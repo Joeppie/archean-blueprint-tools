@@ -8,6 +8,7 @@ modules + Three.js from CDN. No bundler, no npm.
 ```
 viewer/index.html + view3d.js   the inspector (Three.js, one file, ~1300 lines)
 viewer/hullfit.js               generic hull-grid fitter (pure functions, no THREE)
+viewer/blockshapes.js           block shape+orientation table (type -> geometry/faces)
 viewer/models/                  real game component models: manifest.json (mass,
                                 renderable node tree, joints, adapters, colliders
                                 per type) + <Type>.json geometry, lazy-loaded
@@ -38,6 +39,13 @@ Headless render shots: `chromium --headless=new --no-sandbox --disable-gpu
 ## Format facts (verified — do not re-derive)
 - 1 grid cell = 0.25 m; `pos_*` ∈ 0..12; `frame_*` in 3 m units;
   `world = (pos − 5.5)·0.25 + frame·3.0`. −z is the nose (this craft).
+- Blocks: `type` = shape+orientation (0 cube, 1-12 slope [4 = thin tilted
+  rod], 13-20 corner, 21-44 pyramid, 45-52 inverse corner — table in
+  `viewer/blockshapes.js`, transcribed from the game's BlockShapes.hh via the
+  dev's XenonViewer); `colors[7]` = palette slot per face (face order in
+  blockshapes.js). Interior walls culled via a full-face grid in absolute cell
+  coordinates. Subgrids: `Build` components carry nested blueprint data
+  (hatches/doors), stored CLOSED at grid coords.
 - Components' `occupancies` are mirrored by type-255 entries in `data.blocks`.
   **Any save must keep them in sync** (round(delta/0.25) cells, both places).
 - Save format must serialize byte-identical to the game's JS:
@@ -70,7 +78,8 @@ Headless render shots: `chromium --headless=new --no-sandbox --disable-gpu
   localStorage). `Build` type has no model (skipped).
 
 ## Performance rules (iGPU-targeted — keep them)
-- Static geometry is MERGED: all blocks → 1 vertex-color mesh, occupancy
+- Static geometry is MERGED: blocks → one vertex-color mesh per material
+  bucket (matte/metal/glass, shared materials), occupancy
   boxes → 1 line mesh, pipes → 1 mesh, streamlines → 1 LineSegments, all
   adapter nubs → 1 mesh per port type (world-merged, rebuilt on edit).
 - Rendering is ON-DEMAND: call `invalidate()` after anything changes; the

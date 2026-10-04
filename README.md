@@ -37,8 +37,9 @@ game's own compact JSON format, keeping the block/occupancy mirror in sync.
   per file (welded shared vertices, mirror symmetrisation, 0.125 m plate
   thickness, glass palette slots, opacity slider). Zero per-craft constants —
   the fitter passes on every blueprint in the corpus.
-- **Everything else in the file** — voxel blocks (34 block types), rods,
-  nested door/hatch subgrids, fluid pipes with port markers, adapter nubs,
+- **Everything else in the file** — voxel blocks in their real shapes (a block's
+  `type` packs shape+orientation: cubes, slopes, corners, pyramids, inverse
+  corners — the reason voxel hulls look curved), nested door/hatch subgrids, fluid pipes with port markers, adapter nubs,
   CoM/declared-mass cross-check, stylized thin-plate flight analysis
   (CoP/static margin, particles + streamlines — labelled *not CFD*),
   floating labels on cockpit-interactive parts (`dash`, `seat`, `button`,…

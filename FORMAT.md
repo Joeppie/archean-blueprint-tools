@@ -43,18 +43,28 @@ programmatic editing is safe.
   The grid `occupancies` record is the snap/attach footprint; `position` is the truth
   for where the model sits.
 
-## `blocks` — occupancy records
+## `blocks` — the voxel build
 
 `{colors[7], frame_x/y/z, material, pos_x/y/z, size_x/y/z, type}`
 
-- `type`: real block types are small ints (19, 15, 4 = beam/rod, 18/14 = paired
-  colors/beam, ...); **`type:255` entries are invisible occupancy markers for
-  components** — e.g. block #12 mirrors the PilotSeat's occupancies exactly. If you
-  move a component's occupancy, update its 255-mirror in `blocks` too.
-- `size_*`: extent beyond the center cell (footprint = `size+1` cells); rods (type 4)
-  use long `size_z` (e.g. 14 = 3.5 m rod).
-- `colors[7]`: indices into `data.colors` (face/edge color slots; `0` = slot 0 = white,
-  unused).
+- `type` encodes **shape + orientation** in one int (game `BlockShapes.hh`;
+  full table + vertices in `viewer/blockshapes.js`):
+  `0` cube · `1..12` slope (the thin tilted "rods" are slope type 4) ·
+  `13..20` corner · `21..44` pyramid · `45..52` inverse corner ·
+  **`type:255` entries are invisible occupancy markers for components** — e.g.
+  block #12 mirrors the PilotSeat's occupancies exactly. If you move a
+  component's occupancy, update its 255-mirror in `blocks` too.
+  This is why voxel craft look curved/diamond-cut: hulls are built from
+  slopes/corners/pyramids, not cubes.
+- `size_*`: extent beyond the center cell (footprint = `size+1` cells); the
+  shape is scaled into that box (e.g. type 4 slope with `size_z 14` = 3.5 m
+  tilted rod).
+- `colors[7]`: one palette slot (`data.colors`) **per face**, in the face order
+  of `SHAPE_FACES` in `blockshapes.js` (cube: top, bottom, right, left, front,
+  back; slopes/corners/pyramids: their own order, slant face first). Slots with
+  `opacity < 15` render transparent (glass).
+- `material`: 0..6 = composite, concrete, steel, aluminium, glass, lead,
+  titanium (visual: palette slots carry the metallic/roughness per face).
 
 ## `components` — the machines (30 here)
 

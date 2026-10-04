@@ -10,6 +10,7 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js';
 
 // ---- game component models (extracted from installed game modules) ----
 // manifest: per-type metadata (mass, renderable node tree, joints, adapters,
@@ -405,30 +406,122 @@ function colliderProxy(c) {
   return g;
 }
 
-// build merged geometry for a list of blocks (boxes + rods, vertex-coloured);
-// offset shifts all positions (subgrids render relative to their host hinge)
-function mergeBlocks(blocks, offset) {
-  const bgeos = [];
-  for (const b of blocks) {
-    if (b.type === 255) continue;                                       // occupancy mirror
-    const col = palColor(b.colors?.[0] ?? 0);
-    const cx = occWorld(b, 'x') + offset.x, cy = occWorld(b, 'y') + offset.y, cz = occWorld(b, 'z') + offset.z;
-    let g, m4 = new THREE.Matrix4();
-    if (b.type === 4) {                                                 // rod along z
-      g = new THREE.CylinderGeometry(0.028, 0.028, (b.size_z + 1) * CELL, 8);
-      m4.makeRotationX(Math.PI / 2);
-      m4.setPosition(cx, cy, cz + b.size_z * CELL / 2);
-    } else {
-      g = new THREE.BoxGeometry((b.size_x + 1) * CELL, (b.size_y + 1) * CELL, (b.size_z + 1) * CELL);
-      m4.makeTranslation(cx + b.size_x * CELL / 2, cy + b.size_y * CELL / 2, cz + b.size_z * CELL / 2);
+// ---- block shapes -------------------------------------------------------
+// blocks[].type encodes shape + orientation (cube/slope/corner/pyramid/
+// inverse-corner, blockshapes.js, transcribed from the game's BlockShapes.hh).
+// blocks.colors = 7 palette slots, one per face. Faces whose whole slice is
+// covered by a neighbour's full face are interior walls → skipped (culling
+// grid ported from the game developer's XenonViewer).
+const CELLS_PER_FRAME = FRAME / CELL;                                  // 12
+const C_ORIGIN = 4096, C_SPAN = 8192;
+const cellKey = (x, y, z) => ((x + C_ORIGIN) * C_SPAN + (y + C_ORIGIN)) * C_SPAN + (z + C_ORIGIN);
+const faceKey = (x, y, z, axis) => cellKey(x, y, z) * 3 + axis;
+const blkCell = (b) => [b.frame_x * CELLS_PER_FRAME + b.pos_x,
+                        b.frame_y * CELLS_PER_FRAME + b.pos_y,
+                        b.frame_z * CELLS_PER_FRAME + b.pos_z];
+const blkSpan = (b) => [b.size_x + 1, b.size_y + 1, b.size_z + 1];
+function forEachFaceCell(b, dir, visit) {
+  const axis = dir[0] ? 0 : dir[1] ? 1 : 2;
+  const min = blkCell(b), size = blkSpan(b);
+  // the face lives between two cells; file it on the lower-cell side
+  const plane = dir[axis] > 0 ? min[axis] + size[axis] - 1 : min[axis] - 1;
+  const u = (axis + 1) % 3, v = (axis + 2) % 3;
+  const cell = [0, 0, 0];
+  cell[axis] = plane;
+  for (let i = 0; i < size[u]; i++)
+    for (let j = 0; j < size[v]; j++) {
+      cell[u] = min[u] + i; cell[v] = min[v] + j;
+      visit(cell, axis);
     }
-    g.applyMatrix4(m4);
-    const n = g.attributes.position.count, ca = new Float32Array(n * 3);
-    for (let k = 0; k < n; k++) { ca[k * 3] = col.color.r; ca[k * 3 + 1] = col.color.g; ca[k * 3 + 2] = col.color.b; }
-    g.setAttribute('color', new THREE.Float32BufferAttribute(ca, 3));
-    bgeos.push(g);
+}
+function buildFaceGrid(blocks) {
+  const faces = new Map();
+  blocks.forEach((b, index) => {
+    if (b.type === 255) return;
+    const dirs = getBlockFaceDirections(b.type);
+    for (let f = 0; f < dirs.length; f++) {
+      const dir = dirs[f];
+      if (!dir || !isFullFace(b.type, f)) continue;
+      const slot = b.colors?.[f] ?? b.colors?.[0] ?? 0;
+      const opaque = (model.data.colors?.[slot]?.opacity ?? 15) >= 15;
+      forEachFaceCell(b, dir, (cell, axis) => {
+        const key = faceKey(cell[0], cell[1], cell[2], axis);
+        const e = faces.get(key);
+        if (!e) faces.set(key, [{ block: index, opaque }]);
+        else if (!e.some((x) => x.block === index)) e.push({ block: index, opaque });
+      });
+    }
+  });
+  return faces;
+}
+function faceCovered(faces, b, index, faceDir, opaque) {
+  if (!faceDir || Math.abs(faceDir[0]) + Math.abs(faceDir[1]) + Math.abs(faceDir[2]) !== 1) return false;
+  const axis = faceDir[0] ? 0 : faceDir[1] ? 1 : 2;
+  let covered = true;
+  forEachFaceCell(b, faceDir, (cell) => {
+    if (!covered) return;
+    const entry = faces.get(faceKey(cell[0], cell[1], cell[2], axis)) || [];
+    if (!entry.some((e) => e.block !== index && (!opaque || e.opaque))) covered = false;
+  });
+  return covered;
+}
+
+// merged geometry per material bucket for a list of blocks; offset shifts all
+// positions (subgrids reuse the same builder). 0=matte 1=metallic 2=glass.
+function mergeBlocks(blocks, offset) {
+  const faces = buildFaceGrid(blocks);
+  const P = [[], [], []], N = [[], [], []], C = [[], [], []];
+  blocks.forEach((b, index) => {
+    if (b.type === 255) return;
+    const origin = [occWorld(b, 'x') - CELL / 2 + offset.x,
+                    occWorld(b, 'y') - CELL / 2 + offset.y,
+                    occWorld(b, 'z') - CELL / 2 + offset.z];
+    const size = [(b.size_x + 1) * CELL, (b.size_y + 1) * CELL, (b.size_z + 1) * CELL];
+    const pts = getBlockPoints(b.type, origin, size);
+    const tris = getBlockFaces(b.type);
+    const dirs = getBlockFaceDirections(b.type);
+    for (let f = 0; f < tris.length; f++) {
+      const dir = dirs[f];
+      const col = palColor(b.colors?.[f] ?? b.colors?.[0] ?? 0);
+      const opaque = col.op >= 0.999;
+      if (dir && faceCovered(faces, b, index, dir, opaque)) continue;  // interior wall
+      const bucket = !opaque ? 2 : col.metal > 0.5 ? 1 : 0;
+      const idx = tris[f];
+      for (let t = 0; t + 2 < idx.length; t += 3) {
+        const a = pts[idx[t]], d = pts[idx[t + 1]], e = pts[idx[t + 2]];
+        const ux = d[0] - a[0], uy = d[1] - a[1], uz = d[2] - a[2];
+        const vx = e[0] - a[0], vy = e[1] - a[1], vz = e[2] - a[2];
+        let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+        const len = Math.hypot(nx, ny, nz) || 1;
+        nx /= len; ny /= len; nz /= len;
+        for (const p of [a, d, e]) {
+          P[bucket].push(p[0], p[1], p[2]);
+          N[bucket].push(nx, ny, nz);
+          C[bucket].push(col.color.r, col.color.g, col.color.b);
+        }
+      }
+    }
+  });
+  const out = [];
+  for (let i = 0; i < 3; i++) {
+    if (!P[i].length) continue;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(P[i], 3));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(N[i], 3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(C[i], 3));
+    out.push({ geo: g, mat: i });
   }
-  return bgeos.length ? mergeGeometries(bgeos, false) : null;
+  return out;
+}
+const blkMats = [
+  new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.15 }),
+  new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.3, metalness: 0.85 }),
+  new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.1, metalness: 0.1,
+                                   transparent: true, opacity: 0.35, depthWrite: false,
+                                   side: THREE.DoubleSide }),
+];
+function addBlockMeshes(group, blocks, offset) {
+  for (const { geo, mat } of mergeBlocks(blocks, offset)) group.add(new THREE.Mesh(geo, blkMats[mat]));
 }
 
 // subgrids: nested blueprint data inside 'Build' components (hatches/doors),
@@ -439,10 +532,7 @@ function buildSubgrids() {
   subGroup.clear();
   for (const c of model.data.components) {
     if (c.type !== 'Build' || !c.data?.blocks?.length) continue;
-    const bg = mergeBlocks(c.data.blocks, new THREE.Vector3());
-    if (bg) subGroup.add(new THREE.Mesh(bg,
-      new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.2,
-                                       transparent: true, opacity: 0.97 })));
+    addBlockMeshes(subGroup, c.data.blocks, new THREE.Vector3());
     for (const sc of c.data.components || []) {
       if (sc.type === 'Build') continue;
       const m = MODEL.manifest?.[sc.type] ? colliderProxy(sc) : (PROXY[sc.type] || PROXY2[sc.type] || defaultProxy)(sc);
@@ -516,10 +606,7 @@ function buildScene() {
     eg.applyMatrix4(new THREE.Matrix4().makeTranslation(ct.x, ct.y, ct.z));
     oedges.push(eg);
   }
-  const bg = mergeBlocks(blocks, new THREE.Vector3());
-  if (bg) blockGroup.add(new THREE.Mesh(bg,
-    new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.2,
-                                     transparent: true, opacity: 0.97 })));
+  addBlockMeshes(blockGroup, blocks, new THREE.Vector3());
   if (oedges.length) occGroup.add(new THREE.LineSegments(mergeGeometries(oedges, false),
     new THREE.LineBasicMaterial({ color: 0xff4444, transparent: true, opacity: 0.35 })));
   buildHull();
