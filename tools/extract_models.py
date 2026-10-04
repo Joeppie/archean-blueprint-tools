@@ -106,7 +106,7 @@ def main():
         ent = {k: v for (t, k), v in sec.items() if t == "ENTITY"}
         ekey = next(iter(ent), typ)
         entry = {"module": ini.parts[-4], "mass": float(ent.get(ekey, {}).get("mass", 1) or 1),
-                 "nodes": {}, "renderables": [], "joints": [], "adapters": [], "colliders": []}
+                 "nodes": {}, "renderables": [], "joints": [], "targets": [], "adapters": [], "colliders": []}
         try:
             comps = read_gltf(gltf)
         except Exception as e:
@@ -125,6 +125,12 @@ def main():
                     "position": vec(rec.get("position", "0 0 0")),
                     "rotation": vec(rec.get("rotation", "0 0 0")),
                     "limits": vec(rec.get("angular_x", "")) if "angular_x" in rec else None})
+            elif t == "TARGET":
+                # invisible frame nodes (wheel axles, etc): they shift what hangs below
+                entry["targets"].append({
+                    "name": name, "parent": rec.get("parent"),
+                    "position": vec(rec.get("position", "0 0 0")),
+                    "rotation": vec(rec.get("rotation", "0 0 0"))})
             elif t == "ADAPTER":
                 entry["adapters"].append({
                     "name": name, "type": rec.get("type", ""),

@@ -59,9 +59,15 @@ Headless render shots: `chromium --headless=new --no-sandbox --disable-gpu
 - Component models: game ships per component a `.gltf` (materials named
   `color1`/`color2` = player-painted surfaces ⇄ `components[].colors`) and an
   `.ini` (mass, `[RENDERABLE]` node tree, `[JOINT]` with angular limits,
-  `[ADAPTER]` port positions, collider box). `extract_models.py` packs these
-  into `viewer/models/`; the viewer swaps proxies for real models async and
-  keeps proxies as fallback. `Build` type has no model (skipped).
+  `[TARGET]` frame nodes, `[ADAPTER]` port positions, collider box).
+  `extract_models.py` packs these into `viewer/models/`. **Placement truth is
+  the `.ini` tree** (renderable/joint/target parents, euler order **ZYX** like
+  the game engine); gltf node translations are Blender authoring offsets
+  (MiniComputer's geometry sits 3 m from its origin!) and must NOT be baked
+  into geometry. Real models are dense (raytracing-grade): the viewer shows
+  low-poly proxies by default (boxes + hexagon cylinders) and swaps in real
+  geometry only via the “real game models” checkbox / `?real` (persisted in
+  localStorage). `Build` type has no model (skipped).
 
 ## Performance rules (iGPU-targeted — keep them)
 - Static geometry is MERGED: all blocks → 1 vertex-color mesh, occupancy

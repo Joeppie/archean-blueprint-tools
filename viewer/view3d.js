@@ -13,16 +13,14 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 // colliders); geometry fetched lazily per type. Material names color1/color2
 // are the player-painted surfaces (blueprint colors.color1/color2).
 const MODEL = { manifest: null, cache: {} };
-let realModelsOn = true;
-// real game models are beautiful but heavy (dense meshes → many draw calls).
-// Toggling off swaps every component back to its light proxy (for weak iGPUs).
+// Default is LIGHT proxies (boxes + hexagon cylinders): the game ships dense
+// raytracing-grade geometry that overloads raster GPUs. The checkbox swaps in
+// the real game models on demand; the choice persists across sessions.
+let realModelsOn = localStorage.getItem('archean-real-models') === '1';
 function setRealModels(on) {
   realModelsOn = on;
-  compGroup.traverse(o => {
-    if (o.userData.real) o.visible = on;
-    else if (o.userData.hasReal) o.visible = !on;   // proxy: visible only when real is off
-  });
-  invalidate();
+  localStorage.setItem('archean-real-models', on ? '1' : '0');
+  buildScene();               // rebuild: proxy-only (light) vs real geometry
 }
 async function loadModelManifest() {
   try { MODEL.manifest = await (await fetch('models/manifest.json')).json(); }
@@ -49,24 +47,31 @@ function modelMaterial(c, name) {
 function buildRealComponent(c, model, idx) {
   const { geo, info } = model;
   const g = new THREE.Group();
+  // Placement truth is the .ini node tree (renderables/joints/targets, ZYX
+  // euler like the game engine) — NOT the gltf node translations, which are
+  // Blender authoring offsets (MiniComputer's model sits 3 m from its origin!).
   const nodes = new Map();
-  for (const j of info.joints || []) {
+  const RAD = Math.PI / 180;
+  const addNode = (n) => {
     const p = new THREE.Group();
-    p.position.set(...j.position);
-    nodes.set(j.name, p);
-  }
+    p.rotation.order = 'ZYX';
+    p.position.set(...n.position);
+    p.rotation.set(n.rotation[0] * RAD, n.rotation[1] * RAD, n.rotation[2] * RAD);
+    (nodes.get(n.parent) || g).add(p);
+    nodes.set(n.name, p);
+  };
+  for (const j of info.joints || []) addNode(j);
+  for (const t of info.targets || []) addNode(t);
   for (const r of info.renderables) {
+    addNode(r);
     const nd = geo[r.name];
     if (!nd) continue;
-    const rg = new THREE.Group();
-    rg.position.set(...r.position);
-    rg.rotation.set(r.rotation[0] * Math.PI / 180, r.rotation[1] * Math.PI / 180, r.rotation[2] * Math.PI / 180);
-    const byMat = new Map();          // merge same-material prims of a node → fewer draws
+    const rg = nodes.get(r.name);
+    const byMat = new Map();          // merge same-material prims → fewer draws
     for (const prim of nd.prims) {
       const gg = new THREE.BufferGeometry();
       gg.setAttribute('position', new THREE.Float32BufferAttribute(prim.v, 3));
       gg.setIndex(prim.i);
-      gg.applyMatrix4(new THREE.Matrix4().makeTranslation(...nd.translation));
       gg.computeVertexNormals();
       let arr = byMat.get(prim.material);
       if (!arr) byMat.set(prim.material, arr = []);
@@ -79,12 +84,10 @@ function buildRealComponent(c, model, idx) {
       m.userData.ci = idx;
       rg.add(m);
     }
-    (nodes.get(r.parent) || g).add(rg);
   }
-  for (const j of info.joints) (nodes.get(j.parent) || g).add(nodes.get(j.name));
   // aileron: hinge the real flap like the game does (front ailerons droop)
   const jp = nodes.get('joint');
-  if (jp && c.type === 'Aileron') jp.rotation.x = -(c.position.z < 0 ? 0.785 : 0.12);
+  if (jp && c.type === 'Aileron') jp.rotateX(-(c.position.z < 0 ? 0.785 : 0.12));
   // adapter nubs: queue in world space, merged into ONE mesh per port type (see adpFlush)
   const qo = new THREE.Quaternion(c.orientation.x, c.orientation.y, c.orientation.z, c.orientation.w);
   for (const a of info.adapters || []) {
@@ -219,7 +222,7 @@ function mat(spec, extra = {}) {
     transparent: spec.op < 1, opacity: spec.op, ...extra });
 }
 const box = (w, h, d) => new THREE.BoxGeometry(w, h, d);
-const cyl = (r, h, seg = 20) => new THREE.CylinderGeometry(r, r, h, seg);
+const cyl = (r, h, seg = 6) => new THREE.CylinderGeometry(r, r, h, seg);
 
 // ---------- component proxies (pivot at local origin = comp.position) ----------
 function footprint(comp) {
@@ -241,9 +244,9 @@ const PROXY = {
   },
   SmallWheel(c) {
     const g = new THREE.Group();
-    const tire = new THREE.Mesh(cyl(0.17, 0.10, 28), mat(compColor(c, 'color1', 0x1c1c1c)));
+    const tire = new THREE.Mesh(cyl(0.17, 0.10, 8), mat(compColor(c, 'color1', 0x1c1c1c)));
     tire.rotation.z = Math.PI / 2;                             // axle along local X
-    const hub = new THREE.Mesh(cyl(0.06, 0.13, 12), mat(compColor(c, 'color2', 0xcccccc)));
+    const hub = new THREE.Mesh(cyl(0.06, 0.13, 6), mat(compColor(c, 'color2', 0xcccccc)));
     hub.rotation.z = Math.PI / 2;
     g.add(tire, hub);
     return g;
@@ -258,7 +261,7 @@ const PROXY = {
     const m = mat(compColor(c, 'color1', 0xdddddd));
     const plate = new THREE.Mesh(box(f.x, 0.045, f.z * 0.6), m);
     plate.position.z = f.z * 0.2;                  // fixed surface, rear 60% (original side)
-    const rod = new THREE.Mesh(cyl(0.025, f.x + 0.5, 10), mat(compColor(c, 'color2', 0x999999)));
+    const rod = new THREE.Mesh(cyl(0.025, f.x + 0.5, 6), mat(compColor(c, 'color2', 0x999999)));
     rod.rotation.z = Math.PI / 2;
     rod.position.z = -f.z * 0.1;                   // hinge rod toward nose, as before
     const flap = new THREE.Mesh(box(f.x, 0.03, f.z * 0.4), m);
@@ -366,8 +369,8 @@ function buildScene() {
     mesh.userData.ci = i;
     compGroup.add(mesh);
     compObjs[i] = mesh;
-    // swap in the game's real model when available (async, keeps proxies as fallback)
-    const mp = getModel(c.type);
+    // swap in the game's real model when available & enabled (async; proxies are the default)
+    const mp = realModelsOn ? getModel(c.type) : null;
     if (mp) mp.then(mm => {
       if (!mm || !mm.geo || !compObjs.includes(mesh)) return;
       const real = buildRealComponent(c, mm, i);
@@ -1354,6 +1357,7 @@ addEventListener('input', invalidate, true);
 addEventListener('keydown', invalidate);
 
 // ---------- init ----------
+if (location.search.includes('real')) realModelsOn = true;   // before buildViewOpts (checkbox state)
 buildViewOpts();
 buildFlight();
 onResize();
