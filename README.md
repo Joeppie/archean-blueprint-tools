@@ -1,4 +1,4 @@
-# Archean Blueprint Tools
+# Archean Blueprint Tools · v0.9
 
 **Reverse-engineered file format + a zero-build browser viewer/inspector for
 workshop craft of [Archean](https://store.steampowered.com/app/2941660/Archean/)**
