@@ -107,6 +107,12 @@ Headless render shots: `chromium --headless=new --no-sandbox --disable-gpu
   `document.title` / `#out` for `--dump-dom`.
 
 ## Backlog
+- Blocks in the hull wireframe: let the “hull wireframe” overlay also show
+  block edges (per-shape edges via `SHAPE_EDGES` in blockshapes.js). Keep the
+  right block colours *only insofar as the merge into one geometry survives*
+  (edges are lines, colours are vertex colours, so it should); if a
+  colour-faithful variant ever needs per-block materials, ship it as an
+  opt-in toggle, never the merged-geometry default.
 - Better flight-characteristics / stability analysis (beyond the stylized
   thin-plate model: full 360° velocity vector — nose may be ±X/±Z, automatic
   search of stable flight direction at low/high speed + ambiguity warning,

@@ -76,6 +76,21 @@ Useful URL parameters: `?open=<url>` open another blueprint ·
 `?hull` / `?occ` toggles · `?cam=x,y,z,tx,ty,tz` camera pose ·
 `?perf` draw-call probe in the tab title · `?selftest`, `?proxytest` test modes.
 
+## Ideas welcome — open an issue!
+
+This is v0.91: the format is decoded and the viewer is useful, but the good
+ideas are not all in yet. Feature requests, format questions, and craft that
+render wrong (attach the `blueprint.json`) are all best filed as
+[issues](https://github.com/Joeppie/archean-blueprint-tools/issues) — that is
+where the roadmap lives. Already on the list:
+
+- **Blocks in the hull wireframe** — the wireframe overlay covers the hull
+  triangles today; extending it to block edges (the bevels and slope lines)
+  fits the feature perfectly. The right per-block colours should come along
+  via vertex colours, so that all edges stay ONE merged mesh — colour-faithful
+  per-block materials would only ever be an opt-in, never the default.
+- Better flight-characteristics analysis (360° velocity sweep, trim polar).
+
 ## Licensing (short version — see NOTICE.md)
 
 - **Code**: GPL-3.0 (copyleft is deliberate — improvements stay open).
