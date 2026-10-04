@@ -16,7 +16,7 @@ no npm, no server-side code.
 
 ## ▶ Live viewer
 
-**https://joeppie.github.io/archean-blueprint-viewer/viewer/index.html**
+**https://joeppie.github.io/archean-blueprint-tools/viewer/index.html**
 
 Loads the ISW-241 fighter by default. Click any component to edit position,
 rotation and data fields with live 3D feedback; *Open file…* (or drag-drop)
