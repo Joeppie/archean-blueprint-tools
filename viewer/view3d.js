@@ -612,6 +612,11 @@ function buildScene() {
   buildHull();
   buildPipes();
   buildSubgrids();
+  // ground plane: never through the craft — blueprint y can dip below 0,
+  // so park the grid just under the model's lowest point when that happens
+  const gbb = new THREE.Box3().setFromObject(compGroup);
+  gbb.expandByObject(blockGroup); gbb.expandByObject(subGroup); gbb.expandByObject(hullGroup);
+  grid.position.y = (isFinite(gbb.min.y) ? Math.min(0, gbb.min.y - 0.02) : 0) + 0.002;
   invalidate();
 }
 
