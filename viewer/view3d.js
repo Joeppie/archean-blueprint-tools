@@ -4,8 +4,11 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 // surface crashes in the document title (visible to headless test dumps)
-addEventListener('error', (e) => { document.title = 'ERR ' + (e.message || 'load'); });
-addEventListener('unhandledrejection', (e) => { document.title = 'ERR ' + (e.reason?.message || e.reason); });
+addEventListener('error', (e) => { document.title = 'ERR ' + (e.message || 'load') + ' @' + e.lineno + ':' + e.colno; });
+addEventListener('unhandledrejection', (e) => {
+  const st = String(e.reason?.stack || '').split('\n').find(l => l.includes('view3d')) || '';
+  document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
+});
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // ---- game component models (extracted from installed game modules) ----
@@ -188,7 +191,8 @@ const occGroup = new THREE.Group();    // type-255 occupancy boxes
 const hullGroup = new THREE.Group();   // extruded hull plates
 const pipeGroup = new THREE.Group();   // pipes/cables + port markers
 const adpGroup = new THREE.Group();    // adapter/port nubs, merged across all components
-scene.add(compGroup, blockGroup, occGroup, hullGroup, pipeGroup, adpGroup);
+const subGroup = new THREE.Group();    // subgrids: nested Build blueprints (hatches/doors)
+scene.add(compGroup, blockGroup, occGroup, hullGroup, pipeGroup, adpGroup, subGroup);
 occGroup.visible = false;
 hullGroup.visible = true;
 
@@ -401,6 +405,54 @@ function colliderProxy(c) {
   return g;
 }
 
+// build merged geometry for a list of blocks (boxes + rods, vertex-coloured);
+// offset shifts all positions (subgrids render relative to their host hinge)
+function mergeBlocks(blocks, offset) {
+  const bgeos = [];
+  for (const b of blocks) {
+    if (b.type === 255) continue;                                       // occupancy mirror
+    const col = palColor(b.colors?.[0] ?? 0);
+    const cx = occWorld(b, 'x') + offset.x, cy = occWorld(b, 'y') + offset.y, cz = occWorld(b, 'z') + offset.z;
+    let g, m4 = new THREE.Matrix4();
+    if (b.type === 4) {                                                 // rod along z
+      g = new THREE.CylinderGeometry(0.028, 0.028, (b.size_z + 1) * CELL, 8);
+      m4.makeRotationX(Math.PI / 2);
+      m4.setPosition(cx, cy, cz + b.size_z * CELL / 2);
+    } else {
+      g = new THREE.BoxGeometry((b.size_x + 1) * CELL, (b.size_y + 1) * CELL, (b.size_z + 1) * CELL);
+      m4.makeTranslation(cx + b.size_x * CELL / 2, cy + b.size_y * CELL / 2, cz + b.size_z * CELL / 2);
+    }
+    g.applyMatrix4(m4);
+    const n = g.attributes.position.count, ca = new Float32Array(n * 3);
+    for (let k = 0; k < n; k++) { ca[k * 3] = col.color.r; ca[k * 3 + 1] = col.color.g; ca[k * 3 + 2] = col.color.b; }
+    g.setAttribute('color', new THREE.Float32BufferAttribute(ca, 3));
+    bgeos.push(g);
+  }
+  return bgeos.length ? mergeGeometries(bgeos, false) : null;
+}
+
+// subgrids: nested blueprint data inside 'Build' components (hatches/doors),
+// linked to their hinge via data.composite_builds. In the blueprint they are
+// stored in the CLOSED pose, using the same cell-grid encoding as the parent
+// craft — the hinge's own orientation is the animation axis, not a transform.
+function buildSubgrids() {
+  subGroup.clear();
+  for (const c of model.data.components) {
+    if (c.type !== 'Build' || !c.data?.blocks?.length) continue;
+    const bg = mergeBlocks(c.data.blocks, new THREE.Vector3());
+    if (bg) subGroup.add(new THREE.Mesh(bg,
+      new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.2,
+                                       transparent: true, opacity: 0.97 })));
+    for (const sc of c.data.components || []) {
+      if (sc.type === 'Build') continue;
+      const m = MODEL.manifest?.[sc.type] ? colliderProxy(sc) : (PROXY[sc.type] || PROXY2[sc.type] || defaultProxy)(sc);
+      m.position.set(sc.position.x, sc.position.y, sc.position.z);
+      m.quaternion.set(sc.orientation.x, sc.orientation.y, sc.orientation.z, sc.orientation.w);
+      subGroup.add(m);
+    }
+  }
+}
+
 let compObjs = [];
 const realMap = new Map();   // component index → real game-model groups (follow live edits)
 function buildScene() {
@@ -451,44 +503,28 @@ function buildScene() {
   }
 
   // blocks: merge all into ONE vertex-coloured mesh; occupancy → one line mesh
-  const bgeos = [], oedges = [];
+  const oedges = [];
   for (const b of blocks) {
-    if (b.type === 255) {                                       // occupancy mirror box
-      const s = new THREE.Box3(
-        new THREE.Vector3(occWorld(b, 'x') - CELL / 2, occWorld(b, 'y') - CELL / 2, occWorld(b, 'z') - CELL / 2),
-        new THREE.Vector3(occWorld(b, 'x') + b.size_x * CELL + CELL / 2,
-                          occWorld(b, 'y') + b.size_y * CELL + CELL / 2,
-                          occWorld(b, 'z') + b.size_z * CELL + CELL / 2));
-      const sz = s.getSize(new THREE.Vector3()), ct = s.getCenter(new THREE.Vector3());
-      const eg = new THREE.EdgesGeometry(box(sz.x, sz.y, sz.z));
-      eg.applyMatrix4(new THREE.Matrix4().makeTranslation(ct.x, ct.y, ct.z));
-      oedges.push(eg);
-      continue;
-    }
-    const col = palColor(b.colors?.[0] ?? 0);
-    const cx = occWorld(b, 'x'), cy = occWorld(b, 'y'), cz = occWorld(b, 'z');
-    let g, m4 = new THREE.Matrix4();
-    if (b.type === 4) {                                         // rod along z
-      g = new THREE.CylinderGeometry(0.028, 0.028, (b.size_z + 1) * CELL, 8);
-      m4.makeRotationX(Math.PI / 2);
-      m4.setPosition(cx, cy, cz + b.size_z * CELL / 2);
-    } else {
-      g = new THREE.BoxGeometry((b.size_x + 1) * CELL, (b.size_y + 1) * CELL, (b.size_z + 1) * CELL);
-      m4.makeTranslation(cx + b.size_x * CELL / 2, cy + b.size_y * CELL / 2, cz + b.size_z * CELL / 2);
-    }
-    g.applyMatrix4(m4);
-    const n = g.attributes.position.count, ca = new Float32Array(n * 3);
-    for (let k = 0; k < n; k++) { ca[k * 3] = col.color.r; ca[k * 3 + 1] = col.color.g; ca[k * 3 + 2] = col.color.b; }
-    g.setAttribute('color', new THREE.Float32BufferAttribute(ca, 3));
-    bgeos.push(g);
+    if (b.type !== 255) continue;                                       // occupancy mirror box
+    const s = new THREE.Box3(
+      new THREE.Vector3(occWorld(b, 'x') - CELL / 2, occWorld(b, 'y') - CELL / 2, occWorld(b, 'z') - CELL / 2),
+      new THREE.Vector3(occWorld(b, 'x') + b.size_x * CELL + CELL / 2,
+                        occWorld(b, 'y') + b.size_y * CELL + CELL / 2,
+                        occWorld(b, 'z') + b.size_z * CELL + CELL / 2));
+    const sz = s.getSize(new THREE.Vector3()), ct = s.getCenter(new THREE.Vector3());
+    const eg = new THREE.EdgesGeometry(box(sz.x, sz.y, sz.z));
+    eg.applyMatrix4(new THREE.Matrix4().makeTranslation(ct.x, ct.y, ct.z));
+    oedges.push(eg);
   }
-  if (bgeos.length) blockGroup.add(new THREE.Mesh(mergeGeometries(bgeos, false),
+  const bg = mergeBlocks(blocks, new THREE.Vector3());
+  if (bg) blockGroup.add(new THREE.Mesh(bg,
     new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.2,
                                      transparent: true, opacity: 0.97 })));
   if (oedges.length) occGroup.add(new THREE.LineSegments(mergeGeometries(oedges, false),
     new THREE.LineBasicMaterial({ color: 0xff4444, transparent: true, opacity: 0.35 })));
   buildHull();
   buildPipes();
+  buildSubgrids();
   invalidate();
 }
 
@@ -656,6 +692,7 @@ function setModel(obj) {
   // block-only files omit these keys — normalise so consumers can iterate freely
   model.data.triangles = model.data.triangles || [];
   model.data.pipes = model.data.pipes || [];
+  model.data.colors = model.data.colors || [];   // some files ship no palette
   bpBox = { min: model.box_min, max: model.box_max };
   orig = model.data.components.map(c => ({
     pos0: { ...c.position },
@@ -1014,6 +1051,7 @@ function buildViewOpts() {
   toggle('hull triangles', hullGroup);
   toggle('hull wireframe', hullWire);
   toggle('pipes & connectors', pipeGroup);
+  toggle('subgrids (doors/hatches)', subGroup);
   const rl = document.createElement('label');
   rl.className = 'checkrow';
   const rcb = document.createElement('input');
@@ -1471,6 +1509,14 @@ async function runProxyTest() {
 
 // ---------- init ----------
 if (location.search.includes('real')) realModelsOn = true;   // before buildViewOpts (checkbox state)
+function applyCamQ() {                                        // ?cam=px,py,pz,tx,ty,tz
+  const camQ = new URLSearchParams(location.search).get('cam');
+  if (!camQ) return;
+  const [x, y, z, tx = 0, ty = 0, tz = 0] = camQ.split(',').map(Number);
+  camera.position.set(x, y, z);
+  controls.target.set(tx, ty, tz);
+  invalidate();
+}
 buildViewOpts();
 buildFlight();
 onResize();
@@ -1478,7 +1524,7 @@ if (location.search.includes('hull')) hullGroup.visible = true;
 if (location.search.includes('occ')) occGroup.visible = true;
 if (location.search.includes('flow')) flowOn = true;
 if (location.search.includes('perf')) perfT0 = performance.now() + 1500;  // measure after load settles
-loadModelManifest().then(fetchDefault);
+loadModelManifest().then(fetchDefault).then(applyCamQ);
 requestAnimationFrame(tick);
 if (location.search.includes('proxytest')) runProxyTest();
 

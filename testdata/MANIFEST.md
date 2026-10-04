@@ -1,9 +1,33 @@
 # Regression corpus
 
 Workshop craft copies (blueprint.json only, no preview images).
-Purpose: format-validation corpus for `regtest/regtest.html`.
+Purpose: format-validation corpus for .
 
 | craft (workshop id) | bytes | blocks | components | hull triangles |
 |---|---:|---:|---:|---:|
+| 3314817068 | 42 kB | 30 | 16 | 0 |
+| 3327182790 | 61 kB | 65 | 15 | 0 |
+| 3334591920 | 46 kB | 17 | 17 | 0 |
+| 3334593406 | 51 kB | 50 | 47 | 0 |
+| 3334698274 | 518 kB | 1391 | 259 | 0 |
+| 3347018068 | 31 kB | 12 | 12 | 0 |
+| 3348400160 | 178 kB | 407 | 35 | 0 |
+| 3351518711 | 56 kB | 17 | 15 | 0 |
+| 3373508061 | 188 kB | 395 | 32 | 0 |
+| 3381670618 | 294 kB | 499 | 85 | 0 |
+| 3384910875 | 3 kB | 2 | 1 | 0 |
+| 3384917248 | 30 kB | 25 | 10 | 0 |
+| 3385814436 | 27 kB | 16 | 9 | 0 |
+| 3385870429 | 4 kB | 1 | 10 | 0 |
+| 3385876909 | 24 kB | 29 | 48 | 0 |
+| 3386936607 | 80 kB | 58 | 13 | 0 |
+| 3404843025 | 71 kB | 51 | 27 | 0 |
+| 3406025722 | 121 kB | 84 | 60 | 0 |
+| 3406490327 | 87 kB | 52 | 45 | 0 |
+| 3409663016 | 33 kB | 32 | 13 | 0 |
+| 3410883996 | 1 kB | 1 | 1 | 0 |
+| 3417786605 | 288 kB | 482 | 52 | 0 |
+| 3518436870 | 104 kB | 54 | 30 | 0 |
+| 3812927875 | 110 kB | 36 | 30 | 21 |
 
 Content belongs to the game developer — see ../NOTICE.md §2.
