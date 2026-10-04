@@ -87,6 +87,44 @@ def read_gltf(gltf_path):
     return comps
 
 
+def lowify(v, i, min_size):
+    """Quantize+weld decimation: snap vertices to a grid, weld duplicates,
+    drop degenerate/tiny triangles. Square-ish results on boxes, rough
+    hexagons on cylinders, and micro-detail (embossed text, bevels, cable
+    bumps) vanishes — the shape of the real asset, at a fraction of polys.
+    Grid scales with the part's smallest dimension so flat/thin parts survive."""
+    g = min(max(min_size / 48.0, 0.0035), 0.02)
+    keys, idx_map = {}, []
+    for k in range(0, len(v), 3):
+        key = (round(v[k] / g), round(v[k + 1] / g), round(v[k + 2] / g))
+        j = keys.get(key)
+        if j is None:
+            j = len(keys)
+            keys[key] = j
+        idx_map.append(j)
+    nv = [0.0] * (len(keys) * 3)
+    for key, j in keys.items():
+        nv[j * 3], nv[j * 3 + 1], nv[j * 3 + 2] = key[0] * g, key[1] * g, key[2] * g
+    ni = []
+    eps2 = (g * g) ** 2     # (2*area)² threshold for culling slivers of area < g²
+    for k in range(0, len(i) - 2, 3):
+        a, b, c = idx_map[i[k]], idx_map[i[k + 1]], idx_map[i[k + 2]]
+        if a == b or b == c or a == c:
+            continue
+        ax, ay, az = nv[a*3], nv[a*3+1], nv[a*3+2]
+        bx, by, bz = nv[b*3], nv[b*3+1], nv[b*3+2]
+        cx, cy, cz = nv[c*3], nv[c*3+1], nv[c*3+2]
+        cx1, cy1, cz1 = bx - ax, by - ay, bz - az
+        cx2, cy2, cz2 = cx - ax, cy - ay, cz - az
+        nx = cy1 * cz2 - cz1 * cy2
+        ny = cz1 * cx2 - cx1 * cz2
+        nz = cx1 * cy2 - cy1 * cx2
+        if nx * nx + ny * ny + nz * nz < eps2:   # collapsed sliver
+            continue
+        ni += [a, b, c]
+    return nv, ni
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("game_dir", help="Archean-game directory (contains modules/)")
@@ -112,6 +150,15 @@ def main():
         except Exception as e:
             print(f"skip {typ}: gltf {e}", file=sys.stderr)
             continue
+        for c in comps.values():                    # build the low-poly twin
+            allv = [x for p in c["prims"] for x in p["v"]]
+            if not allv:
+                continue
+            min_size = min(max(allv[a::3]) - min(allv[a::3]) for a in (0, 1, 2))
+            for p in c["prims"]:
+                lv, li = lowify(p["v"], p["i"], min_size)
+                p["lv"] = [round(x, 4) for x in lv]
+                p["li"] = li
         for (t, name), kv in sec.items():
             rec = {k: kv[k] for k in kv}
             if t == "RENDERABLE":

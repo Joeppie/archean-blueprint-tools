@@ -44,7 +44,7 @@ function modelMaterial(c, name) {
   const col = MAT_FIX[name] ?? 0x8d949e;
   return { color: new THREE.Color(col), metal: 0.5, rough: 0.55, op: 1 };
 }
-function buildRealComponent(c, model, idx) {
+function buildRealComponent(c, model, idx, low = false) {
   const { geo, info } = model;
   const g = new THREE.Group();
   // Placement truth is the .ini node tree (renderables/joints/targets, ZYX
@@ -69,9 +69,11 @@ function buildRealComponent(c, model, idx) {
     const rg = nodes.get(r.name);
     const byMat = new Map();          // merge same-material prims → fewer draws
     for (const prim of nd.prims) {
+      const v = low && prim.lv ? prim.lv : prim.v;
+      const i = low && prim.li ? prim.li : prim.i;
       const gg = new THREE.BufferGeometry();
-      gg.setAttribute('position', new THREE.Float32BufferAttribute(prim.v, 3));
-      gg.setIndex(prim.i);
+      gg.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
+      gg.setIndex(i);
       gg.computeVertexNormals();
       let arr = byMat.get(prim.material);
       if (!arr) byMat.set(prim.material, arr = []);
@@ -343,9 +345,60 @@ const PROXY2 = {
   },
 };
 function defaultProxy(c) {
+  // exact game collider footprint (from occupancies): box, axis-aligned
   const f = footprint(c);
-  const s = clamp(Math.min(f.x, f.y, f.z), 0.06, 0.3);
-  return new THREE.Mesh(box(s, s, s), mat(compColor(c, 'color1', 0x88aaff)));
+  return new THREE.Mesh(box(f.x, f.y, f.z), mat(compColor(c, 'color1', 0x88aaff)));
+}
+
+// ---------- player-interactive labels ----------
+// Components the player touches in-cockpit get a short floating label; an
+// in-game alias (components[].alias) always wins and renders in blue.
+const INTERACT = {
+  Dashboard: 'dash', PushButton: 'button', ToggleButton: 'toggle', ArrowButton: 'arrow',
+  Keyboard: 'keyboard', Numpad: 'numpad', Led: 'led', Buzzer: 'buzzer', Beacon: 'beacon',
+  NavInstrument: 'nav', MiniNavInstrument: 'nav', HudController: 'hud',
+  PilotSeat: 'seat', ToiletSeat: 'toilet', OwnerPad: 'pad',
+  Computer: 'computer', MiniComputer: 'computer', Volume: 'volume',
+};
+let labelsOn = true;
+function makeLabel(c) {
+  const text = c.alias || INTERACT[c.type];
+  const cv = document.createElement('canvas');
+  let ctx = cv.getContext('2d');
+  ctx.font = 'bold 44px monospace';
+  const w = Math.max(72, Math.ceil(ctx.measureText(text).width) + 28);
+  cv.width = w; cv.height = 64;
+  ctx = cv.getContext('2d');
+  ctx.fillStyle = 'rgba(8,12,16,0.72)';
+  ctx.fillRect(0, 0, w, 64);
+  ctx.font = 'bold 44px monospace';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = c.alias ? '#7fd0ff' : '#ffd479';
+  ctx.fillText(text, 14, 34);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: new THREE.CanvasTexture(cv), depthTest: false, transparent: true }));
+  sp.scale.set(w / 64 * 0.3, 0.3, 1);
+  sp.renderOrder = 10;
+  sp.userData.isLabel = true;
+  return sp;
+}
+
+// instant stand-in until the low-poly mesh loads: exact game collider box
+function colliderProxy(c) {
+  const col = MODEL.manifest?.[c.type]?.colliders?.[0];
+  const g = new THREE.Group();
+  if (col && col.max[0] - col.min[0] > 1e-6) {
+    const b = new THREE.Mesh(
+      box(col.max[0] - col.min[0], col.max[1] - col.min[1], col.max[2] - col.min[2]),
+      mat(compColor(c, 'color1', 0x88aaff)));
+    b.position.set((col.min[0] + col.max[0]) / 2, (col.min[1] + col.max[1]) / 2,
+                   (col.min[2] + col.max[2]) / 2);
+    g.add(b);
+  } else {
+    const f = footprint(c);
+    g.add(new THREE.Mesh(box(f.x, f.y, f.z), mat(compColor(c, 'color1', 0x88aaff))));
+  }
+  return g;
 }
 
 let compObjs = [];
@@ -362,24 +415,35 @@ function buildScene() {
 
   for (const [i, c] of components.entries()) {
     if (c.type === 'Build') continue;   // editor construction-site ghost, not physical
-    const mesh = (PROXY[c.type] || PROXY2[c.type] || defaultProxy)(c);
+    // Default = decimated real mesh (same shape as the game asset, squares +
+    // hexagons, no micro-detail); checkbox swaps in the full raytracing-grade
+    // geometry. Components without an atlas entry keep the hand proxies.
+    const atlas = !!MODEL.manifest?.[c.type];
+    const mesh = atlas ? colliderProxy(c) : (PROXY[c.type] || PROXY2[c.type] || defaultProxy)(c);
     mesh.position.set(c.position.x, c.position.y, c.position.z);
     mesh.quaternion.set(c.orientation.x, c.orientation.y, c.orientation.z, c.orientation.w);
     mesh.traverse(o => { o.userData.ci = i; });
     mesh.userData.ci = i;
     compGroup.add(mesh);
     compObjs[i] = mesh;
-    // swap in the game's real model when available & enabled (async; proxies are the default)
-    const mp = realModelsOn ? getModel(c.type) : null;
+    if (INTERACT[c.type] || c.alias) {              // floating label above part
+      const sp = makeLabel(c);
+      sp.position.y = new THREE.Box3().setFromObject(mesh).max.y - mesh.position.y + 0.18;
+      sp.userData.ci = i;
+      sp.visible = labelsOn;
+      mesh.add(sp);
+    }
+    const mp = atlas ? getModel(c.type) : null;
     if (mp) mp.then(mm => {
       if (!mm || !mm.geo || !compObjs.includes(mesh)) return;
-      const real = buildRealComponent(c, mm, i);
+      const real = buildRealComponent(c, mm, i, !realModelsOn);   // low by default
       real.position.copy(mesh.position);
       real.quaternion.copy(mesh.quaternion);
       real.userData.real = true;
-      real.visible = realModelsOn;
-      mesh.visible = !realModelsOn;
+      mesh.visible = false;
       mesh.userData.hasReal = true;
+      const lab = mesh.children.find(o => o.userData.isLabel);
+      if (lab) real.add(lab);                     // labels ride the visible model
       compGroup.add(real);
       (realMap.get(i) || realMap.set(i, []).get(i)).push(real);
       invalidate();
@@ -955,8 +1019,19 @@ function buildViewOpts() {
   const rcb = document.createElement('input');
   rcb.type = 'checkbox'; rcb.checked = realModelsOn;
   rcb.onchange = () => setRealModels(rcb.checked);
-  rl.append(rcb, document.createTextNode('real game models (off = light proxies)'));
+  rl.append(rcb, document.createTextNode('real game models (off = same-shape low-poly)'));
   s.appendChild(rl);
+  const ll = document.createElement('label');
+  ll.className = 'checkrow';
+  const lcb = document.createElement('input');
+  lcb.type = 'checkbox'; lcb.checked = labelsOn;
+  lcb.onchange = () => {
+    labelsOn = lcb.checked;
+    compGroup.traverse(o => { if (o.userData.isLabel) o.visible = labelsOn; });
+    invalidate();
+  };
+  ll.append(lcb, document.createTextNode('labels on interactive/aliased parts'));
+  s.appendChild(ll);
 
   const hs = document.createElement('div');
   hs.className = 'sec';
@@ -1356,6 +1431,44 @@ controls.addEventListener('change', invalidate);
 addEventListener('input', invalidate, true);
 addEventListener('keydown', invalidate);
 
+// ---------- proxy verification (?proxytest) ----------
+// For every component type in the model atlas: build both the light proxy and
+// the real game geometry from the same fake component, compare bounding boxes.
+// Proxies are approximations; 35% max per-axis deviation is the tolerance.
+async function runProxyTest() {
+  await loadModelManifest();
+  const lines = [];
+  let pass = 0, tot = 0;
+  for (const t of Object.keys(MODEL.manifest || {})) {
+    tot++;
+    try {
+      const mm = await getModel(t);
+      if (!mm) { lines.push(`${t} SKIP (no geometry)`); continue; }
+      const col = (mm.info.colliders && mm.info.colliders[0]) ||
+                  { min: [-0.15, -0.15, -0.15], max: [0.15, 0.15, 0.15] };
+      const cells = [0, 1, 2].map(a => Math.max(0, Math.round((col.max[a] - col.min[a]) / CELL) - 1));
+      const fake = {
+        type: t, module: 'x', alias: '', colors: {}, data: {},
+        position: { x: 0, y: 0, z: 0 }, orientation: { w: 1, x: 0, y: 0, z: 0 },
+        occupancies: [{ frame_x: 0, frame_y: 0, frame_z: 0, pos_x: 5.5, pos_y: 5.5, pos_z: 5.5,
+                        size_x: cells[0], size_y: cells[1], size_z: cells[2] }],
+      };
+      const p = buildRealComponent(fake, mm, 1e9, true);     // decimated (default view)
+      const r = buildRealComponent(fake, mm, 1e9, false);    // full game geometry
+      const dp = new THREE.Box3().setFromObject(p).getSize(new THREE.Vector3());
+      const dr = new THREE.Box3().setFromObject(r).getSize(new THREE.Vector3());
+      const rel = Math.max(...['x', 'y', 'z'].map(a => Math.abs(dp[a] - dr[a]) / Math.max(dr[a], 0.05)));
+      const ok = rel <= 0.35;
+      if (ok) pass++;
+      lines.push(`${t.padEnd(24)} ${ok ? 'OK ' : 'BAD'} proxy ${dp.x.toFixed(2)}×${dp.y.toFixed(2)}×${dp.z.toFixed(2)}`
+               + `  real ${dr.x.toFixed(2)}×${dr.y.toFixed(2)}×${dr.z.toFixed(2)}  maxdiff ${(rel * 100).toFixed(0)}%`);
+    } catch (e) { lines.push(`${t} ERR ${e.message}`); }
+  }
+  document.body.insertAdjacentHTML('beforeend', `<pre id="out" style="white-space:pre-wrap">${lines.join('\n')}</pre>`);
+  const bad = lines.filter(l => l.includes(' BAD')).slice(0, 4).map(l => l.trim().split(' ')[0]).join(',');
+  document.title = `PROXYTEST ${pass}/${tot} PASS bad=${bad || 'none'}`;
+}
+
 // ---------- init ----------
 if (location.search.includes('real')) realModelsOn = true;   // before buildViewOpts (checkbox state)
 buildViewOpts();
@@ -1367,6 +1480,7 @@ if (location.search.includes('flow')) flowOn = true;
 if (location.search.includes('perf')) perfT0 = performance.now() + 1500;  // measure after load settles
 loadModelManifest().then(fetchDefault);
 requestAnimationFrame(tick);
+if (location.search.includes('proxytest')) runProxyTest();
 
 // ---------- self-test (view3d.html?selftest): simulates slider edits + save ----------
 if (location.search.includes('selftest')) {

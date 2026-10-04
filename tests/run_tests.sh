@@ -6,7 +6,8 @@
 #
 # Runs:  1. viewer selftest  — edit→serialize→occupancy/mirror sync, byte round-trip
 #        2. regtest suite    — format invariants + hull fit over every testdata craft
-#        3. smoke render     — one WebGL screenshot (needs swiftshader in headless)
+#        3. proxytest        — low-poly vs real geometry per component type
+#        4. smoke render     — one WebGL screenshot (needs swiftshader in headless)
 #
 # Exit code: 0 = all passed. Artifacts in $OUT (default /tmp/archean-tests).
 set -uo pipefail
@@ -42,6 +43,12 @@ reg=$(chrome --virtual-time-budget=90000 \
   | python3 -c "import sys,re,html; t=sys.stdin.read(); m=re.search(r'id=\"out\">(.*?)</div>', t, re.S); print(html.unescape(m.group(1)) if m else 'NO OUTPUT')")
 echo "$reg" | grep -v ' OK$' | tail -8
 echo "$reg" | grep -q 'REGTEST: PASS' || fail=1
+
+echo "── proxytest (low-poly meshes vs real geometry, all atlas types)"
+title=$(chrome --virtual-time-budget=30000 \
+  --dump-dom "$BASE/viewer/index.html?proxytest" 2>/dev/null | grep -oPm1 '(?<=<title>)[^<]*')
+echo "   $title"
+case "$title" in *PASS*) ;; *) echo "   FAIL"; fail=1;; esac
 
 echo "── smoke render"
 chrome --window-size=1400,900 --virtual-time-budget=15000 \
