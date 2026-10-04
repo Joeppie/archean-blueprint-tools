@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>hullfit regression</title>
+<style>body{background:#111;color:#cfe;font:12px monospace;white-space:pre;padding:12px}</style></head>
+<body><div id="out">running…</div>
+<script type="module">
+import { fitHull } from '../viewer/hullfit.js';
+
+// Regression set: ALL workshop blueprints in testdata/ (24, incl. tiny 1 kB ones).
+// Format-validation suite for the viewer's parsers. Run headless (see tests/):
+//   chromium --headless=new --dump-dom "http://127.0.0.1:8650/regtest/regtest.html"
+const CELL = 0.25, FRAME = 3;
+const W = (o, ax) => (o['pos_' + ax] - 5.5) * CELL + o['frame_' + ax] * FRAME;
+
+let out = [], pass = 0, fail = 0;
+const ids = await (async () => {
+  const listing = await (await fetch('../testdata/')).text();
+  return [...listing.matchAll(/href="(\d{6,})\/"/g)].map(m => m[1]);
+})();
+for (const id of ids) {
+  try {
+    const bp = await (await fetch(`../testdata/${id}/blueprint.json`)).json();
+    const D = bp.data;
+    const nT = (D.triangles || []).length, nC = (D.components || []).length;
+    const nB = (D.blocks || []).length;
+    const notes = [];
+    let ok = true;
+    // invariant 1: non-mirror blocks within bbox (0.35 m margin for rotatables)
+    for (const b of D.blocks || []) {
+      if (b.type === 255) continue;
+      for (const ax of 'xyz') {
+        const lo = W(b, ax) - CELL / 2, hi = W(b, ax) + (b['size_' + ax]) * CELL + CELL / 2;
+        if (lo < bp.box_min[ax] - .35 || hi > bp.box_max[ax] + .35) ok = false;
+      }
+    }
+    // invariant 2: components near bbox ('Build' = editor construction-site
+    // ghost, lives far outside the craft, not physical geometry)
+    for (const c of D.components || []) {
+      if (c.type === 'Build') continue;
+      for (const ax of 'xyz')
+        if (c.position[ax] < bp.box_min[ax] - 1.5 || c.position[ax] > bp.box_max[ax] + 1.5) ok = false;
+    }
+    if (!ok) { notes.push('OUT-OF-BOX geometry'); fail++; } else pass++;
+    // hull fit (only craft with triangle skins, e.g. ISW-241)
+    let fitLine = '';
+    if (nT) {
+      const fit = fitHull(bp);
+      if (!fit) { notes.push('NO HULL FIT'); fail++; pass--; }
+      else {
+        let bad = 0;
+        for (const t of D.triangles) for (let i = 0; i < 3; i++) {
+          const X = (t[`v${i}_x`] + fit.W * t.frame_x) * fit.px + fit.Cx;
+          const Z = (t[`v${i}_z`] + fit.W * t.frame_z) * fit.pz + fit.Cz;
+          if (X < bp.box_min.x - .03 || X > bp.box_max.x + .03 ||
+              Z < bp.box_min.z - .03 || Z > bp.box_max.z + .03) bad++;
+        }
+        fitLine = ` fit W=${fit.W} pitch=(${fit.px.toFixed(4)},${fit.py.toFixed(4)},${fit.pz.toFixed(4)}) outv=${bad}`;
+        if (bad) { notes.push('HULL OUT OF BOX'); fail++; pass--; }
+      }
+    }
+    out.push(`${id}: v${D.version} blocks=${nB} comps=${nC} tris=${nT}${fitLine}  ` +
+      `${notes.length ? notes.join('; ') + ' → FAIL' : 'OK'}`);
+  } catch (e) { out.push(`${id}: ERROR ${e.message}`); fail++; }
+}
+out.push(`\n${pass} pass, ${fail} fail`);
+out.push(fail ? 'REGTEST: FAIL' : 'REGTEST: PASS');
+document.getElementById('out').textContent = out.join('\n');
+document.title = fail ? 'REGTEST FAIL' : 'REGTEST PASS';
+</script>
+</body>
+</html>

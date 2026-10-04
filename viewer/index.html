@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Archean Blueprint Viewer — ISW-241</title>
+<style>
+  :root { --bg:#131219; --panel:#1c1b22; --panel2:#252330; --tx:#e8e6e3; --dim:#9a97a5;
+          --accent:#0a84ff; --row:#2d2b38; --ok:#30e660; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--tx);
+              font:12px/1.5 "Segoe UI", system-ui, sans-serif; overflow:hidden; }
+  #view { position:absolute; inset:0 340px 0 0; }
+  canvas { display:block; }
+
+  /* DevTools-ish side panel */
+  #panel { position:absolute; top:0; right:0; bottom:0; width:340px; background:var(--panel);
+           border-left:1px solid #000; display:flex; flex-direction:column; z-index:10; }
+  #panel header { padding:6px 10px; background:var(--panel2); font-weight:600; letter-spacing:.4px;
+                  display:flex; justify-content:space-between; align-items:center; gap:6px; }
+  #panel header button, .btn { background:var(--row); color:var(--tx); border:1px solid #000;
+                  border-radius:4px; padding:3px 8px; cursor:pointer; font:inherit; }
+  #panel header button:hover, .btn:hover { background:#3a3747; }
+  #filestatus { color:var(--dim); font-weight:400; }
+  #panel .scroll { overflow-y:auto; flex:1; }
+  h3 { margin:0; padding:5px 10px; font-size:10px; text-transform:uppercase; letter-spacing:1px;
+       color:var(--dim); background:#181720; border-top:1px solid #000; border-bottom:1px solid #000; }
+  #filter { width:100%; padding:4px 8px; background:var(--row); color:var(--tx); border:0;
+            outline:0; font:inherit; border-bottom:1px solid #000; }
+  #complist { max-height:180px; overflow-y:auto; }
+  #complist div { padding:2px 10px; cursor:pointer; font-family:monospace; white-space:pre; }
+  #complist div:hover { background:#2a2836; }
+  #complist div.sel { background:color-mix(in srgb, var(--accent) 30%, transparent); color:#fff; }
+  #complist .t { color:#7fd0ff; } #complist .i { color:var(--dim); }
+
+  .sec { padding:6px 10px; }
+  .row { display:grid; grid-template-columns:52px 1fr 74px 18px; gap:6px; align-items:center;
+         margin:3px 0; }
+  .row label { color:var(--dim); font-family:monospace; }
+  .row output { font-family:monospace; text-align:right; color:var(--tx); }
+  .row .rst { visibility:hidden; text-align:center; cursor:pointer; color:var(--dim);
+              border-radius:3px; user-select:none; }
+  .row .rst:hover { color:var(--tx); background:var(--row); }
+  .row.mod .rst { visibility:visible; color:var(--ok); }
+  input[type=range] { width:100%; accent-color:var(--accent); height:14px; margin:0; }
+  input[type=number] { width:74px; background:var(--row); color:var(--tx); border:1px solid #000;
+              border-radius:3px; padding:1px 4px; font:inherit; font-family:monospace; }
+  input[type=text] { flex:1; background:var(--row); color:var(--tx); border:1px solid #000;
+              border-radius:3px; padding:1px 4px; font:inherit; font-family:monospace; }
+  .checkrow { display:flex; align-items:center; gap:6px; margin:3px 0; font-family:monospace; }
+  .checkrow input { accent-color:var(--accent); }
+  .presets { display:flex; flex-wrap:wrap; gap:4px; margin:4px 0; }
+
+  #selname { font-family:monospace; padding:6px 10px; color:#ffd479; }
+  #selname .none { color:var(--dim); }
+  #hud { position:absolute; top:8px; left:10px; color:#cfd8e3; font-family:monospace;
+         font-size:11px; text-shadow:0 1px 2px #000; pointer-events:none; white-space:pre; }
+  #toast { position:absolute; bottom:14px; left:50%; transform:translateX(-50%);
+           background:#000c; padding:6px 14px; border-radius:6px; opacity:0; transition:opacity .3s;
+           pointer-events:none; font-family:monospace; }
+  #help { color:var(--dim); padding:6px 10px; }
+  .dirty #panel header { outline:2px solid var(--ok); outline-offset:-2px; }
+</style>
+<script type="importmap">
+{ "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+  <div id="view"></div>
+  <div id="hud"></div>
+  <div id="toast"></div>
+  <div id="panel">
+    <header>
+      <span>ISW-241 blueprint inspector</span>
+      <span>
+        <button id="openBtn" title="Open blueprint.json (needed for direct save in Chrome/Edge)">Open file…</button>
+        <button id="saveBtn" title="Save (Ctrl+S)">Save</button>
+      </span>
+    </header>
+    <div class="scroll">
+      <h3>Components <span id="filestatus"></span></h3>
+      <input id="filter" placeholder="filter components… (type name)">
+      <div id="complist"></div>
+
+      <div id="selname"><span class="none">nothing selected — click a component</span></div>
+      <div id="inspector"></div>
+
+      <h3>View options</h3>
+      <div class="sec" id="viewopts"></div>
+
+      <h3>Flight analysis</h3>
+      <div id="flight"></div>
+
+      <h3>Hull elements <span id="hullcount"></span></h3>
+      <div id="hulllist"></div>
+      <div id="help">
+        drag = orbit · wheel = zoom · right-drag = pan<br>
+        click = select component · Esc = deselect<br>
+        F = focus selection · G grid · O occupancy boxes · H hull<br>
+        Ctrl+S = save (direct save needs Chrome/Edge “Open file…”;
+        Firefox downloads blueprint.json → overwrite the original)
+      </div>
+    </div>
+  </div>
+  <script type="module" src="view3d.js"></script>
+</body>
+</html>

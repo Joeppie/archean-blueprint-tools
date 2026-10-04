@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Archean Blueprint Tools</title>
+<style>
+  body{background:#14161a;color:#cfe3ee;font:15px/1.6 system-ui,sans-serif;max-width:720px;margin:6vh auto;padding:0 18px}
+  a{color:#7dffcf} h1{font-size:26px;color:#fff} pre{background:#1d2026;padding:10px 14px;border-radius:6px;overflow-x:auto}
+  .muted{color:#8aa}
+</style>
+</head>
+<body>
+<h1>Archean Blueprint Tools</h1>
+<p>Reverse-engineered craft format + live 3D inspector for
+<a href="https://store.steampowered.com/app/2941660/Archean/">Archean</a> workshop blueprints.</p>
+<ul>
+  <li><a href="viewer/index.html">▶ Open the 3D viewer/inspector</a> (loads the ISW-241 craft from testdata)</li>
+  <li><a href="regtest/regtest.html">Run the regression suite</a> (24 blueprints, format invariants)</li>
+  <li><a href="FORMAT.md">FORMAT.md</a> · <a href="AGENTS.md">AGENTS.md</a> · <a href="NOTICE.md">NOTICE.md</a> · <a href="LICENSE">LICENSE (GPL-3.0)</a></li>
+</ul>
+<pre>python3 -m http.server 8650   # serve repo root
+tests/run_tests.sh            # headless-Chromium test suite</pre>
+<p class="muted">Game content belongs to the Archean developer (batcholi / FloDKSM); see NOTICE.md.</p>
+</body>
+</html>
