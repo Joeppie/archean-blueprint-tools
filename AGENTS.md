@@ -6,11 +6,15 @@ modules + Three.js from CDN. No bundler, no npm.
 
 ## Layout
 ```
-viewer/index.html + view3d.js   the inspector (Three.js, one file, ~1100 lines)
+viewer/index.html + view3d.js   the inspector (Three.js, one file, ~1300 lines)
 viewer/hullfit.js               generic hull-grid fitter (pure functions, no THREE)
+viewer/models/                  real game component models: manifest.json (mass,
+                                renderable node tree, joints, adapters, colliders
+                                per type) + <Type>.json geometry, lazy-loaded
 regtest/regtest.html            format-validation suite over testdata/ (importable)
 testdata/<workshop-id>/blueprint.json   regression corpus (24 craft, 1 kB..530 kB)
 tools/adjust_seat.py            reference example of a safe format edit
+tools/extract_models.py         regenerates viewer/models/ from an installed game
 tests/run_tests.sh              headless-Chromium test runner (selftest+regtest+renders)
 FORMAT.md                       format documentation (start here)
 NOTICE.md                       licensing: GPL code, game content belongs to batcholi/FloDKSM
@@ -24,6 +28,8 @@ python3 -m http.server 8650             # manual serving (repo root)
 # selftest: http://127.0.0.1:8650/viewer/index.html?selftest  (tab title: SELFTEST PASS)
 # regtest:  http://127.0.0.1:8650/regtest/regtest.html         (page ends 'REGTEST: PASS')
 # other craft: viewer/index.html?open=../testdata/<id>/blueprint.json
+# perf probe: viewer/index.html?perf → tab title: PERF fps=… draw=<draw-calls> …
+python3 tools/extract_models.py <Archean-game-dir> -o viewer/models
 ```
 Headless render shots: `chromium --headless=new --no-sandbox --disable-gpu
 --enable-unsafe-swiftshader --window-size=1400,900 --virtual-time-budget=15000
@@ -50,6 +56,26 @@ Headless render shots: `chromium --headless=new --no-sandbox --disable-gpu
 - `components[].type === 'Build'` = editor construction-site ghost, far outside
   the bbox — never render it as geometry.
 - Palette slots: `data.colors[256]`; `opacity < 8` ⇒ transparent (glass).
+- Component models: game ships per component a `.gltf` (materials named
+  `color1`/`color2` = player-painted surfaces ⇄ `components[].colors`) and an
+  `.ini` (mass, `[RENDERABLE]` node tree, `[JOINT]` with angular limits,
+  `[ADAPTER]` port positions, collider box). `extract_models.py` packs these
+  into `viewer/models/`; the viewer swaps proxies for real models async and
+  keeps proxies as fallback. `Build` type has no model (skipped).
+
+## Performance rules (iGPU-targeted — keep them)
+- Static geometry is MERGED: all blocks → 1 vertex-color mesh, occupancy
+  boxes → 1 line mesh, pipes → 1 mesh, streamlines → 1 LineSegments, all
+  adapter nubs → 1 mesh per port type (world-merged, rebuilt on edit).
+- Rendering is ON-DEMAND: call `invalidate()` after anything changes; the
+  loop only draws on invalidation, controls movement, or while flow is on.
+  Never reintroduce unconditional per-frame `renderer.render`.
+- Material sharing is intentionally NOT done for component materials:
+  selection highlight writes `material.emissive` per mesh (shared materials
+  would light up every component of that colour).
+- `?perf` writes `draw=<renderer.info.render.calls>` into the title; the
+  ISW-241 scene is ≈150 draws. SwiftShader fps numbers are meaningless —
+  compare draw-call counts only.
 
 ## Invariants that tests enforce (keep them green)
 1. `?selftest`: edit→serialize round-trip preserves bytes except intended fields;
@@ -65,11 +91,16 @@ Headless render shots: `chromium --headless=new --no-sandbox --disable-gpu
 - Keep headless testability: no top-level awaits on user input, report results in
   `document.title` / `#out` for `--dump-dom`.
 
-## Known TODOs
-- Aerodynamics: full 360° velocity vector (nose may be ±X/±Z), automatic search
-  of stable flight direction at low/high speed + ambiguity warning.
+## Backlog
+- Better flight-characteristics / stability analysis (beyond the stylized
+  thin-plate model: full 360° velocity vector — nose may be ±X/±Z, automatic
+  search of stable flight direction at low/high speed + ambiguity warning,
+  trim/drag polar). User-requested, deliberately deferred.
 - Aero model is stylized thin-plate (Cn = 2π·sinα·cosα), not CFD — label keeps.
-- Component proxies are facsimiles; port positions come from pipe endpoints.
+- Joint animation is static (ailerons hinged at fixed droop from preview);
+  in-game deflection state is not stored in the blueprint file.
+- Optional before wider publishing: trim `testdata/` to the author's own craft
+  (the other 23 files are other players' workshop copies — see NOTICE §2).
 
 ## Licensing notes (see NOTICE.md)
 - Code is GPL-3.0; game data belongs to the game developer (batcholi/FloDKSM).
