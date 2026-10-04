@@ -1,5 +1,5 @@
-NOTICE — licensing, attribution, and relicensing terms
-======================================================
+NOTICE — licensing, attribution, and reuse terms
+================================================
 
 This repository bundles code and third-party content with DIFFERENT owners.
 Read this file together with LICENSE (GNU GPL v3).
@@ -39,15 +39,19 @@ Read this file together with LICENSE (GNU GPL v3).
    grant by default for material you do not own. Mark unresolved items in this
    NOTICE until cleared.
 
-4. Relicensing clause
-   -------------------
-   Code in this repository may be relicensed (in whole or in part), without any
-   fee, when a good argument is given and agreed to by the respective rights
-   holders (each contributor's improvements stay theirs, per GPL). This clause
-   exists because standard licenses ignore the practical case of mutually
-   agreed relicensing, and that omission is undesirable and contrary to the
-   spirit in which this work was made. Record any such agreement alongside this
-   file (date, parties, scope, new terms).
+4. Reuse assumption & rights-holder contact
+   -----------------------------------------
+   **No explicit permission has been obtained from any rights holder** for the
+   bundled game or player content, and this repository does not claim any. It
+   is published in good faith, for interoperability, education and research,
+   presuming that reuse of the included third-party IP is acceptable in the
+   spirit of Creative Commons attribution (CC-BY-like). That is a presumption
+   offered transparently — not a licence grant — and nothing here presumes to
+   license anyone else's IP.
+   Rights holders who consider any included material out of bounds: open an
+   issue on this repository and it will be addressed amicably and promptly —
+   takedown, trimming, or relicensing by mutual agreement, without fees or
+   legalism. Any agreed outcome is recorded alongside this file.
 
 5. Data test corpus
    -----------------

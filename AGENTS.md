@@ -111,5 +111,6 @@ Headless render shots: `chromium --headless=new --no-sandbox --disable-gpu
 ## Licensing notes (see NOTICE.md)
 - Code is GPL-3.0; game data belongs to the game developer (batcholi/FloDKSM).
 - Investigate provenance of anything of uncertain origin before extending it.
-- Relicensing by mutual agreement of rights holders is allowed, fee-free,
-  documented in NOTICE.md — respect that process in PRs touching licensing.
+- No rights-holder permissions are claimed; reuse is presumed in good faith,
+  CC-attribution spirit. Rights-holder objections are handled amicably via
+  issues (NOTICE §4) — keep that transparency in any licensing-related change.

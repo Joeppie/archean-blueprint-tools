@@ -82,5 +82,7 @@ Useful URL parameters: `?open=<url>` open another blueprint ·
   belongs to the Archean developer (batcholi / FloDKSM). Player-made workshop
   craft in `testdata/` belong to their workshop authors. All works belong to
   their respective owners.
-- Provenance of unattributed material must be investigated; relicensing by
-  mutual agreement of the rights holders is fee-free and documented.
+- **No rights-holder permissions are claimed.** Reuse of the included
+  third-party content is presumed acceptable in good faith, CC-attribution
+  spirit; rights holders who disagree can raise an issue and it will be
+  addressed amicably and promptly (NOTICE §4).
