@@ -1237,7 +1237,7 @@ function sampleVel(p, dir, V) {
 
 function initFlow() {
   flowGroup.clear();
-  const N = 2200;
+  const N = location.search.includes('flowlow') ? 500 : 2200;   // flowlow = headless shots
   flowData = new Float32Array(N * 3);
   const b = model.box_min, B = model.box_max;
   for (let i = 0; i < N; i++) respawn(flowData, i * 3, b, B);
@@ -1264,8 +1264,9 @@ function buildStreamlines() {
     const c = new THREE.Color().setHSL(clamp(0.66 - (sp / V - 1) * 1.3, 0.02, 0.66), 0.95, 0.55);
     arr.push(c.r, c.g, c.b);
   };
-  for (let y = b.y - 0.35; y <= B.y + 1.0; y += 0.45)
-    for (let x = b.x - 0.5; x <= B.x + 0.5; x += 1.1) {
+  const sga = location.search.includes('flowlow') ? 0.9 : 0.45;   // coarser seed grid
+  for (let y = b.y - 0.35; y <= B.y + 1.0; y += sga)
+    for (let x = b.x - 0.5; x <= B.x + 0.5; x += sga * 2.4) {
       const seed = [x, y, (b.z + B.z) / 2];
       const fwd = [], fc = [], back = [], bc = [];
       const walk = (sgn, pts, cs) => {

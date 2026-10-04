@@ -56,8 +56,8 @@ chrome --window-size=1400,900 --virtual-time-budget=15000 \
 [ -s "$OUT/viewer.png" ] && [ "$OUT/viewer.png" -nt "$OUT/.start" ] && echo "   ok: $OUT/viewer.png" || { echo "   FAIL (no screenshot)"; fail=1; }
 
 echo "── flow render (with streamlines)"
-SHOT_TIMEOUT=240 chrome --window-size=900,600 --virtual-time-budget=2500 \
-  --screenshot="$OUT/flow.png" "$BASE/viewer/index.html?flow" 2>/dev/null
+SHOT_TIMEOUT=240 chrome --window-size=640,400 --virtual-time-budget=2500 \
+  --screenshot="$OUT/flow.png" "$BASE/viewer/index.html?flow&flowlow" 2>/dev/null
 [ -s "$OUT/flow.png" ] && [ "$OUT/flow.png" -nt "$OUT/.start" ] && echo "   ok: $OUT/flow.png" || { echo "   FAIL (no screenshot)"; fail=1; }
 
 [ $fail -eq 0 ] && echo "ALL TESTS PASS" || echo "TESTS FAILED"
