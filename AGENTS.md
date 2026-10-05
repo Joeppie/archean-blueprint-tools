@@ -185,6 +185,10 @@ landing page and README together when the viewer changes).
 - Material sharing is intentionally NOT done for component materials:
   selection highlight writes `material.emissive` per mesh (shared materials
   would light up every component of that colour).
+- `renderer.setPixelRatio` is floored at 1 (capped at 2, re-applied in
+  onResize): browser zoom-out drops `devicePixelRatio` below 1, and
+  feeding that through renders the canvas BELOW CSS resolution — upscaled
+  = the user's "zoomed in and grainy" on fresh opens.
 - `?perf` writes `draw=<renderer.info.render.calls>` into the title; the
   ISW-241 scene is ≈150 draws. SwiftShader fps numbers are meaningless —
   compare draw-call counts only.
@@ -217,6 +221,14 @@ landing page and README together when the viewer changes).
      geometry — nothing of a craft renders below ground, ever (the
      3481322297 "Classic American Semi Truck" builds down to y=−1.5;
      `ground=true`).
+     selecting a component must fire cable power-surges: one travelling
+     pulse per connected pipe (data.pipes graph), the far component blips
+     on arrival; pulses/blips/selection glow render additive with
+     depthTest off — visible THROUGH the hull (`surges=true`). The
+     selection is an incandescent X-ray overlay (shared-geometry meshes,
+     matrix-synced every rendered frame so it tracks live edits). Camera
+     fly-in is MANUAL-only: canvas click, component-list double-click
+     (never list single-click, ?sel= deep links, or selftest).
 2. `regtest`: every testdata blueprint parses; blocks/components within bbox
    margins; the hull lattice map (when triangles exist) puts every vertex
    inside the bbox.

@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=111';
-import { resolveColor } from './palette.js?v=111';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=112';
+import { resolveColor } from './palette.js?v=112';
 
 // ---- game component models (extracted from installed game modules) ----
 // manifest: per-type metadata (mass, renderable node tree, joints, adapters,
@@ -392,7 +392,7 @@ const viewQuat = (q) => LEGACY_Q ? new THREE.Quaternion(-q.x, -q.y, q.z, q.w)
 // ---------- three.js boilerplate ----------
 const view = document.getElementById('view');
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setPixelRatio(Math.max(1, Math.min(devicePixelRatio, 2)));  // floor 1: browser zoom-out pushes dpr <1, feeding that through renders BELOW CSS resolution (user: "zoomed in and grainy")
 view.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -417,7 +417,7 @@ function fitCameraToModel() {
   const sz = box.getSize(new THREE.Vector3());
   const r = Math.max(1, sz.x, sz.y, sz.z);
   controls.target.copy(c);
-  camera.position.set(c.x + r * 0.85, c.y + Math.max(r * 0.45, 2), c.z + r * 1.0);
+  camera.position.set(c.x + r * 1.1, c.y + Math.max(r * 0.62, 2.4), c.z + r * 1.3);
   camera.near = Math.max(0.05, r / 400);
   camera.far = Math.max(300, r * 10);
   scene.fog.near = Math.max(30, r * 2.5);
@@ -443,6 +443,7 @@ scene.add(grid);
 
 function onResize() {
   const w = view.clientWidth, h = view.clientHeight;
+  renderer.setPixelRatio(Math.max(1, Math.min(devicePixelRatio, 2)));  // browser zoom changes dpr (fires resize)
   renderer.setSize(w, h);
   invalidate();
   camera.aspect = w / h;
@@ -1065,7 +1066,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=111';
+import { fitHull } from './hullfit.js?v=112';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -1202,6 +1203,8 @@ function buildPipes() {
   pipeGroup.clear();
   adpEndpoint.clear();
   pipeEndsV.length = 0;
+  pipePolys.length = 0;
+  clearSurges();                              // paths change on rebuild
   const segs = [], endsA = [], endsB = [];
   const sph = (pt) => {
     const g = new THREE.SphereGeometry(0.035, 8, 6);
@@ -1225,15 +1228,18 @@ function buildPipes() {
     // spheres far off the real ports (user's "green spheres don't match").
     const aE = new THREE.Vector3(p.segments[0].start.x, p.segments[0].start.y, -p.segments[0].start.z);
     let cur = aE;
+    const pts = [];                           // surge polyline (a-end → b-end)
     for (const s of p.segments) {
       const d = DIRVM[s.dir], L = s.length + 0.01;
       const st = new THREE.Vector3(s.start.x, s.start.y, -s.start.z);
       cur = st.clone().add(new THREE.Vector3(d[0], d[1], d[2]).multiplyScalar(s.length));
+      pts.push(st.clone(), cur.clone());
       const g = new THREE.BoxGeometry(d[0] ? L : 0.022, d[1] ? L : 0.022, d[2] ? L : 0.022);
       g.applyMatrix4(new THREE.Matrix4().makeTranslation(
         st.x + d[0] * L / 2, st.y + d[1] * L / 2, st.z + d[2] * L / 2));
       segs.push(g);
     }
+    pipePolys.push(pts);
     endsA.push(sph(aE.toArray())); endsB.push(sph(cur.toArray()));
     setEp(p.a_component, p.a_port, aE); setEp(p.b_component, p.b_port, cur);
     pipeEndsV.push({ ci: p.a_component, port: p.a_port, v: aE },
@@ -1436,16 +1442,17 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
 renderer.domElement.addEventListener('pointerup', (e) => {
   const dx = Math.abs(e.clientX - (renderer.domElement.dataset.dx | 0));
   const dy = Math.abs(e.clientY - (renderer.domElement.dataset.dy | 0));
-  if (dx < 4 && dy < 4) select(pick(e));
+  if (dx < 4 && dy < 4) select(pick(e), true);   // canvas click = the ONLY fly trigger (list: dblclick)
 });
 
-function select(i) {
+function select(i, doFly) {
   selected = i;
   invalidate();
   buildInspector();
   buildList();
   paintHighlights();
-  flyTo(i);                     // glide the camera in and centre the part
+  startSurges(i);              // cable power-surge: fires on every selection
+  if (doFly) flyTo(i);         // camera fly is manual-only (canvas click / list dblclick)
 }
 // ---------- selection fly-in + glow ----------
 // Fly-in: animate camera+target onto the component (~0.5 s, smoothstep) from
@@ -1509,6 +1516,110 @@ function paintHighlights() {
     selBox.box.copy(bb);
     selBox.visible = isFinite(bb.min.x);
   } else selBox.visible = false;
+  // incandescent X-ray layer: synced every rendered frame (tracks sliders
+  // live; rebuilt on selection change, model rebuild, proxy→real swap)
+  if (selKey !== selected || selPairs.some(([o]) => !o.parent)) rebuildSelXray();
+  for (const [o, ov] of selPairs) ov.matrix.copy(o.matrix);
+  for (const f of flashes)
+    f.mat.opacity = 0.6 * Math.pow(1 - (performance.now() - f.t0) / f.dur, 2);
+}
+
+// ---------- cable power-surge + incandescent X-ray highlight ----------
+// Selecting a component sends a travelling glow along every connected pipe
+// (data.pipes = the cable graph); on arrival the far component blips briefly.
+// Paths are the exact drawn cable polylines (per-segment anchored, joint
+// zigzag included). Pulses, blips and the selection incandescence all render
+// additive with depthTest off — they shine THROUGH the hull (user: "visible
+// above anything else, like an incandescence effect"). The on-demand loop
+// wakes only while an animation lives.
+const pipePolys = [];                       // per-pipe view-space polyline
+const surgeGroup = new THREE.Group();
+surgeGroup.raycast = () => {};
+scene.add(surgeGroup);
+const surgeGeo = new THREE.SphereGeometry(0.055, 10, 8);
+let surges = [], flashes = [];
+const selXrayMat = new THREE.MeshBasicMaterial({ color: 0xff7a20, transparent: true,
+  opacity: 0.3, blending: THREE.AdditiveBlending, depthTest: false,
+  depthWrite: false, side: THREE.DoubleSide });
+let selPairs = [], selKey = -1;
+function rebuildSelXray() {
+  for (const [, ov] of selPairs) ov.parent && ov.parent.remove(ov);
+  selPairs = []; selKey = selected;
+  compObjs?.[selected]?.traverse(o => {
+    if (!o.isMesh) return;
+    const ov = new THREE.Mesh(o.geometry, selXrayMat);
+    ov.matrixAutoUpdate = false; ov.matrix.copy(o.matrix);
+    ov.renderOrder = 15; ov.raycast = () => {};
+    o.parent.add(ov);
+    selPairs.push([o, ov]);
+  });
+}
+function clearSurges() {
+  surges.forEach(s => { surgeGroup.remove(s.mesh); s.mesh.material.dispose(); });
+  surges = [];
+  flashes.forEach(f => { scene.remove(f.grp); f.mat.dispose(); });
+  flashes = [];
+}
+function buildFlash(ci) {                    // X-ray blip on a pipe's far component
+  const grp = new THREE.Group(), mat = new THREE.MeshBasicMaterial({ color: 0x9fe0ff,
+    transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending,
+    depthTest: false, depthWrite: false, side: THREE.DoubleSide });
+  grp.raycast = () => {};
+  compObjs?.[ci]?.traverse(o => {
+    if (!o.isMesh) return;
+    o.updateWorldMatrix(true, false);
+    const ov = new THREE.Mesh(o.geometry, mat);
+    ov.matrixAutoUpdate = false; ov.matrix.copy(o.matrixWorld);
+    ov.renderOrder = 16; ov.raycast = () => {};
+    grp.add(ov);
+  });
+  scene.add(grp);
+  flashes.push({ ci, grp, mat, t0: performance.now(), dur: 620 });
+}
+function startSurges(ci) {
+  clearSurges();
+  if (!model || ci < 0) return;
+  model.data.pipes.forEach((p, pi) => {
+    let pts = pipePolys[pi], to = -1;
+    if (p.a_component === ci) to = p.b_component;
+    else if (p.b_component === ci) { to = p.a_component; pts = pts.slice().reverse(); }
+    else return;
+    if (!pts || pts.length < 2) return;
+    const cum = [0];
+    for (let k = 1; k < pts.length; k++) cum.push(cum[k - 1] + pts[k].distanceTo(pts[k - 1]));
+    const total = cum[cum.length - 1];
+    if (total < 0.05) return;
+    const mesh = new THREE.Mesh(surgeGeo, new THREE.MeshBasicMaterial({ color: 0xaef3ff,
+      transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending,
+      depthTest: false, depthWrite: false }));
+    mesh.renderOrder = 17; mesh.raycast = () => {};
+    mesh.position.copy(pts[0]);
+    surgeGroup.add(mesh);
+    surges.push({ pts, cum, total, mesh, to, t0: performance.now(),
+                  dur: Math.min(1600, Math.max(550, total * 300)) });
+  });
+  if (surges.length) invalidate();
+}
+function stepSurges(now) {
+  surges = surges.filter(s => {
+    const u = (now - s.t0) / s.dur;
+    if (u < 1) {
+      let d = u * s.total, k = 1;
+      while (k < s.cum.length - 1 && s.cum[k] < d) k++;
+      const t = (d - s.cum[k - 1]) / Math.max(1e-6, s.cum[k] - s.cum[k - 1]);
+      s.mesh.position.lerpVectors(s.pts[k - 1], s.pts[k], Math.min(1, Math.max(0, t)));
+      return true;
+    }
+    surgeGroup.remove(s.mesh); s.mesh.material.dispose();
+    buildFlash(s.to);
+    return false;
+  });
+  flashes = flashes.filter(f => {
+    if (now - f.t0 < f.dur) return true;
+    scene.remove(f.grp); f.mat.dispose();
+    return false;
+  });
+  if (surges.length || flashes.length) invalidate();
 }
 
 // ---------- component list ----------
@@ -1522,6 +1633,7 @@ function buildList() {
                 + (c.alias ? ` “${c.alias}”` : '');
     if (i === selected) d.classList.add('sel');
     d.onclick = () => select(i);
+    d.ondblclick = () => select(i, true);          // dblclick = fly to part
     list.appendChild(d);
   });
 }
@@ -2120,6 +2232,7 @@ function tick(t) {
     if (u >= 1) fly = null;
     invalidate();
   }
+  stepSurges(performance.now());              // cable pulses + arrival blips
   controls.update();                                  // 'change' event → invalidate
   if (labelsOn) for (const o of compGroup.children)   // labels follow dragged/moved parts
     if (o.userData.isLabel) {
@@ -2394,6 +2507,13 @@ if (location.search.includes('selftest')) {
       gbb2.expandByObject(hullGroup); gbb2.expandByObject(pipeGroup);
       const ok14 = Math.abs(ground.position.y - Math.min(0, gbb2.min.y - 0.02)) < 0.01
         && Math.abs(grid.position.y - ground.position.y) < 0.005;
+      // ok15: cable power-surge — selecting the PilotSeat must spawn one
+      // travelling pulse per connected pipe, aimed at the directly
+      // connected component. Re-triggered here: the awaited mural test
+      // advances virtual time, so the select()-spawned pulses already ran.
+      startSurges(idx);
+      const ok15 = surges.length >= 1 && surges.every(s => s.to >= 0 && s.total > 0.05);
+      clearSurges();
       // picking must work through the mirrored component transforms
       // (camera aimed at the selected component: load framing is
       // per-craft now, the pin must not depend on it)
@@ -2408,13 +2528,14 @@ if (location.search.includes('selftest')) {
       ray.setFromCamera(new THREE.Vector2(0, 0), camera);
       const ok5 = ray.intersectObjects(compGroup.children, true)
         .some(h => h.object.userData.ci >= 0);
-      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 && ok10 && ok11 && ok12 && ok13 && ok14 ? 'PASS' : 'FAIL')
+      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 && ok10 && ok11 && ok12 && ok13 && ok14 && ok15 ? 'PASS' : 'FAIL')
         + ' occ_z=' + occ.pos_z + ' mirror=' + !!mir
         + ' pitch=' + (2 * Math.asin(-seat.orientation.x) * 180 / Math.PI).toFixed(1) + '°'
         + ' beacon=' + (mast ? mast.x.toFixed(2) : 'none') + ' droop=' + wc.y.toFixed(2)
         + ' junction=' + jdir.y.toFixed(2) + ' aileron=' + at.y.toFixed(2)
         + ' pick=' + ok5 + ' palette=' + ok9 + ' lens=' + ok10
-        + ' dashmirror=' + ok11 + ' textx=' + ok12 + ' mural=' + ok13 + ' ground=' + ok14;
+        + ' dashmirror=' + ok11 + ' textx=' + ok12 + ' mural=' + ok13 + ' ground=' + ok14
+        + ' surges=' + ok15;
     } catch (e) { document.title = 'SELFTEST ERR ' + e.message + ' @' + String(e.stack).split(String.fromCharCode(10))[1].trim().slice(0, 70); }
   }, 1500);
 }
