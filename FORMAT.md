@@ -43,6 +43,33 @@ programmatic editing is safe.
   The grid `occupancies` record is the snap/attach footprint; `position` is the truth
   for where the model sits.
 
+### Handedness — the Unity left-handed quaternion (verified against `data.pipes`)
+
+The game engine is Unity: a **left-handed** world. `orientation` is stored with Unity's
+rotation sense, so feeding the quaternion straight into a right-handed renderer (Three.js,
+glTF, any RH math) rotates the **opposite** way about every axis — beacons lean to the
+wrong side, steering casters pitch the wrong way, wheels sit inboard of their mounts,
+control surfaces deflect inverted. It is not cosmetic; the mirror is only visible on parts
+off the centerline.
+
+**The file's `q` is a left-handed rotation. The right-handed equivalent is the
+conjugate `q* = {w, −x, −y, −z}`** (equivalently, negate the rotation angle). Proof, so
+this never has to be re-derived: `data.pipes` segment endpoints are *game-computed world
+positions* of each component's adapter ports. For every port,
+`position + R(q*)·adapter_local` reproduces the stored pipe end to **0.000 m**, while
+`position + R(q)·adapter_local` is **0.18–0.66 m** off. The game's own data settles it.
+
+The standard Unity→right-handed fix mirrors one axis. `viewer/view3d.js` mirrors **z**:
+
+    view_pos  = (x, y, −z)          view_quat(file w,x,y,z) = (w, x, y, −z)
+
+`model.data`, the serialized save, the inspector's numbers, and all reports stay in **raw
+file space** (the z-mirror is a pure display transform, so edits convert back); component
+*local* geometry keeps raw `.ini`/gltf numbers and a root `scale.z = -1` absorbs the
+mirror (Three.js flips triangle winding for negative-determinant matrices, and sprite
+labels are unaffected). `?selftest` asserts the beacon mast points nose-ward in view
+space, so a regression that reintroduces raw-`q` placement fails the suite.
+
 ## `blocks` — the voxel build
 
 `{colors[7], frame_x/y/z, material, pos_x/y/z, size_x/y/z, type}`

@@ -70,6 +70,7 @@ const DROP_PARTS = {
 function buildRealComponent(c, model, idx, low = false) {
   const { geo, info } = model;
   const g = new THREE.Group();
+  g.scale.z = -1;          // raw .ini/gltf local space mirrored into view space
   // Placement truth is the .ini node tree (renderables/joints/targets, ZYX
   // euler like the game engine) — NOT the gltf node translations, which are
   // Blender authoring offsets (MiniComputer's model sits 3 m from its origin!).
@@ -119,10 +120,11 @@ function buildRealComponent(c, model, idx, low = false) {
   const jp = nodes.get('joint');
   if (jp && c.type === 'Aileron') jp.rotateX(-(c.position.z < 0 ? 0.785 : 0.12));
   // adapter nubs: queue in world space, merged into ONE mesh per port type (see adpFlush)
-  const qo = new THREE.Quaternion(c.orientation.x, c.orientation.y, c.orientation.z, c.orientation.w);
+  const qo = viewQuat(c.orientation);
+  const po = viewPos(c.position);
   for (const a of info.adapters || []) {
-    const p = new THREE.Vector3(...a.position).applyQuaternion(qo);
-    adpQueue.push({ x: p.x + c.position.x, y: p.y + c.position.y, z: p.z + c.position.z,
+    const p = new THREE.Vector3(a.position[0], a.position[1], -a.position[2]).applyQuaternion(qo);
+    adpQueue.push({ x: p.x + po.x, y: p.y + po.y, z: p.z + po.z,
                     t: a.type, ci: idx, lx: a.position[0], ly: a.position[1], lz: a.position[2] });
   }
   scheduleAdpFlush();
@@ -133,7 +135,7 @@ function buildRealComponent(c, model, idx, low = false) {
 function syncAdapters(obj) {
   let hit = false;
   for (const a of adpQueue) if (a.ci === obj.userData.ci) {
-    const p = new THREE.Vector3(a.lx, a.ly, a.lz).applyQuaternion(obj.quaternion);
+    const p = new THREE.Vector3(a.lx, a.ly, -a.lz).applyQuaternion(obj.quaternion);
     a.x = p.x + obj.position.x; a.y = p.y + obj.position.y; a.z = p.z + obj.position.z;
     hit = true;
   }
@@ -167,6 +169,29 @@ const CELL = 0.25, FRAME = 3.0;
 const cellW = (p) => (p - 5.5) * CELL;               // cell -> world metres
 const occWorld = (o, ax) => cellW(o['pos_' + ax]) + o['frame_' + ax] * FRAME;
 
+// ---------- file space → view space (Unity left-handed mirror) -----------
+// The game runs on Unity: a LEFT-handed world. Drawing the file numbers raw
+// in a right-handed Three.js scene renders the MIRROR IMAGE of the game view
+// — beacons lean to the opposite side, steering casters pitch the wrong way,
+// wheels sit inboard of their mounts, ailerons deflect inverted. This is not
+// cosmetic: pipes settle it. data.pipes endpoints are game-computed world
+// adapter positions, and they match p + R(q)·a for the CONJUGATED quaternion
+// (0.000 m) but not the raw one (0.18–0.66 m) — i.e. the file's q is a
+// left-handed rotation. The standard Unity→right-handed conversion mirrors
+// z: VIEW = (x, y, −z) file-space, quaternion (w, x, y, −z).
+// Conventions here:
+//  * positions/quaternions entering the scene go through viewPos/viewQuat;
+//  * component-local geometry keeps RAW .ini/gltf numbers — a root scale.z=−1
+//    on the component object absorbs the mirror (the renderer flips winding
+//    for negative-determinant matrices, sprites are unaffected);
+//  * raw-coordinate subsystems (CoM marker, flow, aero arrows) live under
+//    worldM (scale.z=−1); baked geometry (blocks, hull, pipes, occupancy)
+//    mirrors z at emit time with the matching winding flip;
+//  * model.data, serialize(), the inspector numbers and the reports stay in
+//    RAW file space (selftest asserts the mirrored placements).
+const viewPos = (p) => new THREE.Vector3(p.x, p.y, -p.z);
+const viewQuat = (q) => new THREE.Quaternion(q.x, q.y, -q.z, q.w);   // file {w,x,y,z}
+
 // ---------- three.js boilerplate ----------
 const view = document.getElementById('view');
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -178,9 +203,9 @@ scene.background = new THREE.Color(0x8fb4d8);
 scene.fog = new THREE.Fog(0x8fb4d8, 40, 90);
 
 const camera = new THREE.PerspectiveCamera(55, 1, 0.05, 300);
-camera.position.set(-6.5, 3.4, -8.5);
+camera.position.set(-6.5, 3.4, 8.5);              // view space: nose (+z) toward camera
 const controls = new OrbitControls(camera, renderer.domElement);
-controls.target.set(0, 0.9, 0.5);
+controls.target.set(0, 0.9, -0.5);
 controls.enableDamping = true;
 
 scene.add(new THREE.HemisphereLight(0xcfe8ff, 0x444422, 1.1));
@@ -547,18 +572,20 @@ function buildBlockGeometry(blocks, offset) {
   const buckets = new Map();                 // matKey -> {pos:[], spec}
   const kept = [], footprints = new Map();
   const epos = [], ecol = [], eseen = new Set();
-  const ek1 = (p) => `${Math.round((p[0]+offset.x)*1e3)},${Math.round((p[1]+offset.y)*1e3)},${Math.round((p[2]+offset.z)*1e3)}`;
+  const ek1 = (p) => `${Math.round(p[0]*1e3)},${Math.round(p[1]*1e3)},${Math.round(-p[2]*1e3)}`;
   const addEdge = (a, b, spec) => {
     const ka = ek1(a), kb = ek1(b), k = ka < kb ? ka + ';' + kb : kb + ';' + ka;
     if (eseen.has(k)) return;
     eseen.add(k);
-    epos.push(a[0]+offset.x, a[1]+offset.y, a[2]+offset.z, b[0]+offset.x, b[1]+offset.y, b[2]+offset.z);
+    epos.push(a[0]+offset.x, a[1]+offset.y, -(a[2]+offset.z), b[0]+offset.x, b[1]+offset.y, -(b[2]+offset.z));
     ecol.push(spec.color.r, spec.color.g, spec.color.b, spec.color.r, spec.color.g, spec.color.b);
   };
-  const push = (spec, pts) => {
+  const push = (spec, pts) => {          // z-mirrored into view space, triangle winding flipped
     let bk = buckets.get(matKey(spec));
     if (!bk) buckets.set(matKey(spec), bk = { pos: [], spec });
-    for (const p of pts) bk.pos.push(p[0] + offset.x, p[1] + offset.y, p[2] + offset.z);
+    for (let i = 0; i + 2 < pts.length; i += 3)
+      for (const p of [pts[i + 2], pts[i + 1], pts[i]])
+        bk.pos.push(p[0] + offset.x, p[1] + offset.y, -(p[2] + offset.z));
   };
   blocks.forEach((b, index) => {
     if (b.type === 255) return;
@@ -646,8 +673,9 @@ function buildSubgrids() {
     for (const sc of c.data.components || []) {
       if (sc.type === 'Build') continue;
       const m = MODEL.manifest?.[sc.type] ? colliderProxy(sc) : (PROXY[sc.type] || PROXY2[sc.type] || defaultProxy)(sc);
-      m.position.set(sc.position.x, sc.position.y, sc.position.z);
-      m.quaternion.set(sc.orientation.x, sc.orientation.y, sc.orientation.z, sc.orientation.w);
+      m.position.copy(viewPos(sc.position));
+      m.quaternion.copy(viewQuat(sc.orientation));
+      m.scale.z = -1;
       subGroup.add(m);
     }
   }
@@ -672,8 +700,9 @@ function buildScene() {
     // geometry. Components without an atlas entry keep the hand proxies.
     const atlas = !!MODEL.manifest?.[c.type];
     const mesh = atlas ? colliderProxy(c) : (PROXY[c.type] || PROXY2[c.type] || defaultProxy)(c);
-    mesh.position.set(c.position.x, c.position.y, c.position.z);
-    mesh.quaternion.set(c.orientation.x, c.orientation.y, c.orientation.z, c.orientation.w);
+    mesh.position.copy(viewPos(c.position));
+    mesh.quaternion.copy(viewQuat(c.orientation));
+    mesh.scale.z = -1;                              // hand proxies keep raw local geometry
     mesh.traverse(o => { o.userData.ci = i; });
     mesh.userData.ci = i;
     compGroup.add(mesh);
@@ -691,6 +720,7 @@ function buildScene() {
       const real = buildRealComponent(c, mm, i, !realModelsOn);   // low by default
       real.position.copy(mesh.position);
       real.quaternion.copy(mesh.quaternion);
+      real.scale.z = -1;                            // (buildRealComponent root mirrors too)
       real.userData.real = true;
       mesh.visible = false;
       mesh.userData.hasReal = true;
@@ -707,11 +737,12 @@ function buildScene() {
   const oedges = [];
   for (const b of blocks) {
     if (b.type !== 255) continue;                                       // occupancy mirror box
-    const s = new THREE.Box3(
-      new THREE.Vector3(occWorld(b, 'x') - CELL / 2, occWorld(b, 'y') - CELL / 2, occWorld(b, 'z') - CELL / 2),
+    const s = new THREE.Box3(   // view-space (z-mirrored) occupancy box
+      new THREE.Vector3(occWorld(b, 'x') - CELL / 2, occWorld(b, 'y') - CELL / 2,
+                        -(occWorld(b, 'z') + b.size_z * CELL + CELL / 2)),
       new THREE.Vector3(occWorld(b, 'x') + b.size_x * CELL + CELL / 2,
                         occWorld(b, 'y') + b.size_y * CELL + CELL / 2,
-                        occWorld(b, 'z') + b.size_z * CELL + CELL / 2));
+                        -(occWorld(b, 'z') - CELL / 2)));
     const sz = s.getSize(new THREE.Vector3()), ct = s.getCenter(new THREE.Vector3());
     const eg = new THREE.EdgesGeometry(box(sz.x, sz.y, sz.z));
     eg.applyMatrix4(new THREE.Matrix4().makeTranslation(ct.x, ct.y, ct.z));
@@ -756,8 +787,8 @@ function hullPt(t, ax, i) {
 function weldedTris() {
   const tris = model.data.triangles.map(t => ({
     c: [0, 1, 2, 3, 4].map(k => t.colors?.[k] ?? t.colors?.[0] ?? 0),
-    p: [0, 1, 2].map(i => [hullPt(t, 'x', i), hullPt(t, 'y', i), hullPt(t, 'z', i)]),
-  }));
+    p: [0, 1, 2].map(i => [hullPt(t, 'x', i), hullPt(t, 'y', i), -hullPt(t, 'z', i)]),
+  }));                                            // z-mirrored into view space
   const K = p => `${Math.round(p[0] * 40)},${Math.round(p[1] * 40)},${Math.round(p[2] * 40)}`;
   const map = new Map(), canon = [];
   const idx = tris.map(t => t.p.map(p => {
@@ -809,16 +840,18 @@ function buildHull() {
     for (const p of pts) bk.pos.push(p[0], p[1], p[2]);
   };
   for (const { c, p } of weldedTris()) {
-    const e1 = p[1].map((v, i) => v - p[0][i]), e2 = p[2].map((v, i) => v - p[0][i]);
+    const e1 = p[2].map((v, i) => v - p[0][i]), e2 = p[1].map((v, i) => v - p[0][i]);
+    // cross of the FLIPPED winding: z-mirrored vertices invert the raw normal,
+    // so this is the game's front normal carried into view space
     const n = [e1[1]*e2[2] - e1[2]*e2[1], e1[2]*e2[0] - e1[0]*e2[2], e1[0]*e2[1] - e1[1]*e2[0]];
     const u = n.map(x => x / (Math.hypot(...n) || 1));
     const F = p.map(v => v.map((x, i) => x + u[i] * T));      // front face (+normal)
     const B = p.map(v => v.map((x, i) => x - u[i] * T));      // back face
-    add(palColor(c[0]), [F[0], F[1], F[2]]);
-    add(palColor(c[1]), [B[2], B[1], B[0]]);
+    add(palColor(c[0]), [F[2], F[1], F[0]]);                  // windings flipped for z-mirror
+    add(palColor(c[1]), [B[0], B[1], B[2]]);
     for (let i = 0; i < 3; i++) {                             // side walls (prism)
       const j = (i + 1) % 3;
-      add(palColor(c[2 + i]), [F[i], B[i], B[j], F[i], B[j], F[j]]);
+      add(palColor(c[2 + i]), [B[j], B[i], F[i], F[j], B[j], F[i]]);
       wpos.push(...p[i], ...p[j]);                            // raw surface edges
     }
   }
@@ -842,6 +875,7 @@ function buildHull() {
 // pipes: data.pipes segments are axis-aligned runs {start, dir(0..5=+x,-x,+y,-y,+z,-z),
 // length}; connectors drawn as markers at the a/b endpoints
 const DIRV = [[1,0,0],[0,1,0],[0,0,1],[-1,0,0],[0,-1,0],[0,0,-1]];
+const DIRVM = DIRV.map(d => [d[0], d[1], -d[2]]);   // view-space (z-mirrored) dirs
 function buildPipes() {
   pipeGroup.clear();
   const segs = [], endsA = [], endsB = [];
@@ -851,10 +885,10 @@ function buildPipes() {
     return g;
   };
   for (const p of model.data.pipes) {
-    let cur = [p.segments[0].start.x, p.segments[0].start.y, p.segments[0].start.z];
+    let cur = [p.segments[0].start.x, p.segments[0].start.y, -p.segments[0].start.z];
     const aEnd = [...cur];
     for (const s of p.segments) {
-      const d = DIRV[s.dir], L = s.length + 0.01;
+      const d = DIRVM[s.dir], L = s.length + 0.01;
       const g = new THREE.BoxGeometry(d[0] ? L : 0.022, d[1] ? L : 0.022, d[2] ? L : 0.022);
       g.applyMatrix4(new THREE.Matrix4().makeTranslation(
         cur[0] + d[0] * L / 2, cur[1] + d[1] * L / 2, cur[2] + d[2] * L / 2));
@@ -1106,8 +1140,9 @@ function secBody() { const s = document.createElement('div'); s.className = 'sec
 
 function livePos(comp, obj, ax) {
   return (v) => {
-    comp.position[ax] = v; obj.position[ax] = v;
-    for (const r of realMap.get(obj.userData.ci) || []) r.position[ax] = v;
+    comp.position[ax] = v;                        // data stays in RAW file space
+    obj.position[ax] = ax === 'z' ? -v : v;       // object lives in view space
+    for (const r of realMap.get(obj.userData.ci) || []) r.position[ax] = ax === 'z' ? -v : v;
     syncAdapters(obj);
     markDirty();
   };
@@ -1123,7 +1158,7 @@ function liveRot(comp, obj, q0) {
     for (const r of realMap.get(obj.userData.ci) || []) r.quaternion.copy(obj.quaternion);
     syncAdapters(obj);
     const q = obj.quaternion;
-    comp.orientation = { w: q.w, x: q.x, y: q.y, z: q.z };
+    comp.orientation = { w: q.w, x: q.x, y: q.y, z: -q.z };   // view quaternion → file
     if (mark) markDirty();
   };
 }
@@ -1149,8 +1184,8 @@ function buildInspector() {
   foot.className = 'presets';
   const btn = (t, fn) => { const b = document.createElement('button'); b.className = 'btn'; b.textContent = t;
     b.onclick = fn; foot.appendChild(b); };
-  btn('◀ nose 0.25', () => rz.set(p.z - 0.25));
-  btn('tail 0.25 ▶', () => rz.set(p.z + 0.25));
+  btn('nose 0.25 ▶', () => rz.set(p.z - 0.25));
+  btn('◀ tail 0.25', () => rz.set(p.z + 0.25));
   btn('up 0.1', () => ry.set(p.y + 0.1));
   body.appendChild(foot);
 
@@ -1170,7 +1205,7 @@ function buildInspector() {
     rb.appendChild(presets);
     const note = document.createElement('div');
     note.style.color = 'var(--dim)';
-    note.textContent = 'negative pitch = lean toward nose (−z)';
+    note.textContent = 'negative pitch = lean toward nose (view +z)';
     rb.appendChild(note);
   }
 
@@ -1217,8 +1252,8 @@ function buildInspector() {
   reset.textContent = '⟲ reset this component';
   reset.onclick = () => {
     comp.position = { ...orig[selected].pos0 };
-    obj.position.copy(new THREE.Vector3(comp.position.x, comp.position.y, comp.position.z));
-    obj.quaternion.copy(orig[selected].q0);
+    obj.position.copy(viewPos(comp.position));
+    obj.quaternion.copy(viewQuat(orig[selected].q0));
     comp.orientation = { ...orig[selected].q0 };
     buildInspector();
     markDirty();
@@ -1308,8 +1343,11 @@ const COMP_MASS = { PilotSeat: 40, MiniComputer: 2, HudController: 1, Beacon: 1,
   Aileron: 5, SmallWheel: 4, SmallTurboPump: 6, PowerConverter: 2, LowVoltageBattery: 8,
   SolarPanel: 6, FluidJunction: 1, FluidPort: 0.5, RCS: 2, TiltSensor: 0.5, OwnerPad: 1 };
 let cellMass = 1.5;
+// raw-space subsystems: CoM/flow/arrows are computed from FILE coordinates and
+// display through one z-mirror group (physics itself is mirror-consistent)
+const worldM = new THREE.Group(); worldM.scale.z = -1; scene.add(worldM);
 const comMarker = new THREE.Group();
-scene.add(comMarker);
+worldM.add(comMarker);
 (function () {
   const m = new THREE.Mesh(new THREE.SphereGeometry(0.07, 16, 12),
     new THREE.MeshBasicMaterial({ color: 0xff8800 }));
@@ -1360,8 +1398,8 @@ function updateCoM() {
 // Thin-plate normal force Cn = 2π·sinα·cosα (clamped), boxes/wheels as bluff
 // bodies. Gives sane comparative numbers per element, not certifiable data.
 let aeroPlates = [], flowPts = null, flowData = null, flowOn = false;
-const flowGroup = new THREE.Group(); scene.add(flowGroup);
-const aeroArrows = new THREE.Group(); scene.add(aeroArrows);
+const flowGroup = new THREE.Group(); worldM.add(flowGroup);
+const aeroArrows = new THREE.Group(); worldM.add(aeroArrows);
 const flowState = { speed: 60, aoa: 4 };
 
 function plateFromTri(t) {
@@ -1630,7 +1668,8 @@ function buildHullList() {
     d.onclick = () => {
       hullGroup.visible = true;
       const g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.Float32BufferAttribute(p.flat(), 3));
+      g.setAttribute('position', new THREE.Float32BufferAttribute(
+        p.map((v) => [v[0], v[1], -v[2]]).flat(), 3));          // into view space
       const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0xff3355, side: THREE.DoubleSide }));
       hullGroup.add(m);
       setTimeout(() => hullGroup.remove(m), 1400);
@@ -1718,8 +1757,8 @@ function applyCamQ() {                                        // ?cam=px,py,pz,t
   const camQ = new URLSearchParams(location.search).get('cam');
   if (!camQ) return;
   const [x, y, z, tx = 0, ty = 0, tz = 0] = camQ.split(',').map(Number);
-  camera.position.set(x, y, z);
-  controls.target.set(tx, ty, tz);
+  camera.position.set(x, y, -z);                             // URLs stay in FILE space
+  controls.target.set(tx, ty, -tz);
   invalidate();
 }
 buildViewOpts();
@@ -1740,21 +1779,32 @@ if (location.search.includes('selftest')) {
       const idx = model.data.components.findIndex(c => c.type === 'PilotSeat');
       select(idx);
       const comp = model.data.components[idx], obj = compObjs[idx];
-      comp.position.z += 0.25; obj.position.z += 0.25;                     // like the z slider
+      comp.position.z += 0.25; obj.position.z -= 0.25;                       // like the z slider (raw +0.25 = view −z)
       const q = new THREE.Quaternion()
         .setFromEuler(new THREE.Euler(-20 * Math.PI / 180, 0, 0, 'YXZ'))
-        .multiply(obj.quaternion);                                          // like the pitch slider
+        .multiply(obj.quaternion);                                          // like the pitch slider (negative = lean fwd)
       obj.quaternion.copy(q);
-      comp.orientation = { w: q.w, x: q.x, y: q.y, z: q.z };
+      comp.orientation = { w: q.w, x: q.x, y: q.y, z: -q.z };
       const text = serialize(), ref = JSON.parse(text);
       const seat = ref.data.components[idx], occ = seat.occupancies[0];
       const mir = ref.data.blocks.find(b => b.type === 255 && b.size_x === 1 && b.size_y === 5
                  && b.size_z === 2 && b.pos_z === occ.pos_z);
       const ok1 = occ.pos_z === orig[idx].occ0[0].pos_z + 1;
       const ok3 = JSON.stringify(JSON.parse(text)) === text;
-      document.title = 'SELFTEST ' + (ok1 && mir && ok3 ? 'PASS' : 'FAIL')
+      // view-space handedness (default craft ISW-241): the beacon's mast must
+      // lean toward the NOSE (view +z). Its 180° quaternion read raw points the
+      // mast at the tail — exactly the user's "points the wrong way" bug.
+      const bi = model.data.components.findIndex(c => c.type === 'Beacon');
+      const mast = bi >= 0 ? new THREE.Vector3(0, 1, 0).applyQuaternion(compObjs[bi].quaternion) : null;
+      const ok4 = !!mast && mast.z > 0.9 && Math.abs(mast.x) < 0.2;
+      // picking must work through the mirrored component transforms
+      ray.setFromCamera(new THREE.Vector2(0, 0), camera);
+      const ok5 = ray.intersectObjects(compGroup.children, true)
+        .some(h => h.object.userData.ci >= 0);
+      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 ? 'PASS' : 'FAIL')
         + ' occ_z=' + occ.pos_z + ' mirror=' + !!mir
-        + ' pitch=' + (2 * Math.asin(-seat.orientation.x) * 180 / Math.PI).toFixed(1) + '°';
+        + ' pitch=' + (2 * Math.asin(-seat.orientation.x) * 180 / Math.PI).toFixed(1) + '°'
+        + ' beacon=' + (mast ? mast.x.toFixed(2) : 'none') + ' pick=' + ok5;
     } catch (e) { document.title = 'SELFTEST ERR ' + e.message; }
   }, 1500);
 }

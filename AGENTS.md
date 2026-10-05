@@ -63,6 +63,13 @@ landing page and README together when the viewer changes).
 ## Format facts (verified — do not re-derive)
 - 1 grid cell = 0.25 m; `pos_*` ∈ 0..12; `frame_*` in 3 m units;
   `world = (pos − 5.5)·0.25 + frame·3.0`. −z is the nose (this craft).
+- **Unity left-handed orientation:** `orientation` is a left-handed quaternion; a
+  right-handed renderer must use the conjugate `{w,−x,−y,−z}` (raw `q` mirrors the
+  game — beacons lean the wrong way, casters pitch the wrong way, wheels go inboard).
+  Verified: `position + R(q*)·adapter_local` reproduces the game-written `data.pipes`
+  endpoints to 0.000 m (raw `q` is 0.18-0.66 m off). Viewer converts to a z-mirrored
+  view space `pos (x,y,−z)`, `quat (w,x,y,−z)`; all data/reports stay raw. See
+  FORMAT.md § Handedness.
 - Blocks: `type` = shape+orientation (0 cube, 1-12 slope [4 = thin tilted
   rod], 13-20 corner, 21-44 pyramid, 45-52 inverse corner — table in
   `viewer/blockshapes.js`, transcribed from the game's BlockShapes.hh via the
@@ -142,7 +149,9 @@ landing page and README together when the viewer changes).
 
 ## Invariants that tests enforce (keep them green)
 1. `?selftest`: edit→serialize round-trip preserves bytes except intended fields;
-   occupancy + type-255 mirror stay synced after position edits.
+   occupancy + type-255 mirror stay synced after position edits; the ISW beacon
+   mast must point nose-ward in VIEW space (pins the Unity handedness fix);
+   raycast picking must work through the mirrored component transforms.
 2. `regtest`: every testdata blueprint parses; blocks/components within bbox
    margins; the hull lattice map (when triangles exist) puts every vertex
    inside the bbox.
