@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=131';
-import { resolveColor } from './palette.js?v=131';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=132';
+import { resolveColor } from './palette.js?v=132';
 
 // ---- site-zoom cancel: the viewer ALWAYS loads at physical 100% ----
 // Chrome SAVES page zoom per site (Ctrl+wheel sets it, Ctrl-F5 keeps it,
@@ -1129,7 +1129,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=131';
+import { fitHull } from './hullfit.js?v=132';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -2233,12 +2233,17 @@ function flowDir() {
   // 'wind from side' azimuth: rotate the flight axis in yaw before taking
   // the wind direction — props produce thrust BOTH ways (user), so the
   // direction must stay user-controllable, not implied by thrust sign.
+  // AoA lives in the WIND-AXIS system: tilt the relative wind (tail-ward,
+  // rising) FIRST, then yaw the whole vector with the azimuth. The old
+  // order glued the +y tilt to the world, so reversing az=180 kept the
+  // 'attack' face on the nose side and drove rising flow into the tail +
+  // belly gap (ground blockage): front/back behaved drastically different
+  // on near-symmetric Jimmy (user). Now az=180 is a true mirror of az=0.
+  const a = flowState.aoa * Math.PI / 180;
+  const w = [-fwd[0] * Math.cos(a), Math.sin(a), -fwd[2] * Math.cos(a)];
   const azr = flowState.az * Math.PI / 180;
   const ca = Math.cos(azr), sa = Math.sin(azr);
-  const ry = [fwd[0] * ca + fwd[2] * sa, fwd[1], -fwd[0] * sa + fwd[2] * ca];
-  // AoA: relative wind travels tail-ward and slightly upward (from front-below)
-  const a = flowState.aoa * Math.PI / 180;
-  return [-ry[0] * Math.cos(a), Math.sin(a), -ry[2] * Math.cos(a)];
+  return [w[0] * ca + w[2] * sa, w[1], -w[0] * sa + w[2] * ca];
 }
 
 function plateFromTri(t) {
