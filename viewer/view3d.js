@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=103';
-import { resolveColor } from './palette.js?v=103';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=106';
+import { resolveColor } from './palette.js?v=106';
 
 // ---- game component models (extracted from installed game modules) ----
 // manifest: per-type metadata (mass, renderable node tree, joints, adapters,
@@ -97,6 +97,9 @@ function dashTextTex(el) {
   cv.width = Math.max(1, Math.round((el.size_x || 0) * 5));
   cv.height = Math.max(1, Math.round((el.size_y || 0) * 5));
   const x = cv.getContext('2d', { willReadFrequently: true });
+  // NO canvas pre-mirror: the board's +Z face, seen through the view mirror
+  // from the pilot's side, reads correctly as drawn (a pre-mirror inverts it
+  // for the seated character — user ground truth). v104 had this backwards.
   x.fillStyle = '#fff'; x.textBaseline = 'alphabetic'; x.textAlign = 'left';
   x.font = `${8 * ts}px monospace`;
   const center = (el.textAlign ?? 16) === 16;   // textAlign 16 = centred
@@ -172,6 +175,27 @@ function buildDashboard(c, model, idx, low) {
   }
   return g;
 }
+// text baked INTO component geometry is authored readable FOR THE PILOT (the
+// game world is LH; the character reads the raw file geometry from their
+// seat). Our z-mirrored view chain mirrors it (user: HUD/computer/dashboard
+// text MIRRORED from the seat) — flip the text prim's LOCAL z: the root
+// mirror (scale.z=−1) cancels it exactly, so the net transform is the raw
+// file geometry at its exact position: readable from the character's point of
+// view, the user's ground truth. (An x-flip mirrors HUD rows' order and a
+// canvas pre-mirror inverts dashboard labels — both double-mirror; v104 had
+// this wrong. Do NOT flip the world convention: pre-v0.93 beacon/wheel bugs.)
+const TEXT_ZFLIP = new Set(['code_button_text', 'reboot_button_text',
+                            'code', 'subscribe', 'codein', 'activein']);
+function flipGeom(gg, sx, sy, sz) {
+  gg.applyMatrix4(new THREE.Matrix4().makeScale(sx, sy, sz));
+  const gi = gg.getIndex();            // restore outward winding in the flipped space
+  if (gi) {
+    const a = gi.array;
+    for (let i = 0; i < a.length; i += 3) { const t = a[i + 1]; a[i + 1] = a[i + 2]; a[i + 2] = t; }
+    gi.needsUpdate = true;
+  }
+  gg.computeVertexNormals();
+}
 function buildRealComponent(c, model, idx, low = false) {
   const { geo, info } = model;
   if (c.type === 'Dashboard') return buildDashboard(c, model, idx, low);
@@ -210,6 +234,7 @@ function buildRealComponent(c, model, idx, low = false) {
       gg.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
       gg.setIndex(i);
       gg.computeVertexNormals();
+      if (TEXT_ZFLIP.has(prim.material)) flipGeom(gg, 1, 1, -1);
       let arr = byMat.get(prim.material);
       if (!arr) byMat.set(prim.material, arr = []);
       arr.push(gg);
@@ -225,6 +250,32 @@ function buildRealComponent(c, model, idx, low = false) {
   // aileron: hinge the real flap like the game does (front ailerons droop)
   const jp = nodes.get('joint');
   if (jp && c.type === 'Aileron') jp.rotateX(aileronAngle(c));   // saved data.angle deflection
+  // Beacon: the game's flashing red light is PROCEDURAL — the gltf carries no
+  // lens material (just housing + mast), the game shader animates the flash.
+  // Rendered straight, the part is a grey pin and users stop recognising it
+  // ("beacon no longer looks like a beacon"). Give the mast tip a static
+  // emissive red lens: the beacon's visual identity (no animation: the render
+  // loop stays on-demand).
+  if (c.type === 'Beacon') {
+    for (const r of info.renderables) {
+      const nd = geo[r.name];
+      if (!nd) continue;
+      let top = null;
+      for (const prim of nd.prims) {
+        if (prim.material !== 'body') continue;
+        const v = low && prim.lv ? prim.lv : prim.v;
+        for (let k = 1; k + 1 < v.length; k += 3)
+          if (!top || v[k] > top[1]) top = [v[k - 1], v[k], v[k + 1]];
+      }
+      if (top) {
+        const lens = new THREE.Mesh(new THREE.SphereGeometry(0.055, 12, 10),
+          new THREE.MeshStandardMaterial({ color: 0x550000, emissive: 0xff2222 }));
+        lens.position.set(top[0], top[1] + 0.03, top[2]);
+        lens.userData.ci = idx;
+        (nodes.get(r.name) || g).add(lens);
+      }
+    }
+  }
   // adapter nubs: queue in world space, merged into ONE mesh per port type (see adpFlush)
   const qo = viewQuat(c.orientation);
   const po = viewPos(c.position);
@@ -950,7 +1001,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=103';
+import { fitHull } from './hullfit.js?v=106';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -1079,7 +1130,7 @@ const DIRVM = DIRV.map(d => [d[0], d[1], -d[2]]);   // view-space (z-mirrored) d
 // Recorded endpoints ARE the connection points: the game writes the cable tip
 // at the part's VISIBLE socket (ISW battery: cable tip at the front-face
 // socket, while the .ini adapters are the 2x2 terminal grid on the other face
-// — snapping nubs to adapter positions unseats them from the cables, v0.103
+// — snapping nubs to adapter positions unseats them from the cables, v0.106
 // regression). Paths are drawn EXACTLY as recorded: no re-routing, no
 // per-segment shifts (axis-aligned joints break apart under taper shifts).
 const pipeEndsV = [];                             // [{ci, port, v}] — consumed by ?comptest
@@ -2083,7 +2134,7 @@ if (location.search.includes('comptest')) runCompTest();
 
 // ---------- self-test (view3d.html?selftest): simulates slider edits + save ----------
 if (location.search.includes('selftest')) {
-  setTimeout(() => {
+  setTimeout(async () => {
     try {
       const idx = model.data.components.findIndex(c => c.type === 'PilotSeat');
       select(idx);
@@ -2135,16 +2186,26 @@ if (location.search.includes('selftest')) {
       const v1c = compColor({ colors: [48, 42] }, 'color1');
       const ok9 = lc.r === 1 && lc.g === 8 && lc.b === 1 && lc2.b === 255
         && Math.abs(v1c.color.r - 1 / 255) < 1e-3 && Math.abs(v1c.color.g - 8 / 255) < 1e-3;
+      // Beacon reads as a beacon: the game's red flash is procedural (no lens
+      // material in the gltf), so the viewer adds an emissive red lens at the
+      // mast tip of every real/low beacon model (user: "beacon no longer
+      // looks like a beacon")
+      let ok10 = false;
+      { const mm = await getModel('Beacon');
+        if (mm?.geo) {
+          const rg = buildRealComponent(model.data.components[bi], mm, bi, true);
+          rg.traverse(o => { if (o.material?.emissive?.getHex() === 0xff2222) ok10 = true; });
+        } }
       // picking must work through the mirrored component transforms
       ray.setFromCamera(new THREE.Vector2(0, 0), camera);
       const ok5 = ray.intersectObjects(compGroup.children, true)
         .some(h => h.object.userData.ci >= 0);
-      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 ? 'PASS' : 'FAIL')
+      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 && ok10 ? 'PASS' : 'FAIL')
         + ' occ_z=' + occ.pos_z + ' mirror=' + !!mir
         + ' pitch=' + (2 * Math.asin(-seat.orientation.x) * 180 / Math.PI).toFixed(1) + '°'
         + ' beacon=' + (mast ? mast.x.toFixed(2) : 'none') + ' droop=' + wc.y.toFixed(2)
         + ' junction=' + jdir.y.toFixed(2) + ' aileron=' + at.y.toFixed(2)
-        + ' pick=' + ok5 + ' palette=' + ok9;
+        + ' pick=' + ok5 + ' palette=' + ok9 + ' lens=' + ok10;
     } catch (e) { document.title = 'SELFTEST ERR ' + e.message; }
   }, 1500);
 }

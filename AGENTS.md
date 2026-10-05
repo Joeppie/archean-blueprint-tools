@@ -185,7 +185,9 @@ landing page and README together when the viewer changes).
    hinge (view tip y ≈ −0.08; the joint limit is ±45°),
    raycast picking must work through the mirrored component transforms; the
    v1 built-in palette must resolve WITHOUT a file palette (slot 48 = matte
-   dark green, slot 53 cyan; v1 comp colours are slot-index pairs).
+   dark green, slot 53 cyan; v1 comp colours are slot-index
+    pairs); the real Beacon model must carry the emissive red lens the game
+    draws procedurally (user: "beacon no longer looks like a beacon").
 2. `regtest`: every testdata blueprint parses; blocks/components within bbox
    margins; the hull lattice map (when triangles exist) puts every vertex
    inside the bbox.

@@ -367,6 +367,25 @@ Zero-build Three.js (WebGL) inspector: `python3 -m http.server 8650` (repo root)
   MIRRORED text on some rasterizers (user report; SwiftShader never mirrors,
   so it is not headless-reproducible). Labels keep `userData.dy` and follow
   their component in `tick()`.
+- **Beacon flash is procedural**: the gltf ships housing + mast only (no lens
+  material, no emissive, `Beacon.png` is unused by the mesh) — the game shader
+  animates the red flash. A plain render shows a grey pin ("beacon no longer
+  looks like a beacon"), so the viewer adds a static emissive red lens sphere
+  (0xff2222) at the `body` prim's mast tip on every real/low Beacon model
+  (selftest `lens=true`). No animation: the render loop stays on-demand.
+- **Text inside geometry under the z-mirror chain mirrors (user: HUD &
+  computer text, dashboard labels MIRRORED) — counter-mirror locally, never
+  flip the world convention** (raw/unmirrored = pre-v0.93 state: beacon lean
+  and caster droop flip back to the wrong side). Ground truth = **readable
+  from the PILOT's seat**: the game authors text so the raw file geometry
+  reads for the character. Fix: flip baked glyph prims' LOCAL z
+  (`code_button_text`, `reboot_button_text`, `code`, `subscribe`, `codein`,
+  `activein`) — the root `scale.z=−1` cancels it, net = raw file geometry at
+  its exact position (flip winding + recompute normals after). Dashboard
+  Label textures are drawn NORMALLY on the canvas (the mirrored view shows
+  them pilot-readable). v104's x-flips / canvas pre-mirror double-mirrored
+  (user: "'test' is inverted from the seat") — the seat POV is the invariant
+  to check against.
 
 ## Editing recipe (used for the seat adjustment)
 
