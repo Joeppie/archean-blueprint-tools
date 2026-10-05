@@ -129,10 +129,12 @@ landing page and README together when the viewer changes).
   (full table in `viewer/palette.js`, ported from the dev viewer, NOTICE §2).
   An all-purple craft = missing built-in groups (magenta = missing-slot
   marker), not a broken file. See FORMAT.md.
-- Dashboard panels are STRETCHERS: `data.size_x/size_y` in 0.05 m units
-  (native 30×20 = collider 1.5×1.0 m), painted by `data.color` (0-255 LINEAR,
-  not the palette slots). Mosaic crafts tile them (5×5 stars, 20 m wall
-  sheets, diagonally over slopes). Viewer: `dashScale` + material override.
+- **Dashboard geometry is GENERATED from `data` (glTF = editor template):**
+  board = box origin→(size_x/100, size_y/100, 0.01) — CENTIMETRES, corner
+  pivot, plane X·Y normal +z; elements at pos/100 z 0.01..0.02; dataport
+  re-centred at (w/2,h/2,0); colours 0-255 LINEAR with metal/rough off
+  0..255. Viewer `buildDashboard()` (dev-viewer port). Hull UI: blocks +
+  triangles share ONE "hull" toggle and the hull-opacity slider.
 - Component models: game ships per component a `.gltf` (materials named
   `color1`/`color2` = player-painted surfaces ⇄ `components[].colors`, plus
   fixed materials whose `pbrMetallicRoughness` baseColorFactor/metallic/

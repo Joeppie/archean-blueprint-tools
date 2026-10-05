@@ -222,16 +222,22 @@ in the dev's XenonViewer + the shipped `.gltf`/`.ini` assets, Oct 5)
   `components[].colors.color1/color2` (same entry format; per-component dict).
   Defaults when fields missing: color1 = white, op 15, rough 0, metal 0
   (polished); color2 = 204³, op 15, rough 7, metal 1 (matte grey).
-- **Dashboard is the exception to "painted = colors slot":** the panel body
-  (`dashboard-body` material) takes its paint from the component's own
-  `data.color` (0..255 **LINEAR** rgb) + `data.metallic/roughness` (0..255),
-  and the panel is a STRETCHER: `data.size_x/size_y` in 0.05 m units with the
-  native panel (collider 1.5×1.0 m) = 30×20, so the game scales the mesh by
-  (size_x/30, 1, size_y/20). Workshop mosaic art is built from these — 5×5
-  mini panels (0.25 m "stars" in the hull scene, navy [16,16,96]) up to
-  400×400 (20 m) wall sheets tiled diagonally over slopes so the stair-stepped
-  block wall reads as smooth. Viewer: `dashScale()` on proxy + real, paint
-  override in `modelMaterial`.
+- **Dashboard geometry is GENERATED from `data` — its glTF is the 1.5×1 m
+  editor template, not the panel.** Units are CENTIMETRES: the board spans
+  from the local origin (CORNER pivot, not centred!) to
+  `(size_x/100, size_y/100, 0.01)`; panel plane = local X·Y, normal +z.
+  Elements (Label/ToggleButton/PushButton/ArrowButton/Led/screens) sit at
+  `pos_*/100` with `size_*/100`, z 0.01..0.02 (+Z face carries Label text:
+  pixel raster, 5 px/cm, 6×9 px char grid, 8 px font, hard alpha threshold;
+  `textAlign 16` = centred). The `dataport` is the only glTF piece kept,
+  re-centred at `(w/2, h/2, 0)`. Colours: `data.color` + per-element
+  base/main colours are 0..255 **LINEAR** with metallic/roughness taken
+  straight off 0..255 (NOT the blocks' 0-7/0|1 scales). Mosaic crafts tile
+  these: 5×5 = 5 cm painted "stars" over the hull art, ~4×2 m sheets laid
+  diagonally over slopes so the stair-stepped block wall reads smooth, and
+  the flat interior faces get panelled solid. Viewer: `buildDashboard()`
+  (ported from the dev viewer's scene.js under NOTICE §2; buttons are
+  faceplate approximations, text uses a monospace face).
 - Fixed (non-painted) gltf materials carry real `pbrMetallicRoughness` factors,
   also LINEAR: `tire` [0.0134³, metal 0, rough 0.5], `body` [0.01..0.03³,
   metal 0], `pin` (chrome, rough 0), `data-connector` [0,0.05,0.5],
