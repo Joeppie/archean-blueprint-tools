@@ -19,6 +19,7 @@ testdata/<workshop-id>/blueprint.json   regression corpus (25 craft + 9000000001
 tools/adjust_seat.py            reference example of a safe format edit
 tools/make_orient_test.py       regenerates the chirality probe craft 9000000001
 tools/make_landing.py         regenerates the landing gallery + viewer/workshop.json
+tools/add_workshop.py <id>      ingest a locally-subscribed workshop craft
                                 (names: tools/ws-names.tsv, fetched slowly — Steam rate-limits)
 tools/extract_models.py         regenerates viewer/models/ from an installed game
 tests/run_tests.sh              headless-Chromium test runner (selftest+regtest+renders)
