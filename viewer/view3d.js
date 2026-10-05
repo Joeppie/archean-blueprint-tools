@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=112';
-import { resolveColor } from './palette.js?v=112';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=113';
+import { resolveColor } from './palette.js?v=113';
 
 // ---- game component models (extracted from installed game modules) ----
 // manifest: per-type metadata (mass, renderable node tree, joints, adapters,
@@ -1066,7 +1066,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=112';
+import { fitHull } from './hullfit.js?v=113';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -1080,15 +1080,21 @@ import { fitHull } from './hullfit.js?v=112';
 // warning when the stability scan finds multiple stable directions.
 const hullP = { W: 12, px: 0.25, py: 0.25, pz: 0.25, Cx: -1.5, Cy: -1.5, Cz: -1.5 };
 const HULL_T = 0.025;                        // half-thickness of hull skin (m)
-let hullOpacity = 1;
-// "hull" is blocks AND triangles (one skin, one slider): dim both groups
+let hullOpacity = Math.min(1, Math.max(0.1,
+  Number(new URLSearchParams(location.search).get('op')) || 1));   // ?op= preset
+// "hull" is blocks AND triangles (one skin, one slider): dim both groups.
+// Blocks are a closed skin — a view ray crosses TWO faces (enter+exit), so
+// linear alpha composites back toward opaque and the slider "does nothing"
+// (user report). Their alpha is sqrt-compensated: 1-(1-a)^2 == slider value.
+// Hull triangles are single 0.05 m prisms seen through one face: linear.
 function applyHullOpacity() {
-  for (const grp of [blockGroup, hullGroup])
+  const effB = hullOpacity >= 1 ? 1 : 1 - Math.sqrt(1 - hullOpacity);
+  for (const [grp, k] of [[blockGroup, effB], [hullGroup, hullOpacity]])
     grp.traverse(o => {
       if (!o.isMesh) return;
       for (const m of (Array.isArray(o.material) ? o.material : [o.material])) {
         const base = m.userData.op0 ?? (m.userData.op0 = m.opacity);
-        m.opacity = base * hullOpacity;
+        m.opacity = base * k;
         m.transparent = m.opacity < 1;
         m.depthWrite = m.opacity >= 0.995;
       }
@@ -1464,6 +1470,13 @@ function select(i, doFly) {
 let fly = null;
 const flyRay = new THREE.Raycaster();
 flyRay.camera = camera;         // Sprite.raycast (labels) dereferences it
+// Landing-spot search: score every candidate direction by how much geometry
+// sits between the camera and the part's centre. A fully buried part (cabin
+// interior, engine bay) must still end up VISIBLE and on ITS OWN side:
+// directions are scored by (occluder count, angle to the part's outward
+// normal), so the camera lands in the clear spot nearest the part's exposed
+// face — never on the far side of the craft. Distance shrinks for small
+// parts so deeply enclosed ones get a genuinely close, unobstructed look.
 function flyTo(i) {
   const o = compObjs?.[i];
   if (!o) return;
@@ -1472,23 +1485,34 @@ function flyTo(i) {
   const c = bb.getCenter(new THREE.Vector3());
   const sz = bb.getSize(new THREE.Vector3());
   const r = Math.max(sz.x, sz.y, sz.z, 0.35);
-  const dist = r * 3.4 + 0.5;
-  const cur = camera.position.clone().sub(controls.target).normalize();
-  const dirs = [cur,
-    cur.clone().setY(Math.max(cur.y, 0.35)).normalize(),
-    new THREE.Vector3(0.75, 0.5, 0.55).normalize(), new THREE.Vector3(-0.75, 0.5, 0.55).normalize(),
+  const dist = Math.min(6, Math.max(0.75, r * 3.4 + 0.4));
+  const mc = new THREE.Box3();
+  [compGroup, blockGroup].forEach(g => mc.expandByObject(g));
+  const out = isFinite(mc.min.x)
+    ? c.clone().sub(mc.getCenter(new THREE.Vector3())).setY(r * 0.4)
+    : new THREE.Vector3(0, 0.4, 1);
+  if (!isFinite(out.x) || out.lengthSq() < 1e-4) out.set(0, 0.4, 1);
+  out.normalize();
+  const dirs = [out,
+    new THREE.Vector3(0.7, 0.5, 0.55).normalize(), new THREE.Vector3(-0.7, 0.5, 0.55).normalize(),
     new THREE.Vector3(0.55, 0.45, -0.8).normalize(), new THREE.Vector3(-0.55, 0.45, -0.8).normalize(),
-    new THREE.Vector3(0, 0.95, 0.3).normalize(), new THREE.Vector3(0.92, 0.4, 0.15).normalize()];
-  const occ = [compGroup, blockGroup, hullGroup];
-  let dir = cur;
+    new THREE.Vector3(0, 0.95, 0.3).normalize(), new THREE.Vector3(0.92, 0.4, 0.15).normalize(),
+    camera.position.clone().sub(controls.target).normalize()];
+  const occ = [compGroup, blockGroup];
+  if (hullGroup.visible) occ.push(hullGroup);
+  let best = null;
   for (const d of dirs) {
     const from = c.clone().addScaledVector(d, dist);
     flyRay.set(from, c.clone().sub(from).normalize());
-    flyRay.near = 0; flyRay.far = dist - r * 0.6;
-    const blocked = flyRay.intersectObjects(occ, true)
-      .some(h => h.object.userData.ci !== i && !h.object.userData.isLabel);
-    if (!blocked) { dir = d; break; }
+    flyRay.near = 0; flyRay.far = dist - r * 0.55;
+    const score = flyRay.intersectObjects(occ, true)
+      .filter(h => h.object.userData.ci !== i && !h.object.userData.isLabel
+                   && !h.object.userData.isXray).length;
+    const ang = d.angleTo(out);
+    if (!best || score < best[0] || (score === best[0] && ang < best[1])) best = [score, ang, d];
+    if (!score && d === dirs[0]) break;                       // exposed side: instant
   }
+  const dir = best[2];
   const p1 = c.clone().addScaledVector(dir, dist);
   p1.y = Math.max(p1.y, ground.position.y + 0.15);
   fly = { p0: camera.position.clone(), g0: controls.target.clone(), p1, g1: c,
@@ -1499,6 +1523,9 @@ controls.addEventListener('start', () => { fly = null; });   // user takes over
 const selBox = new THREE.Box3Helper(new THREE.Box3(), 0x7dffcf);
 selBox.visible = false;
 selBox.raycast = () => {};                                   // never pickable
+selBox.material.depthTest = false;                           // border reads
+selBox.material.transparent = true;                          // through everything
+selBox.renderOrder = 20;
 scene.add(selBox);
 function paintHighlights() {
   compGroup.children.forEach((g, i) => {
@@ -1549,7 +1576,7 @@ function rebuildSelXray() {
     if (!o.isMesh) return;
     const ov = new THREE.Mesh(o.geometry, selXrayMat);
     ov.matrixAutoUpdate = false; ov.matrix.copy(o.matrix);
-    ov.renderOrder = 15; ov.raycast = () => {};
+    ov.renderOrder = 15; ov.raycast = () => {}; ov.userData.isXray = true;
     o.parent.add(ov);
     selPairs.push([o, ov]);
   });
@@ -1560,8 +1587,8 @@ function clearSurges() {
   flashes.forEach(f => { scene.remove(f.grp); f.mat.dispose(); });
   flashes = [];
 }
-function buildFlash(ci) {                    // X-ray blip on a pipe's far component
-  const grp = new THREE.Group(), mat = new THREE.MeshBasicMaterial({ color: 0x9fe0ff,
+function buildFlash(ci, color = 0x9fe0ff, dur = 620) {   // X-ray blip (arrival / source)
+  const grp = new THREE.Group(), mat = new THREE.MeshBasicMaterial({ color,
     transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending,
     depthTest: false, depthWrite: false, side: THREE.DoubleSide });
   grp.raycast = () => {};
@@ -1570,15 +1597,19 @@ function buildFlash(ci) {                    // X-ray blip on a pipe's far compo
     o.updateWorldMatrix(true, false);
     const ov = new THREE.Mesh(o.geometry, mat);
     ov.matrixAutoUpdate = false; ov.matrix.copy(o.matrixWorld);
-    ov.renderOrder = 16; ov.raycast = () => {};
+    ov.renderOrder = 16; ov.raycast = () => {}; ov.userData.isXray = true;
     grp.add(ov);
   });
   scene.add(grp);
-  flashes.push({ ci, grp, mat, t0: performance.now(), dur: 620 });
+  flashes.push({ ci, grp, mat, t0: performance.now(), dur });
 }
 function startSurges(ci) {
   clearSurges();
   if (!model || ci < 0) return;
+  // source blip on the SELECTED part: makes the origin of the bolts
+  // unmistakable (Jimmy aileron report: far-end travel read as "the prop
+  // on the other side fired them")
+  buildFlash(ci, 0xffb347, 500);
   model.data.pipes.forEach((p, pi) => {
     let pts = pipePolys[pi], to = -1;
     if (p.a_component === ci) to = p.b_component;
@@ -2513,6 +2544,11 @@ if (location.search.includes('selftest')) {
       // advances virtual time, so the select()-spawned pulses already ran.
       startSurges(idx);
       const ok15 = surges.length >= 1 && surges.every(s => s.to >= 0 && s.total > 0.05);
+      // ok16: the surge must fire a SOURCE blip on the SELECTED component
+      // (Jimmy aileron report: far-end travel read as "the prop fired
+      // them") and the selection border must render through geometry.
+      const ok16 = flashes.length >= 1 && flashes[0].ci === idx
+        && selBox.material.depthTest === false;
       clearSurges();
       // picking must work through the mirrored component transforms
       // (camera aimed at the selected component: load framing is
@@ -2528,14 +2564,14 @@ if (location.search.includes('selftest')) {
       ray.setFromCamera(new THREE.Vector2(0, 0), camera);
       const ok5 = ray.intersectObjects(compGroup.children, true)
         .some(h => h.object.userData.ci >= 0);
-      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 && ok10 && ok11 && ok12 && ok13 && ok14 && ok15 ? 'PASS' : 'FAIL')
+      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 && ok10 && ok11 && ok12 && ok13 && ok14 && ok15 && ok16 ? 'PASS' : 'FAIL')
         + ' occ_z=' + occ.pos_z + ' mirror=' + !!mir
         + ' pitch=' + (2 * Math.asin(-seat.orientation.x) * 180 / Math.PI).toFixed(1) + '°'
         + ' beacon=' + (mast ? mast.x.toFixed(2) : 'none') + ' droop=' + wc.y.toFixed(2)
         + ' junction=' + jdir.y.toFixed(2) + ' aileron=' + at.y.toFixed(2)
         + ' pick=' + ok5 + ' palette=' + ok9 + ' lens=' + ok10
         + ' dashmirror=' + ok11 + ' textx=' + ok12 + ' mural=' + ok13 + ' ground=' + ok14
-        + ' surges=' + ok15;
+        + ' surges=' + ok15 + ' bolts=' + ok16;
     } catch (e) { document.title = 'SELFTEST ERR ' + e.message + ' @' + String(e.stack).split(String.fromCharCode(10))[1].trim().slice(0, 70); }
   }, 1500);
 }
