@@ -191,6 +191,11 @@ landing page and README together when the viewer changes).
   = the user's "zoomed in and grainy" on fresh opens. NOTE: Chrome PERSISTS
   per-site zoom across reloads (Ctrl-F5 keeps it; only Ctrl+0 resets), so
   HiDPI+zoom gives dpr 3 — the cap is 2.5, not 2, to keep those sharp.
+  view3d also COUNTERACTS saved site zoom with inverse CSS zoom (baseline =
+  lowest dpr ever, localStorage; opt out `?nozoom`), and
+  `fitCameraToModel` frames at `max(1.85r, 3.6m)` — a 1 m craft framed at
+  1.1 m felt like "stuck zoom, tiny FOV, low res" (the user's report;
+  fly-to never runs on load — canvas click / list dblclick only).
 - `?perf` writes `draw=<renderer.info.render.calls>` into the title; the
   ISW-241 scene is ≈150 draws. SwiftShader fps numbers are meaningless —
   compare draw-call counts only.
