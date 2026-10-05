@@ -100,13 +100,18 @@ landing page and README together when the viewer changes).
   are world-space connector positions (trace pipes to place ports). Pipes are
   NOT straight chains — every segment anchors at its OWN `start` (joints have
   0.04-0.14 m offsets; accumulating dir*len drifts tubes off the cables).
-  Endpoints are BUILD-TIME cache: parts moved after building leave stale
-  cables (ISW: solar panel endpoint 1.43 m below the panel = the "spheres
-  floating on the ground"). Viewer snaps endpoints >0.30 m from the live port
-  (adapter base + normal stub) and taper-shifts the path. FluidJunction cables
-  are cached in the builder's FLAT frame (outlets up, row along fuselage) —
-  the junction's display pose matches that frame (mirror-conjugate file quat),
-  which is why the comb lies flat along its pipes. See FORMAT.md.
+  Endpoints ARE the connection points: the game writes cable tips at the
+  part's VISIBLE socket, which can differ from the `.ini` [ADAPTER] position
+  (battery socket on the front face; adapters = bottom terminal grid). Draw
+  paths exactly as recorded — adapter-snapping endpoints + taper-shifting
+  paths is the v0.99 regression (broken lines, nubs off the model): do not
+  reintroduce. Cable-free adapter nubs >0.5 m from the part origin are
+  build-time flanges (SolarPanel's spare ports sit 1.0 m below the pivot =
+  "red & blue spheres on the ground under the panel") — skip them.
+  FluidJunction cables are cached in the builder's FLAT frame (outlets up,
+  row along fuselage) — the junction's display pose matches that frame
+  (mirror-conjugate file quat), which is why the comb lies flat along its
+  pipes. See FORMAT.md.
 - `components[].type === 'Build'` = editor construction-site ghost, far outside
   the bbox — never render it as geometry.
 - Palette slots: `data.colors[256]`, entry = {r,g,b 0-255, opacity 0-15,

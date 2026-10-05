@@ -313,19 +313,28 @@ Zero-build Three.js (WebGL) inspector: `python3 -m http.server 8650` (repo root)
   of their pipes). Display pose = mirror-conjugate file quaternion
   `(w,−x,−y,z)` = the builder/v0.91 layout: model lies flat, ports align with
   its own cached cables (selftest: inlet faces view −y). Display-only via the
-  wheelUndo write-back; saved quaternions stay file-exact. Exempt from the
-  stale-cable endpoint snapping below (its cache frame == display frame).
-- **Stale cable cache → live-port snap:** `data.pipes` endpoints are
-  build-time cache; parts built on the ground and mounted later leave the
-  cable behind (ISW: SolarPanel endpoint 1.43 m below the panel — the "red
-  and blue spheres floating on the ground under the solar panel"; battery
-  connectors 0.4 m off their nubs). Viewer rule: per endpoint, compute the
-  live port (adapter base + connector-normal stub ≤0.135 m, `livePortView`);
-  if the cached endpoint is >0.30 m away, snap it to the live port tip and
-  taper-shift the whole segment path (per-segment shift lerping a→b).
-  comptest uses the same `pipeEndsV` model, so tubes/nubs/endpoint-dots are
-  aligned by construction. `PilotSeat` (editor-moved), `Beacon` (endpoints in
-  connector's upright frame) and `SolarPanel` (corner-vertex-only plate) are
+  wheelUndo write-back; saved quaternions stay file-exact. No endpoint
+  translation is needed (and none is done): the cables' cache frame IS the
+  display frame, so they meet the flat model as recorded.
+- **Recorded endpoints ARE the connection points; `.ini` adapter positions
+  are NOT the visible sockets:** the game writes each cable tip at the part's
+  VISIBLE socket, which can differ from the `.ini` [ADAPTER] position — ISW's
+  battery cables end at the front-face socket (tip 0.06 m in front of the
+  face) while the adapters are the 2×2 terminal grid on the bottom face.
+  v0.99 snapped nubs to adapter positions >0.30 m from cable ends → nubs sat
+  off the model connectors and taper-shifted segment paths broke the
+  axis-aligned joints ("cables under the craft, broken lines"). Reverted:
+  paths are drawn EXACTLY as recorded, nubs at the recorded endpoints.
+  The SolarPanel ground-sphere mystery (red+blue spheres "sitting on the
+  ground plane under the panel"): its two CABLE-FREE adapters (`data-port`,
+  `lowvoltage-port.001`) sit 1.0 m from the panel pivot — a build-time
+  flange reaching into the deck; the panel's rotation maps that to view
+  y 0.03 = ground level, where nub spheres rendered as objects that "fell
+  down". Viewer rule: cable-free adapter nubs are skipped when the adapter
+  is >0.5 m from the part origin. comptest checks raw recorded endpoints
+  (`pipeEndsV`). `PilotSeat` (editor-moved), `Beacon` (endpoints in the
+  connector's upright frame) and `SolarPanel` (corner-vertex-only plate,
+  cable tip at the plate edge, ~0.6 m from the nearest corner vertex) are
   exempt from the model-surface check.
 - **Floating labels are parented to `compGroup`, never to a mirrored mesh:**
   GPU sprite quads under a negative-determinant (scale.z=−1) parent render

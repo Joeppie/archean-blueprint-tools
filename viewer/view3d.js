@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=99';
-import { resolveColor } from './palette.js?v=99';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=100';
+import { resolveColor } from './palette.js?v=100';
 
 // ---- game component models (extracted from installed game modules) ----
 // manifest: per-type metadata (mass, renderable node tree, joints, adapters,
@@ -124,6 +124,12 @@ function buildRealComponent(c, model, idx, low = false) {
   const po = viewPos(c.position);
   for (const a of info.adapters || []) {
     if (adpEndpoint.get(idx)?.has(a.name)) continue;   // cable port: nub drawn at the endpoint
+    // Cable-free ports whose .ini adapter sits >0.5 m from the part origin are
+    // BUILD-TIME flanges, not visible sockets: SolarPanel's spare data/lowv
+    // ports are 1.0 m below the pivot (reaching into the deck at build time),
+    // so their nubs rendered as "red & blue spheres sitting on the ground
+    // plane right under the solar panel" (user report). Skip them.
+    if (Math.hypot(a.position[0], a.position[1], a.position[2]) > 0.5) continue;
     const p = new THREE.Vector3(a.position[0], a.position[1], -a.position[2]).applyQuaternion(qo);
     adpQueue.push({ x: p.x + po.x, y: p.y + po.y, z: p.z + po.z,
                     t: a.type, ci: idx, lx: a.position[0], ly: a.position[1], lz: a.position[2] });
@@ -148,9 +154,10 @@ function syncAdapters(obj) {
 // merged adapter-nub meshes (big craft: hundreds of tiny spheres → 1 draw per type)
 const adpQueue = [];
 // (ci, port name) → cable endpoint recorded by the GAME (data.pipes): the real
-// connection point, 0.1-0.4 m out along the connector stub from the adapter
-// origin. Nubs are drawn there when a cable exists (user: connection markers
-// must sit where the cables physically are); cable-free ports keep the flange.
+// connection point at the part's VISIBLE socket (may differ from the .ini
+// adapter position). Nubs are drawn there when a cable exists (user:
+// connection markers must sit where the cables physically are); cable-free
+// ports keep the flange (skipped if >0.5 m from the part origin).
 const adpEndpoint = new Map();
 let adpTimer = 0;
 function scheduleAdpFlush() {
@@ -829,7 +836,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=99';
+import { fitHull } from './hullfit.js?v=100';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -942,50 +949,12 @@ function buildHull() {
 // length}; connectors drawn as markers at the a/b endpoints
 const DIRV = [[1,0,0],[0,1,0],[0,0,1],[-1,0,0],[0,-1,0],[0,0,-1]];
 const DIRVM = DIRV.map(d => [d[0], d[1], -d[2]]);   // view-space (z-mirrored) dirs
-// Live port position (view space) from the manifest adapter: base + connector
-// normal. data.pipes endpoints are BUILD-TIME cable cache; when a part moves
-// after building (ISW: solar panel 1.43 m, battery 0.44 m) the cache is stale
-// — the live pose is authoritative (user's ground-level spheres under the
-// solar panel). FluidJunctions are exempt: builder files cache ALL junction
-// cables in the builder's flat frame, and the junction display pose matches
-// that frame (applyDisplayPose), so their cache is self-consistent.
-const livePortView = (ci, port) => {
-  const c = model.data.components[ci];
-  const ad = MODEL.manifest?.[c.type]?.adapters?.find(a => a.name === port);
-  if (!ad) return null;
-  const qV = viewQuat(c.orientation), po = viewPos(c.position);
-  const a = new THREE.Vector3(ad.position[0], ad.position[1], -ad.position[2])
-    .applyQuaternion(qV).add(po);
-  let n = new THREE.Vector3(0, 0, -1);
-  if (ad.rotation) {                              // connector axis (+z) under .ini euler,
-    const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(   // mirror-conjugated
-      THREE.MathUtils.degToRad(ad.rotation[0]), THREE.MathUtils.degToRad(ad.rotation[1]),
-      THREE.MathUtils.degToRad(ad.rotation[2]), 'ZYX'));
-    n.applyQuaternion(new THREE.Quaternion(-q.x, -q.y, -q.z, q.w));
-  }
-  n.applyQuaternion(qV);
-  return { a, n };
-};
-function pipeEndModel(p) {                        // per-pipe endpoints + path shifts
-  const n = p.segments.length;
-  const recA = new THREE.Vector3(p.segments[0].start.x, p.segments[0].start.y, -p.segments[0].start.z);
-  const sn = p.segments[n - 1], dv = DIRVM[sn.dir];
-  const recB = new THREE.Vector3(sn.start.x + dv[0] * sn.length, sn.start.y + dv[1] * sn.length,
-    -sn.start.z + dv[2] * sn.length);
-  const fix = (ci, port, rec) => {
-    const lp = livePortView(ci, port);
-    if (!lp || model.data.components[ci].type === 'FluidJunction') return rec;
-    const dist = rec.distanceTo(lp.a);
-    if (dist <= 0.3) return rec;                  // cache is live: keep exact data
-    return lp.a.clone().addScaledVector(lp.n, Math.min(dist, 0.135));  // snap to connector tip
-  };
-  const aE = fix(p.a_component, p.a_port, recA);
-  const bE = fix(p.b_component, p.b_port, recB);
-  const da = aE.clone().sub(recA), db = bE.clone().sub(recB);
-  const shift = (k) => n < 2 ? da.clone().add(db).multiplyScalar(0.5)
-    : da.clone().multiplyScalar(1 - k / (n - 1)).add(db.clone().multiplyScalar(k / (n - 1)));
-  return { aE, bE, shift };
-}
+// Recorded endpoints ARE the connection points: the game writes the cable tip
+// at the part's VISIBLE socket (ISW battery: cable tip at the front-face
+// socket, while the .ini adapters are the 2x2 terminal grid on the other face
+// — snapping nubs to adapter positions unseats them from the cables, v0.100
+// regression). Paths are drawn EXACTLY as recorded: no re-routing, no
+// per-segment shifts (axis-aligned joints break apart under taper shifts).
 const pipeEndsV = [];                             // [{ci, port, v}] — consumed by ?comptest
 function buildPipes() {
   pipeGroup.clear();
@@ -1012,19 +981,17 @@ function buildPipes() {
     // seg[i].start + dir·len and seg[i+1].start (rounded cap smoothing). The
     // old chained cur += dir·len drifted every pipe and left the endpoint
     // spheres far off the real ports (user's "green spheres don't match").
-    // Stale caches get a taper-shift so the path slides onto the live ports.
-    const { aE, bE, shift } = pipeEndModel(p);
-    const n = p.segments.length;
+    const aE = new THREE.Vector3(p.segments[0].start.x, p.segments[0].start.y, -p.segments[0].start.z);
     let cur = aE;
-    p.segments.forEach((s, k) => {
+    for (const s of p.segments) {
       const d = DIRVM[s.dir], L = s.length + 0.01;
-      const st = new THREE.Vector3(s.start.x, s.start.y, -s.start.z).add(shift(k));
+      const st = new THREE.Vector3(s.start.x, s.start.y, -s.start.z);
       cur = st.clone().add(new THREE.Vector3(d[0], d[1], d[2]).multiplyScalar(s.length));
       const g = new THREE.BoxGeometry(d[0] ? L : 0.022, d[1] ? L : 0.022, d[2] ? L : 0.022);
       g.applyMatrix4(new THREE.Matrix4().makeTranslation(
         st.x + d[0] * L / 2, st.y + d[1] * L / 2, st.z + d[2] * L / 2));
       segs.push(g);
-    });
+    }
     endsA.push(sph(aE.toArray())); endsB.push(sph(cur.toArray()));
     setEp(p.a_component, p.a_port, aE); setEp(p.b_component, p.b_port, cur);
     pipeEndsV.push({ ci: p.a_component, port: p.a_port, v: aE },
@@ -1944,8 +1911,9 @@ async function runCompTest() {
       const dn_ = minDist(e.v, nubVerts), dt = minDist(e.v, tubeVerts);
       const exempt = type === 'PilotSeat' || type === 'Beacon' || type === 'SolarPanel';
       // SolarPanel exempt from the model-surface check: its geometry is a thin
-      // plate with vertices only at the 4 corners, and the port sits on the
-      // plate's centre (1.2 m from any corner) — nub+tube carry its alignment.
+      // plate with vertices only at the 4 corners (1.44 m wide), and the cable
+      // tip sits at the plate's edge mid-region ~0.6 m from the nearest corner
+      // — nub+tube carry its alignment.
       const dm = exempt ? 0 : minDist(e.v, modelVerts(e.ci));
       const ok = dn_ <= 0.06 && dt <= 0.06 && (exempt || dm <= 0.35);
       if (ok) pass++;
