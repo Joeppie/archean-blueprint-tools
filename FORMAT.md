@@ -282,13 +282,16 @@ Zero-build Three.js (WebGL) inspector: `python3 -m http.server 8650` (repo root)
     kept verbatim. The proxy stays rebuilt to the true ±z port frame (its old
     ±y stubs were the source of the "it used to be flat" impression).
 - **Aileron deflection is saved per component:** `components[].data.angle` is
-  the joint angle in rad (Unity LH about the hinge/span axis) — the control
-  surfaces' activation position as saved. ISW-241: front canard −4.609 rad
-  (= +95.9° normalised, saloon-door, tip DOWN in view), rear pair ±0.0958 rad
-  differential (±5.5°, one tip down = roll input). Viewer sign: proxy
-  `pivot.rotation.x` and real-model `jp.rotateX` both get `−norm(angle)`
-  (z-mirror flips LH→RH; the 180°-z aileron quaternions map local +x rotation
-  to view +x). Verified: front canard tip renders below its hinge.
+  the joint angle in **DEGREES** (the .ini `[JOINT] angular_x` limits are
+  −45/+45 — a radian reading of ISW-241's −4.609 normalises to +95.9°, past
+  the physical joint; degrees = a gentle −4.6° droop, tip DOWN in view).
+  ISW-241: front canard −4.609° (leading edge droops), rear pair ±0.0958°
+  ≈ neutral (saved mid-roll, differential). Viewer: proxy `pivot.rotation.x`
+  and real-model `jp.rotateX` both use `+deg2rad(data.angle)` (the z-mirror
+  LH→RH flip and the 180°-z q conjugation cancel). Hinge geometry from the
+  .ini: `[JOINT]` at local (0, 0.181, 0) above the plate, `aileron` renderable
+  at joint + (0, 0.07, 0) — the proxy pivot sits on the joint line so the
+  flap rotates about where the game's does.
 - **Floating labels are parented to `compGroup`, never to a mirrored mesh:**
   GPU sprite quads under a negative-determinant (scale.z=−1) parent render
   MIRRORED text on some rasterizers (user report; SwiftShader never mirrors,

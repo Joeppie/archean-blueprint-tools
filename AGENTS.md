@@ -154,7 +154,8 @@ landing page and README together when the viewer changes).
    ISW front caster wheel must hang below its pivot (suspension droop, display-only),
    the FluidJunction inlet must face view −x (game pose; pipes/cables meet ports
    exactly — 0.000 m verified against data.pipes), the ISW front aileron (saved
-   `data.angle` = −4.609 rad) must droop below its hinge,
+   `data.angle` in DEGREES = −4.609°) must droop a few degrees below its hinge
+   (view tip y ≈ −0.08; the joint limit is ±45°),
    raycast picking must work through the mirrored component transforms.
 2. `regtest`: every testdata blueprint parses; blocks/components within bbox
    margins; the hull lattice map (when triangles exist) puts every vertex

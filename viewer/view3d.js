@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=96';
-import { resolveColor } from './palette.js?v=96';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=97';
+import { resolveColor } from './palette.js?v=97';
 
 // ---- game component models (extracted from installed game modules) ----
 // manifest: per-type metadata (mass, renderable node tree, joints, adapters,
@@ -329,12 +329,13 @@ const rawFromView = (obj, q) => {                   // strip droop, mirror to fi
   const t = obj.userData.wheelUndo ? q.clone().multiply(obj.userData.wheelUndo) : q;
   return { w: t.w, x: t.x, y: t.y, z: -t.z };
 };
-// saved aileron deflection: components[].data.angle (rad, Unity LH about the
-// hinge span axis; the "activation position" of the control surface as saved).
-// Normalise to (−π, π]. View-space sign = −aileronAngle (z-mirror + 180° z q).
+// saved aileron deflection: components[].data.angle is in DEGREES (the .ini
+// [JOINT] angular_x limits are −45/+45, so ISW-241's −4.609 = a gentle −4.6°
+// droop — NOT radians; a normalized-rad reading gives 95.9°, past the
+// physical joint limit). Axis = hinge span (local x); view-space sign is +.
 const aileronAngle = c => {
   const a = (c.data && typeof c.data.angle === 'number') ? c.data.angle : 0;
-  return ((a % (2 * Math.PI)) + 3 * Math.PI) % (2 * Math.PI) - Math.PI;
+  return a * Math.PI / 180;
 };
 
 function footprint(comp) {
@@ -365,13 +366,11 @@ const PROXY = {
   },
   Aileron(c) {
     // facsimile of the game model: control plate + hinge rod (the "broom
-    // handle" sticking out past the edges) + flap hinged on the local -z edge.
-    // Flap deflection = the SAVED control state: components[].data.angle is
-    // the joint angle in rad (Unity LH about the hinge/span axis; ISW-241:
-    // front canard -4.609 rad = 95.9° saloon-door, rear pair ±0.096 differential).
-    // View space is the z-mirror of game space (LH→RH flips the sign), and the
-    // 180°-z aileron quaternions conjugate local +x back to view −x (second
-    // flip) → net pivot.rotation.x = +aileronAngle(c).
+    // handle" on the [JOINT] axis at local y=0.181) + flap (the .ini
+    // 'aileron' renderable, joint +0.07 y) hinged on the local -z edge.
+    // Flap deflection = the SAVED control state, components[].data.angle in
+    // DEGREES (.ini [JOINT] angular_x limits −45/+45; ISW-241: front canard
+    // −4.609° gentle droop, rear pair ±0.096° ≈ neutral, saved mid-roll).
     const f = footprint(c);
     const g = new THREE.Group();
     const m = mat(compColor(c, 'color1', 0xdddddd));
@@ -379,13 +378,13 @@ const PROXY = {
     plate.position.z = f.z * 0.2;                  // fixed surface, rear 60% (original side)
     const rod = new THREE.Mesh(cyl(0.025, f.x + 0.5, 6), mat(compColor(c, 'color2', 0x999999)));
     rod.rotation.z = Math.PI / 2;
-    rod.position.z = -f.z * 0.1;                   // hinge rod toward nose, as before
+    rod.position.y = 0.181;                        // hinge rod on the [JOINT] axis line
     const flap = new THREE.Mesh(box(f.x, 0.03, f.z * 0.4), m);
-    flap.position.set(0, 0, -f.z * 0.3);           // moving flap = 40% (larger), nose side
+    flap.position.set(0, 0.07, -f.z * 0.3);        // aileron node = joint +0.07 y (.ini)
     const pivot = new THREE.Group();
-    pivot.position.z = -f.z * 0.1;
+    pivot.position.set(0, 0.181, 0);               // .ini [JOINT] hinge, above the plate
     pivot.add(flap);
-    pivot.rotation.x = aileronAngle(c);
+    pivot.rotation.x = aileronAngle(c);            // saved data.angle (degrees → rad, view +)
     g.add(plate, rod, pivot);
     return g;
   },
@@ -809,7 +808,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=96';
+import { fitHull } from './hullfit.js?v=97';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -1861,16 +1860,16 @@ if (location.search.includes('selftest')) {
       const ji = model.data.components.findIndex(c => c.type === 'FluidJunction');
       const jdir = new THREE.Vector3(0, 0, 1).applyQuaternion(compObjs[ji].quaternion);
       const ok7 = jdir.x < -0.9;
-      // aileron deflection = saved data.angle: the ISW front canard (−4.609 rad
-      // = +95.9° normalised) must render as a saloon door drooping BELOW its
-      // hinge: view tip dir = qV · Mz · R_x(+norm(angle)) · (0,0,−1)
+      // aileron deflection = saved data.angle in DEGREES (.ini joint limits
+      // ±45°): the ISW front canard (−4.609°) droops its leading edge a few
+      // degrees below the hinge, view tip dir = qV · Mz · R_x(rad) · (0,0,1)
       const ac = model.data.components.find(c =>
         c.type === 'Aileron' && c.data && c.data.angle < -3);
-      const aqp = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0),
-        ((ac.data.angle % (2 * Math.PI)) + 3 * Math.PI) % (2 * Math.PI) - Math.PI);
-      const at = new THREE.Vector3(0, 0, -1).applyQuaternion(aqp);
+      const aqp = new THREE.Quaternion().setFromAxisAngle(
+        new THREE.Vector3(1, 0, 0), ac.data.angle * Math.PI / 180);
+      const at = new THREE.Vector3(0, 0, 1).applyQuaternion(aqp);
       at.z = -at.z; at.applyQuaternion(viewQuat(ac.orientation));
-      const ok8 = at.y < -0.5;
+      const ok8 = at.y < -0.03 && at.y > -0.3;   // drooping, within joint limits
       // picking must work through the mirrored component transforms
       ray.setFromCamera(new THREE.Vector2(0, 0), camera);
       const ok5 = ray.intersectObjects(compGroup.children, true)
