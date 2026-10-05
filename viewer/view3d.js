@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=123';
-import { resolveColor } from './palette.js?v=123';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=124';
+import { resolveColor } from './palette.js?v=124';
 
 // ---- site-zoom cancel: the viewer ALWAYS loads at physical 100% ----
 // Chrome SAVES page zoom per site (Ctrl+wheel sets it, Ctrl-F5 keeps it,
@@ -552,7 +552,7 @@ function pbr(c) {
 }
 const matKey = (s) => s.color.getHex() + ',' + s.op.toFixed(3) + ',' + s.metal.toFixed(3) + ',' + s.rough.toFixed(3);
 function palColor(slot) {
-  return pbr(resolveColor(model?.data?.colors, slot));
+  return pbr(resolveColor(model?.data?.colors, slot, LEGACY_Q));
 }
 // component colours: same format as palette entries; the game's painted-material
 // defaults stand in for missing fields (color1 = polished white, color2 = matte grey)
@@ -567,7 +567,7 @@ function compColor(comp, which, fallback) {
     // (legacy editor; e.g. [48,48] = matte dark green). Resolve against the
     // file palette — the built-in table for v1 files, which have none.
     const idx = comp.colors[which === 'color2' ? 1 : 0];
-    if (typeof idx === 'number') c = resolveColor(model.data?.colors, idx);
+    if (typeof idx === 'number') c = resolveColor(model.data?.colors, idx, LEGACY_Q);
   }
   if (!c) {
     if (fallback === undefined || fallback === null) return pbr(COMP_COLOR_DEFAULTS[which] || COMP_COLOR_DEFAULTS.color1);
@@ -849,7 +849,7 @@ function buildFaceGrid(blocks) {
       const dir = dirs[f];
       if (!dir || !isFullFace(b.type, f)) continue;
       const slot = b.colors?.[f] ?? b.colors?.[0] ?? 0;
-      const opaque = resolveColor(model.data.colors, slot).opacity >= 15;
+      const opaque = resolveColor(model.data.colors, slot, LEGACY_Q).opacity >= 15;
       forEachFaceCell(b, dir, (cell, axis) => {
         const key = faceKey(cell[0], cell[1], cell[2], axis);
         const e = faces.get(key);
@@ -1129,7 +1129,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=123';
+import { fitHull } from './hullfit.js?v=124';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -1349,7 +1349,7 @@ const hullRows = {};
 
 // ---------- loading / saving ----------
 let wsNames = null;
-function setModel(obj) {
+function setModel(obj, srcName) {
   model = obj;
   // workshop link (header): real numeric item ids get a ↗ to the Steam page
   { const w = document.getElementById('wslink');
@@ -1397,7 +1397,9 @@ function setModel(obj) {
   buildAero();
   buildFlight();
   buildHullList();
-  $('filestatus').textContent = `— ${model.data.alias} · ${model.data.components.length} components`;
+  // ?open=../testdata/<id>/ files have no workshop alias — show the source
+  // id/filename (was: literal 'undefined' in the header, user screenshot)
+  $('filestatus').textContent = `— ${model.data.alias || srcName || 'craft'} · ${model.data.components.length} components`;
 }
 
 async function fetchDefault() {
@@ -1407,7 +1409,7 @@ async function fetchDefault() {
     let r = null;
     try { r = await fetch(u, { cache: 'no-store' }); } catch { continue; }
     if (!r.ok) continue;
-    setModel(await r.json());          // let scene-build bugs surface (window.onerror → title)
+    setModel(await r.json(), u.split('/').slice(-2, -1)[0]);   // let scene-build bugs surface (window.onerror → title)
     return;
   }
   toast('no blueprint.json — drop a file or use “Open file…”');
@@ -1459,11 +1461,11 @@ async function openFile() {
   if (window.showOpenFilePicker) {
     [fileHandle] = await window.showOpenFilePicker({
       mode: 'readwrite', types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }] });
-    setModel(JSON.parse(await (await fileHandle.getFile()).text()));
+    setModel(JSON.parse(await (await fileHandle.getFile()).text()), fileHandle.name.replace(/\.json$/i, ''));
   } else {
     const inp = document.createElement('input');
     inp.type = 'file'; inp.accept = '.json';
-    inp.onchange = async () => setModel(JSON.parse(await inp.files[0].text()));
+    inp.onchange = async () => setModel(JSON.parse(await inp.files[0].text()), inp.files[0].name.replace(/\.json$/i, ''));
     inp.click();
   }
 }
@@ -1485,7 +1487,7 @@ addEventListener('dragover', (e) => e.preventDefault());
 addEventListener('drop', async (e) => {
   e.preventDefault();
   const f = e.dataTransfer.files[0];
-  if (f) setModel(JSON.parse(await f.text()));
+  if (f) setModel(JSON.parse(await f.text()), f.name.replace(/\.json$/i, ''));
 });
 
 // ---------- selection & picking ----------
@@ -2043,14 +2045,31 @@ function updateCoM() {
 // Thin-plate normal force Cn = 2π·sinα·cosα (clamped), boxes/wheels as bluff
 // bodies. Gives sane comparative numbers per element, not certifiable data.
 let aeroPlates = [], flowPts = null, flowData = null, flowTrails = null, flowOn = false;
+let flowFast = null, flowLUT = null;   // big-dot fast layer + speed colour ramp
+// colour map (user's): blue = slow, green/yellow = mid, red = fast; local
+// speed normalised on 2x freestream. 64-entry LUT: stepFlow is per-frame.
+function flowLutAt(t, out) {          // t in 0..1 -> linear rgb into out[0..2]
+  if (!flowLUT) {
+    flowLUT = new Float32Array(64 * 3);
+    const c = new THREE.Color();
+    for (let k = 0; k < 64; k++) {
+      c.setHSL(0.66 - (k / 63) * 0.64, 1.0, 0.55);
+      flowLUT[k * 3] = c.r; flowLUT[k * 3 + 1] = c.g; flowLUT[k * 3 + 2] = c.b;
+    }
+  }
+  const li = (Math.min(1, Math.max(0, t)) * 63) | 0;
+  out[0] = flowLUT[li * 3] * 1.7; out[1] = flowLUT[li * 3 + 1] * 1.7; out[2] = flowLUT[li * 3 + 2] * 1.7;
+}
 const flowMode = { m: 'off' };          // three-way wind-tunnel toggle: 'off' | 'lines' | 'wind'
 function setFlowMode(m) {
   flowMode.m = m; flowOn = m === 'wind';
   flowGroup.visible = m !== 'off';
   if (flowPts) flowPts.visible = m === 'wind';
+  if (flowFast) flowFast.visible = m === 'wind';
   if (flowTrails) flowTrails.mesh.visible = m === 'wind';
-  for (const o of flowGroup.children) if (o.isLine && !o.userData.isTrail) o.visible = m === 'lines';
-  if (m === 'lines' && !flowGroup.children.some(o => o.isLine && !o.userData.isTrail)) buildStreamlines();
+  for (const o of flowGroup.children)
+    if (o.isLine && !o.userData.isTrail || o.userData.isLineHot) o.visible = m === 'lines';
+  if (m === 'lines' && !flowGroup.children.some(o => o.userData.isLineHot)) buildStreamlines();
   invalidate();
 }
 const flowGroup = new THREE.Group(); worldM.add(flowGroup);
@@ -2082,6 +2101,7 @@ function buildThrustArrows() {
   const matA = new THREE.MeshBasicMaterial({ color: 0xff9a3c, transparent: true, opacity: 0.95 });
   const matN = new THREE.MeshBasicMaterial({ color: 0x53e0ff, transparent: true, opacity: 0.95 });
   let acc = [0, 0, 0], wsum = 0, n = 0;
+  let accM = [0, 0, 0], wsumM = 0, nM = 0;      // MAIN drive net (direction)
   model.data.components.forEach((c, i) => {
     const th = THRUST[c.type];
     if (!th) return;
@@ -2093,6 +2113,13 @@ function buildThrustArrows() {
       .applyQuaternion(o.quaternion).normalize();
     const twoWay = c.type === 'Propeller';     // props thrust BOTH ways:
     if (!twoWay) acc = acc.map((x, k) => x + ax.toArray()[k] * th.w);   // not in the net
+    // MAIN DRIVE = BigThruster only. RCS = attitude control and Mini/Small
+    // thrusters are landing/trim jets: the ISW's bank nets downward and auto
+    // flow chose 'wind from below' (user: not right — cockpit, not RCS,
+    // defines the flight direction).
+    if (c.type === 'BigThruster' && !twoWay) {
+      accM = accM.map((x, k) => x + ax.toArray()[k] * th.w); wsumM += th.w; nM++;
+    }
     wsum += th.w; n++;
     const len = 0.45 + th.w * 1.15;
     const g = new THREE.Group();
@@ -2120,7 +2147,12 @@ function buildThrustArrows() {
     // in a random direction (the ISW rendered vertical streamlines). Below
     // 15% of total class the net is declared ~0 and flow falls back to seat.
     const strong = L > 0.15 * wsum;
-    netThrust = { v: strong ? acc.map(x => x / L) : null, w: wsum, n };
+    const LM = Math.hypot(...accM);
+    netThrust = {
+      v: strong ? acc.map(x => x / L) : null, w: wsum, n,
+      // auto flow direction uses ONLY the main drive; null = fall back cockpit
+      main: nM > 0 && LM > 0.15 * wsumM ? accM.map(x => x / LM) : null,
+    };
     if (strong) {
       const dir = new THREE.Vector3(...netThrust.v);
       const b = model.box_min, B = model.box_max;
@@ -2139,23 +2171,54 @@ function buildThrustArrows() {
   }
   thrustGroup.visible = thrustArrowsOn;
 }
-function flowDir() {
-  // Relative wind travels opposite to flight. Flight direction = net thrust
-  // (user: "use thrust as flow suggestion"), the PilotSeat nose axis for
-  // sail craft / symmetric banks / flow-src=seat. Cycle with the
-  // 'flow src' button; ?flowsrc=seat|thrust|auto presets it.
-  const useT = flowSrc.mode === 'thrust' || (flowSrc.mode === 'auto' && netThrust && netThrust.v);
-  let fwd = useT && netThrust && netThrust.v ? netThrust.v.slice() : null;
-  if (!fwd) {
-    const seat = model?.data.components.find(c => c.type === 'PilotSeat');
-    fwd = [0, 0, -1];
-    if (seat) {
-      const i = model.data.components.indexOf(seat);
-      const o = compObjs?.[i];
-      if (o) fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(o.quaternion).toArray();
-      // view-space seat forward: model convention nose file -z = view +z
-    }
+// Cockpit axis (view space): "cockpits almost always face in the right
+// direction, so fall back on that assumption if there is ambiguity; the
+// PilotSeat with a connection to a Computer takes precedence if contested".
+function seatFwd() {
+  const comps = model?.data.components;
+  if (!comps) return null;
+  const seats = [];
+  comps.forEach((c, i) => { if (c.type === 'PilotSeat') seats.push(i); });
+  if (!seats.length) return null;
+  let best = seats[0];
+  if (seats.length > 1) {
+    const term = new Set();
+    comps.forEach((c, i) => {
+      if (c.type === 'Computer' || c.type === 'MiniComputer' || c.type === 'OwnerPad') term.add(i);
+    });
+    const adj = new Map();
+    const link = (a, b) => {
+      if (a == null || b == null) return;
+      if (!adj.has(a)) adj.set(a, new Set()); adj.get(a).add(b);
+      if (!adj.has(b)) adj.set(b, new Set()); adj.get(b).add(a);
+    };
+    (model.data.pipes || []).forEach(p => link(p.a_component, p.b_component));
+    const hitsComp = (s) => {
+      const seen = new Set([s]), q = [s];
+      while (q.length) {
+        const x = q.pop();
+        if (term.has(x)) return true;
+        for (const y of adj.get(x) || []) if (!seen.has(y)) { seen.add(y); q.push(y); }
+      }
+      return false;
+    };
+    const win = seats.find(hitsComp);
+    if (win != null) best = win;
   }
+  const o = compObjs?.[best];
+  return o ? new THREE.Vector3(0, 0, 1).applyQuaternion(o.quaternion).toArray() : [0, 0, 1];
+}
+function flowDir() {
+  // Relative wind travels opposite to flight. Auto: MAIN drive net (rockets);
+  // RCS banks / landing jets / prop craft are ambiguous, so the cockpit wins
+  // (user: the ISW's downward RCS net must NOT imply 'wind from below').
+  // 'flow src' cycles auto/seat/thrust; ?flowsrc= presets it. 'thrust' mode
+  // = user override, uses the full net (all thrusters, RCS included).
+  const useT = flowSrc.mode === 'thrust' ? netThrust?.v
+    : flowSrc.mode === 'auto' ? netThrust?.main : null;
+  let fwd = useT ? useT.slice() : null;
+  if (!fwd) fwd = seatFwd() || [0, 0, 1];   // default: fly view +z (nose)
+
   // 'wind from side' azimuth: rotate the flight axis in yaw before taking
   // the wind direction — props produce thrust BOTH ways (user), so the
   // direction must stay user-controllable, not implied by thrust sign.
@@ -2424,6 +2487,19 @@ function initFlow() {
   flowPts.raycast = () => {};
   g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(N * 3), 3));
   flowGroup.add(flowPts);
+  // fast-flow layer: accelerated air (over canopy, in gaps) draws as BIG dots
+  // (user: diverted wind should be 'thicker'); shares the position buffer so
+  // moving it costs nothing, its own colour buffer hides slow particles
+  // (black + additive = invisible).
+  const gf = new THREE.BufferGeometry();
+  gf.setAttribute('position', g.attributes.position);
+  gf.setAttribute('color', new THREE.BufferAttribute(new Float32Array(N * 3), 3));
+  flowFast = new THREE.Points(gf, new THREE.PointsMaterial({
+    size: 0.2, sizeAttenuation: true, vertexColors: true, transparent: true, opacity: 0.95,
+    depthTest: false, blending: THREE.AdditiveBlending }));
+  flowFast.renderOrder = 13;
+  flowFast.raycast = () => {};
+  flowGroup.add(flowFast);
   // motion trails: prev->cur segments, additive, depthTest off so the wind
   // reads over the hull (the plain wavy lines alone read as 'not good enough')
   flowTrails = {
@@ -2450,16 +2526,15 @@ function initFlow() {
 // seed grid, so the eye can follow how air is routed around the craft.
 // Blue = freestream speed, red = accelerated flow (stylized, not CFD).
 function buildStreamlines() {
-  for (const o of [...flowGroup.children]) if (o.isLine && !o.userData.isTrail) flowGroup.remove(o);
+  for (const o of [...flowGroup.children])
+    if ((o.isLine && !o.userData.isTrail) || o.userData.isLineHot) flowGroup.remove(o);
   if (!model || flowMode.m !== 'lines') return;
   const V = Math.max(1, flowState.speed), dir = flowDir();
   const b = model.box_min, B = model.box_max;
   const matS = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9 });
-  const ALL = [], ALLC = [];
-  const colOf = (sp, arr) => {
-    const c = new THREE.Color().setHSL(clamp(0.66 - (sp / V - 1) * 1.3, 0.02, 0.66), 0.95, 0.55);
-    arr.push(c.r, c.g, c.b);
-  };
+  const ALL = [], ALLC = [], ALLF = [], ALLFC = [];
+  const rgb = [0, 0, 0];
+  const colOf = (sp, arr) => { flowLutAt(sp / (2 * V), rgb); arr.push(rgb[0], rgb[1], rgb[2]); };
   // Seed plane PERPENDICULAR to the flow, one body-radius upstream — the old
   // fixed x·y/z-centre grid only made sense for pure tailward flow; with wind
   // azimuth / vertical thrust flow it seeded inside the hull.
@@ -2471,34 +2546,55 @@ function buildStreamlines() {
   const rad = Math.hypot(B.x - b.x, B.y - b.y, B.z - b.z) / 2 * 1.1 + 0.5;
   const sga = location.search.includes('flowlow') ? 1.1 : 0.55;   // coarser seed grid
   const R2 = (rad + 2.2) * (rad + 2.2);
+  const FA = 0.055;                                            // 'thick line' offset
+  const FASTOFF = [[0, 0, 0],
+    [e1.x * FA, e1.y * FA, e1.z * FA], [-e1.x * FA, -e1.y * FA, -e1.z * FA],
+    [e2.x * FA, e2.y * FA, e2.z * FA], [-e2.x * FA, -e2.y * FA, -e2.z * FA]];
   for (let a = -rad; a <= rad; a += sga * 1.7)
     for (let c2 = -rad; c2 <= rad; c2 += sga) {
       if (a * a + c2 * c2 > rad * rad) continue;              // disc, not square
       const seed = cen.clone().addScaledVector(dv, -(rad + 1.2))
         .addScaledVector(e1, a).addScaledVector(e2, c2);
       const seedA = [seed.x, seed.y, seed.z];
-      const fwd = [], fc = [], back = [], bc = [];
-      const walk = (sgn, pts, cs) => {
+      const fwd = [], fc = [], back = [], bc = [], spsF = [], spsB = [];
+      const walk = (sgn, pts, cs, sps) => {
         let p = [...seedA];
-        for (let k = 0; k < 90; k++) {
+        for (let k = 0; k < 160; k++) {
           const v = sampleVel(p, dir, V);
           const sp = Math.hypot(v[0], v[1], v[2]);
           pts.push(p[0], p[1], p[2]);
+          sps.push(sp);
           colOf(sp, cs);
           if (sp < V * 0.03) break;                           // sealed interior /
           const dx = p[0] - cen.x, dy = p[1] - cen.y, dz = p[2] - cen.z;  //   stagnation
           if (dx * dx + dy * dy + dz * dz > R2) break;
-          p = p.map((q, i) => q + sgn * v[i] * 0.07);
+          // constant 0.35 m spatial steps: speed-scaled steps (0.07·V = 4 m at
+          // 60 m/s) leapt straight over the 3 m-wide craft, so side-wind flow
+          // never resolved the hull and "didn't cover the craft" (user)
+          const st = 0.35 / sp;
+          p = p.map((q, i) => q + sgn * v[i] * st);
         }
       };
-      walk(1, fwd, fc); walk(-1, back, bc);
+      walk(1, fwd, fc, spsF); walk(-1, back, bc, spsB);
       if (fwd.length + back.length < 12) continue;
-      const pts = [], cs = [];
+      const pts = [], cs = [], sps = [];
       for (let k = back.length - 3; k >= 0; k -= 3) { pts.push(back[k], back[k + 1], back[k + 2]); cs.push(bc[k], bc[k + 1], bc[k + 2]); }
-      pts.push(...fwd); cs.push(...fc);
+      for (let k = spsB.length - 1; k >= 0; k--) sps.push(spsB[k]);
+      pts.push(...fwd); cs.push(...fc); sps.push(...spsF);
       for (let k = 0; k + 5 < pts.length; k += 3) {          // polyline → segments
         ALL.push(pts[k], pts[k + 1], pts[k + 2], pts[k + 3], pts[k + 4], pts[k + 5]);
         ALLC.push(cs[k], cs[k + 1], cs[k + 2], cs[k + 3], cs[k + 4], cs[k + 5]);
+        // high-speed flow (deflected/accelerated: >1.25·V) gets a THICK hot-red
+        // render: 4 offset copies (1px GL lines can't widen) = user "thicker, red"
+        const pm = (sps[k / 3] + sps[k / 3 + 1]) / 2;
+        if (pm > V * 1.25) {
+          for (const o of FASTOFF) {
+            ALLF.push(
+              pts[k] + o[0], pts[k + 1] + o[1], pts[k + 2] + o[2],
+              pts[k + 3] + o[0], pts[k + 4] + o[1], pts[k + 5] + o[2]);
+            ALLFC.push(1, 0.28, 0.1, 1, 0.28, 0.1);
+          }
+        }
       }
     }
   if (ALL.length >= 6) {
@@ -2506,6 +2602,17 @@ function buildStreamlines() {
     lg.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(ALL), 3));
     lg.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(ALLC), 3));
     flowGroup.add(new THREE.LineSegments(lg, matS));
+  }
+  if (ALLF.length >= 6) {                     // accelerated flow: hot + thick
+    const lg = new THREE.BufferGeometry();
+    lg.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(ALLF), 3));
+    lg.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(ALLFC), 3));
+    const hot = new THREE.LineSegments(lg, new THREE.LineBasicMaterial({
+      vertexColors: true, transparent: true, opacity: 0.85,
+      blending: THREE.AdditiveBlending, depthWrite: false }));
+    hot.userData.isTrail = true;              // not removed by streamline rebuild
+    hot.userData.isLineHot = true;
+    flowGroup.add(hot);
   }
 }
 function respawn(arr, i, b, B) {
@@ -2531,6 +2638,8 @@ function stepFlow(dt) {
   const pos = flowPts.geometry.attributes.position.array;
   const col = flowPts.geometry.attributes.color.array;
   const tp = flowTrails && flowTrails.pos, tc = flowTrails && flowTrails.col;
+  const rgb = [0, 0, 0];
+  const fc = flowFast && flowFast.geometry.attributes.color.array;
   for (let i = 0, j = 0; i < pos.length; i += 3, j += 6) {
     const px = pos[i], py = pos[i + 1], pz = pos[i + 2];
     const v = sampleVel([px, py, pz], dir, V);
@@ -2550,10 +2659,19 @@ function stepFlow(dt) {
     }
     const sp = Math.hypot(v[0], v[1], v[2]);
     pos[i] += v[0] * dt * 0.35; pos[i + 1] += v[1] * dt * 0.35; pos[i + 2] += v[2] * dt * 0.35;
-    const t = clamp(sp / (V * 1.4), 0, 1), tr = clamp(ta * 2.2, 0, 1);
-    col[i] = clamp(0.25 + t * 0.75 + tr * 0.7, 0, 1);
-    col[i + 1] = clamp(0.45 + t * 0.3 - tr * 0.35, 0, 1);
-    col[i + 2] = clamp(1 - t * 0.6 - tr * 0.3, 0, 1);
+    const t = clamp(sp / (V * 1.35), 0, 1), tr = clamp(ta * 2.2, 0, 1);
+    flowLutAt(sp / (2 * V), rgb);
+    // turbulence pushes the colour to hot magenta: 'when wind causes
+    // turbulence, it could be visible' (user)
+    col[i] = clamp(rgb[0] * (1 - tr) + tr, 0, 1);
+    col[i + 1] = clamp(rgb[1] * (1 - tr) + tr * 0.1, 0, 1);
+    col[i + 2] = clamp(rgb[2] * (1 - tr) + tr * 0.9, 0, 1);
+    if (fc) {                                     // fast layer: big red dots
+      if (t > 0.72) {
+        fc[i] = col[i]; fc[i + 1] = col[i + 1]; fc[i + 2] = col[i + 2];
+        col[i] *= 0.2; col[i + 1] *= 0.2; col[i + 2] *= 0.2;   // dim the small dot
+      } else { fc[i] = 0; fc[i + 1] = 0; fc[i + 2] = 0; }
+    }
     if (tp) {                                     // trail: prev -> new
       tp[j] = px; tp[j + 1] = py; tp[j + 2] = pz;
       tp[j + 3] = pos[i]; tp[j + 4] = pos[i + 1]; tp[j + 5] = pos[i + 2];
@@ -2566,6 +2684,7 @@ function stepFlow(dt) {
   }
   flowPts.geometry.attributes.position.needsUpdate = true;
   flowPts.geometry.attributes.color.needsUpdate = true;
+  if (fc) flowFast.geometry.attributes.color.needsUpdate = true;
   if (tp) {
     flowTrails.mesh.geometry.attributes.position.needsUpdate = true;
     flowTrails.mesh.geometry.attributes.color.needsUpdate = true;
@@ -2622,7 +2741,7 @@ function updateReport() {
     : `${azA}° ${flowState.az > 0 ? 'from left' : 'from right'}`;
   el.textContent =
 `speed ${flowState.speed} m/s (${(flowState.speed * 3.6).toFixed(0)} km/h) · AoA ${flowState.aoa}° · wind from ${azL} · turb ${flowState.turb.toFixed(2)} · q=${A.qd.toFixed(0)}Pa
-thrust: ${netThrust && netThrust.v ? `${netThrust.n} engine${netThrust.n > 1 ? 's' : ''} · class Σ${netThrust.w.toFixed(2)} · net ${dirLabel(netThrust.v)}${flowSrc.mode === 'seat' ? ' · flow src: seat' : ' → flow follows thrust ✔'}` : netThrust ? `${netThrust.n} engine(s) · class Σ${netThrust.w.toFixed(2)} · net ~0 (symmetric bank) → flow follows seat nose` : 'no thrusters — flow follows seat nose'}${extGrid && extGrid.sealedCount > 0 ? `
+thrust: ${netThrust && netThrust.v ? `${netThrust.n} engine${netThrust.n > 1 ? 's' : ''} · class Σ${netThrust.w.toFixed(2)} · net ${dirLabel(netThrust.v)}${flowSrc.mode === 'seat' ? ' · flow src: seat' : ' → flow follows thrust ✔'}` : netThrust ? `${netThrust.n} engine(s) · class Σ${netThrust.w.toFixed(2)} · net ~0 (symmetric bank) → flow follows cockpit nose` : 'no thrusters — flow follows cockpit nose'}${extGrid && extGrid.sealedCount > 0 ? `
 sealed interior: ${extGrid.sealedCount.toLocaleString()} cells windless (doors closed)` : ''}
 mass: declared ${mm.declared.toFixed(1)} kg | computed ${mm.tot.toFixed(1)} kg (${mm.compSum.toFixed(0)} kg parts
       + ${mm.cells} cells × ${cellMass.toFixed(2)} kg → ${mm.density.toFixed(0)} kg/m³) ${
@@ -2758,6 +2877,7 @@ function tick(t) {
   needsRender = false;
   { const wm = flowMode.m === 'wind';
     if (flowPts) flowPts.visible = wm;
+    if (flowFast) flowFast.visible = wm;
     if (flowTrails) flowTrails.mesh.visible = wm; }
   paintHighlights();
   renderer.render(scene, camera);
@@ -2905,7 +3025,9 @@ if (location.search.includes('occ')) occGroup.visible = true;
 if (location.search.includes('nosub')) subGroup.visible = false;   // debug: hide subgrids
 { const q0 = new URLSearchParams(location.search);        // ?flow = wind, ?lines = streamlines
   if (q0.has('lines')) flowMode.m = 'lines';
-  if (q0.has('flow') || q0.has('wind')) flowMode.m = 'wind'; }
+  if (q0.has('flow') || q0.has('wind')) flowMode.m = 'wind';
+  const azv = parseFloat(q0.get('az')); if (Number.isFinite(azv)) flowState.az = azv;
+  const spv = parseFloat(q0.get('speed')); if (Number.isFinite(spv)) flowState.speed = spv; }
 { const fsP = new URLSearchParams(location.search).get('flowsrc');   // ?flowsrc=seat|thrust|auto
   if (fsP === 'seat' || fsP === 'thrust' || fsP === 'auto') flowSrc.mode = fsP; }
 if (location.search.includes('perf')) perfT0 = performance.now() + 1500;  // measure after load settles
@@ -2966,8 +3088,13 @@ if (location.search.includes('selftest')) {
       // v1 component colours are [slot,slot] palette INDICES, not dicts
       const lc = resolveColor(null, 48), lc2 = resolveColor(null, 53);
       const v1c = compColor({ colors: [48, 42] }, 'color1');
+      // v1 family-base remap: v1 polished starts at 80 (v2: 84) — slot 81 must
+      // resolve to v2-85 [16,16,16] in v1 files (the purple-block fix), and
+      // stay the magenta marker for modern files (255,0,255)
+      const l3 = resolveColor(null, 81, true), l4 = resolveColor(null, 81);
       const ok9 = lc.r === 1 && lc.g === 8 && lc.b === 1 && lc2.b === 255
-        && Math.abs(v1c.color.r - 1 / 255) < 1e-3 && Math.abs(v1c.color.g - 8 / 255) < 1e-3;
+        && Math.abs(v1c.color.r - 1 / 255) < 1e-3 && Math.abs(v1c.color.g - 8 / 255) < 1e-3
+        && l3.r === 16 && l3.g === 16 && l3.b === 16 && l4.r === 255 && l4.g === 0 && l4.b === 255;
       // Beacon reads as a beacon: the game's red flash is procedural (no lens
       // material in the gltf), so the viewer adds an emissive red lens at the
       // mast tip of every real/low beacon model (user: "beacon no longer
@@ -3044,7 +3171,11 @@ if (location.search.includes('selftest')) {
       const nThr = model.data.components.filter(c => c.type in THRUST).length;
       const ok17 = nThr > 0 && !!netThrust && netThrust.n === nThr
         && thrustGroup.children.length === nThr + (netThrust.v ? 1 : 0)
-        && (!netThrust.v || Math.abs(Math.hypot(...netThrust.v) - 1) < 0.02);
+        && (!netThrust.v || Math.abs(Math.hypot(...netThrust.v) - 1) < 0.02)
+        // ISW = RCS + landing jets: NO main drive -> auto flow uses the
+        // cockpit, never the downward landing-thruster net (user: 'wind
+        // from below' was the symptom). aoa 4° keeps |y| = sin4° ≈ 0.07.
+        && !netThrust.main && Math.abs(flowDir()[1]) < 0.2;
       // ok18: sealed-hull wind exclusion (user: no wind inside enclosed
       // craft): BionicDolphin (block hull, hatches stored closed) has a
       // ray-enclosed cabin of 100+ cells that is windless, its far field

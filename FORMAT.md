@@ -243,6 +243,14 @@ in the dev's XenonViewer + the shipped `.gltf`/`.ini` assets, Oct 5)
   v1 `components[].colors` is a `[slot, slot]` **index pair** (color1, color2),
   not a dict. Unresolvable slots render as a magenta marker — a craft "all in
   purple" means the built-in groups are missing, not that the file is odd.
+  - **v1 family bases sit FOUR slots below the v2 bases** (v2 inserted 4 new
+    head colours per family): v1 polished = **80..96**, metal = **120..136**,
+    glass = **160..176**; matte 40..56 is identical in both generations. The
+    256-slot built-in table is the v2 one, so a v1 file's indices 80-83,
+    120-126, 160-171 land in the empty gaps below each family — that was the
+    purple blocks (26 of the 61 corpus files). Fix = `legacySlot(i)` in
+    `palette.js`: +4 / +8 / +12 into the matching v2 family, applied only for
+    palette-less (v1) files — a v2 file genuinely missing slot 81 stays magenta.
 - Component painted materials: gltf materials named `color1`/`color2` take
   `components[].colors.color1/color2` (same entry format; per-component dict).
   Defaults when fields missing: color1 = white, op 15, rough 0, metal 0
@@ -474,10 +482,18 @@ and they are EXCLUDED from the net-thrust vector. Net = Σ axis·weight over
 rockets; |net| < 0.15·Σweight ⇒ "net ~0 (symmetric bank)" (ISW-241's 9 RCS do
 this) and no direction is suggested.
 
-Relative wind = −flight axis; the axis comes from flow-src `auto` (strong net
-thrust, else PilotSeat nose) | `seat` | `thrust`, yawed by the "wind from side"
-azimuth slider and elevated by AoA (props reverse → the direction stays
-user-controllable, `?flowsrc=` presets it).
+Relative wind = −flight axis. The axis comes from flow-src `auto` | `seat` |
+`thrust`, yawed by the "wind from side" azimuth slider and elevated by AoA
+(props reverse → the direction stays user-controllable, `?flowsrc=` presets it).
+**`auto` uses only the MAIN drive net (BigThruster); RCS and Mini/Small
+thrusters are attitude/landing jets and must NOT set the direction** — the
+ISW's landing-thruster net points down, and auto flow "from below" was the
+user's complaint; RCS-propelled craft have no main drive, so `auto` falls back
+to the COCKPIT: "cockpits almost always face in the right direction". On
+contested (multi-seat) craft the PilotSeat REACHING a Computer/MiniComputer/
+OwnerPad over the `data.pipes` graph (`p.a_component`/`p.b_component` edges)
+wins — the editor wires the pilot's cockpit to the flight computer. Manual
+`thrust` mode = user override, full net incl. RCS.
 
 Voxel wind grid (viewer, VIEW space, 0.25 m cells): cell index =
 `pos + 12·frame − 5.5` (z mirrored). Sources: blocks (type≠255), component

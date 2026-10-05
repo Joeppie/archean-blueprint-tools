@@ -65,9 +65,22 @@ for (let i = DEFAULT_PALETTE.length; i < 256; i++) DEFAULT_PALETTE.push(null);
  * Slots 0..10 always use the built-in entries (the game's reader re-imposes
  * them); file entries fall back to the built-in, and a magenta marker flags
  * a fully missing slot.
+ * legacy=true applies the v1 family-base remap (see legacySlot).
  */
-export function resolveColor(palette, index) {
-  const i = index | 0;
+// v1 (2024-25, palette-less) blueprints index the finish families FOUR slots
+// below the v2 (BlockShapes.hh) bases — v2 inserted 4 new head colours per
+// family. v1 polished = 80..96, metal = 120..136, glass = 160..176; unmapped,
+// those indices fall in the empty gaps below each family and render as the
+// magenta missing-slot marker (the 'purple blocks on old crafts' report).
+// Matte 40..56 is identical in both generations — it never went purple.
+export function legacySlot(i) {
+  if (i >= 80 && i <= 96) return i + 4;      // -> polished 84..100
+  if (i >= 120 && i <= 136) return i + 8;    // -> metal 128..144
+  if (i >= 160 && i <= 176) return i + 12;   // -> glass 172..188
+  return i;
+}
+export function resolveColor(palette, index, legacy = false) {
+  const i = (legacy ? legacySlot(index) : index) | 0;
   const c = (i <= 10 ? null : palette?.[i]) || DEFAULT_PALETTE[i] || palette?.[i];
   if (!c || typeof c !== 'object') return { r: 255, g: 0, b: 255, opacity: 15, roughness: 4, metallic: 0 };
   return {

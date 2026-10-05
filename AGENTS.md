@@ -154,8 +154,11 @@ landing page and README together when the viewer changes).
   dict) reference the built-in legacy palette — four 17-colour finish
   families: matte 40..56, polished 84..100, metal 128..144, glass 172..188
   (full table in `viewer/palette.js`, ported from the dev viewer, NOTICE §2).
-  An all-purple craft = missing built-in groups (magenta = missing-slot
-  marker), not a broken file. See FORMAT.md.
+  **v1 family bases are 4 slots below these v2 bases** (polished 80..96, metal
+  120..136, glass 160..176) — the v2 built-in table leaves those v1 indices in
+  the empty gaps = the purple blocks (26/61 files). `legacySlot()` remaps
+  +4/+8/+12 for palette-less (v1) files only. An all-purple craft = missing
+  built-in groups (magenta = missing-slot marker), not a broken file. See FORMAT.md.
 - **Dashboard geometry is GENERATED from `data` (glTF = editor template):**
   board = box origin→(size_x/100, size_y/100, 0.01) — CENTIMETRES, corner
   pivot, plane X·Y normal +z; elements at pos/100 z 0.01..0.02; dataport
