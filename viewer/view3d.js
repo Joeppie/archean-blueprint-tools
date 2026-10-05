@@ -392,7 +392,7 @@ const viewQuat = (q) => LEGACY_Q ? new THREE.Quaternion(-q.x, -q.y, q.z, q.w)
 // ---------- three.js boilerplate ----------
 const view = document.getElementById('view');
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.max(1, Math.min(devicePixelRatio, 2)));  // floor 1: browser zoom-out pushes dpr <1, feeding that through renders BELOW CSS resolution (user: "zoomed in and grainy")
+renderer.setPixelRatio(Math.max(1, Math.min(devicePixelRatio, 2.5)));  // floor 1: browser zoom-out pushes dpr <1 (canvas below CSS res = "zoomed in and grainy"); cap 2.5: Chrome SAVES per-site zoom, so HiDPI 150% zoom => dpr 3 — a 2.0 cap rendered 2/3 res = grainy (user's "stuck zoom after Ctrl-F5")
 view.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -443,7 +443,7 @@ scene.add(grid);
 
 function onResize() {
   const w = view.clientWidth, h = view.clientHeight;
-  renderer.setPixelRatio(Math.max(1, Math.min(devicePixelRatio, 2)));  // browser zoom changes dpr (fires resize)
+  renderer.setPixelRatio(Math.max(1, Math.min(devicePixelRatio, 2.5)));  // browser zoom changes dpr (fires resize); Chrome persists per-site zoom across reloads
   renderer.setSize(w, h);
   invalidate();
   camera.aspect = w / h;

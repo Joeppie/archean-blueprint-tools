@@ -185,10 +185,12 @@ landing page and README together when the viewer changes).
 - Material sharing is intentionally NOT done for component materials:
   selection highlight writes `material.emissive` per mesh (shared materials
   would light up every component of that colour).
-- `renderer.setPixelRatio` is floored at 1 (capped at 2, re-applied in
+- `renderer.setPixelRatio` is floored at 1 (capped at 2.5, re-applied in
   onResize): browser zoom-out drops `devicePixelRatio` below 1, and
   feeding that through renders the canvas BELOW CSS resolution — upscaled
-  = the user's "zoomed in and grainy" on fresh opens.
+  = the user's "zoomed in and grainy" on fresh opens. NOTE: Chrome PERSISTS
+  per-site zoom across reloads (Ctrl-F5 keeps it; only Ctrl+0 resets), so
+  HiDPI+zoom gives dpr 3 — the cap is 2.5, not 2, to keep those sharp.
 - `?perf` writes `draw=<renderer.info.render.calls>` into the title; the
   ISW-241 scene is ≈150 draws. SwiftShader fps numbers are meaningless —
   compare draw-call counts only.
