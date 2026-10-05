@@ -51,6 +51,22 @@ blueprint = {
         "symmetry_axis": 0,
         "symmetry_axis_offset": 0,
         "indestructible": False,
+        # data.colors PRESENT = modern (2026-generation) file => the viewer
+        # applies the CONJUGATE quaternion convention (the beacon's +z file
+        # quaternion must lean the mast toward +x/red, R(q*)); palette-less
+        # files are legacy (2024-25) = raw convention. Colors = the matte
+        # legacy family (43 red, 46 green, 49 blue, 52 yellow, 53 cyan,
+        # 56 magenta) + slot 0 white / 3 chrome; 0 = unused slot.
+        "colors": [
+            ({"r": 255, "g": 255, "b": 255, "opacity": 15, "roughness": 0, "metallic": 0} if i == 0
+             else {"r": 204, "g": 204, "b": 204, "opacity": 15, "roughness": 0, "metallic": 1} if i == 3
+             else {"r": 96, "g": 16, "b": 16, "opacity": 15, "roughness": 7, "metallic": 0} if i == 43
+             else {"r": 16, "g": 96, "b": 16, "opacity": 15, "roughness": 7, "metallic": 0} if i == 46
+             else {"r": 16, "g": 16, "b": 96, "opacity": 15, "roughness": 7, "metallic": 0} if i == 49
+             else {"r": 255, "g": 255, "b": 16, "opacity": 15, "roughness": 7, "metallic": 0} if i == 52
+             else {"r": 16, "g": 255, "b": 255, "opacity": 15, "roughness": 7, "metallic": 0} if i == 53
+             else {"r": 255, "g": 16, "b": 255, "opacity": 15, "roughness": 7, "metallic": 0} if i == 56
+             else 0) for i in range(256)],
         "composite_builds": [],
         "doors": [],
         "frames": [],
@@ -65,8 +81,8 @@ blueprint = {
             "metallic": 0, "roughness": 0,
             "dir_x": 0, "dir_y": 0, "dir_z": 1, "up_x": 0, "up_y": 1, "up_z": 0,
         }],
-        # matte legacy family slots: 43 red, 46 green, 49 blue, 52 yellow,
-        # 53 cyan, 56 magenta (v1 file: no data.colors palette)
+        # matte family slots (in data.colors below): 43 red, 46 green, 49 blue,
+        # 52 yellow, 53 cyan, 56 magenta
         "blocks": [
             block(43, (7, 6, 6)),   # +x
             block(46, (5, 6, 6)),   # -x

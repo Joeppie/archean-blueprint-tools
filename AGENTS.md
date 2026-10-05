@@ -72,6 +72,16 @@ landing page and README together when the viewer changes).
   endpoints to 0.000 m (raw `q` is 0.18-0.66 m off). Viewer converts to a z-mirrored
   view space `pos (x,y,−z)`, `quat (w,x,y,−z)`; all data/reports stay raw. See
   FORMAT.md § Handedness.
+- **Rotation storage has TWO conventions keyed on `data.colors` (v108):**
+  palette-less legacy files (2024-25 corpus, 23 of them) store the Unity LH
+  quaternion **RAW** — the game places with `R(q)` (proof: mosaic craft
+  3334698274's dashboard murals are flush only under raw: |dot| 0.999,
+  conj = 45° out of the wall; selftest `mural=true`); palette-bearing 2026
+  files store the **conjugate** (ISW pipes 0.000 m under `R(q*)`). Viewer:
+  `LEGACY_Q` (set in `setModel`) switches `viewQuat`/`rawFromView` between
+  `(w,−x,−y,z)` (legacy) and `(w,x,y,−z)` (modern). This also explains the
+  dev viewer: raw placement is exact for legacy craft ("renders the mosaic
+  perfectly") and 45°-tilted for 2026 ones. See FORMAT.md § Handedness.
 - Blocks: `type` = shape+orientation (0 cube, 1-12 slope [4 = thin tilted
   rod], 13-20 corner, 21-44 pyramid, 45-52 inverse corner — table in
   `viewer/blockshapes.js`, transcribed from the game's BlockShapes.hh via the
@@ -197,6 +207,9 @@ landing page and README together when the viewer changes).
      text readable from the plate's +normal side, so both layers need local
      counter-mirrors in our z-mirror chain (v105's normal-canvas/z-flip combo
      read mirrored from the pilot side = the v107 fix).
+     legacy (no-palette) files must use RAW quaternions: the mosaic
+     dashboard-mural plate normal must be parallel to its fitted wall plane
+     (`mural=true`; conj quaternions tilt it ~45° out of the wall).
 2. `regtest`: every testdata blueprint parses; blocks/components within bbox
    margins; the hull lattice map (when triangles exist) puts every vertex
    inside the bbox.

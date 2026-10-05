@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=107';
-import { resolveColor } from './palette.js?v=107';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=108';
+import { resolveColor } from './palette.js?v=108';
 
 // ---- game component models (extracted from installed game modules) ----
 // manifest: per-type metadata (mass, renderable node tree, joints, adapters,
@@ -372,7 +372,22 @@ const occWorld = (o, ax) => cellW(o['pos_' + ax]) + o['frame_' + ax] * FRAME;
 //  * model.data, serialize(), the inspector numbers and the reports stay in
 //    RAW file space (selftest asserts the mirrored placements).
 const viewPos = (p) => new THREE.Vector3(p.x, p.y, -p.z);
-const viewQuat = (q) => new THREE.Quaternion(q.x, q.y, -q.z, q.w);   // file {w,x,y,z}
+// Rotation STORAGE convention flips with the game generation:
+// • Pre-palette files (no data.colors, 2024-2025 exports) store the Unity LH
+//   quaternion RAW. Proof: the mosaic craft (3334698274) glues 49 dashboard
+//   plates flat onto one hull wall — only raw R(q) makes every plate normal
+//   parallel to the fitted wall plane (flushfrac 1.00 raw vs 0.00 conj);
+//   conj renders them standing out of the wall at an angle (user: murals
+//   "not flush", 'test' dash "rotated away from the seat" — in the raw game
+//   the plate front is the local −z face, so raw faces the pilot dead-on).
+// • 2026 files (data.colors present) store the CONJUGATE: ISW-241's own
+//   data.pipes endpoints reproduce only under R(q*) (comptest 60/60, 0.000 m).
+// Our view chain mirrors z, so legacy files convert as (w,−x,−y,z) and
+// modern files as (w,x,y,−z). Saved files stay byte-exact: edits invert
+// through rawFromView.
+let LEGACY_Q = false;
+const viewQuat = (q) => LEGACY_Q ? new THREE.Quaternion(-q.x, -q.y, q.z, q.w)
+                                 : new THREE.Quaternion(q.x, q.y, -q.z, q.w);   // file {w,x,y,z}
 
 // ---------- three.js boilerplate ----------
 const view = document.getElementById('view');
@@ -529,7 +544,8 @@ function applyDisplayPose(obj, qV) {
 }
 const rawFromView = (obj, q) => {                   // strip droop, mirror to file
   const t = obj.userData.wheelUndo ? q.clone().multiply(obj.userData.wheelUndo) : q;
-  return { w: t.w, x: t.x, y: t.y, z: -t.z };
+  return LEGACY_Q ? { w: t.w, x: -t.x, y: -t.y, z: t.z }
+                  : { w: t.w, x: t.x, y: t.y, z: -t.z };
 };
 // saved aileron deflection: components[].data.angle is in DEGREES (the .ini
 // [JOINT] angular_x limits are −45/+45, so ISW-241's −4.609 = a gentle −4.6°
@@ -1011,7 +1027,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=107';
+import { fitHull } from './hullfit.js?v=108';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -1221,6 +1237,9 @@ const hullRows = {};
 // ---------- loading / saving ----------
 function setModel(obj) {
   model = obj;
+  // rotation storage convention (see viewQuat): palette-bearing files are
+  // 2026-generation = conjugate; palette-less = raw Unity LH
+  LEGACY_Q = !(Array.isArray(model.data.colors) && model.data.colors.length > 0);
   // block-only files omit these keys — normalise so consumers can iterate freely
   model.data.triangles = model.data.triangles || [];
   model.data.pipes = model.data.pipes || [];
@@ -2230,17 +2249,34 @@ if (location.search.includes('selftest')) {
         flipGeomX(tg);
         return Math.abs(tg.attributes.position.array[0] - 1) < 1e-6;
       })();
+      // ok13: legacy rotation convention (no data.colors => RAW Unity LH
+      // quaternions): the mosaic craft's man-mural constellation (dash 235's
+      // wall: 17 coplanar dashboards, spread 0.26 m) is flush only under raw
+      // R(q) (|dot| 0.999); conjugate quaternions tilt every plate ~45° out
+      // of the wall (|dot| 0.70 = user's "not flush" screenshots).
+      let ok13 = false;
+      {
+        const ms = await (await fetch('../testdata/3334698274/blueprint.json')).json();
+        const dc = ms.data.components[235];
+        if (dc.type === 'Dashboard') {
+          const qv = new THREE.Quaternion(-dc.orientation.x, -dc.orientation.y,
+                                         dc.orientation.z, dc.orientation.w);   // legacy view rule
+          const n = new THREE.Vector3(0, 0, -1).applyQuaternion(qv);   // +Z face through scale.z=−1
+          const npl = new THREE.Vector3(0.69337, 0.63691, -0.33702).normalize();  // view wall normal
+          ok13 = Math.abs(n.dot(npl)) > 0.98;
+        }
+      }
       // picking must work through the mirrored component transforms
       ray.setFromCamera(new THREE.Vector2(0, 0), camera);
       const ok5 = ray.intersectObjects(compGroup.children, true)
         .some(h => h.object.userData.ci >= 0);
-      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 && ok10 && ok11 && ok12 ? 'PASS' : 'FAIL')
+      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 && ok10 && ok11 && ok12 && ok13 ? 'PASS' : 'FAIL')
         + ' occ_z=' + occ.pos_z + ' mirror=' + !!mir
         + ' pitch=' + (2 * Math.asin(-seat.orientation.x) * 180 / Math.PI).toFixed(1) + '°'
         + ' beacon=' + (mast ? mast.x.toFixed(2) : 'none') + ' droop=' + wc.y.toFixed(2)
         + ' junction=' + jdir.y.toFixed(2) + ' aileron=' + at.y.toFixed(2)
         + ' pick=' + ok5 + ' palette=' + ok9 + ' lens=' + ok10
-        + ' dashmirror=' + ok11 + ' textx=' + ok12;
+        + ' dashmirror=' + ok11 + ' textx=' + ok12 + ' mural=' + ok13;
     } catch (e) { document.title = 'SELFTEST ERR ' + e.message; }
   }, 1500);
 }

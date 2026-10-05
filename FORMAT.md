@@ -429,6 +429,31 @@ Zero-build Three.js (WebGL) inspector: `python3 -m http.server 8650` (repo root)
   corpus file has 0, so it is inert today; a non-zero value is the ONE
   genuinely per-component mirroring knob in the format (backlog: apply the
   same local scale sign so both viewers agree if such a file appears).
+- **Component rotation STORAGE flips with the game generation — two
+  conventions, keyed on `data.colors` (v108).**
+  • **Legacy files (2024–2025, no `data.colors`): the Unity LH quaternion is
+    stored RAW** — the game places parts with `R(q)` directly. Proof: the
+    mosaic craft (3334698274) is a wall mural of dashboard plates; fitting a
+    plane to coplanar dashboard constellations (raw normal clusters, 49 and
+    17 members, position spread along the plane normal 0.26–0.32 m = the
+    block-wall depth) shows every plate flush under raw `R(q)·ẑ`
+    (flushfrac 1.00, |dot| 0.999 on dash 235's wall) and standing ~45° out
+    of the wall under the conjugate (|dot| 0.70 / 0.00). The builder glued
+    these flat in-game, and dashboard text authored readable from the plate
+    side then faces the pilot (dash 84 'test' +0.57 toward seat 59 under
+    raw+front=−ẑ). Raw-conversion view quat = `(w,−x,−y,z)`.
+  • **2026 files (`data.colors` present): stored CONJUGATE** — ISW-241's own
+    `data.pipes` endpoints reproduce only under `R(q*)` (0.000 m, comptest
+    60/60; beacon lean, caster droop, junction flat-frame all verified).
+    View quat = `(w,x,y,−z)`.
+  The key is structural (palette feature = same game update as the
+  serialization change); corpus: 24 palette-less files (2024-08..2025-07)
+  raw, the one 2026 file conjugate. Dev-viewer consequence (explains
+  long-standing confusion): raw placement is CORRECT for legacy files —
+  the dev renders the 2024 mosaic "perfectly" — and 45°-tilted for 2026
+  craft (its ISW dashboards/battery lean); we are game-true for both.
+  Selftest `mural=true` pins the legacy side. `viewQuat`/`rawFromView`
+  switch on `LEGACY_Q` (set in `setModel`); saved files stay byte-exact.
 
 ## Editing recipe (used for the seat adjustment)
 
