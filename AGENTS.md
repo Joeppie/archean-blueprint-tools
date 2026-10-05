@@ -151,7 +151,8 @@ landing page and README together when the viewer changes).
 1. `?selftest`: edit→serialize round-trip preserves bytes except intended fields;
    occupancy + type-255 mirror stay synced after position edits; the ISW beacon
    mast must point nose-ward in VIEW space (pins the Unity handedness fix); the
-   ISW front caster wheel must hang below its pivot (suspension droop, display-only);
+   ISW front caster wheel must hang below its pivot (suspension droop, display-only),
+   the FluidJunction inlet must face view −x (flat display pose, `JUNCTION_Q`),
    raycast picking must work through the mirrored component transforms.
 2. `regtest`: every testdata blueprint parses; blocks/components within bbox
    margins; the hull lattice map (when triangles exist) puts every vertex

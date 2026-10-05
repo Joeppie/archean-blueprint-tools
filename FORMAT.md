@@ -259,15 +259,28 @@ Zero-build Three.js (WebGL) inspector: `python3 -m http.server 8650` (repo root)
   button solves it so parts+cells = declared `mass`). Flow shows particles **and**
   streamlines (integrated through the same stylized deflection field; blue =
   freestream, red = accelerated flow. Stylized, not CFD).
-- **Wheel suspension droop (display-only):** the file stores the BUILD pose —
-  suspension arm horizontal, wheel centre 0.447 m off the pivot (`SmallWheel`
-  nodes: pivot +0.124 y, axle +0.323 y) — while in-game a loaded wheel hangs
-  BELOW its mount. `applyWheelDroop` rotates the component about its (horizontal)
-  axle so the arm points to −y: a physical roll, the axle and tire plane are
-  untouched, rolling geometry stays exact. Vertical-axle casters (ISW crawler
-  mounts) can't droop about their axle and keep the file pose. Slider edits
-  write back through the inverse (`userData.wheelUndo`) so saved quaternions
-  remain file-exact.
+- **Display poses (`applyDisplayPose`, display-only):** per-component canonical
+  display quaternions, all writing back through an inverse (`userData.wheelUndo`)
+  so saved quaternions stay file-exact.
+  - *Wheel suspension droop:* the file stores the BUILD pose — suspension arm
+    horizontal, wheel centre 0.447 m off the pivot (`SmallWheel` nodes: pivot
+    +0.124 y, axle +0.323 y) — while in-game a loaded wheel hangs BELOW its
+    mount. The droop rotates the component about its (horizontal) axle so the
+    arm points to −y: a physical roll, the axle and tire plane are untouched,
+    rolling geometry stays exact. Vertical-axle casters (ISW crawler mounts)
+    can't droop about their axle and keep the file pose.
+  - *FluidJunction flat pose (user-requested):* the .ini adapters sit on local
+    **±z** (inlet (0,0,−0.125); outlets (±0.375/±0.125, 0, +0.125)) and the file
+    quaternion stands the comb UPRIGHT — game truth per `data.pipes` (the outlet
+    row faces starboard at four deck heights, inlet faces port). The viewer
+    shows the canonical FLAT layout the user asked for: inlet LEFT (view −x),
+    four outlets RIGHT (+x), row/body along z (fuselage) — display quaternion
+    `JUNCTION_Q` = R_y(−90°), reachable because the junction's thin local-y side
+    is featureless. With the flat pose the file's upright outlet-pipe endpoints
+    sit ≤0.4 m off the drawn ports; the inlet pipe meets exactly. The old
+    hand-built proxy (stubs on local ±y) created the "it used to be flat"
+    impression; the proxy is now rebuilt to the true ±z port frame, and adapter
+    nubs use `JUNCTION_Q` too.
 
 ## Editing recipe (used for the seat adjustment)
 

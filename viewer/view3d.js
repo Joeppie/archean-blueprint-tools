@@ -120,7 +120,7 @@ function buildRealComponent(c, model, idx, low = false) {
   const jp = nodes.get('joint');
   if (jp && c.type === 'Aileron') jp.rotateX(-(c.position.z < 0 ? 0.785 : 0.12));
   // adapter nubs: queue in world space, merged into ONE mesh per port type (see adpFlush)
-  const qo = viewQuat(c.orientation);
+  const qo = JUNCTION_TYPES.has(c.type) ? JUNCTION_Q : viewQuat(c.orientation);
   const po = viewPos(c.position);
   for (const a of info.adapters || []) {
     const p = new THREE.Vector3(a.position[0], a.position[1], -a.position[2]).applyQuaternion(qo);
@@ -312,7 +312,23 @@ const cyl = (r, h, seg = 6) => new THREE.CylinderGeometry(r, r, h, seg);
 // can't droop around their axle and keep the file pose. Pure display: edits
 // write back through the undo in userData (saved quaternions stay file-exact).
 const WHEEL_TYPES = new Set(['SmallWheel', 'Wheel', 'BigWheel']);
-function applyWheelDroop(obj, qV) {
+// FluidJunction canonical display pose. The file quaternion stands the comb
+// UPRIGHT (game truth per data.pipes: the 4-outlet row faces starboard at four
+// deck heights, inlet faces port). The user wants it laid along the fuselage
+// instead: inlet LEFT (−x), the four outlets RIGHT (+x), row/body along z.
+// That layout is rigid-reachable (the junction's thin local-y side absorbs the
+// frame flip): total map local x→z, z→x, y→y = quaternion R_y(−90) composed
+// with the view mirror (mesh scale.z=−1) → q = R_y(−90). Display-only: edits
+// write back through the stored undo, saved quaternions stay file-exact.
+const JUNCTION_TYPES = new Set(['FluidJunction']);
+const JUNCTION_Q = new THREE.Quaternion(0, -Math.SQRT1_2, 0, Math.SQRT1_2);   // R_y(−90°)
+function applyDisplayPose(obj, qV) {
+  obj.userData.wheelUndo = undefined;
+  if (JUNCTION_TYPES.has(obj.userData.wType)) {
+    obj.quaternion.copy(JUNCTION_Q);
+    obj.userData.wheelUndo = JUNCTION_Q.clone().invert().multiply(qV);
+    return;
+  }
   if (!WHEEL_TYPES.has(obj.userData.wType)) { obj.quaternion.copy(qV); return; }
   const a = new THREE.Vector3(1, 0, 0).applyQuaternion(qV);   // axle
   const u = new THREE.Vector3(0, 1, 0).applyQuaternion(qV);   // suspension arm
@@ -394,17 +410,16 @@ const PROXY = {
     return g;
   },
   FluidJunction(c) {
-    // comb manifold (port positions traced from data.pipes): body along local
-    // x (= world z, so a row of junctions touches side-by-side), inlet stub on
-    // local -y (world -x), three outlet stubs on local +y (world +x).
+    // comb manifold, ports per the game .ini adapters: inlet on local −z,
+    // four outlets (x ±0.375/±0.125) on local +z, body long axis local x
     const g = new THREE.Group(), m = mat(compColor(c, 'color1', 0xdddddd));
     g.add(new THREE.Mesh(box(1.0, 0.22, 0.3), m));
     const inlet = new THREE.Mesh(cyl(0.045, 0.16), m);
-    inlet.rotation.x = Math.PI / 2; inlet.position.y = -0.16;
+    inlet.rotation.x = Math.PI / 2; inlet.position.z = -0.16;
     g.add(inlet);
-    for (const x of [-0.33, 0, 0.33]) {
+    for (const x of [-0.375, -0.125, 0.125, 0.375]) {
       const o = new THREE.Mesh(cyl(0.04, 0.16), m);
-      o.rotation.x = Math.PI / 2; o.position.set(x, 0.16, 0);
+      o.rotation.x = Math.PI / 2; o.position.set(x, 0, 0.16);
       g.add(o);
     }
     return g;
@@ -700,7 +715,7 @@ function buildSubgrids() {
       const m = MODEL.manifest?.[sc.type] ? colliderProxy(sc) : (PROXY[sc.type] || PROXY2[sc.type] || defaultProxy)(sc);
       m.position.copy(viewPos(sc.position));
       m.userData.wType = sc.type;
-      applyWheelDroop(m, viewQuat(sc.orientation));
+      applyDisplayPose(m, viewQuat(sc.orientation));
       m.scale.z = -1;
       subGroup.add(m);
     }
@@ -728,7 +743,7 @@ function buildScene() {
     const mesh = atlas ? colliderProxy(c) : (PROXY[c.type] || PROXY2[c.type] || defaultProxy)(c);
     mesh.position.copy(viewPos(c.position));
     mesh.userData.wType = c.type;
-    applyWheelDroop(mesh, viewQuat(c.orientation));
+    applyDisplayPose(mesh, viewQuat(c.orientation));
     mesh.scale.z = -1;                              // hand proxies keep raw local geometry
     mesh.traverse(o => { o.userData.ci = i; });
     mesh.userData.ci = i;
@@ -1282,7 +1297,7 @@ function buildInspector() {
     obj.position.copy(viewPos(comp.position));
     obj.userData.wheelUndo = undefined;
     obj.userData.wType = comp.type;
-    applyWheelDroop(obj, viewQuat(orig[selected].q0));
+    applyDisplayPose(obj, viewQuat(orig[selected].q0));
     comp.orientation = { ...orig[selected].q0 };
     buildInspector();
     markDirty();
@@ -1832,14 +1847,20 @@ if (location.search.includes('selftest')) {
         c.type === 'SmallWheel' && Math.abs(c.orientation.x) > 0.5);   // the front caster
       const wc = new THREE.Vector3(0, 0.447, 0).applyQuaternion(compObjs[wi].quaternion);
       const ok6 = wc.y < -0.3;
+      // FluidJunction canonical flat pose: inlet faces LEFT (view −x), the
+      // outlet row runs along the fuselage (view z) — not standing up
+      const ji = model.data.components.findIndex(c => c.type === 'FluidJunction');
+      const jdir = new THREE.Vector3(0, 0, 1).applyQuaternion(compObjs[ji].quaternion);
+      const ok7 = jdir.x < -0.9;
       // picking must work through the mirrored component transforms
       ray.setFromCamera(new THREE.Vector2(0, 0), camera);
       const ok5 = ray.intersectObjects(compGroup.children, true)
         .some(h => h.object.userData.ci >= 0);
-      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 ? 'PASS' : 'FAIL')
+      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 && ok7 ? 'PASS' : 'FAIL')
         + ' occ_z=' + occ.pos_z + ' mirror=' + !!mir
         + ' pitch=' + (2 * Math.asin(-seat.orientation.x) * 180 / Math.PI).toFixed(1) + '°'
-        + ' beacon=' + (mast ? mast.x.toFixed(2) : 'none') + ' droop=' + wc.y.toFixed(2) + ' pick=' + ok5;
+        + ' beacon=' + (mast ? mast.x.toFixed(2) : 'none') + ' droop=' + wc.y.toFixed(2)
+        + ' junction=' + jdir.x.toFixed(2) + ' pick=' + ok5;
     } catch (e) { document.title = 'SELFTEST ERR ' + e.message; }
   }, 1500);
 }
