@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=124';
-import { resolveColor } from './palette.js?v=124';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=125';
+import { resolveColor } from './palette.js?v=125';
 
 // ---- site-zoom cancel: the viewer ALWAYS loads at physical 100% ----
 // Chrome SAVES page zoom per site (Ctrl+wheel sets it, Ctrl-F5 keeps it,
@@ -1129,7 +1129,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=124';
+import { fitHull } from './hullfit.js?v=125';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -2046,6 +2046,8 @@ function updateCoM() {
 // bodies. Gives sane comparative numbers per element, not certifiable data.
 let aeroPlates = [], flowPts = null, flowData = null, flowTrails = null, flowOn = false;
 let flowFast = null, flowLUT = null;   // big-dot fast layer + speed colour ramp
+let flowSm = null, flowSmT = null;      // EMA-smoothed speed/turb per particle
+let flowAge = null, flowAgeMax = null;  // particle lifetimes (anti-piling)
 // colour map (user's): blue = slow, green/yellow = mid, red = fast; local
 // speed normalised on 2x freestream. 64-entry LUT: stepFlow is per-frame.
 function flowLutAt(t, out) {          // t in 0..1 -> linear rgb into out[0..2]
@@ -2214,20 +2216,23 @@ function flowDir() {
   // (user: the ISW's downward RCS net must NOT imply 'wind from below').
   // 'flow src' cycles auto/seat/thrust; ?flowsrc= presets it. 'thrust' mode
   // = user override, uses the full net (all thrusters, RCS included).
-  const useT = flowSrc.mode === 'thrust' ? netThrust?.v
-    : flowSrc.mode === 'auto' ? netThrust?.main : null;
-  let fwd = useT ? useT.slice() : null;
-  if (!fwd) fwd = seatFwd() || [0, 0, 1];   // default: fly view +z (nose)
+  const useT = flowSrc.mode === 'thrust' ? netThrust?.v : null;
+  // auto = COCKPIT FIRST (user: 'cockpits almost always face in the right
+  // direction'): the United airliner's 2 gimbal-tilted BigThrusters netted
+  // downward and auto chose 'wind from below' — thrust is only the suggestion
+  // for cockpits-less craft (rockets, missiles), and 'thrust' mode = override.
+  const fwd = useT ? useT.slice()
+    : seatFwd() || netThrust?.main || [0, 0, 1];   // default: fly view +z
 
   // 'wind from side' azimuth: rotate the flight axis in yaw before taking
   // the wind direction — props produce thrust BOTH ways (user), so the
   // direction must stay user-controllable, not implied by thrust sign.
   const azr = flowState.az * Math.PI / 180;
   const ca = Math.cos(azr), sa = Math.sin(azr);
-  fwd = [fwd[0] * ca + fwd[2] * sa, fwd[1], -fwd[0] * sa + fwd[2] * ca];
+  const ry = [fwd[0] * ca + fwd[2] * sa, fwd[1], -fwd[0] * sa + fwd[2] * ca];
   // AoA: relative wind travels tail-ward and slightly upward (from front-below)
   const a = flowState.aoa * Math.PI / 180;
-  return [-fwd[0] * Math.cos(a), Math.sin(a), -fwd[2] * Math.cos(a)];
+  return [-ry[0] * Math.cos(a), Math.sin(a), -ry[2] * Math.cos(a)];
 }
 
 function plateFromTri(t) {
@@ -2476,13 +2481,20 @@ function initFlow() {
   flowGroup.clear();
   const N = location.search.includes('flowlow') ? 500 : 2200;   // flowlow = headless shots
   flowData = new Float32Array(N * 3);
+  flowSm = new Float32Array(N); flowSmT = new Float32Array(N);   // colour EMA
+  flowAge = new Float32Array(N); flowAgeMax = new Float32Array(N);
+  flowAgeMax.fill(0);   // respawn() below seeds ages; fill(0) forces first seed
+  for (let i = 0; i < N; i++) flowAgeMax[i] = 2 + Math.random() * 5;   // 2..7 s
   const b = model.box_min, B = model.box_max;
   for (let i = 0; i < N; i++) respawn(flowData, i * 3, b, B);
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(flowData, 3));
   flowPts = new THREE.Points(g, new THREE.PointsMaterial({
     size: 0.09, sizeAttenuation: true, vertexColors: true, transparent: true, opacity: 0.95,
-    depthTest: false }));
+    // depthTest TRUE: X-ray particles showed the far-side flow THROUGH the
+    // hull — the wing's occlusion shadow in that field read as an offset
+    // ghost 'echo' of the plane (user: United airliner, low wind)
+    depthTest: true }));
   flowPts.renderOrder = 12;
   flowPts.raycast = () => {};
   g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(N * 3), 3));
@@ -2496,7 +2508,7 @@ function initFlow() {
   gf.setAttribute('color', new THREE.BufferAttribute(new Float32Array(N * 3), 3));
   flowFast = new THREE.Points(gf, new THREE.PointsMaterial({
     size: 0.2, sizeAttenuation: true, vertexColors: true, transparent: true, opacity: 0.95,
-    depthTest: false, blending: THREE.AdditiveBlending }));
+    depthTest: true, blending: THREE.AdditiveBlending }));
   flowFast.renderOrder = 13;
   flowFast.raycast = () => {};
   flowGroup.add(flowFast);
@@ -2511,7 +2523,7 @@ function initFlow() {
   tg.setAttribute('color', new THREE.BufferAttribute(flowTrails.col, 3));
   const tmesh = new THREE.LineSegments(tg, new THREE.LineBasicMaterial({
     vertexColors: true, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending,
-    depthWrite: false, depthTest: false }));
+    depthWrite: false, depthTest: true }));   // real smoke: hidden by the hull
   tmesh.renderOrder = 11;
   tmesh.raycast = () => {};
   tmesh.userData.isTrail = true;                 // not a streamline (mode filter)
@@ -2534,7 +2546,12 @@ function buildStreamlines() {
   const matS = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9 });
   const ALL = [], ALLC = [], ALLF = [], ALLFC = [];
   const rgb = [0, 0, 0];
-  const colOf = (sp, arr) => { flowLutAt(sp / (2 * V), rgb); arr.push(rgb[0], rgb[1], rgb[2]); };
+  // DEVIATION map (user: show velocity DIFFERENCES, blue=low red=high):
+  // freestream = blue, slowed flow = deep blue, accelerated = yellow->red.
+  // The old absolute map put freestream mid-ramp = green = ground colour,
+  // so 4 m/s streamlines were invisible over the plane (user's dolphin shot).
+  const devT = (sp) => clamp(sp / (2.5 * V) - 0.4, 0, 1);   // V -> 0 (blue), 2.5V -> 1
+  const colOf = (sp, arr) => { flowLutAt(devT(sp), rgb); arr.push(rgb[0], rgb[1], rgb[2]); };
   // Seed plane PERPENDICULAR to the flow, one body-radius upstream — the old
   // fixed x·y/z-centre grid only made sense for pure tailward flow; with wind
   // azimuth / vertical thrust flow it seeded inside the hull.
@@ -2559,20 +2576,33 @@ function buildStreamlines() {
       const fwd = [], fc = [], back = [], bc = [], spsF = [], spsB = [];
       const walk = (sgn, pts, cs, sps) => {
         let p = [...seedA];
+        // heading low-pass + speed EMA: a 0.35 m step through the 0.25 m
+        // voxel field flips cell normals frame to frame — raw integration
+        // drew lightning-bolt zigzags coloured by the spiking |v| (a rainbow
+        // 'turbulence' cloud around the craft, user screenshot). Limiting the
+        // turn rate per step keeps smooth hull-hugging bends; 1-cell spikes
+        // average out, colours stop flickering.
+        let hx = sgn * dir[0], hy = sgn * dir[1], hz = sgn * dir[2];
+        let spSm = V;
         for (let k = 0; k < 160; k++) {
           const v = sampleVel(p, dir, V);
           const sp = Math.hypot(v[0], v[1], v[2]);
           pts.push(p[0], p[1], p[2]);
-          sps.push(sp);
-          colOf(sp, cs);
+          spSm += clamp(sp - spSm, -0.12 * V, 0.12 * V);
+          sps.push(spSm);
+          colOf(spSm, cs);
           if (sp < V * 0.03) break;                           // sealed interior /
           const dx = p[0] - cen.x, dy = p[1] - cen.y, dz = p[2] - cen.z;  //   stagnation
           if (dx * dx + dy * dy + dz * dz > R2) break;
+          const inv = 1 / Math.max(sp, 1e-3);
+          const nx = sgn * v[0] * inv, ny = sgn * v[1] * inv, nz = sgn * v[2] * inv;
+          const a = 0.3;                                      // heading smoothing
+          hx += (nx - hx) * a; hy += (ny - hy) * a; hz += (nz - hz) * a;
+          const hl = Math.max(1e-3, Math.hypot(hx, hy, hz));
           // constant 0.35 m spatial steps: speed-scaled steps (0.07·V = 4 m at
           // 60 m/s) leapt straight over the 3 m-wide craft, so side-wind flow
           // never resolved the hull and "didn't cover the craft" (user)
-          const st = 0.35 / sp;
-          p = p.map((q, i) => q + sgn * v[i] * st);
+          p = [p[0] + hx / hl * 0.35, p[1] + hy / hl * 0.35, p[2] + hz / hl * 0.35];
         }
       };
       walk(1, fwd, fc, spsF); walk(-1, back, bc, spsB);
@@ -2616,13 +2646,16 @@ function buildStreamlines() {
   }
 }
 function respawn(arr, i, b, B) {
-  // NOTE: box_min/max are {x,y,z} — numeric b[k] indexing is undefined (the
-  // old bug: x/z seeds were NaN, particles invisible for every version).
-  const d = flowDir();
-  const bx = [b.x, b.y, b.z], BB = [B.x, B.y, B.z];
+  // Seed UNIFORMLY in bbox inflated by 2.5 m. The old span-scaled upstream
+  // shell (0.55·span per axis) put every seed beyond the kill-margin on long
+  // craft (dolphin: 25 m out), so particles died the frame they spawned and
+  // respawned on that shell — a boiling rainbow cloud 'far ahead of the
+  // craft' (user screenshot). Uniform works for any flow direction.
+  const M = 2.5;
   for (let att = 0; att < 24; att++) {
-    for (let k = 0; k < 3; k++) arr[i + k] = bx[k] + Math.random() * (BB[k] - bx[k]) + (BB[k] - bx[k]) * 0.55 * (d[k] < -0.001 ? 1 : d[k] > 0.001 ? -1 : 0);   // bias UPSTREAM
-    arr[i + 1] = b.y + Math.random() * (B.y - b.y) * 2.2;
+    arr[i] = b.x - M + Math.random() * (B.x - b.x + 2 * M);
+    arr[i + 1] = b.y - M + Math.random() * (B.y - b.y + 2 * M);
+    arr[i + 2] = b.z - M + Math.random() * (B.z - b.z + 2 * M);
     if (!extGrid || inExterior([arr[i], arr[i + 1], arr[i + 2]])) break;   // never seed inside a sealed hull
   }
   if (flowTrails) {                       // trail anchors to the spawn point
@@ -2657,17 +2690,28 @@ function stepFlow(dt) {
       v[0] += tx; v[1] += ty; v[2] += tz;
       ta = Math.hypot(tx, ty, tz) / V;
     }
+    // Brownian jitter: particles otherwise lane onto voxel-cell boundaries
+    // and pile up in stagnation zones into 'spark clusters' (user)
+    v[0] += (Math.random() - 0.5) * V * 0.10;
+    v[1] += (Math.random() - 0.5) * V * 0.10;
+    v[2] += (Math.random() - 0.5) * V * 0.10;
     const sp = Math.hypot(v[0], v[1], v[2]);
     pos[i] += v[0] * dt * 0.35; pos[i + 1] += v[1] * dt * 0.35; pos[i + 2] += v[2] * dt * 0.35;
-    const t = clamp(sp / (V * 1.35), 0, 1), tr = clamp(ta * 2.2, 0, 1);
-    flowLutAt(sp / (2 * V), rgb);
+    const t = clamp(sp / (V * 1.35), 0, 1), tr0 = clamp(ta * 2.2, 0, 1);
+    // EMA-smooth speed & turbulence per particle (raw |v| jumps between LUT
+    // entries frame to frame = rainbow confetti, user: 'is that right?')
+    const pi3 = i / 3;
+    const td = clamp(sp / (2.5 * V) - 0.4, 0, 1);   // deviation map (see colOf)
+    const t2 = flowSm[pi3] + clamp(td - flowSm[pi3], -0.06, 0.06); flowSm[pi3] = t2;
+    const tr = flowSmT[pi3] + clamp(tr0 - flowSmT[pi3], -0.06, 0.06); flowSmT[pi3] = tr;
+    flowLutAt(t2, rgb);
     // turbulence pushes the colour to hot magenta: 'when wind causes
     // turbulence, it could be visible' (user)
     col[i] = clamp(rgb[0] * (1 - tr) + tr, 0, 1);
     col[i + 1] = clamp(rgb[1] * (1 - tr) + tr * 0.1, 0, 1);
     col[i + 2] = clamp(rgb[2] * (1 - tr) + tr * 0.9, 0, 1);
     if (fc) {                                     // fast layer: big red dots
-      if (t > 0.72) {
+      if (t2 > 0.16) {   // sp > ~1.4V: accelerated
         fc[i] = col[i]; fc[i + 1] = col[i + 1]; fc[i + 2] = col[i + 2];
         col[i] *= 0.2; col[i + 1] *= 0.2; col[i + 2] *= 0.2;   // dim the small dot
       } else { fc[i] = 0; fc[i + 1] = 0; fc[i + 2] = 0; }
@@ -2678,9 +2722,14 @@ function stepFlow(dt) {
       tc[j] = col[i] * 0.15; tc[j + 1] = col[i + 1] * 0.15; tc[j + 2] = col[i + 2] * 0.15;
       tc[j + 3] = col[i]; tc[j + 4] = col[i + 1]; tc[j + 5] = col[i + 2];
     }
+    // lifetime cap: stagnation makes particles LINGER, so slow zones keep
+    // receiving new arrivals -> glowing dust clumps (user's spark clusters)
+    const pi0 = i / 3;
+    flowAge[pi0] += dt;
     const out = pos[i] < b.x - R || pos[i] > B.x + R || pos[i + 2] < b.z - R || pos[i + 2] > B.z + R
-             || pos[i + 1] > B.y + R || sp < 1e-4;
-    if (out) respawn(pos, i, b, B);
+             || pos[i + 1] > B.y + R || sp < 1e-4 || flowAge[pi0] > flowAgeMax[pi0];
+    if (out) { respawn(pos, i, b, B); flowAge[pi0] = 0;
+      flowSm[pi0] = flowSmT[pi0] = 0; }   // fresh colour EMA at the new seed
   }
   flowPts.geometry.attributes.position.needsUpdate = true;
   flowPts.geometry.attributes.color.needsUpdate = true;
@@ -2741,7 +2790,7 @@ function updateReport() {
     : `${azA}° ${flowState.az > 0 ? 'from left' : 'from right'}`;
   el.textContent =
 `speed ${flowState.speed} m/s (${(flowState.speed * 3.6).toFixed(0)} km/h) · AoA ${flowState.aoa}° · wind from ${azL} · turb ${flowState.turb.toFixed(2)} · q=${A.qd.toFixed(0)}Pa
-thrust: ${netThrust && netThrust.v ? `${netThrust.n} engine${netThrust.n > 1 ? 's' : ''} · class Σ${netThrust.w.toFixed(2)} · net ${dirLabel(netThrust.v)}${flowSrc.mode === 'seat' ? ' · flow src: seat' : ' → flow follows thrust ✔'}` : netThrust ? `${netThrust.n} engine(s) · class Σ${netThrust.w.toFixed(2)} · net ~0 (symmetric bank) → flow follows cockpit nose` : 'no thrusters — flow follows cockpit nose'}${extGrid && extGrid.sealedCount > 0 ? `
+thrust: ${netThrust ? `${netThrust.n} engine${netThrust.n > 1 ? 's' : ''} · class Σ${netThrust.w.toFixed(2)}${netThrust.v ? ` · net ${dirLabel(netThrust.v)}` : ' · net ~0 (symmetric bank)'} · flow src: ${flowSrc.mode === 'thrust' ? 'thrust (override)' : flowSrc.mode === 'seat' ? 'cockpit' : seatFwd() ? 'cockpit' : netThrust.main ? 'main thrust' : 'nose default'}` : 'no thrusters · flow src: ' + (flowSrc.mode === 'thrust' ? 'none' : 'cockpit')}${extGrid && extGrid.sealedCount > 0 ? `
 sealed interior: ${extGrid.sealedCount.toLocaleString()} cells windless (doors closed)` : ''}
 mass: declared ${mm.declared.toFixed(1)} kg | computed ${mm.tot.toFixed(1)} kg (${mm.compSum.toFixed(0)} kg parts
       + ${mm.cells} cells × ${cellMass.toFixed(2)} kg → ${mm.density.toFixed(0)} kg/m³) ${
