@@ -70,6 +70,31 @@ mirror (Three.js flips triangle winding for negative-determinant matrices, and s
 labels are unaffected). `?selftest` asserts the beacon mast points nose-ward in view
 space, so a regression that reintroduces raw-`q` placement fails the suite.
 
+**The dev viewer's convention, read from its source (viewer.xenontools.dev
+`js/blueprint.js` + `js/scene.js`, Oct 5):** components are placed with the
+**raw** numbers — `new THREE.Quaternion(q.x, q.y, q.z, q.w)` composed with the
+raw position, no conjugate, no axis mirror. Its scene is therefore the
+*mirror image of the game* (self-consistent, so it "looks perfect": the
+mirror flips nose-lean to tail-lean, flips text baked in geometry, puts
+ownership pads face-down, and turns dashboards 45° away from their pilots —
+our users see exactly these symptoms when comparing the two viewers side by
+side; they are the mirror, not a bug in either viewer). The same raw chain
+places dev's adapters **0.18–0.66 m away from its own recorded cable
+endpoints** (the `data.pipes` proof above), which the mirror chain nails to
+0.000 m. Both viewers are valid mirror pairs; ours is the game-true side
+(v0.93 `d94e867`), the dev's is the raw-numbers side. Dev extras worth
+porting, transcribed here: `components[].mirrorAxis` (1/2/3 = x/y/z) = the
+game's left-right symmetry flag, applied as a negative scale on that axis of
+the component instance (0/null in all corpus files today); dashboard button
+elements (ToggleButton/PushButton/ArrowButton/Led) are REAL glTF models from
+the Dashboard folder, based at the element centre z=0.01 with a 180° Y half
+turn, .ini node transform, element spin (ArrowButton `rotation`×90° Z,
+ToggleButton `horizontal` → 90° Z) and state animation (switch tilts ∓45° X
+± 0.005 y, button/arrow sink 0.01·state z; `led` material emissive when
+lit); its pixel text is 8px XenonPixel on a fixed 6×9-px grid, binarised
+(alpha>0 ⇒ lit pixel, no AA), canvas = 5 px per cm, NearestFilter, texture in
+sRGB.
+
 ## `blocks` — the voxel build
 
 `{colors[7], frame_x/y/z, material, pos_x/y/z, size_x/y/z, type}`

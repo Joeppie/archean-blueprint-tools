@@ -208,6 +208,9 @@ landing page and README together when the viewer changes).
   `document.title` / `#out` for `--dump-dom`.
 
 ## Backlog
+- Dashboard BUTTON elements (Toggle/Push/Arrow/Led) as real glTF models with
+  the game's base transform + state animation (dev-viewer parity, transcribed
+  in FORMAT.md §Handedness); today we draw plate+text approximations.
 - Better flight-characteristics / stability analysis (beyond the stylized
   thin-plate model: full 360° velocity vector — nose may be ±X/±Z, automatic
   search of stable flight direction at low/high speed + ambiguity warning,
