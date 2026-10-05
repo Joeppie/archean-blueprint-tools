@@ -191,8 +191,16 @@ landing page and README together when the viewer changes).
   = the user's "zoomed in and grainy" on fresh opens. NOTE: Chrome PERSISTS
   per-site zoom across reloads (Ctrl-F5 keeps it; only Ctrl+0 resets), so
   HiDPI+zoom gives dpr 3 — the cap is 2.5, not 2, to keep those sharp.
-  view3d also COUNTERACTS saved site zoom with inverse CSS zoom (baseline =
-  lowest dpr ever, localStorage; opt out `?nozoom`), and
+  view3d also COUNTERACTS Chrome's PERSISTED SITE ZOOM (set by Ctrl+wheel
+  over the canvas — Chrome grabs it before the page; saved in profile
+  content settings, which apply in INCOGNITO too and survive Ctrl-F5:
+  the user's "random stuck zoomed viewer, incognito, fixed by monitor
+  move"). Mechanism: baseline dpr = lowest seen (localStorage) with
+  zoom-in cancelled by inverse CSS zoom; cold/incognito starts factor
+  devicePixelRatio into standard OS scales × Chrome zoom steps and undo
+  zoom-IN only (deliberate zoom-outs respected; dpr 1.5625 = 125% screen
+  × 125% zoom). Escape hatches: `?nozoom`, View-Options "reset page zoom"
+  button; the Chrome-side entry only Ctrl+0 clears.
   `fitCameraToModel` frames at `max(1.85r, 3.6m)` — a 1 m craft framed at
   1.1 m felt like "stuck zoom, tiny FOV, low res" (the user's report;
   fly-to never runs on load — canvas click / list dblclick only).
