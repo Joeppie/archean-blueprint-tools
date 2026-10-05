@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=127';
-import { resolveColor } from './palette.js?v=127';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=128';
+import { resolveColor } from './palette.js?v=128';
 
 // ---- site-zoom cancel: the viewer ALWAYS loads at physical 100% ----
 // Chrome SAVES page zoom per site (Ctrl+wheel sets it, Ctrl-F5 keeps it,
@@ -1129,7 +1129,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=127';
+import { fitHull } from './hullfit.js?v=128';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -2713,9 +2713,13 @@ function stepFlow(dt) {
     flowLutAt(t2, rgb);
     // turbulence pushes the colour to hot magenta: 'when wind causes
     // turbulence, it could be visible' (user)
-    col[i] = clamp(rgb[0] * (1 - tr) + tr, 0, 1);
-    col[i + 1] = clamp(rgb[1] * (1 - tr) + tr * 0.1, 0, 1);
-    col[i + 2] = clamp(rgb[2] * (1 - tr) + tr * 0.9, 0, 1);
+    // stagnation bubbles (inflow vs plate push-out cancel) parked glowing
+    // dots mid-air ('inexplicable drag'): real smoke DISSIPATES there, so
+    // fade slow particles out as they crawl
+    const fade = clamp(sp / (V * 0.15), 0, 1);
+    col[i] = (rgb[0] * (1 - tr) + tr) * fade;
+    col[i + 1] = (rgb[1] * (1 - tr) + tr * 0.1) * fade;
+    col[i + 2] = (rgb[2] * (1 - tr) + tr * 0.9) * fade;
     if (fc) {                                     // fast layer: big red dots
       if (t2 > 0.8) {   // sp > ~1.15V: accelerated (gain-2 map)
         fc[i] = col[i]; fc[i + 1] = col[i + 1]; fc[i + 2] = col[i + 2];
@@ -2733,7 +2737,7 @@ function stepFlow(dt) {
     const pi0 = i / 3;
     flowAge[pi0] += dt;
     const out = pos[i] < b.x - R || pos[i] > B.x + R || pos[i + 2] < b.z - R || pos[i + 2] > B.z + R
-             || pos[i + 1] > B.y + R || sp < 1e-4 || flowAge[pi0] > flowAgeMax[pi0];
+             || pos[i + 1] > B.y + R || sp < V * 0.06 || flowAge[pi0] > flowAgeMax[pi0];
     if (out) { respawn(pos, i, b, B); flowAge[pi0] = 0;
       flowSm[pi0] = flowSmT[pi0] = 0; }   // fresh colour EMA at the new seed
   }
