@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=129';
-import { resolveColor } from './palette.js?v=129';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=130';
+import { resolveColor } from './palette.js?v=130';
 
 // ---- site-zoom cancel: the viewer ALWAYS loads at physical 100% ----
 // Chrome SAVES page zoom per site (Ctrl+wheel sets it, Ctrl-F5 keeps it,
@@ -1129,7 +1129,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=129';
+import { fitHull } from './hullfit.js?v=130';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -2491,7 +2491,12 @@ function sampleVel(p, dir, V) {
           const w = Math.exp(-(Math.max(0, r - 0.18) ** 2) / 0.1);
           const nx = d[0] / r, ny = d[1] / r, nz = d[2] / r;
           const vn = v[0] * nx + v[1] * ny + v[2] * nz;
-          const g = (V * 0.6 + (vn < 0 ? -1.7 * vn : -0.35 * vn)) * w;
+          // incidence-proportional push-out: the old base 0.6·V fired along
+          // EVERY cell normal (roof normals launched front-wind streamlines
+          // into the sky = 'radically different' front vs back, user). Now
+          // push scales with incoming normal velocity: head-on = strong
+          // stagnation, grazing = gentle hug. Front/back behave alike.
+          const g = (V * 0.12 + (vn < 0 ? -1.9 * vn : -0.25 * vn)) * w;
           v[0] += nx * g; v[1] += ny * g; v[2] += nz * g;
         }
   }
