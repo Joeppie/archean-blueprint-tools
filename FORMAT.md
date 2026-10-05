@@ -398,19 +398,37 @@ Zero-build Three.js (WebGL) inspector: `python3 -m http.server 8650` (repo root)
   looks like a beacon"), so the viewer adds a static emissive red lens sphere
   (0xff2222) at the `body` prim's mast tip on every real/low Beacon model
   (selftest `lens=true`). No animation: the render loop stays on-demand.
-- **Text inside geometry under the z-mirror chain mirrors (user: HUD &
-  computer text, dashboard labels MIRRORED) — counter-mirror locally, never
-  flip the world convention** (raw/unmirrored = pre-v0.93 state: beacon lean
-  and caster droop flip back to the wrong side). Ground truth = **readable
-  from the PILOT's seat**: the game authors text so the raw file geometry
-  reads for the character. Fix: flip baked glyph prims' LOCAL z
+- **Text chirality — settled by the orient fixture (v107), not by derivation.**
+  `tools/make_orient_test.py` generates `testdata/9000000001/blueprint.json`:
+  six single-cell cubes (one per face: +x red, −x green, +y blue, −y yellow,
+  +z cyan, −z magenta) around a centre cell, a +z-facing 1.0×0.6 m Dashboard
+  labelled `TEST`, a Beacon on the +x cube with a +45° file-z quaternion, and
+  a world label. Ground-truth facts (pixel-verified in the dev viewer via its
+  `window.XenonViewer` capture API, front = camera on file +z): the game
+  authors text **readable from the plate's +normal side** — dev renders the
+  raw canvas readable from +z, and raw `R(q)` leans the beacon mast toward
+  −x (green). Our z-mirrored chain therefore must **counter-mirror every
+  text layer locally, never flip the world convention** (raw = pre-v0.93
+  state: beacon lean/caster droop break): dashboard canvas text is
+  **PRE-MIRRORED** (`translate(w,0); scale(-1,1)` before drawing — a raw
+  canvas reads mirrored from the authored side through our z-mirror; v104's
+  rule, v105's revert was the regression), and baked glyph prims
   (`code_button_text`, `reboot_button_text`, `code`, `subscribe`, `codein`,
-  `activein`) — the root `scale.z=−1` cancels it, net = raw file geometry at
-  its exact position (flip winding + recompute normals after). Dashboard
-  Label textures are drawn NORMALLY on the canvas (the mirrored view shows
-  them pilot-readable). v104's x-flips / canvas pre-mirror double-mirrored
-  (user: "'test' is inverted from the seat") — the seat POV is the invariant
-  to check against.
+  `activein`) are mirrored **in-plane about their own bbox centre**
+  (`flipGeomX`: x → 2cx−x, swap winding) — a z-flip nets the raw geometry
+  (= still mirrored from the pilot side; v105's bug), a flip about x=0 would
+  slide off-centre strings across their buttons. Through the chain, `TEST`
+  reads from +z, the mast (+red lens) leans toward the red cube, red cube
+  LEFT of a +z camera, blue top, yellow bottom — the exact mirror pair of the
+  dev render, on the game-true side of every data-checked fact. Selftest
+  pins: `dashmirror=true` (pre-mirror pixel probe) + `textx=true`
+  (`flipGeomX` centre-mirror semantics).
+- **`components[].mirrorAxis` is the game's per-component symmetry mirror**
+  (dev `scene.js`: `scale[mirrorAxis−1] = −1` on the component — draws the
+  part geometry mirrored on x/y/z for 1 (negative) symmetry builds). Every
+  corpus file has 0, so it is inert today; a non-zero value is the ONE
+  genuinely per-component mirroring knob in the format (backlog: apply the
+  same local scale sign so both viewers agree if such a file appears).
 
 ## Editing recipe (used for the seat adjustment)
 

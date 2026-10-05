@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=106';
-import { resolveColor } from './palette.js?v=106';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=107';
+import { resolveColor } from './palette.js?v=107';
 
 // ---- game component models (extracted from installed game modules) ----
 // manifest: per-type metadata (mass, renderable node tree, joints, adapters,
@@ -97,11 +97,16 @@ function dashTextTex(el) {
   cv.width = Math.max(1, Math.round((el.size_x || 0) * 5));
   cv.height = Math.max(1, Math.round((el.size_y || 0) * 5));
   const x = cv.getContext('2d', { willReadFrequently: true });
-  // NO canvas pre-mirror: the board's +Z face, seen through the view mirror
-  // from the pilot's side, reads correctly as drawn (a pre-mirror inverts it
-  // for the seated character — user ground truth). v104 had this backwards.
+  // Canvas PRE-MIRROR (x → width−x). Our view chain mirrors the world on z,
+  // so a RAW canvas reads MIRRORED from the plate's authored readable side.
+  // Proven with the orient fixture (testdata/9000000001): the game and the
+  // dev viewer both render 'TEST' readable from file +z for a +z-facing
+  // plate; through our z-mirror only a pre-mirrored canvas matches. (v104's
+  // rule; v105's revert was the regression the user re-reported.) Text
+  // positions land exactly — the canvas mirror and the net view mirror cancel.
   x.fillStyle = '#fff'; x.textBaseline = 'alphabetic'; x.textAlign = 'left';
   x.font = `${8 * ts}px monospace`;
+  x.translate(cv.width, 0); x.scale(-1, 1);
   const center = (el.textAlign ?? 16) === 16;   // textAlign 16 = centred
   let y = 3;
   for (const line of lines) {
@@ -175,19 +180,24 @@ function buildDashboard(c, model, idx, low) {
   }
   return g;
 }
-// text baked INTO component geometry is authored readable FOR THE PILOT (the
-// game world is LH; the character reads the raw file geometry from their
-// seat). Our z-mirrored view chain mirrors it (user: HUD/computer/dashboard
-// text MIRRORED from the seat) — flip the text prim's LOCAL z: the root
-// mirror (scale.z=−1) cancels it exactly, so the net transform is the raw
-// file geometry at its exact position: readable from the character's point of
-// view, the user's ground truth. (An x-flip mirrors HUD rows' order and a
-// canvas pre-mirror inverts dashboard labels — both double-mirror; v104 had
-// this wrong. Do NOT flip the world convention: pre-v0.93 beacon/wheel bugs.)
-const TEXT_ZFLIP = new Set(['code_button_text', 'reboot_button_text',
-                            'code', 'subscribe', 'codein', 'activein']);
-function flipGeom(gg, sx, sy, sz) {
-  gg.applyMatrix4(new THREE.Matrix4().makeScale(sx, sy, sz));
+// Text baked INTO component geometry (MiniComputer 'CODE' buttons, HUD rows)
+// follows the SAME rule as canvas text, proven with the orient fixture: the
+// glyphs are authored readable from their plate's +normal (front) side in the
+// game, and through our z-mirror that side renders mirrored — so the prim is
+// mirrored IN-PLANE about its own bbox centre (x → 2cx−x): glyph order and
+// shapes read correctly from the authored side, and mirroring about the
+// centre (not x=0) keeps the string exactly where the file put it (HUD rows
+// are symmetric; MiniComputer glyphs sit 5.5 mm off the button centre, and a
+// flip about x=0 would push them 11 mm across it). Winding is restored by an
+// index swap. (v105's local z-flip netted the raw geometry = still mirrored
+// from the pilot side — same bug the fixture exposes for canvas text.)
+const TEXT_MIRROR_X = new Set(['code_button_text', 'reboot_button_text',
+                               'code', 'subscribe', 'codein', 'activein']);
+function flipGeomX(gg) {
+  gg.computeBoundingBox();
+  const cx = (gg.boundingBox.min.x + gg.boundingBox.max.x) / 2;
+  gg.applyMatrix4(new THREE.Matrix4().makeTranslation(2 * cx, 0, 0)
+    .multiply(new THREE.Matrix4().makeScale(-1, 1, 1)));
   const gi = gg.getIndex();            // restore outward winding in the flipped space
   if (gi) {
     const a = gi.array;
@@ -234,7 +244,7 @@ function buildRealComponent(c, model, idx, low = false) {
       gg.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
       gg.setIndex(i);
       gg.computeVertexNormals();
-      if (TEXT_ZFLIP.has(prim.material)) flipGeom(gg, 1, 1, -1);
+      if (TEXT_MIRROR_X.has(prim.material)) flipGeomX(gg);
       let arr = byMat.get(prim.material);
       if (!arr) byMat.set(prim.material, arr = []);
       arr.push(gg);
@@ -1001,7 +1011,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=106';
+import { fitHull } from './hullfit.js?v=107';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -1130,7 +1140,7 @@ const DIRVM = DIRV.map(d => [d[0], d[1], -d[2]]);   // view-space (z-mirrored) d
 // Recorded endpoints ARE the connection points: the game writes the cable tip
 // at the part's VISIBLE socket (ISW battery: cable tip at the front-face
 // socket, while the .ini adapters are the 2x2 terminal grid on the other face
-// — snapping nubs to adapter positions unseats them from the cables, v0.106
+// — snapping nubs to adapter positions unseats them from the cables, v0.99
 // regression). Paths are drawn EXACTLY as recorded: no re-routing, no
 // per-segment shifts (axis-aligned joints break apart under taper shifts).
 const pipeEndsV = [];                             // [{ci, port, v}] — consumed by ?comptest
@@ -2196,16 +2206,41 @@ if (location.search.includes('selftest')) {
           const rg = buildRealComponent(model.data.components[bi], mm, bi, true);
           rg.traverse(o => { if (o.material?.emissive?.getHex() === 0xff2222) ok10 = true; });
         } }
+      // orient-fixture rules (testdata/9000000001, pixel-proven side-by-side
+      // with the dev viewer): dashboard canvas text must be PRE-MIRRORED and
+      // baked text prims mirrored in-plane about their own centre, so both
+      // read correctly from the plate's authored (+normal) side through our
+      // z-mirror. ok11: left-aligned 'AB' lands on the canvas RIGHT edge.
+      const ok11 = (() => {
+        const t = dashTextTex({ text: 'AB', textSize: 2, textAlign: 17, size_x: 40, size_y: 12,
+          mainColor: { r: 255, g: 0, b: 0 }, baseColor: { r: 0, g: 0, b: 0 } });
+        const cv = t.image, cx = cv.getContext('2d', { willReadFrequently: true });
+        const d = cx.getImageData(0, 0, cv.width, cv.height).data;
+        let left = 0, right = 0;
+        for (let i = 0, px = 0; i < d.length; i += 4, px++)
+          if (d[i] > 200 && d[i + 1] < 100) (px % cv.width < cv.width / 2 ? left++ : right++);
+        return right > 20 && left === 0;   // pre-mirrored: left-aligned text lands right
+      })();
+      // ok12: flipGeomX mirrors about the bbox centre (triangle (0,0)(1,0)(0,1)
+      // → first vertex at x=1) — glyph order flips, position is preserved.
+      const ok12 = (() => {
+        const tg = new THREE.BufferGeometry();
+        tg.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0, 0, 1, 0], 3));
+        tg.setIndex([0, 1, 2]);
+        flipGeomX(tg);
+        return Math.abs(tg.attributes.position.array[0] - 1) < 1e-6;
+      })();
       // picking must work through the mirrored component transforms
       ray.setFromCamera(new THREE.Vector2(0, 0), camera);
       const ok5 = ray.intersectObjects(compGroup.children, true)
         .some(h => h.object.userData.ci >= 0);
-      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 && ok10 ? 'PASS' : 'FAIL')
+      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 && ok10 && ok11 && ok12 ? 'PASS' : 'FAIL')
         + ' occ_z=' + occ.pos_z + ' mirror=' + !!mir
         + ' pitch=' + (2 * Math.asin(-seat.orientation.x) * 180 / Math.PI).toFixed(1) + '°'
         + ' beacon=' + (mast ? mast.x.toFixed(2) : 'none') + ' droop=' + wc.y.toFixed(2)
         + ' junction=' + jdir.y.toFixed(2) + ' aileron=' + at.y.toFixed(2)
-        + ' pick=' + ok5 + ' palette=' + ok9 + ' lens=' + ok10;
+        + ' pick=' + ok5 + ' palette=' + ok9 + ' lens=' + ok10
+        + ' dashmirror=' + ok11 + ' textx=' + ok12;
     } catch (e) { document.title = 'SELFTEST ERR ' + e.message; }
   }, 1500);
 }

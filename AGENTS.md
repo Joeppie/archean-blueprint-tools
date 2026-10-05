@@ -14,8 +14,10 @@ viewer/models/                  real game component models: manifest.json (mass,
                                 renderable node tree, joints, adapters, colliders
                                 per type) + <Type>.json geometry, lazy-loaded
 regtest/regtest.html            format-validation suite over testdata/ (importable)
-testdata/<workshop-id>/blueprint.json   regression corpus (24 craft, 1 kB..530 kB)
+testdata/<workshop-id>/blueprint.json   regression corpus (24 craft + 9000000001
+                                orient fixture, 1 kB..530 kB)
 tools/adjust_seat.py            reference example of a safe format edit
+tools/make_orient_test.py       regenerates the chirality probe craft 9000000001
 tools/extract_models.py         regenerates viewer/models/ from an installed game
 tests/run_tests.sh              headless-Chromium test runner (selftest+regtest+renders)
 FORMAT.md                       format documentation (start here)
@@ -187,7 +189,14 @@ landing page and README together when the viewer changes).
    v1 built-in palette must resolve WITHOUT a file palette (slot 48 = matte
    dark green, slot 53 cyan; v1 comp colours are slot-index
     pairs); the real Beacon model must carry the emissive red lens the game
-    draws procedurally (user: "beacon no longer looks like a beacon").
+    draws procedurally (user: "beacon no longer looks like a beacon");
+     dashboard canvas text must be PRE-MIRRORED (`dashmirror=true`: a
+     left-aligned label lands on the canvas RIGHT half) and baked text prims
+     mirrored about their own centre (`textx=true`) — the orient fixture
+     (testdata/9000000001, tools/make_orient_test.py) proved the game authors
+     text readable from the plate's +normal side, so both layers need local
+     counter-mirrors in our z-mirror chain (v105's normal-canvas/z-flip combo
+     read mirrored from the pilot side = the v107 fix).
 2. `regtest`: every testdata blueprint parses; blocks/components within bbox
    margins; the hull lattice map (when triangles exist) puts every vertex
    inside the bbox.
