@@ -58,7 +58,8 @@ NOTE: to kill a dev server, use `pkill -f "[h]ttp.server 8650"` — plain
 ## Publishing (GitHub Pages)
 The live site is the repo root served by GitHub Pages:
 `https://joeppie.github.io/archean-blueprint-tools/viewer/index.html`.
-`git push origin main` is all it takes — Pages rebuilds automatically
+`git push origin main` is all it takes — Pages rebuilds automatically (the build is an Actions job: during GitHub Actions runner incidents
+typically queues "waiting for a hosted runner" — check githubstatus.com before suspecting the push)
 (README viewer link is versioned; bump `v0.xx` in index.html title/header,
 landing page and README together when the viewer changes).
 
