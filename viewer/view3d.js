@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=113';
-import { resolveColor } from './palette.js?v=113';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=114';
+import { resolveColor } from './palette.js?v=114';
 
 // ---- game component models (extracted from installed game modules) ----
 // manifest: per-type metadata (mass, renderable node tree, joints, adapters,
@@ -966,6 +966,22 @@ function buildSubgrids() {
       applyDisplayPose(m, viewQuat(sc.orientation));
       m.scale.z = -1;
       subGroup.add(m);
+      // real/decimated geometry for nested parts too (Spider Mining Rover:
+      // a Wheel lives in a hatch subgrid — the box stand-in alone read as a
+      // "missing wheel"). ci = -1: nested parts are not list/select targets.
+      const mp = MODEL.manifest?.[sc.type] ? getModel(sc.type) : null;
+      if (mp) mp.then(mm => {
+        if (!mm || !mm.geo || !subGroup.children.includes(m)) return;
+        const real = buildRealComponent(sc, mm, -1, !realModelsOn);
+        real.position.copy(m.position);
+        real.quaternion.copy(m.quaternion);
+        real.scale.z = -1;
+        m.visible = false;
+        real.raycast = () => {};
+        real.traverse(o => { o.raycast = () => {}; });
+        subGroup.add(real);
+        invalidate();
+      });
     }
   }
 }
@@ -1066,7 +1082,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=113';
+import { fitHull } from './hullfit.js?v=114';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -2418,6 +2434,7 @@ buildFlight();
 onResize();
 if (location.search.includes('hull')) hullGroup.visible = true;
 if (location.search.includes('occ')) occGroup.visible = true;
+if (location.search.includes('nosub')) subGroup.visible = false;   // debug: hide subgrids
 if (location.search.includes('flow')) flowOn = true;
 if (location.search.includes('perf')) perfT0 = performance.now() + 1500;  // measure after load settles
 loadModelManifest().then(fetchDefault).then(applyCamQ);

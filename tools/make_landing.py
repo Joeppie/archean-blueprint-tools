@@ -14,7 +14,7 @@ fetched from the browser (Steam download needs the client / auth and
 steamcommunity sends no CORS headers) — the Steam client's workshop
 content dir is the ingest path, so this repo mirrors them under testdata/.
 """
-import json, os
+import json, os, re
 
 ROOT = os.path.join(os.path.dirname(__file__), '..')
 CURATED = {   # titles Steam pages confirm; kept offline per AGENTS (no fetches at runtime)
@@ -37,6 +37,15 @@ FEATURED = [('3481322297', 'the classic American semi truck'),
             ('3381670618', 'the arrow-shaped dolphin'),
             ('3334698274', 'the dashboard mosaic')]
 SYNTH = {'9000000001'}          # viewer fixtures, not workshop items
+# Gallery exclusions (user request): novelty/repeat builds kept in testdata/
+# (regtest corpus) but not shown on the landing page.
+EXCLUDE = {
+    '3384910875',   # Glideon
+    '3334593406',   # port-a-power-plugin
+    '3347018068',   # Oh no.. it flies
+    '3334591920',   # 7x-Port-a-MiningRig
+}
+NUMERIC_NAME = re.compile(r'^(Workshop item\s+)?[\d\s.,_\-]+$', re.U)  # "23", "Workshop item 3406025722"… (deleted/untitled) -> skip (user)
 
 names = dict(CURATED)
 tsv = os.path.join(ROOT, 'tools', 'ws-names.tsv')
@@ -47,14 +56,17 @@ if os.path.isfile(tsv):
                 and 'Error' not in parts[1] and parts[1] != 'Steam Workshop'):
             names.setdefault(parts[0], parts[1])
 
-data, rows = {}, []
+data, rows, skipped = {}, [], []
 for d in sorted(os.listdir(os.path.join(ROOT, 'testdata'))):
     bp = os.path.join(ROOT, 'testdata', d, 'blueprint.json')
-    if not (d.isdigit() and len(d) >= 6 and d not in SYNTH and os.path.isfile(bp)):
+    if not (d.isdigit() and len(d) >= 6 and d not in SYNTH and d not in EXCLUDE and os.path.isfile(bp)):
         continue
     j = json.load(open(bp))
     alias = (j['data'].get('alias') or '').strip()
     name = names.get(d) or alias or ('Workshop item ' + d)
+    if NUMERIC_NAME.match(name):
+        skipped.append((d, name))
+        continue
     author = j.get('author', '')
     data[d] = {'name': name, 'author': author}
     rows.append((d, name, author, os.path.isfile(os.path.join(ROOT, 'testdata', d, 'preview.jpg'))))
@@ -88,7 +100,6 @@ mirrors them under <code>testdata/</code> — game content belongs to the develo
 
 p = os.path.join(ROOT, 'index.html')
 html = open(p).read()
-import re
 html = re.sub(r'<!--GALLERY-->.*?<!--/GALLERY-->', gallery, html, flags=re.S)
 if '<!--GALLERY-->' not in html:
     html = html.replace('</body>', gallery + '\n</body>')
@@ -101,3 +112,5 @@ if '.grid{' not in html:
     html = html.replace('</style>', style + '</style>')
 open(p, 'w').write(html)
 print(f'gallery: {len(rows)} crafts, {sum(1 for r in rows if r[3])} previews; workshop.json written')
+if skipped:
+    print('skipped numeric-only names:', ', '.join(f'{d} ({n})' for d, n in skipped))
