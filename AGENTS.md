@@ -122,6 +122,13 @@ landing page and README together when the viewer changes).
   Metal is shaded as metallic·(1 − roughness/7): the game's tracer lights all
   roughness>0 surfaces diffusely, so metalness=1 would wrongly darken painted
   parts (color1's default is metallic 0, roughness 0). See `viewer/palette.js`.
+- **v1 files (23 of the 24 corpus!) carry NO `data.colors` at all**: block
+  slots and v1 `components[].colors` (a `[slot,slot]` **index pair**, not a
+  dict) reference the built-in legacy palette — four 17-colour finish
+  families: matte 40..56, polished 84..100, metal 128..144, glass 172..188
+  (full table in `viewer/palette.js`, ported from the dev viewer, NOTICE §2).
+  An all-purple craft = missing built-in groups (magenta = missing-slot
+  marker), not a broken file. See FORMAT.md.
 - Component models: game ships per component a `.gltf` (materials named
   `color1`/`color2` = player-painted surfaces ⇄ `components[].colors`, plus
   fixed materials whose `pbrMetallicRoughness` baseColorFactor/metallic/
@@ -170,7 +177,9 @@ landing page and README together when the viewer changes).
    the cables are authored in that frame; see FORMAT.md), the ISW front aileron
    (saved `data.angle` in DEGREES = −4.609°) must droop a few degrees below its
    hinge (view tip y ≈ −0.08; the joint limit is ±45°),
-   raycast picking must work through the mirrored component transforms.
+   raycast picking must work through the mirrored component transforms; the
+   v1 built-in palette must resolve WITHOUT a file palette (slot 48 = matte
+   dark green, slot 53 cyan; v1 comp colours are slot-index pairs).
 2. `regtest`: every testdata blueprint parses; blocks/components within bbox
    margins; the hull lattice map (when triangles exist) puts every vertex
    inside the bbox.

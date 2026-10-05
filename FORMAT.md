@@ -208,6 +208,16 @@ in the dev's XenonViewer + the shipped `.gltf`/`.ini` assets, Oct 5)
   - Slots **0..10 are engine-reserved** (the reader re-imposes the built-ins);
     full built-in table in `viewer/palette.js` (from the game's BlockShapes.hh,
     same source the dev's XenonViewer generates from).
+- **v1-format files (23 of the 24 corpus files!) carry NO `data.colors`
+  palette** — every slot references the BUILT-IN table. The legacy palette is
+  four 17-colour families (white, 3 greys, 3×red, 3×green, 3×blue, yellow,
+  cyan, orange, violet, magenta), one per finish: matte slots **40..56**
+  (rough 7 — the dashboard/mosaic crafts live here), polished **84..100**,
+  metal **128..144**, tinted glass **172..188** (opacity 2). Transcribed from
+  the dev's XenonViewer `js/palette.js` (BlockShapes.hh-generated, NOTICE §2).
+  v1 `components[].colors` is a `[slot, slot]` **index pair** (color1, color2),
+  not a dict. Unresolvable slots render as a magenta marker — a craft "all in
+  purple" means the built-in groups are missing, not that the file is odd.
 - Component painted materials: gltf materials named `color1`/`color2` take
   `components[].colors.color1/color2` (same entry format; per-component dict).
   Defaults when fields missing: color1 = white, op 15, rough 0, metal 0

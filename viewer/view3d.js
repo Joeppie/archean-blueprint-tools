@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=100';
-import { resolveColor } from './palette.js?v=100';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=101';
+import { resolveColor } from './palette.js?v=101';
 
 // ---- game component models (extracted from installed game modules) ----
 // manifest: per-type metadata (mass, renderable node tree, joints, adapters,
@@ -299,7 +299,14 @@ const COMP_COLOR_DEFAULTS = {
   color2: { r: 204, g: 204, b: 204, opacity: 15, roughness: 7, metallic: 1 },
 };
 function compColor(comp, which, fallback) {
-  const c = comp.colors?.[which];
+  let c = comp.colors?.[which];
+  if (c == null && Array.isArray(comp.colors)) {
+    // v1-format files store colours as PALETTE SLOT INDICES: [color1, color2]
+    // (legacy editor; e.g. [48,48] = matte dark green). Resolve against the
+    // file palette — the built-in table for v1 files, which have none.
+    const idx = comp.colors[which === 'color2' ? 1 : 0];
+    if (typeof idx === 'number') c = resolveColor(model.data?.colors, idx);
+  }
   if (!c) {
     if (fallback === undefined || fallback === null) return pbr(COMP_COLOR_DEFAULTS[which] || COMP_COLOR_DEFAULTS.color1);
     return { color: new THREE.Color(fallback), metal: 0.5, rough: 0.55, op: 1 };
@@ -836,7 +843,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=100';
+import { fitHull } from './hullfit.js?v=101';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -952,7 +959,7 @@ const DIRVM = DIRV.map(d => [d[0], d[1], -d[2]]);   // view-space (z-mirrored) d
 // Recorded endpoints ARE the connection points: the game writes the cable tip
 // at the part's VISIBLE socket (ISW battery: cable tip at the front-face
 // socket, while the .ini adapters are the 2x2 terminal grid on the other face
-// — snapping nubs to adapter positions unseats them from the cables, v0.100
+// — snapping nubs to adapter positions unseats them from the cables, v0.101
 // regression). Paths are drawn EXACTLY as recorded: no re-routing, no
 // per-segment shifts (axis-aligned joints break apart under taper shifts).
 const pipeEndsV = [];                             // [{ci, port, v}] — consumed by ?comptest
@@ -1994,15 +2001,24 @@ if (location.search.includes('selftest')) {
       const at = new THREE.Vector3(0, 0, 1).applyQuaternion(aqp);
       at.z = -at.z; at.applyQuaternion(viewQuat(ac.orientation));
       const ok8 = at.y < -0.03 && at.y > -0.3;   // drooping, within joint limits
+      // v1-format files (23 of 24 corpus files!) carry NO data.colors palette:
+      // slots must resolve against the built-in legacy groups (dashboard
+      // mosaic craft lives in 40..56: slot 48 = matte dark green [1,8,1]);
+      // v1 component colours are [slot,slot] palette INDICES, not dicts
+      const lc = resolveColor(null, 48), lc2 = resolveColor(null, 53);
+      const v1c = compColor({ colors: [48, 42] }, 'color1');
+      const ok9 = lc.r === 1 && lc.g === 8 && lc.b === 1 && lc2.b === 255
+        && Math.abs(v1c.color.r - 1 / 255) < 1e-3 && Math.abs(v1c.color.g - 8 / 255) < 1e-3;
       // picking must work through the mirrored component transforms
       ray.setFromCamera(new THREE.Vector2(0, 0), camera);
       const ok5 = ray.intersectObjects(compGroup.children, true)
         .some(h => h.object.userData.ci >= 0);
-      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 ? 'PASS' : 'FAIL')
+      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 ? 'PASS' : 'FAIL')
         + ' occ_z=' + occ.pos_z + ' mirror=' + !!mir
         + ' pitch=' + (2 * Math.asin(-seat.orientation.x) * 180 / Math.PI).toFixed(1) + '°'
         + ' beacon=' + (mast ? mast.x.toFixed(2) : 'none') + ' droop=' + wc.y.toFixed(2)
-        + ' junction=' + jdir.y.toFixed(2) + ' aileron=' + at.y.toFixed(2) + ' pick=' + ok5;
+        + ' junction=' + jdir.y.toFixed(2) + ' aileron=' + at.y.toFixed(2)
+        + ' pick=' + ok5 + ' palette=' + ok9;
     } catch (e) { document.title = 'SELFTEST ERR ' + e.message; }
   }, 1500);
 }
