@@ -304,6 +304,29 @@ Zero-build Three.js (WebGL) inspector: `python3 -m http.server 8650` (repo root)
   .ini: `[JOINT]` at local (0, 0.181, 0) above the plate, `aileron` renderable
   at joint + (0, 0.07, 0) — the proxy pivot sits on the joint line so the
   flap rotates about where the game's does.
+- **FluidJunction flat display pose (v0.99, cable-cache frame):** ISW-241's
+  pipe endpoints (delta table, 100 pipes measured) show the junction cables
+  were authored in the BUILDER's flat frame — outlets pointing UP (view +y),
+  the 4-outlet row along the fuselage (view z), inlet down — with only the
+  0.135 m connector-stub offset. The conjugate (file) pose stands the comb
+  upright and matches NONE of these cables (the user: junctions "stick out"
+  of their pipes). Display pose = mirror-conjugate file quaternion
+  `(w,−x,−y,z)` = the builder/v0.91 layout: model lies flat, ports align with
+  its own cached cables (selftest: inlet faces view −y). Display-only via the
+  wheelUndo write-back; saved quaternions stay file-exact. Exempt from the
+  stale-cable endpoint snapping below (its cache frame == display frame).
+- **Stale cable cache → live-port snap:** `data.pipes` endpoints are
+  build-time cache; parts built on the ground and mounted later leave the
+  cable behind (ISW: SolarPanel endpoint 1.43 m below the panel — the "red
+  and blue spheres floating on the ground under the solar panel"; battery
+  connectors 0.4 m off their nubs). Viewer rule: per endpoint, compute the
+  live port (adapter base + connector-normal stub ≤0.135 m, `livePortView`);
+  if the cached endpoint is >0.30 m away, snap it to the live port tip and
+  taper-shift the whole segment path (per-segment shift lerping a→b).
+  comptest uses the same `pipeEndsV` model, so tubes/nubs/endpoint-dots are
+  aligned by construction. `PilotSeat` (editor-moved), `Beacon` (endpoints in
+  connector's upright frame) and `SolarPanel` (corner-vertex-only plate) are
+  exempt from the model-surface check.
 - **Floating labels are parented to `compGroup`, never to a mirrored mesh:**
   GPU sprite quads under a negative-determinant (scale.z=−1) parent render
   MIRRORED text on some rasterizers (user report; SwiftShader never mirrors,

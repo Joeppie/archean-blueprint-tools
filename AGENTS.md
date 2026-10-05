@@ -100,9 +100,13 @@ landing page and README together when the viewer changes).
   are world-space connector positions (trace pipes to place ports). Pipes are
   NOT straight chains — every segment anchors at its OWN `start` (joints have
   0.04-0.14 m offsets; accumulating dir*len drifts tubes off the cables).
-  Cable endpoints sit 0.1-0.4 m out along connector stubs from the .ini adapter
-  origin — port connection point = pipe endpoint (nubs drawn there). Beacon
-  endpoints are in the connector's upright frame (exception). See FORMAT.md.
+  Endpoints are BUILD-TIME cache: parts moved after building leave stale
+  cables (ISW: solar panel endpoint 1.43 m below the panel = the "spheres
+  floating on the ground"). Viewer snaps endpoints >0.30 m from the live port
+  (adapter base + normal stub) and taper-shifts the path. FluidJunction cables
+  are cached in the builder's FLAT frame (outlets up, row along fuselage) —
+  the junction's display pose matches that frame (mirror-conjugate file quat),
+  which is why the comb lies flat along its pipes. See FORMAT.md.
 - `components[].type === 'Build'` = editor construction-site ghost, far outside
   the bbox — never render it as geometry.
 - Palette slots: `data.colors[256]`, entry = {r,g,b 0-255, opacity 0-15,
@@ -157,10 +161,10 @@ landing page and README together when the viewer changes).
    occupancy + type-255 mirror stay synced after position edits; the ISW beacon
    mast must point nose-ward in VIEW space (pins the Unity handedness fix); the
    ISW front caster wheel must hang below its pivot (suspension droop, display-only),
-   the FluidJunction inlet must face view −x (game pose; pipes/cables meet ports
-   exactly — 0.000 m verified against data.pipes), the ISW front aileron (saved
-   `data.angle` in DEGREES = −4.609°) must droop a few degrees below its hinge
-   (view tip y ≈ −0.08; the joint limit is ±45°),
+   the FluidJunction inlet must face view −y (flat builder-cache display pose —
+   the cables are authored in that frame; see FORMAT.md), the ISW front aileron
+   (saved `data.angle` in DEGREES = −4.609°) must droop a few degrees below its
+   hinge (view tip y ≈ −0.08; the joint limit is ±45°),
    raycast picking must work through the mirrored component transforms.
 2. `regtest`: every testdata blueprint parses; blocks/components within bbox
    margins; the hull lattice map (when triangles exist) puts every vertex

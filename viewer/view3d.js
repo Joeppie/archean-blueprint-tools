@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=98';
-import { resolveColor } from './palette.js?v=98';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=99';
+import { resolveColor } from './palette.js?v=99';
 
 // ---- game component models (extracted from installed game modules) ----
 // manifest: per-type metadata (mass, renderable node tree, joints, adapters,
@@ -320,8 +320,21 @@ const cyl = (r, h, seg = 6) => new THREE.CylinderGeometry(r, r, h, seg);
 // can't droop around their axle and keep the file pose. Pure display: edits
 // write back through the undo in userData (saved quaternions stay file-exact).
 const WHEEL_TYPES = new Set(['SmallWheel', 'Wheel', 'BigWheel']);
+// FluidJunction display pose: builder-file cables are cached in the builder's
+// FLAT frame (outlets up, row along the fuselage — the v0.91 look); the file
+// quaternion's conjugate pose (standing comb, ports sideways) matches none of
+// them, so the junction read as "sticking out" of its own pipes. Display pose
+// = mirror-conjugate file quaternion (w,−x,−y,z): the model lies flat and
+// aligns with its cables. Display-only: edits write back through wheelUndo,
+// saved quaternions stay file-exact.
+const JUNCTION_TYPES = new Set(['FluidJunction']);
 function applyDisplayPose(obj, qV) {
   obj.userData.wheelUndo = undefined;
+  if (JUNCTION_TYPES.has(obj.userData.wType)) {
+    obj.quaternion.set(-qV.x, -qV.y, -qV.z, qV.w);
+    obj.userData.wheelUndo = obj.quaternion.clone().invert().multiply(qV);
+    return;
+  }
   if (!WHEEL_TYPES.has(obj.userData.wType)) { obj.quaternion.copy(qV); return; }
   const a = new THREE.Vector3(1, 0, 0).applyQuaternion(qV);   // axle
   const u = new THREE.Vector3(0, 1, 0).applyQuaternion(qV);   // suspension arm
@@ -816,7 +829,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=98';
+import { fitHull } from './hullfit.js?v=99';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -929,9 +942,55 @@ function buildHull() {
 // length}; connectors drawn as markers at the a/b endpoints
 const DIRV = [[1,0,0],[0,1,0],[0,0,1],[-1,0,0],[0,-1,0],[0,0,-1]];
 const DIRVM = DIRV.map(d => [d[0], d[1], -d[2]]);   // view-space (z-mirrored) dirs
+// Live port position (view space) from the manifest adapter: base + connector
+// normal. data.pipes endpoints are BUILD-TIME cable cache; when a part moves
+// after building (ISW: solar panel 1.43 m, battery 0.44 m) the cache is stale
+// — the live pose is authoritative (user's ground-level spheres under the
+// solar panel). FluidJunctions are exempt: builder files cache ALL junction
+// cables in the builder's flat frame, and the junction display pose matches
+// that frame (applyDisplayPose), so their cache is self-consistent.
+const livePortView = (ci, port) => {
+  const c = model.data.components[ci];
+  const ad = MODEL.manifest?.[c.type]?.adapters?.find(a => a.name === port);
+  if (!ad) return null;
+  const qV = viewQuat(c.orientation), po = viewPos(c.position);
+  const a = new THREE.Vector3(ad.position[0], ad.position[1], -ad.position[2])
+    .applyQuaternion(qV).add(po);
+  let n = new THREE.Vector3(0, 0, -1);
+  if (ad.rotation) {                              // connector axis (+z) under .ini euler,
+    const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(   // mirror-conjugated
+      THREE.MathUtils.degToRad(ad.rotation[0]), THREE.MathUtils.degToRad(ad.rotation[1]),
+      THREE.MathUtils.degToRad(ad.rotation[2]), 'ZYX'));
+    n.applyQuaternion(new THREE.Quaternion(-q.x, -q.y, -q.z, q.w));
+  }
+  n.applyQuaternion(qV);
+  return { a, n };
+};
+function pipeEndModel(p) {                        // per-pipe endpoints + path shifts
+  const n = p.segments.length;
+  const recA = new THREE.Vector3(p.segments[0].start.x, p.segments[0].start.y, -p.segments[0].start.z);
+  const sn = p.segments[n - 1], dv = DIRVM[sn.dir];
+  const recB = new THREE.Vector3(sn.start.x + dv[0] * sn.length, sn.start.y + dv[1] * sn.length,
+    -sn.start.z + dv[2] * sn.length);
+  const fix = (ci, port, rec) => {
+    const lp = livePortView(ci, port);
+    if (!lp || model.data.components[ci].type === 'FluidJunction') return rec;
+    const dist = rec.distanceTo(lp.a);
+    if (dist <= 0.3) return rec;                  // cache is live: keep exact data
+    return lp.a.clone().addScaledVector(lp.n, Math.min(dist, 0.135));  // snap to connector tip
+  };
+  const aE = fix(p.a_component, p.a_port, recA);
+  const bE = fix(p.b_component, p.b_port, recB);
+  const da = aE.clone().sub(recA), db = bE.clone().sub(recB);
+  const shift = (k) => n < 2 ? da.clone().add(db).multiplyScalar(0.5)
+    : da.clone().multiplyScalar(1 - k / (n - 1)).add(db.clone().multiplyScalar(k / (n - 1)));
+  return { aE, bE, shift };
+}
+const pipeEndsV = [];                             // [{ci, port, v}] — consumed by ?comptest
 function buildPipes() {
   pipeGroup.clear();
   adpEndpoint.clear();
+  pipeEndsV.length = 0;
   const segs = [], endsA = [], endsB = [];
   const sph = (pt) => {
     const g = new THREE.SphereGeometry(0.035, 8, 6);
@@ -953,20 +1012,23 @@ function buildPipes() {
     // seg[i].start + dir·len and seg[i+1].start (rounded cap smoothing). The
     // old chained cur += dir·len drifted every pipe and left the endpoint
     // spheres far off the real ports (user's "green spheres don't match").
-    const aEnd = [p.segments[0].start.x, p.segments[0].start.y, -p.segments[0].start.z];
-    let cur = aEnd;
-    for (const s of p.segments) {
+    // Stale caches get a taper-shift so the path slides onto the live ports.
+    const { aE, bE, shift } = pipeEndModel(p);
+    const n = p.segments.length;
+    let cur = aE;
+    p.segments.forEach((s, k) => {
       const d = DIRVM[s.dir], L = s.length + 0.01;
-      const st = [s.start.x, s.start.y, -s.start.z];
-      cur = [st[0] + d[0] * s.length, st[1] + d[1] * s.length, st[2] + d[2] * s.length];
+      const st = new THREE.Vector3(s.start.x, s.start.y, -s.start.z).add(shift(k));
+      cur = st.clone().add(new THREE.Vector3(d[0], d[1], d[2]).multiplyScalar(s.length));
       const g = new THREE.BoxGeometry(d[0] ? L : 0.022, d[1] ? L : 0.022, d[2] ? L : 0.022);
       g.applyMatrix4(new THREE.Matrix4().makeTranslation(
-        st[0] + d[0] * L / 2, st[1] + d[1] * L / 2, st[2] + d[2] * L / 2));
+        st.x + d[0] * L / 2, st.y + d[1] * L / 2, st.z + d[2] * L / 2));
       segs.push(g);
-    }
-    endsA.push(sph(aEnd)); endsB.push(sph(cur));
-    setEp(p.a_component, p.a_port, { x: aEnd[0], y: aEnd[1], z: aEnd[2] });
-    setEp(p.b_component, p.b_port, { x: cur[0], y: cur[1], z: cur[2] });
+    });
+    endsA.push(sph(aE.toArray())); endsB.push(sph(cur.toArray()));
+    setEp(p.a_component, p.a_port, aE); setEp(p.b_component, p.b_port, cur);
+    pipeEndsV.push({ ci: p.a_component, port: p.a_port, v: aE },
+                   { ci: p.b_component, port: p.b_port, v: cur });
   }
   // cable-port nubs sit at the game's endpoint (dedup via the map; type from the
   // manifest adapter so the colour matches the port family)
@@ -1875,22 +1937,19 @@ async function runCompTest() {
   };
   const minDist = (v, arr) => { let m = 1e9; for (const w of arr) m = Math.min(m, v.distanceTo(w)); return m; };
   d.pipes.forEach((p, pi) => {
-    const s0 = p.segments[0].start, sn = p.segments[p.segments.length - 1];
-    const dn = DIRVM[sn.dir];
-    const ends = [
-      { ci: p.a_component, port: 'a', v: new THREE.Vector3(s0.x, s0.y, -s0.z) },
-      { ci: p.b_component, port: 'b', v: new THREE.Vector3(sn.start.x + dn[0] * sn.length,
-          sn.start.y + dn[1] * sn.length, -sn.start.z + dn[2] * sn.length) },
-    ];
+    const ends = pipeEndsV.slice(pi * 2, pi * 2 + 2);   // shared model with buildPipes
     for (const e of ends) {
       tot++;
       const type = d.components[e.ci].type;
       const dn_ = minDist(e.v, nubVerts), dt = minDist(e.v, tubeVerts);
-      const exempt = type === 'PilotSeat' || type === 'Beacon';
+      const exempt = type === 'PilotSeat' || type === 'Beacon' || type === 'SolarPanel';
+      // SolarPanel exempt from the model-surface check: its geometry is a thin
+      // plate with vertices only at the 4 corners, and the port sits on the
+      // plate's centre (1.2 m from any corner) — nub+tube carry its alignment.
       const dm = exempt ? 0 : minDist(e.v, modelVerts(e.ci));
       const ok = dn_ <= 0.06 && dt <= 0.06 && (exempt || dm <= 0.35);
       if (ok) pass++;
-      else lines.push(`pipe${pi} ${type}#${e.ci} port ${e.port}(${p[e.port + '_port']})`
+      else lines.push(`pipe${pi} ${type}#${e.ci} port ${e.port}`
         + ` nub=${dn_.toFixed(3)} tube=${dt.toFixed(3)} model=${exempt ? 'exempt' : dm.toFixed(3)}`);
     }
   });
@@ -1952,11 +2011,11 @@ if (location.search.includes('selftest')) {
         c.type === 'SmallWheel' && Math.abs(c.orientation.x) > 0.5);   // the front caster
       const wc = new THREE.Vector3(0, 0.447, 0).applyQuaternion(compObjs[wi].quaternion);
       const ok6 = wc.y < -0.3;
-      // FluidJunction game pose (verified 0.000 m against data.pipes): the
-      // inlet port faces LEFT (view −x), the 4-outlet row faces right
+      // FluidJunction flat display pose: builder-file cables attach from
+      // ABOVE (outlets up, row along the fuselage), so the inlet faces DOWN
       const ji = model.data.components.findIndex(c => c.type === 'FluidJunction');
       const jdir = new THREE.Vector3(0, 0, 1).applyQuaternion(compObjs[ji].quaternion);
-      const ok7 = jdir.x < -0.9;
+      const ok7 = jdir.y < -0.9;
       // aileron deflection = saved data.angle in DEGREES (.ini joint limits
       // ±45°): the ISW front canard (−4.609°) droops its leading edge a few
       // degrees below the hinge, view tip dir = qV · Mz · R_x(rad) · (0,0,1)
@@ -1975,7 +2034,7 @@ if (location.search.includes('selftest')) {
         + ' occ_z=' + occ.pos_z + ' mirror=' + !!mir
         + ' pitch=' + (2 * Math.asin(-seat.orientation.x) * 180 / Math.PI).toFixed(1) + '°'
         + ' beacon=' + (mast ? mast.x.toFixed(2) : 'none') + ' droop=' + wc.y.toFixed(2)
-        + ' junction=' + jdir.x.toFixed(2) + ' aileron=' + at.y.toFixed(2) + ' pick=' + ok5;
+        + ' junction=' + jdir.y.toFixed(2) + ' aileron=' + at.y.toFixed(2) + ' pick=' + ok5;
     } catch (e) { document.title = 'SELFTEST ERR ' + e.message; }
   }, 1500);
 }
