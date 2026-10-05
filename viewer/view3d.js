@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=125';
-import { resolveColor } from './palette.js?v=125';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=126';
+import { resolveColor } from './palette.js?v=126';
 
 // ---- site-zoom cancel: the viewer ALWAYS loads at physical 100% ----
 // Chrome SAVES page zoom per site (Ctrl+wheel sets it, Ctrl-F5 keeps it,
@@ -1129,7 +1129,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=125';
+import { fitHull } from './hullfit.js?v=126';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -2048,6 +2048,7 @@ let aeroPlates = [], flowPts = null, flowData = null, flowTrails = null, flowOn 
 let flowFast = null, flowLUT = null;   // big-dot fast layer + speed colour ramp
 let flowSm = null, flowSmT = null;      // EMA-smoothed speed/turb per particle
 let flowAge = null, flowAgeMax = null;  // particle lifetimes (anti-piling)
+let flowPhase = null;                   // per-particle turbulence phase (anti-striping)
 // colour map (user's): blue = slow, green/yellow = mid, red = fast; local
 // speed normalised on 2x freestream. 64-entry LUT: stepFlow is per-frame.
 function flowLutAt(t, out) {          // t in 0..1 -> linear rgb into out[0..2]
@@ -2483,8 +2484,8 @@ function initFlow() {
   flowData = new Float32Array(N * 3);
   flowSm = new Float32Array(N); flowSmT = new Float32Array(N);   // colour EMA
   flowAge = new Float32Array(N); flowAgeMax = new Float32Array(N);
-  flowAgeMax.fill(0);   // respawn() below seeds ages; fill(0) forces first seed
-  for (let i = 0; i < N; i++) flowAgeMax[i] = 2 + Math.random() * 5;   // 2..7 s
+  flowPhase = new Float32Array(N);
+  for (let i = 0; i < N; i++) { flowAgeMax[i] = 2 + Math.random() * 5; flowPhase[i] = Math.random() * 6.283; }   // 2..7 s
   const b = model.box_min, B = model.box_max;
   for (let i = 0; i < N; i++) respawn(flowData, i * 3, b, B);
   const g = new THREE.BufferGeometry();
@@ -2550,7 +2551,7 @@ function buildStreamlines() {
   // freestream = blue, slowed flow = deep blue, accelerated = yellow->red.
   // The old absolute map put freestream mid-ramp = green = ground colour,
   // so 4 m/s streamlines were invisible over the plane (user's dolphin shot).
-  const devT = (sp) => clamp(sp / (2.5 * V) - 0.4, 0, 1);   // V -> 0 (blue), 2.5V -> 1
+  const devT = (sp) => clamp(0.5 + (sp / V - 1) * 0.5, 0, 1);  // V -> mid (green), 2V -> red, 0 -> blue
   const colOf = (sp, arr) => { flowLutAt(devT(sp), rgb); arr.push(rgb[0], rgb[1], rgb[2]); };
   // Seed plane PERPENDICULAR to the flow, one body-radius upstream — the old
   // fixed x·y/z-centre grid only made sense for pure tailward flow; with wind
@@ -2683,10 +2684,14 @@ function stepFlow(dt) {
     const wake = clamp(sp0 / V - 1, 0, 1.5) + 0.12;
     let ta = 0;
     if (flowState.turb > 0 && sp0 > 1e-3) {
-      const s = 0.7, A = V * 0.16 * flowState.turb * wake;
-      const tx = A * Math.sin(py * s + tt * 3.5) * Math.cos(pz * s * 1.3 - tt * 2.8);
-      const ty = A * Math.sin(pz * s * 1.1 - tt * 3.2) * Math.cos(px * s - tt * 3.8);
-      const tz = A * Math.sin(px * s * 0.9 + tt * 4.2) * Math.cos(py * s * 1.2 + tt * 2.3);
+      // per-particle phase offset: a shared-phase sine field organises the
+      // particles into marching wavy bands — the 'nonsensical echo' the user
+      // screenshotted from behind-wind on the ISW. Random phase per particle
+      // decorrelates them into eddies.
+      const s = 0.7, A = V * 0.16 * flowState.turb * wake, ph = flowPhase[i / 3];
+      const tx = A * Math.sin(py * s + tt * 3.5 + ph) * Math.cos(pz * s * 1.3 - tt * 2.8 + ph * 0.7);
+      const ty = A * Math.sin(pz * s * 1.1 - tt * 3.2 + ph * 1.3) * Math.cos(px * s - tt * 3.8 + ph);
+      const tz = A * Math.sin(px * s * 0.9 + tt * 4.2 + ph * 0.4) * Math.cos(py * s * 1.2 + tt * 2.3 + ph * 1.1);
       v[0] += tx; v[1] += ty; v[2] += tz;
       ta = Math.hypot(tx, ty, tz) / V;
     }
@@ -2701,7 +2706,7 @@ function stepFlow(dt) {
     // EMA-smooth speed & turbulence per particle (raw |v| jumps between LUT
     // entries frame to frame = rainbow confetti, user: 'is that right?')
     const pi3 = i / 3;
-    const td = clamp(sp / (2.5 * V) - 0.4, 0, 1);   // deviation map (see colOf)
+    const td = clamp(0.5 + (sp / V - 1) * 0.5, 0, 1);   // deviation map (see colOf)
     const t2 = flowSm[pi3] + clamp(td - flowSm[pi3], -0.06, 0.06); flowSm[pi3] = t2;
     const tr = flowSmT[pi3] + clamp(tr0 - flowSmT[pi3], -0.06, 0.06); flowSmT[pi3] = tr;
     flowLutAt(t2, rgb);
@@ -2711,7 +2716,7 @@ function stepFlow(dt) {
     col[i + 1] = clamp(rgb[1] * (1 - tr) + tr * 0.1, 0, 1);
     col[i + 2] = clamp(rgb[2] * (1 - tr) + tr * 0.9, 0, 1);
     if (fc) {                                     // fast layer: big red dots
-      if (t2 > 0.16) {   // sp > ~1.4V: accelerated
+      if (t2 > 0.62) {   // sp > ~1.24V: accelerated
         fc[i] = col[i]; fc[i + 1] = col[i + 1]; fc[i + 2] = col[i + 2];
         col[i] *= 0.2; col[i + 1] *= 0.2; col[i + 2] *= 0.2;   // dim the small dot
       } else { fc[i] = 0; fc[i + 1] = 0; fc[i + 2] = 0; }
