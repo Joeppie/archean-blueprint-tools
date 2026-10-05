@@ -303,6 +303,31 @@ const box = (w, h, d) => new THREE.BoxGeometry(w, h, d);
 const cyl = (r, h, seg = 6) => new THREE.CylinderGeometry(r, r, h, seg);
 
 // ---------- component proxies (pivot at local origin = comp.position) ----------
+// In-game a loaded wheel hangs BELOW its mount: the suspension arm droops to
+// −y. The blueprint stores the BUILD pose (arm horizontal: wheel centre 0.447 m
+// off the pivot), so a file-accurate render buries the tire in the deck edge.
+// Droop = the smallest world rotation about the (horizontal) axle that brings
+// the arm to −y — a physical wheel-roll: the axle and tire plane are untouched,
+// so rolling geometry stays exact. Vertical-axle casters (ISW crawler mounts)
+// can't droop around their axle and keep the file pose. Pure display: edits
+// write back through the undo in userData (saved quaternions stay file-exact).
+const WHEEL_TYPES = new Set(['SmallWheel', 'Wheel', 'BigWheel']);
+function applyWheelDroop(obj, qV) {
+  if (!WHEEL_TYPES.has(obj.userData.wType)) { obj.quaternion.copy(qV); return; }
+  const a = new THREE.Vector3(1, 0, 0).applyQuaternion(qV);   // axle
+  const u = new THREE.Vector3(0, 1, 0).applyQuaternion(qV);   // suspension arm
+  const c = -u.y, s = -new THREE.Vector3().crossVectors(a, u).y;   // cos/sin of arm→down
+  const L = Math.hypot(c, s);
+  if (L > 0.9 && c <= 0.02) {        // roll reachable: arm horizontal (90°) or tilted
+    const phi = Math.atan2(s, c);
+    obj.quaternion.setFromAxisAngle(a, phi).multiply(qV);
+    obj.userData.wheelUndo = obj.quaternion.clone().invert().multiply(qV);
+  } else obj.quaternion.copy(qV);
+}
+const rawFromView = (obj, q) => {                   // strip droop, mirror to file
+  const t = obj.userData.wheelUndo ? q.clone().multiply(obj.userData.wheelUndo) : q;
+  return { w: t.w, x: t.x, y: t.y, z: -t.z };
+};
 function footprint(comp) {
   const o = comp.occupancies[0] || { size_x: 0, size_y: 0, size_z: 0 };
   return { x: (o.size_x + 1) * CELL, y: (o.size_y + 1) * CELL, z: (o.size_z + 1) * CELL };
@@ -674,7 +699,8 @@ function buildSubgrids() {
       if (sc.type === 'Build') continue;
       const m = MODEL.manifest?.[sc.type] ? colliderProxy(sc) : (PROXY[sc.type] || PROXY2[sc.type] || defaultProxy)(sc);
       m.position.copy(viewPos(sc.position));
-      m.quaternion.copy(viewQuat(sc.orientation));
+      m.userData.wType = sc.type;
+      applyWheelDroop(m, viewQuat(sc.orientation));
       m.scale.z = -1;
       subGroup.add(m);
     }
@@ -701,7 +727,8 @@ function buildScene() {
     const atlas = !!MODEL.manifest?.[c.type];
     const mesh = atlas ? colliderProxy(c) : (PROXY[c.type] || PROXY2[c.type] || defaultProxy)(c);
     mesh.position.copy(viewPos(c.position));
-    mesh.quaternion.copy(viewQuat(c.orientation));
+    mesh.userData.wType = c.type;
+    applyWheelDroop(mesh, viewQuat(c.orientation));
     mesh.scale.z = -1;                              // hand proxies keep raw local geometry
     mesh.traverse(o => { o.userData.ci = i; });
     mesh.userData.ci = i;
@@ -1158,7 +1185,7 @@ function liveRot(comp, obj, q0) {
     for (const r of realMap.get(obj.userData.ci) || []) r.quaternion.copy(obj.quaternion);
     syncAdapters(obj);
     const q = obj.quaternion;
-    comp.orientation = { w: q.w, x: q.x, y: q.y, z: -q.z };   // view quaternion → file
+    comp.orientation = rawFromView(obj, q);         // view quaternion → file (droop stripped)
     if (mark) markDirty();
   };
 }
@@ -1253,7 +1280,9 @@ function buildInspector() {
   reset.onclick = () => {
     comp.position = { ...orig[selected].pos0 };
     obj.position.copy(viewPos(comp.position));
-    obj.quaternion.copy(viewQuat(orig[selected].q0));
+    obj.userData.wheelUndo = undefined;
+    obj.userData.wType = comp.type;
+    applyWheelDroop(obj, viewQuat(orig[selected].q0));
     comp.orientation = { ...orig[selected].q0 };
     buildInspector();
     markDirty();
@@ -1797,14 +1826,20 @@ if (location.search.includes('selftest')) {
       const bi = model.data.components.findIndex(c => c.type === 'Beacon');
       const mast = bi >= 0 ? new THREE.Vector3(0, 1, 0).applyQuaternion(compObjs[bi].quaternion) : null;
       const ok4 = !!mast && mast.z > 0.9 && Math.abs(mast.x) < 0.2;
+      // wheels hang below the mount in-game (suspension droop, display-only):
+      // the ISW front caster's centre must sit BELOW its pivot, not at deck height
+      const wi = model.data.components.findIndex(c =>
+        c.type === 'SmallWheel' && Math.abs(c.orientation.x) > 0.5);   // the front caster
+      const wc = new THREE.Vector3(0, 0.447, 0).applyQuaternion(compObjs[wi].quaternion);
+      const ok6 = wc.y < -0.3;
       // picking must work through the mirrored component transforms
       ray.setFromCamera(new THREE.Vector2(0, 0), camera);
       const ok5 = ray.intersectObjects(compGroup.children, true)
         .some(h => h.object.userData.ci >= 0);
-      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 ? 'PASS' : 'FAIL')
+      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 ? 'PASS' : 'FAIL')
         + ' occ_z=' + occ.pos_z + ' mirror=' + !!mir
         + ' pitch=' + (2 * Math.asin(-seat.orientation.x) * 180 / Math.PI).toFixed(1) + '°'
-        + ' beacon=' + (mast ? mast.x.toFixed(2) : 'none') + ' pick=' + ok5;
+        + ' beacon=' + (mast ? mast.x.toFixed(2) : 'none') + ' droop=' + wc.y.toFixed(2) + ' pick=' + ok5;
     } catch (e) { document.title = 'SELFTEST ERR ' + e.message; }
   }, 1500);
 }

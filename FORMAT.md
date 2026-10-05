@@ -259,6 +259,15 @@ Zero-build Three.js (WebGL) inspector: `python3 -m http.server 8650` (repo root)
   button solves it so parts+cells = declared `mass`). Flow shows particles **and**
   streamlines (integrated through the same stylized deflection field; blue =
   freestream, red = accelerated flow. Stylized, not CFD).
+- **Wheel suspension droop (display-only):** the file stores the BUILD pose —
+  suspension arm horizontal, wheel centre 0.447 m off the pivot (`SmallWheel`
+  nodes: pivot +0.124 y, axle +0.323 y) — while in-game a loaded wheel hangs
+  BELOW its mount. `applyWheelDroop` rotates the component about its (horizontal)
+  axle so the arm points to −y: a physical roll, the axle and tire plane are
+  untouched, rolling geometry stays exact. Vertical-axle casters (ISW crawler
+  mounts) can't droop about their axle and keep the file pose. Slider edits
+  write back through the inverse (`userData.wheelUndo`) so saved quaternions
+  remain file-exact.
 
 ## Editing recipe (used for the seat adjustment)
 
