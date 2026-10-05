@@ -29,6 +29,14 @@ Read this file together with LICENSE (GNU GPL v3).
    licenses. If you redistribute this repository, keep these attributions
    intact and review the game's EULA/ToS for what redistribution of
    player-created workshop data permits.
+   **XenonViewer-derived material**: `viewer/blockshapes.js` and
+   `viewer/palette.js` (shape/rotation tables and the built-in palette, both
+   transcriptions of the game's `BlockShapes.hh`), and the block face-culling,
+   colour-management and component-placement algorithms in `viewer/view3d.js`
+   are ports/reimplementations of the game developer's own reference viewer
+   (XenonViewer, https://viewer.xenontools.dev/, by batcholi/FloDKSM) — same
+   rights holder as the game data above; transcribed in good faith for
+   interoperability, with attribution, per §4.
 
 3. Content of uncertain or unidentified origin
    -------------------------------------------

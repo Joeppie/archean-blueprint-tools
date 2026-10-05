@@ -11,6 +11,7 @@ addEventListener('unhandledrejection', (e) => {
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js';
+import { resolveColor } from './palette.js';
 
 // ---- game component models (extracted from installed game modules) ----
 // manifest: per-type metadata (mass, renderable node tree, joints, adapters,
@@ -41,13 +42,31 @@ function getModel(type) {
 }
 const ADAPTER_COL = { data: 0x2244cc, fluid: 0x22aa88, highvoltage: 0xcc8811, lowvoltage: 0xcc4444, item: 0x886622, heat: 0xcc2222 };
 const ADP_GEO = new THREE.SphereGeometry(0.03, 8, 6);
-const MAT_FIX = { 'data-connector': 0x2244cc, 'data-connector-m': 0x2244cc, glass: 0xbfd6e6 };
-function modelMaterial(c, name) {
-  if (name === 'color1') return compColor(c, 'color1', 0x9aa2ad);
-  if (name === 'color2') return compColor(c, 'color2', 0x565d68);
-  const col = MAT_FIX[name] ?? 0x8d949e;
-  return { color: new THREE.Color(col), metal: 0.5, rough: 0.55, op: 1 };
+// fallback materials for atlas files predating the materials table (glTF
+// factors are LINEAR, like the game's own material colours)
+const MAT_FIX = {
+  'data-connector': { color: [0, 0.05, 0.5], metal: 1, rough: 1 },
+  'data-connector-m': { color: [0, 0.05, 0.5], metal: 1, rough: 1 },
+  glass: { color: [0.75, 0.84, 0.9, 0.4], metal: 0.1, rough: 0.1, alpha: 'BLEND' },
+};
+function modelMaterial(c, name, mats) {
+  if (name === 'color1') return compColor(c, 'color1');
+  if (name === 'color2') return compColor(c, 'color2');
+  const m = mats?.[name] || MAT_FIX[name];
+  if (m) return { color: new THREE.Color(...m.color.slice(0, 3)),
+                  metal: m.metal ?? 1, rough: clamp(m.rough ?? 1, 0.03, 1),
+                  op: m.alpha === 'BLEND' ? clamp(m.color[3] ?? 0.5, 0.05, 1) : 1 };
+  return { color: new THREE.Color(0x8d949e), metal: 0.5, rough: 0.55, op: 1 };
 }
+// renderables the game only shows under a condition (client behaviour, same
+// table as XenonViewer's CONDITIONAL_PARTS): a wheel's gltf contains BOTH tire
+// toruses (only one is mounted, per data.reverse) and an optional mudguard —
+// showing all of them stacks a double tire and a guard the craft never wore.
+const DROP_PARTS = {
+  Wheel: (c) => [...(c.data?.mudguard === false ? ['mudguard'] : []),
+                  c.data?.reverse ? 'Torus' : 'TorusReverse'],
+  BigWheel: (c) => [c.data?.reverse ? 'Torus' : 'TorusReverse'],
+};
 function buildRealComponent(c, model, idx, low = false) {
   const { geo, info } = model;
   const g = new THREE.Group();
@@ -56,18 +75,23 @@ function buildRealComponent(c, model, idx, low = false) {
   // Blender authoring offsets (MiniComputer's model sits 3 m from its origin!).
   const nodes = new Map();
   const RAD = Math.PI / 180;
-  const addNode = (n) => {
+  const mkNode = (n) => {
     const p = new THREE.Group();
     p.rotation.order = 'ZYX';
     p.position.set(...n.position);
     p.rotation.set(n.rotation[0] * RAD, n.rotation[1] * RAD, n.rotation[2] * RAD);
-    (nodes.get(n.parent) || g).add(p);
     nodes.set(n.name, p);
   };
-  for (const j of info.joints || []) addNode(j);
-  for (const t of info.targets || []) addNode(t);
+  // two passes: create every node, then link — a joint parented to a target
+  // (or any forward reference) must not fall back to the root
+  for (const j of info.joints || []) mkNode(j);
+  for (const t of info.targets || []) mkNode(t);
+  for (const r of info.renderables) mkNode(r);
+  const link = (n) => (nodes.get(n.parent) || g).add(nodes.get(n.name));
+  for (const n of [...(info.joints || []), ...(info.targets || []), ...info.renderables]) link(n);
+  const drop = new Set(DROP_PARTS[c.type]?.(c) || []);
   for (const r of info.renderables) {
-    addNode(r);
+    if (drop.has(r.name)) continue;
     const nd = geo[r.name];
     if (!nd) continue;
     const rg = nodes.get(r.name);
@@ -86,7 +110,7 @@ function buildRealComponent(c, model, idx, low = false) {
     for (const [mname, geos] of byMat) {
       const gg = geos.length > 1 ? mergeGeometries(geos, false) : geos[0];
       if (!gg) continue;
-      const m = new THREE.Mesh(gg, mat(modelMaterial(c, mname)));
+      const m = new THREE.Mesh(gg, mat(modelMaterial(c, mname, info.materials)));
       m.userData.ci = idx;
       rg.add(m);
     }
@@ -207,21 +231,43 @@ const toast = (msg) => { const t = $('toast'); t.textContent = msg; t.style.opac
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const fmt = (v) => (Math.round(v * 1000) / 1000).toString();
 
-function palColor(slot, fallback = 0xaaaaaa) {
-  const c = model.data.colors[slot];
-  if (!c || typeof c !== 'object') return { color: new THREE.Color(fallback), metal: 0.4, rough: 0.7, op: 1 };
+// Game colour semantics (ported from the dev's XenonViewer, see NOTICE §2):
+// palette/component colours are 0-255 LINEAR albedo (the engine's shaders
+// take vec3(r,g,b)/255 raw — decoding them as sRGB darkens everything ~^2.2),
+// roughness is a 0..7 scale, metallic is 0|1, and opacity <15 is transparent.
+// The game's tracer lights every surface with diffuse when roughness>0 even
+// for metallic=1 (a rough-steel plate sun-lit bright, chrome mirror-dark),
+// so metalness is modelled as metallic·(1 − roughness/7).
+function pbr(c) {
+  const rough = clamp((c.roughness ?? 0) / 7, 0.03, 1);
+  const op = c.opacity ?? 15;
   return {
-    color: new THREE.Color(`rgb(${c.r},${c.g},${c.b})`),
-    metal: c.metallic, rough: (c.roughness ?? 7) / 7,
-    op: clamp((c.opacity ?? 15) / 15, 0.05, 1),
+    color: new THREE.Color().setRGB(c.r / 255, c.g / 255, c.b / 255, THREE.LinearSRGBColorSpace),
+    metal: c.metallic ? Math.max(0, 1 - (c.roughness ?? 0) / 7) : 0,
+    rough,
+    op: op >= 15 ? 1 : clamp((op + 1) / 16, 0.02, 1),
   };
 }
+const matKey = (s) => s.color.getHex() + ',' + s.op.toFixed(3) + ',' + s.metal.toFixed(3) + ',' + s.rough.toFixed(3);
+function palColor(slot) {
+  return pbr(resolveColor(model?.data?.colors, slot));
+}
+// component colours: same format as palette entries; the game's painted-material
+// defaults stand in for missing fields (color1 = polished white, color2 = matte grey)
+const COMP_COLOR_DEFAULTS = {
+  color1: { r: 255, g: 255, b: 255, opacity: 15, roughness: 0, metallic: 0 },
+  color2: { r: 204, g: 204, b: 204, opacity: 15, roughness: 7, metallic: 1 },
+};
 function compColor(comp, which, fallback) {
   const c = comp.colors?.[which];
-  if (!c) return { color: new THREE.Color(fallback), metal: 0.5, rough: 0.6, op: 1 };
-  return { color: new THREE.Color(`rgb(${c.r},${c.g},${c.b})`),
-           metal: c.metallic, rough: clamp((c.roughness ?? 7) / 7, 0.05, 1),
-           op: clamp((c.opacity ?? 15) / 15, 0.05, 1) };
+  if (!c) {
+    if (fallback === undefined || fallback === null) return pbr(COMP_COLOR_DEFAULTS[which] || COMP_COLOR_DEFAULTS.color1);
+    return { color: new THREE.Color(fallback), metal: 0.5, rough: 0.55, op: 1 };
+  }
+  const d = COMP_COLOR_DEFAULTS[which] || COMP_COLOR_DEFAULTS.color1;
+  return pbr({ r: c.r ?? d.r, g: c.g ?? d.g, b: c.b ?? d.b,
+               opacity: c.opacity ?? d.opacity, roughness: c.roughness ?? d.roughness,
+               metallic: c.metallic ?? d.metallic });
 }
 function mat(spec, extra = {}) {
   return new THREE.MeshStandardMaterial({
@@ -443,7 +489,7 @@ function buildFaceGrid(blocks) {
       const dir = dirs[f];
       if (!dir || !isFullFace(b.type, f)) continue;
       const slot = b.colors?.[f] ?? b.colors?.[0] ?? 0;
-      const opaque = (model.data.colors?.[slot]?.opacity ?? 15) >= 15;
+      const opaque = resolveColor(model.data.colors, slot).opacity >= 15;
       forEachFaceCell(b, dir, (cell, axis) => {
         const key = faceKey(cell[0], cell[1], cell[2], axis);
         const e = faces.get(key);
@@ -466,62 +512,126 @@ function faceCovered(faces, b, index, faceDir, opaque) {
   return covered;
 }
 
-// merged geometry per material bucket for a list of blocks; offset shifts all
-// positions (subgrids reuse the same builder). 0=matte 1=metallic 2=glass.
-function mergeBlocks(blocks, offset) {
+// ---- block geometry (algorithm ported from the dev's XenonViewer) --------
+// Blocks render as merged geometry, ONE mesh per distinct palette colour
+// (crafts use a handful of colours), with the game's interior-wall rules:
+//  * full faces are cut cell-by-cell against the face grid; surviving cells
+//    are stitched back into rectangles (a 3 m deck = 2 quads, not 144);
+//  * partial faces (slope sides, corner slants) die when fully cell-covered;
+//  * two blocks sharing the same partial-face footprint (a slope glued to a
+//    slope) form an interior partition — both copies drop, else they z-fight.
+// Every surviving face edge also goes into one wire geometry (face colour as
+// vertex colour) so the wireframe overlay shows blocks and hull uniformly.
+function faceFootprint(points, indices) {
+  const uniq = new Set();
+  for (const i of indices) { const p = points[i]; uniq.add(`${p[0].toFixed(4)},${p[1].toFixed(4)},${p[2].toFixed(4)}`); }
+  return [...uniq].sort().join('|');
+}
+const cellM = (c) => c * CELL - FRAME / 2;
+/** Quad covering spanU×spanV cells from `cell`, wound so its normal follows dir. */
+function cellQuad(cell, axis, dir, spanU = 1, spanV = 1) {
+  const u = (axis + 1) % 3, v = (axis + 2) % 3;
+  const plane = cellM(cell[axis] + 1);       // a face lives between cells: plane = cell+1
+  const corner = (du, dv) => {
+    const p = [0, 0, 0];
+    p[axis] = plane; p[u] = cellM(cell[u] + du); p[v] = cellM(cell[v] + dv);
+    return p;
+  };
+  const quad = [corner(0, 0), corner(spanU, 0), corner(spanU, spanV), corner(0, spanV)];
+  const e1 = quad[1].map((x, i) => x - quad[0][i]), e2 = quad[2].map((x, i) => x - quad[0][i]);
+  const n = [e1[1]*e2[2]-e1[2]*e2[1], e1[2]*e2[0]-e1[0]*e2[2], e1[0]*e2[1]-e1[1]*e2[0]];
+  return n[0]*dir[0] + n[1]*dir[1] + n[2]*dir[2] >= 0 ? quad : [quad[3], quad[2], quad[1], quad[0]];
+}
+function buildBlockGeometry(blocks, offset) {
   const faces = buildFaceGrid(blocks);
-  const P = [[], [], []], N = [[], [], []], C = [[], [], []];
+  const buckets = new Map();                 // matKey -> {pos:[], spec}
+  const kept = [], footprints = new Map();
+  const epos = [], ecol = [], eseen = new Set();
+  const ek1 = (p) => `${Math.round((p[0]+offset.x)*1e3)},${Math.round((p[1]+offset.y)*1e3)},${Math.round((p[2]+offset.z)*1e3)}`;
+  const addEdge = (a, b, spec) => {
+    const ka = ek1(a), kb = ek1(b), k = ka < kb ? ka + ';' + kb : kb + ';' + ka;
+    if (eseen.has(k)) return;
+    eseen.add(k);
+    epos.push(a[0]+offset.x, a[1]+offset.y, a[2]+offset.z, b[0]+offset.x, b[1]+offset.y, b[2]+offset.z);
+    ecol.push(spec.color.r, spec.color.g, spec.color.b, spec.color.r, spec.color.g, spec.color.b);
+  };
+  const push = (spec, pts) => {
+    let bk = buckets.get(matKey(spec));
+    if (!bk) buckets.set(matKey(spec), bk = { pos: [], spec });
+    for (const p of pts) bk.pos.push(p[0] + offset.x, p[1] + offset.y, p[2] + offset.z);
+  };
   blocks.forEach((b, index) => {
     if (b.type === 255) return;
-    const origin = [occWorld(b, 'x') - CELL / 2 + offset.x,
-                    occWorld(b, 'y') - CELL / 2 + offset.y,
-                    occWorld(b, 'z') - CELL / 2 + offset.z];
+    const origin = [occWorld(b, 'x') - CELL / 2, occWorld(b, 'y') - CELL / 2, occWorld(b, 'z') - CELL / 2];
     const size = [(b.size_x + 1) * CELL, (b.size_y + 1) * CELL, (b.size_z + 1) * CELL];
     const pts = getBlockPoints(b.type, origin, size);
     const tris = getBlockFaces(b.type);
     const dirs = getBlockFaceDirections(b.type);
     for (let f = 0; f < tris.length; f++) {
+      const spec = palColor(b.colors?.[f] ?? b.colors?.[0] ?? 0);
+      const opaque = spec.op >= 1;
       const dir = dirs[f];
-      const col = palColor(b.colors?.[f] ?? b.colors?.[0] ?? 0);
-      const opaque = col.op >= 0.999;
-      if (dir && faceCovered(faces, b, index, dir, opaque)) continue;  // interior wall
-      const bucket = !opaque ? 2 : col.metal > 0.5 ? 1 : 0;
-      const idx = tris[f];
-      for (let t = 0; t + 2 < idx.length; t += 3) {
-        const a = pts[idx[t]], d = pts[idx[t + 1]], e = pts[idx[t + 2]];
-        const ux = d[0] - a[0], uy = d[1] - a[1], uz = d[2] - a[2];
-        const vx = e[0] - a[0], vy = e[1] - a[1], vz = e[2] - a[2];
-        let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
-        const len = Math.hypot(nx, ny, nz) || 1;
-        nx /= len; ny /= len; nz /= len;
-        for (const p of [a, d, e]) {
-          P[bucket].push(p[0], p[1], p[2]);
-          N[bucket].push(nx, ny, nz);
-          C[bucket].push(col.color.r, col.color.g, col.color.b);
-        }
+      if (dir && isFullFace(b.type, f)) {    // full face: per-cell cull + rectangle stitch
+        const axis = dir[0] ? 0 : dir[1] ? 1 : 2, u = (axis + 1) % 3, v = (axis + 2) % 3;
+        const min = blkCell(b), sz = blkSpan(b);
+        const free = new Uint8Array(sz[u] * sz[v]);
+        let freeCount = 0;
+        forEachFaceCell(b, dir, (cell) => {
+          const entry = faces.get(faceKey(cell[0], cell[1], cell[2], axis)) || [];
+          if (entry.some((e) => e.block !== index && (!opaque || e.opaque))) return;
+          free[(cell[u] - min[u]) * sz[v] + (cell[v] - min[v])] = 1;
+          freeCount++;
+        });
+        if (!freeCount) continue;
+        const emit = (i, j, w, h) => {
+          const cell = [0, 0, 0];
+          cell[axis] = dir[axis] > 0 ? min[axis] + sz[axis] - 1 : min[axis] - 1;
+          cell[u] = min[u] + i; cell[v] = min[v] + j;
+          const q = cellQuad(cell, axis, dir, w, h);
+          push(spec, [q[0], q[1], q[2], q[2], q[3], q[0]]);
+          addEdge(q[0], q[1], spec); addEdge(q[1], q[2], spec);
+          addEdge(q[2], q[3], spec); addEdge(q[3], q[0], spec);
+        };
+        for (let i = 0; i < sz[u]; i++)
+          for (let j = 0; j < sz[v]; j++) {
+            if (!free[i * sz[v] + j]) continue;
+            let h = 1; while (j + h < sz[v] && free[i * sz[v] + j + h]) h++;
+            let w = 1;
+            grow: while (i + w < sz[u]) { for (let k = 0; k < h; k++) if (!free[(i + w) * sz[v] + j + k]) break grow; w++; }
+            emit(i, j, w, h);
+            for (let di = 0; di < w; di++) for (let dj = 0; dj < h; dj++) free[(i + di) * sz[v] + j + dj] = 0;
+          }
+        continue;
       }
+      if (faceCovered(faces, b, index, dir, opaque)) continue;   // interior wall
+      const fp = faceFootprint(pts, tris[f]);
+      footprints.set(fp, (footprints.get(fp) || 0) + 1);
+      kept.push({ pts, idx: tris[f], spec, fp });
     }
   });
-  const out = [];
-  for (let i = 0; i < 3; i++) {
-    if (!P[i].length) continue;
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(P[i], 3));
-    g.setAttribute('normal', new THREE.Float32BufferAttribute(N[i], 3));
-    g.setAttribute('color', new THREE.Float32BufferAttribute(C[i], 3));
-    out.push({ geo: g, mat: i });
+  for (const face of kept) {
+    if (footprints.get(face.fp) > 1) continue;                   // interior partition
+    const P = face.idx.map((i) => face.pts[i]);
+    push(face.spec, P);
+    for (let t = 0; t + 2 < P.length; t += 3)
+      for (const [a, b] of [[P[t], P[t+1]], [P[t+1], P[t+2]], [P[t+2], P[t]]]) addEdge(a, b, face.spec);
   }
-  return out;
+  const meshes = [];
+  for (const { pos, spec } of buckets.values()) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.computeVertexNormals();
+    meshes.push({ geo: g, spec });
+  }
+  return { meshes, edges: { pos: epos, col: ecol } };
 }
-const blkMats = [
-  new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.15 }),
-  new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.3, metalness: 0.85 }),
-  new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.1, metalness: 0.1,
-                                   transparent: true, opacity: 0.35, depthWrite: false,
-                                   side: THREE.DoubleSide }),
-];
 function addBlockMeshes(group, blocks, offset) {
-  for (const { geo, mat } of mergeBlocks(blocks, offset)) group.add(new THREE.Mesh(geo, blkMats[mat]));
+  const { meshes, edges } = buildBlockGeometry(blocks, offset);
+  for (const { geo, spec } of meshes)
+    group.add(new THREE.Mesh(geo, mat(spec, {
+      side: spec.op < 1 ? THREE.DoubleSide : THREE.FrontSide,
+      depthWrite: spec.op >= 1 })));
+  return edges;
 }
 
 // subgrids: nested blueprint data inside 'Build' components (hatches/doors),
@@ -592,7 +702,8 @@ function buildScene() {
     });
   }
 
-  // blocks: merge all into ONE vertex-coloured mesh; occupancy → one line mesh
+  // blocks: merged meshes per palette colour + wire edges; the wireframe
+  // overlay shows blocks and hull triangles uniformly; occupancy → 1 line mesh
   const oedges = [];
   for (const b of blocks) {
     if (b.type !== 255) continue;                                       // occupancy mirror box
@@ -606,10 +717,11 @@ function buildScene() {
     eg.applyMatrix4(new THREE.Matrix4().makeTranslation(ct.x, ct.y, ct.z));
     oedges.push(eg);
   }
-  addBlockMeshes(blockGroup, blocks, new THREE.Vector3());
+  const blkEdges = addBlockMeshes(blockGroup, blocks, new THREE.Vector3());
   if (oedges.length) occGroup.add(new THREE.LineSegments(mergeGeometries(oedges, false),
     new THREE.LineBasicMaterial({ color: 0xff4444, transparent: true, opacity: 0.35 })));
   buildHull();
+  setBlockWire(blkEdges);
   buildPipes();
   buildSubgrids();
   // ground plane: never through the craft — blueprint y can dip below 0,
@@ -622,17 +734,18 @@ function buildScene() {
 
 import { fitHull } from './hullfit.js';
 
-// hull triangles: world_ax = (v + W·frame)·p_ax + C_ax — vertices are SLOTS on
-// a per-frame lattice (W slots per frame tile, see hullfit.js: W detected from
-// cross-frame weld pairs). Constants fitted per file. Hull renders as solid
-// plates (0.125 m, matching in-game skin) + a toggleable wireframe showing the
-// raw triangle surfaces.
+// hull triangles: vertices live on the SAME lattice as blocks —
+// world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
+// 0.05 m prism per triangle (the game's TRIANGLE_THICKNESS): colours[0] front,
+// colours[1] back, colours[2..4] the side walls along edges v0-v1, v1-v2,
+// v2-v0. Raw surface edges join the wireframe overlay (hullWire) alongside
+// block edges — blocks and triangles are treated uniformly there.
 // TODO(future): aerodynamics with full 360° velocity vector (crafts fly along
 // any axis — nose may be ±X/±Z; Y is always up), automatic search of the
 // aerodynamically stable flight direction at low/high speed, and an ambiguity
 // warning when the stability scan finds multiple stable directions.
-const hullP = { W: 14, px: 0.2325, py: 0.2325, pz: 0.2325, Cx: -1.3, Cy: -4.2, Cz: -0.95 };
-const HULL_T = 0.0625;                       // half-thickness of hull skin (m)
+const hullP = { W: 12, px: 0.25, py: 0.25, pz: 0.25, Cx: -1.5, Cy: -1.5, Cz: -1.5 };
+const HULL_T = 0.025;                        // half-thickness of hull skin (m)
 let hullOpacity = 1;
 function hullPt(t, ax, i) {
   return (t[`v${i}_${ax}`] + hullP.W * t['frame_' + ax]) * hullP['p' + ax] + hullP['C' + ax];
@@ -642,7 +755,7 @@ function hullPt(t, ax, i) {
 // their |x| so the skin renders symmetric, and near-axis points snap to x=0.
 function weldedTris() {
   const tris = model.data.triangles.map(t => ({
-    c: t.colors?.[0] ?? 0,
+    c: [0, 1, 2, 3, 4].map(k => t.colors?.[k] ?? t.colors?.[0] ?? 0),
     p: [0, 1, 2].map(i => [hullPt(t, 'x', i), hullPt(t, 'y', i), hullPt(t, 'z', i)]),
   }));
   const K = p => `${Math.round(p[0] * 40)},${Math.round(p[1] * 40)},${Math.round(p[2] * 40)}`;
@@ -675,56 +788,55 @@ function weldedTris() {
   return tris.map((t, i) => ({ c: t.c, p: idx[i].map(j => canon[j]) }));
 }
 const hullWire = new THREE.Group(); scene.add(hullWire);
+let blockWireObj = null;
+function setBlockWire(e) {
+  if (blockWireObj) { hullWire.remove(blockWireObj); blockWireObj.geometry.dispose(); blockWireObj = null; }
+  if (!e.pos.length) return;
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(e.pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(e.col, 3));
+  blockWireObj = new THREE.LineSegments(g,
+    new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.55 }));
+  hullWire.add(blockWireObj);
+}
 function buildHull() {
   hullGroup.clear(); hullWire.clear();
-  // game renders hull triangles as thin solid plates (~0.125 m) — extrude
-  // each triangle along its normal (top, bottom, 3 side walls);
-  // low-opacity palette slots (canopy glass) go to a separate transparent mesh
-  const T = HULL_T, pos = [], col = [], gpos = [], gcol = [], wpos = [];
-  const push = (p, c, P = pos, C = col) => { P.push(...p); C.push(c.r, c.g, c.b); };
-  let colv, gtarget;
-  const off = (v, n, o) => v.map((x, i) => x + n[i] * o);
-  const tri = (a, b, cc, n, o) => {
-    push(off(a, n, o), colv, gtarget.P, gtarget.C);
-    push(off(b, n, o), colv, gtarget.P, gtarget.C);
-    push(off(cc, n, o), colv, gtarget.P, gtarget.C);
+  const T = HULL_T, wpos = [];
+  const buckets = new Map();                 // matKey -> {pos:[], spec}
+  const add = (spec, pts) => {
+    let bk = buckets.get(matKey(spec));
+    if (!bk) buckets.set(matKey(spec), bk = { pos: [], spec });
+    for (const p of pts) bk.pos.push(p[0], p[1], p[2]);
   };
-  const gpush = (p, c) => push(p, c, gpos, gcol);
-  for (const { c: slot, p } of weldedTris()) {
-    const pc = palColor(slot);
-    const glass = pc.op < 0.5;                       // canopy glass slot
-    const c = glass ? new THREE.Color(0x9fb8cc) : pc.color;
-    colv = c; gtarget = glass ? { P: gpos, C: gcol } : { P: pos, C: col };
+  for (const { c, p } of weldedTris()) {
     const e1 = p[1].map((v, i) => v - p[0][i]), e2 = p[2].map((v, i) => v - p[0][i]);
-    const n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
-    const L = Math.hypot(...n) || 1;
-    const u = n.map(x => x / L);
-    const P = glass ? gpush : push;
-    // top + bottom faces
-    tri(p[0], p[1], p[2], u, T); tri(p[0], p[2], p[1], u, -T);
-    // side walls
-    for (let i = 0; i < 3; i++) {
-      const a = p[i], b = p[(i + 1) % 3];
-      P(a.map((v, k) => v + u[k] * T), c); P(b.map((v, k) => v + u[k] * T), c); P(b.map((v, k) => v - u[k] * T), c);
-      P(a.map((v, k) => v + u[k] * T), c); P(b.map((v, k) => v - u[k] * T), c); P(a.map((v, k) => v - u[k] * T), c);
+    const n = [e1[1]*e2[2] - e1[2]*e2[1], e1[2]*e2[0] - e1[0]*e2[2], e1[0]*e2[1] - e1[1]*e2[0]];
+    const u = n.map(x => x / (Math.hypot(...n) || 1));
+    const F = p.map(v => v.map((x, i) => x + u[i] * T));      // front face (+normal)
+    const B = p.map(v => v.map((x, i) => x - u[i] * T));      // back face
+    add(palColor(c[0]), [F[0], F[1], F[2]]);
+    add(palColor(c[1]), [B[2], B[1], B[0]]);
+    for (let i = 0; i < 3; i++) {                             // side walls (prism)
+      const j = (i + 1) % 3;
+      add(palColor(c[2 + i]), [F[i], B[i], B[j], F[i], B[j], F[j]]);
+      wpos.push(...p[i], ...p[j]);                            // raw surface edges
     }
-    for (let i = 0; i < 3; i++) { wpos.push(...p[i], ...p[(i + 1) % 3]); }   // raw surface edges
   }
-  const mk = (P, C, opts, grp = hullGroup) => {
+  for (const { pos, spec } of buckets.values()) {
     const hg = new THREE.BufferGeometry();
-    hg.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
-    hg.setAttribute('color', new THREE.Float32BufferAttribute(C, 3));
+    hg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     hg.computeVertexNormals();
-    grp.add(new THREE.Mesh(hg, new THREE.MeshStandardMaterial(Object.assign(
-      { vertexColors: true, side: THREE.DoubleSide, flatShading: true, roughness: 0.5, metalness: 0.3 }, opts))));
-  };
-  mk(pos, col, { transparent: hullOpacity < 1, opacity: hullOpacity });
-  mk(gpos, gcol, { transparent: true, opacity: 0.28 * hullOpacity, metalness: 0.9, roughness: 0.1,
-                   depthWrite: false });
+    const s = { ...spec, op: spec.op * hullOpacity };
+    hullGroup.add(new THREE.Mesh(hg, new THREE.MeshStandardMaterial({
+      color: s.color, metalness: s.metal, roughness: s.rough,
+      transparent: s.op < 1, opacity: s.op, depthWrite: s.op >= 1,
+      side: THREE.DoubleSide, flatShading: true })));
+  }
   const wg = new THREE.BufferGeometry();
   wg.setAttribute('position', new THREE.Float32BufferAttribute(wpos, 3));
   hullWire.add(new THREE.LineSegments(wg,
     new THREE.LineBasicMaterial({ color: 0x7dffcf, transparent: true, opacity: 0.65 })));
+  if (blockWireObj) hullWire.add(blockWireObj);   // blocks ride the same overlay
 }
 
 // pipes: data.pipes segments are axis-aligned runs {start, dir(0..5=+x,-x,+y,-y,+z,-z),
@@ -1141,7 +1253,7 @@ function buildViewOpts() {
   toggle('occupancy boxes (type-255)', occGroup);
   toggle('blocks', blockGroup);
   toggle('hull triangles', hullGroup);
-  toggle('hull wireframe', hullWire);
+  toggle('wireframe (hull + blocks)', hullWire);
   toggle('pipes & connectors', pipeGroup);
   toggle('subgrids (doors/hatches)', subGroup);
   const rl = document.createElement('label');

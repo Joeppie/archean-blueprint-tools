@@ -62,7 +62,8 @@ programmatic editing is safe.
 - `colors[7]`: one palette slot (`data.colors`) **per face**, in the face order
   of `SHAPE_FACES` in `blockshapes.js` (cube: top, bottom, right, left, front,
   back; slopes/corners/pyramids: their own order, slant face first). Slots with
-  `opacity < 15` render transparent (glass).
+  `opacity < 15` render transparent, alpha = (opacity+1)/16 (glass) — see
+  “Colour & materials” below for the full PBR semantics.
 - `material`: 0..6 = composite, concrete, steel, aluminium, glass, lead,
   titanium (visual: palette slots carry the metallic/roughness per face).
 
@@ -119,28 +120,96 @@ identical frame/pos/size).
   with editor nudges; `blocks` mirror tracked `occupancies` — our save format
   emulation (see viewer) matches what the game itself writes.
 
-## Triangles (hull) mapping — SOLVED via vertex welding
+## Triangles (hull) mapping — EXACT lattice (verified via game maths + XenonViewer, Oct 5)
 
-Triangle vertices are **lattice slots**: `(frame, v_x,v_y,v_z)` with world
-`world_ax = (v_ax + W·frame_ax)·pitch_ax + C_ax`. Evidence from this file:
+Triangle vertices live on the **same lattice as blocks** — no fitting involved:
+
+    world_ax = frame_ax · 3.0 − 1.5 + v_ax · 0.25
+             = (v_ax + 12·frame_ax) · 0.25 − 1.5        (W=12, pitch=CELL, C=−FRAME/2)
+
+Evidence (ISW-241, 21 triangles):
 
 - 63 vertex usages occupy only **49 distinct slots** — shared slots are welded
   vertices (the two canopy side panels share exactly 2 slots: the hatch hinge).
 - Cross-frame weld pairs: canopy top ridge stored as `(5,27,20)@frame_x 0` and
-  `(19,27,20)@frame_x −1` — same v_y/v_z, Δv_x = 14…16; the mode gives **W = 12**
-  for this craft (bottom counterparts at W±2 encode a 2-slot **gap** = the canopy
-  opening at the rear: welded hinge, gaped bottom — matches in-game).
-- Canonical slot indices fitted tight to the bounding box give **pitch_x = 0.25000
-  = exactly the game cell size** (0.2667 y, 0.2866 z — anisotropic lattice);
-  y anchored at aileron height (wing layer) and box top. Result: wingtips and
-  tail land exactly on box edges, canopy is symmetric about x = 0, canopy top =
-  box top, nose tip = box z-min. `hullfit.js` derives W/pitches/offsets per file.
-- The game layers thickness (~0.125 m) onto the triangle surface; winding order
-  flips the normal. The viewer extrudes each triangle ±0.0625 m along its normal
-  and renders low-opacity palette slots (slot 4 here: white, opacity 0) as glass.
-  A "hull wireframe" toggle shows the raw welded triangle edges.
-- Render symmetry: shared slots weld (0.025 m), near-mirror vertex pairs average
-  |x|, near-axis points snap to x = 0.
+  `(17,27,20)@frame_x −1` — same v_y/v_z, Δv_x = **12** = cells-per-frame
+  (dominant Δv across the corpus, 37/54 pairs); bottom counterparts at 12±2
+  encode deliberate 2-slot **gaps** = openings (the canopy opening at the rear:
+  welded hinge, gaped bottom — matches in-game).
+- Vertex positions are exact multiples of 0.25 offset by frame·3−1.5, and the
+  resulting bbox matches the craft box (x exactly, y/z inside) on every corpus
+  file. **The old per-file "pitch fit" (py 0.2667, pz 0.2866) was an artefact of
+  stretching the vertex span onto `box_min/box_max` — the box is not the skin's
+  tight bbox. Do not reintroduce per-axis fits**; they leave the skin 3–15 % off
+  the block hull, so no triangle edge meets a block edge.
+- Each triangle is a closed **0.05 m prism** (game `TRIANGLE_THICKNESS_METERS`):
+  `colors[0]` front face, `colors[1]` back face, `colors[2..4]` the three side
+  walls along edges v0-v1, v1-v2, v2-v0. All five colours matter (ISW-241 uses
+  slots 0 = hull navy, 4 = glass, 51 = chrome rims). Winding order flips the
+  normal. The viewer renders the prisms per-colour; the wireframe overlay
+  (“wireframe (hull + blocks)”) shows the raw triangle edges **and** the block
+  face edges together — one LineSegments each, vertex-coloured.
+- Render symmetry (viewer heuristic, not the game): shared slots weld (0.025 m),
+  near-mirror vertex pairs average |x|, near-axis points snap to x = 0.
+
+## Colour & materials — the game's exact semantics (verified from shader notes
+in the dev's XenonViewer + the shipped `.gltf`/`.ini` assets, Oct 5)
+
+- Palette entries `data.colors[slot]` = `{r,g,b 0..255, opacity 0..15,
+  roughness 0..7, metallic 0|1}`:
+  - **r/g/b are LINEAR albedo** — the engine uses `vec3(r,g,b)/255` raw.
+    Decoding them as sRGB darkens everything ~^2.2 (the ISW-241 navy renders
+    as a black hole). Three.js: `new THREE.Color().setRGB(r/255,g/255,b/255,
+    THREE.LinearSRGBColorSpace)`.
+  - transparency: `opacity < 15` ⇒ alpha = **(opacity+1)/16**, depthWrite off
+    (`opacity < 8` is glass; built-in slot 4 = white/opacity 0 = clear glass).
+  - roughness = value/7; metallic ∈ {0,1} and the tracer lights every surface
+    with diffuse when roughness>0 even for metallic=1 (rough steel sun-lit
+    bright, chrome mirror-dark) ⇒ `metalness = metallic · (1 − roughness/7)`.
+  - Slots **0..10 are engine-reserved** (the reader re-imposes the built-ins);
+    full built-in table in `viewer/palette.js` (from the game's BlockShapes.hh,
+    same source the dev's XenonViewer generates from).
+- Component painted materials: gltf materials named `color1`/`color2` take
+  `components[].colors.color1/color2` (same entry format; per-component dict).
+  Defaults when fields missing: color1 = white, op 15, rough 0, metal 0
+  (polished); color2 = 204³, op 15, rough 7, metal 1 (matte grey).
+- Fixed (non-painted) gltf materials carry real `pbrMetallicRoughness` factors,
+  also LINEAR: `tire` [0.0134³, metal 0, rough 0.5], `body` [0.01..0.03³,
+  metal 0], `pin` (chrome, rough 0), `data-connector` [0,0.05,0.5],
+  `lv-connector` [0.5,0,0], `hv-connector` [0.5,0.15,0]. glTF defaults when a
+  factor is absent: color 0.8³, metallic 1, roughness 1.
+  `extract_models.py` keeps these per type in `viewer/models/manifest.json`
+  under `materials`. (Wheels rendered as grey discs before this was extracted.)
+- **Conditional renderables**: a Wheel/BigWheel gltf contains BOTH tire toruses
+  `Torus`/`TorusReverse` plus a `mudguard`; the client mounts one torus
+  (`data.reverse` picks) and the guard unless `data.mudguard === false`.
+  Rendering all = double-stacked tire (the “wheels look wrong” bug).
+- Component placement truth = the `.ini` node tree (RENDERABLE/JOINT/TARGET
+  parents, euler **ZYX**); gltf node translations are Blender layout offsets
+  (Beacon base node +0.339 z ↔ .ini −0.339 y; MiniComputer 3 m; PilotSeat seat
+  pan +0.82 m) and must NOT be baked into geometry — the beacon renders at the
+  game's position only with the .ini transform. Node `parent` refs may appear
+  in any order: build the full node map, then link.
+- `mirrorAxis` exists in files; **0 = none** (axis indices are 1=x,2=y,3=z,
+  mirrored = negative scale in the component's local frame). No corpus file
+  uses a nonzero value.
+
+## Local sources of truth (no web fetch needed)
+
+All of the above is derivable offline — a fresh session should NOT need to
+fetch https://viewer.xenontools.dev/ (the dev's authoritative JS viewer; its
+key semantics are transcribed above and in the code headers):
+
+- Game assets on disk: `~/.local/share/Steam/steamapps/common/Archean/Archean-game/modules/<module>/components/<Type>/<Type>.{gltf,ini,png}`
+  — per component: mesh + material factors (gltf), node tree/mass/colliders/
+  joints/adapters (ini). Regenerate the atlas:
+  `python3 tools/extract_models.py ~/.local/share/Steam/steamapps/common/Archean/Archean-game -o viewer/models`
+  (only `manifest.json` changes for material-table updates; geometry jsons
+  are byte-stable).
+- The dev's viewer (`viewer.xenontools.dev`, js/{scene,blueprint,palette,blockshapes}.js)
+  remains the reference implementation when a format question is genuinely new;
+  anything learned there MUST be transcribed into this file + code comments so
+  it stays offline.
 
 ## Live viewer: viewer/index.html + view3d.js
 

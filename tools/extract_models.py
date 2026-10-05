@@ -48,7 +48,12 @@ def vec(s, n=None):
 
 
 def read_gltf(gltf_path):
-    """Return {node_name: [ {material, v:[..], n:[..], i:[..]} ]} from gltf+bin."""
+    """Return ({node_name: prims...}, {material_name: pbr factors}) from gltf+bin.
+
+    The material table keeps pbrMetallicRoughness baseColorFactor / metallic /
+    roughness factors (glTF defaults: color 0.8 grey, metallic 1, roughness 1;
+    baseColorFactor is LINEAR, no sRGB conversion) so the viewer can render
+    'tire'/'body'/'pin'/connectors in their real game colors."""
     g = json.loads(gltf_path.read_text())
     bins = []
     for buf in g.get("buffers", []):
@@ -84,7 +89,21 @@ def read_gltf(gltf_path):
             "translation": node.get("translation", [0, 0, 0]),
             "rotation": node.get("rotation", [0, 0, 0, 1]),
         }
-    return comps
+    mats = {}
+    for m in g.get("materials", []):
+        pbr = m.get("pbrMetallicRoughness", {})
+        bc = pbr.get("baseColorFactor", [0.8, 0.8, 0.8, 1.0])
+        rec = {"color": [round(x, 4) for x in bc[:3]],
+               "metal": pbr.get("metallicFactor", 1),
+               "rough": pbr.get("roughnessFactor", 1)}
+        alpha = m.get("alphaMode")
+        if alpha and alpha != "OPAQUE":
+            rec["alpha"] = alpha
+            rec["color"].append(round(bc[3], 4))
+        if any(m.get("emissiveFactor", [])):
+            rec["emissive"] = [round(x, 3) for x in m["emissiveFactor"]]
+        mats[m.get("name", "base")] = rec
+    return comps, mats
 
 
 def lowify(v, i, min_size):
@@ -144,12 +163,14 @@ def main():
         ent = {k: v for (t, k), v in sec.items() if t == "ENTITY"}
         ekey = next(iter(ent), typ)
         entry = {"module": ini.parts[-4], "mass": float(ent.get(ekey, {}).get("mass", 1) or 1),
-                 "nodes": {}, "renderables": [], "joints": [], "targets": [], "adapters": [], "colliders": []}
+                 "nodes": {}, "renderables": [], "joints": [], "targets": [], "adapters": [],
+                 "colliders": [], "materials": {}}
         try:
-            comps = read_gltf(gltf)
+            comps, mats = read_gltf(gltf)
         except Exception as e:
             print(f"skip {typ}: gltf {e}", file=sys.stderr)
             continue
+        entry["materials"] = mats
         for c in comps.values():                    # build the low-poly twin
             allv = [x for p in c["prims"] for x in p["v"]]
             if not allv:
