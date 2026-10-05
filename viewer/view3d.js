@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=126';
-import { resolveColor } from './palette.js?v=126';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=127';
+import { resolveColor } from './palette.js?v=127';
 
 // ---- site-zoom cancel: the viewer ALWAYS loads at physical 100% ----
 // Chrome SAVES page zoom per site (Ctrl+wheel sets it, Ctrl-F5 keeps it,
@@ -1129,7 +1129,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=126';
+import { fitHull } from './hullfit.js?v=127';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -2551,7 +2551,7 @@ function buildStreamlines() {
   // freestream = blue, slowed flow = deep blue, accelerated = yellow->red.
   // The old absolute map put freestream mid-ramp = green = ground colour,
   // so 4 m/s streamlines were invisible over the plane (user's dolphin shot).
-  const devT = (sp) => clamp(0.5 + (sp / V - 1) * 0.5, 0, 1);  // V -> mid (green), 2V -> red, 0 -> blue
+  const devT = (sp) => clamp(0.5 + (sp / V - 1) * 2.0, 0, 1);  // V -> mid (green); +-25% -> full blue/red (small craft too)
   const colOf = (sp, arr) => { flowLutAt(devT(sp), rgb); arr.push(rgb[0], rgb[1], rgb[2]); };
   // Seed plane PERPENDICULAR to the flow, one body-radius upstream — the old
   // fixed x·y/z-centre grid only made sense for pure tailward flow; with wind
@@ -2618,7 +2618,7 @@ function buildStreamlines() {
         // high-speed flow (deflected/accelerated: >1.25·V) gets a THICK hot-red
         // render: 4 offset copies (1px GL lines can't widen) = user "thicker, red"
         const pm = (sps[k / 3] + sps[k / 3 + 1]) / 2;
-        if (pm > V * 1.25) {
+        if (pm > V * 1.15) {   // accelerated: hot + thick (matches gain-2 map)
           for (const o of FASTOFF) {
             ALLF.push(
               pts[k] + o[0], pts[k + 1] + o[1], pts[k + 2] + o[2],
@@ -2652,7 +2652,8 @@ function respawn(arr, i, b, B) {
   // craft (dolphin: 25 m out), so particles died the frame they spawned and
   // respawned on that shell — a boiling rainbow cloud 'far ahead of the
   // craft' (user screenshot). Uniform works for any flow direction.
-  const M = 2.5;
+  const M = 1.3;   // MUST stay < the kill margin R (2.6) in stepFlow: spawning
+                    // outside it parks particles (instant respawn in place, user)
   for (let att = 0; att < 24; att++) {
     arr[i] = b.x - M + Math.random() * (B.x - b.x + 2 * M);
     arr[i + 1] = b.y - M + Math.random() * (B.y - b.y + 2 * M);
@@ -2668,7 +2669,7 @@ function stepFlow(dt) {
   if (!flowData || !flowOn) return;
   const V = Math.max(1, flowState.speed), dir = flowDir();
   const b = model.box_min, B = model.box_max;
-  const R = 1.6, tt = performance.now() * 0.0006;
+  const R = 2.6, tt = performance.now() * 0.0006;   // > respawn margin M (1.3)
   const pos = flowPts.geometry.attributes.position.array;
   const col = flowPts.geometry.attributes.color.array;
   const tp = flowTrails && flowTrails.pos, tc = flowTrails && flowTrails.col;
@@ -2706,7 +2707,7 @@ function stepFlow(dt) {
     // EMA-smooth speed & turbulence per particle (raw |v| jumps between LUT
     // entries frame to frame = rainbow confetti, user: 'is that right?')
     const pi3 = i / 3;
-    const td = clamp(0.5 + (sp / V - 1) * 0.5, 0, 1);   // deviation map (see colOf)
+    const td = clamp(0.5 + (sp / V - 1) * 2.0, 0, 1);   // deviation map (gain 2: small craft too)
     const t2 = flowSm[pi3] + clamp(td - flowSm[pi3], -0.06, 0.06); flowSm[pi3] = t2;
     const tr = flowSmT[pi3] + clamp(tr0 - flowSmT[pi3], -0.06, 0.06); flowSmT[pi3] = tr;
     flowLutAt(t2, rgb);
@@ -2716,7 +2717,7 @@ function stepFlow(dt) {
     col[i + 1] = clamp(rgb[1] * (1 - tr) + tr * 0.1, 0, 1);
     col[i + 2] = clamp(rgb[2] * (1 - tr) + tr * 0.9, 0, 1);
     if (fc) {                                     // fast layer: big red dots
-      if (t2 > 0.62) {   // sp > ~1.24V: accelerated
+      if (t2 > 0.8) {   // sp > ~1.15V: accelerated (gain-2 map)
         fc[i] = col[i]; fc[i + 1] = col[i + 1]; fc[i + 2] = col[i + 2];
         col[i] *= 0.2; col[i + 1] *= 0.2; col[i + 2] *= 0.2;   // dim the small dot
       } else { fc[i] = 0; fc[i + 1] = 0; fc[i + 2] = 0; }
