@@ -269,18 +269,31 @@ Zero-build Three.js (WebGL) inspector: `python3 -m http.server 8650` (repo root)
     arm points to −y: a physical roll, the axle and tire plane are untouched,
     rolling geometry stays exact. Vertical-axle casters (ISW crawler mounts)
     can't droop about their axle and keep the file pose.
-  - *FluidJunction flat pose (user-requested):* the .ini adapters sit on local
-    **±z** (inlet (0,0,−0.125); outlets (±0.375/±0.125, 0, +0.125)) and the file
-    quaternion stands the comb UPRIGHT — game truth per `data.pipes` (the outlet
-    row faces starboard at four deck heights, inlet faces port). The viewer
-    shows the canonical FLAT layout the user asked for: inlet LEFT (view −x),
-    four outlets RIGHT (+x), row/body along z (fuselage) — display quaternion
-    `JUNCTION_Q` = R_y(−90°), reachable because the junction's thin local-y side
-    is featureless. With the flat pose the file's upright outlet-pipe endpoints
-    sit ≤0.4 m off the drawn ports; the inlet pipe meets exactly. The old
-    hand-built proxy (stubs on local ±y) created the "it used to be flat"
-    impression; the proxy is now rebuilt to the true ±z port frame, and adapter
-    nubs use `JUNCTION_Q` too.
+  - *FluidJunction — game pose is the only layout where cables connect
+    (v0.96 revert of the v0.95 flat pose):* the .ini port frame is local **±z**
+    (inlet (0,0,−0.125); outlets (±0.375/±0.125, 0, +0.125)) and `data.pipes`
+    endpoints sit at x ±0.125 from the component origin (verified 0.000 m): the
+    ports are on the SIDE faces — inlet faces port (view −x = LEFT), the
+    4-outlet row faces starboard (+x = RIGHT) as a vertical stack at four deck
+    heights, and every pipe/cable meets a port exactly. The comb body stands
+    vertical (1.0 m, local x → world y). The v0.95 "flat" pose (display
+    quaternion R_y(−90), row along the fuselage) put the outlets on top-ish and
+    ≤0.4 m off the file's upright pipe endpoints — reverted: the file pose is
+    kept verbatim. The proxy stays rebuilt to the true ±z port frame (its old
+    ±y stubs were the source of the "it used to be flat" impression).
+- **Aileron deflection is saved per component:** `components[].data.angle` is
+  the joint angle in rad (Unity LH about the hinge/span axis) — the control
+  surfaces' activation position as saved. ISW-241: front canard −4.609 rad
+  (= +95.9° normalised, saloon-door, tip DOWN in view), rear pair ±0.0958 rad
+  differential (±5.5°, one tip down = roll input). Viewer sign: proxy
+  `pivot.rotation.x` and real-model `jp.rotateX` both get `−norm(angle)`
+  (z-mirror flips LH→RH; the 180°-z aileron quaternions map local +x rotation
+  to view +x). Verified: front canard tip renders below its hinge.
+- **Floating labels are parented to `compGroup`, never to a mirrored mesh:**
+  GPU sprite quads under a negative-determinant (scale.z=−1) parent render
+  MIRRORED text on some rasterizers (user report; SwiftShader never mirrors,
+  so it is not headless-reproducible). Labels keep `userData.dy` and follow
+  their component in `tick()`.
 
 ## Editing recipe (used for the seat adjustment)
 

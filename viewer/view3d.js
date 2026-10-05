@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js';
-import { resolveColor } from './palette.js';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=96';
+import { resolveColor } from './palette.js?v=96';
 
 // ---- game component models (extracted from installed game modules) ----
 // manifest: per-type metadata (mass, renderable node tree, joints, adapters,
@@ -118,9 +118,9 @@ function buildRealComponent(c, model, idx, low = false) {
   }
   // aileron: hinge the real flap like the game does (front ailerons droop)
   const jp = nodes.get('joint');
-  if (jp && c.type === 'Aileron') jp.rotateX(-(c.position.z < 0 ? 0.785 : 0.12));
+  if (jp && c.type === 'Aileron') jp.rotateX(aileronAngle(c));   // saved data.angle deflection
   // adapter nubs: queue in world space, merged into ONE mesh per port type (see adpFlush)
-  const qo = JUNCTION_TYPES.has(c.type) ? JUNCTION_Q : viewQuat(c.orientation);
+  const qo = viewQuat(c.orientation);
   const po = viewPos(c.position);
   for (const a of info.adapters || []) {
     const p = new THREE.Vector3(a.position[0], a.position[1], -a.position[2]).applyQuaternion(qo);
@@ -312,23 +312,8 @@ const cyl = (r, h, seg = 6) => new THREE.CylinderGeometry(r, r, h, seg);
 // can't droop around their axle and keep the file pose. Pure display: edits
 // write back through the undo in userData (saved quaternions stay file-exact).
 const WHEEL_TYPES = new Set(['SmallWheel', 'Wheel', 'BigWheel']);
-// FluidJunction canonical display pose. The file quaternion stands the comb
-// UPRIGHT (game truth per data.pipes: the 4-outlet row faces starboard at four
-// deck heights, inlet faces port). The user wants it laid along the fuselage
-// instead: inlet LEFT (−x), the four outlets RIGHT (+x), row/body along z.
-// That layout is rigid-reachable (the junction's thin local-y side absorbs the
-// frame flip): total map local x→z, z→x, y→y = quaternion R_y(−90) composed
-// with the view mirror (mesh scale.z=−1) → q = R_y(−90). Display-only: edits
-// write back through the stored undo, saved quaternions stay file-exact.
-const JUNCTION_TYPES = new Set(['FluidJunction']);
-const JUNCTION_Q = new THREE.Quaternion(0, -Math.SQRT1_2, 0, Math.SQRT1_2);   // R_y(−90°)
 function applyDisplayPose(obj, qV) {
   obj.userData.wheelUndo = undefined;
-  if (JUNCTION_TYPES.has(obj.userData.wType)) {
-    obj.quaternion.copy(JUNCTION_Q);
-    obj.userData.wheelUndo = JUNCTION_Q.clone().invert().multiply(qV);
-    return;
-  }
   if (!WHEEL_TYPES.has(obj.userData.wType)) { obj.quaternion.copy(qV); return; }
   const a = new THREE.Vector3(1, 0, 0).applyQuaternion(qV);   // axle
   const u = new THREE.Vector3(0, 1, 0).applyQuaternion(qV);   // suspension arm
@@ -344,6 +329,14 @@ const rawFromView = (obj, q) => {                   // strip droop, mirror to fi
   const t = obj.userData.wheelUndo ? q.clone().multiply(obj.userData.wheelUndo) : q;
   return { w: t.w, x: t.x, y: t.y, z: -t.z };
 };
+// saved aileron deflection: components[].data.angle (rad, Unity LH about the
+// hinge span axis; the "activation position" of the control surface as saved).
+// Normalise to (−π, π]. View-space sign = −aileronAngle (z-mirror + 180° z q).
+const aileronAngle = c => {
+  const a = (c.data && typeof c.data.angle === 'number') ? c.data.angle : 0;
+  return ((a % (2 * Math.PI)) + 3 * Math.PI) % (2 * Math.PI) - Math.PI;
+};
+
 function footprint(comp) {
   const o = comp.occupancies[0] || { size_x: 0, size_y: 0, size_z: 0 };
   return { x: (o.size_x + 1) * CELL, y: (o.size_y + 1) * CELL, z: (o.size_z + 1) * CELL };
@@ -373,8 +366,12 @@ const PROXY = {
   Aileron(c) {
     // facsimile of the game model: control plate + hinge rod (the "broom
     // handle" sticking out past the edges) + flap hinged on the local -z edge.
-    // Canards (the front pair) render with the flap deflected up, like the
-    // saloon-door look in-game; main control surfaces sit near-neutral.
+    // Flap deflection = the SAVED control state: components[].data.angle is
+    // the joint angle in rad (Unity LH about the hinge/span axis; ISW-241:
+    // front canard -4.609 rad = 95.9° saloon-door, rear pair ±0.096 differential).
+    // View space is the z-mirror of game space (LH→RH flips the sign), and the
+    // 180°-z aileron quaternions conjugate local +x back to view −x (second
+    // flip) → net pivot.rotation.x = +aileronAngle(c).
     const f = footprint(c);
     const g = new THREE.Group();
     const m = mat(compColor(c, 'color1', 0xdddddd));
@@ -388,7 +385,7 @@ const PROXY = {
     const pivot = new THREE.Group();
     pivot.position.z = -f.z * 0.1;
     pivot.add(flap);
-    pivot.rotation.x = (c.position && c.position.z < 0 ? 1.05 : 0.12); // canards: saloon-door up
+    pivot.rotation.x = aileronAngle(c);
     g.add(plate, rod, pivot);
     return g;
   },
@@ -751,10 +748,14 @@ function buildScene() {
     compObjs[i] = mesh;
     if (INTERACT[c.type] || c.alias) {              // floating label above part
       const sp = makeLabel(c);
-      sp.position.y = new THREE.Box3().setFromObject(mesh).max.y - mesh.position.y + 0.18;
+      const top = new THREE.Box3().setFromObject(mesh).max.y;
       sp.userData.ci = i;
+      sp.userData.dy = top - mesh.position.y + 0.18;
+      sp.position.set(mesh.position.x, top + 0.18, mesh.position.z);
       sp.visible = labelsOn;
-      mesh.add(sp);
+      compGroup.add(sp);   // NEVER parented to the mirrored mesh: GPU sprite
+                           // quads under a negative-determinant parent render
+                           // mirrored text on some rasterizers
     }
     const mp = atlas ? getModel(c.type) : null;
     if (mp) mp.then(mm => {
@@ -766,8 +767,11 @@ function buildScene() {
       real.userData.real = true;
       mesh.visible = false;
       mesh.userData.hasReal = true;
-      const lab = mesh.children.find(o => o.userData.isLabel);
-      if (lab) real.add(lab);                     // labels ride the visible model
+      const lab = compGroup.children.find(o => o.userData.isLabel && o.userData.ci === i);
+      if (lab) {                                   // labels ride the visible model
+        lab.userData.dy = new THREE.Box3().setFromObject(real).max.y - real.position.y + 0.18;
+        lab.position.y = real.position.y + lab.userData.dy;
+      }
       compGroup.add(real);
       (realMap.get(i) || realMap.set(i, []).get(i)).push(real);
       invalidate();
@@ -805,7 +809,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js';
+import { fitHull } from './hullfit.js?v=96';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -1731,6 +1735,11 @@ function tick(t) {
   const dt = Math.min(0.05, (t - lastT) / 1000 || 0.016);
   lastT = t;
   controls.update();                                  // 'change' event → invalidate
+  if (labelsOn) for (const o of compGroup.children)   // labels follow dragged/moved parts
+    if (o.userData.isLabel) {
+      const m = compObjs[o.userData.ci];
+      if (m) o.position.set(m.position.x, m.position.y + o.userData.dy, m.position.z);
+    }
   if (flowOn) stepFlow(dt);
   if (perfT0) needsRender = true;
   if (!needsRender && !flowOn) return;
@@ -1847,20 +1856,30 @@ if (location.search.includes('selftest')) {
         c.type === 'SmallWheel' && Math.abs(c.orientation.x) > 0.5);   // the front caster
       const wc = new THREE.Vector3(0, 0.447, 0).applyQuaternion(compObjs[wi].quaternion);
       const ok6 = wc.y < -0.3;
-      // FluidJunction canonical flat pose: inlet faces LEFT (view −x), the
-      // outlet row runs along the fuselage (view z) — not standing up
+      // FluidJunction game pose (verified 0.000 m against data.pipes): the
+      // inlet port faces LEFT (view −x), the 4-outlet row faces right
       const ji = model.data.components.findIndex(c => c.type === 'FluidJunction');
       const jdir = new THREE.Vector3(0, 0, 1).applyQuaternion(compObjs[ji].quaternion);
       const ok7 = jdir.x < -0.9;
+      // aileron deflection = saved data.angle: the ISW front canard (−4.609 rad
+      // = +95.9° normalised) must render as a saloon door drooping BELOW its
+      // hinge: view tip dir = qV · Mz · R_x(+norm(angle)) · (0,0,−1)
+      const ac = model.data.components.find(c =>
+        c.type === 'Aileron' && c.data && c.data.angle < -3);
+      const aqp = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0),
+        ((ac.data.angle % (2 * Math.PI)) + 3 * Math.PI) % (2 * Math.PI) - Math.PI);
+      const at = new THREE.Vector3(0, 0, -1).applyQuaternion(aqp);
+      at.z = -at.z; at.applyQuaternion(viewQuat(ac.orientation));
+      const ok8 = at.y < -0.5;
       // picking must work through the mirrored component transforms
       ray.setFromCamera(new THREE.Vector2(0, 0), camera);
       const ok5 = ray.intersectObjects(compGroup.children, true)
         .some(h => h.object.userData.ci >= 0);
-      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 && ok7 ? 'PASS' : 'FAIL')
+      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 ? 'PASS' : 'FAIL')
         + ' occ_z=' + occ.pos_z + ' mirror=' + !!mir
         + ' pitch=' + (2 * Math.asin(-seat.orientation.x) * 180 / Math.PI).toFixed(1) + '°'
         + ' beacon=' + (mast ? mast.x.toFixed(2) : 'none') + ' droop=' + wc.y.toFixed(2)
-        + ' junction=' + jdir.x.toFixed(2) + ' pick=' + ok5;
+        + ' junction=' + jdir.x.toFixed(2) + ' aileron=' + at.y.toFixed(2) + ' pick=' + ok5;
     } catch (e) { document.title = 'SELFTEST ERR ' + e.message; }
   }, 1500);
 }

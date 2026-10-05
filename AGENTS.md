@@ -152,7 +152,9 @@ landing page and README together when the viewer changes).
    occupancy + type-255 mirror stay synced after position edits; the ISW beacon
    mast must point nose-ward in VIEW space (pins the Unity handedness fix); the
    ISW front caster wheel must hang below its pivot (suspension droop, display-only),
-   the FluidJunction inlet must face view −x (flat display pose, `JUNCTION_Q`),
+   the FluidJunction inlet must face view −x (game pose; pipes/cables meet ports
+   exactly — 0.000 m verified against data.pipes), the ISW front aileron (saved
+   `data.angle` = −4.609 rad) must droop below its hinge,
    raycast picking must work through the mirrored component transforms.
 2. `regtest`: every testdata blueprint parses; blocks/components within bbox
    margins; the hull lattice map (when triangles exist) puts every vertex
