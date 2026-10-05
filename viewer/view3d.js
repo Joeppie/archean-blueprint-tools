@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=132';
-import { resolveColor } from './palette.js?v=132';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=133';
+import { resolveColor } from './palette.js?v=133';
 
 // ---- site-zoom cancel: the viewer ALWAYS loads at physical 100% ----
 // Chrome SAVES page zoom per site (Ctrl+wheel sets it, Ctrl-F5 keeps it,
@@ -1129,7 +1129,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=132';
+import { fitHull } from './hullfit.js?v=133';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -2498,7 +2498,11 @@ function sampleVel(p, dir, V) {
           const d = [p[0] - (cx + i + 0.5) * 0.25, p[1] - (cy + j + 0.5) * 0.25, p[2] - (cz + k + 0.5) * 0.25];
           const r = Math.hypot(d[0], d[1], d[2]);
           if (r > 0.62 || r < 1e-6) continue;
-          const w = Math.exp(-(Math.max(0, r - 0.18) ** 2) / 0.1);
+          // influence width 0.1->0.3: with a ~0.3 m reach, each crossed cell
+          // boundary delivered one discrete 0.25 m kick -> particles climbed
+          // the hull in cell-sized STAIRS (user). Overlapping neighbours
+          // make the push continuous; particles hug surfaces as ramps.
+          const w = Math.exp(-(Math.max(0, r - 0.18) ** 2) / 0.3);
           const nx = d[0] / r, ny = d[1] / r, nz = d[2] / r;
           const vn = v[0] * nx + v[1] * ny + v[2] * nz;
           // incidence-proportional push-out: the old base 0.6·V fired along
@@ -2783,8 +2787,12 @@ function stepFlow(dt) {
     // receiving new arrivals -> glowing dust clumps (user's spark clusters)
     const pi0 = i / 3;
     flowAge[pi0] += dt;
-    const out = pos[i] < b.x - R || pos[i] > B.x + R || pos[i + 2] < b.z - R || pos[i + 2] > B.z + R
+    let out = pos[i] < b.x - R || pos[i] > B.x + R || pos[i + 2] < b.z - R || pos[i + 2] > B.z + R
              || pos[i + 1] > B.y + R || sp < V * 0.06 || flowAge[pi0] > flowAgeMax[pi0];
+    // hard rule (user): particles must not be inside a sealed hull, and if
+    // one gets there (fast step, seeding edge case) it DIES this frame —
+    // no visible frame at all, not just the zero-velocity fade
+    if (!out && extGrid && !inExterior([pos[i], pos[i + 1], pos[i + 2]])) out = true;
     if (out) { respawn(pos, i, b, B); flowAge[pi0] = 0;
       flowSm[pi0] = flowSmT[pi0] = 0; }   // fresh colour EMA at the new seed
   }
