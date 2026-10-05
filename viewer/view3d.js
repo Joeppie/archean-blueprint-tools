@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=108';
-import { resolveColor } from './palette.js?v=108';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=109';
+import { resolveColor } from './palette.js?v=109';
 
 // ---- game component models (extracted from installed game modules) ----
 // manifest: per-type metadata (mass, renderable node tree, joints, adapters,
@@ -1018,16 +1018,21 @@ function buildScene() {
   setBlockWire(blkEdges);
   buildPipes();
   buildSubgrids();
-  // ground plane: never through the craft — blueprint y can dip below 0,
-  // so park the grid just under the model's lowest point when that happens
+  // ground plane: never through the craft — blueprint y can dip below 0
+  // (the VKG-955 truck builds down to y=-1.5), so park BOTH the grid and the
+  // green ground plane just under the model's lowest point: the craft always
+  // stands ON the ground, nothing renders below it (user rule).
   const gbb = new THREE.Box3().setFromObject(compGroup);
   gbb.expandByObject(blockGroup); gbb.expandByObject(subGroup); gbb.expandByObject(hullGroup);
-  grid.position.y = (isFinite(gbb.min.y) ? Math.min(0, gbb.min.y - 0.02) : 0) + 0.002;
+  gbb.expandByObject(pipeGroup);
+  const gy = isFinite(gbb.min.y) ? Math.min(0, gbb.min.y - 0.02) : 0;
+  ground.position.y = gy;
+  grid.position.y = gy + 0.002;
   applyHullOpacity();
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=108';
+import { fitHull } from './hullfit.js?v=109';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -1235,8 +1240,23 @@ let bpBox = { min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 } };
 const hullRows = {};
 
 // ---------- loading / saving ----------
+let wsNames = null;
 function setModel(obj) {
   model = obj;
+  // workshop link (header): real numeric item ids get a ↗ to the Steam page
+  { const w = document.getElementById('wslink');
+    if (w) {
+      const id = String(model.workshop_item_id || '');
+      if (/^\d{6,}$/.test(id) && id !== '0000000000' && id !== '9000000001') {
+        w.href = 'https://steamcommunity.com/sharedfiles/filedetails/?id=' + id;
+        w.style.display = '';
+        const nm = () => w.title = (wsNames && wsNames[id] && wsNames[id].name)
+          || (model.data.alias || 'Workshop page for this craft');
+        nm();
+        if (!wsNames) fetch('workshop.json').then(r => r.ok ? r.json() : null)
+          .then(j => { if (j) { wsNames = j; nm(); } }).catch(() => {});
+      } else w.style.display = 'none';
+    } }
   // rotation storage convention (see viewQuat): palette-bearing files are
   // 2026-generation = conjugate; palette-less = raw Unity LH
   LEGACY_Q = !(Array.isArray(model.data.colors) && model.data.colors.length > 0);
@@ -2266,17 +2286,25 @@ if (location.search.includes('selftest')) {
           ok13 = Math.abs(n.dot(npl)) > 0.98;
         }
       }
+      // ok14: ground fit — the green plane and grid sit just UNDER the
+      // lowest rendered geometry (truck 3481322297 builds to y=-1.5:
+      // nothing may render below ground; user rule), ISW included.
+      const gbb2 = new THREE.Box3().setFromObject(compGroup);
+      gbb2.expandByObject(blockGroup); gbb2.expandByObject(subGroup);
+      gbb2.expandByObject(hullGroup); gbb2.expandByObject(pipeGroup);
+      const ok14 = Math.abs(ground.position.y - Math.min(0, gbb2.min.y - 0.02)) < 0.01
+        && Math.abs(grid.position.y - ground.position.y) < 0.005;
       // picking must work through the mirrored component transforms
       ray.setFromCamera(new THREE.Vector2(0, 0), camera);
       const ok5 = ray.intersectObjects(compGroup.children, true)
         .some(h => h.object.userData.ci >= 0);
-      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 && ok10 && ok11 && ok12 && ok13 ? 'PASS' : 'FAIL')
+      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 && ok10 && ok11 && ok12 && ok13 && ok14 ? 'PASS' : 'FAIL')
         + ' occ_z=' + occ.pos_z + ' mirror=' + !!mir
         + ' pitch=' + (2 * Math.asin(-seat.orientation.x) * 180 / Math.PI).toFixed(1) + '°'
         + ' beacon=' + (mast ? mast.x.toFixed(2) : 'none') + ' droop=' + wc.y.toFixed(2)
         + ' junction=' + jdir.y.toFixed(2) + ' aileron=' + at.y.toFixed(2)
         + ' pick=' + ok5 + ' palette=' + ok9 + ' lens=' + ok10
-        + ' dashmirror=' + ok11 + ' textx=' + ok12 + ' mural=' + ok13;
+        + ' dashmirror=' + ok11 + ' textx=' + ok12 + ' mural=' + ok13 + ' ground=' + ok14;
     } catch (e) { document.title = 'SELFTEST ERR ' + e.message; }
   }, 1500);
 }

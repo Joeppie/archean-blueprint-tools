@@ -14,10 +14,12 @@ viewer/models/                  real game component models: manifest.json (mass,
                                 renderable node tree, joints, adapters, colliders
                                 per type) + <Type>.json geometry, lazy-loaded
 regtest/regtest.html            format-validation suite over testdata/ (importable)
-testdata/<workshop-id>/blueprint.json   regression corpus (24 craft + 9000000001
+testdata/<workshop-id>/blueprint.json   regression corpus (25 craft + 9000000001
                                 orient fixture, 1 kB..530 kB)
 tools/adjust_seat.py            reference example of a safe format edit
 tools/make_orient_test.py       regenerates the chirality probe craft 9000000001
+tools/make_landing.py         regenerates the landing gallery + viewer/workshop.json
+                                (names: tools/ws-names.tsv, fetched slowly — Steam rate-limits)
 tools/extract_models.py         regenerates viewer/models/ from an installed game
 tests/run_tests.sh              headless-Chromium test runner (selftest+regtest+renders)
 FORMAT.md                       format documentation (start here)
@@ -210,6 +212,10 @@ landing page and README together when the viewer changes).
      legacy (no-palette) files must use RAW quaternions: the mosaic
      dashboard-mural plate normal must be parallel to its fitted wall plane
      (`mural=true`; conj quaternions tilt it ~45° out of the wall).
+     the green ground plane + grid must sit just under the lowest rendered
+     geometry — nothing of a craft renders below ground, ever (the
+     3481322297 "Classic American Semi Truck" builds down to y=−1.5;
+     `ground=true`).
 2. `regtest`: every testdata blueprint parses; blocks/components within bbox
    margins; the hull lattice map (when triangles exist) puts every vertex
    inside the bbox.
