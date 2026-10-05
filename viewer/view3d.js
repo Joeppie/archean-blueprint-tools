@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=97';
-import { resolveColor } from './palette.js?v=97';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=98';
+import { resolveColor } from './palette.js?v=98';
 
 // ---- game component models (extracted from installed game modules) ----
 // manifest: per-type metadata (mass, renderable node tree, joints, adapters,
@@ -123,6 +123,7 @@ function buildRealComponent(c, model, idx, low = false) {
   const qo = viewQuat(c.orientation);
   const po = viewPos(c.position);
   for (const a of info.adapters || []) {
+    if (adpEndpoint.get(idx)?.has(a.name)) continue;   // cable port: nub drawn at the endpoint
     const p = new THREE.Vector3(a.position[0], a.position[1], -a.position[2]).applyQuaternion(qo);
     adpQueue.push({ x: p.x + po.x, y: p.y + po.y, z: p.z + po.z,
                     t: a.type, ci: idx, lx: a.position[0], ly: a.position[1], lz: a.position[2] });
@@ -134,7 +135,9 @@ function buildRealComponent(c, model, idx, low = false) {
 
 function syncAdapters(obj) {
   let hit = false;
-  for (const a of adpQueue) if (a.ci === obj.userData.ci) {
+  for (const a of adpQueue) if (a.ci === obj.userData.ci && a.lx != null) {
+    // a.lx == null → endpoint nub: it belongs to the cable, not the part; it
+    // stays at the game's endpoint when the part is moved in the viewer
     const p = new THREE.Vector3(a.lx, a.ly, -a.lz).applyQuaternion(obj.quaternion);
     a.x = p.x + obj.position.x; a.y = p.y + obj.position.y; a.z = p.z + obj.position.z;
     hit = true;
@@ -144,6 +147,11 @@ function syncAdapters(obj) {
 
 // merged adapter-nub meshes (big craft: hundreds of tiny spheres → 1 draw per type)
 const adpQueue = [];
+// (ci, port name) → cable endpoint recorded by the GAME (data.pipes): the real
+// connection point, 0.1-0.4 m out along the connector stub from the adapter
+// origin. Nubs are drawn there when a cable exists (user: connection markers
+// must sit where the cables physically are); cable-free ports keep the flange.
+const adpEndpoint = new Map();
 let adpTimer = 0;
 function scheduleAdpFlush() {
   clearTimeout(adpTimer);
@@ -808,7 +816,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=97';
+import { fitHull } from './hullfit.js?v=98';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -923,25 +931,48 @@ const DIRV = [[1,0,0],[0,1,0],[0,0,1],[-1,0,0],[0,-1,0],[0,0,-1]];
 const DIRVM = DIRV.map(d => [d[0], d[1], -d[2]]);   // view-space (z-mirrored) dirs
 function buildPipes() {
   pipeGroup.clear();
+  adpEndpoint.clear();
   const segs = [], endsA = [], endsB = [];
   const sph = (pt) => {
     const g = new THREE.SphereGeometry(0.035, 8, 6);
     g.applyMatrix4(new THREE.Matrix4().makeTranslation(pt[0], pt[1], pt[2]));
     return g;
   };
+  const setEp = (ci, port, v) => {
+    let m = adpEndpoint.get(ci);
+    if (!m) adpEndpoint.set(ci, m = new Map());
+    m.set(port, v);
+  };
+  const portType = (ci, name) => {
+    const ad = MODEL.manifest?.[model.data.components[ci]?.type]?.adapters?.find(a => a.name === name);
+    return ad ? ad.type : /^(fluid|data|power|lowvoltage|highvoltage)/.exec(name)?.[0] ?? 'connector';
+  };
   for (const p of model.data.pipes) {
-    let cur = [p.segments[0].start.x, p.segments[0].start.y, -p.segments[0].start.z];
-    const aEnd = [...cur];
+    // Every segment tube anchors at ITS OWN start (view z-mirrored): the game's
+    // cables are NOT a straight chain — joints have 0.04-0.14 m offsets between
+    // seg[i].start + dir·len and seg[i+1].start (rounded cap smoothing). The
+    // old chained cur += dir·len drifted every pipe and left the endpoint
+    // spheres far off the real ports (user's "green spheres don't match").
+    const aEnd = [p.segments[0].start.x, p.segments[0].start.y, -p.segments[0].start.z];
+    let cur = aEnd;
     for (const s of p.segments) {
       const d = DIRVM[s.dir], L = s.length + 0.01;
+      const st = [s.start.x, s.start.y, -s.start.z];
+      cur = [st[0] + d[0] * s.length, st[1] + d[1] * s.length, st[2] + d[2] * s.length];
       const g = new THREE.BoxGeometry(d[0] ? L : 0.022, d[1] ? L : 0.022, d[2] ? L : 0.022);
       g.applyMatrix4(new THREE.Matrix4().makeTranslation(
-        cur[0] + d[0] * L / 2, cur[1] + d[1] * L / 2, cur[2] + d[2] * L / 2));
+        st[0] + d[0] * L / 2, st[1] + d[1] * L / 2, st[2] + d[2] * L / 2));
       segs.push(g);
-      cur = cur.map((v, i) => v + d[i] * s.length);
     }
     endsA.push(sph(aEnd)); endsB.push(sph(cur));
+    setEp(p.a_component, p.a_port, { x: aEnd[0], y: aEnd[1], z: aEnd[2] });
+    setEp(p.b_component, p.b_port, { x: cur[0], y: cur[1], z: cur[2] });
   }
+  // cable-port nubs sit at the game's endpoint (dedup via the map; type from the
+  // manifest adapter so the colour matches the port family)
+  for (const [ci, m] of adpEndpoint)
+    for (const [port, v] of m)
+      adpQueue.push({ x: v.x, y: v.y, z: v.z, t: portType(ci, port), ci, lx: null });
   const add = (geos, color, basic) => {
     if (!geos.length) return;
     const mg = mergeGeometries(geos, false);
@@ -953,6 +984,7 @@ function buildPipes() {
   add(segs, 0x222228, false);
   add(endsA, 0x33ddff, true);
   add(endsB, 0x33ff88, true);
+  scheduleAdpFlush();
 }
 function hullAutoFit() {                       // centre hull bbox inside the craft box
   for (const ax of ['x', 'y', 'z']) {
@@ -1803,6 +1835,70 @@ async function runProxyTest() {
   document.title = `PROXYTEST ${pass}/${tot} PASS bad=${bad || 'none'}`;
 }
 
+// ---------- component connector test (?comptest) ----------
+// data.pipes endpoints ARE the game's own record of where every port sits
+// (0.000 m verified, FORMAT.md § Handedness). One sweep over the default
+// craft (ISW-241) tests every component that has a cable: each endpoint must
+// have (1) an adapter nub, (2) a cable tube, and (3) the owning component's
+// MODEL SURFACE within tolerance — so a wrong component pose shows up as a
+// model-vertex miss even when the data-driven nub/tube are right.
+// PilotSeat is exempt: the user moved it in the editor (its pitch is not
+// axis-aligned, and its pose is not derivable from the .ini).
+// Beacon is exempt too: the game records its cable endpoints in the
+// connector's own upright frame (p + (0,−0.145,±0.062) for ALL orientations),
+// which no reading of the .ini adapter reproduces — the .ini model placement
+// and the data-driven tube/nub are each correct in their own frame.
+async function runCompTest() {
+  let tw = Date.now();      // wait for the blueprint to load (setModel)
+  while (!model && Date.now() - tw < 10000) await new Promise(r => setTimeout(r, 100));
+  const t0 = Date.now();   // let real models load (they are fetched async)
+  while (Date.now() - t0 < 8000 && compObjs.some((m, i) =>
+      m && MODEL.manifest?.[m.userData.wType] && !realMap.has(i)))
+    await new Promise(r => setTimeout(r, 100));
+  await new Promise(r => setTimeout(r, 600));    // adapter nubs merge on a 350 ms debounce
+  const d = model.data, lines = [];
+  let pass = 0, tot = 0;
+  const nubVerts = [], tubeVerts = [];
+  const grab = (o, arr) => { const a = o.geometry.attributes.position;
+    for (let i = 0; i < a.count; i++) arr.push(new THREE.Vector3().fromBufferAttribute(a, i).applyMatrix4(o.matrixWorld)); };
+  adpGroup.updateMatrixWorld(true);
+  adpGroup.traverse(o => { if (o.geometry) grab(o, nubVerts); });
+  const tube0 = pipeGroup.children[0];          // merged tube mesh (children[1..] = end spheres)
+  if (tube0) { tube0.updateWorldMatrix(true, true); grab(tube0, tubeVerts); }
+  const modelVerts = (ci) => {
+    const objs = realMap.get(ci), root = (objs && objs.length && objs[0]) || compObjs[ci];
+    root.updateWorldMatrix(true, true);
+    const out = [];
+    root.traverse(o => { if (o.isMesh) { const a = o.geometry.attributes.position;
+      for (let i = 0; i < a.count; i++) out.push(new THREE.Vector3().fromBufferAttribute(a, i).applyMatrix4(o.matrixWorld)); } });
+    return out;
+  };
+  const minDist = (v, arr) => { let m = 1e9; for (const w of arr) m = Math.min(m, v.distanceTo(w)); return m; };
+  d.pipes.forEach((p, pi) => {
+    const s0 = p.segments[0].start, sn = p.segments[p.segments.length - 1];
+    const dn = DIRVM[sn.dir];
+    const ends = [
+      { ci: p.a_component, port: 'a', v: new THREE.Vector3(s0.x, s0.y, -s0.z) },
+      { ci: p.b_component, port: 'b', v: new THREE.Vector3(sn.start.x + dn[0] * sn.length,
+          sn.start.y + dn[1] * sn.length, -sn.start.z + dn[2] * sn.length) },
+    ];
+    for (const e of ends) {
+      tot++;
+      const type = d.components[e.ci].type;
+      const dn_ = minDist(e.v, nubVerts), dt = minDist(e.v, tubeVerts);
+      const exempt = type === 'PilotSeat' || type === 'Beacon';
+      const dm = exempt ? 0 : minDist(e.v, modelVerts(e.ci));
+      const ok = dn_ <= 0.06 && dt <= 0.06 && (exempt || dm <= 0.35);
+      if (ok) pass++;
+      else lines.push(`pipe${pi} ${type}#${e.ci} port ${e.port}(${p[e.port + '_port']})`
+        + ` nub=${dn_.toFixed(3)} tube=${dt.toFixed(3)} model=${exempt ? 'exempt' : dm.toFixed(3)}`);
+    }
+  });
+  document.body.insertAdjacentHTML('beforeend',
+    `<pre id="out" style="white-space:pre-wrap">${lines.join('\n') || 'all connectors aligned'}</pre>`);
+  document.title = `COMPTEST ${pass}/${tot} PASS bad=${lines.length ? lines[0].split(' ')[1] : 'none'}`;
+}
+
 // ---------- init ----------
 if (location.search.includes('real')) realModelsOn = true;   // before buildViewOpts (checkbox state)
 function applyCamQ() {                                        // ?cam=px,py,pz,tx,ty,tz
@@ -1823,6 +1919,7 @@ if (location.search.includes('perf')) perfT0 = performance.now() + 1500;  // mea
 loadModelManifest().then(fetchDefault).then(applyCamQ);
 requestAnimationFrame(tick);
 if (location.search.includes('proxytest')) runProxyTest();
+if (location.search.includes('comptest')) runCompTest();
 
 // ---------- self-test (view3d.html?selftest): simulates slider edits + save ----------
 if (location.search.includes('selftest')) {

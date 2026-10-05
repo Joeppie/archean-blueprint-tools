@@ -121,6 +121,18 @@ at +0.22 → the pump lies sideways with ports left/right). Connections are by
 component index, so cached segments may render slightly stale after a component moves;
 the game regenerates them on next save from the editor. The viewer renders pipes as tubes
 with blue/green connector markers at the a/b ends.
+**Pipes are NOT straight chains** (verified on all 30 ISW-241 pipes): every joint has a
+0.04–0.14 m offset between `seg[i].start + dir·len` and `seg[i+1].start` (rounded-cap
+cable smoothing). Each tube MUST be anchored at its own segment `start` — accumulating
+`cur += dir·len` drifts every pipe and leaves the endpoint markers far off the ports
+(the v0.97 "green spheres don't match the cables" bug). Cable endpoints also sit
+0.1–0.4 m out along each connector's stub from the `.ini` adapter origin: a port's
+**connection point is the pipe endpoint**, and adapter nubs are drawn there whenever a
+cable exists. Exception: the Beacon records its endpoints in the connector's upright
+frame (`p + (0,−0.145,±0.062)` for every orientation) — exempt in the connector test.
+The viewer's `?comptest` sweeps all of this on ISW-241: every endpoint must have a nub
+(≤0.06 m), a tube (≤0.06 m) and the owner's model surface (≤0.35 m) — 60/60, with
+PilotSeat (user-moved in editor) and Beacon exempt from the model check only.
 Note: `components` may contain a `Build` type — the editor's construction-site ghost
 (e.g. y −24.75, far outside the craft). It is not physical geometry; the viewer skips it.
 

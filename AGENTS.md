@@ -97,7 +97,12 @@ landing page and README together when the viewer changes).
   colours[2..4] the side walls along edges v0-v1, v1-v2, v2-v0 (all five
   colours matter; ISW-241 uses slots 0, 4, 51 = hull, glass, chrome).
 - `pipes` segments: `dir` 0..5 = +x,+y,+z,−x,−y,−z; the first/last segment ends
-  are world-space connector positions (trace pipes to place ports).
+  are world-space connector positions (trace pipes to place ports). Pipes are
+  NOT straight chains — every segment anchors at its OWN `start` (joints have
+  0.04-0.14 m offsets; accumulating dir*len drifts tubes off the cables).
+  Cable endpoints sit 0.1-0.4 m out along connector stubs from the .ini adapter
+  origin — port connection point = pipe endpoint (nubs drawn there). Beacon
+  endpoints are in the connector's upright frame (exception). See FORMAT.md.
 - `components[].type === 'Build'` = editor construction-site ghost, far outside
   the bbox — never render it as geometry.
 - Palette slots: `data.colors[256]`, entry = {r,g,b 0-255, opacity 0-15,
@@ -160,6 +165,13 @@ landing page and README together when the viewer changes).
 2. `regtest`: every testdata blueprint parses; blocks/components within bbox
    margins; the hull lattice map (when triangles exist) puts every vertex
    inside the bbox.
+2b. `?comptest`: connector-alignment sweep over ISW-241 — every `data.pipes`
+   endpoint (the game's own record of its port positions) must have an adapter
+   nub ≤0.06 m, a cable tube ≤0.06 m, and the owning component's model surface
+   ≤0.35 m. 60/60 PASS, PilotSeat (editor-moved) + Beacon (connector-frame
+   endpoint quirk) exempt from the model check. Catches: tube chaining (pipes are
+   NOT straight chains — anchor every segment at its own `start`), component
+   pose/orientation, nub placement.
 3. `fitHull` must stay **generic**: zero per-craft constants. The exact lattice
    (W=12, pitch=CELL, C=−FRAME/2) passes on all 24 corpus files, not just ISW-241.
 

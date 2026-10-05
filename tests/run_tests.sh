@@ -50,6 +50,12 @@ title=$(chrome --virtual-time-budget=30000 \
 echo "   $title"
 case "$title" in *PASS*) ;; *) echo "   FAIL"; fail=1;; esac
 
+echo "── comptest (cable endpoints vs nubs/tubes/models, ISW-241)"
+title=$(chrome --virtual-time-budget=30000 \
+  --dump-dom "$BASE/viewer/index.html?comptest" 2>/dev/null | grep -oPm1 '(?<=<title>)[^<]*')
+echo "   $title"
+case "$title" in *COMPTEST\ 60/60\ PASS*) ;; *) echo "   FAIL"; fail=1;; esac
+
 echo "── smoke render"
 chrome --window-size=1400,900 --virtual-time-budget=15000 \
   --screenshot="$OUT/viewer.png" "$BASE/viewer/index.html" 2>/dev/null
