@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=130';
-import { resolveColor } from './palette.js?v=130';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=131';
+import { resolveColor } from './palette.js?v=131';
 
 // ---- site-zoom cancel: the viewer ALWAYS loads at physical 100% ----
 // Chrome SAVES page zoom per site (Ctrl+wheel sets it, Ctrl-F5 keeps it,
@@ -1129,7 +1129,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=130';
+import { fitHull } from './hullfit.js?v=131';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -2209,7 +2209,12 @@ function seatFwd() {
     if (win != null) best = win;
   }
   const o = compObjs?.[best];
-  return o ? new THREE.Vector3(0, 0, 1).applyQuaternion(o.quaternion).toArray() : [0, 0, 1];
+  // LEGACY (raw-quat) files place with a 180-deg-yawed frame (viewQuat
+  // (w,-x,-y,z) = modern composed with Rz(180)), so the seat's facing axis
+  // is local -z there: measuring +z on Jimmy (v1 file) read the cockpit
+  // backwards -> auto wind came from the tail (user: 'all cockpits face the
+  // other way, including the computer-linked one').
+  return o ? new THREE.Vector3(0, 0, LEGACY_Q ? -1 : 1).applyQuaternion(o.quaternion).toArray() : [0, 0, 1];
 }
 function flowDir() {
   // Relative wind travels opposite to flight. Auto: MAIN drive net (rockets);
@@ -2599,6 +2604,7 @@ function buildStreamlines() {
       const seed = cen.clone().addScaledVector(dv, -(rad + 1.2))
         .addScaledVector(e1, a).addScaledVector(e2, c2);
       const seedA = [seed.x, seed.y, seed.z];
+      const ph = a * 0.9 + c2 * 1.4;                          // wake meander phase
       const fwd = [], fc = [], back = [], bc = [], spsF = [], spsB = [];
       const walk = (sgn, pts, cs, sps) => {
         let p = [...seedA];
@@ -2612,10 +2618,21 @@ function buildStreamlines() {
         let spSm = V;
         for (let k = 0; k < 160; k++) {
           const v = sampleVel(p, dir, V);
-          const sp = Math.hypot(v[0], v[1], v[2]);
+          let sp = Math.hypot(v[0], v[1], v[2]);
           pts.push(p[0], p[1], p[2]);
           spSm += clamp(sp - spSm, -0.12 * V, 0.12 * V);
           sps.push(spSm);
+          // wake meander (speed response): every stylised deflection scales
+          // with V, so inviscid streamline SHAPE is V-invariant -> the speed
+          // slider changed nothing at all (user). Wake unsteadiness grows
+          // with speed (stylised Reynolds effect): lateral sine in the
+          // accelerated/shear region, amplitude ∝ V.
+          const wm = clamp(spSm / V - 1, 0, 1.5);
+          if (wm > 0.02) {
+            const mg = Math.sin(k * 0.55 + ph) * wm * V * 0.30 * Math.min(1.6, V / 60);
+            v[0] += e1.x * mg; v[1] += e1.y * mg; v[2] += e1.z * mg;
+            sp = Math.hypot(v[0], v[1], v[2]);
+          }
           colOf(spSm, cs);
           if (sp < V * 0.03) break;                           // sealed interior /
           const dx = p[0] - cen.x, dy = p[1] - cen.y, dz = p[2] - cen.z;  //   stagnation
