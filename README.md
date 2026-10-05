@@ -1,4 +1,4 @@
-# Archean Blueprint Tools · v0.93
+# Archean Blueprint Tools · v0.94
 
 **Reverse-engineered file format + a zero-build browser viewer/inspector for
 workshop craft of [Archean](https://store.steampowered.com/app/2941660/Archean/)**
@@ -80,7 +80,7 @@ Useful URL parameters: `?open=<url>` open another blueprint ·
 
 ## Ideas welcome — open an issue!
 
-This is v0.93: the format is decoded and the viewer is useful, but the good
+This is v0.94: the format is decoded and the viewer is useful, but the good
 ideas are not all in yet. Feature requests, format questions, and craft that
 render wrong (attach the `blueprint.json`) are all best filed as
 [issues](https://github.com/Joeppie/archean-blueprint-tools/issues) — that is
