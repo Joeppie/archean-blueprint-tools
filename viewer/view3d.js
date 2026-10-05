@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=109';
-import { resolveColor } from './palette.js?v=109';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=110';
+import { resolveColor } from './palette.js?v=110';
 
 // ---- game component models (extracted from installed game modules) ----
 // manifest: per-type metadata (mass, renderable node tree, joints, adapters,
@@ -404,6 +404,27 @@ camera.position.set(-6.5, 3.4, 8.5);              // view space: nose (+z) towar
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(0, 0.9, -0.5);
 controls.enableDamping = true;
+// Per-craft framing: the ISW-tuned defaults bury the camera in a 16 m truck
+// (user: "deeply zoomed in, fades out when zooming out, moving behaves
+// weird" — fixed fog(40,90) ate the far parts, fixed far=300 clipped the
+// ground, and the orbit pivot sat inside the hull). Frame the bbox, scale
+// fog/far to the model size; ?cam= still overrides afterwards.
+function fitCameraToModel() {
+  const box = new THREE.Box3();
+  [compGroup, blockGroup, hullGroup, pipeGroup, subGroup].forEach(g => box.expandByObject(g));
+  if (!isFinite(box.min.x)) return;
+  const c = box.getCenter(new THREE.Vector3());
+  const sz = box.getSize(new THREE.Vector3());
+  const r = Math.max(1, sz.x, sz.y, sz.z);
+  controls.target.copy(c);
+  camera.position.set(c.x + r * 0.85, c.y + Math.max(r * 0.45, 2), c.z + r * 1.0);
+  camera.near = Math.max(0.05, r / 400);
+  camera.far = Math.max(300, r * 10);
+  scene.fog.near = Math.max(30, r * 2.5);
+  scene.fog.far = Math.max(80, r * 7);
+  camera.updateProjectionMatrix();
+  controls.update();
+}
 
 scene.add(new THREE.HemisphereLight(0xcfe8ff, 0x444422, 1.1));
 const sun = new THREE.DirectionalLight(0xfff2dd, 2.2);
@@ -428,6 +449,17 @@ function onResize() {
   camera.updateProjectionMatrix();
 }
 addEventListener('resize', onResize);
+// Back/forward returns the page from bfcache with the frozen camera (a zoom
+// left in some cockpit), a residual damping velocity (weird camera glide) and
+// a suspended render — the user's "deep zoom + fades + moves oddly after
+// back/forward, fine on fresh open". Treat restore like a fresh open:
+// refit framing to the craft, resize, and repaint.
+addEventListener('pageshow', (e) => {
+  if (!e.persisted) return;
+  fitCameraToModel();
+  onResize();
+  invalidate();
+});
 
 // ---------- state ----------
 let model = null;              // parsed blueprint, components kept live-synced
@@ -1032,7 +1064,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=109';
+import { fitHull } from './hullfit.js?v=110';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -1282,6 +1314,7 @@ function setModel(obj) {
         + `· C (${fit.Cx.toFixed(2)}, ${fit.Cy.toFixed(2)}, ${fit.Cz.toFixed(2)}) · anchor ${fit.d.toFixed(1)}m`);
   }
   buildScene();
+  fitCameraToModel();          // frame the loaded craft (fog/far scaled)
   buildList();
   buildInspector();
   calibrateCellMass();
@@ -2295,6 +2328,16 @@ if (location.search.includes('selftest')) {
       const ok14 = Math.abs(ground.position.y - Math.min(0, gbb2.min.y - 0.02)) < 0.01
         && Math.abs(grid.position.y - ground.position.y) < 0.005;
       // picking must work through the mirrored component transforms
+      // (camera aimed at the selected component: load framing is
+      // per-craft now, the pin must not depend on it)
+      {
+        const bb = new THREE.Box3().setFromObject(obj);
+        const c = bb.getCenter(new THREE.Vector3());
+        controls.target.copy(c);
+        camera.position.copy(c).add(new THREE.Vector3(1.2, 0.8, 1.5));
+        camera.near = 0.01; camera.far = 100; camera.updateProjectionMatrix();
+        camera.updateMatrixWorld(true);
+      }
       ray.setFromCamera(new THREE.Vector2(0, 0), camera);
       const ok5 = ray.intersectObjects(compGroup.children, true)
         .some(h => h.object.userData.ci >= 0);
