@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=116';
-import { resolveColor } from './palette.js?v=116';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=122';
+import { resolveColor } from './palette.js?v=122';
 
 // ---- site-zoom cancel: the viewer ALWAYS loads at physical 100% ----
 // Chrome SAVES page zoom per site (Ctrl+wheel sets it, Ctrl-F5 keeps it,
@@ -1129,7 +1129,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=116';
+import { fitHull } from './hullfit.js?v=122';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -2042,14 +2042,130 @@ function updateCoM() {
 // (seat quaternion × (0,0,-1)), i.e. "the direction the pilot faces".
 // Thin-plate normal force Cn = 2π·sinα·cosα (clamped), boxes/wheels as bluff
 // bodies. Gives sane comparative numbers per element, not certifiable data.
-let aeroPlates = [], flowPts = null, flowData = null, flowOn = false;
+let aeroPlates = [], flowPts = null, flowData = null, flowTrails = null, flowOn = false;
 const flowGroup = new THREE.Group(); worldM.add(flowGroup);
 const aeroArrows = new THREE.Group(); worldM.add(aeroArrows);
-const flowState = { speed: 60, aoa: 4 };
+const flowState = { speed: 60, aoa: 4, az: 0, turb: 0.35 };
+
+// ---------- thrust (display + flow direction suggestion) ----------
+// Local thrust axes from each propulsor's [TARGET thrust/plasma] node in the
+// game .ini (exhaust side -> reaction pushes the craft the other way):
+// Big/MiniThruster & Propeller thrust = local -y, SmallThruster = +y,
+// RCS = local -z. Weights are per-class display ratios (the blueprint has no
+// newton figures). Arrows render in VIEW space; file-space nose (-z) shows as
+// view +z.
+const THRUST = {
+  BigThruster:   { ax: [0, -1, 0], w: 1.0 },
+  MiniThruster:  { ax: [0, -1, 0], w: 0.4 },
+  SmallThruster: { ax: [0,  1, 0], w: 0.15 },
+  RCS:           { ax: [0,  0, -1], w: 0.25 },
+  Propeller:     { ax: [0, -1, 0], w: 0.6 },
+};
+let thrustArrowsOn = true;
+const flowSrc = { mode: 'auto' };          // 'auto' | 'thrust' | 'seat'
+let netThrust = null;                                 // {v:[x,y,z] view|null, w, n}
+const thrustGroup = new THREE.Group(); worldM.add(thrustGroup);
+function buildThrustArrows() {
+  thrustGroup.clear();
+  netThrust = null;
+  if (!model) return;
+  const matA = new THREE.MeshBasicMaterial({ color: 0xff9a3c, transparent: true, opacity: 0.95 });
+  const matN = new THREE.MeshBasicMaterial({ color: 0x53e0ff, transparent: true, opacity: 0.95 });
+  let acc = [0, 0, 0], wsum = 0, n = 0;
+  model.data.components.forEach((c, i) => {
+    const th = THRUST[c.type];
+    if (!th) return;
+    const o = compObjs?.[i];
+    if (!o) return;
+    // axis in the component's VIEW-local frame (x, y, -z), rotated by the
+    // display quaternion the mesh actually carries
+    const ax = new THREE.Vector3(th.ax[0], th.ax[1], -th.ax[2])
+      .applyQuaternion(o.quaternion).normalize();
+    const twoWay = c.type === 'Propeller';     // props thrust BOTH ways:
+    if (!twoWay) acc = acc.map((x, k) => x + ax.toArray()[k] * th.w);   // not in the net
+    wsum += th.w; n++;
+    const len = 0.45 + th.w * 1.15;
+    const g = new THREE.Group();
+    const shaft = new THREE.Mesh(cyl(0.035, twoWay ? len * 2 : len), matA);
+    shaft.rotation.x = Math.PI / 2;                    // cylinder axis y -> z
+    shaft.position.z = twoWay ? 0 : len / 2;
+    const head = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.26, 10), matA);
+    head.rotation.x = Math.PI / 2;
+    head.position.z = len + 0.1;
+    g.add(shaft, head);
+    if (twoWay) {
+      const head2 = head.clone();
+      head2.rotation.x = -Math.PI / 2;
+      head2.position.z = -len - 0.1;
+      g.add(head2);
+    }
+    g.position.copy(o.position);
+    g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), ax);
+    g.raycast = () => {};
+    thrustGroup.add(g);
+  });
+  if (n) {
+    const L = Math.hypot(...acc);
+    // Symmetric RCS banks net to ~0: normalized noise would send the flow
+    // in a random direction (the ISW rendered vertical streamlines). Below
+    // 15% of total class the net is declared ~0 and flow falls back to seat.
+    const strong = L > 0.15 * wsum;
+    netThrust = { v: strong ? acc.map(x => x / L) : null, w: wsum, n };
+    if (strong) {
+      const dir = new THREE.Vector3(...netThrust.v);
+      const b = model.box_min, B = model.box_max;
+      const len = 1.4 + wsum * 0.25;
+      const g = new THREE.Group();
+      const shaft = new THREE.Mesh(cyl(0.07, len), matN);
+      shaft.rotation.x = Math.PI / 2; shaft.position.z = len / 2;
+      const head = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.6, 12), matN);
+      head.rotation.x = Math.PI / 2; head.position.z = len + 0.22;
+      g.add(shaft, head);
+      g.position.set((b[0] + B[0]) / 2, (b[1] + B[1]) / 2 + 1.1, (b[2] + B[2]) / 2);
+      g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
+      g.raycast = () => {};
+      thrustGroup.add(g);
+    }
+  }
+  thrustGroup.visible = thrustArrowsOn;
+}
+function flowDir() {
+  // Relative wind travels opposite to flight. Flight direction = net thrust
+  // (user: "use thrust as flow suggestion"), the PilotSeat nose axis for
+  // sail craft / symmetric banks / flow-src=seat. Cycle with the
+  // 'flow src' button; ?flowsrc=seat|thrust|auto presets it.
+  const useT = flowSrc.mode === 'thrust' || (flowSrc.mode === 'auto' && netThrust && netThrust.v);
+  let fwd = useT && netThrust && netThrust.v ? netThrust.v.slice() : null;
+  if (!fwd) {
+    const seat = model?.data.components.find(c => c.type === 'PilotSeat');
+    fwd = [0, 0, -1];
+    if (seat) {
+      const i = model.data.components.indexOf(seat);
+      const o = compObjs?.[i];
+      if (o) fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(o.quaternion).toArray();
+      // view-space seat forward: model convention nose file -z = view +z
+    }
+  }
+  // 'wind from side' azimuth: rotate the flight axis in yaw before taking
+  // the wind direction — props produce thrust BOTH ways (user), so the
+  // direction must stay user-controllable, not implied by thrust sign.
+  const azr = flowState.az * Math.PI / 180;
+  const ca = Math.cos(azr), sa = Math.sin(azr);
+  fwd = [fwd[0] * ca + fwd[2] * sa, fwd[1], -fwd[0] * sa + fwd[2] * ca];
+  // AoA: relative wind travels tail-ward and slightly upward (from front-below)
+  const a = flowState.aoa * Math.PI / 180;
+  return [-fwd[0] * Math.cos(a), Math.sin(a), -fwd[2] * Math.cos(a)];
+}
 
 function plateFromTri(t) {
   const p = [];
-  for (let i = 0; i < 3; i++) p.push([hullPt(t, 'x', i), hullPt(t, 'y', i), hullPt(t, 'z', i)]);
+  for (let i = 0; i < 3; i++) {
+    // VIEW space (z-mirrored): the flow field, streamlines and seeds all
+    // live in the view frame — plates in raw file coords deflected the
+    // mirrored craft's opposite side (old 'blocks/components not taken
+    // into account' symptom, part 1 of 2).
+    p.push([hullPt(t, 'x', i), hullPt(t, 'y', i), -hullPt(t, 'z', i)]);
+  }
   const a = p[0], b = p[1], c = p[2];
   const e1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
   const e2 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
@@ -2059,52 +2175,194 @@ function plateFromTri(t) {
            n: n.map(x => x / len), area: len / 2, R: Math.sqrt(len / 2 / Math.PI) + 0.15 };
 }
 
+// Solid 0.25 m cells (VIEW space): every block (type != 255) plus every
+// component's `occupancies` box. sampleVel pushes flow around these, so the
+// streamlines wrap the actual voxel hull and protruding parts — the blocks
+// ARE taken into account (part 2 of 2 of the user report).
+let solidCells = null;
+let extGrid = null;                     // {b0:[ix,iy,iz], n:[nx,ny,nz], ext:Uint8Array, counts}
+const cellKeyV = (x, y, z) => ((x + 4096) * 8192 + (y + 4096)) * 8192 + (z + 4096);
+// Pure voxelization + sealing of a blueprint's `data` in VIEW space (z
+// mirrored). Exact universal lattice (W=12, pitch=0.25, C=−1.5, FORMAT.md),
+// so it needs no per-file hull fit → selftest can run it on any file.
+// ext: 1 = exterior (wind), 2 = cabin (ray-enclosed, windless), 0 = solid/sealed.
+function sealStats(data) {
+  const cells = new Set();
+  const add = (fx, fy, fz, px, py, pz, sx, sy, sz) => {
+    // world = (pos + 12·frame)·0.25 − 1.375  (AGENTS: (pos−5.5)·0.25 + frame·3;
+    // (12f)·0.25 IS the 3f — do not add frame·3 again, that was the old
+    // double-pitch bug making the voxel shell 3 m off at frame ≥ 1)
+    for (let i = 0; i <= sx; i++)
+      for (let j = 0; j <= sy; j++)
+        for (let k = 0; k <= sz; k++)
+          cells.add(cellKeyV(
+            Math.round(px + i + fx * 12 - 5.5),
+            Math.round(py + j + fy * 12 - 5.5),
+            -Math.round(pz + k + fz * 12 - 5.5)));
+  };
+  for (const b of data.blocks || [])
+    if (b.type !== 255) add(b.frame_x, b.frame_y, b.frame_z, b.pos_x, b.pos_y, b.pos_z, b.size_x, b.size_y, b.size_z);
+  // hull-triangle skins (ISW-241's hull is 21 big prisms; Golden Throne has
+  // NO blocks): rasterize each triangle into every cell its surface crosses
+  // (0.11 m sampling: every crossed 0.25 m cell gets a hit even on 45° faces),
+  // so wind blocks at and seals behind triangle-only hulls.
+  const hpt = (t, ax, i) => (t['v' + i + '_' + ax] + 12 * t['frame_' + ax]) * 0.25 - 1.5;
+  let triBudget = 500000;
+  for (const t of data.triangles || []) {
+    const a = [hpt(t, 'x', 0), hpt(t, 'y', 0), -hpt(t, 'z', 0)];
+    const e1 = [hpt(t, 'x', 1) - a[0], hpt(t, 'y', 1) - a[1], -hpt(t, 'z', 1) - a[2]];
+    const e2 = [hpt(t, 'x', 2) - a[0], hpt(t, 'y', 2) - a[1], -hpt(t, 'z', 2) - a[2]];
+    const el = Math.hypot(...e1), e2l = Math.hypot(...e2), e3 = Math.hypot(e1[0] - e2[0], e1[1] - e2[1], e1[2] - e2[2]);
+    const n = Math.min(110, Math.max(1, Math.ceil(Math.max(el, e2l, e3) / 0.11)));
+    triBudget -= (n + 1) * (n + 2) / 2;
+    if (triBudget < 0) break;
+    for (let i = 0; i <= n; i++)
+      for (let j = 0; j <= n - i; j++) {
+        const u = i / n, v = j / n;
+        cells.add(cellKeyV(
+          Math.round((a[0] + e1[0] * u + e2[0] * v) / 0.25),
+          Math.round((a[1] + e1[1] * u + e2[1] * v) / 0.25),
+          Math.round((a[2] + e1[2] * u + e2[2] * v) / 0.25)));
+      }
+  }
+  for (const c of data.components || []) {
+    // Build = editor construction-site ghost: its own position/occupancies
+    // sit far outside the bbox (skip), but its nested blocks are the real
+    // closed hatch/door geometry at true grid coords (keep).
+    if (c.type !== 'Build')
+      for (const o of c.occupancies || [])
+        add(o.frame_x, o.frame_y, o.frame_z, o.pos_x, o.pos_y, o.pos_z, o.size_x, o.size_y, o.size_z);
+    if (c.type === 'Build' && c.data?.blocks)            // closed hatches seal the hull
+      for (const b of c.data.blocks)
+        if (b.type !== 255) add(b.frame_x, b.frame_y, b.frame_z, b.pos_x, b.pos_y, b.pos_z, b.size_x, b.size_y, b.size_z);
+  }
+  // Flood-fill from the padded bbox corner: cells not reachable from outside
+  // are SEALED INTERIOR — the wind simulation skips them entirely (user:
+  // "wind shouldnt be simulated in something enclosed").
+  // Grid from the CELL extent, not the file box: workshop files' box_min/max
+  // can clip subgrid geometry (BionicDolphin: 16 m box around a 46 m craft).
+  let mnx = 1e9, mny = 1e9, mnz = 1e9, mxx = -1e9, mxy = -1e9, mxz = -1e9;
+  for (const k of cells) {
+    const z = (k % 8192) - 4096, t = Math.floor(k / 8192);
+    const y = (t % 8192) - 4096, x = Math.floor(t / 8192) - 4096;
+    if (x < mnx) mnx = x; if (y < mny) mny = y; if (z < mnz) mnz = z;
+    if (x > mxx) mxx = x; if (y > mxy) mxy = y; if (z > mxz) mxz = z;
+  }
+  if (mnx > mxx) return { cells, sealedCount: 0, tooBig: true };       // no geometry
+  const b0 = [mnx - 3, mny - 3, mnz - 3];
+  const n = [mxx - mnx + 7, mxy - mny + 7, mxz - mnz + 7];
+  const size = n[0] * n[1] * n[2];
+  if (size > 1600000) return { cells, sealedCount: 0, tooBig: true };   // huge craft: skip sealing
+  const solid = new Uint8Array(size), ext = new Uint8Array(size);
+  const idx = (x, y, z) => ((y * n[0]) + x) * n[2] + z;
+  let solidCount = 0;
+  for (const k of cells) {
+    const z = (k % 8192) - 4096, t = Math.floor(k / 8192);
+    const y = (t % 8192) - 4096, x = Math.floor(t / 8192) - 4096;
+    const gx = x - b0[0], gy = y - b0[1], gz = z - b0[2];
+    if (gx >= 0 && gy >= 0 && gz >= 0 && gx < n[0] && gy < n[1] && gz < n[2] && !solid[idx(gx, gy, gz)]) {
+      solid[idx(gx, gy, gz)] = 1; solidCount++;
+    }
+  }
+  const q = new Int32Array(size);
+  let qh = 0, qt = 0;
+  q[qt++] = 0; ext[0] = 1;                               // (b0 corner = always outside)
+  while (qh < qt) {
+    const c = q[qh++];
+    const z = c % n[2], y = Math.floor(c / n[2]) % n[1], x = Math.floor(c / (n[2] * n[1]));
+    const nb = [[x + 1, y, z], [x - 1, y, z], [x, y + 1, z], [x, y - 1, z], [x, y, z + 1], [x, y, z - 1]];
+    for (const [a, b2, d] of nb) {
+      if (a < 0 || b2 < 0 || d < 0 || a >= n[0] || b2 >= n[1] || d >= n[2]) continue;
+      const i2 = idx(a, b2, d);
+      if (solid[i2] || ext[i2]) continue;
+      ext[i2] = 1; q[qt++] = i2;
+    }
+  }
+  // Ray-enclosure pass: cells the flood reached through intake/gap LEAKS
+  // that are nevertheless fully shell-enclosed (axial rays in all 6
+  // directions hit solid) are CABIN cells — the "Dolphin interior with the
+  // doors closed" case: voxel shells of block-built crafts leak through
+  // intakes, so pure flood fill alone under-seals. Verified: BionicDolphin
+  // (testdata/3417786605) → 253 cabin cells; ISW-241 → 0 (open-tail tube,
+  // physically wind-swept: correct).
+  for (let i = 0; i < size; i++) {
+    if (solid[i] || !ext[i]) continue;
+    const z = i % n[2], y = Math.floor(i / n[2]) % n[1], x = Math.floor(i / (n[2] * n[1]));
+    let enc = true;
+    for (let d = 0; d < 6 && enc; d++) {
+      const ax = d >> 1, sgn = (d & 1) ? -1 : 1;
+      for (let a = x + sgn;; a += sgn) {
+        if (ax === 0) { if (a < 0 || a >= n[0]) { enc = false; break; } if (solid[idx(a, y, z)]) break; }
+        else if (ax === 1) { if (a < 0 || a >= n[1]) { enc = false; break; } if (solid[idx(x, a, z)]) break; }
+        else { if (a < 0 || a >= n[2]) { enc = false; break; } if (solid[idx(x, y, a)]) break; }
+      }
+    }
+    if (enc) ext[i] = 2;                                          // no-wind cabin
+  }
+  let sealedCount = 0, sealedSample = null, extCount = 0;
+  for (let i = 0; i < size; i++) {
+    if (ext[i] === 1) extCount++;
+    if (!solid[i] && ext[i] !== 1) {
+      sealedCount++;
+      if (!sealedSample) {
+        const z = i % n[2], y = Math.floor(i / n[2]) % n[1], x = Math.floor(i / (n[2] * n[1]));
+        sealedSample = [(x + b0[0] + 0.5) * 0.25, (y + b0[1] + 0.5) * 0.25, (z + b0[2] + 0.5) * 0.25];
+      }
+    }
+  }
+  return { cells, b0, n, ext, extCount, solidCount, sealedCount, sealedSample };
+}
+function buildSolid() {
+  solidCells = null;
+  extGrid = null;
+  if (!model) return;
+  const r = sealStats(model.data);
+  solidCells = r.cells;
+  extGrid = r.tooBig ? null : r;
+}
+function inExterior(p) {
+  if (!extGrid) return true;
+  const gx = Math.round(p[0] / 0.25) - extGrid.b0[0];
+  const gy = Math.round(p[1] / 0.25) - extGrid.b0[1];
+  const gz = Math.round(p[2] / 0.25) - extGrid.b0[2];
+  const n = extGrid.n;
+  if (gx < 0 || gy < 0 || gz < 0 || gx >= n[0] || gy >= n[1] || gz >= n[2]) return true;
+  return extGrid.ext[((gy * n[0]) + gx) * n[2] + gz] === 1;
+}
+
 function buildAero() {
   if (!model) return;
   aeroPlates = [];
   for (const t of model.data.triangles) aeroPlates.push(plateFromTri(t));
   for (const c of model.data.components) {
-    const q = new THREE.Quaternion(c.orientation.x, c.orientation.y, c.orientation.z, c.orientation.w);
+    const q = viewQuat(c.orientation);                 // VIEW-space pose
     const f = footprint(c);
+    const P = [c.position.x, c.position.y, -c.position.z];
     if (c.type === 'Aileron') {
       const n = new THREE.Vector3(0, 1, 0).applyQuaternion(q);
-      const R = q.clone();
       aeroPlates.push({ name: c.position.z < 0 ? 'canard' : 'aileron',
-        c: [c.position.x, c.position.y, c.position.z], n: [n.x, n.y, n.z],
+        c: P, n: [n.x, n.y, n.z],
         area: f.x * f.z * 0.72, R: 0.75 });
       const defl = c.position.z < 0 ? 1.05 : 0.12;
-      const fl = new THREE.Vector3(0, Math.cos(defl), Math.sin(defl))
+      const fl = new THREE.Vector3(0, Math.cos(defl), -Math.sin(defl))   // mirror z
         .applyQuaternion(q).normalize();
-      aeroPlates.push({ name: 'flap', c: [c.position.x, c.position.y, c.position.z],
-        n: [fl.x, fl.y, fl.z], area: f.x * f.z * 0.3, R: 0.4 });
+      aeroPlates.push({ name: 'flap', c: P, n: [fl.x, fl.y, fl.z], area: f.x * f.z * 0.3, R: 0.4 });
     } else if (c.type === 'SolarPanel') {
       const n = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
-      aeroPlates.push({ name: 'solar panel', c: [c.position.x, c.position.y, c.position.z],
-        n: [n.x, n.y, n.z], area: f.x * f.z, R: 1.2 });
+      aeroPlates.push({ name: 'solar panel', c: P, n: [n.x, n.y, n.z], area: f.x * f.z, R: 1.2 });
     } else if (c.type === 'SmallWheel') {
-      aeroPlates.push({ name: 'wheel', bluff: true, c: [c.position.x, c.position.y, c.position.z],
+      aeroPlates.push({ name: 'wheel', bluff: true, c: P,
         n: [0, 0, 1], area: Math.PI * 0.17 * 0.10, R: 0.3 });
     }
   }
+  buildSolid();
+  buildThrustArrows();
   initFlow();
   updateReport();
 }
 
-function flowDir() {
-  const seat = model?.data.components.find(c => c.type === 'PilotSeat');
-  let up = [0, 0, -1];
-  if (seat) {
-    const q = new THREE.Quaternion(seat.orientation.x, seat.orientation.y, seat.orientation.z, seat.orientation.w);
-    up = new THREE.Vector3(0, 0, -1).applyQuaternion(q).toArray();
-  }
-  // AoA: relative wind travels tail-ward and slightly upward (comes from front-below)
-  const a = flowState.aoa * Math.PI / 180;
-  const sp = Math.sin(a), cp = Math.cos(a);
-  const tail = up.map(x => -x);                      // seat faces forward; wind travels to tail
-  return [tail[0] * cp, sp, tail[2] * cp];
-}
-
 function sampleVel(p, dir, V) {
+  if (extGrid && !inExterior(p)) return [0, 0, 0];   // sealed interior: no wind
   let v = [dir[0] * V, dir[1] * V, dir[2] * V];
   for (const pl of aeroPlates) {
     const d = (p[0] - pl.c[0]) * pl.n[0] + (p[1] - pl.c[1]) * pl.n[1] + (p[2] - pl.c[2]) * pl.n[2];
@@ -2119,6 +2377,25 @@ function sampleVel(p, dir, V) {
     v[1] += pl.n[1] * s * V * 0.9 * w + (vn < 0 ? -pl.n[1] * vn * 1.6 * w : 0);
     v[2] += pl.n[2] * s * V * 0.9 * w + (vn < 0 ? -pl.n[2] * vn * 1.6 * w : 0);
   }
+  // voxel hull + component occupancy cells (VIEW-space 0.25 m grid): radial
+  // push-out from solid cell centres kills inflow and bends the stream —
+  // blocks and components now shape the flow, not just the hull triangles.
+  if (solidCells && solidCells.size) {
+    const cx = Math.floor(p[0] / 0.25), cy = Math.floor(p[1] / 0.25), cz = Math.floor(p[2] / 0.25);
+    for (let i = -1; i <= 1; i++)
+      for (let j = -1; j <= 1; j++)
+        for (let k = -1; k <= 1; k++) {
+          if (!solidCells.has(cellKeyV(cx + i, cy + j, cz + k))) continue;
+          const d = [p[0] - (cx + i + 0.5) * 0.25, p[1] - (cy + j + 0.5) * 0.25, p[2] - (cz + k + 0.5) * 0.25];
+          const r = Math.hypot(d[0], d[1], d[2]);
+          if (r > 0.62 || r < 1e-6) continue;
+          const w = Math.exp(-(Math.max(0, r - 0.18) ** 2) / 0.1);
+          const nx = d[0] / r, ny = d[1] / r, nz = d[2] / r;
+          const vn = v[0] * nx + v[1] * ny + v[2] * nz;
+          const g = (V * 0.6 + (vn < 0 ? -1.7 * vn : -0.35 * vn)) * w;
+          v[0] += nx * g; v[1] += ny * g; v[2] += nz * g;
+        }
+  }
   return v;
 }
 
@@ -2131,9 +2408,28 @@ function initFlow() {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(flowData, 3));
   flowPts = new THREE.Points(g, new THREE.PointsMaterial({
-    size: 0.09, sizeAttenuation: true, vertexColors: true, transparent: true, opacity: 0.95 }));
+    size: 0.09, sizeAttenuation: true, vertexColors: true, transparent: true, opacity: 0.95,
+    depthTest: false }));
+  flowPts.renderOrder = 12;
+  flowPts.raycast = () => {};
   g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(N * 3), 3));
   flowGroup.add(flowPts);
+  // motion trails: prev->cur segments, additive, depthTest off so the wind
+  // reads over the hull (the plain wavy lines alone read as 'not good enough')
+  flowTrails = {
+    pos: new Float32Array(N * 6),
+    col: new Float32Array(N * 6),
+  };
+  const tg = new THREE.BufferGeometry();
+  tg.setAttribute('position', new THREE.BufferAttribute(flowTrails.pos, 3));
+  tg.setAttribute('color', new THREE.BufferAttribute(flowTrails.col, 3));
+  const tmesh = new THREE.LineSegments(tg, new THREE.LineBasicMaterial({
+    vertexColors: true, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending,
+    depthWrite: false, depthTest: false }));
+  tmesh.renderOrder = 11;
+  tmesh.raycast = () => {};
+  flowGroup.add(tmesh);
+  flowTrails.mesh = tmesh;
   flowGroup.visible = flowOn;
   buildStreamlines();
 }
@@ -2151,22 +2447,39 @@ function buildStreamlines() {
     const c = new THREE.Color().setHSL(clamp(0.66 - (sp / V - 1) * 1.3, 0.02, 0.66), 0.95, 0.55);
     arr.push(c.r, c.g, c.b);
   };
-  const sga = location.search.includes('flowlow') ? 0.9 : 0.45;   // coarser seed grid
-  for (let y = b.y - 0.35; y <= B.y + 1.0; y += sga)
-    for (let x = b.x - 0.5; x <= B.x + 0.5; x += sga * 2.4) {
-      const seed = [x, y, (b.z + B.z) / 2];
+  // Seed plane PERPENDICULAR to the flow, one body-radius upstream — the old
+  // fixed x·y/z-centre grid only made sense for pure tailward flow; with wind
+  // azimuth / vertical thrust flow it seeded inside the hull.
+  const dv = new THREE.Vector3(dir[0], dir[1], dir[2]).normalize();
+  const cen = new THREE.Vector3((b.x + B.x) / 2, (b.y + B.y) / 2, (b.z + B.z) / 2);
+  const ref = Math.abs(dv.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+  const e1 = ref.cross(dv).normalize();
+  const e2 = new THREE.Vector3().crossVectors(dv, e1).normalize();
+  const rad = Math.hypot(B.x - b.x, B.y - b.y, B.z - b.z) / 2 * 1.1 + 0.5;
+  const sga = location.search.includes('flowlow') ? 1.1 : 0.55;   // coarser seed grid
+  const R2 = (rad + 2.2) * (rad + 2.2);
+  for (let a = -rad; a <= rad; a += sga * 1.7)
+    for (let c2 = -rad; c2 <= rad; c2 += sga) {
+      if (a * a + c2 * c2 > rad * rad) continue;              // disc, not square
+      const seed = cen.clone().addScaledVector(dv, -(rad + 1.2))
+        .addScaledVector(e1, a).addScaledVector(e2, c2);
+      const seedA = [seed.x, seed.y, seed.z];
       const fwd = [], fc = [], back = [], bc = [];
       const walk = (sgn, pts, cs) => {
-        let p = [...seed];
-        for (let k = 0; k < 75; k++) {
+        let p = [...seedA];
+        for (let k = 0; k < 90; k++) {
           const v = sampleVel(p, dir, V);
-          p = p.map((q, i) => q + sgn * v[i] * 0.07);
+          const sp = Math.hypot(v[0], v[1], v[2]);
           pts.push(p[0], p[1], p[2]);
-          colOf(Math.hypot(v[0], v[1], v[2]), cs);
-          if (Math.abs(p[0]) > B.x + 2.5 || Math.abs(p[2]) > 16 || p[1] > B.y + 4 || p[1] < -1.5) break;
+          colOf(sp, cs);
+          if (sp < V * 0.03) break;                           // sealed interior /
+          const dx = p[0] - cen.x, dy = p[1] - cen.y, dz = p[2] - cen.z;  //   stagnation
+          if (dx * dx + dy * dy + dz * dz > R2) break;
+          p = p.map((q, i) => q + sgn * v[i] * 0.07);
         }
       };
       walk(1, fwd, fc); walk(-1, back, bc);
+      if (fwd.length + back.length < 12) continue;
       const pts = [], cs = [];
       for (let k = back.length - 3; k >= 0; k -= 3) { pts.push(back[k], back[k + 1], back[k + 2]); cs.push(bc[k], bc[k + 1], bc[k + 2]); }
       pts.push(...fwd); cs.push(...fc);
@@ -2184,28 +2497,63 @@ function buildStreamlines() {
 }
 function respawn(arr, i, b, B) {
   const d = flowDir();
-  for (let k = 0; k < 3; k++) arr[i + k] = b[k] + Math.random() * (B[k] - b[k]) + (B[k] - b[k]) * 0.55 * (d[k] < -0.001 ? -1 : d[k] > 0.001 ? 1 : 0);
-  arr[i + 1] = model.box_min.y + Math.random() * (model.box_max.y - model.box_min.y) * 2.2;
+  for (let att = 0; att < 24; att++) {
+    for (let k = 0; k < 3; k++) arr[i + k] = b[k] + Math.random() * (B[k] - b[k]) + (B[k] - b[k]) * 0.55 * (d[k] < -0.001 ? -1 : d[k] > 0.001 ? 1 : 0);
+    arr[i + 1] = model.box_min.y + Math.random() * (model.box_max.y - model.box_min.y) * 2.2;
+    if (!extGrid || inExterior([arr[i], arr[i + 1], arr[i + 2]])) break;   // never seed inside a sealed hull
+  }
+  if (flowTrails) {                       // trail anchors to the spawn point
+    flowTrails.pos[i * 2] = arr[i]; flowTrails.pos[i * 2 + 1] = arr[i + 1]; flowTrails.pos[i * 2 + 2] = arr[i + 2];
+    flowTrails.pos[i * 2 + 3] = arr[i]; flowTrails.pos[i * 2 + 4] = arr[i + 1]; flowTrails.pos[i * 2 + 5] = arr[i + 2];
+  }
 }
 function stepFlow(dt) {
   if (!flowData || !flowOn) return;
   const V = Math.max(1, flowState.speed), dir = flowDir();
   const b = model.box_min, B = model.box_max;
-  const R = 1.6;
+  const R = 1.6, tt = performance.now() * 0.0006;
   const pos = flowPts.geometry.attributes.position.array;
   const col = flowPts.geometry.attributes.color.array;
-  for (let i = 0; i < pos.length; i += 3) {
-    const v = sampleVel([pos[i], pos[i + 1], pos[i + 2]], dir, V);
+  const tp = flowTrails && flowTrails.pos, tc = flowTrails && flowTrails.col;
+  for (let i = 0, j = 0; i < pos.length; i += 3, j += 6) {
+    const px = pos[i], py = pos[i + 1], pz = pos[i + 2];
+    const v = sampleVel([px, py, pz], dir, V);
+    const sp0 = Math.hypot(v[0], v[1], v[2]);
+    // animated turbulence: sinusoidal field, amplitude rising in the
+    // wake/shear (where |v| departs from freestream) — laminar far field
+    // stays calm blue, separated flow around edges boils red-magenta.
+    const wake = clamp(sp0 / V - 1, 0, 1.5) + 0.12;
+    let ta = 0;
+    if (flowState.turb > 0 && sp0 > 1e-3) {
+      const s = 0.7, A = V * 0.16 * flowState.turb * wake;
+      const tx = A * Math.sin(py * s + tt * 3.5) * Math.cos(pz * s * 1.3 - tt * 2.8);
+      const ty = A * Math.sin(pz * s * 1.1 - tt * 3.2) * Math.cos(px * s - tt * 3.8);
+      const tz = A * Math.sin(px * s * 0.9 + tt * 4.2) * Math.cos(py * s * 1.2 + tt * 2.3);
+      v[0] += tx; v[1] += ty; v[2] += tz;
+      ta = Math.hypot(tx, ty, tz) / V;
+    }
     const sp = Math.hypot(v[0], v[1], v[2]);
     pos[i] += v[0] * dt * 0.35; pos[i + 1] += v[1] * dt * 0.35; pos[i + 2] += v[2] * dt * 0.35;
-    const t = clamp(sp / (V * 1.4), 0, 1);
-    col[i] = 0.25 + t * 0.75; col[i + 1] = 0.45 + t * 0.3; col[i + 2] = 1 - t * 0.6;
+    const t = clamp(sp / (V * 1.4), 0, 1), tr = clamp(ta * 2.2, 0, 1);
+    col[i] = clamp(0.25 + t * 0.75 + tr * 0.7, 0, 1);
+    col[i + 1] = clamp(0.45 + t * 0.3 - tr * 0.35, 0, 1);
+    col[i + 2] = clamp(1 - t * 0.6 - tr * 0.3, 0, 1);
+    if (tp) {                                     // trail: prev -> new
+      tp[j] = px; tp[j + 1] = py; tp[j + 2] = pz;
+      tp[j + 3] = pos[i]; tp[j + 4] = pos[i + 1]; tp[j + 5] = pos[i + 2];
+      tc[j] = col[i] * 0.15; tc[j + 1] = col[i + 1] * 0.15; tc[j + 2] = col[i + 2] * 0.15;
+      tc[j + 3] = col[i]; tc[j + 4] = col[i + 1]; tc[j + 5] = col[i + 2];
+    }
     const out = pos[i] < b.x - R || pos[i] > B.x + R || pos[i + 2] < b.z - R || pos[i + 2] > B.z + R
-             || pos[i + 1] > B.y + R;
+             || pos[i + 1] > B.y + R || sp < 1e-4;
     if (out) respawn(pos, i, b, B);
   }
   flowPts.geometry.attributes.position.needsUpdate = true;
   flowPts.geometry.attributes.color.needsUpdate = true;
+  if (tp) {
+    flowTrails.mesh.geometry.attributes.position.needsUpdate = true;
+    flowTrails.mesh.geometry.attributes.color.needsUpdate = true;
+  }
 }
 
 function computeAero() {
@@ -2232,6 +2580,14 @@ function computeAero() {
     cp: { x: cp.x / totF, y: cp.y / totF, z: cp.z / totF }, V, qd };
 }
 
+function dirLabel(v) {
+  const [x, y, z] = v;                          // VIEW space: +z = nose
+  const ax = Math.abs(x), ay = Math.abs(y), az = Math.abs(z);
+  if (az >= ax && az >= ay) return z > 0 ? 'nose-ward' : 'tail-ward';
+  if (ax >= ay) return x > 0 ? 'right-ward' : 'left-ward';
+  return y > 0 ? 'up-ward' : 'down-ward';
+}
+
 function updateReport() {
   if (!model) return;
   const mm = updateCoM();
@@ -2245,8 +2601,13 @@ function updateReport() {
   const dl = Math.hypot(...fwd) || 1;
   const axial = (A.cp.x - mm.com[0]) * (fwd[0] / dl) + (A.cp.z - mm.com[2]) * (fwd[2] / dl);
   const mac = model.box_max.z - model.box_min.z;
+  const azA = Math.abs(flowState.az);
+  const azL = azA < 5 ? 'nose' : azA > 175 ? 'tail'
+    : `${azA}° ${flowState.az > 0 ? 'from left' : 'from right'}`;
   el.textContent =
-`speed ${flowState.speed} m/s (${(flowState.speed * 3.6).toFixed(0)} km/h) · AoA ${flowState.aoa}° · q=${A.qd.toFixed(0)}Pa
+`speed ${flowState.speed} m/s (${(flowState.speed * 3.6).toFixed(0)} km/h) · AoA ${flowState.aoa}° · wind from ${azL} · turb ${flowState.turb.toFixed(2)} · q=${A.qd.toFixed(0)}Pa
+thrust: ${netThrust && netThrust.v ? `${netThrust.n} engine${netThrust.n > 1 ? 's' : ''} · class Σ${netThrust.w.toFixed(2)} · net ${dirLabel(netThrust.v)}${flowSrc.mode === 'seat' ? ' · flow src: seat' : ' → flow follows thrust ✔'}` : netThrust ? `${netThrust.n} engine(s) · class Σ${netThrust.w.toFixed(2)} · net ~0 (symmetric bank) → flow follows seat nose` : 'no thrusters — flow follows seat nose'}${extGrid && extGrid.sealedCount > 0 ? `
+sealed interior: ${extGrid.sealedCount.toLocaleString()} cells windless (doors closed)` : ''}
 mass: declared ${mm.declared.toFixed(1)} kg | computed ${mm.tot.toFixed(1)} kg (${mm.compSum.toFixed(0)} kg parts
       + ${mm.cells} cells × ${cellMass.toFixed(2)} kg → ${mm.density.toFixed(0)} kg/m³) ${
         Math.abs(mm.tot - mm.declared) / mm.declared < 0.02 ? '✔ matches' : '⚠ MISMATCH'}
@@ -2272,6 +2633,8 @@ function buildFlight() {
   s.innerHTML = '';
   row(s, 'speed', 0, 160, 1, flowState.speed, v => { flowState.speed = v; updateReport(); buildStreamlines(); });
   row(s, 'AoA °', -8, 20, 0.5, flowState.aoa, v => { flowState.aoa = v; updateReport(); buildStreamlines(); });
+  row(s, 'wind from side °', -180, 180, 5, flowState.az, v => { flowState.az = v; updateReport(); buildStreamlines(); });
+  row(s, 'turbulence', 0, 1, 0.05, flowState.turb, v => { flowState.turb = v; });
   row(s, 'kg / block cell (0.25 m cube)', 0.2, 20, 0.05, cellMass, v => { cellMass = v; updateReport(); });
   const cal = document.createElement('button');
   cal.className = 'btn'; cal.textContent = 'calibrate cells to declared mass';
@@ -2286,7 +2649,22 @@ function buildFlight() {
   comB.textContent = 'CoM/arrows: ' + (aeroArrows.visible ? 'on' : 'off');
   comB.onclick = () => { aeroArrows.visible = comMarker.visible = !aeroArrows.visible;
     comB.textContent = 'CoM/arrows: ' + (aeroArrows.visible ? 'on' : 'off'); };
-  s.appendChild(cal); s.appendChild(flowB); s.appendChild(comB);
+  const thB = document.createElement('button');
+  thB.className = 'btn'; thB.style.marginLeft = '4px';
+  thB.textContent = 'thrust: ' + (thrustArrowsOn ? 'shown' : 'hidden');
+  thB.onclick = () => { thrustArrowsOn = !thrustArrowsOn; thrustGroup.visible = thrustArrowsOn;
+    invalidate();
+    thB.textContent = 'thrust: ' + (thrustArrowsOn ? 'shown' : 'hidden'); };
+  const fsB = document.createElement('button');
+  fsB.className = 'btn'; fsB.style.marginLeft = '4px';
+  fsB.title = 'Direction the air flows past: net thrust (auto = thrust when the bank is asymmetric, seat nose otherwise)';
+  fsB.textContent = 'flow src: ' + flowSrc.mode;
+  fsB.onclick = () => {
+    flowSrc.mode = flowSrc.mode === 'auto' ? 'seat' : flowSrc.mode === 'seat' ? 'thrust' : 'auto';
+    buildStreamlines(); updateReport();
+    fsB.textContent = 'flow src: ' + flowSrc.mode;
+  };
+  s.appendChild(cal); s.appendChild(flowB); s.appendChild(comB); s.appendChild(thB); s.appendChild(fsB);
   const pre = document.createElement('pre');
   pre.id = 'aeroreport';
   pre.style.cssText = 'margin:6px 0 2px;padding:6px;background:var(--panel2);border-radius:4px;font-size:11px;white-space:pre-wrap;color:#cfe';
@@ -2496,6 +2874,8 @@ if (location.search.includes('hull')) hullGroup.visible = true;
 if (location.search.includes('occ')) occGroup.visible = true;
 if (location.search.includes('nosub')) subGroup.visible = false;   // debug: hide subgrids
 if (location.search.includes('flow')) flowOn = true;
+{ const fsP = new URLSearchParams(location.search).get('flowsrc');   // ?flowsrc=seat|thrust|auto
+  if (fsP === 'seat' || fsP === 'thrust' || fsP === 'auto') flowSrc.mode = fsP; }
 if (location.search.includes('perf')) perfT0 = performance.now() + 1500;  // measure after load settles
 loadModelManifest().then(fetchDefault).then(applyCamQ);
 requestAnimationFrame(tick);
@@ -2627,6 +3007,26 @@ if (location.search.includes('selftest')) {
       const ok16 = flashes.length >= 1 && flashes[0].ci === idx
         && selBox.material.depthTest === false;
       clearSurges();
+      // ok17: thrust indication — every propulsor (ISW RCS bank) feeds a
+      // normalized net-thrust vector, and per-engine + net arrows are built
+      const nThr = model.data.components.filter(c => c.type in THRUST).length;
+      const ok17 = nThr > 0 && !!netThrust && netThrust.n === nThr
+        && thrustGroup.children.length === nThr + (netThrust.v ? 1 : 0)
+        && (!netThrust.v || Math.abs(Math.hypot(...netThrust.v) - 1) < 0.02);
+      // ok18: sealed-hull wind exclusion (user: no wind inside enclosed
+      // craft): BionicDolphin (block hull, hatches stored closed) has a
+      // ray-enclosed cabin of 100+ cells that is windless, its far field
+      // windy; the live ISW grid exists and its far field is exterior.
+      const dp = await (await fetch('../testdata/3417786605/blueprint.json')).json();
+      const seal = sealStats(dp.data);
+      const sp = seal.sealedSample;
+      const sgx = Math.round(sp[0] / 0.25) - seal.b0[0];
+      const sgy = Math.round(sp[1] / 0.25) - seal.b0[1];
+      const sgz = Math.round(sp[2] / 0.25) - seal.b0[2];
+      const ok18 = !!extGrid && inExterior([model.box_min.x - 2, 0, 0])
+        && seal.sealedCount > 100
+        && seal.ext[((sgy * seal.n[0]) + sgx) * seal.n[2] + sgz] !== 1
+        && seal.ext[0] === 1;
       // picking must work through the mirrored component transforms
       // (camera aimed at the selected component: load framing is
       // per-craft now, the pin must not depend on it)
@@ -2641,14 +3041,15 @@ if (location.search.includes('selftest')) {
       ray.setFromCamera(new THREE.Vector2(0, 0), camera);
       const ok5 = ray.intersectObjects(compGroup.children, true)
         .some(h => h.object.userData.ci >= 0);
-      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 && ok10 && ok11 && ok12 && ok13 && ok14 && ok15 && ok16 ? 'PASS' : 'FAIL')
+      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 && ok10 && ok11 && ok12 && ok13 && ok14 && ok15 && ok16 && ok17 && ok18 ? 'PASS' : 'FAIL')
         + ' occ_z=' + occ.pos_z + ' mirror=' + !!mir
         + ' pitch=' + (2 * Math.asin(-seat.orientation.x) * 180 / Math.PI).toFixed(1) + '°'
         + ' beacon=' + (mast ? mast.x.toFixed(2) : 'none') + ' droop=' + wc.y.toFixed(2)
         + ' junction=' + jdir.y.toFixed(2) + ' aileron=' + at.y.toFixed(2)
         + ' pick=' + ok5 + ' palette=' + ok9 + ' lens=' + ok10
         + ' dashmirror=' + ok11 + ' textx=' + ok12 + ' mural=' + ok13 + ' ground=' + ok14
-        + ' surges=' + ok15 + ' bolts=' + ok16;
+        + ' surges=' + ok15 + ' bolts=' + ok16 + ' thrust=' + ok17 + ' seal=' + ok18
+        + ' cabin=' + seal.sealedCount;
     } catch (e) { document.title = 'SELFTEST ERR ' + e.message + ' @' + String(e.stack).split(String.fromCharCode(10))[1].trim().slice(0, 70); }
   }, 1500);
 }

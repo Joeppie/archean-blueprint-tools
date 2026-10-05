@@ -38,9 +38,20 @@ python3 -m http.server 8650             # manual serving (repo root)
 # perf probe: viewer/index.html?perf → tab title: PERF fps=… draw=<draw-calls> …
 python3 tools/extract_models.py <Archean-game-dir> -o viewer/models
 ```
-Headless render shots: `chromium --headless=new --no-sandbox --disable-gpu
---enable-unsafe-swiftshader --window-size=1400,900 --virtual-time-budget=15000
---screenshot=out.png <url>` (add `--dump-dom` to read page text/titles).
+Headless render shots — use the **AMD iGPU** (~1 s/shot, full budgets):
+```bash
+VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.json \
+chromium --headless=new --no-sandbox --disable-dev-shm-usage \
+  --use-gl=angle --use-angle=vulkan --window-size=1400,900 \
+  --virtual-time-budget=15000 --screenshot=out.png <url>   # --dump-dom for titles
+```
+VK_ICD_FILENAMES hides the NVIDIA ICD from chromium entirely — the discrete
+GPU usually runs the user's AI models and MUST NOT be contended (quick check:
+`nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv`; if busy,
+keep the iGPU pin). tests/run_tests.sh does this by default (whole suite ~6 s).
+GPU=0 = SwiftShader CPU fallback: every virtual frame costs 13-300 ms wall,
+screenshots at virtual budgets ≥10 s never complete (wall-time cliff) — keep
+budgets ≤8000 in that mode.
 NOTE: to kill a dev server, use `pkill -f "[h]ttp.server 8650"` — plain
 `pkill -f "http.server 8650"` also matches (kills) the calling shell.
 
@@ -239,7 +250,14 @@ landing page and README together when the viewer changes).
      selecting a component must fire cable power-surges: one travelling
      pulse per connected pipe (data.pipes graph), the far component blips
      on arrival; pulses/blips/selection glow render additive with
-     depthTest off — visible THROUGH the hull (`surges=true`). The
+     depthTest off — visible THROUGH the hull (`surges=true`).
+     thrust display + wind model: every propulsor (THRUST table = .ini
+     TARGET axes; Propeller double-headed + excluded from the net) feeds
+     a normalized net-thrust vector, symmetric banks net to null
+     (`thrust=true`); sealStats (blocks+occup+hatch blocks+triangle
+     raster on cell = pos+12f−5.5, z-view) flood+ray-enclosure seals
+     BionicDolphin's cabin (>100 cells) while ISW stays wind-swept;
+     sampleVel is zero inside sealed cells (`seal=true cabin=…`). The
      selection is an incandescent X-ray overlay (shared-geometry meshes,
      matrix-synced every rendered frame so it tracks live edits). Camera
      fly-in is MANUAL-only: canvas click, component-list double-click

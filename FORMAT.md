@@ -455,6 +455,52 @@ Zero-build Three.js (WebGL) inspector: `python3 -m http.server 8650` (repo root)
   Selftest `mural=true` pins the legacy side. `viewQuat`/`rawFromView`
   switch on `LEGACY_Q` (set in `setModel`); saved files stay byte-exact.
 
+## Propulsion & the viewer's wind model (v0.122)
+
+Thrust axes (from each propulsor's game `.ini` `[TARGET plasma]/[thrust]`
+nodes; a TARGET `rotation = -90 0 0` maps node-forward (−z) to local −y):
+
+| type | local thrust axis | class weight |
+|---|---|---|
+| BigThruster | (0,−1,0) | 1.0 |
+| MiniThruster | (0,−1,0) | 0.4 |
+| SmallThruster | (0,+1,0) | 0.15 |
+| RCS | (0,0,−1) | 0.25 |
+| Propeller | (0,−1,0) | 0.6 |
+
+Blueprints store no newton figures — weights are display ratios. **Propellers
+thrust BOTH ways** (user-verified behaviour): their arrows render double-headed
+and they are EXCLUDED from the net-thrust vector. Net = Σ axis·weight over
+rockets; |net| < 0.15·Σweight ⇒ "net ~0 (symmetric bank)" (ISW-241's 9 RCS do
+this) and no direction is suggested.
+
+Relative wind = −flight axis; the axis comes from flow-src `auto` (strong net
+thrust, else PilotSeat nose) | `seat` | `thrust`, yawed by the "wind from side"
+azimuth slider and elevated by AoA (props reverse → the direction stays
+user-controllable, `?flowsrc=` presets it).
+
+Voxel wind grid (viewer, VIEW space, 0.25 m cells): cell index =
+`pos + 12·frame − 5.5` (z mirrored). Sources: blocks (type≠255), component
+`occupancies`, **Build subgrid blocks** (a closed hatch stores its real blocks
+at true grid coords → they seal; the Build component's OWN occupancies are the
+construction-site ghost far outside the bbox → skip), and hull-triangle
+surfaces rasterized at 0.11 m sampling (exact lattice `(v+12f)·0.25 − 1.5`).
+NEVER add `frame·3.0` on top of `(12f)·0.25` — that double-pitch bug put every
+cell 3 m off per frame (v0.117 shipped with it).
+
+Sealing = flood-fill from the padded bbox corner (unreached cells are windless)
+**plus a ray-enclosure pass**: flood-reached cells that have solid on all six
+axial rays are CABIN (windless). Block-built shells leak through intakes and
+gaps, so flood alone under-seals; enclosure rescues e.g. BionicDolphin
+(testdata/3417786605 → ~230 cabin cells), while ISW-241 is an open-tail tube →
+0 cabin cells, correctly wind-swept. Selftest `seal=true` pins the dolphin case
+via pure `sealStats(data)`.
+
+`sampleVel` returns 0 velocity in windless cells (streamlines break, particles
+respawn outside the hull). Turbulence = animated sinusoidal field, amplitude ∝
+wake/shear (|v|/V − 1) × turbulence slider; particles and their trails shade
+blue→red-magenta with local turbulence.
+
 ## Editing recipe (used for the seat adjustment)
 
 Tilt forward = rotate about world **X** with a **negative** angle (Unity left-handed:

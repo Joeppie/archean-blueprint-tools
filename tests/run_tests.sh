@@ -7,7 +7,8 @@
 # Runs:  1. viewer selftest  — edit→serialize→occupancy/mirror sync, byte round-trip
 #        2. regtest suite    — format invariants + hull fit over every testdata craft
 #        3. proxytest        — low-poly vs real geometry per component type
-#        4. smoke render     — one WebGL screenshot (needs swiftshader in headless)
+#        4. smoke render     — one WebGL screenshot (iGPU Vulkan via ANGLE;
+#                              GPU=0 forces the slow SwiftShader CPU fallback)
 #
 # Exit code: 0 = all passed. Artifacts in $OUT (default /tmp/archean-tests).
 set -uo pipefail
@@ -17,10 +18,25 @@ OUT="${OUT:-/tmp/archean-tests}"
 PORT="${PORT:-8650}"
 CHROME="${CHROME:-$(command -v chromium chromium-browser google-chrome 2>/dev/null | head -1)}"
 [ -n "$CHROME" ] || { echo "no chromium found (set CHROME=...)"; exit 2; }
-# every browser step is wall-clock capped: a hung SwiftShader render must FAIL,
-# not stall the suite (virtual-time-budget only bounds virtual time)
-chrome() { timeout "${SHOT_TIMEOUT:-150}" "$CHROME" --headless=new --no-sandbox \
-  --disable-gpu --disable-dev-shm-usage --enable-unsafe-swiftshader "$@"; }
+# GPU rendering is the default: real Vulkan via ANGLE. We PIN THE AMD iGPU
+# (VK_ICD_FILENAMES hides the NVIDIA ICD from chromium entirely) because the
+# discrete GPU is usually running AI models — contending with it jeopardizes
+# their continuity, and RADV renders this viewer in <1 s headless.
+# QUICK CHECK before GPU runs: `nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv`
+# — if util/mem show live work, keep the iGPU pin (i.e. leave this as-is).
+# GPU=0 falls back to SwiftShader (CPU rasterizer): every virtual frame then
+# costs ~13-300 ms wall, so dump budgets >10 s and screenshots at budgets
+# ≥10 s stop completing — a SwiftShader limit, not a viewer problem.
+IGPU_ICD="/usr/share/vulkan/icd.d/radeon_icd.json"
+if [ "${GPU:-1}" = "1" ] && [ -f "$IGPU_ICD" ]; then
+  export VK_ICD_FILENAMES="$IGPU_ICD"
+  chrome() { timeout "${SHOT_TIMEOUT:-90}" "$CHROME" --headless=new --no-sandbox \
+    --disable-dev-shm-usage --use-gl=angle --use-angle=vulkan "$@"; }
+else
+  chrome() { timeout "${SHOT_TIMEOUT:-240}" "$CHROME" --headless=new --no-sandbox \
+    --disable-gpu --disable-dev-shm-usage --enable-unsafe-swiftshader "$@"; }
+fi
+SMBUD=15000; [ "${GPU:-1}" = "1" ] || SMBUD=8000   # swiftshader dies at 15000 (see above)
 mkdir -p "$OUT"
 touch "$OUT/.start"          # freshness marker: stale screenshots from old runs must not pass
 
@@ -57,12 +73,13 @@ echo "   $title"
 case "$title" in *COMPTEST\ 60/60\ PASS*) ;; *) echo "   FAIL"; fail=1;; esac
 
 echo "── smoke render"
-chrome --window-size=1400,900 --virtual-time-budget=15000 \
+chrome --window-size=1400,900 --virtual-time-budget=$SMBUD \
   --screenshot="$OUT/viewer.png" "$BASE/viewer/index.html" 2>/dev/null
 [ -s "$OUT/viewer.png" ] && [ "$OUT/viewer.png" -nt "$OUT/.start" ] && echo "   ok: $OUT/viewer.png" || { echo "   FAIL (no screenshot)"; fail=1; }
 
 echo "── flow render (with streamlines)"
-SHOT_TIMEOUT=240 chrome --window-size=640,400 --virtual-time-budget=2500 \
+FBUD=$SMBUD; [ "${GPU:-1}" = "1" ] || FBUD=2500
+chrome --window-size=1000,700 --virtual-time-budget=$FBUD \
   --screenshot="$OUT/flow.png" "$BASE/viewer/index.html?flow&flowlow" 2>/dev/null
 [ -s "$OUT/flow.png" ] && [ "$OUT/flow.png" -nt "$OUT/.start" ] && echo "   ok: $OUT/flow.png" || { echo "   FAIL (no screenshot)"; fail=1; }
 
