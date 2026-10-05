@@ -511,6 +511,12 @@ gaps, so flood alone under-seals; enclosure rescues e.g. BionicDolphin
 (testdata/3417786605 → ~230 cabin cells), while ISW-241 is an open-tail tube →
 0 cabin cells, correctly wind-swept. Selftest `seal=true` pins the dolphin case
 via pure `sealStats(data)`.
+CAUTION (v0.129 fix): grid index is `(y·n[0]+x)·n[2]+z` — decode MUST use
+`x = t % n[0]; y = t / n[0]`. Decoding with `n[1]` strides (as the flood,
+enclosure ray and sealedSample all did) phantom-connects the 6-neighbour flood
+on non-cubic grids: sealed interiors read as wind-open (the mosaic craft's
+"leaked cabin" — its shell never leaked; true counts: mosaic 36,442 sealed,
+dolphin 2,696, ISW 0).
 
 `sampleVel` returns 0 velocity in windless cells (streamlines break, particles
 respawn outside the hull). Turbulence = animated sinusoidal field, amplitude ∝

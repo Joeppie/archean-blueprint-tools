@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=128';
-import { resolveColor } from './palette.js?v=128';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=129';
+import { resolveColor } from './palette.js?v=129';
 
 // ---- site-zoom cancel: the viewer ALWAYS loads at physical 100% ----
 // Chrome SAVES page zoom per site (Ctrl+wheel sets it, Ctrl-F5 keeps it,
@@ -1129,7 +1129,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=128';
+import { fitHull } from './hullfit.js?v=129';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -2348,7 +2348,11 @@ function sealStats(data) {
   q[qt++] = 0; ext[0] = 1;                               // (b0 corner = always outside)
   while (qh < qt) {
     const c = q[qh++];
-    const z = c % n[2], y = Math.floor(c / n[2]) % n[1], x = Math.floor(c / (n[2] * n[1]));
+    // decode MUST match idx = (y*n[0] + x)*n[2] + z: the old (y = %n[1],
+    // x = /(n[2]*n[1])) swapped strides turned the 6-neighbour flood into a
+    // phantom walk on non-cubic grids, marking sealed interiors wind-open
+    // (the mosaic craft's 'leaked' cabin: the shell never leaked)
+    const z = c % n[2], t2 = Math.floor(c / n[2]); const x = t2 % n[0], y = Math.floor(t2 / n[0]);
     const nb = [[x + 1, y, z], [x - 1, y, z], [x, y + 1, z], [x, y - 1, z], [x, y, z + 1], [x, y, z - 1]];
     for (const [a, b2, d] of nb) {
       if (a < 0 || b2 < 0 || d < 0 || a >= n[0] || b2 >= n[1] || d >= n[2]) continue;
@@ -2364,16 +2368,32 @@ function sealStats(data) {
   // intakes, so pure flood fill alone under-seals. Verified: BionicDolphin
   // (testdata/3417786605) → 253 cabin cells; ISW-241 → 0 (open-tail tube,
   // physically wind-swept: correct).
+  // 1-cell PINHOLES count as wall (mosaic crafts art their shells with
+  // single-cell holes; the game's pressurisation doesn't leak through those):
+  // an open scan cell flanked by solid on both sides IN THE WALL PLANE is
+  // bridged. Real openings (doors, tail ramps) flank air -> still leak.
+  const sAt = (x, y, z) => (x >= 0 && y >= 0 && z >= 0 && x < n[0] && y < n[1] && z < n[2])
+    ? !!solid[idx(x, y, z)] : false;
   for (let i = 0; i < size; i++) {
     if (solid[i] || !ext[i]) continue;
-    const z = i % n[2], y = Math.floor(i / n[2]) % n[1], x = Math.floor(i / (n[2] * n[1]));
+    const z = i % n[2], t2 = Math.floor(i / n[2]); const x = t2 % n[0], y = Math.floor(t2 / n[0]);
     let enc = true;
     for (let d = 0; d < 6 && enc; d++) {
       const ax = d >> 1, sgn = (d & 1) ? -1 : 1;
       for (let a = x + sgn;; a += sgn) {
-        if (ax === 0) { if (a < 0 || a >= n[0]) { enc = false; break; } if (solid[idx(a, y, z)]) break; }
-        else if (ax === 1) { if (a < 0 || a >= n[1]) { enc = false; break; } if (solid[idx(x, a, z)]) break; }
-        else { if (a < 0 || a >= n[2]) { enc = false; break; } if (solid[idx(x, y, a)]) break; }
+        if (ax === 0) {
+          if (a < 0 || a >= n[0]) { enc = false; break; }
+          if (solid[idx(a, y, z)]) break;
+          if ((sAt(a, y + 1, z) && sAt(a, y - 1, z)) || (sAt(a, y, z + 1) && sAt(a, y, z - 1))) break;
+        } else if (ax === 1) {
+          if (a < 0 || a >= n[1]) { enc = false; break; }
+          if (solid[idx(x, a, z)]) break;
+          if ((sAt(x + 1, a, z) && sAt(x - 1, a, z)) || (sAt(x, a, z + 1) && sAt(x, a, z - 1))) break;
+        } else {
+          if (a < 0 || a >= n[2]) { enc = false; break; }
+          if (solid[idx(x, y, a)]) break;
+          if ((sAt(x + 1, y, a) && sAt(x - 1, y, a)) || (sAt(x, y + 1, a) && sAt(x, y - 1, a))) break;
+        }
       }
     }
     if (enc) ext[i] = 2;                                          // no-wind cabin
@@ -2384,7 +2404,7 @@ function sealStats(data) {
     if (!solid[i] && ext[i] !== 1) {
       sealedCount++;
       if (!sealedSample) {
-        const z = i % n[2], y = Math.floor(i / n[2]) % n[1], x = Math.floor(i / (n[2] * n[1]));
+        const z = i % n[2], t2 = Math.floor(i / n[2]); const x = t2 % n[0], y = Math.floor(t2 / n[0]);
         sealedSample = [(x + b0[0] + 0.5) * 0.25, (y + b0[1] + 0.5) * 0.25, (z + b0[2] + 0.5) * 0.25];
       }
     }
