@@ -1,0 +1,38 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>scan</title><script>window.__IDS=['3251580044', '3270802273', '3272419455', '3278621686', '3278744757', '3281212435', '3284539247', '3285660336', '3288012440', '3290177994', '3294879498', '3294880085', '3298465282', '3308603448', '3309955432', '3314817068', '3322048134', '3326372833', '3327182790', '3328340564', '3332349780', '3332465933', '3332487383', '3334591920', '3334593406', '3334698274', '3347018068', '3348400160', '3348745601', '3351518711', '3353727171', '3371634039', '3373508061', '3381670618', '3382439824', '3384910875', '3384917248', '3385814436', '3385870429', '3385876909', '3386936607', '3403011843', '3404843025', '3406025722', '3406490327', '3409663016', '3410883996', '3417173321', '3417786605', '3445304576', '3468267043', '3481322297', '3481737379', '3509975859', '3510792645', '3518436870', '3521588534', '3732302108', '3803780241', '3812927875', '9000000001'];</script>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js" } }
+</script></head><body><div id="out">…</div>
+<script type="module">
+import { resolveColor } from 'http://127.0.0.1:8650/viewer/palette.js';
+const ids = window.__IDS;
+const lines = [];
+for (const id of ids) {
+  try {
+    const bp = await (await fetch('http://127.0.0.1:8650/testdata/' + id + '/blueprint.json')).json();
+    const d = bp.data;
+    const pal = Array.isArray(d.colors) ? d.colors : [];
+    const filePal = pal.length > 0;
+    const bad = new Map();                     // slot -> count (unresolved)
+    const check = (slot) => {
+      if (slot == null) return;
+      try {
+        const c = resolveColor(pal, slot);
+        if (c.r === 255 && c.g === 0 && c.b === 255) bad.set(slot, (bad.get(slot) || 0) + 1);
+      } catch (e) { bad.set('EXC:' + slot, (bad.get('EXC:' + slot) || 0) + 1); }
+    };
+    for (const b of d.blocks || [])
+      if (b.type !== 255) for (const s of b.colors || []) check(s);
+    for (const c of d.components || []) {
+      if (Array.isArray(c.colors)) c.colors.forEach(check);
+      else if (c.colors && typeof c.colors === 'object')
+        for (const k of Object.keys(c.colors)) check(c.colors[k]);
+    }
+    for (const t of d.triangles || []) for (const s of (t.colors || [])) check(s);
+    const n = [...bad.values()].reduce((a, b) => a + b, 0);
+    if (n) lines.push(id + ' ' + (filePal ? 'FILEPAL' : 'builtin') + ' x' + n + ': ' +
+      [...bad.entries()].map(([s, c]) => s + '(' + c + ')').join(','));
+  } catch (e) { lines.push(id + ' FETCHFAIL ' + e.message); }
+}
+document.getElementById('out').textContent = 'SCAN-DONE ' + lines.length + '\n' + lines.join('\n');
+document.title = 'SCAN ' + lines.length;
+</script></body></html>

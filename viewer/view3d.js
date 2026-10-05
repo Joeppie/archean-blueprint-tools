@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=122';
-import { resolveColor } from './palette.js?v=122';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=123';
+import { resolveColor } from './palette.js?v=123';
 
 // ---- site-zoom cancel: the viewer ALWAYS loads at physical 100% ----
 // Chrome SAVES page zoom per site (Ctrl+wheel sets it, Ctrl-F5 keeps it,
@@ -1129,7 +1129,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=122';
+import { fitHull } from './hullfit.js?v=123';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -2043,6 +2043,16 @@ function updateCoM() {
 // Thin-plate normal force Cn = 2π·sinα·cosα (clamped), boxes/wheels as bluff
 // bodies. Gives sane comparative numbers per element, not certifiable data.
 let aeroPlates = [], flowPts = null, flowData = null, flowTrails = null, flowOn = false;
+const flowMode = { m: 'off' };          // three-way wind-tunnel toggle: 'off' | 'lines' | 'wind'
+function setFlowMode(m) {
+  flowMode.m = m; flowOn = m === 'wind';
+  flowGroup.visible = m !== 'off';
+  if (flowPts) flowPts.visible = m === 'wind';
+  if (flowTrails) flowTrails.mesh.visible = m === 'wind';
+  for (const o of flowGroup.children) if (o.isLine && !o.userData.isTrail) o.visible = m === 'lines';
+  if (m === 'lines' && !flowGroup.children.some(o => o.isLine && !o.userData.isTrail)) buildStreamlines();
+  invalidate();
+}
 const flowGroup = new THREE.Group(); worldM.add(flowGroup);
 const aeroArrows = new THREE.Group(); worldM.add(aeroArrows);
 const flowState = { speed: 60, aoa: 4, az: 0, turb: 0.35 };
@@ -2428,17 +2438,20 @@ function initFlow() {
     depthWrite: false, depthTest: false }));
   tmesh.renderOrder = 11;
   tmesh.raycast = () => {};
+  tmesh.userData.isTrail = true;                 // not a streamline (mode filter)
   flowGroup.add(tmesh);
   flowTrails.mesh = tmesh;
-  flowGroup.visible = flowOn;
+  flowOn = flowMode.m === 'wind';
+  flowGroup.visible = flowMode.m !== 'off';
+  flowPts.visible = flowMode.m === 'wind';
   buildStreamlines();
 }
 // streamlines: integrate the same deflected velocity field both ways from a
 // seed grid, so the eye can follow how air is routed around the craft.
 // Blue = freestream speed, red = accelerated flow (stylized, not CFD).
 function buildStreamlines() {
-  for (const o of [...flowGroup.children]) if (o.isLine) flowGroup.remove(o);
-  if (!model || !flowOn) return;
+  for (const o of [...flowGroup.children]) if (o.isLine && !o.userData.isTrail) flowGroup.remove(o);
+  if (!model || flowMode.m !== 'lines') return;
   const V = Math.max(1, flowState.speed), dir = flowDir();
   const b = model.box_min, B = model.box_max;
   const matS = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9 });
@@ -2496,10 +2509,13 @@ function buildStreamlines() {
   }
 }
 function respawn(arr, i, b, B) {
+  // NOTE: box_min/max are {x,y,z} — numeric b[k] indexing is undefined (the
+  // old bug: x/z seeds were NaN, particles invisible for every version).
   const d = flowDir();
+  const bx = [b.x, b.y, b.z], BB = [B.x, B.y, B.z];
   for (let att = 0; att < 24; att++) {
-    for (let k = 0; k < 3; k++) arr[i + k] = b[k] + Math.random() * (B[k] - b[k]) + (B[k] - b[k]) * 0.55 * (d[k] < -0.001 ? -1 : d[k] > 0.001 ? 1 : 0);
-    arr[i + 1] = model.box_min.y + Math.random() * (model.box_max.y - model.box_min.y) * 2.2;
+    for (let k = 0; k < 3; k++) arr[i + k] = bx[k] + Math.random() * (BB[k] - bx[k]) + (BB[k] - bx[k]) * 0.55 * (d[k] < -0.001 ? 1 : d[k] > 0.001 ? -1 : 0);   // bias UPSTREAM
+    arr[i + 1] = b.y + Math.random() * (B.y - b.y) * 2.2;
     if (!extGrid || inExterior([arr[i], arr[i + 1], arr[i + 2]])) break;   // never seed inside a sealed hull
   }
   if (flowTrails) {                       // trail anchors to the spawn point
@@ -2639,11 +2655,23 @@ function buildFlight() {
   const cal = document.createElement('button');
   cal.className = 'btn'; cal.textContent = 'calibrate cells to declared mass';
   cal.onclick = () => { calibrateCellMass(); buildFlight(); updateReport(); toast(`cell = ${cellMass.toFixed(2)} kg`); };
-  const flowB = document.createElement('button');
-  flowB.className = 'btn'; flowB.style.marginLeft = '4px';
-  flowB.textContent = flowOn ? 'flow: on' : 'flow: off';
-  flowB.onclick = () => { flowOn = !flowOn; flowGroup.visible = flowOn; buildStreamlines();
-    flowB.textContent = flowOn ? 'flow: on' : 'flow: off'; };
+  // three-way wind-tunnel toggle: none / streamlines / animated wind
+  const FM = [['off', '⏻ off'], ['lines', '≋ streamlines'], ['wind', '💨 wind']];
+  const fbtns = [];
+  const setFM = () => fbtns.forEach((b, i) => {
+    const on = flowMode.m === FM[i][0];
+    b.style.background = on ? '#2b6a8f' : '';
+    b.style.borderColor = on ? '#53e0ff' : '';
+  });
+  for (const [m, lab] of FM) {
+    const b = document.createElement('button');
+    b.className = 'btn'; b.style.marginLeft = '4px'; b.textContent = lab;
+    b.title = m === 'lines' ? 'static streamlines around the craft'
+      : m === 'wind' ? 'animated wind particles + turbulence trails' : 'no flow display';
+    b.onclick = () => { setFlowMode(m); setFM(); };
+    fbtns.push(b); s.appendChild(b);
+  }
+  setFM();
   const comB = document.createElement('button');
   comB.className = 'btn'; comB.style.marginLeft = '4px';
   comB.textContent = 'CoM/arrows: ' + (aeroArrows.visible ? 'on' : 'off');
@@ -2664,7 +2692,7 @@ function buildFlight() {
     buildStreamlines(); updateReport();
     fsB.textContent = 'flow src: ' + flowSrc.mode;
   };
-  s.appendChild(cal); s.appendChild(flowB); s.appendChild(comB); s.appendChild(thB); s.appendChild(fsB);
+  s.appendChild(cal); s.appendChild(comB); s.appendChild(thB); s.appendChild(fsB);
   const pre = document.createElement('pre');
   pre.id = 'aeroreport';
   pre.style.cssText = 'margin:6px 0 2px;padding:6px;background:var(--panel2);border-radius:4px;font-size:11px;white-space:pre-wrap;color:#cfe';
@@ -2728,7 +2756,9 @@ function tick(t) {
   if (perfT0) needsRender = true;
   if (!needsRender && !flowOn) return;
   needsRender = false;
-  if (flowPts) flowPts.visible = flowOn;
+  { const wm = flowMode.m === 'wind';
+    if (flowPts) flowPts.visible = wm;
+    if (flowTrails) flowTrails.mesh.visible = wm; }
   paintHighlights();
   renderer.render(scene, camera);
   const sel = selected >= 0 ? model.data.components[selected] : null;
@@ -2873,7 +2903,9 @@ onResize();
 if (location.search.includes('hull')) hullGroup.visible = true;
 if (location.search.includes('occ')) occGroup.visible = true;
 if (location.search.includes('nosub')) subGroup.visible = false;   // debug: hide subgrids
-if (location.search.includes('flow')) flowOn = true;
+{ const q0 = new URLSearchParams(location.search);        // ?flow = wind, ?lines = streamlines
+  if (q0.has('lines')) flowMode.m = 'lines';
+  if (q0.has('flow') || q0.has('wind')) flowMode.m = 'wind'; }
 { const fsP = new URLSearchParams(location.search).get('flowsrc');   // ?flowsrc=seat|thrust|auto
   if (fsP === 'seat' || fsP === 'thrust' || fsP === 'auto') flowSrc.mode = fsP; }
 if (location.search.includes('perf')) perfT0 = performance.now() + 1500;  // measure after load settles
