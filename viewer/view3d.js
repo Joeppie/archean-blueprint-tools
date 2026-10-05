@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=110';
-import { resolveColor } from './palette.js?v=110';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=111';
+import { resolveColor } from './palette.js?v=111';
 
 // ---- game component models (extracted from installed game modules) ----
 // manifest: per-type metadata (mass, renderable node tree, joints, adapters,
@@ -742,6 +742,7 @@ function makeLabel(c) {
   sp.scale.set(w / 64 * 0.3, 0.3, 1);
   sp.renderOrder = 10;
   sp.userData.isLabel = true;
+  sp.raycast = () => {};                  // labels are never pick targets
   return sp;
 }
 
@@ -1064,7 +1065,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=110';
+import { fitHull } from './hullfit.js?v=111';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -1444,16 +1445,70 @@ function select(i) {
   buildInspector();
   buildList();
   paintHighlights();
+  flyTo(i);                     // glide the camera in and centre the part
 }
+// ---------- selection fly-in + glow ----------
+// Fly-in: animate camera+target onto the component (~0.5 s, smoothstep) from
+// the current heading — an in-flight pan+approach. The landing spot is picked
+// from candidate view directions and validated with a raycast: the first
+// direction with a clear line of sight to the part (no hull/blocks/other
+// parts in between) wins, so the camera never parks inside a wall; it never
+// lands below the ground plane. A user drag cancels the flight.
+let fly = null;
+const flyRay = new THREE.Raycaster();
+flyRay.camera = camera;         // Sprite.raycast (labels) dereferences it
+function flyTo(i) {
+  const o = compObjs?.[i];
+  if (!o) return;
+  const bb = new THREE.Box3().setFromObject(o);
+  if (!isFinite(bb.min.x)) return;
+  const c = bb.getCenter(new THREE.Vector3());
+  const sz = bb.getSize(new THREE.Vector3());
+  const r = Math.max(sz.x, sz.y, sz.z, 0.35);
+  const dist = r * 3.4 + 0.5;
+  const cur = camera.position.clone().sub(controls.target).normalize();
+  const dirs = [cur,
+    cur.clone().setY(Math.max(cur.y, 0.35)).normalize(),
+    new THREE.Vector3(0.75, 0.5, 0.55).normalize(), new THREE.Vector3(-0.75, 0.5, 0.55).normalize(),
+    new THREE.Vector3(0.55, 0.45, -0.8).normalize(), new THREE.Vector3(-0.55, 0.45, -0.8).normalize(),
+    new THREE.Vector3(0, 0.95, 0.3).normalize(), new THREE.Vector3(0.92, 0.4, 0.15).normalize()];
+  const occ = [compGroup, blockGroup, hullGroup];
+  let dir = cur;
+  for (const d of dirs) {
+    const from = c.clone().addScaledVector(d, dist);
+    flyRay.set(from, c.clone().sub(from).normalize());
+    flyRay.near = 0; flyRay.far = dist - r * 0.6;
+    const blocked = flyRay.intersectObjects(occ, true)
+      .some(h => h.object.userData.ci !== i && !h.object.userData.isLabel);
+    if (!blocked) { dir = d; break; }
+  }
+  const p1 = c.clone().addScaledVector(dir, dist);
+  p1.y = Math.max(p1.y, ground.position.y + 0.15);
+  fly = { p0: camera.position.clone(), g0: controls.target.clone(), p1, g1: c,
+          t0: performance.now(), dur: 520 };
+  invalidate();
+}
+controls.addEventListener('start', () => { fly = null; });   // user takes over
+const selBox = new THREE.Box3Helper(new THREE.Box3(), 0x7dffcf);
+selBox.visible = false;
+selBox.raycast = () => {};                                   // never pickable
+scene.add(selBox);
 function paintHighlights() {
   compGroup.children.forEach((g, i) => {
     g.traverse(o => {
       if (!o.isMesh || !o.material.emissive) return;
-      if (i === selected) o.material.emissive.setHex(0x995000);
-      else if (i === hovered) o.material.emissive.setHex(0x222200);
-      else o.material.emissive.setHex(0x000000);
+      if (i === selected) { o.material.emissive.setHex(0xb85a00); o.material.emissiveIntensity = 1.7; }
+      else if (i === hovered) { o.material.emissive.setHex(0x222200); o.material.emissiveIntensity = 1; }
+      else { o.material.emissive.setHex(0x000000); o.material.emissiveIntensity = 1; }
     });
   });
+  // selection outline: the clearest "what is selected" cue (stays in sync
+  // with live edits — this runs on every frame we render)
+  if (selected >= 0 && compObjs?.[selected]) {
+    const bb = new THREE.Box3().setFromObject(compObjs[selected]);
+    selBox.box.copy(bb);
+    selBox.visible = isFinite(bb.min.x);
+  } else selBox.visible = false;
 }
 
 // ---------- component list ----------
@@ -2057,6 +2112,14 @@ function tick(t) {
   requestAnimationFrame(tick);
   const dt = Math.min(0.05, (t - lastT) / 1000 || 0.016);
   lastT = t;
+  if (fly) {
+    const u = Math.min(1, (performance.now() - fly.t0) / fly.dur);
+    const e = u * u * (3 - 2 * u);                       // smoothstep ease
+    camera.position.lerpVectors(fly.p0, fly.p1, e);
+    controls.target.lerpVectors(fly.g0, fly.g1, e);
+    if (u >= 1) fly = null;
+    invalidate();
+  }
   controls.update();                                  // 'change' event → invalidate
   if (labelsOn) for (const o of compGroup.children)   // labels follow dragged/moved parts
     if (o.userData.isLabel) {
@@ -2194,12 +2257,16 @@ async function runCompTest() {
 
 // ---------- init ----------
 if (location.search.includes('real')) realModelsOn = true;   // before buildViewOpts (checkbox state)
-function applyCamQ() {                                        // ?cam=px,py,pz,tx,ty,tz
-  const camQ = new URLSearchParams(location.search).get('cam');
-  if (!camQ) return;
-  const [x, y, z, tx = 0, ty = 0, tz = 0] = camQ.split(',').map(Number);
-  camera.position.set(x, y, -z);                             // URLs stay in FILE space
-  controls.target.set(tx, ty, -tz);
+function applyCamQ() {                              // ?cam=px,py,pz,tx,ty,tz · ?sel=idx
+  const q = new URLSearchParams(location.search);
+  const camQ = q.get('cam');
+  if (camQ) {
+    const [x, y, z, tx = 0, ty = 0, tz = 0] = camQ.split(',').map(Number);
+    camera.position.set(x, y, -z);                           // URLs stay in FILE space
+    controls.target.set(tx, ty, -tz);
+  }
+  const si = Number(q.get('sel'));                // deep-link a selection (+fly-in)
+  if (Number.isInteger(si) && si >= 0 && model?.data.components[si]) select(si);
   invalidate();
 }
 buildViewOpts();
@@ -2348,6 +2415,6 @@ if (location.search.includes('selftest')) {
         + ' junction=' + jdir.y.toFixed(2) + ' aileron=' + at.y.toFixed(2)
         + ' pick=' + ok5 + ' palette=' + ok9 + ' lens=' + ok10
         + ' dashmirror=' + ok11 + ' textx=' + ok12 + ' mural=' + ok13 + ' ground=' + ok14;
-    } catch (e) { document.title = 'SELFTEST ERR ' + e.message; }
+    } catch (e) { document.title = 'SELFTEST ERR ' + e.message + ' @' + String(e.stack).split(String.fromCharCode(10))[1].trim().slice(0, 70); }
   }, 1500);
 }
