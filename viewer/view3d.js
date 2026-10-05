@@ -10,8 +10,38 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=114';
-import { resolveColor } from './palette.js?v=114';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=115';
+import { resolveColor } from './palette.js?v=115';
+
+// ---- site-zoom cancel: the viewer ALWAYS loads at physical 100% ----
+// Chrome SAVES page zoom per site (Ctrl+wheel sets it, Ctrl-F5 keeps it,
+// only Ctrl+0 resets — and JS cannot call that reset). The lowest
+// devicePixelRatio we have ever seen is the unzoomed baseline; the current
+// ratio above it is saved zoom, which we counteract with inverse CSS zoom.
+// Canvas + UI then occupy the same physical pixels as a 100% page, so the
+// "stuck in a highly zoomed viewer" state cannot survive a load. Opt out
+// with ?nozoom.
+{
+  try {
+    if (!new URLSearchParams(location.search).has('nozoom')) {
+      let base = Math.min(Number(localStorage.getItem('archean-dpr-base')) || Infinity,
+                          devicePixelRatio);
+      localStorage.setItem('archean-dpr-base', String(base));
+      const apply = () => {
+        let z = devicePixelRatio / base;
+        if (z > 1.55) {          // dpr jump = monitor swap, not page zoom
+          base = devicePixelRatio;
+          localStorage.setItem('archean-dpr-base', String(base));
+          z = 1;
+        }
+        document.documentElement.style.zoom =
+          Math.abs(z - 1) > 0.02 ? String(1 / z) : '';
+      };
+      apply();
+      addEventListener('resize', apply);            // zoom changes fire resize
+    }
+  } catch { /* localStorage blocked: leave zoom alone */ }
+}
 
 // ---- game component models (extracted from installed game modules) ----
 // manifest: per-type metadata (mass, renderable node tree, joints, adapters,
@@ -417,7 +447,12 @@ function fitCameraToModel() {
   const sz = box.getSize(new THREE.Vector3());
   const r = Math.max(1, sz.x, sz.y, sz.z);
   controls.target.copy(c);
-  camera.position.set(c.x + r * 1.1, c.y + Math.max(r * 0.62, 2.4), c.z + r * 1.3);
+  // Minimum framing distance: on a 1 m craft a 1.1 m camera reads as tiny
+  // FOV + low res + ultra-sensitive orbit (user's "stuck in a zoomed
+  // viewer" — no fly-to ran; the AUTO fit was the zoom). Small crafts get
+  // a >= 3.6 m view; big crafts keep the 1.85r framing.
+  const d = Math.max(r * 1.85, 3.6);
+  camera.position.set(c.x + d * 0.6, c.y + Math.max(d * 0.34, 1.4), c.z + d * 0.72);
   camera.near = Math.max(0.05, r / 400);
   camera.far = Math.max(300, r * 10);
   scene.fog.near = Math.max(30, r * 2.5);
@@ -1082,7 +1117,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=114';
+import { fitHull } from './hullfit.js?v=115';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
