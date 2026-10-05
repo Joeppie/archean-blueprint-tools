@@ -222,6 +222,16 @@ in the dev's XenonViewer + the shipped `.gltf`/`.ini` assets, Oct 5)
   `components[].colors.color1/color2` (same entry format; per-component dict).
   Defaults when fields missing: color1 = white, op 15, rough 0, metal 0
   (polished); color2 = 204³, op 15, rough 7, metal 1 (matte grey).
+- **Dashboard is the exception to "painted = colors slot":** the panel body
+  (`dashboard-body` material) takes its paint from the component's own
+  `data.color` (0..255 **LINEAR** rgb) + `data.metallic/roughness` (0..255),
+  and the panel is a STRETCHER: `data.size_x/size_y` in 0.05 m units with the
+  native panel (collider 1.5×1.0 m) = 30×20, so the game scales the mesh by
+  (size_x/30, 1, size_y/20). Workshop mosaic art is built from these — 5×5
+  mini panels (0.25 m "stars" in the hull scene, navy [16,16,96]) up to
+  400×400 (20 m) wall sheets tiled diagonally over slopes so the stair-stepped
+  block wall reads as smooth. Viewer: `dashScale()` on proxy + real, paint
+  override in `modelMaterial`.
 - Fixed (non-painted) gltf materials carry real `pbrMetallicRoughness` factors,
   also LINEAR: `tire` [0.0134³, metal 0, rough 0.5], `body` [0.01..0.03³,
   metal 0], `pin` (chrome, rough 0), `data-connector` [0,0.05,0.5],

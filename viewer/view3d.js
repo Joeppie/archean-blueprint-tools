@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=101';
-import { resolveColor } from './palette.js?v=101';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=102';
+import { resolveColor } from './palette.js?v=102';
 
 // ---- game component models (extracted from installed game modules) ----
 // manifest: per-type metadata (mass, renderable node tree, joints, adapters,
@@ -52,6 +52,16 @@ const MAT_FIX = {
 function modelMaterial(c, name, mats) {
   if (name === 'color1') return compColor(c, 'color1');
   if (name === 'color2') return compColor(c, 'color2');
+  // Dashboards paint the panel body from their OWN data (0..255 linear rgb,
+  // metallic/roughness 0..255) — the mosaic crafts are scenes of painted
+  // panels (navy 16,16,96 stars, red, green on black walls).
+  if (name === 'dashboard-body' && c.type === 'Dashboard' && c.data?.color) {
+    const d = c.data;
+    return { color: new THREE.Color().setRGB(
+               d.color.r / 255, d.color.g / 255, d.color.b / 255, THREE.LinearSRGBColorSpace),
+             metal: d.metallic ? Math.max(0, 1 - (d.roughness ?? 0) / 255) : 0,
+             rough: clamp((d.roughness ?? 0) / 255, 0.03, 1), op: 1 };
+  }
   const m = mats?.[name] || MAT_FIX[name];
   if (m) return { color: new THREE.Color(...m.color.slice(0, 3)),
                   metal: m.metal ?? 1, rough: clamp(m.rough ?? 1, 0.03, 1),
@@ -67,10 +77,19 @@ const DROP_PARTS = {
                   c.data?.reverse ? 'Torus' : 'TorusReverse'],
   BigWheel: (c) => [c.data?.reverse ? 'Torus' : 'TorusReverse'],
 };
+// Dashboard panels are STRETCHABLE: data.size_x/size_y in 0.05 m units, the
+// native panel (collider 1.5×1.0 m) = 30×20. The dashboard-mosaic craft tiles
+// 5×5 mini panels (0.25 m "stars" in the hull art) up to 400×400 (20 m) wall
+// sheets, so drawing every panel at native size read as "size is not
+// respected". The game stretches the panel mesh by (size_x/30, 1, size_y/20).
+const dashScale = (c) => c.type === 'Dashboard'
+  ? [Math.max(c.data?.size_x || 30, 1) / 30, 1, Math.max(c.data?.size_y || 20, 1) / 20]
+  : [1, 1, 1];
 function buildRealComponent(c, model, idx, low = false) {
   const { geo, info } = model;
   const g = new THREE.Group();
-  g.scale.z = -1;          // raw .ini/gltf local space mirrored into view space
+  const ds = dashScale(c);
+  g.scale.set(ds[0], ds[1], -ds[2]);   // raw .ini/gltf local space mirrored into view space
   // Placement truth is the .ini node tree (renderables/joints/targets, ZYX
   // euler like the game engine) — NOT the gltf node translations, which are
   // Blender authoring offsets (MiniComputer's model sits 3 m from its origin!).
@@ -775,7 +794,8 @@ function buildScene() {
     mesh.position.copy(viewPos(c.position));
     mesh.userData.wType = c.type;
     applyDisplayPose(mesh, viewQuat(c.orientation));
-    mesh.scale.z = -1;                              // hand proxies keep raw local geometry
+    const ds = dashScale(c);
+    mesh.scale.set(ds[0], ds[1], -ds[2]);           // hand proxies keep raw local geometry
     mesh.traverse(o => { o.userData.ci = i; });
     mesh.userData.ci = i;
     compGroup.add(mesh);
@@ -797,7 +817,7 @@ function buildScene() {
       const real = buildRealComponent(c, mm, i, !realModelsOn);   // low by default
       real.position.copy(mesh.position);
       real.quaternion.copy(mesh.quaternion);
-      real.scale.z = -1;                            // (buildRealComponent root mirrors too)
+      real.scale.set(ds[0], ds[1], -ds[2]);         // (buildRealComponent root mirrors too)
       real.userData.real = true;
       mesh.visible = false;
       mesh.userData.hasReal = true;
@@ -843,7 +863,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=101';
+import { fitHull } from './hullfit.js?v=102';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -959,7 +979,7 @@ const DIRVM = DIRV.map(d => [d[0], d[1], -d[2]]);   // view-space (z-mirrored) d
 // Recorded endpoints ARE the connection points: the game writes the cable tip
 // at the part's VISIBLE socket (ISW battery: cable tip at the front-face
 // socket, while the .ini adapters are the 2x2 terminal grid on the other face
-// — snapping nubs to adapter positions unseats them from the cables, v0.101
+// — snapping nubs to adapter positions unseats them from the cables, v0.102
 // regression). Paths are drawn EXACTLY as recorded: no re-routing, no
 // per-segment shifts (axis-aligned joints break apart under taper shifts).
 const pipeEndsV = [];                             // [{ci, port, v}] — consumed by ?comptest
@@ -1850,7 +1870,9 @@ async function runProxyTest() {
                   { min: [-0.15, -0.15, -0.15], max: [0.15, 0.15, 0.15] };
       const cells = [0, 1, 2].map(a => Math.max(0, Math.round((col.max[a] - col.min[a]) / CELL) - 1));
       const fake = {
-        type: t, module: 'x', alias: '', colors: {}, data: {},
+        type: t, module: 'x', alias: '', colors: {},
+        data: t === 'Dashboard' ? { size_x: 60, size_y: 40 } : {},   // stretched: both
+        // paths must apply dashScale (panel 3.0×2.0 m, not the native 1.5×1.0)
         position: { x: 0, y: 0, z: 0 }, orientation: { w: 1, x: 0, y: 0, z: 0 },
         occupancies: [{ frame_x: 0, frame_y: 0, frame_z: 0, pos_x: 5.5, pos_y: 5.5, pos_z: 5.5,
                         size_x: cells[0], size_y: cells[1], size_z: cells[2] }],
