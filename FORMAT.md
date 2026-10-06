@@ -230,13 +230,6 @@ in the dev's XenonViewer + the shipped `.gltf`/`.ini` assets, Oct 5)
   - roughness = value/7; metallic ∈ {0,1} and the tracer lights every surface
     with diffuse when roughness>0 even for metallic=1 (rough steel sun-lit
     bright, chrome mirror-dark) ⇒ `metalness = metallic · (1 − roughness/7)`.
-  - **IBL is mandatory for that model** (v0.144, user: "the specular/
-    metallic is just too dark" — dolphin + truck): metallic=1 roughness≈0
-    is a pure mirror with ZERO diffuse; sun+ambient alone leaves it with
-    nothing to reflect → near-black. The game shades through a skybox.
-    The viewer PMREMs a RoomEnvironment studio at
-    scene.environmentIntensity 0.6 (matte/glass shift barely: dielectric
-    Fresnel ~4%). Pin `metal=true`.
   - Slots **0..10 are engine-reserved** (the reader re-imposes the built-ins);
     full built-in table in `viewer/palette.js` (from the game's BlockShapes.hh,
     same source the dev's XenonViewer generates from).

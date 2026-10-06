@@ -259,9 +259,7 @@ landing page and README together when the viewer changes).
      gltf author space (Unity = (gx,−gz,gy)) and must be pre-rotated −90°
      about x — the mosaic Crafter's long axis renders horizontal, and occ
      boxes draw from `components[].occupancies`, NOT the build-time-shifted
-     type-255 mirrors (`legacyfmt=true`). Metal-family slots need an IBL
-     environment (metallic=1 has zero diffuse; sun-only renders them
-     black — `metal=true`: PMREM RoomEnvironment at intensity 0.6).
+     type-255 mirrors (`legacyfmt=true`).
      the green ground plane + grid must sit just under the lowest rendered
      geometry — nothing of a craft renders below ground, ever (the
      3481322297 "Classic American Semi Truck" builds down to y=−1.5;
