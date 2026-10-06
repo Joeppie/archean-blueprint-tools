@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=136';
-import { resolveColor } from './palette.js?v=136';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=137';
+import { resolveColor } from './palette.js?v=137';
 
 // ---- site-zoom cancel: the viewer ALWAYS loads at physical 100% ----
 // Chrome SAVES page zoom per site (Ctrl+wheel sets it, Ctrl-F5 keeps it,
@@ -1129,7 +1129,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=136';
+import { fitHull } from './hullfit.js?v=137';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -1499,21 +1499,20 @@ function pick(ev) {
   const hits = ray.intersectObjects(compGroup.children, true);
   return hits.length ? hits[0].object.userData.ci : -1;
 }
-renderer.domElement.addEventListener('pointermove', (e) => {
-  const ci = pick(e);
-  if (ci !== hovered) {
-    hovered = ci;
-    invalidate();
-    renderer.domElement.style.cursor = ci >= 0 ? 'pointer' : '';
-  }
-});
+// No hover picking (PERF.md #1, user): pointermove fired a recursive
+// raycast over every component mesh — during orbit drags too — costing
+// 1-10 ms per event on component-heavy crafts. Picking now happens on a
+// DELIBERATE press only: one raycast at pointerdown (the moment a drag
+// starts), reused by the click test in pointerup.
+let downPick = -1;
 renderer.domElement.addEventListener('pointerdown', (e) => {
   renderer.domElement.dataset.dx = e.clientX; renderer.domElement.dataset.dy = e.clientY;
+  downPick = pick(e);                            // the ONLY scene raycast loop
 });
 renderer.domElement.addEventListener('pointerup', (e) => {
   const dx = Math.abs(e.clientX - (renderer.domElement.dataset.dx | 0));
   const dy = Math.abs(e.clientY - (renderer.domElement.dataset.dy | 0));
-  if (dx < 4 && dy < 4) select(pick(e), true);   // canvas click = the ONLY fly trigger (list: dblclick)
+  if (dx < 4 && dy < 4) select(downPick, true);  // canvas click = the ONLY fly trigger (list: dblclick)
 });
 
 function select(i, doFly) {
@@ -2598,9 +2597,25 @@ function sampleVel(p, dir, V) {
   return v;
 }
 
+let flowN = 0;
+function flowBudget() {
+  // sampleVel scans ALL aeroPlates per particle: hull triangles ARE the
+  // sim cost. The game itself approximates physics as crafts grow (user) —
+  // mirror that: fewer particles on plate-heavy crafts (giant 6.3 MB craft
+  // measured 13 ms/frame at 2200 -> 700 puts it back in budget).
+  if (location.search.includes('flowlow')) return 500;           // headless shots
+  // measured cost driver = solid-cell lookup pressure (237k-cell giant
+  // cost 13 ms at 2200 pts; 16k-cell crafts run full rate at 3 ms)
+  const c = solidCells ? solidCells.size : 0, p = aeroPlates.length;
+  let n = 2200;
+  if (c > 400000) n = 500; else if (c > 100000) n = 900; else if (c > 40000) n = 1400;
+  if (p > 6000) n = Math.min(n, 900); else if (p > 2500) n = Math.min(n, 1400);
+  return n;
+}
 function initFlow() {
   flowGroup.clear();
-  const N = location.search.includes('flowlow') ? 500 : 2200;   // flowlow = headless shots
+  const N = flowBudget();
+  flowN = N;
   flowData = new Float32Array(N * 3);
   flowSm = new Float32Array(N); flowSmT = new Float32Array(N);   // colour EMA
   flowAge = new Float32Array(N); flowAgeMax = new Float32Array(N);
@@ -2940,7 +2955,7 @@ function updateReport() {
   const azL = azA < 5 ? 'nose' : azA > 175 ? 'tail'
     : `${azA}° ${flowState.az > 0 ? 'from left' : 'from right'}`;
   el.textContent =
-`speed ${flowState.speed} m/s (${(flowState.speed * 3.6).toFixed(0)} km/h) · AoA ${flowState.aoa}° · wind from ${azL} · turb ${flowState.turb.toFixed(2)} · q=${A.qd.toFixed(0)}Pa
+`speed ${flowState.speed} m/s (${(flowState.speed * 3.6).toFixed(0)} km/h) · AoA ${flowState.aoa}° · wind from ${azL} · turb ${flowState.turb.toFixed(2)} · q=${A.qd.toFixed(0)}Pa${flowN && flowN < 2200 ? ` · sim ${flowN} pts (large-craft approx)` : ''}
 thrust: ${netThrust ? `${netThrust.n} engine${netThrust.n > 1 ? 's' : ''} · class Σ${netThrust.w.toFixed(2)}${netThrust.v ? ` · net ${dirLabel(netThrust.v)}` : ' · net ~0 (symmetric bank)'} · flow src: ${flowSrc.mode === 'thrust' ? 'thrust (override)' : flowSrc.mode === 'seat' ? 'cockpit' : seatFwd() ? 'cockpit' : netThrust.main ? 'main thrust' : 'nose default'}` : 'no thrusters · flow src: ' + (flowSrc.mode === 'thrust' ? 'none' : 'cockpit')}${extGrid && extGrid.sealedCount > 0 ? `
 sealed interior: ${extGrid.sealedCount.toLocaleString()} cells windless (doors closed)` : ''}
 mass: declared ${mm.declared.toFixed(1)} kg | computed ${mm.tot.toFixed(1)} kg (${mm.compSum.toFixed(0)} kg parts
@@ -2966,9 +2981,18 @@ ${rows}
 function buildFlight() {
   const s = $('flight');
   s.innerHTML = '';
-  row(s, 'speed', 0, 160, 1, flowState.speed, v => { flowState.speed = v; updateReport(); buildStreamlines(); });
-  row(s, 'AoA °', -8, 20, 0.5, flowState.aoa, v => { flowState.aoa = v; updateReport(); buildStreamlines(); });
-  row(s, 'wind from side °', -180, 180, 5, flowState.az, v => { flowState.az = v; updateReport(); buildStreamlines(); });
+  // rebuild ~120 ms after the last drag event (PERF.md #2: a full rebuild
+  // per pointer-event ate the whole frame budget); wind mode reads flowState
+  // live and needs no rebuild at all
+  const debLines = (() => {
+    let h = 0;
+    return () => { clearTimeout(h); h = setTimeout(() => {
+      if (flowMode.m === 'lines') { buildStreamlines(); invalidate(); }
+    }, 120); };
+  })();
+  row(s, 'speed', 0, 160, 1, flowState.speed, v => { flowState.speed = v; updateReport(); debLines(); });
+  row(s, 'AoA °', -8, 20, 0.5, flowState.aoa, v => { flowState.aoa = v; updateReport(); debLines(); });
+  row(s, 'wind from side °', -180, 180, 5, flowState.az, v => { flowState.az = v; updateReport(); debLines(); });
   row(s, 'turbulence', 0, 1, 0.05, flowState.turb, v => { flowState.turb = v; });
   row(s, 'kg / block cell (0.25 m cube)', 0.2, 20, 0.05, cellMass, v => { cellMass = v; updateReport(); });
   const cal = document.createElement('button');
@@ -3100,7 +3124,8 @@ function tick(t) {
     if (elR >= 1500 || (perfFrames >= 3 && elR >= 250)) {
       document.title = `PERF fps=${(perfFrames / Math.max(1, elR) * 1000).toFixed(1)} draw=${renderer.info.render.calls}` +
         ` flowms=${perfFlowN ? (perfFlow / perfFlowN).toFixed(2) : '-'} buildms=${perfBuild.toFixed(0)} loadms=${loadMs.toFixed(0)}`
-        + ` tris=${renderer.info.render.triangles} geo=${renderer.info.memory.geometries}`;
+        + ` tris=${renderer.info.render.triangles} geo=${renderer.info.memory.geometries}` +
+        ` plates=${aeroPlates.length} cells=${solidCells ? solidCells.size : 0} windpts=${flowN}`;
       perfW0 = 0;
     }
   }
@@ -3401,6 +3426,23 @@ if (location.search.includes('selftest')) {
           h.checked = true; h.dispatchEvent(new Event('change'));
           ok20 = a && !w.checked && blockGroup.visible && !hullWire.visible;
         } }
+      // ok21: physics-LOD budget — normal crafts keep all 2200 particles
+      const ok21 = flowPts && flowPts.geometry.attributes.position.count === 2200 && flowN === 2200;
+      // ok22: clicking a component on the canvas selects it via the
+      // pointerdown raycast (no hover path exists anymore)
+      let ok22 = false;
+      { const si = compObjs.findIndex(o => !!o);
+        if (si >= 0) {
+          const v = new THREE.Vector3(); compObjs[si].getWorldPosition(v); v.project(camera);
+          const r = renderer.domElement.getBoundingClientRect();
+          const x = r.left + (v.x * 0.5 + 0.5) * r.width, y = r.top + (-v.y * 0.5 + 0.5) * r.height;
+          const ev = (t) => renderer.domElement.dispatchEvent(new PointerEvent(t,
+            { clientX: x, clientY: y, bubbles: true, pointerId: 1, isPrimary: true }));
+          const prev = selected;
+          ev('pointerdown'); ev('pointerup');
+          ok22 = selected === si;
+          fly = null; select(prev, false);       // undo camera side effects
+        } }
       const ok17 = nThr > 0 && !!netThrust && netThrust.n === nThr
         && thrustGroup.children.length === nThr + (netThrust.v ? 1 : 0)
         && (!netThrust.v || Math.abs(Math.hypot(...netThrust.v) - 1) < 0.02)
@@ -3436,14 +3478,14 @@ if (location.search.includes('selftest')) {
       ray.setFromCamera(new THREE.Vector2(0, 0), camera);
       const ok5 = ray.intersectObjects(compGroup.children, true)
         .some(h => h.object.userData.ci >= 0);
-      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 && ok10 && ok11 && ok12 && ok13 && ok14 && ok15 && ok16 && ok17 && ok18 && ok19 && ok20 ? 'PASS' : 'FAIL')
+      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 && ok10 && ok11 && ok12 && ok13 && ok14 && ok15 && ok16 && ok17 && ok18 && ok19 && ok20 && ok21 && ok22 ? 'PASS' : 'FAIL')
         + ' occ_z=' + occ.pos_z + ' mirror=' + !!mir
         + ' pitch=' + (2 * Math.asin(-seat.orientation.x) * 180 / Math.PI).toFixed(1) + '°'
         + ' beacon=' + (mast ? mast.x.toFixed(2) : 'none') + ' droop=' + wc.y.toFixed(2)
         + ' junction=' + jdir.y.toFixed(2) + ' aileron=' + at.y.toFixed(2)
         + ' pick=' + ok5 + ' palette=' + ok9 + ' lens=' + ok10
         + ' dashmirror=' + ok11 + ' textx=' + ok12 + ' mural=' + ok13 + ' ground=' + ok14
-        + ' surges=' + ok15 + ' bolts=' + ok16 + ' thrust=' + ok17 + ' seal=' + ok18 + ' sock=' + ok19 + ' excl=' + ok20
+        + ' surges=' + ok15 + ' bolts=' + ok16 + ' thrust=' + ok17 + ' seal=' + ok18 + ' sock=' + ok19 + ' excl=' + ok20 + ' windpts=' + ok21 + ' click=' + ok22
         + ' cabin=' + seal.sealedCount;
     } catch (e) { document.title = 'SELFTEST ERR ' + e.message + ' @' + String(e.stack).split(String.fromCharCode(10))[1].trim().slice(0, 70); }
   }, 1500);

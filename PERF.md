@@ -26,6 +26,11 @@ modern GL drivers, and the merged-hull + on-demand-render design works.
 One real cliff: the 6.3 MB craft (~1.8 k components → 12 k draw calls,
 3.7 M tris) runs 14 fps, and its wind step costs 13 ms (grid grows with bbox).
 
+**v0.137 shipped fixes 1, 2, 4** (below): giant wind is now 6.5 ms at 900
+particles (`sim 900 pts (large-craft approx)` in the report); normal crafts
+keep all 2200 — ISW cells 1 k, truck 6 k, Jimmy 16 k, all under the full-rate
+tier at 60 fps. The giant's 14 fps itself is GPU draw-bound (candidate 3).
+
 ## Design wins (do not regress — mostly already test-pinned)
 
 - Hull merged into one mesh per palette colour; wire = 1 LineSegments;
@@ -36,27 +41,29 @@ One real cliff: the 6.3 MB craft (~1.8 k components → 12 k draw calls,
 - Streamline build is 30 ms; wind step ≤3 ms at 2200 particles.
 - Seal flood + triangle raster have hard cell/triangle budgets (linear load).
 
-## Harmful candidates (catalogue — each needs a pin, none applied yet)
+## Harmful candidates (catalogue)
 
-1. **pointermove raycast unthrottled** (`pick()` @ selection section): every
-   mouse-move raycasts ALL component meshes recursively — and `pointermove`
-   fires continuously during orbit DRAGS. Cost scales with mesh count:
-   truck ≈ 2 k meshes, giant ≈ 12 k. Likely the felt "mouse-move lag" on
-   component-heavy craft. Fix ≈ 15 lines: coalesce to one pick per rAF,
-   skip while `controls` is dragging. Severity: high on big crafts, 0 on ISW.
-2. **buildStreamlines per slider `input` event** (speed/AoA/azimuth rows):
-   each drag pixel = full rebuild (28-30 ms) at pointer event rate ≈ every
-   frame → 100 % frame budget while dragging in lines mode. Fix: ~100 ms
-   debounce + immediate on `change`. Severity: medium (drag-only jank).
+1. **pointermove raycast unthrottled** — FIXED v0.137: hover listener removed
+   (user: raycast only on a DELIBERATE press). One pick at pointerdown (the
+   moment a drag starts), reused by the click test in pointerup. Orbit drags
+   raycast exactly once, never during movement. Pin: `click=true`.
+2. **buildStreamlines per slider `input` event** (speed/AoA/azimuth rows) —
+   FIXED v0.137: ~120 ms debounce, lines-mode only (wind mode reads
+   flowState live and needs no rebuild).
 3. **Giant craft GPU-bound (14 fps)**: 12 k draws = per-component proxy node
    trees (each renderable node = own mesh + own material for selection
    highlight). Fix = merge proxies per component, keep per-component (not
    per-node) highlight via per-component overlay mesh; breaks per-node
-   emissive — needs design. Severity: only for 1 corpus file.
-4. **stepFlow 13 ms on the giant**: particle count is fixed 2200; per-particle
-   cost grows with the cell grid (neighbourhood lookups) and bbox (kill
-   margin). Fix: scale particle count by load (e.g. 2200 → 900 when
-   cells > 400 k). Severity: medium, trivial fix.
+   emissive — needs design. Severity: only for 1 corpus file. OPEN.
+4. **stepFlow 13 ms on the giant** — FIXED v0.137 as game-style physics LOD
+   (user framing: the game approximates physics for big crafts because full
+   sim cost scales with them). Measured cost driver = solid-cell lookup
+   pressure (237 k-cell giant at 2200 pts = 13 ms; 16 k-cell crafts = 3 ms).
+   `flowBudget()` tiers the particle count on solidCells.size: 2200 ≤100 k
+   cells, 1400/900 ≤400 k, 500 above; aero-plate count guards the
+   hull-triangle-heavy case (1400/900). Giant: 900 pts, 6.5 ms. The flight
+   report shows `sim N pts (large-craft approx)` when tiered. Pin:
+   `windpts=true` (ISW keeps the full 2200).
 5. **Load 937 ms (giant)**: JSON parse + build + seal, all budget-capped;
    fine for 6 MB (sub-second). No action.
 6. **antialias:true + dpr cap 2.5**: intentional sharpness (documented in
