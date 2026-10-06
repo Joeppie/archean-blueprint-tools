@@ -271,8 +271,9 @@ landing page and README together when the viewer changes).
      streamlines are UNDISTURBED upstream of the body mid-plane (`inflow=true`)
      while the wake deficit behind it slows the flow >25% (`wake=true`);
      pitching the PilotSeat must NOT steer/slow the wind (heading-only,
-     `seatpitch=true`); display anchoring moff/cv = 0 on ISW + explode/
-     assembly round-trips homes exactly (`explode=true`).
+     `seatpitch=true`); display anchoring is a no-op on frame-(0,0,0) crafts
+     like ISW (`anchor=true`). The explode/assembly feature (v0.140/141) was
+     REMOVED in v0.142 (user: "a catastrophe") — do not resurrect.
      thrust display + wind model: every propulsor (THRUST table = .ini
      TARGET axes; Propeller double-headed + excluded from the net) feeds
      a normalized net-thrust vector, symmetric banks net to null

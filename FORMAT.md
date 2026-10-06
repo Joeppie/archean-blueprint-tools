@@ -546,7 +546,7 @@ the report says `sim N pts (large-craft approx)`. Pin `windpts=true` (2200
 on normal crafts). Picking: ONE raycast per deliberate pointerdown (no
 hover raycasts — user perf rule), pin `click=true`.
 
-## Display anchoring, explode view, wind seat rule (v0.140)
+## Display anchoring + wind seat rule (v0.140)
 
 Blueprints store the builder's world position (`frame·3.0` — Jimmy sits at
 x = 1102 m). The viewer normalizes this away: `model.moff = -3·min(frame)`
@@ -554,21 +554,6 @@ shifts the scene groups, `model.cv = +12·min(frame)` shifts every point→cell
 decode (round/floor of exact multiples stays exact). Saved files and all
 reports keep raw coordinates. ISW and most corpus crafts are anchored at
 (0,0,0): moff = cv = 0, bit-identical rendering.
-
-Explode view (v0.141, `explode` slider / `?explode=N`): UNIFORM scaling
-about the model centre — s = 1 + 1.7·v. Part positions scale (geometry keeps
-size) so relative arrangement and connections stay readable; pipes, connector
-dots (constant size), occupancy boxes and subgrids scale with them (cables
-STRETCH proportionally). Blocks + hull triangles are merged meshes (cannot
-move per-block) so the skin stays home and fades to ~18% alpha
-(applyHullOpacity kEx). Overlay groups (surges, thrust/aero arrows, CoM
-marker — marker position scales) hide during explode. Entering/leaving
-explode refits the camera (fitCameraToModel calls updateMatrixWorld — the
-transforms are lazy). The same function runs backwards as the 1.5 s
-reverse-explosion LOAD animation (assembly starts after fitCamera; suppressed
-by ?selftest/?proxytest/?comptest/?noanim/?explode=). Pin `explode=true`:
-part at exactly 2.7× its centre-relative home vector, pipes scale 2.7, skin
-< 0.35, explode(0) restores homes to 1e-9.
 
 Wind seat rule: the cockpit-first flow direction uses the seat's HEADING
 (yaw) only, unit length — a chair's pitch/roll is a comfort axis; pitching
