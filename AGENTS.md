@@ -22,8 +22,13 @@ tools/make_landing.py         regenerates the landing gallery + viewer/workshop.
 tools/add_workshop.py <id>      ingest a locally-subscribed workshop craft
                                 (names: tools/ws-names.tsv, fetched slowly — Steam rate-limits)
 tools/extract_models.py         regenerates viewer/models/ from an installed game
+tools/perfprobe.py URL [s]      real-clock headless perf probe (DevTools ws;
+                                ?perf titles under --virtual-time-budget are
+                                meaningless — clocks/rAF freeze there)
 tests/run_tests.sh              headless-Chromium test runner (selftest+regtest+renders)
 FORMAT.md                       format documentation (start here)
+PERF.md                         measured perf baseline + harmful-candidate catalogue
+                                (run perfprobe before touching render/flow hot paths)
 NOTICE.md                       licensing: GPL code, game content belongs to batcholi/FloDKSM
 ```
 
@@ -36,6 +41,7 @@ python3 -m http.server 8650             # manual serving (repo root)
 # regtest:  http://127.0.0.1:8650/regtest/regtest.html         (page ends 'REGTEST: PASS')
 # other craft: viewer/index.html?open=../testdata/<id>/blueprint.json
 # perf probe: viewer/index.html?perf → tab title: PERF fps=… draw=<draw-calls> …
+#   (live browsers only; headless: python3 tools/perfprobe.py <url> 12)
 python3 tools/extract_models.py <Archean-game-dir> -o viewer/models
 ```
 Headless render shots — use the **AMD iGPU** (~1 s/shot, full budgets):
@@ -255,6 +261,9 @@ landing page and README together when the viewer changes).
      pulse per connected pipe (data.pipes graph), the far component blips
      on arrival; pulses/blips/selection glow render additive with
      depthTest off — visible THROUGH the hull (`surges=true`).
+     the windsock HUD is a camera child and its tail aims along flowDir()
+     in camera space (`sock=true`, dot > 0.93 after an explicit updateWindHud);
+     hull solids and wireframe are mutually exclusive checkboxes (`excl=true`).
      thrust display + wind model: every propulsor (THRUST table = .ini
      TARGET axes; Propeller double-headed + excluded from the net) feeds
      a normalized net-thrust vector, symmetric banks net to null

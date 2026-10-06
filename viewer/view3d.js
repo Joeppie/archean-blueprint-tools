@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=135';
-import { resolveColor } from './palette.js?v=135';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=136';
+import { resolveColor } from './palette.js?v=136';
 
 // ---- site-zoom cancel: the viewer ALWAYS loads at physical 100% ----
 // Chrome SAVES page zoom per site (Ctrl+wheel sets it, Ctrl-F5 keeps it,
@@ -1129,7 +1129,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=135';
+import { fitHull } from './hullfit.js?v=136';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -1915,13 +1915,21 @@ function buildViewOpts() {
     cb.onchange = () => { for (const t of arr) t.visible = cb.checked; };
     l.append(cb, document.createTextNode(label));
     s.appendChild(l);
+    return cb;
   };
   toggle('ground grid', grid);
   toggle('occupancy boxes (type-255)', occGroup);
   // blocks and hull triangles are ONE thing in-game — the hull skin (the
   // user: "they're one and the same thing to us") — so they share a toggle
-  toggle('hull (blocks + triangles)', [blockGroup, hullGroup]);
-  toggle('wireframe (hull)', hullWire);
+  const tHull = toggle('hull (blocks + triangles)', [blockGroup, hullGroup]);
+  const tWire = toggle('wireframe (hull)', hullWire);
+  // mutually exclusive (user): solid triangles under a wire overlay cost the
+  // full fill rate for zero added readability; drawing one replaces the other
+  const excl = (a, b) => a.addEventListener('change', () => {
+    if (a.checked && b.checked) { b.checked = false; b.dispatchEvent(new Event('change')); }
+  });
+  excl(tHull, tWire); excl(tWire, tHull);
+  if (tWire.checked && tHull.checked) { tHull.checked = false; tHull.dispatchEvent(new Event('change')); }
   toggle('pipes & connectors', pipeGroup);
   toggle('subgrids (doors/hatches)', subGroup);
   const rl = document.createElement('label');
@@ -2652,6 +2660,7 @@ function initFlow() {
 // seed grid, so the eye can follow how air is routed around the craft.
 // Blue = freestream speed, red = accelerated flow (stylized, not CFD).
 function buildStreamlines() {
+  const _b0 = performance.now();
   for (const o of [...flowGroup.children])
     if ((o.isLine && !o.userData.isTrail) || o.userData.isLineHot) flowGroup.remove(o);
   if (!model || flowMode.m !== 'lines') return;
@@ -2770,6 +2779,7 @@ function buildStreamlines() {
     hot.userData.isLineHot = true;
     flowGroup.add(hot);
   }
+  perfBuild += performance.now() - _b0;
 }
 function respawn(arr, i, b, B) {
   // Seed UNIFORMLY in bbox inflated by 2.5 m. The old span-scaled upstream
@@ -2792,6 +2802,7 @@ function respawn(arr, i, b, B) {
 }
 function stepFlow(dt) {
   if (!flowData || !flowOn) return;
+  const _t0 = perfW0 ? performance.now() : 0;
   const V = Math.max(1, flowState.speed), dir = flowDir();
   const b = model.box_min, B = model.box_max;
   const R = 2.6, tt = performance.now() * 0.0006;   // > respawn margin M (1.3)
@@ -2877,6 +2888,7 @@ function stepFlow(dt) {
     flowTrails.mesh.geometry.attributes.position.needsUpdate = true;
     flowTrails.mesh.geometry.attributes.color.needsUpdate = true;
   }
+  if (perfW0) { perfFlow += performance.now() - _t0; perfFlowN++; }
 }
 
 function computeAero() {
@@ -3037,7 +3049,8 @@ function buildHullList() {
 }
 
 // ---------- animate (on-demand: iGPUs idle at ~0% until something changes) ----------
-let needsRender = true, perfT0 = 0, perfFrames = 0;
+let needsRender = true, perfFrames = 0, perfFlow = 0, perfFlowN = 0, perfBuild = 0, loadMs = 0;
+let perfW0 = 0, perfArm = 0;   // real-clock window: start (ms) + arm timestamp
 function invalidate() { needsRender = true; }
 let lastT = 0;
 function tick(t) {
@@ -3061,7 +3074,13 @@ function tick(t) {
       if (m) o.position.set(m.position.x, m.position.y + o.userData.dy, m.position.z);
     }
   if (flowOn) stepFlow(dt);
-  if (perfT0) needsRender = true;
+  { const nowR = Date.now();
+    if (perfArm && !perfW0 && nowR >= perfArm) { perfW0 = nowR; perfFrames = 0; }
+    if (perfW0 && nowR - perfW0 < 1600) needsRender = true; }
+  if (!loadMs && model) {
+    loadMs = performance.now();
+    if (perfOn) perfArm = Date.now() + 800;   // measure the live scene
+  }
   if (!needsRender && !flowOn) return;
   needsRender = false;
   { const wm = flowMode.m === 'wind';
@@ -3075,13 +3094,14 @@ function tick(t) {
     ? `${sel.type}[${selected}]  pos(${fmt(sel.position.x)}, ${fmt(sel.position.y)}, ${fmt(sel.position.z)})` +
       `  pitch ${fmt(2 * Math.asin(clamp(-sel.orientation.x, -1, 1)) * 180 / Math.PI)}°`
     : 'Archean blueprint viewer — click a component';
-  if (perfT0 && performance.now() >= perfT0) {
+  if (perfW0) {
     perfFrames++;
-    const el = performance.now() - perfT0;
-    if (el > 1200 || (perfFrames >= 3 && el > 400)) {   // heavy scenes: 3 frames is plenty for draw stats
-      document.title = `PERF fps=${(perfFrames / el * 1000).toFixed(1)} draw=${renderer.info.render.calls}`
+    const elR = Date.now() - perfW0;
+    if (elR >= 1500 || (perfFrames >= 3 && elR >= 250)) {
+      document.title = `PERF fps=${(perfFrames / Math.max(1, elR) * 1000).toFixed(1)} draw=${renderer.info.render.calls}` +
+        ` flowms=${perfFlowN ? (perfFlow / perfFlowN).toFixed(2) : '-'} buildms=${perfBuild.toFixed(0)} loadms=${loadMs.toFixed(0)}`
         + ` tris=${renderer.info.render.triangles} geo=${renderer.info.memory.geometries}`;
-      perfT0 = 0;
+      perfW0 = 0;
     }
   }
 }
@@ -3219,7 +3239,7 @@ if (location.search.includes('nosub')) subGroup.visible = false;   // debug: hid
   const spv = parseFloat(q0.get('speed')); if (Number.isFinite(spv)) flowState.speed = spv; }
 { const fsP = new URLSearchParams(location.search).get('flowsrc');   // ?flowsrc=seat|thrust|auto
   if (fsP === 'seat' || fsP === 'thrust' || fsP === 'auto') flowSrc.mode = fsP; }
-if (location.search.includes('perf')) perfT0 = performance.now() + 1500;  // measure after load settles
+const perfOn = location.search.includes('perf');   // arm at load-complete (below), not wall-clock
 loadModelManifest().then(fetchDefault).then(applyCamQ);
 requestAnimationFrame(tick);
 if (location.search.includes('proxytest')) runProxyTest();
@@ -3370,6 +3390,17 @@ if (location.search.includes('selftest')) {
           ok19 = z.dot(dcam) > 0.93;
         }
         setFlowMode('off'); }
+      // ok20: hull-solid and wireframe are mutually exclusive (user)
+      let ok20 = false;
+      { const cbs = [...document.querySelectorAll('input[type=checkbox]')];
+        const find = t => cbs.find(c => (c.parentElement.textContent || '').includes(t));
+        const h = find('hull (blocks + triangles)'), w = find('wireframe (hull)');
+        if (h && w) {
+          w.checked = true; w.dispatchEvent(new Event('change'));
+          const a = !h.checked && !blockGroup.visible && hullWire.visible;
+          h.checked = true; h.dispatchEvent(new Event('change'));
+          ok20 = a && !w.checked && blockGroup.visible && !hullWire.visible;
+        } }
       const ok17 = nThr > 0 && !!netThrust && netThrust.n === nThr
         && thrustGroup.children.length === nThr + (netThrust.v ? 1 : 0)
         && (!netThrust.v || Math.abs(Math.hypot(...netThrust.v) - 1) < 0.02)
@@ -3405,14 +3436,14 @@ if (location.search.includes('selftest')) {
       ray.setFromCamera(new THREE.Vector2(0, 0), camera);
       const ok5 = ray.intersectObjects(compGroup.children, true)
         .some(h => h.object.userData.ci >= 0);
-      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 && ok10 && ok11 && ok12 && ok13 && ok14 && ok15 && ok16 && ok17 && ok18 && ok19 ? 'PASS' : 'FAIL')
+      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 && ok10 && ok11 && ok12 && ok13 && ok14 && ok15 && ok16 && ok17 && ok18 && ok19 && ok20 ? 'PASS' : 'FAIL')
         + ' occ_z=' + occ.pos_z + ' mirror=' + !!mir
         + ' pitch=' + (2 * Math.asin(-seat.orientation.x) * 180 / Math.PI).toFixed(1) + '°'
         + ' beacon=' + (mast ? mast.x.toFixed(2) : 'none') + ' droop=' + wc.y.toFixed(2)
         + ' junction=' + jdir.y.toFixed(2) + ' aileron=' + at.y.toFixed(2)
         + ' pick=' + ok5 + ' palette=' + ok9 + ' lens=' + ok10
         + ' dashmirror=' + ok11 + ' textx=' + ok12 + ' mural=' + ok13 + ' ground=' + ok14
-        + ' surges=' + ok15 + ' bolts=' + ok16 + ' thrust=' + ok17 + ' seal=' + ok18 + ' sock=' + ok19
+        + ' surges=' + ok15 + ' bolts=' + ok16 + ' thrust=' + ok17 + ' seal=' + ok18 + ' sock=' + ok19 + ' excl=' + ok20
         + ' cabin=' + seal.sealedCount;
     } catch (e) { document.title = 'SELFTEST ERR ' + e.message + ' @' + String(e.stack).split(String.fromCharCode(10))[1].trim().slice(0, 70); }
   }, 1500);
