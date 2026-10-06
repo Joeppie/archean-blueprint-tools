@@ -10,9 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=144';
-import { resolveColor } from './palette.js?v=144';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=143';
+import { resolveColor } from './palette.js?v=143';
 
 // ---- site-zoom cancel: the viewer ALWAYS loads at physical 100% ----
 // Chrome SAVES page zoom per site (Ctrl+wheel sets it, Ctrl-F5 keeps it,
@@ -462,17 +461,6 @@ view.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x8fb4d8);
 scene.fog = new THREE.Fog(0x8fb4d8, 40, 90);
-// IBL for the specular lobe (user: "the specular/metallic is just too dark"
-// — dolphin + truck): the palette's metal family is metallic=1 roughness~0,
-// a pure mirror with ZERO diffuse; lit only by sun+ambient it renders near
-// black, because metal reflects what isn't there (no skybox). The game
-// always lights through a skybox; a PMREM studio environment gives the
-// mirror lobe something to reflect. Intensity 0.6: metals read polished,
-// matte/glass surfaces shift barely (dielectric Fresnel ~4%).
-{ const pmrem = new THREE.PMREMGenerator(renderer);
-  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-  scene.environmentIntensity = 0.6;
-  pmrem.dispose(); }
 
 const camera = new THREE.PerspectiveCamera(55, 1, 0.05, 300);
 camera.position.set(-6.5, 3.4, 8.5);              // view space: nose (+z) toward camera
@@ -1170,7 +1158,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=144';
+import { fitHull } from './hullfit.js?v=143';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -3511,11 +3499,6 @@ if (location.search.includes('selftest')) {
           Math.abs(occWorld(o, 'z') + o.size_z * CELL / 2 - lamp.position.z));   // raw space
         ok27 = lying && dmax < 0.13;
       }
-      // ok28: IBL environment present (user: "specular/metallic is just
-      // too dark in both dolphin and truck"): metal palette slots are
-      // metallic=1 roughness~0 -> zero diffuse, near-black without an env
-      // map to reflect (the game lights through a skybox).
-      const ok28 = !!scene.environment && scene.environmentIntensity >= 0.4;
       // ok14: ground fit — the green plane and grid sit just UNDER the
       // lowest rendered geometry (truck 3481322297 builds to y=-1.5:
       // nothing may render below ground; user rule), ISW included.
@@ -3692,7 +3675,7 @@ if (location.search.includes('selftest')) {
         + ' beacon=' + (mast ? mast.x.toFixed(2) : 'none') + ' droop=' + wc.y.toFixed(2)
         + ' junction=' + jdir.y.toFixed(2) + ' aileron=' + at.y.toFixed(2)
         + ' pick=' + ok5 + ' palette=' + ok9 + ' lens=' + ok10
-        + ' dashmirror=' + ok11 + ' textx=' + ok12 + ' mural=' + ok13 + ' legacyfmt=' + ok27 + ' metal=' + ok28 + ' ground=' + ok14
+        + ' dashmirror=' + ok11 + ' textx=' + ok12 + ' mural=' + ok13 + ' legacyfmt=' + ok27 + ' ground=' + ok14
         + ' surges=' + ok15 + ' bolts=' + ok16 + ' thrust=' + ok17 + ' seal=' + ok18 + ' sock=' + ok19 + ' excl=' + ok20 + ' windpts=' + ok21 + ' click=' + ok22 + ' inflow=' + ok23 + ' wake=' + ok24 + ' seatpitch=' + ok25 + ' anchor=' + ok26
         + ' cabin=' + seal.sealedCount;
     } catch (e) { document.title = 'SELFTEST ERR ' + e.message + ' @' + String(e.stack).split(String.fromCharCode(10))[1].trim().slice(0, 70); }
