@@ -520,8 +520,31 @@ dolphin 2,696, ISW 0).
 
 `sampleVel` returns 0 velocity in windless cells (streamlines break, particles
 respawn outside the hull). Turbulence = animated sinusoidal field, amplitude ∝
-wake/shear (|v|/V − 1) × turbulence slider; particles and their trails shade
+wake/shear (|v|/V − 1 × turbulence slider; particles and their trails shade
 blue→red-magenta with local turbulence.
+
+**Wake deficit (v0.138, stylized — not game data):** inviscid thin-plate flow
+has no separation: behind a blunt hull the air ran at full freestream, so the
+flow *visually ignored the geometry* (user: "things magically happen 10 m in
+front, nothing responds"). sampleVel now walks up to 3 m UPSTREAM along the
+flow dir; the first solid cell casts a downstream deficit cone: v ×= 1 −
+0.6·e^(−d/3.5 m) (4th return value = deficit fraction). Downstream-of-mid-plane
+only for the streamline billow (gate `wake>0`): the old gate fired on >2 %
+ACCELERATION = on the nose = waves in clean inflow air. Colours: the deviation
+map uses ABSOLUTE intensity (gain 2·V/(V+40)) — dynamic pressure scales V², so
+the ramp is muted at 25 m/s and saturated at 150 m/s (the honest speed-slider
+response: inviscid pattern SHAPE is speed-invariant, unsteadiness ∝ V lives in
+the wake billow, amplitude `wm·V·0.45·min(1.6, V/60)`). Pins: `inflow=true`
+(no line vertex upstream of mid-plane deviates >0.45 m from its seed ring),
+`wake=true` (1.5 m behind the tail |v| < 0.75V, ahead of the nose ≈ V).
+
+**Physics LOD (v0.137):** particle count tiers on solid-cell count (the
+measured cost driver — Map lookup pressure: 237 k cells = 13 ms/frame at
+2200): 2200 ≤100 k, 1400/900 ≤400 k, 500 above; aero-plate count guards
+triangle-heavy hulls. Mirrors the game coarsening physics on big crafts;
+the report says `sim N pts (large-craft approx)`. Pin `windpts=true` (2200
+on normal crafts). Picking: ONE raycast per deliberate pointerdown (no
+hover raycasts — user perf rule), pin `click=true`.
 
 ## Editing recipe (used for the seat adjustment)
 

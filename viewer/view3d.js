@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=137';
-import { resolveColor } from './palette.js?v=137';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=138';
+import { resolveColor } from './palette.js?v=138';
 
 // ---- site-zoom cancel: the viewer ALWAYS loads at physical 100% ----
 // Chrome SAVES page zoom per site (Ctrl+wheel sets it, Ctrl-F5 keeps it,
@@ -1129,7 +1129,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=137';
+import { fitHull } from './hullfit.js?v=138';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -2594,7 +2594,24 @@ function sampleVel(p, dir, V) {
           v[0] += nx * g; v[1] += ny * g; v[2] += nz * g;
         }
   }
-  return v;
+  // Stylized WAKE DEFICIT (user: 'the response to geometry seems really
+  // premature / magical'): inviscid thin-plate flow has NO separation — the
+  // air behind a blunt barge ran at full freestream, so the flow appeared
+  // to ignore the hull entirely. Real tunnels leave a slow, turbulent wake
+  // downstream of the body: walk up to 3 m UPSTREAM along the flow; the
+  // first solid cell casts a deficit cone (~60 % at the face, e-folds in
+  // 3.5 m). 4th return value = deficit fraction (turbulence/wave coupling).
+  let wake = 0;
+  if (solidCells && solidCells.size) {
+    for (let s = 1; s <= 12; s++) {
+      const qx = Math.floor((p[0] - dir[0] * s * 0.25) / 0.25);
+      const qy = Math.floor((p[1] - dir[1] * s * 0.25) / 0.25);
+      const qz = Math.floor((p[2] - dir[2] * s * 0.25) / 0.25);
+      if (solidCells.has(cellKeyV(qx, qy, qz))) { wake = 0.6 * Math.exp(-s * 0.25 / 3.5); break; }
+    }
+    if (wake) { v[0] *= 1 - wake; v[1] *= 1 - wake; v[2] *= 1 - wake; }
+  }
+  return wake ? [v[0], v[1], v[2], wake] : v;
 }
 
 let flowN = 0;
@@ -2688,7 +2705,12 @@ function buildStreamlines() {
   // freestream = blue, slowed flow = deep blue, accelerated = yellow->red.
   // The old absolute map put freestream mid-ramp = green = ground colour,
   // so 4 m/s streamlines were invisible over the plane (user's dolphin shot).
-  const devT = (sp) => clamp(0.5 + (sp / V - 1) * 2.0, 0, 1);  // V -> mid (green); +-25% -> full blue/red (small craft too)
+  const gA = 2.0 * V / (V + 40);
+  const devT = (sp) => clamp(0.5 + (sp / V - 1) * gA, 0, 1);
+  // Colour INTENSITY uses ABSOLUTE deviation (dynamic pressure scales V²):
+  // at 25 m/s the nose sees ±3 m/s = muted ramp; at 150 m/s ±45 m/s = full
+  // blue/red. Inviscid pattern SHAPE is speed-invariant (physics), so the
+  // intensity is the honest visible answer to the speed slider (user).
   const colOf = (sp, arr) => { flowLutAt(devT(sp), rgb); arr.push(rgb[0], rgb[1], rgb[2]); };
   // Seed plane PERPENDICULAR to the flow, one body-radius upstream — the old
   // fixed x·y/z-centre grid only made sense for pure tailward flow; with wind
@@ -2734,9 +2756,21 @@ function buildStreamlines() {
           // slider changed nothing at all (user). Wake unsteadiness grows
           // with speed (stylised Reynolds effect): lateral sine in the
           // accelerated/shear region, amplitude ∝ V.
-          const wm = clamp(spSm / V - 1, 0, 1.5);
-          if (wm > 0.02) {
-            const mg = Math.sin(k * 0.55 + ph) * wm * V * 0.30 * Math.min(1.6, V / 60);
+          // wake meander (the speed response): gated to DECELERATED flow
+          // BEHIND the body mid-plane — the wake. The old gate fired on
+          // >2 % acceleration, i.e. on nose-flow over the hull: at 150 m/s
+          // that whipped 25 deg waves into clean upstream air and streamlines
+          // 'magically happened 10 m in front of' the craft (user); the
+          // inflow side (shape-invariant, as incompressible flow is) then
+          // showed nothing changing with the speed slider. Real tunnels:
+          // pattern is speed-invariant, only the wake gets unsteady with
+          // Reynolds number — so the waves live in the wake only, amplitude
+          // ∝ V: speed 25 = glass-smooth, 150 = full vortex-street billow.
+          const wkx = p[0] - cen.x, wky = p[1] - cen.y, wkz = p[2] - cen.z;
+          const wake = wkx * dv.x + wky * dv.y + wkz * dv.z;   // + = downstream
+          const wm = wake > 0 ? clamp(Math.max(1 - spSm / V, 0.7 * (spSm / V - 1), (v[3] || 0) * 1.3), 0, 0.7) : 0;   // wake deficit + shear-layer billow (rear half only)
+          if (wm > 0.05) {
+            const mg = Math.sin(k * 0.55 + ph) * wm * V * 0.45 * Math.min(1.6, V / 60);
             v[0] += e1.x * mg; v[1] += e1.y * mg; v[2] += e1.z * mg;
             sp = Math.hypot(v[0], v[1], v[2]);
           }
@@ -2833,7 +2867,7 @@ function stepFlow(dt) {
     // animated turbulence: sinusoidal field, amplitude rising in the
     // wake/shear (where |v| departs from freestream) — laminar far field
     // stays calm blue, separated flow around edges boils red-magenta.
-    const wake = clamp(sp0 / V - 1, 0, 1.5) + 0.12;
+    const wake = clamp(sp0 / V - 1, 0, 1.5) + clamp(v[3] || 0, 0, 1) * 1.3 + 0.12;   // deficit = shear = boiling
     let ta = 0;
     if (flowState.turb > 0 && sp0 > 1e-3) {
       // per-particle phase offset: a shared-phase sine field organises the
@@ -2858,7 +2892,7 @@ function stepFlow(dt) {
     // EMA-smooth speed & turbulence per particle (raw |v| jumps between LUT
     // entries frame to frame = rainbow confetti, user: 'is that right?')
     const pi3 = i / 3;
-    const td = clamp(0.5 + (sp / V - 1) * 2.0, 0, 1);   // deviation map (gain 2: small craft too)
+    const td = clamp(0.5 + (sp / V - 1) * 2.0 * V / (V + 40), 0, 1);   // deviation map: ABSOLUTE intensity (∝V², speed-slider responsive)
     const t2 = flowSm[pi3] + clamp(td - flowSm[pi3], -0.06, 0.06); flowSm[pi3] = t2;
     const tr = flowSmT[pi3] + clamp(tr0 - flowSmT[pi3], -0.06, 0.06); flowSmT[pi3] = tr;
     flowLutAt(t2, rgb);
@@ -3443,6 +3477,55 @@ if (location.search.includes('selftest')) {
           ok22 = selected === si;
           fly = null; select(prev, false);       // undo camera side effects
         } }
+      // ok23: streamlines are undisturbed UPSTREAM of the body mid-plane
+      // (user: 'things magically happen 10 m in front of Jimmy'). Every line
+      // vertex with dot(p-cen,dir) < 0 must sit laterally within 0.45 m of
+      // its seed ring radius (straight run-in + heading low-pass tolerance).
+      let ok23 = false;
+      { setFlowMode('lines');
+        const dvL = new THREE.Vector3(...flowDir()).normalize();
+        const bL = model.box_min, BL = model.box_max;
+        const cenL = new THREE.Vector3((bL.x + BL.x) / 2, (bL.y + BL.y) / 2, (bL.z + BL.z) / 2);
+        const seedR = [];
+        { const ref = Math.abs(dvL.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+          const e1L = ref.cross(dvL).normalize();
+          const e2L = new THREE.Vector3().crossVectors(dvL, e1L).normalize();
+          const radL = Math.hypot(BL.x - bL.x, BL.y - bL.y, BL.z - bL.z) / 2 * 1.1 + 0.5;
+          for (let a = -radL; a <= radL; a += 1.7)
+            for (let c2 = -radL; c2 <= radL; c2 += 0.55)
+              if (a * a + c2 * c2 <= radL * radL) seedR.push(Math.hypot(a, c2));
+        }
+        let worst = 0;
+        for (const o of flowGroup.children) {
+          if (!o.isLine || o.userData.isTrail || o.userData.isLineHot) continue;
+          const pos = o.geometry.attributes.position.array;
+          for (let i = 0; i < pos.length; i += 3) {
+            const px = pos[i] - cenL.x, py = pos[i + 1] - cenL.y, pz = pos[i + 2] - cenL.z;
+            if (px * dvL.x + py * dvL.y + pz * dvL.z >= 0) continue;     // wake side: waves allowed
+            const t = px * dvL.x + py * dvL.y + pz * dvL.z;
+            const ux = px - t * dvL.x, uy = py - t * dvL.y, uz = pz - t * dvL.z;
+            const lat = Math.hypot(ux, uy, uz);
+            let m = 1e9;
+            for (const r of seedR) { const d = Math.abs(lat - r); if (d < m) m = d; }
+            if (m > worst) worst = m;
+          }
+        }
+        ok23 = worst < 0.45 && flowGroup.children.some(o => o.isLine && !o.userData.isTrail);
+        setFlowMode('off'); }
+      // ok24: wake deficit — air directly behind Jimmy's tail is slowed
+      // (>25 % deficit), air ahead of the nose is at freestream
+      let ok24 = false;
+      { const dvW = flowDir();
+        const bl = model.box_min, Bg = model.box_max;
+        const cW = [(bl.x + Bg.x) / 2, (bl.y + Bg.y) / 2, (bl.z + Bg.z) / 2];
+        const ext = Math.abs((Bg.x - bl.x) / 2 * dvW[0]) + Math.abs((Bg.y - bl.y) / 2 * dvW[1]) + Math.abs((Bg.z - bl.z) / 2 * dvW[2]);
+        const VB = 60;
+        const pb = [cW[0] + dvW[0] * (ext + 1.5), cW[1] + dvW[1] * (ext + 1.5), cW[2] + dvW[2] * (ext + 1.5)];
+        const pf = [cW[0] - dvW[0] * (ext + 1.5), cW[1] - dvW[1] * (ext + 1.5), cW[2] - dvW[2] * (ext + 1.5)];
+        const vb = sampleVel(pb, dvW, VB), vf = sampleVel(pf, dvW, VB);
+        ok24 = Math.hypot(vb[0], vb[1], vb[2]) < VB * 0.75 && (vb[3] || 0) > 0.3
+          && Math.hypot(vf[0], vf[1], vf[2]) > VB * 0.95 && !(vf[3] > 0);
+      }
       const ok17 = nThr > 0 && !!netThrust && netThrust.n === nThr
         && thrustGroup.children.length === nThr + (netThrust.v ? 1 : 0)
         && (!netThrust.v || Math.abs(Math.hypot(...netThrust.v) - 1) < 0.02)
@@ -3478,14 +3561,14 @@ if (location.search.includes('selftest')) {
       ray.setFromCamera(new THREE.Vector2(0, 0), camera);
       const ok5 = ray.intersectObjects(compGroup.children, true)
         .some(h => h.object.userData.ci >= 0);
-      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 && ok10 && ok11 && ok12 && ok13 && ok14 && ok15 && ok16 && ok17 && ok18 && ok19 && ok20 && ok21 && ok22 ? 'PASS' : 'FAIL')
+      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 && ok10 && ok11 && ok12 && ok13 && ok14 && ok15 && ok16 && ok17 && ok18 && ok19 && ok20 && ok21 && ok22 && ok23 && ok24 ? 'PASS' : 'FAIL')
         + ' occ_z=' + occ.pos_z + ' mirror=' + !!mir
         + ' pitch=' + (2 * Math.asin(-seat.orientation.x) * 180 / Math.PI).toFixed(1) + '°'
         + ' beacon=' + (mast ? mast.x.toFixed(2) : 'none') + ' droop=' + wc.y.toFixed(2)
         + ' junction=' + jdir.y.toFixed(2) + ' aileron=' + at.y.toFixed(2)
         + ' pick=' + ok5 + ' palette=' + ok9 + ' lens=' + ok10
         + ' dashmirror=' + ok11 + ' textx=' + ok12 + ' mural=' + ok13 + ' ground=' + ok14
-        + ' surges=' + ok15 + ' bolts=' + ok16 + ' thrust=' + ok17 + ' seal=' + ok18 + ' sock=' + ok19 + ' excl=' + ok20 + ' windpts=' + ok21 + ' click=' + ok22
+        + ' surges=' + ok15 + ' bolts=' + ok16 + ' thrust=' + ok17 + ' seal=' + ok18 + ' sock=' + ok19 + ' excl=' + ok20 + ' windpts=' + ok21 + ' click=' + ok22 + ' inflow=' + ok23 + ' wake=' + ok24
         + ' cabin=' + seal.sealedCount;
     } catch (e) { document.title = 'SELFTEST ERR ' + e.message + ' @' + String(e.stack).split(String.fromCharCode(10))[1].trim().slice(0, 70); }
   }, 1500);

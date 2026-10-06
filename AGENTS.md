@@ -263,7 +263,11 @@ landing page and README together when the viewer changes).
      depthTest off — visible THROUGH the hull (`surges=true`).
      the windsock HUD is a camera child and its tail aims along flowDir()
      in camera space (`sock=true`, dot > 0.93 after an explicit updateWindHud);
-     hull solids and wireframe are mutually exclusive checkboxes (`excl=true`).
+     hull solids and wireframe are mutually exclusive checkboxes (`excl=true`);
+     the wind particle budget tiers with scene cost, normal crafts full 2200
+     (`windpts=true`); canvas picking = deliberate press only (`click=true`);
+     streamlines are UNDISTURBED upstream of the body mid-plane (`inflow=true`)
+     while the wake deficit behind it slows the flow >25% (`wake=true`).
      thrust display + wind model: every propulsor (THRUST table = .ini
      TARGET axes; Propeller double-headed + excluded from the net) feeds
      a normalized net-thrust vector, symmetric banks net to null
