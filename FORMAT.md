@@ -546,6 +546,27 @@ the report says `sim N pts (large-craft approx)`. Pin `windpts=true` (2200
 on normal crafts). Picking: ONE raycast per deliberate pointerdown (no
 hover raycasts — user perf rule), pin `click=true`.
 
+## Display anchoring, explode view, wind seat rule (v0.140)
+
+Blueprints store the builder's world position (`frame·3.0` — Jimmy sits at
+x = 1102 m). The viewer normalizes this away: `model.moff = -3·min(frame)`
+shifts the scene groups, `model.cv = +12·min(frame)` shifts every point→cell
+decode (round/floor of exact multiples stays exact). Saved files and all
+reports keep raw coordinates. ISW and most corpus crafts are anchored at
+(0,0,0): moff = cv = 0, bit-identical rendering.
+
+Explode view (`explode` slider / `?explode=N`): parts scatter radially+axially
+into a floating dome (deterministic per-index hash), hull skin peels UP,
+pipes hide; the same function runs backwards as the 1.5 s reverse-explosion
+LOAD animation (fitCamera uses the home bbox, assembly starts after;
+suppressed by ?selftest/?proxytest/?comptest/?noanim). Pin `explode=true`.
+
+Wind seat rule: the cockpit-first flow direction uses the seat's HEADING
+(yaw) only, unit length — a chair's pitch/roll is a comfort axis; pitching
+the seat must not steer or slow the wind (was: reclining the ISW seat shrank
+the un-normalized flow vector → wind "changed direction and speed", user).
+Pin `seatpitch=true`.
+
 ## Editing recipe (used for the seat adjustment)
 
 Tilt forward = rotate about world **X** with a **negative** angle (Unity left-handed:

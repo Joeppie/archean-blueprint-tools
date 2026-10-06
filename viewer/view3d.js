@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=139';
-import { resolveColor } from './palette.js?v=139';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=140';
+import { resolveColor } from './palette.js?v=140';
 
 // ---- site-zoom cancel: the viewer ALWAYS loads at physical 100% ----
 // Chrome SAVES page zoom per site (Ctrl+wheel sets it, Ctrl-F5 keeps it,
@@ -68,6 +68,7 @@ function setRealModels(on) {
   realModelsOn = on;
   localStorage.setItem('archean-real-models-v2', on ? '1' : '0');
   buildScene();               // rebuild: proxy-only (light) vs real geometry
+  captureHomes(); applyExplode(explodeV);   // new meshes start at home: restore state
 }
 async function loadModelManifest() {
   try { MODEL.manifest = await (await fetch('models/manifest.json')).json(); }
@@ -1129,7 +1130,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=139';
+import { fitHull } from './hullfit.js?v=140';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -1372,6 +1373,22 @@ function setModel(obj, srcName) {
   model.data.triangles = model.data.triangles || [];
   model.data.pipes = model.data.pipes || [];
   model.data.colors = model.data.colors || [];   // some files ship no palette
+  // Display anchoring (user: the frame·3 anchor offset "makes zero sense"
+  // for viewing — it is WHERE THE BUILDER STOOD: Jimmy sits at x=1102 m).
+  // Shift the craft's minimal frame to the origin. The shift is a multiple
+  // of 3.0 m = 12 cells, so every cell-grid index stays an exact integer
+  // (model.cv); craft anchored at frame (0,0,0) — ISW and most of the
+  // corpus — get moff = 0 and are bit-identical to before. Saved files are
+  // untouched: this is a view-only transform, reports stay raw.
+  { const fs = model.data.components;
+    const fx0 = fs.length ? Math.min(...fs.map(c => c.frame_x | 0)) : 0;
+    const fy0 = fs.length ? Math.min(...fs.map(c => c.frame_y | 0)) : 0;
+    const fz0 = fs.length ? Math.min(...fs.map(c => c.frame_z | 0)) : 0;
+    model.moff = [-3 * fx0, -3 * fy0, -3 * fz0];
+    model.cv = [12 * fx0, 12 * fy0, 12 * fz0];   // raw cell = decode(p − moff) = decode(p) + 12f0
+    for (const o of [compGroup, blockGroup, hullGroup, hullWire, pipeGroup, adpGroup, subGroup, occGroup, worldM, surgeGroup])
+      o.position.set(model.moff[0], model.moff[1], model.moff[2]);
+    for (const k of ['x', 'y', 'z']) { model.box_min[k] += model.moff['xyz'.indexOf(k)]; model.box_max[k] += model.moff['xyz'.indexOf(k)]; } }
   bpBox = { min: model.box_min, max: model.box_max };
   orig = model.data.components.map(c => ({
     pos0: { ...c.position },
@@ -1390,6 +1407,9 @@ function setModel(obj, srcName) {
         + `· C (${fit.Cx.toFixed(2)}, ${fit.Cy.toFixed(2)}, ${fit.Cz.toFixed(2)}) · anchor ${fit.d.toFixed(1)}m`);
   }
   buildScene();
+  captureHomes();
+  { const mEx = location.search.match(/[?&]explode=([0-9.]+)/);   // dev/testing hook
+    if (mEx) { asmT0 = 0; applyExplode(clamp(parseFloat(mEx[1]), 0, 1)); } }
   fitCameraToModel();          // frame the loaded craft (fog/far scaled)
   buildList();
   buildInspector();
@@ -1400,7 +1420,8 @@ function setModel(obj, srcName) {
   // ?open=../testdata/<id>/ files have no workshop alias — show the source
   // id/filename (was: literal 'undefined' in the header, user screenshot)
   $('filestatus').textContent = `— ${model.data.alias || srcName || 'craft'} · ${model.data.components.length} components`;
-}
+  startAssembly();             // AFTER fitCamera: framing + ground size use the
+}                              // HOME bbox, parts then fly in from the explode
 
 async function fetchDefault() {
   const open = new URLSearchParams(location.search).get('open');
@@ -1929,7 +1950,7 @@ function buildViewOpts() {
   });
   excl(tHull, tWire); excl(tWire, tHull);
   if (tWire.checked && tHull.checked) { tHull.checked = false; tHull.dispatchEvent(new Event('change')); }
-  toggle('pipes & connectors', pipeGroup);
+  const tPipes = toggle('pipes & connectors', [pipeGroup, adpGroup]);
   toggle('subgrids (doors/hatches)', subGroup);
   const rl = document.createElement('label');
   rl.className = 'checkrow';
@@ -1949,6 +1970,7 @@ function buildViewOpts() {
   };
   ll.append(lcb, document.createTextNode('labels on interactive/aliased parts'));
   s.appendChild(ll);
+  row(s, 'explode', 0, 1, 0.02, 0, v => setExplode(v));   // Expanse view (user)
   // manual cure for the zoom saga: clears our saved dpr baseline + any
   // inverse CSS zoom we applied. (Chrome's own site-zoom entry can only be
   // cleared by Ctrl+0 in the browser — pages may not touch it.)
@@ -2307,8 +2329,18 @@ function flowDir() {
   // direction'): the United airliner's 2 gimbal-tilted BigThrusters netted
   // downward and auto chose 'wind from below' — thrust is only the suggestion
   // for cockpits-less craft (rockets, missiles), and 'thrust' mode = override.
-  const fwd = useT ? useT.slice()
+  const f0 = useT ? useT.slice()
     : seatFwd() || netThrust?.main || [0, 0, 1];   // default: fly view +z
+  // Use the seat's HEADING (yaw) only. A chair's pitch/roll is a comfort
+  // axis: feeding it through raw made reclining the ISW seat shrink the
+  // (un-normalised) wind vector — the whole tunnel slowed to cos(pitch)
+  // AND pitched — "pitch the chair and the wind direction and speed
+  // change" (user). Craft attitude is the AoA slider's job, unit length
+  // always; the cockpit-first rule cares which way the pilot FACES.
+  const fh = Math.hypot(f0[0], f0[2]);
+  const fwd = fh > 0.15 ? [f0[0] / fh, 0, f0[2] / fh]
+    : f0.map(x => x / (Math.hypot(...f0) || 1));   // near-vertical (thrust-override
+                                                   // net straight up/down): keep 3D
 
   // 'wind from side' azimuth: rotate the flight axis in yaw before taking
   // the wind direction — props produce thrust BOTH ways (user), so the
@@ -2511,9 +2543,10 @@ function buildSolid() {
 }
 function inExterior(p) {
   if (!extGrid) return true;
-  const gx = Math.round(p[0] / 0.25) - extGrid.b0[0];
-  const gy = Math.round(p[1] / 0.25) - extGrid.b0[1];
-  const gz = Math.round(p[2] / 0.25) - extGrid.b0[2];
+  const cv = model ? model.cv : [0, 0, 0];   // display anchoring (see setModel)
+  const gx = Math.round(p[0] / 0.25) + cv[0] - extGrid.b0[0];
+  const gy = Math.round(p[1] / 0.25) + cv[1] - extGrid.b0[1];
+  const gz = Math.round(p[2] / 0.25) + cv[2] - extGrid.b0[2];
   const n = extGrid.n;
   if (gx < 0 || gy < 0 || gz < 0 || gx >= n[0] || gy >= n[1] || gz >= n[2]) return true;
   return extGrid.ext[((gy * n[0]) + gx) * n[2] + gz] === 1;
@@ -2552,6 +2585,7 @@ function buildAero() {
 
 function sampleVel(p, dir, V) {
   if (extGrid && !inExterior(p)) return [0, 0, 0];   // sealed interior: no wind
+  const cv = model ? model.cv : [0, 0, 0];   // display anchoring cell shift
   let v = [dir[0] * V, dir[1] * V, dir[2] * V];
   for (const pl of aeroPlates) {
     const d = (p[0] - pl.c[0]) * pl.n[0] + (p[1] - pl.c[1]) * pl.n[1] + (p[2] - pl.c[2]) * pl.n[2];
@@ -2574,8 +2608,9 @@ function sampleVel(p, dir, V) {
     for (let i = -1; i <= 1; i++)
       for (let j = -1; j <= 1; j++)
         for (let k = -1; k <= 1; k++) {
-          if (!solidCells.has(cellKeyV(cx + i, cy + j, cz + k))) continue;
-          const d = [p[0] - (cx + i + 0.5) * 0.25, p[1] - (cy + j + 0.5) * 0.25, p[2] - (cz + k + 0.5) * 0.25];
+          const rx = cx + i + cv[0], ry = cy + j + cv[1], rz = cz + k + cv[2];
+          if (!solidCells.has(cellKeyV(rx, ry, rz))) continue;
+          const d = [p[0] - (rx + 0.5) * 0.25 - model.moff[0], p[1] - (ry + 0.5) * 0.25 - model.moff[1], p[2] - (rz + 0.5) * 0.25 - model.moff[2]];
           const r = Math.hypot(d[0], d[1], d[2]);
           if (r > 0.62 || r < 1e-6) continue;
           // influence width 0.1->0.3: with a ~0.3 m reach, each crossed cell
@@ -2604,14 +2639,54 @@ function sampleVel(p, dir, V) {
   let wake = 0;
   if (solidCells && solidCells.size) {
     for (let s = 1; s <= 12; s++) {
-      const qx = Math.floor((p[0] - dir[0] * s * 0.25) / 0.25);
-      const qy = Math.floor((p[1] - dir[1] * s * 0.25) / 0.25);
-      const qz = Math.floor((p[2] - dir[2] * s * 0.25) / 0.25);
+      const qx = Math.floor((p[0] - dir[0] * s * 0.25) / 0.25) + cv[0];
+      const qy = Math.floor((p[1] - dir[1] * s * 0.25) / 0.25) + cv[1];
+      const qz = Math.floor((p[2] - dir[2] * s * 0.25) / 0.25) + cv[2];
       if (solidCells.has(cellKeyV(qx, qy, qz))) { wake = 0.6 * Math.exp(-s * 0.25 / 3.5); break; }
     }
     if (wake) { v[0] *= 1 - wake; v[1] *= 1 - wake; v[2] *= 1 - wake; }
   }
   return wake ? [v[0], v[1], v[2], wake] : v;
+}
+
+// ---------- explode (user: Expanse-style view + reverse-explosion load) ----------
+// parts stream OUTWARD from the hull centre (radial + axial scatter, per-part
+// distance), the hull skin PEELS UP over them, pipes hide. The same function
+// runs backwards as the assembly animation when a craft loads.
+let explodeV = 0, asmT0 = 0;
+function captureHomes() { compObjs.forEach(o => { if (o) o.userData.home = o.position.clone(); }); }
+function applyExplode(v) {
+  explodeV = v;
+  if (!model) return;
+  const b = model.box_min, B = model.box_max, m = model.moff;
+  const cx = (b.x + B.x) / 2, cy = (b.y + B.y) / 2, cz = (b.z + B.z) / 2;
+  const span = Math.max(1, Math.hypot(B.x - b.x, B.y - b.y, B.z - b.z) / 2);
+  for (const o of compObjs) {
+    if (!o || !o.userData.home) continue;
+    const h = o.userData.home, i = o.userData.ci | 0;
+    const s1 = Math.sin(i * 127.1 + 311.7) * 43758.5453, r1 = s1 - Math.floor(s1);
+    const s2 = Math.sin(i * 269.5 + 183.3) * 24634.6345, r2 = s2 - Math.floor(s2);
+    let dx = h.x + m[0] - cx, dy = h.y + m[1] - cy, dz = h.z + m[2] - cz;
+    dz += (r1 - 0.5) * span * 0.5;                       // axial scatter (Expanse line-out)
+    const L = Math.hypot(dx, dy, dz) || 1;
+    const dist = span * (1.1 + 2.4 * r1) + 1.5;
+    // dome scatter: parts FLOAT in an arc (sci-fi docking-shot formation,
+    // user's Expanse reference), not a ground-level debris field
+    o.position.set(h.x + dx / L * dist * v,
+      h.y + (Math.abs(dy) / L * 0.35 + 0.22 + 0.55 * r2) * dist * 0.5 * v,
+      h.z + dz / L * dist * v);
+  }
+  const peel = span * 0.7 + 1.2;                          // hull skin lifts off the internals
+  for (const g of [blockGroup, hullGroup, hullWire, subGroup]) g.position.set(m[0], m[1] + peel * v, m[2]);
+  const pipeOn = v < 0.02 && (typeof tPipes === 'undefined' || tPipes.checked);
+  pipeGroup.visible = adpGroup.visible = pipeOn;
+  invalidate();
+}
+function setExplode(v) { asmT0 = 0; applyExplode(v); }
+function startAssembly() {
+  if (location.search.match(/selftest|proxytest|comptest|noanim/)) return;
+  asmT0 = performance.now();
+  applyExplode(1);
 }
 
 let flowN = 0;
@@ -2974,6 +3049,7 @@ function dirLabel(v) {
 
 function updateReport() {
   if (!model) return;
+  if (explodeV) applyExplode(explodeV);   // edits write home positions; re-apply the offset
   const mm = updateCoM();
   const A = computeAero();
   const el = $('aeroreport');
@@ -3126,6 +3202,11 @@ function tick(t) {
   stepSurges(performance.now());              // cable pulses + arrival blips
   controls.update();                                  // 'change' event → invalidate
   if (windHud.visible) { updateWindHud(t); invalidate(); }   // sock flutters
+  if (asmT0) {                                             // reverse-explosion load
+    const e = (performance.now() - asmT0) / 1500;
+    if (e >= 1) { asmT0 = 0; applyExplode(0); }
+    else { applyExplode(1 - (1 - Math.pow(1 - e, 3))); invalidate(); }
+  }
   if (labelsOn) for (const o of compGroup.children)   // labels follow dragged/moved parts
     if (o.userData.isLabel) {
       const m = compObjs[o.userData.ci];
@@ -3520,12 +3601,42 @@ if (location.search.includes('selftest')) {
         const cW = [(bl.x + Bg.x) / 2, (bl.y + Bg.y) / 2, (bl.z + Bg.z) / 2];
         const ext = Math.abs((Bg.x - bl.x) / 2 * dvW[0]) + Math.abs((Bg.y - bl.y) / 2 * dvW[1]) + Math.abs((Bg.z - bl.z) / 2 * dvW[2]);
         const VB = 60;
-        const pb = [cW[0] + dvW[0] * (ext + 1.5), cW[1] + dvW[1] * (ext + 1.5), cW[2] + dvW[2] * (ext + 1.5)];
-        const pf = [cW[0] - dvW[0] * (ext + 1.5), cW[1] - dvW[1] * (ext + 1.5), cW[2] - dvW[2] * (ext + 1.5)];
+        // mid-way between axis and hull TOP skin: the ISW tail centre is its
+        // open engine duct (air, casts no wake); the top skin is solid
+        const yTop = (Bg.y + cW[1]) / 2 - 0.15;
+        const pb = [cW[0] + dvW[0] * (ext + 1.5), yTop, cW[2] + dvW[2] * (ext + 1.5)];
+        const pf = [cW[0] - dvW[0] * (ext + 1.5), yTop, cW[2] - dvW[2] * (ext + 1.5)];
         const vb = sampleVel(pb, dvW, VB), vf = sampleVel(pf, dvW, VB);
         ok24 = Math.hypot(vb[0], vb[1], vb[2]) < VB * 0.75 && (vb[3] || 0) > 0.3
           && Math.hypot(vf[0], vf[1], vf[2]) > VB * 0.95 && !(vf[3] > 0);
       }
+      // ok25: chair pitch is a COMFORT axis — pitching the pilot seat must
+      // not steer the wind (user: 'pitch the chair and the wind direction
+      // and speed change'); wind keeps heading + unit length
+      let ok25 = false;
+      { const seatCi = model.data.components.findIndex(c => c.type === 'PilotSeat');
+        const so = seatCi >= 0 ? compObjs[seatCi] : null;
+        if (so) {
+          const d0 = flowDir();
+          const q = so.quaternion.clone();
+          so.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), 0.35));
+          const d1 = flowDir();
+          so.quaternion.copy(q);
+          ok25 = d0[0] * d1[0] + d0[1] * d1[1] + d0[2] * d1[2] > 0.9999
+            && Math.abs(Math.hypot(...d0) - 1) < 0.01 && Math.abs(Math.hypot(...d1) - 1) < 0.01;
+        } }
+      // ok26: display anchoring (ISW frame (0,0,0) => moff/cv = 0) + explode:
+      // parts move outward, hull skin peels up, pipes hide, t=0 restores homes
+      let ok26 = false;
+      { setExplode(1);
+        const o = compObjs.find(o2 => o2 && o2.userData.home);
+        const d = o ? o.position.distanceTo(o.userData.home) : 0;
+        const skin = blockGroup.position.y - model.moff[1];
+        const pipeOff = !pipeGroup.visible;
+        setExplode(0);
+        ok26 = model.moff[0] === 0 && model.cv[0] === 0 && d > 1 && skin > 0.5
+          && pipeOff && o.position.distanceTo(o.userData.home) < 1e-9
+          && blockGroup.position.y === model.moff[1]; }
       const ok17 = nThr > 0 && !!netThrust && netThrust.n === nThr
         && thrustGroup.children.length === nThr + (netThrust.v ? 1 : 0)
         && (!netThrust.v || Math.abs(Math.hypot(...netThrust.v) - 1) < 0.02)
@@ -3561,14 +3672,14 @@ if (location.search.includes('selftest')) {
       ray.setFromCamera(new THREE.Vector2(0, 0), camera);
       const ok5 = ray.intersectObjects(compGroup.children, true)
         .some(h => h.object.userData.ci >= 0);
-      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 && ok10 && ok11 && ok12 && ok13 && ok14 && ok15 && ok16 && ok17 && ok18 && ok19 && ok20 && ok21 && ok22 && ok23 && ok24 ? 'PASS' : 'FAIL')
+      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 && ok10 && ok11 && ok12 && ok13 && ok14 && ok15 && ok16 && ok17 && ok18 && ok19 && ok20 && ok21 && ok22 && ok23 && ok24 && ok25 && ok26 ? 'PASS' : 'FAIL')
         + ' occ_z=' + occ.pos_z + ' mirror=' + !!mir
         + ' pitch=' + (2 * Math.asin(-seat.orientation.x) * 180 / Math.PI).toFixed(1) + '°'
         + ' beacon=' + (mast ? mast.x.toFixed(2) : 'none') + ' droop=' + wc.y.toFixed(2)
         + ' junction=' + jdir.y.toFixed(2) + ' aileron=' + at.y.toFixed(2)
         + ' pick=' + ok5 + ' palette=' + ok9 + ' lens=' + ok10
         + ' dashmirror=' + ok11 + ' textx=' + ok12 + ' mural=' + ok13 + ' ground=' + ok14
-        + ' surges=' + ok15 + ' bolts=' + ok16 + ' thrust=' + ok17 + ' seal=' + ok18 + ' sock=' + ok19 + ' excl=' + ok20 + ' windpts=' + ok21 + ' click=' + ok22 + ' inflow=' + ok23 + ' wake=' + ok24
+        + ' surges=' + ok15 + ' bolts=' + ok16 + ' thrust=' + ok17 + ' seal=' + ok18 + ' sock=' + ok19 + ' excl=' + ok20 + ' windpts=' + ok21 + ' click=' + ok22 + ' inflow=' + ok23 + ' wake=' + ok24 + ' seatpitch=' + ok25 + ' explode=' + ok26
         + ' cabin=' + seal.sealedCount;
     } catch (e) { document.title = 'SELFTEST ERR ' + e.message + ' @' + String(e.stack).split(String.fromCharCode(10))[1].trim().slice(0, 70); }
   }, 1500);

@@ -269,7 +269,10 @@ landing page and README together when the viewer changes).
      the wind particle budget tiers with scene cost, normal crafts full 2200
      (`windpts=true`); canvas picking = deliberate press only (`click=true`);
      streamlines are UNDISTURBED upstream of the body mid-plane (`inflow=true`)
-     while the wake deficit behind it slows the flow >25% (`wake=true`).
+     while the wake deficit behind it slows the flow >25% (`wake=true`);
+     pitching the PilotSeat must NOT steer/slow the wind (heading-only,
+     `seatpitch=true`); display anchoring moff/cv = 0 on ISW + explode/
+     assembly round-trips homes exactly (`explode=true`).
      thrust display + wind model: every propulsor (THRUST table = .ini
      TARGET axes; Propeller double-headed + excluded from the net) feeds
      a normalized net-thrust vector, symmetric banks net to null
