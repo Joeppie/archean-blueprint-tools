@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=134';
-import { resolveColor } from './palette.js?v=134';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=135';
+import { resolveColor } from './palette.js?v=135';
 
 // ---- site-zoom cancel: the viewer ALWAYS loads at physical 100% ----
 // Chrome SAVES page zoom per site (Ctrl+wheel sets it, Ctrl-F5 keeps it,
@@ -1129,7 +1129,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=134';
+import { fitHull } from './hullfit.js?v=135';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -2050,7 +2050,7 @@ let flowFast = null, flowLUT = null;   // big-dot fast layer + speed colour ramp
 // flowDir() and flutters with turbulence/speed — the classic tunnel reference
 // for what the streamlines/particles are showing (user request)
 const windHud = new THREE.Group();
-let sockPivot = null;
+let sockPivot = null, sockLabel = null;
 { const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.013, 0.52, 6),
     new THREE.MeshBasicMaterial({ color: 0xc8d2d8, transparent: true, opacity: 0.8, depthTest: false }));
   pole.position.y = 0.26;
@@ -2068,6 +2068,16 @@ let sockPivot = null;
   ring.position.z = 0.004;
   sockPivot.add(ring);
   windHud.add(pole, sockPivot);
+  { const cv = document.createElement('canvas'); cv.width = 160; cv.height = 48;
+    const tx = new THREE.CanvasTexture(cv);
+    const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tx, transparent: true,
+      opacity: 0.9, depthTest: false }));
+    spr.scale.set(0.52, 0.156, 1);
+    spr.position.set(0, -0.16, 0);
+    spr.renderOrder = 30;
+    windHud.add(spr);
+    sockLabel = { cv, tx, spr, last: '' };
+  }
   windHud.traverse(o => { o.renderOrder = 30; o.raycast = () => {}; });
   scene.add(camera);                     // camera children (the HUD) render
   camera.add(windHud);
@@ -2076,16 +2086,37 @@ let sockPivot = null;
 }
 function updateWindHud(tms) {
   if (!windHud.visible) return;
+  const V = flowState.speed;
   const dv = flowDir();                                    // view-space travel dir
   const dcam = new THREE.Vector3(dv[0], dv[1], -dv[2])     // view -> scene (z mirror)
     .applyQuaternion(camera.quaternion.clone().invert()).normalize();   // world -> cam
   sockPivot.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dcam);
-  // flutter: amplitude grows with turbulence + speed; multi-frequency sway
-  const A = 0.05 + flowState.turb * 0.3 + Math.min(0.25, flowState.speed / 600);
+  // droop: only airflow inflates the sock horizontal; in little wind it hangs
+  // down the pole (user). ~70 deg droop at 0 m/s, level by 45 m/s
+  const infl = clamp(V / 45, 0, 1);
+  sockPivot.rotateOnAxis(new THREE.Vector3(1, 0, 0), (1 - infl) * 1.22);
+  // flutter ∝ real wind: at 0 m/s the sock is dead still (user), turbulence
+  // adds the gustiness on top once there IS wind
+  const A = flowState.turb * 0.38 * Math.min(1, V / 25);
   const t = tms * 0.001;
   sockPivot.rotateOnAxis(new THREE.Vector3(0, 1, 0), Math.sin(t * 1.9) * A);
   sockPivot.rotateOnAxis(new THREE.Vector3(1, 0, 0), Math.sin(t * 1.3 + 1) * A * 0.7);
   sockPivot.rotateOnAxis(new THREE.Vector3(1, 0.4, 0).normalize(), Math.sin(t * 4.1) * A * 0.35);
+  // speed readout, redrawn only when the text changes
+  if (sockLabel) {
+    const txt = `${Math.round(V)} m/s`;
+    if (txt !== sockLabel.last) {
+      sockLabel.last = txt;
+      const g = sockLabel.cv.getContext('2d');
+      g.clearRect(0, 0, 160, 48);
+      g.fillStyle = 'rgba(8,12,16,0.45)';
+      g.fillRect(0, 8, 160, 34);
+      g.font = 'bold 26px monospace'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillStyle = infl > 0.55 ? '#eaf4ff' : infl > 0.2 ? '#ffd9a0' : '#9fb4c4';
+      g.fillText(txt, 80, 25);
+      sockLabel.tx.needsUpdate = true;
+    }
+  }
 }
 let flowSm = null, flowSmT = null;      // EMA-smoothed speed/turb per particle
 let flowAge = null, flowAgeMax = null;  // particle lifetimes (anti-piling)
