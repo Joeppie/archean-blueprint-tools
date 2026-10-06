@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=143';
-import { resolveColor } from './palette.js?v=143';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=142';
+import { resolveColor } from './palette.js?v=142';
 
 // ---- site-zoom cancel: the viewer ALWAYS loads at physical 100% ----
 // Chrome SAVES page zoom per site (Ctrl+wheel sets it, Ctrl-F5 keeps it,
@@ -248,23 +248,11 @@ function flipGeomX(gg) {
   }
   gg.computeVertexNormals();
 }
-// gltf geometry vertices are authored in the Blender/gltf export space,
-// (gx, gy, gz) = Unity (x, −z, y) — the standard y-up/z-forward DCC mapping
-// (proof: every .ini [RENDERABLE] position equals its gltf node translation
-// under Unity = (gx, −gz, gy): Crafter ini (-1.014, 0, -0.728) vs gltf
-// (-1.014, -0.728, 0), Beacon ini z +0.339 vs gltf y -0.339). Prims are
-// stored raw, so the viewer pre-rotates -90 deg about x: (x, y, z) ->
-// (x, z, -y) = Unity raw, which the z-mirror chain maps correctly.
-// Pre-fix, parts whose gltf space differs from Unity space rendered rotated
-// (legacy mosaic Crafter stood up, Crusher jaws mirrored sideways — user).
-// Dashboard prims are NOT rotated: the plate is GENERATED in Unity space
-// (mural pin proves text prims share it).
-const ROT_AUTH2UNITY = new THREE.Matrix4().makeRotationX(-Math.PI / 2);
 function buildRealComponent(c, model, idx, low = false) {
   const { geo, info } = model;
   if (c.type === 'Dashboard') return buildDashboard(c, model, idx, low);
   const g = new THREE.Group();
-  g.scale.z = -1;          // raw Unity local space mirrored into view space
+  g.scale.z = -1;          // raw .ini/gltf local space mirrored into view space
   // Placement truth is the .ini node tree (renderables/joints/targets, ZYX
   // euler like the game engine) — NOT the gltf node translations, which are
   // Blender authoring offsets (MiniComputer's model sits 3 m from its origin!).
@@ -283,15 +271,7 @@ function buildRealComponent(c, model, idx, low = false) {
   for (const t of info.targets || []) mkNode(t);
   for (const r of info.renderables) mkNode(r);
   const link = (n) => (nodes.get(n.parent) || g).add(nodes.get(n.name));
-  for (const n of [...(info.joints || []), ...(info.targets || []), ...info.renderables]) {
-    // Single-mesh fallback renderables (extractor: parent null, position 0)
-    // carry their only transform in the gltf node translation (author space,
-    // Unity = (gx, -gz, gy)); .ini-authored nodes already equal it — don't add.
-    const t = geo[n.name] && geo[n.name].translation;
-    if (t && n.parent === null && !n.position.some(v => v))
-      nodes.get(n.name).position.set(t[0], -t[2], t[1]);
-    link(n);
-  }
+  for (const n of [...(info.joints || []), ...(info.targets || []), ...info.renderables]) link(n);
   const drop = new Set(DROP_PARTS[c.type]?.(c) || []);
   for (const r of info.renderables) {
     if (drop.has(r.name)) continue;
@@ -307,7 +287,6 @@ function buildRealComponent(c, model, idx, low = false) {
       gg.setIndex(i);
       gg.computeVertexNormals();
       if (TEXT_MIRROR_X.has(prim.material)) flipGeomX(gg);
-      gg.applyMatrix4(ROT_AUTH2UNITY);              // author space -> Unity raw
       let arr = byMat.get(prim.material);
       if (!arr) byMat.set(prim.material, arr = []);
       arr.push(gg);
@@ -336,14 +315,14 @@ function buildRealComponent(c, model, idx, low = false) {
       let top = null;
       for (const prim of nd.prims) {
         if (prim.material !== 'body') continue;
-        const v = low && prim.lv ? prim.lv : prim.v;   // raw author coords;
-        for (let k = 1; k + 1 < v.length; k += 3)      // lens y = gz (post-rot)
-          if (!top || v[k + 1] > top[2]) top = [v[k - 1], v[k], v[k + 1]];
+        const v = low && prim.lv ? prim.lv : prim.v;
+        for (let k = 1; k + 1 < v.length; k += 3)
+          if (!top || v[k] > top[1]) top = [v[k - 1], v[k], v[k + 1]];
       }
       if (top) {
         const lens = new THREE.Mesh(new THREE.SphereGeometry(0.055, 12, 10),
           new THREE.MeshStandardMaterial({ color: 0x550000, emissive: 0xff2222 }));
-        lens.position.set(top[0], top[2] + 0.03, -top[1]);   // author -> Unity
+        lens.position.set(top[0], top[1] + 0.03, top[2]);
         lens.userData.ci = idx;
         (nodes.get(r.name) || g).add(lens);
       }
@@ -1117,14 +1096,8 @@ function buildScene() {
   // blocks: merged meshes per palette colour + wire edges; the wireframe
   // overlay shows blocks and hull triangles uniformly; occupancy → 1 line mesh
   const oedges = [];
-  // Draw from components[].occupancies, NOT the type-255 mirror blocks: v2
-  // keeps the mirror in sync (selftest), but v1 files record 255s at each
-  // part's BUILD-TIME builder origin — up to 2 frames (6 m) off the craft
-  // grid (mosaic lamp: box 3.5 m from the lamp, user: "bounding box precisely
-  // wrong, the lamp is correct"). Component occs are craft-local in both.
-  for (const c of components) {
-    if (c.type === 'Build') continue;
-    for (const b of c.occupancies || []) {
+  for (const b of blocks) {
+    if (b.type !== 255) continue;                                       // occupancy mirror box
     const s = new THREE.Box3(   // view-space (z-mirrored) occupancy box
       new THREE.Vector3(occWorld(b, 'x') - CELL / 2, occWorld(b, 'y') - CELL / 2,
                         -(occWorld(b, 'z') + b.size_z * CELL + CELL / 2)),
@@ -1135,7 +1108,6 @@ function buildScene() {
     const eg = new THREE.EdgesGeometry(box(sz.x, sz.y, sz.z));
     eg.applyMatrix4(new THREE.Matrix4().makeTranslation(ct.x, ct.y, ct.z));
     oedges.push(eg);
-    }
   }
   const blkEdges = addBlockMeshes(blockGroup, blocks, new THREE.Vector3());
   if (oedges.length) occGroup.add(new THREE.LineSegments(mergeGeometries(oedges, false),
@@ -1158,7 +1130,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=143';
+import { fitHull } from './hullfit.js?v=142';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -3462,8 +3434,8 @@ if (location.search.includes('selftest')) {
       // R(q) (|dot| 0.999); conjugate quaternions tilt every plate ~45° out
       // of the wall (|dot| 0.70 = user's "not flush" screenshots).
       let ok13 = false;
-      const ms = await (await fetch('../testdata/3334698274/blueprint.json')).json();
       {
+        const ms = await (await fetch('../testdata/3334698274/blueprint.json')).json();
         const dc = ms.data.components[235];
         if (dc.type === 'Dashboard') {
           const qv = new THREE.Quaternion(-dc.orientation.x, -dc.orientation.y,
@@ -3472,32 +3444,6 @@ if (location.search.includes('selftest')) {
           const npl = new THREE.Vector3(0.69337, 0.63691, -0.33702).normalize();  // view wall normal
           ok13 = Math.abs(n.dot(npl)) > 0.98;
         }
-      }
-      // ok27: legacy-format pipeline, mosaic craft (ms fetched above):
-      //  (a) real-model prims arrive in gltf/Blender author space and must
-      //      be pre-rotated into Unity raw: the Crafter's 2 m long axis
-      //      renders HORIZONTAL at identity pose (pre-fix: standing up —
-      //      user: "crafter 28 seems rotated wrong, it seems to be standing");
-      //  (b) occupancy boxes draw from components[].occupancies, which
-      //      contain the component pivot on v1 grids (pre-fix: the shifted
-      //      type-255 mirrors — user: "the lamp is correct, its bounding
-      //      box is precisely wrong").
-      let ok27 = false;
-      {
-        const mmC = await getModel('Crafter');
-        const fc = { type: 'Crafter', module: 'x', alias: '', colors: {}, data: {},
-          position: { x: 0, y: 0, z: 0 }, orientation: { w: 1, x: 0, y: 0, z: 0 },
-          occupancies: [{ frame_x: 0, frame_y: 0, frame_z: 0, pos_x: 5, pos_y: 5, pos_z: 5, size_x: 2, size_y: 2, size_z: 2 }] };
-        const rb = new THREE.Box3().setFromObject(buildRealComponent(fc, mmC, 1e9, true))
-          .getSize(new THREE.Vector3());
-        const lying = rb.z > rb.y + 1e-6;
-        const lamp = ms.data.components.find(c => c.type === 'Lamp');
-        const o = lamp.occupancies[0];
-        const dmax = Math.max(
-          Math.abs(occWorld(o, 'x') + o.size_x * CELL / 2 - lamp.position.x),
-          Math.abs(occWorld(o, 'y') + o.size_y * CELL / 2 - lamp.position.y),
-          Math.abs(occWorld(o, 'z') + o.size_z * CELL / 2 - lamp.position.z));   // raw space
-        ok27 = lying && dmax < 0.13;
       }
       // ok14: ground fit — the green plane and grid sit just UNDER the
       // lowest rendered geometry (truck 3481322297 builds to y=-1.5:
@@ -3675,7 +3621,7 @@ if (location.search.includes('selftest')) {
         + ' beacon=' + (mast ? mast.x.toFixed(2) : 'none') + ' droop=' + wc.y.toFixed(2)
         + ' junction=' + jdir.y.toFixed(2) + ' aileron=' + at.y.toFixed(2)
         + ' pick=' + ok5 + ' palette=' + ok9 + ' lens=' + ok10
-        + ' dashmirror=' + ok11 + ' textx=' + ok12 + ' mural=' + ok13 + ' legacyfmt=' + ok27 + ' ground=' + ok14
+        + ' dashmirror=' + ok11 + ' textx=' + ok12 + ' mural=' + ok13 + ' ground=' + ok14
         + ' surges=' + ok15 + ' bolts=' + ok16 + ' thrust=' + ok17 + ' seal=' + ok18 + ' sock=' + ok19 + ' excl=' + ok20 + ' windpts=' + ok21 + ' click=' + ok22 + ' inflow=' + ok23 + ' wake=' + ok24 + ' seatpitch=' + ok25 + ' anchor=' + ok26
         + ' cabin=' + seal.sealedCount;
     } catch (e) { document.title = 'SELFTEST ERR ' + e.message + ' @' + String(e.stack).split(String.fromCharCode(10))[1].trim().slice(0, 70); }

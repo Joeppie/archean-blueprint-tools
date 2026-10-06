@@ -546,35 +546,6 @@ the report says `sim N pts (large-craft approx)`. Pin `windpts=true` (2200
 on normal crafts). Picking: ONE raycast per deliberate pointerdown (no
 hover raycasts — user perf rule), pin `click=true`.
 
-## v1 legacy files + real-model author space (v0.143)
-
-The 23 palette-less corpus files (v1, 2024-25) decode through THREE format
-conventions, all keyed on the same `LEGACY_Q` predicate (no `data.colors`):
-1. Rotations: RAW Unity LH quaternions (`viewQuat` switch, see Handedness).
-2. Positions: `components[].position` is direct METRES (float, e.g. 3.725000
-   001490116), not quantized `pos_*`+`frame_*` — `viewPos` takes it as-is.
-   Occupancies still use grid `pos_*`+`frame_*`, craft-local (small frames).
-3. type-255 occupancy mirrors sit on each part's BUILD-TIME builder grid:
-   they can be 1-2 frames (3-6 m) off the craft grid (mosaic lamp 3.5 m).
-   NEVER draw occupancy boxes from them — `components[].occupancies` is
-   craft-local and contains the component pivot in BOTH formats; the viewer
-   occ-box overlay iterates components (the 255 mirror stays data-only,
-   selftest keeps it in sync for edits).
-
-Real-model geometry is authored in Blender/gltf export space, related to
-Unity by Unity = (gx, −gz, gy) — proven by every .ini [RENDERABLE] position
-equaling its gltf node translation under that mapping (Crafter ini
-(−1.014, 0, −0.728) vs gltf (−1.014, −0.728, 0)). Stored prims are raw, so
-buildRealComponent pre-rotates −90° about x (`ROT_AUTH2UNITY`): author →
-Unity raw, which the z-mirror chain maps correctly. Pre-fix, parts with
-asymmetric author-space layouts rendered rotated/mirrored (mosaic Crafter
-stood up, Crusher jaws shifted — user); ISW parts hid it (axis-symmetric).
-Dashboard prims are EXEMPT (plate generated in Unity space, mural pin
-proves text shares it). Single-mesh fallback renderables (extractor: parent
-null, position 0) apply their gltf translation as Unity (gx, −gz, gy).
-Pin `legacyfmt=true`: Crafter 2 m axis horizontal at identity + lamp occ
-box contains the pivot.
-
 ## Display anchoring + wind seat rule (v0.140)
 
 Blueprints store the builder's world position (`frame·3.0` — Jimmy sits at
