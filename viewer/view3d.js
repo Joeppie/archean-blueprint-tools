@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=140';
-import { resolveColor } from './palette.js?v=140';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=141';
+import { resolveColor } from './palette.js?v=141';
 
 // ---- site-zoom cancel: the viewer ALWAYS loads at physical 100% ----
 // Chrome SAVES page zoom per site (Ctrl+wheel sets it, Ctrl-F5 keeps it,
@@ -453,6 +453,7 @@ controls.enableDamping = true;
 // ground, and the orbit pivot sat inside the hull). Frame the bbox, scale
 // fog/far to the model size; ?cam= still overrides afterwards.
 function fitCameraToModel() {
+  scene.updateMatrixWorld(true);   // fresh explode/assembly transforms (matrixWorld is lazy)
   const box = new THREE.Box3();
   [compGroup, blockGroup, hullGroup, pipeGroup, subGroup].forEach(g => box.expandByObject(g));
   if (!isFinite(box.min.x)) return;
@@ -1130,7 +1131,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=140';
+import { fitHull } from './hullfit.js?v=141';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -1152,8 +1153,11 @@ let hullOpacity = Math.min(1, Math.max(0.1,
 // (user report). Their alpha is sqrt-compensated: 1-(1-a)^2 == slider value.
 // Hull triangles are single 0.05 m prisms seen through one face: linear.
 function applyHullOpacity() {
-  const effB = hullOpacity >= 1 ? 1 : 1 - Math.sqrt(1 - hullOpacity);
-  for (const [grp, k] of [[blockGroup, effB], [hullGroup, hullOpacity]])
+  const kEx = 1 - 0.82 * explodeV;   // explode: the skin CANNOT fly apart (one
+  // merged mesh per colour) so it FADES instead (user): internals + stretched
+  // cables visible through it; restored exactly at explode = 0
+  const effB = (hullOpacity >= 1 ? 1 : 1 - Math.sqrt(1 - hullOpacity)) * kEx;
+  for (const [grp, k] of [[blockGroup, effB], [hullGroup, hullOpacity * kEx]])
     grp.traverse(o => {
       if (!o.isMesh) return;
       for (const m of (Array.isArray(o.material) ? o.material : [o.material])) {
@@ -1408,9 +1412,9 @@ function setModel(obj, srcName) {
   }
   buildScene();
   captureHomes();
-  { const mEx = location.search.match(/[?&]explode=([0-9.]+)/);   // dev/testing hook
-    if (mEx) { asmT0 = 0; applyExplode(clamp(parseFloat(mEx[1]), 0, 1)); } }
   fitCameraToModel();          // frame the loaded craft (fog/far scaled)
+  { const mEx = location.search.match(/[?&]explode=([0-9.]+)/);   // dev/testing hook
+    if (mEx) { asmT0 = 0; setExplode(clamp(parseFloat(mEx[1]), 0, 1)); } }  // AFTER framing
   buildList();
   buildInspector();
   calibrateCellMass();
@@ -2063,7 +2067,11 @@ function calibrateCellMass() {
 
 function updateCoM() {
   const mm = massModel();
-  comMarker.position.set(...mm.com);
+  { const m = model.moff, s = explodeS(), b = model.box_min, B = model.box_max;
+    const cx = (b.x + B.x) / 2, cy = (b.y + B.y) / 2, cz = (b.z + B.z) / 2;
+    comMarker.position.set(cx + (mm.com[0] + m[0] - cx) * s - m[0],
+                           cy + (mm.com[1] + m[1] - cy) * s - m[1],
+                           cz + (mm.com[2] + m[2] - cz) * s - m[2]); }
   comMarker.visible = comMarker.visible;   // controlled by UI checkbox
   return mm;
 }
@@ -2655,36 +2663,55 @@ function sampleVel(p, dir, V) {
 // runs backwards as the assembly animation when a craft loads.
 let explodeV = 0, asmT0 = 0;
 function captureHomes() { compObjs.forEach(o => { if (o) o.userData.home = o.position.clone(); }); }
+function explodeS() { return 1 + 1.7 * explodeV; }
 function applyExplode(v) {
+  // UNIFORM explode (user): the whole craft scales proportionally about its
+  // centre — parts keep their relative arrangement (fly out along home
+  // directions, arrive back in their EXACT places), cables + connector dots
+  // stretch with the parts, occupancy boxes + subgrids follow. Blocks and
+  // hull triangles are merged meshes (cannot move per-block, user) so the
+  // skin stays home and goes TRANSLUCENT. Assembly = the same, played back.
   explodeV = v;
   if (!model) return;
   const b = model.box_min, B = model.box_max, m = model.moff;
   const cx = (b.x + B.x) / 2, cy = (b.y + B.y) / 2, cz = (b.z + B.z) / 2;
-  const span = Math.max(1, Math.hypot(B.x - b.x, B.y - b.y, B.z - b.z) / 2);
-  for (const o of compObjs) {
+  const s = 1 + 1.7 * v;
+  for (const o of compObjs) {              // part positions scale; geometry keeps size
     if (!o || !o.userData.home) continue;
-    const h = o.userData.home, i = o.userData.ci | 0;
-    const s1 = Math.sin(i * 127.1 + 311.7) * 43758.5453, r1 = s1 - Math.floor(s1);
-    const s2 = Math.sin(i * 269.5 + 183.3) * 24634.6345, r2 = s2 - Math.floor(s2);
-    let dx = h.x + m[0] - cx, dy = h.y + m[1] - cy, dz = h.z + m[2] - cz;
-    dz += (r1 - 0.5) * span * 0.5;                       // axial scatter (Expanse line-out)
-    const L = Math.hypot(dx, dy, dz) || 1;
-    const dist = span * (1.1 + 2.4 * r1) + 1.5;
-    // dome scatter: parts FLOAT in an arc (sci-fi docking-shot formation,
-    // user's Expanse reference), not a ground-level debris field
-    o.position.set(h.x + dx / L * dist * v,
-      h.y + (Math.abs(dy) / L * 0.35 + 0.22 + 0.55 * r2) * dist * 0.5 * v,
-      h.z + dz / L * dist * v);
+    const h = o.userData.home;
+    o.position.set(cx + (h.x + m[0] - cx) * s - m[0],
+                   cy + (h.y + m[1] - cy) * s - m[1],
+                   cz + (h.z + m[2] - cz) * s - m[2]);
   }
-  const peel = span * 0.7 + 1.2;                          // hull skin lifts off the internals
-  for (const g of [blockGroup, hullGroup, hullWire, subGroup]) g.position.set(m[0], m[1] + peel * v, m[2]);
-  const pipeOn = v < 0.02 && (typeof tPipes === 'undefined' || tPipes.checked);
-  pipeGroup.visible = adpGroup.visible = pipeOn;
+  for (const g of [pipeGroup, adpGroup, occGroup, subGroup]) {   // cables STRETCH proportionally
+    g.scale.setScalar(s);
+    g.position.set(cx + (m[0] - cx) * s, cy + (m[1] - cy) * s, cz + (m[2] - cz) * s);
+  }
+  for (const ch of adpGroup.children) ch.scale.setScalar(1 / s);  // connector dots: move, keep size
+  applyHullOpacity();                                            // skin fades (see applyHullOpacity)
+  hullWire.traverse(o => {
+    if (!o.material) return;
+    if (o.userData.op0 === undefined) o.userData.op0 = o.material.opacity;
+    o.material.opacity = o.userData.op0 * (1 - 0.82 * v);
+    o.material.transparent = true;
+  });
+  surgeGroup.visible = v < 0.02;           // overlays live in home space
+  thrustGroup.visible = thrustArrowsOn && v < 0.02;
+  aeroArrows.visible = aeroArrows.userData.base !== false && v < 0.02;
+  comMarker.visible = comMarker.userData.base !== false && v < 0.02;
   invalidate();
 }
-function setExplode(v) { asmT0 = 0; applyExplode(v); }
+let explodedFit = false;
+function setExplode(v) {
+  asmT0 = 0;
+  applyExplode(v);
+  // frame the exploded craft when entering explode, back home when leaving
+  if (v > 0.05 && !explodedFit) { explodedFit = true; fitCameraToModel(); }
+  if (v < 0.02 && explodedFit) { explodedFit = false; fitCameraToModel(); }
+}
 function startAssembly() {
-  if (location.search.match(/selftest|proxytest|comptest|noanim/)) return;
+  // ?explode=N pins a static exploded view: no fly-in over it
+  if (location.search.match(/selftest|proxytest|comptest|noanim|explode=/)) return;
   asmT0 = performance.now();
   applyExplode(1);
 }
@@ -3128,12 +3155,13 @@ function buildFlight() {
   const comB = document.createElement('button');
   comB.className = 'btn'; comB.style.marginLeft = '4px';
   comB.textContent = 'CoM/arrows: ' + (aeroArrows.visible ? 'on' : 'off');
-  comB.onclick = () => { aeroArrows.visible = comMarker.visible = !aeroArrows.visible;
-    comB.textContent = 'CoM/arrows: ' + (aeroArrows.visible ? 'on' : 'off'); };
+  comB.onclick = () => { const nv = !aeroArrows.visible; aeroArrows.visible = comMarker.visible = nv;
+    aeroArrows.userData.base = comMarker.userData.base = nv;
+    comB.textContent = 'CoM/arrows: ' + (nv ? 'on' : 'off'); };
   const thB = document.createElement('button');
   thB.className = 'btn'; thB.style.marginLeft = '4px';
   thB.textContent = 'thrust: ' + (thrustArrowsOn ? 'shown' : 'hidden');
-  thB.onclick = () => { thrustArrowsOn = !thrustArrowsOn; thrustGroup.visible = thrustArrowsOn;
+  thB.onclick = () => { thrustArrowsOn = !thrustArrowsOn; thrustGroup.visible = thrustArrowsOn && explodeV < 0.02;
     invalidate();
     thB.textContent = 'thrust: ' + (thrustArrowsOn ? 'shown' : 'hidden'); };
   const fsB = document.createElement('button');
@@ -3625,18 +3653,25 @@ if (location.search.includes('selftest')) {
           ok25 = d0[0] * d1[0] + d0[1] * d1[1] + d0[2] * d1[2] > 0.9999
             && Math.abs(Math.hypot(...d0) - 1) < 0.01 && Math.abs(Math.hypot(...d1) - 1) < 0.01;
         } }
-      // ok26: display anchoring (ISW frame (0,0,0) => moff/cv = 0) + explode:
-      // parts move outward, hull skin peels up, pipes hide, t=0 restores homes
+      // ok26: display anchoring (ISW moff/cv = 0) + UNIFORM explode: part at
+      // 2.7× its centre-relative home vector, skin faded, pipes stretched;
+      // explode(0) restores homes exactly
       let ok26 = false;
-      { setExplode(1);
-        const o = compObjs.find(o2 => o2 && o2.userData.home);
-        const d = o ? o.position.distanceTo(o.userData.home) : 0;
-        const skin = blockGroup.position.y - model.moff[1];
-        const pipeOff = !pipeGroup.visible;
+      { const o = compObjs.find(o2 => o2 && o2.userData.home);
+        const mo = model.moff, b2 = model.box_min, B2 = model.box_max;
+        const cx = (b2.x + B2.x) / 2, cy = (b2.y + B2.y) / 2, cz = (b2.z + B2.z) / 2;
+        setExplode(1);
+        const hx = o.userData.home.x + mo[0] - cx, hy = o.userData.home.y + mo[1] - cy, hz = o.userData.home.z + mo[2] - cz;
+        const ox = o.position.x + mo[0] - cx, oy = o.position.y + mo[1] - cy, oz = o.position.z + mo[2] - cz;
+        const Lh = Math.hypot(hx, hy, hz) || 1e-9, Lo = Math.hypot(ox, oy, oz);
+        const ratio = Lo / Lh;
+        const dirOk = (ox * hx + oy * hy + oz * hz) / (Lo * Lh) > 0.9999;
+        const skin = (blockGroup.children[0] && blockGroup.children[0].material.opacity || 1) < 0.35;
+        const pipeS = Math.abs(pipeGroup.scale.x - 2.7) < 1e-9;
         setExplode(0);
-        ok26 = model.moff[0] === 0 && model.cv[0] === 0 && d > 1 && skin > 0.5
-          && pipeOff && o.position.distanceTo(o.userData.home) < 1e-9
-          && blockGroup.position.y === model.moff[1]; }
+        ok26 = model.moff[0] === 0 && model.cv[0] === 0 && Math.abs(ratio - 2.7) < 1e-6 && dirOk
+          && skin && pipeS && o.position.distanceTo(o.userData.home) < 1e-9
+          && blockGroup.children[0].material.opacity > 0.99 && pipeGroup.scale.x === 1; }
       const ok17 = nThr > 0 && !!netThrust && netThrust.n === nThr
         && thrustGroup.children.length === nThr + (netThrust.v ? 1 : 0)
         && (!netThrust.v || Math.abs(Math.hypot(...netThrust.v) - 1) < 0.02)
