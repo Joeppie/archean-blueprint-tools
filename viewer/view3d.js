@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=133';
-import { resolveColor } from './palette.js?v=133';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=134';
+import { resolveColor } from './palette.js?v=134';
 
 // ---- site-zoom cancel: the viewer ALWAYS loads at physical 100% ----
 // Chrome SAVES page zoom per site (Ctrl+wheel sets it, Ctrl-F5 keeps it,
@@ -1129,7 +1129,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=133';
+import { fitHull } from './hullfit.js?v=134';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -2046,6 +2046,47 @@ function updateCoM() {
 // bodies. Gives sane comparative numbers per element, not certifiable data.
 let aeroPlates = [], flowPts = null, flowData = null, flowTrails = null, flowOn = false;
 let flowFast = null, flowLUT = null;   // big-dot fast layer + speed colour ramp
+// 3D windsock HUD: camera-anchored top-of-screen, translucent, aims along
+// flowDir() and flutters with turbulence/speed — the classic tunnel reference
+// for what the streamlines/particles are showing (user request)
+const windHud = new THREE.Group();
+let sockPivot = null;
+{ const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.013, 0.52, 6),
+    new THREE.MeshBasicMaterial({ color: 0xc8d2d8, transparent: true, opacity: 0.8, depthTest: false }));
+  pole.position.y = 0.26;
+  sockPivot = new THREE.Group(); sockPivot.position.y = 0.44;
+  const segL = 0.2;
+  [[0xff7a1a, 0], [0xf2f2f2, 1], [0xff7a1a, 2]].forEach(([c, i]) => {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(0.083 + (2 - i) * 0.028, 0.083 + (2 - i - 1) * 0.028, segL, 10, 1, true),
+      new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.85, depthTest: false, side: THREE.DoubleSide }));
+    m.rotation.x = Math.PI / 2;          // axis y -> z: tail (wide) streams +z downwind
+    m.position.z = i * segL + segL / 2;
+    sockPivot.add(m);
+  });
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.083, 0.01, 6, 14),
+    new THREE.MeshBasicMaterial({ color: 0x2a2a2a, transparent: true, opacity: 0.85, depthTest: false }));
+  ring.position.z = 0.004;
+  sockPivot.add(ring);
+  windHud.add(pole, sockPivot);
+  windHud.traverse(o => { o.renderOrder = 30; o.raycast = () => {}; });
+  scene.add(camera);                     // camera children (the HUD) render
+  camera.add(windHud);
+  windHud.position.set(0, 1.18, -3.4);
+  windHud.visible = false;
+}
+function updateWindHud(tms) {
+  if (!windHud.visible) return;
+  const dv = flowDir();                                    // view-space travel dir
+  const dcam = new THREE.Vector3(dv[0], dv[1], -dv[2])     // view -> scene (z mirror)
+    .applyQuaternion(camera.quaternion.clone().invert()).normalize();   // world -> cam
+  sockPivot.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dcam);
+  // flutter: amplitude grows with turbulence + speed; multi-frequency sway
+  const A = 0.05 + flowState.turb * 0.3 + Math.min(0.25, flowState.speed / 600);
+  const t = tms * 0.001;
+  sockPivot.rotateOnAxis(new THREE.Vector3(0, 1, 0), Math.sin(t * 1.9) * A);
+  sockPivot.rotateOnAxis(new THREE.Vector3(1, 0, 0), Math.sin(t * 1.3 + 1) * A * 0.7);
+  sockPivot.rotateOnAxis(new THREE.Vector3(1, 0.4, 0).normalize(), Math.sin(t * 4.1) * A * 0.35);
+}
 let flowSm = null, flowSmT = null;      // EMA-smoothed speed/turb per particle
 let flowAge = null, flowAgeMax = null;  // particle lifetimes (anti-piling)
 let flowPhase = null;                   // per-particle turbulence phase (anti-striping)
@@ -2067,6 +2108,7 @@ const flowMode = { m: 'off' };          // three-way wind-tunnel toggle: 'off' |
 function setFlowMode(m) {
   flowMode.m = m; flowOn = m === 'wind';
   flowGroup.visible = m !== 'off';
+  windHud.visible = m !== 'off';
   if (flowPts) flowPts.visible = m === 'wind';
   if (flowFast) flowFast.visible = m === 'wind';
   if (flowTrails) flowTrails.mesh.visible = m === 'wind';
@@ -2571,6 +2613,7 @@ function initFlow() {
   flowTrails.mesh = tmesh;
   flowOn = flowMode.m === 'wind';
   flowGroup.visible = flowMode.m !== 'off';
+  windHud.visible = flowMode.m !== 'off';   // ?flow/?lines on load
   flowPts.visible = flowMode.m === 'wind';
   buildStreamlines();
 }
@@ -2602,7 +2645,7 @@ function buildStreamlines() {
   const e2 = new THREE.Vector3().crossVectors(dv, e1).normalize();
   const rad = Math.hypot(B.x - b.x, B.y - b.y, B.z - b.z) / 2 * 1.1 + 0.5;
   const sga = location.search.includes('flowlow') ? 1.1 : 0.55;   // coarser seed grid
-  const R2 = (rad + 2.2) * (rad + 2.2);
+  const R2 = (rad + 6.5) * (rad + 6.5);   // lines survive far past the craft (user: 'start long enough ahead')
   const FA = 0.055;                                            // 'thick line' offset
   const FASTOFF = [[0, 0, 0],
     [e1.x * FA, e1.y * FA, e1.z * FA], [-e1.x * FA, -e1.y * FA, -e1.z * FA],
@@ -2610,7 +2653,7 @@ function buildStreamlines() {
   for (let a = -rad; a <= rad; a += sga * 1.7)
     for (let c2 = -rad; c2 <= rad; c2 += sga) {
       if (a * a + c2 * c2 > rad * rad) continue;              // disc, not square
-      const seed = cen.clone().addScaledVector(dv, -(rad + 1.2))
+      const seed = cen.clone().addScaledVector(dv, -(rad + 5))   // generous approach run-in
         .addScaledVector(e1, a).addScaledVector(e2, c2);
       const seedA = [seed.x, seed.y, seed.z];
       const ph = a * 0.9 + c2 * 1.4;                          // wake meander phase
@@ -2980,6 +3023,7 @@ function tick(t) {
   }
   stepSurges(performance.now());              // cable pulses + arrival blips
   controls.update();                                  // 'change' event → invalidate
+  if (windHud.visible) { updateWindHud(t); invalidate(); }   // sock flutters
   if (labelsOn) for (const o of compGroup.children)   // labels follow dragged/moved parts
     if (o.userData.isLabel) {
       const m = compObjs[o.userData.ci];
@@ -3283,6 +3327,18 @@ if (location.search.includes('selftest')) {
       // ok17: thrust indication — every propulsor (ISW RCS bank) feeds a
       // normalized net-thrust vector, and per-engine + net arrows are built
       const nThr = model.data.components.filter(c => c.type in THRUST).length;
+      // windsock HUD: camera child, aims its +z (tail) downwind in camera
+      // space: dot(sock z, flowDir in cam space) ~ 1 (ok19)
+      let ok19 = false;
+      { setFlowMode('wind'); updateWindHud(performance.now());   // aim once (rAF has not run)
+        if (windHud.visible && sockPivot && windHud.parent === camera) {
+          const dv = flowDir();
+          const dcam = new THREE.Vector3(dv[0], dv[1], -dv[2])
+            .applyQuaternion(camera.quaternion.clone().invert()).normalize();
+          const z = new THREE.Vector3(0, 0, 1).applyQuaternion(sockPivot.quaternion);
+          ok19 = z.dot(dcam) > 0.93;
+        }
+        setFlowMode('off'); }
       const ok17 = nThr > 0 && !!netThrust && netThrust.n === nThr
         && thrustGroup.children.length === nThr + (netThrust.v ? 1 : 0)
         && (!netThrust.v || Math.abs(Math.hypot(...netThrust.v) - 1) < 0.02)
@@ -3318,14 +3374,14 @@ if (location.search.includes('selftest')) {
       ray.setFromCamera(new THREE.Vector2(0, 0), camera);
       const ok5 = ray.intersectObjects(compGroup.children, true)
         .some(h => h.object.userData.ci >= 0);
-      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 && ok10 && ok11 && ok12 && ok13 && ok14 && ok15 && ok16 && ok17 && ok18 ? 'PASS' : 'FAIL')
+      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 && ok10 && ok11 && ok12 && ok13 && ok14 && ok15 && ok16 && ok17 && ok18 && ok19 ? 'PASS' : 'FAIL')
         + ' occ_z=' + occ.pos_z + ' mirror=' + !!mir
         + ' pitch=' + (2 * Math.asin(-seat.orientation.x) * 180 / Math.PI).toFixed(1) + '°'
         + ' beacon=' + (mast ? mast.x.toFixed(2) : 'none') + ' droop=' + wc.y.toFixed(2)
         + ' junction=' + jdir.y.toFixed(2) + ' aileron=' + at.y.toFixed(2)
         + ' pick=' + ok5 + ' palette=' + ok9 + ' lens=' + ok10
         + ' dashmirror=' + ok11 + ' textx=' + ok12 + ' mural=' + ok13 + ' ground=' + ok14
-        + ' surges=' + ok15 + ' bolts=' + ok16 + ' thrust=' + ok17 + ' seal=' + ok18
+        + ' surges=' + ok15 + ' bolts=' + ok16 + ' thrust=' + ok17 + ' seal=' + ok18 + ' sock=' + ok19
         + ' cabin=' + seal.sealedCount;
     } catch (e) { document.title = 'SELFTEST ERR ' + e.message + ' @' + String(e.stack).split(String.fromCharCode(10))[1].trim().slice(0, 70); }
   }, 1500);
