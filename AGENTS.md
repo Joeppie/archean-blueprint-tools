@@ -255,6 +255,11 @@ landing page and README together when the viewer changes).
      legacy (no-palette) files must use RAW quaternions: the mosaic
      dashboard-mural plate normal must be parallel to its fitted wall plane
      (`mural=true`; conj quaternions tilt it ~45° out of the wall).
+     v1 legacy files (no data.colors): real-model prims arrive in Blender/
+     gltf author space (Unity = (gx,−gz,gy)) and must be pre-rotated −90°
+     about x — the mosaic Crafter's long axis renders horizontal, and occ
+     boxes draw from `components[].occupancies`, NOT the build-time-shifted
+     type-255 mirrors (`legacyfmt=true`).
      the green ground plane + grid must sit just under the lowest rendered
      geometry — nothing of a craft renders below ground, ever (the
      3481322297 "Classic American Semi Truck" builds down to y=−1.5;
