@@ -576,23 +576,6 @@ buildRealComponent pre-rotates −90° about x (`ROT_AUTH2UNITY`): author →
 Unity raw, which the z-mirror chain maps correctly. Pre-fix, parts with
 asymmetric author-space layouts rendered rotated/mirrored (mosaic Crafter
 stood up, Crusher jaws shifted — user); ISW parts hid it (axis-symmetric).
-gltf NODE ROTATIONS are part of the same export convention and must NOT be
-dropped: they encode per-asset frames — FluidJunction's base node carries the
-z-up swap (0.5,0.5,-0.5,0.5), Lamp a housing tilt, Propeller a blade skew
-(the .ini transform only mirrors the node TRANSLATION: ini pos == (tx,-tz,ty)
-of the gltf translation). Unity loads gltf by conjugating every node TRS by
-Rx(-90): the viewer builds the mesh chain Q q Q^-1 (Q = Rx(-90)) on a child
-group (extract_models.py keeps the raw [x,y,z,w]; the old `pop("rotation")`
-+ v0.143's vertex-only rotation made swap-carrying assets render rotated by
-exactly their swap — user: "affects bigwheel and fluidjunction" in dolphin +
-truck, v0.143). Consequences: real junction geometry lands in the GAME pose
-(standing comb, ports vertical — matches [COLLIDER collider] rotated to
-(0.25,1,0.25)); the flat builder-cache display pose therefore keeps the OLD
-formula for proxy geometry (obj.quaternion.set(-qV.x,-qV.y,-qV.z,qV.w),
-pin junction=-1.00) while the REAL model root multiplies conjM(F^-1) at the
-quaternion sync (F = Q q: qd*conjM(F^-1)*M*F*G == qd*M*G, the target).
-BigWheel: torus authored axle z -> Unity y = .ini [JOINT axle] angular_y ✓,
-disc plane xz, standing.
 Dashboard prims are EXEMPT (plate generated in Unity space, mural pin
 proves text shares it). Single-mesh fallback renderables (extractor: parent
 null, position 0) apply their gltf translation as Unity (gx, −gz, gy).

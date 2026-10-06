@@ -11,8 +11,8 @@ addEventListener('unhandledrejection', (e) => {
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=145';
-import { resolveColor } from './palette.js?v=145';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=144';
+import { resolveColor } from './palette.js?v=144';
 
 // ---- site-zoom cancel: the viewer ALWAYS loads at physical 100% ----
 // Chrome SAVES page zoom per site (Ctrl+wheel sets it, Ctrl-F5 keeps it,
@@ -298,34 +298,7 @@ function buildRealComponent(c, model, idx, low = false) {
     if (drop.has(r.name)) continue;
     const nd = geo[r.name];
     if (!nd) continue;
-    let rg = nodes.get(r.name);
-    const rq = geo[r.name] && geo[r.name].rotation;   // gltf raw [x,y,z,w]
-    if (rq && (Math.abs(rq[3]) < 0.99999 || Math.abs(rq[0]) > 1e-6 ||
-               Math.abs(rq[1]) > 1e-6 || Math.abs(rq[2]) > 1e-6)) {
-      // The gltf node rotation is part of the asset's export convention
-      // (FluidJunction's base node carries the z-up swap (0.5,0.5,-0.5,0.5),
-      // Lamp a housing tilt, Propeller a blade skew - the .ini transform
-      // only mirrors the node TRANSLATION). Unity loads gltf by conjugating
-      // every node TRS by Rx(-90), so the mesh chain is Q q Q^-1 applied to
-      // the Rx(-90)-baked prims (v0.143 rotated prims WITHOUT it: assets
-      // carrying a node swap rendered rotated by exactly that swap - user:
-      // "affects bigwheel and fluidjunction" in dolphin + truck).
-      const qg = new THREE.Quaternion(rq[0], rq[1], rq[2], rq[3]);
-      const Qv = new THREE.Quaternion(-Math.SQRT1_2, 0, 0, Math.SQRT1_2); // Rx(-90)
-      const child = new THREE.Group();
-      child.quaternion.copy(Qv).multiply(qg).multiply(Qv.clone().invert());
-      rg.add(child);
-      rg = child;
-      if (JUNCTION_TYPES.has(c.type) && r.name === (info.renderables[0] || {}).name) {
-        // Real junction geometry lands in the GAME pose (standing comb,
-        // F = Q q Q^-1 chain = Q q on the raw prims); the display pose
-        // flattens the PROXY (view-space geometry, old formula). The real
-        // root gets the z-mirror conjugate of F^-1 at the quaternion sync:
-        // qd * conjM(F^-1) * M * F * G  ==  qd * M * G  (target).
-        const F = Qv.clone().multiply(qg);            // authored -> Unity standing
-        g.userData.jfix = F.clone().invert().mirrorZ();   // (x,-y,-z,w)
-      }
-    }
+    const rg = nodes.get(r.name);
     const byMat = new Map();          // merge same-material prims → fewer draws
     for (const prim of nd.prims) {
       const v = low && prim.lv ? prim.lv : prim.v;
@@ -477,10 +450,6 @@ const viewPos = (p) => new THREE.Vector3(p.x, p.y, -p.z);
 // modern files as (w,x,y,−z). Saved files stay byte-exact: edits invert
 // through rawFromView.
 let LEGACY_Q = false;
-// conjugate a quaternion by the z mirror M=diag(1,1,-1): M q M
-THREE.Quaternion.prototype.mirrorZ = function () {
-  return new THREE.Quaternion(this.x, -this.y, -this.z, this.w);
-};
 const viewQuat = (q) => LEGACY_Q ? new THREE.Quaternion(-q.x, -q.y, q.z, q.w)
                                  : new THREE.Quaternion(q.x, q.y, -q.z, q.w);   // file {w,x,y,z}
 
@@ -669,17 +638,9 @@ const WHEEL_TYPES = new Set(['SmallWheel', 'Wheel', 'BigWheel']);
 // aligns with its cables. Display-only: edits write back through wheelUndo,
 // saved quaternions stay file-exact.
 const JUNCTION_TYPES = new Set(['FluidJunction']);
-function applyDisplayPose(obj, qV, q0) {
+function applyDisplayPose(obj, qV) {
   obj.userData.wheelUndo = undefined;
   if (JUNCTION_TYPES.has(obj.userData.wType)) {
-    // Flat builder-cache display pose (v0.91), geometry-space aware (v0.145:
-    // v0.143 rotated real-model prims into Unity raw space, so atlas
-    // geometry - collider box + real model, gltf base-node z-up swap
-    // applied as Q q Q^-1 - lands in the GAME pose (standing comb).
-    // Display pose = M-transport of the placement, (x, y, -z, w) of the
-    // view quaternion, flattens it in BOTH format generations: identical
-    // to the old formula for modern files; the legacy z-sign flip was the
-    // truck/dolphin junction misrotation (user).
     obj.quaternion.set(-qV.x, -qV.y, -qV.z, qV.w);
     obj.userData.wheelUndo = obj.quaternion.clone().invert().multiply(qV);
     return;
@@ -1083,7 +1044,7 @@ function buildSubgrids() {
       const m = MODEL.manifest?.[sc.type] ? colliderProxy(sc) : (PROXY[sc.type] || PROXY2[sc.type] || defaultProxy)(sc);
       m.position.copy(viewPos(sc.position));
       m.userData.wType = sc.type;
-      applyDisplayPose(m, viewQuat(sc.orientation), sc.orientation);
+      applyDisplayPose(m, viewQuat(sc.orientation));
       m.scale.z = -1;
       subGroup.add(m);
       // real/decimated geometry for nested parts too (Spider Mining Rover:
@@ -1095,7 +1056,6 @@ function buildSubgrids() {
         const real = buildRealComponent(sc, mm, -1, !realModelsOn);
         real.position.copy(m.position);
         real.quaternion.copy(m.quaternion);
-        if (real.userData.jfix) real.quaternion.multiply(real.userData.jfix);
         real.scale.z = -1;
         m.visible = false;
         real.raycast = () => {};
@@ -1128,8 +1088,7 @@ function buildScene() {
     const mesh = atlas ? colliderProxy(c) : (PROXY[c.type] || PROXY2[c.type] || defaultProxy)(c);
     mesh.position.copy(viewPos(c.position));
     mesh.userData.wType = c.type;
-    mesh.userData.atlas = atlas;
-    applyDisplayPose(mesh, viewQuat(c.orientation), c.orientation);
+    applyDisplayPose(mesh, viewQuat(c.orientation));
     mesh.scale.z = -1;                              // hand proxies keep raw local geometry
     mesh.traverse(o => { o.userData.ci = i; });
     mesh.userData.ci = i;
@@ -1152,7 +1111,6 @@ function buildScene() {
       const real = buildRealComponent(c, mm, i, !realModelsOn);   // low by default
       real.position.copy(mesh.position);
       real.quaternion.copy(mesh.quaternion);
-      if (real.userData.jfix) real.quaternion.multiply(real.userData.jfix);
       real.scale.z = -1;                            // (buildRealComponent root mirrors too)
       real.userData.real = true;
       mesh.visible = false;
@@ -1212,7 +1170,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=145';
+import { fitHull } from './hullfit.js?v=144';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -1982,7 +1940,7 @@ function buildInspector() {
     obj.position.copy(viewPos(comp.position));
     obj.userData.wheelUndo = undefined;
     obj.userData.wType = comp.type;
-    applyDisplayPose(obj, viewQuat(orig[selected].q0), orig[selected].q0);
+    applyDisplayPose(obj, viewQuat(orig[selected].q0));
     comp.orientation = { ...orig[selected].q0 };
     buildInspector();
     markDirty();
@@ -3545,30 +3503,13 @@ if (location.search.includes('selftest')) {
         const rb = new THREE.Box3().setFromObject(buildRealComponent(fc, mmC, 1e9, true))
           .getSize(new THREE.Vector3());
         const lying = rb.z > rb.y + 1e-6;
-        // (c) gltf node rotations (export-convention swaps, e.g. the
-        // FluidJunction base node's (0.5,0.5,-0.5,0.5) z-up swap) must be
-        // applied as Unity Q q Q^-1 on the mesh: at identity the junction
-        // comb lies FLAT (thin y) as the game places it, and the BigWheel
-        // stands (tall y, axle x) - v0.143 rotated prims without it: comb
-        // on edge, wheel faces flipped (user: "affects bigwheel and
-        // fluidjunction" in dolphin + truck).
-        const fakeJ = { type: 'FluidJunction', module: 'x', alias: '', colors: {}, data: {},
-          position: { x: 0, y: 0, z: 0 }, orientation: { w: 1, x: 0, y: 0, z: 0 },
-          occupancies: [] };
-        const jb = new THREE.Box3().setFromObject(
-          buildRealComponent(fakeJ, await getModel('FluidJunction'), 1e9, true)).getSize(new THREE.Vector3());
-        const jFlat = jb.y > jb.x + 1e-6 && jb.y > jb.z + 1e-6;  // game pose
-        const fakeW = { ...fakeJ, type: 'BigWheel' };
-        const wb = new THREE.Box3().setFromObject(
-          buildRealComponent(fakeW, await getModel('BigWheel'), 1e9, true)).getSize(new THREE.Vector3());
-        const wUp = wb.x > wb.y + 1e-6 && wb.z > wb.y + 1e-6;    // axle y, disc xz
         const lamp = ms.data.components.find(c => c.type === 'Lamp');
         const o = lamp.occupancies[0];
         const dmax = Math.max(
           Math.abs(occWorld(o, 'x') + o.size_x * CELL / 2 - lamp.position.x),
           Math.abs(occWorld(o, 'y') + o.size_y * CELL / 2 - lamp.position.y),
           Math.abs(occWorld(o, 'z') + o.size_z * CELL / 2 - lamp.position.z));   // raw space
-        ok27 = lying && jFlat && wUp && dmax < 0.13;
+        ok27 = lying && dmax < 0.13;
       }
       // ok28: IBL environment present (user: "specular/metallic is just
       // too dark in both dolphin and truck"): metal palette slots are
