@@ -227,8 +227,9 @@ def main():
     for typ, entry in atlas.items():
         geo = entry.pop("nodes", {})
         # gltf node transforms stay with the geometry file
-        for name, c in geo.items():
-            c.pop("rotation", None)   # transforms live in renderables (Euler deg)
+        # gltf node rotation STAYS (raw [x,y,z,w]): it is part of the
+        # asset's export convention (z-up swap etc); viewer places it as
+        # Unity = Q q Q^-1 on a mesh child (Q = Rx(-90)).
         (outdir / f"{typ}.json").write_text(json.dumps(geo, separators=(",", ":")))
         manifest[typ] = entry
     (outdir / "manifest.json").write_text(json.dumps(manifest, separators=(",", ":")))

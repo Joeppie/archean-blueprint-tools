@@ -259,7 +259,10 @@ landing page and README together when the viewer changes).
      gltf author space (Unity = (gx,−gz,gy)) and must be pre-rotated −90°
      about x — the mosaic Crafter's long axis renders horizontal, and occ
      boxes draw from `components[].occupancies`, NOT the build-time-shifted
-     type-255 mirrors (`legacyfmt=true`). Metal-family slots need an IBL
+     type-255 mirrors (`legacyfmt=true` also pins: junction real geometry
+     in the game standing pose + BigWheel disc xz/axle-y — gltf node
+     rotations stay in the geo files, viewer = Q q Q^-1 on a mesh child).
+     Metal-family slots need an IBL
      environment (metallic=1 has zero diffuse; sun-only renders them
      black — `metal=true`: PMREM RoomEnvironment at intensity 0.6).
      the green ground plane + grid must sit just under the lowest rendered
