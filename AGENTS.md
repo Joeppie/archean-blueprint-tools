@@ -191,7 +191,9 @@ landing page and README together when the viewer changes).
   double tire. Real models are dense (raytracing-grade): the viewer shows
   low-poly proxies by default (boxes + hexagon cylinders) and swaps in real
   geometry only via the “real game models” checkbox / `?real` (persisted in
-  localStorage). `Build` type has no model (skipped).
+  localStorage key `archean-real-models-v2` — v0.139 bumped the key so fresh
+  opens honour the user-set defaults: hull on, wireframe off, labels off,
+  real models off). `Build` type has no model (skipped).
 
 ## Performance rules (iGPU-targeted — keep them)
 - Static geometry is MERGED: blocks → one mesh per distinct palette colour

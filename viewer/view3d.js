@@ -10,8 +10,8 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=138';
-import { resolveColor } from './palette.js?v=138';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=139';
+import { resolveColor } from './palette.js?v=139';
 
 // ---- site-zoom cancel: the viewer ALWAYS loads at physical 100% ----
 // Chrome SAVES page zoom per site (Ctrl+wheel sets it, Ctrl-F5 keeps it,
@@ -63,10 +63,10 @@ const MODEL = { manifest: null, cache: {} };
 // Default is LIGHT proxies (boxes + hexagon cylinders): the game ships dense
 // raytracing-grade geometry that overloads raster GPUs. The checkbox swaps in
 // the real game models on demand; the choice persists across sessions.
-let realModelsOn = localStorage.getItem('archean-real-models') === '1';
+let realModelsOn = localStorage.getItem('archean-real-models-v2') === '1';   // v2 key: fresh defaults (real models OFF by default, user)
 function setRealModels(on) {
   realModelsOn = on;
-  localStorage.setItem('archean-real-models', on ? '1' : '0');
+  localStorage.setItem('archean-real-models-v2', on ? '1' : '0');
   buildScene();               // rebuild: proxy-only (light) vs real geometry
 }
 async function loadModelManifest() {
@@ -770,7 +770,7 @@ const INTERACT = {
   PilotSeat: 'seat', ToiletSeat: 'toilet', OwnerPad: 'pad',
   Computer: 'computer', MiniComputer: 'computer', Volume: 'volume',
 };
-let labelsOn = true;
+let labelsOn = false;   // labels OFF by default (user): opt-in per session
 function makeLabel(c) {
   const text = c.alias || INTERACT[c.type];
   const cv = document.createElement('canvas');
@@ -1129,7 +1129,7 @@ function buildScene() {
   invalidate();
 }
 
-import { fitHull } from './hullfit.js?v=138';
+import { fitHull } from './hullfit.js?v=139';
 
 // hull triangles: vertices live on the SAME lattice as blocks —
 // world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
@@ -1203,7 +1203,7 @@ function weldedTris() {
   for (const p of canon) if (Math.abs(p[0]) < 0.15) p[0] = 0;
   return tris.map((t, i) => ({ c: t.c, p: idx[i].map(j => canon[j]) }));
 }
-const hullWire = new THREE.Group(); scene.add(hullWire);
+const hullWire = new THREE.Group(); hullWire.visible = false; scene.add(hullWire);   // wireframe OFF by default (user): checkbox derives visibility
 let blockWireObj = null;
 function setBlockWire(e) {
   if (blockWireObj) { hullWire.remove(blockWireObj); blockWireObj.geometry.dispose(); blockWireObj = null; }
