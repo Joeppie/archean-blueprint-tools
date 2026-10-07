@@ -231,6 +231,17 @@ landing page and README together when the viewer changes).
   ISW-241 scene is ≈150 draws. SwiftShader fps numbers are meaningless —
   compare draw-call counts only.
 
+## Known open issues (v0.146 state)
+- **v0.143/v0.145 were REVERTED** (user-confirmed regressions on Pages: beacon mast +
+  aileron real models rotated wrong). v0.144 (IBL) was re-landed as the PMREM commit.
+  Re-land the legacy alignment + per-asset loader bake ONLY with new pins first
+  (real Beacon mast tip in world, comptest-grade; aileron real-model tip below hinge
+  on a palette file) — existing pins are sign-invariant on axisymmetric parts, so a
+  bake flip passes the suite silently. Details: FORMAT.md § Per-asset gltf loader
+  conventions.
+- Beacon "point forward" display convention (user): parked — blocked on an asymmetric
+  probe craft (180°-quaternion z-sign ambiguity, see FORMAT.md).
+
 ## Invariants that tests enforce (keep them green)
 1. `?selftest`: edit→serialize round-trip preserves bytes except intended fields;
    occupancy + type-255 mirror stay synced after position edits; the ISW beacon

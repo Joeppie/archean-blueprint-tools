@@ -592,6 +592,34 @@ the seat must not steer or slow the wind (was: reclining the ISW seat shrank
 the un-normalized flow vector → wind "changed direction and speed", user).
 Pin `seatpitch=true`.
 
+## Per-asset gltf loader conventions + Beacon decode ambiguity (verified Oct 6; implementation REVERTED in v0.146 — do NOT re-land without pins)
+
+- The `.ini` `[RENDERABLE]` rotation == the gltf node rotation (same Euler, degrees;
+  verified by a full-atlas scan of the game modules: PilotSeat's seat node quat
+  (0.707,0,0,0.707) == `.ini` `rotation=90,0,0`). The extractor keeps the raw gltf
+  quat `[x,y,z,w]` in the geo files.
+- The loader convention is **per-asset**, not global:
+  - **z-swap assets** (gltf node rotation = identity, `.ini` rotation = 0 — Beacon,
+    Crafter, FluidJunction): geometry arrives in Blender author space; Unity placement
+    = (gx, −gz, gy), i.e. bake Rx(+90) at load.
+  - **y-up assets** (non-identity node rotation matching the `.ini` euler — PilotSeat):
+    apply the node rotation as-is, NO bake.
+  - The v0.145 attempt applied one global bake and passed every existing pin while
+    flipping the y-up assets upside-down — pins are sign-invariant on axisymmetric parts.
+- **v1 legacy files (no `data.colors`):** real-model prims arrive in Blender/gltf
+  author space (Unity = (gx,−gz,gy)) and occ boxes must draw from
+  `components[].occupancies`, NOT the type-255 mirrors (those sit on per-placement
+  build-time grids, 3–6 m off on the mosaic craft). Verified on 3334698274; the
+  implementation was reverted with v0.143 — re-land behind a pin.
+- **Beacon decode ambiguity:** the ISW beacon stores a 180° quaternion whose z-term
+  sign is ambiguous under our mirror decode (both signs pass the comptest pin at
+  0.000 m — the mast is a cylinder). The game's own R(q*) puts the mast forward/left
+  ~45° off; the verified modern decode puts it up. Needs an asymmetric probe craft
+  from the game (like tools/make_orient_test.py for text) before ANY decode change.
+- **Pins-first rule:** sign flips on axisymmetric parts pass the existing suite
+  silently. Add the pin BEFORE re-landing: real-model Beacon mast tip in world
+  (comptest-grade), aileron real-model tip below hinge on a palette file.
+
 ## Editing recipe (used for the seat adjustment)
 
 Tilt forward = rotate about world **X** with a **negative** angle (Unity left-handed:
