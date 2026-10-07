@@ -281,6 +281,15 @@ in the dev's XenonViewer + the shipped `.gltf`/`.ini` assets, Oct 5)
 - **Conditional renderables**: a Wheel/BigWheel gltf contains BOTH tire toruses
   `Torus`/`TorusReverse` plus a `mudguard`; the client mounts one torus
   (`data.reverse` picks) and the guard unless `data.mudguard === false`.
+  **ToggleButton is a two-state device the same way**: the `.ini` pairs
+  JOINT `axle` (ZYX rot 18,0,−180 = pressed) + RENDERABLE `switch` with JOINT
+  `axle2` (18,0,0 = released) + `switch2`; exactly ONE lever renders, keyed on
+  `data.state` (missing = false). `base2` is the second-face plate: render
+  only when `data.isDualSided` (same for PushButton's base/base2). Drawing
+  everything stacks a lever ghost flipped 180° about z — a second lever
+  sticking through the mount (the dolphin 3417786605 "misplaced door
+  buttons"); pinned by the generic ?postest `btn-*` suite (all 24 corpus
+  craft have buttons: 22 legacy + 2 modern).
   Rendering all = double-stacked tire (the “wheels look wrong” bug).
 - Component placement truth = the `.ini` node tree (RENDERABLE/JOINT/TARGET
   parents, euler **ZYX**); gltf node translations are Blender layout offsets

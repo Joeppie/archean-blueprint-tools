@@ -72,8 +72,8 @@ title=$(chrome --virtual-time-budget=30000 \
 echo "   $title"
 case "$title" in *COMPTEST\ 60/60\ PASS*) ;; *) echo "   FAIL"; fail=1;; esac
 
-echo "── position tests (placement fixtures: FluidJunction row, ISW + RCS-infinity)"
-for c in 3812927875 3518436870; do
+echo "── position tests (placement fixtures + generic button sweep)"
+for c in 3812927875 3518436870 3417786605 3803780241; do
   title=$(chrome --virtual-time-budget=12000 \
     --dump-dom "$BASE/viewer/index.html?open=../testdata/$c/blueprint.json&postest" 2>/dev/null \
     | grep -oPm1 '(?<=<title>)[^<]*')

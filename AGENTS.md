@@ -304,6 +304,11 @@ landing page and README together when the viewer changes).
    sockets = 0.14 m off the proxy box). Guards the convention-independent
    junction display pose (FORMAT.md: file quat (w,−x,−y,z), never derived
    from the mapped view quat). Craft without fixtures report POSTEST SKIP.
+   A GENERIC btn-* suite runs on every postest craft: ToggleButton renders
+   exactly ONE lever (state picks axle/switch vs axle2/switch2), the lever
+   centre matches the .ini derivation pivot+qV·mirror(Rz(0|−π)·Rx(18°)·
+   (0,−0.16,−0.018)) within 0.07 m, and single-sided buttons show no base2.
+   Catches state-ghost stacking (dolphin door buttons) in both rotations.
 3. `fitHull` must stay **generic**: zero per-craft constants. The exact lattice
    (W=12, pitch=CELL, C=−FRAME/2) passes on all 24 corpus files, not just ISW-241.
 
