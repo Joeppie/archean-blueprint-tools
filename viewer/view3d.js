@@ -618,10 +618,16 @@ const WHEEL_TYPES = new Set(['SmallWheel', 'Wheel', 'BigWheel']);
 // aligns with its cables. Display-only: edits write back through wheelUndo,
 // saved quaternions stay file-exact.
 const JUNCTION_TYPES = new Set(['FluidJunction']);
-function applyDisplayPose(obj, qV) {
+function applyDisplayPose(obj, qV, qF) {
   obj.userData.wheelUndo = undefined;
   if (JUNCTION_TYPES.has(obj.userData.wType)) {
-    obj.quaternion.set(-qV.x, -qV.y, -qV.z, qV.w);
+    // Builder-flat display pose, CONVENTION-INDEPENDENT: legacy files store
+    // the builder pose RAW, 2026 files its CONJUGATE (LEGACY_Q), so in file
+    // terms the flat comb is always (−x,−y,z,w). Deriving it from qV with
+    // (−x,−y,−z,w) matches only the modern convention and conjugated legacy
+    // junctions by 120° about (1,1,−1) — the RCS-infinity (3518436870) comb
+    // stood on its end; postest rcs-fj-flat/rcs-fj-touch pin this.
+    obj.quaternion.set(-qF.x, -qF.y, qF.z, qF.w);
     obj.userData.wheelUndo = obj.quaternion.clone().invert().multiply(qV);
     return;
   }
@@ -1024,7 +1030,7 @@ function buildSubgrids() {
       const m = MODEL.manifest?.[sc.type] ? colliderProxy(sc) : (PROXY[sc.type] || PROXY2[sc.type] || defaultProxy)(sc);
       m.position.copy(viewPos(sc.position));
       m.userData.wType = sc.type;
-      applyDisplayPose(m, viewQuat(sc.orientation));
+      applyDisplayPose(m, viewQuat(sc.orientation), sc.orientation);
       m.scale.z = -1;
       subGroup.add(m);
       // real/decimated geometry for nested parts too (Spider Mining Rover:
@@ -1068,7 +1074,7 @@ function buildScene() {
     const mesh = atlas ? colliderProxy(c) : (PROXY[c.type] || PROXY2[c.type] || defaultProxy)(c);
     mesh.position.copy(viewPos(c.position));
     mesh.userData.wType = c.type;
-    applyDisplayPose(mesh, viewQuat(c.orientation));
+    applyDisplayPose(mesh, viewQuat(c.orientation), c.orientation);
     mesh.scale.z = -1;                              // hand proxies keep raw local geometry
     mesh.traverse(o => { o.userData.ci = i; });
     mesh.userData.ci = i;
@@ -1914,7 +1920,7 @@ function buildInspector() {
     obj.position.copy(viewPos(comp.position));
     obj.userData.wheelUndo = undefined;
     obj.userData.wType = comp.type;
-    applyDisplayPose(obj, viewQuat(orig[selected].q0));
+    applyDisplayPose(obj, viewQuat(orig[selected].q0), orig[selected].q0);
     comp.orientation = { ...orig[selected].q0 };
     buildInspector();
     markDirty();
@@ -3316,6 +3322,127 @@ async function runCompTest() {
   document.title = `COMPTEST ${pass}/${tot} PASS bad=${lines.length ? lines[0].split(' ')[1] : 'none'}`;
 }
 
+// ---------- position tests (?postest&open=<craft>) ----------
+// Placement FIXTURES: named positional/boundary checks on the rendered scene,
+// keyed per workshop id — these are craft-specific ground-truth probes, the
+// deliberate exception to regtest's "generic only" rule (fixtures are allowed
+// to name constants; the suite auto-skips craft without a fixture list).
+// Expected values come from the game's own records: file positions and
+// data.pipes endpoints (pipeEndsV). One junction lesson drives the RCS set:
+// FluidJunctions of ISW-241 (modern, conjugate quats) and RCS-infinity
+// (3518436870, legacy raw quats) are byte-identical in the files — they must
+// render byte-identical, comb flat, ports touching their cable endpoints.
+// Report: <pre id=out> lines 'PASS/FAIL name: detail' + title
+// 'POSTEST pass/total PASS bad=names' (headless) — quick, positions only.
+const POSTESTS = {
+  '3812927875': (ctx) => {
+    const { fjBoxes, fjIdx } = ctx;
+    T('isw-fj-flat', () => {                       // display pose: comb lies flat
+      for (const [ci, bb] of fjBoxes) {
+        const sy = bb.getSize(tmpV).y;
+        if (sy > 0.40) return `FJ#${ci} bbox y-size ${sy.toFixed(2)} m (expect ≤0.40: flat)`;
+      }
+      return true;
+    });
+    T('isw-fj-row', () => {                        // row along z at one height
+      const cs = fjIdx.map(ci => fjBoxes.find(a => a[0] === ci)[1]
+        .getCenter(new THREE.Vector3()));
+      const ys = cs.map(v => v.y), zs = cs.map(v => v.z).sort((a, b) => a - b);
+      if (Math.max(...ys) - Math.min(...ys) > 0.02) return `y spread ${(Math.max(...ys) - Math.min(...ys)).toFixed(2)}`;
+      for (let i = 1; i < zs.length; i++)
+        if (Math.abs(zs[i] - zs[i - 1] - 1) > 0.02) return `z gap ${zs[i] - zs[i - 1]}`;
+      return true;
+    });
+    T('isw-fj-cable-side', () => {                 // cables leave below the deck
+      for (const e of pipeEndsV.filter(e => fjIdx.includes(e.ci))) {
+        const bb = fjBoxes.find(a => a[0] === e.ci)[1];
+        if (e.v.y > bb.getCenter(tmpV).y + 0.06) return `pipe end y=${e.v.y.toFixed(2)} above comb mid y=${tmpV.y.toFixed(2)}`;
+        if (e.v.y < bb.min.y - 0.35) return `pipe end y=${e.v.y.toFixed(2)} far below comb y=${bb.min.y.toFixed(2)}`;
+      }
+      return true;
+    });
+    T('isw-fj-touch', () => {                      // ports at their comb sockets
+      // 0.20 m: cable tips sit on the VISIBLE socket (FORMAT.md), which sits
+      // 0.14 m off the proxy collider box; a rotated pose lands 0.27+ m off.
+      for (const e of pipeEndsV.filter(e => fjIdx.includes(e.ci))) {
+        const bb = fjBoxes.find(a => a[0] === e.ci)[1];
+        const d = bb.distanceToPoint(e.v);
+        if (d > 0.20) return `port ${e.port} ${d.toFixed(2)} m off bbox`;
+      }
+      return true;
+    });
+  },
+  '3518436870': (ctx) => {
+    const { fjBoxes, fjIdx, comps } = ctx;
+    T('rcs-fj-flat', () => {                       // legacy raw-quat file: same flat comb
+      for (const [ci, bb] of fjBoxes) {
+        const sy = bb.getSize(tmpV).y;
+        if (sy > 0.40) return `FJ#${ci} bbox y-size ${sy.toFixed(2)} m (expect ≤0.40: flat, matches ISW byte-identical quat)`;
+      }
+      return true;
+    });
+    T('rcs-fj-row', () => {                        // row height ≈ file position y 0.88
+      for (const [ci, bb] of fjBoxes) {
+        const y = bb.getCenter(tmpV).y, fy = comps[ci].position.y;
+        if (Math.abs(y - fy) > 0.25) return `FJ#${ci} centre y=${y.toFixed(2)} vs file y=${fy.toFixed(2)}`;
+      }
+      return true;
+    });
+    T('rcs-fj-cable-side', () => {
+      for (const e of pipeEndsV.filter(e => fjIdx.includes(e.ci))) {
+        const bb = fjBoxes.find(a => a[0] === e.ci)[1];
+        if (e.v.y > bb.getCenter(tmpV).y + 0.06) return `pipe end y=${e.v.y.toFixed(2)} above comb mid y=${tmpV.y.toFixed(2)}`;
+        if (e.v.y < bb.min.y - 0.35) return `pipe end y=${e.v.y.toFixed(2)} far below comb y=${bb.min.y.toFixed(2)}`;
+      }
+      return true;
+    });
+    T('rcs-fj-touch', () => {
+      for (const e of pipeEndsV.filter(e => fjIdx.includes(e.ci))) {
+        const bb = fjBoxes.find(a => a[0] === e.ci)[1];
+        const d = bb.distanceToPoint(e.v);
+        if (d > 0.20) return `port ${e.port} ${d.toFixed(2)} m off bbox (pose rotated?)`;
+      }
+      return true;
+    });
+  },
+};
+// harness state at module scope: the POSTESTS fixture closures above capture
+// this scope, so T/tmpV must live here (runPosTest resets the counters).
+const tmpV = new THREE.Vector3();
+let ptLines = [], ptPass = 0, ptTot = 0;
+const T = (name, fn) => {
+  ptTot++;
+  let r = true;
+  try { r = fn(); } catch (e) { r = 'threw ' + e.message; }
+  if (r === true) { ptPass++; ptLines.push(`PASS ${name}`); }
+  else ptLines.push(`FAIL ${name}: ${r}`);
+};
+async function runPosTest() {
+  let tw = Date.now();
+  while (!model && Date.now() - tw < 10000) await new Promise(r => setTimeout(r, 100));
+  if (!model) { document.title = 'POSTEST ERR no model'; return; }
+  await new Promise(r => setTimeout(r, 600));      // scene built + merged
+  compGroup.updateMatrixWorld(true);
+  const id = String(model.workshop_item_id ?? '');
+  const suite = POSTESTS[id];
+  ptLines = []; ptPass = 0; ptTot = 0;
+  if (suite) {
+    const fjIdx = model.data.components
+      .map((c, i) => c.type === 'FluidJunction' && compObjs[i] ? i : -1).filter(i => i >= 0);
+    const fjBoxes = fjIdx.map(ci => [ci, new THREE.Box3().setFromObject(compObjs[ci])]);
+    suite({ fjIdx, fjBoxes, comps: model.data.components });
+  } else {
+    document.title = `POSTEST SKIP ${id} (no fixtures)`;
+    document.body.insertAdjacentHTML('beforeend',
+      `<pre id="out">no position fixtures for craft ${id} — add one to POSTESTS in view3d.js</pre>`);
+    return;
+  }
+  document.body.insertAdjacentHTML('beforeend',
+    `<pre id="out" style="white-space:pre-wrap">${ptLines.join('\n')}</pre>`);
+  const bad = ptLines.filter(l => l.startsWith('FAIL')).map(l => l.slice(5, l.indexOf(':')));
+  document.title = `POSTEST ${ptPass}/${ptTot} ${bad.length ? 'FAIL' : 'PASS'} bad=${bad.join(',') || 'none'}`;
+}
+
 // ---------- init ----------
 if (location.search.includes('real')) realModelsOn = true;   // before buildViewOpts (checkbox state)
 function applyCamQ() {                              // ?cam=px,py,pz,tx,ty,tz · ?sel=idx
@@ -3348,6 +3475,7 @@ loadModelManifest().then(fetchDefault).then(applyCamQ);
 requestAnimationFrame(tick);
 if (location.search.includes('proxytest')) runProxyTest();
 if (location.search.includes('comptest')) runCompTest();
+if (location.search.includes('postest')) runPosTest();
 
 // ---------- self-test (view3d.html?selftest): simulates slider edits + save ----------
 if (location.search.includes('selftest')) {

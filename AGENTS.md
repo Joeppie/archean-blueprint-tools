@@ -295,6 +295,15 @@ landing page and README together when the viewer changes).
    endpoint quirk) exempt from the model check. Catches: tube chaining (pipes are
    NOT straight chains — anchor every segment at its own `start`), component
    pose/orientation, nub placement.
+2c. `?postest`: placement fixtures keyed per craft (the POSTESTS table in
+   view3d.js — the sanctioned exception to "no per-craft constants": fixtures
+   probe the RENDERED scene where generic checks cannot see a pose bug).
+   ISW-241 + RCS-infinity (3518436870) FluidJunction rows: comb flat
+   (world bbox y ≤ 0.40 m), one-height row at file y, cable endpoints on the
+   −y side, ports ≤ 0.20 m of the model bbox (cable tips sit on visible
+   sockets = 0.14 m off the proxy box). Guards the convention-independent
+   junction display pose (FORMAT.md: file quat (w,−x,−y,z), never derived
+   from the mapped view quat). Craft without fixtures report POSTEST SKIP.
 3. `fitHull` must stay **generic**: zero per-craft constants. The exact lattice
    (W=12, pitch=CELL, C=−FRAME/2) passes on all 24 corpus files, not just ISW-241.
 

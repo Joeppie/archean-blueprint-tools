@@ -72,6 +72,15 @@ title=$(chrome --virtual-time-budget=30000 \
 echo "   $title"
 case "$title" in *COMPTEST\ 60/60\ PASS*) ;; *) echo "   FAIL"; fail=1;; esac
 
+echo "── position tests (placement fixtures: FluidJunction row, ISW + RCS-infinity)"
+for c in 3812927875 3518436870; do
+  title=$(chrome --virtual-time-budget=12000 \
+    --dump-dom "$BASE/viewer/index.html?open=../testdata/$c/blueprint.json&postest" 2>/dev/null \
+    | grep -oPm1 '(?<=<title>)[^<]*')
+  echo "   $c: $title"
+  case "$title" in *POSTEST*PASS*) ;; *) echo "   FAIL"; fail=1;; esac
+done
+
 echo "── smoke render"
 chrome --window-size=1400,900 --virtual-time-budget=$SMBUD \
   --screenshot="$OUT/viewer.png" "$BASE/viewer/index.html" 2>/dev/null

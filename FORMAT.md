@@ -375,6 +375,15 @@ Zero-build Three.js (WebGL) inspector: `python3 -m http.server 8650` (repo root)
   wheelUndo write-back; saved quaternions stay file-exact. No endpoint
   translation is needed (and none is done): the cables' cache frame IS the
   display frame, so they meet the flat model as recorded.
+  **The display pose must be computed from the FILE quaternion as
+  `(w,−x,−y,z)` (THREE: set(−x,−y,z,w)) — convention-independent** — the
+  builder's flat pose is what both file conventions encode (RAW for legacy,
+  CONJUGATE for modern), so deriving the pose from the convention-mapped
+  view quaternion matches only modern files and conjugates legacy junctions
+  by 120° about (1,1,−1). Proof: ISW-241 and RCS-infinity (3518436870) carry
+  byte-identical FluidJunction positions+quats, rows at y 0.88 z −1..−3;
+  view-derived code rendered ISW flat and the RCS comb standing on its end
+  (bbox y-size 1.00 m). Pinned by `?postest` fixtures rcs-fj-flat/rcs-fj-touch.
 - **Recorded endpoints ARE the connection points; `.ini` adapter positions
   are NOT the visible sockets:** the game writes each cable tip at the part's
   VISIBLE socket, which can differ from the `.ini` [ADAPTER] position — ISW's
