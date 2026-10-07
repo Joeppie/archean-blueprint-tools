@@ -309,6 +309,9 @@ landing page and README together when the viewer changes).
    centre matches the .ini derivation pivot+qV·mirror(Rz(0|−π)·Rx(18°)·
    (0,−0.16,−0.018)) within 0.07 m, and single-sided buttons show no base2.
    Catches state-ghost stacking (dolphin door buttons) in both rotations.
+   v0.146: lever/plate expectations include the game's mount bake (local
+   yaw-180, plate front on the mount face pilot-side — raw file quat leaves
+   the plate 0.68 m behind the pivot = dolphin/Cede gap defect).
 3. `fitHull` must stay **generic**: zero per-craft constants. The exact lattice
    (W=12, pitch=CELL, C=−FRAME/2) passes on all 24 corpus files, not just ISW-241.
 

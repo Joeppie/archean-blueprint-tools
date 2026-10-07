@@ -640,6 +640,18 @@ function applyDisplayPose(obj, qV, qF) {
     obj.userData.wheelUndo = obj.quaternion.clone().invert().multiply(qV);
     return;
   }
+  if (obj.userData.wType === 'ToggleButton') {
+    // Mount bake: the game mounts the button base_planes-FLUSH — the mount
+    // face (plate front) sits on the surface facing the pilot, which bakes a
+    // local yaw-180 into the model: plate covers the authored hull gap, the
+    // lever hides in the wall (pressed state flips it UP out of a deck
+    // mount). Raw file-quat placement puts the 0.24 m plate box 0.68 m
+    // BEHIND the pivot = dolphin/Cede "gap in the fuselage, button further
+    // back, away from cockpit". Pinned by postest btn-plate-flush/-lever-pose.
+    obj.quaternion.copy(qV).multiply(new THREE.Quaternion(0, 1, 0, 0));   // yaw 180
+    obj.userData.wheelUndo = obj.quaternion.clone().invert().multiply(qV);
+    return;
+  }
   if (!WHEEL_TYPES.has(obj.userData.wType)) { obj.quaternion.copy(qV); return; }
   const a = new THREE.Vector3(1, 0, 0).applyQuaternion(qV);   // axle
   const u = new THREE.Vector3(0, 1, 0).applyQuaternion(qV);   // suspension arm
@@ -3459,17 +3471,41 @@ function btnSuite(ctx) {
     return true;
   });
   T('btn-lever-pose', () => {
+    // Game MOUNTS the button base_planes-flush (mount face = plate front,
+    // cockpit side), baking a local yaw-180 into the model: the plate covers
+    // the hull gap facing the pilot, the lever hides in the wall. Raw
+    // file-quat placement puts the plate BEHIND the pivot (dolphin/Cede:
+    // "gap in the fuselage, button further back"). View-space lever centre:
+    //   pivot + qV · mirror_z( yaw180 · Rx(18°) · Rz(0|−π) · (0,−0.16,−0.018) )
+    // (pressed = axle z−180: lever flips UP out of the mount, deck buttons).
     for (const [i, c] of comps.entries()) {
       if (c.type !== 'ToggleButton' || !objs[i]) continue;
       const lever = nodeMeshes(rootOf(i), c.data?.state ? 'switch' : 'switch2')[0];
       if (!lever) return `TB#${i} state=${!!c.data?.state} lever mesh missing`;
-      const off = new THREE.Vector3(0, -0.16, -0.018);          // node pos + geom centroid
+      const off = new THREE.Vector3(0, -0.16, -0.018);
       off.applyEuler(new THREE.Euler(18 * RAD, 0, c.data?.state ? -Math.PI : 0, 'ZYX'));
+      off.applyEuler(new THREE.Euler(0, Math.PI, 0));           // baked yaw-180
       off.z = -off.z;                                           // root scale.z = −1
       const exp = viewPos(c.position).add(off.applyQuaternion(viewQuat(c.orientation)));
       const d = new THREE.Box3().setFromObject(lever).getCenter(tmpV).distanceTo(exp);
       if (d > 0.07)
-        return `TB#${i} lever centre ${tmpV.toArray().map(v => v.toFixed(2))} vs data ${exp.toArray().map(v => v.toFixed(2))} (${d.toFixed(2)} m)`;
+        return `TB#${i} lever centre ${tmpV.toArray().map(v => v.toFixed(2))} vs mounted ${exp.toArray().map(v => v.toFixed(2))} (${d.toFixed(2)} m)`;
+    }
+    return true;
+  });
+  T('btn-plate-flush', () => {
+    // plate (base) centre under the mount bake: pivot + qV·(0,−0.059,+0.334)
+    // view = plate box 0.08 in FRONT of the mount face (file −z = cockpit);
+    // raw placement puts it 0.34 BEHIND the pivot (into/behind the wall).
+    for (const [i, c] of comps.entries()) {
+      if (c.type !== 'ToggleButton' || !objs[i]) continue;
+      const base = nodeMeshes(rootOf(i), 'base')[0];
+      if (!base) return `TB#${i} base mesh missing`;
+      const off = new THREE.Vector3(0, 0.05, 0.335);   // base bbox centre, yaw180+mirror
+      const exp = viewPos(c.position).add(off.applyQuaternion(viewQuat(c.orientation)));
+      const d = new THREE.Box3().setFromObject(base).getCenter(tmpV).distanceTo(exp);
+      if (d > 0.08)
+        return `TB#${i} plate centre ${tmpV.toArray().map(v => v.toFixed(2))} vs mounted ${exp.toArray().map(v => v.toFixed(2))} (${d.toFixed(2)} m — raw yaw?)`;
     }
     return true;
   });

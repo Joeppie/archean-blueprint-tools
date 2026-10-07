@@ -290,6 +290,19 @@ in the dev's XenonViewer + the shipped `.gltf`/`.ini` assets, Oct 5)
   sticking through the mount (the dolphin 3417786605 "misplaced door
   buttons"); pinned by the generic ?postest `btn-*` suite (all 24 corpus
   craft have buttons: 22 legacy + 2 modern).
+  **Mount bake (v0.146):** the game mounts buttons base_planes-FLUSH — the
+  mount face is the PLATE FRONT (pilot side), which bakes a local **yaw-180**
+  into the model: the plate box (0.24 m, sitting at pivot + 0.34 m local −z
+  after the bake) covers the authored 1-cell hull gap facing the cockpit and
+  the lever hides inside the wall; a pressed deck button flips its lever UP
+  out of the deck. The file quaternion does NOT carry this yaw — raw
+  placement parks the plate 0.68 m BEHIND the pivot (into/behind the wall):
+  the dolphin + Cede crafts (3381670618/3348400160/3373508061, one author,
+  identical door trio at x±1.38 z 6.38 + a deck button) rendered as "a gap in
+  the fuselage, the button further back, away from cockpit". The cable-cache
+  socket sits at the exact pivot → the position is raw-exact, only the model
+  yaw is baked. Viewer bakes it display-only (applyDisplayPose, wheelUndo
+  write-back). Pinned by postest btn-plate-flush/btn-lever-pose.
   Rendering all = double-stacked tire (the “wheels look wrong” bug).
 - Component placement truth = the `.ini` node tree (RENDERABLE/JOINT/TARGET
   parents, euler **ZYX**); gltf node translations are Blender layout offsets
