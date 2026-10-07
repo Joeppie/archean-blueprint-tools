@@ -3,6 +3,7 @@
 // file format. World mapping: world = (pos - 5.5) * 0.25 + frame * 3.0 per axis.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 // surface crashes in the document title (visible to headless test dumps)
 addEventListener('error', (e) => { document.title = 'ERR ' + (e.message || 'load') + ' @' + e.lineno + ':' + e.colno; });
 addEventListener('unhandledrejection', (e) => {
@@ -129,6 +130,7 @@ const dashMat = (c, metallic, roughness) => {
       (c?.b ?? 255) / 255, THREE.LinearSRGBColorSpace),
     roughness: Math.max(rough, 0.02),
     metalness: ((metallic ?? 0) / 255) * (1 - rough),
+    envMapIntensity: (metallic ?? 0) > 127 ? 1.25 : 0,
   });
 };
 function dashTextTex(el) {
@@ -211,7 +213,7 @@ function buildDashboard(c, model, idx, low) {
     const tex = el.type === 'Label' && el.text ? dashTextTex(el) : null;
     const body = dashMat(el.baseColor, el.baseMetallic, el.baseRoughness);
     const face = tex
-      ? new THREE.MeshStandardMaterial({ map: tex,
+      ? new THREE.MeshStandardMaterial({ map: tex, envMapIntensity: 0,
           roughness: Math.max((el.baseRoughness ?? 0) / 255, 0.02), metalness: 0 })
       : dashMat(el.mainColor, el.mainMetallic, el.mainRoughness);  // buttons/plates
     const m = new THREE.Mesh(new THREE.BoxGeometry(ew, eh, 0.01),
@@ -321,7 +323,7 @@ function buildRealComponent(c, model, idx, low = false) {
       }
       if (top) {
         const lens = new THREE.Mesh(new THREE.SphereGeometry(0.055, 12, 10),
-          new THREE.MeshStandardMaterial({ color: 0x550000, emissive: 0xff2222 }));
+          new THREE.MeshStandardMaterial({ color: 0x550000, emissive: 0xff2222, envMapIntensity: 0 }));
         lens.position.set(top[0], top[1] + 0.03, top[2]);
         lens.userData.ci = idx;
         (nodes.get(r.name) || g).add(lens);
@@ -440,6 +442,16 @@ view.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x8fb4d8);
 scene.fog = new THREE.Fog(0x8fb4d8, 40, 90);
+// PBR metal has NO diffuse term: lights-only, chrome renders near-black
+// (user: "metallic colours too dark, not enough reflection" — the game's
+// raytracer reflects the world). PMREM studio env, baked once at startup,
+// zero per-frame cost; only metal materials get envMapIntensity > 0, so
+// matte/painted surfaces stay exactly as before.
+{
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  pmrem.dispose();
+}
 
 const camera = new THREE.PerspectiveCamera(55, 1, 0.05, 300);
 camera.position.set(-6.5, 3.4, 8.5);              // view space: nose (+z) toward camera
@@ -481,7 +493,7 @@ scene.add(sun);
 
 const ground = new THREE.Mesh(
   new THREE.PlaneGeometry(120, 120),
-  new THREE.MeshStandardMaterial({ color: 0x3d5a34, roughness: 1 }));
+  new THREE.MeshStandardMaterial({ color: 0x3d5a34, roughness: 1, envMapIntensity: 0 }));
 ground.rotation.x = -Math.PI / 2;
 scene.add(ground);
 
@@ -582,6 +594,7 @@ function compColor(comp, which, fallback) {
 function mat(spec, extra = {}) {
   return new THREE.MeshStandardMaterial({
     color: spec.color, metalness: spec.metal, roughness: spec.rough,
+    envMapIntensity: spec.metal > 0.5 ? 1.25 : 0,
     transparent: spec.op < 1, opacity: spec.op, ...extra });
 }
 const box = (w, h, d) => new THREE.BoxGeometry(w, h, d);
@@ -1248,6 +1261,7 @@ function buildHull() {
     const s = { ...spec, op: spec.op * hullOpacity };
     hullGroup.add(new THREE.Mesh(hg, new THREE.MeshStandardMaterial({
       color: s.color, metalness: s.metal, roughness: s.rough,
+      envMapIntensity: s.metal > 0.5 ? 1.25 : 0,
       transparent: s.op < 1, opacity: s.op, depthWrite: s.op >= 1,
       side: THREE.DoubleSide, flatShading: true })));
   }
@@ -1326,7 +1340,7 @@ function buildPipes() {
     if (basic) mg.computeVertexNormals();
     pipeGroup.add(new THREE.Mesh(mg, basic
       ? new THREE.MeshBasicMaterial({ color })
-      : new THREE.MeshStandardMaterial({ color, roughness: 0.9 })));
+      : new THREE.MeshStandardMaterial({ color, roughness: 0.9, envMapIntensity: 0 })));
   };
   add(segs, 0x222228, false);
   add(endsA, 0x33ddff, true);
