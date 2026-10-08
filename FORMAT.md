@@ -494,7 +494,7 @@ Zero-build Three.js (WebGL) inspector: `python3 -m http.server 8650` (repo root)
   Selftest `mural=true` pins the legacy side. `viewQuat`/`rawFromView`
   switch on `LEGACY_Q` (set in `setModel`); saved files stay byte-exact.
 
-## Propulsion & the viewer's wind model (v0.122)
+## Propulsion & the viewer's wind model (v0.122; RCS rule v0.148)
 
 Thrust axes (from each propulsor's game `.ini` `[TARGET plasma]/[thrust]`
 nodes; a TARGET `rotation = -90 0 0` maps node-forward (−z) to local −y):
@@ -504,27 +504,40 @@ nodes; a TARGET `rotation = -90 0 0` maps node-forward (−z) to local −y):
 | BigThruster | (0,−1,0) | 1.0 |
 | MiniThruster | (0,−1,0) | 0.4 |
 | SmallThruster | (0,+1,0) | 0.15 |
-| RCS | (0,0,−1) | 0.25 |
+| RCS | none — see below | 0.25 |
 | Propeller | (0,−1,0) | 0.6 |
 
 Blueprints store no newton figures — weights are display ratios. **Propellers
 thrust BOTH ways** (user-verified behaviour): their arrows render double-headed
 and they are EXCLUDED from the net-thrust vector. Net = Σ axis·weight over
-rockets; |net| < 0.15·Σweight ⇒ "net ~0 (symmetric bank)" (ISW-241's 9 RCS do
-this) and no direction is suggested.
+rockets; |net| < 0.15·Σweight ⇒ "net ~0 (symmetric bank)" and no direction is
+suggested.
+
+**RCS is NOT a fixed-axis jet.** Its `.ini` carries no JOINT/gimbal and a
+single `[TARGET thrust]` at local +z `rotation 0` (the model's bell flare sits
+on +y, so the TARGET is a template pose at best), yet the game can fire the
+blob in 5 selectable directions — and the blueprint stores NONE of which. The
+old single-axis guess `(0,0,−1)` drew a straight-DOWN thrust arrow at ISW-241's
+nose pod (user: "we have no downward pointing propulsion of any kind"). The
+rule (user): **an RCS counts as propulsion only when it is the craft's ONLY
+propulsion class**, and then "normally it pushes BACKWARD" — arrow, net and
+main-drive all point tail-ward along −flight heading (cockpit first, fly-view
++z fallback; heading only, a reclined seat is not yaw). With real engines or a
+Propeller aboard, RCS gets no arrow and no net weight at all. FluidPorts never
+enter this table — connectors are no more propulsors than wheels are.
 
 Relative wind = −flight axis. The axis comes from flow-src `auto` | `seat` |
 `thrust`, yawed by the "wind from side" azimuth slider and elevated by AoA
 (props reverse → the direction stays user-controllable, `?flowsrc=` presets it).
-**`auto` uses only the MAIN drive net (BigThruster); RCS and Mini/Small
-thrusters are attitude/landing jets and must NOT set the direction** — the
-ISW's landing-thruster net points down, and auto flow "from below" was the
-user's complaint; RCS-propelled craft have no main drive, so `auto` falls back
-to the COCKPIT: "cockpits almost always face in the right direction". On
-contested (multi-seat) craft the PilotSeat REACHING a Computer/MiniComputer/
+**`auto` uses only the MAIN drive net (BigThruster, or an RCS-only craft's
+backward push); Mini/Small thrusters are landing/trim jets and must NOT set the
+direction** — auto flow "from below" was the user's complaint. RCS-propelled
+craft with a cockpit still fall back to the COCKPIT: "cockpits almost always
+face in the right direction". On contested (multi-seat) craft the PilotSeat
+REACHING a Computer/MiniComputer/
 OwnerPad over the `data.pipes` graph (`p.a_component`/`p.b_component` edges)
 wins — the editor wires the pilot's cockpit to the flight computer. Manual
-`thrust` mode = user override, full net incl. RCS.
+`thrust` mode = user override, full net (incl. RCS when sole-class).
 
 Voxel wind grid (viewer, VIEW space, 0.25 m cells): cell index =
 `pos + 12·frame − 5.5` (z mirrored). Sources: blocks (type≠255), component

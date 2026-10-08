@@ -285,9 +285,13 @@ landing page and README together when the viewer changes).
      `seatpitch=true`); display anchoring is a no-op on frame-(0,0,0) crafts
      like ISW (`anchor=true`). The explode/assembly feature (v0.140/141) was
      REMOVED in v0.142 (user: "a catastrophe") — do not resurrect.
-     thrust display + wind model: every propulsor (THRUST table = .ini
-     TARGET axes; Propeller double-headed + excluded from the net) feeds
-     a normalized net-thrust vector, symmetric banks net to null
+     thrust display + wind model: every DIRECTIONAL propulsor (THRUST
+     table = .ini TARGET axes; Propeller double-headed + excluded from
+     the net) feeds a normalized net-thrust vector, while the
+     directionless RCS blob (5-way in the game, nothing stored in the
+     file) renders/counts as a tail-ward push along −cockpit heading
+     ONLY when it is the sole propulsion class — ISW net+main pin to
+     view (0,0,−1), never the old straight-down TARGET-axis arrow
      (`thrust=true`); sealStats (blocks+occup+hatch blocks+triangle
      raster on cell = pos+12f−5.5, z-view) flood+ray-enclosure seals
      BionicDolphin's cabin (>100 cells) while ISW stays wind-swept;

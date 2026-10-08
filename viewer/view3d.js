@@ -2234,15 +2234,25 @@ const flowState = { speed: 60, aoa: 4, az: 0, turb: 0.35 };
 // ---------- thrust (display + flow direction suggestion) ----------
 // Local thrust axes from each propulsor's [TARGET thrust/plasma] node in the
 // game .ini (exhaust side -> reaction pushes the craft the other way):
-// Big/MiniThruster & Propeller thrust = local -y, SmallThruster = +y,
-// RCS = local -z. Weights are per-class display ratios (the blueprint has no
-// newton figures). Arrows render in VIEW space; file-space nose (-z) shows as
-// view +z.
+// Big/MiniThruster & Propeller thrust = local -y, SmallThruster = +y.
+// Weights are per-class display ratios (the blueprint has no newton figures).
+// Arrows render in VIEW space; file-space nose (-z) shows as view +z.
+// RCS is SPECIAL: the unit is a fixed multi-nozzle blob (no joint/gimbal in
+// its .ini) that the GAME can fire in 5 selectable directions — the blueprint
+// stores NOTHING about which. Its lone [TARGET thrust] sits at local +z with
+// rotation 0 (not even aimed like the jets' -90; the model's bell flare is on
+// +y, so the TARGET is a template pose at best): trusting it drew a
+// straight-DOWN thrust arrow at the ISW's nose pod (user: "we have no
+// downward pointing propulsion of any kind"). Display rule (user): an RCS is
+// propulsion ONLY when nothing else propels the craft, and then "normally it
+// pushes backward" — arrow points tail-ward along −flight heading (cockpit
+// first, fallback fly-view-+z). FluidPort/FluidJunction are no more
+// propulsors than wheels are — they never enter this table.
 const THRUST = {
   BigThruster:   { ax: [0, -1, 0], w: 1.0 },
   MiniThruster:  { ax: [0, -1, 0], w: 0.4 },
   SmallThruster: { ax: [0,  1, 0], w: 0.15 },
-  RCS:           { ax: [0,  0, -1], w: 0.25 },
+  RCS:           { ax: null,       w: 0.25 },   // direction = −heading, below
   Propeller:     { ax: [0, -1, 0], w: 0.6 },
 };
 let thrustArrowsOn = true;
@@ -2257,22 +2267,38 @@ function buildThrustArrows() {
   const matN = new THREE.MeshBasicMaterial({ color: 0x53e0ff, transparent: true, opacity: 0.95 });
   let acc = [0, 0, 0], wsum = 0, n = 0;
   let accM = [0, 0, 0], wsumM = 0, nM = 0;      // MAIN drive net (direction)
-  model.data.components.forEach((c, i) => {
+  // RCS blob rule (see THRUST): treated as propulsion only when it is the
+  // SOLE class — "normally it pushes backward, and that's only considered if
+  // there's no other props or jets" (user). Its normal push = tail-ward,
+  // opposite the flight heading (cockpit first, same source auto flow uses;
+  // heading only — a reclined seat is comfort, not yaw).
+  const comps = model.data.components;
+  const rcsOnly = comps.some(c => c.type === 'RCS')
+    && !comps.some(c => c.type in THRUST && c.type !== 'RCS');
+  let back = seatFwd() || [0, 0, 1];
+  { const fh = Math.hypot(back[0], back[2]);
+    back = fh > 0.15 ? [back[0] / fh, 0, back[2] / fh]
+      : back.map(x => x / (Math.hypot(...back) || 1)); }
+  back = back.map(x => -x);
+  comps.forEach((c, i) => {
     const th = THRUST[c.type];
     if (!th) return;
     const o = compObjs?.[i];
     if (!o) return;
+    if (c.type === 'RCS' && !rcsOnly) return;   // attitude control beside
+                                                // real engines: not drawn
     // axis in the component's VIEW-local frame (x, y, -z), rotated by the
     // display quaternion the mesh actually carries
-    const ax = new THREE.Vector3(th.ax[0], th.ax[1], -th.ax[2])
-      .applyQuaternion(o.quaternion).normalize();
+    const ax = c.type === 'RCS' ? new THREE.Vector3(...back)
+      : new THREE.Vector3(th.ax[0], th.ax[1], -th.ax[2])
+          .applyQuaternion(o.quaternion).normalize();
     const twoWay = c.type === 'Propeller';     // props thrust BOTH ways:
     if (!twoWay) acc = acc.map((x, k) => x + ax.toArray()[k] * th.w);   // not in the net
-    // MAIN DRIVE = BigThruster only. RCS = attitude control and Mini/Small
-    // thrusters are landing/trim jets: the ISW's bank nets downward and auto
-    // flow chose 'wind from below' (user: not right — cockpit, not RCS,
-    // defines the flight direction).
-    if (c.type === 'BigThruster' && !twoWay) {
+    // MAIN DRIVE = BigThruster only; an RCS-ONLY craft has nothing else, so
+    // its normal backward push IS its main drive. Mini/Small are landing/trim
+    // jets: the old all-RCS main net tilted the ISW's flow to 'wind from
+    // below' (user: cockpit, not RCS, defines the flight direction).
+    if ((c.type === 'BigThruster' || (c.type === 'RCS' && rcsOnly)) && !twoWay) {
       accM = accM.map((x, k) => x + ax.toArray()[k] * th.w); wsumM += th.w; nM++;
     }
     wsum += th.w; n++;
@@ -2370,8 +2396,8 @@ function seatFwd() {
 }
 function flowDir() {
   // Relative wind travels opposite to flight. Auto: MAIN drive net (rockets);
-  // RCS banks / landing jets / prop craft are ambiguous, so the cockpit wins
-  // (user: the ISW's downward RCS net must NOT imply 'wind from below').
+  // landing jets / prop craft are ambiguous, so the cockpit wins (user). The
+  // RCS blob enters the nets only as a sole-class backward push (see THRUST).
   // 'flow src' cycles auto/seat/thrust; ?flowsrc= presets it. 'thrust' mode
   // = user override, uses the full net (all thrusters, RCS included).
   const useT = flowSrc.mode === 'thrust' ? netThrust?.v : null;
@@ -4038,10 +4064,16 @@ if (location.search.includes('selftest')) {
       const ok17 = nThr > 0 && !!netThrust && netThrust.n === nThr
         && thrustGroup.children.length === nThr + (netThrust.v ? 1 : 0)
         && (!netThrust.v || Math.abs(Math.hypot(...netThrust.v) - 1) < 0.02)
-        // ISW = RCS + landing jets: NO main drive -> auto flow uses the
-        // cockpit, never the downward landing-thruster net (user: 'wind
-        // from below' was the symptom). aoa 4° keeps |y| = sin4° ≈ 0.07.
-        && !netThrust.main && Math.abs(flowDir()[1]) < 0.2;
+        // ISW = sole-class RCS blob: the blueprint stores none of the game's
+        // 5 selectable fire directions, so it displays the NORMAL mode —
+        // push BACKWARD along −cockpit heading = view (0,0,−1) (user: "no
+        // downward propulsion"; the old .ini-TARGET-axis guess drew a
+        // straight-down arrow at the nose pod). RCS is excluded from the
+        // nets entirely when real engines coexist. Auto flow still takes the
+        // cockpit first; aoa 4° keeps |y| = sin4° ≈ 0.07.
+        && !!netThrust.main && netThrust.main[2] < -0.97
+        && Math.abs(netThrust.main[0]) < 0.05 && Math.abs(netThrust.main[1]) < 0.05
+        && netThrust.v[2] < -0.97 && Math.abs(flowDir()[1]) < 0.2;
       // ok18: sealed-hull wind exclusion (user: no wind inside enclosed
       // craft): BionicDolphin (block hull, hatches stored closed) has a
       // ray-enclosed cabin of 100+ cells that is windless, its far field
