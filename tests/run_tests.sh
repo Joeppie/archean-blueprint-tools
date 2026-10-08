@@ -7,7 +7,11 @@
 # Runs:  1. viewer selftest  — edit→serialize→occupancy/mirror sync, byte round-trip
 #        2. regtest suite    — format invariants + hull fit over every testdata craft
 #        3. proxytest        — low-poly vs real geometry per component type
-#        4. smoke render     — one WebGL screenshot (iGPU Vulkan via ANGLE;
+#        4. comptest         — cable endpoints vs nubs/tubes/model surfaces (ISW)
+#        5. postest          — per-craft placement fixtures + button-state sweep
+#        6. uitest           — headless UI sweep: drives every panel control,
+#                             keyboard shortcuts, presets, dirty/save lifecycle
+#        7. smoke render     — one WebGL screenshot (iGPU Vulkan via ANGLE;
 #                              GPU=0 forces the slow SwiftShader CPU fallback)
 #
 # Exit code: 0 = all passed. Artifacts in $OUT (default /tmp/archean-tests).
@@ -71,6 +75,12 @@ title=$(chrome --virtual-time-budget=30000 \
   --dump-dom "$BASE/viewer/index.html?comptest" 2>/dev/null | grep -oPm1 '(?<=<title>)[^<]*')
 echo "   $title"
 case "$title" in *COMPTEST\ 60/60\ PASS*) ;; *) echo "   FAIL"; fail=1;; esac
+
+echo "── uitest (UI sweep: every panel control, keys, presets, dirty/save)"
+title=$(chrome --virtual-time-budget=20000 \
+  --dump-dom "$BASE/viewer/index.html?uitest" 2>/dev/null | grep -oPm1 '(?<=<title>)[^<]*')
+echo "   $title"
+case "$title" in *UITEST\ PASS*) ;; *) echo "   FAIL"; fail=1;; esac
 
 echo "── position tests (placement fixtures + generic button sweep)"
 for c in 3812927875 3518436870 3417786605 3803780241 3381670618; do

@@ -306,6 +306,16 @@ landing page and README together when the viewer changes).
    endpoint quirk) exempt from the model check. Catches: tube chaining (pipes are
    NOT straight chains — anchor every segment at its own `start`), component
    pose/orientation, nub placement.
+2c-b. `?uitest` (v0.147): headless UI sweep — drives EVERY panel control
+   through its real handler (checkboxes, buttons, sliders, ⟲ resets) plus the
+   paths state-pins miss: filter, list-click select, keyboard g/o/h (which
+   must move groups AND stay synced with their checkboxes; h = blocks +
+   triangles together), preset buttons (must actually MOVE the part — the
+   row.set()/onInput dead-button bug), comp.data write-through, real-model
+   toggle + localStorage persistence, wind-mode/flow-src/CoM/thrust buttons,
+   hull auto-fit + opacity, hull-list flash row, Steam wslink, dirty→Save
+   lifecycle, calibrated-mass report. Title: `UITEST PASS n=21 ctrls=N` /
+   `UITEST FAIL <pins>`, captured errors in #out.
 2c. `?postest`: placement fixtures keyed per craft (the POSTESTS table in
    view3d.js — the sanctioned exception to "no per-craft constants": fixtures
    probe the RENDERED scene where generic checks cannot see a pose bug).

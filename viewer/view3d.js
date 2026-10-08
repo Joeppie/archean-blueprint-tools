@@ -1384,7 +1384,7 @@ function hullAutoFit() {                       // centre hull bbox inside the cr
     hullP[`C${ax}`] = (bpBox.min[ax] + bpBox.max[ax]) / 2 - (lo + hi) / 2;
   }
   buildHull();
-  ['Cx', 'Cy', 'Cz'].forEach(k => hullRows[k] && hullRows[k].set(hullP[k], false));
+  ['Cx', 'Cy', 'Cz'].forEach(k => hullRows[k] && hullRows[k].thumb(hullP[k]));
 }
 let bpBox = { min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 } };
 const hullRows = {};
@@ -1443,7 +1443,7 @@ function setModel(obj, srcName) {
   const fit = fitHull(model);
   if (fit) {
     Object.assign(hullP, fit);
-    for (const k in hullRows) hullRows[k] && hullRows[k].set(hullP[k], false);
+    for (const k in hullRows) hullRows[k] && hullRows[k].thumb(hullP[k]);
     toast(`hull fit: grid W=${fit.W} · pitch (${fit.px.toFixed(4)}, ${fit.py.toFixed(4)}, ${fit.pz.toFixed(4)}) m `
         + `· C (${fit.Cx.toFixed(2)}, ${fit.Cy.toFixed(2)}, ${fit.Cz.toFixed(2)}) · anchor ${fit.d.toFixed(1)}m`);
   }
@@ -1534,9 +1534,13 @@ addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); save(); }
   if (e.target.tagName === 'INPUT') return;
   if (e.key === 'Escape') select(-1);
-  if (e.key === 'g') grid.visible = !grid.visible;
-  if (e.key === 'o') occGroup.visible = !occGroup.visible;
-  if (e.key === 'h') hullGroup.visible = !hullGroup.visible;
+  // shortcuts drive the SAME checkboxes as the mouse (v0.147): the checkbox
+  // change handler owns exclusivity + visibility, so flip through it.
+  const kb = (k) => { const t = viewToggles[k]; if (t) { t.cb.checked = !t.cb.checked;
+                       t.cb.dispatchEvent(new Event('change')); } };
+  if (e.key === 'g') kb('grid');
+  if (e.key === 'o') kb('occ');
+  if (e.key === 'h') kb('hull');
   if (e.key === 'f' && selected >= 0) {
     controls.target.copy(compObjs[selected].position);
   }
@@ -1804,16 +1808,19 @@ function row(sec, label, min, max, step, value, onInput) {
   const rst = document.createElement('span');
   rst.className = 'rst'; rst.textContent = '⟲'; rst.title = 'reset';
   r.append(rng, num, rst);
+  // set() MUST run onInput — presets/⟲ previously only moved the thumb while
+  // the model (and the part on screen) stayed put (dead-button bug, v0.147).
   const set = (v, mark = true) => {
-    rng.value = num.value = v;
+    rng.value = num.value = String(v);
+    onInput(+v, mark);
     if (mark) { r.classList.add('mod'); markDirty(); }
   };
   rng.oninput = () => { num.value = rng.value; onInput(+rng.value); };
   num.oninput = () => { if (num.value === '') return; const v = +num.value;
                         if (isFinite(v)) { rng.value = v; onInput(v); } };
-  rst.onclick = () => { r.classList.remove('mod'); onInput(+value, false); rng.value = num.value = value; };
+  rst.onclick = () => { r.classList.remove('mod'); set(+value, false); };
   sec.appendChild(r);
-  return { set, el: r };
+  return { set, thumb: (v) => { rng.value = num.value = String(v); }, el: r };
 }
 function markDirty() {
   dirty = true;
@@ -1961,25 +1968,32 @@ function ensureOrigQ() {
 }
 
 // ---------- view options ----------
+// keyed registry so keyboard shortcuts (and ?uitest) can flip a toggle and
+// keep its checkbox in sync — the g/o/h keys used to move groups behind a
+// stale checkbox, and 'h' only hid the triangles while blocks stayed.
+// (cb.onchange also invalidates: the on-demand loop would otherwise show
+// nothing until the next camera interaction — "checkbox does nothing".)
+const viewToggles = {};
 function buildViewOpts() {
   const s = $('viewopts');
-  const toggle = (label, targets) => {
+  const toggle = (key, label, targets) => {
     const arr = Array.isArray(targets) ? targets : [targets];
     const l = document.createElement('label');
     l.className = 'checkrow';
     const cb = document.createElement('input');
     cb.type = 'checkbox'; cb.checked = arr.every(t => t.visible);
-    cb.onchange = () => { for (const t of arr) t.visible = cb.checked; };
+    cb.onchange = () => { for (const t of arr) t.visible = cb.checked; invalidate(); };
     l.append(cb, document.createTextNode(label));
     s.appendChild(l);
+    viewToggles[key] = { cb, arr };
     return cb;
   };
-  toggle('ground grid', grid);
-  toggle('occupancy boxes (type-255)', occGroup);
+  toggle('grid', 'ground grid', grid);
+  toggle('occ', 'occupancy boxes (type-255)', occGroup);
   // blocks and hull triangles are ONE thing in-game — the hull skin (the
   // user: "they're one and the same thing to us") — so they share a toggle
-  const tHull = toggle('hull (blocks + triangles)', [blockGroup, hullGroup]);
-  const tWire = toggle('wireframe (hull)', hullWire);
+  const tHull = toggle('hull', 'hull (blocks + triangles)', [blockGroup, hullGroup]);
+  const tWire = toggle('wire', 'wireframe (hull)', hullWire);
   // mutually exclusive (user): solid triangles under a wire overlay cost the
   // full fill rate for zero added readability; drawing one replaces the other
   const excl = (a, b) => a.addEventListener('change', () => {
@@ -1987,8 +2001,8 @@ function buildViewOpts() {
   });
   excl(tHull, tWire); excl(tWire, tHull);
   if (tWire.checked && tHull.checked) { tHull.checked = false; tHull.dispatchEvent(new Event('change')); }
-  const tPipes = toggle('pipes & connectors', [pipeGroup, adpGroup]);
-  toggle('subgrids (doors/hatches)', subGroup);
+  toggle('pipes', 'pipes & connectors', [pipeGroup, adpGroup]);
+  toggle('subs', 'subgrids (doors/hatches)', subGroup);
   const rl = document.createElement('label');
   rl.className = 'checkrow';
   const rcb = document.createElement('input');
@@ -3544,6 +3558,203 @@ async function runPosTest() {
   document.title = `POSTEST ${ptPass}/${ptTot} ${bad.length ? 'FAIL' : 'PASS'}${suite ? '' : ' SKIP'} bad=${bad.join(',') || 'none'}`;
 }
 
+// ---------- UI sweep (?uitest) ----------
+// Headless click-through of the whole panel: every checkbox/button/slider/⟲
+// the user can touch gets driven through its REAL handler, plus behaviours
+// the pure-state pins cannot reach (filter, list click, keyboard shortcuts,
+// checkbox↔group sync, dirty-flag lifecycle, preset buttons). Failing pins
+// land in the title; captured window errors go to #out.
+async function runUiTest() {
+  const fails = [], errs = [];
+  const collect = (e) => errs.push(String((e && (e.message || e.reason)) || e));
+  addEventListener('error', collect);
+  addEventListener('unhandledrejection', collect);
+  const ok = (n, cond) => { if (!cond) fails.push(n); };
+  const click = (el) => el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  const setIn = (el, v) => { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
+  const btn = (root, t) => [...root.querySelectorAll('button')].find(b => b.textContent.includes(t));
+  const numRow = (root, label) => [...root.querySelectorAll('.row')]
+    .find(r => r.querySelector('label')?.textContent === label)?.querySelector('input[type=number]');
+  const cbL = (t) => [...document.querySelectorAll('#panel input[type=checkbox]')]
+    .find(c => (c.parentElement.textContent || '').includes(t));
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const settle = async (pred, ms = 4000) => { const t0 = Date.now();
+    while (!pred() && Date.now() - t0 < ms) await sleep(50); return pred(); };
+
+  // filter: typing narrows the list to matching types; clearing restores it
+  { const tot = model.data.components.length;
+    setIn($('filter'), 'wheel');
+    const rows = [...$('complist').children];
+    const only = rows.length > 0 && rows.every(d => d.textContent.includes('Wheel'));
+    setIn($('filter'), '');
+    ok('filter', only && $('complist').children.length === tot); }
+
+  // list click: a row selects — header names it and the inspector builds
+  { const d = $('complist').children[3], idx = +d.querySelector('.i').textContent;
+    click(d);
+    ok('listclick', selected === idx && $('selname').textContent.includes(model.data.components[idx].type)
+       && $('inspector').querySelectorAll('.row').length >= 6); }
+
+  // number edit moves RAW data; the row ⟲ restores it
+  { const si = model.data.components.findIndex(c => c.type === 'PilotSeat');
+    select(si);
+    const comp = model.data.components[si], x0 = comp.position.x;
+    const nx = numRow($('inspector'), 'x');
+    setIn(nx, x0 + 0.375);
+    const moved = Math.abs(comp.position.x - (x0 + 0.375)) < 1e-9 && document.body.classList.contains('dirty');
+    click(nx.parentElement.querySelector('.rst'));
+    ok('editreset', moved && Math.abs(comp.position.x - x0) < 1e-12);
+
+    // presets actually MOVE the part (nose = raw z −0.25, up = +0.1)
+    const z0 = comp.position.z, y0 = comp.position.y;
+    click(btn($('inspector'), 'nose 0.25')); click(btn($('inspector'), 'up 0.1'));
+    ok('presets', Math.abs(comp.position.z - (z0 - 0.25)) < 1e-9
+       && Math.abs(comp.position.y - (y0 + 0.1)) < 1e-9);
+
+    // Actions-reset returns position to the file state
+    click([...$('inspector').querySelectorAll('button')].find(b => b.textContent.includes('reset this component')));
+    ok('compreset', ['x', 'y', 'z'].every(k => Math.abs(comp.position[k] - orig[si].pos0[k]) < 1e-12));
+
+    // PilotSeat lean preset bends the seat from its just-reset pose
+    const qb = compObjs[si].quaternion.clone();
+    click(btn($('inspector'), 'lean fwd 12°'));
+    ok('seatpreset', compObjs[si].quaternion.angleTo(qb) > 0.15);   // ≥12° applied
+    select(-1); }
+
+  // component-data checkbox writes through to comp.data
+  { const di = model.data.components.findIndex(c => c.data
+      && Object.values(c.data).some(v => typeof v === 'boolean'));
+    let pass = false;
+    if (di >= 0) {
+      select(di);
+      const cb = $('inspector').querySelector('.checkrow input[type=checkbox]');
+      const d0 = model.data.components[di].data;
+      const k = Object.keys(d0).find(k => typeof d0[k] === 'boolean');
+      if (cb) { const before = d0[k]; click(cb);
+        pass = d0[k] === !before; click(cb); pass = pass && d0[k] === before; }
+      select(-1);
+    }
+    ok('dataedit', pass); }
+
+  // keys g/o/h flip groups AND stay synced with their checkboxes; 'h' moves
+  // blocks+triangles together (ONE hull); Esc deselects
+  { select(model.data.components.findIndex(c => c.type === 'PilotSeat'));
+    const keyd = (k) => dispatchEvent(new KeyboardEvent('keydown', { key: k }));
+    let pass = true;
+    for (const [k, tk, groups] of [['g', 'grid', [grid]], ['o', 'occ', [occGroup]],
+                                   ['h', 'hull', [blockGroup, hullGroup]]]) {
+      const t = viewToggles[tk], v0 = groups.every(o => o.visible);
+      keyd(k);
+      if (!(groups.every(o => o.visible) === !v0 && t.cb.checked === !v0)) pass = false;
+      keyd(k);
+      if (!(groups.every(o => o.visible) === v0 && t.cb.checked === v0)) pass = false;
+    }
+    keyd('Escape');
+    ok('keys', pass && selected === -1); }
+
+  // real-models checkbox swaps proxies<->real geometry AND persists
+  { const cb = cbL('real game models');
+    if (!cb.checked) click(cb);
+    const on = await settle(() => realModelsOn && realMap.size > 0);
+    click(cb);
+    const off = await settle(() => !realModelsOn && realMap.size === 0);
+    ok('realmodels', on && off && localStorage.getItem('archean-real-models-v2') === '0'); }
+
+  // three-way wind buttons switch modes (lines actually built)
+  { const f = $('flight');
+    click(btn(f, 'streamlines'));
+    const lines = flowMode.m === 'lines' && flowGroup.children.some(o => o.isLine && !o.userData.isTrail);
+    click(btn(f, 'wind')); const wind = flowMode.m === 'wind';
+    click(btn(f, 'off'));
+    ok('flow', lines && wind && flowMode.m === 'off'); }
+
+  // flow-src cycles auto → seat → thrust → auto
+  { const fsB = btn($('flight'), 'flow src:'), seq = [];
+    for (let i = 0; i < 3; i++) { click(fsB); seq.push(fsB.textContent.replace('flow src: ', '')); }
+    ok('flowsrc', seq.join(',') === 'seat,thrust,auto' && flowSrc.mode === 'auto'); }
+
+  // CoM/arrows + thrust display buttons flip their groups
+  { const com0 = aeroArrows.visible, th0 = thrustGroup.visible;
+    click(btn($('flight'), 'CoM/arrows:'));
+    const com = aeroArrows.visible === !com0 && comMarker.visible === !com0;
+    click(btn($('flight'), 'thrust:'));
+    ok('flightbtns', com && thrustGroup.visible === !th0); }
+
+  // hull auto-fit button + hull-opacity slider drive the fit state
+  { click(btn($('viewopts'), 'auto-fit'));
+    const nO = numRow($('viewopts'), 'hull opacity');
+    setIn(nO, 0.55);
+    ok('hullui', hullP.W >= 4 && Number.isFinite(hullP.px) && Math.abs(hullOpacity - 0.55) < 1e-9);
+    setIn(nO, 1); }
+
+  // hull-list row click flashes that triangle into the hull group
+  { const n0 = hullGroup.children.length, row0 = $('hulllist').children[0];
+    if (row0) { click(row0); ok('hulllist', hullGroup.children.length === n0 + 1); }
+    else ok('hulllist', false); }
+
+  // header workshop link: real numeric ids point at the Steam page
+  { const w = $('wslink'), id = String(model.workshop_item_id || '');
+    ok('wslink', /^\d{6,}$/.test(id) && id !== '0000000000'
+      ? w.href.includes('steamcommunity.com') && w.href.includes(id)
+      : w.style.display === 'none'); }
+
+  // dirty-flag lifecycle: an edit marks dirty, the Save button clears it
+  { const nO = numRow($('viewopts'), 'hull opacity');
+    setIn(nO, 0.95);
+    const dirtied = document.body.classList.contains('dirty');
+    click($('saveBtn'));
+    ok('dirty', dirtied && !document.body.classList.contains('dirty'));
+    setIn(nO, 1); }
+
+  // zoom-cure button clears the saved dpr baseline without throwing
+  { localStorage.setItem('archean-dpr-base', '1');
+    click(btn($('viewopts'), 'reset page zoom'));
+    ok('zoombtn', localStorage.getItem('archean-dpr-base') === null); }
+
+  // labels checkbox flips labelsOn + label visibility
+  { const cb = cbL('labels on interactive'), v0 = labelsOn;
+    click(cb);
+    const vis = labelsOn === !v0
+      && [...compGroup.children].some(o => o.userData.isLabel && o.visible === labelsOn);
+    click(cb);
+    ok('labels', vis && labelsOn === v0); }
+
+  // calibrated cell mass reproduces the declared craft total (report ✔)
+  { const mm = massModel();
+    ok('mass', mm.declared > 0 && Math.abs(mm.tot - mm.declared) / mm.declared < 0.02); }
+
+  // SWEEP: EVERY touchable panel control gets its real handler fired
+  // (open/save excluded: file pickers + downloads cannot run headless)
+  let n = 0;
+  { const ctrls = [...document.querySelectorAll('#panel input, #panel button, #panel .rst')]
+      .filter(el => !['openBtn', 'saveBtn'].includes(el.id));
+    for (const el of ctrls) {
+      n++;
+      const ty = (el.type || '').toLowerCase();
+      try {
+        if (el.classList.contains('rst') || el.tagName === 'BUTTON') click(el);
+        else if (ty === 'checkbox') click(el);
+        else if (ty === 'range') setIn(el, (+el.min + +el.max) / 2);
+        else if (ty === 'number') { const v = parseFloat(el.value);
+          if (Number.isFinite(v)) setIn(el, v + (+el.step || 1)); }
+        else if (ty === 'text') setIn(el, 'uitest');
+      } catch (e) { errs.push('ctrl:' + e); }
+    }
+    let parsed = false;
+    try { JSON.parse(serialize()); parsed = true; } catch { /* fail below */ }
+    ok('sweep', n > 30 && parsed); }
+
+  ok('no-errors', errs.length === 0);
+
+  document.title = fails.length ? 'UITEST FAIL ' + fails.join(',')
+                                : `UITEST PASS n=21 ctrls=${n}`;
+  if (errs.length) {
+    const pre = document.createElement('pre'); pre.id = 'out';
+    pre.textContent = errs.slice(0, 20).join('\n');
+    document.body.appendChild(pre);
+  }
+}
+
 // ---------- init ----------
 if (location.search.includes('real')) realModelsOn = true;   // before buildViewOpts (checkbox state)
 function applyCamQ() {                              // ?cam=px,py,pz,tx,ty,tz · ?sel=idx
@@ -3577,6 +3788,7 @@ requestAnimationFrame(tick);
 if (location.search.includes('proxytest')) runProxyTest();
 if (location.search.includes('comptest')) runCompTest();
 if (location.search.includes('postest')) runPosTest();
+if (location.search.includes('uitest')) setTimeout(runUiTest, 1500);
 
 // ---------- self-test (view3d.html?selftest): simulates slider edits + save ----------
 if (location.search.includes('selftest')) {
