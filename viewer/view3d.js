@@ -1186,16 +1186,20 @@ const hullP = { W: 12, px: 0.25, py: 0.25, pz: 0.25, Cx: -1.5, Cy: -1.5, Cz: -1.
 const HULL_T = 0.025;                        // half-thickness of hull skin (m)
 let hullOpacity = Math.min(1, Math.max(0.1,
   Number(new URLSearchParams(location.search).get('op')) || 1));   // ?op= preset
-// "hull" is blocks AND triangles (one skin, one slider): dim both groups.
+// "hull" is blocks AND triangles (one skin, one slider): dim both groups,
+// plus the wireframe overlay (v0.149 user: "make hull opacity pertain to
+// blocks also" — the bright un-faded edges made the block dimming read as
+// "nothing happens").
 // Blocks are a closed skin — a view ray crosses TWO faces (enter+exit), so
 // linear alpha composites back toward opaque and the slider "does nothing"
 // (user report). Their alpha is sqrt-compensated: 1-(1-a)^2 == slider value.
 // Hull triangles are single 0.05 m prisms seen through one face: linear.
 function applyHullOpacity() {
   const effB = hullOpacity >= 1 ? 1 : 1 - Math.sqrt(1 - hullOpacity);
-  for (const [grp, k] of [[blockGroup, effB], [hullGroup, hullOpacity]])
+  for (const [grp, k] of [[blockGroup, effB], [hullGroup, hullOpacity],
+                          [hullWire, hullOpacity]])
     grp.traverse(o => {
-      if (!o.isMesh) return;
+      if (!o.isMesh && !o.isLineSegments) return;
       for (const m of (Array.isArray(o.material) ? o.material : [o.material])) {
         const base = m.userData.op0 ?? (m.userData.op0 = m.opacity);
         m.opacity = base * k;
@@ -1374,20 +1378,10 @@ function buildPipes() {
   add(endsB, 0x33ff88, true);
   scheduleAdpFlush();
 }
-function hullAutoFit() {                       // centre hull bbox inside the craft box
-  for (const ax of ['x', 'y', 'z']) {
-    let lo = Infinity, hi = -Infinity;
-    for (const t of model.data.triangles) for (let i = 0; i < 3; i++) {
-      const w = (t[`v${i}_${ax}`] + hullP.W * t['frame_' + ax]) * hullP['p' + ax];
-      lo = Math.min(lo, w); hi = Math.max(hi, w);
-    }
-    hullP[`C${ax}`] = (bpBox.min[ax] + bpBox.max[ax]) / 2 - (lo + hi) / 2;
-  }
-  buildHull();
-  ['Cx', 'Cy', 'Cz'].forEach(k => hullRows[k] && hullRows[k].thumb(hullP[k]));
-}
-let bpBox = { min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 } };
-const hullRows = {};
+// hull lattice is EXACT (hullfit.js: W=12, pitch=0.25, C=−1.5) and applied
+// silently per file in setModel — the manual fit button + offset sliders were
+// approximation-era leftovers, removed v0.149 (user: "remove the autofit
+// offsets… these things just complicate things").
 
 // ---------- loading / saving ----------
 let wsNames = null;
@@ -1430,7 +1424,6 @@ function setModel(obj, srcName) {
     for (const o of [compGroup, blockGroup, hullGroup, hullWire, pipeGroup, adpGroup, subGroup, occGroup, worldM, surgeGroup])
       o.position.set(model.moff[0], model.moff[1], model.moff[2]);
     for (const k of ['x', 'y', 'z']) { model.box_min[k] += model.moff['xyz'.indexOf(k)]; model.box_max[k] += model.moff['xyz'.indexOf(k)]; } }
-  bpBox = { min: model.box_min, max: model.box_max };
   orig = model.data.components.map(c => ({
     pos0: { ...c.position },
     occ0: c.occupancies.map(o => ({ ...o })),
@@ -1443,7 +1436,6 @@ function setModel(obj, srcName) {
   const fit = fitHull(model);
   if (fit) {
     Object.assign(hullP, fit);
-    for (const k in hullRows) hullRows[k] && hullRows[k].thumb(hullP[k]);
     toast(`hull fit: grid W=${fit.W} · pitch (${fit.px.toFixed(4)}, ${fit.py.toFixed(4)}, ${fit.pz.toFixed(4)}) m `
         + `· C (${fit.Cx.toFixed(2)}, ${fit.Cy.toFixed(2)}, ${fit.Cz.toFixed(2)}) · anchor ${fit.d.toFixed(1)}m`);
   }
@@ -2037,25 +2029,16 @@ function buildViewOpts() {
 
   const hs = document.createElement('div');
   hs.className = 'sec';
-  const mk = (k, label, min, max) => {
-    hullRows[k] = row(hs, label, min, max, 1 / 96, hullP[k], v => { hullP[k] = v; buildHull(); buildAero(); });
-  };
-  mk('px', 'pitch x (m/slot)', 0.05, 0.6);
-  mk('py', 'pitch y', 0.05, 0.6); mk('pz', 'pitch z', 0.05, 0.6);
-  mk('W', 'slots / frame tile', 4, 28);
-  mk('Cx', 'offset x', -8, 8); mk('Cy', 'offset y', -8, 8); mk('Cz', 'offset z', -8, 8);
+  // Hull-lattice pitch/offset sliders + the auto-fit button REMOVED in v0.149
+  // (user: "these things just complicate things"): the exact lattice
+  // (W=12, pitch=0.25, C=−1.5) that fitHull() proves per file is applied
+  // silently on load — there is nothing left to tune by hand.
   row(hs, 'hull opacity', 0.1, 1, 0.05, hullOpacity,
     v => { hullOpacity = v; buildHull(); applyHullOpacity(); });
-  const fit = document.createElement('button');
-  fit.className = 'btn'; fit.textContent = 'auto-fit offsets to bounding box';
-  fit.onclick = hullAutoFit;
-  hs.appendChild(fit);
   const note = document.createElement('div');
   note.style.color = 'var(--dim)';
   note.style.marginTop = '4px';
-  note.textContent = 'hull world = (v + W·frame)·pitch + C. Vertices are lattice slots; shared '
-    + 'slots are welded points. W comes from cross-frame weld pairs (canopy ridge), pitches from '
-    + 'the bounding box, y from aileron height. Nudge sliders to wrap the skin onto the components.';
+  note.textContent = 'dims the whole hull skin: blocks, triangle plates and their wireframes.';
   hs.appendChild(note);
   s.appendChild(hs);
 }
@@ -3140,9 +3123,9 @@ function buildFlight() {
   row(s, 'wind from side °', -180, 180, 5, flowState.az, v => { flowState.az = v; updateReport(); debLines(); });
   row(s, 'turbulence', 0, 1, 0.05, flowState.turb, v => { flowState.turb = v; });
   row(s, 'kg / block cell (0.25 m cube)', 0.2, 20, 0.05, cellMass, v => { cellMass = v; updateReport(); });
-  const cal = document.createElement('button');
-  cal.className = 'btn'; cal.textContent = 'calibrate cells to declared mass';
-  cal.onclick = () => { calibrateCellMass(); buildFlight(); updateReport(); toast(`cell = ${cellMass.toFixed(2)} kg`); };
+  // the 'calibrate cells to declared mass' button was removed (v0.149, user:
+  // "I don't understand what that even means"): the calibration runs
+  // AUTOMATICALLY on load (setModel), which is what the report's ✔ compares.
   // three-way wind-tunnel toggle: none / streamlines / animated wind
   const FM = [['off', '⏻ off'], ['lines', '≋ streamlines'], ['wind', '💨 wind']];
   const fbtns = [];
@@ -3180,7 +3163,7 @@ function buildFlight() {
     buildStreamlines(); updateReport();
     fsB.textContent = 'flow src: ' + flowSrc.mode;
   };
-  s.appendChild(cal); s.appendChild(comB); s.appendChild(thB); s.appendChild(fsB);
+  s.appendChild(comB); s.appendChild(thB); s.appendChild(fsB);
   const pre = document.createElement('pre');
   pre.id = 'aeroreport';
   pre.style.cssText = 'margin:6px 0 2px;padding:6px;background:var(--panel2);border-radius:4px;font-size:11px;white-space:pre-wrap;color:#cfe';
@@ -3706,11 +3689,14 @@ async function runUiTest() {
     click(btn($('flight'), 'thrust:'));
     ok('flightbtns', com && thrustGroup.visible === !th0); }
 
-  // hull auto-fit button + hull-opacity slider drive the fit state
-  { click(btn($('viewopts'), 'auto-fit'));
-    const nO = numRow($('viewopts'), 'hull opacity');
+  // hull-opacity slider dims blocks + skin + wireframes together (the
+  // lattice sliders/auto-fit button are gone — exact fit is silent)
+  { const nO = numRow($('viewopts'), 'hull opacity');
     setIn(nO, 0.55);
-    ok('hullui', hullP.W >= 4 && Number.isFinite(hullP.px) && Math.abs(hullOpacity - 0.55) < 1e-9);
+    const bm = blockGroup.children.filter(o => o.isMesh);
+    ok('hullui', Math.abs(hullOpacity - 0.55) < 1e-9 && bm.length > 0
+      && bm.every(o => o.material.opacity < 0.5)
+      && (!blockWireObj || blockWireObj.material.opacity < 0.55));
     setIn(nO, 1); }
 
   // hull-list row click flashes that triangle into the hull group
@@ -3796,6 +3782,12 @@ function applyCamQ() {                              // ?cam=px,py,pz,tx,ty,tz ·
   invalidate();
 }
 buildViewOpts();
+// flight panel expand/close (v0.149 user request), remembered like the other
+// view prefs (the sweep/tests still drive controls inside a closed <details>)
+{ const fsec = $('flightsec');
+  if (localStorage.getItem('archean-flight-open') === '0') fsec.open = false;
+  fsec.addEventListener('toggle',
+    () => localStorage.setItem('archean-flight-open', fsec.open ? '1' : '0')); }
 buildFlight();
 onResize();
 if (location.search.includes('hull')) hullGroup.visible = true;

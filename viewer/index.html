@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Archean Blueprint Viewer v0.148 — ISW-241</title>
+<title>Archean Blueprint Viewer v0.149 — ISW-241</title>
 <style>
   :root { --bg:#131219; --panel:#1c1b22; --panel2:#252330; --tx:#e8e6e3; --dim:#9a97a5;
           --accent:#0a84ff; --row:#2d2b38; --ok:#30e660; }
@@ -24,6 +24,13 @@
   #panel .scroll { overflow-y:auto; flex:1; }
   h3 { margin:0; padding:5px 10px; font-size:10px; text-transform:uppercase; letter-spacing:1px;
        color:var(--dim); background:#181720; border-top:1px solid #000; border-bottom:1px solid #000; }
+  /* collapsible section header (Flight analysis): looks like h3 + a caret */
+  summary { margin:0; padding:5px 10px; font-size:10px; text-transform:uppercase; letter-spacing:1px;
+       color:var(--dim); background:#181720; border-top:1px solid #000; border-bottom:1px solid #000;
+       cursor:pointer; user-select:none; list-style:none; }
+  summary::-webkit-details-marker { display:none; }
+  summary::after { content:'▸'; float:right; }
+  details[open] > summary::after { content:'▾'; }
   #filter { width:100%; padding:4px 8px; background:var(--row); color:var(--tx); border:0;
             outline:0; font:inherit; border-bottom:1px solid #000; }
   #complist { max-height:180px; overflow-y:auto; }
@@ -73,7 +80,7 @@
   <div id="toast"></div>
   <div id="panel">
     <header>
-      <span>ISW-241 blueprint inspector <small style="color:#7dffcf;font-weight:400">v0.148</small>
+      <span>ISW-241 blueprint inspector <small style="color:#7dffcf;font-weight:400">v0.149</small>
         <a id="wslink" target="_blank" rel="noopener" title="Workshop page for this craft"
            style="display:none;margin-left:8px;font-size:12px;color:#7dffcf;text-decoration:none">workshop ↗</a></span>
       <span>
@@ -92,8 +99,10 @@
       <h3>View options</h3>
       <div class="sec" id="viewopts"></div>
 
-      <h3>Flight analysis</h3>
-      <div id="flight"></div>
+      <details id="flightsec" open>
+        <summary>Flight analysis</summary>
+        <div id="flight"></div>
+      </details>
 
       <h3>Hull elements <span id="hullcount"></span></h3>
       <div id="hulllist"></div>
@@ -106,6 +115,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="view3d.js?v=148"></script>
+  <script type="module" src="view3d.js?v=149"></script>
 </body>
 </html>

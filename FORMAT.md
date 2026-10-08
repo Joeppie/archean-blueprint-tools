@@ -348,8 +348,11 @@ Zero-build Three.js (WebGL) inspector: `python3 -m http.server 8650` (repo root)
   parse + geometry invariants + hull fit containment. Run:
   `chromium --headless=new --dump-dom http://127.0.0.1:8650/regtest/regtest.html`
   → `REGTEST: PASS` (24/24; only ISW-241 has hull triangles).
-- Flight analysis: "kg / block cell" = mass per 0.25 m structural cell (calibrate
-  button solves it so parts+cells = declared `mass`). Flow shows particles **and**
+- Flight analysis (collapsible ▾ panel, remembered): "kg / block cell" = mass per
+  0.25 m structural cell — **auto-calibrated on load** so parts+cells = declared
+  `mass` (the old "calibrate cells to declared mass" button was removed in
+  v0.149: the manual step was inscrutable and the automatic one always runs).
+  Flow shows particles **and**
   streamlines (integrated through the same stylized deflection field; blue =
   freestream, red = accelerated flow. Stylized, not CFD).
 - **Display poses (`applyDisplayPose`, display-only):** per-component canonical

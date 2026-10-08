@@ -170,7 +170,9 @@ landing page and README together when the viewer changes).
   pivot, plane X·Y normal +z; elements at pos/100 z 0.01..0.02; dataport
   re-centred at (w/2,h/2,0); colours 0-255 LINEAR with metal/rough off
   0..255. Viewer `buildDashboard()` (dev-viewer port). Hull UI: blocks +
-  triangles share ONE "hull" toggle and the hull-opacity slider.
+  triangles share ONE "hull" toggle; the hull-opacity slider fades blocks,
+  triangle skin AND the wireframe overlay (v0.149 — lattice pitch/offset
+  sliders + auto-fit button REMOVED: the exact fit applies silently).
 - Component models: game ships per component a `.gltf` (materials named
   `color1`/`color2` = player-painted surfaces ⇄ `components[].colors`, plus
   fixed materials whose `pbrMetallicRoughness` baseColorFactor/metallic/
@@ -317,7 +319,8 @@ landing page and README together when the viewer changes).
    triangles together), preset buttons (must actually MOVE the part — the
    row.set()/onInput dead-button bug), comp.data write-through, real-model
    toggle + localStorage persistence, wind-mode/flow-src/CoM/thrust buttons,
-   hull auto-fit + opacity, hull-list flash row, Steam wslink, dirty→Save
+   hull-opacity slider (fades blocks + skin + wire together),
+   hull-list flash row, Steam wslink, dirty→Save
    lifecycle, calibrated-mass report. Title: `UITEST PASS n=21 ctrls=N` /
    `UITEST FAIL <pins>`, captured errors in #out.
 2c. `?postest`: placement fixtures keyed per craft (the POSTESTS table in
