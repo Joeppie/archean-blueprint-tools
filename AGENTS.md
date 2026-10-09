@@ -43,7 +43,7 @@ tests/run_tests.sh                      # full headless suite (python3 + chromiu
 python3 -m http.server 8650             # manual serving (repo root)
 # viewer:   http://127.0.0.1:8650/viewer/index.html
 # selftest: http://127.0.0.1:8650/viewer/index.html?selftest  (tab title: SELFTEST PASS)
-# gizmatest: viewer/index.html?gizmatest (GIZMATEST PASS n=15; &shot=1|2|3 = WYSIWYG screenshot states)
+# gizmatest: viewer/index.html?gizmatest (GIZMATEST PASS n=16; &shot=1|2|3 = WYSIWYG screenshot states)
 # regtest:  http://127.0.0.1:8650/regtest/regtest.html         (page ends 'REGTEST: PASS')
 # other craft: viewer/index.html?open=../testdata/<id>/blueprint.json
 # perf probe: viewer/index.html?perf → tab title: PERF fps=… draw=<draw-calls> …
@@ -354,7 +354,7 @@ landing page and README together when the viewer changes).
      as seen (user WYSIWYG rule); scene-root proxy, writeback qv = P·Ry(π)
      (THREE decompose absorbs the negative scale by negating sx). `gizmo=
      true` pins the writeback round-trip; `?gizmatest` (synthetic single-
-     seat blueprint, camera facing the pilot, n=15 + &shot=1|2|3 visual
+     seat blueprint, camera facing the pilot, n=16 + &shot=1|2|3 visual
      states) pins the order algebra, the LIVE pose, and v0.156 KNOB
      CONTINUITY (`gizmoUnwrap`): TransformControls reports ring drags as a
      raw atan2 angle, so a knob sweep past 180° POPS back toward the start
@@ -379,7 +379,18 @@ landing page and README together when the viewer changes).
      translate = WORLD (the arrows stay axis-aligned; user: "the move
      gizmo rotates and becomes non axis aligned, thats bad"), rotate =
      LOCAL rings (the pinned intrinsic model). movecfg pin asserts the
-     space flip toggles with the mode. The explode/assembly
+     space flip toggles with the mode. v0.159: the gizmo ATTACHES TO
+     SUBGRIDS TOO — selecting a subgrid attaches TransformControls to the
+     GROUP itself, and its translate space is LOCAL ("EXCEPT for subgrid,
+     respect that rotation :)"): the arrows follow the subgrid's attach
+     pose + joint swing. objectChange branches on tctl.object: subgrid
+     groups write back through the JOINT INVERSE (subtract pivot/slide,
+     rotate −a, reverse order) into g.userData.base, then the Build
+     component (position mirror + rawFromView quat) — the same contract
+     as the panel's pivot rows. Pins: gizmatest movespace (MEASURED
+     widget nodes: translate arrows proxy-INVARIANT, rings proxy-FOLLOWING)
+     + dolphin subgizmo-move (local attach + sign-sensitive joint-inverse
+     writeback on the 90°-open pivot door). The explode/assembly
      feature (v0.140/141) was
      REMOVED in v0.142 (user: "a catastrophe") — do not resurrect.
      thrust display + wind model: every DIRECTIONAL propulsor (THRUST
@@ -441,10 +452,14 @@ landing page and README together when the viewer changes).
    writeback through applyGizmoOrientation (file decode, mesh pose, ring
    tracking, visible nose swing) + v0.153 move-mode pins (movecfg: the mode
    switch toggles tctl translate↔rotate and persists; moveinv: the
-   position writeback is the raw/mirror involution). `&shot=1|2|3` leaves
+   position writeback is the raw/mirror involution). v0.159 MOVESPACE pin
+   MEASURES the rendered widget nodes: swinging the proxy 40° about z must
+   move the translate ARROWS 0° (world space) and the rotate RINGS exactly
+   40° (local space) — the empirical proof of the per-mode space split.
+   `&shot=1|2|3` leaves
    the scene at
    before/+pitch90/+pitch90+roll90 for headless eyeball (runner saves
-   gizmo1..3.png). Title: `GIZMATEST PASS n=15`.
+   gizmo1..3.png). Title: `GIZMATEST PASS n=16`.
 2c. `?postest`: placement fixtures keyed per craft (the POSTESTS table in
    view3d.js — the sanctioned exception to "no per-craft constants": fixtures
    probe the RENDERED scene where generic checks cannot see a pose bug).

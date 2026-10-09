@@ -1164,6 +1164,44 @@ function syncSubJoints() {
   invalidate();
 }
 
+// The kinematic joint chain of a subgrid group, in syncSubJoints order:
+// axis/pivot per master plus its stored angle (DEGREES) and slide (m).
+function subJointChain(g) {
+  return (subMasterEntries().get(g.userData.sub) || [])
+    .map(e => model.data.components[e.component])
+    .filter(mc => mc && subJointAxis(mc))
+    .map(mc => ({ ...subJointAxis(mc),
+      a: typeof mc.data?.angle === 'number' ? mc.data.angle : 0,
+      s: typeof mc.data?.pos === 'number' ? mc.data.pos : 0 }));
+}
+// Gizmo edit on a SUBGRID group (v0.159): the live group pose is the joint
+// composition J over the Build attach pose (per master p' = pivot +
+// R(axis,a)·(base−pivot) + axis·pos, q' = R·base). The user dragged the
+// COMPOSED pose, so invert J (reverse order: subtract pivot AND slide,
+// rotate −a, restore pivot) back into base, then write the Build component
+// (position mirrored, orientation via the convention-aware rawFromView) —
+// the same contract as the panel's pivot rows, so a door dragged in world
+// space lands in the file exactly like a slider edit.
+function applySubGizmo(g) {
+  const bc = model.data.components[g.userData.sub];
+  if (!bc) return;
+  const p = g.position.clone(), q = g.quaternion.clone();
+  const chain = subJointChain(g);
+  for (let i = chain.length - 1; i >= 0; i--) {
+    const { axis, pivot, a, s } = chain[i];
+    if (a) p.sub(pivot).addScaledVector(axis, -s)
+      .applyQuaternion(new THREE.Quaternion().setFromAxisAngle(axis, -a * Math.PI / 180))
+      .add(pivot);
+    else if (s) p.addScaledVector(axis, -s);
+    if (a) q.premultiply(new THREE.Quaternion().setFromAxisAngle(axis, -a * Math.PI / 180));
+  }
+  g.userData.base.p.copy(p); g.userData.base.q.copy(q);
+  bc.position.x = p.x; bc.position.y = p.y; bc.position.z = -p.z;
+  bc.orientation = rawFromView({ userData: {} }, q);
+  syncSubJoints();
+  markDirty();
+}
+
 let compObjs = [];
 const realMap = new Map();   // component index → real game-model groups (follow live edits)
 function buildScene() {
@@ -1783,25 +1821,35 @@ function gizmoUnwrap(raw, prevRaw, accum) {
   return accum + d;
 }
 tctl.addEventListener('objectChange', () => {
-  if (tctl.mode === 'translate') return applyGizmoPosition(gizmoProxy.position);
-  const P = gizmoProxy.quaternion;
+  // subgrid target (v0.159): the gizmo is attached to the GROUP, whose live
+  // pose = joint composition over the Build attach — write back through the
+  // joint inverse into the Build component (base), not into a comp index.
+  const g = tctl.object && tctl.object !== gizmoProxy
+    && tctl.object.userData.sub !== undefined ? tctl.object : null;
+  if (tctl.mode === 'translate')
+    return g ? applySubGizmo(g) : applyGizmoPosition(gizmoProxy.position);
+  const P = g ? g.quaternion : gizmoProxy.quaternion;
   _knobQ.copy(knobQ0).invert().multiply(P);         // raw relative spin q0⁻¹·P
   const len = Math.hypot(_knobQ.x, _knobQ.y, _knobQ.z);
-  if (len < 1e-4) return applyGizmoOrientation(P);  // snap-to-zero / no spin
+  if (len < 1e-4) { if (g) return applySubGizmo(g); return applyGizmoOrientation(P); }  // snap
   if (!knobAxis) {                                 // first real spin: the raw
     knobAxis = _knobA.set(_knobQ.x, _knobQ.y, _knobQ.z).normalize();   // axis IS the ring axis
     knobRaw = 2 * Math.atan2(len, _knobQ.w); knobAcc = knobRaw;
+    if (g) return applySubGizmo(g);
     return applyGizmoOrientation(P);
   }
   const s = _knobA.x * knobAxis.x + _knobA.y * knobAxis.y + _knobA.z * knobAxis.z;
   const raw = 2 * Math.atan2(len * Math.sign(s), _knobQ.w);
   knobAcc = gizmoUnwrap(raw, knobRaw, knobAcc); knobRaw = raw;
-  applyGizmoOrientation(_knobQ.copy(knobQ0).multiply(
-    new THREE.Quaternion().setFromAxisAngle(knobAxis, knobAcc)));
+  const qF = _knobQ.copy(knobQ0).multiply(
+    new THREE.Quaternion().setFromAxisAngle(knobAxis, knobAcc));
+  if (g) { g.quaternion.copy(qF); return applySubGizmo(g); }
+  applyGizmoOrientation(qF);
 });
 tctl.addEventListener('mouseDown', () => {
   controls.enabled = false; hideModeBox();
-  knobQ0.copy(gizmoProxy.quaternion); knobAxis = null; knobRaw = knobAcc = 0;
+  knobQ0.copy(tctl.object ? tctl.object.quaternion : gizmoProxy.quaternion);
+  knobAxis = null; knobRaw = knobAcc = 0;
 });
 tctl.addEventListener('mouseUp', () => {
   controls.enabled = true;
@@ -1831,8 +1879,17 @@ function syncGizmoPose() {
 }
 function syncGizmo() {
   const o = selected >= 0 ? compObjs?.[selected] : null;
-  if (gizmoOn && o && (gizmoMode === 'move' || gizmoMode === 'rotate')) {
-    syncGizmoPose(); tctl.attach(gizmoProxy);
+  const g = selectedSub >= 0
+    ? subGroup.children.find(x => x.userData.sub === selectedSub) : null;
+  const target = o ? gizmoProxy : g;
+  if (gizmoOn && target && (gizmoMode === 'move' || gizmoMode === 'rotate')) {
+    if (o) syncGizmoPose();
+    tctl.attach(target);
+    // v0.159: SPACE per TARGET + mode — component move = WORLD (v0.158),
+    // SUBGRID move = LOCAL: the subgrid's attach/joint rotation is its
+    // working frame (user: "EXCEPT for subgrid, respect that rotation :)").
+    tctl.space = gizmoMode === 'move' && !o ? 'local'
+      : gizmoMode === 'move' ? 'world' : 'local';
   } else tctl.detach();
 }
 // ---------- gizmo MODE widget (v0.153: context switch at the click point) ----
@@ -1843,7 +1900,8 @@ function syncGizmo() {
 let gizmoMode = localStorage.getItem('archean-gizmo-mode') || 'rotate';
 const modeBox = document.createElement('div');
 modeBox.id = 'modebox';
-for (const [m, ic, ti] of [['none', '⊘', 'no gizmo'], ['move', '✥', 'move — world position'],
+for (const [m, ic, ti] of [['none', '⊘', 'no gizmo'],
+                           ['move', '✥', 'move — world axes (subgrids: own axes)'],
                            ['rotate', '⟳', 'rotate'], ['info', 'ℹ', 'info only (no gizmo)']]) {
   const b = document.createElement('button');
   b.textContent = ic; b.title = ti; b.dataset.m = m;
@@ -4276,6 +4334,39 @@ const POSTESTS = {
         && piv && back)
         || `spin q=${qOff.angleTo(bq).toFixed(3)} dot=${dAx.dot(bax).toFixed(3)} pivot=${piv} back=${back}`;
     });
+    T('subgizmo-move', () => {        // v0.159: gizmo on a SUBGRID writes back
+      // through the joint inverse: with the door OPENED 90° on its pivot, a
+      // world +x drag of the composed pose must land in the file as the
+      // R(−90°)-rotated base delta (sign-sensitive), and the gizmo must be
+      // LOCAL-space (the subgrid rides its own rotation).
+      const g = subs().find(o => (subMasterEntries().get(o.userData.sub) || [])
+        .some(e => model.data.components[e.component]?.type === 'SmallPivot'));
+      if (!g) return 'no SmallPivot-mastered subgrid';
+      selectSub(g.userData.sub);
+      setGizmoMode('move');
+      const attached = tctl.object === g && tctl.space === 'local';
+      const e = (subMasterEntries().get(g.userData.sub) || [])
+        .find(e => model.data.components[e.component]?.type === 'SmallPivot');
+      const mc = model.data.components[e.component];
+      const a0 = typeof mc.data.angle === 'number' ? mc.data.angle : 0;
+      const bc = model.data.components[g.userData.sub];
+      const bp0 = g.userData.base.p.clone();
+      const { axis } = subJointAxis(mc);
+      mc.data.angle = 90; syncSubJoints();            // composed frame swings
+      g.position.add(new THREE.Vector3(0.25, 0, 0));  // the "drag" (world +x)
+      applySubGizmo(g);
+      const d = g.userData.base.p.clone().sub(bp0);
+      const want = new THREE.Vector3(0.25, 0, 0)
+        .applyQuaternion(new THREE.Quaternion().setFromAxisAngle(axis, -Math.PI / 2));
+      const okPos = d.distanceTo(want) < 1e-6
+        && Math.abs(bc.position.x - (bp0.x + want.x)) < 1e-6;
+      bc.position.x = bp0.x; bc.position.y = bp0.y; bc.position.z = -bp0.z;
+      mc.data.angle = a0;
+      g.userData.base.p.copy(bp0);
+      syncSubJoints(); tctl.detach();
+      return (attached && okPos)
+        || `attach=${attached} d=${d.toArray().map(v => v.toFixed(3))} want=${want.toArray().map(v => v.toFixed(3))}`;
+    });
   },
   '3803780241': () => {              // XYQ-615: 2 subgrids, pair-unique decode
     T('xyq-sub-masters', () => {
@@ -4526,6 +4617,30 @@ async function runGizmoTest() {
     const n1 = projN(qv1);
     ok('nose', Math.hypot(n1[0] - n0[0], n1[1] - n0[1]) > 0.4);  // swung visibly on screen
     ok('proxy', Math.abs(gizmoProxy.quaternion.dot(qv1)) > 0.9999);  // rings track the part
+
+    // ---- B2. widget ORIENTATION proof (v0.158, user: "translation widget
+    // rotates"): swing the proxy 40° about z and MEASURE the rendered widget
+    // nodes — the translate ARROWS must not move a degree (world space), the
+    // rotate RINGS must follow exactly (local space).
+    { const tRoot = tctl.getHelper();
+      const G = tRoot.children.find(o => o.isTransformControlsGizmo);
+      const wq = (mode) => {
+        const x = G.gizmo[mode].children.find(c => c.name === 'X');
+        tRoot.updateMatrixWorld(true);
+        return x.getWorldQuaternion(new THREE.Quaternion());
+      };
+      setGizmoMode('move'); gizmoProxy.quaternion.identity();
+      const aMove = wq('translate');
+      gizmoProxy.quaternion.setFromAxisAngle(new THREE.Vector3(0, 0, 1), 40 * Math.PI / 180);
+      const bMove = wq('translate');
+      const dArrow = aMove.angleTo(bMove);                       // must be ~0
+      setGizmoMode('rotate'); gizmoProxy.quaternion.identity();
+      const aRot = wq('rotate');
+      gizmoProxy.quaternion.setFromAxisAngle(new THREE.Vector3(0, 0, 1), 40 * Math.PI / 180);
+      const dRing = aRot.angleTo(wq('rotate'));                  // must be ~40°
+      gizmoProxy.quaternion.copy(qv1);
+      ok('movespace', (dArrow < 1e-6 && dRing > 0.69 && dRing < 0.71)
+        || `arrowΔ=${dArrow.toFixed(4)} ringΔ=${dRing.toFixed(4)} (want ~0 / ~0.698)`); }
 
     // ---- C. demo state for screenshots (before / +pitch / +pitch+roll) ----
     setModel(seatBp(), 'gizmatest seat');

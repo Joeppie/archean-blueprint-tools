@@ -714,6 +714,11 @@ Adventure = 3334698274).
   gets editable joint sliders (angle °/slide m) that write the master's
   `data` verbatim and animate the subgrid live; Pivot offset +
   rotation rows editing the Build fields live (byte-true on save).
+  v0.159: the MOVE gizmo attaches to the subgrid GROUP in LOCAL space
+  (arrows follow its rotation); the drag edits the COMPOSED pose, so the
+  writeback applies the joint INVERSE (reverse order: subtract pivot and
+  slide, rotate −angle) and lands in the same Build pivot fields — a
+  dragged door and a slider-editing door save identically.
   `slaveBuildId`-geometry heuristics (v0.153) are OBSOLETE — the decode is
   exact.
 
