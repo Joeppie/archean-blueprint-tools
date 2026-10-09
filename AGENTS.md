@@ -375,7 +375,11 @@ landing page and README together when the viewer changes).
      involution (view z-flip) minus the compGroup display anchor, occ +
      type-255 mirror cells follow via serialize()'s round(delta/CELL) shift
      exactly like the position sliders — the gizmo never touches blueprint
-     math. Shift snaps 15° AND 0.25 m cells. The explode/assembly
+     math. Shift snaps 15° AND 0.25 m cells. v0.158: SPACE IS PER-MODE —
+     translate = WORLD (the arrows stay axis-aligned; user: "the move
+     gizmo rotates and becomes non axis aligned, thats bad"), rotate =
+     LOCAL rings (the pinned intrinsic model). movecfg pin asserts the
+     space flip toggles with the mode. The explode/assembly
      feature (v0.140/141) was
      REMOVED in v0.142 (user: "a catastrophe") — do not resurrect.
      thrust display + wind model: every DIRECTIONAL propulsor (THRUST

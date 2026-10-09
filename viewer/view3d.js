@@ -1884,6 +1884,10 @@ function setGizmoMode(m) {
   gizmoMode = m;
   localStorage.setItem('archean-gizmo-mode', m);
   tctl.setMode(m === 'move' ? 'translate' : 'rotate');
+  // v0.158: the MOVE arrows must stay WORLD-axis aligned (user: "the move
+  // gizmo rotates and becomes non axis aligned, that's bad") — only the
+  // rotate RINGS are part-axis (local, the pinned intrinsic model).
+  tctl.space = m === 'move' ? 'world' : 'local';
   syncGizmo(); paintModeBox(); invalidate();
 }
 // move writeback: the proxy lives at scene root, so undo the compGroup display
@@ -1904,6 +1908,7 @@ function applyGizmoPosition(pW) {
 // apply the persisted mode WITHOUT invalidate(): module-eval order forbids
 // touching the render pipeline here; attach/paint happen on the first click.
 tctl.setMode(gizmoMode === 'move' ? 'translate' : 'rotate');
+tctl.space = gizmoMode === 'move' ? 'world' : 'local';      // same per-mode rule
 // Proxy pose = obj.quaternion·RY180: THREE decompose() absorbs a negative
 // scale by NEGATING SX, so getWorldQuaternion() on the scale.z=−1 root is
 // qv·Ry(π), not qv. That stripped frame is the RIGHT gizmo frame — its axes
@@ -4491,11 +4496,14 @@ async function runGizmoTest() {
       ok('unwrap', a1 > 3.099 && a1 < 3.101 && a2 > 3.14 && a2 < 3.25
          && Math.abs(b2 - 3.08) < 1e-9); }
     // v0.153 mode switch: move mode engages the same proxy; the position
-    // writeback is the raw/mirror involution (view z-flip undoes itself)
+    // writeback is the raw/mirror involution (view z-flip undoes itself).
+    // v0.158: move mode is WORLD-space (arrows stay axis-aligned), only the
+    // rotate rings are part-axis local (user: "the move gizmo rotates and
+    // becomes non axis aligned, that's bad").
     setGizmoMode('move');
-    const tcMove = tctl.mode === 'translate';
+    const tcMove = tctl.mode === 'translate' && tctl.space === 'world';
     setGizmoMode('rotate');
-    ok('movecfg', tcMove && tctl.mode === 'rotate'
+    ok('movecfg', tcMove && tctl.mode === 'rotate' && tctl.space === 'local'
       && localStorage.getItem('archean-gizmo-mode') === 'rotate');
     { const raw = { x: 1.1, y: -2.3, z: 0.7 }, v = viewPos(raw);
       ok('moveinv', Math.abs(v.x - raw.x) < 1e-12 && Math.abs(v.y - raw.y) < 1e-12
