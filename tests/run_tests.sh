@@ -97,7 +97,7 @@ for s in 1 2 3; do   # before / +pitch90 / +pitch90+roll90 — eyeball WYSIWYG o
 done
 
 echo "── position tests (placement fixtures + generic button sweep)"
-for c in 3812927875 3518436870 3417786605 3803780241 3381670618; do
+for c in 3812927875 3518436870 3417786605 3803780241 3381670618 3509975859; do
   title=$(chrome --virtual-time-budget=12000 \
     --dump-dom "$BASE/viewer/index.html?open=../testdata/$c/blueprint.json&postest" 2>/dev/null \
     | grep -oPm1 '(?<=<title>)[^<]*')

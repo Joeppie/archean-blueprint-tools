@@ -31,6 +31,14 @@ particles (`sim 900 pts (large-craft approx)` in the report); normal crafts
 keep all 2200 — ISW cells 1 k, truck 6 k, Jimmy 16 k, all under the full-rate
 tier at 60 fps. The giant's 14 fps itself is GPU draw-bound (candidate 3).
 
+**v0.155 aero-plate grid**: sampleVel's per-particle O(plates) scan is now a
+uniform-grid superset query (3x3x3 cells of 1.5 m, integer keys) above 200
+plates. Giant (1024 plates, 900 pts): flowms 6.3-6.5 → 4.9-5.5 (3 runs each,
+2026-10-09; that day the NVIDIA GPU ran the user's AI models at 100 % — fps
+titles were contention-noise, flowms is the robust signal). Sub-200-plate
+crafts keep the scan: the airliner's 92 plates measured scan 2.4 vs grid
+5.0 ms/frame — the grid only pays off once scans dominate the 27 hash probes.
+
 ## Design wins (do not regress — mostly already test-pinned)
 
 - Hull merged into one mesh per palette colour; wire = 1 LineSegments;
@@ -60,8 +68,9 @@ tier at 60 fps. The giant's 14 fps itself is GPU draw-bound (candidate 3).
    sim cost scales with them). Measured cost driver = solid-cell lookup
    pressure (237 k-cell giant at 2200 pts = 13 ms; 16 k-cell crafts = 3 ms).
    `flowBudget()` tiers the particle count on solidCells.size: 2200 ≤100 k
-   cells, 1400/900 ≤400 k, 500 above; aero-plate count guards the
-   hull-triangle-heavy case (1400/900). Giant: 900 pts, 6.5 ms. The flight
+   cells, 1400/900 ≤400 k, 500 above. v0.155: the aero-plate tier
+   (1400/900) is GONE — plates are grid-indexed (see above). Giant: 900 pts,
+   ~5 ms. The flight
    report shows `sim N pts (large-craft approx)` when tiered. Pin:
    `windpts=true` (ISW keeps the full 2200).
 5. **Load 937 ms (giant)**: JSON parse + build + seal, all budget-capped;
@@ -71,6 +80,21 @@ tier at 60 fps. The giant's 14 fps itself is GPU draw-bound (candidate 3).
    leave it. Re-check only for integrated-GPU user reports.
 7. **windHud forces 60 fps redraw in lines mode** (sock flutter): 168-draw
    static scene → negligible (64 fps measured). Optional: flutter at 30 fps.
+8. **string-keyed grid cells** — v0.155's first aero grid used `'x,y,z'`
+   template keys: giant flowms REGRESSED 6.5 → 7.5 (27 string allocs +
+   hashes per particle-sample, GC churn). Integer base-8192 keys (the
+   cellKeyV encoding) fixed it (→ 5.0). Rule: every per-frame key is an
+   integer.
+9. **serialize() per-occ full-block scan** — FIXED v0.155: type-255 mirror
+   sync was O(comps×occs×blocks) per save. Now a live-reindexed Map keyed
+   by CURRENT cell+size+frame; matched blocks are consumed from their old
+   key and re-inserted at the shifted cell, reproducing the sequential-scan
+   semantics exactly (a later occ keyed by a shifted-to cell matches again).
+10. **syncAdapters scanned all of adpQueue per edit** — FIXED v0.155: gizmo/
+   livePos drags fire per pointermove over every nub+cable entry; now a Map
+   keyed by component index (length sentinel + explicit invalidate at the
+   queue rebuild in setModel — clear+refill to the SAME length must drop
+   the stale index).
 
 ## Tooling
 

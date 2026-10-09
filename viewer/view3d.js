@@ -360,16 +360,28 @@ function buildRealComponent(c, model, idx, low = false) {
   return g;
 }
 
+// adpQueue lives in the component-index domain: index it once (v0.155) so a
+// gizmo/livePos drag is O(occs of THAT part), not O(all nubs+cables) per
+// drag event. Rebuilt lazily whenever pushes appended (length sentinel).
+let adpIdx = null, adpIdxN = -1;
+function invalidateAdpIdx() { adpIdx = null; adpIdxN = -1; }   // on queue rebuild
 function syncAdapters(obj) {
-  let hit = false;
-  for (const a of adpQueue) if (a.ci === obj.userData.ci && a.lx != null) {
-    // a.lx == null → endpoint nub: it belongs to the cable, not the part; it
-    // stays at the game's endpoint when the part is moved in the viewer
+  if (!adpIdx || adpIdxN !== adpQueue.length) {
+    adpIdx = new Map(); adpIdxN = adpQueue.length;
+    for (const a of adpQueue) {
+      if (a.lx == null) continue;   // endpoint nub: belongs to the CABLE, stays
+      let l = adpIdx.get(a.ci);
+      if (!l) adpIdx.set(a.ci, l = []);
+      l.push(a);
+    }
+  }
+  const lst = adpIdx.get(obj.userData.ci);
+  if (!lst) return;
+  for (const a of lst) {
     const p = new THREE.Vector3(a.lx, a.ly, -a.lz).applyQuaternion(obj.quaternion);
     a.x = p.x + obj.position.x; a.y = p.y + obj.position.y; a.z = p.z + obj.position.z;
-    hit = true;
   }
-  if (hit) scheduleAdpFlush();
+  scheduleAdpFlush();
 }
 
 // merged adapter-nub meshes (big craft: hundreds of tiny spheres → 1 draw per type)
@@ -1102,7 +1114,7 @@ function buildScene() {
   }
   compObjs = [];
   realMap.clear();
-  adpQueue.length = 0;
+  adpQueue.length = 0; invalidateAdpIdx();
   adpGroup.clear();
   const { blocks, components } = model.data;
 
@@ -1490,6 +1502,19 @@ async function fetchDefault() {
 function serialize() {
   const out = structuredClone(model);
   const blocks = out.data.blocks;
+  // Type-255 mirror sync (v0.155): live Map index keyed by CURRENT cell+size
+  // replaces the per-occ full-block scan (was O(comps×occs×blocks) per save).
+  // Sequential semantics are EXACT: a block that matched an earlier occ sits
+  // at its NEW cell now, so a later occ keyed by that cell matches it again —
+  // live reindexing reproduces the scan-order behaviour of the old loop.
+  const mkey = (p) => `${p.pos_x},${p.pos_y},${p.pos_z}|`
+    + `${p.size_x},${p.size_y},${p.size_z}|${p.frame_x},${p.frame_y},${p.frame_z}`;
+  const mirrors = new Map();
+  for (const bl of blocks) if (bl.type === 255) {
+    const k = mkey(bl);
+    if (!mirrors.has(k)) mirrors.set(k, []);
+    mirrors.get(k).push(bl);
+  }
   out.data.components.forEach((c, i) => {
     const o = orig[i];
     const cells = {
@@ -1500,12 +1525,13 @@ function serialize() {
     c.occupancies.forEach((occ, k) => {
       const b0 = o.occ0[k];
       occ.pos_x = b0.pos_x + cells.x; occ.pos_y = b0.pos_y + cells.y; occ.pos_z = b0.pos_z + cells.z;
-      for (const bl of blocks) {                                // keep type-255 mirror in sync
-        if (bl.type === 255 && bl.size_x === b0.size_x && bl.size_y === b0.size_y && bl.size_z === b0.size_z
-            && bl.pos_x === b0.pos_x && bl.pos_y === b0.pos_y && bl.pos_z === b0.pos_z
-            && bl.frame_x === b0.frame_x && bl.frame_y === b0.frame_y && bl.frame_z === b0.frame_z) {
-          bl.pos_x += cells.x; bl.pos_y += cells.y; bl.pos_z += cells.z;
-        }
+      const lst = mirrors.get(mkey(b0));                     // keep type-255 mirror in sync
+      if (!lst) return;
+      for (const bl of lst.splice(0)) {                      // consume: block leaves old key
+        bl.pos_x += cells.x; bl.pos_y += cells.y; bl.pos_z += cells.z;
+        const nk = mkey(bl);
+        if (!mirrors.has(nk)) mirrors.set(nk, []);
+        mirrors.get(nk).push(bl);
       }
     });
   });
@@ -2986,17 +3012,59 @@ function buildAero() {
         n: [0, 0, 1], area: Math.PI * 0.17 * 0.10, R: 0.3 });
     }
   }
+  buildAeroGrid();
   buildSolid();
   buildThrustArrows();
   initFlow();
   updateReport();
 }
 
+// Uniform-grid SUPERSET index over aero plates (v0.155): the old per-particle
+// O(plates) scan is the sim's hot path (flowBudget() had to CUT PARTICLES on
+// plate-heavy crafts — 6000 plates x 2200 pts = 13 M scans/frame). Cell size
+// 1.5 m >= max influence distance sqrt(0.25 + Rmax^2 + 0.5) ~ 1.48, so a
+// plate's influence never leaves the 3x3x3 cell block around its centre, and
+// a particle's query (3x3x3) sees a guaranteed superset of its influencing
+// plates. The exact slab/r2 tests below run unchanged on that superset —
+// streamlines are BIT-IDENTICAL, budgets can go back up. Integer cell keys
+// (cellKeyV's encoding, zero string garbage per probe). ADAPTIVE: the ~6 ns
+// allocation-free scan beats 27 hash probes below ~200 plates (measured: the
+// 92-plate airliner regressed 2.4→5.0 ms/frame under the grid; the 1024-plate
+// giant inverts the crossover), so sparse scenes keep the plain scan.
+const AERO_CELL = 1.5, AERO_GRID_MIN = 200;
+let aeroGrid = new Map(), aeroUseGrid = false;
+function buildAeroGrid() {
+  aeroGrid = new Map();
+  aeroUseGrid = aeroPlates.length >= AERO_GRID_MIN;
+  if (!aeroUseGrid) return;
+  aeroPlates.forEach((pl, i) => {
+    const cx = Math.floor(pl.c[0] / AERO_CELL), cy = Math.floor(pl.c[1] / AERO_CELL),
+          cz = Math.floor(pl.c[2] / AERO_CELL);
+    for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (let c = -1; c <= 1; c++) {
+      const key = ((cx + a + 4096) * 8192 + cy + b + 4096) * 8192 + cz + c + 4096;
+      let l = aeroGrid.get(key);
+      if (!l) aeroGrid.set(key, l = []);
+      l.push(i);
+    }
+  });
+}
+const nearPl = [];                          // scratch (sampleVel is sequential)
+function platesNear(p) {
+  nearPl.length = 0;
+  const cx = Math.floor(p[0] / AERO_CELL), cy = Math.floor(p[1] / AERO_CELL),
+        cz = Math.floor(p[2] / AERO_CELL);
+  for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (let c = -1; c <= 1; c++) {
+    const l = aeroGrid.get(((cx + a + 4096) * 8192 + cy + b + 4096) * 8192 + cz + c + 4096);
+    if (l) for (const i of l) nearPl.push(aeroPlates[i]);
+  }
+  return nearPl;
+}
+
 function sampleVel(p, dir, V) {
   if (extGrid && !inExterior(p)) return [0, 0, 0];   // sealed interior: no wind
   const cv = model ? model.cv : [0, 0, 0];   // display anchoring cell shift
   let v = [dir[0] * V, dir[1] * V, dir[2] * V];
-  for (const pl of aeroPlates) {
+  for (const pl of aeroUseGrid ? platesNear(p) : aeroPlates) {
     const d = (p[0] - pl.c[0]) * pl.n[0] + (p[1] - pl.c[1]) * pl.n[1] + (p[2] - pl.c[2]) * pl.n[2];
     if (Math.abs(d) > 0.5) continue;
     const qd = [(p[0] - pl.c[0]) - d * pl.n[0], (p[1] - pl.c[1]) - d * pl.n[1], (p[2] - pl.c[2]) - d * pl.n[2]];
@@ -3060,17 +3128,14 @@ function sampleVel(p, dir, V) {
 
 let flowN = 0;
 function flowBudget() {
-  // sampleVel scans ALL aeroPlates per particle: hull triangles ARE the
-  // sim cost. The game itself approximates physics as crafts grow (user) —
-  // mirror that: fewer particles on plate-heavy crafts (giant 6.3 MB craft
-  // measured 13 ms/frame at 2200 -> 700 puts it back in budget).
+  // v0.155: plates are GRID-INDEXED (platesNear), so plate count is no longer
+  // the per-frame cost driver — the measured driver is solid-cell lookup
+  // pressure (237k-cell giant cost 13 ms at 2200 pts; 16k-cell crafts run
+  // full rate at 3 ms). Tier on that alone now.
   if (location.search.includes('flowlow')) return 500;           // headless shots
-  // measured cost driver = solid-cell lookup pressure (237k-cell giant
-  // cost 13 ms at 2200 pts; 16k-cell crafts run full rate at 3 ms)
-  const c = solidCells ? solidCells.size : 0, p = aeroPlates.length;
+  const c = solidCells ? solidCells.size : 0;
   let n = 2200;
   if (c > 400000) n = 500; else if (c > 100000) n = 900; else if (c > 40000) n = 1400;
-  if (p > 6000) n = Math.min(n, 900); else if (p > 2500) n = Math.min(n, 1400);
   return n;
 }
 function initFlow() {
@@ -3765,6 +3830,64 @@ const POSTESTS = {
         if (d > 0.20) return `port ${e.port} ${d.toFixed(2)} m off bbox`;
       }
       return true;
+    });
+  },
+  // v0.155 aero GRID pins: the giant (1024 plates ≥ AERO_GRID_MIN) is the
+  // only corpus craft whose wind runs on the grid, so its soundness (the
+  // 3x3x3 query returns a SUPERSET of the influencing plates — the exact
+  // slab/r2 tests then run on it, so streamlines are bit-identical) has to
+  // be pinned here; ISW-class pins only cover the scan path.
+  '3509975859': () => {
+    T('giant-grid-on', () =>
+      (aeroUseGrid && aeroGrid.size > 0) || `grid off (plates=${aeroPlates.length})`);
+    T('giant-grid-superset', () => {
+      const b = model.box_min, B = model.box_max;
+      for (let k = 1; k <= 250; k++) {                       // golden-ratio fill
+        const p = [b.x + (k * 0.6180339887 % 1) * (B.x - b.x),
+                   b.y + (k * 0.7548776662 % 1) * (B.y - b.y),
+                   b.z + (k * 0.5698402910 % 1) * (B.z - b.z)];
+        const near = platesNear(p);
+        for (let i = 0; i < aeroPlates.length; i++) {
+          const pl = aeroPlates[i];
+          const d = (p[0] - pl.c[0]) * pl.n[0] + (p[1] - pl.c[1]) * pl.n[1] + (p[2] - pl.c[2]) * pl.n[2];
+          if (Math.abs(d) > 0.5) continue;                   // sampleVel's exact filter
+          const qd2 = (p[0] - pl.c[0]) ** 2 + (p[1] - pl.c[1]) ** 2 + (p[2] - pl.c[2]) ** 2 - d * d;
+          if (qd2 > pl.R * pl.R + 0.5) continue;
+          if (!near.includes(pl))
+            return `plate ${i} influences p=${p.map(v => v.toFixed(1))} but grid missed it`;
+        }
+      }
+      return true;
+    });
+    T('giant-grid-inflow', () => {                           // freestream far upstream
+      const b = model.box_min, B = model.box_max;
+      const v = sampleVel([(b.x + B.x) / 2, (b.y + B.y) / 2, b.z - 8], [0, 0, 1], 12);
+      return (Math.abs(v[2] - 12) < 1e-6 && Math.abs(v[0]) < 1e-6 && Math.abs(v[1]) < 1e-6)
+        || `upstream v=${v.map(x => x.toFixed(2))} (expect 0,0,12)`;
+    });
+    T('giant-grid-wake', () => {
+      // Deficit behind the body: sample the FIRST cells buildSolid inserted
+      // (blocks first, densest structure; Set order is insertion order =
+      // deterministic), stand 2 cells (0.5 m) downstream of each along each
+      // axis — the wake ray walks 0.25 m steps upstream and must hit the
+      // anchor cell. (bbox-face probes fly through air: the giant's sparse
+      // skin leaves the face grids between stringers.)
+      let tested = 0, mx = 0;
+      outer:
+      for (const key of solidCells) {
+        const z = key % 8192 - 4096, y = (key - (z + 4096)) / 8192 % 8192 - 4096,
+              x = (key - (z + 4096) - (y + 4096) * 8192) / 67108864 - 4096;
+        for (let ax = 0; ax < 3; ax++) {
+          const p = [x * 0.25 + 0.125, y * 0.25 + 0.125, z * 0.25 + 0.125];
+          p[ax] = (p[ax] - 0.125) + 0.5;
+          const dir = ax === 0 ? [1, 0, 0] : ax === 1 ? [0, 1, 0] : [0, 0, 1];
+          const v = sampleVel(p, dir, 12);
+          if (v.length > 3) mx = Math.max(mx, v[3]);
+          tested++;
+        }
+        if (tested >= 90) break outer;
+      }
+      return mx > 0.25 || `max wake deficit ${mx.toFixed(2)} (expect >0.25 behind body, ${tested} probes)`;
     });
   },
   '3518436870': (ctx) => {

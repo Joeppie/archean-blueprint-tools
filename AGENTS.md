@@ -217,6 +217,17 @@ landing page and README together when the viewer changes).
   1 LineSegments (vertex-coloured), occupancy
   boxes → 1 line mesh, pipes → 1 mesh, streamlines → 1 LineSegments, all
   adapter nubs → 1 mesh per port type (world-merged, rebuilt on edit).
+- Data structures (v0.155 audit): per-frame and per-edit queries go through
+  hash indexes, never linear scans — aero plates get a uniform-grid SUPERSET
+  index (3×3×3 probe of 1.5 m cells ≥ max influence 1.48 m; exact slab/r2
+  tests run on the result = bit-identical streamlines) above 200 plates;
+  below that the ~6 ns allocation-free scan beats 27 hash probes (adaptive,
+  `aeroUseGrid`; giant craft 1024 plates 6.5→5.0 ms, airliner 92 plates must
+  KEEP the scan — grid measured 2.4→5.0 regression). All per-frame cell keys
+  are INTEGERS (`cellKeyV` base-8192 encoding; string keys regressed the
+  giant 6.5→7.5, PERF.md #8). serialize()'s type-255 mirror sync (live
+  Map index, sequential semantics preserved) and syncAdapters (Map by comp
+  index, invalidated at the setModel queue rebuild) index likewise.
 - Rendering is ON-DEMAND: call `invalidate()` after anything changes; the
   loop only draws on invalidation, controls movement, or while flow is on.
   Never reintroduce unconditional per-frame `renderer.render`.
@@ -384,7 +395,12 @@ landing page and README together when the viewer changes).
    −y side, ports ≤ 0.20 m of the model bbox (cable tips sit on visible
    sockets = 0.14 m off the proxy box). Guards the convention-independent
    junction display pose (FORMAT.md: file quat (w,−x,−y,z), never derived
-   from the mapped view quat). Craft without fixtures report POSTEST SKIP.
+   from the mapped view quat). Giant (3509975859) AERO-GRID pins (only
+   grid-path craft, 1024 plates): grid ON, the 3×3×3 query is a SUPERSET of
+   the influencing plates at 250 golden-ratio box points, freestream
+   upstream, wake deficit >0.25 anchored on the first inserted solid cells
+   (bbox-face probes fly through its sparse skin). Craft without fixtures
+   report POSTEST SKIP.
    A GENERIC btn-* suite runs on every postest craft: ToggleButton renders
    exactly ONE lever (state picks axle/switch vs axle2/switch2), the lever
    centre matches the .ini derivation pivot+qV·mirror(Rz(0|−π)·Rx(18°)·
