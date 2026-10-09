@@ -1584,28 +1584,53 @@ function select(i, doFly) {
   if (doFly) flyTo(i);         // camera fly is manual-only (canvas click / list dblclick)
 }
 
-// ---------- rotate gizmo (Blender-style, v0.150) ----------
-// Rings on the selected part: drag a coloured arc to rotate about that VIEW
-// axis, the big outer ring is a free trackball, Shift snaps to 15°. Written
+// ---------- rotate gizmo (Blender-style, v0.150; order fix v0.151) ----------
+// Rings on the selected part; the big outer ring is a free trackball, Shift
+// snaps to 15°. WYSIWYG ORDER semantics live in the PURE gizmoSpinRing/
+// gizmoSpinEye model below (space='local' = intrinsic spin about each ring's
+// currently-drawn axis). v0.150 shipped world space — fixed view axes
+// spinning while the rings visibly moved with the part: after a 90° pitch
+// the next ring no longer spun the axis it showed (user: "I expect it to
+// rotate according to what is shown"). Written
 // back through the exact inverse of the display chain, so saved files stay
 // byte-consistent for BOTH quaternion conventions (rawFromView also strips
 // the wheel-droop / junction / button display poses).
-// THE PROXY IS MANDATORY: components live under worldM (scale.z=−1) and carry
-// their own root scale.z=−1 with a RAW-geometry frame. TransformControls'
-// rotation premultiplies in the ATTACHED object's parent frame — attached to
-// the mirrored object directly, a world-space drag would land mirrored in the
-// local frame: X-axis drags happen to stay correct, Y and Z invert (S·R·S
-// conjugation) — the axis-dependent sign mess that ate v0.143. So the gizmo
-// attaches to a scene-root proxy carrying the part's VISIBLE pose
-// (decompose() of the negative-determinant chain = proper rotation
-// R(flipZ(qv))); writeback flips back with the involution qv = flipZ(qW)
-// before rawFromView. Pinned by selftest `gizmo=true` (Y-axis 0.7 rad drag
-// on the PilotSeat — z components break the symmetry so a sign slip fails).
+// THE PROXY IS MANDATORY: TransformControls writes the ATTACHED object's
+// quaternion raw, while components must be written through our pipeline
+// (applyGizmoOrientation → dirty flag, realMap mirrors, syncAdapters, and
+// rawFromView for the file quaternion incl. droop/junction display-pose
+// undo) — and component roots carry scale.z=−1, which would feed negative
+// scale into the control's world math. Decompose of the component chain
+// yields qv·Ry(π) (THREE absorbs negative det by negating sx) — the RIGHT
+// gizmo frame, since its axes are the part's VISIBLE raw axes; see
+// applyGizmoOrientation below for the exact round-trip. Pinned by
+// ?gizmatest (order algebra + live writeback) and selftest `gizmo=true`.
 let gizmoOn = true;
+// ---------- gizmo rotation model (PURE — validated by ?gizmatest) ----------
+// WYSIWYG order-of-operations, Blender-style: dragging ring k by θ spins the
+// part about the axis that ring is DRAWN ALONG right now — the part's own
+// axis — i.e. the INTRINSIC update  q ← q·R(e_k, θ), which equals the
+// world-space premultiply R(q·e_k, θ)·q through the currently-visible axis.
+// Successive drags compose in drag order: after a 90° pitch, the ring that
+// now reads as "roll" truly spins the apparent axis (world-space mode, which
+// we had first, spins old view axes while the rings visibly moved — the part
+// then never turns the way the gesture shows, user report v0.150).
+// The big trackball ring instead spins about the camera eye axis (extrinsic,
+// inherently screen-consistent). TransformControls space='local' implements
+// exactly these two rules; the model functions below are the contract the
+// gizmo tests assert, independent of any UI.
+const _gUnit = { x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), z: new THREE.Vector3(0, 0, 1) };
+const gizmoSpinRing = (q, k, ang) =>
+  q.clone().multiply(new THREE.Quaternion().setFromAxisAngle(_gUnit[k], ang)).normalize();
+const gizmoSpinEye = (q, eye, ang) =>
+  new THREE.Quaternion().setFromAxisAngle(eye.clone().normalize(), ang).multiply(q).normalize();
+const gizmoCol = (q, k) => _gUnit[k].clone().applyQuaternion(q);   // visible ring axis
+const gizmoShot = new URLSearchParams(location.search).get('shot'); // render stop for screenshots
 const gizmoProxy = new THREE.Object3D(); gizmoProxy.name = 'rotProxy';
 scene.add(gizmoProxy);
 const tctl = new TransformControls(camera, renderer.domElement);
 tctl.setMode('rotate');
+tctl.space = 'local';                 // ring = part axis (see model above)
 tctl.setSize(0.8);
 tctl.addEventListener('objectChange', () => applyGizmoOrientation(gizmoProxy.quaternion));
 tctl.addEventListener('mouseDown', () => { controls.enabled = false; });
@@ -1629,12 +1654,24 @@ function syncGizmo() {
   if (gizmoOn && o) { syncGizmoPose(); tctl.attach(gizmoProxy); }
   else tctl.detach();
 }
-// scene-root (view) rotation → component: S··S involution then the standard
-// file write (droop/display-pose undo inside rawFromView)
+// Proxy pose = obj.quaternion·RY180: THREE decompose() absorbs a negative
+// scale by NEGATING SX, so getWorldQuaternion() on the scale.z=−1 root is
+// qv·Ry(π), not qv. That stripped frame is the RIGHT gizmo frame — its axes
+// are the part's VISIBLE raw axes (x̂, ŷ, −ẑ, the mirror flips z) — and in
+// it a local-mode ring drag (P ← P·R(e_k,θ)) maps back by qv ← P·RY180 into
+// exactly the WYSIWYG world form qv' = R(drawn axis, θ)·qv. Components must
+// still be written through our pipeline (applyGizmoOrientation → dirty
+// flag, realMap mirrors, syncAdapters, rawFromView for the file quaternion
+// incl. droop/junction display-pose undo). The scene-root proxy also keeps
+// the negative-scale root out of the control's own world math. A plain copy
+// (no ·RY180) was the v0.150 writeback bug: the part rendered 180° off its
+// rings (?gizmatest live/proxy pins). Pinned by ?gizmatest (order algebra +
+// live writeback) and selftest `gizmo=true`.
+const GIZMO_Y180 = new THREE.Quaternion(0, 1, 0, 0);      // Ry(π), self-inverse
 function applyGizmoOrientation(qW) {
   const i = selected, o = compObjs?.[i];
   if (!o) return;
-  const qv = new THREE.Quaternion(qW.x, qW.y, -qW.z, qW.w);
+  const qv = qW.clone().multiply(GIZMO_Y180);             // undo decompose's sx flip
   o.quaternion.copy(qv);
   for (const r of realMap.get(i) || []) r.quaternion.copy(qv);
   model.data.components[i].orientation = rawFromView(o, qv);
@@ -3658,6 +3695,114 @@ async function runPosTest() {
   document.title = `POSTEST ${ptPass}/${ptTot} ${bad.length ? 'FAIL' : 'PASS'}${suite ? '' : ' SKIP'} bad=${bad.join(',') || 'none'}`;
 }
 
+// ---------- ?gizmatest: rotation-order contract for the rotate gizmo ----------
+// Works on a SYNTHETIC single-component blueprint (one PilotSeat, identity
+// orientation) with the camera focused IN FRONT of the seat (pilot faces the
+// camera) — the user-suggested isolation for "rotate as it is SHOWN".
+// Structure per user: the spin algebra lives in the pure gizmoSpinRing/
+// gizmoSpinEye functions (UI-free, asserted here directly); TransformControls
+// is configured to implement exactly that rule (space='local' applies
+// q·R(e_k,θ) = R(visible axis,θ)·q); the writeback (applyGizmoOrientation →
+// rawFromView) is the UNCHANGED v0.150 blueprint path, proven to carry the
+// chained pose into the file quaternion bit-true.
+// ?gizmatest&shot=1|2|3 leaves the demo scene at before / +pitch90 /
+// +pitch90+roll90 for headless screenshots.
+async function runGizmoTest() {
+  const fails = []; let nPins = 0;
+  const ok = (nm, cond) => { nPins++; if (!cond) fails.push(nm); };
+  try {
+    let tw = Date.now();   // let the default load finish (manifest + scene) first
+    while (!model && Date.now() - tw < 10000) await new Promise(r => setTimeout(r, 100));
+    if (!model) { document.title = 'GIZMATEST ERR no baseline'; return; }
+    // one-component blueprint; data.colors PRESENT so LEGACY_Q=false
+    const seatBp = () => ({ version: 2, mass: 40, type: 'Archean Build Blueprint',
+      author: 'gizmatest', datetime: '2026-10-09 00:00:00', workshop_item_id: 9000000002,
+      box_min: { x: -0.4, y: 0, z: -0.4 }, box_max: { x: 0.4, y: 0.9, z: 0.4 },
+      box_size: { x: 0.8, y: 0.9, z: 0.8 },
+      data: { alias: 'gizmatest seat', colors: [
+          { r: 200, g: 200, b: 200, opacity: 15, roughness: 0, metallic: 0 },
+          { r: 90, g: 90, b: 90, opacity: 15, roughness: 0, metallic: 0 }],
+        components: [{ type: 'PilotSeat', module: 'ARCHEAN_pilot_seat',
+          position: { x: 0, y: 0, z: 0 }, frame_x: 0, frame_y: 0, frame_z: 0,
+          orientation: { w: 1, x: 0, y: 0, z: 0 },
+          colors: { color1: 0, color2: 1 }, data: {}, occupancies: [] }],
+        blocks: [], triangles: [], pipes: [] } });
+    const aimCamera = () => { camera.position.set(0, 0.55, 2.6);
+      controls.target.set(0, 0.3, 0); camera.lookAt(controls.target);
+      controls.update(); invalidate(); };
+    if (!realModelsOn) setRealModels(true);      // a recognizable seat for shots
+    setModel(seatBp(), 'gizmatest seat');
+    select(0);
+    aimCamera();
+
+    // ---- A. the pure contract, generic (UI-free) pose ----
+    const D90 = Math.PI / 2, TH = 1.0;
+    const q0 = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.28, 0.7, -0.15, 'YXZ'));
+    const qAx = (a, t) => new THREE.Quaternion().setFromAxisAngle(a.clone().normalize(), t);
+    for (const k of ['x', 'y', 'z']) {          // each ring spins about ITS axis
+      const q1 = gizmoSpinRing(q0, k, TH), a = gizmoCol(q0, k);
+      const others = ['x', 'y', 'z'].filter(j => j !== k);
+      ok('ring' + k, gizmoCol(q1, k).dot(a) > 1 - 1e-6
+        && others.every(j => gizmoCol(q1, j).dot(
+             gizmoCol(q0, j).applyQuaternion(qAx(a, TH))) > 0.9999));
+    }
+    // WYSIWYG identity: intrinsic == world premultiply about the VISIBLE axis
+    ok('equiv', Math.abs(gizmoSpinRing(q0, 'x', TH)
+      .dot(qAx(gizmoCol(q0, 'x'), TH).multiply(q0).clone())) > 0.9999);
+    // the user's case: pitch 90° THEN roll 90° — order matters, and the second
+    // step spins about the ring's axis as MOVED BY the first step
+    const qP = gizmoSpinRing(q0, 'x', D90), qPR = gizmoSpinRing(qP, 'y', D90);
+    const qRP = gizmoSpinRing(gizmoSpinRing(q0, 'y', D90), 'x', D90);
+    ok('noncommute', 1 - Math.abs(qPR.dot(qRP)) > 0.2);
+    // world-frame view of the same chain: forward vector a-turns about the
+    // visible X ring, THEN turns about the (moved) visible Y ring
+    const za = gizmoCol(q0, 'z').applyQuaternion(qAx(gizmoCol(q0, 'x'), D90));
+    const zb = za.applyQuaternion(qAx(gizmoCol(qP, 'y'), D90));
+    ok('chain', gizmoCol(qPR, 'z').dot(zb) > 0.9999);
+    // trackball: extrinsic spin about the camera eye axis
+    const eye = new THREE.Vector3(0.3, 0.4, 1);
+    ok('eye', Math.abs(gizmoSpinEye(q0, eye, TH)
+      .dot(qAx(eye, TH).multiply(q0).clone())) > 0.9999);
+    // shipped configuration = the rule the model describes
+    ok('config', tctl.mode === 'rotate' && tctl.space === 'local');
+
+    // ---- B. scene proof through the REAL writeback path ----
+    const obj = compObjs[0], comp = model.data.components[0];
+    scene.updateMatrixWorld(true);
+    const qv0 = obj.getWorldQuaternion(new THREE.Quaternion());   // stripped frame = qv·RY180
+    const projN = (q) => { const p = new THREE.Vector3(0, 0, 1)   // proxy +z = part raw −z = nose
+        .applyQuaternion(q).add(camera.position).project(camera); return [p.x, p.y]; };
+    const qv1 = gizmoSpinRing(gizmoSpinRing(qv0, 'x', D90), 'y', D90);   // proxy-frame chain
+    const n0 = projN(qv0);
+    applyGizmoOrientation(qv1);
+    scene.updateMatrixWorld(true);
+    ok('file', Math.abs(viewQuat(comp.orientation)
+      .dot(qv1.clone().multiply(GIZMO_Y180))) > 0.9999);          // mesh qv = P·RY180
+    ok('live', Math.abs(obj.getWorldQuaternion(new THREE.Quaternion())
+      .dot(qv1)) > 0.9999);                                       // decompose tracks the rings
+    const n1 = projN(qv1);
+    ok('nose', Math.hypot(n1[0] - n0[0], n1[1] - n0[1]) > 0.4);  // swung visibly on screen
+    ok('proxy', Math.abs(gizmoProxy.quaternion.dot(qv1)) > 0.9999);  // rings track the part
+
+    // ---- C. demo state for screenshots (before / +pitch / +pitch+roll) ----
+    setModel(seatBp(), 'gizmatest seat');
+    select(0);
+    aimCamera();
+    scene.updateMatrixWorld(true);
+    const qv = compObjs[0].getWorldQuaternion(new THREE.Quaternion());
+    const step = Math.min(2, Math.max(0, (gizmoShot | 0) - 1));
+    const demoQ = [qv, gizmoSpinRing(qv, 'x', D90),
+                   gizmoSpinRing(gizmoSpinRing(qv, 'x', D90), 'y', D90)][step];
+    if (step > 0) applyGizmoOrientation(demoQ);
+    invalidate();
+    document.title = fails.length ? 'GIZMATEST FAIL ' + fails.join(',')
+                                  : `GIZMATEST PASS n=${nPins}`;
+  } catch (e) {
+    document.title = 'GIZMATEST ERR ' + e.message + ' @'
+      + String(e.stack).split(String.fromCharCode(10))[1].trim().slice(0, 70);
+  }
+}
+
 // ---------- UI sweep (?uitest) ----------
 // Headless click-through of the whole panel: every checkbox/button/slider/⟲
 // the user can touch gets driven through its REAL handler, plus behaviours
@@ -3924,6 +4069,7 @@ if (location.search.includes('proxytest')) runProxyTest();
 if (location.search.includes('comptest')) runCompTest();
 if (location.search.includes('postest')) runPosTest();
 if (location.search.includes('uitest')) setTimeout(runUiTest, 1500);
+if (location.search.includes('gizmatest')) runGizmoTest();
 
 // ---------- self-test (view3d.html?selftest): simulates slider edits + save ----------
 if (location.search.includes('selftest')) {
@@ -4170,11 +4316,13 @@ if (location.search.includes('selftest')) {
       const ok26 = model.moff[0] === 0 && model.moff[1] === 0 && model.moff[2] === 0
         && model.cv[0] === 0 && model.cv[1] === 0 && model.cv[2] === 0
         && isFinite(model.box_min.x) && blockGroup.position.lengthSq() === 0;
-      // ok27: rotate gizmo mirror chain — a 0.7 rad WORLD drag about view +y
-      // applied to the PilotSeat must write back a file quaternion whose
-      // decode equals flipZ(drag·visible): the seat's saved pitch makes the
-      // z components nonzero, so any sign slip in the S··S conjugation (the
-      // axis-dependent mess from attaching to the mirrored object) fails
+      // ok27: rotate gizmo writeback shape — a 0.7 rad drag about view +y
+      // (the trackball's world-premultiply form) applied to the PilotSeat
+      // must land VERBATIM in the mesh quaternion and round-trip the file
+      // quaternion (viewQuat∘rawFromView = id): the seat's saved pitch makes
+      // the z component nonzero, so any mirror/conjugation slip in the chain
+      // fails (v0.150 shipped exactly such a flipZ step; ?gizmatest covers
+      // the ring-order semantics, this pins the writeback path)
       let ok27 = false;
       (function () {
         const ci = model.data.components.findIndex(c => c.type === 'PilotSeat');
@@ -4186,10 +4334,10 @@ if (location.search.includes('selftest')) {
         const pq = drag.multiply(q0);                              // what TControls computes
         applyGizmoOrientation(pq);
         const qf = model.data.components[ci].orientation;
-        const want = new THREE.Quaternion(pq.x, pq.y, -pq.z, pq.w); // flipZ involution
-        const d1 = Math.abs(viewQuat(qf).dot(want));               // file → view decode
-        const d2 = Math.abs(o.quaternion.dot(want));               // live mesh pose
-        ok27 = d1 > 0.9999 && d2 > 0.9999 && dirty;
+        const want = pq.clone().multiply(GIZMO_Y180);   // proxy frame → mesh frame
+        ok27 = Math.abs(viewQuat(qf).dot(want)) > 0.9999           // file → view decode
+          && Math.abs(o.quaternion.dot(want)) > 0.9999             // live mesh pose
+          && dirty;
         select(-1);
       })();
       const ok17 = nThr > 0 && !!netThrust && netThrust.n === nThr

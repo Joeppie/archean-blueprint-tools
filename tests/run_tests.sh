@@ -11,7 +11,10 @@
 #        5. postest          — per-craft placement fixtures + button-state sweep
 #        6. uitest           — headless UI sweep: drives every panel control,
 #                             keyboard shortcuts, presets, dirty/save lifecycle
-#        7. smoke render     — one WebGL screenshot (iGPU Vulkan via ANGLE;
+#        7. gizmatest        — rotate-gizmo rotation-order contract on a
+#                             synthetic single-PilotSeat blueprint, camera in
+#                             front of the seat (+3 screenshot states)
+#        8. smoke render     — one WebGL screenshot (iGPU Vulkan via ANGLE;
 #                              GPU=0 forces the slow SwiftShader CPU fallback)
 #
 # Exit code: 0 = all passed. Artifacts in $OUT (default /tmp/archean-tests).
@@ -81,6 +84,17 @@ title=$(chrome --virtual-time-budget=20000 \
   --dump-dom "$BASE/viewer/index.html?uitest" 2>/dev/null | grep -oPm1 '(?<=<title>)[^<]*')
 echo "   $title"
 case "$title" in *UITEST\ PASS*) ;; *) echo "   FAIL"; fail=1;; esac
+
+echo "── gizmatest (gizmo rotation order on a single-seat craft + visual stops)"
+title=$(chrome --virtual-time-budget=20000 \
+  --dump-dom "$BASE/viewer/index.html?gizmatest" 2>/dev/null | grep -oPm1 '(?<=<title>)[^<]*')
+echo "   $title"
+case "$title" in *GIZMATEST\ PASS*) ;; *) echo "   FAIL"; fail=1;; esac
+for s in 1 2 3; do   # before / +pitch90 / +pitch90+roll90 — eyeball WYSIWYG order
+  chrome --window-size=900,700 --virtual-time-budget=$SMBUD \
+    --screenshot="$OUT/gizmo$s.png" "$BASE/viewer/index.html?gizmatest&shot=$s" 2>/dev/null
+  [ -s "$OUT/gizmo$s.png" ] && [ "$OUT/gizmo$s.png" -nt "$OUT/.start" ] || { echo "   FAIL (no gizmo$s.png)"; fail=1; }
+done
 
 echo "── position tests (placement fixtures + generic button sweep)"
 for c in 3812927875 3518436870 3417786605 3803780241 3381670618; do

@@ -38,6 +38,7 @@ tests/run_tests.sh                      # full headless suite (python3 + chromiu
 python3 -m http.server 8650             # manual serving (repo root)
 # viewer:   http://127.0.0.1:8650/viewer/index.html
 # selftest: http://127.0.0.1:8650/viewer/index.html?selftest  (tab title: SELFTEST PASS)
+# gizmatest: viewer/index.html?gizmatest (GIZMATEST PASS n=12; &shot=1|2|3 = WYSIWYG screenshot states)
 # regtest:  http://127.0.0.1:8650/regtest/regtest.html         (page ends 'REGTEST: PASS')
 # other craft: viewer/index.html?open=../testdata/<id>/blueprint.json
 # perf probe: viewer/index.html?perf → tab title: PERF fps=… draw=<draw-calls> …
@@ -286,10 +287,14 @@ landing page and README together when the viewer changes).
      pitching the PilotSeat must NOT steer/slow the wind (heading-only,
      `seatpitch=true`); display anchoring is a no-op on frame-(0,0,0) crafts
      like ISW (`anchor=true`). The rotate gizmo (Blender-style rings,
-     v0.150) attaches to a SCENE-ROOT PROXY and a 0.7-rad world Y-drag on the
-     PilotSeat round-trips the z-mirror chain exactly (`gizmo=true` — a
-     mirrored attach inverts Y/Z drags while X stays correct, so this pin
-     must never be sign-relaxed). The explode/assembly feature (v0.140/141) was
+     v0.151) drags INTRINSIC (space='local'): each drag spins the axis
+     the ring is CURRENTLY DRAWN along, so pitch-then-roll composes exactly
+     as seen (user WYSIWYG rule); scene-root proxy, writeback qv = P·Ry(π)
+     (THREE decompose absorbs the negative scale by negating sx). `gizmo=
+     true` pins the writeback round-trip; `?gizmatest` (synthetic single-
+     seat blueprint, camera facing the pilot, n=12 + &shot=1|2|3 visual
+     states) pins the order algebra and the live pose. The explode/assembly
+     feature (v0.140/141) was
      REMOVED in v0.142 (user: "a catastrophe") — do not resurrect.
      thrust display + wind model: every DIRECTIONAL propulsor (THRUST
      table = .ini TARGET axes; Propeller double-headed + excluded from
@@ -329,6 +334,16 @@ landing page and README together when the viewer changes).
    rotate-gizmo attach/toggle pins. Title: `UITEST PASS n=<pins> ctrls=N`
    (n counts ok() live, nothing hardcoded) /
    `UITEST FAIL <pins>`, captured errors in #out.
+2c-c. `?gizmatest` (v0.151): rotate-gizmo ROTATION-ORDER suite on a
+   synthetic single-PilotSeat blueprint, camera focused in front of the seat
+   (user-suggested isolation). Asserts the PURE gizmoSpinRing/gizmoSpinEye
+   contract (UI-free algebra: ring drag = intrinsic spin about the ring's
+   drawn axis; trackball = eye-axis extrinsic; pitch90→roll90 order matters
+   and uses the MOVED axis) + the shipped config (rotate/local) + the LIVE
+   writeback through applyGizmoOrientation (file decode, mesh pose, ring
+   tracking, visible nose swing). `&shot=1|2|3` leaves the scene at
+   before/+pitch90/+pitch90+roll90 for headless eyeball (runner saves
+   gizmo1..3.png). Title: `GIZMATEST PASS n=12`.
 2c. `?postest`: placement fixtures keyed per craft (the POSTESTS table in
    view3d.js — the sanctioned exception to "no per-craft constants": fixtures
    probe the RENDERED scene where generic checks cannot see a pose bug).

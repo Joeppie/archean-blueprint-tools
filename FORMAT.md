@@ -496,15 +496,22 @@ Zero-build Three.js (WebGL) inspector: `python3 -m http.server 8650` (repo root)
   craft (its ISW dashboards/battery lean); we are game-true for both.
   Selftest `mural=true` pins the legacy side. `viewQuat`/`rawFromView`
   switch on `LEGACY_Q` (set in `setModel`); saved files stay byte-exact.
-- **Rotate gizmo (v0.150) must attach to a scene-root PROXY**, never to a
-  mesh inside the mirrored group: TransformControls premultiplies rotation in
-  the attached object's PARENT frame, so a mirrored parent inverts Y/Z drags
-  while X stays correct (axis-dependent sign mess again). The proxy carries
-  the part's VISIBLE pose — `getWorldQuaternion()` decompose of the
-  negative-determinant chain returns the proper rotation R(flipZ(qv)) — and
-  writeback applies the involution qv = flipZ(qWorld) before `rawFromView`
-  (which still strips wheel droop / junction / button display poses).
-  Selftest `gizmo=true`.
+- **Rotate gizmo (v0.150/v0.151) attaches to a scene-root PROXY**:
+  TransformControls writes the attached object's quaternion raw, while parts
+  must go through `applyGizmoOrientation` (dirty flag, real-model mirrors,
+  `syncAdapters`, then `rawFromView` for the file quaternion). Component
+  roots carry `scale.z=−1`, and THREE `decompose()` absorbs a negative
+  determinant by negating **sx** — so `getWorldQuaternion()` = `qv·Ry(π)`.
+  That stripped frame is exactly the WYSIWYG gizmo frame (its axes are the
+  part's VISIBLE raw axes x̂, ŷ, −ẑ), and a local-mode ring drag `P ← P·R(e_k,θ)`
+  maps back through `qv ← P·Ry(π)` into the world form `qv' = R(drawn axis,θ)·qv`.
+  Ring drag = INTRINSIC (space='local'): each drag spins about the ring's
+  currently-drawn axis, so pitch-90-then-roll-90 composes like you see it.
+  Writeback shortcuts (plain copy, or a flipZ conjugation) put the part
+  180°/mirrored off its rings — `?gizmatest` `live`/`proxy`/`file` pins and
+  selftest `gizmo=true` catch both. Order algebra + visual stops: `?gizmatest`
+  (synthetic single-PilotSeat blueprint, camera in front of the seat,
+  `&shot=1|2|3` screenshots before/+pitch90/+roll90).
 
 ## Propulsion & the viewer's wind model (v0.122; RCS rule v0.148)
 
