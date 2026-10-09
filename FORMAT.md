@@ -95,6 +95,20 @@ lit); its pixel text is 8px XenonPixel on a fixed 6×9-px grid, binarised
 (alpha>0 ⇒ lit pixel, no AA), canvas = 5 px per cm, NearestFilter, texture in
 sRGB.
 
+- **Left-right symmetry in the file is GEOMETRIC (v0.160 decode).** The
+  editor's mirror tool writes the twin as a SEPARATE component of the same
+  type at a mirrored `position` (x flips, y/z identical): dolphin's twin
+  tail-door hinges are `SmallHinge[29]/[49]` at x=±1.125; twin `Build`
+  (subgrid) pairs exist in 12 of the 25 corpus crafts (XYQ-615:
+  `Build[5]/[41]` at ±0.635 = the door pair). The twin's `orientation` is
+  NOT forced-mirrored (the dolphin hinges mount 90° apart — builder
+  geometry, not a file law), so the viewer's gizmo moves propagate the
+  MIRRORED DELTA (dx,dy,dz)→(−dx,dy,dz) (view frame; file frame
+  (−dx,dy,−dz)) and leave each twin's pose and joint state its own; the
+  twins' occ/type-255 mirrors follow the save-time per-component delta
+  shift. `mirrorAxis`-flagged parts (the gantry craft: 21 entries) are
+  SELF-MIRRORED instances — a single entry renders both halves.
+
 ## `blocks` — the voxel build
 
 `{colors[7], frame_x/y/z, material, pos_x/y/z, size_x/y/z, type}`

@@ -43,7 +43,7 @@ tests/run_tests.sh                      # full headless suite (python3 + chromiu
 python3 -m http.server 8650             # manual serving (repo root)
 # viewer:   http://127.0.0.1:8650/viewer/index.html
 # selftest: http://127.0.0.1:8650/viewer/index.html?selftest  (tab title: SELFTEST PASS)
-# gizmatest: viewer/index.html?gizmatest (GIZMATEST PASS n=16; &shot=1|2|3 = WYSIWYG screenshot states)
+# gizmatest: viewer/index.html?gizmatest (GIZMATEST PASS n=17; &shot=1|2|3 = WYSIWYG screenshot states)
 # regtest:  http://127.0.0.1:8650/regtest/regtest.html         (page ends 'REGTEST: PASS')
 # other craft: viewer/index.html?open=../testdata/<id>/blueprint.json
 # perf probe: viewer/index.html?perf → tab title: PERF fps=… draw=<draw-calls> …
@@ -354,23 +354,28 @@ landing page and README together when the viewer changes).
      as seen (user WYSIWYG rule); scene-root proxy, writeback qv = P·Ry(π)
      (THREE decompose absorbs the negative scale by negating sx). `gizmo=
      true` pins the writeback round-trip; `?gizmatest` (synthetic single-
-     seat blueprint, camera facing the pilot, n=16 + &shot=1|2|3 visual
+     seat blueprint, camera facing the pilot, n=17 + &shot=1|2|3 visual
      states) pins the order algebra, the LIVE pose, and v0.156 KNOB
      CONTINUITY (`gizmoUnwrap`): TransformControls reports ring drags as a
      raw atan2 angle, so a knob sweep past 180° POPS back toward the start
      (user report) — the objectChange writeback unwraps per-event wrapped
      deltas into a continuous spin, both directions. Rings are thickened
-     annuli at full opacity (TGC's default 0.02-wide/25 % reads invisible).
-     The selection is boxed by a FAT 4.5px LineSegments2 outline,
-     EXPANDED 0.07 m off the part (outline=true: 12 segments on select,
-     hidden on none; Box3Helper's 1px lines vanished on HiDPI — user
-     "selection should be more clear"; v0.157 "bigger highlight"). Connectors
+     annuli at full opacity — v0.160: r169 builds them as HAIRLINE
+     TorusGeometry (the v0.156 RingGeometry filter never matched), so the
+     swap now matches Torus tubes too; the HOVERED/active ring swaps to a
+     FAT tube instead of TGC's yellow flash (gizmostyle pin).
+     The selection is boxed by a FAT 3.5px GOLDEN LineSegments2 outline,
+     EXPANDED 0.07 m off the part, PULSING with the x-ray glow (outline=
+     true: 12 segments on select, hidden on none; Box3Helper's 1px lines
+     vanished on HiDPI — user "selection should be more clear"; v0.157
+     "bigger highlight"; v0.160 gold + slimmer "slightly less thick"). Connectors
      (adapter nubs) default HIDDEN on their own View-Options toggle
      (conndef=true), pipes/cables keep theirs. The v0.153 MODE
      WIDGET: a canvas click on a part pops ⊘/✥/⟳/ℹ TIED TO THE PART
      (v0.156: projected bbox centre, re-projected every rendered frame
      while open — no/move/rotate/info; last choice persists,
-     `archean-gizmo-mode`; v0.157: enlarged to 17 px buttons);
+     `archean-gizmo-mode`; v0.157: enlarged, v0.160: 26 px buttons
+     "2-3 times bigger for better ux");
      move = translate gizmo on the same proxy, writeback is the mirror
      involution (view z-flip) minus the compGroup display anchor, occ +
      type-255 mirror cells follow via serialize()'s round(delta/CELL) shift
@@ -405,7 +410,10 @@ landing page and README together when the viewer changes).
      BionicDolphin's cabin (>100 cells) while ISW stays wind-swept;
      sampleVel is zero inside sealed cells (`seal=true cabin=…`). The
      selection is an incandescent X-ray overlay (shared-geometry meshes,
-     matrix-synced every rendered frame so it tracks live edits). Camera
+     matrix-synced every rendered frame so it tracks live edits), GOLDEN
+     and PULSING (v0.160: x-ray opacity, emissive intensity and outline
+     breathe together; the on-demand loop wakes only while a selection
+     lives). Camera
      fly-in is MANUAL-only: canvas click, component-list double-click
      (never list single-click, ?sel= deep links, or selftest).
 2. `regtest`: every testdata blueprint parses; blocks/components within bbox
@@ -459,7 +467,7 @@ landing page and README together when the viewer changes).
    `&shot=1|2|3` leaves
    the scene at
    before/+pitch90/+pitch90+roll90 for headless eyeball (runner saves
-   gizmo1..3.png). Title: `GIZMATEST PASS n=16`.
+   gizmo1..3.png). Title: `GIZMATEST PASS n=17`.
 2c. `?postest`: placement fixtures keyed per craft (the POSTESTS table in
    view3d.js — the sanctioned exception to "no per-craft constants": fixtures
    probe the RENDERED scene where generic checks cannot see a pose bug).
@@ -491,7 +499,10 @@ landing page and README together when the viewer changes).
    staying plain-numeric, and `subjoint-angle` spins that pivot's master to
    90°: the group must rotate EXACTLY 90° about the decoded axle axis
    (sign-sensitive dot>0.9999), swing about the pivot point, and return.
-   XYQ-615 (3803780241) decodes Build[41]←ToggleButton, Build[5]←Dashboard.
+   XYQ-615 (3803780241) decodes Build[41]←ToggleButton, Build[5]←Dashboard, and
+   its Build[5]/[41] ±0.635 TWIN SUBGRID PAIR proves symmove-sub (one
+   door dragged, its twin rides the mirrored delta — dolphin's symmove pin
+   does the same for SmallHinge twins, sign-sensitive in x).
    v0.157 gantry (3732302108) `subjoint-pos`: the LinearTrack-mastered
    subgrid slides +0.25 m along its decoded axle axis, and returns.
    Dev-shot hooks leave final states for headless screenshots: uitest
@@ -530,6 +541,20 @@ landing page and README together when the viewer changes).
   `document.title` / `#out` for `--dump-dom`.
 
 ## Backlog
+- **Git attribution (user-requested, do soon):** commits are authored as
+  `joep <pseudonymous-local-email>`, so GitHub does NOT link them to the
+  Joeppie account. Fix: set the repo identity to the GitHub-linked
+  identity — `git config user.name Joeppie` + `user.email
+  joeppie@gmail.com` (that mailbox must be VERIFIED on the GitHub
+  account; noreply@… is the private-email alternative) — new commits then
+  attribute. Historic commits need a history rewrite
+  (`git filter-repo --mailmap`, then force-push: destructive, ask first).
+- **view3d.js is monolithic** (~5.5k lines): split into zero-build ES
+  modules — e.g. scene/render, gizmo, UI panels, subgrids, the test
+  suites — keeping the importmap/CDN, no-bundler constraint and the
+  module-closure test hooks (CDP eval cannot see module scope; suites
+  report via document.title). Update this file's Layout section + the
+  "one flat file" convention when done.
 - Dashboard BUTTON elements (Toggle/Push/Arrow/Led) as real glTF models with
   the game's base transform + state animation (dev-viewer parity, transcribed
   in FORMAT.md §Handedness); today we draw plate+text approximations.

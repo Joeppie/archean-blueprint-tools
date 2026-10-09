@@ -1195,9 +1195,21 @@ function applySubGizmo(g) {
     else if (s) p.addScaledVector(axis, -s);
     if (a) q.premultiply(new THREE.Quaternion().setFromAxisAngle(axis, -a * Math.PI / 180));
   }
+  // twin subgrids (door pairs!) ride the mirrored delta (v0.160)
+  const d = { x: p.x - g.userData.base.p.x, y: p.y - g.userData.base.p.y,
+    z: p.z - g.userData.base.p.z };
   g.userData.base.p.copy(p); g.userData.base.q.copy(q);
   bc.position.x = p.x; bc.position.y = p.y; bc.position.z = -p.z;
   bc.orientation = rawFromView({ userData: {} }, q);
+  // d is the VIEW-frame base delta; world x-mirror = (−dx,dy,dz) in view,
+  // which lands in the twins' FILE frame as (−dx, dy, −dz).
+  for (const j of symTwinIndex().get(g.userData.sub) || []) {
+    const tb = model.data.components[j];
+    tb.position.x -= d.x; tb.position.y += d.y; tb.position.z -= d.z;
+    const tg = subGroup.children.find(o => o.userData.sub === j);
+    if (tg) { tg.userData.base.p.x -= d.x; tg.userData.base.p.y += d.y;
+      tg.userData.base.p.z += d.z; }
+  }
   syncSubJoints();
   markDirty();
 }
@@ -1515,6 +1527,7 @@ function buildPipes() {
 let wsNames = null;
 function setModel(obj, srcName) {
   model = obj;
+  symTwins = null; symTwinIndex();          // twin cache: per-model, at CLEAN positions
   // workshop link (header): real numeric item ids get a ↗ to the Steam page
   { const w = document.getElementById('wslink');
     if (w) {
@@ -1859,16 +1872,45 @@ tctl.addEventListener('mouseUp', () => {
 });
 scene.add(tctl.getHelper());
 // Ring visibility (v0.156, user: "its too thin as well"): TransformControls
-// draws its rotation rings as 0.02-wide RingGeometry annuli at 25 % opacity —
+// draws its rotation rings as hairline toruses (0.0075 tube) at 25 % opacity —
 // near-invisible over a bright hull. Thicken the annulus and light them at
-// full strength (the invisible hit-discs keep opacity 0 = untouched).
+// full strength (the invisible hit-toruses keep opacity 0 = untouched).
+// v0.160 NOTE: r169's rings are TorusGeometry, not the RingGeometry the
+// v0.156 filter matched — the swap silently never fired (headless gizmatest
+// shots showed the hairline all along). Match BOTH; keep BOTH widths — the
+// HOVERED/active ring swaps to the fat one (styleGizmo) instead of TGC's
+// yellow flash (user: "selected axis shouldnt become yellow, thicker").
 tctl.getHelper().traverse(o => {
-  if (o.isMesh && o.geometry?.type === 'RingGeometry' && o.material.opacity > 0.1) {
+  if (!o.isMesh || o.material.opacity <= 0.1) return;
+  if (o.geometry?.type === 'RingGeometry') {
     o.geometry.dispose();
     o.geometry = new THREE.RingGeometry(0.28, 0.36, 64);
     o.material.opacity = 0.95;
+    o.userData.ringThin = o.geometry;
+    o.userData.ringFat = new THREE.RingGeometry(0.2, 0.44, 64);
+  } else if (o.geometry?.type === 'TorusGeometry') {
+    const { radius, arc } = o.geometry.parameters;
+    o.geometry.dispose();
+    o.geometry = new THREE.TorusGeometry(radius, 0.035, 6, 64, arc);
+    o.material.opacity = 0.95;
+    o.userData.ringThin = o.geometry;
+    o.userData.ringFat = new THREE.TorusGeometry(radius, 0.09, 8, 64, arc);
   }
 });
+// Rotate-gizmo hover style: TGC repaints the active axis yellow every frame
+// (its material._color cache holds the base colour) — undo the yellow, show
+// the fat ring instead. Runs on every rendered frame (paintHighlights).
+function styleGizmo() {
+  const G = tctl.getHelper().children.find(o => o.isTransformControlsGizmo);
+  if (!G) return;
+  for (const m of G.gizmo.rotate.children) {
+    if (!m.isMesh || !m.userData.ringThin) continue;
+    m.geometry = (m.name === tctl.axis) ? m.userData.ringFat : m.userData.ringThin;
+    if (m.material._color) m.material.color.copy(m.material._color);
+    if (m.material._opacity !== undefined) m.material.opacity = m.material._opacity;
+  }
+}
+tctl.addEventListener('change', () => invalidate());   // hover repaints the style
 const _gq = new THREE.Quaternion();
 function syncGizmoPose() {
   const o = compObjs?.[selected];
@@ -1958,10 +2000,62 @@ function applyGizmoPosition(pW) {
   if (!o) return;
   o.position.copy(pW).sub(compGroup.position);
   const p = model.data.components[i].position;
+  const d = { x: o.position.x - p.x, y: o.position.y - p.y, z: -o.position.z - p.z };
   p.x = o.position.x; p.y = o.position.y; p.z = -o.position.z;
   for (const r of realMap.get(i) || []) r.position.copy(o.position);
   syncAdapters(o);
+  symPropagate(i, d);                       // left-right twins ride along
   markDirty();
+}
+// ---------- symmetry twin index (v0.160, user: "moving a part that is in
+// symmetry should respect that") ----------
+// The game's left-right symmetry is GEOMETRIC in the file: the editor's
+// mirror tool places the twin as a SEPARATE component of the same type at
+// mirrored position (x flips, y/z identical) — 12/25 corpus crafts carry
+// twin Build pairs, the dolphin's twin tail doors hinge on SmallHinge
+// [29]/[49] at x=±1.125. Twins are NOT pose-mirrored (the dolphin pair
+// mounts its hinges 90° apart — builder geometry, not a file law), so a
+// gizmo move propagates the mirrored delta (dx,dy,dz)→(−dx,dy,dz) and
+// leaves each twin's own pose (and joint state) intact. Components with
+// mirrorAxis=1 (gantry craft) are self-mirrored instances — their own twin,
+// nothing to propagate. occ/type-255 mirrors follow via serialize()'s
+// per-component delta shift, exactly like the moved part itself.
+let symTwins = null;                        // compIdx -> [twinIdx...]
+function symTwinIndex() {
+  if (symTwins) return symTwins;
+  symTwins = new Map();
+  const byType = new Map();
+  (model?.data.components || []).forEach((c, i) =>
+    (byType.get(c.type) || byType.set(c.type, []).get(c.type)).push(i));
+  for (const idxs of byType.values())
+    for (const i of idxs) {
+      const a = model.data.components[i].position;
+      if (!a || Math.abs(a.x) < 0.011) continue;            // centreline: own twin
+      for (const j of idxs) {
+        if (j === i) continue;
+        const b = model.data.components[j].position;
+        if (b && Math.abs(a.x + b.x) < 0.011 && Math.abs(a.y - b.y) < 0.011
+            && Math.abs(a.z - b.z) < 0.011)
+          (symTwins.get(i) || symTwins.set(i, []).get(i)).push(j);
+      }
+    }
+  return symTwins;
+}
+// Propagate a file-space delta (dx,dy,dz) to the twins of comp i: mirrored
+// in x; meshes follow live, files carry the twins' own occ mirrors (the
+// save-time delta shift handles them).
+function symPropagate(i, d) {
+  if (!model || (!d.x && !d.y && !d.z)) return;
+  for (const j of symTwinIndex().get(i) || []) {
+    const q = model.data.components[j].position;
+    q.x -= d.x; q.y += d.y; q.z += d.z;
+    const oj = compObjs[j];
+    if (oj) {
+      oj.position.set(q.x, q.y, -q.z);
+      for (const r of realMap.get(j) || []) r.position.copy(oj.position);
+      syncAdapters(oj);
+    }
+  }
 }
 // apply the persisted mode WITHOUT invalidate(): module-eval order forbids
 // touching the render pipeline here; attach/paint happen on the first click.
@@ -2059,7 +2153,7 @@ controls.addEventListener('start', () => { fly = null; });   // user takes over
 // Box3Helper draws 1 px GL lines, invisible on HiDPI displays. LineSegments2
 // renders true screen-space-fat borders (3 px), depthTest off so the box
 // reads through the hull like the incandescence layer.
-const selEdgesMat = new LineMaterial({ color: 0x7dffcf, linewidth: 4.5,
+const selEdgesMat = new LineMaterial({ color: 0xffc233, linewidth: 3.5,
   transparent: true, depthTest: false, depthWrite: false });
 selEdgesMat.resolution.set(1400, 900);            // onResize keeps it live
 const selBox = new LineSegments2(new LineSegmentsGeometry(), selEdgesMat);
@@ -2078,10 +2172,18 @@ function boxEdges(bb, out) {                                // 12 segments
     out[i * 3] = V[j]; out[i * 3 + 1] = V[j + 1]; out[i * 3 + 2] = V[j + 2]; }
 }
 function paintHighlights() {
+  // Golden PULSE (v0.160, user: "should be pulsing, like a golden glow ...
+  // so we know its selected"): the selected part's incandescent layer,
+  // emissive shimmer and outline breathe together; the on-demand loop
+  // stays awake only while a selection lives.
+  const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 385);
+  selXrayMat.opacity = 0.42 + 0.46 * pulse;
+  selEdgesMat.opacity = 0.7 + 0.3 * pulse;
   compGroup.children.forEach((g, i) => {
     g.traverse(o => {
       if (!o.isMesh || !o.material.emissive) return;
-      if (i === selected) { o.material.emissive.setHex(0xb85a00); o.material.emissiveIntensity = 1.7; }
+      if (i === selected) { o.material.emissive.setHex(0xa8761e);
+        o.material.emissiveIntensity = 1.0 + 1.4 * pulse; }
       else if (i === hovered) { o.material.emissive.setHex(0x222200); o.material.emissiveIntensity = 1; }
       else { o.material.emissive.setHex(0x000000); o.material.emissiveIntensity = 1; }
     });
@@ -2101,6 +2203,8 @@ function paintHighlights() {
   for (const f of flashes)
     f.mat.opacity = 0.6 * Math.pow(1 - (performance.now() - f.t0) / f.dur, 2);
   if (modeAnchor && modeBox.classList.contains('vis')) projectModeAnchor();
+  styleGizmo();
+  if (selected >= 0) invalidate();          // keep the golden pulse alive
 }
 
 // ---------- cable power-surge + incandescent X-ray highlight ----------
@@ -2117,7 +2221,7 @@ surgeGroup.raycast = () => {};
 scene.add(surgeGroup);
 const surgeGeo = new THREE.SphereGeometry(0.055, 10, 8);
 let surges = [], flashes = [];
-const selXrayMat = new THREE.MeshBasicMaterial({ color: 0xff7a20, transparent: true,
+const selXrayMat = new THREE.MeshBasicMaterial({ color: 0xffb020, transparent: true,
   opacity: 0.6, blending: THREE.AdditiveBlending, depthTest: false,
   depthWrite: false, side: THREE.DoubleSide });
 let selPairs = [], selKey = -1;
@@ -4367,6 +4471,30 @@ const POSTESTS = {
       return (attached && okPos)
         || `attach=${attached} d=${d.toArray().map(v => v.toFixed(3))} want=${want.toArray().map(v => v.toFixed(3))}`;
     });
+    T('symmove', () => {             // v0.160: a gizmo move propagates to the
+      // left-right TWIN component (dolphin's twin tail-door hinges ±1.125):
+      // file delta (dx,dy,dz) → twin (−dx,dy,dz); pose stays its own.
+      const ent = [...symTwinIndex().entries()]
+        .find(([i, ts]) => ts.length && model.data.components[i].type === 'SmallHinge');
+      if (!ent) return 'no SmallHinge twin pair';
+      const [i, ts] = ent, j = ts[0];
+      const ci = model.data.components[i], cj = model.data.components[j];
+      const p0i = { ...ci.position }, p0j = { ...cj.position };
+      select(i); setGizmoMode('move');
+      const o = compObjs[i];
+      o.position.set(o.position.x + 0.25, o.position.y, o.position.z);
+      applyGizmoPosition(o.position.clone().add(compGroup.position));
+      const d = { x: ci.position.x - p0i.x, y: ci.position.y - p0i.y, z: ci.position.z - p0i.z };
+      const dj = { x: cj.position.x - p0j.x, y: cj.position.y - p0j.y, z: cj.position.z - p0j.z };
+      const okm = Math.abs(d.x - 0.25) < 1e-9 && Math.abs(dj.x + 0.25) < 1e-9
+        && Math.abs(dj.y) < 1e-9 && Math.abs(dj.z) < 1e-9;
+      ci.position.x = p0i.x; ci.position.y = p0i.y; ci.position.z = p0i.z;
+      cj.position.x = p0j.x; cj.position.y = p0j.y; cj.position.z = p0j.z;
+      compObjs[i].position.set(p0i.x, p0i.y, -p0i.z);
+      compObjs[j].position.set(p0j.x, p0j.y, -p0j.z);
+      syncAdapters(compObjs[i]); syncAdapters(compObjs[j]); markDirty();
+      return okm || `self=${JSON.stringify(d)} twin=${JSON.stringify(dj)}`;
+    });
   },
   '3803780241': () => {              // XYQ-615: 2 subgrids, pair-unique decode
     T('xyq-sub-masters', () => {
@@ -4374,6 +4502,29 @@ const POSTESTS = {
       const g = (bi) => (m.get(bi) || []).map(e => model.data.components[e.component]?.type).join();
       const a = g(41), b = g(5);
       return (a === 'ToggleButton' && b === 'Dashboard') || `Build[41]=${a} Build[5]=${b}`;
+    });
+    T('symmove-sub', () => {         // v0.160: twin SUBGRIDS (Build[5]/[41]
+      // at x=±0.635, the XYQ door pair) ride a subgrid gizmo move mirrored.
+      const g = subGroup.children.find(o => o.userData.sub === 41);
+      const tg = subGroup.children.find(o => o.userData.sub === 5);
+      if (!g || !tg) return 'twin Build groups missing';
+      selectSub(41); setGizmoMode('move');
+      const b0 = { ...model.data.components[41].position };
+      const c0 = { ...model.data.components[5].position };
+      const t0 = tg.userData.base.p.x;
+      g.position.x += 0.4;                          // world +x drag
+      applySubGizmo(g);
+      const cb = model.data.components[41], cc = model.data.components[5];
+      const okp = Math.abs(cb.position.x - (b0.x + 0.4)) < 1e-9
+        && Math.abs(cc.position.x - (c0.x - 0.4)) < 1e-9
+        && Math.abs(tg.userData.base.p.x - (t0 - 0.4)) < 1e-9;
+      const msg = `selfΔ=${(cb.position.x - b0.x).toFixed(3)} twinΔ=${(cc.position.x - c0.x).toFixed(3)}`
+        + ` twins=${JSON.stringify(symTwinIndex().get(41) || null)} pos=${JSON.stringify(cb.position)}`;
+      cb.position.x = b0.x; cb.position.y = b0.y; cb.position.z = b0.z;
+      cc.position.x = c0.x; cc.position.y = c0.y; cc.position.z = c0.z;
+      g.userData.base.p.x -= 0.4; tg.userData.base.p.x += 0.4;
+      syncSubJoints(); tctl.detach();
+      return okp || msg;
     });
   },
 };
@@ -4641,6 +4792,21 @@ async function runGizmoTest() {
       gizmoProxy.quaternion.copy(qv1);
       ok('movespace', (dArrow < 1e-6 && dRing > 0.69 && dRing < 0.71)
         || `arrowΔ=${dArrow.toFixed(4)} ringΔ=${dRing.toFixed(4)} (want ~0 / ~0.698)`); }
+
+    // ---- B3. ring hover style (v0.160): the active RING thickens, never
+    // turns yellow (user: "selected axis shouldnt become yellow, thicker") ----
+    { const G = tctl.getHelper().children.find(o => o.isTransformControlsGizmo);
+      const ring = (nm) => G.gizmo.rotate.children.find(m => m.isMesh && m.name === nm
+        && m.userData.ringThin);
+      const x = ring('X'), y = ring('Y');
+      tctl.axis = 'X'; paintHighlights();
+      const fatX = x.geometry === x.userData.ringFat;
+      const thinY = y.geometry === y.userData.ringThin;
+      const gold = !!x.material._color && x.material.color.getHex() !== 0xffff00;
+      tctl.axis = null; paintHighlights();
+      const backThin = x.geometry === x.userData.ringThin;
+      ok('gizmostyle', (fatX && thinY && gold && backThin)
+        || `fatX=${fatX} thinY=${thinY} noYellow=${gold} back=${backThin}`); }
 
     // ---- C. demo state for screenshots (before / +pitch / +pitch+roll) ----
     setModel(seatBp(), 'gizmatest seat');
