@@ -496,6 +496,15 @@ Zero-build Three.js (WebGL) inspector: `python3 -m http.server 8650` (repo root)
   craft (its ISW dashboards/battery lean); we are game-true for both.
   Selftest `mural=true` pins the legacy side. `viewQuat`/`rawFromView`
   switch on `LEGACY_Q` (set in `setModel`); saved files stay byte-exact.
+- **Rotate gizmo (v0.150) must attach to a scene-root PROXY**, never to a
+  mesh inside the mirrored group: TransformControls premultiplies rotation in
+  the attached object's PARENT frame, so a mirrored parent inverts Y/Z drags
+  while X stays correct (axis-dependent sign mess again). The proxy carries
+  the part's VISIBLE pose — `getWorldQuaternion()` decompose of the
+  negative-determinant chain returns the proper rotation R(flipZ(qv)) — and
+  writeback applies the involution qv = flipZ(qWorld) before `rawFromView`
+  (which still strips wheel droop / junction / button display poses).
+  Selftest `gizmo=true`.
 
 ## Propulsion & the viewer's wind model (v0.122; RCS rule v0.148)
 

@@ -3,6 +3,7 @@
 // file format. World mapping: world = (pos - 5.5) * 0.25 + frame * 3.0 per axis.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 // surface crashes in the document title (visible to headless test dumps)
 addEventListener('error', (e) => { document.title = 'ERR ' + (e.message || 'load') + ' @' + e.lineno + ':' + e.colno; });
@@ -1558,6 +1559,9 @@ function pick(ev) {
 // 1-10 ms per event on component-heavy crafts. Picking now happens on a
 // DELIBERATE press only: one raycast at pointerdown (the moment a drag
 // starts), reused by the click test in pointerup.
+// Ring presses need NO pick special-case: a ring DRAG moves the pointer, so
+// the deliberate-press test below never selects on it; a zero-move press is a
+// real click — the trackball applies zero rotation, the click selects.
 let downPick = -1;
 renderer.domElement.addEventListener('pointerdown', (e) => {
   renderer.domElement.dataset.dx = e.clientX; renderer.domElement.dataset.dy = e.clientY;
@@ -1575,9 +1579,72 @@ function select(i, doFly) {
   buildInspector();
   buildList();
   paintHighlights();
+  syncGizmo();               // rotate gizmo follows the selection
   startSurges(i);              // cable power-surge: fires on every selection
   if (doFly) flyTo(i);         // camera fly is manual-only (canvas click / list dblclick)
 }
+
+// ---------- rotate gizmo (Blender-style, v0.150) ----------
+// Rings on the selected part: drag a coloured arc to rotate about that VIEW
+// axis, the big outer ring is a free trackball, Shift snaps to 15°. Written
+// back through the exact inverse of the display chain, so saved files stay
+// byte-consistent for BOTH quaternion conventions (rawFromView also strips
+// the wheel-droop / junction / button display poses).
+// THE PROXY IS MANDATORY: components live under worldM (scale.z=−1) and carry
+// their own root scale.z=−1 with a RAW-geometry frame. TransformControls'
+// rotation premultiplies in the ATTACHED object's parent frame — attached to
+// the mirrored object directly, a world-space drag would land mirrored in the
+// local frame: X-axis drags happen to stay correct, Y and Z invert (S·R·S
+// conjugation) — the axis-dependent sign mess that ate v0.143. So the gizmo
+// attaches to a scene-root proxy carrying the part's VISIBLE pose
+// (decompose() of the negative-determinant chain = proper rotation
+// R(flipZ(qv))); writeback flips back with the involution qv = flipZ(qW)
+// before rawFromView. Pinned by selftest `gizmo=true` (Y-axis 0.7 rad drag
+// on the PilotSeat — z components break the symmetry so a sign slip fails).
+let gizmoOn = true;
+const gizmoProxy = new THREE.Object3D(); gizmoProxy.name = 'rotProxy';
+scene.add(gizmoProxy);
+const tctl = new TransformControls(camera, renderer.domElement);
+tctl.setMode('rotate');
+tctl.setSize(0.8);
+tctl.addEventListener('objectChange', () => applyGizmoOrientation(gizmoProxy.quaternion));
+tctl.addEventListener('mouseDown', () => { controls.enabled = false; });
+tctl.addEventListener('mouseUp', () => {
+  controls.enabled = true;
+  buildInspector();                    // rebases the euler sliders on the new pose
+  paintHighlights();
+  invalidate();
+});
+scene.add(tctl.getHelper());
+const _gq = new THREE.Quaternion();
+function syncGizmoPose() {
+  const o = compObjs?.[selected];
+  if (!o) return;
+  scene.updateMatrixWorld(true);
+  gizmoProxy.position.setFromMatrixPosition(o.matrixWorld);
+  if (!tctl.dragging) gizmoProxy.quaternion.copy(o.getWorldQuaternion(_gq));
+}
+function syncGizmo() {
+  const o = selected >= 0 ? compObjs?.[selected] : null;
+  if (gizmoOn && o) { syncGizmoPose(); tctl.attach(gizmoProxy); }
+  else tctl.detach();
+}
+// scene-root (view) rotation → component: S··S involution then the standard
+// file write (droop/display-pose undo inside rawFromView)
+function applyGizmoOrientation(qW) {
+  const i = selected, o = compObjs?.[i];
+  if (!o) return;
+  const qv = new THREE.Quaternion(qW.x, qW.y, -qW.z, qW.w);
+  o.quaternion.copy(qv);
+  for (const r of realMap.get(i) || []) r.quaternion.copy(qv);
+  model.data.components[i].orientation = rawFromView(o, qv);
+  syncAdapters(o);
+  markDirty();
+  invalidate();
+}
+// Shift = 15° snap, Blender-style
+addEventListener('keydown', (e) => { if (e.key === 'Shift') tctl.setRotationSnap(Math.PI / 12); });
+addEventListener('keyup', (e) => { if (e.key === 'Shift') tctl.setRotationSnap(null); });
 // ---------- selection fly-in + glow ----------
 // Fly-in: animate camera+target onto the component (~0.5 s, smoothstep) from
 // the current heading — an in-flight pan+approach. The landing spot is picked
@@ -1806,6 +1873,11 @@ function row(sec, label, min, max, step, value, onInput) {
     rng.value = num.value = String(v);
     onInput(+v, mark);
     if (mark) { r.classList.add('mod'); markDirty(); }
+    // programmatic .value assignment fires NO 'input' event, so the global
+    // input→invalidate listener never saw ⟲/presets — sliders moved while the
+    // picture stayed frozen (user v0.149: "reset... changes sliders but no
+    // visual update is triggered"). Repaint from here.
+    invalidate();
   };
   rng.oninput = () => { num.value = rng.value; onInput(+rng.value); };
   num.oninput = () => { if (num.value === '') return; const v = +num.value;
@@ -1818,6 +1890,7 @@ function markDirty() {
   dirty = true;
   document.body.classList.add('dirty');
   if (model) updateReport();          // live CoM/aero feedback while dragging sliders
+  if (gizmoOn && tctl.object === gizmoProxy) syncGizmoPose();   // rings track position edits
 }
 
 function secHeader(t) { const h = document.createElement('h3'); h.textContent = t; $('inspector').appendChild(h); }
@@ -2029,6 +2102,23 @@ function buildViewOpts() {
 
   const hs = document.createElement('div');
   hs.className = 'sec';
+  // rotate gizmo (v0.150, user: "when you select a component you can rotate
+  // its axes in an intuitive way, like in blender"): rings attach to the
+  // selection, world axes, outer ring = free trackball, Shift = 15° snap.
+  const gl = document.createElement('label');
+  gl.className = 'checkrow';
+  const gcb = document.createElement('input');
+  gcb.type = 'checkbox';
+  gcb.checked = localStorage.getItem('archean-gizmo') !== '0';    // default ON
+  gizmoOn = gcb.checked;
+  gcb.onchange = () => {
+    gizmoOn = gcb.checked;
+    localStorage.setItem('archean-gizmo', gizmoOn ? '1' : '0');
+    syncGizmo();
+    invalidate();
+  };
+  gl.append(gcb, document.createTextNode('rotate gizmo on selection (Shift = 15° snap)'));
+  hs.append(gl);
   // Hull-lattice pitch/offset sliders + the auto-fit button REMOVED in v0.149
   // (user: "these things just complicate things"): the exact lattice
   // (W=12, pitch=0.25, C=−1.5) that fitHull() proves per file is applied
@@ -3201,9 +3291,10 @@ function buildHullList() {
 }
 
 // ---------- animate (on-demand: iGPUs idle at ~0% until something changes) ----------
-let needsRender = true, perfFrames = 0, perfFlow = 0, perfFlowN = 0, perfBuild = 0, loadMs = 0;
+let needsRender = true, perfFrames = 0, perfFlowN = 0, perfFlow = 0, perfBuild = 0, loadMs = 0;
 let perfW0 = 0, perfArm = 0;   // real-clock window: start (ms) + arm timestamp
-function invalidate() { needsRender = true; }
+let invalSeq = 0;                 // repaint counter: pins assert edits repaint
+function invalidate() { needsRender = true; invalSeq++; }
 let lastT = 0;
 function tick(t) {
   requestAnimationFrame(tick);
@@ -3578,7 +3669,8 @@ async function runUiTest() {
   const collect = (e) => errs.push(String((e && (e.message || e.reason)) || e));
   addEventListener('error', collect);
   addEventListener('unhandledrejection', collect);
-  const ok = (n, cond) => { if (!cond) fails.push(n); };
+  let nPins = 0;   // counted dynamically: the title can never desync the pins
+  const ok = (nm, cond) => { nPins++; if (!cond) fails.push(nm); };
   const click = (el) => el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
   const setIn = (el, v) => { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
   const btn = (root, t) => [...root.querySelectorAll('button')].find(b => b.textContent.includes(t));
@@ -3604,6 +3696,17 @@ async function runUiTest() {
     ok('listclick', selected === idx && $('selname').textContent.includes(model.data.components[idx].type)
        && $('inspector').querySelectorAll('.row').length >= 6); }
 
+  // rotate gizmo attaches on selection — to the scene-root PROXY, never the
+  // mirrored mesh (attaching under worldM would mirror Y/Z drags, see gizmo
+  // section); toggling the checkbox detaches/reattaches
+  { ok('gizmo', selected >= 0 && tctl.object === gizmoProxy
+      && tctl.getHelper().parent === scene);
+    const gcb = cbL('rotate gizmo');
+    click(gcb);
+    const off = tctl.object == null;
+    click(gcb);
+    ok('gizmo2', off && tctl.object === gizmoProxy); }
+
   // number edit moves RAW data; the row ⟲ restores it
   { const si = model.data.components.findIndex(c => c.type === 'PilotSeat');
     select(si);
@@ -3628,6 +3731,20 @@ async function runUiTest() {
     const qb = compObjs[si].quaternion.clone();
     click(btn($('inspector'), 'lean fwd 12°'));
     ok('seatpreset', compObjs[si].quaternion.angleTo(qb) > 0.15);   // ≥12° applied
+    select(-1); }
+
+  // ⟲ must RE-PAINT (v0.149 user: "resetting a component doesnt immediatley
+  // reset it, it changes sliders but no visual update is triggered"):
+  // set() assigns .value programmatically — no 'input' event — and the click
+  // itself scheduled no redraw, so the picture lagged the data
+  { const si = model.data.components.findIndex(c => c.type === 'PilotSeat');
+    select(si);
+    const nx = numRow($('inspector'), 'x');
+    setIn(nx, +nx.value + 0.25);
+    const s0 = invalSeq;
+    click(nx.parentElement.querySelector('.rst'));
+    ok('resetpaint', invalSeq > s0
+      && Math.abs(model.data.components[si].position.x - (+nx.value + 0.25 - 0.25)) < 1e-9);
     select(-1); }
 
   // component-data checkbox writes through to comp.data
@@ -3759,7 +3876,7 @@ async function runUiTest() {
   ok('no-errors', errs.length === 0);
 
   document.title = fails.length ? 'UITEST FAIL ' + fails.join(',')
-                                : `UITEST PASS n=21 ctrls=${n}`;
+                                : `UITEST PASS n=${nPins} ctrls=${n}`;
   if (errs.length) {
     const pre = document.createElement('pre'); pre.id = 'out';
     pre.textContent = errs.slice(0, 20).join('\n');
@@ -4053,6 +4170,28 @@ if (location.search.includes('selftest')) {
       const ok26 = model.moff[0] === 0 && model.moff[1] === 0 && model.moff[2] === 0
         && model.cv[0] === 0 && model.cv[1] === 0 && model.cv[2] === 0
         && isFinite(model.box_min.x) && blockGroup.position.lengthSq() === 0;
+      // ok27: rotate gizmo mirror chain — a 0.7 rad WORLD drag about view +y
+      // applied to the PilotSeat must write back a file quaternion whose
+      // decode equals flipZ(drag·visible): the seat's saved pitch makes the
+      // z components nonzero, so any sign slip in the S··S conjugation (the
+      // axis-dependent mess from attaching to the mirrored object) fails
+      let ok27 = false;
+      (function () {
+        const ci = model.data.components.findIndex(c => c.type === 'PilotSeat');
+        select(ci);
+        const o = compObjs[ci];
+        scene.updateMatrixWorld(true);
+        const q0 = o.getWorldQuaternion(new THREE.Quaternion());   // visible pose
+        const drag = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), 0.7);
+        const pq = drag.multiply(q0);                              // what TControls computes
+        applyGizmoOrientation(pq);
+        const qf = model.data.components[ci].orientation;
+        const want = new THREE.Quaternion(pq.x, pq.y, -pq.z, pq.w); // flipZ involution
+        const d1 = Math.abs(viewQuat(qf).dot(want));               // file → view decode
+        const d2 = Math.abs(o.quaternion.dot(want));               // live mesh pose
+        ok27 = d1 > 0.9999 && d2 > 0.9999 && dirty;
+        select(-1);
+      })();
       const ok17 = nThr > 0 && !!netThrust && netThrust.n === nThr
         && thrustGroup.children.length === nThr + (netThrust.v ? 1 : 0)
         && (!netThrust.v || Math.abs(Math.hypot(...netThrust.v) - 1) < 0.02)
@@ -4094,14 +4233,14 @@ if (location.search.includes('selftest')) {
       ray.setFromCamera(new THREE.Vector2(0, 0), camera);
       const ok5 = ray.intersectObjects(compGroup.children, true)
         .some(h => h.object.userData.ci >= 0);
-      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 && ok10 && ok11 && ok12 && ok13 && ok14 && ok15 && ok16 && ok17 && ok18 && ok19 && ok20 && ok21 && ok22 && ok23 && ok24 && ok25 && ok26 ? 'PASS' : 'FAIL')
+      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 && ok10 && ok11 && ok12 && ok13 && ok14 && ok15 && ok16 && ok17 && ok18 && ok19 && ok20 && ok21 && ok22 && ok23 && ok24 && ok25 && ok26 && ok27 ? 'PASS' : 'FAIL')
         + ' occ_z=' + occ.pos_z + ' mirror=' + !!mir
         + ' pitch=' + (2 * Math.asin(-seat.orientation.x) * 180 / Math.PI).toFixed(1) + '°'
         + ' beacon=' + (mast ? mast.x.toFixed(2) : 'none') + ' droop=' + wc.y.toFixed(2)
         + ' junction=' + jdir.y.toFixed(2) + ' aileron=' + at.y.toFixed(2)
         + ' pick=' + ok5 + ' palette=' + ok9 + ' lens=' + ok10
         + ' dashmirror=' + ok11 + ' textx=' + ok12 + ' mural=' + ok13 + ' ground=' + ok14
-        + ' surges=' + ok15 + ' bolts=' + ok16 + ' thrust=' + ok17 + ' seal=' + ok18 + ' sock=' + ok19 + ' excl=' + ok20 + ' windpts=' + ok21 + ' click=' + ok22 + ' inflow=' + ok23 + ' wake=' + ok24 + ' seatpitch=' + ok25 + ' anchor=' + ok26
+        + ' surges=' + ok15 + ' bolts=' + ok16 + ' thrust=' + ok17 + ' seal=' + ok18 + ' sock=' + ok19 + ' excl=' + ok20 + ' windpts=' + ok21 + ' click=' + ok22 + ' inflow=' + ok23 + ' wake=' + ok24 + ' seatpitch=' + ok25 + ' anchor=' + ok26 + ' gizmo=' + ok27
         + ' cabin=' + seal.sealedCount;
     } catch (e) { document.title = 'SELFTEST ERR ' + e.message + ' @' + String(e.stack).split(String.fromCharCode(10))[1].trim().slice(0, 70); }
   }, 1500);

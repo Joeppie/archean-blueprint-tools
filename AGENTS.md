@@ -285,7 +285,11 @@ landing page and README together when the viewer changes).
      while the wake deficit behind it slows the flow >25% (`wake=true`);
      pitching the PilotSeat must NOT steer/slow the wind (heading-only,
      `seatpitch=true`); display anchoring is a no-op on frame-(0,0,0) crafts
-     like ISW (`anchor=true`). The explode/assembly feature (v0.140/141) was
+     like ISW (`anchor=true`). The rotate gizmo (Blender-style rings,
+     v0.150) attaches to a SCENE-ROOT PROXY and a 0.7-rad world Y-drag on the
+     PilotSeat round-trips the z-mirror chain exactly (`gizmo=true` — a
+     mirrored attach inverts Y/Z drags while X stays correct, so this pin
+     must never be sign-relaxed). The explode/assembly feature (v0.140/141) was
      REMOVED in v0.142 (user: "a catastrophe") — do not resurrect.
      thrust display + wind model: every DIRECTIONAL propulsor (THRUST
      table = .ini TARGET axes; Propeller double-headed + excluded from
@@ -321,7 +325,9 @@ landing page and README together when the viewer changes).
    toggle + localStorage persistence, wind-mode/flow-src/CoM/thrust buttons,
    hull-opacity slider (fades blocks + skin + wire together),
    hull-list flash row, Steam wslink, dirty→Save
-   lifecycle, calibrated-mass report. Title: `UITEST PASS n=21 ctrls=N` /
+   lifecycle, calibrated-mass report, ⟲ RE-PAINT pin (invalSeq) and
+   rotate-gizmo attach/toggle pins. Title: `UITEST PASS n=<pins> ctrls=N`
+   (n counts ok() live, nothing hardcoded) /
    `UITEST FAIL <pins>`, captured errors in #out.
 2c. `?postest`: placement fixtures keyed per craft (the POSTESTS table in
    view3d.js — the sanctioned exception to "no per-craft constants": fixtures
@@ -346,6 +352,10 @@ landing page and README together when the viewer changes).
 ## Conventions
 - view3d.js is one flat file with `// ---------- sections ----------`; follow it.
 - UI = DevTools-style rows built by `row()`; new tunables get sliders, not prompts.
+- `row().set()` MUST repaint (it calls `invalidate()`): programmatic
+  `.value` assignment fires no 'input' event, and the global input→invalidate
+  listener is what keeps sliders live — without it ⟲/presets moved the UI but
+  froze the picture (v0.149 user report).
 - Keep headless testability: no top-level awaits on user input, report results in
   `document.title` / `#out` for `--dump-dom`.
 
