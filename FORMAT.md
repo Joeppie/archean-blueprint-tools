@@ -694,8 +694,25 @@ Adventure = 3334698274).
   XYQ-615's pair ±24.3° offset ±0.635 m, Jimmy's gantry 54.0° X +
   (0, −10.14, −8.86). Build.occupancies = ONE cell (the hinge/anchor cell),
   NOT a mirror of the nested blocks.
+- **Kinematic masters DRIVE their subgrid (v0.157).** A master whose game
+  `.ini` declares a `[JOINT]` node (SmallHinge, SmallPivot, Aileron,
+  LinearTrack, … — manifest `joints[0]`) has its live joint state in `data`
+  (`angle` DEGREES / `pos` metres), and the dev viewer composes nested
+  content UNDER that joint node — so the subgrid display pose is the joint
+  offset composed with the Build attach:
+  `axis = R(viewQuat(master)) · axleEuler(ZYX) · x̂` (the axle node's own
+  spin axis — same local-X convention the aileron/wheel display uses),
+  `pivot = viewPos(master) + R(viewQuat) · mirror_z(axle.position)`,
+  `p' = pivot + R(axis, angle)·(base.p − pivot) + axis·pos`,
+  `q' = R(axis, angle) · base.q`. Lamp/SpotLight masters have NO joints in
+  the manifest (their `angle` is the light aim) ⇒ static hosts, unanimated.
+  69 corpus entries reference out-of-range master indices (deleted editor
+  references) ⇒ skipped. Pins: dolphin `subjoint-angle` (sign-sensitive),
+  3732302108 `subjoint-pos`.
 - So the subgrid info panel (click a subgrid): Contents; Mount = the DECODED
-  master(s) with joint state and measured distance; Pivot offset +
+  master(s) with joint state and measured distance — a KINEMATIC master also
+  gets editable joint sliders (angle °/slide m) that write the master's
+  `data` verbatim and animate the subgrid live; Pivot offset +
   rotation rows editing the Build fields live (byte-true on save).
   `slaveBuildId`-geometry heuristics (v0.153) are OBSOLETE — the decode is
   exact.

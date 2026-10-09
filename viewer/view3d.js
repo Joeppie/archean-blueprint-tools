@@ -1078,6 +1078,7 @@ function buildSubgrids() {
     // z-mirror in their own placement (a second mirror would un-mirror them).
     g.position.copy(viewPos(c.position));
     g.quaternion.copy(viewQuat(c.orientation));
+    g.userData.base = { p: g.position.clone(), q: g.quaternion.clone() };   // Build attach pose (v0.157 joints compose on top)
     subGroup.add(g);
     addBlockMeshes(g, c.data.blocks, new THREE.Vector3());
     for (const sc of c.data.components || []) {
@@ -1109,6 +1110,58 @@ function buildSubgrids() {
       });
     }
   });
+  syncSubJoints();
+}
+
+// ---------- subgrid JOINT drive (v0.157) ----------
+// The user's "subgrids could rotate or move based on the value in the
+// hinge/pivot/…": composite_builds masters that carry a .ini [JOINT]
+// (SmallHinge, SmallPivot, Aileron, LinearTrack, …) store the live joint
+// state on the MASTER: data.angle (DEGREES, spin about the axle node's own
+// axis — the aileron/wheel convention pinned by selftest) and data.pos
+// (m, slide along that axis). The dev viewer composes nested content under
+// the master's joint node, so the subgrid display pose = joint offset ∘
+// Build attach: q = qOff·baseQ, p = pivot + qOff·(baseP−pivot) (spin about
+// the hinge line) and p += axis·pos (slide). Static hosts (dashboards, RTGs,
+// pumps — no manifest joint) leave the group at its attach pose.
+function subJointAxis(mc) {
+  const jn = (MODEL.manifest?.[mc.type]?.joints || [])[0];
+  if (!jn) return null;
+  const qAxle = new THREE.Quaternion().setFromEuler(new THREE.Euler(
+    jn.rotation[0] * Math.PI / 180, jn.rotation[1] * Math.PI / 180,
+    jn.rotation[2] * Math.PI / 180, 'ZYX'));                       // .ini euler order
+  const axis = new THREE.Vector3(1, 0, 0).applyQuaternion(qAxle);   // axle local spin axis
+  const mq = viewQuat(mc.orientation);
+  axis.applyQuaternion(mq).normalize();
+  const pivot = new THREE.Vector3(jn.position[0], jn.position[1], -jn.position[2])
+    .applyQuaternion(mq).add(viewPos(mc.position));                 // hinge line anchor (view)
+  return { axis, pivot };
+}
+function syncSubJoints() {
+  if (!model) return;
+  const byB = subMasterEntries();
+  for (const g of subGroup.children) {
+    const base = g.userData.base;
+    if (!base) continue;
+    g.quaternion.copy(base.q);
+    g.position.copy(base.p);
+    for (const e of byB.get(g.userData.sub) || []) {
+      const mc = model.data.components[e.component];
+      if (!mc || !subJointAxis(mc)) continue;                       // static host
+      const { axis, pivot } = subJointAxis(mc);
+      const a = typeof mc.data?.angle === 'number' ? mc.data.angle : 0;
+      const s = typeof mc.data?.pos === 'number' ? mc.data.pos : 0;
+      if (a) {
+        g.position.sub(pivot)
+          .applyQuaternion(new THREE.Quaternion().setFromAxisAngle(axis, a * Math.PI / 180))
+          .add(pivot);
+        g.quaternion.premultiply(
+          new THREE.Quaternion().setFromAxisAngle(axis, a * Math.PI / 180));
+      }
+      if (s) g.position.addScaledVector(axis, s);
+    }
+  }
+  invalidate();
 }
 
 let compObjs = [];
@@ -1647,7 +1700,7 @@ function select(i, doFly) {
   selectedSub = -1;
   invalidate();
   buildInspector();
-  buildList();
+  buildList({ reveal: true });
   paintHighlights();
   syncGizmo();               // gizmo follows the selection (mode permitting)
   startSurges(i);              // cable power-surge: fires on every selection
@@ -1660,7 +1713,7 @@ function selectSub(i) {
   selected = -1;
   invalidate();
   buildInspector();
-  buildList();
+  buildList({ reveal: true });
   paintHighlights();
   syncGizmo();
 }
@@ -1807,8 +1860,11 @@ function paintModeBox() { for (const b of modeBox.children) b.classList.toggle('
 const _mbV = new THREE.Vector3();
 let modeAnchor = null;
 function placeModeBox(x, y) {
-  modeBox.style.left = Math.min(x + 10, innerWidth - 118) + 'px';
-  modeBox.style.top = Math.min(y + 8, innerHeight - 44) + 'px';
+  // v0.157: the widget got bigger — clamp on its MEASURED size, not the
+  // old 13px-button constants (it ran off the right screen edge)
+  const w = modeBox.offsetWidth || 118, h = modeBox.offsetHeight || 44;
+  modeBox.style.left = Math.min(x + 10, innerWidth - w - 6) + 'px';
+  modeBox.style.top = Math.min(y + 8, innerHeight - h - 6) + 'px';
 }
 function projectModeAnchor() {
   const bb = new THREE.Box3().setFromObject(modeAnchor);
@@ -1819,8 +1875,9 @@ function projectModeAnchor() {
 }
 function showModeBox(x, y, anchor = null) {
   modeAnchor = anchor;
+  modeBox.classList.add('vis');            // visible FIRST: placeModeBox measures it
   if (anchor) projectModeAnchor(); else placeModeBox(x, y);
-  modeBox.classList.add('vis'); paintModeBox();
+  paintModeBox();
 }
 function hideModeBox() { if (modeBox) { modeAnchor = null; modeBox.classList.remove('vis'); } }
 function setGizmoMode(m) {
@@ -1939,7 +1996,7 @@ controls.addEventListener('start', () => { fly = null; });   // user takes over
 // Box3Helper draws 1 px GL lines, invisible on HiDPI displays. LineSegments2
 // renders true screen-space-fat borders (3 px), depthTest off so the box
 // reads through the hull like the incandescence layer.
-const selEdgesMat = new LineMaterial({ color: 0x7dffcf, linewidth: 3,
+const selEdgesMat = new LineMaterial({ color: 0x7dffcf, linewidth: 4.5,
   transparent: true, depthTest: false, depthWrite: false });
 selEdgesMat.resolution.set(1400, 900);            // onResize keeps it live
 const selBox = new LineSegments2(new LineSegmentsGeometry(), selEdgesMat);
@@ -1970,6 +2027,7 @@ function paintHighlights() {
   // with live edits — this runs on every frame we render)
   if (selected >= 0 && compObjs?.[selected]) {
     const bb = new THREE.Box3().setFromObject(compObjs[selected]);
+    bb.expandByScalar(0.07);                       // box stands OFF the part (v0.157)
     selBox.visible = isFinite(bb.min.x);
     if (selBox.visible) { boxEdges(bb, _selPts); selBox.geometry.setPositions(_selPts); }
   } else selBox.visible = false;
@@ -1997,7 +2055,7 @@ scene.add(surgeGroup);
 const surgeGeo = new THREE.SphereGeometry(0.055, 10, 8);
 let surges = [], flashes = [];
 const selXrayMat = new THREE.MeshBasicMaterial({ color: 0xff7a20, transparent: true,
-  opacity: 0.45, blending: THREE.AdditiveBlending, depthTest: false,
+  opacity: 0.6, blending: THREE.AdditiveBlending, depthTest: false,
   depthWrite: false, side: THREE.DoubleSide });
 let selPairs = [], selKey = -1;
 function rebuildSelXray() {
@@ -2084,32 +2142,49 @@ function stepSurges(now) {
   if (surges.length || flashes.length) invalidate();
 }
 
-// ---------- component list (v0.156) ----------
+// ---------- component list (v0.156 tabs; v0.157 collapsible groups) ----------
 // TWO tabs on top: group by TYPE (alphabetical sections) or by SUBGRID
 // (one section per Build: its decoded masters + nested parts, then the
 // subgrid-free hull parts). A single search box — where it has always lived
-// — filters both tabs (type, alias and section titles).
+// — filters both tabs. Groups are COLLAPSED by default (click the header);
+// selecting a part (canvas, list, dblclick, Esc-state) or typing a filter
+// AUTO-EXPANDS the containing group and scrolls it into view.
 let listTab = localStorage.getItem('archean-list-tab') || 'type';
-function buildList() {
+const listOpen = new Map();               // "tab|sectionKey" -> open (absent = collapsed)
+function buildList(opts = {}) {
   const list = $('complist'), q = $('filter').value.toLowerCase();
   const ltabs = $('ltabs');
   for (const t of ltabs.children) t.classList.toggle('on', t.dataset.k === listTab);
   list.innerHTML = '';
   const comps = model?.data.components || [];
-  const mk = (idx, c, sel) => {
+  const sections = [];
+  const section = (key, title, n) => {
+    const h = document.createElement('div');
+    h.className = 'sec';
+    const grp = document.createElement('div');
+    grp.className = 'grp'; grp.dataset.sec = `${listTab}|${key}`;
+    h.innerHTML = `<span class="chev">▸</span>&nbsp;${title} <span style="color:var(--dim)">· ${n}</span>`;
+    h.onclick = () => {
+      const k = grp.dataset.sec, open = !listOpen.get(k);
+      listOpen.set(k, open);
+      grp.style.display = open ? '' : 'none';
+      h.querySelector('.chev').textContent = open ? '▾' : '▸';
+    };
+    list.append(h, grp);
+    sections.push({ h, grp });
+    return grp;
+  };
+  const mk = (grp, idx, c, sel, sub) => {
     const d = document.createElement('div');
     d.innerHTML = `<span class="i">${String(idx).padStart(2, '0')}</span> <span class="t">${c.type}</span>`
                 + (c.alias ? ` “${c.alias}”` : '');
     if (sel) d.classList.add('sel');
+    if (sub) d.classList.add('sub');
+    d.dataset.idx = idx;
     d.onclick = () => select(idx);
     d.ondblclick = () => select(idx, true);          // dblclick = fly to part
+    grp.appendChild(d);
     return d;
-  };
-  const hdr = (txt, n) => {
-    const d = document.createElement('div');
-    d.className = 'sec';
-    d.innerHTML = `${txt} <span style="color:var(--dim)">· ${n}</span>`;
-    list.appendChild(d);
   };
   const hits = (c) => !q || c.type.toLowerCase().includes(q)
                     || (c.alias || '').toLowerCase().includes(q);
@@ -2120,42 +2195,62 @@ function buildList() {
     for (const type of [...byT.keys()].sort()) {
       const idxs = byT.get(type).filter(i => hits(comps[i]));
       if (!idxs.length && !(q && type.toLowerCase().includes(q))) continue;
-      hdr(type, byT.get(type).length);
-      for (const i of idxs) list.appendChild(mk(i, comps[i], i === selected));
+      const grp = section('t:' + type, type, byT.get(type).length);
+      for (const i of idxs) mk(grp, i, comps[i], i === selected);
     }
-    return;
-  }
-  // by subgrid: Build[i] ← its decoded masters (composite_builds.component)
-  const masters = new Map();
-  for (const [bi, es] of subMasterEntries())
-    for (const e of es)
-      (masters.get(bi) || masters.set(bi, []).get(bi)).push(e.component);
-  const builds = comps.map((c, i) => c.type === 'Build' ? i : -1).filter(i => i >= 0);
-  for (const bi of builds) {
-    const bc = comps[bi], nested = (bc.data?.components || []).filter(c => c.type !== 'Build');
-    const ms = (masters.get(bi) || []).filter(i => comps[i]);
-    const nN = nested.filter(hits), nM = ms.filter(i => hits(comps[i]));
-    const title = `⬓ Build[${bi}]` + (bc.data?.alias ? ` “${bc.data.alias}”` : '');
-    if (q && !nN.length && !nM.length && !title.toLowerCase().includes(q)) continue;
-    hdr(title + (ms.length
-      ? ` ← ${ms.map(m => comps[m].type).join(', ')}` : ' (floating)'), nested.length);
-    for (const m of nM) list.appendChild(mk(m, comps[m], m === selected));
-    for (const k of nN) {
-      const d = mk(k, nested[k], false);
-      d.classList.add('sub');
-      if (bi === selectedSub) d.classList.add('sel');
-      d.onclick = () => selectSub(bi);               // nested content IS the subgrid
-      d.ondblclick = d.onclick;
-      list.appendChild(d);
+  } else {
+    // by subgrid: Build[i] ← its decoded masters (composite_builds.component)
+    const masters = new Map();
+    for (const [bi, es] of subMasterEntries())
+      for (const e of es)
+        (masters.get(bi) || masters.set(bi, []).get(bi)).push(e.component);
+    const builds = comps.map((c, i) => c.type === 'Build' ? i : -1).filter(i => i >= 0);
+    for (const bi of builds) {
+      const bc = comps[bi], nested = (bc.data?.components || []).filter(c => c.type !== 'Build');
+      const ms = (masters.get(bi) || []).filter(i => comps[i]);
+      const nN = nested.filter(hits), nM = ms.filter(i => hits(comps[i]));
+      const title = `⬓ Build[${bi}]` + (bc.data?.alias ? ` “${bc.data.alias}”` : '');
+      if (q && !nN.length && !nM.length && !title.toLowerCase().includes(q)) continue;
+      const grp = section('b' + bi, title + (ms.length
+        ? ` ← ${ms.map(m => comps[m].type).join(', ')}` : ' (floating)'), nested.length);
+      for (const m of nM) mk(grp, m, comps[m], m === selected);
+      for (const k of nN) {
+        const d = mk(grp, k, nested[k], false, true);
+        if (bi === selectedSub) d.classList.add('sel');
+        d.dataset.b = bi;
+        d.onclick = () => selectSub(bi);             // nested content IS the subgrid
+        d.ondblclick = d.onclick;
+      }
+    }
+    const inSub = new Set([...builds, ...[...masters.values()].flat()]);
+    const rest = comps.map((c, i) => i).filter(i => !inSub.has(i) && hits(comps[i]));
+    if (rest.length || !q) {
+      const grp = section('rest', 'Hull & parts (no subgrid)',
+        comps.filter((c, i) => !inSub.has(i)).length);
+      for (const i of rest) mk(grp, i, comps[i], i === selected);
     }
   }
-  const inSub = new Set([...builds, ...[...masters.values()].flat()]);
-  const rest = comps.map((c, i) => i).filter(i => !inSub.has(i) && hits(comps[i]));
-  if (rest.length || !q) hdr('Hull & parts (no subgrid)',
-    comps.filter((c, i) => !inSub.has(i)).length);
-  for (const i of rest) list.appendChild(mk(i, comps[i], i === selected));
+  // collapse state: search force-opens (you want to SEE matches), else the
+  // per-section open map (default collapsed)
+  for (const s of sections) {
+    const open = q ? true : !!listOpen.get(s.grp.dataset.sec);
+    s.grp.style.display = open ? '' : 'none';
+    s.h.querySelector('.chev').textContent = open ? '▾' : '▸';
+  }
+  if (opts.reveal) {                        // selection → open its group, scroll to it
+    const el = selectedSub >= 0
+      ? list.querySelector(`.grp div[data-b="${selectedSub}"]`)
+      : list.querySelector(`.grp div[data-idx="${selected}"]`);
+    const grp = el && el.closest('.grp');
+    if (grp) {
+      listOpen.set(grp.dataset.sec, true);
+      grp.style.display = '';
+      grp.previousElementSibling.querySelector('.chev').textContent = '▾';
+      el.scrollIntoView({ block: 'nearest' });
+    }
+  }
 }
-$('filter').oninput = buildList;
+$('filter').oninput = () => buildList();
 {
   const ltabs = $('ltabs');
   for (const [k, lab] of [['type', 'by type'], ['sub', 'by subgrid']]) {
@@ -2202,6 +2297,7 @@ function markDirty() {
   document.body.classList.add('dirty');
   if (model) updateReport();          // live CoM/aero feedback while dragging sliders
   if (gizmoOn && tctl.object === gizmoProxy) syncGizmoPose();   // rings track position edits
+  if (model && subGroup.children.length) syncSubJoints();       // master joint/pose edits ride the subgrid (v0.157)
   invalidate();   // EVERY data edit repaints — sliders rely on the input-event
 }                 // listener, but BUTTONS (⟲ reset this component) fire none
                   // (v0.152: "resetting the component still doesnt update the 3d view")
@@ -2295,6 +2391,7 @@ function buildSubInspector() {
       b2.appendChild(d); continue;
     }
     const jd = mc.data || {};
+    const zc = (v) => Math.abs(v) < 1e-4 ? 0 : v;
     const st = typeof jd.angle === 'number' ? ` · angle ${jd.angle.toFixed(1)}°`
       : typeof jd.pos === 'number' ? ` · offset ${jd.pos.toFixed(3)} m` : '';
     const vp = viewPos(mc.position);         // the viewer's own placement rule
@@ -2304,6 +2401,17 @@ function buildSubInspector() {
     d.innerHTML = `<b>${mc.type}</b>[${e.component}]${mc.alias ? ' ' + mc.alias : ''}` +
       `<span style="color:var(--dim)">${st} · ${dist.toFixed(2)} m to subgrid</span>`;
     b2.appendChild(d);
+    // Kinematic master (has a .ini joint) → the joint state is EDITABLE and
+    // drives the subgrid live (v0.157): hinges/pivots/ailerons spin, linear
+    // tracks slide; the value saves verbatim into the master's data.
+    if (mc.data && MODEL.manifest?.[mc.type]?.joints?.[0]) {
+      if (typeof jd.angle === 'number')
+        row(b2, 'joint angle (°)', -180, 180, 0.5, zc(jd.angle),
+          (val) => { mc.data.angle = val; syncSubJoints(); });
+      if (typeof jd.pos === 'number')
+        row(b2, 'joint slide (m)', -1, 1, 0.005, zc(jd.pos),
+          (val) => { mc.data.pos = val; syncSubJoints(); });
+    }
   }
   if (!ents.length) {
     const d = document.createElement('div'); d.className = 'checkrow';
@@ -2318,7 +2426,8 @@ function buildSubInspector() {
   // −8.9e-16 zero-Z coordinates — a number box truncated mid-exponent reads
   // as “−8.8817 m”, i.e. a FAKE real value. Show true 0 for noise.
   const nz = (v) => Math.abs(v) < 1e-4 ? 0 : v;
-  const sp = (ax) => (v) => { bc.position[ax] = v; g.position.copy(viewPos(bc.position)); markDirty(); };
+  const sp = (ax) => (v) => { bc.position[ax] = v;
+    g.userData.base.p.copy(viewPos(bc.position)); markDirty(); };
   row(b3, 'x', pp.x - 2, pp.x + 2, 0.005, nz(pp.x), sp('x'));
   row(b3, 'y', pp.y - 2, pp.y + 2, 0.005, nz(pp.y), sp('y'));
   row(b3, 'z', pp.z - 2, pp.z + 2, 0.005, nz(pp.z), sp('z'));
@@ -2332,7 +2441,7 @@ function buildSubInspector() {
     dq[kind] = deg;
     eT.set(dq.p * Math.PI / 180, dq.y * Math.PI / 180, dq.r * Math.PI / 180);
     qT.setFromEuler(eT);
-    g.quaternion.copy(qT);
+    g.userData.base.q.copy(qT);
     bc.orientation = rawFromView({ userData: {} }, qT);   // convention-aware file mirror
     markDirty();
   };
@@ -4038,6 +4147,24 @@ const POSTESTS = {
       return mx > 0.25 || `max wake deficit ${mx.toFixed(2)} (expect >0.25 behind body, ${tested} probes)`;
     });
   },
+  '3732302108': () => {              // mosaic gantry: LinearTrack master SLIDES its subgrid
+    T('subjoint-pos', () => {
+      const g = subGroup.children.find(o => (subMasterEntries().get(o.userData.sub) || [])
+        .some(e => model.data.components[e.component]?.type === 'LinearTrack'));
+      if (!g) return 'no LinearTrack-mastered subgrid';
+      const e = (subMasterEntries().get(g.userData.sub) || [])
+        .find(x => model.data.components[x.component]?.type === 'LinearTrack');
+      const mc = model.data.components[e.component];
+      const { axis } = subJointAxis(mc);
+      const p0 = g.position.clone(), p1 = mc.data.pos;
+      mc.data.pos = p1 + 0.25; syncSubJoints();
+      const d = g.position.clone().sub(p0).normalize();
+      const hit = d.dot(axis) > 0.9999;                 // slide along the axle axis
+      mc.data.pos = p1; syncSubJoints();
+      return (hit && g.position.distanceTo(p0) < 1e-9)
+        || `slide not axle-aligned (dot=${d.dot(axis).toFixed(3)})`;
+    });
+  },
   '3518436870': (ctx) => {
     const { fjBoxes, fjIdx, comps } = ctx;
     T('rcs-fj-flat', () => {                       // legacy raw-quat file: same flat comb
@@ -4115,11 +4242,34 @@ const POSTESTS = {
       if (!g) return 'no subgrids';
       const bc = model.data.components[g.userData.sub];
       const px = bc.position.x, gx = g.position.x;
-      bc.position.x = px + 0.4; g.position.copy(viewPos(bc.position));
+      bc.position.x = px + 0.4; g.userData.base.p.copy(viewPos(bc.position)); syncSubJoints();
       const moved = Math.abs(g.position.x - (gx + 0.4)) < 1e-9
         && Number.isFinite(bc.orientation.x) && Number.isFinite(bc.orientation.w);
-      bc.position.x = px; g.position.copy(viewPos(bc.position));
+      bc.position.x = px; g.userData.base.p.copy(viewPos(bc.position)); syncSubJoints();
       return moved || 'group did not track pivot edit';
+    });
+    T('subjoint-angle', () => {        // master joint state DRIVES the subgrid (v0.157)
+      const g = subs().find(o => (subMasterEntries().get(o.userData.sub) || [])
+        .some(e => model.data.components[e.component]?.type === 'SmallPivot'
+                && model.data.components[e.component]?.data?.angle === 0));
+      if (!g) return 'no SmallPivot-mastered subgrid at angle 0';
+      const e = (subMasterEntries().get(g.userData.sub) || [])
+        .find(e => model.data.components[e.component]?.type === 'SmallPivot');
+      const mc = model.data.components[e.component];
+      const { axis, pivot } = subJointAxis(mc);
+      const bq = g.quaternion.clone(), bp = g.position.clone();
+      mc.data.angle = 90; syncSubJoints();
+      const qOff = bq.clone().invert().multiply(g.quaternion);        // base⁻¹·q = base⁻¹·R(axis,90)·base
+      const bax = axis.clone().applyQuaternion(bq.clone().invert());
+      const dAx = new THREE.Vector3(qOff.x, qOff.y, qOff.z).normalize();
+      const piv = Math.abs(g.position.distanceTo(
+        bp.clone().sub(pivot).applyQuaternion(new THREE.Quaternion().setFromAxisAngle(axis, Math.PI / 2)).add(pivot))) < 1e-9;
+      mc.data.angle = 0; syncSubJoints();
+      const back = g.quaternion.angleTo(bq) < 1e-6 && g.position.distanceTo(bp) < 1e-9;
+      return (Math.abs(qOff.angleTo(new THREE.Quaternion().setFromAxisAngle(bax, Math.PI / 2))) < 1e-6
+        && dAx.dot(bax) > 0.9999      // SIGN-sensitive: +angle spins +axis (right-hand, view)
+        && piv && back)
+        || `spin q=${qOff.angleTo(bq).toFixed(3)} dot=${dAx.dot(bax).toFixed(3)} pivot=${piv} back=${back}`;
     });
   },
   '3803780241': () => {              // XYQ-615: 2 subgrids, pair-unique decode
@@ -4250,6 +4400,8 @@ async function runPosTest() {
     const g = subGroup.children.find(o => o.userData.sub !== undefined);
     if (g) {
       selectSub(g.userData.sub);
+      const es = subMasterEntries().get(g.userData.sub);
+      if (es?.length) flyTo(es[0].component);   // frame the hinge/pivot + driven door
       const v = new THREE.Box3().setFromObject(g).getCenter(new THREE.Vector3()).project(camera);
       const r = renderer.domElement.getBoundingClientRect();
       showModeBox(r.left + (v.x * .5 + .5) * r.width, r.top + (-v.y * .5 + .5) * r.height, g);
@@ -4272,7 +4424,8 @@ async function runPosTest() {
 // +pitch90+roll90 for headless screenshots.
 async function runGizmoTest() {
   const fails = []; let nPins = 0;
-  const ok = (nm, cond) => { nPins++; if (!cond) fails.push(nm); };
+  const ok = (nm, cond) => { nPins++; if (cond !== true)
+    fails.push(nm + (typeof cond === 'string' ? ' [' + cond + ']' : '')); };
   try {
     let tw = Date.now();   // let the default load finish (manifest + scene) first
     while (!model && Date.now() - tw < 10000) await new Promise(r => setTimeout(r, 100));
@@ -4397,7 +4550,8 @@ async function runUiTest() {
   addEventListener('error', collect);
   addEventListener('unhandledrejection', collect);
   let nPins = 0;   // counted dynamically: the title can never desync the pins
-  const ok = (nm, cond) => { nPins++; if (!cond) fails.push(nm); };
+  const ok = (nm, cond) => { nPins++; if (cond !== true)
+    fails.push(nm + (typeof cond === 'string' ? ' [' + cond + ']' : '')); };
   const click = (el) => el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
   const setIn = (el, v) => { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
   const btn = (root, t) => [...root.querySelectorAll('button')].find(b => b.textContent.includes(t));
@@ -4410,9 +4564,9 @@ async function runUiTest() {
     while (!pred() && Date.now() - t0 < ms) await sleep(50); return pred(); };
 
   // filter: typing narrows the list to matching types; clearing restores it
-  // (v0.156: the by-type tab adds section headers — rows are the .i badges)
+  // (grouped list v0.157: rows live inside .grp containers; search force-opens)
   { const tot = model.data.components.length;
-    const rows = () => [...$('complist').children].filter(d => d.querySelector('.i'));
+    const rows = () => [...$('complist').querySelectorAll('.grp > div[data-idx]')];
     setIn($('filter'), 'wheel');
     const r0 = rows();
     const only = r0.length > 0 && r0.every(d => d.textContent.includes('Wheel'));
@@ -4422,8 +4576,8 @@ async function runUiTest() {
   // list tabs (v0.156): by-type sections vs by-subgrid (Build sections +
   // hull-parts section); every flat part is listed in both; the choice persists
   { const tot = model.data.components.length;
-    const rows = () => [...$('complist').children].filter(d => d.querySelector('.i'));
-    const secs = () => [...$('complist').children].filter(d => d.classList.contains('sec'));
+    const rows = () => [...$('complist').querySelectorAll('.grp > div[data-idx]')];
+    const secs = () => [...$('complist').querySelectorAll('.sec')];
     const [tbType, tbSub] = [...$('ltabs').children];
     tbType.click();
     const typeOk = rows().length === tot && secs().length > 1;
@@ -4433,12 +4587,34 @@ async function runUiTest() {
     ok('listtabs', typeOk && subOk && listTab === 'type'
        && localStorage.getItem('archean-list-tab') === 'type'); }
 
-  // list click: a row selects — header names it and the inspector builds
-  { const d = [...$('complist').children].filter(x => x.querySelector('.i'))[3],
-          idx = +d.querySelector('.i').textContent;
-    click(d);
-    ok('listclick', selected === idx && $('selname').textContent.includes(model.data.components[idx].type)
-       && $('inspector').querySelectorAll('.row').length >= 6); }
+  // collapsible groups (v0.157): groups are collapsed by default, header
+  // toggles, and SELECTING a part auto-expands its group (listclick pin).
+  // Self-contained: force every group closed via its own header first, so
+  // earlier pins' open-states cannot skew the baseline.
+  { const list = $('complist');
+    const grps = () => [...list.querySelectorAll('.grp')];
+    for (const h of list.querySelectorAll('.sec'))
+      if (h.nextElementSibling.style.display !== 'none') h.click();
+    const allCol = grps().length > 1 && grps().every(g => g.style.display === 'none');
+    list.querySelector('.sec').click();
+    const opened = grps()[0].style.display !== 'none';
+    list.querySelector('.sec').click();
+    const reclosed = grps()[0].style.display === 'none';
+    ok('listcollapse', (allCol && opened && reclosed)
+      || `n=${grps().length} allCol=${allCol} opened=${opened} reclosed=${reclosed}`); }
+
+  // list click: a row selects — header names it and the inspector builds;
+  // v0.157: selecting AUTO-EXPANDS the containing group (reveal)
+  { const d0 = $('complist').querySelectorAll('.grp > div[data-idx]')[3];
+    const idx = +d0.dataset.idx;
+    click(d0);
+    const d = $('complist').querySelector(`.grp > div[data-idx="${idx}"]`);
+    const msg = `sel=${selected} want ${idx} row=${!!d}`
+      + ` grp=${d ? d.closest('.grp')?.style.display || 'open' : '-'} name=${$('selname').textContent}`
+      + ` rows=${$('inspector').querySelectorAll('.row').length}`;
+    ok('listclick', (selected === idx && d && d.closest('.grp').style.display !== 'none'
+       && $('selname').textContent.includes(model.data.components[idx].type)
+       && $('inspector').querySelectorAll('.row').length >= 6) || msg); }
 
   // rotate gizmo attaches on selection — to the scene-root PROXY, never the
   // mirrored mesh (attaching under worldM would mirror Y/Z drags, see gizmo

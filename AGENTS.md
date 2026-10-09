@@ -180,8 +180,20 @@ landing page and README together when the viewer changes).
   recursive subtree sizes — dev readBuild order); exact for 342/342 corpus
   entries. Masters are any part type (hinges/pivots kinematic, dashboards/
   RTGs/batteries static hosts, metres away); joint state lives on the MASTER
-  (`angle` DEGREES / `pos` metres). Pins: selftest `subjoin`, dolphin/XYQ
-  postest sub-master fixtures. See FORMAT.md §Subgrids.
+  (`angle` DEGREES / `pos` metres). **v0.157 joint drive:** masters with a
+  manifest `joints[0]` (SmallHinge/SmallPivot/Aileron/LinearTrack — NOT
+  Lamp/SpotLight, whose joints = [] and whose `angle` is the light aim)
+  ANIMATE their subgrid: axis = viewQuat(master)·axleEuler(ZYX)·x̂, pivot =
+  viewPos(master) + viewQuat·(mirror_z axle.position); group pose
+  p' = pivot + R(axis,angle)·(base.p−pivot) (+axis·pos), q' = R·base.q
+  (`syncSubJoints()`, runs from buildSubgrids + every markDirty; the panel
+  Mount row exposes editable joint-angle/slide sliders that write the
+  master's data verbatim). Build attach pose lives in `g.userData.base`
+  {p,q} — pivot rows edit BASE, never the live transform. Pins: selftest
+  `subjoin`, dolphin/XYQ postest sub-master fixtures, dolphin
+  `subjoint-angle` (sign-sensitive 90° spin about the decoded axis),
+  3732302108 `subjoint-pos` (LinearTrack slide ∥ axle). See FORMAT.md
+  §Subgrids.
 - Palette slots: `data.colors[256]`, entry = {r,g,b 0-255, opacity 0-15,
   roughness 0-7, metallic 0|1}. **r/g/b are LINEAR albedo** — the engine's
   shaders use them raw; decoding as sRGB darkens the craft ~^2.2 (the ISW-241
@@ -349,15 +361,16 @@ landing page and README together when the viewer changes).
      (user report) — the objectChange writeback unwraps per-event wrapped
      deltas into a continuous spin, both directions. Rings are thickened
      annuli at full opacity (TGC's default 0.02-wide/25 % reads invisible).
-     The selection is boxed by a FAT 3px LineSegments2 outline (outline=
-     true: 12 segments on select, hidden on none; Box3Helper's 1px lines
-     vanished on HiDPI — user "selection should be more clear"). Connectors
+     The selection is boxed by a FAT 4.5px LineSegments2 outline,
+     EXPANDED 0.07 m off the part (outline=true: 12 segments on select,
+     hidden on none; Box3Helper's 1px lines vanished on HiDPI — user
+     "selection should be more clear"; v0.157 "bigger highlight"). Connectors
      (adapter nubs) default HIDDEN on their own View-Options toggle
      (conndef=true), pipes/cables keep theirs. The v0.153 MODE
      WIDGET: a canvas click on a part pops ⊘/✥/⟳/ℹ TIED TO THE PART
      (v0.156: projected bbox centre, re-projected every rendered frame
      while open — no/move/rotate/info; last choice persists,
-     `archean-gizmo-mode`);
+     `archean-gizmo-mode`; v0.157: enlarged to 17 px buttons);
      move = translate gizmo on the same proxy, writeback is the mirror
      involution (view z-flip) minus the compGroup display anchor, occ +
      type-255 mirror cells follow via serialize()'s round(delta/CELL) shift
@@ -394,7 +407,10 @@ landing page and README together when the viewer changes).
    through its real handler (checkboxes, buttons, sliders, ⟲ resets) plus the
    paths state-pins miss: filter, LIST TABS (listtabs: by type / by subgrid,
    v0.156 — every flat part listed in both tabs, one search filters both,
-   the pick persists), list-click select, keyboard g/o/h (which
+   the pick persists), COLLAPSIBLE GROUPS (listcollapse: v0.157 groups start
+   collapsed, header toggles; listclick also pins that a row-click AUTO-
+   EXPANDS the containing group = the reveal path), list-click select,
+   keyboard g/o/h (which
    must move groups AND stay synced with their checkboxes; h = blocks +
    triangles together), preset buttons (must actually MOVE the part — the
    row.set()/onInput dead-button bug), comp.data write-through, real-model
@@ -451,26 +467,37 @@ landing page and README together when the viewer changes).
    subgrid (userData.sub), a ray from OUTSIDE the craft toward a door must
    route to the SUBGRID (front priority — the hull behind it loses),
    selectSub opens the info panel (Contents/Mount/Pivot rows) showing the
-   DECODED master (sub-masters pin: 5 entries, Build[22]←SmallPivot), and a
-   pivot edit tracks the group live with the file quat staying plain-numeric.
+   DECODED master (sub-masters pin: 5 entries, Build[22]←SmallPivot), a
+   pivot edit tracks the group live (via userData.base) with the file quat
+   staying plain-numeric, and `subjoint-angle` spins that pivot's master to
+   90°: the group must rotate EXACTLY 90° about the decoded axle axis
+   (sign-sensitive dot>0.9999), swing about the pivot point, and return.
    XYQ-615 (3803780241) decodes Build[41]←ToggleButton, Build[5]←Dashboard.
+   v0.157 gantry (3732302108) `subjoint-pos`: the LinearTrack-mastered
+   subgrid slides +0.25 m along its decoded axle axis, and returns.
    Dev-shot hooks leave final states for headless screenshots: uitest
    `&wbshot` (mode widget + move gizmo on a part), postest `&subshot`
-   (subgrid panel + widget at the door).
+   (subgrid panel + widget at the door, camera flown to the master part).
 3. `fitHull` must stay **generic**: zero per-craft constants. The exact lattice
    (W=12, pitch=CELL, C=−FRAME/2) passes on all 24 corpus files, not just ISW-241.
 
 ## Conventions
 - view3d.js is one flat file with `// ---------- sections ----------`; follow it.
 - UI = DevTools-style rows built by `row()`; new tunables get sliders, not prompts.
-- Component list (v0.156): two tabs (`#ltabs`, persisted `archean-list-tab`) —
-  `by type` (alphabetical sections) and `by subgrid` (one section per Build:
-  decoded masters + indented nested rows whose click = selectSub; then
-  'Hull & parts (no subgrid)'), ONE search (`#filter`, position unchanged)
-  filters both; rows carry the `.i` index badge, section headers are
-  `.sec` (count spans must NOT use class `i` — uitest counts rows by it).
-  The nose/tail/up nudge presets were REMOVED (user: meaningless — sliders +
-  gizmo cover nudging); the PilotSeat lean presets stay (seatpreset pin).
+- Component list (v0.156 tabs, v0.157 collapsible): two tabs (`#ltabs`,
+  persisted `archean-list-tab`) — `by type` (alphabetical sections) and
+  `by subgrid` (one section per Build: decoded masters + indented nested
+  rows whose click = selectSub; then 'Hull & parts (no subgrid)'), ONE
+  search (`#filter`, position unchanged) filters both; rows carry the `.i`
+  index badge, section headers are `.sec` (count spans must NOT use class
+  `i` — uitest counts rows by it). Rows live inside a `.grp` container per
+  section; groups are COLLAPSED by default (chevron on the header toggles;
+  `listOpen` map keyed `tab|section`), a non-empty filter force-opens, and
+  `select()`/`selectSub()` pass `{reveal:true}` which opens the containing
+  group and scrolls the row into view (nested rows carry `data-b` = their
+  Build index for the subgrid-tab reveal). The nose/tail/up nudge presets
+  were REMOVED (user: meaningless — sliders + gizmo cover nudging); the
+  PilotSeat lean presets stay (seatpreset pin).
 - `row().set()` MUST repaint (it calls `invalidate()`): programmatic
   `.value` assignment fires no 'input' event, and the global input→invalidate
   listener is what keeps sliders live — without it ⟲/presets moved the UI but

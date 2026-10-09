@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Archean Blueprint Viewer v0.156 — ISW-241</title>
+<title>Archean Blueprint Viewer v0.157 — ISW-241</title>
 <style>
   :root { --bg:#131219; --panel:#1c1b22; --panel2:#252330; --tx:#e8e6e3; --dim:#9a97a5;
           --accent:#0a84ff; --row:#2d2b38; --ok:#30e660; }
@@ -38,10 +38,12 @@
   #complist div:hover { background:#2a2836; }
   #complist div.sel { background:color-mix(in srgb, var(--accent) 30%, transparent); color:#fff; }
   #complist .t { color:#7fd0ff; } #complist .i { color:var(--dim); }
-  #complist div.sub { padding-left:22px; opacity:.85; }
+  #complist div.sub { padding-left:34px; opacity:.85; }
+  #complist .grp > div { padding-left:22px; }
   #complist div.sec { color:var(--accent); font-size:10px; letter-spacing:.06em;
-    background:#201e2b; cursor:default; text-transform:uppercase; }
-  #complist div.sec:hover { background:#201e2b; }
+    background:#201e2b; cursor:pointer; text-transform:uppercase; }
+  #complist div.sec:hover { background:#2a2836; }
+  #complist .chev { display:inline-block; width:10px; color:#5f7488; }
   #ltabs { display:flex; gap:4px; margin:2px 0; }
   #ltabs button { all:unset; cursor:pointer; flex:1; text-align:center; padding:3px 0;
     font-size:11px; background:var(--row); color:var(--dim); border-radius:4px; }
@@ -76,12 +78,12 @@
   #help { color:var(--dim); padding:6px 10px; }
   .dirty #panel header { outline:2px solid var(--ok); outline-offset:-2px; }
   /* gizmo mode switch — pops up at the click point (v0.154) */
-  #modebox { position:fixed; z-index:40; display:none; gap:2px; padding:3px;
-             background:#10141aee; border:1px solid #2e3a46; border-radius:7px;
+  #modebox { position:fixed; z-index:40; display:none; gap:3px; padding:5px;
+             background:#10141aee; border:1px solid #2e3a46; border-radius:9px;
              box-shadow:0 4px 16px #000a; font-family:monospace; }
   #modebox.vis { display:flex; }
-  #modebox button { all:unset; cursor:pointer; font-size:13px; line-height:1;
-             padding:5px 8px; border-radius:5px; color:#9fb4c4; }
+  #modebox button { all:unset; cursor:pointer; font-size:17px; line-height:1;
+             padding:7px 11px; border-radius:6px; color:#9fb4c4; }
   #modebox button:hover { background:#1d2833; }
   #modebox button.on { background:#26506b; color:#dff1ff; }
 </style>
@@ -98,7 +100,7 @@
   <div id="toast"></div>
   <div id="panel">
     <header>
-      <span>ISW-241 blueprint inspector <small style="color:#7dffcf;font-weight:400">v0.156</small>
+      <span>ISW-241 blueprint inspector <small style="color:#7dffcf;font-weight:400">v0.157</small>
         <a id="wslink" target="_blank" rel="noopener" title="Workshop page for this craft"
            style="display:none;margin-left:8px;font-size:12px;color:#7dffcf;text-decoration:none">workshop ↗</a></span>
       <span>
@@ -134,6 +136,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="view3d.js?v=156"></script>
+  <script type="module" src="view3d.js?v=157"></script>
 </body>
 </html>
