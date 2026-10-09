@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Archean Blueprint Viewer v0.152 — ISW-241</title>
+<title>Archean Blueprint Viewer v0.153 — ISW-241</title>
 <style>
   :root { --bg:#131219; --panel:#1c1b22; --panel2:#252330; --tx:#e8e6e3; --dim:#9a97a5;
           --accent:#0a84ff; --row:#2d2b38; --ok:#30e660; }
@@ -66,6 +66,15 @@
            pointer-events:none; font-family:monospace; }
   #help { color:var(--dim); padding:6px 10px; }
   .dirty #panel header { outline:2px solid var(--ok); outline-offset:-2px; }
+  /* gizmo mode switch — pops up at the click point (v0.153) */
+  #modebox { position:fixed; z-index:40; display:none; gap:2px; padding:3px;
+             background:#10141aee; border:1px solid #2e3a46; border-radius:7px;
+             box-shadow:0 4px 16px #000a; font-family:monospace; }
+  #modebox.vis { display:flex; }
+  #modebox button { all:unset; cursor:pointer; font-size:13px; line-height:1;
+             padding:5px 8px; border-radius:5px; color:#9fb4c4; }
+  #modebox button:hover { background:#1d2833; }
+  #modebox button.on { background:#26506b; color:#dff1ff; }
 </style>
 <script type="importmap">
 { "imports": {
@@ -80,7 +89,7 @@
   <div id="toast"></div>
   <div id="panel">
     <header>
-      <span>ISW-241 blueprint inspector <small style="color:#7dffcf;font-weight:400">v0.152</small>
+      <span>ISW-241 blueprint inspector <small style="color:#7dffcf;font-weight:400">v0.153</small>
         <a id="wslink" target="_blank" rel="noopener" title="Workshop page for this craft"
            style="display:none;margin-left:8px;font-size:12px;color:#7dffcf;text-decoration:none">workshop ↗</a></span>
       <span>
@@ -115,6 +124,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="view3d.js?v=152"></script>
+  <script type="module" src="view3d.js?v=153"></script>
 </body>
 </html>

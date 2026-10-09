@@ -38,7 +38,7 @@ tests/run_tests.sh                      # full headless suite (python3 + chromiu
 python3 -m http.server 8650             # manual serving (repo root)
 # viewer:   http://127.0.0.1:8650/viewer/index.html
 # selftest: http://127.0.0.1:8650/viewer/index.html?selftest  (tab title: SELFTEST PASS)
-# gizmatest: viewer/index.html?gizmatest (GIZMATEST PASS n=12; &shot=1|2|3 = WYSIWYG screenshot states)
+# gizmatest: viewer/index.html?gizmatest (GIZMATEST PASS n=14; &shot=1|2|3 = WYSIWYG screenshot states)
 # regtest:  http://127.0.0.1:8650/regtest/regtest.html         (page ends 'REGTEST: PASS')
 # other craft: viewer/index.html?open=../testdata/<id>/blueprint.json
 # perf probe: viewer/index.html?perf → tab title: PERF fps=… draw=<draw-calls> …
@@ -148,6 +148,15 @@ landing page and README together when the viewer changes).
   pipes. See FORMAT.md.
 - `components[].type === 'Build'` = editor construction-site ghost, far outside
   the bbox — never render it as geometry.
+- **Subgrids** (v0.153): Build components carrying nested blueprints (doors/
+  hatches) live as ONE Group per Build (`userData.sub`); their attach transform
+  is the Build component's own `position`/`orientation` (dev-viewer composes
+  nested content under the Build matrix). `data.composite_builds` entries
+  `{component, slaveBuildId}` name the master part but slaveBuildId is an
+  editor id with no referent, and geometry pairing is ambiguous for ~72 % of
+  anchors — so the subgrid info panel lists a master only when it provably
+  touches the subgrid bbox (≤0.3 m), never guesses. Master joint state:
+  `angle` in DEGREES, `pos` in metres. See FORMAT.md §Subgrids.
 - Palette slots: `data.colors[256]`, entry = {r,g,b 0-255, opacity 0-15,
   roughness 0-7, metallic 0|1}. **r/g/b are LINEAR albedo** — the engine's
   shaders use them raw; decoding as sRGB darkens the craft ~^2.2 (the ISW-241
@@ -281,7 +290,10 @@ landing page and README together when the viewer changes).
      in camera space (`sock=true`, dot > 0.93 after an explicit updateWindHud);
      hull solids and wireframe are mutually exclusive checkboxes (`excl=true`);
      the wind particle budget tiers with scene cost, normal crafts full 2200
-     (`windpts=true`); canvas picking = deliberate press only (`click=true`);
+     (`windpts=true`); canvas picking = deliberate press only (`click=true`),
+     and a subgrid hit CLOSER than any component routes the click to the
+     subgrid info panel (v0.153 — content of a subgrid and anything BEHIND it
+     lose; pinned in the dolphin postest, ISW has no subgrids);
      streamlines are UNDISTURBED upstream of the body mid-plane (`inflow=true`)
      while the wake deficit behind it slows the flow >25% (`wake=true`);
      pitching the PilotSeat must NOT steer/slow the wind (heading-only,
@@ -292,8 +304,15 @@ landing page and README together when the viewer changes).
      as seen (user WYSIWYG rule); scene-root proxy, writeback qv = P·Ry(π)
      (THREE decompose absorbs the negative scale by negating sx). `gizmo=
      true` pins the writeback round-trip; `?gizmatest` (synthetic single-
-     seat blueprint, camera facing the pilot, n=12 + &shot=1|2|3 visual
-     states) pins the order algebra and the live pose. The explode/assembly
+     seat blueprint, camera facing the pilot, n=14 + &shot=1|2|3 visual
+     states) pins the order algebra and the live pose. The v0.153 MODE
+     WIDGET: a canvas click on a part pops ⊘/✥/⟳/ℹ AT the click point
+     (no/move/rotate/info — last choice persists, `archean-gizmo-mode`);
+     move = translate gizmo on the same proxy, writeback is the mirror
+     involution (view z-flip) minus the compGroup display anchor, occ +
+     type-255 mirror cells follow via serialize()'s round(delta/CELL) shift
+     exactly like the position sliders — the gizmo never touches blueprint
+     math. Shift snaps 15° AND 0.25 m cells. The explode/assembly
      feature (v0.140/141) was
      REMOVED in v0.142 (user: "a catastrophe") — do not resurrect.
      thrust display + wind model: every DIRECTIONAL propulsor (THRUST
@@ -334,7 +353,11 @@ landing page and README together when the viewer changes).
    level ⟲ pin (compreset: proxy + real siblings move, repaints, and writes a
    PLAIN numeric file quaternion — spreading a THREE.Quaternion copies its
    _x/_y accessor BACKING = NaN quats at the next rebuild), rotate-gizmo
-   attach/toggle pins. Title: `UITEST PASS n=<pins> ctrls=N`
+   attach/toggle pins, mode-widget pins (modebox: a synthetic canvas click
+   pops the widget at the part, ⊘/✥/⟳ buttons drive tctl mode + attach state
+   + localStorage; movemode: proxy drag writes comp.position RAW, moves mesh
+   AND real siblings, undo through the same path).
+   Title: `UITEST PASS n=<pins> ctrls=N`
    (n counts ok() live, nothing hardcoded) /
    `UITEST FAIL <pins>`, captured errors in #out.
 2c-c. `?gizmatest` (v0.151): rotate-gizmo ROTATION-ORDER suite on a
@@ -344,9 +367,12 @@ landing page and README together when the viewer changes).
    drawn axis; trackball = eye-axis extrinsic; pitch90→roll90 order matters
    and uses the MOVED axis) + the shipped config (rotate/local) + the LIVE
    writeback through applyGizmoOrientation (file decode, mesh pose, ring
-   tracking, visible nose swing). `&shot=1|2|3` leaves the scene at
+   tracking, visible nose swing) + v0.153 move-mode pins (movecfg: the mode
+   switch toggles tctl translate↔rotate and persists; moveinv: the
+   position writeback is the raw/mirror involution). `&shot=1|2|3` leaves
+   the scene at
    before/+pitch90/+pitch90+roll90 for headless eyeball (runner saves
-   gizmo1..3.png). Title: `GIZMATEST PASS n=12`.
+   gizmo1..3.png). Title: `GIZMATEST PASS n=14`.
 2c. `?postest`: placement fixtures keyed per craft (the POSTESTS table in
    view3d.js — the sanctioned exception to "no per-craft constants": fixtures
    probe the RENDERED scene where generic checks cannot see a pose bug).
@@ -364,6 +390,14 @@ landing page and README together when the viewer changes).
    v0.146: lever/plate expectations include the game's mount bake (local
    yaw-180, plate front on the mount face pilot-side — raw file quat leaves
    the plate 0.68 m behind the pivot = dolphin/Cede gap defect).
+   v0.153 dolphin (3417786605) SUBGRID fixtures: one THREE.Group per Build
+   subgrid (userData.sub), a ray from OUTSIDE the craft toward a door must
+   route to the SUBGRID (front priority — the hull behind it loses),
+   selectSub opens the info panel (Contents/Mount/Pivot rows), and a pivot
+   edit tracks the group live with the file quat staying plain-numeric.
+   Dev-shot hooks leave final states for headless screenshots: uitest
+   `&wbshot` (mode widget + move gizmo on a part), postest `&subshot`
+   (subgrid panel + widget at the door).
 3. `fitHull` must stay **generic**: zero per-craft constants. The exact lattice
    (W=12, pitch=CELL, C=−FRAME/2) passes on all 24 corpus files, not just ISW-241.
 

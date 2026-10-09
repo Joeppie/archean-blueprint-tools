@@ -652,6 +652,42 @@ Pin `seatpitch=true`.
   silently. Add the pin BEFORE re-landing: real-model Beacon mast tip in world
   (comptest-grade), aileron real-model tip below hinge on a palette file.
 
+## Subgrids (`Build` components) — attach semantics, what decodes (v0.153)
+
+`ARCHEAN_build.Build` is the component that CARRIES a sub-construction — the part
+that hangs off a pivot/hinge/rail and moves relative to the rest; the game calls
+it a *subgrid* in player UI ("Delete subgrid & contents") (dev-viewer comment,
+transcribed). Corpus: every craft with subgrids has exactly one
+`data.composite_builds` entry per Build component.
+
+- **Stored CLOSED at grid coords**: the nested `data.blocks` use the parent's
+  cell encoding at the craft's true coordinates (they seal the hull while
+  closed — see §sealStats). Nested `data.components` ride along untransformed.
+- **The attach transform is the Build component's OWN `position`/`orientation`.**
+  Dev viewer reference implementation: nested content composes as
+  `world = BuildMatrix ∘ local` (readBuild recursion). Most files store
+  identity (dolphin doors: position ≈ 0, quat = identity, ±1e-30 noise);
+  XYQ-615 carries a real 0.635 m pivot offset. Viewer applies the same
+  composition to its per-subgrid group (scale.z=−1 + viewQuat mirror chain, so
+  an identity pivot renders bit-identical to the pre-v0.153 flat draw).
+- **`composite_builds[]` = `{component, slaveBuildId}`**:
+  - `component` = index of the MASTER the subgrid rides: 49 distinct types in
+    the corpus — Dashboard(54), SmallHinge(34), SmallPivot(22), Aileron(19),
+    Build(16), junctions/batteries/pumps… (construction bolted to equipment is
+    as common as door-on-hinge). Joint masters carry their LIVE state in
+    `data`: `angle` in DEGREES (SmallHinge ±90, SmallPivot 338.4 — same key and
+    unit as ailerons), `pos` in metres (LinearTrack) — 32 anchors corpus-wide
+    hold a non-zero pose.
+  - `slaveBuildId` = **editor-session id with NO referent in the file**
+    (verified: not a component index, not nested `data.id`/alias, not ghost
+    occ cells; the dev viewer ignores `composite_builds` entirely).
+- **Reconstructing anchor→subgrid geometry is NOT reliable**: nearest-subgrid
+  is unique for only ~28 % of anchors (crane-arm constructions legitimately sit
+  metres from their pivot); order-pairing `cb[i] ↔ i-th Build` fails (342 m
+  outlier). So the viewer NEVER guesses: the subgrid info panel (v0.153, click
+  a subgrid) lists a master only when a `composite_builds` anchor provably
+  touches that subgrid's bbox (≤0.3 m), else says so.
+
 ## Editing recipe (used for the seat adjustment)
 
 Tilt forward = rotate about world **X** with a **negative** angle (Unity left-handed:

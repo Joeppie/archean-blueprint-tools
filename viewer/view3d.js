@@ -546,7 +546,7 @@ scene.add(compGroup, blockGroup, occGroup, hullGroup, pipeGroup, adpGroup, subGr
 occGroup.visible = false;
 hullGroup.visible = true;
 
-let selected = -1, hovered = -1, dirty = false;
+let selected = -1, hovered = -1, dirty = false, selectedSub = -1;   // selectedSub: Build-comp index of a clicked subgrid (v0.153)
 let fileHandle = null;
 
 // ---------- helpers ----------
@@ -1039,14 +1039,30 @@ function addBlockMeshes(group, blocks, offset) {
 }
 
 // subgrids: nested blueprint data inside 'Build' components (hatches/doors),
-// linked to their hinge via data.composite_builds. In the blueprint they are
-// stored in the CLOSED pose, using the same cell-grid encoding as the parent
-// craft — the hinge's own orientation is the animation axis, not a transform.
+// stored in the CLOSED pose using the same cell-grid encoding as the parent.
+// The subgrid's authoritative attach transform is the Build component's OWN
+// position/orientation (dev viewer: nested world = BuildMatrix ∘ local);
+// hinge anchors live in data.composite_builds — see FORMAT §Subgrids for what
+// is/isn't decodable there. Each subgrid becomes ONE group (userData.sub =
+// Build comp index): pick target, pivot-edit subject, one visibility unit.
+// The group mirrors like any component (scale.z=−1 + viewQuat), so with the
+// near-universal identity pivot it renders EXACTLY as before, and a pivot
+// edit rotates/offsets the whole subgrid around the mount.
 function buildSubgrids() {
   subGroup.clear();
-  for (const c of model.data.components) {
-    if (c.type !== 'Build' || !c.data?.blocks?.length) continue;
-    addBlockMeshes(subGroup, c.data.blocks, new THREE.Vector3());
+  let sn = 0;
+  model.data.components.forEach((c, bi) => {
+    if (c.type !== 'Build' || !c.data?.blocks?.length) return;
+    const g = new THREE.Group();
+    g.userData.sub = bi; g.userData.subn = ++sn;
+    // The group carries the Build attach transform CONJUGATED into view space:
+    // V·T(bp)·R(q)·V = T(viewPos(bp))·R(viewQuat(q)) — a PROPER rotation, so
+    // the group gets NO scale.z=−1: the children already embed the single
+    // z-mirror in their own placement (a second mirror would un-mirror them).
+    g.position.copy(viewPos(c.position));
+    g.quaternion.copy(viewQuat(c.orientation));
+    subGroup.add(g);
+    addBlockMeshes(g, c.data.blocks, new THREE.Vector3());
     for (const sc of c.data.components || []) {
       if (sc.type === 'Build') continue;
       const m = MODEL.manifest?.[sc.type] ? colliderProxy(sc) : (PROXY[sc.type] || PROXY2[sc.type] || defaultProxy)(sc);
@@ -1054,13 +1070,16 @@ function buildSubgrids() {
       m.userData.wType = sc.type;
       applyDisplayPose(m, viewQuat(sc.orientation), sc.orientation);
       m.scale.z = -1;
-      subGroup.add(m);
+      g.add(m);
       // real/decimated geometry for nested parts too (Spider Mining Rover:
       // a Wheel lives in a hatch subgrid — the box stand-in alone read as a
-      // "missing wheel"). ci = -1: nested parts are not list/select targets.
+      // "missing wheel"). ci = -1: nested parts are not list/select targets —
+      // their (invisible, still-raycastable) proxy under the group routes the
+      // click to the SUBGRID ("a clock or a triangle" inside a subgrid = the
+      // subgrid's own content, v0.153).
       const mp = MODEL.manifest?.[sc.type] ? getModel(sc.type) : null;
       if (mp) mp.then(mm => {
-        if (!mm || !mm.geo || !subGroup.children.includes(m)) return;
+        if (!mm || !mm.geo || !g.children.includes(m)) return;
         const real = buildRealComponent(sc, mm, -1, !realModelsOn);
         real.position.copy(m.position);
         real.quaternion.copy(m.quaternion);
@@ -1068,11 +1087,11 @@ function buildSubgrids() {
         m.visible = false;
         real.raycast = () => {};
         real.traverse(o => { o.raycast = () => {}; });
-        subGroup.add(real);
+        g.add(real);
         invalidate();
       });
     }
-  }
+  });
 }
 
 let compObjs = [];
@@ -1430,6 +1449,8 @@ function setModel(obj, srcName) {
     occ0: c.occupancies.map(o => ({ ...o })),
   }));
   selected = -1;
+  selectedSub = -1;
+  hideModeBox();
   dirty = false;
   document.body.classList.remove('dirty');
   ensureOrigQ();
@@ -1526,7 +1547,7 @@ $('openBtn').onclick = openFile;
 addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); save(); }
   if (e.target.tagName === 'INPUT') return;
-  if (e.key === 'Escape') select(-1);
+  if (e.key === 'Escape') { select(-1); selectSub(-1); hideModeBox(); }
   // shortcuts drive the SAME checkboxes as the mouse (v0.147): the checkbox
   // change handler owns exclusivity + visibility, so flip through it.
   const kb = (k) => { const t = viewToggles[k]; if (t) { t.cb.checked = !t.cb.checked;
@@ -1547,12 +1568,20 @@ addEventListener('drop', async (e) => {
 
 // ---------- selection & picking ----------
 const ray = new THREE.Raycaster(), ptr = new THREE.Vector2();
+// subgrid owner of a hit: nearest ancestor tagged by buildSubgrids
+function subOwner(o) { while (o) { if (o.userData.sub !== undefined) return o.userData.sub; o = o.parent; } return -1; }
 function pick(ev) {
   const r = renderer.domElement.getBoundingClientRect();
   ptr.set(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
   ray.setFromCamera(ptr, camera);
-  const hits = ray.intersectObjects(compGroup.children, true);
-  return hits.length ? hits[0].object.userData.ci : -1;
+  const hc = ray.intersectObjects(compGroup.children, true);
+  // subgrids pick too (v0.153): a hit closer than any component means the
+  // CLICK LANDED ON the subgrid — content like its clocks/triangles route to
+  // the subgrid, and a component BEHIND the subgrid loses (user rule).
+  const hs = subGroup.visible ? ray.intersectObjects(subGroup.children, true) : [];
+  const dc = hc.length ? hc[0].distance : Infinity, ds = hs.length ? hs[0].distance : Infinity;
+  if (ds < dc) return { ci: -1, sub: subOwner(hs[0].object) };
+  return { ci: hc.length ? hc[0].object.userData.ci : -1, sub: -1 };
 }
 // No hover picking (PERF.md #1, user): pointermove fired a recursive
 // raycast over every component mesh — during orbit drags too — costing
@@ -1562,7 +1591,7 @@ function pick(ev) {
 // Ring presses need NO pick special-case: a ring DRAG moves the pointer, so
 // the deliberate-press test below never selects on it; a zero-move press is a
 // real click — the trackball applies zero rotation, the click selects.
-let downPick = -1;
+let downPick = { ci: -1, sub: -1 };
 renderer.domElement.addEventListener('pointerdown', (e) => {
   renderer.domElement.dataset.dx = e.clientX; renderer.domElement.dataset.dy = e.clientY;
   downPick = pick(e);                            // the ONLY scene raycast loop
@@ -1570,18 +1599,35 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
 renderer.domElement.addEventListener('pointerup', (e) => {
   const dx = Math.abs(e.clientX - (renderer.domElement.dataset.dx | 0));
   const dy = Math.abs(e.clientY - (renderer.domElement.dataset.dy | 0));
-  if (dx < 4 && dy < 4) select(downPick, true);  // canvas click = the ONLY fly trigger (list: dblclick)
+  if (dx < 4 && dy < 4) {                        // canvas click = the ONLY fly trigger
+    if (downPick.sub >= 0) selectSub(downPick.sub);
+    else select(downPick.ci, true);
+    // the mode widget is the context menu AT the clicked widget (v0.153)
+    if (downPick.ci >= 0 || downPick.sub >= 0) showModeBox(e.clientX, e.clientY);
+    else hideModeBox();
+  }
 });
 
 function select(i, doFly) {
   selected = i;
+  selectedSub = -1;
   invalidate();
   buildInspector();
   buildList();
   paintHighlights();
-  syncGizmo();               // rotate gizmo follows the selection
+  syncGizmo();               // gizmo follows the selection (mode permitting)
   startSurges(i);              // cable power-surge: fires on every selection
   if (doFly) flyTo(i);         // camera fly is manual-only (canvas click / list dblclick)
+}
+// subgrid selection: info-only (no gizmo, no surge, no list row) — the
+// inspector swaps to the subgrid panel with mount + pivot rotation/offset
+function selectSub(i) {
+  selectedSub = i;
+  selected = -1;
+  invalidate();
+  buildInspector();
+  paintHighlights();
+  syncGizmo();
 }
 
 // ---------- rotate gizmo (Blender-style, v0.150; order fix v0.151) ----------
@@ -1632,8 +1678,9 @@ const tctl = new TransformControls(camera, renderer.domElement);
 tctl.setMode('rotate');
 tctl.space = 'local';                 // ring = part axis (see model above)
 tctl.setSize(0.8);
-tctl.addEventListener('objectChange', () => applyGizmoOrientation(gizmoProxy.quaternion));
-tctl.addEventListener('mouseDown', () => { controls.enabled = false; });
+tctl.addEventListener('objectChange', () => tctl.mode === 'translate'
+  ? applyGizmoPosition(gizmoProxy.position) : applyGizmoOrientation(gizmoProxy.quaternion));
+tctl.addEventListener('mouseDown', () => { controls.enabled = false; hideModeBox(); });
 tctl.addEventListener('mouseUp', () => {
   controls.enabled = true;
   buildInspector();                    // rebases the euler sliders on the new pose
@@ -1651,9 +1698,58 @@ function syncGizmoPose() {
 }
 function syncGizmo() {
   const o = selected >= 0 ? compObjs?.[selected] : null;
-  if (gizmoOn && o) { syncGizmoPose(); tctl.attach(gizmoProxy); }
-  else tctl.detach();
+  if (gizmoOn && o && (gizmoMode === 'move' || gizmoMode === 'rotate')) {
+    syncGizmoPose(); tctl.attach(gizmoProxy);
+  } else tctl.detach();
 }
+// ---------- gizmo MODE widget (v0.153: context switch at the click point) ----
+// A canvas click on a widget pops a 4-button switch where you clicked:
+// ⊘ none / ✥ move (world position) / ⟳ rotate / ℹ info-only. Move and rotate
+// share the TransformControls proxy; last choice persists. The old
+// "rotate gizmo on selection" checkbox stays the master enable.
+let gizmoMode = localStorage.getItem('archean-gizmo-mode') || 'rotate';
+const modeBox = document.createElement('div');
+modeBox.id = 'modebox';
+for (const [m, ic, ti] of [['none', '⊘', 'no gizmo'], ['move', '✥', 'move — world position'],
+                           ['rotate', '⟳', 'rotate'], ['info', 'ℹ', 'info only (no gizmo)']]) {
+  const b = document.createElement('button');
+  b.textContent = ic; b.title = ti; b.dataset.m = m;
+  b.addEventListener('pointerdown', (e) => e.stopPropagation());
+  b.onclick = (e) => { e.stopPropagation(); setGizmoMode(m); };
+  modeBox.appendChild(b);
+}
+document.body.appendChild(modeBox);
+function paintModeBox() { for (const b of modeBox.children) b.classList.toggle('on', b.dataset.m === gizmoMode); }
+function showModeBox(x, y) {
+  modeBox.style.left = Math.min(x + 10, innerWidth - 118) + 'px';
+  modeBox.style.top = Math.min(y + 8, innerHeight - 44) + 'px';
+  modeBox.classList.add('vis'); paintModeBox();
+}
+function hideModeBox() { if (modeBox) modeBox.classList.remove('vis'); }
+function setGizmoMode(m) {
+  gizmoMode = m;
+  localStorage.setItem('archean-gizmo-mode', m);
+  tctl.setMode(m === 'move' ? 'translate' : 'rotate');
+  syncGizmo(); paintModeBox(); invalidate();
+}
+// move writeback: the proxy lives at scene root, so undo the compGroup display
+// anchor, then the z-mirror (involution) into the RAW file position. occ +
+// type-255 mirror cells follow automatically at save time via serialize()'s
+// round(delta/CELL) shift — same contract as the position sliders, so the
+// gizmo never touches the blueprint math itself.
+function applyGizmoPosition(pW) {
+  const i = selected, o = compObjs?.[i];
+  if (!o) return;
+  o.position.copy(pW).sub(compGroup.position);
+  const p = model.data.components[i].position;
+  p.x = o.position.x; p.y = o.position.y; p.z = -o.position.z;
+  for (const r of realMap.get(i) || []) r.position.copy(o.position);
+  syncAdapters(o);
+  markDirty();
+}
+// apply the persisted mode WITHOUT invalidate(): module-eval order forbids
+// touching the render pipeline here; attach/paint happen on the first click.
+tctl.setMode(gizmoMode === 'move' ? 'translate' : 'rotate');
 // Proxy pose = obj.quaternion·RY180: THREE decompose() absorbs a negative
 // scale by NEGATING SX, so getWorldQuaternion() on the scale.z=−1 root is
 // qv·Ry(π), not qv. That stripped frame is the RIGHT gizmo frame — its axes
@@ -1679,9 +1775,9 @@ function applyGizmoOrientation(qW) {
   markDirty();
   invalidate();
 }
-// Shift = 15° snap, Blender-style
-addEventListener('keydown', (e) => { if (e.key === 'Shift') tctl.setRotationSnap(Math.PI / 12); });
-addEventListener('keyup', (e) => { if (e.key === 'Shift') tctl.setRotationSnap(null); });
+// Shift = 15° rotate snap + 0.25 m cell move snap, Blender-style
+addEventListener('keydown', (e) => { if (e.key === 'Shift') { tctl.setRotationSnap(Math.PI / 12); tctl.setTranslationSnap(CELL); } });
+addEventListener('keyup', (e) => { if (e.key === 'Shift') { tctl.setRotationSnap(null); tctl.setTranslationSnap(null); } });
 // ---------- selection fly-in + glow ----------
 // Fly-in: animate camera+target onto the component (~0.5 s, smoothstep) from
 // the current heading — an in-flight pan+approach. The landing spot is picked
@@ -1960,10 +2056,98 @@ function liveRot(comp, obj, q0) {
   };
 }
 
+// ---------- subgrid info panel (v0.153) ----------
+// Pivot rotation/offset ARE the Build component's own fields (FORMAT §Subgrids:
+// the dev viewer composes nested content under the Build matrix, so those two
+// fields are the subgrid's attach transform). The Mount section lists
+// composite_builds anchors PROVABLY touching this subgrid (≤0.3 m) — the
+// file's slaveBuildId has no referent, and geometry pairing across the corpus
+// is unreliable (76/265), so we show measured evidence, never guesses.
+function buildSubInspector() {
+  const name = $('selname');
+  const bi = selectedSub;
+  const bc = model?.data.components[bi];
+  const g = subGroup.children.find(o => o.userData.sub === bi);
+  if (!bc || !g) { selectedSub = -1; name.innerHTML = '<span class="none">subgrid gone — reselect</span>'; return; }
+  name.innerHTML = `<b>Subgrid</b> #${g.userData.subn} · Build[${bi}]` + (bc.data?.alias ? ` · ${bc.data.alias}` : '');
+
+  const bb = new THREE.Box3().setFromObject(g);
+  const sz = bb.isEmpty() ? new THREE.Vector3() : bb.getSize(new THREE.Vector3());
+  const nb = bc.data?.blocks?.length || 0;
+  const ncs = (bc.data?.components || []).filter(s => s.type !== 'Build');
+  secHeader('Contents');
+  const b1 = secBody();
+  const d1 = document.createElement('div'); d1.className = 'checkrow';
+  d1.innerHTML = `<span style="color:var(--dim)">${nb} blocks · ${ncs.length} parts` +
+    (ncs.length ? ` (${[...new Set(ncs.map(s => s.type))].slice(0, 6).join(', ')})` : '') +
+    ` · ${sz.x.toFixed(2)} × ${sz.y.toFixed(2)} × ${sz.z.toFixed(2)} m</span>`;
+  b1.appendChild(d1);
+
+  secHeader('Mount (hinge / master)');
+  const b2 = secBody();
+  let found = 0;
+  for (const e of model.data.composite_builds || []) {
+    const mc = model.data.components[e.component];
+    if (!mc) continue;
+    const vp = viewPos(mc.position);         // the viewer's own placement rule
+    const v = new THREE.Vector3(vp.x + (model.moff?.[0] || 0),
+      vp.y + (model.moff?.[1] || 0), vp.z + (model.moff?.[2] || 0));
+    if (!bb.isEmpty() && bb.distanceToPoint(v) <= 0.3) {
+      found++;
+      const jd = mc.data || {};
+      const st = typeof jd.angle === 'number' ? ` · angle ${jd.angle.toFixed(1)}°`
+        : typeof jd.pos === 'number' ? ` · offset ${jd.pos.toFixed(3)} m` : '';
+      const d = document.createElement('div'); d.className = 'checkrow';
+      d.innerHTML = `<b>${mc.type}</b>[${e.component}]${mc.alias ? ' ' + mc.alias : ''}` +
+        `<span style="color:var(--dim)">${st}</span>`;
+      b2.appendChild(d);
+    }
+  }
+  if (!found) {
+    const d = document.createElement('div'); d.className = 'checkrow';
+    d.innerHTML = '<span style="color:var(--dim)">no component touching this subgrid — the game-side mount is stored under an editor id with no referent here (FORMAT §Subgrids)</span>';
+    b2.appendChild(d);
+  }
+
+  secHeader('Pivot offset (m)');
+  const b3 = secBody();
+  const pp = bc.position;
+  // identity quats euler-decompose to ~1e-30 float noise, and files carry
+  // −8.9e-16 zero-Z coordinates — a number box truncated mid-exponent reads
+  // as “−8.8817 m”, i.e. a FAKE real value. Show true 0 for noise.
+  const nz = (v) => Math.abs(v) < 1e-4 ? 0 : v;
+  const sp = (ax) => (v) => { bc.position[ax] = v; g.position.copy(viewPos(bc.position)); markDirty(); };
+  row(b3, 'x', pp.x - 2, pp.x + 2, 0.005, nz(pp.x), sp('x'));
+  row(b3, 'y', pp.y - 2, pp.y + 2, 0.005, nz(pp.y), sp('y'));
+  row(b3, 'z', pp.z - 2, pp.z + 2, 0.005, nz(pp.z), sp('z'));
+
+  secHeader('Pivot rotation (°)');
+  const b4 = secBody();
+  const e0 = new THREE.Euler().setFromQuaternion(viewQuat(bc.orientation), 'YXZ');
+  const dq = { p: e0.x * 180 / Math.PI, y: e0.y * 180 / Math.PI, r: e0.z * 180 / Math.PI };
+  const eT = new THREE.Euler(0, 0, 0, 'YXZ'), qT = new THREE.Quaternion();
+  const sr = (kind) => (deg) => {
+    dq[kind] = deg;
+    eT.set(dq.p * Math.PI / 180, dq.y * Math.PI / 180, dq.r * Math.PI / 180);
+    qT.setFromEuler(eT);
+    g.quaternion.copy(qT);
+    bc.orientation = rawFromView({ userData: {} }, qT);   // convention-aware file mirror
+    markDirty();
+  };
+  row(b4, 'pitch', -180, 180, 0.5, nz(dq.p), sr('p'));
+  row(b4, 'yaw', -180, 180, 0.5, nz(dq.y), sr('y'));
+  row(b4, 'roll', -180, 180, 0.5, nz(dq.r), sr('r'));
+  const note = document.createElement('div');
+  note.style.color = 'var(--dim)';
+  note.textContent = 'the subgrid rides its Build pivot — stored verbatim in the file (YXZ euler, game convention); save writes it back byte-true';
+  b4.appendChild(note);
+}
+
 function buildInspector() {
   const insp = $('inspector');
   insp.innerHTML = '';
   const name = $('selname');
+  if (selectedSub >= 0) { buildSubInspector(); return; }   // v0.153 subgrid panel
   if (selected < 0) { name.innerHTML = '<span class="none">nothing selected — click a component</span>'; return; }
 
   const comp = model.data.components[selected];
@@ -3592,6 +3776,48 @@ const POSTESTS = {
       return true;
     });
   },
+  '3417786605': () => {                        // GNG-574 dolphin: 5 door subgrids
+    const subs = () => subGroup.children.filter(o => o.userData.sub !== undefined);
+    T('sub-groups', () => subs().length === 5 ? true : `${subs().length} subgrid groups (expect 5)`);
+    T('sub-pick-front', () => {         // subgrid in FRONT wins over the hull behind it
+      const g = subs()[0];
+      if (!g) return 'no subgrid groups';
+      const bb = new THREE.Box3().setFromObject(g);
+      if (bb.isEmpty()) return 'subgrid bbox empty';
+      const c = bb.getCenter(new THREE.Vector3());
+      const whole = new THREE.Box3();
+      for (const gg of [compGroup, blockGroup, hullGroup, subGroup]) whole.expandByObject(gg);
+      const out = c.clone().sub(whole.getCenter(new THREE.Vector3())).normalize();
+      const rc = new THREE.Raycaster(c.clone().addScaledVector(out, 3), out.clone().negate());
+      const hc = rc.intersectObjects(compGroup.children, true);
+      const hs = rc.intersectObjects(subGroup.children, true);
+      const dc = hc.length ? hc[0].distance : Infinity, ds = hs.length ? hs[0].distance : Infinity;
+      if (!(ds < dc)) return `component hit ${dc.toFixed(2)} m before subgrid ${ds.toFixed(2)} m`;
+      let o = hs[0].object, s = -1;
+      while (o && s < 0) { s = o.userData.sub ?? -1; o = o.parent; }
+      return s === g.userData.sub || `hit routed to sub=${s}, want ${g.userData.sub}`;
+    });
+    T('sub-info', () => {              // click-equivalent opens the subgrid panel
+      if (!subs().length) return 'no subgrids';
+      selectSub(subs()[0].userData.sub);
+      const nm = document.getElementById('selname').textContent;
+      const ins = document.getElementById('inspector').textContent;
+      selectSub(-1);
+      return (/Subgrid/.test(nm) && /Pivot offset/.test(ins) && /Pivot rotation/.test(ins))
+        || `panel missing (nm='${nm.slice(0, 40)}')`;
+    });
+    T('sub-pivot-edit', () => {        // pivot rows move the group live + stay plain in the file
+      const g = subs()[0];
+      if (!g) return 'no subgrids';
+      const bc = model.data.components[g.userData.sub];
+      const px = bc.position.x, gx = g.position.x;
+      bc.position.x = px + 0.4; g.position.copy(viewPos(bc.position));
+      const moved = Math.abs(g.position.x - (gx + 0.4)) < 1e-9
+        && Number.isFinite(bc.orientation.x) && Number.isFinite(bc.orientation.w);
+      bc.position.x = px; g.position.copy(viewPos(bc.position));
+      return moved || 'group did not track pivot edit';
+    });
+  },
 };
 // harness state at module scope: the POSTESTS fixture closures above capture
 // this scope, so T/tmpV must live here (runPosTest resets the counters).
@@ -3708,6 +3934,16 @@ async function runPosTest() {
     `<pre id="out" style="white-space:pre-wrap">${ptLines.join('\n') || 'no fixtures for ' + id}</pre>`);
   const bad = ptLines.filter(l => l.startsWith('FAIL')).map(l => l.slice(5, l.indexOf(':')));
   document.title = `POSTEST ${ptPass}/${ptTot} ${bad.length ? 'FAIL' : 'PASS'}${suite ? '' : ' SKIP'} bad=${bad.join(',') || 'none'}`;
+  if (location.search.includes('subshot')) {    // dev visual state: subgrid panel + widget
+    const g = subGroup.children.find(o => o.userData.sub !== undefined);
+    if (g) {
+      selectSub(g.userData.sub);
+      const v = new THREE.Box3().setFromObject(g).getCenter(new THREE.Vector3()).project(camera);
+      const r = renderer.domElement.getBoundingClientRect();
+      showModeBox(r.left + (v.x * .5 + .5) * r.width, r.top + (-v.y * .5 + .5) * r.height);
+      invalidate();
+    }
+  }
 }
 
 // ---------- ?gizmatest: rotation-order contract for the rotate gizmo ----------
@@ -3780,6 +4016,16 @@ async function runGizmoTest() {
       .dot(qAx(eye, TH).multiply(q0).clone())) > 0.9999);
     // shipped configuration = the rule the model describes
     ok('config', tctl.mode === 'rotate' && tctl.space === 'local');
+    // v0.153 mode switch: move mode engages the same proxy; the position
+    // writeback is the raw/mirror involution (view z-flip undoes itself)
+    setGizmoMode('move');
+    const tcMove = tctl.mode === 'translate';
+    setGizmoMode('rotate');
+    ok('movecfg', tcMove && tctl.mode === 'rotate'
+      && localStorage.getItem('archean-gizmo-mode') === 'rotate');
+    { const raw = { x: 1.1, y: -2.3, z: 0.7 }, v = viewPos(raw);
+      ok('moveinv', Math.abs(v.x - raw.x) < 1e-12 && Math.abs(v.y - raw.y) < 1e-12
+        && Math.abs(-v.z - raw.z) < 1e-12); }
 
     // ---- B. scene proof through the REAL writeback path ----
     const obj = compObjs[0], comp = model.data.components[0];
@@ -3968,6 +4214,44 @@ async function runUiTest() {
     ok('realmodels', on && off && localStorage.getItem('archean-real-models-v2') === '0');
     ok('compreset', cres); }
 
+  // mode widget (v0.153): a canvas click pops ⊘/✥/⟳/ℹ at the click point;
+  // the buttons drive the gizmo and persist
+  { const si = compObjs.findIndex(o => !!o);
+    const v = new THREE.Vector3(); compObjs[si].getWorldPosition(v); v.project(camera);
+    const r = renderer.domElement.getBoundingClientRect();
+    const cx = r.left + (v.x * .5 + .5) * r.width, cy = r.top + (-v.y * .5 + .5) * r.height;
+    const ev = (t) => renderer.domElement.dispatchEvent(new PointerEvent(t,
+      { clientX: cx, clientY: cy, bubbles: true, pointerId: 1, isPrimary: true }));
+    const prev = selected;
+    ev('pointerdown'); ev('pointerup');
+    const vis = modeBox.classList.contains('vis') && selected === si;
+    modeBox.querySelector('[data-m="move"]').click();
+    const mv = gizmoMode === 'move' && tctl.mode === 'translate'
+      && tctl.object === gizmoProxy && localStorage.getItem('archean-gizmo-mode') === 'move';
+    modeBox.querySelector('[data-m="none"]').click();
+    const nv = tctl.object == null;
+    modeBox.querySelector('[data-m="rotate"]').click();
+    const rb = tctl.mode === 'rotate' && tctl.object === gizmoProxy;
+    hideModeBox(); select(prev, false);
+    ok('modebox', vis && mv && nv && rb); }
+
+  // move gizmo (v0.153): dragging the proxy writes comp.position (RAW),
+  // moves mesh + real siblings; occ mirror stays serialize()'s job
+  { const si = model.data.components.findIndex(c => c.type === 'PilotSeat');
+    select(si); setGizmoMode('move');
+    const obj = compObjs[si], x0 = model.data.components[si].position.x;
+    scene.updateMatrixWorld(true);
+    gizmoProxy.position.x += 0.5;
+    tctl.dispatchEvent({ type: 'objectChange' });
+    const moved = Math.abs(model.data.components[si].position.x - x0 - 0.5) < 1e-6
+      && Math.abs(obj.position.x - (gizmoProxy.position.x - compGroup.position.x)) < 1e-6
+      && (realMap.get(si) || []).every(r => Math.abs(r.position.x - obj.position.x) < 1e-9);
+    gizmoProxy.position.x -= 0.5;              // undo through the same path
+    tctl.dispatchEvent({ type: 'objectChange' });
+    const back = Math.abs(model.data.components[si].position.x - x0) < 1e-6;
+    setGizmoMode('rotate'); select(-1);
+    ok('movemode', moved && back); }
+
   // three-way wind buttons switch modes (lines actually built)
   { const f = $('flight');
     click(btn(f, 'streamlines'));
@@ -4059,6 +4343,16 @@ async function runUiTest() {
 
   document.title = fails.length ? 'UITEST FAIL ' + fails.join(',')
                                 : `UITEST PASS n=${nPins} ctrls=${n}`;
+  if (location.search.includes('wbshot')) {     // dev visual state: widget + move gizmo
+    const si = compObjs.findIndex(o => !!o);
+    if (si >= 0) {
+      select(si, false); setGizmoMode('move');
+      const v = new THREE.Vector3(); compObjs[si].getWorldPosition(v); v.project(camera);
+      const r = renderer.domElement.getBoundingClientRect();
+      showModeBox(r.left + (v.x * .5 + .5) * r.width, r.top + (-v.y * .5 + .5) * r.height);
+      invalidate();
+    }
+  }
   if (errs.length) {
     const pre = document.createElement('pre'); pre.id = 'out';
     pre.textContent = errs.slice(0, 20).join('\n');
