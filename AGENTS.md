@@ -148,15 +148,18 @@ landing page and README together when the viewer changes).
   pipes. See FORMAT.md.
 - `components[].type === 'Build'` = editor construction-site ghost, far outside
   the bbox — never render it as geometry.
-- **Subgrids** (v0.153): Build components carrying nested blueprints (doors/
-  hatches) live as ONE Group per Build (`userData.sub`); their attach transform
-  is the Build component's own `position`/`orientation` (dev-viewer composes
-  nested content under the Build matrix). `data.composite_builds` entries
-  `{component, slaveBuildId}` name the master part but slaveBuildId is an
-  editor id with no referent, and geometry pairing is ambiguous for ~72 % of
-  anchors — so the subgrid info panel lists a master only when it provably
-  touches the subgrid bbox (≤0.3 m), never guesses. Master joint state:
-  `angle` in DEGREES, `pos` in metres. See FORMAT.md §Subgrids.
+- **Subgrids** (v0.153, join decoded v0.154): Build components carrying nested
+  blueprints (doors/hatches) live as ONE Group per Build (`userData.sub`);
+  their attach transform is the Build component's own `position`/`orientation`
+  (dev-viewer composes nested content under the Build matrix; dolphin doors
+  ride real pivots 0/126/180° = saved mid-swing). The Mount is DECODED, not
+  guessed: `composite_builds[].slaveBuildId` = the Build's index in the
+  FLATTENED component array (nested content numbers BEFORE its Build,
+  recursive subtree sizes — dev readBuild order); exact for 342/342 corpus
+  entries. Masters are any part type (hinges/pivots kinematic, dashboards/
+  RTGs/batteries static hosts, metres away); joint state lives on the MASTER
+  (`angle` DEGREES / `pos` metres). Pins: selftest `subjoin`, dolphin/XYQ
+  postest sub-master fixtures. See FORMAT.md §Subgrids.
 - Palette slots: `data.colors[256]`, entry = {r,g,b 0-255, opacity 0-15,
   roughness 0-7, metallic 0|1}. **r/g/b are LINEAR albedo** — the engine's
   shaders use them raw; decoding as sRGB darkens the craft ~^2.2 (the ISW-241
@@ -393,8 +396,10 @@ landing page and README together when the viewer changes).
    v0.153 dolphin (3417786605) SUBGRID fixtures: one THREE.Group per Build
    subgrid (userData.sub), a ray from OUTSIDE the craft toward a door must
    route to the SUBGRID (front priority — the hull behind it loses),
-   selectSub opens the info panel (Contents/Mount/Pivot rows), and a pivot
-   edit tracks the group live with the file quat staying plain-numeric.
+   selectSub opens the info panel (Contents/Mount/Pivot rows) showing the
+   DECODED master (sub-masters pin: 5 entries, Build[22]←SmallPivot), and a
+   pivot edit tracks the group live with the file quat staying plain-numeric.
+   XYQ-615 (3803780241) decodes Build[41]←ToggleButton, Build[5]←Dashboard.
    Dev-shot hooks leave final states for headless screenshots: uitest
    `&wbshot` (mode widget + move gizmo on a part), postest `&subshot`
    (subgrid panel + widget at the door).

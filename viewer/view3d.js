@@ -2056,13 +2056,36 @@ function liveRot(comp, obj, q0) {
   };
 }
 
-// ---------- subgrid info panel (v0.153) ----------
-// Pivot rotation/offset ARE the Build component's own fields (FORMAT §Subgrids:
-// the dev viewer composes nested content under the Build matrix, so those two
-// fields are the subgrid's attach transform). The Mount section lists
-// composite_builds anchors PROVABLY touching this subgrid (≤0.3 m) — the
-// file's slaveBuildId has no referent, and geometry pairing across the corpus
-// is unreliable (76/265), so we show measured evidence, never guesses.
+// Decoded subgrid→master join (v0.154): a composite_builds entry's
+// slaveBuildId is the index the Build component carries in the FLATTENED
+// component array — nested content numbers BEFORE its Build (the dev viewer's
+// readBuild recursion order), subtree sizes counted recursively.
+// Verified 342/342 entries over all 36 corpus crafts with subgrids.
+// Returns Map<Build comp index, entries[]> (entries can be >1 per subgrid).
+function subMasterEntries() {
+  const flat = new Map();
+  const T = (c) => { let s = 0; for (const sc of (c.data && c.data.components) || []) s += 1 + T(sc); return s; };
+  let n = 0;
+  model.data.components.forEach((c, i) => {
+    if (c.type === 'Build') { const t = T(c); flat.set(n + t, i); n += t; }
+    n += 1;
+  });
+  const byBuild = new Map();
+  for (const e of model.data.composite_builds || []) {
+    const bi = flat.get(e.slaveBuildId);
+    if (bi === undefined) continue;
+    (byBuild.get(bi) || byBuild.set(bi, []).get(bi)).push(e);
+  }
+  return byBuild;
+}
+
+// ---------- subgrid info panel (v0.153; decoded mount v0.154) ----------
+// Pivot rotation/offset ARE the Build component's own fields: the subgrid's
+// attach transform (dev viewer composes nested content under the Build
+// matrix; dolphin doors ride at 125.9°/180° = the builder left them open).
+// The Mount section lists the DECODED master(s) via subMasterEntries()
+// (slaveBuildId = flattened component index — see FORMAT §Subgrids) with
+// each master's stored joint state and its distance to the subgrid.
 function buildSubInspector() {
   const name = $('selname');
   const bi = selectedSub;
@@ -2083,29 +2106,30 @@ function buildSubInspector() {
     ` · ${sz.x.toFixed(2)} × ${sz.y.toFixed(2)} × ${sz.z.toFixed(2)} m</span>`;
   b1.appendChild(d1);
 
-  secHeader('Mount (hinge / master)');
+  secHeader('Mount (master part)');
   const b2 = secBody();
-  let found = 0;
-  for (const e of model.data.composite_builds || []) {
+  const ents = subMasterEntries().get(bi) || [];
+  for (const e of ents) {
     const mc = model.data.components[e.component];
-    if (!mc) continue;
+    const d = document.createElement('div'); d.className = 'checkrow';
+    if (!mc) {
+      d.innerHTML = `<span style="color:var(--dim)">master = component[${e.component}] — not in file (deleted editor reference)</span>`;
+      b2.appendChild(d); continue;
+    }
+    const jd = mc.data || {};
+    const st = typeof jd.angle === 'number' ? ` · angle ${jd.angle.toFixed(1)}°`
+      : typeof jd.pos === 'number' ? ` · offset ${jd.pos.toFixed(3)} m` : '';
     const vp = viewPos(mc.position);         // the viewer's own placement rule
     const v = new THREE.Vector3(vp.x + (model.moff?.[0] || 0),
       vp.y + (model.moff?.[1] || 0), vp.z + (model.moff?.[2] || 0));
-    if (!bb.isEmpty() && bb.distanceToPoint(v) <= 0.3) {
-      found++;
-      const jd = mc.data || {};
-      const st = typeof jd.angle === 'number' ? ` · angle ${jd.angle.toFixed(1)}°`
-        : typeof jd.pos === 'number' ? ` · offset ${jd.pos.toFixed(3)} m` : '';
-      const d = document.createElement('div'); d.className = 'checkrow';
-      d.innerHTML = `<b>${mc.type}</b>[${e.component}]${mc.alias ? ' ' + mc.alias : ''}` +
-        `<span style="color:var(--dim)">${st}</span>`;
-      b2.appendChild(d);
-    }
+    const dist = bb.isEmpty() ? 0 : bb.distanceToPoint(v);
+    d.innerHTML = `<b>${mc.type}</b>[${e.component}]${mc.alias ? ' ' + mc.alias : ''}` +
+      `<span style="color:var(--dim)">${st} · ${dist.toFixed(2)} m to subgrid</span>`;
+    b2.appendChild(d);
   }
-  if (!found) {
+  if (!ents.length) {
     const d = document.createElement('div'); d.className = 'checkrow';
-    d.innerHTML = '<span style="color:var(--dim)">no component touching this subgrid — the game-side mount is stored under an editor id with no referent here (FORMAT §Subgrids)</span>';
+    d.innerHTML = '<span style="color:var(--dim)">no composite_builds entry names this subgrid</span>';
     b2.appendChild(d);
   }
 
@@ -3803,8 +3827,17 @@ const POSTESTS = {
       const nm = document.getElementById('selname').textContent;
       const ins = document.getElementById('inspector').textContent;
       selectSub(-1);
-      return (/Subgrid/.test(nm) && /Pivot offset/.test(ins) && /Pivot rotation/.test(ins))
-        || `panel missing (nm='${nm.slice(0, 40)}')`;
+      // decoded master of Build[4] (v0.154 join): SmallTurboPump[47]
+      return (/Subgrid/.test(nm) && /Pivot offset/.test(ins) && /Pivot rotation/.test(ins)
+        && /SmallTurboPump\[47\]/.test(ins))
+        || `panel missing decoded mount (nm='${nm.slice(0, 40)}')`;
+    });
+    T('sub-masters', () => {          // decoded join: 1 entry per subgrid
+      const m = subMasterEntries();
+      let tot = 0; for (const v of m.values()) tot += v.length;
+      if (tot !== 5) return `${tot} decoded entries (expect 5)`;
+      const e22 = (m.get(22) || []).map(e => model.data.components[e.component]?.type).join();
+      return e22 === 'SmallPivot' || `Build[22] master: ${e22} (want SmallPivot)`;
     });
     T('sub-pivot-edit', () => {        // pivot rows move the group live + stay plain in the file
       const g = subs()[0];
@@ -3816,6 +3849,14 @@ const POSTESTS = {
         && Number.isFinite(bc.orientation.x) && Number.isFinite(bc.orientation.w);
       bc.position.x = px; g.position.copy(viewPos(bc.position));
       return moved || 'group did not track pivot edit';
+    });
+  },
+  '3803780241': () => {              // XYQ-615: 2 subgrids, pair-unique decode
+    T('xyq-sub-masters', () => {
+      const m = subMasterEntries();
+      const g = (bi) => (m.get(bi) || []).map(e => model.data.components[e.component]?.type).join();
+      const a = g(41), b = g(5);
+      return (a === 'ToggleButton' && b === 'Dashboard') || `Build[41]=${a} Build[5]=${b}`;
     });
   },
 };
@@ -4501,6 +4542,7 @@ if (location.search.includes('selftest')) {
       // R(q) (|dot| 0.999); conjugate quaternions tilt every plate ~45° out
       // of the wall (|dot| 0.70 = user's "not flush" screenshots).
       let ok13 = false;
+      let ok13b = false;
       {
         const ms = await (await fetch('../testdata/3334698274/blueprint.json')).json();
         const dc = ms.data.components[235];
@@ -4511,6 +4553,24 @@ if (location.search.includes('selftest')) {
           const npl = new THREE.Vector3(0.69337, 0.63691, -0.33702).normalize();  // view wall normal
           ok13 = Math.abs(n.dot(npl)) > 0.98;
         }
+        // ok13b: decoded subgrid join (v0.154, FORMAT §Subgrids): slaveBuildId
+        // = the Build's index in the flattened component array (nested content
+        // numbered BEFORE its Build). Jimmy's Adventure: one gantry subgrid
+        // (Build[6] with 4 nested dashboards) whose single entry must decode
+        // master RTG[171] — the mount proximity heuristics never found this
+        // (13 m anchor), the decode finds it exactly.
+        const e0 = (ms.data.composite_builds || [])[0];
+        const builds13 = ms.data.components.filter(c => c.type === 'Build');
+        const flat13 = new Map();
+        { const T13 = (c) => { let s = 0; for (const sc of (c.data && c.data.components) || []) s += 1 + T13(sc); return s; };
+          let nn = 0;
+          ms.data.components.forEach((c) => {
+            if (c.type === 'Build') { const t = T13(c); flat13.set(nn + t, c); nn += t; }
+            nn += 1;
+          }); }
+        ok13b = builds13.length === 1 && !!e0 && flat13.get(e0.slaveBuildId) === builds13[0]
+          && builds13[0].data.components.length === 4
+          && ms.data.components[e0.component]?.type === 'RTG';
       }
       // ok14: ground fit — the green plane and grid sit just UNDER the
       // lowest rendered geometry (truck 3481322297 builds to y=-1.5:
@@ -4718,7 +4778,7 @@ if (location.search.includes('selftest')) {
         + ' beacon=' + (mast ? mast.x.toFixed(2) : 'none') + ' droop=' + wc.y.toFixed(2)
         + ' junction=' + jdir.y.toFixed(2) + ' aileron=' + at.y.toFixed(2)
         + ' pick=' + ok5 + ' palette=' + ok9 + ' lens=' + ok10
-        + ' dashmirror=' + ok11 + ' textx=' + ok12 + ' mural=' + ok13 + ' ground=' + ok14
+        + ' dashmirror=' + ok11 + ' textx=' + ok12 + ' mural=' + ok13 + ' subjoin=' + ok13b + ' ground=' + ok14
         + ' surges=' + ok15 + ' bolts=' + ok16 + ' thrust=' + ok17 + ' seal=' + ok18 + ' sock=' + ok19 + ' excl=' + ok20 + ' windpts=' + ok21 + ' click=' + ok22 + ' inflow=' + ok23 + ' wake=' + ok24 + ' seatpitch=' + ok25 + ' anchor=' + ok26 + ' gizmo=' + ok27
         + ' cabin=' + seal.sealedCount;
     } catch (e) { document.title = 'SELFTEST ERR ' + e.message + ' @' + String(e.stack).split(String.fromCharCode(10))[1].trim().slice(0, 70); }
