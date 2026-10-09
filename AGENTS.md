@@ -330,8 +330,11 @@ landing page and README together when the viewer changes).
    toggle + localStorage persistence, wind-mode/flow-src/CoM/thrust buttons,
    hull-opacity slider (fades blocks + skin + wire together),
    hull-list flash row, Steam wslink, dirty→Save
-   lifecycle, calibrated-mass report, ⟲ RE-PAINT pin (invalSeq) and
-   rotate-gizmo attach/toggle pins. Title: `UITEST PASS n=<pins> ctrls=N`
+   lifecycle, calibrated-mass report, ⟲ RE-PAINT pin (invalSeq), component-
+   level ⟲ pin (compreset: proxy + real siblings move, repaints, and writes a
+   PLAIN numeric file quaternion — spreading a THREE.Quaternion copies its
+   _x/_y accessor BACKING = NaN quats at the next rebuild), rotate-gizmo
+   attach/toggle pins. Title: `UITEST PASS n=<pins> ctrls=N`
    (n counts ok() live, nothing hardcoded) /
    `UITEST FAIL <pins>`, captured errors in #out.
 2c-c. `?gizmatest` (v0.151): rotate-gizmo ROTATION-ORDER suite on a
@@ -371,6 +374,11 @@ landing page and README together when the viewer changes).
   `.value` assignment fires no 'input' event, and the global input→invalidate
   listener is what keeps sliders live — without it ⟲/presets moved the UI but
   froze the picture (v0.149 user report).
+- `markDirty()` MUST repaint (it calls `invalidate()`): BUTTON handlers mutate
+  data too but fire no 'input' event, so the global input→invalidate listener
+  cannot cover them — v0.152: "⟲ reset this component" updated data+sliders
+  while the 3D view sat still (its real-model siblings + nubs must be synced
+  there as well, mirroring livePos/liveRot).
 - Keep headless testability: no top-level awaits on user input, report results in
   `document.title` / `#out` for `--dump-dom`.
 

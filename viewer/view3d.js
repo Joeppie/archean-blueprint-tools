@@ -1928,7 +1928,9 @@ function markDirty() {
   document.body.classList.add('dirty');
   if (model) updateReport();          // live CoM/aero feedback while dragging sliders
   if (gizmoOn && tctl.object === gizmoProxy) syncGizmoPose();   // rings track position edits
-}
+  invalidate();   // EVERY data edit repaints — sliders rely on the input-event
+}                 // listener, but BUTTONS (⟲ reset this component) fire none
+                  // (v0.152: "resetting the component still doesnt update the 3d view")
 
 function secHeader(t) { const h = document.createElement('h3'); h.textContent = t; $('inspector').appendChild(h); }
 function secBody() { const s = document.createElement('div'); s.className = 'sec'; $('inspector').appendChild(s); return s; }
@@ -2051,9 +2053,22 @@ function buildInspector() {
     obj.userData.wheelUndo = undefined;
     obj.userData.wType = comp.type;
     applyDisplayPose(obj, viewQuat(orig[selected].q0), orig[selected].q0);
-    comp.orientation = { ...orig[selected].q0 };
+    // PLAIN file object with explicit fields: spreading a THREE.Quaternion
+    // copies its _x/_y/_z/_w accessor BACKING ({isQuaternion,_x,…} lands in
+    // the data, .x reads undefined) → NaN quats at the next rebuild/serialize
+    // (v0.152 catch: uitest flow pin saw seatFwd()=NaN after a reset+rebuild).
+    const qf0 = orig[selected].q0;
+    comp.orientation = { w: qf0.w, x: qf0.x, y: qf0.y, z: qf0.z };
+    // real game models are SIBLINGS of the proxy (livePos/liveRot mirror every
+    // edit) — reset must drag them along too, else the view never appears to
+    // move while "real game models" is on (v0.152 user report)
+    for (const r of realMap.get(selected) || []) {
+      r.position.copy(obj.position);
+      r.quaternion.copy(obj.quaternion);
+    }
+    syncAdapters(obj);                // port nubs back to the pristine pose
     buildInspector();
-    markDirty();
+    markDirty();                      // invalidates (v0.152) — repaint guaranteed
     toast('component reset');
   };
   ab.appendChild(reset);
@@ -3927,9 +3942,31 @@ async function runUiTest() {
   { const cb = cbL('real game models');
     if (!cb.checked) click(cb);
     const on = await settle(() => realModelsOn && realMap.size > 0);
+    // "⟲ reset this component" must move proxy AND real siblings + repaint +
+    // write a PLAIN numeric file quaternion (v0.152 user: "resetting the
+    // component still doesnt update it in the 3d view" — no invalidate on
+    // button paths, real groups (siblings, not children) stayed put, and
+    // {...q0} spread THREE _x/_y accessor fields into comp.orientation)
+    let cres = true;
+    {
+      const si = model.data.components.findIndex(c => c.type === 'PilotSeat');
+      select(si);
+      const obj = compObjs[si], nx = numRow($('inspector'), 'x');
+      const x0 = obj.position.x;
+      setIn(nx, +nx.value + 0.3);
+      const s0 = invalSeq;
+      click([...$('inspector').querySelectorAll('button')]
+        .find(b => b.textContent.includes('reset this component')));
+      cres = invalSeq > s0 && Math.abs(obj.position.x - x0) < 1e-9
+        && Math.abs(model.data.components[si].position.x - orig[si].pos0.x) < 1e-9
+        && ['w', 'x', 'y', 'z'].every(k => Number.isFinite(model.data.components[si].orientation[k]))
+        && (realMap.get(si) || []).every(r => r.position.x === obj.position.x);
+      select(-1);
+    }
     click(cb);
     const off = await settle(() => !realModelsOn && realMap.size === 0);
-    ok('realmodels', on && off && localStorage.getItem('archean-real-models-v2') === '0'); }
+    ok('realmodels', on && off && localStorage.getItem('archean-real-models-v2') === '0');
+    ok('compreset', cres); }
 
   // three-way wind buttons switch modes (lines actually built)
   { const f = $('flight');
