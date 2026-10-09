@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Mandatory checkin gate (AGENTS.md). Install once per clone:
+#   bash tools/install-hooks.sh
+# Every commit passes:
+#   1. tools/security-scan.py --staged — credential-shape scan of the exact
+#      staged blobs (keys/tokens/JWTs/basic-auth/Steam WebAPI/passwords).
+#   2. tools/security-scan.py --versions — the v0.xx release strings in
+#      viewer/index.html + README.md + index.html (incl. view3d.js?v=) must
+#      all agree, enforced whenever any of them (or the viewer) is staged.
+set -e
+cd "$(git rev-parse --show-toplevel)"
+python3 tools/security-scan.py --staged
+if git diff --cached --name-only | grep -qE '^(viewer/index\.html|index\.html|README\.md|viewer/view3d\.js)$'; then
+  python3 tools/security-scan.py --versions
+fi

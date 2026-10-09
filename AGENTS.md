@@ -22,6 +22,10 @@ tools/make_landing.py         regenerates the landing gallery + viewer/workshop.
 tools/add_workshop.py <id>      ingest a locally-subscribed workshop craft
                                 (names: tools/ws-names.tsv, fetched slowly — Steam rate-limits)
 tools/extract_models.py         regenerates viewer/models/ from an installed game
+tools/security-scan.py          checkin gate: secret-shape scan (--staged/--tree/
+                                --history) + release-string sync (--versions)
+tools/install-hooks.sh          ONE-PER-CLONE: installs tests/pre-commit into .git
+tests/pre-commit                the mandatory gate hook (see Checkin gate below)
 tools/perfprobe.py URL [s]      real-clock headless perf probe (DevTools ws;
                                 ?perf titles under --virtual-time-budget are
                                 meaningless — clocks/rAF freeze there)
@@ -34,6 +38,7 @@ NOTICE.md                       licensing: GPL code, game content belongs to bat
 
 ## Commands
 ```bash
+bash tools/install-hooks.sh               # after cloning: enables the checkin gate
 tests/run_tests.sh                      # full headless suite (python3 + chromium)
 python3 -m http.server 8650             # manual serving (repo root)
 # viewer:   http://127.0.0.1:8650/viewer/index.html
@@ -61,6 +66,23 @@ screenshots at virtual budgets ≥10 s never complete (wall-time cliff) — keep
 budgets ≤8000 in that mode.
 NOTE: to kill a dev server, use `pkill -f "[h]ttp.server 8650"` — plain
 `pkill -f "http.server 8650"` also matches (kills) the calling shell.
+
+## Checkin gate (mandatory — the hook is the enforcement)
+Every commit passes `tests/pre-commit` (install once: `bash
+tools/install-hooks.sh`): (1) `tools/security-scan.py --staged` — the staged
+blobs are scanned for CREDENTIAL SHAPES (private keys, GitHub/AWS/Google/
+Slack/npm/PyPI/OpenAI tokens, JWTs, ssh keys, basic-auth URLs, Steam WebAPI
+`key=<32hex>`, password/token assignments) — any hit blocks the commit;
+(2) `--versions` — when a release-string file (or the viewer) is staged, ALL
+context-anchored `v0.NN` strings (viewer title/header, `view3d.js?v=NN`,
+README ×2, landing ×2) must agree, so the release ritual can never ship a
+mismatched build. Deep scans: `--tree` and `--history` (every blob of every
+revision). Baseline audit 2026-10-09: tree (250 files) + history (1211 blobs)
+= ZERO secret hits; no emails/IPs/tokens in the tree. INTENTIONAL, audited,
+public data: testdata blueprints carry workshop authors + timestamps
+(NOTICE §2), ws-names.tsv the public craft titles; the git identity
+(pseudonymous local email) is author metadata, not repo content. No CI
+secrets exist (Pages builds from the branch; no workflow files).
 
 ## Publishing (GitHub Pages)
 The live site is the repo root served by GitHub Pages:
