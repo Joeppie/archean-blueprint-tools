@@ -12,6 +12,9 @@ addEventListener('unhandledrejection', (e) => {
   document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
 });
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=142';
 import { resolveColor } from './palette.js?v=142';
 
@@ -527,6 +530,7 @@ function onResize() {
   const w = view.clientWidth, h = view.clientHeight;
   renderer.setPixelRatio(Math.max(1, Math.min(devicePixelRatio, 2.5)));  // browser zoom changes dpr (fires resize); Chrome persists per-site zoom across reloads
   renderer.setSize(w, h);
+  selEdgesMat.resolution.set(w, h);              // fat-line screen units
   invalidate();
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
@@ -553,6 +557,7 @@ const occGroup = new THREE.Group();    // type-255 occupancy boxes
 const hullGroup = new THREE.Group();   // extruded hull plates
 const pipeGroup = new THREE.Group();   // pipes/cables + port markers
 const adpGroup = new THREE.Group();    // adapter/port nubs, merged across all components
+adpGroup.visible = false;              // v0.156 (user): connectors OFF by default
 const subGroup = new THREE.Group();    // subgrids: nested Build blueprints (hatches/doors)
 scene.add(compGroup, blockGroup, occGroup, hullGroup, pipeGroup, adpGroup, subGroup);
 occGroup.visible = false;
@@ -1628,8 +1633,11 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   if (dx < 4 && dy < 4) {                        // canvas click = the ONLY fly trigger
     if (downPick.sub >= 0) selectSub(downPick.sub);
     else select(downPick.ci, true);
-    // the mode widget is the context menu AT the clicked widget (v0.153)
-    if (downPick.ci >= 0 || downPick.sub >= 0) showModeBox(e.clientX, e.clientY);
+    // the mode widget is PROJECTION-TIED to the picked component (v0.156)
+    if (downPick.ci >= 0)
+      showModeBox(e.clientX, e.clientY, compObjs[downPick.ci]);
+    else if (downPick.sub >= 0)
+      showModeBox(e.clientX, e.clientY, subGroup.children.find(o => o.userData.sub === downPick.sub));
     else hideModeBox();
   }
 });
@@ -1652,6 +1660,7 @@ function selectSub(i) {
   selected = -1;
   invalidate();
   buildInspector();
+  buildList();
   paintHighlights();
   syncGizmo();
 }
@@ -1704,9 +1713,43 @@ const tctl = new TransformControls(camera, renderer.domElement);
 tctl.setMode('rotate');
 tctl.space = 'local';                 // ring = part axis (see model above)
 tctl.setSize(0.8);
-tctl.addEventListener('objectChange', () => tctl.mode === 'translate'
-  ? applyGizmoPosition(gizmoProxy.position) : applyGizmoOrientation(gizmoProxy.quaternion));
-tctl.addEventListener('mouseDown', () => { controls.enabled = false; hideModeBox(); });
+// Ring drag CONTINUITY (v0.156, user: "turn it like a knob, it suddenly pops
+// over, finding the angle closest to the original"): TransformControls draws
+// each ring move as startQuat·R(axis, signed-angle(pointer start → pointer
+// now)) — a plain atan2, so sweeping the knob PAST 180° wraps back toward
+// the start pose. We unwrap the raw relative angle across events (add the
+// wrapped per-event delta to a continuous accumulator) and re-apply the
+// accumulated spin; the intrinsic RING algebra itself (gizmoSpinRing) is
+// unchanged, the unwrap only removes the ±π wrap. Pure part = gizmoUnwrap,
+// pinned by ?gizmatest.
+const _knobQ = new THREE.Quaternion(), _knobA = new THREE.Vector3();
+let knobQ0 = new THREE.Quaternion(), knobAxis = null, knobRaw = 0, knobAcc = 0;
+function gizmoUnwrap(raw, prevRaw, accum) {
+  let d = raw - prevRaw;
+  d = Math.atan2(Math.sin(d), Math.cos(d));        // wrap into (−π, π]
+  return accum + d;
+}
+tctl.addEventListener('objectChange', () => {
+  if (tctl.mode === 'translate') return applyGizmoPosition(gizmoProxy.position);
+  const P = gizmoProxy.quaternion;
+  _knobQ.copy(knobQ0).invert().multiply(P);         // raw relative spin q0⁻¹·P
+  const len = Math.hypot(_knobQ.x, _knobQ.y, _knobQ.z);
+  if (len < 1e-4) return applyGizmoOrientation(P);  // snap-to-zero / no spin
+  if (!knobAxis) {                                 // first real spin: the raw
+    knobAxis = _knobA.set(_knobQ.x, _knobQ.y, _knobQ.z).normalize();   // axis IS the ring axis
+    knobRaw = 2 * Math.atan2(len, _knobQ.w); knobAcc = knobRaw;
+    return applyGizmoOrientation(P);
+  }
+  const s = _knobA.x * knobAxis.x + _knobA.y * knobAxis.y + _knobA.z * knobAxis.z;
+  const raw = 2 * Math.atan2(len * Math.sign(s), _knobQ.w);
+  knobAcc = gizmoUnwrap(raw, knobRaw, knobAcc); knobRaw = raw;
+  applyGizmoOrientation(_knobQ.copy(knobQ0).multiply(
+    new THREE.Quaternion().setFromAxisAngle(knobAxis, knobAcc)));
+});
+tctl.addEventListener('mouseDown', () => {
+  controls.enabled = false; hideModeBox();
+  knobQ0.copy(gizmoProxy.quaternion); knobAxis = null; knobRaw = knobAcc = 0;
+});
 tctl.addEventListener('mouseUp', () => {
   controls.enabled = true;
   buildInspector();                    // rebases the euler sliders on the new pose
@@ -1714,6 +1757,17 @@ tctl.addEventListener('mouseUp', () => {
   invalidate();
 });
 scene.add(tctl.getHelper());
+// Ring visibility (v0.156, user: "its too thin as well"): TransformControls
+// draws its rotation rings as 0.02-wide RingGeometry annuli at 25 % opacity —
+// near-invisible over a bright hull. Thicken the annulus and light them at
+// full strength (the invisible hit-discs keep opacity 0 = untouched).
+tctl.getHelper().traverse(o => {
+  if (o.isMesh && o.geometry?.type === 'RingGeometry' && o.material.opacity > 0.1) {
+    o.geometry.dispose();
+    o.geometry = new THREE.RingGeometry(0.28, 0.36, 64);
+    o.material.opacity = 0.95;
+  }
+});
 const _gq = new THREE.Quaternion();
 function syncGizmoPose() {
   const o = compObjs?.[selected];
@@ -1746,12 +1800,29 @@ for (const [m, ic, ti] of [['none', '⊘', 'no gizmo'], ['move', '✥', 'move �
 }
 document.body.appendChild(modeBox);
 function paintModeBox() { for (const b of modeBox.children) b.classList.toggle('on', b.dataset.m === gizmoMode); }
-function showModeBox(x, y) {
+// v0.156 (user): the widget is PROJECTION-tied to the component, not the raw
+// click pixel — it pops at the part's projected bbox centre and keeps tracking
+// it while open (camera orbits, live edits). Falls back to the given pixel
+// when no anchor is passed.
+const _mbV = new THREE.Vector3();
+let modeAnchor = null;
+function placeModeBox(x, y) {
   modeBox.style.left = Math.min(x + 10, innerWidth - 118) + 'px';
   modeBox.style.top = Math.min(y + 8, innerHeight - 44) + 'px';
+}
+function projectModeAnchor() {
+  const bb = new THREE.Box3().setFromObject(modeAnchor);
+  if (bb.isEmpty()) return;
+  bb.getCenter(_mbV).project(camera);
+  const r = renderer.domElement.getBoundingClientRect();
+  placeModeBox(r.left + (_mbV.x * .5 + .5) * r.width, r.top + (-_mbV.y * .5 + .5) * r.height);
+}
+function showModeBox(x, y, anchor = null) {
+  modeAnchor = anchor;
+  if (anchor) projectModeAnchor(); else placeModeBox(x, y);
   modeBox.classList.add('vis'); paintModeBox();
 }
-function hideModeBox() { if (modeBox) modeBox.classList.remove('vis'); }
+function hideModeBox() { if (modeBox) { modeAnchor = null; modeBox.classList.remove('vis'); } }
 function setGizmoMode(m) {
   gizmoMode = m;
   localStorage.setItem('archean-gizmo-mode', m);
@@ -1864,13 +1935,28 @@ function flyTo(i) {
   invalidate();
 }
 controls.addEventListener('start', () => { fly = null; });   // user takes over
-const selBox = new THREE.Box3Helper(new THREE.Box3(), 0x7dffcf);
+// Selection outline (v0.156, user: "selection should be more clear"): the old
+// Box3Helper draws 1 px GL lines, invisible on HiDPI displays. LineSegments2
+// renders true screen-space-fat borders (3 px), depthTest off so the box
+// reads through the hull like the incandescence layer.
+const selEdgesMat = new LineMaterial({ color: 0x7dffcf, linewidth: 3,
+  transparent: true, depthTest: false, depthWrite: false });
+selEdgesMat.resolution.set(1400, 900);            // onResize keeps it live
+const selBox = new LineSegments2(new LineSegmentsGeometry(), selEdgesMat);
 selBox.visible = false;
 selBox.raycast = () => {};                                   // never pickable
-selBox.material.depthTest = false;                           // border reads
-selBox.material.transparent = true;                          // through everything
 selBox.renderOrder = 20;
 scene.add(selBox);
+const _selPts = new Float32Array(72);
+function boxEdges(bb, out) {                                // 12 segments
+  const V = [bb.min.x, bb.min.y, bb.min.z, bb.max.x, bb.min.y, bb.min.z,
+             bb.max.x, bb.min.y, bb.max.z, bb.min.x, bb.min.y, bb.max.z,
+             bb.min.x, bb.max.y, bb.min.z, bb.max.x, bb.max.y, bb.min.z,
+             bb.max.x, bb.max.y, bb.max.z, bb.min.x, bb.max.y, bb.max.z];
+  const E = [0,1, 1,2, 2,3, 3,0, 4,5, 5,6, 6,7, 7,4, 0,4, 1,5, 2,6, 3,7];
+  for (let i = 0; i < E.length; i++) { const j = E[i] * 3;
+    out[i * 3] = V[j]; out[i * 3 + 1] = V[j + 1]; out[i * 3 + 2] = V[j + 2]; }
+}
 function paintHighlights() {
   compGroup.children.forEach((g, i) => {
     g.traverse(o => {
@@ -1884,8 +1970,8 @@ function paintHighlights() {
   // with live edits — this runs on every frame we render)
   if (selected >= 0 && compObjs?.[selected]) {
     const bb = new THREE.Box3().setFromObject(compObjs[selected]);
-    selBox.box.copy(bb);
     selBox.visible = isFinite(bb.min.x);
+    if (selBox.visible) { boxEdges(bb, _selPts); selBox.geometry.setPositions(_selPts); }
   } else selBox.visible = false;
   // incandescent X-ray layer: synced every rendered frame (tracks sliders
   // live; rebuilt on selection change, model rebuild, proxy→real swap)
@@ -1893,6 +1979,7 @@ function paintHighlights() {
   for (const [o, ov] of selPairs) ov.matrix.copy(o.matrix);
   for (const f of flashes)
     f.mat.opacity = 0.6 * Math.pow(1 - (performance.now() - f.t0) / f.dur, 2);
+  if (modeAnchor && modeBox.classList.contains('vis')) projectModeAnchor();
 }
 
 // ---------- cable power-surge + incandescent X-ray highlight ----------
@@ -1910,7 +1997,7 @@ scene.add(surgeGroup);
 const surgeGeo = new THREE.SphereGeometry(0.055, 10, 8);
 let surges = [], flashes = [];
 const selXrayMat = new THREE.MeshBasicMaterial({ color: 0xff7a20, transparent: true,
-  opacity: 0.3, blending: THREE.AdditiveBlending, depthTest: false,
+  opacity: 0.45, blending: THREE.AdditiveBlending, depthTest: false,
   depthWrite: false, side: THREE.DoubleSide });
 let selPairs = [], selKey = -1;
 function rebuildSelXray() {
@@ -1997,22 +2084,87 @@ function stepSurges(now) {
   if (surges.length || flashes.length) invalidate();
 }
 
-// ---------- component list ----------
+// ---------- component list (v0.156) ----------
+// TWO tabs on top: group by TYPE (alphabetical sections) or by SUBGRID
+// (one section per Build: its decoded masters + nested parts, then the
+// subgrid-free hull parts). A single search box — where it has always lived
+// — filters both tabs (type, alias and section titles).
+let listTab = localStorage.getItem('archean-list-tab') || 'type';
 function buildList() {
   const list = $('complist'), q = $('filter').value.toLowerCase();
+  const ltabs = $('ltabs');
+  for (const t of ltabs.children) t.classList.toggle('on', t.dataset.k === listTab);
   list.innerHTML = '';
-  model?.data.components.forEach((c, i) => {
-    if (q && !c.type.toLowerCase().includes(q)) return;
+  const comps = model?.data.components || [];
+  const mk = (idx, c, sel) => {
     const d = document.createElement('div');
-    d.innerHTML = `<span class="i">${String(i).padStart(2, '0')}</span> <span class="t">${c.type}</span>`
+    d.innerHTML = `<span class="i">${String(idx).padStart(2, '0')}</span> <span class="t">${c.type}</span>`
                 + (c.alias ? ` “${c.alias}”` : '');
-    if (i === selected) d.classList.add('sel');
-    d.onclick = () => select(i);
-    d.ondblclick = () => select(i, true);          // dblclick = fly to part
+    if (sel) d.classList.add('sel');
+    d.onclick = () => select(idx);
+    d.ondblclick = () => select(idx, true);          // dblclick = fly to part
+    return d;
+  };
+  const hdr = (txt, n) => {
+    const d = document.createElement('div');
+    d.className = 'sec';
+    d.innerHTML = `${txt} <span style="color:var(--dim)">· ${n}</span>`;
     list.appendChild(d);
-  });
+  };
+  const hits = (c) => !q || c.type.toLowerCase().includes(q)
+                    || (c.alias || '').toLowerCase().includes(q);
+  if (listTab === 'type') {
+    const byT = new Map();
+    comps.forEach((c, i) =>
+      (byT.get(c.type) || byT.set(c.type, []).get(c.type)).push(i));
+    for (const type of [...byT.keys()].sort()) {
+      const idxs = byT.get(type).filter(i => hits(comps[i]));
+      if (!idxs.length && !(q && type.toLowerCase().includes(q))) continue;
+      hdr(type, byT.get(type).length);
+      for (const i of idxs) list.appendChild(mk(i, comps[i], i === selected));
+    }
+    return;
+  }
+  // by subgrid: Build[i] ← its decoded masters (composite_builds.component)
+  const masters = new Map();
+  for (const [bi, es] of subMasterEntries())
+    for (const e of es)
+      (masters.get(bi) || masters.set(bi, []).get(bi)).push(e.component);
+  const builds = comps.map((c, i) => c.type === 'Build' ? i : -1).filter(i => i >= 0);
+  for (const bi of builds) {
+    const bc = comps[bi], nested = (bc.data?.components || []).filter(c => c.type !== 'Build');
+    const ms = (masters.get(bi) || []).filter(i => comps[i]);
+    const nN = nested.filter(hits), nM = ms.filter(i => hits(comps[i]));
+    const title = `⬓ Build[${bi}]` + (bc.data?.alias ? ` “${bc.data.alias}”` : '');
+    if (q && !nN.length && !nM.length && !title.toLowerCase().includes(q)) continue;
+    hdr(title + (ms.length
+      ? ` ← ${ms.map(m => comps[m].type).join(', ')}` : ' (floating)'), nested.length);
+    for (const m of nM) list.appendChild(mk(m, comps[m], m === selected));
+    for (const k of nN) {
+      const d = mk(k, nested[k], false);
+      d.classList.add('sub');
+      if (bi === selectedSub) d.classList.add('sel');
+      d.onclick = () => selectSub(bi);               // nested content IS the subgrid
+      d.ondblclick = d.onclick;
+      list.appendChild(d);
+    }
+  }
+  const inSub = new Set([...builds, ...[...masters.values()].flat()]);
+  const rest = comps.map((c, i) => i).filter(i => !inSub.has(i) && hits(comps[i]));
+  if (rest.length || !q) hdr('Hull & parts (no subgrid)',
+    comps.filter((c, i) => !inSub.has(i)).length);
+  for (const i of rest) list.appendChild(mk(i, comps[i], i === selected));
 }
 $('filter').oninput = buildList;
+{
+  const ltabs = $('ltabs');
+  for (const [k, lab] of [['type', 'by type'], ['sub', 'by subgrid']]) {
+    const b = document.createElement('button');
+    b.textContent = lab; b.dataset.k = k;
+    b.onclick = () => { listTab = k; localStorage.setItem('archean-list-tab', k); buildList(); };
+    ltabs.appendChild(b);
+  }
+}
 
 // ---------- DevTools-style inspector ----------
 function row(sec, label, min, max, step, value, onInput) {
@@ -2211,14 +2363,6 @@ function buildInspector() {
   const rx = row(body, 'x', p.x - 2, p.x + 2, 0.005, p.x, livePos(comp, obj, 'x'));
   const ry = row(body, 'y', p.y - 1.5, p.y + 1.5, 0.005, p.y, livePos(comp, obj, 'y'));
   const rz = row(body, 'z', p.z - 2, p.z + 2, 0.005, p.z, livePos(comp, obj, 'z'));
-  const foot = document.createElement('div');
-  foot.className = 'presets';
-  const btn = (t, fn) => { const b = document.createElement('button'); b.className = 'btn'; b.textContent = t;
-    b.onclick = fn; foot.appendChild(b); };
-  btn('nose 0.25 ▶', () => rz.set(p.z - 0.25));
-  btn('◀ tail 0.25', () => rz.set(p.z + 0.25));
-  btn('up 0.1', () => ry.set(p.y + 0.1));
-  body.appendChild(foot);
 
   secHeader('Rotation (° deltas, world axes)');
   const rb = secBody();
@@ -2352,7 +2496,8 @@ function buildViewOpts() {
   });
   excl(tHull, tWire); excl(tWire, tHull);
   if (tWire.checked && tHull.checked) { tHull.checked = false; tHull.dispatchEvent(new Event('change')); }
-  toggle('pipes', 'pipes & connectors', [pipeGroup, adpGroup]);
+  toggle('pipes', 'pipes (cables)', pipeGroup);
+  toggle('adapters', 'connectors (adapter ports)', adpGroup);   // v0.156: own toggle, off by default
   toggle('subs', 'subgrids (doors/hatches)', subGroup);
   const rl = document.createElement('label');
   rl.className = 'checkrow';
@@ -3130,12 +3275,13 @@ let flowN = 0;
 function flowBudget() {
   // v0.155: plates are GRID-INDEXED (platesNear), so plate count is no longer
   // the per-frame cost driver — the measured driver is solid-cell lookup
-  // pressure (237k-cell giant cost 13 ms at 2200 pts; 16k-cell crafts run
-  // full rate at 3 ms). Tier on that alone now.
+  // pressure. v0.156 (user: "more wind particles, from further away"): the
+  // grid + wider spawn made room — baseline 2200 → 4000, tiers raised with
+  // it; cell pressure still tiers the giants.
   if (location.search.includes('flowlow')) return 500;           // headless shots
   const c = solidCells ? solidCells.size : 0;
-  let n = 2200;
-  if (c > 400000) n = 500; else if (c > 100000) n = 900; else if (c > 40000) n = 1400;
+  let n = 4000;
+  if (c > 400000) n = 1000; else if (c > 100000) n = 1600; else if (c > 40000) n = 3000;
   return n;
 }
 function initFlow() {
@@ -3231,7 +3377,7 @@ function buildStreamlines() {
   const e2 = new THREE.Vector3().crossVectors(dv, e1).normalize();
   const rad = Math.hypot(B.x - b.x, B.y - b.y, B.z - b.z) / 2 * 1.1 + 0.5;
   const sga = location.search.includes('flowlow') ? 1.1 : 0.55;   // coarser seed grid
-  const R2 = (rad + 6.5) * (rad + 6.5);   // lines survive far past the craft (user: 'start long enough ahead')
+  const R2 = (rad + 10) * (rad + 10);   // v0.156 wider kill radius (particles spawn 4 m out)
   const FA = 0.055;                                            // 'thick line' offset
   const FASTOFF = [[0, 0, 0],
     [e1.x * FA, e1.y * FA, e1.z * FA], [-e1.x * FA, -e1.y * FA, -e1.z * FA],
@@ -3239,7 +3385,7 @@ function buildStreamlines() {
   for (let a = -rad; a <= rad; a += sga * 1.7)
     for (let c2 = -rad; c2 <= rad; c2 += sga) {
       if (a * a + c2 * c2 > rad * rad) continue;              // disc, not square
-      const seed = cen.clone().addScaledVector(dv, -(rad + 5))   // generous approach run-in
+      const seed = cen.clone().addScaledVector(dv, -(rad + 9))   // v0.156: longer approach run
         .addScaledVector(e1, a).addScaledVector(e2, c2);
       const seedA = [seed.x, seed.y, seed.z];
       const ph = a * 0.9 + c2 * 1.4;                          // wake meander phase
@@ -3345,8 +3491,10 @@ function respawn(arr, i, b, B) {
   // craft (dolphin: 25 m out), so particles died the frame they spawned and
   // respawned on that shell — a boiling rainbow cloud 'far ahead of the
   // craft' (user screenshot). Uniform works for any flow direction.
-  const M = 1.3;   // MUST stay < the kill margin R (2.6) in stepFlow: spawning
-                    // outside it parks particles (instant respawn in place, user)
+  const M = 4.0;  // v0.156 "from further away": spawn 4 m outside the bbox
+                    // (was 1.3). MUST stay < the kill margin R in stepFlow:
+                    // spawning outside it parks particles (instant respawn in
+                    // place, user)
   for (let att = 0; att < 24; att++) {
     arr[i] = b.x - M + Math.random() * (B.x - b.x + 2 * M);
     arr[i + 1] = b.y - M + Math.random() * (B.y - b.y + 2 * M);
@@ -3363,7 +3511,7 @@ function stepFlow(dt) {
   const _t0 = perfW0 ? performance.now() : 0;
   const V = Math.max(1, flowState.speed), dir = flowDir();
   const b = model.box_min, B = model.box_max;
-  const R = 2.6, tt = performance.now() * 0.0006;   // > respawn margin M (1.3)
+  const R = 9.0, tt = performance.now() * 0.0006;   // > respawn margin M (4.0), v0.156
   const pos = flowPts.geometry.attributes.position.array;
   const col = flowPts.geometry.attributes.color.array;
   const tp = flowTrails && flowTrails.pos, tc = flowTrails && flowTrails.col;
@@ -4104,7 +4252,7 @@ async function runPosTest() {
       selectSub(g.userData.sub);
       const v = new THREE.Box3().setFromObject(g).getCenter(new THREE.Vector3()).project(camera);
       const r = renderer.domElement.getBoundingClientRect();
-      showModeBox(r.left + (v.x * .5 + .5) * r.width, r.top + (-v.y * .5 + .5) * r.height);
+      showModeBox(r.left + (v.x * .5 + .5) * r.width, r.top + (-v.y * .5 + .5) * r.height, g);
       invalidate();
     }
   }
@@ -4180,6 +4328,15 @@ async function runGizmoTest() {
       .dot(qAx(eye, TH).multiply(q0).clone())) > 0.9999);
     // shipped configuration = the rule the model describes
     ok('config', tctl.mode === 'rotate' && tctl.space === 'local');
+    // v0.156 knob continuity: TransformControls reports the ring drag as a
+    // raw atan2 angle in (−π, π] — sweeping a knob past 180° pops it back
+    // toward the start pose (user report). The shipped writeback unwraps:
+    // per-event wrapped deltas accumulate into a continuous spin, both ways.
+    { const a1 = gizmoUnwrap(3.10, 3.08, 3.08);
+      const a2 = gizmoUnwrap(-3.10, 3.10, a1);          // crossing +π keeps going
+      const b2 = gizmoUnwrap(3.08, 3.10, a1);           // reversing follows down
+      ok('unwrap', a1 > 3.099 && a1 < 3.101 && a2 > 3.14 && a2 < 3.25
+         && Math.abs(b2 - 3.08) < 1e-9); }
     // v0.153 mode switch: move mode engages the same proxy; the position
     // writeback is the raw/mirror involution (view z-flip undoes itself)
     setGizmoMode('move');
@@ -4253,15 +4410,32 @@ async function runUiTest() {
     while (!pred() && Date.now() - t0 < ms) await sleep(50); return pred(); };
 
   // filter: typing narrows the list to matching types; clearing restores it
+  // (v0.156: the by-type tab adds section headers — rows are the .i badges)
   { const tot = model.data.components.length;
+    const rows = () => [...$('complist').children].filter(d => d.querySelector('.i'));
     setIn($('filter'), 'wheel');
-    const rows = [...$('complist').children];
-    const only = rows.length > 0 && rows.every(d => d.textContent.includes('Wheel'));
+    const r0 = rows();
+    const only = r0.length > 0 && r0.every(d => d.textContent.includes('Wheel'));
     setIn($('filter'), '');
-    ok('filter', only && $('complist').children.length === tot); }
+    ok('filter', only && rows().length === tot); }
+
+  // list tabs (v0.156): by-type sections vs by-subgrid (Build sections +
+  // hull-parts section); every flat part is listed in both; the choice persists
+  { const tot = model.data.components.length;
+    const rows = () => [...$('complist').children].filter(d => d.querySelector('.i'));
+    const secs = () => [...$('complist').children].filter(d => d.classList.contains('sec'));
+    const [tbType, tbSub] = [...$('ltabs').children];
+    tbType.click();
+    const typeOk = rows().length === tot && secs().length > 1;
+    tbSub.click();
+    const subOk = rows().length === tot && secs().some(d => d.textContent.includes('no subgrid'));
+    tbType.click();
+    ok('listtabs', typeOk && subOk && listTab === 'type'
+       && localStorage.getItem('archean-list-tab') === 'type'); }
 
   // list click: a row selects — header names it and the inspector builds
-  { const d = $('complist').children[3], idx = +d.querySelector('.i').textContent;
+  { const d = [...$('complist').children].filter(x => x.querySelector('.i'))[3],
+          idx = +d.querySelector('.i').textContent;
     click(d);
     ok('listclick', selected === idx && $('selname').textContent.includes(model.data.components[idx].type)
        && $('inspector').querySelectorAll('.row').length >= 6); }
@@ -4287,11 +4461,9 @@ async function runUiTest() {
     click(nx.parentElement.querySelector('.rst'));
     ok('editreset', moved && Math.abs(comp.position.x - x0) < 1e-12);
 
-    // presets actually MOVE the part (nose = raw z −0.25, up = +0.1)
-    const z0 = comp.position.z, y0 = comp.position.y;
-    click(btn($('inspector'), 'nose 0.25')); click(btn($('inspector'), 'up 0.1'));
-    ok('presets', Math.abs(comp.position.z - (z0 - 0.25)) < 1e-9
-       && Math.abs(comp.position.y - (y0 + 0.1)) < 1e-9);
+    // (v0.156: the nose/tail/up nudge presets were REMOVED as meaningless —
+    //  the position sliders + gizmo cover it; the seat lean presets below keep
+    //  the preset-button code path pinned)
 
     // Actions-reset returns position to the file state
     click([...$('inspector').querySelectorAll('button')].find(b => b.textContent.includes('reset this component')));
@@ -4389,6 +4561,10 @@ async function runUiTest() {
     const prev = selected;
     ev('pointerdown'); ev('pointerup');
     const vis = modeBox.classList.contains('vis') && selected === si;
+    // v0.156: the widget is projection-tied to the PART, not the click pixel
+    const tied = modeAnchor === compObjs[si]
+      && Math.abs(parseFloat(modeBox.style.left) - Math.min(cx + 10, innerWidth - 118)) < 160
+      && Math.abs(parseFloat(modeBox.style.top) - Math.min(cy + 8, innerHeight - 44)) < 160;
     modeBox.querySelector('[data-m="move"]').click();
     const mv = gizmoMode === 'move' && tctl.mode === 'translate'
       && tctl.object === gizmoProxy && localStorage.getItem('archean-gizmo-mode') === 'move';
@@ -4397,7 +4573,7 @@ async function runUiTest() {
     modeBox.querySelector('[data-m="rotate"]').click();
     const rb = tctl.mode === 'rotate' && tctl.object === gizmoProxy;
     hideModeBox(); select(prev, false);
-    ok('modebox', vis && mv && nv && rb); }
+    ok('modebox', vis && tied && mv && nv && rb); }
 
   // move gizmo (v0.153): dragging the proxy writes comp.position (RAW),
   // moves mesh + real siblings; occ mirror stays serialize()'s job
@@ -4513,7 +4689,8 @@ async function runUiTest() {
       select(si, false); setGizmoMode('move');
       const v = new THREE.Vector3(); compObjs[si].getWorldPosition(v); v.project(camera);
       const r = renderer.domElement.getBoundingClientRect();
-      showModeBox(r.left + (v.x * .5 + .5) * r.width, r.top + (-v.y * .5 + .5) * r.height);
+      showModeBox(r.left + (v.x * .5 + .5) * r.width, r.top + (-v.y * .5 + .5) * r.height,
+        compObjs[si]);
       invalidate();
     }
   }
@@ -4741,8 +4918,8 @@ if (location.search.includes('selftest')) {
           h.checked = true; h.dispatchEvent(new Event('change'));
           ok20 = a && !w.checked && blockGroup.visible && !hullWire.visible;
         } }
-      // ok21: physics-LOD budget — normal crafts keep all 2200 particles
-      const ok21 = flowPts && flowPts.geometry.attributes.position.count === 2200 && flowN === 2200;
+      // ok21: physics-LOD budget — normal crafts keep all 4000 particles (v0.156)
+      const ok21 = flowPts && flowPts.geometry.attributes.position.count === 4000 && flowN === 4000;
       // ok22: clicking a component on the canvas selects it via the
       // pointerdown raycast (no hover path exists anymore)
       let ok22 = false;
@@ -4854,6 +5031,18 @@ if (location.search.includes('selftest')) {
           && dirty;
         select(-1);
       })();
+      // ok28: fat-line SELECTION OUTLINE (v0.156 user "selection should be
+      // more clear"): visible with all 12 box segments on a selection, hidden
+      // on none. ok29: connectors (adapter nubs) hidden by DEFAULT, cables
+      // stay (v0.156 user default).
+      let ok28 = false, ok29 = adpGroup.visible === false && pipeGroup.visible;
+      (function () {
+        const ci = model.data.components.findIndex(c => c.type === 'PilotSeat');
+        select(ci); paintHighlights();
+        ok28 = selBox.visible && selBox.geometry.getAttribute('instanceStart').count === 12;
+        select(-1); paintHighlights();
+        ok28 = ok28 && !selBox.visible;
+      })();
       const ok17 = nThr > 0 && !!netThrust && netThrust.n === nThr
         && thrustGroup.children.length === nThr + (netThrust.v ? 1 : 0)
         && (!netThrust.v || Math.abs(Math.hypot(...netThrust.v) - 1) < 0.02)
@@ -4895,14 +5084,14 @@ if (location.search.includes('selftest')) {
       ray.setFromCamera(new THREE.Vector2(0, 0), camera);
       const ok5 = ray.intersectObjects(compGroup.children, true)
         .some(h => h.object.userData.ci >= 0);
-      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 && ok10 && ok11 && ok12 && ok13 && ok14 && ok15 && ok16 && ok17 && ok18 && ok19 && ok20 && ok21 && ok22 && ok23 && ok24 && ok25 && ok26 && ok27 ? 'PASS' : 'FAIL')
+      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 && ok10 && ok11 && ok12 && ok13 && ok14 && ok15 && ok16 && ok17 && ok18 && ok19 && ok20 && ok21 && ok22 && ok23 && ok24 && ok25 && ok26 && ok27 && ok28 && ok29 ? 'PASS' : 'FAIL')
         + ' occ_z=' + occ.pos_z + ' mirror=' + !!mir
         + ' pitch=' + (2 * Math.asin(-seat.orientation.x) * 180 / Math.PI).toFixed(1) + '°'
         + ' beacon=' + (mast ? mast.x.toFixed(2) : 'none') + ' droop=' + wc.y.toFixed(2)
         + ' junction=' + jdir.y.toFixed(2) + ' aileron=' + at.y.toFixed(2)
         + ' pick=' + ok5 + ' palette=' + ok9 + ' lens=' + ok10
         + ' dashmirror=' + ok11 + ' textx=' + ok12 + ' mural=' + ok13 + ' subjoin=' + ok13b + ' ground=' + ok14
-        + ' surges=' + ok15 + ' bolts=' + ok16 + ' thrust=' + ok17 + ' seal=' + ok18 + ' sock=' + ok19 + ' excl=' + ok20 + ' windpts=' + ok21 + ' click=' + ok22 + ' inflow=' + ok23 + ' wake=' + ok24 + ' seatpitch=' + ok25 + ' anchor=' + ok26 + ' gizmo=' + ok27
+        + ' surges=' + ok15 + ' bolts=' + ok16 + ' thrust=' + ok17 + ' seal=' + ok18 + ' sock=' + ok19 + ' excl=' + ok20 + ' windpts=' + ok21 + ' click=' + ok22 + ' inflow=' + ok23 + ' wake=' + ok24 + ' seatpitch=' + ok25 + ' anchor=' + ok26 + ' gizmo=' + ok27 + ' outline=' + ok28 + ' conndef=' + ok29
         + ' cabin=' + seal.sealedCount;
     } catch (e) { document.title = 'SELFTEST ERR ' + e.message + ' @' + String(e.stack).split(String.fromCharCode(10))[1].trim().slice(0, 70); }
   }, 1500);

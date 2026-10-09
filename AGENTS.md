@@ -38,7 +38,7 @@ tests/run_tests.sh                      # full headless suite (python3 + chromiu
 python3 -m http.server 8650             # manual serving (repo root)
 # viewer:   http://127.0.0.1:8650/viewer/index.html
 # selftest: http://127.0.0.1:8650/viewer/index.html?selftest  (tab title: SELFTEST PASS)
-# gizmatest: viewer/index.html?gizmatest (GIZMATEST PASS n=14; &shot=1|2|3 = WYSIWYG screenshot states)
+# gizmatest: viewer/index.html?gizmatest (GIZMATEST PASS n=15; &shot=1|2|3 = WYSIWYG screenshot states)
 # regtest:  http://127.0.0.1:8650/regtest/regtest.html         (page ends 'REGTEST: PASS')
 # other craft: viewer/index.html?open=../testdata/<id>/blueprint.json
 # perf probe: viewer/index.html?perf → tab title: PERF fps=… draw=<draw-calls> …
@@ -303,8 +303,10 @@ landing page and README together when the viewer changes).
      the windsock HUD is a camera child and its tail aims along flowDir()
      in camera space (`sock=true`, dot > 0.93 after an explicit updateWindHud);
      hull solids and wireframe are mutually exclusive checkboxes (`excl=true`);
-     the wind particle budget tiers with scene cost, normal crafts full 2200
-     (`windpts=true`); canvas picking = deliberate press only (`click=true`),
+     the wind particle budget tiers with scene cost, normal crafts full 4000
+     (v0.156 "more wind particles, from further away": spawn box inflated
+     4 m, kill margin 9 m; `windpts=true`); canvas picking = deliberate
+     press only (`click=true`),
      and a subgrid hit CLOSER than any component routes the click to the
      subgrid info panel (v0.153 — content of a subgrid and anything BEHIND it
      lose; pinned in the dolphin postest, ISW has no subgrids);
@@ -318,10 +320,22 @@ landing page and README together when the viewer changes).
      as seen (user WYSIWYG rule); scene-root proxy, writeback qv = P·Ry(π)
      (THREE decompose absorbs the negative scale by negating sx). `gizmo=
      true` pins the writeback round-trip; `?gizmatest` (synthetic single-
-     seat blueprint, camera facing the pilot, n=14 + &shot=1|2|3 visual
-     states) pins the order algebra and the live pose. The v0.153 MODE
-     WIDGET: a canvas click on a part pops ⊘/✥/⟳/ℹ AT the click point
-     (no/move/rotate/info — last choice persists, `archean-gizmo-mode`);
+     seat blueprint, camera facing the pilot, n=15 + &shot=1|2|3 visual
+     states) pins the order algebra, the LIVE pose, and v0.156 KNOB
+     CONTINUITY (`gizmoUnwrap`): TransformControls reports ring drags as a
+     raw atan2 angle, so a knob sweep past 180° POPS back toward the start
+     (user report) — the objectChange writeback unwraps per-event wrapped
+     deltas into a continuous spin, both directions. Rings are thickened
+     annuli at full opacity (TGC's default 0.02-wide/25 % reads invisible).
+     The selection is boxed by a FAT 3px LineSegments2 outline (outline=
+     true: 12 segments on select, hidden on none; Box3Helper's 1px lines
+     vanished on HiDPI — user "selection should be more clear"). Connectors
+     (adapter nubs) default HIDDEN on their own View-Options toggle
+     (conndef=true), pipes/cables keep theirs. The v0.153 MODE
+     WIDGET: a canvas click on a part pops ⊘/✥/⟳/ℹ TIED TO THE PART
+     (v0.156: projected bbox centre, re-projected every rendered frame
+     while open — no/move/rotate/info; last choice persists,
+     `archean-gizmo-mode`);
      move = translate gizmo on the same proxy, writeback is the mirror
      involution (view z-flip) minus the compGroup display anchor, occ +
      type-255 mirror cells follow via serialize()'s round(delta/CELL) shift
@@ -356,7 +370,9 @@ landing page and README together when the viewer changes).
    pose/orientation, nub placement.
 2c-b. `?uitest` (v0.147): headless UI sweep — drives EVERY panel control
    through its real handler (checkboxes, buttons, sliders, ⟲ resets) plus the
-   paths state-pins miss: filter, list-click select, keyboard g/o/h (which
+   paths state-pins miss: filter, LIST TABS (listtabs: by type / by subgrid,
+   v0.156 — every flat part listed in both tabs, one search filters both,
+   the pick persists), list-click select, keyboard g/o/h (which
    must move groups AND stay synced with their checkboxes; h = blocks +
    triangles together), preset buttons (must actually MOVE the part — the
    row.set()/onInput dead-button bug), comp.data write-through, real-model
@@ -386,7 +402,7 @@ landing page and README together when the viewer changes).
    position writeback is the raw/mirror involution). `&shot=1|2|3` leaves
    the scene at
    before/+pitch90/+pitch90+roll90 for headless eyeball (runner saves
-   gizmo1..3.png). Title: `GIZMATEST PASS n=14`.
+   gizmo1..3.png). Title: `GIZMATEST PASS n=15`.
 2c. `?postest`: placement fixtures keyed per craft (the POSTESTS table in
    view3d.js — the sanctioned exception to "no per-craft constants": fixtures
    probe the RENDERED scene where generic checks cannot see a pose bug).
@@ -425,6 +441,14 @@ landing page and README together when the viewer changes).
 ## Conventions
 - view3d.js is one flat file with `// ---------- sections ----------`; follow it.
 - UI = DevTools-style rows built by `row()`; new tunables get sliders, not prompts.
+- Component list (v0.156): two tabs (`#ltabs`, persisted `archean-list-tab`) —
+  `by type` (alphabetical sections) and `by subgrid` (one section per Build:
+  decoded masters + indented nested rows whose click = selectSub; then
+  'Hull & parts (no subgrid)'), ONE search (`#filter`, position unchanged)
+  filters both; rows carry the `.i` index badge, section headers are
+  `.sec` (count spans must NOT use class `i` — uitest counts rows by it).
+  The nose/tail/up nudge presets were REMOVED (user: meaningless — sliders +
+  gizmo cover nudging); the PilotSeat lean presets stay (seatpreset pin).
 - `row().set()` MUST repaint (it calls `invalidate()`): programmatic
   `.value` assignment fires no 'input' event, and the global input→invalidate
   listener is what keeps sliders live — without it ⟲/presets moved the UI but

@@ -39,6 +39,13 @@ titles were contention-noise, flowms is the robust signal). Sub-200-plate
 crafts keep the scan: the airliner's 92 plates measured scan 2.4 vs grid
 5.0 ms/frame — the grid only pays off once scans dominate the 27 hash probes.
 
+**v0.156 wind scale-up** (user: "more wind particles, from further away"):
+baseline 2200 → 4000 particles, spawn box inflated 4 m (was 1.3), kill
+margin 9 m (was 2.6), streamline seeds rad+9 upstream. Measured iGPU:
+ISW 4000 pts flowms 4.9 (2.8 at 2200), giant 1600 pts 7.8 (5.0 at 900) —
+per-particle cost unchanged, frame budget (16 ms) holds; the giant's fps
+stays draw-bound.
+
 ## Design wins (do not regress — mostly already test-pinned)
 
 - Hull merged into one mesh per palette colour; wire = 1 LineSegments;
@@ -67,12 +74,12 @@ crafts keep the scan: the airliner's 92 plates measured scan 2.4 vs grid
    (user framing: the game approximates physics for big crafts because full
    sim cost scales with them). Measured cost driver = solid-cell lookup
    pressure (237 k-cell giant at 2200 pts = 13 ms; 16 k-cell crafts = 3 ms).
-   `flowBudget()` tiers the particle count on solidCells.size: 2200 ≤100 k
-   cells, 1400/900 ≤400 k, 500 above. v0.155: the aero-plate tier
-   (1400/900) is GONE — plates are grid-indexed (see above). Giant: 900 pts,
-   ~5 ms. The flight
+   `flowBudget()` tiers the particle count on solidCells.size. v0.155: the
+   aero-plate tier is GONE — plates are grid-indexed (see above). v0.156
+   re-scaled the tiers: 4000 baseline, 3000/1600/1000 by cell pressure
+   (giant 1600 pts, ~7.8 ms). The flight
    report shows `sim N pts (large-craft approx)` when tiered. Pin:
-   `windpts=true` (ISW keeps the full 2200).
+   `windpts=true` (ISW keeps the full 4000).
 5. **Load 937 ms (giant)**: JSON parse + build + seal, all budget-capped;
    fine for 6 MB (sub-second). No action.
 6. **antialias:true + dpr cap 2.5**: intentional sharpness (documented in
