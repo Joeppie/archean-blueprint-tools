@@ -375,10 +375,21 @@ indistinguishable from the pushed build (2026-10-09 user report).
      TorusGeometry (the v0.156 RingGeometry filter never matched), so the
      FAT tube instead of TGC's yellow flash (gizmostyle pin). v0.161 REVERT
      of v0.160's overreach: the swap thickened the REST state too (user: "a
-     gizmo to rotate the gizmo and its always thick") — rings now KEEP TGC's
-     hairline geometry/opacity at rest; ONLY the hovered/active ring swaps
-     to the fat tube at full opacity (styleGizmo runs every rendered frame
-     and restores material._color/_opacity from TGC's own caches).
+     gizmo to rotate the gizmo and its always thick") — rings KEEP TGC's
+     geometry at rest; ONLY the hovered/active ring fattens. v0.162 root
+     cause of the residual "the WRONG axis rotater becomes yellow and thick,
+     KEEP THE COLOR": TransformControls' highlight writes the MATERIAL of
+     the raycast-hit mesh, and the pick meshes (helper's unnamed children;
+     shared matInvisible at opacity 0.15 — NOT 0 as assumed) share one
+     material across all axes, so a hover flashed every pick torus yellow
+     at opacity 1 — fat yellow ghosts, positioned by the RAYCAST pick (at
+     ring crossings the nearest torus is a different ring's visual). fix:
+     styleGizmo restores _color/_opacity over the WHOLE helper subtree
+     every rendered frame (paintHighlights) and fat-swaps only the active
+     axis's VISIBLE rings (thickable = opacity ≥ 0.2; fattening the 0.15
+     pick toruses would shrink the raycast area); NO opacity forcing — the
+     active ring's colours stay theirs. The gizmostyle pin simulates TGC's
+     exact shared-material write and asserts the restore.
      The selection is boxed by a FAT 3.5px GOLDEN LineSegments2 outline,
      EXPANDED 0.07 m off the part, PULSING with the x-ray glow (outline=
      true: 12 segments on select, hidden on none; Box3Helper's 1px lines
@@ -394,9 +405,13 @@ indistinguishable from the pushed build (2026-10-09 user report).
      v0.161 FIFTH BUTTON ⇄ = mirror-move switch (persisted `archean-sym`):
      twin propagation is ON only while symOn AND the selected part's pair is
      still mirrored — twins are filtered by symAllowed() at PRE-MOVE file
-     positions in BOTH gizmo writebacks (computing it after the self-write
-     makes every move drift its own pair and self-disable — caught by the
-     XYQ pin). A pair a builder (or slider edit) moved apart by >5 cm
+     positions in ALL position writebacks: both gizmo paths AND the
+     inspector position sliders (livePos, v0.162 user: "mirror is not
+     respected; I edited one wheel, it didnt do the other" — sliders were
+     the manual path by design, the user corrected that: every position
+     edit mirrors while the pair is aligned; computing the filter after the
+     self-write makes every move drift its own pair and self-disable —
+     caught by the XYQ pin). A pair a builder moved apart by >5 cm
      AUTO-DISABLES; the button shows the effective state with a
      strikethrough (CSS .off), so the user can also purposely disable.
      move = translate gizmo on the same proxy, writeback is the mirror
@@ -470,7 +485,10 @@ indistinguishable from the pushed build (2026-10-09 user report).
    attach/toggle pins, mode-widget pins (modebox: a synthetic canvas click
    pops the widget at the part, ⊘/✥/⟳ buttons drive tctl mode + attach state
    + localStorage; movemode: proxy drag writes comp.position RAW, moves mesh
-   AND real siblings, undo through the same path).
+   AND real siblings, undo through the same path; symwidget: the ⇄ button
+   toggles twin propagation + persisted strikethrough state; symslider:
+   inspector x-slider edits propagate the mirrored delta to the twin and
+   the reverse edit restores the pair, v0.162).
    Title: `UITEST PASS n=<pins> ctrls=N`
    (n counts ok() live, nothing hardcoded) /
    `UITEST FAIL <pins>`, captured errors in #out.

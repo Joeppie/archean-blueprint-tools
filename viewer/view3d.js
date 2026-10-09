@@ -1950,36 +1950,53 @@ tctl.addEventListener('mouseUp', () => {
   invalidate();
 });
 scene.add(tctl.getHelper());
-// Rotate-gizmo ring style (v0.160/161, user: "the axis for rotation
-// selected should be thicker when I move it" — v0.160 overdid it by
-// thickening the REST state into a stack of fat donuts; that is reverted):
-// rings keep TGC's hairline REST geometry/opacity untouched; only the
-// HOVERED/active ring swaps to a fat tube at full opacity — and TGC's
-// yellow flash is undone from its own material._color/_opacity caches,
-// every rendered frame (paintHighlights → styleGizmo). The invisible hit-
-// toruses (opacity 0) are untouched; RingGeometry kept for portability.
+// Rotate-gizmo ring style (v0.160/161/162, user: "the axis for rotation
+// selected should be thicker when I move it"; v0.162: "the WRONG axis
+// rotater becomes yellow and thick, KEEP THE COLOR"): TransformControls'
+// highlight writes colour/opacity to the MATERIALS of the raycast hit
+// mesh — and the hit-toruses of ALL axes share ONE material (as do the
+// full-track rings), so hovering one ring paints the shared materials
+// yellow/opacity-1 everywhere, and at ring crossings the raycaster picks
+// the nearest hit-torus, i.e. a DIFFERENT ring's visual. Counter: every
+// rendered frame restore _color/_opacity on EVERY handle mesh of EVERY
+// gizmo group from TGC's own caches (the invisible hit-toruses included
+// — v0.161 restored only the visible rings, so the flash survived), and
+// swap ONLY the active axis's visible rings to the fat tube — colours
+// stay theirs (no opacity forcing: v0.161's `on ? 1 : ...` set the
+// shared track material to 1 = all rings blazed yellow).
 tctl.getHelper().traverse(o => {
-  if (!o.isMesh || o.material.opacity <= 0.1) return;
-  if (o.geometry?.type === 'RingGeometry') {
-    o.userData.ringThin = o.geometry;
-    o.userData.ringFat = new THREE.RingGeometry(0.28, 0.36, 64);
-  } else if (o.geometry?.type === 'TorusGeometry') {
-    const { radius, arc } = o.geometry.parameters;
-    o.userData.ringThin = o.geometry;
-    o.userData.ringFat = new THREE.TorusGeometry(radius, 0.035, 8, 64, arc);
+  if (!o.isMesh) return;
+  const g0 = o.geometry;
+  if (g0?.type === 'RingGeometry' || g0?.type === 'TorusGeometry') {
+    o.userData.ringThin = g0;
+    // VISIBLE rings only: the shared hit-torus material rides opacity
+    // 0.15 (v0.162 probe) — thickening THOSE would shrink the raycast
+    // hit area (fat geometry replaces the 0.1-tube pick torus)
+    o.userData.thickable = o.material.opacity >= 0.2;
+    o.userData.ringFat = g0.type === 'TorusGeometry'
+      ? new THREE.TorusGeometry(g0.parameters.radius, 0.035, 8, 64, g0.parameters.arc)
+      : new THREE.RingGeometry(0.28, 0.36, 64);
   }
 });
 function styleGizmo() {
   const G = tctl.getHelper().children.find(o => o.isTransformControlsGizmo);
   if (!G) return;
-  for (const m of G.gizmo.rotate.children) {
-    if (!m.isMesh || !m.userData.ringThin) continue;
-    const on = m.name === tctl.axis;
-    m.geometry = on ? m.userData.ringFat : m.userData.ringThin;
+  // TGC's highlight writes colour/opacity on the MATERIAL of the raycast
+  // hit-mesh — and those hit-meshes (this build's TransformControlsGizmo
+  // UNNAMED children: an invisible torus/sphere per axis) share ONE
+  // material across all axes, as do the full-track rings: highlighting
+  // anything flashes EVERYTHING. Restore every handle material in the
+  // whole helper subtree from TGC's own _color/_opacity caches, every
+  // rendered frame (paintHighlights), then fat-swap ONLY the active
+  // axis's VISIBLE rings (userData.thickable).
+  G.traverse(m => {
+    if (!m.isMesh || !m.material) return;
     if (m.material._color) m.material.color.copy(m.material._color);
-    if (m.material._opacity !== undefined)
-      m.material.opacity = on ? 1 : m.material._opacity;
-  }
+    if (m.material._opacity !== undefined) m.material.opacity = m.material._opacity;
+  });
+  for (const m of G.gizmo.rotate.children)
+    if (m.userData.thickable)
+      m.geometry = m.name === tctl.axis ? m.userData.ringFat : m.userData.ringThin;
 }
 tctl.addEventListener('change', () => invalidate());   // hover repaints the style
 // (styleGizmo + the hover invalidation listener live with the ring-style
@@ -2588,13 +2605,18 @@ function secBody() { const s = document.createElement('div'); s.className = 'sec
 
 function livePos(comp, obj, ax) {
   return (v) => {
-    comp.position[ax] = v;                        // data stays in RAW file space
-    obj.position[ax] = ax === 'z' ? -v : v;       // object lives in view space
-    for (const r of realMap.get(obj.userData.ci) || []) r.position[ax] = ax === 'z' ? -v : v;
+    const i = obj.userData.ci;
+    const d = { x: 0, y: 0, z: 0 };
+    d[ax] = v - comp.position[ax];
+    const tw = symAllowed(i);                    // twins aligned at PRE-MOVE
+    comp.position[ax] = v;                       // data stays in RAW file space
+    obj.position[ax] = ax === 'z' ? -v : v;      // object lives in view space
+    for (const r of realMap.get(i) || []) r.position[ax] = ax === 'z' ? -v : v;
     syncAdapters(obj);
-    markDirty();
-  };
-}
+    symPropagate(i, d, tw);                      // ⇄ mirror moves cover the
+    markDirty();                                 // sliders too (v0.162 user:
+  };                                             // "edited one wheel, it didnt
+}                                                // do the other")
 function liveRot(comp, obj, q0) {
   const qd = new THREE.Quaternion(), e = new THREE.Euler(0, 0, 0, 'YXZ');
   const delta = { p: 0, y: 0, r: 0 };
@@ -4954,20 +4976,41 @@ async function runGizmoTest() {
       ok('movespace', (dArrow < 1e-6 && dRing > 0.69 && dRing < 0.71)
         || `arrowΔ=${dArrow.toFixed(4)} ringΔ=${dRing.toFixed(4)} (want ~0 / ~0.698)`); }
 
-    // ---- B3. ring hover style (v0.160): the active RING thickens, never
-    // turns yellow (user: "selected axis shouldnt become yellow, thicker") ----
+    // ---- B3. ring hover style (v0.160→162): the ACTIVE ring thickens and
+    // nothing turns yellow (user: "the wrong axis rotater becomes yellow and
+    // thick, KEEP THE COLOR") — TGC's highlight writes SHARED materials
+    // (hit-torus + full-track rings), so the pin simulates TGC's exact
+    // material writes and asserts the per-frame restore undoes them ----
     { const G = tctl.getHelper().children.find(o => o.isTransformControlsGizmo);
       const ring = (nm) => G.gizmo.rotate.children.find(m => m.isMesh && m.name === nm
         && m.userData.ringThin);
       const x = ring('X'), y = ring('Y');
+      const hitMeshes = [];
+      G.children.forEach(o => o.traverse(m => {
+        // the shared hit-material signature (v0.162 probe): _opacity 0.15,
+        // colour white — ONE material instance across every axis's pick mesh
+        if (m.isMesh && m.material._opacity === 0.15) hitMeshes.push(m);
+      }));
+      const hit = hitMeshes[0];
+      const trk = G.gizmo.rotate.children.find(m => m.isMesh
+        && m.material._opacity > 0.01 && m.material._opacity < 1);
       tctl.axis = 'X'; paintHighlights();
       const fatX = x.geometry === x.userData.ringFat;
       const thinY = y.geometry === y.userData.ringThin;
       const gold = !!x.material._color && x.material.color.getHex() !== 0xffff00;
+      let noFlash = 'no hit-mesh';
+      if (hit) {
+        hit.material.color.setHex(0xffff00); hit.material.opacity = 1;  // TGC write
+        if (trk) trk.material.opacity = 1;
+        paintHighlights();
+        noFlash = hit.material.opacity === hit.material._opacity
+          && hit.material.color.getHex() !== 0xffff00
+          && (!trk || trk.material.opacity === trk.material._opacity);
+      }
       tctl.axis = null; paintHighlights();
       const backThin = x.geometry === x.userData.ringThin;
-      ok('gizmostyle', (fatX && thinY && gold && backThin)
-        || `fatX=${fatX} thinY=${thinY} noYellow=${gold} back=${backThin}`); }
+      ok('gizmostyle', (fatX && thinY && gold && backThin && noFlash === true)
+        || `fatX=${fatX} thinY=${thinY} noYellow=${gold} back=${backThin} flash=${noFlash}`); }
 
     // ---- C. demo state for screenshots (before / +pitch / +pitch+roll) ----
     setModel(seatBp(), 'gizmatest seat');
@@ -5220,6 +5263,24 @@ async function runUiTest() {
       ok('symwidget', s1.on === !on0 && s1.off === !s1.on
         && s1.ls === (s1.on ? '1' : '0') && symOn === on0 && s2 === false);
     } }
+
+  // SLIDER edits ride the mirror too (v0.162, user: "mirror is not
+  // respected; I edited one wheel, it didnt do the other")
+  { const ent = [...symTwinIndex().entries()].find(([, ts]) => ts.length);
+    const [si, [ti]] = ent;
+    select(si, false);
+    const sl = [...document.querySelectorAll('#inspector .row')]
+      .find(r => r.querySelector('label')?.textContent === 'x')
+      ?.querySelector('input[type=range]');
+    const x0 = model.data.components[si].position.x, t0 = model.data.components[ti].position.x;
+    setIn(sl, x0 + 0.25);
+    const okS = Math.abs(model.data.components[si].position.x - (x0 + 0.25)) < 1e-9
+      && Math.abs(model.data.components[ti].position.x - (t0 - 0.25)) < 1e-9
+      && Math.abs(compObjs[ti].position.x - (t0 - 0.25)) < 1e-9;
+    setIn(sl, x0);                                // reverse edit propagates
+    ok('symslider', okS
+      && Math.abs(model.data.components[ti].position.x - t0) < 1e-9
+      && Math.abs(compObjs[ti].position.x - t0) < 1e-9); }
 
   // move gizmo (v0.153): dragging the proxy writes comp.position (RAW),
   // moves mesh + real siblings; occ mirror stays serialize()'s job
