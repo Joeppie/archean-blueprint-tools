@@ -83,6 +83,13 @@ public data: testdata blueprints carry workshop authors + timestamps
 (NOTICE §2), ws-names.tsv the public craft titles; the git identity
 (pseudonymous local email) is author metadata, not repo content. No CI
 secrets exist (Pages builds from the branch; no workflow files).
+(3) v0.161: when ANY `viewer/` file is staged, the hook runs
+`tests/run_tests.sh --gate` — the headless SELFTEST + REGTEST smoke pair
+over the tree (~5 s, iGPU-pinned; chromium present required). Gate PASS is
+commit proof; the full suite (uitest/gizmatest/postest/renders) stays the
+release ritual's job. (2026-10-09 remediation: the user F5'd the dev server
+mid-session, saw a selftest FAIL under the SAME v0.160 label as the pushed
+release, and reasonably concluded the release was broken.)
 
 ## Publishing (GitHub Pages)
 The live site is the repo root served by GitHub Pages:
@@ -90,7 +97,11 @@ The live site is the repo root served by GitHub Pages:
 `git push origin main` is all it takes — Pages rebuilds automatically (the build is an Actions job: during GitHub Actions runner incidents
 typically queues "waiting for a hosted runner" — check githubstatus.com before suspecting the push)
 (README viewer link is versioned; bump `v0.xx` in index.html title/header,
-landing page and README together when the viewer changes).
+landing page and README together when the viewer changes). v0.161 rule:
+**bump the version strings at SESSION START, not at release** — the dev
+server (:8650) serves the working tree, so an in-progress tree must carry
+the NEXT version label; a dev snapshot wearing the last release's string is
+indistinguishable from the pushed build (2026-10-09 user report).
 
 ## Sources of truth (all offline — do NOT web-fetch to answer format questions)
 - **FORMAT.md is the knowledge base.** Everything reverse-engineered lives
@@ -362,8 +373,12 @@ landing page and README together when the viewer changes).
      deltas into a continuous spin, both directions. Rings are thickened
      annuli at full opacity — v0.160: r169 builds them as HAIRLINE
      TorusGeometry (the v0.156 RingGeometry filter never matched), so the
-     swap now matches Torus tubes too; the HOVERED/active ring swaps to a
-     FAT tube instead of TGC's yellow flash (gizmostyle pin).
+     FAT tube instead of TGC's yellow flash (gizmostyle pin). v0.161 REVERT
+     of v0.160's overreach: the swap thickened the REST state too (user: "a
+     gizmo to rotate the gizmo and its always thick") — rings now KEEP TGC's
+     hairline geometry/opacity at rest; ONLY the hovered/active ring swaps
+     to the fat tube at full opacity (styleGizmo runs every rendered frame
+     and restores material._color/_opacity from TGC's own caches).
      The selection is boxed by a FAT 3.5px GOLDEN LineSegments2 outline,
      EXPANDED 0.07 m off the part, PULSING with the x-ray glow (outline=
      true: 12 segments on select, hidden on none; Box3Helper's 1px lines
@@ -376,6 +391,14 @@ landing page and README together when the viewer changes).
      while open — no/move/rotate/info; last choice persists,
      `archean-gizmo-mode`; v0.157: enlarged, v0.160: 26 px buttons
      "2-3 times bigger for better ux");
+     v0.161 FIFTH BUTTON ⇄ = mirror-move switch (persisted `archean-sym`):
+     twin propagation is ON only while symOn AND the selected part's pair is
+     still mirrored — twins are filtered by symAllowed() at PRE-MOVE file
+     positions in BOTH gizmo writebacks (computing it after the self-write
+     makes every move drift its own pair and self-disable — caught by the
+     XYQ pin). A pair a builder (or slider edit) moved apart by >5 cm
+     AUTO-DISABLES; the button shows the effective state with a
+     strikethrough (CSS .off), so the user can also purposely disable.
      move = translate gizmo on the same proxy, writeback is the mirror
      involution (view z-flip) minus the compGroup display anchor, occ +
      type-255 mirror cells follow via serialize()'s round(delta/CELL) shift
@@ -503,6 +526,13 @@ landing page and README together when the viewer changes).
    its Build[5]/[41] ±0.635 TWIN SUBGRID PAIR proves symmove-sub (one
    door dragged, its twin rides the mirrored delta — dolphin's symmove pin
    does the same for SmallHinge twins, sign-sensitive in x).
+   v0.161 XYQ `symmove-off`: with ⇄ clicked OFF a twin drag leaves its pair
+   frozen, and a DRIFTED pair (twin moved alone → pair no longer mirrored)
+   propagates NOTHING (auto-disable). dolphin `mirrorplane`: the striped
+   sheet + frame + ⇄ arrows build on a symmetric craft, REST on the ground
+   plane, and the View-Options checkbox toggles it — selftest ground=true
+   now ALSO scans mirrorGroup ("nothing renders below ground" covers
+   overlays; v0.160-era WIP plane pierced it, suite was blind).
    v0.157 gantry (3732302108) `subjoint-pos`: the LinearTrack-mastered
    subgrid slides +0.25 m along its decoded axle axis, and returns.
    Dev-shot hooks leave final states for headless screenshots: uitest

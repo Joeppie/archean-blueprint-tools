@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Archean Blueprint Viewer v0.160 — ISW-241</title>
+<title>Archean Blueprint Viewer v0.161 — ISW-241</title>
 <style>
   :root { --bg:#131219; --panel:#1c1b22; --panel2:#252330; --tx:#e8e6e3; --dim:#9a97a5;
           --accent:#0a84ff; --row:#2d2b38; --ok:#30e660; }
@@ -86,6 +86,10 @@
              padding:13px 18px; border-radius:9px; color:#9fb4c4; }
   #modebox button:hover { background:#1d2833; }
   #modebox button.on { background:#26506b; color:#dff1ff; }
+  /* ⇄ mirror button strikethrough = propagation off (clicked-off or the
+     pair auto-disabled because it is no longer mirrored) — v0.161 */
+  #modebox button.off { text-decoration:line-through; color:#5b6c7a; }
+  #modebox button.off:hover { background:#1d2833; }
 </style>
 <script type="importmap">
 { "imports": {
@@ -100,7 +104,7 @@
   <div id="toast"></div>
   <div id="panel">
     <header>
-      <span>ISW-241 blueprint inspector <small style="color:#7dffcf;font-weight:400">v0.160</small>
+      <span>ISW-241 blueprint inspector <small style="color:#7dffcf;font-weight:400">v0.161</small>
         <a id="wslink" target="_blank" rel="noopener" title="Workshop page for this craft"
            style="display:none;margin-left:8px;font-size:12px;color:#7dffcf;text-decoration:none">workshop ↗</a></span>
       <span>
@@ -136,6 +140,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="view3d.js?v=160"></script>
+  <script type="module" src="view3d.js?v=161"></script>
 </body>
 </html>

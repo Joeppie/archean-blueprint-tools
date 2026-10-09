@@ -18,11 +18,13 @@
 #                              GPU=0 forces the slow SwiftShader CPU fallback)
 #
 # Exit code: 0 = all passed. Artifacts in $OUT (default /tmp/archean-tests).
+#   --gate  = smoke layer only (selftest + regtest) — used by tests/pre-commit
 set -uo pipefail
 cd "$(dirname "$0")/.."
+GATE=0; [ "${1:-}" = "--gate" ] && GATE=1
 REPO="$PWD"
 OUT="${OUT:-/tmp/archean-tests}"
-PORT="${PORT:-8650}"
+PORT="${PORT:-$([ $GATE = 1 ] && echo 8651 || echo 8650)}"
 CHROME="${CHROME:-$(command -v chromium chromium-browser google-chrome 2>/dev/null | head -1)}"
 [ -n "$CHROME" ] || { echo "no chromium found (set CHROME=...)"; exit 2; }
 # GPU rendering is the default: real Vulkan via ANGLE. We PIN THE AMD iGPU
@@ -66,6 +68,12 @@ reg=$(chrome --virtual-time-budget=90000 \
   | python3 -c "import sys,re,html; t=sys.stdin.read(); m=re.search(r'id=\"out\">(.*?)</div>', t, re.S); print(html.unescape(m.group(1)) if m else 'NO OUTPUT')")
 echo "$reg" | grep -v ' OK$' | tail -8
 echo "$reg" | grep -q 'REGTEST: PASS' || fail=1
+
+# gate mode (pre-commit): the two cheap invariant suites are enough proof
+if [ $GATE = 1 ]; then
+  [ $fail -eq 0 ] && echo "GATE PASS (selftest + regtest)" || echo "GATE FAIL"
+  exit $fail
+fi
 
 echo "── proxytest (low-poly meshes vs real geometry, all atlas types)"
 title=$(chrome --virtual-time-budget=30000 \

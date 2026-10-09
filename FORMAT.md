@@ -108,6 +108,14 @@ sRGB.
   twins' occ/type-255 mirrors follow the save-time per-component delta
   shift. `mirrorAxis`-flagged parts (the gantry craft: 21 entries) are
   SELF-MIRRORED instances — a single entry renders both halves.
+  v0.161 makes propagation a SWITCH: the mode widget's ⇄ button toggles it
+  (persisted), and propagation auto-disables for a PAIR THAT NO LONGER
+  MIRRORS — twin pairs are indexed at load time (clean baseline), and at
+  every gizmo move the twin list is filtered by CURRENT mirror-alignment
+  (all axes within 5 cm: a slider-nudged twin breaks it), evaluated
+  BEFORE the mover's own file write. The viewer also draws the symmetry
+  plane x=0 on symmetric crafts (striped sheet + frame + ⇄ arrows, resting
+  on the ground plane; View-Options "mirror plane" toggles it).
 
 ## `blocks` — the voxel build
 

@@ -7,9 +7,19 @@
 #   2. tools/security-scan.py --versions — the v0.xx release strings in
 #      viewer/index.html + README.md + index.html (incl. view3d.js?v=) must
 #      all agree, enforced whenever any of them (or the viewer) is staged.
+#   3. tests/run_tests.sh --gate — headless selftest + regtest over the
+#      WORKING TREE, whenever the viewer itself is staged (2026-10-09
+#      remediation: a user screenshot showed a mid-edit dev-server tree
+#      failing the ground pin under the SAME v0.160 label as the pushed
+#      release; commits must carry proof they are green, not ritual).
+#      Full suite (uitest/gizmatest/postest/renders) stays the release
+#      ritual's job; this smoke layer is ~5 s on the iGPU.
 set -e
 cd "$(git rev-parse --show-toplevel)"
 python3 tools/security-scan.py --staged
 if git diff --cached --name-only | grep -qE '^(viewer/index\.html|index\.html|README\.md|viewer/view3d\.js)$'; then
   python3 tools/security-scan.py --versions
+fi
+if git diff --cached --name-only | grep -qE '^viewer/'; then
+  bash tests/run_tests.sh --gate
 fi

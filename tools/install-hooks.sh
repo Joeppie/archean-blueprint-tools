@@ -3,4 +3,4 @@
 set -e
 cd "$(git rev-parse --show-toplevel)"
 install -m 0755 tests/pre-commit .git/hooks/pre-commit
-echo "installed .git/hooks/pre-commit (security scan + version sync — AGENTS.md)"
+echo "installed .git/hooks/pre-commit (security scan + version sync + suite gate — AGENTS.md)"

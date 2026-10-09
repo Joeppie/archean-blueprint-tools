@@ -526,6 +526,14 @@ const grid = new THREE.GridHelper(28, 112, 0x223322, 0x2c4429);
 grid.position.y = 0.002;
 scene.add(grid);
 
+// Render-loop state + invalidate — HOISTED to the top of the module (v0.161):
+// invalidate() is referenced from ~40 call sites across the whole file; with
+// the declarations down at the animate section, ANY call during module
+// evaluation (listener wiring, mid-edit dev trees) threw
+// 'Cannot access needsRender before initialization' (TDZ). Safe anywhere now.
+let needsRender = true, invalSeq = 0;      // repaint request + counter (pins)
+function invalidate() { needsRender = true; invalSeq++; }
+
 function onResize() {
   const w = view.clientWidth, h = view.clientHeight;
   renderer.setPixelRatio(Math.max(1, Math.min(devicePixelRatio, 2.5)));  // browser zoom changes dpr (fires resize); Chrome persists per-site zoom across reloads
@@ -1198,12 +1206,15 @@ function applySubGizmo(g) {
   // twin subgrids (door pairs!) ride the mirrored delta (v0.160)
   const d = { x: p.x - g.userData.base.p.x, y: p.y - g.userData.base.p.y,
     z: p.z - g.userData.base.p.z };
+  // d is the VIEW-frame base delta; world x-mirror = (−dx,dy,dz) in view,
+  // which lands in the twins' FILE frame as (−dx, dy, −dz). twins filtered
+  // at PRE-MOVE positions (v0.161: drift ⇒ auto-off, ⇄ widget) — BEFORE the
+  // self-write, or every move drifts its OWN pair and self-disables.
+  const tw = symAllowed(g.userData.sub);
   g.userData.base.p.copy(p); g.userData.base.q.copy(q);
   bc.position.x = p.x; bc.position.y = p.y; bc.position.z = -p.z;
   bc.orientation = rawFromView({ userData: {} }, q);
-  // d is the VIEW-frame base delta; world x-mirror = (−dx,dy,dz) in view,
-  // which lands in the twins' FILE frame as (−dx, dy, −dz).
-  for (const j of symTwinIndex().get(g.userData.sub) || []) {
+  for (const j of tw) {
     const tb = model.data.components[j];
     tb.position.x -= d.x; tb.position.y += d.y; tb.position.z -= d.z;
     const tg = subGroup.children.find(o => o.userData.sub === j);
@@ -1212,6 +1223,73 @@ function applySubGizmo(g) {
   }
   syncSubJoints();
   markDirty();
+}
+
+// ---------- mirror-plane overlay (v0.161, user: "show mirror axes as a
+// striped barred plane that indicates the mirror direction, toggle off in
+// options") ----------
+// The symmetry plane x=0: zebra-barred translucent sheet + outline frame +
+// a ⇄ double arrow along ±x (the mirrored axis). It RESTS on the ground
+// plane (the selftest ground pin now scans it). Shown only on crafts that
+// ARE symmetric (twin pairs or mirrorAxis parts exist); View-Options
+// "mirror plane" toggles it; never pickable.
+const mirrorGroup = new THREE.Group();
+scene.add(mirrorGroup);
+function buildMirrorPlane() {
+  mirrorGroup.clear();
+  if (!model) return;
+  if (!symTwinIndex().size
+      && !(model.data.components || []).some((c) => c.mirrorAxis)) return;
+  const bb = new THREE.Box3();
+  for (const g of [compGroup, blockGroup, hullGroup, subGroup]) bb.expandByObject(g);
+  if (!isFinite(bb.min.x)) return;
+  // v0.161 restyle (user: "mirror plane looks very weird"): the sheet RESTS
+  // on the ground plane (nothing renders below ground — same rule as the
+  // craft, now pinned by selftest ok14 which scans mirrorGroup too), spans
+  // the hull's z extent, and is quiet: 1.4 m zebra bars at 12 % + a slim
+  // outline frame so it reads as a PLANE, not fog. The ⇄ pair along ±x
+  // (the mirrored axis) rides at mid-height, sized to the craft.
+  const y0 = ground.position.y + 0.02;
+  const y1 = bb.max.y + 0.03 * Math.max(bb.max.y - y0, 1);
+  const z0 = bb.min.z - 0.02 * (bb.max.z - bb.min.z);
+  const z1 = bb.max.z + 0.02 * (bb.max.z - bb.min.z);
+  const sy = y1 - y0, sz = z1 - z0;
+  const cy = (y0 + y1) / 2, cz = (z0 + z1) / 2;
+  const cv = document.createElement('canvas');
+  cv.width = 4; cv.height = 16;
+  const g2 = cv.getContext('2d');
+  g2.fillStyle = '#bfe9ff';
+  for (let y = 0; y < 16; y += 8) g2.fillRect(0, y, 4, 4);    // 1:2 zebra bars
+  const tex = new THREE.CanvasTexture(cv);
+  tex.magFilter = tex.minFilter = THREE.NearestFilter;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(1, Math.max(2, Math.round(sy / 1.4)));
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(sz, sy),
+    new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.17,
+      side: THREE.DoubleSide, depthWrite: false, color: 0x63c8ff }));
+  m.rotation.y = Math.PI / 2;                 // plane normal = world x = mirror dir
+  m.position.set(0, cy, cz);
+  m.renderOrder = -2;
+  mirrorGroup.add(m);
+  const fr = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry),
+    new THREE.LineBasicMaterial({ color: 0x63c8ff, transparent: true,
+      opacity: 0.55, depthWrite: false }));
+  fr.rotation.y = Math.PI / 2;
+  fr.position.copy(m.position);
+  fr.renderOrder = -2;
+  mirrorGroup.add(fr);
+  const len = Math.min(6, Math.max(1.2, sz * 0.12));
+  for (const s of [1, -1]) {
+    const a = new THREE.ArrowHelper(new THREE.Vector3(s, 0, 0),
+      new THREE.Vector3(0, cy, cz), len, 0x8fdcff, len * 0.32, len * 0.18);
+    a.traverse((o) => {
+      if (o.isMesh || o.isLine) {
+        o.material.transparent = true; o.material.opacity = 0.9;
+      }
+    });
+    mirrorGroup.add(a);
+  }
+  mirrorGroup.traverse((o) => { o.raycast = () => {}; });
 }
 
 let compObjs = [];
@@ -1590,6 +1668,7 @@ function setModel(obj, srcName) {
   buildAero();
   buildFlight();
   buildHullList();
+  buildMirrorPlane();           // striped x-symmetry sheet (v0.161, if symmetric)
   // ?open=../testdata/<id>/ files have no workshop alias — show the source
   // id/filename (was: literal 'undefined' in the header, user screenshot)
   $('filestatus').textContent = `— ${model.data.alias || srcName || 'craft'} · ${model.data.components.length} components`;
@@ -1871,46 +1950,40 @@ tctl.addEventListener('mouseUp', () => {
   invalidate();
 });
 scene.add(tctl.getHelper());
-// Ring visibility (v0.156, user: "its too thin as well"): TransformControls
-// draws its rotation rings as hairline toruses (0.0075 tube) at 25 % opacity —
-// near-invisible over a bright hull. Thicken the annulus and light them at
-// full strength (the invisible hit-toruses keep opacity 0 = untouched).
-// v0.160 NOTE: r169's rings are TorusGeometry, not the RingGeometry the
-// v0.156 filter matched — the swap silently never fired (headless gizmatest
-// shots showed the hairline all along). Match BOTH; keep BOTH widths — the
-// HOVERED/active ring swaps to the fat one (styleGizmo) instead of TGC's
-// yellow flash (user: "selected axis shouldnt become yellow, thicker").
+// Rotate-gizmo ring style (v0.160/161, user: "the axis for rotation
+// selected should be thicker when I move it" — v0.160 overdid it by
+// thickening the REST state into a stack of fat donuts; that is reverted):
+// rings keep TGC's hairline REST geometry/opacity untouched; only the
+// HOVERED/active ring swaps to a fat tube at full opacity — and TGC's
+// yellow flash is undone from its own material._color/_opacity caches,
+// every rendered frame (paintHighlights → styleGizmo). The invisible hit-
+// toruses (opacity 0) are untouched; RingGeometry kept for portability.
 tctl.getHelper().traverse(o => {
   if (!o.isMesh || o.material.opacity <= 0.1) return;
   if (o.geometry?.type === 'RingGeometry') {
-    o.geometry.dispose();
-    o.geometry = new THREE.RingGeometry(0.28, 0.36, 64);
-    o.material.opacity = 0.95;
     o.userData.ringThin = o.geometry;
-    o.userData.ringFat = new THREE.RingGeometry(0.2, 0.44, 64);
+    o.userData.ringFat = new THREE.RingGeometry(0.28, 0.36, 64);
   } else if (o.geometry?.type === 'TorusGeometry') {
     const { radius, arc } = o.geometry.parameters;
-    o.geometry.dispose();
-    o.geometry = new THREE.TorusGeometry(radius, 0.035, 6, 64, arc);
-    o.material.opacity = 0.95;
     o.userData.ringThin = o.geometry;
-    o.userData.ringFat = new THREE.TorusGeometry(radius, 0.09, 8, 64, arc);
+    o.userData.ringFat = new THREE.TorusGeometry(radius, 0.035, 8, 64, arc);
   }
 });
-// Rotate-gizmo hover style: TGC repaints the active axis yellow every frame
-// (its material._color cache holds the base colour) — undo the yellow, show
-// the fat ring instead. Runs on every rendered frame (paintHighlights).
 function styleGizmo() {
   const G = tctl.getHelper().children.find(o => o.isTransformControlsGizmo);
   if (!G) return;
   for (const m of G.gizmo.rotate.children) {
     if (!m.isMesh || !m.userData.ringThin) continue;
-    m.geometry = (m.name === tctl.axis) ? m.userData.ringFat : m.userData.ringThin;
+    const on = m.name === tctl.axis;
+    m.geometry = on ? m.userData.ringFat : m.userData.ringThin;
     if (m.material._color) m.material.color.copy(m.material._color);
-    if (m.material._opacity !== undefined) m.material.opacity = m.material._opacity;
+    if (m.material._opacity !== undefined)
+      m.material.opacity = on ? 1 : m.material._opacity;
   }
 }
 tctl.addEventListener('change', () => invalidate());   // hover repaints the style
+// (styleGizmo + the hover invalidation listener live with the ring-style
+// block above)
 const _gq = new THREE.Quaternion();
 function syncGizmoPose() {
   const o = compObjs?.[selected];
@@ -1944,15 +2017,39 @@ const modeBox = document.createElement('div');
 modeBox.id = 'modebox';
 for (const [m, ic, ti] of [['none', '⊘', 'no gizmo'],
                            ['move', '✥', 'move — world axes (subgrids: own axes)'],
-                           ['rotate', '⟳', 'rotate'], ['info', 'ℹ', 'info only (no gizmo)']]) {
+                           ['rotate', '⟳', 'rotate'], ['info', 'ℹ', 'info only (no gizmo)'],
+                           ['sym', '⇄', 'mirror symmetry']]) {
   const b = document.createElement('button');
   b.textContent = ic; b.title = ti; b.dataset.m = m;
   b.addEventListener('pointerdown', (e) => e.stopPropagation());
-  b.onclick = (e) => { e.stopPropagation(); setGizmoMode(m); };
+  b.onclick = (e) => {
+    e.stopPropagation();
+    if (m === 'sym') {
+      symOn = !symOn;
+      localStorage.setItem('archean-sym', symOn ? '1' : '0');
+      paintModeBox(); invalidate();
+    } else setGizmoMode(m);
+  };
   modeBox.appendChild(b);
 }
 document.body.appendChild(modeBox);
-function paintModeBox() { for (const b of modeBox.children) b.classList.toggle('on', b.dataset.m === gizmoMode); }
+function paintModeBox() {
+  for (const b of modeBox.children) {
+    if (b.dataset.m === 'sym') {                 // ⇄ mirror-moves switch (v0.161)
+      const t = selected >= 0 ? selected : selectedSub;
+      const has = t >= 0 && !!symTwinIndex().get(t)?.length;
+      const eff = symOn && has && symAllowed(t).length > 0;
+      b.classList.toggle('on', eff);
+      b.classList.toggle('off', !eff);           // strikethrough: off (user)
+      b.title = !has ? 'mirror moves: this part has no twin'
+        : !symOn ? 'mirror moves: OFF (clicked off) — click to enable'
+        : symAllowed(t).length ? 'mirror moves: ON — twins follow the move'
+        : 'mirror moves: AUTO-OFF — this pair is no longer mirrored (it was moved apart)';
+      continue;
+    }
+    b.classList.toggle('on', b.dataset.m === gizmoMode);
+  }
+}
 // v0.156 (user): the widget is PROJECTION-tied to the component, not the raw
 // click pixel — it pops at the part's projected bbox centre and keeps tracking
 // it while open (camera orbits, live edits). Falls back to the given pixel
@@ -2001,10 +2098,11 @@ function applyGizmoPosition(pW) {
   o.position.copy(pW).sub(compGroup.position);
   const p = model.data.components[i].position;
   const d = { x: o.position.x - p.x, y: o.position.y - p.y, z: -o.position.z - p.z };
+  const tw = symAllowed(i);                 // twins aligned at the PRE-MOVE spots
   p.x = o.position.x; p.y = o.position.y; p.z = -o.position.z;
   for (const r of realMap.get(i) || []) r.position.copy(o.position);
   syncAdapters(o);
-  symPropagate(i, d);                       // left-right twins ride along
+  symPropagate(i, d, tw);                   // left-right twins ride along
   markDirty();
 }
 // ---------- symmetry twin index (v0.160, user: "moving a part that is in
@@ -2041,12 +2139,27 @@ function symTwinIndex() {
     }
   return symTwins;
 }
-// Propagate a file-space delta (dx,dy,dz) to the twins of comp i: mirrored
-// in x; meshes follow live, files carry the twins' own occ mirrors (the
+// Twin pairs are load-time geometry. If a builder (or a slider edit) has
+// since moved one twin off its mirrored spot ("notable discrepancy",
+// > 5 cm), the pair AUTO-DISABLES propagation — dragging one half of a
+// broken pair must not chase a twin that is no longer its mirror. The mode
+// widget's ⇄ button shows the state (strikethrough = off) and toggles the
+// master switch (persisted `archean-sym`).
+const symPairAligned = (i, j) => {
+  const a = model.data.components[i].position, b = model.data.components[j].position;
+  return Math.abs(a.x + b.x) < 0.05 && Math.abs(a.y - b.y) < 0.05
+    && Math.abs(a.z - b.z) < 0.05;
+};
+let symOn = localStorage.getItem('archean-sym') !== '0';     // the ⇄ widget switch
+const symAllowed = (i) => (!symOn ? []
+  : (symTwinIndex().get(i) || []).filter((j) => symPairAligned(i, j)));
+// Propagate a file-space delta (dx,dy,dz) to the given twins of comp i
+// (pre-filtered via symAllowed at the pre-move positions): mirrored in x;
+// meshes follow live, files carry the twins' own occ mirrors (the
 // save-time delta shift handles them).
-function symPropagate(i, d) {
+function symPropagate(i, d, twins) {
   if (!model || (!d.x && !d.y && !d.z)) return;
-  for (const j of symTwinIndex().get(i) || []) {
+  for (const j of twins || []) {
     const q = model.data.components[j].position;
     q.x -= d.x; q.y += d.y; q.z += d.z;
     const oj = compObjs[j];
@@ -2465,6 +2578,7 @@ function markDirty() {
   if (model) updateReport();          // live CoM/aero feedback while dragging sliders
   if (gizmoOn && tctl.object === gizmoProxy) syncGizmoPose();   // rings track position edits
   if (model && subGroup.children.length) syncSubJoints();       // master joint/pose edits ride the subgrid (v0.157)
+  paintModeBox();               // ⇄ button tracks auto-off as pairs drift apart (v0.161)
   invalidate();   // EVERY data edit repaints — sliders rely on the input-event
 }                 // listener, but BUTTONS (⟲ reset this component) fire none
                   // (v0.152: "resetting the component still doesnt update the 3d view")
@@ -2775,6 +2889,7 @@ function buildViewOpts() {
   toggle('pipes', 'pipes (cables)', pipeGroup);
   toggle('adapters', 'connectors (adapter ports)', adpGroup);   // v0.156: own toggle, off by default
   toggle('subs', 'subgrids (doors/hatches)', subGroup);
+  toggle('mirror', 'mirror plane (x symmetry)', mirrorGroup);   // v0.161
   const rl = document.createElement('label');
   rl.className = 'checkrow';
   const rcb = document.createElement('input');
@@ -4040,10 +4155,9 @@ function buildHullList() {
 }
 
 // ---------- animate (on-demand: iGPUs idle at ~0% until something changes) ----------
-let needsRender = true, perfFrames = 0, perfFlowN = 0, perfFlow = 0, perfBuild = 0, loadMs = 0;
+let perfFrames = 0, perfFlowN = 0, perfFlow = 0, perfBuild = 0, loadMs = 0;
 let perfW0 = 0, perfArm = 0;   // real-clock window: start (ms) + arm timestamp
-let invalSeq = 0;                 // repaint counter: pins assert edits repaint
-function invalidate() { needsRender = true; invalSeq++; }
+// (needsRender/invalSeq/invalidate() hoisted to the scene section — v0.161)
 let lastT = 0;
 function tick(t) {
   requestAnimationFrame(tick);
@@ -4495,6 +4609,24 @@ const POSTESTS = {
       syncAdapters(compObjs[i]); syncAdapters(compObjs[j]); markDirty();
       return okm || `self=${JSON.stringify(d)} twin=${JSON.stringify(dj)}`;
     });
+    T('mirrorplane', () => {         // v0.161: symmetric craft shows the
+      // striped sheet + frame + ⇄ pair, it RESTS on the ground (nothing
+      // renders below ground — overlays included), and the View-Options
+      // checkbox toggles it.
+      const t = viewToggles.mirror;
+      if (!t) return 'no mirror toggle in View Options';
+      const kids = mirrorGroup.children.length;
+      if (!kids) return 'no plane built on a symmetric craft';
+      const sheet = mirrorGroup.children[0];
+      const bbP = new THREE.Box3().setFromObject(sheet);
+      const sits = bbP.min.y > ground.position.y - 1e-6;
+      const arrows = mirrorGroup.children.filter(o => o.type === 'ArrowHelper').length;
+      t.cb.checked = false; t.cb.dispatchEvent(new Event('change'));
+      const hidden = !mirrorGroup.visible;
+      t.cb.checked = true; t.cb.dispatchEvent(new Event('change'));
+      return (kids === 4 && sits && arrows === 2 && hidden && mirrorGroup.visible)
+        || `kids=${kids} sits=${sits} arrows=${arrows} hidden=${hidden}`;
+    });
   },
   '3803780241': () => {              // XYQ-615: 2 subgrids, pair-unique decode
     T('xyq-sub-masters', () => {
@@ -4525,6 +4657,35 @@ const POSTESTS = {
       g.userData.base.p.x -= 0.4; tg.userData.base.p.x += 0.4;
       syncSubJoints(); tctl.detach();
       return okp || msg;
+    });
+    T('symmove-off', () => {         // v0.161: the ⇄ switch AND drifted pairs
+      // suppress twin propagation. (a) explicitly OFF: dragging twin 41 leaves
+      // twin 5 frozen. (b) DRIFT: 41 moved alone (+0.3, slider-equivalent) so
+      // the pair is no longer mirrored → AUTO-OFF: the drag propagates nothing.
+      const g = subGroup.children.find(o => o.userData.sub === 41);
+      const tg = subGroup.children.find(o => o.userData.sub === 5);
+      if (!g || !tg) return 'twin Build groups missing';
+      const cb = model.data.components[41], cc = model.data.components[5];
+      const b0 = { ...cb.position }, c0 = { ...cc.position };
+      const a0 = symOn;
+      selectSub(41); setGizmoMode('move');
+      symOn = false;
+      g.position.x += 0.3; applySubGizmo(g);
+      const offOk = Math.abs(cb.position.x - (b0.x + 0.3)) < 1e-9
+        && Math.abs(cc.position.x - c0.x) < 1e-12;
+      cb.position.x = b0.x; g.userData.base.p.x -= 0.3;
+      syncSubJoints();
+      cb.position.x += 0.3;
+      symOn = true;
+      const drifted = symAllowed(41).length === 0;
+      g.position.x += 0.4; applySubGizmo(g);
+      const autoOk = Math.abs(cb.position.x - (b0.x + 0.4)) < 1e-9
+        && Math.abs(cc.position.x - c0.x) < 1e-12;
+      cb.position.x = b0.x; cb.position.y = b0.y; cb.position.z = b0.z;
+      g.userData.base.p.x -= 0.4;
+      syncSubJoints(); symOn = a0; tctl.detach();
+      return (offOk && drifted && autoOk)
+        || `off=${offOk} drifted=${drifted} auto=${autoOk}`;
     });
   },
 };
@@ -5040,6 +5201,26 @@ async function runUiTest() {
     hideModeBox(); select(prev, false);
     ok('modebox', vis && tied && mv && nv && rb); }
 
+  // ⇄ mirror button (v0.161): the widget's fifth button toggles twin-move
+  // propagation (persisted archean-sym), and its strikethrough state tracks
+  // the EFFECTIVE switch (off-clicked or auto-off pair) for the selection
+  { const sb = modeBox.querySelector('[data-m="sym"]');
+    const ent = [...symTwinIndex().entries()].find(([, ts]) => ts.length);
+    if (!sb || !ent) ok('symwidget', 'no twin pair on this craft');
+    else {
+      const prev = selected;
+      select(ent[0], false);
+      const on0 = symOn;
+      sb.click();
+      const s1 = { on: symOn, ls: localStorage.getItem('archean-sym'),
+                   off: sb.classList.contains('off') };
+      sb.click();
+      const s2 = sb.classList.contains('off');   // back ON, pair aligned → no strike
+      select(prev, false);
+      ok('symwidget', s1.on === !on0 && s1.off === !s1.on
+        && s1.ls === (s1.on ? '1' : '0') && symOn === on0 && s2 === false);
+    } }
+
   // move gizmo (v0.153): dragging the proxy writes comp.position (RAW),
   // moves mesh + real siblings; occ mirror stays serialize()'s job
   { const si = model.data.components.findIndex(c => c.type === 'PilotSeat');
@@ -5340,9 +5521,14 @@ if (location.search.includes('selftest')) {
       // ok14: ground fit — the green plane and grid sit just UNDER the
       // lowest rendered geometry (truck 3481322297 builds to y=-1.5:
       // nothing may render below ground; user rule), ISW included.
+      // v0.161: the scan includes the OVERLAY groups (mirror plane) — the
+      // rule is "nothing renders below ground, EVER", for decorations too
+      // (the first mirror-plane cut pierced the ground and the suite was
+      // blind to it — user screenshot 2026-10-09).
       const gbb2 = new THREE.Box3().setFromObject(compGroup);
       gbb2.expandByObject(blockGroup); gbb2.expandByObject(subGroup);
       gbb2.expandByObject(hullGroup); gbb2.expandByObject(pipeGroup);
+      gbb2.expandByObject(mirrorGroup);
       const ok14 = Math.abs(ground.position.y - Math.min(0, gbb2.min.y - 0.02)) < 0.01
         && Math.abs(grid.position.y - ground.position.y) < 0.005;
       // ok15: cable power-surge — selecting the PilotSeat must spawn one
