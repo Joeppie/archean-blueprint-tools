@@ -222,22 +222,30 @@ indistinguishable from the pushed build (2026-10-09 user report).
   p' = pivot₀ + R(axis₀,angle)·(base.p−pivot₀) (+slide₀·pos), q' = R·base.q
   about the BUILD-CAPTURED joint line (g.userData.jref: pivot₀ = the axle
   pivot CLAMPED onto the subgrid's non-255-block bbox = the content's edge
-  line nearest the master — v0.173; and axis₀/slide₀ = v0.174/175: for a
+  line nearest the master — v0.173; and axis₀/slide₀ = v0.174-177: for a
   PANEL subgrid (non-empty bbox) the content's OWN longest bbox dimension
   — a door hinges along its long edge: the XYQ doors (longest ŷ) are car
   doors, Jimmy's gantry (longest x̂) folds like "a back door would on a
   car", the truck's 3 m doors hinge vertically while the 0.75 m rear
-  flaps tailgate laterally, the flukes deflect as elevons — EXCEPT a
-  SmallHinge face-mounted off the panel plane (pivot offset along the
-  thin axis): MIDDLE dimension — the dolphin fins (0.25×2.5×1.5) roll
-  about a LONGITUDINAL line at their bottom edge, flush-folded into the
-  hull side at 90° ("staying close to the frame on its bottom part",
-  "collapsing outward or inward"); the .ini axle key is the PART's pin,
+  flaps tailgate laterally, the flukes deflect as elevons. HINGES use
+  their own kinematic TRIAD (v0.175/177, user: "looking at the rotation
+  of the hinge or pivot we can determine the precise way that it should
+  rotate"): pin = the .ini barrel axis (chain), span d = the longest
+  dimension; EDGE-mounted (content runs along its pin, |pin·d|≈1: XYQ
+  doors, truck flaps) swings ON THE PIN (= longest, unchanged);
+  FACE-mounted (content welded laterally — BOTH dolphin fins: the
+  0.25 m skin-fin with the axle off its plane AND the 2-cell-deep fin
+  with the axle inside its bbox, which v0.176 yawed "like a door,
+  incorrectly") swings on the THIRD axis pin×span — world ẑ at the
+  clamped bottom edge, the top edge sweeping in x·y ("collapsing outward
+  or inward", "staying close to the frame on its bottom part"); the
+  cross's sign is mirror-antisymmetric (Build[4] −ẑ, Build[27] +ẑ), so
+  equal angles deploy the twin fins mirror-symmetrically, each to its own
+  side (bbox-verified); the .ini axle key is the PART's pin,
   NOT the content's animation axis (the v0.171 uniform ŷ key flipped the
   fins into x̂ drawbridges, "wrong in every single tested vehicle"; the
-  v0.174 longest-dim yaw kept them "wrong for dolphin still" — v0.175:
-  "looking at the rotation of the hinge or pivot we can determine the
-  precise way that it should rotate"); PARTS-ONLY subgrids (empty bbox:
+  v0.174 longest-dim yaw kept them "wrong for dolphin still");
+  PARTS-ONLY subgrids (empty bbox:
   nested parts riding the axle) keep the .ini key chain.
   A master MOUNTED on
   its content keeps pivot₀ = the axle point exactly), then the
@@ -272,8 +280,9 @@ indistinguishable from the pushed build (2026-10-09 user report).
   dolphin `dooraxis` (parts-riding SmallPivot spin axis ≈ vertical =
   car-door, .ini angular_y)
   + `doorpivot` (hinge fin: joint line clamped to the panel's bottom edge
-  AND axis = world ẑ = the face-mount middle-dim roll, the fin folds
-  flush into the hull side; non-vacuous axle offset)
+  AND axis = world ẑ = the face-mount pin×span swivel roll, AND twin
+  Build[27] rolls on ẑ with the MIRROR-OPPOSITE sign — equal angles
+  deploy both fins out to their own sides; non-vacuous axle offset)
   + `flukeaxis` (fluke panel subgrid axis = x̂ = its longest dimension)
   + `subfollow` (+0.5 m translate and +30° yaw spin of the hinge ride the
   subgrid in unison, sign-sensitive, exact restore)
@@ -741,11 +750,14 @@ indistinguishable from the pushed build (2026-10-09 user report).
    return; v0.173 doorpivot: the hinge-driven fin's joint line must be
    clamped onto its panel bbox (pivot0 on the panel plane at the bottom
    edge y, axle0 0.25 m inboard — "collapsing outward or inward, rotating
-   around the bottom"), and v0.175 pins the fin's axis = world ẑ (the
-   face-mount MIDDLE-dim roll: the fin folds flush into the hull side —
+   around the bottom"), and v0.175-177 pins the fin's axis = world ẑ (the
+   face-mount swivel axis pin×span: the fin deploys out to its own side,
    the axle key's ŷ maps to x̂ at that mount quat = the "rolls in and
-   out" drawbridge, the v0.174 longest-dim ŷ yaw = "still wrong");
-   flukeaxis: the fluke panel's
+   out" drawbridge, the v0.174 longest-dim ŷ yaw = "opens like a door,
+   incorrectly" — "one of the doors opens correctly, like a hatch folding
+   down, but the other opens like a door"); the TWIN Build[27] must roll
+   on ẑ with the MIRROR-OPPOSITE sign (equal angles = symmetric twin
+   deploy); flukeaxis: the fluke panel's
    axis = x̂ (its longest dimension, elevon deflection); gantry railaxis:
    the panel LinearTrack slides along its length; XYQ xyq-dooraxis:
    edge-mounted hinge doors keep the ±ŷ long-edge yaw (the face-mount

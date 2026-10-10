@@ -600,20 +600,31 @@ const POSTESTS = {
         && Math.abs(r.pivot0.y - 0.125) < 1e-9
         && r.pivot0.z < -4.875 && r.pivot0.z > -7.375;
       const off = r.axle0.distanceTo(r.pivot0);
-      // v0.175 (user: "looking at the rotation of the hinge ... we can
-      // determine the precise way that it should rotate"): a SmallHinge
-      // swings its content on the PHYSICAL PIN — the .ini key axis ŷ,
-      // which this Rx(90°)-type mount quat maps to the WORLD LONGITUDINAL
-      // axis: the fin ROLLS in/out about its bottom edge — flush-folded
-      // into the hull side at +90°, deployed horizontal at −90° ("staying
+      // v0.175-177 (user: "looking at the rotation of the hinge ... we
+      // can determine the precise way that it should rotate"): this fin
+      // is FACE-mounted (content welded laterally from the pin), so it
+      // swings about the hinge's THIRD axis pin×span — world LONGITUDINAL
+      // ẑ at the clamped bottom edge: the fin ROLLS in/out ("staying
       // close to the frame of the dolphin on its bottom part"). NOT the
-      // v0.174 vertical yaw (longest-dim rule — that is the turntable
-      // pivot's rule, confirmed by the truck/gantry/fluke pins).
-      const pin = Math.abs(r.axis0.z) > 0.99
+      // pin itself (x̂ drawbridge, "rolls in and out", v0.173) and NOT
+      // the vertical yaw (v0.174 "still wrong", the turntable rule).
+      const roll = Math.abs(r.axis0.z) > 0.99
         && Math.hypot(r.axis0.x, r.axis0.y) < 1e-9;
-      return (onEdge && off > 0.2 && pin)
+      // v0.177: the TWIN fin (Build[27], a 2-cell-deep panel with its
+      // axle INSIDE the bbox — v0.176 gave it the ŷ yaw: "opens like a
+      // door, incorrectly") must roll on the same ẑ family with the
+      // MIRROR-OPPOSITE sign (the cross pin×span is antisymmetric):
+      // equal angles then fold the pair mirror-symmetrically.
+      const g2 = subs().find((o) => o.userData.sub === 27);
+      const r2 = g2 && (g2.userData.jref || [])
+        .find((x) => x.mc?.type === 'SmallHinge');
+      const twinRoll = !!r2 && Math.abs(r2.axis0.z) > 0.99
+        && Math.hypot(r2.axis0.x, r2.axis0.y) < 1e-9
+        && Math.sign(r2.axis0.z) === -Math.sign(r.axis0.z);
+      return (onEdge && off > 0.2 && roll && twinRoll)
         || `pivot0=${r.pivot0.toArray().map(v => v.toFixed(3))} `
-          + `off=${off.toFixed(2)} axis=${r.axis0.toArray().map(v => v.toFixed(2))}`;
+          + `off=${off.toFixed(2)} axis=${r.axis0.toArray().map(v => v.toFixed(2))} `
+          + `twin=${r2 ? r2.axis0.toArray().map(v => v.toFixed(2)) : 'none'}`;
     });
     T('flukeaxis', () => {           // v0.174: the tail fluke subgrid
       const g = subs().find((o) => o.userData.sub === 22);   // (blocks x-widest)

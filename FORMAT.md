@@ -824,28 +824,34 @@ Adventure = 3334698274).
   PLANE, pivots 7–16 m from the flukes they drive) pivots at the content
   bbox's nearest face/edge (user: "collapsing outward or inward, rotating
   around the bottom. That goes for all of them").
-  **v0.174/175 axis rule:** for a PANEL subgrid (non-empty bbox) the
+  **v0.174-177 axis rule:** for a PANEL subgrid (non-empty bbox) the
   rotation/slide axis is the content's OWN longest bbox dimension, not
   the axle key — a door always hinges along its long edge: the XYQ doors
   (longest ŷ) are car doors, Jimmy's 7.5 m gantry (longest x̂) folds like
   a car's BACK door over its top edge, the semi-truck's 3 m doors (longest
   ŷ) hinge vertically while its 0.75 m rear flaps (longest x̂) tailgate
-  laterally, the dolphin flukes (longest x̂) deflect as elevons. EXCEPT a
-  SmallHinge mounted OFF THE PANEL FACE (v0.175, user: "looking at the
-  rotation of the hinge or pivot we can determine the precise way that it
-  should rotate"): when the axle pivot is offset from the clamped bbox
-  point along the panel's THIN axis (a face-mount), the swing axis is the
-  MIDDLE dimension — the dolphin's fins (0.25×2.5×1.5 m, hinge 0.25 m
-  inboard of the fin plane) roll about a LONGITUDINAL line at their bottom
-  edge: the 2.5 m top edge sweeps in x·y, flush-folded against the hull
-  side at +90°, deployed horizontal at −90° — "collapsing outward or
-  inward, rotating around the bottom", "staying close to the frame ... on
-  its bottom part". The pin axis R·ŷ (world x̂ there) sweeps the fin
-  THROUGH the hull (the v0.171/173 "door rolls in and out"), the longest
-  dim ŷ yaws it off the frame (the v0.174 "still wrong"); the middle-dim
-  roll is the only motion that keeps the root on the frame. Edge-mounted
-  hinges (offset along the SPAN: XYQ; corner: truck flaps, offset 0) keep
-  the longest dimension, which their part pins agree with. The .ini axle
+  laterally, the dolphin flukes (longest x̂) deflect as elevons. HINGES
+  are sharper (v0.175/177, user: "looking at the rotation of the hinge or
+  pivot we can determine the precise way that it should rotate"): the
+  hinge's own kinematic TRIAD fixes the axis — pin = the barrel axis (the
+  .ini key, chain), span d = the content's longest bbox dimension. An
+  EDGE-mounted hinge (content runs ALONG its pin, |pin·d|≈1 — XYQ doors,
+  truck flaps: their pins equal the longest dim) swings about the PIN. A
+  FACE-mounted hinge (content welded laterally in its face plane — both
+  dolphin fins: Build[4] a 0.25 m skin-fin with the axle 0.25 m off its
+  plane, Build[27] a 2-cell-deep fin with the axle inside its bbox)
+  swings about the THIRD axis **pin×span** — the knuckle's swivel axis:
+  world ẑ at the clamped bottom edge, the 2.5 m top edge sweeping in x·y
+  — "collapsing outward or inward, rotating around the bottom", "staying
+  close to the frame ... on its bottom part"; the pin itself (world x̂,
+  v0.171/173) sweeps the fin THROUGH the hull ("the door rolls in and
+  out") and the ŷ yaw (v0.174/176) opens it "like a door, incorrectly"
+  ("one of the doors opens correctly, like a hatch folding down, but the
+  other opens like a door" — v0.177). The cross's SIGN is mirror-
+  antisymmetric (Build[4] −ẑ, Build[27] +ẑ), so equal angles deploy the
+  pair MIRROR-SYMMETRICALLY — at +90° both fins lie horizontal at the
+  belly line, each pointing OUT to its own side (verified: bbox
+  x 1.25..3.75 / −3.5..−1). The .ini axle
   key is the PART's pin, not the animation axis of content welded to it.
   PARTS-ONLY subgrids (empty bbox — nested parts riding the axle node,
   dolphin fin subgrid 6, gantry rails) keep the .ini key chain (v0.171).
@@ -880,16 +886,18 @@ Adventure = 3334698274).
   joint line), dolphin `dooraxis` (parts-riding SmallPivot: spin axis must
   be ~vertical = car-door, .ini angular_y), dolphin `doorpivot` (hinge fin:
   joint line clamped to the panel's bottom edge AND axis = the world
-  LONGITUDINAL ẑ, the face-mount middle-dim roll — v0.175), dolphin
+  LONGITUDINAL ẑ = the face-mount pin×span swivel roll, AND the twin
+  Build[27] rolls on ẑ with the MIRROR-OPPOSITE sign — v0.177), dolphin
   `flukeaxis` (fluke panel subgrid axis =
   x̂, its longest dimension),
   dolphin `subfollow` (translate +30°-spin unison ride, sign-sensitive,
   exact restore), dolphin `subtwin-angle` (a hinge-angle edit rides the
   symmetry twin's subgrid in unison: +90° about each twin's OWN captured
-  axis, data verbatim, exact restore), 3732302108 `subjoint-pos` (LinearTrack slides along its
+  axis — the antisymmetric signs make that a mirror-symmetric twin deploy,
+  data verbatim, exact restore), 3732302108 `subjoint-pos` (LinearTrack slides along its
   CAPTURED axis) + `railaxis` (panel rail slides along its length, not the
   axle key), XYQ `xyq-dooraxis` (edge-mounted hinge doors stay ±ŷ — the
-  middle-dim face-mount branch must NOT fire there).
+  face-mount swivel branch must NOT fire there).
 - So the subgrid info panel (click a subgrid): Contents; Mount = the DECODED
   master(s) with joint state and measured distance — a KINEMATIC master also
   gets editable joint sliders (angle °/slide m) that write the master's
