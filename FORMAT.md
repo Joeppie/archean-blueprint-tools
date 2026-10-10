@@ -117,6 +117,13 @@ sRGB.
   mover's own file write. The viewer also draws the symmetry
   plane x=0 on symmetric crafts (striped sheet + frame + ⇄ arrows, resting
   on the ground plane; View-Options "mirror plane" toggles it).
+  v0.164 makes propagation VISIBLE: while ⇄ is live and the pair aligned,
+  the twins CO-SELECT — they glow with the selection (the shared pulsing
+  x-ray overlay covers twin meshes, and twin SUBGRID groups too) and the
+  first twin gets its own golden outline box; twin subgrid groups also
+  ride the mirrored delta in the 3D scene (their `base.p` is the file
+  frame, so the same (−dx,dy,dz) applies, then joints re-compose — before
+  this a twin Build moved in the file only, invisible in the viewport).
 
 ## `blocks` — the voxel build
 

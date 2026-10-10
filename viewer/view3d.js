@@ -2010,7 +2010,29 @@ tctl.getHelper().traverse(o => {
     o.userData.ringFat = g0.type === 'TorusGeometry'
       ? new THREE.TorusGeometry(g0.parameters.radius, 0.035, 8, 64, g0.parameters.arc)
       : new THREE.RingGeometry(0.28, 0.36, 64);
+    return;
   }
+  // v0.164 (user: "they dont light up for the entire thing … make the
+  // thicker selected version match location of the normal handles"): the
+  // fattened hover state covers the WHOLE handle of EVERY mode, not just
+  // rotate rings — arrow shafts/tips, the drag planes, the centre
+  // octahedron and the scale cubes get same-transform fat variants (only
+  // radii/size grow; length/position parameters identical) so the fat
+  // handle coincides with the normal one BY CONSTRUCTION.
+  if (o.material.opacity < 0.2) return;                          // pick meshes
+  const p = g0?.parameters;
+  let fat = null;
+  if (g0?.type === 'CylinderGeometry' && p)
+    fat = new THREE.CylinderGeometry(Math.max(p.radiusTop * 4, 0.03),
+      Math.max(p.radiusBottom * 4, 0.03), p.height, 12);
+  else if (g0?.type === 'ConeGeometry' && p)
+    fat = new THREE.ConeGeometry(Math.max(p.radius * 3.5, 0.045), p.height, 16);
+  else if (g0?.type === 'BoxGeometry' && p)
+    fat = new THREE.BoxGeometry(p.width * 2.4, p.height * 2.4, p.depth * 2.4);
+  else if (g0?.type === 'OctahedronGeometry' && p)
+    fat = new THREE.OctahedronGeometry(p.radius * 2, p.detail);
+  if (fat) { o.userData.ringThin = g0; o.userData.ringFat = fat;
+    o.userData.thickable = true; }
 });
 function styleGizmo() {
   const G = tctl.getHelper().children.find(o => o.isTransformControlsGizmo);
@@ -2029,9 +2051,10 @@ function styleGizmo() {
     if (m.material._opacity !== undefined) m.material.opacity = m.material._opacity;
     if (m.userData.trackHide) m.material.opacity = 0;    // axis-less rings stay hidden
   });
-  for (const m of G.gizmo.rotate.children)
-    if (m.userData.thickable)
-      m.geometry = m.name === tctl.axis ? m.userData.ringFat : m.userData.ringThin;
+  for (const grp of ['translate', 'rotate', 'scale'])
+    for (const m of G.gizmo[grp].children)
+      if (m.userData.thickable)
+        m.geometry = m.name === tctl.axis ? m.userData.ringFat : m.userData.ringThin;
 }
 tctl.addEventListener('change', () => invalidate());   // hover repaints the style
 // (styleGizmo + the hover invalidation listener live with the ring-style
@@ -2232,6 +2255,7 @@ const symAllowed = (i) => (!symOn ? []
 // save-time delta shift handles them).
 function symPropagate(i, d, twins) {
   if (!model || (!d.x && !d.y && !d.z)) return;
+  let sg = false;
   for (const j of twins || []) {
     const q = model.data.components[j].position;
     q.x -= d.x; q.y += d.y; q.z += d.z;
@@ -2241,7 +2265,19 @@ function symPropagate(i, d, twins) {
       for (const r of realMap.get(j) || []) r.position.copy(oj.position);
       syncAdapters(oj);
     }
+    // v0.164: twin SUBGRIDS (Build twins — dolphin/XYQ door pairs are the
+    // fixtures) ride along in 3D too: base.p lives in the file frame, so
+    // the same mirrored delta applies, then joints re-compose (the subgrid
+    // gizmo writeback's contract). Before this, a twin Build moved in the
+    // FILE only — the 3D twin door sat put (user: "I dont see the
+    // mirror-component ... being subject to the correct mirrored movement")
+    const g = subGroup.children.find((x) => x.userData.sub === j);
+    if (g) {
+      g.userData.base.p.x -= d.x; g.userData.base.p.y += d.y;
+      g.userData.base.p.z += d.z; sg = true;
+    }
   }
+  if (sg) syncSubJoints();
 }
 // apply the persisted mode WITHOUT invalidate(): module-eval order forbids
 // touching the render pipeline here; attach/paint happen on the first click.
@@ -2347,7 +2383,16 @@ selBox.visible = false;
 selBox.raycast = () => {};                                   // never pickable
 selBox.renderOrder = 20;
 scene.add(selBox);
+// v0.164 MIRROR CO-SELECTION (user: "I dont see the mirror-component being
+// identified and co-selected"): the twin's own golden box, synced every
+// rendered frame while ⇄ is live and the pair is aligned
+const selBox2 = new LineSegments2(new LineSegmentsGeometry(), selEdgesMat);
+selBox2.visible = false;
+selBox2.raycast = () => {};
+selBox2.renderOrder = 20;
+scene.add(selBox2);
 const _selPts = new Float32Array(72);
+const _selPts2 = new Float32Array(72);
 function boxEdges(bb, out) {                                // 12 segments
   const V = [bb.min.x, bb.min.y, bb.min.z, bb.max.x, bb.min.y, bb.min.z,
              bb.max.x, bb.min.y, bb.max.z, bb.min.x, bb.min.y, bb.max.z,
@@ -2376,15 +2421,30 @@ function paintHighlights() {
   });
   // selection outline: the clearest "what is selected" cue (stays in sync
   // with live edits — this runs on every frame we render)
+  const tSel = selected >= 0 ? selected : selectedSub;
+  const tw = tSel >= 0 && symOn ? symAllowed(tSel) : [];
   if (selected >= 0 && compObjs?.[selected]) {
     const bb = new THREE.Box3().setFromObject(compObjs[selected]);
     bb.expandByScalar(0.07);                       // box stands OFF the part (v0.157)
     selBox.visible = isFinite(bb.min.x);
     if (selBox.visible) { boxEdges(bb, _selPts); selBox.geometry.setPositions(_selPts); }
   } else selBox.visible = false;
+  // twin co-selection box: the first twin's own golden box (corpus pairs
+  // are 2-element; ALL twins get the x-ray glow, component and subgrid)
+  const tRoot = selected >= 0 ? compObjs?.[tw[0]]
+    : subGroup.children.find((x) => x.userData.sub === tw[0]);
+  if (tRoot) {
+    const tb = new THREE.Box3().setFromObject(tRoot);
+    selBox2.visible = isFinite(tb.min.x);
+    if (selBox2.visible) { boxEdges(tb, _selPts2); selBox2.geometry.setPositions(_selPts2); }
+  } else selBox2.visible = false;
   // incandescent X-ray layer: synced every rendered frame (tracks sliders
-  // live; rebuilt on selection change, model rebuild, proxy→real swap)
-  if (selKey !== selected || selPairs.some(([o]) => !o.parent)) rebuildSelXray();
+  // live; rebuilt on selection change, model rebuild, proxy→real swap,
+  // and whenever the twin set changes — ⇄ flip, pair drift, slider edits)
+  const twinKey = tSel + '|' + tw.join(',');
+  if (selKey !== selected || twinKey !== selTwinKey
+      || selPairs.some(([o]) => !o.parent)) rebuildSelXray();
+  selTwinKey = twinKey;
   for (const [o, ov] of selPairs) ov.matrix.copy(o.matrix);
   for (const f of flashes)
     f.mat.opacity = 0.6 * Math.pow(1 - (performance.now() - f.t0) / f.dur, 2);
@@ -2410,11 +2470,11 @@ let surges = [], flashes = [];
 const selXrayMat = new THREE.MeshBasicMaterial({ color: 0xffb020, transparent: true,
   opacity: 0.6, blending: THREE.AdditiveBlending, depthTest: false,
   depthWrite: false, side: THREE.DoubleSide });
-let selPairs = [], selKey = -1;
+let selPairs = [], selKey = -1, selTwinKey = '';
 function rebuildSelXray() {
   for (const [, ov] of selPairs) ov.parent && ov.parent.remove(ov);
   selPairs = []; selKey = selected;
-  compObjs?.[selected]?.traverse(o => {
+  const addTree = (root) => root?.traverse(o => {
     if (!o.isMesh) return;
     const ov = new THREE.Mesh(o.geometry, selXrayMat);
     ov.matrixAutoUpdate = false; ov.matrix.copy(o.matrix);
@@ -2422,6 +2482,14 @@ function rebuildSelXray() {
     o.parent.add(ov);
     selPairs.push([o, ov]);
   });
+  addTree(compObjs?.[selected]);
+  // twin co-selection: aligned twins glow WITH the selection (same shared,
+  // pulsing x-ray material) — component twins and SUBGRID (Build) twins
+  // alike; the twin set is re-evaluated whenever ⇄ flips or a pair drifts
+  // (the twinKey staleness check in paintHighlights)
+  if (selected >= 0) for (const j of symAllowed(selected)) addTree(compObjs?.[j]);
+  if (selectedSub >= 0) for (const j of symAllowed(selectedSub))
+    addTree(subGroup.children.find((x) => x.userData.sub === j));
 }
 function clearSurges() {
   surges.forEach(s => { surgeGroup.remove(s.mesh); s.mesh.material.dispose(); });
@@ -4447,6 +4515,26 @@ const POSTESTS = {
       }
       return true;
     });
+    T('symselect', () => {         // v0.164 (user: "I dont see the mirror-
+      // component being identified and co-selected"): selecting a twin-
+      // paired part must GLOW the twin with it (shared pulsing x-ray pair)
+      // and box it in its own golden outline; ⇄ OFF drops both; deselect
+      // clears everything.
+      const ent = [...symTwinIndex().entries()].find(([, ts]) => ts.length);
+      if (!ent) return 'no twin pair on ISW';
+      const [i, ts] = ent, j = ts[0];
+      const a0 = symOn;
+      select(i, false); symOn = true; paintHighlights();
+      const tset = new Set(); compObjs[j]?.traverse(o => tset.add(o));
+      const glow = selPairs.some(([o]) => tset.has(o));
+      const box = selBox2.visible === true;
+      symOn = false; paintHighlights();
+      const off = !selPairs.some(([o]) => tset.has(o)) && !selBox2.visible;
+      symOn = a0; select(-1); paintHighlights();
+      const cleared = !selBox.visible && !selBox2.visible;
+      return (glow && box && off && cleared)
+        || `glow=${glow} box=${box} off=${off} cleared=${cleared}`;
+    });
   },
   // v0.155 aero GRID pins: the giant (1024 plates ≥ AERO_GRID_MIN) is the
   // only corpus craft whose wind runs on the grid, so its soundness (the
@@ -4766,6 +4854,22 @@ const POSTESTS = {
       return (offOk && drifted && autoOk)
         || `off=${offOk} drifted=${drifted} auto=${autoOk}`;
     });
+    T('symselect-sub', () => {      // v0.164: subgrid twins co-select too —
+      // selecting the XYQ door subgrid Build[41] must glow twin Build[5]'s
+      // GROUP with it (x-ray pair) and box it; ⇄ OFF drops both.
+      const g = subGroup.children.find(o => o.userData.sub === 41);
+      const tg = subGroup.children.find(o => o.userData.sub === 5);
+      if (!g || !tg) return 'twin Build groups missing';
+      const a0 = symOn;
+      symOn = true; selectSub(41);
+      const tset = new Set(); tg.traverse(o => tset.add(o));
+      const glow = selPairs.some(([o]) => tset.has(o));
+      const box = selBox2.visible === true;
+      symOn = false; paintHighlights();
+      const off = !selPairs.some(([o]) => tset.has(o)) && !selBox2.visible;
+      symOn = a0; selectSub(-1);
+      return (glow && box && off) || `glow=${glow} box=${box} off=${off}`;
+    });
   },
 };
 // harness state at module scope: the POSTESTS fixture closures above capture
@@ -5075,6 +5179,33 @@ async function runGizmoTest() {
                          && trackHid)
         || `fatX=${fatX} thinY=${thinY} noYellow=${gold} back=${backThin}`
         + ` flash=${noFlash} track=${trackHid}`); }
+
+    // ---- B3b. v0.164 (user: "they dont light up for the entire thing;
+    // make the thicker selected version match location of the normal
+    // handles"): the FATTENED hover state covers the WHOLE handle — EVERY
+    // visible mesh of the hovered axis (arrow shaft, tapered tip, all
+    // of them) swaps to its fat variant, which shares the mesh (so the
+    // transform) and keeps every length parameter, growing radii only;
+    // at rest every mesh swaps back. ----
+    { const G = tctl.getHelper().children.find(o => o.isTransformControlsGizmo);
+      const allX = G.gizmo.translate.children.filter(m => m.isMesh
+        && m.name === 'X' && m.userData.thickable);
+      const thin0 = allX.map(m => m.geometry);
+      setGizmoMode('move'); tctl.axis = 'X'; paintHighlights();
+      const fatAll = allX.every(m => m.geometry === m.userData.ringFat);
+      const coincide = allX.every(m => { const a = m.geometry.parameters,
+          b = m.userData.ringThin.parameters;
+        return Math.abs((a.height ?? 0) - (b.height ?? 0)) < 1e-12
+          && Math.abs((a.width ?? 0) - (b.width ?? 0)) < 1e-12
+          && Math.abs((a.radiusTop ?? 0)
+               - Math.max((b.radiusTop ?? 0) * 4, 0.03)) < 1e-12
+          && Math.abs((a.radiusBottom ?? 0)
+               - Math.max((b.radiusBottom ?? 0) * 4, 0.03)) < 1e-12; });
+      tctl.axis = null; paintHighlights();
+      const backAll = allX.every((m, k) => m.geometry === thin0[k]);
+      setGizmoMode('rotate'); paintHighlights();
+      ok('gizmofat', (allX.length >= 2 && fatAll && coincide && backAll)
+        || `n=${allX.length} fat=${fatAll} coincide=${coincide} back=${backAll}`); }
 
     // ---- B4. REAL hover path (v0.163, user: "when I hover over the blue
     // axes it lights up yellow WRONG; a large yellow circle around it that

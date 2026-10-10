@@ -43,7 +43,7 @@ tests/run_tests.sh                      # full headless suite (python3 + chromiu
 python3 -m http.server 8650             # manual serving (repo root)
 # viewer:   http://127.0.0.1:8650/viewer/index.html
 # selftest: http://127.0.0.1:8650/viewer/index.html?selftest  (tab title: SELFTEST PASS)
-# gizmatest: viewer/index.html?gizmatest (GIZMATEST PASS n=18; &shot=1|2|3 = WYSIWYG screenshot states)
+# gizmatest: viewer/index.html?gizmatest (GIZMATEST PASS n=19; &shot=1|2|3 = WYSIWYG screenshot states)
 # regtest:  http://127.0.0.1:8650/regtest/regtest.html         (page ends 'REGTEST: PASS')
 # other craft: viewer/index.html?open=../testdata/<id>/blueprint.json
 # perf probe: viewer/index.html?perf → tab title: PERF fps=… draw=<draw-calls> …
@@ -365,7 +365,7 @@ indistinguishable from the pushed build (2026-10-09 user report).
      as seen (user WYSIWYG rule); scene-root proxy, writeback qv = P·Ry(π)
      (THREE decompose absorbs the negative scale by negating sx). `gizmo=
      true` pins the writeback round-trip; `?gizmatest` (synthetic single-
-     seat blueprint, camera facing the pilot, n=18 + &shot=1|2|3 visual
+     seat blueprint, camera facing the pilot, n=19 + &shot=1|2|3 visual
      states) pins the order algebra, the LIVE pose, and v0.156 KNOB
      CONTINUITY (`gizmoUnwrap`): TransformControls reports ring drags as a
      raw atan2 angle, so a knob sweep past 180° POPS back toward the start
@@ -414,7 +414,16 @@ indistinguishable from the pushed build (2026-10-09 user report).
      gizmohover pin drives the REAL pointer path (synthetic canvas
      pointermove): ring hover picks its own ring (axis='Z'), TGC's RAW
      update flashes yellow, the SHIPPED chain clears it in-frame, the
-     aimed ring fattens, E/XYZE stay hidden, proxy at centre.
+     aimed ring fattens, E/XYZE stay hidden, proxy at centre. v0.164 (user:
+     "they dont light up for the entire thing; make the thicker selected
+     version match location of the normal handles"): EVERY visible handle
+     mesh of EVERY mode (arrow shafts/tips, drag planes, centre octahedron,
+     scale cubes, rings) gets a same-mesh fat variant — length/position
+     parameters identical, radii/size grown ⇒ the fattened hover state
+     covers the WHOLE handle and coincides with the normal one by
+     construction; styleGizmo fattens the active axis's meshes across the
+     translate/rotate/scale groups (gizmofat pin: every 'X' translate mesh
+     fattens, params verified, restores at rest).
      The selection is boxed by a FAT 3.5px GOLDEN LineSegments2 outline,
      EXPANDED 0.07 m off the part, PULSING with the x-ray glow (outline=
      true: 12 segments on select, hidden on none; Box3Helper's 1px lines
@@ -439,6 +448,16 @@ indistinguishable from the pushed build (2026-10-09 user report).
      caught by the XYQ pin). A pair a builder moved apart by >5 cm
      AUTO-DISABLES; the button shows the effective state with a
      strikethrough (CSS .off), so the user can also purposely disable.
+     v0.164 CO-SELECTION (user: "I dont see the mirror-component being
+     identified and co-selected"): while ⇄ is live and the pair aligned,
+     the TWINS glow with the selection (shared pulsing x-ray overlay,
+     rebuildSelXray; twinKey staleness ⇒ ⇄ flips/drifts repaint) and the
+     first twin gets its own golden box (selBox2, synced in
+     paintHighlights) — component twins AND subgrid (Build) twins alike
+     (selectSub path included); twin SUBGRID groups also ride the mirrored
+     delta in 3D (symPropagate writes twin g.userData.base.p +
+     syncSubJoints — before, twin Builds moved in the file only). Pins:
+     ISW symselect, XYQ symselect-sub.
      move = translate gizmo on the same proxy, writeback is the mirror
      involution (view z-flip) minus the compGroup display anchor, occ +
      type-255 mirror cells follow via serialize()'s round(delta/CELL) shift
@@ -533,7 +552,7 @@ indistinguishable from the pushed build (2026-10-09 user report).
    `&shot=1|2|3` leaves
    the scene at
    before/+pitch90/+pitch90+roll90 for headless eyeball (runner saves
-   gizmo1..3.png). Title: `GIZMATEST PASS n=18`.
+   gizmo1..3.png). Title: `GIZMATEST PASS n=19`.
 2c. `?postest`: placement fixtures keyed per craft (the POSTESTS table in
    view3d.js — the sanctioned exception to "no per-craft constants": fixtures
    probe the RENDERED scene where generic checks cannot see a pose bug).
