@@ -81,7 +81,7 @@ revision). Baseline audit 2026-10-09: tree (250 files) + history (1211 blobs)
 = ZERO secret hits; no emails/IPs/tokens in the tree. INTENTIONAL, audited,
 public data: testdata blueprints carry workshop authors + timestamps
 (NOTICE §2), ws-names.tsv the public craft titles; the git identity
-(pseudonymous local email) is author metadata, not repo content. No CI
+(GitHub noreply, public by design) is author metadata, not repo content. No CI
 secrets exist (Pages builds from the branch; no workflow files).
 (3) v0.161: when ANY `viewer/` file is staged, the hook runs
 `tests/run_tests.sh --gate` — the headless SELFTEST + REGTEST smoke pair
@@ -671,14 +671,13 @@ indistinguishable from the pushed build (2026-10-09 user report).
   rebases knobQ0 to the live pose; future work: verify multi-grip sweeps
   end-to-end (pin), check the ring's drawn plane follows the live pose
   during re-grip, and confirm ±π/2π boundary drags stay continuous.
-- **Git attribution (user-requested, do soon):** commits are authored as
-  `joep <pseudonymous-local-email>`, so GitHub does NOT link them to the
-  Joeppie account. Fix: set the repo identity to the GitHub-linked
-  identity — `git config user.name Joeppie` + `user.email
-  joeppie@gmail.com` (that mailbox must be VERIFIED on the GitHub
-  account; noreply@… is the private-email alternative) — new commits then
-  attribute. Historic commits need a history rewrite
-  (`git filter-repo --mailmap`, then force-push: destructive, ask first).
+- **Git attribution: DONE 2026-10-10 (v0.165).** Repo identity is
+  `Joeppie <3845457+Joeppie@users.noreply.github.com>` (GitHub noreply:
+  links to the account without publishing the real mailbox); all 98
+  historic commits + both annotated tags were rewritten with
+  `git-filter-repo --mailmap` (verified metadata-only: every tree+message
+  byte-identical pre/post) and force-pushed. API check: every published
+  commit links to login Joeppie.
 - **view3d.js is monolithic** (~5.5k lines): split into zero-build ES
   modules — e.g. scene/render, gizmo, UI panels, subgrids, the test
   suites — keeping the importmap/CDN, no-bundler constraint and the
