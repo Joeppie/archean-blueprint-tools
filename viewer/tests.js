@@ -496,9 +496,12 @@ const POSTESTS = {
       const nm = document.getElementById('selname').textContent;
       const ins = document.getElementById('inspector').textContent;
       H.selectSub(-1);
-      // decoded master of Build[4] (v0.171 flattened join): SmallHinge[29]
-      return (/Subgrid/.test(nm) && /Pivot offset/.test(ins) && /Pivot rotation/.test(ins)
-        && /SmallHinge\[29\]/.test(ins))
+      // decoded master of Build[4] (v0.171 flattened join): SmallHinge[29].
+      // v0.173: the Pivot offset/rotation sections are GONE (user: the six
+      // sliders "should not be a separate interface") — Contents + Mount
+      // (with the master's joint slider) only.
+      return (/Subgrid/.test(nm) && !/Pivot offset/.test(ins)
+        && !/Pivot rotation/.test(ins) && /SmallHinge\[29\]/.test(ins))
         || `panel missing decoded mount (nm='${nm.slice(0, 40)}')`;
     });
     T('sub-masters', () => {          // v0.171: the FLATTENED master decode
@@ -565,16 +568,26 @@ const POSTESTS = {
         || `trans=${trans} rigid=${rigid}(${r0.length().toFixed(4)}->`
           + `${r1.length().toFixed(4)},ang=${r0.angleTo(r1).toFixed(4)},cy=${cy.toFixed(4)}) back=${back}`;
     });
-    T('sub-pivot-edit', () => {        // pivot rows move the group live + stay plain in the file
-      const g = subs()[0];
-      if (!g) return 'no subgrids';
-      const bc = H.model.data.components[g.userData.sub];
-      const px = bc.position.x, gx = g.position.x;
-      bc.position.x = px + 0.4; g.userData.base.p.copy(H.viewPos(bc.position)); H.syncSubJoints();
-      const moved = Math.abs(g.position.x - (gx + 0.4)) < 1e-9
-        && Number.isFinite(bc.orientation.x) && Number.isFinite(bc.orientation.w);
-      bc.position.x = px; g.userData.base.p.copy(H.viewPos(bc.position)); H.syncSubJoints();
-      return moved || 'group did not track pivot edit';
+    T('doorpivot', () => {            // v0.173 (user: the hinge-driven door
+      const g = subs().find((o) =>   // "should ... be collapsing outward
+        o.userData.sub === 4);       // or inward, rotating around
+      if (!g) return 'no Build[4] subgrid';             // the bottom")
+      const r = (g.userData.jref || [])
+        .find((x) => x.mc?.type === 'SmallHinge');
+      if (!r) return 'no hinge jref';
+      // Build[4]'s door IS the two slope panels: x∈[1.375,1.625] (file x=11
+      // + frame), y∈[0.125,2.375] (pos_y 6, size_y 9), tail z. The hinge
+      // axle sits at (1.125, 0.125, ·) — 0.25 m INBOARD of the panel plane:
+      // the joint line must be clamped onto the content bbox = the panel
+      // plane at its BOTTOM edge (the axle's z is inside the span), so the
+      // fin folds out/in about its bottom edge like in the game, instead of
+      // sweeping through the hull on the axle's 0.25 m lever.
+      const onEdge = Math.abs(r.pivot0.x - 1.375) < 1e-9
+        && Math.abs(r.pivot0.y - 0.125) < 1e-9
+        && r.pivot0.z < -4.875 && r.pivot0.z > -7.375;
+      const off = r.axle0.distanceTo(r.pivot0);
+      return (onEdge && off > 0.2)
+        || `pivot0=${r.pivot0.toArray().map(v => v.toFixed(3))} off=${off.toFixed(2)}`;
     });
     T('subjoint-angle', () => {        // master joint state DRIVES the subgrid (v0.157)
       const g = subs().find(o => (H.subMasterEntries().get(o.userData.sub) || [])
@@ -583,7 +596,10 @@ const POSTESTS = {
       const e = (H.subMasterEntries().get(g.userData.sub) || [])
         .find((x) => x.mc?.type === 'SmallPivot');
       const mc = e.mc;
-      const { axis, pivot } = H.subJointAxis(mc);
+      // v0.173: orbit centre is the CAPTURED joint line (content-bbox-clamped
+      // anchor, .ini axis) — g.userData.jref is the source of truth.
+      const jr = g.userData.jref.find((x) => x.mc === mc);
+      const axis = jr.axis0, pivot = jr.pivot0;
       const bq = g.quaternion.clone(), bp = g.position.clone();
       mc.data.angle = 90; H.syncSubJoints();
       const qOff = bq.clone().invert().multiply(g.quaternion);        // base⁻¹·q = base⁻¹·R(axis,90)·base

@@ -1096,18 +1096,7 @@ function buildSubgrids() {
     // about the master's pivot exactly as the joint sliders say.
     g.position.set(0, 0, 0);
     g.quaternion.identity();
-    g.userData.base = { p: g.position.clone(), q: g.quaternion.clone() };   // attach-offset pose (v0.157 joints compose on top; pivot rows + gizmo edit this)
-    // v0.172 baseline for RIGID RIDING (user: "i move the hinger, the
-    // subgrid should immediately move in unison with it"): each kinematic
-    // master's pose AT BUILD; syncSubJoints composes the master's pose
-    // DELTA from here on top of the joint chain, so dragging a hinge/pivot
-    // drags its subgrid along, as the game composes the nested subtree
-    // under the master's joint node.
-    g.userData.jref = (subMasterEntries().get(bi) || [])
-      .filter((e) => e.mc && subJointAxis(e.mc))
-      .map((e) => { const j0 = subJointAxis(e.mc); return { mc: e.mc,
-        p0: viewPos(e.mc.position), q0: viewQuat(e.mc.orientation),
-        pivot0: j0.pivot, axis0: j0.axis, slide0: j0.slide }; });
+    g.userData.base = { p: g.position.clone(), q: g.quaternion.clone() };   // attach-offset pose (v0.157 joints compose on top)
     subGroup.add(g);
     addBlockMeshes(g, c.data.blocks, new THREE.Vector3());
     for (const sc of c.data.components || []) {
@@ -1138,6 +1127,40 @@ function buildSubgrids() {
         invalidate();
       });
     }
+    // v0.173 JOINT-LINE capture (after the content exists, so the bbox is
+    // real): the subgrid rotates about its master's .ini axis direction,
+    // anchored at the point of the CONTENT's bbox nearest the axle pivot
+    // (user: the hinge-driven door should "be collapsing outward or
+    // inward, rotating around the bottom. That goes for all of them").
+    // For masters the builder mounted ON their content (XYQ/SMR: ~0.1 m)
+    // the axle pivot lies INSIDE the bbox, the clamp is the pivot itself,
+    // and this matches the game's axle composition exactly. The dolphin's
+    // five masters sit 7–25 m from the doors they drive (the builder
+    // welded a control part to the hull; the content rides its own skin)
+    // — an axle-centred rotation there sweeps a door tens of metres
+    // through the air on a huge radius ("the door rolls in and out");
+    // the game folds it at its own edge. Clamping to the bbox gives the
+    // face/edge line closest to the master.
+    const bbj = new THREE.Box3();
+    for (const b of c.data.blocks) {
+      if (b.type === 255) continue;   // occupancy mirrors sit AT the master
+      for (const s of [[0, 0, 0],
+        [(b.size_x || 0) + 1, (b.size_y || 0) + 1, (b.size_z || 0) + 1]])
+        bbj.expandByPoint(new THREE.Vector3(
+          (b.pos_x + s[0] + b.frame_x * 12 - 5.5) * 0.25,
+          (b.pos_y + s[1] + b.frame_y * 12 - 5.5) * 0.25,
+          -((b.pos_z + s[2] + b.frame_z * 12 - 5.5) * 0.25)));
+    }
+    g.userData.jref = (subMasterEntries().get(bi) || [])
+      .filter((e) => e.mc && subJointAxis(e.mc))
+      .map((e) => { const j0 = subJointAxis(e.mc);
+        const pivot0 = bbj.isEmpty() ? j0.pivot.clone() : new THREE.Vector3(
+          THREE.MathUtils.clamp(j0.pivot.x, bbj.min.x, bbj.max.x),
+          THREE.MathUtils.clamp(j0.pivot.y, bbj.min.y, bbj.max.y),
+          THREE.MathUtils.clamp(j0.pivot.z, bbj.min.z, bbj.max.z));
+        return { mc: e.mc, p0: viewPos(e.mc.position),
+          q0: viewQuat(e.mc.orientation), pivot0, axle0: j0.pivot,
+          axis0: j0.axis, slide0: j0.slide }; });
   });
   syncSubJoints();
 }
@@ -1192,11 +1215,12 @@ function syncSubJoints() {
       const r = (g.userData.jref || []).find((x) => x.mc === mc);
       const a = typeof mc.data?.angle === 'number' ? mc.data.angle : 0;
       const s = typeof mc.data?.pos === 'number' ? mc.data.pos : 0;
-      // v0.172: the JOINT term composes about the AUTHORED joint line
-      // (captured at build), then the master's rigid pose delta rides the
-      // whole thing — the game graph is M·J·R(angle)·L, so the hinge line
-      // itself moves with the master (composing about the CURRENT line
-      // first double-applies the delta).
+      // v0.172/173: the JOINT term composes about the CAPTURED joint line
+      // (axis from the .ini, anchor clamped to the content bbox = the
+      // edge line closest to the master), then the master's rigid pose
+      // delta rides the whole thing — the game graph is M·J·R(angle)·L, so
+      // the hinge line itself moves with the master (composing about the
+      // CURRENT line first double-applies the delta).
       const ax = r ? r.axis0 : axis, pv0 = r ? r.pivot0 : pivot;
       const sl = r ? r.slide0 : slide;
       if (a) {
@@ -3113,12 +3137,14 @@ function subMasterEntries() {
 }
 
 // ---------- subgrid info panel (v0.153; decoded mount v0.154) ----------
-// Pivot rotation/offset ARE the Build component's own fields: the subgrid's
-// attach transform (dev viewer composes nested content under the Build
-// matrix; dolphin doors ride at 125.9°/180° = the builder left them open).
+// Contents + Mount only (v0.173): the Build ghost fields are not editable
+// here — the subgrid's kinematics are the MASTER's pose and joint state
+// (user: the pivot sliders "should not be a separate interface").
 // The Mount section lists the DECODED master(s) via subMasterEntries()
 // (BOTH indices flattened component indices, v0.171 — see FORMAT §Subgrids) with
-// each master's stored joint state and its distance to the subgrid.
+// each master's stored joint state and its distance to the subgrid; for a
+// kinematic master the joint angle/slide sliders write the master's own
+// data verbatim (same fields its own inspector's Component data shows).
 function buildSubInspector() {
   const name = $('selname');
   const bi = selectedSub;
@@ -3178,39 +3204,15 @@ function buildSubInspector() {
     b2.appendChild(d);
   }
 
-  secHeader('Pivot offset (m)');
-  const b3 = secBody();
-  const pp = bc.position;
-  // identity quats euler-decompose to ~1e-30 float noise, and files carry
-  // −8.9e-16 zero-Z coordinates — a number box truncated mid-exponent reads
-  // as “−8.8817 m”, i.e. a FAKE real value. Show true 0 for noise.
-  const nz = (v) => Math.abs(v) < 1e-4 ? 0 : v;
-  const sp = (ax) => (v) => { bc.position[ax] = v;
-    g.userData.base.p.copy(viewPos(bc.position)); markDirty(); };
-  row(b3, 'x', pp.x - 2, pp.x + 2, 0.005, nz(pp.x), sp('x'));
-  row(b3, 'y', pp.y - 2, pp.y + 2, 0.005, nz(pp.y), sp('y'));
-  row(b3, 'z', pp.z - 2, pp.z + 2, 0.005, nz(pp.z), sp('z'));
-
-  secHeader('Pivot rotation (°)');
-  const b4 = secBody();
-  const e0 = new THREE.Euler().setFromQuaternion(viewQuat(bc.orientation), 'YXZ');
-  const dq = { p: e0.x * 180 / Math.PI, y: e0.y * 180 / Math.PI, r: e0.z * 180 / Math.PI };
-  const eT = new THREE.Euler(0, 0, 0, 'YXZ'), qT = new THREE.Quaternion();
-  const sr = (kind) => (deg) => {
-    dq[kind] = deg;
-    eT.set(dq.p * Math.PI / 180, dq.y * Math.PI / 180, dq.r * Math.PI / 180);
-    qT.setFromEuler(eT);
-    g.userData.base.q.copy(qT);
-    bc.orientation = rawFromView({ userData: {} }, qT);   // convention-aware file mirror
-    markDirty();
-  };
-  row(b4, 'pitch', -180, 180, 0.5, nz(dq.p), sr('p'));
-  row(b4, 'yaw', -180, 180, 0.5, nz(dq.y), sr('y'));
-  row(b4, 'roll', -180, 180, 0.5, nz(dq.r), sr('r'));
-  const note = document.createElement('div');
-  note.style.color = 'var(--dim)';
-  note.textContent = 'the subgrid rides its Build pivot — stored verbatim in the file (YXZ euler, game convention); save writes it back byte-true';
-  b4.appendChild(note);
+  // v0.173: the Pivot offset/rotation slider rows are REMOVED (user: "the
+  // six sliders under the hinge ... none of them are actually logical. Each
+  // of them is something that should inherently be a part of ... moving the
+  // hinge itself. It should not be a separate interface"): they edited the
+  // Build ghost pose — a construction-site field the game never displays,
+  // and the subgrid's real kinematics are the MASTER's pose (v0.172 rigid
+  // riding) and joint state. The master rows above stay: their joint angle/
+  // slide sliders write the hinge's own data, and every kinematic part also
+  // exposes them in its own inspector via Component data.
 }
 
 function buildInspector() {

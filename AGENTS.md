@@ -220,7 +220,15 @@ indistinguishable from the pushed build (2026-10-09 user report).
   axis = viewQuat(master)·axleEuler(ZYX)·e(axis), pivot =
   viewPos(master) + viewQuat·(mirror_z axle.position); group pose
   p' = pivot₀ + R(axis₀,angle)·(base.p−pivot₀) (+slide₀·pos), q' = R·base.q
-  about the BUILD-CAPTURED joint line (g.userData.jref), then the master's
+  about the BUILD-CAPTURED joint line (g.userData.jref: axis₀/slide₀ +
+  pivot₀ = the axle pivot CLAMPED onto the subgrid's non-255-block bbox =
+  the content's edge line nearest the master — v0.173, user: the hinge
+  door "should ... be collapsing outward or inward, rotating around the
+  bottom. That goes for all of them" — the dolphin's masters sit off their
+  panels (hinges 0.25 m inboard, pivots 7–16 m away), and an axle-centred
+  rotation swept the doors through the hull on that lever; a master
+  MOUNTED on its content keeps pivot₀ = the axle point exactly), then the
+  master's
   RIGID POSE DELTA rides the whole thing: p'' = p₀ + dq·(p'−p₀) + (p−p₀),
   q'' = dq·q', dq = q·q₀⁻¹ (v0.172, user: "i move the hinger, the subgrid
   should immediately move in unison with it" — the game composes the
@@ -228,18 +236,24 @@ indistinguishable from the pushed build (2026-10-09 user report).
   composes to identity, so the load display is bit-identical)
   (`syncSubJoints()`, runs from buildSubgrids + every markDirty; the panel
   Mount row exposes editable joint-angle/slide sliders that write the
-  master's data verbatim). Subgrid display pose lives in `g.userData.base`
-  {p,q} (identity at load) — the pivot rows' edit BASE, never the live
-  transform. v0.170 (user: "i can select and move or rotate a subgrid.
+  master's data verbatim; every kinematic part's OWN inspector shows the
+  same fields via Component data). Subgrid display pose lives in
+  `g.userData.base` {p,q} (identity at load, v0.173: the panel's pivot
+  offset/rotation rows are REMOVED — user: the six sliders "should not be
+  a separate interface" — so base is no longer viewer-written). v0.170
+  (user: "i can select and move or rotate a subgrid.
   that is WRONG"): the gizmo and the mode widget are COMPONENT-ONLY —
   subgrids have NO gizmo (selectSub detaches + hides the widget), so the
   ONLY manipulation path is their masters' joint state (the master parts'
-  gizmo/sliders, the panel's pivot rows). The free subgrid gizmo
+  gizmo/sliders, the panel's Mount joint sliders). The free subgrid gizmo
   (v0.159-168: applySubGizmo/subSpin writeback, proxy at the content
   centre, local-space arrows) is REMOVED — do not resurrect. Pins: selftest
   `subjoin`, dolphin/XYQ postest sub-master fixtures (flattened pairs),
-  dolphin `subjoint-angle` (sign-sensitive 90° spin about the decoded axis)
-  + `dooraxis` (SmallPivot spin axis ≈ vertical = car-door, .ini angular_y)
+  dolphin `subjoint-angle` (sign-sensitive 90° spin about the decoded axis,
+  orbit about the CAPTURED joint line),
+  dolphin `dooraxis` (SmallPivot spin axis ≈ vertical = car-door, .ini angular_y)
+  + `doorpivot` (hinge joint line clamped to the panel's bottom-edge
+  plane; non-vacuous axle offset)
   + `subfollow` (+0.5 m translate and +30° yaw spin of the hinge ride the
   subgrid in unison, sign-sensitive, exact restore),
   dolphin `subwidget` (inverted v0.170: component select attaches gizmo +
@@ -688,14 +702,19 @@ indistinguishable from the pushed build (2026-10-09 user report).
    route to the SUBGRID (front priority — the hull behind it loses; v0.169:
    the pin now also drives the SHIPPED pickRay routing — a world-visible
    first hit must reach the subgrid),
-   selectSub opens the info panel (Contents/Mount/Pivot rows) showing the
+   selectSub opens the info panel (Contents + Mount rows — v0.173: the
+   Pivot offset/rotation slider rows REMOVED, user: "should not be a
+   separate interface"; sub-info pins their ABSENCE) showing the
    DECODED master (sub-masters pin: v0.171 flattened join — the dolphin's
    5 subgrids pair 1:1 with 3 SmallPivots + 2 SmallHinges: Build[22]/[12]/
-   [6]←pivot, Build[4]/[27]←hinge), a
-   pivot edit tracks the group live (via userData.base) with the file quat
-   staying plain-numeric, and `subjoint-angle` spins that pivot's master to
+   [6]←pivot, Build[4]/[27]←hinge),
+   `subjoint-angle` spins that pivot's master to
    90°: the group must rotate EXACTLY 90° about the decoded axle axis
-   (sign-sensitive dot>0.9999), swing about the pivot point, and return;
+   (sign-sensitive dot>0.9999), swing about the CAPTURED joint line, and
+   return; v0.173 doorpivot: the hinge-driven fin's joint line must be
+   clamped onto its panel bbox (pivot0 on the panel plane at the bottom
+   edge y, axle0 0.25 m inboard — "collapsing outward or inward, rotating
+   around the bottom");
    v0.172 subfollow: translating the hinge master +0.5 m in x and
    spinning it +30° about view ŷ must ride the subgrid group rigidly in
    UNISON (pure +x ride; constant origin-distance orbit with the sign

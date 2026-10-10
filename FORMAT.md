@@ -813,10 +813,23 @@ Adventure = 3334698274).
   uniform x̂ assumption (a) swung the pivot-mounted dolphin doors DOWN &
   OUT like barn doors instead of the game's car doors (user report),
   (b) was only ever verified on x̂ joints (Aileron droop, LinearTrack).
-  `pivot = viewPos(master) + R(viewQuat) · mirror_z(axle.position)`,
+  `pivot = viewPos(master) + R(viewQuat) · mirror_z(axle.position)` = the
+  axle pivot; the ANCHOR used is `pivot₀` = that point CLAMPED onto the
+  bbox of the subgrid's non-255 blocks (buildSubgrids captures the joint
+  line `g.userData.jref` = {axis₀, pivot₀, axle₀, slide₀, p₀, q₀} per
+  kinematic master, AFTER the content exists). A master mounted ON its
+  content (XYQ/SMR: 0.1 m) has its axle pivot INSIDE that bbox ⇒ the
+  clamp is the pivot itself and the composition is exactly the game's
+  axle one; a distant control master (dolphin: hinges 0.25 m off the fin
+  PLANE, pivots 7–16 m from the flukes they drive) pivots at the content
+  bbox's nearest face/edge = the closest edge line: the dolphin's hinge
+  fins fold at their BOTTOM edge (user: "collapsing outward or inward,
+  rotating around the bottom. That goes for all of them"), NOT sweeping
+  on the axle's lever ("the door rolls in and out"). A subgrid of only
+  type-255 mirrors (parts riding the axle, dolphin subgrid 6) has an
+  empty bbox ⇒ falls back to the axle point.
   `p' = pivot₀ + R(axis₀, angle)·(base.p − pivot₀) + slide₀·pos` then
-  `q' = R(axis₀, angle) · base.q` — where (axis₀, pivot₀, slide₀) is the
-  joint line captured at BUILD (buildSubgrids `g.userData.jref`).
+  `q' = R(axis₀, angle) · base.q`.
   **v0.172 rigid riding:** the master's own pose delta then rides the
   whole composed pose: `p'' = p₀ + dq·(p' − p₀) + (p − p₀)`,
   `q'' = dq · q'` with `dq = viewQuat(orient)·viewQuat(orient₀)⁻¹` —
@@ -830,16 +843,24 @@ Adventure = 3334698274).
   Lamp/SpotLight masters have NO joints in the manifest (their `angle` is
   the light aim) ⇒ static hosts, unanimated
   (as are junction/battery/RTG-style masters: no manifest joint).
-  Pins: dolphin `subjoint-angle` (sign-sensitive), dolphin `dooraxis`
-  (SmallPivot spin axis must be ~vertical = car-door, .ini angular_y),
+  Pins: dolphin `subjoint-angle` (sign-sensitive; orbit about the captured
+  joint line), dolphin `dooraxis` (SmallPivot spin axis must be ~vertical
+  = car-door, .ini angular_y), dolphin `doorpivot` (hinge joint line
+  clamped to the panel's bottom-edge plane, non-vacuous axle offset),
   dolphin `subfollow` (translate +30°-spin unison ride, sign-sensitive,
   exact restore), 3732302108 `subjoint-pos` (LinearTrack slides along its
   linear_x axis).
 - So the subgrid info panel (click a subgrid): Contents; Mount = the DECODED
   master(s) with joint state and measured distance — a KINEMATIC master also
   gets editable joint sliders (angle °/slide m) that write the master's
-  `data` verbatim and animate the subgrid live; Pivot offset +
-  rotation rows editing the Build fields live (byte-true on save).
+  `data` verbatim and animate the subgrid live. v0.173: the Pivot offset +
+  rotation rows are REMOVED (user: "the six sliders under the hinge ...
+  none of them are actually logical. Each of them is something that should
+  inherently be a part of ... moving the hinge itself. It should not be a
+  separate interface") — the Build ghost fields are construction-site data
+  the game never displays; every kinematic part already exposes its joint
+  state in its OWN inspector (Component data), and the v0.172 rigid riding
+  makes moving the hinge itself the manipulation path.
   v0.170: subgrids have NO gizmo and no mode widget (the v0.159-168
   proxy-attached subgrid gizmo is REMOVED — "i can select and move or
   rotate a subgrid. that is WRONG"): the panel's joint sliders are the
