@@ -127,14 +127,28 @@ sRGB.
   v0.165 extends propagation to ROTATION: a mirror reflection CONJUGATES
   rotation deltas by R180° about the mirror normal x̂, so a delta
   dq=(w,x,y,z) maps to (w,x,−y,−z) — spins about x̂ (roll; the aileron
-  hinge axis) are mirror-INVARIANT, spins about ŷ/ẑ flip sign; the same
-  formula in the view and file frames. Hooks: the rotate gizmo (the
+  hinge, the wheel axle) are mirror-INVARIANT (rolling a wheel back
+  rolls its twin back), spins about ŷ/ẑ flip sign; the same formula in
+  the view and file frames. Hooks: the rotate gizmo (the
   incremental drag delta), the inspector rotation sliders (absolute
   qd·q0 writes → twin delta against a base-pose snapshot captured at the
   FIRST edit of the gesture) and the subgrid gizmo (twin subgrid group
   `base.q` + file quat, joints re-compose). Twin POSES stay independent —
   only the delta propagates (builders orient twins freely: the dolphin
-  hinges mount 90° apart).
+  hinges mount 90° apart). v0.165 SHIPPED the full quaternion conjugate
+  (w,−x,−y,−z) — the mirror-normal component flipped too, so twin
+  WHEELS rolled opposite (user report); its pins only tested ŷ/ẑ.
+  v0.166 generalises the whole subsystem to a per-pair MIRROR MASK:
+  symMaskAt classifies every axis of a same-type pair as mirrored
+  (|a+b|≈0, off-plane) or equal (|a−b|≈0; on-plane counts as equal —
+  the centreline rule per axis), requires ≥1 mirrored axis and no
+  unclassifiable axis. Left-right = mask 1 (x), so every v0.160 pair
+  keeps its exact behaviour; y (top-bottom, e.g. the mosaic truck),
+  z (nose-tail), two-axis (180° twist) and three-axis (point) pairs
+  work by the same law. Position deltas flip the mask axes; rotation
+  deltas take md = det(S)·S·dq (S = diag(−1 on mask axes)) — one axis
+  reproduces the R180-normal conjugation above, and drift
+  auto-disable = the live (5 cm) mask must equal the indexed mask.
 
 ## `blocks` — the voxel build
 

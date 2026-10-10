@@ -1215,16 +1215,19 @@ function applySubGizmo(g) {
   g.userData.base.p.copy(p); g.userData.base.q.copy(q);
   bc.position.x = p.x; bc.position.y = p.y; bc.position.z = -p.z;
   bc.orientation = rawFromView({ userData: {} }, q);
-  for (const j of tw) {
+  for (const [j, m] of tw) {
+    const sx = m & 1 ? -1 : 1, sy = m & 2 ? -1 : 1, sz = m & 4 ? -1 : 1;
     const tb = model.data.components[j];
-    tb.position.x -= d.x; tb.position.y += d.y; tb.position.z -= d.z;
+    tb.position.x += sx * d.x; tb.position.y += sy * d.y; tb.position.z += sz * d.z;
     const tg = subGroup.children.find(o => o.userData.sub === j);
-    if (tg) { tg.userData.base.p.x -= d.x; tg.userData.base.p.y += d.y;
-      tg.userData.base.p.z += d.z;
-      // v0.165: twin subgrids ride the MIRRORED spin too (M·dq·M⁻¹) and
-      // their file quaternion follows the twin's new base pose
+    if (tg) { tg.userData.base.p.x += sx * d.x; tg.userData.base.p.y += sy * d.y;
+      tg.userData.base.p.z += sz * d.z;
+      // v0.165/166: twin subgrids ride the MIRROR-TWIN spin (conjugated
+      // by the pair's mask, see symPropagateRot) and their file
+      // quaternion follows the twin's new base pose
       tg.userData.base.q.premultiply(
-        new THREE.Quaternion(-dq.x, -dq.y, -dq.z, dq.w));
+        new THREE.Quaternion(sx * sy * sz * sx * dq.x,
+          sx * sy * sz * sy * dq.y, sx * sy * sz * sz * dq.z, dq.w));
       tb.orientation = rawFromView({ userData: {} }, tg.userData.base.q); }
   }
   syncSubJoints();
@@ -1234,66 +1237,86 @@ function applySubGizmo(g) {
 // ---------- mirror-plane overlay (v0.161, user: "show mirror axes as a
 // striped barred plane that indicates the mirror direction, toggle off in
 // options") ----------
-// The symmetry plane x=0: zebra-barred translucent sheet + outline frame +
-// a ⇄ double arrow along ±x (the mirrored axis). It RESTS on the ground
-// plane (the selftest ground pin now scans it). Shown only on crafts that
-// ARE symmetric (twin pairs or mirrorAxis parts exist); View-Options
-// "mirror plane" toggles it; never pickable.
+// One zebra-barred plane per mirror axis present in the craft (v0.166):
+// the twin pairs' masks ∪ self-mirrored parts' mirrorAxis — x=0 (the
+// game's left-right symmetry: ⇄ arrows along ±x), y=0 (top-bottom, a
+// horizontal sheet) and z=0 (nose-tail) alike. Each plane RESTS on the
+// ground plane (the selftest ground pin now scans it). Shown only on
+// crafts that ARE symmetric; View-Options "mirror plane" toggles it;
+// never pickable.
 const mirrorGroup = new THREE.Group();
 scene.add(mirrorGroup);
 function buildMirrorPlane() {
   mirrorGroup.clear();
   if (!model) return;
-  if (!symTwinIndex().size
-      && !(model.data.components || []).some((c) => c.mirrorAxis)) return;
+  let mask = 0;
+  for (const ts of symTwinIndex().values())
+    for (const [, m] of ts) mask |= m;
+  for (const c of model.data.components || [])
+    if (c.mirrorAxis >= 1 && c.mirrorAxis <= 3) mask |= 1 << (c.mirrorAxis - 1);
+  if (!mask) return;
   const bb = new THREE.Box3();
   for (const g of [compGroup, blockGroup, hullGroup, subGroup]) bb.expandByObject(g);
   if (!isFinite(bb.min.x)) return;
   // v0.161 restyle (user: "mirror plane looks very weird"): the sheet RESTS
   // on the ground plane (nothing renders below ground — same rule as the
   // craft, now pinned by selftest ok14 which scans mirrorGroup too), spans
-  // the hull's z extent, and is quiet: 1.4 m zebra bars at 12 % + a slim
-  // outline frame so it reads as a PLANE, not fog. The ⇄ pair along ±x
-  // (the mirrored axis) rides at mid-height, sized to the craft.
+  // the hull's extent, and is quiet: 1.4 m zebra bars at 12 % + a slim
+  // outline frame so it reads as a PLANE, not fog. The ⇄ pair along the
+  // mirrored axis rides at mid-height, sized to the craft. For a horizontal
+  // plane (y mirror) the arrows straddle the sheet upward from it, so the
+  // down-arrow TIP lands ON the plane — never below ground.
   const y0 = ground.position.y + 0.02;
   const y1 = bb.max.y + 0.03 * Math.max(bb.max.y - y0, 1);
-  const z0 = bb.min.z - 0.02 * (bb.max.z - bb.min.z);
-  const z1 = bb.max.z + 0.02 * (bb.max.z - bb.min.z);
-  const sy = y1 - y0, sz = z1 - z0;
-  const cy = (y0 + y1) / 2, cz = (z0 + z1) / 2;
+  const ex = [bb.min.x - 0.02 * (bb.max.x - bb.min.x),
+    bb.max.x + 0.02 * (bb.max.x - bb.min.x)];
+  const ey = [y0, y1];
+  const ez = [bb.min.z - 0.02 * (bb.max.z - bb.min.z),
+    bb.max.z + 0.02 * (bb.max.z - bb.min.z)];
   const cv = document.createElement('canvas');
   cv.width = 4; cv.height = 16;
   const g2 = cv.getContext('2d');
   g2.fillStyle = '#bfe9ff';
   for (let y = 0; y < 16; y += 8) g2.fillRect(0, y, 4, 4);    // 1:2 zebra bars
-  const tex = new THREE.CanvasTexture(cv);
-  tex.magFilter = tex.minFilter = THREE.NearestFilter;
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(1, Math.max(2, Math.round(sy / 1.4)));
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(sz, sy),
-    new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.17,
-      side: THREE.DoubleSide, depthWrite: false, color: 0x63c8ff }));
-  m.rotation.y = Math.PI / 2;                 // plane normal = world x = mirror dir
-  m.position.set(0, cy, cz);
-  m.renderOrder = -2;
-  mirrorGroup.add(m);
-  const fr = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry),
-    new THREE.LineBasicMaterial({ color: 0x63c8ff, transparent: true,
-      opacity: 0.55, depthWrite: false }));
-  fr.rotation.y = Math.PI / 2;
-  fr.position.copy(m.position);
-  fr.renderOrder = -2;
-  mirrorGroup.add(fr);
-  const len = Math.min(6, Math.max(1.2, sz * 0.12));
-  for (const s of [1, -1]) {
-    const a = new THREE.ArrowHelper(new THREE.Vector3(s, 0, 0),
-      new THREE.Vector3(0, cy, cz), len, 0x8fdcff, len * 0.32, len * 0.18);
-    a.traverse((o) => {
-      if (o.isMesh || o.isLine) {
-        o.material.transparent = true; o.material.opacity = 0.9;
-      }
-    });
-    mirrorGroup.add(a);
+  for (const [k, bit] of SYM_AX) {
+    if (!(mask & bit)) continue;
+    const u = k === 'x' ? ez : ex, v = k === 'y' ? ez : ey;    // sheet axes
+    const su = u[1] - u[0], sv = v[1] - v[0];
+    const tex = new THREE.CanvasTexture(cv);
+    tex.magFilter = tex.minFilter = THREE.NearestFilter;
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(1, Math.max(2, Math.round(sv / 1.4)));
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(su, sv),
+      new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.17,
+        side: THREE.DoubleSide, depthWrite: false, color: 0x63c8ff }));
+    const cU = (u[0] + u[1]) / 2, cV = (v[0] + v[1]) / 2;
+    if (k === 'x') { m.rotation.y = Math.PI / 2; m.position.set(0, cV, cU); }
+    else if (k === 'y') { m.rotation.x = -Math.PI / 2; m.position.set(cU, 0, cV); }
+    else { m.position.set(cU, cV, 0); }
+    m.renderOrder = -2;
+    mirrorGroup.add(m);
+    const fr = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry),
+      new THREE.LineBasicMaterial({ color: 0x63c8ff, transparent: true,
+        opacity: 0.55, depthWrite: false }));
+    fr.rotation.copy(m.rotation);
+    fr.position.copy(m.position);
+    fr.renderOrder = -2;
+    mirrorGroup.add(fr);
+    const len = Math.min(6, Math.max(1.2, su * 0.12));
+    const n = new THREE.Vector3(k === 'x' ? 1 : 0, k === 'y' ? 1 : 0,
+      k === 'z' ? 1 : 0);
+    const org = m.position.clone();
+    if (k === 'y') org.y = len;                               // straddle upward
+    for (const s of [1, -1]) {
+      const a = new THREE.ArrowHelper(n.clone().multiplyScalar(s),
+        org, len, 0x8fdcff, len * 0.32, len * 0.18);
+      a.traverse((o) => {
+        if (o.isMesh || o.isLine) {
+          o.material.transparent = true; o.material.opacity = 0.9;
+        }
+      });
+      mirrorGroup.add(a);
+    }
   }
   mirrorGroup.traverse((o) => { o.raycast = () => {}; });
 }
@@ -2334,7 +2357,33 @@ function applyGizmoPosition(pW) {
 // mirrorAxis=1 (gantry craft) are self-mirrored instances — their own twin,
 // nothing to propagate. occ/type-255 mirrors follow via serialize()'s
 // per-component delta shift, exactly like the moved part itself.
-let symTwins = null;                        // compIdx -> [twinIdx...]
+// Twin pairs are load-time geometry. If a builder (or a slider edit) has
+// since moved one twin off its mirrored spot ("notable discrepancy",
+// > 5 cm), the pair AUTO-DISABLES propagation — dragging one half of a
+// broken pair must not chase a twin that is no longer its mirror. The mode
+// widget's ⇄ button shows the state (strikethrough = off) and toggles the
+// master switch (persisted `archean-sym`).
+// v0.166 (user: "define robust logic … no matter whether we have x, y or
+// z symmetry"): every pair carries a MIRROR MASK — the axes it is placed
+// mirrored on (|a+b| ≈ 0, off-plane); every remaining axis must be equal
+// (|a−b| ≈ 0), else NO symmetry (drift ⇒ mask changes ⇒ auto-disable).
+// The game's left-right symmetry is mask 1 (x mirrored, y/z equal); pairs
+// mirrored in y (top-bottom, e.g. the mosaic truck) get 2, in z 4; two
+// mirrored axes = a 180° twist, three = point symmetry — all compose.
+// An axis where both positions are ≈0 (on-plane, |a| ≤ ε) is equal AND
+// mirrored ⇒ classifies as EQUAL (a centreline part is its own twin
+// there; the v0.160 centreline skip generalises to per-axis).
+const SYM_AX = [['x', 1], ['y', 2], ['z', 4]];
+const symMaskAt = (a, b, eps) => {
+  if (!a || !b) return 0;
+  let m = 0;
+  for (const [k, bit] of SYM_AX) {
+    if (Math.abs(a[k] + b[k]) < eps && Math.abs(a[k]) > eps) m |= bit;
+    else if (Math.abs(a[k] - b[k]) > eps) return 0;
+  }
+  return m;
+};
+let symTwins = null;                    // compIdx -> [ [twinIdx, mask]... ]
 function symTwinIndex() {
   if (symTwins) return symTwins;
   symTwins = new Map();
@@ -2342,43 +2391,35 @@ function symTwinIndex() {
   (model?.data.components || []).forEach((c, i) =>
     (byType.get(c.type) || byType.set(c.type, []).get(c.type)).push(i));
   for (const idxs of byType.values())
-    for (const i of idxs) {
-      const a = model.data.components[i].position;
-      if (!a || Math.abs(a.x) < 0.011) continue;            // centreline: own twin
-      for (const j of idxs) {
-        if (j === i) continue;
-        const b = model.data.components[j].position;
-        if (b && Math.abs(a.x + b.x) < 0.011 && Math.abs(a.y - b.y) < 0.011
-            && Math.abs(a.z - b.z) < 0.011)
-          (symTwins.get(i) || symTwins.set(i, []).get(i)).push(j);
-      }
-    }
+    for (const i of idxs)
+      for (const j of idxs)
+        if (j !== i) {
+          const m = symMaskAt(model.data.components[i].position,
+            model.data.components[j].position, 0.011);
+          if (m) (symTwins.get(i) || symTwins.set(i, []).get(i)).push([j, m]);
+        }
   return symTwins;
 }
-// Twin pairs are load-time geometry. If a builder (or a slider edit) has
-// since moved one twin off its mirrored spot ("notable discrepancy",
-// > 5 cm), the pair AUTO-DISABLES propagation — dragging one half of a
-// broken pair must not chase a twin that is no longer its mirror. The mode
-// widget's ⇄ button shows the state (strikethrough = off) and toggles the
-// master switch (persisted `archean-sym`).
-const symPairAligned = (i, j) => {
-  const a = model.data.components[i].position, b = model.data.components[j].position;
-  return Math.abs(a.x + b.x) < 0.05 && Math.abs(a.y - b.y) < 0.05
-    && Math.abs(a.z - b.z) < 0.05;
-};
+const symPairAligned = (i, j) => symMaskAt(model.data.components[i].position,
+  model.data.components[j].position, 0.05);
 let symOn = localStorage.getItem('archean-sym') !== '0';     // the ⇄ widget switch
 const symAllowed = (i) => (!symOn ? []
-  : (symTwinIndex().get(i) || []).filter((j) => symPairAligned(i, j)));
+  : (symTwinIndex().get(i) || [])
+    .filter(([j, m]) => symPairAligned(i, j) === m));
 // Propagate a file-space delta (dx,dy,dz) to the given twins of comp i
-// (pre-filtered via symAllowed at the pre-move positions): mirrored in x;
-// meshes follow live, files carry the twins' own occ mirrors (the
-// save-time delta shift handles them).
+// (pre-filtered via symAllowed at the pre-move positions): the delta
+// mirrors on the pair's mask axes and stays equal on the rest (v0.166:
+// x-mirror pairs get (−dx,dy,dz) exactly as v0.160, y/z pairs flip their
+// own component); meshes follow live, files carry the twins' own occ
+// mirrors (the save-time delta shift handles them).
 function symPropagate(i, d, twins) {
   if (!model || (!d.x && !d.y && !d.z)) return;
   let sg = false;
-  for (const j of twins || []) {
+  for (const [j, m] of twins || []) {
+    const sx = m & 1 ? -d.x : d.x, sy = m & 2 ? -d.y : d.y,
+      sz = m & 4 ? -d.z : d.z;
     const q = model.data.components[j].position;
-    q.x -= d.x; q.y += d.y; q.z += d.z;
+    q.x += sx; q.y += sy; q.z += sz;
     const oj = compObjs[j];
     if (oj) {
       oj.position.set(q.x, q.y, -q.z);
@@ -2393,28 +2434,41 @@ function symPropagate(i, d, twins) {
     // mirror-component ... being subject to the correct mirrored movement")
     const g = subGroup.children.find((x) => x.userData.sub === j);
     if (g) {
-      g.userData.base.p.x -= d.x; g.userData.base.p.y += d.y;
-      g.userData.base.p.z += d.z; sg = true;
+      g.userData.base.p.x += sx; g.userData.base.p.y += sy;
+      g.userData.base.p.z += sz; sg = true;
     }
   }
   if (sg) syncSubJoints();
 }
 // v0.165 (user: "manipulation of its rotation does NOT affect the
-// counterpart"): rotation edits propagate to the twins MIRRORED — a
-// reflection conjugates a rotation by R180°-about-x̂: dq' = M·dq·M⁻¹, i.e.
-// (w,x,y,z) → (w,x,−y,−z): roll about x̂ is preserved, pitch/yaw flip
-// sign — the builder's mirror copy of a pose (left aileron +5° ⇒ right
-// −5°). The formula is identical in the view and file frames: the mirror
-// normal x̂ is shared, and the view quat's z-mirror conjugation commutes
-// through R180x̂, so every writeback (gizmo spin, rotation sliders,
-// subgrid gizmo) can premultiply the same mirrored delta. `base` (Map
-// j→their pose at edit start) makes the write ABSOLUTE — sliders are
-// absolute (self gets qd·q0), gizmo spins are per-event incremental.
+// counterpart"), generalised v0.166 (user: "rotate two wheels … all axes
+// behave correctly, exact the one that is red. If I move my wheel back,
+// the mirrored wheel moves forward … define robust logic … no matter
+// whether we have x, y or z symmetry"): a rotation edit propagates to the
+// twins as the MIRROR-TWIN MOTION — conjugate the self delta by R180°
+// about every mirror-normal axis of the pair's mask: the spin component
+// along a mirror NORMAL is PRESERVED (both wheels roll backwards
+// together), the tangential components FLIP (a steered pair yaws in
+// opposite, mirror-symmetric, directions; the aileron pair deflects
+// mirror-symmetrically). v0.165 shipped (w,−x,−y,−z) — the full
+// quaternion conjugate — which flipped the mirror-normal component too:
+// exactly the red-axis wheel bug (the pins only tested ŷ/ẑ, so x̂ was
+// never asserted). General rule: md = det(S)·S·dq with S = the pairs'
+// per-axis diag(−1 on mask axes) — one axis ⇒ (w, dx, −dy, −dz); two
+// mirrored axes compose to the R180 twist conjugation; three (point
+// symmetry) give the plain delta. The view/file frames agree because
+// every mask is a diagonal sign map, and those commute with the view
+// chain's z-conjugation. `base` (Map j→their pose at edit start) makes
+// the write ABSOLUTE — sliders are absolute (self gets qd·q0), gizmo
+// spins are per-event incremental.
 function symPropagateRot(i, dq, twins, base) {
   if (!model) return;
-  const md = new THREE.Quaternion(-dq.x, -dq.y, -dq.z, dq.w);
   let sg = false;
-  for (const j of twins || []) {
+  for (const [j, m] of twins || []) {
+    const sx = m & 1 ? -1 : 1, sy = m & 2 ? -1 : 1, sz = m & 4 ? -1 : 1;
+    const det = sx * sy * sz;
+    const md = new THREE.Quaternion(det * sx * dq.x, det * sy * dq.y,
+      det * sz * dq.z, dq.w);
     const oj = compObjs[j];
     if (oj) {
       const b = base && base.get(j);
@@ -2588,8 +2642,8 @@ function paintHighlights() {
   } else selBox.visible = false;
   // twin co-selection box: the first twin's own golden box (corpus pairs
   // are 2-element; ALL twins get the x-ray glow, component and subgrid)
-  const tRoot = selected >= 0 ? compObjs?.[tw[0]]
-    : subGroup.children.find((x) => x.userData.sub === tw[0]);
+  const tRoot = selected >= 0 ? compObjs?.[tw[0]?.[0]]
+    : subGroup.children.find((x) => x.userData.sub === tw[0]?.[0]);
   if (tRoot) {
     const tb = new THREE.Box3().setFromObject(tRoot);
     selBox2.visible = isFinite(tb.min.x);
@@ -2644,8 +2698,8 @@ function rebuildSelXray() {
   // pulsing x-ray material) — component twins and SUBGRID (Build) twins
   // alike; the twin set is re-evaluated whenever ⇄ flips or a pair drifts
   // (the twinKey staleness check in paintHighlights)
-  if (selected >= 0) for (const j of symAllowed(selected)) addTree(compObjs?.[j]);
-  if (selectedSub >= 0) for (const j of symAllowed(selectedSub))
+  if (selected >= 0) for (const [j] of symAllowed(selected)) addTree(compObjs?.[j]);
+  if (selectedSub >= 0) for (const [j] of symAllowed(selectedSub))
     addTree(subGroup.children.find((x) => x.userData.sub === j));
 }
 function clearSurges() {
@@ -2919,7 +2973,7 @@ function liveRot(comp, obj, q0) {
     // per input event would accumulate)
     if (tBase === null) {
       tBase = new Map();
-      for (const j of symAllowed(ci)) {
+      for (const [j] of symAllowed(ci)) {
         const oj = compObjs[j];
         if (oj) tBase.set(j, oj.quaternion.clone());
         const g = subGroup.children.find((x) => x.userData.sub === j);
@@ -4696,7 +4750,7 @@ const POSTESTS = {
       // clears everything.
       const ent = [...symTwinIndex().entries()].find(([, ts]) => ts.length);
       if (!ent) return 'no twin pair on ISW';
-      const [i, ts] = ent, j = ts[0];
+      const [i, ts] = ent, j = ts[0][0];
       const a0 = symOn;
       select(i, false); symOn = true; paintHighlights();
       const tset = new Set(); compObjs[j]?.traverse(o => tset.add(o));
@@ -4719,7 +4773,7 @@ const POSTESTS = {
       const ent = [...symTwinIndex().entries()].find(([i2, ts]) => ts.length
         && model.data.components[i2].type === 'Aileron');
       if (!ent) return 'no aileron twin pair';
-      const [i, ts] = ent, j = ts[0];
+      const [i, ts] = ent, j = ts[0][0];
       const oi = compObjs[i], oj = compObjs[j];
       if (!oi || !oj) return 'aileron proxies missing';
       const a0 = symOn; symOn = true;
@@ -4741,6 +4795,40 @@ const POSTESTS = {
       symOn = a0; select(-1); paintHighlights();
       return (okRot && okFile && okBack)
         || `rot=${okRot}(${dj.z.toFixed(4)}) file=${okFile} back=${okBack}`;
+    });
+    T('symrot-x', () => {         // v0.166 (user: "rotate two wheels …
+      // all axes behave correctly, exact the one that is red. If I move
+      // my wheel back, the mirrored wheel moves forward"): the spin
+      // component along the mirror NORMAL is PRESERVED — rolling one
+      // ISW SmallWheel pair member (x=±3.125) about x̂ (red) by +0.2 must
+      // roll its twin the SAME way, Rx(+0.2) (sign-sensitive; the
+      // v0.165 code flipped it), with the twin's file quaternion
+      // following; the counter-spin restores everything.
+      const ent = [...symTwinIndex().entries()].find(([i2, ts]) => ts.length
+        && model.data.components[i2].type === 'SmallWheel');
+      if (!ent) return 'no SmallWheel twin pair';
+      const [i, ts] = ent, j = ts[0][0];
+      const oi = compObjs[i], oj = compObjs[j];
+      if (!oi || !oj) return 'wheel proxies missing';
+      const a0 = symOn; symOn = true;
+      select(i, false);
+      const qi0 = oi.quaternion.clone(), qj0 = oj.quaternion.clone();
+      const qv = qi0.clone().multiply(new THREE.Quaternion()
+        .setFromAxisAngle(new THREE.Vector3(1, 0, 0), 0.2))
+        .multiply(GIZMO_Y180);
+      applyGizmoOrientation(qv);
+      const dj = oj.quaternion.clone().multiply(qj0.clone().invert());
+      const okX = dj.x > 0.0995 && dj.x < 0.1005
+        && Math.abs(dj.y) < 1e-9 && Math.abs(dj.z) < 1e-9;
+      const of = model.data.components[j].orientation;
+      const rf = rawFromView(oj, oj.quaternion);
+      const okFile = Math.abs(of.w - rf.w) < 1e-9 && Math.abs(of.x - rf.x) < 1e-9
+        && Math.abs(of.y - rf.y) < 1e-9 && Math.abs(of.z - rf.z) < 1e-9;
+      applyGizmoOrientation(qi0.clone().multiply(GIZMO_Y180));  // restore spin
+      const okBack = Math.abs(oj.quaternion.dot(qj0)) > 1 - 1e-9;
+      symOn = a0; select(-1); paintHighlights();
+      return (okX && okFile && okBack)
+        || `rot=${okX}(${dj.x.toFixed(4)}) file=${okFile} back=${okBack}`;
     });
   },
   // v0.155 aero GRID pins: the giant (1024 plates ≥ AERO_GRID_MIN) is the
@@ -4964,7 +5052,7 @@ const POSTESTS = {
       const ent = [...symTwinIndex().entries()]
         .find(([i, ts]) => ts.length && model.data.components[i].type === 'SmallHinge');
       if (!ent) return 'no SmallHinge twin pair';
-      const [i, ts] = ent, j = ts[0];
+      const [i, ts] = ent, j = ts[0][0];
       const ci = model.data.components[i], cj = model.data.components[j];
       const p0i = { ...ci.position }, p0j = { ...cj.position };
       select(i); setGizmoMode('move');
@@ -5101,9 +5189,23 @@ const POSTESTS = {
         && Math.abs(of.y - rf.y) < 1e-9 && Math.abs(of.z - rf.z) < 1e-9;
       spin(-0.3); applySubGizmo(g);
       const okBack = Math.abs(tg.userData.base.q.dot(qB0)) > 1 - 1e-9;
+      // v0.166: the RED spin (mirror-normal axis x̂) is PRESERVED: door
+      // spin Rx(+0.3) ⇒ twin Rx(+0.3) (v0.165 flipped it: the wheel bug).
+      const qB1 = tg.userData.base.q.clone();
+      g.quaternion.premultiply(new THREE.Quaternion()
+        .setFromAxisAngle(new THREE.Vector3(1, 0, 0), 0.3));
+      applySubGizmo(g);
+      const djx = tg.userData.base.q.clone().multiply(qB1.clone().invert());
+      const okX = djx.x > 0.14 && djx.x < 0.15
+        && Math.abs(djx.y) < 1e-9 && Math.abs(djx.z) < 1e-9;
+      g.quaternion.premultiply(new THREE.Quaternion()
+        .setFromAxisAngle(new THREE.Vector3(1, 0, 0), -0.3));
+      applySubGizmo(g);
+      const okBackX = Math.abs(tg.userData.base.q.dot(qB1)) > 1 - 1e-9;
       tctl.detach(); setGizmoMode('translate'); selectSub(-1); symOn = a0;
-      return (okRot && okFile && okBack)
-        || `rot=${okRot}(${dj.z.toFixed(4)}) file=${okFile} back=${okBack}`;
+      return (okRot && okFile && okBack && okX && okBackX)
+        || `rot=${okRot}(${dj.z.toFixed(4)}) file=${okFile} back=${okBack}`
+        + ` x=${okX}(${djx.x.toFixed(4)}) backX=${okBackX}`;
     });
   },
 };
@@ -5782,7 +5884,7 @@ async function runUiTest() {
   // SLIDER edits ride the mirror too (v0.162, user: "mirror is not
   // respected; I edited one wheel, it didnt do the other")
   { const ent = [...symTwinIndex().entries()].find(([, ts]) => ts.length);
-    const [si, [ti]] = ent;
+    const [si, [[ti]]] = ent;
     select(si, false);
     const sl = [...document.querySelectorAll('#inspector .row')]
       .find(r => r.querySelector('label')?.textContent === 'x')
@@ -5808,7 +5910,7 @@ async function runUiTest() {
       && model.data.components[i].type === 'Aileron');
     if (!ent) ok('symrot', 'no aileron pair on this craft');
     else {
-      const [si, [ti]] = ent;
+      const [si, [[ti]]] = ent;
       select(si, false);
       const q0 = compObjs[ti].quaternion.clone();
       const rl = [...document.querySelectorAll('#inspector .row')]
@@ -5821,8 +5923,24 @@ async function runUiTest() {
         const okR = dj.y < -0.12 && dj.y > -0.14        // sin(−7.5°) ≈ −0.1305
           && Math.abs(dj.x) < 1e-9 && Math.abs(dj.z) < 1e-9;
         setIn(rl, 0);
-        ok('symrot', okR && Math.abs(compObjs[ti].quaternion.dot(q0)) > 1 - 1e-9
-          && Math.abs(dj.y) > 0.1);
+        const q1 = compObjs[ti].quaternion.clone();
+        // v0.166: the RED slider (pitch = view x̂ = the mirror NORMAL
+        // axis) is PRESERVED on the twin (rolling one wheel back rolls
+        // its twin back — the v0.165 code flipped it).
+        const pl = [...document.querySelectorAll('#inspector .row')]
+          .find(r => r.querySelector('label')?.textContent === 'pitch')
+          ?.querySelector('input[type=range]');
+        if (!pl) ok('symrot', 'no pitch slider');
+        else {
+          setIn(pl, 15);
+          const dp = compObjs[ti].quaternion.clone().multiply(q1.clone().invert());
+          const okP = dp.x > 0.12 && dp.x < 0.14        // sin(+7.5°) ≈ +0.1305
+            && Math.abs(dp.y) < 1e-9 && Math.abs(dp.z) < 1e-9;
+          setIn(pl, 0);
+          ok('symrot', okR && okP
+            && Math.abs(compObjs[ti].quaternion.dot(q1)) > 1 - 1e-9
+            && Math.abs(dj.y) > 0.1 && Math.abs(dp.x) > 0.1);
+        }
       }
     } }
 

@@ -475,6 +475,27 @@ indistinguishable from the pushed build (2026-10-09 user report).
      delta in 3D (symPropagate writes twin g.userData.base.p +
      syncSubJoints — before, twin Builds moved in the file only). Pins:
      ISW symselect, XYQ symselect-sub.
+     v0.166 MASK GENERALISATION + RED-AXIS FIX (user: "rotate two wheels
+     that are symmetry linked, all axes behave correctly, exact the one
+     that is red. If I move my wheel back, the mirrored wheel moves
+     forward. Can you define robust logic … x, y or z symmetry?"): pairs
+     are indexed with a MIRROR MASK (symMaskAt: every axis mirrored
+     |a+b|≈0 & off-plane ∈ mask, every other axis must be equal; x/y/z,
+     two-axis twists and point symmetry all compose; on-plane axes are
+     EQUAL — the centreline rule per axis). Drift auto-disable = the live
+     5 cm mask must EQUAL the indexed mask. Position deltas flip the mask
+     axes; rotation deltas take the MIRROR-TWIN MOTION conjugation: the
+     spin component along a mirror NORMAL is PRESERVED (both wheels roll
+     backwards together), tangential spins flip (a steered pair yaws
+     mirror-symmetrically) — md = det(S)·S·dq. v0.165 SHIPPED THE FULL
+     quaternion conjugate (w,−x,−y,−z) — flipping the mirror-normal
+     component too: exactly the red-axis wheel bug; its pins only tested
+     ŷ/ẑ, so x̂ was never asserted (now: ISW symrot-x SmallWheel pair
+     Rx(+0.2)→Rx(+0.2), XYQ symrot-sub x phase, uitest symrot pitch
+     phase — all sign-sensitive). The mirror-plane overlay draws one
+     plane per mirror axis present (twin masks ∪ mirrorAxis parts); the
+     y-plane arrow pair straddles UPWARD so the down-tip lands ON the
+     plane (selftest ground=true scans mirrorGroup).
      move = translate gizmo on the same proxy, writeback is the mirror
      involution (view z-flip) minus the compGroup display anchor, occ +
      type-255 mirror cells follow via serialize()'s round(delta/CELL) shift
@@ -550,10 +571,12 @@ indistinguishable from the pushed build (2026-10-09 user report).
    toggles twin propagation + persisted strikethrough state; symslider:
    inspector x-slider edits propagate the mirrored delta to the twin and
    the reverse edit restores the pair, v0.162; symrot: the inspector
-   YAW slider (ŷ spin — mirror conjugation flips ŷ/ẑ spins, roll about
-   the mirror normal x̂ is invariant, so the pin must NOT use pitch)
-   spins the twin aileron MESH by the mirrored delta Ry(−15°)
-   (sign-sensitive) and the reverse edit restores the pair, v0.165).
+   YAW slider (ŷ spin — spins TANGENTIAL to the mirror plane flip; the
+   component along the mirror normal x̂ is PRESERVED) spins the twin
+   aileron MESH by the MIRRORED delta Ry(−15°) (sign-sensitive) and the
+   reverse edit restores the pair; v0.166 adds the PITCH phase (x̂ = the
+   mirror normal: the twin takes Rx(+15°) PRESERVED — the red-axis wheel
+   bug, slider-side), v0.165).
    Title: `UITEST PASS n=<pins> ctrls=N`
    (n counts ok() live, nothing hardcoded) /
    `UITEST FAIL <pins>`, captured errors in #out.
@@ -615,10 +638,15 @@ indistinguishable from the pushed build (2026-10-09 user report).
    frozen, and a DRIFTED pair (twin moved alone → pair no longer mirrored)
    propagates NOTHING (auto-disable). v0.165 `symrot` (ISW): spinning the
    selected aileron via the gizmo writeback path (view Rz(+0.2)) must spin
-   the twin's MESH by the MIRRORED delta Rz(−0.2) (sign-sensitive: mirror
-   conjugation flips ŷ/ẑ spins) and follow its FILE quaternion, exact
-   restore; XYQ `symrot-sub`: the same spin on a twin Build SUBGRID rides
-   its `base.q` + file quat (door pair). dolphin `mirrorplane`: the striped
+   the twin's MESH by the MIRRORED delta Rz(−0.2) (sign-sensitive: spins
+   tangential to the mirror plane flip) and follow its FILE quaternion,
+   exact restore; XYQ `symrot-sub`: the same spin on a twin Build SUBGRID
+   rides its `base.q` + file quat (door pair), and its v0.166 x-phase
+   pins the MIRROR-NORMAL rule: Rx(+0.3) ⇒ twin Rx(+0.3) PRESERVED
+   (v0.165's full-conjugate flipped it). ISW v0.166 `symrot-x`: rolling
+   the SmallWheel pair (x=±3.125) about the red axis, self Rx(+0.2) ⇒
+   twin Rx(+0.2) — same direction, sign-sensitive (user: "move my wheel
+   back, the mirrored wheel moves forward"). dolphin `mirrorplane`: the striped
    sheet + frame + ⇄ arrows build on a symmetric craft, REST on the ground
    plane, and the View-Options checkbox toggles it — selftest ground=true
    now ALSO scans mirrorGroup ("nothing renders below ground" covers
