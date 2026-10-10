@@ -600,13 +600,18 @@ const POSTESTS = {
         && Math.abs(r.pivot0.y - 0.125) < 1e-9
         && r.pivot0.z < -4.875 && r.pivot0.z > -7.375;
       const off = r.axle0.distanceTo(r.pivot0);
-      // v0.174: the fin (longest dim = y, 2.5 m) hinges along its long edge
-      // ⇒ VERTICAL axis (deployable fin staying close to the frame, yawing
-      // about its bottom edge) — NOT the x̂ drawbridge the axle pin's ŷ maps
-      // to at this mount quat ("the door rolls in and out").
-      const vert = Math.abs(r.axis0.y) > 0.99
-        && Math.hypot(r.axis0.x, r.axis0.z) < 1e-9;
-      return (onEdge && off > 0.2 && vert)
+      // v0.175 (user: "looking at the rotation of the hinge ... we can
+      // determine the precise way that it should rotate"): a SmallHinge
+      // swings its content on the PHYSICAL PIN — the .ini key axis ŷ,
+      // which this Rx(90°)-type mount quat maps to the WORLD LONGITUDINAL
+      // axis: the fin ROLLS in/out about its bottom edge — flush-folded
+      // into the hull side at +90°, deployed horizontal at −90° ("staying
+      // close to the frame of the dolphin on its bottom part"). NOT the
+      // v0.174 vertical yaw (longest-dim rule — that is the turntable
+      // pivot's rule, confirmed by the truck/gantry/fluke pins).
+      const pin = Math.abs(r.axis0.z) > 0.99
+        && Math.hypot(r.axis0.x, r.axis0.y) < 1e-9;
+      return (onEdge && off > 0.2 && pin)
         || `pivot0=${r.pivot0.toArray().map(v => v.toFixed(3))} `
           + `off=${off.toFixed(2)} axis=${r.axis0.toArray().map(v => v.toFixed(2))}`;
     });
@@ -697,6 +702,19 @@ const POSTESTS = {
         .every((e) => Math.abs(e.mc?.data?.angle - 24.3) < 0.01));
       return (a === 'SmallHinge' && b === 'SmallHinge' && ang)
         || `Build[41]=${a} Build[5]=${b}`;
+    });
+    T('xyq-dooraxis', () => {       // v0.175: edge-mounted hinges keep
+      let n = 0;                    // the LONGEST dim (±ŷ car doors) —
+      for (const g of H.subGroup.children) {   // the face-mount middle-dim
+        const rs = (g.userData.jref || [])     // branch (dolphin fin) must
+          .filter((x) => x.mc?.type === 'SmallHinge');   // NOT fire here
+        for (const r of rs) {                  // (it would give x̂)
+          if (Math.abs(r.axis0.y) < 0.99 ||
+            Math.hypot(r.axis0.x, r.axis0.z) > 1e-9) return `door axis ${r.axis0.toArray().map(v => v.toFixed(2))}`;
+          n++;
+        }
+      }
+      return n >= 2 || `pinned ${n} hinge axes`;
     });
             T('symselect-sub', () => {      // v0.164: subgrid twins co-select too —
       // selecting the XYQ door subgrid Build[41] must glow twin Build[5]'s

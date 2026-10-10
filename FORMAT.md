@@ -824,20 +824,31 @@ Adventure = 3334698274).
   PLANE, pivots 7–16 m from the flukes they drive) pivots at the content
   bbox's nearest face/edge (user: "collapsing outward or inward, rotating
   around the bottom. That goes for all of them").
-  **v0.174 axis rule:** for a PANEL subgrid (non-empty bbox) the rotation/
-  slide axis is the content's OWN longest bbox dimension, not the axle
-  key — a door always hinges along its long edge: the dolphin's tall fins
-  (longest ŷ) yaw about a VERTICAL line at their bottom edge (deployable
-  fins staying close to the frame; the v0.171 ŷ-key flipped them into x̂
-  drawbridges — "the door rolls in and out ... wrong in every single
-  tested vehicle"), the XYQ doors (longest ŷ) stay car doors, Jimmy's
-  7.5 m gantry (longest x̂) folds like a car's BACK door over its top
-  edge, the semi-truck's 3 m doors (longest ŷ) hinge vertically while the
-  0.75 m rear flaps (longest x̂) tailgate laterally, the dolphin flukes
-  (longest x̂) deflect as elevons. The .ini axle key is the PART's pin,
-  not the animation axis of content welded to it. PARTS-ONLY subgrids
-  (empty bbox — nested parts riding the axle node, dolphin fin subgrid 6,
-  gantry rails) keep the .ini key chain (v0.171).
+  **v0.174/175 axis rule:** for a PANEL subgrid (non-empty bbox) the
+  rotation/slide axis is the content's OWN longest bbox dimension, not
+  the axle key — a door always hinges along its long edge: the XYQ doors
+  (longest ŷ) are car doors, Jimmy's 7.5 m gantry (longest x̂) folds like
+  a car's BACK door over its top edge, the semi-truck's 3 m doors (longest
+  ŷ) hinge vertically while its 0.75 m rear flaps (longest x̂) tailgate
+  laterally, the dolphin flukes (longest x̂) deflect as elevons. EXCEPT a
+  SmallHinge mounted OFF THE PANEL FACE (v0.175, user: "looking at the
+  rotation of the hinge or pivot we can determine the precise way that it
+  should rotate"): when the axle pivot is offset from the clamped bbox
+  point along the panel's THIN axis (a face-mount), the swing axis is the
+  MIDDLE dimension — the dolphin's fins (0.25×2.5×1.5 m, hinge 0.25 m
+  inboard of the fin plane) roll about a LONGITUDINAL line at their bottom
+  edge: the 2.5 m top edge sweeps in x·y, flush-folded against the hull
+  side at +90°, deployed horizontal at −90° — "collapsing outward or
+  inward, rotating around the bottom", "staying close to the frame ... on
+  its bottom part". The pin axis R·ŷ (world x̂ there) sweeps the fin
+  THROUGH the hull (the v0.171/173 "door rolls in and out"), the longest
+  dim ŷ yaws it off the frame (the v0.174 "still wrong"); the middle-dim
+  roll is the only motion that keeps the root on the frame. Edge-mounted
+  hinges (offset along the SPAN: XYQ; corner: truck flaps, offset 0) keep
+  the longest dimension, which their part pins agree with. The .ini axle
+  key is the PART's pin, not the animation axis of content welded to it.
+  PARTS-ONLY subgrids (empty bbox — nested parts riding the axle node,
+  dolphin fin subgrid 6, gantry rails) keep the .ini key chain (v0.171).
   `p' = pivot₀ + R(axis₀, angle)·(base.p − pivot₀) + slide₀·pos` then
   `q' = R(axis₀, angle) · base.q`.
   **v0.172 rigid riding:** the master's own pose delta then rides the
@@ -856,13 +867,15 @@ Adventure = 3334698274).
   Pins: dolphin `subjoint-angle` (sign-sensitive; orbit about the captured
   joint line), dolphin `dooraxis` (parts-riding SmallPivot: spin axis must
   be ~vertical = car-door, .ini angular_y), dolphin `doorpivot` (hinge fin:
-  joint line clamped to the panel's bottom edge AND axis vertical = the
-  fin's long-edge hinge), dolphin `flukeaxis` (fluke panel subgrid axis =
+  joint line clamped to the panel's bottom edge AND axis = the world
+  LONGITUDINAL ẑ, the face-mount middle-dim roll — v0.175), dolphin
+  `flukeaxis` (fluke panel subgrid axis =
   x̂, its longest dimension),
   dolphin `subfollow` (translate +30°-spin unison ride, sign-sensitive,
   exact restore), 3732302108 `subjoint-pos` (LinearTrack slides along its
   CAPTURED axis) + `railaxis` (panel rail slides along its length, not the
-  axle key).
+  axle key), XYQ `xyq-dooraxis` (edge-mounted hinge doors stay ±ŷ — the
+  middle-dim face-mount branch must NOT fire there).
 - So the subgrid info panel (click a subgrid): Contents; Mount = the DECODED
   master(s) with joint state and measured distance — a KINEMATIC master also
   gets editable joint sliders (angle °/slide m) that write the master's

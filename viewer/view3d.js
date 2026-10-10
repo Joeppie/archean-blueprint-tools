@@ -1127,29 +1127,15 @@ function buildSubgrids() {
         invalidate();
       });
     }
-    // v0.173/174 JOINT-LINE capture (after the content exists, so the bbox
-    // is real). PANEL subgrids (non-empty block bbox): the hinge/pivot/
-    // track animates the content about its OWN long axis — the axis along
-    // which the panel is longest — anchored at the bbox point nearest the
-    // axle pivot (the edge line closest to the master). This unifies every
-    // in-game motion the user described (v0.174: "the door rolls in and
-    // out, when it really should ... be collapsing outward or inward,
-    // rotating around the bottom ... the door opens the way a back door
-    // would on a car ... That goes for all of them actually"): the
-    // dolphin's tall fins (longest ŷ) yaw about a VERTICAL line at their
-    // bottom edge — deployable fins staying close to the frame; the XYQ
-    // doors (longest ŷ) are car doors (pinned v0.171); Jimmy's 7.5 m
-    // gantry (longest x̂) folds like a car's BACK door about its top edge;
-    // the semi-truck's 3 m doors (longest ŷ) hinge vertically while its
-    // 0.75 m rear flaps (longest x̂) tailgate laterally; the dolphin's tail
-    // flukes (longest x̂) deflect as elevons. A door always hinges along
-    // its long edge — the .ini axle key (angular_y) is the part's own pin,
-    // NOT the animation axis of the content welded to it: taking ŷ for
-    // every panel (v0.171) fixed the XYQ doors but flipped the dolphin
-    // fins into x̂ drawbridges (v0.174: "it rotates the same wrong axis as
-    // before ... wrong in every single tested vehicle"). PARTS-ONLY
-    // subgrids (empty block bbox) ride the axle node itself: their axis
-    // stays the .ini key chain (v0.171, pinned by dooraxis/subjoint-angle).
+    // v0.173/174/175 JOINT-LINE capture (after the content exists, so the
+    // bbox is real). Every panel subgrid pivots at the bbox point nearest
+    // the axle pivot (the edge line closest to the master); the AXIS rule
+    // is in the map below (v0.175: longest bbox dimension, middle
+    // dimension for a face-mounted SmallHinge — the dolphin fin "roll").
+    // A master mounted ON its content (XYQ/SMR: ~0.1 m) has its axle pivot
+    // INSIDE that bbox ⇒ the clamp is the pivot itself. PARTS-ONLY subgrids
+    // (empty block bbox) ride the axle node itself: their axis stays the
+    // .ini key chain (v0.171, pinned by dooraxis/subjoint-angle).
     const bbj = new THREE.Box3();
     for (const b of c.data.blocks) {
       if (b.type === 255) continue;   // occupancy mirrors sit AT the master
@@ -1167,17 +1153,45 @@ function buildSubgrids() {
           q0: viewQuat(e.mc.orientation), pivot0: j0.pivot.clone(),
           axle0: j0.pivot, axis0: j0.axis, slide0: j0.slide };
         const sz = bbj.getSize(new THREE.Vector3());
-        const d = sz.x >= sz.y && sz.x >= sz.z
-          ? new THREE.Vector3(1, 0, 0)
-          : sz.y >= sz.z ? new THREE.Vector3(0, 1, 0)
-            : new THREE.Vector3(0, 0, 1);
+        const pivot0 = new THREE.Vector3(
+          THREE.MathUtils.clamp(j0.pivot.x, bbj.min.x, bbj.max.x),
+          THREE.MathUtils.clamp(j0.pivot.y, bbj.min.y, bbj.max.y),
+          THREE.MathUtils.clamp(j0.pivot.z, bbj.min.z, bbj.max.z));
+        // v0.175 panel axis (user: "looking at the rotation of the hinge
+        // or pivot we can determine the precise way that it should
+        // rotate"): the content's LONGEST bbox dimension — the v0.174-
+        // confirmed set (truck doors vertical, Jimmy's gantry back-door
+        // fold, dolphin flukes elevons, gantry rail length). EXCEPT a
+        // SmallHinge mounted OFF THE PANEL FACE (its pivot offset along
+        // the panel's THIN axis — a face-mount): the content is authored
+        // flush at angle 0, and the hinge swings it about the MIDDLE
+        // dimension — the dolphin fin's axis is world ẑ at its clamped
+        // bottom edge: the 2.5 m top edge sweeps in x·y, flush-folded
+        // against the hull side at +90°, deployed horizontal at −90°:
+        // "collapsing outward or inward, rotating around the bottom",
+        // "staying close to the frame ... on its bottom part" (the pin
+        // axis R·ŷ = world x̂ sweeps the fin THROUGH the hull — "the door
+        // rolls in and out", v0.173). Edge-mounted hinges keep the
+        // longest dimension, which their pins agree with: the XYQ doors
+        // (offset along the SPAN → ŷ car doors) and the truck's corner-
+        // mounted rear flaps (x̂ tailgate).
+        let k = sz.x >= sz.y && sz.x >= sz.z ? 0 : sz.y >= sz.z ? 1 : 2;
+        const offv = new THREE.Vector3().subVectors(j0.pivot, pivot0);
+        const thin = sz.x <= sz.y && sz.x <= sz.z ? 0
+          : sz.y <= sz.z ? 1 : 2;
+        if (e.mc.type === 'SmallHinge' && k !== thin &&
+            offv.lengthSq() > 1e-12 &&
+            Math.abs(offv.getComponent(thin)) >
+              1e-6 + offv.length() * 0.7071) {
+          const t = [sz.x, sz.y, sz.z].sort((a, b) => a - b)[1];
+          k = sz.x === t ? 0 : sz.y === t ? 1 : 2;
+        }
+        const d = new THREE.Vector3(k === 0 ? 1 : 0, k === 1 ? 1 : 0,
+          k === 2 ? 1 : 0);
+        if (j0.axis.dot(d) < -1e-6) d.negate();
         return { mc: e.mc, p0: viewPos(e.mc.position),
-          q0: viewQuat(e.mc.orientation),
-          pivot0: new THREE.Vector3(
-            THREE.MathUtils.clamp(j0.pivot.x, bbj.min.x, bbj.max.x),
-            THREE.MathUtils.clamp(j0.pivot.y, bbj.min.y, bbj.max.y),
-            THREE.MathUtils.clamp(j0.pivot.z, bbj.min.z, bbj.max.z)),
-          axle0: j0.pivot, axis0: d, slide0: d }; });
+          q0: viewQuat(e.mc.orientation), pivot0, axle0: j0.pivot,
+          axis0: d, slide0: d }; });
   });
   syncSubJoints();
 }
