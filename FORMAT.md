@@ -814,13 +814,27 @@ Adventure = 3334698274).
   OUT like barn doors instead of the game's car doors (user report),
   (b) was only ever verified on x̂ joints (Aileron droop, LinearTrack).
   `pivot = viewPos(master) + R(viewQuat) · mirror_z(axle.position)`,
-  `p' = pivot + R(axis, angle)·(base.p − pivot) + slide·pos`,
-  `q' = R(axis, angle) · base.q`. Lamp/SpotLight masters have NO joints in
-  the manifest (their `angle` is the light aim) ⇒ static hosts, unanimated
+  `p' = pivot₀ + R(axis₀, angle)·(base.p − pivot₀) + slide₀·pos` then
+  `q' = R(axis₀, angle) · base.q` — where (axis₀, pivot₀, slide₀) is the
+  joint line captured at BUILD (buildSubgrids `g.userData.jref`).
+  **v0.172 rigid riding:** the master's own pose delta then rides the
+  whole composed pose: `p'' = p₀ + dq·(p' − p₀) + (p − p₀)`,
+  `q'' = dq · q'` with `dq = viewQuat(orient)·viewQuat(orient₀)⁻¹` —
+  the game graph is `M·J·R(angle)·L`, so dragging/rotating a hinge, pivot
+  or track drags its subgrid along IMMEDIATELY (user: "i move the hinger,
+  the subgrid should immediately move in unison with it"), while a master
+  at its built pose composes to identity (bit-identical load display).
+  Twin subgrids need no separate mirror write — their twin masters move,
+  and the delta term rides them (the v0.164/165 twin-subgrid base writes
+  in symPropagate/-Rot are REMOVED: they would DOUBLE-move).
+  Lamp/SpotLight masters have NO joints in the manifest (their `angle` is
+  the light aim) ⇒ static hosts, unanimated
   (as are junction/battery/RTG-style masters: no manifest joint).
   Pins: dolphin `subjoint-angle` (sign-sensitive), dolphin `dooraxis`
   (SmallPivot spin axis must be ~vertical = car-door, .ini angular_y),
-  3732302108 `subjoint-pos` (LinearTrack slides along its linear_x axis).
+  dolphin `subfollow` (translate +30°-spin unison ride, sign-sensitive,
+  exact restore), 3732302108 `subjoint-pos` (LinearTrack slides along its
+  linear_x axis).
 - So the subgrid info panel (click a subgrid): Contents; Mount = the DECODED
   master(s) with joint state and measured distance — a KINEMATIC master also
   gets editable joint sliders (angle °/slide m) that write the master's

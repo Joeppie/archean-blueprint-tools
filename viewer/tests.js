@@ -532,6 +532,39 @@ const POSTESTS = {
         || `pivot spin axis ${axis.toArray().map((v) => v.toFixed(3))} `
           + '(want ~±y: car-door swing, .ini angular_y)';
     });
+    T('subfollow', () => {            // v0.172 (user: "i move the hinger,
+      const g = subs().find((o) =>   // the subgrid should immediately
+        (H.subMasterEntries().get(o.userData.sub) || [])
+          .some((e) => e.mc?.type === 'SmallHinge'));      // move in unison")
+      if (!g) return 'no SmallHinge-mastered subgrid';
+      const mc = (H.subMasterEntries().get(g.userData.sub) || [])
+        .find((x) => x.mc?.type === 'SmallHinge').mc;
+      const p0 = { ...mc.position }, q0 = { ...mc.orientation };
+      const x0 = g.position.clone();
+      mc.position.x += 0.5; H.syncSubJoints();
+      const d = g.position.clone().sub(x0);
+      const trans = Math.abs(d.x - 0.5) < 1e-9
+        && Math.hypot(d.y, d.z) < 1e-12;                   // pure +x ride
+      mc.position = p0; H.syncSubJoints();                 // restore, then
+      const x1 = g.position.clone();                       // isolate the spin
+      const mq = H.viewQuat(mc.orientation);
+      mq.premultiply(new THREE.Quaternion().setFromAxisAngle(
+        new THREE.Vector3(0, 1, 0), Math.PI / 6));         // +30° view yaw
+      mc.orientation = H.rawFromView({ userData: {} }, mq);
+      H.syncSubJoints();
+      const pm = H.viewPos(mc.position);                    // master origin
+      const r0 = x1.clone().sub(pm), r1 = g.position.clone().sub(pm);
+      const cy = r0.clone().cross(r1).y;                    // cross() mutates!
+      const rigid = Math.abs(r1.length() - r0.length()) < 1e-9
+        && Math.abs(r0.angleTo(r1) - Math.PI / 6) < 2e-3  // ~30° orbit (acos
+        && cy > 0;                                        // ill-conditioned;
+      //                                            exact spin pinned by back)
+      mc.position = p0; mc.orientation = q0; H.syncSubJoints();
+      const back = g.position.distanceTo(x0) < 1e-9;
+      return (trans && rigid && back)
+        || `trans=${trans} rigid=${rigid}(${r0.length().toFixed(4)}->`
+          + `${r1.length().toFixed(4)},ang=${r0.angleTo(r1).toFixed(4)},cy=${cy.toFixed(4)}) back=${back}`;
+    });
     T('sub-pivot-edit', () => {        // pivot rows move the group live + stay plain in the file
       const g = subs()[0];
       if (!g) return 'no subgrids';

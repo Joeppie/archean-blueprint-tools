@@ -1097,6 +1097,17 @@ function buildSubgrids() {
     g.position.set(0, 0, 0);
     g.quaternion.identity();
     g.userData.base = { p: g.position.clone(), q: g.quaternion.clone() };   // attach-offset pose (v0.157 joints compose on top; pivot rows + gizmo edit this)
+    // v0.172 baseline for RIGID RIDING (user: "i move the hinger, the
+    // subgrid should immediately move in unison with it"): each kinematic
+    // master's pose AT BUILD; syncSubJoints composes the master's pose
+    // DELTA from here on top of the joint chain, so dragging a hinge/pivot
+    // drags its subgrid along, as the game composes the nested subtree
+    // under the master's joint node.
+    g.userData.jref = (subMasterEntries().get(bi) || [])
+      .filter((e) => e.mc && subJointAxis(e.mc))
+      .map((e) => { const j0 = subJointAxis(e.mc); return { mc: e.mc,
+        p0: viewPos(e.mc.position), q0: viewQuat(e.mc.orientation),
+        pivot0: j0.pivot, axis0: j0.axis, slide0: j0.slide }; });
     subGroup.add(g);
     addBlockMeshes(g, c.data.blocks, new THREE.Vector3());
     for (const sc of c.data.components || []) {
@@ -1178,16 +1189,35 @@ function syncSubJoints() {
       const mc = e.mc;                                              // master obj (v0.171)
       if (!mc || !subJointAxis(mc)) continue;                       // static host
       const { axis, slide, pivot } = subJointAxis(mc);
+      const r = (g.userData.jref || []).find((x) => x.mc === mc);
       const a = typeof mc.data?.angle === 'number' ? mc.data.angle : 0;
       const s = typeof mc.data?.pos === 'number' ? mc.data.pos : 0;
+      // v0.172: the JOINT term composes about the AUTHORED joint line
+      // (captured at build), then the master's rigid pose delta rides the
+      // whole thing — the game graph is M·J·R(angle)·L, so the hinge line
+      // itself moves with the master (composing about the CURRENT line
+      // first double-applies the delta).
+      const ax = r ? r.axis0 : axis, pv0 = r ? r.pivot0 : pivot;
+      const sl = r ? r.slide0 : slide;
       if (a) {
-        g.position.sub(pivot)
-          .applyQuaternion(new THREE.Quaternion().setFromAxisAngle(axis, a * Math.PI / 180))
-          .add(pivot);
+        g.position.sub(pv0)
+          .applyQuaternion(new THREE.Quaternion().setFromAxisAngle(ax, a * Math.PI / 180))
+          .add(pv0);
         g.quaternion.premultiply(
-          new THREE.Quaternion().setFromAxisAngle(axis, a * Math.PI / 180));
+          new THREE.Quaternion().setFromAxisAngle(ax, a * Math.PI / 180));
       }
-      if (s) g.position.addScaledVector(slide, s);
+      if (s) g.position.addScaledVector(sl, s);
+      // rigid riding (user: "i move the hinger, the subgrid should
+      // immediately move in unison with it"): X' = p0 + dq·(X − p0) + (p − p0),
+      // dq = q·q0⁻¹ — the master's pose delta about its own origin.
+      // Identity while the master sits at its built pose ⇒ load-time
+      // display (mid-swing doors, tracks slid open) is bit-identical.
+      if (r) {
+        const dq = viewQuat(mc.orientation).multiply(r.q0.clone().invert());
+        g.position.sub(r.p0).applyQuaternion(dq).add(r.p0)
+          .add(viewPos(mc.position).sub(r.p0));
+        g.quaternion.premultiply(dq);
+      }
     }
   }
   invalidate();
@@ -2425,7 +2455,6 @@ const symAllowed = (i) => (!symOn ? []
 // mirrors (the save-time delta shift handles them).
 function symPropagate(i, d, twins) {
   if (!model || (!d.x && !d.y && !d.z)) return;
-  let sg = false;
   for (const [j, m] of twins || []) {
     const sx = m & 1 ? -d.x : d.x, sy = m & 2 ? -d.y : d.y,
       sz = m & 4 ? -d.z : d.z;
@@ -2437,19 +2466,11 @@ function symPropagate(i, d, twins) {
       for (const r of realMap.get(j) || []) r.position.copy(oj.position);
       syncAdapters(oj);
     }
-    // v0.164: twin SUBGRIDS (Build twins — dolphin/XYQ door pairs are the
-    // fixtures) ride along in 3D too: base.p lives in the file frame, so
-    // the same mirrored delta applies, then joints re-compose. Before this,
-    // a twin Build moved in the FILE only — the 3D twin door sat put
-    // (user: "I dont see the
-    // mirror-component ... being subject to the correct mirrored movement")
-    const g = subGroup.children.find((x) => x.userData.sub === j);
-    if (g) {
-      g.userData.base.p.x += sx; g.userData.base.p.y += sy;
-      g.userData.base.p.z += sz; sg = true;
-    }
+    // v0.172: twin SUBGRIDS need no direct write — their kinematic masters
+    // (the twin hinge/pivot) just moved above, and syncSubJoints' rigid
+    // master-delta term rides the twin group in unison (the v0.164 base.p
+    // write would DOUBLE-move it).
   }
-  if (sg) syncSubJoints();
 }
 // v0.165 (user: "manipulation of its rotation does NOT affect the
 // counterpart"), generalised v0.166 (user: "rotate two wheels … all axes
@@ -2474,7 +2495,6 @@ function symPropagate(i, d, twins) {
 // spins are per-event incremental.
 function symPropagateRot(i, dq, twins, base, piv) {
   if (!model) return;
-  let sg = false;
   for (const [j, m] of twins || []) {
     const sx = m & 1 ? -1 : 1, sy = m & 2 ? -1 : 1, sz = m & 4 ? -1 : 1;
     const det = sx * sy * sz;
@@ -2498,15 +2518,9 @@ function symPropagateRot(i, dq, twins, base, piv) {
       }
       syncAdapters(oj);
     }
-    const g = subGroup.children.find((x) => x.userData.sub === j);
-    if (g) {
-      const b = base && base.get('s' + j);
-      if (b) g.userData.base.q.copy(md).multiply(b);
-      else g.userData.base.q.premultiply(md);
-      sg = true;
-    }
+    // v0.172: twin subgrids ride their twin masters' new pose through
+    // syncSubJoints' rigid delta (the v0.165 base.q write would DOUBLE it).
   }
-  if (sg) syncSubJoints();
 }
 // apply the persisted mode WITHOUT invalidate(): module-eval order forbids
 // touching the render pipeline here; attach/paint happen on the first click.
@@ -3052,8 +3066,6 @@ function liveRot(comp, obj, q0) {
       for (const [j] of symAllowed(ci)) {
         const oj = compObjs[j];
         if (oj) tBase.set(j, oj.quaternion.clone());
-        const g = subGroup.children.find((x) => x.userData.sub === j);
-        if (g) tBase.set('s' + j, g.userData.base.q.clone());
       }
     }
     symPropagateRot(ci, qd, symAllowed(ci), tBase);

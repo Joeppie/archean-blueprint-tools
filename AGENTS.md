@@ -219,7 +219,13 @@ indistinguishable from the pushed build (2026-10-09 user report).
   about X̂, Gyroscope/Drill about Ẑ, LinearTrack slides along X̂):
   axis = viewQuat(master)·axleEuler(ZYX)·e(axis), pivot =
   viewPos(master) + viewQuat·(mirror_z axle.position); group pose
-  p' = pivot + R(axis,angle)·(base.p−pivot) (+slide·pos), q' = R·base.q
+  p' = pivot₀ + R(axis₀,angle)·(base.p−pivot₀) (+slide₀·pos), q' = R·base.q
+  about the BUILD-CAPTURED joint line (g.userData.jref), then the master's
+  RIGID POSE DELTA rides the whole thing: p'' = p₀ + dq·(p'−p₀) + (p−p₀),
+  q'' = dq·q', dq = q·q₀⁻¹ (v0.172, user: "i move the hinger, the subgrid
+  should immediately move in unison with it" — the game composes the
+  nested subtree under the master's joint node; a master at its built pose
+  composes to identity, so the load display is bit-identical)
   (`syncSubJoints()`, runs from buildSubgrids + every markDirty; the panel
   Mount row exposes editable joint-angle/slide sliders that write the
   master's data verbatim). Subgrid display pose lives in `g.userData.base`
@@ -233,7 +239,9 @@ indistinguishable from the pushed build (2026-10-09 user report).
   centre, local-space arrows) is REMOVED — do not resurrect. Pins: selftest
   `subjoin`, dolphin/XYQ postest sub-master fixtures (flattened pairs),
   dolphin `subjoint-angle` (sign-sensitive 90° spin about the decoded axis)
-  + `dooraxis` (SmallPivot spin axis ≈ vertical = car-door, .ini angular_y),
+  + `dooraxis` (SmallPivot spin axis ≈ vertical = car-door, .ini angular_y)
+  + `subfollow` (+0.5 m translate and +30° yaw spin of the hinge ride the
+  subgrid in unison, sign-sensitive, exact restore),
   dolphin `subwidget` (inverted v0.170: component select attaches gizmo +
   widget, subgrid select detaches + hides), 3732302108 `subjoint-pos`
   (LinearTrack slide ∥ its linear_x axis). See FORMAT.md §Subgrids.
@@ -520,8 +528,10 @@ indistinguishable from the pushed build (2026-10-09 user report).
      first twin gets its own golden box (selBox2, synced in
      paintHighlights) — component twins AND subgrid (Build) twins alike
      (selectSub path included); twin SUBGRID groups also ride the mirrored
-     delta in 3D (symPropagate writes twin g.userData.base.p +
-     syncSubJoints — before, twin Builds moved in the file only). Pins:
+     delta in 3D (v0.172: their twin masters move, and syncSubJoints'
+     rigid master-delta term rides the twin groups — the old symPropagate
+     base writes are REMOVED, they would DOUBLE-move; before v0.164 twin
+     Builds moved in the file only). Pins:
      ISW symselect, XYQ symselect-sub.
      v0.166 MASK GENERALISATION + RED-AXIS FIX (user: "rotate two wheels
      that are symmetry linked, all axes behave correctly, exact the one
@@ -685,7 +695,12 @@ indistinguishable from the pushed build (2026-10-09 user report).
    pivot edit tracks the group live (via userData.base) with the file quat
    staying plain-numeric, and `subjoint-angle` spins that pivot's master to
    90°: the group must rotate EXACTLY 90° about the decoded axle axis
-   (sign-sensitive dot>0.9999), swing about the pivot point, and return.
+   (sign-sensitive dot>0.9999), swing about the pivot point, and return;
+   v0.172 subfollow: translating the hinge master +0.5 m in x and
+   spinning it +30° about view ŷ must ride the subgrid group rigidly in
+   UNISON (pure +x ride; constant origin-distance orbit with the sign
+   of the cross product pinned; exact restore on both), because the
+   master-pose delta composes on top of the joint chain).
    v0.169 subgrid-UX pins: `sublist` (the by-subgrid tab lists EVERY
    subgrid as its own SUBGRID row — blocks-only ones included; the old
    nested filter returned component OBJECTS that then indexed the array
