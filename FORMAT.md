@@ -554,8 +554,15 @@ Zero-build Three.js (WebGL) inspector: `python3 -m http.server 8650` (repo root)
 - **Rotate gizmo (v0.150/v0.151) attaches to a scene-root PROXY**
   (v0.163: the proxy rides the part's VISIBLE CENTRE — bbox centre, the
   anchor of the mode widget/selection box/click — not its pivot; the MOVE
-  writeback subtracts the stored centre→origin offset `_gizOff`, the
-  quaternion writeback is pivot-agnostic; the axis-less trackball rings
+  writeback subtracts the stored centre→origin offset `_gizOff`; v0.167:
+  the ROTATION writeback ORBITS that centre — `p' = c + R(dq)·(p−c)` with
+  c = bbox centre of the VISIBLE geometry (proxy ∪ real siblings; the
+  real game meshes render offset from the part origin, e.g. the beacon
+  mast, MiniComputer 3 m off — a pivot-only spin lever-swung them, user
+  report) captured once per gesture at mouseDown; mirror twins orbit
+  their OWN centres (the mirrored self-centre), sliders keep the game's
+  pivot semantics; subgrid gizmos attach AT the joint pivot; the
+  axis-less trackball rings
   are hidden and the ring PICKERS hug the visible rings):
   TransformControls writes the attached object's quaternion raw, while parts
   must go through `applyGizmoOrientation` (dirty flag, real-model mirrors,

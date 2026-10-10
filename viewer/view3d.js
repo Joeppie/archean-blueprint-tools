@@ -1971,9 +1971,28 @@ tctl.addEventListener('mouseDown', () => {
   controls.enabled = false; hideModeBox();
   knobQ0.copy(tctl.object ? tctl.object.quaternion : gizmoProxy.quaternion);
   knobAxis = null; knobRaw = knobAcc = 0;
+  // v0.167: capture the ROTATION PIVOTS once per gesture (mouseUp clears
+  // them). The self pivot is the GIZMO CENTRE = the part's visible bbox
+  // centre (where the rings are drawn); every aligned twin gets its OWN
+  // bbox centre — the mirror twin of a spin about the self centre is a
+  // spin about the mirrored centre, and the mirrored self-centre IS the
+  // twin's centre (positions are mirrored, geometry identical/mirrored).
+  gizPivotL = null; symRotPiv.clear();
+  const go = compObjs?.[selected];
+  if (go && tctl.mode === 'rotate') {
+    scene.updateMatrixWorld(true);
+    gizPivotL = gizmoCentre(selected) ?? go.position.clone().add(_gizOff);
+    for (const [j] of symAllowed(selected)) {
+      const oj = compObjs[j];
+      if (!oj) continue;
+      const c = gizmoCentre(j);
+      if (c) symRotPiv.set(j, c);
+    }
+  }
 });
 tctl.addEventListener('mouseUp', () => {
   controls.enabled = true;
+  gizPivotL = null; symRotPiv.clear();   // pivots are per-gesture (v0.167)
   buildInspector();                    // rebases the euler sliders on the new pose
   paintHighlights();
   invalidate();
@@ -2221,11 +2240,29 @@ const _gq = new THREE.Quaternion(), _gcen = new THREE.Vector3(), _gow = new THRE
 // part. The quaternion writeback is pivot-agnostic; the MOVE writeback
 // subtracts the stored centre→origin offset, so drag deltas map exactly.
 const _gizOff = new THREE.Vector3();
+let gizPivotL = null;                  // v0.167: self rotation pivot (compGroup
+const symRotPiv = new Map();           // frame), captured at gizmo mouseDown
+// The gizmo/rotation centre = bbox centre of the VISIBLE geometry: with
+// real models on, compObjs[idx] is the hidden proxy (origin-centred box)
+// while the real game geometry renders offset from the origin (the beacon
+// mast, MiniComputer 3 m off) — pivot over the union of proxy + real
+// siblings = the part's visual centre (user: "the pivot locations dont
+// seem to be properly positioned, causing parts to rotate/orbit around
+// the wrong position"). Returned in the compGroup frame.
+function gizmoCentre (idx) {
+  const o = compObjs?.[idx];
+  if (!o) return null;
+  const bb = new THREE.Box3().setFromObject(o);
+  for (const r of realMap.get(idx) || []) bb.expandByObject(r);
+  return isFinite(bb.min.x)
+    ? bb.getCenter(new THREE.Vector3()).sub(compGroup.position) : null;
+}
 function syncGizmoPose() {
   const o = compObjs?.[selected];
   if (!o) return;
   scene.updateMatrixWorld(true);
   const bb = new THREE.Box3().setFromObject(o);
+  for (const r of realMap.get(selected) || []) bb.expandByObject(r);
   if (isFinite(bb.min.x)) gizmoProxy.position.copy(bb.getCenter(_gcen));
   else gizmoProxy.position.setFromMatrixPosition(o.matrixWorld);
   _gizOff.copy(gizmoProxy.position).sub(o.getWorldPosition(_gow));
@@ -2461,7 +2498,7 @@ function symPropagate(i, d, twins) {
 // chain's z-conjugation. `base` (Map j→their pose at edit start) makes
 // the write ABSOLUTE — sliders are absolute (self gets qd·q0), gizmo
 // spins are per-event incremental.
-function symPropagateRot(i, dq, twins, base) {
+function symPropagateRot(i, dq, twins, base, piv) {
   if (!model) return;
   let sg = false;
   for (const [j, m] of twins || []) {
@@ -2473,8 +2510,18 @@ function symPropagateRot(i, dq, twins, base) {
     if (oj) {
       const b = base && base.get(j);
       if (b) oj.quaternion.copy(md).multiply(b); else oj.quaternion.premultiply(md);
-      for (const r of realMap.get(j) || []) r.quaternion.copy(oj.quaternion);
+      // v0.167: gizmo spins orbit the twin's OWN centre (piv, captured at
+      // mouseDown); slider edits (no piv) spin about the twin's pivot,
+      // matching the self part's slider semantics.
+      const c = piv && piv.get(j);
+      if (c) oj.position.sub(c).applyQuaternion(md).add(c);
+      for (const r of realMap.get(j) || [])
+        { r.quaternion.copy(oj.quaternion); if (c) r.position.copy(oj.position); }
       model.data.components[j].orientation = rawFromView(oj, oj.quaternion);
+      if (c) {
+        const q = model.data.components[j].position;
+        q.x = oj.position.x; q.y = oj.position.y; q.z = -oj.position.z;
+      }
       syncAdapters(oj);
     }
     const g = subGroup.children.find((x) => x.userData.sub === j);
@@ -2511,11 +2558,32 @@ function applyGizmoOrientation(qW) {
   const twins = symAllowed(i);                           // v0.165 mirror twins
   const qv = qW.clone().multiply(GIZMO_Y180);             // undo decompose's sx flip
   const dq = qv.clone().multiply(o.quaternion.clone().invert());  // view delta
+  // v0.167 (user: "the pivot locations dont seem to be properly
+  // positioned, causing parts to rotate/orbit around the wrong
+  // position"): the rings are DRAWN at the part's VISIBLE CENTRE (the
+  // proxy rides the bbox centre, v0.163), so the spin must ORBIT that
+  // point — p' = c + R(dq)·(p − c) — with c captured once per gesture
+  // (mouseDown); a live fallback covers programmatic calls. Off-origin
+  // geometry (beacon mast, corner-pivoted dashboard, junction comb) no
+  // longer swings on a lever arm about the file origin. The inspector
+  // rotation SLIDERS keep the game's semantics: orientation edits spin
+  // about the part's own pivot, no orbit (they pass no pivots).
+  let c = gizPivotL;
+  if (!c) {
+    const bb = new THREE.Box3().setFromObject(o);
+    c = isFinite(bb.min.x)
+      ? bb.getCenter(new THREE.Vector3()).sub(compGroup.position)
+      : o.position.clone().add(_gizOff);
+  }
   o.quaternion.copy(qv);
-  for (const r of realMap.get(i) || []) r.quaternion.copy(qv);
+  o.position.sub(c).applyQuaternion(dq).add(c);
+  for (const r of realMap.get(i) || [])
+    { r.quaternion.copy(qv); r.position.copy(o.position); }
+  const p = model.data.components[i].position;
+  p.x = o.position.x; p.y = o.position.y; p.z = -o.position.z;
   model.data.components[i].orientation = rawFromView(o, qv);
   syncAdapters(o);
-  symPropagateRot(i, dq, twins);
+  symPropagateRot(i, dq, twins, undefined, symRotPiv);   // twins orbit too
   markDirty();
   invalidate();
 }
@@ -4813,6 +4881,16 @@ const POSTESTS = {
       const a0 = symOn; symOn = true;
       select(i, false);
       const qi0 = oi.quaternion.clone(), qj0 = oj.quaternion.clone();
+      // v0.167: capture the gesture pivots like mouseDown does (self =
+      // gizmo centre, twin = twin's own centre) and assert the twin
+      // ORBITS its centre (radius constant, not levered about its origin).
+      scene.updateMatrixWorld(true);
+      gizPivotL = new THREE.Box3().setFromObject(oi)
+        .getCenter(new THREE.Vector3()).sub(compGroup.position);
+      symRotPiv.clear();
+      symRotPiv.set(j, new THREE.Box3().setFromObject(oj)
+        .getCenter(new THREE.Vector3()).sub(compGroup.position));
+      const cj = symRotPiv.get(j), pj0 = oj.position.clone();
       const qv = qi0.clone().multiply(new THREE.Quaternion()
         .setFromAxisAngle(new THREE.Vector3(1, 0, 0), 0.2))
         .multiply(GIZMO_Y180);
@@ -4820,15 +4898,20 @@ const POSTESTS = {
       const dj = oj.quaternion.clone().multiply(qj0.clone().invert());
       const okX = dj.x > 0.0995 && dj.x < 0.1005
         && Math.abs(dj.y) < 1e-9 && Math.abs(dj.z) < 1e-9;
+      const okPiv = Math.abs(oj.position.distanceTo(cj)
+        - pj0.distanceTo(cj)) < 1e-9;
       const of = model.data.components[j].orientation;
       const rf = rawFromView(oj, oj.quaternion);
       const okFile = Math.abs(of.w - rf.w) < 1e-9 && Math.abs(of.x - rf.x) < 1e-9
         && Math.abs(of.y - rf.y) < 1e-9 && Math.abs(of.z - rf.z) < 1e-9;
       applyGizmoOrientation(qi0.clone().multiply(GIZMO_Y180));  // restore spin
-      const okBack = Math.abs(oj.quaternion.dot(qj0)) > 1 - 1e-9;
-      symOn = a0; select(-1); paintHighlights();
-      return (okX && okFile && okBack)
-        || `rot=${okX}(${dj.x.toFixed(4)}) file=${okFile} back=${okBack}`;
+      const okBack = Math.abs(oj.quaternion.dot(qj0)) > 1 - 1e-9
+        && oj.position.distanceTo(pj0) < 1e-9;
+      symOn = a0; gizPivotL = null; symRotPiv.clear();
+      select(-1); paintHighlights();
+      return (okX && okFile && okBack && okPiv)
+        || `rot=${okX}(${dj.x.toFixed(4)}) file=${okFile} back=${okBack}`
+        + ` piv=${okPiv}`;
     });
   },
   // v0.155 aero GRID pins: the giant (1024 plates ≥ AERO_GRID_MIN) is the
@@ -5941,6 +6024,59 @@ async function runUiTest() {
             && Math.abs(compObjs[ti].quaternion.dot(q1)) > 1 - 1e-9
             && Math.abs(dj.y) > 0.1 && Math.abs(dp.x) > 0.1);
         }
+      }
+    } }
+
+  // v0.167 (user: "the pivot locations dont seem to be properly
+  // positioned, causing parts to rotate/orbit around the wrong
+  // position"): with REAL models on, the game geometry renders offset
+  // from the part origin (Beacon mast, MiniComputer geometry 3 m off) —
+  // the gizmo pivot is now the VISIBLE geometry's centre (proxy ∪ real
+  // bbox), and a gizmo spin must ORBIT that centre: the part origin
+  // keeps a constant distance from it (the old pure-origin bug left
+  // the position frozen while the geometry swung on a lever arm).
+  { const bi = model.data.components.findIndex(c => c.type === 'Beacon');
+    const r0 = realModelsOn;
+    if (bi < 0) ok('pivotreal', 'no Beacon on this craft');
+    else {
+      setRealModels(true);
+      const loaded = await settle(() => (realMap.get(bi) || []).length > 0
+        && (() => { const b = new THREE.Box3();
+          for (const g of realMap.get(bi) || []) b.expandByObject(g);
+          return isFinite(b.min.x)
+            && b.getSize(new THREE.Vector3()).lengthSq() > 0.01; })());
+      if (!loaded) ok('pivotreal', 'real Beacon geometry never loaded');
+      else {
+        select(bi, false);
+        scene.updateMatrixWorld(true);
+        const o = compObjs[bi];
+        const c = gizmoCentre(bi);
+        const off = c.clone().sub(o.position).length();
+        gizPivotL = c.clone(); symRotPiv.clear();
+        const q0 = o.quaternion.clone(), p0 = o.position.clone();
+        const qv1 = new THREE.Quaternion()
+          .setFromAxisAngle(new THREE.Vector3(1, 0, 0), 0.4)
+          .multiply(q0).multiply(GIZMO_Y180);
+        applyGizmoOrientation(qv1);
+        const dq = o.quaternion.clone().multiply(q0.clone().invert());
+        const okQ = Math.abs(dq.x) > 0.1 && Math.abs(dq.y) < 1e-9
+          && Math.abs(dq.z) < 1e-9;
+        const okR = Math.abs(o.position.distanceTo(c) - p0.distanceTo(c)) < 1e-9
+          && p0.distanceTo(o.position) > 0.3 * off;   // a real lever swing
+        const pf = model.data.components[bi].position;
+        const okF = Math.abs(pf.x - o.position.x) < 1e-12
+          && Math.abs(pf.y - o.position.y) < 1e-12
+          && Math.abs(pf.z + o.position.z) < 1e-12;
+        const qv2 = new THREE.Quaternion()
+          .setFromAxisAngle(new THREE.Vector3(1, 0, 0), -0.4)
+          .multiply(o.quaternion.clone()).multiply(GIZMO_Y180);
+        applyGizmoOrientation(qv2);
+        const okBack = p0.distanceTo(o.position) < 1e-9
+          && Math.abs(o.quaternion.dot(q0)) > 1 - 1e-9;
+        gizPivotL = null; symRotPiv.clear();
+        select(-1); paintHighlights(); setRealModels(r0);
+        ok('pivotreal', (off > 0.15 && okQ && okR && okF && okBack)
+          || `off=${off.toFixed(2)} Q=${okQ} r=${okR} file=${okF} back=${okBack}`);
       }
     } }
 

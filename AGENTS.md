@@ -410,7 +410,18 @@ indistinguishable from the pushed build (2026-10-09 user report).
      shrunk to a 0.16 sphere (trackball = centre drag only). (d) the gizmo
      ATTACHES AT THE PART'S VISIBLE CENTRE (bbox centre — the anchor of
      the mode widget/selection box/click; _gizOff centre→origin subtracted
-     in applyGizmoPosition; quaternion writeback is pivot-agnostic). The
+     in applyGizmoPosition; v0.167: the quaternion writeback is NOT
+     pivot-agnostic — a gizmo spin ORBITS the gizmo centre, p' = c +
+     R(dq)·(p−c), c = bbox centre of the VISIBLE geometry (proxy ∪ real
+     siblings, gizmoCentre; captured once per gesture at mouseDown) so
+     off-origin real geometry (beacon mast, MiniComputer 3 m off) spins
+     IN PLACE at the rings instead of lever-swings about the file origin
+     (user: "the pivot locations dont seem to be properly positioned,
+     causing parts to rotate/orbit around the wrong position"); mirror
+     twins orbit their OWN centres (symRotPiv, captured at the same
+     mouseDown — the mirrored self-centre IS the twin centre); sliders
+     keep the game's pivot semantics (orientation about the part origin,
+     no orbit); subgrid gizmos attach AT the joint pivot — unchanged). The
      gizmohover pin drives the REAL pointer path (synthetic canvas
      pointermove): ring hover picks its own ring (axis='Z'), TGC's RAW
      update flashes yellow, the SHIPPED chain clears it in-frame, the
@@ -576,7 +587,13 @@ indistinguishable from the pushed build (2026-10-09 user report).
    aileron MESH by the MIRRORED delta Ry(−15°) (sign-sensitive) and the
    reverse edit restores the pair; v0.166 adds the PITCH phase (x̂ = the
    mirror normal: the twin takes Rx(+15°) PRESERVED — the red-axis wheel
-   bug, slider-side), v0.165).
+   bug, slider-side), v0.165); pivotreal (v0.167, user: "the pivot
+   locations dont seem to be properly positioned, causing parts to
+   rotate/orbit around the wrong position"): real models ON, real Beacon
+   geometry loaded (off-origin > 0.15 m asserted), a gizmo spin about
+   x̂ keeps the part origin at a CONSTANT distance from the visible
+   geometry's centre (proxy ∪ real bbox = the gizmo pivot) with the
+   file position following, and the counter-spin restores exactly.
    Title: `UITEST PASS n=<pins> ctrls=N`
    (n counts ok() live, nothing hardcoded) /
    `UITEST FAIL <pins>`, captured errors in #out.
@@ -646,7 +663,10 @@ indistinguishable from the pushed build (2026-10-09 user report).
    (v0.165's full-conjugate flipped it). ISW v0.166 `symrot-x`: rolling
    the SmallWheel pair (x=±3.125) about the red axis, self Rx(+0.2) ⇒
    twin Rx(+0.2) — same direction, sign-sensitive (user: "move my wheel
-   back, the mirrored wheel moves forward"). dolphin `mirrorplane`: the striped
+   back, the mirrored wheel moves forward"); its v0.167 phase captures
+   the mouseDown pivots (self gizmo centre, twin its own centre) and
+   pins the twin's orbit: constant twin-origin distance to its centre
+   plus exact restore. dolphin `mirrorplane`: the striped
    sheet + frame + ⇄ arrows build on a symmetric craft, REST on the ground
    plane, and the View-Options checkbox toggles it — selftest ground=true
    now ALSO scans mirrorGroup ("nothing renders below ground" covers
