@@ -43,7 +43,7 @@ tests/run_tests.sh                      # full headless suite (python3 + chromiu
 python3 -m http.server 8650             # manual serving (repo root)
 # viewer:   http://127.0.0.1:8650/viewer/index.html
 # selftest: http://127.0.0.1:8650/viewer/index.html?selftest  (tab title: SELFTEST PASS)
-# gizmatest: viewer/index.html?gizmatest (GIZMATEST PASS n=17; &shot=1|2|3 = WYSIWYG screenshot states)
+# gizmatest: viewer/index.html?gizmatest (GIZMATEST PASS n=18; &shot=1|2|3 = WYSIWYG screenshot states)
 # regtest:  http://127.0.0.1:8650/regtest/regtest.html         (page ends 'REGTEST: PASS')
 # other craft: viewer/index.html?open=../testdata/<id>/blueprint.json
 # perf probe: viewer/index.html?perf → tab title: PERF fps=… draw=<draw-calls> …
@@ -365,7 +365,7 @@ indistinguishable from the pushed build (2026-10-09 user report).
      as seen (user WYSIWYG rule); scene-root proxy, writeback qv = P·Ry(π)
      (THREE decompose absorbs the negative scale by negating sx). `gizmo=
      true` pins the writeback round-trip; `?gizmatest` (synthetic single-
-     seat blueprint, camera facing the pilot, n=17 + &shot=1|2|3 visual
+     seat blueprint, camera facing the pilot, n=18 + &shot=1|2|3 visual
      states) pins the order algebra, the LIVE pose, and v0.156 KNOB
      CONTINUITY (`gizmoUnwrap`): TransformControls reports ring drags as a
      raw atan2 angle, so a knob sweep past 180° POPS back toward the start
@@ -389,7 +389,32 @@ indistinguishable from the pushed build (2026-10-09 user report).
      axis's VISIBLE rings (thickable = opacity ≥ 0.2; fattening the 0.15
      pick toruses would shrink the raycast area); NO opacity forcing — the
      active ring's colours stay theirs. The gizmostyle pin simulates TGC's
-     exact shared-material write and asserts the restore.
+     exact shared-material write and asserts the restore. v0.163 FULL
+     ROOT CAUSE (user: "the WRONG axis rotater becomes yellow and thick
+     KEEP THE COLOR … large yellow circle, dont know which angle … then I
+     select it is in a different spot"): (a) the trackball PICK torus
+     (r 0.75 tube 0.1) is the nearest raycast hit for every screen point
+     within 0.85 of the gizmo → EVERY ring hover set axis='E' → the yellow
+     E ring blazed at opacity 1 + fattened, the intended rings never did;
+     the restore ran in paintHighlights BEFORE the render, but Transform-
+     Controls re-applies its flash inside the GIZMO'S OWN updateMatrixWorld
+     (every rendered frame) — so styleGizmo is CHAINED onto the gizmo's
+     updateMatrixWorld (original first, restore+fat-swap after, in the same
+     pass, before anything draws). (b) the axis-less visible trackball
+     rings E (yellow 25%) + XYZE (grey) are hidden (trackHide, material-
+     guarded on opacity ≥ 0.2 so matInvisible's lazy _opacity cache is not
+     poisoned). (c) the ring PICKERS (r0.5 tube0.1 → band 0.40..0.60) sit
+     OUTSIDE the visible rings (r 0.40 = the band's grazing inner edge):
+     reshaped to hug them (r 0.42 tube 0.07) so the fat ring lands ON the
+     hovered ring ("does not show up where the actual one is"); E pick
+     shrunk to a 0.16 sphere (trackball = centre drag only). (d) the gizmo
+     ATTACHES AT THE PART'S VISIBLE CENTRE (bbox centre — the anchor of
+     the mode widget/selection box/click; _gizOff centre→origin subtracted
+     in applyGizmoPosition; quaternion writeback is pivot-agnostic). The
+     gizmohover pin drives the REAL pointer path (synthetic canvas
+     pointermove): ring hover picks its own ring (axis='Z'), TGC's RAW
+     update flashes yellow, the SHIPPED chain clears it in-frame, the
+     aimed ring fattens, E/XYZE stay hidden, proxy at centre.
      The selection is boxed by a FAT 3.5px GOLDEN LineSegments2 outline,
      EXPANDED 0.07 m off the part, PULSING with the x-ray glow (outline=
      true: 12 segments on select, hidden on none; Box3Helper's 1px lines
@@ -508,7 +533,7 @@ indistinguishable from the pushed build (2026-10-09 user report).
    `&shot=1|2|3` leaves
    the scene at
    before/+pitch90/+pitch90+roll90 for headless eyeball (runner saves
-   gizmo1..3.png). Title: `GIZMATEST PASS n=17`.
+   gizmo1..3.png). Title: `GIZMATEST PASS n=18`.
 2c. `?postest`: placement fixtures keyed per craft (the POSTESTS table in
    view3d.js — the sanctioned exception to "no per-craft constants": fixtures
    probe the RENDERED scene where generic checks cannot see a pose bug).
@@ -589,6 +614,16 @@ indistinguishable from the pushed build (2026-10-09 user report).
   `document.title` / `#out` for `--dump-dom`.
 
 ## Backlog
+- **Ring-drag rotation continuity (user-requested, v0.163+):** dragging a
+  rotate ring must reference the UPDATED/ROTATED pose continuously, so a
+  multi-grip sweep (grab ring, drag, release, re-grab) keeps rotating the
+  part smoothly wherever it currently is; the accumulated angle must
+  FLIP-OVER AND MODULO — raw per-event atan2 wraps unwrapped into a
+  continuous spin (gizmoUnwrap) and full turns folded to the equivalent
+  pose, never written as multiple-rotation noise. mouseDown already
+  rebases knobQ0 to the live pose; future work: verify multi-grip sweeps
+  end-to-end (pin), check the ring's drawn plane follows the live pose
+  during re-grip, and confirm ±π/2π boundary drags stay continuous.
 - **Git attribution (user-requested, do soon):** commits are authored as
   `joep <pseudonymous-local-email>`, so GitHub does NOT link them to the
   Joeppie account. Fix: set the repo identity to the GitHub-linked

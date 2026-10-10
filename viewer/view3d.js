@@ -1973,6 +1973,40 @@ tctl.getHelper().traverse(o => {
     // 0.15 (v0.162 probe) — thickening THOSE would shrink the raycast
     // hit area (fat geometry replaces the 0.1-tube pick torus)
     o.userData.thickable = o.material.opacity >= 0.2;
+    // v0.163 (user: "a large yellow circle around it that I dont know
+    // which angle it is"): TGC's axis-less visible TRACKBALL rings —
+    // 'E' (full yellow circle at 25%) + 'XYZE' (grey). Hide the visuals
+    // (styleGizmo forces opacity 0 every frame); the pick meshes stay.
+    // Guard on opacity >= 0.2 so the E PICK torus (matInvisible 0.15,
+    // shared across all picks) is never touched — TGC lazily caches
+    // matInvisible._opacity from its live opacity on its FIRST
+    // updateMatrixWorld, and pre-zeroing it poisons that cache.
+    if ((o.name === 'E' || o.name === 'XYZE') && o.material.opacity >= 0.2)
+      o.userData.trackHide = true;
+    // THE root cause of the v0.162 "the WRONG axis rotater becomes yellow
+    // and thick": the trackball PICK torus (radius 0.75, tube 0.1) is the
+    // closest raycast hit for EVERY screen point inside 0.85 of the
+    // gizmo, so hovering any ring sets axis='E' — the E ring blazed
+    // yellow (opacity 1) + fattened, and the intended rings never did.
+    // Shrink it to a fingertip sphere: ring hovers pick the rings,
+    // centre hovers keep the trackball.
+    if (o.name === 'E' && g0.type === 'TorusGeometry' && g0.parameters.tube > 0.05) {
+      o.geometry.dispose();
+      o.geometry = new THREE.SphereGeometry(0.16, 12, 8);
+    }
+    // v0.163 (user: "the thicker hover handle does not show up where the
+    // actual one is"): the rotate PICKERS are toruses r0.5 tube 0.1 —
+    // band 0.40..0.60, i.e. the VISIBLE rings (r 0.40) sit exactly on the
+    // band's inner boundary. Hovering the ring you see grazes/misses its
+    // own picker, and at ring crossings the nearest picker tube is often
+    // the OTHER axis's — so the fat swap landed where the raycast hit,
+    // not where the hovered ring is. Reshape the pickers to hug the
+    // visible rings (band 0.35..0.49 around r0.40).
+    if (['X', 'Y', 'Z'].includes(o.name) && g0.type === 'TorusGeometry'
+        && g0.parameters.radius > 0.45 && o.material.opacity < 0.2) {
+      o.geometry.dispose();
+      o.geometry = new THREE.TorusGeometry(0.42, 0.07, 8, 48);
+    }
     o.userData.ringFat = g0.type === 'TorusGeometry'
       ? new THREE.TorusGeometry(g0.parameters.radius, 0.035, 8, 64, g0.parameters.arc)
       : new THREE.RingGeometry(0.28, 0.36, 64);
@@ -1993,6 +2027,7 @@ function styleGizmo() {
     if (!m.isMesh || !m.material) return;
     if (m.material._color) m.material.color.copy(m.material._color);
     if (m.material._opacity !== undefined) m.material.opacity = m.material._opacity;
+    if (m.userData.trackHide) m.material.opacity = 0;    // axis-less rings stay hidden
   });
   for (const m of G.gizmo.rotate.children)
     if (m.userData.thickable)
@@ -2001,12 +2036,33 @@ function styleGizmo() {
 tctl.addEventListener('change', () => invalidate());   // hover repaints the style
 // (styleGizmo + the hover invalidation listener live with the ring-style
 // block above)
-const _gq = new THREE.Quaternion();
+// THE reason v0.162's restore did not reach the screen: TransformControls
+// applies its hover/drag yellow flash inside the GIZMO'S OWN
+// updateMatrixWorld (runs on EVERY scene matrix update, i.e. every render)
+// — paintHighlights' restore runs BEFORE that write in the frame, so the
+// flash always drew, and the suite (which simulated the material writes
+// then restored) stayed blind. Chain styleGizmo onto the gizmo's
+// updateMatrixWorld: the restore + fat-swap now runs immediately AFTER
+// TGC writes, in the same pass, before anything is drawn.
+const _tgz = tctl.getHelper().children.find(o => o.isTransformControlsGizmo);
+const _tgzUpd = Object.getPrototypeOf(_tgz).updateMatrixWorld;
+_tgz.updateMatrixWorld = function (force) { _tgzUpd.call(this, force); styleGizmo(); };
+const _gq = new THREE.Quaternion(), _gcen = new THREE.Vector3(), _gow = new THREE.Vector3();
+// v0.163 (user: "And then I select it is in a different spot"): the gizmo
+// rides the part's VISIBLE CENTRE (bbox centre — the same anchor the mode
+// widget, selection box and click point use), not its pivot: parts like
+// dashboards pivot at a corner, so a pivot-placed gizmo lands off the
+// part. The quaternion writeback is pivot-agnostic; the MOVE writeback
+// subtracts the stored centre→origin offset, so drag deltas map exactly.
+const _gizOff = new THREE.Vector3();
 function syncGizmoPose() {
   const o = compObjs?.[selected];
   if (!o) return;
   scene.updateMatrixWorld(true);
-  gizmoProxy.position.setFromMatrixPosition(o.matrixWorld);
+  const bb = new THREE.Box3().setFromObject(o);
+  if (isFinite(bb.min.x)) gizmoProxy.position.copy(bb.getCenter(_gcen));
+  else gizmoProxy.position.setFromMatrixPosition(o.matrixWorld);
+  _gizOff.copy(gizmoProxy.position).sub(o.getWorldPosition(_gow));
   if (!tctl.dragging) gizmoProxy.quaternion.copy(o.getWorldQuaternion(_gq));
 }
 function syncGizmo() {
@@ -2112,7 +2168,7 @@ function setGizmoMode(m) {
 function applyGizmoPosition(pW) {
   const i = selected, o = compObjs?.[i];
   if (!o) return;
-  o.position.copy(pW).sub(compGroup.position);
+  o.position.copy(pW).sub(compGroup.position).sub(_gizOff);   // centre-anchored (v0.163)
   const p = model.data.components[i].position;
   const d = { x: o.position.x - p.x, y: o.position.y - p.y, z: -o.position.z - p.z };
   const tw = symAllowed(i);                 // twins aligned at the PRE-MOVE spots
@@ -4619,7 +4675,8 @@ const POSTESTS = {
       select(i); setGizmoMode('move');
       const o = compObjs[i];
       o.position.set(o.position.x + 0.25, o.position.y, o.position.z);
-      applyGizmoPosition(o.position.clone().add(compGroup.position));
+      // pW = proxy world pos under CENTRE attachment = part world + offset (v0.163)
+      applyGizmoPosition(o.position.clone().add(compGroup.position).add(_gizOff));
       const d = { x: ci.position.x - p0i.x, y: ci.position.y - p0i.y, z: ci.position.z - p0i.z };
       const dj = { x: cj.position.x - p0j.x, y: cj.position.y - p0j.y, z: cj.position.z - p0j.z };
       const okm = Math.abs(d.x - 0.25) < 1e-9 && Math.abs(dj.x + 0.25) < 1e-9
@@ -5005,12 +5062,73 @@ async function runGizmoTest() {
         paintHighlights();
         noFlash = hit.material.opacity === hit.material._opacity
           && hit.material.color.getHex() !== 0xffff00
-          && (!trk || trk.material.opacity === trk.material._opacity);
+          && (!trk || trk.material.opacity
+               === (trk.userData.trackHide ? 0 : trk.material._opacity));
       }
       tctl.axis = null; paintHighlights();
       const backThin = x.geometry === x.userData.ringThin;
-      ok('gizmostyle', (fatX && thinY && gold && backThin && noFlash === true)
-        || `fatX=${fatX} thinY=${thinY} noYellow=${gold} back=${backThin} flash=${noFlash}`); }
+      // v0.163: the axis-less trackball rings (E/XYZE) stay hidden
+      const trackHid = G.gizmo.rotate.children
+        .filter(m => m.userData.trackHide)
+        .every(m => m.material.opacity === 0);
+      ok('gizmostyle', (fatX && thinY && gold && backThin && noFlash === true
+                         && trackHid)
+        || `fatX=${fatX} thinY=${thinY} noYellow=${gold} back=${backThin}`
+        + ` flash=${noFlash} track=${trackHid}`); }
+
+    // ---- B4. REAL hover path (v0.163, user: "when I hover over the blue
+    // axes it lights up yellow WRONG; a large yellow circle around it that
+    // I dont know which angle it is; and then I select, it is in a
+    // different spot"): a synthetic canvas pointermove drives TGC's own
+    // pointerHover (picker raycast). Pinned: (1) the ring's PICKER wins
+    // (axis='Z', not the trackball's 'E' — the v0.162 bug: the E pick
+    // torus r0.75 t0.1 occluded every ring), (2) hover dispatches
+    // 'change' (invalidate), (3) TGC's RAW updateMatrixWorld flashes the
+    // hovered axis's handles yellow — and the SHIPPED chain (our override:
+    // TGC update → styleGizmo restore) clears it in the same pass, before
+    // the frame draws, (4) the intended ring fattens, (5) the axis-less
+    // E/XYZE visible rings stay hidden, (6) the gizmo sits at the part's
+    // bbox CENTRE (the 'different spot' complaint).
+    { const cv = renderer.domElement, rect = cv.getBoundingClientRect();
+      setGizmoMode('rotate'); syncGizmo();
+      const atCentre = gizmoProxy.position.distanceTo(
+        new THREE.Box3().setFromObject(compObjs[0]).getCenter(new THREE.Vector3()))
+        < 1e-6;
+      const G2 = tctl.getHelper().children.find(o => o.isTransformControlsGizmo);
+      const scanY = () => { let y = false;
+        tctl.getHelper().traverse(m => {
+          if (m.isMesh && m.material._color && m.material._color.getHex() !== 0xffff00
+              && m.material.color.getHex() === 0xffff00) y = true; });
+        return y; };
+      // aim ON THE VISIBLE RING'S CENTRELINE (r 0.40 = the ring the user
+      // hovers): the reshaped Z picker (r0.42 tube0.07) must catch it —
+      // the v0.162 pickers (r0.5 tube0.1) made this exact hover a grazing
+      // hit → the fat ring landed elsewhere (user: "does not show up
+      // where the actual one is"). E sphere 0.16 / XYZE 0.25 miss at 0.40.
+      const p = gizmoProxy.localToWorld(new THREE.Vector3(0, 0.4, 0));
+      scene.updateMatrixWorld(true);
+      p.project(camera);
+      needsRender = false;
+      cv.dispatchEvent(new PointerEvent('pointermove', {
+        pointerId: 1, pointerType: 'mouse', bubbles: true,
+        clientX: rect.left + (p.x + 1) / 2 * rect.width,
+        clientY: rect.top - (p.y - 1) / 2 * rect.height }));
+      const ringPicked = tctl.axis === 'Z';
+      const woke = needsRender === true;
+      Object.getPrototypeOf(G2).updateMatrixWorld.call(G2, true);  // RAW TGC flash
+      const rawYellow = scanY();
+      scene.updateMatrixWorld(true);                               // shipped chain
+      const cleared = !scanY();
+      const arc = G2.gizmo.rotate.children.find(m => m.isMesh && m.name === 'Z'
+        && m.userData.thickable);
+      const fat = arc.geometry === arc.userData.ringFat;
+      const track = G2.gizmo.rotate.children.filter(m => m.userData.trackHide)
+        .every(m => m.material.opacity === 0);
+      ok('gizmohover', (atCentre && ringPicked && woke && rawYellow && cleared
+        && fat && track)
+        || `centre=${atCentre} axis=${tctl.axis} woke=${woke} raw=${rawYellow}`
+        + ` cleared=${cleared} fat=${fat} track=${track}`);
+      tctl.axis = null; scene.updateMatrixWorld(true); }
 
     // ---- C. demo state for screenshots (before / +pitch / +pitch+roll) ----
     setModel(seatBp(), 'gizmatest seat');
@@ -5291,7 +5409,8 @@ async function runUiTest() {
     gizmoProxy.position.x += 0.5;
     tctl.dispatchEvent({ type: 'objectChange' });
     const moved = Math.abs(model.data.components[si].position.x - x0 - 0.5) < 1e-6
-      && Math.abs(obj.position.x - (gizmoProxy.position.x - compGroup.position.x)) < 1e-6
+      && Math.abs(obj.position.x - (gizmoProxy.position.x - compGroup.position.x
+                                   - _gizOff.x)) < 1e-6      // centre-anchored (v0.163)
       && (realMap.get(si) || []).every(r => Math.abs(r.position.x - obj.position.x) < 1e-9);
     gizmoProxy.position.x -= 0.5;              // undo through the same path
     tctl.dispatchEvent({ type: 'objectChange' });

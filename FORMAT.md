@@ -519,7 +519,12 @@ Zero-build Three.js (WebGL) inspector: `python3 -m http.server 8650` (repo root)
   craft (its ISW dashboards/battery lean); we are game-true for both.
   Selftest `mural=true` pins the legacy side. `viewQuat`/`rawFromView`
   switch on `LEGACY_Q` (set in `setModel`); saved files stay byte-exact.
-- **Rotate gizmo (v0.150/v0.151) attaches to a scene-root PROXY**:
+- **Rotate gizmo (v0.150/v0.151) attaches to a scene-root PROXY**
+  (v0.163: the proxy rides the part's VISIBLE CENTRE — bbox centre, the
+  anchor of the mode widget/selection box/click — not its pivot; the MOVE
+  writeback subtracts the stored centre→origin offset `_gizOff`, the
+  quaternion writeback is pivot-agnostic; the axis-less trackball rings
+  are hidden and the ring PICKERS hug the visible rings):
   TransformControls writes the attached object's quaternion raw, while parts
   must go through `applyGizmoOrientation` (dirty flag, real-model mirrors,
   `syncAdapters`, then `rawFromView` for the file quaternion). Component
