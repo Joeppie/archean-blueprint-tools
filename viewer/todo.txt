@@ -1,0 +1,6 @@
+Keep this line; here is a list of impromptu todos that may or may not be relevant anymore, remove as is needed, include in release notes/commit message when done.
+
+-The reset zoom stuff/legacy crap needs to go, seems to be a linux-related bug.
+-In e.g. the dolphin; the subgrids are attached, the json is clear; through the hinges; rotation for them is constrained to and ATTACHED to that hinge. So no free rotation for them; but we can manipulate the hinges or pivots.
+That should be done through use of a UI at that place.
+

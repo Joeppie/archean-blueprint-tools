@@ -6,7 +6,12 @@ modules + Three.js from CDN. No bundler, no npm.
 
 ## Layout
 ```
-viewer/index.html + view3d.js   the inspector (Three.js, one file, ~1400 lines)
+viewer/index.html + view3d.js   the inspector (Three.js core module)
+viewer/tests.js                 the headless suites (selftest/proxytest/comptest/
+                                uitest/gizmatest/postest), split out of view3d.js
+                                in v0.169; driven via the window.HARCHEAN hooks
+                                object (live getters+setters). Loaded ONLY for
+                                suite URLs (dynamic import in index.html)
 viewer/hullfit.js               exact hull-lattice mapping (pure function, no THREE)
 viewer/blockshapes.js           block shape+orientation table (type -> geometry/faces)
 viewer/palette.js               the game's built-in 256-slot palette + slot resolution
@@ -726,7 +731,13 @@ indistinguishable from the pushed build (2026-10-09 user report).
   while the 3D view sat still (its real-model siblings + nubs must be synced
   there as well, mirroring livePos/liveRot).
 - Keep headless testability: no top-level awaits on user input, report results in
-  `document.title` / `#out` for `--dump-dom`.
+  `document.title` / `#out` for `--dump-dom`. The suites live in
+  `viewer/tests.js` (v0.169) and reach the core through `window.HARCHEAN`
+  (accessor object of live getters/setters, exported at the bottom of
+  view3d.js) — a global handle on purpose: tests.js is loaded by a dynamic
+  import in index.html, so a static `import` with the release `?v=` specifier
+  would be a SECOND app instance on one DOM (the v0.169 lesson: the split
+  'worked' — every suite bound to the invisible twin).
 
 ## Backlog
 - **Ring-drag rotation continuity (user-requested, v0.163+):** dragging a
@@ -746,12 +757,13 @@ indistinguishable from the pushed build (2026-10-09 user report).
   `git-filter-repo --mailmap` (verified metadata-only: every tree+message
   byte-identical pre/post) and force-pushed. API check: every published
   commit links to login Joeppie.
-- **view3d.js is monolithic** (~5.5k lines): split into zero-build ES
-  modules — e.g. scene/render, gizmo, UI panels, subgrids, the test
-  suites — keeping the importmap/CDN, no-bundler constraint and the
-  module-closure test hooks (CDP eval cannot see module scope; suites
-  report via document.title). Update this file's Layout section + the
-  "one flat file" convention when done.
+- **view3d.js is monolithic** (~5k lines, core): the headless test suites
+  were split into `viewer/tests.js` in v0.169 (zero-build ES module, driven
+  through the `window.HARCHEAN` hooks accessor — a GLOBAL handle on purpose:
+  the page loads view3d.js with a per-release `?v=` cache-bust, and a static
+  import from tests.js would resolve a SECOND module instance = two apps on one
+  DOM). Remaining split (deferred): scene/render, gizmo, UI panels, subgrids,
+  keeping the importmap/CDN, no-bundler constraint.
 - Dashboard BUTTON elements (Toggle/Push/Arrow/Led) as real glTF models with
   the game's base transform + state animation (dev-viewer parity, transcribed
   in FORMAT.md §Handedness); today we draw plate+text approximations.

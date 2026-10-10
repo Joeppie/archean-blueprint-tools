@@ -126,7 +126,8 @@ def mode_history():
 
 VER_SPECS = {
     'viewer/index.html': [r'Archean Blueprint Viewer v0\.(\d+)',
-                          r'v0\.(\d+)</small>', r'view3d\.js\?v=(\d+)'],
+                          r'v0\.(\d+)</small>', r'view3d\.js\?v=(\d+)',
+                          r'tests\.js\?v=(\d+)'],
     'README.md': [r'# Archean Blueprint Tools · v0\.(\d+)', r'This is v0\.(\d+)'],
     'index.html': [r'Archean Blueprint Tools v0\.(\d+)</title>',
                    r'v0\.(\d+)</span>'],
