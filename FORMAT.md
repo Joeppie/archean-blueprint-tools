@@ -132,8 +132,9 @@ sRGB.
   the view and file frames. Hooks: the rotate gizmo (the
   incremental drag delta), the inspector rotation sliders (absolute
   qd·q0 writes → twin delta against a base-pose snapshot captured at the
-  FIRST edit of the gesture) and the subgrid gizmo (twin subgrid group
-  `base.q` + file quat, joints re-compose). Twin POSES stay independent —
+  FIRST edit of the gesture) and the master-part writebacks (a twin
+  subgrid group `base.q` + file quat re-composes through its joints).
+  Twin POSES stay independent —
   only the delta propagates (builders orient twins freely: the dolphin
   hinges mount 90° apart). v0.165 SHIPPED the full quaternion conjugate
   (w,−x,−y,−z) — the mirror-normal component flipped too, so twin
@@ -561,7 +562,8 @@ Zero-build Three.js (WebGL) inspector: `python3 -m http.server 8650` (repo root)
   mast, MiniComputer 3 m off — a pivot-only spin lever-swung them, user
   report) captured once per gesture at mouseDown; mirror twins orbit
   their OWN centres (the mirrored self-centre), sliders keep the game's
-  pivot semantics; subgrid gizmos attach AT the joint pivot; the
+  pivot semantics; v0.170: subgrids have NO gizmo (they ride their
+  masters' joints); the
   axis-less trackball rings
   are hidden and the ring PICKERS hug the visible rings):
   TransformControls writes the attached object's quaternion raw, while parts
@@ -788,9 +790,11 @@ Adventure = 3334698274).
   display of the dolphin doors is the SmallPivot masters' `data.angle`, the
   kinematic drive below. Build.occupancies = ONE cell (the ghost/anchor
   cell), NOT a mirror of the nested blocks. Ghost positions are also the
-  SYMMETRY-PAIR key for Build twins (XYQ doors ±0.635 ⇒ x-mirror pair), so
-  a pure subgrid SPIN must not rewrite them (applySubGizmo gates the ghost
-  position write on a nonzero move delta — v0.168, XYQ `symrot-sub`).
+  SYMMETRY-PAIR key for Build twins (XYQ doors ±0.635 ⇒ x-mirror pair).
+  v0.170: subgrids have NO gizmo in the viewer (user: "i can select and
+  move or rotate a subgrid. that is WRONG") — they move ONLY via their
+  masters' joints, so the ghost fields are never viewer-written any more
+  (the old v0.168 gate on the REMOVED applySubGizmo writeback is moot).
 - **Kinematic masters DRIVE their subgrid (v0.157).** A master whose game
   `.ini` declares a `[JOINT]` node (SmallHinge, SmallPivot, Aileron,
   LinearTrack, … — manifest `joints[0]`) has its live joint state in `data`

@@ -1182,94 +1182,6 @@ function syncSubJoints() {
   invalidate();
 }
 
-// The kinematic joint chain of a subgrid group, in syncSubJoints order:
-// axis/pivot per master plus its stored angle (DEGREES) and slide (m).
-function subJointChain(g) {
-  return (subMasterEntries().get(g.userData.sub) || [])
-    .map(e => model.data.components[e.component])
-    .filter(mc => mc && subJointAxis(mc))
-    .map(mc => ({ ...subJointAxis(mc),
-      a: typeof mc.data?.angle === 'number' ? mc.data.angle : 0,
-      s: typeof mc.data?.pos === 'number' ? mc.data.pos : 0 }));
-}
-// Gizmo edit on a SUBGRID group (v0.159): the live group pose is the joint
-// composition J over the Build attach pose (per master p' = pivot +
-// R(axis,a)·(base−pivot) + axis·pos, q' = R·base). The user dragged the
-// COMPOSED pose, so invert J (reverse order: subtract pivot AND slide,
-// rotate −a, restore pivot) back into base, then write the Build component
-// (position mirrored, orientation via the convention-aware rawFromView) —
-// the same contract as the panel's pivot rows, so a door dragged in world
-// space lands in the file exactly like a slider edit.
-function subInvChain(g, p, q) {   // live world group pose → base (undo joint chain)
-  const chain = subJointChain(g);
-  for (let i = chain.length - 1; i >= 0; i--) {
-    const { axis, pivot, a, s } = chain[i];
-    if (a) p.sub(pivot).addScaledVector(axis, -s)
-      .applyQuaternion(new THREE.Quaternion().setFromAxisAngle(axis, -a * Math.PI / 180))
-      .add(pivot);
-    else if (s) p.addScaledVector(axis, -s);
-    if (a) q.premultiply(new THREE.Quaternion().setFromAxisAngle(axis, -a * Math.PI / 180));
-  }
-}
-function applySubGizmo(g) {
-  const bc = model.data.components[g.userData.sub];
-  if (!bc) return;
-  const p = g.position.clone(), q = g.quaternion.clone();
-  subInvChain(g, p, q);
-  // twin subgrids (door pairs!) ride the mirrored delta (v0.160)
-  const d = { x: p.x - g.userData.base.p.x, y: p.y - g.userData.base.p.y,
-    z: p.z - g.userData.base.p.z };
-  // d is the VIEW-frame base delta; world x-mirror = (−dx,dy,dz) in view,
-  // which lands in the twins' FILE frame as (−dx, dy, −dz). twins filtered
-  // at PRE-MOVE positions (v0.161: drift ⇒ auto-off, ⇄ widget) — BEFORE the
-  // self-write, or every move drifts its OWN pair and self-disables.
-  const tw = symAllowed(g.userData.sub);
-  const dq = q.clone().multiply(g.userData.base.q.clone().invert());  // v0.165 view spin
-  g.userData.base.p.copy(p); g.userData.base.q.copy(q);
-  // v0.168: the ghost position fields are the subgrid pair's symmetry key
-  // (Builds have no meshes) — a PURE SPIN (no move delta) must not rewrite
-  // them, or the spin itself de-aligns the pair mid-gesture (twins vanish
-  // after the first event: twin spins/restore break, symTwinIndex rots).
-  const moved = Math.abs(d.x) + Math.abs(d.y) + Math.abs(d.z) > 1e-12;
-  if (moved) { bc.position.x = p.x; bc.position.y = p.y; bc.position.z = -p.z; }
-  bc.orientation = rawFromView({ userData: {} }, q);
-  for (const [j, m] of tw) {
-    const sx = m & 1 ? -1 : 1, sy = m & 2 ? -1 : 1, sz = m & 4 ? -1 : 1;
-    const md = new THREE.Quaternion(sx * sy * sz * sx * dq.x,
-      sx * sy * sz * sy * dq.y, sx * sy * sz * sz * dq.z, dq.w);  // mirror-twin spin
-    const tb = model.data.components[j];
-    if (moved) {
-      tb.position.x += sx * d.x; tb.position.y += sy * d.y; tb.position.z += sz * d.z;
-    }
-    const tg = subGroup.children.find(o => o.userData.sub === j);
-    if (tg) {
-      // v0.165/166: twin subgrids ride the MIRROR-TWIN spin (conjugated
-      // by the pair's mask, see symPropagateRot) and their file
-      // quaternion follows the twin's new base pose.
-      // v0.168: GIZMO spins (pivot captured at mouseDown, symRotPiv) orbit
-      // the twin's own content centre — p' = c + R(md)·(p−c) on the LIVE
-      // group pose, then the same joint-inverse writeback as the self path
-      // (spins the twin's doors IN PLACE at their twin centre, not about
-      // the parent grid origin; slider edits carry no pivot ⇒ origin spin).
-      const c = symRotPiv.get(j);
-      if (c) {
-        const tp = tg.position.clone().sub(c).applyQuaternion(md).add(c);
-        const tq = tg.quaternion.clone().premultiply(md);
-        subInvChain(tg, tp, tq);
-        tg.userData.base.p.copy(tp); tg.userData.base.q.copy(tq);
-        tb.position.x = tp.x; tb.position.y = tp.y; tb.position.z = -tp.z;
-      } else {
-        tg.userData.base.p.x += sx * d.x; tg.userData.base.p.y += sy * d.y;
-        tg.userData.base.p.z += sz * d.z;
-        tg.userData.base.q.premultiply(md);
-      }
-      tb.orientation = rawFromView({ userData: {} }, tg.userData.base.q);
-    }
-  }
-  syncSubJoints();
-  markDirty();
-}
-
 // ---------- mirror-plane overlay (v0.161, user: "show mirror axes as a
 // striped barred plane that indicates the mirror direction, toggle off in
 // options") ----------
@@ -1899,11 +1811,12 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   if (dx < 4 && dy < 4) {                        // canvas click = the ONLY fly trigger
     if (downPick.sub >= 0) selectSub(downPick.sub);
     else select(downPick.ci, true);
-    // the mode widget is PROJECTION-TIED to the picked component (v0.156)
+    // the mode widget is PROJECTION-TIED to the picked component (v0.156);
+    // v0.170: subgrids get NO gizmo/mode widget — they ride their masters'
+    // joints (user: "i can select and move or rotate a subgrid. that is
+    // WRONG"), the info panel opens on the click itself
     if (downPick.ci >= 0)
       showModeBox(e.clientX, e.clientY, compObjs[downPick.ci]);
-    else if (downPick.sub >= 0)
-      showModeBox(e.clientX, e.clientY, subGroup.children.find(o => o.userData.sub === downPick.sub));
     else hideModeBox();
   }
 });
@@ -1924,9 +1837,11 @@ function select(i, doFly) {
     showModeBox(0, 0, compObjs?.[i] || null);
   if (doFly) flyTo(i);         // camera fly is manual-only (canvas click / list dblclick)
 }
-// subgrid selection: info-only (no surge, no list row) — the
-// inspector swaps to the subgrid panel with mount + pivot rotation/offset;
-// the gizmo and an open mode widget ride the SUBGRID (v0.169)
+// subgrid selection: INFO-ONLY (v0.170) — the inspector swaps to the
+// subgrid panel with mount + pivot rotation/offset; subgrids have no
+// gizmo and no mode widget (user: "i can select and move or rotate a
+// subgrid. that is WRONG") — they move only kinematically, driven by
+// their masters' joint state (sliders/presets on the master parts).
 function selectSub(i) {
   selectedSub = i;
   selected = -1;
@@ -1935,8 +1850,7 @@ function selectSub(i) {
   buildList({ reveal: true });
   paintHighlights();
   syncGizmo();
-  if (modeBox.classList.contains('vis'))
-    showModeBox(0, 0, subGroup.children.find((o) => o.userData.sub === i) || null);
+  hideModeBox();
 }
 
 // ---------- rotate gizmo (Blender-style, v0.150; order fix v0.151) ----------
@@ -2003,58 +1917,22 @@ function gizmoUnwrap(raw, prevRaw, accum) {
   d = Math.atan2(Math.sin(d), Math.cos(d));        // wrap into (−π, π]
   return accum + d;
 }
-// subgrid gizmo gesture state (v0.168): the proxy rides the subgrid's
-// content CENTRE (syncGizmoPose), so drags map through these captures:
-// translate = group pose + (proxy − proxy0); rotate = spin about the
-// content centre, p' = C + R(dq)·(p0 − C), q' = R(dq)·q0 (WYSIWYG pivot,
-// same rule as components v0.167 — the identity-base group origin is the
-// parent grid origin, NOT the part).
-const subGizP0 = new THREE.Vector3(), subGizQ0 = new THREE.Quaternion(),
-  subGizX0 = new THREE.Vector3(), subGizC = new THREE.Vector3();
-let subGizOn = false;
-const _subD = new THREE.Vector3(), _subDq = new THREE.Quaternion();
-function subCentre (g) {
-  scene.updateMatrixWorld(true);
-  const bb = new THREE.Box3().setFromObject(g);
-  return isFinite(bb.min.x) ? bb.getCenter(new THREE.Vector3()) : null;
-}
-function subSpin(g, target) {
-  const dq = _subDq.copy(knobQ0).invert().multiply(target);
-  g.quaternion.copy(dq).multiply(subGizQ0);
-  g.position.copy(subGizP0).sub(subGizC).applyQuaternion(dq).add(subGizC);
-  return applySubGizmo(g);
-}
 tctl.addEventListener('objectChange', () => {
-  // subgrid target (v0.159; proxy-borne v0.168): the user drags the proxy
-  // at the content centre — map it onto the GROUP pose (translate = proxy
-  // delta, rotate = spin about the captured centre), then write through the
-  // joint inverse into the Build component (base), not into a comp index.
-  const g = tctl.object === gizmoProxy && selectedSub >= 0
-    ? subGroup.children.find(x => x.userData.sub === selectedSub) : null;
-  if (tctl.mode === 'translate') {
-    if (g) {
-      g.position.copy(subGizP0).add(_subD.copy(gizmoProxy.position).sub(subGizX0));
-      return applySubGizmo(g);
-    }
-    return applyGizmoPosition(gizmoProxy.position);
-  }
+  if (tctl.mode === 'translate') return applyGizmoPosition(gizmoProxy.position);
   const P = gizmoProxy.quaternion;
   _knobQ.copy(knobQ0).invert().multiply(P);         // raw relative spin q0⁻¹·P
   const len = Math.hypot(_knobQ.x, _knobQ.y, _knobQ.z);
-  if (len < 1e-4) { if (g) return subSpin(g, P); return applyGizmoOrientation(P); }  // snap
+  if (len < 1e-4) return applyGizmoOrientation(P);  // snap
   if (!knobAxis) {                                 // first real spin: the raw
     knobAxis = _knobA.set(_knobQ.x, _knobQ.y, _knobQ.z).normalize();   // axis IS the ring axis
     knobRaw = 2 * Math.atan2(len, _knobQ.w); knobAcc = knobRaw;
-    if (g) return subSpin(g, P);
     return applyGizmoOrientation(P);
   }
   const s = _knobA.x * knobAxis.x + _knobA.y * knobAxis.y + _knobA.z * knobAxis.z;
   const raw = 2 * Math.atan2(len * Math.sign(s), _knobQ.w);
   knobAcc = gizmoUnwrap(raw, knobRaw, knobAcc); knobRaw = raw;
-  const qF = _knobQ.copy(knobQ0).multiply(
-    new THREE.Quaternion().setFromAxisAngle(knobAxis, knobAcc));
-  if (g) return subSpin(g, qF);
-  applyGizmoOrientation(qF);
+  applyGizmoOrientation(_knobQ.copy(knobQ0).multiply(
+    new THREE.Quaternion().setFromAxisAngle(knobAxis, knobAcc)));
 });
 tctl.addEventListener('mouseDown', () => {
   controls.enabled = false; hideModeBox();
@@ -2066,24 +1944,9 @@ tctl.addEventListener('mouseDown', () => {
   // bbox centre — the mirror twin of a spin about the self centre is a
   // spin about the mirrored centre, and the mirrored self-centre IS the
   // twin's centre (positions are mirrored, geometry identical/mirrored).
-  gizPivotL = null; symRotPiv.clear(); subGizOn = false;
+  gizPivotL = null; symRotPiv.clear();
   const go = compObjs?.[selected];
-  const gs = selectedSub >= 0
-    ? subGroup.children.find((x) => x.userData.sub === selectedSub) : null;
-  if (gs) {                                  // v0.168: subgrid gesture
-    subGizOn = true;
-    subGizP0.copy(gs.position); subGizQ0.copy(gs.quaternion);
-    subGizX0.copy(gizmoProxy.position);
-    const c = subCentre(gs);
-    if (c) subGizC.copy(c); else subGizC.copy(gs.position);
-    if (tctl.mode === 'rotate')
-      for (const [j] of symAllowed(selectedSub)) {
-        const tg = subGroup.children.find(x => x.userData.sub === j);
-        if (!tg) continue;
-        const c2 = subCentre(tg);
-        if (c2) symRotPiv.set(j, c2);
-      }
-  } else if (go && tctl.mode === 'rotate') {
+  if (go && tctl.mode === 'rotate') {
     scene.updateMatrixWorld(true);
     gizPivotL = gizmoCentre(selected) ?? go.position.clone().add(_gizOff);
     for (const [j] of symAllowed(selected)) {
@@ -2097,7 +1960,6 @@ tctl.addEventListener('mouseDown', () => {
 tctl.addEventListener('mouseUp', () => {
   controls.enabled = true;
   gizPivotL = null; symRotPiv.clear();   // pivots are per-gesture (v0.167)
-  subGizOn = false;                      // v0.168: ditto for subgrid state
   buildInspector();                    // rebases the euler sliders on the new pose
   paintHighlights();
   invalidate();
@@ -2364,41 +2226,24 @@ function gizmoCentre (idx) {
 }
 function syncGizmoPose() {
   const o = compObjs?.[selected];
-  if (o) {
-    scene.updateMatrixWorld(true);
-    const bb = new THREE.Box3().setFromObject(o);
-    for (const r of realMap.get(selected) || []) bb.expandByObject(r);
-    if (isFinite(bb.min.x)) gizmoProxy.position.copy(bb.getCenter(_gcen));
-    else gizmoProxy.position.setFromMatrixPosition(o.matrixWorld);
-    _gizOff.copy(gizmoProxy.position).sub(o.getWorldPosition(_gow));
-    if (!tctl.dragging) gizmoProxy.quaternion.copy(o.getWorldQuaternion(_gq));
-    return;
-  }
-  // v0.168: subgrids ride the SAME proxy (was: attach to the GROUP, v0.159)
-  // — with the identity base the group origin is the parent grid origin, so
-  // attaching there parked the rings kilometres from the doors; the proxy
-  // rides the content's VISIBLE centre, rings concentric with the part.
-  const g = selectedSub >= 0
-    ? subGroup.children.find((x) => x.userData.sub === selectedSub) : null;
-  if (!g) return;
+  if (!o) return;
   scene.updateMatrixWorld(true);
-  const bb = new THREE.Box3().setFromObject(g);
+  const bb = new THREE.Box3().setFromObject(o);
+  for (const r of realMap.get(selected) || []) bb.expandByObject(r);
   if (isFinite(bb.min.x)) gizmoProxy.position.copy(bb.getCenter(_gcen));
-  if (!tctl.dragging) gizmoProxy.quaternion.copy(g.quaternion);
+  else gizmoProxy.position.setFromMatrixPosition(o.matrixWorld);
+  _gizOff.copy(gizmoProxy.position).sub(o.getWorldPosition(_gow));
+  if (!tctl.dragging) gizmoProxy.quaternion.copy(o.getWorldQuaternion(_gq));
 }
 function syncGizmo() {
+  // v0.170: the gizmo is COMPONENT-ONLY — subgrids ride their masters'
+  // joints, never a free gizmo (user: "i can select and move or rotate a
+  // subgrid. that is WRONG").
   const o = selected >= 0 ? compObjs?.[selected] : null;
-  const s = selectedSub >= 0
-    && subGroup.children.some(x => x.userData.sub === selectedSub);
-  const target = (o || s) ? gizmoProxy : null;
-  if (gizmoOn && target && (gizmoMode === 'move' || gizmoMode === 'rotate')) {
+  if (gizmoOn && o && (gizmoMode === 'move' || gizmoMode === 'rotate')) {
     syncGizmoPose();
-    tctl.attach(target);
-    // v0.159: SPACE per TARGET + mode — component move = WORLD (v0.158),
-    // SUBGRID move = LOCAL: the subgrid's attach/joint rotation is its
-    // working frame (user: "EXCEPT for subgrid, respect that rotation :)").
-    tctl.space = gizmoMode === 'move' && !o ? 'local'
-      : gizmoMode === 'move' ? 'world' : 'local';
+    tctl.attach(gizmoProxy);
+    tctl.space = gizmoMode === 'move' ? 'world' : 'local';   // v0.158 per-mode
   } else tctl.detach();
 }
 // ---------- gizmo MODE widget (v0.153: context switch at the click point) ----
@@ -2410,7 +2255,7 @@ let gizmoMode = localStorage.getItem('archean-gizmo-mode') || 'rotate';
 const modeBox = document.createElement('div');
 modeBox.id = 'modebox';
 for (const [m, ic, ti] of [['none', '⊘', 'no gizmo'],
-                           ['move', '✥', 'move — world axes (subgrids: own axes)'],
+                           ['move', '✥', 'move — world axes'],
                            ['rotate', '⟳', 'rotate'], ['info', 'ℹ', 'info only (no gizmo)'],
                            ['sym', '⇄', 'mirror symmetry']]) {
   const b = document.createElement('button');
@@ -2583,9 +2428,9 @@ function symPropagate(i, d, twins) {
     }
     // v0.164: twin SUBGRIDS (Build twins — dolphin/XYQ door pairs are the
     // fixtures) ride along in 3D too: base.p lives in the file frame, so
-    // the same mirrored delta applies, then joints re-compose (the subgrid
-    // gizmo writeback's contract). Before this, a twin Build moved in the
-    // FILE only — the 3D twin door sat put (user: "I dont see the
+    // the same mirrored delta applies, then joints re-compose. Before this,
+    // a twin Build moved in the FILE only — the 3D twin door sat put
+    // (user: "I dont see the
     // mirror-component ... being subject to the correct mirrored movement")
     const g = subGroup.children.find((x) => x.userData.sub === j);
     if (g) {
@@ -2844,7 +2689,9 @@ function paintHighlights() {
   // incandescent X-ray layer: synced every rendered frame (tracks sliders
   // live; rebuilt on selection change, model rebuild, proxy→real swap,
   // and whenever the twin set changes — ⇄ flip, pair drift, slider edits)
-  const twinKey = tSel + '|' + tw.join(',');
+  const twinKey = tSel + '|' + tw.join(',') + '|'
+    + [selected, ...tw.map(([j]) => j)]
+        .map(i => realMap.get(i)?.length || 0).join(',');
   if (selKey !== selected || twinKey !== selTwinKey
       || selPairs.some(([o]) => !o.parent)) rebuildSelXray();
   selTwinKey = twinKey;
@@ -2885,7 +2732,13 @@ function rebuildSelXray() {
     o.parent.add(ov);
     selPairs.push([o, ov]);
   });
+  const addReal = (i) => { for (const r of realMap.get(i) || []) addTree(r); };
   addTree(compObjs?.[selected]);
+  // v0.170 (user: "the highlight effect is good and should alsways happen
+  // for xomponents"): the REAL game models of the selection glow with the
+  // same whole effect — with real models on the proxy is hidden, and the
+  // proxy-geometry-only overlay glowed a box-shaped ghost of the part.
+  if (selected >= 0) addReal(selected);
   // v0.169 (user: "subgrid should highlight as a whole … so we understand
   // its a subgrid"): selecting a SUBGRID glows its whole content tree —
   // the merged block meshes + nested part proxies of the group.
@@ -2895,7 +2748,8 @@ function rebuildSelXray() {
   // pulsing x-ray material) — component twins and SUBGRID (Build) twins
   // alike; the twin set is re-evaluated whenever ⇄ flips or a pair drifts
   // (the twinKey staleness check in paintHighlights)
-  if (selected >= 0) for (const [j] of symAllowed(selected)) addTree(compObjs?.[j]);
+  if (selected >= 0) for (const [j] of symAllowed(selected))
+    { addTree(compObjs?.[j]); addReal(j); }
   if (selectedSub >= 0) for (const [j] of symAllowed(selectedSub))
     addTree(subGroup.children.find((x) => x.userData.sub === j));
 }
@@ -4859,7 +4713,6 @@ export const hooks = {
   get aeroUseGrid () { return aeroUseGrid },
   get applyGizmoOrientation () { return applyGizmoOrientation },
   get applyGizmoPosition () { return applyGizmoPosition },
-  get applySubGizmo () { return applySubGizmo },
   get blockGroup () { return blockGroup },
   get blockWireObj () { return blockWireObj },
   get buildList () { return buildList },
@@ -4958,17 +4811,9 @@ export const hooks = {
   get sockPivot () { return sockPivot },
   get solidCells () { return solidCells },
   get startSurges () { return startSurges },
-  get subCentre () { return subCentre },
-  get subGizC () { return subGizC },
-  get subGizOn () { return subGizOn },
-  set subGizOn (v) { subGizOn = v },
-  get subGizP0 () { return subGizP0 },
-  get subGizQ0 () { return subGizQ0 },
-  get subGizX0 () { return subGizX0 },
   get subGroup () { return subGroup },
   get subJointAxis () { return subJointAxis },
   get subMasterEntries () { return subMasterEntries },
-  get subSpin () { return subSpin },
   get surges () { return surges },
   get symAllowed () { return symAllowed },
   get symOn () { return symOn },

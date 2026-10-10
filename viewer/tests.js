@@ -425,17 +425,20 @@ const POSTESTS = {
       H.listTab = prev; H.buildList(); H.select(-1); H.paintHighlights();
       return (okN && okSel) || `rows=${rows.length}/${nB} sel=${H.selectedSub} err=${err}`;
     });
-    T('subwidget', () => {            // v0.169 (user: "subgrid manipulation
-      const g = subs()[0];            // widget not correctly positioned when
-      if (!g) return 'no subgrids';   // selecting a subgrid from menu"): an
-      const o = H.compObjs.find(Boolean);   // open mode widget re-anchors to
-      if (!o) return 'no components';       // the subgrid group, not the old
-      H.showModeBox(50, 50, o);             // anchor.
-      const before = H.modeAnchor === o;
+    T('subwidget', () => {            // v0.170 (user: "i can select and move
+      const g = subs()[0];           // or rotate a subgrid. that is WRONG"):
+      if (!g) return 'no subgrids';  // selecting a SUBGRID detaches the
+      const o = H.compObjs.find(Boolean);   // gizmo and hides the mode
+      if (!o) return 'no components';       // widget; component selection
+      H.setGizmoMode('move');               // keeps both (gizmatest pins
+      H.select(H.compObjs.indexOf(o));      // the component side).
+      const compOk = H.tctl.object === H.gizmoProxy;
+      H.showModeBox(50, 50, o);
+      const shown = H.modeBox.classList.contains('vis');
       H.selectSub(g.userData.sub);
-      const after = H.modeAnchor === g;
-      H.hideModeBox(); H.select(-1); H.paintHighlights();
-      return (before && after) || `before=${before} after=${after}`;
+      const off = !H.tctl.object && !H.modeBox.classList.contains('vis');
+      H.setGizmoMode('rotate'); H.select(-1); H.paintHighlights();
+      return (compOk && shown && off) || `comp=${compOk} shown=${shown} off=${off}`;
     });
     T('subglow', () => {              // v0.169 (user: "subgrid should
       const g = subs()[0];           // highlight as a whole/wireframe so we
@@ -469,6 +472,23 @@ const POSTESTS = {
         + ` sub=${H.selectedSub} g=${g.userData.sub} vis2=${H.selBox2.visible}`;
       H.select(-1); H.paintHighlights();
       return (n >= Math.min(nMesh, 2) && okBox) || dbg;
+    });
+    T('compglow', () => {             // v0.170 (user: "the highlight effect
+      // is good and should alsways happen for xomponents"): the REAL game
+      // models of a selected component get the x-ray overlay too (proxy
+      // boxes are hidden under real geometry — proxy-only glow read as a
+      // box-shaped ghost of the part).
+      const i2 = H.model.data.components.findIndex((c, k2) =>
+        (H.realMap.get(k2)?.length || 0) > 0 && c.type === 'Beacon');
+      if (i2 < 0) return 'no real-loaded component';
+      H.select(i2);
+      const roots = new Set(H.realMap.get(i2));
+      const n = H.selPairs.filter(([o]) => {
+        for (let p2 = o; p2; p2 = p2.parent) if (roots.has(p2)) return true;
+        return false;
+      }).length;
+      H.select(-1); H.paintHighlights();
+      return n > 0 || `selPairs=${H.selPairs.length} none under real roots`;
     });
     T('sub-info', () => {              // click-equivalent opens the subgrid panel
       if (!subs().length) return 'no subgrids';
@@ -522,106 +542,7 @@ const POSTESTS = {
         && piv && back)
         || `spin q=${qOff.angleTo(bq).toFixed(3)} dot=${dAx.dot(bax).toFixed(3)} pivot=${piv} back=${back}`;
     });
-    T('subgizmo-move', () => {        // v0.159: gizmo on a SUBGRID writes back
-      // through the joint inverse: with the door OPENED 90° on its pivot, a
-      // world +x drag of the composed pose must land in the file as the
-      // R(−90°)-rotated base delta (sign-sensitive), and the gizmo must be
-      // LOCAL-space (the subgrid rides its own rotation).
-      const g = subs().find(o => (H.subMasterEntries().get(o.userData.sub) || [])
-        .some(e => H.model.data.components[e.component]?.type === 'SmallPivot'));
-      if (!g) return 'no SmallPivot-mastered subgrid';
-      H.selectSub(g.userData.sub);
-      H.setGizmoMode('move');
-      const attached = H.tctl.object === H.gizmoProxy && H.tctl.space === 'local';
-      const e = (H.subMasterEntries().get(g.userData.sub) || [])
-        .find(e => H.model.data.components[e.component]?.type === 'SmallPivot');
-      const mc = H.model.data.components[e.component];
-      const a0 = typeof mc.data.angle === 'number' ? mc.data.angle : 0;
-      const bc = H.model.data.components[g.userData.sub];
-      const bp0 = g.userData.base.p.clone();
-      const { axis } = H.subJointAxis(mc);
-      mc.data.angle = 90; H.syncSubJoints();            // composed frame swings
-      g.position.add(new THREE.Vector3(0.25, 0, 0));  // the "drag" (world +x)
-      H.applySubGizmo(g);
-      const d = g.userData.base.p.clone().sub(bp0);
-      const want = new THREE.Vector3(0.25, 0, 0)
-        .applyQuaternion(new THREE.Quaternion().setFromAxisAngle(axis, -Math.PI / 2));
-      const okPos = d.distanceTo(want) < 1e-6
-        && Math.abs(bc.position.x - (bp0.x + want.x)) < 1e-6;
-      bc.position.x = bp0.x; bc.position.y = bp0.y; bc.position.z = -bp0.z;
-      mc.data.angle = a0;
-      g.userData.base.p.copy(bp0);
-      H.syncSubJoints(); H.tctl.detach();
-      return (attached && okPos)
-        || `attach=${attached} d=${d.toArray().map(v => v.toFixed(3))} want=${want.toArray().map(v => v.toFixed(3))}`;
-    });
-    T('subgizmo-rot', () => {         // v0.168 (user: "rotation on the
-      // dolphin doesnt work as it should for subgrids/pivots"): with the
-      // identity base the group origin is the PARENT GRID ORIGIN, so a raw
-      // ring spin spins the door about that origin — a 25 m lever swing.
-      // The gizmo spin must orbit the subgrid's CONTENT CENTRE (rings are
-      // drawn there): emulate the gesture (mouseDown capture + proxy spin +
-      // writeback) and pin radius-preserving orbit + exact restore.
-      const g = subs().find(o => (H.subMasterEntries().get(o.userData.sub) || [])
-        .some(e => H.model.data.components[e.component]?.type === 'SmallPivot'));
-      if (!g) return 'no SmallPivot-mastered subgrid';
-      H.selectSub(g.userData.sub);
-      H.setGizmoMode('rotate');
-      const attached = H.tctl.object === H.gizmoProxy;
-      H.scene.updateMatrixWorld(true);
-      const C = H.subCentre(g);
-      const p0 = g.position.clone(), q0 = g.quaternion.clone();
-      const lever = C.distanceTo(p0);
-      // mouseDown emulation (same captures the real listener takes)
-      H.knobQ0.copy(H.gizmoProxy.quaternion);
-      H.knobAxis = null; H.knobRaw = H.knobAcc = 0;
-      H.subGizP0.copy(g.position); H.subGizQ0.copy(g.quaternion);
-      H.subGizX0.copy(H.gizmoProxy.position); H.subGizC.copy(C);
-      H.gizPivotL = null; H.symRotPiv.clear();
-      // ring drag: intrinsic +0.3 rad about the ring the proxy is drawn
-      // with (world ŷ = base-local q0⁻¹·ŷ — the knob path's postmultiply)
-      const loc = new THREE.Vector3(0, 1, 0).applyQuaternion(q0.clone().invert());
-      H.gizmoProxy.quaternion.copy(H.knobQ0).multiply(
-        new THREE.Quaternion().setFromAxisAngle(loc, 0.3));
-      H.subSpin(g, H.gizmoProxy.quaternion);
-      H.scene.updateMatrixWorld(true);
-      const dqg = g.quaternion.clone().multiply(q0.clone().invert());
-      const ang = 2 * Math.atan2(Math.hypot(dqg.x, dqg.y, dqg.z), Math.abs(dqg.w));
-      const okQ = Math.abs(ang - 0.3) < 1e-6
-        && dqg.y > 0.1494 && dqg.y < 0.1495          // world ŷ spin (sign-sensitive)
-        && Math.abs(dqg.x) < 1e-9 && Math.abs(dqg.z) < 1e-9;
-      const okR = Math.abs(g.position.distanceTo(C) - p0.distanceTo(C)) < 1e-9
-        && p0.distanceTo(g.position) > 0.25 * lever;  // a real lever swing
-      const bb = new THREE.Box3().setFromObject(g);
-      const c1 = bb.getCenter(new THREE.Vector3());
-      const dC = c1.distanceTo(C);
-      // The AABB of rotated ASYMMETRIC content grows at second order in θ
-      // (bbox of a union of rotated boxes ⊃ rotated bbox), so the envelope
-      // centre wobbles a few cm at 0.3 rad over a multi-metre panel — the
-      // WYSIWYG guarantee is spin IN PLACE at C, pinned at 10 cm.
-      const okC = dC < 0.1;
-      const bc = H.model.data.components[g.userData.sub];
-      const rf = H.rawFromView({ userData: {} }, g.quaternion);
-      const of = bc.orientation;
-      const okFile = Math.abs(of.w - rf.w) < 1e-9 && Math.abs(of.x - rf.x) < 1e-9
-        && Math.abs(of.y - rf.y) < 1e-9 && Math.abs(of.z - rf.z) < 1e-9;
-      // counter-spin as a FRESH gesture (real mouseDown re-captures the
-      // base): reset subGiz* + knobQ0 onto the CURRENT pose, then spin the
-      // proxy so subSpin's dq = knobQ0⁻¹·target = Rz(−0.3) world-ŷ.
-      H.subGizP0.copy(g.position); H.subGizQ0.copy(g.quaternion);
-      H.subGizC.copy(C); H.knobQ0.copy(g.quaternion);
-      H.gizmoProxy.quaternion.copy(H.knobQ0).premultiply(
-        new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -0.3));
-      H.subSpin(g, H.gizmoProxy.quaternion);
-      const okBack = g.position.distanceTo(p0) < 1e-9
-        && Math.abs(g.quaternion.dot(q0)) > 1 - 1e-9;
-      H.gizmoProxy.quaternion.copy(q0);   // park the proxy back on the part
-      H.subGizOn = false; H.tctl.detach(); H.select(-1); H.paintHighlights();
-      return (attached && lever > 5 && okQ && okR && okC && okFile && okBack)
-        || `attach=${attached} lever=${lever.toFixed(1)} Q=${okQ} r=${okR} `
-        + `centre=${dC.toExponential(1)} file=${okFile} back=${okBack}`;
-    });
-    T('symmove', () => {             // v0.160: a gizmo move propagates to the
+            T('symmove', () => {             // v0.160: a gizmo move propagates to the
       // left-right TWIN component (dolphin's twin tail-door hinges ±1.125):
       // file delta (dx,dy,dz) → twin (−dx,dy,dz); pose stays its own.
       const ent = [...H.symTwinIndex().entries()]
@@ -672,62 +593,7 @@ const POSTESTS = {
       const a = g(41), b = g(5);
       return (a === 'ToggleButton' && b === 'Dashboard') || `Build[41]=${a} Build[5]=${b}`;
     });
-    T('symmove-sub', () => {         // v0.160: twin SUBGRIDS (Build[5]/[41]
-      // at x=±0.635, the XYQ door pair) ride a subgrid gizmo move mirrored.
-      const g = H.subGroup.children.find(o => o.userData.sub === 41);
-      const tg = H.subGroup.children.find(o => o.userData.sub === 5);
-      if (!g || !tg) return 'twin Build groups missing';
-      H.selectSub(41); H.setGizmoMode('move');
-      const b0 = { ...H.model.data.components[41].position };
-      const c0 = { ...H.model.data.components[5].position };
-      const t0 = tg.userData.base.p.x;
-      g.position.x += 0.4;                          // world +x drag
-      H.applySubGizmo(g);
-      const cb = H.model.data.components[41], cc = H.model.data.components[5];
-      // v0.168: subgrid moves write the BUILD fields = the live base offset
-      // (identity at load, ghost/bench values live only in the loaded file
-      // fields); twins ride the mirrored delta on their file fields.
-      const okp = Math.abs(cb.position.x - 0.4) < 1e-9
-        && Math.abs(cc.position.x - (c0.x - 0.4)) < 1e-9
-        && Math.abs(tg.userData.base.p.x - (t0 - 0.4)) < 1e-9;
-      const msg = `selfΔ=${(cb.position.x - b0.x).toFixed(3)} twinΔ=${(cc.position.x - c0.x).toFixed(3)}`
-        + ` twins=${JSON.stringify(H.symTwinIndex().get(41) || null)} pos=${JSON.stringify(cb.position)}`;
-      cb.position.x = b0.x; cb.position.y = b0.y; cb.position.z = b0.z;
-      cc.position.x = c0.x; cc.position.y = c0.y; cc.position.z = c0.z;
-      g.userData.base.p.x -= 0.4; tg.userData.base.p.x += 0.4;
-      H.syncSubJoints(); H.tctl.detach();
-      return okp || msg;
-    });
-    T('symmove-off', () => {         // v0.161: the ⇄ switch AND drifted pairs
-      // suppress twin propagation. (a) explicitly OFF: dragging twin 41 leaves
-      // twin 5 frozen. (b) DRIFT: 41 moved alone (+0.3, slider-equivalent) so
-      // the pair is no longer mirrored → AUTO-OFF: the drag propagates nothing.
-      const g = H.subGroup.children.find(o => o.userData.sub === 41);
-      const tg = H.subGroup.children.find(o => o.userData.sub === 5);
-      if (!g || !tg) return 'twin Build groups missing';
-      const cb = H.model.data.components[41], cc = H.model.data.components[5];
-      const b0 = { ...cb.position }, c0 = { ...cc.position };
-      const a0 = H.symOn;
-      H.selectSub(41); H.setGizmoMode('move');
-      H.symOn = false;
-      g.position.x += 0.3; H.applySubGizmo(g);
-      const offOk = Math.abs(cb.position.x - 0.3) < 1e-9
-        && Math.abs(cc.position.x - c0.x) < 1e-12;
-      cb.position.x = b0.x; g.userData.base.p.x -= 0.3;
-      H.syncSubJoints();
-      cb.position.x += 0.3;
-      H.symOn = true;
-      const drifted = H.symAllowed(41).length === 0;
-      g.position.x += 0.4; H.applySubGizmo(g);
-      const autoOk = Math.abs(cb.position.x - 0.4) < 1e-9
-        && Math.abs(cc.position.x - c0.x) < 1e-12;
-      cb.position.x = b0.x; cb.position.y = b0.y; cb.position.z = b0.z;
-      g.userData.base.p.x -= 0.4;
-      H.syncSubJoints(); H.symOn = a0; H.tctl.detach();
-      return (offOk && drifted && autoOk)
-        || `off=${offOk} drifted=${drifted} auto=${autoOk}`;
-    });
-    T('symselect-sub', () => {      // v0.164: subgrid twins co-select too —
+            T('symselect-sub', () => {      // v0.164: subgrid twins co-select too —
       // selecting the XYQ door subgrid Build[41] must glow twin Build[5]'s
       // GROUP with it (x-ray pair) and box it; ⇄ OFF drops both.
       const g = H.subGroup.children.find(o => o.userData.sub === 41);
@@ -743,51 +609,7 @@ const POSTESTS = {
       H.symOn = a0; H.selectSub(-1);
       return (glow && box && off) || `glow=${glow} box=${box} off=${off}`;
     });
-    T('symrot-sub', () => {      // v0.165: twin SUBGRIDS ride the
-      // mirrored SPIN too — rotating the XYQ door subgrid Build[41] with
-      // the gizmo must spin twin Build[5]'s base pose MIRRORED
-      // (Rz(+0.3) ⇒ Rz(−0.3), sign-sensitive) and write the twin's file
-      // quaternion; the counter-spin restores everything.
-      const g = H.subGroup.children.find(o => o.userData.sub === 41);
-      const tg = H.subGroup.children.find(o => o.userData.sub === 5);
-      if (!g || !tg) return 'twin Build groups missing';
-      const a0 = H.symOn; H.symOn = true;
-      H.selectSub(41); H.setGizmoMode('rotate');
-      H.tctl.attach(g); H.scene.updateMatrixWorld(true);
-      const qB0 = tg.userData.base.q.clone();
-      const spin = (a) => g.quaternion.premultiply(new THREE.Quaternion()
-        .setFromAxisAngle(new THREE.Vector3(0, 0, 1), a));
-      spin(0.3); H.applySubGizmo(g);
-      const dj = tg.userData.base.q.clone().multiply(qB0.clone().invert());
-      const okRot = dj.z < -0.14 && dj.z > -0.15
-        && Math.abs(dj.x) < 1e-9 && Math.abs(dj.y) < 1e-9;
-      const rf = H.rawFromView({ userData: {} }, tg.userData.base.q);
-      const of = H.model.data.components[5].orientation;
-      const okFile = Math.abs(of.w - rf.w) < 1e-9 && Math.abs(of.x - rf.x) < 1e-9
-        && Math.abs(of.y - rf.y) < 1e-9 && Math.abs(of.z - rf.z) < 1e-9;
-      spin(-0.3); H.applySubGizmo(g);
-      const okBack = Math.abs(tg.userData.base.q.dot(qB0)) > 1 - 1e-9;
-      // v0.166: the RED spin (mirror-normal axis x̂) is PRESERVED: door
-      // spin Rx(+0.3) ⇒ twin Rx(+0.3) (v0.165 flipped it: the wheel bug).
-      const qB1 = tg.userData.base.q.clone();
-      g.quaternion.premultiply(new THREE.Quaternion()
-        .setFromAxisAngle(new THREE.Vector3(1, 0, 0), 0.3));
-      H.applySubGizmo(g);
-      const djx = tg.userData.base.q.clone().multiply(qB1.clone().invert());
-      const okX = djx.x > 0.14 && djx.x < 0.15
-        && Math.abs(djx.y) < 1e-9 && Math.abs(djx.z) < 1e-9;
-      g.quaternion.premultiply(new THREE.Quaternion()
-        .setFromAxisAngle(new THREE.Vector3(1, 0, 0), -0.3));
-      H.applySubGizmo(g);
-      const okBackX = Math.abs(tg.userData.base.q.dot(qB1)) > 1 - 1e-9;
-      H.tctl.detach(); H.setGizmoMode('translate'); H.selectSub(-1); H.symOn = a0;
-      return (okRot && okFile && okBack && okX && okBackX)
-        || `rot=${okRot}(${dj.z.toFixed(4)}) file=${okFile} back=${okBack}`
-        + `(${tg.userData.base.q.toArray().map(v => v.toFixed(4))}|`
-        + `${qB0.toArray().map(v => v.toFixed(4))}) x=${okX}(${djx.x.toFixed(4)})`
-        + ` backX=${okBackX} tw=${JSON.stringify(H.symAllowed(41))}`;
-    });
-  },
+      },
 };
 // harness state at module scope: the POSTESTS fixture closures above capture
 // this scope, so T/tmpV must live here (runPosTest resets the counters).
@@ -957,9 +779,6 @@ async function runPosTest() {
       H.selectSub(g.userData.sub);
       const es = H.subMasterEntries().get(g.userData.sub);
       if (es?.length) H.flyTo(es[0].component);   // frame the hinge/pivot + driven door
-      const v = new THREE.Box3().setFromObject(g).getCenter(new THREE.Vector3()).project(H.camera);
-      const r = H.renderer.domElement.getBoundingClientRect();
-      H.showModeBox(r.left + (v.x * .5 + .5) * r.width, r.top + (-v.y * .5 + .5) * r.height, g);
       H.invalidate();
     }
   }

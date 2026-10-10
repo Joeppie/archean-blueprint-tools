@@ -213,16 +213,19 @@ indistinguishable from the pushed build (2026-10-09 user report).
   (`syncSubJoints()`, runs from buildSubgrids + every markDirty; the panel
   Mount row exposes editable joint-angle/slide sliders that write the
   master's data verbatim). Subgrid display pose lives in `g.userData.base`
-  {p,q} (identity at load) — pivot rows + gizmo edit BASE, never the live
-  transform; a pure SPIN must not rewrite the ghost position fields (they are
-  the Build twin's symmetry key — applySubGizmo gates the write on a nonzero
-  move delta). Pins: selftest
+  {p,q} (identity at load) — the pivot rows' edit BASE, never the live
+  transform. v0.170 (user: "i can select and move or rotate a subgrid.
+  that is WRONG"): the gizmo and the mode widget are COMPONENT-ONLY —
+  subgrids have NO gizmo (selectSub detaches + hides the widget), so the
+  ONLY manipulation path is their masters' joint state (the master parts'
+  gizmo/sliders, the panel's pivot rows). The free subgrid gizmo
+  (v0.159-168: applySubGizmo/subSpin writeback, proxy at the content
+  centre, local-space arrows) is REMOVED — do not resurrect. Pins: selftest
   `subjoin`, dolphin/XYQ postest sub-master fixtures, dolphin
   `subjoint-angle` (sign-sensitive 90° spin about the decoded axis),
-  dolphin `subgizmo-rot` (v0.168 WYSIWYG: a gizmo ring spin orbits the
-  subgrid's CONTENT CENTRE, spins it in place, lever > 5 m, exact restore),
-  3732302108 `subjoint-pos` (LinearTrack slide ∥ axle). See FORMAT.md
-  §Subgrids.
+  dolphin `subwidget` (inverted v0.170: component select attaches gizmo +
+  widget, subgrid select detaches + hides), 3732302108 `subjoint-pos`
+  (LinearTrack slide ∥ axle). See FORMAT.md §Subgrids.
 - Palette slots: `data.colors[256]`, entry = {r,g,b 0-255, opacity 0-15,
   roughness 0-7, metallic 0|1}. **r/g/b are LINEAR albedo** — the engine's
   shaders use them raw; decoding as sRGB darkens the craft ~^2.2 (the ISW-241
@@ -443,7 +446,8 @@ indistinguishable from the pushed build (2026-10-09 user report).
      twins orbit their OWN centres (symRotPiv, captured at the same
      mouseDown — the mirrored self-centre IS the twin centre); sliders
      keep the game's pivot semantics (orientation about the part origin,
-     no orbit); subgrid gizmos attach AT the joint pivot — unchanged). The
+     no orbit); v0.170: subgrids have NO gizmo at all — they ride their
+     masters' joints). The
      gizmohover pin drives the REAL pointer path (synthetic canvas
      pointermove): ring hover picks its own ring (axis='Z'), TGC's RAW
      update flashes yellow, the SHIPPED chain clears it in-frame, the
@@ -524,7 +528,7 @@ indistinguishable from the pushed build (2026-10-09 user report).
      quaternion conjugate (w,−x,−y,−z) — flipping the mirror-normal
      component too: exactly the red-axis wheel bug; its pins only tested
      ŷ/ẑ, so x̂ was never asserted (now: ISW symrot-x SmallWheel pair
-     Rx(+0.2)→Rx(+0.2), XYQ symrot-sub x phase, uitest symrot pitch
+     Rx(+0.2)→Rx(+0.2), uitest symrot pitch
      phase — all sign-sensitive). The mirror-plane overlay draws one
      plane per mirror axis present (twin masks ∪ mirrorAxis parts); the
      y-plane arrow pair straddles UPWARD so the down-tip lands ON the
@@ -537,25 +541,16 @@ indistinguishable from the pushed build (2026-10-09 user report).
      translate = WORLD (the arrows stay axis-aligned; user: "the move
      gizmo rotates and becomes non axis aligned, thats bad"), rotate =
      LOCAL rings (the pinned intrinsic model). movecfg pin asserts the
-     space flip toggles with the mode. v0.159/v0.168: the gizmo ATTACHES TO
-     SUBGRIDS TOO — selecting a subgrid attaches TransformControls to the
-     shared scene-root PROXY, which rides the subgrid's CONTENT bbox CENTRE
-     (v0.168: NOT the group — with the identity base the group origin is the
-     parent grid origin, metres from the doors), and its translate space is
-     LOCAL ("EXCEPT for subgrid, respect that rotation :)"): the arrows
-     follow the subgrid's attach pose + joint swing. objectChange branches on
-     the selected subgrid: translate maps the proxy DELTA onto the group pose
-     and writes back through the JOINT INVERSE (subtract pivot/slide,
-     rotate −a, reverse order) into g.userData.base, then the Build
-     component (position mirror + rawFromView quat) — the same contract
-     as the panel's pivot rows; ROTATE (subSpin) spins the group about the
-     captured content CENTRE (p'=C+R(dq)·(p−C), q'=R(dq)·q0) — the WYSIWYG
-     pivot rule (the identity-base origin spin was a huge lever swing).
+     space flip toggles with the mode. v0.170: THE GIZMO IS COMPONENT-ONLY
+     — the v0.159/v0.168 subgrid gizmo (proxy riding the subgrid's content
+     centre, local-space arrows, joint-inverse writeback + subSpin spin
+     about the content centre) is REMOVED (user: "i can select and move or
+     rotate a subgrid. that is WRONG"): subgrids are INFO-SELECT ONLY and
+     move kinematically via their masters' joints.
      Pins: gizmatest movespace (MEASURED
      widget nodes: translate arrows proxy-INVARIANT, rings proxy-FOLLOWING)
-     + dolphin subgizmo-move (local attach + sign-sensitive joint-inverse
-     writeback on the 90°-open pivot door) + dolphin subgizmo-rot (v0.168:
-     ring spin orbits the content centre, in-place, exact restore). The explode/assembly
+     + dolphin subwidget (component select attaches gizmo + widget;
+     subgrid select detaches + hides). The explode/assembly
      feature (v0.140/141) was
      REMOVED in v0.142 (user: "a catastrophe") — do not resurrect.
      thrust display + wind model: every DIRECTIONAL propulsor (THRUST
@@ -682,32 +677,34 @@ indistinguishable from the pushed build (2026-10-09 user report).
    subgrid as its own SUBGRID row — blocks-only ones included; the old
    nested filter returned component OBJECTS that then indexed the array
    (buildList THREW, the tab died at the first subgrid with nested parts)
-   — and the row click selects the subgrid); `subwidget` (an OPEN mode
-   widget re-anchors to the subgrid group on selectSub — menu selections
-   kept it glued to the previous part); `subglow` (subgrid selection glows
+   — and the row click selects the subgrid); `subwidget` (v0.170 INVERTED:
+   component select attaches the gizmo + an open widget stays anchored to
+   the part, subgrid select DETACHES the gizmo and HIDES the widget — the
+   v0.169 re-anchor is gone with the subgrid gizmo); `subglow` (subgrid
+   selection glows
    the WHOLE content tree via selPairs and gets the golden outline box —
    compare the box geometry's EXTENT centre: a start-points-only mean is
    corner-unbalanced; re-paint after updateMatrixWorld, matrixWorld may be
-   stale between pins). Generic `comp-pick` (every postest craft): a ray
+   stale between pins); `compglow` (v0.170: the REAL game models of a
+   selected component get the x-ray glow too — a selPairs overlay must
+   live under the realMap roots of the selection, not only the proxy
+   boxes, so real-model paints highlight the part's true shape). Generic
+   `comp-pick` (every postest craft): a ray
    through an invisible nested-proxy group (world-invisible) must NOT route
    to its subgrid when a component is hit behind it (the gantry's nested
    SpotLight/Dashboard proxies prove the non-vacuous path); a VISIBLE
    subgrid block in front of the component (the giant's decks) keeps the
    subgrid win.
-   XYQ-615 (3803780241) decodes Build[41]←ToggleButton, Build[5]←Dashboard, and
-   its Build[5]/[41] ±0.635 TWIN SUBGRID PAIR proves symmove-sub (one
-   door dragged, its twin rides the mirrored delta — dolphin's symmove pin
-   does the same for SmallHinge twins, sign-sensitive in x).
-   v0.161 XYQ `symmove-off`: with ⇄ clicked OFF a twin drag leaves its pair
-   frozen, and a DRIFTED pair (twin moved alone → pair no longer mirrored)
-   propagates NOTHING (auto-disable). v0.165 `symrot` (ISW): spinning the
+   XYQ-615 (3803780241) decodes Build[41]←ToggleButton, Build[5]←Dashboard;
+   its Build[5]/[41] ±0.635 TWIN SUBGRID PAIR proves symselect-sub (twins
+   co-select + glow; dolphin's symmove pin keeps the COMPONENT twin
+   propagation for SmallHinge masters, sign-sensitive in x — the subgrid
+   gizmo drag pins were REMOVED with the feature in v0.170).
+   v0.165 `symrot` (ISW): spinning the
    selected aileron via the gizmo writeback path (view Rz(+0.2)) must spin
    the twin's MESH by the MIRRORED delta Rz(−0.2) (sign-sensitive: spins
    tangential to the mirror plane flip) and follow its FILE quaternion,
-   exact restore; XYQ `symrot-sub`: the same spin on a twin Build SUBGRID
-   rides its `base.q` + file quat (door pair), and its v0.166 x-phase
-   pins the MIRROR-NORMAL rule: Rx(+0.3) ⇒ twin Rx(+0.3) PRESERVED
-   (v0.165's full-conjugate flipped it). ISW v0.166 `symrot-x`: rolling
+   exact restore. ISW v0.166 `symrot-x`: rolling
    the SmallWheel pair (x=±3.125) about the red axis, self Rx(+0.2) ⇒
    twin Rx(+0.2) — same direction, sign-sensitive (user: "move my wheel
    back, the mirrored wheel moves forward"); its v0.167 phase captures
@@ -722,7 +719,8 @@ indistinguishable from the pushed build (2026-10-09 user report).
    subgrid slides +0.25 m along its decoded axle axis, and returns.
    Dev-shot hooks leave final states for headless screenshots: uitest
    `&wbshot` (mode widget + move gizmo on a part), postest `&subshot`
-   (subgrid panel + widget at the door, camera flown to the master part).
+   (subgrid panel open, camera flown to the master part — v0.170: no
+   widget on subgrids).
 3. `fitHull` must stay **generic**: zero per-craft constants. The exact lattice
    (W=12, pitch=CELL, C=−FRAME/2) passes on all 24 corpus files, not just ISW-241.
 
