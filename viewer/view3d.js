@@ -1849,18 +1849,36 @@ addEventListener('drop', async (e) => {
 const ray = new THREE.Raycaster(), ptr = new THREE.Vector2();
 // subgrid owner of a hit: nearest ancestor tagged by buildSubgrids
 function subOwner(o) { while (o) { if (o.userData.sub !== undefined) return o.userData.sub; o = o.parent; } return -1; }
+// The pick ray rules (v0.169, user: "normal component selection prioritizes
+// subgrids, making it impossible to select by looking at a component"):
+// a subgrid wins over a component ONLY when the ray lands on VISIBLE
+// subgrid content (its merged block/triangle meshes) closer than any
+// component. The invisible collider proxies of NESTED parts (flush hull
+// boxes, raycast-enabled so doors stay clickable) no longer jump component
+// clicks: they route a click to their subgrid only when the ray hit NO
+// component at all (a component hidden behind a hatch box keeps the
+// v0.153 rule — the subgrid behind a visible part loses, a part behind
+// an invisible box wins: you select what you can SEE).
+function pickRay() {
+  const hc = ray.intersectObjects(compGroup.children, true);
+  const hs = subGroup.visible ? ray.intersectObjects(subGroup.children, true) : [];
+  const dc = hc.length ? hc[0].distance : Infinity;
+  // WORLD visibility: a nested part's collider proxy is a group flagged
+  // invisible once its real model loads (the box MESH inside stays visible)
+  const vis = hs.filter((h) => {
+    for (let p = h.object; p; p = p.parent) if (!p.visible) return false;
+    return true;
+  });
+  if (vis.length && vis[0].distance < dc) return { ci: -1, sub: subOwner(vis[0].object) };
+  if (hc.length) return { ci: hc[0].object.userData.ci, sub: -1 };
+  if (hs.length) return { ci: -1, sub: subOwner(hs[0].object) };
+  return { ci: -1, sub: -1 };
+}
 function pick(ev) {
   const r = renderer.domElement.getBoundingClientRect();
   ptr.set(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
   ray.setFromCamera(ptr, camera);
-  const hc = ray.intersectObjects(compGroup.children, true);
-  // subgrids pick too (v0.153): a hit closer than any component means the
-  // CLICK LANDED ON the subgrid — content like its clocks/triangles route to
-  // the subgrid, and a component BEHIND the subgrid loses (user rule).
-  const hs = subGroup.visible ? ray.intersectObjects(subGroup.children, true) : [];
-  const dc = hc.length ? hc[0].distance : Infinity, ds = hs.length ? hs[0].distance : Infinity;
-  if (ds < dc) return { ci: -1, sub: subOwner(hs[0].object) };
-  return { ci: hc.length ? hc[0].object.userData.ci : -1, sub: -1 };
+  return pickRay();
 }
 // No hover picking (PERF.md #1, user): pointermove fired a recursive
 // raycast over every component mesh — during orbit drags too — costing
@@ -1899,10 +1917,16 @@ function select(i, doFly) {
   paintHighlights();
   syncGizmo();               // gizmo follows the selection (mode permitting)
   startSurges(i);              // cable power-surge: fires on every selection
+  // v0.169: an OPEN mode widget rides the new selection (it pops at the
+  // click point on canvas picks; list/menu selections kept it glued to the
+  // PREVIOUS part — user: "manipulation widget not correctly positioned")
+  if (modeBox.classList.contains('vis'))
+    showModeBox(0, 0, compObjs?.[i] || null);
   if (doFly) flyTo(i);         // camera fly is manual-only (canvas click / list dblclick)
 }
-// subgrid selection: info-only (no gizmo, no surge, no list row) — the
-// inspector swaps to the subgrid panel with mount + pivot rotation/offset
+// subgrid selection: info-only (no surge, no list row) — the
+// inspector swaps to the subgrid panel with mount + pivot rotation/offset;
+// the gizmo and an open mode widget ride the SUBGRID (v0.169)
 function selectSub(i) {
   selectedSub = i;
   selected = -1;
@@ -1911,6 +1935,8 @@ function selectSub(i) {
   buildList({ reveal: true });
   paintHighlights();
   syncGizmo();
+  if (modeBox.classList.contains('vis'))
+    showModeBox(0, 0, subGroup.children.find((o) => o.userData.sub === i) || null);
 }
 
 // ---------- rotate gizmo (Blender-style, v0.150; order fix v0.151) ----------
@@ -2799,6 +2825,12 @@ function paintHighlights() {
     bb.expandByScalar(0.07);                       // box stands OFF the part (v0.157)
     selBox.visible = isFinite(bb.min.x);
     if (selBox.visible) { boxEdges(bb, _selPts); selBox.geometry.setPositions(_selPts); }
+  } else if (selectedSub >= 0) {                   // v0.169: a SUBGRID gets the
+    const g = subGroup.children.find((x) => x.userData.sub === selectedSub);
+    const bb = g && new THREE.Box3().setFromObject(g);   // same golden box,
+    selBox.visible = !!bb && isFinite(bb.min.x);         // whole-content wireframe
+    if (selBox.visible) { bb.expandByScalar(0.07); boxEdges(bb, _selPts);
+      selBox.geometry.setPositions(_selPts); }
   } else selBox.visible = false;
   // twin co-selection box: the first twin's own golden box (corpus pairs
   // are 2-element; ALL twins get the x-ray glow, component and subgrid)
@@ -2821,7 +2853,7 @@ function paintHighlights() {
     f.mat.opacity = 0.6 * Math.pow(1 - (performance.now() - f.t0) / f.dur, 2);
   if (modeAnchor && modeBox.classList.contains('vis')) projectModeAnchor();
   styleGizmo();
-  if (selected >= 0) invalidate();          // keep the golden pulse alive
+  if (selected >= 0 || selectedSub >= 0) invalidate();   // keep the golden pulse alive
 }
 
 // ---------- cable power-surge + incandescent X-ray highlight ----------
@@ -2854,6 +2886,11 @@ function rebuildSelXray() {
     selPairs.push([o, ov]);
   });
   addTree(compObjs?.[selected]);
+  // v0.169 (user: "subgrid should highlight as a whole … so we understand
+  // its a subgrid"): selecting a SUBGRID glows its whole content tree —
+  // the merged block meshes + nested part proxies of the group.
+  if (selectedSub >= 0)
+    addTree(subGroup.children.find((x) => x.userData.sub === selectedSub));
   // twin co-selection: aligned twins glow WITH the selection (same shared,
   // pulsing x-ray material) — component twins and SUBGRID (Build) twins
   // alike; the twin set is re-evaluated whenever ⇄ flips or a pair drifts
@@ -3000,17 +3037,31 @@ function buildList(opts = {}) {
     for (const bi of builds) {
       const bc = comps[bi], nested = (bc.data?.components || []).filter(c => c.type !== 'Build');
       const ms = (masters.get(bi) || []).filter(i => comps[i]);
-      const nN = nested.filter(hits), nM = ms.filter(i => hits(comps[i]));
+      // v0.169: nested rows are INDICES (nested.filter(hits) returned
+      // component OBJECTS that then indexed nested[] — buildList threw and
+      // the whole tab died at the first subgrid with nested parts); and
+      // EVERY subgrid gets its own row — subgrids are mostly BLOCKS
+      // (hatch/gear-door panels), so a parts-only list made them invisible
+      // and unselectable (user: "a subgrid list is not properly visible,
+      // and I cant properly select them").
+      const nN = nested.map((c, k) => hits(c) ? k : -1).filter(k => k >= 0);
+      const nM = ms.filter(i => hits(comps[i]));
       const title = `⬓ Build[${bi}]` + (bc.data?.alias ? ` “${bc.data.alias}”` : '');
-      if (q && !nN.length && !nM.length && !title.toLowerCase().includes(q)) continue;
+      if (q && !nN.length && !nM.length && !title.toLowerCase().includes(q)
+          && !'subgrid'.includes(q)) continue;
       const grp = section('b' + bi, title + (ms.length
         ? ` ← ${ms.map(m => comps[m].type).join(', ')}` : ' (floating)'), nested.length);
+      const nB = (bc.data?.blocks || []).length;
+      const ds = mk(grp, bi, { type: `SUBGRID · ${nB} blocks` +
+        (nested.length ? `, ${nested.length} parts` : '') }, bi === selectedSub, true);
+      ds.dataset.b = bi;
+      ds.onclick = ds.ondblclick = () => selectSub(bi);
       for (const m of nM) mk(grp, m, comps[m], m === selected);
       for (const k of nN) {
         const d = mk(grp, k, nested[k], false, true);
         if (bi === selectedSub) d.classList.add('sel');
         d.dataset.b = bi;
-        d.onclick = () => selectSub(bi);             // nested content IS the subgrid
+        d.onclick = () => selectSub(bi);            // nested content IS the subgrid
         d.ondblclick = d.onclick;
       }
     }
@@ -4811,6 +4862,7 @@ export const hooks = {
   get applySubGizmo () { return applySubGizmo },
   get blockGroup () { return blockGroup },
   get blockWireObj () { return blockWireObj },
+  get buildList () { return buildList },
   get buildRealComponent () { return buildRealComponent },
   get camera () { return camera },
   get clearSurges () { return clearSurges },
@@ -4863,11 +4915,13 @@ export const hooks = {
   set knobRaw (v) { knobRaw = v },
   get labelsOn () { return labelsOn },
   get listTab () { return listTab },
+  set listTab (v) { listTab = v },
   get loadModelManifest () { return loadModelManifest },
   get markDirty () { return markDirty },
   get massModel () { return massModel },
   get mirrorGroup () { return mirrorGroup },
   get modeAnchor () { return modeAnchor },
+  get pickRay () { return pickRay },
   get modeBox () { return modeBox },
   get model () { return model },
   get needsRender () { return needsRender },
@@ -4894,6 +4948,7 @@ export const hooks = {
   get select () { return select },
   get selectSub () { return selectSub },
   get selected () { return selected },
+  get selectedSub () { return selectedSub },
   get serialize () { return serialize },
   get setFlowMode () { return setFlowMode },
   get setGizmoMode () { return setGizmoMode },

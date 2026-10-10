@@ -396,7 +396,79 @@ const POSTESTS = {
       if (!(ds < dc)) return `component hit ${dc.toFixed(2)} m before subgrid ${ds.toFixed(2)} m`;
       let o = hs[0].object, s = -1;
       while (o && s < 0) { s = o.userData.sub ?? -1; o = o.parent; }
-      return s === g.userData.sub || `hit routed to sub=${s}, want ${g.userData.sub}`;
+      if (s !== g.userData.sub) return `hit routed to sub=${s}, want ${g.userData.sub}`;
+      // v0.169 routing: a hit on VISIBLE subgrid content in front of any
+      // component must reach pickRay as the subgrid (the rule that survived
+      // the component-first change)
+      let wv = true;
+      for (let p = hs[0].object; p; p = p.parent) if (!p.visible) { wv = false; break; }
+      if (wv) {
+        H.ray.set(rc.ray.origin, rc.ray.direction);
+        const res = H.pickRay();
+        return res.sub === g.userData.sub
+          || `pickRay gave ${JSON.stringify(res)}, want sub=${g.userData.sub}`;
+      }
+      return true;
+    });
+    T('sublist', () => {              // v0.169: the by-subgrid tab lists
+      const prev = H.listTab;        // EVERY subgrid as its own row (the
+      H.listTab = 'sub';             // old nested-only listing hid the
+      let err = '';                   // blocks-only ones and THREW at the
+      try { H.buildList(); } catch (e) { err = String(e.message); }
+      const rows = [...H.$('complist').querySelectorAll('.grp > div[data-b]')]
+        .filter(d => d.querySelector('.t')?.textContent.startsWith('SUBGRID'));
+      const nB = H.model.data.components.filter(c => c.type === 'Build'
+        && c.data?.blocks?.length).length;
+      const okN = rows.length === nB;
+      rows[0].click();                // row click selects the SUBGRID
+      const okSel = H.selectedSub === +rows[0].dataset.idx && H.selectedSub >= 0;
+      H.listTab = prev; H.buildList(); H.select(-1); H.paintHighlights();
+      return (okN && okSel) || `rows=${rows.length}/${nB} sel=${H.selectedSub} err=${err}`;
+    });
+    T('subwidget', () => {            // v0.169 (user: "subgrid manipulation
+      const g = subs()[0];            // widget not correctly positioned when
+      if (!g) return 'no subgrids';   // selecting a subgrid from menu"): an
+      const o = H.compObjs.find(Boolean);   // open mode widget re-anchors to
+      if (!o) return 'no components';       // the subgrid group, not the old
+      H.showModeBox(50, 50, o);             // anchor.
+      const before = H.modeAnchor === o;
+      H.selectSub(g.userData.sub);
+      const after = H.modeAnchor === g;
+      H.hideModeBox(); H.select(-1); H.paintHighlights();
+      return (before && after) || `before=${before} after=${after}`;
+    });
+    T('subglow', () => {              // v0.169 (user: "subgrid should
+      const g = subs()[0];           // highlight as a whole/wireframe so we
+      if (!g) return 'no subgrids';  // understand its a subgrid"): x-ray
+      H.selectSub(g.userData.sub);   // glow over the WHOLE content tree +
+      H.scene.updateMatrixWorld(true); // the golden outline box around it
+      H.paintHighlights();           // re-paint with fresh world matrices
+      let n = 0, nMesh = 0;
+      g.traverse(o => { if (o.isMesh) nMesh++; });
+      for (const [o] of H.selPairs) {
+        let p = o;
+        while (p) { if (p === g) { n++; break; } p = p.parent; }
+      }
+      const bb = new THREE.Box3().setFromObject(g);
+      const c = bb.getCenter(new THREE.Vector3());
+      // golden box geometry = 12 edge segments; compare its EXTENT centre
+      // (start+end vertices — a start-points-only mean is corner-unbalanced)
+      const sp = H.selBox.geometry.getAttribute('instanceStart');
+      const ep = H.selBox.geometry.getAttribute('instanceEnd');
+      const mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
+      for (let i = 0; i < sp.count; i++)
+        for (const p of [sp, ep])
+          for (let a = 0; a < 3; a++) {
+            const v = [p.getX(i), p.getY(i), p.getZ(i)][a];
+            mn[a] = Math.min(mn[a], v); mx[a] = Math.max(mx[a], v);
+          }
+      const bc = new THREE.Vector3((mn[0] + mx[0]) / 2, (mn[1] + mx[1]) / 2, (mn[2] + mx[2]) / 2);
+      const okBox = H.selBox.visible && bc.distanceTo(c) < 0.15;
+      const dbg = `glow=${n}/${nMesh} box=${H.selBox.visible}`
+        + ` c=${c.toArray().map(v => v.toFixed(2))} bc=${bc.toArray().map(v => v.toFixed(2))}`
+        + ` sub=${H.selectedSub} g=${g.userData.sub} vis2=${H.selBox2.visible}`;
+      H.select(-1); H.paintHighlights();
+      return (n >= Math.min(nMesh, 2) && okBox) || dbg;
     });
     T('sub-info', () => {              // click-equivalent opens the subgrid panel
       if (!subs().length) return 'no subgrids';
@@ -807,6 +879,53 @@ function btnSuite(ctx) {
         return `${c.type}#${i} draws base2 on a single-sided button (z-fight ghost)`;
     }
     return true;
+  });
+  T('comp-pick', () => {              // v0.169 (user: "normal component
+    // selection prioritizes subgrids, making it impossible to select by
+    // looking at a component"): the invisible collider proxy GROUPS of a
+    // subgrid's nested parts (flagged !visible when the real model loads;
+    // the box mesh inside stays visible — the world-visible walk in
+    // pickRay is what demotes them) must not steal a click aimed at a
+    // component BEHIND them. The subgrid wins only on visible content
+    // (dolphin sub-pick-front) or when the ray hits no component.
+    // Generic; crafts with no subgrid-collider-behind-component fixture
+    // self-skip.
+    const g = H.subGroup.children.find(x =>
+      x.children.some(o => o.userData.wType && !o.visible));
+    if (!g) return true;             // no nested-real proxy on this craft
+    H.scene.updateMatrixWorld(true);
+    const cp = g.children.find(o => o.userData.wType && !o.visible)
+      .getWorldPosition(new THREE.Vector3());
+    const whole = new THREE.Box3();
+    for (const gg of [H.compGroup, H.blockGroup, H.hullGroup, H.subGroup])
+      whole.expandByObject(gg);
+    const out = cp.clone().sub(whole.getCenter(new THREE.Vector3())).normalize();
+    // shoot INWARD from just outside the proxy so it is the near hit and a
+    // component behind it the far hit (the proxy box has real depth, a
+    // from-centre outward shot never registers it)
+    H.ray.set(cp.clone().addScaledVector(out, 4), out.clone().negate());
+    const hs = H.ray.intersectObjects(H.subGroup.children, true);
+    const hc = H.ray.intersectObjects(H.compGroup.children, true);
+    if (!hs.length) return true;                               // no near proxy
+    let wv = true;
+    for (let p = hs[0].object; p; p = p.parent) if (!p.visible) { wv = false; break; }
+    if (wv) return true;                                       // visible block hit
+    if (!hc.length || hc[0].distance <= hs[0].distance) return true;  // nothing behind
+    // full-rule assertion: the invisible proxy demotes; if VISIBLE subgrid
+    // content (deck blocks) is closer than the component, the subgrid wins —
+    // only a clear shot (no visible subgrid content in front) must land on
+    // the component.
+    const res = H.pickRay();
+    const subOwnerOf = (x) => { for (let p = x; p; p = p.parent)
+      if (p.userData.sub !== undefined) return p.userData.sub; return -1; };
+    const visd = hs.filter(h => { for (let p = h.object; p; p = p.parent)
+      if (!p.visible) return false; return true; });
+    const dv = visd.length ? visd[0].distance : Infinity;
+    if (dv < hc[0].distance)
+      return res.sub === subOwnerOf(visd[0].object)
+        || `visible content ${dv.toFixed(2)} m: pickRay gave ${JSON.stringify(res)}`;
+    return (res.ci === hc[0].object.userData.ci && res.sub === -1)
+      || `pickRay gave ${JSON.stringify(res)}, want comp=${hc[0].object.userData.ci}`;
   });
 }
 async function runPosTest() {

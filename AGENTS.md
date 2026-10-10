@@ -370,9 +370,13 @@ indistinguishable from the pushed build (2026-10-09 user report).
      (v0.156 "more wind particles, from further away": spawn box inflated
      4 m, kill margin 9 m; `windpts=true`); canvas picking = deliberate
      press only (`click=true`),
-     and a subgrid hit CLOSER than any component routes the click to the
-     subgrid info panel (v0.153 — content of a subgrid and anything BEHIND it
-     lose; pinned in the dolphin postest, ISW has no subgrids);
+     and a subgrid hit on its VISIBLE content CLOSER than any component
+     routes the click to the subgrid info panel (v0.153; v0.169 re-scoped:
+     the invisible collider proxy groups of NESTED parts — flagged
+     !visible when their real model loads, box mesh inside stays visible —
+     count as WORLD-INVISIBLE (parent-chain walk) and only route when the
+     ray hit NO component, so a part you look at never loses to a box you
+     cannot see; pinned in the dolphin postest, ISW has no subgrids);
      streamlines are UNDISTURBED upstream of the body mid-plane (`inflow=true`)
      while the wake deficit behind it slows the flow >25% (`wake=true`);
      pitching the PilotSeat must NOT steer/slow the wind (heading-only,
@@ -665,13 +669,31 @@ indistinguishable from the pushed build (2026-10-09 user report).
    the plate 0.68 m behind the pivot = dolphin/Cede gap defect).
    v0.153 dolphin (3417786605) SUBGRID fixtures: one THREE.Group per Build
    subgrid (userData.sub), a ray from OUTSIDE the craft toward a door must
-   route to the SUBGRID (front priority — the hull behind it loses),
+   route to the SUBGRID (front priority — the hull behind it loses; v0.169:
+   the pin now also drives the SHIPPED pickRay routing — a world-visible
+   first hit must reach the subgrid),
    selectSub opens the info panel (Contents/Mount/Pivot rows) showing the
    DECODED master (sub-masters pin: 5 entries, Build[22]←SmallPivot), a
    pivot edit tracks the group live (via userData.base) with the file quat
    staying plain-numeric, and `subjoint-angle` spins that pivot's master to
    90°: the group must rotate EXACTLY 90° about the decoded axle axis
    (sign-sensitive dot>0.9999), swing about the pivot point, and return.
+   v0.169 subgrid-UX pins: `sublist` (the by-subgrid tab lists EVERY
+   subgrid as its own SUBGRID row — blocks-only ones included; the old
+   nested filter returned component OBJECTS that then indexed the array
+   (buildList THREW, the tab died at the first subgrid with nested parts)
+   — and the row click selects the subgrid); `subwidget` (an OPEN mode
+   widget re-anchors to the subgrid group on selectSub — menu selections
+   kept it glued to the previous part); `subglow` (subgrid selection glows
+   the WHOLE content tree via selPairs and gets the golden outline box —
+   compare the box geometry's EXTENT centre: a start-points-only mean is
+   corner-unbalanced; re-paint after updateMatrixWorld, matrixWorld may be
+   stale between pins). Generic `comp-pick` (every postest craft): a ray
+   through an invisible nested-proxy group (world-invisible) must NOT route
+   to its subgrid when a component is hit behind it (the gantry's nested
+   SpotLight/Dashboard proxies prove the non-vacuous path); a VISIBLE
+   subgrid block in front of the component (the giant's decks) keeps the
+   subgrid win.
    XYQ-615 (3803780241) decodes Build[41]←ToggleButton, Build[5]←Dashboard, and
    its Build[5]/[41] ±0.635 TWIN SUBGRID PAIR proves symmove-sub (one
    door dragged, its twin rides the mirrored delta — dolphin's symmove pin
@@ -709,8 +731,10 @@ indistinguishable from the pushed build (2026-10-09 user report).
 - UI = DevTools-style rows built by `row()`; new tunables get sliders, not prompts.
 - Component list (v0.156 tabs, v0.157 collapsible): two tabs (`#ltabs`,
   persisted `archean-list-tab`) — `by type` (alphabetical sections) and
-  `by subgrid` (one section per Build: decoded masters + indented nested
-  rows whose click = selectSub; then 'Hull & parts (no subgrid)'), ONE
+  `by subgrid` (one section per Build: its own SUBGRID row (v0.169 — the
+  subgrids are mostly BLOCKS, a parts-only listing made them invisible and
+  unselectable) + decoded masters + indented nested rows whose click =
+  selectSub; then 'Hull & parts (no subgrid)'), ONE
   search (`#filter`, position unchanged) filters both; rows carry the `.i`
   index badge, section headers are `.sec` (count spans must NOT use class
   `i` — uitest counts rows by it). Rows live inside a `.grp` container per
