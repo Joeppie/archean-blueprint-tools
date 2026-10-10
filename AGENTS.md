@@ -181,17 +181,25 @@ indistinguishable from the pushed build (2026-10-09 user report).
   pipes. See FORMAT.md.
 - `components[].type === 'Build'` = editor construction-site ghost, far outside
   the bbox — never render it as geometry.
-- **Subgrids** (v0.153, join decoded v0.154): Build components carrying nested
-  blueprints (doors/hatches) live as ONE Group per Build (`userData.sub`);
-  their attach transform is the Build component's own `position`/`orientation`
-  (dev-viewer composes nested content under the Build matrix; dolphin doors
-  ride real pivots 0/126/180° = saved mid-swing). The Mount is DECODED, not
+- **Subgrids** (v0.153, join decoded v0.154; placement model corrected v0.168):
+  Build components carrying nested blueprints (doors/hatches) live as ONE
+  Group per Build (`userData.sub`); the group BASE is the IDENTITY and nested
+  content sits at its PARENT-frame absolute coords. Build.position/
+  orientation = the builder's construction-site GHOST/bench pose (like the
+  top-level Build ghost, far outside the bbox), applied on top as a DISPLAY
+  offset — NOT an origin. (The old "BuildMatrix∘local" attach model
+  double-offsets absolute content: SU-57 gear doors rendered x=±39 =
+  "exploded out", and the subgrid gizmo parked at the group origin = the
+  Build bench pose, metres from its doors = "rotation on the dolphin doesn't
+  work".) The Mount is DECODED, not
   guessed: `composite_builds[].slaveBuildId` = the Build's index in the
   FLATTENED component array (nested content numbers BEFORE its Build,
   recursive subtree sizes — dev readBuild order); exact for 342/342 corpus
   entries. Masters are any part type (hinges/pivots kinematic, dashboards/
   RTGs/batteries static hosts, metres away); joint state lives on the MASTER
-  (`angle` DEGREES / `pos` metres). **v0.157 joint drive:** masters with a
+  (`angle` DEGREES / `pos` metres; dolphin doors ride real pivots 0/126/180°
+  via the SmallPivot master angle, NOT the Build pose). **v0.157 joint drive:**
+  masters with a
   manifest `joints[0]` (SmallHinge/SmallPivot/Aileron/LinearTrack — NOT
   Lamp/SpotLight, whose joints = [] and whose `angle` is the light aim)
   ANIMATE their subgrid: axis = viewQuat(master)·axleEuler(ZYX)·x̂, pivot =
@@ -199,10 +207,15 @@ indistinguishable from the pushed build (2026-10-09 user report).
   p' = pivot + R(axis,angle)·(base.p−pivot) (+axis·pos), q' = R·base.q
   (`syncSubJoints()`, runs from buildSubgrids + every markDirty; the panel
   Mount row exposes editable joint-angle/slide sliders that write the
-  master's data verbatim). Build attach pose lives in `g.userData.base`
-  {p,q} — pivot rows edit BASE, never the live transform. Pins: selftest
+  master's data verbatim). Subgrid display pose lives in `g.userData.base`
+  {p,q} (identity at load) — pivot rows + gizmo edit BASE, never the live
+  transform; a pure SPIN must not rewrite the ghost position fields (they are
+  the Build twin's symmetry key — applySubGizmo gates the write on a nonzero
+  move delta). Pins: selftest
   `subjoin`, dolphin/XYQ postest sub-master fixtures, dolphin
   `subjoint-angle` (sign-sensitive 90° spin about the decoded axis),
+  dolphin `subgizmo-rot` (v0.168 WYSIWYG: a gizmo ring spin orbits the
+  subgrid's CONTENT CENTRE, spins it in place, lever > 5 m, exact restore),
   3732302108 `subjoint-pos` (LinearTrack slide ∥ axle). See FORMAT.md
   §Subgrids.
 - Palette slots: `data.colors[256]`, entry = {r,g,b 0-255, opacity 0-15,
@@ -515,18 +528,25 @@ indistinguishable from the pushed build (2026-10-09 user report).
      translate = WORLD (the arrows stay axis-aligned; user: "the move
      gizmo rotates and becomes non axis aligned, thats bad"), rotate =
      LOCAL rings (the pinned intrinsic model). movecfg pin asserts the
-     space flip toggles with the mode. v0.159: the gizmo ATTACHES TO
+     space flip toggles with the mode. v0.159/v0.168: the gizmo ATTACHES TO
      SUBGRIDS TOO — selecting a subgrid attaches TransformControls to the
-     GROUP itself, and its translate space is LOCAL ("EXCEPT for subgrid,
-     respect that rotation :)"): the arrows follow the subgrid's attach
-     pose + joint swing. objectChange branches on tctl.object: subgrid
-     groups write back through the JOINT INVERSE (subtract pivot/slide,
+     shared scene-root PROXY, which rides the subgrid's CONTENT bbox CENTRE
+     (v0.168: NOT the group — with the identity base the group origin is the
+     parent grid origin, metres from the doors), and its translate space is
+     LOCAL ("EXCEPT for subgrid, respect that rotation :)"): the arrows
+     follow the subgrid's attach pose + joint swing. objectChange branches on
+     the selected subgrid: translate maps the proxy DELTA onto the group pose
+     and writes back through the JOINT INVERSE (subtract pivot/slide,
      rotate −a, reverse order) into g.userData.base, then the Build
      component (position mirror + rawFromView quat) — the same contract
-     as the panel's pivot rows. Pins: gizmatest movespace (MEASURED
+     as the panel's pivot rows; ROTATE (subSpin) spins the group about the
+     captured content CENTRE (p'=C+R(dq)·(p−C), q'=R(dq)·q0) — the WYSIWYG
+     pivot rule (the identity-base origin spin was a huge lever swing).
+     Pins: gizmatest movespace (MEASURED
      widget nodes: translate arrows proxy-INVARIANT, rings proxy-FOLLOWING)
      + dolphin subgizmo-move (local attach + sign-sensitive joint-inverse
-     writeback on the 90°-open pivot door). The explode/assembly
+     writeback on the 90°-open pivot door) + dolphin subgizmo-rot (v0.168:
+     ring spin orbits the content centre, in-place, exact restore). The explode/assembly
      feature (v0.140/141) was
      REMOVED in v0.142 (user: "a catastrophe") — do not resurrect.
      thrust display + wind model: every DIRECTIONAL propulsor (THRUST

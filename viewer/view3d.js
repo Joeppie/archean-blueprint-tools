@@ -1080,13 +1080,23 @@ function buildSubgrids() {
     if (c.type !== 'Build' || !c.data?.blocks?.length) return;
     const g = new THREE.Group();
     g.userData.sub = bi; g.userData.subn = ++sn;
-    // The group carries the Build attach transform CONJUGATED into view space:
-    // V·T(bp)·R(q)·V = T(viewPos(bp))·R(viewQuat(q)) — a PROPER rotation, so
-    // the group gets NO scale.z=−1: the children already embed the single
-    // z-mirror in their own placement (a second mirror would un-mirror them).
-    g.position.copy(viewPos(c.position));
-    g.quaternion.copy(viewQuat(c.orientation));
-    g.userData.base = { p: g.position.clone(), q: g.quaternion.clone() };   // Build attach pose (v0.157 joints compose on top)
+    // v0.168 BASE = IDENTITY (user: "SU-57 looks like parts of it exploded
+    // out" + "rotation on the dolphin doesnt work as it should for
+    // subgrids/pivots"): the nested data.blocks/components are stored in the
+    // PARENT's absolute grid coords — sealStats proves it (nested hatch cells
+    // flood-seal the dolphin cabin straight off pos+12f−5.5), and masters'
+    // data.angle=0 (closed) agrees with "the game stores subgrids CLOSED".
+    // The Build component's own position/orientation is the builder's bench
+    // pose (same construction-site ghost as the top-level Build = far outside
+    // the bbox, never rendered) — composing it on top of absolute content
+    // double-offsets it (SU-57's gear doors: bench at x=±21 ⇒ rendered at
+    // x=±39; dolphin gizmos parked 51 m from their doors). The kinematic
+    // joint chain J (syncSubJoints) composes on top of THIS identity base,
+    // so a door at angle 0 renders closed at its stored cells and swings
+    // about the master's pivot exactly as the joint sliders say.
+    g.position.set(0, 0, 0);
+    g.quaternion.identity();
+    g.userData.base = { p: g.position.clone(), q: g.quaternion.clone() };   // attach-offset pose (v0.157 joints compose on top; pivot rows + gizmo edit this)
     subGroup.add(g);
     addBlockMeshes(g, c.data.blocks, new THREE.Vector3());
     for (const sc of c.data.components || []) {
@@ -1190,10 +1200,7 @@ function subJointChain(g) {
 // (position mirrored, orientation via the convention-aware rawFromView) —
 // the same contract as the panel's pivot rows, so a door dragged in world
 // space lands in the file exactly like a slider edit.
-function applySubGizmo(g) {
-  const bc = model.data.components[g.userData.sub];
-  if (!bc) return;
-  const p = g.position.clone(), q = g.quaternion.clone();
+function subInvChain(g, p, q) {   // live world group pose → base (undo joint chain)
   const chain = subJointChain(g);
   for (let i = chain.length - 1; i >= 0; i--) {
     const { axis, pivot, a, s } = chain[i];
@@ -1203,6 +1210,12 @@ function applySubGizmo(g) {
     else if (s) p.addScaledVector(axis, -s);
     if (a) q.premultiply(new THREE.Quaternion().setFromAxisAngle(axis, -a * Math.PI / 180));
   }
+}
+function applySubGizmo(g) {
+  const bc = model.data.components[g.userData.sub];
+  if (!bc) return;
+  const p = g.position.clone(), q = g.quaternion.clone();
+  subInvChain(g, p, q);
   // twin subgrids (door pairs!) ride the mirrored delta (v0.160)
   const d = { x: p.x - g.userData.base.p.x, y: p.y - g.userData.base.p.y,
     z: p.z - g.userData.base.p.z };
@@ -1213,22 +1226,45 @@ function applySubGizmo(g) {
   const tw = symAllowed(g.userData.sub);
   const dq = q.clone().multiply(g.userData.base.q.clone().invert());  // v0.165 view spin
   g.userData.base.p.copy(p); g.userData.base.q.copy(q);
-  bc.position.x = p.x; bc.position.y = p.y; bc.position.z = -p.z;
+  // v0.168: the ghost position fields are the subgrid pair's symmetry key
+  // (Builds have no meshes) — a PURE SPIN (no move delta) must not rewrite
+  // them, or the spin itself de-aligns the pair mid-gesture (twins vanish
+  // after the first event: twin spins/restore break, symTwinIndex rots).
+  const moved = Math.abs(d.x) + Math.abs(d.y) + Math.abs(d.z) > 1e-12;
+  if (moved) { bc.position.x = p.x; bc.position.y = p.y; bc.position.z = -p.z; }
   bc.orientation = rawFromView({ userData: {} }, q);
   for (const [j, m] of tw) {
     const sx = m & 1 ? -1 : 1, sy = m & 2 ? -1 : 1, sz = m & 4 ? -1 : 1;
+    const md = new THREE.Quaternion(sx * sy * sz * sx * dq.x,
+      sx * sy * sz * sy * dq.y, sx * sy * sz * sz * dq.z, dq.w);  // mirror-twin spin
     const tb = model.data.components[j];
-    tb.position.x += sx * d.x; tb.position.y += sy * d.y; tb.position.z += sz * d.z;
+    if (moved) {
+      tb.position.x += sx * d.x; tb.position.y += sy * d.y; tb.position.z += sz * d.z;
+    }
     const tg = subGroup.children.find(o => o.userData.sub === j);
-    if (tg) { tg.userData.base.p.x += sx * d.x; tg.userData.base.p.y += sy * d.y;
-      tg.userData.base.p.z += sz * d.z;
+    if (tg) {
       // v0.165/166: twin subgrids ride the MIRROR-TWIN spin (conjugated
       // by the pair's mask, see symPropagateRot) and their file
-      // quaternion follows the twin's new base pose
-      tg.userData.base.q.premultiply(
-        new THREE.Quaternion(sx * sy * sz * sx * dq.x,
-          sx * sy * sz * sy * dq.y, sx * sy * sz * sz * dq.z, dq.w));
-      tb.orientation = rawFromView({ userData: {} }, tg.userData.base.q); }
+      // quaternion follows the twin's new base pose.
+      // v0.168: GIZMO spins (pivot captured at mouseDown, symRotPiv) orbit
+      // the twin's own content centre — p' = c + R(md)·(p−c) on the LIVE
+      // group pose, then the same joint-inverse writeback as the self path
+      // (spins the twin's doors IN PLACE at their twin centre, not about
+      // the parent grid origin; slider edits carry no pivot ⇒ origin spin).
+      const c = symRotPiv.get(j);
+      if (c) {
+        const tp = tg.position.clone().sub(c).applyQuaternion(md).add(c);
+        const tq = tg.quaternion.clone().premultiply(md);
+        subInvChain(tg, tp, tq);
+        tg.userData.base.p.copy(tp); tg.userData.base.q.copy(tq);
+        tb.position.x = tp.x; tb.position.y = tp.y; tb.position.z = -tp.z;
+      } else {
+        tg.userData.base.p.x += sx * d.x; tg.userData.base.p.y += sy * d.y;
+        tg.userData.base.p.z += sz * d.z;
+        tg.userData.base.q.premultiply(md);
+      }
+      tb.orientation = rawFromView({ userData: {} }, tg.userData.base.q);
+    }
   }
   syncSubJoints();
   markDirty();
@@ -1941,22 +1977,49 @@ function gizmoUnwrap(raw, prevRaw, accum) {
   d = Math.atan2(Math.sin(d), Math.cos(d));        // wrap into (−π, π]
   return accum + d;
 }
+// subgrid gizmo gesture state (v0.168): the proxy rides the subgrid's
+// content CENTRE (syncGizmoPose), so drags map through these captures:
+// translate = group pose + (proxy − proxy0); rotate = spin about the
+// content centre, p' = C + R(dq)·(p0 − C), q' = R(dq)·q0 (WYSIWYG pivot,
+// same rule as components v0.167 — the identity-base group origin is the
+// parent grid origin, NOT the part).
+const subGizP0 = new THREE.Vector3(), subGizQ0 = new THREE.Quaternion(),
+  subGizX0 = new THREE.Vector3(), subGizC = new THREE.Vector3();
+let subGizOn = false;
+const _subD = new THREE.Vector3(), _subDq = new THREE.Quaternion();
+function subCentre (g) {
+  scene.updateMatrixWorld(true);
+  const bb = new THREE.Box3().setFromObject(g);
+  return isFinite(bb.min.x) ? bb.getCenter(new THREE.Vector3()) : null;
+}
+function subSpin(g, target) {
+  const dq = _subDq.copy(knobQ0).invert().multiply(target);
+  g.quaternion.copy(dq).multiply(subGizQ0);
+  g.position.copy(subGizP0).sub(subGizC).applyQuaternion(dq).add(subGizC);
+  return applySubGizmo(g);
+}
 tctl.addEventListener('objectChange', () => {
-  // subgrid target (v0.159): the gizmo is attached to the GROUP, whose live
-  // pose = joint composition over the Build attach — write back through the
+  // subgrid target (v0.159; proxy-borne v0.168): the user drags the proxy
+  // at the content centre — map it onto the GROUP pose (translate = proxy
+  // delta, rotate = spin about the captured centre), then write through the
   // joint inverse into the Build component (base), not into a comp index.
-  const g = tctl.object && tctl.object !== gizmoProxy
-    && tctl.object.userData.sub !== undefined ? tctl.object : null;
-  if (tctl.mode === 'translate')
-    return g ? applySubGizmo(g) : applyGizmoPosition(gizmoProxy.position);
-  const P = g ? g.quaternion : gizmoProxy.quaternion;
+  const g = tctl.object === gizmoProxy && selectedSub >= 0
+    ? subGroup.children.find(x => x.userData.sub === selectedSub) : null;
+  if (tctl.mode === 'translate') {
+    if (g) {
+      g.position.copy(subGizP0).add(_subD.copy(gizmoProxy.position).sub(subGizX0));
+      return applySubGizmo(g);
+    }
+    return applyGizmoPosition(gizmoProxy.position);
+  }
+  const P = gizmoProxy.quaternion;
   _knobQ.copy(knobQ0).invert().multiply(P);         // raw relative spin q0⁻¹·P
   const len = Math.hypot(_knobQ.x, _knobQ.y, _knobQ.z);
-  if (len < 1e-4) { if (g) return applySubGizmo(g); return applyGizmoOrientation(P); }  // snap
+  if (len < 1e-4) { if (g) return subSpin(g, P); return applyGizmoOrientation(P); }  // snap
   if (!knobAxis) {                                 // first real spin: the raw
     knobAxis = _knobA.set(_knobQ.x, _knobQ.y, _knobQ.z).normalize();   // axis IS the ring axis
     knobRaw = 2 * Math.atan2(len, _knobQ.w); knobAcc = knobRaw;
-    if (g) return applySubGizmo(g);
+    if (g) return subSpin(g, P);
     return applyGizmoOrientation(P);
   }
   const s = _knobA.x * knobAxis.x + _knobA.y * knobAxis.y + _knobA.z * knobAxis.z;
@@ -1964,7 +2027,7 @@ tctl.addEventListener('objectChange', () => {
   knobAcc = gizmoUnwrap(raw, knobRaw, knobAcc); knobRaw = raw;
   const qF = _knobQ.copy(knobQ0).multiply(
     new THREE.Quaternion().setFromAxisAngle(knobAxis, knobAcc));
-  if (g) { g.quaternion.copy(qF); return applySubGizmo(g); }
+  if (g) return subSpin(g, qF);
   applyGizmoOrientation(qF);
 });
 tctl.addEventListener('mouseDown', () => {
@@ -1977,9 +2040,24 @@ tctl.addEventListener('mouseDown', () => {
   // bbox centre — the mirror twin of a spin about the self centre is a
   // spin about the mirrored centre, and the mirrored self-centre IS the
   // twin's centre (positions are mirrored, geometry identical/mirrored).
-  gizPivotL = null; symRotPiv.clear();
+  gizPivotL = null; symRotPiv.clear(); subGizOn = false;
   const go = compObjs?.[selected];
-  if (go && tctl.mode === 'rotate') {
+  const gs = selectedSub >= 0
+    ? subGroup.children.find((x) => x.userData.sub === selectedSub) : null;
+  if (gs) {                                  // v0.168: subgrid gesture
+    subGizOn = true;
+    subGizP0.copy(gs.position); subGizQ0.copy(gs.quaternion);
+    subGizX0.copy(gizmoProxy.position);
+    const c = subCentre(gs);
+    if (c) subGizC.copy(c); else subGizC.copy(gs.position);
+    if (tctl.mode === 'rotate')
+      for (const [j] of symAllowed(selectedSub)) {
+        const tg = subGroup.children.find(x => x.userData.sub === j);
+        if (!tg) continue;
+        const c2 = subCentre(tg);
+        if (c2) symRotPiv.set(j, c2);
+      }
+  } else if (go && tctl.mode === 'rotate') {
     scene.updateMatrixWorld(true);
     gizPivotL = gizmoCentre(selected) ?? go.position.clone().add(_gizOff);
     for (const [j] of symAllowed(selected)) {
@@ -1993,6 +2071,7 @@ tctl.addEventListener('mouseDown', () => {
 tctl.addEventListener('mouseUp', () => {
   controls.enabled = true;
   gizPivotL = null; symRotPiv.clear();   // pivots are per-gesture (v0.167)
+  subGizOn = false;                      // v0.168: ditto for subgrid state
   buildInspector();                    // rebases the euler sliders on the new pose
   paintHighlights();
   invalidate();
@@ -2259,22 +2338,35 @@ function gizmoCentre (idx) {
 }
 function syncGizmoPose() {
   const o = compObjs?.[selected];
-  if (!o) return;
+  if (o) {
+    scene.updateMatrixWorld(true);
+    const bb = new THREE.Box3().setFromObject(o);
+    for (const r of realMap.get(selected) || []) bb.expandByObject(r);
+    if (isFinite(bb.min.x)) gizmoProxy.position.copy(bb.getCenter(_gcen));
+    else gizmoProxy.position.setFromMatrixPosition(o.matrixWorld);
+    _gizOff.copy(gizmoProxy.position).sub(o.getWorldPosition(_gow));
+    if (!tctl.dragging) gizmoProxy.quaternion.copy(o.getWorldQuaternion(_gq));
+    return;
+  }
+  // v0.168: subgrids ride the SAME proxy (was: attach to the GROUP, v0.159)
+  // — with the identity base the group origin is the parent grid origin, so
+  // attaching there parked the rings kilometres from the doors; the proxy
+  // rides the content's VISIBLE centre, rings concentric with the part.
+  const g = selectedSub >= 0
+    ? subGroup.children.find((x) => x.userData.sub === selectedSub) : null;
+  if (!g) return;
   scene.updateMatrixWorld(true);
-  const bb = new THREE.Box3().setFromObject(o);
-  for (const r of realMap.get(selected) || []) bb.expandByObject(r);
+  const bb = new THREE.Box3().setFromObject(g);
   if (isFinite(bb.min.x)) gizmoProxy.position.copy(bb.getCenter(_gcen));
-  else gizmoProxy.position.setFromMatrixPosition(o.matrixWorld);
-  _gizOff.copy(gizmoProxy.position).sub(o.getWorldPosition(_gow));
-  if (!tctl.dragging) gizmoProxy.quaternion.copy(o.getWorldQuaternion(_gq));
+  if (!tctl.dragging) gizmoProxy.quaternion.copy(g.quaternion);
 }
 function syncGizmo() {
   const o = selected >= 0 ? compObjs?.[selected] : null;
-  const g = selectedSub >= 0
-    ? subGroup.children.find(x => x.userData.sub === selectedSub) : null;
-  const target = o ? gizmoProxy : g;
+  const s = selectedSub >= 0
+    && subGroup.children.some(x => x.userData.sub === selectedSub);
+  const target = (o || s) ? gizmoProxy : null;
   if (gizmoOn && target && (gizmoMode === 'move' || gizmoMode === 'rotate')) {
-    if (o) syncGizmoPose();
+    syncGizmoPose();
     tctl.attach(target);
     // v0.159: SPACE per TARGET + mode — component move = WORLD (v0.158),
     // SUBGRID move = LOCAL: the subgrid's attach/joint rotation is its
@@ -5106,7 +5198,7 @@ const POSTESTS = {
       if (!g) return 'no SmallPivot-mastered subgrid';
       selectSub(g.userData.sub);
       setGizmoMode('move');
-      const attached = tctl.object === g && tctl.space === 'local';
+      const attached = tctl.object === gizmoProxy && tctl.space === 'local';
       const e = (subMasterEntries().get(g.userData.sub) || [])
         .find(e => model.data.components[e.component]?.type === 'SmallPivot');
       const mc = model.data.components[e.component];
@@ -5128,6 +5220,72 @@ const POSTESTS = {
       syncSubJoints(); tctl.detach();
       return (attached && okPos)
         || `attach=${attached} d=${d.toArray().map(v => v.toFixed(3))} want=${want.toArray().map(v => v.toFixed(3))}`;
+    });
+    T('subgizmo-rot', () => {         // v0.168 (user: "rotation on the
+      // dolphin doesnt work as it should for subgrids/pivots"): with the
+      // identity base the group origin is the PARENT GRID ORIGIN, so a raw
+      // ring spin spins the door about that origin — a 25 m lever swing.
+      // The gizmo spin must orbit the subgrid's CONTENT CENTRE (rings are
+      // drawn there): emulate the gesture (mouseDown capture + proxy spin +
+      // writeback) and pin radius-preserving orbit + exact restore.
+      const g = subs().find(o => (subMasterEntries().get(o.userData.sub) || [])
+        .some(e => model.data.components[e.component]?.type === 'SmallPivot'));
+      if (!g) return 'no SmallPivot-mastered subgrid';
+      selectSub(g.userData.sub);
+      setGizmoMode('rotate');
+      const attached = tctl.object === gizmoProxy;
+      scene.updateMatrixWorld(true);
+      const C = subCentre(g);
+      const p0 = g.position.clone(), q0 = g.quaternion.clone();
+      const lever = C.distanceTo(p0);
+      // mouseDown emulation (same captures the real listener takes)
+      knobQ0.copy(gizmoProxy.quaternion);
+      knobAxis = null; knobRaw = knobAcc = 0;
+      subGizP0.copy(g.position); subGizQ0.copy(g.quaternion);
+      subGizX0.copy(gizmoProxy.position); subGizC.copy(C);
+      gizPivotL = null; symRotPiv.clear();
+      // ring drag: intrinsic +0.3 rad about the ring the proxy is drawn
+      // with (world ŷ = base-local q0⁻¹·ŷ — the knob path's postmultiply)
+      const loc = new THREE.Vector3(0, 1, 0).applyQuaternion(q0.clone().invert());
+      gizmoProxy.quaternion.copy(knobQ0).multiply(
+        new THREE.Quaternion().setFromAxisAngle(loc, 0.3));
+      subSpin(g, gizmoProxy.quaternion);
+      scene.updateMatrixWorld(true);
+      const dqg = g.quaternion.clone().multiply(q0.clone().invert());
+      const ang = 2 * Math.atan2(Math.hypot(dqg.x, dqg.y, dqg.z), Math.abs(dqg.w));
+      const okQ = Math.abs(ang - 0.3) < 1e-6
+        && dqg.y > 0.1494 && dqg.y < 0.1495          // world ŷ spin (sign-sensitive)
+        && Math.abs(dqg.x) < 1e-9 && Math.abs(dqg.z) < 1e-9;
+      const okR = Math.abs(g.position.distanceTo(C) - p0.distanceTo(C)) < 1e-9
+        && p0.distanceTo(g.position) > 0.25 * lever;  // a real lever swing
+      const bb = new THREE.Box3().setFromObject(g);
+      const c1 = bb.getCenter(new THREE.Vector3());
+      const dC = c1.distanceTo(C);
+      // The AABB of rotated ASYMMETRIC content grows at second order in θ
+      // (bbox of a union of rotated boxes ⊃ rotated bbox), so the envelope
+      // centre wobbles a few cm at 0.3 rad over a multi-metre panel — the
+      // WYSIWYG guarantee is spin IN PLACE at C, pinned at 10 cm.
+      const okC = dC < 0.1;
+      const bc = model.data.components[g.userData.sub];
+      const rf = rawFromView({ userData: {} }, g.quaternion);
+      const of = bc.orientation;
+      const okFile = Math.abs(of.w - rf.w) < 1e-9 && Math.abs(of.x - rf.x) < 1e-9
+        && Math.abs(of.y - rf.y) < 1e-9 && Math.abs(of.z - rf.z) < 1e-9;
+      // counter-spin as a FRESH gesture (real mouseDown re-captures the
+      // base): reset subGiz* + knobQ0 onto the CURRENT pose, then spin the
+      // proxy so subSpin's dq = knobQ0⁻¹·target = Rz(−0.3) world-ŷ.
+      subGizP0.copy(g.position); subGizQ0.copy(g.quaternion);
+      subGizC.copy(C); knobQ0.copy(g.quaternion);
+      gizmoProxy.quaternion.copy(knobQ0).premultiply(
+        new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -0.3));
+      subSpin(g, gizmoProxy.quaternion);
+      const okBack = g.position.distanceTo(p0) < 1e-9
+        && Math.abs(g.quaternion.dot(q0)) > 1 - 1e-9;
+      gizmoProxy.quaternion.copy(q0);   // park the proxy back on the part
+      subGizOn = false; tctl.detach(); select(-1); paintHighlights();
+      return (attached && lever > 5 && okQ && okR && okC && okFile && okBack)
+        || `attach=${attached} lever=${lever.toFixed(1)} Q=${okQ} r=${okR} `
+        + `centre=${dC.toExponential(1)} file=${okFile} back=${okBack}`;
     });
     T('symmove', () => {             // v0.160: a gizmo move propagates to the
       // left-right TWIN component (dolphin's twin tail-door hinges ±1.125):
@@ -5192,7 +5350,10 @@ const POSTESTS = {
       g.position.x += 0.4;                          // world +x drag
       applySubGizmo(g);
       const cb = model.data.components[41], cc = model.data.components[5];
-      const okp = Math.abs(cb.position.x - (b0.x + 0.4)) < 1e-9
+      // v0.168: subgrid moves write the BUILD fields = the live base offset
+      // (identity at load, ghost/bench values live only in the loaded file
+      // fields); twins ride the mirrored delta on their file fields.
+      const okp = Math.abs(cb.position.x - 0.4) < 1e-9
         && Math.abs(cc.position.x - (c0.x - 0.4)) < 1e-9
         && Math.abs(tg.userData.base.p.x - (t0 - 0.4)) < 1e-9;
       const msg = `selfΔ=${(cb.position.x - b0.x).toFixed(3)} twinΔ=${(cc.position.x - c0.x).toFixed(3)}`
@@ -5216,7 +5377,7 @@ const POSTESTS = {
       selectSub(41); setGizmoMode('move');
       symOn = false;
       g.position.x += 0.3; applySubGizmo(g);
-      const offOk = Math.abs(cb.position.x - (b0.x + 0.3)) < 1e-9
+      const offOk = Math.abs(cb.position.x - 0.3) < 1e-9
         && Math.abs(cc.position.x - c0.x) < 1e-12;
       cb.position.x = b0.x; g.userData.base.p.x -= 0.3;
       syncSubJoints();
@@ -5224,7 +5385,7 @@ const POSTESTS = {
       symOn = true;
       const drifted = symAllowed(41).length === 0;
       g.position.x += 0.4; applySubGizmo(g);
-      const autoOk = Math.abs(cb.position.x - (b0.x + 0.4)) < 1e-9
+      const autoOk = Math.abs(cb.position.x - 0.4) < 1e-9
         && Math.abs(cc.position.x - c0.x) < 1e-12;
       cb.position.x = b0.x; cb.position.y = b0.y; cb.position.z = b0.z;
       g.userData.base.p.x -= 0.4;
@@ -5288,7 +5449,9 @@ const POSTESTS = {
       tctl.detach(); setGizmoMode('translate'); selectSub(-1); symOn = a0;
       return (okRot && okFile && okBack && okX && okBackX)
         || `rot=${okRot}(${dj.z.toFixed(4)}) file=${okFile} back=${okBack}`
-        + ` x=${okX}(${djx.x.toFixed(4)}) backX=${okBackX}`;
+        + `(${tg.userData.base.q.toArray().map(v => v.toFixed(4))}|`
+        + `${qB0.toArray().map(v => v.toFixed(4))}) x=${okX}(${djx.x.toFixed(4)})`
+        + ` backX=${okBackX} tw=${JSON.stringify(symAllowed(41))}`;
     });
   },
 };

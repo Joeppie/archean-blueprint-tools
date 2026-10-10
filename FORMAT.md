@@ -745,13 +745,22 @@ transcribed). Corpus: every craft with subgrids has exactly one
 `data.composite_builds` entry per Build component (5 in dolphin; 1 in Jimmy's
 Adventure = 3334698274).
 
-- **Stored at grid coords**: the nested `data.blocks` use the parent's cell
-  encoding (a CLOSED hatch seals the hull — see §sealStats). The Build
-  component's own `position`/`orientation` is then applied on top: dev viewer
-  composes nested content as `world = BuildMatrix ∘ local` (readBuild
-  recursion), and the viewer's per-subgrid group does the same (group =
-  `viewPos(pos)` + `viewQuat(q)`, NO extra scale.z=−1 — the children already
-  embed the single z-mirror; identity pivot ⇒ bit-identical to flat drawing).
+- **Stored at grid coords, in the PARENT frame (v0.168 correction):** the nested
+  `data.blocks`/`data.components` are authored in the PARENT craft's cell/
+  metre coords (a CLOSED hatch seals the hull at its parent cell — see
+  §sealStats, which reads `pos+12f−5.5` straight off the nested blocks). They
+  are NOT local to the Build. The viewer's per-subgrid group base is therefore
+  the IDENTITY (children `viewPos(sc.position)`), NOT `viewPos(Build.position)`
+  — composing the Build pose on top double-offsets the content. This was the
+  "SU-57 parts exploded out" bug (SU-57 gear doors sit at bench x=±21 ⇒
+  rendered x=±39) and the "rotation on the dolphin/subgrids doesn't work"
+  report (the group origin WAS the Build bench pose, so gizmos parked metres
+  from the doors). Build.position/orientation are the builder's construction-
+  site GHOST pose (same convention as the top-level `Build` = far outside the
+  bbox, never rendered as geometry) — a DISPLAY offset for the subgrid, applied
+  on top of the identity base (so a builder who moved the whole subgrid
+  preserves the nested-content offsets), NOT an origin. The per-subgrid group
+  carries no scale.z=−1 (the children already embed the single z-mirror).
 - **`composite_builds[]` = `{component, slaveBuildId}` — the join IS decodable:**
   `slaveBuildId` = the index the Build component carries in the FLATTENED
   component array, counting nested content recursively **before** the Build
@@ -772,18 +781,22 @@ Adventure = 3334698274).
   with 4 dashboards hangs off an RTG 13 m away. Distance is DISPLAY info,
   never a matching heuristic. One dolphin entry's master index (67) is out
   of range = deleted editor reference; the viewer shows it as such.
-- The Build's own `position`/`orientation` are the **pivot** (offset in m +
-  rotation) the subgrid rides: dolphin's five doors carry pivots 0°, 125.9°
-  and 180° (the builder saved them mid-swing-open, pivot at the hinge),
-  XYQ-615's pair ±24.3° offset ±0.635 m, Jimmy's gantry 54.0° X +
-  (0, −10.14, −8.86). Build.occupancies = ONE cell (the hinge/anchor cell),
-  NOT a mirror of the nested blocks.
+- The Build's own `position`/`orientation` = the builder's ghost pose (above).
+  Measured values that read like hinge pivots (dolphin doors 0°, 125.9°,
+  180°; XYQ pair ±0.635 m; Jimmy's gantry 54.0° X + (0, −10.14, −8.86)) are
+  the bench poses at which the sub-assemblies were built — the MID-SWING
+  display of the dolphin doors is the SmallPivot masters' `data.angle`, the
+  kinematic drive below. Build.occupancies = ONE cell (the ghost/anchor
+  cell), NOT a mirror of the nested blocks. Ghost positions are also the
+  SYMMETRY-PAIR key for Build twins (XYQ doors ±0.635 ⇒ x-mirror pair), so
+  a pure subgrid SPIN must not rewrite them (applySubGizmo gates the ghost
+  position write on a nonzero move delta — v0.168, XYQ `symrot-sub`).
 - **Kinematic masters DRIVE their subgrid (v0.157).** A master whose game
   `.ini` declares a `[JOINT]` node (SmallHinge, SmallPivot, Aileron,
   LinearTrack, … — manifest `joints[0]`) has its live joint state in `data`
   (`angle` DEGREES / `pos` metres), and the dev viewer composes nested
   content UNDER that joint node — so the subgrid display pose is the joint
-  offset composed with the Build attach:
+  offset composed on top of the base pose:
   `axis = R(viewQuat(master)) · axleEuler(ZYX) · x̂` (the axle node's own
   spin axis — same local-X convention the aileron/wheel display uses),
   `pivot = viewPos(master) + R(viewQuat) · mirror_z(axle.position)`,
@@ -798,11 +811,15 @@ Adventure = 3334698274).
   gets editable joint sliders (angle °/slide m) that write the master's
   `data` verbatim and animate the subgrid live; Pivot offset +
   rotation rows editing the Build fields live (byte-true on save).
-  v0.159: the MOVE gizmo attaches to the subgrid GROUP in LOCAL space
-  (arrows follow its rotation); the drag edits the COMPOSED pose, so the
-  writeback applies the joint INVERSE (reverse order: subtract pivot and
-  slide, rotate −angle) and lands in the same Build pivot fields — a
-  dragged door and a slider-editing door save identically.
+  v0.159/v0.168: both gizmo modes attach to the shared scene-root PROXY,
+  which rides the subgrid's CONTENT bbox centre (with the identity base the
+  group origin is the parent grid origin — attaching there parked the rings
+  metres from the doors, the user's dolphin complaint). Move: the proxy
+  delta maps through the joint INVERSE into the base fields (LOCAL space:
+  arrows follow the subgrid's rotation); rotate: the spin ORBITS the
+  captured content centre (p' = C + R(dq)·(p−C), subSpin, same WYSIWYG rule
+  as components v0.167), twin subgrids orbit their own centres (symRotPiv).
+  A dragged door and a slider-editing door save identically.
   `slaveBuildId`-geometry heuristics (v0.153) are OBSOLETE — the decode is
   exact.
 
