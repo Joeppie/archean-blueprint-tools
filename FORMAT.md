@@ -124,6 +124,17 @@ sRGB.
   ride the mirrored delta in the 3D scene (their `base.p` is the file
   frame, so the same (−dx,dy,dz) applies, then joints re-compose — before
   this a twin Build moved in the file only, invisible in the viewport).
+  v0.165 extends propagation to ROTATION: a mirror reflection CONJUGATES
+  rotation deltas by R180° about the mirror normal x̂, so a delta
+  dq=(w,x,y,z) maps to (w,x,−y,−z) — spins about x̂ (roll; the aileron
+  hinge axis) are mirror-INVARIANT, spins about ŷ/ẑ flip sign; the same
+  formula in the view and file frames. Hooks: the rotate gizmo (the
+  incremental drag delta), the inspector rotation sliders (absolute
+  qd·q0 writes → twin delta against a base-pose snapshot captured at the
+  FIRST edit of the gesture) and the subgrid gizmo (twin subgrid group
+  `base.q` + file quat, joints re-compose). Twin POSES stay independent —
+  only the delta propagates (builders orient twins freely: the dolphin
+  hinges mount 90° apart).
 
 ## `blocks` — the voxel build
 
@@ -547,6 +558,23 @@ Zero-build Three.js (WebGL) inspector: `python3 -m http.server 8650` (repo root)
   selftest `gizmo=true` catch both. Order algebra + visual stops: `?gizmatest`
   (synthetic single-PilotSeat blueprint, camera in front of the seat,
   `&shot=1|2|3` screenshots before/+pitch90/+roll90).
+- **Gizmo handle geometry + hover picking (v0.165 root cause):** three r169's
+  `setupGizmo` BAKES every per-mesh position/rotation/scale INTO the geometry
+  (mesh transforms reset to identity), and `updateGizmoResolution` zeroes
+  every handle's rotation EVERY frame — the raw-torus ring PICKERS (positioned
+  by mesh rotation upstream) collapse into ONE coincident XY-plane torus, so
+  TGC's first-surface picker raycast answers a different axis than the ring
+  under the cursor (the v0.162/163 "wrong axis becomes yellow and thick").
+  The viewer therefore (a) builds fat hover variants by CLONING-and-fattening
+  the BAKED geometry in place — toruses: tube scaled in its own plane about
+  the ring CIRCLE (a semicircle's bbox centre is NOT its centre, fanning
+  about it shifts the fat ring), cylinders: radial about the longest bbox
+  axis, boxes/octahedra uniform about centre; and (b) replaces the picker
+  raycast with a true ray↔ring-CIRCLE distance on the VISIBLE semicircle
+  (`ringPickerRaycast`; baked-plane basis `RING_PLANE`, camera-side wins at
+  crossings, scale-aware because TGC rescales handles by camera distance per
+  frame). The XYZE trackball pick sphere shrinks to E's 0.16 so ring hovers
+  pick rings; centre drags keep the trackball.
 
 ## Propulsion & the viewer's wind model (v0.122; RCS rule v0.148)
 

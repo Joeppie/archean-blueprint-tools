@@ -98,7 +98,7 @@ title=$(chrome --virtual-time-budget=20000 \
   --dump-dom "$BASE/viewer/index.html?gizmatest" 2>/dev/null | grep -oPm1 '(?<=<title>)[^<]*')
 echo "   $title"
 case "$title" in *GIZMATEST\ PASS*) ;; *) echo "   FAIL"; fail=1;; esac
-for s in 1 2 3; do   # before / +pitch90 / +pitch90+roll90 — eyeball WYSIWYG order
+for s in 1 2 3 4; do   # before / +pitch90 / +pitch90+roll90 / ring-hover fat — eyeball
   chrome --window-size=900,700 --virtual-time-budget=$SMBUD \
     --screenshot="$OUT/gizmo$s.png" "$BASE/viewer/index.html?gizmatest&shot=$s" 2>/dev/null
   [ -s "$OUT/gizmo$s.png" ] && [ "$OUT/gizmo$s.png" -nt "$OUT/.start" ] || { echo "   FAIL (no gizmo$s.png)"; fail=1; }

@@ -1211,6 +1211,7 @@ function applySubGizmo(g) {
   // at PRE-MOVE positions (v0.161: drift ⇒ auto-off, ⇄ widget) — BEFORE the
   // self-write, or every move drifts its OWN pair and self-disables.
   const tw = symAllowed(g.userData.sub);
+  const dq = q.clone().multiply(g.userData.base.q.clone().invert());  // v0.165 view spin
   g.userData.base.p.copy(p); g.userData.base.q.copy(q);
   bc.position.x = p.x; bc.position.y = p.y; bc.position.z = -p.z;
   bc.orientation = rawFromView({ userData: {} }, q);
@@ -1219,7 +1220,12 @@ function applySubGizmo(g) {
     tb.position.x -= d.x; tb.position.y += d.y; tb.position.z -= d.z;
     const tg = subGroup.children.find(o => o.userData.sub === j);
     if (tg) { tg.userData.base.p.x -= d.x; tg.userData.base.p.y += d.y;
-      tg.userData.base.p.z += d.z; }
+      tg.userData.base.p.z += d.z;
+      // v0.165: twin subgrids ride the MIRRORED spin too (M·dq·M⁻¹) and
+      // their file quaternion follows the twin's new base pose
+      tg.userData.base.q.premultiply(
+        new THREE.Quaternion(-dq.x, -dq.y, -dq.z, dq.w));
+      tb.orientation = rawFromView({ userData: {} }, tg.userData.base.q); }
   }
   syncSubJoints();
   markDirty();
@@ -1950,6 +1956,72 @@ tctl.addEventListener('mouseUp', () => {
   invalidate();
 });
 scene.add(tctl.getHelper());
+// v0.165 ring hover truth (user: "the thicker selection handle for
+// rotation STILL DOES NOT MATCH"): hover picking switches from TGC's
+// picker raycast to a true ray↔ring-CIRCLE distance on the VISIBLE
+// semicircle — camera-side wins at crossings. The v0.162/163 picker
+// system was unfixable at its root: r169's updateGizmoResolution runs
+// handle.rotation.set(0,0,0) on the PICKER meshes too, so all three ring
+// pickers (raw toruses positioned by mesh rotation) collapse into ONE
+// coincident XY-plane torus — every ring hover raycast-hits ALL of them
+// and the first-surface sort answers a DIFFERENT axis than the ring
+// under the cursor (the v0.162 "wrong axis becomes yellow and thick",
+// v0.163's picker reshape band landed 10 cm inside the visible rings).
+const rayRingVis = {};                       // 'X'|'Y'|'Z' -> visible ring mesh
+const _rgO = new THREE.Vector3(), _rgD = new THREE.Vector3(),
+  _rgP = new THREE.Vector3(), _rgQ = new THREE.Quaternion(),
+  _rgV = new THREE.Vector3();
+// r169's baked ring planes + arc parametrization, in each mesh's LOCAL
+// frame (geometry fully baked: CircleGeometry Rx(90)·Ry(90) + per-axis
+// mesh rotation folded in by setupGizmo):
+//   X ring: (0, r cosθ,  r sinθ) → normal x̂,  θ = atan2(z, y)
+//   Y ring: (r cosθ, 0,  r sinθ) → normal ŷ,  θ = atan2(z, x)
+//   Z ring: (r sinθ, r cosθ, 0) → normal ẑ,  θ = atan2(x, y)
+// RING_PLANE[name] = [normalAxis, [cosArgAxis, sinArgAxis]].
+const RING_PLANE = { X: [0, [1, 2]], Y: [1, [0, 2]], Z: [2, [1, 0]] };
+function ringPickerRaycast(raycaster, intersects) {
+  const vis = rayRingVis[this.name];
+  if (!vis) return;
+  vis.updateWorldMatrix(true, false);
+  const r = vis.geometry.parameters.radius;
+  const arc = vis.geometry.parameters.arc ?? Math.PI * 2;
+  const [ax, [ia, ib]] = RING_PLANE[this.name];
+  const o = _rgO.copy(raycaster.ray.origin); vis.worldToLocal(o);
+  const d = _rgD.copy(raycaster.ray.direction).applyQuaternion(
+    _rgQ.copy(vis.getWorldQuaternion(_rgQ)).invert());   // unit ✓
+  // TGC's updateGizmoResolution rescales every handle by the camera
+  // distance EVERY frame — worldToLocal divides the origin by that scale,
+  // so the direction must be divided too, else the local ray is skewed.
+  d.divideScalar(vis.getWorldScale(_rgV).x || 1);
+  // circle: {|p| = r, p·n̂ = 0} about the LOCAL ORIGIN (the bake is
+  // origin-centred: a semicircle's bbox centre is NOT the ring centre)
+  const R = r + 0.3;
+  const a = d.dot(d), b = 2 * o.dot(d), c = o.lengthSq() - R * R;
+  const disc = b * b - 4 * a * c;
+  if (disc <= 0) return;                                  // passes > 0.3 away
+  const sq = Math.sqrt(disc);
+  let lo = (-b - sq) / (2 * a), hi = (-b + sq) / (2 * a);
+  const dist = (t) => { _rgP.copy(d).multiplyScalar(t).add(o);
+    const dn = _rgP.getComponent(ax);
+    return Math.hypot(Math.sqrt(Math.max(0,
+      _rgP.getComponent(ia) ** 2 + _rgP.getComponent(ib) ** 2)) - r,
+      Math.abs(dn)); };
+  let tb = lo, dm = Infinity;
+  for (let k = 0; k <= 48; k++) {
+    const t = lo + (hi - lo) * k / 48, dd = dist(t);
+    if (dd < dm) { dm = dd; tb = t; } }
+  lo = tb - (hi - lo) / 48; hi = tb + (hi - lo) / 48;
+  for (let k = 0; k < 24; k++) { const m1 = lo + (hi - lo) / 3,
+    m2 = hi - (hi - lo) / 3; if (dist(m1) < dist(m2)) hi = m2; else lo = m1; }
+  tb = (lo + hi) / 2;
+  if (dist(tb) > 0.06) return;                            // miss the ring
+  _rgP.copy(d).multiplyScalar(tb).add(o);
+  const th = Math.atan2(_rgP.getComponent(ib), _rgP.getComponent(ia));
+  if (th < -0.12 || th > arc + 0.12) return;              // drawn semicircle only
+  const wp = vis.localToWorld(_rgP.clone());
+  intersects.push({ distance: raycaster.ray.origin.distanceTo(wp),
+    point: wp, object: this, face: null, faceIndex: null, uv: null });
+}
 // Rotate-gizmo ring style (v0.160/161/162, user: "the axis for rotation
 // selected should be thicker when I move it"; v0.162: "the WRONG axis
 // rotater becomes yellow and thick, KEEP THE COLOR"): TransformControls'
@@ -1994,43 +2066,91 @@ tctl.getHelper().traverse(o => {
       o.geometry.dispose();
       o.geometry = new THREE.SphereGeometry(0.16, 12, 8);
     }
-    // v0.163 (user: "the thicker hover handle does not show up where the
-    // actual one is"): the rotate PICKERS are toruses r0.5 tube 0.1 —
-    // band 0.40..0.60, i.e. the VISIBLE rings (r 0.40) sit exactly on the
-    // band's inner boundary. Hovering the ring you see grazes/misses its
-    // own picker, and at ring crossings the nearest picker tube is often
-    // the OTHER axis's — so the fat swap landed where the raycast hit,
-    // not where the hovered ring is. Reshape the pickers to hug the
-    // visible rings (band 0.35..0.49 around r0.40).
+    // v0.165 (user: the fat ring "STILL DOES NOT MATCH" the normal one):
+    // the picker toruses no longer decide hover at all — ringPickerRaycast
+    // (below) replaces Mesh.raycast with a true ray↔ring-CIRCLE distance
+    // test on the VISIBLE semicircle. The v0.163 reshape (r 0.42) put the
+    // pick band 0.35..0.49, i.e. 10 cm INSIDE the visible rings (r 0.5 —
+    // the r150 value was assumed), and the first-surface raycast entered
+    // a crossing ring's solid slab before the aimed ring's: the fat ring
+    // blazed on a different ring than the one under the cursor. Geometry
+    // kept (invisible); the mesh transform maps it onto the ring planes.
     if (['X', 'Y', 'Z'].includes(o.name) && g0.type === 'TorusGeometry'
-        && g0.parameters.radius > 0.45 && o.material.opacity < 0.2) {
+        && o.material.opacity < 0.2) o.raycast = ringPickerRaycast;
+    // the XYZE trackball PICK sphere (r 0.25) covers the far ring
+    // crossings' centre-passing rays: shrink it to the E sphere's size so
+    // ring hovers pick the rings (centre drags keep the trackball)
+    if (o.name === 'XYZE' && g0.type === 'SphereGeometry') {
       o.geometry.dispose();
-      o.geometry = new THREE.TorusGeometry(0.42, 0.07, 8, 48);
+      o.geometry = new THREE.SphereGeometry(0.16, 10, 8);
     }
-    o.userData.ringFat = g0.type === 'TorusGeometry'
-      ? new THREE.TorusGeometry(g0.parameters.radius, 0.035, 8, 64, g0.parameters.arc)
-      : new THREE.RingGeometry(0.28, 0.36, 64);
+    // FAT rings: CLONE-and-fatten the baked geometry (setupGizmo bakes the
+    // per-mesh rotation into it, so a raw+bake reconstruction lands in a
+    // neighbour ring's plane for Y/Z). Grow the tube IN ITS OWN PLANE:
+    // per vertex, snap onto the ring circle (center = LOCAL ORIGIN, radius
+    // preserved) and scale the tube offset — fanning about the bbox centre
+    // would shift the fat semicircle, since a semicircle's bbox centre is
+    // NOT the ring centre.
+    let fatR;
+    if (g0.type === 'TorusGeometry') {
+      fatR = g0.clone(); fatR.computeBoundingBox();
+      const bb = fatR.boundingBox, sz = bb.getSize(new THREE.Vector3());
+      const ax = sz.x <= sz.y && sz.x <= sz.z ? 0 : sz.y <= sz.z ? 1 : 2;
+      const nrm = new THREE.Vector3(ax === 0 ? 1 : 0, ax === 1 ? 1 : 0,
+        ax === 2 ? 1 : 0);
+      const r = g0.parameters.radius, f = 0.035 / g0.parameters.tube;
+      const pos = fatR.attributes.position, v = new THREE.Vector3(),
+        u = new THREE.Vector3(), w = new THREE.Vector3();
+      for (let k = 0; k < pos.count; k++) {
+        v.set(pos.getX(k), pos.getY(k), pos.getZ(k));
+        u.copy(v).addScaledVector(nrm, -v.dot(nrm));
+        const rho = Math.max(u.length(), 1e-6);
+        u.multiplyScalar(r / rho);                      // onto the circle
+        w.copy(v).sub(u).multiplyScalar(f).add(u);      // fat tube
+        pos.setXYZ(k, w.x, w.y, w.z); }
+      fatR.boundingBox = null;
+    } else fatR = new THREE.RingGeometry(0.28, 0.36, 64);
+    o.userData.ringFat = fatR;
+    if (o.userData.thickable) rayRingVis[o.name] = o;
     return;
   }
-  // v0.164 (user: "they dont light up for the entire thing … make the
+  // v0.164/165 (user: "they dont light up for the entire thing … make the
   // thicker selected version match location of the normal handles"): the
-  // fattened hover state covers the WHOLE handle of EVERY mode, not just
-  // rotate rings — arrow shafts/tips, the drag planes, the centre
-  // octahedron and the scale cubes get same-transform fat variants (only
-  // radii/size grow; length/position parameters identical) so the fat
-  // handle coincides with the normal one BY CONSTRUCTION.
+  // fattened hover state covers the WHOLE handle of EVERY mode. r169's
+  // setupGizmo BAKES every per-mesh position/rotation/scale INTO the
+  // geometry (tempGeometry.applyMatrix4(object.matrix), mesh transform
+  // reset) — a fat variant built from raw constructor params lands in the
+  // WRONG place (the v0.164 "location does not match"). So the fat
+  // variants CLONE the baked geometry and fatten it in place: cylinders
+  // (arrow shafts/tips, scale sticks) grow radially about their own axis
+  // (axis component preserved), boxes (drag planes, scale cubes) and the
+  // centre octahedron grow uniformly about their centre.
   if (o.material.opacity < 0.2) return;                          // pick meshes
   const p = g0?.parameters;
   let fat = null;
-  if (g0?.type === 'CylinderGeometry' && p)
-    fat = new THREE.CylinderGeometry(Math.max(p.radiusTop * 4, 0.03),
-      Math.max(p.radiusBottom * 4, 0.03), p.height, 12);
-  else if (g0?.type === 'ConeGeometry' && p)
-    fat = new THREE.ConeGeometry(Math.max(p.radius * 3.5, 0.045), p.height, 16);
-  else if (g0?.type === 'BoxGeometry' && p)
-    fat = new THREE.BoxGeometry(p.width * 2.4, p.height * 2.4, p.depth * 2.4);
-  else if (g0?.type === 'OctahedronGeometry' && p)
-    fat = new THREE.OctahedronGeometry(p.radius * 2, p.detail);
+  if (g0?.type === 'CylinderGeometry' && p) {
+    fat = g0.clone(); fat.computeBoundingBox();
+    const bb = fat.boundingBox, c = bb.getCenter(new THREE.Vector3()),
+      sz = bb.getSize(new THREE.Vector3());
+    const ax = sz.x >= sz.y && sz.x >= sz.z ? 0 : sz.y >= sz.z ? 1 : 2;
+    const rad = Math.max(sz[ax === 0 ? 'y' : ax === 1 ? 'x' : 'x'],
+      sz[ax === 0 ? 'z' : ax === 1 ? 'z' : 'y']) / 2;
+    const f = Math.min(60, 0.045 / Math.max(rad, 1e-4));
+    const pos = fat.attributes.position, v = new THREE.Vector3();
+    for (let k = 0; k < pos.count; k++) {
+      v.set(pos.getX(k), pos.getY(k), pos.getZ(k)).sub(c);
+      const al = v.getComponent(ax);
+      v.setComponent(ax, 0).multiplyScalar(f).setComponent(ax, al);
+      pos.setXYZ(k, v.x + c.x, v.y + c.y, v.z + c.z); }
+    fat.boundingBox = null;
+  } else if (g0?.type === 'BoxGeometry' && p) {
+    fat = g0.clone(); fat.computeBoundingBox();
+    const c = fat.boundingBox.getCenter(new THREE.Vector3());
+    fat.translate(-c.x, -c.y, -c.z); fat.scale(2.4, 2.4, 2.4);
+    fat.translate(c.x, c.y, c.z); fat.boundingBox = null;
+  } else if (g0?.type === 'OctahedronGeometry' && p) {
+    fat = g0.clone(); fat.scale(2, 2, 2);
+  }
   if (fat) { o.userData.ringThin = g0; o.userData.ringFat = fat;
     o.userData.thickable = true; }
 });
@@ -2279,6 +2399,40 @@ function symPropagate(i, d, twins) {
   }
   if (sg) syncSubJoints();
 }
+// v0.165 (user: "manipulation of its rotation does NOT affect the
+// counterpart"): rotation edits propagate to the twins MIRRORED — a
+// reflection conjugates a rotation by R180°-about-x̂: dq' = M·dq·M⁻¹, i.e.
+// (w,x,y,z) → (w,x,−y,−z): roll about x̂ is preserved, pitch/yaw flip
+// sign — the builder's mirror copy of a pose (left aileron +5° ⇒ right
+// −5°). The formula is identical in the view and file frames: the mirror
+// normal x̂ is shared, and the view quat's z-mirror conjugation commutes
+// through R180x̂, so every writeback (gizmo spin, rotation sliders,
+// subgrid gizmo) can premultiply the same mirrored delta. `base` (Map
+// j→their pose at edit start) makes the write ABSOLUTE — sliders are
+// absolute (self gets qd·q0), gizmo spins are per-event incremental.
+function symPropagateRot(i, dq, twins, base) {
+  if (!model) return;
+  const md = new THREE.Quaternion(-dq.x, -dq.y, -dq.z, dq.w);
+  let sg = false;
+  for (const j of twins || []) {
+    const oj = compObjs[j];
+    if (oj) {
+      const b = base && base.get(j);
+      if (b) oj.quaternion.copy(md).multiply(b); else oj.quaternion.premultiply(md);
+      for (const r of realMap.get(j) || []) r.quaternion.copy(oj.quaternion);
+      model.data.components[j].orientation = rawFromView(oj, oj.quaternion);
+      syncAdapters(oj);
+    }
+    const g = subGroup.children.find((x) => x.userData.sub === j);
+    if (g) {
+      const b = base && base.get('s' + j);
+      if (b) g.userData.base.q.copy(md).multiply(b);
+      else g.userData.base.q.premultiply(md);
+      sg = true;
+    }
+  }
+  if (sg) syncSubJoints();
+}
 // apply the persisted mode WITHOUT invalidate(): module-eval order forbids
 // touching the render pipeline here; attach/paint happen on the first click.
 tctl.setMode(gizmoMode === 'move' ? 'translate' : 'rotate');
@@ -2300,11 +2454,14 @@ const GIZMO_Y180 = new THREE.Quaternion(0, 1, 0, 0);      // Ry(π), self-invers
 function applyGizmoOrientation(qW) {
   const i = selected, o = compObjs?.[i];
   if (!o) return;
+  const twins = symAllowed(i);                           // v0.165 mirror twins
   const qv = qW.clone().multiply(GIZMO_Y180);             // undo decompose's sx flip
+  const dq = qv.clone().multiply(o.quaternion.clone().invert());  // view delta
   o.quaternion.copy(qv);
   for (const r of realMap.get(i) || []) r.quaternion.copy(qv);
   model.data.components[i].orientation = rawFromView(o, qv);
   syncAdapters(o);
+  symPropagateRot(i, dq, twins);
   markDirty();
   invalidate();
 }
@@ -2744,15 +2901,32 @@ function livePos(comp, obj, ax) {
 function liveRot(comp, obj, q0) {
   const qd = new THREE.Quaternion(), e = new THREE.Euler(0, 0, 0, 'YXZ');
   const delta = { p: 0, y: 0, r: 0 };
+  const ci = obj.userData.ci;
+  let tBase = null;              // twins' pose at inspector build (v0.165)
   return (kind) => (deg, mark = true) => {
     delta[kind] = deg * Math.PI / 180;
     e.set(delta.p, delta.y, delta.r);
     qd.setFromEuler(e);
     obj.quaternion.copy(qd).multiply(q0);
-    for (const r of realMap.get(obj.userData.ci) || []) r.quaternion.copy(obj.quaternion);
+    for (const r of realMap.get(ci) || []) r.quaternion.copy(obj.quaternion);
     syncAdapters(obj);
     const q = obj.quaternion;
     comp.orientation = rawFromView(obj, q);         // view quaternion → file (droop stripped)
+    // v0.165: the rotation sliders are a twin writeback path too (the
+    // position sliders' v0.162 contract, rotation edition): twins take the
+    // MIRRORED delta absolutely from their pose at edit start (the sliders
+    // are absolute qd·q0 writes, so premultiplying an incremental delta
+    // per input event would accumulate)
+    if (tBase === null) {
+      tBase = new Map();
+      for (const j of symAllowed(ci)) {
+        const oj = compObjs[j];
+        if (oj) tBase.set(j, oj.quaternion.clone());
+        const g = subGroup.children.find((x) => x.userData.sub === j);
+        if (g) tBase.set('s' + j, g.userData.base.q.clone());
+      }
+    }
+    symPropagateRot(ci, qd, symAllowed(ci), tBase);
     if (mark) markDirty();
   };
 }
@@ -4535,6 +4709,39 @@ const POSTESTS = {
       return (glow && box && off && cleared)
         || `glow=${glow} box=${box} off=${off} cleared=${cleared}`;
     });
+    T('symrot', () => {          // v0.165 (user: "manipulation of its
+      // rotation does NOT affect the counterpart"): a gizmo rotation spin
+      // propagates MIRRORED to the twin — mirror conjugation flips pitch/
+      // yaw and preserves roll — so a view-frame Rz(+0.2) on one ISW
+      // aileron must land as Rz(−0.2) on its twin (sign-sensitive), with
+      // the twin's FILE quaternion following its view pose; the reverse
+      // spin restores everything.
+      const ent = [...symTwinIndex().entries()].find(([i2, ts]) => ts.length
+        && model.data.components[i2].type === 'Aileron');
+      if (!ent) return 'no aileron twin pair';
+      const [i, ts] = ent, j = ts[0];
+      const oi = compObjs[i], oj = compObjs[j];
+      if (!oi || !oj) return 'aileron proxies missing';
+      const a0 = symOn; symOn = true;
+      select(i, false);
+      const qi0 = oi.quaternion.clone(), qj0 = oj.quaternion.clone();
+      const qv = qi0.clone().multiply(new THREE.Quaternion()
+        .setFromAxisAngle(new THREE.Vector3(0, 0, 1), 0.2))
+        .multiply(GIZMO_Y180);                   // qW; qW·Y180 = target qv
+      applyGizmoOrientation(qv);
+      const dj = oj.quaternion.clone().multiply(qj0.clone().invert());
+      const okRot = dj.z < -0.0995 && dj.z > -0.1005
+        && Math.abs(dj.x) < 1e-9 && Math.abs(dj.y) < 1e-9;
+      const of = model.data.components[j].orientation;
+      const rf = rawFromView(oj, oj.quaternion);
+      const okFile = Math.abs(of.w - rf.w) < 1e-9 && Math.abs(of.x - rf.x) < 1e-9
+        && Math.abs(of.y - rf.y) < 1e-9 && Math.abs(of.z - rf.z) < 1e-9;
+      applyGizmoOrientation(qi0.clone().multiply(GIZMO_Y180));  // restore spin
+      const okBack = Math.abs(oj.quaternion.dot(qj0)) > 1 - 1e-9;
+      symOn = a0; select(-1); paintHighlights();
+      return (okRot && okFile && okBack)
+        || `rot=${okRot}(${dj.z.toFixed(4)}) file=${okFile} back=${okBack}`;
+    });
   },
   // v0.155 aero GRID pins: the giant (1024 plates ≥ AERO_GRID_MIN) is the
   // only corpus craft whose wind runs on the grid, so its soundness (the
@@ -4870,6 +5077,34 @@ const POSTESTS = {
       symOn = a0; selectSub(-1);
       return (glow && box && off) || `glow=${glow} box=${box} off=${off}`;
     });
+    T('symrot-sub', () => {      // v0.165: twin SUBGRIDS ride the
+      // mirrored SPIN too — rotating the XYQ door subgrid Build[41] with
+      // the gizmo must spin twin Build[5]'s base pose MIRRORED
+      // (Rz(+0.3) ⇒ Rz(−0.3), sign-sensitive) and write the twin's file
+      // quaternion; the counter-spin restores everything.
+      const g = subGroup.children.find(o => o.userData.sub === 41);
+      const tg = subGroup.children.find(o => o.userData.sub === 5);
+      if (!g || !tg) return 'twin Build groups missing';
+      const a0 = symOn; symOn = true;
+      selectSub(41); setGizmoMode('rotate');
+      tctl.attach(g); scene.updateMatrixWorld(true);
+      const qB0 = tg.userData.base.q.clone();
+      const spin = (a) => g.quaternion.premultiply(new THREE.Quaternion()
+        .setFromAxisAngle(new THREE.Vector3(0, 0, 1), a));
+      spin(0.3); applySubGizmo(g);
+      const dj = tg.userData.base.q.clone().multiply(qB0.clone().invert());
+      const okRot = dj.z < -0.14 && dj.z > -0.15
+        && Math.abs(dj.x) < 1e-9 && Math.abs(dj.y) < 1e-9;
+      const rf = rawFromView({ userData: {} }, tg.userData.base.q);
+      const of = model.data.components[5].orientation;
+      const okFile = Math.abs(of.w - rf.w) < 1e-9 && Math.abs(of.x - rf.x) < 1e-9
+        && Math.abs(of.y - rf.y) < 1e-9 && Math.abs(of.z - rf.z) < 1e-9;
+      spin(-0.3); applySubGizmo(g);
+      const okBack = Math.abs(tg.userData.base.q.dot(qB0)) > 1 - 1e-9;
+      tctl.detach(); setGizmoMode('translate'); selectSub(-1); symOn = a0;
+      return (okRot && okFile && okBack)
+        || `rot=${okRot}(${dj.z.toFixed(4)}) file=${okFile} back=${okBack}`;
+    });
   },
 };
 // harness state at module scope: the POSTESTS fixture closures above capture
@@ -5180,27 +5415,36 @@ async function runGizmoTest() {
         || `fatX=${fatX} thinY=${thinY} noYellow=${gold} back=${backThin}`
         + ` flash=${noFlash} track=${trackHid}`); }
 
-    // ---- B3b. v0.164 (user: "they dont light up for the entire thing;
-    // make the thicker selected version match location of the normal
-    // handles"): the FATTENED hover state covers the WHOLE handle — EVERY
-    // visible mesh of the hovered axis (arrow shaft, tapered tip, all
-    // of them) swaps to its fat variant, which shares the mesh (so the
-    // transform) and keeps every length parameter, growing radii only;
-    // at rest every mesh swaps back. ----
+    // ---- B3b. v0.164/165 (user: "they dont light up for the entire
+    // thing; make the thicker selected version match location of the
+    // normal handles"): the FATTENED hover state covers the WHOLE handle
+    // — EVERY visible mesh of the hovered axis — and COINCIDES with the
+    // normal one: verified on real geometry bounding boxes (same local
+    // bbox CENTER = the fat variant is a clone fattened IN PLACE, r169
+    // bakes every mesh transform into geometry, so fat variants MUST
+    // clone (the v0.164 raw-reconstruction fat variants sat at the raw
+    // canonical pose: arrows shifted h/2, rings in a neighbour plane)
+    // and be strictly fatter. ----
     { const G = tctl.getHelper().children.find(o => o.isTransformControlsGizmo);
       const allX = G.gizmo.translate.children.filter(m => m.isMesh
         && m.name === 'X' && m.userData.thickable);
       const thin0 = allX.map(m => m.geometry);
+      thin0.forEach(g => g.computeBoundingBox());
       setGizmoMode('move'); tctl.axis = 'X'; paintHighlights();
       const fatAll = allX.every(m => m.geometry === m.userData.ringFat);
-      const coincide = allX.every(m => { const a = m.geometry.parameters,
-          b = m.userData.ringThin.parameters;
-        return Math.abs((a.height ?? 0) - (b.height ?? 0)) < 1e-12
-          && Math.abs((a.width ?? 0) - (b.width ?? 0)) < 1e-12
-          && Math.abs((a.radiusTop ?? 0)
-               - Math.max((b.radiusTop ?? 0) * 4, 0.03)) < 1e-12
-          && Math.abs((a.radiusBottom ?? 0)
-               - Math.max((b.radiusBottom ?? 0) * 4, 0.03)) < 1e-12; });
+      const coincide = allX.every((m, k) => {
+        const a = m.geometry.boundingBox
+          ?? (m.geometry.computeBoundingBox(), m.geometry.boundingBox);
+        const b = thin0[k].boundingBox;
+        const c = (bb, ax) => (bb.max[ax] + bb.min[ax]) / 2;
+        const szA = a.max.x - a.min.x + (a.max.y - a.min.y)
+          + (a.max.z - a.min.z);
+        const szB = b.max.x - b.min.x + (b.max.y - b.min.y)
+          + (b.max.z - b.min.z);
+        return Math.abs(c(a, 'x') - c(b, 'x')) < 1e-6
+          && Math.abs(c(a, 'y') - c(b, 'y')) < 1e-6
+          && Math.abs(c(a, 'z') - c(b, 'z')) < 1e-6
+          && szA > szB + 1e-3; });
       tctl.axis = null; paintHighlights();
       const backAll = allX.every((m, k) => m.geometry === thin0[k]);
       setGizmoMode('rotate'); paintHighlights();
@@ -5231,13 +5475,12 @@ async function runGizmoTest() {
           if (m.isMesh && m.material._color && m.material._color.getHex() !== 0xffff00
               && m.material.color.getHex() === 0xffff00) y = true; });
         return y; };
-      // aim ON THE VISIBLE RING'S CENTRELINE (r 0.40 = the ring the user
-      // hovers): the reshaped Z picker (r0.42 tube0.07) must catch it —
-      // the v0.162 pickers (r0.5 tube0.1) made this exact hover a grazing
-      // hit → the fat ring landed elsewhere (user: "does not show up
-      // where the actual one is"). E sphere 0.16 / XYZE 0.25 miss at 0.40.
-      const p = gizmoProxy.localToWorld(new THREE.Vector3(0, 0.4, 0));
+      // aim ON THE VISIBLE Z RING'S CENTRELINE mid-arc AWAY FROM THE
+      // CROSSINGS — in the RING MESH's local frame (TGC's handle scaling
+      // shrinks the world ring to r·0.52; the proxy-local r 0.5 aim point
+      // lands at 1.9× the ring, which is what made this pin aim-miss).
       scene.updateMatrixWorld(true);
+      const p = rayRingVis.Z.localToWorld(new THREE.Vector3(0.3536, -0.3536, 0));
       p.project(camera);
       needsRender = false;
       cv.dispatchEvent(new PointerEvent('pointermove', {
@@ -5253,12 +5496,22 @@ async function runGizmoTest() {
       const arc = G2.gizmo.rotate.children.find(m => m.isMesh && m.name === 'Z'
         && m.userData.thickable);
       const fat = arc.geometry === arc.userData.ringFat;
+      // v0.165: the fat variant fattens IN PLACE (clone-and-radial-fatten
+      // of the BAKED geometry): the Y ring (XZ plane) must keep its thin
+      // tube extent on its normal axis (y) far below the ring radius —
+      // an un-baked reconstruction would sit in the XY plane (y ≈ r).
+      const arcY = G2.gizmo.rotate.children.find(m => m.isMesh
+        && m.name === 'Y' && m.userData.thickable);
+      const gF = arcY.userData.ringFat, gT = arcY.userData.ringThin;
+      gF.computeBoundingBox(); gT.computeBoundingBox();
+      const baked = gF.boundingBox.max.y < 0.1
+        && gF.boundingBox.max.x > gT.boundingBox.max.x;
       const track = G2.gizmo.rotate.children.filter(m => m.userData.trackHide)
         .every(m => m.material.opacity === 0);
       ok('gizmohover', (atCentre && ringPicked && woke && rawYellow && cleared
-        && fat && track)
+        && fat && baked && track)
         || `centre=${atCentre} axis=${tctl.axis} woke=${woke} raw=${rawYellow}`
-        + ` cleared=${cleared} fat=${fat} track=${track}`);
+        + ` cleared=${cleared} fat=${fat} baked=${baked} track=${track}`);
       tctl.axis = null; scene.updateMatrixWorld(true); }
 
     // ---- C. demo state for screenshots (before / +pitch / +pitch+roll) ----
@@ -5267,10 +5520,23 @@ async function runGizmoTest() {
     aimCamera();
     scene.updateMatrixWorld(true);
     const qv = compObjs[0].getWorldQuaternion(new THREE.Quaternion());
-    const step = Math.min(2, Math.max(0, (gizmoShot | 0) - 1));
+    const step = gizmoShot === 4 ? 0
+      : Math.min(2, Math.max(0, (gizmoShot | 0) - 1));
     const demoQ = [qv, gizmoSpinRing(qv, 'x', D90),
                    gizmoSpinRing(gizmoSpinRing(qv, 'x', D90), 'y', D90)][step];
     if (step > 0) applyGizmoOrientation(demoQ);
+    if (gizmoShot === 4) {      // v0.165 WYSIWYG: RING-HOVER state — the
+      setGizmoMode('rotate'); syncGizmo();   // aimed Z ring fattens IN PLACE
+      scene.updateMatrixWorld(true);
+      const cv4 = renderer.domElement, rect4 = cv4.getBoundingClientRect();
+      const p4 = rayRingVis.Z.localToWorld(new THREE.Vector3(0.3536, -0.3536, 0));
+      p4.project(camera);
+      cv4.dispatchEvent(new PointerEvent('pointermove', {
+        pointerId: 1, pointerType: 'mouse', bubbles: true,
+        clientX: rect4.left + (p4.x + 1) / 2 * rect4.width,
+        clientY: rect4.top - (p4.y - 1) / 2 * rect4.height }));
+      scene.updateMatrixWorld(true);
+    }
     invalidate();
     document.title = fails.length ? 'GIZMATEST FAIL ' + fails.join(',')
                                   : `GIZMATEST PASS n=${nPins}`;
@@ -5530,6 +5796,35 @@ async function runUiTest() {
     ok('symslider', okS
       && Math.abs(model.data.components[ti].position.x - t0) < 1e-9
       && Math.abs(compObjs[ti].position.x - t0) < 1e-9); }
+
+  // ROTATION sliders ride the mirror too (v0.165, user: "manipulation of
+  // its rotation does NOT affect the counterpart"): yawing the selected
+  // ISW aileron +15° (about ŷ) via the inspector slider must spin the
+  // twin's MESH by the MIRRORED delta Ry(−15°) — SIGN-sensitive: mirror
+  // conjugation preserves roll (about x̂, the mirror normal) and flips
+  // pitch-style spins about ŷ/ẑ — and follow its file quaternion; the
+  // reverse edit restores the pair.
+  { const ent = [...symTwinIndex().entries()].find(([i, ts]) => ts.length
+      && model.data.components[i].type === 'Aileron');
+    if (!ent) ok('symrot', 'no aileron pair on this craft');
+    else {
+      const [si, [ti]] = ent;
+      select(si, false);
+      const q0 = compObjs[ti].quaternion.clone();
+      const rl = [...document.querySelectorAll('#inspector .row')]
+        .find(r => r.querySelector('label')?.textContent === 'yaw')
+        ?.querySelector('input[type=range]');
+      if (!rl) ok('symrot', 'no yaw slider');
+      else {
+        setIn(rl, 15);
+        const dj = compObjs[ti].quaternion.clone().multiply(q0.clone().invert());
+        const okR = dj.y < -0.12 && dj.y > -0.14        // sin(−7.5°) ≈ −0.1305
+          && Math.abs(dj.x) < 1e-9 && Math.abs(dj.z) < 1e-9;
+        setIn(rl, 0);
+        ok('symrot', okR && Math.abs(compObjs[ti].quaternion.dot(q0)) > 1 - 1e-9
+          && Math.abs(dj.y) > 0.1);
+      }
+    } }
 
   // move gizmo (v0.153): dragging the proxy writes comp.position (RAW),
   // moves mesh + real siblings; occ mirror stays serialize()'s job

@@ -43,7 +43,7 @@ tests/run_tests.sh                      # full headless suite (python3 + chromiu
 python3 -m http.server 8650             # manual serving (repo root)
 # viewer:   http://127.0.0.1:8650/viewer/index.html
 # selftest: http://127.0.0.1:8650/viewer/index.html?selftest  (tab title: SELFTEST PASS)
-# gizmatest: viewer/index.html?gizmatest (GIZMATEST PASS n=19; &shot=1|2|3 = WYSIWYG screenshot states)
+# gizmatest: viewer/index.html?gizmatest (GIZMATEST PASS n=19; &shot=1|2|3|4 = WYSIWYG screenshot states, 4 = fat ring-hover)
 # regtest:  http://127.0.0.1:8650/regtest/regtest.html         (page ends 'REGTEST: PASS')
 # other craft: viewer/index.html?open=../testdata/<id>/blueprint.json
 # perf probe: viewer/index.html?perf → tab title: PERF fps=… draw=<draw-calls> …
@@ -365,7 +365,7 @@ indistinguishable from the pushed build (2026-10-09 user report).
      as seen (user WYSIWYG rule); scene-root proxy, writeback qv = P·Ry(π)
      (THREE decompose absorbs the negative scale by negating sx). `gizmo=
      true` pins the writeback round-trip; `?gizmatest` (synthetic single-
-     seat blueprint, camera facing the pilot, n=19 + &shot=1|2|3 visual
+     seat blueprint, camera facing the pilot, n=19 + &shot=1|2|3|4 visual
      states) pins the order algebra, the LIVE pose, and v0.156 KNOB
      CONTINUITY (`gizmoUnwrap`): TransformControls reports ring drags as a
      raw atan2 angle, so a knob sweep past 180° POPS back toward the start
@@ -418,12 +418,29 @@ indistinguishable from the pushed build (2026-10-09 user report).
      "they dont light up for the entire thing; make the thicker selected
      version match location of the normal handles"): EVERY visible handle
      mesh of EVERY mode (arrow shafts/tips, drag planes, centre octahedron,
-     scale cubes, rings) gets a same-mesh fat variant — length/position
-     parameters identical, radii/size grown ⇒ the fattened hover state
-     covers the WHOLE handle and coincides with the normal one by
-     construction; styleGizmo fattens the active axis's meshes across the
-     translate/rotate/scale groups (gizmofat pin: every 'X' translate mesh
-     fattens, params verified, restores at rest).
+     scale cubes, rings) gets a fat variant ⇒ the fattened hover state
+     covers the WHOLE handle. v0.165 ROOT CAUSE of "the thicker selection
+     handle for rotation STILL DOES NOT MATCH": r169's setupGizmo BAKES
+     every per-mesh position/rotation/scale INTO the geometry, and
+     updateGizmoResolution zeroes the PICKER meshes' rotations every frame
+     — the three raw-torus ring pickers collapse into ONE coincident
+     XY-plane torus, so TGC's first-surface picker raycast answers a
+     DIFFERENT axis than the ring under the cursor, and raw-reconstructed
+     fat handles land at the raw canonical pose (arrows h/2 low, rings in
+     a neighbour plane). Fixes: fat variants CLONE-and-fatten the BAKED
+     geometry IN PLACE (toruses scale the tube in its own plane about the
+     ring CIRCLE — fanning about a semicircle's bbox centre shifts it;
+     cylinders radial about the longest bbox axis; boxes/octahedra uniform
+     about centre); hover picking replaces the picker raycast with
+     ringPickerRaycast = a true ray↔ring-CIRCLE distance on the VISIBLE
+     semicircle (RING_PLANE baked-plane basis, camera-side wins at
+     crossings, scale-aware since TGC rescales handles per frame); the
+     XYZE trackball PICK shrinks to E's 0.16 so ring hovers pick rings.
+     styleGizmo fattens the active axis's meshes across the translate/
+     rotate/scale groups (gizmofat pin: fat-vs-thin bbox CENTRES coincide
+     + strictly fatter on every 'X' translate mesh, restores at rest);
+     gizmohover aims via rayRingVis.Z.localToWorld (a proxy-local r0.5
+     aim lands at 1.9× the shrunken ring TGC rescales per frame).
      The selection is boxed by a FAT 3.5px GOLDEN LineSegments2 outline,
      EXPANDED 0.07 m off the part, PULSING with the x-ray glow (outline=
      true: 12 segments on select, hidden on none; Box3Helper's 1px lines
@@ -532,7 +549,11 @@ indistinguishable from the pushed build (2026-10-09 user report).
    AND real siblings, undo through the same path; symwidget: the ⇄ button
    toggles twin propagation + persisted strikethrough state; symslider:
    inspector x-slider edits propagate the mirrored delta to the twin and
-   the reverse edit restores the pair, v0.162).
+   the reverse edit restores the pair, v0.162; symrot: the inspector
+   YAW slider (ŷ spin — mirror conjugation flips ŷ/ẑ spins, roll about
+   the mirror normal x̂ is invariant, so the pin must NOT use pitch)
+   spins the twin aileron MESH by the mirrored delta Ry(−15°)
+   (sign-sensitive) and the reverse edit restores the pair, v0.165).
    Title: `UITEST PASS n=<pins> ctrls=N`
    (n counts ok() live, nothing hardcoded) /
    `UITEST FAIL <pins>`, captured errors in #out.
@@ -549,10 +570,12 @@ indistinguishable from the pushed build (2026-10-09 user report).
    MEASURES the rendered widget nodes: swinging the proxy 40° about z must
    move the translate ARROWS 0° (world space) and the rotate RINGS exactly
    40° (local space) — the empirical proof of the per-mode space split.
-   `&shot=1|2|3` leaves
+   `&shot=1|2|3|4` leaves
    the scene at
-   before/+pitch90/+pitch90+roll90 for headless eyeball (runner saves
-   gizmo1..3.png). Title: `GIZMATEST PASS n=19`.
+   before/+pitch90/+pitch90+roll90/RING-HOVER-FAT for headless eyeball
+   (runner saves gizmo1..4.png; shot 4 aims the real pointer path at the
+   visible Z ring and leaves it fattened — the v0.165 WYSIWYG proof that
+   the fat ring COINCIDES with the thin one). Title: `GIZMATEST PASS n=19`.
 2c. `?postest`: placement fixtures keyed per craft (the POSTESTS table in
    view3d.js — the sanctioned exception to "no per-craft constants": fixtures
    probe the RENDERED scene where generic checks cannot see a pose bug).
@@ -590,7 +613,12 @@ indistinguishable from the pushed build (2026-10-09 user report).
    does the same for SmallHinge twins, sign-sensitive in x).
    v0.161 XYQ `symmove-off`: with ⇄ clicked OFF a twin drag leaves its pair
    frozen, and a DRIFTED pair (twin moved alone → pair no longer mirrored)
-   propagates NOTHING (auto-disable). dolphin `mirrorplane`: the striped
+   propagates NOTHING (auto-disable). v0.165 `symrot` (ISW): spinning the
+   selected aileron via the gizmo writeback path (view Rz(+0.2)) must spin
+   the twin's MESH by the MIRRORED delta Rz(−0.2) (sign-sensitive: mirror
+   conjugation flips ŷ/ẑ spins) and follow its FILE quaternion, exact
+   restore; XYQ `symrot-sub`: the same spin on a twin Build SUBGRID rides
+   its `base.q` + file quat (door pair). dolphin `mirrorplane`: the striped
    sheet + frame + ⇄ arrows build on a symmetric craft, REST on the ground
    plane, and the View-Options checkbox toggles it — selftest ground=true
    now ALSO scans mirrorGroup ("nothing renders below ground" covers
