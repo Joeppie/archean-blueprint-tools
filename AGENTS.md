@@ -250,7 +250,12 @@ indistinguishable from the pushed build (2026-10-09 user report).
   (`syncSubJoints()`, runs from buildSubgrids + every markDirty; the panel
   Mount row exposes editable joint-angle/slide sliders that write the
   master's data verbatim; every kinematic part's OWN inspector shows the
-  same fields via Component data). Subgrid display pose lives in
+  same fields via Component data; v0.176 `symPropagateJoint`: a joint
+  edit propagates the SAME delta to the live symmetry twins — a
+  symmetric pair animates in unison, as authored (XYQ doors
+  24.3°/24.3°); each twin swings about its OWN captured axis, which
+  encodes its side's geometry, so equal angles fold the (asymmetrically
+  built!) dolphin fin pair mirror-symmetrically). Subgrid display pose lives in
   `g.userData.base` {p,q} (identity at load, v0.173: the panel's pivot
   offset/rotation rows are REMOVED — user: the six sliders "should not be
   a separate interface" — so base is no longer viewer-written). v0.170
@@ -271,7 +276,10 @@ indistinguishable from the pushed build (2026-10-09 user report).
   flush into the hull side; non-vacuous axle offset)
   + `flukeaxis` (fluke panel subgrid axis = x̂ = its longest dimension)
   + `subfollow` (+0.5 m translate and +30° yaw spin of the hinge ride the
-  subgrid in unison, sign-sensitive, exact restore),
+  subgrid in unison, sign-sensitive, exact restore)
+  + `subtwin-angle` (v0.176: a hinge-angle edit on Build[4]'s master
+  propagates +90° to Build[27]'s twin master AND both subgrid groups
+  swing +90° about their OWN captured axis — asymmetric twins, unison),
   dolphin `subwidget` (inverted v0.170: component select attaches gizmo +
   widget, subgrid select detaches + hides), 3732302108 `subjoint-pos`
   (LinearTrack slide ∥ its CAPTURED axis) + `railaxis` (panel rail slides
@@ -747,6 +755,12 @@ indistinguishable from the pushed build (2026-10-09 user report).
    UNISON (pure +x ride; constant origin-distance orbit with the sign
    of the cross product pinned; exact restore on both), because the
    master-pose delta composes on top of the joint chain).
+   v0.176 subtwin-angle: a joint-angle edit on the Build[4] hinge master
+   must propagate the same +90° delta to the Build[27] TWIN master
+   (symAllowed pair) and swing BOTH subgrid groups +90° about their OWN
+   captured axis (the twin fins are built asymmetric — skin-fin roll ẑ
+   vs deep-fin yaw ŷ — equal angles are the mirror-symmetric fold),
+   exact restore of data + poses.
    v0.169 subgrid-UX pins: `sublist` (the by-subgrid tab lists EVERY
    subgrid as its own SUBGRID row — blocks-only ones included; the old
    nested filter returned component OBJECTS that then indexed the array

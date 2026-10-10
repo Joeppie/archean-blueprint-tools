@@ -624,6 +624,42 @@ const POSTESTS = {
       return Math.abs(r.axis0.x) > 0.99
         || `fluke axis ${r.axis0.toArray().map((v) => v.toFixed(2))}`;
     });
+    T('subtwin-angle', () => {       // v0.176 (user: "for [a]symmetric
+      const g = subs().find((o) => o.userData.sub === 4);     // hinges, the
+      const gT = subs().find((o) => o.userData.sub === 27);   // subgrids do
+      if (!g || !gT) return 'no fin subgrids';                // not move in
+      const e = (H.subMasterEntries().get(4) || [])           // unison ...
+        .find((x) => x.mc?.type === 'SmallHinge');            // both hinges
+      const eT = (H.subMasterEntries().get(27) || [])         // are active
+        .find((x) => x.mc?.type === 'SmallHinge');            // when
+      if (!e || !eT) return 'no hinge masters';               // modifying
+      const a0 = e.mc.data.angle, aT = eT.mc.data.angle;      // the one
+      const i0 = H.components.indexOf(e.mc);
+      const sym0 = H.symOn; H.symOn = true;
+      const tw0 = H.symAllowed(i0)
+        .some(([j]) => j === H.components.indexOf(eT.mc));
+      H.symPropagateJoint(i0, 'angle', 90);      // the slider path
+      e.mc.data.angle = 90; H.syncSubJoints();
+      const data = Math.abs(eT.mc.data.angle - (aT + 90)) < 1e-9;
+      // Each twin subgrid swings +90° about its OWN captured joint line —
+      // the twin fins are built asymmetric (Build[4] is a 0.25 m skin-fin
+      // with an offset hinge → roll axis ẑ; Build[27] is a 2-cell deep fin
+      // whose axle sits INSIDE its bbox → the .ini-key yaw axis ŷ), so
+      // "unison" is the shared +90° about axis₀, not a shared world axis.
+      const q90 = (gg) => { const q = gg.quaternion, ax = gg.userData.jref[0].axis0;
+        const v = Math.hypot(q.x, q.y, q.z);
+        return Math.abs(q.w - 0.70710678) < 1e-5
+          && (q.x * ax.x + q.y * ax.y + q.z * ax.z) / v > 0.9999; };
+      const unison = q90(g) && q90(gT);
+      H.symPropagateJoint(i0, 'angle', a0);      // restore (delta −90)
+      e.mc.data.angle = a0; H.syncSubJoints();
+      const back = Math.abs(eT.mc.data.angle - aT) < 1e-12
+        && g.quaternion.angleTo(g.userData.base.q) < 1e-9
+        && gT.quaternion.angleTo(gT.userData.base.q) < 1e-9;
+      H.symOn = sym0;
+      return (tw0 && data && unison && back)
+        || `twins=${tw0} data=${data} unison=${unison} back=${back}`;
+    });
     T('subjoint-angle', () => {        // master joint state DRIVES the subgrid (v0.157)
       const g = subs().find(o => (H.subMasterEntries().get(o.userData.sub) || [])
         .some((e) => e.mc?.type === 'SmallPivot' && e.mc?.data?.angle === 0));

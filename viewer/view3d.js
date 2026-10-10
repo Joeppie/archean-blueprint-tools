@@ -2577,6 +2577,30 @@ function symPropagateRot(i, dq, twins, base, piv) {
     // syncSubJoints' rigid delta (the v0.165 base.q write would DOUBLE it).
   }
 }
+// v0.176 (user: "for [a]symmetric hinges, the subgrids do not move in
+// unison, when really they should ... both the hinges are active when
+// modifying the one"): a JOINT-STATE edit (data.angle DEGREES / data.pos
+// metres) on a kinematic master propagates the SAME delta to its live
+// symmetry twins, so a symmetric pair animates in unison — as the game
+// builds it (the XYQ twin doors are authored at 24.3°/24.3°, every
+// corpus twin pair carries equal joint state). Same value, NOT the
+// mirror-conjugated quaternion of symPropagateRot: the twins' captured
+// joint axes already encode the mirror (face-mount fins fold
+// symmetrically about their own ẑ, hinge doors yaw symmetrically about
+// their own ŷ), so equal angles ARE the symmetric motion. Callers invoke
+// this BEFORE writing self's value (the delta is self-new minus self-old).
+function symPropagateJoint(i, k, val) {
+  if (!model) return;
+  const c = model.data.components[i];
+  if (!c || !MODEL.manifest?.[c.type]?.joints?.[0]) return;
+  const self = typeof c.data?.[k] === 'number' ? c.data[k] : 0;
+  for (const [j] of symAllowed(i)) {
+    const t = model.data.components[j];
+    if (t.type !== c.type) continue;
+    t.data[k] = (typeof t.data?.[k] === 'number' ? t.data[k] : 0)
+      + (val - self);
+  }
+}
 // apply the persisted mode WITHOUT invalidate(): module-eval order forbids
 // touching the render pipeline here; attach/paint happen on the first click.
 tctl.setMode(gizmoMode === 'move' ? 'translate' : 'rotate');
@@ -3223,10 +3247,14 @@ function buildSubInspector() {
     if (mc.data && MODEL.manifest?.[mc.type]?.joints?.[0]) {
       if (typeof jd.angle === 'number')
         row(b2, 'joint angle (°)', -180, 180, 0.5, zc(jd.angle),
-          (val) => { mc.data.angle = val; syncSubJoints(); });
+          (val) => {
+            symPropagateJoint(model.data.components.indexOf(mc), 'angle', val);
+            mc.data.angle = val; syncSubJoints(); });
       if (typeof jd.pos === 'number')
         row(b2, 'joint slide (m)', -1, 1, 0.005, zc(jd.pos),
-          (val) => { mc.data.pos = val; syncSubJoints(); });
+          (val) => {
+            symPropagateJoint(model.data.components.indexOf(mc), 'pos', val);
+            mc.data.pos = val; syncSubJoints(); });
     }
   }
   if (!ents.length) {
@@ -3301,6 +3329,8 @@ function buildInspector() {
     } else if (typeof v === 'number') {
       shown++;
       row(db, k, Math.min(v - 10, -100), Math.max(v + 10, 100), 0.1, v, (nv) => {
+        if (k === 'angle' || k === 'pos')
+          symPropagateJoint(model.data.components.indexOf(comp), k, nv);
         comp.data[k] = nv; markDirty(); });
     } else if (typeof v === 'string' && v.length <= 80) {
       shown++;
@@ -4795,7 +4825,7 @@ export const hooks = {
   get compColor () { return compColor },
   get compGroup () { return compGroup },
   get compObjs () { return compObjs },
-  get components () { return components },
+  get components () { return model?.data.components },
   get controls () { return controls },
   get dashTextTex () { return dashTextTex },
   get dirty () { return dirty },
@@ -4890,6 +4920,7 @@ export const hooks = {
   get symAllowed () { return symAllowed },
   get symOn () { return symOn },
   set symOn (v) { symOn = v },
+  get symPropagateJoint () { return symPropagateJoint },
   get symRotPiv () { return symRotPiv },
   get symTwinIndex () { return symTwinIndex },
   get syncAdapters () { return syncAdapters },

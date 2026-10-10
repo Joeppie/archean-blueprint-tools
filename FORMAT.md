@@ -861,6 +861,18 @@ Adventure = 3334698274).
   Twin subgrids need no separate mirror write — their twin masters move,
   and the delta term rides them (the v0.164/165 twin-subgrid base writes
   in symPropagate/-Rot are REMOVED: they would DOUBLE-move).
+  **v0.176 joint-state twins:** a joint-angle/slide edit on a kinematic
+  master propagates the SAME delta to its live symmetry twins
+  (`symPropagateJoint`, gated by ⇄ + pair alignment, same-type twins
+  only), so a symmetric pair animates in unison (user: "for [a]symmetric
+  hinges, the subgrids do not move in unison, when really they should
+  ... both the hinges are active when modifying the one"). Equal angles
+  ARE the symmetric motion: every corpus twin pair is authored with
+  equal joint state (XYQ doors 24.3°/24.3°), and each twin swings about
+  its OWN captured axis, which already encodes its side's geometry
+  (the dolphin fin pair is built asymmetric — a 0.25 m skin-fin with a
+  face-mount ẑ roll and a 2-cell deep fin with an in-bbox ŷ yaw — and
+  equal angles fold them mirror-symmetrically).
   Lamp/SpotLight masters have NO joints in the manifest (their `angle` is
   the light aim) ⇒ static hosts, unanimated
   (as are junction/battery/RTG-style masters: no manifest joint).
@@ -872,7 +884,9 @@ Adventure = 3334698274).
   `flukeaxis` (fluke panel subgrid axis =
   x̂, its longest dimension),
   dolphin `subfollow` (translate +30°-spin unison ride, sign-sensitive,
-  exact restore), 3732302108 `subjoint-pos` (LinearTrack slides along its
+  exact restore), dolphin `subtwin-angle` (a hinge-angle edit rides the
+  symmetry twin's subgrid in unison: +90° about each twin's OWN captured
+  axis, data verbatim, exact restore), 3732302108 `subjoint-pos` (LinearTrack slides along its
   CAPTURED axis) + `railaxis` (panel rail slides along its length, not the
   axle key), XYQ `xyq-dooraxis` (edge-mounted hinge doors stay ±ŷ — the
   middle-dim face-mount branch must NOT fire there).
