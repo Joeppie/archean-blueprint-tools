@@ -764,25 +764,28 @@ Adventure = 3334698274).
   preserves the nested-content offsets), NOT an origin. The per-subgrid group
   carries no scale.z=−1 (the children already embed the single z-mirror).
 - **`composite_builds[]` = `{component, slaveBuildId}` — the join IS decodable:**
-  `slaveBuildId` = the index the Build component carries in the FLATTENED
-  component array, counting nested content recursively **before** the Build
-  itself (exactly the dev readBuild push order: nested components register
-  first, then the Build). Verified 342/342 entries across all 36 corpus
-  crafts. Pins: selftest `subjoin` (Jimmy's gantry: slaveBuildId 10 ⇒
-  Build[6], 4 nested dashboards), dolphin + XYQ postest fixtures.
-  (It is NOT the top-level component index: dolphin's doors are at 4..27
-  but numbered 4,9,16,40,45 flattened.)
-- `component` = index of the MASTER the subgrid rides: 49 distinct types —
-  Dashboard(54), SmallHinge(34), SmallPivot(22), Aileron(19), Build(16),
-  junctions/batteries/pumps/RTG… Joint masters carry their LIVE state in
-  `data`: `angle` in DEGREES, `pos` in metres (LinearTrack) — 32 anchors
-  corpus-wide hold a non-zero pose. Master geometry (dist master→subgrid
-  bbox, decoded): joint masters median 0.0 m (door ON hinge) but up to
-  109 m (long constructions on a joint); static masters (RTG, battery,
-  junction…) attach constructions metres away — Jimmy's 17-block gantry
-  with 4 dashboards hangs off an RTG 13 m away. Distance is DISPLAY info,
-  never a matching heuristic. One dolphin entry's master index (67) is out
-  of range = deleted editor reference; the viewer shows it as such.
+  BOTH indices are FLATTENED component indices — the array formed by the dev
+  readBuild push order, counting nested content recursively **before** the
+  Build itself (nested components register first, then the Build). Verified
+  over the corpus (dolphin doors are at top-level 4..27 but numbered
+  4,9,16,40,45 flattened). Pins: selftest `subjoin`, dolphin + XYQ postest
+  fixtures.
+- `component` = the MASTER the subgrid rides, in the SAME flattened domain
+  (v0.171 fix, user: "jimmy and dorito dont properly id hinge or pivot for
+  subgrids"): read as a TOP-LEVEL index the master lands on the static junk
+  sitting (nested-prefix) slots earlier in the array — SpotLights, junctions,
+  dashboards, an RTG — and 69 masters fell out of range as "deleted editor
+  references". Flattened, EVERY entry of every corpus craft resolves to a
+  joint part carrying live joint state: the dolphin's 5 subgrids ride 3
+  SmallPivots (`data.angle` 180/0/125.9° — the doors' mid-swing display) +
+  2 SmallHinges; the XYQ twin doors ride a SmallHinge pair at 24.3°; Jimmy's
+  gantry (4 nested dashboards) rides SmallPivot[167] at 54.0° — exactly the
+  gantry ghost's 54° pitch, the sub-assembly was BUILT on that pivot.
+  Masters carry their LIVE state in `data`: `angle` in DEGREES, `pos` in
+  metres (LinearTrack slides). All 51 corpus entries land on TOP-LEVEL
+  components (nested masters: none observed; the viewer still resolves
+  through the flat array, so a nested master would display/animate fine).
+  Master→subgrid distance is DISPLAY info only, never a matching heuristic.
 - The Build's own `position`/`orientation` = the builder's ghost pose (above).
   Measured values that read like hinge pivots (dolphin doors 0°, 125.9°,
   180°; XYQ pair ±0.635 m; Jimmy's gantry 54.0° X + (0, −10.14, −8.86)) are
@@ -795,35 +798,39 @@ Adventure = 3334698274).
   move or rotate a subgrid. that is WRONG") — they move ONLY via their
   masters' joints, so the ghost fields are never viewer-written any more
   (the old v0.168 gate on the REMOVED applySubGizmo writeback is moot).
-- **Kinematic masters DRIVE their subgrid (v0.157).** A master whose game
-  `.ini` declares a `[JOINT]` node (SmallHinge, SmallPivot, Aileron,
-  LinearTrack, … — manifest `joints[0]`) has its live joint state in `data`
-  (`angle` DEGREES / `pos` metres), and the dev viewer composes nested
-  content UNDER that joint node — so the subgrid display pose is the joint
-  offset composed on top of the base pose:
-  `axis = R(viewQuat(master)) · axleEuler(ZYX) · x̂` (the axle node's own
-  spin axis — same local-X convention the aileron/wheel display uses),
+- **Kinematic masters DRIVE their subgrid (v0.157; axes fixed v0.171).**
+  A master whose game `.ini` declares a `[JOINT]` node (SmallHinge,
+  SmallPivot, Aileron, LinearTrack, … — manifest `joints[0]`) has its live
+  joint state in `data` (`angle` DEGREES / `pos` metres), and the dev
+  viewer composes nested content UNDER that joint node — so the subgrid
+  display pose is the joint offset composed on top of the base pose:
+  **the spin/slide axes ARE the .ini joint keys** (extract_models stores
+  `axis`=angular_x/y/z, `slide`=linear_x/y/z per joint record):
+  `axis = R(viewQuat(master)) · axleEuler(ZYX) · e(axis)`,
+  `slide = R(same) · e(slide)` — SmallHinge/SmallPivot/Propeller spin
+  about the axle's local Ŷ, Aileron/Wheels about X̂/Ẑ, Gyroscopes/Drills
+  about Ẑ, LinearTrack slides along X̂, Wheel suspension along Ẑ. The old
+  uniform x̂ assumption (a) swung the pivot-mounted dolphin doors DOWN &
+  OUT like barn doors instead of the game's car doors (user report),
+  (b) was only ever verified on x̂ joints (Aileron droop, LinearTrack).
   `pivot = viewPos(master) + R(viewQuat) · mirror_z(axle.position)`,
-  `p' = pivot + R(axis, angle)·(base.p − pivot) + axis·pos`,
+  `p' = pivot + R(axis, angle)·(base.p − pivot) + slide·pos`,
   `q' = R(axis, angle) · base.q`. Lamp/SpotLight masters have NO joints in
-  the manifest (their `angle` is the light aim) ⇒ static hosts, unanimated.
-  69 corpus entries reference out-of-range master indices (deleted editor
-  references) ⇒ skipped. Pins: dolphin `subjoint-angle` (sign-sensitive),
-  3732302108 `subjoint-pos`.
+  the manifest (their `angle` is the light aim) ⇒ static hosts, unanimated
+  (as are junction/battery/RTG-style masters: no manifest joint).
+  Pins: dolphin `subjoint-angle` (sign-sensitive), dolphin `dooraxis`
+  (SmallPivot spin axis must be ~vertical = car-door, .ini angular_y),
+  3732302108 `subjoint-pos` (LinearTrack slides along its linear_x axis).
 - So the subgrid info panel (click a subgrid): Contents; Mount = the DECODED
   master(s) with joint state and measured distance — a KINEMATIC master also
   gets editable joint sliders (angle °/slide m) that write the master's
   `data` verbatim and animate the subgrid live; Pivot offset +
   rotation rows editing the Build fields live (byte-true on save).
-  v0.159/v0.168: both gizmo modes attach to the shared scene-root PROXY,
-  which rides the subgrid's CONTENT bbox centre (with the identity base the
-  group origin is the parent grid origin — attaching there parked the rings
-  metres from the doors, the user's dolphin complaint). Move: the proxy
-  delta maps through the joint INVERSE into the base fields (LOCAL space:
-  arrows follow the subgrid's rotation); rotate: the spin ORBITS the
-  captured content centre (p' = C + R(dq)·(p−C), subSpin, same WYSIWYG rule
-  as components v0.167), twin subgrids orbit their own centres (symRotPiv).
-  A dragged door and a slider-editing door save identically.
+  v0.170: subgrids have NO gizmo and no mode widget (the v0.159-168
+  proxy-attached subgrid gizmo is REMOVED — "i can select and move or
+  rotate a subgrid. that is WRONG"): the panel's joint sliders are the
+  ONLY manipulation path, and they write the master's `data` verbatim,
+  so a slider-edited door and a game-opened door save identically.
   `slaveBuildId`-geometry heuristics (v0.153) are OBSOLETE — the decode is
   exact.
 

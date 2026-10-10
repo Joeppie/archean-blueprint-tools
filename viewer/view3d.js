@@ -1147,13 +1147,24 @@ function subJointAxis(mc) {
   if (!jn) return null;
   const qAxle = new THREE.Quaternion().setFromEuler(new THREE.Euler(
     jn.rotation[0] * Math.PI / 180, jn.rotation[1] * Math.PI / 180,
-    jn.rotation[2] * Math.PI / 180, 'ZYX'));                       // .ini euler order
-  const axis = new THREE.Vector3(1, 0, 0).applyQuaternion(qAxle);   // axle local spin axis
+    jn.rotation[2] * Math.PI / 180, 'ZYX'));                        // .ini euler order
+  // The SPIN/SLIDE axes are the .ini JOINT keys themselves (extract_models
+  // stores axis=angular_x/y/z, slide=linear_x/y/z): SmallHinge/SmallPivot/
+  // Propeller spin about the axle's local Y, Aileron/Wheels about X/Z,
+  // Gyroscopes/Drills about Z, LinearTrack slides along X. Assuming x̂ for
+  // every joint swung the dolphin's pivot-mounted doors DOWN & OUT like
+  // barn doors, not the car doors the game shows
+  // (v0.171, user: "dolphin misunderstands axis. doors swing down and out,
+  // unlike car doors").
+  const UNIT = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] };
+  const axis = new THREE.Vector3(...(UNIT[jn.axis] || UNIT.x)).applyQuaternion(qAxle);
   const mq = viewQuat(mc.orientation);
   axis.applyQuaternion(mq).normalize();
+  const slide = new THREE.Vector3(...(UNIT[jn.slide] || UNIT[jn.axis] || UNIT.x))
+    .applyQuaternion(qAxle).applyQuaternion(mq).normalize();
   const pivot = new THREE.Vector3(jn.position[0], jn.position[1], -jn.position[2])
     .applyQuaternion(mq).add(viewPos(mc.position));                 // hinge line anchor (view)
-  return { axis, pivot };
+  return { axis, slide, pivot };
 }
 function syncSubJoints() {
   if (!model) return;
@@ -1164,9 +1175,9 @@ function syncSubJoints() {
     g.quaternion.copy(base.q);
     g.position.copy(base.p);
     for (const e of byB.get(g.userData.sub) || []) {
-      const mc = model.data.components[e.component];
+      const mc = e.mc;                                              // master obj (v0.171)
       if (!mc || !subJointAxis(mc)) continue;                       // static host
-      const { axis, pivot } = subJointAxis(mc);
+      const { axis, slide, pivot } = subJointAxis(mc);
       const a = typeof mc.data?.angle === 'number' ? mc.data.angle : 0;
       const s = typeof mc.data?.pos === 'number' ? mc.data.pos : 0;
       if (a) {
@@ -1176,7 +1187,7 @@ function syncSubJoints() {
         g.quaternion.premultiply(
           new THREE.Quaternion().setFromAxisAngle(axis, a * Math.PI / 180));
       }
-      if (s) g.position.addScaledVector(axis, s);
+      if (s) g.position.addScaledVector(slide, s);
     }
   }
   invalidate();
@@ -2886,7 +2897,7 @@ function buildList(opts = {}) {
     const masters = new Map();
     for (const [bi, es] of subMasterEntries())
       for (const e of es)
-        (masters.get(bi) || masters.set(bi, []).get(bi)).push(e.component);
+        if (e.top >= 0) (masters.get(bi) || masters.set(bi, []).get(bi)).push(e.top);
     const builds = comps.map((c, i) => c.type === 'Build' ? i : -1).filter(i => i >= 0);
     for (const bi of builds) {
       const bc = comps[bi], nested = (bc.data?.components || []).filter(c => c.type !== 'Build');
@@ -3057,18 +3068,34 @@ function liveRot(comp, obj, q0) {
 // Verified 342/342 entries over all 36 corpus crafts with subgrids.
 // Returns Map<Build comp index, entries[]> (entries can be >1 per subgrid).
 function subMasterEntries() {
-  const flat = new Map();
-  const T = (c) => { let s = 0; for (const sc of (c.data && c.data.components) || []) s += 1 + T(sc); return s; };
-  let n = 0;
-  model.data.components.forEach((c, i) => {
-    if (c.type === 'Build') { const t = T(c); flat.set(n + t, i); n += t; }
-    n += 1;
-  });
+  // v0.171 (user: "jimmy and dorito dont properly id hinge or pivot for
+  // subgrids"): BOTH composite_builds indices — master component AND
+  // slaveBuildId — are FLATTENED indices (dev readBuild order: nested
+  // content numbers before its Build, recursively). The master index read
+  // TOP-LEVEL is a systematic off-by-(nested-prefix) shift: it lands on
+  // static junk (SpotLight/Junction/Dashboard/RTG) and turned 69 masters
+  // into "deleted editor references". Flattened, EVERY entry of every
+  // corpus craft lands on a joint part carrying live state — dolphin door
+  // pivots 0/126/180°, XYQ door hinges 24.3°, gantry LinearTrack slides —
+  // the join IS the game's kinematic record. Entries gain:
+  //   mc = master component object, top = its top-level index (-1 nested).
+  const flat = [];
+  const rec = (list) => { for (const c of list) {
+    const sub = (c.data && c.data.components) || null;
+    if (c.type === 'Build' && sub && sub.length) rec(sub);
+    flat.push(c);
+  } };
+  rec(model.data.components);
   const byBuild = new Map();
   for (const e of model.data.composite_builds || []) {
-    const bi = flat.get(e.slaveBuildId);
-    if (bi === undefined) continue;
-    (byBuild.get(bi) || byBuild.set(bi, []).get(bi)).push(e);
+    const bc = flat[e.slaveBuildId];
+    if (!bc || bc.type !== 'Build') continue;
+    const mc = flat[e.component] || null;
+    const ent = { component: e.component, mc,
+      top: mc ? model.data.components.indexOf(mc) : -1 };
+    const bi = model.data.components.indexOf(bc);
+    if (!byBuild.has(bi)) byBuild.set(bi, []);
+    byBuild.get(bi).push(ent);
   }
   return byBuild;
 }
@@ -3078,7 +3105,7 @@ function subMasterEntries() {
 // attach transform (dev viewer composes nested content under the Build
 // matrix; dolphin doors ride at 125.9°/180° = the builder left them open).
 // The Mount section lists the DECODED master(s) via subMasterEntries()
-// (slaveBuildId = flattened component index — see FORMAT §Subgrids) with
+// (BOTH indices flattened component indices, v0.171 — see FORMAT §Subgrids) with
 // each master's stored joint state and its distance to the subgrid.
 function buildSubInspector() {
   const name = $('selname');
@@ -3104,7 +3131,7 @@ function buildSubInspector() {
   const b2 = secBody();
   const ents = subMasterEntries().get(bi) || [];
   for (const e of ents) {
-    const mc = model.data.components[e.component];
+    const mc = e.mc;
     const d = document.createElement('div'); d.className = 'checkrow';
     if (!mc) {
       d.innerHTML = `<span style="color:var(--dim)">master = component[${e.component}] — not in file (deleted editor reference)</span>`;
@@ -3118,7 +3145,7 @@ function buildSubInspector() {
     const v = new THREE.Vector3(vp.x + (model.moff?.[0] || 0),
       vp.y + (model.moff?.[1] || 0), vp.z + (model.moff?.[2] || 0));
     const dist = bb.isEmpty() ? 0 : bb.distanceToPoint(v);
-    d.innerHTML = `<b>${mc.type}</b>[${e.component}]${mc.alias ? ' ' + mc.alias : ''}` +
+    d.innerHTML = `<b>${mc.type}</b>${e.top >= 0 ? `[${e.top}]` : ' (nested)'}${mc.alias ? ' ' + mc.alias : ''}` +
       `<span style="color:var(--dim)">${st} · ${dist.toFixed(2)} m to subgrid</span>`;
     b2.appendChild(d);
     // Kinematic master (has a .ini joint) → the joint state is EDITABLE and

@@ -197,19 +197,29 @@ indistinguishable from the pushed build (2026-10-09 user report).
   "exploded out", and the subgrid gizmo parked at the group origin = the
   Build bench pose, metres from its doors = "rotation on the dolphin doesn't
   work".) The Mount is DECODED, not
-  guessed: `composite_builds[].slaveBuildId` = the Build's index in the
-  FLATTENED component array (nested content numbers BEFORE its Build,
-  recursive subtree sizes — dev readBuild order); exact for 342/342 corpus
-  entries. Masters are any part type (hinges/pivots kinematic, dashboards/
-  RTGs/batteries static hosts, metres away); joint state lives on the MASTER
-  (`angle` DEGREES / `pos` metres; dolphin doors ride real pivots 0/126/180°
-  via the SmallPivot master angle, NOT the Build pose). **v0.157 joint drive:**
+  guessed: BOTH `composite_builds[]` indices (master `component` AND
+  `slaveBuildId`) are FLATTENED component-array indices (nested content
+  numbers BEFORE its Build, recursive subtree sizes — dev readBuild order);
+  the master index read top-level is a systematic off-by-(nested-prefix)
+  shift that lands on static junk and fakes 69 "deleted editor references"
+  (v0.171, user: "jimmy and dorito dont properly id hinge or pivot for
+  subgrids"). Flattened, EVERY corpus entry resolves to a joint part with
+  live state on the MASTER (`angle` DEGREES / `pos` metres; dolphin doors
+  ride real pivots 0/126/180°, XYQ doors hinges 24.3°, Jimmy's gantry
+  pivot 54.0° = the ghost pitch — via the master angle, NOT the Build
+  pose). **v0.157 joint drive:**
   masters with a
   manifest `joints[0]` (SmallHinge/SmallPivot/Aileron/LinearTrack — NOT
   Lamp/SpotLight, whose joints = [] and whose `angle` is the light aim)
-  ANIMATE their subgrid: axis = viewQuat(master)·axleEuler(ZYX)·x̂, pivot =
+  ANIMATE their subgrid. The spin/slide axes ARE the .ini joint keys
+  (extract_models stores axis=angular_x/y/z, slide=linear_x/y/z; v0.171:
+  the old uniform x̂ swung the pivot-mounted dolphin doors down-and-out
+  like barn doors, user: "doors swing down and out, unlike car doors" —
+  SmallHinge/SmallPivot/Propeller spin about the axle's local Ŷ, Aileron
+  about X̂, Gyroscope/Drill about Ẑ, LinearTrack slides along X̂):
+  axis = viewQuat(master)·axleEuler(ZYX)·e(axis), pivot =
   viewPos(master) + viewQuat·(mirror_z axle.position); group pose
-  p' = pivot + R(axis,angle)·(base.p−pivot) (+axis·pos), q' = R·base.q
+  p' = pivot + R(axis,angle)·(base.p−pivot) (+slide·pos), q' = R·base.q
   (`syncSubJoints()`, runs from buildSubgrids + every markDirty; the panel
   Mount row exposes editable joint-angle/slide sliders that write the
   master's data verbatim). Subgrid display pose lives in `g.userData.base`
@@ -221,11 +231,12 @@ indistinguishable from the pushed build (2026-10-09 user report).
   gizmo/sliders, the panel's pivot rows). The free subgrid gizmo
   (v0.159-168: applySubGizmo/subSpin writeback, proxy at the content
   centre, local-space arrows) is REMOVED — do not resurrect. Pins: selftest
-  `subjoin`, dolphin/XYQ postest sub-master fixtures, dolphin
-  `subjoint-angle` (sign-sensitive 90° spin about the decoded axis),
+  `subjoin`, dolphin/XYQ postest sub-master fixtures (flattened pairs),
+  dolphin `subjoint-angle` (sign-sensitive 90° spin about the decoded axis)
+  + `dooraxis` (SmallPivot spin axis ≈ vertical = car-door, .ini angular_y),
   dolphin `subwidget` (inverted v0.170: component select attaches gizmo +
   widget, subgrid select detaches + hides), 3732302108 `subjoint-pos`
-  (LinearTrack slide ∥ axle). See FORMAT.md §Subgrids.
+  (LinearTrack slide ∥ its linear_x axis). See FORMAT.md §Subgrids.
 - Palette slots: `data.colors[256]`, entry = {r,g,b 0-255, opacity 0-15,
   roughness 0-7, metallic 0|1}. **r/g/b are LINEAR albedo** — the engine's
   shaders use them raw; decoding as sRGB darkens the craft ~^2.2 (the ISW-241
@@ -668,7 +679,9 @@ indistinguishable from the pushed build (2026-10-09 user report).
    the pin now also drives the SHIPPED pickRay routing — a world-visible
    first hit must reach the subgrid),
    selectSub opens the info panel (Contents/Mount/Pivot rows) showing the
-   DECODED master (sub-masters pin: 5 entries, Build[22]←SmallPivot), a
+   DECODED master (sub-masters pin: v0.171 flattened join — the dolphin's
+   5 subgrids pair 1:1 with 3 SmallPivots + 2 SmallHinges: Build[22]/[12]/
+   [6]←pivot, Build[4]/[27]←hinge), a
    pivot edit tracks the group live (via userData.base) with the file quat
    staying plain-numeric, and `subjoint-angle` spins that pivot's master to
    90°: the group must rotate EXACTLY 90° about the decoded axle axis
@@ -695,7 +708,8 @@ indistinguishable from the pushed build (2026-10-09 user report).
    SpotLight/Dashboard proxies prove the non-vacuous path); a VISIBLE
    subgrid block in front of the component (the giant's decks) keeps the
    subgrid win.
-   XYQ-615 (3803780241) decodes Build[41]←ToggleButton, Build[5]←Dashboard;
+   XYQ-615 (3803780241) decodes Build[41]/Build[5] ← a SmallHinge pair at
+   24.3° (v0.171 flattened master decode);
    its Build[5]/[41] ±0.635 TWIN SUBGRID PAIR proves symselect-sub (twins
    co-select + glow; dolphin's symmove pin keeps the COMPONENT twin
    propagation for SmallHinge masters, sign-sensitive in x — the subgrid

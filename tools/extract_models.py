@@ -188,11 +188,24 @@ def main():
                     "position": vec(rec.get("position", "0 0 0")),
                     "rotation": vec(rec.get("rotation", "0 0 0"))})
             elif t == "JOINT":
-                entry["joints"].append({
-                    "name": name, "parent": rec.get("parent"),
-                    "position": vec(rec.get("position", "0 0 0")),
-                    "rotation": vec(rec.get("rotation", "0 0 0")),
-                    "limits": vec(rec.get("angular_x", "")) if "angular_x" in rec else None})
+                j = {"name": name, "parent": rec.get("parent"),
+                     "position": vec(rec.get("position", "0 0 0")),
+                     "rotation": vec(rec.get("rotation", "0 0 0")),
+                     "limits": None}
+                # the SPIN/SLIDE axes are the .ini keys themselves: angular_x/y/z,
+                # linear_x/y/z (SmallHinge/SmallPivot/Propeller spin about the
+                # axle's local Y; Aileron about X; Gyroscope/Drill about Z;
+                # LinearTrack slides along X, Wheel suspension along Z)
+                for k in ("angular_x", "angular_y", "angular_z"):
+                    if k in rec:
+                        j["axis"] = k[-1]
+                        j["limits"] = vec(rec[k])
+                        break
+                for k in ("linear_x", "linear_y", "linear_z"):
+                    if k in rec:
+                        j["slide"] = k[-1]
+                        break
+                entry["joints"].append(j)
             elif t == "TARGET":
                 # invisible frame nodes (wheel axles, etc): they shift what hangs below
                 entry["targets"].append({

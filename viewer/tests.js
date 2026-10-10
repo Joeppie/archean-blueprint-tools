@@ -329,16 +329,16 @@ const POSTESTS = {
   '3732302108': () => {              // mosaic gantry: LinearTrack master SLIDES its subgrid
     T('subjoint-pos', () => {
       const g = H.subGroup.children.find(o => (H.subMasterEntries().get(o.userData.sub) || [])
-        .some(e => H.model.data.components[e.component]?.type === 'LinearTrack'));
+        .some(e => e.mc?.type === 'LinearTrack'));
       if (!g) return 'no LinearTrack-mastered subgrid';
       const e = (H.subMasterEntries().get(g.userData.sub) || [])
-        .find(x => H.model.data.components[x.component]?.type === 'LinearTrack');
-      const mc = H.model.data.components[e.component];
-      const { axis } = H.subJointAxis(mc);
+        .find((x) => x.mc?.type === 'LinearTrack');
+      const mc = e.mc;
+      const { axis, slide } = H.subJointAxis(mc);
       const p0 = g.position.clone(), p1 = mc.data.pos;
       mc.data.pos = p1 + 0.25; H.syncSubJoints();
       const d = g.position.clone().sub(p0).normalize();
-      const hit = d.dot(axis) > 0.9999;                 // slide along the axle axis
+      const hit = d.dot(slide) > 0.9999;                // slide along the .ini linear_x axis
       mc.data.pos = p1; H.syncSubJoints();
       return (hit && g.position.distanceTo(p0) < 1e-9)
         || `slide not axle-aligned (dot=${d.dot(axis).toFixed(3)})`;
@@ -496,17 +496,41 @@ const POSTESTS = {
       const nm = document.getElementById('selname').textContent;
       const ins = document.getElementById('inspector').textContent;
       H.selectSub(-1);
-      // decoded master of Build[4] (v0.154 join): SmallTurboPump[47]
+      // decoded master of Build[4] (v0.171 flattened join): SmallHinge[29]
       return (/Subgrid/.test(nm) && /Pivot offset/.test(ins) && /Pivot rotation/.test(ins)
-        && /SmallTurboPump\[47\]/.test(ins))
+        && /SmallHinge\[29\]/.test(ins))
         || `panel missing decoded mount (nm='${nm.slice(0, 40)}')`;
     });
-    T('sub-masters', () => {          // decoded join: 1 entry per subgrid
-      const m = H.subMasterEntries();
-      let tot = 0; for (const v of m.values()) tot += v.length;
-      if (tot !== 5) return `${tot} decoded entries (expect 5)`;
-      const e22 = (m.get(22) || []).map(e => H.model.data.components[e.component]?.type).join();
-      return e22 === 'SmallPivot' || `Build[22] master: ${e22} (want SmallPivot)`;
+    T('sub-masters', () => {          // v0.171: the FLATTENED master decode
+      const m = H.subMasterEntries(); // pairs every dolphin subgrid with a
+      const want = { 22: 'SmallPivot', 12: 'SmallPivot', 6: 'SmallPivot',
+        4: 'SmallHinge', 27: 'SmallHinge' };   // 3 pivots + 2 hinges, 1:1
+      const got = [...m.keys()].sort((a, b) => a - b);
+      if (got.join() !== Object.keys(want).join())
+        return `subgrid keys ${got.join()} (want ${Object.keys(want).join()})`;
+      for (const k of Object.keys(want)) {
+        const t = (m.get(+k) || []).map((e) => e.mc?.type).join();
+        if (t !== want[k]) return `Build[${k}] master ${t} (want ${want[k]})`;
+      }
+      return true;
+    });
+    T('dooraxis', () => {              // v0.171 (user: "dolphin
+      const g = subs().find((o) =>    // misunderstands axis. doors swing
+        (H.subMasterEntries().get(o.userData.sub) || [])
+          .some((e) => e.mc?.type === 'SmallPivot'));
+      if (!g) return 'no SmallPivot-mastered subgrid';
+      const e = (H.subMasterEntries().get(g.userData.sub) || [])
+        .find((x) => x.mc?.type === 'SmallPivot');
+      const { axis } = H.subJointAxis(e.mc);
+      // the game's SmallPivot .ini: [JOINT axle] angular_Y => the axle
+      // node's local Y is the spin axis. The door pivots mount upright or
+      // inverted (mount quat ±180° about x/y) => the swing axis must be
+      // VERTICAL (car door), NOT the axle-local x̂ we used to take
+      // (barn door: "doors swing down and out"). Swing SIGN is pinned
+      // sign-sensitively by subjoint-angle.
+      return (Math.abs(axis.y) > 0.99 && Math.hypot(axis.x, axis.z) < 0.15)
+        || `pivot spin axis ${axis.toArray().map((v) => v.toFixed(3))} `
+          + '(want ~±y: car-door swing, .ini angular_y)';
     });
     T('sub-pivot-edit', () => {        // pivot rows move the group live + stay plain in the file
       const g = subs()[0];
@@ -521,12 +545,11 @@ const POSTESTS = {
     });
     T('subjoint-angle', () => {        // master joint state DRIVES the subgrid (v0.157)
       const g = subs().find(o => (H.subMasterEntries().get(o.userData.sub) || [])
-        .some(e => H.model.data.components[e.component]?.type === 'SmallPivot'
-                && H.model.data.components[e.component]?.data?.angle === 0));
+        .some((e) => e.mc?.type === 'SmallPivot' && e.mc?.data?.angle === 0));
       if (!g) return 'no SmallPivot-mastered subgrid at angle 0';
       const e = (H.subMasterEntries().get(g.userData.sub) || [])
-        .find(e => H.model.data.components[e.component]?.type === 'SmallPivot');
-      const mc = H.model.data.components[e.component];
+        .find((x) => x.mc?.type === 'SmallPivot');
+      const mc = e.mc;
       const { axis, pivot } = H.subJointAxis(mc);
       const bq = g.quaternion.clone(), bp = g.position.clone();
       mc.data.angle = 90; H.syncSubJoints();
@@ -587,11 +610,14 @@ const POSTESTS = {
     });
   },
   '3803780241': () => {              // XYQ-615: 2 subgrids, pair-unique decode
-    T('xyq-sub-masters', () => {
-      const m = H.subMasterEntries();
-      const g = (bi) => (m.get(bi) || []).map(e => H.model.data.components[e.component]?.type).join();
-      const a = g(41), b = g(5);
-      return (a === 'ToggleButton' && b === 'Dashboard') || `Build[41]=${a} Build[5]=${b}`;
+    T('xyq-sub-masters', () => {      // v0.171: flattened master decode —
+      const m = H.subMasterEntries(); // BOTH twin doors ride SmallHinge
+      const g = (bi) => (m.get(bi) || []).map((e) => e.mc?.type).join();
+      const a = g(41), b = g(5);     // masters, live angle 24.3° (open doors)
+      const ang = [41, 5].every((bi) => (m.get(bi) || [])
+        .every((e) => Math.abs(e.mc?.data?.angle - 24.3) < 0.01));
+      return (a === 'SmallHinge' && b === 'SmallHinge' && ang)
+        || `Build[41]=${a} Build[5]=${b}`;
     });
             T('symselect-sub', () => {      // v0.164: subgrid twins co-select too —
       // selecting the XYQ door subgrid Build[41] must glow twin Build[5]'s
@@ -778,7 +804,7 @@ async function runPosTest() {
     if (g) {
       H.selectSub(g.userData.sub);
       const es = H.subMasterEntries().get(g.userData.sub);
-      if (es?.length) H.flyTo(es[0].component);   // frame the hinge/pivot + driven door
+      if (es?.length && es[0].top >= 0) H.flyTo(es[0].top);   // frame the hinge/pivot + door
       H.invalidate();
     }
   }
@@ -1679,24 +1705,28 @@ if (location.search.includes('selftest')) {
           const npl = new THREE.Vector3(0.69337, 0.63691, -0.33702).normalize();  // view wall normal
           ok13 = Math.abs(n.dot(npl)) > 0.98;
         }
-        // ok13b: decoded subgrid join (v0.154, FORMAT §Subgrids): slaveBuildId
-        // = the Build's index in the flattened component array (nested content
-        // numbered BEFORE its Build). Jimmy's Adventure: one gantry subgrid
-        // (Build[6] with 4 nested dashboards) whose single entry must decode
-        // master RTG[171] — the mount proximity heuristics never found this
-        // (13 m anchor), the decode finds it exactly.
+        // ok13b: decoded subgrid join (v0.154; BOTH indices flattened
+        // v0.171, FORMAT §Subgrids): composite_builds entries index the
+        // FLATTENED component array (nested content numbered before its
+        // Build, dev readBuild order) — for BOTH the slaveBuildId AND the
+        // master component. Jimmy's Adventure: one gantry subgrid (Build[6]
+        // with 4 nested dashboards) riding SmallPivot[167] at 54° — the
+        // top-level-index reading called it "RTG[171], a 13 m static
+        // anchor"; flattened, every corpus master is a JOINT part with live
+        // joint state (this pivot's 54° = the gantry ghost's 54° pitch).
         const e0 = (ms.data.composite_builds || [])[0];
         const builds13 = ms.data.components.filter(c => c.type === 'Build');
-        const flat13 = new Map();
-        { const T13 = (c) => { let s = 0; for (const sc of (c.data && c.data.components) || []) s += 1 + T13(sc); return s; };
-          let nn = 0;
-          ms.data.components.forEach((c) => {
-            if (c.type === 'Build') { const t = T13(c); flat13.set(nn + t, c); nn += t; }
-            nn += 1;
-          }); }
-        ok13b = builds13.length === 1 && !!e0 && flat13.get(e0.slaveBuildId) === builds13[0]
+        const flat13 = [];
+        { const r13 = (l13) => { for (const c13 of l13) {
+            const s13 = (c13.data && c13.data.components) || null;
+            if (c13.type === 'Build' && s13 && s13.length) r13(s13);
+            flat13.push(c13);
+          } };
+          r13(ms.data.components); }
+        ok13b = builds13.length === 1 && !!e0 && flat13[e0.slaveBuildId] === builds13[0]
           && builds13[0].data.components.length === 4
-          && ms.data.components[e0.component]?.type === 'RTG';
+          && flat13[e0.component]?.type === 'SmallPivot'
+          && Math.abs(flat13[e0.component]?.data?.angle - 54) < 0.01;
       }
       // ok14: ground fit — the green plane and grid sit just UNDER the
       // lowest rendered geometry (truck 3481322297 builds to y=-1.5:
