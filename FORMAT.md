@@ -855,6 +855,27 @@ Adventure = 3334698274).
   key is the PART's pin, not the animation axis of content welded to it.
   PARTS-ONLY subgrids (empty bbox — nested parts riding the axle node,
   dolphin fin subgrid 6, gantry rails) keep the .ini key chain (v0.171).
+  **EPISTEMIC STATUS (2026-10-10 audit, user-requested — read before
+  "deriving" anything new from these rules):** the axis rules above are
+  an EMPIRICAL FIT to user-confirmed in-game motions (5 crafts pinned:
+  dolphin, XYQ, truck, gantry/Jimmy, mosaic), NOT format semantics.
+  Format facts established by the audit: (a) all 342 corpus
+  `composite_builds` entries carry exactly `{component, slaveBuildId}` —
+  the join stores NO axis/pivot/offset fields, so content animation is
+  100% runtime-derived by the game; (b) the dev viewer's blueprint.js
+  never parses `composite_builds` at all (static subgrids) and its
+  readBuild order (nested content BEFORE its Build, global list, pipes
+  index it) independently confirms the v0.171 flattened-index decode;
+  (c) the part `.ini`s' design intent is the PART graph: `[RENDERABLE
+  slave]/[COLLIDER slave] parent = axle` — the hinge's slave plate slot
+  extends along LOCAL +ẑ up to 0.375 m (the face content is welded to;
+  its pin is `angular_y` = local ŷ), the SmallPivot axle sits at
+  (0, 0.152, 0) `angular_y ±360` with the slave 0.098 above (turntable),
+  LinearTrack slides `linear_x` with the carriage above the rail; (d)
+  master types are EXACTLY SmallHinge/SmallPivot/LinearTrack across the
+  corpus — the code's `SmallHinge` type test covers the whole hinge
+  family. Where the fit is untested (hundreds of entries on ~30 crafts
+  the user never inspected), the rules apply as heuristics.
   `p' = pivot₀ + R(axis₀, angle)·(base.p − pivot₀) + slide₀·pos` then
   `q' = R(axis₀, angle) · base.q`.
   **v0.172 rigid riding:** the master's own pose delta then rides the

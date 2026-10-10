@@ -1133,7 +1133,16 @@ function buildSubgrids() {
     // master); the AXIS rule is in the map below (v0.177: the hinge's
     // kinematic triad — edge-mounted swings on its pin, face-mounted
     // swings on pin×span, the dolphin fins' ẑ "hatch roll"; pivots/
-    // tracks along the longest dimension).
+    // tracks along the longest dimension). EPISTEMIC STATUS (v0.177
+    // audit): these axis rules are an EMPIRICAL FIT to user-confirmed
+    // in-game motions (dolphin/XYQ/truck/gantry pins) — the format
+    // stores NO kinematic fields for the join (all 342 corpus entries
+    // carry exactly {component, slaveBuildId}; dev blueprint.js ignores
+    // composite_builds entirely), and the .ini part graph only fixes
+    // the PART's own pin (SmallHinge: slave slot on local +ẑ, pin
+    // angular_y; SmallPivot: turntable at (0,0.152,0) angular_y;
+    // LinearTrack: carriage linear_x). See FORMAT.md §Subgrids
+    // EPISTEMIC STATUS.
     // A master mounted ON its content (XYQ/SMR: ~0.1 m) has its axle pivot
     // INSIDE that bbox ⇒ the clamp is the pivot itself. PARTS-ONLY subgrids
     // (empty block bbox) ride the axle node itself: their axis stays the

@@ -246,7 +246,15 @@ indistinguishable from the pushed build (2026-10-09 user report).
   fins into x̂ drawbridges, "wrong in every single tested vehicle"; the
   v0.174 longest-dim yaw kept them "wrong for dolphin still");
   PARTS-ONLY subgrids (empty bbox:
-  nested parts riding the axle) keep the .ini key chain.
+  nested parts riding the axle) keep the .ini key chain. EPISTEMIC
+  STATUS (v0.177 audit): the axis rules are an EMPIRICAL FIT to
+  user-confirmed in-game motions (dolphin/XYQ/truck/gantry pins), not
+  format semantics — all 342 corpus composite_builds entries carry
+  exactly {component, slaveBuildId} (no kinematic fields; dev
+  blueprint.js ignores the join; masters are exactly SmallHinge/
+  SmallPivot/LinearTrack), and the .ini graph fixes only the PART's
+  pin (hinge slave slot local +ẑ, pin angular_y). See FORMAT.md
+  §Subgrids.
   A master MOUNTED on
   its content keeps pivot₀ = the axle point exactly), then the
   master's
