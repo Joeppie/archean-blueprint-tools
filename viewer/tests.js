@@ -334,14 +334,28 @@ const POSTESTS = {
       const e = (H.subMasterEntries().get(g.userData.sub) || [])
         .find((x) => x.mc?.type === 'LinearTrack');
       const mc = e.mc;
-      const { axis, slide } = H.subJointAxis(mc);
+      // v0.174: the CAPTURED slide is the source of truth — a panel rail
+      // slides along its own length (bbox longest axis), a parts rail along
+      // the .ini axle key.
+      const { axis } = H.subJointAxis(mc);
+      const slide = (g.userData.jref.find((x) => x.mc === mc) || {}).slide0;
       const p0 = g.position.clone(), p1 = mc.data.pos;
       mc.data.pos = p1 + 0.25; H.syncSubJoints();
       const d = g.position.clone().sub(p0).normalize();
-      const hit = d.dot(slide) > 0.9999;                // slide along the .ini linear_x axis
+      const hit = d.dot(slide) > 0.9999;               // slide ∥ captured axis
       mc.data.pos = p1; H.syncSubJoints();
       return (hit && g.position.distanceTo(p0) < 1e-9)
         || `slide not axle-aligned (dot=${d.dot(axis).toFixed(3)})`;
+    });
+    T('railaxis', () => {            // v0.174 (user: "That goes for all of
+      for (const g of H.subGroup.children) {          // them actually"): a
+        const r = (g.userData.jref || [])             // PANEL LinearTrack
+          .find((x) => x.mc?.type === 'LinearTrack'); // slides along its
+        if (!r || r.axle0.distanceTo(r.pivot0) < 0.05) continue;  // length
+        return Math.abs(r.slide0.z) > 0.99            // (bbox longest axis,
+          || `panel rail slide ${r.slide0.toArray().map((v) => v.toFixed(2))}`;
+      }
+      return 'no panel LinearTrack subgrid';
     });
   },
   '3518436870': (ctx) => {
@@ -586,8 +600,24 @@ const POSTESTS = {
         && Math.abs(r.pivot0.y - 0.125) < 1e-9
         && r.pivot0.z < -4.875 && r.pivot0.z > -7.375;
       const off = r.axle0.distanceTo(r.pivot0);
-      return (onEdge && off > 0.2)
-        || `pivot0=${r.pivot0.toArray().map(v => v.toFixed(3))} off=${off.toFixed(2)}`;
+      // v0.174: the fin (longest dim = y, 2.5 m) hinges along its long edge
+      // ⇒ VERTICAL axis (deployable fin staying close to the frame, yawing
+      // about its bottom edge) — NOT the x̂ drawbridge the axle pin's ŷ maps
+      // to at this mount quat ("the door rolls in and out").
+      const vert = Math.abs(r.axis0.y) > 0.99
+        && Math.hypot(r.axis0.x, r.axis0.z) < 1e-9;
+      return (onEdge && off > 0.2 && vert)
+        || `pivot0=${r.pivot0.toArray().map(v => v.toFixed(3))} `
+          + `off=${off.toFixed(2)} axis=${r.axis0.toArray().map(v => v.toFixed(2))}`;
+    });
+    T('flukeaxis', () => {           // v0.174: the tail fluke subgrid
+      const g = subs().find((o) => o.userData.sub === 22);   // (blocks x-widest)
+      if (!g) return 'no Build[22] subgrid';                // deflects as an
+      const r = (g.userData.jref || [])                     // elevon: axis x̂
+        .find((x) => x.mc?.type === 'SmallPivot');          // (its longest dim),
+      if (!r) return 'no pivot jref';                       // 180° built pose
+      return Math.abs(r.axis0.x) > 0.99
+        || `fluke axis ${r.axis0.toArray().map((v) => v.toFixed(2))}`;
     });
     T('subjoint-angle', () => {        // master joint state DRIVES the subgrid (v0.157)
       const g = subs().find(o => (H.subMasterEntries().get(o.userData.sub) || [])

@@ -220,14 +220,21 @@ indistinguishable from the pushed build (2026-10-09 user report).
   axis = viewQuat(master)·axleEuler(ZYX)·e(axis), pivot =
   viewPos(master) + viewQuat·(mirror_z axle.position); group pose
   p' = pivot₀ + R(axis₀,angle)·(base.p−pivot₀) (+slide₀·pos), q' = R·base.q
-  about the BUILD-CAPTURED joint line (g.userData.jref: axis₀/slide₀ +
-  pivot₀ = the axle pivot CLAMPED onto the subgrid's non-255-block bbox =
-  the content's edge line nearest the master — v0.173, user: the hinge
-  door "should ... be collapsing outward or inward, rotating around the
-  bottom. That goes for all of them" — the dolphin's masters sit off their
-  panels (hinges 0.25 m inboard, pivots 7–16 m away), and an axle-centred
-  rotation swept the doors through the hull on that lever; a master
-  MOUNTED on its content keeps pivot₀ = the axle point exactly), then the
+  about the BUILD-CAPTURED joint line (g.userData.jref: pivot₀ = the axle
+  pivot CLAMPED onto the subgrid's non-255-block bbox = the content's edge
+  line nearest the master — v0.173; and axis₀/slide₀ = v0.174: for a PANEL
+  subgrid (non-empty bbox) the content's OWN longest bbox dimension — a
+  door hinges along its long edge: the dolphin fins (longest ŷ) yaw
+  vertically at their bottom edge ("staying close to the frame on its
+  bottom part"), Jimmy's gantry (longest x̂) folds like "a back door
+  would on a car", the truck's 3 m doors hinge vertically while the
+  0.75 m rear flaps tailgate laterally, the flukes deflect as elevons —
+  the .ini axle key is the PART's pin, NOT the content's animation axis:
+  the v0.171 uniform ŷ key flipped the fins into x̂ drawbridges, "wrong
+  in every single tested vehicle"); PARTS-ONLY subgrids (empty bbox:
+  nested parts riding the axle) keep the .ini key chain.
+  A master MOUNTED on
+  its content keeps pivot₀ = the axle point exactly), then the
   master's
   RIGID POSE DELTA rides the whole thing: p'' = p₀ + dq·(p'−p₀) + (p−p₀),
   q'' = dq·q', dq = q·q₀⁻¹ (v0.172, user: "i move the hinger, the subgrid
@@ -251,14 +258,17 @@ indistinguishable from the pushed build (2026-10-09 user report).
   `subjoin`, dolphin/XYQ postest sub-master fixtures (flattened pairs),
   dolphin `subjoint-angle` (sign-sensitive 90° spin about the decoded axis,
   orbit about the CAPTURED joint line),
-  dolphin `dooraxis` (SmallPivot spin axis ≈ vertical = car-door, .ini angular_y)
-  + `doorpivot` (hinge joint line clamped to the panel's bottom-edge
-  plane; non-vacuous axle offset)
+  dolphin `dooraxis` (parts-riding SmallPivot spin axis ≈ vertical =
+  car-door, .ini angular_y)
+  + `doorpivot` (hinge fin: joint line clamped to the panel's bottom edge
+  AND axis vertical = the fin's long-edge hinge; non-vacuous axle offset)
+  + `flukeaxis` (fluke panel subgrid axis = x̂ = its longest dimension)
   + `subfollow` (+0.5 m translate and +30° yaw spin of the hinge ride the
   subgrid in unison, sign-sensitive, exact restore),
   dolphin `subwidget` (inverted v0.170: component select attaches gizmo +
   widget, subgrid select detaches + hides), 3732302108 `subjoint-pos`
-  (LinearTrack slide ∥ its linear_x axis). See FORMAT.md §Subgrids.
+  (LinearTrack slide ∥ its CAPTURED axis) + `railaxis` (panel rail slides
+  along its length, not the axle key). See FORMAT.md §Subgrids.
 - Palette slots: `data.colors[256]`, entry = {r,g,b 0-255, opacity 0-15,
   roughness 0-7, metallic 0|1}. **r/g/b are LINEAR albedo** — the engine's
   shaders use them raw; decoding as sRGB darkens the craft ~^2.2 (the ISW-241
@@ -714,7 +724,11 @@ indistinguishable from the pushed build (2026-10-09 user report).
    return; v0.173 doorpivot: the hinge-driven fin's joint line must be
    clamped onto its panel bbox (pivot0 on the panel plane at the bottom
    edge y, axle0 0.25 m inboard — "collapsing outward or inward, rotating
-   around the bottom");
+   around the bottom"), and v0.174 pins the fin's axis = VERTICAL (the
+   fin's long-edge hinge — the axle key's ŷ maps to x̂ at that mount quat
+   = the "rolls in and out" drawbridge); flukeaxis: the fluke panel's
+   axis = x̂ (its longest dimension, elevon deflection); gantry railaxis:
+   the panel LinearTrack slides along its length;
    v0.172 subfollow: translating the hinge master +0.5 m in x and
    spinning it +30° about view ŷ must ride the subgrid group rigidly in
    UNISON (pure +x ride; constant origin-distance orbit with the sign

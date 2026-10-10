@@ -822,12 +822,22 @@ Adventure = 3334698274).
   clamp is the pivot itself and the composition is exactly the game's
   axle one; a distant control master (dolphin: hinges 0.25 m off the fin
   PLANE, pivots 7–16 m from the flukes they drive) pivots at the content
-  bbox's nearest face/edge = the closest edge line: the dolphin's hinge
-  fins fold at their BOTTOM edge (user: "collapsing outward or inward,
-  rotating around the bottom. That goes for all of them"), NOT sweeping
-  on the axle's lever ("the door rolls in and out"). A subgrid of only
-  type-255 mirrors (parts riding the axle, dolphin subgrid 6) has an
-  empty bbox ⇒ falls back to the axle point.
+  bbox's nearest face/edge (user: "collapsing outward or inward, rotating
+  around the bottom. That goes for all of them").
+  **v0.174 axis rule:** for a PANEL subgrid (non-empty bbox) the rotation/
+  slide axis is the content's OWN longest bbox dimension, not the axle
+  key — a door always hinges along its long edge: the dolphin's tall fins
+  (longest ŷ) yaw about a VERTICAL line at their bottom edge (deployable
+  fins staying close to the frame; the v0.171 ŷ-key flipped them into x̂
+  drawbridges — "the door rolls in and out ... wrong in every single
+  tested vehicle"), the XYQ doors (longest ŷ) stay car doors, Jimmy's
+  7.5 m gantry (longest x̂) folds like a car's BACK door over its top
+  edge, the semi-truck's 3 m doors (longest ŷ) hinge vertically while the
+  0.75 m rear flaps (longest x̂) tailgate laterally, the dolphin flukes
+  (longest x̂) deflect as elevons. The .ini axle key is the PART's pin,
+  not the animation axis of content welded to it. PARTS-ONLY subgrids
+  (empty bbox — nested parts riding the axle node, dolphin fin subgrid 6,
+  gantry rails) keep the .ini key chain (v0.171).
   `p' = pivot₀ + R(axis₀, angle)·(base.p − pivot₀) + slide₀·pos` then
   `q' = R(axis₀, angle) · base.q`.
   **v0.172 rigid riding:** the master's own pose delta then rides the
@@ -844,12 +854,15 @@ Adventure = 3334698274).
   the light aim) ⇒ static hosts, unanimated
   (as are junction/battery/RTG-style masters: no manifest joint).
   Pins: dolphin `subjoint-angle` (sign-sensitive; orbit about the captured
-  joint line), dolphin `dooraxis` (SmallPivot spin axis must be ~vertical
-  = car-door, .ini angular_y), dolphin `doorpivot` (hinge joint line
-  clamped to the panel's bottom-edge plane, non-vacuous axle offset),
+  joint line), dolphin `dooraxis` (parts-riding SmallPivot: spin axis must
+  be ~vertical = car-door, .ini angular_y), dolphin `doorpivot` (hinge fin:
+  joint line clamped to the panel's bottom edge AND axis vertical = the
+  fin's long-edge hinge), dolphin `flukeaxis` (fluke panel subgrid axis =
+  x̂, its longest dimension),
   dolphin `subfollow` (translate +30°-spin unison ride, sign-sensitive,
   exact restore), 3732302108 `subjoint-pos` (LinearTrack slides along its
-  linear_x axis).
+  CAPTURED axis) + `railaxis` (panel rail slides along its length, not the
+  axle key).
 - So the subgrid info panel (click a subgrid): Contents; Mount = the DECODED
   master(s) with joint state and measured distance — a KINEMATIC master also
   gets editable joint sliders (angle °/slide m) that write the master's

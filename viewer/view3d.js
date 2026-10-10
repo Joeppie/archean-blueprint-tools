@@ -1127,20 +1127,29 @@ function buildSubgrids() {
         invalidate();
       });
     }
-    // v0.173 JOINT-LINE capture (after the content exists, so the bbox is
-    // real): the subgrid rotates about its master's .ini axis direction,
-    // anchored at the point of the CONTENT's bbox nearest the axle pivot
-    // (user: the hinge-driven door should "be collapsing outward or
-    // inward, rotating around the bottom. That goes for all of them").
-    // For masters the builder mounted ON their content (XYQ/SMR: ~0.1 m)
-    // the axle pivot lies INSIDE the bbox, the clamp is the pivot itself,
-    // and this matches the game's axle composition exactly. The dolphin's
-    // five masters sit 7–25 m from the doors they drive (the builder
-    // welded a control part to the hull; the content rides its own skin)
-    // — an axle-centred rotation there sweeps a door tens of metres
-    // through the air on a huge radius ("the door rolls in and out");
-    // the game folds it at its own edge. Clamping to the bbox gives the
-    // face/edge line closest to the master.
+    // v0.173/174 JOINT-LINE capture (after the content exists, so the bbox
+    // is real). PANEL subgrids (non-empty block bbox): the hinge/pivot/
+    // track animates the content about its OWN long axis — the axis along
+    // which the panel is longest — anchored at the bbox point nearest the
+    // axle pivot (the edge line closest to the master). This unifies every
+    // in-game motion the user described (v0.174: "the door rolls in and
+    // out, when it really should ... be collapsing outward or inward,
+    // rotating around the bottom ... the door opens the way a back door
+    // would on a car ... That goes for all of them actually"): the
+    // dolphin's tall fins (longest ŷ) yaw about a VERTICAL line at their
+    // bottom edge — deployable fins staying close to the frame; the XYQ
+    // doors (longest ŷ) are car doors (pinned v0.171); Jimmy's 7.5 m
+    // gantry (longest x̂) folds like a car's BACK door about its top edge;
+    // the semi-truck's 3 m doors (longest ŷ) hinge vertically while its
+    // 0.75 m rear flaps (longest x̂) tailgate laterally; the dolphin's tail
+    // flukes (longest x̂) deflect as elevons. A door always hinges along
+    // its long edge — the .ini axle key (angular_y) is the part's own pin,
+    // NOT the animation axis of the content welded to it: taking ŷ for
+    // every panel (v0.171) fixed the XYQ doors but flipped the dolphin
+    // fins into x̂ drawbridges (v0.174: "it rotates the same wrong axis as
+    // before ... wrong in every single tested vehicle"). PARTS-ONLY
+    // subgrids (empty block bbox) ride the axle node itself: their axis
+    // stays the .ini key chain (v0.171, pinned by dooraxis/subjoint-angle).
     const bbj = new THREE.Box3();
     for (const b of c.data.blocks) {
       if (b.type === 255) continue;   // occupancy mirrors sit AT the master
@@ -1154,13 +1163,21 @@ function buildSubgrids() {
     g.userData.jref = (subMasterEntries().get(bi) || [])
       .filter((e) => e.mc && subJointAxis(e.mc))
       .map((e) => { const j0 = subJointAxis(e.mc);
-        const pivot0 = bbj.isEmpty() ? j0.pivot.clone() : new THREE.Vector3(
-          THREE.MathUtils.clamp(j0.pivot.x, bbj.min.x, bbj.max.x),
-          THREE.MathUtils.clamp(j0.pivot.y, bbj.min.y, bbj.max.y),
-          THREE.MathUtils.clamp(j0.pivot.z, bbj.min.z, bbj.max.z));
+        if (bbj.isEmpty()) return { mc: e.mc, p0: viewPos(e.mc.position),
+          q0: viewQuat(e.mc.orientation), pivot0: j0.pivot.clone(),
+          axle0: j0.pivot, axis0: j0.axis, slide0: j0.slide };
+        const sz = bbj.getSize(new THREE.Vector3());
+        const d = sz.x >= sz.y && sz.x >= sz.z
+          ? new THREE.Vector3(1, 0, 0)
+          : sz.y >= sz.z ? new THREE.Vector3(0, 1, 0)
+            : new THREE.Vector3(0, 0, 1);
         return { mc: e.mc, p0: viewPos(e.mc.position),
-          q0: viewQuat(e.mc.orientation), pivot0, axle0: j0.pivot,
-          axis0: j0.axis, slide0: j0.slide }; });
+          q0: viewQuat(e.mc.orientation),
+          pivot0: new THREE.Vector3(
+            THREE.MathUtils.clamp(j0.pivot.x, bbj.min.x, bbj.max.x),
+            THREE.MathUtils.clamp(j0.pivot.y, bbj.min.y, bbj.max.y),
+            THREE.MathUtils.clamp(j0.pivot.z, bbj.min.z, bbj.max.z)),
+          axle0: j0.pivot, axis0: d, slide0: d }; });
   });
   syncSubJoints();
 }
