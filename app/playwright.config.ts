@@ -12,6 +12,7 @@ export default defineConfig({
   },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    { name: 'pixel7', use: { ...devices['Pixel 7'] } },
   ],
   webServer: {
     // Vite binds ::1 by default; the whole suite is pinned to IPv4 loopback

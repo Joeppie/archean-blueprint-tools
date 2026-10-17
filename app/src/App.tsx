@@ -1,97 +1,145 @@
-// SPA shell (Phase 1): blueprint picker over the configured corpus folder
-// (/corpus/ served by tools/vite-corpus.ts — AGENTS § Blueprint folder) and
-// a placeholder viewport. The Three.js scene engine + full panel UI land in
-// Phases 2–3; selection state here already follows the ?craft= deep link so
-// Playwright fixtures can address a craft directly.
+// App.tsx — two-stage SPA: craft GALLERY (legacy index-page style) →
+// full-screen EDITOR. ?craft=<id> deep-links straight into the editor, so
+// old links and Playwright fixtures keep working. Corpus/names/previews are
+// served by the vite plugin from the CONFIGURED blueprint folder + the
+// legacy workshop.json (AGENTS § Blueprint folder — no hardcoded paths).
 import { useEffect, useState } from 'react';
 import type { PickHit } from './engine/scene';
 import Viewport from './components/Viewport';
 import type { Blueprint } from './engine/format';
 import { isLegacyFile } from './engine/format';
 
-interface CraftRow { id: string; name: string }
+interface WorkshopEntry { name: string; author?: string }
+type Workshop = Record<string, WorkshopEntry>;
 
-function useCraftParam(): [string | null, (id: string) => void] {
-  const [params, setParams] = useState(() => new URLSearchParams(location.search));
-  const select = (id: string) => {
-    params.set('craft', id);
-    history.pushState({}, '', `${location.pathname}?${params}`);
-    setParams(new URLSearchParams(params));
-  };
-  return [params.get('craft'), select];
+/** shared one-shot loads (module caches) */
+let workshopP: Promise<Workshop> | null = null;
+export function getWorkshop(): Promise<Workshop> {
+  return workshopP ??= fetch('/workshop.json').then(r => r.ok ? r.json() as Promise<Workshop> : {}).catch(() => ({}));
+}
+async function getCraftIds(): Promise<string[]> {
+  const html = await (await fetch('/corpus/')).text();
+  return [...html.matchAll(/href="(\d{6,})\/"/g)].map(m => m[1]!);
 }
 
 export default function App() {
-  const [craft, setCraft] = useCraftParam();
-  const [crafts, setCrafts] = useState<CraftRow[]>([]);
-  const [bp, setBp] = useState<Blueprint | null>(null);
-  const [sel, setSel] = useState<PickHit | null>(null);
-
+  const [params, setParams] = useState(() => new URLSearchParams(location.search));
+  const craft = params.get('craft');
+  const navigate = (to: string | null) => {
+    history.pushState({}, '', to ? `/?craft=${to}` : '/');
+    setParams(new URLSearchParams(to ? { craft: to } : {}));
+  };
   useEffect(() => {
-    (async () => {
-      const html = await (await fetch('/corpus/')).text();
-      const ids = [...html.matchAll(/href="(\d{6,})\/"/g)].map(m => m[1]!);
-      setCrafts(ids.map(id => ({ id, name: id })));
-      if (!craft && ids.length) setCraft(ids[0]!);
-    })().catch(console.error);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const pop = () => setParams(new URLSearchParams(location.search));
+    addEventListener('popstate', pop);
+    return () => removeEventListener('popstate', pop);
   }, []);
 
-  useEffect(() => {
-    if (!craft) return;
-    (async () => {
-      const res = await fetch(`/corpus/${craft}/blueprint.json`);
-      if (res.ok) setBp(await res.json() as Blueprint);
-    })().catch(console.error);
-  }, [craft]);
+  return craft
+    ? <Editor craft={craft} onBack={() => navigate(null)} />
+    : <Gallery onOpen={navigate} />;
+}
 
+// ---------------------------------------------------------------- gallery
+function Gallery({ onOpen }: { onOpen: (id: string) => void }) {
+  const [ids, setIds] = useState<string[]>([]);
+  const [ws, setWs] = useState<Workshop>({});
+  useEffect(() => {
+    Promise.all([getCraftIds(), getWorkshop()]).then(([i, w]) => { setIds(i); setWs(w); }).catch(console.error);
+  }, []);
   return (
-    <div className="grid h-full grid-cols-[260px_1fr]">
-      <aside className="overflow-y-auto border-r border-white/10 bg-panel p-2" data-testid="corpus-panel">
-        <h1 className="mb-2 px-1 text-[11px] tracking-widest text-ink-dim uppercase">
-          Archean inspector
+    <div className="min-h-dvh overflow-y-auto bg-[#0e1013] px-4 py-6 md:px-10">
+      <header className="mx-auto max-w-5xl">
+        <h1 className="text-xl font-semibold text-white">
+          Archean <span data-testid="brand-accent" className="text-accent">blueprint inspector</span>
         </h1>
-        {crafts.map(c => (
-          <button key={c.id}
-            data-testid={`craft-${c.id}`}
-            onClick={() => setCraft(c.id)}
-            className={`block w-full truncate rounded px-2 py-1 text-left ${
-              c.id === craft ? 'bg-panel2 text-accent' : 'hover:bg-panel2'}`}>
-            {c.name}
+        <p data-testid="gallery-sub" className="mt-1 text-[12px] text-ink-dim">
+          Click a craft to open the 3D editor; &#8599; opens the Steam Workshop page.
+          {' '}{ids.length} crafts from the configured blueprint folder.
+        </p>
+      </header>
+      <main data-testid="gallery"
+        className="mx-auto mt-6 grid max-w-5xl grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+        {ids.map(id => (
+          <button key={id} data-testid={`card-${id}`} onClick={() => onOpen(id)}
+            className="group text-left">
+            <div className="aspect-square overflow-hidden rounded-lg border border-white/10 bg-panel2
+                            transition group-hover:border-accent/60">
+              <img src={`/corpus/${id}/preview.jpg`} alt="" loading="lazy"
+                className="h-full w-full object-cover"
+                onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+            </div>
+            <div className="mt-1.5 truncate text-[13px] font-semibold text-ink group-hover:text-accent">
+              {ws[id]?.name ?? `Workshop ${id}`}
+            </div>
+            <div className="truncate text-[11px] text-ink-dim">
+              {ws[id]?.author ?? id} · <a
+                href={`https://steamcommunity.com/sharedfiles/filedetails/?id=${id}`}
+                target="_blank" rel="noopener" onClick={e => e.stopPropagation()}
+                className="hover:text-accent">workshop ↗</a>
+            </div>
           </button>
         ))}
-        {crafts.length === 0 && <p className="px-2 text-ink-dim">corpus folder empty</p>}
-      </aside>
-      <main className="relative h-full">
-        <Viewport bp={bp} onPick={h => { setSel(h); (window as unknown as { __SEL__?: string }).__SEL__ = h.kind; }} />
-        {bp && (
-          <div className="pointer-events-none absolute top-2 left-3">
-            <Summary craft={craft!} bp={bp} sel={sel} />
-          </div>
-        )}
+        {ids.length === 0 && <p className="col-span-full text-ink-dim">corpus folder empty</p>}
       </main>
     </div>
   );
 }
 
-function Summary({ craft, bp, sel }: { craft: string; bp: Blueprint; sel: PickHit | null }) {
-  const legacy = isLegacyFile(bp);
-  const comp = sel?.kind === 'comp' && sel.ci != null ? bp.data.components[sel.ci] : null;
+// ----------------------------------------------------------------- editor
+function Editor({ craft, onBack }: { craft: string; onBack: () => void }) {
+  const [bp, setBp] = useState<Blueprint | null>(null);
+  const [ws, setWs] = useState<Workshop>({});
+  const [sel, setSel] = useState<PickHit | null>(null);
+
+  useEffect(() => {
+    setBp(null); setSel(null);
+    (async () => {
+      const res = await fetch(`/corpus/${craft}/blueprint.json`);
+      if (res.ok) setBp(await res.json() as Blueprint);
+    })().catch(console.error);
+    getWorkshop().then(setWs).catch(() => undefined);
+  }, [craft]);
+
+  const name = bp?.data.alias?.trim() || ws[craft]?.name || `Workshop ${craft}`;
   return (
-    <div data-testid="bp-summary" className="rounded-lg border border-white/10 bg-panel/85 px-4 py-3 backdrop-blur">
-      <h2 className="text-base text-accent">{bp.data.alias || `Workshop ${craft}`}</h2>
-      <p className="text-ink-dim">
-        blocks={bp.data.blocks.length} components={bp.data.components.length}
-        {' '}triangles={bp.data.triangles?.length ?? 0} version={bp.data.version}
-        {' '}{legacy ? <span data-testid="legacy-badge" className="text-gold">legacy palette</span>
-                    : <span className="text-gold">file palette</span>}
-      </p>
-      {sel && sel.kind !== 'none' && (
-        <p data-testid="pick-info" className="text-ink">
-          picked: {sel.kind}{comp ? ` ${comp.type}` : ''}
-          {sel.point ? ` @ ${sel.point.map(n => n.toFixed(2)).join(', ')}` : ''}
-        </p>
-      )}
+    <div className="flex h-dvh w-full flex-col">
+      <header className="flex h-11 shrink-0 items-center gap-2 border-b border-white/10 bg-panel px-2">
+        <button data-testid="back-to-gallery" onClick={onBack}
+          className="rounded bg-panel2 px-2.5 py-1 text-[12px] text-ink hover:bg-white/10 hover:text-accent">
+          ← gallery
+        </button>
+        <span data-testid="editor-title" className="min-w-0 flex-1 truncate text-[13px] font-semibold text-accent">{name}</span>
+        {bp && (
+          <span className="hidden shrink-0 text-[11px] text-ink-dim sm:block">
+            v{bp.data.version} · {isLegacyFile(bp) ? 'legacy palette' : 'file palette'}
+          </span>
+        )}
+      </header>
+      <div className="relative flex min-h-0 flex-1">
+        <main className="relative min-w-0 flex-1">
+          <Viewport bp={bp} onPick={setSel} />
+          {bp && sel && sel.kind !== 'none' && (
+            <PickChip sel={sel} bp={bp} />
+          )}
+        </main>
+      </div>
+    </div>
+  );
+}
+
+/** picked-part chip: bottom sheet on phones, floating card on desktop */
+function PickChip({ sel, bp }: { sel: PickHit; bp: Blueprint }) {
+  const comp = sel.kind === 'comp' && sel.ci != null ? bp.data.components[sel.ci] : null;
+  return (
+    <div data-testid="pick-info"
+      className="pointer-events-none absolute inset-x-2 bottom-12 rounded-lg border border-gold/30
+                 bg-black/70 px-3 py-2 text-[12px] text-ink backdrop-blur
+                 md:inset-x-auto md:bottom-auto md:right-3 md:top-3 md:max-w-[320px]">
+      picked: <span className="text-gold">{sel.kind}</span>
+      {comp && <> · <span className="text-accent">{comp.type}</span>
+        {comp.name ? <span className="text-ink-dim"> "{comp.name}"</span> : null}</>}
+      {sel.point && <span className="text-ink-dim"> @ {sel.point.map(n => n.toFixed(2)).join(', ')}</span>}
     </div>
   );
 }

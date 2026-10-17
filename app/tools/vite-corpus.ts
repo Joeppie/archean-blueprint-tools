@@ -38,8 +38,28 @@ export function corpusDir(): string {
   return path.resolve(REPO, expandUser(raw));
 }
 
+/** repo assets the SPA reuses from the legacy tree: /workshop.json + /models/* */
+function repoFile(res: ServerResponse, rel: string, type: string) {
+  const f = path.join(REPO, rel);
+  if (!path.resolve(f).startsWith(REPO) || !fs.existsSync(f)) {
+    res.statusCode = 404;
+    res.end('not found');
+    return;
+  }
+  res.statusCode = 200;
+  res.setHeader('Content-Type', type);
+  res.end(fs.readFileSync(f));
+}
+
 function handler(req: IncomingMessage, res: ServerResponse, next: () => void) {
   const url = decodeURIComponent((req.url ?? '').split('?')[0]!);
+  if (url === '/workshop.json') return repoFile(res, 'viewer/workshop.json', 'application/json');
+  if (url.startsWith('/models/')) {
+    // whitelisted shape: <Type>.json only, no traversal
+    const m = /^\/models\/([A-Za-z0-9_.-]+\.json)$/.exec(url);
+    if (!m || m[1]!.includes('..')) { res.statusCode = 404; res.end('nope'); return; }
+    return repoFile(res, `viewer/models/${m[1]}`, 'application/json');
+  }
   if (!url.startsWith('/corpus')) return next();
   const root = corpusDir();
   const rel = url.replace(/^\/corpus\/?/, '');

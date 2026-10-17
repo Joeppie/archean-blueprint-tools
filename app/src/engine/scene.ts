@@ -9,6 +9,7 @@ import {
   PlaneGeometry, Raycaster, Scene, Vector2, Vector3, WebGLRenderer,
 } from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import type { PartBox } from './compparts';
 import { buildCompProxies, buildSolids, type SolidBatch } from './build';
 import type { Blueprint } from './format';
 
@@ -22,6 +23,7 @@ export class Engine {
   private controls: OrbitControls | null = null;
   private root = new Group();
   private compMeshes: Mesh[] = [];
+  private parts: PartBox[] = [];
   private batch: SolidBatch | null = null;
   private bp: Blueprint | null = null;
   private needRender = false;
@@ -65,8 +67,9 @@ export class Engine {
 
   invalidate() { this.needRender = true; }
 
-  load(bp: Blueprint) {
+  load(bp: Blueprint, parts: PartBox[] = []) {
     this.bp = bp;
+    this.parts = parts;
     this.disposeScene();
     this.batch = buildSolids(bp);
 
@@ -109,8 +112,17 @@ export class Engine {
       this.root.add(m);
     }
 
+    // component collider proxies (legacy low-poly look): grey boxes, pickable
+    const partMat = new MeshStandardMaterial({ color: 0x8a93a3, roughness: 0.7, metalness: 0.15 });
+    for (const box of parts) {
+      const m = new Mesh(new BoxGeometry(box.size[0], box.size[1], box.size[2]), partMat);
+      m.position.set(box.center[0], box.center[1], box.center[2]);
+      m.userData = { kind: 'comp', ci: box.ci };
+      this.root.add(m);
+    }
+
     this.addGround(bp);
-    this.fit(bp);
+    this.fit();
     this.invalidate();
   }
 
@@ -128,14 +140,28 @@ export class Engine {
     this.root.add(grid);
   }
 
-  /** legacy fit: d = max(1.85r, 3.6), eye (0.6d, max(.34d,1.4), .72d), fog scales with r */
-  private fit(bp: Blueprint) {
-    const c = new Vector3((bp.box_min.x + bp.box_max.x) / 2, (bp.box_min.y + bp.box_max.y) / 2, -(bp.box_min.z + bp.box_max.z) / 2);
-    const r = Math.max(
-      (bp.box_max.x - bp.box_min.x) / 2,
-      (bp.box_max.y - bp.box_min.y) / 2,
-      (bp.box_max.z - bp.box_min.z) / 2, 0.5);
-    const d = Math.max(1.85 * r, 3.6);
+  /** legacy fit: d = max(1.85r, 3.6), eye (0.6d, max(.34d,1.4), .72d), fog
+   *  scales with r — over the UNION of file box, built solids and part boxes,
+   *  so geometry that rides outside the file bbox still frames (whole craft) */
+  private fit() {
+    const bp = this.bp!;
+    const mn = [bp.box_min.x, bp.box_min.y, -bp.box_max.z];
+    const mx = [bp.box_max.x, bp.box_max.y, -bp.box_min.z];
+    const grow = (x: number, y: number, z: number) => {
+      mn[0] = Math.min(mn[0]!, x); mn[1] = Math.min(mn[1]!, y); mn[2] = Math.min(mn[2]!, z);
+      mx[0] = Math.max(mx[0]!, x); mx[1] = Math.max(mx[1]!, y); mx[2] = Math.max(mx[2]!, z);
+    };
+    for (const b of this.batch?.buckets.values() ?? [])
+      for (let i = 0; i < b.positions.length; i += 3) grow(b.positions[i]!, b.positions[i + 1]!, b.positions[i + 2]!);
+    for (const p of this.parts)
+      grow(p.center[0] - p.size[0] / 2, p.center[1] - p.size[1] / 2, p.center[2] - p.size[2] / 2),
+        grow(p.center[0] + p.size[0] / 2, p.center[1] + p.size[1] / 2, p.center[2] + p.size[2] / 2);
+    const c = new Vector3((mn[0] + mx[0]) / 2, (mn[1] + mx[1]) / 2, (mn[2] + mx[2]) / 2);
+    const r = Math.max((mx[0] - mn[0]) / 2, (mx[1] - mn[1]) / 2, (mx[2] - mn[2]) / 2, 0.5);
+    const d0 = Math.max(1.85 * r, 3.6);
+    // fov is VERTICAL: on portrait screens the horizontal view narrows — pull
+    // back by the aspect deficit so the whole craft stays framed on phones
+    const d = this.camera.aspect < 1 ? d0 / Math.max(this.camera.aspect, 0.4) : d0;
     this.controls?.target.copy(c);
     this.camera.position.set(c.x + d * 0.6, c.y + Math.max(d * 0.34, 1.4), c.z + d * 0.72);
     this.camera.near = Math.max(0.05, r / 400);

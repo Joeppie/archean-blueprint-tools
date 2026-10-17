@@ -4,6 +4,7 @@
 // Test hooks land on window.__ARCHEAN__ (same philosophy as the legacy
 // title/#out reporting): stats/pick are assertable without pixels.
 import { useEffect, useRef } from 'react';
+import { buildPartBoxes, type Manifest } from '../engine/compparts';
 import type { Blueprint } from '../engine/format';
 import { Engine, type PickHit, type SceneStats } from '../engine/scene';
 
@@ -14,6 +15,12 @@ declare global {
     pickProbe: () => PickHit;
     lastPick: () => PickHit;
   } }
+}
+
+let manifestP: Promise<Manifest | null> | null = null;
+function getManifest(): Promise<Manifest | null> {
+  return manifestP ??= fetch('/models/manifest.json')
+    .then(r => r.ok ? r.json() as Promise<Manifest> : null).catch(() => null);
 }
 
 export default function Viewport({ bp, onPick }: { bp: Blueprint | null; onPick: (h: PickHit) => void }) {
@@ -35,7 +42,15 @@ export default function Viewport({ bp, onPick }: { bp: Blueprint | null; onPick:
     return () => { ro.disconnect(); engine.dispose(); window.__ARCHEAN__ = undefined; };
   }, []);
 
-  useEffect(() => { if (bp && engineRef.current) engineRef.current.load(bp); }, [bp]);
+  useEffect(() => {
+    if (!bp) return;
+    let dead = false;
+    (async () => {
+      const parts = buildPartBoxes(bp, await getManifest());
+      if (!dead) engineRef.current?.load(bp, parts);
+    })().catch(console.error);
+    return () => { dead = true; };
+  }, [bp]);
 
   return (
     <div className="relative h-full w-full" data-testid="viewport">
