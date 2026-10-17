@@ -67,7 +67,7 @@ new build dep, kept inside `app/`).
   honours ARCHEAN_BLUEPRINTS/blueprints.conf per the AGENTS rule); SPA shell
   with ?craft= deep links. Corpus config resolution is mirrored in
   `app/tools/vite-corpus.ts` — no hardcoded paths in `app/` either.
-- **P2 — IN PROGRESS (P2a landed: first render)**: `engine/build.ts` (pure,
+- **P2 — DONE (P2a–P2c + heavy tier)**: `engine/build.ts` (pure,
   THREE-free — WASM seam) merges blocks per palette colour with the view
   z-mirror + flipped winding, hull triangles and occupancy proxies;
   `engine/scene.ts` is the framework-free renderer (legacy lighting rig
@@ -78,12 +78,64 @@ new build dep, kept inside `app/`).
   + Playwright scene specs (draws>0, pick probe, canvas click, switch).
   Caught through the screenshots: block/occupancy `size_*` is INCLUSIVE
   ((size+1)·CELL, legacy blkSpan) — pinned in build.test.
-  Next (P2b): interior-wall face culling + rect stitch, pipes/adapters,
-  component real models + display-pose rules, subgrid kinematics, IBL/PMREM.
-- **P3 — React UI**: DevTools-style panels as shadcn components
-  (ViewOptions, component list tabs + collapse + search, inspector rows →
-  controlled sliders writing the store, mode widget, gizmo = engine-owned
-  canvas overlay, panels get keyboard a11y for free via Radix).
+- **P3 — LANDED (core editor loop + subgrids; see the gaps below)**:
+  editing + UI on top of the frozen port references:
+  - `engine/doc.ts` gained `docSet` (primitive writes keeping literal style);
+    `engine/edit.ts` (NEW, pure) is the ONLY write funnel: position/quaternion/
+    data-field edits hit bp AND doc together, and `serializeSave` replays the
+    legacy serialize() contract — occ cells = occ0 + round(Δ/CELL), the
+    type-255 mirrors follow via the CURRENT-key consume-and-rekey index, an
+    applied-cells tracker keeps repeated saves exact, and an untouched doc
+    re-emits byte-for-byte (pinned over EVERY corpus file + an ISW wheel move).
+  - `engine/subgrid.ts` (NEW, pure): the FLATTENED composite_builds decode
+    (nested content before its Build, readBuild order; masters may be NESTED —
+    doc paths included), the joint-line capture (bbox clamp + the edge/face-
+    mounted hinge triad, pin vs pin×span, pivots/tracks longest-dim) and the
+    joint-pose algebra (spin about the CAPTURED line, slide, rigid master
+    riding — identity at the built pose). Vitest pins: readBuild order, nested
+    masters, dolphin 5⇔3+2, XYQ hinges @24.3°, corpus-wide "no master lands
+    on a Build", axis rules, pose identity/swing/slide/follow.
+  - `engine/scene.ts`: display anchoring (legacy moff: the minimal frame at
+    the origin, view-z flips sign); ONE Group per Build with nested solids
+    (parent palette) + nested part proxies (invisible proxies route clicks to
+    the SUBGRID only when no component is hit — v0.169 pick routing baked into
+    pickNdc) + real models with raycast disabled; `syncSubJoints` after every
+    load/edit; heavy tier MERGES the nested stand-in boxes per colour (the
+    giant's 659 boxes blew the phone draw budget). Selection: golden
+    LineSegments2 box (3.5 px, expanded 0.07 m, depthTest off) + breathing
+    pulse (the on-demand loop wakes only while a selection lives) + ease-out
+    fly-to (canvas click / list double-click only). Editing API:
+    `moveComp` (proxy+real siblings ride, subgrids follow),
+    `beginRotEdit`/`setCompQuatDelta` (absolute world YXZ degree deltas
+    composed qd·q0, file quaternion stripped through the legacy wheelUndo
+    right-multiplier), `refreshComp` (⟲ rebuilds the display pose + undo),
+    `setOption/setHullOpacity` (hull⟷wire exclusive; opacity dims solids +
+    wire), `setRealModels` (reload with/without the atlas stream).
+  - `occupancies` is an ARRAY (real format!) — fixed the type + standInBox/
+    buildCompProxies to read `[0]` (the occ-box display silently used origin
+    dots for every part before).
+  - UI: `components/Panel.tsx` — DevTools rows (slider+number+⟲ with the
+    BUILD-TIME reset baseline — a live-prop baseline made ⟲ a no-op after the
+    first re-render, caught by the dolphin joint pin), view options (all
+    legacy toggles + hull opacity + real models), the component list (by type /
+    by subgrid tabs, collapsed groups + search force-open + selection reveal),
+    the inspector (position ±2/±1.5 m, world pitch/yaw/roll deltas, PilotSeat
+    lean presets, comp.data rows bool/number/string, ⟲ reset this component),
+    the subgrid panel (Contents + DECODED masters + live joint angle/slide
+    sliders writing the master's data verbatim). App: doc-backed Editor
+    (text → parseDoc → makeCtx), dirty → Save downloads the mirror-synced
+    byte-identical blueprint.json (also Ctrl+S), keyboard g/o/h/Esc drive the
+    same toggles as the checkboxes, mobile panel drawer.
+  - e2e `panels.spec.ts`: exclusivity + keyboard pins, search→select→inspector,
+    move x → SAVE with the 255 mirror verified in the DOWNLOADED file,
+    dolphin subgrid tab → joint slider swings + restores the group pose,
+    mobile drawer. Gates: vitest 95/95, tsc strict clean, Playwright 27 pass
+    (3 desktop-only skips), iGPU renders: dolphin subs=5, ISW, gantry.
+    Remaining P3-scope gaps (next commits): the rotate/translate GIZMO + mode
+    widget, symmetry twin propagation (⇄/mirror plane), cable power-surges +
+    X-ray glow, labels, mass/CoM, aero/wind/flow/thrust/seal + flight UI,
+    dashboards, interior-wall face culling, hull element list, hi-def model
+    toggle, calibrated-mass report, workshop header link.
 - **P4 — perf**: BatchedMesh proxies, ?perf port, wasm benchmark of
   candidate 1, optional WebGPU flag.
 - **P5 — parity gate + cutover**: Playwright suite mirrors the old suites

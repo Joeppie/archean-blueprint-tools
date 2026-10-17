@@ -46,7 +46,7 @@ export function standInBox(c: BlueprintComponent, info: CollidersEntry | undefin
       center: [(col.min[0] + col.max[0]) / 2, (col.min[1] + col.max[1]) / 2, (col.min[2] + col.max[2]) / 2],
       size: [col.max[0] - col.min[0], col.max[1] - col.min[1], col.max[2] - col.min[2]],
     };
-  const o = c.occupancies ?? ({} as NonNullable<BlueprintComponent['occupancies']>);
+  const o = c.occupancies?.[0] ?? ({} as NonNullable<NonNullable<BlueprintComponent['occupancies']>[number]>);
   const cell = (n: number | undefined): number => ((n ?? 0) + 1) * 0.25;   // inclusive rule
   return { center: [0, 0, 0], size: [cell(o.size_x), cell(o.size_y), cell(o.size_z)] };
 }

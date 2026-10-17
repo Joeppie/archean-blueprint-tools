@@ -161,3 +161,21 @@ export function docSetNumber(root: DocNode, path: (string | number)[], v: number
   n.value = v;
   return true;
 }
+
+/** Set a primitive at a path: numbers keep their literal style, booleans and
+ *  strings adopt the new value (emitting true/false/"str"). Objects and
+ *  type-mismatched targets are refused. True = applied. */
+export function docSet(root: DocNode, path: (string | number)[], v: number | string | boolean): boolean {
+  const n = docGet(root, path);
+  if (!n) return false;
+  if (typeof v === 'number') {
+    if (n.kind !== 'num') return false;
+    n.value = v;
+    return true;
+  }
+  if (n.kind === 'obj' || n.kind === 'arr' || n.kind === 'null') return false;
+  const m = n as { kind: 'num' | 'str' | 'bool'; value: number | string | boolean };
+  if (typeof v === 'boolean') { m.kind = 'bool'; m.value = v; }
+  else { m.kind = 'str'; m.value = v; }
+  return true;
+}

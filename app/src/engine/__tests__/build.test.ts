@@ -113,7 +113,7 @@ describe('buildCompProxies', () => {
     const bp: Blueprint = bpOf([]);
     bp.data.components = [
       { type: 'Wheel', position: { x: 0, y: 0, z: 0 }, orientation: { w: 1, x: 0, y: 0, z: 0 },
-        occupancies: { pos_x: 5, pos_y: 5, pos_z: 0, size_x: 2, size_y: 1, size_z: 1 } },
+        occupancies: [{ pos_x: 5, pos_y: 5, pos_z: 0, size_x: 2, size_y: 1, size_z: 1 }] },
       { type: 'Build', position: { x: 900, y: 0, z: 0 }, orientation: { w: 1, x: 0, y: 0, z: 0 } },
       { type: 'Lamp', position: { x: 1, y: 2, z: -3 }, orientation: { w: 1, x: 0, y: 0, z: 0 } },
     ] as never;

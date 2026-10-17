@@ -97,7 +97,7 @@ describe('standInBox', () => {
   test('atlas collider wins; degenerate collider falls back to the footprint', () => {
     const b = standInBox(comp as never, man.Thing);
     b.center.forEach((v, i) => expect(v).toBeCloseTo([0.5, 0.25, 0.125][i]!, 6));
-    const flat = standInBox({ ...comp, occupancies: { size_x: 2, size_y: 0, size_z: 1 } } as never,
+    const flat = standInBox({ ...comp, occupancies: [{ size_x: 2, size_y: 0, size_z: 1 }] } as never,
       { colliders: [{ name: 'p', min: [0, 0, 0], max: [0, 0, 0] }] });
     expect(flat.size).toEqual([0.75, 0.25, 0.5]);             // inclusive cell rule
   });

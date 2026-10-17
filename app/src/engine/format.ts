@@ -65,7 +65,9 @@ export interface BlueprintComponent {
   name?: string;
   colors?: Record<string, Partial<import('./palette').PaletteEntry>> | [number, number];
   data?: Record<string, unknown>;
-  occupancies?: LatticeObj & { size_x?: number; size_y?: number; size_z?: number };
+  /** occupancy mirror records (array; first entry = footprint). Kept in sync
+   *  with the type-255 entries in data.blocks on every save. */
+  occupancies?: (LatticeObj & { size_x?: number; size_y?: number; size_z?: number })[];
   [key: string]: unknown;
 }
 

@@ -1,15 +1,25 @@
 // App.tsx — two-stage SPA: craft GALLERY (legacy index-page style) →
-// full-screen EDITOR. ?craft=<id> deep-links straight into the editor, so
-// old links and Playwright fixtures keep working. The catalog itself is
-// STATICALLY COMPILED at build time (virtual:gallery from the configured
-// blueprint folder — AGENTS § Blueprint folder), so the gallery paints with
-// zero runtime fetches; only the preview images load lazily as files.
-import { useEffect, useState } from 'react';
+// full-screen EDITOR (viewport + DevTools-style panels). ?craft=<id> deep
+// links straight into the editor, so old links and Playwright fixtures keep
+// working. The catalog itself is STATICALLY COMPILED at build time
+// (virtual:gallery from the configured blueprint folder — AGENTS § Blueprint
+// folder), so the gallery paints with zero runtime fetches; only the preview
+// images load lazily as files.
+//
+// EDITING (P3): the blueprint lives in a raw-literal DOC (doc.ts) plus a
+// plain live view of it; every write goes through engine/edit.ts so bp and
+// doc stay in lockstep, and SAVE re-emits the doc byte-identically except
+// for the edited numbers (occupancy + type-255 mirrors ride at save time).
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GALLERY } from 'virtual:gallery';
-import type { PickHit } from './engine/scene';
+import type { Engine, PickHit, ViewOptions } from './engine/scene';
 import Viewport from './components/Viewport';
+import Panel, { type EditApi } from './components/Panel';
 import type { Blueprint } from './engine/format';
 import { isLegacyFile } from './engine/format';
+import { docValue, parseDoc } from './engine/doc';
+import { makeCtx, resetComponent, setDataField, setOrientation, setPos,
+  serializeSave, type EditCtx } from './engine/edit';
 
 export const craftName = (id: string) =>
   GALLERY.find(g => g.id === id)?.name ?? `Workshop ${id}`;
@@ -28,7 +38,7 @@ export default function App() {
   }, []);
 
   return craft
-    ? <Editor craft={craft} onBack={() => navigate(null)} />
+    ? <Editor key={craft} craft={craft} onBack={() => navigate(null)} />
     : <Gallery onOpen={navigate} />;
 }
 
@@ -75,17 +85,114 @@ function Gallery({ onOpen }: { onOpen: (id: string) => void }) {
 // ----------------------------------------------------------------- editor
 function Editor({ craft, onBack }: { craft: string; onBack: () => void }) {
   const [bp, setBp] = useState<Blueprint | null>(null);
-  const [sel, setSel] = useState<PickHit | null>(null);
+  const [sel, setSel] = useState<{ ci: number; sub: number }>({ ci: -1, sub: -1 });
+  const [hit, setHit] = useState<PickHit | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [inspKey, setInspKey] = useState(0);
+  const [opts, setOpts] = useState<ViewOptions>({ grid: true, occ: false, hull: true, wire: false, pipes: true, subs: true });
+  const [hullOpacity, setHullOpacity] = useState(1);
+  const [realModels, setRealModels] = useState(true);
+  const engineRef = useRef<Engine | null>(null);
+  const [engine, setEngine] = useState<Engine | null>(null);
+  const ctxRef = useRef<EditCtx | null>(null);
+  const dirtyRef = useRef(false);
+  // mobile: the panel is a drawer; desktop opens it by default
+  const [panelOpen, setPanelOpen] = useState(() => window.innerWidth >= 768);
 
   useEffect(() => {
-    setBp(null); setSel(null);
+    setBp(null); setSel({ ci: -1, sub: -1 }); setHit(null); setDirty(false);
+    dirtyRef.current = false;
     (async () => {
       const res = await fetch(`/corpus/${craft}/blueprint.json`);
-      if (res.ok) setBp(await res.json() as Blueprint);
+      if (!res.ok) return;
+      const text = await res.text();
+      const d = parseDoc(text);
+      ctxRef.current = makeCtx(d, docValue(d) as Blueprint);
+      setBp(ctxRef.current.bp);
     })().catch(console.error);
   }, [craft]);
 
+  const markDirty = useCallback(() => {
+    if (!dirtyRef.current) { dirtyRef.current = true; setDirty(true); }
+  }, []);
+
+  const onEngine = useCallback((e: Engine | null) => {
+    engineRef.current = e;
+    if (e) e.onSelection = s => setSel(s);
+    setEngine(e);
+  }, []);
+
+  // every write: doc + bp (edit.ts) AND the live scene (engine) — one funnel
+  const edits: EditApi = useMemo(() => ({
+    pos: (ctx, ci, ax, v) => { setPos(ctx, ci, ax, v); engineRef.current?.moveComp(ci); },
+    beginRot: ci => engineRef.current?.beginRotEdit(ci),
+    quatDelta: (ctx, ci, p, y, r) => {
+      const q = engineRef.current?.setCompQuatDelta(ci, p, y, r);
+      if (q) setOrientation(ctx, ci, q);
+    },
+    dataField: (ctx, path, k, v) => { setDataField(ctx, path, k, v); },
+    reset: (ctx, ci) => {
+      resetComponent(ctx, ci);
+      setInspKey(k => k + 1);                     // rebuild the slider baselines
+    },
+  }), []);
+
+  // SAVE: mirror-sync occupancy + type-255 blocks into the doc and re-emit
+  const save = useCallback(() => {
+    const ctx = ctxRef.current;
+    if (!ctx) return;
+    const text = serializeSave(ctx);
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+    a.download = 'blueprint.json'; a.click(); URL.revokeObjectURL(a.href);
+    dirtyRef.current = false; setDirty(false);
+  }, []);
+
+  // keyboard: g/o/h drive the SAME toggles as the checkboxes (v0.147 rule),
+  // Esc deselects, Ctrl+S saves
+  const toggleOpt = useCallback((k: keyof ViewOptions, on: boolean) => {
+    const e = engineRef.current;
+    if (!e) return;
+    e.setOption(k, on);
+    setOpts(e.getOptions());                      // hull/wire exclusivity rides back
+  }, []);
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); save(); return; }
+      if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
+      const map: Record<string, keyof ViewOptions> = { g: 'grid', o: 'occ', h: 'hull' };
+      if (map[e.key]) {
+        const cur = engineRef.current?.getOptions();
+        if (cur) toggleOpt(map[e.key]!, !cur[map[e.key]!]);
+      }
+      if (e.key === 'Escape') engineRef.current?.select(-1);
+    };
+    addEventListener('keydown', h);
+    return () => removeEventListener('keydown', h);
+  }, [save, toggleOpt]);
+
+  const setReal = useCallback((on: boolean) => {
+    setRealModels(on);
+    engineRef.current?.setRealModels(on);
+  }, []);
+  const setHullOp = useCallback((v: number) => {
+    setHullOpacity(v);
+    engineRef.current?.setHullOpacity(v);
+  }, []);
+
   const name = bp?.data.alias?.trim() || craftName(craft);
+  const panel = bp && ctxRef.current && (
+    <Panel
+      engine={engine} ctx={ctxRef.current} bp={bp} sel={sel}
+      opts={opts} hullOpacity={hullOpacity} onHullOpacity={setHullOp}
+      realModels={realModels} onRealModels={setReal}
+      onOpt={toggleOpt}
+      onSelect={(ci, fly) => { engineRef.current?.select(ci); if (fly) engineRef.current?.flyTo(ci); }}
+      onSelectSub={bi => engineRef.current?.selectSub(bi)}
+      edits={edits} inspKey={inspKey} markDirty={markDirty}
+    />
+  );
+
   return (
     <div className="flex h-dvh w-full flex-col">
       <header className="flex h-11 shrink-0 items-center gap-2 border-b border-white/10 bg-panel px-2">
@@ -99,31 +206,46 @@ function Editor({ craft, onBack }: { craft: string; onBack: () => void }) {
             v{bp.data.version} · {isLegacyFile(bp) ? 'legacy palette' : 'file palette'}
           </span>
         )}
+        <button data-testid="save-btn" onClick={save}
+          className={`rounded px-2.5 py-1 text-[12px] ${dirty ? 'bg-accent text-black' : 'bg-panel2 text-ink-dim'}`}>
+          {dirty ? '● Save' : 'Save'}
+        </button>
+        <button data-testid="toggle-panels" onClick={() => setPanelOpen(o => !o)}
+          className="rounded bg-panel2 px-2.5 py-1 text-[12px] text-ink hover:bg-white/10 hover:text-accent">
+          ⚙
+        </button>
       </header>
       <div className="relative flex min-h-0 flex-1">
         <main className="relative min-w-0 flex-1">
-          <Viewport bp={bp} onPick={setSel} />
-          {bp && sel && sel.kind !== 'none' && (
-            <PickChip sel={sel} bp={bp} />
+          <Viewport bp={bp} onPick={setHit} onEngine={onEngine} />
+          {bp && hit && hit.kind !== 'none' && (
+            <PickChip hit={hit} bp={bp} />
           )}
         </main>
+        {panelOpen && (
+          <aside data-testid="panel-aside"
+            className="absolute inset-y-0 right-0 z-10 w-[300px] max-w-[85vw] border-l border-white/10
+                       shadow-2xl md:static md:z-auto md:shadow-none">
+            {panel}
+          </aside>
+        )}
       </div>
     </div>
   );
 }
 
 /** picked-part chip: bottom sheet on phones, floating card on desktop */
-function PickChip({ sel, bp }: { sel: PickHit; bp: Blueprint }) {
-  const comp = sel.kind === 'comp' && sel.ci != null ? bp.data.components[sel.ci] : null;
+function PickChip({ hit, bp }: { hit: PickHit; bp: Blueprint }) {
+  const comp = hit.kind === 'comp' && hit.ci != null ? bp.data.components[hit.ci] : null;
   return (
     <div data-testid="pick-info"
       className="pointer-events-none absolute inset-x-2 bottom-12 rounded-lg border border-gold/30
                  bg-black/70 px-3 py-2 text-[12px] text-ink backdrop-blur
                  md:inset-x-auto md:bottom-auto md:right-3 md:top-3 md:max-w-[320px]">
-      picked: <span className="text-gold">{sel.kind}</span>
+      picked: <span className="text-gold">{hit.kind}</span>
       {comp && <> · <span className="text-accent">{comp.type}</span>
-        {comp.name ? <span className="text-ink-dim"> "{comp.name}"</span> : null}</>}
-      {sel.point && <span className="text-ink-dim"> @ {sel.point.map(n => n.toFixed(2)).join(', ')}</span>}
+        {typeof comp.name === 'string' && comp.name ? <span className="text-ink-dim"> "{comp.name}"</span> : null}</>}
+      {hit.point && <span className="text-ink-dim"> @ {hit.point.map(n => n.toFixed(2)).join(', ')}</span>}
     </div>
   );
 }

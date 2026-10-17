@@ -9,10 +9,10 @@
 // distinct palette colour; wire edges in ONE buffer.
 
 import { getBlockEdges, getBlockFaceDirections, getBlockFaces, getBlockPoints, OCCUPANCY_TYPE } from './blockshapes';
-import type { Blueprint, Vec3D } from './format';
+import type { Block, Blueprint, Vec3D } from './format';
 import { CELL, isLegacyFile, worldCoord } from './format';
 import { buildHullSkin } from './hull';
-import { resolveColor, type ResolvedColor } from './palette';
+import { resolveColor, type FilePalette, type ResolvedColor } from './palette';
 
 export interface GeomBucket {
   color: ResolvedColor;
@@ -46,16 +46,16 @@ function faceNormal(a: number[], b: number[], c: number[]): number[] {
 }
 
 /**
- * Merge every block solid + hull triangle skin into colour buckets.
- * Interior-wall culling (legacy face-grid cut + rectangle stitch) lands in
- * the next commit — the scene is CORRECT without it, only batch-heavier.
+ * Merge a block list into per-colour buckets (view space, flipped winding).
+ * Shared by the main hull build AND the subgrid nested blocks (subgrid.ts
+ * supplies the PARENT palette — nested content reuses the file colours).
  */
-export function buildSolids(bp: Blueprint): SolidBatch {
-  const legacy = isLegacyFile(bp);
-  const palette = bp.data.colors ?? null;
+export function buildBlocksSolids(
+  blocks: Block[], palette: FilePalette | null, legacy: boolean,
+): { buckets: Map<string, GeomBucket>; wire: number[]; blocks: number; tris: number } {
   const buckets = new Map<string, GeomBucket>();
   const wire: number[] = [];
-  let blocks = 0, tris = 0, hullTris = 0;
+  let n = 0, tris = 0;
 
   const bucketFor = (slot: number): GeomBucket => {
     const color = resolveColor(palette, slot, legacy);
@@ -67,16 +67,16 @@ export function buildSolids(bp: Blueprint): SolidBatch {
 
   // emit one outward-wound triangle (the caller hands final winding)
   const tri3 = (b: GeomBucket, A: [number, number, number], C: [number, number, number], E: [number, number, number]) => {
-    const n = faceNormal(A, C, E);
+    const nrm = faceNormal(A, C, E);
     const base = b.positions.length / 3;
-    for (const v of [A, C, E]) b.positions.push(v[0], v[1], v[2]), b.normals.push(n[0]!, n[1]!, n[2]!);
+    for (const v of [A, C, E]) b.positions.push(v[0], v[1], v[2]), b.normals.push(nrm[0]!, nrm[1]!, nrm[2]!);
     b.indices.push(base, base + 1, base + 2);
     tris++;
   };
 
-  for (const blk of bp.data.blocks) {
+  for (const blk of blocks) {
     if (blk.type === OCCUPANCY_TYPE) continue;
-    blocks++;
+    n++;
     const origin: [number, number, number] = [
       worldCoord(blk, 'x') - CELL / 2,
       worldCoord(blk, 'y') - CELL / 2,
@@ -99,18 +99,47 @@ export function buildSolids(bp: Blueprint): SolidBatch {
       wire.push(A[0]!, A[1]!, A[2]!, C[0]!, C[1]!, C[2]!);
     }
   }
+  return { buckets, wire, blocks: n, tris };
+}
+
+/**
+ * Merge every block solid + hull triangle skin into colour buckets.
+ * Interior-wall culling (legacy face-grid cut + rectangle stitch) lands in
+ * the next commit — the scene is CORRECT without it, only batch-heavier.
+ */
+export function buildSolids(bp: Blueprint): SolidBatch {
+  const legacy = isLegacyFile(bp);
+  const palette = bp.data.colors ?? null;
+  const { buckets, wire, blocks, tris: blockTris } = buildBlocksSolids(bp.data.blocks, palette, legacy);
+  let tris = blockTris, hullTris = 0;
 
   // hull triangle skin: the game's closed 0.05 m prisms — colours[0] front,
   // [1] back, [2..4] side walls (hull.ts carries the exact winding).
-  const skin = buildHullSkin(bp.data.triangles);
+  const skin = buildHullSkin(bp.data.triangles ?? []);
+  const tri3 = (b: GeomBucket, A: readonly number[], C: readonly number[], E: readonly number[]) => {
+    const nrm = faceNormal(A as number[], C as number[], E as number[]);
+    const base = b.positions.length / 3;
+    for (const v of [A, C, E]) b.positions.push(v[0]!, v[1]!, v[2]!), b.normals.push(nrm[0]!, nrm[1]!, nrm[2]!);
+    b.indices.push(base, base + 1, base + 2);
+    tris++;
+  };
   for (const f of skin.faces) {
-    const b = bucketFor(f.slot);
-    tri3(b, f.tri[0] as [number, number, number], f.tri[1] as [number, number, number], f.tri[2] as [number, number, number]);
+    const b = bucketForIn(buckets, f.slot, legacy, palette);
+    tri3(b, f.tri[0], f.tri[1], f.tri[2]);
   }
   wire.push(...skin.wire);
   hullTris = skin.tris;
 
   return { buckets, wire, stats: { blocks, tris, hullTris } };
+}
+
+function bucketForIn(buckets: Map<string, GeomBucket>, slot: number, legacy: boolean,
+  palette: FilePalette | null): GeomBucket {
+  const color = resolveColor(palette, slot, legacy);
+  const key = colorKey(color);
+  let b = buckets.get(key);
+  if (!b) buckets.set(key, b = { color, positions: [], normals: [], indices: [] });
+  return b;
 }
 
 /** Component occupancy proxy boxes (file world → view boxes). */
@@ -119,7 +148,7 @@ export function buildCompProxies(bp: Blueprint): ProxyBox[] {
   const out: ProxyBox[] = [];
   bp.data.components.forEach((c, ci) => {
     if (c.type === 'Build') return;                      // construction-site ghost
-    const occ = c.occupancies;
+    const occ = c.occupancies?.[0];
     if (!occ || occ.size_x == null) {                    // no occupancy: origin marker size
       out.push({ min: { x: c.position.x - 0.15, y: c.position.y - 0.15, z: -c.position.z - 0.15 },
                  size: { x: 0.3, y: 0.3, z: 0.3 }, ci });
