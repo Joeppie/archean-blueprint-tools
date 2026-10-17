@@ -125,9 +125,15 @@ line; `git push origin main` never moves the live site.**
   push (the build is an Actions job: during GitHub Actions runner incidents it
   typically queues "waiting for a hosted runner" — check githubstatus.com
   before suspecting the push).
+- `release` is branch-PROTECTED (done 2026-10-17): classic protection on
+  (force-push/delete blocked for non-admins; admins bypass, which is what
+  `release.sh` uses for its ff push). If a push to release is ever refused
+  as a force push, someone rebased the branch — recover with
+  `git push origin $(git rev-parse main):release` after reconciling via main.
 - One-time setup (done 2026-10-17): Pages source flipped to release via
-  `gh api -X PUT repos/Joeppie/archean-blueprint-tools/pages --input -` with
-  `{"build_type":"branch","source":{"branch":"release","path":"/"}}`;
+  `echo '{"source":{"branch":"release","path":"/"}}' | gh api -X PUT
+  repos/Joeppie/archean-blueprint-tools/pages --input -` (branch-source mode
+  is called `legacy` in the API — sending build_type "branch" 422s);
   verify with `gh api repos/Joeppie/archean-blueprint-tools/pages` (or the
   Settings → Pages page when the gh CLI is unavailable).
 (README viewer link is versioned; bump `v0.xx` in index.html title/header,
