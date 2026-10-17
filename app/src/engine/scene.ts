@@ -21,7 +21,7 @@ import {
   LineBasicMaterial, LineSegments, LinearSRGBColorSpace, Matrix4, Mesh,
   MeshBasicMaterial, MeshStandardMaterial, Object3D, PerspectiveCamera,
   PlaneGeometry, PMREMGenerator, Quaternion, Raycaster,
-  Scene, SphereGeometry, Vector2, Vector3, WebGLRenderer,
+  Scene, SphereGeometry, TorusGeometry, Vector2, Vector3, WebGLRenderer,
   type MeshStandardMaterialParameters,
 } from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -48,6 +48,7 @@ import {
 import {
   hasMirrorX, mirrorDelta, mirrorQuat, symAllowed, symTwinIndex, type TwinPair,
 } from './sym';
+import { calibrateCellMass, massModel, type MassModel } from './mass';
 
 export interface PickHit {
   kind: 'block' | 'comp' | 'sub' | 'none';
@@ -61,9 +62,10 @@ export interface SceneStats { blocks: number; tris: number; hullTris: number; co
 type Kind = 'block' | 'wire' | 'occ' | 'pipe' | 'pipe-end' | 'comp' | 'sub' | 'ground';
 
 export interface ViewOptions {
-  grid: boolean; occ: boolean; hull: boolean; wire: boolean; pipes: boolean; subs: boolean; mirror: boolean;
+  grid: boolean; occ: boolean; hull: boolean; wire: boolean; pipes: boolean; subs: boolean;
+  mirror: boolean; com: boolean;
 }
-const DEFAULT_OPTS: ViewOptions = { grid: true, occ: false, hull: true, wire: false, pipes: true, subs: true, mirror: true };
+const DEFAULT_OPTS: ViewOptions = { grid: true, occ: false, hull: true, wire: false, pipes: true, subs: true, mirror: true, com: true };
 
 const DEG = Math.PI / 180;
 const STAND_IN_HEX = 0x88aaff;          // legacy colliderProxy stand-in tint
@@ -136,6 +138,12 @@ export class Engine {
   private symIdx = new Map<number, TwinPair[]>();
   private symOn = localStorage.getItem('archean-app-sym') !== '0';   // the ⇄ switch
   private mirrorPlane: Group | null = null;
+
+  // ---------- mass & CoM ----------
+  private cellMass = 1.5;
+  private comMarker: Group | null = null;
+  /** hi-def: the FULL game meshes (prim.v) instead of the decimated twins */
+  private hiDef = localStorage.getItem('archean-app-hidef') === '1';
   private symRotBases = new Map<number, Map<number, FileQuat>>();     // ci → twin display quat at edit start
 
   // ---------- selection ----------
@@ -362,6 +370,8 @@ export class Engine {
     this.buildSubgrids(bp);
 
     const parts = buildPartBoxes(bp, atlas?.manifest ?? null);
+    this.cellMass = calibrateCellMass(bp, atlas?.manifest ?? null);   // total ⇒ declared
+    this.updateCoM();
     this.addGround(bp, parts);
     this.buildMirrorPlane(parts);
     this.applyViewOptions();
@@ -494,8 +504,8 @@ export class Engine {
       const rg = nodes.get(r.name)!;
       const byMat = new Map<string, BufferGeometry[]>();
       for (const prim of nd.prims) {
-        const v = prim.lv ?? prim.v;               // low-poly twin by default
-        const i = prim.li ?? prim.i;
+        const v = this.hiDef ? prim.v : (prim.lv ?? prim.v);   // decimated twins by default
+        const i = this.hiDef ? prim.i : (prim.li ?? prim.i);
         const gg = new BufferGeometry();
         gg.setAttribute('position', new BufferAttribute(new Float32Array(v), 3));
         gg.setIndex(i);
@@ -737,6 +747,7 @@ export class Engine {
     this.groundGroup.visible = this.opts.grid;
     this.subGroup.visible = this.opts.subs;
     if (this.mirrorPlane) this.mirrorPlane.visible = this.opts.mirror;
+    if (this.comMarker) this.comMarker.visible = this.opts.com;
   }
   getOptions(): ViewOptions { return { ...this.opts }; }
 
@@ -804,6 +815,41 @@ export class Engine {
     }
   }
   onDataEdit: ((ci: number, key: string) => void) | null = null;
+
+  // ---------- mass & CoM ----------
+
+  /** the orange CoM marker (sphere + equator ring) at the RAW-space centre of
+   *  mass, displayed through the view mirror (physics itself is file-space) */
+  private updateCoM(): MassModel | null {
+    if (!this.bp) return null;
+    const mm = massModel(this.bp, this.atlasRef?.manifest ?? null, this.cellMass);
+    if (!this.comMarker) {
+      const g = new Group();
+      const m = new Mesh(new SphereGeometry(0.07, 16, 12),
+        new MeshBasicMaterial({ color: 0xff8800 }));
+      const ring = new Mesh(new TorusGeometry(0.13, 0.012, 8, 32),
+        new MeshBasicMaterial({ color: 0xff8800 }));
+      ring.rotation.x = Math.PI / 2;
+      g.add(m, ring);
+      g.renderOrder = 998;
+      this.comMarker = g;
+      this.scene.add(g);
+    }
+    this.comMarker.position.set(mm.com[0] + this.moff.x, mm.com[1] + this.moff.y, -mm.com[2] + this.moff.z);
+    this.comMarker.visible = this.opts.com && mm.total > 0;
+    return mm;
+  }
+  massReport(): (MassModel & { comVisible: boolean }) | null {
+    const mm = this.updateCoM();
+    return mm ? { ...mm, comVisible: this.opts.com } : null;
+  }
+  setHiDef(on: boolean) {
+    if (on === this.hiDef || !this.bp) return;
+    this.hiDef = on;
+    localStorage.setItem('archean-app-hidef', on ? '1' : '0');
+    this.load(this.bp, this.realModelsOn ? this.atlasRef : null);   // rebuild the meshes
+  }
+  get hiDefOn() { return this.hiDef; }
 
   /** the striped x-symmetry sheet (v0.161) at FILE x = 0 — view x = moff.x.
    *  Shown only when the craft actually carries x-mirror pairs. */
@@ -1114,6 +1160,7 @@ export class Engine {
       }
       this.onEdit?.(tb.j);
     }
+    this.updateCoM();
     this.syncSubJoints();
     if (this.selCi === ci) this.paintSelection();
     this.onEdit?.(ci);
@@ -1145,6 +1192,7 @@ export class Engine {
     if (!c) return;
     for (const o of this.compRoots.get(ci) ?? [])
       o.position.set(c.position.x + this.moff.x, c.position.y + this.moff.y, -c.position.z + this.moff.z);
+    this.updateCoM();
     this.syncSubJoints();                            // rigid master-riding (v0.172)
     if (this.selCi === ci) { this.paintSelection(); this.syncGizmo(); }
     this.invalidate();

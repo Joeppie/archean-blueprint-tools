@@ -20,6 +20,8 @@ export interface EditApi {
 
 interface Props {
   engine: Engine | null;
+  /** edit counter: re-renders the live readouts (mass/CoM) */
+  rev: number;
   ctx: EditCtx | null;
   bp: Blueprint;
   sel: { ci: number; sub: number };
@@ -28,6 +30,8 @@ interface Props {
   realModels: boolean;
   gizmoOn: boolean;
   onGizmo: (v: boolean) => void;
+  hiDef: boolean;
+  onHiDef: (v: boolean) => void;
   onOpt: (k: keyof ViewOptions, on: boolean) => void;
   onHullOpacity: (v: number) => void;
   onRealModels: (on: boolean) => void;
@@ -37,6 +41,23 @@ interface Props {
   /** bump to remount the inspector (⟲ reset rebuilds the slider baselines) */
   inspKey: number;
   markDirty: () => void;
+}
+
+// ------------------------------------------------------------- mass & CoM
+function MassCoM(p: { engine: Engine | null; rev: number }) {
+  const mm = p.engine?.massReport();
+  if (!mm) return null;
+  const fmt = (n: number, d = 2) => n.toLocaleString('en', { maximumFractionDigits: d });
+  return (
+    <Sec title="Mass & center of mass" testid="massbox">
+      <div className="space-y-[2px] text-[11px] text-ink" data-testid="mass-report">
+        <div>declared <b>{fmt(mm.declared, 0)} kg</b> · computed {fmt(mm.total, 0)} kg</div>
+        <div>hull {fmt(mm.cells, 0)} cells × {fmt(mm.cellMass, 2)} kg · parts {fmt(mm.compSum, 0)} kg</div>
+        <div className="text-ink-dim">implied structural density ≈ {fmt(mm.density, 0)} kg/m³ (plausibility)</div>
+        <div>CoM ({fmt(mm.com[0])}, {fmt(mm.com[1])}, {fmt(mm.com[2])}) m <span className="text-ink-dim">raw</span></div>
+      </div>
+    </Sec>
+  );
 }
 
 // ---------------------------------------------------------------- DevTools row
@@ -88,7 +109,7 @@ const Check = (p: { label: string; checked: boolean; onChange: (v: boolean) => v
 );
 
 // ------------------------------------------------------------- view options
-function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHullOpacity' | 'realModels' | 'onRealModels' | 'gizmoOn' | 'onGizmo'>) {
+function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHullOpacity' | 'realModels' | 'onRealModels' | 'gizmoOn' | 'onGizmo' | 'hiDef' | 'onHiDef'>) {
   return (
     <Sec title="View options" testid="viewopts">
       <Check testid="opt-grid" label="ground grid" checked={p.opts.grid} onChange={v => p.onOpt('grid', v)} />
@@ -100,6 +121,8 @@ function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHullOpaci
       <Check testid="opt-mirror" label="mirror plane (x symmetry)" checked={p.opts.mirror} onChange={v => p.onOpt('mirror', v)} />
       <Check testid="opt-real" label="real game models (off = low-poly)" checked={p.realModels} onChange={p.onRealModels} />
       <Check testid="opt-gizmo" label="gizmo on selection (Shift snaps)" checked={p.gizmoOn} onChange={p.onGizmo} />
+      <Check testid="opt-hidef" label="hi-def meshes (full game meshes)" checked={p.hiDef} onChange={p.onHiDef} />
+      <Check testid="opt-com" label="center-of-mass marker" checked={p.opts.com} onChange={v => p.onOpt('com', v)} />
       <Row label="hull opacity" min={0.1} max={1} step={0.05} value={p.hullOpacity}
         onInput={p.onHullOpacity}
         title="dims the whole hull skin: blocks, triangle plates and their wireframes" />
@@ -457,8 +480,10 @@ function SubPanel(p: Props) {
 export default function Panel(p: Props) {
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-panel text-ink" data-testid="panels">
+      <MassCoM engine={p.engine} rev={p.rev} />
       <ViewOpts opts={p.opts} onOpt={p.onOpt} hullOpacity={p.hullOpacity} onHullOpacity={p.onHullOpacity}
-        realModels={p.realModels} onRealModels={p.onRealModels} gizmoOn={p.gizmoOn} onGizmo={p.onGizmo} />
+        realModels={p.realModels} onRealModels={p.onRealModels} gizmoOn={p.gizmoOn} onGizmo={p.onGizmo}
+        hiDef={p.hiDef} onHiDef={p.onHiDef} />
       <div className="flex min-h-0 flex-[2] flex-col border-t border-white/10">
         <h3 className="px-3 pt-2 text-[11px] font-semibold uppercase tracking-wide text-ink-dim">Components</h3>
         <CompList bp={p.bp} sel={p.sel} onSelect={p.onSelect} onSelectSub={p.onSelectSub} />

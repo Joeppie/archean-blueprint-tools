@@ -183,10 +183,19 @@ new build dep, kept inside `app/`).
   doors UNISON to 34.3° + ⟲ restores BOTH hinges, mirror option
   round-trip). Gates: vitest 112/112, tsc clean, Playwright 34 pass /
   10 desktop-only skips; iGPU shot: twin aileron boxed + mirror sheet.
-    Remaining gaps (next commits): cable power-surges + X-ray glow,
-    labels, mass/CoM + calibrated-mass report,
+- **MASS & CoM + HI-DEF + WORKSHOP LINK — landed**: pure `engine/mass.ts`
+  (manifest masses + fallback table, cellMass CALIBRATED so the computed
+  total lands on the declared blueprint.mass, implied density as a
+  plausibility readout, RAW-space CoM) + the orange marker in the engine
+  (opt-com, live on every move) and the panel readout. Hi-def meshes toggle
+  (opt-hidef, persisted): the FULL game meshes instead of the decimated
+  twins, rebuilt through the load path. Workshop ↗ header link for real
+  item ids (fixture ids excluded). Pins: mass.test (symmetric CoM,
+  calibration total + floor, corpus ISW density sanity) + e2e (readout,
+  marker toggle, hi-def rebuild still draws, wslink href).
+    Remaining gaps (next commits): cable power-surges + X-ray glow, labels,
     aero/wind/flow/thrust/seal + flight UI, dashboards, hull element list,
-    hi-def model toggle, workshop header link.
+    calibrated-mass report wiring beyond the live readout.
 - **P4 — perf**: BatchedMesh proxies, ?perf port, wasm benchmark of
   candidate 1, optional WebGPU flag.
 - **P5 — parity gate + cutover**: Playwright suite mirrors the old suites

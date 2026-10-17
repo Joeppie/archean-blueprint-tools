@@ -89,10 +89,13 @@ function Editor({ craft, onBack }: { craft: string; onBack: () => void }) {
   const [hit, setHit] = useState<PickHit | null>(null);
   const [dirty, setDirty] = useState(false);
   const [inspKey, setInspKey] = useState(0);
-  const [opts, setOpts] = useState<ViewOptions>({ grid: true, occ: false, hull: true, wire: false, pipes: true, subs: true, mirror: true });
+  const [opts, setOpts] = useState<ViewOptions>({ grid: true, occ: false, hull: true, wire: false, pipes: true, subs: true, mirror: true, com: true });
   const [hullOpacity, setHullOpacity] = useState(1);
   const [realModels, setRealModels] = useState(true);
   const [gizmoOn, setGizmoOn] = useState(() => localStorage.getItem('archean-app-gizmo') !== '0');
+  const [hiDef, setHiDefState] = useState(() => localStorage.getItem('archean-app-hidef') === '1');
+  const [rev, setRev] = useState(0);
+  const bumpRev = useCallback(() => setRev(r => r + 1), []);
   const engineRef = useRef<Engine | null>(null);
   const [engine, setEngine] = useState<Engine | null>(null);
   const ctxRef = useRef<EditCtx | null>(null);
@@ -128,7 +131,7 @@ function Editor({ craft, onBack }: { craft: string; onBack: () => void }) {
         if (!ctx || !c) return;
         setPos(ctx, ci, 'x', c.position.x); setPos(ctx, ci, 'y', c.position.y); setPos(ctx, ci, 'z', c.position.z);
         setOrientation(ctx, ci, c.orientation ?? { w: 1, x: 0, y: 0, z: 0 });
-        markDirty();
+        markDirty(); bumpRev();
       };
       e.onDataEdit = (ci, key) => {
         const ctx = ctxRef.current;
@@ -151,10 +154,11 @@ function Editor({ craft, onBack }: { craft: string; onBack: () => void }) {
       const q = engineRef.current?.setCompQuatDelta(ci, p, y, r);
       if (q) setOrientation(ctx, ci, q);
     },
-    dataField: (ctx, path, k, v) => { setDataField(ctx, path, k, v); },
+    dataField: (ctx, path, k, v) => { setDataField(ctx, path, k, v); bumpRev(); },
     reset: (ctx, ci) => {
       resetComponent(ctx, ci);
       setInspKey(k => k + 1);                     // rebuild the slider baselines
+      bumpRev();
     },
   }), []);
 
@@ -200,6 +204,10 @@ function Editor({ craft, onBack }: { craft: string; onBack: () => void }) {
     setGizmoOn(on);
     engineRef.current?.setGizmoEnabled(on);
   }, []);
+  const onHiDef = useCallback((on: boolean) => {
+    setHiDefState(on);
+    engineRef.current?.setHiDef(on);
+  }, []);
   const setHullOp = useCallback((v: number) => {
     setHullOpacity(v);
     engineRef.current?.setHullOpacity(v);
@@ -208,10 +216,10 @@ function Editor({ craft, onBack }: { craft: string; onBack: () => void }) {
   const name = bp?.data.alias?.trim() || craftName(craft);
   const panel = bp && ctxRef.current && (
     <Panel
-      engine={engine} ctx={ctxRef.current} bp={bp} sel={sel}
+      engine={engine} ctx={ctxRef.current} bp={bp} sel={sel} rev={rev}
       opts={opts} hullOpacity={hullOpacity} onHullOpacity={setHullOp}
       realModels={realModels} onRealModels={setReal}
-      gizmoOn={gizmoOn} onGizmo={setGizmo}
+      gizmoOn={gizmoOn} onGizmo={setGizmo} hiDef={hiDef} onHiDef={onHiDef}
       onOpt={toggleOpt}
       onSelect={(ci, fly) => { engineRef.current?.select(ci); if (fly) engineRef.current?.flyTo(ci); }}
       onSelectSub={bi => engineRef.current?.selectSub(bi)}
@@ -231,6 +239,12 @@ function Editor({ craft, onBack }: { craft: string; onBack: () => void }) {
           <span className="hidden shrink-0 text-[11px] text-ink-dim sm:block">
             v{bp.data.version} · {isLegacyFile(bp) ? 'legacy palette' : 'file palette'}
           </span>
+        )}
+        {/^\d{6,}$/.test(craft) && craft !== '0000000000' && craft !== '9000000001' && (
+          <a data-testid="wslink" title="Steam Workshop page"
+            href={`https://steamcommunity.com/sharedfiles/filedetails/?id=${craft}`}
+            target="_blank" rel="noopener"
+            className="shrink-0 rounded bg-panel2 px-2 py-1 text-[11px] text-ink-dim hover:text-accent">workshop ↗</a>
         )}
         <button data-testid="save-btn" onClick={save}
           className={`rounded px-2.5 py-1 text-[12px] ${dirty ? 'bg-accent text-black' : 'bg-panel2 text-ink-dim'}`}>

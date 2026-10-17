@@ -123,6 +123,36 @@ test.describe('desktop panels', () => {
   });
 });
 
+test.describe('mass & CoM + fidelity toggles', () => {
+  const desktopOnly = () => test.skip(test.info().project.name !== 'chromium', 'desktop-only');
+
+  test('mass readout, CoM marker toggle, hi-def rebuild, workshop link', async ({ page }) => {
+    desktopOnly();
+    await openCraft(page, ISW);
+    const rep = page.getByTestId('mass-report');
+    await expect(rep).toContainText('declared');
+    await expect(rep).toContainText('CoM');
+    const comVisible = () => page.evaluate(() => {
+      const w = window as unknown as { __ARCHEAN__?: { engine: { massReport: () => { comVisible: boolean } | null } } };
+      return w.__ARCHEAN__!.engine.massReport()!.comVisible;
+    });
+    expect(await comVisible()).toBe(true);
+    await page.getByTestId('opt-com').uncheck();
+    expect(await comVisible()).toBe(false);
+    await page.getByTestId('opt-com').check();
+
+    // hi-def rebuilds with the full game meshes and must still draw
+    await page.getByTestId('opt-hidef').check();
+    await expect.poll(() => page.evaluate(() =>
+      (window as unknown as { __ARCHEAN__?: { stats: () => { draws: number } } }).__ARCHEAN__!.stats().draws),
+      { timeout: 20_000 }).toBeGreaterThan(0);
+    await page.getByTestId('opt-hidef').uncheck();
+
+    const ws = page.getByTestId('wslink');
+    await expect(ws).toHaveAttribute('href', new RegExp(`id=${ISW}$`));
+  });
+});
+
 test('mobile: the panels are a drawer behind the ⚙ toggle', async ({ page }) => {
   await openCraft(page, ISW);
   const aside = page.getByTestId('panel-aside');
