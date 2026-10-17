@@ -4,6 +4,8 @@
 // Phases 2–3; selection state here already follows the ?craft= deep link so
 // Playwright fixtures can address a craft directly.
 import { useEffect, useState } from 'react';
+import type { PickHit } from './engine/scene';
+import Viewport from './components/Viewport';
 import type { Blueprint } from './engine/format';
 import { isLegacyFile } from './engine/format';
 
@@ -23,6 +25,7 @@ export default function App() {
   const [craft, setCraft] = useCraftParam();
   const [crafts, setCrafts] = useState<CraftRow[]>([]);
   const [bp, setBp] = useState<Blueprint | null>(null);
+  const [sel, setSel] = useState<PickHit | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -59,27 +62,36 @@ export default function App() {
         ))}
         {crafts.length === 0 && <p className="px-2 text-ink-dim">corpus folder empty</p>}
       </aside>
-      <main className="relative flex items-center justify-center" data-testid="viewport">
-        {bp ? <Summary craft={craft!} bp={bp} /> : <p className="text-ink-dim">open a craft…</p>}
-        <p className="absolute bottom-2 right-3 text-[11px] text-ink-dim">
-          scene engine lands in Phase 2 (see REWRITE.md)
-        </p>
+      <main className="relative h-full">
+        <Viewport bp={bp} onPick={h => { setSel(h); (window as unknown as { __SEL__?: string }).__SEL__ = h.kind; }} />
+        {bp && (
+          <div className="pointer-events-none absolute top-2 left-3">
+            <Summary craft={craft!} bp={bp} sel={sel} />
+          </div>
+        )}
       </main>
     </div>
   );
 }
 
-function Summary({ craft, bp }: { craft: string; bp: Blueprint }) {
+function Summary({ craft, bp, sel }: { craft: string; bp: Blueprint; sel: PickHit | null }) {
   const legacy = isLegacyFile(bp);
+  const comp = sel?.kind === 'comp' && sel.ci != null ? bp.data.components[sel.ci] : null;
   return (
-    <div data-testid="bp-summary" className="rounded-lg border border-white/10 bg-panel px-5 py-4">
-      <h2 className="mb-1 text-base text-accent">{bp.data.alias || `Workshop ${craft}`}</h2>
+    <div data-testid="bp-summary" className="rounded-lg border border-white/10 bg-panel/85 px-4 py-3 backdrop-blur">
+      <h2 className="text-base text-accent">{bp.data.alias || `Workshop ${craft}`}</h2>
       <p className="text-ink-dim">
         blocks={bp.data.blocks.length} components={bp.data.components.length}
         {' '}triangles={bp.data.triangles?.length ?? 0} version={bp.data.version}
         {' '}{legacy ? <span data-testid="legacy-badge" className="text-gold">legacy palette</span>
                     : <span className="text-gold">file palette</span>}
       </p>
+      {sel && sel.kind !== 'none' && (
+        <p data-testid="pick-info" className="text-ink">
+          picked: {sel.kind}{comp ? ` ${comp.type}` : ''}
+          {sel.point ? ` @ ${sel.point.map(n => n.toFixed(2)).join(', ')}` : ''}
+        </p>
+      )}
     </div>
   );
 }

@@ -67,11 +67,19 @@ new build dep, kept inside `app/`).
   honours ARCHEAN_BLUEPRINTS/blueprints.conf per the AGENTS rule); SPA shell
   with ?craft= deep links. Corpus config resolution is mirrored in
   `app/tools/vite-corpus.ts` — no hardcoded paths in `app/` either.
-- **P2 — engine port**: scene build (merge-by-colour, culling, wire, pipes,
-  nubs, adapters), camera/controls, pick raycast, subgrid kinematics —
-  headless class + vitest harness using a `three` + jsdom-free `null`
-  renderer trick for math pins; every old invariant (handedness, LEGACY_Q,
-  junction pose, mural…) re-pinned there or in P3 fixtures.
+- **P2 — IN PROGRESS (P2a landed: first render)**: `engine/build.ts` (pure,
+  THREE-free — WASM seam) merges blocks per palette colour with the view
+  z-mirror + flipped winding, hull triangles and occupancy proxies;
+  `engine/scene.ts` is the framework-free renderer (legacy lighting rig
+  sky+fog+hemi+warm-sun, ground under the model, legacy fit params, on-demand
+  invalidate, raycast pick); React `<Viewport>` mounts it and exposes
+  `window.__ARCHEAN__` test hooks + a `SCENE PASS …` title. Verified with
+  HEADLESS CHROMIUM (iGPU-pinned shots: chopper 3251580044, GNG-574, ISW-241)
+  + Playwright scene specs (draws>0, pick probe, canvas click, switch).
+  Caught through the screenshots: block/occupancy `size_*` is INCLUSIVE
+  ((size+1)·CELL, legacy blkSpan) — pinned in build.test.
+  Next (P2b): interior-wall face culling + rect stitch, pipes/adapters,
+  component real models + display-pose rules, subgrid kinematics, IBL/PMREM.
 - **P3 — React UI**: DevTools-style panels as shadcn components
   (ViewOptions, component list tabs + collapse + search, inspector rows →
   controlled sliders writing the store, mode widget, gizmo = engine-owned
