@@ -17,8 +17,11 @@ function expandUser(p: string): string {
   return p.startsWith('~') ? path.join(process.env.HOME ?? '', p.slice(2)) : p;
 }
 
-/** env > blueprints.conf > <repo>/testdata (relative entries resolve vs repo). */
+/** env > blueprints.conf > <repo>/testdata (relative entries resolve vs repo).
+ *  Memoised: the hot path (every image request) must not re-read the conf. */
+let corpusCache: string | null = null;
 export function corpusDir(): string {
+  if (corpusCache) return corpusCache;
   let raw = process.env.ARCHEAN_BLUEPRINTS;
   if (!raw) {
     const conf = path.join(REPO, 'blueprints.conf');
@@ -35,30 +38,36 @@ export function corpusDir(): string {
     }
   }
   raw = raw || path.join(REPO, 'testdata');
-  return path.resolve(REPO, expandUser(raw));
+  return (corpusCache = path.resolve(REPO, expandUser(raw)));
+}
+
+/** static file response with cache validators: dev reloads and re-navigation
+ *  through the gallery must revalidate (304), not re-transfer */
+function sendFile(req: IncomingMessage, res: ServerResponse, file: string, type: string, maxAge = 0) {
+  let st;
+  try { st = fs.statSync(file); } catch { res.statusCode = 404; res.end('not found'); return; }
+  const etag = `W/"${st.size}-${Math.round(st.mtimeMs)}"`;
+  if (req.headers['if-none-match'] === etag) { res.statusCode = 304; res.end(); return; }
+  res.statusCode = 200;
+  res.setHeader('Content-Type', type);
+  res.setHeader('ETag', etag);
+  res.setHeader('Cache-Control', maxAge ? `public, max-age=${maxAge}` : 'no-cache');
+  res.end(fs.readFileSync(file));
 }
 
 /** repo assets the SPA reuses from the legacy tree: /workshop.json + /models/* */
-function repoFile(res: ServerResponse, rel: string, type: string) {
-  const f = path.join(REPO, rel);
-  if (!path.resolve(f).startsWith(REPO) || !fs.existsSync(f)) {
-    res.statusCode = 404;
-    res.end('not found');
-    return;
-  }
-  res.statusCode = 200;
-  res.setHeader('Content-Type', type);
-  res.end(fs.readFileSync(f));
+function repoFile(req: IncomingMessage, res: ServerResponse, rel: string, type: string) {
+  sendFile(req, res, path.join(REPO, rel), type);
 }
 
 function handler(req: IncomingMessage, res: ServerResponse, next: () => void) {
   const url = decodeURIComponent((req.url ?? '').split('?')[0]!);
-  if (url === '/workshop.json') return repoFile(res, 'viewer/workshop.json', 'application/json');
+  if (url === '/workshop.json') return repoFile(req, res, 'viewer/workshop.json', 'application/json');
   if (url.startsWith('/models/')) {
     // whitelisted shape: <Type>.json only, no traversal
     const m = /^\/models\/([A-Za-z0-9_.-]+\.json)$/.exec(url);
     if (!m || m[1]!.includes('..')) { res.statusCode = 404; res.end('nope'); return; }
-    return repoFile(res, `viewer/models/${m[1]}`, 'application/json');
+    return repoFile(req, res, `viewer/models/${m[1]}`, 'application/json');
   }
   if (!url.startsWith('/corpus')) return next();
   const root = corpusDir();
@@ -75,15 +84,12 @@ function handler(req: IncomingMessage, res: ServerResponse, next: () => void) {
     return;
   }
   // <id>/<file> with strict traversal guard
-  const file = path.resolve(root, rel);
-  if (!file.startsWith(root + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
-    res.statusCode = 404;
-    res.end('not found');
-    return;
-  }
-  res.statusCode = 200;
-  res.setHeader('Content-Type', file.endsWith('.json') ? 'application/json' : 'application/octet-stream');
-  res.end(fs.readFileSync(file));
+  const root0 = root;
+  const file = path.resolve(root0, rel);
+  if (!file.startsWith(root0 + path.sep)) { res.statusCode = 404; res.end('not found'); return; }
+  sendFile(req, res, file, file.endsWith('.json') ? 'application/json'
+    : file.endsWith('.jpg') ? 'image/jpeg' : 'application/octet-stream',
+  file.endsWith('.jpg') ? 3600 : 0);   // previews cache 1 h; blueprints revalidate
 }
 
 export default function corpus(): PluginOption {
