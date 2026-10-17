@@ -14,7 +14,7 @@ const bpOf = (blocks: Block[], triangles: Triangle[] = []): Blueprint => ({
 });
 
 describe('buildSolids', () => {
-  test('two same-colour cubes merge into one bucket; wire spans 24 edges', () => {
+  test('two same-colour cubes: interior wall culled; merged outline 20 tris / 20 edges', () => {
     const bp = bpOf([
       block({ pos_x: 5, pos_y: 5, pos_z: 5, colors: [3, 3, 3, 3, 3, 3, 3] }),
       block({ pos_x: 6, pos_y: 5, pos_z: 5, colors: [3, 3, 3, 3, 3, 3, 3] }),
@@ -23,9 +23,11 @@ describe('buildSolids', () => {
     expect(stats.blocks).toBe(2);
     expect(buckets.size).toBe(1);                       // one mesh per colour
     const b = [...buckets.values()][0]!;
-    expect(b.indices.length).toBe(2 * 36);              // 12 tris per cube
-    expect(stats.tris).toBe(24);
-    expect(wire.length).toBe(2 * 12 * 2 * 3);           // 2 blocks × 12 edges × 2 pts × xyz
+    // interior-wall culling (cull.ts): the glued face pair drops → 5 quads
+    // per cube = 20 tris; the wire follows the SURVIVING face outlines only
+    expect(b.indices.length).toBe(20 * 3);
+    expect(stats.tris).toBe(20);
+    expect(wire.length / 6).toBe(20);
   });
 
   test('different palette slots split into separate buckets', () => {

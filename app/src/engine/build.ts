@@ -8,9 +8,10 @@
 // Design carried from the legacy viewer (PERF.md): one merged mesh per
 // distinct palette colour; wire edges in ONE buffer.
 
-import { getBlockEdges, getBlockFaceDirections, getBlockFaces, getBlockPoints, OCCUPANCY_TYPE } from './blockshapes';
+import { getBlockFaceDirections } from './blockshapes';
 import type { Block, Blueprint, Vec3D } from './format';
 import { CELL, isLegacyFile, worldCoord } from './format';
+import { culledBlocksSolids } from './cull';
 import { buildHullSkin } from './hull';
 import { resolveColor, type FilePalette, type ResolvedColor } from './palette';
 
@@ -46,16 +47,20 @@ function faceNormal(a: number[], b: number[], c: number[]): number[] {
 }
 
 /**
- * Merge a block list into per-colour buckets (view space, flipped winding).
- * Shared by the main hull build AND the subgrid nested blocks (subgrid.ts
- * supplies the PARENT palette — nested content reuses the file colours).
+ * Merge a block list into per-colour buckets (view space, flipped winding),
+ * applying the game's INTERIOR-WALL rules via cull.ts (cell-cut full faces
+ * stitched into rectangles, covered partials + duplicate footprints dropped,
+ * translucent neighbours never cull opaque faces). The surviving edges are
+ * exactly the stitched face outlines — the wire overlay draws blocks and
+ * hull uniformly. Shared by the main build AND subgrid nested blocks
+ * (subgrid.ts supplies the PARENT palette).
  */
 export function buildBlocksSolids(
   blocks: Block[], palette: FilePalette | null, legacy: boolean,
 ): { buckets: Map<string, GeomBucket>; wire: number[]; blocks: number; tris: number } {
   const buckets = new Map<string, GeomBucket>();
   const wire: number[] = [];
-  let n = 0, tris = 0;
+  let tris = 0;
 
   const bucketFor = (slot: number): GeomBucket => {
     const color = resolveColor(palette, slot, legacy);
@@ -65,42 +70,25 @@ export function buildBlocksSolids(
     return b;
   };
 
-  // emit one outward-wound triangle (the caller hands final winding)
-  const tri3 = (b: GeomBucket, A: [number, number, number], C: [number, number, number], E: [number, number, number]) => {
+  const culled = culledBlocksSolids(blocks, palette, legacy);
+  for (const f of culled.tris) {
+    const b = bucketFor(f.slot);
+    // view z-mirror: winding reversed so normals stay outward
+    const A = toView(f.tri[0][0], f.tri[0][1], f.tri[0][2]);
+    const C = toView(f.tri[2][0], f.tri[2][1], f.tri[2][2]);
+    const E = toView(f.tri[1][0], f.tri[1][1], f.tri[1][2]);
     const nrm = faceNormal(A, C, E);
     const base = b.positions.length / 3;
     for (const v of [A, C, E]) b.positions.push(v[0], v[1], v[2]), b.normals.push(nrm[0]!, nrm[1]!, nrm[2]!);
     b.indices.push(base, base + 1, base + 2);
     tris++;
-  };
-
-  for (const blk of blocks) {
-    if (blk.type === OCCUPANCY_TYPE) continue;
-    n++;
-    const origin: [number, number, number] = [
-      worldCoord(blk, 'x') - CELL / 2,
-      worldCoord(blk, 'y') - CELL / 2,
-      worldCoord(blk, 'z') - CELL / 2,
-    ];
-    // block size is INCLUSIVE cell count: span = (size+1)·CELL (legacy blkSpan)
-    const size: [number, number, number] = [(blk.size_x + 1) * CELL, (blk.size_y + 1) * CELL, (blk.size_z + 1) * CELL];
-    const pts = getBlockPoints(blk.type, origin, size).map(p => toView(p[0], p[1], p[2]));
-
-    const faces = getBlockFaces(blk.type);
-    for (let fi = 0; fi < faces.length; fi++) {
-      const f = faces[fi]!;
-      const slot = blk.colors?.[fi] ?? 0;
-      const b = bucketFor(slot);
-      if (f.length === 6) { tri3(b, pts[f[0]!]!, pts[f[2]!]!, pts[f[1]!]!); tri3(b, pts[f[3]!]!, pts[f[5]!]!, pts[f[4]!]!); }
-      else tri3(b, pts[f[0]!]!, pts[f[2]!]!, pts[f[1]!]!);
-    }
-    for (const [a, c] of getBlockEdges(blk.type)) {
-      const A = pts[a]!, C = pts[c]!;
-      wire.push(A[0]!, A[1]!, A[2]!, C[0]!, C[1]!, C[2]!);
-    }
   }
-  return { buckets, wire, blocks: n, tris };
+  for (const [a, c] of culled.edges)
+    wire.push(a[0], a[1], -a[2], c[0], c[1], -c[2]);
+
+  return { buckets, wire, blocks: countBlocks(blocks), tris };
 }
+const countBlocks = (blocks: Block[]) => blocks.filter(b => b.type !== 255).length;
 
 /**
  * Merge every block solid + hull triangle skin into colour buckets.
