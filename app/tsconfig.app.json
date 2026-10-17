@@ -16,7 +16,11 @@
     "noEmit": true,
     "jsx": "react-jsx",
 
-    /* Linting */
+    /* Linting + full strictness (AGENTS app/: the engine core is the typed,
+       testable seam — strict + noUncheckedIndexedAccess keep the `| undefined`
+       honest across the pure ⇄ THREE boundary) */
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,

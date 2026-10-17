@@ -91,13 +91,20 @@ describe('buildSolids', () => {
     expect(b.color.opacity).toBe(0);                    // clear glass
   });
 
-  test('hull triangles join the colours[0] bucket', () => {
+  test('hull triangle becomes a 5-colour prism: 8 faces, front slot colours[0]', () => {
     const t = { v0_x: 0, v0_y: 0, v0_z: 0, v1_x: 6, v1_y: 0, v1_z: 0, v2_x: 0, v2_y: 0, v2_z: 6,
       frame_x: 1, frame_y: 1, frame_z: 1, colors: [51, 52, 53, 54, 55, 56] } as Triangle;
     const { stats, buckets } = buildSolids(bpOf([], [t]));
-    expect(stats.hullTris).toBe(1);
-    expect(stats.tris).toBe(1);
-    expect(buckets.size).toBe(1);
+    expect(stats.hullTris).toBe(1);                     // one FILE triangle
+    expect(stats.tris).toBe(8);                         // closed prism: 1+1+2·3 faces
+    expect(buckets.size).toBe(5);                       // colours[0..4], back face distinct
+  });
+
+  test('hull surface edges join the wire buffer (3 edges per triangle)', () => {
+    const t = { v0_x: 0, v0_y: 0, v0_z: 0, v1_x: 6, v1_y: 0, v1_z: 0, v2_x: 0, v2_y: 0, v2_z: 6,
+      frame_x: 1, frame_y: 1, frame_z: 1, colors: [51] } as Triangle;
+    const { wire } = buildSolids(bpOf([], [t]));
+    expect(wire.length).toBe(3 * 2 * 3);                // 3 edges × 2 pts × xyz
   });
 });
 

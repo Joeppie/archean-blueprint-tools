@@ -69,13 +69,30 @@ export interface BlueprintComponent {
   [key: string]: unknown;
 }
 
+/** One cable run: two component ports joined by axis-aligned segments. */
+export interface PipeSegment {
+  start: Vec3D;                       // FILE world space
+  /** dir 0..5 = +x,+y,+z,−x,−y,−z */
+  dir: number;
+  length: number;
+}
+
+export interface Pipe {
+  a_component: number;
+  a_port: string;
+  b_component: number;
+  b_port: string;
+  radius?: number;
+  segments: PipeSegment[];
+}
+
 export interface BlueprintData {
   version: number;
   alias?: string;
   blocks: Block[];
   components: BlueprintComponent[];
   triangles?: Triangle[];
-  pipes?: unknown[];
+  pipes?: Pipe[];
   /** v2 palette (256 slots); v1 files carry NONE → built-in legacy palette. */
   colors?: import('./palette').FilePalette;
   composite_builds?: { component: number; slaveBuildId: number }[];

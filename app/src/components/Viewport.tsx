@@ -1,10 +1,10 @@
 // Viewport.tsx — thin React host for the headless Engine. React owns mount/
 // resize/blueprint-load ONLY; scene graph, pick and render cadence stay in
-// the engine (60 fps path never runs through the reconciler).
+// the engine (the 60 fps path never runs through the reconciler).
 // Test hooks land on window.__ARCHEAN__ (same philosophy as the legacy
 // title/#out reporting): stats/pick are assertable without pixels.
 import { useEffect, useRef } from 'react';
-import { buildPartBoxes, type Manifest } from '../engine/compparts';
+import { openAtlas, type ModelAtlas } from '../engine/models';
 import type { Blueprint } from '../engine/format';
 import { Engine, type PickHit, type SceneStats } from '../engine/scene';
 
@@ -17,11 +17,8 @@ declare global {
   } }
 }
 
-let manifestP: Promise<Manifest | null> | null = null;
-function getManifest(): Promise<Manifest | null> {
-  return manifestP ??= fetch('/models/manifest.json')
-    .then(r => r.ok ? r.json() as Promise<Manifest> : null).catch(() => null);
-}
+let atlasP: Promise<ModelAtlas | null> | null = null;
+const getAtlas = (): Promise<ModelAtlas | null> => (atlasP ??= openAtlas());
 
 export default function Viewport({ bp, onPick }: { bp: Blueprint | null; onPick: (h: PickHit) => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -46,8 +43,8 @@ export default function Viewport({ bp, onPick }: { bp: Blueprint | null; onPick:
     if (!bp) return;
     let dead = false;
     (async () => {
-      const parts = buildPartBoxes(bp, await getManifest());
-      if (!dead) engineRef.current?.load(bp, parts);
+      const atlas = await getAtlas();
+      if (!dead) engineRef.current?.load(bp, atlas);
     })().catch(console.error);
     return () => { dead = true; };
   }, [bp]);

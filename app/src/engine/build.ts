@@ -11,7 +11,7 @@
 import { getBlockEdges, getBlockFaceDirections, getBlockFaces, getBlockPoints, OCCUPANCY_TYPE } from './blockshapes';
 import type { Blueprint, Vec3D } from './format';
 import { CELL, isLegacyFile, worldCoord } from './format';
-import { hullVertex } from './hullfit';
+import { buildHullSkin } from './hull';
 import { resolveColor, type ResolvedColor } from './palette';
 
 export interface GeomBucket {
@@ -24,7 +24,8 @@ export interface GeomBucket {
 export interface SolidBatch {
   /** merged solid geometry keyed by resolved-colour signature */
   buckets: Map<string, GeomBucket>;
-  /** wireframe edge segments (view space), 2 vertices per edge */
+  /** wireframe edge segments (view space), 2 vertices per edge: block edges
+   *  + the hull surface edges (legacy hullWire covers both uniformly) */
   wire: number[];
   stats: { blocks: number; tris: number; hullTris: number };
 }
@@ -64,9 +65,8 @@ export function buildSolids(bp: Blueprint): SolidBatch {
     return b;
   };
 
-  // emit one (possibly mirrored) triangle; winding already flipped by caller
-  const tri = (b: GeomBucket, p: [number, number, number][], a: number, c: number, e: number) => {
-    const A = p[a]!, C = p[c]!, E = p[e]!;
+  // emit one outward-wound triangle (the caller hands final winding)
+  const tri3 = (b: GeomBucket, A: [number, number, number], C: [number, number, number], E: [number, number, number]) => {
     const n = faceNormal(A, C, E);
     const base = b.positions.length / 3;
     for (const v of [A, C, E]) b.positions.push(v[0], v[1], v[2]), b.normals.push(n[0]!, n[1]!, n[2]!);
@@ -91,8 +91,8 @@ export function buildSolids(bp: Blueprint): SolidBatch {
       const f = faces[fi]!;
       const slot = blk.colors?.[fi] ?? 0;
       const b = bucketFor(slot);
-      if (f.length === 6) { tri(b, pts, f[0]!, f[2]!, f[1]!); tri(b, pts, f[3]!, f[5]!, f[4]!); }
-      else tri(b, pts, f[0]!, f[2]!, f[1]!);
+      if (f.length === 6) { tri3(b, pts[f[0]!]!, pts[f[2]!]!, pts[f[1]!]!); tri3(b, pts[f[3]!]!, pts[f[5]!]!, pts[f[4]!]!); }
+      else tri3(b, pts[f[0]!]!, pts[f[2]!]!, pts[f[1]!]!);
     }
     for (const [a, c] of getBlockEdges(blk.type)) {
       const A = pts[a]!, C = pts[c]!;
@@ -100,16 +100,15 @@ export function buildSolids(bp: Blueprint): SolidBatch {
     }
   }
 
-  // hull triangle skin: single triangles, colours[0] = file-front (its normal
-  // mirrors to view-front, so reversed winding keeps that face toward −z… we
-  // keep BOTH visible via DoubleSide in the renderer; prism extrusion +
-  // 5-colour side walls land with culling (P2b).
-  for (const t of bp.data.triangles ?? []) {
-    hullTris++;
-    const p = [0, 1, 2].map(i => { const v = hullVertex(t, i as 0 | 1 | 2); return toView(v.x, v.y, v.z); }) as [number, number, number][];
-    const b = bucketFor(t.colors?.[0] ?? 0);
-    tri(b, p, 0, 2, 1);
+  // hull triangle skin: the game's closed 0.05 m prisms — colours[0] front,
+  // [1] back, [2..4] side walls (hull.ts carries the exact winding).
+  const skin = buildHullSkin(bp.data.triangles);
+  for (const f of skin.faces) {
+    const b = bucketFor(f.slot);
+    tri3(b, f.tri[0] as [number, number, number], f.tri[1] as [number, number, number], f.tri[2] as [number, number, number]);
   }
+  wire.push(...skin.wire);
+  hullTris = skin.tris;
 
   return { buckets, wire, stats: { blocks, tris, hullTris } };
 }

@@ -1,7 +1,8 @@
 // compparts.ts pins: quaternion rotation, collider box → view AABB with the
-// z-mirror + view-quat chain, Build ghosts and unknown types skipped.
+// z-mirror + view-quat chain, Build ghosts and unknown types skipped, and the
+// DISPLAY-POSE rules (wheel droop, builder-flat junction, toggle yaw-180).
 import { describe, expect, test } from 'vitest';
-import { buildPartBoxes, compPartBoxes, qRot } from '../compparts';
+import { buildPartBoxes, compPartBoxes, displayQuat, qMul, qRot, standInBox } from '../compparts';
 import type { Blueprint } from '../format';
 
 const Y90 = { w: Math.SQRT1_2, x: 0, y: Math.SQRT1_2, z: 0 };   // +90° about y
@@ -52,5 +53,52 @@ describe('buildPartBoxes', () => {
     expect(boxes.length).toBeGreaterThan(0);
     expect(boxes.every(b => b.ci === 1)).toBe(true);
     expect(buildPartBoxes(bp, null)).toEqual([]);
+  });
+});
+
+describe('displayQuat', () => {
+  const I = { w: 1, x: 0, y: 0, z: 0 };
+
+  test('FluidJunction rides the builder-FLAT pose (file −x,−y,z,w), convention-free', () => {
+    const qF = { w: 0.5, x: 0.5, y: 0.5, z: 0.5 };
+    expect(displayQuat('FluidJunction', Y90, qF)).toEqual({ w: 0.5, x: -0.5, y: -0.5, z: 0.5 });
+  });
+
+  test('ToggleButton = view quat ∘ yaw-180 (plate flush, lever out of the mount)', () => {
+    const got = displayQuat('ToggleButton', Y90, I);
+    const want = qMul(Y90, { w: 0, x: 0, y: 1, z: 0 });
+    expect(got.w).toBeCloseTo(want.w); expect(got.x).toBeCloseTo(want.x);
+    expect(got.y).toBeCloseTo(want.y); expect(got.z).toBeCloseTo(want.z);
+  });
+
+  test('wheel droop: the horizontal suspension arm (local +y) swings DOWN (−y)', () => {
+    const q = displayQuat('SmallWheel', I, I);
+    const arm = qRot(q, [0, 0.447, 0]);                       // ISW arm length
+    expect(arm[1]).toBeCloseTo(-0.447, 6);                    // hangs below the mount
+    expect(Math.hypot(...arm)).toBeCloseTo(0.447, 6);         // a ROLL: length preserved
+    const axle = qRot(q, [1, 0, 0]);                          // axle untouched (x̂ roll)
+    axle.forEach((v, i) => expect(v).toBeCloseTo([1, 0, 0][i]!, 6));
+  });
+
+  test('a wheel already hanging keeps its pose (no flip past −y)', () => {
+    const down = qMul({ w: Math.SQRT1_2, x: Math.SQRT1_2, y: 0, z: 0 }, I);  // x̂ 180°: +y→−y… 
+    const q = displayQuat('Wheel', down, I);
+    const arm = qRot(q, [0, 0.447, 0]);
+    expect(arm[1]).toBeLessThan(0);                           // stays down
+  });
+
+  test('plain parts ride the view quat untouched', () => {
+    expect(displayQuat('LowVoltageBattery', Y90, I)).toEqual(Y90);
+  });
+});
+
+describe('standInBox', () => {
+  const comp = { type: 'X', position: { x: 0, y: 0, z: 0 }, orientation: { w: 1, x: 0, y: 0, z: 0 } };
+  test('atlas collider wins; degenerate collider falls back to the footprint', () => {
+    const b = standInBox(comp as never, man.Thing);
+    b.center.forEach((v, i) => expect(v).toBeCloseTo([0.5, 0.25, 0.125][i]!, 6));
+    const flat = standInBox({ ...comp, occupancies: { size_x: 2, size_y: 0, size_z: 1 } } as never,
+      { colliders: [{ name: 'p', min: [0, 0, 0], max: [0, 0, 0] }] });
+    expect(flat.size).toEqual([0.75, 0.25, 0.5]);             // inclusive cell rule
   });
 });

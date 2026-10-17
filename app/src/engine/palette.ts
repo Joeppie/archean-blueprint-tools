@@ -64,10 +64,13 @@ const LEGACY_GROUPS: Record<number, number[][]> = {
     [255,255,16,2,0,0],[16,255,255,2,0,0],[255,64,16,2,0,0],[64,16,255,2,0,0],
     [255,16,255,2,0,0]],
 };
-for (const base of Object.keys(LEGACY_GROUPS))
-  LEGACY_GROUPS[+base].forEach((v, k) => {
+for (const base of Object.keys(LEGACY_GROUPS)) {
+  const rows = LEGACY_GROUPS[+base];
+  if (!rows) continue;
+  rows.forEach((v, k) => {
     DEFAULT_PALETTE[+base + k] = { r: v[0]!, g: v[1]!, b: v[2]!, opacity: v[3]!, roughness: v[4]!, metallic: v[5]! };
   });
+}
 while (DEFAULT_PALETTE.length < 256) DEFAULT_PALETTE.push(null);
 
 // v1 (2024-25, palette-less) blueprints index the finish families FOUR slots
