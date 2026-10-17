@@ -69,7 +69,8 @@ function StatsStrip({ engine, bp }: { engine: { current: Engine | null }; bp: Bl
       if (e && ref.current) {
         const s = e.stats();
         if (s.draws > 0 || frames++ > 120) {
-          ref.current.textContent = `blocks=${s.blocks} tris=${s.tris} hull=${s.hullTris} comps=${s.comps} draws=${s.draws}`;
+          ref.current.textContent =
+            `blocks=${s.blocks} tris=${s.tris} hull=${s.hullTris} comps=${s.comps} draws=${s.draws} tier=${s.tier}`;
           document.title = s.ok && s.draws > 0 ? `SCENE PASS ${ref.current.textContent}` : `SCENE ${JSON.stringify(s)}`;
           if (s.ok && s.draws > 0) return;
         }

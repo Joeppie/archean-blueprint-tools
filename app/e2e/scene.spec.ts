@@ -50,3 +50,22 @@ test('switching crafts rebuilds the scene (stats change, still renders)', async 
     return s !== first && /draws=[1-9]\d*/.test(s ?? '');
   }, { timeout: 30_000 }).toBe(true);
 });
+
+// The DUS Stratolaunch (3509975859, "DHD-773"): 2 370 components. Streaming
+// every part's real game model puts the scene at ~9 k geometries / 6.7 k draw
+// calls — PERF.md's cliff, which phone GPUs do not survive (user report: the
+// craft "fails to render on my mobile phone" while every other craft works).
+// The heavy-craft tier keeps painted stand-ins: the phone must still DRAW it,
+// at a bounded scene cost. Runs on both projects (desktop + Pixel 7).
+test('giant craft renders within a phone budget (heavy tier)', async ({ page }) => {
+  await page.goto('/?craft=3509975859');
+  await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
+  const st = await page.evaluate(() => {
+    const w = window as unknown as { __ARCHEAN__?: { stats: () => Record<string, unknown> } };
+    return w.__ARCHEAN__!.stats();
+  });
+  expect(st.comps).toBe(2370);
+  expect(st.tier).toBe('lite');
+  expect(Number(st.draws)).toBeGreaterThan(0);
+  expect(Number(st.draws), 'no real-model fan-out on heavy craft').toBeLessThan(3000);
+});

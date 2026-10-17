@@ -36,13 +36,28 @@ import type { Blueprint, BlueprintComponent } from './format';
 import { isLegacyFile } from './format';
 
 export interface PickHit { kind: 'block' | 'comp' | 'hull' | 'none'; ci?: number; point?: [number, number, number] }
-export interface SceneStats { blocks: number; tris: number; hullTris: number; comps: number; draws: number; ok: boolean }
+export interface SceneStats { blocks: number; tris: number; hullTris: number; comps: number; draws: number; ok: boolean;
+  /** 'lite' = the heavy-craft tier (painted stand-ins, no real-model fan-out) */
+  tier: 'full' | 'lite' }
 
 /** renderer kinds carried in userData.kind (pick routes on these) */
 type Kind = 'block' | 'wire' | 'occ' | 'pipe' | 'pipe-end' | 'comp' | 'ground';
 
 const DEG = Math.PI / 180;
 const STAND_IN_HEX = 0x88aaff;          // legacy colliderProxy stand-in tint
+
+/** PERF.md's measured cliff: draw calls are what a GPU pays per frame, and
+ *  one component = one stand-in + N real-model meshes. The desktop iGPU
+ *  already only reaches 14 fps at ~12 k draws (the 6.3 MB giant); a phone
+ *  tile GPU is 3-5x behind there, and its driver watchdog kills the WebGL
+ *  context on the multi-hundred-ms first frame — the user's "Stratolaunch
+ *  fails to render on my mobile phone" (3509975859, 2 370 components →
+ *  9 108 geometries / 6 741 draws / 26 MB of model JSON when every part
+ *  streams its real model). Above this component count the craft renders
+ *  in the LITE tier: painted stand-in boxes only (the giant lands at
+ *  ~2 400 draws — the budget the e2e phone pin asserts). Corpus: the giant
+ *  has 2 370 components, the next craft 668, so only giants take this path. */
+const HEAVY_COMPONENTS = 800;
 
 export class Engine {
   readonly scene = new Scene();
@@ -56,6 +71,13 @@ export class Engine {
   private bp: Blueprint | null = null;
   private needRender = false;
   private loadSeq = 0;                  // async real-model loads die with their load()
+  private heavy = false;                // heavy-craft tier for the current load
+  /** assets owned by the Engine, NOT by one scene load: shared unit box +
+   *  cached stand-in materials (disposeScene must never dispose these) */
+  private shared = new WeakSet<object>();
+  private unitBox = new BoxGeometry(1, 1, 1);
+  private matCache = new Map<string, MeshStandardMaterial>();
+  private occ: MeshStandardMaterial | null = null;   // shared occ-box material
   lastPick: PickHit = { kind: 'none' };
 
   attach(canvas: HTMLCanvasElement) {
@@ -68,11 +90,12 @@ export class Engine {
     // legacy lighting rig (view3d r0.178): sky blue + fog, hemi fill, warm sun
     this.scene.background = new Color(0x8fb4d8);
     this.scene.fog = new Fog(0x8fb4d8, 40, 90);
-    {
-      const pmrem = new PMREMGenerator(this.renderer);
-      this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-      pmrem.dispose();
-    }
+    this.bakeEnv();
+    // Phones recycle GPU contexts constantly (tab switches, memory
+    // pressure). three re-uploads buffers on webglcontextrestored but NOT
+    // the PMREM texture baked here — rebake and repaint, or the restored
+    // canvas keeps a dead envMap and never looks right again.
+    canvas.addEventListener('webglcontextrestored', this.onRestore);
     this.scene.add(new HemisphereLight(0xcfe8ff, 0x444422, 1.1));
     const sun = new DirectionalLight(0xfff2dd, 2.2);
     sun.position.set(-6, 10, -4);
@@ -102,6 +125,17 @@ export class Engine {
 
   invalidate() { this.needRender = true; }
 
+  /** PMREM studio env, baked once per GL context (legacy v0.144 rule): zero
+   *  per-frame cost; only metal reads it (materials.ts envIntensity). */
+  private bakeEnv() {
+    if (!this.renderer) return;
+    const pmrem = new PMREMGenerator(this.renderer);
+    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    pmrem.dispose();
+  }
+
+  private onRestore = () => { this.bakeEnv(); this.invalidate(); };
+
   /** one PbrSpec → MeshStandardMaterial (palette r/g/b are LINEAR albedo —
    *  never sRGB-decode; only metal reflects the studio env) */
   private mat(spec: PbrSpec, extra?: Partial<MeshStandardMaterialParameters>): MeshStandardMaterial {
@@ -121,6 +155,32 @@ export class Engine {
     const m = this.mat({ color: srgbHexToLinear(hex), metal: 0, rough: 1, opacity: 1 });
     m.envMapIntensity = 0;
     return m;
+  }
+
+  /** material cache for the repeated stand-in/occupancy paints: a giant
+   *  crafts its 2 370 boxes from a handful of colours — one material per
+   *  spec, not per mesh (the legacy per-mesh materials only exist for the
+   *  emissive selection highlight, which this app does not have yet) */
+  private sharedMat(spec: PbrSpec): MeshStandardMaterial {
+    const key = `${spec.color.join(',')}|${spec.metal}|${spec.rough}|${spec.opacity}`;
+    let m = this.matCache.get(key);
+    if (!m) {
+      m = this.mat(spec);
+      this.matCache.set(key, m);
+      this.shared.add(m);
+    }
+    return m;
+  }
+
+  /** one translucent occupancy-box material for the whole Engine lifetime */
+  private occMaterial(): MeshStandardMaterial {
+    if (!this.occ) {
+      this.occ = this.flatMat(0x39404d);
+      this.occ.transparent = true;
+      this.occ.opacity = 0.35;
+      this.shared.add(this.occ);
+    }
+    return this.occ;
   }
 
   load(bp: Blueprint, atlas: ModelAtlas | null = null) {
@@ -151,20 +211,25 @@ export class Engine {
       this.root.add(wire);
     }
 
-    // occupancy (type-255) boxes: one line-style translucent mesh each, OFF
-    const occMat = this.flatMat(0x39404d);
-    occMat.transparent = true;
-    occMat.opacity = 0.35;
+    // occupancy (type-255) boxes: translucent, OFF, ONE shared unit box +
+    // material scaled per mesh (a giant = 2 400 of these; see HEAVY comment)
+    const occMat = this.occMaterial();
     for (const box of buildCompProxies(bp)) {
-      const m = new Mesh(new BoxGeometry(box.size.x, box.size.y, box.size.z), occMat.clone());
+      const m = new Mesh(this.unitBox, occMat);
       m.position.set(box.min.x + box.size.x / 2, box.min.y + box.size.y / 2, box.min.z + box.size.z / 2);
+      m.scale.set(box.size.x, box.size.y, box.size.z);
       m.userData = { kind: 'occ', ci: box.ci };
       m.visible = false;                // occupancy boxes default OFF (legacy rule)
       this.root.add(m);
     }
 
     this.buildPipesMesh(bp);
-    this.buildComponents(bp, atlas, legacy, palette, seq);
+    // heavy-craft tier (PERF.md cliff, see HEAVY_COMPONENTS): above the
+    // component budget the real-model fan-out takes the scene past what a
+    // phone GPU survives, so the atlas never streams (this ALSO saves the
+    // giant's 26 MB of per-type model JSON on metered connections)
+    this.heavy = bp.data.components.reduce((n, c) => n + (c.type === 'Build' ? 0 : 1), 0) > HEAVY_COMPONENTS;
+    this.buildComponents(bp, this.heavy ? null : atlas, legacy, palette, seq);
 
     const parts = buildPartBoxes(bp, atlas?.manifest ?? null);
     this.addGround(bp, parts);
@@ -221,9 +286,10 @@ export class Engine {
       g.userData = { kind: 'comp', ci };
 
       const box = standInBox(c, atlas?.manifest[c.type]);
-      const stand = new Mesh(new BoxGeometry(box.size[0], box.size[1], box.size[2]),
-        this.mat(nodeMaterialSpec(c, 'color1', undefined, palette, legacy, STAND_IN_HEX)));
+      const stand = new Mesh(this.unitBox,
+        this.sharedMat(nodeMaterialSpec(c, 'color1', undefined, palette, legacy, STAND_IN_HEX)));
       stand.position.set(box.center[0], box.center[1], box.center[2]);
+      stand.scale.set(box.size[0], box.size[1], box.size[2]);   // shared unit box (geo count)
       g.add(stand);
       this.root.add(g);
       this.compRoots.push(g);
@@ -422,6 +488,7 @@ export class Engine {
       comps: this.compCount,
       draws: this.renderer?.info.render.calls ?? 0,
       ok: this.batch !== null && (this.batch.stats.blocks > 0 || this.batch.stats.hullTris > 0),
+      tier: this.heavy ? 'lite' : 'full',
     };
   }
 
@@ -430,10 +497,12 @@ export class Engine {
   private disposeScene() {
     this.root.traverse(o => {
       const m = o as Mesh;
-      m.geometry?.dispose?.();
+      // Engine-owned shared assets (unit box, cached materials) survive
+      // load swaps — disposing them here would poison the next craft
+      if (m.geometry && !this.shared.has(m.geometry)) m.geometry.dispose?.();
       const mat = m.material as MeshStandardMaterial | MeshStandardMaterial[] | undefined;
-      if (Array.isArray(mat)) mat.forEach(x => x.dispose());
-      else mat?.dispose();
+      if (Array.isArray(mat)) mat.forEach(x => { if (!this.shared.has(x)) x.dispose(); });
+      else if (mat && !this.shared.has(mat)) mat.dispose();
     });
     this.root.clear();
     this.compRoots = [];
@@ -444,6 +513,12 @@ export class Engine {
   dispose() {
     this.loadSeq++;                    // strand in-flight real-model loads
     this.disposeScene();
+    this.renderer?.domElement.removeEventListener('webglcontextrestored', this.onRestore);
+    this.unitBox.dispose();
+    this.occ?.dispose();
+    this.occ = null;
+    this.matCache.forEach(m => m.dispose());
+    this.matCache.clear();
     this.renderer?.dispose();
     this.renderer = null;
   }
