@@ -131,11 +131,32 @@ new build dep, kept inside `app/`).
     dolphin subgrid tab → joint slider swings + restores the group pose,
     mobile drawer. Gates: vitest 95/95, tsc strict clean, Playwright 27 pass
     (3 desktop-only skips), iGPU renders: dolphin subs=5, ISW, gantry.
-    Remaining P3-scope gaps (next commits): the rotate/translate GIZMO + mode
-    widget, symmetry twin propagation (⇄/mirror plane), cable power-surges +
-    X-ray glow, labels, mass/CoM, aero/wind/flow/thrust/seal + flight UI,
-    dashboards, interior-wall face culling, hull element list, hi-def model
-    toggle, calibrated-mass report, workshop header link.
+- **GIZMO + MODE WIDGET — landed on top of P3** (the legacy primary
+  manipulation path): an engine-owned `TransformControls` on a plain proxy
+  group attached at the VISIBLE-geometry bbox centre (v0.167 pivot semantics:
+  an off-origin part spins IN PLACE at the rings while the file origin ORBITS
+  the pivot at constant radius — pinned); translate = WORLD space, rotate =
+  LOCAL rings (v0.158 per-mode rule); Shift snaps 15° / 0.25 m; the base
+  rebases on every mouseDown so multi-grip sweeps continue. The writeback
+  applies the gesture DELTA motion X ↦ c + dq·(X−c) + t (with the ABSOLUTE
+  proxy quaternion a pure translate also rotated the part — caught by the
+  pin) and strips the display pose through the legacy right-multiplier undo
+  dispQ0⁻¹·viewQ0 — a PRODUCT, not an inverse: the wrong form collapsed
+  rotation writebacks to identity, which had silently broken the inspector's
+  rotation sliders too; the pin restores the file quaternion to 1e-9 after
+  ±30°. The inspector's sliders share the exact undo. The MODE widget
+  (⊘/✥/⟳) pops at a deliberate canvas part pick (legacy v0.153; ⇄ lands with
+  the symmetry port) and persists; `opt-gizmo` + localStorage keep the legacy
+  default ON; subgrid selection carries NO gizmo (v0.170, pinned). Engine
+  writes flow through `onEdit` → the doc mirror + dirty, so a gizmo drag is
+  Save-able like a slider edit. e2e `gizmo.spec.ts` + gates: vitest 95/95,
+  Playwright 31 pass / 7 desktop-only skips; iGPU shot: RGB rings +
+  trackball on the ISW beacon.
+    Remaining gaps (next commits): symmetry twin propagation (⇄/mirror
+    plane), cable power-surges + X-ray glow, labels, mass/CoM,
+    aero/wind/flow/thrust/seal + flight UI, dashboards, interior-wall face
+    culling, hull element list, hi-def model toggle, calibrated-mass report,
+    workshop header link.
 - **P4 — perf**: BatchedMesh proxies, ?perf port, wasm benchmark of
   candidate 1, optional WebGPU flag.
 - **P5 — parity gate + cutover**: Playwright suite mirrors the old suites
