@@ -97,6 +97,7 @@ function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHullOpaci
       <Check testid="opt-wire" label="wireframe (hull)" checked={p.opts.wire} onChange={v => p.onOpt('wire', v)} />
       <Check testid="opt-pipes" label="pipes (cables)" checked={p.opts.pipes} onChange={v => p.onOpt('pipes', v)} />
       <Check testid="opt-subs" label="subgrids (doors/hatches)" checked={p.opts.subs} onChange={v => p.onOpt('subs', v)} />
+      <Check testid="opt-mirror" label="mirror plane (x symmetry)" checked={p.opts.mirror} onChange={v => p.onOpt('mirror', v)} />
       <Check testid="opt-real" label="real game models (off = low-poly)" checked={p.realModels} onChange={p.onRealModels} />
       <Check testid="opt-gizmo" label="gizmo on selection (Shift snaps)" checked={p.gizmoOn} onChange={p.onGizmo} />
       <Row label="hull opacity" min={0.1} max={1} step={0.05} value={p.hullOpacity}
@@ -306,7 +307,8 @@ function Inspector(p: Props) {
         )}
       </Sec>
       <Sec title="Component data">
-        <DataRows comp={comp} compPath={['data', 'components', ci]} edits={edits} ctx={ctx} markDirty={markDirty} />
+        <DataRows comp={comp} compPath={['data', 'components', ci]} edits={edits} ctx={ctx} markDirty={markDirty}
+          symJoint={(k, d) => engine?.propagateJoint(ci, k, d)} />
       </Sec>
       <Sec title="Actions">
         <button data-testid="comp-reset"
@@ -327,6 +329,7 @@ function Inspector(p: Props) {
 function DataRows(p: {
   comp: BlueprintComponent; compPath: (string | number)[];
   edits: EditApi; ctx: EditCtx | null; markDirty: () => void;
+  symJoint?: (key: string, delta: number) => void;
 }) {
   const entries = Object.entries(p.comp.data ?? {});
   const editable = entries.filter(([, v]) =>
@@ -343,7 +346,14 @@ function DataRows(p: {
         if (typeof v === 'number')
           return <Row key={k} label={k} min={Math.min(v - 10, -100)} max={Math.max(v + 10, 100)}
             step={0.1} value={v}
-            onInput={nv => { p.edits.dataField(p.ctx!, p.compPath, k, nv); p.markDirty(); }} />;
+            onInput={nv => {
+              // angle/pos on a kinematic master move the twins in unison (v0.176)
+              if ((k === 'angle' || k === 'pos') && p.symJoint) {
+                const old = typeof p.comp.data?.[k] === 'number' ? (p.comp.data[k] as number) : 0;
+                p.symJoint(k, nv - old);
+              }
+              p.edits.dataField(p.ctx!, p.compPath, k, nv); p.markDirty();
+            }} />;
         if (typeof v === 'string' && v.length <= 80)
           return (
             <label key={k} className="flex items-center gap-2 py-[2px]">
@@ -419,11 +429,21 @@ function SubPanel(p: Props) {
               </div>
               {kinematic && typeof jd['angle'] === 'number' && path && ctx && (
                 <Row label="joint angle (°)" min={-180} max={180} step={0.5} value={zc(jd['angle'] as number)}
-                  onInput={v => { edits.dataField(ctx, path, 'angle', v); engine?.dataEdited(); markDirty(); }} />
+                  onInput={v => {
+                    if (!ctx) return;
+                    const old = typeof mc.data?.['angle'] === 'number' ? (mc.data['angle'] as number) : 0;
+                    if (e.top >= 0) engine?.propagateJoint(e.top, 'angle', v - old);   // twins move in UNISON (v0.176)
+                    edits.dataField(ctx, path, 'angle', v); engine?.dataEdited(); markDirty();
+                  }} />
               )}
               {kinematic && typeof jd['pos'] === 'number' && path && ctx && (
                 <Row label="joint slide (m)" min={-1} max={1} step={0.005} value={zc(jd['pos'] as number)}
-                  onInput={v => { edits.dataField(ctx, path, 'pos', v); engine?.dataEdited(); markDirty(); }} />
+                  onInput={v => {
+                    if (!ctx) return;
+                    const old = typeof mc.data?.['pos'] === 'number' ? (mc.data['pos'] as number) : 0;
+                    if (e.top >= 0) engine?.propagateJoint(e.top, 'pos', v - old);
+                    edits.dataField(ctx, path, 'pos', v); engine?.dataEdited(); markDirty();
+                  }} />
               )}
             </div>
           );

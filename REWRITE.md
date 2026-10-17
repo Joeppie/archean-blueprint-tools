@@ -152,11 +152,41 @@ new build dep, kept inside `app/`).
   Save-able like a slider edit. e2e `gizmo.spec.ts` + gates: vitest 95/95,
   Playwright 31 pass / 7 desktop-only skips; iGPU shot: RGB rings +
   trackball on the ISW beacon.
-    Remaining gaps (next commits): symmetry twin propagation (⇄/mirror
-    plane), cable power-surges + X-ray glow, labels, mass/CoM,
-    aero/wind/flow/thrust/seal + flight UI, dashboards, interior-wall face
-    culling, hull element list, hi-def model toggle, calibrated-mass report,
-    workshop header link.
+- **INTERIOR-WALL CULLING + RECT STITCH — landed** (XenonViewer port, pure
+  `engine/cull.ts` = the designated WASM seam): full faces cut cell-by-cell
+  against a face grid in ABSOLUTE cell+axis keys (cross-frame seams weld),
+  survivors stitched into rectangles; covered partials die; identical
+  partial footprints (slope-to-slope, exact duplicates) drop BOTH copies;
+  transparency asymmetry kept (opaque survives behind glass, glass dies).
+  The wire buffer now follows the SURVIVING face outlines only. The heli
+  drops 1716 → 521 tris; sealed cabins render clean. Pins: seam plane empty,
+  duplicate→0 tris, stitch span 0.75 m, cross-frame weld, Euler-28 wall row,
+  glass asymmetry (cull.test suite + re-pinned build pins).
+- **SYM TWIN PROPAGATION (⇄) — landed** (legacy v0.160–v0.176 semantics,
+  pure `engine/sym.ts` index + engine write-path integration): same-type
+  components placed as a MIRROR MASK pair (x→1, y→2, z→4; on-plane axes are
+  EQUAL; drift ⇒ no pair). The >5 cm alignment filter AUTO-DISABLES a broken
+  pair and revives it on realign (pinned). Propagation rides EVERY write
+  path: slider/gizmo moves ship the mask-flipped delta; rotations ship the
+  MIRROR-TWIN MOTION md = det(S)·S·dq (normal spin PRESERVED — the red-axis
+  wheel rule — tangential FLIPPED) applied ABSOLUTELY to twin bases at edit
+  start, twins orbiting their OWN captured centres; joint angle/pos edits
+  ship the SAME delta (equal angles ARE the symmetric motion — the captured
+  axes carry the mirror). Twins CO-SELECT with their own golden boxes, the
+  ⇄ button toggles the master switch (persisted, strikethrough when
+  inactive), and the mirror-plane sheet renders at file x=0 when x-pairs
+  exist (opt-mirror). Save rides each twin's own occ/type-255 deltas.
+  Pin caught a real bug: the twin delta must touch ONLY the edited axis
+  (a v-for-all-axes version dragged twin y/z along). Pins: sym.test (mask
+  classification, auto-disable window, md sign rules per mask) + e2e
+  sym.spec (UI slider → mirrored twin move, drift/disable/revive, XYQ twin
+  doors UNISON to 34.3° + ⟲ restores BOTH hinges, mirror option
+  round-trip). Gates: vitest 112/112, tsc clean, Playwright 34 pass /
+  10 desktop-only skips; iGPU shot: twin aileron boxed + mirror sheet.
+    Remaining gaps (next commits): cable power-surges + X-ray glow,
+    labels, mass/CoM + calibrated-mass report,
+    aero/wind/flow/thrust/seal + flight UI, dashboards, hull element list,
+    hi-def model toggle, workshop header link.
 - **P4 — perf**: BatchedMesh proxies, ?perf port, wasm benchmark of
   candidate 1, optional WebGPU flag.
 - **P5 — parity gate + cutover**: Playwright suite mirrors the old suites

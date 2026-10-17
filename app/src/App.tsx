@@ -89,7 +89,7 @@ function Editor({ craft, onBack }: { craft: string; onBack: () => void }) {
   const [hit, setHit] = useState<PickHit | null>(null);
   const [dirty, setDirty] = useState(false);
   const [inspKey, setInspKey] = useState(0);
-  const [opts, setOpts] = useState<ViewOptions>({ grid: true, occ: false, hull: true, wire: false, pipes: true, subs: true });
+  const [opts, setOpts] = useState<ViewOptions>({ grid: true, occ: false, hull: true, wire: false, pipes: true, subs: true, mirror: true });
   const [hullOpacity, setHullOpacity] = useState(1);
   const [realModels, setRealModels] = useState(true);
   const [gizmoOn, setGizmoOn] = useState(() => localStorage.getItem('archean-app-gizmo') !== '0');
@@ -130,13 +130,22 @@ function Editor({ craft, onBack }: { craft: string; onBack: () => void }) {
         setOrientation(ctx, ci, c.orientation ?? { w: 1, x: 0, y: 0, z: 0 });
         markDirty();
       };
+      e.onDataEdit = (ci, key) => {
+        const ctx = ctxRef.current;
+        const v = ctx?.bp.data.components[ci]?.data?.[key];
+        if (!ctx || typeof v !== 'number') return;
+        setDataField(ctx, ['data', 'components', ci], key, v);
+        markDirty();
+      };
     }
     setEngine(e);
   }, [markDirty]);
 
   // every write: doc + bp (edit.ts) AND the live scene (engine) — one funnel
   const edits: EditApi = useMemo(() => ({
-    pos: (ctx, ci, ax, v) => { setPos(ctx, ci, ax, v); engineRef.current?.moveComp(ci); },
+    // position edits ride the ENGINE path: twin propagation + doc mirror via
+    // onEdit (edit.ts primitives stay the doc layer's own tools)
+    pos: (_ctx, ci, ax, v) => { engineRef.current?.setFilePosAxis(ci, ax, v); },
     beginRot: ci => engineRef.current?.beginRotEdit(ci),
     quatDelta: (ctx, ci, p, y, r) => {
       const q = engineRef.current?.setCompQuatDelta(ci, p, y, r);

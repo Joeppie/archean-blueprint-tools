@@ -66,6 +66,7 @@ export default function Viewport({ bp, onPick, onEngine }: {
   const [widget, setWidget] = useState<{ x: number; y: number } | null>(null);
   const [gmode, setGmode] = useState<'off' | 'translate' | 'rotate'>(
     () => (localStorage.getItem('archean-app-gizmo-mode') as 'off' | 'translate' | 'rotate') || 'rotate');
+  const [, setSymTick] = useState(0);
   useEffect(() => {
     const sh = (e: KeyboardEvent, on: boolean) => { if (e.key === 'Shift') engineRef.current?.setGizmoSnap(on); };
     const dn = (e: KeyboardEvent) => sh(e, true), up = (e: KeyboardEvent) => sh(e, false);
@@ -110,6 +111,14 @@ export default function Viewport({ bp, onPick, onEngine }: {
               {ic}
             </button>
           ))}
+          {/* ⇄ mirror-twin switch (v0.161): effective state with strikethrough when
+              off OR the selected pair drifted apart (the >5 cm auto-disable) */}
+          <button title="move mirrored twins (⇄)" data-testid="mode-sym"
+            onClick={() => { const e = engineRef.current; if (e) e.setSymOn(!e.symState().on); setSymTick(t => t + 1); }}
+            className={`h-8 w-9 rounded text-[15px] leading-none ${
+              engineRef.current?.symState().active ? 'bg-accent/30 text-accent' : 'text-ink line-through opacity-60 hover:bg-white/10'}`}>
+            ⇄
+          </button>
         </div>
       )}
       <StatsStrip engine={engineRef} bp={bp} />

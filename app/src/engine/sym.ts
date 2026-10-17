@@ -1,0 +1,91 @@
+// sym.ts — the SYMMETRY TWIN index (legacy v0.160/v0.166): the game's
+// left-right symmetry is GEOMETRIC in the file — the editor's mirror tool
+// places the twin as a SEPARATE component of the same type at a mirrored
+// position. Twins are NOT pose-mirrored, so a move propagates the
+// mirror-flipped delta and a rotation propagates the MIRROR-TWIN MOTION.
+// Pure + testable; the Engine owns the live index (rebuild per load).
+//
+// v0.166 MASK GENERALISATION: every pair carries a MIRROR MASK — the axes
+// it is placed mirrored on (|a+b| ≈ 0 AND off-plane); every remaining axis
+// must be EQUAL (|a−b| ≈ 0) else NO pair at all (drift ⇒ mask changes ⇒
+// the alignment re-check auto-disables). x→1, y→2, z→4; two mirrored axes
+// = a 180° twist, three = point symmetry. An axis where both positions are
+// ≈ 0 (on-plane) classifies as EQUAL (a centreline part is its own twin
+// there).
+
+import type { BlueprintComponent, FileQuat, Vec3D } from './format';
+
+export interface TwinPair { j: number; mask: number }
+
+const AX_BITS = [1, 2, 4] as const;
+
+/** Mirror mask of the (a, b) position pair, 0 = not a mirror pair. */
+export function symMaskAt(a: Vec3D, b: Vec3D, eps: number): number {
+  if (!a || !b) return 0;
+  let m = 0;
+  const av = [a.x, a.y, a.z], bv = [b.x, b.y, b.z];
+  for (let k = 0; k < 3; k++) {
+    const bit = AX_BITS[k]!;
+    if (Math.abs(av[k]! + bv[k]!) < eps && Math.abs(av[k]!) > eps) m |= bit;      // mirrored AND off-plane
+    else if (Math.abs(av[k]! - bv[k]!) > eps) return 0;                            // neither equal nor mirrored
+  }
+  return m;
+}
+
+/** compIdx → its twin pairs, from LOAD-TIME geometry (same type only). */
+export function symTwinIndex(comps: readonly BlueprintComponent[]): Map<number, TwinPair[]> {
+  const out = new Map<number, TwinPair[]>();
+  const byType = new Map<string, number[]>();
+  comps.forEach((c, i) => {
+    const l = byType.get(c.type);
+    if (l) l.push(i); else byType.set(c.type, [i]);
+  });
+  for (const idxs of byType.values())
+    for (const i of idxs)
+      for (const j of idxs)
+        if (j !== i) {
+          const m = symMaskAt(comps[i]!.position, comps[j]!.position, 0.011);
+          if (m) {
+            const l = out.get(i);
+            if (l) l.push({ j, mask: m }); else out.set(i, [{ j, mask: m }]);
+          }
+        }
+  return out;
+}
+
+/** A pair PROPAGATES while it is still aligned (drift > 5 cm auto-disables
+ *  — dragging one half of a broken pair must not chase a lost twin). */
+export function symAllowed(index: Map<number, TwinPair[]>, symOn: boolean,
+  comps: readonly BlueprintComponent[], i: number): TwinPair[] {
+  if (!symOn) return [];
+  return (index.get(i) ?? []).filter(p => symMaskAt(comps[i]!.position, comps[p.j]!.position, 0.05) === p.mask);
+}
+
+/** File-space move delta mirrored on the pair's mask axes. */
+export function mirrorDelta(d: Vec3D, mask: number): Vec3D {
+  return {
+    x: mask & 1 ? -d.x : d.x,
+    y: mask & 2 ? -d.y : d.y,
+    z: mask & 4 ? -d.z : d.z,
+  };
+}
+
+/** MIRROR-TWIN MOTION: conjugate the spin delta by R180° about every mirror
+ *  NORMAL — md = det(S)·S·dq with S = diag(−1 on mask axes). The spin along
+ *  a mirror NORMAL is PRESERVED (both wheels roll backwards together);
+ *  tangential spins FLIP (a steered pair yaws mirror-symmetrically). One
+ *  axis ⇒ (w, dx, −dy, −dz); two compose to the twist conjugation; three
+ *  (point symmetry) give the plain delta. */
+export function mirrorQuat(dq: FileQuat, mask: number): FileQuat {
+  const sx = mask & 1 ? -1 : 1, sy = mask & 2 ? -1 : 1, sz = mask & 4 ? -1 : 1;
+  const det = sx * sy * sz;
+  return { w: dq.w, x: det * sx * dq.x, y: det * sy * dq.y, z: det * sz * dq.z };
+}
+
+/** Does the craft carry ANY x-mirror pair? (drives the mirror-plane option) */
+export function hasMirrorX(index: Map<number, TwinPair[]>): boolean {
+  for (const [, pairs] of index) if (pairs.some(p => p.mask & 1)) return true;
+  return false;
+}
+
+export const symKeyOf = (bp: BlueprintComponent[]) => bp.length;   // cheap invalidation guard

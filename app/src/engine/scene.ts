@@ -45,6 +45,9 @@ import {
   captureJrefs, masterJointState, subBlockBBox, subJointPose, subMasterEntries,
   type JRef, type SubBBox,
 } from './subgrid';
+import {
+  hasMirrorX, mirrorDelta, mirrorQuat, symAllowed, symTwinIndex, type TwinPair,
+} from './sym';
 
 export interface PickHit {
   kind: 'block' | 'comp' | 'sub' | 'none';
@@ -58,9 +61,9 @@ export interface SceneStats { blocks: number; tris: number; hullTris: number; co
 type Kind = 'block' | 'wire' | 'occ' | 'pipe' | 'pipe-end' | 'comp' | 'sub' | 'ground';
 
 export interface ViewOptions {
-  grid: boolean; occ: boolean; hull: boolean; wire: boolean; pipes: boolean; subs: boolean;
+  grid: boolean; occ: boolean; hull: boolean; wire: boolean; pipes: boolean; subs: boolean; mirror: boolean;
 }
-const DEFAULT_OPTS: ViewOptions = { grid: true, occ: false, hull: true, wire: false, pipes: true, subs: true };
+const DEFAULT_OPTS: ViewOptions = { grid: true, occ: false, hull: true, wire: false, pipes: true, subs: true, mirror: true };
 
 const DEG = Math.PI / 180;
 const STAND_IN_HEX = 0x88aaff;          // legacy colliderProxy stand-in tint
@@ -129,12 +132,20 @@ export class Engine {
   private subJrefs = new Map<number, JRef[]>();
   private subCount = 0;
 
+  // ---------- symmetry twins (engine/sym.ts) ----------
+  private symIdx = new Map<number, TwinPair[]>();
+  private symOn = localStorage.getItem('archean-app-sym') !== '0';   // the ⇄ switch
+  private mirrorPlane: Group | null = null;
+  private symRotBases = new Map<number, Map<number, FileQuat>>();     // ci → twin display quat at edit start
+
   // ---------- selection ----------
   lastPick: PickHit = { kind: 'none' };
   private selCi = -1;
   private selSub = -1;
   private selBox: LineSegments2 | null = null;
   private selMat: LineMaterial | null = null;
+  /** twin co-selection: mirrored twins glow with the selection (v0.164) */
+  private twinBoxes: { box: LineSegments2; mat: LineMaterial }[] = [];
   onSelection: ((sel: { ci: number; sub: number }) => void) | null = null;
   private fly: { from: Vector3; to: Vector3; t0: number } | null = null;
 
@@ -150,7 +161,10 @@ export class Engine {
   private gizmoMode: 'off' | 'translate' | 'rotate' = 'rotate';
   private gizmoEnabled = true;
   private gizmoCi = -1;
-  private gBase = new Map<number, { p0: Vector3; pp0: Vector3; q0: Quaternion }>();  // gesture bases
+  private gBase = new Map<number, {
+    p0: Vector3; pp0: Vector3; q0: Quaternion;
+    twins: { j: number; mask: number; p0: Vector3; cpre: Vector3; q0: Quaternion; q0p: FileQuat }[];
+  }>();  // gesture bases
   /** every engine-side write: the App mirrors bp numbers into the raw doc */
   onEdit: ((ci: number) => void) | null = null;
 
@@ -286,6 +300,7 @@ export class Engine {
     this.atlasRef = atlas;
     this.legacy = isLegacyFile(bp);
     this.palette = bp.data.colors ?? null;
+    this.symIdx = symTwinIndex(bp.data.components);      // load-time twin geometry
 
     // Display anchoring (legacy setModel): shift the craft's minimal frame to
     // the origin — Jimmy sits at x=1102 m (that is WHERE THE BUILDER STOOD).
@@ -348,6 +363,7 @@ export class Engine {
 
     const parts = buildPartBoxes(bp, atlas?.manifest ?? null);
     this.addGround(bp, parts);
+    this.buildMirrorPlane(parts);
     this.applyViewOptions();
     this.fit(parts);
     this.select(-1);
@@ -720,8 +736,110 @@ export class Engine {
     for (const m of this.pipeMeshes) m.visible = this.opts.pipes;
     this.groundGroup.visible = this.opts.grid;
     this.subGroup.visible = this.opts.subs;
+    if (this.mirrorPlane) this.mirrorPlane.visible = this.opts.mirror;
   }
   getOptions(): ViewOptions { return { ...this.opts }; }
+
+  // ---------- symmetry twins ----------
+
+  setSymOn(on: boolean) {
+    this.symOn = on;
+    localStorage.setItem('archean-app-sym', on ? '1' : '0');
+    this.paintSelection();
+    this.invalidate();
+  }
+  symState(): { on: boolean; mirrorX: boolean; active: boolean } {
+    return {
+      on: this.symOn,
+      mirrorX: hasMirrorX(this.symIdx),
+      active: this.selCi >= 0 && this.twinPairsFor(this.selCi).length > 0,
+    };
+  }
+  /** live pairs that PROPAGATE for comp i (on only while the pair is still
+   *  aligned — drift > 5 cm auto-disables, v0.166) */
+  private twinPairsFor(ci: number): TwinPair[] {
+    return symAllowed(this.symIdx, this.symOn, this.bp?.data.components ?? [], ci);
+  }
+  twinPairsOf(ci: number): TwinPair[] { return this.twinPairsFor(ci); }
+
+  /** file-space POSITION write with twin propagation: the delta mirrors on
+   *  the pair's mask axes; twins' own poses stay intact (v0.160: twins are
+   *  separate components, not pose-mirrored); occ/type-255 mirrors ride at
+   *  save via each twin's own committed delta. */
+  setFilePosAxis(ci: number, ax: 'x' | 'y' | 'z', v: number) {
+    const comps = this.bp?.data.components;
+    const comp = comps?.[ci];
+    if (!comp) return;
+    const twins = this.twinPairsFor(ci);                 // evaluated PRE-move
+    const old = { ...comp.position };
+    comp.position[ax] = v;
+    this.moveComp(ci);
+    const d: Vec3D = { x: 0, y: 0, z: 0 };
+    d[ax] = v - old[ax];
+    for (const { j, mask } of twins) {
+      const t = comps![j]!;
+      const md = mirrorDelta(d, mask);
+      t.position.x += md.x; t.position.y += md.y; t.position.z += md.z;
+      this.moveComp(j);
+      this.onEdit?.(j);                                  // doc mirror for the twin
+    }
+    this.onEdit?.(ci);                                   // doc mirror for self
+    this.onSelection?.({ ci: this.selCi, sub: this.selSub });   // drift ⇒ ⇄ repaint
+  }
+
+  /** JOINT-STATE edit (data.angle DEGREES / data.pos m) on a kinematic
+   *  master propagates the SAME delta to its live twins (v0.176): the
+   *  twins' captured joint axes already encode the mirror, so EQUAL values
+   *  ARE the symmetric motion (XYQ doors are authored 24.3°/24.3°). */
+  propagateJoint(ci: number, key: string, delta: number) {
+    const comps = this.bp?.data.components;
+    const c = comps?.[ci];
+    if (!c || !delta || !this.atlasRef?.manifest[c.type]?.joints?.length) return;
+    for (const { j } of this.twinPairsFor(ci)) {
+      const t = comps![j]!;
+      if (t.type !== c.type) continue;
+      const cur = typeof t.data?.[key] === 'number' ? (t.data[key] as number) : 0;
+      t.data = { ...t.data, [key]: cur + delta };
+      this.onDataEdit?.(j, key);
+    }
+  }
+  onDataEdit: ((ci: number, key: string) => void) | null = null;
+
+  /** the striped x-symmetry sheet (v0.161) at FILE x = 0 — view x = moff.x.
+   *  Shown only when the craft actually carries x-mirror pairs. */
+  private buildMirrorPlane(parts: PartBox[]) {
+    if (this.mirrorPlane) {
+      this.root.remove(this.mirrorPlane);
+      this.mirrorPlane.traverse(o => {
+        const m = o as Mesh;
+        m.geometry?.dispose?.();
+        (m.material as MeshStandardMaterial)?.dispose?.();
+      });
+      this.mirrorPlane = null;
+    }
+    if (!hasMirrorX(this.symIdx)) return;
+    let y0 = Infinity, y1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (const p of parts) {
+      y0 = Math.min(y0, p.center[1] - p.size[1] / 2); y1 = Math.max(y1, p.center[1] + p.size[1] / 2);
+      z0 = Math.min(z0, p.center[2] - p.size[2] / 2); z1 = Math.max(z1, p.center[2] + p.size[2] / 2);
+    }
+    if (!isFinite(y0)) return;
+    const h = Math.max(y1 - y0, 1) * 1.15, w = Math.max(z1 - z0, 1) * 1.15;
+    const g = new Group();
+    const sheet = new Mesh(new PlaneGeometry(w, h),
+      new MeshStandardMaterial({ color: 0xffc94d, transparent: true, opacity: 0.10,
+        roughness: 1, side: DoubleSide, depthWrite: false }));
+    sheet.material.envMapIntensity = 0;
+    sheet.rotation.y = Math.PI / 2;                       // normal = x
+    const edges = new LineSegments(new BufferGeometry().setFromPoints([
+      new Vector3(0, -h / 2, -w / 2), new Vector3(0, -h / 2, w / 2),
+      new Vector3(0, h / 2, w / 2), new Vector3(0, h / 2, -w / 2), new Vector3(0, -h / 2, -w / 2),
+    ]), new LineBasicMaterial({ color: GOLD, transparent: true, opacity: 0.6 }));
+    g.add(sheet, edges);
+    g.position.set(this.moff.x, (y0 + y1) / 2, (z0 + z1) / 2);
+    this.mirrorPlane = g;
+    this.root.add(g);
+  }
 
   /** dims the whole hull skin: block solids + prism plates AND the wireframe
    *  overlay (legacy applyHullOpacity; per-material base opacity is cached) */
@@ -760,12 +878,15 @@ export class Engine {
   get selection() { return { ci: this.selCi, sub: this.selSub }; }
 
   /** golden fat outline box, EXPANDED 0.07 m off the part (legacy selEdges:
-   *  a 1px box vanished on HiDPI — selection must be unmistakable) */
+   *  a 1px box vanished on HiDPI — selection must be unmistakable). Mirror
+   *  twins co-select: each aligned twin gets its own box (v0.164). */
   private paintSelection() {
     const target: Object3D | null = this.selCi >= 0
       ? (this.compRoots.get(this.selCi)?.[0] ?? null)
       : this.selSub >= 0 ? (this.subGroups.get(this.selSub) ?? null) : null;
     if (this.selBox) { this.scene.remove(this.selBox); this.selBox.geometry.dispose(); this.selBox = null; }
+    for (const t of this.twinBoxes) { this.scene.remove(t.box); t.box.geometry.dispose(); }
+    this.twinBoxes = [];
     if (!target) { this.selMat = null; return; }
     this.scene.updateMatrixWorld(true);
     let gold: Box3;
@@ -776,7 +897,23 @@ export class Engine {
       for (const o of vis.length ? vis : roots) gold.expandByObject(o);
     } else gold = new Box3().setFromObject(target);
     if (gold.isEmpty()) return;
-    gold.expandByScalar(0.07);
+    this.selMat = this.addOutlineBox(gold);
+    this.selBox = this.selBoxTake();
+    if (this.selCi >= 0)                            // twin co-selection boxes
+      for (const { j } of this.twinPairsFor(this.selCi)) {
+        const roots = this.compRoots.get(j) ?? [];
+        const tb = new Box3();
+        const vis = roots.filter(o => o.visible);
+        for (const o of vis.length ? vis : roots) tb.expandByObject(o);
+        if (tb.isEmpty()) continue;
+        const mat = this.addOutlineBox(tb);
+        if (mat) this.twinBoxes.push({ box: this.selBoxTake()!, mat });
+      }
+  }
+
+  private pendingBox: LineSegments2 | null = null;
+  private addOutlineBox(bb: Box3): LineMaterial | null {
+    const gold = bb.clone().expandByScalar(0.07);
     const { min, max } = gold;
     const pts = [
       min.x, min.y, min.z, max.x, min.y, min.z,  max.x, min.y, min.z, max.x, max.y, min.z,
@@ -788,19 +925,25 @@ export class Engine {
     ];
     const lg = new LineSegmentsGeometry();
     lg.setPositions(pts);
-    this.selMat = new LineMaterial({ color: GOLD, linewidth: 3.5, transparent: true, depthTest: false });
+    const mat = new LineMaterial({ color: GOLD, linewidth: 3.5, transparent: true, depthTest: false });
     const c = this.renderer?.domElement as HTMLCanvasElement | null;
-    this.selMat.resolution.set(c?.clientWidth || 1, c?.clientHeight || 1);
-    this.selBox = new LineSegments2(lg, this.selMat);
-    this.selBox.renderOrder = 999;                   // glow through the hull
-    this.scene.add(this.selBox);
+    mat.resolution.set(c?.clientWidth || 1, c?.clientHeight || 1);
+    const box = new LineSegments2(lg, mat);
+    box.renderOrder = 999;                            // glow through the hull
+    this.scene.add(box);
+    this.pendingBox = box;
+    return mat;
   }
+  /** take the box created by the most recent addOutlineBox call */
+  private selBoxTake(): LineSegments2 | null { const b = this.pendingBox; this.pendingBox = null; return b; }
 
   /** the selection breathes (legacy incandescent pulse): the on-demand loop
    *  wakes ONLY while a selection lives */
   private pulseSelection() {
-    if (!this.selMat || !this.selBox) return;
-    this.selMat.opacity = 0.62 + 0.33 * Math.sin(performance.now() / 260);
+    if (this.twinBoxes.length === 0 && (!this.selMat || !this.selBox)) return;
+    const op = 0.62 + 0.33 * Math.sin(performance.now() / 260);
+    if (this.selMat) this.selMat.opacity = op;
+    for (const t of this.twinBoxes) t.mat.opacity = op * 0.8;
     this.needRender = true;
   }
 
@@ -897,10 +1040,24 @@ export class Engine {
   private captureGesture(ci: number) {
     const c = this.bp?.data.components[ci];
     if (!c) return;
+    const mo = new Vector3(this.moff.x, this.moff.y, this.moff.z);
+    const twins = this.twinPairsFor(ci).map(({ j, mask }) => {
+      const t = this.bp!.data.components[j]!;
+      const oj = (this.compRoots.get(j) ?? []).find(r => r.visible) ?? this.compRoots.get(j)?.[0];
+      const q = oj?.quaternion;
+      return {
+        j, mask,
+        p0: new Vector3(t.position.x, t.position.y, -t.position.z),
+        cpre: this.gizmoCentre(j).sub(mo),                 // twin's OWN pivot (v0.167)
+        q0: q ? new Quaternion(q.x, q.y, q.z, q.w) : new Quaternion(),
+        q0p: q ? { w: q.w, x: q.x, y: q.y, z: q.z } : { ...Q_ID },
+      };
+    });
     this.gBase.set(ci, {
       p0: new Vector3(c.position.x, c.position.y, -c.position.z),
       pp0: this.gizmo ? this.gizmoProxy.position.clone() : new Vector3(),
       q0: this.gizmo ? this.gizmoProxy.quaternion.clone() : new Quaternion(),
+      twins,
     });
   }
 
@@ -931,6 +1088,31 @@ export class Engine {
     for (const o of this.compRoots.get(ci) ?? []) {
       o.position.set(origin.x + this.moff.x, origin.y + this.moff.y, -origin.z + this.moff.z);
       o.quaternion.copy(q);
+    }
+    // twins ride the SAME gesture: mirrored delta translate + mirrored-twin
+    // spin, each orbiting its OWN captured centre (v0.164/167)
+    const dqp = { w: dq.w, x: dq.x, y: dq.y, z: dq.z };
+    for (const tb of b.twins) {
+      const m = mirrorQuat(dqp, tb.mask);
+      const mq = new Quaternion(m.x, m.y, m.z, m.w);
+      const mdp = mirrorDelta({ x: dp.x, y: dp.y, z: dp.z }, tb.mask);
+      const off = tb.p0.clone().sub(tb.cpre).applyQuaternion(mq);
+      const originT = new Vector3(tb.cpre.x + off.x + mdp.x, tb.cpre.y + off.y + mdp.y, tb.cpre.z + off.z + mdp.z);
+      const qj = mq.clone().multiply(tb.q0);
+      const tcomp = this.bp!.data.components[tb.j]!;
+      tcomp.position = { x: originT.x, y: originT.y, z: -originT.z };
+      const tUndo = this.rotUndo.get(tb.j);
+      if (tUndo) {
+        const tt = quatMul({ x: qj.x, y: qj.y, z: qj.z, w: qj.w }, tUndo);
+        tcomp.orientation = this.legacy
+          ? { w: tt.w, x: -tt.x, y: -tt.y, z: tt.z }
+          : { w: tt.w, x: tt.x, y: tt.y, z: -tt.z };
+      }
+      for (const o of this.compRoots.get(tb.j) ?? []) {
+        o.position.set(originT.x + this.moff.x, originT.y + this.moff.y, -originT.z + this.moff.z);
+        o.quaternion.copy(qj);
+      }
+      this.onEdit?.(tb.j);
     }
     this.syncSubJoints();
     if (this.selCi === ci) this.paintSelection();
@@ -976,11 +1158,21 @@ export class Engine {
   beginRotEdit(ci: number) {
     const o = this.compRoots.get(ci)?.[0];
     if (o) this.rotBase.set(ci, { q: { x: o.quaternion.x, y: o.quaternion.y, z: o.quaternion.z, w: o.quaternion.w } });
+    // twin bases for the SLIDER session: each twin's display quaternion at
+    // edit start — the mirrored delta is applied ABSOLUTELY (sliders write
+    // qd·q0 for self, so twins get md·twinQ0, never accumulating)
+    const bases = new Map<number, FileQuat>();
+    for (const { j } of this.twinPairsFor(ci)) {
+      const oj = (this.compRoots.get(j) ?? []).find(r => r.visible) ?? this.compRoots.get(j)?.[0];
+      if (oj) bases.set(j, { w: oj.quaternion.w, x: oj.quaternion.x, y: oj.quaternion.y, z: oj.quaternion.z });
+    }
+    this.symRotBases.set(ci, bases);
   }
   setCompQuatDelta(ci: number, pitch: number, yaw: number, roll: number): FileQuat | null {
     const base = this.rotBase.get(ci);
     const undo = this.rotUndo.get(ci);
     if (!base || !undo || !this.bp) return null;
+    const twins = this.twinPairsFor(ci);
     const dq = quatFromEulerYXZ(pitch * DEG, yaw * DEG, roll * DEG);
     const q = quatMul(dq, base.q);                   // qd·q0 (intrinsic-free world deltas)
     const t = quatMul(q, undo);                      // strip the display pose
@@ -989,6 +1181,23 @@ export class Engine {
       : { w: t.w, x: t.x, y: t.y, z: -t.z };
     for (const o of this.compRoots.get(ci) ?? []) o.quaternion.set(q.x, q.y, q.z, q.w);
     this.bp.data.components[ci]!.orientation = file;
+    // MIRROR-TWIN MOTION (v0.165/166): twins take md = det(S)·S·dq applied
+    // ABSOLUTELY to their base pose at edit start — spin along a mirror
+    // normal PRESERVED, tangential spins FLIP (both wheels roll together;
+    // a steered pair yaws symmetrically; the red-axis stays correct)
+    for (const { j, mask } of twins) {
+      const b = this.symRotBases.get(ci)?.get(j);
+      const tUndo = this.rotUndo.get(j);
+      if (!b || !tUndo) continue;
+      const md = mirrorQuat(dq, mask);
+      const qj = quatMul(md, b);
+      for (const o of this.compRoots.get(j) ?? []) o.quaternion.set(qj.x, qj.y, qj.z, qj.w);
+      const tt = quatMul(qj, tUndo);
+      this.bp.data.components[j]!.orientation = this.legacy
+        ? { w: tt.w, x: -tt.x, y: -tt.y, z: tt.z }
+        : { w: tt.w, x: tt.x, y: tt.y, z: -tt.z };
+      this.onEdit?.(j);
+    }
     this.syncSubJoints();
     if (this.selCi === ci) { this.paintSelection(); this.syncGizmo(); }
     this.invalidate();
@@ -1129,6 +1338,9 @@ export class Engine {
     this.compRoots.clear();
     this.rotUndo.clear();
     this.rotBase.clear();
+    this.symRotBases.clear();
+    for (const t of this.twinBoxes) { this.scene.remove(t.box); t.box.geometry.dispose(); }
+    this.twinBoxes = [];
     this.gBase.clear();
     if (this.gizmo) { this.gizmo.detach(); this.gizmoCi = -1; }
     this.hullMeshes = [];
