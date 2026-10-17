@@ -38,12 +38,17 @@ TAG="v0.${VER}"
 
 ss -ltn 2>/dev/null | grep -q ":8650 " && die "port 8650 busy — stop the dev server (pkill -f '[h]ttp.server 8650')"
 
-git fetch --quiet origin --tags
+git fetch --quiet origin "refs/heads/*:refs/remotes/origin/*"
+# NOTE: never `fetch --tags` here — the 2026-10-10 filter-repo rewrite left
+# some clones' LOCAL old v0.9/v0.91 tags clobbering against the remote ones
+# (fetch rc=1, silent death). Tag truth comes from ls-remote below.
 [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] \
   || die "main is not pushed — git push origin main first"
-if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
-  [ "$(git rev-list -n1 "$TAG")" = "$(git rev-parse HEAD)" ] \
-    || die "tag $TAG already exists on $(git rev-parse --short "$TAG^{commit}") — bump the version strings"
+# tag truth = the REMOTE (a local stale tag of the same name must not gate us)
+REMOTE_TAG=$(git ls-remote origin "refs/tags/$TAG^{}" | cut -f1)
+if [ -n "$REMOTE_TAG" ]; then
+  [ "$REMOTE_TAG" = "$(git rev-parse HEAD)" ] \
+    || die "tag $TAG already exists on $(git rev-parse --short "$REMOTE_TAG") on origin — bump the version strings"
 fi
 if git ls-remote --exit-code --heads origin release >/dev/null 2>&1; then
   git merge-base --is-ancestor origin/release HEAD \
@@ -56,10 +61,11 @@ tests/run_tests.sh || die "suite FAILED — release aborted, $TAG not cut, relea
 
 # ---------- fast-forward release + annotated tag + push ----------
 git branch -f release HEAD
-git rev-parse -q --verify "refs/tags/$TAG" >/dev/null \
-  || git tag -a "$TAG" HEAD -m "$TAG — stable release $(date -u +%F). Suite: full PASS (run_tests.sh)."
+if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null && [ -z "$REMOTE_TAG" ]; then
+  git tag -a "$TAG" HEAD -m "$TAG — stable release $(date -u +%F). Suite: full PASS (run_tests.sh)."
+fi
 git push origin release
-git push origin "refs/tags/$TAG"
+[ -n "$REMOTE_TAG" ] || git push origin "refs/tags/$TAG"
 say "$TAG = $(git rev-parse --short HEAD) now on release → Pages will rebuild."
 
 # ---------- GitHub Release (best effort: gh installed + authed) ----------
