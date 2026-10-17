@@ -29,6 +29,9 @@ tools/add_workshop.py <id>      ingest a locally-subscribed workshop craft
 tools/extract_models.py         regenerates viewer/models/ from an installed game
 tools/security-scan.py          checkin gate: secret-shape scan (--staged/--tree/
                                 --history) + release-string sync (--versions)
+tools/release.sh                THE release ritual: full-suite gate → ff release
+                                branch → annotated v0.NN tag → push (+ GitHub
+                                Release notes via gh, best effort)
 tools/install-hooks.sh          ONE-PER-CLONE: installs tests/pre-commit into .git
 tests/pre-commit                the mandatory gate hook (see Checkin gate below)
 tools/perfprobe.py URL [s]      real-clock headless perf probe (DevTools ws;
@@ -45,6 +48,8 @@ NOTICE.md                       licensing: GPL code, game content belongs to bat
 ```bash
 bash tools/install-hooks.sh               # after cloning: enables the checkin gate
 tests/run_tests.sh                      # full headless suite (python3 + chromium)
+tools/release.sh                        # cut the STABLE release (full-suite gate,
+                                        # ff release branch, tag, push — see § Publishing)
 python3 -m http.server 8650             # manual serving (repo root)
 # viewer:   http://127.0.0.1:8650/viewer/index.html
 # selftest: http://127.0.0.1:8650/viewer/index.html?selftest  (tab title: SELFTEST PASS)
@@ -91,22 +96,47 @@ secrets exist (Pages builds from the branch; no workflow files).
 (3) v0.161: when ANY `viewer/` file is staged, the hook runs
 `tests/run_tests.sh --gate` — the headless SELFTEST + REGTEST smoke pair
 over the tree (~5 s, iGPU-pinned; chromium present required). Gate PASS is
-commit proof; the full suite (uitest/gizmatest/postest/renders) stays the
-release ritual's job. (2026-10-09 remediation: the user F5'd the dev server
+commit proof; the full suite (uitest/gizmatest/postest/renders) is the
+RELEASE gate — `tools/release.sh` runs it and refuses to cut a release on a
+FAIL. (2026-10-09 remediation: the user F5'd the dev server
 mid-session, saw a selftest FAIL under the SAME v0.160 label as the pushed
 release, and reasonably concluded the release was broken.)
 
-## Publishing (GitHub Pages)
+## Publishing (GitHub Pages — release-branch scheme)
 The live site is the repo root served by GitHub Pages:
 `https://joeppie.github.io/archean-blueprint-tools/viewer/index.html`.
-`git push origin main` is all it takes — Pages rebuilds automatically (the build is an Actions job: during GitHub Actions runner incidents
-typically queues "waiting for a hosted runner" — check githubstatus.com before suspecting the push)
+**Pages serves the `release` branch (source: release / root) = the STABLE
+line; `git push origin main` never moves the live site.**
+- `main` = development. Commits pass the pre-commit gate (selftest+regtest);
+  Pages ignores main entirely — an in-progress main can never wear the stable
+  build's clothes (branch-level fix of the 2026-10-09 "dev snapshot under the
+  pushed label" failure mode).
+- `release` = stable, **ff-only**. A release is an EXACT main commit that
+  passed the COMPLETE suite (`tests/run_tests.sh`: selftest + regtest +
+  proxy + comp + ui + gizmo + position fixtures + renders), fast-forwarded
+  onto release and stamped with an annotated tag `v0.NN`. Hotfixes go through
+  main and re-release — release is never rebased or cherry-picked onto.
+- The ritual is **`tools/release.sh [v0.NN]`**: preflight (clean tree on main,
+  main pushed, release strings agree via `security-scan --versions`, tag free,
+  origin/release an ancestor of main) → COMPLETE suite (a FAIL aborts — the
+  release branch is never touched) → ff `release` to HEAD → annotated tag +
+  push → best-effort GitHub Release with commit-range notes (needs an authed
+  gh CLI; absence only skips the notes page). Pages rebuilds on the release
+  push (the build is an Actions job: during GitHub Actions runner incidents it
+  typically queues "waiting for a hosted runner" — check githubstatus.com
+  before suspecting the push).
+- One-time setup (done 2026-10-17): Pages source flipped to release via
+  `gh api -X PUT repos/Joeppie/archean-blueprint-tools/pages --input -` with
+  `{"build_type":"branch","source":{"branch":"release","path":"/"}}`;
+  verify with `gh api repos/Joeppie/archean-blueprint-tools/pages` (or the
+  Settings → Pages page when the gh CLI is unavailable).
 (README viewer link is versioned; bump `v0.xx` in index.html title/header,
 landing page and README together when the viewer changes). v0.161 rule:
 **bump the version strings at SESSION START, not at release** — the dev
 server (:8650) serves the working tree, so an in-progress tree must carry
 the NEXT version label; a dev snapshot wearing the last release's string is
-indistinguishable from the pushed build (2026-10-09 user report).
+indistinguishable from a pushed one (2026-10-09 user report). `release.sh`
+refuses to cut a tag when the strings disagree.
 
 ## Sources of truth (all offline — do NOT web-fetch to answer format questions)
 - **FORMAT.md is the knowledge base.** Everything reverse-engineered lives

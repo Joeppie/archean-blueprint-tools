@@ -105,10 +105,22 @@ for s in 1 2 3 4; do   # before / +pitch90 / +pitch90+roll90 / ring-hover fat �
 done
 
 echo "── position tests (placement fixtures + generic button sweep)"
+postest() {   # $1=craft $2=budget $3=wall-timeout — dump the postest title
+  ( export SHOT_TIMEOUT="$3"
+    chrome --virtual-time-budget="$2" --dump-dom \
+      "$BASE/viewer/index.html?open=../testdata/$1/blueprint.json&postest" 2>/dev/null \
+    | grep -oPm1 '(?<=<title>)[^<]*' )
+}
 for c in 3812927875 3518436870 3417786605 3803780241 3381670618 3509975859 3732302108; do
-  title=$(chrome --virtual-time-budget=12000 \
-    --dump-dom "$BASE/viewer/index.html?open=../testdata/$c/blueprint.json&postest" 2>/dev/null \
-    | grep -oPm1 '(?<=<title>)[^<]*')
+  title=$(postest "$c" 12000 90)
+  case "$title" in *POSTEST*PASS*) ;; *)
+    # ONE retry with doubled clocks: the two giant crafts sometimes lose the
+    # 90 s wall / 12 s virtual budget when the iGPU and CPUs are busy serving
+    # the desktop (headless timing, not geometry — the same URL passes in <1 s
+    # standalone). A craft that fails BOTH attempts is a real FAIL.
+    echo "   $c: ${title:-NO TITLE} — retry at 24 s budget / 240 s wall…"
+    title=$(postest "$c" 24000 240) ;;
+  esac
   echo "   $c: $title"
   case "$title" in *POSTEST*PASS*) ;; *) echo "   FAIL"; fail=1;; esac
 done
