@@ -92,6 +92,7 @@ function Editor({ craft, onBack }: { craft: string; onBack: () => void }) {
   const [opts, setOpts] = useState<ViewOptions>({ grid: true, occ: false, hull: true, wire: false, pipes: true, subs: true });
   const [hullOpacity, setHullOpacity] = useState(1);
   const [realModels, setRealModels] = useState(true);
+  const [gizmoOn, setGizmoOn] = useState(() => localStorage.getItem('archean-app-gizmo') !== '0');
   const engineRef = useRef<Engine | null>(null);
   const [engine, setEngine] = useState<Engine | null>(null);
   const ctxRef = useRef<EditCtx | null>(null);
@@ -118,9 +119,20 @@ function Editor({ craft, onBack }: { craft: string; onBack: () => void }) {
 
   const onEngine = useCallback((e: Engine | null) => {
     engineRef.current = e;
-    if (e) e.onSelection = s => setSel(s);
+    if (e) {
+      e.onSelection = s => setSel(s);
+      // gizmo drags mutate bp inside the engine — mirror into the doc + dirty
+      e.onEdit = ci => {
+        const ctx = ctxRef.current;
+        const c = ctx?.bp.data.components[ci];
+        if (!ctx || !c) return;
+        setPos(ctx, ci, 'x', c.position.x); setPos(ctx, ci, 'y', c.position.y); setPos(ctx, ci, 'z', c.position.z);
+        setOrientation(ctx, ci, c.orientation ?? { w: 1, x: 0, y: 0, z: 0 });
+        markDirty();
+      };
+    }
     setEngine(e);
-  }, []);
+  }, [markDirty]);
 
   // every write: doc + bp (edit.ts) AND the live scene (engine) — one funnel
   const edits: EditApi = useMemo(() => ({
@@ -175,6 +187,10 @@ function Editor({ craft, onBack }: { craft: string; onBack: () => void }) {
     setRealModels(on);
     engineRef.current?.setRealModels(on);
   }, []);
+  const setGizmo = useCallback((on: boolean) => {
+    setGizmoOn(on);
+    engineRef.current?.setGizmoEnabled(on);
+  }, []);
   const setHullOp = useCallback((v: number) => {
     setHullOpacity(v);
     engineRef.current?.setHullOpacity(v);
@@ -186,6 +202,7 @@ function Editor({ craft, onBack }: { craft: string; onBack: () => void }) {
       engine={engine} ctx={ctxRef.current} bp={bp} sel={sel}
       opts={opts} hullOpacity={hullOpacity} onHullOpacity={setHullOp}
       realModels={realModels} onRealModels={setReal}
+      gizmoOn={gizmoOn} onGizmo={setGizmo}
       onOpt={toggleOpt}
       onSelect={(ci, fly) => { engineRef.current?.select(ci); if (fly) engineRef.current?.flyTo(ci); }}
       onSelectSub={bi => engineRef.current?.selectSub(bi)}

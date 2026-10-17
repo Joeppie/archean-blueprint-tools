@@ -3,7 +3,7 @@
 // stay in the engine (the 60 fps path never runs through the reconciler).
 // Test hooks land on window.__ARCHEAN__ (same philosophy as the legacy
 // title/#out reporting): stats/pick/pose are assertable without pixels.
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { openAtlas, type ModelAtlas } from '../engine/models';
 import type { Blueprint } from '../engine/format';
 import { Engine, type PickHit, type SceneStats } from '../engine/scene';
@@ -58,26 +58,60 @@ export default function Viewport({ bp, onPick, onEngine }: {
 
   // DELIBERATE press picks (PERF.md: one raycast per click, none during
   // orbit): pointerdown records, pointerup <4px moves select-and-fly,
-  // exactly like the legacy pick-on-click rule.
+  // exactly like the legacy pick-on-click rule. A comp pick also pops the
+  // MODE widget at the click point (⊘/✥/⟳, legacy v0.153; ⇄ comes with the
+  // symmetry port) — the choice persists and drives the gizmo.
   const down = useRef({ x: 0, y: 0 });
+  const hostRef = useRef<HTMLDivElement>(null);
+  const [widget, setWidget] = useState<{ x: number; y: number } | null>(null);
+  const [gmode, setGmode] = useState<'off' | 'translate' | 'rotate'>(
+    () => (localStorage.getItem('archean-app-gizmo-mode') as 'off' | 'translate' | 'rotate') || 'rotate');
+  useEffect(() => {
+    const sh = (e: KeyboardEvent, on: boolean) => { if (e.key === 'Shift') engineRef.current?.setGizmoSnap(on); };
+    const dn = (e: KeyboardEvent) => sh(e, true), up = (e: KeyboardEvent) => sh(e, false);
+    addEventListener('keydown', dn); addEventListener('keyup', up);
+    return () => { removeEventListener('keydown', dn); removeEventListener('keyup', up); };
+  }, []);
+  const setMode = (m: 'off' | 'translate' | 'rotate') => {
+    setGmode(m);
+    engineRef.current?.setGizmoMode(m);
+  };
   const pickClick = (e: React.PointerEvent) => {
     const engine = engineRef.current;
     if (!engine) return;
     const hit = engine.pickAt(e.clientX, e.clientY);
     onPick(hit);
-    if (hit.kind === 'comp' && hit.ci != null) { engine.select(hit.ci); engine.flyTo(hit.ci); }
-    else if (hit.kind === 'sub' && hit.sub != null) engine.selectSub(hit.sub);
-    else engine.select(-1);
+    if (hit.kind === 'comp' && hit.ci != null) {
+      engine.select(hit.ci); engine.flyTo(hit.ci);
+      const box = hostRef.current?.getBoundingClientRect();
+      if (box) setWidget({ x: e.clientX - box.left, y: e.clientY - box.top });
+    } else {
+      if (hit.kind === 'sub' && hit.sub != null) engine.selectSub(hit.sub);
+      else engine.select(-1);
+      setWidget(null);
+    }
   };
 
   return (
-    <div className="relative h-full w-full" data-testid="viewport">
+    <div ref={hostRef} className="relative h-full w-full" data-testid="viewport">
       <canvas ref={canvasRef} data-testid="canvas" className="block h-full w-full touch-none"
         onPointerDown={e => { down.current = { x: e.clientX, y: e.clientY }; }}
         onPointerUp={e => {
           if (Math.abs(e.clientX - down.current.x) < 4 && Math.abs(e.clientY - down.current.y) < 4)
             pickClick(e);
         }} />
+      {widget && (
+        <div data-testid="modebox"
+          className="absolute z-20 flex -translate-x-1/2 gap-1 rounded-lg border border-white/15 bg-black/80 p-1 backdrop-blur"
+          style={{ left: widget.x, top: widget.y - 44 }}>
+          {([['off', '⊘', 'hide gizmo'], ['translate', '✥', 'move'], ['rotate', '⟳', 'rotate']] as const).map(([m, ic, t]) => (
+            <button key={m} title={t} data-testid={`mode-${m}`} onClick={() => setMode(m)}
+              className={`h-8 w-9 rounded text-[15px] leading-none ${gmode === m ? 'bg-accent/30 text-accent' : 'text-ink hover:bg-white/10'}`}>
+              {ic}
+            </button>
+          ))}
+        </div>
+      )}
       <StatsStrip engine={engineRef} bp={bp} />
     </div>
   );

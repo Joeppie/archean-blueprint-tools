@@ -26,6 +26,8 @@ interface Props {
   opts: ViewOptions;
   hullOpacity: number;
   realModels: boolean;
+  gizmoOn: boolean;
+  onGizmo: (v: boolean) => void;
   onOpt: (k: keyof ViewOptions, on: boolean) => void;
   onHullOpacity: (v: number) => void;
   onRealModels: (on: boolean) => void;
@@ -86,7 +88,7 @@ const Check = (p: { label: string; checked: boolean; onChange: (v: boolean) => v
 );
 
 // ------------------------------------------------------------- view options
-function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHullOpacity' | 'realModels' | 'onRealModels'>) {
+function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHullOpacity' | 'realModels' | 'onRealModels' | 'gizmoOn' | 'onGizmo'>) {
   return (
     <Sec title="View options" testid="viewopts">
       <Check testid="opt-grid" label="ground grid" checked={p.opts.grid} onChange={v => p.onOpt('grid', v)} />
@@ -96,6 +98,7 @@ function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHullOpaci
       <Check testid="opt-pipes" label="pipes (cables)" checked={p.opts.pipes} onChange={v => p.onOpt('pipes', v)} />
       <Check testid="opt-subs" label="subgrids (doors/hatches)" checked={p.opts.subs} onChange={v => p.onOpt('subs', v)} />
       <Check testid="opt-real" label="real game models (off = low-poly)" checked={p.realModels} onChange={p.onRealModels} />
+      <Check testid="opt-gizmo" label="gizmo on selection (Shift snaps)" checked={p.gizmoOn} onChange={p.onGizmo} />
       <Row label="hull opacity" min={0.1} max={1} step={0.05} value={p.hullOpacity}
         onInput={p.onHullOpacity}
         title="dims the whole hull skin: blocks, triangle plates and their wireframes" />
@@ -435,7 +438,7 @@ export default function Panel(p: Props) {
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-panel text-ink" data-testid="panels">
       <ViewOpts opts={p.opts} onOpt={p.onOpt} hullOpacity={p.hullOpacity} onHullOpacity={p.onHullOpacity}
-        realModels={p.realModels} onRealModels={p.onRealModels} />
+        realModels={p.realModels} onRealModels={p.onRealModels} gizmoOn={p.gizmoOn} onGizmo={p.onGizmo} />
       <div className="flex min-h-0 flex-[2] flex-col border-t border-white/10">
         <h3 className="px-3 pt-2 text-[11px] font-semibold uppercase tracking-wide text-ink-dim">Components</h3>
         <CompList bp={p.bp} sel={p.sel} onSelect={p.onSelect} onSelectSub={p.onSelectSub} />

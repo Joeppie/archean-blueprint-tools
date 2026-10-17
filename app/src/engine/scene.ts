@@ -25,12 +25,13 @@ import {
   type MeshStandardMaterialParameters,
 } from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { buildPartBoxes, displayQuat, fileToViewQuat, standInBox, type PartBox } from './compparts';
+import { buildPartBoxes, displayQuat, fileToViewQuat, qMul, standInBox, type PartBox } from './compparts';
 import type { FileQuat, Vec3D } from './format';
 import type { LoadedModel, ModelAtlas, NodeRec } from './models';
 import { droppedParts, TEXT_MIRROR_X } from './models';
@@ -137,6 +138,22 @@ export class Engine {
   onSelection: ((sel: { ci: number; sub: number }) => void) | null = null;
   private fly: { from: Vector3; to: Vector3; t0: number } | null = null;
 
+  // ------------------------------------------------------------ gizmo (P3+)
+  /** Blender-style move/rotate widget on the selection (legacy v0.150+):
+   *  translate = WORLD axes (the arrows stay axis-aligned — the user rule),
+   *  rotate = LOCAL rings (intrinsic, WYSIWYG). The proxy sits at the
+   *  VISIBLE-geometry bbox centre (v0.167: off-origin real geometry spins IN
+   *  PLACE at the rings instead of lever-swinging about the file origin), so
+   *  a ring drag ORBITS the centre exactly. Shift snaps 15° / 0.25 m. */
+  private gizmo: TransformControls | null = null;
+  private gizmoProxy = new Group();
+  private gizmoMode: 'off' | 'translate' | 'rotate' = 'rotate';
+  private gizmoEnabled = true;
+  private gizmoCi = -1;
+  private gBase = new Map<number, { p0: Vector3; pp0: Vector3; q0: Quaternion }>();  // gesture bases
+  /** every engine-side write: the App mirrors bp numbers into the raw doc */
+  onEdit: ((ci: number) => void) | null = null;
+
   attach(canvas: HTMLCanvasElement) {
     this.renderer = new WebGLRenderer({ canvas, antialias: true });
     // devicePixelRatio floored at 1, capped 2.5 (legacy onResize rule)
@@ -153,6 +170,22 @@ export class Engine {
     // the PMREM texture baked here — rebake and repaint, or the restored
     // canvas keeps a dead envMap and never looks right again.
     canvas.addEventListener('webglcontextrestored', this.onRestore);
+    // gizmo (TransformControls): the helper renders in the scene; orbit
+    // controls yield while an axis is dragged. Custom TGC events are untyped.
+    {
+      const g = this.gizmo = new TransformControls(this.camera, canvas);
+      this.gizmoEnabled = localStorage.getItem('archean-app-gizmo') !== '0';    // legacy default ON
+      const m = localStorage.getItem('archean-app-gizmo-mode');
+      this.gizmoMode = m === 'off' || m === 'translate' || m === 'rotate' ? m : 'rotate';
+      const listen = (t: string, f: (e: { value?: boolean }) => void) =>
+        (g.addEventListener as unknown as (t: string, f: (e: { value?: boolean }) => void) => void)(t, f);
+      listen('objectChange', () => this.gizmoWriteback());
+      listen('mouseDown', () => { if (this.gizmoCi >= 0) this.captureGesture(this.gizmoCi); });
+      listen('dragging-changed', e => { if (this.controls) this.controls.enabled = !e.value; });
+      this.scene.add(g.getHelper());
+      g.enabled = false;
+      g.getHelper().visible = false;
+    }
     this.scene.add(new HemisphereLight(0xcfe8ff, 0x444422, 1.1));
     const sun = new DirectionalLight(0xfff2dd, 2.2);
     sun.position.set(-6, 10, -4);
@@ -380,8 +413,11 @@ export class Engine {
       g.quaternion.set(qDisp.x, qDisp.y, qDisp.z, qDisp.w);
       g.scale.z = -1;                    // raw LH local space mirrored into view
       g.userData = { kind: 'comp', ci };
-      // writeback undo (legacy wheelUndo semantics): qView = qDisp · undo
-      this.rotUndo.set(ci, qInv(qDisp));
+      // writeback undo (legacy wheelUndo semantics): undo = dispQ0⁻¹·viewQ0
+      // (a PRODUCT, not an inverse — applyDisplayPose stores exactly this
+      // right-multiplier), so file = mirror(qDisp · undo) = the ORIGINAL
+      // view quaternion and slider deltas qd·qDisp strip to qd·qView0.
+      this.rotUndo.set(ci, qMul(qInv(qDisp), qView));
       this.root.add(g);
       this.pushRoot(ci, g);
 
@@ -709,6 +745,7 @@ export class Engine {
     this.selCi = ci;
     this.selSub = -1;
     this.paintSelection();
+    this.syncGizmo();
     this.onSelection?.({ ci: this.selCi, sub: this.selSub });
     this.invalidate();
   }
@@ -716,6 +753,7 @@ export class Engine {
     this.selSub = bi;
     this.selCi = -1;
     this.paintSelection();
+    this.syncGizmo();               // v0.170: subgrids get NO gizmo — they ride their masters
     this.onSelection?.({ ci: this.selCi, sub: this.selSub });
     this.invalidate();
   }
@@ -789,6 +827,133 @@ export class Engine {
     this.invalidate();
   }
 
+  // -------------------------------------------------------------- gizmo ops
+
+  setGizmoEnabled(on: boolean) {
+    this.gizmoEnabled = on;
+    localStorage.setItem('archean-app-gizmo', on ? '1' : '0');
+    this.syncGizmo();
+    this.invalidate();
+  }
+  setGizmoMode(m: 'off' | 'translate' | 'rotate') {
+    this.gizmoMode = m;
+    localStorage.setItem('archean-app-gizmo-mode', m);
+    this.syncGizmo();
+    this.invalidate();
+  }
+  /** Shift = 15° / 0.25 m snap (legacy) */
+  setGizmoSnap(on: boolean) {
+    const g = this.gizmo;
+    if (!g) return;
+    g.setTranslationSnap(on ? 0.25 : null);
+    g.setRotationSnap(on ? 15 * DEG : null);
+  }
+  gizmoState(): { mode: 'off' | 'translate' | 'rotate'; ci: number } {
+    return { mode: !this.gizmoEnabled || this.gizmoCi < 0 ? 'off' : this.gizmoMode, ci: this.gizmoCi };
+  }
+  /** the live pivot in PRE-MOFF VIEW space (pins compare against (x, y, −z)
+   *  of the part's file position) */
+  gizmoPivot(): [number, number, number] | null {
+    if (this.gizmoCi < 0) return null;
+    const p = this.gizmoProxy.position;
+    return [p.x - this.moff.x, p.y - this.moff.y, p.z - this.moff.z];
+  }
+
+  /** centre of the VISIBLE geometry (world incl. moff) = the gizmo pivot */
+  private gizmoCentre(ci: number): Vector3 {
+    const roots = this.compRoots.get(ci) ?? [];
+    const vis = roots.filter(o => o.visible);
+    const box = new Box3();
+    this.scene.updateMatrixWorld(true);
+    for (const o of vis.length ? vis : roots) box.expandByObject(o);
+    return box.isEmpty() ? new Vector3() : box.getCenter(new Vector3());
+  }
+
+  private syncGizmo() {
+    const g = this.gizmo;
+    if (!g) return;
+    const show = this.gizmoEnabled && this.gizmoMode !== 'off' && this.selCi >= 0;
+    if (!show) { g.detach(); g.enabled = false; g.getHelper().visible = false; this.gizmoCi = -1; return; }
+    const roots = this.compRoots.get(this.selCi) ?? [];
+    const o = roots.find(r => r.visible) ?? roots[0];
+    if (!o) { g.detach(); this.gizmoCi = -1; return; }
+    const rebind = this.selCi !== this.gizmoCi;
+    this.gizmoCi = this.selCi;
+    this.gizmoProxy.position.copy(this.gizmoCentre(this.selCi));
+    this.gizmoProxy.quaternion.copy(o.quaternion);
+    if (rebind) this.captureGesture(this.selCi);        // base = the pose JUST placed
+    g.attach(this.gizmoProxy);
+    g.setMode(this.gizmoMode === 'translate' ? 'translate' : 'rotate');   // 'off' never reaches here
+    // v0.158 SPACE IS PER-MODE: translate = WORLD (arrows stay axis-aligned),
+    // rotate = LOCAL (intrinsic rings, the pinned WYSIWYG model)
+    g.setSpace(this.gizmoMode === 'translate' ? 'world' : 'local');
+    g.enabled = true;
+    g.getHelper().visible = true;
+  }
+
+  /** gesture base: the committed file origin (view, pre-moff) + the proxy's
+   *  CURRENT centre — rebased on attach AND every mouseDown so multi-grip
+   *  sweeps keep rotating wherever the part currently is. */
+  private captureGesture(ci: number) {
+    const c = this.bp?.data.components[ci];
+    if (!c) return;
+    this.gBase.set(ci, {
+      p0: new Vector3(c.position.x, c.position.y, -c.position.z),
+      pp0: this.gizmo ? this.gizmoProxy.position.clone() : new Vector3(),
+      q0: this.gizmo ? this.gizmoProxy.quaternion.clone() : new Quaternion(),
+    });
+  }
+
+  /** writeback (legacy applyGizmo* semantics): the gizmo's rigid motion
+   *  X ↦ c + R·(X − c) + t orbits the FILE origin about the pivot, the proxy
+   *  quaternion IS the new display pose, and the saved quaternion strips the
+   *  display-pose undo (droop/junction stay file-exact). */
+  private gizmoWriteback() {
+    const ci = this.gizmoCi;
+    const b = this.gBase.get(ci);
+    const comp = this.bp?.data.components[ci];
+    const undo = this.rotUndo.get(ci);
+    if (!b || !comp || !undo) return;
+    const q = this.gizmoProxy.quaternion;
+    // the gizmo's motion RELATIVE to the gesture base: X ↦ c + dq·(X−c) + t
+    // (the ABSOLUTE q would also rotate during a pure translate)
+    const dq = q.clone().multiply(b.q0.clone().invert());
+    const dp = this.gizmoProxy.position.clone().sub(b.pp0);
+    const cpre = b.pp0.clone().sub(new Vector3(this.moff.x, this.moff.y, this.moff.z));
+    const off = new Vector3(b.p0.x - cpre.x, b.p0.y - cpre.y, b.p0.z - cpre.z).applyQuaternion(dq);
+    const origin = new Vector3(cpre.x + off.x + dp.x, cpre.y + off.y + dp.y, cpre.z + off.z + dp.z);
+    comp.position = { x: origin.x, y: origin.y, z: -origin.z };
+    const t = quatMul({ x: q.x, y: q.y, z: q.z, w: q.w }, undo);
+    const fileQ: FileQuat = this.legacy
+      ? { w: t.w, x: -t.x, y: -t.y, z: t.z }
+      : { w: t.w, x: t.x, y: t.y, z: -t.z };
+    comp.orientation = fileQ;
+    for (const o of this.compRoots.get(ci) ?? []) {
+      o.position.set(origin.x + this.moff.x, origin.y + this.moff.y, -origin.z + this.moff.z);
+      o.quaternion.copy(q);
+    }
+    this.syncSubJoints();
+    if (this.selCi === ci) this.paintSelection();
+    this.onEdit?.(ci);
+    this.invalidate();
+  }
+
+  /** synthetic gesture for pins + the future keyboard nudge (world VIEW
+   *  axis, degrees): exercises the exact TGC writeback path (orbit + pose) */
+  gizmoRotateViewDeg(axis: 'x' | 'y' | 'z', deg: number) {
+    if (this.gizmoCi < 0) return;
+    this.captureGesture(this.gizmoCi);
+    const v = axis === 'x' ? new Vector3(1, 0, 0) : axis === 'y' ? new Vector3(0, 1, 0) : new Vector3(0, 0, 1);
+    this.gizmoProxy.quaternion.premultiply(new Quaternion().setFromAxisAngle(v, deg * DEG));
+    this.gizmoWriteback();
+  }
+  gizmoTranslateView(ax: 'x' | 'y' | 'z', m: number) {
+    if (this.gizmoCi < 0) return;
+    this.captureGesture(this.gizmoCi);
+    this.gizmoProxy.position[ax] += m;
+    this.gizmoWriteback();
+  }
+
   // -------------------------------------------------------------- editing
 
   /** live position ride: stand-in AND real-model siblings follow the file
@@ -799,7 +964,7 @@ export class Engine {
     for (const o of this.compRoots.get(ci) ?? [])
       o.position.set(c.position.x + this.moff.x, c.position.y + this.moff.y, -c.position.z + this.moff.z);
     this.syncSubJoints();                            // rigid master-riding (v0.172)
-    if (this.selCi === ci) this.paintSelection();
+    if (this.selCi === ci) { this.paintSelection(); this.syncGizmo(); }
     this.invalidate();
   }
 
@@ -825,7 +990,7 @@ export class Engine {
     for (const o of this.compRoots.get(ci) ?? []) o.quaternion.set(q.x, q.y, q.z, q.w);
     this.bp.data.components[ci]!.orientation = file;
     this.syncSubJoints();
-    if (this.selCi === ci) this.paintSelection();
+    if (this.selCi === ci) { this.paintSelection(); this.syncGizmo(); }
     this.invalidate();
     return file;
   }
@@ -839,14 +1004,14 @@ export class Engine {
     const qFile = c.orientation ?? Q_ID;
     const qView = fileToViewQuat(qFile, this.legacy);
     const qDisp = displayQuat(c.type, qView, qFile);
-    this.rotUndo.set(ci, qInv(qDisp));
+    this.rotUndo.set(ci, qMul(qInv(qDisp), qView));
     this.rotBase.delete(ci);
     for (const o of this.compRoots.get(ci) ?? []) {
       o.position.set(c.position.x + this.moff.x, c.position.y + this.moff.y, -c.position.z + this.moff.z);
       o.quaternion.set(qDisp.x, qDisp.y, qDisp.z, qDisp.w);
     }
     this.syncSubJoints();
-    if (this.selCi === ci) this.paintSelection();
+    if (this.selCi === ci) { this.paintSelection(); this.syncGizmo(); }
     this.invalidate();
   }
 
@@ -964,6 +1129,8 @@ export class Engine {
     this.compRoots.clear();
     this.rotUndo.clear();
     this.rotBase.clear();
+    this.gBase.clear();
+    if (this.gizmo) { this.gizmo.detach(); this.gizmoCi = -1; }
     this.hullMeshes = [];
     this.wireLine = null;
     this.occMeshes = [];
@@ -982,6 +1149,8 @@ export class Engine {
     this.occ = null;
     this.matCache.forEach(m => m.dispose());
     this.matCache.clear();
+    this.gizmo?.dispose();
+    this.gizmo = null;
     this.renderer?.dispose();
     this.renderer = null;
   }
