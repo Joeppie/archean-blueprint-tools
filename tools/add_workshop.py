@@ -6,16 +6,19 @@
 Steam item downloads require the Steam client (browser fetches are blocked:
 getfiles.cgi needs login and steamcommunity sends no CORS headers), so the
 item must be subscribed in the game/client first. This copies
-~/.local/share/Steam/steamapps/workshop/content/<APPID>/<id>/blueprint.json
-(+ preview.png -> 320px preview.jpg thumbnail) into testdata/<id>/, then
-regenerates the landing gallery. Workshop page link:
-https://steamcommunity.com/sharedfiles/filedetails/?id=<id>
+<workshop_content>/<id>/blueprint.json (+ preview.png -> 320px preview.jpg
+thumbnail) into <blueprints>/<id>/, then regenerates the landing gallery.
+Both folders resolve through tools/config.py (ARCHEAN_WORKSHOP /
+ARCHEAN_BLUEPRINTS env or blueprints.conf — no hardcoded Steam paths).
+Workshop page link: https://steamcommunity.com/sharedfiles/filedetails/?id=<id>
 """
 import os, shutil, subprocess, sys
 
-APPID = '2941660'
-CONTENT = os.path.expanduser(f'~/.local/share/Steam/steamapps/workshop/content/{APPID}')
-ROOT = os.path.join(os.path.dirname(__file__), '..')
+sys.path.insert(0, os.path.dirname(__file__))
+import config
+
+ROOT = config.ROOT
+CONTENT = config.workshop_content_dir()
 
 def main(wid):
     src = os.path.join(CONTENT, wid)
@@ -24,7 +27,7 @@ def main(wid):
         sys.exit(f'not found: {bp}\n'
                  f'subscribe to https://steamcommunity.com/sharedfiles/filedetails/?id={wid} '
                  f'in the Archean client first (content dir: {CONTENT})')
-    dst = os.path.join(ROOT, 'testdata', wid)
+    dst = os.path.join(config.blueprints_dir(), wid)
     os.makedirs(dst, exist_ok=True)
     shutil.copy2(bp, os.path.join(dst, 'blueprint.json'))
     prev = os.path.join(src, 'preview.png')

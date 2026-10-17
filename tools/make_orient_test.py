@@ -19,7 +19,7 @@ Convention table (viewed from FILE +z looking toward -z):
 Both are mirror-consistent; the beacon lean + cable-endpoint data side with
 the game, not the raw render.
 """
-import json, os
+import json, os, sys
 
 def block(slot, pos):
     x, y, z = pos
@@ -126,7 +126,9 @@ blueprint = {
     },
 }
 
-out = os.path.join(os.path.dirname(__file__), '..', 'testdata', '9000000001')
+sys.path.insert(0, os.path.dirname(__file__))
+import config
+out = os.path.join(config.blueprints_dir(), '9000000001')
 os.makedirs(out, exist_ok=True)
 with open(os.path.join(out, 'blueprint.json'), 'w') as f:
     json.dump(blueprint, f, separators=(',', ':'), ensure_ascii=False)

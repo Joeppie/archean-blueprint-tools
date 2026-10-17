@@ -49,22 +49,40 @@ SMBUD=15000; [ "${GPU:-1}" = "1" ] || SMBUD=8000   # swiftshader dies at 15000 (
 mkdir -p "$OUT"
 touch "$OUT/.start"          # freshness marker: stale screenshots from old runs must not pass
 
-python3 -m http.server "$PORT" --directory "$REPO" >/dev/null 2>&1 &
+# Blueprint corpus location (AGENTS.md § Blueprint folder): resolved by
+# tools/config.py (ARCHEAN_BLUEPRINTS env > blueprints.conf > repo testdata/).
+# One static server must cover BOTH the repo and the corpus, so serve their
+# common ancestor and address each by its URL path under it.
+CORPUS_DIR=$(python3 -c "import sys; sys.path.insert(0,'tools'); import config; print(config.blueprints_dir())") || { echo "cannot resolve blueprints folder (tools/config.py)"; exit 2; }
+CORPUS_DIR=$(realpath "$CORPUS_DIR")
+REPO=$(realpath "$REPO")
+SERVE=$(python3 -c "import sys; print(__import__('os').path.commonpath([sys.argv[1], sys.argv[2]]))" "$REPO" "$CORPUS_DIR")
+REPO_URL="${REPO#"$SERVE"}"; CORPUS_URL="${CORPUS_DIR#"$SERVE"}"
+# realpath('/') ends WITH the slash, so stripping the root ancestor eats the
+# leading '/'; restore it (an empty URL = that tree IS the server root).
+[ -n "$REPO_URL" ] && [ "${REPO_URL:0:1}" != / ] && REPO_URL="/$REPO_URL"
+[ -n "$CORPUS_URL" ] && [ "${CORPUS_URL:0:1}" != / ] && CORPUS_URL="/$CORPUS_URL"
+
+python3 -m http.server "$PORT" --directory "$SERVE" >/dev/null 2>&1 &
 SRV=$!
 trap 'kill $SRV 2>/dev/null' EXIT
 sleep 1
 BASE="http://127.0.0.1:$PORT"
+APP="$BASE$REPO_URL"                     # the repo under the server
+REGARG="$BASE$REPO_URL/regtest/regtest.html"
+[ "$CORPUS_DIR" = "$REPO/testdata" ] || REGARG="$REGARG?corpus=$BASE$CORPUS_URL"
+CORPUS_BASE="$BASE$CORPUS_URL"           # corpus root for ?open= URLs
 fail=0
 
 echo "── selftest (viewer)"
 title=$(chrome --virtual-time-budget=20000 \
-  --dump-dom "$BASE/viewer/index.html?selftest" 2>/dev/null | grep -oPm1 '(?<=<title>)[^<]*')
+  --dump-dom "$APP/viewer/index.html?selftest" 2>/dev/null | grep -oPm1 '(?<=<title>)[^<]*')
 echo "   $title"
 case "$title" in *SELFTEST\ PASS*) ;; *) echo "   FAIL"; fail=1;; esac
 
 echo "── regtest (all testdata blueprints)"
 reg=$(chrome --virtual-time-budget=90000 \
-  --dump-dom "$BASE/regtest/regtest.html" 2>/dev/null \
+  --dump-dom "$REGARG" 2>/dev/null \
   | python3 -c "import sys,re,html; t=sys.stdin.read(); m=re.search(r'id=\"out\">(.*?)</div>', t, re.S); print(html.unescape(m.group(1)) if m else 'NO OUTPUT')")
 echo "$reg" | grep -v ' OK$' | tail -8
 echo "$reg" | grep -q 'REGTEST: PASS' || fail=1
@@ -77,30 +95,30 @@ fi
 
 echo "── proxytest (low-poly meshes vs real geometry, all atlas types)"
 title=$(chrome --virtual-time-budget=30000 \
-  --dump-dom "$BASE/viewer/index.html?proxytest" 2>/dev/null | grep -oPm1 '(?<=<title>)[^<]*')
+  --dump-dom "$APP/viewer/index.html?proxytest" 2>/dev/null | grep -oPm1 '(?<=<title>)[^<]*')
 echo "   $title"
 case "$title" in *PASS*) ;; *) echo "   FAIL"; fail=1;; esac
 
 echo "── comptest (cable endpoints vs nubs/tubes/models, ISW-241)"
 title=$(chrome --virtual-time-budget=30000 \
-  --dump-dom "$BASE/viewer/index.html?comptest" 2>/dev/null | grep -oPm1 '(?<=<title>)[^<]*')
+  --dump-dom "$APP/viewer/index.html?comptest" 2>/dev/null | grep -oPm1 '(?<=<title>)[^<]*')
 echo "   $title"
 case "$title" in *COMPTEST\ 60/60\ PASS*) ;; *) echo "   FAIL"; fail=1;; esac
 
 echo "── uitest (UI sweep: every panel control, keys, presets, dirty/save)"
 title=$(chrome --virtual-time-budget=20000 \
-  --dump-dom "$BASE/viewer/index.html?uitest" 2>/dev/null | grep -oPm1 '(?<=<title>)[^<]*')
+  --dump-dom "$APP/viewer/index.html?uitest" 2>/dev/null | grep -oPm1 '(?<=<title>)[^<]*')
 echo "   $title"
 case "$title" in *UITEST\ PASS*) ;; *) echo "   FAIL"; fail=1;; esac
 
 echo "── gizmatest (gizmo rotation order on a single-seat craft + visual stops)"
 title=$(chrome --virtual-time-budget=20000 \
-  --dump-dom "$BASE/viewer/index.html?gizmatest" 2>/dev/null | grep -oPm1 '(?<=<title>)[^<]*')
+  --dump-dom "$APP/viewer/index.html?gizmatest" 2>/dev/null | grep -oPm1 '(?<=<title>)[^<]*')
 echo "   $title"
 case "$title" in *GIZMATEST\ PASS*) ;; *) echo "   FAIL"; fail=1;; esac
 for s in 1 2 3 4; do   # before / +pitch90 / +pitch90+roll90 / ring-hover fat — eyeball
   chrome --window-size=900,700 --virtual-time-budget=$SMBUD \
-    --screenshot="$OUT/gizmo$s.png" "$BASE/viewer/index.html?gizmatest&shot=$s" 2>/dev/null
+    --screenshot="$OUT/gizmo$s.png" "$APP/viewer/index.html?gizmatest&shot=$s" 2>/dev/null
   [ -s "$OUT/gizmo$s.png" ] && [ "$OUT/gizmo$s.png" -nt "$OUT/.start" ] || { echo "   FAIL (no gizmo$s.png)"; fail=1; }
 done
 
@@ -108,7 +126,7 @@ echo "── position tests (placement fixtures + generic button sweep)"
 postest() {   # $1=craft $2=budget $3=wall-timeout — dump the postest title
   ( export SHOT_TIMEOUT="$3"
     chrome --virtual-time-budget="$2" --dump-dom \
-      "$BASE/viewer/index.html?open=../testdata/$1/blueprint.json&postest" 2>/dev/null \
+      "$APP/viewer/index.html?open=$CORPUS_BASE/$1/blueprint.json&postest" 2>/dev/null \
     | grep -oPm1 '(?<=<title>)[^<]*' )
 }
 for c in 3812927875 3518436870 3417786605 3803780241 3381670618 3509975859 3732302108; do
@@ -127,13 +145,13 @@ done
 
 echo "── smoke render"
 chrome --window-size=1400,900 --virtual-time-budget=$SMBUD \
-  --screenshot="$OUT/viewer.png" "$BASE/viewer/index.html" 2>/dev/null
+  --screenshot="$OUT/viewer.png" "$APP/viewer/index.html" 2>/dev/null
 [ -s "$OUT/viewer.png" ] && [ "$OUT/viewer.png" -nt "$OUT/.start" ] && echo "   ok: $OUT/viewer.png" || { echo "   FAIL (no screenshot)"; fail=1; }
 
 echo "── flow render (with streamlines)"
 FBUD=$SMBUD; [ "${GPU:-1}" = "1" ] || FBUD=2500
 chrome --window-size=1000,700 --virtual-time-budget=$FBUD \
-  --screenshot="$OUT/flow.png" "$BASE/viewer/index.html?flow&flowlow" 2>/dev/null
+  --screenshot="$OUT/flow.png" "$APP/viewer/index.html?flow&flowlow" 2>/dev/null
 [ -s "$OUT/flow.png" ] && [ "$OUT/flow.png" -nt "$OUT/.start" ] && echo "   ok: $OUT/flow.png" || { echo "   FAIL (no screenshot)"; fail=1; }
 
 [ $fail -eq 0 ] && echo "ALL TESTS PASS" || echo "TESTS FAILED"

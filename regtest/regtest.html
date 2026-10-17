@@ -10,16 +10,20 @@ import { fitHull } from '../viewer/hullfit.js';
 // Format-validation suite for the viewer's parsers. Run headless (see tests/):
 //   chromium --headless=new --dump-dom "http://127.0.0.1:8650/regtest/regtest.html"
 const CELL = 0.25, FRAME = 3;
+// Corpus root: ?corpus=<url> (folder of <id>/blueprint.json, served by the
+// same static server), default the repo's testdata/. Mirrors tools/config.py:
+// nothing here depends on the repo living at any particular path.
+const CORPUS = (new URLSearchParams(location.search).get('corpus') || '../testdata').replace(/\/+$/, '');
 const W = (o, ax) => (o['pos_' + ax] - 5.5) * CELL + o['frame_' + ax] * FRAME;
 
 let out = [], pass = 0, fail = 0;
 const ids = await (async () => {
-  const listing = await (await fetch('../testdata/')).text();
+  const listing = await (await fetch(CORPUS + '/')).text();
   return [...listing.matchAll(/href="(\d{6,})\/"/g)].map(m => m[1]);
 })();
 for (const id of ids) {
   try {
-    const bp = await (await fetch(`../testdata/${id}/blueprint.json`)).json();
+    const bp = await (await fetch(`${CORPUS}/${id}/blueprint.json`)).json();
     const D = bp.data;
     const nT = (D.triangles || []).length, nC = (D.components || []).length;
     const nB = (D.blocks || []).length;

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Generate the landing-page craft gallery + viewer/workshop.json.
 
-Scans testdata/<id>/blueprint.json, merges names from
+Scans the blueprint corpus (<blueprints>/<id>/blueprint.json — resolved by
+tools/config.py: ARCHEAN_BLUEPRINTS env or blueprints.conf, default testdata/),
+merges names from
 tools/ws-names.tsv (tab-separated id<TAB>title, fetched from Steam,
 rate-limit-friendly) with data.alias and a small curated table, writes
 viewer/workshop.json ({id: {name, author}} — used for the viewer's
@@ -12,11 +14,21 @@ Items are linked two ways: open in our viewer (?open=) and the Steam
 Workshop page (filedetails?id=). The game files themselves cannot be
 fetched from the browser (Steam download needs the client / auth and
 steamcommunity sends no CORS headers) — the Steam client's workshop
-content dir is the ingest path, so this repo mirrors them under testdata/.
-"""
-import json, os, re
+content dir is the ingest path, so the corpus normally mirrors them under
+testdata/.
 
-ROOT = os.path.join(os.path.dirname(__file__), '..')
+The published gallery can only reach files the web server actually serves:
+the link prefix is --webroot (default "testdata"), i.e. the corpus folder's
+URL path relative to this repo's root. If your corpus lives OUTSIDE the repo,
+either symlink/copy it in at that path or serve it and pass a matching
+--webroot (e.g. --webroot=../corpus when the parent folder is served).
+"""
+import argparse, json, os, re, sys
+
+sys.path.insert(0, os.path.dirname(__file__))
+import config
+
+ROOT = config.ROOT
 CURATED = {   # titles Steam pages confirm; kept offline per AGENTS (no fetches at runtime)
     '3327182790': 'Cheap Exploration Plane',
     '3334591920': '7x-Port-a-MiningRig',
@@ -47,6 +59,16 @@ EXCLUDE = {
 }
 NUMERIC_NAME = re.compile(r'^(Workshop item\s+)?[\d\s.,_\-]+$', re.U)  # "23", "Workshop item 3406025722"… (deleted/untitled) -> skip (user)
 
+_ap = argparse.ArgumentParser()
+_ap.add_argument('--webroot', default='testdata',
+                 help='URL path of the corpus folder, relative to the repo root '
+                      '(where the web server serves it); default testdata')
+WEBROOT = _ap.parse_args().webroot.strip('/')
+CORPUS = config.blueprints_dir()
+if os.path.abspath(CORPUS) != os.path.join(ROOT, 'testdata'):
+    print(f'note: corpus is {CORPUS}; generated links point at /{WEBROOT}/ — '
+          f'make sure that path is served (symlink, copy, or --webroot)')
+
 names = dict(CURATED)
 tsv = os.path.join(ROOT, 'tools', 'ws-names.tsv')
 if os.path.isfile(tsv):
@@ -57,8 +79,8 @@ if os.path.isfile(tsv):
             names.setdefault(parts[0], parts[1])
 
 data, rows, skipped = {}, [], []
-for d in sorted(os.listdir(os.path.join(ROOT, 'testdata'))):
-    bp = os.path.join(ROOT, 'testdata', d, 'blueprint.json')
+for d in sorted(os.listdir(CORPUS)):
+    bp = os.path.join(CORPUS, d, 'blueprint.json')
     if not (d.isdigit() and len(d) >= 6 and d not in SYNTH and d not in EXCLUDE and os.path.isfile(bp)):
         continue
     j = json.load(open(bp))
@@ -69,18 +91,18 @@ for d in sorted(os.listdir(os.path.join(ROOT, 'testdata'))):
         continue
     author = j.get('author', '')
     data[d] = {'name': name, 'author': author}
-    rows.append((d, name, author, os.path.isfile(os.path.join(ROOT, 'testdata', d, 'preview.jpg'))))
+    rows.append((d, name, author, os.path.isfile(os.path.join(CORPUS, d, 'preview.jpg'))))
 
 os.makedirs(os.path.join(ROOT, 'viewer'), exist_ok=True)
 with open(os.path.join(ROOT, 'viewer', 'workshop.json'), 'w') as f:
     json.dump(data, f, indent=1, ensure_ascii=False)
 
 def card(d, name, author, thumb):
-    img = (f'<img src="testdata/{d}/preview.jpg" width="160" height="160" loading="lazy" alt="">'
+    img = (f'<img src="{WEBROOT}/{d}/preview.jpg" width="160" height="160" loading="lazy" alt="">'
            if thumb else
            '<div style="width:160px;height:160px;background:#1d2026;border-radius:8px;'
            'display:flex;align-items:center;justify-content:center;color:#567">no preview</div>')
-    return (f'<div class="card"><a href="viewer/index.html?open=../testdata/{d}/blueprint.json">'
+    return (f'<div class="card"><a href="viewer/index.html?open=../{WEBROOT}/{d}/blueprint.json">'
             f'{img}<div class="cn">{name}</div></a>'
             f'<div class="cm">{author} · <a href="https://steamcommunity.com/sharedfiles/'
             f'filedetails/?id={d}" target="_blank" rel="noopener">workshop ↗</a></div></div>')
@@ -91,8 +113,8 @@ gallery = f'''<!--GALLERY-->
 <h2 style="font-size:20px;color:#fff;margin-top:34px">Craft gallery</h2>
 <p class="muted">Click a craft to open it in the <a href="viewer/index.html">3D inspector</a>;
 &#8599; opens the Steam Workshop page. Blueprint files come from the local Steam
-workshop content dir (browser downloads from Steam need the client, so the repo
-mirrors them under <code>testdata/</code> — game content belongs to the developer, see NOTICE.md).</p>
+workshop content dir (browser downloads from Steam need the client, so the
+corpus mirrors them under <code>{WEBROOT}/</code> — game content belongs to the developer, see NOTICE.md).</p>
 <div class="grid">{feat}</div>
 <p class="muted" style="margin-top:18px">…and the rest of the corpus:</p>
 <div class="grid">{rest}</div>

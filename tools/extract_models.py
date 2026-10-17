@@ -145,8 +145,12 @@ def lowify(v, i, min_size):
 
 
 def main():
+    sys.path.insert(0, str(Path(__file__).parent))
+    import config
     ap = argparse.ArgumentParser()
-    ap.add_argument("game_dir", help="Archean-game directory (contains modules/)")
+    ap.add_argument("game_dir", nargs='?', default=config.game_dir(),
+                    help="Archean-game directory (contains modules/); "
+                         "default = tools/config.py game_dir (ARCHEAN_GAME / blueprints.conf)")
     ap.add_argument("-o", "--out", default="models/components.json")
     args = ap.parse_args()
     mods = Path(args.game_dir) / "modules"

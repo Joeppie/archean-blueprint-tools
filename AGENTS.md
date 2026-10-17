@@ -44,6 +44,28 @@ PERF.md                         measured perf baseline + harmful-candidate catal
 NOTICE.md                       licensing: GPL code, game content belongs to batcholi/FloDKSM
 ```
 
+## Blueprint folder (rule — machine-local paths are configurable)
+The repo may be cloned ANYWHERE: never assume it lives inside the Steam tree,
+and NEVER hardcode a machine-local absolute path (Steam install, workshop
+content dir, a user's home) in a tool, test or script. The blueprint
+CORPUS — the folder of `<workshop-id>/blueprint.json` dirs — and every other
+outside-the-repo path resolve through ONE module, `tools/config.py`, in three
+tiers: env `ARCHEAN_BLUEPRINTS` / `ARCHEAN_WORKSHOP` / `ARCHEAN_GAME` >
+gitignored repo-root `blueprints.conf` (KEY = value; see
+`blueprints.conf.example`) > built-in defaults (corpus = `<repo>/testdata`,
+so a fresh clone works unchanged). Print the resolved paths with
+`python3 tools/config.py`.
+- Python tools: `import config` (sys.path include of `tools/`) and use
+  `config.blueprints_dir()` / `workshop_content_dir()` / `game_dir()` —
+  add_workshop, make_landing (--webroot sets the generated links' URL prefix),
+  make_orient_test and extract_models (game_dir now optional) all do.
+- Browser suites mirror this: `regtest/regtest.html?corpus=<url>` overrides
+  the corpus root (default `../testdata`); `tests/run_tests.sh` resolves the
+  corpus via config, serves the repo+corpus common ancestor on one static
+  server and passes the corpus URL automatically (regtest + postest `?open=`).
+So pointing at a different blueprints folder is pure configuration — no code
+or path edits anywhere.
+
 ## Commands
 ```bash
 bash tools/install-hooks.sh               # after cloning: enables the checkin gate
@@ -158,6 +180,9 @@ refuses to cut a tag when the strings disagree.
   colour/PBR semantics, palette defaults, gltf material factors, conditional
   wheel parts, .ini placement rules). Read it before investigating anything.
 - Game assets on disk: `~/.local/share/Steam/steamapps/common/Archean/Archean-game/modules/<module>/components/<Type>/<Type>.{gltf,ini}`
+  (= the tools/config.py `game_dir` DEFAULT — override via ARCHEAN_GAME or
+  blueprints.conf; resolve every machine-local path through config, see
+  § Blueprint folder)
   = ground truth for models/materials/node trees (read the `.gltf` materials +
   `.ini` directly; regenerate `viewer/models/` after extractor changes).
 - The dev's own viewer (https://viewer.xenontools.dev/, js modules under /js/)
