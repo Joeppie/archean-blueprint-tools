@@ -50,6 +50,7 @@ bash tools/install-hooks.sh               # after cloning: enables the checkin g
 tests/run_tests.sh                      # full headless suite (python3 + chromium)
 tools/release.sh                        # cut the STABLE release (full-suite gate,
                                         # ff release branch, tag, push — see § Publishing)
+                                        # ONLY when the user explicitly asks to release
 python3 -m http.server 8650             # manual serving (repo root)
 # viewer:   http://127.0.0.1:8650/viewer/index.html
 # selftest: http://127.0.0.1:8650/viewer/index.html?selftest  (tab title: SELFTEST PASS)
@@ -125,6 +126,13 @@ line; `git push origin main` never moves the live site.**
   push (the build is an Actions job: during GitHub Actions runner incidents it
   typically queues "waiting for a hosted runner" — check githubstatus.com
   before suspecting the push).
+- **A new release requires the user's EXPLICIT say-so** (2026-10-17 rule).
+  Never run `tools/release.sh` — or otherwise move/tag/push `release` — on
+  your own initiative: finishing work, a green suite, a commit, or a push to
+  main do NOT imply a release. The stable line only ever moves when the user
+  asks for it in those terms ("release it", "cut the release", "ship it").
+  Full-suite RUNS for verification are still fine and encouraged — only the
+  release CUT is gated on the user.
 - `release` is branch-PROTECTED (done 2026-10-17): classic protection on
   (force-push/delete blocked for non-admins; admins bypass, which is what
   `release.sh` uses for its ff push). If a push to release is ever refused

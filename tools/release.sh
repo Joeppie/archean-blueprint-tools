@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # release.sh — cut a STABLE release onto the `release` branch (AGENTS.md § Publishing).
 #
+# RUN THIS ONLY WHEN THE USER EXPLICITLY ASKS TO RELEASE (2026-10-17 rule):
+# a finished feature, a green suite, or a push to main do NOT imply one.
+#
 # The release scheme:
 #   main     = development. Every commit passes the pre-commit gate
 #              (selftest + regtest smoke pair). Pages does NOT serve main.

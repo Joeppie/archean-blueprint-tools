@@ -63,6 +63,7 @@ game's own compact JSON format, keeping the block/occupancy mirror in sync.
 | `tools/extract_models.py` | regenerates `viewer/models/` from a local Archean install |
 | `tools/adjust_seat.py` | example of a safe scripted format edit |
 | `tests/run_tests.sh` | headless-Chromium suite: selftest, regtest, proxytest, render shots |
+| `tools/release.sh` | cuts the stable release onto the `release` branch — **only ever run when the maintainer explicitly says so** |
 | `FORMAT.md` | the format documentation — start here |
 | `AGENTS.md` | development guide for humans *and* coding agents |
 | `NOTICE.md` | licensing: code GPL-3.0; game/player content belongs to its respective owners |
@@ -79,6 +80,14 @@ Useful URL parameters: `?open=<url>` open another blueprint ·
 `?real` full game geometry · `?flow` particles + streamlines ·
 `?hull` / `?occ` toggles · `?cam=x,y,z,tx,ty,tz` camera pose ·
 `?perf` draw-call probe in the tab title · `?selftest`, `?proxytest` test modes.
+
+## Releases
+
+GitHub Pages serves the **`release` branch** (stable); `main` is development.
+A release is a `main` commit that passed the full suite, fast-forwarded onto
+`release` and tagged — all done by `tools/release.sh` (see AGENTS.md §
+Publishing). **Cutting a release always requires the maintainer's explicit
+say-so**: green tests or merged work never imply one.
 
 ## Ideas welcome — open an issue!
 
