@@ -1,0 +1,15 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* DevTools-style dark theme tokens (shadcn convention, Tailwind 4 @theme) */
+@theme {
+  --color-panel: #17191f;
+  --color-panel2: #1d2026;
+  --color-ink: #cfe3ee;
+  --color-ink-dim: #8aa0ae;
+  --color-accent: #7dffcf;
+  --color-gold: #ffd75d;
+}
+
+html, body, #root { height: 100%; }
+body { background: #0e1013; color: var(--color-ink); font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }

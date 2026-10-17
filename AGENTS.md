@@ -66,6 +66,28 @@ so a fresh clone works unchanged). Print the resolved paths with
 So pointing at a different blueprints folder is pure configuration — no code
 or path edits anywhere.
 
+## The rewrite (app/ — React + TypeScript, IN PROGRESS)
+Per the user (2026-10-17) the React SPA in `app/` REPLACES `viewer/` as the
+working app: ALL new feature work happens there. `viewer/` + `viewer/tests.js`
+are FROZEN port-references (the engine semantics they pin — FORMAT.md, the
+invariant list — transfer to vitest/Playwright pins as modules port; see
+REWRITE.md for the phase plan, the WASM candidate list and the three.js
+fork/WebGPU verdict). Do not delete `viewer/` until REWRITE P5 with the
+user's explicit say-so (Pages/release still serves it meanwhile).
+- Toolchain lives ONLY under `app/` (own npm project); repo-root `tools/`,
+  `tests/` and the zero-build regtest stay as they are until cutover.
+- app/ obeys the same rules: no hardcoded machine paths (corpus resolves via
+  `app/tools/vite-corpus.ts` mirroring tools/config.py), byte-identical saves
+  (`app/src/engine/doc.ts` keeps each number's raw literal — the game writer
+  distinguishes int-modelled fields, bare, from double-modelled, "1.0"/"1e-08"),
+  and never releases without the user asking.
+```bash
+cd app && npm install          # one-time
+npm test                       # vitest — pure engine core (no browser)
+npm run test:e2e               # Playwright chromium UI suite (app/e2e/)
+npm run dev                    # http://localhost:5175 (IPv4: --host 127.0.0.1)
+```
+
 ## Commands
 ```bash
 bash tools/install-hooks.sh               # after cloning: enables the checkin gate
