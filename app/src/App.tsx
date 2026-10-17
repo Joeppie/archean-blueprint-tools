@@ -1,26 +1,18 @@
 // App.tsx — two-stage SPA: craft GALLERY (legacy index-page style) →
 // full-screen EDITOR. ?craft=<id> deep-links straight into the editor, so
-// old links and Playwright fixtures keep working. Corpus/names/previews are
-// served by the vite plugin from the CONFIGURED blueprint folder + the
-// legacy workshop.json (AGENTS § Blueprint folder — no hardcoded paths).
+// old links and Playwright fixtures keep working. The catalog itself is
+// STATICALLY COMPILED at build time (virtual:gallery from the configured
+// blueprint folder — AGENTS § Blueprint folder), so the gallery paints with
+// zero runtime fetches; only the preview images load lazily as files.
 import { useEffect, useState } from 'react';
+import { GALLERY } from 'virtual:gallery';
 import type { PickHit } from './engine/scene';
 import Viewport from './components/Viewport';
 import type { Blueprint } from './engine/format';
 import { isLegacyFile } from './engine/format';
 
-interface WorkshopEntry { name: string; author?: string }
-type Workshop = Record<string, WorkshopEntry>;
-
-/** shared one-shot loads (module caches) */
-let workshopP: Promise<Workshop> | null = null;
-export function getWorkshop(): Promise<Workshop> {
-  return workshopP ??= fetch('/workshop.json').then(r => r.ok ? r.json() as Promise<Workshop> : {}).catch(() => ({}));
-}
-async function getCraftIds(): Promise<string[]> {
-  const html = await (await fetch('/corpus/')).text();
-  return [...html.matchAll(/href="(\d{6,})\/"/g)].map(m => m[1]!);
-}
+export const craftName = (id: string) =>
+  GALLERY.find(g => g.id === id)?.name ?? `Workshop ${id}`;
 
 export default function App() {
   const [params, setParams] = useState(() => new URLSearchParams(location.search));
@@ -42,11 +34,6 @@ export default function App() {
 
 // ---------------------------------------------------------------- gallery
 function Gallery({ onOpen }: { onOpen: (id: string) => void }) {
-  const [ids, setIds] = useState<string[]>([]);
-  const [ws, setWs] = useState<Workshop>({});
-  useEffect(() => {
-    Promise.all([getCraftIds(), getWorkshop()]).then(([i, w]) => { setIds(i); setWs(w); }).catch(console.error);
-  }, []);
   return (
     <div className="min-h-dvh overflow-y-auto bg-[#0e1013] px-4 py-6 md:px-10">
       <header className="mx-auto max-w-5xl">
@@ -55,32 +42,31 @@ function Gallery({ onOpen }: { onOpen: (id: string) => void }) {
         </h1>
         <p data-testid="gallery-sub" className="mt-1 text-[12px] text-ink-dim">
           Click a craft to open the 3D editor; &#8599; opens the Steam Workshop page.
-          {' '}{ids.length} crafts from the configured blueprint folder.
+          {' '}{GALLERY.length} crafts from the configured blueprint folder.
         </p>
       </header>
       <main data-testid="gallery"
         className="mx-auto mt-6 grid max-w-5xl grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-        {ids.map(id => (
-          <button key={id} data-testid={`card-${id}`} onClick={() => onOpen(id)}
+        {GALLERY.map(g => (
+          <button key={g.id} data-testid={`card-${g.id}`} onClick={() => onOpen(g.id)}
             className="group text-left">
             <div className="aspect-square overflow-hidden rounded-lg border border-white/10 bg-panel2
                             transition group-hover:border-accent/60">
-              <img src={`/corpus/${id}/preview.jpg`} alt="" loading="lazy"
-                className="h-full w-full object-cover"
-                onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+              {g.preview && <img src={g.preview} alt="" loading="lazy"
+                className="h-full w-full object-cover" />}
             </div>
             <div className="mt-1.5 truncate text-[13px] font-semibold text-ink group-hover:text-accent">
-              {ws[id]?.name ?? `Workshop ${id}`}
+              {g.name}
             </div>
             <div className="truncate text-[11px] text-ink-dim">
-              {ws[id]?.author ?? id} · <a
-                href={`https://steamcommunity.com/sharedfiles/filedetails/?id=${id}`}
+              {g.author ?? g.id} · <a
+                href={`https://steamcommunity.com/sharedfiles/filedetails/?id=${g.id}`}
                 target="_blank" rel="noopener" onClick={e => e.stopPropagation()}
                 className="hover:text-accent">workshop ↗</a>
             </div>
           </button>
         ))}
-        {ids.length === 0 && <p className="col-span-full text-ink-dim">corpus folder empty</p>}
+        {GALLERY.length === 0 && <p className="col-span-full text-ink-dim">corpus folder empty</p>}
       </main>
     </div>
   );
@@ -89,7 +75,6 @@ function Gallery({ onOpen }: { onOpen: (id: string) => void }) {
 // ----------------------------------------------------------------- editor
 function Editor({ craft, onBack }: { craft: string; onBack: () => void }) {
   const [bp, setBp] = useState<Blueprint | null>(null);
-  const [ws, setWs] = useState<Workshop>({});
   const [sel, setSel] = useState<PickHit | null>(null);
 
   useEffect(() => {
@@ -98,10 +83,9 @@ function Editor({ craft, onBack }: { craft: string; onBack: () => void }) {
       const res = await fetch(`/corpus/${craft}/blueprint.json`);
       if (res.ok) setBp(await res.json() as Blueprint);
     })().catch(console.error);
-    getWorkshop().then(setWs).catch(() => undefined);
   }, [craft]);
 
-  const name = bp?.data.alias?.trim() || ws[craft]?.name || `Workshop ${craft}`;
+  const name = bp?.data.alias?.trim() || craftName(craft);
   return (
     <div className="flex h-dvh w-full flex-col">
       <header className="flex h-11 shrink-0 items-center gap-2 border-b border-white/10 bg-panel px-2">
