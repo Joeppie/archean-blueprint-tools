@@ -1680,10 +1680,8 @@ async function runUiTest() {
     ok('dirty', dirtied && !document.body.classList.contains('dirty'));
     setIn(nO, 1); }
 
-  // zoom-cure button clears the saved dpr baseline without throwing
-  { localStorage.setItem('archean-dpr-base', '1');
-    click(btn(H.$('viewopts'), 'reset page zoom'));
-    ok('zoombtn', localStorage.getItem('archean-dpr-base') === null); }
+  // (the ⟲ "reset page zoom" button + dpr-baseline machinery was REMOVED —
+  //  the Chrome/Linux site-zoom workaround misfired; Ctrl+0 is the cure.)
 
   // labels checkbox flips labelsOn + label visibility
   { const cb = cbL('labels on interactive'), v0 = H.labelsOn;

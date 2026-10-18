@@ -18,47 +18,12 @@ import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=142';
 import { resolveColor } from './palette.js?v=142';
 
-// ---- site-zoom cancel: the viewer ALWAYS loads at physical 100% ----
-// Chrome SAVES page zoom per site (Ctrl+wheel sets it, Ctrl-F5 keeps it,
-// only Ctrl+0 resets — and JS cannot call that reset). The lowest
-// devicePixelRatio we have ever seen is the unzoomed baseline; the current
-// ratio above it is saved zoom, which we counteract with inverse CSS zoom.
-// Canvas + UI then occupy the same physical pixels as a 100% page, so the
-// "stuck in a highly zoomed viewer" state cannot survive a load. Opt out
-// with ?nozoom.
-{
-  try {
-    if (!new URLSearchParams(location.search).has('nozoom')) {
-      const SCREEN = [1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3];      // OS scales
-      const STEP = [0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3]; // Chrome zoom steps
-      let base = Number(localStorage.getItem('archean-dpr-base')) || 0;
-      const apply = () => {
-        const d = devicePixelRatio;
-        const known = base > 0 && d / base >= 0.6 && d / base <= 1.6;
-        if (!known) {
-          // No trustworthy baseline (incognito, monitor swap): factor the
-          // dpr into standard OS scale × Chrome zoom step. dpr 1.5625 can
-          // only be 125% screen × 125% site zoom — cancel that; dpr 1.5 is
-          // a native 150% screen — leave it alone. Only ZOOM-IN is undone:
-          // a deliberate Ctrl+wheel zoom-out (90%, 80%) is respected, and
-          // excluding z<1 keeps 1.5625 from factoring as 175% screen × 90%.
-          let best = null;
-          for (const b of SCREEN)
-            for (const z of STEP)
-              if (z > 1.02 && Math.abs(b * z - d) < 0.015 &&
-                  (!best || Math.abs(Math.log(z)) < Math.abs(Math.log(best[1]))))
-                best = [b, z];
-          base = best ? best[0] : d;
-          localStorage.setItem('archean-dpr-base', String(Math.min(base, d)));
-        }
-        document.documentElement.style.zoom =
-          Math.abs(d / base - 1) > 0.02 ? String(base / d) : '';
-      };
-      apply();
-      addEventListener('resize', apply);            // zoom changes fire resize
-    }
-  } catch { /* localStorage blocked: leave zoom alone */ }
-}
+// ---- zoom: the site-zoom-cancel machinery was REMOVED (todo cleanup) ----
+// The old inverse-CSS-zoom / dpr-baseline "zoom saga" (persisted per-site
+// Chrome zoom + Linux fractional scaling) misfired more than it cured. The
+// viewer now renders at whatever zoom the browser reports; only the renderer
+// pixel-ratio clamp (setPixelRatio floor 1 / cap 2.5) stays.
+
 
 // ---- game component models (extracted from installed game modules) ----
 // manifest: per-type metadata (mass, renderable node tree, joints, adapters,
@@ -3459,19 +3424,9 @@ function buildViewOpts() {
   };
   ll.append(lcb, document.createTextNode('labels on interactive/aliased parts'));
   s.appendChild(ll);
-  // manual cure for the zoom saga: clears our saved dpr baseline + any
-  // inverse CSS zoom we applied. (Chrome's own site-zoom entry can only be
-  // cleared by Ctrl+0 in the browser — pages may not touch it.)
-  const zb = document.createElement('button');
-  zb.className = 'btn';
-  zb.textContent = '⟲ reset page zoom (view scale)';
-  zb.title = 'Clears the viewer\'s dpr baseline + inverse zoom. If the page is still big, Chrome itself has a saved site zoom: press Ctrl+0.';
-  zb.onclick = () => {
-    document.documentElement.style.zoom = '';
-    try { localStorage.removeItem('archean-dpr-base'); } catch {}
-    invalidate();
-  };
-  s.appendChild(zb);
+  // (the ⟲ "reset page zoom" button + dpr-baseline inverse-CSS-zoom machinery
+  //  was REMOVED — todo cleanup: it was a Chrome/Linux site-zoom misfire and
+  //  cured less than it caused. Ctrl+0 in the browser is the only zoom reset.)
 
   const hs = document.createElement('div');
   hs.className = 'sec';
