@@ -20,6 +20,9 @@ declare global {
     /** wire-mode list-hover 3D preview (accent glow beside the selection) */
     hover: (ci: number) => void;
     hoverState: () => number;
+    /** constrained subgrid joint handles (the hinge UI at the joint line) */
+    hinge: () => ReturnType<Engine['hingeInfo']>;
+    hingePoint: (i: number) => ReturnType<Engine['hingeScreenPoint']>;
   } }
 }
 
@@ -59,6 +62,8 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockP
       labels: () => engine.labelState(),
       hover: (ci: number) => engine.previewHover(ci),
       hoverState: () => engine.hoverActive,
+      hinge: () => engine.hingeInfo(),
+      hingePoint: (i: number) => engine.hingeScreenPoint(i),
     };
     onEngine?.(engine);
     return () => {

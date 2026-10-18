@@ -86,6 +86,12 @@ invariant list — transfer to vitest/Playwright pins as modules port; see
 REWRITE.md for the phase plan, the WASM candidate list and the three.js
 fork/WebGPU verdict). Do not delete `viewer/` until REWRITE P5 with the
 user's explicit say-so (Pages/release still serves it meanwhile).
+- App subgrid UX (todo, v0.179): a selected SUBGRID gets no free gizmo (the
+  v0.170 rule) BUT a constrained UI AT THE JOINT LINE — a gold ring per angle
+  master (drag writes the master's data.angle in DEGREES about the captured
+  axis) and an arrow per slide master (data.pos in metres), Shift-snapped,
+  twin-unison via propagateJoint. Pinned by app/e2e/hinge.spec.ts (real
+  pointer drag on the dolphin fin + re-grip continuity + subgrid-only gating).
 - Toolchain lives ONLY under `app/` (own npm project); repo-root `tools/`,
   `tests/` and the zero-build regtest stay as they are until cutover.
 - app/ obeys the same rules: no hardcoded machine paths (corpus resolves via
@@ -514,16 +520,11 @@ refuses to cut a tag when the strings disagree.
   = the user's "zoomed in and grainy" on fresh opens. NOTE: Chrome PERSISTS
   per-site zoom across reloads (Ctrl-F5 keeps it; only Ctrl+0 resets), so
   HiDPI+zoom gives dpr 3 — the cap is 2.5, not 2, to keep those sharp.
-  view3d also COUNTERACTS Chrome's PERSISTED SITE ZOOM (set by Ctrl+wheel
-  over the canvas — Chrome grabs it before the page; saved in profile
-  content settings, which apply in INCOGNITO too and survive Ctrl-F5:
-  the user's "random stuck zoomed viewer, incognito, fixed by monitor
-  move"). Mechanism: baseline dpr = lowest seen (localStorage) with
-  zoom-in cancelled by inverse CSS zoom; cold/incognito starts factor
-  devicePixelRatio into standard OS scales × Chrome zoom steps and undo
-  zoom-IN only (deliberate zoom-outs respected; dpr 1.5625 = 125% screen
-  × 125% zoom). Escape hatches: `?nozoom`, View-Options "reset page zoom"
-  button; the Chrome-side entry only Ctrl+0 clears.
+  v0.179 REMOVED view3d's site-zoom counteract machinery (the localStorage
+  dpr-baseline heuristic + inverse CSS zoom + the "reset page zoom" button +
+  ?nozoom — todo cleanup: the "stuck zoomed viewer" saga was a Chrome/Linux
+  persisted-site-zoom misfire that cured less than it caused). Ctrl+0 in the
+  browser is now the only zoom reset; the app was built without any of it.
   `fitCameraToModel` frames at `max(1.85r, 3.6m)` — a 1 m craft framed at
   1.1 m felt like "stuck zoom, tiny FOV, low res" (the user's report;
   fly-to never runs on load — canvas click / list dblclick only).

@@ -20,7 +20,7 @@ import {
   DoubleSide, Fog, GridHelper, Group, HemisphereLight, InstancedMesh,
   LineBasicMaterial, LineSegments, LinearSRGBColorSpace, Matrix4, Mesh,
   MeshBasicMaterial, MeshStandardMaterial, Object3D, PerspectiveCamera,
-  AdditiveBlending, PlaneGeometry, PMREMGenerator, Quaternion, Raycaster,
+  AdditiveBlending, Plane, PlaneGeometry, PMREMGenerator, Quaternion, Raycaster,
   Scene, SphereGeometry, Sprite, SpriteMaterial, TorusGeometry, Vector2, Vector3, WebGLRenderer,
   type MeshStandardMaterialParameters,
 } from 'three';
@@ -49,6 +49,12 @@ import {
 import { calibrateCellMass, massModel, type MassModel } from './mass';
 import { Highlight } from './highlight';
 import { flightReport } from './flight';
+
+/** a constrained subgrid joint handle (ring = angle master, arrow = slide) —
+ *  the "UI at that place" (todo): you turn the HINGE, the panel rides */
+interface HingeHandle {
+  mesh: Mesh; kind: 'angle' | 'slide'; jref: JRef; ci: number; radius: number;
+}
 
 /** player-interactive components get a short floating label (legacy INTERACT);
  *  an in-game alias (components[].alias) always wins and renders in BLUE */
@@ -246,6 +252,10 @@ export class Engine {
       g.getHelper().visible = false;
     }
     this.scene.add(new HemisphereLight(0xcfe8ff, 0x444422, 1.1));
+    this.scene.add(this.hingeGroup);
+    this.hingeGroup.visible = false;
+    canvas.addEventListener('pointerdown', this.onHingeDown, { capture: true });
+    this.hingeCanvas = canvas;
     const sun = new DirectionalLight(0xfff2dd, 2.2);
     sun.position.set(-6, 10, -4);
     this.scene.add(sun);
@@ -1077,7 +1087,8 @@ export class Engine {
     this.selSub = -1;
     this.paintSelection();
     this.syncGizmo();
-    this.startSurges(ci);            // cable power-surge: fires on EVERY selection
+    this.buildHingeUI(-1);            // components own the TGC gizmo; hinge UI is for SUBGRIDS
+    this.startSurges(ci);             // cable power-surge: fires on EVERY selection
     this.onSelection?.({ ci: this.selCi, sub: this.selSub });
     this.invalidate();
   }
@@ -1087,6 +1098,7 @@ export class Engine {
     this.clearSurges();
     this.paintSelection();
     this.syncGizmo();               // v0.170: subgrids get NO gizmo — they ride their masters
+    this.buildHingeUI(bi);          // …but the joint line gets a constrained ring/arrow handle
     this.onSelection?.({ ci: this.selCi, sub: this.selSub });
     this.invalidate();
   }
@@ -1357,6 +1369,7 @@ export class Engine {
     this.gizmoEnabled = on;
     localStorage.setItem('archean-app-gizmo', on ? '1' : '0');
     this.syncGizmo();
+    this.hingeGroup.visible = on && this.hingeHandles.length > 0;   // hinge UI is an EDIT-mode handle too
     this.invalidate();
   }
   setGizmoMode(m: 'off' | 'translate' | 'rotate') {
@@ -1365,8 +1378,9 @@ export class Engine {
     this.syncGizmo();
     this.invalidate();
   }
-  /** Shift = 15° / 0.25 m snap (legacy) */
+  /** Shift = 15° / 0.25 m snap (legacy) — shared by the TGC gizmo AND the hinge handles */
   setGizmoSnap(on: boolean) {
+    this.snapOn = on;
     const g = this.gizmo;
     if (!g) return;
     g.setTranslationSnap(on ? 0.25 : null);
@@ -1517,6 +1531,194 @@ export class Engine {
     this.gizmoProxy.position[ax] += m;
     this.gizmoWriteback();
   }
+
+  // ------------------------------------------------ hinge UI (subgrid handles)
+  // A selected SUBGRID gets no free gizmo (v0.170 — it rides its masters), but
+  // it does get a UI AT the joint line: one ring per angle master (turning it
+  // writes the master's data.angle in DEGREES) and one arrow per slide master
+  // (data.pos in metres). The motion is constrained to and ATTACHED to the
+  // captured hinge — you manipulate the hinge, never the panel directly.
+  // Writes mirror the panel joint sliders: master data + propagateJoint twin
+  // unison (v0.176) + onDataEdit doc mirror. Shift snaps 15° / 0.25 m.
+  private hingeGroup = new Group();
+  private hingeCanvas: HTMLCanvasElement | null = null;
+  private hingeHandles: HingeHandle[] = [];
+  private hingeDrag: {
+    h: HingeHandle; plane: Plane; axis: Vector3; pivot: Vector3;
+    last: Vector3; acc: number; base: number;
+  } | null = null;
+  private snapOn = false;
+
+  /** client-space grab point of handle i (test hook: where to press to turn it) */
+  hingeScreenPoint(i: number): { x: number; y: number } | null {
+    const h = this.hingeHandles[i];
+    if (!h || !this.renderer) return null;
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    let p: Vector3;
+    if (h.kind === 'angle') {
+      const a = h.jref.axis0;
+      const av = new Vector3(a[0], a[1], a[2]);
+      const u = new Vector3(1, 0, 0);
+      if (Math.abs(av.x) > 0.9) u.set(0, 1, 0);
+      u.cross(av).normalize().multiplyScalar(h.radius * 0.95);          // ⟂ axis, on the ring
+      p = new Vector3(h.jref.pivot0[0], h.jref.pivot0[1], h.jref.pivot0[2])
+        .add(this.moffV()).add(u);
+    } else {
+      const s = h.jref.slide0;
+      const pos = typeof h.jref.mc.data?.['pos'] === 'number' ? (h.jref.mc.data['pos'] as number) : 0;
+      p = new Vector3(h.jref.pivot0[0] + s[0] * (pos + 0.3), h.jref.pivot0[1] + s[1] * (pos + 0.3),
+        h.jref.pivot0[2] + s[2] * (pos + 0.3)).add(this.moffV());
+    }
+    p.project(this.camera);
+    return { x: rect.left + (p.x * 0.5 + 0.5) * rect.width, y: rect.top + (-p.y * 0.5 + 0.5) * rect.height };
+  }
+
+  hingeInfo(): { bi: number; handles: { ci: number; key: string; value: number }[] } | null {
+    if (this.selSub < 0 || !this.hingeHandles.length) return null;
+    return {
+      bi: this.selSub,
+      handles: this.hingeHandles.map(h => ({
+        ci: h.ci, key: h.kind === 'angle' ? 'angle' : 'pos',
+        value: typeof h.jref.mc.data?.[h.kind === 'angle' ? 'angle' : 'pos'] === 'number'
+          ? (h.jref.mc.data[h.kind === 'angle' ? 'angle' : 'pos'] as number) : 0,
+      })),
+    };
+  }
+
+  private moffV() { return new Vector3(this.moff.x, this.moff.y, this.moff.z); }
+
+  /** (re)build the joint handles for the selected subgrid (none = hidden) */
+  private buildHingeUI(bi: number) {
+    this.hingeGroup.clear();
+    this.hingeHandles = [];
+    if (bi < 0) { this.hingeGroup.visible = false; return; }
+    const jrefs = this.subJrefs.get(bi) ?? [];
+    const g = this.subGroups.get(bi);
+    const box = new Box3();
+    if (g) { this.scene.updateMatrixWorld(true); box.setFromObject(g); }
+    const size = box.isEmpty() ? 1 : box.getSize(new Vector3()).length();
+    const radius = Math.max(0.3, Math.min(1.2, size * 0.28));
+    for (const jref of jrefs) {
+      if (jref.top < 0) continue;                       // nested master: no file handle row
+      const d = jref.mc.data ?? {};
+      const kind: 'angle' | 'slide' | null =
+        typeof d['angle'] === 'number' ? 'angle' : typeof d['pos'] === 'number' ? 'slide' : null;
+      if (!kind || !this.atlasRef?.manifest[jref.mc.type]?.joints?.length) continue;
+      const mat = new MeshBasicMaterial({ color: 0xffc850, transparent: true, opacity: 0.9, depthTest: false });
+      let mesh: Mesh;
+      if (kind === 'angle') {
+        mesh = new Mesh(new TorusGeometry(radius, Math.max(0.02, radius * 0.055), 10, 40), mat);
+        const a = jref.axis0;
+        mesh.quaternion.setFromUnitVectors(new Vector3(0, 0, 1), new Vector3(a[0], a[1], a[2]));
+        mesh.position.set(jref.pivot0[0] + this.moff.x, jref.pivot0[1] + this.moff.y, jref.pivot0[2] + this.moff.z);
+      } else {
+        const s = jref.slide0;
+        mesh = new Mesh(new BoxGeometry(0.09, 0.09, 0.5), mat);
+        const av = new Vector3(s[0], s[1], s[2]);
+        mesh.quaternion.setFromUnitVectors(new Vector3(0, 0, 1), av);
+        const pos = typeof d['pos'] === 'number' ? (d['pos'] as number) : 0;
+        mesh.position.set(jref.pivot0[0] + s[0] * pos + this.moff.x, jref.pivot0[1] + s[1] * pos + this.moff.y,
+          jref.pivot0[2] + s[2] * pos + this.moff.z);
+      }
+      mesh.renderOrder = 997;
+      const hi = this.hingeHandles.length;
+      this.hingeHandles.push({ mesh, kind, jref, ci: jref.top, radius });
+      mesh.userData = { hinge: hi };
+      this.hingeGroup.add(mesh);
+    }
+    this.hingeGroup.visible = this.hingeHandles.length > 0 && this.gizmoEnabled;
+  }
+
+  /** commit a handle edit like the panel slider: self data verbatim + twin
+   *  unison + group replay (syncSubJoints) + doc mirror */
+  private applyHinge(h: (typeof this.hingeHandles)[number], v: number) {
+    const key = h.kind === 'angle' ? 'angle' : 'pos';
+    const mc = h.jref.mc;
+    const old = typeof mc.data?.[key] === 'number' ? (mc.data[key] as number) : 0;
+    if (v === old) return;
+    mc.data = { ...mc.data, [key]: v };
+    this.propagateJoint(h.ci, key, v - old);
+    this.onDataEdit?.(h.ci, key);
+    if (h.kind === 'slide') {                            // arrow rides the slide
+      const s = h.jref.slide0;
+      h.mesh.position.set(h.jref.pivot0[0] + s[0] * v + this.moff.x,
+        h.jref.pivot0[1] + s[1] * v + this.moff.y, h.jref.pivot0[2] + s[2] * v + this.moff.z);
+    }
+    this.syncSubJoints();
+    this.invalidate();
+  }
+
+  private hingeRay(ev: PointerEvent) {
+    if (!this.renderer) return null;
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const rc = new Raycaster();
+    rc.setFromCamera(new Vector2(((ev.clientX - rect.left) / rect.width) * 2 - 1,
+      -((ev.clientY - rect.top) / rect.height) * 2 + 1), this.camera);
+    return rc;
+  }
+
+  private onHingeDown = (ev: PointerEvent) => {
+    if (!this.hingeGroup.visible || !this.hingeHandles.length) return;
+    const rc = this.hingeRay(ev);
+    if (!rc) return;
+    const hit = rc.intersectObjects(this.hingeGroup.children, false)[0];
+    if (!hit) return;
+    const hi = (hit.object.userData as { hinge?: number }).hinge;
+    const h = hi != null ? this.hingeHandles[hi] : undefined;
+    if (!h) return;
+    const pivot = new Vector3(h.jref.pivot0[0], h.jref.pivot0[1], h.jref.pivot0[2]).add(this.moffV());
+    const axis = h.kind === 'angle'
+      ? new Vector3(...h.jref.axis0)
+      : new Vector3(...h.jref.slide0);
+    // drag plane faces the camera; angle turns about axis, slides read along axis
+    const n = new Vector3();
+    this.camera.getWorldDirection(n);
+    const plane = new Plane().setFromNormalAndCoplanarPoint(n, pivot);
+    const p0 = new Vector3();
+    if (!rc.ray.intersectPlane(plane, p0)) return;
+    const key = h.kind === 'angle' ? 'angle' : 'pos';
+    this.hingeDrag = {
+      h, plane, axis, pivot, last: p0, acc: 0,
+      base: typeof h.jref.mc.data?.[key] === 'number' ? (h.jref.mc.data[key] as number) : 0,
+    };
+    if (this.controls) this.controls.enabled = false;
+    this.renderer?.domElement.setPointerCapture(ev.pointerId);
+    addEventListener('pointermove', this.onHingeMove);
+    addEventListener('pointerup', this.onHingeUp);
+  };
+
+  private onHingeMove = (ev: PointerEvent) => {
+    const dr = this.hingeDrag;
+    if (!dr) return;
+    const rc = this.hingeRay(ev);
+    if (!rc) return;
+    const p = new Vector3();
+    if (!rc.ray.intersectPlane(dr.plane, p)) return;
+    if (dr.h.kind === 'angle') {
+      // signed angle swept about the hinge axis between consecutive samples
+      const v0 = dr.last.clone().sub(dr.pivot);
+      const v1 = p.clone().sub(dr.pivot);
+      for (const v of [v0, v1]) v.addScaledVector(dr.axis, -v.dot(dr.axis));   // into the ring plane
+      const dTheta = Math.atan2(new Vector3().crossVectors(v0, v1).dot(dr.axis), v0.dot(v1));
+      dr.acc += dTheta;
+      let deg = dr.base + dr.acc / DEG;
+      if (this.snapOn) deg = Math.round(deg / 15) * 15;
+      this.applyHinge(dr.h, +deg.toFixed(6));
+    } else {
+      dr.acc += p.clone().sub(dr.last).dot(dr.axis);
+      let m = dr.base + dr.acc;
+      if (this.snapOn) m = Math.round(m / 0.25) * 0.25;
+      this.applyHinge(dr.h, +m.toFixed(6));
+    }
+    dr.last.copy(p);
+  };
+
+  private onHingeUp = () => {
+    this.hingeDrag = null;
+    if (this.controls) this.controls.enabled = true;
+    removeEventListener('pointermove', this.onHingeMove);
+    removeEventListener('pointerup', this.onHingeUp);
+  };
 
   // -------------------------------------------------------------- editing
 
@@ -1847,12 +2049,19 @@ export class Engine {
     this.clearSurges();
     this.clearLabels();
     this.selCi = this.selSub = -1;
+    this.buildHingeUI(-1);
   }
 
   dispose() {
     this.loadSeq++;                    // strand in-flight real-model loads
     this.disposeScene();
     this.renderer?.domElement.removeEventListener('webglcontextrestored', this.onRestore);
+    this.hingeCanvas?.removeEventListener('pointerdown', this.onHingeDown, { capture: true } as EventListenerOptions);
+    removeEventListener('pointermove', this.onHingeMove);
+    removeEventListener('pointerup', this.onHingeUp);
+    for (const h of this.hingeHandles) { h.mesh.geometry.dispose(); (h.mesh.material as MeshBasicMaterial).dispose(); }
+    this.hingeHandles = [];
+    this.hingeCanvas = null;
     this.unitBox.dispose();
     this.surgeGeo.dispose();
     this.clearSurges();

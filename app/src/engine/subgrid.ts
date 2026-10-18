@@ -179,6 +179,9 @@ export interface JRef {
   mc: BlueprintComponent;
   /** doc path to the master (for editing its data.angle / data.pos) */
   mcPath: (string | number)[] | undefined;
+  /** top-level components[] index of the master when top-level, else -1
+   *  (the hinge UI + joint sliders only edit through this index) */
+  top: number;
   /** master pose at capture (view, pre-moff) — the rigid-delta anchor */
   p0: V3; q0: FileQuat;
   /** the CAPTURED joint line: pivot clamped onto the panel bbox, axis per the
@@ -198,7 +201,7 @@ export function captureJrefs(
     const p0: V3 = [mc.position.x, mc.position.y, -mc.position.z];
     const q0 = fileToViewQuat(mc.orientation ?? { w: 1, x: 0, y: 0, z: 0 }, legacy);
     if (!bb) {                                          // parts-only: ride the axle
-      out.push({ mc, mcPath: e.mcPath, p0, q0, pivot0: j0.pivot, axis0: j0.axis, slide0: j0.slide });
+      out.push({ mc, mcPath: e.mcPath, top: e.top, p0, q0, pivot0: j0.pivot, axis0: j0.axis, slide0: j0.slide });
       continue;
     }
     const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
@@ -218,7 +221,7 @@ export function captureJrefs(
     const axis0 = mc.type === 'SmallHinge' && Math.abs(vDot(j0.axis, d)) < 0.7071
       ? vNorm(vCross(j0.axis, d))
       : d;
-    out.push({ mc, mcPath: e.mcPath, p0, q0, pivot0, axis0, slide0: d });
+    out.push({ mc, mcPath: e.mcPath, top: e.top, p0, q0, pivot0, axis0, slide0: d });
   }
   return out;
 }
