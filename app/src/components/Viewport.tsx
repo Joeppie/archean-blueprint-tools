@@ -14,6 +14,9 @@ declare global {
     stats: () => SceneStats;
     pickProbe: () => PickHit;
     lastPick: () => PickHit;
+    /** cable power-surge + label pins (legacy selftest surges=true) */
+    surges: () => ReturnType<Engine['surgeState']>;
+    labels: () => ReturnType<Engine['labelState']>;
   } }
 }
 
@@ -43,6 +46,8 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockP
       stats: () => engine.stats(),
       pickProbe: () => engine.pickProbe(),
       lastPick: () => engine.lastPick,
+      surges: () => engine.surgeState(),
+      labels: () => engine.labelState(),
     };
     onEngine?.(engine);
     return () => {

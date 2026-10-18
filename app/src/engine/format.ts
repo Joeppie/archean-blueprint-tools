@@ -64,6 +64,8 @@ export interface BlueprintComponent {
   position: Vec3D;
   orientation: FileQuat;
   name?: string;
+  /** player-authored floating label text (beats the INTERACT-type default) */
+  alias?: string;
   colors?: Record<string, Partial<import('./palette').PaletteEntry>> | [number, number];
   data?: Record<string, unknown>;
   /** occupancy mirror records (array; first entry = footprint). Kept in sync

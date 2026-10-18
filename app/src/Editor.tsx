@@ -3,7 +3,7 @@
 // mode bar state and the save/open funnel; see App.tsx for the app shell.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { craftName } from './gallery-catalog';
-import type { Engine, PickHit, ViewOptions } from './engine/scene';
+import { DEFAULT_OPTS, type Engine, type PickHit, type ViewOptions } from './engine/scene';
 import Viewport from './components/Viewport';
 import Panel, { type EditApi } from './components/Panel';
 import TopBar, { type Mode } from './components/TopBar';
@@ -17,8 +17,7 @@ import { makePipe } from './engine/wireops';
 import { normalizeDoc } from './engine/normalize';
 import { newCraftDoc } from './engine/newcraft';
 
-const DEFAULT_OPTS: ViewOptions = { grid: true, occ: false, hull: true, wire: false,
-  pipes: true, subs: true, mirror: true, com: true };
+
 
 export default function Editor({ craft, onBack }: { craft: string | null; onBack: () => void }) {
   const [bp, setBp] = useState<Blueprint | null>(null);

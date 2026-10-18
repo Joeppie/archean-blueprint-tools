@@ -20,8 +20,8 @@ import {
   DoubleSide, Fog, GridHelper, Group, HemisphereLight, InstancedMesh,
   LineBasicMaterial, LineSegments, LinearSRGBColorSpace, Matrix4, Mesh,
   MeshBasicMaterial, MeshStandardMaterial, Object3D, PerspectiveCamera,
-  PlaneGeometry, PMREMGenerator, Quaternion, Raycaster,
-  Scene, SphereGeometry, TorusGeometry, Vector2, Vector3, WebGLRenderer,
+  AdditiveBlending, PlaneGeometry, PMREMGenerator, Quaternion, Raycaster,
+  Scene, SphereGeometry, Sprite, SpriteMaterial, TorusGeometry, Vector2, Vector3, WebGLRenderer,
   type MeshStandardMaterialParameters,
 } from 'three';
 import { CanvasTexture, NearestFilter, SRGBColorSpace } from 'three';
@@ -34,7 +34,7 @@ import type { FileQuat, Vec3D } from './format';
 import type { LoadedModel, ModelAtlas, NodeRec } from './models';
 import { droppedParts, TEXT_MIRROR_X } from './models';
 import { envIntensity, nodeMaterialSpec, pbr, srgbHexToLinear, type PbrSpec } from './materials';
-import { buildPipes } from './pipes';
+import { buildPipes, surgePaths, type PipeNetwork } from './pipes';
 import { buildBlocksSolids, buildCompProxies, buildSolids, type SolidBatch } from './build';
 import type { FilePalette } from './palette';
 import type { Blueprint, BlueprintComponent } from './format';
@@ -50,6 +50,16 @@ import { calibrateCellMass, massModel, type MassModel } from './mass';
 import { Highlight } from './highlight';
 import { flightReport } from './flight';
 
+/** player-interactive components get a short floating label (legacy INTERACT);
+ *  an in-game alias (components[].alias) always wins and renders in BLUE */
+const INTERACT: Record<string, string> = {
+  Dashboard: 'dash', PushButton: 'button', ToggleButton: 'toggle', ArrowButton: 'arrow',
+  Keyboard: 'keyboard', Numpad: 'numpad', Led: 'led', Buzzer: 'buzzer', Beacon: 'beacon',
+  NavInstrument: 'nav', MiniNavInstrument: 'nav', HudController: 'hud',
+  PilotSeat: 'seat', ToiletSeat: 'toilet', OwnerPad: 'pad',
+  Computer: 'computer', MiniComputer: 'computer', Volume: 'volume',
+};
+
 export interface PickHit {
   kind: 'block' | 'comp' | 'sub' | 'none';
   ci?: number; sub?: number; point?: [number, number, number];
@@ -64,8 +74,11 @@ type Kind = 'block' | 'wire' | 'occ' | 'pipe' | 'pipe-end' | 'comp' | 'sub' | 'g
 export interface ViewOptions {
   grid: boolean; occ: boolean; hull: boolean; wire: boolean; pipes: boolean; subs: boolean;
   mirror: boolean; com: boolean;
+  /** labels on interactive/aliased parts — OFF by default (legacy user rule:
+   *  opt-in per session, NOT persisted) */
+  labels: boolean;
 }
-const DEFAULT_OPTS: ViewOptions = { grid: true, occ: false, hull: true, wire: false, pipes: true, subs: true, mirror: true, com: true };
+export const DEFAULT_OPTS: ViewOptions = { grid: true, occ: false, hull: true, wire: false, pipes: true, subs: true, mirror: true, com: true, labels: false };
 
 const DEG = Math.PI / 180;
 const STAND_IN_HEX = 0x88aaff;          // legacy colliderProxy stand-in tint
@@ -125,6 +138,24 @@ export class Engine {
   private wireLine: LineSegments | null = null;
   private occMeshes: Mesh[] = [];
   private pipeMeshes: Object3D[] = [];
+  // ---- cable power-surge (legacy v0.14x): selecting a part sends a
+  // travelling glow along every connected pipe; on arrival the far part
+  // blips. Pulses/blips render additive with depthTest OFF — they shine
+  // THROUGH the hull — and the on-demand loop wakes only while alive.
+  private pipeNet: PipeNetwork = { tubes: [], ends: [], links: [], polys: [], pipes: 0 };
+  private surgeGroup = new Group();
+  private surgeGeo = new SphereGeometry(0.055, 10, 8);
+  private surges: { pts: Vector3[]; cum: number[]; total: number; to: number;
+    mesh: Mesh; t0: number; dur: number }[] = [];
+  private flashes: { grp: Group; mat: MeshBasicMaterial; color: number;
+    t0: number; dur: number }[] = [];
+  /** cumulative ARRIVAL blips (0x9fe0ff) since the current selection began —
+   *  e2e-safe: pins never race the 620 ms live-flash window */
+  private flashArrivals = 0;
+  // ---- floating labels on interactive/aliased parts (legacy v0.15x):
+  // sprites at the part's TOP, never parented to the mirrored part (GPU
+  // quads under a negative-determinant parent render MIRRORED text)
+  private labels: { sp: Sprite; ci: number; dy: number }[] = [];
   private subGroup = new Group();
   private opts: ViewOptions = { ...DEFAULT_OPTS };
   private hullOpacity = 1;
@@ -210,12 +241,16 @@ export class Engine {
     const sun = new DirectionalLight(0xfff2dd, 2.2);
     sun.position.set(-6, 10, -4);
     this.scene.add(sun);
+    this.surgeGroup.raycast = () => {};
     this.scene.add(this.root);
     this.scene.add(this.subGroup);
+    this.scene.add(this.surgeGroup);
     const loop = () => {
       this.controls?.update();                    // damping fires change→invalidate
       this.stepFly();
       this.pulseSelection();
+      this.stepSurges(performance.now());
+      this.stepLabels();
       if (this.needRender && this.renderer) {
         this.needRender = false;
         this.renderer.render(this.scene, this.camera);
@@ -391,6 +426,8 @@ export class Engine {
    *  (cyan = a-end, green = b-end — legacy buildPipes colours, MeshBasic) */
   private buildPipesMesh(bp: Blueprint) {
     const net = buildPipes(bp.data.pipes);
+    this.pipeNet = net;
+    this.clearSurges();                            // paths change on rebuild
     if (!net.tubes.length) return;
     const geos = net.tubes.map(t => {
       const g = new BoxGeometry(t.size[0], t.size[1], t.size[2]);
@@ -451,6 +488,7 @@ export class Engine {
       stand.position.set(box.center[0], box.center[1], box.center[2]);
       stand.scale.set(box.size[0], box.size[1], box.size[2]);   // shared unit box (geo count)
       g.add(stand);
+      this.maybeLabel(c, ci, g);         // INTERACT type or an in-game alias
 
       if (!atlas) return;
       void atlas.geoFor(c.type).then(model => {
@@ -463,6 +501,13 @@ export class Engine {
         g.visible = false;               // stand-in retires (kept for dispose symmetry)
         this.root.add(real);
         this.pushRoot(ci, real);
+        const lab = this.labels.find(l => l.ci === ci);   // labels ride the VISIBLE model
+        if (lab) {
+          real.updateWorldMatrix(true, false);
+          const top = new Box3().setFromObject(real).max.y;
+          lab.dy = top - real.position.y + 0.18;
+          lab.sp.position.set(real.position.x, top + 0.18, real.position.z);
+        }
         this.invalidate();
       });
     });
@@ -855,6 +900,7 @@ export class Engine {
     this.subGroup.visible = this.opts.subs;
     if (this.mirrorPlane) this.mirrorPlane.visible = this.opts.mirror;
     if (this.comMarker) this.comMarker.visible = this.opts.com;
+    for (const l of this.labels) l.sp.visible = this.opts.labels;
   }
   getOptions(): ViewOptions { return { ...this.opts }; }
 
@@ -1021,12 +1067,14 @@ export class Engine {
     this.selSub = -1;
     this.paintSelection();
     this.syncGizmo();
+    this.startSurges(ci);            // cable power-surge: fires on EVERY selection
     this.onSelection?.({ ci: this.selCi, sub: this.selSub });
     this.invalidate();
   }
   selectSub(bi: number) {
     this.selSub = bi;
     this.selCi = -1;
+    this.clearSurges();
     this.paintSelection();
     this.syncGizmo();               // v0.170: subgrids get NO gizmo — they ride their masters
     this.onSelection?.({ ci: this.selCi, sub: this.selSub });
@@ -1066,6 +1114,164 @@ export class Engine {
    *  wakes ONLY while a selection lives */
   private pulseSelection() {
     if (this.hl.pulse(performance.now())) this.needRender = true;
+  }
+
+  // ---------- cable power-surge + arrival blips (legacy startSurges) ----------
+
+  /** source blip / arrival blip: an X-ray flash over the part's VISIBLE
+   *  meshes, world-pinned (matrixWorld copy) into the surge layer — the
+   *  part itself is not re-touched (x-ray overlays excluded). */
+  private buildFlash(ci: number, color = 0x9fe0ff, dur = 620) {
+    const roots = this.compRoots.get(ci);
+    if (!roots?.length) return;
+    const mat = new MeshBasicMaterial({ color, transparent: true, opacity: 0.6,
+      blending: AdditiveBlending, depthTest: false, depthWrite: false, side: DoubleSide });
+    const grp = new Group();
+    grp.raycast = () => {};
+    const vis = roots.filter(o => o.visible);
+    for (const o of vis.length ? vis : roots) o.traverse(x => {
+      const m = x as Mesh;
+      if (!m.isMesh || !m.visible || m.userData.noXray) return;
+      m.updateWorldMatrix(true, false);
+      const ov = new Mesh(m.geometry, mat);
+      ov.matrixAutoUpdate = false;
+      ov.matrix.copy(m.matrixWorld);
+      ov.renderOrder = 16;
+      ov.raycast = () => {};
+      grp.add(ov);
+    });
+    this.scene.add(grp);
+    this.flashes.push({ grp, mat, color, t0: performance.now(), dur });
+    if (color === 0x9fe0ff) this.flashArrivals++;
+  }
+
+  /** selecting a component lights every cable it owns: a bolt travels the
+   *  EXACT drawn polyline away from the picked socket; the far component
+   *  blips on arrival. Degenerate runs never surge (surgePaths). */
+  private startSurges(ci: number) {
+    this.clearSurges();
+    this.flashArrivals = 0;                    // arrivals count per selection
+    if (!this.bp || ci < 0) return;
+    this.buildFlash(ci, 0xffb347, 500);          // source blip: origin unmistakable
+    for (const p of surgePaths(this.pipeNet, ci)) {
+      const pts = p.pts.map(v => new Vector3(v[0]!, v[1]!, v[2]!));
+      const mesh = new Mesh(this.surgeGeo, new MeshBasicMaterial({
+        color: 0xaef3ff, transparent: true, opacity: 0.95,
+        blending: AdditiveBlending, depthTest: false, depthWrite: false }));
+      mesh.renderOrder = 17;
+      mesh.raycast = () => {};
+      mesh.position.copy(pts[0]!);
+      this.surgeGroup.add(mesh);
+      this.surges.push({ pts, cum: p.cum, total: p.total, to: p.to, mesh,
+        t0: performance.now(), dur: Math.min(1600, Math.max(550, p.total * 300)) });
+    }
+    if (this.surges.length) this.invalidate();
+  }
+
+  /** the loop's surge ticker: lerp along the polyline, arrival blips, and the
+   *  on-demand wake ONLY while an animation lives (perf rule) */
+  private stepSurges(now: number) {
+    if (!this.surges.length && !this.flashes.length) return;
+    this.surges = this.surges.filter(s => {
+      const u = (now - s.t0) / s.dur;
+      if (u < 1) {
+        let d = u * s.total, k = 1;
+        while (k < s.cum.length - 1 && s.cum[k]! < d) k++;
+        const t = (d - s.cum[k - 1]!) / Math.max(1e-6, s.cum[k]! - s.cum[k - 1]!);
+        s.mesh.position.lerpVectors(s.pts[k - 1]!, s.pts[k]!, Math.min(1, Math.max(0, t)));
+        return true;
+      }
+      s.mesh.removeFromParent();
+      (s.mesh.material as MeshBasicMaterial).dispose();
+      this.buildFlash(s.to);
+      return false;
+    });
+    this.flashes = this.flashes.filter(f => {
+      if (now - f.t0 < f.dur) {
+        f.mat.opacity = 0.6 * Math.pow(1 - (now - f.t0) / f.dur, 2);
+        return true;
+      }
+      this.scene.remove(f.grp);
+      f.mat.dispose();
+      return false;
+    });
+    this.needRender = true;
+  }
+
+  private clearSurges() {
+    for (const s of this.surges) {
+      s.mesh.removeFromParent();
+      (s.mesh.material as MeshBasicMaterial).dispose();
+    }
+    this.surges = [];
+    for (const f of this.flashes) {
+      this.scene.remove(f.grp);
+      f.mat.dispose();
+    }
+    this.flashes = [];
+  }
+
+  // ---------- floating labels ----------
+
+  /** the legacy canvas chip: dark plate + monospace text, gold for an
+   *  INTERACT type, BLUE for the player-authored alias (alias always wins) */
+  private makeLabel(text: string, blue: boolean): Sprite {
+    const cv = document.createElement('canvas');
+    let ctx = cv.getContext('2d')!;
+    ctx.font = 'bold 44px monospace';
+    const w = Math.max(72, Math.ceil(ctx.measureText(text).width) + 28);
+    cv.width = w;
+    cv.height = 64;
+    ctx = cv.getContext('2d')!;
+    ctx.fillStyle = 'rgba(8,12,16,0.72)';
+    ctx.fillRect(0, 0, w, 64);
+    ctx.font = 'bold 44px monospace';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = blue ? '#7fd0ff' : '#ffd479';
+    ctx.fillText(text, 14, 34);
+    const sp = new Sprite(new SpriteMaterial({
+      map: new CanvasTexture(cv), depthTest: false, transparent: true }));
+    sp.scale.set(w / 64 * 0.3, 0.3, 1);
+    sp.renderOrder = 10;
+    sp.raycast = () => {};                       // labels are never pick targets
+    return sp;
+  }
+
+  /** a label above an INTERACT/aliased part, riding its CURRENT top; the
+   *  real model arrival re-measures dy (labels ride the VISIBLE model) */
+  private maybeLabel(c: BlueprintComponent, ci: number, root: Group) {
+    const alias = (c.alias ?? '').trim();
+    const text = alias || INTERACT[c.type];
+    if (!text) return;
+    const sp = this.makeLabel(text, !!alias);
+    root.updateWorldMatrix(true, false);
+    const top = new Box3().setFromObject(root).max.y;
+    sp.position.set(root.position.x, top + 0.18, root.position.z);
+    sp.userData = { isLabel: true, ci };
+    sp.visible = this.opts.labels;
+    this.root.add(sp);
+    this.labels.push({ sp, ci, dy: top - root.position.y + 0.18 });
+  }
+
+  /** labels follow dragged/moved parts every frame (legacy loop rule): they
+   *  ride the VISIBLE root's position; no invalidate (movers already do) */
+  private stepLabels() {
+    if (!this.opts.labels || !this.labels.length) return;
+    for (const l of this.labels) {
+      const roots = this.compRoots.get(l.ci);
+      if (!roots?.length) continue;
+      const o = roots.find(r => r.visible) ?? roots[0]!;
+      l.sp.position.set(o.position.x, o.position.y + l.dy, o.position.z);
+    }
+  }
+
+  private clearLabels() {
+    for (const { sp } of this.labels) {
+      sp.removeFromParent();
+      sp.material.map?.dispose();
+      sp.material.dispose();
+    }
+    this.labels = [];
   }
 
   /** camera fly: glides the orbit pivot onto the part (manual triggers only —
@@ -1424,6 +1630,38 @@ export class Engine {
 
   get blueprint(): Blueprint | null { return this.bp; }
 
+  /** e2e/selftest pin (legacy selftest surges=true): the LIVE surge state —
+   *  one pulse per connected pipe, each with a real target and length, all
+   *  additive + depthTest OFF (visible THROUGH the hull) */
+  surgeState() {
+    return {
+      surges: this.surges.map(s => ({
+        to: s.to, total: Math.round(s.total * 1000) / 1000, dur: Math.round(s.dur),
+      })),
+      flashes: this.flashes.length,
+      arrivals: this.flashArrivals,
+      sourceBlip: this.flashes.some(f => f.color === 0xffb347),
+      additiveNoDepth: this.surges.length > 0 && this.surges.every(s => {
+        const m = s.mesh.material as MeshBasicMaterial;
+        return m.blending === AdditiveBlending && m.depthTest === false
+          && m.depthWrite === false;
+      }),
+      links: this.pipeNet.links.length,
+    };
+  }
+
+  /** e2e pin: label chips exist and follow the labels option; alias chips
+   *  (blue) counted separately from INTERACT-type chips */
+  labelState() {
+    return {
+      total: this.labels.length,
+      shown: this.labels.filter(l => l.sp.visible).length,
+      aliased: this.labels.filter(l =>
+        ((this.bp?.data.components[l.ci]?.alias ?? '') as string).trim() !== '').length,
+      on: this.opts.labels,
+    };
+  }
+
   /** re-run the whole load with the CURRENT bp (block/wire edits mutate bp
    *  outside the engine; the merged geometry is rebuilt wholesale) */
   reload() { if (this.bp) this.load(this.bp, this.realModelsOn ? this.atlasRef : null); }
@@ -1522,6 +1760,8 @@ export class Engine {
     this.batch = null;
     this.hl.clearBoxes();
     this.hl.clearXray();
+    this.clearSurges();
+    this.clearLabels();
     this.selCi = this.selSub = -1;
   }
 
@@ -1530,6 +1770,9 @@ export class Engine {
     this.disposeScene();
     this.renderer?.domElement.removeEventListener('webglcontextrestored', this.onRestore);
     this.unitBox.dispose();
+    this.surgeGeo.dispose();
+    this.clearSurges();
+    this.clearLabels();
     this.occ?.dispose();
     this.occ = null;
     this.hl.dispose();

@@ -193,9 +193,38 @@ new build dep, kept inside `app/`).
   item ids (fixture ids excluded). Pins: mass.test (symmetric CoM,
   calibration total + floor, corpus ISW density sanity) + e2e (readout,
   marker toggle, hi-def rebuild still draws, wslink href).
-    Remaining gaps (next commits): cable power-surges + X-ray glow, labels,
-    aero/wind/flow/thrust/seal + flight UI, dashboards, hull element list,
-    calibrated-mass report wiring beyond the live readout.
+  dashboards (buildDashboard: generated board/elements, PRE-MIRRORED canvas
+  text) + the calibrated live readout LANDED with the P3/gizmo commits.
+- **POWER-SURGE + LABELS — landed** (legacy v0.14x cable power-surge +
+  v0.15x interactive labels): pure `surgePaths()` in pipes.ts — the network
+  now records per-pipe view-space polylines + component links; the bolt
+  walks AWAY from the picked socket (b-side hits reverse the polyline),
+  degenerate <5 cm runs never surge. Engine `startSurges` fires on EVERY
+  select(): one additive depthTest-OFF pulse per connected pipe (travel
+  550–1600 ms along the EXACT drawn cable path, joint zigzag included), an
+  orange SOURCE blip on the picked part and a cyan ARRIVAL blip on the far
+  one (world-pinned matrixWorld copies; x-ray overlays excluded), with a
+  CUMULATIVE arrival counter so pins never race the 620 ms flash window;
+  the loop wakes only while an animation lives (perf rule). Floating
+  labels: INTERACT type table + `components[].alias` (the player's text
+  always wins, BLUE chip vs gold), canvas chips above the VISIBLE model's
+  top (re-measured when the real model streams in), never parented under
+  the mirrored part (negative-det sprites render mirrored text), never
+  pick targets, OFF by default (opt-in `opt-labels` row, not persisted —
+  legacy user rule). The suite also caught a REAL small-window bug: one
+  extra view-options row crushed the component list to 8 px at 1280×720
+  (rows rendered clipped, clicks intercepted) — the mass/options block now
+  shrinks with its own scroll and the list keeps a 160 px minimum.
+  Pins: pipes.surgePaths (walk both directions, exact reversal, cum==
+  total, degenerate skip) + e2e `select.spec` (one pulse per connected
+  pipe, additive+depthTest-off, arrivals == cable degree, deselect
+  clears; label opt-in lifecycle through the real checkbox incl. the
+  mobile drawer). Gates: vitest 135/135, tsc strict clean, Playwright
+  46 pass / 18 desktop-only skips ×2 consecutive runs (config workers
+  capped at 3 — the engine-heavy suite + lazy Editor chunk starved rAF at
+  6 parallel on this box).
+  Remaining gaps (next): aero/wind/flow/thrust/seal + flight UI, hull
+  element list, streamlines/windsock HUD, P4 perf (BatchedMesh/?perf/wasm).
 - **P4 — perf**: BatchedMesh proxies, ?perf port, wasm benchmark of
   candidate 1, optional WebGPU flag.
 - **P5 — parity gate + cutover**: Playwright suite mirrors the old suites

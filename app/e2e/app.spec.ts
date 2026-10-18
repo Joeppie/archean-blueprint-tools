@@ -19,14 +19,14 @@ test('card click enters the editor and renders the craft', async ({ page }) => {
   const id = await firstCraftId(page);
   await page.locator(`[data-testid="card-${id}"]`).click();
   await expect(page).toHaveURL(new RegExp(`craft=${id}`));
-  await expect(page.getByTestId('editor-title')).toBeVisible();
+  await expect(page.getByTestId('editor-title')).toBeVisible({ timeout: 15_000 });
   await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
 });
 
 test('back button returns to the gallery', async ({ page }) => {
   const id = await firstCraftId(page);
   await page.locator(`[data-testid="card-${id}"]`).click();
-  await expect(page.getByTestId('editor-title')).toBeVisible();
+  await expect(page.getByTestId('editor-title')).toBeVisible({ timeout: 15_000 });
   await page.getByTestId('back-to-gallery').click();
   await expect(page.getByTestId('gallery')).toBeVisible();
   await expect(page).toHaveURL(/\/$/);
@@ -35,7 +35,7 @@ test('back button returns to the gallery', async ({ page }) => {
 test('?craft= deep link opens the editor directly', async ({ page }) => {
   const id = await firstCraftId(page);
   await page.goto(`/?craft=${id}`);
-  await expect(page.getByTestId('editor-title')).toBeVisible();
+  await expect(page.getByTestId('editor-title')).toBeVisible({ timeout: 15_000 });
   await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
 });
 

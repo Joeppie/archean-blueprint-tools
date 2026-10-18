@@ -142,6 +142,7 @@ function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHullOpaci
       <Check testid="opt-pipes" label="pipes (cables)" checked={p.opts.pipes} onChange={v => p.onOpt('pipes', v)} />
       <Check testid="opt-subs" label="subgrids (doors/hatches)" checked={p.opts.subs} onChange={v => p.onOpt('subs', v)} />
       <Check testid="opt-mirror" label="mirror plane (x symmetry)" checked={p.opts.mirror} onChange={v => p.onOpt('mirror', v)} />
+      <Check testid="opt-labels" label="labels on interactive/aliased parts" checked={p.opts.labels} onChange={v => p.onOpt('labels', v)} />
       <Check testid="opt-real" label="real game models (off = low-poly)" checked={p.realModels} onChange={p.onRealModels} />
       <Check testid="opt-gizmo" label="gizmo on selection (Shift snaps)" checked={p.gizmoOn} onChange={p.onGizmo} />
       <Check testid="opt-hidef" label="hi-def meshes (full game meshes)" checked={p.hiDef} onChange={p.onHiDef} />
@@ -537,11 +538,18 @@ function SubPanel(p: Props) {
 export default function Panel(p: Props) {
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-panel text-ink" data-testid="panels">
-      <MassCoM engine={p.engine} rev={p.rev} />
-      <ViewOpts opts={p.opts} onOpt={p.onOpt} hullOpacity={p.hullOpacity} onHullOpacity={p.onHullOpacity}
-        realModels={p.realModels} onRealModels={p.onRealModels} gizmoOn={p.gizmoOn} onGizmo={p.onGizmo}
-        hiDef={p.hiDef} onHiDef={p.onHiDef} />
-      <div className="flex min-h-0 flex-[2] flex-col border-t border-white/10">
+      {/* mass + view options SHRINK with their own scroll on short windows:
+          once the fixed content exceeded the viewport it silently crushed
+          the component list to a few pixels (rows rendered outside the
+          clipped box = clicks intercepted by the inspector) — caught by
+          sym.spec at the 1280×720 default viewport */}
+      <div className="min-h-0 max-h-[55%] shrink overflow-y-auto">
+        <MassCoM engine={p.engine} rev={p.rev} />
+        <ViewOpts opts={p.opts} onOpt={p.onOpt} hullOpacity={p.hullOpacity} onHullOpacity={p.onHullOpacity}
+          realModels={p.realModels} onRealModels={p.onRealModels} gizmoOn={p.gizmoOn} onGizmo={p.onGizmo}
+          hiDef={p.hiDef} onHiDef={p.onHiDef} />
+      </div>
+      <div className="flex min-h-[160px] flex-[2] flex-col border-t border-white/10">
         <h3 className="px-3 pt-2 text-[11px] font-semibold uppercase tracking-wide text-ink-dim">Components</h3>
         <CompList bp={p.bp} sel={p.sel} onSelect={p.onSelect} onSelectSub={p.onSelectSub} />
       </div>
