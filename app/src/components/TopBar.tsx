@@ -23,6 +23,8 @@ interface Props {
   onSave: (as?: string) => void;
   onClose: () => void;
   onBack: () => void;
+  /** File ▾ redownload: the ONLY user-forced network fetch for a cached craft */
+  onRefresh?: () => void;
   children?: React.ReactNode;              // right side: panel toggle etc.
 }
 
@@ -70,6 +72,7 @@ export default function TopBar(p: Props) {
             {item(p.dirty ? '● Save (download)' : 'Save (download)', () => p.onSave(), 'save')}
             {item('Save as…', () => p.onSave('archean-craft.json'), 'saveas')}
             <div className="my-1 border-t border-white/10" />
+            {p.onRefresh && item('Refresh craft (redownload)', p.onRefresh, 'refresh')}
             {item('Close → gallery', p.onClose, 'close')}
           </div>
         )}

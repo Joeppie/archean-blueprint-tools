@@ -28,6 +28,7 @@ import { makeCtx, resetComponent, setDataField, setOrientation, setPos, setCompF
 import { makePipe } from './engine/wireops';
 import { normalizeDoc } from './engine/normalize';
 import { newCraftDoc, newComponent } from './engine/newcraft';
+import { loadCraft } from './crafts';
 
 export const craftName = (id: string) =>
   GALLERY.find(g => g.id === id)?.name ?? `Workshop ${id}`;
@@ -128,6 +129,11 @@ function Editor({ craft, onBack }: { craft: string | null; onBack: () => void })
   // KSP part placement: the catalog type currently HELD (null = nothing)
   const [placing, setPlacing] = useState<string | null>(null);
   const [manifest, setManifest] = useState<Record<string, { mass: number; module: string }> | null>(null);
+  // blueprint download state (overlay): null = nothing in flight / cached
+  const [dl, setDl] = useState<{ frac: number | null; bytes: number } | null>(null);
+  const [dlErr, setDlErr] = useState(false);
+  const [retrySeq, setRetrySeq] = useState(0);
+  const forceRef = useRef(false);             // File ▾ Refresh: one-shot re-download
   const engineRef = useRef<Engine | null>(null);
   const ctxRef = useRef<EditCtx | null>(null);
   const dirtyRef = useRef(false);
@@ -151,13 +157,17 @@ function Editor({ craft, onBack }: { craft: string | null; onBack: () => void })
     setBp(null);
     if (!craft) { openText(emitNew()); return; }    // New craft (craft === null)
     let dead = false;
+    const force = forceRef.current; forceRef.current = false;
+    setDlErr(false);
     (async () => {
-      const res = await fetch(`/corpus/${craft}/blueprint.json`);
-      if (!res.ok || dead) return;
-      if (!dead) openText(await res.text());
+      const r = await loadCraft(craft, (frac, bytes) => { if (!dead) setDl({ frac, bytes }); }, force);
+      if (dead) return;
+      setDl(null);
+      if (!r) { setDlErr(true); return; }           // no cache + network failed
+      openText(r.text);                             // cache hit: no overlay, no network
     })().catch(console.error);
     return () => { dead = true; };
-  }, [craft, openText]);
+  }, [craft, openText, retrySeq]);
 
   const emitNew = () => {
     // imported lazily to keep this component's top tidy; doc → text round
@@ -403,7 +413,8 @@ function Editor({ craft, onBack }: { craft: string | null; onBack: () => void })
       }}>
       <TopBar mode={mode} onMode={setMode} dirty={dirty} title={name} craftId={craft}
         onNew={() => { ctxRef.current = null; setBp(null); openText(emitNew()); }}
-        onOpen={openFile} onSave={save} onClose={onBack} onBack={onBack}>
+        onOpen={openFile} onSave={save} onClose={onBack} onBack={onBack}
+        onRefresh={craft ? () => { forceRef.current = true; setRetrySeq(s => s + 1); } : undefined}>
         <button data-testid="save-btn" onClick={() => save()}
           className={`ksp-btn shrink-0 px-2.5 py-1 text-[12px] ${dirty ? 'on font-semibold' : 'text-ink-dim'}`}>
           {dirty ? '● Save' : 'Save'}
@@ -462,6 +473,53 @@ function Editor({ craft, onBack }: { craft: string | null; onBack: () => void })
           {/* KSP bottom-right: the camera cluster over the viewport */}
           <CameraCluster engine={engine} />
         </main>
+        {(dl || dlErr) && (
+          <DownloadOverlay name={name} dl={dl} err={dlErr}
+            onRetry={() => { forceRef.current = true; setRetrySeq(s => s + 1); }}
+            onBack={onBack} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** KSP-style "receiving blueprint" download overlay: shown ONLY while an
+ *  actual download runs (cached crafts open instantly, no overlay, no
+ *  network) — bevelled window, progress bar, percent + KiB; error state
+ *  offers Retry / Gallery. */
+function DownloadOverlay(p: { name: string; dl: { frac: number | null; bytes: number } | null;
+  err: boolean; onRetry: () => void; onBack: () => void }) {
+  const pct = p.dl?.frac != null ? Math.round(p.dl.frac * 100) : null;
+  return (
+    <div data-testid="load-overlay" className="absolute inset-0 z-40 grid place-items-center bg-black/50">
+      <div className="ksp-win w-[340px] max-w-[85vw] rounded-lg px-4 py-4 text-center">
+        <div className="ksp-label mb-1 text-[12px] text-accent">
+          {p.err ? 'Blueprint download failed' : 'Receiving blueprint'}</div>
+        <div className="truncate text-[13px] font-semibold text-ink">{p.name}</div>
+        {p.err ? (
+          <>
+            <div className="mt-2 text-[11px] leading-snug text-ink-dim">
+              This craft is not in the local cache and could not be downloaded.</div>
+            <div className="mt-3 flex justify-center gap-2">
+              <button data-testid="load-retry" className="ksp-btn on px-3 py-1 text-[12px]" onClick={p.onRetry}>Retry</button>
+              <button data-testid="load-back" className="ksp-btn px-3 py-1 text-[12px]" onClick={p.onBack}>Gallery</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="mt-3 h-3 overflow-hidden rounded border border-white/20 bg-black/50">
+              <div data-testid="load-bar"
+                className={`h-full bg-accent/80 ${p.dl && pct === null ? 'w-1/3 animate-pulse' : 'transition-[width] duration-150'}`}
+                style={p.dl && pct !== null ? { width: `${pct}%` } : undefined} />
+            </div>
+            <div data-testid="load-pct" className="mt-1.5 text-[11px] tabular-nums text-ink-dim">
+              {!p.dl ? 'checking cache…'
+                : p.dl.bytes === 0 ? 'receiving…'
+                : pct !== null ? `${pct}% · ${(p.dl.bytes / 1024).toFixed(0)} KiB`
+                : `${(p.dl.bytes / 1024).toFixed(0)} KiB \u2026`}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
