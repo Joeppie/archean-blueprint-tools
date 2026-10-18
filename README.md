@@ -85,6 +85,31 @@ no tool hardcodes a machine path. To point the tools at YOUR Archean install
 `appmanifest_2941660.acf`, `Archean-data/client/blueprints/`,
 `workshop/content/2941660/`) is documented in [LOCATIONS.md](LOCATIONS.md).
 
+## Development setup
+
+```bash
+git clone https://github.com/Joeppie/archean-blueprint-tools.git ~/archean-blueprint-tools
+cd ~/archean-blueprint-tools
+bash tools/install-hooks.sh                               # one-per-clone: the mandatory
+                                                          # checkin gate (credential-shape +
+                                                          # version-string scan, headless
+                                                          # selftest + regtest on viewer edits)
+python3 tools/find_install.py --conf >> blueprints.conf   # optional: point at your local
+                                                          # Archean install (gitignored file)
+cd app && npm install                                     # only for the React app/ rewrite
+```
+
+Clone over HTTPS as above, or use the SSH URL
+(`git@github.com:Joeppie/archean-blueprint-tools.git`) if you have a key on the
+repo. Everything outside `app/` is zero-build — Python 3 + Chromium for the
+test suite, no other dependencies. `blueprints.conf` is the only place a
+machine-local path may live and it is gitignored, so nothing machine-specific
+is ever committed (see `blueprints.conf.example`). The React rewrite in `app/`
+is its own npm project (`npm test` = vitest, `npm run test:e2e` = Playwright,
+`npm run dev`); its phase plan and the current `viewer/` → `app/` porting
+status are in [REWRITE.md](REWRITE.md), and the full contributor guide —
+checkin gate, test suites, release policy — is [AGENTS.md](AGENTS.md).
+
 Useful URL parameters: `?open=<url>` open another blueprint ·
 `?real` full game geometry · `?flow` particles + streamlines ·
 `?hull` / `?occ` toggles · `?cam=x,y,z,tx,ty,tz` camera pose ·
