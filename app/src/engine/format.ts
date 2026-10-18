@@ -81,6 +81,8 @@ export interface PipeSegment {
 }
 
 export interface Pipe {
+  /** cable class: data | lowvoltage | highvoltage | fluid | item */
+  type?: string;
   a_component: number;
   a_port: string;
   b_component: number;

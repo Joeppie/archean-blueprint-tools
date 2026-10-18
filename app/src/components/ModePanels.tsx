@@ -135,6 +135,17 @@ export function WirePanel(p: {
   const used = useMemo(() => connectedPorts(p.bp), [p.bp, p.rev]);
   const open = useMemo(() => unconnectedPorts(p.bp, manifest), [p.bp, manifest, p.rev]);
   const [msg, setMsg] = useState('');
+  const run = (strategy: 'observed' | 'naive') => {
+    if (!p.ctx) return;
+    const before = p.ctx.bp.data.pipes?.length ?? 0;
+    const res = autoWire(p.ctx.bp, manifest, strategy);
+    for (let i = before; i < (p.ctx.bp.data.pipes ?? []).length; i++)
+      docArrayInsert(p.ctx.doc, ['data', 'pipes'], i, docFromValue(p.ctx.bp.data.pipes![i]));
+    setMsg(res.created
+      ? `wired ${res.created} cable${res.created === 1 ? '' : 's'} \u2014 ${strategy === 'observed' ? 'batteries ∥, edges→hubs, routers→computer' : 'nearest free pairs'}`
+      : 'nothing to pair — no compatible free ports remained');
+    p.onApplied();
+  };
   const perKind = WIRE_KINDS.map(k => ({
     kind: k,
     total: census.filter(c => c.kind === k).length,
@@ -154,17 +165,14 @@ export function WirePanel(p: {
         {perKind.length === 0 && <div className="text-[11px] text-ink-dim">no ports on this craft</div>}
         <button data-testid="auto-wire"
           className="mt-2 w-full rounded bg-accent px-2 py-1 text-[12px] font-semibold text-black hover:brightness-110"
-          onClick={() => {
-            if (!p.ctx) return;
-            const before = p.ctx.bp.data.pipes?.length ?? 0;
-            const res = autoWire(p.ctx.bp, manifest);
-            for (let i = before; i < (p.ctx.bp.data.pipes ?? []).length; i++)
-              docArrayInsert(p.ctx.doc, ['data', 'pipes'], i, docFromValue(p.ctx.bp.data.pipes![i]));
-            setMsg(res.created ? `auto-wired ${res.created} cable${res.created === 1 ? '' : 's'} (nearest free pairs)`
-              : 'nothing to pair — no two free ports on different components');
-            p.onApplied();
-          }}>
-          Auto-wire (naive nearest pairs)
+          onClick={() => run('observed')}
+          title="batteries in parallel · pumps & intakes to the nearest junction · data to the nearest router, routers on to the computer">
+          Auto-wire (observed patterns)
+        </button>
+        <button data-testid="auto-wire-naive"
+          className="mt-1 w-full rounded bg-panel2 px-2 py-1 text-[11px] text-ink-dim hover:text-ink"
+          onClick={() => run('naive')}>
+          fallback: naive nearest pairs
         </button>
         {msg && <div className="pt-1 text-[10px] text-ink-dim">{msg}</div>}
       </Sec>

@@ -180,7 +180,7 @@ test.describe('modes, new craft, file menu', () => {
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
     const blocks = await page.evaluate(() =>
       (window as unknown as { __ARCHEAN__?: { stats: () => { blocks: number } } }).__ARCHEAN__!.stats().blocks);
-    expect(blocks).toBe(3);
+    expect(blocks).toBe(5);
     await expect(page.getByTestId('wslink')).toHaveCount(0);        // not a workshop item
     await expect(page.getByTestId('save-btn')).toBeVisible();
   });
@@ -206,7 +206,7 @@ test.describe('modes, new craft, file menu', () => {
     const box = (await canvas.boundingBox())!;
     const before = await page.evaluate(() =>
       (window as unknown as { __ARCHEAN__?: { stats: () => { blocks: number } } }).__ARCHEAN__!.stats().blocks);
-    const pts: [number, number][] = [[0.5, 0.62], [0.5, 0.55], [0.45, 0.6], [0.55, 0.65]];
+    const pts: [number, number][] = [[0.5, 0.62], [0.5, 0.55], [0.5, 0.68], [0.45, 0.6], [0.55, 0.6], [0.42, 0.64], [0.58, 0.64]];
     let after = before;
     for (const [fx, fy] of pts) {
       await canvas.click({ position: { x: box.width * fx, y: box.height * fy } });
@@ -216,7 +216,7 @@ test.describe('modes, new craft, file menu', () => {
       if (after > before) break;
     }
     expect(after, 'a block was placed on the deck').toBe(before + 1);
-    await expect(page.getByTestId('block-edit')).toContainText('Block[3]');
+    await expect(page.getByTestId('block-edit')).toContainText(/Block\[\d+\]/);
   });
 
   test('wire mode: census + auto-wire answers, file menu opens a blueprint', async ({ page }) => {
@@ -226,7 +226,7 @@ test.describe('modes, new craft, file menu', () => {
     await page.getByTestId('mode-wire').click();
     await expect(page.getByTestId('wire-census')).toContainText('connected');
     await page.getByTestId('auto-wire').click();
-    await expect(page.locator('[data-testid="wire-census"] , #root')).toContainText(/auto-wired|nothing to pair/);
+    await expect(page.getByTestId('wire-census')).toContainText(/wired|nothing to pair/);
     // File ▾ → Open file… loads a local blueprint (and normalizes v1 → v2)
     await page.getByTestId('file-menu').click();
     await page.getByTestId('file-open').click();

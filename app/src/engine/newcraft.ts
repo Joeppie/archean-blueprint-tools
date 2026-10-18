@@ -10,7 +10,7 @@ import { docFromValue, type DocNode } from './doc';
 export function newCraftDoc(alias = 'New craft'): DocNode {
   const deck = (pos_z: number) => ({
     colors: [4, 4, 4, 4, 4, 4, 4], frame_x: 0, frame_y: 0, frame_z: 0, material: 0,
-    pos_x: 4, pos_y: 5, pos_z, size_x: 4, size_y: 0, size_z: 0, type: 0,
+    pos_x: 2, pos_y: 5, pos_z, size_x: 8, size_y: 0, size_z: 0, type: 0,
   });
   return docFromValue({
     author: '',
@@ -19,7 +19,7 @@ export function newCraftDoc(alias = 'New craft'): DocNode {
     box_size: { x: 3.0, y: 2.0, z: 3.0 },
     data: {
       alias,
-      blocks: [deck(4), deck(5), deck(6)],
+      blocks: [deck(3), deck(4), deck(5), deck(6), deck(7)],
       colors: new Array(256).fill(null),
       components: [{
         alias: '',

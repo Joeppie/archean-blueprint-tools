@@ -24,7 +24,6 @@ import type { ModelManifest } from './models';
 
 export type WireKind = 'data' | 'lowvoltage' | 'highvoltage' | 'fluid' | 'item';
 export const WIRE_KINDS: WireKind[] = ['data', 'lowvoltage', 'highvoltage', 'fluid', 'item'];
-const AUTO_KINDS: WireKind[] = ['data', 'lowvoltage', 'highvoltage'];
 
 export interface PortInfo { ci: number; type: string; name: string; kind: WireKind; at: [number, number, number] }
 
@@ -106,46 +105,178 @@ export interface AutoWireResult {
 }
 
 /**
- * NAIVE auto-wiring: per electric kind, repeatedly join the globally nearest
- * pair of free ports living on DIFFERENT components. Writes straight into
- * bp.data.pipes (FLATTENED component indices); the caller mirrors each new
- * pipe into the doc (doc.ts value builder) and reloads the scene.
+ * OBSERVED-PATTERN wiring (user's rules from the corpus, v-next):
+ *  • power (lv/hv): BATTERIES FIRST IN PARALLEL (nearest battery-battery
+ *    pair repeatedly), then every other device port to the nearest free
+ *    port on a hub (battery or *Junction);
+ *  • fluid: pumps/tanks/ports/reactors are EDGES; FluidJunction is the hub
+ *    ("intakes to the nearest of the 4 junction ports", "pumps to the
+ *    single ports" = the least-loaded junction) — edge ports go to the
+ *    nearest junction with capacity, junctions that stay isolated link to
+ *    their nearest junction;
+ *  • data: devices to the nearest ROUTER (DataJunction/DataBridge) with a
+ *    free port; routers then daisy-chain to the nearest other router and
+ *    finally to a COMPUTER sink (Computer/MiniComputer).
+ * Naive nearest-pair remains available as the fallback strategy.
+ * Ports hold ONE cable each; components never self-wire.
  */
-export function autoWire(bp: Blueprint, manifest: ModelManifest | null): AutoWireResult {
+
+const BATTERY = /^(LowVoltage|HighVoltage)Battery$/;
+const JUNCTION = /Junction$|Bridge$/;
+const COMPUTER = /^(MiniComputer|Computer)$/;
+const DATA_ROUTER = /^(DataJunction|DataBridge)$/;
+const FLUID_HUB = /^FluidJunction$/;
+
+const isPowerKind = (k: WireKind) => k === 'lowvoltage' || k === 'highvoltage';
+
+export type WireStrategy = 'observed' | 'naive';
+
+export function autoWire(bp: Blueprint, manifest: ModelManifest | null,
+  strategy: WireStrategy = 'observed'): AutoWireResult {
   const flat = flattenComponents(bp);
   const topToFlat = new Map<number, number>();
   flat.forEach((f, i) => { if (f.top >= 0) topToFlat.set(f.top, i); });
   bp.data.pipes = bp.data.pipes ?? [];
-  let free = unconnectedPorts(bp, manifest).filter(p => AUTO_KINDS.includes(p.kind));
   const created0 = bp.data.pipes.length;
   const skipped: AutoWireResult['skipped'] = [];
-  for (const kind of AUTO_KINDS) {
-    for (;;) {
-      const ports = free.filter(p => p.kind === kind);
-      if (ports.length < 2) break;
-      let bi = -1, bj = -1, best = Infinity;
-      for (let i = 0; i < ports.length; i++)
-        for (let j = i + 1; j < ports.length; j++) {
-          if (ports[i]!.ci === ports[j]!.ci) continue;
-          const d = Math.hypot(ports[i]!.at[0] - ports[j]!.at[0],
-            ports[i]!.at[1] - ports[j]!.at[1], ports[i]!.at[2] - ports[j]!.at[2]);
-          if (d < best) { best = d; bi = i; bj = j; }
-        }
-      if (bi < 0) {
-        for (const p of ports) skipped.push({ port: p, why: 'no other component has a free port' });
-        free = free.filter(p => p.kind !== kind);
-        break;
-      }
-      const A = ports[bi]!, B = ports[bj]!;
-      bp.data.pipes.push({
-        a_component: topToFlat.get(A.ci)!, a_port: A.name,
-        b_component: topToFlat.get(B.ci)!, b_port: B.name,
-        radius: 0.02,
-        segments: route(A.at, B.at, kind) as never,
-        type: kind,
-      } as never);
-      free = free.filter(p => p !== A && p !== B);
+  let free = unconnectedPorts(bp, manifest);
+
+  const link = (A: PortInfo, B: PortInfo) => {
+    bp.data.pipes!.push({
+      a_component: topToFlat.get(A.ci)!, a_port: A.name,
+      b_component: topToFlat.get(B.ci)!, b_port: B.name,
+      radius: A.kind === 'fluid' ? 0.045 : 0.02,
+      segments: route(A.at, B.at, A.kind) as never,
+      type: A.kind,
+    } as never);
+    free = free.filter(p => p !== A && p !== B);
+  };
+  const d = (a: PortInfo, b: PortInfo) => Math.hypot(a.at[0] - b.at[0], a.at[1] - b.at[1], a.at[2] - b.at[2]);
+  const other = (p: PortInfo) => free.filter(q => q.kind === p.kind && q.ci !== p.ci);
+  const nearest = (p: PortInfo, pool: (q: PortInfo) => boolean,
+    load?: Map<number, number>): PortInfo | null => {
+    let best: PortInfo | null = null;
+    for (const q of other(p)) {
+      if (!pool(q)) continue;
+      if (!best) { best = q; continue; }
+      const lq = load ? (load.get(q.ci) ?? 0) : 0, lb = load ? (load.get(best.ci) ?? 0) : 0;
+      if (lq < lb || (lq === lb && d(p, q) < d(p, best))) best = q;
     }
+    return best;
+  };
+  const hubLoad = (kinds: WireKind[], isHub: (t: string) => boolean) => {
+    const m = new Map<number, number>();
+    const used = connectedPorts(bp);
+    for (const c of portCensus(bp, manifest))
+      if (c.kind && kinds.includes(c.kind) && isHub(c.type) && used.has(`${c.ci}/${c.name}`))
+        m.set(c.ci, (m.get(c.ci) ?? 0) + 1);
+    return m;
+  };
+
+  for (const kind of WIRE_KINDS) {
+    if (!free.some(p => p.kind === kind)) continue;
+    if (strategy === 'naive') {                      // plain nearest pair
+      for (;;) {
+        const ports = free.filter(p => p.kind === kind);
+        let bi = -1, bj = -1, best = Infinity;
+        for (let i = 0; i < ports.length; i++)
+          for (let j = i + 1; j < ports.length; j++) {
+            if (ports[i]!.ci === ports[j]!.ci) continue;
+            const dd = d(ports[i]!, ports[j]!);
+            if (dd < best) { best = dd; bi = i; bj = j; }
+          }
+        if (bi < 0 || bj < 0) break;
+        link(ports[bi]!, ports[bj]!);
+      }
+      continue;
+    }
+    // ---- observed patterns ----
+    if (isPowerKind(kind)) {
+      // 1. batteries in parallel: repeatedly the nearest bat-bat pair
+      for (;;) {
+        const bats = free.filter(p => BATTERY.test(p.type));
+        let bi = -1, bj = -1, best = Infinity;
+        for (let i = 0; i < bats.length; i++)
+          for (let j = i + 1; j < bats.length; j++) {
+            if (bats[i]!.ci === bats[j]!.ci) continue;
+            const dd = d(bats[i]!, bats[j]!);
+            if (dd < best) { best = dd; bi = i; bj = j; }
+          }
+        if (bi < 0 || bj < 0) break;
+        link(bats[bi]!, bats[bj]!);
+      }
+      // 2. device ports → nearest free hub port, LEAST-LOADED hub first
+      const load = hubLoad([kind], t => BATTERY.test(t) || JUNCTION.test(t));
+      for (const p of free.filter(q => q.kind === kind && !BATTERY.test(q.type))) {
+        const hub = nearest(p, q => BATTERY.test(q.type) || JUNCTION.test(q.type), load);
+        if (hub) { link(p, hub); load.set(hub.ci, (load.get(hub.ci) ?? 0) + 1); }
+      }
+      // batteries still alone (e.g. a lone battery) → nearest hub too
+      for (const p of free.filter(q => q.kind === kind)) {
+        const hub = nearest(p, q => JUNCTION.test(q.type), load);
+        if (hub) link(p, hub);
+      }
+    } else if (kind === 'fluid') {
+      const load = hubLoad(['fluid'], t => FLUID_HUB.test(t));
+      // edges (ports/tanks/pumps/reactors…) → nearest junction with capacity
+      for (const p of free.filter(q => q.kind === 'fluid' && !FLUID_HUB.test(q.type))) {
+        const hub = nearest(p, q => FLUID_HUB.test(q.type), load);
+        if (hub) { link(p, hub); load.set(hub.ci, (load.get(hub.ci) ?? 0) + 1); }
+      }
+      // junctions left isolated → link junction to nearest junction
+      for (;;) {
+        const js = free.filter(q => q.kind === 'fluid' && FLUID_HUB.test(q.type));
+        let bi = -1, bj = -1, best = Infinity;
+        for (let i = 0; i < js.length; i++)
+          for (let j = i + 1; j < js.length; j++) {
+            if (js[i]!.ci === js[j]!.ci) continue;
+            const dd = d(js[i]!, js[j]!);
+            if (dd < best) { best = dd; bi = i; bj = j; }
+          }
+        if (bi < 0 || bj < 0) break;
+        link(js[bi]!, js[bj]!);
+      }
+    } else if (kind === 'data') {
+      const load = hubLoad(['data'], t => DATA_ROUTER.test(t));
+      // devices → nearest router
+      for (const p of free.filter(q => q.kind === 'data' && !DATA_ROUTER.test(q.type) && !COMPUTER.test(q.type))) {
+        const hub = nearest(p, q => DATA_ROUTER.test(q.type), load);
+        if (hub) { link(p, hub); load.set(hub.ci, (load.get(hub.ci) ?? 0) + 1); }
+      }
+      // routers → another router (prefer least loaded) — daisy chain
+      for (;;) {
+        const rs = free.filter(q => q.kind === 'data' && DATA_ROUTER.test(q.type));
+        let bi = -1, bj = -1, best = Infinity;
+        for (let i = 0; i < rs.length; i++)
+          for (let j = i + 1; j < rs.length; j++) {
+            if (rs[i]!.ci === rs[j]!.ci) continue;
+            const dd = d(rs[i]!, rs[j]!);
+            if (dd < best) { best = dd; bi = i; bj = j; }
+          }
+        if (bi < 0 || bj < 0) break;
+        link(rs[bi]!, rs[bj]!);
+      }
+      // anything still free (routers, computers, strays) → nearest
+      // router-with-capacity, else computer, else any port: last resort
+      for (const p of free.filter(q => q.kind === 'data')) {
+        const hub = nearest(p, q => DATA_ROUTER.test(q.type), load)
+          ?? nearest(p, q => COMPUTER.test(q.type))
+          ?? nearest(p, () => true);
+        if (hub) { link(p, hub); if (DATA_ROUTER.test(hub.type)) load.set(hub.ci, (load.get(hub.ci) ?? 0) + 1); }
+      }
+    } else {
+      // item + unknown kinds: naive pairing
+      for (;;) {
+        const ports = free.filter(p => p.kind === kind);
+        if (ports.length < 2) break;
+        const A = ports[0]!;
+        const B = nearest(A, () => true);
+        if (!B) break;
+        link(A, B);
+      }
+    }
+    for (const p of free.filter(q => q.kind === kind))
+      skipped.push({ port: p, why: 'no compatible free port remained' });
   }
   return { created: bp.data.pipes.length - created0, skipped };
 }
