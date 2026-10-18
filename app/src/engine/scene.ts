@@ -1504,6 +1504,34 @@ export class Engine {
     return null;
   }
   get manifest() { return this.atlasRef?.manifest ?? null; }
+
+  /** PLACE mode (KSP part pickup): the surface point under the cursor in
+   *  FILE space — same view→file map as pickCell. Any visible hull/part/
+   *  subgrid/ground surface counts; the point rides the face normal by a
+   *  hair so the new part sits ON the surface it was clicked on. */
+  pickPlacePoint(clientX: number, clientY: number): [number, number, number] | null {
+    const c = this.renderer?.domElement as HTMLCanvasElement | null;
+    if (!c || !this.bp) return null;
+    const rect = c.getBoundingClientRect();
+    const ndc = new Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+    const ray = new Raycaster();
+    ray.setFromCamera(ndc, this.camera);
+    const hits = ray.intersectObjects([this.root, this.subGroup], true);
+    for (const h of hits) {
+      let o: Object3D | null = h.object;
+      while (o && !o.userData.kind) o = o.parent;
+      const kind = o?.userData.kind as Kind | undefined;
+      if (kind !== 'block' && kind !== 'comp' && kind !== 'sub' && kind !== 'ground') continue;
+      const n = h.face
+        ? new Vector3(h.face.normal.x, h.face.normal.y, -h.face.normal.z)
+        : new Vector3(0, 1, 0);
+      const px = h.point.x + n.x * 0.01 - this.moff.x;
+      const py = h.point.y + n.y * 0.01 - this.moff.y;
+      const pz = h.point.z + n.z * 0.01 - this.moff.z;
+      return [px, py, -pz];
+    }
+    return null;
+  }
   /** test/UI hooks: world-ish VIEW pose (pre-moff, file-convention friendly) */
   compViewPos(ci: number): Vec3D | null {
     const c = this.bp?.data.components[ci];

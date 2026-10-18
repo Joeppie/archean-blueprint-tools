@@ -27,7 +27,7 @@ import { makeCtx, resetComponent, setDataField, setOrientation, setPos, setCompF
   setCompColor, serializeSave, type EditCtx } from './engine/edit';
 import { makePipe } from './engine/wireops';
 import { normalizeDoc } from './engine/normalize';
-import { newCraftDoc } from './engine/newcraft';
+import { newCraftDoc, newComponent } from './engine/newcraft';
 
 export const craftName = (id: string) =>
   GALLERY.find(g => g.id === id)?.name ?? `Workshop ${id}`;
@@ -125,6 +125,9 @@ function Editor({ craft, onBack }: { craft: string | null; onBack: () => void })
   const [triDraft, setTriDraft] = useState<number[][]>([]);
   const [triSel, setTriSel] = useState(-1);
   const [triBrush, setTriBrush] = useState<number[]>([51, 51, 51, 51, 51]);
+  // KSP part placement: the catalog type currently HELD (null = nothing)
+  const [placing, setPlacing] = useState<string | null>(null);
+  const [manifest, setManifest] = useState<Record<string, { mass: number; module: string }> | null>(null);
   const engineRef = useRef<Engine | null>(null);
   const ctxRef = useRef<EditCtx | null>(null);
   const dirtyRef = useRef(false);
@@ -140,7 +143,7 @@ function Editor({ craft, onBack }: { craft: string | null; onBack: () => void })
     normalizeDoc(d);                              // convert-on-open migration
     ctxRef.current = makeCtx(d, docValue(d) as Blueprint);
     dirtyRef.current = false;
-    setDirty(false); setSel({ ci: -1, sub: -1 }); setBlockSel(-1);
+    setDirty(false); setSel({ ci: -1, sub: -1 }); setBlockSel(-1); setPlacing(null);
     setBp(ctxRef.current.bp);
   }, []);
 
@@ -261,14 +264,17 @@ function Editor({ craft, onBack }: { craft: string | null; onBack: () => void })
         const cur = engineRef.current?.getOptions();
         if (cur) toggleOpt(map[e.key]!, !cur[map[e.key]!]);
       }
-      if (e.key === 'Escape') { engineRef.current?.select(-1); setBlockSel(-1); }
+      if (e.key === 'Escape') {
+        if (placing) { setPlacing(null); return; }   // KSP: drop the HELD part first
+        engineRef.current?.select(-1); setBlockSel(-1);
+      }
       // NOTE: deleting a block goes through the BlockPanel button ONLY —
       // it mutates bp AND the doc together; a bare key must never touch bp
       // without the doc mirror.
     };
     addEventListener('keydown', h);
     return () => removeEventListener('keydown', h);
-  }, [save, toggleOpt]);
+  }, [save, toggleOpt, placing]);
 
   // blocks-mode canvas handling: place (brush) or select, via engine.pickCell
   const onBlockPick = useCallback((clientX: number, clientY: number) => {
@@ -300,6 +306,25 @@ function Editor({ craft, onBack }: { craft: string | null; onBack: () => void })
     if (r.bi >= 0) { setBlockSel(placeBlock(ctx, r.cell, brush)); sceneChanged(); }
     else setBlockSel(-1);
   }, [blockTool, blockSub, brush, triDraft, triBrush, sceneChanged]);
+
+  /** CATALOG placement (KSP part pickup): land the HELD type at the picked
+   *  surface — bp + doc together, then the debounced scene reload; the part
+   *  auto-selects once the fresh roots exist (load() clears the selection,
+   *  so the select rides just behind the 180 ms reload). Like KSP, one
+   *  click places ONE part and the hand empties. */
+  const onPlacePoint = useCallback((clientX: number, clientY: number) => {
+    const e = engineRef.current, ctx = ctxRef.current;
+    if (!e || !ctx || !placing) return;
+    const p = e.pickPlacePoint(clientX, clientY);
+    if (!p) return;
+    setPlacing(null);
+    const comp = newComponent(placing, e.manifest?.[placing]?.module ?? 'ARCHEAN_general', p);
+    ctx.bp.data.components.push(comp as never);
+    const at = ctx.bp.data.components.length - 1;
+    docArrayInsert(ctx.doc, ['data', 'components'], at, docFromValue(comp));
+    sceneChanged();
+    setTimeout(() => engineRef.current?.select(at), 350);
+  }, [placing, sceneChanged]);
 
   const setReal = useCallback((on: boolean) => {
     setRealModels(on);
@@ -410,13 +435,25 @@ function Editor({ craft, onBack }: { craft: string | null; onBack: () => void })
                 edits={edits} inspKey={inspKey} markDirty={markDirty}
                 readOnly={mode === 'view'}
                 bottom={modePanel}
+                manifest={manifest}
+                placingType={placing}
+                onPlaceType={(t) => { setPlacing(t); if (t && mode === 'view') setMode('edit'); }}
               />
             )}
           </aside>
         )}
         <main className="relative min-w-0 flex-1">
           <Viewport bp={bp} onPick={setHit} onEngine={onEngine}
-            mode={mode} onBlockPick={onBlockPick} />
+            mode={mode} onBlockPick={onBlockPick}
+            placing={mode === 'edit' ? placing : null} onPlace={onPlacePoint}
+            onManifest={setManifest} />
+          {placing && mode === 'edit' && (
+            <div data-testid="place-hint"
+              className="ksp-win ksp-label pointer-events-none absolute left-1/2 top-2 z-20 -translate-x-1/2
+                         rounded px-3 py-1 text-[11px] text-accent">
+              holding <b>{placing}</b> — click a surface · Esc drops it
+            </div>
+          )}
           {bp && hit && hit.kind !== 'none' && mode !== 'blocks' && (
             <PickChip hit={hit} bp={bp} />
           )}

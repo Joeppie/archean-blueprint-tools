@@ -51,6 +51,11 @@ interface Props {
   readOnly?: boolean;
   /** mode workspaces (Blocks/Wire/Flight) replace the inspector section */
   bottom?: React.ReactNode;
+  /** game model manifest (drives the KSP-style parts CATALOG tab) */
+  manifest: Record<string, { mass: number; module: string }> | null;
+  /** type currently held for placement (KSP "holding a part") */
+  placingType: string | null;
+  onPlaceType: (t: string | null) => void;
 }
 
 // ------------------------------------------------------------- mass & CoM
@@ -181,7 +186,10 @@ const tileHue = (t: string) => {
   return h;
 };
 
-function CompList(p: { bp: Blueprint; sel: Props['sel']; onSelect: Props['onSelect']; onSelectSub: Props['onSelectSub'] }) {
+function CompList(p: { bp: Blueprint; rev: number; sel: Props['sel'];
+  onSelect: Props['onSelect']; onSelectSub: Props['onSelectSub'];
+  manifest: Props['manifest']; placingType: Props['placingType'];
+  onPlaceType: Props['onPlaceType'] }) {
   const [tab, setTab] = useState(() => localStorage.getItem('archean-app-list-tab') || 'type');
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<Set<string>>(new Set());
@@ -244,7 +252,20 @@ function CompList(p: { bp: Blueprint; sel: Props['sel']; onSelect: Props['onSele
           rows: rest.map(i => ({ kind: 'comp' as const, idx: i })) });
     }
     return secs;
-  }, [p.bp, tab, query]);
+    // p.rev is DELIBERATE: bp is mutated in place (edits keep the object
+    // identity), the rev counter is what invalidates this view of it
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.bp, p.rev, tab, query]);
+
+  // CATALOG tab rows: every type the game ships (manifest), KSP parts-list
+  // style — click to HOLD the part, then click the craft to place it.
+  const catRows = useMemo(() => {
+    if (!p.manifest) return [];
+    return Object.keys(p.manifest)
+      .filter(t => t !== 'Build' && (!query
+        || t.toLowerCase().includes(query) || p.manifest![t]!.module.toLowerCase().includes(query)))
+      .sort();
+  }, [p.manifest, query]);
 
   // selection → open its group once, scroll it into view (legacy reveal)
   const revealed = useRef('');
@@ -268,13 +289,14 @@ function CompList(p: { bp: Blueprint; sel: Props['sel']; onSelect: Props['onSele
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {/* KSP parts-list header: Categories | Subcategories toggles + search */}
+      {/* KSP parts-list header: Categories | Subgrids | Catalog + search */}
       <div className="flex items-center gap-[3px] px-3 pt-2">
-        {(['type', 'sub'] as const).map(t => (
+        {(['type', 'sub', 'catalog'] as const).map(t => (
           <button key={t} data-testid={`ltab-${t}`} onClick={() => switchTab(t)}
-            title={t === 'type' ? 'parts grouped by type' : 'parts grouped by subgrid (Build)'}
+            title={t === 'type' ? 'parts grouped by type' : t === 'sub' ? 'parts grouped by subgrid (Build)'
+              : 'the game part catalogue — click a part, then click the craft to place it'}
             className={`ksp-btn px-2 py-[3px] text-[10px] ${tab === t ? 'on' : ''}`}>
-            {t === 'type' ? 'Categories' : 'Subgrids'}
+            {t === 'type' ? 'Categories' : t === 'sub' ? 'Subgrids' : 'Catalog'}
           </button>
         ))}
       </div>
@@ -282,6 +304,26 @@ function CompList(p: { bp: Blueprint; sel: Props['sel']; onSelect: Props['onSele
         onChange={e => setQ(e.target.value)}
         className="mx-3 mt-1.5 rounded border border-white/15 bg-black/40 px-2 py-1 text-[12px] text-ink
                    placeholder:text-ink-dim/60 focus:border-accent/60 focus:outline-none" />
+      {tab === 'catalog' ? (
+        <div data-testid="catalog-list" className="min-h-0 flex-1 overflow-y-auto px-1 py-1">
+          {!p.manifest && <div className="px-2 py-1 text-[11px] text-ink-dim">catalogue loading…</div>}
+          {catRows.map(t => (
+            <div key={t} data-testid="catalog-item" title={`hold a ${t} — then click a surface on the craft`}
+              className={rowCls(p.placingType === t)}
+              onClick={() => p.onPlaceType(p.placingType === t ? null : t)}>
+              <span
+                className="grid h-[16px] w-[16px] shrink-0 place-items-center rounded-[3px] border text-[8px] font-bold text-ink"
+                style={{ background: `hsl(${tileHue(t)} 20% 22%)`, borderColor: `hsl(${tileHue(t)} 24% 44%)` }}>
+                {partCode(t)}
+              </span>
+              <span className="min-w-0 flex-1 truncate">{t}</span>
+              <span className="shrink-0 text-[10px] tabular-nums text-ink-dim">
+                {p.manifest![t]!.mass ? `${+p.manifest![t]!.mass.toFixed(1)} kg` : ''}</span>
+            </div>
+          ))}
+          {!!p.manifest && !catRows.length && <div className="px-2 py-1 text-[11px] text-ink-dim">no matches</div>}
+        </div>
+      ) : (
       <div ref={listRef} data-testid="complist" className="min-h-0 flex-1 overflow-y-auto px-1 py-1">
         {sections.map(s => {
           const isOpen = query ? true : open.has(s.key);       // search force-opens
@@ -324,6 +366,7 @@ function CompList(p: { bp: Blueprint; sel: Props['sel']; onSelect: Props['onSele
           );
         })}
       </div>
+      )}
     </div>
   );
 }
@@ -573,7 +616,8 @@ export default function Panel(p: Props) {
           camera/view settings sit at the bottom */}
       <div className="flex min-h-0 flex-[3] flex-col border-t border-white/10">
         <h3 className="ksp-label px-3 pt-2 text-[11px] font-semibold text-ink-dim">Parts</h3>
-        <CompList bp={p.bp} sel={p.sel} onSelect={p.onSelect} onSelectSub={p.onSelectSub} />
+        <CompList bp={p.bp} rev={p.rev} sel={p.sel} onSelect={p.onSelect} onSelectSub={p.onSelectSub}
+          manifest={p.manifest} placingType={p.placingType} onPlaceType={p.onPlaceType} />
       </div>
       <div className="min-h-0 flex-[2] border-t border-white/10 overflow-y-auto">
         {p.bottom !== undefined ? p.bottom ?? null : p.sel.sub >= 0

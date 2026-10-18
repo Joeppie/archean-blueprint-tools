@@ -55,3 +55,26 @@ export function newCraftDoc(alias = 'New craft'): DocNode {
     workshop_item_id: 0,
   });
 }
+
+/** CATALOG placement: a brand-new component at a placement point. Key order
+ *  copies the PilotSeat above (the game's writer order); defaults are the
+ *  file defaults. OCCUPANCIES are deliberately absent — the type-255 mirror
+ *  is the game BUILDER's bookkeeping, and sync edits stay exact for parts
+ *  that HAVE them (edit.test pins that); a bare part round-trips untouched. */
+export function newComponent(type: string, module: string,
+  pos: readonly [number, number, number]) {
+  const r3 = (n: number) => +n.toFixed(3);
+  return {
+    alias: '',
+    colors: {
+      color1: { b: 255, g: 255, metallic: 0, opacity: 15, r: 255, roughness: 0 },
+      color2: { b: 204, g: 204, metallic: 1, opacity: 15, r: 204, roughness: 7 },
+    },
+    data: {},
+    mirrorAxis: 0,
+    module,
+    orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 },
+    position: { x: r3(pos[0]), y: r3(pos[1]), z: r3(pos[2]) },
+    type,
+  };
+}

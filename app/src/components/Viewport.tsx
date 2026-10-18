@@ -20,7 +20,7 @@ declare global {
 let atlasP: Promise<ModelAtlas | null> | null = null;
 const getAtlas = (): Promise<ModelAtlas | null> => (atlasP ??= openAtlas());
 
-export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockPick }: {
+export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockPick, placing = null, onPlace, onManifest }: {
   bp: Blueprint | null;
   onPick: (h: PickHit) => void;
   onEngine?: (e: Engine | null) => void;
@@ -28,6 +28,12 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockP
    *  only belongs to Edit */
   mode?: 'view' | 'edit' | 'blocks' | 'wire' | 'flight';
   onBlockPick?: (clientX: number, clientY: number) => void;
+  /** KSP part placement: a held catalog type — the next canvas click
+   *  places it at the picked surface instead of selecting */
+  placing?: string | null;
+  onPlace?: (clientX: number, clientY: number) => void;
+  /** game manifest once the model atlas is open (drives the Catalog tab) */
+  onManifest?: (m: Record<string, { mass: number; module: string }> | null) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<Engine | null>(null);
@@ -56,9 +62,10 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockP
     (async () => {
       const atlas = await getAtlas();
       if (!dead) engineRef.current?.load(bp, atlas);
+      if (!dead) onManifest?.(atlas?.manifest ?? null);
     })().catch(console.error);
     return () => { dead = true; };
-  }, [bp]);
+  }, [bp, onManifest]);
 
   // DELIBERATE press picks (PERF.md: one raycast per click, none during
   // orbit): pointerdown records, pointerup <4px moves select-and-fly,
@@ -84,6 +91,7 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockP
   const pickClick = (e: React.PointerEvent) => {
     const engine = engineRef.current;
     if (!engine) return;
+    if (placing) { onPlace?.(e.clientX, e.clientY); return; }   // KSP place: no select
     if (mode === 'blocks') { onBlockPick?.(e.clientX, e.clientY); return; }
     const hit = engine.pickAt(e.clientX, e.clientY);
     onPick(hit);
