@@ -280,3 +280,28 @@ export function autoWire(bp: Blueprint, manifest: ModelManifest | null,
   }
   return { created: bp.data.pipes.length - created0, skipped };
 }
+
+/**
+ * MANUAL wiring primitive (GUI-independent): build a cable between two
+ * named ports, or null when invalid (same component, port already used,
+ * port unknown, or mixed cable kinds). The caller (App) pushes the pipe
+ * into bp AND the doc.
+ */
+export function makePipe(bp: Blueprint, manifest: ModelManifest | null,
+  aCi: number, aPort: string, bCi: number, bPort: string) {
+  if (aCi === bCi || !manifest) return null;
+  const open = unconnectedPorts(bp, manifest);
+  const A = open.find(p => p.ci === aCi && p.name === aPort);
+  const B = open.find(p => p.ci === bCi && p.name === bPort);
+  if (!A || !B || A.kind !== B.kind) return null;
+  const flat = flattenComponents(bp);
+  const topToFlat = new Map<number, number>();
+  flat.forEach((f, i) => { if (f.top >= 0) topToFlat.set(f.top, i); });
+  return {
+    a_component: topToFlat.get(aCi)!, a_port: aPort,
+    b_component: topToFlat.get(bCi)!, b_port: bPort,
+    radius: A.kind === 'fluid' ? 0.045 : 0.02,
+    segments: route(A.at, B.at, A.kind) as never,
+    type: A.kind,
+  };
+}

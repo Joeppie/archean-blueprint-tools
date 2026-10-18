@@ -144,3 +144,26 @@ export function serializeSave(ctx: EditCtx): string {
   });
   return emitDoc(doc);
 }
+
+/** Editable component META (the non-pose scalars every comp carries). */
+export type CompMetaKey = 'alias' | 'module' | 'mirrorAxis';
+export function setCompField(ctx: EditCtx, ci: number, key: CompMetaKey,
+  v: string | number): boolean {
+  const c = ctx.bp.data.components[ci];
+  if (!c) return false;
+  (c as unknown as Record<string, unknown>)[key] = v;
+  return docSet(ctx.doc, ['data', 'components', ci, key], v as number | string);
+}
+
+/** One field of one player-paint colour entry (color1/color2 dict shape —
+ *  convert-on-open guarantees dicts at top level). */
+export function setCompColor(ctx: EditCtx, ci: number, which: 'color1' | 'color2',
+  field: 'r' | 'g' | 'b' | 'opacity' | 'roughness' | 'metallic', v: number): boolean {
+  const c = ctx.bp.data.components[ci];
+  if (!c || typeof c.colors === 'string') return false;
+  const cols = c.colors as Record<string, Record<string, number>> | undefined;
+  const ent = cols?.[which];
+  if (!ent) return false;
+  ent[field] = v;
+  return docSetNumber(ctx.doc, ['data', 'components', ci, 'colors', which, field], v);
+}

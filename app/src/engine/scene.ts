@@ -1444,7 +1444,7 @@ export class Engine {
       let o: Object3D | null = h.object;
       while (o && !o.userData.kind) o = o.parent;
       const kind = o?.userData.kind as Kind | undefined;
-      if (kind !== 'block' && kind !== 'ground') continue;
+      if (kind !== 'block' && kind !== 'ground' && kind !== 'comp') continue;
       const px = h.point.x - this.moff.x, py = h.point.y - this.moff.y, pz = h.point.z - this.moff.z;
       const file: [number, number, number] = [px, py, -pz];
       const n = h.face

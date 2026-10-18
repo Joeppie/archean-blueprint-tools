@@ -241,3 +241,72 @@ test.describe('modes, new craft, file menu', () => {
     expect(legacyChip, 'v1 file was NORMALIZED: it now carries a palette').toBe(true);
   });
 });
+
+test.describe('manual wiring + triangles + component meta', () => {
+  const desktopOnly = () => test.skip(test.info().project.name !== 'chromium', 'desktop-only');
+
+  test('wire mode: select a part, pick a free port, connect via the search list', async ({ page }) => {
+    desktopOnly();
+    await page.goto('/?craft=' + ISW);
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
+    await page.getByTestId('mode-wire').click();
+    const pipesBefore = await page.evaluate(() => {
+      const w = window as unknown as { __ARCHEAN__?: { engine: { blueprint: { data: { pipes?: unknown[] } } } } };
+      return w.__ARCHEAN__!.engine.blueprint.data.pipes?.length ?? 0;
+    });
+    // pick an OPEN warning (guaranteed free port) -> that component is selected
+    await page.getByTestId('wire-warning').first().click();
+    await expect(page.getByTestId('wire-manual')).toContainText('ports:');
+    // start from a free port, then pick the nearest listed partner
+    await page.locator('[data-testid="wire-port"]:not([disabled])').first().click();
+    await expect(page.getByTestId('wire-target-search')).toBeVisible();
+    await page.getByTestId('wire-target-search').fill('');
+    const target = page.getByTestId('wire-target-item').first();
+    await expect(target).toBeVisible();
+    await target.click();
+    await expect.poll(async () => page.evaluate(() => {
+      const w = window as unknown as { __ARCHEAN__?: { engine: { blueprint: { data: { pipes?: unknown[] } } } } };
+      return w.__ARCHEAN__!.engine.blueprint.data.pipes?.length ?? 0;
+    }), { timeout: 8000 }).toBeGreaterThan(pipesBefore);
+  });
+
+  test('triangles submode: three lattice clicks add a prism, panel edits it', async ({ page }) => {
+    desktopOnly();
+    await page.goto('/');
+    await page.getByTestId('gallery-new').click();
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
+    await page.getByTestId('mode-blocks').click();
+    await page.getByTestId('blocksub-tris').click();
+    const canvas = page.getByTestId('canvas');
+    const box = (await canvas.boundingBox())!;
+    for (const [fx, fy] of [[0.42, 0.6], [0.58, 0.6], [0.5, 0.68]]) {
+      await canvas.click({ position: { x: box.width * fx, y: box.height * fy } });
+      await page.waitForTimeout(250);
+    }
+    await expect.poll(async () => page.evaluate(() => {
+      const w = window as unknown as { __ARCHEAN__?: { engine: { blueprint: { data: { triangles?: unknown[] } } } } };
+      return w.__ARCHEAN__!.engine.blueprint.data.triangles?.length ?? 0;
+    }), { timeout: 8000 }).toBe(1);
+    await expect(page.getByTestId('tri-edit')).toContainText('Triangle[0]');
+  });
+
+  test('component meta: alias + paint fields write through to the doc', async ({ page }) => {
+    desktopOnly();
+    await page.goto('/?craft=' + ISW);
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
+    await page.getByTestId('mode-edit').click();
+    await page.getByTestId('filter').fill('beacon');
+    await page.locator('[data-idx]').first().click();
+    await page.getByTestId('comp-alias').fill('lighthouse');
+    const opField = page.getByTestId('paint-color1-opacity');
+    await opField.fill('9');
+    const vals = await page.evaluate(() => {
+      const w = window as unknown as { __ARCHEAN__?: { engine: { blueprint: { data: {
+        components: { alias?: string; colors?: Record<string, { opacity: number }> }[] } } } } };
+      const c = w.__ARCHEAN__!.engine.blueprint.data.components.find(x => x.alias === 'lighthouse');
+      return { alias: c?.alias, op: c?.colors?.color1?.opacity };
+    });
+    expect(vals.alias).toBe('lighthouse');
+    expect(vals.op).toBe(9);
+  });
+});

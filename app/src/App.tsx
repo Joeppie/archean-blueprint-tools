@@ -17,11 +17,13 @@ import type { Engine, PickHit, ViewOptions } from './engine/scene';
 import Viewport from './components/Viewport';
 import Panel, { type EditApi } from './components/Panel';
 import TopBar, { type Mode } from './components/TopBar';
-import { BlockPanel, FlightPanel, WirePanel, placeBlock, type Brush } from './components/ModePanels';
+import { BlockPanel, FlightPanel, TriPanel, WirePanel, placeBlock, type Brush } from './components/ModePanels';
+import { cornerOf, triAt, triangleFromCorners } from './engine/tris';
 import type { Blueprint } from './engine/format';
-import { docValue, parseDoc } from './engine/doc';
-import { makeCtx, resetComponent, setDataField, setOrientation, setPos,
-  serializeSave, type EditCtx } from './engine/edit';
+import { docArrayInsert, docFromValue, docValue, parseDoc } from './engine/doc';
+import { makeCtx, resetComponent, setDataField, setOrientation, setPos, setCompField,
+  setCompColor, serializeSave, type EditCtx } from './engine/edit';
+import { makePipe } from './engine/wireops';
 import { normalizeDoc } from './engine/normalize';
 import { newCraftDoc } from './engine/newcraft';
 
@@ -117,6 +119,10 @@ function Editor({ craft, onBack }: { craft: string | null; onBack: () => void })
   const [blockSel, setBlockSel] = useState(-1);
   const [brush, setBrush] = useState<Brush>({ type: 0, sx: 0, sy: 0, sz: 0, slot: 4 });
   const [blockTool, setBlockTool] = useState<'place' | 'select'>('place');
+  const [blockSub, setBlockSub] = useState<'blocks' | 'tris'>('blocks');
+  const [triDraft, setTriDraft] = useState<number[][]>([]);
+  const [triSel, setTriSel] = useState(-1);
+  const [triBrush, setTriBrush] = useState<number[]>([51, 51, 51, 51, 51]);
   const engineRef = useRef<Engine | null>(null);
   const ctxRef = useRef<EditCtx | null>(null);
   const dirtyRef = useRef(false);
@@ -203,6 +209,11 @@ function Editor({ craft, onBack }: { craft: string | null; onBack: () => void })
   }, [mode, gizmoOn, engine]);
 
   const edits: EditApi = useMemo(() => ({
+    compField: (ctx, ci, key, v) => { setCompField(ctx, ci, key, v); markDirty(); bumpRev(); },
+    compColor: (ctx, ci, which, field, v) => {
+      setCompColor(ctx, ci, which, field, v);
+      sceneChanged();                       // materials rebuild on the debounced reload
+    },
     pos: (_ctx, ci, ax, v) => { engineRef.current?.setFilePosAxis(ci, ax, v); },
     beginRot: ci => engineRef.current?.beginRotEdit(ci),
     quatDelta: (ctx, ci, p, y, r) => {
@@ -214,7 +225,7 @@ function Editor({ craft, onBack }: { craft: string | null; onBack: () => void })
       resetComponent(ctx, ci);
       setInspKey(k => k + 1); bumpRev();
     },
-  }), [bumpRev]);
+  }), [bumpRev, markDirty, sceneChanged]);
 
   const save = useCallback((as?: string) => {
     const ctx = ctxRef.current;
@@ -261,12 +272,32 @@ function Editor({ craft, onBack }: { craft: string | null; onBack: () => void })
   const onBlockPick = useCallback((clientX: number, clientY: number) => {
     const e = engineRef.current, ctx = ctxRef.current;
     if (!e || !ctx) return;
+    if (blockSub === 'tris') {
+      const r = e.pickCell(clientX, clientY);
+      if (!r) return;
+      const t = triAt(ctx.bp, r.point);
+      if (t >= 0 && triDraft.length === 0) { setTriSel(t); return; }   // select existing
+      const g = cornerOf(r.point);
+      const next = [...triDraft, g];
+      if (next.length < 3) { setTriDraft(next); return; }
+      const tri = triangleFromCorners(next[0] as [number,number,number], next[1] as [number,number,number],
+        next[2] as [number,number,number], triBrush);
+      setTriDraft([]);
+      if (!tri) return;
+      ctx.bp.data.triangles = ctx.bp.data.triangles ?? [];
+      ctx.bp.data.triangles.push(tri);
+      const at = ctx.bp.data.triangles.length - 1;
+      docArrayInsert(ctx.doc, ['data', 'triangles'], at, docFromValue(tri));
+      setTriSel(at);
+      sceneChanged();
+      return;
+    }
     const r = e.pickCell(clientX, clientY);
     if (!r) return;
     if (blockTool === 'select') { setBlockSel(r.bi >= 0 ? r.bi : -1); return; }
     if (r.bi >= 0) { setBlockSel(placeBlock(ctx, r.cell, brush)); sceneChanged(); }
     else setBlockSel(-1);
-  }, [blockTool, brush, sceneChanged]);
+  }, [blockTool, blockSub, brush, triDraft, triBrush, sceneChanged]);
 
   const setReal = useCallback((on: boolean) => {
     setRealModels(on);
@@ -286,9 +317,23 @@ function Editor({ craft, onBack }: { craft: string | null; onBack: () => void })
   }, []);
 
   const name = (bp?.data.alias?.trim()) || (craft ? craftName(craft) : 'Untitled craft');
+  const triPanel = (
+    <TriPanel bp={bp!} ctx={ctxRef.current} draft={triDraft} triSel={triSel}
+      brush={triBrush} onSlot={(i, v) => setTriBrush(b => b.map((x, j) => j === i ? v : x))}
+      onUndo={() => setTriDraft(d => d.slice(0, -1))}
+      onDeleted={sceneChanged} onClearSel={() => setTriSel(-1)} />
+  );
   const modePanel = mode === 'blocks' ? (
     <div className="overflow-y-auto">
       <div className="flex gap-1 px-3 pt-2">
+        {(['blocks', 'tris'] as const).map(t => (
+          <button key={t} data-testid={`blocksub-${t}`} onClick={() => { setBlockSub(t); setTriDraft([]); }}
+            className={`rounded px-2 py-[3px] text-[11px] ${blockSub === t ? 'bg-accent/25 text-accent' : 'bg-panel2 text-ink-dim hover:text-ink'}`}>
+            {t === 'blocks' ? '▤ Blocks' : '▵ Triangles'}
+          </button>
+        ))}
+      </div>
+      <div className="flex gap-1 px-3 pt-1">
         {(['place', 'select'] as const).map(t => (
           <button key={t} data-testid={`blocktool-${t}`} onClick={() => setBlockTool(t)}
             className={`rounded px-2 py-[3px] text-[11px] ${blockTool === t ? 'bg-accent/25 text-accent' : 'bg-panel2 text-ink-dim hover:text-ink'}`}>
@@ -296,13 +341,27 @@ function Editor({ craft, onBack }: { craft: string | null; onBack: () => void })
           </button>
         ))}
       </div>
-      <BlockPanel engine={engine} ctx={ctxRef.current} bp={bp!} blockSel={blockSel}
-        brush={brush} onBrush={setBrush} onSelectBlock={setBlockSel} onApplied={sceneChanged} />
+      {blockSub === 'tris' ? triPanel : (
+        <BlockPanel engine={engine} ctx={ctxRef.current} bp={bp!} blockSel={blockSel}
+          brush={brush} onBrush={setBrush} onSelectBlock={setBlockSel} onApplied={sceneChanged} />
+      )}
     </div>
   ) : mode === 'wire' ? (
     <WirePanel engine={engine} ctx={ctxRef.current} bp={bp!} rev={rev}
       onApplied={sceneChanged}
-      onSelectComp={ci => engineRef.current?.select(ci)} />
+      onSelectComp={ci => engineRef.current?.select(ci)}
+      sel={sel.ci}
+      onConnect={(aCi, aPort, bCi, bPort) => {
+        const ctx = ctxRef.current;
+        if (!ctx) return false;
+        const pipe = makePipe(ctx.bp, engineRef.current?.manifest ?? null, aCi, aPort, bCi, bPort);
+        if (!pipe) return false;
+        ctx.bp.data.pipes = ctx.bp.data.pipes ?? [];
+        ctx.bp.data.pipes.push(pipe as never);
+        docArrayInsert(ctx.doc, ['data', 'pipes'], ctx.bp.data.pipes.length - 1, docFromValue(pipe));
+        sceneChanged();
+        return true;
+      }} />
   ) : mode === 'flight' ? (
     <FlightPanel engine={engine} rev={rev} />
   ) : undefined;

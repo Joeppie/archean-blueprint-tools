@@ -2,34 +2,15 @@
 // modes. Every mutation goes through the pure model modules onto bp + doc
 // (App provides the funnel), then schedules the debounced scene reload.
 import { useMemo, useState } from 'react';
+import { Sec, Num, SearchList } from './ui';
 import type { Engine } from '../engine/scene';
 import type { EditCtx } from '../engine/edit';
 import { docArrayInsert, docFromValue, docSetNumber, docArrayRemoveAt } from '../engine/doc';
 import { blockFromCell, blockInfo, setBlockField } from '../engine/blocks';
 import { autoWire, portCensus, connectedPorts, unconnectedPorts, WIRE_KINDS } from '../engine/wireops';
+import { triCentroid } from '../engine/tris';
+import type { Triangle } from '../engine/format';
 import type { Blueprint } from '../engine/format';
-
-const Sec = (p: { title: string; children?: React.ReactNode; testid?: string }) => (
-  <section className="border-t border-white/10 px-3 py-2" data-testid={p.testid}>
-    <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-ink-dim">{p.title}</h3>
-    {p.children}
-  </section>
-);
-
-const Num = (p: { label: string; value: number; min: number; max: number;
-  onCommit: (v: number) => void }) => {
-  const [v, setV] = useState(String(p.value));
-  return (
-    <label className="flex items-center gap-1.5 py-[2px] text-[11px]">
-      <span className="w-[46px] shrink-0 text-ink-dim">{p.label}</span>
-      <input type="number" value={v} min={p.min} max={p.max}
-        data-testid={`num-${p.label}`}
-        className="w-[64px] rounded border border-white/10 bg-panel2 px-1 py-[1px] text-ink"
-        onChange={e => { setV(e.target.value); const n = +e.target.value;
-          if (e.target.value !== '' && isFinite(n)) p.onCommit(Math.max(p.min, Math.min(p.max, n))); }} />
-    </label>
-  );
-};
 
 // ------------------------------------------------------------- BLOCKS mode
 export interface Brush { type: number; sx: number; sy: number; sz: number; slot: number }
@@ -129,7 +110,13 @@ export function placeBlock(ctx: EditCtx, cell: [number, number, number], brush: 
 export function WirePanel(p: {
   engine: Engine | null; ctx: EditCtx | null; bp: Blueprint; rev: number;
   onApplied: () => void; onSelectComp: (ci: number) => void;
+  /** currently selected component (drives the manual port list) */
+  sel: number;
+  /** manual connect: returns success (the App writes bp + doc + reload) */
+  onConnect: (aCi: number, aPort: string, bCi: number, bPort: string) => boolean;
 }) {
+  const [draft, setDraft] = useState<{ ci: number; name: string; kind: string; at: number[] } | null>(null);
+  const [connectMsg, setConnectMsg] = useState('');
   const manifest = p.engine?.manifest ?? null;
   const census = useMemo(() => portCensus(p.bp, manifest), [p.bp, manifest, p.rev]);
   const used = useMemo(() => connectedPorts(p.bp), [p.bp, p.rev]);
@@ -175,6 +162,65 @@ export function WirePanel(p: {
           fallback: naive nearest pairs
         </button>
         {msg && <div className="pt-1 text-[10px] text-ink-dim">{msg}</div>}
+      </Sec>
+      <Sec title="Manual wiring" testid="wire-manual">
+        {p.sel < 0 && <div className="text-[11px] text-ink-dim">Select a component (list or viewport) to see its ports.</div>}
+        {p.sel >= 0 && (
+          <>
+            <div className="pb-1 text-[11px] text-ink">
+              {p.bp.data.components[p.sel]?.type}[{p.sel}] ports:
+            </div>
+            {census.filter(c => c.ci === p.sel).map(c => {
+              const wired = used.has(`${c.ci}/${c.name}`);
+              return (
+                <button key={c.name} data-testid="wire-port" disabled={wired}
+                  className={`block w-full truncate rounded px-2 py-[2px] text-left text-[11px] ${
+                    draft?.name === c.name && draft?.ci === c.ci ? 'bg-accent/30 text-accent'
+                      : wired ? 'text-ink-dim' : 'bg-panel2 text-ink hover:bg-white/10'}`}
+                  onClick={() => setDraft({ ci: c.ci, name: c.name, kind: c.kind, at: c.at })}>
+                  {wired ? '✓' : '○'} {c.name}
+                  <span className="ml-2 text-[10px] text-ink-dim">{c.kind}</span>
+                </button>
+              );
+            })}
+            {draft && (
+              <div className="pt-2">
+                <div className="flex items-center justify-between pb-1">
+                  <span className="text-[10px] uppercase tracking-wide text-ink-dim">
+                    {draft.kind} from {draft.name} →
+                  </span>
+                  <button className="text-[10px] text-ink-dim hover:text-ink" onClick={() => setDraft(null)}>cancel</button>
+                </div>
+                <SearchList testid="wire-target" placeholder="search parts with a free port…"
+                  entries={(() => {
+                    const byCi = new Map<number, { type: string; n: number; d: number; port: string }>();
+                    for (const q of open) {
+                      if (q.ci === draft.ci || q.kind !== draft.kind) continue;
+                      const dd = Math.hypot(q.at[0]! - draft.at[0]!, q.at[1]! - draft.at[1]!, q.at[2]! - draft.at[2]!);
+                      const cur = byCi.get(q.ci);
+                      if (!cur || dd < cur.d)
+                        byCi.set(q.ci, { type: q.type, n: (cur?.n ?? 0) + 1, d: dd, port: q.name });
+                      else cur.n += 1;
+                    }
+                    return [...byCi.entries()]
+                      .sort((a, b) => a[1].d - b[1].d)
+                      .map(([ci, v]) => ({
+                        id: `${ci}/${v.port}`,
+                        label: `${v.type}[${ci}]`,
+                        sub: `${v.n} free · ${v.d.toFixed(1)} m`,
+                      }));
+                  })()}
+                  onPick={id => {
+                    const [ciS, port] = id.split('/') as [string, string];
+                    const ok = p.onConnect(draft.ci, draft.name, +ciS, port);
+                    setConnectMsg(ok ? `wired ${draft.name} → ${id}` : 'invalid pairing (port busy or incompatible)');
+                    if (ok) setDraft(null);
+                  }} />
+                {connectMsg && <div className="pt-1 text-[10px] text-ink-dim">{connectMsg}</div>}
+              </div>
+            )}
+          </>
+        )}
       </Sec>
       <Sec title={`Warnings — unconnected (${open.length})`} testid="wire-warnings">
         {open.length === 0 && <div className="text-[11px] text-emerald-400">every port is wired ✓</div>}
@@ -238,6 +284,76 @@ export function FlightPanel(p: { engine: Engine | null; rev: number }) {
           declared {r.mass.declared.toFixed(0)} kg · computed {r.mass.total.toFixed(0)} kg<br />
           CoM {v3(r.mass.com)} (raw file space)
         </div>
+      </Sec>
+    </>
+  );
+}
+
+// ------------------------------------------------------------ TRIANGLES
+const TRI_SLOTS = ['front', 'back', 'side v0-v1', 'side v1-v2', 'side v2-v0'];
+
+export function TriPanel(p: {
+  bp: Blueprint; ctx: EditCtx | null; draft: number[][]; triSel: number;
+  onSlot: (i: number, v: number) => void; brush: number[];
+  onUndo: () => void; onDeleted: () => void; onClearSel: () => void;
+}) {
+  const t: Triangle | undefined = p.triSel >= 0
+    ? (p.bp.data.triangles ?? [])[p.triSel] : undefined;
+  const o = t as unknown as Record<string, unknown> | undefined;
+  const tn = (v: unknown) => Number(v ?? 0);
+  return (
+    <>
+      <Sec title={`Triangles — draft ${p.draft.length}/3 corners`} testid="tri-draft">
+        <div className="text-[10px] leading-snug text-ink-dim">
+          Click lattice corners on any surface; the third click commits the
+          prism. Click an existing triangle's middle to select it.
+          Snapping is to the 0.25 m hull lattice.
+        </div>
+        {p.draft.length > 0 && (
+          <button data-testid="tri-undo" onClick={p.onUndo}
+            className="mt-1 rounded bg-panel2 px-2 py-[3px] text-[11px] text-ink hover:bg-white/10">
+            ↩ undo corner ({p.draft.length}/3)
+          </button>
+        )}
+        <div className="pt-1 text-[10px] text-ink-dim">brush colours (palette slots):</div>
+        {TRI_SLOTS.map((label, i) => (
+          <Num key={i} label={label.slice(0, 9)} value={p.brush[i] ?? 51} min={0} max={255}
+            onCommit={v => p.onSlot(i, v)} />
+        ))}
+      </Sec>
+      <Sec title={p.triSel >= 0 ? `Triangle[${p.triSel}]` : 'Triangles — none selected'} testid="tri-edit">
+        {!o && <div className="text-[11px] text-ink-dim">Click near a prism's centre to edit it.</div>}
+        {o && (
+          <>
+            <div className="pb-1 font-mono text-[10px] text-ink-dim">
+              frame ({tn(o.frame_x)}, {tn(o.frame_y)}, {tn(o.frame_z)}) · centroid
+              ({triCentroid(t!).map(n => n.toFixed(2)).join(', ')})
+            </div>
+            {TRI_SLOTS.map((label, i) => (
+              <Num key={i} label={label.slice(0, 9)} value={tn((o.colors as number[] | undefined)?.[i])} min={0} max={255}
+                onCommit={v => {
+                  const arr = [...(((t as unknown as { colors?: number[] }).colors) ?? [])]; arr[i] = v;
+                  (t as unknown as { colors: number[] }).colors = arr;
+                  if (p.ctx) docSetNumber(p.ctx.doc, ['data', 'triangles', p.triSel, 'colors', i], v);
+                  p.onDeleted();                      // reuse: mark dirty + reload
+                }} />
+            ))}
+            <div className="mt-1 flex gap-1">
+              <button data-testid="tri-delete"
+                className="rounded bg-red-900/60 px-2 py-1 text-[11px] text-ink hover:bg-red-800"
+                onClick={() => {
+                  if (!p.ctx) return;
+                  p.ctx.bp.data.triangles!.splice(p.triSel, 1);
+                  docArrayRemoveAt(p.ctx.doc, ['data', 'triangles'], p.triSel);
+                  p.onDeleted();
+                }}>
+                Delete triangle
+              </button>
+              <button className="rounded bg-panel2 px-2 py-1 text-[11px] text-ink-dim hover:text-ink"
+                onClick={p.onClearSel}>Deselect</button>
+            </div>
+          </>
+        )}
       </Sec>
     </>
   );

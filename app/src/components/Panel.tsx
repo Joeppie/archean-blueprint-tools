@@ -11,6 +11,9 @@ import type { Blueprint, BlueprintComponent, LatticeObj } from '../engine/format
 import { subMasterEntries } from '../engine/subgrid';
 
 export interface EditApi {
+  compField(ctx: EditCtx, ci: number, key: 'alias' | 'module' | 'mirrorAxis', v: string | number): void;
+  compColor(ctx: EditCtx, ci: number, which: 'color1' | 'color2',
+    field: 'r' | 'g' | 'b' | 'opacity' | 'roughness' | 'metallic', v: number): void;
   pos(ctx: EditCtx, ci: number, ax: 'x' | 'y' | 'z', v: number): void;
   beginRot(ci: number): void;
   quatDelta(ctx: EditCtx, ci: number, p: number, y: number, r: number): void;
@@ -61,6 +64,22 @@ function MassCoM(p: { engine: Engine | null; rev: number }) {
         <div>CoM ({fmt(mm.com[0])}, {fmt(mm.com[1])}, {fmt(mm.com[2])}) m <span className="text-ink-dim">raw</span></div>
       </div>
     </Sec>
+  );
+}
+
+function MetaNum(p: { testid: string; label: string; value: number; min: number; max: number;
+  disabled?: boolean; onCommit: (v: number) => void }) {
+  const [v, setV] = useState(String(p.value));
+  useEffect(() => setV(String(p.value)), [p.value]);
+  return (
+    <label className="flex items-center gap-1 py-[2px] text-[10px]">
+      <span className="text-ink-dim">{p.label}</span>
+      <input type="number" value={v} min={p.min} max={p.max} disabled={p.disabled}
+        data-testid={p.testid}
+        className="w-[52px] rounded border border-white/10 bg-panel2 px-1 text-[10px] text-ink"
+        onChange={e => { setV(e.target.value); const n = +e.target.value;
+          if (e.target.value !== '' && isFinite(n)) p.onCommit(Math.max(p.min, Math.min(p.max, n))); }} />
+    </label>
   );
 }
 
@@ -307,6 +326,40 @@ function Inspector(p: Props) {
         <b className="text-accent">{comp.type}</b>
         <span className="text-ink-dim">[{ci}] · {String(comp.module ?? '')}</span>
       </div>
+      <Sec title="Component">
+        <label className="flex items-center gap-2 py-[2px]">
+          <span className="w-[74px] shrink-0 text-[11px] text-ink-dim">alias</span>
+          <input type="text" defaultValue={String(comp.alias ?? '')} disabled={readOnly}
+            data-testid="comp-alias"
+            className="min-w-0 flex-1 rounded border border-white/10 bg-panel2 px-1 py-[1px] text-[11px] text-ink"
+            onChange={e => { if (ctx) edits.compField(ctx, ci, 'alias', e.target.value); markDirty(); }} />
+        </label>
+        <label className="flex items-center gap-2 py-[2px]">
+          <span className="w-[74px] shrink-0 text-[11px] text-ink-dim">module</span>
+          <input type="text" defaultValue={String(comp.module ?? '')} disabled={readOnly}
+            data-testid="comp-module"
+            className="min-w-0 flex-1 rounded border border-white/10 bg-panel2 px-1 py-[1px] text-[11px] font-mono text-ink"
+            onChange={e => { if (ctx) edits.compField(ctx, ci, 'module', e.target.value); markDirty(); }} />
+        </label>
+        <Row label="mirrorAxis" min={0} max={2} step={1} value={Number(comp.mirrorAxis ?? 0)} disabled={readOnly}
+          onInput={v => { if (ctx) edits.compField(ctx, ci, 'mirrorAxis', Math.round(v)); markDirty(); }} />
+      </Sec>
+      <Sec title="Paint (linear 0-255)">
+        {(['color1', 'color2'] as const).map(which => (
+          <div key={which} className="mb-1">
+            <div className="text-[10px] uppercase tracking-wide text-ink-dim">{which}</div>
+            <div className="flex flex-wrap gap-x-3">
+              {([['r', 0, 255], ['g', 0, 255], ['b', 0, 255], ['opacity', 0, 15],
+                 ['roughness', 0, 7], ['metallic', 0, 1]] as const).map(([f, lo, hi]) => (
+                <MetaNum key={f} testid={`paint-${which}-${f}`} label={f}
+                  value={Number((comp.colors as Record<string, Record<string, number>> | undefined)?.[which]?.[f] ?? 0)}
+                  min={lo} max={hi} disabled={readOnly}
+                  onCommit={v => { if (ctx) edits.compColor(ctx, ci, which, f, v); markDirty(); }} />
+              ))}
+            </div>
+          </div>
+        ))}
+      </Sec>
       <Sec title="Position (m)">
         <Row label="x" min={pos0.x - 2} max={pos0.x + 2} step={0.005} value={pos0.x} disabled={readOnly}
           onInput={v => livePos('x', v)} />
