@@ -22,6 +22,8 @@ regtest/regtest.html            format-validation suite over testdata/ (importab
 testdata/<workshop-id>/blueprint.json   regression corpus (25 craft + 9000000001
                                 orient fixture, 1 kB..530 kB)
 tools/adjust_seat.py            reference example of a safe format edit
+tools/find_install.py           discover a local Archean install / blueprint
+                                saves / workshop dir (the procedure: LOCATIONS.md)
 tools/make_orient_test.py       regenerates the chirality probe craft 9000000001
 tools/make_landing.py         regenerates the landing gallery + viewer/workshop.json
 tools/add_workshop.py <id>      ingest a locally-subscribed workshop craft
@@ -39,6 +41,11 @@ tools/perfprobe.py URL [s]      real-clock headless perf probe (DevTools ws;
                                 meaningless — clocks/rAF freeze there)
 tests/run_tests.sh              headless-Chromium test runner (selftest+regtest+renders)
 FORMAT.md                       format documentation (start here)
+LOCATIONS.md                    how to find an Archean install, its local
+                                blueprint saves (Archean-data/client/blueprints)
+                                and workshop downloads (workshop/content/2941660)
+                                on ANY machine — Steam appid 2941660,
+                                appmanifest + libraryfolders.vdf procedure
 PERF.md                         measured perf baseline + harmful-candidate catalogue
                                 (run perfprobe before touching render/flow hot paths)
 NOTICE.md                       licensing: GPL code, game content belongs to batcholi/FloDKSM
@@ -64,7 +71,12 @@ so a fresh clone works unchanged). Print the resolved paths with
   corpus via config, serves the repo+corpus common ancestor on one static
   server and passes the corpus URL automatically (regtest + postest `?open=`).
 So pointing at a different blueprints folder is pure configuration — no code
-or path edits anywhere.
+or path edits anywhere. On a NEW machine, discover the paths with
+`python3 tools/find_install.py` (procedure documented in LOCATIONS.md: Steam
+appid 2941660 → libraryfolders.vdf → appmanifest_2941660.acf →
+`common/Archean/Archean-game` + `Archean-data/client/blueprints` +
+`workshop/content/2941660`); NEVER commit a resolved machine path — the only
+config file that may hold one is the gitignored `blueprints.conf`.
 
 ## The rewrite (app/ — React + TypeScript, IN PROGRESS)
 Per the user (2026-10-17) the React SPA in `app/` REPLACES `viewer/` as the
@@ -225,14 +237,19 @@ refuses to cut a tag when the strings disagree.
 - Game assets on disk: `~/.local/share/Steam/steamapps/common/Archean/Archean-game/modules/<module>/components/<Type>/<Type>.{gltf,ini}`
   (= the tools/config.py `game_dir` DEFAULT — override via ARCHEAN_GAME or
   blueprints.conf; resolve every machine-local path through config, see
-  § Blueprint folder)
+  § Blueprint folder; discover on any machine via tools/find_install.py +
+  LOCATIONS.md)
   = ground truth for models/materials/node trees (read the `.gltf` materials +
   `.ini` directly; regenerate `viewer/models/` after extractor changes).
-- The dev's own viewer (https://viewer.xenontools.dev/, js modules under /js/)
+- The dev's own viewer (https://viewer.xenontools.dev/, js modules under /js/ —
+  hub page with docs/links: https://xenontools.dev/)
   is the reference implementation for genuinely NEW format questions. When
   used, transcribe the finding into FORMAT.md + code comments in the SAME
   commit so the knowledge stays offline (see FORMAT.md § Local sources of
-  truth, and NOTICE.md §2 for its GPL-adjacent porting terms).
+  truth, and NOTICE.md §2 for its GPL-adjacent porting terms). The official
+  Archean wiki (https://wiki.archean.space/en/tools/BlueprintTool.html and the
+  rest of wiki.archean.space) documents the in-game side; all reference URLs
+  are indexed in LOCATIONS.md § Upstream / reference viewer documentation.
 
 ## Format facts (verified — do not re-derive)
 - 1 grid cell = 0.25 m; `pos_*` ∈ 0..12; `frame_*` in 3 m units;

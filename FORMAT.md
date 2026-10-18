@@ -378,11 +378,15 @@ key semantics are transcribed above and in the code headers):
 
 - Game assets on disk: `~/.local/share/Steam/steamapps/common/Archean/Archean-game/modules/<module>/components/<Type>/<Type>.{gltf,ini,png}`
   — per component: mesh + material factors (gltf), node tree/mass/colliders/
-  joints/adapters (ini). Regenerate the atlas:
+  joints/adapters (ini). Find the install on ANY machine via
+  `python3 tools/find_install.py` (procedure + layout: LOCATIONS.md).
+  Regenerate the atlas:
   `python3 tools/extract_models.py ~/.local/share/Steam/steamapps/common/Archean/Archean-game -o viewer/models`
   (only `manifest.json` changes for material-table updates; geometry jsons
   are byte-stable).
-- The dev's viewer (`viewer.xenontools.dev`, js/{scene,blueprint,palette,blockshapes}.js)
+- The dev's viewer (`viewer.xenontools.dev`, js/{scene,blueprint,palette,blockshapes}.js —
+  full URLs + the xenontools.dev hub and the official Archean wiki page are
+  indexed in LOCATIONS.md § Upstream / reference viewer documentation)
   remains the reference implementation when a format question is genuinely new;
   anything learned there MUST be transcribed into this file + code comments so
   it stays offline.
