@@ -122,6 +122,27 @@ budgets ≤8000 in that mode.
 NOTE: to kill a dev server, use `pkill -f "[h]ttp.server 8650"` — plain
 `pkill -f "http.server 8650"` also matches (kills) the calling shell.
 
+## OpenCode session discipline (mandatory — read at session START)
+Every OpenCode session works in its OWN git worktree (~/.local/share/opencode/
+worktree/…). Two live sessions on this repo therefore SILENTLY fork the commit
+graph — caught 2026-10-18 when a sibling worktree held three unmerged feature
+commits while `main` moved on (painful semantic merge + a botched shared-
+node_modules symlink that deleted the real package tree; restored via npm ci).
+Rules:
+- At session START run `git worktree list`. A sibling worktree carrying
+  commits NOT on main = another session forked this repo: STOP, tell the
+  user, reconcile (merge + full gates) BEFORE doing new work.
+- Land finished work on main (ff-only, see § Publishing — merges/pushes to
+  main are routine; only the RELEASE cut needs the user's explicit ask).
+  Never leave the session's only copy of the work in its own worktree.
+- NEVER symlink node_modules (or other state dirs) between worktrees or into
+  the main checkout; each checkout runs its own `npm install`. The gitignore
+  says `node_modules` (no trailing slash) exactly so a stray link can never
+  be committed.
+- One live session per repo: before starting a NEW conversation here, have
+  the current one merge to main, then `git worktree remove <it>` (stale
+  entries: `git worktree prune`). `git worktree list` is the live map.
+
 ## Checkin gate (mandatory — the hook is the enforcement)
 Every commit passes `tests/pre-commit` (install once: `bash
 tools/install-hooks.sh`): (1) `tools/security-scan.py --staged` — the staged
