@@ -109,7 +109,7 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockP
       {widget && (
         <div data-testid="modebox"
           className="absolute z-20 flex -translate-x-1/2 gap-1 rounded-lg border border-white/15 bg-black/80 p-1 backdrop-blur"
-          style={{ left: widget.x, top: widget.y - 44 }}>
+          style={{ left: widget.x, top: Math.max(8, widget.y - 48) }}>
           {([['off', '⊘', 'hide gizmo'], ['translate', '✥', 'move'], ['rotate', '⟳', 'rotate']] as const).map(([m, ic, t]) => (
             <button key={m} title={t} data-testid={`mode-${m}`} onClick={() => setMode(m)}
               className={`h-8 w-9 rounded text-[15px] leading-none ${gmode === m ? 'bg-accent/30 text-accent' : 'text-ink hover:bg-white/10'}`}>
@@ -154,5 +154,6 @@ function StatsStrip({ engine, bp }: { engine: { current: Engine | null }; bp: Bl
     return () => cancelAnimationFrame(raf);
   }, [bp, engine]);
   return <p data-testid="scene-stats" ref={ref}
-    className="absolute bottom-2 left-3 rounded bg-black/50 px-2 py-1 text-[11px] text-ink-dim" />;
+    className="pointer-events-none absolute bottom-2 left-3 max-w-[calc(100%-1.5rem)] truncate rounded
+               bg-black/50 px-2 py-1 text-[11px] text-ink-dim" />;
 }

@@ -47,7 +47,11 @@ export default function TopBar(p: Props) {
   );
 
   return (
-    <header className="relative z-30 flex h-11 shrink-0 items-center gap-2 border-b border-white/10 bg-panel px-2">
+    // mobile: the mode bar cannot share one row with File/Save/⚙ (it used to
+    // be crushed to a sliver by the shrink-0 siblings), so it wraps onto a
+    // full-width second row; desktop keeps the single-row chrome
+    <header className="relative z-30 flex min-h-11 shrink-0 flex-wrap items-center gap-x-2 gap-y-1
+                       border-b border-white/10 bg-panel px-2 py-1 md:flex-nowrap md:py-0">
       <button data-testid="back-to-gallery" onClick={p.onBack} title="back to gallery"
         className="shrink-0 rounded bg-panel2 px-2.5 py-1 text-[12px] text-ink hover:bg-white/10 hover:text-accent">
         ←
@@ -76,10 +80,13 @@ export default function TopBar(p: Props) {
       </button>
 
       <nav data-testid="mode-bar"
-        className="ml-1 flex max-w-[46vw] shrink items-center gap-[2px] overflow-x-auto rounded-lg border border-white/10 bg-panel2 p-[2px]">
+        className="order-last flex w-full justify-between gap-[2px] rounded-lg border border-white/10
+                   bg-panel2 p-[2px] md:order-none md:ml-1 md:w-auto md:max-w-[46vw] md:justify-start
+                   md:shrink md:overflow-x-auto">
         {MODES.map(([m, label]) => (
           <button key={m} data-testid={`mode-${m}`} onClick={() => p.onMode(m)}
-            className={`shrink-0 whitespace-nowrap rounded-md px-2.5 py-1 text-[12px] md:px-3 ${
+            className={`flex-1 whitespace-nowrap rounded-md px-2.5 py-1.5 text-center text-[12px]
+                       md:flex-none md:px-3 md:py-1 ${
               p.mode === m ? 'bg-accent font-semibold text-black' : 'text-ink-dim hover:text-ink'}`}>
             {label}
           </button>
@@ -94,7 +101,7 @@ export default function TopBar(p: Props) {
         <a data-testid="wslink" title="Steam Workshop page"
           href={`https://steamcommunity.com/sharedfiles/filedetails/?id=${p.craftId}`}
           target="_blank" rel="noopener"
-          className="shrink-0 rounded bg-panel2 px-2 py-1 text-[11px] text-ink-dim hover:text-accent">workshop ↗</a>
+          className="hidden shrink-0 rounded bg-panel2 px-2 py-1 text-[11px] text-ink-dim hover:text-accent md:block">workshop ↗</a>
       )}
       {p.children}
     </header>
