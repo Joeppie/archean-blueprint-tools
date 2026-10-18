@@ -123,10 +123,15 @@ for s in 1 2 3 4; do   # before / +pitch90 / +pitch90+roll90 / ring-hover fat �
 done
 
 echo "── position tests (placement fixtures + generic button sweep)"
+# Per-craft FIXTURE FLOOR (AGENTS § Blueprint folder): a custom corpus is the
+# user's curated folder — it need not carry the regression fixtures (XYQ, the
+# giant, the gantry live in the repo's testdata/). A missing craft id falls
+# back to testdata, served from the SAME static server.
+craftbase() { [ -f "$CORPUS_DIR/$1/blueprint.json" ] && echo "$CORPUS_BASE" || echo "$APP/testdata"; }
 postest() {   # $1=craft $2=budget $3=wall-timeout — dump the postest title
   ( export SHOT_TIMEOUT="$3"
     chrome --virtual-time-budget="$2" --dump-dom \
-      "$APP/viewer/index.html?open=$CORPUS_BASE/$1/blueprint.json&postest" 2>/dev/null \
+      "$APP/viewer/index.html?open=$(craftbase "$1")/$1/blueprint.json&postest" 2>/dev/null \
     | grep -oPm1 '(?<=<title>)[^<]*' )
 }
 for c in 3812927875 3518436870 3417786605 3803780241 3381670618 3509975859 3732302108; do

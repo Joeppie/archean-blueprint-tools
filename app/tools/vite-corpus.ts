@@ -47,6 +47,22 @@ export function corpusDir(): string {
   return (corpusCache = path.resolve(REPO, expandUser(raw)));
 }
 
+/** Per-craft folder: the configured corpus first, the repo testdata as the
+ *  fixture floor. A custom corpus (Steam saves) is a superset the user curates
+ *  — it need not carry the regression fixtures (XYQ 3803780241, the giant
+ *  3509975859 …), which the repo's testdata/ always ships. Test ids and
+ *  gallery deep links therefore resolve on ANY machine — still zero
+ *  hardcoded absolute paths (AGENTS § Blueprint folder). */
+export function craftRoot(id: string): string {
+  const p = path.join(corpusDir(), id);
+  return fs.existsSync(path.join(p, 'blueprint.json')) ? p : path.join(REPO, 'testdata', id);
+}
+
+/** corpus-rooted file lookup with the same fixture floor (node-side tests) */
+export function craftFile(id: string, file = 'blueprint.json'): string {
+  return path.join(craftRoot(id), file);
+}
+
 /** snapshot the catalog at compile time: ids, workshop names/authors, preview
  *  availability — baked into the bundle as virtual:gallery */
 export function galleryData(): GalleryEntry[] {
@@ -109,10 +125,13 @@ function handler(req: IncomingMessage, res: ServerResponse, next: () => void) {
     res.end(ids.map(d => `<a href="${d}/">${d}/</a>`).join('\n'));
     return;
   }
-  // <id>/<file> with strict traversal guard
-  const root0 = root;
-  const file = path.resolve(root0, rel);
-  if (!file.startsWith(root0 + path.sep)) { res.statusCode = 404; res.end('not found'); return; }
+  // <id>/<file> with strict traversal guard; missing ids fall back to the
+  // repo testdata fixture floor (craftRoot)
+  const m = /^(\d{6,})\/(.+)$/.exec(rel);
+  if (!m) { res.statusCode = 404; res.end('not found'); return; }
+  const root0 = craftRoot(m[1]!);
+  const file = path.resolve(root0, m[2]!);
+  if (!file.startsWith(root0 + path.sep) || !fs.existsSync(file)) { res.statusCode = 404; res.end('not found'); return; }
   sendFile(req, res, file, file.endsWith('.json') ? 'application/json'
     : file.endsWith('.jpg') ? 'image/jpeg' : 'application/octet-stream',
   file.endsWith('.jpg') ? 3600 : 0);   // previews cache 1 h; blueprints revalidate

@@ -13,12 +13,12 @@ import {
 } from '../subgrid';
 import type { Blueprint, BlueprintComponent, Block, FileQuat } from '../format';
 import type { ModelManifest } from '../models';
-import { corpusDir } from '../../../tools/vite-corpus.ts';
+import { corpusDir, craftFile } from '../../../tools/vite-corpus.ts';
 
 const CORPUS = corpusDir();
 const haveCorpus = existsSync(CORPUS);
 const load = (id: string): Blueprint =>
-  JSON.parse(readFileSync(`${CORPUS}/${id}/blueprint.json`, 'utf8')) as Blueprint;
+  JSON.parse(readFileSync(craftFile(id), 'utf8')) as Blueprint;
 
 const comp = (o: Partial<BlueprintComponent> & { type: string }): BlueprintComponent => ({
   position: { x: 0, y: 0, z: 0 }, orientation: { w: 1, x: 0, y: 0, z: 0 }, ...o,
