@@ -9,7 +9,7 @@ over the release line when it reaches feature parity (Phase 5).
 | Concern | Choice | Why |
 |---|---|---|
 | Language | TypeScript (strict, `noUncheckedIndexedAccess`) | the whole ask |
-| App shell | React 19 + Vite 7, SPA in `app/` | the ask; Vite = zero-config TS/ESM |
+| App shell | React 19 + Vite 8 (Rolldown bundler), SPA in `app/` | the ask; Vite = zero-config TS/ESM; scaffold landed on Vite 8 after the plan was written |
 | UI kit | Tailwind CSS 4 + shadcn/ui (Radix primitives) | the leading React UX framework in 2026; Radix gives accessible sliders/panels/trees without opinionated chrome — right fit for the DevTools-style inspector |
 | State | zustand (slices) + immer for the blueprint model | one dirty-checked document store; panels subscribe per-field (no whole-tree rerenders) |
 | 3D | three.js (npm, pinned) inside a **headless scene engine class** (`app/src/engine/`), NOT react-three-fiber | the scene is manually merged/culled/on-demand-rendered (PERF.md rules); R3F would rerender the graph per React commit. React mounts `<Viewport>` and calls `engine.attach(canvas)`; engine never imports React |
@@ -17,6 +17,14 @@ over the release line when it reaches feature parity (Phase 5).
 | Unit tests | vitest (pure logic: palette, blockshapes, hullfit, format math, serialize) | no browser needed for ~40 % of the old suite |
 | E2E / UI | Playwright (`@playwright/test`) | the ask; see § Playwright |
 | Blueprint root | resolved path served over a tiny dev-server plugin reading `tools/config.py` (`ARCHEAN_BLUEPRINTS` / `blueprints.conf`) | keeps the AGENTS § Blueprint-folder rule through the rewrite |
+
+Vite was **introduced** by this rewrite — it does not replace the legacy
+`viewer/`, which stays zero-build (plain ES modules + CDN Three.js, no npm)
+and live on `release` until Phase 5 cutover. The toolchain lives ONLY under
+`app/` (own npm project; repo-root `tools/`, `tests/` and the zero-build
+regtest are unchanged). Deviations from the 2026-10 plan strings, all landed
+with P1: Vite 7→8 (Rolldown), ESLint never adopted (Oxlint), vitest runs the
+pure engine layer on plain node.
 
 ## three.js fork investigation (verdict — no fork)
 No third-party fork beats stock three.js for this workload (2026 survey):

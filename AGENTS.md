@@ -97,7 +97,9 @@ user's explicit say-so (Pages/release still serves it meanwhile).
 cd app && npm install          # one-time
 npm test                       # vitest — pure engine core (no browser)
 npm run test:e2e               # Playwright chromium UI suite (app/e2e/)
-npm run dev                    # http://localhost:5175 (IPv4: --host 127.0.0.1)
+npm run dev -- --host 0.0.0.0  # NEVER loopback-only (dev-server binding rule):
+                               # browse via the Tailscale IP (tailscale ip -4):
+                               # http://<ip>:5175/  — loopback still answers there
 ```
 
 ## Commands
