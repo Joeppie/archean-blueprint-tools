@@ -47,6 +47,7 @@ export function unityConjugate(q: FileQuat): FileQuat { return { w: q.w, x: -q.x
 
 export interface Block extends LatticeObj {
   type: number;
+  material?: number;
   size_x: number; size_y: number; size_z: number;
   colors?: number[];
 }

@@ -43,6 +43,7 @@ function eng(op: string, arg: Record<string, unknown> = {}): (page: Page) => Pro
 async function openCraft(page: Page, id: string) {
   await page.goto(`/?craft=${id}`);
   await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
+  await page.getByTestId('mode-edit').click();
 }
 
 test.describe('symmetry twins', () => {

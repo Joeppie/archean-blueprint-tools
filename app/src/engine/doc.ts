@@ -179,3 +179,57 @@ export function docSet(root: DocNode, path: (string | number)[], v: number | str
   else { m.kind = 'str'; m.value = v; }
   return true;
 }
+
+// ---------- value → document (New craft / normalize / block & wire ops) ----
+
+/** Wrap a plain JS value as a DOC using the game writer's literal style:
+ *  int-modelled numbers bare, double-modelled float-styled. `floaty` marks
+ *  numbers the writer would emit as doubles (world coords, radii). */
+export function docFromValue(v: unknown, floaty = false): DocNode {
+  if (v === null || v === undefined) return { kind: 'null' };
+  if (typeof v === 'boolean') return { kind: 'bool', value: v };
+  if (typeof v === 'string') return { kind: 'str', value: v };
+  if (typeof v === 'number') {
+    let raw = String(v);
+    if (floaty && !/[.eE]/.test(raw)) raw += '.0';
+    if (floaty) raw = raw.replace(/e([+-])(\d)(?!\d)/, 'e$10$2');
+    return { kind: 'num', value: v, raw };
+  }
+  if (Array.isArray(v)) return { kind: 'arr', items: v.map(x => docFromValue(x, floaty)) };
+  const entries: [string, DocNode][] = [];
+  for (const [k, x] of Object.entries(v as object)) entries.push([k, docFromValue(x, floaty)]);
+  return { kind: 'obj', entries };
+}
+
+/** The `data.colors` palette is a MIXED writer type: entries are objects of
+ *  INTS (0-255 / 0-15 scales) — force int style for their numbers. */
+export function docSetArrayItem(root: DocNode, path: (string | number)[],
+  index: number, node: DocNode): boolean {
+  const arr = docGet(root, path);
+  if (!arr || arr.kind !== 'arr') return false;
+  while (arr.items.length <= index) arr.items.push({ kind: 'null' });
+  arr.items[index] = node;
+  return true;
+}
+
+/** Insert at index (append when index >= length). */
+export function docArrayInsert(root: DocNode, path: (string | number)[],
+  index: number, node: DocNode): boolean {
+  const arr = docGet(root, path);
+  if (!arr || arr.kind !== 'arr') return false;
+  arr.items.splice(Math.max(0, Math.min(index, arr.items.length)), 0, node);
+  return true;
+}
+
+export function docArrayRemoveAt(root: DocNode, path: (string | number)[],
+  index: number): boolean {
+  const arr = docGet(root, path);
+  if (!arr || arr.kind !== 'arr' || index < 0 || index >= arr.items.length) return false;
+  arr.items.splice(index, 1);
+  return true;
+}
+
+export function docArrayLength(root: DocNode, path: (string | number)[], ): number {
+  const arr = docGet(root, path);
+  return arr && arr.kind === 'arr' ? arr.items.length : 0;
+}

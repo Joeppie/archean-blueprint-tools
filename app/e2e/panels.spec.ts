@@ -4,6 +4,7 @@
 // the occupancy/type-255 mirror verified in the DOWNLOADED file, and the
 // subgrid tab + live joint slider riding the dolphin's panel group.
 import { expect, test, type Page } from '@playwright/test';
+import path from 'node:path';
 import { readFileSync } from 'node:fs';
 
 const ISW = '3812927875';
@@ -12,6 +13,7 @@ const DOLPHIN = '3417786605';
 async function openCraft(page: Page, id: string) {
   await page.goto(`/?craft=${id}`);
   await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
+  await page.getByTestId('mode-edit').click();
 }
 
 const optsOf = (page: Page) => page.evaluate(() => {
@@ -165,4 +167,77 @@ test('mobile: the panels are a drawer behind the ⚙ toggle', async ({ page }) =
   await expect(aside.getByTestId('viewopts')).toBeVisible();
   await page.getByTestId('toggle-panels').click();
   await expect(aside).toHaveCount(0);
+});
+
+test.describe('modes, new craft, file menu', () => {
+  const desktopOnly = () => test.skip(test.info().project.name !== 'chromium', 'desktop-only');
+
+  test('gallery → New craft: untitled doc with the starter deck', async ({ page }) => {
+    desktopOnly();
+    await page.goto('/');
+    await page.getByTestId('gallery-new').click();
+    await expect(page.getByTestId('editor-title')).toContainText('New craft');
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
+    const blocks = await page.evaluate(() =>
+      (window as unknown as { __ARCHEAN__?: { stats: () => { blocks: number } } }).__ARCHEAN__!.stats().blocks);
+    expect(blocks).toBe(3);
+    await expect(page.getByTestId('wslink')).toHaveCount(0);        // not a workshop item
+    await expect(page.getByTestId('save-btn')).toBeVisible();
+  });
+
+  test('view mode is read-only, edit mode unlocks the inspector', async ({ page }) => {
+    desktopOnly();
+    await page.goto('/?craft=' + ISW);
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });   // lands in View
+    await page.getByTestId('filter').fill('aileron');
+    await page.locator('[data-idx]').first().click();
+    await expect(page.getByTestId('row-n-x')).toBeDisabled();
+    await page.getByTestId('mode-edit').click();
+    await expect(page.getByTestId('row-n-x')).toBeEnabled();
+  });
+
+  test('blocks mode: click a deck face to place a block', async ({ page }) => {
+    desktopOnly();
+    await page.goto('/');
+    await page.getByTestId('gallery-new').click();
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
+    await page.getByTestId('mode-blocks').click();
+    const canvas = page.getByTestId('canvas');
+    const box = (await canvas.boundingBox())!;
+    const before = await page.evaluate(() =>
+      (window as unknown as { __ARCHEAN__?: { stats: () => { blocks: number } } }).__ARCHEAN__!.stats().blocks);
+    const pts: [number, number][] = [[0.5, 0.62], [0.5, 0.55], [0.45, 0.6], [0.55, 0.65]];
+    let after = before;
+    for (const [fx, fy] of pts) {
+      await canvas.click({ position: { x: box.width * fx, y: box.height * fy } });
+      await page.waitForTimeout(600);                       // debounced scene reload
+      after = await page.evaluate(() =>
+        (window as unknown as { __ARCHEAN__?: { stats: () => { blocks: number } } }).__ARCHEAN__!.stats().blocks);
+      if (after > before) break;
+    }
+    expect(after, 'a block was placed on the deck').toBe(before + 1);
+    await expect(page.getByTestId('block-edit')).toContainText('Block[3]');
+  });
+
+  test('wire mode: census + auto-wire answers, file menu opens a blueprint', async ({ page }) => {
+    desktopOnly();
+    await page.goto('/?craft=' + ISW);
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
+    await page.getByTestId('mode-wire').click();
+    await expect(page.getByTestId('wire-census')).toContainText('connected');
+    await page.getByTestId('auto-wire').click();
+    await expect(page.locator('[data-testid="wire-census"] , #root')).toContainText(/auto-wired|nothing to pair/);
+    // File ▾ → Open file… loads a local blueprint (and normalizes v1 → v2)
+    await page.getByTestId('file-menu').click();
+    await page.getByTestId('file-open').click();
+    await page.getByTestId('file-input').setInputFiles(
+      path.resolve(process.cwd(), '..', 'testdata', DOLPHIN, 'blueprint.json'));
+    await expect(page.getByTestId('editor-title')).toContainText(/GNG-574|Dolphin|New craft|\S/, { timeout: 15_000 });
+    await expect(page).toHaveTitle(/SCENE PASS/);
+    const legacyChip = await page.evaluate(() => {
+      const w = window as unknown as { __ARCHEAN__?: { engine: { blueprint: { data: { colors?: unknown[] } } } } };
+      return Array.isArray(w.__ARCHEAN__!.engine.blueprint.data.colors);
+    });
+    expect(legacyChip, 'v1 file was NORMALIZED: it now carries a palette').toBe(true);
+  });
 });

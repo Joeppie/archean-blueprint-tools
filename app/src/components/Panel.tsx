@@ -41,6 +41,10 @@ interface Props {
   /** bump to remount the inspector (⟲ reset rebuilds the slider baselines) */
   inspKey: number;
   markDirty: () => void;
+  /** view mode: everything read-only */
+  readOnly?: boolean;
+  /** mode workspaces (Blocks/Wire/Flight) replace the inspector section */
+  bottom?: React.ReactNode;
 }
 
 // ------------------------------------------------------------- mass & CoM
@@ -65,7 +69,7 @@ function MassCoM(p: { engine: Engine | null; rev: number }) {
 // onInput (dead-button bug v0.147) and every edit marks the row modified.
 function Row(p: {
   label: string; min: number; max: number; step: number; value: number;
-  onInput: (v: number) => void; title?: string;
+  onInput: (v: number) => void; title?: string; disabled?: boolean;
 }) {
   const [v, setV] = useState(p.value);
   const [mod, setMod] = useState(false);
@@ -79,10 +83,10 @@ function Row(p: {
   return (
     <div title={p.title} className={`flex items-center gap-1.5 py-[3px] ${mod ? 'row-mod' : ''}`}>
       <label className="w-[74px] shrink-0 truncate text-[11px] text-ink-dim">{p.label}</label>
-      <input type="range" min={p.min} max={p.max} step={p.step} value={v}
+      <input type="range" min={p.min} max={p.max} step={p.step} value={v} disabled={p.disabled}
         data-testid={`row-r-${p.label}`}
-        onChange={e => set(+e.target.value)} className="min-w-0 flex-1 accent-accent" />
-      <input type="number" min={p.min} max={p.max} step={p.step} value={v}
+        onChange={e => set(+e.target.value)} className="min-w-0 flex-1 accent-accent disabled:opacity-40" />
+      <input type="number" min={p.min} max={p.max} step={p.step} value={v} disabled={p.disabled}
         data-testid={`row-n-${p.label}`}
         onChange={e => { if (e.target.value === '') return; const n = +e.target.value; if (isFinite(n)) set(n); }}
         className="w-[64px] shrink-0 rounded border border-white/10 bg-panel2 px-1 py-[1px] text-[11px] text-ink" />
@@ -275,7 +279,7 @@ function CompList(p: { bp: Blueprint; sel: Props['sel']; onSelect: Props['onSele
 
 // ----------------------------------------------------------------- inspector
 function Inspector(p: Props) {
-  const { engine, ctx, bp, sel, edits, markDirty } = p;
+  const { engine, ctx, bp, sel, edits, markDirty, readOnly } = p;
   const ci = sel.ci;
   const comp = ci >= 0 ? bp.data.components[ci] : null;
 
@@ -304,19 +308,19 @@ function Inspector(p: Props) {
         <span className="text-ink-dim">[{ci}] · {String(comp.module ?? '')}</span>
       </div>
       <Sec title="Position (m)">
-        <Row label="x" min={pos0.x - 2} max={pos0.x + 2} step={0.005} value={pos0.x}
+        <Row label="x" min={pos0.x - 2} max={pos0.x + 2} step={0.005} value={pos0.x} disabled={readOnly}
           onInput={v => livePos('x', v)} />
-        <Row label="y" min={pos0.y - 1.5} max={pos0.y + 1.5} step={0.005} value={pos0.y}
+        <Row label="y" min={pos0.y - 1.5} max={pos0.y + 1.5} step={0.005} value={pos0.y} disabled={readOnly}
           onInput={v => livePos('y', v)} />
-        <Row label="z" min={pos0.z - 2} max={pos0.z + 2} step={0.005} value={pos0.z}
+        <Row label="z" min={pos0.z - 2} max={pos0.z + 2} step={0.005} value={pos0.z} disabled={readOnly}
           onInput={v => livePos('z', v)} />
       </Sec>
       <Sec title="Rotation (° deltas, world axes)">
-        <Row label="pitch" min={-180} max={180} step={0.5} value={0}
+        <Row label="pitch" min={-180} max={180} step={0.5} value={0} disabled={readOnly}
           title="world-axis pitch delta; orientation stays an exact file quaternion"
           onInput={v => liveRot('p', v)} />
-        <Row label="yaw" min={-180} max={180} step={0.5} value={0} onInput={v => liveRot('y', v)} />
-        <Row label="roll" min={-180} max={180} step={0.5} value={0} onInput={v => liveRot('r', v)} />
+        <Row label="yaw" min={-180} max={180} step={0.5} value={0} disabled={readOnly} onInput={v => liveRot('y', v)} />
+        <Row label="roll" min={-180} max={180} step={0.5} value={0} disabled={readOnly} onInput={v => liveRot('r', v)} />
         {comp.type === 'PilotSeat' && (
           <div className="mt-1 flex flex-wrap gap-1">
             {([['lean fwd 12°', 12], ['20°', 20], ['30°', 30], ['45°', 45], ['upright', 0]] as const).map(([t, v]) => (
@@ -331,9 +335,9 @@ function Inspector(p: Props) {
       </Sec>
       <Sec title="Component data">
         <DataRows comp={comp} compPath={['data', 'components', ci]} edits={edits} ctx={ctx} markDirty={markDirty}
-          symJoint={(k, d) => engine?.propagateJoint(ci, k, d)} />
+          symJoint={(k, d) => engine?.propagateJoint(ci, k, d)} readOnly={readOnly} />
       </Sec>
-      <Sec title="Actions">
+      {!readOnly && <Sec title="Actions">
         <button data-testid="comp-reset"
           className="rounded bg-panel2 px-2 py-1 text-[11px] text-ink hover:bg-white/10"
           onClick={() => {
@@ -344,7 +348,7 @@ function Inspector(p: Props) {
           }}>
           ⟲ reset this component
         </button>
-      </Sec>
+      </Sec>}
     </div>
   );
 }
@@ -352,7 +356,7 @@ function Inspector(p: Props) {
 function DataRows(p: {
   comp: BlueprintComponent; compPath: (string | number)[];
   edits: EditApi; ctx: EditCtx | null; markDirty: () => void;
-  symJoint?: (key: string, delta: number) => void;
+  symJoint?: (key: string, delta: number) => void; readOnly?: boolean;
 }) {
   const entries = Object.entries(p.comp.data ?? {});
   const editable = entries.filter(([, v]) =>
@@ -368,7 +372,7 @@ function DataRows(p: {
             onChange={nv => { p.edits.dataField(p.ctx!, p.compPath, k, nv); p.markDirty(); }} />;
         if (typeof v === 'number')
           return <Row key={k} label={k} min={Math.min(v - 10, -100)} max={Math.max(v + 10, 100)}
-            step={0.1} value={v}
+            step={0.1} value={v} disabled={p.readOnly}
             onInput={nv => {
               // angle/pos on a kinematic master move the twins in unison (v0.176)
               if ((k === 'angle' || k === 'pos') && p.symJoint) {
@@ -489,7 +493,7 @@ export default function Panel(p: Props) {
         <CompList bp={p.bp} sel={p.sel} onSelect={p.onSelect} onSelectSub={p.onSelectSub} />
       </div>
       <div className="min-h-0 flex-[2] border-t border-white/10 overflow-y-auto">
-        {p.sel.sub >= 0
+        {p.bottom !== undefined ? p.bottom ?? null : p.sel.sub >= 0
           ? <SubPanel {...p} key={`s${p.sel.sub}`} />
           : p.sel.ci >= 0
             ? <Inspector {...p} key={`c${p.sel.ci}k${p.inspKey}`} />

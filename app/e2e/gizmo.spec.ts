@@ -48,6 +48,7 @@ function eng(op: string, arg: Record<string, unknown> = {}): (page: Page) => Pro
 async function openCraft(page: Page, id: string) {
   await page.goto(`/?craft=${id}`);
   await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
+  await page.getByTestId('mode-edit').click();
 }
 const dist = (a: readonly number[], b: readonly number[]) =>
   Math.hypot(a[0]! - b[0]!, a[1]! - b[1]!, a[2]! - b[2]!);

@@ -20,10 +20,14 @@ declare global {
 let atlasP: Promise<ModelAtlas | null> | null = null;
 const getAtlas = (): Promise<ModelAtlas | null> => (atlasP ??= openAtlas());
 
-export default function Viewport({ bp, onPick, onEngine }: {
+export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockPick }: {
   bp: Blueprint | null;
   onPick: (h: PickHit) => void;
   onEngine?: (e: Engine | null) => void;
+  /** workspace mode: blocks clicks route to onBlockPick; the mode widget
+   *  only belongs to Edit */
+  mode?: 'view' | 'edit' | 'blocks' | 'wire' | 'flight';
+  onBlockPick?: (clientX: number, clientY: number) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<Engine | null>(null);
@@ -80,12 +84,13 @@ export default function Viewport({ bp, onPick, onEngine }: {
   const pickClick = (e: React.PointerEvent) => {
     const engine = engineRef.current;
     if (!engine) return;
+    if (mode === 'blocks') { onBlockPick?.(e.clientX, e.clientY); return; }
     const hit = engine.pickAt(e.clientX, e.clientY);
     onPick(hit);
     if (hit.kind === 'comp' && hit.ci != null) {
       engine.select(hit.ci); engine.flyTo(hit.ci);
       const box = hostRef.current?.getBoundingClientRect();
-      if (box) setWidget({ x: e.clientX - box.left, y: e.clientY - box.top });
+      if (box && mode === 'edit') setWidget({ x: e.clientX - box.left, y: e.clientY - box.top });
     } else {
       if (hit.kind === 'sub' && hit.sub != null) engine.selectSub(hit.sub);
       else engine.select(-1);
