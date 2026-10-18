@@ -1,9 +1,10 @@
 // ModePanels.tsx — the workspace panels for the BLOCKS / WIRE / FLIGHT
 // modes. Every mutation goes through the pure model modules onto bp + doc
 // (App provides the funnel), then schedules the debounced scene reload.
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { Sec, Num, SearchList } from './ui';
 import type { Engine } from '../engine/scene';
+import { FLOWS } from '../engine/aero';
 import type { EditCtx } from '../engine/edit';
 import { docArrayInsert, docFromValue, docSetNumber, docArrayRemoveAt } from '../engine/doc';
 import { blockFromCell, blockInfo, setBlockField } from '../engine/blocks';
@@ -311,6 +312,81 @@ export function FlightPanel(p: { engine: Engine | null; rev: number }) {
           CoM {v3(r.mass.com)} (raw file space)
         </div>
       </Sec>
+    </>
+  );
+}
+
+// -------------------------------------------------------------- WIND mode
+const FLOW_KEYS: [string, string][] = [
+  ['nose', '← nose'], ['tail', 'tail →'], ['left', 'left'], ['right', 'right'],
+  ['up', 'up'], ['down', 'down'],
+];
+
+/** The WIND TUNNEL panel (engine/aero.ts): the Archean shape-field model
+ *  (wiki.archean.space §Aerodynamics — see FORMAT.md): flow direction, the
+ *  live multigrid solve status, and the cross-section analysis (frontal
+ *  area, fineness-weighted form drag, thin-wing classification). */
+export function WindPanel(p: { engine: Engine | null; rev: number }) {
+  const [now, setNow] = useState(0);
+  p.rev;
+  const st = p.engine?.windState();
+  // keep the status live: poll while mounted (the solve usually lands in
+  // the first second — a running-gated interval could clear before the
+  // final state ever rendered)
+  useEffect(() => {
+    const t = setInterval(() => setNow(n => n + 1), 400);
+    return () => clearInterval(t);
+  }, []);
+  void now;
+  const flowKey = st ? Object.keys(FLOWS).find(k =>
+    FLOWS[k]![0] === st.flow[0] && FLOWS[k]![1] === st.flow[1] && FLOWS[k]![2] === st.flow[2]) ?? 'nose' : 'nose';
+  const r = st?.report;
+  return (
+    <>
+      <Sec title="Wind tunnel — flow direction" testid="wind-flows">
+        <div className="flex flex-wrap gap-1 pb-1">
+          {FLOW_KEYS.map(([k, label]) => (
+            <button key={k} data-testid={`wind-flow-${k}`}
+              className={`ksp-btn px-1.5 py-[3px] text-[11px] ${flowKey === k ? 'on' : ''}`}
+              onClick={() => p.engine?.setWindTunnel(true, FLOWS[k]!)}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <div data-testid="wind-status" className="text-[11px] text-ink-dim">
+          {!st?.on && <span>idle — pick a direction</span>}
+          {!!st?.solid && <>body {st.solid} voxels · {(st.voxel * 100).toFixed(0)} cm/voxel<br /></>}
+          {st?.running && <span className="text-gold">solving… {st.iters} V-cycles (res {st.res.toExponential(1)})</span>}
+          {st?.converged && <span className="text-emerald-400">flow converged · {st.lines} streamlines</span>}
+        </div>
+        <div className="pt-1 text-[10px] leading-snug text-ink-dim">
+          Potential flow through the collider shape field, with the game's
+          fineness law: slender profiles keep the flow attached, bluff faces
+          shed a slow wake. Lines: warm glow = fast, blue = slow/stagnation,
+          uniform stream faded out.
+        </div>
+      </Sec>
+      {r && (
+        <Sec title="Shape-field analysis" testid="wind-report">
+          <div className="space-y-[2px] text-[11px] text-ink-dim">
+            <div>frontal area <span className="text-ink">{r.frontalArea.toFixed(2)} m²</span></div>
+            <div>form drag (fineness-weighted){' '}
+              <span className={r.dragCd < 0.4 ? 'text-emerald-400' : r.dragCd < 0.75 ? 'text-gold' : 'text-red-400'}>
+                {(r.dragCd * 100).toFixed(0)} % of bluff
+              </span>
+            </div>
+            <div>thin lifting cross-sections{' '}
+              <span className={r.liftArea > 0.5 ? 'text-emerald-400' : 'text-ink'}>{r.liftArea.toFixed(2)} m²</span>
+              <span className="text-ink-dim"> · {r.thinColumns}/{r.columns} columns</span>
+            </div>
+            <div className="pt-1 text-[10px]">
+              Lift needs ANGLE OF ATTACK — this is the geometric wing
+              criterion (wiki: thin cross-section normal to the flow).
+              Trim the craft nose-up with the seat axis for the force model.
+            </div>
+          </div>
+        </Sec>
+      )}
     </>
   );
 }

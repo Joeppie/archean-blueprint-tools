@@ -11,7 +11,7 @@ import { DEFAULT_OPTS, type Engine, type PickHit, type ViewOptions } from './eng
 import Viewport from './components/Viewport';
 import Panel, { StaticInfo, ViewOpts, type EditApi } from './components/Panel';
 import TopBar, { type Mode } from './components/TopBar';
-import { BlockPanel, FlightPanel, TriPanel, WirePanel, placeBlock, type Brush } from './components/ModePanels';
+import { BlockPanel, FlightPanel, TriPanel, WirePanel, WindPanel, placeBlock, type Brush } from './components/ModePanels';
 import { cornerOf, triAt, triangleFromCorners } from './engine/tris';
 import type { Blueprint } from './engine/format';
 import { docArrayInsert, docFromValue, docValue, parseDoc } from './engine/doc';
@@ -28,7 +28,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   const [hit, setHit] = useState<PickHit | null>(null);
   const [dirty, setDirty] = useState(false);
   const [inspKey, setInspKey] = useState(0);
-  const [mode, setMode] = useState<Mode>('view');
+  const [mode, setMode] = useState<Mode>(() =>
+    new URLSearchParams(window.location.search).has('aero') ? 'aero' : 'view');
   const [opts, setOpts] = useState<ViewOptions>(DEFAULT_OPTS);
   const [hullOpacity, setHullOpacityState] = useState(1);
   const [realModels, setRealModels] = useState(true);
@@ -133,13 +134,15 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   }, [markDirty, bumpRev]);
   const [engine, setEngine] = useState<Engine | null>(null);
 
-  // mode gating: gizmo only in Edit; Wire forces cables visible
+  // mode gating: gizmo only in Edit; Wire forces cables visible; the wind
+  // tunnel runs ONLY in Wind mode (the solve is bounded but never free)
   useEffect(() => {
     const e = engineRef.current;
     if (!e) return;
     e.setGizmoEnabled(mode === 'edit' && gizmoOn);
     if (mode === 'wire') e.setOption('pipes', true);
     if (mode !== 'blocks') setBlockSel(-1);
+    e.setWindTunnel(mode === 'aero');
   }, [mode, gizmoOn, engine]);
 
   const edits: EditApi = useMemo(() => ({
@@ -327,6 +330,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     </div>
   ) : mode === 'flight' ? (
     <FlightPanel engine={engine} rev={rev} />
+  ) : mode === 'aero' ? (
+    <div className="overflow-y-auto"><WindPanel engine={engine} rev={rev} /></div>
   ) : undefined;
 
   return (

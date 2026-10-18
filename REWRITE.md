@@ -270,8 +270,40 @@ new build dep, kept inside `app/`).
   wire-dock height, hover>=0 on item hover → -1 on leave, two-step
   connect; panels/select/sym specs follow the ⚙ popover. Gates: tsc
   clean, vitest 142, Playwright 59 pass / 19 desktop-only skips.
-  Remaining gaps (next): aero/wind/flow/thrust/seal + flight UI, hull
-  element list, streamlines/windsock HUD, P4 perf (BatchedMesh/?perf/wasm).
+  Remaining gaps (next): hull element list, P4 perf (BatchedMesh/?perf/
+  wasm), force coefficients (lift curve + stall + AoA) on the wind field.
+- **WIND TUNNEL (aero) — landed** (replaces the bogus legacy thin-plate
+  "aero plates" model per the user; STREAMLINES FIRST as asked): the OFFICIAL
+  game model is the SHAPE FIELD (wiki.archean.space §Aerodynamics — fully
+  transcribed into FORMAT.md §Aerodynamics): an outer-shell cross-section
+  scan where each surface patch knows the SOLID DEPTH behind it; fineness
+  along the flow = streamlining ("a tenth of the form drag of a blunt one"),
+  sealed cavities count solid, cost bounded by size-scaled resolution.
+  Pure `engine/aero.ts` implements exactly that on the collider voxel lattice
+  (blocks + nested-subgrid blocks + occupancies): per flow-parallel solid
+  run → blockageOf(run) form-blockage + wake deficit (potential flow cannot
+  separate — the wake enters from the wiki's own fineness law). The flow
+  solve is REAL: incompressible porous-mask potential flow v = κ(U+∇φ),
+  face flux σ_f(δ+Δφ) with the ∇κ·U source (uniform air telescopes to φ≡0
+  EXACTLY), geometric multigrid (FMV-cycle, red-black GS, full weighting =
+  prolong transpose), travel-aligned domain (any of the 6 wind directions,
+  voxel auto-scales to a bounded budget). Streamlines: RK2 through the face
+  flux field, forward + short backward legs, DIE in the opaque shell,
+  DEVIATION colour map (additive: fast warm glow, slow/stagnation blue,
+  freestream in a deadband fades out). scanAnalysis: frontal area,
+  fineness-weighted form drag %, THIN cross-section (wiki wing criterion)
+  lift-area readout — forces (lift curve/stall/AoA) are the next step on
+  the SAME field. Engine: `setWindTunnel(on, flowFile)` + the solve pumped
+  3 V-cycles every other frame INSIDE the on-demand loop (ISW converges in
+  ~13 V-cycles; progressive preview lines from iter 6), `windState()` for
+  UI/e2e, rebuilt on every load while active. UI: a sixth MODE tile
+  ⌥/≋/WIND + WindPanel (six flow-direction buttons, live solve status,
+  shape-field analysis) + `?aero=1` deep link. Pins: aero.test 10 (run
+  laws, wake shadow, travel-map exactness, uniform-field identity, plane
+  FLUX CONSERVATION on ISW, no-penetration, stagnation-vs-shoulder,
+  streamline colours/wake, wing-vs-bluff scan) + e2e aero.spec (mode solve
+  → converged, lines>20, retarget, teardown); gates vitest 152, tsc clean,
+  iGPU shots ISW + dolphin.
 - **P4 — perf**: BatchedMesh proxies, ?perf port, wasm benchmark of
   candidate 1, optional WebGPU flag.
 - **P5 — parity gate + cutover**: Playwright suite mirrors the old suites

@@ -10,7 +10,7 @@
 //   Flight — flight analysis (mass/CoM, thrust nets, control surfaces)
 import { useEffect, useRef, useState } from 'react';
 
-export type Mode = 'view' | 'edit' | 'blocks' | 'wire' | 'flight';
+export type Mode = 'view' | 'edit' | 'blocks' | 'wire' | 'flight' | 'aero';
 
 interface Props {
   mode: Mode;
@@ -30,7 +30,7 @@ interface Props {
 
 const MODES: [Mode, string, string][] = [
   ['view', '⌖', 'View'], ['edit', '✎', 'Edit'], ['blocks', '▦', 'Blocks'],
-  ['wire', '∿', 'Wire'], ['flight', '➤', 'Flight'],
+  ['wire', '∿', 'Wire'], ['flight', '➤', 'Flight'], ['aero', '≋', 'Wind'],
 ];
 
 export default function TopBar(p: Props) {

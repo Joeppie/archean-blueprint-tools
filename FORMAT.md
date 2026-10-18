@@ -949,3 +949,43 @@ positive X-rotation tilts +Y toward +Z = toward tail; negative tips the seatback
 the nose/−z). Quaternion for angle θ about X: `{w: cos θ/2, x: sin θ/2, y: 0, z: 0}`.
 Shift toward tail = increase `position.z` (and keep grid in sync: +0.25 m = +1 `pos_z`
 in both `occupancies[0]` and the `blocks` type-255 mirror). See `adjust_seat.py`.
+
+## Aerodynamics — the OFFICIAL game model (transcribed 2026-10-19 from wiki.archean.space/en/aerodynamics.html; kept offline per §Local sources of truth)
+
+The game simulates flight-sim-grade lift/drag/stability/buoyancy/re-entry heating
+from the build's SHAPE via a **shape field (cross-section model)**:
+
+- On build finish the engine scans the **outer shell** from six axis directions
+  into **surface patches**, each storing position, facing, area and — crucially —
+  the **solid depth behind it along the flow (cross-section)**. The snapshot is
+  CACHED (rebuilt only on edit/damage); cost is BOUNDED and the scan resolution
+  scales with the vehicle size. Only the shell is scanned: interior blocks add
+  zero drag, and a sealed cavity counts as solid body ("a hollow shape flies
+  exactly like its solid version"). Block subdivision/material are invisible:
+  same outer shape ⇒ bit-identical forces (material affects mass/buoyancy only).
+- **Lift**: a surface lifts when its cross-section is THIN (a wing is thin along
+  the flow, broad in span×chord; a fuselage is deep everywhere ⇒ drag only).
+  Realistic lift curve, STALL ≈ 15° AoA; two-sided (a wing buried on one face
+  lifts weaker); separated stacked surfaces each lift (air gaps are not solid).
+  Lift is applied per patch ⇒ real pitch/roll/yaw moments about the CoM.
+- **Drag**: form (p·v², forward-facing) + skin friction (Reynolds-based) +
+  induced (with lift). **Fineness = streamlining**: slender-along-flow keeps the
+  air attached — "a streamlined shape can have a TENTH of the form drag of a
+  blunt one at the same frontal size". Slopes/corners/bevels taper ⇒ pay off.
+- Compressibility: transonic/supersonic rise on forward faces, wing lift fades
+  supersonically (body lift + control deflection carry). Stability is EMERGENT
+  (no artificial weathervaning): tail surfaces behind the CoM restore; CoM at or
+  slightly ahead of the lift center = stable, aft = divergent. Control surfaces
+  (Aileron parts, ±45°) re-evaluate per frame; authority ∝ area·lever·ρv².
+  Damage sheds lift + streamlining per surface (asymmetric ⇒ roll + yaw).
+- Air and water are ONE density-sampled model (no water path); RCS attenuates
+  ∝ e^(−ρ·4) in fluid; propellers/thrusters/ailerons are EXCLUDED from the
+  shape field (own models). Frame beams are aerodynamically invisible.
+  (Steam patch notes Jun 2024 already carried "increased aerodynamic volume
+  threshold … dramatically increases aerodynamic realism" — same lineage.)
+- The app's WIND TUNNEL (`app/src/engine/aero.ts`) implements this shape field
+  for VISUALISATION: collider-voxel runs → blockageOf(run) fineness + wake
+  deficit, porous-mask potential-flow multigrid solve, deviation-coloured
+  streamlines, and the thin-cross-section wing classification readout. The
+  legacy viewer's "aero plates" thin-plate wind model was BOGUS (per the user,
+  2026-10-19) and was NOT ported; the frozen viewer keeps it only as history.

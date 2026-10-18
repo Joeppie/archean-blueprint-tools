@@ -23,6 +23,8 @@ declare global {
     /** constrained subgrid joint handles (the hinge UI at the joint line) */
     hinge: () => ReturnType<Engine['hingeInfo']>;
     hingePoint: (i: number) => ReturnType<Engine['hingeScreenPoint']>;
+    /** wind tunnel (engine/aero.ts) live state */
+    wind: () => ReturnType<Engine['windState']>;
   } }
 }
 
@@ -35,7 +37,7 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockP
   onEngine?: (e: Engine | null) => void;
   /** workspace mode: blocks clicks route to onBlockPick; the mode widget
    *  only belongs to Edit */
-  mode?: 'view' | 'edit' | 'blocks' | 'wire' | 'flight';
+  mode?: 'view' | 'edit' | 'blocks' | 'wire' | 'flight' | 'aero';
   onBlockPick?: (clientX: number, clientY: number) => void;
   /** KSP part placement: a held catalog type — the next canvas click
    *  places it at the picked surface instead of selecting */
@@ -64,6 +66,7 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockP
       hoverState: () => engine.hoverActive,
       hinge: () => engine.hingeInfo(),
       hingePoint: (i: number) => engine.hingeScreenPoint(i),
+      wind: () => engine.windState(),
     };
     onEngine?.(engine);
     return () => {

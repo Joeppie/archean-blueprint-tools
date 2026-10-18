@@ -49,6 +49,8 @@ import {
 import { calibrateCellMass, massModel, type MassModel } from './mass';
 import { Highlight } from './highlight';
 import { flightReport } from './flight';
+import { buildTunnel, createSolve, FLOWS, scanAnalysis, solveStep, streamlines,
+  type ScanReport, type Solve, type Tunnel, type V3 as AeroV3 } from './aero';
 
 /** a constrained subgrid joint handle (ring = angle master, arrow = slide) —
  *  the "UI at that place" (todo): you turn the HINGE, the panel rides */
@@ -269,6 +271,7 @@ export class Engine {
       this.pulseSelection();
       this.stepSurges(performance.now());
       this.stepLabels();
+      this.pumpWind();
       if (this.needRender && this.renderer) {
         this.needRender = false;
         this.renderer.render(this.scene, this.camera);
@@ -429,6 +432,7 @@ export class Engine {
     this.applyViewOptions();
     this.fit(parts);
     this.select(-1);
+    if (this.windOn) this.startTunnel();          // rebuild the tunnel on the fresh bp
     this.invalidate();
   }
 
@@ -845,6 +849,114 @@ export class Engine {
   /** green ground + grid just under the lowest rendered geometry (ground=true:
    *  nothing of a craft renders below ground — part boxes may ride below the
    *  file box, the 3481322297 truck builds down to y=−1.5) */
+  // ---------- wind tunnel (engine/aero.ts — the Archean shape-field model) ----------
+  /** active tunnel + multigrid solve, stepped across frames (bounded cost) */
+  private wind: { tun: Tunnel; solve: Solve } | null = null;
+  private windOn = false;
+  private windFlow: AeroV3 = [...FLOWS.nose!] as AeroV3;
+  private windMesh: LineSegments | null = null;
+  private windFrame = 0;
+  private windReport: ScanReport | null = null;
+  private windStats = { lines: 0, segments: 0, vMax: 0 };
+
+  /** toggle / retarget the wind tunnel. `flow` is a FILE-space direction
+   *  (FLOWS.nose = wind coming at the nose). The solve is progressive:
+   *  preview streamlines appear within a few frames and refine as the
+   *  multigrid converges (the wiki's bounded cost, metronomically paced
+   *  inside the on-demand loop — never a synchronous freeze). */
+  setWindTunnel(on: boolean, flow?: AeroV3) {
+    if (flow) this.windFlow = [...flow] as AeroV3;
+    this.windOn = on;
+    if (!on) { this.clearWind(); this.invalidate(); return; }
+    this.startTunnel();
+  }
+
+  private startTunnel() {
+    this.clearWind();
+    if (!this.bp) return;
+    const tun = buildTunnel(this.bp, this.windFlow);
+    if (!tun) return;
+    this.wind = { tun, solve: createSolve(tun) };
+    this.windReport = scanAnalysis(tun);
+    this.invalidate();
+  }
+
+  /** per-frame solve slice + progressive streamline refresh */
+  private pumpWind() {
+    const w = this.wind;
+    if (!w) return;
+    if (w.solve.done && this.windMesh) return;
+    if (this.windFrame++ % 2) return;
+    const st = solveStep(w.solve, 3);
+    if (st.done) {
+      const sl = streamlines(w.solve);
+      this.setWindLines(sl.positions, sl.colors);
+      this.windStats = { lines: sl.lines, segments: sl.segments, vMax: sl.vMax };
+      this.windReport = scanAnalysis(w.tun);
+      this.invalidate();
+      return;
+    }
+    // progressive: first preview lines at iter ≥ 6, refined every 18 sweeps
+    if (w.solve.iters >= 6 && (w.solve.iters - 6) % 18 < 3) {
+      const sl = streamlines(w.solve, this.windMesh ? undefined : 160);
+      this.setWindLines(sl.positions, sl.colors);
+      this.windStats = { lines: sl.lines, segments: sl.segments, vMax: sl.vMax };
+      this.invalidate();
+    }
+  }
+
+  private setWindLines(positions: Float32Array, colors: Float32Array) {
+    this.clearWindMesh();
+    if (!positions.length) return;
+    const g = new BufferGeometry();
+    g.setAttribute('position', new BufferAttribute(positions, 3));
+    g.setAttribute('color', new BufferAttribute(colors, 3));
+    const m = new LineBasicMaterial({ vertexColors: true, transparent: true,
+      opacity: 0.85, blending: AdditiveBlending, depthWrite: false });
+    const mesh = new LineSegments(g, m);
+    mesh.raycast = () => { };                     // never a pick target
+    mesh.renderOrder = 990;
+    mesh.userData.windlines = true;
+    this.windMesh = mesh;
+    this.root.add(mesh);
+  }
+
+  private clearWindMesh() {
+    if (!this.windMesh) return;
+    this.root.remove(this.windMesh);
+    this.windMesh.geometry.dispose();
+    (this.windMesh.material as MeshBasicMaterial).dispose();
+    this.windMesh = null;
+  }
+
+  private clearWind() {
+    this.wind = null;
+    this.windReport = null;
+    this.windStats = { lines: 0, segments: 0, vMax: 0 };
+    this.clearWindMesh();
+  }
+
+  /** live wind-tunnel state (UI panel + e2e pins) */
+  windState(): { on: boolean; running: boolean; converged: boolean; iters: number;
+    res: number; lines: number; segments: number; vMax: number; voxel: number;
+    solid: number; flow: AeroV3; report: ScanReport | null } {
+    const w = this.wind;
+    return {
+      on: this.windOn,
+      running: !!w && !w.solve.done,
+      converged: !!w?.solve.converged,
+      iters: w?.solve.iters ?? 0,
+      res: w?.solve.res ?? 0,
+      lines: this.windStats.lines,
+      segments: this.windStats.segments,
+      vMax: this.windStats.vMax,
+      voxel: w?.tun.voxel ?? 0,
+      solid: w?.tun.solidCount ?? 0,
+      flow: [...this.windFlow] as AeroV3,
+      report: this.windReport,
+    };
+  }
+
   private addGround(bp: Blueprint, parts: PartBox[]) {
     let y = bp.box_min.y;
     for (const p of parts) y = Math.min(y, p.center[1] - p.size[1] / 2);
@@ -2050,6 +2162,7 @@ export class Engine {
     this.clearLabels();
     this.selCi = this.selSub = -1;
     this.buildHingeUI(-1);
+    this.clearWind();
   }
 
   dispose() {
