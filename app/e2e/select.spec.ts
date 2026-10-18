@@ -87,10 +87,10 @@ test('labels ride interactive/aliased parts — opt-in, off by default', async (
   expect(off.shown, 'labels OFF by default (legacy user rule)').toBe(0);
   expect(off.on).toBe(false);
 
-  // the REAL control: the view-options row (on phones the panel is a drawer —
-  // ⚙ opens it, exactly the mobile path)
+  // the REAL control: the ⚙ options popover (its own window, not the parts
+  // drawer — works identically desktop and mobile)
+  await page.getByTestId('toggle-options').click();
   const box = page.getByTestId('opt-labels');
-  if (!await box.isVisible()) await page.getByTestId('toggle-panels').click();
   await expect(box).toBeVisible();
   await box.check();
   const on = await page.evaluate(() =>

@@ -16,6 +16,12 @@ async function openCraft(page: Page, id: string) {
   await page.getByTestId('mode-edit').click();
 }
 
+/** the ⚙ view-options popover (options moved OUT of the left parts panel) */
+async function openOptions(page: Page) {
+  await page.getByTestId('toggle-options').click();
+  await expect(page.getByTestId('options-win')).toBeVisible();
+}
+
 const optsOf = (page: Page) => page.evaluate(() => {
   const w = window as unknown as { __ARCHEAN__?: { engine: { getOptions: () => Record<string, boolean> } } };
   return w.__ARCHEAN__!.engine.getOptions();
@@ -38,6 +44,7 @@ test.describe('desktop panels', () => {
     desktopOnly();
     await openCraft(page, ISW);
     await expect(page.getByTestId('panel-aside')).toBeVisible();
+    await openOptions(page);
     const hull = page.getByTestId('opt-hull'), wire = page.getByTestId('opt-wire');
     await expect(hull).toBeChecked();
     await wire.check();                                    // wire ON forces hull OFF (legacy excl)
@@ -54,6 +61,29 @@ test.describe('desktop panels', () => {
     await page.keyboard.press('h');
     await expect(page.getByTestId('opt-hull')).not.toBeChecked();
     expect(await optsOf(page)).toMatchObject({ hull: false, occ: false, grid: true, pipes: true, subs: true });
+  });
+
+  test('label-scrub gives fine movement control (the tweaking complaint)', async ({ page }) => {
+    desktopOnly();
+    await openCraft(page, ISW);
+    await page.getByTestId('filter').fill('smallwheel');
+    const row = page.locator('[data-idx]').first();
+    const ci = +(await row.getAttribute('data-idx'))!;
+    await row.click();
+    const label = page.getByTestId('row-s-x');         // the scrub handle
+    await label.scrollIntoViewIfNeeded();
+    await expect(label).toBeInViewport();              // (mouse.move does NOT scroll)
+    const bb = (await label.boundingBox())!;
+    const x0 = await partX(page, ci);
+    await page.mouse.move(bb.x + bb.width / 2, bb.y + bb.height / 2);
+    await page.mouse.down();
+    for (let i = 1; i <= 4; i++) await page.mouse.move(bb.x + bb.width / 2 + i * 10, bb.y + bb.height / 2);
+    await page.mouse.up();
+    const x1 = await partX(page, ci);
+    expect(x1 - x0).toBeGreaterThan(0.1);              // 40 px ≈ 0.4 m @ 0.01/px
+    expect(x1 - x0).toBeLessThan(0.8);                 // FINE — not a slider jump
+    await page.getByTestId('row-x-x').click();         // ⟲ restore
+    expect(await partX(page, ci)).toBeCloseTo(x0, 6);
   });
 
   test('list search → select → inspector; move x; SAVE downloads a mirror-synced file', async ({ page }) => {
@@ -139,6 +169,7 @@ test.describe('mass & CoM + fidelity toggles', () => {
       return w.__ARCHEAN__!.engine.massReport()!.comVisible;
     });
     expect(await comVisible()).toBe(true);
+    await openOptions(page);
     await page.getByTestId('opt-com').uncheck();
     expect(await comVisible()).toBe(false);
     await page.getByTestId('opt-com').check();
@@ -164,9 +195,13 @@ test('mobile: the panels are a drawer behind the ⚙ toggle', async ({ page }) =
   }
   await page.getByTestId('toggle-panels').click();
   await expect(aside).toBeVisible();
-  await expect(aside.getByTestId('viewopts')).toBeVisible();
+  await expect(aside.getByTestId('complist')).toBeVisible();     // the PARTS panel
+  await expect(aside.getByTestId('viewopts')).toHaveCount(0);    // options are NOT here anymore
   await page.getByTestId('toggle-panels').click();
   await expect(aside).toHaveCount(0);
+  // ...they open in their own ⚙ popover over the viewport
+  await openOptions(page);
+  await expect(page.getByTestId('opt-hull')).toBeVisible();
 });
 
 test.describe('modes, new craft, file menu', () => {
@@ -257,17 +292,40 @@ test.describe('manual wiring + triangles + component meta', () => {
     // pick an OPEN warning (guaranteed free port) -> that component is selected
     await page.getByTestId('wire-warning').first().click();
     await expect(page.getByTestId('wire-manual')).toContainText('ports:');
-    // start from a free port, then pick the nearest listed partner
+    // the wire workspace is a WIDE bottom dock (the user: bigger screen for
+    // wires) — tall enough to evaluate the graph, not a sidebar sliver
+    const dock = page.getByTestId('wire-dock');
+    await expect(dock).toBeVisible();
+    expect((await dock.boundingBox())!.height).toBeGreaterThan(200);
+    // start from a free port, then pick a compatible part, THEN its port
     await page.locator('[data-testid="wire-port"]:not([disabled])').first().click();
     await expect(page.getByTestId('wire-target-search')).toBeVisible();
     await page.getByTestId('wire-target-search').fill('');
     const target = page.getByTestId('wire-target-item').first();
     await expect(target).toBeVisible();
-    await target.click();
+    // hover a candidate: the 3D PREVIEW glows the candidate while the
+    // selection stays; leaving restores (hover state -1)
+    const hoverState = () => page.evaluate(() =>
+      (window as unknown as { __ARCHEAN__?: { hoverState: () => number } }).__ARCHEAN__!.hoverState());
+    await target.hover();
+    expect(await hoverState()).toBeGreaterThanOrEqual(0);
+    await target.click();                                  // STEP 1: the part
+    const port = page.getByTestId('wire-target-port').first();
+    await expect(port).toBeVisible();                      // STEP 2: explicit port
+    await expect.poll(hoverState).toBeGreaterThanOrEqual(0);
+    await port.click();
     await expect.poll(async () => page.evaluate(() => {
       const w = window as unknown as { __ARCHEAN__?: { engine: { blueprint: { data: { pipes?: unknown[] } } } } };
       return w.__ARCHEAN__!.engine.blueprint.data.pipes?.length ?? 0;
     }), { timeout: 8000 }).toBeGreaterThan(pipesBefore);
+    // warnings hover: PREVIEW the flagged part, leaving restores the plain
+    // selection state (the user: "highlight the relevant component when
+    // mousing over the list, but then move back to what we are editing")
+    const warn = page.getByTestId('wire-warning').first();
+    await warn.hover();
+    await expect.poll(hoverState, { timeout: 4000 }).toBeGreaterThanOrEqual(0);
+    await page.mouse.move(5, 5);            // onto the canvas, off the list
+    await expect.poll(hoverState, { timeout: 4000 }).toBe(-1);
   });
 
   test('triangles submode: three lattice clicks add a prism, panel edits it', async ({ page }) => {

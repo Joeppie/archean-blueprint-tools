@@ -105,6 +105,9 @@ function MetaNum(p: { testid: string; label: string; value: number; min: number;
 function Row(p: {
   label: string; min: number; max: number; step: number; value: number;
   onInput: (v: number) => void; title?: string; disabled?: boolean;
+  /** scrub sensitivity: value units per CSS pixel while dragging the label
+   *  (default the full range over 400 px); Shift drags 5× coarser */
+  perPx?: number;
 }) {
   const [v, setV] = useState(p.value);
   const [mod, setMod] = useState(false);
@@ -115,9 +118,38 @@ function Row(p: {
   const set = (nv: number) => {
     setV(nv); setMod(true); p.onInput(nv);
   };
+  // BLENDER-STYLE SCRUB: grab the label and drag horizontally for fine,
+  // continuous control — the ±2 m slider over ~150 px is 2.6 cm per pixel,
+  // impossible to tweak with (the user's "trouble tweaking movement and
+  // rotation"). Shift = 5× coarser; the value snaps to the row step.
+  const vRef = useRef(v);
+  vRef.current = v;
+  const scrub = (e: React.PointerEvent) => {
+    if (p.disabled) return;
+    const el = e.currentTarget as HTMLElement;
+    el.setPointerCapture(e.pointerId);
+    const x0 = e.clientX, from = vRef.current;
+    const perPx = p.perPx ?? (p.max - p.min) / 400;
+    const move = (ev: PointerEvent) => {
+      const raw = from + (ev.clientX - x0) * perPx * (ev.shiftKey ? 5 : 1);
+      const q = Math.round(raw / p.step) * p.step;
+      const cl = Math.min(p.max, Math.max(p.min, q));
+      set(+cl.toFixed(6));
+    };
+    const up = () => {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+  };
   return (
-    <div title={p.title} className={`flex items-center gap-1.5 py-[3px] ${mod ? 'row-mod' : ''}`}>
-      <label className="w-[74px] shrink-0 truncate text-[11px] text-ink-dim">{p.label}</label>
+    <div title={p.title ?? 'drag the label to scrub · Shift = coarse'}
+      className={`flex items-center gap-1.5 py-[3px] ${mod ? 'row-mod' : ''}`}>
+      <label data-testid={`row-s-${p.label}`}
+        onPointerDown={scrub}
+        className="w-[74px] shrink-0 cursor-ew-resize select-none truncate text-[11px] text-ink-dim hover:text-ink"
+        style={{ touchAction: 'none' }}>{p.label}</label>
       <input type="range" min={p.min} max={p.max} step={p.step} value={v} disabled={p.disabled}
         data-testid={`row-r-${p.label}`}
         onChange={e => set(+e.target.value)} className="min-w-0 flex-1 accent-accent disabled:opacity-40" />
@@ -148,7 +180,10 @@ const Check = (p: { label: string; checked: boolean; onChange: (v: boolean) => v
 );
 
 // ------------------------------------------------------------- view options
-function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHullOpacity' | 'realModels' | 'onRealModels' | 'gizmoOn' | 'onGizmo' | 'hiDef' | 'onHiDef'>) {
+/** MOVED OUT of the left parts panel (the user: "the full list of options
+ *  shouldnt be combined into the main left-hand panel"): rendered in a
+ *  floating ⚙ popover window over the viewport by the Editor. */
+export function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHullOpacity' | 'realModels' | 'onRealModels' | 'gizmoOn' | 'onGizmo' | 'hiDef' | 'onHiDef'>) {
   return (
     <Sec title="View options" testid="viewopts">
       <Check testid="opt-grid" label="ground grid" checked={p.opts.grid} onChange={v => p.onOpt('grid', v)} />
@@ -445,11 +480,11 @@ function Inspector(p: Props) {
           onInput={v => livePos('z', v)} />
       </Sec>
       <Sec title="Rotation (° deltas, world axes)">
-        <Row label="pitch" min={-180} max={180} step={0.5} value={0} disabled={readOnly}
-          title="world-axis pitch delta; orientation stays an exact file quaternion"
+        <Row label="pitch" min={-180} max={180} step={0.1} value={0} disabled={readOnly} perPx={0.25}
+          title="world-axis pitch delta; orientation stays an exact file quaternion. Drag the LABEL to scrub: 4 px = 1° (Shift 5×)."
           onInput={v => liveRot('p', v)} />
-        <Row label="yaw" min={-180} max={180} step={0.5} value={0} disabled={readOnly} onInput={v => liveRot('y', v)} />
-        <Row label="roll" min={-180} max={180} step={0.5} value={0} disabled={readOnly} onInput={v => liveRot('r', v)} />
+        <Row label="yaw" min={-180} max={180} step={0.1} value={0} disabled={readOnly} perPx={0.25} onInput={v => liveRot('y', v)} />
+        <Row label="roll" min={-180} max={180} step={0.1} value={0} disabled={readOnly} perPx={0.25} onInput={v => liveRot('r', v)} />
         {comp.type === 'PilotSeat' && (
           <div className="mt-1 flex flex-wrap gap-1">
             {([['lean fwd 12°', 12], ['20°', 20], ['30°', 30], ['45°', 45], ['upright', 0]] as const).map(([t, v]) => (
@@ -623,17 +658,12 @@ export default function Panel(p: Props) {
         <CompList bp={p.bp} rev={p.rev} sel={p.sel} onSelect={p.onSelect} onSelectSub={p.onSelectSub}
           manifest={p.manifest} placingType={p.placingType} onPlaceType={p.onPlaceType} />
       </div>
-      <div className="min-h-0 flex-[2] border-t border-white/10 overflow-y-auto">
+      <div className="min-h-0 flex-[3] border-t border-white/10 overflow-y-auto">
         {p.bottom !== undefined ? p.bottom ?? null : p.sel.sub >= 0
           ? <SubPanel {...p} key={`s${p.sel.sub}`} />
           : p.sel.ci >= 0
             ? <Inspector {...p} key={`c${p.sel.ci}k${p.inspKey}`} />
             : <div className="px-3 py-2 text-[12px] text-ink-dim">nothing selected — click a part</div>}
-      </div>
-      <div className="max-h-[45%] shrink-0 overflow-y-auto border-t border-white/10">
-        <ViewOpts opts={p.opts} onOpt={p.onOpt} hullOpacity={p.hullOpacity} onHullOpacity={p.onHullOpacity}
-          realModels={p.realModels} onRealModels={p.onRealModels} gizmoOn={p.gizmoOn} onGizmo={p.onGizmo}
-          hiDef={p.hiDef} onHiDef={p.onHiDef} />
       </div>
     </div>
   );

@@ -137,6 +137,7 @@ test.describe('symmetry twins', () => {
   test('mirror-plane option round-trips through the engine', async ({ page }) => {
     desktopOnly();
     await openCraft(page, ISW);
+    await page.getByTestId('toggle-options').click();   // options live in the ⚙ popover now
     const cb = page.getByTestId('opt-mirror');
     await expect(cb).toBeChecked();
     await cb.uncheck();

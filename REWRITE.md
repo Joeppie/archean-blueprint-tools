@@ -243,6 +243,25 @@ new build dep, kept inside `app/`).
   crafts.test included), tsc strict clean, Playwright 58 pass / 18
   desktop-only skips (their download/place specs + the surge/label/mobile
   pins green together).
+- **UX REWORK (user feedback round) — landed**:
+  ① EDIT TWEAKING: Row fields gained BLENDER-STYLE LABEL SCRUB (drag the
+  label horizontally: position 1 cm/px, rotation 0.1° step + 0.25°/px —
+  the ±2 m slider over 150 px was 2.6 cm per pixel, untweakable; Shift =
+  5× coarse; value snaps to the row step; pin: 40 px ≈ 0.4 m, ⟲ restores).
+  ② VIEW OPTIONS moved OUT of the left parts panel into their own ⚙
+  popover window over the viewport (toggle-options; the left panel is now
+  ONLY Parts + context). ③ WIRE MODE = a dedicated WIDE BOTTOM DOCK
+  (38% of the viewport, 3-column workspace: census/auto-wire | manual
+  pairing | warnings) while the parts panel + inspector stay live;
+  manual wiring is TWO-STEP — pick the source port, then a compatible
+  COMPONENT, then explicitly one of ITS free ports (wire-target-port).
+  ④ HOVER PREVIEW: mousing over the candidate or warnings lists glows
+  that part with a SECOND accent-colored Highlight instance beside the
+  selection (never replacing it — leaving restores exactly what you were
+  editing); engine.previewHover + hoverActive hook. Pins: scrub drag,
+  wire-dock height, hover>=0 on item hover → -1 on leave, two-step
+  connect; panels/select/sym specs follow the ⚙ popover. Gates: tsc
+  clean, vitest 142, Playwright 59 pass / 19 desktop-only skips.
   Remaining gaps (next): aero/wind/flow/thrust/seal + flight UI, hull
   element list, streamlines/windsock HUD, P4 perf (BatchedMesh/?perf/wasm).
 - **P4 — perf**: BatchedMesh proxies, ?perf port, wasm benchmark of

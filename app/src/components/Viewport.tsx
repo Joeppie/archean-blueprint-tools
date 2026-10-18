@@ -17,6 +17,9 @@ declare global {
     /** cable power-surge + label pins (legacy selftest surges=true) */
     surges: () => ReturnType<Engine['surgeState']>;
     labels: () => ReturnType<Engine['labelState']>;
+    /** wire-mode list-hover 3D preview (accent glow beside the selection) */
+    hover: (ci: number) => void;
+    hoverState: () => number;
   } }
 }
 
@@ -54,6 +57,8 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockP
       lastPick: () => engine.lastPick,
       surges: () => engine.surgeState(),
       labels: () => engine.labelState(),
+      hover: (ci: number) => engine.previewHover(ci),
+      hoverState: () => engine.hoverActive,
     };
     onEngine?.(engine);
     return () => {

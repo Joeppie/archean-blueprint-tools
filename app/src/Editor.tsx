@@ -9,7 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { craftName } from './gallery-catalog';
 import { DEFAULT_OPTS, type Engine, type PickHit, type ViewOptions } from './engine/scene';
 import Viewport from './components/Viewport';
-import Panel, { StaticInfo, type EditApi } from './components/Panel';
+import Panel, { StaticInfo, ViewOpts, type EditApi } from './components/Panel';
 import TopBar, { type Mode } from './components/TopBar';
 import { BlockPanel, FlightPanel, TriPanel, WirePanel, placeBlock, type Brush } from './components/ModePanels';
 import { cornerOf, triAt, triangleFromCorners } from './engine/tris';
@@ -57,6 +57,10 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   const fileRef = useRef<HTMLInputElement>(null);
   // mobile: the panel is a drawer; desktop opens it by default
   const [panelOpen, setPanelOpen] = useState(() => window.innerWidth >= 768);
+  // view options live in their own ⚙ popover (NOT the left parts panel —
+  // the user: "the full list of options shouldnt be combined into the main
+  // left-hand panel/menu")
+  const [optsOpen, setOptsOpen] = useState(false);
 
   /** parse → v1→v2 NORMALIZE → doc+ctx → live bp. One funnel for download,
    *  file-open, drag-drop and New craft. */
@@ -268,6 +272,29 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     engineRef.current?.setHiDef(on);
   }, []);
 
+  /** WIRE workspace: a wide BOTTOM DOCK across the viewport (the user: wire
+   *  editing needs a larger screen — the 300 px sidebar slot could never
+   *  show census + manual pairing + warnings legibly). The left parts panel
+   *  and the inspector stay live beside it. */
+  const wirePanel = (
+    <WirePanel engine={engine} ctx={ctxRef.current} bp={bp!} rev={rev}
+      onApplied={sceneChanged}
+      onSelectComp={ci => engineRef.current?.select(ci)}
+      sel={sel.ci}
+      onHoverComp={ci => engineRef.current?.previewHover(ci ?? -1)}
+      onConnect={(aCi, aPort, bCi, bPort) => {
+        const ctx = ctxRef.current;
+        if (!ctx) return false;
+        const pipe = makePipe(ctx.bp, engineRef.current?.manifest ?? null, aCi, aPort, bCi, bPort);
+        if (!pipe) return false;
+        ctx.bp.data.pipes = ctx.bp.data.pipes ?? [];
+        ctx.bp.data.pipes.push(pipe as never);
+        docArrayInsert(ctx.doc, ['data', 'pipes'], ctx.bp.data.pipes.length - 1, docFromValue(pipe));
+        sceneChanged();
+        return true;
+      }} />
+  );
+
   const name = (bp?.data.alias?.trim()) || (craft ? craftName(craft) : 'Untitled craft');
   const triPanel = (
     <TriPanel bp={bp!} ctx={ctxRef.current} draft={triDraft} triSel={triSel}
@@ -298,22 +325,6 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
           brush={brush} onBrush={setBrush} onSelectBlock={setBlockSel} onApplied={sceneChanged} />
       )}
     </div>
-  ) : mode === 'wire' ? (
-    <WirePanel engine={engine} ctx={ctxRef.current} bp={bp!} rev={rev}
-      onApplied={sceneChanged}
-      onSelectComp={ci => engineRef.current?.select(ci)}
-      sel={sel.ci}
-      onConnect={(aCi, aPort, bCi, bPort) => {
-        const ctx = ctxRef.current;
-        if (!ctx) return false;
-        const pipe = makePipe(ctx.bp, engineRef.current?.manifest ?? null, aCi, aPort, bCi, bPort);
-        if (!pipe) return false;
-        ctx.bp.data.pipes = ctx.bp.data.pipes ?? [];
-        ctx.bp.data.pipes.push(pipe as never);
-        docArrayInsert(ctx.doc, ['data', 'pipes'], ctx.bp.data.pipes.length - 1, docFromValue(pipe));
-        sceneChanged();
-        return true;
-      }} />
   ) : mode === 'flight' ? (
     <FlightPanel engine={engine} rev={rev} />
   ) : undefined;
@@ -336,6 +347,11 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         </button>
         <button data-testid="toggle-panels" title="toggle the parts panel" onClick={() => setPanelOpen(o => !o)}
           className="ksp-btn shrink-0 px-2.5 py-1 text-[12px] hover:text-accent">
+          ▤
+        </button>
+        <button data-testid="toggle-options" title="view options" aria-pressed={optsOpen}
+          onClick={() => setOptsOpen(o => !o)}
+          className={`ksp-btn shrink-0 px-2.5 py-1 text-[12px] hover:text-accent ${optsOpen ? 'on' : ''}`}>
           ⚙
         </button>
       </TopBar>
@@ -384,25 +400,45 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
             </aside>
           </>
         )}
-        <main className="relative min-w-0 flex-1">
-          <Viewport bp={bp} onPick={setHit} onEngine={onEngine}
-            mode={mode} onBlockPick={onBlockPick}
-            placing={mode === 'edit' ? placing : null} onPlace={onPlacePoint}
-            onManifest={setManifest} />
-          {placing && mode === 'edit' && (
-            <div data-testid="place-hint"
-              className="ksp-win ksp-label pointer-events-none absolute left-1/2 top-2 z-20 -translate-x-1/2
-                         rounded px-3 py-1 text-[11px] text-accent">
-              holding <b>{placing}</b> — click a surface · Esc drops it
+        <main className="flex min-w-0 flex-1 flex-col">
+          <div className="relative min-h-0 flex-1">
+            <Viewport bp={bp} onPick={setHit} onEngine={onEngine}
+              mode={mode} onBlockPick={onBlockPick}
+              placing={mode === 'edit' ? placing : null} onPlace={onPlacePoint}
+              onManifest={setManifest} />
+            {placing && mode === 'edit' && (
+              <div data-testid="place-hint"
+                className="ksp-win ksp-label pointer-events-none absolute left-1/2 top-2 z-20 -translate-x-1/2
+                           rounded px-3 py-1 text-[11px] text-accent">
+                holding <b>{placing}</b> — click a surface · Esc drops it
+              </div>
+            )}
+            {bp && hit && hit.kind !== 'none' && mode !== 'blocks' && (
+              <PickChip hit={hit} bp={bp} />
+            )}
+            {/* the ⚙ view-options popover — its own window, not the parts
+                panel (moved out of the left sidebar by user request) */}
+            {optsOpen && (
+              <div data-testid="options-win"
+                className="ksp-win absolute right-2 top-2 z-30 max-h-[calc(100%-1rem)] w-[290px]
+                           overflow-y-auto rounded-lg">
+                <ViewOpts opts={opts} onOpt={toggleOpt} hullOpacity={hullOpacity} onHullOpacity={setHullOp}
+                  realModels={realModels} onRealModels={setReal}
+                  gizmoOn={gizmoOn} onGizmo={setGizmo} hiDef={hiDef} onHiDef={onHiDef} />
+              </div>
+            )}
+            {/* KSP bottom-left: the STATIC INFO black box (mass & CoM) */}
+            {bp && <div className="absolute bottom-2 left-3 z-[5]"><StaticInfo engine={engine} rev={rev} /></div>}
+            {/* KSP bottom-right: the camera cluster over the viewport */}
+            <CameraCluster engine={engine} />
+          </div>
+          {mode === 'wire' && bp && (
+            <div data-testid="wire-dock"
+              className="h-[38%] max-h-[46%] min-h-[200px] shrink-0 overflow-y-auto border-t
+                         border-[rgba(217,212,189,.22)] bg-panel">
+              {wirePanel}
             </div>
           )}
-          {bp && hit && hit.kind !== 'none' && mode !== 'blocks' && (
-            <PickChip hit={hit} bp={bp} />
-          )}
-          {/* KSP bottom-left: the STATIC INFO black box (mass & CoM) */}
-          {bp && <div className="absolute bottom-2 left-3 z-[5]"><StaticInfo engine={engine} rev={rev} /></div>}
-          {/* KSP bottom-right: the camera cluster over the viewport */}
-          <CameraCluster engine={engine} />
         </main>
         {(dl || dlErr) && (
           <DownloadOverlay name={name} dl={dl} err={dlErr}

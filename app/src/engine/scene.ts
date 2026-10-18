@@ -183,6 +183,11 @@ export class Engine {
   private selSub = -1;
   /** outline boxes (self + twins) + the incandescent X-ray overlay */
   private hl = new Highlight(this.scene);
+  /** hover preview (wire-mode candidate lists): an ACCENT-coloured glow that
+   *  rides beside the selection — leaving a hover never disturbs what the
+   *  user is actually editing */
+  private hoverHl = new Highlight(this.scene, 0x7dffcf);
+  private hoverCi = -1;
   onSelection: ((sel: { ci: number; sub: number }) => void) | null = null;
   private fly: { from: Vector3; to: Vector3; t0: number } | null = null;
   /** last fit() framing — the KSP camera-cluster presets pivot on this */
@@ -272,6 +277,7 @@ export class Engine {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.hl.setResolution(w, h);                 // fat lines live in screen px
+    this.hoverHl.setResolution(w, h);
     this.invalidate();
   }
 
@@ -1086,6 +1092,25 @@ export class Engine {
   }
   get selection() { return { ci: this.selCi, sub: this.selSub }; }
 
+  /** list-hover preview: glow the VISIBLE roots of ci (boxes + x-ray).
+   *  previewHover(-1)/clear restores the pure selection state. */
+  previewHover(ci: number) {
+    if (ci === this.hoverCi) return;
+    this.hoverCi = ci;
+    this.scene.updateMatrixWorld(true);
+    if (ci < 0) { this.hoverHl.clearBoxes(); this.hoverHl.clearXray(); }
+    else {
+      const roots = this.compRoots.get(ci) ?? [];
+      const vis = roots.filter(o => o.visible);
+      const pick = vis.length ? vis : roots;
+      this.hoverHl.setBoxes(pick);
+      this.hoverHl.setXray(pick, 0.22);
+    }
+    this.invalidate();
+  }
+
+  get hoverActive(): number { return this.hoverCi; }
+
   /** selection visuals (engine/highlight): golden outline boxes on the
    *  VISIBLE geometry of self AND the live symmetry twins (v0.164
    *  co-selection — twins dim via the shared pulse), plus the X-ray glow
@@ -1817,6 +1842,8 @@ export class Engine {
     this.batch = null;
     this.hl.clearBoxes();
     this.hl.clearXray();
+    this.hoverHl.dispose();
+    this.hoverCi = -1;
     this.clearSurges();
     this.clearLabels();
     this.selCi = this.selSub = -1;
@@ -1833,6 +1860,7 @@ export class Engine {
     this.occ?.dispose();
     this.occ = null;
     this.hl.dispose();
+    this.hoverHl.dispose();
     this.matCache.forEach(m => m.dispose());
     this.matCache.clear();
     this.gizmo?.dispose();

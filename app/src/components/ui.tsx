@@ -28,9 +28,12 @@ export function Num(p: { label: string; value: number; min: number; max: number;
 
 export interface ListEntry { id: string; label: string; sub?: string; disabled?: boolean }
 
-/** Searchable pick-list: entries + a query box, one onTap per row. */
+/** Searchable pick-list: entries + a query box, one onTap per row.
+ *  onHover(id|null) fires as rows are entered / the list left — wire mode
+ *  uses it to PREVIEW the candidate part in the 3D view (the selection the
+ *  user is editing stays untouched; leaving restores it visually). */
 export function SearchList(p: { entries: ListEntry[]; placeholder?: string; testid: string;
-  onPick: (id: string) => void }) {
+  onPick: (id: string) => void; onHover?: (id: string | null) => void }) {
   const [q, setQ] = useState('');
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -42,11 +45,13 @@ export function SearchList(p: { entries: ListEntry[]; placeholder?: string; test
       <input value={q} placeholder={p.placeholder ?? 'search\u2026'} data-testid={`${p.testid}-search`}
         onChange={e => setQ(e.target.value)}
         className="mb-1 w-full rounded border border-white/10 bg-panel2 px-2 py-1 text-[12px] text-ink placeholder:text-ink-dim/60" />
-      <div className="max-h-56 space-y-[2px] overflow-y-auto">
+      <div className="max-h-56 space-y-[2px] overflow-y-auto"
+        onMouseLeave={() => p.onHover?.(null)}>
         {shown.map(e => (
           <button key={e.id} data-testid={`${p.testid}-item`} disabled={e.disabled}
             className="block w-full truncate rounded bg-panel2 px-2 py-[3px] text-left text-[11px] text-ink
                        hover:bg-white/10 disabled:opacity-40"
+            onMouseEnter={() => p.onHover?.(e.id)}
             onClick={() => p.onPick(e.id)}>
             {e.label}{e.sub && <span className="ml-2 text-[10px] text-ink-dim">{e.sub}</span>}
           </button>

@@ -20,7 +20,12 @@ export class Highlight {
   private xrayMat: MeshBasicMaterial | null = null;
 
   private sceneRoot: Object3D;
-  constructor(sceneRoot: Object3D) { this.sceneRoot = sceneRoot; }
+  /** hover previews ride a SECOND instance in a distinct colour (the
+   *  selection's gold pulse is never replaced, only supplemented) */
+  private color: number;
+  constructor(sceneRoot: Object3D, color = GOLD) {
+    this.sceneRoot = sceneRoot; this.color = color;
+  }
 
   get active() { return this.boxes.length > 0 || this.xray.length > 0; }
 
@@ -42,7 +47,7 @@ export class Highlight {
       ];
       const lg = new LineSegmentsGeometry();
       lg.setPositions(pts);
-      const mat = new LineMaterial({ color: GOLD, linewidth: 3.5, transparent: true, depthTest: false });
+      const mat = new LineMaterial({ color: this.color, linewidth: 3.5, transparent: true, depthTest: false });
       const box = new LineSegments2(lg, mat);
       box.renderOrder = 999;
       this.sceneRoot.add(box);
@@ -65,7 +70,7 @@ export class Highlight {
     this.clearXray();
     if (!roots.length) return;
     this.xrayMat = new MeshBasicMaterial({
-      color: GOLD, transparent: true, opacity, blending: AdditiveBlending,
+      color: this.color, transparent: true, opacity, blending: AdditiveBlending,
       depthTest: false, depthWrite: false, side: 2,
     });
     for (const root of roots) {

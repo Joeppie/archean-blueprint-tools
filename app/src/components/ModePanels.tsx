@@ -114,8 +114,15 @@ export function WirePanel(p: {
   sel: number;
   /** manual connect: returns success (the App writes bp + doc + reload) */
   onConnect: (aCi: number, aPort: string, bCi: number, bPort: string) => boolean;
+  /** list-hover 3D preview of a candidate (null restores the selection-only
+   *  glow — the part being edited is never replaced, only supplemented) */
+  onHoverComp: (ci: number | null) => void;
 }) {
   const [draft, setDraft] = useState<{ ci: number; name: string; kind: string; at: number[] } | null>(null);
+  // two-step manual wiring: candidate COMPONENT first, then explicitly one
+  // of ITS free ports (the user: "let me select target ports on compatible
+  // elements manually, so that this can be evaluated")
+  const [tPart, setTPart] = useState<number | null>(null);
   const [connectMsg, setConnectMsg] = useState('');
   const manifest = p.engine?.manifest ?? null;
   const census = useMemo(() => portCensus(p.bp, manifest), [p.bp, manifest, p.rev]);
@@ -139,7 +146,7 @@ export function WirePanel(p: {
     wired: census.filter(c => c.kind === k && used.has(`${c.ci}/${c.name}`)).length,
   })).filter(k => k.total > 0);
   return (
-    <>
+    <div className="grid items-start gap-x-4 px-1 pb-2 md:grid-cols-3">
       <Sec title="Ports" testid="wire-census">
         {perKind.map(k => (
           <div key={k.kind} className="flex justify-between text-[11px]">
@@ -189,9 +196,11 @@ export function WirePanel(p: {
                   <span className="text-[10px] uppercase tracking-wide text-ink-dim">
                     {draft.kind} from {draft.name} →
                   </span>
-                  <button className="text-[10px] text-ink-dim hover:text-ink" onClick={() => setDraft(null)}>cancel</button>
+                  <button className="text-[10px] text-ink-dim hover:text-ink"
+                    onClick={() => { setDraft(null); setTPart(null); p.onHoverComp(null); }}>cancel</button>
                 </div>
-                <SearchList testid="wire-target" placeholder="search parts with a free port…"
+                <SearchList testid="wire-target" placeholder="choose a compatible part (hover previews it)…"
+                  onHover={id => p.onHoverComp(id ? +id.split('/')[0]! : null)}
                   entries={(() => {
                     const byCi = new Map<number, { type: string; n: number; d: number; port: string }>();
                     for (const q of open) {
@@ -206,16 +215,32 @@ export function WirePanel(p: {
                       .sort((a, b) => a[1].d - b[1].d)
                       .map(([ci, v]) => ({
                         id: `${ci}/${v.port}`,
-                        label: `${v.type}[${ci}]`,
+                        label: `${v.type}[${ci}]${tPart === ci ? '  ◂' : ''}`,
                         sub: `${v.n} free · ${v.d.toFixed(1)} m`,
                       }));
                   })()}
-                  onPick={id => {
-                    const [ciS, port] = id.split('/') as [string, string];
-                    const ok = p.onConnect(draft.ci, draft.name, +ciS, port);
-                    setConnectMsg(ok ? `wired ${draft.name} → ${id}` : 'invalid pairing (port busy or incompatible)');
-                    if (ok) setDraft(null);
-                  }} />
+                  onPick={id => { setTPart(+id.split('/')[0]!); setConnectMsg(''); }} />
+                {tPart !== null && (
+                  <div className="pt-2">
+                    <div className="pb-1 text-[10px] uppercase tracking-wide text-ink-dim">
+                      free {draft.kind} ports on {p.bp.data.components[tPart]?.type}[{tPart}]:
+                    </div>
+                    {open.filter(q => q.ci === tPart && q.kind === draft.kind).map(q => (
+                      <button key={q.name} data-testid="wire-target-port"
+                        className="mt-[2px] block w-full truncate rounded bg-panel2 px-2 py-[2px] text-left text-[11px] text-ink hover:bg-white/10"
+                        onMouseEnter={() => p.onHoverComp(tPart)}
+                        onClick={() => {
+                          const ok = p.onConnect(draft.ci, draft.name, tPart, q.name);
+                          setConnectMsg(ok ? `wired ${draft.name} → ${p.bp.data.components[tPart]?.type}[${tPart}]/${q.name}`
+                            : 'invalid pairing (port busy or incompatible)');
+                          if (ok) { setDraft(null); setTPart(null); }
+                          p.onHoverComp(null);
+                        }}>
+                        ○ {q.name} <span className="text-[10px] text-ink-dim">{q.kind}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {connectMsg && <div className="pt-1 text-[10px] text-ink-dim">{connectMsg}</div>}
               </div>
             )}
@@ -224,10 +249,11 @@ export function WirePanel(p: {
       </Sec>
       <Sec title={`Warnings — unconnected (${open.length})`} testid="wire-warnings">
         {open.length === 0 && <div className="text-[11px] text-emerald-400">every port is wired ✓</div>}
-        <div className="max-h-64 space-y-[2px] overflow-y-auto">
+        <div className="max-h-64 space-y-[2px] overflow-y-auto" onMouseLeave={() => p.onHoverComp(null)}>
           {open.map(w => (
             <button key={`${w.ci}/${w.name}`} data-testid="wire-warning"
               className="block w-full truncate rounded bg-panel2 px-2 py-[3px] text-left text-[11px] text-ink hover:bg-white/10"
+              onMouseEnter={() => p.onHoverComp(w.ci)}
               onClick={() => p.onSelectComp(w.ci)}
               title={`${w.type} ${w.name} — ${w.kind} port not on any cable`}>
               <span className="text-gold">⚠</span> {w.type}[{w.ci}] {w.name} — {w.kind}
@@ -235,7 +261,7 @@ export function WirePanel(p: {
           ))}
         </div>
       </Sec>
-    </>
+    </div>
   );
 }
 
