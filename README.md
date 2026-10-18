@@ -1,4 +1,4 @@
-# Archean Blueprint Tools · v0.178
+# Archean Blueprint Tools · v0.179
 
 **Reverse-engineered file format + a zero-build browser viewer/inspector for
 workshop craft of [Archean](https://store.steampowered.com/app/2941660/Archean/)**
@@ -61,10 +61,12 @@ game's own compact JSON format, keeping the block/occupancy mirror in sync.
 | `regtest/` | format-validation suite over the whole `testdata/` corpus (auto-discovers craft) |
 | `testdata/` | 25 workshop blueprints (1 kB–2.5 MB, incl. the Classic American Semi Truck) used as regression corpus |
 | `tools/extract_models.py` | regenerates `viewer/models/` from a local Archean install |
+| `tools/find_install.py` | finds the local Archean install / blueprint saves / Workshop dir on any machine (see `LOCATIONS.md`) |
 | `tools/adjust_seat.py` | example of a safe scripted format edit |
 | `tests/run_tests.sh` | headless-Chromium suite: selftest, regtest, proxytest, render shots |
 | `tools/release.sh` | cuts the stable release onto the `release` branch — **only ever run when the maintainer explicitly says so** |
 | `FORMAT.md` | the format documentation — start here |
+| `LOCATIONS.md` | how to reliably find an Archean install, its local blueprint saves and Workshop downloads on any machine |
 | `AGENTS.md` | development guide for humans *and* coding agents |
 | `NOTICE.md` | licensing: code GPL-3.0; game/player content belongs to its respective owners |
 
@@ -76,10 +78,29 @@ python3 -m http.server 8650          # repo root
 # suite:   tests/run_tests.sh        (python3 + chromium; exit 0 = all green)
 ```
 
+The repo works anywhere — it does not have to live inside the Steam tree, and
+no tool hardcodes a machine path. To point the tools at YOUR Archean install
+(local saves and Workshop downloads), run `python3 tools/find_install.py
+--conf >> blueprints.conf` — the discovery procedure behind it (Steam
+`appmanifest_2941660.acf`, `Archean-data/client/blueprints/`,
+`workshop/content/2941660/`) is documented in [LOCATIONS.md](LOCATIONS.md).
+
 Useful URL parameters: `?open=<url>` open another blueprint ·
 `?real` full game geometry · `?flow` particles + streamlines ·
 `?hull` / `?occ` toggles · `?cam=x,y,z,tx,ty,tz` camera pose ·
 `?perf` draw-call probe in the tab title · `?selftest`, `?proxytest` test modes.
+
+## Upstream references
+
+The game developer (batcholi / FloDKSM) ships their own builder tools at
+**[xenontools.dev](https://xenontools.dev/)**, whose **XenonViewer**
+(<https://viewer.xenontools.dev/>) is this project's reference implementation
+for the blueprint format — its readable sources under
+<https://viewer.xenontools.dev/js/> (`scene.js`, `blueprint.js`, `palette.js`,
+`blockshapes.js`) are the de-facto spec; see [NOTICE.md](NOTICE.md) §2 for the
+porting terms. The official Archean wiki documents the in-game blueprint
+workflow at
+<https://wiki.archean.space/en/tools/BlueprintTool.html>.
 
 ## Releases
 
@@ -91,7 +112,7 @@ say-so**: green tests or merged work never imply one.
 
 ## Ideas welcome — open an issue!
 
-This is v0.178: the format is decoded and the viewer is useful, but the good
+This is v0.179: the format is decoded and the viewer is useful, but the good
 ideas are not all in yet. Feature requests, format questions, and craft that
 render wrong (attach the `blueprint.json`) are all best filed as
 [issues](https://github.com/Joeppie/archean-blueprint-tools/issues) — that is
