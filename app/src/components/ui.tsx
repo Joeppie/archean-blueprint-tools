@@ -6,7 +6,7 @@ import { useMemo, useState } from 'react';
 
 export const Sec = (p: { title: string; children?: React.ReactNode; testid?: string }) => (
   <section className="border-t border-white/10 px-3 py-2" data-testid={p.testid}>
-    <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-ink-dim">{p.title}</h3>
+    <h3 className="ksp-label mb-1 text-[11px] font-semibold text-ink-dim">{p.title}</h3>
     {p.children}
   </section>
 );

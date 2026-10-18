@@ -1,9 +1,12 @@
-// Panel.tsx — the DevTools-style right sidebar (P3): view options, the
-// component list (by type / by subgrid tabs, collapsible groups, one search)
-// and the inspector (position/rotation sliders, comp.data rows, ⟲ reset) or
-// the subgrid panel (Contents + decoded masters + live joint sliders).
-// Editing writes flow through the EditApi (bp + doc via edit.ts) and the
-// Engine (live scene ride) — the React tree only ever reads file-space data.
+// Panel.tsx — the LEFT-side parts panel (KSP parts-list layout): the
+// component list leads (by type / by subgrid tabs = Categories/Subgrids,
+// collapsible groups, one search, icon tiles), the context window follows
+// (position/rotation sliders, comp.data rows, ⟲ reset) or the subgrid panel
+// (Contents + decoded masters + live joint sliders), and the view options
+// sit at the bottom. Editing writes flow through the EditApi (bp + doc via
+// edit.ts) and the Engine (live scene ride) — the React tree only ever
+// reads file-space data. Mass & CoM moved out: the StaticInfo KSP black
+// box floats over the viewport (App).
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Engine, ViewOptions } from '../engine/scene';
 import type { EditCtx } from '../engine/edit';
@@ -51,19 +54,27 @@ interface Props {
 }
 
 // ------------------------------------------------------------- mass & CoM
-function MassCoM(p: { engine: Engine | null; rev: number }) {
+/** KSP "STATIC INFO" black box: uppercase tan labels, right-aligned values.
+ *  Lives as a viewport overlay (App), not in the sidebar — like the VAB's
+ *  Mass/Modules/Cost readout under the parts list. */
+export function StaticInfo(p: { engine: Engine | null; rev: number }) {
   const mm = p.engine?.massReport();
   if (!mm) return null;
   const fmt = (n: number, d = 2) => n.toLocaleString('en', { maximumFractionDigits: d });
   return (
-    <Sec title="Mass & center of mass" testid="massbox">
-      <div className="space-y-[2px] text-[11px] text-ink" data-testid="mass-report">
-        <div>declared <b>{fmt(mm.declared, 0)} kg</b> · computed {fmt(mm.total, 0)} kg</div>
-        <div>hull {fmt(mm.cells, 0)} cells × {fmt(mm.cellMass, 2)} kg · parts {fmt(mm.compSum, 0)} kg</div>
+    <div data-testid="massbox"
+      className="ksp-win pointer-events-none w-[250px] rounded px-2.5 py-1.5 text-[11px] text-ink">
+      <div className="ksp-label mb-1 border-b border-white/10 pb-[2px] text-[10px] text-ink-dim">
+        Static info</div>
+      <div className="space-y-[1px] leading-snug" data-testid="mass-report">
+        <div>declared <b className="float-right tabular-nums">{fmt(mm.declared, 0)} kg</b></div>
+        <div>computed <b className="float-right tabular-nums">{fmt(mm.total, 0)} kg</b></div>
+        <div className="text-ink-dim">hull {fmt(mm.cells, 0)} cells × {fmt(mm.cellMass, 2)} kg ·
+          parts {fmt(mm.compSum, 0)} kg</div>
         <div className="text-ink-dim">implied structural density ≈ {fmt(mm.density, 0)} kg/m³ (plausibility)</div>
-        <div>CoM ({fmt(mm.com[0])}, {fmt(mm.com[1])}, {fmt(mm.com[2])}) m <span className="text-ink-dim">raw</span></div>
+        <div>CoM <span className="float-right tabular-nums">({fmt(mm.com[0])}, {fmt(mm.com[1])}, {fmt(mm.com[2])}) m</span></div>
       </div>
-    </Sec>
+    </div>
   );
 }
 
@@ -118,7 +129,7 @@ function Row(p: {
 
 const Sec = (p: { title: string; children?: React.ReactNode; testid?: string }) => (
   <section className="border-t border-white/10 px-3 py-2" data-testid={p.testid}>
-    <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-ink-dim">{p.title}</h3>
+    <h3 className="ksp-label mb-1 text-[11px] font-semibold text-ink-dim">{p.title}</h3>
     {p.children}
   </section>
 );
@@ -159,6 +170,16 @@ function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHullOpaci
 // ----------------------------------------------------------- component list
 const ALIAS = (c: BlueprintComponent) => (typeof c.alias === 'string' && c.alias) ||
   (typeof c.name === 'string' && c.name) || '';
+
+/** KSP parts-list flavour: every type gets a little icon tile — CamelCase
+ *  initials on a stable muted hue (hash of the type name). */
+const partCode = (t: string) =>
+  ((t.match(/[A-Z]/g) ?? []).slice(0, 2).join('') || t.slice(0, 1)).toUpperCase();
+const tileHue = (t: string) => {
+  let h = 0;
+  for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) % 360;
+  return h;
+};
 
 function CompList(p: { bp: Blueprint; sel: Props['sel']; onSelect: Props['onSelect']; onSelectSub: Props['onSelectSub'] }) {
   const [tab, setTab] = useState(() => localStorage.getItem('archean-app-list-tab') || 'type');
@@ -242,22 +263,25 @@ function CompList(p: { bp: Blueprint; sel: Props['sel']; onSelect: Props['onSele
   }, [p.sel, tab, sections]);
 
   const rowCls = (sel: boolean) =>
-    `flex cursor-pointer gap-2 whitespace-nowrap rounded px-2 py-[1px] text-[12px] ${
-      sel ? 'bg-accent/25 text-accent' : 'text-ink hover:bg-white/5'}`;
+    `flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded px-2 py-[1px] text-[12px] ${
+      sel ? 'bg-accent/20 text-accent shadow-[inset_0_0_0_1px_rgba(169,215,240,.5)]' : 'text-ink hover:bg-white/5'}`;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-1 px-3 pt-2">
+      {/* KSP parts-list header: Categories | Subcategories toggles + search */}
+      <div className="flex items-center gap-[3px] px-3 pt-2">
         {(['type', 'sub'] as const).map(t => (
           <button key={t} data-testid={`ltab-${t}`} onClick={() => switchTab(t)}
-            className={`rounded px-2 py-[3px] text-[11px] ${tab === t ? 'bg-accent/25 text-accent' : 'bg-panel2 text-ink-dim hover:text-ink'}`}>
-            {t === 'type' ? 'by type' : 'by subgrid'}
+            title={t === 'type' ? 'parts grouped by type' : 'parts grouped by subgrid (Build)'}
+            className={`ksp-btn px-2 py-[3px] text-[10px] ${tab === t ? 'on' : ''}`}>
+            {t === 'type' ? 'Categories' : 'Subgrids'}
           </button>
         ))}
       </div>
-      <input value={q} data-testid="filter" placeholder="filter type or name…"
+      <input value={q} data-testid="filter" placeholder="Search parts…"
         onChange={e => setQ(e.target.value)}
-        className="mx-3 mt-1.5 rounded border border-white/10 bg-panel2 px-2 py-1 text-[12px] text-ink placeholder:text-ink-dim/60" />
+        className="mx-3 mt-1.5 rounded border border-white/15 bg-black/40 px-2 py-1 text-[12px] text-ink
+                   placeholder:text-ink-dim/60 focus:border-accent/60 focus:outline-none" />
       <div ref={listRef} data-testid="complist" className="min-h-0 flex-1 overflow-y-auto px-1 py-1">
         {sections.map(s => {
           const isOpen = query ? true : open.has(s.key);       // search force-opens
@@ -279,7 +303,15 @@ function CompList(p: { bp: Blueprint; sel: Props['sel']; onSelect: Props['onSele
                         || (r.kind === 'sub' && r.idx === p.sel.sub))}
                       onClick={() => r.kind === 'comp' ? p.onSelect(r.idx) : p.onSelectSub(r.idx)}
                       onDoubleClick={() => r.kind === 'comp' ? p.onSelect(r.idx, true) : p.onSelectSub(r.idx)}>
-                      <span className="w-5 shrink-0 text-right text-[10px] text-ink-dim">{String(r.idx).padStart(2, '0')}</span>
+                      {(() => {
+                        const t = r.kind === 'comp' ? p.bp.data.components[r.idx]?.type ?? '?' : 'Subgrid';
+                        return <span
+                          className="grid h-[16px] w-[16px] shrink-0 place-items-center rounded-[3px] border text-[8px] font-bold text-ink"
+                          style={{ background: `hsl(${tileHue(t)} 20% 22%)`, borderColor: `hsl(${tileHue(t)} 24% 44%)` }}>
+                          {r.kind === 'comp' ? partCode(t) : '⬓'}
+                        </span>;
+                      })()}
+                      <span className="w-4 shrink-0 text-right text-[9px] text-ink-dim">{String(r.idx).padStart(2, '0')}</span>
                       <span className={`truncate ${r.dim ? 'text-ink-dim italic' : ''}`}>
                         {r.label ?? p.bp.data.components[r.idx]?.type}
                         {r.kind === 'comp' && ALIAS(p.bp.data.components[r.idx]!) ? ` “${ALIAS(p.bp.data.components[r.idx]!)}”` : ''}
@@ -537,12 +569,10 @@ function SubPanel(p: Props) {
 export default function Panel(p: Props) {
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-panel text-ink" data-testid="panels">
-      <MassCoM engine={p.engine} rev={p.rev} />
-      <ViewOpts opts={p.opts} onOpt={p.onOpt} hullOpacity={p.hullOpacity} onHullOpacity={p.onHullOpacity}
-        realModels={p.realModels} onRealModels={p.onRealModels} gizmoOn={p.gizmoOn} onGizmo={p.onGizmo}
-        hiDef={p.hiDef} onHiDef={p.onHiDef} />
-      <div className="flex min-h-0 flex-[2] flex-col border-t border-white/10">
-        <h3 className="px-3 pt-2 text-[11px] font-semibold uppercase tracking-wide text-ink-dim">Components</h3>
+      {/* KSP order: the PARTS list leads, the context window follows, the
+          camera/view settings sit at the bottom */}
+      <div className="flex min-h-0 flex-[3] flex-col border-t border-white/10">
+        <h3 className="ksp-label px-3 pt-2 text-[11px] font-semibold text-ink-dim">Parts</h3>
         <CompList bp={p.bp} sel={p.sel} onSelect={p.onSelect} onSelectSub={p.onSelectSub} />
       </div>
       <div className="min-h-0 flex-[2] border-t border-white/10 overflow-y-auto">
@@ -550,7 +580,12 @@ export default function Panel(p: Props) {
           ? <SubPanel {...p} key={`s${p.sel.sub}`} />
           : p.sel.ci >= 0
             ? <Inspector {...p} key={`c${p.sel.ci}k${p.inspKey}`} />
-            : <div className="px-3 py-2 text-[12px] text-ink-dim">nothing selected — click a component</div>}
+            : <div className="px-3 py-2 text-[12px] text-ink-dim">nothing selected — click a part</div>}
+      </div>
+      <div className="max-h-[45%] shrink-0 overflow-y-auto border-t border-white/10">
+        <ViewOpts opts={p.opts} onOpt={p.onOpt} hullOpacity={p.hullOpacity} onHullOpacity={p.onHullOpacity}
+          realModels={p.realModels} onRealModels={p.onRealModels} gizmoOn={p.gizmoOn} onGizmo={p.onGizmo}
+          hiDef={p.hiDef} onHiDef={p.onHiDef} />
       </div>
     </div>
   );

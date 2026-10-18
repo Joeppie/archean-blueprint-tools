@@ -1,9 +1,11 @@
 // App.tsx — two-stage SPA: craft GALLERY (legacy index-page style) →
-// full-screen EDITOR with desktop-app chrome (File menu, New craft, the
-// View / Edit / Blocks / Wire / Flight mode bar). ?craft=<id> deep-links
-// straight into the editor. The catalog is STATICALLY COMPILED at build
-// time (virtual:gallery — AGENTS § Blueprint folder), so the gallery paints
-// with zero runtime fetches.
+// full-screen EDITOR laid out KSP-VAB-style: a viewport that fills the
+// window, the PARTS panel docked LEFT (mobile: drawer), the STATIC INFO
+// (mass/CoM) black box bottom-left, the camera-preset cluster bottom-right
+// and the File menu + View / Edit / Blocks / Wire / Flight mode tiles in a
+// thin toolbar. ?craft=<id> deep-links straight into the editor. The
+// catalog is STATICALLY COMPILED at build time (virtual:gallery — AGENTS
+// § Blueprint folder), so the gallery paints with zero runtime fetches.
 //
 // EDITING: the blueprint lives in a raw-literal DOC (doc.ts) plus a plain
 // live view of it. v1 files are NORMALIZED to the v2 dialect at open time
@@ -15,7 +17,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GALLERY } from 'virtual:gallery';
 import type { Engine, PickHit, ViewOptions } from './engine/scene';
 import Viewport from './components/Viewport';
-import Panel, { type EditApi } from './components/Panel';
+import Panel, { StaticInfo, type EditApi } from './components/Panel';
 import TopBar, { type Mode } from './components/TopBar';
 import { BlockPanel, FlightPanel, TriPanel, WirePanel, placeBlock, type Brush } from './components/ModePanels';
 import { cornerOf, triAt, triangleFromCorners } from './engine/tris';
@@ -328,7 +330,7 @@ function Editor({ craft, onBack }: { craft: string | null; onBack: () => void })
       <div className="flex gap-1 px-3 pt-2">
         {(['blocks', 'tris'] as const).map(t => (
           <button key={t} data-testid={`blocksub-${t}`} onClick={() => { setBlockSub(t); setTriDraft([]); }}
-            className={`rounded px-2 py-[3px] text-[11px] ${blockSub === t ? 'bg-accent/25 text-accent' : 'bg-panel2 text-ink-dim hover:text-ink'}`}>
+            className={`ksp-btn px-2 py-[3px] text-[11px] ${blockSub === t ? 'on' : ''}`}>
             {t === 'blocks' ? '▤ Blocks' : '▵ Triangles'}
           </button>
         ))}
@@ -336,7 +338,7 @@ function Editor({ craft, onBack }: { craft: string | null; onBack: () => void })
       <div className="flex gap-1 px-3 pt-1">
         {(['place', 'select'] as const).map(t => (
           <button key={t} data-testid={`blocktool-${t}`} onClick={() => setBlockTool(t)}
-            className={`rounded px-2 py-[3px] text-[11px] ${blockTool === t ? 'bg-accent/25 text-accent' : 'bg-panel2 text-ink-dim hover:text-ink'}`}>
+            className={`ksp-btn px-2 py-[3px] text-[11px] ${blockTool === t ? 'on' : ''}`}>
             {t === 'place' ? '✚ Place' : '▣ Select'}
           </button>
         ))}
@@ -378,11 +380,11 @@ function Editor({ craft, onBack }: { craft: string | null; onBack: () => void })
         onNew={() => { ctxRef.current = null; setBp(null); openText(emitNew()); }}
         onOpen={openFile} onSave={save} onClose={onBack} onBack={onBack}>
         <button data-testid="save-btn" onClick={() => save()}
-          className={`shrink-0 rounded px-2.5 py-1 text-[12px] ${dirty ? 'bg-accent text-black' : 'bg-panel2 text-ink-dim hover:text-ink'}`}>
+          className={`ksp-btn shrink-0 px-2.5 py-1 text-[12px] ${dirty ? 'on font-semibold' : 'text-ink-dim'}`}>
           {dirty ? '● Save' : 'Save'}
         </button>
-        <button data-testid="toggle-panels" onClick={() => setPanelOpen(o => !o)}
-          className="shrink-0 rounded bg-panel2 px-2.5 py-1 text-[12px] text-ink hover:bg-white/10 hover:text-accent">
+        <button data-testid="toggle-panels" title="toggle the parts panel" onClick={() => setPanelOpen(o => !o)}
+          className="ksp-btn shrink-0 px-2.5 py-1 text-[12px] hover:text-accent">
           ⚙
         </button>
       </TopBar>
@@ -390,16 +392,10 @@ function Editor({ craft, onBack }: { craft: string | null; onBack: () => void })
         data-testid="file-input"
         onChange={e => { const f = e.target.files?.[0]; if (f) readFile(f); e.target.value = ''; }} />
       <div className="relative flex min-h-0 flex-1">
-        <main className="relative min-w-0 flex-1">
-          <Viewport bp={bp} onPick={setHit} onEngine={onEngine}
-            mode={mode} onBlockPick={onBlockPick} />
-          {bp && hit && hit.kind !== 'none' && mode !== 'blocks' && (
-            <PickChip hit={hit} bp={bp} />
-          )}
-        </main>
+        {/* KSP layout: the parts list lives on the LEFT (mobile: drawer) */}
         {panelOpen && (
           <aside data-testid="panel-aside"
-            className="absolute inset-y-0 right-0 z-10 w-[300px] max-w-[85vw] border-l border-white/10
+            className="absolute inset-y-0 left-0 z-10 w-[300px] max-w-[85vw] border-r border-white/10
                        shadow-2xl md:static md:z-auto md:shadow-none">
             {bp && ctxRef.current && (
               <Panel
@@ -418,23 +414,55 @@ function Editor({ craft, onBack }: { craft: string | null; onBack: () => void })
             )}
           </aside>
         )}
+        <main className="relative min-w-0 flex-1">
+          <Viewport bp={bp} onPick={setHit} onEngine={onEngine}
+            mode={mode} onBlockPick={onBlockPick} />
+          {bp && hit && hit.kind !== 'none' && mode !== 'blocks' && (
+            <PickChip hit={hit} bp={bp} />
+          )}
+          {/* KSP bottom-left: the STATIC INFO black box (mass & CoM) */}
+          {bp && <div className="absolute bottom-2 left-3 z-[5]"><StaticInfo engine={engine} rev={rev} /></div>}
+          {/* KSP bottom-right: the camera cluster over the viewport */}
+          <CameraCluster engine={engine} />
+        </main>
       </div>
     </div>
   );
 }
 
-/** picked-part chip: bottom sheet on phones, floating card on desktop */
+/** KSP-style camera presets (the square-button cluster bottom-right) */
+const CAMS: ['fit' | 'top' | 'front' | 'side', string, string][] = [
+  ['fit', '⌂', 'frame craft'], ['top', '⊞', 'top view'],
+  ['front', '⊏', 'front (nose) view'], ['side', '⊐', 'side view'],
+];
+function CameraCluster({ engine }: { engine: Engine | null }) {
+  return (
+    <div data-testid="cam-cluster"
+      className="absolute bottom-2 right-2 z-[5] flex flex-col gap-1">
+      {CAMS.map(([k, ic, t]) => (
+        <button key={k} data-testid={`cam-${k}`} title={t}
+          className="ksp-btn grid h-8 w-9 place-items-center text-[14px] leading-none"
+          onClick={() => engine?.viewPreset(k)}>
+          {ic}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** picked-part chip: bottom sheet on phones (above the static-info box),
+ *  KSP part-tooltip card on desktop */
 function PickChip({ hit, bp }: { hit: PickHit; bp: Blueprint }) {
   const comp = hit.kind === 'comp' && hit.ci != null ? bp.data.components[hit.ci] : null;
   return (
     <div data-testid="pick-info"
-      className="pointer-events-none absolute inset-x-2 bottom-12 rounded-lg border border-gold/30
-                 bg-black/70 px-3 py-2 text-[12px] text-ink backdrop-blur
-                 md:inset-x-auto md:bottom-auto md:right-3 md:top-3 md:max-w-[320px]">
-      picked: <span className="text-gold">{hit.kind}</span>
-      {comp && <> · <span className="text-accent">{comp.type}</span>
+      className="ksp-win pointer-events-none absolute inset-x-2 bottom-[132px] rounded px-3 py-2 text-[12px]
+                 text-ink md:inset-x-auto md:bottom-auto md:right-3 md:top-3 md:max-w-[320px]">
+      <span className="ksp-label text-[10px] text-ink-dim">picked</span>{' '}
+      <span className="text-gold">{hit.kind}</span>
+      {comp && <> · <span className="ksp-label font-semibold text-accent">{comp.type}</span>
         {typeof comp.name === 'string' && comp.name ? <span className="text-ink-dim"> "{comp.name}"</span> : null}</>}
-      {hit.point && <span className="text-ink-dim"> @ {hit.point.map(n => n.toFixed(2)).join(', ')}</span>}
+      {hit.point && <div className="tabular-nums text-[10px] text-ink-dim">@ {hit.point.map(n => n.toFixed(2)).join(', ')}</div>}
     </div>
   );
 }

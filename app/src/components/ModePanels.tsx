@@ -41,7 +41,7 @@ export function BlockPanel(p: {
         <div className="flex flex-wrap gap-1 pb-1">
           {TYPES.map(([t, label]) => (
             <button key={t} data-testid={`btype-${t}`} onClick={() => p.onBrush({ ...p.brush, type: t })}
-              className={`rounded px-1.5 py-[2px] text-[10px] ${p.brush.type === t ? 'bg-accent/30 text-accent' : 'bg-panel2 text-ink-dim hover:text-ink'}`}>
+              className={`ksp-btn px-1.5 py-[2px] text-[10px] ${p.brush.type === t ? 'on' : ''}`}>
               {label}
             </button>
           ))}

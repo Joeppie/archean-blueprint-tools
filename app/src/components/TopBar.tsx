@@ -1,6 +1,8 @@
-// TopBar.tsx — the desktop-app chrome on top of the editor: a File menu
+// TopBar.tsx — the KSP-VAB-style toolbar over the editor: a File menu
 // (New / Open / Save + Save as + Close-to-gallery), a New-craft button, and
-// the MODE segments that split the workspace:
+// the MODE tiles that split the workspace (icon + uppercase caption, like
+// KSP's editor/tool buttons). Dark bevelled .ksp-btn chrome, blue glow on
+// the active tile:
 //   View   — inspect only (no gizmo, no writes)
 //   Edit   — component editing: gizmo, sliders, data rows
 //   Blocks — block placement / resizing / deletion
@@ -24,8 +26,9 @@ interface Props {
   children?: React.ReactNode;              // right side: panel toggle etc.
 }
 
-const MODES: [Mode, string][] = [
-  ['view', 'View'], ['edit', 'Edit'], ['blocks', 'Blocks'], ['wire', 'Wire'], ['flight', 'Flight'],
+const MODES: [Mode, string, string][] = [
+  ['view', '⌖', 'View'], ['edit', '✎', 'Edit'], ['blocks', '▦', 'Blocks'],
+  ['wire', '∿', 'Wire'], ['flight', '➤', 'Flight'],
 ];
 
 export default function TopBar(p: Props) {
@@ -42,24 +45,25 @@ export default function TopBar(p: Props) {
     <button data-testid={`file-${key ?? label}`}
       className="flex w-full items-center justify-between gap-6 px-3 py-1.5 text-left text-[12px] text-ink hover:bg-white/10"
       onClick={() => { setFileOpen(false); act(); }}>
-      {label}<span className="text-[10px] text-ink-dim">{key === 'save' ? 'Ctrl+S' : ''}</span>
+      <span className="ksp-label">{label}</span><span className="text-[10px] text-ink-dim">{key === 'save' ? 'Ctrl+S' : ''}</span>
     </button>
   );
 
   return (
-    <header className="relative z-30 flex h-11 shrink-0 items-center gap-2 border-b border-white/10 bg-panel px-2">
-      <button data-testid="back-to-gallery" onClick={p.onBack} title="back to gallery"
-        className="shrink-0 rounded bg-panel2 px-2.5 py-1 text-[12px] text-ink hover:bg-white/10 hover:text-accent">
+    <header className="relative z-30 flex h-11 shrink-0 items-center gap-2 border-b border-[rgba(217,212,189,.22)]
+                       bg-gradient-to-b from-panel to-panel2 px-2">
+      <button data-testid="back-to-gallery" onClick={p.onBack} title="back to space center (gallery)"
+        className="ksp-btn shrink-0 px-2.5 py-1 text-[12px] hover:text-accent">
         ←
       </button>
       <div ref={menuRef} className="relative shrink-0">
         <button data-testid="file-menu" onClick={() => setFileOpen(o => !o)}
-          className={`whitespace-nowrap rounded px-2.5 py-1 text-[12px] ${fileOpen ? 'bg-white/10 text-ink' : 'bg-panel2 text-ink hover:bg-white/10'}`}>
+          className={`ksp-btn whitespace-nowrap px-2.5 py-1 text-[12px] ${fileOpen ? 'on' : ''}`}>
           File ▾
         </button>
         {fileOpen && (
           <div data-testid="file-dropdown"
-            className="absolute left-0 top-8 w-56 overflow-hidden rounded-md border border-white/15 bg-panel shadow-2xl">
+            className="ksp-win absolute left-0 top-8 w-56 overflow-hidden rounded-md">
             {item('New craft', p.onNew, 'new')}
             {item('Open file…', p.onOpen, 'open')}
             <div className="my-1 border-t border-white/10" />
@@ -71,30 +75,34 @@ export default function TopBar(p: Props) {
         )}
       </div>
       <button data-testid="new-craft" onClick={p.onNew}
-        className="hidden shrink-0 whitespace-nowrap rounded bg-panel2 px-2.5 py-1 text-[12px] text-ink hover:bg-white/10 hover:text-accent md:inline">
+        className="ksp-btn hidden shrink-0 whitespace-nowrap px-2.5 py-1 text-[12px] hover:text-accent md:inline">
         + New craft
       </button>
 
-      <nav data-testid="mode-bar"
-        className="ml-1 flex max-w-[46vw] shrink items-center gap-[2px] overflow-x-auto rounded-lg border border-white/10 bg-panel2 p-[2px]">
-        {MODES.map(([m, label]) => (
+      <nav data-testid="mode-bar" title="editor modes — KSP-style tool switch"
+        className="ml-1 flex max-w-[52vw] shrink items-center gap-[3px] overflow-x-auto rounded-lg
+                   border border-[rgba(217,212,189,.16)] bg-black/30 p-[3px]">
+        {MODES.map(([m, ic, label]) => (
           <button key={m} data-testid={`mode-${m}`} onClick={() => p.onMode(m)}
-            className={`shrink-0 whitespace-nowrap rounded-md px-2.5 py-1 text-[12px] md:px-3 ${
-              p.mode === m ? 'bg-accent font-semibold text-black' : 'text-ink-dim hover:text-ink'}`}>
-            {label}
+            className={`ksp-btn flex shrink-0 flex-col items-center rounded px-2 py-[2px] leading-tight md:px-3
+                        ${p.mode === m ? 'on' : ''}`}>
+            <span className="text-[13px] leading-[15px]">{ic}</span>
+            <span className="text-[9px]">{label}</span>
           </button>
         ))}
       </nav>
 
+      {/* ship nameplate — the KSP vessel-name strip */}
       <span data-testid="editor-title"
-        className="ml-1 min-w-[64px] flex-1 truncate text-[13px] font-semibold text-accent md:ml-2">
+        className="ksp-label ml-1 min-w-[64px] flex-1 truncate text-[13px] font-semibold tracking-[.12em] text-accent
+                   md:ml-2 md:text-[14px]">
         {p.title}{p.dirty && <span className="text-gold"> ●</span>}
       </span>
       {p.craftId && /^\d{6,}$/.test(p.craftId) && p.craftId !== '0000000000' && p.craftId !== '9000000001' && (
         <a data-testid="wslink" title="Steam Workshop page"
           href={`https://steamcommunity.com/sharedfiles/filedetails/?id=${p.craftId}`}
           target="_blank" rel="noopener"
-          className="shrink-0 rounded bg-panel2 px-2 py-1 text-[11px] text-ink-dim hover:text-accent">workshop ↗</a>
+          className="ksp-btn shrink-0 px-2 py-1 text-[11px] text-ink-dim">workshop ↗</a>
       )}
       {p.children}
     </header>

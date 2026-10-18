@@ -26,6 +26,24 @@ test('camera pick hits the craft at the frame centre', async ({ page }) => {
   expect(hit.point).toBeTruthy();
 });
 
+test('KSP camera cluster presets snap the eye to axis views and re-fit', async ({ page }) => {
+  await openFirstCraft(page);
+  const camPos = () => page.evaluate(() =>
+    (window as unknown as { __ARCHEAN__?: { engine: { camPos: () => [number, number, number] } } })
+      .__ARCHEAN__!.engine.camPos());
+  const p0 = await camPos();
+  const moved = (p: number[]) => Math.hypot(p[0]! - p0[0]!, p[1]! - p0[1]!, p[2]! - p0[2]!);
+  await page.getByTestId('cam-top').click();
+  expect(moved(await camPos()), 'top view moved the eye').toBeGreaterThan(1);
+  await page.getByTestId('cam-front').click();
+  expect(moved(await camPos()), 'front view moved the eye').toBeGreaterThan(1);
+  await page.getByTestId('cam-side').click();
+  expect(moved(await camPos()), 'side view moved the eye').toBeGreaterThan(1);
+  await page.getByTestId('cam-fit').click();
+  await expect.poll(camPos).toEqual(p0);                 // fit = the load framing
+  await expect(page).toHaveTitle(/SCENE PASS/);
+});
+
 test('a real canvas tap routes through the pick path into the info chip', async ({ page }) => {
   await openFirstCraft(page);
   const canvas = page.getByTestId('canvas');

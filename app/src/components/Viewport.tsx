@@ -108,11 +108,11 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockP
         }} />
       {widget && (
         <div data-testid="modebox"
-          className="absolute z-20 flex -translate-x-1/2 gap-1 rounded-lg border border-white/15 bg-black/80 p-1 backdrop-blur"
+          className="ksp-win absolute z-20 flex -translate-x-1/2 gap-1 rounded p-1"
           style={{ left: widget.x, top: widget.y - 44 }}>
           {([['off', '⊘', 'hide gizmo'], ['translate', '✥', 'move'], ['rotate', '⟳', 'rotate']] as const).map(([m, ic, t]) => (
             <button key={m} title={t} data-testid={`mode-${m}`} onClick={() => setMode(m)}
-              className={`h-8 w-9 rounded text-[15px] leading-none ${gmode === m ? 'bg-accent/30 text-accent' : 'text-ink hover:bg-white/10'}`}>
+              className={`ksp-btn grid h-8 w-9 place-items-center text-[15px] leading-none ${gmode === m ? 'on' : ''}`}>
               {ic}
             </button>
           ))}
@@ -120,8 +120,8 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockP
               off OR the selected pair drifted apart (the >5 cm auto-disable) */}
           <button title="move mirrored twins (⇄)" data-testid="mode-sym"
             onClick={() => { const e = engineRef.current; if (e) e.setSymOn(!e.symState().on); setSymTick(t => t + 1); }}
-            className={`h-8 w-9 rounded text-[15px] leading-none ${
-              engineRef.current?.symState().active ? 'bg-accent/30 text-accent' : 'text-ink line-through opacity-60 hover:bg-white/10'}`}>
+            className={`ksp-btn grid h-8 w-9 place-items-center text-[15px] leading-none ${
+              engineRef.current?.symState().active ? 'on' : 'line-through opacity-60'}`}>
             ⇄
           </button>
         </div>
@@ -154,5 +154,5 @@ function StatsStrip({ engine, bp }: { engine: { current: Engine | null }; bp: Bl
     return () => cancelAnimationFrame(raf);
   }, [bp, engine]);
   return <p data-testid="scene-stats" ref={ref}
-    className="absolute bottom-2 left-3 rounded bg-black/50 px-2 py-1 text-[11px] text-ink-dim" />;
+    className="absolute left-3 top-2 rounded bg-black/50 px-2 py-1 text-[11px] text-ink-dim" />;
 }

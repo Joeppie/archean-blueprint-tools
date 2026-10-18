@@ -154,6 +154,9 @@ export class Engine {
   private hl = new Highlight(this.scene);
   onSelection: ((sel: { ci: number; sub: number }) => void) | null = null;
   private fly: { from: Vector3; to: Vector3; t0: number } | null = null;
+  /** last fit() framing — the KSP camera-cluster presets pivot on this */
+  private frameC: Vector3 | null = null;
+  private frameD = 3.6;
 
   // ------------------------------------------------------------ gizmo (P3+)
   /** Blender-style move/rotate widget on the selection (legacy v0.150+):
@@ -833,6 +836,7 @@ export class Engine {
       (this.scene.fog as { near: number }).near = Math.max(30, r * 2.5);
       (this.scene.fog as { far: number }).far = Math.max(80, r * 7);
     }
+    this.frameC = c.clone(); this.frameD = d;      // presets ride this framing
     this.camera.lookAt(c);
     this.controls?.update();
   }
@@ -1089,6 +1093,31 @@ export class Engine {
     this.controls.target.copy(next);
     if (k >= 1) this.fly = null;
     this.invalidate();
+  }
+
+  /** KSP camera-cluster presets: 'fit' re-applies the load framing;
+   * top/front/side snap the eye onto an axis through the framed centre at
+   * the fit distance (a hair of tilt keeps OrbitControls' up-vector sane).
+   * View space: nose = −z, up = +y, right = +x. */
+  viewPreset(k: 'fit' | 'top' | 'front' | 'side') {
+    if (!this.controls || !this.frameC) return;
+    const c = this.frameC, d = Math.max(this.frameD, 3.6);
+    const p =
+      k === 'fit' ? new Vector3(c.x + d * 0.6, c.y + Math.max(d * 0.34, 1.4), c.z + d * 0.72)
+        : k === 'top' ? new Vector3(c.x, c.y + d, c.z + d * 0.002)
+          : k === 'front' ? new Vector3(c.x, c.y + d * 0.002, c.z - d)
+            : new Vector3(c.x + d, c.y + d * 0.002, c.z);
+    this.fly = null;
+    this.camera.position.copy(p);
+    this.controls.target.copy(c);
+    this.camera.lookAt(c);
+    this.controls.update();
+    this.invalidate();
+  }
+  /** eye position — the camera-preset e2e pins */
+  camPos(): [number, number, number] {
+    const p = this.camera.position;
+    return [p.x, p.y, p.z];
   }
 
   // -------------------------------------------------------------- gizmo ops
