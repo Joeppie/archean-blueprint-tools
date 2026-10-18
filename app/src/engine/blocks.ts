@@ -1,11 +1,14 @@
 // blocks.ts — the BLOCKS mode model layer (pure): absolute-cell ↔ block
-// conversions, placement from a picked face, safe field writes.
+// conversions, placement from a picked face, safe field writes, and
+// MIRRORED placement (the ⇄ twin path for blocks/parts — same plane the
+// component symmetry index uses: file x = 0).
 // Absolute cell = frame·12 + pos (the same keying cull.ts uses); a block at
 // cell C spans [C, C+size+1). Files store pos_* ∈ 0..12 + frame_* — the
 // writer keeps content in the minimal frames, same rule as normalize.
 
 import type { Block, Blueprint } from './format';
 import { CELL, CELLS_PER_FRAME } from './format';
+import { getBlockPoints } from './blockshapes';
 
 type Cell = [number, number, number];   // absolute cells (x, y, z)
 
@@ -59,6 +62,54 @@ export function blockInfo(bp: Blueprint, bi: number): BlockInfo | null {
     size: [b.size_x, b.size_y, b.size_z], type: b.type,
     slot: b.colors?.[0] ?? 0,
   };
+}
+
+// ------------------------------------------------------------ MIRRORED place
+// The ⇄ path for BLOCKS: the game's editor mirror builds the twin as the
+// same footprint at the x-FLIPPED cell range ([c, c+size+1) → [−(c+size+1),
+// −c)) with the shape mirrored in x too (ramps/corners change orientation;
+// cubes/pyramid-centres are x-symmetric). The plane is file x = 0 — exactly
+// the plane the component twin index (sym.ts, mask bit 1) uses.
+
+/** Mirror a block START cell of footprint extent e = size+1 (cells) in x
+ *  about the FILE WORLD x = 0 plane — the same plane ⇄ uses (world =
+ *  (abs−5.5)·CELL ⇒ cell-space plane at 5.5): [c, c+e) → [11−c−e, 11−c). */
+export function mirrorBlockCell(cx: number, sizeX: number): number {
+  return 10 - cx - sizeX;
+}
+
+/** type → its x-mirror type, derived from the vertex clouds of the real
+ *  shape table (x → 1−x in local space), so it can never drift from
+ *  blockshapes.ts. Types whose mirrored cloud is not in the table (none in
+ *  0..52) map to themselves. Involutory by construction. */
+export const MIRROR_TYPE: Uint8Array = (() => {
+  const table = new Uint8Array(256);
+  for (let t = 0; t < 256; t++) table[t] = t;
+  const key = (pts: [number, number, number][]) =>
+    pts.map(p => p.map(v => Math.round(v * 1000)).join(',')).sort().join(';');
+  const set = new Map<string, number>();
+  for (let t = 0; t <= 52; t++) set.set(key(getBlockPoints(t, [0, 0, 0], [1, 1, 1])), t);
+  for (let t = 0; t <= 52; t++) {
+    const m = getBlockPoints(t, [0, 0, 0], [1, 1, 1]).map(p => [1 - p[0], p[1], p[2]] as [number, number, number]);
+    const hit = set.get(key(m));
+    if (hit !== undefined) table[t] = hit;
+  }
+  return table;
+})();
+
+/** The ⇄ twin of a fresh block (same footprint, mirrored cell + type). */
+export function mirroredBlock(b: Block): Block {
+  const cx = (b.frame_x ?? 0) * CELLS_PER_FRAME + b.pos_x;
+  const mc = mirrorBlockCell(cx, b.size_x);
+  const fr = (a: number) => Math.floor(a / CELLS_PER_FRAME);
+  const t = MIRROR_TYPE[b.type] ?? b.type;
+  const twin: Block = { ...b, type: t };
+  twin.frame_x = fr(mc);
+  twin.pos_x = mc - fr(mc) * CELLS_PER_FRAME;
+  // colours ride the block's face slots: swap the ±x face pair when the
+  // slot list is the 7-face format and the twin's face count matches
+  if (Array.isArray(b.colors) && b.colors.length === 7) twin.colors = [...b.colors];
+  return twin;
 }
 
 /** In-place field write with guards (keeps pos_* inside 0..12 by

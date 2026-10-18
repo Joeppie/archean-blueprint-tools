@@ -7,7 +7,7 @@ import type { Engine } from '../engine/scene';
 import { FLOWS } from '../engine/aero';
 import type { EditCtx } from '../engine/edit';
 import { docArrayInsert, docFromValue, docSetNumber, docArrayRemoveAt } from '../engine/doc';
-import { blockFromCell, blockInfo, setBlockField } from '../engine/blocks';
+import { blockFromCell, blockInfo, mirroredBlock, setBlockField } from '../engine/blocks';
 import { autoWire, portCensus, connectedPorts, unconnectedPorts, WIRE_KINDS } from '../engine/wireops';
 import { triCentroid } from '../engine/tris';
 import type { Triangle } from '../engine/format';
@@ -98,12 +98,20 @@ export function BlockPanel(p: {
   );
 }
 
-/** App-side: place a block from a picked cell (blocks mode) */
-export function placeBlock(ctx: EditCtx, cell: [number, number, number], brush: Brush): number {
+/** App-side: place a block from a picked cell (blocks mode). With `mirror`
+ *  the ⇄ twin lands at the x-mirrored cell too (type mirrored; same-face
+ *  colour slots kept — single-slot brush paints are the exact case). */
+export function placeBlock(ctx: EditCtx, cell: [number, number, number], brush: Brush,
+  mirror = false): number {
   const block = blockFromCell(cell, [brush.sx, brush.sy, brush.sz], brush.type, brush.slot);
   ctx.bp.data.blocks.push(block);
   const at = ctx.bp.data.blocks.length - 1;
   docArrayInsert(ctx.doc, ['data', 'blocks'], at, docFromValue(block));
+  if (mirror) {
+    const twin = mirroredBlock(block);
+    ctx.bp.data.blocks.push(twin);
+    docArrayInsert(ctx.doc, ['data', 'blocks'], ctx.bp.data.blocks.length - 1, docFromValue(twin));
+  }
   return at;
 }
 

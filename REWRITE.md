@@ -272,6 +272,21 @@ new build dep, kept inside `app/`).
   clean, vitest 142, Playwright 59 pass / 19 desktop-only skips.
   Remaining gaps (next): hull element list, P4 perf (BatchedMesh/?perf/
   wasm), force coefficients (lift curve + stall + AoA) on the wind field.
+- **⇄ MIRRORED PLACEMENT — landed** (the user: "allow placing blocks with
+  mirror too"): a persisted twin switch (⇄ twin ON, `archean-app-plsym`)
+  beside the place/select tools in BLOCKS mode drives BOTH placement paths.
+  Blocks: pure `engine/blocks.ts` `mirrorBlockCell` mirrors the footprint
+  about the SAME plane ⇄ uses (FILE world x = 0 = cell 5.5) and the derived
+  `MIRROR_TYPE` table maps every shape to its x-mirrored type — computed at
+  module load from blockshapes' own vertex clouds (x → 1−x), so it can never
+  drift from the shape table; involutive + closed on 0..52, pinned, plus a
+  cell-plane/involution/twin-builder pin set (blocks.test 4). Catalog parts:
+  the twin COMPONENT lands at the x-flipped position with the same
+  orientation — the exact geometry sym.ts indexes (mask bit 1), so the fresh
+  pair co-selects and every later edit propagates through the established
+  twin path (no new write machinery). e2e mirror.spec (both projects): one
+  click = block + twin at the mirrored cell; held part + twin at the
+  mirrored position; ramp visual shot shows the mirrored orientation.
 - **WIND TUNNEL (aero) — landed** (replaces the bogus legacy thin-plate
   "aero plates" model per the user; STREAMLINES FIRST as asked): the OFFICIAL
   game model is the SHAPE FIELD (wiki.archean.space §Aerodynamics — fully

@@ -1,0 +1,95 @@
+// mirror.spec.ts — ⇄ MIRRORED PLACEMENT: with the twin toggle on, a block
+// click places the block AND its x-mirrored twin (mirrored cell about the
+// file x = 0 plane + mirrored shape type), and a held catalog part places
+// the twin COMPONENT at the mirrored position — the exact geometry the ⇄
+// twin index pairs, so later edits propagate through the established path.
+import { expect, test, type Page } from '@playwright/test';
+
+type Blk = { frame_x?: number; pos_x: number; size_x: number; type: number };
+const blocksOf = (page: Page) => page.evaluate(() => {
+  const w = window as unknown as { __ARCHEAN__?: { engine: { blueprint: {
+    data: { blocks: Blk[] } } } } };
+  return w.__ARCHEAN__!.engine.blueprint.data.blocks;
+});
+const compsOf = (page: Page) => page.evaluate(() => {
+  const w = window as unknown as { __ARCHEAN__?: { engine: { blueprint: {
+    data: { components: { type: string; position: { x: number; y: number; z: number } }[] } } } } };
+  return w.__ARCHEAN__!.engine.blueprint.data.components;
+});
+const cellX = (b: Blk) => (b.frame_x ?? 0) * 12 + b.pos_x;
+
+/** the parts panel is a drawer under md: open/close it on phones only */
+async function setDrawer(page: Page, want: boolean) {
+  if (await page.evaluate(() => window.innerWidth >= 768)) return;
+  const aside = page.getByTestId('panel-aside');
+  const vis = await aside.isVisible().catch(() => false);
+  if (vis !== want) await page.getByTestId('toggle-panels').click();
+  if (want) await expect(aside).toBeVisible();
+}
+
+test.describe('⇄ mirrored placement', () => {
+  test('blocks: one click lands the block + its mirrored twin', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('gallery-new').click();
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
+    await page.getByTestId('mode-blocks').click();
+    await setDrawer(page, true);
+    await expect(page.getByTestId('block-mirror')).toBeVisible();
+    await page.getByTestId('block-mirror').click();          // twin ON (persisted)
+    await expect(page.getByTestId('block-mirror')).toContainText('twin ON');
+    await setDrawer(page, false);
+
+    const before = (await blocksOf(page)).length;
+    const canvas = page.getByTestId('canvas');
+    const box = (await canvas.boundingBox())!;
+    for (const [fx, fy] of [[0.5, 0.62], [0.5, 0.55], [0.5, 0.68], [0.45, 0.6]]) {
+      await canvas.click({ position: { x: box.width * fx, y: box.height * fy } });
+      await page.waitForTimeout(300);
+      if ((await blocksOf(page)).length > before) break;
+    }
+    const after = await blocksOf(page);
+    expect(after.length, 'ONE click placed the block AND its twin').toBe(before + 2);
+    const [self, twin] = after.slice(-2);
+    // twin footprint: [c, c+size+1) mirrored to [10−c−size, 11−c) about x = 0
+    expect(cellX(twin!)).toBe(10 - cellX(self!) - self!.size_x);
+    expect(twin!.size_x).toBe(self!.size_x);
+    expect(twin!.type).not.toBe(255);
+    // mirror is a closed involution on the placed type
+    await setDrawer(page, true);
+    await expect(page.getByTestId('block-edit')).toBeVisible();
+  });
+
+  test('catalog parts: the held part lands with a mirrored twin component', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('gallery-new').click();
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
+    await page.getByTestId('mode-edit').click();
+    await setDrawer(page, true);
+    await page.getByTestId('mode-blocks').click();           // flip the shared twin switch
+    await page.getByTestId('block-mirror').click();
+    await page.getByTestId('mode-edit').click();
+    await page.getByTestId('ltab-catalog').click();
+    await page.getByTestId('filter').fill('smallwheel');
+    await page.getByTestId('catalog-item').first().click();
+    await expect(page.getByTestId('place-hint')).toContainText('SmallWheel');
+    await setDrawer(page, false);
+
+    const before = (await compsOf(page)).length;
+    const canvas = page.getByTestId('canvas');
+    const box = (await canvas.boundingBox())!;
+    for (const [fx, fy] of [[0.5, 0.62], [0.5, 0.55], [0.5, 0.68], [0.45, 0.6]]) {
+      await canvas.click({ position: { x: box.width * fx, y: box.height * fy } });
+      await page.waitForTimeout(350);
+      if ((await compsOf(page)).length > before) break;
+    }
+    const after = await compsOf(page);
+    expect(after.length, 'ONE click placed the part AND its twin').toBe(before + 2);
+    const a = after[after.length - 2]!, b = after[after.length - 1]!;
+    expect(a.type).toBe('SmallWheel');
+    expect(b.type).toBe('SmallWheel');
+    // the twin sits at the MIRRORED position (⇄ mask-bit-1 geometry)
+    expect(b.position.x).toBeCloseTo(-a.position.x, 3);
+    expect(b.position.y).toBeCloseTo(a.position.y, 3);
+    expect(b.position.z).toBeCloseTo(a.position.z, 3);
+  });
+});

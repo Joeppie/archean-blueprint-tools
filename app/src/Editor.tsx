@@ -40,6 +40,10 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   const [brush, setBrush] = useState<Brush>({ type: 0, sx: 0, sy: 0, sz: 0, slot: 4 });
   const [blockTool, setBlockTool] = useState<'place' | 'select'>('place');
   const [blockSub, setBlockSub] = useState<'blocks' | 'tris'>('blocks');
+  // ⇄ mirrored placement (blocks AND catalog parts): the twin lands at the
+  // x-flipped cell/position about file x = 0 — the game editor's mirror tool
+  const [mirrorPlace, setMirrorPlace] = useState(() => localStorage.getItem('archean-app-plsym') === '1');
+  useEffect(() => { localStorage.setItem('archean-app-plsym', mirrorPlace ? '1' : '0'); }, [mirrorPlace]);
   const [triDraft, setTriDraft] = useState<number[][]>([]);
   const [triSel, setTriSel] = useState(-1);
   const [triBrush, setTriBrush] = useState<number[]>([51, 51, 51, 51, 51]);
@@ -235,9 +239,9 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     const r = e.pickCell(clientX, clientY);
     if (!r) return;
     if (blockTool === 'select') { setBlockSel(r.bi >= 0 ? r.bi : -1); return; }
-    if (r.bi >= 0) { setBlockSel(placeBlock(ctx, r.cell, brush)); sceneChanged(); }
+    if (r.bi >= 0) { setBlockSel(placeBlock(ctx, r.cell, brush, mirrorPlace)); sceneChanged(); }
     else setBlockSel(-1);
-  }, [blockTool, blockSub, brush, triDraft, triBrush, sceneChanged]);
+  }, [blockTool, blockSub, brush, mirrorPlace, triDraft, triBrush, sceneChanged]);
 
   /** CATALOG placement (KSP part pickup): land the HELD type at the picked
    *  surface — bp + doc together, then the debounced scene reload; the part
@@ -250,13 +254,23 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     const p = e.pickPlacePoint(clientX, clientY);
     if (!p) return;
     setPlacing(null);
-    const comp = newComponent(placing, e.manifest?.[placing]?.module ?? 'ARCHEAN_general', p);
+    const type = placing;
+    const module = e.manifest?.[type]?.module ?? 'ARCHEAN_general';
+    const comp = newComponent(type, module, p);
     ctx.bp.data.components.push(comp as never);
     const at = ctx.bp.data.components.length - 1;
     docArrayInsert(ctx.doc, ['data', 'components'], at, docFromValue(comp));
+    if (mirrorPlace) {
+      // ⇄ twin: mirrored POSITION, same orientation — exactly the geometry
+      // sym.ts indexes (mask bit 1), so the pair co-selects and every later
+      // edit propagates through the established twin path.
+      const twin = newComponent(type, module, [-p[0], p[1], p[2]]);
+      ctx.bp.data.components.push(twin as never);
+      docArrayInsert(ctx.doc, ['data', 'components'], ctx.bp.data.components.length - 1, docFromValue(twin));
+    }
     sceneChanged();
     setTimeout(() => engineRef.current?.select(at), 350);
-  }, [placing, sceneChanged]);
+  }, [placing, mirrorPlace, sceneChanged]);
 
   const setReal = useCallback((on: boolean) => {
     setRealModels(on);
@@ -322,6 +336,13 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
             {t === 'place' ? '✚ Place' : '▣ Select'}
           </button>
         ))}
+        {blockSub === 'blocks' && blockTool === 'place' && (
+          <button data-testid="block-mirror" title="⇄ also place the x-mirrored twin (blocks AND catalog parts)"
+            aria-pressed={mirrorPlace} onClick={() => setMirrorPlace(m => !m)}
+            className={`ksp-btn ml-auto px-2 py-[3px] text-[11px] ${mirrorPlace ? 'on' : ''}`}>
+            ⇄ {mirrorPlace ? 'twin ON' : 'twin off'}
+          </button>
+        )}
       </div>
       {blockSub === 'tris' ? triPanel : (
         <BlockPanel engine={engine} ctx={ctxRef.current} bp={bp!} blockSel={blockSel}
