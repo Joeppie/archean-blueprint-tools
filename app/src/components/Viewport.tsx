@@ -23,7 +23,7 @@ declare global {
 let atlasP: Promise<ModelAtlas | null> | null = null;
 const getAtlas = (): Promise<ModelAtlas | null> => (atlasP ??= openAtlas());
 
-export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockPick }: {
+export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockPick, placing = null, onPlace, onManifest }: {
   bp: Blueprint | null;
   onPick: (h: PickHit) => void;
   onEngine?: (e: Engine | null) => void;
@@ -31,6 +31,12 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockP
    *  only belongs to Edit */
   mode?: 'view' | 'edit' | 'blocks' | 'wire' | 'flight';
   onBlockPick?: (clientX: number, clientY: number) => void;
+  /** KSP part placement: a held catalog type — the next canvas click
+   *  places it at the picked surface instead of selecting */
+  placing?: string | null;
+  onPlace?: (clientX: number, clientY: number) => void;
+  /** game manifest once the model atlas is open (drives the Catalog tab) */
+  onManifest?: (m: Record<string, { mass: number; module: string }> | null) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<Engine | null>(null);
@@ -61,9 +67,10 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockP
     (async () => {
       const atlas = await getAtlas();
       if (!dead) engineRef.current?.load(bp, atlas);
+      if (!dead) onManifest?.(atlas?.manifest ?? null);
     })().catch(console.error);
     return () => { dead = true; };
-  }, [bp]);
+  }, [bp, onManifest]);
 
   // DELIBERATE press picks (PERF.md: one raycast per click, none during
   // orbit): pointerdown records, pointerup <4px moves select-and-fly,
@@ -89,6 +96,7 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockP
   const pickClick = (e: React.PointerEvent) => {
     const engine = engineRef.current;
     if (!engine) return;
+    if (placing) { onPlace?.(e.clientX, e.clientY); return; }   // KSP place: no select
     if (mode === 'blocks') { onBlockPick?.(e.clientX, e.clientY); return; }
     const hit = engine.pickAt(e.clientX, e.clientY);
     onPick(hit);
@@ -113,11 +121,11 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockP
         }} />
       {widget && (
         <div data-testid="modebox"
-          className="absolute z-20 flex -translate-x-1/2 gap-1 rounded-lg border border-white/15 bg-black/80 p-1 backdrop-blur"
+          className="ksp-win absolute z-20 flex -translate-x-1/2 gap-1 rounded p-1"
           style={{ left: widget.x, top: Math.max(8, widget.y - 48) }}>
           {([['off', '⊘', 'hide gizmo'], ['translate', '✥', 'move'], ['rotate', '⟳', 'rotate']] as const).map(([m, ic, t]) => (
             <button key={m} title={t} data-testid={`mode-${m}`} onClick={() => setMode(m)}
-              className={`h-8 w-9 rounded text-[15px] leading-none ${gmode === m ? 'bg-accent/30 text-accent' : 'text-ink hover:bg-white/10'}`}>
+              className={`ksp-btn grid h-8 w-9 place-items-center text-[15px] leading-none ${gmode === m ? 'on' : ''}`}>
               {ic}
             </button>
           ))}
@@ -125,8 +133,8 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockP
               off OR the selected pair drifted apart (the >5 cm auto-disable) */}
           <button title="move mirrored twins (⇄)" data-testid="mode-sym"
             onClick={() => { const e = engineRef.current; if (e) e.setSymOn(!e.symState().on); setSymTick(t => t + 1); }}
-            className={`h-8 w-9 rounded text-[15px] leading-none ${
-              engineRef.current?.symState().active ? 'bg-accent/30 text-accent' : 'text-ink line-through opacity-60 hover:bg-white/10'}`}>
+            className={`ksp-btn grid h-8 w-9 place-items-center text-[15px] leading-none ${
+              engineRef.current?.symState().active ? 'on' : 'line-through opacity-60'}`}>
             ⇄
           </button>
         </div>
@@ -159,6 +167,6 @@ function StatsStrip({ engine, bp }: { engine: { current: Engine | null }; bp: Bl
     return () => cancelAnimationFrame(raf);
   }, [bp, engine]);
   return <p data-testid="scene-stats" ref={ref}
-    className="pointer-events-none absolute bottom-2 left-3 max-w-[calc(100%-1.5rem)] truncate rounded
+    className="pointer-events-none absolute left-3 top-2 max-w-[calc(100%-1.5rem)] truncate rounded
                bg-black/50 px-2 py-1 text-[11px] text-ink-dim" />;
 }

@@ -185,6 +185,9 @@ export class Engine {
   private hl = new Highlight(this.scene);
   onSelection: ((sel: { ci: number; sub: number }) => void) | null = null;
   private fly: { from: Vector3; to: Vector3; t0: number } | null = null;
+  /** last fit() framing — the KSP camera-cluster presets pivot on this */
+  private frameC: Vector3 | null = null;
+  private frameD = 3.6;
 
   // ------------------------------------------------------------ gizmo (P3+)
   /** Blender-style move/rotate widget on the selection (legacy v0.150+):
@@ -878,6 +881,7 @@ export class Engine {
       (this.scene.fog as { near: number }).near = Math.max(30, r * 2.5);
       (this.scene.fog as { far: number }).far = Math.max(80, r * 7);
     }
+    this.frameC = c.clone(); this.frameD = d;      // presets ride this framing
     this.camera.lookAt(c);
     this.controls?.update();
   }
@@ -1297,6 +1301,31 @@ export class Engine {
     this.invalidate();
   }
 
+  /** KSP camera-cluster presets: 'fit' re-applies the load framing;
+   * top/front/side snap the eye onto an axis through the framed centre at
+   * the fit distance (a hair of tilt keeps OrbitControls' up-vector sane).
+   * View space: nose = −z, up = +y, right = +x. */
+  viewPreset(k: 'fit' | 'top' | 'front' | 'side') {
+    if (!this.controls || !this.frameC) return;
+    const c = this.frameC, d = Math.max(this.frameD, 3.6);
+    const p =
+      k === 'fit' ? new Vector3(c.x + d * 0.6, c.y + Math.max(d * 0.34, 1.4), c.z + d * 0.72)
+        : k === 'top' ? new Vector3(c.x, c.y + d, c.z + d * 0.002)
+          : k === 'front' ? new Vector3(c.x, c.y + d * 0.002, c.z - d)
+            : new Vector3(c.x + d, c.y + d * 0.002, c.z);
+    this.fly = null;
+    this.camera.position.copy(p);
+    this.controls.target.copy(c);
+    this.camera.lookAt(c);
+    this.controls.update();
+    this.invalidate();
+  }
+  /** eye position — the camera-preset e2e pins */
+  camPos(): [number, number, number] {
+    const p = this.camera.position;
+    return [p.x, p.y, p.z];
+  }
+
   // -------------------------------------------------------------- gizmo ops
 
   setGizmoEnabled(on: boolean) {
@@ -1713,6 +1742,34 @@ export class Engine {
     return null;
   }
   get manifest() { return this.atlasRef?.manifest ?? null; }
+
+  /** PLACE mode (KSP part pickup): the surface point under the cursor in
+   *  FILE space — same view→file map as pickCell. Any visible hull/part/
+   *  subgrid/ground surface counts; the point rides the face normal by a
+   *  hair so the new part sits ON the surface it was clicked on. */
+  pickPlacePoint(clientX: number, clientY: number): [number, number, number] | null {
+    const c = this.renderer?.domElement as HTMLCanvasElement | null;
+    if (!c || !this.bp) return null;
+    const rect = c.getBoundingClientRect();
+    const ndc = new Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+    const ray = new Raycaster();
+    ray.setFromCamera(ndc, this.camera);
+    const hits = ray.intersectObjects([this.root, this.subGroup], true);
+    for (const h of hits) {
+      let o: Object3D | null = h.object;
+      while (o && !o.userData.kind) o = o.parent;
+      const kind = o?.userData.kind as Kind | undefined;
+      if (kind !== 'block' && kind !== 'comp' && kind !== 'sub' && kind !== 'ground') continue;
+      const n = h.face
+        ? new Vector3(h.face.normal.x, h.face.normal.y, -h.face.normal.z)
+        : new Vector3(0, 1, 0);
+      const px = h.point.x + n.x * 0.01 - this.moff.x;
+      const py = h.point.y + n.y * 0.01 - this.moff.y;
+      const pz = h.point.z + n.z * 0.01 - this.moff.z;
+      return [px, py, -pz];
+    }
+    return null;
+  }
   /** test/UI hooks: world-ish VIEW pose (pre-moff, file-convention friendly) */
   compViewPos(ci: number): Vec3D | null {
     const c = this.bp?.data.components[ci];

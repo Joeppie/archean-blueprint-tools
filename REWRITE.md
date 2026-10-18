@@ -223,6 +223,26 @@ new build dep, kept inside `app/`).
   46 pass / 18 desktop-only skips ×2 consecutive runs (config workers
   capped at 3 — the engine-heavy suite + lazy Editor chunk starved rAF at
   6 parallel on this box).
+- **KSP-VAB REWORK — merged from the sibling session (fc6f4bd line)**:
+  a second OpenCode worktree (`mighty-nebula`) developed THREE commits on
+  the same base while the mobile/surge line ran on `main`: parts panel
+  docked LEFT with CATALOG (icon tiles + mass, searchable, hold-a-part →
+  click-a-surface placement via engine.pickPlacePoint + pure newComponent),
+  StaticInfo mass/CoM black box bottom-left, camera-preset cluster
+  bottom-right (engine.viewPreset fit/top/front/side), KSP skin (ksp-btn /
+  ksp-win / ksp-label in index.css), and crafts.ts: blueprints download
+  ONLY on open, streamed byte-progress "Receiving blueprint" overlay,
+  IndexedDB cache (cached = zero network; File ▾ Refresh forces). The
+  merge re-adapted it to main's structure: their App-inline Editor moved
+  into the LAZY Editor.tsx chunk (gallery still ships no three.js), the
+  mobile drawer backdrop + ✕ re-landed on the LEFT aside, TopBar keeps
+  their KSP skin with the mode bar wrapping to row two on phones, and the
+  Panel shell takes their Parts-first order with my min-height guard.
+  Both lines independently invented E2E_PORT (port-collision protection) —
+  theirs kept, plus the workers:3 cap. Gates: vitest 142/142 (their
+  crafts.test included), tsc strict clean, Playwright 58 pass / 18
+  desktop-only skips (their download/place specs + the surge/label/mobile
+  pins green together).
   Remaining gaps (next): aero/wind/flow/thrust/seal + flight UI, hull
   element list, streamlines/windsock HUD, P4 perf (BatchedMesh/?perf/wasm).
 - **P4 — perf**: BatchedMesh proxies, ?perf port, wasm benchmark of

@@ -1,11 +1,15 @@
-// Editor.tsx — the full-screen editing workspace (lazy chunk: the gallery
-// never loads three.js/the engine). Holds the raw-literal DOC + live bp, the
-// mode bar state and the save/open funnel; see App.tsx for the app shell.
+// Editor.tsx — the full-screen KSP-VAB editing workspace (lazy chunk: the
+// gallery never loads three.js/the engine). Viewport fills the window, the
+// parts panel docks LEFT (mobile: a drawer behind ⚙), STATIC INFO (mass &
+// CoM) floats bottom-left, the camera-preset cluster bottom-right. Blueprints
+// stream through crafts.ts (IndexedDB cache: a cached craft opens with zero
+// network; the KSP "receiving blueprint" overlay shows only on a real
+// download). Holds the raw-literal DOC + live bp; see App.tsx for the shell.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { craftName } from './gallery-catalog';
 import { DEFAULT_OPTS, type Engine, type PickHit, type ViewOptions } from './engine/scene';
 import Viewport from './components/Viewport';
-import Panel, { type EditApi } from './components/Panel';
+import Panel, { StaticInfo, type EditApi } from './components/Panel';
 import TopBar, { type Mode } from './components/TopBar';
 import { BlockPanel, FlightPanel, TriPanel, WirePanel, placeBlock, type Brush } from './components/ModePanels';
 import { cornerOf, triAt, triangleFromCorners } from './engine/tris';
@@ -15,9 +19,8 @@ import { makeCtx, resetComponent, setDataField, setOrientation, setPos, setCompF
   setCompColor, serializeSave, type EditCtx } from './engine/edit';
 import { makePipe } from './engine/wireops';
 import { normalizeDoc } from './engine/normalize';
-import { newCraftDoc } from './engine/newcraft';
-
-
+import { newCraftDoc, newComponent } from './engine/newcraft';
+import { loadCraft } from './crafts';
 
 export default function Editor({ craft, onBack }: { craft: string | null; onBack: () => void }) {
   const [bp, setBp] = useState<Blueprint | null>(null);
@@ -39,6 +42,14 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   const [triDraft, setTriDraft] = useState<number[][]>([]);
   const [triSel, setTriSel] = useState(-1);
   const [triBrush, setTriBrush] = useState<number[]>([51, 51, 51, 51, 51]);
+  // KSP part placement: the catalog type currently HELD (null = nothing)
+  const [placing, setPlacing] = useState<string | null>(null);
+  const [manifest, setManifest] = useState<Record<string, { mass: number; module: string }> | null>(null);
+  // blueprint download state (overlay): null = nothing in flight / cached
+  const [dl, setDl] = useState<{ frac: number | null; bytes: number } | null>(null);
+  const [dlErr, setDlErr] = useState(false);
+  const [retrySeq, setRetrySeq] = useState(0);
+  const forceRef = useRef(false);             // File ▾ Refresh: one-shot re-download
   const engineRef = useRef<Engine | null>(null);
   const ctxRef = useRef<EditCtx | null>(null);
   const dirtyRef = useRef(false);
@@ -47,14 +58,14 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // mobile: the panel is a drawer; desktop opens it by default
   const [panelOpen, setPanelOpen] = useState(() => window.innerWidth >= 768);
 
-  /** parse → v1→v2 NORMALIZE → doc+ctx → live bp. One funnel for fetch,
+  /** parse → v1→v2 NORMALIZE → doc+ctx → live bp. One funnel for download,
    *  file-open, drag-drop and New craft. */
   const openText = useCallback((text: string) => {
     const d = parseDoc(text);
     normalizeDoc(d);                              // convert-on-open migration
     ctxRef.current = makeCtx(d, docValue(d) as Blueprint);
     dirtyRef.current = false;
-    setDirty(false); setSel({ ci: -1, sub: -1 }); setBlockSel(-1);
+    setDirty(false); setSel({ ci: -1, sub: -1 }); setBlockSel(-1); setPlacing(null);
     setBp(ctxRef.current.bp);
   }, []);
 
@@ -62,17 +73,20 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     setBp(null);
     if (!craft) { openText(emitNew()); return; }    // New craft (craft === null)
     let dead = false;
+    const force = forceRef.current; forceRef.current = false;
+    setDlErr(false);
     (async () => {
-      const res = await fetch(`/corpus/${craft}/blueprint.json`);
-      if (!res.ok || dead) return;
-      if (!dead) openText(await res.text());
+      const r = await loadCraft(craft, (frac, bytes) => { if (!dead) setDl({ frac, bytes }); }, force);
+      if (dead) return;
+      setDl(null);
+      if (!r) { setDlErr(true); return; }           // no cache + network failed
+      openText(r.text);                             // cache hit: no overlay, no network
     })().catch(console.error);
     return () => { dead = true; };
-  }, [craft, openText]);
+  }, [craft, openText, retrySeq]);
 
   const emitNew = () => {
-    // imported lazily to keep this component's top tidy; doc → text round
-    // trip through the SAME doc the editor then keeps
+    // doc → text round trip through the SAME doc the editor then keeps
     const d = newCraftDoc();
     return JSON.stringify(docValue(d));
   };
@@ -158,8 +172,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     f.text().then(openText).catch(console.error);
   }, [openText]);
 
-  // keyboard: g/o/h toggles, Ctrl+S save, Esc deselect, Del deletes the
-  // selected block (blocks mode)
+  // keyboard: g/o/h toggles, Ctrl+S save, Esc drops the HELD part else
+  // deselects (KSP pickup rule)
   const toggleOpt = useCallback((k: keyof ViewOptions, on: boolean) => {
     const e = engineRef.current;
     if (!e) return;
@@ -175,14 +189,17 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         const cur = engineRef.current?.getOptions();
         if (cur) toggleOpt(map[e.key]!, !cur[map[e.key]!]);
       }
-      if (e.key === 'Escape') { engineRef.current?.select(-1); setBlockSel(-1); }
+      if (e.key === 'Escape') {
+        if (placing) { setPlacing(null); return; }   // KSP: drop the HELD part first
+        engineRef.current?.select(-1); setBlockSel(-1);
+      }
       // NOTE: deleting a block goes through the BlockPanel button ONLY —
       // it mutates bp AND the doc together; a bare key must never touch bp
       // without the doc mirror.
     };
     addEventListener('keydown', h);
     return () => removeEventListener('keydown', h);
-  }, [save, toggleOpt]);
+  }, [save, toggleOpt, placing]);
 
   // blocks-mode canvas handling: place (brush) or select, via engine.pickCell
   const onBlockPick = useCallback((clientX: number, clientY: number) => {
@@ -215,6 +232,25 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     else setBlockSel(-1);
   }, [blockTool, blockSub, brush, triDraft, triBrush, sceneChanged]);
 
+  /** CATALOG placement (KSP part pickup): land the HELD type at the picked
+   *  surface — bp + doc together, then the debounced scene reload; the part
+   *  auto-selects once the fresh roots exist (load() clears the selection,
+   *  so the select rides just behind the 180 ms reload). Like KSP, one
+   *  click places ONE part and the hand empties. */
+  const onPlacePoint = useCallback((clientX: number, clientY: number) => {
+    const e = engineRef.current, ctx = ctxRef.current;
+    if (!e || !ctx || !placing) return;
+    const p = e.pickPlacePoint(clientX, clientY);
+    if (!p) return;
+    setPlacing(null);
+    const comp = newComponent(placing, e.manifest?.[placing]?.module ?? 'ARCHEAN_general', p);
+    ctx.bp.data.components.push(comp as never);
+    const at = ctx.bp.data.components.length - 1;
+    docArrayInsert(ctx.doc, ['data', 'components'], at, docFromValue(comp));
+    sceneChanged();
+    setTimeout(() => engineRef.current?.select(at), 350);
+  }, [placing, sceneChanged]);
+
   const setReal = useCallback((on: boolean) => {
     setRealModels(on);
     engineRef.current?.setRealModels(on);
@@ -244,7 +280,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       <div className="flex gap-1 px-3 pt-2">
         {(['blocks', 'tris'] as const).map(t => (
           <button key={t} data-testid={`blocksub-${t}`} onClick={() => { setBlockSub(t); setTriDraft([]); }}
-            className={`rounded px-2 py-[3px] text-[11px] ${blockSub === t ? 'bg-accent/25 text-accent' : 'bg-panel2 text-ink-dim hover:text-ink'}`}>
+            className={`ksp-btn px-2 py-[3px] text-[11px] ${blockSub === t ? 'on' : ''}`}>
             {t === 'blocks' ? '▤ Blocks' : '▵ Triangles'}
           </button>
         ))}
@@ -252,7 +288,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       <div className="flex gap-1 px-3 pt-1">
         {(['place', 'select'] as const).map(t => (
           <button key={t} data-testid={`blocktool-${t}`} onClick={() => setBlockTool(t)}
-            className={`rounded px-2 py-[3px] text-[11px] ${blockTool === t ? 'bg-accent/25 text-accent' : 'bg-panel2 text-ink-dim hover:text-ink'}`}>
+            className={`ksp-btn px-2 py-[3px] text-[11px] ${blockTool === t ? 'on' : ''}`}>
             {t === 'place' ? '✚ Place' : '▣ Select'}
           </button>
         ))}
@@ -292,13 +328,14 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       }}>
       <TopBar mode={mode} onMode={setMode} dirty={dirty} title={name} craftId={craft}
         onNew={() => { ctxRef.current = null; setBp(null); openText(emitNew()); }}
-        onOpen={openFile} onSave={save} onClose={onBack} onBack={onBack}>
+        onOpen={openFile} onSave={save} onClose={onBack} onBack={onBack}
+        onRefresh={craft ? () => { forceRef.current = true; setRetrySeq(s => s + 1); } : undefined}>
         <button data-testid="save-btn" onClick={() => save()}
-          className={`shrink-0 rounded px-2.5 py-1 text-[12px] ${dirty ? 'bg-accent text-black' : 'bg-panel2 text-ink-dim hover:text-ink'}`}>
+          className={`ksp-btn shrink-0 px-2.5 py-1 text-[12px] ${dirty ? 'on font-semibold' : 'text-ink-dim'}`}>
           {dirty ? '● Save' : 'Save'}
         </button>
-        <button data-testid="toggle-panels" onClick={() => setPanelOpen(o => !o)}
-          className="shrink-0 rounded bg-panel2 px-2.5 py-1 text-[12px] text-ink hover:bg-white/10 hover:text-accent">
+        <button data-testid="toggle-panels" title="toggle the parts panel" onClick={() => setPanelOpen(o => !o)}
+          className="ksp-btn shrink-0 px-2.5 py-1 text-[12px] hover:text-accent">
           ⚙
         </button>
       </TopBar>
@@ -306,49 +343,112 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         data-testid="file-input"
         onChange={e => { const f = e.target.files?.[0]; if (f) readFile(f); e.target.value = ''; }} />
       <div className="relative flex min-h-0 flex-1">
-        <main className="relative min-w-0 flex-1">
-          <Viewport bp={bp} onPick={setHit} onEngine={onEngine}
-            mode={mode} onBlockPick={onBlockPick} />
-          {bp && hit && hit.kind !== 'none' && mode !== 'blocks' && (
-            <PickChip hit={hit} bp={bp} />
-          )}
-        </main>
+        {/* KSP layout: the parts list lives on the LEFT (mobile: drawer —
+            tap the dimmed viewport to dismiss, ✕ in the drawer header) */}
         {panelOpen && (
           <>
-            {/* mobile drawer: tap the dimmed canvas to dismiss (desktop keeps
-                the static sidebar with no overlay) */}
             <div data-testid="panel-backdrop" onClick={() => setPanelOpen(false)}
               className="absolute inset-0 z-[5] bg-black/40 md:hidden" />
             <aside data-testid="panel-aside"
-              className="absolute inset-y-0 right-0 z-10 flex w-[300px] max-w-[85vw] flex-col border-l border-white/10
+              className="absolute inset-y-0 left-0 z-10 flex w-[300px] max-w-[85vw] flex-col border-r border-white/10
                          shadow-2xl md:static md:z-auto md:shadow-none">
               <div className="flex h-9 shrink-0 items-center justify-between border-b border-white/10 px-3
                               md:hidden">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-dim">Panel</span>
                 <button data-testid="panel-close" onClick={() => setPanelOpen(false)}
                   aria-label="close panel"
-                  className="rounded bg-panel2 px-2.5 py-1 text-[13px] text-ink hover:bg-white/10 hover:text-accent">
+                  className="ksp-btn rounded px-2.5 py-1 text-[13px] text-ink hover:text-accent">
                   ✕
                 </button>
+                <span className="ksp-label text-[11px] text-ink-dim">Parts</span>
               </div>
               <div className="flex min-h-0 flex-1 flex-col">
-              {bp && ctxRef.current && (
-                <Panel
-                  engine={engine} ctx={ctxRef.current} bp={bp} sel={sel} rev={rev}
-                  opts={opts} hullOpacity={hullOpacity} onHullOpacity={setHullOp}
-                  realModels={realModels} onRealModels={setReal}
-                  gizmoOn={gizmoOn && mode === 'edit'} onGizmo={setGizmo}
-                  hiDef={hiDef} onHiDef={onHiDef}
-                  onOpt={toggleOpt}
-                  onSelect={(ci, fly) => { engineRef.current?.select(ci); if (fly) engineRef.current?.flyTo(ci); }}
-                  onSelectSub={bi => engineRef.current?.selectSub(bi)}
-                  edits={edits} inspKey={inspKey} markDirty={markDirty}
-                  readOnly={mode === 'view'}
-                  bottom={modePanel}
-                />
-              )}
+                {bp && ctxRef.current && (
+                  <Panel
+                    engine={engine} ctx={ctxRef.current} bp={bp} sel={sel} rev={rev}
+                    opts={opts} hullOpacity={hullOpacity} onHullOpacity={setHullOp}
+                    realModels={realModels} onRealModels={setReal}
+                    gizmoOn={gizmoOn && mode === 'edit'} onGizmo={setGizmo}
+                    hiDef={hiDef} onHiDef={onHiDef}
+                    onOpt={toggleOpt}
+                    onSelect={(ci, fly) => { engineRef.current?.select(ci); if (fly) engineRef.current?.flyTo(ci); }}
+                    onSelectSub={bi => engineRef.current?.selectSub(bi)}
+                    edits={edits} inspKey={inspKey} markDirty={markDirty}
+                    readOnly={mode === 'view'}
+                    bottom={modePanel}
+                    manifest={manifest}
+                    placingType={placing}
+                    onPlaceType={(t) => { setPlacing(t); if (t && mode === 'view') setMode('edit'); }}
+                  />
+                )}
               </div>
             </aside>
+          </>
+        )}
+        <main className="relative min-w-0 flex-1">
+          <Viewport bp={bp} onPick={setHit} onEngine={onEngine}
+            mode={mode} onBlockPick={onBlockPick}
+            placing={mode === 'edit' ? placing : null} onPlace={onPlacePoint}
+            onManifest={setManifest} />
+          {placing && mode === 'edit' && (
+            <div data-testid="place-hint"
+              className="ksp-win ksp-label pointer-events-none absolute left-1/2 top-2 z-20 -translate-x-1/2
+                         rounded px-3 py-1 text-[11px] text-accent">
+              holding <b>{placing}</b> — click a surface · Esc drops it
+            </div>
+          )}
+          {bp && hit && hit.kind !== 'none' && mode !== 'blocks' && (
+            <PickChip hit={hit} bp={bp} />
+          )}
+          {/* KSP bottom-left: the STATIC INFO black box (mass & CoM) */}
+          {bp && <div className="absolute bottom-2 left-3 z-[5]"><StaticInfo engine={engine} rev={rev} /></div>}
+          {/* KSP bottom-right: the camera cluster over the viewport */}
+          <CameraCluster engine={engine} />
+        </main>
+        {(dl || dlErr) && (
+          <DownloadOverlay name={name} dl={dl} err={dlErr}
+            onRetry={() => { forceRef.current = true; setRetrySeq(s => s + 1); }}
+            onBack={onBack} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** KSP-style "receiving blueprint" download overlay: shown ONLY while an
+ *  actual download runs (cached crafts open instantly, no overlay, no
+ *  network) — bevelled window, progress bar, percent + KiB; error state
+ *  offers Retry / Gallery. */
+function DownloadOverlay(p: { name: string; dl: { frac: number | null; bytes: number } | null;
+  err: boolean; onRetry: () => void; onBack: () => void }) {
+  const pct = p.dl?.frac != null ? Math.round(p.dl.frac * 100) : null;
+  return (
+    <div data-testid="load-overlay" className="absolute inset-0 z-40 grid place-items-center bg-black/50">
+      <div className="ksp-win w-[340px] max-w-[85vw] rounded-lg px-4 py-4 text-center">
+        <div className="ksp-label mb-1 text-[12px] text-accent">
+          {p.err ? 'Blueprint download failed' : 'Receiving blueprint'}</div>
+        <div className="truncate text-[13px] font-semibold text-ink">{p.name}</div>
+        {p.err ? (
+          <>
+            <div className="mt-2 text-[11px] leading-snug text-ink-dim">
+              This craft is not in the local cache and could not be downloaded.</div>
+            <div className="mt-3 flex justify-center gap-2">
+              <button data-testid="load-retry" className="ksp-btn on px-3 py-1 text-[12px]" onClick={p.onRetry}>Retry</button>
+              <button data-testid="load-back" className="ksp-btn px-3 py-1 text-[12px]" onClick={p.onBack}>Gallery</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="mt-3 h-3 overflow-hidden rounded border border-white/20 bg-black/50">
+              <div data-testid="load-bar"
+                className={`h-full bg-accent/80 ${p.dl && pct === null ? 'w-1/3 animate-pulse' : 'transition-[width] duration-150'}`}
+                style={p.dl && pct !== null ? { width: `${pct}%` } : undefined} />
+            </div>
+            <div data-testid="load-pct" className="mt-1.5 text-[11px] tabular-nums text-ink-dim">
+              {!p.dl ? 'checking cache…'
+                : p.dl.bytes === 0 ? 'receiving…'
+                : pct !== null ? `${pct}% · ${(p.dl.bytes / 1024).toFixed(0)} KiB`
+                : `${(p.dl.bytes / 1024).toFixed(0)} KiB \u2026`}
+            </div>
           </>
         )}
       </div>
@@ -356,18 +456,39 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   );
 }
 
-/** picked-part chip: bottom sheet on phones, floating card on desktop */
+/** KSP-style camera presets (the square-button cluster bottom-right) */
+const CAMS: ['fit' | 'top' | 'front' | 'side', string, string][] = [
+  ['fit', '⌂', 'frame craft'], ['top', '⊞', 'top view'],
+  ['front', '⊏', 'front (nose) view'], ['side', '⊐', 'side view'],
+];
+function CameraCluster({ engine }: { engine: Engine | null }) {
+  return (
+    <div data-testid="cam-cluster"
+      className="absolute bottom-2 right-2 z-[5] flex flex-col gap-1">
+      {CAMS.map(([k, ic, t]) => (
+        <button key={k} data-testid={`cam-${k}`} title={t}
+          className="ksp-btn grid h-8 w-9 place-items-center text-[14px] leading-none"
+          onClick={() => engine?.viewPreset(k)}>
+          {ic}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** picked-part chip: bottom sheet on phones (above the static-info box),
+ *  KSP part-tooltip card on desktop */
 function PickChip({ hit, bp }: { hit: PickHit; bp: Blueprint }) {
   const comp = hit.kind === 'comp' && hit.ci != null ? bp.data.components[hit.ci] : null;
   return (
     <div data-testid="pick-info"
-      className="pointer-events-none absolute inset-x-2 bottom-12 rounded-lg border border-gold/30
-                 bg-black/70 px-3 py-2 text-[12px] text-ink backdrop-blur
-                 md:inset-x-auto md:bottom-auto md:right-3 md:top-3 md:max-w-[320px]">
-      picked: <span className="text-gold">{hit.kind}</span>
-      {comp && <> · <span className="text-accent">{comp.type}</span>
+      className="ksp-win pointer-events-none absolute inset-x-2 bottom-[132px] rounded px-3 py-2 text-[12px]
+                 text-ink md:inset-x-auto md:bottom-auto md:right-3 md:top-3 md:max-w-[320px]">
+      <span className="ksp-label text-[10px] text-ink-dim">picked</span>{' '}
+      <span className="text-gold">{hit.kind}</span>
+      {comp && <> · <span className="ksp-label font-semibold text-accent">{comp.type}</span>
         {typeof comp.name === 'string' && comp.name ? <span className="text-ink-dim"> "{comp.name}"</span> : null}</>}
-      {hit.point && <span className="text-ink-dim"> @ {hit.point.map(n => n.toFixed(2)).join(', ')}</span>}
+      {hit.point && <div className="tabular-nums text-[10px] text-ink-dim">@ {hit.point.map(n => n.toFixed(2)).join(', ')}</div>}
     </div>
   );
 }

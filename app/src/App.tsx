@@ -1,18 +1,21 @@
 // App.tsx — two-stage SPA: craft GALLERY (legacy index-page style) →
-// full-screen EDITOR with desktop-app chrome (File menu, New craft, the
-// View / Edit / Blocks / Wire / Flight mode bar). ?craft=<id> deep-links
-// straight into the editor. The catalog is STATICALLY COMPILED at build
-// time (virtual:gallery — AGENTS § Blueprint folder), so the gallery paints
-// with zero runtime fetches. The EDITOR is a LAZY chunk: the gallery page
-// ships only React + the card grid — three.js and the whole engine load on
-// the FIRST craft open (mobile initial paint stays light).
+// full-screen EDITOR laid out KSP-VAB-style: a viewport that fills the
+// window, the PARTS panel docked LEFT (mobile: drawer), the STATIC INFO
+// (mass/CoM) black box bottom-left, the camera-preset cluster bottom-right
+// and the File menu + View / Edit / Blocks / Wire / Flight mode tiles in a
+// thin toolbar. ?craft=<id> deep-links straight into the editor. The
+// catalog is STATICALLY COMPILED at build time (virtual:gallery — AGENTS
+// § Blueprint folder), so the gallery paints with zero runtime fetches.
+// The EDITOR is a LAZY chunk: the gallery page ships only React + the card
+// grid — three.js and the whole engine load on the FIRST craft open.
 //
 // EDITING: the blueprint lives in a raw-literal DOC (doc.ts) plus a plain
 // live view of it. v1 files are NORMALIZED to the v2 dialect at open time
 // (normalize.ts — the migration the user asked for: convert first, then the
 // app speaks one format). Every write goes through engine/edit.ts + the
 // pure mode modules, and SAVE re-emits the doc byte-identically except for
-// the edited fields.
+// the edited fields. Blueprints DOWNLOAD only on demand and cache in
+// IndexedDB (crafts.ts) — a cached craft opens with zero network.
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { GALLERY } from './gallery-catalog';
 

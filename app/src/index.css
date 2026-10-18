@@ -1,15 +1,44 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-/* DevTools-style dark theme tokens (shadcn convention, Tailwind 4 @theme) */
+/* KSP-editor theme (Tailwind 4 @theme): the warm charcoal/tan of the
+   Kerbal Space Program VAB chrome — dark olive-charcoal panels, parchment
+   ink, the pale-blue glow KSP uses for active buttons. Token names are
+   unchanged so every component keeps its classes; only the values move. */
 @theme {
-  --color-panel: #17191f;
-  --color-panel2: #1d2026;
-  --color-ink: #cfe3ee;
-  --color-ink-dim: #8aa0ae;
-  --color-accent: #7dffcf;
+  --color-panel: #1f221b;
+  --color-panel2: #2a2e25;
+  --color-ink: #d9d4bd;
+  --color-ink-dim: #8f8a6f;
+  --color-accent: #a9d7f0;
   --color-gold: #ffd75d;
 }
 
 html, body, #root { height: 100%; }
-body { background: #0e1013; color: var(--color-ink); font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+body { background: #14160f; color: var(--color-ink); font: 13px/1.45 'Arial Narrow', 'Roboto Condensed', 'Liberation Sans Narrow', ui-sans-serif, system-ui, sans-serif; }
+
+/* KSP-style controls: dark bevelled buttons with a hover/active blue glow,
+   condensed uppercase labels, translucent floating windows. */
+.ksp-btn {
+  background: linear-gradient(#2c3027, #1b1e17);
+  border: 1px solid rgba(217, 212, 189, .16);
+  border-radius: 4px;
+  color: var(--color-ink);
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .05);
+}
+.ksp-btn:hover { border-color: rgba(169, 215, 240, .55); box-shadow: 0 0 7px rgba(169, 215, 240, .22); color: #fff; }
+.ksp-btn.on {
+  background: linear-gradient(#3c4c55, #24313a);
+  border-color: rgba(169, 215, 240, .85);
+  color: #eef8ff;
+  box-shadow: 0 0 9px rgba(169, 215, 240, .35), inset 0 1px 0 rgba(255, 255, 255, .08);
+}
+.ksp-win {
+  background: rgba(23, 25, 19, .93);
+  border: 1px solid rgba(217, 212, 189, .22);
+  box-shadow: 0 2px 18px rgba(0, 0, 0, .6);
+  backdrop-filter: blur(5px);
+}
+.ksp-label { text-transform: uppercase; letter-spacing: .11em; }

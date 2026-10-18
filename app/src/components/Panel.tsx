@@ -1,9 +1,12 @@
-// Panel.tsx — the DevTools-style right sidebar (P3): view options, the
-// component list (by type / by subgrid tabs, collapsible groups, one search)
-// and the inspector (position/rotation sliders, comp.data rows, ⟲ reset) or
-// the subgrid panel (Contents + decoded masters + live joint sliders).
-// Editing writes flow through the EditApi (bp + doc via edit.ts) and the
-// Engine (live scene ride) — the React tree only ever reads file-space data.
+// Panel.tsx — the LEFT-side parts panel (KSP parts-list layout): the
+// component list leads (by type / by subgrid tabs = Categories/Subgrids,
+// collapsible groups, one search, icon tiles), the context window follows
+// (position/rotation sliders, comp.data rows, ⟲ reset) or the subgrid panel
+// (Contents + decoded masters + live joint sliders), and the view options
+// sit at the bottom. Editing writes flow through the EditApi (bp + doc via
+// edit.ts) and the Engine (live scene ride) — the React tree only ever
+// reads file-space data. Mass & CoM moved out: the StaticInfo KSP black
+// box floats over the viewport (App).
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Engine, ViewOptions } from '../engine/scene';
 import type { EditCtx } from '../engine/edit';
@@ -48,22 +51,35 @@ interface Props {
   readOnly?: boolean;
   /** mode workspaces (Blocks/Wire/Flight) replace the inspector section */
   bottom?: React.ReactNode;
+  /** game model manifest (drives the KSP-style parts CATALOG tab) */
+  manifest: Record<string, { mass: number; module: string }> | null;
+  /** type currently held for placement (KSP "holding a part") */
+  placingType: string | null;
+  onPlaceType: (t: string | null) => void;
 }
 
 // ------------------------------------------------------------- mass & CoM
-function MassCoM(p: { engine: Engine | null; rev: number }) {
+/** KSP "STATIC INFO" black box: uppercase tan labels, right-aligned values.
+ *  Lives as a viewport overlay (App), not in the sidebar — like the VAB's
+ *  Mass/Modules/Cost readout under the parts list. */
+export function StaticInfo(p: { engine: Engine | null; rev: number }) {
   const mm = p.engine?.massReport();
   if (!mm) return null;
   const fmt = (n: number, d = 2) => n.toLocaleString('en', { maximumFractionDigits: d });
   return (
-    <Sec title="Mass & center of mass" testid="massbox">
-      <div className="space-y-[2px] text-[11px] text-ink" data-testid="mass-report">
-        <div>declared <b>{fmt(mm.declared, 0)} kg</b> · computed {fmt(mm.total, 0)} kg</div>
-        <div>hull {fmt(mm.cells, 0)} cells × {fmt(mm.cellMass, 2)} kg · parts {fmt(mm.compSum, 0)} kg</div>
+    <div data-testid="massbox"
+      className="ksp-win pointer-events-none w-[250px] rounded px-2.5 py-1.5 text-[11px] text-ink">
+      <div className="ksp-label mb-1 border-b border-white/10 pb-[2px] text-[10px] text-ink-dim">
+        Static info</div>
+      <div className="space-y-[1px] leading-snug" data-testid="mass-report">
+        <div>declared <b className="float-right tabular-nums">{fmt(mm.declared, 0)} kg</b></div>
+        <div>computed <b className="float-right tabular-nums">{fmt(mm.total, 0)} kg</b></div>
+        <div className="text-ink-dim">hull {fmt(mm.cells, 0)} cells × {fmt(mm.cellMass, 2)} kg ·
+          parts {fmt(mm.compSum, 0)} kg</div>
         <div className="text-ink-dim">implied structural density ≈ {fmt(mm.density, 0)} kg/m³ (plausibility)</div>
-        <div>CoM ({fmt(mm.com[0])}, {fmt(mm.com[1])}, {fmt(mm.com[2])}) m <span className="text-ink-dim">raw</span></div>
+        <div>CoM <span className="float-right tabular-nums">({fmt(mm.com[0])}, {fmt(mm.com[1])}, {fmt(mm.com[2])}) m</span></div>
       </div>
-    </Sec>
+    </div>
   );
 }
 
@@ -118,7 +134,7 @@ function Row(p: {
 
 const Sec = (p: { title: string; children?: React.ReactNode; testid?: string }) => (
   <section className="border-t border-white/10 px-3 py-2" data-testid={p.testid}>
-    <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-ink-dim">{p.title}</h3>
+    <h3 className="ksp-label mb-1 text-[11px] font-semibold text-ink-dim">{p.title}</h3>
     {p.children}
   </section>
 );
@@ -161,7 +177,20 @@ function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHullOpaci
 const ALIAS = (c: BlueprintComponent) => (typeof c.alias === 'string' && c.alias) ||
   (typeof c.name === 'string' && c.name) || '';
 
-function CompList(p: { bp: Blueprint; sel: Props['sel']; onSelect: Props['onSelect']; onSelectSub: Props['onSelectSub'] }) {
+/** KSP parts-list flavour: every type gets a little icon tile — CamelCase
+ *  initials on a stable muted hue (hash of the type name). */
+const partCode = (t: string) =>
+  ((t.match(/[A-Z]/g) ?? []).slice(0, 2).join('') || t.slice(0, 1)).toUpperCase();
+const tileHue = (t: string) => {
+  let h = 0;
+  for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) % 360;
+  return h;
+};
+
+function CompList(p: { bp: Blueprint; rev: number; sel: Props['sel'];
+  onSelect: Props['onSelect']; onSelectSub: Props['onSelectSub'];
+  manifest: Props['manifest']; placingType: Props['placingType'];
+  onPlaceType: Props['onPlaceType'] }) {
   const [tab, setTab] = useState(() => localStorage.getItem('archean-app-list-tab') || 'type');
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<Set<string>>(new Set());
@@ -224,7 +253,20 @@ function CompList(p: { bp: Blueprint; sel: Props['sel']; onSelect: Props['onSele
           rows: rest.map(i => ({ kind: 'comp' as const, idx: i })) });
     }
     return secs;
-  }, [p.bp, tab, query]);
+    // p.rev is DELIBERATE: bp is mutated in place (edits keep the object
+    // identity), the rev counter is what invalidates this view of it
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.bp, p.rev, tab, query]);
+
+  // CATALOG tab rows: every type the game ships (manifest), KSP parts-list
+  // style — click to HOLD the part, then click the craft to place it.
+  const catRows = useMemo(() => {
+    if (!p.manifest) return [];
+    return Object.keys(p.manifest)
+      .filter(t => t !== 'Build' && (!query
+        || t.toLowerCase().includes(query) || p.manifest![t]!.module.toLowerCase().includes(query)))
+      .sort();
+  }, [p.manifest, query]);
 
   // selection → open its group once, scroll it into view (legacy reveal)
   const revealed = useRef('');
@@ -243,22 +285,46 @@ function CompList(p: { bp: Blueprint; sel: Props['sel']; onSelect: Props['onSele
   }, [p.sel, tab, sections]);
 
   const rowCls = (sel: boolean) =>
-    `flex cursor-pointer gap-2 whitespace-nowrap rounded px-2 py-[1px] text-[12px] ${
-      sel ? 'bg-accent/25 text-accent' : 'text-ink hover:bg-white/5'}`;
+    `flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded px-2 py-[1px] text-[12px] ${
+      sel ? 'bg-accent/20 text-accent shadow-[inset_0_0_0_1px_rgba(169,215,240,.5)]' : 'text-ink hover:bg-white/5'}`;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-1 px-3 pt-2">
-        {(['type', 'sub'] as const).map(t => (
+      {/* KSP parts-list header: Categories | Subgrids | Catalog + search */}
+      <div className="flex items-center gap-[3px] px-3 pt-2">
+        {(['type', 'sub', 'catalog'] as const).map(t => (
           <button key={t} data-testid={`ltab-${t}`} onClick={() => switchTab(t)}
-            className={`rounded px-2 py-[3px] text-[11px] ${tab === t ? 'bg-accent/25 text-accent' : 'bg-panel2 text-ink-dim hover:text-ink'}`}>
-            {t === 'type' ? 'by type' : 'by subgrid'}
+            title={t === 'type' ? 'parts grouped by type' : t === 'sub' ? 'parts grouped by subgrid (Build)'
+              : 'the game part catalogue — click a part, then click the craft to place it'}
+            className={`ksp-btn px-2 py-[3px] text-[10px] ${tab === t ? 'on' : ''}`}>
+            {t === 'type' ? 'Categories' : t === 'sub' ? 'Subgrids' : 'Catalog'}
           </button>
         ))}
       </div>
-      <input value={q} data-testid="filter" placeholder="filter type or name…"
+      <input value={q} data-testid="filter" placeholder="Search parts…"
         onChange={e => setQ(e.target.value)}
-        className="mx-3 mt-1.5 rounded border border-white/10 bg-panel2 px-2 py-1 text-[12px] text-ink placeholder:text-ink-dim/60" />
+        className="mx-3 mt-1.5 rounded border border-white/15 bg-black/40 px-2 py-1 text-[12px] text-ink
+                   placeholder:text-ink-dim/60 focus:border-accent/60 focus:outline-none" />
+      {tab === 'catalog' ? (
+        <div data-testid="catalog-list" className="min-h-0 flex-1 overflow-y-auto px-1 py-1">
+          {!p.manifest && <div className="px-2 py-1 text-[11px] text-ink-dim">catalogue loading…</div>}
+          {catRows.map(t => (
+            <div key={t} data-testid="catalog-item" title={`hold a ${t} — then click a surface on the craft`}
+              className={rowCls(p.placingType === t)}
+              onClick={() => p.onPlaceType(p.placingType === t ? null : t)}>
+              <span
+                className="grid h-[16px] w-[16px] shrink-0 place-items-center rounded-[3px] border text-[8px] font-bold text-ink"
+                style={{ background: `hsl(${tileHue(t)} 20% 22%)`, borderColor: `hsl(${tileHue(t)} 24% 44%)` }}>
+                {partCode(t)}
+              </span>
+              <span className="min-w-0 flex-1 truncate">{t}</span>
+              <span className="shrink-0 text-[10px] tabular-nums text-ink-dim">
+                {p.manifest![t]!.mass ? `${+p.manifest![t]!.mass.toFixed(1)} kg` : ''}</span>
+            </div>
+          ))}
+          {!!p.manifest && !catRows.length && <div className="px-2 py-1 text-[11px] text-ink-dim">no matches</div>}
+        </div>
+      ) : (
       <div ref={listRef} data-testid="complist" className="min-h-0 flex-1 overflow-y-auto px-1 py-1">
         {sections.map(s => {
           const isOpen = query ? true : open.has(s.key);       // search force-opens
@@ -280,7 +346,15 @@ function CompList(p: { bp: Blueprint; sel: Props['sel']; onSelect: Props['onSele
                         || (r.kind === 'sub' && r.idx === p.sel.sub))}
                       onClick={() => r.kind === 'comp' ? p.onSelect(r.idx) : p.onSelectSub(r.idx)}
                       onDoubleClick={() => r.kind === 'comp' ? p.onSelect(r.idx, true) : p.onSelectSub(r.idx)}>
-                      <span className="w-5 shrink-0 text-right text-[10px] text-ink-dim">{String(r.idx).padStart(2, '0')}</span>
+                      {(() => {
+                        const t = r.kind === 'comp' ? p.bp.data.components[r.idx]?.type ?? '?' : 'Subgrid';
+                        return <span
+                          className="grid h-[16px] w-[16px] shrink-0 place-items-center rounded-[3px] border text-[8px] font-bold text-ink"
+                          style={{ background: `hsl(${tileHue(t)} 20% 22%)`, borderColor: `hsl(${tileHue(t)} 24% 44%)` }}>
+                          {r.kind === 'comp' ? partCode(t) : '⬓'}
+                        </span>;
+                      })()}
+                      <span className="w-4 shrink-0 text-right text-[9px] text-ink-dim">{String(r.idx).padStart(2, '0')}</span>
                       <span className={`truncate ${r.dim ? 'text-ink-dim italic' : ''}`}>
                         {r.label ?? p.bp.data.components[r.idx]?.type}
                         {r.kind === 'comp' && ALIAS(p.bp.data.components[r.idx]!) ? ` “${ALIAS(p.bp.data.components[r.idx]!)}”` : ''}
@@ -293,6 +367,7 @@ function CompList(p: { bp: Blueprint; sel: Props['sel']; onSelect: Props['onSele
           );
         })}
       </div>
+      )}
     </div>
   );
 }
@@ -538,27 +613,27 @@ function SubPanel(p: Props) {
 export default function Panel(p: Props) {
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-panel text-ink" data-testid="panels">
-      {/* mass + view options SHRINK with their own scroll on short windows:
-          once the fixed content exceeded the viewport it silently crushed
-          the component list to a few pixels (rows rendered outside the
-          clipped box = clicks intercepted by the inspector) — caught by
-          sym.spec at the 1280×720 default viewport */}
-      <div className="min-h-0 max-h-[55%] shrink overflow-y-auto">
-        <MassCoM engine={p.engine} rev={p.rev} />
-        <ViewOpts opts={p.opts} onOpt={p.onOpt} hullOpacity={p.hullOpacity} onHullOpacity={p.onHullOpacity}
-          realModels={p.realModels} onRealModels={p.onRealModels} gizmoOn={p.gizmoOn} onGizmo={p.onGizmo}
-          hiDef={p.hiDef} onHiDef={p.onHiDef} />
-      </div>
-      <div className="flex min-h-[160px] flex-[2] flex-col border-t border-white/10">
-        <h3 className="px-3 pt-2 text-[11px] font-semibold uppercase tracking-wide text-ink-dim">Components</h3>
-        <CompList bp={p.bp} sel={p.sel} onSelect={p.onSelect} onSelectSub={p.onSelectSub} />
+      {/* KSP order: the PARTS list leads, the context window follows, the
+          camera/view settings sit at the bottom. Min-heights are load-
+          bearing: when fixed content once exceeded the window the flex
+          engine silently crushed the list to 8 px (rows rendered clipped,
+          clicks intercepted) — caught by sym.spec at 1280×720. */}
+      <div className="flex min-h-[160px] flex-[3] flex-col border-t border-white/10">
+        <h3 className="ksp-label px-3 pt-2 text-[11px] font-semibold text-ink-dim">Parts</h3>
+        <CompList bp={p.bp} rev={p.rev} sel={p.sel} onSelect={p.onSelect} onSelectSub={p.onSelectSub}
+          manifest={p.manifest} placingType={p.placingType} onPlaceType={p.onPlaceType} />
       </div>
       <div className="min-h-0 flex-[2] border-t border-white/10 overflow-y-auto">
         {p.bottom !== undefined ? p.bottom ?? null : p.sel.sub >= 0
           ? <SubPanel {...p} key={`s${p.sel.sub}`} />
           : p.sel.ci >= 0
             ? <Inspector {...p} key={`c${p.sel.ci}k${p.inspKey}`} />
-            : <div className="px-3 py-2 text-[12px] text-ink-dim">nothing selected — click a component</div>}
+            : <div className="px-3 py-2 text-[12px] text-ink-dim">nothing selected — click a part</div>}
+      </div>
+      <div className="max-h-[45%] shrink-0 overflow-y-auto border-t border-white/10">
+        <ViewOpts opts={p.opts} onOpt={p.onOpt} hullOpacity={p.hullOpacity} onHullOpacity={p.onHullOpacity}
+          realModels={p.realModels} onRealModels={p.onRealModels} gizmoOn={p.gizmoOn} onGizmo={p.onGizmo}
+          hiDef={p.hiDef} onHiDef={p.onHiDef} />
       </div>
     </div>
   );
