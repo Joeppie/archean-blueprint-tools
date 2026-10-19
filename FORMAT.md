@@ -13,7 +13,7 @@ programmatic editing is safe.
 | `author`, `alias`, `datetime`, `workshop_item_id` | metadata |
 | `mass` | total craft mass (kg, computed) |
 | `type` | blueprint kind (`"Vessel"`) |
-| `version` | format version (2) |
+| `version` | container version — **always 1 in the whole corpus** (incl. ISW-241); NOT the v1/v2 discriminator (see §V1/V2 audit below) |
 | `box_min` / `box_max` / `box_size` | craft bounding box in world metres (x ±3.5, y 0.19..2.25, z −4.75..7) |
 | `data` | the actual build (below) |
 
@@ -150,6 +150,85 @@ sRGB.
   deltas take md = det(S)·S·dq (S = diag(−1 on mask axes)) — one axis
   reproduces the R180-normal conjugation above, and drift
   auto-disable = the live (5 cm) mask must equal the indexed mask.
+
+### V1/V2 flavours — definition table, corpus census, mirror verdict (audited 2026-10-19)
+
+**What actually separates the two generations.** Neither the top-level
+`version` (always **1** in every corpus file, ISW-241 included) nor
+`data.version` (always **2**, also on the 2024 files and the synthetic
+fixtures) discriminates. The single structural key is the **presence of a
+non-empty `data.colors` palette** — the same game update that introduced
+palette editing also changed the rotation serialisation and the component
+colour shape:
+
+| property | V1 (legacy, 2024–25) | V2 (2026) |
+|---|---|---|
+| `data.colors` | **absent/empty** → built-in palette | present, 256 entries |
+| `components[].orientation` | Unity LH quaternion **RAW** | **CONJUGATE** `{w,−x,−y,−z}` |
+| `components[].colors` | `[slot, slot]` **index pair** | `{color1:{…}, color2:{…}}` dict |
+| finish-family bases | polished 80, metal 120, glass 160 (matte 40 shared) | polished 84, metal 128, glass 172 → `legacySlot()` +4/+8/+12 |
+| view-quat chain | `(w,−x,−y,z)` | `(w,x,y,−z)` |
+
+**Corpus census (111 files under testdata/, 2026-10-19):** all are
+`version:1` + `data.version:2`. 60 workshop craft split **51 V1
+(palette-less) / 9 V2** (`3278744757, 3326372833, 3445304576, 3468267043,
+3510792645, 3521588534, 3732302108, 3803780241, 3812927875` — every V2 file
+also carries dict comp colours, every V1 file pair colours). 51 synthetic
+fixtures (`9000000001`, `90000010NN`, `90000020NN`) carry a full palette +
+dict-level V2 keys **but `[slot,slot]` comp-colour pairs** (`colors:[0,3]`
+from `tools/make_matrix_test.py`) — a legal hybrid: the colour PAIR branch
+must key on the SHAPE of `comp.colors` (`compColor`'s
+`Array.isArray(comp.colors)` test), NOT on palette presence. The fixtures'
+quaternions are all identity (matrix law: identity mounts only), so raw vs
+conjugate is convention-invariant there and neither viewer can tell them
+apart. The palette↔quat coupling is verified on the two proof craft only
+(mosaic `3334698274` mural flushfrac 1.00 RAW; ISW `3812927875` pipes
+0.000 m CONJ); the other 7 workshop V2 craft follow the same writer and
+carry dict colours, but are not individually pipe-verified — the heuristic
+is structural, and no corpus file is known to lie about it.
+
+**Mirror verdict for the "every scene seems MIRRORED" report (dev|ours
+sheets).** Expected, not a bug: our z-mirror chain renders the GAME's view,
+the dev's raw placement renders its MIRROR image (§Handedness proof above).
+At the same file camera the two screens relate by a **horizontal flip** —
+`tools/matrix_iou.py` mirrors our mask for exactly this reason (4882dcc).
+A non-mirrored screenshot of ours is SUPPOSED to match the dev's after a
+flip; "our rotation is mirrored??" is the dev's side, not ours. Two further
+sheet effects must not be confused with it: (a) on **rotated mounts in V2
+files** the DEV mirrors the part itself (raw-quat bug, matrix triage step 8
+— fixtures are identity, so matrix rows never show it); (b) **deflected**
+twins (`90000020NN`) differ because the dev renders parts AT REST while we
+apply `data.angle`/`data.pos` — ours-only by definition (triage step 5).
+A flip maps faces to faces, so it can NEVER make geometry appear on one
+side and vanish on the other: a symptom like the **9000001007 Dashboard
+row** ("TEST" Label visible in dev, not in ours) is NOT the flip — the
+mount is identity (convention-invariant) and the Label data is present
+(`{type:Label,text:'TEST',state:0}`); it points at our dashboard
+text/SIDE path (the `dashmirror`/`textx` pre-mirror rules) or the staged
+camera side, and needs one eyeball pass on the PNG pair to bind —
+tracked, unresolved as of this audit.
+
+**DECISION (user, 2026-10-19): the viewer/app support V2 semantics
+internally; V1 files get an ad-hoc LOAD-TIME conversion; the LEGACY_Q
+branching is the migration target.** Implemented in `app/` as
+`app/src/engine/normalize.ts` (`normalizeDoc`, called at open in
+`Editor.tsx`): embed used built-in entries at their v2-base indices, remap
+block/triangle slots through `legacySlot`, pair→dict comp colours,
+`q' = {w,−x,−y,−z}` (display-invariant: the legacy view chain on `q` equals
+the modern chain on `q'`, pinned in `normalize.test.ts`), recurse into
+Build subgrids, bump `data.version=2`; saving a converted file writes the
+V2 form (intentional migration — such a file no longer round-trips
+byte-identical to the game's original). Porting the same conversion to
+`viewer/` must keep `applyDisplayPose`'s FluidJunction flat-comb rule in
+view: it derives the pose from the RAW FILE quat as convention-independent
+"(−x,−y,z,w)", which is NOT invariant under a q→q* rewrite of the file —
+`normalizeDoc` conjugates a junction's stored quat while `displayQuat`
+re-reads the raw file value, so a legacy non-identity junction changes its
+display pose after conversion (the RCS-infinity "comb on its end" class,
+postest rcs-fj-flat). LATENT in app/ today (its fixtures pin identity
+junctions only); fix = exempt FluidJunction `orientation` from the step-4
+conjugation (the flat-frame rule then keeps working on the raw value) or
+re-key the rule on the view quat — pin with the RCS-infinity fixture.
 
 ## `blocks` — the voxel build
 

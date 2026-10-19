@@ -187,9 +187,20 @@ dev's implementation).
    `make_matrix_test.py` re-batches alphabetically in threes.
 
 ## Known intentional viewer divergences (not failures)
+* **every sheet is a MIRROR PAIR, not just the mask**: our viewer renders the
+  GAME's view (z-mirror chain), the dev's raw render is its mirror image
+  (FORMAT § Handeness; V1/V2 audit 2026-10-19). At the same file camera the
+  two PNG sides relate by a HORIZONTAL FLIP — read whole sheets with that in
+  mind (`matrix_iou.py` mirrors our mask accordingly). A flip maps faces to
+  faces, so it can never explain content VISIBLE on one side and MISSING on
+  the other (e.g. the 9000001007 Dashboard 'TEST' Label): that class is a
+  text/SIDE-path question, not the flip.
 * **rotated 2026 files**: the dev places components with the RAW Unity
   quaternion; the game (and we) use the CONJUGATE for palette-bearing files
-  (FORMAT.md § Handeness). Fixtures therefore all sit at identity — rotated
+  (FORMAT.md § Handeness). **V1 files are the dev's one correct case** — raw
+  placement IS the legacy convention, so side-by-sides of mosaic-era craft
+  agree pose-wise while 2026 craft show the dev's mirror (FORMAT §V1/V2).
+  Fixtures therefore all sit at identity — rotated
   comparisons against the dev would flag a KNOWN dev-side mirror.
 * our default is proxies, `&real` the game models; the dev always renders the
   real models — compare `<id>-ours-real.png` against `<id>-dev.png`.
