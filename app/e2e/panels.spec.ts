@@ -239,19 +239,37 @@ test.describe('modes, new craft, file menu', () => {
     await page.getByTestId('gallery-new').click();
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
     await page.getByTestId('mode-blocks').click();
+    // v0.183: deterministic scene state — wait for the atlas fan-out (the
+    // PilotSeat's REAL model shown, its stand-in retired), then PROBE the
+    // canvas through engine.pickCell for a pixel that answers a block face.
+    // The old seven hardcoded fractions only "passed" while the seat mesh
+    // was still loading — a timing lottery, not a pin.
+    const probeDeckFace = () => page.evaluate(() => {
+      const c = document.querySelector('canvas')!;
+      const r = c.getBoundingClientRect();
+      const e = (window as unknown as { __ARCHEAN__?: { engine: { pendingReal: number; pickCell: (x: number, y: number) => { bi: number } | null } } }).__ARCHEAN__!.engine;
+      if (e.pendingReal > 0) return null;
+      for (let fy = 0.5; fy <= 0.78; fy += 0.02)
+        for (let fx = 0.28; fx <= 0.72; fx += 0.02) {
+          const h = e.pickCell(r.left + r.width * fx, r.top + r.height * fy);
+          if (h && h.bi >= 0) return { x: fx, y: fy };
+        }
+      return null;
+    });
+    let click: { x: number; y: number } | null = null;
+    for (let i = 0; i < 40 && !click; i++) {
+      click = await probeDeckFace();
+      if (!click) await page.waitForTimeout(300);
+    }
+    expect(click, 'a deck block face is clickable once real models land').not.toBeNull();
     const canvas = page.getByTestId('canvas');
     const box = (await canvas.boundingBox())!;
     const before = await page.evaluate(() =>
       (window as unknown as { __ARCHEAN__?: { stats: () => { blocks: number } } }).__ARCHEAN__!.stats().blocks);
-    const pts: [number, number][] = [[0.5, 0.62], [0.5, 0.55], [0.5, 0.68], [0.45, 0.6], [0.55, 0.6], [0.42, 0.64], [0.58, 0.64]];
-    let after = before;
-    for (const [fx, fy] of pts) {
-      await canvas.click({ position: { x: box.width * fx, y: box.height * fy } });
-      await page.waitForTimeout(600);                       // debounced scene reload
-      after = await page.evaluate(() =>
-        (window as unknown as { __ARCHEAN__?: { stats: () => { blocks: number } } }).__ARCHEAN__!.stats().blocks);
-      if (after > before) break;
-    }
+    await canvas.click({ position: { x: box.width * click!.x, y: box.height * click!.y } });
+    await page.waitForTimeout(600);                       // debounced scene reload
+    const after = await page.evaluate(() =>
+      (window as unknown as { __ARCHEAN__?: { stats: () => { blocks: number } } }).__ARCHEAN__!.stats().blocks);
     expect(after, 'a block was placed on the deck').toBe(before + 1);
     await expect(page.getByTestId('block-edit')).toContainText(/Block\[\d+\]/);
   });

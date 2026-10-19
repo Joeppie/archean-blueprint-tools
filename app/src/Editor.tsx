@@ -32,7 +32,6 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     new URLSearchParams(window.location.search).has('aero') ? 'aero' : 'view');
   const [opts, setOpts] = useState<ViewOptions>(DEFAULT_OPTS);
   const [hullOpacity, setHullOpacityState] = useState(1);
-  const [realModels, setRealModels] = useState(true);
   const [gizmoOn, setGizmoOn] = useState(() => localStorage.getItem('archean-app-gizmo') !== '0');
   const [hiDef, setHiDefState] = useState(() => localStorage.getItem('archean-app-hidef') !== '0');
   const [rev, setRev] = useState(0);
@@ -272,10 +271,6 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     setTimeout(() => engineRef.current?.select(at), 350);
   }, [placing, mirrorPlace, sceneChanged]);
 
-  const setReal = useCallback((on: boolean) => {
-    setRealModels(on);
-    engineRef.current?.setRealModels(on);
-  }, []);
   const setGizmo = useCallback((on: boolean) => {
     setGizmoOn(on);
     engineRef.current?.setGizmoEnabled(on && mode === 'edit');
@@ -408,8 +403,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
                   <Panel
                     engine={engine} ctx={ctxRef.current} bp={bp} sel={sel} rev={rev}
                     opts={opts} hullOpacity={hullOpacity} onHullOpacity={setHullOp}
-                    realModels={realModels} onRealModels={setReal}
-                    gizmoOn={gizmoOn && mode === 'edit'} onGizmo={setGizmo}
+                                        gizmoOn={gizmoOn && mode === 'edit'} onGizmo={setGizmo}
                     hiDef={hiDef} onHiDef={onHiDef}
                     onOpt={toggleOpt}
                     onSelect={(ci, fly) => { engineRef.current?.select(ci); if (fly) engineRef.current?.flyTo(ci); }}
@@ -449,8 +443,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
                 className="ksp-win absolute right-2 top-2 z-30 max-h-[calc(100%-1rem)] w-[290px]
                            overflow-y-auto rounded-lg">
                 <ViewOpts opts={opts} onOpt={toggleOpt} hullOpacity={hullOpacity} onHullOpacity={setHullOp}
-                  realModels={realModels} onRealModels={setReal}
-                  gizmoOn={gizmoOn} onGizmo={setGizmo} hiDef={hiDef} onHiDef={onHiDef} />
+                                    gizmoOn={gizmoOn} onGizmo={setGizmo} hiDef={hiDef} onHiDef={onHiDef} />
               </div>
             )}
             {/* KSP bottom-left: the STATIC INFO black box (mass & CoM) */}

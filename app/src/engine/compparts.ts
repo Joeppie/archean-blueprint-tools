@@ -123,7 +123,10 @@ export function compPartBoxes(c: BlueprintComponent, manifest: CollidersManifest
   const origin: V3 = [c.position.x, c.position.y, c.position.z];
   return entry.colliders.map(col => {
     // eight corners of the local box, spun by the placement law, grown to
-    // AABB (de-mirror v0.180: local z is no longer negated for a root mirror)
+    // AABB (de-mirror v0.180: local z is no longer negated for a root mirror).
+    // NB: framing/ground law ONLY — the VISIBLE stand-in boxes ride the
+    // content basis C explicitly in scene.ts buildComponents (v0.182); these
+    // AABBs feed fit()/addGround, whose camera tuning predates the C audit.
     const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
     for (const lx of [col.min[0], col.max[0]])
       for (const ly of [col.min[1], col.max[1]])

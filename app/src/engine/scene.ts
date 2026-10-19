@@ -168,7 +168,6 @@ export class Engine {
   private batch: SolidBatch | null = null;
   private bp: Blueprint | null = null;
   private atlasRef: ModelAtlas | null = null;
-  private realModelsOn = true;
   private needRender = false;
   private loadSeq = 0;                  // async real-model loads die with their load()
   private heavy = false;                // heavy-craft tier for the current load
@@ -405,7 +404,15 @@ export class Engine {
 
   // ------------------------------------------------------------------ load
 
-  load(bp: Blueprint, atlas: ModelAtlas | null = null) {
+  load(bp: Blueprint, atlas: ModelAtlas | null = null, keepView = false) {
+    // A same-craft rebuild (⚙ decimated-twin swap, block edit) must keep the
+    // camera + selection (user report v0.182: rebuilds "reset the view").
+    // Only a craft swap re-frames. (The old "real models" toggle that forced
+    // a rebuild here is REMOVED — see ensureRealSelected, v0.183 user rule.)
+    const keep = keepView && !!this.bp && !!this.controls && !!this.camera;
+    const camP = keep ? this.camera!.position.clone() : null;
+    const camT = keep ? this.controls!.target.clone() : null;
+    const selCi = this.selCi, selSub = this.selSub;
     this.loadSeq++;
     this.disposeScene();
     this.bp = bp;
@@ -479,20 +486,50 @@ export class Engine {
     this.addGround(bp, parts);
     this.buildMirrorPlane(parts);
     this.applyViewOptions();
-    this.fit(parts);
-    this.select(-1);
+    if (camP && camT) {                    // same-craft rebuild: camera stays put
+      this.camera!.position.copy(camP);
+      this.controls!.target.copy(camT);
+      this.controls!.update();
+    } else this.fit(parts);
+    if (selCi >= 0) this.select(selCi);
+    else if (selSub >= 0) this.selectSub(selSub);
+    else this.select(-1);
     if (this.windOn) this.startTunnel();          // rebuild the tunnel on the fresh bp
     this.invalidate();
   }
 
-  /** real game models on/off (legacy setRealModels): rebuild the component
-   *  fan-out with/without the atlas stream (the stand-ins are ALWAYS built) */
-  setRealModels(on: boolean) {
-    if (on === this.realModelsOn || !this.bp) return;
-    this.realModelsOn = on;
-    this.load(this.bp, on ? this.atlasRef : null);
+  /** USER rule (v0.183): the SELECTED component always rides its REAL game
+   *  model; everything else rides what the scene already shows. The old
+   *  "real game models" checkbox (a full load() rebuild that reset the camera
+   *  and nulled the manifest — mis-oriented stand-ins + a view reset, the
+   *  v0.182 user report) is REMOVED with this rule: there is nothing to
+   *  toggle, so there is nothing to reset. On the LITE tier (heavy craft)
+   *  nothing streams at load, so selecting a part streams+builds JUST that
+   *  part's real model on demand (the load fan-out is unchanged otherwise). */
+  private ensureRealSelected(ci: number) {
+    if (ci < 0 || !this.bp || !this.heavy || !this.atlasRef) return;
+    const c = this.bp.data.components[ci];
+    const roots = this.compRoots.get(ci);
+    if (!c || c.type === 'Build' || !roots?.length) return;
+    if (roots.some(o => (o.userData as { real?: boolean })?.real)) return;
+    const seq = this.loadSeq;
+    void this.atlasRef.geoFor(c.type).then(model => {
+      if (!model || seq !== this.loadSeq || this.selCi !== ci) return;
+      this.liveGeo.set(c.type, model);
+      const g0 = roots[0]!;
+      if (!g0.parent) return;
+      const real = this.buildReal(c, model);
+      real.position.copy(g0.position);
+      real.quaternion.copy(g0.quaternion);
+      real.userData = { kind: 'comp', ci, real: true };
+      this.root.add(real);
+      this.pushRoot(ci, real);
+      g0.visible = false;                 // stand-in retires (kept for dispose symmetry)
+      this.scene.updateMatrixWorld(true);
+      if (this.selCi === ci) { this.paintSelection(); this.syncGizmo(); }
+      this.invalidate();
+    });
   }
-  get realModels() { return this.realModelsOn; }
 
   /** cables: ONE merged tube mesh + instanced connector endpoint spheres
    *  (cyan = a-end, green = b-end — legacy buildPipes colours, MeshBasic) */
@@ -554,15 +591,25 @@ export class Engine {
       this.root.add(g);
       this.pushRoot(ci, g);
 
-      const box = standInBox(c, atlas?.manifest[c.type]);
+      const box = standInBox(c, this.atlasRef?.manifest[c.type]);
+      // colliders live in the BAKED-FILE frame (FORMAT §vertex space: raw
+      // chain + C⁻¹-baked verts fit them) — the SAME frame the real model's
+      // geometry lives in, i.e. UNDER the content basis C. Hanging the box
+      // straight off the qDisp root showed every stand-in C-rotated (90° x
+      // pitch) from the real meshes (user: "incorrectly rotated occupancy
+      // boxes" when real models go off).
+      const basis = new Group();
+      basis.rotation.order = 'ZYX';
+      basis.rotation.x = -Math.PI / 2;          // C: file (x,y,z) → content (x,z,−y)
+      g.add(basis);
       const stand = new Mesh(this.unitBox,
         this.sharedMat(nodeMaterialSpec(c, 'color1', undefined, this.palette, this.legacy, STAND_IN_HEX)));
       stand.position.set(box.center[0], box.center[1], box.center[2]);
       stand.scale.set(box.size[0], box.size[1], box.size[2]);   // shared unit box (geo count)
-      g.add(stand);
+      basis.add(stand);
       this.maybeLabel(c, ci, g);         // INTERACT type or an in-game alias
 
-      if (!atlas) return;
+      if (!atlas) return;               // LITE tier (heavy craft): no fan-out
       void atlas.geoFor(c.type).then(model => {
         if (seq !== this.loadSeq || !model || !g.parent) return;   // stale/load-swapped
         this.liveGeo.set(c.type, model);
@@ -872,6 +919,7 @@ export class Engine {
         const bg = new BoxGeometry(box.size[0], box.size[1], box.size[2]);
         const q = displayQuat(sc.type, fileToViewQuat(sc.orientation ?? Q_ID, this.legacy), sc.orientation ?? Q_ID);
         bg.translate(box.center[0], box.center[1], box.center[2]);
+        bg.rotateX(-Math.PI / 2);      // under content basis C (BAKED-FILE colliders)
         bg.applyMatrix4(new Matrix4().compose(
           new Vector3(sc.position.x, sc.position.y, sc.position.z),
           new Quaternion(q.x, q.y, q.z, q.w),
@@ -889,11 +937,15 @@ export class Engine {
         const qDisp = displayQuat(sc.type, fileToViewQuat(qFile, this.legacy), qFile);
         m.quaternion.set(qDisp.x, qDisp.y, qDisp.z, qDisp.w);
         const box = standInBox(sc, manifest?.[sc.type]);
+        const basis = new Group();               // colliders are BAKED-FILE frame
+        basis.rotation.order = 'ZYX';
+        basis.rotation.x = -Math.PI / 2;         // (same C law as buildComponents)
+        m.add(basis);
         const stand = new Mesh(this.unitBox,
           this.sharedMat(nodeMaterialSpec(sc, 'color1', undefined, this.palette, this.legacy, STAND_IN_HEX)));
         stand.position.set(box.center[0], box.center[1], box.center[2]);
         stand.scale.set(box.size[0], box.size[1], box.size[2]);
-        m.add(stand);
+        basis.add(stand);
         g.add(m);
         const mp = manifest?.[sc.type] ? this.atlasRef : null;
         if (mp && this.atlasRef) {
@@ -1233,7 +1285,7 @@ export class Engine {
     if (on === this.hiDef || !this.bp) return;
     this.hiDef = on;
     localStorage.setItem('archean-app-hidef', on ? '1' : '0');
-    this.load(this.bp, this.realModelsOn ? this.atlasRef : null);   // rebuild the meshes
+    this.load(this.bp, this.atlasRef, true);   // rebuild the meshes, keep camera
   }
   get hiDefOn() { return this.hiDef; }
 
@@ -1294,6 +1346,7 @@ export class Engine {
   select(ci: number) {
     this.selCi = ci;
     this.selSub = -1;
+    this.ensureRealSelected(ci);        // the SELECTED part always rides its real model
     this.paintSelection();
     this.syncGizmo();
     this.buildHingeUI(-1);            // components own the TGC gizmo; hinge UI is for SUBGRIDS
@@ -2084,7 +2137,7 @@ export class Engine {
   private liveEdits = new Map<number, Promise<void>>();
 
   liveDataEdit(ci: number) {
-    if (!this.bp || this.heavy || !this.realModelsOn) return;
+    if (!this.bp || this.heavy) return;
     if (!this.compRoots.get(ci)?.some(o => (o.userData as { real?: boolean })?.real)) return;
     const prev = this.liveEdits.get(ci) ?? Promise.resolve();
     this.liveEdits.set(ci, prev.then(() => this.rebuildRealInPlace(ci)));
@@ -2211,6 +2264,16 @@ export class Engine {
 
   get blueprint(): Blueprint | null { return this.bp; }
 
+  /** e2e pin: components whose REAL model has not swapped in yet (the
+   *  collider-sized stand-in box is still what raycasts/clicks see — the
+   *  v0.182 basis fix moved those boxes onto the part's true footprint, so
+   *  pixel-tuned scene tests must wait for the atlas fan-out to land) */
+  get pendingReal(): number {
+    let n = 0;
+    this.compRoots.forEach(l => { if (l.length === 1) n++; });
+    return n;
+  }
+
   /** e2e/selftest pin (legacy selftest surges=true): the LIVE surge state —
    *  one pulse per connected pipe, each with a real target and length, all
    *  additive + depthTest OFF (visible THROUGH the hull) */
@@ -2245,7 +2308,7 @@ export class Engine {
 
   /** re-run the whole load with the CURRENT bp (block/wire edits mutate bp
    *  outside the engine; the merged geometry is rebuilt wholesale) */
-  reload() { if (this.bp) this.load(this.bp, this.realModelsOn ? this.atlasRef : null); }
+  reload() { if (this.bp) this.load(this.bp, this.atlasRef, true); }
 
   /** BLOCKS mode: raycast for the placement/select cell. Returns the hit
    *  block index (-1 for ground/other), the FILE-space point, and the cell

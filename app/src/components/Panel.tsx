@@ -33,14 +33,12 @@ interface Props {
   sel: { ci: number; sub: number };
   opts: ViewOptions;
   hullOpacity: number;
-  realModels: boolean;
   gizmoOn: boolean;
   onGizmo: (v: boolean) => void;
   hiDef: boolean;
   onHiDef: (v: boolean) => void;
   onOpt: (k: keyof ViewOptions, on: boolean) => void;
   onHullOpacity: (v: number) => void;
-  onRealModels: (on: boolean) => void;
   onSelect: (ci: number, fly?: boolean) => void;
   onSelectSub: (bi: number) => void;
   edits: EditApi;
@@ -183,7 +181,7 @@ const Check = (p: { label: string; checked: boolean; onChange: (v: boolean) => v
 /** MOVED OUT of the left parts panel (the user: "the full list of options
  *  shouldnt be combined into the main left-hand panel"): rendered in a
  *  floating ⚙ popover window over the viewport by the Editor. */
-export function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHullOpacity' | 'realModels' | 'onRealModels' | 'gizmoOn' | 'onGizmo' | 'hiDef' | 'onHiDef'>) {
+export function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHullOpacity' | 'gizmoOn' | 'onGizmo' | 'hiDef' | 'onHiDef'>) {
   return (
     <Sec title="View options" testid="viewopts">
       <Check testid="opt-grid" label="ground grid" checked={p.opts.grid} onChange={v => p.onOpt('grid', v)} />
@@ -194,7 +192,6 @@ export function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHu
       <Check testid="opt-subs" label="subgrids (doors/hatches)" checked={p.opts.subs} onChange={v => p.onOpt('subs', v)} />
       <Check testid="opt-mirror" label="mirror plane (x symmetry)" checked={p.opts.mirror} onChange={v => p.onOpt('mirror', v)} />
       <Check testid="opt-labels" label="labels on interactive/aliased parts" checked={p.opts.labels} onChange={v => p.onOpt('labels', v)} />
-      <Check testid="opt-real" label="real game models (off = low-poly)" checked={p.realModels} onChange={p.onRealModels} />
       <Check testid="opt-gizmo" label="gizmo on selection (Shift snaps)" checked={p.gizmoOn} onChange={p.onGizmo} />
       {/* the FULL game meshes are the DEFAULT (v0.182 user rule) — the row
           offers the decimated twins as the opt-in for weak GPUs */}
