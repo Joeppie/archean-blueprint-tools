@@ -1018,6 +1018,10 @@ refuses to cut a tag when the strings disagree.
   'worked' — every suite bound to the invisible twin).
 
 ## Backlog
+- **Propeller data-generated geometry (matrix finding 2026-10-19):** the game
+  client generates the prop surface from `data.blades/radius/width/twist/
+  pitch` (dev `propellerGeometry` mirrors it); viewer draws the static gltf
+  template. Port = generator in app/ + a matrix-pair pin (MATRIX.md §Scope).
 - **Ring-drag rotation continuity (user-requested, v0.163+):** dragging a
   rotate ring must reference the UPDATED/ROTATED pose continuously, so a
   multi-grip sweep (grab ring, drag, release, re-grab) keeps rotating the

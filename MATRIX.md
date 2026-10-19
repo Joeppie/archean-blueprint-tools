@@ -204,6 +204,16 @@ dev's implementation).
   visibility.
 * lighting/HDR/sky differ by design; the harness compares GEOMETRY, pose,
   occupancy layer content and the numbers — eyeball the pairs side by side.
+* **Propeller is a REAL gap (backlog, fix in app/)**: the game client (and
+  the dev — see its `propellerGeometry`) GENERATE the prop surface from
+  `data.blades/radius/width/twist/pitch`; our viewer draws the static gltf
+  `prop` template. Propeller rows score ~0.23–0.40 on the screen for this
+  reason; the numbers side (mass/cost) is unaffected. Implement generator +
+  Playwright pin when the app render pass reaches it.
+* screen caveat: rows whose parts TOUCH/touch-project can make the
+  largest-component mask span different scopes per side (dev merges, ours
+  separates) → low IoU with no rendering fault (e.g. C01 1001, C13 1013,
+  C19/26/32). The triage step is the ASCII/mask eyeball, not the score.
 
 ## Extending (next phases)
 
