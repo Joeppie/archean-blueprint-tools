@@ -39,7 +39,8 @@ export type V3 = [number, number, number];
 
 /** flow directions in FILE space (−z is the nose of the corpus craft): the
  *  "wind" blows FROM that side toward the opposite one. */
-export const FLOWS: Record<string, V3> = {
+export type FlowKey = 'nose' | 'tail' | 'left' | 'right' | 'up' | 'down';
+export const FLOWS: Record<FlowKey, V3> = {
   nose: [0, 0, -1], tail: [0, 0, 1], left: [-1, 0, 0],
   right: [1, 0, 0], up: [0, -1, 0], down: [0, 1, 0],
 };
@@ -395,12 +396,12 @@ function gsweep(l: Level): void {
           // neighbour OR symmetry ghost (ghost = interior value ⇒ the face
           // contributes w·u[p] to rhs and w to aw ⇒ cancels = no-flux wall).
           // Implemented by SIMPLY SKIPPING boundary faces (equivalent).
-          if (i > 0) { const w = cx[CxF(l, i - 1, j, k)]!; if (w) { aw += w; rhs += w * u[p - 1]; } }
-          if (i < nx - 1) { const w = cx[CxF(l, i, j, k)]!; if (w) { aw += w; rhs += w * u[p + 1]; } }
-          if (j > 0) { const w = cy[CyF(l, i, j - 1, k)]!; if (w) { aw += w; rhs += w * u[p - nx]; } }
-          if (j < ny - 1) { const w = cy[CyF(l, i, j, k)]!; if (w) { aw += w; rhs += w * u[p + nx]; } }
-          if (k > 0) { const w = cz[CzF(l, i, j, k)]!; if (w) { aw += w; rhs += w * u[p - nxy]; } }
-          if (k < nz - 1) { const w = cz[CzF(l, i, j, k + 1)]!; if (w) { aw += w; rhs += w * u[p + nxy]; } }
+          if (i > 0) { const w = cx[CxF(l, i - 1, j, k)]!; if (w) { aw += w; rhs += w * u[p - 1]!; } }
+          if (i < nx - 1) { const w = cx[CxF(l, i, j, k)]!; if (w) { aw += w; rhs += w * u[p + 1]!; } }
+          if (j > 0) { const w = cy[CyF(l, i, j - 1, k)]!; if (w) { aw += w; rhs += w * u[p - nx]!; } }
+          if (j < ny - 1) { const w = cy[CyF(l, i, j, k)]!; if (w) { aw += w; rhs += w * u[p + nx]!; } }
+          if (k > 0) { const w = cz[CzF(l, i, j, k)]!; if (w) { aw += w; rhs += w * u[p - nxy]!; } }
+          if (k < nz - 1) { const w = cz[CzF(l, i, j, k + 1)]!; if (w) { aw += w; rhs += w * u[p + nxy]!; } }
           u[p] = aw > 1e-12 ? rhs / aw : 0;
         }
       }
@@ -418,12 +419,12 @@ function residual(l: Level, r: Float32Array): void {
       for (let i = 0; i < nx; i++, p++) {
         if (kap[p] === 0) continue;
         let res = src[p]!;
-        if (i > 0) res += cx[CxF(l, i - 1, j, k)]! * (u[p - 1] - u[p]);
-        if (i < nx - 1) res += cx[CxF(l, i, j, k)]! * (u[p + 1] - u[p]);
-        if (j > 0) res += cy[CyF(l, i, j - 1, k)]! * (u[p - nx] - u[p]);
-        if (j < ny - 1) res += cy[CyF(l, i, j, k)]! * (u[p + nx] - u[p]);
-        if (k > 0) res += cz[CzF(l, i, j, k)]! * (u[p - nxy] - u[p]);
-        if (k < nz - 1) res += cz[CzF(l, i, j, k + 1)]! * (u[p + nxy] - u[p]);
+        if (i > 0) res += cx[CxF(l, i - 1, j, k)]! * (u[p - 1]! - u[p]!);
+        if (i < nx - 1) res += cx[CxF(l, i, j, k)]! * (u[p + 1]! - u[p]!);
+        if (j > 0) res += cy[CyF(l, i, j - 1, k)]! * (u[p - nx]! - u[p]!);
+        if (j < ny - 1) res += cy[CyF(l, i, j, k)]! * (u[p + nx]! - u[p]!);
+        if (k > 0) res += cz[CzF(l, i, j, k)]! * (u[p - nxy]! - u[p]!);
+        if (k < nz - 1) res += cz[CzF(l, i, j, k + 1)]! * (u[p + nxy]! - u[p]!);
         r[p] = res;
       }
     }
@@ -530,7 +531,7 @@ export function solveStep(s: Solve, batch = 4): SolveStatus {
  *  outside the domain. */
 export function sampleVel(s: Solve, i: number, j: number, k: number):
   [number, number, number, number] {
-  const t = s.tun, { nx, ny, nz } = t, phi = s.phi, nxy = nx * ny;
+  const t = s.tun, { nx, ny, nz } = t, phi = s.phi;
   if (i < 0 || j < 0 || k < 0 || i > nx - 1 || j > ny - 1 || k > nz - 1)
     return [0, 0, 0, 1e9];
   const i0 = Math.round(i), j0 = Math.round(j), k0 = Math.round(k);
@@ -664,7 +665,7 @@ export function scanAnalysis(t: Tunnel): ScanReport {
     for (let a = 0; a < nA; a++) {
       const c = [0, 0, 0];
       c[perp[0]!] = a; c[perp[1]!] = b;
-      const base = (c[2] * ny + c[1]) * nx + c[0];
+      const base = (c[2]! * ny + c[1]!) * nx + c[0]!;
       // solid runs; single-cell air seams MERGE (the wiki's cavity rule)
       const runs: [number, number][] = [];
       let q = 0;

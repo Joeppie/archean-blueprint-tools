@@ -63,7 +63,7 @@ describe('hullPrism', () => {
 
   test('front face (colours[0]) is the cross(v1−v0, v2−v0) side', () => {
     const v = [0, 1, 2].map(i => {
-      const ax = (T[`v${i}_x`]! + 12) * 0.25 - 1.5, az = (T[`v${i}_z`]! + 12) * 0.25 - 1.5;
+      const ax = (Number(T[`v${i}_x`]) + 12) * 0.25 - 1.5, az = (Number(T[`v${i}_z`]) + 12) * 0.25 - 1.5;
       return [ax, RAW_Y, az];
     });
     const n = cross(sub(v[1]!, v[0]!), sub(v[2]!, v[0]!));      // +ŷ-normal side here (right-hand)

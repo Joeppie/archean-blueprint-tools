@@ -4,7 +4,7 @@
 import { useMemo, useState, useEffect } from 'react';
 import { Sec, Num, SearchList } from './ui';
 import type { Engine } from '../engine/scene';
-import { FLOWS } from '../engine/aero';
+import { FLOWS, type FlowKey } from '../engine/aero';
 import type { EditCtx } from '../engine/edit';
 import { docArrayInsert, docFromValue, docSetNumber, docArrayRemoveAt } from '../engine/doc';
 import { blockFromCell, blockInfo, mirroredBlock, setBlockField } from '../engine/blocks';
@@ -325,7 +325,7 @@ export function FlightPanel(p: { engine: Engine | null; rev: number }) {
 }
 
 // -------------------------------------------------------------- WIND mode
-const FLOW_KEYS: [string, string][] = [
+const FLOW_KEYS: [FlowKey, string][] = [
   ['nose', '← nose'], ['tail', 'tail →'], ['left', 'left'], ['right', 'right'],
   ['up', 'up'], ['down', 'down'],
 ];
@@ -346,8 +346,8 @@ export function WindPanel(p: { engine: Engine | null; rev: number }) {
     return () => clearInterval(t);
   }, []);
   void now;
-  const flowKey = st ? Object.keys(FLOWS).find(k =>
-    FLOWS[k]![0] === st.flow[0] && FLOWS[k]![1] === st.flow[1] && FLOWS[k]![2] === st.flow[2]) ?? 'nose' : 'nose';
+  const flowKey = st ? (FLOW_KEYS.map(([k]) => k).find(k =>
+    FLOWS[k][0] === st.flow[0] && FLOWS[k][1] === st.flow[1] && FLOWS[k][2] === st.flow[2]) ?? 'nose') : 'nose';
   const r = st?.report;
   return (
     <>

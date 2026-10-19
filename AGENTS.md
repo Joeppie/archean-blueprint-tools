@@ -1045,6 +1045,15 @@ refuses to cut a tag when the strings disagree.
   'worked' — every suite bound to the invisible twin).
 
 ## Backlog
+- **Component sub-parts not placed right (user-reported 2026-10-19, post
+  v0.180 de-mirror, STILL OPEN):** in the per-component matrix comparison the
+  moving/sub components still do not render at their correct spots — and in
+  the new app the "real" components are still the old low-poly proxy mockups
+  while the real-node rendering is effectively just occupancy-shaped blocks.
+  The `.ini` node tree (renderables/joints/targets ZYX composition, per-asset
+  gltf author-space conventions — see FORMAT §Per-asset gltf loader
+  conventions) is NOT yet faithfully reproduced in app/; porting it comes
+  with per-type pins verified against the dev's real-model renders.
 - **Propeller data-generated geometry (matrix finding 2026-10-19):** the game
   client generates the prop surface from `data.blades/radius/width/twist/
   pitch` (dev `propellerGeometry` mirrors it); viewer draws the static gltf

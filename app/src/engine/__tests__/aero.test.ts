@@ -86,7 +86,7 @@ describe('shape field (wiki cross-section model)', () => {
     const ka = a.body[2], kb = b.body[2];
     expect(ka).toBeGreaterThan(2); expect(kb).toBeGreaterThan(2);
     // a voxel of A maps to the SAME file point as the mirrored voxel of B
-    const mid = (t: Tunnel, x: 0 | 1 | 2) => (t.body[x] + t.body[x + 3]) / 2;
+    const mid = (t: Tunnel, x: 0 | 1 | 2) => ((t.body[x] ?? 0) + (t.body[x + 3] ?? 0)) / 2;
     const pa = rootPos(a, mid(a, 0), mid(a, 1), mid(a, 2));
     const pb = rootPos(b, mid(b, 0), mid(b, 1), mid(b, 2));
     for (let x = 0; x < 3; x++) expect(pa[x]!).toBeCloseTo(pb[x]!, 6);
@@ -183,7 +183,7 @@ describe('streamlines + scan', () => {
     // shoulder flows carry warm (red-dominant) ones (deviation colour map)
     let slow = 0, fast = 0;
     for (let q = 3; q < sl.colors.length; q += 6) {
-      const r2 = sl.colors[q]!, g = sl.colors[q + 1]!, b = sl.colors[q + 2]!;
+      const r2 = sl.colors[q]!, b = sl.colors[q + 2]!;
       if (b > r2 + 0.25) slow++;
       if (r2 > b + 0.2) fast++;
     }
@@ -194,7 +194,6 @@ describe('streamlines + scan', () => {
   it('scanAnalysis: thin cross-sections classify as wings, bluff as drag', () => {
     // 2-cell-thick plate broadside to the flow = the wiki's wing criterion
     const wing = buildTunnel(boxBp([6, 4, 8], [8, 14, 12]), FLOWS.left)!;  // x cells 6..8
-    const bl = Array.from(new Set(Array.from(wing.blockage).filter(b => b > 0)));
     const rw = scanAnalysis(wing);
     expect(rw.columns).toBeGreaterThan(0);
     expect(rw.liftArea).toBeGreaterThan(0);          // thin runs → lift area

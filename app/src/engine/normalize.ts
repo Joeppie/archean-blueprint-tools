@@ -58,7 +58,8 @@ function normalizeComponents(list: DocNode, used: Set<number>): void {
     // BOTH generations (displayQuat reads the raw file quat), so conjugating
     // a junction's orientation would flip the legacy comb on its end — the
     // RCS-infinity regression class. The stored quat keeps its v1 raw form.
-    const isJunction = get('type')?.kind === 'str' && get('type')!.value === 'FluidJunction';
+    const ty = get('type');
+    const isJunction = ty?.kind === 'str' && ty.value === 'FluidJunction';
     const q = isJunction ? undefined : get('orientation');
     if (q?.kind === 'obj') {
       for (const [k, n] of q.entries)
