@@ -147,26 +147,47 @@ def palette():
     return [ent(i) if i in PAL else 0 for i in range(256)]
 
 
-def occ_block(px, kind=255):
-    return {'colors': [0] * 7, 'frame_x': 0, 'frame_y': 0, 'frame_z': 0,
-            'material': 0, 'pos_x': px, 'pos_y': 6, 'pos_z': 6,
-            'size_x': 0, 'size_y': 0, 'size_z': 0, 'type': kind}
+# Occupancy footprints follow the GAME's own writes (client saves, 2026-10-19):
+# a wall-mounted Dashboard occupies NOTHING (all 11 corpus dashboards carry
+# occ []); a 1 m control surface (Aileron) writes ONE flat 4x4-cell patch at
+# its own y level (ISW-241 ailerons: occ pos (5,9,6) size (3,0,3), mirrored
+# by an IDENTICAL type-255 block); small parts (ToggleButton, sensors,
+# junctions…) write the single origin cell. `pos` = MIN footprint cell,
+# `size` = span-1 per axis (same convention as blocks).
+def occupancies(t, px):
+    if t == 'Dashboard':
+        return []
+    if t == 'Aileron':
+        return [{'frame_x': 0, 'frame_y': 0, 'frame_z': 0,
+                 'pos_x': px - 2, 'pos_y': 6, 'pos_z': 4,
+                 'size_x': 3, 'size_y': 0, 'size_z': 3}]
+    return [{'frame_x': 0, 'frame_y': 0, 'frame_z': 0,
+             'pos_x': px, 'pos_y': 6, 'pos_z': 6,
+             'size_x': 0, 'size_y': 0, 'size_z': 0}]
+
+
+def occ_block(o):
+    return {'colors': [0] * 7, 'frame_x': o['frame_x'],
+            'frame_y': o['frame_y'], 'frame_z': o['frame_z'],
+            'material': 0, 'pos_x': o['pos_x'], 'pos_y': o['pos_y'],
+            'pos_z': o['pos_z'], 'size_x': o['size_x'],
+            'size_y': o['size_y'], 'size_z': o['size_z'], 'type': 255}
 
 
 def component(t, module, x, data):
+    px = round(x / CELL + 5.5)
     return {'alias': '', 'type': t, 'module': module,
             'position': {'x': x, 'y': 0.125, 'z': CZ},
             'orientation': {'w': 1.0, 'x': 0.0, 'y': 0.0, 'z': 0.0},
             'colors': [0, 3], 'mirrorAxis': 0,
-            'occupancies': [{'frame_x': 0, 'frame_y': 0, 'frame_z': 0,
-                             'pos_x': round(x / CELL + 5.5), 'pos_y': 6,
-                             'pos_z': 6, 'size_x': 0, 'size_y': 0, 'size_z': 0}],
+            'occupancies': occupancies(t, px),
             'data': dict(data)}
 
 
 def craft(craft_id, row_idx, comps, label):
     comps = list(comps)
-    blocks = [occ_block(round(c['position']['x'] / CELL + 5.5)) for c in comps]
+    blocks = [occ_block(o) for c in comps
+              for o in c['occupancies']]
     bp = {
         'author': 'matrix-test',
         'box_min': {'x': -1.4, 'y': -0.2, 'z': -0.2},
