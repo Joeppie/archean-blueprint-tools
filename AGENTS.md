@@ -42,6 +42,8 @@ app/tools/devscrape.mjs         Playwright matrix driver: Xenon viewer panels +
 app/tools/sidechir.mjs          chirality probe: our viewer's ±x side + cockpit cameras on the
 app/tools/devchir.mjs           airliner; dev side via its XenonViewer capture API (FORMAT
                                 §Chirality vs in-game truth — the game's screenshots arbitrate)
+app/tools/onebyone.mjs          per-COMPONENT matrix triage: our viewer, one part in frame,
+                                nothing selected + node bboxes / label ink / occupancy JSON
 tests/matrix.sh                 the whole matrix ritual (see MATRIX.md)
 tools/make_landing.py         regenerates the landing gallery + viewer/workshop.json
 tools/add_workshop.py <id>      ingest a locally-subscribed workshop craft
