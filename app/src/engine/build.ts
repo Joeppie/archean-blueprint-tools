@@ -2,11 +2,12 @@
 // NO THREE, NO DOM — unit-testable and the designated future-WASM seam
 // (REWRITE.md § WASM candidates, item 1: face culling + stitching).
 //
-// View-space convention (AGENTS "Format facts"): display space z-mirrors the
-// file world (view = x, y, −z), which FLIPS triangle handedness — every
-// triangle here is emitted with REVERSED winding so normals stay outward.
-// Design carried from the legacy viewer (PERF.md): one merged mesh per
-// distinct palette colour; wire edges in ONE buffer.
+// View-space convention (AGENTS "Format facts", de-mirrored v0.180): the
+// display space IS the file world (FORMAT §Chirality vs in-game truth — the
+// game projects raw file coordinates with standard RH camera math), so
+// triangles here keep their RAW winding and normals stay outward as
+// authored. Design carried from the legacy viewer (PERF.md): one merged mesh
+// per distinct palette colour; wire edges in ONE buffer.
 
 import { getBlockFaceDirections } from './blockshapes';
 import type { Block, Blueprint, Vec3D } from './format';
@@ -35,8 +36,8 @@ export function colorKey(c: ResolvedColor): string {
   return `${c.r}|${c.g}|${c.b}|${c.opacity}|${c.roughness}|${c.metallic}`;
 }
 
-/** file world → view space (z-mirror) */
-export const toView = (x: number, y: number, z: number): [number, number, number] => [x, y, -z];
+/** file world → view space: IDENTITY since the v0.180 de-mirror (kept seam) */
+export const toView = (x: number, y: number, z: number): [number, number, number] => [x, y, z];
 
 function faceNormal(a: number[], b: number[], c: number[]): number[] {
   const ux = b[0]! - a[0]!, uy = b[1]! - a[1]!, uz = b[2]! - a[2]!;
@@ -73,18 +74,18 @@ export function buildBlocksSolids(
   const culled = culledBlocksSolids(blocks, palette, legacy);
   for (const f of culled.tris) {
     const b = bucketFor(f.slot);
-    // view z-mirror: winding reversed so normals stay outward
+    // raw frame == view frame (v0.180): cull's authored winding is kept
     const A = toView(f.tri[0][0], f.tri[0][1], f.tri[0][2]);
+    const Bv = toView(f.tri[1][0], f.tri[1][1], f.tri[1][2]);
     const C = toView(f.tri[2][0], f.tri[2][1], f.tri[2][2]);
-    const E = toView(f.tri[1][0], f.tri[1][1], f.tri[1][2]);
-    const nrm = faceNormal(A, C, E);
+    const nrm = faceNormal(A, Bv, C);
     const base = b.positions.length / 3;
-    for (const v of [A, C, E]) b.positions.push(v[0], v[1], v[2]), b.normals.push(nrm[0]!, nrm[1]!, nrm[2]!);
+    for (const v of [A, Bv, C]) b.positions.push(v[0], v[1], v[2]), b.normals.push(nrm[0]!, nrm[1]!, nrm[2]!);
     b.indices.push(base, base + 1, base + 2);
     tris++;
   }
   for (const [a, c] of culled.edges)
-    wire.push(a[0], a[1], -a[2], c[0], c[1], -c[2]);
+    wire.push(a[0], a[1], a[2], c[0], c[1], c[2]);
 
   return { buckets, wire, blocks: countBlocks(blocks), tris };
 }
@@ -138,16 +139,15 @@ export function buildCompProxies(bp: Blueprint): ProxyBox[] {
     if (c.type === 'Build') return;                      // construction-site ghost
     const occ = c.occupancies?.[0];
     if (!occ || occ.size_x == null) {                    // no occupancy: origin marker size
-      out.push({ min: { x: c.position.x - 0.15, y: c.position.y - 0.15, z: -c.position.z - 0.15 },
+      out.push({ min: { x: c.position.x - 0.15, y: c.position.y - 0.15, z: c.position.z - 0.15 },
                  size: { x: 0.3, y: 0.3, z: 0.3 }, ci });
       return;
     }
     const min: Vec3D = {
       x: worldCoord(occ, 'x') - CELL / 2,
       y: worldCoord(occ, 'y') - CELL / 2,
-      // view z spans [−(W + sz·CELL + CELL/2), −(W − CELL/2)] (legacy view3d
-      // occupancy box; with the inclusive rule the span is (sz+1)·CELL)
-      z: -(worldCoord(occ, 'z') + (occ.size_z ?? 0) * CELL + CELL / 2),
+      // raw frame == view frame (v0.180): z span [W − CELL/2, … + (sz+1)·CELL]
+      z: worldCoord(occ, 'z') - CELL / 2,
     };
     out.push({ min, size: { x: ((occ.size_x ?? 0) + 1) * CELL, y: ((occ.size_y ?? 0) + 1) * CELL, z: ((occ.size_z ?? 0) + 1) * CELL }, ci });
   });

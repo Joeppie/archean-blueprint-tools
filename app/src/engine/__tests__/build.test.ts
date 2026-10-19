@@ -1,5 +1,6 @@
-// build.ts pins: view-space z-mirror with flipped winding, per-colour merge,
-// wire buffer, occupancy-mirror skipping, proxy boxes.
+// build.ts pins: RAW geometry in the == file display frame (de-mirror
+// v0.180: authored winding, no z-mirror), per-colour merge, wire buffer,
+// occupancy-mirror (type 255) skipping, proxy boxes.
 import { describe, expect, test } from 'vitest';
 import { buildCompProxies, buildSolids, colorKey } from '../build';
 import type { Block, Blueprint, Triangle } from '../format';
@@ -53,17 +54,17 @@ describe('buildSolids', () => {
     expect(max - min).toBeCloseTo(0.75, 10);            // 2+1 cells
   });
 
-  test('view space mirrors z — cell W=−1.375 spans view z 1.25..1.5', () => {
-    // pos_z 0 → origin W−CELL/2 = −1.5, extent 0.25 → view [+1.25, +1.5]
+  test('raw z is kept — cell W=−1.375 spans z −1.5..−1.25 (view == file, v0.180)', () => {
+    // pos_z 0 → origin W−CELL/2 = −1.5, extent 0.25 → z [−1.5, −1.25]
     const bp = bpOf([block({ pos_x: 5, pos_y: 5, pos_z: 0 })]);
     const pos = [...buildSolids(bp).buckets.values()][0]!.positions;
     let min = Infinity, max = -Infinity;
     for (let i = 2; i < pos.length; i += 3) min = Math.min(min, pos[i]!), max = Math.max(max, pos[i]!);
-    expect(min).toBeCloseTo(1.25, 10);
-    expect(max).toBeCloseTo(1.5, 10);
+    expect(min).toBeCloseTo(-1.5, 10);
+    expect(max).toBeCloseTo(-1.25, 10);
   });
 
-  test('mirrored winding keeps the outward face normal pointing out (+y top)', () => {
+  test('authored winding keeps the outward face normal pointing out (+y top)', () => {
     const bp = bpOf([block({ pos_x: 5, pos_y: 5, pos_z: 5 })]);
     const b = [...buildSolids(bp).buckets.values()][0]!;
     const { topArea, upNormal } = (() => {
@@ -111,7 +112,7 @@ describe('buildSolids', () => {
 });
 
 describe('buildCompProxies', () => {
-  test('occupancy boxes mirror z; Build ghosts skipped; origin dot for the rest', () => {
+  test('occupancy boxes stay raw z; Build ghosts skipped; origin dot for the rest', () => {
     const bp: Blueprint = bpOf([]);
     bp.data.components = [
       { type: 'Wheel', position: { x: 0, y: 0, z: 0 }, orientation: { w: 1, x: 0, y: 0, z: 0 },
@@ -122,8 +123,8 @@ describe('buildCompProxies', () => {
     const boxes = buildCompProxies(bp);
     expect(boxes.length).toBe(2);                       // Build skipped
     expect(boxes[0]!.ci).toBe(0);
-    expect(boxes[0]!.min.z).toBeCloseTo(1.0, 10);       // inclusive span: 2 cells → 0.5 m
-    expect(boxes[0]!.size.z).toBe(0.5);
-    expect(boxes[1]!.min.z).toBeCloseTo(2.85, 10);      // file z −3 → view +3 ±0.15
+    expect(boxes[0]!.min.z).toBeCloseTo(-1.5, 10);      // W − CELL/2 (raw == view)
+    expect(boxes[0]!.size.z).toBe(0.5);                   // inclusive span: 2 cells
+    expect(boxes[1]!.min.z).toBeCloseTo(-3.15, 10);       // file z −3 stays −3 ±0.15
   });
 });

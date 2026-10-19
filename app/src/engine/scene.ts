@@ -32,7 +32,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { buildPartBoxes, displayQuat, fileToViewQuat, qMul, standInBox, type PartBox } from './compparts';
 import type { FileQuat, Vec3D } from './format';
 import type { LoadedModel, ModelAtlas, NodeRec } from './models';
-import { droppedParts, TEXT_MIRROR_X } from './models';
+import { droppedParts } from './models';
 import { envIntensity, nodeMaterialSpec, pbr, srgbHexToLinear, type PbrSpec } from './materials';
 import { buildPipes, surgePaths, type PipeNetwork } from './pipes';
 import { buildBlocksSolids, buildCompProxies, buildSolids, type SolidBatch } from './build';
@@ -161,7 +161,7 @@ export class Engine {
    *  e2e-safe: pins never race the 620 ms live-flash window */
   private flashArrivals = 0;
   // ---- floating labels on interactive/aliased parts (legacy v0.15x):
-  // sprites at the part's TOP, never parented to the mirrored part (GPU
+  // sprites at the part's TOP, never parented to the part mesh (GPU
   // quads under a negative-determinant parent render MIRRORED text)
   private labels: { sp: Sprite; ci: number; dy: number }[] = [];
   private subGroup = new Group();
@@ -368,12 +368,12 @@ export class Engine {
     // Display anchoring (legacy setModel): shift the craft's minimal frame to
     // the origin — Jimmy sits at x=1102 m (that is WHERE THE BUILDER STOOD).
     // A whole number of 3 m frames, so cell indices stay exact; the file is
-    // never touched (view-only). view z mirrors the file → moff.z flips sign.
+    // never touched (view-only). view == file frame (v0.180) → moff is raw.
     {
       const fs = bp.data.components;
       const min = (f: 'frame_x' | 'frame_y' | 'frame_z') =>
         fs.length ? Math.min(...fs.map(c => ((c[f] as number | undefined) ?? 0) | 0)) : 0;
-      this.moff = { x: -3 * min('frame_x'), y: -3 * min('frame_y'), z: 3 * min('frame_z') };
+      this.moff = { x: -3 * min('frame_x'), y: -3 * min('frame_y'), z: -3 * min('frame_z') };
       this.root.position.set(this.moff.x, this.moff.y, this.moff.z);
       this.subGroup.position.set(this.moff.x, this.moff.y, this.moff.z);
     }
@@ -483,7 +483,7 @@ export class Engine {
     mkEnds(0x33ff88, e => e.b);
   }
 
-  /** every non-Build component: a mirroring group at the DISPLAY pose — the
+  /** every non-Build component: a group at the DISPLAY pose — the
    *  painted collider stand-in immediately, the real game model when it loads */
   private buildComponents(bp: Blueprint, atlas: ModelAtlas | null) {
     const seq = this.loadSeq;
@@ -493,9 +493,9 @@ export class Engine {
       const qView = fileToViewQuat(qFile, this.legacy);
       const qDisp = displayQuat(c.type, qView, qFile);
       const g = new Group();
-      g.position.set(c.position.x + this.moff.x, c.position.y + this.moff.y, -c.position.z + this.moff.z);
+      g.position.set(c.position.x + this.moff.x, c.position.y + this.moff.y, c.position.z + this.moff.z);
       g.quaternion.set(qDisp.x, qDisp.y, qDisp.z, qDisp.w);
-      g.scale.z = -1;                    // raw LH local space mirrored into view
+      // no mirror root since v0.180: the display frame IS the file frame
       g.userData = { kind: 'comp', ci };
       // writeback undo (legacy wheelUndo semantics): undo = dispQ0⁻¹·viewQ0
       // (a PRODUCT, not an inverse — applyDisplayPose stores exactly this
@@ -519,7 +519,6 @@ export class Engine {
         const real = this.buildReal(c, model);
         real.position.copy(g.position);
         real.quaternion.copy(g.quaternion);
-        real.scale.z = -1;
         real.userData = { kind: 'comp', ci, real: true };
         g.visible = false;               // stand-in retires (kept for dispose symmetry)
         this.root.add(real);
@@ -583,7 +582,8 @@ export class Engine {
         gg.setAttribute('position', new BufferAttribute(new Float32Array(v), 3));
         gg.setIndex(i);
         gg.computeVertexNormals();
-        if (TEXT_MIRROR_X.has(prim.material)) flipGeomX(gg);
+        // (de-mirror v0.180: baked text prims render RAW — the old
+        // TEXT_MIRROR_X in-plane flip countered the removed world mirror)
         const arr = byMat.get(prim.material) ?? [];
         byMat.set(prim.material, [...arr, gg]);
       }
@@ -623,11 +623,11 @@ export class Engine {
     return m;
   }
 
-  /** Label text: 5 px/cm monospace grid on a canvas PRE-MIRRORED (x → w−x).
-   *  The view chain mirrors z, so a RAW canvas reads MIRRORED from the
-   *  plate's authored side — proven by the orient fixture 9000000001
-   *  (legacy dashTextTex rule; the v105 canvas-mirror-less build was the
-   *  re-reported regression). The pixel pass lights glyphs in mainColor on
+  /** Label text: 5 px/cm monospace grid on a RAW canvas (de-mirror v0.180):
+   *  the game authors dashboard text readable from the plate's +z face with
+   *  a non-mirrored canvas (FORMAT §Chirality vs in-game truth — the game's
+   *  own cockpit screenshots; the legacy pre-mirror only compensated our
+   *  removed world mirror). The pixel pass lights glyphs in mainColor on
    *  the baseColor plate, no half-tones. */
   private dashTextTex(el: Record<string, any>): CanvasTexture {
     const lines = String(el.text ?? '').split('\n');
@@ -638,7 +638,6 @@ export class Engine {
     const x = cv.getContext('2d', { willReadFrequently: true })!;
     x.fillStyle = '#fff'; x.textBaseline = 'alphabetic'; x.textAlign = 'left';
     x.font = `${8 * ts}px monospace`;
-    x.translate(cv.width, 0); x.scale(-1, 1);
     const center = (el.textAlign ?? 16) === 16;         // 16 = centred
     let y = 3;
     for (const line of lines) {
@@ -776,11 +775,10 @@ export class Engine {
         const q = displayQuat(sc.type, fileToViewQuat(sc.orientation ?? Q_ID, this.legacy), sc.orientation ?? Q_ID);
         bg.translate(box.center[0], box.center[1], box.center[2]);
         bg.applyMatrix4(new Matrix4().compose(
-          new Vector3(sc.position.x, sc.position.y, -sc.position.z),
+          new Vector3(sc.position.x, sc.position.y, sc.position.z),
           new Quaternion(q.x, q.y, q.z, q.w),
-          new Vector3(1, 1, -1),
-        ));
-        flipWinding(bg);                  // the z-mirror is BAKED now: compensate winding
+          new Vector3(1, 1, 1),
+        ));   // no baked mirror since v0.180 — winding stays as authored
         const lst = merged.get(key);
         if (lst) lst.geos.push(bg); else merged.set(key, { spec, geos: [bg] });
       } : null;
@@ -789,10 +787,9 @@ export class Engine {
         if (mergeStands) { mergeStands(sc); continue; }   // heavy tier: merged paint
         const qFile = sc.orientation ?? Q_ID;
         const m = new Group();
-        m.position.set(sc.position.x, sc.position.y, -sc.position.z);
+        m.position.set(sc.position.x, sc.position.y, sc.position.z);
         const qDisp = displayQuat(sc.type, fileToViewQuat(qFile, this.legacy), qFile);
         m.quaternion.set(qDisp.x, qDisp.y, qDisp.z, qDisp.w);
-        m.scale.z = -1;
         const box = standInBox(sc, manifest?.[sc.type]);
         const stand = new Mesh(this.unitBox,
           this.sharedMat(nodeMaterialSpec(sc, 'color1', undefined, this.palette, this.legacy, STAND_IN_HEX)));
@@ -808,7 +805,6 @@ export class Engine {
             const real = this.buildReal(sc, model, true);
             real.position.copy(m.position);
             real.quaternion.copy(m.quaternion);
-            real.scale.z = -1;
             m.visible = false;
             g.add(real);
             this.invalidate();
@@ -1002,7 +998,7 @@ export class Engine {
     // back by the aspect deficit so the whole craft stays framed on phones
     const d = this.camera.aspect < 1 ? d0 / Math.max(this.camera.aspect, 0.4) : d0;
     this.controls?.target.copy(c);
-    this.camera.position.set(c.x + d * 0.6, c.y + Math.max(d * 0.34, 1.4), c.z + d * 0.72);
+    this.camera.position.set(c.x + d * 0.6, c.y + Math.max(d * 0.34, 1.4), c.z - d * 0.72);
     this.camera.near = Math.max(0.05, r / 400);
     this.camera.far = Math.max(300, r * 10);
     if (this.scene.fog) {
@@ -1120,7 +1116,7 @@ export class Engine {
       this.comMarker = g;
       this.scene.add(g);
     }
-    this.comMarker.position.set(mm.com[0] + this.moff.x, mm.com[1] + this.moff.y, -mm.com[2] + this.moff.z);
+    this.comMarker.position.set(mm.com[0] + this.moff.x, mm.com[1] + this.moff.y, mm.com[2] + this.moff.z);
     this.comMarker.visible = this.opts.com && mm.total > 0;
     return mm;
   }
@@ -1458,7 +1454,7 @@ export class Engine {
     if (!this.controls || !this.frameC) return;
     const c = this.frameC, d = Math.max(this.frameD, 3.6);
     const p =
-      k === 'fit' ? new Vector3(c.x + d * 0.6, c.y + Math.max(d * 0.34, 1.4), c.z + d * 0.72)
+      k === 'fit' ? new Vector3(c.x + d * 0.6, c.y + Math.max(d * 0.34, 1.4), c.z - d * 0.72)
         : k === 'top' ? new Vector3(c.x, c.y + d, c.z + d * 0.002)
           : k === 'front' ? new Vector3(c.x, c.y + d * 0.002, c.z - d)
             : new Vector3(c.x + d, c.y + d * 0.002, c.z);
@@ -1554,14 +1550,14 @@ export class Engine {
       const q = oj?.quaternion;
       return {
         j, mask,
-        p0: new Vector3(t.position.x, t.position.y, -t.position.z),
+        p0: new Vector3(t.position.x, t.position.y, t.position.z),
         cpre: this.gizmoCentre(j).sub(mo),                 // twin's OWN pivot (v0.167)
         q0: q ? new Quaternion(q.x, q.y, q.z, q.w) : new Quaternion(),
         q0p: q ? { w: q.w, x: q.x, y: q.y, z: q.z } : { ...Q_ID },
       };
     });
     this.gBase.set(ci, {
-      p0: new Vector3(c.position.x, c.position.y, -c.position.z),
+      p0: new Vector3(c.position.x, c.position.y, c.position.z),
       pp0: this.gizmo ? this.gizmoProxy.position.clone() : new Vector3(),
       q0: this.gizmo ? this.gizmoProxy.quaternion.clone() : new Quaternion(),
       twins,
@@ -1586,14 +1582,14 @@ export class Engine {
     const cpre = b.pp0.clone().sub(new Vector3(this.moff.x, this.moff.y, this.moff.z));
     const off = new Vector3(b.p0.x - cpre.x, b.p0.y - cpre.y, b.p0.z - cpre.z).applyQuaternion(dq);
     const origin = new Vector3(cpre.x + off.x + dp.x, cpre.y + off.y + dp.y, cpre.z + off.z + dp.z);
-    comp.position = { x: origin.x, y: origin.y, z: -origin.z };
+    comp.position = { x: origin.x, y: origin.y, z: origin.z };
     const t = quatMul({ x: q.x, y: q.y, z: q.z, w: q.w }, undo);
     const fileQ: FileQuat = this.legacy
-      ? { w: t.w, x: -t.x, y: -t.y, z: t.z }
-      : { w: t.w, x: t.x, y: t.y, z: -t.z };
+      ? { w: t.w, x: t.x, y: t.y, z: t.z }
+      : { w: t.w, x: -t.x, y: -t.y, z: -t.z };
     comp.orientation = fileQ;
     for (const o of this.compRoots.get(ci) ?? []) {
-      o.position.set(origin.x + this.moff.x, origin.y + this.moff.y, -origin.z + this.moff.z);
+      o.position.set(origin.x + this.moff.x, origin.y + this.moff.y, origin.z + this.moff.z);
       o.quaternion.copy(q);
     }
     // twins ride the SAME gesture: mirrored delta translate + mirrored-twin
@@ -1607,16 +1603,16 @@ export class Engine {
       const originT = new Vector3(tb.cpre.x + off.x + mdp.x, tb.cpre.y + off.y + mdp.y, tb.cpre.z + off.z + mdp.z);
       const qj = mq.clone().multiply(tb.q0);
       const tcomp = this.bp!.data.components[tb.j]!;
-      tcomp.position = { x: originT.x, y: originT.y, z: -originT.z };
+      tcomp.position = { x: originT.x, y: originT.y, z: originT.z };
       const tUndo = this.rotUndo.get(tb.j);
       if (tUndo) {
         const tt = quatMul({ x: qj.x, y: qj.y, z: qj.z, w: qj.w }, tUndo);
         tcomp.orientation = this.legacy
-          ? { w: tt.w, x: -tt.x, y: -tt.y, z: tt.z }
-          : { w: tt.w, x: tt.x, y: tt.y, z: -tt.z };
+          ? { w: tt.w, x: tt.x, y: tt.y, z: tt.z }
+          : { w: tt.w, x: -tt.x, y: -tt.y, z: -tt.z };
       }
       for (const o of this.compRoots.get(tb.j) ?? []) {
-        o.position.set(originT.x + this.moff.x, originT.y + this.moff.y, -originT.z + this.moff.z);
+        o.position.set(originT.x + this.moff.x, originT.y + this.moff.y, originT.z + this.moff.z);
         o.quaternion.copy(qj);
       }
       this.onEdit?.(tb.j);
@@ -1835,12 +1831,12 @@ export class Engine {
   // -------------------------------------------------------------- editing
 
   /** live position ride: stand-in AND real-model siblings follow the file
-   *  position (view z-flip); master parts ride their subgrids too. */
+   *  position (raw == view frame, v0.180); master parts ride subgrids too. */
   moveComp(ci: number) {
     const c = this.bp?.data.components[ci];
     if (!c) return;
     for (const o of this.compRoots.get(ci) ?? [])
-      o.position.set(c.position.x + this.moff.x, c.position.y + this.moff.y, -c.position.z + this.moff.z);
+      o.position.set(c.position.x + this.moff.x, c.position.y + this.moff.y, c.position.z + this.moff.z);
     this.updateCoM();
     this.syncSubJoints();                            // rigid master-riding (v0.172)
     if (this.selCi === ci) { this.paintSelection(); this.syncGizmo(); }
@@ -1874,8 +1870,8 @@ export class Engine {
     const q = quatMul(dq, base.q);                   // qd·q0 (intrinsic-free world deltas)
     const t = quatMul(q, undo);                      // strip the display pose
     const file: FileQuat = this.legacy
-      ? { w: t.w, x: -t.x, y: -t.y, z: t.z }
-      : { w: t.w, x: t.x, y: t.y, z: -t.z };
+      ? { w: t.w, x: t.x, y: t.y, z: t.z }
+      : { w: t.w, x: -t.x, y: -t.y, z: -t.z };
     for (const o of this.compRoots.get(ci) ?? []) o.quaternion.set(q.x, q.y, q.z, q.w);
     this.bp.data.components[ci]!.orientation = file;
     // MIRROR-TWIN MOTION (v0.165/166): twins take md = det(S)·S·dq applied
@@ -1891,8 +1887,8 @@ export class Engine {
       for (const o of this.compRoots.get(j) ?? []) o.quaternion.set(qj.x, qj.y, qj.z, qj.w);
       const tt = quatMul(qj, tUndo);
       this.bp.data.components[j]!.orientation = this.legacy
-        ? { w: tt.w, x: -tt.x, y: -tt.y, z: tt.z }
-        : { w: tt.w, x: tt.x, y: tt.y, z: -tt.z };
+        ? { w: tt.w, x: tt.x, y: tt.y, z: tt.z }
+        : { w: tt.w, x: -tt.x, y: -tt.y, z: -tt.z };
       this.onEdit?.(j);
     }
     this.syncSubJoints();
@@ -1913,7 +1909,7 @@ export class Engine {
     this.rotUndo.set(ci, qMul(qInv(qDisp), qView));
     this.rotBase.delete(ci);
     for (const o of this.compRoots.get(ci) ?? []) {
-      o.position.set(c.position.x + this.moff.x, c.position.y + this.moff.y, -c.position.z + this.moff.z);
+      o.position.set(c.position.x + this.moff.x, c.position.y + this.moff.y, c.position.z + this.moff.z);
       o.quaternion.set(qDisp.x, qDisp.y, qDisp.z, qDisp.w);
     }
     this.syncSubJoints();
@@ -2054,7 +2050,7 @@ export class Engine {
       const px = h.point.x - this.moff.x, py = h.point.y - this.moff.y, pz = h.point.z - this.moff.z;
       const file: [number, number, number] = [px, py, -pz];
       const n = h.face
-        ? new Vector3(h.face.normal.x, h.face.normal.y, -h.face.normal.z)
+        ? new Vector3(h.face.normal.x, h.face.normal.y, h.face.normal.z)
         : new Vector3(0, 1, 0);
       const CELLW = 0.25;
       const cell = [
@@ -2100,7 +2096,7 @@ export class Engine {
       const kind = o?.userData.kind as Kind | undefined;
       if (kind !== 'block' && kind !== 'comp' && kind !== 'sub' && kind !== 'ground') continue;
       const n = h.face
-        ? new Vector3(h.face.normal.x, h.face.normal.y, -h.face.normal.z)
+        ? new Vector3(h.face.normal.x, h.face.normal.y, h.face.normal.z)
         : new Vector3(0, 1, 0);
       const px = h.point.x + n.x * 0.01 - this.moff.x;
       const py = h.point.y + n.y * 0.01 - this.moff.y;
@@ -2217,34 +2213,3 @@ function worldVisible(o: Object3D): boolean {
   return true;
 }
 
-// Bake the view z-mirror into a geometry: negative determinant flips the
-// rasteriser's face selection, so swap the winding back (normals recomputed).
-function flipWinding(gg: BufferGeometry) {
-  const gi = gg.getIndex();
-  if (gi) {
-    const a = gi.array;
-    for (let i = 0; i < a.length; i += 3) { const t = a[i + 1]!; a[i + 1] = a[i + 2]!; a[i + 2] = t; }
-    gi.needsUpdate = true;
-  }
-  gg.computeVertexNormals();
-}
-
-// In-plane counter-mirror for baked text prims (legacy flipGeomX): the glyphs
-// are authored readable from the plate's +normal side, so through our view
-// z-mirror they need mirroring about their OWN bbox centre (the orient
-// fixture 9000000001 pins both direction and centre), winding restored.
-function flipGeomX(gg: BufferGeometry) {
-  gg.computeBoundingBox();
-  const bb = gg.boundingBox;
-  if (!bb) return;
-  const cx = (bb.min.x + bb.max.x) / 2;
-  gg.applyMatrix4(new Matrix4().makeTranslation(2 * cx, 0, 0)
-    .multiply(new Matrix4().makeScale(-1, 1, 1)));
-  const gi = gg.getIndex();
-  if (gi) {
-    const a = gi.array;
-    for (let i = 0; i < a.length; i += 3) { const t = a[i + 1]!; a[i + 1] = a[i + 2]!; a[i + 2] = t; }
-    gi.needsUpdate = true;
-  }
-  gg.computeVertexNormals();
-}

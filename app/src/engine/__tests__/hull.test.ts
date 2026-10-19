@@ -1,6 +1,7 @@
 // hull.ts pins: the game's prism skin — 8 outward-wound faces, the five
-// colour slots in order, extrusion ±HULL_T along the flipped-winding normal
-// (view space), everything convex, and the file→view z-mirror applied.
+// colour slots in order, extrusion ±HULL_T along the authored-winding front
+// normal (cross(v1−v0, v2−v0), the game's colours[0] side), everything convex.
+// The file frame IS the display frame since the v0.180 de-mirror (no z-mirror).
 import { describe, expect, test } from 'vitest';
 import { HULL_T, hullPrism } from '../hull';
 import type { Triangle } from '../format';
@@ -56,8 +57,19 @@ describe('hullPrism', () => {
     }
   });
 
-  test('z-mirror: file z ≥ 0 lands at view z ≤ 0 (v-verts of the whole prism)', () => {
-    for (const f of faces) for (const v of f.tri) expect(v[2]!).toBeLessThanOrEqual(1e-9);
+  test('raw z kept (v0.180): file z ≥ 0 stays z ≥ 0 — no world mirror', () => {
+    for (const f of faces) for (const v of f.tri) expect(v[2]!).toBeGreaterThanOrEqual(-HULL_T - 1e-9);
+  });
+
+  test('front face (colours[0]) is the cross(v1−v0, v2−v0) side', () => {
+    const v = [0, 1, 2].map(i => {
+      const ax = (T[`v${i}_x`]! + 12) * 0.25 - 1.5, az = (T[`v${i}_z`]! + 12) * 0.25 - 1.5;
+      return [ax, RAW_Y, az];
+    });
+    const n = cross(sub(v[1]!, v[0]!), sub(v[2]!, v[0]!));      // +ŷ-normal side here (right-hand)
+    const front = faces[0]!;
+    const nf = faceN(front.tri);
+    expect(nf[0]! * n[0]! + nf[1]! * n[1]! + nf[2]! * n[2]!).toBeGreaterThan(0.99);
   });
 
   test('missing colours default to slot 0 (opaque hull, never magenta by omission)', () => {

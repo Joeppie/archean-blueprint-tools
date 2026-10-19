@@ -12,7 +12,9 @@
 //     editor) become v2 {color1:{...}, color2:{...}} entry objects.
 //  4. orientations: v1 stores the Unity-LH quaternion RAW, v2 stores the
 //     CONJUGATE — q' = {w, −x, −y, −z} keeps the same displayed rotation
-//     under the modern (non-LEGACY_Q) chain (AGENTS §Handedness).
+//     under the modern law R(q*): display = R(q) under BOTH the old and the
+//     de-mirrored (v0.180) chains. FluidJunction orientations are EXEMPT —
+//     the builder-flat comb pose is R(as-written) for both generations.
 //  5. data.version 1 → 2.
 // All rules apply RECURSIVELY into Build subgrids. Saving a converted file
 // writes the v2 form (intentional: the converter is the migration).
@@ -51,8 +53,13 @@ function normalizeComponents(list: DocNode, used: Set<number>): void {
   for (const comp of list.items) {
     if (comp.kind !== 'obj') continue;
     const get = (k: string) => comp.entries.find(([kk]) => kk === k)?.[1];
-    // 4. raw quaternion → conjugate
-    const q = get('orientation');
+    // 4. raw quaternion → conjugate. FluidJunction EXEMPT (de-mirror v0.180):
+    // the builder-FLAT comb pose is R(q) of the AS-WRITTEN quaternion for
+    // BOTH generations (displayQuat reads the raw file quat), so conjugating
+    // a junction's orientation would flip the legacy comb on its end — the
+    // RCS-infinity regression class. The stored quat keeps its v1 raw form.
+    const isJunction = get('type')?.kind === 'str' && get('type')!.value === 'FluidJunction';
+    const q = isJunction ? undefined : get('orientation');
     if (q?.kind === 'obj') {
       for (const [k, n] of q.entries)
         if (n.kind === 'num' && (k === 'x' || k === 'y' || k === 'z')) {

@@ -138,8 +138,8 @@ export function jointChain(
   const axis = vNorm(qRot(mq, qRot(qAxle, UNIT[jn.axis ?? 'x'])));
   const slide = vNorm(qRot(mq, qRot(qAxle, UNIT[jn.slide ?? jn.axis ?? 'x'])));
   const pivot = vAdd(
-    qRot(mq, [jn.position[0]!, jn.position[1]!, -jn.position[2]!] as V3),
-    [mc.position.x, mc.position.y, -mc.position.z],
+    qRot(mq, [jn.position[0]!, jn.position[1]!, jn.position[2]!] as V3),   // raw local (v0.180)
+    [mc.position.x, mc.position.y, mc.position.z],
   );
   return { axis, slide, pivot };
 }
@@ -198,7 +198,7 @@ export function captureJrefs(
     if (!mc) continue;
     const j0 = jointChain(mc, manifest, legacy);
     if (!j0) continue;                                 // static host: no joint term
-    const p0: V3 = [mc.position.x, mc.position.y, -mc.position.z];
+    const p0: V3 = [mc.position.x, mc.position.y, mc.position.z];
     const q0 = fileToViewQuat(mc.orientation ?? { w: 1, x: 0, y: 0, z: 0 }, legacy);
     if (!bb) {                                          // parts-only: ride the axle
       out.push({ mc, mcPath: e.mcPath, top: e.top, p0, q0, pivot0: j0.pivot, axis0: j0.axis, slide0: j0.slide });
@@ -265,7 +265,7 @@ export function masterJointState(mc: BlueprintComponent, legacy: boolean) {
   return {
     angle: typeof mc.data?.['angle'] === 'number' ? (mc.data['angle'] as number) : 0,
     slide: typeof mc.data?.['pos'] === 'number' ? (mc.data['pos'] as number) : 0,
-    pos: [mc.position.x, mc.position.y, -mc.position.z] as V3,
+    pos: [mc.position.x, mc.position.y, mc.position.z] as V3,
     quat: fileToViewQuat(mc.orientation ?? { w: 1, x: 0, y: 0, z: 0 }, legacy),
   };
 }

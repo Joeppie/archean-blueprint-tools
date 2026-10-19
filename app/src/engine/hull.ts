@@ -5,10 +5,10 @@
 // All five colours matter (ISW-241 uses slots 0/4/51 = hull/glass/chrome);
 // a single-triangle render reads paper-thin from the side (P2a look).
 //
-// Winding (legacy buildHull, carried verbatim): vertices are already in
-// VIEW space (z-mirrored, handedness flipped), so the FRONT normal is the
-// cross of the FLIPPED winding — cross(p2−p0, p1−p0) — and each emitted
-// face below is already in its final outward-wound order.
+// Winding (de-mirrored v0.180, FORMAT §Chirality): vertices are in the RAW
+// frame == the view frame, so the FRONT normal is the ordinary winding cross
+// cross(p1−p0, p2−p0) — colours[0] paints that side, matching the game's own
+// front face (the old chain mirrored the vertices and flipped the winding).
 
 import type { Triangle } from './format';
 import { hullVertex } from './hullfit';
@@ -38,15 +38,15 @@ const cross = (a: V3, b: V3): V3 => [
   a[0]! * b[1]! - a[1]! * b[0]!,
 ];
 
-/** prism faces for one triangle file record (view-space output) */
+/** prism faces for one triangle file record (raw frame == view frame) */
 export function hullPrism(t: Triangle): HullFace[] {
   const p: [V3, V3, V3] = ([0, 1, 2] as const).map(i => {
     const v = hullVertex(t, i);
-    return [v.x, v.y, -v.z] as V3;
+    return [v.x, v.y, v.z] as V3;
   }) as [V3, V3, V3];
 
-  // FRONT normal (view space) = cross of the flipped winding
-  const n = cross(sub(p[2], p[0]), sub(p[1], p[0]));
+  // FRONT normal = cross of the authored winding (raw frame, v0.180)
+  const n = cross(sub(p[1], p[0]), sub(p[2], p[0]));
   const len = Math.hypot(n[0], n[1], n[2]) || 1;
   const u: V3 = [n[0]! / len, n[1]! / len, n[2]! / len];
   const off = (v: V3, s: number): V3 => [v[0]! + u[0]! * s, v[1]! + u[1]! * s, v[2]! + u[2]! * s];
@@ -55,14 +55,14 @@ export function hullPrism(t: Triangle): HullFace[] {
 
   const slot = (i: number): number => t.colors?.[i] ?? 0;
   const faces: HullFace[] = [
-    { slot: slot(0), tri: [F[2]!, F[1]!, F[0]!] },        // front (flipped winding)
-    { slot: slot(1), tri: [B[0]!, B[1]!, B[2]!] },        // back
+    { slot: slot(0), tri: [F[0]!, F[1]!, F[2]!] },        // front (+normal)
+    { slot: slot(1), tri: [B[2]!, B[1]!, B[0]!] },        // back
   ];
   for (let i = 0; i < 3; i++) {                           // side walls, edge i→j
     const j = (i + 1) % 3;
     const s = slot(2 + i);
-    faces.push({ slot: s, tri: [B[j]!, B[i]!, F[i]!] });
-    faces.push({ slot: s, tri: [B[j]!, F[i]!, F[j]!] });
+    faces.push({ slot: s, tri: [F[i]!, B[i]!, B[j]!] });
+    faces.push({ slot: s, tri: [F[i]!, B[j]!, F[j]!] });
   }
   return faces;
 }
@@ -75,7 +75,7 @@ export function buildHullSkin(triangles: readonly Triangle[] | undefined): HullS
     faces.push(...hullPrism(t));
     const p: V3[] = ([0, 1, 2] as const).map(i => {
       const v = hullVertex(t, i);
-      return [v.x, v.y, -v.z];
+      return [v.x, v.y, v.z];
     });
     for (let i = 0; i < 3; i++) {
       const a = p[i]!, b = p[(i + 1) % 3]!;

@@ -1,6 +1,7 @@
-// compparts.ts pins: quaternion rotation, collider box → view AABB with the
-// z-mirror + view-quat chain, Build ghosts and unknown types skipped, and the
-// DISPLAY-POSE rules (wheel droop, builder-flat junction, toggle yaw-180).
+// compparts.ts pins: quaternion rotation, collider box → world AABB under
+// the placement law (view == file frame since the v0.180 de-mirror, no local
+// z-flip), Build ghosts and unknown types skipped, and the DISPLAY-POSE
+// rules (wheel droop, builder-flat junction, toggle yaw-180).
 import { describe, expect, test } from 'vitest';
 import { buildPartBoxes, compPartBoxes, displayQuat, qMul, qRot, standInBox } from '../compparts';
 import type { Blueprint } from '../format';
@@ -24,17 +25,17 @@ describe('compPartBoxes', () => {
     type: 'Thing', position: { x: 1, y: 2, z: -3 }, orientation,
   });
 
-  test('identity quat: LH local box z-mirrors into the view AABB', () => {
+  test('identity quat: local box lands RAW at the component position (v0.180)', () => {
     const [box] = compPartBoxes(comp() as never, man, false, 7);
     expect(box!.ci).toBe(7);
-    box!.center.forEach((v, i) => expect(v).toBeCloseTo([1.5, 2.25, 2.875][i]!, 6));
+    box!.center.forEach((v, i) => expect(v).toBeCloseTo([1.5, 2.25, -2.875][i]!, 6));
     box!.size.forEach((v, i) => expect(v).toBeCloseTo([1, 0.5, 0.25][i]!, 6));
   });
 
-  test('yawed box grows to the rotated AABB (x↔z swap under 90°)', () => {
+  test('yawed box grows to the rotated AABB (x↔z swap under 90°; modern law = R(q*))', () => {
     const [box] = compPartBoxes(comp(Y90) as never, man, false, 0);
     box!.size.forEach((v, i) => expect(v).toBeCloseTo([0.25, 0.5, 1][i]!, 6));
-    box!.center.forEach((v, i) => expect(v).toBeCloseTo([0.875, 2.25, 2.5][i]!, 6));
+    box!.center.forEach((v, i) => expect(v).toBeCloseTo([0.875, 2.25, -2.5][i]!, 6));
   });
 
   test('unknown component type yields no boxes', () => {
@@ -59,9 +60,9 @@ describe('buildPartBoxes', () => {
 describe('displayQuat', () => {
   const I = { w: 1, x: 0, y: 0, z: 0 };
 
-  test('FluidJunction rides the builder-FLAT pose (file −x,−y,z,w), convention-free', () => {
+  test('FluidJunction rides the builder-FLAT pose = the RAW file quat R(q), both generations (v0.180)', () => {
     const qF = { w: 0.5, x: 0.5, y: 0.5, z: 0.5 };
-    expect(displayQuat('FluidJunction', Y90, qF)).toEqual({ w: 0.5, x: -0.5, y: -0.5, z: 0.5 });
+    expect(displayQuat('FluidJunction', Y90, qF)).toEqual(qF);
   });
 
   test('ToggleButton = view quat ∘ yaw-180 (plate flush, lever out of the mount)', () => {

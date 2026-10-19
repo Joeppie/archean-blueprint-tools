@@ -25,14 +25,21 @@ export function worldCoord(o: LatticeObj, ax: 'x' | 'y' | 'z'): number {
   return (o[`pos_${ax}`] - 5.5) * CELL + (o[`frame_${ax}`] ?? 0) * FRAME;
 }
 
-/** File (right-handed world) → viewer display space: z-mirrored position. */
-export function toViewPos(p: Vec3D): Vec3D { return { x: p.x, y: p.y, z: -p.z }; }
+/** File world → viewer display space. Since the v0.180 de-mirror (FORMAT
+ *  §Chirality vs in-game truth — corrective plan) the DISPLAY frame IS the
+ *  FILE frame: the game projects raw file coordinates with standard
+ *  right-handed camera math, so this is the identity copy (kept as a seam). */
+export function toViewPos(p: Vec3D): Vec3D { return { x: p.x, y: p.y, z: p.z }; }
 
-/** File → view quaternion for palette-bearing (modern, v108+) files. */
-export function toViewQuatModern(q: FileQuat): FileQuat { return { w: q.w, x: q.x, y: q.y, z: -q.z }; }
+/** File → view quaternion for palette-bearing (modern, v108+) files: the
+ *  Unity-LH quaternion's plain CONJUGATE (w,−x,−y,−z) — pipes pin placement
+ *  to R(q*) at 0.000 m (AGENTS §Format facts, de-mirrored v0.180). */
+export function toViewQuatModern(q: FileQuat): FileQuat { return { w: q.w, x: -q.x, y: -q.y, z: -q.z }; }
 
-/** File → view quaternion for palette-less legacy files (RAW-R(q) convention). */
-export function toViewQuatLegacy(q: FileQuat): FileQuat { return { w: q.w, x: -q.x, y: -q.y, z: q.z }; }
+/** File → view quaternion for palette-less legacy files: the stored
+ *  quaternion AS-IS (those files keep the Unity LH quaternion RAW; the
+ *  mosaic-mural flushfrac proof, AGENTS §Format facts). */
+export function toViewQuatLegacy(q: FileQuat): FileQuat { return { w: q.w, x: q.x, y: q.y, z: q.z }; }
 
 /** Inverse of toViewQuatModern: view → FILE quaternion (modern files). */
 export const fromViewQuatModern = toViewQuatModern;   // involutive
@@ -40,8 +47,9 @@ export const fromViewQuatModern = toViewQuatModern;   // involutive
 export const fromViewQuatLegacy = toViewQuatLegacy;   // involutive
 
 /**
- * Unity LH → right-handed renderer: conjugate {w,−x,−y,−z} before mirroring.
- * (Verified against data.pipes endpoints: 0.000 m under R(q*).)
+ * Unity LH → right-handed placement for MODERN files: conjugate
+ * {w,−x,−y,−z} (verified against data.pipes endpoints: 0.000 m under R(q*)).
+ * Since the v0.180 de-mirror this IS toViewQuatModern.
  */
 export function unityConjugate(q: FileQuat): FileQuat { return { w: q.w, x: -q.x, y: -q.y, z: -q.z }; }
 

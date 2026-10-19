@@ -9,10 +9,11 @@
 //    smallest world rotation about the (horizontal) axle bringing the arm to
 //    −y — a physical wheel-roll; a vertical-axle caster cannot droop.
 //  • FluidJunction lies FLAT: builder cables are cached in the builder's
-//    flat frame, so the comb's display pose is the raw file quaternion with
-//    only the sign convention applied (−x,−y,z,w in file terms) —
-//    CONVENTION-INDEPENDENT (deriving from qV conjugates legacy junctions
-//    by 120°, the RCS-infinity "comb on its end" regression).
+//    flat frame, so the comb's display pose is the RAW file quaternion
+//    R(q) for BOTH generations (de-mirror v0.180: this is what the old
+//    chain's (−x,−y,z,w)-in-its-mirrored-view display equated to in raw
+//    terms; the byte-identical ISW modern and RCS-infinity legacy
+//    junctions still render byte-identically flat).
 //  • ToggleButton mounts plate-FLUSH: a local yaw-180 under the view quat.
 
 import type { Blueprint, BlueprintComponent, FileQuat } from './format';
@@ -95,7 +96,11 @@ const JUNCTION_TYPES: ReadonlySet<string> = new Set(['FluidJunction']);
  */
 export function displayQuat(type: string, qView: FileQuat, qFile: FileQuat): FileQuat {
   if (JUNCTION_TYPES.has(type))
-    return { w: qFile.w, x: -qFile.x, y: -qFile.y, z: qFile.z };   // builder-flat comb
+    return { w: qFile.w, x: qFile.x, y: qFile.y, z: qFile.z };    // builder-flat comb:
+    // the flat frame IS the builder's RAW pose (de-mirror v0.180: the old
+    // chain's flat comb (−x,−y,z,w) in its mirrored view equals R(q) in raw
+    // terms — for BOTH generations, so the RCS-infinity legacy fixture and
+    // the byte-identical ISW modern junction still render identically flat)
   if (type === 'ToggleButton')
     return qMul(qView, { w: 0, x: 0, y: 1, z: 0 });                 // yaw-180 flush mount
   if (!WHEEL_TYPES.has(type)) return qView;
@@ -116,14 +121,15 @@ export function compPartBoxes(c: BlueprintComponent, manifest: CollidersManifest
   const entry = manifest[c.type];
   if (!entry?.colliders?.length) return [];
   const qv = fileToViewQuat(c.orientation ?? { w: 1, x: 0, y: 0, z: 0 }, legacy);
-  const origin: V3 = [c.position.x, c.position.y, -c.position.z];
+  const origin: V3 = [c.position.x, c.position.y, c.position.z];
   return entry.colliders.map(col => {
-    // eight corners of the local LH box, each z-mirrored then spun, grown to AABB
+    // eight corners of the local box, spun by the placement law, grown to
+    // AABB (de-mirror v0.180: local z is no longer negated for a root mirror)
     const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
     for (const lx of [col.min[0], col.max[0]])
       for (const ly of [col.min[1], col.max[1]])
         for (const lz of [col.min[2], col.max[2]]) {
-          const r = qRot(qv, [lx, ly, -lz]);
+          const r = qRot(qv, [lx, ly, lz]);
           for (let i = 0; i < 3; i++) {
             mn[i] = Math.min(mn[i]!, origin[i]! + r[i]!);
             mx[i] = Math.max(mx[i]!, origin[i]! + r[i]!);

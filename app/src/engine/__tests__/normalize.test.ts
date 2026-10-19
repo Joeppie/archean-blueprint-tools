@@ -5,7 +5,7 @@
 import { describe, expect, test } from 'vitest';
 import { emitDoc, parseDoc, docValue } from '../doc';
 import { normalizeDoc } from '../normalize';
-import { fileToViewQuat } from '../compparts';
+import { displayQuat, fileToViewQuat } from '../compparts';
 import type { Blueprint, FileQuat } from '../format';
 
 const V1 = '{"data":{"version":1,"blocks":[{"type":0,"pos_x":5,"pos_y":5,"pos_z":5,' +
@@ -13,7 +13,9 @@ const V1 = '{"data":{"version":1,"blocks":[{"type":0,"pos_x":5,"pos_y":5,"pos_z"
   '"triangles":[],"components":[{"type":"PilotSeat","position":{"x":0.0,"y":0.0,"z":0.0},' +
   '"orientation":{"w":0.7071,"x":0.0,"y":0.7071,"z":0.0},"colors":[48,172],' +
   '"data":{"components":[{"type":"Lamp","position":{"x":1.0,"y":0.0,"z":0.0},' +
-  '"orientation":{"w":1.0,"x":0.0,"y":0.0,"z":0.5}}]}}]}}';
+  '"orientation":{"w":1.0,"x":0.0,"y":0.0,"z":0.5}}]}},' +
+  '{"type":"FluidJunction","position":{"x":0.0,"y":0.9,"z":1.0},' +
+  '"orientation":{"w":0.0,"x":0.7071,"y":0.0,"z":0.7071},"colors":[48,48]}]}}';
 
 const quat = (o: { w: number; x: number; y: number; z: number }): FileQuat =>
   ({ w: o.w, x: o.x, y: o.y, z: o.z });
@@ -58,6 +60,16 @@ describe('v1 → v2 open-time normalize', () => {
   test('recursion: nested subgrid quaternions are conjugated too', () => {
     const nested = (bp.data.components[0]!.data!['components'] as { orientation: FileQuat }[])[0]!;
     expect(nested.orientation.z).toBe(-0.5);
+  });
+
+  test('FluidJunction orientation is EXEMPT from the conjugation (flat comb survives)', () => {
+    const fj = bp.data.components[1]!;
+    expect(fj.type).toBe('FluidJunction');
+    // stored quaternion keeps its v1 raw form (x̂ 90°: (0,.7071,0,.7071))
+    expect(quat(fj.orientation)).toEqual({ w: 0, x: 0.7071, y: 0, z: 0.7071 });
+    // the builder-FLAT display pose = R(raw file quat) — unchanged
+    expect(displayQuat('FluidJunction', fileToViewQuat(quat(fj.orientation), false), quat(fj.orientation)))
+      .toEqual({ w: 0, x: 0.7071, y: 0, z: 0.7071 });
   });
 
   test('the converted file still emits compact and re-parses', () => {

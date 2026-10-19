@@ -69,7 +69,7 @@ test.describe('gizmo writeback', () => {
     const pivot0 = (await eng('pivot')(page)) as [number, number, number];
     const pos0 = (await eng("pos", { ci })(page)) as { x: number; y: number; z: number };
     const q0 = (await eng('quat', { ci })(page)) as Record<string, number>;
-    const view = (p: { x: number; y: number; z: number }) => [p.x, p.y, -p.z];
+    const view = (p: { x: number; y: number; z: number }) => [p.x, p.y, p.z];   // raw == view (v0.180)
     const r0 = dist(view(pos0), pivot0!);
     expect(r0, 'an aileron origin sits OFF its visible bbox centre (non-vacuous orbit)').toBeGreaterThan(0.05);
 

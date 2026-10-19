@@ -35,17 +35,18 @@ describe('grid maths', () => {
     expect(cellCoord({ pos_x: 6, pos_y: 0, pos_z: 0, frame_x: 0 }, 'x')).toBe(1);
     expect(cellCoord({ pos_x: 5, pos_y: 0, pos_z: 0, frame_x: 1 }, 'x')).toBe(12);  // 2.875 m → 11.5 → 12
   });
-  test('view-space mapping z-mirrors position only', () => {
-    expect(toViewPos({ x: 1, y: 2, z: 3 })).toEqual({ x: 1, y: 2, z: -3 });
+  test('view mapping is the IDENTITY: display frame == file frame (v0.180)', () => {
+    expect(toViewPos({ x: 1, y: 2, z: 3 })).toEqual({ x: 1, y: 2, z: 3 });
   });
-  test('the two quaternion conventions are involutions and inverses of each other', () => {
+  test('the two quaternion conventions (de-mirrored v0.180)', () => {
     const q = { w: 0.5, x: 0.5, y: 0.5, z: 0.5 };
     expect(toViewQuatModern(toViewQuatModern(q))).toEqual(q);
     expect(toViewQuatLegacy(toViewQuatLegacy(q))).toEqual(q);
-    // modern = (w,x,y,−z), legacy = (w,−x,−y,z): the z-sign split IS the
-    // palette-keyed LEGACY_Q convention (mural/beacon pins).
-    expect(toViewQuatModern(q)).toEqual({ w: 0.5, x: 0.5, y: 0.5, z: -0.5 });
-    expect(toViewQuatLegacy(q)).toEqual({ w: 0.5, x: -0.5, y: -0.5, z: 0.5 });
+    // modern = plain conjugate (w,−x,−y,−z) [pipes: placement is R(q*)],
+    // legacy = stored quaternion AS-IS [mural: raw R(q)] — the palette-keyed
+    // LEGACY_Q split, minus the old mirror conjugations.
+    expect(toViewQuatModern(q)).toEqual({ w: 0.5, x: -0.5, y: -0.5, z: -0.5 });
+    expect(toViewQuatLegacy(q)).toEqual({ w: 0.5, x: 0.5, y: 0.5, z: 0.5 });
     expect(unityConjugate(q)).toEqual({ w: 0.5, x: -0.5, y: -0.5, z: -0.5 });
   });
 });

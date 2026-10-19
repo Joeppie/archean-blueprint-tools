@@ -190,7 +190,7 @@ describe('joint line capture + pose', () => {
     const mc = comp({ type: 'SmallPivot', position: { x: 1, y: 0.5, z: 2 }, data: { angle: 0 } });
     const [r] = captureJrefs([{ component: 0, mc, top: 0 }], bbx, manifest, false);
     const base = { p: [0, 0, 0] as [number, number, number], q: { w: 1, x: 0, y: 0, z: 0 } as FileQuat };
-    const moved = { ...masterJointState(mc, false), pos: [1.5, 0.5, -2] as [number, number, number] };
+    const moved = { ...masterJointState(mc, false), pos: [1.5, 0.5, 2] as [number, number, number] };   // raw == view (v0.180)
     const pose = subJointPose(base, [r!], [moved]);
     expect(pose.p[0]).toBeCloseTo(0.5, 9);
     expect(pose.p[1]).toBeCloseTo(0, 9);

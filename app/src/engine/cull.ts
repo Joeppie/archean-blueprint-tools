@@ -9,9 +9,9 @@
 //    z-fight,
 //  * transparency: an opaque face survives behind a TRANSLUCENT neighbour
 //    (only opaque entries cull opaque faces).
-// PURE: raw file-space triangles (wound per the raw convention — the view
-// builder applies the z-mirror + winding flip) + deduped surviving edges.
-// This is the designated WASM seam (REWRITE.md candidate 1).
+// PURE: raw file-space triangles (wound per the raw convention — since the
+// v0.180 de-mirror the view builder keeps that winding as-is) + deduped
+// surviving edges. This is the designated WASM seam (REWRITE.md candidate 1).
 
 import {
   getBlockFaceDirections, getBlockFaces, getBlockPoints, isFullFace, OCCUPANCY_TYPE,

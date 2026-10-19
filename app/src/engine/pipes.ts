@@ -34,9 +34,9 @@ export interface PipeNetwork {
 /** one cable run to animate a power-surge along, walkable FROM ci */
 export interface SurgePath { pts: V3[]; cum: number[]; total: number; to: number }
 
-/** dir 0..5 → +x,+y,+z,−x,−y,−z, in VIEW space (z-mirrored) */
+/** dir 0..5 → +x,+y,+z,−x,−y,−z, raw frame == view frame (v0.180) */
 const DIRS: readonly (V3 | undefined)[] = [
-  [1, 0, 0], [0, 1, 0], [0, 0, -1], [-1, 0, 0], [0, -1, 0], [0, 0, 1],
+  [1, 0, 0], [0, 1, 0], [0, 0, 1], [-1, 0, 0], [0, -1, 0], [0, 0, -1],
 ];
 
 /** non-axis tube thickness (legacy 0.022) and joint slack (legacy +0.01) */
@@ -54,12 +54,12 @@ export function buildPipes(pipes: readonly Pipe[] | undefined): PipeNetwork {
     const first = p.segments[0];
     const last = p.segments[p.segments.length - 1];
     if (!first || !last) continue;
-    let bEnd: V3 = [first.start.x, first.start.y, -first.start.z];   // overwritten per seg
+    let bEnd: V3 = [first.start.x, first.start.y, first.start.z];   // overwritten per seg
     const pts: V3[] = [];                                            // surge polyline
     for (const s of p.segments) {
       const d = DIRS[s.dir] ?? DIRS[0]!;
       const L = s.length + SLACK;
-      const st: V3 = [s.start.x, s.start.y, -s.start.z];
+      const st: V3 = [s.start.x, s.start.y, s.start.z];
       bEnd = [st[0]! + d[0]! * s.length, st[1]! + d[1]! * s.length, st[2]! + d[2]! * s.length];
       pts.push(st, bEnd);
       tubes.push({
@@ -67,7 +67,7 @@ export function buildPipes(pipes: readonly Pipe[] | undefined): PipeNetwork {
         size: [d[0] ? L : TUBE, d[1] ? L : TUBE, d[2] ? L : TUBE],
       });
     }
-    ends.push({ a: [first.start.x, first.start.y, -first.start.z], b: bEnd });
+    ends.push({ a: [first.start.x, first.start.y, first.start.z], b: bEnd });
     links.push({ a: p.a_component, b: p.b_component });
     polys.push(pts);
   }

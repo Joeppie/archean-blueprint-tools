@@ -258,9 +258,9 @@ export function buildTunnel(bp: Blueprint, flow: V3, opts?:
     o: [lo[0]!, lo[1]!, lo[2]!], solid, blockage, wake, body, solidCount };
 }
 
-/** voxel position (float index) → ROOT-space metres (view coords, PRE-moff:
- *  the Engine's root group carries the display anchor). Inverts the
- *  travel-aligned map, then the FILE→view z flip. */
+/** voxel position (float index) → ROOT-space metres (the display frame IS
+ *  the file frame since the v0.180 de-mirror; PRE-moff: the Engine's root
+ *  group carries the display anchor). Inverts the travel-aligned map. */
 export function rootPos(t: Tunnel, i: number, j: number, k: number): V3 {
   const axis = t.axis, d = t.flow[axis]! >= 0 ? 1 : -1;
   const abs = [0, 0, 0];
@@ -275,15 +275,15 @@ export function rootPos(t: Tunnel, i: number, j: number, k: number): V3 {
     // covers file [−(g+s), −g] → centre −g−s/2):
     abs[a] = a === axis ? (d > 0 ? g + (t.voxel / CELL) / 2 : -g - (t.voxel / CELL) / 2) : g + (t.voxel / CELL) / 2;
   }
-  // abs are absolute-cell CENTRES; world = (abs − 5.5)·CELL, view flips z
+  // abs are absolute-cell CENTRES; world = (abs − 5.5)·CELL (raw == view, v0.180)
   const cellCentreToWorld = (v: number) => (v - 5.5) * CELL;
-  return [cellCentreToWorld(abs[0]!), cellCentreToWorld(abs[1]!), -cellCentreToWorld(abs[2]!)];
+  return [cellCentreToWorld(abs[0]!), cellCentreToWorld(abs[1]!), cellCentreToWorld(abs[2]!)];
 }
 
-/** voxel position → FILE-space world metres (no z flip) */
+/** voxel position → FILE-space world metres (== rootPos since v0.180: the
+ *  display frame IS the file frame) */
 export function filePointOf(t: Tunnel, i: number, j: number, k: number): V3 {
-  const r = rootPos(t, i, j, k);
-  return [r[0], r[1], -r[2]];
+  return rootPos(t, i, j, k);
 }
 
 // ------------------------------------------------------------- the solver

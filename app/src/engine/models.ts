@@ -146,9 +146,3 @@ export function droppedParts(c: BlueprintComponent): ReadonlySet<string> {
   return new Set(f(d).filter((n): n is string => n != null));
 }
 
-/** glTF prims whose glyphs need the in-plane counter-mirror through the
- *  view z-flip (baked text authored readable from the plate +normal side;
- *  proven by the orient fixture 9000000001). */
-export const TEXT_MIRROR_X: ReadonlySet<string> = new Set([
-  'code_button_text', 'reboot_button_text', 'code', 'subscribe', 'codein', 'activein',
-]);
