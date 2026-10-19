@@ -37,6 +37,9 @@ interface Props {
   onGizmo: (v: boolean) => void;
   hiDef: boolean;
   onHiDef: (v: boolean) => void;
+  /** the STATIC INFO overlay (mass & CoM) is visible? (its ✕ hides it) */
+  staticInfo: boolean;
+  onStaticInfo: (v: boolean) => void;
   onOpt: (k: keyof ViewOptions, on: boolean) => void;
   onHullOpacity: (v: number) => void;
   onSelect: (ci: number, fly?: boolean) => void;
@@ -60,21 +63,38 @@ interface Props {
 /** KSP "STATIC INFO" black box: uppercase tan labels, right-aligned values.
  *  Lives as a viewport overlay (App), not in the sidebar — like the VAB's
  *  Mass/Modules/Cost readout under the parts list. */
-export function StaticInfo(p: { engine: Engine | null; rev: number }) {
+/**
+ *  OPTIONAL (user 2026-10-19: "Static info shouldn't necessarily show. It's
+ *  too large on mobile, hide it under settings, x to close panel itself"):
+ *  the Editor only renders it while its `staticInfo` setting is on (⚙ view
+ *  options carries the checkbox; default OFF on phones, ON on desktop), the
+ *  box itself carries an ✕ that dismisses it, and on phones it is a COMPACT
+ *  one-glance card — declared/computed/CoM only, the structural-detail lines
+ *  stay on md+ where there is room for them. */
+export function StaticInfo(p: { engine: Engine | null; rev: number; onClose: () => void }) {
   const mm = p.engine?.massReport();
   if (!mm) return null;
   const fmt = (n: number, d = 2) => n.toLocaleString('en', { maximumFractionDigits: d });
   return (
     <div data-testid="massbox"
-      className="ksp-win pointer-events-none w-[250px] rounded px-2.5 py-1.5 text-[11px] text-ink">
-      <div className="ksp-label mb-1 border-b border-white/10 pb-[2px] text-[10px] text-ink-dim">
-        Static info</div>
-      <div className="space-y-[1px] leading-snug" data-testid="mass-report">
+      className="ksp-win pointer-events-none w-[164px] rounded px-1.5 py-1 text-[10px] leading-snug
+                 text-ink md:w-[250px] md:px-2.5 md:py-1.5 md:text-[11px]">
+      <div className="ksp-label mb-1 flex items-center justify-between gap-2 border-b border-white/10
+                     pb-[2px] text-[9px] text-ink-dim md:text-[10px]">
+        Static info
+        <button data-testid="static-close" onClick={p.onClose} title="hide the static info box"
+          aria-label="hide the static info box"
+          className="ksp-btn pointer-events-auto -my-0.5 rounded px-1.5 py-0 text-[11px] leading-tight
+                     text-ink-dim hover:text-accent">
+          ✕
+        </button>
+      </div>
+      <div data-testid="mass-report" className="space-y-[1px] leading-snug">
         <div>declared <b className="float-right tabular-nums">{fmt(mm.declared, 0)} kg</b></div>
         <div>computed <b className="float-right tabular-nums">{fmt(mm.total, 0)} kg</b></div>
-        <div className="text-ink-dim">hull {fmt(mm.cells, 0)} cells × {fmt(mm.cellMass, 2)} kg ·
+        <div className="hidden text-ink-dim md:block">hull {fmt(mm.cells, 0)} cells × {fmt(mm.cellMass, 2)} kg ·
           parts {fmt(mm.compSum, 0)} kg</div>
-        <div className="text-ink-dim">implied structural density ≈ {fmt(mm.density, 0)} kg/m³ (plausibility)</div>
+        <div data-testid="mass-density" className="hidden text-ink-dim md:block">implied structural density ≈ {fmt(mm.density, 0)} kg/m³ (plausibility)</div>
         <div>CoM <span className="float-right tabular-nums">({fmt(mm.com[0])}, {fmt(mm.com[1])}, {fmt(mm.com[2])}) m</span></div>
       </div>
     </div>
@@ -181,7 +201,7 @@ const Check = (p: { label: string; checked: boolean; onChange: (v: boolean) => v
 /** MOVED OUT of the left parts panel (the user: "the full list of options
  *  shouldnt be combined into the main left-hand panel"): rendered in a
  *  floating ⚙ popover window over the viewport by the Editor. */
-export function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHullOpacity' | 'gizmoOn' | 'onGizmo' | 'hiDef' | 'onHiDef'>) {
+export function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHullOpacity' | 'gizmoOn' | 'onGizmo' | 'hiDef' | 'onHiDef' | 'staticInfo' | 'onStaticInfo'>) {
   return (
     <Sec title="View options" testid="viewopts">
       <Check testid="opt-grid" label="ground grid" checked={p.opts.grid} onChange={v => p.onOpt('grid', v)} />
@@ -198,6 +218,11 @@ export function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHu
       <Check testid="opt-hidef" label="decimated low-poly meshes (weak GPUs)" checked={!p.hiDef}
         onChange={v => p.onHiDef(!v)} />
       <Check testid="opt-com" label="center-of-mass marker" checked={p.opts.com} onChange={v => p.onOpt('com', v)} />
+      {/* the KSP STATIC INFO overlay (mass & CoM) is optional: on phones it is
+          OFF by default (it ate a third of the viewport — user 2026-10-19);
+          its own ✕ hides it and this row brings it back */}
+      <Check testid="opt-static" label="static info box (mass & CoM)" checked={p.staticInfo}
+        onChange={p.onStaticInfo} />
       <Row label="hull opacity" min={0.1} max={1} step={0.05} value={p.hullOpacity}
         onInput={p.onHullOpacity}
         title="dims the whole hull skin: blocks, triangle plates and their wireframes" />

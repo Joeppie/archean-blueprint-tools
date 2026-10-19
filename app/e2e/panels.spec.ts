@@ -158,6 +158,25 @@ test.describe('desktop panels @ui', () => {
 test.describe('mass & CoM + fidelity toggles @ui', () => {
   const desktopOnly = () => test.skip(test.info().project.name !== 'chromium', 'desktop-only');
 
+  // User 2026-10-19: "Static info shouldn't necessarily show. It's too large
+  // on mobile, hide it under settings, x to close panel itself." → the KSP
+  // mass/CoM card is a SETTING (⚙ row), it dismisses itself with its own ✕,
+  // and on phones it starts hidden and renders as a compact card.
+  test('static info box: its ✕ dismisses it, the ⚙ row brings it back', async ({ page }) => {
+    desktopOnly();
+    await openCraft(page, ISW);
+    await expect(page.getByTestId('massbox'), 'desktop default: the box shows').toBeVisible();
+    await expect(page.getByTestId('mass-density'), 'desktop keeps the structural detail').toBeVisible();
+    await page.getByTestId('static-close').click();
+    await expect(page.getByTestId('massbox')).toHaveCount(0);
+    await openOptions(page);
+    await expect(page.getByTestId('opt-static'), 'the ✕ flipped the setting off too').not.toBeChecked();
+    await page.getByTestId('opt-static').check();
+    await expect(page.getByTestId('massbox')).toBeVisible();
+    await page.getByTestId('opt-static').uncheck();            // the setting hides it too
+    await expect(page.getByTestId('massbox')).toHaveCount(0);
+  });
+
   test('mass readout, CoM marker toggle, hi-def rebuild, workshop link', async ({ page }) => {
     desktopOnly();
     await openCraft(page, ISW);
@@ -186,6 +205,28 @@ test.describe('mass & CoM + fidelity toggles @ui', () => {
     const ws = page.getByTestId('wslink');
     await expect(ws).toHaveAttribute('href', new RegExp(`id=${ISW}$`));
   });
+});
+
+/** Phones (the pixel7 project): no unsolicited overlay — the static-info card
+ *  is OFF by default and, when switched on from ⚙, it is the COMPACT variant
+ *  (no structural-detail lines, well under the desktop 250 px card). */
+test('mobile: no static-info box by default; ⚙ shows a compact card @ui', async ({ page }) => {
+  test.skip(test.info().project.name === 'chromium', 'phone project only');
+  await page.goto('/?craft=' + ISW);
+  await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
+  await expect(page.getByTestId('massbox'), 'phones start WITHOUT the box').toHaveCount(0);
+  await page.getByTestId('toggle-options').click();
+  await expect(page.getByTestId('options-win')).toBeVisible();
+  await page.getByTestId('opt-static').check();
+  const box = page.getByTestId('massbox');
+  await expect(box).toBeVisible();
+  const w = (await box.boundingBox())!.width;
+  expect(w, 'the phone card is compact, not the 250 px desktop box').toBeLessThan(200);
+  await expect(page.getByTestId('mass-report')).toContainText('declared');
+  await expect(page.getByTestId('mass-density'), 'the structural-detail row stays off phones').toBeHidden();
+  await expect(page.getByTestId('mass-report')).toContainText('CoM');
+  await page.getByTestId('static-close').click();
+  await expect(page.getByTestId('massbox')).toHaveCount(0);
 });
 
 test('mobile: the panels are a drawer behind the ⚙ toggle', async ({ page }) => {

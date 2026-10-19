@@ -34,6 +34,17 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   const [hullOpacity, setHullOpacityState] = useState(1);
   const [gizmoOn, setGizmoOn] = useState(() => localStorage.getItem('archean-app-gizmo') !== '0');
   const [hiDef, setHiDefState] = useState(() => localStorage.getItem('archean-app-hidef') !== '0');
+  // the KSP STATIC INFO box (mass & CoM) is OPTIONAL (user 2026-10-19: "static
+  // info shouldn't necessarily show. it's too large on mobile, hide it under
+  // settings, x to close panel itself"): no unsolicited overlay — the ⚙ view
+  // options owns the switch (row static info box) and the box has its own ✕.
+  // With no stored choice, phones start WITHOUT it (it covered a third of the
+  // viewport); desktop starts with it as before.
+  const [staticInfo, setStaticInfo] = useState(() => {
+    const s = localStorage.getItem('archean-app-static-info');
+    return s === null ? window.innerWidth >= 768 : s === '1';
+  });
+  useEffect(() => { localStorage.setItem('archean-app-static-info', staticInfo ? '1' : '0'); }, [staticInfo]);
   const [rev, setRev] = useState(0);
   const [blockSel, setBlockSel] = useState(-1);
   const [brush, setBrush] = useState<Brush>({ type: 0, sx: 0, sy: 0, sz: 0, slot: 4 });
@@ -426,6 +437,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
                     opts={opts} hullOpacity={hullOpacity} onHullOpacity={setHullOp}
                                         gizmoOn={gizmoOn && mode === 'edit'} onGizmo={setGizmo}
                     hiDef={hiDef} onHiDef={onHiDef}
+                    staticInfo={staticInfo} onStaticInfo={setStaticInfo}
                     onOpt={toggleOpt}
                     onSelect={(ci, fly) => { engineRef.current?.select(ci); if (fly) engineRef.current?.flyTo(ci); }}
                     onSelectSub={bi => engineRef.current?.selectSub(bi)}
@@ -473,11 +485,16 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
                 className="ksp-win absolute right-2 top-2 z-30 max-h-[calc(100%-1rem)] w-[290px]
                            overflow-y-auto rounded-lg">
                 <ViewOpts opts={opts} onOpt={toggleOpt} hullOpacity={hullOpacity} onHullOpacity={setHullOp}
-                                    gizmoOn={gizmoOn} onGizmo={setGizmo} hiDef={hiDef} onHiDef={onHiDef} />
+                                    gizmoOn={gizmoOn} onGizmo={setGizmo} hiDef={hiDef} onHiDef={onHiDef}
+                                    staticInfo={staticInfo} onStaticInfo={setStaticInfo} />
               </div>
             )}
             {/* KSP bottom-left: the STATIC INFO black box (mass & CoM) */}
-            {bp && <div className="absolute bottom-2 left-3 z-[5]"><StaticInfo engine={engine} rev={rev} /></div>}
+            {bp && staticInfo && (
+              <div className="absolute bottom-2 left-3 z-[5]">
+                <StaticInfo engine={engine} rev={rev} onClose={() => setStaticInfo(false)} />
+              </div>
+            )}
             {/* KSP bottom-right: the camera cluster over the viewport */}
             <CameraCluster engine={engine} />
           </div>

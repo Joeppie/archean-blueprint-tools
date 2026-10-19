@@ -60,6 +60,7 @@ app/tools/wheelpair.mjs         REAL-CRAFT root-pose check (the solo ritual's
 app/tools/subride.mjs         REAL-craft SUBGRID joint audit: every (subgrid, master) pair's
                                 captured joint line (on its panel? near its part? no phantom
                                 lever) + the exactness of the panel riding the part's gizmo motion
+app/tools/staticinfo.mjs      viewport footprint of the STATIC INFO card (phone vs desktop)
 app/tools/hinging.mjs         where each SUBGRID's joint-handle (ring/arrow) lands ON SCREEN vs its
                                 master part — a mirrored clamp line put the handle metres away
 app/tools/jointturn.mjs       one joint's ANGLE turn traced: a point on the joint line must not
@@ -129,6 +130,16 @@ user's explicit say-so (Pages/release still serves it meanwhile).
   axis) and an arrow per slide master (data.pos in metres), Shift-snapped,
   twin-unison via propagateJoint. Pinned by app/e2e/hinge.spec.ts (real
   pointer drag on the dolphin fin + re-grip continuity + subgrid-only gating).
+- No unsolicited viewport overlays (user 2026-10-19: "Static info shouldn't
+  necessarily show. It's too large on mobile, hide it under settings, x to
+  close panel itself"): the KSP STATIC INFO card (mass & CoM) is a SETTING —
+  ⚙ row opt-static (localStorage archean-app-static-info; default ON only at
+  ≥768 px, OFF on phones), the card carries its own ✕ (static-close) that
+  flips the same setting, and on phones it renders COMPACT (164 px card, the
+  structural-density detail lines are md-only; measured 3.5 % of a 412×915
+  viewport vs 8.6 % for the old always-on 250 px card). Pinned by
+  app/e2e/panels.spec.ts (desktop ✕ ⇄ ⚙ row; pixel7 no-box default + compact
+  card) and auditable with node app/tools/staticinfo.mjs.
 - Mesh fidelity defaults (v0.182 user rule): the app renders the FULL game
   meshes (atlas prim.v) by DEFAULT — the ⚙ row offers the decimated twins
   (lv/li) as the opt-in for weak GPUs (localStorage archean-app-hidef '0').
