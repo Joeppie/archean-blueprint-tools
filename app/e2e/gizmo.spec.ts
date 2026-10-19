@@ -22,6 +22,8 @@ type Eng = {
   compViewPos(ci: number): { x: number; y: number; z: number } | null;
   select(ci: number): void;
   selectSub(bi: number): void;
+  gizmoDragAxis(): string | null;
+  ringScreenPoint(axis: 'x' | 'y' | 'z', deg?: number): { x: number; y: number } | null;
   blueprint: { data: { components: { orientation?: Record<string, number> }[] } } | null;
 };
 
@@ -40,6 +42,8 @@ function eng(op: string, arg: Record<string, unknown> = {}): (page: Page) => Pro
       case 'mov': e.gizmoTranslateView(arg['a'] as 'x' | 'y' | 'z', arg['m'] as number); return null;
       case 'sel': e.select(ci!); return null;
       case 'selsub': e.selectSub((arg as { bi: number }).bi); return null;
+      case 'axis': return e.gizmoDragAxis();
+      case 'ring': return e.ringScreenPoint(arg['a'] as 'x' | 'y' | 'z', (arg['deg'] as number) ?? 0);
     }
     return null;
   }, { op, arg });
@@ -52,6 +56,25 @@ async function openCraft(page: Page, id: string) {
 }
 const dist = (a: readonly number[], b: readonly number[]) =>
   Math.hypot(a[0]! - b[0]!, a[1]! - b[1]!, a[2]! - b[2]!);
+
+// small quaternion math for the ring-drag continuity pins (file quats are
+// plain serialisable objects through the Playwright boundary)
+type Q = { w: number; x: number; y: number; z: number };
+const qNorm = (q: Q) => Math.hypot(q.w, q.x, q.y, q.z);
+const qMul = (a: Q, b: Q): Q => ({
+  w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
+  x: a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+  y: a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+  z: a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+});
+const qInv = (q: Q): Q => ({ w: q.w, x: -q.x, y: -q.y, z: -q.z });
+const qAngle = (q: Q) => 2 * Math.acos(Math.min(1, Math.abs(q.w)));
+/** rotate a vector by q (q·v) */
+const rotY = (q: Q, v: readonly number[]): number[] => {
+  const { w, x, y, z } = q;
+  const tx = 2 * (y * v[2] - z * v[1]), ty = 2 * (z * v[0] - x * v[2]), tz = 2 * (x * v[1] - y * v[0]);
+  return [v[0] + w * tx + y * tz - z * ty, v[1] + w * ty + z * tx - x * tz, v[2] + w * tz + x * ty - y * tx];
+};
 
 test.describe('gizmo writeback', () => {
   const desktopOnly = () => test.skip(test.info().project.name !== 'chromium', 'desktop-only');
@@ -114,6 +137,67 @@ test.describe('gizmo writeback', () => {
     expect(((await eng('state')(page)) as { ci: number }).ci).toBeGreaterThanOrEqual(0);
     await eng('selsub', { bi: 4 })(page);
     expect(await eng('state')(page)).toEqual({ mode: 'off', ci: -1 });
+  });
+
+  test('multi-grip RING drags keep spinning in unison: the ring plane follows the live pose, per-event poses stay continuous (v0.181 continuity backlog)', async ({ page }) => {
+    desktopOnly();
+    await openCraft(page, ISW);
+    await page.getByTestId('filter').fill('aileron');
+    const row = page.locator('[data-idx]').first();
+    const ci = +(await row.getAttribute('data-idx'))!;
+    await row.click();
+    const qGet = async () => (await eng('quat', { ci })(page)) as Q;
+    const ring = async (deg: number) => (await eng('ring', { a: 'y', deg })(page)) as { x: number; y: number } | null;
+
+    // one REAL-pointer grip: aim the drawn Y ring, sweep `arc`° along the
+    // circle frozen from the pose AT PRESS, sampling the FILE quaternion
+    // every event (the shipped TGC writeback path, no synthetic shortcuts).
+    const grip = async (arc: number) => {
+      const p0 = await ring(0);
+      expect(p0, 'a Y-ring grab point exists').not.toBeNull();
+      const path: { x: number; y: number }[] = [];
+      for (let i = 1; i <= 10; i++) path.push((await ring(arc * i / 10))!);
+      await page.mouse.move(p0!.x, p0!.y);
+      await page.mouse.down();
+      let prev = await qGet();
+      let axis: string | null = null;
+      const steps: number[] = [], signs: number[] = [];
+      for (const p of path) {
+        await page.mouse.move(p.x, p.y);
+        if (axis === null) axis = (await eng('axis')(page)) as string | null;
+        const q = await qGet();
+        const d = qMul(q, qInv(prev));
+        steps.push(qAngle(d));
+        const n = rotY(prev, [0, 1, 0]);           // the part's LIVE local ŷ
+        signs.push(Math.sign(d.x * n[0] + d.y * n[1] + d.z * n[2]));
+        prev = q;
+      }
+      await page.mouse.up();
+      return { axis, steps, signs, end: prev };
+    };
+
+    const q0 = await qGet();
+    const g1 = await grip(38);
+    expect(g1.axis, 'the grip landed on the Y ring').toBe('Y');
+    const a1 = qMul(g1.end, qInv(q0));
+    expect(qAngle(a1), 'grip 1 turned the part').toBeGreaterThan(0.05);
+    expect(Math.max(...g1.steps), 'no per-event pose pop').toBeLessThan(0.6);
+    const s1 = g1.signs.find(s => s !== 0) ?? 0;
+    expect(s1, 'grip 1 actually spun (non-vacuous)').not.toBe(0);
+    expect(g1.signs.filter(s => s !== 0).every(s => s === s1), 'grip 1: one rotation direction').toBe(true);
+
+    // re-grip: the grab point is recomputed from the ring's CURRENT (rotated)
+    // pose — landing there and STILL picking 'Y' proves the drawn ring plane
+    // followed the live pose (the v0.163 mouseDown-rebase contract)
+    const g2 = await grip(38);
+    expect(g2.axis, 're-grip lands on the MOVED Y ring: the handle plane follows the live pose').toBe('Y');
+    const a2 = qMul(g2.end, qInv(g1.end));
+    expect(qAngle(a2), 'grip 2 keeps spinning from wherever the part now is').toBeGreaterThan(0.05);
+    expect(a2.x * a1.x + a2.y * a1.y + a2.z * a1.z, 'grip 2 continues in the SAME direction').toBeGreaterThan(0);
+    expect(Math.abs(qNorm(g2.end) - 1), 'the file quaternion stays a unit quat (no multi-rotation noise)').toBeLessThan(1e-6);
+    const n2 = g2.signs.find(s => s !== 0) ?? 0;
+    expect(g2.signs.filter(s => s !== 0).every(s => s === n2), 'grip 2: one rotation direction').toBe(true);
+    expect(n2, 'both grips spin the same way').toBe(s1);
   });
 
   test('the mode widget pops on a canvas part pick and re-modes the gizmo', async ({ page }) => {

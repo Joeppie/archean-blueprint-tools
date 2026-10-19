@@ -1058,16 +1058,17 @@ refuses to cut a tag when the strings disagree.
   client generates the prop surface from `data.blades/radius/width/twist/
   pitch` (dev `propellerGeometry` mirrors it); viewer draws the static gltf
   template. Port = generator in app/ + a matrix-pair pin (MATRIX.md §Scope).
-- **Ring-drag rotation continuity (user-requested, v0.163+):** dragging a
-  rotate ring must reference the UPDATED/ROTATED pose continuously, so a
-  multi-grip sweep (grab ring, drag, release, re-grab) keeps rotating the
-  part smoothly wherever it currently is; the accumulated angle must
-  FLIP-OVER AND MODULO — raw per-event atan2 wraps unwrapped into a
-  continuous spin (gizmoUnwrap) and full turns folded to the equivalent
-  pose, never written as multiple-rotation noise. mouseDown already
-  rebases knobQ0 to the live pose; future work: verify multi-grip sweeps
-  end-to-end (pin), check the ring's drawn plane follows the live pose
-  during re-grip, and confirm ±π/2π boundary drags stay continuous.
+- **Ring-drag rotation continuity: DONE 2026-10-19 (app).** The REAL-pointer
+  multi-grip sweep is pinned in app/e2e/gizmo.spec.ts: Engine.ringScreenPoint
+  computes a grab point on the DRAWN ring from the CURRENT proxy pose + TGC's
+  own handle scale, so grip 2 aims where the ring ACTUALLY IS after grip 1 —
+  re-grip still picks axis 'Y' (the handle plane follows the live pose), each
+  grip keeps spinning in the same direction from wherever the part is, the
+  per-event file-quaternion steps never pop (<0.6 rad), and the saved quat
+  stays unit-normalised (folded equivalent pose, no multi-rotation noise).
+  TGC's local ring is displacement-cumulative from press (no atan2 wrap);
+  mouseDown rebases the gesture (captureGesture) exactly like the legacy
+  knobQ0 contract.
 - **Git attribution: DONE 2026-10-10 (v0.165).** Repo identity is
   `Joeppie <3845457+Joeppie@users.noreply.github.com>` (GitHub noreply:
   links to the account without publishing the real mailbox); all 98

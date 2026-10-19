@@ -1639,6 +1639,39 @@ export class Engine {
     this.gizmoProxy.position[ax] += m;
     this.gizmoWriteback();
   }
+  /** the ring/arrow axis TGC picked for the LIVE drag ('X'|'Y'|'Z'|'E'…|null)
+   *  — pins assert a real-pointer grip landed on the DRAWN ring at its
+   *  CURRENT (rotated) position: proof the handle plane follows the live pose */
+  gizmoDragAxis(): string | null {
+    return this.gizmo?.axis ?? null;
+  }
+  /** client-px grab point ON the drawn rotate ring of `axis`, at sweep-angle
+   *  `deg` around the circle (0 = the point whose tangential drag rotates
+   *  about the live axis). Derived from the CURRENT proxy pose and TGC's own
+   *  handle scale, so a re-grip aims where the ring ACTUALLY IS after the
+   *  last grip (ring-drag continuity backlog pin). */
+  ringScreenPoint(axis: 'x' | 'y' | 'z', deg = 0): { x: number; y: number } | null {
+    const g = this.gizmo, renderer = this.renderer, cam = this.camera;
+    if (!g || !renderer || !this.gizmoEnabled || this.gizmoMode !== 'rotate' || this.gizmoCi < 0) return null;
+    const e = cam.getWorldPosition(new Vector3()).sub(this.gizmoProxy.getWorldPosition(new Vector3())).normalize();
+    const q = this.gizmoProxy.getWorldQuaternion(new Quaternion());
+    const A = new Vector3(axis === 'x' ? 1 : 0, axis === 'y' ? 1 : 0, axis === 'z' ? 1 : 0);
+    const n = A.applyQuaternion(q);                       // ring-plane normal, LIVE pose
+    if (Math.abs(n.dot(e)) > 0.95) return null;           // edge-on: aim another view
+    const u = e.clone().addScaledVector(n, -e.dot(n)).normalize();  // in-plane ⊥ n
+    const v = new Vector3().crossVectors(n, u);           // tangential at deg 0
+    // TGC's per-frame handle scale (TransformControls.updateMatrixWorld):
+    // factor * size/4, size = 1; the ring's pick torus radius is 0.5 UNIT
+    const dist = cam.getWorldPosition(new Vector3()).distanceTo(this.gizmoProxy.getWorldPosition(new Vector3()));
+    const fov = (cam as { fov?: number }).fov ?? 50;
+    const r = dist * Math.min(1.9 * Math.tan(Math.PI * fov / 360), 7) / 4 * 0.5;
+    const t = deg * DEG;
+    const p = this.gizmoProxy.getWorldPosition(new Vector3())
+      .addScaledVector(u, Math.cos(t) * r).addScaledVector(v, Math.sin(t) * r);
+    p.project(cam);
+    const rect = renderer.domElement.getBoundingClientRect();
+    return { x: rect.left + (p.x + 1) / 2 * rect.width, y: rect.top + (1 - p.y) / 2 * rect.height };
+  }
 
   // ------------------------------------------------ hinge UI (subgrid handles)
   // A selected SUBGRID gets no free gizmo (v0.170 — it rides its masters), but
