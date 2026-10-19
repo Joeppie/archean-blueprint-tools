@@ -190,6 +190,48 @@ sRGB.
   (`xc_files`), Beacon holds frequency + last transmitted payload, PilotSeat holds
   `{emitPlayerToken, smoothControls}`, HudController holds HUD `.xc` source.
 
+## Mass & build cost — the game's server/editor rules (transcribed 2026-10-19,
+verified vs the installed build 136 + the dev viewer panels; implementation
+`tools/game_data.py`, cross-check harness MATRIX.md)
+
+- **Sources**: per-component mass = `[ENTITY] mass` in
+  `modules/<module>/components/<Type>/<Type>.ini`; items + crafter recipes =
+  `modules/<module>/config.yaml` (`items: {id: {max_stack}}`, `recipes:
+  [{label, context, category, time, input, output}]`; shorthand bare-string
+  input = qty 1; dynamic `input.composition.*` quantities exist only in
+  non-crafter contexts (crusher) — never part of the cost unfold).
+  Item ids are `MODULE.Type`; 165 items / 140 crafter recipes / 111 component
+  masses on build 136.
+- **Blueprint-tool content list** (game `GetBlueprintContents`,
+  ARCHEAN_build/common.hh, via the dev's port): blocks cost their FULL rect
+  `(sx+1)(sy+1)(sz+1)` of `ARCHEAN_build.<Material>Block` (Composite,
+  Concrete, Steel, Aluminium, Glass, Lead, Titanium by `material` 0..6) —
+  shape/orientation irrelevant; hull triangles cost
+  `max(ceil(area·0.05 m / 0.25³), 1)` blocks; struts `ceil(len·100)`
+  SteelRod; frame beams 1 × SteelBeam each; cables cost their length in cm
+  with the game's quirk of **truncating per SEGMENT** (2×1.5 cm = 2 cm);
+  components 1 item keyed by the file's `module.Type`; `Build` subgrid items
+  deleted; `Dashboard` replaced by 1 × DashboardTool.
+- **Raw-material unfold** (game `RepairEconomy.h`): recursive through crafter
+  recipes, first recipe outputting an item wins, fractional batches
+  `qty/out_qty`, craft time += `time·batches`. No recipe ⇒ RAW, unless the id
+  is a catalog component or a recipe cycle ⇒ UNRESOLVED (the dev UI's 'stuck'
+  rows) — a stuck component item therefore means a wrong module mapping.
+- **Mass model** (game `MaterialProperties.hh` + server collider update, via
+  the dev's port, verified against game-written blueprint `mass` fields):
+  densities are per 0.25 m CELL CUBE (not kg/m³): composite 0.25, concrete
+  10, steel 1, aluminium 0.5, glass 1, lead 150, titanium 0.6; blocks =
+  rect × density, **any non-cube type costs HALF its rect**; triangles
+  `area·0.05 m / cell³ × density`; struts 1 kg/m; beams 10 kg; components the
+  ini mass; **tank contents are FRACTIONS of capacity** (FluidTank 1.5 m³,
+  SmallFluidTank 0.2, BigFluidTank 14) × the game's "very crude" liquid
+  density = `Σ atomic_mass·n · 1.6605402e-27 / Σ (4/3)π(0.92e-10·n)³` with
+  the game's atomic table (H 1.008 … U 238.03; isotope suffixes stripped,
+  e.g. `(U235)F6` → UF6). Centre of mass = mass-weighted cell/part centres.
+- The viewer's mass panel (view3d.js) is its own calibration display (declared
+  vs computed); the AUTHORITATIVE calculator for the matrix suite is
+  `tools/game_data.py compute_mass/required_items/expand_to_raw`.
+
 ## `pipes`
 
 Data-port cables: `{a_component, a_port, b_component, b_port, radius, segments[]}` where

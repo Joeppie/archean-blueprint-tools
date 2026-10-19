@@ -1,0 +1,118 @@
+# MATRIX.md — component matrix: mass, ingredients & render vs the dev viewer
+
+Purpose: prove, per COMPONENT TYPE, that this repo's data and renderers agree
+with the ground truth — the installed GAME FILES for the numbers, the dev's
+XenonViewer for what the game's own editor tooling displays — and give a
+repeatable release test to re-run **whenever the game version increments**.
+
+## Scope (current state)
+
+Per component type (all 106 in `viewer/models/manifest.json`), batched three
+to a craft to keep the number of test cases down:
+
+1. **render** — the component at rest and, where it has joint/state data, in
+   a deflected state (`Torus` vs `TorusReverse`, mudguard, aileron −15°,
+   hinge 90°, track +0.25 m, open door, lever 0.7, button pressed, tank
+   fluid…). Both viewers draw the real game models; screenshots at the SAME
+   camera (the dev's `iso` preset: azimuth 0.9, elevation 0.45 rad; our view
+   space mirrors z → camera dir (0.705, 0.435, −0.560)).
+2. **mass** — the game's server model: component `[ENTITY] mass` from the
+   `.ini`; per-material density per 0.25 m cell cube (composite .25,
+   concrete 10, steel 1, aluminium .5, glass 1, lead 150, titanium .6 kg),
+   shaped blocks = half their rect, hull triangles `area·0.05 m`, struts
+   1 kg/m, frame beams 10 kg, tank contents = fraction × capacity
+   (FluidTank 1.5 m³, SmallFluidTank 0.2, BigFluidTank 14) × the game's
+   "very crude" liquid density from atomic masses (radius ∝ n³).
+   Center of mass = kg-weighted positions — a second, position-sensitive
+   check the dev's panel exposes for free.
+3. **ingredients** — the Blueprint tool's content list (`GetBlueprintContents`,
+   ARCHEAN_build/common.hh): blocks cost their FULL rect of the material's
+   block item (shape irrelevant), triangles `ceil(vol)` ≥ 1, struts 100 rods
+   per m (ceil), cables truncate PER SEGMENT in cm (2×1.5 cm = 2 cm, not 3),
+   frames = SteelBeams, components = 1 item keyed `module.Type` **as the file
+   says**, `Build` subgrids dropped, Dashboard → one DashboardTool.
+   Raw materials = recursive crafter-recipe unfold (`RepairEconomy.h` rule):
+   first crafter recipe outputting an item wins, fractional batches, items
+   with no recipe are raw UNLESS they are catalog components (then
+   "unresolved" = the stuck rows; a stuck component ⇒ wrong module mapping).
+
+Sources inside the install: `modules/<module>/components/<Type>/<Type>.ini`
+(mass) + `modules/<module>/config.yaml` (items, recipes; shorthand bare-string
+inputs, dynamic `input.composition.*` outputs only for non-crafter contexts —
+dropped). The dev's own catalog (`models/catalog.json`) is generated from the
+game SOURCE on the dev's schedule; ours from the installed build
+(`APP_VERSION_BUILD_NUMBER.txt`). Cross-checks 2026-10-19 (build 136):
+111/111 masses, 140/140 crafter recipes, 165/165 items identical. **A
+mismatch after a game update is expected drift, not automatically a bug.**
+The port attribution for the formulas follows NOTICE §2 (dev viewer + game
+headers), same terms as the existing ports; knowledge is mirrored into
+FORMAT.md so answers stay offline.
+
+## Files
+
+| path | role |
+|---|---|
+| `tools/game_data.py` | our extraction + mass/cost model from GAME FILES; `--selfcheck <blueprint>` prints items/raw/mass for any craft |
+| `tools/make_matrix_test.py` | generates the fixture corpus rows (ids `90000010NN` rest, `90000020NN` deflected) — deterministic |
+| `app/tools/devscrape.mjs` | Playwright: uploads each fixture to the Xenon viewer (it has NO URL loader — file input only), scrapes mass/cost/contents/notes panels, screenshots; drives OUR viewer via `?open=` + the `window.HARCHEAN` hooks only (frozen viewer untouched), camera matched to the dev iso, proxy + `&real` shots |
+| `tools/matrix_verify.py` | diffs the scraped panels vs `game_data` numbers → `reports/matrix/REPORT.md`, exit code |
+| `tests/matrix.sh` | orchestrates all of the above |
+
+## Running
+
+```bash
+bash tests/matrix.sh                    # all matrix crafts (network + game install)
+bash tests/matrix.sh 9000001001,9000002001   # just these
+MATRIX_SKIP_SHOTS=1 bash tests/matrix.sh     # panels only (faster triage)
+python3 tools/matrix_verify.py --dir reports/matrix   # re-diff only
+```
+
+Outputs land in `reports/matrix/`: per-craft `<id>.json` dossier, `<id>-dev.png`,
+`<id>-ours-proxy.png`, `<id>-ours-real.png`, `REPORT.md`.
+The dev viewer loads each blueprint from OUR generated file — the comparison
+is the same blueprint through both pipelines, not two approximations.
+
+## Reading the verdicts
+
+* `stuck in dev raw: MODULE.Type` → the module written in our fixture (and
+  the manifest) is wrong for that type, or the game added/renamed a recipe.
+* `mass dev X vs ours Y` → ini mass parse drift or a model rule changed
+  (check `--selfcheck` against a real craft of that game build).
+* `raw ... differ` → recipe table update (also compare
+  `python3 tools/game_data.py --list-recipes` vs the dev catalog).
+* dev `notes` entries → the dev rejected part of our fixture: field-level
+  format regression, fix the generator and pin the format in FORMAT.md.
+* render diffs on deflected twins → the data-driven node selection
+  (conditional renderables, joint pose) disagrees with the dev.
+
+## Known intentional viewer divergences (not failures)
+
+* **rotated 2026 files**: the dev places components with the RAW Unity
+  quaternion; the game (and we) use the CONJUGATE for palette-bearing files
+  (FORMAT.md § Handeness). Fixtures therefore all sit at identity — rotated
+  comparisons against the dev would flag a KNOWN dev-side mirror.
+* our default is proxies, `&real` the game models; the dev always renders the
+  real models — compare `<id>-ours-real.png` against `<id>-dev.png`.
+* `ArrowButton` + `Led` are dashboard-BUILTIN element models (they live under
+  `components/Dashboard/`), not catalog parts: the dev viewer has no catalog
+  entry, draws a placeholder and says so in its notes panel — we draw the
+  real model. Their craft rows are EXPECTED to show that one note; the
+  verifier tolerates exactly that.
+* occupancy display defaults differ (our viewer shows occupancy boxes, the
+  dev draws them in its `occupancies` layer per its scene options) — the
+  harness compares the OCCUPANCY DATA via the panels/geometry, not the layer
+  visibility.
+* lighting/HDR/sky differ by design; the harness compares GEOMETRY, pose,
+  occupancy layer content and the numbers — eyeball the pairs side by side.
+
+## Extending (next phases)
+
+* block-type rows (types 0..52, then multi-cell sizes) — same harness, extend
+  `make_matrix_test.py`; occupancy/material columns ride along.
+* app/ port: when the React app covers these components, add `--ours2
+  <app-url>` second-pass shots to devscrape and pin the deltas as Playwright
+  expectations in app/e2e.
+* occupancy exactness: fixtures carry 1-cell occupancies; deriving the GAME's
+  own footprint rule (collider box → cells) would let us generate the exact
+  occupancies the editor would write — compare against client saves
+  (`Archean-data/client/blueprints`) which contain real footprints.

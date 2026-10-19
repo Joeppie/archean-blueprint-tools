@@ -25,6 +25,18 @@ tools/adjust_seat.py            reference example of a safe format edit
 tools/find_install.py           discover a local Archean install / blueprint
                                 saves / workshop dir (the procedure: LOCATIONS.md)
 tools/make_orient_test.py       regenerates the chirality probe craft 9000000001
+tools/make_matrix_test.py       regenerates the COMPONENT MATRIX fixtures
+                                (90000010NN rest / 90000020NN deflected, 3 types
+                                per craft; mass+ingredients vs the Xenon dev
+                                viewer — see MATRIX.md)
+tools/game_data.py              mass & build-cost model straight from the GAME
+                                FILES ([ENTITY] mass, modules/*/config.yaml
+                                items+recipes); --selfcheck <blueprint.json>
+tools/matrix_verify.py          diffs game-file numbers vs the dev viewer's
+                                scraped mass/cost panels (reports/matrix/)
+app/tools/devscrape.mjs         Playwright matrix driver: Xenon viewer panels +
+                                iso screenshots, our viewer via HARCHEAN hooks
+tests/matrix.sh                 the whole matrix ritual (see MATRIX.md)
 tools/make_landing.py         regenerates the landing gallery + viewer/workshop.json
 tools/add_workshop.py <id>      ingest a locally-subscribed workshop craft
                                 (names: tools/ws-names.tsv, fetched slowly — Steam rate-limits)
