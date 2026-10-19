@@ -22,10 +22,10 @@ import os
 import numpy as np
 from PIL import Image
 
-# per-viewer UI chrome: dev floats ~300 px panels both sides; our viewer is a
-# 350 px left dock on a full-width canvas
+# per-viewer UI chrome: dev floats ~300 px panels both sides; our viewer
+# docks its 340 px DevTools panel on the RIGHT of a full-width canvas
 CROP_DEV = (300, 330, 70, 80)
-CROP_OURS = (355, 25, 25, 25)
+CROP_OURS = (25, 355, 25, 25)
 
 
 def foreground(img, crop):

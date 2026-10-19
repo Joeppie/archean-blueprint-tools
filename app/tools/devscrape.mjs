@@ -96,6 +96,20 @@ async function scrapeDev(page, shotPath) {
       text: e.textContent.replace(/\s+/g, ' ').trim() }))
       .filter((c) => c.id && !c.id.startsWith('layer:')));
   await page.click('[data-view="iso"]');
+  // silhouette hygiene (mirrors what openCraftOurs does to OUR scene): the
+  // ground plane/sky, grid and drop shadows are styling, not subject — off
+  // for the metric pair; rows live in the collapsed 'rendering' fold
+  const optFold = page.locator('details.sp-fold:has(#scene-options)');
+  if ((await optFold.getAttribute('open')) === null) {
+    await optFold.locator('summary').click();
+  }
+  for (const label of ['ground grid', 'sky & ground', 'shadows']) {
+    const row = page.locator('#scene-options .opt-row', { hasText: label });
+    if (await row.count()) {
+      const on = await row.evaluate((r) => r.classList.contains('on'));
+      if (on) await row.click();
+    }
+  }
   await page.waitForTimeout(1200);
   if (DO_SHOTS) await page.screenshot({ path: shotPath });
   // build-cost lives in a collapsed <details>; rows exist in the DOM but the
@@ -152,6 +166,10 @@ async function openCraftOurs(page, url, iso) {
             (c.isMesh && c.geometry?.type === 'PlaneGeometry' &&
              c.geometry?.parameters?.width === 120)) c.visible = false;
       }
+      // occupancy wire too: the DATA is verified numerically (layer row
+      // count); its thin lines only stretch our silhouette bbox
+      const occ = H.viewToggles?.occ;
+      if (occ && occ.cb.checked) { occ.cb.checked = false; occ.cb.onchange(); }
       const d = [...dir];
       const t = H.controls.target.clone();
       const dist = H.camera.position.distanceTo(t);
