@@ -156,7 +156,17 @@ export function geoFor(type: string): Promise<LoadedModel | null> {
     cache.set(type, loadManifest().then(async m => {
       const info = m?.[type];
       if (!info) return null;
-      const j = await getJson(BASES.map(b => `${b}/${type}.json`), type);
+      // indexed /atlas/<n>.json FIRST: type NAMES can collide with generic
+      // filter-list rules (EasyPrivacy '/beacon.js' substring-matches
+      // 'Beacon.json' — the user's Firefox blocked ONLY the beacon part;
+      // user 2026-10-19: "change the URL of the beacon so it doesnt cause
+      // a problem"), the numeric route carries no words a rule can key on
+      const names = Object.keys(m).sort();
+      const idx = names.indexOf(type);
+      const j = await getJson([
+        ...(idx >= 0 ? [`/atlas/${idx}.json`] : []),
+        ...BASES.map(b => `${b}/${type}.json`),
+      ], type);
       if (!j) return null;
       return { geo: bakeGeo(j as ModelGeo), info };
     }).catch(() => null).then(r => { if (!r) cache.delete(type); return r; }));

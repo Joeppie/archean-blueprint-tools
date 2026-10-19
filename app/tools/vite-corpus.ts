@@ -185,10 +185,21 @@ function handler(req: IncomingMessage, res: ServerResponse, next: () => void) {
   const url = decodeURIComponent((req.url ?? '').split('?')[0]!);
   if (url === '/workshop.json') return repoFile(req, res, 'viewer/workshop.json', 'application/json');
   if (url.startsWith('/models/') || url.startsWith('/atlas/')) {
-    // two aliases for the same files: browser content-blockers/ETP pattern
-    // rules keyed on "/models/" (the user's Firefox white-block session)
-    // can kill the SPA's XHR to one shape while navigation and other
-    // servers still work — the loader (models.ts) walks both aliases
+    // INDEXED form /atlas/<n>.json: n = position of the type name in the
+    // SORTED manifest keys. Why: EasyPrivacy's generic substring rule
+    // '/beacon.js' (analytics beacons) also matches 'Beacon.json' — the
+    // GAME model of the Beacon part — so ANY URL naming that type dies in
+    // Adblock Plus/Firefox (user report 2026-10-19: every other model
+    // loaded, only the beacon became a white stand-in box). The indexed
+    // route carries no type words at all; models.ts prefers it.
+    const im = /^\/atlas\/(\d+)\.json$/.exec(url);
+    if (im) {
+      const mf = JSON.parse(fs.readFileSync(path.join(REPO, 'viewer/models/manifest.json'), 'utf8')) as Record<string, unknown>;
+      const name = Object.keys(mf).sort()[+im[1]!];
+      if (!name) { res.statusCode = 404; res.end('nope'); return; }
+      return repoFile(req, res, `viewer/models/${name}.json`, 'application/json');
+    }
+    // named aliases: <Type>.json only, no traversal
     const m = /^\/(?:models|atlas)\/([A-Za-z0-9_.-]+\.json)$/.exec(url);
     if (!m || m[1]!.includes('..')) { res.statusCode = 404; res.end('nope'); return; }
     return repoFile(req, res, `viewer/models/${m[1]}`, 'application/json');
