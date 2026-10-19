@@ -1040,33 +1040,66 @@ the seat must not steer or slow the wind (was: reclining the ISW seat shrank
 the un-normalized flow vector → wind "changed direction and speed", user).
 Pin `seatpitch=true`.
 
-## Per-asset gltf loader conventions + Beacon decode ambiguity (verified Oct 6; implementation REVERTED in v0.146 — do NOT re-land without pins)
+## Per-asset gltf VERTEX SPACE — RESOLVED (2026-10-19; app/ implementation live)
 
-- The `.ini` `[RENDERABLE]` rotation == the gltf node rotation (same Euler, degrees;
-  verified by a full-atlas scan of the game modules: PilotSeat's seat node quat
-  (0.707,0,0,0.707) == `.ini` `rotation=90,0,0`). The extractor keeps the raw gltf
-  quat `[x,y,z,w]` in the geo files.
-- The loader convention is **per-asset**, not global:
-  - **z-swap assets** (gltf node rotation = identity, `.ini` rotation = 0 — Beacon,
-    Crafter, FluidJunction): geometry arrives in Blender author space; Unity placement
-    = (gx, −gz, gy), i.e. bake Rx(+90) at load.
-  - **y-up assets** (non-identity node rotation matching the `.ini` euler — PilotSeat):
-    apply the node rotation as-is, NO bake.
-  - The v0.145 attempt applied one global bake and passed every existing pin while
-    flipping the y-up assets upside-down — pins are sign-invariant on axisymmetric parts.
+The Oct-6 note below this line chased a "per-asset loader convention" through
+gltf node rotations; that framing was wrong. The truth, established from the
+dev viewer's sources (`applyIniTransforms` + its `models/catalog.json`), the
+game's `.ini` colliders and a full-atlas census:
+
+- **The `.ini` node tree (positions + ZYX eulers) is authored in the PART'S
+  FILE FRAME** — the same frame as `[ADAPTER]` and `[COLLIDER]` (colliders
+  ALSO carry `position`+`rotation` fields the extractor drops; apply them).
+- **XenonViewer transforms the node chain into the glTF basis with
+  C(x,y,z)=(x,z,−y)** (catalog `position`/`euler` are C-transformed — verified
+  against ActiveRadiator/SmallTurboPump/Bobblehead/PilotSeat/ToggleButton) and
+  renders the raw glTF meshes. Algebraically dev content ≡ the RAW .ini chain
+  applied to **Rx(+90)=(x,−z,y) baked** vertices, expressed in the C basis.
+  So in our (file-frame) renderer the dev-equivalent rule is:
+  **raw .ini chain + C⁻¹-baked vertices**.
+- **The game's own loader is per-asset** (Unity-style "Bake Axis Conversion"
+  chosen per import): the majority of assets arrive Z-up (Blender) and the
+  game bakes them; a minority already ship Y-up (their raw verts + raw chain
+  are exactly what the collider box fits — SmallWheel's torus, the Beacon's
+  mast, sensors, ToggleButton…). Applying the bake to the y-up minority flips
+  them upside-down (v0.143/v0.145's global-bake regression, user-confirmed).
+- **Classification is data, not folklore**: `tools/asset_space.py` builds each
+  type's node-tree cloud raw and Rx90-baked and scores both against the
+  properly transformed `.ini` collider boxes; strictly-better-baked (margin
+  0.15 m) → baked; ties/degenerate colliders stay RAW (pre-fix look).
+  The 32-type table lives in `app/src/engine/models.ts` (`UNITY_BAKED_TYPES`),
+  applied once per type in `bakeGeo()` at atlas load; `unityBake` = (x,−z,y).
+  RE-RUN the tool after game updates (same ritual as the conditional-parts
+  drop table).
+- **Pins (sign-sensitive, measured in world):** `app/src/engine/__tests__/
+  asset-space.test.ts` (bake algebra + table gates) and
+  `app/e2e/asset-space.spec.ts` (identity-orientation matrix fixtures: the
+  ActiveRadiator slab lies FLAT, the Aileron plate spans Z, the TrashCan lies
+  along Z, ToggleButton stays RAW). `gizmo.spec.ts` now picks the spin axis
+  PERPENDICULAR to the origin→pivot arm — the baked flat-plate aileron put
+  the arm exactly on ŷ and silently zeroed a hardcoded ŷ orbit (2026-10-19).
+- **The frozen legacy viewer is UNCHANGED** (still raw-chain, every type) —
+  its Oct-6 selftest numbers (aileron tip y≈−0.08, Beacon mast) were derived
+  against that space; Pages therefore shows the pre-fix vertex space for the
+  32 baked types until the user decides to port.
 - **v1 legacy files (no `data.colors`):** real-model prims arrive in Blender/gltf
   author space (Unity = (gx,−gz,gy)) and occ boxes must draw from
   `components[].occupancies`, NOT the type-255 mirrors (those sit on per-placement
   build-time grids, 3–6 m off on the mosaic craft). Verified on 3334698274; the
   implementation was reverted with v0.143 — re-land behind a pin.
-- **Beacon decode ambiguity:** the ISW beacon stores a 180° quaternion whose z-term
-  sign is ambiguous under our mirror decode (both signs pass the comptest pin at
-  0.000 m — the mast is a cylinder). The game's own R(q*) puts the mast forward/left
-  ~45° off; the verified modern decode puts it up. Needs an asymmetric probe craft
-  from the game (like tools/make_orient_test.py for text) before ANY decode change.
-- **Pins-first rule:** sign flips on axisymmetric parts pass the existing suite
-  silently. Add the pin BEFORE re-landing: real-model Beacon mast tip in world
-  (comptest-grade), aileron real-model tip below hinge on a palette file.
+- **Beacon decode ambiguity:** unchanged — the ISW beacon's 180° quaternion
+  z-term stays ambiguous (cylinder mast); Beacon classifies RAW (tie default),
+  so the decode question and the vertex-space question never interact.
+  Needs an asymmetric probe craft before ANY decode change.
+- **Pins-first rule** stands: sign flips on axisymmetric parts pass existing
+  suites silently — measure against the collider box, not a viewer.
+
+### superseded (Oct 6 notes, kept for provenance)
+- The `.ini` `[RENDERABLE]` rotation == the gltf node rotation — NOT true of
+  the shipped glTFs (current extraction: node rotations identity, node
+  translations = C-transformed absolute .ini chain + authoring offsets).
+- "y-up assets are recognized by non-identity node rotation" — superseded by
+  the collider census; the discriminator is the collider fit, not rotations.
 
 ## Subgrids (`Build` components) — attach semantics, fully decoded (v0.153; join decoded v0.154)
 

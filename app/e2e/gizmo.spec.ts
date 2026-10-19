@@ -96,16 +96,25 @@ test.describe('gizmo writeback', () => {
     const r0 = dist(view(pos0), pivot0!);
     expect(r0, 'an aileron origin sits OFF its visible bbox centre (non-vacuous orbit)').toBeGreaterThan(0.05);
 
-    await eng('rot', { a: 'y', d: 30, ci })(page);
+    // Spin about a VIEW axis PERPENDICULAR to the lever arm pivot−origin:
+    // a spin about an axis PARALLEL to the arm rotates the origin about its
+    // own axis — zero displacement (the baked flat-plate aileron put the arm
+    // exactly on ŷ, which silently de-vacuated the old hardcoded 'y' spin).
+    const arm = view(pos0).map((v, i) => v - pivot0![i]!);
+    const ax = (['x', 'y', 'z'] as const)[
+      arm[0]! ** 2 <= arm[1]! ** 2 && arm[0]! ** 2 <= arm[2]! ** 2 ? 0
+        : arm[1]! ** 2 <= arm[2]! ** 2 ? 1 : 2];
+
+    await eng('rot', { a: ax, d: 30, ci })(page);
     const pivot1 = (await eng('pivot')(page)) as [number, number, number];
     const pos1 = (await eng("pos", { ci })(page)) as { x: number; y: number; z: number };
     const q1 = (await eng('quat', { ci })(page)) as Record<string, number>;
     expect(dist(view(pos1), pivot1), 'origin orbits the pivot at constant radius').toBeCloseTo(r0, 6);
-    expect(dist(view(pos1), view(pos0)), 'the origin actually MOVED').toBeGreaterThan(0.01);
+    expect(dist(view(pos1), view(pos0)), 'the origin actually MOVED').toBeGreaterThan(0.3 * r0);
     const dot = ['w', 'x', 'y', 'z'].reduce((s, k) => s + q1[k]! * q0[k]!, 0);
     expect(dot, 'the saved quaternion turned').toBeLessThan(0.999);
 
-    await eng('rot', { a: 'y', d: -30, ci })(page);
+    await eng('rot', { a: ax, d: -30, ci })(page);
     const pos2 = (await eng("pos", { ci })(page)) as { x: number; y: number; z: number };
     const q2 = (await eng('quat', { ci })(page)) as Record<string, number>;
     for (const k of ['x', 'y', 'z'] as const) expect(pos2[k]).toBeCloseTo(pos0[k], 6);

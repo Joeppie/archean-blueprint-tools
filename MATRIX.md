@@ -101,6 +101,13 @@ scene.js settles where per-part rendering comes from:
   `[ENTITY]` (`mass`, `airtight`, `base_planes`, `symmetric`). Euler ZYX
   node-tree composition — exactly what `viewer/models/manifest.json`
   (renderables/joints) already encodes; gltf node transforms stay ignored.
+  VERTEX SPACE (2026-10-19): the dev re-expresses that chain in the glTF basis
+  C=(x,z,-y), which equals the raw chain over Rx(+90)-baked verts; the game's
+  own loader bakes per asset (majority Z-up, minority already Y-up — its
+  `.ini` collider box arbitrates). app/ implements this via
+  `tools/asset_space.py` + models.ts `UNITY_BAKED_TYPES` (FORMAT §Per-asset
+  gltf VERTEX SPACE); a wrong-space part renders the SAME parts rotated 90°
+  about the part's placement — re-run the tool after game updates.
 * **Part visibility/animation is NOT data**: no ini/yaml key hides or moves
   a part. The game client toggles `renderables["mudguard"]->active` etc.
   per frame by part NAME + `data` (C++). The dev mirrors it with a

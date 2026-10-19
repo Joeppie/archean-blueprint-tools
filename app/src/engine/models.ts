@@ -111,10 +111,56 @@ export function geoFor(type: string): Promise<LoadedModel | null> {
       const info = m?.[type];
       if (!info) return null;
       const r = await fetch(`${BASE}/${type}.json`).catch(() => null);
-      return r && r.ok ? { geo: await r.json() as ModelGeo, info } : null;
+      return r && r.ok ? { geo: bakeGeo(type, await r.json() as ModelGeo), info } : null;
     }).catch(() => null));
   }
   return cache.get(type)!;
+}
+
+// ---------- per-asset VERTEX SPACE (tools/asset_space.py, 2026-10-19) ----------
+// The game's glTF loader bakes the Blender/Z-up author space into the Unity
+// part frame as (gx, -gz, gy) for MOST assets (its import setting "Bake Axis
+// Conversion"); a minority ship already Y-up (Blender zero-rot exports whose
+// .ini colliders only fit the raw verts). XenonViewer places every asset
+// under a C=(x,z,-y)-transformed .ini node chain; the file-frame equivalent
+// for the baked majority is: bake (x,-z,y) = Rx(+90) into the vertices and
+// keep the RAW .ini chain (algebra: C·chain·C⁻¹·v = chain·(C⁻¹·v)).
+// UNITY_BAKED_TYPES = the majority, classified offline against each part's
+// [COLLIDER] box in its .ini (position+euler applied): strictly-better fit
+// by >= 0.15 m summed; ties default RAW (the pre-fix look) so symmetric
+// parts (wheels, Beacon) never flip silently — v0.145's GLOBAL bake flipped
+// the y-up assets and was reverted (AGENTS §Known open issues). RE-RUN
+// `python3 tools/asset_space.py` after game updates (same ritual as
+// DROP_TABLE) and keep FORMAT.md §Per-asset gltf loader conventions in sync.
+
+export const UNITY_BAKED_TYPES: ReadonlySet<string> = new Set([
+  'ActiveRadiator', 'Aileron', 'ChemicalFurnace', 'ChemicalReactor', 'Computer',
+  'Crafter', 'Dashboard', 'DataJunction', 'DockableDoor', 'EnrichmentCentrifuge',
+  'GeothermalExchanger', 'GroundAnchor', 'HighVoltageJunction', 'Lamp',
+  'LowVoltageJunction', 'LowVoltageRelay', 'MiniComputer', 'MiniRouter',
+  'OreScanner', 'OwnerPad', 'PassiveRadiator', 'PilotSeat', 'RTG', 'Router',
+  'SabatierReactor', 'SmallHinge', 'SmallTurboPump', 'SolarPanel', 'Step',
+  'TerrainScanner', 'TrashCan', 'Volume',
+]);
+
+/** Rx(+90): Blender/glTF Z-up author space -> the game's Y-up part frame */
+export function unityBake(v: number[]): number[] {
+  const out = new Array<number>(v.length);
+  for (let i = 0; i < v.length; i += 3) {
+    out[i] = v[i]!; out[i + 1] = -v[i + 2]!; out[i + 2] = v[i + 1]!;
+  }
+  return out;
+}
+
+/** per-type vertex-space fix applied to the atlas JSON once at load */
+function bakeGeo(type: string, geo: ModelGeo): ModelGeo {
+  if (!UNITY_BAKED_TYPES.has(type)) return geo;
+  const out: Record<string, NodeGeo> = {};
+  for (const [name, nd] of Object.entries(geo))
+    out[name] = { ...nd, prims: nd.prims.map(p => ({
+      ...p, v: unityBake(p.v), ...(p.lv ? { lv: unityBake(p.lv) } : {}),
+    })) };
+  return out;
 }
 
 // ---------- conditional parts (client behaviour, XenonViewer parity) ----------

@@ -49,6 +49,8 @@ tools/make_landing.py         regenerates the landing gallery + viewer/workshop.
 tools/add_workshop.py <id>      ingest a locally-subscribed workshop craft
                                 (names: tools/ws-names.tsv, fetched slowly — Steam rate-limits)
 tools/extract_models.py         regenerates viewer/models/ from an installed game
+tools/asset_space.py            per-asset glTF VERTEX-SPACE census (collider-fit
+                                classification → app models.ts UNITY_BAKED_TYPES)
 tools/security-scan.py          checkin gate: secret-shape scan (--staged/--tree/
                                 --history) + release-string sync (--versions)
 tools/release.sh                THE release ritual: full-suite gate → ff release
@@ -568,11 +570,11 @@ refuses to cut a tag when the strings disagree.
   in-game pixels, never a viewer's.
 - **v0.143/v0.145 were REVERTED** (user-confirmed regressions on Pages: beacon mast +
   aileron real models rotated wrong). v0.144 (IBL) was re-landed as the PMREM commit.
-  Re-land the legacy alignment + per-asset loader bake ONLY with new pins first
-  (real Beacon mast tip in world, comptest-grade; aileron real-model tip below hinge
-  on a palette file) — existing pins are sign-invariant on axisymmetric parts, so a
-  bake flip passes the suite silently. Details: FORMAT.md § Per-asset gltf loader
-  conventions.
+  RESOLVED 2026-10-19 IN APP ONLY: the per-asset vertex-space bake re-landed with
+  collider-census classification + measured pins (FORMAT.md §Per-asset gltf VERTEX
+  SPACE; tools/asset_space.py; app models.ts UNITY_BAKED_TYPES). The LEGACY viewer
+  keeps its raw-chain look (its Oct-6 pin numbers were derived in that space);
+  porting the bake there needs the user's call + those pins re-derived.
 - Beacon "point forward" display convention (user): parked — blocked on an asymmetric
   probe craft (180°-quaternion z-sign ambiguity, see FORMAT.md).
 
@@ -1045,19 +1047,27 @@ refuses to cut a tag when the strings disagree.
   'worked' — every suite bound to the invisible twin).
 
 ## Backlog
-- **Component sub-parts not placed right (user-reported 2026-10-19, post
-  v0.180 de-mirror, STILL OPEN):** in the per-component matrix comparison the
-  moving/sub components still do not render at their correct spots — and in
-  the new app the "real" components are still the old low-poly proxy mockups
-  while the real-node rendering is effectively just occupancy-shaped blocks.
-  The `.ini` node tree (renderables/joints/targets ZYX composition, per-asset
-  gltf author-space conventions — see FORMAT §Per-asset gltf loader
-  conventions) is NOT yet faithfully reproduced in app/; porting it comes
-  with per-type pins verified against the dev's real-model renders.
-- **Propeller data-generated geometry (matrix finding 2026-10-19):** the game
+- **Component sub-parts placed per-asset — RESOLVED IN APP (2026-10-19):**
+  the `.ini` node tree places in the part's FILE frame; the game bakes
+  Z-up glTF vertices as (gx,−gz,gy) for the MAJORITY of types and ships the
+  minority already Y-up (the collider box arbitrates — FORMAT §Per-asset gltf
+  VERTEX SPACE). `tools/asset_space.py` classifies, `app/src/engine/models.ts`
+  (`UNITY_BAKED_TYPES` + `bakeGeo`) applies the Rx(+90) bake at atlas load,
+  pinned by vitest `asset-space.test.ts` + e2e `asset-space.spec.ts` (world
+  spans on the identity-orientation matrix fixtures). STILL OPEN: the frozen
+  legacy viewer/Pages keeps the old raw-chain look for the 32 baked types
+  (port only with the user's call + the legacy pins re-derived); the Aileron
+  bake on ISW awaits the user's in-game eyeball (drop it from the table if
+  the game disagrees); the app still shows decimated (lv) twins by default —
+  the hi-def path is a later REWRITE phase.
+- **Propeller data-generated geometry: DONE 2026-10-19 (app).** The game
   client generates the prop surface from `data.blades/radius/width/twist/
-  pitch` (dev `propellerGeometry` mirrors it); viewer draws the static gltf
-  template. Port = generator in app/ + a matrix-pair pin (MATRIX.md §Scope).
+  pitch` (dev `propellerGeometry` mirrors it); `app/src/engine/propeller.ts`
+  transcribes it and `scene.ts` swaps it in for the frozen gltf template's
+  `prop` node. Pinned by vitest `propeller.test.ts` + e2e `propeller.spec.ts`
+  (rest 4-blade r1.2 disc; deflected twist/pitch spread the surface
+  OUT OF PLANE beyond the rest twin, radius span equal on both). The viewer/
+  still draws the static gltf template.
 - **Ring-drag rotation continuity: DONE 2026-10-19 (app).** The REAL-pointer
   multi-grip sweep is pinned in app/e2e/gizmo.spec.ts: Engine.ringScreenPoint
   computes a grab point on the DRAWN ring from the CURRENT proxy pose + TGC's
