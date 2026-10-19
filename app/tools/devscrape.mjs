@@ -14,16 +14,16 @@
 // Our side (static server at --ours): loads viewer/index.html?open=<corpus>
 // and MATCHES the camera to the dev's iso framing — dev Viewer.VIEW_ANGLES.iso
 // is azimuth 0.9 / elevation 0.45 rad in FILE space (dir =
-// (cos e·sin a, sin e, cos e·cos a)); our view space mirrors z, so the camera
-// sits along (0.7053, 0.4350, -0.5597) at the load-fit distance. NOTE
-// (FORMAT §Chirality vs in-game truth, 2026-10-19): our viewer's z-mirror
-// chain renders the horizontal MIRROR of the game's view — at this paired
-// camera our image relates to the dev's (game-true) one by exactly one
-// horizontal flip, which tools/matrix_iou.py compensates with its mask
-// mirror. Uses ONLY the frozen viewer's public surface: URL params + the
-// window.HARCHEAN test hooks (camera / controls / invalidate). Two shots:
-// proxy (default) and real game models (?real) — dev always draws the real
-// models.
+// (cos e·sin a, sin e, cos e·cos a)); since the v0.180 de-mirror OUR VIEW
+// SPACE IS THE FILE SPACE (FORMAT §Chirality vs in-game truth — corrective
+// plan landed), so the camera sits along the dev's UNMIRRORED direction
+// (0.7053, 0.4350, 0.5597) at the load-fit distance: our render and the
+// dev's (game-true) render now show the SAME side, and tools/matrix_iou.py
+// compares the masks directly (its mirror compensation was retired with the
+// chain mirror). Uses ONLY the frozen viewer's public surface: URL params +
+// the window.HARCHEAN test hooks (camera / controls / invalidate). Two
+// shots: proxy (default) and real game models (?real) — dev always draws
+// the real models.
 //
 // Output per craft: <out>/<id>.json {dev:{mass,cost,items,warnings},...}
 // and <id>-dev.png, <id>-ours-proxy.png, <id>-ours-real.png.
@@ -61,13 +61,14 @@ const DO_DEV = !args['no-dev'], DO_OURS = !args['no-ours'] && !!OURS;
 const DO_SHOTS = !('no-shots' in args);
 mkdirSync(OUT, { recursive: true });
 
-// dev iso: azimuth 0.9 elevation 0.45, FILE-space camera direction; our view
-// space mirrors z (pos (x,y,-z)) so the camera dir follows.
+// dev iso: azimuth 0.9 elevation 0.45, FILE-space camera direction; since
+// the v0.180 de-mirror our view space IS file space (viewPos identity), so
+// the camera dir is the dev's direction UNMIRRORED.
 const ISO = { az: 0.9, el: 0.45 };
 const ISO_DIR = [
   Math.cos(ISO.el) * Math.sin(ISO.az),
   Math.sin(ISO.el),
-  -Math.cos(ISO.el) * Math.cos(ISO.az),   // our view space: z mirrored
+  Math.cos(ISO.el) * Math.cos(ISO.az),    // == dev camera dir (v0.180)
 ];
 
 async function openCraftDev(page, file) {
