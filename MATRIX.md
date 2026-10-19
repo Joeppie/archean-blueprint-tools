@@ -126,9 +126,17 @@ scene.js settles where per-part rendering comes from:
 
 A mismatch = one screenshot pair (`<id>-dev.png` vs
 `<id>-ours-real.png`, side-by-sides under `sheets/`) differing beyond
-lighting/framing. `render-iou.json` (bbox-normalised silhouette IoU —
-framing-invariant by design) only ORDERS the eyeball queue; a human verdict
-is the gate. Work the ladder; the first failing gate names the owning layer:
+lighting/framing. `render-iou.json` (silhouette IoU: per-row modal
+background removal → MORPHOLOGICAL OPENING (kills label glyph strokes, grid
+and wire hair) → largest connected component → bbox-normalised 160×120)
+only ORDERS the eyeball queue — framing-invariant by design, but styling
+still floors the score (~0.5+ typical); a human verdict is the gate.
+Screenshot staging is symmetric by construction: the dev pair is shot with
+its `ground grid` + `shadows` options OFF (sky/ground stays ON — off turns
+the canvas transparent and page furniture floods the mask); ours hides the
+120 m ground plane, the grid helper and the occupancy wire via the
+HARCHEAN hooks. Work the ladder; the first failing gate names the owning
+layer:
 
 1. **Re-shoot before believing it**: `bash tests/matrix.sh <id>` (fresh
    contexts). `ours_real.filestatus` must show the right alias + component

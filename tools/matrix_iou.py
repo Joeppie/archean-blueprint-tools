@@ -18,9 +18,10 @@ import argparse
 import glob
 import json
 import os
+from collections import deque
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageFilter
 
 # per-viewer UI chrome: dev floats ~300 px panels both sides; our viewer
 # docks its 340 px DevTools panel on the RIGHT of a full-width canvas
@@ -41,15 +42,59 @@ def foreground(img, crop):
     return np.abs(img - bg).sum(axis=2) > 60
 
 
+def open_mask(mask, k=5):
+    """Binary opening (erode→dilate) via PIL min/max filters: kills thin
+    lines, label glyph strokes and grid remnants — the silhouettes that
+    remain are solid part bodies. k=5 px at [::2] ≈ 10 px full-res."""
+    im = Image.fromarray((mask * 255).astype(np.uint8))
+    im = im.filter(ImageFilter.MinFilter(k)).filter(ImageFilter.MaxFilter(k))
+    return np.asarray(im) > 127
+
+
+def lcc(mask):
+    """Largest 8-connected component on a 4x-downsampled mask — drops the
+    small junk (label glyphs, grid remnants, page furniture) and keeps the
+    dominant subject blob for the bbox-normalised IoU."""
+    small = open_mask(mask)[::2, ::2]
+    seen = np.zeros_like(small, dtype=bool)
+    best, best_n = None, 0
+    H, W = small.shape
+    for sy, sx in zip(*np.nonzero(small)):
+        if seen[sy, sx]:
+            continue
+        q = deque([(sy, sx)])
+        seen[sy, sx] = True
+        comp = []
+        while q:
+            y, x = q.popleft()
+            comp.append((y, x))
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    ny, nx = y + dy, x + dx
+                    if 0 <= ny < H and 0 <= nx < W and small[ny, nx] \
+                            and not seen[ny, nx]:
+                        seen[ny, nx] = True
+                        q.append((ny, nx))
+        if len(comp) > best_n:
+            best, best_n = comp, len(comp)
+    if best_n < 100:                 # < ~1.6 % of a downsampled frame
+        return None
+    out = np.zeros_like(small)
+    for y, x in best:
+        out[y, x] = True
+    return out
+
+
 def canon(mask, size=(160, 120)):
-    ys, xs = np.nonzero(mask)
-    if len(xs) < 400:
+    m = lcc(mask)
+    if m is None:
         return None, None
-    box = mask[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
+    ys, xs = np.nonzero(m)
+    box = m[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
     im = Image.fromarray((box * 255).astype(np.uint8)).resize(size, Image.NEAREST)
-    m = np.asarray(im) > 127
+    mm = np.asarray(im) > 127
     ar = box.shape[1] / box.shape[0]
-    return m, ar
+    return mm, ar
 
 
 def main():

@@ -96,14 +96,16 @@ async function scrapeDev(page, shotPath) {
       text: e.textContent.replace(/\s+/g, ' ').trim() }))
       .filter((c) => c.id && !c.id.startsWith('layer:')));
   await page.click('[data-view="iso"]');
-  // silhouette hygiene (mirrors what openCraftOurs does to OUR scene): the
-  // ground plane/sky, grid and drop shadows are styling, not subject — off
-  // for the metric pair; rows live in the collapsed 'rendering' fold
+  // silhouette hygiene: the ground grid line and the drop shadow stretch
+  // the dev's bbox beyond the subject, so they go OFF for the metric pair —
+  // but 'sky & ground' STAYS ON: with it off the canvas turns transparent/
+  // white and page furniture floods the mask. Our side mirrors this by
+  // hiding its own ground/grid in openCraftOurs.
   const optFold = page.locator('details.sp-fold:has(#scene-options)');
   if ((await optFold.getAttribute('open')) === null) {
     await optFold.locator('summary').click();
   }
-  for (const label of ['ground grid', 'sky & ground', 'shadows']) {
+  for (const label of ['ground grid', 'shadows']) {
     const row = page.locator('#scene-options .opt-row', { hasText: label });
     if (await row.count()) {
       const on = await row.evaluate((r) => r.classList.contains('on'));
