@@ -50,11 +50,9 @@ AP = subprocess.run
 def run(*args, cwd=None, env=None, capture=False):
     print('+', ' '.join(args), f'(cwd={os.path.relpath(cwd or ROOT, ROOT)})')
     r = subprocess.run(args, cwd=cwd or ROOT, env=env,
-                       stdout=subprocess.PIPE if capture else None,
-                       stderr=subprocess.STDOUT if capture else None, text=True)
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     if r.returncode != 0:
-        if capture:
-            print(r.stdout)
+        print(r.stdout)
         sys.exit(f'deploy: FAILED: {" ".join(args)} (rc={r.returncode})')
     return r.stdout or ''
 
