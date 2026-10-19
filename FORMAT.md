@@ -1217,11 +1217,26 @@ Adventure = 3334698274).
   uniform x̂ assumption (a) swung the pivot-mounted dolphin doors DOWN &
   OUT like barn doors instead of the game's car doors (user report),
   (b) was only ever verified on x̂ joints (Aileron droop, LinearTrack).
-  `pivot = viewPos(master) + R(viewQuat) · mirror_z(axle.position)` = the
-  axle pivot; the ANCHOR used is `pivot₀` = that point CLAMPED onto the
+  `pivot = viewPos(master) + R(viewQuat) · axle.position` (RAW local, like
+  every other placement law since the v0.180 de-mirror) = the axle pivot;
+  the ANCHOR used is `pivot₀` = that point CLAMPED onto the
   bbox of the subgrid's non-255 blocks (buildSubgrids captures the joint
   line `g.userData.jref` = {axis₀, pivot₀, axle₀, slide₀, p₀, q₀} per
-  kinematic master, AFTER the content exists). A master mounted ON its
+  kinematic master, AFTER the content exists). **THE CLAMP IS FRAME-CRITICAL
+  (app fix 2026-10-19):** that bbox must be built in the SAME raw view frame
+  as `pivot`/`p₀` — the app's port kept the pre-v0.180 z-negation in
+  `subBlockBBox` while jointChain/p0 went raw, so the clamp grabbed the
+  panel's MIRROR IMAGE: Jimmy's Adventure gantry pivot clamped to z = +15.9
+  for a SmallPivot at z = −14.4 whose panel spans z ∈ [−17.9, −15.9] (a
+  30 m phantom lever ⇒ spinning the part 35° swept the panel 11 m; the
+  joint-ANGLE term spun the panel about a line 31.75 m from the visible
+  hinge — user: "subgrid rotation is way off when I move components
+  … rotation isnt properly relative … towards the joints themselves").
+  Pinned app-side by `app/e2e/subride.spec.ts` (per pair: the line lies ON
+  its panel, no phantom lever, and the group transform equals the exact
+  rigid transport of the part's motion) and auditable with
+  `node app/tools/subride.mjs <craft>` / `jointturn.mjs` (a point ON the
+  joint line must not move when the joint turns). A master mounted ON its
   content (XYQ/SMR: 0.1 m) has its axle pivot INSIDE that bbox ⇒ the
   clamp is the pivot itself and the composition is exactly the game's
   axle one; a distant control master (dolphin: hinges 0.25 m off the fin

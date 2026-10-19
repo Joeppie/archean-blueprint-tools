@@ -1205,8 +1205,8 @@ void main() {
    *  All in ANCHORED coords (moff shifts the rendered groups; frame with it). */
   private fit(parts: PartBox[]) {
     const bp = this.bp!;
-    const mn = [bp.box_min.x, bp.box_min.y, -bp.box_max.z];
-    const mx = [bp.box_max.x, bp.box_max.y, -bp.box_min.z];
+    const mn = [bp.box_min.x, bp.box_min.y, bp.box_min.z];
+    const mx = [bp.box_max.x, bp.box_max.y, bp.box_max.z];
     const grow = (x: number, y: number, z: number) => {
       mn[0] = Math.min(mn[0]!, x); mn[1] = Math.min(mn[1]!, y); mn[2] = Math.min(mn[2]!, z);
       mx[0] = Math.max(mx[0]!, x); mx[1] = Math.max(mx[1]!, y); mx[2] = Math.max(mx[2]!, z);

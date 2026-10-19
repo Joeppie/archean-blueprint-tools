@@ -118,7 +118,22 @@ describe('joint line capture + pose', () => {
     expect(b.max[0]).toBeCloseTo(0.625, 6);               // +size 1 = one extra cell (inclusive)
     expect(b.min[1]).toBeCloseTo(-0.125, 6);              // y: pos 5 size 0 → one cell
     expect(b.max[1]).toBeCloseTo(0.125, 6);
-    expect(b.max[2]).toBeCloseTo(-0.125, 6);              // z view-mirrored: −(6−5.5)·0.25
+    expect(b.min[2]).toBeCloseTo(0.125, 6);               // z RAW == view (v0.180): (6−5.5)·0.25
+    expect(b.max[2]).toBeCloseTo(0.375, 6);              // +size 0 = one extra cell (inclusive)
+    // The FRAME is the point: this box CLAMPS the joint line in captureJrefs,
+    // so a mirrored z clamps onto the panel's MIRROR IMAGE (Jimmy's Adventure:
+    // a 30 m phantom lever, panel swept 11 m by a 35° part spin). A master
+    // mounted ON this panel (world z 0.25, .ini pivot at its origin) must have
+    // its jointChain pivot INSIDE the box — the clamp is then a no-op. Under
+    // the old mirror the box sat at z ∈ [−0.375,−0.125] and the pivot was
+    // dragged 0.375 m to the wrong side of the panel.
+    const mcOn = comp({ type: 'SmallPivot', position: { x: 0.375, y: 0, z: 0.25 } });
+    const jc = jointChain(mcOn, {
+      SmallPivot: { joints: [{ name: 'axle', position: [0, 0, 0], rotation: [0, 0, 0], axis: 'y' }] },
+    } as unknown as ModelManifest, false)!;
+    expect(Math.abs(jc.pivot[2] - 0.25)).toBeLessThan(1e-9);
+    expect(jc.pivot[2]).toBeGreaterThanOrEqual(b.min[2]);
+    expect(jc.pivot[2]).toBeLessThanOrEqual(b.max[2]);
   });
 
   test('pivot-only subgrid (no blocks): axis stays the .ini key chain', () => {

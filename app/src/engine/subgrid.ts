@@ -150,7 +150,14 @@ export interface SubBBox { min: V3; max: V3 }
 
 /** View-space bbox of the subgrid's NON-255 blocks (nested content sits at
  *  parent-absolute cells; occupancy mirrors sit AT the master → excluded).
- *  null = parts-only subgrid (empty block list). */
+ *  null = parts-only subgrid (empty block list).
+ *  RAW == VIEW (v0.180): this box is the CLAMP TARGET for the joint line in
+ *  captureJrefs, so it must live in the same frame as jointChain()'s pivot and
+ *  JRef.p0. The pre-v0.180 z-mirror here made the clamp grab the panel's
+ *  MIRROR IMAGE: Jimmy's Adventure gantry pivot clamped to z=+15.9 while its
+ *  SmallPivot sits at z=−14.4 — a 30 m phantom lever, so rotating the part
+ *  swept the panel 11 m ("subgrid rotation is way off when I move components
+ *  … rotation isnt properly relative … towards the joints themselves"). */
 export function subBlockBBox(blocks: Block[] | undefined): SubBBox | null {
   let min: V3 | null = null, max: V3 | null = null;
   const grow = (p: V3) => {
@@ -165,7 +172,7 @@ export function subBlockBBox(blocks: Block[] | undefined): SubBBox | null {
       grow([
         (b.pos_x + s[0] + (b.frame_x ?? 0) * CELLS_PER_FRAME - 5.5) * CELL,
         (b.pos_y + s[1] + (b.frame_y ?? 0) * CELLS_PER_FRAME - 5.5) * CELL,
-        -((b.pos_z + s[2] + (b.frame_z ?? 0) * CELLS_PER_FRAME - 5.5) * CELL),
+        (b.pos_z + s[2] + (b.frame_z ?? 0) * CELLS_PER_FRAME - 5.5) * CELL,
       ]);
     }
   }

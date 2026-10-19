@@ -57,6 +57,11 @@ app/tools/wheelpair.mjs         REAL-CRAFT root-pose check (the solo ritual's
                                 --types components in BOTH viewers' live scenes
                                 (truck leg: killed the droop for LEGACY files;
                                 modern-file casters hang per displayQuat — FORMAT)
+app/tools/subride.mjs         REAL-craft SUBGRID joint audit: every (subgrid, master) pair's
+                                captured joint line (on its panel? near its part? no phantom
+                                lever) + the exactness of the panel riding the part's gizmo motion
+app/tools/jointturn.mjs       one joint's ANGLE turn traced: a point on the joint line must not
+                                move, the panel centre must circle it at a constant radius
 tools/asset_space.py            SUPERSEDED collider-census (kept for provenance;
                                 its "per-asset vertex space" was a basis artifact)
 tools/security-scan.py          checkin gate: secret-shape scan (--staged/--tree/
@@ -454,7 +459,14 @@ refuses to cut a tag when the strings disagree.
   SmallHinge/SmallPivot/Propeller spin about the axle's local Ŷ, Aileron
   about X̂, Gyroscope/Drill about Ẑ, LinearTrack slides along X̂):
   axis = viewQuat(master)·axleEuler(ZYX)·e(axis), pivot =
-  viewPos(master) + viewQuat·(mirror_z axle.position); group pose
+  viewPos(master) + viewQuat·axle.position (RAW local since the v0.180
+  de-mirror — the old mirror_z of the axle local, AND the z-negated panel
+  bbox that CLAMPS it, are the retired mirrored law; the app port kept the
+  mirrored bbox and paid: Jimmy's gantry clamped 30 m off its own pivot, so
+  spinning the part swept the panel 11 m — “subgrid rotation is way off …
+  rotation isnt properly relative … towards the joints themselves”;
+  pinned by app/e2e/subride.spec.ts, audited by app/tools/subride.mjs +
+  app/tools/jointturn.mjs); group pose
   p' = pivot₀ + R(axis₀,angle)·(base.p−pivot₀) (+slide₀·pos), q' = R·base.q
   about the BUILD-CAPTURED joint line (g.userData.jref: pivot₀ = the axle
   pivot CLAMPED onto the subgrid's non-255-block bbox = the content's edge
