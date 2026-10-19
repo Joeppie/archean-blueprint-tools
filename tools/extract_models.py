@@ -81,8 +81,12 @@ def read_gltf(gltf_path):
             v = accessor(prim["attributes"]["POSITION"])
             i = accessor(prim["indices"]) if "indices" in prim else list(range(len(v) // 3))
             prims.append({
-                "material": g["materials"][prim["material"]]["name"] if "material" in prim else "base",
-                "v": [round(x, 3) for x in v], "i": i,
+                "material": g['materials'][prim["material"]]["name"] if "material" in prim else "base",
+                # EXACT game float32 values — an earlier mm-rounding here
+                # made the atlas a LOSSY paraphrase of the .gltf (user: "use
+                # the proper model, produce it, dont use your own"): weld it
+                # no more than the game already welded.
+                "v": list(v), "i": i,
             })   # normals recomputed by the viewer (computeVertexNormals)
         comps[node["name"]] = {
             "prims": prims,
