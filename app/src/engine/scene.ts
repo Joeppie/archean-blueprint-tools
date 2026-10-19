@@ -121,7 +121,8 @@ export class Engine {
   private root = new Group();
   /** placed components (stand-in group + real-model sibling), keyed by ci */
   private compRoots = new Map<number, Object3D[]>();
-  /** writeback undo for the DISPLAY pose (droop/junction/toggle): file quat =
+  /** writeback undo for the DISPLAY pose (junction/toggle; the RETIRED wheel
+   *  droop was a third): file quat =
    *  mirror(qView · undo), undo = dispQ0⁻¹·viewQ0 captured at build — the
    *  legacy userData.wheelUndo right-multiplier, so inspector deltas applied
    *  on the LEFT (qd·q0) strip exactly (rawFromView parity). */
@@ -1613,7 +1614,7 @@ export class Engine {
   /** writeback (legacy applyGizmo* semantics): the gizmo's rigid motion
    *  X ↦ c + R·(X − c) + t orbits the FILE origin about the pivot, the proxy
    *  quaternion IS the new display pose, and the saved quaternion strips the
-   *  display-pose undo (droop/junction stay file-exact). */
+   *  display-pose undo (junction stays file-exact). */
   private gizmoWriteback() {
     const ci = this.gizmoCi;
     const b = this.gBase.get(ci);
@@ -1936,7 +1937,7 @@ export class Engine {
   /** inspector rotation sliders: absolute WORLD-axis degree deltas composed
    *  as q = qd·q0 (q0 captured by beginRotEdit when the inspector opens),
    *  Euler YXZ exactly like legacy liveRot. Writes the FILE quaternion
-   *  (droop/junction display pose stripped through the build-time undo)
+   *  (junction display pose stripped through the build-time undo)
    *  into bp — the caller mirrors it into the doc. Returns it. */
   beginRotEdit(ci: number) {
     const o = this.compRoots.get(ci)?.[0];
@@ -1988,7 +1989,7 @@ export class Engine {
   }
 
   /** ⟲ reset: the caller has already restored bp+doc (edit.resetComponent);
-   *  rebuild the display pose (fresh droop/junction rule + fresh undo) and
+   *  rebuild the display pose (fresh junction/toggle rule + fresh undo) and
    *  ride proxy + real siblings onto it (v0.152: the view MUST repaint). */
   refreshComp(ci: number) {
     const c = this.bp?.data.components[ci];

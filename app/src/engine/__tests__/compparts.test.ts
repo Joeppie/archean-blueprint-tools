@@ -72,20 +72,22 @@ describe('displayQuat', () => {
     expect(got.y).toBeCloseTo(want.y); expect(got.z).toBeCloseTo(want.z);
   });
 
-  test('wheel droop: the horizontal suspension arm (local +y) swings DOWN (−y)', () => {
-    const q = displayQuat('SmallWheel', I, I);
-    const arm = qRot(q, [0, 0.447, 0]);                       // ISW arm length
-    expect(arm[1]).toBeCloseTo(-0.447, 6);                    // hangs below the mount
-    expect(Math.hypot(...arm)).toBeCloseTo(0.447, 6);         // a ROLL: length preserved
-    const axle = qRot(q, [1, 0, 0]);                          // axle untouched (x̂ roll)
-    axle.forEach((v, i) => expect(v).toBeCloseTo([1, 0, 0][i]!, 6));
-  });
-
-  test('a wheel already hanging keeps its pose (no flip past −y)', () => {
-    const down = qMul({ w: Math.SQRT1_2, x: Math.SQRT1_2, y: 0, z: 0 }, I);  // x̂ 180°: +y→−y… 
-    const q = displayQuat('Wheel', down, I);
-    const arm = qRot(q, [0, 0.447, 0]);
-    expect(arm[1]).toBeLessThan(0);                           // stays down
+  test('WHEELS ride qView untouched (droop RETIRED 2026-10-19; cable-law', () => {
+    // verified): the game's uniform law is R(qFile*) — ISW-241's own written
+    // cable endpoints seat its junction ports at 0.000 m under it (0.18–
+    // 0.29 m under raw). The retired droop swung the semi truck's BigWheel
+    // discs ±0.899 m in z off BOTH viewers (app/tools/wheelpair.mjs). The
+    // file quat below is the ISW rear caster (x̂−90 BUILD pose): display is
+    // the mapped view quat, nothing else.
+    const x90 = { w: Math.SQRT1_2, x: -Math.SQRT1_2, y: 0, z: 0 };   // ISW caster file quat
+    const conjX = { w: x90.w, x: -x90.x, y: 0, z: 0 };               // fileToViewQuat(x90)
+    for (const t of ['SmallWheel', 'Wheel', 'BigWheel']) {
+      expect(displayQuat(t, x90, x90)).toEqual(x90);                 // legacy/converted: qView as-is
+      expect(displayQuat(t, conjX, x90)).toEqual(conjX);             // modern: the CONJUGATE, not raw
+      const arm = qRot(displayQuat(t, conjX, x90), [0, 1, 0]);       // arm under R(x̂+90)
+      expect(arm[2]).toBeCloseTo(1, 6);                              //   (build pose, +z)
+    }
+    expect(displayQuat('SmallWheel', I, I)).toEqual(I);
   });
 
   test('plain parts ride the view quat untouched', () => {

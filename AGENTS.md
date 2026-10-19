@@ -52,6 +52,11 @@ tools/extract_models.py         regenerates viewer/models/ from an installed gam
 tools/make_solo_test.py         SOLO component fixtures (1 type/craft, ids
                                 90000030NN) for the vertex-space pair ritual
 tools/solo_verify.py            scores reports/solo (IoU + local-box, dev vs app)
+app/tools/wheelpair.mjs         REAL-CRAFT root-pose check (the solo ritual's
+                                root-blind-spot companion): world bboxes of
+                                --types components in BOTH viewers' live scenes
+                                (killed the wheel droop; modern roots arbitrate
+                                by the cable law, not dev — FORMAT)
 tools/asset_space.py            SUPERSEDED collider-census (kept for provenance;
                                 its "per-asset vertex space" was a basis artifact)
 tools/security-scan.py          checkin gate: secret-shape scan (--staged/--tree/

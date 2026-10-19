@@ -745,13 +745,29 @@ Zero-build Three.js (WebGL) inspector: `python3 -m http.server 8650` (repo root)
 - **Display poses (`applyDisplayPose`, display-only):** per-component canonical
   display quaternions, all writing back through an inverse (`userData.wheelUndo`)
   so saved quaternions stay file-exact.
-  - *Wheel suspension droop:* the file stores the BUILD pose — suspension arm
-    horizontal, wheel centre 0.447 m off the pivot (`SmallWheel` nodes: pivot
-    +0.124 y, axle +0.323 y) — while in-game a loaded wheel hangs BELOW its
-    mount. The droop rotates the component about its (horizontal) axle so the
-    arm points to −y: a physical roll, the axle and tire plane are untouched,
-    rolling geometry stays exact. Vertical-axle casters (ISW crawler mounts)
-    can't droop about their axle and keep the file pose.
+  - *Wheel suspension droop — RETIRED 2026-10-19 (cable-law re-verified; the
+    LEGACY viewer still draws it):* the rule read the file as storing the
+    BUILD pose (arm horizontal, wheel centre 0.447 m off the pivot) and
+    rolled the wheel about its axle to hang below the mount. Two proofs it
+    is display FICTION in the app's (de-mirrored, content-basis) render
+    space: (1) the real-craft wheel-pair scene-graph check
+    (`app/tools/wheelpair.mjs 3481322297`) showed the roll swinging every
+    BigWheel disc ±0.899 m in z and the truck's angled casters ~0.29 m off
+    the XenonViewer's placement — with the rule removed all 16 truck wheels
+    agree with the dev viewer to ≤8 mm; (2) the game's uniform root law is
+    R(qFile\*): ISW-241's (modern, palette-bearing) own written `data.pipes`
+    endpoints seat its FluidJunction ports at EXACTLY 0.000 m under the
+    conjugate and 0.18–0.29 m away under raw R(qFile) — and the app
+    converts legacy files to the modern convention on load (legacy craft are
+    NOT supported as-is; conversion conjugates quaternions), so ONE law,
+    `qView = fileToViewQuat(qFile)`, places EVERY component including
+    wheels. NOTE for wheel-pair runs over MODERN files: XenonViewer's
+    raw-quat roots are its own documented modern-file bug (its ISW caster
+    pose 0.581 m y off ours is the dev bug, not ours; its junction ports sit
+    0.18–0.29 m off the game's own cables there). The in-game wheel "hangs"
+    below its mount only through LIVE suspension SIMULATION — the file
+    quaternion is the build pose — no viewer replays that; do not reintroduce
+    a display roll.
   - *FluidJunction — game pose is the only layout where cables connect
     (v0.96 revert of the v0.95 flat pose):* the .ini port frame is local **±z**
     (inlet (0,0,−0.125); outlets (±0.375/±0.125, 0, +0.125)) and `data.pipes`
@@ -1065,8 +1081,10 @@ artifact, see §Why the census fooled us):
   basis wrap, and its dataport glTF piece un-does the bake
   (`m.rotation.x = −π/2`) to match the dev's raw-vert connector; the **Beacon
   lens** rides the model's dominant-spread-axis tip (baked mast = +ẑ).
-- **Root quaternion conventions are UNCHANGED** (legacy raw / modern q*,
-  wheel droop, junction-flat, ToggleButton yaw-180 display rules): C is a
+- **Root quaternion conventions (legacy raw / modern q*, junction-flat,
+  ToggleButton yaw-180 display rules; **wheel droop RETIRED in the app
+  2026-10-19** — wheels ride qView like everything else, see §Display
+  poses): C is a
   CONTENT-basis change below the root, orthogonal to the chirality layer
   (FORMAT §Chirality, §Handedness).
 
@@ -1108,6 +1126,25 @@ types the user flags; `--types Aileron,SolarPanel` runs a subset. Pins: vitest
 `asset-space.test.ts` (C/bake algebra), e2e
 `asset-space.spec.ts` (solo-fixture spans = the C·chain·C⁻¹ clouds),
 e2e `propeller.spec.ts` (basis-robust sorted spans).
+
+### The REAL-CRAFT root check (the ritual's blind-spot companion — same rule:
+re-run whenever a component looks rotated/translated wrong in a real craft)
+The SOLO fixtures are identity-orientation and the box verdict inverts by
+each viewer's OWN component matrix, so anything riding the component ROOT
+(root quaternion conventions, display-pose rules) is invisible to them BY
+CONSTRUCTION. `node app/tools/wheelpair.mjs <craft-id>,… [--types=Wheel|Beacon]`
+pairs the live-WORLD bboxes of every matching component in BOTH viewers (dev
+`userData.box` / app `compRealBox`) keyed by the component's file position.
+FOUND (2026-10-19, this is how the wheel droop died): solo verdict 104/104
+green while the semi truck's 16 wheels sat ±0.899 m (BigWheel discs) and
+~0.29 m (angled casters) off the dev viewer — the retired DROOP roll. With
+it removed: all 16 truck wheels + 4 RCS-infinity wheels/beacons ≤8 mm vs dev
+(legacy formats: dev's raw placement ≡ our converted qView). MODERN files:
+the dev viewer's raw-quat ROOTS are its own known bug — the game's uniform
+law is R(qFile*) (ISW-241's own written pipe endpoints seat its junction
+ports at 0.000 m under the conjugate, 0.18–0.29 m under raw), so a modern
+root disagreement with dev (ISW rear caster 0.581 m) is arbitrated by the
+CABLE LAW, not by dev; see §Display poses wheel-droop entry.
 
 ## Subgrids (`Build` components) — attach semantics, fully decoded (v0.153; join decoded v0.154)
 

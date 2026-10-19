@@ -4,10 +4,19 @@
 //
 // Display poses are LEGACY display-only conventions (saved quaternions stay
 // file-exact — the app is currently read-only, so no writeback path exists):
-//  • WHEEL_TYPES droop: the file stores the BUILD pose (suspension arm
-//    horizontal); an in-game loaded wheel hangs BELOW its mount. Droop = the
-//    smallest world rotation about the (horizontal) axle bringing the arm to
-//    −y — a physical wheel-roll; a vertical-axle caster cannot droop.
+//  • WHEEL DROOP RETIRED 2026-10-19 (XenonViewer-arbitrated + cable-law
+//    re-verified): an earlier rule rolled wheels about the axle from the
+//    file's BUILD pose toward a hanging one. The real-craft wheel-pair
+//    scene-graph check (app/tools/wheelpair.mjs, semi truck 3481322297)
+//    showed the roll swings the BigWheel discs ±0.899 m in z and the angled
+//    casters ~0.29 m off BOTH the dev viewer and the game's uniform
+//    placement law — the game's own cable endpoints on ISW-241 seat its
+//    junction ports at EXACTLY 0.000 m under R(qFile*) (the app's
+//    fileToViewQuat) and 0.18–0.29 m away under raw R(qFile). Wheels ride
+//    qView like every other type; the file pose is the BUILD pose and the
+//    in-game wheel "hangs" only through live suspension simulation, which no
+//    viewer replays (dev viewer's raw-quat roots are its own known
+//    modern-file bug — FORMAT §Wheel suspension droop).
 //  • FluidJunction lies FLAT: builder cables are cached in the builder's
 //    flat frame, so the comb's display pose is the RAW file quaternion
 //    R(q) for BOTH generations (de-mirror v0.180: this is what the old
@@ -86,13 +95,13 @@ export function qAxisAngle(axis: V3, angle: number): FileQuat {
 export const fileToViewQuat = (q: FileQuat, legacy: boolean): FileQuat =>
   legacy ? toViewQuatLegacy(q) : toViewQuatModern(q);
 
-const WHEEL_TYPES: ReadonlySet<string> = new Set(['SmallWheel', 'Wheel', 'BigWheel']);
 const JUNCTION_TYPES: ReadonlySet<string> = new Set(['FluidJunction']);
 
 /**
  * The DISPLAY quaternion (view space) for a component whose file quaternion
- * is qFile and mapped view quaternion is qView. Everything except the three
- * special types rides qView unchanged.
+ * is qFile and mapped view quaternion is qView. Everything except the two
+ * special types rides qView unchanged (wheels included since the droop rule
+ * was retired — see the header).
  */
 export function displayQuat(type: string, qView: FileQuat, qFile: FileQuat): FileQuat {
   if (JUNCTION_TYPES.has(type))
@@ -103,17 +112,7 @@ export function displayQuat(type: string, qView: FileQuat, qFile: FileQuat): Fil
     // the byte-identical ISW modern junction still render identically flat)
   if (type === 'ToggleButton')
     return qMul(qView, { w: 0, x: 0, y: 1, z: 0 });                 // yaw-180 flush mount
-  if (!WHEEL_TYPES.has(type)) return qView;
-
-  // suspension droop: roll about the axle until the arm (local +y) points down
-  const a = qRot(qView, [1, 0, 0]);   // axle
-  const u = qRot(qView, [0, 1, 0]);   // suspension arm
-  const c = -u[1]!;                                       // cos of arm→down
-  const s = -(a[2]! * u[0]! - a[0]! * u[2]!);             // −(a × u)·ŷ = sin
-  const L = Math.hypot(c, s);
-  if (L > 0.9 && c <= 0.02)                               // roll reachable
-    return qMul(qAxisAngle(a, Math.atan2(s, c)), qView);
-  return qView;                                           // vertical caster: keep file pose
+  return qView;
 }
 
 /** one component → its collider boxes in view space (empty when unknown type) */
