@@ -21,7 +21,7 @@ import {
   LineBasicMaterial, LineSegments, LinearSRGBColorSpace, Matrix4, Mesh,
   MeshBasicMaterial, MeshStandardMaterial, Object3D, PerspectiveCamera,
   AdditiveBlending, Plane, PlaneGeometry, PMREMGenerator, Quaternion, Raycaster,
-  Scene, SphereGeometry, Sprite, SpriteMaterial, TorusGeometry, Vector2, Vector3, WebGLRenderer,
+  Scene, ShaderMaterial, SphereGeometry, Sprite, SpriteMaterial, TorusGeometry, Vector2, Vector3, WebGLRenderer,
   type MeshStandardMaterialParameters,
 } from 'three';
 import { CanvasTexture, NearestFilter, SRGBColorSpace } from 'three';
@@ -182,6 +182,11 @@ export class Engine {
   private unitBox = new BoxGeometry(1, 1, 1);
   private matCache = new Map<string, MeshStandardMaterial>();
   private occ: MeshStandardMaterial | null = null;   // shared occ-box material
+  /** ONE load-time hologram material + the count of real models still
+   *  streaming (the uniform only breathes while that count > 0, so the
+   *  on-demand render loop goes back to sleep once loading finishes) */
+  private holo: ShaderMaterial | null = null;
+  private holoPending = 0;
 
   // ---------- view-option groups (visibility targets) ----------
   private groundGroup = new Group();
@@ -317,6 +322,7 @@ export class Engine {
       this.flushLiveEdits();                      // per-component geometry rebuilds (data sliders)
       this.stepFly();
       this.pulseSelection();
+      this.stepHolo();
       this.stepSurges(performance.now());
       this.stepLabels();
       this.pumpWind();
@@ -400,6 +406,56 @@ export class Engine {
       this.shared.add(this.occ);
     }
     return this.occ;
+  }
+
+  /** the LOAD-TIME paint for the occupancy boxes (the REAL volume each part
+   *  reserves): a cool additive HOLOGRAM instead of opaque painted PBR — a
+   *  fresnel rim + a faint face wash, no sun/env to blow out. The opaque
+   *  periwinkle stand-ins flashed near-white while the real models streamed
+   *  (user 2026-10-19: "a different colour or alpha that makes the loading
+   *  feel cooler or snappier — possibly a really simple shader"). ONE
+   *  material for every load box; uPulse breathes ONLY while real models
+   *  are still streaming (see stepHolo), then freezes — the on-demand
+   *  render loop never wakes for this once loading is done (PERF.md). */
+  private holoMaterial(): ShaderMaterial {
+    if (!this.holo) {
+      this.holo = new ShaderMaterial({
+        uniforms: { uColor: { value: new Color(0x5fd4ff) }, uPulse: { value: 1 } },
+        transparent: true, depthWrite: false, blending: AdditiveBlending,
+        vertexShader: /* glsl */`
+varying vec3 vN;
+varying vec3 vV;
+void main() {
+  vec4 mv = modelViewMatrix * vec4(position, 1.0);
+  vN = normalize(normalMatrix * normal);
+  vV = normalize(-mv.xyz);
+  gl_Position = projectionMatrix * mv;
+}`,
+        fragmentShader: /* glsl */`
+uniform vec3 uColor;
+uniform float uPulse;
+varying vec3 vN;
+varying vec3 vV;
+void main() {
+  float rim = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 1.6);
+  gl_FragColor = vec4(uColor * (0.22 + 1.15 * rim) * uPulse, 0.13 + 0.5 * rim);
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
+}`,
+      });
+      this.shared.add(this.holo);
+    }
+    return this.holo;
+  }
+
+  /** hologram breath (0.82..1.10) while parts stream in — the ONLY wake the
+   *  load boxes ever get; the last landing freezes uPulse at 1 and the
+   *  on-demand loop sleeps again */
+  private stepHolo() {
+    const h = this.holo;
+    if (!h || this.holoPending <= 0) return;
+    h.uniforms.uPulse!.value = 0.82 + 0.28 * (0.5 + 0.5 * Math.sin(performance.now() / 320));
+    this.invalidate();
   }
 
   // ------------------------------------------------------------------ load
@@ -609,8 +665,10 @@ export class Engine {
       this.pushRoot(ci, g);
 
       const pb = proxies.get(ci)!;
-      const stand = new Mesh(this.unitBox,
-        this.sharedMat(nodeMaterialSpec(c, 'color1', undefined, this.palette, this.legacy, STAND_IN_HEX)));
+      // the load box IS the occupancy box, painted with the load hologram
+      // (cool cyan fresnel — not opaque paint that reads white until the
+      // real model lands)
+      const stand = new Mesh(this.unitBox, this.holoMaterial());
       const sl = occStandLocal(
         [pb.min.x + pb.size.x / 2, pb.min.y + pb.size.y / 2, pb.min.z + pb.size.z / 2],
         [g.position.x, g.position.y, g.position.z], qDisp);
@@ -621,7 +679,9 @@ export class Engine {
       this.maybeLabel(c, ci, g);         // INTERACT type or an in-game alias
 
       if (!atlas) return;               // LITE tier (heavy craft): no fan-out
+      this.holoPending++;               // hologram breathes until this lands
       void atlas.geoFor(c.type).then(model => {
+        this.holoPending--;
         if (seq !== this.loadSeq || !model || !g.parent) return;   // stale/load-swapped
         this.liveGeo.set(c.type, model);
         const real = this.buildReal(c, model);
