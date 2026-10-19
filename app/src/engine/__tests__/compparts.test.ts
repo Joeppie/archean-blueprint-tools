@@ -3,9 +3,10 @@
 // z-flip), Build ghosts and unknown types skipped, and the DISPLAY-POSE
 // rules (wheel droop, builder-flat junction, toggle yaw-180).
 import { describe, expect, test } from 'vitest';
-import { buildPartBoxes, compPartBoxes, displayQuat, qMul, qRot, standInBox } from '../compparts';
+import { buildPartBoxes, compPartBoxes, displayQuat, occStandLocal, qMul, qRot, standInBox } from '../compparts';
 import type { Blueprint } from '../format';
 
+const I = { w: 1, x: 0, y: 0, z: 0 };                       // identity quat
 const Y90 = { w: Math.SQRT1_2, x: 0, y: Math.SQRT1_2, z: 0 };   // +90° about y
 const man = { Thing: { colliders: [{ name: 'c', min: [0, 0, 0] as [number, number, number], max: [1, 0.5, 0.25] as [number, number, number] }] } };
 
@@ -110,5 +111,26 @@ describe('standInBox', () => {
     const flat = standInBox({ ...comp, occupancies: [{ size_x: 2, size_y: 0, size_z: 1 }] } as never,
       { colliders: [{ name: 'p', min: [0, 0, 0], max: [0, 0, 0] }] });
     expect(flat.size).toEqual([0.75, 0.25, 0.5]);             // inclusive cell rule
+  });
+});
+
+describe('occStandLocal (initial box == menu occupancy box)', () => {
+  // the painted per-part stand-in IS the translucent type-255 overlay box
+  // (buildCompProxies), placed under the rotated part group: spinning the
+  // local point back by qDisp must land exactly on the cell centre.
+  const center = [0.125, 0.875, 0.125] as const;            // ISW FluidPort cell
+  const origin = [0, 0.875, 0.125] as const;                // its part position
+  test('identity pose: offset along x', () => {
+    const { pos, quat } = occStandLocal(center, origin, I);
+    expect(pos.map(v => +v.toFixed(6))).toEqual([0.125, 0, 0]);
+    expect([quat.w, quat.x, quat.y, quat.z].map(v => v + 0)).toEqual([1, 0, 0, 0]);  // +0 strips -0
+  });
+  test('90° yaw mount: box still covers the cell (world round-trip)', () => {
+    const { pos, quat } = occStandLocal(center, origin, Y90);
+    const back = qRot(Y90, pos);                            // back into world
+    expect(back[0]! + origin[0]!).toBeCloseTo(center[0], 9);
+    expect(back[1]! + origin[1]!).toBeCloseTo(center[1], 9);
+    expect(back[2]! + origin[2]!).toBeCloseTo(center[2], 9);
+    expect(quat).toEqual({ w: Y90.w, x: -Y90.x, y: -Y90.y, z: -Y90.z });
   });
 });

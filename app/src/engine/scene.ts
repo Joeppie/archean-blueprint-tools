@@ -29,7 +29,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { buildPartBoxes, displayQuat, fileToViewQuat, qMul, standInBox, type PartBox } from './compparts';
+import { buildPartBoxes, displayQuat, fileToViewQuat, occStandLocal, qMul, standInBox, type PartBox } from './compparts';
 import type { FileQuat, Vec3D } from './format';
 import type { LoadedModel, ModelAtlas, NodeRec } from './models';
 import { droppedParts, unityBake } from './models';
@@ -41,7 +41,7 @@ import { propellerSurface, type PropellerData } from './propeller';
  *  written in sRGB (dev propellerGeometry agrees). */
 const PROP_GEN_SPEC: PbrSpec = { color: srgbHexToLinear(0x808080), metal: 0, rough: 0.65, opacity: 1 };
 import { buildPipes, surgePaths, type PipeNetwork } from './pipes';
-import { buildBlocksSolids, buildCompProxies, buildSolids, type SolidBatch } from './build';
+import { buildBlocksSolids, buildCompProxies, buildSolids, type ProxyBox, type SolidBatch } from './build';
 import type { FilePalette } from './palette';
 import type { Blueprint, BlueprintComponent } from './format';
 import { isLegacyFile } from './format';
@@ -459,9 +459,17 @@ export class Engine {
     }
 
     // occupancy (type-255) boxes: translucent, OFF, ONE shared unit box +
-    // material scaled per mesh (a giant = 2 400 of these; see HEAVY comment)
+    // material scaled per mesh (a giant = 2 400 of these; see HEAVY comment).
+    // THESE are the occupancy boxes — the same ProxyBox list also paints the
+    // initial per-part stand-ins (buildComponents), so what a part sits ON at
+    // load is exactly what the menu's transparent overlay shows (user
+    // 2026-10-19: "the initial occupancy boxes do not match the actual
+    // occupancy boxes" — the old stand-ins drew manifest COLLIDER boxes at
+    // the part origin, off the reserved cells by half a cell (FluidPort) to
+    // a metre (PilotSeat, SolarPanel) across ISW-241).
     const occMat = this.occMaterial();
-    for (const box of buildCompProxies(bp)) {
+    const proxies = buildCompProxies(bp);
+    for (const box of proxies) {
       const m = new Mesh(this.unitBox, occMat);
       m.position.set(box.min.x + box.size.x / 2, box.min.y + box.size.y / 2, box.min.z + box.size.z / 2);
       m.scale.set(box.size.x, box.size.y, box.size.z);
@@ -477,7 +485,7 @@ export class Engine {
     // phone GPU survives, so the atlas never streams (this ALSO saves the
     // giant's 26 MB of per-type model JSON on metered connections)
     this.heavy = bp.data.components.reduce((n, c) => n + (c.type === 'Build' ? 0 : 1), 0) > HEAVY_COMPONENTS;
-    this.buildComponents(bp, this.heavy ? null : atlas);
+    this.buildComponents(bp, this.heavy ? null : atlas, new Map(proxies.map(b => [b.ci, b])));
     this.buildSubgrids(bp);
 
     const parts = buildPartBoxes(bp, atlas?.manifest ?? null);
@@ -569,9 +577,18 @@ export class Engine {
     mkEnds(0x33ff88, e => e.b);
   }
 
-  /** every non-Build component: a group at the DISPLAY pose — the
-   *  painted collider stand-in immediately, the real game model when it loads */
-  private buildComponents(bp: Blueprint, atlas: ModelAtlas | null) {
+  /** every non-Build component: a group at the DISPLAY pose — the painted
+   *  OCCUPANCY box immediately, the real game model when it loads. The
+   *  initial box is the part's OWN entry of the SAME ProxyBox list the
+   *  translucent type-255 overlay draws (the menu's "occupancy boxes"),
+   *  placed through qDisp⁻¹ (occStandLocal) so it covers exactly that cell
+   *  volume, world-aligned like the overlay, yet rides the part's live
+   *  moves under the group — and hides with it when the real model lands.
+   *  (Was: manifest-collider boxes centred at the part origin — a DIFFERENT
+   *  volume than the reserved cells; the C-basis it needed disappears with
+   *  it. Parts with no occupancy record ride buildCompProxies' 0.3 m origin
+   *  dot, exactly like the overlay does.) */
+  private buildComponents(bp: Blueprint, atlas: ModelAtlas | null, proxies: Map<number, ProxyBox>) {
     const seq = this.loadSeq;
     bp.data.components.forEach((c, ci) => {
       if (c.type === 'Build') return;                        // construction-site ghost
@@ -591,22 +608,16 @@ export class Engine {
       this.root.add(g);
       this.pushRoot(ci, g);
 
-      const box = standInBox(c, this.atlasRef?.manifest[c.type]);
-      // colliders live in the BAKED-FILE frame (FORMAT §vertex space: raw
-      // chain + C⁻¹-baked verts fit them) — the SAME frame the real model's
-      // geometry lives in, i.e. UNDER the content basis C. Hanging the box
-      // straight off the qDisp root showed every stand-in C-rotated (90° x
-      // pitch) from the real meshes (user: "incorrectly rotated occupancy
-      // boxes" when real models go off).
-      const basis = new Group();
-      basis.rotation.order = 'ZYX';
-      basis.rotation.x = -Math.PI / 2;          // C: file (x,y,z) → content (x,z,−y)
-      g.add(basis);
+      const pb = proxies.get(ci)!;
       const stand = new Mesh(this.unitBox,
         this.sharedMat(nodeMaterialSpec(c, 'color1', undefined, this.palette, this.legacy, STAND_IN_HEX)));
-      stand.position.set(box.center[0], box.center[1], box.center[2]);
-      stand.scale.set(box.size[0], box.size[1], box.size[2]);   // shared unit box (geo count)
-      basis.add(stand);
+      const sl = occStandLocal(
+        [pb.min.x + pb.size.x / 2, pb.min.y + pb.size.y / 2, pb.min.z + pb.size.z / 2],
+        [g.position.x, g.position.y, g.position.z], qDisp);
+      stand.position.set(sl.pos[0]!, sl.pos[1]!, sl.pos[2]!);
+      stand.quaternion.set(sl.quat.x, sl.quat.y, sl.quat.z, sl.quat.w);
+      stand.scale.set(pb.size.x, pb.size.y, pb.size.z);   // shared unit box (geo count)
+      g.add(stand);
       this.maybeLabel(c, ci, g);         // INTERACT type or an in-game alias
 
       if (!atlas) return;               // LITE tier (heavy craft): no fan-out

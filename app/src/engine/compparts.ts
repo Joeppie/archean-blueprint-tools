@@ -137,6 +137,21 @@ export function displayQuat(type: string, qView: FileQuat, qFile: FileQuat,
   return qView;
 }
 
+/** The local transform that lands a WORLD-axis-aligned box (e.g. an occu-
+ *  pancy cell box from buildCompProxies) under a part group sitting at
+ *  `origin` with display quaternion `qDisp`:
+ *  pos = qDisp⁻¹·(center − origin), quat = conjugate(qDisp) (unit quat).
+ *  The box then covers exactly that world cell volume — the same box the
+ *  translucent type-255 occupancy overlay draws — while still riding the
+ *  group's live move/rotate edits. */
+export function occStandLocal(center: V3, origin: V3, qDisp: FileQuat): { pos: V3; quat: FileQuat } {
+  const inv: FileQuat = { w: qDisp.w, x: -qDisp.x, y: -qDisp.y, z: -qDisp.z };
+  return {
+    pos: qRot(inv, [center[0]! - origin[0]!, center[1]! - origin[1]!, center[2]! - origin[2]!]),
+    quat: inv,
+  };
+}
+
 /** one component → its collider boxes in view space (empty when unknown type) */
 export function compPartBoxes(c: BlueprintComponent, manifest: CollidersManifest, legacy: boolean, ci: number): PartBox[] {
   const entry = manifest[c.type];
