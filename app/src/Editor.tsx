@@ -388,7 +388,14 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         onChange={e => { const f = e.target.files?.[0]; if (f) readFile(f); e.target.value = ''; }} />
       <div className="relative flex min-h-0 flex-1">
         {/* KSP layout: the parts list lives on the LEFT (mobile: drawer —
-            tap the dimmed viewport to dismiss, ✕ in the drawer header) */}
+            tap the dimmed viewport to dismiss, ✕ in the drawer header).
+            Collapsible to a BOOKMARK TAB (user 2026-10-19: "make the tab
+            collapsible instead, with a > and < icon … only the expander
+            visible like a little bookmark tab on the side, so it's mostly
+            unobscuring to the view"): open state carries a ‹ tab clipped to
+            the panel's right edge, collapsed state leaves only a slim › tab
+            at the viewport edge — one toggle (testid panel-tab) both ways,
+            and the ▤ button / re-clicking the active View tile do the same. */}
         {panelOpen && (
           <>
             <div data-testid="panel-backdrop" onClick={() => setPanelOpen(false)}
@@ -396,6 +403,13 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
             <aside data-testid="panel-aside"
               className="absolute inset-y-0 left-0 z-10 flex w-[300px] max-w-[85vw] flex-col border-r border-white/10
                          shadow-2xl md:static md:z-auto md:shadow-none">
+              <button data-testid="panel-tab" title="collapse the parts panel"
+                aria-label="collapse the parts panel" onClick={() => setPanelOpen(false)}
+                className="absolute -right-5 top-1/2 z-20 flex h-16 w-5 -translate-y-1/2 items-center
+                           justify-center rounded-r-md border border-l-0 border-white/15 bg-panel2
+                           text-[12px] text-ink-dim shadow-lg hover:text-accent">
+                &lt;
+              </button>
               <div className="flex h-9 shrink-0 items-center justify-between border-b border-white/10 px-3
                               md:hidden">
                 <button data-testid="panel-close" onClick={() => setPanelOpen(false)}
@@ -426,6 +440,15 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
               </div>
             </aside>
           </>
+        )}
+        {!panelOpen && (
+          <button data-testid="panel-tab" title="show the parts panel" aria-label="show the parts panel"
+            onClick={() => setPanelOpen(true)}
+            className="absolute left-0 top-1/2 z-20 flex h-16 w-5 -translate-y-1/2 items-center
+                       justify-center rounded-r-md border border-l-0 border-white/15 bg-panel2
+                       text-[12px] text-ink-dim shadow-lg hover:text-accent">
+            &gt;
+          </button>
         )}
         <main className="flex min-w-0 flex-1 flex-col">
           <div className="relative min-h-0 flex-1">

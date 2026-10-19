@@ -407,9 +407,17 @@ test.describe('shipped UI (no debug flag) @ui', () => {
     await expect(page.getByTestId('scene-stats')).toHaveCount(0);
     const aside = page.getByTestId('panel-aside');
     await expect(aside).toBeVisible();                          // desktop opens WITH the panel
-    await page.getByTestId('mode-view').click();                // already in View → hide it
+    await page.getByTestId('mode-view').click();                // already in View → collapse
     await expect(aside).toHaveCount(0);
-    await page.getByTestId('mode-view').click();                // again → back
+    const tab = page.getByTestId('panel-tab');                  // only the bookmark tab remains
+    await expect(tab).toBeVisible();
+    await expect(tab).toHaveText('>');
+    await tab.click();                                          // › re-expands
+    await expect(aside).toBeVisible();
+    await expect(aside.getByTestId('panel-tab')).toHaveText('<');
+    await aside.getByTestId('panel-tab').click();               // ‹ collapses again
+    await expect(aside).toHaveCount(0);
+    await page.getByTestId('mode-view').click();                // View tile re-click re-expands
     await expect(aside).toBeVisible();
   });
 });
