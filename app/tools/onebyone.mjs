@@ -87,12 +87,13 @@ for (const id of IDS) {
         if (b) (nodes[m.userData.node] ??= []).push(b);
       });
       rec.nodes = nodes;
-      // occupancy: file cell -> world cell centre (view-space chain: z negated)
+      // occupancy: file cell -> world cell centre (v0.180: view space IS the
+      // raw file frame — no z negation)
       rec.occ = (c.occupancies || []).map((o) => ({
         cell: [o.pos_x, o.pos_y, o.pos_z],
         centre: [ +(((o.pos_x + o.size_x / 2) - 5.5) * 0.25 + o.frame_x * 3).toFixed(3),
                   +(((o.pos_y + o.size_y / 2) - 5.5) * 0.25 + o.frame_y * 3).toFixed(3),
-                  +((((o.pos_z + o.size_z / 2) - 5.5) * 0.25 + o.frame_z * 3) * -1).toFixed(3) ],
+                  +(((o.pos_z + o.size_z / 2) - 5.5) * 0.25 + o.frame_z * 3).toFixed(3) ],
       }));
       // Dashboard label ink: sample the face material's canvas for dark pixels
       if (c.type === 'Dashboard') {

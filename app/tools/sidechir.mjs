@@ -15,7 +15,11 @@ const OURS = args.ours, OUT = args.out || '/tmp/opencode/sidechir';
 const ID = args.id || '3309955432';
 mkdirSync(OUT, { recursive: true });
 
-// FILE-space camera {pos, target}; our view space mirrors z.
+// FILE-space camera {pos, target}. v0.180 de-mirror: our view space IS the
+// raw file frame, so the cameras below are the game's physical cameras
+// ( FORMAT §"Chirality vs in-game truth" ). Pre-v0.180 this harness
+// negated z — with the mirror that MAPPING still aimed the same physical
+// camera, but the SHOTS came out horizontally flipped (the verdict B images).
 const CAMS = {
   'side-xneg': { pos: [-16, 13.4, -2.6], tgt: [-3.1, 12.8, -2.6] },  // look at x=-3 plates
   'side-xpos': { pos: [16, 13.4, -2.6], tgt: [3.1, 12.8, -2.6] },
@@ -50,7 +54,7 @@ for (const [name, c] of Object.entries(CAMS)) {
       else if (/^thrust: shown$/.test(b.textContent)) b.click();
     }
     if (typeof H.select === 'function') H.select(-1);
-    const M = (p) => [p[0], p[1], -p[2]];           // file -> view
+    const M = (p) => [...p];                        // file -> view: identity (v0.180)
     const P = M(c.pos), T = M(c.tgt);
     H.camera.position.set(P[0], P[1], P[2]);
     H.controls.target.set(T[0], T[1], T[2]);
