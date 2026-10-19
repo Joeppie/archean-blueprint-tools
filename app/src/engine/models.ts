@@ -91,11 +91,31 @@ export interface ModelAtlas {
 
 const BASE = '/models';
 
+/** types whose last fetch FAILED (network/HTTP). A poisoned browser cache
+ *  entry (a cached 404/HTML error body for /models/*.json — the user's
+ *  "white block, not a beacon" session, 2026-10-19) otherwise failed SILENT:
+ *  the viewer quietly drew stand-in boxes and the model was just "missing".
+ *  Failures now (a) retry once with a cache-busting query, (b) are NOT
+ *  memoised as permanent nulls, and (c) surface through modelFailures() so
+ *  the UI can say so. */
+const failures = new Set<string>();
+export function modelFailures(): string[] { return [...failures]; }
+
+async function getJson(url: string, tag: string): Promise<unknown | null> {
+  for (const u of [url, `${url}?cb=${Date.now()}`]) {
+    try {
+      const r = await fetch(u);
+      if (r.ok) { failures.delete(tag); return await r.json(); }
+    } catch { /* fall through to the cache-busted retry */ }
+  }
+  failures.add(tag);
+  return null;
+}
+
 let manifestP: Promise<ModelManifest | null> | null = null;
 export function loadManifest(): Promise<ModelManifest | null> {
-  return manifestP ??= fetch(`${BASE}/manifest.json`)
-    .then(r => (r.ok ? r.json() as Promise<ModelManifest> : null))
-    .catch(() => null);
+  return manifestP ??= getJson(`${BASE}/manifest.json`, 'manifest')
+    .then(j => (j as ModelManifest | null));
 }
 
 export function openAtlas(): Promise<ModelAtlas | null> {
@@ -104,15 +124,17 @@ export function openAtlas(): Promise<ModelAtlas | null> {
 
 const cache = new Map<string, Promise<LoadedModel | null>>();
 
-/** lazy <Type>.json fetch, memoised per type (atlas files are immutable) */
+/** lazy <Type>.json fetch, memoised per type (atlas files are immutable) —
+ *  but a FAILED load is dropped from the cache so a later mount retries */
 export function geoFor(type: string): Promise<LoadedModel | null> {
   if (!cache.has(type)) {
     cache.set(type, loadManifest().then(async m => {
       const info = m?.[type];
       if (!info) return null;
-      const r = await fetch(`${BASE}/${type}.json`).catch(() => null);
-      return r && r.ok ? { geo: bakeGeo(await r.json() as ModelGeo), info } : null;
-    }).catch(() => null));
+      const j = await getJson(`${BASE}/${type}.json`, type);
+      if (!j) return null;
+      return { geo: bakeGeo(j as ModelGeo), info };
+    }).catch(() => null).then(r => { if (!r) cache.delete(type); return r; }));
   }
   return cache.get(type)!;
 }

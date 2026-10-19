@@ -4,7 +4,7 @@
 // Test hooks land on window.__ARCHEAN__ (same philosophy as the legacy
 // title/#out reporting): stats/pick/pose are assertable without pixels.
 import { useEffect, useRef, useState } from 'react';
-import { openAtlas, type ModelAtlas } from '../engine/models';
+import { openAtlas, modelFailures, type ModelAtlas } from '../engine/models';
 import type { Blueprint } from '../engine/format';
 import { Engine, type PickHit, type SceneStats } from '../engine/scene';
 
@@ -168,8 +168,10 @@ function StatsStrip({ engine, bp }: { engine: { current: Engine | null }; bp: Bl
       if (e && ref.current) {
         const s = e.stats();
         if (s.draws > 0 || frames++ > 120) {
+          const fails = modelFailures();
           ref.current.textContent =
-            `blocks=${s.blocks} tris=${s.tris} hull=${s.hullTris} comps=${s.comps} subs=${s.subs} draws=${s.draws} tier=${s.tier}`;
+            `blocks=${s.blocks} tris=${s.tris} hull=${s.hullTris} comps=${s.comps} subs=${s.subs} draws=${s.draws} tier=${s.tier}`
+            + (fails.length ? `  ⚠ ${fails.length} game-model file(s) FAILED to load — stand-ins drawn; Ctrl+Shift+R` : '');
           document.title = s.ok && s.draws > 0 ? `SCENE PASS ${ref.current.textContent}` : `SCENE ${JSON.stringify(s)}`;
           if (s.ok && s.draws > 0) return;
         }
