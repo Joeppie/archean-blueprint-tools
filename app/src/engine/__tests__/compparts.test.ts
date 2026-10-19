@@ -72,22 +72,29 @@ describe('displayQuat', () => {
     expect(got.y).toBeCloseTo(want.y); expect(got.z).toBeCloseTo(want.z);
   });
 
-  test('WHEELS ride qView untouched (droop RETIRED 2026-10-19; cable-law', () => {
-    // verified): the game's uniform law is R(qFile*) — ISW-241's own written
-    // cable endpoints seat its junction ports at 0.000 m under it (0.18–
-    // 0.29 m under raw). The retired droop swung the semi truck's BigWheel
-    // discs ±0.899 m in z off BOTH viewers (app/tools/wheelpair.mjs). The
-    // file quat below is the ISW rear caster (x̂−90 BUILD pose): display is
-    // the mapped view quat, nothing else.
+  test('WHEELS: legacy files ride qView as-is; MODERN files hang the arm', () => {
+    // 2026-10-19 (user: ISW casters "sticking up" in the app vs the legacy
+    // viewer/in-game): the semi-truck evidence that retired the droop was
+    // collected on a RAW-quat legacy file — there the rule stays OFF (app ==
+    // dev build pose, wheelpair-verified). On MODERN (conjugate) files the
+    // display rolls the suspension arm to −y about the world axle, the
+    // legacy viewer's applyDisplayPose rule.
     const x90 = { w: Math.SQRT1_2, x: -Math.SQRT1_2, y: 0, z: 0 };   // ISW caster file quat
     const conjX = { w: x90.w, x: -x90.x, y: 0, z: 0 };               // fileToViewQuat(x90)
     for (const t of ['SmallWheel', 'Wheel', 'BigWheel']) {
-      expect(displayQuat(t, x90, x90)).toEqual(x90);                 // legacy/converted: qView as-is
-      expect(displayQuat(t, conjX, x90)).toEqual(conjX);             // modern: the CONJUGATE, not raw
-      const arm = qRot(displayQuat(t, conjX, x90), [0, 1, 0]);       // arm under R(x̂+90)
-      expect(arm[2]).toBeCloseTo(1, 6);                              //   (build pose, +z)
+      expect(displayQuat(t, x90, x90, true)).toEqual(x90);           // legacy: qView as-is
+      const d = displayQuat(t, conjX, x90, false);                   // modern: drooped
+      const arm = qRot(d, [0, 0, -1]);        // world arm (content C maps file ŷ → −ẑ)
+      expect(arm[1]).toBeCloseTo(-1, 6);                             //   hangs BELOW the mount
+      const axle = qRot(d, [1, 0, 0]);
+      expect(axle[1]).toBeCloseTo(0, 6);                             // axle stays horizontal
     }
-    expect(displayQuat('SmallWheel', I, I)).toEqual(I);
+    expect(displayQuat('SmallWheel', I, I, true)).toEqual(I);        // legacy identity: untouched
+    const dId = displayQuat('SmallWheel', I, I, false);              // modern identity: hangs
+    expect(qRot(dId, [0, 0, -1])[1]).toBeCloseTo(-1, 6);
+    // vertical-axle mount (axle qView-rotated to +ŷ): cannot droop → file pose kept
+    const z90 = { w: Math.SQRT1_2, x: 0, y: 0, z: Math.SQRT1_2 };
+    expect(displayQuat('SmallWheel', z90, z90, false)).toEqual(z90);
   });
 
   test('plain parts ride the view quat untouched', () => {

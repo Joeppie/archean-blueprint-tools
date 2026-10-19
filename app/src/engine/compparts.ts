@@ -4,19 +4,16 @@
 //
 // Display poses are LEGACY display-only conventions (saved quaternions stay
 // file-exact — the app is currently read-only, so no writeback path exists):
-//  • WHEEL DROOP RETIRED 2026-10-19 (XenonViewer-arbitrated + cable-law
-//    re-verified): an earlier rule rolled wheels about the axle from the
-//    file's BUILD pose toward a hanging one. The real-craft wheel-pair
-//    scene-graph check (app/tools/wheelpair.mjs, semi truck 3481322297)
-//    showed the roll swings the BigWheel discs ±0.899 m in z and the angled
-//    casters ~0.29 m off BOTH the dev viewer and the game's uniform
-//    placement law — the game's own cable endpoints on ISW-241 seat its
-//    junction ports at EXACTLY 0.000 m under R(qFile*) (the app's
-//    fileToViewQuat) and 0.18–0.29 m away under raw R(qFile). Wheels ride
-//    qView like every other type; the file pose is the BUILD pose and the
-//    in-game wheel "hangs" only through live suspension simulation, which no
-//    viewer replays (dev viewer's raw-quat roots are its own known
-//    modern-file bug — FORMAT §Wheel suspension droop).
+//  • WHEEL DROOP (2026-10-19, MODERN files only): the blueprint stores the
+//    BUILD pose; in-game a loaded wheel hangs BELOW its mount. The display
+//    rolls the suspension arm to −y about the world axle (legacy viewer's
+//    applyDisplayPose; vertical-axle casters can't droop and keep the pose).
+//    The same-day RETIREMENT was arbitrated on the semi truck 3481322297 —
+//    a LEGACY (raw-quat) file, where the rule stays OFF and the app keeps
+//    the wheelpair-verified dev-matching build pose. On modern files dev's
+//    raw-quat roots are its own known bug and cannot arbitrate; the app
+//    showing ISW's crawler casters sticking UP (user, 2026-10-19) settled it.
+//    Pure display: saved quaternions stay file-exact (rotUndo strips).
 //  • FluidJunction lies FLAT: builder cables are cached in the builder's
 //    flat frame, so the comb's display pose is the RAW file quaternion
 //    R(q) for BOTH generations (de-mirror v0.180: this is what the old
@@ -96,14 +93,28 @@ export const fileToViewQuat = (q: FileQuat, legacy: boolean): FileQuat =>
   legacy ? toViewQuatLegacy(q) : toViewQuatModern(q);
 
 const JUNCTION_TYPES: ReadonlySet<string> = new Set(['FluidJunction']);
+const WHEEL_TYPES: ReadonlySet<string> = new Set(['SmallWheel', 'Wheel', 'BigWheel']);
 
 /**
  * The DISPLAY quaternion (view space) for a component whose file quaternion
- * is qFile and mapped view quaternion is qView. Everything except the two
- * special types rides qView unchanged (wheels included since the droop rule
- * was retired — see the header).
+ * is qFile and mapped view quaternion is qView. Everything except the special
+ * types rides qView unchanged.
+ *
+ * WHEEL DROOP RE-LANDED 2026-10-19 for MODERN (conjugate) files, legacy-
+ * generation files excluded (user: the ISW crawler's casters rendered
+ * "sticking UP" in the app while the legacy JS viewer — and in-game — hang
+ * them BELOW the mount). The blueprint stores the BUILD pose; the physical
+ * wheel hangs, so the display rolls the suspension arm to −y about the world
+ * axle (axle + tire plane untouched, rolling geometry stays exact; the
+ * vertical-axle case can't droop and keeps the file pose — the legacy
+ * viewer's applyDisplayPose rule, same formula). The 2026-10-19 retirement
+ * (a99d801) was arbitrated on the SEMI TRUCK — a LEGACY (raw-quat) file,
+ * where app == dev build pose and this rule is NOT applied; on the modern
+ * ISW file dev's raw roots are its documented own bug and cannot arbitrate.
+ * Pure display: rotUndo strips qDisp→qView, saved quaternions stay file-exact.
  */
-export function displayQuat(type: string, qView: FileQuat, qFile: FileQuat): FileQuat {
+export function displayQuat(type: string, qView: FileQuat, qFile: FileQuat,
+  legacy = false): FileQuat {
   if (JUNCTION_TYPES.has(type))
     return { w: qFile.w, x: qFile.x, y: qFile.y, z: qFile.z };    // builder-flat comb:
     // the flat frame IS the builder's RAW pose (de-mirror v0.180: the old
@@ -112,6 +123,17 @@ export function displayQuat(type: string, qView: FileQuat, qFile: FileQuat): Fil
     // the byte-identical ISW modern junction still render identically flat)
   if (type === 'ToggleButton')
     return qMul(qView, { w: 0, x: 0, y: 1, z: 0 });                 // yaw-180 flush mount
+  if (WHEEL_TYPES.has(type) && !legacy) {
+    // wheel content rides the engine content basis C (x,z,−y): the suspension
+    // arm is file +ŷ → C → −ẑ; the axle file x̂ is C-invariant.
+    const A = qRot(qView, [1, 0, 0]);               // world axle direction
+    const U = qRot(qView, [0, 0, -1]);              // world suspension-arm direction
+    const c = -U[1]!;                               // cos/sin of the arm→down roll
+    const s = -(A[2]! * U[0]! - A[0]! * U[2]!);     //   = −(A×U)·ŷ
+    const L = Math.hypot(c, s);
+    if (L > 0.9 && c <= 0.02 && Math.abs(A[1]!) < 0.95)   // horizontal axle, arm reachable
+      return qMul(qAxisAngle(A, Math.atan2(s, c)), qView);
+  }
   return qView;
 }
 

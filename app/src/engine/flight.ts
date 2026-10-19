@@ -65,7 +65,7 @@ export function flightReport(bp: Blueprint, manifest: ModelManifest | null, cell
     const th = THRUST[c.type];
     if (!th) return;
     if (c.type === 'RCS' && !rcsOnly) return;            // beside real engines: attitude only
-    const qDisp = displayQuat(c.type, fileToViewQuat(c.orientation ?? Q_ID, legacy), c.orientation ?? Q_ID);
+    const qDisp = displayQuat(c.type, fileToViewQuat(c.orientation ?? Q_ID, legacy), c.orientation ?? Q_ID, legacy);
     // the .ini TARGET axis lives in the part's raw-LH local frame; the view
     // mirror maps (x, y, z)file-local → (x, y, −z) before the quaternion
     let ax = qRot(qDisp, [th.ax[0], th.ax[1], -th.ax[2]]);

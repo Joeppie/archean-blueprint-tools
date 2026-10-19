@@ -55,8 +55,8 @@ tools/solo_verify.py            scores reports/solo (IoU + local-box, dev vs app
 app/tools/wheelpair.mjs         REAL-CRAFT root-pose check (the solo ritual's
                                 root-blind-spot companion): world bboxes of
                                 --types components in BOTH viewers' live scenes
-                                (killed the wheel droop; modern roots arbitrate
-                                by the cable law, not dev — FORMAT)
+                                (truck leg: killed the droop for LEGACY files;
+                                modern-file casters hang per displayQuat — FORMAT)
 tools/asset_space.py            SUPERSEDED collider-census (kept for provenance;
                                 its "per-asset vertex space" was a basis artifact)
 tools/security-scan.py          checkin gate: secret-shape scan (--staged/--tree/

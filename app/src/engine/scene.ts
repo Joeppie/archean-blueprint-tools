@@ -577,7 +577,7 @@ export class Engine {
       if (c.type === 'Build') return;                        // construction-site ghost
       const qFile = c.orientation ?? Q_ID;
       const qView = fileToViewQuat(qFile, this.legacy);
-      const qDisp = displayQuat(c.type, qView, qFile);
+      const qDisp = displayQuat(c.type, qView, qFile, this.legacy);
       const g = new Group();
       g.position.set(c.position.x + this.moff.x, c.position.y + this.moff.y, c.position.z + this.moff.z);
       g.quaternion.set(qDisp.x, qDisp.y, qDisp.z, qDisp.w);
@@ -924,7 +924,7 @@ export class Engine {
         const key = JSON.stringify([spec.color, spec.metal, spec.rough, spec.opacity]);
         const box = standInBox(sc, manifest?.[sc.type]);
         const bg = new BoxGeometry(box.size[0], box.size[1], box.size[2]);
-        const q = displayQuat(sc.type, fileToViewQuat(sc.orientation ?? Q_ID, this.legacy), sc.orientation ?? Q_ID);
+        const q = displayQuat(sc.type, fileToViewQuat(sc.orientation ?? Q_ID, this.legacy), sc.orientation ?? Q_ID, this.legacy);
         bg.translate(box.center[0], box.center[1], box.center[2]);
         bg.rotateX(-Math.PI / 2);      // under content basis C (BAKED-FILE colliders)
         bg.applyMatrix4(new Matrix4().compose(
@@ -941,7 +941,7 @@ export class Engine {
         const qFile = sc.orientation ?? Q_ID;
         const m = new Group();
         m.position.set(sc.position.x, sc.position.y, sc.position.z);
-        const qDisp = displayQuat(sc.type, fileToViewQuat(qFile, this.legacy), qFile);
+        const qDisp = displayQuat(sc.type, fileToViewQuat(qFile, this.legacy), qFile, this.legacy);
         m.quaternion.set(qDisp.x, qDisp.y, qDisp.z, qDisp.w);
         const box = standInBox(sc, manifest?.[sc.type]);
         const basis = new Group();               // colliders are BAKED-FILE frame
@@ -2111,7 +2111,7 @@ export class Engine {
     if (!c) return;
     const qFile = c.orientation ?? Q_ID;
     const qView = fileToViewQuat(qFile, this.legacy);
-    const qDisp = displayQuat(c.type, qView, qFile);
+    const qDisp = displayQuat(c.type, qView, qFile, this.legacy);
     this.rotUndo.set(ci, qMul(qInv(qDisp), qView));
     this.rotBase.delete(ci);
     for (const o of this.compRoots.get(ci) ?? []) {

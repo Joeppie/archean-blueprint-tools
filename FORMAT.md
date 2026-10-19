@@ -745,29 +745,25 @@ Zero-build Three.js (WebGL) inspector: `python3 -m http.server 8650` (repo root)
 - **Display poses (`applyDisplayPose`, display-only):** per-component canonical
   display quaternions, all writing back through an inverse (`userData.wheelUndo`)
   so saved quaternions stay file-exact.
-  - *Wheel suspension droop — RETIRED 2026-10-19 (cable-law re-verified; the
-    LEGACY viewer still draws it):* the rule read the file as storing the
-    BUILD pose (arm horizontal, wheel centre 0.447 m off the pivot) and
-    rolled the wheel about its axle to hang below the mount. Two proofs it
-    is display FICTION in the app's (de-mirrored, content-basis) render
-    space: (1) the real-craft wheel-pair scene-graph check
-    (`app/tools/wheelpair.mjs 3481322297`) showed the roll swinging every
-    BigWheel disc ±0.899 m in z and the truck's angled casters ~0.29 m off
-    the XenonViewer's placement — with the rule removed all 16 truck wheels
-    agree with the dev viewer to ≤8 mm; (2) the game's uniform root law is
-    R(qFile\*): ISW-241's (modern, palette-bearing) own written `data.pipes`
-    endpoints seat its FluidJunction ports at EXACTLY 0.000 m under the
-    conjugate and 0.18–0.29 m away under raw R(qFile) — and the app
-    converts legacy files to the modern convention on load (legacy craft are
-    NOT supported as-is; conversion conjugates quaternions), so ONE law,
-    `qView = fileToViewQuat(qFile)`, places EVERY component including
-    wheels. NOTE for wheel-pair runs over MODERN files: XenonViewer's
-    raw-quat roots are its own documented modern-file bug (its ISW caster
-    pose 0.581 m y off ours is the dev bug, not ours; its junction ports sit
-    0.18–0.29 m off the game's own cables there). The in-game wheel "hangs"
-    below its mount only through LIVE suspension SIMULATION — the file
-    quaternion is the build pose — no viewer replays that; do not reintroduce
-    a display roll.
+  - *Wheel suspension droop — MODERN files only (RE-LANDED 2026-10-19,
+    user-confirmed; the LEGACY viewer always drew it):* the rule reads the
+    file as storing the BUILD pose (arm horizontal, wheel centre 0.447 m off
+    the pivot) and display-rolls the wheel about its axle to hang BELOW the
+    mount (vertical-axle casters can't droop and keep the pose). The same
+    day's RETIREMENT was arbitrated on the semi truck 3481322297 — a LEGACY
+    (raw-quat) file, where the roll swings BigWheel discs ±0.899 m off the
+    dev's placement: there the rule stays **OFF** and app == dev to ≤8 mm
+    on all 16 wheels (wheelpair). On MODERN (palette/conjugate) files that
+    verdict did not carry: the app's content-basis pose left ISW-241's
+    crawler casters **sticking up** (hub top 1.705 over the mount y 1.009)
+    while the old JS viewer and the sister legacy craft 3518436870 hang the
+    identical part to 0.313..1.124 — the user's in-game memory matched the
+    hanging look, so the app droops MODERN-file wheels only; after the fix
+    the ISW front caster lands on 3518436870's box to the millimetre.
+    XenonViewer's modern-file caster pose (its raw-quat roots are its own
+    documented bug) is NOT an arbiter here. Pinned by
+    `app/e2e/wheels.spec.ts` (@SmallWheel @BigWheel) and
+    `compparts.test.ts` (arm→−y for modern, untouched for legacy).
   - *FluidJunction — game pose is the only layout where cables connect
     (v0.96 revert of the v0.95 flat pose):* the .ini port frame is local **±z**
     (inlet (0,0,−0.125); outlets (±0.375/±0.125, 0, +0.125)) and `data.pipes`
