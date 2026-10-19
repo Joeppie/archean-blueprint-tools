@@ -158,6 +158,21 @@ npx playwright test --grep '@place|@ui'    # per-area subsets (user rule: an
                                # solo-fixture content-basis pair-checks),
                                # @gizmo, @sym, @subgrid, @aero; tags live in
                                # the describe titles of app/e2e/*.spec.ts)
+npx playwright test --grep '@Aileron'  # PER-COMPONENT pins (user rule
+                               # 2026-10-19): a test that pins ONE component
+                               # rendering correctly is a standing guarantee —
+                               # it must NEVER break unless the change's
+                               # EXPECTED outcome was altering that render;
+                               # but running all components' pins for one
+                               # component's change is overkill. So each
+                               # solo-fixture test carries @<ComponentName>
+                               # (@ActiveRadiator @Aileron @TrashCan
+                               # @ToggleButton @Propeller): run the tag(s)
+                               # you touched; re-run ALL of @models (or the
+                               # full suite / solo-pair ritual) only when a
+                               # SHARED render pipeline file changed (basis
+                               # C, unityBake/bakeGeo, models.ts loader,
+                               # buildReal/standInBox, scene fan-out).
 npm run dev -- --host 0.0.0.0  # NEVER loopback-only (dev-server binding rule):
                                # browse via the Tailscale IP (tailscale ip -4):
                                # http://<ip>:5175/  — loopback still answers there

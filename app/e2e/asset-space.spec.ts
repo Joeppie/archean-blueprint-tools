@@ -40,7 +40,7 @@ async function openPart(page: Page, id: string, type: string): Promise<number> {
 test.describe('engine content basis C·chain·C⁻¹ (solo fixtures) @models @slow', () => {
   const desktopOnly = () => test.skip(test.info().project.name !== 'chromium', 'desktop-only');
 
-  test('ActiveRadiator: slab spans X·Y, thin Z (dev content, spans 0.99/0.99/0.38)', async ({ page }) => {
+  test('ActiveRadiator: slab spans X·Y, thin Z (dev content, spans 0.99/0.99/0.38) @ActiveRadiator', async ({ page }) => {
     desktopOnly();
     const ci = await openPart(page, RAD, 'ActiveRadiator');
     const s = spans((await page.evaluate((ci) =>
@@ -50,7 +50,7 @@ test.describe('engine content basis C·chain·C⁻¹ (solo fixtures) @models @sl
     expect(s[2], `z ${s[2]} (raw-file frame: 0.72)`).toBeLessThan(0.55);
   });
 
-  test('Aileron: wing plate spans X·Z, thin Y (dev content, spans 1.0/0.25/1.01)', async ({ page }) => {
+  test('Aileron: wing plate spans X·Z, thin Y (dev content, spans 1.0/0.25/1.01) @Aileron', async ({ page }) => {
     desktopOnly();
     const ci = await openPart(page, AIL, 'Aileron');
     const s = spans((await page.evaluate((ci) =>
@@ -60,7 +60,7 @@ test.describe('engine content basis C·chain·C⁻¹ (solo fixtures) @models @sl
     expect(s[2], `z ${s[2]} (raw 0.76 / baked 0.48)`).toBeGreaterThan(0.9);
   });
 
-  test('TrashCan: drum along Y at identity mount (dev content, spans 0.5/0.72/0.5)', async ({ page }) => {
+  test('TrashCan: drum along Y at identity mount (dev content, spans 0.5/0.72/0.5) @TrashCan', async ({ page }) => {
     desktopOnly();
     const ci = await openPart(page, TRASH, 'TrashCan');
     const s = spans((await page.evaluate((ci) =>
@@ -69,7 +69,7 @@ test.describe('engine content basis C·chain·C⁻¹ (solo fixtures) @models @sl
     expect(s[2], `z ${s[2]} (baked-file: 0.72)`).toBeLessThan(0.6);
   });
 
-  test('ToggleButton: lever stack thin X/Y, +0.37 along Z (dev content)', async ({ page }) => {
+  test('ToggleButton: lever stack thin X/Y, +0.37 along Z (dev content) @ToggleButton', async ({ page }) => {
     desktopOnly();
     const ci = await openPart(page, TOGGLE, 'ToggleButton');
     const s = spans((await page.evaluate((ci) =>
