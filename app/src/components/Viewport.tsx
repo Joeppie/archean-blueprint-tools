@@ -152,16 +152,25 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockP
           </button>
         </div>
       )}
-      <StatsStrip engine={engineRef} bp={bp} />
+      {DEBUG_MODE && <StatsStrip engine={engineRef} bp={bp} />}
     </div>
   );
 }
 
-/** live scene-stats strip; also the headless assertion point */
+/** live scene-stats strip; also the headless assertion point. DEBUG ONLY
+ *  (user 2026-10-19: "blocks=… draws=… should not show, not unless in debug
+ *  mode" — and the browser TAB must keep its normal title, not the
+ *  "SCENE PASS …" test signal). Debug mode = URL ?debug or the persisted
+ *  localStorage flag; the Playwright config sets that flag for every e2e
+ *  context, so the title/strip assertions keep working unchanged. */
+export const DEBUG_MODE =
+  new URLSearchParams(location.search).has('debug') ||
+  localStorage.getItem('archean-app-debug') === '1';
+
 function StatsStrip({ engine, bp }: { engine: { current: Engine | null }; bp: Blueprint | null }) {
   const ref = useRef<HTMLParagraphElement>(null);
   useEffect(() => {
-    if (!bp) return;
+    if (!bp || !DEBUG_MODE) return;
     let raf = 0, frames = 0;
     const tick = () => {                                   // poll after first drawn frame
       const e = engine.current;

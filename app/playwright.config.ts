@@ -19,6 +19,13 @@ export default defineConfig({
   use: {
     baseURL: URL,
     trace: 'retain-on-failure',
+    // the suites assert through the debug channel (SCENE PASS title +
+    // scene-stats strip are DEBUG-ONLY in the shipped UI — user rule
+    // 2026-10-19), so every context boots with the debug flag set
+    storageState: {
+      cookies: [],
+      origins: [{ origin: URL, localStorage: [{ name: 'archean-app-debug', value: '1' }] }],
+    },
   },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },

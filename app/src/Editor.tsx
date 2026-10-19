@@ -358,7 +358,14 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         const f = e.dataTransfer.files?.[0];
         if (f) readFile(f);
       }}>
-      <TopBar mode={mode} onMode={setMode} dirty={dirty} title={name} craftId={craft}
+      <TopBar mode={mode} onMode={m => {
+        // the ACTIVE mode tile clicked again is a shortcut, not a re-select:
+        // on View it toggles the side panel (user 2026-10-19: "clicking view
+        // an extra time should hide the side panel") — more screen for the
+        // craft; the ▤ button and a re-click bring it back
+        if (m === 'view' && mode === 'view') { setPanelOpen(o => !o); return; }
+        setMode(m);
+      }} dirty={dirty} title={name} craftId={craft}
         onNew={() => { ctxRef.current = null; setBp(null); openText(emitNew()); }}
         onOpen={openFile} onSave={save} onClose={onBack} onBack={onBack}
         onRefresh={craft ? () => { forceRef.current = true; setRetrySeq(s => s + 1); } : undefined}>

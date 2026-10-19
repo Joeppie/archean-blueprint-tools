@@ -388,3 +388,28 @@ test.describe('manual wiring + triangles + component meta @ui', () => {
     expect(vals.op).toBe(9);
   });
 });
+
+// The SHIPPED UI (no debug flag): the SCENE PASS tab-title and the stats
+// strip are a DEBUG channel only (user 2026-10-19: "the text in the top
+// should not show, not unless in debug mode"; "the title is incorrectly
+// changed after loading containing SCENE PASS"), and clicking the ACTIVE
+// View tile hides the side panel ("clicking view an extra time should hide
+// the side panel").
+test.describe('shipped UI (no debug flag) @ui', () => {
+  test.use({ storageState: { cookies: [], origins: [] } });     // no archean-app-debug
+  test('clean title, no stats strip, View-tile-again hides/restores the panel', async ({ page }) => {
+    test.skip(test.info().project.name !== 'chromium', 'desktop-only');
+    await page.goto('/?craft=' + ISW);
+    await expect.poll(async () => (await page.evaluate(() =>
+      (window as unknown as { __ARCHEAN__?: { stats: () => { draws: number } } }).__ARCHEAN__?.stats().draws ?? -1)),
+      { timeout: 30_000 }).toBeGreaterThan(0);
+    await expect(page).not.toHaveTitle(/SCENE PASS/);
+    await expect(page.getByTestId('scene-stats')).toHaveCount(0);
+    const aside = page.getByTestId('panel-aside');
+    await expect(aside).toBeVisible();                          // desktop opens WITH the panel
+    await page.getByTestId('mode-view').click();                // already in View → hide it
+    await expect(aside).toHaveCount(0);
+    await page.getByTestId('mode-view').click();                // again → back
+    await expect(aside).toBeVisible();
+  });
+});
