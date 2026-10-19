@@ -202,17 +202,21 @@ const POSTESTS = {
       H.select(i, false);
       const qi0 = oi.quaternion.clone(), qj0 = oj.quaternion.clone();
       const qv = qi0.clone().multiply(new THREE.Quaternion()
-        .setFromAxisAngle(new THREE.Vector3(0, 0, 1), 0.2))
-        .multiply(H.GIZMO_Y180);                   // qW; qW·Y180 = target qv
+        .setFromAxisAngle(new THREE.Vector3(0, 0, 1), 0.2));   // proxy == mesh frame (v0.180)
       H.applyGizmoOrientation(qv);
       const dj = oj.quaternion.clone().multiply(qj0.clone().invert());
-      const okRot = dj.z < -0.0995 && dj.z > -0.1005
+      // v0.180: the ISW aileron mount maps the spin axis to +ẑ in the RAW
+      // frame (−ẑ through the old mirror), so the twin's preserved-flip
+      // delta dj = det·S·dq lands at +sin(0.1) — same magnitude, un-mirrored
+      // sign; the md = det(S)·S·dq relation itself is unchanged (uitest
+      // symrot/symslider pin the clean slider-side algebra sign-precisely).
+      const okRot = dj.z > 0.0995 && dj.z < 0.1005
         && Math.abs(dj.x) < 1e-9 && Math.abs(dj.y) < 1e-9;
       const of = H.model.data.components[j].orientation;
       const rf = H.rawFromView(oj, oj.quaternion);
       const okFile = Math.abs(of.w - rf.w) < 1e-9 && Math.abs(of.x - rf.x) < 1e-9
         && Math.abs(of.y - rf.y) < 1e-9 && Math.abs(of.z - rf.z) < 1e-9;
-      H.applyGizmoOrientation(qi0.clone().multiply(H.GIZMO_Y180));  // restore spin
+      H.applyGizmoOrientation(qi0.clone());  // restore spin
       const okBack = Math.abs(oj.quaternion.dot(qj0)) > 1 - 1e-9;
       H.symOn = a0; H.select(-1); H.paintHighlights();
       return (okRot && okFile && okBack)
@@ -246,11 +250,13 @@ const POSTESTS = {
         .getCenter(new THREE.Vector3()).sub(H.compGroup.position));
       const cj = H.symRotPiv.get(j), pj0 = oj.position.clone();
       const qv = qi0.clone().multiply(new THREE.Quaternion()
-        .setFromAxisAngle(new THREE.Vector3(1, 0, 0), 0.2))
-        .multiply(H.GIZMO_Y180);
+        .setFromAxisAngle(new THREE.Vector3(1, 0, 0), 0.2));   // proxy == mesh frame (v0.180)
       H.applyGizmoOrientation(qv);
       const dj = oj.quaternion.clone().multiply(qj0.clone().invert());
-      const okX = dj.x > 0.0995 && dj.x < 0.1005
+      // v0.180: wheel mount axis x̂ → −x̂ in the raw frame (see symrot note):
+      // the PRESERVED mirror-normal twin roll keeps the same (now un-
+      // mirrored) sign as the self's mount-conjugated spin.
+      const okX = dj.x < -0.0995 && dj.x > -0.1005
         && Math.abs(dj.y) < 1e-9 && Math.abs(dj.z) < 1e-9;
       const okPiv = Math.abs(oj.position.distanceTo(cj)
         - pj0.distanceTo(cj)) < 1e-9;
@@ -258,7 +264,7 @@ const POSTESTS = {
       const rf = H.rawFromView(oj, oj.quaternion);
       const okFile = Math.abs(of.w - rf.w) < 1e-9 && Math.abs(of.x - rf.x) < 1e-9
         && Math.abs(of.y - rf.y) < 1e-9 && Math.abs(of.z - rf.z) < 1e-9;
-      H.applyGizmoOrientation(qi0.clone().multiply(H.GIZMO_Y180));  // restore spin
+      H.applyGizmoOrientation(qi0.clone());  // restore spin
       const okBack = Math.abs(oj.quaternion.dot(qj0)) > 1 - 1e-9
         && oj.position.distanceTo(pj0) < 1e-9;
       H.symOn = a0; H.gizPivotL = null; H.symRotPiv.clear();
@@ -598,7 +604,7 @@ const POSTESTS = {
       // sweeping through the hull on the axle's 0.25 m lever.
       const onEdge = Math.abs(r.pivot0.x - 1.375) < 1e-9
         && Math.abs(r.pivot0.y - 0.125) < 1e-9
-        && r.pivot0.z < -4.875 && r.pivot0.z > -7.375;
+        && r.pivot0.z > 4.875 && r.pivot0.z < 7.375;   // raw +z tail side (v0.180 un-mirror)
       const off = r.axle0.distanceTo(r.pivot0);
       // v0.175-177 (user: "looking at the rotation of the hinge ... we
       // can determine the precise way that it should rotate"): this fin
@@ -716,8 +722,8 @@ const POSTESTS = {
         && Math.abs(dj.y) < 1e-9 && Math.abs(dj.z) < 1e-9;
       ci.position.x = p0i.x; ci.position.y = p0i.y; ci.position.z = p0i.z;
       cj.position.x = p0j.x; cj.position.y = p0j.y; cj.position.z = p0j.z;
-      H.compObjs[i].position.set(p0i.x, p0i.y, -p0i.z);
-      H.compObjs[j].position.set(p0j.x, p0j.y, -p0j.z);
+      H.compObjs[i].position.set(p0i.x, p0i.y, p0i.z);
+      H.compObjs[j].position.set(p0j.x, p0j.y, p0j.z);
       H.syncAdapters(H.compObjs[i]); H.syncAdapters(H.compObjs[j]); H.markDirty();
       return okm || `self=${JSON.stringify(d)} twin=${JSON.stringify(dj)}`;
     });
@@ -839,7 +845,8 @@ function btnSuite(ctx) {
       const off = new THREE.Vector3(0, -0.16, -0.018);
       off.applyEuler(new THREE.Euler(18 * RAD, 0, c.data?.state ? -Math.PI : 0, 'ZYX'));
       off.applyEuler(new THREE.Euler(0, Math.PI, 0));           // baked yaw-180
-      off.z = -off.z;                                           // root scale.z = −1
+      // (de-mirror v0.180: the old chain added off.z = −off.z for the root
+      // scale.z=−1; the raw frame needs none)
       const exp = H.viewPos(c.position).add(off.applyQuaternion(H.viewQuat(c.orientation)));
       const d = new THREE.Box3().setFromObject(lever).getCenter(tmpV).distanceTo(exp);
       if (d > 0.07)
@@ -855,7 +862,9 @@ function btnSuite(ctx) {
       if (c.type !== 'ToggleButton' || !objs[i]) continue;
       const base = nodeMeshes(rootOf(i), 'base')[0];
       if (!base) return `TB#${i} base mesh missing`;
-      const off = new THREE.Vector3(0, 0.05, 0.335);   // base bbox centre, yaw180+mirror
+      const off = new THREE.Vector3(0, 0.05, -0.335);   // base bbox centre: yaw180 bake, raw frame
+                                                       // (v0.180: the old chain's +0.335 was that
+                                                       // vector through the removed root mirror)
       const exp = H.viewPos(c.position).add(off.applyQuaternion(H.viewQuat(c.orientation)));
       const d = new THREE.Box3().setFromObject(base).getCenter(tmpV).distanceTo(exp);
       if (d > 0.08)
@@ -987,7 +996,7 @@ async function runGizmoTest() {
           orientation: { w: 1, x: 0, y: 0, z: 0 },
           colors: { color1: 0, color2: 1 }, data: {}, occupancies: [] }],
         blocks: [], triangles: [], pipes: [] } });
-    const aimCamera = () => { H.camera.position.set(0, 0.55, 2.6);
+    const aimCamera = () => { H.camera.position.set(0, 0.55, -2.6);   // raw −z: the seat faces the camera
       H.controls.target.set(0, 0.3, 0); H.camera.lookAt(H.controls.target);
       H.controls.update(); H.invalidate(); };
     if (!H.realModelsOn) H.setRealModels(true);      // a recognizable seat for shots
@@ -1035,7 +1044,8 @@ async function runGizmoTest() {
       ok('unwrap', a1 > 3.099 && a1 < 3.101 && a2 > 3.14 && a2 < 3.25
          && Math.abs(b2 - 3.08) < 1e-9); }
     // v0.153 mode switch: move mode engages the same proxy; the position
-    // writeback is the raw/mirror involution (view z-flip undoes itself).
+    // writeback is the RAW identity (the scene frame is the file frame since
+    // the v0.180 de-mirror — the old chain's z-flip involution is gone).
     // v0.158: move mode is WORLD-space (arrows stay axis-aligned), only the
     // rotate rings are part-axis local (user: "the move gizmo rotates and
     // becomes non axis aligned, that's bad").
@@ -1046,20 +1056,20 @@ async function runGizmoTest() {
       && localStorage.getItem('archean-gizmo-mode') === 'rotate');
     { const raw = { x: 1.1, y: -2.3, z: 0.7 }, v = H.viewPos(raw);
       ok('moveinv', Math.abs(v.x - raw.x) < 1e-12 && Math.abs(v.y - raw.y) < 1e-12
-        && Math.abs(-v.z - raw.z) < 1e-12); }
+        && Math.abs(v.z - raw.z) < 1e-12); }
 
     // ---- B. scene proof through the REAL writeback path ----
     const obj = H.compObjs[0], comp = H.model.data.components[0];
     H.scene.updateMatrixWorld(true);
-    const qv0 = obj.getWorldQuaternion(new THREE.Quaternion());   // stripped frame = qv·RY180
-    const projN = (q) => { const p = new THREE.Vector3(0, 0, 1)   // proxy +z = part raw −z = nose
+    const qv0 = obj.getWorldQuaternion(new THREE.Quaternion());   // plain visible pose
+    const projN = (q) => { const p = new THREE.Vector3(0, 0, -1)   // seat faces raw −z = the nose
         .applyQuaternion(q).add(H.camera.position).project(H.camera); return [p.x, p.y]; };
     const qv1 = H.gizmoSpinRing(H.gizmoSpinRing(qv0, 'x', D90), 'y', D90);   // proxy-frame chain
     const n0 = projN(qv0);
     H.applyGizmoOrientation(qv1);
     H.scene.updateMatrixWorld(true);
     ok('file', Math.abs(H.viewQuat(comp.orientation)
-      .dot(qv1.clone().multiply(H.GIZMO_Y180))) > 0.9999);          // mesh qv = P·RY180
+      .dot(qv1)) > 0.9999);                                       // mesh qv = P (v0.180)
     ok('live', Math.abs(obj.getWorldQuaternion(new THREE.Quaternion())
       .dot(qv1)) > 0.9999);                                       // decompose tracks the rings
     const n1 = projN(qv1);
@@ -1197,8 +1207,11 @@ async function runGizmoTest() {
       // CROSSINGS — in the RING MESH's local frame (TGC's handle scaling
       // shrinks the world ring to r·0.52; the proxy-local r 0.5 aim point
       // lands at 1.9× the ring, which is what made this pin aim-miss).
+      // v0.180: the camera sits on −z (in FRONT of the pilot), so the clean
+      // arc midpoint is the mirrored quadrant (θ=45°, was θ=135° from the
+      // old mirrored +z side).
       H.scene.updateMatrixWorld(true);
-      const p = H.rayRingVis.Z.localToWorld(new THREE.Vector3(0.3536, -0.3536, 0));
+      const p = H.rayRingVis.Z.localToWorld(new THREE.Vector3(0.3536, 0.3536, 0));
       p.project(H.camera);
       H.needsRender = false;
       cv.dispatchEvent(new PointerEvent('pointermove', {
@@ -1247,7 +1260,7 @@ async function runGizmoTest() {
       H.setGizmoMode('rotate'); H.syncGizmo();   // aimed Z ring fattens IN PLACE
       H.scene.updateMatrixWorld(true);
       const cv4 = H.renderer.domElement, rect4 = cv4.getBoundingClientRect();
-      const p4 = H.rayRingVis.Z.localToWorld(new THREE.Vector3(0.3536, -0.3536, 0));
+      const p4 = H.rayRingVis.Z.localToWorld(new THREE.Vector3(0.3536, 0.3536, 0));  // v0.180 −z camera side
       p4.project(H.camera);
       cv4.dispatchEvent(new PointerEvent('pointermove', {
         pointerId: 1, pointerType: 'mouse', bubbles: true,
@@ -1589,7 +1602,7 @@ async function runUiTest() {
         const q0 = o.quaternion.clone(), p0 = o.position.clone();
         const qv1 = new THREE.Quaternion()
           .setFromAxisAngle(new THREE.Vector3(1, 0, 0), 0.4)
-          .multiply(q0).multiply(H.GIZMO_Y180);
+          .multiply(q0);                       // proxy == mesh frame (v0.180)
         H.applyGizmoOrientation(qv1);
         const dq = o.quaternion.clone().multiply(q0.clone().invert());
         const okQ = Math.abs(dq.x) > 0.1 && Math.abs(dq.y) < 1e-9
@@ -1599,10 +1612,10 @@ async function runUiTest() {
         const pf = H.model.data.components[bi].position;
         const okF = Math.abs(pf.x - o.position.x) < 1e-12
           && Math.abs(pf.y - o.position.y) < 1e-12
-          && Math.abs(pf.z + o.position.z) < 1e-12;
+          && Math.abs(pf.z - o.position.z) < 1e-12;
         const qv2 = new THREE.Quaternion()
           .setFromAxisAngle(new THREE.Vector3(1, 0, 0), -0.4)
-          .multiply(o.quaternion.clone()).multiply(H.GIZMO_Y180);
+          .multiply(o.quaternion.clone());     // restore spin
         H.applyGizmoOrientation(qv2);
         const okBack = p0.distanceTo(o.position) < 1e-9
           && Math.abs(o.quaternion.dot(q0)) > 1 - 1e-9;
@@ -1744,24 +1757,25 @@ if (location.search.includes('selftest')) {
       const idx = H.model.data.components.findIndex(c => c.type === 'PilotSeat');
       H.select(idx);
       const comp = H.model.data.components[idx], obj = H.compObjs[idx];
-      comp.position.z += 0.25; obj.position.z -= 0.25;                       // like the z slider (raw +0.25 = view −z)
+      comp.position.z += 0.25; obj.position.z += 0.25;                       // like the z slider (scene frame == file frame, v0.180)
       const q = new THREE.Quaternion()
         .setFromEuler(new THREE.Euler(-20 * Math.PI / 180, 0, 0, 'YXZ'))
         .multiply(obj.quaternion);                                          // like the pitch slider (negative = lean fwd)
       obj.quaternion.copy(q);
-      comp.orientation = { w: q.w, x: q.x, y: q.y, z: -q.z };
+      comp.orientation = H.rawFromView(obj, q);                             // like liveRot's writeback
       const text = H.serialize(), ref = JSON.parse(text);
       const seat = ref.data.components[idx], occ = seat.occupancies[0];
       const mir = ref.data.blocks.find(b => b.type === 255 && b.size_x === 1 && b.size_y === 5
                  && b.size_z === 2 && b.pos_z === occ.pos_z);
       const ok1 = occ.pos_z === H.orig[idx].occ0[0].pos_z + 1;
       const ok3 = JSON.stringify(JSON.parse(text)) === text;
-      // view-space handedness (default craft ISW-241): the beacon's mast must
-      // lean toward the NOSE (view +z). Its 180° quaternion read raw points the
-      // mast at the tail — exactly the user's "points the wrong way" bug.
+      // handedness (default craft ISW-241, de-mirrored chain): the beacon's
+      // mast must lean toward the NOSE = RAW −z, the frame the scene renders
+      // in (v0.180; the old chain pinned +z in its mirrored view). Its 180°
+      // quaternion read wrong points the mast at the tail.
       const bi = H.model.data.components.findIndex(c => c.type === 'Beacon');
       const mast = bi >= 0 ? new THREE.Vector3(0, 1, 0).applyQuaternion(H.compObjs[bi].quaternion) : null;
-      const ok4 = !!mast && mast.z > 0.9 && Math.abs(mast.x) < 0.2;
+      const ok4 = !!mast && mast.z < -0.9 && Math.abs(mast.x) < 0.2;
       // wheels hang below the mount in-game (suspension droop, display-only):
       // the ISW front caster's centre must sit BELOW its pivot, not at deck height
       const wi = H.model.data.components.findIndex(c =>
@@ -1769,19 +1783,23 @@ if (location.search.includes('selftest')) {
       const wc = new THREE.Vector3(0, 0.447, 0).applyQuaternion(H.compObjs[wi].quaternion);
       const ok6 = wc.y < -0.3;
       // FluidJunction flat display pose: builder-file cables attach from
-      // ABOVE (outlets up, row along the fuselage), so the inlet faces DOWN
+      // ABOVE (outlets up, row along the fuselage), so in the game's own
+      // frame the outlet face (local +z) points +y UP and the inlet hangs
+      // toward the cables (de-mirror v0.180 flipped this pin's sign with the
+      // chain: the old chain's mirrored world showed the mirrored comb)
       const ji = H.model.data.components.findIndex(c => c.type === 'FluidJunction');
       const jdir = new THREE.Vector3(0, 0, 1).applyQuaternion(H.compObjs[ji].quaternion);
-      const ok7 = jdir.y < -0.9;
+      const ok7 = jdir.y > 0.9;
       // aileron deflection = saved data.angle in DEGREES (.ini joint limits
       // ±45°): the ISW front canard (−4.609°) droops its leading edge a few
-      // degrees below the hinge, view tip dir = qV · Mz · R_x(rad) · (0,0,1)
+      // degrees below the hinge; the proxy's flap tip rides local +z rotated
+      // by Rx(angle) about the [JOINT] hinge, in the raw frame it renders
       const ac = H.model.data.components.find(c =>
         c.type === 'Aileron' && c.data && c.data.angle < -3);
       const aqp = new THREE.Quaternion().setFromAxisAngle(
         new THREE.Vector3(1, 0, 0), ac.data.angle * Math.PI / 180);
-      const at = new THREE.Vector3(0, 0, 1).applyQuaternion(aqp);
-      at.z = -at.z; at.applyQuaternion(H.viewQuat(ac.orientation));
+      const at = new THREE.Vector3(0, 0, 1).applyQuaternion(aqp)
+        .applyQuaternion(H.viewQuat(ac.orientation));
       const ok8 = at.y < -0.03 && at.y > -0.3;   // drooping, within joint limits
       // v1-format files (23 of 24 corpus files!) carry NO data.colors palette:
       // slots must resolve against the built-in legacy groups (dashboard
@@ -1806,11 +1824,13 @@ if (location.search.includes('selftest')) {
           const rg = H.buildRealComponent(H.model.data.components[bi], mm, bi, true);
           rg.traverse(o => { if (o.material?.emissive?.getHex() === 0xff2222) ok10 = true; });
         } }
-      // orient-fixture rules (testdata/9000000001, pixel-proven side-by-side
-      // with the dev viewer): dashboard canvas text must be PRE-MIRRORED and
-      // baked text prims mirrored in-plane about their own centre, so both
-      // read correctly from the plate's authored (+normal) side through our
-      // z-mirror. ok11: left-aligned 'AB' lands on the canvas RIGHT edge.
+      // orient-fixture rules (testdata/9000000001 + the game's own cockpit
+      // screenshots, FORMAT §Chirality): the game authors dashboard text
+      // READABLE from the plate's +z face with a RAW canvas — the de-mirror
+      // (v0.180) removed the canvas pre-mirror and the TEXT_MIRROR_X baked-
+      // text flip that the old z-mirror chain needed. ok11 (dashtext): a
+      // left-aligned canvas now starts at the LEFT edge (through the old
+      // chain it pre-flipped to the RIGHT edge).
       const ok11 = (() => {
         const t = H.dashTextTex({ text: 'AB', textSize: 2, textAlign: 17, size_x: 40, size_y: 12,
           mainColor: { r: 255, g: 0, b: 0 }, baseColor: { r: 0, g: 0, b: 0 } });
@@ -1819,16 +1839,44 @@ if (location.search.includes('selftest')) {
         let left = 0, right = 0;
         for (let i = 0, px = 0; i < d.length; i += 4, px++)
           if (d[i] > 200 && d[i + 1] < 100) (px % cv.width < cv.width / 2 ? left++ : right++);
-        return right > 20 && left === 0;   // pre-mirrored: left-aligned text lands right
+        return left > 20 && right === 0;   // raw canvas: left-aligned text lands left
       })();
-      // ok12: flipGeomX mirrors about the bbox centre (triangle (0,0)(1,0)(0,1)
-      // → first vertex at x=1) — glyph order flips, position is preserved.
-      const ok12 = (() => {
-        const tg = new THREE.BufferGeometry();
-        tg.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0, 0, 1, 0], 3));
-        tg.setIndex([0, 1, 2]);
-        H.flipGeomX(tg);
-        return Math.abs(tg.attributes.position.array[0] - 1) < 1e-6;
+      // ok12 (orienttext): the orient fixture's own 'TEST' dashboard, built
+      // through the shipped chain IN OUR OWN VIEWER (no dev-viewer arbiter):
+      // the text-bearing face is the plate's +Z (BoxGeometry face order),
+      // the group carries no in-plane/world mirror, and the identity mount
+      // maps that face's normal onto raw +z — so a camera on the +z side of
+      // the board reads the RAW canvas normally: the plate is readable from
+      // its authored (+normal) side WITHOUT any pre-mirror. Under the old
+      // mirror chain every leg fails (scale.z=−1, −z normal, right-flipped
+      // canvas ink).
+      const ok12 = await (async () => {
+        const fx = await (await fetch('../testdata/9000000001/blueprint.json')).json();
+        const dc = fx.data.components.find(c => c.type === 'Dashboard');
+        const el = (dc.data.elements || [])[0];
+        if (dc.type !== 'Dashboard' || el.type !== 'Label') return false;
+        const g = H.buildDashboard(dc, { info: {} }, 0, true);
+        // the Label element's mesh is the generated box whose +Z face carries
+        // the texture (BoxGeometry material order [+x,−x,+y,−y,+z,−z])
+        let mesh = null;
+        g.traverse(o => { if (o.isMesh && Array.isArray(o.material) && o.material[4]?.map) mesh = o; });
+        if (!mesh) return false;
+        if (g.scale.z !== 1 || mesh.scale.z !== 1) return false;
+        // identity mount + the shipped decode: board normal → raw +z
+        const n = new THREE.Vector3(0, 0, 1)
+          .applyQuaternion(H.viewQuat(dc.orientation));    // fixture quat = identity
+        if (n.z < 0.99) return false;
+        // and the face texture itself is the RAW (non pre-mirrored) canvas:
+        // the fixture's centred 'TEST' ink is symmetric, so compare against
+        // a left-aligned render of the same string: raw advances LEFT.
+        const t = H.dashTextTex({ text: 'TEST', textSize: 2, textAlign: 17,
+          size_x: 80, size_y: 30, mainColor: { r: 255, g: 0, b: 0 }, baseColor: { r: 0, g: 0, b: 0 } });
+        const cv = t.image, cx = cv.getContext('2d', { willReadFrequently: true });
+        const px = cx.getImageData(0, 0, cv.width, cv.height).data;
+        let l = 0, r = 0;
+        for (let i = 0, k = 0; i < px.length; i += 4, k++)
+          if (px[i] > 200 && px[i + 1] < 100) (k % cv.width < cv.width / 2 ? l++ : r++);
+        return l > 0 && r === 0;
       })();
       // ok13: legacy rotation convention (no data.colors => RAW Unity LH
       // quaternions): the mosaic craft's man-mural constellation (dash 235's
@@ -1841,10 +1889,10 @@ if (location.search.includes('selftest')) {
         const ms = await (await fetch('../testdata/3334698274/blueprint.json')).json();
         const dc = ms.data.components[235];
         if (dc.type === 'Dashboard') {
-          const qv = new THREE.Quaternion(-dc.orientation.x, -dc.orientation.y,
-                                         dc.orientation.z, dc.orientation.w);   // legacy view rule
-          const n = new THREE.Vector3(0, 0, -1).applyQuaternion(qv);   // +Z face through scale.z=−1
-          const npl = new THREE.Vector3(0.69337, 0.63691, -0.33702).normalize();  // view wall normal
+          const qv = new THREE.Quaternion(dc.orientation.x, dc.orientation.y,
+                                         dc.orientation.z, dc.orientation.w);   // legacy = raw q (v0.180)
+          const n = new THREE.Vector3(0, 0, 1).applyQuaternion(qv);   // plate front = local +z (no root mirror)
+          const npl = new THREE.Vector3(0.69337, 0.63691, 0.33702).normalize();  // raw-frame wall normal (was view −z)
           ok13 = Math.abs(n.dot(npl)) > 0.98;
         }
         // ok13b: decoded subgrid join (v0.154; BOTH indices flattened
@@ -1870,6 +1918,79 @@ if (location.search.includes('selftest')) {
           && flat13[e0.component]?.type === 'SmallPivot'
           && Math.abs(flat13[e0.component]?.data?.angle - 54) < 0.01;
       }
+      // ok18b (liver): MIRROR-PROOF ACCEPTANCE GATE for the de-mirrored
+      // chain (v0.180; FORMAT.md §"Chirality vs in-game truth"). The United
+      // Airliner 3309955432 hand-plates its −x fuselage with 48 Dashboard
+      // panels (paint [0,3] = white/silver) spelling U-N-I-T-E-D; the GAME's
+      // own workshop photos show that side reading nose-first left-to-right.
+      // An observer on the −x side (camera looking +x, up +y) has screen
+      // RIGHT = +z and the nose (raw −z) at screen LEFT. Raster the plate
+      // footprints through the shipped placement law (this file is V1/palette-
+      // less => RAW quaternions) into that screen: the pixel-font must match
+      // the captured UNITED orientation — glyph 1 = U at the nose end, glyph
+      // 5 = E (open right), glyph 6 = D (closed right). Under the old
+      // z-mirror chain the same code yields the DETINUD mirror (every
+      // expectation below fails): pins elsewhere pass mirrored either way,
+      // this one cannot. Pure data + camera maths, no GPU text.
+      const ok18bRaw = await (async () => {
+        const al = await (await fetch('../testdata/3309955432/blueprint.json')).json();
+        const legacy = !(Array.isArray(al.data.colors) && al.data.colors.length > 0);
+        const plates = [];
+        for (const c of al.data.components) {
+          if (c.type !== 'Dashboard' || JSON.stringify(c.colors) !== '[0,3]') continue;
+          const p = c.position;
+          if (!(p.x > -3.5 && p.x < -2.6 && p.y > 12 && p.y < 13.7)) continue;
+          const q = legacy ? new THREE.Quaternion(c.orientation.x, c.orientation.y,
+                                                 c.orientation.z, c.orientation.w)
+                           : new THREE.Quaternion(-c.orientation.x, -c.orientation.y,
+                                                  -c.orientation.z, c.orientation.w);
+          const dd = c.data, sx = dd.size_x / 100, sy = dd.size_y / 100;
+          const wp = [
+            new THREE.Vector3(0, 0, 0.005), new THREE.Vector3(sx, 0, 0.005),
+            new THREE.Vector3(0, sy, 0.005), new THREE.Vector3(sx, sy, 0.005),
+          ].map(v => v.applyQuaternion(q).add(H.viewPos(p)));
+          plates.push([Math.min(...wp.map(v => v.z)), Math.max(...wp.map(v => v.z)),
+                       Math.min(...wp.map(v => v.y)), Math.max(...wp.map(v => v.y))]);
+        }
+        if (plates.length !== 48) return `plate count ${plates.length} (expect 48)`;
+        const res = 0.1;
+        const zmin = Math.min(...plates.map(a => a[0])), zmax = Math.max(...plates.map(a => a[1]));
+        const ymin = Math.min(...plates.map(a => a[2])), ymax = Math.max(...plates.map(a => a[3]));
+        const W = Math.floor((zmax - zmin) / res) + 2, Hh = Math.floor((ymax - ymin) / res) + 2;
+        const g = Array.from({ length: Hh }, () => new Array(W).fill('.'));
+        for (const [a, b, c0, c1] of plates)
+          for (let r = Math.floor((c0 - ymin) / res); r <= Math.floor((c1 - ymin) / res); r++)
+            for (let col = Math.floor((a - zmin) / res); col <= Math.floor((b - zmin) / res); col++)
+              if (r >= 0 && r < Hh && col >= 0 && col < W) g[r][col] = '#';
+        const rows = [];
+        for (let r = Hh - 1; r >= 0; r--) rows.push(g[r].join(''));
+        // top row empty; then 12 content rows — the UNITED orientation for a
+        // −x observer (screen right = +z, up = +y). Mirror(DETINUD) ≠ this.
+        const want = [
+          '....................................................................................',
+          '####....####...############...##############..############.##########...###########.',
+          '####....####...############...##############..############.##########...###########.',
+          '####....####...############...##############..############.##########...###########.',
+          '####....####...####....####........####...........####.....###..........####....###.',
+          '####....####...####....####........####...........####.....###..........####....###.',
+          '############..#######..##########..###########....########.############.####.######.',
+          '############..#######..##########..###########....########.############.####.######.',
+          '############..#######..##########..###########....########.###..#######.####.######.',
+          '############..#######..##########..###########....########.###..#######.####.######.',
+          '############..#######..##########..###########....########.###..#######.####.######.',
+          '############..#######..#######################....########.############.###########.',
+          '############..#######..#######################....########.############.###########.',
+          '############..#######..#######################....########.############.###########.',
+        ];
+        if (rows.join('|') === want.map(s => s.split('').reverse().join('')).join('|'))
+          return 'raster reads DETINUD (mirrored!)';
+        for (let k = 0; k < want.length; k++)
+          if (rows[k] !== want[k])
+            return `row ${k}: got ${rows[k]} want UNITED-orientation raster (see rows) | `
+              + rows.slice(0, 3).join(' / ');
+        return true;
+      })();
+      const ok18b = ok18bRaw === true;
       // ok14: ground fit — the green plane and grid sit just UNDER the
       // lowest rendered geometry (truck 3481322297 builds to y=-1.5:
       // nothing may render below ground; user rule), ISW included.
@@ -1904,7 +2025,7 @@ if (location.search.includes('selftest')) {
       { H.setFlowMode('wind'); H.updateWindHud(performance.now());   // aim once (rAF has not run)
         if (H.windHud.visible && H.sockPivot && H.windHud.parent === H.camera) {
           const dv = H.flowDir();
-          const dcam = new THREE.Vector3(dv[0], dv[1], -dv[2])
+          const dcam = new THREE.Vector3(dv[0], dv[1], dv[2])   // scene frame == file frame (v0.180)
             .applyQuaternion(H.camera.quaternion.clone().invert()).normalize();
           const z = new THREE.Vector3(0, 0, 1).applyQuaternion(H.sockPivot.quaternion);
           ok19 = z.dot(dcam) > 0.93;
@@ -1973,19 +2094,34 @@ if (location.search.includes('selftest')) {
         }
         ok23 = worst < 0.45 && H.flowGroup.children.some(o => o.isLine && !o.userData.isTrail);
         H.setFlowMode('off'); }
-      // ok24: wake deficit — air directly behind Jimmy's tail is slowed
+      // ok24: wake deficit — air directly behind the tail is slowed
       // (>25 % deficit), air ahead of the nose is at freestream
       let ok24 = false;
       { const dvW = H.flowDir();
         const bl = H.model.box_min, Bg = H.model.box_max;
         const cW = [(bl.x + Bg.x) / 2, (bl.y + Bg.y) / 2, (bl.z + Bg.z) / 2];
-        const ext = Math.abs((Bg.x - bl.x) / 2 * dvW[0]) + Math.abs((Bg.y - bl.y) / 2 * dvW[1]) + Math.abs((Bg.z - bl.z) / 2 * dvW[2]);
         const VB = 60;
-        // mid-way between axis and hull TOP skin: the ISW tail centre is its
-        // open engine duct (air, casts no wake); the top skin is solid
-        const yTop = (Bg.y + cW[1]) / 2 - 0.15;
-        const pb = [cW[0] + dvW[0] * (ext + 1.5), yTop, cW[2] + dvW[2] * (ext + 1.5)];
-        const pf = [cW[0] - dvW[0] * (ext + 1.5), yTop, cW[2] - dvW[2] * (ext + 1.5)];
+        // v0.180: stand the probes 1.5 m along the flow axis off the TWO
+        // SOLID CELLS that reach furthest down/upstream (tracked by their
+        // projection on the flow direction). The wake walk is a straight
+        // column, so it must start behind a cell that actually casts one
+        // (the ISW tail CENTRE is its open engine duct: air, no wake — the
+        // old chain's bbox/centre-offset probes only hit the wake because
+        // mirrored voxel cells and raw-numbered centres COINCIDED in z).
+        let tLo = 1e9, tHi = -1e9, cLo = null, cHi = null;
+        for (const k of H.solidCells) {
+          const z = (k % 8192) - 4096, t2 = Math.floor(k / 8192);
+          const y = (t2 % 8192) - 4096, x = Math.floor(t2 / 8192) - 4096;
+          const p = [(x + 0.5) * 0.25 - cW[0], (y + 0.5) * 0.25 - cW[1],
+                     (z + 0.5) * 0.25 - cW[2]];
+          const t = p[0] * dvW[0] + p[1] * dvW[1] + p[2] * dvW[2];
+          if (t < tLo) { tLo = t; cLo = p; }
+          if (t > tHi) { tHi = t; cHi = p; }
+        }
+        const pb = [cW[0] + cHi[0] + dvW[0] * 1.5, cW[1] + cHi[1] + dvW[1] * 1.5,
+                    cW[2] + cHi[2] + dvW[2] * 1.5];
+        const pf = [cW[0] + cLo[0] - dvW[0] * 1.5, cW[1] + cLo[1] - dvW[1] * 1.5,
+                    cW[2] + cLo[2] - dvW[2] * 1.5];
         const vb = H.sampleVel(pb, dvW, VB), vf = H.sampleVel(pf, dvW, VB);
         ok24 = Math.hypot(vb[0], vb[1], vb[2]) < VB * 0.75 && (vb[3] || 0) > 0.3
           && Math.hypot(vf[0], vf[1], vf[2]) > VB * 0.95 && !(vf[3] > 0);
@@ -2028,7 +2164,7 @@ if (location.search.includes('selftest')) {
         const pq = drag.multiply(q0);                              // what TControls computes
         H.applyGizmoOrientation(pq);
         const qf = H.model.data.components[ci].orientation;
-        const want = pq.clone().multiply(H.GIZMO_Y180);   // proxy frame → mesh frame
+        const want = pq.clone();                    // proxy carries the plain pose (v0.180)
         ok27 = Math.abs(H.viewQuat(qf).dot(want)) > 0.9999           // file → view decode
           && Math.abs(o.quaternion.dot(want)) > 0.9999             // live mesh pose
           && H.dirty;
@@ -2051,14 +2187,15 @@ if (location.search.includes('selftest')) {
         && (!H.netThrust.v || Math.abs(Math.hypot(...H.netThrust.v) - 1) < 0.02)
         // ISW = sole-class RCS blob: the blueprint stores none of the game's
         // 5 selectable fire directions, so it displays the NORMAL mode —
-        // push BACKWARD along −cockpit heading = view (0,0,−1) (user: "no
-        // downward propulsion"; the old .ini-TARGET-axis guess drew a
-        // straight-down arrow at the nose pod). RCS is excluded from the
-        // nets entirely when real engines coexist. Auto flow still takes the
-        // cockpit first; aoa 4° keeps |y| = sin4° ≈ 0.07.
-        && !!H.netThrust.main && H.netThrust.main[2] < -0.97
+        // push BACKWARD along −cockpit heading = raw +z (nose = raw −z;
+        // v0.180 unpins the old mirrored-frame (0,0,−1); user: "no downward
+        // propulsion"; the old .ini-TARGET-axis guess drew a straight-down
+        // arrow at the nose pod). RCS is excluded from the nets when real
+        // engines coexist. Auto flow still takes the cockpit first; aoa 4°
+        // keeps |y| = sin4° ≈ 0.07.
+        && !!H.netThrust.main && H.netThrust.main[2] > 0.97
         && Math.abs(H.netThrust.main[0]) < 0.05 && Math.abs(H.netThrust.main[1]) < 0.05
-        && H.netThrust.v[2] < -0.97 && Math.abs(H.flowDir()[1]) < 0.2;
+        && H.netThrust.v[2] > 0.97 && Math.abs(H.flowDir()[1]) < 0.2;
       // ok18: sealed-hull wind exclusion (user: no wind inside enclosed
       // craft): BionicDolphin (block hull, hatches stored closed) has a
       // ray-enclosed cabin of 100+ cells that is windless, its far field
@@ -2073,28 +2210,31 @@ if (location.search.includes('selftest')) {
         && seal.sealedCount > 100
         && seal.ext[((sgy * seal.n[0]) + sgx) * seal.n[2] + sgz] !== 1
         && seal.ext[0] === 1;
-      // picking must work through the mirrored component transforms
-      // (camera aimed at the selected component: load framing is
-      // per-craft now, the pin must not depend on it)
+      // picking must work through the component transforms (camera aimed at
+      // the selected component; v0.180: an explicit lookAt — the old chain
+      // passed on the stale fitCameraToModel quaternion pointing scene-ward
+      // from ITS side, which the de-mirror no longer coincides with)
       {
         const bb = new THREE.Box3().setFromObject(obj);
         const c = bb.getCenter(new THREE.Vector3());
         H.controls.target.copy(c);
         H.camera.position.copy(c).add(new THREE.Vector3(1.2, 0.8, 1.5));
+        H.camera.lookAt(c);
         H.camera.near = 0.01; H.camera.far = 100; H.camera.updateProjectionMatrix();
         H.camera.updateMatrixWorld(true);
       }
       H.ray.setFromCamera(new THREE.Vector2(0, 0), H.camera);
       const ok5 = H.ray.intersectObjects(H.compGroup.children, true)
         .some(h => h.object.userData.ci >= 0);
-      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 && ok10 && ok11 && ok12 && ok13 && ok14 && ok15 && ok16 && ok17 && ok18 && ok19 && ok20 && ok21 && ok22 && ok23 && ok24 && ok25 && ok26 && ok27 && ok28 && ok29 ? 'PASS' : 'FAIL')
+      document.title = 'SELFTEST ' + (ok1 && mir && ok3 && ok4 && ok5 && ok6 && ok7 && ok8 && ok9 && ok10 && ok11 && ok12 && ok13 && ok13b && ok14 && ok15 && ok16 && ok17 && ok18 && ok18b && ok19 && ok20 && ok21 && ok22 && ok23 && ok24 && ok25 && ok26 && ok27 && ok28 && ok29 ? 'PASS' : 'FAIL')
         + ' occ_z=' + occ.pos_z + ' mirror=' + !!mir
         + ' pitch=' + (2 * Math.asin(-seat.orientation.x) * 180 / Math.PI).toFixed(1) + '°'
         + ' beacon=' + (mast ? mast.x.toFixed(2) : 'none') + ' droop=' + wc.y.toFixed(2)
         + ' junction=' + jdir.y.toFixed(2) + ' aileron=' + at.y.toFixed(2)
         + ' pick=' + ok5 + ' palette=' + ok9 + ' lens=' + ok10
-        + ' dashmirror=' + ok11 + ' textx=' + ok12 + ' mural=' + ok13 + ' subjoin=' + ok13b + ' ground=' + ok14
-        + ' surges=' + ok15 + ' bolts=' + ok16 + ' thrust=' + ok17 + ' seal=' + ok18 + ' sock=' + ok19 + ' excl=' + ok20 + ' windpts=' + ok21 + ' click=' + ok22 + ' inflow=' + ok23 + ' wake=' + ok24 + ' seatpitch=' + ok25 + ' anchor=' + ok26 + ' gizmo=' + ok27 + ' outline=' + ok28 + ' conndef=' + ok29
+        + ' dashtext=' + ok11 + ' orienttext=' + ok12 + ' mural=' + ok13 + ' subjoin=' + ok13b + ' ground=' + ok14
+        + ' surges=' + ok15 + ' bolts=' + ok16 + ' thrust=' + ok17 + ' seal=' + ok18
+        + ' liver=' + (ok18b ? 'true' : ok18bRaw) + ' sock=' + ok19 + ' excl=' + ok20 + ' windpts=' + ok21 + ' click=' + ok22 + ' inflow=' + ok23 + ' wake=' + ok24 + ' seatpitch=' + ok25 + ' anchor=' + ok26 + ' gizmo=' + ok27 + ' outline=' + ok28 + ' conndef=' + ok29
         + ' cabin=' + seal.sealedCount;
     } catch (e) { document.title = 'SELFTEST ERR ' + e.message + ' @' + String(e.stack).split(String.fromCharCode(10))[1].trim().slice(0, 70); }
   }, 1500);

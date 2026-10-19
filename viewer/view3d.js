@@ -118,16 +118,14 @@ function dashTextTex(el) {
   cv.width = Math.max(1, Math.round((el.size_x || 0) * 5));
   cv.height = Math.max(1, Math.round((el.size_y || 0) * 5));
   const x = cv.getContext('2d', { willReadFrequently: true });
-  // Canvas PRE-MIRROR (x → width−x). Our view chain mirrors the world on z,
-  // so a RAW canvas reads MIRRORED from the plate's authored readable side.
-  // Proven with the orient fixture (testdata/9000000001): the game and the
-  // dev viewer both render 'TEST' readable from file +z for a +z-facing
-  // plate; through our z-mirror only a pre-mirrored canvas matches. (v104's
-  // rule; v105's revert was the regression the user re-reported.) Text
-  // positions land exactly — the canvas mirror and the net view mirror cancel.
+  // RAW canvas, drawn left-to-right (de-mirror v0.180). FORMAT.md §Chirality
+  // vs in-game truth proved with the game's own cockpit screenshots that the
+  // game authors the Label text readable from the board's +z face (text-up =
+  // local +y, string advances +x) — the dev viewer's un-mirrored chain shows
+  // it too. The old x→width−x PRE-MIRROR was compensation for our removed
+  // world mirror: inside the mirrored world it was a local double-mirror.
   x.fillStyle = '#fff'; x.textBaseline = 'alphabetic'; x.textAlign = 'left';
   x.font = `${8 * ts}px monospace`;
-  x.translate(cv.width, 0); x.scale(-1, 1);
   const center = (el.textAlign ?? 16) === 16;   // textAlign 16 = centred
   let y = 3;
   for (const line of lines) {
@@ -152,7 +150,6 @@ function dashTextTex(el) {
 }
 function buildDashboard(c, model, idx, low) {
   const g = new THREE.Group();
-  g.scale.z = -1;                          // standard mirror chain
   const d = c.data || {};
   const w = (Number(d.size_x) || 0) / 100, h = (Number(d.size_y) || 0) / 100;
   if (w <= 0 || h <= 0) return g;
@@ -201,37 +198,16 @@ function buildDashboard(c, model, idx, low) {
   }
   return g;
 }
-// Text baked INTO component geometry (MiniComputer 'CODE' buttons, HUD rows)
-// follows the SAME rule as canvas text, proven with the orient fixture: the
-// glyphs are authored readable from their plate's +normal (front) side in the
-// game, and through our z-mirror that side renders mirrored — so the prim is
-// mirrored IN-PLANE about its own bbox centre (x → 2cx−x): glyph order and
-// shapes read correctly from the authored side, and mirroring about the
-// centre (not x=0) keeps the string exactly where the file put it (HUD rows
-// are symmetric; MiniComputer glyphs sit 5.5 mm off the button centre, and a
-// flip about x=0 would push them 11 mm across it). Winding is restored by an
-// index swap. (v105's local z-flip netted the raw geometry = still mirrored
-// from the pilot side — same bug the fixture exposes for canvas text.)
-const TEXT_MIRROR_X = new Set(['code_button_text', 'reboot_button_text',
-                               'code', 'subscribe', 'codein', 'activein']);
-function flipGeomX(gg) {
-  gg.computeBoundingBox();
-  const cx = (gg.boundingBox.min.x + gg.boundingBox.max.x) / 2;
-  gg.applyMatrix4(new THREE.Matrix4().makeTranslation(2 * cx, 0, 0)
-    .multiply(new THREE.Matrix4().makeScale(-1, 1, 1)));
-  const gi = gg.getIndex();            // restore outward winding in the flipped space
-  if (gi) {
-    const a = gi.array;
-    for (let i = 0; i < a.length; i += 3) { const t = a[i + 1]; a[i + 1] = a[i + 2]; a[i + 2] = t; }
-    gi.needsUpdate = true;
-  }
-  gg.computeVertexNormals();
-}
+// Baked-in component text prims (MiniComputer 'CODE' buttons, HUD rows)
+// are authored readable from the plate's +normal side and now render RAW —
+// the old TEXT_MIRROR_X in-plane flip (and its flipGeomX helper) existed
+// only to counteract the removed world mirror (de-mirror v0.180; FORMAT.md
+// §Chirality). buildDashboard's Label canvas above and these prims now share
+// the single rule: raw geometry, readable from +z/+normal.
 function buildRealComponent(c, model, idx, low = false) {
   const { geo, info } = model;
   if (c.type === 'Dashboard') return buildDashboard(c, model, idx, low);
   const g = new THREE.Group();
-  g.scale.z = -1;          // raw .ini/gltf local space mirrored into view space
   // Placement truth is the .ini node tree (renderables/joints/targets, ZYX
   // euler like the game engine) — NOT the gltf node translations, which are
   // Blender authoring offsets (MiniComputer's model sits 3 m from its origin!).
@@ -265,7 +241,6 @@ function buildRealComponent(c, model, idx, low = false) {
       gg.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
       gg.setIndex(i);
       gg.computeVertexNormals();
-      if (TEXT_MIRROR_X.has(prim.material)) flipGeomX(gg);
       let arr = byMat.get(prim.material);
       if (!arr) byMat.set(prim.material, arr = []);
       arr.push(gg);
@@ -319,7 +294,7 @@ function buildRealComponent(c, model, idx, low = false) {
     // so their nubs rendered as "red & blue spheres sitting on the ground
     // plane right under the solar panel" (user report). Skip them.
     if (Math.hypot(a.position[0], a.position[1], a.position[2]) > 0.5) continue;
-    const p = new THREE.Vector3(a.position[0], a.position[1], -a.position[2]).applyQuaternion(qo);
+    const p = new THREE.Vector3(...a.position).applyQuaternion(qo);
     adpQueue.push({ x: p.x + po.x, y: p.y + po.y, z: p.z + po.z,
                     t: a.type, ci: idx, lx: a.position[0], ly: a.position[1], lz: a.position[2] });
   }
@@ -346,7 +321,7 @@ function syncAdapters(obj) {
   const lst = adpIdx.get(obj.userData.ci);
   if (!lst) return;
   for (const a of lst) {
-    const p = new THREE.Vector3(a.lx, a.ly, -a.lz).applyQuaternion(obj.quaternion);
+    const p = new THREE.Vector3(a.lx, a.ly, a.lz).applyQuaternion(obj.quaternion);
     a.x = p.x + obj.position.x; a.y = p.y + obj.position.y; a.z = p.z + obj.position.z;
   }
   scheduleAdpFlush();
@@ -385,43 +360,41 @@ const CELL = 0.25, FRAME = 3.0;
 const cellW = (p) => (p - 5.5) * CELL;               // cell -> world metres
 const occWorld = (o, ax) => cellW(o['pos_' + ax]) + o['frame_' + ax] * FRAME;
 
-// ---------- file space → view space (Unity left-handed mirror) -----------
-// The game runs on Unity: a LEFT-handed world. Drawing the file numbers raw
-// in a right-handed Three.js scene renders the MIRROR IMAGE of the game view
-// — beacons lean to the opposite side, steering casters pitch the wrong way,
-// wheels sit inboard of their mounts, ailerons deflect inverted. This is not
-// cosmetic: pipes settle it. data.pipes endpoints are game-computed world
-// adapter positions, and they match p + R(q)·a for the CONJUGATED quaternion
-// (0.000 m) but not the raw one (0.18–0.66 m) — i.e. the file's q is a
-// left-handed rotation. The standard Unity→right-handed conversion mirrors
-// z: VIEW = (x, y, −z) file-space, quaternion (w, x, y, −z).
-// Conventions here:
-//  * positions/quaternions entering the scene go through viewPos/viewQuat;
-//  * component-local geometry keeps RAW .ini/gltf numbers — a root scale.z=−1
-//    on the component object absorbs the mirror (the renderer flips winding
-//    for negative-determinant matrices, sprites are unaffected);
-//  * raw-coordinate subsystems (CoM marker, flow, aero arrows) live under
-//    worldM (scale.z=−1); baked geometry (blocks, hull, pipes, occupancy)
-//    mirrors z at emit time with the matching winding flip;
+// ---------- file space → view space (de-mirrored, v0.180) -----------------
+// VERDICT (FORMAT.md §"Chirality vs in-game truth", 2026-10-19, proven against
+// the game's OWN workshop screenshots of craft 3309955432): the game projects
+// the RAW FILE frame with STANDARD RIGHT-HANDED camera math — a viewer that
+// draws raw positions, NO world mirror, RH camera renders the game's view
+// (the old z-mirror chain rendered its horizontal MIRROR image; every data
+// pin was reflection-invariant, so the mirror stayed green its whole life).
+// The game IS Unity-left-handed for ROTATION STORAGE (a placement fact, not a
+// camera fact): a right-handed renderer must place with the conjugate for
+// 2026 files — pipes settle it: data.pipes endpoints are game-computed world
+// adapter positions matching p + R(q*)·a (0.000 m) but not R(q) (0.18–0.66 m).
+// Conventions here (view space == raw file space):
+//  * positions enter the scene through viewPos (the identity copy);
+//  * component-local geometry keeps RAW .ini/gltf numbers, no root mirror;
+//  * raw-coordinate subsystems (CoM marker, flow, aero/thrust arrows) live
+//    under worldM (identity anchor group), and baked geometry (blocks, hull,
+//    pipes, occupancy) emits raw coordinates with the raw winding;
 //  * model.data, serialize(), the inspector numbers and the reports stay in
-//    RAW file space (selftest asserts the mirrored placements).
-const viewPos = (p) => new THREE.Vector3(p.x, p.y, -p.z);
+//    RAW file space (selftest asserts the placements).
+const viewPos = (p) => new THREE.Vector3(p.x, p.y, p.z);
 // Rotation STORAGE convention flips with the game generation:
 // • Pre-palette files (no data.colors, 2024-2025 exports) store the Unity LH
 //   quaternion RAW. Proof: the mosaic craft (3334698274) glues 49 dashboard
 //   plates flat onto one hull wall — only raw R(q) makes every plate normal
 //   parallel to the fitted wall plane (flushfrac 1.00 raw vs 0.00 conj);
 //   conj renders them standing out of the wall at an angle (user: murals
-//   "not flush", 'test' dash "rotated away from the seat" — in the raw game
-//   the plate front is the local −z face, so raw faces the pilot dead-on).
+//   "not flush", 'test' dash "rotated away from the seat").
 // • 2026 files (data.colors present) store the CONJUGATE: ISW-241's own
 //   data.pipes endpoints reproduce only under R(q*) (comptest 60/60, 0.000 m).
-// Our view chain mirrors z, so legacy files convert as (w,−x,−y,z) and
-// modern files as (w,x,y,−z). Saved files stay byte-exact: edits invert
-// through rawFromView.
+// View space == raw file space, so legacy files place with q AS STORED
+// (w,x,y,z) and modern files with the plain conjugate (w,−x,−y,−z). Saved
+// files stay byte-exact: edits invert through rawFromView.
 let LEGACY_Q = false;
-const viewQuat = (q) => LEGACY_Q ? new THREE.Quaternion(-q.x, -q.y, q.z, q.w)
-                                 : new THREE.Quaternion(q.x, q.y, -q.z, q.w);   // file {w,x,y,z}
+const viewQuat = (q) => LEGACY_Q ? new THREE.Quaternion(q.x, q.y, q.z, q.w)
+                                 : new THREE.Quaternion(-q.x, -q.y, -q.z, q.w);   // file {w,x,y,z}
 
 // ---------- three.js boilerplate ----------
 const view = document.getElementById('view');
@@ -444,9 +417,9 @@ scene.fog = new THREE.Fog(0x8fb4d8, 40, 90);
 }
 
 const camera = new THREE.PerspectiveCamera(55, 1, 0.05, 300);
-camera.position.set(-6.5, 3.4, 8.5);              // view space: nose (+z) toward camera
+camera.position.set(-6.5, 3.4, -8.5);             // raw frame: nose (−z) toward camera
 const controls = new OrbitControls(camera, renderer.domElement);
-controls.target.set(0, 0.9, -0.5);
+controls.target.set(0, 0.9, 0.5);
 controls.enableDamping = true;
 // Per-craft framing: the ISW-tuned defaults bury the camera in a 16 m truck
 // (user: "deeply zoomed in, fades out when zooming out, moving behaves
@@ -467,7 +440,7 @@ function fitCameraToModel() {
   // viewer" — no fly-to ran; the AUTO fit was the zoom). Small crafts get
   // a >= 3.6 m view; big crafts keep the 1.85r framing.
   const d = Math.max(r * 1.85, 3.6);
-  camera.position.set(c.x + d * 0.6, c.y + Math.max(d * 0.34, 1.4), c.z + d * 0.72);
+  camera.position.set(c.x + d * 0.6, c.y + Math.max(d * 0.34, 1.4), c.z - d * 0.72);
   camera.near = Math.max(0.05, r / 400);
   camera.far = Math.max(300, r * 10);
   scene.fog.near = Math.max(30, r * 2.5);
@@ -614,20 +587,16 @@ const WHEEL_TYPES = new Set(['SmallWheel', 'Wheel', 'BigWheel']);
 // FLAT frame (outlets up, row along the fuselage — the v0.91 look); the file
 // quaternion's conjugate pose (standing comb, ports sideways) matches none of
 // them, so the junction read as "sticking out" of its own pipes. Display pose
-// = mirror-conjugate file quaternion (w,−x,−y,z): the model lies flat and
-// aligns with its cables. Display-only: edits write back through wheelUndo,
-// saved quaternions stay file-exact.
+// (de-mirror v0.180: view space == raw file space) = the RAW file quaternion
+// for BOTH generations: the old chain's flat comb in view was the file quat
+// (w,−x,−y,z) under its mirrored placement law, whose raw-space rotation IS
+// R(q) — the flat frame is a property of the builder's raw pose. Display-only:
+// edits write back through wheelUndo, saved quaternions stay file-exact.
 const JUNCTION_TYPES = new Set(['FluidJunction']);
 function applyDisplayPose(obj, qV, qF) {
   obj.userData.wheelUndo = undefined;
   if (JUNCTION_TYPES.has(obj.userData.wType)) {
-    // Builder-flat display pose, CONVENTION-INDEPENDENT: legacy files store
-    // the builder pose RAW, 2026 files its CONJUGATE (LEGACY_Q), so in file
-    // terms the flat comb is always (−x,−y,z,w). Deriving it from qV with
-    // (−x,−y,−z,w) matches only the modern convention and conjugated legacy
-    // junctions by 120° about (1,1,−1) — the RCS-infinity (3518436870) comb
-    // stood on its end; postest rcs-fj-flat/rcs-fj-touch pin this.
-    obj.quaternion.set(-qF.x, -qF.y, qF.z, qF.w);
+    obj.quaternion.set(qF.x, qF.y, qF.z, qF.w);
     obj.userData.wheelUndo = obj.quaternion.clone().invert().multiply(qV);
     return;
   }
@@ -654,10 +623,12 @@ function applyDisplayPose(obj, qV, qF) {
     obj.userData.wheelUndo = obj.quaternion.clone().invert().multiply(qV);
   } else obj.quaternion.copy(qV);
 }
-const rawFromView = (obj, q) => {                   // strip droop, mirror to file
+const rawFromView = (obj, q) => {                   // strip droop, view → file
   const t = obj.userData.wheelUndo ? q.clone().multiply(obj.userData.wheelUndo) : q;
-  return LEGACY_Q ? { w: t.w, x: -t.x, y: -t.y, z: t.z }
-                  : { w: t.w, x: t.x, y: t.y, z: -t.z };
+  // view space == file space (v0.180): legacy stores q as displayed, modern
+  // stores the conjugate of the displayed rotation.
+  return LEGACY_Q ? { w: t.w, x: t.x, y: t.y, z: t.z }
+                  : { w: t.w, x: -t.x, y: -t.y, z: -t.z };
 };
 // saved aileron deflection: components[].data.angle is in DEGREES (the .ini
 // [JOINT] angular_x limits are −45/+45, so ISW-241's −4.609 = a gentle −4.6°
@@ -939,20 +910,20 @@ function buildBlockGeometry(blocks, offset) {
   const buckets = new Map();                 // matKey -> {pos:[], spec}
   const kept = [], footprints = new Map();
   const epos = [], ecol = [], eseen = new Set();
-  const ek1 = (p) => `${Math.round(p[0]*1e3)},${Math.round(p[1]*1e3)},${Math.round(-p[2]*1e3)}`;
+  const ek1 = (p) => `${Math.round(p[0]*1e3)},${Math.round(p[1]*1e3)},${Math.round(p[2]*1e3)}`;
   const addEdge = (a, b, spec) => {
     const ka = ek1(a), kb = ek1(b), k = ka < kb ? ka + ';' + kb : kb + ';' + ka;
     if (eseen.has(k)) return;
     eseen.add(k);
-    epos.push(a[0]+offset.x, a[1]+offset.y, -(a[2]+offset.z), b[0]+offset.x, b[1]+offset.y, -(b[2]+offset.z));
+    epos.push(a[0]+offset.x, a[1]+offset.y, a[2]+offset.z, b[0]+offset.x, b[1]+offset.y, b[2]+offset.z);
     ecol.push(spec.color.r, spec.color.g, spec.color.b, spec.color.r, spec.color.g, spec.color.b);
   };
-  const push = (spec, pts) => {          // z-mirrored into view space, triangle winding flipped
+  const push = (spec, pts) => {          // raw coords, raw winding (de-mirrored)
     let bk = buckets.get(matKey(spec));
     if (!bk) buckets.set(matKey(spec), bk = { pos: [], spec });
     for (let i = 0; i + 2 < pts.length; i += 3)
-      for (const p of [pts[i + 2], pts[i + 1], pts[i]])
-        bk.pos.push(p[0] + offset.x, p[1] + offset.y, -(p[2] + offset.z));
+      for (const p of [pts[i], pts[i + 1], pts[i + 2]])
+        bk.pos.push(p[0] + offset.x, p[1] + offset.y, p[2] + offset.z);
   };
   blocks.forEach((b, index) => {
     if (b.type === 255) return;
@@ -1035,9 +1006,9 @@ function addBlockMeshes(group, blocks, offset) {
 // hinge anchors live in data.composite_builds — see FORMAT §Subgrids for what
 // is/isn't decodable there. Each subgrid becomes ONE group (userData.sub =
 // Build comp index): pick target, pivot-edit subject, one visibility unit.
-// The group mirrors like any component (scale.z=−1 + viewQuat), so with the
-// near-universal identity pivot it renders EXACTLY as before, and a pivot
-// edit rotates/offsets the whole subgrid around the mount.
+// The group rides the same un-mirrored chain as any component (v0.180), so
+// with the near-universal identity pivot it renders EXACTLY as before, and a
+// pivot edit rotates/offsets the whole subgrid around the mount.
 function buildSubgrids() {
   subGroup.clear();
   let sn = 0;
@@ -1070,7 +1041,6 @@ function buildSubgrids() {
       m.position.copy(viewPos(sc.position));
       m.userData.wType = sc.type;
       applyDisplayPose(m, viewQuat(sc.orientation), sc.orientation);
-      m.scale.z = -1;
       g.add(m);
       // real/decimated geometry for nested parts too (Spider Mining Rover:
       // a Wheel lives in a hatch subgrid — the box stand-in alone read as a
@@ -1084,7 +1054,6 @@ function buildSubgrids() {
         const real = buildRealComponent(sc, mm, -1, !realModelsOn);
         real.position.copy(m.position);
         real.quaternion.copy(m.quaternion);
-        real.scale.z = -1;
         m.visible = false;
         real.raycast = () => {};
         real.traverse(o => { o.raycast = () => {}; });
@@ -1120,7 +1089,7 @@ function buildSubgrids() {
         bbj.expandByPoint(new THREE.Vector3(
           (b.pos_x + s[0] + b.frame_x * 12 - 5.5) * 0.25,
           (b.pos_y + s[1] + b.frame_y * 12 - 5.5) * 0.25,
-          -((b.pos_z + s[2] + b.frame_z * 12 - 5.5) * 0.25)));
+          (b.pos_z + s[2] + b.frame_z * 12 - 5.5) * 0.25));
     }
     g.userData.jref = (subMasterEntries().get(bi) || [])
       .filter((e) => e.mc && subJointAxis(e.mc))
@@ -1202,7 +1171,7 @@ function subJointAxis(mc) {
   axis.applyQuaternion(mq).normalize();
   const slide = new THREE.Vector3(...(UNIT[jn.slide] || UNIT[jn.axis] || UNIT.x))
     .applyQuaternion(qAxle).applyQuaternion(mq).normalize();
-  const pivot = new THREE.Vector3(jn.position[0], jn.position[1], -jn.position[2])
+  const pivot = new THREE.Vector3(...jn.position)
     .applyQuaternion(mq).add(viewPos(mc.position));                 // hinge line anchor (view)
   return { axis, slide, pivot };
 }
@@ -1362,7 +1331,6 @@ function buildScene() {
     mesh.position.copy(viewPos(c.position));
     mesh.userData.wType = c.type;
     applyDisplayPose(mesh, viewQuat(c.orientation), c.orientation);
-    mesh.scale.z = -1;                              // hand proxies keep raw local geometry
     mesh.traverse(o => { o.userData.ci = i; });
     mesh.userData.ci = i;
     compGroup.add(mesh);
@@ -1374,9 +1342,9 @@ function buildScene() {
       sp.userData.dy = top - mesh.position.y + 0.18;
       sp.position.set(mesh.position.x, top + 0.18, mesh.position.z);
       sp.visible = labelsOn;
-      compGroup.add(sp);   // NEVER parented to the mirrored mesh: GPU sprite
-                           // quads under a negative-determinant parent render
-                           // mirrored text on some rasterizers
+      compGroup.add(sp);   // NEVER parented to the component mesh: GPU sprite
+                           // quads under a transformed parent render flipped
+                           // text on some rasterizers
     }
     const mp = atlas ? getModel(c.type) : null;
     if (mp) mp.then(mm => {
@@ -1384,7 +1352,6 @@ function buildScene() {
       const real = buildRealComponent(c, mm, i, !realModelsOn);   // low by default
       real.position.copy(mesh.position);
       real.quaternion.copy(mesh.quaternion);
-      real.scale.z = -1;                            // (buildRealComponent root mirrors too)
       real.userData.real = true;
       mesh.visible = false;
       mesh.userData.hasReal = true;
@@ -1404,12 +1371,12 @@ function buildScene() {
   const oedges = [];
   for (const b of blocks) {
     if (b.type !== 255) continue;                                       // occupancy mirror box
-    const s = new THREE.Box3(   // view-space (z-mirrored) occupancy box
+    const s = new THREE.Box3(   // world-space (raw) occupancy box
       new THREE.Vector3(occWorld(b, 'x') - CELL / 2, occWorld(b, 'y') - CELL / 2,
-                        -(occWorld(b, 'z') + b.size_z * CELL + CELL / 2)),
+                        occWorld(b, 'z') - CELL / 2),
       new THREE.Vector3(occWorld(b, 'x') + b.size_x * CELL + CELL / 2,
                         occWorld(b, 'y') + b.size_y * CELL + CELL / 2,
-                        -(occWorld(b, 'z') - CELL / 2)));
+                        occWorld(b, 'z') + b.size_z * CELL + CELL / 2));
     const sz = s.getSize(new THREE.Vector3()), ct = s.getCenter(new THREE.Vector3());
     const eg = new THREE.EdgesGeometry(box(sz.x, sz.y, sz.z));
     eg.applyMatrix4(new THREE.Matrix4().makeTranslation(ct.x, ct.y, ct.z));
@@ -1477,14 +1444,14 @@ function applyHullOpacity() {
 function hullPt(t, ax, i) {
   return (t[`v${i}_${ax}`] + hullP.W * t['frame_' + ax]) * hullP['p' + ax] + hullP['C' + ax];
 }
-// welded + mirrored hull triangles: shared lattice slots merge into single
-// points (like the game's welded vertices); near-mirror vertex pairs average
-// their |x| so the skin renders symmetric, and near-axis points snap to x=0.
+// welded hull triangles: shared lattice slots merge into single points (like
+// the game's welded vertices); near-mirror vertex pairs average their |x| so
+// the skin renders symmetric, and near-axis points snap to x=0.
 function weldedTris() {
   const tris = model.data.triangles.map(t => ({
     c: [0, 1, 2, 3, 4].map(k => t.colors?.[k] ?? t.colors?.[0] ?? 0),
-    p: [0, 1, 2].map(i => [hullPt(t, 'x', i), hullPt(t, 'y', i), -hullPt(t, 'z', i)]),
-  }));                                            // z-mirrored into view space
+    p: [0, 1, 2].map(i => [hullPt(t, 'x', i), hullPt(t, 'y', i), hullPt(t, 'z', i)]),
+  }));                                            // raw file coords (v0.180)
   const K = p => `${Math.round(p[0] * 40)},${Math.round(p[1] * 40)},${Math.round(p[2] * 40)}`;
   const map = new Map(), canon = [];
   const idx = tris.map(t => t.p.map(p => {
@@ -1536,18 +1503,19 @@ function buildHull() {
     for (const p of pts) bk.pos.push(p[0], p[1], p[2]);
   };
   for (const { c, p } of weldedTris()) {
-    const e1 = p[2].map((v, i) => v - p[0][i]), e2 = p[1].map((v, i) => v - p[0][i]);
-    // cross of the FLIPPED winding: z-mirrored vertices invert the raw normal,
-    // so this is the game's front normal carried into view space
+    const e1 = p[1].map((v, i) => v - p[0][i]), e2 = p[2].map((v, i) => v - p[0][i]);
+    // raw front normal of the winding (de-mirror v0.180): colours[0] paints
+    // the (v1−v0)×(v2−v0) side — the mirror chain drew its z-mirror image;
+    // this is the game's front normal, the same face the dev viewer paints
     const n = [e1[1]*e2[2] - e1[2]*e2[1], e1[2]*e2[0] - e1[0]*e2[2], e1[0]*e2[1] - e1[1]*e2[0]];
     const u = n.map(x => x / (Math.hypot(...n) || 1));
     const F = p.map(v => v.map((x, i) => x + u[i] * T));      // front face (+normal)
     const B = p.map(v => v.map((x, i) => x - u[i] * T));      // back face
-    add(palColor(c[0]), [F[2], F[1], F[0]]);                  // windings flipped for z-mirror
-    add(palColor(c[1]), [B[0], B[1], B[2]]);
+    add(palColor(c[0]), [F[0], F[1], F[2]]);                  // windings face +n raw
+    add(palColor(c[1]), [B[2], B[1], B[0]]);
     for (let i = 0; i < 3; i++) {                             // side walls (prism)
       const j = (i + 1) % 3;
-      add(palColor(c[2 + i]), [B[j], B[i], F[i], F[j], B[j], F[i]]);
+      add(palColor(c[2 + i]), [F[i], B[i], B[j], F[i], B[j], F[j]]);
       wpos.push(...p[i], ...p[j]);                            // raw surface edges
     }
   }
@@ -1572,7 +1540,6 @@ function buildHull() {
 // pipes: data.pipes segments are axis-aligned runs {start, dir(0..5=+x,-x,+y,-y,+z,-z),
 // length}; connectors drawn as markers at the a/b endpoints
 const DIRV = [[1,0,0],[0,1,0],[0,0,1],[-1,0,0],[0,-1,0],[0,0,-1]];
-const DIRVM = DIRV.map(d => [d[0], d[1], -d[2]]);   // view-space (z-mirrored) dirs
 // Recorded endpoints ARE the connection points: the game writes the cable tip
 // at the part's VISIBLE socket (ISW battery: cable tip at the front-face
 // socket, while the .ini adapters are the 2x2 terminal grid on the other face
@@ -1602,17 +1569,18 @@ function buildPipes() {
     return ad ? ad.type : /^(fluid|data|power|lowvoltage|highvoltage)/.exec(name)?.[0] ?? 'connector';
   };
   for (const p of model.data.pipes) {
-    // Every segment tube anchors at ITS OWN start (view z-mirrored): the game's
-    // cables are NOT a straight chain — joints have 0.04-0.14 m offsets between
-    // seg[i].start + dir·len and seg[i+1].start (rounded cap smoothing). The
-    // old chained cur += dir·len drifted every pipe and left the endpoint
-    // spheres far off the real ports (user's "green spheres don't match").
-    const aE = new THREE.Vector3(p.segments[0].start.x, p.segments[0].start.y, -p.segments[0].start.z);
+    // Every segment tube anchors at ITS OWN start (raw coords, v0.180): the
+    // game's cables are NOT a straight chain — joints have 0.04-0.14 m offsets
+    // between seg[i].start + dir·len and seg[i+1].start (rounded cap
+    // smoothing). The old chained cur += dir·len drifted every pipe and left
+    // the endpoint spheres far off the real ports (user's "green spheres
+    // don't match").
+    const aE = new THREE.Vector3(p.segments[0].start.x, p.segments[0].start.y, p.segments[0].start.z);
     let cur = aE;
     const pts = [];                           // surge polyline (a-end → b-end)
     for (const s of p.segments) {
-      const d = DIRVM[s.dir], L = s.length + 0.01;
-      const st = new THREE.Vector3(s.start.x, s.start.y, -s.start.z);
+      const d = DIRV[s.dir], L = s.length + 0.01;
+      const st = new THREE.Vector3(s.start.x, s.start.y, s.start.z);
       cur = st.clone().add(new THREE.Vector3(d[0], d[1], d[2]).multiplyScalar(s.length));
       pts.push(st.clone(), cur.clone());
       const g = new THREE.BoxGeometry(d[0] ? L : 0.022, d[1] ? L : 0.022, d[2] ? L : 0.022);
@@ -1939,12 +1907,12 @@ function selectSub(i) {
 // quaternion raw, while components must be written through our pipeline
 // (applyGizmoOrientation → dirty flag, realMap mirrors, syncAdapters, and
 // rawFromView for the file quaternion incl. droop/junction display-pose
-// undo) — and component roots carry scale.z=−1, which would feed negative
-// scale into the control's world math. Decompose of the component chain
-// yields qv·Ry(π) (THREE absorbs negative det by negating sx) — the RIGHT
-// gizmo frame, since its axes are the part's VISIBLE raw axes; see
-// applyGizmoOrientation below for the exact round-trip. Pinned by
-// ?gizmatest (order algebra + live writeback) and selftest `gizmo=true`.
+// undo). Since the de-mirror (v0.180) component roots carry no negative
+// scale, so the proxy pose is the plain component quaternion — the removed
+// P·Ry(π) frame trick only existed because decompose() absorbed the old
+// scale.z=−1 root by negating sx. The scene-root proxy also keeps the
+// component transform hierarchy out of the control's own world math. Pinned
+// by ?gizmatest (order algebra + live writeback) and selftest `gizmo=true`.
 let gizmoOn = true;
 // ---------- gizmo rotation model (PURE — validated by ?gizmatest) ----------
 // WYSIWYG order-of-operations, Blender-style: dragging ring k by θ spins the
@@ -2398,18 +2366,18 @@ function setGizmoMode(m) {
   syncGizmo(); paintModeBox(); invalidate();
 }
 // move writeback: the proxy lives at scene root, so undo the compGroup display
-// anchor, then the z-mirror (involution) into the RAW file position. occ +
-// type-255 mirror cells follow automatically at save time via serialize()'s
-// round(delta/CELL) shift — same contract as the position sliders, so the
-// gizmo never touches the blueprint math itself.
+// anchor (the scene frame IS the raw file frame since v0.180 — no mirror to
+// undo). occ + type-255 mirror cells follow automatically at save time via
+// serialize()'s round(delta/CELL) shift — same contract as the position
+// sliders, so the gizmo never touches the blueprint math itself.
 function applyGizmoPosition(pW) {
   const i = selected, o = compObjs?.[i];
   if (!o) return;
   o.position.copy(pW).sub(compGroup.position).sub(_gizOff);   // centre-anchored (v0.163)
   const p = model.data.components[i].position;
-  const d = { x: o.position.x - p.x, y: o.position.y - p.y, z: -o.position.z - p.z };
+  const d = { x: o.position.x - p.x, y: o.position.y - p.y, z: o.position.z - p.z };
   const tw = symAllowed(i);                 // twins aligned at the PRE-MOVE spots
-  p.x = o.position.x; p.y = o.position.y; p.z = -o.position.z;
+  p.x = o.position.x; p.y = o.position.y; p.z = o.position.z;
   for (const r of realMap.get(i) || []) r.position.copy(o.position);
   syncAdapters(o);
   symPropagate(i, d, tw);                   // left-right twins ride along
@@ -2492,7 +2460,7 @@ function symPropagate(i, d, twins) {
     q.x += sx; q.y += sy; q.z += sz;
     const oj = compObjs[j];
     if (oj) {
-      oj.position.set(q.x, q.y, -q.z);
+      oj.position.set(q.x, q.y, q.z);
       for (const r of realMap.get(j) || []) r.position.copy(oj.position);
       syncAdapters(oj);
     }
@@ -2544,7 +2512,7 @@ function symPropagateRot(i, dq, twins, base, piv) {
       model.data.components[j].orientation = rawFromView(oj, oj.quaternion);
       if (c) {
         const q = model.data.components[j].position;
-        q.x = oj.position.x; q.y = oj.position.y; q.z = -oj.position.z;
+        q.x = oj.position.x; q.y = oj.position.y; q.z = oj.position.z;
       }
       syncAdapters(oj);
     }
@@ -2580,25 +2548,22 @@ function symPropagateJoint(i, k, val) {
 // touching the render pipeline here; attach/paint happen on the first click.
 tctl.setMode(gizmoMode === 'move' ? 'translate' : 'rotate');
 tctl.space = gizmoMode === 'move' ? 'world' : 'local';      // same per-mode rule
-// Proxy pose = obj.quaternion·RY180: THREE decompose() absorbs a negative
-// scale by NEGATING SX, so getWorldQuaternion() on the scale.z=−1 root is
-// qv·Ry(π), not qv. That stripped frame is the RIGHT gizmo frame — its axes
-// are the part's VISIBLE raw axes (x̂, ŷ, −ẑ, the mirror flips z) — and in
-// it a local-mode ring drag (P ← P·R(e_k,θ)) maps back by qv ← P·RY180 into
-// exactly the WYSIWYG world form qv' = R(drawn axis, θ)·qv. Components must
-// still be written through our pipeline (applyGizmoOrientation → dirty
+// Proxy pose = obj.getWorldQuaternion() VERBATIM (de-mirror v0.180): with no
+// negative-scale root there is no sx-absorb, and the rings draw along the
+// part's visible raw axes (x̂, ŷ, ẑ). A local-mode ring drag (P ← P·R(e_k,θ))
+// therefore maps 1:1 into the WYSIWYG world form qv' = R(drawn axis, θ)·qv —
+// the removed GIZMO_Y180 compensated the old scale.z=−1 root only. Components
+// must still be written through our pipeline (applyGizmoOrientation → dirty
 // flag, realMap mirrors, syncAdapters, rawFromView for the file quaternion
-// incl. droop/junction display-pose undo). The scene-root proxy also keeps
-// the negative-scale root out of the control's own world math. A plain copy
-// (no ·RY180) was the v0.150 writeback bug: the part rendered 180° off its
-// rings (?gizmatest live/proxy pins). Pinned by ?gizmatest (order algebra +
-// live writeback) and selftest `gizmo=true`.
-const GIZMO_Y180 = new THREE.Quaternion(0, 1, 0, 0);      // Ry(π), self-inverse
+// incl. droop/junction display-pose undo). A plain copy without the pipeline
+// was the v0.150 writeback bug: the part rendered 180° off its rings
+// (?gizmatest live/proxy pins). Pinned by ?gizmatest (order algebra + live
+// writeback) and selftest `gizmo=true`.
 function applyGizmoOrientation(qW) {
   const i = selected, o = compObjs?.[i];
   if (!o) return;
   const twins = symAllowed(i);                           // v0.165 mirror twins
-  const qv = qW.clone().multiply(GIZMO_Y180);             // undo decompose's sx flip
+  const qv = qW.clone();                                 // proxy carries the plain pose
   const dq = qv.clone().multiply(o.quaternion.clone().invert());  // view delta
   // v0.167 (user: "the pivot locations dont seem to be properly
   // positioned, causing parts to rotate/orbit around the wrong
@@ -2622,7 +2587,7 @@ function applyGizmoOrientation(qW) {
   for (const r of realMap.get(i) || [])
     { r.quaternion.copy(qv); r.position.copy(o.position); }
   const p = model.data.components[i].position;
-  p.x = o.position.x; p.y = o.position.y; p.z = -o.position.z;
+  p.x = o.position.x; p.y = o.position.y; p.z = o.position.z;
   model.data.components[i].orientation = rawFromView(o, qv);
   syncAdapters(o);
   symPropagateRot(i, dq, twins, undefined, symRotPiv);   // twins orbit too
@@ -3089,8 +3054,8 @@ function livePos(comp, obj, ax) {
     d[ax] = v - comp.position[ax];
     const tw = symAllowed(i);                    // twins aligned at PRE-MOVE
     comp.position[ax] = v;                       // data stays in RAW file space
-    obj.position[ax] = ax === 'z' ? -v : v;      // object lives in view space
-    for (const r of realMap.get(i) || []) r.position[ax] = ax === 'z' ? -v : v;
+    obj.position[ax] = v;                        // object lives in the raw frame too
+    for (const r of realMap.get(i) || []) r.position[ax] = v;
     syncAdapters(obj);
     symPropagate(i, d, tw);                      // ⇄ mirror moves cover the
     markDirty();                                 // sliders too (v0.162 user:
@@ -3284,7 +3249,7 @@ function buildInspector() {
     rb.appendChild(presets);
     const note = document.createElement('div');
     note.style.color = 'var(--dim)';
-    note.textContent = 'negative pitch = lean toward nose (view +z)';
+    note.textContent = 'negative pitch = lean toward nose (raw −z)';
     rb.appendChild(note);
   }
 
@@ -3471,8 +3436,10 @@ const COMP_MASS = { PilotSeat: 40, MiniComputer: 2, HudController: 1, Beacon: 1,
   SolarPanel: 6, FluidJunction: 1, FluidPort: 0.5, RCS: 2, TiltSensor: 0.5, OwnerPad: 1 };
 let cellMass = 1.5;
 // raw-space subsystems: CoM/flow/arrows are computed from FILE coordinates and
-// display through one z-mirror group (physics itself is mirror-consistent)
-const worldM = new THREE.Group(); worldM.scale.z = -1; scene.add(worldM);
+// displayed through ONE shared anchor group — under the un-mirrored chain
+// (v0.180) worldM is a pure position anchor (identity rotation/scale), the
+// display frame IS the file frame
+const worldM = new THREE.Group(); scene.add(worldM);
 const comMarker = new THREE.Group();
 worldM.add(comMarker);
 (function () {
@@ -3567,8 +3534,8 @@ let sockPivot = null, sockLabel = null;
 function updateWindHud(tms) {
   if (!windHud.visible) return;
   const V = flowState.speed;
-  const dv = flowDir();                                    // view-space travel dir
-  const dcam = new THREE.Vector3(dv[0], dv[1], -dv[2])     // view -> scene (z mirror)
+  const dv = flowDir();                                    // raw-space travel dir
+  const dcam = new THREE.Vector3(dv[0], dv[1], dv[2])      // scene == file frame (v0.180)
     .applyQuaternion(camera.quaternion.clone().invert()).normalize();   // world -> cam
   sockPivot.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dcam);
   // droop: only airflow inflates the sock horizontal; in little wind it hangs
@@ -3676,7 +3643,7 @@ function buildThrustArrows() {
   const comps = model.data.components;
   const rcsOnly = comps.some(c => c.type === 'RCS')
     && !comps.some(c => c.type in THRUST && c.type !== 'RCS');
-  let back = seatFwd() || [0, 0, 1];
+  let back = seatFwd() || [0, 0, -1];
   { const fh = Math.hypot(back[0], back[2]);
     back = fh > 0.15 ? [back[0] / fh, 0, back[2] / fh]
       : back.map(x => x / (Math.hypot(...back) || 1)); }
@@ -3688,10 +3655,14 @@ function buildThrustArrows() {
     if (!o) return;
     if (c.type === 'RCS' && !rcsOnly) return;   // attitude control beside
                                                 // real engines: not drawn
-    // axis in the component's VIEW-local frame (x, y, -z), rotated by the
-    // display quaternion the mesh actually carries
+    // axis in the component's RAW-local frame (the .ini TARGET axis as
+    // stored), rotated by the display quaternion the mesh actually carries
+    // (de-mirror v0.180: the scene renders in the file frame, so the arrow
+    // now sits ON its part — the old chain built it from view-space part
+    // positions under the mirrored worldM and the per-engine arrows drew on
+    // the z-mirrored side of the craft, latent-mirror bug)
     const ax = c.type === 'RCS' ? new THREE.Vector3(...back)
-      : new THREE.Vector3(th.ax[0], th.ax[1], -th.ax[2])
+      : new THREE.Vector3(...th.ax)
           .applyQuaternion(o.quaternion).normalize();
     const twoWay = c.type === 'Propeller';     // props thrust BOTH ways:
     if (!twoWay) acc = acc.map((x, k) => x + ax.toArray()[k] * th.w);   // not in the net
@@ -3788,12 +3759,12 @@ function seatFwd() {
     if (win != null) best = win;
   }
   const o = compObjs?.[best];
-  // LEGACY (raw-quat) files place with a 180-deg-yawed frame (viewQuat
-  // (w,-x,-y,z) = modern composed with Rz(180)), so the seat's facing axis
-  // is local -z there: measuring +z on Jimmy (v1 file) read the cockpit
-  // backwards -> auto wind came from the tail (user: 'all cockpits face the
-  // other way, including the computer-linked one').
-  return o ? new THREE.Vector3(0, 0, LEGACY_Q ? -1 : 1).applyQuaternion(o.quaternion).toArray() : [0, 0, 1];
+  // LEGACY (raw-quat) files mount parts in a 180-deg-yawed frame, so the
+  // seat's facing axis is local +z there; modern (conjugate) files place the
+  // part as authored: local −z = the pilot's view (the seat-proxy backrest at
+  // local +z is behind it). De-mirror v0.180: view space == file space (the
+  // old chain read (0,0, LEGACY ? −1 : +1) in its mirrored frame).
+  return o ? new THREE.Vector3(0, 0, LEGACY_Q ? 1 : -1).applyQuaternion(o.quaternion).toArray() : [0, 0, -1];
 }
 function flowDir() {
   // Relative wind travels opposite to flight. Auto: MAIN drive net (rockets);
@@ -3807,7 +3778,7 @@ function flowDir() {
   // downward and auto chose 'wind from below' — thrust is only the suggestion
   // for cockpits-less craft (rockets, missiles), and 'thrust' mode = override.
   const f0 = useT ? useT.slice()
-    : seatFwd() || netThrust?.main || [0, 0, 1];   // default: fly view +z
+    : seatFwd() || netThrust?.main || [0, 0, -1];  // default: fly nose-ward (raw −z)
   // Use the seat's HEADING (yaw) only. A chair's pitch/roll is a comfort
   // axis: feeding it through raw made reclining the ISW seat shrink the
   // (un-normalised) wind vector — the whole tunnel slowed to cos(pitch)
@@ -3832,17 +3803,17 @@ function flowDir() {
   const w = [-fwd[0] * Math.cos(a), Math.sin(a), -fwd[2] * Math.cos(a)];
   const azr = flowState.az * Math.PI / 180;
   const ca = Math.cos(azr), sa = Math.sin(azr);
-  return [w[0] * ca + w[2] * sa, w[1], -w[0] * sa + w[2] * ca];
+  // de-mirror v0.180: the old chain yawed by −az in its mirrored frame, which
+  // is +az in the raw file frame the flow field now lives in.
+  return [w[0] * ca - w[2] * sa, w[1], w[0] * sa + w[2] * ca];
 }
 
 function plateFromTri(t) {
   const p = [];
   for (let i = 0; i < 3; i++) {
-    // VIEW space (z-mirrored): the flow field, streamlines and seeds all
-    // live in the view frame — plates in raw file coords deflected the
-    // mirrored craft's opposite side (old 'blocks/components not taken
-    // into account' symptom, part 1 of 2).
-    p.push([hullPt(t, 'x', i), hullPt(t, 'y', i), -hullPt(t, 'z', i)]);
+    // RAW file coords (de-mirror v0.180): the flow field, streamlines and
+    // seeds all live in the raw frame the scene itself renders in.
+    p.push([hullPt(t, 'x', i), hullPt(t, 'y', i), hullPt(t, 'z', i)]);
   }
   const a = p[0], b = p[1], c = p[2];
   const e1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
@@ -3853,15 +3824,16 @@ function plateFromTri(t) {
            n: n.map(x => x / len), area: len / 2, R: Math.sqrt(len / 2 / Math.PI) + 0.15 };
 }
 
-// Solid 0.25 m cells (VIEW space): every block (type != 255) plus every
+// Solid 0.25 m cells (RAW space): every block (type != 255) plus every
 // component's `occupancies` box. sampleVel pushes flow around these, so the
 // streamlines wrap the actual voxel hull and protruding parts — the blocks
 // ARE taken into account (part 2 of 2 of the user report).
 let solidCells = null;
 let extGrid = null;                     // {b0:[ix,iy,iz], n:[nx,ny,nz], ext:Uint8Array, counts}
 const cellKeyV = (x, y, z) => ((x + 4096) * 8192 + (y + 4096)) * 8192 + (z + 4096);
-// Pure voxelization + sealing of a blueprint's `data` in VIEW space (z
-// mirrored). Exact universal lattice (W=12, pitch=0.25, C=−1.5, FORMAT.md),
+// Pure voxelization + sealing of a blueprint's `data` in the raw file frame
+// (de-mirrored v0.180; the scene renders in this same frame).
+// Exact universal lattice (W=12, pitch=0.25, C=−1.5, FORMAT.md),
 // so it needs no per-file hull fit → selftest can run it on any file.
 // ext: 1 = exterior (wind), 2 = cabin (ray-enclosed, windless), 0 = solid/sealed.
 function sealStats(data) {
@@ -3876,7 +3848,7 @@ function sealStats(data) {
           cells.add(cellKeyV(
             Math.round(px + i + fx * 12 - 5.5),
             Math.round(py + j + fy * 12 - 5.5),
-            -Math.round(pz + k + fz * 12 - 5.5)));
+            Math.round(pz + k + fz * 12 - 5.5)));
   };
   for (const b of data.blocks || [])
     if (b.type !== 255) add(b.frame_x, b.frame_y, b.frame_z, b.pos_x, b.pos_y, b.pos_z, b.size_x, b.size_y, b.size_z);
@@ -3887,9 +3859,9 @@ function sealStats(data) {
   const hpt = (t, ax, i) => (t['v' + i + '_' + ax] + 12 * t['frame_' + ax]) * 0.25 - 1.5;
   let triBudget = 500000;
   for (const t of data.triangles || []) {
-    const a = [hpt(t, 'x', 0), hpt(t, 'y', 0), -hpt(t, 'z', 0)];
-    const e1 = [hpt(t, 'x', 1) - a[0], hpt(t, 'y', 1) - a[1], -hpt(t, 'z', 1) - a[2]];
-    const e2 = [hpt(t, 'x', 2) - a[0], hpt(t, 'y', 2) - a[1], -hpt(t, 'z', 2) - a[2]];
+    const a = [hpt(t, 'x', 0), hpt(t, 'y', 0), hpt(t, 'z', 0)];
+    const e1 = [hpt(t, 'x', 1) - a[0], hpt(t, 'y', 1) - a[1], hpt(t, 'z', 1) - a[2]];
+    const e2 = [hpt(t, 'x', 2) - a[0], hpt(t, 'y', 2) - a[1], hpt(t, 'z', 2) - a[2]];
     const el = Math.hypot(...e1), e2l = Math.hypot(...e2), e3 = Math.hypot(e1[0] - e2[0], e1[1] - e2[1], e1[2] - e2[2]);
     const n = Math.min(110, Math.max(1, Math.ceil(Math.max(el, e2l, e3) / 0.11)));
     triBudget -= (n + 1) * (n + 2) / 2;
@@ -4034,16 +4006,16 @@ function buildAero() {
   aeroPlates = [];
   for (const t of model.data.triangles) aeroPlates.push(plateFromTri(t));
   for (const c of model.data.components) {
-    const q = viewQuat(c.orientation);                 // VIEW-space pose
+    const q = viewQuat(c.orientation);                 // display pose (raw frame)
     const f = footprint(c);
-    const P = [c.position.x, c.position.y, -c.position.z];
+    const P = [c.position.x, c.position.y, c.position.z];
     if (c.type === 'Aileron') {
       const n = new THREE.Vector3(0, 1, 0).applyQuaternion(q);
       aeroPlates.push({ name: c.position.z < 0 ? 'canard' : 'aileron',
         c: P, n: [n.x, n.y, n.z],
         area: f.x * f.z * 0.72, R: 0.75 });
       const defl = c.position.z < 0 ? 1.05 : 0.12;
-      const fl = new THREE.Vector3(0, Math.cos(defl), -Math.sin(defl))   // mirror z
+      const fl = new THREE.Vector3(0, Math.cos(defl), Math.sin(defl))   // = M(old view vec)
         .applyQuaternion(q).normalize();
       aeroPlates.push({ name: 'flap', c: P, n: [fl.x, fl.y, fl.z], area: f.x * f.z * 0.3, R: 0.4 });
     } else if (c.type === 'SolarPanel') {
@@ -4051,7 +4023,7 @@ function buildAero() {
       aeroPlates.push({ name: 'solar panel', c: P, n: [n.x, n.y, n.z], area: f.x * f.z, R: 1.2 });
     } else if (c.type === 'SmallWheel') {
       aeroPlates.push({ name: 'wheel', bluff: true, c: P,
-        n: [0, 0, 1], area: Math.PI * 0.17 * 0.10, R: 0.3 });
+        n: [0, 0, -1], area: Math.PI * 0.17 * 0.10, R: 0.3 });
     }
   }
   buildAeroGrid();
@@ -4519,9 +4491,9 @@ function computeAero() {
 }
 
 function dirLabel(v) {
-  const [x, y, z] = v;                          // VIEW space: +z = nose
+  const [x, y, z] = v;                          // raw file space: nose = −z
   const ax = Math.abs(x), ay = Math.abs(y), az = Math.abs(z);
-  if (az >= ax && az >= ay) return z > 0 ? 'nose-ward' : 'tail-ward';
+  if (az >= ax && az >= ay) return z > 0 ? 'tail-ward' : 'nose-ward';
   if (ax >= ay) return x > 0 ? 'right-ward' : 'left-ward';
   return y > 0 ? 'up-ward' : 'down-ward';
 }
@@ -4730,8 +4702,8 @@ function applyCamQ() {                              // ?cam=px,py,pz,tx,ty,tz ·
   const camQ = q.get('cam');
   if (camQ) {
     const [x, y, z, tx = 0, ty = 0, tz = 0] = camQ.split(',').map(Number);
-    camera.position.set(x, y, -z);                           // URLs stay in FILE space
-    controls.target.set(tx, ty, -tz);
+    camera.position.set(x, y, z);                 // ?cam is FILE space == view space (v0.180)
+    controls.target.set(tx, ty, tz);
   }
   const si = Number(q.get('sel'));                // deep-link a selection (+fly-in)
   if (Number.isInteger(si) && si >= 0 && model?.data.components[si]) select(si);
@@ -4769,7 +4741,6 @@ requestAnimationFrame(tick);
 export const hooks = {
   get $ () { return $ },
   get CELL () { return CELL },
-  get GIZMO_Y180 () { return GIZMO_Y180 },
   get MODEL () { return MODEL },
   get THRUST () { return THRUST },
   get _gizOff () { return _gizOff },
@@ -4782,6 +4753,7 @@ export const hooks = {
   get applyGizmoPosition () { return applyGizmoPosition },
   get blockGroup () { return blockGroup },
   get blockWireObj () { return blockWireObj },
+  get buildDashboard () { return buildDashboard },
   get buildList () { return buildList },
   get buildRealComponent () { return buildRealComponent },
   get camera () { return camera },
@@ -4796,7 +4768,6 @@ export const hooks = {
   get dirty () { return dirty },
   get extGrid () { return extGrid },
   get flashes () { return flashes },
-  get flipGeomX () { return flipGeomX },
   get flowDir () { return flowDir },
   get flowGroup () { return flowGroup },
   get flowMode () { return flowMode },
