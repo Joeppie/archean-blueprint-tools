@@ -188,15 +188,21 @@ carry dict colours, but are not individually pipe-verified — the heuristic
 is structural, and no corpus file is known to lie about it.
 
 **Mirror verdict for the "every scene seems MIRRORED" report (dev|ours
-sheets).** Expected, not a bug: our z-mirror chain renders the GAME's view,
-the dev's raw placement renders its MIRROR image (§Handedness proof above).
-At the same file camera the two screens relate by a **horizontal flip** —
-`tools/matrix_iou.py` mirrors our mask for exactly this reason (4882dcc).
-A non-mirrored screenshot of ours is SUPPOSED to match the dev's after a
-flip; "our rotation is mirrored??" is the dev's side, not ours. Two further
-sheet effects must not be confused with it: (a) on **rotated mounts in V2
-files** the DEV mirrors the part itself (raw-quat bug, matrix triage step 8
-— fixtures are identity, so matrix rows never show it); (b) **deflected**
+sheets).** ~~Expected, not a bug: our z-mirror chain renders the GAME's
+view, the dev's raw placement renders its MIRROR image.~~ **SUPERSEDED
+the SAME DAY (§Chirality vs in-game truth below): the chirality
+DIRECTION was wrong. The game's own workshop screenshots prove the DEV's
+raw render equals the game's view and OUR z-mirror chain renders its
+horizontal mirror image.** This audit only had the two viewers to
+compare and no external arbiter. The OBSERVED relation stands (dev|ours
+screens relate by one horizontal flip at the M-paired camera, and
+`tools/matrix_iou.py`'s mask mirror compensates exactly that one flip —
+the mechanism is right either way, only its stated reason flips). Two
+further sheet effects must not be confused with it: (a) on **rotated
+mounts in V2 files** the DEV mirrors the part itself (raw-quat bug,
+matrix triage step 8 — fixtures are identity, so matrix rows never show
+it; per the pipes/mural data proofs the GAME places rotated V2 parts
+with the CONJUGATE, so here dev ≠ game); (b) **deflected**
 twins (`90000020NN`) differ because the dev renders parts AT REST while we
 apply `data.angle`/`data.pos` — ours-only by definition (triage step 5).
 A flip maps faces to faces, so it can NEVER make geometry appear on one
@@ -229,6 +235,163 @@ postest rcs-fj-flat). LATENT in app/ today (its fixtures pin identity
 junctions only); fix = exempt FluidJunction `orientation` from the step-4
 conjugation (the flat-frame rule then keeps working on the raw value) or
 re-key the rule on the view quat — pin with the RCS-infinity fixture.
+
+### Chirality vs in-game truth (2026-10-19) — VERDICT: our view chain is the game's MIRROR
+
+**The question (user):** the game renders with a custom raytracer in a
+Unity left-handed world — maybe everything it shows (dashboard text
+included) is mirrored in world space and only "un-mirrored" by the
+game's own camera, in which case any third-party viewer is chasing an
+unsolvable mirroring, and the dashmirror/textx rules + the "we show the
+game's view" claim may have the sides backwards.
+
+**The epistemics first.** File space IS the game's physical world — the
+pipes/mural proofs pin placements to 0.000 m, so left/right in FILE
+numbers is physically real to the in-game builder. The engine's screen
+IS the ground truth a human sees; there is no un-mirrored "true world"
+behind it to chase. The whole question therefore operationalises to one
+measurable fact: **does a viewer's render match the game's rendered
+pixels from the same physical camera?** All offline evidence so far
+pinned PLACEMENT — chirality-free under a global reflection — never
+this. The orient fixture (v107) "pixel-proved" "+normal readable"
+against the DEV viewer's capture API plus the ASSUMED front (file +z),
+never against an in-game image: it pinned us to the dev's convention,
+not to the game.
+
+**The external arbiter — workshop craft 3309955432 "United Airlines
+Airliner" (DOMINATOR), in-corpus, workshop gallery shots rendered by the
+game's own engine**
+(https://steamcommunity.com/sharedfiles/filedetails/?id=3309955432;
+described here, images not stored — NOTICE §2):
+
+- **Cockpit POV shot:** the pilot looks toward the NOSE = file −z (the
+  cockpit sits at z≈−12, the cabin extends aft to the "VIP ONLY"
+  partition at z=+26). The red quadrant + "Throttle" plate — data.label
+  at **x=−0.13** — appears on the IMAGE LEFT; the second ThrottleLever
+  (file x=+0.125, green quadrant, plate relabelled "Trim" by the author)
+  on the image RIGHT; every text element (dash Labels, data.labels
+  plates, the "This plane is very fuel hungry…" note at comp 356,
+  x=−2.1, image LEFT) reads CORRECTLY. The "Main Power Breaker" label
+  (dir=+z, facing aft toward the pilot) reads correctly from the seat ⇒
+  data.label `dir` = the readable face, in-game. ⇒ **the game's screen,
+  for a camera facing file −z with up +y, has its right side at file
+  +x: the game projects the raw file frame with STANDARD RIGHT-HANDED
+  camera math** (Unity's built-in LH camera would put Throttle on the
+  right). The "LH quaternion" story was always a PLACEMENT fact
+  (conjugate vs raw q); the game's custom raytracer does not use Unity's
+  LH camera projection.
+- **Ground side views (nose left, upright, gear down)** show the blue
+  pixel-block "UNITED" livery reading CORRECTLY — with the RH screen
+  fact above, the side shown is the file **x<0** side. The livery is
+  NOT text: solid-colour Dashboard plates (baseColor (2,2,32)) arranged
+  as pixel-font U-N-I-T-E-D strokes at x≈−2.8..−3.3, y 12.2..13.4,
+  z −6.6..+1.5 (U at the nose end), tilted with the fuselage
+  tumblehome, normals outboard. The x=+3 side carries a SEPARATE
+  hand-plated spelling — the two sides' plate z-clusters are NOT
+  mirror-equal, the builder painted both sides to read correctly from
+  their own outside (like real livery; `symmetry_axis` notwithstanding).
+- The two EMERGENCY EXITS labels (dir=±x INBOARD) read correctly from
+  the cabin aisle in another shot — again `dir` = readable face.
+
+**The two viewers at the same physical cameras** (probes
+`app/tools/sidechir.mjs` + `app/tools/devchir.mjs`, re-runnable;
+iGPU-pinned headless chromium, ours via the HARCHEAN hooks with
+H.select(-1); dev driven through its `window.XenonViewer.open()/capture
+({azimuth,elevation})` capture API — its azimuth is the camera DIR in
+RAW file space, az=−90° ⇒ camera on the −x side):
+
+| view | GAME (workshop photos) | DEV (raw numbers) | OURS (z-mirror chain) |
+|---|---|---|---|
+| fuselage −x side | UNITED READABLE, nose left | UNITED READABLE, nose left | **DETINUD mirrored** |
+| fuselage +x side | (separately painted readable) | UNITED READABLE | **DETINUD mirrored** |
+| cockpit seat | note panel (x=−2.1) IMAGE LEFT, text readable | — (same side by construction) | note panel IMAGE **RIGHT**, text still readable ⇒ scene MIRRORED, text locally counter-flipped |
+| iso pair (dev az 51.56°/el 25.78° vs ours ISO_DIR z-mirrored cam) | — | reference | mirrored image |
+
+**Verdict B: our display chain renders the game's view horizontally
+flipped.** The dev's raw-numbers render IS the game's view (positions,
+identity mounts, unrotated text always; for ROTATED parts in V2 files
+the dev still uses raw q — its one known deviation from the game, whose
+data-pinned placement is the conjugate). Our scene is exactly M(file)
+(M = z-mirror) rendered RH. Every selftest/postest/comptest pin is
+INVARIANT under a global reflection (nose-ward, below-pivot,
+flush-to-wall, endpoints-on-pipes), so the whole suite stayed green
+across the mirror's entire life (v0.93→). The text rules then read as
+what they are: `dashmirror`/`TEXT_MIRROR_X` pre-flip glyph strings
+INSIDE the mirrored world — a local double-mirror that keeps text
+readable while the surrounding scene stays flipped; they made the
+mirror self-consistent-looking from inside. v107's finding "the game
+authors text READABLE FROM THE PLATE'S +NORMAL SIDE" is TRUE (the s2/s7
+screenshots confirm it via the labels' dir faces) — and dev shows it
+too; what v107 never measured was WHICH side of a plate the GAME shows
+text on from a given camera, because its arbiter was the dev's pixels,
+not the game's.
+
+**The corrected model of the game's pixels** (reconciles ALL evidence —
+pipes 0.000 m, mosaic murals, label readability, livery, cockpit):
+raw file POSITIONS, NO world mirror, standard RH camera; rotations
+V1-file R(q) / V2-file R(q*) (the LEGACY_Q table stands — placement
+conventions are mirror-invariant); dashboards = RAW canvas on the
+board's +z face (readable from +z, text-up = local +ŷ, string advances
++x̂ — verified readable in the game's own s2 dash; comp551's mount quat
+maps ŷ to the up-aft slope, consistent); labels readable from the dir
+face with right = (−dir)×up — which is exactly the dev viewer's
+`buildLabels` basis x = up×dir (transcribed from viewer.xenontools.dev
+`js/scene.js`, NOTICE §2) — and its dashboard Label texture chain
+(5 px/cm, +z face, no pre-mirror), matching game readability in the
+same screenshots.
+
+**Consequences:**
+- *Harness (matrix ritual): behaviourally UNCHANGED, still correct.*
+  devscrape's ISO_DIR = M(dev cam) remains the right pairing: our shot
+  vs the dev's relates by exactly ONE flip (our mirror), which
+  matrix_iou.py's mask mirror compensates — no double-flip. The flip
+  observed in 4882dcc is expected under BOTH chirality stories; only
+  its stated reason was backwards (comments now cite this section).
+- *Today's V1/V2 audit (d1b4085):* its "Mirror verdict" paragraph is
+  SUPERSEDED (struck in place above); the rest (census, palette/quat
+  table, normalizeDoc analysis) is chirality-neutral and stands —
+  normalizeDoc's q→q* with V2 re-save preserves placement under either
+  display chain.
+- *The viewer/app themselves:* deliberately NOT changed here (frozen-
+  port + app rules; user approval required). The de-mirror is a
+  coordinated project — plan below.
+- *Epistemic rule going forward:* the mirror was invisible to every
+  data-driven test ever written — only in-game pixels can bind
+  chirality. Future chirality claims MUST cite a game screenshot.
+
+**Corrective plan (de-mirror; for user approval — NOT implemented):**
+1. Display chain (`viewer/view3d.js`; the app port mirrors it): drop M —
+   view_pos = raw pos; view_quat: V2 = q* = (w,−x,−y,−z), V1 = raw q
+   (the LEGACY_Q table's placement law, without the mirror
+   conjugation); local geometry drops `scale.z = -1` and the winding
+   compensations it implied (hull-triangle z-flip on emit, blockshape
+   face winding, basis flips). The scene then equals the corrected
+   model above.
+2. Text: REMOVE the `dashmirror` canvas pre-mirror and `TEXT_MIRROR_X`
+   `flipGeomX` (raw canvas reads correctly un-mirrored, per s2).
+   data.labels stay unrendered, or get a first implementation using the
+   readable-from-dir rule.
+3. Writebacks: `rawFromView` and its ±z signs collapse to identity;
+   gizmo writebacks (`gizmoSpinRing`, `applyGizmoOrientation`, the
+   P·Ry(π) proxy trick) become plain q math; symmetry mask deltas — the
+   file-frame (−dx,dy,−dz) variants become the view-frame (−dx,dy,dz);
+   rotation conjugation md = det(S)·S·dq unchanged; mirror-plane
+   overlay, cables/adapters unchanged.
+4. FluidJunction `applyDisplayPose`: re-key displayQuat to read the
+   view-frame quat under the new chain (RCS-infinity postest recheck).
+5. Pins that flip sign/expectation (~30): selftest beacon-mast side,
+   caster droop, mural flush side, `dashmirror`/`textx` pins (inverted
+   to raw), dash text positions; postest dolphin `dooraxis`/`doorpivot`/
+   `subjoint-angle` cross-product signs, fluke/rail axis dots, XYQ
+   `xyq-dooraxis`, ISW `symrot*` twin sides, `subtwin-angle` mirror
+   sign, gizmatest ring-order nose-swing phase; app vitest + hinge e2e
+   likewise. Add NEW pins that CANNOT pass under a mirror: an
+   orient-fixture probe measured in OUR OWN viewer (not vs dev), and an
+   airliner-livery check — the file-derived plate raster must read
+   UNITED when viewed from −x, per this section's screenshots.
+6. Doc sweep once landed: this table becomes normative; §Handedness's
+   "our view is the game's" narrative retired; MATRIX.md/PERF.md mirror
+   notes re-worded.
 
 ## `blocks` — the voxel build
 

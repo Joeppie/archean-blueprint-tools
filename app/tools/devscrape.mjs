@@ -15,10 +15,15 @@
 // and MATCHES the camera to the dev's iso framing — dev Viewer.VIEW_ANGLES.iso
 // is azimuth 0.9 / elevation 0.45 rad in FILE space (dir =
 // (cos e·sin a, sin e, cos e·cos a)); our view space mirrors z, so the camera
-// sits along (0.7053, 0.4350, -0.5597) at the load-fit distance. Uses ONLY the
-// frozen viewer's public surface: URL params + the window.HARCHEAN test hooks
-// (camera / controls / invalidate). Two shots: proxy (default) and real game
-// models (?real) — dev always draws the real models.
+// sits along (0.7053, 0.4350, -0.5597) at the load-fit distance. NOTE
+// (FORMAT §Chirality vs in-game truth, 2026-10-19): our viewer's z-mirror
+// chain renders the horizontal MIRROR of the game's view — at this paired
+// camera our image relates to the dev's (game-true) one by exactly one
+// horizontal flip, which tools/matrix_iou.py compensates with its mask
+// mirror. Uses ONLY the frozen viewer's public surface: URL params + the
+// window.HARCHEAN test hooks (camera / controls / invalidate). Two shots:
+// proxy (default) and real game models (?real) — dev always draws the real
+// models.
 //
 // Output per craft: <out>/<id>.json {dev:{mass,cost,items,warnings},...}
 // and <id>-dev.png, <id>-ours-proxy.png, <id>-ours-real.png.

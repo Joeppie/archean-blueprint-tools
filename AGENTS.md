@@ -39,6 +39,9 @@ tools/matrix_iou.py             framing-invariant silhouette IoU screen
                                 (render-iou.json = the eyeball queue)
 app/tools/devscrape.mjs         Playwright matrix driver: Xenon viewer panels +
                                 iso screenshots, our viewer via HARCHEAN hooks
+app/tools/sidechir.mjs          chirality probe: our viewer's ±x side + cockpit cameras on the
+app/tools/devchir.mjs           airliner; dev side via its XenonViewer capture API (FORMAT
+                                §Chirality vs in-game truth — the game's screenshots arbitrate)
 tests/matrix.sh                 the whole matrix ritual (see MATRIX.md)
 tools/make_landing.py         regenerates the landing gallery + viewer/workshop.json
 tools/add_workshop.py <id>      ingest a locally-subscribed workshop craft
@@ -548,6 +551,17 @@ refuses to cut a tag when the strings disagree.
   compare draw-call counts only.
 
 ## Known open issues (v0.146 state)
+- **CHIRALITY (2026-10-19, FORMAT §Chirality vs in-game truth): our viewer's
+  z-mirror display chain renders the game's view HORIZONTALLY FLIPPED** —
+  proven against in-game workshop screenshots of craft 3309955432 (readable
+  UNITED livery + cockpit handedness vs dev/ours renders; probes `app/tools/
+  sidechir.mjs`/`devchir.mjs`). The dev's raw render is the game-true side
+  (except rotated V2 parts, which the game places with the conjugate). The
+  mirror is intentional today and ALL suite pins are reflection-invariant,
+  so nothing is "broken" — but any "we show the game's view" claim is wrong
+  until the user approves the de-mirror plan in that FORMAT section. Do NOT
+  "fix" text/mirror rules piecemeal; re-verify chirality claims only against
+  game screenshots.
 - **v0.143/v0.145 were REVERTED** (user-confirmed regressions on Pages: beacon mast +
   aileron real models rotated wrong). v0.144 (IBL) was re-landed as the PMREM commit.
   Re-land the legacy alignment + per-asset loader bake ONLY with new pins first

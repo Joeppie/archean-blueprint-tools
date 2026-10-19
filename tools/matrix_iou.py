@@ -116,12 +116,16 @@ def main():
                                          dtype=np.int16), CROP_DEV))[0]
         mb, arb = canon(foreground(np.asarray(Image.open(ou).convert('RGB'),
                                               dtype=np.int16), CROP_OURS))
-        # Our viewer renders the GAME's view (z-mirror chain); the dev
-        # renders raw numbers, i.e. the mirror image (FORMAT § Handeness —
-        # the proven mosaic-beacon truth). At the SAME file camera direction
-        # the two screens therefore relate by a horizontal flip — mirror our
-        # mask to compare like-for-like. (Screenshots stay un-mirrored; this
-        # is the documented expected relation, not a correction.)
+        # Our viewer renders a HORIZONTAL MIRROR of the game's view (the
+        # z-mirror display chain; FORMAT §Chirality vs in-game truth,
+        # 2026-10-19 — the game's own screenshots prove the DEV's raw
+        # render is the game-true side, not ours). The devscrape camera
+        # pairing maps the dev's file-space dir through M (z-mirrored
+        # ISO_DIR), so the two screens relate by exactly ONE horizontal
+        # flip — mirror our mask to compare like-for-like. (Screenshots
+        # stay un-mirrored; one flip observed, one flip compensated —
+        # no double-count. Fixing the mirror would mean de-mirroring the
+        # viewer first: FORMAT corrective plan.)
         if mb is not None:
             mb = mb[:, ::-1]
         if ma is None or mb is None:
