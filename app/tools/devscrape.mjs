@@ -172,6 +172,13 @@ async function openCraftOurs(page, url, iso) {
       // count); its thin lines only stretch our silhouette bbox
       const occ = H.viewToggles?.occ;
       if (occ && occ.cb.checked) { occ.cb.checked = false; occ.cb.onchange(); }
+      // CoM marker + aero arrows and thrust arrows are OUR analysis HUD
+      // (default on); the dev shots show none of it — click the real
+      // flight-panel buttons off so both sides shoot the bare craft
+      for (const b of document.querySelectorAll('#flight button, .btn')) {
+        if (/^CoM\/arrows: on$/.test(b.textContent)) b.click();
+        else if (/^thrust: shown$/.test(b.textContent)) b.click();
+      }
       const d = [...dir];
       const t = H.controls.target.clone();
       const dist = H.camera.position.distanceTo(t);
