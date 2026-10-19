@@ -35,4 +35,6 @@ ARGS=(tools/devscrape.mjs --ids "$IDS" --ours "http://127.0.0.1:$PORT")
 (cd app && node "${ARGS[@]}")
 
 python3 tools/matrix_verify.py --dir reports/matrix
+python3 tools/matrix_sheet.py --dir reports/matrix || true
+python3 tools/matrix_iou.py --dir reports/matrix || true
 echo "[matrix] report: reports/matrix/REPORT.md  (photos: http://$IP:$PORT/reports/matrix/)"

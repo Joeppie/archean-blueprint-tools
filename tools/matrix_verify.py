@@ -180,10 +180,22 @@ def check_craft(dossier, quiet=False):
         # ---- component attribution ----
         exp_ids = sorted({f"{c['module']}.{c['type']}"
                           for c in bp['data']['components']})
-        got_ids = sorted({c['id'] for c in dev['comps'] if c['id']})
+        got_ids = sorted({c['id'] for c in dev['comps'] if c['id']
+                          and not c['id'].startswith('layer:')})
         if exp_ids != got_ids:
             fails.append(f'comp-list ids differ (module map?): dev {got_ids} '
                          f'vs file {exp_ids}')
+        # the contents list carries an 'occupancies<N>' layer row: the dev's
+        # own count of the occupancy cells it parsed from OUR file
+        occ_row = next((c['text'] for c in dev['comps']
+                        if c['id'] == 'layer:occupancies'), None)
+        if occ_row is not None:
+            n_occ = sum(len(c['occupancies'])
+                        for c in bp['data']['components'])
+            m = re.search(r'occupancies(\d+)', occ_row)
+            if not m or int(m.group(1)) != n_occ:
+                fails.append(f'occupancy count: dev row {occ_row!r} '
+                             f'vs file {n_occ}')
     # our viewer must report the same component count in its status line
     for tag in ('ours_proxy', 'ours_real'):
         ours = dossier.get(tag)

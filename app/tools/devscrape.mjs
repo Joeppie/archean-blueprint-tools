@@ -93,7 +93,8 @@ async function scrapeDev(page, shotPath) {
   out.massState = await page.textContent('#mass-state');
   out.comps = await page.$$eval('#comp-list .comp-group',
     (els) => els.map((e) => ({ id: e.dataset.rowKey,
-      text: e.textContent.replace(/\s+/g, ' ').trim() })));
+      text: e.textContent.replace(/\s+/g, ' ').trim() }))
+      .filter((c) => c.id && !c.id.startsWith('layer:')));
   await page.click('[data-view="iso"]');
   await page.waitForTimeout(1200);
   if (DO_SHOTS) await page.screenshot({ path: shotPath });
@@ -143,6 +144,14 @@ async function openCraftOurs(page, url, iso) {
   if (iso) {
     await page.evaluate((dir) => {
       const H = window.HARCHEAN;
+      // silhouette hygiene for the screenshot pair: the 120 m green ground
+      // plane + grid split every scanline (horizon) and wreck automated
+      // foreground extraction; the craft's own geometry is the subject
+      for (const c of H.scene.children) {
+        if (c.type === 'GridHelper' ||
+            (c.isMesh && c.geometry?.type === 'PlaneGeometry' &&
+             c.geometry?.parameters?.width === 120)) c.visible = false;
+      }
       const d = [...dir];
       const t = H.controls.target.clone();
       const dist = H.camera.position.distanceTo(t);
@@ -172,7 +181,18 @@ async function openCraftOurs(page, url, iso) {
   for (const id of IDS) {
     const file = path.join(CORPUS, id, 'blueprint.json');
     if (!existsSync(file)) { console.error(`missing ${file}`); errors.push(id); continue; }
-    const dossier = { id };
+    // partial re-runs (--no-dev / --no-ours) keep the other side's results
+    let dossier = { id };
+    const dpath = path.join(OUT, `${id}.json`);
+    if (existsSync(dpath)) {
+      try {
+        const prev = JSON.parse(readFileSync(dpath, 'utf8'));
+        dossier = { id };
+        if (!DO_DEV && prev.dev) { dossier.dev = prev.dev; dossier.devPageErrors = prev.devPageErrors; }
+        if (!DO_OURS) for (const t of ['proxy', 'real'])
+          if (prev[`ours_${t}`]) dossier[`ours_${t}`] = prev[`ours_${t}`];
+      } catch { /* fresh */ }
+    }
     for (const phase of ['dev', 'ours-proxy', 'ours-real']) {
       try {
         if (phase === 'dev') {

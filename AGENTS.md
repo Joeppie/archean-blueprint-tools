@@ -34,6 +34,9 @@ tools/game_data.py              mass & build-cost model straight from the GAME
                                 items+recipes); --selfcheck <blueprint.json>
 tools/matrix_verify.py          diffs game-file numbers vs the dev viewer's
                                 scraped mass/cost panels (reports/matrix/)
+tools/matrix_sheet.py           dev│ours side-by-side PNGs per craft
+tools/matrix_iou.py             framing-invariant silhouette IoU screen
+                                (render-iou.json = the eyeball queue)
 app/tools/devscrape.mjs         Playwright matrix driver: Xenon viewer panels +
                                 iso screenshots, our viewer via HARCHEAN hooks
 tests/matrix.sh                 the whole matrix ritual (see MATRIX.md)

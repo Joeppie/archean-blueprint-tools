@@ -56,6 +56,8 @@ FORMAT.md so answers stay offline.
 | `tools/make_matrix_test.py` | generates the fixture corpus rows (ids `90000010NN` rest, `90000020NN` deflected) — deterministic |
 | `app/tools/devscrape.mjs` | Playwright: uploads each fixture to the Xenon viewer (it has NO URL loader — file input only), scrapes mass/cost/contents/notes panels, screenshots; drives OUR viewer via `?open=` + the `window.HARCHEAN` hooks only (frozen viewer untouched), camera matched to the dev iso, proxy + `&real` shots |
 | `tools/matrix_verify.py` | diffs the scraped panels vs `game_data` numbers → `reports/matrix/REPORT.md`, exit code |
+| `tools/matrix_sheet.py` | side-by-side `dev │ ours` PNGs + a coarse silhouette-correlation screen (orders the eyeball queue; a low score ≠ failure, a human decides) |
+| `tools/matrix_iou.py` | framing-invariant screen: foreground-mask bbox normalised per side, IoU → `render-iou.json` (the QUEUE for step-0 triage) |
 | `tests/matrix.sh` | orchestrates all of the above |
 
 ## Running
@@ -65,6 +67,9 @@ bash tests/matrix.sh                    # all matrix crafts (network + game inst
 bash tests/matrix.sh 9000001001,9000002001   # just these
 MATRIX_SKIP_SHOTS=1 bash tests/matrix.sh     # panels only (faster triage)
 python3 tools/matrix_verify.py --dir reports/matrix   # re-diff only
+python3 tools/matrix_iou.py --dir reports/matrix      # re-screen renders only
+# ours-side only re-shoot (keeps scraped dev panels in the dossiers):
+(cd app && node tools/devscrape.mjs --ids <ids> --ours http://127.0.0.1:8650 --no-dev)
 ```
 
 Outputs land in `reports/matrix/`: per-craft `<id>.json` dossier, `<id>-dev.png`,
@@ -85,8 +90,95 @@ is the same blueprint through both pipelines, not two approximations.
 * render diffs on deflected twins → the data-driven node selection
   (conditional renderables, joint pose) disagrees with the dev.
 
-## Known intentional viewer divergences (not failures)
+## What the DATA files define for rendering (verified 2026-10-19, build 136)
 
+A census of all 117 component `.ini`s + every `config.yaml` + the dev's
+scene.js settles where per-part rendering comes from:
+
+* **Placement IS data**: `[RENDERABLE <node>] parent/position/rotation`,
+  `[JOINT <node>]` (+ `angular_x|y|z`, `linear_x|z` axis keys), `[ADAPTER]`,
+  `[TARGET]`, `[COLLIDER]` (+`is_build_block`, `displacement_volume`),
+  `[ENTITY]` (`mass`, `airtight`, `base_planes`, `symmetric`). Euler ZYX
+  node-tree composition — exactly what `viewer/models/manifest.json`
+  (renderables/joints) already encodes; gltf node transforms stay ignored.
+* **Part visibility/animation is NOT data**: no ini/yaml key hides or moves
+  a part. The game client toggles `renderables["mudguard"]->active` etc.
+  per frame by part NAME + `data` (C++). The dev mirrors it with a
+  hardcoded drop table: `ARCHEAN_wheel.Wheel`: drop `mudguard` iff
+  `data.mudguard === false` (mounted unless explicitly false), drop `Torus`
+  if `data.reverse` else `TorusReverse`; `BigWheel`: the torus pair only.
+  Our `COND_PARTS` (view3d.js) is semantically identical — any app/ port
+  must key the same way, and the table must be re-verified on game updates
+  (a new conditional part shows up as an extra gltf node name).
+* **The dev renders kinematic parts at REST**: its scene.js reads ONLY
+  `data.reverse`, `data.mudguard`, Propeller geometry params (it GENERATES
+  the prop surface from `blades/radius/width/twist/pitch`) and Dashboard
+  element states. No `data.angle`, `data.pos` or component `data.state`
+  exists anywhere in its modules. We DO animate those (the saved values are
+  the game's authored pose — FORMAT §Subgrids, selftest aileron pins), so
+  on deflected twins a deflected-OURS vs rested-DEV is the expected,
+  correct difference; the dev-facing job of a twin is the parts the dev
+  honours: wheel selection, propeller geometry, tank contents (mass panel).
+* Dev switch/lever state poses (±45° switch, 0.01 m press) are its own
+  approximations for DASHBOARD ELEMENTS only — not component truth.
+
+## Interpreting a render mismatch — the triage procedure
+
+A mismatch = one screenshot pair (`<id>-dev.png` vs
+`<id>-ours-real.png`, side-by-sides under `sheets/`) differing beyond
+lighting/framing. `render-iou.json` (bbox-normalised silhouette IoU —
+framing-invariant by design) only ORDERS the eyeball queue; a human verdict
+is the gate. Work the ladder; the first failing gate names the owning layer:
+
+1. **Re-shoot before believing it**: `bash tests/matrix.sh <id>` (fresh
+   contexts). `ours_real.filestatus` must show the right alias + component
+   count, `dev.warnings` inside the tolerance rule, zero page errors. Stale
+   or half-loaded PNGs are the top false-positive source.
+2. **Bind the diff to ONE type**: the row's three types sit left→right at
+   file x=−1.375/0.125/1.625 (screen-mirrored); the in-scene label names it.
+3. **Part missing/extra** → node tree + conditional rules: re-run
+   `python3 tools/extract_models.py <game> -o viewer/models`, diff the
+   type's `renderables` against its `[RENDERABLE]` sections, re-check the
+   drop table above. Fix = extractor or the conditional rule; then extend
+   `DEFLECT_DATA` so BOTH states stay pinned in new twins.
+4. **Right parts, wrong REST position/rotation** → composition chain vs ini
+   (`parent/position/rotation`, euler ZYX; gltf offsets must NOT be baked —
+   v0.143/v0.145 revert lesson: never touch per-asset alignment without a
+   measured pin, AGENTS §Known open issues). The dev composes the same ini:
+   it is the reference. Corrective = loader fix + a postest-style pin.
+5. **Wrong only at deflection** → ours-only by definition (the dev rests):
+   judge against our own joint pins, never against the dev.
+6. **Colour/material** → albedo LINEAR both sides; diff the type's material
+   names against the dev catalog (`models/catalog.json`,
+   `components[id].materials`) and our manifest `materials` — game renames
+   surface here first.
+7. **Whole part scaled** → unit traps: Dashboard cm/100, ini metres, hull
+   lattice 0.25, Propeller `radius` metres.
+8. **Rotated mounts mirrored** → known dev raw-quaternion bug, not fixable
+   here (identity fixtures; see divergences).
+
+Loop: fix the owning layer → re-run the single id → pair agrees → run the
+FULL matrix → transcribe the root cause into FORMAT.md in the SAME commit
+(offline knowledge rule; NOTICE §2 attribution when the fact came from the
+dev's implementation).
+
+## Game-version bump ritual
+
+1. `python3 tools/game_data.py --selfcheck testdata/3812927875/blueprint.json`
+   — parser survives the new ini/yaml dialect.
+2. `python3 tools/extract_models.py <new game> -o viewer/models` → the git
+   diff IS the per-part placement/material/mass/joint change list of the
+   update (review it like a code diff).
+3. `bash tests/matrix.sh` (full): mass/recipe drift shows per row;
+   distinguish GAME change (our numbers and the dev panels move TOGETHER →
+   update FORMAT tables; declared masses regenerate with the fixtures) from
+   PARSER break (they disagree) from DEV STALENESS (their `catalog.json`
+   `generated` date lags the install's `APP_VERSION_BUILD_NUMBER.txt`;
+   compare `--list-recipes` vs the fetched catalog before blaming either).
+4. New component types appear via `manifest.json` automatically:
+   `make_matrix_test.py` re-batches alphabetically in threes.
+
+## Known intentional viewer divergences (not failures)
 * **rotated 2026 files**: the dev places components with the RAW Unity
   quaternion; the game (and we) use the CONJUGATE for palette-bearing files
   (FORMAT.md § Handeness). Fixtures therefore all sit at identity — rotated
