@@ -856,7 +856,10 @@ export class Engine {
       const verts: [number, number, number][] = [];
       for (const prim of nd.prims) {
         if (prim.material !== 'body') continue;
-        const v = prim.lv ?? prim.v;
+        // the tip MUST come from the SAME twin the render shows (full v vs
+        // decimated lv): a full mast + lv-derived tip floated the lens off
+        // the point (solo Beacon 9000003006 pair, 2026-10-19)
+        const v = (this.hiDef ? prim.v : prim.lv) ?? prim.v;
         for (let k = 0; k + 2 < v.length; k += 3) {
           const p: [number, number, number] = [v[k]!, v[k + 1]!, v[k + 2]!];
           verts.push(p);
@@ -868,11 +871,15 @@ export class Engine {
         top = verts.reduce((b, p) => (p[ax]! > b[ax]! ? p : b), verts[0]!);
       }
       if (!top) continue;
-      const lens = new Mesh(new SphereGeometry(0.055, 12, 10),
+      // a discreet flush TIP light, not a balloon: the XenonViewer (game)
+      // draws no lens at all (the flash is procedural), so the recognisability
+      // sphere must stay small against the 0.25 m housing (user: beacon
+      // "doesnt look like in XenonViewer", solo Beacon 9000003006)
+      const lens = new Mesh(new SphereGeometry(0.04, 12, 10),
         new MeshStandardMaterial({ color: 0x550000, emissive: 0xff2222 }));
       lens.material.envMapIntensity = 0;
       lens.position.set(top[0], top[1], top[2]);
-      lens.position.setComponent(ax as 0 | 1 | 2, top[ax]! + 0.03);   // proud of the tip
+      lens.position.setComponent(ax as 0 | 1 | 2, top[ax]! + 0.012);   // flush on the tip
       (nodes.get(r.name) ?? root).add(lens);
     }
   }
