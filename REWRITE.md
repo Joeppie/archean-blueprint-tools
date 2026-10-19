@@ -76,8 +76,9 @@ new build dep, kept inside `app/`).
   with ?craft= deep links. Corpus config resolution is mirrored in
   `app/tools/vite-corpus.ts` — no hardcoded paths in `app/` either.
 - **P2 — DONE (P2a–P2c + heavy tier)**: `engine/build.ts` (pure,
-  THREE-free — WASM seam) merges blocks per palette colour with the view
-  z-mirror + flipped winding, hull triangles and occupancy proxies;
+  THREE-free — WASM seam) merges blocks per palette colour in the RAW frame
+  (v0.180 de-mirror: no view z-mirror, authored winding), hull triangles and
+  occupancy proxies;
   `engine/scene.ts` is the framework-free renderer (legacy lighting rig
   sky+fog+hemi+warm-sun, ground under the model, legacy fit params, on-demand
   invalidate, raycast pick); React `<Viewport>` mounts it and exposes
@@ -104,7 +105,7 @@ new build dep, kept inside `app/`).
     masters, dolphin 5⇔3+2, XYQ hinges @24.3°, corpus-wide "no master lands
     on a Build", axis rules, pose identity/swing/slide/follow.
   - `engine/scene.ts`: display anchoring (legacy moff: the minimal frame at
-    the origin, view-z flips sign); ONE Group per Build with nested solids
+    the origin; v0.180: raw frame, z keeps its sign); ONE Group per Build with nested solids
     (parent palette) + nested part proxies (invisible proxies route clicks to
     the SUBGRID only when no component is hit — v0.169 pick routing baked into
     pickNdc) + real models with raycast disabled; `syncSubJoints` after every
@@ -201,8 +202,8 @@ new build dep, kept inside `app/`).
   item ids (fixture ids excluded). Pins: mass.test (symmetric CoM,
   calibration total + floor, corpus ISW density sanity) + e2e (readout,
   marker toggle, hi-def rebuild still draws, wslink href).
-  dashboards (buildDashboard: generated board/elements, PRE-MIRRORED canvas
-  text) + the calibrated live readout LANDED with the P3/gizmo commits.
+  dashboards (buildDashboard: generated board/elements, RAW canvas text on
+  the +z face since the v0.180 de-mirror) + the calibrated live readout LANDED with the P3/gizmo commits.
 - **POWER-SURGE + LABELS — landed** (legacy v0.14x cable power-surge +
   v0.15x interactive labels): pure `surgePaths()` in pipes.ts — the network
   now records per-pipe view-space polylines + component links; the bolt

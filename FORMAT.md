@@ -59,30 +59,41 @@ positions* of each component's adapter ports. For every port,
 `position + R(q*)·adapter_local` reproduces the stored pipe end to **0.000 m**, while
 `position + R(q)·adapter_local` is **0.18–0.66 m** off. The game's own data settles it.
 
-The standard Unity→right-handed fix mirrors one axis. `viewer/view3d.js` mirrors **z**:
+**The de-mirrored display chain (v0.180, 2026-10-19 — see §"Chirality vs
+in-game truth" below, which is the arbiter):** the game projects the RAW
+file frame with standard right-handed camera math, so the viewer renders
+file coordinates directly —
 
-    view_pos  = (x, y, −z)          view_quat(file w,x,y,z) = (w, x, y, −z)
+    view_pos  = (x, y, z)           view_quat V2 (modern) = (w, −x, −y, −z)  [= q*]
+                                    view_quat V1 (legacy) = (w, x, y, z)     [raw q]
 
-`model.data`, the serialized save, the inspector's numbers, and all reports stay in **raw
-file space** (the z-mirror is a pure display transform, so edits convert back); component
-*local* geometry keeps raw `.ini`/gltf numbers and a root `scale.z = -1` absorbs the
-mirror (Three.js flips triangle winding for negative-determinant matrices, and sprite
-labels are unaffected). `?selftest` asserts the beacon mast points nose-ward in view
-space, so a regression that reintroduces raw-`q` placement fails the suite.
+— the conjugate/raw placement law (the LEGACY_Q split, verified by the pipes
+and mural proofs above) WITHOUT the old axis mirror. `model.data`, the
+serialized save, the inspector's numbers and all reports stay in raw file
+space, and component *local* geometry keeps raw `.ini`/gltf numbers with
+**no** root mirror (the historic `scale.z = -1` + emit-time z-flip chain,
+v0.93→v0.179, rendered a horizontal MIRROR IMAGE of the game — every pin
+then passed because each was reflection-invariant). `?selftest` asserts the
+beacon mast points nose-ward (raw −z) so a regression to raw-`q` placement
+on modern files fails the suite, and the `liver` pin (airliner 3309955432
+livery raster reads U-N-I-T-E-D from file −x) cannot pass under a mirror.
 
 **The dev viewer's convention, read from its source (viewer.xenontools.dev
 `js/blueprint.js` + `js/scene.js`, Oct 5):** components are placed with the
 **raw** numbers — `new THREE.Quaternion(q.x, q.y, q.z, q.w)` composed with the
-raw position, no conjugate, no axis mirror. Its scene is therefore the
-*mirror image of the game* (self-consistent, so it "looks perfect": the
-mirror flips nose-lean to tail-lean, flips text baked in geometry, puts
-ownership pads face-down, and turns dashboards 45° away from their pilots —
-our users see exactly these symptoms when comparing the two viewers side by
-side; they are the mirror, not a bug in either viewer). The same raw chain
-places dev's adapters **0.18–0.66 m away from its own recorded cable
-endpoints** (the `data.pipes` proof above), which the mirror chain nails to
-0.000 m. Both viewers are valid mirror pairs; ours is the game-true side
-(v0.93 `d94e867`), the dev's is the raw-numbers side. Dev extras worth
+raw position, no conjugate, no axis mirror. Per the game's own workshop
+screenshots (§Chirality vs in-game truth, 2026-10-19) that raw-numbers scene
+IS the game's view for positions, identity mounts and unrotated text — the
+dev's one deviation is ROTATED parts in V2 files, where the game places with
+the CONJUGATE and the dev's raw quaternion mirrors the part. (The pre-2026-10
+narrative here claimed the dev's scene was "the mirror image of the game"
+and ours the game-true side — that direction was BACKWARDS; the old z-mirror
+chain was the mirror image, and the symptoms users saw when comparing
+viewers were that mirror.) Both viewers now agree with the game on the same
+side (ours since the v0.180 de-mirror); for rotated V2 parts the dev's raw
+chain additionally places its adapters away from its own recorded
+`data.pipes` endpoints (the conjugate law nails those to 0.000 m — the proof
+above). Dev extras worth
 porting, transcribed here: `components[].mirrorAxis` (1/2/3 = x/y/z) = the
 game's left-right symmetry flag, applied as a negative scale on that axis of
 the component instance (0/null in all corpus files today); dashboard button
@@ -103,8 +114,9 @@ sRGB.
   `Build[5]/[41]` at ±0.635 = the door pair). The twin's `orientation` is
   NOT forced-mirrored (the dolphin hinges mount 90° apart — builder
   geometry, not a file law), so the viewer's gizmo moves propagate the
-  MIRRORED DELTA (dx,dy,dz)→(−dx,dy,dz) (view frame; file frame
-  (−dx,dy,−dz)) and leave each twin's pose and joint state its own; the
+  MIRRORED DELTA (dx,dy,dz)→(−dx,dy,dz) in the file frame — which since the
+  v0.180 de-mirror IS the view frame) and leave each twin's pose and joint
+  state its own; the
   twins' occ/type-255 mirrors follow the save-time per-component delta
   shift. `mirrorAxis`-flagged parts (the gantry craft: 21 entries) are
   SELF-MIRRORED instances — a single entry renders both halves.
@@ -167,7 +179,7 @@ colour shape:
 | `components[].orientation` | Unity LH quaternion **RAW** | **CONJUGATE** `{w,−x,−y,−z}` |
 | `components[].colors` | `[slot, slot]` **index pair** | `{color1:{…}, color2:{…}}` dict |
 | finish-family bases | polished 80, metal 120, glass 160 (matte 40 shared) | polished 84, metal 128, glass 172 → `legacySlot()` +4/+8/+12 |
-| view-quat chain | `(w,−x,−y,z)` | `(w,x,y,−z)` |
+| view-quat chain (v0.180) | stored quat **as-is** `(w,x,y,z)` | **conjugate** `(w,−x,−y,−z)` (pre-v0.180: `(w,−x,−y,z)` / `(w,x,y,−z)` mirrored view) |
 
 **Corpus census (111 files under testdata/, 2026-10-19):** all are
 `version:1` + `data.version:2`. 60 workshop craft split **51 V1
@@ -195,14 +207,16 @@ DIRECTION was wrong. The game's own workshop screenshots prove the DEV's
 raw render equals the game's view and OUR z-mirror chain renders its
 horizontal mirror image.** This audit only had the two viewers to
 compare and no external arbiter. The OBSERVED relation stands (dev|ours
-screens relate by one horizontal flip at the M-paired camera, and
-`tools/matrix_iou.py`'s mask mirror compensates exactly that one flip —
-the mechanism is right either way, only its stated reason flips). Two
+screens related by one horizontal flip at the M-paired camera, which
+`tools/matrix_iou.py`'s mask mirror compensated — RETIRED with the v0.180
+de-mirror: ours now renders the same side as the dev, so the masks compare
+directly). Two
 further sheet effects must not be confused with it: (a) on **rotated
 mounts in V2 files** the DEV mirrors the part itself (raw-quat bug,
 matrix triage step 8 — fixtures are identity, so matrix rows never show
 it; per the pipes/mural data proofs the GAME places rotated V2 parts
-with the CONJUGATE, so here dev ≠ game); (b) **deflected**
+with the CONJUGATE, so here dev ≠ game — this remains the ONE live
+divergence); (b) **deflected**
 twins (`90000020NN`) differ because the dev renders parts AT REST while we
 apply `data.angle`/`data.pos` — ours-only by definition (triage step 5).
 A flip maps faces to faces, so it can NEVER make geometry appear on one
@@ -211,8 +225,11 @@ row** ("TEST" Label visible in dev, not in ours) is NOT the flip — the
 mount is identity (convention-invariant) and the Label data is present
 (`{type:Label,text:'TEST',state:0}`); it points at our dashboard
 text/SIDE path (the `dashmirror`/`textx` pre-mirror rules) or the staged
-camera side, and needs one eyeball pass on the PNG pair to bind —
-tracked, unresolved as of this audit.
+camera side, and needs one eyeball pass on the PNG pair to bind.
+**LIKELY RESOLVED by the v0.180 de-mirror:** with the raw +z-face canvas and
+both viewers on the same side, our sheet should draw the 'TEST' label like
+the dev's — CONFIRM on the next `bash tests/matrix.sh 9000001007` re-shoot
+before closing it out.
 
 **DECISION (user, 2026-10-19): the viewer/app support V2 semantics
 internally; V1 files get an ad-hoc LOAD-TIME conversion; the LEGACY_Q
@@ -224,19 +241,17 @@ block/triangle slots through `legacySlot`, pair→dict comp colours,
 the modern chain on `q'`, pinned in `normalize.test.ts`), recurse into
 Build subgrids, bump `data.version=2`; saving a converted file writes the
 V2 form (intentional migration — such a file no longer round-trips
-byte-identical to the game's original). Porting the same conversion to
-`viewer/` must keep `applyDisplayPose`'s FluidJunction flat-comb rule in
-view: it derives the pose from the RAW FILE quat as convention-independent
-"(−x,−y,z,w)", which is NOT invariant under a q→q* rewrite of the file —
-`normalizeDoc` conjugates a junction's stored quat while `displayQuat`
-re-reads the raw file value, so a legacy non-identity junction changes its
-display pose after conversion (the RCS-infinity "comb on its end" class,
-postest rcs-fj-flat). LATENT in app/ today (its fixtures pin identity
-junctions only); fix = exempt FluidJunction `orientation` from the step-4
-conjugation (the flat-frame rule then keeps working on the raw value) or
-re-key the rule on the view quat — pin with the RCS-infinity fixture.
+byte-identical to the game's original; the q→q* step stays display-invariant
+under BOTH the old and the de-mirrored laws — both reduce to R(q), pinned in
+`normalize.test.ts`). The FluidJunction interaction below was REALISED by
+the v0.180 de-mirror: the flat-comb rule is now "display = R(the as-written
+file quat)" for both generations, which is NOT invariant under the q→q*
+rewrite either — so `normalizeDoc` EXEMPTS FluidJunction `orientation` from
+the step-4 conjugation (the legacy comb keeps its flat pose after
+conversion; pinned in `normalize.test`, viewer-side pinned by postest
+rcs-fj-flat/-touch).
 
-### Chirality vs in-game truth (2026-10-19) — VERDICT: our view chain is the game's MIRROR
+### Chirality vs in-game truth (2026-10-19) — VERDICT B CONFIRMED; DE-MIRRORED IN v0.180 — this section is NORMATIVE
 
 **The question (user):** the game renders with a custom raytracer in a
 Unity left-handed world — maybe everything it shows (dashboard text
@@ -341,25 +356,28 @@ face with right = (−dir)×up — which is exactly the dev viewer's
 same screenshots.
 
 **Consequences:**
-- *Harness (matrix ritual): behaviourally UNCHANGED, still correct.*
-  devscrape's ISO_DIR = M(dev cam) remains the right pairing: our shot
-  vs the dev's relates by exactly ONE flip (our mirror), which
-  matrix_iou.py's mask mirror compensates — no double-flip. The flip
-  observed in 4882dcc is expected under BOTH chirality stories; only
-  its stated reason was backwards (comments now cite this section).
+- *Harness (matrix ritual):* pre-v0.180 devscrape's ISO_DIR = M(dev cam) was
+  the right pairing (our mirror ⇒ one flip, compensated by matrix_iou's mask
+  mirror). **LANDED v0.180:** the de-mirrored viewer's view space IS file
+  space, so ISO_DIR is the dev camera direction UNMIRRORED and
+  matrix_iou.py compares masks directly (its mirror was retired — keeping it
+  would double-flip). The flip observed in 4882dcc belonged to the mirror
+  era; only its stated reason was backwards.
 - *Today's V1/V2 audit (d1b4085):* its "Mirror verdict" paragraph is
   SUPERSEDED (struck in place above); the rest (census, palette/quat
   table, normalizeDoc analysis) is chirality-neutral and stands —
   normalizeDoc's q→q* with V2 re-save preserves placement under either
   display chain.
-- *The viewer/app themselves:* deliberately NOT changed here (frozen-
-  port + app rules; user approval required). The de-mirror is a
-  coordinated project — plan below.
+- *The viewer/app themselves:* LANDED v0.180 (2026-10-19, user-approved) —
+  see the corrective plan below, marked step by step.
 - *Epistemic rule going forward:* the mirror was invisible to every
   data-driven test ever written — only in-game pixels can bind
-  chirality. Future chirality claims MUST cite a game screenshot.
+  chirality. Future chirality claims MUST cite a game screenshot. The
+  v0.180 suite encodes the rule: the selftest `liver` + `orienttext` pins
+  CANNOT pass under a mirror (liver even reports `raster reads DETINUD
+  (mirrored!)` explicitly if the scene flips again).
 
-**Corrective plan (de-mirror; for user approval — NOT implemented):**
+**Corrective plan (de-mirror) — APPROVED and LANDED in v0.180 (2026-10-19):**
 1. Display chain (`viewer/view3d.js`; the app port mirrors it): drop M —
    view_pos = raw pos; view_quat: V2 = q* = (w,−x,−y,−z), V1 = raw q
    (the LEGACY_Q table's placement law, without the mirror
@@ -392,6 +410,31 @@ same screenshots.
 6. Doc sweep once landed: this table becomes normative; §Handedness's
    "our view is the game's" narrative retired; MATRIX.md/PERF.md mirror
    notes re-worded.
+
+**Landing notes (v0.180):** steps 1-6 shipped as commits `de-mirror(1-4/7)`
+(viewer chain + text + junction + pins), `de-mirror(5/7)` (matrix harness:
+devscrape ISO_DIR un-mirrored, matrix_iou mask mirror retired),
+`de-mirror(6/7)` (app port + normalize FluidJunction EXEMPTION — the earlier
+audit's latent note became REQUIRED, verified), and the doc sweep. New
+mirror-proof selftest pins: `dashtext` (raw left-advancing canvas),
+`orienttext` (orient fixture 9000000001 rebuilt through the shipped chain in
+OUR viewer: +z text face, raw canvas, no mirror scale), `liver` (airliner
+plate raster reads U-N-I-T-E-D from −x, screen-right = +z). Pins whose
+constants flipped as genuinely chirality-dependent: beacon mast (nose = raw
+−z), junction display +y, mural raw-q + z-negated wall normal, btn-lever/
+plate raw offsets, doorpivot raw-z clamp constants, ISW symrot/symrot-x
+mount-axis signs, gizmohover/aimCamera + fitCamera/cam-fit to the −z nose
+side, app pins (format/build/compparts/hull/pipes/subgrid/gizmo-e2e).
+Rebuilt, not flipped: selftest wake probe (ok24 — the old bbox-offset probe
+only found the wake because mirrored voxel cells and raw-numbered centres
+COINCIDED in z; it now stands 1.5 m off the downstream-most SOLID CELL),
+selftest pick (explicit lookAt; the old pass rode a stale fit quaternion).
+Side fix landed with step 1: per-engine THRUST ARROWS previously drew at
+z-MIRRORED positions off their own parts (raw part coords rendered under the
+mirrored worldM) — they now sit on their engines. Chirality-invariant pins
+(mask deltas md=det(S)·S·dq, droop y-tests, subgrid |axis| dots, twin
+unison, comptest, seal/inflow/wake magnitudes) were NOT relaxed — they pass
+unchanged.
 
 ## `blocks` — the voxel build
 
@@ -793,22 +836,20 @@ Zero-build Three.js (WebGL) inspector: `python3 -m http.server 8650` (repo root)
   `window.XenonViewer` capture API, front = camera on file +z): the game
   authors text **readable from the plate's +normal side** — dev renders the
   raw canvas readable from +z, and raw `R(q)` leans the beacon mast toward
-  −x (green). Our z-mirrored chain therefore must **counter-mirror every
-  text layer locally, never flip the world convention** (raw = pre-v0.93
-  state: beacon lean/caster droop break): dashboard canvas text is
-  **PRE-MIRRORED** (`translate(w,0); scale(-1,1)` before drawing — a raw
-  canvas reads mirrored from the authored side through our z-mirror; v104's
-  rule, v105's revert was the regression), and baked glyph prims
-  (`code_button_text`, `reboot_button_text`, `code`, `subscribe`, `codein`,
-  `activein`) are mirrored **in-plane about their own bbox centre**
-  (`flipGeomX`: x → 2cx−x, swap winding) — a z-flip nets the raw geometry
-  (= still mirrored from the pilot side; v105's bug), a flip about x=0 would
-  slide off-centre strings across their buttons. Through the chain, `TEST`
+  −x (green). This section's old conclusion — that OUR chain therefore had
+  to "counter-mirror every text layer locally" (PRE-MIRRORED dashboard
+  canvas `translate(w,0); scale(-1,1)` + in-plane `flipGeomX` on baked glyph
+  prims `code_button_text`, `reboot_button_text`, `code`, `subscribe`,
+  `codein`, `activein`) — was an artefact of the removed world mirror: a
+  local double-mirror inside a mirrored world. **Since the v0.180 de-mirror
+  both layers render RAW** (FORMAT §"Chirality vs in-game truth"): the raw
+  canvas on the board's +z face reads correctly from the authored side, and
+  baked prims are untouched geometry. Through the chain, `TEST`
   reads from +z, the mast (+red lens) leans toward the red cube, red cube
-  LEFT of a +z camera, blue top, yellow bottom — the exact mirror pair of the
-  dev render, on the game-true side of every data-checked fact. Selftest
-  pins: `dashmirror=true` (pre-mirror pixel probe) + `textx=true`
-  (`flipGeomX` centre-mirror semantics).
+  RIGHT of a +z camera (= the game's own side; the dev render agrees) — Selftest
+  pins: `dashtext=true` (raw left-advancing canvas probe) + `orienttext=true`
+  (the fixture's own plate rebuilt through the shipped chain: +z text face,
+  raw canvas, no mirror scale).
 - **`components[].mirrorAxis` is the game's per-component symmetry mirror**
   (dev `scene.js`: `scale[mirrorAxis−1] = −1` on the component — draws the
   part geometry mirrored on x/y/z for 1 (negative) symmetry builds). Every
@@ -827,11 +868,12 @@ Zero-build Three.js (WebGL) inspector: `python3 -m http.server 8650` (repo root)
     of the wall under the conjugate (|dot| 0.70 / 0.00). The builder glued
     these flat in-game, and dashboard text authored readable from the plate
     side then faces the pilot (dash 84 'test' +0.57 toward seat 59 under
-    raw+front=−ẑ). Raw-conversion view quat = `(w,−x,−y,z)`.
+    raw+front=−ẑ). View quat = the stored quaternion AS-IS (pre-v0.180:
+    `(w,−x,−y,z)`).
   • **2026 files (`data.colors` present): stored CONJUGATE** — ISW-241's own
     `data.pipes` endpoints reproduce only under `R(q*)` (0.000 m, comptest
     60/60; beacon lean, caster droop, junction flat-frame all verified).
-    View quat = `(w,x,y,−z)`.
+    View quat = `(w,−x,−y,−z)` (pre-v0.180: `(w,x,y,−z)`).
   The key is structural (palette feature = same game update as the
   serialization change); corpus: 24 palette-less files (2024-08..2025-07)
   raw, the one 2026 file conjugate. Dev-viewer consequence (explains
@@ -1136,7 +1178,9 @@ Adventure = 3334698274).
   out") and the ŷ yaw (v0.174/176) opens it "like a door, incorrectly"
   ("one of the doors opens correctly, like a hatch folding down, but the
   other opens like a door" — v0.177). The cross's SIGN is mirror-
-  antisymmetric (Build[4] −ẑ, Build[27] +ẑ), so equal angles deploy the
+  antisymmetric (Build[4] −ẑ, Build[27] +ẑ under the old chain — the pair's
+  signs swap together under the v0.180 de-mirror; the ANTI relation and the
+  symmetric fold are unchanged), so equal angles deploy the
   pair MIRROR-SYMMETRICALLY — at +90° both fins lie horizontal at the
   belly line, each pointing OUT to its own side (verified: bbox
   x 1.25..3.75 / −3.5..−1). The .ini axle

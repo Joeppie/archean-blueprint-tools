@@ -286,8 +286,10 @@ refuses to cut a tag when the strings disagree.
   right-handed renderer must use the conjugate `{w,−x,−y,−z}` (raw `q` mirrors the
   game — beacons lean the wrong way, casters pitch the wrong way, wheels go inboard).
   Verified: `position + R(q*)·adapter_local` reproduces the game-written `data.pipes`
-  endpoints to 0.000 m (raw `q` is 0.18-0.66 m off). Viewer converts to a z-mirrored
-  view space `pos (x,y,−z)`, `quat (w,x,y,−z)`; all data/reports stay raw. See
+  endpoints to 0.000 m (raw `q` is 0.18-0.66 m off). **Since the v0.180 de-mirror
+  the VIEW SPACE IS THE RAW FILE FRAME** (`pos (x,y,z)` — the game projects raw
+  file coordinates with standard RH camera math; FORMAT §"Chirality vs in-game
+  truth"); no axis mirror anywhere. See
   FORMAT.md § Handedness.
 - **Rotation storage has TWO conventions keyed on `data.colors` (v108):**
   palette-less legacy files (2024-25 corpus, 23 of them) store the Unity LH
@@ -296,7 +298,9 @@ refuses to cut a tag when the strings disagree.
   conj = 45° out of the wall; selftest `mural=true`); palette-bearing 2026
   files store the **conjugate** (ISW pipes 0.000 m under `R(q*)`). Viewer:
   `LEGACY_Q` (set in `setModel`) switches `viewQuat`/`rawFromView` between
-  `(w,−x,−y,z)` (legacy) and `(w,x,y,−z)` (modern). This also explains the
+  the stored quat AS-IS `(w,x,y,z)` (legacy) and the plain conjugate
+  `(w,−x,−y,−z)` (modern) — the v0.180 de-mirrored chain (pre-v0.180:
+  `(w,−x,−y,z)` / `(w,x,y,−z)` in a z-mirrored view). This also explains the
   dev viewer: raw placement is exact for legacy craft ("renders the mosaic
   perfectly") and 45°-tilted for 2026 ones. See FORMAT.md § Handedness.
 - Blocks: `type` = shape+orientation (0 cube, 1-12 slope [4 = thin tilted
@@ -396,7 +400,9 @@ refuses to cut a tag when the strings disagree.
   incorrectly") swings on the THIRD axis pin×span — world ẑ at the
   clamped bottom edge, the top edge sweeping in x·y ("collapsing outward
   or inward", "staying close to the frame on its bottom part"); the
-  cross's sign is mirror-antisymmetric (Build[4] −ẑ, Build[27] +ẑ), so
+  cross's sign is mirror-antisymmetric (Build[4] −ẑ, Build[27] +ẑ under the
+  old chain — the pair's signs swap together under the v0.180 de-mirror, the
+  ANTI relation is unchanged), so
   equal angles deploy the twin fins mirror-symmetrically, each to its own
   side (bbox-verified); the .ini axle key is the PART's pin,
   NOT the content's animation axis (the v0.171 uniform ŷ key flipped the
@@ -553,17 +559,13 @@ refuses to cut a tag when the strings disagree.
   compare draw-call counts only.
 
 ## Known open issues (v0.146 state)
-- **CHIRALITY (2026-10-19, FORMAT §Chirality vs in-game truth): our viewer's
-  z-mirror display chain renders the game's view HORIZONTALLY FLIPPED** —
-  proven against in-game workshop screenshots of craft 3309955432 (readable
-  UNITED livery + cockpit handedness vs dev/ours renders; probes `app/tools/
-  sidechir.mjs`/`devchir.mjs`). The dev's raw render is the game-true side
-  (except rotated V2 parts, which the game places with the conjugate). The
-  mirror is intentional today and ALL suite pins are reflection-invariant,
-  so nothing is "broken" — but any "we show the game's view" claim is wrong
-  until the user approves the de-mirror plan in that FORMAT section. Do NOT
-  "fix" text/mirror rules piecemeal; re-verify chirality claims only against
-  game screenshots.
+- **CHIRALITY: RESOLVED — DE-MIRRORED v0.180 (2026-10-19).** The viewer/app
+  now render the game's own view (raw positions, standard RH camera, V2 q* /
+  V1 raw q); the z-mirror chain, its text pre-mirrors and the matrix mask
+  compensation are retired. Normative write-up + landing notes:
+  FORMAT §"Chirality vs in-game truth" (mirror-proof pins: selftest
+  `dashtext`/`orienttext`/`liver`). Chirality claims must still cite
+  in-game pixels, never a viewer's.
 - **v0.143/v0.145 were REVERTED** (user-confirmed regressions on Pages: beacon mast +
   aileron real models rotated wrong). v0.144 (IBL) was re-landed as the PMREM commit.
   Re-land the legacy alignment + per-asset loader bake ONLY with new pins first
@@ -577,9 +579,11 @@ refuses to cut a tag when the strings disagree.
 ## Invariants that tests enforce (keep them green)
 1. `?selftest`: edit→serialize round-trip preserves bytes except intended fields;
    occupancy + type-255 mirror stay synced after position edits; the ISW beacon
-   mast must point nose-ward in VIEW space (pins the Unity handedness fix); the
+   mast must point nose-ward (nose = raw −z = view space, v0.180; pins the
+   Unity handedness fix); the
    ISW front caster wheel must hang below its pivot (suspension droop, display-only),
-   the FluidJunction inlet must face view −y (flat builder-cache display pose —
+   the FluidJunction outlet (its local +z) must face +y with the inlet toward
+   −y (flat builder-cache display pose = the RAW file quat R(q), v0.180 —
    the cables are authored in that frame; see FORMAT.md), the ISW front aileron
    (saved `data.angle` in DEGREES = −4.609°) must droop a few degrees below its
    hinge (view tip y ≈ −0.08; the joint limit is ±45°),
@@ -588,13 +592,17 @@ refuses to cut a tag when the strings disagree.
    dark green, slot 53 cyan; v1 comp colours are slot-index
     pairs); the real Beacon model must carry the emissive red lens the game
     draws procedurally (user: "beacon no longer looks like a beacon");
-     dashboard canvas text must be PRE-MIRRORED (`dashmirror=true`: a
-     left-aligned label lands on the canvas RIGHT half) and baked text prims
-     mirrored about their own centre (`textx=true`) — the orient fixture
-     (testdata/9000000001, tools/make_orient_test.py) proved the game authors
-     text readable from the plate's +normal side, so both layers need local
-     counter-mirrors in our z-mirror chain (v105's normal-canvas/z-flip combo
-     read mirrored from the pilot side = the v107 fix).
+     dashboard canvas text is RAW on the board's +z face (`dashtext=true`: a
+     left-aligned label lands on the canvas LEFT half; `orienttext=true`:
+     the orient fixture's plate rebuilt through the shipped chain has its
+     text face at local +z with an un-mirrored canvas — the game authors
+     text readable from the plate's +normal side and the v0.180 display
+     frame IS the file frame, so NO pre-mirrors remain; the old
+     dashmirror/textx counter-mirror pair was a property of the removed
+     world mirror — FORMAT §Chirality), plus the mirror-proof `liver=true`
+     gate (airliner 3309955432 livery plate raster reads U-N-I-T-E-D from
+     the file −x side, screen-right = +z; fails loudly as DETINUD under any
+     mirror).
      legacy (no-palette) files must use RAW quaternions: the mosaic
      dashboard-mural plate normal must be parallel to its fitted wall plane
      (`mural=true`; conj quaternions tilt it ~45° out of the wall).
@@ -627,8 +635,9 @@ refuses to cut a tag when the strings disagree.
      like ISW (`anchor=true`). The rotate gizmo (Blender-style rings,
      v0.151) drags INTRINSIC (space='local'): each drag spins the axis
      the ring is CURRENTLY DRAWN along, so pitch-then-roll composes exactly
-     as seen (user WYSIWYG rule); scene-root proxy, writeback qv = P·Ry(π)
-     (THREE decompose absorbs the negative scale by negating sx). `gizmo=
+     as seen (user WYSIWYG rule); scene-root proxy, writeback qv = P verbatim
+     (v0.180: the old P·Ry(π) decompose-compensation existed only for the
+     removed scale.z=−1 mirror root). `gizmo=
      true` pins the writeback round-trip; `?gizmatest` (synthetic single-
      seat blueprint, camera facing the pilot, n=19 + &shot=1|2|3|4 visual
      states) pins the order algebra, the LIVE pose, and v0.156 KNOB
@@ -775,8 +784,10 @@ refuses to cut a tag when the strings disagree.
      plane per mirror axis present (twin masks ∪ mirrorAxis parts); the
      y-plane arrow pair straddles UPWARD so the down-tip lands ON the
      plane (selftest ground=true scans mirrorGroup).
-     move = translate gizmo on the same proxy, writeback is the mirror
-     involution (view z-flip) minus the compGroup display anchor, occ +
+     move = translate gizmo on the same proxy, writeback lands the proxy
+     position DIRECTLY in file coords (v0.180: view == file frame; the old
+     mirror involution / view z-flip is gone) minus the compGroup display
+     anchor, occ +
      type-255 mirror cells follow via serialize()'s round(delta/CELL) shift
      exactly like the position sliders — the gizmo never touches blueprint
      math. Shift snaps 15° AND 0.25 m cells. v0.158: SPACE IS PER-MODE —
@@ -889,8 +900,8 @@ refuses to cut a tag when the strings disagree.
    (world bbox y ≤ 0.40 m), one-height row at file y, cable endpoints on the
    −y side, ports ≤ 0.20 m of the model bbox (cable tips sit on visible
    sockets = 0.14 m off the proxy box). Guards the convention-independent
-   junction display pose (FORMAT.md: file quat (w,−x,−y,z), never derived
-   from the mapped view quat). Giant (3509975859) AERO-GRID pins (only
+   junction display pose (v0.180: the RAW file quat R(q) for BOTH
+   generations, never derived from the mapped view quat). Giant (3509975859) AERO-GRID pins (only
    grid-path craft, 1024 plates): grid ON, the 3×3×3 query is a SUPERSET of
    the influencing plates at 250 golden-ratio box points, freestream
    upstream, wake deficit >0.25 anchored on the first inserted solid cells

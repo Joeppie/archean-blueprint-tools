@@ -14,8 +14,8 @@ to a craft to keep the number of test cases down:
    a deflected state (`Torus` vs `TorusReverse`, mudguard, aileron −15°,
    hinge 90°, track +0.25 m, open door, lever 0.7, button pressed, tank
    fluid…). Both viewers draw the real game models; screenshots at the SAME
-   camera (the dev's `iso` preset: azimuth 0.9, elevation 0.45 rad; our view
-   space mirrors z → camera dir (0.705, 0.435, −0.560)).
+   camera (the dev's `iso` preset: azimuth 0.9, elevation 0.45 rad; since the
+   v0.180 de-mirror our view space IS file space → camera dir (0.705, 0.435, +0.560)).
 2. **mass** — the game's server model: component `[ENTITY] mass` from the
    `.ini`; per-material density per 0.25 m cell cube (composite .25,
    concrete 10, steel 1, aluminium .5, glass 1, lead 150, titanium .6 kg),
@@ -143,7 +143,8 @@ layer:
    count, `dev.warnings` inside the tolerance rule, zero page errors. Stale
    or half-loaded PNGs are the top false-positive source.
 2. **Bind the diff to ONE type**: the row's three types sit left→right at
-   file x=−1.375/0.125/1.625 (screen-mirrored); the in-scene label names it.
+   file x=−1.375/0.125/1.625 (left→right at the paired iso camera since the
+   v0.180 de-mirror); the in-scene label names it.
 3. **Part missing/extra** → node tree + conditional rules: re-run
    `python3 tools/extract_models.py <game> -o viewer/models`, diff the
    type's `renderables` against its `[RENDERABLE]` sections, re-check the
@@ -162,8 +163,9 @@ layer:
    surface here first.
 7. **Whole part scaled** → unit traps: Dashboard cm/100, ini metres, hull
    lattice 0.25, Propeller `radius` metres.
-8. **Rotated mounts mirrored** → known dev raw-quaternion bug, not fixable
-   here (identity fixtures; see divergences).
+8. **Rotated mounts mirrored (dev side only)** → known dev raw-quaternion
+   bug — since the v0.180 de-mirror OUR render is the game-true one here;
+   not fixable on our side (identity fixtures; see divergences).
 
 Loop: fix the owning layer → re-run the single id → pair agrees → run the
 FULL matrix → transcribe the root cause into FORMAT.md in the SAME commit
@@ -187,21 +189,28 @@ dev's implementation).
    `make_matrix_test.py` re-batches alphabetically in threes.
 
 ## Known intentional viewer divergences (not failures)
-* **every sheet is a MIRROR PAIR, not just the mask**: our viewer renders the
-  GAME's view (z-mirror chain), the dev's raw render is its mirror image
-  (FORMAT § Handeness; V1/V2 audit 2026-10-19). At the same file camera the
-  two PNG sides relate by a HORIZONTAL FLIP — read whole sheets with that in
-  mind (`matrix_iou.py` mirrors our mask accordingly). A flip maps faces to
-  faces, so it can never explain content VISIBLE on one side and MISSING on
-  the other (e.g. the 9000001007 Dashboard 'TEST' Label): that class is a
-  text/SIDE-path question, not the flip.
-* **rotated 2026 files**: the dev places components with the RAW Unity
-  quaternion; the game (and we) use the CONJUGATE for palette-bearing files
-  (FORMAT.md § Handeness). **V1 files are the dev's one correct case** — raw
-  placement IS the legacy convention, so side-by-sides of mosaic-era craft
-  agree pose-wise while 2026 craft show the dev's mirror (FORMAT §V1/V2).
-  Fixtures therefore all sit at identity — rotated
-  comparisons against the dev would flag a KNOWN dev-side mirror.
+* **sheets are DIRECT pairs since the v0.180 de-mirror**: our viewer now
+  renders the GAME's own view (raw positions, standard RH camera — FORMAT
+  §"Chirality vs in-game truth", corrective plan LANDED 2026-10-19); the
+  dev's raw-numbers render shows the SAME side at the paired camera, so
+  `<id>-ours-real.png` compares to `<id>-dev.png` WITHOUT any flip
+  (`matrix_iou.py`'s mask mirror was retired — keeping it would double-flip;
+  devscrape's ISO_DIR is the dev camera direction un-mirrored). Screenshots
+  and triage notes from before v0.180 carry one horizontal flip between the
+  two sides. A flip maps faces to faces, so it could never explain content
+  VISIBLE on one side and MISSING on the other (e.g. the 9000001007
+  Dashboard 'TEST' Label): that class was a text/SIDE-path question anyway —
+  and the raw-canvas dashboard fixed it.
+* **rotated 2026 files**: the ONE remaining true divergence — the dev places
+  components with the RAW Unity quaternion, while the game (and we) place
+  palette-bearing files with the CONJUGATE (data-pinned: pipes 0.000 m,
+  mural flushfrac; FORMAT §"Chirality vs in-game truth"). After the
+  de-mirror ours and the dev's sheets agree everywhere EXCEPT here: rotated
+  mounts in V2 files show the dev mirroring the PART (its raw-quat bug;
+  triage step 8). **V1 files are the dev's correct case** — raw placement IS
+  the legacy convention, so side-by-sides of mosaic-era craft agree
+  pose-wise (FORMAT §V1/V2). Fixtures therefore all sit at identity —
+  rotated comparisons against the dev would flag a KNOWN dev-side error.
 * our default is proxies, `&real` the game models; the dev always renders the
   real models — compare `<id>-ours-real.png` against `<id>-dev.png`.
 * `ArrowButton` + `Led` are dashboard-BUILTIN element models (they live under
