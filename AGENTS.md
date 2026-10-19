@@ -60,6 +60,8 @@ app/tools/wheelpair.mjs         REAL-CRAFT root-pose check (the solo ritual's
 app/tools/subride.mjs         REAL-craft SUBGRID joint audit: every (subgrid, master) pair's
                                 captured joint line (on its panel? near its part? no phantom
                                 lever) + the exactness of the panel riding the part's gizmo motion
+app/tools/hinging.mjs         where each SUBGRID's joint-handle (ring/arrow) lands ON SCREEN vs its
+                                master part — a mirrored clamp line put the handle metres away
 app/tools/jointturn.mjs       one joint's ANGLE turn traced: a point on the joint line must not
                                 move, the panel centre must circle it at a constant radius
 tools/asset_space.py            SUPERSEDED collider-census (kept for provenance;
