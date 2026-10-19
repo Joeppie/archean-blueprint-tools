@@ -174,12 +174,14 @@ test.describe('mass & CoM + fidelity toggles', () => {
     expect(await comVisible()).toBe(false);
     await page.getByTestId('opt-com').check();
 
-    // hi-def rebuilds with the full game meshes and must still draw
-    await page.getByTestId('opt-hidef').check();
+    // FULL game meshes are the DEFAULT (v0.182 user rule); the row offers the
+    // decimated twins as the opt-in — toggling rebuilds and must still draw
+    expect(await page.getByTestId('opt-hidef').isChecked()).toBe(false);
+    await page.getByTestId('opt-hidef').check();         // → decimated twins
     await expect.poll(() => page.evaluate(() =>
       (window as unknown as { __ARCHEAN__?: { stats: () => { draws: number } } }).__ARCHEAN__!.stats().draws),
       { timeout: 20_000 }).toBeGreaterThan(0);
-    await page.getByTestId('opt-hidef').uncheck();
+    await page.getByTestId('opt-hidef').uncheck();       // → full game meshes
 
     const ws = page.getByTestId('wslink');
     await expect(ws).toHaveAttribute('href', new RegExp(`id=${ISW}$`));

@@ -196,7 +196,10 @@ export function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHu
       <Check testid="opt-labels" label="labels on interactive/aliased parts" checked={p.opts.labels} onChange={v => p.onOpt('labels', v)} />
       <Check testid="opt-real" label="real game models (off = low-poly)" checked={p.realModels} onChange={p.onRealModels} />
       <Check testid="opt-gizmo" label="gizmo on selection (Shift snaps)" checked={p.gizmoOn} onChange={p.onGizmo} />
-      <Check testid="opt-hidef" label="hi-def meshes (full game meshes)" checked={p.hiDef} onChange={p.onHiDef} />
+      {/* the FULL game meshes are the DEFAULT (v0.182 user rule) — the row
+          offers the decimated twins as the opt-in for weak GPUs */}
+      <Check testid="opt-hidef" label="decimated low-poly meshes (weak GPUs)" checked={!p.hiDef}
+        onChange={v => p.onHiDef(!v)} />
       <Check testid="opt-com" label="center-of-mass marker" checked={p.opts.com} onChange={v => p.onOpt('com', v)} />
       <Row label="hull opacity" min={0.1} max={1} step={0.05} value={p.hullOpacity}
         onInput={p.onHullOpacity}
@@ -499,6 +502,7 @@ function Inspector(p: Props) {
       </Sec>
       <Sec title="Component data">
         <DataRows comp={comp} compPath={['data', 'components', ci]} edits={edits} ctx={ctx} markDirty={markDirty}
+          liveEdit={() => engine?.liveDataEdit(Number(ci))}
           symJoint={(k, d) => engine?.propagateJoint(ci, k, d)} readOnly={readOnly} />
       </Sec>
       {!readOnly && <Sec title="Actions">
@@ -520,6 +524,9 @@ function Inspector(p: Props) {
 function DataRows(p: {
   comp: BlueprintComponent; compPath: (string | number)[];
   edits: EditApi; ctx: EditCtx | null; markDirty: () => void;
+  /** ci into data.components — every write re-renders the part's live model
+   *  (Engine.liveDataEdit): propeller soup, dashboard, joints, conditionals */
+  liveEdit?: () => void;
   symJoint?: (key: string, delta: number) => void; readOnly?: boolean;
 }) {
   const entries = Object.entries(p.comp.data ?? {});
@@ -533,7 +540,7 @@ function DataRows(p: {
       {entries.map(([k, v]) => {
         if (typeof v === 'boolean')
           return <Check key={k} testid={`data-${k}`} label={k} checked={v}
-            onChange={nv => { p.edits.dataField(p.ctx!, p.compPath, k, nv); p.markDirty(); }} />;
+            onChange={nv => { p.edits.dataField(p.ctx!, p.compPath, k, nv); p.markDirty(); p.liveEdit?.(); }} />;
         if (typeof v === 'number')
           return <Row key={k} label={k} min={Math.min(v - 10, -100)} max={Math.max(v + 10, 100)}
             step={0.1} value={v} disabled={p.readOnly}
@@ -543,14 +550,14 @@ function DataRows(p: {
                 const old = typeof p.comp.data?.[k] === 'number' ? (p.comp.data[k] as number) : 0;
                 p.symJoint(k, nv - old);
               }
-              p.edits.dataField(p.ctx!, p.compPath, k, nv); p.markDirty();
+              p.edits.dataField(p.ctx!, p.compPath, k, nv); p.markDirty(); p.liveEdit?.();
             }} />;
         if (typeof v === 'string' && v.length <= 80)
           return (
             <label key={k} className="flex items-center gap-2 py-[2px]">
               <span className="w-[74px] shrink-0 truncate font-mono text-[10px] text-ink-dim">{k}</span>
               <input type="text" defaultValue={v} data-testid={`data-${k}`}
-                onChange={e => { p.edits.dataField(p.ctx!, p.compPath, k, e.target.value); p.markDirty(); }}
+                onChange={e => { p.edits.dataField(p.ctx!, p.compPath, k, e.target.value); p.markDirty(); p.liveEdit?.(); }}
                 className="min-w-0 flex-1 rounded border border-white/10 bg-panel2 px-1 py-[1px] text-[11px] text-ink" />
             </label>
           );
@@ -625,6 +632,7 @@ function SubPanel(p: Props) {
                     const old = typeof mc.data?.['angle'] === 'number' ? (mc.data['angle'] as number) : 0;
                     if (e.top >= 0) engine?.propagateJoint(e.top, 'angle', v - old);   // twins move in UNISON (v0.176)
                     edits.dataField(ctx, path, 'angle', v); engine?.dataEdited(); markDirty();
+                    if (e.top >= 0) engine?.liveDataEdit(e.top);   // master's own joint node rides live
                   }} />
               )}
               {kinematic && typeof jd['pos'] === 'number' && path && ctx && (
@@ -634,6 +642,7 @@ function SubPanel(p: Props) {
                     const old = typeof mc.data?.['pos'] === 'number' ? (mc.data['pos'] as number) : 0;
                     if (e.top >= 0) engine?.propagateJoint(e.top, 'pos', v - old);
                     edits.dataField(ctx, path, 'pos', v); engine?.dataEdited(); markDirty();
+                    if (e.top >= 0) engine?.liveDataEdit(e.top);   // master's own slide node rides live
                   }} />
               )}
             </div>

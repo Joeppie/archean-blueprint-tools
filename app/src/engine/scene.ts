@@ -98,6 +98,40 @@ const DEG = Math.PI / 180;
 const STAND_IN_HEX = 0x88aaff;          // legacy colliderProxy stand-in tint
 const GOLD = 0xffc94d;                  // selection outline (legacy golden box)
 const Q_ID: FileQuat = { w: 1, x: 0, y: 0, z: 0 };
+
+/** a part's own .ini joint node + its captured BASE transform (the authored
+ *  chain), so the data-driven joint pose re-applies from base on every edit */
+interface JointPose {
+  node: Group;
+  /** .ini angular_x/y/z key → unit axis in the part's CONTENT frame */
+  axis?: 'x' | 'y' | 'z';
+  /** .ini linear_x/y/z key → slide direction */
+  slide?: 'x' | 'y' | 'z';
+  baseP: Vector3;
+  baseQ: Quaternion;
+}
+const AXIS_V: Record<'x' | 'y' | 'z', Vector3> = {
+  x: new Vector3(1, 0, 0), y: new Vector3(0, 1, 0), z: new Vector3(0, 0, 1),
+};
+
+/** joint-state pose (data.angle DEGREES / data.pos metres — the same fields
+ *  the panel/hinge UI write): ANGLE multiplies about the node origin (the
+ *  Aileron flap rule, generalised to every type whose manifest carries a
+ *  joints[0].axis), POS translates ALONG the .ini slide axis. Types without
+ *  the field (Lamp/SpotLight whose angle = the light aim) are skipped. */
+function applyJointPoses(jrefs: JointPose[], c: BlueprintComponent) {
+  const d = c.data ?? {};
+  const angle = typeof d['angle'] === 'number' ? (d['angle'] as number) : null;
+  const pos = typeof d['pos'] === 'number' ? (d['pos'] as number) : null;
+  for (const j of jrefs) {
+    j.node.position.copy(j.baseP);
+    j.node.quaternion.copy(j.baseQ);
+    if (angle !== null && j.axis)
+      j.node.quaternion.multiply(new Quaternion().setFromAxisAngle(AXIS_V[j.axis], angle * DEG));
+    if (pos !== null && j.slide)
+      j.node.position.addScaledVector(AXIS_V[j.slide], pos);
+  }
+}
 const qInv = (q: FileQuat): FileQuat => ({ w: q.w, x: -q.x, y: -q.y, z: -q.z });
 
 /** PERF.md's measured cliff: draw calls are what a GPU pays per frame, and
@@ -121,6 +155,9 @@ export class Engine {
   private root = new Group();
   /** placed components (stand-in group + real-model sibling), keyed by ci */
   private compRoots = new Map<number, Object3D[]>();
+  /** per-type LoadedModel of every real root currently in the scene — the
+   *  cache liveDataEdit rebuilds from (no async refetch mid-slider-drag) */
+  private liveGeo = new Map<string, LoadedModel>();
   /** writeback undo for the DISPLAY pose (junction/toggle; the RETIRED wheel
    *  droop was a third): file quat =
    *  mirror(qView · undo), undo = dispQ0⁻¹·viewQ0 captured at build — the
@@ -188,8 +225,12 @@ export class Engine {
   // ---------- mass & CoM ----------
   private cellMass = 1.5;
   private comMarker: Group | null = null;
-  /** hi-def: the FULL game meshes (prim.v) instead of the decimated twins */
-  private hiDef = localStorage.getItem('archean-app-hidef') === '1';
+  /** hi-def: the FULL game meshes (prim.v) instead of the decimated twins.
+   *  THE DEFAULT since the user's v0.182 call (2026-10-19): the app used to
+   *  default to the lv/li decimated twins, which read as "low poly" next to
+   *  the legacy viewer's full meshes — the low-poly twins are now the OPT-IN
+   *  (localStorage 'archean-app-hidef' = '0') for weak GPUs. */
+  private hiDef = localStorage.getItem('archean-app-hidef') !== '0';
   private symRotBases = new Map<number, Map<number, FileQuat>>();     // ci → twin display quat at edit start
 
   // ---------- selection ----------
@@ -274,6 +315,7 @@ export class Engine {
     this.scene.add(this.surgeGroup);
     const loop = () => {
       this.controls?.update();                    // damping fires change→invalidate
+      this.flushLiveEdits();                      // per-component geometry rebuilds (data sliders)
       this.stepFly();
       this.pulseSelection();
       this.stepSurges(performance.now());
@@ -523,6 +565,7 @@ export class Engine {
       if (!atlas) return;
       void atlas.geoFor(c.type).then(model => {
         if (seq !== this.loadSeq || !model || !g.parent) return;   // stale/load-swapped
+        this.liveGeo.set(c.type, model);
         const real = this.buildReal(c, model);
         real.position.copy(g.position);
         real.quaternion.copy(g.quaternion);
@@ -625,13 +668,21 @@ export class Engine {
         rg.add(m);
       }
     }
-    // aileron: the SAVED flap deflection, data.angle in DEGREES (.ini joint
-    // limits ±45° — a radian reading would exceed the physical joint)
-    const joint = nodes.get('joint');
-    if (joint && c.type === 'Aileron') {
-      const angle = c.data?.['angle'];
-      if (typeof angle === 'number') joint.rotateX(angle * DEG);
+    // JOINT-STATE pose on the part's OWN model (was: Aileron only): every
+    // .ini joint node rides its master's data — data.angle in DEGREES about
+    // the .ini angular axis, data.pos in metres along the linear axis. The
+    // node's BASE transform stays untouched (it's the authored chain); the
+    // pose multiplies on top (rotation about the node origin) so a data edit
+    // re-applies from the same base — the live path in applyJointPoses.
+    const jrefs: JointPose[] = [];
+    for (const j of info.joints) {
+      const node = nodes.get(j.name);
+      if (!node) continue;
+      jrefs.push({ node, axis: j.axis, slide: j.slide,
+        baseP: node.position.clone(), baseQ: node.quaternion.clone() });
     }
+    if (jrefs.length) applyJointPoses(jrefs, c);
+    if (jrefs.length) (root.userData as { jrefs?: JointPose[] }).jrefs = jrefs;
     // Beacon: the game's flashing red lens is procedural (the gltf carries no
     // lens material); a static emissive tip keeps the part readable.
     if (c.type === 'Beacon') this.addBeaconLenses(info, geo, nodes, root);
@@ -849,9 +900,11 @@ export class Engine {
           const seq = this.loadSeq;
           void this.atlasRef.geoFor(sc.type).then(model => {
             if (seq !== this.loadSeq || !model || !g.children.includes(m)) return;
+            this.liveGeo.set(sc.type, model);
             const real = this.buildReal(sc, model, true);
             real.position.copy(m.position);
             real.quaternion.copy(m.quaternion);
+            real.userData = { real: true, noRaycast: true };   // liveDataEdit pose-ride marker
             m.visible = false;
             g.add(real);
             this.invalidate();
@@ -1140,6 +1193,7 @@ export class Engine {
       const cur = typeof t.data?.[key] === 'number' ? (t.data[key] as number) : 0;
       t.data = { ...t.data, [key]: cur + delta };
       this.onDataEdit?.(j, key);
+      this.liveDataEdit(j);                       // the twin's own joint node rides too
     }
   }
   onDataEdit: ((ci: number, key: string) => void) | null = null;
@@ -1838,6 +1892,7 @@ export class Engine {
     mc.data = { ...mc.data, [key]: v };
     this.propagateJoint(h.ci, key, v - old);
     this.onDataEdit?.(h.ci, key);
+    this.liveDataEdit(h.ci);                             // master's own joint node rides live
     if (h.kind === 'slide') {                            // arrow rides the slide
       const s = h.jref.slide0;
       h.mesh.position.set(h.jref.pivot0[0] + s[0] * v + this.moff.x,
@@ -2008,8 +2063,79 @@ export class Engine {
     this.invalidate();
   }
 
-  /** data-field edits (the subgrid joint sliders land here via master parts) */
-  dataEdited() { this.syncSubJoints(); this.invalidate(); }
+  /** data-field edits (the subgrid joint sliders land here via master parts)
+   *  + the part's OWN joint pose re-applied on its live model (Aileron flap,
+   *  hinge/pivot hardware, LinearTrack slide — applyJointPoses) */
+  dataEdited() {
+    this.syncSubJoints();
+    for (const [ci] of this.liveEdits) this.applyLiveJointPose(ci);
+    this.invalidate();
+  }
+
+  // ---------- LIVE data edits (real-time component re-render) ----------
+  /** DATA-panel slider stream (pitch/twist/blades/radius/width on a
+   *  Propeller, dashboard size, angle/pos on a joint, reverse/mudguard/state
+   *  conditionals…): the panel writes bp.data VERBATIM then calls this; the
+   *  component's real model is REBUILT IN PLACE from the fresh data — the
+   *  same generated surfaces buildReal makes at load (propeller.ts soup,
+   *  buildDashboard, the drop-table conditionals), so the mesh follows the
+   *  slider every frame with NO full scene reload. One rebuild per frame per
+   *  component at most (the slider's input storm coalesces here). */
+  private liveEdits = new Map<number, Promise<void>>();
+
+  liveDataEdit(ci: number) {
+    if (!this.bp || this.heavy || !this.realModelsOn) return;
+    if (!this.compRoots.get(ci)?.some(o => (o.userData as { real?: boolean })?.real)) return;
+    const prev = this.liveEdits.get(ci) ?? Promise.resolve();
+    this.liveEdits.set(ci, prev.then(() => this.rebuildRealInPlace(ci)));
+  }
+
+  /** every JOINT-STATE field edit routes the part's own joint node here */
+  private applyLiveJointPose(ci: number) {
+    const c = this.bp?.data.components[ci];
+    if (!c) return;
+    for (const o of this.compRoots.get(ci) ?? []) {
+      const jrefs = (o.userData as { jrefs?: JointPose[] }).jrefs;
+      if (jrefs) applyJointPoses(jrefs, c);
+    }
+  }
+
+  private flushLiveEdits() {
+    if (!this.liveEdits.size) return;
+    const pend = [...this.liveEdits.keys()];
+    this.liveEdits.clear();
+    for (const ci of pend) void this.rebuildRealInPlace(ci);
+  }
+
+  /** dispose ONE component's real roots, rebuild from bp.data, re-attach at
+   *  the live pose (the stand-in stays retired), re-bind selection + gizmo */
+  private rebuildRealInPlace(ci: number) {
+    const c = this.bp?.data.components[ci];
+    const model = c ? this.liveGeo.get(c.type) : undefined;
+    if (!c || !model) return;
+    const roots = this.compRoots.get(ci);
+    if (!roots) return;
+    const old = roots.filter(o => (o.userData as { real?: boolean })?.real);
+    if (!old.length) return;
+    const pose = old[0]!;
+    for (const o of old) {
+      this.root.remove(o);
+      o.traverse(x => {
+        const m = x as Mesh;
+        if (m.isMesh) { m.geometry.dispose(); if (!this.shared.has(m.material)) (m.material as MeshStandardMaterial).dispose(); }
+      });
+      const k = roots.indexOf(o);
+      if (k >= 0) roots.splice(k, 1);
+    }
+    const real = this.buildReal(c, model, !!(pose.userData as { noRaycast?: boolean }));
+    real.position.copy(pose.position);
+    real.quaternion.copy(pose.quaternion);
+    real.userData = { kind: 'comp', ci, real: true };
+    this.root.add(real);
+    roots.push(real);
+    if (this.selCi === ci || this.hoverCi === ci) { this.scene.updateMatrixWorld(true); this.paintSelection(); this.syncGizmo(); }
+    this.invalidate();
+  }
 
   // ------------------------------------------------------------------ pick
 

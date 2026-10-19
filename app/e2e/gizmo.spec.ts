@@ -150,6 +150,10 @@ test.describe('gizmo writeback', () => {
 
   test('multi-grip RING drags keep spinning in unison: the ring plane follows the live pose, per-event poses stay continuous (v0.181 continuity backlog)', async ({ page }) => {
     desktopOnly();
+    // v0.182: with the full-game-mesh DEFAULT every ring step re-renders the
+    // hi-def ISW scene, so this evaluate-per-event sweep needs headroom
+    // beyond the 30 s base under the suite's 3-worker contention.
+    test.slow();
     await openCraft(page, ISW);
     await page.getByTestId('filter').fill('aileron');
     const row = page.locator('[data-idx]').first();

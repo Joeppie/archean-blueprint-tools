@@ -122,6 +122,23 @@ user's explicit say-so (Pages/release still serves it meanwhile).
   axis) and an arrow per slide master (data.pos in metres), Shift-snapped,
   twin-unison via propagateJoint. Pinned by app/e2e/hinge.spec.ts (real
   pointer drag on the dolphin fin + re-grip continuity + subgrid-only gating).
+- Mesh fidelity defaults (v0.182 user rule): the app renders the FULL game
+  meshes (atlas prim.v) by DEFAULT — the ⚙ row offers the decimated twins
+  (lv/li) as the opt-in for weak GPUs (localStorage archean-app-hidef '0').
+  The legacy default (decimated twins always) read as "low poly" next to the
+  old viewer's full meshes (user report 2026-10-19); heavy-craft LITE tier
+  (>800 comps, PERF.md) is unchanged.
+- LIVE data edits (v0.182): every inspector data-field write (number/bool/
+  string rows, subgrid joint sliders, canvas hinge handles) routes through
+  Engine.liveDataEdit(ci), which rebuilds that ONE component's real model
+  in place at most once per frame (propeller soup, dashboard, conditionals,
+  generated surfaces) + applyJointPoses rides the part's own .ini joint node
+  (data.angle DEGREES about the .ini angular axis, data.pos m along the
+  linear axis — generalized from Aileron-only to every joints[0].axis type;
+  angle-less types like Lamp aim untouched). NO full-scene reload, selection/
+  gizmo re-bind after the swap. Pinned by app/e2e/liveedit.spec.ts (panel-
+  routed Propeller twist + Aileron angle: liveDataEdit counter, reload
+  counter 0, real-model bbox follows the data).
 - Toolchain lives ONLY under `app/` (own npm project); repo-root `tools/`,
   `tests/` and the zero-build regtest stay as they are until cutover.
 - app/ obeys the same rules: no hardcoded machine paths (corpus resolves via

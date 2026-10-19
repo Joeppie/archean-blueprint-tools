@@ -34,7 +34,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   const [hullOpacity, setHullOpacityState] = useState(1);
   const [realModels, setRealModels] = useState(true);
   const [gizmoOn, setGizmoOn] = useState(() => localStorage.getItem('archean-app-gizmo') !== '0');
-  const [hiDef, setHiDefState] = useState(() => localStorage.getItem('archean-app-hidef') === '1');
+  const [hiDef, setHiDefState] = useState(() => localStorage.getItem('archean-app-hidef') !== '0');
   const [rev, setRev] = useState(0);
   const [blockSel, setBlockSel] = useState(-1);
   const [brush, setBrush] = useState<Brush>({ type: 0, sx: 0, sy: 0, sz: 0, slot: 4 });
