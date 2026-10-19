@@ -6,8 +6,9 @@ modes:
               pre-commit hook; fast, byte-accurate: reads the INDEX blobs)
   --tree      scan every tracked file in the working tree
   --history   scan every blob of every revision (forensic one-off)
-  --versions  verify the v0.xx release strings agree across
-              viewer/index.html + README.md + index.html (release ritual)
+  --versions  verify the vX.Y release strings agree across
+              viewer/index.html + README.md + index.html + app/index.html
+              (release ritual)
 
 FAIL (exit 1) = credential SHAPES, i.e. things that are secrets if real:
   private-key blocks, GitHub/AWS/Google/Slack/npm/PyPI/OpenAI tokens, JWTs,
@@ -125,12 +126,13 @@ def mode_history():
 
 
 VER_SPECS = {
-    'viewer/index.html': [r'Archean Blueprint Viewer v0\.(\d+)',
-                          r'v0\.(\d+)</small>', r'view3d\.js\?v=(\d+)',
-                          r'tests\.js\?v=(\d+)'],
-    'README.md': [r'# Archean Blueprint Tools · v0\.(\d+)', r'This is v0\.(\d+)'],
-    'index.html': [r'Archean Blueprint Tools v0\.(\d+)</title>',
-                   r'v0\.(\d+)</span>'],
+    'viewer/index.html': [r'Archean Blueprint Viewer v(\d+\.\d+)',
+                          r'v(\d+\.\d+)</small>', r'view3d\.js\?v=([\d.]+)',
+                          r'tests\.js\?v=([\d.]+)'],
+    'README.md': [r'# Archean Blueprint Tools · v(\d+\.\d+)', r'This is v(\d+\.\d+)'],
+    'index.html': [r'Archean Blueprint Tools v(\d+\.\d+)</title>',
+                   r'v(\d+\.\d+)</span>'],
+    'app/index.html': [r'Archean Blueprint Inspector v(\d+\.\d+)</title>'],
 }
 
 

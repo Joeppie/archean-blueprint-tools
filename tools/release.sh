@@ -7,19 +7,25 @@
 # The release scheme:
 #   main     = development. Every commit passes the pre-commit gate
 #              (selftest + regtest smoke pair). Pages does NOT serve main.
-#   release  = STABLE. GitHub Pages serves this branch (source: release / root).
+#   release  = STABLE. GitHub Pages serves the GENERATED `pages` branch
+#              (tools/deploy_pages.py builds it from release + app/dist).
 #              A release = an EXACT main commit that passed the COMPLETE suite
 #              (tests/run_tests.sh), fast-forwarded onto release and stamped with
-#              an annotated tag v0.NN. release is ff-only: hotfixes go through
-#              main like everything else — never rebase or cherry-pick release.
+#              an annotated tag vX.Y (v1.0 milestone since 2026-10-19; the
+#              v0.NN line preceded it). release is ff-only: hotfixes go
+#              through main like everything else — never rebase or
+#              cherry-pick release.
+#   pages    = GENERATED public site (since the v1.0 app deploy): a
+#              force-pushed snapshot of release + the built app/, published
+#              by tools/deploy_pages.py. Never edited by hand.
 #
 # Usage:  tools/release.sh          (version is read from the release strings)
-#         tools/release.sh v0.NN    (same, but asserts the strings say v0.NN)
+#         tools/release.sh vX.Y     (same, but asserts the strings say vX.Y)
 #
 # Refuses (exit 1, BEFORE running anything) when:
 #   - the tree is dirty, or HEAD is not main, or main is not pushed to origin
-#   - the context-anchored v0.NN strings disagree (security-scan --versions)
-#   - the tag v0.NN already exists on a DIFFERENT commit (bump the strings)
+#   - the context-anchored vX.Y strings disagree (security-scan --versions)
+#   - the tag vX.Y already exists on a DIFFERENT commit (bump the strings)
 #   - origin/release is not an ancestor of main (diverged — reconcile via main)
 # Then it runs the full suite; a FAIL aborts the release (release untouched).
 set -euo pipefail
@@ -33,10 +39,10 @@ BR=$(git symbolic-ref --short HEAD)
 [ "$BR" = main ] || die "run on main (you are on $BR)"
 [ -z "$(git status --porcelain)" ] || die "working tree is dirty — commit first"
 
-# the release strings (viewer title, README ×2, landing ×2) must all agree
+# the release strings (viewer title, README ×2, landing ×2, app title) must all agree
 python3 tools/security-scan.py --versions
-VER=$(grep -oPm1 '(?<=Archean Blueprint Viewer v0\.)\d+' viewer/index.html)
-TAG="v0.${VER}"
+VER=$(grep -oPm1 '(?<=Archean Blueprint Viewer v)\d+\.\d+' viewer/index.html)
+TAG="v${VER}"
 [ -z "${1:-}" ] || [ "$1" = "$TAG" ] || die "argument $1 disagrees with the release string $TAG"
 
 ss -ltn 2>/dev/null | grep -q ":8650 " && die "port 8650 busy — stop the dev server (pkill -f '[h]ttp.server 8650')"

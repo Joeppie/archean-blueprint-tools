@@ -258,11 +258,12 @@ FAIL. (2026-10-09 remediation: the user F5'd the dev server
 mid-session, saw a selftest FAIL under the SAME v0.160 label as the pushed
 release, and reasonably concluded the release was broken.)
 
-## Publishing (GitHub Pages — release-branch scheme)
-The live site is the repo root served by GitHub Pages:
-`https://joeppie.github.io/archean-blueprint-tools/viewer/index.html`.
-**Pages serves the `release` branch (source: release / root) = the STABLE
-line; `git push origin main` never moves the live site.**
+## Publishing (GitHub Pages — release-branch + generated `pages` scheme)
+The live site is `https://joeppie.github.io/archean-blueprint-tools/`
+(landing + `/viewer/index.html` legacy inspector + `/app/index.html` the
+React Inspector). **Pages serves the GENERATED `pages` branch (source:
+pages / root); `git push origin main` never moves the live site, and the
+`release` branch is the STABLE line the `pages` site is built from.**
 - `main` = development. Commits pass the pre-commit gate (selftest+regtest);
   Pages ignores main entirely — an in-progress main can never wear the stable
   build's clothes (branch-level fix of the 2026-10-09 "dev snapshot under the
@@ -270,17 +271,29 @@ line; `git push origin main` never moves the live site.**
 - `release` = stable, **ff-only**. A release is an EXACT main commit that
   passed the COMPLETE suite (`tests/run_tests.sh`: selftest + regtest +
   proxy + comp + ui + gizmo + position fixtures + renders), fast-forwarded
-  onto release and stamped with an annotated tag `v0.NN`. Hotfixes go through
+  onto release and stamped with an annotated tag `vX.Y` (the `v1.0` milestone
+  2026-10-19 replaced the old `v0.NN` line). Hotfixes go through
   main and re-release — release is never rebased or cherry-picked onto.
-- The ritual is **`tools/release.sh [v0.NN]`**: preflight (clean tree on main,
+- `pages` = the PUBLIC artifact, since the v1.0 app deploy: an orphan
+  snapshot of the release tree whose `app/` dir is replaced by the vite
+  build, FORCE-PUSHED by **`tools/deploy_pages.py`** (pure build inside a
+  detached worktree of origin/release with its own npm ci; the compiled
+  gallery catalog pins ARCHEAN_BLUEPRINTS to the repo testdata so a
+  machine-local Steam corpus can never leak into the public bundle). It is
+  NEVER hand-edited; its history is disposable; release is the truth.
+  The app's data routes are page-relative (`../testdata/…`,
+  `../viewer/models/…`; vite `base './'`), so the repo URL path is never
+  hardcoded.
+- The ritual is **`tools/release.sh [vX.Y]`**: preflight (clean tree on main,
   main pushed, release strings agree via `security-scan --versions`, tag free,
   origin/release an ancestor of main) → COMPLETE suite (a FAIL aborts — the
   release branch is never touched) → ff `release` to HEAD → annotated tag +
   push → best-effort GitHub Release with commit-range notes (needs an authed
-  gh CLI; absence only skips the notes page). Pages rebuilds on the release
-  push (the build is an Actions job: during GitHub Actions runner incidents it
-  typically queues "waiting for a hosted runner" — check githubstatus.com
-  before suspecting the push).
+  gh CLI; absence only skips the notes page). THEN the public site moves only
+  when **`tools/deploy_pages.py`** runs (builds the app from the release ref
+  and force-pushes `pages`; the Pages rebuild is an Actions job: during
+  GitHub Actions runner incidents it typically queues "waiting for a hosted
+  runner" — check githubstatus.com before suspecting the push).
 - **A new release requires the user's EXPLICIT say-so** (2026-10-17 rule).
   Never run `tools/release.sh` — or otherwise move/tag/push `release` — on
   your own initiative: finishing work, a green suite, a commit, or a push to
@@ -299,6 +312,10 @@ line; `git push origin main` never moves the live site.**
   is called `legacy` in the API — sending build_type "branch" 422s);
   verify with `gh api repos/Joeppie/archean-blueprint-tools/pages` (or the
   Settings → Pages page when the gh CLI is unavailable).
+  v1.0 (done 2026-10-19): source flipped to the GENERATED `pages` branch the
+  same way (`{"source":{"branch":"pages","path":"/"}}`). ROLLBACK of the app
+  deploy = flip it back to `release` (the pure-static site keeps working
+  either way; `pages` is rebuilt from release by `tools/deploy_pages.py`).
 (README viewer link is versioned; bump `v0.xx` in index.html title/header,
 landing page and README together when the viewer changes). v0.161 rule:
 **bump the version strings at SESSION START, not at release** — the dev

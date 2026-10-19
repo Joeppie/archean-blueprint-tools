@@ -1,4 +1,4 @@
-# Archean Blueprint Tools · v0.181
+# Archean Blueprint Tools · v1.0
 
 **Reverse-engineered file format + a zero-build browser viewer/inspector for
 workshop craft of [Archean](https://store.steampowered.com/app/2941660/Archean/)**
@@ -11,14 +11,22 @@ voxel blocks, hull-triangle meshes, fluid/power wiring, nested door subgrids.
 The format is undocumented; this repository reverse-engineers it (see
 [FORMAT.md](FORMAT.md)) and ships the tooling that grew out of that work.
 
-Everything is static — plain ES modules + Three.js from a CDN. No build step,
-no npm, no server-side code.
+Everything outside the React app in `app/` is static — plain ES modules +
+Three.js from a CDN. No build step, no npm, no server-side code (`app/` has
+its own npm project; see [app/README.md](app/README.md)).
 
 ## ▶ Live viewer
 
 **Overview + craft gallery: https://joeppie.github.io/archean-blueprint-tools/**
 
+**★ The Blueprint Inspector app (v1.0):
+https://joeppie.github.io/archean-blueprint-tools/app/index.html** —
+the React + TypeScript editor: craft gallery, full game meshes, live editing,
+byte-exact saves. This is the app `viewer/` is being ported to (see
+[REWRITE.md](REWRITE.md)).
+
 **https://joeppie.github.io/archean-blueprint-tools/viewer/index.html**
+(the legacy zero-build inspector — still maintained, frozen port reference).
 
 Loads the ISW-241 fighter by default. Click any component to edit position,
 rotation and data fields with live 3D feedback; *Open file…* (or drag-drop)
@@ -137,7 +145,7 @@ say-so**: green tests or merged work never imply one.
 
 ## Ideas welcome — open an issue!
 
-This is v0.181: the format is decoded and the viewer is useful, but the good
+This is v1.0: the format is decoded and the viewer is useful, but the good
 ideas are not all in yet. Feature requests, format questions, and craft that
 render wrong (attach the `blueprint.json`) are all best filed as
 [issues](https://github.com/Joeppie/archean-blueprint-tools/issues) — that is
