@@ -184,9 +184,12 @@ function repoFile(req: IncomingMessage, res: ServerResponse, rel: string, type: 
 function handler(req: IncomingMessage, res: ServerResponse, next: () => void) {
   const url = decodeURIComponent((req.url ?? '').split('?')[0]!);
   if (url === '/workshop.json') return repoFile(req, res, 'viewer/workshop.json', 'application/json');
-  if (url.startsWith('/models/')) {
-    // whitelisted shape: <Type>.json only, no traversal
-    const m = /^\/models\/([A-Za-z0-9_.-]+\.json)$/.exec(url);
+  if (url.startsWith('/models/') || url.startsWith('/atlas/')) {
+    // two aliases for the same files: browser content-blockers/ETP pattern
+    // rules keyed on "/models/" (the user's Firefox white-block session)
+    // can kill the SPA's XHR to one shape while navigation and other
+    // servers still work — the loader (models.ts) walks both aliases
+    const m = /^\/(?:models|atlas)\/([A-Za-z0-9_.-]+\.json)$/.exec(url);
     if (!m || m[1]!.includes('..')) { res.statusCode = 404; res.end('nope'); return; }
     return repoFile(req, res, `viewer/models/${m[1]}`, 'application/json');
   }

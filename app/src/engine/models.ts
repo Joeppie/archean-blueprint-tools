@@ -89,24 +89,44 @@ export interface ModelAtlas {
   geoFor(type: string): Promise<LoadedModel | null>;
 }
 
-const BASE = '/models';
+const BASES = ['/models', '/atlas'];   // alias shapes (blocker-pattern dodge,
+                                       // see vite-corpus.ts)
 
-/** types whose last fetch FAILED (network/HTTP). A poisoned browser cache
- *  entry (a cached 404/HTML error body for /models/*.json — the user's
- *  "white block, not a beacon" session, 2026-10-19) otherwise failed SILENT:
- *  the viewer quietly drew stand-in boxes and the model was just "missing".
- *  Failures now (a) retry once with a cache-busting query, (b) are NOT
- *  memoised as permanent nulls, and (c) surface through modelFailures() so
- *  the UI can say so. */
+/** types whose last fetch FAILED (network/HTTP). A poisoned cache entry or a
+ *  flaky client (the user's "white block, not a beacon" Firefox session,
+ *  2026-10-19) must never leave the viewer silently drawing stand-ins:
+ *  getJson walks every path alias × {fetch, fetch+cache-bust, XHR,
+ *  XHR+cache-bust}, failures are NEVER memoised, and the UI shows
+ *  '⚠ N game-model file(s) FAILED' via modelFailures() while retrying. */
 const failures = new Set<string>();
 export function modelFailures(): string[] { return [...failures]; }
 
-async function getJson(url: string, tag: string): Promise<unknown | null> {
-  for (const u of [url, `${url}?cb=${Date.now()}`]) {
+function xhrJson(url: string): Promise<unknown> {
+  return new Promise((resolve, reject) => {
     try {
-      const r = await fetch(u);
-      if (r.ok) { failures.delete(tag); return await r.json(); }
-    } catch { /* fall through to the cache-busted retry */ }
+      const x = new XMLHttpRequest();
+      x.open('GET', url, true);
+      x.onload = () => (x.status >= 200 && x.status < 300
+        ? resolve(JSON.parse(x.responseText)) : reject(new Error(`HTTP ${x.status}`)));
+      x.onerror = () => reject(new Error('xhr error'));
+      x.send();
+    } catch (e) { reject(e instanceof Error ? e : new Error(String(e))); }
+  });
+}
+
+async function getJson(paths: string[], tag: string): Promise<unknown | null> {
+  const tries: Array<() => Promise<unknown>> = [];
+  for (const p of paths) {
+    tries.push(() => fetch(p).then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))));
+    tries.push(() => fetch(`${p}?cb=${Date.now()}`).then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))));
+    tries.push(() => xhrJson(p));
+    tries.push(() => xhrJson(`${p}?cb=${Date.now()}`));
+  }
+  for (const t of tries) {
+    try {
+      const j = await t();
+      if (j) { failures.delete(tag); return j; }
+    } catch { /* next recovery step */ }
   }
   failures.add(tag);
   return null;
@@ -114,8 +134,13 @@ async function getJson(url: string, tag: string): Promise<unknown | null> {
 
 let manifestP: Promise<ModelManifest | null> | null = null;
 export function loadManifest(): Promise<ModelManifest | null> {
-  return manifestP ??= getJson(`${BASE}/manifest.json`, 'manifest')
-    .then(j => (j as ModelManifest | null));
+  // a FAILED manifest load is not cached: the next call retries the whole
+  // recovery chain (an earlier version memoised the null for the session,
+  // turning one snag into permanent stand-ins)
+  manifestP ??= getJson(BASES.map(b => `${b}/manifest.json`), 'manifest')
+    .then(j => j as ModelManifest | null)
+    .then(m => { if (!m) manifestP = null; return m; });
+  return manifestP;
 }
 
 export function openAtlas(): Promise<ModelAtlas | null> {
@@ -131,7 +156,7 @@ export function geoFor(type: string): Promise<LoadedModel | null> {
     cache.set(type, loadManifest().then(async m => {
       const info = m?.[type];
       if (!info) return null;
-      const j = await getJson(`${BASE}/${type}.json`, type);
+      const j = await getJson(BASES.map(b => `${b}/${type}.json`), type);
       if (!j) return null;
       return { geo: bakeGeo(j as ModelGeo), info };
     }).catch(() => null).then(r => { if (!r) cache.delete(type); return r; }));
