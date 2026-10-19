@@ -1040,66 +1040,66 @@ the seat must not steer or slow the wind (was: reclining the ISW seat shrank
 the un-normalized flow vector → wind "changed direction and speed", user).
 Pin `seatpitch=true`.
 
-## Per-asset gltf VERTEX SPACE — RESOLVED (2026-10-19; app/ implementation live)
+## Component VERTEX SPACE — the engine content basis C (final, 2026-10-19; XenonViewer-arbitrated)
 
-The Oct-6 note below this line chased a "per-asset loader convention" through
-gltf node rotations; that framing was wrong. The truth, established from the
-dev viewer's sources (`applyIniTransforms` + its `models/catalog.json`), the
-game's `.ini` colliders and a full-atlas census:
+Every component's glTF meshes are placed by ONE uniform map (no per-asset
+exception — the "per-asset" theory of the Oct-6/earlier-today notes was an
+artifact, see §Why the census fooled us):
 
-- **The `.ini` node tree (positions + ZYX eulers) is authored in the PART'S
-  FILE FRAME** — the same frame as `[ADAPTER]` and `[COLLIDER]` (colliders
-  ALSO carry `position`+`rotation` fields the extractor drops; apply them).
-- **XenonViewer transforms the node chain into the glTF basis with
-  C(x,y,z)=(x,z,−y)** (catalog `position`/`euler` are C-transformed — verified
-  against ActiveRadiator/SmallTurboPump/Bobblehead/PilotSeat/ToggleButton) and
-  renders the raw glTF meshes. Algebraically dev content ≡ the RAW .ini chain
-  applied to **Rx(+90)=(x,−z,y) baked** vertices, expressed in the C basis.
-  So in our (file-frame) renderer the dev-equivalent rule is:
-  **raw .ini chain + C⁻¹-baked vertices**.
-- **The game's own loader is per-asset** (Unity-style "Bake Axis Conversion"
-  chosen per import): the majority of assets arrive Z-up (Blender) and the
-  game bakes them; a minority already ship Y-up (their raw verts + raw chain
-  are exactly what the collider box fits — SmallWheel's torus, the Beacon's
-  mast, sensors, ToggleButton…). Applying the bake to the y-up minority flips
-  them upside-down (v0.143/v0.145's global-bake regression, user-confirmed).
-- **Classification is data, not folklore**: `tools/asset_space.py` builds each
-  type's node-tree cloud raw and Rx90-baked and scores both against the
-  properly transformed `.ini` collider boxes; strictly-better-baked (margin
-  0.15 m) → baked; ties/degenerate colliders stay RAW (pre-fix look).
-  The 32-type table lives in `app/src/engine/models.ts` (`UNITY_BAKED_TYPES`),
-  applied once per type in `bakeGeo()` at atlas load; `unityBake` = (x,−z,y).
-  RE-RUN the tool after game updates (same ritual as the conditional-parts
-  drop table).
-- **Pins (sign-sensitive, measured in world):** `app/src/engine/__tests__/
-  asset-space.test.ts` (bake algebra + table gates) and
-  `app/e2e/asset-space.spec.ts` (identity-orientation matrix fixtures: the
-  ActiveRadiator slab lies FLAT, the Aileron plate spans Z, the TrashCan lies
-  along Z, ToggleButton stays RAW). `gizmo.spec.ts` now picks the spin axis
-  PERPENDICULAR to the origin→pivot arm — the baked flat-plate aileron put
-  the arm exactly on ŷ and silently zeroed a hardcoded ŷ orbit (2026-10-19).
-- **The frozen legacy viewer is UNCHANGED** (still raw-chain, every type) —
-  its Oct-6 selftest numbers (aileron tip y≈−0.08, Beacon mast) were derived
-  against that space; Pages therefore shows the pre-fix vertex space for the
-  32 baked types until the user decides to port.
-- **v1 legacy files (no `data.colors`):** real-model prims arrive in Blender/gltf
-  author space (Unity = (gx,−gz,gy)) and occ boxes must draw from
-  `components[].occupancies`, NOT the type-255 mirrors (those sit on per-placement
-  build-time grids, 3–6 m off on the mosaic craft). Verified on 3334698274; the
-  implementation was reverted with v0.143 — re-land behind a pin.
-- **Beacon decode ambiguity:** unchanged — the ISW beacon's 180° quaternion
-  z-term stays ambiguous (cylinder mast); Beacon classifies RAW (tie default),
-  so the decode question and the vertex-space question never interact.
-  Needs an asymmetric probe craft before ANY decode change.
-- **Pins-first rule** stands: sign flips on axisymmetric parts pass existing
-  suites silently — measure against the collider box, not a viewer.
+    content = C · chain(.ini RENDERABLE/JOINT/TARGET: T(pos)·R_ZYX(euler)) · C⁻¹ · v_gltf
+    C (file → engine content frame) = (x, z, −y) = rotation Rx(−90)
 
-### superseded (Oct 6 notes, kept for provenance)
-- The `.ini` `[RENDERABLE]` rotation == the gltf node rotation — NOT true of
-  the shipped glTFs (current extraction: node rotations identity, node
-  translations = C-transformed absolute .ini chain + authoring offsets).
-- "y-up assets are recognized by non-identity node rotation" — superseded by
-  the collider census; the discriminator is the collider fit, not rotations.
+- **Ground truth = the XenonViewer's scene graph**, user-confirmed against the
+  game ("100% right in all its shows"), and verified mechanically: reading its
+  live scene (`window.__xv`) and inverting each component's own matrix gives
+  per-part content boxes that equal OURS only when ours is C-rotated (ISW
+  audit 2026-10-19: every discriminating type dev = C(ours)). Its published
+  catalog node tables are exactly C-transformed `.ini` chains (axle
+  (0,−0.12,0) → (0,0,0.12) etc.).
+- **app/ implementation**: `scene.ts buildReal` hangs the RAW .ini node chain
+  under a basis group `rotation.x = −π/2` (that's C), over atlas vertices
+  baked ONCE at load with `unityBake` = C⁻¹ = (x,−z,y) (`models.ts bakeGeo`,
+  full + `lv` prims). Special paths: the **data-generated propeller** soup is
+  authored Y-up like the dev's `propellerGeometry` → `unityBake(gen.v)` at
+  swap-in; the **Dashboard** builds board/elements in the shared frame with no
+  basis wrap, and its dataport glTF piece un-does the bake
+  (`m.rotation.x = −π/2`) to match the dev's raw-vert connector; the **Beacon
+  lens** rides the model's dominant-spread-axis tip (baked mast = +ẑ).
+- **Root quaternion conventions are UNCHANGED** (legacy raw / modern q*,
+  wheel droop, junction-flat, ToggleButton yaw-180 display rules): C is a
+  CONTENT-basis change below the root, orthogonal to the chirality layer
+  (FORMAT §Chirality, §Handedness).
+
+### Why the collider census fooled us (2026-10-19, lesson kept)
+The `[COLLIDER]` manifest boxes are authored in the **BAKED-FILE (Unity
+import) frame**: raw-chain + C⁻¹-baked verts fits them *axis-perfectly*, while
+the RENDERED content (one extra C above the whole chain) sits C-rotated from
+them. Fitting "raw vs baked" clouds against those boxes therefore classified
+assets into fake "z-up/y-up" families — a basis difference masquerading as
+per-asset data. `tools/asset_space.py` (the census) is kept for provenance but
+is SUPERSEDED; the collider is only an arbiter within one frame.
+Also kept from that era: extract_models DROPS the .ini collider
+`position`/`rotation` fields (min/max only) — beware any future collider work.
+
+### The solo-pair routine (the ritual that settled it — RE-RUN after game
+updates or loader changes)
+```
+python3 tools/make_solo_test.py              # one component per craft, ids
+                                             # 90000030NN, identity quat, corpus
+(cd app && node tools/solopair.mjs)          # each craft rendered in BOTH
+                                             # viewers at the dev iso; writes
+                                             # reports/solo/<Type>-{dev,app}.png
+                                             # + solo.json (per-viewer LOCAL
+                                             # content bbox via scene graphs)
+python3 tools/solo_verify.py                 # IoU of the silhouettes + local
+                                             # box axis check, per type
+```
+A component that disagrees with the dev viewer is a PER-TYPE exception to
+document HERE (never a code table) — as of the first full run all types share
+the uniform rule. Suspect set = whichever types the user flags; `--types A,B`
+runs a subset. Pins: vitest `asset-space.test.ts` (C/bake algebra), e2e
+`asset-space.spec.ts` (solo fixtures' world spans = the C·chain·C⁻¹ clouds),
+e2e `propeller.spec.ts` (basis-robust sorted spans).
 
 ## Subgrids (`Build` components) — attach semantics, fully decoded (v0.153; join decoded v0.154)
 

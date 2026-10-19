@@ -49,8 +49,11 @@ tools/make_landing.py         regenerates the landing gallery + viewer/workshop.
 tools/add_workshop.py <id>      ingest a locally-subscribed workshop craft
                                 (names: tools/ws-names.tsv, fetched slowly — Steam rate-limits)
 tools/extract_models.py         regenerates viewer/models/ from an installed game
-tools/asset_space.py            per-asset glTF VERTEX-SPACE census (collider-fit
-                                classification → app models.ts UNITY_BAKED_TYPES)
+tools/make_solo_test.py         SOLO component fixtures (1 type/craft, ids
+                                90000030NN) for the vertex-space pair ritual
+tools/solo_verify.py            scores reports/solo (IoU + local-box, dev vs app)
+tools/asset_space.py            SUPERSEDED collider-census (kept for provenance;
+                                its "per-asset vertex space" was a basis artifact)
 tools/security-scan.py          checkin gate: secret-shape scan (--staged/--tree/
                                 --history) + release-string sync (--versions)
 tools/release.sh                THE release ritual: full-suite gate → ff release
@@ -570,11 +573,12 @@ refuses to cut a tag when the strings disagree.
   in-game pixels, never a viewer's.
 - **v0.143/v0.145 were REVERTED** (user-confirmed regressions on Pages: beacon mast +
   aileron real models rotated wrong). v0.144 (IBL) was re-landed as the PMREM commit.
-  RESOLVED 2026-10-19 IN APP ONLY: the per-asset vertex-space bake re-landed with
-  collider-census classification + measured pins (FORMAT.md §Per-asset gltf VERTEX
-  SPACE; tools/asset_space.py; app models.ts UNITY_BAKED_TYPES). The LEGACY viewer
-  keeps its raw-chain look (its Oct-6 pin numbers were derived in that space);
-  porting the bake there needs the user's call + those pins re-derived.
+  RESOLVED 2026-10-19 IN APP ONLY, final form: the engine content basis C=(x,z,−y)
+  over C⁻¹-baked atlas verts (uniform, XenonViewer-arbitrated — FORMAT §Component
+  VERTEX SPACE; solo-pair routine tools/make_solo_test.py + app/tools/solopair.mjs +
+  tools/solo_verify.py). The LEGACY viewer still draws the old raw-chain look (its
+  Oct-6 pin numbers were derived there); porting C there needs the user's call +
+  those pins re-derived.
 - Beacon "point forward" display convention (user): parked — blocked on an asymmetric
   probe craft (180°-quaternion z-sign ambiguity, see FORMAT.md).
 
@@ -1047,19 +1051,17 @@ refuses to cut a tag when the strings disagree.
   'worked' — every suite bound to the invisible twin).
 
 ## Backlog
-- **Component sub-parts placed per-asset — RESOLVED IN APP (2026-10-19):**
-  the `.ini` node tree places in the part's FILE frame; the game bakes
-  Z-up glTF vertices as (gx,−gz,gy) for the MAJORITY of types and ships the
-  minority already Y-up (the collider box arbitrates — FORMAT §Per-asset gltf
-  VERTEX SPACE). `tools/asset_space.py` classifies, `app/src/engine/models.ts`
-  (`UNITY_BAKED_TYPES` + `bakeGeo`) applies the Rx(+90) bake at atlas load,
-  pinned by vitest `asset-space.test.ts` + e2e `asset-space.spec.ts` (world
-  spans on the identity-orientation matrix fixtures). STILL OPEN: the frozen
-  legacy viewer/Pages keeps the old raw-chain look for the 32 baked types
-  (port only with the user's call + the legacy pins re-derived); the Aileron
-  bake on ISW awaits the user's in-game eyeball (drop it from the table if
-  the game disagrees); the app still shows decimated (lv) twins by default —
-  the hi-def path is a later REWRITE phase.
+- **Component sub-parts placed on the engine content basis — RESOLVED IN APP
+  (2026-10-19, XenonViewer-arbitrated):** the dev viewer (user-confirmed = the
+  game) places EVERY component as C·chain·C⁻¹·v, C(file→content)=(x,z,−y) —
+  uniform, no per-asset table (the earlier collider "census" split was a basis
+  artifact: colliders live in the baked-FILE frame; FORMAT §Component VERTEX
+  SPACE). app implements it as basis group C + raw .ini chain + `unityBake`
+  (C⁻¹) atlas verts (scene.ts buildReal / models.ts bakeGeo); pinned by vitest
+  `asset-space.test.ts` + e2e `asset-space.spec.ts` (solo-fixture spans) + the
+  solo-pair ritual (make_solo_test.py → solopair.mjs → solo_verify.py, re-run
+  after game updates). STILL OPEN: legacy viewer/Pages keeps the old raw-chain
+  look (port needs the user's call + its Oct-6 pins re-derived).
 - **Propeller data-generated geometry: DONE 2026-10-19 (app).** The game
   client generates the prop surface from `data.blades/radius/width/twist/
   pitch` (dev `propellerGeometry` mirrors it); `app/src/engine/propeller.ts`

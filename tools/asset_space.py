@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
 """asset_space.py — classify each component model's glTF VERTEX SPACE.
 
+SUPERSEDED (2026-10-19, same day): the "per-asset vertex space" this tool
+derived is a BASIS ARTIFACT — the [COLLIDER] boxes live in the baked-FILE
+(Unity import) frame, so fitting raw-vs-baked clouds against them splits the
+atlas into fake families. The engine renders EVERY asset as C·chain·C⁻¹·v
+(FORMAT §Component VERTEX SPACE; verified per type by the solo-pair ritual
+tools/make_solo_test.py + app/tools/solopair.mjs + tools/solo_verify.py).
+Kept for provenance + its collider-transform logic (.ini position/rotation
+handling, which extract_models still drops) — do NOT feed its table to the app.
+
+Original framing below.
+
 Every glTF asset stores its mesh verts in one of two author spaces:
  * Z-UP   (Blender space): the game places them as (gx, -gz, gy)  -> the
    viewer must bake Rx(+90) = (x,-z,y) at load  ("unity-baked" types);

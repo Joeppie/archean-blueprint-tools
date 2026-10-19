@@ -1,18 +1,17 @@
-// asset-space.spec.ts — the REAL-model vertex space, measured end-to-end
-// (AGENTS §Known open issues: per-asset alignment must be pinned on WORLD
-// bboxes, sign-sensitive — the v0.145 lesson). The matrix fixtures stand the
-// parts at IDENTITY orientation, so the part frame IS the world frame and the
-// real-model bbox spans arbitrate directly against the .ini collider:
-//   ActiveRadiator  thin-Y slab (collider y 0.25):  baked z-span > y-span
-//                   (raw = the mirrored pair, part "standing on edge")
-//   Aileron         flat wing plate:               baked z-span thin (<0.5),
-//                   chord rides in Y               (raw = z-span 0.76, thin in Y)
-//   TrashCan        0.72 m long can lying along Z: baked z-span > y-span
-//                   (raw = can sticking UP out of its cell)
+// asset-space.spec.ts — the engine content basis measured END TO END
+// (FORMAT §Per-asset gltf VERTEX SPACE; XenonViewer = the arbiter). The solo
+// fixtures (tools/make_solo_test.py, one component at IDENTITY orientation)
+// put the part frame == the world frame, so the real-model bbox spans pin
+// the exact dev content map  C·chain·C⁻¹·v  (expected values computed from
+// the atlas + .ini in the C basis — the same clouds the dev viewer draws).
+// Sign-sensitive across ALL three historic configs (raw-file, per-asset
+// bake, C-basis): only the current one passes.
 import { expect, test, type Page } from '@playwright/test';
 
-const REST = '9000001001';       // ActiveRadiator, Aileron, AltitudeSensor
-const REST2 = '9000001034';      // ToggleButton, ToiletSeat, TrashCan
+const RAD = '9000003001';       // ActiveRadiator
+const AIL = '9000003002';       // Aileron
+const TRASH = '9000003102';     // TrashCan
+const TOGGLE = '9000003100';    // ToggleButton
 
 type Box = { min: [number, number, number]; max: [number, number, number] };
 type W = { __ARCHEAN__?: {
@@ -38,50 +37,46 @@ async function openPart(page: Page, id: string, type: string): Promise<number> {
   return ci;
 }
 
-test.describe('per-asset vertex space (world bboxes)', () => {
+test.describe('engine content basis C·chain·C⁻¹ (solo fixtures)', () => {
   const desktopOnly = () => test.skip(test.info().project.name !== 'chromium', 'desktop-only');
 
-  test('ActiveRadiator lies FLAT: Z-span exceeds Y-span (thin-Y collider)', async ({ page }) => {
+  test('ActiveRadiator: slab spans X·Y, thin Z (dev content, spans 0.99/0.99/0.38)', async ({ page }) => {
     desktopOnly();
-    const ci = await openPart(page, REST, 'ActiveRadiator');
+    const ci = await openPart(page, RAD, 'ActiveRadiator');
     const s = spans((await page.evaluate((ci) =>
       (window as unknown as W).__ARCHEAN__?.engine!.compRealBox(ci)!, ci)));
-    expect(s[0], `x-span ${s[0]}`).toBeGreaterThan(0.9);        // 1 m slab width
-    expect(s[2] - s[1], `z−y = ${(s[2] - s[1]).toFixed(3)} (raw: inverted)`)
-      .toBeGreaterThan(0.15);                                    // sign-sensitive
-    expect(s[1], `y-span ${s[1]} (standing fan = 0.99)`).toBeLessThan(0.9);
+    expect(s[0], `x ${s[0]}`).toBeGreaterThan(0.9);
+    expect(s[1], `y ${s[1]} (baked-file frame: 0.72 — slab tipped)`).toBeGreaterThan(0.9);
+    expect(s[2], `z ${s[2]} (raw-file frame: 0.72)`).toBeLessThan(0.55);
   });
 
-  test('Aileron is a flat plate in X·Y: Z-span thin, chord in Y', async ({ page }) => {
+  test('Aileron: wing plate spans X·Z, thin Y (dev content, spans 1.0/0.25/1.01)', async ({ page }) => {
     desktopOnly();
-    const ci = await openPart(page, REST, 'Aileron');
+    const ci = await openPart(page, AIL, 'Aileron');
     const s = spans((await page.evaluate((ci) =>
       (window as unknown as W).__ARCHEAN__?.engine!.compRealBox(ci)!, ci)));
-    expect(s[0], `x-span ${s[0]}`).toBeGreaterThan(0.9);
-    expect(s[2], `z-span ${s[2]} (raw: 0.76 upright)`).toBeLessThan(0.5);
-    expect(s[1], `y-span ${s[1]} (raw: 0.48)`).toBeGreaterThan(0.6);
+    expect(s[0], `x ${s[0]}`).toBeGreaterThan(0.9);
+    expect(s[1], `y ${s[1]} (raw: 0.48 / baked-file: 1.01)`).toBeLessThan(0.4);
+    expect(s[2], `z ${s[2]} (raw 0.76 / baked 0.48)`).toBeGreaterThan(0.9);
   });
 
-  test('TrashCan lies along Z (collider ±0.47·Z): does NOT stick up', async ({ page }) => {
+  test('TrashCan: drum along Y at identity mount (dev content, spans 0.5/0.72/0.5)', async ({ page }) => {
     desktopOnly();
-    const ci = await openPart(page, REST2, 'TrashCan');
+    const ci = await openPart(page, TRASH, 'TrashCan');
     const s = spans((await page.evaluate((ci) =>
       (window as unknown as W).__ARCHEAN__?.engine!.compRealBox(ci)!, ci)));
-    expect(s[2] - s[1], `z−y = ${(s[2] - s[1]).toFixed(3)} (raw: can upright)`).toBeGreaterThan(0.15);
+    expect(s[1], `y ${s[1]} (baked-file: 0.5 tipped)`).toBeGreaterThan(0.65);
+    expect(s[2], `z ${s[2]} (baked-file: 0.72)`).toBeLessThan(0.6);
   });
 
-  test('ToggleButton stays RAW (tie default): lever arm reaches z −0.46, y stays > −0.32',
-    async ({ page }) => {
-      desktopOnly();
-      const ci = await openPart(page, REST2, 'ToggleButton');
-      const r = await page.evaluate((ci) => {
-        const e = (window as unknown as W).__ARCHEAN__!.engine;
-        const b = e.compRealBox(ci)!, p = e.blueprint!.data.components[ci].position;
-        return { zmin: b.min[2] - p.z, ymin: b.min[1] - p.y };
-      }, ci);
-      // RAW cloud spans (0.25, 0.43, 0.63) with the display yaw-180 flipping
-      // the lever to −z; a BAKE would swap them to (0.25, 0.63, 0.43).
-      expect(r.zmin, `local z-min ${r.zmin} (baked: ≥ −0.24)`).toBeLessThan(-0.35);
-      expect(r.ymin, `local y-min ${r.ymin} (baked: −0.46)`).toBeGreaterThan(-0.32);
-    });
+  test('ToggleButton: lever stack thin X/Y, +0.37 along Z (dev content)', async ({ page }) => {
+    desktopOnly();
+    const ci = await openPart(page, TOGGLE, 'ToggleButton');
+    const s = spans((await page.evaluate((ci) =>
+      (window as unknown as W).__ARCHEAN__?.engine!.compRealBox(ci)!, ci)));
+    expect(s[0], `x ${s[0]}`).toBeLessThan(0.3);
+    expect(s[1], `y ${s[1]} (raw: 0.44)`).toBeLessThan(0.32);
+    expect(s[2], `z ${s[2]} (raw: 0.63)`).toBeGreaterThan(0.25);
+    expect(s[2], `z ${s[2]} (raw: 0.63)`).toBeLessThan(0.5);
+  });
 });

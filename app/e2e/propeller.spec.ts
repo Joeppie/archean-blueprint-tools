@@ -37,54 +37,41 @@ async function openProp(page: Page, id: string): Promise<number> {
 }
 
 const span = (b: Box, a: 0 | 1 | 2) => b.max[a] - b.min[a];
-const diag = (b: Box) => Math.hypot(span(b, 0), span(b, 1), span(b, 2));
 
 test.describe('generated propeller (matrix pair)', () => {
   const desktopOnly = () => test.skip(test.info().project.name !== 'chromium', 'desktop-only');
 
-  // The disc plane carries the .ini axle mount tilt (−90° x, −33.45° y), so
-  // per-axis WORLD spans understate r; the bbox DIAGONAL is mount-robust:
-  // a full disc of radius r spans 2r across the plane and 2r·cos α over the
-  // blade angles α — 4 blades hit cos = 1, 6 blades cos 30°.
-  //   data r = 1.2 → rest 4-blade diag ≈ 3.36, 6-blade ≈ 3.17
-  //   frozen gltf template (r = 0.88, same mount): rest ≈ 2.49
-  // So: rest diag > 2.9 proves GENERATION (template tops out at 2.49);
-  // deflected < rest proves the blade COUNT feeds the geometry — the static
-  // template is identical for both fixtures.
-  test('rest twin: generated r = 1.2 m disc, flat (hub-thick out-of-plane)', async ({ page }) => {
+  // Content basis C·chain·C⁻¹ (dev rule; FORMAT §Per-asset gltf VERTEX
+  // SPACE): basis-robust pins — the DISC diameter (2r = 2.4) must appear on
+  // the two larger world-span axes whatever the mount tilt/basis, the hub +
+  // tilt cone on the smallest. The frozen gltf template (r 0.88, same mount)
+  // tops out at 1.76 ⇒ mid/max spans > 2.2 prove GENERATION at r = 1.2.
+  test('rest twin: generated r = 1.2 m disc, flat (hub-thin smallest axis)', async ({ page }) => {
     desktopOnly();
     const ci = await openProp(page, REST);
     const b = (await box(page, ci))!;
-    const d = diag(b);
-    expect(d, `rest diag ${d.toFixed(3)} (template: 2.49)`).toBeGreaterThan(2.9);
-    expect(d, `rest diag ${d.toFixed(3)} (full disc 2√2r = 3.39)`).toBeLessThan(3.6);
-    // flat disc + tilt: the smallest axis span is the hub width (0.125) plus
-    // the tilt cone of the in-plane extents (≈ 0.83 for −33.45°/−90°)
-    const outOfPlane = Math.min(span(b, 0), span(b, 1), span(b, 2));
-    expect(outOfPlane, `min span ${outOfPlane.toFixed(3)}`).toBeLessThan(1.15);
-    expect(outOfPlane, `min span ${outOfPlane.toFixed(3)} (hub not lost)`).toBeGreaterThan(0.1);
+    const s = ([0, 1, 2] as const).map(a => span(b, a)).sort((x, y) => x - y);
+    expect(s[1], `mid span ${s[1].toFixed(3)} (template: 1.76)`).toBeGreaterThan(2.2);
+    expect(s[2], `max span ${s[2].toFixed(3)} (2r = 2.4 + chord)`).toBeGreaterThan(2.2);
+    expect(s[0], `min span ${s[0].toFixed(3)} (hub+tilt cone)`).toBeLessThan(1.4);
+    expect(s[0], `min span ${s[0].toFixed(3)} (hub not lost)`).toBeGreaterThan(0.1);
   });
 
   test('deflected twin: twist/pitch spread the surface OUT OF PLANE beyond the rest twin', async ({ page }) => {
     desktopOnly();
-    // (measured 2026-10-19) rest r1.2 4-blade flat: spans (2.34, 2.40, 1.00);
-    // deflected 6-blade twist 10 pitch 0.5: (2.69, 2.40, 2.00). The blade
-    // RADIUS holds (mount-vertical span = 2r = 2.4 on both), and the helix
-    // (pitch/twist) nearly DOUBLES the out-of-plane extent. (The original
-    // 2026-10-19-WIP assertion expected the disc DIAGONAL to SHRINK with
-    // blade count — wrong: both discs bbox 2r×2r in plane, the twist effect
-    // dominates the diagonal and grows it.)
+    // sorted spans: radius holds on the two disc axes; the smallest axis
+    // (disc normal) GROWS with pitch/twist. (The original 2026-10-19-WIP
+    // assertion expected the diagonal to SHRINK with blade count — wrong:
+    // both discs bbox 2r×2r in plane; the helix dominates and grows it.)
     const ciR = await openProp(page, REST);
     const bR = (await box(page, ciR))!;
     const ciD = await openProp(page, DEFLECT);      // goto re-mounts the viewport
     const bD = (await box(page, ciD))!;
-    const span = (b: Box, a: 0 | 1 | 2) => b.max[a] - b.min[a];
-    expect(span(bR, 1), 'rest mount-vertical extent = 2r').toBeGreaterThan(2.3);
-    expect(span(bD, 1), 'deflected mount-vertical extent = 2r').toBeGreaterThan(2.3);
-    expect(span(bD, 1), 'blade radius identical across the twins').toBeCloseTo(span(bR, 1), 1);
-    const oopR = Math.min(...([0, 1, 2] as const).map(a => span(bR, a)));
-    const oopD = Math.min(...([0, 1, 2] as const).map(a => span(bD, a)));
-    expect(oopD - oopR, `out-of-plane spread grew ${(oopD - oopR).toFixed(2)} m (twist/pitch → data drives geometry)`)
+    const sortSpans = (b: Box) => ([0, 1, 2] as const).map(a => span(b, a)).sort((x, y) => x - y);
+    const sR = sortSpans(bR), sD = sortSpans(bD);
+    expect(sD[2], 'deflected keeps the disc diameter').toBeGreaterThan(2.2);
+    expect(sD[2], 'deflected disc diameter ≈ rest').toBeLessThan(sR[2] + 0.6);
+    expect(sD[0] - sR[0], `out-of-plane spread grew ${(sD[0] - sR[0]).toFixed(2)} m (twist/pitch → data drives geometry)`)
       .toBeGreaterThan(0.5);
   });
 });

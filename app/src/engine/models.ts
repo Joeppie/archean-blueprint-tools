@@ -111,39 +111,21 @@ export function geoFor(type: string): Promise<LoadedModel | null> {
       const info = m?.[type];
       if (!info) return null;
       const r = await fetch(`${BASE}/${type}.json`).catch(() => null);
-      return r && r.ok ? { geo: bakeGeo(type, await r.json() as ModelGeo), info } : null;
+      return r && r.ok ? { geo: bakeGeo(await r.json() as ModelGeo), info } : null;
     }).catch(() => null));
   }
   return cache.get(type)!;
 }
 
-// ---------- per-asset VERTEX SPACE (tools/asset_space.py, 2026-10-19) ----------
-// The game's glTF loader bakes the Blender/Z-up author space into the Unity
-// part frame as (gx, -gz, gy) for MOST assets (its import setting "Bake Axis
-// Conversion"); a minority ship already Y-up (Blender zero-rot exports whose
-// .ini colliders only fit the raw verts). XenonViewer places every asset
-// under a C=(x,z,-y)-transformed .ini node chain; the file-frame equivalent
-// for the baked majority is: bake (x,-z,y) = Rx(+90) into the vertices and
-// keep the RAW .ini chain (algebra: C·chain·C⁻¹·v = chain·(C⁻¹·v)).
-// UNITY_BAKED_TYPES = the majority, classified offline against each part's
-// [COLLIDER] box in its .ini (position+euler applied): strictly-better fit
-// by >= 0.15 m summed; ties default RAW (the pre-fix look) so symmetric
-// parts (wheels, Beacon) never flip silently — v0.145's GLOBAL bake flipped
-// the y-up assets and was reverted (AGENTS §Known open issues). RE-RUN
-// `python3 tools/asset_space.py` after game updates (same ritual as
-// DROP_TABLE) and keep FORMAT.md §Per-asset gltf loader conventions in sync.
+// ---------- glTF → engine content basis (FORMAT §Per-asset gltf VERTEX SPACE)
+// The engine imports EVERY glTF mesh with the Blender axis bake C⁻¹ =
+// (x,−z,y); scene.ts wraps the .ini node tree under C = (x,z,−y), so the
+// content renders as C·chain·C⁻¹·v — XenonViewer's rule verbatim (its catalog
+// node tables are exactly C·[RENDERABLE]·C⁻¹ over raw glTF verts). Applied
+// once per type at atlas load; also the space the DATA-GENERATED surfaces
+// (propeller.ts soup, via unityBake at swap-in) must speak.
 
-export const UNITY_BAKED_TYPES: ReadonlySet<string> = new Set([
-  'ActiveRadiator', 'Aileron', 'ChemicalFurnace', 'ChemicalReactor', 'Computer',
-  'Crafter', 'Dashboard', 'DataJunction', 'DockableDoor', 'EnrichmentCentrifuge',
-  'GeothermalExchanger', 'GroundAnchor', 'HighVoltageJunction', 'Lamp',
-  'LowVoltageJunction', 'LowVoltageRelay', 'MiniComputer', 'MiniRouter',
-  'OreScanner', 'OwnerPad', 'PassiveRadiator', 'PilotSeat', 'RTG', 'Router',
-  'SabatierReactor', 'SmallHinge', 'SmallTurboPump', 'SolarPanel', 'Step',
-  'TerrainScanner', 'TrashCan', 'Volume',
-]);
-
-/** Rx(+90): Blender/glTF Z-up author space -> the game's Y-up part frame */
+/** C⁻¹: Blender/glTF author space -> engine content space, (x,−z,y) */
 export function unityBake(v: number[]): number[] {
   const out = new Array<number>(v.length);
   for (let i = 0; i < v.length; i += 3) {
@@ -152,9 +134,8 @@ export function unityBake(v: number[]): number[] {
   return out;
 }
 
-/** per-type vertex-space fix applied to the atlas JSON once at load */
-function bakeGeo(type: string, geo: ModelGeo): ModelGeo {
-  if (!UNITY_BAKED_TYPES.has(type)) return geo;
+/** bake every prim (full + decimated twin) of an atlas JSON at load */
+function bakeGeo(geo: ModelGeo): ModelGeo {
   const out: Record<string, NodeGeo> = {};
   for (const [name, nd] of Object.entries(geo))
     out[name] = { ...nd, prims: nd.prims.map(p => ({
