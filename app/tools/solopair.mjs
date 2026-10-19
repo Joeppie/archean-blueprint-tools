@@ -107,6 +107,10 @@ async function devShot(f) {
     if (await row.count() && await row.evaluate(r => r.classList.contains('on'))) await row.click();
   }
   await page.waitForTimeout(1000);
+  // the dev's canvas is full-viewport with HTML overlays floating on it —
+  // hide the chrome for the shot (after the iso/option clicks need it)
+  await page.addStyleTag({ content: '#app-chrome, #atelier { display: none !important }' });
+  await page.waitForTimeout(300);
   const clip = await canvasClip();
   await page.screenshot({ path: resolve(OUT, `${f.type}-dev.png`), clip: clip ?? undefined });
   return page.evaluate(() => {
@@ -140,9 +144,12 @@ async function appShot(f) {
   await page.evaluate((dir) => {
     const e = window.__ARCHEAN__.engine;
     // silhouette hygiene (mirrors devscrape on the legacy viewer): grid,
-    // ground plane, selection glow/gizmo all out
+    // ground plane, analysis overlays (CoM marker, mirror sheet), selection
+    // glow/gizmo all out
     for (const c of e.scene.children) if (c.type === 'GridHelper') c.visible = false;
-    for (const o of e.root.children) if (o.userData?.kind === 'ground') o.visible = false;
+    e.scene.traverse(o => { if (o.userData?.kind === 'ground') o.visible = false; });
+    e.setOption('com', false);
+    e.setOption('mirror', false);
     if (e.select) e.select(-1);
     const t = e.controls.target.clone();
     const dist = e.camera.position.distanceTo(t);

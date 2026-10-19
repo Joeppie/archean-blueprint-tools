@@ -38,6 +38,51 @@ def open_mask(mask, k=5):
     return np.asarray(im) > 127
 
 
+def lcc(mask):
+    """largest 8-connected component (matrix_iou technique): vignette edges,
+    gradient bands and ground wedges are edge junk, the part is one blob."""
+    small = mask[::2, ::2]
+    H, W = small.shape
+    seen = np.zeros_like(small)
+    best, best_n = None, 0
+    for sy in range(H):
+        for sx in range(W):
+            if not small[sy, sx] or seen[sy, sx]:
+                continue
+            stack, comp = [(sy, sx)], 0
+            seen[sy, sx] = True
+            while stack:
+                y, x = stack.pop()
+                comp += 1
+                for dy in (-1, 0, 1):
+                    for dx in (-1, 0, 1):
+                        ny, nx = y + dy, x + dx
+                        if 0 <= ny < H and 0 <= nx < W and small[ny, nx] and not seen[ny, nx]:
+                            seen[ny, nx] = True
+                            stack.append((ny, nx))
+            if comp > best_n:
+                # re-collect the winner's pixels (cheap: mark during DFS instead)
+                best_n = comp
+                best_mask = np.zeros_like(small)
+                # re-run fill from (sy,sx) capturing pixels
+                seen2 = np.zeros_like(small)
+                stack = [(sy, sx)]
+                seen2[sy, sx] = True
+                while stack:
+                    y, x = stack.pop()
+                    best_mask[y, x] = True
+                    for dy in (-1, 0, 1):
+                        for dx in (-1, 0, 1):
+                            ny, nx = y + dy, x + dx
+                            if 0 <= ny < H and 0 <= nx < W and small[ny, nx] and not seen2[ny, nx]:
+                                seen2[ny, nx] = True
+                                stack.append((ny, nx))
+    if best_n == 0:
+        return mask
+    out = np.repeat(np.repeat(best_mask, 2, 0), 2, 1)[:mask.shape[0], :mask.shape[1]]
+    return out & mask
+
+
 def norm_mask(m, size=(160, 120)):
     ys, xs = np.where(m)
     if len(ys) == 0:
@@ -60,8 +105,8 @@ def main():
                    os.path.join(args.dir, f'{T}-app.png'))
         iou = None
         if os.path.exists(dp) and os.path.exists(ap_):
-            dm = norm_mask(open_mask(foreground(np.asarray(Image.open(dp).convert('RGB')), CROP_DEV)))
-            am = norm_mask(open_mask(foreground(np.asarray(Image.open(ap_).convert('RGB')), CROP_APP)))
+            dm = norm_mask(lcc(open_mask(foreground(np.asarray(Image.open(dp).convert('RGB')), CROP_DEV))))
+            am = norm_mask(lcc(open_mask(foreground(np.asarray(Image.open(ap_).convert('RGB')), CROP_APP))))
             if dm is not None and am is not None and (dm.any() and am.any()):
                 iou = round(float((dm & am).sum() / (dm | am).sum()), 3)
         box_ok = None
