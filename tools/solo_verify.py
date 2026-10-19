@@ -2,9 +2,12 @@
 """solo_verify.py — score the solo-pair renders (app/tools/solopair.mjs).
 
 For every reports/solo/<Type>-{dev,app}.png pair: matrix_iou-style foreground
-mask (per-row modal bg), crop out each viewer's panels, bbox-normalise, IoU.
+mask (per-row modal bg) + largest-component screen, bbox-normalise, IoU.
 Plus the numeric check from solo.json: the per-type LOCAL bbox SPANS of the
 two viewers must agree (axis signature) — a C-basis regression swaps y/z.
+THE BOX CHECK IS THE VERDICT (scene-graph measured, colour-free); IoU is the
+queue — pale parts merge into the dev sky mask and horizon bands hijack the
+component pick (same 'queue not verdict' caveat as matrix_iou).
 
   python3 tools/solo_verify.py [--dir reports/solo] [--review 0.62]
 """

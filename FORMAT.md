@@ -1096,9 +1096,17 @@ python3 tools/solo_verify.py                 # IoU of the silhouettes + local
 ```
 A component that disagrees with the dev viewer is a PER-TYPE exception to
 document HERE (never a code table) — as of the first full run all types share
-the uniform rule. Suspect set = whichever types the user flags; `--types A,B`
-runs a subset. Pins: vitest `asset-space.test.ts` (C/bake algebra), e2e
-`asset-space.spec.ts` (solo fixtures' world spans = the C·chain·C⁻¹ clouds),
+the uniform rule. FIRST FULL VERDICT (2026-10-19, 106 types): LOCAL-BOX
+MATCH 104/104 (ArrowButton/Led have no dev-side glTF content to measure) —
+every component's content bbox, measured from each viewer's OWN scene graph
+and inverse-transformed by its component matrix, agrees to <0.12 m. 74/106
+silhouette IoUs ≥0.62; the 32 lower ones ALL carry the box match — the IoU
+screen is colour-sensitive exactly like matrix_iou's ("a queue, not a
+verdict"): pale parts merge into the dev sky mask, horizon bands hijack the
+largest-component pick, thin parts are framing-sensitive. Suspect set = whichever
+types the user flags; `--types Aileron,SolarPanel` runs a subset. Pins: vitest
+`asset-space.test.ts` (C/bake algebra), e2e
+`asset-space.spec.ts` (solo-fixture spans = the C·chain·C⁻¹ clouds),
 e2e `propeller.spec.ts` (basis-robust sorted spans).
 
 ## Subgrids (`Build` components) — attach semantics, fully decoded (v0.153; join decoded v0.154)
