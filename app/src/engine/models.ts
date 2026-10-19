@@ -89,8 +89,12 @@ export interface ModelAtlas {
   geoFor(type: string): Promise<LoadedModel | null>;
 }
 
-const BASES = ['/models', '/atlas'];   // alias shapes (blocker-pattern dodge,
-                                       // see vite-corpus.ts)
+const BASES = ['/models', '/atlas',     // dev/preview plugin aliases (the
+                                           // blocker-pattern dodge — see
+                                           // vite-corpus.ts)
+               '../viewer/models'];      // STATIC Pages layout: the app lives
+                                         // in app/, the model tree one level
+                                         // up (tools/deploy_pages.py)
 
 /** types whose last fetch FAILED (network/HTTP). A poisoned cache entry or a
  *  flaky client (the user's "white block, not a beacon" Firefox session,

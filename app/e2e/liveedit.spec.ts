@@ -107,7 +107,7 @@ test.describe('live data edits re-render the part (no reload) @live', () => {
       roots.forEach((r: any, ri: number) => {
         r.traverse((o: any) => {
           const mw = o.matrixWorld.elements;
-          if (!mw.every(Number.isFinite)) out.push(`MW-NaN r${ri} ${o.type} ${o.name || ''} mw=${mw.map(x => +x.toFixed(2))}`);
+          if (!mw.every(Number.isFinite)) out.push(`MW-NaN r${ri} ${o.type} ${o.name || ''} mw=${mw.map((x: number) => +x.toFixed(2))}`);
           const g = o.geometry as any;
           if (g) { g.computeBoundingBox?.(); if (!Number.isFinite(g.boundingBox?.min?.x ?? 0)) out.push(`GEO-NaN r${ri} ${o.type} v=${g.attributes?.position?.count}`); }
         });

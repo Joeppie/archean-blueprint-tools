@@ -43,13 +43,18 @@ describe('compiled gallery catalog', () => {
       expect(g.name).toMatch(/\D/);            // no numeric-only names
     }
   });
-  it('serves previews through /corpus (fixture floor included)', () => {
+  it('serves previews through Pages-relative routes (fixture floor included)', () => {
+    // '../testdata/<id>/…' resolves at the repo/Pages root from BOTH the
+    // dev '/' page and the deployed '/…/app/' page; a corpus-only preview
+    // falls back to 'corpus/<id>/…' (dev plugin route).
     const withPrev = G.filter(g => g.preview);
     expect(withPrev.length).toBeGreaterThanOrEqual(40);
     for (const g of withPrev.slice(0, 8)) {
-      expect(g.preview).toBe(`/corpus/${g.id}/preview.jpg`);
-      // the /corpus handler resolves files through craftFile's PER-FILE
-      // fixture floor, so a testdata-only preview IS reachable
+      const inTest = existsSync(craftFile(g.id, 'preview.jpg'))
+        && existsSync(new URL(`../../../../testdata/${g.id}/preview.jpg`, import.meta.url).pathname);
+      expect(g.preview, g.id).toBe(inTest ? `../testdata/${g.id}/preview.jpg` : `corpus/${g.id}/preview.jpg`);
+      // the /corpus + /testdata handlers resolve files through craftFile's
+      // PER-FILE fixture floor, so a testdata-only preview IS reachable
       expect(existsSync(craftFile(g.id, 'preview.jpg')), g.id).toBe(true);
     }
   });

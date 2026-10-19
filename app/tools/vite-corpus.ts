@@ -154,10 +154,17 @@ export function galleryData(): GalleryEntry[] {
     const name = ws[id]?.name?.trim() || CURATED[id] || tsv.get(id) || aliasOf(path.join(dir, 'blueprint.json'));
     if (!name || NUMERIC_NAME.test(name)) continue;
     // previews live beside the blueprint in EITHER root (Steam saves carry
-    // none; testdata ships 56 of them)
-    const prev = [dir, path.join(REPO, 'testdata', id)]
-      .find(d => fs.existsSync(path.join(d, 'preview.jpg')));
-    out.push({ id, name, author: ws[id]?.author, preview: prev ? `/corpus/${id}/preview.jpg` : null });
+    // none; testdata ships 56 of them). URL scheme (Pages-compatible, the
+    // app is served from app/): a testdata copy -> '../testdata/<id>/…'
+    // (resolves at the repo/Pages root from BOTH the dev '/' page and the
+    // deployed '/…/app/' page; the plugin also serves /testdata/ in dev);
+    // a corpus-only preview -> 'corpus/<id>/…' (dev-only — the Pages build
+    // pins the corpus to testdata, so it never carries corpus-only files).
+    const prevTest = fs.existsSync(path.join(REPO, 'testdata', id, 'preview.jpg'));
+    const prevCorpus = !prevTest && fs.existsSync(path.join(dir, 'preview.jpg'));
+    out.push({ id, name, author: ws[id]?.author,
+      preview: prevTest ? `../testdata/${id}/preview.jpg`
+        : prevCorpus ? `corpus/${id}/preview.jpg` : null });
   }
   return out;
 }
@@ -204,7 +211,24 @@ function handler(req: IncomingMessage, res: ServerResponse, next: () => void) {
     if (!m || m[1]!.includes('..')) { res.statusCode = 404; res.end('nope'); return; }
     return repoFile(req, res, `viewer/models/${m[1]}`, 'application/json');
   }
-  if (!url.startsWith('/corpus')) return next();
+  if (!url.startsWith('/corpus')) {
+    // /testdata/<id>/<file>: the STATIC Pages layout served in dev/preview
+    // too, so the catalog's '../testdata/…' preview + blueprint routes hit
+    // the same files in every environment
+    if (url.startsWith('/testdata/')) {
+      const mt = /^\/testdata\/(\d{6,})\/(.+)$/.exec(url);
+      const root0 = mt ? path.join(REPO, 'testdata', mt[1]!) : '';
+      const f = mt && root0 ? path.resolve(root0, mt[2]!) : '';
+      if (!f || !root0 || !f.startsWith(root0 + path.sep) || !fs.existsSync(f)) {
+        res.statusCode = 404; res.end('not found'); return;
+      }
+      sendFile(req, res, f, f.endsWith('.json') ? 'application/json'
+        : f.endsWith('.jpg') ? 'image/jpeg' : 'application/octet-stream',
+      f.endsWith('.jpg') ? 3600 : 0);
+      return;
+    }
+    return next();
+  }
   const rel = url.replace(/^\/corpus\/?/, '');
   if (rel === '') {                                   // listing (same union as the catalog)
     res.statusCode = 200;

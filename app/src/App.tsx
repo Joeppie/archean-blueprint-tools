@@ -29,7 +29,10 @@ export default function App() {
   const [newSeq, setNewSeq] = useState(0);
   const [isNew, setIsNew] = useState(false);
   const navigate = (to: string | null) => {
-    history.pushState({}, '', to ? `/?craft=${to}` : '/');
+    // RELATIVE query-only pushState: absolute '/' would eject the SPA from
+    // its Pages subdirectory (/archean-blueprint-tools/app/) and break the
+    // ../testdata + ../viewer asset routes on reload.
+    history.pushState({}, '', to ? `?craft=${to}` : location.pathname);
     setParams(new URLSearchParams(to ? { craft: to } : {}));
     setIsNew(false);
   };

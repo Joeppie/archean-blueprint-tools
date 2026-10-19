@@ -56,7 +56,9 @@ test('progress overlay streams while a slow blueprint downloads', async ({ page 
 
 test('failed first download → overlay error state, Retry recovers', async ({ page }) => {
   let fail = true;
-  await page.route(`**/corpus/${ISW}/blueprint.json`, route =>
+  // block BOTH candidate routes (loadCraft tries /corpus/ then the static
+  // ../testdata/ Pages layout) — the error state needs every route dead
+  await page.route(`**/${ISW}/blueprint.json`, route =>
     fail ? route.fulfill({ status: 404, body: 'gone' }) : route.continue());
   await page.goto(`/?craft=${ISW}`);
   const overlay = page.getByTestId('load-overlay');
