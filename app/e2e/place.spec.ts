@@ -24,7 +24,7 @@ async function setDrawer(page: Page, want: boolean) {
   if (want) await expect(aside).toBeVisible();
 }
 
-test.describe('KSP modes & catalog placement', () => {
+test.describe('KSP modes & catalog placement @place', () => {
   test('mode tiles: blocks / wire / flight / edit each show their workspace', async ({ page }) => {
     await page.goto(`/?craft=${ISW}`);
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });

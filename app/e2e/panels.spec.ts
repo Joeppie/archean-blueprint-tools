@@ -37,7 +37,7 @@ const subQuat = (page: Page, bi: number) => page.evaluate(b => {
 }, bi);
 
 // view options default open on desktop; the drawer test covers mobile
-test.describe('desktop panels', () => {
+test.describe('desktop panels @ui', () => {
   const desktopOnly = () => test.skip(test.info().project.name !== 'chromium', 'desktop-only');
 
   test('view options: hull/wire exclusive, keyboard g/o/h drive the checkboxes', async ({ page }) => {
@@ -155,7 +155,7 @@ test.describe('desktop panels', () => {
   });
 });
 
-test.describe('mass & CoM + fidelity toggles', () => {
+test.describe('mass & CoM + fidelity toggles @ui', () => {
   const desktopOnly = () => test.skip(test.info().project.name !== 'chromium', 'desktop-only');
 
   test('mass readout, CoM marker toggle, hi-def rebuild, workshop link', async ({ page }) => {
@@ -206,7 +206,7 @@ test('mobile: the panels are a drawer behind the ⚙ toggle', async ({ page }) =
   await expect(page.getByTestId('opt-hull')).toBeVisible();
 });
 
-test.describe('modes, new craft, file menu', () => {
+test.describe('modes, new craft, file menu @ui', () => {
   const desktopOnly = () => test.skip(test.info().project.name !== 'chromium', 'desktop-only');
 
   test('gallery → New craft: untitled doc with the starter deck', async ({ page }) => {
@@ -297,7 +297,7 @@ test.describe('modes, new craft, file menu', () => {
   });
 });
 
-test.describe('manual wiring + triangles + component meta', () => {
+test.describe('manual wiring + triangles + component meta @ui', () => {
   const desktopOnly = () => test.skip(test.info().project.name !== 'chromium', 'desktop-only');
 
   test('wire mode: select a part, pick a free port, connect via the search list', async ({ page }) => {

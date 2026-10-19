@@ -76,7 +76,7 @@ const rotY = (q: Q, v: readonly number[]): number[] => {
   return [v[0] + w * tx + y * tz - z * ty, v[1] + w * ty + z * tx - x * tz, v[2] + w * tz + x * ty - y * tx];
 };
 
-test.describe('gizmo writeback', () => {
+test.describe('gizmo writeback @gizmo @slow', () => {
   const desktopOnly = () => test.skip(test.info().project.name !== 'chromium', 'desktop-only');
 
   test('select attaches at the visible-geometry centre; a spin ORBITS the origin about it and saves an exact quat', async ({ page }) => {

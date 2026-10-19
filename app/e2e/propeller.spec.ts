@@ -38,7 +38,7 @@ async function openProp(page: Page, id: string): Promise<number> {
 
 const span = (b: Box, a: 0 | 1 | 2) => b.max[a] - b.min[a];
 
-test.describe('generated propeller (matrix pair)', () => {
+test.describe('generated propeller (matrix pair) @models @slow', () => {
   const desktopOnly = () => test.skip(test.info().project.name !== 'chromium', 'desktop-only');
 
   // Content basis C·chain·C⁻¹ (dev rule; FORMAT §Per-asset gltf VERTEX

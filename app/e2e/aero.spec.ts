@@ -31,7 +31,7 @@ async function setDrawer(page: Page, want: boolean) {
   if (want) await expect(aside).toBeVisible();
 }
 
-test.describe('wind tunnel', () => {
+test.describe('wind tunnel @aero @slow', () => {
   test('Wind mode solves the field and draws streamlines', async ({ page }) => {
     test.setTimeout(90_000);
     await page.goto(`/?craft=${ISW}`);

@@ -46,7 +46,7 @@ async function openCraft(page: Page, id: string) {
   await page.getByTestId('mode-edit').click();
 }
 
-test.describe('symmetry twins', () => {
+test.describe('symmetry twins @sym @slow', () => {
   const desktopOnly = () => test.skip(test.info().project.name !== 'chromium', 'desktop-only');
 
   test('slider move propagates the mirrored delta to the twin; drift auto-disables', async ({ page }) => {

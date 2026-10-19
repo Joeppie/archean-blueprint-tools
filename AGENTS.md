@@ -149,7 +149,15 @@ user's explicit say-so (Pages/release still serves it meanwhile).
 ```bash
 cd app && npm install          # one-time
 npm test                       # vitest — pure engine core (no browser)
-npm run test:e2e               # Playwright chromium UI suite (app/e2e/)
+npm run test:e2e               # Playwright chromium UI suite (app/e2e/) — FULL
+npm run test:e2e:fast          #   … minus the @slow suites (the pricey ones)
+npx playwright test --grep '@place|@ui'    # per-area subsets (user rule: an
+                               # unrelated change does NOT necessiate a full
+                               # run — pick the tags it touches; @slow = the
+                               # heavy multi-asset renders: @models (the
+                               # solo-fixture content-basis pair-checks),
+                               # @gizmo, @sym, @subgrid, @aero; tags live in
+                               # the describe titles of app/e2e/*.spec.ts)
 npm run dev -- --host 0.0.0.0  # NEVER loopback-only (dev-server binding rule):
                                # browse via the Tailscale IP (tailscale ip -4):
                                # http://<ip>:5175/  — loopback still answers there

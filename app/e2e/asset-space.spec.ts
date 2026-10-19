@@ -37,7 +37,7 @@ async function openPart(page: Page, id: string, type: string): Promise<number> {
   return ci;
 }
 
-test.describe('engine content basis C·chain·C⁻¹ (solo fixtures)', () => {
+test.describe('engine content basis C·chain·C⁻¹ (solo fixtures) @models @slow', () => {
   const desktopOnly = () => test.skip(test.info().project.name !== 'chromium', 'desktop-only');
 
   test('ActiveRadiator: slab spans X·Y, thin Z (dev content, spans 0.99/0.99/0.38)', async ({ page }) => {

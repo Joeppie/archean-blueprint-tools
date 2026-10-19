@@ -64,7 +64,7 @@ async function scrub(page: Page, key: string, px: number) {
 const boxOf = (page: Page, ci: number) => page.evaluate((ci) =>
   (window as unknown as W).__ARCHEAN__!.engine.compRealBox(ci)!, ci);
 
-test.describe('live data edits re-render the part (no reload)', () => {
+test.describe('live data edits re-render the part (no reload) @live', () => {
   const desktopOnly = () => test.skip(test.info().project.name !== 'chromium', 'desktop-only');
 
   test('Propeller twist edit grows the generated blade surface immediately', async ({ page }) => {

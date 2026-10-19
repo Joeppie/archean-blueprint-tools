@@ -34,7 +34,7 @@ async function openDolphin(page: Page) {
   await page.getByTestId('mode-edit').click();
 }
 
-test.describe('subgrid hinge UI', () => {
+test.describe('subgrid hinge UI @subgrid @slow', () => {
   test('a selected subgrid gets its hinge ring; a pointer drag turns the hinge', async ({ page }) => {
     test.skip(test.info().project.name !== 'chromium', 'desktop-only');
     await openDolphin(page);
