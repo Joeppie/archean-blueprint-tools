@@ -34,6 +34,12 @@ import type { FileQuat, Vec3D } from './format';
 import type { LoadedModel, ModelAtlas, NodeRec } from './models';
 import { droppedParts } from './models';
 import { envIntensity, nodeMaterialSpec, pbr, srgbHexToLinear, type PbrSpec } from './materials';
+import { propellerSurface, type PropellerData } from './propeller';
+
+/** The generated propeller blade's material: the client raytraces it as a
+ *  neutral NON-metallic grey — `ReverseGamma(vec3(0.5))` in the shader, i.e.
+ *  written in sRGB (dev propellerGeometry agrees). */
+const PROP_GEN_SPEC: PbrSpec = { color: srgbHexToLinear(0x808080), metal: 0, rough: 0.65, opacity: 1 };
 import { buildPipes, surgePaths, type PipeNetwork } from './pipes';
 import { buildBlocksSolids, buildCompProxies, buildSolids, type SolidBatch } from './build';
 import type { FilePalette } from './palette';
@@ -574,9 +580,15 @@ export class Engine {
       const nd = geo[r.name];
       if (!nd) continue;
       const rg = nodes.get(r.name)!;
+      // Propeller: the game GENERATES the blade surface from
+      // data.blades/radius/width/twist/pitch (the gltf is a frozen 0.88 m
+      // template) — swap the `prop` prims for the data-driven soup.
+      const gen = c.type === 'Propeller' && r.name === 'prop'
+        ? propellerSurface((c.data ?? {}) as PropellerData) : null;
+      const prims = gen ? [{ material: 'prop', v: gen.v, i: gen.i }] : nd.prims;
       const byMat = new Map<string, BufferGeometry[]>();
-      for (const prim of nd.prims) {
-        const v = this.hiDef ? prim.v : (prim.lv ?? prim.v);   // decimated twins by default
+      for (const prim of prims) {
+        const v = this.hiDef ? prim.v : (prim.lv ?? prim.v);   // decimated twins (the generated soup has none)
         const i = this.hiDef ? prim.i : (prim.li ?? prim.i);
         const gg = new BufferGeometry();
         gg.setAttribute('position', new BufferAttribute(new Float32Array(v), 3));
@@ -592,7 +604,10 @@ export class Engine {
         if (!gg) continue;
         // NO userData.kind on the child meshes: pick walks UP to the owning
         // group, whose userData carries {kind:'comp', ci}
-        const m = new Mesh(gg, this.mat(nodeMaterialSpec(c, mname, info.materials, this.palette, this.legacy)));
+        const spec = gen
+          ? PROP_GEN_SPEC                                   // client raytracing grey (sRGB 0.5 in the shader)
+          : nodeMaterialSpec(c, mname, info.materials, this.palette, this.legacy);
+        const m = new Mesh(gg, this.mat(spec));
         rg.add(m);
       }
     }
@@ -1638,6 +1653,17 @@ export class Engine {
     this.captureGesture(this.gizmoCi);
     this.gizmoProxy.position[ax] += m;
     this.gizmoWriteback();
+  }
+  /** WORLD bbox of a component's REAL (node-tree) model, [min,max]; null
+   *  while only the stand-in box or nothing is shown (matrix-pair pins
+   *  measure the generated/data-driven surface through this) */
+  compRealBox(ci: number): { min: [number, number, number]; max: [number, number, number] } | null {
+    const roots = (this.compRoots.get(ci) ?? []).filter(o => (o.userData as { real?: boolean })?.real && o.visible);
+    if (!roots.length) return null;
+    this.scene.updateMatrixWorld(true);
+    const b = new Box3();
+    for (const o of roots) b.expandByObject(o);
+    return b.isEmpty() ? null : { min: [b.min.x, b.min.y, b.min.z], max: [b.max.x, b.max.y, b.max.z] };
   }
   /** the ring/arrow axis TGC picked for the LIVE drag ('X'|'Y'|'Z'|'E'…|null)
    *  — pins assert a real-pointer grip landed on the DRAWN ring at its
