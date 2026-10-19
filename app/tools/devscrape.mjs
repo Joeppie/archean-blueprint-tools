@@ -179,6 +179,14 @@ async function openCraftOurs(page, url, iso) {
         if (/^CoM\/arrows: on$/.test(b.textContent)) b.click();
         else if (/^thrust: shown$/.test(b.textContent)) b.click();
       }
+      // NOTHING SELECTED for the shot: the pulsing x-ray glow, the golden
+      // outline box, the gizmo and the mode widget all pollute our silhouette
+      // vs the dev's bare craft — and would break a future pixel-diff
+      // overlay. select(-1) is the tests' verified deselect path.
+      if (typeof H.select === 'function' && (H.selected >= 0 || H.selectedSub != null)) {
+        H.select(-1);
+        if (typeof H.paintHighlights === 'function') H.paintHighlights();
+      }
       const d = [...dir];
       const t = H.controls.target.clone();
       const dist = H.camera.position.distanceTo(t);
