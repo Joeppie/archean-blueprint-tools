@@ -154,16 +154,17 @@ export function galleryData(): GalleryEntry[] {
     const name = ws[id]?.name?.trim() || CURATED[id] || tsv.get(id) || aliasOf(path.join(dir, 'blueprint.json'));
     if (!name || NUMERIC_NAME.test(name)) continue;
     // previews live beside the blueprint in EITHER root (Steam saves carry
-    // none; testdata ships 56 of them). URL scheme (Pages-compatible, the
-    // app is served from app/): a testdata copy -> '../testdata/<id>/…'
-    // (resolves at the repo/Pages root from BOTH the dev '/' page and the
-    // deployed '/…/app/' page; the plugin also serves /testdata/ in dev);
-    // a corpus-only preview -> 'corpus/<id>/…' (dev-only — the Pages build
-    // pins the corpus to testdata, so it never carries corpus-only files).
+    // none; testdata ships 56 of them). URL scheme (Pages = the app at the
+    // SITE ROOT): a testdata copy -> 'testdata/<id>/…' (exact at the Pages
+    // root and on the dev '/' page, where the plugin serves /testdata/;
+    // App.tsx's CardPreview flips to '../testdata/…' if that 404s, i.e. the
+    // '/app/' copy of the same site); a corpus-only preview ->
+    // 'corpus/<id>/…' (dev-only — the Pages build pins the corpus to
+    // testdata, so it never carries corpus-only files).
     const prevTest = fs.existsSync(path.join(REPO, 'testdata', id, 'preview.jpg'));
     const prevCorpus = !prevTest && fs.existsSync(path.join(dir, 'preview.jpg'));
     out.push({ id, name, author: ws[id]?.author,
-      preview: prevTest ? `../testdata/${id}/preview.jpg`
+      preview: prevTest ? `testdata/${id}/preview.jpg`
         : prevCorpus ? `corpus/${id}/preview.jpg` : null });
   }
   return out;
@@ -212,6 +213,20 @@ function handler(req: IncomingMessage, res: ServerResponse, next: () => void) {
     return repoFile(req, res, `viewer/models/${m[1]}`, 'application/json');
   }
   if (!url.startsWith('/corpus')) {
+    // /viewer/<file>: the RETIRED legacy viewer, served in dev/preview too,
+    // so the gallery's small "legacy blueprint viewer" footer link works
+    // while developing (on Pages it lives at the repo root next to the app)
+    if (url.startsWith('/viewer/')) {
+      const root0 = path.join(REPO, 'viewer');
+      const f = path.resolve(root0, decodeURIComponent(url).slice('/viewer/'.length));
+      if (!f.startsWith(root0 + path.sep) || !fs.existsSync(f) || !fs.statSync(f).isFile()) {
+        res.statusCode = 404; res.end('not found'); return;
+      }
+      sendFile(req, res, f, f.endsWith('.html') ? 'text/html'
+        : f.endsWith('.js') ? 'text/javascript' : f.endsWith('.json') ? 'application/json'
+        : f.endsWith('.svg') ? 'image/svg+xml' : 'application/octet-stream');
+      return;
+    }
     // /testdata/<id>/<file>: the STATIC Pages layout served in dev/preview
     // too, so the catalog's '../testdata/…' preview + blueprint routes hit
     // the same files in every environment

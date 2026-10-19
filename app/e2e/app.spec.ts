@@ -15,6 +15,21 @@ test('gallery landing shows the craft cards', async ({ page }) => {
   await expect(page.locator('[data-testid^="card-"]').first()).toBeVisible();
 });
 
+test('the app IS the site: legacy viewer only as a small END-of-gallery link', async ({ page, request }) => {
+  await page.goto('/');
+  const legacy = page.getByTestId('legacy-link');
+  await expect(legacy).toBeVisible();
+  await expect(legacy).toHaveCSS('font-size', '11px');   // deliberately small + muted
+  // pointed to the BACK: it sits AFTER the last craft card in the DOM
+  const order = await page.evaluate(() => [...document.querySelectorAll('[data-testid], footer [data-testid]')]
+    .map(e => e.getAttribute('data-testid'))
+    .filter(t => t?.startsWith('card-') || t === 'legacy-link'));
+  expect(order.at(-1)).toBe('legacy-link');
+  await expect(legacy).toHaveAttribute('href', 'viewer/index.html');
+  // and the target resolves (dev plugin /viewer/ route; Pages repo root)
+  expect((await request.get('/viewer/index.html')).status()).toBe(200);
+});
+
 test('card click enters the editor and renders the craft', async ({ page }) => {
   const id = await firstCraftId(page);
   await page.locator(`[data-testid="card-${id}"]`).click();

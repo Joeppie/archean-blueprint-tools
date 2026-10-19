@@ -82,8 +82,7 @@ function Gallery({ onOpen, onNew }: { onOpen: (id: string) => void; onNew: () =>
             className="group text-left">
             <div className="aspect-square overflow-hidden rounded-lg border border-white/10 bg-panel2
                             transition group-hover:border-accent/60">
-              {g.preview && <img src={g.preview} alt="" loading="lazy" decoding="async"
-                className="h-full w-full object-cover" />}
+              {g.preview && <CardPreview preview={g.preview} />}
             </div>
             <div className="mt-1.5 truncate text-[13px] font-semibold text-ink group-hover:text-accent">
               {g.name}
@@ -98,6 +97,28 @@ function Gallery({ onOpen, onNew }: { onOpen: (id: string) => void; onNew: () =>
         ))}
         {GALLERY.length === 0 && <p className="col-span-full text-ink-dim">corpus folder empty</p>}
       </main>
+      {/* the app IS the site now (Pages root): the retired zero-build viewer
+          lives at the very END of the gallery — one small, muted link. The
+          href is ROOT-relative-exact (from the Pages site root AND the dev
+          '/' page — '../' would ESCAPE the Pages repo prefix). */}
+      <footer className="mx-auto mt-12 max-w-5xl border-t border-white/5 pt-3 pb-1 text-[11px] text-ink-dim/70">
+        <a data-testid="legacy-link" href="viewer/index.html"
+          className="underline decoration-white/15 underline-offset-2 hover:text-ink">
+          legacy blueprint viewer
+        </a>
+      </footer>
     </div>
   );
+}
+
+// Catalog previews bake the ROOT layout ('testdata/<id>/…', where Pages
+// serves the app); the '/app/' copy resolves one level deeper, so onError
+// flips to the parent-relative twin. Dev hits the plugin's /testdata route.
+function CardPreview({ preview }: { preview: string }) {
+  const [src, setSrc] = useState(preview);
+  const alt = src.startsWith('testdata/') ? `../${src}`
+    : src.startsWith('../testdata/') ? src.slice(3) : null;
+  return <img src={src} alt="" loading="lazy" decoding="async"
+    onError={() => { if (alt && src !== alt) setSrc(alt); }}
+    className="h-full w-full object-cover" />;
 }

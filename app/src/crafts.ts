@@ -133,11 +133,13 @@ export function loadCraft(id: string, onProgress: ProgressFn,
     }
     notify(null, 0);                                         // download STARTED: overlay appears
     // candidate routes: /corpus/ = the dev/preview plugin server (tools/
-    // vite-corpus.ts); ../testdata/ = the STATIC GitHub Pages layout, where
-    // the app is served from app/ and the repo corpus sits one level up
-    // (tools/deploy_pages.py ships the same tree). First hit wins.
+    // vite-corpus.ts); testdata/ = the STATIC GitHub Pages layout where the
+    // app IS the site root (tools/deploy_pages.py ships dist at the repo
+    // root); ../testdata/ = the same site served one level deeper (/app/).
+    // First hit wins.
     let text: string | null = null;
-    for (const url of [`/corpus/${id}/blueprint.json`, `../testdata/${id}/blueprint.json`]) {
+    for (const url of [`/corpus/${id}/blueprint.json`, `testdata/${id}/blueprint.json`,
+                       `../testdata/${id}/blueprint.json`]) {
       text = await fetchProgress(url, notify, fetchImpl);
       if (text != null) break;
     }

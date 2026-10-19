@@ -15,18 +15,18 @@ Everything outside the React app in `app/` is static — plain ES modules +
 Three.js from a CDN. No build step, no npm, no server-side code (`app/` has
 its own npm project; see [app/README.md](app/README.md)).
 
-## ▶ Live viewer
+## ▶ Live site
 
-**Overview + craft gallery: https://joeppie.github.io/archean-blueprint-tools/**
-
-**★ The Blueprint Inspector app (v1.0):
-https://joeppie.github.io/archean-blueprint-tools/app/index.html** —
+**The Blueprint Inspector app IS the site:
+https://joeppie.github.io/archean-blueprint-tools/** —
 the React + TypeScript editor: craft gallery, full game meshes, live editing,
-byte-exact saves. This is the app `viewer/` is being ported to (see
-[REWRITE.md](REWRITE.md)).
+byte-exact saves (also reachable as `/app/index.html`). This is the app
+`viewer/` is being ported to (see [REWRITE.md](REWRITE.md)).
 
+The legacy zero-build inspector stays reachable at
 **https://joeppie.github.io/archean-blueprint-tools/viewer/index.html**
-(the legacy zero-build inspector — still maintained, frozen port reference).
+(small link at the end of the app's gallery — it is the frozen port
+reference, not the front door).
 
 Loads the ISW-241 fighter by default. Click any component to edit position,
 rotation and data fields with live 3D feedback; *Open file…* (or drag-drop)

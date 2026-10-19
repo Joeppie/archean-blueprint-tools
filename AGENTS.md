@@ -259,11 +259,13 @@ mid-session, saw a selftest FAIL under the SAME v0.160 label as the pushed
 release, and reasonably concluded the release was broken.)
 
 ## Publishing (GitHub Pages — release-branch + generated `pages` scheme)
-The live site is `https://joeppie.github.io/archean-blueprint-tools/`
-(landing + `/viewer/index.html` legacy inspector + `/app/index.html` the
-React Inspector). **Pages serves the GENERATED `pages` branch (source:
-pages / root); `git push origin main` never moves the live site, and the
-`release` branch is the STABLE line the `pages` site is built from.**
+The live site is `https://joeppie.github.io/archean-blueprint-tools/` —
+**the React Inspector app IS the site root** (craft gallery + editor); the
+retired legacy inspector lives at `/viewer/index.html` behind a small link
+at the end of the app gallery. **Pages serves the GENERATED `pages` branch
+(source: pages / root); `git push origin main` never moves the live site,
+and the `release` branch is the STABLE line the `pages` site is built
+from.**
 - `main` = development. Commits pass the pre-commit gate (selftest+regtest);
   Pages ignores main entirely — an in-progress main can never wear the stable
   build's clothes (branch-level fix of the 2026-10-09 "dev snapshot under the
@@ -275,15 +277,21 @@ pages / root); `git push origin main` never moves the live site, and the
   2026-10-19 replaced the old `v0.NN` line). Hotfixes go through
   main and re-release — release is never rebased or cherry-picked onto.
 - `pages` = the PUBLIC artifact, since the v1.0 app deploy: an orphan
-  snapshot of the release tree whose `app/` dir is replaced by the vite
-  build, FORCE-PUSHED by **`tools/deploy_pages.py`** (pure build inside a
+  snapshot of the release tree where **the vite-built app IS the site ROOT**
+  (2026-10-19 user rule: the new app is the front door; the retired legacy
+  viewer keeps `/viewer/index.html` and is reachable only through a SMALL
+  link at the END of the app gallery — pinned by app.spec's legacy-link
+  test), plus an `/app/index.html` redirect stub for old deep links.
+  FORCE-PUSHED by **`tools/deploy_pages.py`** (pure build inside a
   detached worktree of origin/release with its own npm ci; the compiled
   gallery catalog pins ARCHEAN_BLUEPRINTS to the repo testdata so a
   machine-local Steam corpus can never leak into the public bundle). It is
   NEVER hand-edited; its history is disposable; release is the truth.
-  The app's data routes are page-relative (`../testdata/…`,
-  `../viewer/models/…`; vite `base './'`), so the repo URL path is never
-  hardcoded.
+  The app's data routes are page-relative and LAYOUT-EXACT (`testdata/…`,
+  `viewer/models…` at the root; `../testdata/…` + `../viewer/models…` and
+  the CardPreview `../` flip are deeper-copy fallbacks; the legacy link is
+  root-exact because `../` would ESCAPE the Pages prefix; vite `base './'`),
+  so the repo URL path is never hardcoded.
 - The ritual is **`tools/release.sh [vX.Y]`**: preflight (clean tree on main,
   main pushed, release strings agree via `security-scan --versions`, tag free,
   origin/release an ancestor of main) → COMPLETE suite (a FAIL aborts — the
