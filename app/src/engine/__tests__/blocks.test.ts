@@ -6,7 +6,8 @@
 // rotate/flip, SIMILAR-TWIN identification and the ✧ snap-to-neighbours.
 import { describe, expect, it } from 'vitest';
 
-import { blockAt, blockCells, blockFromCell, blockMirrorTwin, cellIndex, cellOverlap,
+import { blockAt, blockCells, blockFromCell, blockMirrorTwin, blockTwinIssues,
+  cellIndex, cellOverlap,
   complementBlock, flippedBlock, mirroredBlock, mirrorBlockCell, MIRROR_TYPE,
   rotateType, rotateTypeAbout, rotatedBlock, snapBlockType } from '../blocks';
 import { getBlockPoints } from '../blockshapes';
@@ -267,6 +268,51 @@ describe('SIMILAR blocks ⇄ (the block twin index)', () => {
     const wrong = blockFromCell([mirrorBlockCell(8, 1), 5, 6], [1, 0, 0], 15, 4);
     const bp2 = { data: { blocks: [b, wrong] } } as unknown as Blueprint;
     expect(blockMirrorTwin(bp2, 0)).toBe(-1);
+  });
+});
+
+describe('v1.8.0 UNIFORM MIRROR RULE: blockTwinIssues (faux-mirror screen)', () => {
+  const bpOf = (blocks: ReturnType<typeof blockFromCell>[]) =>
+    ({ data: { blocks } }) as unknown as Blueprint;
+  it('true mirror twin → twin id, NO issues', () => {
+    const b = blockFromCell([8, 5, 6], [1, 0, 0], 13, 4);
+    const t = mirroredBlock(b);
+    const r = blockTwinIssues(bpOf([b, t]), 0)!;
+    expect(r).toEqual({ twin: 1, issues: [] });
+  });
+  it('material differs → still a twin, flagged material', () => {
+    const b = blockFromCell([8, 5, 6], [0, 0, 0], 0, 4);
+    const t = mirroredBlock(b);
+    t.material = 2;                                   // Steel vs Composite
+    const r = blockTwinIssues(bpOf([b, t]), 0)!;
+    expect(r.twin).toBe(1);
+    expect(r.issues.join(', ')).toMatch(/material Composite ≠ Steel/);
+  });
+  it('face paint differs → flagged with the face count', () => {
+    const b = blockFromCell([8, 5, 6], [0, 0, 0], 0, 4);
+    const t = mirroredBlock(b);
+    (t.colors as number[])[0] = 9;
+    const r = blockTwinIssues(bpOf([b, t]), 0)!;
+    expect(r.twin).toBe(1);
+    expect(r.issues.join(', ')).toMatch(/face paint on \d+ of 7 faces/);
+  });
+  it('wrong shape on the mirrored footprint → faux-mirror: NO twin, shape issue', () => {
+    const b = blockFromCell([8, 5, 6], [1, 0, 0], 13, 4);
+    const wrong = blockFromCell([mirrorBlockCell(8, 1), 5, 6], [1, 0, 0], 15, 4);
+    const r = blockTwinIssues(bpOf([b, wrong]), 0)!;
+    expect(r.twin).toBe(-1);
+    expect(r.issues.join(', ')).toMatch(/shape .+ ≠ .+/);
+  });
+  it('different extents on the mirrored span → size/position issue, no twin', () => {
+    const b = blockFromCell([8, 5, 6], [0, 0, 0], 0, 4);
+    const big = blockFromCell([mirrorBlockCell(8, 0) - 1, 5, 6], [1, 0, 0], 0, 4);
+    const r = blockTwinIssues(bpOf([b, big]), 0)!;
+    expect(r.twin).toBe(-1);
+    expect(r.issues.join(', ')).toMatch(/size\/position/);
+  });
+  it('nothing on the mirrored footprint → null (no candidate)', () => {
+    const b = blockFromCell([8, 5, 6], [0, 0, 0], 0, 4);
+    expect(blockTwinIssues(bpOf([b]), 0)).toBeNull();
   });
 });
 

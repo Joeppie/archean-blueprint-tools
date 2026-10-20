@@ -2,7 +2,10 @@
 //  • a slider position edit moves the mirrored twin by the flipped delta
 //    (x pair → −dx) and the twin co-selects with its own golden box,
 //  • a rotation edit turns the twin's FILE quaternion (mirror-twin motion),
-//  • drift > 5 cm auto-disables, restoring the pair revives it (v0.166),
+//  • drift > 5 cm auto-disables AND flags the pair as a faux-mirror (v1.8.0
+//    uniform rule: no UI path can solo-move one half — drift is created by a
+//    RAW data edit, the way a file can carry a broken pair), restoring it
+//    revives propagation (v0.166),
 //  • a joint-angle slider moves BOTH twin masters in unison and ⟲ restores
 //    the pair (v0.176, XYQ twin doors authored 24.3°/24.3°),
 //  • the mirror-plane option round-trips.
@@ -16,6 +19,7 @@ type Eng = {
   setFilePosAxis(ci: number, ax: 'x' | 'y' | 'z', v: number): void;
   setSymOn(on: boolean): void;
   twinPairsOf(ci: number): { j: number; mask: number }[];
+  twinWarnState(): { text: string; x: number; y: number } | null;
   symState(): { on: boolean; mirrorX: boolean; active: boolean };
   setSymOn(on: boolean): void;
   getOptions(): Record<string, boolean>;
@@ -35,6 +39,15 @@ function eng(op: string, arg: Record<string, unknown> = {}): (page: Page) => Pro
       case 'angle': return e.blueprint!.data.components[ci]?.data?.['angle'] ?? null;
       case 'setx': e.setFilePosAxis(ci, 'x', (arg as { v: number }).v); return null;
       case 'symon': e.setSymOn(!!(arg as { on: boolean }).on); return null;
+      // RAW position nudge (bypasses twin propagation — simulates a file
+      // that carries a drifted pair), re-screens the selection, returns the
+      // faux-mirror ⚠ text (v1.8.0)
+      case 'rawx': {
+        const c = e.blueprint!.data.components[ci].position;
+        c.x += (arg as { d: number }).d;
+        e.select(ci);
+        return e.twinWarnState()?.text ?? '';
+      }
     }
     return null;
   }, { op, arg });
@@ -71,21 +84,20 @@ test.describe('symmetry twins @sym @slow', () => {
     await expect.poll(async () => ((await eng('posOf', { ci: twin })(page)) as { x: number }).x)
       .toBeCloseTo(x0.x - 0.5, 9);                       // mirrored: the twin moves -x
 
-    // a SYMMETRIC edit keeps the pair aligned; breaking symmetry (⇄ off +
-    // solo move) drifts it → the >5 cm auto-disable kills propagation, and
-    // realigning revives the pair (v0.166)
+    // a SYMMETRIC edit keeps the pair aligned; a BROKEN pair (drift > 5 cm,
+    // made here by a RAW data edit — since the v1.8.0 UNIFORM MIRROR RULE no
+    // UI path can solo-move one half) auto-disables propagation AND is
+    // flagged by the faux-mirror screen; realigning revives the pair (v0.166)
     expect(((await eng('twins', { ci })(page)) as unknown[]).length).toBeGreaterThan(0);
-    await eng('symon', { on: false, ci: 0 })(page);
-    await eng('setx', { ci, v: selfPos.x + 0.38 })(page);      // solo drift
-    await eng('symon', { on: true, ci: 0 })(page);
-    expect(((await eng('twins', { ci })(page)) as unknown[]).length).toBe(0);
-    await eng('symon', { on: false, ci: 0 })(page);
-    await eng('setx', { ci, v: selfPos.x })(page);             // both halves
-    await eng('setx', { ci: twin, v: x0.x })(page);            // back on the plane
-    await eng('symon', { on: true, ci: 0 })(page);
+    const warn = await eng('rawx', { ci, d: 0.38 })(page) as string;
+    expect(((await eng('twins', { ci })(page)) as unknown[]).length,
+      'a drifted pair does not propagate').toBe(0);
+    expect(warn, 'the drifted pair is a flagged FAUX-MIRROR').toMatch(/drift/);
+    expect(warn).toMatch(new RegExp(`\[${twin}\]`));
+    await eng('rawx', { ci, d: -0.38 })(page);                 // back on the plane
     expect(((await eng('twins', { ci })(page)) as unknown[]).length).toBeGreaterThan(0);
-    // self + twin are back at their file-authoring poses
-    expect(((await eng('pos', { ci })(page)) as { x: number }).x).toBeCloseTo(selfPos.x, 9);
+    expect(((await eng('pos', { ci })(page)) as { x: number }).x)
+      .toBeCloseTo(selfPos.x + 0.5, 9);   // aligned at the slid pose, twin rode it
   });
 
   test('XYQ twin door hinges move in UNISON on one joint slider, ⟲ restores both', async ({ page }) => {

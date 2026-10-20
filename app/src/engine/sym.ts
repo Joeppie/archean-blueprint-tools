@@ -88,4 +88,30 @@ export function hasMirrorX(index: Map<number, TwinPair[]>): boolean {
   return false;
 }
 
+/** v1.8.0 UNIFORM MIRROR RULE diagnostics: appearance of a component pair.
+ *  A twin pair whose PAINT differs (v2 color1/color2 spec dicts or v1
+ *  [slot,slot] index pairs) is a mirror-conflicting FAUX-MIRROR: it must be
+ *  flagged, not silently half-painted. Returns human-readable issue strings
+ *  ([] = consistent). Pure — the Engine formats the red ⚠ popup from it. */
+export function compPaintDiff(
+  a: BlueprintComponent['colors'], b: BlueprintComponent['colors']): string[] {
+  type Norm = null | number[] | [number, number] | { c1: number[] | null; c2: number[] | null };
+  const spec = (s: { r?: number; g?: number; b?: number; opacity?: number;
+    roughness?: number; metallic?: number } | undefined | null) =>
+    s ? [s.r ?? 0, s.g ?? 0, s.b ?? 0, s.opacity ?? 0, s.roughness ?? 0, s.metallic ?? 0] : null;
+  const norm = (x: unknown): Norm => {
+    if (x == null) return null;
+    if (Array.isArray(x)) return x.map(Number) as [number, number];
+    const d = x as { color1?: never; color2?: never };
+    return { c1: spec(d.color1), c2: spec(d.color2) };
+  };
+  const na = norm(a), nb = norm(b);
+  if (JSON.stringify(na) === JSON.stringify(nb)) return [];
+  if (na === null || nb === null || Array.isArray(na) || Array.isArray(nb)) return ['paint differs'];
+  const out: string[] = [];
+  if (JSON.stringify(na.c1) !== JSON.stringify(nb.c1)) out.push('colour1 differs');
+  if (JSON.stringify(na.c2) !== JSON.stringify(nb.c2)) out.push('colour2 differs');
+  return out.length ? out : ['paint differs'];
+}
+
 export const symKeyOf = (bp: BlueprintComponent[]) => bp.length;   // cheap invalidation guard

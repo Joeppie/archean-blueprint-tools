@@ -8,7 +8,8 @@
 
 import type { Block, Blueprint } from './format';
 import { CELL, CELLS_PER_FRAME } from './format';
-import { getBlockFaceDirections, getBlockFaces, getBlockPoints } from './blockshapes';
+import { getBlockFaceDirections, getBlockFaces, getBlockPoints, shapeName } from './blockshapes';
+import { MATERIALS } from './tools';
 
 type Cell = [number, number, number];   // absolute cells (x, y, z)
 
@@ -482,6 +483,61 @@ export function blockMirrorTwin(bp: Blueprint, bi: number): number {
     if (rank > bestRank) { bestRank = rank; best = j; }
   }
   return best;
+}
+
+/** v1.8.0 UNIFORM MIRROR RULE diagnostic (user rule: "whatever I do goes to
+ *  the mirror block, mirrored — if the block is DIFFERENT in the regards
+ *  regarded, it is a mirror-conflicting FAUX-MIRROR and must be flagged"):
+ *  compares the selected block with its twin — the propable similar twin
+ *  when one exists, else the nearest candidate sitting on the block's
+ *  x-MIRRORED footprint (same y/z cells, overlapping mirrored x span) even
+ *  when its extents/shape make it an invalid pair.
+ *  Returns { twin, issues }: twin = blockMirrorTwin (propable) or -1;
+ *  issues = human-readable mismatches (shape, size/position, material,
+ *  per-face paint through the mirrored face mapping); [] = a TRUE mirror
+ *  twin. null = nothing sits on the mirrored footprint at all. The UI
+ *  renders issues as the RED overlay + ⚠ popup. */
+export function blockTwinIssues(bp: Blueprint, bi: number): { twin: number; issues: string[] } | null {
+  const bl = bp.data.blocks;
+  const b = bl[bi];
+  if (!b || b.type === 255) return null;
+  const twin = blockMirrorTwin(bp, bi);
+  let other = twin;
+  if (other < 0) {
+    // faux-mirror CANDIDATE: something on the mirrored span that fails the
+    // twin test (wrong extents, wrong shape) — still worth flagging
+    const c = blockCells(b);
+    const mcx = mirrorBlockCell(c.x, b.size_x);
+    let best = -1, bestOv = 0;
+    for (let j = 0; j < bl.length; j++) {
+      if (j === bi) continue;
+      const o = bl[j]!;
+      if (o.type === 255) continue;
+      const cj = blockCells(o);
+      if (cj.y !== c.y || cj.z !== c.z) continue;
+      const ov = Math.min(cj.x + o.size_x, mcx + b.size_x) - Math.max(cj.x, mcx) + 1;
+      if (ov > 0 && ov > bestOv) { bestOv = ov; best = j; }
+    }
+    other = best;
+    if (other < 0) return null;
+  }
+  const o = bl[other]!;
+  const c = blockCells(b), cj = blockCells(o);
+  const issues: string[] = [];
+  if (cj.x !== mirrorBlockCell(c.x, b.size_x) || cj.y !== c.y || cj.z !== c.z ||
+    o.size_x !== b.size_x || o.size_y !== b.size_y || o.size_z !== b.size_z)
+    issues.push(`size/position ${b.size_x + 1}×${b.size_y + 1}×${b.size_z + 1} ≠ ` +
+      `${o.size_x + 1}×${o.size_y + 1}×${o.size_z + 1}`);
+  const want = MIRROR_TYPE[b.type] ?? b.type;
+  if (o.type !== b.type && o.type !== want)
+    issues.push(`shape ${shapeName(b.type)} ≠ ${shapeName(o.type)}`);
+  if ((b.material ?? 0) !== (o.material ?? 0))
+    issues.push(`material ${MATERIALS[b.material ?? 0] ?? b.material} ≠ ${MATERIALS[o.material ?? 0] ?? o.material}`);
+  const expect = mirroredFaceSlots(b, o), got = faceSlots(o);
+  let diff = 0;
+  for (let f = 0; f < 7; f++) if (expect[f] !== got[f]) diff++;
+  if (diff) issues.push(`face paint on ${diff} of 7 faces`);
+  return { twin, issues };
 }
 
 // ------------------------------------------------------------ FACE PAINT

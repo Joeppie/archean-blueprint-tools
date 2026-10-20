@@ -53,7 +53,7 @@ import {
   type JRef, type SubBBox,
 } from './subgrid';
 import {
-  hasMirrorX, mirrorDelta, mirrorQuat, symAllowed, symTwinIndex, type TwinPair,
+  compPaintDiff, hasMirrorX, mirrorDelta, mirrorQuat, symAllowed, symTwinIndex, type TwinPair,
 } from './sym';
 import { calibrateCellMass, massModel, type MassModel } from './mass';
 import { Highlight } from './highlight';
@@ -207,7 +207,7 @@ export class Engine {
    *  block (+ its dim SIMILAR TWIN, identified regardless of ⇄) — the block
    *  analogue of the component outline. Own scene child at moff, like ghostGroup. */
   private blockHlGroup = new Group();
-  private blockHlSpec: { bi: number; twin: number } | null = null;
+  private blockHlSpec: { bi: number; twin: number; issues: string[] } | null = null;
   /** bi|twin|geometry+paint fingerprint — the v1.6 staleness guard */
   private blockHlSig = '';
   /** CATALOG placement ghost (v1.4): a translucent collider box at the
@@ -272,6 +272,11 @@ export class Engine {
    *  rides beside the selection — leaving a hover never disturbs what the
    *  user is actually editing */
   private hoverHl = new Highlight(this.scene, 0x7dffcf);
+  /** v1.8.0 UNIFORM MIRROR RULE: a mirror-conflicting FAUX-MIRROR twin gets a
+   *  RED outline box (never silent gold) beside the golden selection */
+  private warnHl = new Highlight(this.scene, 0xff4d4d);
+  /** the selected component's conflicted twin pairs (red box + ⚠ popup) */
+  private compWarn: { j: number; issues: string[] }[] = [];
   private hoverCi = -1;
   onSelection: ((sel: { ci: number; sub: number }) => void) | null = null;
   private fly: { from: Vector3; to: Vector3; t0: number } | null = null;
@@ -305,8 +310,9 @@ export class Engine {
    *  widget snaps TRANSLATION to whole lattice CELLS and ROTATION to quarter
    *  turns ALWAYS, and a gesture commits as a cell shift and/or N ×
    *  rotatedBlock turns — the discrete edits of the panel's cx/⟲X/Y/Z rows.
-   *  mirror = ⇄ on: the block's SIMILAR TWIN (blockMirrorTwin) moves/turns
-   *  in unison. -1 detaches. */
+   *  mirror = the reported ⇄ state; v1.7.1: the block's SIMILAR TWIN
+   *  (blockMirrorTwin) ALWAYS moves/turns in unison (mirrored) — ⇄ gates
+   *  only twin PLACEMENT. -1 detaches. */
   private blockGizBi = -1;
   private blockGizMirror = false;
   /** gesture base: the block's cell + the proxy centre at mouseDown */
@@ -410,6 +416,7 @@ export class Engine {
     this.camera.updateProjectionMatrix();
     this.hl.setResolution(w, h);                 // fat lines live in screen px
     this.hoverHl.setResolution(w, h);
+    this.warnHl.setResolution(w, h);
     this.invalidate();
   }
 
@@ -1346,10 +1353,13 @@ void main() {
       active: this.selCi >= 0 && this.twinPairsFor(this.selCi).length > 0,
     };
   }
-  /** live pairs that PROPAGATE for comp i (on only while the pair is still
-   *  aligned — drift > 5 cm auto-disables, v0.166) */
+  /** live pairs that PROPAGATE for comp i, while the pair is still aligned
+   *  (drift > 5 cm auto-disables — a drifted pair is a FAUX-MIRROR: red ⚠,
+   *  no propagation). v1.8.0 UNIFORM MIRROR RULE (user: the rule applies to
+   *  components and to color/material/rotation too, ALWAYS): the ⇄ widget
+   *  toggle never gates propagation — symOn is indicator state only. */
   private twinPairsFor(ci: number): TwinPair[] {
-    return symAllowed(this.symIdx, this.symOn, this.bp?.data.components ?? [], ci);
+    return symAllowed(this.symIdx, true, this.bp?.data.components ?? [], ci);
   }
   twinPairsOf(ci: number): TwinPair[] { return this.twinPairsFor(ci); }
 
@@ -1560,6 +1570,27 @@ void main() {
       const g = this.subGroups.get(this.selSub);
       if (g) self.push(g);
     }
+    // FAUX-MIRROR screen (v1.8.0): every INDEXED pair that does not ride the
+    // selection — drifted off the mirror plane, or its PAINT differs — is a
+    // mirror conflict: the twin gets the red box, and the popup names it.
+    this.compWarn = [];
+    const faux: Object3D[] = [];
+    if (this.selCi >= 0 && this.bp) {
+      const comps = this.bp.data.components;
+      const live = new Set(this.twinPairsFor(this.selCi).map(p => p.j));
+      for (const { j } of this.symIdx.get(this.selCi) ?? []) {
+        const issues: string[] = [];
+        if (!live.has(j)) issues.push('drift: pair off the mirror plane');
+        issues.push(...compPaintDiff(comps[this.selCi]?.colors, comps[j]?.colors));
+        if (!issues.length) continue;
+        this.compWarn.push({ j, issues });
+        const rs = this.compRoots.get(j) ?? [];
+        const v = rs.filter(o => o.visible);
+        faux.push(...(v.length ? v : rs));
+      }
+    }
+    if (faux.length) this.warnHl.setBoxes(faux);
+    else this.warnHl.clearBoxes();
     this.hl.setBoxes([...self, ...twins]);
     this.hl.setXray(this.selCi >= 0 ? [...xray, ...twins] : []);
   }
@@ -2071,8 +2102,9 @@ void main() {
     this.syncBlockGizmo();
     this.invalidate();
   }
-  /** VALIDATED whole-cell shift of the block owning the widget (+ the ⇄ twin
-   *  to its mirrored cell). false = the footprint collides (refused).
+  /** VALIDATED whole-cell shift of the block owning the widget (+ its SIMILAR
+   *  TWIN to the mirrored cell — v1.7.1: ALWAYS, the user's edits mirror to
+   *  the identified twin). false = the footprint collides (refused).
    *  PUBLIC: the e2e pins and a future keyboard nudge drive this exact path. */
   blockGizmoShift(step: [number, number, number]): boolean {
     const bp = this.bp;
@@ -2083,7 +2115,7 @@ void main() {
     const c = blockCells(b);
     const cell: [number, number, number] = [c.x + step[0], c.y + step[1], c.z + step[2]];
     const size: [number, number, number] = [b.size_x, b.size_y, b.size_z];
-    const twin = this.blockGizMirror ? blockMirrorTwin(bp, bi) : -1;
+    const twin = blockMirrorTwin(bp, bi);
     const tw = twin >= 0 ? bp.data.blocks[twin] : undefined;
     if (cellOverlapSkip(bp, cell, size, [bi, twin])) return false;
     let tcell: [number, number, number] | null = null;
@@ -2098,7 +2130,8 @@ void main() {
   }
   /** n × +90° right-hand turns about a WORLD axis (negative wraps) — the
    *  panel's ⟲X/Y/Z geometry (rotatedBlock: type turns, the two perpendicular
-   *  footprints exchange, the bbox CENTRE stays frozen), ⇄ twin in unison. */
+   *  footprints exchange, the bbox CENTRE stays frozen), SIMILAR TWIN in
+   *  unison (v1.7.1: ALWAYS, mirrored). */
   blockGizmoRotate(axis: 'x' | 'y' | 'z', n90: number): boolean {
     const bp = this.bp;
     const bi = this.blockGizBi;
@@ -2106,7 +2139,7 @@ void main() {
     if (!bp || !b) return false;
     const n = ((Math.round(n90) % 4) + 4) % 4;
     if (n === 0) return true;
-    const twin = this.blockGizMirror ? blockMirrorTwin(bp, bi) : -1;
+    const twin = blockMirrorTwin(bp, bi);
     const tw = twin >= 0 ? bp.data.blocks[twin] : undefined;
     const turn = (x: Block): Block => {
       let r = x;
@@ -2127,8 +2160,8 @@ void main() {
   /** overlay rebuild + the doc/dirty/reload mirror (the Editor owns the doc) */
   private afterBlockGizmoEdit(twin: number) {
     this.blockHlSpec = null;                  // force a geometry rebuild
-    if (this.blockGizBi >= 0 && this.bp)      // twin IDENTIFIED always (v1.7.1);
-      this.setBlockHighlight(this.blockGizBi, // blockGizMirror only gated EDITS
+    if (this.blockGizBi >= 0 && this.bp)      // twin IDENTIFIED always (v1.7.1)
+      this.setBlockHighlight(this.blockGizBi,
         blockMirrorTwin(this.bp, this.blockGizBi));
     this.onBlockEdit?.(twin >= 0 ? [this.blockGizBi, twin] : [this.blockGizBi]);
   }
@@ -2792,8 +2825,8 @@ void main() {
 
   /** BLOCKS-edit selection highlight (v1.4): the selected block gets the
    *  golden constructor overlay, its SIMILAR TWIN a dim one (the block
-   *  analogue of twin co-selection) — the twin is identified regardless of
-   *  ⇄, the toggle only gates whether edits propagate to it (v1.7.1).
+   *  analogue of twin co-selection) — the twin is identified and driven by
+   *  every edit regardless of ⇄ (v1.7.1; the toggle gates twin PLACEMENT).
    *  -1 clears. Survives reloads visually
    *  (raw geometry, no per-load objects) — the Editor re-issues it per edit.
    *  v1.6: the dedup key carries a GEOMETRY/PAINT FINGERPRINT too — the
@@ -2802,7 +2835,7 @@ void main() {
    *  block's OLD shape/pos: a golden ghost of the pre-edit block stuck on
    *  the deck until a full deselect ("blocks become translucent and don't
    *  return to previous state", user report). */
-  setBlockHighlight(bi: number, twin = -1) {
+  setBlockHighlight(bi: number, twin = -1, issues: readonly string[] = []) {
     const fp = (i: number): string => {
       const b = i >= 0 && this.bp ? this.bp.data.blocks[i] : undefined;
       if (!b) return '-';
@@ -2810,10 +2843,10 @@ void main() {
       return `${b.type}|${c.x},${c.y},${c.z}|${b.size_x},${b.size_y},${b.size_z}|` +
         (Array.isArray(b.colors) ? b.colors.join(',') : '');
     };
-    const sig = `${bi}|${twin}|${fp(bi)}|${fp(twin)}`;
+    const sig = `${bi}|${twin}|${issues.join(';')}|${fp(bi)}|${fp(twin)}`;
     if ((this.blockHlSpec?.bi ?? -1) === bi && (this.blockHlSpec?.twin ?? -1) === twin &&
       this.blockHlSig === sig) return;
-    this.blockHlSpec = bi >= 0 ? { bi, twin } : null;
+    this.blockHlSpec = bi >= 0 ? { bi, twin, issues: [...issues] } : null;
     this.blockHlSig = sig;
     for (const o of this.blockHlGroup.children) {
       (o as Mesh).geometry?.dispose();
@@ -2821,21 +2854,57 @@ void main() {
     }
     this.blockHlGroup.clear();
     if (bi >= 0 && this.bp) {
-      const add = (idx: number, opacity: number) => {
+      const addAt = (idx: number, opacity: number, hex: number) => {
         const b = this.bp!.data.blocks[idx];
         if (!b || b.type === 255 || b.type > 52) return;
         const c = blockCells(b);
         this.addBlockOverlay(this.blockHlGroup, b.type,
           [(c.x - 6) * CELL, (c.y - 6) * CELL, (c.z - 6) * CELL],
           [(b.size_x + 1) * CELL, (b.size_y + 1) * CELL, (b.size_z + 1) * CELL],
-          0xffc94d, opacity);
+          hex, opacity);
       };
+      const add = (idx: number, opacity: number) => addAt(idx, opacity, 0xffc94d);
+      const addTwin = (idx: number, opacity: number, hex: number) => addAt(idx, opacity, hex);
       add(bi, 0.34);
-      if (twin >= 0) add(twin, 0.16);
+      // v1.8.0: a mirror-conflicting FAUX-MIRROR twin rides RED, a true twin gold
+      if (twin >= 0) addTwin(twin, 0.16, issues.length ? 0xff4d4d : 0xffc94d);
     }
     this.invalidate();
   }
   get blockHighlightState() { return this.blockHlSpec; }
+
+  /** v1.8.0 FAUX-MIRROR popup state (UNIFORM MIRROR RULE): while the current
+   *  selection's mirror twin CONFLICTS (block issues, or a component pair
+   *  drifted / painted apart), returns the label text + a CLIENT-px anchor at
+   *  the flagged twin; null = no conflict. The Viewport renders the ⚠ card. */
+  twinWarnState(): { text: string; x: number; y: number } | null {
+    const renderer = this.renderer, cam = this.camera;
+    if (!renderer || !cam || !this.bp) return null;
+    const p = new Vector3();
+    let text = '';
+    const spec = this.blockHlSpec;
+    if (spec && spec.issues.length) {
+      const ti = spec.twin >= 0 ? spec.twin : spec.bi;
+      const b = this.bp.data.blocks[ti];
+      if (!b) return null;
+      const c = blockCells(b);
+      p.set((c.x - 6 + (b.size_x + 1) / 2) * CELL, (c.y - 6 + (b.size_y + 1) / 2) * CELL,
+        (c.z - 6 + (b.size_z + 1) / 2) * CELL).add(this.moffV());
+      text = (spec.twin >= 0 ? `Block[${spec.bi}] ↔ twin Block[${spec.twin}]: `
+        : `Block[${spec.bi}]: no valid mirror twin — `) + spec.issues.join(', ');
+    } else if (this.selCi >= 0 && this.compWarn.length) {
+      const w = this.compWarn[0]!;
+      const c = this.bp.data.components[w.j];
+      if (!c) return null;
+      p.set(c.position.x, c.position.y, c.position.z).add(this.moffV());
+      text = `${c.type}[${this.selCi}] ↔ twin [${w.j}]: ` + w.issues.join(', ');
+    } else return null;
+    p.project(cam);
+    if (p.z > 1) return null;                       // behind the camera
+    const rect = renderer.domElement.getBoundingClientRect();
+    return { text, x: rect.left + (p.x + 1) / 2 * rect.width,
+      y: rect.top + (1 - p.y) / 2 * rect.height };
+  }
 
   /** WORLD bboxes of the selection overlay meshes (e2e/pin hook): proves the
    *  golden overlay sits ON the block it selects — a stale ghost sits where
@@ -3007,6 +3076,7 @@ void main() {
     this.occ = null;
     this.hl.dispose();
     this.hoverHl.dispose();
+    this.warnHl.dispose();
     this.matCache.forEach(m => m.dispose());
     this.matCache.clear();
     this.gizmo?.dispose();

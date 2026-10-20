@@ -14,7 +14,8 @@ import TopBar, { type Mode } from './components/TopBar';
 import { BlockPanel, FlightPanel, TriPanel, WirePanel, WindPanel, brushSpec, placeBlock, type Brush } from './components/ModePanels';
 import { BlockPaint, CompPaint, SwatchGrid } from './components/ColorPanel';
 import { TOOLS, ToolDialog } from './components/ToolsDialog';
-import { blockInfo, blockMirrorTwin, cellIndex, cellOverlap, complementBlock, paintTwinPair } from './engine/blocks';
+import { blockInfo, blockMirrorTwin, blockTwinIssues, cellIndex, cellOverlap,
+  complementBlock, paintTwinPair } from './engine/blocks';
 import { cornerOf, triAt, triangleFromCorners } from './engine/tris';
 import type { Blueprint } from './engine/format';
 import { isLegacyFile } from './engine/format';
@@ -205,7 +206,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
 
   // BLOCK widget (v1.5): a SELECTED block owns the gizmo in BLOCKS ▸ Edit —
   // cell-snapped arrows + 90°-snap rings; a selected COMPONENT takes it back.
-  // ⇄ on ⇒ the block's SIMILAR TWIN moves/turns in unison (blockMirrorTwin).
+  // v1.7.1: the block's SIMILAR TWIN always moves/turns in unison (mirrored);
+  // mirrorPlace (⇄) only rides as the reported placement-twin state.
   useEffect(() => {
     const e = engineRef.current;
     if (!e) return;
@@ -218,12 +220,17 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
    *  the per-component orig/applied save-sync tables shift with it, the
    *  scene rebuilds on the debounce. CABLES referencing shifted indices are
    *  left alone (the game editor prunes them on load; a stale pipe index is
-   *  data, not a crash). */
+   *  data, not a crash). v1.8.0 UNIFORM MIRROR RULE: whatever the selection
+   *  does, its twin pair does — deleting a part deletes its twins too. */
   const deleteComp = useCallback((ctx: EditCtx, ci: number) => {
-    ctx.bp.data.components.splice(ci, 1);
-    docArrayRemoveAt(ctx.doc, ['data', 'components'], ci);
-    ctx.orig.splice(ci, 1);
-    ctx.applied.splice(ci, 1);
+    const idx = new Set<number>([ci]);
+    for (const { j } of engineRef.current?.twinPairsOf(ci) ?? []) idx.add(j);
+    for (const k of [...idx].sort((a, b) => b - a)) {
+      ctx.bp.data.components.splice(k, 1);
+      docArrayRemoveAt(ctx.doc, ['data', 'components'], k);
+      ctx.orig.splice(k, 1);
+      ctx.applied.splice(k, 1);
+    }
     engineRef.current?.select(-1);
     engineRef.current?.setCompGhost(null);
     sceneChanged();
@@ -232,7 +239,10 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   const edits: EditApi = useMemo(() => ({
     compField: (ctx, ci, key, v) => { setCompField(ctx, ci, key, v); markDirty(); bumpRev(); },
     compColor: (ctx, ci, which, field, v) => {
+      // v1.8.0 UNIFORM MIRROR RULE: the twin pair takes the same appearance
       setCompColor(ctx, ci, which, field, v);
+      for (const { j } of engineRef.current?.twinPairsOf(ci) ?? [])
+        setCompColor(ctx, j, which, field, v);
       sceneChanged();                       // materials rebuild on the debounced reload
     },
     pos: (_ctx, ci, ax, v) => { engineRef.current?.setFilePosAxis(ci, ax, v); },
@@ -336,17 +346,17 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // BLOCKS selection highlight (v1.4 "blocks don't yet highlight"): the
   // picked block gets the golden overlay and its SIMILAR TWIN rides along
   // dimly (blockMirrorTwin — same plane as the component twins). v1.7.1: the
-  // twin is IDENTIFIED on EVERY selection, ⇄ or not (user: "Selecting blocks
-  // does NOT SELECT MIRROR SYMMETRY" — ⇄ defaults OFF, so the pair read as
-  // un-symmetrised). The ⇄ toggle gates only whether EDITS propagate to the
-  // twin (paint/gizmo/panel rows), never whether it is shown co-selected —
-  // exactly how the BlockPanel's twin row already behaves.
+  // twin is IDENTIFIED on EVERY selection, ⇄ or not. v1.8.0 UNIFORM MIRROR
+  // RULE: blockTwinIssues flags a mirror-conflicting FAUX-MIRROR (shape,
+  // size, material or face-paint mismatch on the mirrored footprint) — the
+  // twin overlay then rides RED and the Viewport shows the ⚠ popup.
   useEffect(() => {
     const e = engineRef.current, ctx = ctxRef.current;
     if (!e) return;
-    if (mode === 'blocks' && blockSel >= 0 && ctx)
-      e.setBlockHighlight(blockSel, blockMirrorTwin(ctx.bp, blockSel));
-    else e.setBlockHighlight(-1);
+    if (mode === 'blocks' && blockSel >= 0 && ctx) {
+      const tw = blockTwinIssues(ctx.bp, blockSel);
+      e.setBlockHighlight(blockSel, tw?.twin ?? -1, tw?.issues ?? []);
+    } else e.setBlockHighlight(-1);
   }, [mode, blockSel, rev, engine]);
 
   // the CATALOG ghost (v1.4): while a part is HELD, hovering the viewport
@@ -471,18 +481,18 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
    *  family colours (palette.legacySlot) so a swatch = what renders. */
   const legacy = bp ? isLegacyFile(bp) : false;
   /** Paint the SELECTED block (faces = face slots, undefined = all 7).
-   *  ⇄ on ⇒ the SIMILAR TWIN is painted through the mirrored face mapping
-   *  (paintTwinPair/mirrorFaceOrder) — mirroring is respected for PAINT
-   *  exactly like the gizmo respects it for GEOMETRY. bp + doc together. */
+   *  v1.7.1: the SIMILAR TWIN is ALWAYS painted through the mirrored face
+   *  mapping (paintTwinPair/mirrorFaceOrder) — every block edit mirrors to
+   *  the identified twin. bp + doc together. */
   const paintBlock = useCallback((slot: number, faces?: number[]) => {
     const ctx = ctxRef.current;
     if (!ctx || blockSel < 0) return;
-    const twin = mirrorPlace ? blockMirrorTwin(ctx.bp, blockSel) : -1;
+    const twin = blockMirrorTwin(ctx.bp, blockSel);
     if (!paintTwinPair(ctx.bp, blockSel, twin, slot, faces).length) return;
     writeBlockDoc(ctx, blockSel);
     if (twin >= 0) writeBlockDoc(ctx, twin);
     sceneChanged();
-  }, [blockSel, mirrorPlace, sceneChanged]);
+  }, [blockSel, sceneChanged]);
   /** v1.7 custom RGB: write the picked colour into the next free slot of
    *  THIS craft's palette (bp + doc, int-styled like the game writer) and
    *  return its index; null = the palette is full / the write refused. The
@@ -498,13 +508,17 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   }, [sceneChanged]);
 
   /** Snap a palette slot's FULL shading spec onto a component's custom
-   *  color1/color2 dict (r/g/b/opacity/roughness/metallic). */
+   *  color1/color2 dict (r/g/b/opacity/roughness/metallic). v1.8.0 UNIFORM
+   *  MIRROR RULE: the twin pair is painted the SAME appearance together
+   *  (colour is identity, not geometry — no mirroring to apply). */
   const paintComp = useCallback((ci: number, which: 'color1' | 'color2', c: ResolvedColor) => {
     const ctx = ctxRef.current;
     if (!ctx || ci < 0) return;
-    for (const [f, v] of [['r', c.r], ['g', c.g], ['b', c.b], ['opacity', c.opacity],
-      ['roughness', c.roughness], ['metallic', c.metallic]] as const)
-      setCompColor(ctx, ci, which, f, v);
+    const targets = [ci, ...(engineRef.current?.twinPairsOf(ci) ?? []).map(({ j }) => j)];
+    for (const k of targets)
+      for (const [f, v] of [['r', c.r], ['g', c.g], ['b', c.b], ['opacity', c.opacity],
+        ['roughness', c.roughness], ['metallic', c.metallic]] as const)
+        setCompColor(ctx, k, which, f, v);
     sceneChanged();
   }, [sceneChanged]);
 
@@ -700,7 +714,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
                 <div className="ksp-label mb-1 flex items-center justify-between gap-2 border-b
                                border-white/10 pb-1 text-[10px] text-ink-dim">
                   Paint —{' '}
-                  {mode === 'blocks' && blockSel >= 0 ? `Block[${blockSel}]${mirrorPlace ? ' + ⇄ twin' : ''}`
+                  {mode === 'blocks' && blockSel >= 0 ? `Block[${blockSel}]${bp.data.blocks[blockSel] && blockMirrorTwin(bp, blockSel) >= 0 ? ' + twin' : ''}`
                     : sel.ci >= 0 ? `${bp.data.components[sel.ci]?.type ?? 'part'}[${sel.ci}]`
                       : 'brush'}
                   <button data-testid="palette-close" onClick={() => setPaintOpen(false)}

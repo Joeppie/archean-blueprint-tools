@@ -260,6 +260,29 @@ user's explicit say-so (Pages/release still serves it meanwhile).
   footprint, twin identity, snap convergence/consensus) +
   app/e2e/blockedit.spec.ts, place.spec.ts (comp ghost + delete),
   mirror.spec.ts, panels.spec.ts (view-stats-only, deck-place EDIT).
+- **UNIFORM MIRROR RULE + FAUX-MIRROR screen (v1.8 user rules: "It should
+  also do whatever I do to the mirror block (mirrored of course)"; "This rule
+  is uniform and it also applies to color, material, rotation, and to
+  components"): EVERY edit on a SELECTED item ALWAYS drives its mirror twin in
+  mirrored unison — BLOCKS (cell shifts via gizmo/panel cx/cy/cz, sizes, shape
+  turns ⟲X/Y/Z/cycle/flip/snap, face PAINT via mirrorFaceOrder, MATERIAL,
+  delete) AND COMPONENTS (position deltas, MIRROR-TWIN-MOTION rotations,
+  palette paint of color1/color2, joint data, delete). NO toggle gates
+  propagation: the ⇄ widget button is an INDICATOR (lit = live twin pair,
+  struck = none/drifted), `archean-app-plsym` ⇄ gates only twin PLACEMENT of
+  NEW brush/catalog ghosts, and the engine's twinPairsFor passes `true` where
+  symOn used to gate (symAllowed keeps its arg for the pure pins). Twin
+  identification = `blockMirrorTwin` (blocks: mirrored footprint, same
+  extents, identical-or-MIRROR_TYPE shape) / the `sym.ts` mask index (parts:
+  alignment stays within 5 cm; drift = a broken pair = flagged, not chased).
+  **FAUX-MIRROR = flagged, never silent:** a mirror-position partner that
+  DIFFERS in a regarded property (blocks: shape, size/position, material,
+  per-face paint through the mirrored mapping; components: pair drift,
+  colour1/colour2) renders the twin overlay/box RED (scene warnHl,
+  setBlockHighlight issues) and a small ⚠ popup (Viewport `twin-warn` card;
+  engine `twinWarnState()` text anchored at the twin by projection). Pure
+  screens: `blocks.ts blockTwinIssues()` + `sym.ts compPaintDiff()`
+  (vitest-pinned); UI pinned by app/e2e/mirror-mismatch.spec.ts (@place).
 - **v1.7 MATERIALS / appearance split (user rule: "Blocks should let me edit
   material: composite, iron, glass, etc; this is not part of the color picker,
   and it should make it clear glass/metal is appearance"): the blueprint's

@@ -32,6 +32,8 @@ declare global {
     blockGizmo: () => ReturnType<Engine['blockGizmoState']>;
     /** live selection ({ci, sub}) — v1.5 view-lock pin */
     sel: () => ReturnType<Engine['selectionState']>;
+    /** v1.8.0 faux-mirror ⚠ popup state (text + client-px anchor at the twin) */
+    twinWarn: () => ReturnType<Engine['twinWarnState']>;
     /** held-catalog-part placement ghost state (v1.4, null = no ghost) */
     compGhost: () => Engine['compGhostState'];
     /** constrained subgrid joint handles (the hinge UI at the joint line) */
@@ -97,6 +99,7 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
       blockHlBoxes: () => engine.blockHlBoxes(),
       blockGizmo: () => engine.blockGizmoState(),
       sel: () => engine.selectionState(),
+      twinWarn: () => engine.twinWarnState(),
       compGhost: () => engine.compGhostState,
       hinge: () => engine.hingeInfo(),
       hingePoint: (i: number) => engine.hingeScreenPoint(i),
@@ -150,7 +153,17 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
     const m = localStorage.getItem('archean-app-gizmo-mode');
     return m === 'translate' || m === 'rotate' ? m : 'rotate';
   });
-  const [, setSymTick] = useState(0);
+  // v1.8.0 FAUX-MIRROR ⚠ popup: poll the engine's conflict state (selection-
+  // scoped, cheap) and re-anchor it every ~250 ms so it rides camera motion.
+  const [warn, setWarn] = useState<{ text: string; x: number; y: number } | null>(null);
+  useEffect(() => {
+    const h = setInterval(() => {
+      const e = engineRef.current, box = hostRef.current?.getBoundingClientRect();
+      const w = e?.twinWarnState();
+      setWarn(w && box ? { text: w.text, x: w.x - box.left, y: w.y - box.top } : null);
+    }, 250);
+    return () => clearInterval(h);
+  }, []);
   useEffect(() => {
     const sh = (e: KeyboardEvent, on: boolean) => {
       if (e.key !== 'Shift') return;
@@ -222,10 +235,11 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
               {ic}
             </button>
           ))}
-          {/* ⇄ mirror-twin switch (v0.161): effective state with strikethrough when
-              off OR the selected pair drifted apart (the >5 cm auto-disable) */}
-          <button title="move mirrored twins (⇄)" data-testid="mode-sym"
-            onClick={() => { const e = engineRef.current; if (e) e.setSymOn(!e.symState().on); setSymTick(t => t + 1); }}
+          {/* ⇄ mirror-twin BADGE (v1.8.0 uniform rule): a selection's twin always
+              rides EVERY edit (position, rotation, shape, colour, material, delete)
+              — this is an indicator: lit = a live twin pair, struck = none or the
+              pair drifted apart (a FAUX-MIRROR: red boxes + ⚠ label name it) */}
+          <button title="mirror twin — every edit mirrors to it" data-testid="mode-sym" disabled
             className={`ksp-btn grid h-8 w-9 place-items-center text-[15px] leading-none ${
               engineRef.current?.symState().active ? 'on' : 'line-through opacity-60'}`}>
             ⇄
@@ -237,6 +251,15 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
             className="ksp-btn grid h-8 w-9 place-items-center text-[15px] leading-none">
             🎨
           </button>
+        </div>
+      )}
+      {warn && (
+        <div data-testid="twin-warn" role="alert" title="mirror-conflicting faux-mirror"
+          className="ksp-win absolute z-30 flex max-w-[240px] -translate-x-1/2 items-start gap-1.5
+                     rounded px-2 py-1 text-[10px] leading-snug text-[#ff9c9c]"
+          style={{ left: warn.x, top: Math.max(8, warn.y + 14) }}>
+          <span className="text-[13px] leading-none text-[#ff4d4d]">⚠</span>
+          <span>{warn.text}</span>
         </div>
       )}
       {DEBUG_MODE && <StatsStrip engine={engineRef} bp={bp} />}

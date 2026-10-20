@@ -5,7 +5,7 @@
 // wheel bug of v0.165 must stay dead).
 import { readFileSync, existsSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
-import { mirrorQuat, symAllowed, symMaskAt, symTwinIndex } from '../sym';
+import { compPaintDiff, mirrorQuat, symAllowed, symMaskAt, symTwinIndex } from '../sym';
 import type { Blueprint, BlueprintComponent, Vec3D } from '../format';
 import { corpusDir } from '../../../tools/vite-corpus.ts';
 
@@ -50,7 +50,7 @@ describe('pair index + auto-disable', () => {
     expect(symAllowed(idx, true, comps, 0)).toEqual([]);
     comps[1]!.position.x += 0.08;
     expect(symAllowed(idx, true, comps, 0).length).toBe(1);
-    expect(symAllowed(idx, false, comps, 0)).toEqual([]);   // the master ⇄ switch
+    expect(symAllowed(idx, false, comps, 0)).toEqual([]);   // the switch arg (the Engine now always passes true)
   });
 });
 
@@ -79,4 +79,23 @@ describe.skipIf(!existsSync(corpusDir()))('corpus twins', () => {
     expect(pair, 'an x-mirror SmallHinge pair exists').toBeTruthy();
   });
 
+});
+
+describe('v1.8.0 UNIFORM MIRROR RULE: compPaintDiff (faux-mirror paint screen)', () => {
+  const spec = (r: number) => ({ r, g: 0, b: 0, opacity: 15, roughness: 0, metallic: 0 });
+  test('both unpainted, or identical dicts/PAIRS → consistent', () => {
+    expect(compPaintDiff(undefined, undefined)).toEqual([]);
+    expect(compPaintDiff({ color1: spec(1) } as never, { color1: spec(1) } as never)).toEqual([]);
+    expect(compPaintDiff([48, 52] as never, [48, 52] as never)).toEqual([]);
+  });
+  test('colour1 r differs → the label names colour1 only', () => {
+    expect(compPaintDiff({ color1: spec(1), color2: spec(2) } as never,
+      { color1: spec(5), color2: spec(2) } as never)).toEqual(['colour1 differs']);
+  });
+  test('v1 slot pairs differ → generic paint issue', () => {
+    expect(compPaintDiff([48, 52] as never, [48, 53] as never)).toEqual(['paint differs']);
+  });
+  test('one side painted, the other not → paint issue', () => {
+    expect(compPaintDiff({ color1: spec(1) } as never, undefined)).toEqual(['paint differs']);
+  });
 });

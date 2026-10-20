@@ -181,7 +181,8 @@ test.describe('selection lifecycle: no stale ghost, sky deselects @place', () =>
     await toBlocks(page, 'edit');
     const px = await pixelOfBlock(page, 0);
     await page.mouse.click(px.x, px.y);
-    await expect.poll(() => highlight(page), { timeout: 5_000 }).toEqual({ bi: 0, twin: -1 });
+    await expect.poll(() => highlight(page), { timeout: 5_000 })
+      .toEqual({ bi: 0, twin: -1, issues: [] });
     let c0 = blockCentre((await blocks(page))[0]!);
     let boxes = await hlCentres(page);
     expect(boxes.length).toBe(1);

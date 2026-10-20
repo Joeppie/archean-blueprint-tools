@@ -7,7 +7,7 @@ import type { Engine } from '../engine/scene';
 import { FLOWS, type FlowKey } from '../engine/aero';
 import { writeBlockDoc, writeBlockMaterial, type EditCtx } from '../engine/edit';
 import { docArrayInsert, docFromValue, docSetNumber, docArrayRemoveAt } from '../engine/doc';
-import { blockCells, blockFromCell, blockInfo, blockMirrorTwin, cellOverlapSkip, flippedBlock,
+import { blockCells, blockFromCell, blockInfo, blockTwinIssues, blockMirrorTwin, cellOverlapSkip, flippedBlock,
   mirroredBlock, MIRROR_TYPE, mirrorBlockCell, rotateType, rotatedBlock, setBlockField, setBlockGeom,
   snapBlockType, type PlaceSpec } from '../engine/blocks';
 import { shapeName } from '../engine/blockshapes';
@@ -50,8 +50,9 @@ export function BlockPanel(p: {
   blockSel: number; brush: Brush;
   /** PLACE docks blocks with the brush; EDIT edits the selected block */
   tab: 'place' | 'edit';
-  /** ⇄ respect the active mirror plane: shape edits + deletes go to the
-   *  block's SIMILAR TWIN (blockMirrorTwin) as well */
+  /** ⇄ mirrored PLACEMENT (the brush + held-part ghosts). v1.7.1: block
+   *  EDITS no longer consult it — every edit on a selected block always
+   *  drives its SIMILAR TWIN (blockMirrorTwin) in mirrored unison */
   mirror: boolean;
   /** v1 files carry no data.colors — the palette picker applies the remap */
   legacy: boolean;
@@ -68,10 +69,14 @@ export function BlockPanel(p: {
 }) {
   const [snapMsg, setSnapMsg] = useState('');
   const info = p.blockSel >= 0 ? blockInfo(p.bp, p.blockSel) : null;
-  // SIMILAR BLOCKS ⇄ (identified always; edits only propagate when mirror is
-  // on): the block on the mirrored footprint with the same extents and a
-  // compatible (identical-or-mirrored) shape — the block twin index.
+  // SIMILAR BLOCKS ⇄: the block on the mirrored footprint with the same
+  // extents and a compatible (identical-or-mirrored) shape — the block twin
+  // index. Identified always; since v1.7.1 EVERY edit below drives it too
+  // (mirrored), the ⇄ toggle gating only twin PLACEMENT.
   const twin = info ? blockMirrorTwin(p.bp, p.blockSel) : -1;
+  // v1.8.0 UNIFORM MIRROR RULE diagnostic: what (if anything) breaks the
+  // mirror on the footprint opposite this block — the RED ⚠ row + popup
+  const twDiag = info ? blockTwinIssues(p.bp, p.blockSel) : null;
   const TYPES: [number, string][] = [
     [0, 'Cube'], [1, 'Ramp A'], [5, 'Ramp B'], [9, 'Ramp C'], [13, 'Corner'], [21, 'Pyramid'],
     [45, 'Inv corner'], [4, 'Thin rod'],
@@ -80,14 +85,16 @@ export function BlockPanel(p: {
    *  (v1.4 fix: single-key "cx" writes vanished on save), so the gizmo commit
    *  and the panel rows can never drift apart. */
   const writeBlock = (bi: number) => { if (p.ctx) writeBlockDoc(p.ctx, bi); };
-  /** v1.6: EVERY field edit (cx/cy/cz/size/type) respects ⇄ — the twin takes
+  /** v1.6: EVERY field edit (cx/cy/cz/size/type) mirrors — the twin takes
    *  the mirrored x cell, the same y/z DELTA, its own clamped size and the
    *  MIRROR_TYPE turn (user: "ensure mirroring is respected, which currently
-   *  it is not, when editing a block"). A colliding cell move REFUSES the
-   *  twin's move (the gizmo's cellOverlapSkip contract — the pair may not
-   *  interpenetrate); the self edit already applied stands. */
+   *  it is not, when editing a block"). v1.7.1 (user: "it should also do
+   *  whatever I do to the mirror block"): ALWAYS, not just while ⇄ is on.
+   *  A colliding cell move REFUSES the twin's move (the gizmo's
+   *  cellOverlapSkip contract — the pair may not interpenetrate); the self
+   *  edit already applied stands. */
   const mirrorGeom = (k: 'cx' | 'cy' | 'cz' | 'size_x' | 'size_y' | 'size_z' | 'type', v: number) => {
-    if (!p.mirror || twin < 0 || !p.ctx) return;
+    if (twin < 0 || !p.ctx) return;
     const bp = p.ctx.bp;
     const tw = bp.data.blocks[twin];
     if (!tw) return;
@@ -120,11 +127,11 @@ export function BlockPanel(p: {
     mirrorGeom(k, v);
     p.onApplied();
   };
-  /** Run one in-place shape edit on the selected block AND (⇄ on) its
-   *  similar twin. fn mutates bp and writes the doc; returns changed. */
+  /** Run one in-place shape edit on the selected block AND ALWAYS its
+   *  similar twin (v1.7.1). fn mutates bp and writes the doc; returns changed. */
   const editBlocks = (fn: (bi: number) => boolean) => {
     if (!p.ctx || p.blockSel < 0) return;
-    const tw = p.mirror ? blockMirrorTwin(p.bp, p.blockSel) : -1;
+    const tw = blockMirrorTwin(p.bp, p.blockSel);
     const results = [fn(p.blockSel)];
     if (tw >= 0) results.push(fn(tw));
     if (results.some(Boolean)) p.onApplied();
@@ -157,7 +164,7 @@ export function BlockPanel(p: {
    *  stays mirror-consistent. */
   const snap = () => {
     if (!p.ctx || p.blockSel < 0) return;
-    const tw = p.mirror ? blockMirrorTwin(p.bp, p.blockSel) : -1;
+    const tw = blockMirrorTwin(p.bp, p.blockSel);
     const rs = snapBlockType(p.bp, p.blockSel);
     const rt = tw >= 0 ? snapBlockType(p.bp, tw) : null;
     if (!rs) { setSnapMsg('no neighbouring blocks to match'); return; }
@@ -179,7 +186,7 @@ export function BlockPanel(p: {
   };
   const deleteSel = () => {
     if (!p.ctx) return;
-    const tw = p.mirror ? blockMirrorTwin(p.bp, p.blockSel) : -1;
+    const tw = blockMirrorTwin(p.bp, p.blockSel);
     const idx = [p.blockSel, ...(tw >= 0 ? [tw] : [])].sort((a, b) => b - a);
     for (const i of idx) {
       p.ctx.bp.data.blocks.splice(i, 1);
@@ -194,7 +201,7 @@ export function BlockPanel(p: {
    *  it; the game reader defaults a missing one to composite). */
   const setMaterial = (m: number) => {
     if (!p.ctx || p.blockSel < 0) return;
-    const tw = p.mirror ? blockMirrorTwin(p.bp, p.blockSel) : -1;
+    const tw = blockMirrorTwin(p.bp, p.blockSel);
     writeBlockMaterial(p.ctx, p.blockSel, m);
     if (tw >= 0) writeBlockMaterial(p.ctx, tw, m);
     p.onApplied();
@@ -272,7 +279,7 @@ export function BlockPanel(p: {
                 <Num label="slot" value={info.slot} min={0} max={255} onCommit={v => apply('slot', v)} />
               </div>
               {/* MATERIALS (v1.7): the block's game material (mass/heat/build
-                  cost). ⇄ on drives the SIMILAR TWIN too (identity edits mirror
+                  cost). v1.7.1: the SIMILAR TWIN is driven too (identity edits mirror
                   like geometry edits — a symmetric craft is built of one
                   material). The appearance is the Paint section below. */}
               <div className="flex items-center gap-2 pb-1 pt-1">
@@ -313,15 +320,18 @@ export function BlockPanel(p: {
               </div>
               {snapMsg && <div data-testid="snap-msg" className="pt-1 text-[10px] text-ink-dim">{snapMsg}</div>}
               <div data-testid="block-twin" className="pt-1 text-[10px]">
-                {twin >= 0
-                  ? <span className="text-gold">⇄ similar twin: Block[{twin}]{p.mirror ? ' (edits mirror to it)' : ' — ⇄ OFF: edits stay local'}</span>
-                  : <span className="text-ink-dim">no similar (mirrored) block</span>}
+                {twDiag?.issues.length
+                  ? <span className="text-red-400">⚠ mirror conflict{twin >= 0 ? `: Block[${twin}]` : ''}
+                      — {twDiag.issues.join(', ')}{twin < 0 ? ' (edits do NOT mirror)' : ''}</span>
+                  : twin >= 0
+                    ? <span className="text-gold">⇄ similar twin: Block[{twin}] (edits mirror to it)</span>
+                    : <span className="text-ink-dim">no similar (mirrored) block</span>}
               </div>
               <div className="mt-1 flex gap-1">
                 <button data-testid="block-delete"
                   className="rounded bg-red-900/60 px-2 py-1 text-[11px] text-ink hover:bg-red-800"
                   onClick={deleteSel}>
-                  {p.mirror && twin >= 0 ? 'Delete block + twin' : 'Delete block'}
+                  {twin >= 0 ? 'Delete block + twin' : 'Delete block'}
                 </button>
                 <button data-testid="block-deselect"
                   className="rounded bg-panel2 px-2 py-1 text-[11px] text-ink-dim hover:text-ink"
