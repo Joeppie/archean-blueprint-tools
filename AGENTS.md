@@ -298,8 +298,9 @@ Multiple stacked changes still take ONE bump: the version describes the
 RELEASE, not the commits inside it (v1.3 = one tweak; had it carried a fix AND
 a feature, it would be the feature's `Y`, still a single tag).
 
-Enforcement: `tools/release.sh` refuses a 2-part string on a new cut, refuses
-a number that does not move FORWARD past the newest remote tag, and prints
+Enforcement: `tools/release.sh` refuses a 2-part string on a new cut, refuses a
+version strictly BACKWARD of the newest tag on origin (EQUAL stays legal — it
+is the suite-re-run path), and prints
 `semver bump: v1.3 → v1.3.1 (patch …)` so a fix-onto-Y misfire is visible at
 the moment of the cut. `tools/security-scan.py --versions` keeps all nine
 context-anchored strings in lockstep. The bump itself still happens at SESSION

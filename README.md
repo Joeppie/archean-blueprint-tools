@@ -139,8 +139,8 @@ workflow at
 
 Releases are **semver `vX.Y.Z`**: `X` for an overhaul (UI, framework, scope —
 `v1.0` was the app replacing the viewer), `Y` for new features, `Z` for fixes
-and small tweaks. `tools/release.sh` refuses a 2-part string and a number that
-does not move forward.
+and small tweaks. `tools/release.sh` refuses a 2-part string and a version
+older than the newest tag.
 
 GitHub Pages serves the **`release` branch** (stable); `main` is development.
 A release is a `main` commit that passed the full suite, fast-forwarded onto
