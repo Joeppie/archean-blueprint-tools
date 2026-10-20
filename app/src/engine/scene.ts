@@ -207,7 +207,7 @@ export class Engine {
    *  block (+ its dim SIMILAR TWIN, identified regardless of ⇄) — the block
    *  analogue of the component outline. Own scene child at moff, like ghostGroup. */
   private blockHlGroup = new Group();
-  private blockHlSpec: { bi: number; twin: number; issues: string[] } | null = null;
+  private blockHlSpec: { bi: number; twin: number; issues: string[]; info: boolean } | null = null;
   /** bi|twin|geometry+paint fingerprint — the v1.6 staleness guard */
   private blockHlSig = '';
   /** CATALOG placement ghost (v1.4): a translucent collider box at the
@@ -276,7 +276,7 @@ export class Engine {
    *  RED outline box (never silent gold) beside the golden selection */
   private warnHl = new Highlight(this.scene, 0xff4d4d);
   /** the selected component's conflicted twin pairs (red box + ⚠ popup) */
-  private compWarn: { j: number; issues: string[] }[] = [];
+  private compWarn: { j: number; issues: string[]; info: boolean }[] = [];
   private hoverCi = -1;
   onSelection: ((sel: { ci: number; sub: number }) => void) | null = null;
   private fly: { from: Vector3; to: Vector3; t0: number } | null = null;
@@ -317,6 +317,8 @@ export class Engine {
   private blockGizMirror = false;
   /** gesture base: the block's cell + the proxy centre at mouseDown */
   private blockBase: { cell: [number, number, number]; center: Vector3 } | null = null;
+  /** view options saved at a BLOCK-widget drag start (v1.8.1 wireframe hint) */
+  private wireDragOpts: { hull: boolean; wire: boolean } | null = null;
   /** block-side writes (gizmo commits): the Editor mirrors the bp blocks into
    *  the raw doc + dirty + the debounced merged-hull reload (it owns the doc) */
   onBlockEdit: ((bis: number[]) => void) | null = null;
@@ -1581,9 +1583,15 @@ void main() {
       for (const { j } of this.symIdx.get(this.selCi) ?? []) {
         const issues: string[] = [];
         if (!live.has(j)) issues.push('drift: pair off the mirror plane');
-        issues.push(...compPaintDiff(comps[this.selCi]?.colors, comps[j]?.colors));
+        const paint = compPaintDiff(comps[this.selCi]?.colors, comps[j]?.colors);
+        issues.push(...paint);
         if (!issues.length) continue;
-        this.compWarn.push({ j, issues });
+        // v1.8.1: a pair PAINTED apart is INFORMATIONAL (blue popup only, the
+        // twin box stays gold); a drifted pair is a conflict (red) even with
+        // a paint diff riding along.
+        const info = paint.length > 0 && issues.length === paint.length;
+        this.compWarn.push({ j, issues, info });
+        if (info) continue;                       // blue popup only, no red box
         const rs = this.compRoots.get(j) ?? [];
         const v = rs.filter(o => o.visible);
         faux.push(...(v.length ? v : rs));
@@ -2053,6 +2061,9 @@ void main() {
   private captureBlockGesture() {
     const b = this.blockGizBi >= 0 && this.bp ? this.bp.data.blocks[this.blockGizBi] : undefined;
     if (!b) return;
+    // v1.8.1 (user: "when moving blocks, wireframe must be visible for all
+    // blocks"): the WHOLE hull goes wireframe for the gesture's duration
+    this.showHullWireframe(true);
     const c = blockCells(b);
     this.blockBase = { cell: [c.x, c.y, c.z], center: this.gizmoProxy.position.clone() };
   }
@@ -2077,6 +2088,7 @@ void main() {
    *  footprint REFUSES the gesture (the widget snaps back — the red-ghost
    *  contract). Both are the panel's discrete edits, driven by the widget. */
   private commitBlockGesture() {
+    this.showHullWireframe(false);            // solids come back at the commit
     const base = this.blockBase;
     this.blockBase = null;
     if (!base) return;
@@ -2102,6 +2114,29 @@ void main() {
     this.syncBlockGizmo();
     this.invalidate();
   }
+  /** v1.8.1 (user: "when moving blocks, wireframe must be visible for all
+   *  blocks"): while the BLOCK widget DRAGS a block, every block's lattice
+   *  shows — the merged wireframe goes visible and the hull solids step
+   *  aside (the legacy hull⇄wire pair), so the block being placed reads
+   *  against ALL other blocks instead of hiding inside a solid skin. The
+   *  user's own hull/wire choice is restored at the commit (a wire already
+   *  showing is left untouched). */
+  private showHullWireframe(on: boolean) {
+    if (on) {
+      if (this.wireDragOpts || !this.wireLine) return;
+      this.wireDragOpts = { hull: this.opts.hull, wire: this.opts.wire };
+      if (!this.opts.wire) {
+        this.opts = { ...this.opts, hull: false, wire: true };
+        this.applyViewOptions();
+      }
+    } else if (this.wireDragOpts) {
+      this.opts = { ...this.opts, hull: this.wireDragOpts.hull, wire: this.wireDragOpts.wire };
+      this.wireDragOpts = null;
+      this.applyViewOptions();
+    }
+    this.invalidate();
+  }
+
   /** VALIDATED whole-cell shift of the block owning the widget (+ its SIMILAR
    *  TWIN to the mirrored cell — v1.7.1: ALWAYS, the user's edits mirror to
    *  the identified twin). false = the footprint collides (refused).
@@ -2835,7 +2870,7 @@ void main() {
    *  block's OLD shape/pos: a golden ghost of the pre-edit block stuck on
    *  the deck until a full deselect ("blocks become translucent and don't
    *  return to previous state", user report). */
-  setBlockHighlight(bi: number, twin = -1, issues: readonly string[] = []) {
+  setBlockHighlight(bi: number, twin = -1, issues: readonly string[] = [], info = false) {
     const fp = (i: number): string => {
       const b = i >= 0 && this.bp ? this.bp.data.blocks[i] : undefined;
       if (!b) return '-';
@@ -2843,10 +2878,10 @@ void main() {
       return `${b.type}|${c.x},${c.y},${c.z}|${b.size_x},${b.size_y},${b.size_z}|` +
         (Array.isArray(b.colors) ? b.colors.join(',') : '');
     };
-    const sig = `${bi}|${twin}|${issues.join(';')}|${fp(bi)}|${fp(twin)}`;
+    const sig = `${bi}|${twin}|${info ? 'i' : 'w'}|${issues.join(';')}|${fp(bi)}|${fp(twin)}`;
     if ((this.blockHlSpec?.bi ?? -1) === bi && (this.blockHlSpec?.twin ?? -1) === twin &&
       this.blockHlSig === sig) return;
-    this.blockHlSpec = bi >= 0 ? { bi, twin, issues: [...issues] } : null;
+    this.blockHlSpec = bi >= 0 ? { bi, twin, issues: [...issues], info } : null;
     this.blockHlSig = sig;
     for (const o of this.blockHlGroup.children) {
       (o as Mesh).geometry?.dispose();
@@ -2866,8 +2901,10 @@ void main() {
       const add = (idx: number, opacity: number) => addAt(idx, opacity, 0xffc94d);
       const addTwin = (idx: number, opacity: number, hex: number) => addAt(idx, opacity, hex);
       add(bi, 0.34);
-      // v1.8.0: a mirror-conflicting FAUX-MIRROR twin rides RED, a true twin gold
-      if (twin >= 0) addTwin(twin, 0.16, issues.length ? 0xff4d4d : 0xffc94d);
+      // v1.8.0: a mirror-conflicting FAUX-MIRROR twin rides RED; v1.8.1: a
+      // face-PAINT-only divergence is INFORMATIONAL — the overlay stays gold,
+      // only the blue info popup notes it (user rule).
+      if (twin >= 0) addTwin(twin, 0.16, issues.length && !info ? 0xff4d4d : 0xffc94d);
     }
     this.invalidate();
   }
@@ -2877,11 +2914,12 @@ void main() {
    *  selection's mirror twin CONFLICTS (block issues, or a component pair
    *  drifted / painted apart), returns the label text + a CLIENT-px anchor at
    *  the flagged twin; null = no conflict. The Viewport renders the ⚠ card. */
-  twinWarnState(): { text: string; x: number; y: number } | null {
+  twinWarnState(): { text: string; x: number; y: number; info: boolean } | null {
     const renderer = this.renderer, cam = this.camera;
     if (!renderer || !cam || !this.bp) return null;
     const p = new Vector3();
     let text = '';
+    let info = false;
     const spec = this.blockHlSpec;
     if (spec && spec.issues.length) {
       const ti = spec.twin >= 0 ? spec.twin : spec.bi;
@@ -2892,17 +2930,19 @@ void main() {
         (c.z - 6 + (b.size_z + 1) / 2) * CELL).add(this.moffV());
       text = (spec.twin >= 0 ? `Block[${spec.bi}] ↔ twin Block[${spec.twin}]: `
         : `Block[${spec.bi}]: no valid mirror twin — `) + spec.issues.join(', ');
+      info = spec.info;
     } else if (this.selCi >= 0 && this.compWarn.length) {
       const w = this.compWarn[0]!;
       const c = this.bp.data.components[w.j];
       if (!c) return null;
       p.set(c.position.x, c.position.y, c.position.z).add(this.moffV());
       text = `${c.type}[${this.selCi}] ↔ twin [${w.j}]: ` + w.issues.join(', ');
+      info = w.info;
     } else return null;
     p.project(cam);
     if (p.z > 1) return null;                       // behind the camera
     const rect = renderer.domElement.getBoundingClientRect();
-    return { text, x: rect.left + (p.x + 1) / 2 * rect.width,
+    return { text, info, x: rect.left + (p.x + 1) / 2 * rect.width,
       y: rect.top + (1 - p.y) / 2 * rect.height };
   }
 

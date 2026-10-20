@@ -5,18 +5,21 @@
 // conflicting faux-mirror: it must be flagged — a RED overlay/box plus a ⚠
 // popup naming what differs (engine twinWarnState → the Viewport's twin-warn
 // card; blockTwinIssues / compPaintDiff are the pure screens, unit-pinned in
-// blocks.test.ts / sym.test.ts).
+// blocks.test.ts / sym.test.ts). v1.8.1 SEVERITY: face-paint / component-colour
+// divergence is INFORMATIONAL — a BLUE ℹ popup only, no red overlay (user:
+// "face paint mismatch should not be a red warning but just informational");
+// shape/size/material/drift stay RED conflicts.
 import { expect, test, type Page } from '@playwright/test';
 
-type Hl = { bi: number; twin: number; issues?: string[] } | null;
+type Hl = { bi: number; twin: number; issues?: string[]; info?: boolean } | null;
 
 const highlight = (page: Page) => page.evaluate(() =>
   (window as unknown as { __ARCHEAN__?: { blockHighlight: () => Hl } }
   ).__ARCHEAN__!.blockHighlight());
 
+type Warn = { text: string; info: boolean; x: number; y: number } | null;
 const twinWarn = (page: Page) => page.evaluate(() =>
-  (window as unknown as { __ARCHEAN__?: { twinWarn: () => { text: string; x: number; y: number } | null } }
-  ).__ARCHEAN__!.twinWarn());
+  (window as unknown as { __ARCHEAN__?: { twinWarn: () => Warn } }).__ARCHEAN__!.twinWarn());
 
 const compsLen = (page: Page) => page.evaluate(() =>
   (window as unknown as { __ARCHEAN__?: { engine: { blueprint: {
@@ -68,19 +71,41 @@ test.describe('faux-mirror screen: mismatches are flagged, not silent @place', (
     expect(hl!.twin, 'a true twin is propable').toBeGreaterThanOrEqual(0);
     expect(hl!.issues ?? [], 'a fresh ⇄ pair has no conflict').toEqual([]);
 
-    // BREAK the mirror behind the UI: the twin takes a different MATERIAL.
+    // BREAK the appearance first: a face-PAINT difference is INFORMATIONAL
+    // (v1.8.1): BLUE ℹ popup, no red flag (user rule).
+    const reselect = async () => {
+      const b = (await page.getByTestId('canvas').boundingBox())!;
+      await page.mouse.click(b.x + b.width * 0.04, b.y + b.height * 0.04);  // sky
+      await expect.poll(() => highlight(page), { timeout: 4000 }).toBeNull();
+      await page.mouse.click(px, py);                      // re-select: re-screen
+      return highlight(page);
+    };
+    await page.evaluate((i) => {
+      const bl = (window as unknown as { __ARCHEAN__?: { engine: { blueprint: {
+        data: { blocks: { colors?: unknown }[] } } } } }).__ARCHEAN__!.engine
+        .blueprint.data.blocks[i]!;
+      (bl.colors as number[])[0] = 9;                      // one face repainted
+    }, hl!.twin);
+    hl = await reselect();
+    expect((hl!.issues ?? []).join(', ')).toMatch(/face paint on 1 of 7 faces/);
+    expect(hl!.info, 'a paint-only mismatch is informational, not a conflict').toBe(true);
+    await expect.poll(async () => (await twinWarn(page))?.text ?? '', { timeout: 5000 })
+      .toMatch(/face paint/);
+    expect((await twinWarn(page))!.info).toBe(true);
+    await expect(page.getByTestId('twin-warn')).toContainText('ℹ');
+
+    // BREAK the mirror for real: the twin takes a different MATERIAL — RED.
     await page.evaluate((i) => {
       (window as unknown as { __ARCHEAN__?: { engine: { blueprint: {
         data: { blocks: { material?: number }[] } } } } }).__ARCHEAN__!.engine
-        .blueprint.data.blocks[i]!.material = 1;          // Concrete vs Composite
+        .blueprint.data.blocks[i]!.material = 1;           // Concrete vs Composite
     }, hl!.twin);
-    await page.mouse.click(box.x + box.width * 0.04, box.y + box.height * 0.04);  // sky: deselect
-    await expect.poll(() => highlight(page), { timeout: 4000 }).toBeNull();
-    await page.mouse.click(px, py);                        // re-select: issues recompute
-    hl = await highlight(page);
+    hl = await reselect();
     expect(hl).not.toBeNull();
     expect((hl!.issues ?? []).join(', ')).toMatch(/material Composite ≠ Concrete/);
+    expect(hl!.info, 'a material conflict is NOT informational').toBe(false);
     await expect(page.getByTestId('block-twin')).toContainText(/⚠ mirror conflict/);
+    await expect(page.getByTestId('twin-warn')).toContainText('⚠');
     // the ⚠ popup (250 ms poll): a triangle + the diff text, anchored at the twin
     await expect.poll(async () => (await twinWarn(page))?.text ?? '', { timeout: 5000 })
       .toMatch(/material Composite ≠ Concrete/);
@@ -130,6 +155,8 @@ test.describe('faux-mirror screen: mismatches are flagged, not silent @place', (
     await expect.poll(() => twinWarn(page), { timeout: 5000 }).not.toBeNull();
     const w = await twinWarn(page);
     expect(w!.text).toMatch(/SmallWheel\[\d+\] ↔ twin \[\d+\]: .*colour1 differs/);
+    expect(w!.info, 'a painted-apart pair is informational (blue), not red').toBe(true);
+    await expect(page.getByTestId('twin-warn')).toContainText('ℹ');
     await expect(page.getByTestId('twin-warn')).toContainText(/colour1 differs/);
   });
 });

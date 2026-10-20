@@ -5,7 +5,9 @@
 // doesnt show when selecting blocks … move arrows cell snapped, rotation
 // arrows that move in 90° increments"). ⟲ turns the shape IN PLACE (bbox
 // centre frozen), ✧ snap reads the neighbour geometry, and a ⇄-placed pair
-// IDENTIFIES as similar twins whose edits propagate together.
+// IDENTIFIES as similar twins whose edits ALWAYS propagate together
+// (mirrored) — v1.7.1: identification AND propagation are unconditional,
+// the ⇄ toggle gates only twin PLACEMENT.
 import { expect, test, type Page } from '@playwright/test';
 
 type Blk = { pos_x: number; pos_y: number; pos_z: number; frame_x?: number; frame_y?: number;
@@ -203,7 +205,21 @@ test.describe('blocks EDIT: highlight, in-place rotate, snap, twin @place', () =
     expect(hl!.bi).not.toBe(hl!.twin);
     const twinRow = page.getByTestId('block-twin');
     await expect(twinRow).toContainText(/similar twin: Block\[\d+\]/);
-    await expect(twinRow).toContainText(/⇄ OFF: edits stay local/);
+    await expect(twinRow).toContainText(/\(edits mirror to it\)/);
+    // v1.7.1 (user: "It should also do whatever I do to the mirror block,
+    // mirrored of course"): with ⇄ still OFF, a gizmo cell-shift moves the
+    // SELF one cell up AND the TWIN one cell up (y mirrors to itself) —
+    // propagation is unconditional; ⇄ gates only twin PLACEMENT.
+    const t0 = await blockAt(page, hl!.twin);
+    const s0 = await blockAt(page, hl!.bi);
+    const moved = await page.evaluate(() => (window as unknown as {
+      __ARCHEAN__?: { engine: { blockGizmoShift: (s: [number, number, number]) => boolean } } }
+    ).__ARCHEAN__!.engine.blockGizmoShift([0, 1, 0]));
+    expect(moved, 'a shift into empty space is accepted').toBe(true);
+    expect(await blockAt(page, hl!.bi), 'the self block moved one cell up')
+      .toMatchObject({ cy: s0.cy + 1 });
+    expect(await blockAt(page, hl!.twin!), 'the twin moved WITH it (mirrored), ⇄ OFF')
+      .toMatchObject({ cy: t0.cy + 1 });
   });
 
   test('BLOCK widget (v1.5): attach, refuse a colliding shift, cell-move, 90° turn, detach on flip', async ({ page }) => {

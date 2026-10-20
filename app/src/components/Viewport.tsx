@@ -155,12 +155,12 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
   });
   // v1.8.0 FAUX-MIRROR ⚠ popup: poll the engine's conflict state (selection-
   // scoped, cheap) and re-anchor it every ~250 ms so it rides camera motion.
-  const [warn, setWarn] = useState<{ text: string; x: number; y: number } | null>(null);
+  const [warn, setWarn] = useState<{ text: string; info: boolean; x: number; y: number } | null>(null);
   useEffect(() => {
     const h = setInterval(() => {
       const e = engineRef.current, box = hostRef.current?.getBoundingClientRect();
       const w = e?.twinWarnState();
-      setWarn(w && box ? { text: w.text, x: w.x - box.left, y: w.y - box.top } : null);
+      setWarn(w && box ? { text: w.text, info: w.info, x: w.x - box.left, y: w.y - box.top } : null);
     }, 250);
     return () => clearInterval(h);
   }, []);
@@ -254,11 +254,16 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
         </div>
       )}
       {warn && (
-        <div data-testid="twin-warn" role="alert" title="mirror-conflicting faux-mirror"
-          className="ksp-win absolute z-30 flex max-w-[240px] -translate-x-1/2 items-start gap-1.5
-                     rounded px-2 py-1 text-[10px] leading-snug text-[#ff9c9c]"
+        // v1.8.0 conflict = RED ⚠; v1.8.1 face-paint-only = informational
+        // BLUE ℹ popup (the twin overlay stays gold — user: "just its popup")
+        <div data-testid="twin-warn" role={warn.info ? 'status' : 'alert'}
+          title={warn.info ? 'mirror twin differs in appearance only' : 'mirror-conflicting faux-mirror'}
+          className={`ksp-win absolute z-30 flex max-w-[240px] -translate-x-1/2 items-start gap-1.5
+                      rounded px-2 py-1 text-[10px] leading-snug ${
+                        warn.info ? 'text-[#9cc8ff]' : 'text-[#ff9c9c]'}`}
           style={{ left: warn.x, top: Math.max(8, warn.y + 14) }}>
-          <span className="text-[13px] leading-none text-[#ff4d4d]">⚠</span>
+          <span className={`text-[13px] leading-none ${warn.info ? 'text-[#4da3ff]' : 'text-[#ff4d4d]'}`}>
+            {warn.info ? 'ℹ' : '⚠'}</span>
           <span>{warn.text}</span>
         </div>
       )}

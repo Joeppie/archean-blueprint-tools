@@ -355,7 +355,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     if (!e) return;
     if (mode === 'blocks' && blockSel >= 0 && ctx) {
       const tw = blockTwinIssues(ctx.bp, blockSel);
-      e.setBlockHighlight(blockSel, tw?.twin ?? -1, tw?.issues ?? []);
+      e.setBlockHighlight(blockSel, tw?.twin ?? -1, tw?.issues ?? [], tw?.info ?? false);
     } else e.setBlockHighlight(-1);
   }, [mode, blockSel, rev, engine]);
 

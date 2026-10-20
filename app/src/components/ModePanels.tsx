@@ -321,7 +321,9 @@ export function BlockPanel(p: {
               {snapMsg && <div data-testid="snap-msg" className="pt-1 text-[10px] text-ink-dim">{snapMsg}</div>}
               <div data-testid="block-twin" className="pt-1 text-[10px]">
                 {twDiag?.issues.length
-                  ? <span className="text-red-400">⚠ mirror conflict{twin >= 0 ? `: Block[${twin}]` : ''}
+                  ? <span className={twDiag.info ? 'text-sky-300' : 'text-red-400'}>
+                      {twDiag.info ? 'ℹ' : '⚠'} {twDiag.info ? 'differs in appearance' : 'mirror conflict'}
+                      {twin >= 0 ? `: Block[${twin}]` : ''}
                       — {twDiag.issues.join(', ')}{twin < 0 ? ' (edits do NOT mirror)' : ''}</span>
                   : twin >= 0
                     ? <span className="text-gold">⇄ similar twin: Block[{twin}] (edits mirror to it)</span>

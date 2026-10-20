@@ -492,12 +492,17 @@ export function blockMirrorTwin(bp: Blueprint, bi: number): number {
  *  when one exists, else the nearest candidate sitting on the block's
  *  x-MIRRORED footprint (same y/z cells, overlapping mirrored x span) even
  *  when its extents/shape make it an invalid pair.
- *  Returns { twin, issues }: twin = blockMirrorTwin (propable) or -1;
+ *  Returns { twin, issues, info }: twin = blockMirrorTwin (propable) or -1;
  *  issues = human-readable mismatches (shape, size/position, material,
  *  per-face paint through the mirrored face mapping); [] = a TRUE mirror
- *  twin. null = nothing sits on the mirrored footprint at all. The UI
- *  renders issues as the RED overlay + ⚠ popup. */
-export function blockTwinIssues(bp: Blueprint, bi: number): { twin: number; issues: string[] } | null {
+ *  twin; info = v1.8.1 severity (user: "face paint mismatch should not be a
+ *  red warning but just informational, blue colored, just its popup will
+ *  do") — TRUE when ONLY appearance (face paint) differs: no red overlay,
+ *  just the BLUE info popup. null = nothing sits on the mirrored footprint.
+ *  Everything else (shape, extents, material — the gameplay identity) is a
+ *  conflict: RED overlay + ⚠ popup. */
+export function blockTwinIssues(
+  bp: Blueprint, bi: number): { twin: number; issues: string[]; info: boolean } | null {
   const bl = bp.data.blocks;
   const b = bl[bi];
   if (!b || b.type === 255) return null;
@@ -537,7 +542,7 @@ export function blockTwinIssues(bp: Blueprint, bi: number): { twin: number; issu
   let diff = 0;
   for (let f = 0; f < 7; f++) if (expect[f] !== got[f]) diff++;
   if (diff) issues.push(`face paint on ${diff} of 7 faces`);
-  return { twin, issues };
+  return { twin, issues, info: issues.length > 0 && issues.every(i => i.startsWith('face paint')) };
 }
 
 // ------------------------------------------------------------ FACE PAINT

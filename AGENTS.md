@@ -276,13 +276,24 @@ user's explicit say-so (Pages/release still serves it meanwhile).
   extents, identical-or-MIRROR_TYPE shape) / the `sym.ts` mask index (parts:
   alignment stays within 5 cm; drift = a broken pair = flagged, not chased).
   **FAUX-MIRROR = flagged, never silent:** a mirror-position partner that
-  DIFFERS in a regarded property (blocks: shape, size/position, material,
-  per-face paint through the mirrored mapping; components: pair drift,
-  colour1/colour2) renders the twin overlay/box RED (scene warnHl,
-  setBlockHighlight issues) and a small ⚠ popup (Viewport `twin-warn` card;
-  engine `twinWarnState()` text anchored at the twin by projection). Pure
-  screens: `blocks.ts blockTwinIssues()` + `sym.ts compPaintDiff()`
-  (vitest-pinned); UI pinned by app/e2e/mirror-mismatch.spec.ts (@place).
+  DIFFERS in a regarded property is flagged — with SEVERITY (v1.8.1 user
+  rule: "face paint mismatch should not be a red warning but just
+  informational, blue colored, just its popup will do"): a GEOMETRY/GAMEPLAY
+  conflict (blocks: shape, size/position, material; components: pair drift)
+  renders the twin overlay/box RED (scene warnHl, setBlockHighlight issues)
+  + a ⚠ popup; an APPEARANCE-only difference (blocks: per-face paint via
+  the mirrored mapping; components: colour1/colour2) is INFORMATIONAL —
+  twin overlay/box stays GOLD, only a BLUE ℹ popup notes it (the info flag
+  rides blockTwinIssues().info / twinWarnState().info). Popups: the Viewport
+  `twin-warn` card; engine `twinWarnState()` text anchored at the twin by
+  projection). Pure screens: `blocks.ts blockTwinIssues()` + `sym.ts
+  compPaintDiff()` (vitest-pinned); UI pinned by
+  app/e2e/mirror-mismatch.spec.ts (@place). v1.8.1 also: dragging a block
+  with the BLOCK widget shows the WHOLE hull as wireframe for the gesture's
+  duration (showHullWireframe: merged wire on, hull solids off, the user's
+  hull/wire choice restored at the commit) — user: "when moving blocks,
+  wireframe must be visible for all blocks".
+
 - **v1.7 MATERIALS / appearance split (user rule: "Blocks should let me edit
   material: composite, iron, glass, etc; this is not part of the color picker,
   and it should make it clear glass/metal is appearance"): the blueprint's

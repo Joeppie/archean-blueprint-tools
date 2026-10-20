@@ -278,7 +278,7 @@ describe('v1.8.0 UNIFORM MIRROR RULE: blockTwinIssues (faux-mirror screen)', () 
     const b = blockFromCell([8, 5, 6], [1, 0, 0], 13, 4);
     const t = mirroredBlock(b);
     const r = blockTwinIssues(bpOf([b, t]), 0)!;
-    expect(r).toEqual({ twin: 1, issues: [] });
+    expect(r).toEqual({ twin: 1, issues: [], info: false });
   });
   it('material differs → still a twin, flagged material', () => {
     const b = blockFromCell([8, 5, 6], [0, 0, 0], 0, 4);
@@ -287,6 +287,7 @@ describe('v1.8.0 UNIFORM MIRROR RULE: blockTwinIssues (faux-mirror screen)', () 
     const r = blockTwinIssues(bpOf([b, t]), 0)!;
     expect(r.twin).toBe(1);
     expect(r.issues.join(', ')).toMatch(/material Composite ≠ Steel/);
+    expect(r.info).toBe(false);                          // gameplay identity = RED
   });
   it('face paint differs → flagged with the face count', () => {
     const b = blockFromCell([8, 5, 6], [0, 0, 0], 0, 4);
@@ -295,6 +296,9 @@ describe('v1.8.0 UNIFORM MIRROR RULE: blockTwinIssues (faux-mirror screen)', () 
     const r = blockTwinIssues(bpOf([b, t]), 0)!;
     expect(r.twin).toBe(1);
     expect(r.issues.join(', ')).toMatch(/face paint on \d+ of 7 faces/);
+    // v1.8.1 (user rule): appearance-only divergence is INFORMATIONAL (blue
+    // popup), NOT a red faux-mirror conflict
+    expect(r.info).toBe(true);
   });
   it('wrong shape on the mirrored footprint → faux-mirror: NO twin, shape issue', () => {
     const b = blockFromCell([8, 5, 6], [1, 0, 0], 13, 4);
