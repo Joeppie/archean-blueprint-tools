@@ -43,13 +43,14 @@ function fixtureFaces(bp: Blueprint): { n: V3; c: number }[] {
   const out: { n: V3; c: number }[] = [];
   for (const b of bp.data.blocks) {
     if (b.type === 255) continue;
-    const lo: V3 = ['x', 'y', 'z'].map(a => (b[`pos_${a}`] - 5.5) * CELL + (b[`frame_${a}`] ?? 0) * 3) as V3;
-    const sz: V3 = ['x', 'y', 'z'].map(a => (b[`size_${a}`] + 1) * CELL) as V3;
+    const AX = ['x', 'y', 'z'] as const;
+    const lo: V3 = AX.map(a => (b[`pos_${a}`] - 5.5) * CELL + (b[`frame_${a}`] ?? 0) * 3) as V3;
+    const sz: V3 = AX.map(a => (b[`size_${a}`] + 1) * CELL) as V3;
     const pts = getBlockPoints(b.type, lo, sz);
     for (const idx of getBlockFaces(b.type)) {
       const uniq = [...new Set(idx)];
       if (uniq.length < 3) continue;
-      const [a, q, r] = uniq.map(k => pts[k] as V3);
+      const [a, q, r] = [pts[uniq[0]!]!, pts[uniq[1]!]!, pts[uniq[2]!]!] as [V3, V3, V3];
       const u: V3 = [q[0] - a[0], q[1] - a[1], q[2] - a[2]];
       const v: V3 = [r[0] - a[0], r[1] - a[1], r[2] - a[2]];
       const n: V3 = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
