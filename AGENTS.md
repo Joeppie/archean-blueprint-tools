@@ -344,28 +344,41 @@ user's explicit say-so (Pages/release still serves it meanwhile).
   The registry `TOOLS` currently holds `replace-all` and `hullify`; TopBar's
   Tools ▾ renders the list from it (adding a tool = adding one ToolDef, no
   new UI code). Pinned by `e2e/tools.spec.ts`.
-- **v1.7 hullify (blocks ▸ hull triangles)** lives in `engine/tools.ts` and
-  is PURE. Basis: `cull.culledBlocksSolids` already computes exactly the
-  surface the game shows (cell-cut full faces, interior walls, interior
-  partitions, translucency asymmetry), and every piece it keeps now carries
-  `src` = its block index (so the MATERIAL rides along). The tool regroups
-  the pieces by (plane, colour, material), rasterises them onto the PLANE'S
-  OWN integer lattice (`planeOrigin` solves a base point by extended gcd —
-  the plane x+z=29 contains NO multiple of (1,0,1), the first attempt's bug;
-  `planeBasis` picks a basis ALIGNED with the shape face edges — a generic
-  unimodular search finds skewed bases whose cells cut the pieces apart) and
-  stitches merged rectangles (greedy maximal rects = cull's stitch). Then
-  each rectangle is SPLIT until it fits the game's per-axis 5-bit vertex
-  window (v ∈ 0..31 with f 12-aligned — a 26-cell span straddling a frame
-  boundary has NO valid f; corpus-verified, FORMAT §Triangles). Invariants:
-  the triangle area EQUALS the culled surface area (pinned across the whole
-  corpus in `__tests__/tools.test.ts`), colours = the OUTSIDE face slot
-  (interior faces were culled away), occupancy type-255 blocks SURVIVE
-  (reservations, not geometry); Build-subgrid blocks are NOT rewritten (they
-  live in the nested blueprint lists) and the preview reports them. The tool
-  derives the cull's palette GENERATION from the blueprint (`colors == null`
-  ⇒ legacy slots) — a probe that swaps the palette out re-rules the
-  translucency culling and breaks the area pin (the first corpus-red).
+- **v1.7 hullify (blocks ▸ hull triangles) — FACE-EXACT rewrite (v1.5.1,
+  user: "it should literally take the coordinates of the edges … the current
+  one butchered the geometry of the ISW-241 craft wing shame")** lives in
+  `engine/tools.ts` and is PURE. Every emitted triangle IS a block-shape
+  face triangle: corners are `blockshapes` face vertices scaled by the
+  block's cell corner (`blkCell` coords ARE the triangle lattice g:
+  world = (g−6)·CELL) — a square face = 2 triangles, a wedge side = 1.
+  NOTHING merges or rasterises any more: the retired planeBasis/
+  stitchRects pass approximated slope-profile diagonals into staircase
+  rectangles whose compensating errors kept the TOTAL AREA exact (its only
+  guard) while ~⅓ of the ISW-241 hull (79 of 187 tris, 27 m²) sat OFF the
+  real faces — area equality cannot prove shape (lesson now pinned). The
+  ONLY culling is adjacency, sharing cull.ts's interior-wall rules (now
+  exported: blkCell/blkSpan/cellM/faceKey/buildFaceGrid/forEachFaceCell/
+  faceCovered/faceFootprint/cellQuad): a FULL face is cut cell-by-cell
+  against the face grid — a cell whose border is shared precisely and fully
+  with a neighbour's face cell (opaque vs opaque only, the translucency
+  asymmetry kept) emits NOTHING, a fully free face emits its whole
+  block-shape polygon, a partly covered one emits the FREE cells' own quads
+  (= "triangles that cover the non-overlapping area"); a PARTIAL
+  (slant/profile) face dies when an identical footprint appears twice
+  (glued slope-to-slope = interior partition). Block sizes ≤ 15 cells
+  (corpus) ⇒ every raw face fits the per-axis 5-bit window (encodeTri
+  rejects none; `skipped` is only ever a report). Colours = the OUTSIDE
+  face slot, MATERIAL rides along, occupancy type-255 blocks SURVIVE
+  (reservations, not geometry); Build-subgrid blocks are NOT rewritten (the
+  preview reports them). The tool derives the cull's palette GENERATION
+  from the blueprint (`colors == null` ⇒ legacy slots). Invariants
+  (`__tests__/tools.test.ts`, corpus-wide): the triangle area EQUALS the
+  culled surface area AND **containment** (`straysOf` = 0: every triangle's
+  centroid + all three corners lie ON the culled surface in its plane,
+  plane-bucketed point-in-tri) — together they pin the union exactly;
+  plus the literal-rule pins (glued-cube pair: shared border emits nothing,
+  20 face quads' worth of tris; lone wedge: profile planes hold ONE tri
+  each, square sides TWO; slant-glued wedge pair behaves like one cube).
   The dialog is a `danger` tool (no undo yet).
 - **v1.7 declared TODOs, visible in the Edit ▾ menu** (user: "we need a stack
   to be able to undo at least the last 10 operations, for each and every

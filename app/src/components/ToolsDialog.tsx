@@ -133,10 +133,12 @@ export const TOOLS: ToolDef[] = [
     label: 'Blocks → hull triangles…',
     icon: '▵',
     danger: true,
-    blurb: 'Glue the block hull into the hull TRIANGLES that cover its OUTSIDE '
-      + 'exactly: the silhouette and every edge survive, the interior block '
-      + 'borders die, each piece keeps its outside face’s colour and its '
-      + 'block’s material. Cheaper to build and lighter (a skin, not solid '
+    blurb: 'Turn every exposed BLOCK FACE into the hull TRIANGLES that ARE '
+      + 'that face: the triangles take the block shape’s own corner '
+      + 'coordinates (a square face = 2 triangles, a wedge side = 1). A '
+      + 'border two adjacent blocks share precisely and fully emits nothing; '
+      + 'everything else keeps its outside face’s colour and its block’s '
+      + 'material. Cheaper to build and lighter (a skin, not solid '
       + 'voxels); the game recomputes mass and the bounding box on load.',
     fields: [
       {

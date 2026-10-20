@@ -1,10 +1,19 @@
-// tools.ts pins (v1.7): the MATERIALS table + custom-RGB palette helpers,
-// the REPLACE-ALL census/mutation (family finish mapping, occupancy mirrors
-// never touched) and HULLIFY — blocks ▸ the hull triangles that cover their
-// OUTSIDE surface exactly. The invariant that makes hullify safe: the merged
-// triangle set covers the SAME surface area as cull.ts's surviving faces
-// (the exact silhouette), keeps each piece's colour + material, and lands on
-// the cell-corner lattice inside the game's 0..31 vertex window.
+// tools.ts pins (v1.7, hullify REWRITTEN v1.5.1 face-exact): the MATERIALS
+// table + custom-RGB palette helpers, the REPLACE-ALL census/mutation
+// (family finish mapping, occupancy mirrors never touched) and HULLIFY —
+// blocks ▸ hull triangles that ARE their own outside faces. The two
+// invariants that make hullify safe (the old stitch pass violated the
+// second one while keeping the first — the ISW-241 wing butchering):
+//  • AREA: the emitted set covers the SAME area as cull.ts's surviving
+//    faces (the exact silhouette) for EVERY corpus craft;
+//  • CONTAINMENT: EVERY emitted triangle (centroid + all three corners)
+//    lies ON that culled surface, in its plane — equal area + containment
+//    together = the union is exact. Plus the literal rule: a block's face
+//    triangles use the BLOCK SHAPE'S OWN corners (a square face = 2 tris,
+//    a wedge side = 1), and a border shared precisely between neighbours
+//    emits nothing.
+// Colours + materials stay per face, on the cell-corner lattice inside the
+// game's 0..31 vertex window.
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 import { corpusDir } from '../../../tools/vite-corpus.ts';
@@ -44,6 +53,55 @@ const triArea = (p: [number, number, number][]): number => {
 };
 const areaSum = (tris: [number, number, number][][]): number =>
   tris.reduce((s, t) => s + triArea(t), 0);
+
+type V3 = [number, number, number];
+const vsub = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const vcross = (a: V3, b: V3): V3 =>
+  [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const gOf = (p: V3): V3 => [Math.round(p[0] / CELL + 6), Math.round(p[1] / CELL + 6), Math.round(p[2] / CELL + 6)];
+const gcd2 = (a: number, b: number): number => (b ? gcd2(b, a % b) : Math.abs(a));
+/** canonical integer plane key of a world tri (lattice arithmetic, exact) */
+function planeKeyOf(t: V3[]): string {
+  const g = t.map(gOf);
+  const n = vcross(vsub(g[1]!, g[0]!), vsub(g[2]!, g[0]!));
+  const d = gcd2(gcd2(n[0], n[1]), n[2]) || 1;
+  let [nx, ny, nz] = [n[0] / d, n[1] / d, n[2] / d];
+  if (nx < 0 || (nx === 0 && ny < 0) || (nx === 0 && ny === 0 && nz < 0)) { nx = -nx; ny = -ny; nz = -nz; }
+  return `${nx},${ny},${nz}|${nx * g[0]![0] + ny * g[0]![1] + nz * g[0]![2]}`;
+}
+/** coplanar point-in-tri (2D projection on the dominant plane, boundary ok) */
+function inTriExact(q: V3, t: V3[]): boolean {
+  const n = vcross(vsub(t[1]!, t[0]!), vsub(t[2]!, t[0]!));
+  const nl = Math.hypot(n[0], n[1], n[2]);
+  if (nl < 1e-12) return false;
+  if (Math.abs(n[0] * (q[0] - t[0]![0]) + n[1] * (q[1] - t[0]![1]) + n[2] * (q[2] - t[0]![2])) / nl > 1e-6) return false;
+  const ax = Math.abs(n[0]) >= Math.abs(n[1]) && Math.abs(n[0]) >= Math.abs(n[2]) ? 0 : Math.abs(n[1]) >= Math.abs(n[2]) ? 1 : 2;
+  const u = (ax + 1) % 3, v = (ax + 2) % 3;
+  const p2 = (p: V3): [number, number] => [p[u]!, p[v]!];
+  const A = p2(t[0]!), B = p2(t[1]!), C = p2(t[2]!), Q = p2(q);
+  const sgn = (p: [number, number], a: [number, number], b: [number, number]) =>
+    (a[0] - p[0]) * (b[1] - p[1]) - (a[1] - p[1]) * (b[0] - p[0]);
+  const d1 = sgn(A, B, Q), d2 = sgn(B, C, Q), d3 = sgn(C, A, Q);
+  const eps = 1e-9 * (Math.hypot(B[0] - A[0], B[1] - A[1]) * Math.hypot(C[0] - A[0], C[1] - A[1]) + 1);
+  return !((d1 < -eps || d2 < -eps || d3 < -eps) && (d1 > eps || d2 > eps || d3 > eps));
+}
+/** emitted tris NOT on the culled surface (plane bucket + centroid/corners) */
+function straysOf(out: V3[][], surf: V3[][]): number {
+  const buckets = new Map<string, V3[][]>();
+  for (const t of surf) {
+    const k = planeKeyOf(t);
+    const b = buckets.get(k);
+    if (b) b.push(t); else buckets.set(k, [t]);
+  }
+  let n = 0;
+  for (const t of out) {
+    const bucket = buckets.get(planeKeyOf(t)) ?? [];
+    const cen: V3 = [(t[0]![0] + t[1]![0] + t[2]![0]) / 3, (t[0]![1] + t[1]![1] + t[2]![1]) / 3, (t[0]![2] + t[1]![2] + t[2]![2]) / 3];
+    const on = (q: V3) => bucket.some(s => inTriExact(q, s));
+    if (!on(cen) || !t.every(on)) n++;
+  }
+  return n;
+}
 
 describe('materials + RGB helpers', () => {
   test('the seven build materials, in the file order (FORMAT §blocks)', () => {
@@ -119,7 +177,7 @@ describe('replaceAll', () => {
 });
 
 describe('hullify — blocks ▸ hull triangles', () => {
-  test('two glued cubes merge into ONE closed box: 12 triangles, exact area', () => {
+  test('two glued cubes: the shared border emits NOTHING, every other face is its own quad pair', () => {
     const bp = bpOf([
       block({ pos_x: 5, pos_y: 5, pos_z: 5, colors: all(3), material: 2 }),
       block({ pos_x: 6, pos_y: 5, pos_z: 5, colors: all(3), material: 2 }),
@@ -127,14 +185,15 @@ describe('hullify — blocks ▸ hull triangles', () => {
     const prev = hullifyPreview(bp);
     expect(prev.ok).toBe(true);
     expect(prev.blocksRemoved).toBe(2);
-    // a 2×1×1-cell box: six merged rectangles = 12 triangles
-    expect(prev.trisAdded).toBe(12);
+    // 12 cube faces − 2 on the precisely shared border = 10 face quads
+    // = 20 triangles, each its BLOCK'S OWN corners (no cross-block merge)
+    expect(prev.trisAdded).toBe(20);
     // preview never mutates
     expect(bp.data.blocks.length).toBe(2);
     expect(bp.data.triangles ?? []).toEqual([]);
 
     const res = hullifyApply(bp);
-    expect(res.trisAdded).toBe(12);
+    expect(res.trisAdded).toBe(20);
     expect(bp.data.blocks.length).toBe(0);
     const tris = bp.data.triangles!;
     // the box 0.5 × 0.25 × 0.25 m: surface 0.625 m² — the SAME area cull shows
@@ -144,6 +203,11 @@ describe('hullify — blocks ▸ hull triangles', () => {
     ], null, false);
     expect(areaSum(tris.map(triWorld))).toBeCloseTo(
       areaSum(culled.tris.map(t => t.tri)), 9);
+    // NO triangle lies on the shared border plane (cells 5|6 ▸ world x = 0)
+    for (const t of tris) {
+      const w = triWorld(t);
+      expect(w.every(p => p[0] === 0)).toBe(false);
+    }
     // every face keeps the block's colour + material on all five prism faces
     for (const t of tris) {
       expect(t.colors).toEqual([3, 3, 3, 3, 3]);
@@ -151,28 +215,73 @@ describe('hullify — blocks ▸ hull triangles', () => {
     }
   });
 
-  test('a 13-cube row glues into ONE prism (12 tris), not 13 boxes — cross-block merge', () => {
+  test('a 13-cube row: only the 24 shared-border faces die (108 tris), no merged prisms', () => {
     const blocks = Array.from({ length: 13 }, (_, i) =>
       block({ pos_x: 2 + i, pos_y: 5, pos_z: 5, colors: all(3) }));
     // crosses a frame boundary (cells 2..14) → the writer re-anchors frames
     blocks[12]!.pos_x = 2; blocks[12]!.frame_x = 1;
     const res = hullifyPreview(bpOf(blocks));
-    expect(res.trisAdded).toBe(12);
+    // 78 cube faces − 12 border pairs × 2 = 54 face quads = 108 triangles
+    expect(res.trisAdded).toBe(108);
     expect(res.skipped).toBe(0);
   });
 
-  test('different colours do NOT merge across the seam (the finish stays)', () => {
+  test('a lone wedge: the square faces are TWO triangles, the slanted side ONE', () => {
+    const bp = bpOf([
+      block({ type: 1, pos_x: 5, pos_y: 5, pos_z: 5, colors: [9, 3, 3, 3, 3, 3, 3] }),
+    ]);
+    const res = hullifyPreview(bp);
+    // the SLOPE shape = slant(2) + right(1) + left(1) + front(2) + bottom(2)
+    expect(res.trisAdded).toBe(8);
+    hullifyApply(bp);
+    const culled = culledBlocksSolids(
+      [block({ type: 1, pos_x: 5, pos_y: 5, pos_z: 5, colors: [9, 3, 3, 3, 3, 3, 3] })], null, false);
+    expect(areaSum(bp.data.triangles!.map(triWorld))).toBeCloseTo(
+      areaSum(culled.tris.map(t => t.tri)), 9);
+    // per axis-plane triangle counts: the wedge's two profile sides are
+    // planes of exactly ONE triangle each (the user's rule), its square
+    // sides are planes of TWO (the face's own diagonal split)
+    const planeCounts = new Map<string, number>();
+    for (const t of bp.data.triangles!) {
+      const w = triWorld(t);
+      for (const ax of [0, 1, 2] as const)
+        if (w.every(p => p[ax] === w[0]![ax]!))
+          planeCounts.set(`${ax}|${w[0]![ax]!}`, (planeCounts.get(`${ax}|${w[0]![ax]!}`) ?? 0) + 1);
+    }
+    const xs = [...planeCounts.entries()].filter(([k]) => k.startsWith('0|')).map(([, v]) => v).sort();
+    expect(xs, 'wedge profile sides: one triangle each').toEqual([1, 1]);
+    expect([...planeCounts.values()], 'square sides: two triangles').toContain(2);
+  });
+
+  test('two wedges glued slant-to-slant share that border PRECISELY: it emits NO triangle', () => {
+    // type 1 + type 3 (rot index 2 = the half-turn) fill one full cell
+    const bp = bpOf([
+      block({ type: 1, pos_x: 5, pos_y: 5, pos_z: 5, colors: all(3) }),
+      block({ type: 3, pos_x: 5, pos_y: 5, pos_z: 5, colors: all(3) }),
+    ]);
+    const res = hullifyPreview(bp);
+    // the pair behaves like ONE CUBE: 6 face quads = 12 triangles, the
+    // interior slant partition (identical footprints) dropped both copies
+    expect(res.trisAdded).toBe(12);
+    hullifyApply(bp);
+    const culled = culledBlocksSolids([
+      block({ type: 1, pos_x: 5, pos_y: 5, pos_z: 5, colors: all(3) }),
+      block({ type: 3, pos_x: 5, pos_y: 5, pos_z: 5, colors: all(3) }),
+    ], null, false);
+    expect(areaSum(bp.data.triangles!.map(triWorld))).toBeCloseTo(
+      areaSum(culled.tris.map(t => t.tri)), 9);
+  });
+
+  test('different colours: no merge, every face stays its own block quad pair', () => {
     const bp = bpOf([
       block({ pos_x: 5, pos_y: 5, pos_z: 5, colors: all(3) }),
       block({ pos_x: 6, pos_y: 5, pos_z: 5, colors: all(48) }),
     ]);
     const res = hullifyPreview(bp);
-    // same COUNT as the single-colour pair (the seam faces are culled either
-    // way), but every face stayed its own quad: an all-one-colour pair merges
-    // its 10 surviving quads down to 6 rects = 12 triangles — here none did.
+    // same as the single-colour pair: the seam faces are culled either way
     expect(res.trisAdded).toBe(20);
     hullifyApply(bp);
-    // no merged rectangle survived: every triangle pair spans exactly 1 cell
+    // every triangle spans exactly 1 cell (per-block faces, never merged)
     for (const t of bp.data.triangles!) {
       const w = triWorld(t);
       for (const a of [0, 1, 2] as const)
@@ -182,13 +291,13 @@ describe('hullify — blocks ▸ hull triangles', () => {
     expect(new Set(bp.data.triangles!.flatMap(t => t.colors ?? [])).size).toBe(2);
   });
 
-  test('different MATERIALS do not merge either — each piece keeps its block material', () => {
+  test('different MATERIALS: each face keeps its block material', () => {
     const bp = bpOf([
       block({ pos_x: 5, pos_y: 5, pos_z: 5, colors: all(3), material: 0 }),
       block({ pos_x: 6, pos_y: 5, pos_z: 5, colors: all(3), material: 5 }),
     ]);
     const res = hullifyPreview(bp);
-    expect(res.trisAdded).toBeGreaterThan(12);
+    expect(res.trisAdded).toBe(20);
     hullifyApply(bp);
     const mats = new Set(bp.data.triangles!.map(t => t.material));
     expect([...mats].sort()).toEqual([0, 5]);
@@ -305,7 +414,7 @@ describe('hullify — blocks ▸ hull triangles', () => {
     expect(r.massAdded).toBeGreaterThan(0);
   });
 
-  test('CORPUS SMOKE: every block craft converts, area EXACTLY = the culled surface', () => {
+  test('CORPUS SMOKE: every block craft converts; area EXACTLY = the culled surface AND zero stray triangles', () => {
     const CORPUS = corpusDir();
     if (!existsSync(CORPUS)) return;
     const dirs = readdirSync(CORPUS).filter(d => {
@@ -339,6 +448,11 @@ describe('hullify — blocks ▸ hull triangles', () => {
       hullifyApply(probe);
       expect(areaSum(probe.data.triangles!.map(triWorld)), d)
         .toBeCloseTo(culledArea, 6);
+      // CONTAINMENT (the ISW-241 wing lesson): equal area alone is NOT the
+      // shape — every triangle's centroid and corners must lie ON the exact
+      // culled surface. Area + containment together pin the union.
+      expect(straysOf(probe.data.triangles!.map(triWorld), culled.tris.map(t => t.tri)), d)
+        .toBe(0);
       checked++;
     }
     expect(checked).toBeGreaterThan(10);

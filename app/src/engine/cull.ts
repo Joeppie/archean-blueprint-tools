@@ -22,21 +22,25 @@ import { resolveColor, type FilePalette } from './palette';
 
 type V3 = [number, number, number];
 
-const blkCell = (b: Block): [number, number, number] => [
+/** Absolute cell index of the block's min corner (cell coords = the hull
+ *  triangle lattice g: world = (c − 6)·CELL = c·CELL − FRAME/2). Exported for
+ *  the Tools hullify, which culls faces with EXACTLY these rules. */
+export const blkCell = (b: Block): [number, number, number] => [
   (b.frame_x ?? 0) * CELLS_PER_FRAME + b.pos_x,
   (b.frame_y ?? 0) * CELLS_PER_FRAME + b.pos_y,
   (b.frame_z ?? 0) * CELLS_PER_FRAME + b.pos_z,
 ];
-const blkSpan = (b: Block): [number, number, number] => [b.size_x + 1, b.size_y + 1, b.size_z + 1];
-const cellM = (c: number) => c * CELL - FRAME / 2;          // cell boundary in world
+export const blkSpan = (b: Block): [number, number, number] => [b.size_x + 1, b.size_y + 1, b.size_z + 1];
+export const cellM = (c: number) => c * CELL - FRAME / 2;          // cell boundary in world
 /** absolute-cell face key (axis-tagged); ±8192 cells = frame ±682, safe int */
-const faceKey = (x: number, y: number, z: number, axis: number) =>
+export const faceKey = (x: number, y: number, z: number, axis: number) =>
   ((x + 8192) * 16384 + (y + 8192)) * 262144 + (z + 8192) * 3 + axis;
 
-interface FaceEntry { block: number; opaque: boolean }
+export interface FaceEntry { block: number; opaque: boolean }
 
-/** Every FULL face cell of every block, keyed by absolute cell + axis. */
-function buildFaceGrid(blocks: Block[], palette: FilePalette | null, legacy: boolean): Map<number, FaceEntry[]> {
+/** Every FULL face cell of every block, keyed by absolute cell + axis.
+ *  Exported for the Tools hullify (same interior-wall coverage rules). */
+export function buildFaceGrid(blocks: Block[], palette: FilePalette | null, legacy: boolean): Map<number, FaceEntry[]> {
   const faces = new Map<number, FaceEntry[]>();
   blocks.forEach((b, index) => {
     if (b.type === OCCUPANCY_TYPE) return;
@@ -57,7 +61,7 @@ function buildFaceGrid(blocks: Block[], palette: FilePalette | null, legacy: boo
   return faces;
 }
 
-function forEachFaceCell(b: Block, dir: readonly number[],
+export function forEachFaceCell(b: Block, dir: readonly number[],
   visit: (cell: [number, number, number], axis: number) => void): void {
   const axis = dir[0] ? 0 : dir[1] ? 1 : 2;
   const min = blkCell(b), size = blkSpan(b);
@@ -72,7 +76,7 @@ function forEachFaceCell(b: Block, dir: readonly number[],
     }
 }
 
-function faceCovered(faces: Map<number, FaceEntry[]>, b: Block, index: number,
+export function faceCovered(faces: Map<number, FaceEntry[]>, b: Block, index: number,
   dir: readonly number[] | null | undefined, opaque: boolean): boolean {
   if (!dir || Math.abs(dir[0]!) + Math.abs(dir[1]!) + Math.abs(dir[2]!) !== 1) return false;
   const axis = dir[0] ? 0 : dir[1] ? 1 : 2;
@@ -85,14 +89,14 @@ function faceCovered(faces: Map<number, FaceEntry[]>, b: Block, index: number,
   return covered;
 }
 
-const faceFootprint = (points: V3[], indices: readonly number[]): string => {
+export const faceFootprint = (points: V3[], indices: readonly number[]): string => {
   const uniq = new Set<string>();
   for (const i of indices) { const p = points[i]!; uniq.add(`${p[0].toFixed(4)},${p[1].toFixed(4)},${p[2].toFixed(4)}`); }
   return [...uniq].sort().join('|');
 };
 
 /** Quad covering spanU×spanV cells from `cell`, wound so its normal follows dir. */
-function cellQuad(cell: readonly number[], axis: number, dir: readonly number[],
+export function cellQuad(cell: readonly number[], axis: number, dir: readonly number[],
   spanU = 1, spanV = 1): V3[] {
   const u = (axis + 1) % 3, v = (axis + 2) % 3;
   const plane = cellM(cell[axis]! + 1);           // a face lives BETWEEN cells
