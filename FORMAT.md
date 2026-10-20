@@ -755,6 +755,39 @@ Evidence (ISW-241, 21 triangles):
   shared-edge pairs among 241 tris, 62 joins cross frames (records key on
   the absolute lattice), 197/232 joiners share identical `colours[0..4]`,
   221/232 the same `material`.
+- **Flush mounts vs the skin — the AVOID placement rule (v1.5.13, Oct 20
+  2026, user: "figure out why YOU cant seem to place the triangles such
+  that the dashboards are not hidden. You consistently kept doing it
+  wrong")**: the prism is ±0.025 m about the triangle plane CENTRED
+  (game `TRIANGLE_HALF_THICKNESS_METERS`; XenonViewer `buildTriangles`
+  verbatim: "répartie de part et d'autre du plan"), while a flush-mounted
+  Dashboard puts ALL its generated content 0..0.02 m in front of the face
+  (board 0.01, elements 0.02, FORMAT §Dashboard). So ANY triangle emitted
+  over a mount buries it — geometry, not shading: no winding or
+  smooth/flat option can fix it, which is why every earlier conversion
+  "kept doing it wrong". Census of the IN-GAME-AUTHORED airliner skin
+  (3309955432, 53 235 tris): 103 of 138 dashboards have a triangle plane
+  EXACTLY coplanar with their mount (distance 0.000), 58 of them directly
+  COVERED — the game's own authoring tool tolerates skin over mounts, so
+  "match the game's authoring" cannot be the placement rule that keeps
+  parts VISIBLE. The rule that does: hullify emits NO skin over a mounted
+  part's footprint (`tools.ts` AVOID, default on, 'off' keeps the pure
+  face-exact conversion). NOTE the open question this leaves: whether the
+  GAME's renderer lifts components above coplanar skin (the airliner
+  cockpit reads usable in game) is UNDOCUMENTED — our renderer stays
+  faithful to the ±0.025 prism; the fix is at placement time.
+- **The game never moves stored anchors (byte-diffed Oct 20 2026)**: a
+  hullified Jimmy re-saved in game (`fresh_jimmy_or_not` 11 960 tris vs
+  `jimminey` 11 958) and the airliner copy (`blueprint - 2026-10-20T173944`
+  vs 3309955432, 53 235 tris) diff as ZERO moved vertices — the game kept
+  every `frame_*/v*` byte verbatim (it dropped only 2 interior filler
+  triangles in the Jimmy case). The "anchor points moved / melted" look of
+  the OLD Jimmy conversion was OUR pre-v1.5.1 rasteriser (staircased
+  slope-profile diagonals + overlapping coplanar quads whose per-prism
+  rims z-fight), NOT the game reshaping the skin. What the in-game tool
+  does snap is NEW drags onto the absolute 0.25 lattice (welding to
+  existing slots — `MakeEdge`/`HasSameVertices`), which can land anchors
+  where the underlying BLOCK corners are not, and reads as "moved".
 - Render symmetry (viewer heuristic, not the game): shared slots weld (0.025 m),
   near-mirror vertex pairs average |x|, near-axis points snap to x = 0.
 

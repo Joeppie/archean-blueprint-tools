@@ -276,7 +276,7 @@ type G3 = [number, number, number];
 
 const EMPTY_HULL: HullifyResult = {
   ok: false, blocksRemoved: 0, keptOcc: 0, trisAdded: 0, trisKept: 0, subBlocks: 0,
-  massRemoved: 0, massAdded: 0, skipped: 0,
+  massRemoved: 0, massAdded: 0, skipped: 0, avoided: 0,
 };
 
 const triAreaCells = (g: G3[]): number => {
@@ -301,6 +301,11 @@ export interface HullifyResult {
   massAdded: number;
   /** faces the 0..31 vertex window could not store (never silently reshaped) */
   skipped: number;
+  /** v1.5.13 AVOID: face cells / partial-face triangles kept OUT of the skin
+   *  because a mounted component's footprint sits there (flush content like
+   *  Dashboards is ≤ 0.02 m tall and the skin prism spans ±0.025 m about the
+   *  surface plane — a triangle over the mount would bury it). */
+  avoided: number;
   reason?: string;
 }
 
@@ -350,12 +355,78 @@ export const HULLIFY_WIND_DEFAULT: HullifyWind = 'outward';
 export type HullifyShade = 'smooth' | 'flat';
 export const HULLIFY_SHADE_DEFAULT: HullifyShade = 'flat';
 
-export interface HullifyOptions { wind?: HullifyWind; shade?: HullifyShade }
+/** v1.5.13 AVOID rule (user: "figure out why YOU cant seem to place the
+ *  triangles such that the dashboards are not hidden. You consistently kept
+ *  doing it wrong"). The skin prism is 0.05 m thick CENTRED on the triangle
+ *  plane — ±0.025 m each side (game Triangle.inc.glsl HALF_THICKNESS macro;
+ *  XenonViewer "répartie de part et d'autre du plan"). Everything a flush
+ *  mount puts in front of the face is ≤ 0.02 m tall (Dashboard board 0.01,
+ *  elements 0.02), so ANY triangle emitted over such a mount buries it —
+ *  geometrically, for every winding/shading. The airliner census proves the
+ *  game itself pays no attention when AUTHORING (58 of its 138 dashboards
+ *  sit under coplanar skin at distance 0.000), so "the game does it" cannot
+ *  be the placement rule; the placement rule that keeps parts visible is:
+ *  emit NO skin over a mounted part's footprint. 'parts' = that rule;
+ *  'off' = the pure v1.5.12 face-exact conversion (kept selectable, and
+ *  what the GAME-CONVENTION pins run). */
+export type HullifyAvoid = 'parts' | 'off';
+export const HULLIFY_AVOID_DEFAULT: HullifyAvoid = 'parts';
+
+/** Half-depth of the protection slab about a face plane: the prism reaches
+ *  0.025 m each side; +0.005 margin for mounts drawn a hair off the lattice. */
+const AVOID_SLAB = 0.03;
+
+export interface WorldBox {
+  min: [number, number, number];
+  max: [number, number, number];
+}
+
+/** World-space AABBs of FLUSH-MOUNTED component content the skin must not
+ *  cover (file frame, the same lattice the triangles and blkCell use — the
+ *  v1.5.11 raw placement law, world = position + R(q)·local). v1 covers the
+ *  Dashboard family: its geometry is GENERATED from data (FORMAT §Dashboard:
+ *  board origin→(sx/100, sy/100, 0.01), elements 0.01..0.02), so the box is
+ *  exact without the model manifest — the whole class that "gets hidden".
+ *  Type 'Build' ghosts mount nothing; other types stand well proud of the
+ *  face (only their base stub would be skinned over) and are left out. */
+export function componentAvoidBoxes(bp: Blueprint): WorldBox[] {
+  const out: WorldBox[] = [];
+  for (const c of (bp.data.components ?? []) as unknown as Record<string, unknown>[]) {
+    if (c['type'] !== 'Dashboard') continue;
+    const d = c['data'] as { size_x?: number; size_y?: number } | undefined;
+    const sx = (d?.size_x ?? 0) / 100, sy = (d?.size_y ?? 0) / 100;
+    if (!(sx > 0 && sy > 0)) continue;
+    const p = c['position'] as { x: number; y: number; z: number };
+    const q = c['orientation'] as { w: number; x: number; y: number; z: number };
+    const rot = (lx: number, ly: number, lz: number): [number, number, number] => {
+      // v' = q · v · q⁻¹ (raw quaternion law, v1.5.11 — both generations)
+      const { w, x, y, z } = q;
+      const tx = 2 * (y * lz - z * ly), ty = 2 * (z * lx - x * lz), tz = 2 * (x * ly - y * lx);
+      return [p.x + lx + w * tx + y * tz - z * ty,
+        p.y + ly + w * ty + z * tx - x * tz,
+        p.z + lz + w * tz + x * ty - y * tx];
+    };
+    const lo: [number, number, number] = [Infinity, Infinity, Infinity];
+    const hi: [number, number, number] = [-Infinity, -Infinity, -Infinity];
+    for (const lx of [0, sx]) for (const ly of [0, sy]) for (const lz of [0, 0.02]) {
+      const v = rot(lx, ly, lz);
+      for (let a = 0; a < 3; a++) { lo[a] = Math.min(lo[a]!, v[a]!); hi[a] = Math.max(hi[a]!, v[a]!); }
+    }
+    out.push({ min: lo, max: hi });
+  }
+  return out;
+}
+
+export interface HullifyOptions {
+  wind?: HullifyWind;
+  shade?: HullifyShade;
+  avoid?: HullifyAvoid;
+}
 
 /** Preview the conversion without touching bp. */
 export function hullifyPreview(bp: Blueprint, opts: HullifyOptions = {}): HullifyResult {
   return hullifyCore(bp, false, opts.wind ?? HULLIFY_WIND_DEFAULT,
-    opts.shade ?? HULLIFY_SHADE_DEFAULT);
+    opts.shade ?? HULLIFY_SHADE_DEFAULT, opts.avoid ?? HULLIFY_AVOID_DEFAULT);
 }
 
 /** Convert bp IN PLACE: remove every geometry block, append the covering
@@ -363,10 +434,11 @@ export function hullifyPreview(bp: Blueprint, opts: HullifyOptions = {}): Hullif
  *  (+reason) leaves bp untouched. */
 export function hullifyApply(bp: Blueprint, opts: HullifyOptions = {}): HullifyResult {
   return hullifyCore(bp, true, opts.wind ?? HULLIFY_WIND_DEFAULT,
-    opts.shade ?? HULLIFY_SHADE_DEFAULT);
+    opts.shade ?? HULLIFY_SHADE_DEFAULT, opts.avoid ?? HULLIFY_AVOID_DEFAULT);
 }
 
-function hullifyCore(bp: Blueprint, apply: boolean, wind: HullifyWind, shade: HullifyShade): HullifyResult {
+function hullifyCore(bp: Blueprint, apply: boolean, wind: HullifyWind, shade: HullifyShade,
+  avoidMode: HullifyAvoid): HullifyResult {
   const blocks = bp.data.blocks ?? [];
   const geometry = blocks.filter(b => b.type !== OCCUPANCY_TYPE);
   if (!geometry.length) return { ...EMPTY_HULL, reason: 'the craft has no blocks to convert' };
@@ -412,6 +484,30 @@ function hullifyCore(bp: Blueprint, apply: boolean, wind: HullifyWind, shade: Hu
   const faces = buildFaceGrid(blocks, palette, legacy);
   const newTris: Triangle[] = [];
   let skipped = 0;
+  let avoided = 0;
+
+  // v1.5.13 AVOID: flush-mounted content the skin must not cover (see the
+  // HullifyAvoid note). Full faces protect whole CELLs whose in-plane rect
+  // overlaps a box; partial (slant/profile) faces test the triangle bbox —
+  // conservative there by design: a slant partly under a mount keeps the
+  // WHOLE face open rather than clipping mid-triangle.
+  const avoid = avoidMode === 'parts' ? componentAvoidBoxes(bp) : [];
+  const EPS = 0.004;
+  /** does an avoid box reach into the slab about a full face's plane? */
+  const slabHit = (a: WorldBox, axis: number, plane: number): boolean =>
+    a.min[axis]! < plane + AVOID_SLAB && a.max[axis]! > plane - AVOID_SLAB;
+  /** world-AABB hit of one partial-face triangle (its own corner points) */
+  const triHit = (ptsIdx: readonly number[], pts: [number, number, number][]): boolean => {
+    if (!avoid.length) return false;
+    const lo: [number, number, number] = [Infinity, Infinity, Infinity];
+    const hi: [number, number, number] = [-Infinity, -Infinity, -Infinity];
+    for (const i of ptsIdx) for (let a = 0; a < 3; a++) {
+      lo[a] = Math.min(lo[a]!, pts[i]![a]!); hi[a] = Math.max(hi[a]!, pts[i]![a]!);
+    }
+    return avoid.some(av => lo[0]! < av.max[0]! + AVOID_SLAB && hi[0]! > av.min[0]! - AVOID_SLAB
+      && lo[1]! < av.max[1]! + AVOID_SLAB && hi[1]! > av.min[1]! - AVOID_SLAB
+      && lo[2]! < av.max[2]! + AVOID_SLAB && hi[2]! > av.min[2]! - AVOID_SLAB);
+  };
 
   blocks.forEach((b, index) => {
     if (b.type === OCCUPANCY_TYPE) return;
@@ -423,10 +519,12 @@ function hullifyCore(bp: Blueprint, apply: boolean, wind: HullifyWind, shade: Hu
       const slot = b.colors?.[f] ?? b.colors?.[0] ?? 0;
       const opaque = resolveColor(palette, slot, legacy).opacity >= 15;
       /** emit the block-shape face polygon (its own corners) as triangles,
-       *  wound per the chosen direction (swap = the v1↔v2 reversal) */
+       *  wound per the chosen direction (swap = the v1↔v2 reversal); an
+       *  AVOID-guarded triangle is skipped, never clipped mid-shape */
       const emitPoly = (idx: readonly number[]): void => {
         const g = idx.map(i => toG(pts[i]!));
         for (let t = 0; t + 2 < g.length; t += 3) {
+          if (triHit([idx[t]!, idx[t + 1]!, idx[t + 2]!], pts)) { avoided++; continue; }
           const tri: [G3, G3, G3] = wind === 'outward'
             ? [g[t]!, g[t + 1]!, g[t + 2]!] : [g[t]!, g[t + 2]!, g[t + 1]!];
           const enc = encodeTri(tri, slot, material, shade === 'smooth');
@@ -452,10 +550,35 @@ function hullifyCore(bp: Blueprint, apply: boolean, wind: HullifyWind, shade: Hu
         });
         const total = sz[u]! * sz[v]!;
         if (covCount === total) continue;              // border shared fully ▸ nothing
-        if (!covCount) { emitPoly(trisOf[f]!); continue; }   // the block's own face corners
+        // protected cells: the face's plane sits inside an avoid box's slab
+        // AND the cell rect overlaps the box in-plane (touching a boundary
+        // exactly, EPS-tight, is NOT an overlap — mounts flush to a cell
+        // line do not open a whole extra cell).
+        let prot: Uint8Array | null = null;
+        let protCount = 0;
+        if (avoid.length) {
+          const plane = dir[axis]! > 0 ? cellM(min[axis]! + sz[axis]!) : cellM(min[axis]!);
+          const hits = avoid.filter(a => slabHit(a, axis, plane));
+          if (hits.length) {
+            prot = new Uint8Array(total);
+            for (const a of hits) {
+              const i0 = Math.max(0, Math.floor((a.min[u]! - cellM(min[u]!) + EPS) / CELL));
+              const i1 = Math.min(sz[u]! - 1, Math.ceil((a.max[u]! - cellM(min[u]!) - EPS) / CELL) - 1);
+              const j0 = Math.max(0, Math.floor((a.min[v]! - cellM(min[v]!) + EPS) / CELL));
+              const j1 = Math.min(sz[v]! - 1, Math.ceil((a.max[v]! - cellM(min[v]!) - EPS) / CELL) - 1);
+              for (let i = i0; i <= i1; i++)
+                for (let j = j0; j <= j1; j++) {
+                  const k = i * sz[v]! + j;
+                  if (!prot[k]!) { prot[k] = 1; protCount++; }
+                }
+            }
+          }
+        }
+        if (!covCount && !protCount) { emitPoly(trisOf[f]!); continue; }   // the block's own face corners
         for (let i = 0; i < sz[u]!; i++)
           for (let j = 0; j < sz[v]!; j++) {
             if (cov[i * sz[v]! + j]) continue;
+            if (prot?.[i * sz[v]! + j]) { avoided++; continue; }           // under a mount
             const cell: G3 = [0, 0, 0];
             cell[axis] = dir[axis]! > 0 ? min[axis]! + sz[axis]! - 1 : min[axis]! - 1;
             cell[u] = min[u]! + i; cell[v] = min[v]! + j;
@@ -503,7 +626,7 @@ function hullifyCore(bp: Blueprint, apply: boolean, wind: HullifyWind, shade: Hu
     trisAdded: newTris.length,
     trisKept: (bp.data.triangles ?? []).length,
     subBlocks,
-    massRemoved, massAdded, skipped,
+    massRemoved, massAdded, skipped, avoided,
   };
   if (!apply || !newTris.length) return apply ? { ...res, ok: newTris.length > 0 } : res;
 

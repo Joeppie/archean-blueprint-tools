@@ -409,6 +409,34 @@ on all, flat none, other fields identical, existing kept); `tooldoc.test.ts`
 writer-style pin; `e2e/tools.spec.ts` preview reads "shading smooth:1".
 SUPERSEDED v1.5.12: the DEFAULT is now flat + outward (the game's own
 freshly-authored triangles, fixture 9000006001 — see the v1.5.12 bullet).
+- **v1.5.13 HULLIFY AVOID — NEVER SKIN OVER A MOUNTED PART (user,
+  repeatedly: "figure out why YOU cant seem to place the triangles such
+  that the dashboards are not hidden. You consistently kept doing it
+  wrong")**: the skin prism is 0.05 m thick CENTRED on the triangle plane
+  (±0.025; Xenon source + game macros confirm), while a flush Dashboard's
+  entire generated content is 0..0.02 m proud of the face — so a triangle
+  placed over a mount buries it for EVERY winding/shading (that is why
+  every earlier attempt "hid the dashboards": it is geometry, not the
+  shading debates). `tools.ts` hullify now takes `avoid:'parts'|'off'`
+  (DEFAULT 'parts'): full faces skip the lattice CELLs under a mounted
+  Dashboard's footprint (exact generated-geometry AABB, raw-quat law —
+  `componentAvoidBoxes`, exported), partial (slant/profile) faces skip
+  their whole triangle if its bbox hits a mount (conservative, never
+  clipped mid-shape); the skipped count rides `HullifyResult.avoided` and
+  the Tools dialog shows a "mounted parts: keep clear / skin over
+  everything" select. The GAME itself authors skin over mounts (airliner
+  census: 58/138 dashboards covered, planes at 0.000) — so the
+  GAME-CONVENTION pin runs `avoid:'off'`; the airliner's cockpit still
+  reads usable in game, which leaves the game's RENDERER (component
+  priority over coplanar skin?) as the open, undocumented question — our
+  renderer stays faithful to the ±0.025 prism. Byte-diffed ground truth
+  for the "the game moves the anchors" theory: game re-saves move NOTHING
+  (11 958/11 960 Jimmy tris identical, airliner 53 235 identical; only 2
+  interior fillers dropped) — the old "melted Jimmy" was OUR pre-v1.5.1
+  staircase rasteriser, see FORMAT §Triangles. Pins: `__tests__/
+  tools.test.ts` AVOID (testframe 9000005001: zero emitted prisms
+  intersect the 8 dashboard boxes, deck-top area strictly less than the
+  avoid-off conversion, deck bottom identical).
 - **v1.5.12 HULLIFY DEFAULTS = THE GAME'S OWN AUTHORING + DELETE RENUMBERS
   FLATTENED REFS (user's in-game A/B + the Jimmy wiring incident):** (1) The
   user's craft `Triangle_Trial.json` (in-game-TRI-AUTHORED: the game's own
