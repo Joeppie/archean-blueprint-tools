@@ -112,3 +112,72 @@ export function resolveColor(palette: FilePalette | null | undefined, index: num
 export function slotAlpha(c: ResolvedColor): number {
   return c.opacity >= 15 ? 1 : (c.opacity + 1) / 16;
 }
+
+// ------------------------------------------------------------ usage census
+// The colour picker's "how often is this colour on the vessel" readout
+// (v1.6 user rule: "a preview of existing picked colours on the vessel and
+// the number of times its been used"). A slot's count is over PALETTE-
+// INDEXED paints only: every block face slot (7 per block), every hull
+// triangle's 5 prism-face slots, and — in v1 files — the components'
+// [slot,slot] colour pairs. v2 components carry a CUSTOM dict (color1/
+// color2 r/g/b), which is counted separately as `custom`, not per slot.
+
+import type { Blueprint } from './format';
+
+export interface SlotUsage {
+  slot: number;
+  /** resolved WITH the file's own palette + the v1 legacy remap */
+  color: ResolvedColor;
+  blocks: number;
+  tris: number;
+  comps: number;
+  total: number;
+}
+
+export interface PaletteUsage {
+  legacy: boolean;
+  /** every slot referenced at least once, sorted by slot index */
+  slots: SlotUsage[];
+  /** v2 components' custom-dict paints (color1/color2 entries) */
+  custom: number;
+  /** total distinct slots referenced */
+  distinct: number;
+}
+
+export function paletteUsage(bp: Blueprint, legacy: boolean): PaletteUsage {
+  const blocks = new Map<number, number>();
+  const tris = new Map<number, number>();
+  const comps = new Map<number, number>();
+  let custom = 0;
+  const bump = (m: Map<number, number>, s: number) =>
+    m.set(s, (m.get(s) ?? 0) + 1);
+  for (const b of bp.data.blocks ?? []) {
+    if (b.type === 255) continue;                    // occupancy mirrors are not paint
+    for (const c of b.colors ?? []) if (typeof c === 'number') bump(blocks, c | 0);
+  }
+  for (const t of bp.data.triangles ?? [])
+    for (const c of (t as { colors?: number[] }).colors ?? [])
+      if (typeof c === 'number') bump(tris, c | 0);
+  for (const comp of bp.data.components ?? []) {
+    const cols = comp.colors as unknown;
+    if (Array.isArray(cols)) {
+      for (const c of cols) if (typeof c === 'number') bump(comps, c | 0);
+    } else if (cols && typeof cols === 'object') custom++;
+  }
+  const all = [...new Set([...blocks.keys(), ...tris.keys(), ...comps.keys()])].sort((a, b) => a - b);
+  const slots = all.map(s => {
+    const color = resolveColor(bp.data.colors ?? null, s, legacy);
+    const bl = blocks.get(s) ?? 0, tr = tris.get(s) ?? 0, co = comps.get(s) ?? 0;
+    return { slot: s, color, blocks: bl, tris: tr, comps: co, total: bl + tr + co };
+  });
+  return { legacy, slots, custom, distinct: slots.length };
+}
+
+/** CSS colour for a resolved slot — r/g/b are LINEAR albedo and the engine
+ *  feeds them raw to the shaders, so the UI must NOT sRGB-encode either:
+ *  rgb() with the raw values is exactly what the 3D view shows. Alpha from
+ *  slotAlpha() so glass slots read as glass in the swatch. */
+export function cssColor(c: ResolvedColor, alphaMul = 1): string {
+  const a = slotAlpha(c) * alphaMul;
+  return `rgba(${Math.round(c.r)},${Math.round(c.g)},${Math.round(c.b)},${a.toFixed(3)})`;
+}

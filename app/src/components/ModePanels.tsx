@@ -7,9 +7,12 @@ import type { Engine } from '../engine/scene';
 import { FLOWS, type FlowKey } from '../engine/aero';
 import { writeBlockDoc, type EditCtx } from '../engine/edit';
 import { docArrayInsert, docFromValue, docSetNumber, docArrayRemoveAt } from '../engine/doc';
-import { blockCells, blockFromCell, blockInfo, blockMirrorTwin, flippedBlock, mirroredBlock,
-  rotateType, rotatedBlock, setBlockField, setBlockGeom, snapBlockType, type PlaceSpec } from '../engine/blocks';
+import { blockCells, blockFromCell, blockInfo, blockMirrorTwin, cellOverlapSkip, flippedBlock,
+  mirroredBlock, MIRROR_TYPE, mirrorBlockCell, rotateType, rotatedBlock, setBlockField, setBlockGeom,
+  snapBlockType, type PlaceSpec } from '../engine/blocks';
 import { shapeName } from '../engine/blockshapes';
+import { cssColor, resolveColor } from '../engine/palette';
+import { SwatchGrid, BlockPaint } from './ColorPanel';
 import { autoWire, portCensus, connectedPorts, unconnectedPorts, WIRE_KINDS } from '../engine/wireops';
 import { triCentroid } from '../engine/tris';
 import type { Triangle } from '../engine/format';
@@ -30,9 +33,15 @@ export function BlockPanel(p: {
   /** ⇄ respect the active mirror plane: shape edits + deletes go to the
    *  block's SIMILAR TWIN (blockMirrorTwin) as well */
   mirror: boolean;
+  /** v1 files carry no data.colors — the palette picker applies the remap */
+  legacy: boolean;
   onBrush: (b: Brush) => void;
   onSelectBlock: (bi: number) => void;
   onApplied: () => void;                 // schedule reload + dirty
+  /** PALETTE paint of the selected block (faces = face-slot indices,
+   *  undefined = all 7 uniform): the Editor funnel writes bp + doc for the
+   *  block AND its ⇄ twin (paintTwinPair/mirrorFaceOrder). */
+  onPaint?: (slot: number, faces?: number[]) => void;
 }) {
   const [snapMsg, setSnapMsg] = useState('');
   const info = p.blockSel >= 0 ? blockInfo(p.bp, p.blockSel) : null;
@@ -48,18 +57,44 @@ export function BlockPanel(p: {
    *  (v1.4 fix: single-key "cx" writes vanished on save), so the gizmo commit
    *  and the panel rows can never drift apart. */
   const writeBlock = (bi: number) => { if (p.ctx) writeBlockDoc(p.ctx, bi); };
+  /** v1.6: EVERY field edit (cx/cy/cz/size/type) respects ⇄ — the twin takes
+   *  the mirrored x cell, the same y/z DELTA, its own clamped size and the
+   *  MIRROR_TYPE turn (user: "ensure mirroring is respected, which currently
+   *  it is not, when editing a block"). A colliding cell move REFUSES the
+   *  twin's move (the gizmo's cellOverlapSkip contract — the pair may not
+   *  interpenetrate); the self edit already applied stands. */
+  const mirrorGeom = (k: 'cx' | 'cy' | 'cz' | 'size_x' | 'size_y' | 'size_z' | 'type', v: number) => {
+    if (!p.mirror || twin < 0 || !p.ctx) return;
+    const bp = p.ctx.bp;
+    const tw = bp.data.blocks[twin];
+    if (!tw) return;
+    if (k === 'cx') {
+      const tcx = mirrorBlockCell(Math.round(v), tw.size_x);
+      const c = blockCells(tw);
+      if (cellOverlapSkip(bp, [tcx, c.y, c.z], [tw.size_x, tw.size_y, tw.size_z], [p.blockSel, twin])) return;
+      setBlockField(bp, twin, 'cx', tcx);
+    } else if (k === 'cy' || k === 'cz') {
+      const ax = k[1] as 'x' | 'y' | 'z';
+      const b = bp.data.blocks[p.blockSel]!;
+      setBlockField(bp, twin, k, blockCells(tw)[ax] + (Math.round(v) - blockCells(b)[ax]));
+    } else if (k === 'type') {
+      setBlockField(bp, twin, 'type', MIRROR_TYPE[Math.round(v)] ?? Math.round(v));
+    } else {
+      setBlockField(bp, twin, k, v);            // setBlockField clamps per-twin
+    }
+    writeBlock(twin);
+  };
   const apply = (k: Parameters<typeof setBlockField>[2], v: number) => {
     if (!info || !p.ctx) return;
+    if (k === 'slot') { p.onPaint?.(v); return; }   // ⇄ twin + reload ride in onPaint
     setBlockField(p.ctx.bp, p.blockSel, k, v);
-    if (k === 'slot') {
-      const d = p.ctx.doc, path = ['data', 'blocks', p.blockSel];
-      for (let i = 0; i < 7; i++) docSetNumber(d, [...path, 'colors', i], Math.round(v));
-    } else if (k === 'cx' || k === 'cy' || k === 'cz') {
+    if (k === 'cx' || k === 'cy' || k === 'cz') {
       const ax = k[1];
       const b = p.ctx.bp.data.blocks[p.blockSel]!;
       docSetNumber(p.ctx.doc, ['data', 'blocks', p.blockSel, `pos_${ax}`], b[`pos_${ax}` as 'pos_x']);
       docSetNumber(p.ctx.doc, ['data', 'blocks', p.blockSel, `frame_${ax}`], b[`frame_${ax}` as 'frame_x'] ?? 0);
     } else docSetNumber(p.ctx.doc, ['data', 'blocks', p.blockSel, k], Math.round(v));
+    mirrorGeom(k, v);
     p.onApplied();
   };
   /** Run one in-place shape edit on the selected block AND (⇄ on) its
@@ -152,7 +187,18 @@ export function BlockPanel(p: {
             <Num label="sy" value={p.brush.sy} min={0} max={8} onCommit={v => p.onBrush({ ...p.brush, sy: v })} />
             <Num label="sz" value={p.brush.sz} min={0} max={8} onCommit={v => p.onBrush({ ...p.brush, sz: v })} />
           </div>
-          <Num label="slot" value={p.brush.slot} min={0} max={255} onCommit={v => p.onBrush({ ...p.brush, slot: v })} />
+          <div className="flex items-center gap-2">
+            <Num label="slot" value={p.brush.slot} min={0} max={255} onCommit={v => p.onBrush({ ...p.brush, slot: v })} />
+            {/* the brush's live colour (palette picker below) */}
+            <span data-testid="brush-swatch" title={`brush slot ${p.brush.slot}`}
+              className="inline-block h-5 w-5 rounded-[3px] border border-white/25"
+              style={{ background: cssColor(resolveColor(p.bp.data.colors ?? null, p.brush.slot, p.legacy)) }} />
+          </div>
+          {/* PALETTE (v1.6): choose the brush colour, badges = uses on vessel */}
+          <div className="pt-1">
+            <SwatchGrid bp={p.bp} legacy={p.legacy} current={p.brush.slot}
+              onPick={slot => p.onBrush({ ...p.brush, slot })} />
+          </div>
           <div className="pt-1 text-[10px] leading-snug text-ink-dim">
             Hover a block, part or hull triangle to preview · click to place ·
             <b> Shift</b> over a block copies it / logically continues its shape
@@ -182,6 +228,15 @@ export function BlockPanel(p: {
               <div className="flex gap-2">
                 <Num label="type" value={info.type} min={0} max={254} onCommit={v => apply('type', v)} />
                 <Num label="slot" value={info.slot} min={0} max={255} onCommit={v => apply('slot', v)} />
+              </div>
+              {/* PALETTE (v1.6): per-face paint of THIS block (⇄ twin rides
+                  the mirrored face mapping inside the Editor's onPaint) */}
+              <div className="mt-1.5 text-[10px] uppercase tracking-wide text-ink-dim">
+                Paint — pick a face, then a colour
+              </div>
+              <div className="mt-1">
+                <BlockPaint bp={p.bp} legacy={p.legacy} bi={p.blockSel}
+                  onPaint={(slot, faces) => p.onPaint?.(slot, faces)} />
               </div>
               {/* in-place SHAPE tools (the interface components have): every
                   op keeps the bbox centre; ⇄ on drives the similar twin too */}

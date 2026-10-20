@@ -12,6 +12,7 @@ import type { Engine, ViewOptions } from '../engine/scene';
 import type { EditCtx } from '../engine/edit';
 import type { Blueprint, BlueprintComponent, LatticeObj } from '../engine/format';
 import { subMasterEntries } from '../engine/subgrid';
+import { CompPaint } from './ColorPanel';
 
 export interface EditApi {
   compField(ctx: EditCtx, ci: number, key: 'alias' | 'module' | 'mirrorAxis', v: string | number): void;
@@ -32,6 +33,8 @@ interface Props {
   rev: number;
   ctx: EditCtx | null;
   bp: Blueprint;
+  /** v1 file (no data.colors): the PALETTE applies the legacy family remap */
+  legacy: boolean;
   sel: { ci: number; sub: number };
   opts: ViewOptions;
   hullOpacity: number;
@@ -598,6 +601,16 @@ function Inspector(p: Props) {
           onInput={v => { if (ctx) edits.compField(ctx, ci, 'mirrorAxis', Math.round(v)); markDirty(); }} />
       </Sec>
       <Sec title="Paint (linear 0-255)">
+        {/* v1.6 PALETTE: pick a vessel colour and it SNAPS its full shading
+            spec onto color1/color2 (the numeric rows stay for fine edits) */}
+        <CompPaint bp={bp} legacy={p.legacy} comp={comp}
+          onApply={(which, c) => {
+            if (!ctx) return;
+            for (const [f, v] of [['r', c.r], ['g', c.g], ['b', c.b], ['opacity', c.opacity],
+              ['roughness', c.roughness], ['metallic', c.metallic]] as const)
+              edits.compColor(ctx, ci, which, f, v);
+            markDirty();
+          }} />
         {(['color1', 'color2'] as const).map(which => (
           <div key={which} className="mb-1">
             <div className="text-[10px] uppercase tracking-wide text-ink-dim">{which}</div>

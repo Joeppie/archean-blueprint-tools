@@ -262,6 +262,32 @@ user's explicit say-so (Pages/release still serves it meanwhile).
   mirror.spec.ts, panels.spec.ts (view-stats-only, deck-place EDIT).
 - Toolchain lives ONLY under `app/` (own npm project); repo-root `tools/`,
   `tests/` and the zero-build regtest stay as they are until cutover.
+- **PALETTE / color picker (v1.6):** `app/src/components/ColorPanel.tsx` —
+  the 256-slot swatch grid (file palette + built-in families, v1 legacy
+  remap), every swatch badged with its USE COUNT on the vessel
+  (`engine/palette.paletteUsage`: block faces + triangle prism faces + v1
+  component slot pairs; v2 custom-dict comps counted separately). Docks:
+  the BLOCKS brush + a `BlockPaint` per-face editor in the block EDIT tab,
+  the Inspector's Paint section (`CompPaint` snaps a slot's full shading
+  spec onto color1/color2), and the canvas mode widget's 🎨 button (the
+  paint alternative to ⊘/✥/⟳ — opens a floating palette window for the
+  CURRENT selection). ⇄ MIRRORING IS RESPECTED EVERYWHERE a block is
+  edited (user: "ensure mirroring is respected … when editing a block"):
+  `engine/blocks.mirrorFaceOrder` maps a twin's face slots through the
+  WORLD face directions (x is the mirrored axis; slants pair by face
+  position), `paintTwinPair` paints self+twin, and the BlockPanel geometry
+  rows (cx/cy/cz/size/type) drive the twin's mirrored cell/turn
+  (`mirrorGeom`, collision-guarded); `mirroredBlock` now carries the
+  DIRECTION-MAPPED paint, not a raw slot copy. Fixes bundled: the golden
+  block-selection overlay dedups on a GEOMETRY/PAINT FINGERPRINT now (the
+  old {bi,twin}-only guard left a stale gold ghost of a moved block on the
+  deck — the "blocks become translucent and don't return" report), a SKY
+  click (nothing picked) deselects the block, and the default brush slot
+  moved 4→51 (slot 4 is the built-in CLEAR GLASS: the old default placed
+  6 %-alpha ghost blocks). Pinned by vitest `facepaint.test.ts` (cube ±x
+  swap, involutive slope mapping, twin paint, census counts/skips 255) +
+  e2e `paint.spec.ts` (@place: deck badge 35×, face paint ↔ twin, widget 🎨
+  block + comp, stale-ghost overlay-centre + sky-deselect).
 - app/ obeys the same rules: no hardcoded machine paths (corpus resolves via
   `app/tools/vite-corpus.ts` mirroring tools/config.py), byte-identical saves
   (`app/src/engine/doc.ts` keeps each number's raw literal — the game writer
@@ -1283,6 +1309,15 @@ refuses to cut a tag when the strings disagree.
   'worked' — every suite bound to the invisible twin).
 
 ## Backlog
+- **Slider discipline (user 2026-10-20, v1.6 TODO):** component `data` rows
+  must respect INTEGER-valued fields and sensible min/max (the DataRows Row
+  today gives every number `min=v−10, max=v+10, step=0.1` — the game's own
+  `modules/*/config.yaml` ranges are the source), with LOGICAL slider
+  increments per field; the block cx/cy/cz rows and component position rows
+  should move in FIXED increments — the cell lattice is 0.25 m (blocks are
+  whole cells, so the ±/slider step is 1 cell = 0.25 m — the user guessed
+  "0.5 or 0.25"; it is 0.25), and keyboard ±/arrows nudge by exactly one
+  increment. Decide per-field steps from the game data, not one global 0.1.
 - **Component sub-parts placed on the engine content basis — RESOLVED IN APP
   (2026-10-19, XenonViewer-arbitrated):** the dev viewer (user-confirmed = the
   game) places EVERY component as C·chain·C⁻¹·v, C(file→content)=(x,z,−y) —

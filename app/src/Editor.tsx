@@ -12,9 +12,12 @@ import Viewport from './components/Viewport';
 import Panel, { StaticInfo, ViewOpts, type EditApi } from './components/Panel';
 import TopBar, { type Mode } from './components/TopBar';
 import { BlockPanel, FlightPanel, TriPanel, WirePanel, WindPanel, brushSpec, placeBlock, type Brush } from './components/ModePanels';
-import { blockInfo, blockMirrorTwin, cellIndex, cellOverlap, complementBlock } from './engine/blocks';
+import { BlockPaint, CompPaint, SwatchGrid } from './components/ColorPanel';
+import { blockInfo, blockMirrorTwin, cellIndex, cellOverlap, complementBlock, paintTwinPair } from './engine/blocks';
 import { cornerOf, triAt, triangleFromCorners } from './engine/tris';
 import type { Blueprint } from './engine/format';
+import { isLegacyFile } from './engine/format';
+import type { ResolvedColor } from './engine/palette';
 import { docArrayInsert, docArrayRemoveAt, docFromValue, docValue, parseDoc } from './engine/doc';
 import { makeCtx, resetComponent, setDataField, setOrientation, setPos, setCompField,
   setCompColor, serializeSave, writeBlockDoc, type EditCtx } from './engine/edit';
@@ -50,7 +53,14 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   useEffect(() => { localStorage.setItem('archean-app-static-info', staticInfo ? '1' : '0'); }, [staticInfo]);
   const [rev, setRev] = useState(0);
   const [blockSel, setBlockSel] = useState(-1);
-  const [brush, setBrush] = useState<Brush>({ type: 0, sx: 0, sy: 0, sz: 0, slot: 4 });
+  // the brush's default paint is an OPAQUE hull grey (v1.6: slot 4 is the
+  // built-in CLEAR GLASS — the old default placed translucent ghost blocks,
+  // the root of the "my blocks turned translucent" report)
+  const [brush, setBrush] = useState<Brush>({ type: 0, sx: 0, sy: 0, sz: 0, slot: 51 });
+  // 🎨 PALETTE window over the viewport (v1.6): the paint alternative to the
+  // move/rotate gizmo, opened from the canvas mode widget for the CURRENT
+  // selection (block ▸ per-face, component ▸ color1/color2, else the brush).
+  const [paintOpen, setPaintOpen] = useState(false);
   // THE panel flavor (v1.5 user rule): ONE ✎ Edit | ✚ Place switch crowns the
   // side panel in BOTH the Edit and Blocks modes — the two flavors of the
   // SAME panel. Edit = select for gizmo/inspector/DELETE; Place = brush +
@@ -264,6 +274,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         if (cur) toggleOpt(map[e.key]!, !cur[map[e.key]!]);
       }
       if (e.key === 'Escape') {
+        setPaintOpen(false);                           // 🎨 palette window first
         if (placing) {                              // KSP: drop the HELD part first
           setPlacing(null);
           engineRef.current?.setCompGhost(null);
@@ -359,7 +370,14 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       return;
     }
     const r = e.pickCell(clientX, clientY);
-    if (!r) return;
+    if (!r) {
+      // v1.6: clicking EMPTY SPACE (sky — nothing picked) deselects in the
+      // EDIT flavor: the golden block overlay used to sit on the deck with
+      // nothing selected anymore ("don't return to previous state" report —
+      // a stale selection the user believed they had cleared)
+      if (tool === 'edit' && blockSel >= 0) { setBlockSel(-1); e.select(-1); }
+      return;
+    }
     // clicking an existing COMPONENT selects it in BOTH sub-tabs (user v1.4)
     // — the inspector (with Delete) takes over the context window.
     if (r.kind === 'comp' && r.ci >= 0) {
@@ -391,7 +409,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     // the game keeps the ghost under the cursor after a placement — re-aim
     // it over the fresh surface (it may now complement the block placed)
     computeGhost(clientX, clientY, shift);
-  }, [tool, blockSub, brush, mirrorPlace, triDraft, triBrush, sceneChanged, computeGhost]);
+  }, [tool, blockSub, brush, mirrorPlace, triDraft, triBrush, sceneChanged, computeGhost, blockSel]);
 
   /** CATALOG placement (KSP part pickup): land the HELD type at the picked
    *  surface — bp + doc together, then the debounced scene reload; the part
@@ -434,6 +452,34 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     setHiDefState(on);
     engineRef.current?.setHiDef(on);
   }, []);
+
+  // ------------------------------------------------------------- PAINT 🎨
+  /** v1 (2024-25, palette-less) files: the picker shows the legacy-mapped
+   *  family colours (palette.legacySlot) so a swatch = what renders. */
+  const legacy = bp ? isLegacyFile(bp) : false;
+  /** Paint the SELECTED block (faces = face slots, undefined = all 7).
+   *  ⇄ on ⇒ the SIMILAR TWIN is painted through the mirrored face mapping
+   *  (paintTwinPair/mirrorFaceOrder) — mirroring is respected for PAINT
+   *  exactly like the gizmo respects it for GEOMETRY. bp + doc together. */
+  const paintBlock = useCallback((slot: number, faces?: number[]) => {
+    const ctx = ctxRef.current;
+    if (!ctx || blockSel < 0) return;
+    const twin = mirrorPlace ? blockMirrorTwin(ctx.bp, blockSel) : -1;
+    if (!paintTwinPair(ctx.bp, blockSel, twin, slot, faces).length) return;
+    writeBlockDoc(ctx, blockSel);
+    if (twin >= 0) writeBlockDoc(ctx, twin);
+    sceneChanged();
+  }, [blockSel, mirrorPlace, sceneChanged]);
+  /** Snap a palette slot's FULL shading spec onto a component's custom
+   *  color1/color2 dict (r/g/b/opacity/roughness/metallic). */
+  const paintComp = useCallback((ci: number, which: 'color1' | 'color2', c: ResolvedColor) => {
+    const ctx = ctxRef.current;
+    if (!ctx || ci < 0) return;
+    for (const [f, v] of [['r', c.r], ['g', c.g], ['b', c.b], ['opacity', c.opacity],
+      ['roughness', c.roughness], ['metallic', c.metallic]] as const)
+      setCompColor(ctx, ci, which, f, v);
+    sceneChanged();
+  }, [sceneChanged]);
 
   /** WIRE workspace: a wide BOTTOM DOCK across the viewport (the user: wire
    *  editing needs a larger screen — the 300 px sidebar slot could never
@@ -493,8 +539,9 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         )}
         {blockSub === 'tris' ? triPanel : (
           <BlockPanel engine={engine} ctx={ctxRef.current} bp={bp!} blockSel={blockSel}
-            brush={brush} tab={tool} mirror={mirrorPlace}
-            onBrush={setBrush} onSelectBlock={setBlockSel} onApplied={sceneChanged} />
+            brush={brush} tab={tool} mirror={mirrorPlace} legacy={legacy}
+            onBrush={setBrush} onSelectBlock={setBlockSel} onApplied={sceneChanged}
+            onPaint={paintBlock} />
         )}
       </div>
     )
@@ -570,6 +617,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
                 {bp && ctxRef.current && (
                   <Panel
                     engine={engine} ctx={ctxRef.current} bp={bp} sel={sel} rev={rev}
+                    legacy={legacy}
                     opts={opts} hullOpacity={hullOpacity} onHullOpacity={setHullOp}
                     gizmoOn={gizmoOn && (mode === 'edit' || mode === 'blocks')} onGizmo={setGizmo}
                     hiDef={hiDef} onHiDef={onHiDef}
@@ -609,7 +657,36 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
             <Viewport bp={bp} onPick={setHit} onEngine={onEngine}
               mode={mode} tool={tool} onBlockPick={onBlockPick} onBlockHover={computeGhost}
               placing={mode === 'edit' || mode === 'blocks' ? placing : null} onPlace={onPlacePoint}
+              onPaintOpen={() => setPaintOpen(o => !o)}
               onManifest={setManifest} />
+            {/* 🎨 PALETTE window (v1.6): the paint alternative to the gizmo
+                modes, opened from the mode widget — targets the CURRENT
+                selection: the selected BLOCK (per-face, ⇄ twin), a COMPONENT
+                (color1/color2 snap), or the block BRUSH in the Place flavor */}
+            {paintOpen && bp && ctxRef.current && (
+              <div data-testid="palette-win"
+                className="ksp-win absolute right-2 top-12 z-30 max-h-[calc(100%-4rem)] w-[320px]
+                           overflow-y-auto rounded-lg px-3 py-2">
+                <div className="ksp-label mb-1 flex items-center justify-between gap-2 border-b
+                               border-white/10 pb-1 text-[10px] text-ink-dim">
+                  Paint —{' '}
+                  {mode === 'blocks' && blockSel >= 0 ? `Block[${blockSel}]${mirrorPlace ? ' + ⇄ twin' : ''}`
+                    : sel.ci >= 0 ? `${bp.data.components[sel.ci]?.type ?? 'part'}[${sel.ci}]`
+                      : 'brush'}
+                  <button data-testid="palette-close" onClick={() => setPaintOpen(false)}
+                    className="ksp-btn rounded px-1.5 text-[11px] text-ink-dim hover:text-accent">✕</button>
+                </div>
+                {mode === 'blocks' && blockSel >= 0 ? (
+                  <BlockPaint bp={bp} legacy={legacy} bi={blockSel} onPaint={paintBlock} />
+                ) : sel.ci >= 0 && bp.data.components[sel.ci] ? (
+                  <CompPaint bp={bp} legacy={legacy} comp={bp.data.components[sel.ci]!}
+                    onApply={(which, c) => paintComp(sel.ci, which, c)} />
+                ) : (
+                  <SwatchGrid bp={bp} legacy={legacy} current={brush.slot}
+                    onPick={slot => setBrush(b => ({ ...b, slot }))} />
+                )}
+              </div>
+            )}
             {placing && (mode === 'edit' || mode === 'blocks') && (
               <div data-testid="place-hint"
                 className="ksp-win ksp-label pointer-events-none absolute left-1/2 top-2 z-20 -translate-x-1/2

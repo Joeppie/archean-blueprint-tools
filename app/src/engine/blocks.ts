@@ -143,9 +143,10 @@ export function mirroredBlock(b: Block): Block {
   const twin: Block = { ...b, type: t };
   twin.frame_x = fr(mc);
   twin.pos_x = mc - fr(mc) * CELLS_PER_FRAME;
-  // colours ride the block's face slots: swap the ±x face pair when the
-  // slot list is the 7-face format and the twin's face count matches
-  if (Array.isArray(b.colors) && b.colors.length === 7) twin.colors = [...b.colors];
+  // colours ride the block's face slots: the twin's face i takes the
+  // source face that faces the OPPOSITE world x (direction mapping, so a
+  // per-face paint mirrors correctly even across slope↔slope pairs)
+  if (Array.isArray(b.colors) && b.colors.length === 7) twin.colors = mirroredFaceSlots(b, twin);
   return twin;
 }
 
@@ -476,6 +477,86 @@ export function blockMirrorTwin(bp: Blueprint, bi: number): number {
     if (rank > bestRank) { bestRank = rank; best = j; }
   }
   return best;
+}
+
+// ------------------------------------------------------------ FACE PAINT
+// Per-face palette slots (blocks.colors[7]) are the block's PAINT; the ⇄
+// twin must ride every paint AND geometry edit (v1.6 user rule: "ensure
+// mirroring is respected, which currently it is not, when editing a block").
+// Face order is per shape family (blockshapes SHAPE_FACES), so a twin of a
+// DIFFERENT family (a slope ↔ its x-mirror) maps its paint through the
+// WORLD face direction each slot presents: the twin's +x-facing face takes
+// the source's −x-facing slot (x is the mirrored axis; y/z stay equal).
+// Slant faces have no single direction — they map by FACE POSITION in the
+// family's face list (slope↔slope, corner↔corner pair in order).
+
+type Dir3 = readonly number[] | null;
+
+/** slot i of `twin` takes the source slot `order[i]` (length 7). */
+export function mirrorFaceOrder(src: Block, twin: Block): number[] {
+  const ds = getBlockFaceDirections(src.type);
+  const dt = getBlockFaceDirections(twin.type);
+  const order: number[] = [];
+  const slantsS: number[] = [], slantsT: number[] = [];
+  ds.forEach((d, i) => { if (!d) slantsS.push(i); });
+  dt.forEach((d, i) => { if (!d) slantsT.push(i); });
+  for (let i = 0; i < 7; i++) {
+    const d = dt[i];
+    if (!d) {                                   // slant ↔ slant by position
+      const k = slantsT.indexOf(i);
+      order.push(k >= 0 && k < slantsS.length ? slantsS[k]! : i);
+      continue;
+    }
+    const want: Dir3 = [-d[0]!, d[1]!, d[2]!];  // the source face behind it
+    const k = ds.findIndex(e => e && e[0] === want[0] && e[1] === want[1] && e[2] === want[2]);
+    order.push(k >= 0 ? k : i);
+  }
+  return order;
+}
+
+/** The 7 face slots of a block (0-filled when the list is short/absent). */
+export function faceSlots(b: Block): number[] {
+  const c = Array.isArray(b.colors) ? b.colors : [];
+  return [0, 1, 2, 3, 4, 5, 6].map(i => (typeof c[i] === 'number' ? c[i] : 0));
+}
+
+/** Paint face slots of a live block: faces = slot indices (all 7 when
+ *  omitted) to `slot`, UNIFORM. Returns the face indices actually changed
+ *  (empty = everything already carried the slot). */
+export function paintBlockFaces(b: Block, slot: number, faces?: number[]): number[] {
+  const s = Math.max(0, Math.min(255, Math.round(slot)));
+  const arr = faceSlots(b);
+  const list = faces && faces.length ? faces : [0, 1, 2, 3, 4, 5, 6];
+  const changed: number[] = [];
+  for (const f of list) if (f >= 0 && f < 7 && arr[f] !== s) { arr[f] = s; changed.push(f); }
+  if (!changed.length) return changed;
+  b.colors = arr;
+  return changed;
+}
+
+/** Paint a block AND (twin >= 0) its mirrored twin, mapping the twin's face
+ *  slots through mirrorFaceOrder (a paint on the source's left face lands
+ *  on the twin's right). Pure writes onto the live blocks — the caller
+ *  writeBlockDocs both. Returns the source faces actually changed. */
+export function paintTwinPair(bp: Blueprint, bi: number, twin: number,
+  slot: number, faces?: number[]): number[] {
+  const b = bp.data.blocks[bi];
+  if (!b) return [];
+  const changed = paintBlockFaces(b, slot, faces);
+  const tw = twin >= 0 ? bp.data.blocks[twin] : undefined;
+  if (tw && changed.length) {
+    const order = mirrorFaceOrder(b, tw);
+    const tfaces = changed.map(f => order[f]!).filter(f => f >= 0 && f < 7);
+    paintBlockFaces(tw, slot, tfaces);
+  }
+  return changed;
+}
+
+/** The whole 7-slot list mirrored for a twin: twin slot i = source slot
+ *  order[i]. */
+export function mirroredFaceSlots(b: Block, twin: Block): number[] {
+  const src = faceSlots(b);
+  return mirrorFaceOrder(b, twin).map(i => src[i] ?? 0);
 }
 
 // ------------------------------------------------------------ SNAP ✧

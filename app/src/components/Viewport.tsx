@@ -24,6 +24,9 @@ declare global {
     ghost: () => Engine['placeGhostState'];
     /** BLOCKS-edit selection highlight state ({bi, twin} | null, v1.4) */
     blockHighlight: () => Engine['blockHighlightState'];
+    /** WORLD bboxes of the highlight overlay meshes (v1.6 stale-ghost pin:
+     *  the overlay must sit ON the selected block after every edit) */
+    blockHlBoxes: () => ReturnType<Engine['blockHlBoxes']>;
     /** BLOCK widget state (v1.5): {bi, mode, mirror, cell} while a selected
      *  block owns the gizmo (BLOCKS ▸ Edit), else null */
     blockGizmo: () => ReturnType<Engine['blockGizmoState']>;
@@ -42,7 +45,7 @@ declare global {
 let atlasP: Promise<ModelAtlas | null> | null = null;
 const getAtlas = (): Promise<ModelAtlas | null> => (atlasP ??= openAtlas());
 
-export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, onBlockPick, onBlockHover, placing = null, onPlace, onManifest }: {
+export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, onBlockPick, onBlockHover, placing = null, onPlace, onPaintOpen, onManifest }: {
   bp: Blueprint | null;
   onPick: (h: PickHit) => void;
   onEngine?: (e: Engine | null) => void;
@@ -65,6 +68,9 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
    *  places it at the picked surface instead of selecting */
   placing?: string | null;
   onPlace?: (clientX: number, clientY: number) => void;
+  /** 🎨 PALETTE button in the mode widget (v1.6): toggles the Editor's paint
+   *  window — the colour alternative to the move/rotate gizmo modes */
+  onPaintOpen?: () => void;
   /** game manifest once the model atlas is open (drives the Catalog tab) */
   onManifest?: (m: Record<string, { mass: number; module: string }> | null) => void;
 }) {
@@ -88,6 +94,7 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
       hoverState: () => engine.hoverActive,
       ghost: () => engine.placeGhostState,
       blockHighlight: () => engine.blockHighlightState,
+      blockHlBoxes: () => engine.blockHlBoxes(),
       blockGizmo: () => engine.blockGizmoState(),
       sel: () => engine.selectionState(),
       compGhost: () => engine.compGhostState,
@@ -222,6 +229,13 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
             className={`ksp-btn grid h-8 w-9 place-items-center text-[15px] leading-none ${
               engineRef.current?.symState().active ? 'on' : 'line-through opacity-60'}`}>
             ⇄
+          </button>
+          {/* 🎨 PALETTE (v1.6): painting is a peer of moving/turning — this
+              opens the colour window for the part/block under the widget */}
+          <button title="paint this part/block (palette)" data-testid="mode-paint"
+            onClick={() => onPaintOpen?.()}
+            className="ksp-btn grid h-8 w-9 place-items-center text-[15px] leading-none">
+            🎨
           </button>
         </div>
       )}

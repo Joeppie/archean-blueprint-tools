@@ -208,6 +208,8 @@ export class Engine {
    *  component outline. Own scene child at moff, like ghostGroup. */
   private blockHlGroup = new Group();
   private blockHlSpec: { bi: number; twin: number } | null = null;
+  /** bi|twin|geometry+paint fingerprint — the v1.6 staleness guard */
+  private blockHlSig = '';
   /** CATALOG placement ghost (v1.4): a translucent collider box at the
    *  hovered surface (+ the ⇄ mirrored twin box), the component analogue of
    *  the block constructor ghost. Own scene child at moff. */
@@ -2791,10 +2793,26 @@ void main() {
   /** BLOCKS-edit selection highlight (v1.4): the selected block gets the
    *  golden constructor overlay, its ⇄ SIMILAR TWIN a dim one (the block
    *  analogue of twin co-selection). -1 clears. Survives reloads visually
-   *  (raw geometry, no per-load objects) — the Editor re-issues it per edit. */
+   *  (raw geometry, no per-load objects) — the Editor re-issues it per edit.
+   *  v1.6: the dedup key carries a GEOMETRY/PAINT FINGERPRINT too — the
+   *  old {bi,twin}-only guard returned early when a panel edit (cx move,
+   *  ⟲X turn, repaint) kept the same selection, so the overlay kept the
+   *  block's OLD shape/pos: a golden ghost of the pre-edit block stuck on
+   *  the deck until a full deselect ("blocks become translucent and don't
+   *  return to previous state", user report). */
   setBlockHighlight(bi: number, twin = -1) {
-    if ((this.blockHlSpec?.bi ?? -1) === bi && (this.blockHlSpec?.twin ?? -1) === twin) return;
+    const fp = (i: number): string => {
+      const b = i >= 0 && this.bp ? this.bp.data.blocks[i] : undefined;
+      if (!b) return '-';
+      const c = blockCells(b);
+      return `${b.type}|${c.x},${c.y},${c.z}|${b.size_x},${b.size_y},${b.size_z}|` +
+        (Array.isArray(b.colors) ? b.colors.join(',') : '');
+    };
+    const sig = `${bi}|${twin}|${fp(bi)}|${fp(twin)}`;
+    if ((this.blockHlSpec?.bi ?? -1) === bi && (this.blockHlSpec?.twin ?? -1) === twin &&
+      this.blockHlSig === sig) return;
     this.blockHlSpec = bi >= 0 ? { bi, twin } : null;
+    this.blockHlSig = sig;
     for (const o of this.blockHlGroup.children) {
       (o as Mesh).geometry?.dispose();
       ((o as Mesh).material as MeshBasicMaterial)?.dispose?.();
@@ -2816,6 +2834,22 @@ void main() {
     this.invalidate();
   }
   get blockHighlightState() { return this.blockHlSpec; }
+
+  /** WORLD bboxes of the selection overlay meshes (e2e/pin hook): proves the
+   *  golden overlay sits ON the block it selects — a stale ghost sits where
+   *  the block USED to be, so geometry assertions (not just the {bi,twin}
+   *  spec) are what pin the v1.6 fingerprint fix. */
+  blockHlBoxes(): { min: [number, number, number]; max: [number, number, number] }[] {
+    this.scene.updateMatrixWorld(true);
+    const out: { min: [number, number, number]; max: [number, number, number] }[] = [];
+    for (const o of this.blockHlGroup.children) {
+      const m = o as Mesh;
+      if (!m.isMesh || !m.visible) continue;
+      const b = new Box3().setFromObject(m);
+      if (!b.isEmpty()) out.push({ min: [b.min.x, b.min.y, b.min.z], max: [b.max.x, b.max.y, b.max.z] });
+    }
+    return out;
+  }
 
   /** CATALOG placement ghost (v1.4): a translucent collider box of the held
    *  part at the hovered surface — the component analogue of the constructor
