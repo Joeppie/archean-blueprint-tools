@@ -658,8 +658,14 @@ is the suite-re-run path), and prints
 `semver bump: v1.3 → v1.3.1 (patch …)` so a fix-onto-Y misfire is visible at
 the moment of the cut. `tools/security-scan.py --versions` keeps all nine
 context-anchored strings in lockstep. The bump itself still happens at SESSION
-START (the v0.161 rule below), now onto the next Z unless the session's stated
-work is a feature (`Y`) or an overhaul (`X`).
+START (the v0.161 rule below): onto the next **Z (patch) the agent bumps
+AUTONOMOUSLY — it is expected, not permitted-with-apology** — but a **Y
+(new user-facing FEATURE) or X (overhaul) needs the user's explicit OK: the
+agent SUGGESTS the number ("this batch includes <feature> — suggest
+vX.Y.0, OK?") and until the user assents, the tree carries the next Z, never
+a self-chosen Y/X** (user 2026-10-20: "You are allowed and SHOULD bump patch
+versions unless you get an OK for a new release/functionality (you can
+suggest that!). but no user-unacknowledged bumps").
 
 ## Publishing (GitHub Pages — release-branch + generated `pages` scheme)
 The live site is `https://joeppie.github.io/archean-blueprint-tools/` —
@@ -738,16 +744,21 @@ server (:8650) serves the working tree, so an in-progress tree must carry
 the NEXT version label; a dev snapshot wearing the last release's string is
 indistinguishable from a pushed one (2026-10-09 user report). `release.sh`
 refuses to cut a tag when the strings disagree.
-**2026-10-20 USER OVERRIDE — the NUMBER belongs to the user alone:** "It's
-1.5.7 or something. DO NOT INCREMENT THAT WITHOUT MY CONSENT" (an agent
-bumped v1.5.7 → v1.9.0 uninvited and had it reverted). NO agent edits ANY
-release string (X, Y or Z, session-start or otherwise) without the user's
-explicit number for it. The session-start ritual above therefore means:
-AT SESSION START ASK the user whether the tree should carry a new number —
-and until they answer, the working tree keeps the last user-set strings
-(the dev-snapshot ambiguity is accepted, the user's number outranks it).
-The X/Y/Z guidance in § Versioning describes how to NUMBER a release once
-the user says a number is due; it never authorises the bump itself.
+**2026-10-20 BUMP POLICY (user's wording, refines both the v0.161 ritual and
+the same-day first correction): "You are allowed and SHOULD bump patch
+versions unless you get an OK (you can suggest that!) for a new
+release/functionality. but no user-unackowledged bumps."** Concretely:
+- **PATCH (Z) — agent-owned, DO IT:** session start (v0.161 dev-label rule)
+  and any fix landing bumps the strings to the next Z without asking;
+  announce it in the commit message. A never-asked patch is policy-compliant.
+- **MINOR/MAJOR (Y/X) — user-owned: SUGGEST, then WAIT.** A batch that adds
+  user-facing functionality (or an overhaul) gets a PROPOSAL — "suggest
+  vX.Y.0, OK?" — and only after the user assents may the strings carry it;
+  until then the tree keeps the next Z. The same-day v1.5.7 → v1.9.0 edit
+  was reverted NOT because bumping was forbidden but because it was a
+  Y-sized jump the user never acknowledged (and an invented number line).
+- The X/Y/Z SEMVER guidance below describes how to NUMBER a release; the
+  authority to apply it is split exactly as above.
 
 ## Sources of truth (all offline — do NOT web-fetch to answer format questions)
 - **FORMAT.md is the knowledge base.** Everything reverse-engineered lives
