@@ -70,8 +70,9 @@ tools/asset_space.py            SUPERSEDED collider-census (kept for provenance;
 tools/security-scan.py          checkin gate: secret-shape scan (--staged/--tree/
                                 --history) + release-string sync (--versions)
 tools/release.sh                THE release ritual: full-suite gate → ff release
-                                branch → annotated v0.NN tag → push (+ GitHub
-                                Release notes via gh, best effort)
+                                branch → annotated vX.Y.Z (SEMVER, see
+                                § Versioning) tag → push (+ GitHub Release
+                                notes via gh, best effort)
 tools/install-hooks.sh          ONE-PER-CLONE: installs tests/pre-commit into .git
 tests/pre-commit                the mandatory gate hook (see Checkin gate below)
 tools/perfprobe.py URL [s]      real-clock headless perf probe (DevTools ws;
@@ -258,9 +259,9 @@ blobs are scanned for CREDENTIAL SHAPES (private keys, GitHub/AWS/Google/
 Slack/npm/PyPI/OpenAI tokens, JWTs, ssh keys, basic-auth URLs, Steam WebAPI
 `key=<32hex>`, password/token assignments) — any hit blocks the commit;
 (2) `--versions` — when a release-string file (or the viewer) is staged, ALL
-context-anchored `v0.NN` strings (viewer title/header, `view3d.js?v=NN`,
-README ×2, landing ×2) must agree, so the release ritual can never ship a
-mismatched build. Deep scans: `--tree` and `--history` (every blob of every
+context-anchored version strings (viewer title/header, `view3d.js?v=N`,
+README ×2, landing ×2, app title) must agree, so the release ritual can never
+ship a mismatched build. Deep scans: `--tree` and `--history` (every blob of every
 revision). Baseline audit 2026-10-09: tree (250 files) + history (1211 blobs)
 = ZERO secret hits; no emails/IPs/tokens in the tree. INTENTIONAL, audited,
 public data: testdata blueprints carry workshop authors + timestamps
@@ -275,6 +276,35 @@ RELEASE gate — `tools/release.sh` runs it and refuses to cut a release on a
 FAIL. (2026-10-09 remediation: the user F5'd the dev server
 mid-session, saw a selftest FAIL under the SAME v0.160 label as the pushed
 release, and reasonably concluded the release was broken.)
+
+## Versioning (semver — user rule 2026-10-20)
+
+`vX.Y.Z` (the pre-rule tags v1.0 … v1.3 were 2-part; read them as `X.Y.0`).
+Bump the smallest component that describes the work — **do NOT spend a `Y` on
+a fix** (the rule was written after v1.2 = a z-flip bugfix and v1.3 = a
+settings/✕ tweak both consumed `Y` bumps):
+
+- **X — major**: an overhaul or a change of shape. A UI overhaul, a framework
+  step (the React app replacing the legacy viewer = v1.0), an entire scope
+  change (the app becoming the Pages site root).
+- **Y — minor**: a new FEATURE/capability the user can point at — the subgrid
+  hinge UI, a new editor mode, a new analysis, a new panel/tool surface.
+- **Z — patch**: FIXES and small tweaks — a wrong pivot or mis-framed camera
+  (that was v1.2-sized = a Z job), a control moved, wording, a threshold,
+  a tool added, docs. If it only makes an existing thing correct or nicer,
+  it is a Z.
+
+Multiple stacked changes still take ONE bump: the version describes the
+RELEASE, not the commits inside it (v1.3 = one tweak; had it carried a fix AND
+a feature, it would be the feature's `Y`, still a single tag).
+
+Enforcement: `tools/release.sh` refuses a 2-part string on a new cut, refuses
+a number that does not move FORWARD past the newest remote tag, and prints
+`semver bump: v1.3 → v1.3.1 (patch …)` so a fix-onto-Y misfire is visible at
+the moment of the cut. `tools/security-scan.py --versions` keeps all nine
+context-anchored strings in lockstep. The bump itself still happens at SESSION
+START (the v0.161 rule below), now onto the next Z unless the session's stated
+work is a feature (`Y`) or an overhaul (`X`).
 
 ## Publishing (GitHub Pages — release-branch + generated `pages` scheme)
 The live site is `https://joeppie.github.io/archean-blueprint-tools/` —
@@ -291,8 +321,9 @@ from.**
 - `release` = stable, **ff-only**. A release is an EXACT main commit that
   passed the COMPLETE suite (`tests/run_tests.sh`: selftest + regtest +
   proxy + comp + ui + gizmo + position fixtures + renders), fast-forwarded
-  onto release and stamped with an annotated tag `vX.Y` (the `v1.0` milestone
-  2026-10-19 replaced the old `v0.NN` line). Hotfixes go through
+  onto release and stamped with an annotated tag `vX.Y.Z` (SEMVER — see
+  § Versioning; the `v1.0` milestone 2026-10-19 replaced the old `v0.NN`
+  line, whose 2-part successors v1.0…v1.3 stay as they are). Hotfixes go through
   main and re-release — release is never rebased or cherry-picked onto.
 - `pages` = the PUBLIC artifact, since the v1.0 app deploy: an orphan
   snapshot of the release tree where **the vite-built app IS the site ROOT**
@@ -310,8 +341,10 @@ from.**
   the CardPreview `../` flip are deeper-copy fallbacks; the legacy link is
   root-exact because `../` would ESCAPE the Pages prefix; vite `base './'`),
   so the repo URL path is never hardcoded.
-- The ritual is **`tools/release.sh [vX.Y]`**: preflight (clean tree on main,
-  main pushed, release strings agree via `security-scan --versions`, tag free,
+- The ritual is **`tools/release.sh [vX.Y.Z]`**: preflight (clean tree on main,
+  main pushed, release strings agree via `security-scan --versions`, the string
+  is 3-part SEMVER and moves FORWARD past the newest remote tag (the bump kind
+  major/minor/patch is printed), tag free,
   origin/release an ancestor of main) → COMPLETE suite (a FAIL aborts — the
   release branch is never touched) → ff `release` to HEAD → annotated tag +
   push → best-effort GitHub Release with commit-range notes (needs an authed
@@ -342,8 +375,9 @@ from.**
   same way (`{"source":{"branch":"pages","path":"/"}}`). ROLLBACK of the app
   deploy = flip it back to `release` (the pure-static site keeps working
   either way; `pages` is rebuilt from release by `tools/deploy_pages.py`).
-(README viewer link is versioned; bump `v0.xx` in index.html title/header,
-landing page and README together when the viewer changes). v0.161 rule:
+(README viewer link is versioned; bump the version in index.html title/header,
+landing page and README together when the viewer changes). v0.161 rule +
+§ Versioning for WHAT to bump:
 **bump the version strings at SESSION START, not at release** — the dev
 server (:8650) serves the working tree, so an in-progress tree must carry
 the NEXT version label; a dev snapshot wearing the last release's string is

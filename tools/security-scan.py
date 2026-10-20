@@ -6,9 +6,12 @@ modes:
               pre-commit hook; fast, byte-accurate: reads the INDEX blobs)
   --tree      scan every tracked file in the working tree
   --history   scan every blob of every revision (forensic one-off)
-  --versions  verify the vX.Y release strings agree across
+  --versions  verify the vX.Y[.Z] release strings agree across
               viewer/index.html + README.md + index.html + app/index.html
-              (release ritual)
+              (release ritual). The scheme is SEMVER: major = UI overhaul /
+              framework / scope change, minor = new features, PATCH = fixes
+              and small tweaks (tools/release.sh enforces the 3-part form and
+              that the number moves FORWARD).
 
 FAIL (exit 1) = credential SHAPES, i.e. things that are secrets if real:
   private-key blocks, GitHub/AWS/Google/Slack/npm/PyPI/OpenAI tokens, JWTs,
@@ -125,14 +128,19 @@ def mode_history():
     return fails, len(ids)
 
 
+# ONE context-anchored pattern per string. The version group accepts BOTH the
+# historical 2-part tags (v1.0 … v1.3) and the semver 3-part form (v1.3.1);
+# release.sh additionally REQUIRES 3 parts on a new cut, so the old tags keep
+# scanning clean while every new release is vX.Y.Z.
 VER_SPECS = {
-    'viewer/index.html': [r'Archean Blueprint Viewer v(\d+\.\d+)',
-                          r'v(\d+\.\d+)</small>', r'view3d\.js\?v=([\d.]+)',
+    'viewer/index.html': [r'Archean Blueprint Viewer v(\d+\.\d+(?:\.\d+)?)',
+                          r'v(\d+\.\d+(?:\.\d+)?)</small>', r'view3d\.js\?v=([\d.]+)',
                           r'tests\.js\?v=([\d.]+)'],
-    'README.md': [r'# Archean Blueprint Tools · v(\d+\.\d+)', r'This is v(\d+\.\d+)'],
-    'index.html': [r'Archean Blueprint Tools v(\d+\.\d+)</title>',
-                   r'v(\d+\.\d+)</span>'],
-    'app/index.html': [r'Archean Blueprint Inspector v(\d+\.\d+)</title>'],
+    'README.md': [r'# Archean Blueprint Tools · v(\d+\.\d+(?:\.\d+)?)',
+                  r'This is v(\d+\.\d+(?:\.\d+)?)'],
+    'index.html': [r'Archean Blueprint Tools v(\d+\.\d+(?:\.\d+)?)</title>',
+                   r'v(\d+\.\d+(?:\.\d+)?)</span>'],
+    'app/index.html': [r'Archean Blueprint Inspector v(\d+\.\d+(?:\.\d+)?)</title>'],
 }
 
 

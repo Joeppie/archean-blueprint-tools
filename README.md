@@ -1,4 +1,4 @@
-# Archean Blueprint Tools · v1.3
+# Archean Blueprint Tools · v1.3.1
 
 **Reverse-engineered file format + a zero-build browser viewer/inspector for
 workshop craft of [Archean](https://store.steampowered.com/app/2941660/Archean/)**
@@ -137,6 +137,11 @@ workflow at
 
 ## Releases
 
+Releases are **semver `vX.Y.Z`**: `X` for an overhaul (UI, framework, scope —
+`v1.0` was the app replacing the viewer), `Y` for new features, `Z` for fixes
+and small tweaks. `tools/release.sh` refuses a 2-part string and a number that
+does not move forward.
+
 GitHub Pages serves the **`release` branch** (stable); `main` is development.
 A release is a `main` commit that passed the full suite, fast-forwarded onto
 `release` and tagged — all done by `tools/release.sh` (see AGENTS.md §
@@ -145,7 +150,7 @@ say-so**: green tests or merged work never imply one.
 
 ## Ideas welcome — open an issue!
 
-This is v1.3: the format is decoded and the viewer is useful, but the good
+This is v1.3.1: the format is decoded and the viewer is useful, but the good
 ideas are not all in yet. Feature requests, format questions, and craft that
 render wrong (attach the `blueprint.json`) are all best filed as
 [issues](https://github.com/Joeppie/archean-blueprint-tools/issues) — that is

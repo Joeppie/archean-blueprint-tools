@@ -11,8 +11,18 @@
 #              (tools/deploy_pages.py builds it from release + app/dist).
 #              A release = an EXACT main commit that passed the COMPLETE suite
 #              (tests/run_tests.sh), fast-forwarded onto release and stamped with
-#              an annotated tag vX.Y (v1.0 milestone since 2026-10-19; the
-#              v0.NN line preceded it). release is ff-only: hotfixes go
+#              an annotated tag vX.Y.Z. THE SCHEME IS SEMVER (user rule
+#              2026-10-20, after v1.2/v1.3 were burned on two fixes):
+#                X major  UI overhaul, framework/rewrite step, scope change
+#                         (v1.0 = the React app replacing the viewer + Pages
+#                         root inversion)
+#                Y minor  new features/capabilities (subgrid hinge UI, a new
+#                         editor mode, a new analysis)
+#                Z patch  fixes and small tweaks — the joint-line fix and the
+#                         static-info setting were Z-sized work
+#              Every NEW cut must be 3-part; the legacy 2-part tags (v1.0 …
+#              v1.3) stay as they are and are read as X.Y.0. A fix therefore
+#              goes v1.3 → v1.3.1 and NEVER onto Y. release is ff-only: hotfixes go
 #              through main like everything else — never rebase or
 #              cherry-pick release.
 #   pages    = GENERATED public site (since the v1.0 app deploy): a
@@ -20,12 +30,15 @@
 #              by tools/deploy_pages.py. Never edited by hand.
 #
 # Usage:  tools/release.sh          (version is read from the release strings)
-#         tools/release.sh vX.Y     (same, but asserts the strings say vX.Y)
+#         tools/release.sh vX.Y.Z   (same, but asserts the strings say vX.Y.Z)
 #
 # Refuses (exit 1, BEFORE running anything) when:
 #   - the tree is dirty, or HEAD is not main, or main is not pushed to origin
-#   - the context-anchored vX.Y strings disagree (security-scan --versions)
-#   - the tag vX.Y already exists on a DIFFERENT commit (bump the strings)
+#   - the context-anchored version strings disagree (security-scan --versions)
+#   - the release string is not 3-part vX.Y.Z (semver: fixes bump Z, features
+#     bump Y, only an overhaul bumps X)
+#   - the version does not move FORWARD past the newest tag on origin
+#   - the tag already exists on a DIFFERENT commit (bump the strings)
 #   - origin/release is not an ancestor of main (diverged — reconcile via main)
 # Then it runs the full suite; a FAIL aborts the release (release untouched).
 set -euo pipefail
@@ -41,9 +54,29 @@ BR=$(git symbolic-ref --short HEAD)
 
 # the release strings (viewer title, README ×2, landing ×2, app title) must all agree
 python3 tools/security-scan.py --versions
-VER=$(grep -oPm1 '(?<=Archean Blueprint Viewer v)\d+\.\d+' viewer/index.html)
+VER=$(grep -oPm1 '(?<=Archean Blueprint Viewer v)\d+\.\d+(?:\.\d+)?' viewer/index.html)
 TAG="v${VER}"
 [ -z "${1:-}" ] || [ "$1" = "$TAG" ] || die "argument $1 disagrees with the release string $TAG"
+[[ "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+  || die "release string v$VER is not semver vX.Y.Z — fixes bump Z, features bump Y, overhauls bump X"
+
+# the number must move FORWARD (a silent v1.3.0 after v1.3.2 would re-issue a
+# tag that means something else). Tag TRUTH = the remote (never local tags —
+# see the fetch --tags note below) and the ^{} peeled rows are collapsed.
+LATEST=$(git ls-remote --tags origin 'refs/tags/v[0-9]*' \
+  | sed 's|.*refs/tags/||; s|\^{}||' | sort -Vu | tail -1)
+if [ -n "$LATEST" ]; then
+  LV=${LATEST#v}
+  [ "$(printf '%s\n%s\n' "$LV" "$VER" | sort -V | head -1)" = "$LV" ] && [ "$LV" != "$VER" ] \
+    || die "v$VER does not go forward past the newest tag $LATEST (sort -V)"
+  # what kind of bump is this? (print it, so a fix-onto-Y misfire is visible)
+  read -r A B C < <(printf '%s %s %s' "${LV%%.*}" "$(echo "${LV#*.}" | cut -d. -f1)" "$(echo "$LV" | cut -s -d. -f3)")
+  read -r X Y Z < <(printf '%s %s %s' "${VER%%.*}" "$(echo "${VER#*.}" | cut -d. -f1)" "$(echo "$VER" | cut -d. -f3)")
+  KIND="major"
+  [ "$X" = "$A" ] && KIND="minor"
+  [ "$X" = "$A" ] && [ "$Y" = "$B" ] && KIND="patch"
+  say "semver bump: $LATEST → $TAG  ($KIND — Z fixes · Y features · X overhaul)"
+fi
 
 ss -ltn 2>/dev/null | grep -q ":8650 " && die "port 8650 busy — stop the dev server (pkill -f '[h]ttp.server 8650')"
 
