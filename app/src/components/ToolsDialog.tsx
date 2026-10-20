@@ -142,6 +142,19 @@ export const TOOLS: ToolDef[] = [
       + 'voxels); the game recomputes mass and the bounding box on load.',
     fields: [
       {
+        key: 'wind', label: 'direction', kind: 'select',
+        options: [
+          { id: 'inward', label: 'front faces IN' },
+          { id: 'outward', label: 'front faces OUT' },
+        ],
+        hint: 'Which way the triangle winding faces. The game extrudes each '
+          + 'triangle as a prism whose FRONT side takes colours[0] and shades '
+          + 'by that normal — if the converted hull shows a beveled/wrong-way '
+          + 'look in the game, pick the other direction here. (v1.5.7 user '
+          + 'report: the block face’s own winding read wrong-way in-game; '
+          + 'front-IN is the default, front-OUT is the v1.5.6 behaviour.)',
+      },
+      {
         key: 'note', label: '', kind: 'note',
         hint: 'Existing hull triangles and struts stay; type-255 component '
           + 'occupancy markers STAY (they are reservations, not geometry); '
@@ -150,23 +163,23 @@ export const TOOLS: ToolDef[] = [
           + 'if you want the block version back.',
       },
     ],
-    initial: {},
-    preview: (_f, bp) => {
-      const r = hullifyPreview(bp);
+    initial: { wind: 'inward' },
+    preview: (f, bp) => {
+      const r = hullifyPreview(bp, { wind: f['wind'] === 'outward' ? 'outward' : 'inward' });
       if (!r.ok) return r.reason ?? 'nothing to convert';
-      return `${r.blocksRemoved} blocks ▸ ${r.trisAdded} triangles`
+      return `${r.blocksRemoved} blocks ▸ ${r.trisAdded} triangles · front faces ${f['wind'] === 'outward' ? 'OUT' : 'IN'}`
         + (r.keptOcc ? ` · ${r.keptOcc} occupancy markers kept` : '')
         + (r.subBlocks ? ` · ${r.subBlocks} SUBGRID blocks stay blocks` : '')
         + ` · mass ≈ ${(r.massRemoved).toFixed(0)} kg ▸ ${r.massAdded.toFixed(0)} kg`
         + (r.skipped ? ` · ${r.skipped} faces skipped (too wide for the format)` : '');
     },
-    run: (_f, ctx) => {
+    run: (f, ctx) => {
       const geo = ctx.bp.data.blocks
         .map((b, i) => (b.type === OCCUPANCY_TYPE ? -1 : i))
         .filter(i => i >= 0)
         .sort((a, b) => b - a);
       const trisBefore = ctx.bp.data.triangles?.length ?? 0;
-      const res = hullifyApply(ctx.bp);
+      const res = hullifyApply(ctx.bp, { wind: f['wind'] === 'outward' ? 'outward' : 'inward' });
       if (!res.ok) return res.reason ?? 'nothing converted';
       for (const i of geo) docArrayRemoveAt(ctx.doc, ['data', 'blocks'], i);
       docEnsureArray(ctx.doc, ['data', 'triangles']);

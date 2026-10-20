@@ -304,19 +304,34 @@ export interface HullifyResult {
   reason?: string;
 }
 
+/** Which way the generated triangles' winding faces (v1.5.7 user rule:
+ *  "all triangles are precisely the wrong way around … but want to keep it
+ *  as an option for their directionality"). 'inward' = the v1↔v2 swap of
+ *  the face's authored winding — the direction the user's in-game check of
+ *  the generated hull says is RIGHT (the bevel artifact disappears);
+ *  'outward' = keep the block face's own winding (front = the RH cross
+ *  points away from the solid), the v1.5.6 behaviour, kept selectable.
+ *  NOTE: the corpus census of game-AUTHORED triangles reads outward under
+ *  the centroid heuristic — the user's in-game observation arbitrates, so
+ *  'inward' is the default and BOTH directions stay one click away. */
+export type HullifyWind = 'inward' | 'outward';
+export const HULLIFY_WIND_DEFAULT: HullifyWind = 'inward';
+
+export interface HullifyOptions { wind?: HullifyWind }
+
 /** Preview the conversion without touching bp. */
-export function hullifyPreview(bp: Blueprint): HullifyResult {
-  return hullifyCore(bp, false);
+export function hullifyPreview(bp: Blueprint, opts: HullifyOptions = {}): HullifyResult {
+  return hullifyCore(bp, false, opts.wind ?? HULLIFY_WIND_DEFAULT);
 }
 
 /** Convert bp IN PLACE: remove every geometry block, append the covering
  *  hull triangles (existing triangles stay). Returns the report; ok=false
  *  (+reason) leaves bp untouched. */
-export function hullifyApply(bp: Blueprint): HullifyResult {
-  return hullifyCore(bp, true);
+export function hullifyApply(bp: Blueprint, opts: HullifyOptions = {}): HullifyResult {
+  return hullifyCore(bp, true, opts.wind ?? HULLIFY_WIND_DEFAULT);
 }
 
-function hullifyCore(bp: Blueprint, apply: boolean): HullifyResult {
+function hullifyCore(bp: Blueprint, apply: boolean, wind: HullifyWind): HullifyResult {
   const blocks = bp.data.blocks ?? [];
   const geometry = blocks.filter(b => b.type !== OCCUPANCY_TYPE);
   if (!geometry.length) return { ...EMPTY_HULL, reason: 'the craft has no blocks to convert' };
@@ -372,11 +387,14 @@ function hullifyCore(bp: Blueprint, apply: boolean): HullifyResult {
     for (let f = 0; f < trisOf.length; f++) {
       const slot = b.colors?.[f] ?? b.colors?.[0] ?? 0;
       const opaque = resolveColor(palette, slot, legacy).opacity >= 15;
-      /** emit the block-shape face polygon (its own corners) as triangles */
+      /** emit the block-shape face polygon (its own corners) as triangles,
+       *  wound per the chosen direction (swap = the v1↔v2 reversal) */
       const emitPoly = (idx: readonly number[]): void => {
         const g = idx.map(i => toG(pts[i]!));
         for (let t = 0; t + 2 < g.length; t += 3) {
-          const enc = encodeTri([g[t]!, g[t + 1]!, g[t + 2]!], slot, material);
+          const tri: [G3, G3, G3] = wind === 'outward'
+            ? [g[t]!, g[t + 1]!, g[t + 2]!] : [g[t]!, g[t + 2]!, g[t + 1]!];
+          const enc = encodeTri(tri, slot, material);
           if (enc) newTris.push(enc); else skipped++;
         }
       };
@@ -408,7 +426,9 @@ function hullifyCore(bp: Blueprint, apply: boolean): HullifyResult {
             cell[u] = min[u]! + i; cell[v] = min[v]! + j;
             const q = cellQuad(cell, axis, dir).map(p => toG(p)) as [G3, G3, G3, G3];
             for (const t of [[q[0]!, q[1]!, q[2]!], [q[2]!, q[3]!, q[0]!]] as [G3, G3, G3][]) {
-              const enc = encodeTri(t, slot, material);
+              const tri: [G3, G3, G3] = wind === 'outward'
+                ? t : [t[0]!, t[2]!, t[1]!];
+              const enc = encodeTri(tri, slot, material);
               if (enc) newTris.push(enc); else skipped++;
             }
           }

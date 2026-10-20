@@ -379,7 +379,17 @@ user's explicit say-so (Pages/release still serves it meanwhile).
   plus the literal-rule pins (glued-cube pair: shared border emits nothing,
   20 face quads' worth of tris; lone wedge: profile planes hold ONE tri
   each, square sides TWO; slant-glued wedge pair behaves like one cube).
-  The dialog is a `danger` tool (no undo yet).
+  The dialog is a `danger` tool (no undo yet). **v1.5.7 DIRECTION option**
+(user: "all triangles are precisely the wrong way around … keep it as an
+option for their directionality"): the tool's `direction` select sets the
+generated winding — `inward` (DEFAULT: the v1↔v2 reversal of the block face's
+own winding; the user's in-game check says this is the direction the game
+wants, the outward one rendered the "weird beveled" hull) or `outward`
+(= the v1.5.6 behaviour, front = the RH cross away from the solid, what the
+block-shape table and the corpus census of AUTHORED files read as). Pure pin
+(`__tests__/tools.test.ts` DIRECTION test): both directions emit the SAME
+triangles/area, normals exactly antiparallel, the lone cube's +x face normal
++x/−x per option. `hullifyApply(bp, { wind })`.
 - **v1.7 declared TODOs, visible in the Edit ▾ menu** (user: "we need a stack
   to be able to undo at least the last 10 operations, for each and every
   thing; make this a todo, visible from the Edit Menu"; the vessel-info

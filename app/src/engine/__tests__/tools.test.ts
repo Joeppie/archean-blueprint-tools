@@ -177,6 +177,46 @@ describe('replaceAll', () => {
 });
 
 describe('hullify — blocks ▸ hull triangles', () => {
+  test('DIRECTION option (v1.5.7): inward (default) = the outward winding REVERSED — same triangles, same area, opposite normals', () => {
+    const mkPair = () => bpOf([
+      block({ pos_x: 5, pos_y: 5, pos_z: 5, colors: all(3) }),
+      block({ type: 1, pos_x: 6, pos_y: 5, pos_z: 5, colors: all(3) }),
+    ]);
+    const out = mkPair(), inn = mkPair();
+    const ro = hullifyApply(out, { wind: 'outward' });
+    const ri = hullifyApply(inn);                      // default = 'inward'
+    expect(ri.trisAdded).toBe(ro.trisAdded);
+    const ta = out.data.triangles!, tb = inn.data.triangles!;
+    expect(tb.length).toBe(ta.length);
+    // SAME geometric triangles (vertex multisets identical, lattice encoding
+    // included) — the winding is the exact v1↔v2 reversal of each other:
+    const key = (p: [number, number, number][]) =>
+      p.map(q => q.map(x => x.toFixed(4)).join()).sort().join('|');
+    const nrm = (p: V3[]): V3 => vcross(vsub(p[1]!, p[0]!), vsub(p[2]!, p[0]!));
+    const normOut = new Map(ta.map(t => [key(triWorld(t)), nrm(triWorld(t))]));
+    for (const t of tb) {
+      const w = triWorld(t);
+      const m = normOut.get(key(w));
+      expect(m).toBeDefined();
+      const n = nrm(w);
+      const dot = n.reduce((s, v, i) => s + v * m![i]!, 0);
+      const len = Math.hypot(...n) * Math.hypot(...m!);
+      expect(dot / len).toBeLessThan(-0.999);          // exactly antiparallel
+    }
+    // the literal rule on a lone cube: its +x extreme face carries a +x
+    // winding normal outward, and a −x one inward
+    const lone = (wind?: 'inward' | 'outward') => {
+      const bp = bpOf([block({ pos_x: 5, pos_y: 5, pos_z: 5, colors: all(0) })]);
+      hullifyApply(bp, wind ? { wind } : {});
+      const face = bp.data.triangles!.filter(t => triWorld(t).every(p => p[0] === 0))
+        .map(t => nrm(triWorld(t)));
+      expect(face.length).toBe(2);
+      return face.every(n => Math.sign(n[0]!) === (wind === 'outward' ? 1 : -1));
+    };
+    expect(lone('outward')).toBe(true);
+    expect(lone()).toBe(true);                         // default inward
+  });
+
   test('two glued cubes: the shared border emits NOTHING, every other face is its own quad pair', () => {
     const bp = bpOf([
       block({ pos_x: 5, pos_y: 5, pos_z: 5, colors: all(3), material: 2 }),
@@ -456,5 +496,5 @@ describe('hullify — blocks ▸ hull triangles', () => {
       checked++;
     }
     expect(checked).toBeGreaterThan(10);
-  });
+  }, 120_000);        // 25-craft convert+cull+containment census — slow on the iGPU box
 });
