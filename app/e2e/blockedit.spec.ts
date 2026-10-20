@@ -83,6 +83,53 @@ test.describe('blocks EDIT: highlight, in-place rotate, snap, twin @place', () =
     expect(await highlight(page)).toBeNull();
   });
 
+  test('a component picked in blocks mode gets the gizmo + widget + inspector (v1.4 regression: move/rotate)', async ({ page }) => {
+    test.skip(test.info().project.name !== 'chromium', 'desktop-only');
+    await page.goto('/');
+    await page.getByTestId('gallery-new').click();
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
+    await page.getByTestId('mode-blocks').click();          // PLACE tab (default)
+    let px: { x: number; y: number } | null = null;
+    for (let i = 0; i < 40 && !px; i++) {
+      px = await page.evaluate(() => {
+        const c = document.querySelector('canvas')!;
+        const r = c.getBoundingClientRect();
+        const e = (window as unknown as { __ARCHEAN__?: { engine: { pendingReal: number;
+          pickCell: (x: number, y: number) => { kind: string } | null } } }).__ARCHEAN__!.engine;
+        if (e.pendingReal > 0) return null;
+        for (let fy = 0.3; fy <= 0.8; fy += 0.02)
+          for (let fx = 0.25; fx <= 0.8; fx += 0.02) {
+            const h = e.pickCell(r.left + r.width * fx, r.top + r.height * fy);
+            if (h && h.kind === 'comp') return { x: r.left + r.width * fx, y: r.top + r.height * fy };
+          }
+        return null;
+      });
+      if (!px) await page.waitForTimeout(300);
+    }
+    expect(px, 'the PilotSeat surface answers pickCell').not.toBeNull();
+    await page.mouse.click(px!.x, px!.y);
+    await expect(page.getByTestId('modebox')).toBeVisible();          // ⊘/✥/⟳/⇄ pops
+    const st = await page.evaluate(() =>
+      (window as unknown as { __ARCHEAN__?: { engine: { gizmoState: () => { ci: number; mode: string } } } }
+      ).__ARCHEAN__!.engine.gizmoState());
+    expect(st.ci, 'the gizmo attaches in blocks mode too').toBeGreaterThanOrEqual(0);
+    await expect(page.getByTestId('block-brush'), 'the brush workspace stays').toBeVisible();
+    await expect(page.getByTestId('inspector'), 'the inspector stacks above it').toBeVisible();
+    // and the part MOVES from there (inspector slider — the gizmo path is
+    // pinned mode-independently by gizmo.spec)
+    const x0 = await page.evaluate(() => {
+      const a = window.__ARCHEAN__!;
+      return a.engine.compViewPos(a.engine.gizmoState().ci)!.x;
+    });
+    await page.getByTestId('row-n-x').fill(String(x0 + 0.5));
+    await page.waitForTimeout(300);
+    const x1 = await page.evaluate(() => {
+      const a = window.__ARCHEAN__!;
+      return a.engine.compViewPos(a.engine.gizmoState().ci)!.x;
+    });
+    expect(x1 - x0).toBeCloseTo(0.5, 3);
+  });
+
   test('⇄ placed pair: the block editor identifies the similar twin', async ({ page }) => {
     test.skip(test.info().project.name !== 'chromium', 'desktop-only');
     await page.goto('/');

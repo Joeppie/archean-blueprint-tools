@@ -68,6 +68,11 @@ interface Props {
   /** VIEW mode: the side menu shows ONLY the overall vessel stats, in
    *  collapsable sections (user v1.4) — no parts list, no inspector */
   statsOnly?: boolean;
+  /** with a mode workspace in `bottom` (BLOCKS), a selected component's
+   *  Inspector stacks ABOVE it instead of replacing it (v1.4: entering
+   *  blocks mode with a part selected kept its move/rotate/edit panel AND
+   *  kept the brush workspace) */
+  selOverBottom?: boolean;
 }
 
 // ------------------------------------------------------------- mass & CoM
@@ -838,7 +843,13 @@ export default function Panel(p: Props) {
           listMode={place ? 'place' : 'edit'} />
       </div>
       <div className="min-h-0 flex-[3] border-t border-white/10 overflow-y-auto">
-        {p.bottom !== undefined ? p.bottom ?? null : p.sel.sub >= 0
+        {p.bottom !== undefined ? (
+          <>
+            {p.selOverBottom && p.sel.sub < 0 && p.sel.ci >= 0
+              && <Inspector {...p} key={`c${p.sel.ci}k${p.inspKey}`} />}
+            {p.bottom ?? null}
+          </>
+        ) : p.sel.sub >= 0
           ? <SubPanel {...p} key={`s${p.sel.sub}`} />
           : p.sel.ci >= 0
             ? <Inspector {...p} key={`c${p.sel.ci}k${p.inspKey}`} />

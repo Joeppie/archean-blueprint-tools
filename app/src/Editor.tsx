@@ -152,12 +152,14 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   }, [markDirty, bumpRev]);
   const [engine, setEngine] = useState<Engine | null>(null);
 
-  // mode gating: gizmo only in Edit; Wire forces cables visible; the wind
-  // tunnel runs ONLY in Wind mode (the solve is bounded but never free)
+  // mode gating: gizmo in Edit AND Blocks (v1.4: clicking a component in
+  // blocks mode selects it and must be movable/rotatable there too); Wire
+  // forces cables visible; the wind tunnel runs ONLY in Wind mode (the solve
+  // is bounded but never free)
   useEffect(() => {
     const e = engineRef.current;
     if (!e) return;
-    e.setGizmoEnabled(mode === 'edit' && gizmoOn);
+    e.setGizmoEnabled((mode === 'edit' || mode === 'blocks') && gizmoOn);
     if (mode === 'wire') e.setOption('pipes', true);
     if (mode !== 'blocks') setBlockSel(-1);
     e.setWindTunnel(mode === 'aero');
@@ -300,7 +302,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     if (!placing || mode !== 'edit') engine.setCompGhost(null);
   }, [placing, mode, engine]);
 
-  const onBlockPick = useCallback((clientX: number, clientY: number, shift: boolean) => {
+  const onBlockPick = useCallback((clientX: number, clientY: number, shift: boolean,
+    openWidget: () => void) => {
     const e = engineRef.current, ctx = ctxRef.current;
     if (!e || !ctx) return;
     if (blockSub === 'tris') {
@@ -327,7 +330,12 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     if (!r) return;
     // clicking an existing COMPONENT selects it in BOTH sub-tabs (user v1.4)
     // — the inspector (with Delete) takes over the context window.
-    if (r.kind === 'comp' && r.ci >= 0) { setBlockSel(-1); e.select(r.ci); return; }
+    if (r.kind === 'comp' && r.ci >= 0) {
+      setBlockSel(-1);
+      e.select(r.ci);          // the gizmo rides it (enabled in blocks too)
+      openWidget();            // ⊘/✥/⟳/⇄ at the part: move/rotate switch here
+      return;
+    }
     if (blockTool === 'edit') {
       if (r.bi >= 0) e.select(-1);                     // a block took the pick
       setBlockSel(r.bi >= 0 ? r.bi : -1);
@@ -422,9 +430,10 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       onDeleted={sceneChanged} onClearSel={() => setTriSel(-1)} />
   );
   const modePanel = mode === 'blocks' ? (
-    // a component picked off the canvas takes the context window (inspector
-    // with Delete); the block workspace returns the moment the pick is gone
-    sel.ci >= 0 ? undefined : (
+    // v1.4 fix: the blocks workspace stays visible even with a component
+    // selected — the Inspector stacks ABOVE it (Panel's selOverBottom), so
+    // entering BLOCKS with a part selected never ate the brush/editor.
+    (
       <div className="overflow-y-auto">
         <div className="flex gap-1 px-3 pt-2">
           {(['blocks', 'tris'] as const).map(t => (
@@ -547,6 +556,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
                     edits={edits} inspKey={inspKey} markDirty={markDirty}
                     readOnly={mode === 'view'}
                     bottom={modePanel}
+                    selOverBottom={mode === 'blocks'}
                     manifest={manifest}
                     placingType={placing}
                     onPlaceType={(t) => { setPlacing(t); if (t && mode === 'view') setMode('edit'); }}

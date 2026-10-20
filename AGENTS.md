@@ -187,7 +187,12 @@ user's explicit say-so (Pages/release still serves it meanwhile).
   `__ARCHEAN__.blockHighlight()`) plus a dim one on its SIMILAR TWIN
   (`blockMirrorTwin`: mirrored footprint + same extents + identical-or-
   MIRROR_TYPE shape; while ⇄ is on, shape edits AND deletes propagate to
-  it). EDIT shape tools keep the bbox CENTRE frozen: ⟲X/Y/Z
+  it). The inspector of a component selected in blocks mode STACKS ABOVE
+  the blocks workspace (`selOverBottom` — v1.4 regression fix: it first
+  REPLACED the workspace, which read as "lost the capacity to rotate and
+  move components"), and the gizmo + ⊘/✥/⟳/⇄ mode widget are enabled in
+  BLOCKS mode as well as Edit (`setGizmoEnabled(mode==='edit'||mode===
+  'blocks')`), so a part picked there is immediately movable/rotatable. EDIT shape tools keep the bbox CENTRE frozen: ⟲X/Y/Z
   (`rotateTypeAbout` cloud-table 90° turn + perpendicular footprint
   exchange), ⇄ flip (`flippedBlock` = in-place MIRROR_TYPE), ⟲ cycle
   (`rotateType`) and ✧ snap (`snapBlockType`: 4×4 cross-section agreement

@@ -44,7 +44,10 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockP
   /** workspace mode: blocks clicks route to onBlockPick; the mode widget
    *  only belongs to Edit */
   mode?: 'view' | 'edit' | 'blocks' | 'wire' | 'flight' | 'aero';
-  onBlockPick?: (clientX: number, clientY: number, shift: boolean) => void;
+  onBlockPick?: (clientX: number, clientY: number, shift: boolean,
+    /** pops the ⊘/✥/⟳/⇄ mode widget at the click point (v1.4: a component
+     *  picked in BLOCKS mode gets the gizmo mode switch there too) */
+    openWidget: () => void) => void;
   /** BLOCKS-place hover: the engine re-aims the ghost preview (shiftKey =
    *  the game's logical-continuation modifier). Throttled here (~40 Hz):
    *  one raycast per pointermove event would tax a giant on a phone. */
@@ -145,7 +148,15 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockP
     const engine = engineRef.current;
     if (!engine) return;
     if (placing) { onPlace?.(e.clientX, e.clientY); return; }   // KSP place: no select
-    if (mode === 'blocks') { onBlockPick?.(e.clientX, e.clientY, e.shiftKey); return; }
+    if (mode === 'blocks') {
+      let opened = false;
+      onBlockPick?.(e.clientX, e.clientY, e.shiftKey, () => {
+        const box = hostRef.current?.getBoundingClientRect();
+        if (box) { opened = true; setWidget({ x: e.clientX - box.left, y: e.clientY - box.top }); }
+      });
+      if (!opened) setWidget(null);
+      return;
+    }
     const hit = engine.pickAt(e.clientX, e.clientY);
     onPick(hit);
     if (hit.kind === 'comp' && hit.ci != null) {
