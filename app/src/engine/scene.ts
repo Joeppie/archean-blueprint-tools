@@ -43,10 +43,11 @@ const PROP_GEN_SPEC: PbrSpec = { color: srgbHexToLinear(0x808080), metal: 0, rou
 import { buildPipes, surgePaths, type PipeNetwork } from './pipes';
 import { buildBlocksSolids, buildCompProxies, buildSolids, type ProxyBox, type SolidBatch } from './build';
 import type { FilePalette } from './palette';
-import type { Blueprint, BlueprintComponent } from './format';
+import type { Block, Blueprint, BlueprintComponent } from './format';
 import { CELL, isLegacyFile } from './format';
 import { getBlockEdges, getBlockFaces, getBlockPoints } from './blockshapes';
-import { blockCells, type PlaceSpec } from './blocks';
+import { blockCells, blockMirrorTwin, cellOverlapSkip, mirrorBlockCell,
+  rotatedBlock, setBlockGeom, type PlaceSpec } from './blocks';
 import {
   captureJrefs, masterJointState, subBlockBBox, subJointPose, subMasterEntries,
   type JRef, type SubBBox,
@@ -289,6 +290,23 @@ export class Engine {
   }>();  // gesture bases
   /** every engine-side write: the App mirrors bp numbers into the raw doc */
   onEdit: ((ci: number) => void) | null = null;
+  /** BLOCK widget (v1.5, user: "the gizmo doesnt show when selecting blocks
+   *  … move arrows cell-snapped, rotation arrows that move in 90°
+   *  increments"): the SAME TransformControls re-attached to the selected
+   *  block. A block carries no free pos/quat (its `type` encodes shape +
+   *  orientation and its footprint lives on the 0.25 m lattice), so the
+   *  widget snaps TRANSLATION to whole lattice CELLS and ROTATION to quarter
+   *  turns ALWAYS, and a gesture commits as a cell shift and/or N ×
+   *  rotatedBlock turns — the discrete edits of the panel's cx/⟲X/Y/Z rows.
+   *  mirror = ⇄ on: the block's SIMILAR TWIN (blockMirrorTwin) moves/turns
+   *  in unison. -1 detaches. */
+  private blockGizBi = -1;
+  private blockGizMirror = false;
+  /** gesture base: the block's cell + the proxy centre at mouseDown */
+  private blockBase: { cell: [number, number, number]; center: Vector3 } | null = null;
+  /** block-side writes (gizmo commits): the Editor mirrors the bp blocks into
+   *  the raw doc + dirty + the debounced merged-hull reload (it owns the doc) */
+  onBlockEdit: ((bis: number[]) => void) | null = null;
 
   attach(canvas: HTMLCanvasElement) {
     this.renderer = new WebGLRenderer({ canvas, antialias: true });
@@ -315,9 +333,18 @@ export class Engine {
       this.gizmoMode = m === 'off' || m === 'translate' || m === 'rotate' ? m : 'rotate';
       const listen = (t: string, f: (e: { value?: boolean }) => void) =>
         (g.addEventListener as unknown as (t: string, f: (e: { value?: boolean }) => void) => void)(t, f);
-      listen('objectChange', () => this.gizmoWriteback());
-      listen('mouseDown', () => { if (this.gizmoCi >= 0) this.captureGesture(this.gizmoCi); });
-      listen('dragging-changed', e => { if (this.controls) this.controls.enabled = !e.value; });
+      listen('objectChange', () => {
+        if (this.blockGizBi >= 0) this.blockGizmoDrag();
+        else this.gizmoWriteback();
+      });
+      listen('mouseDown', () => {
+        if (this.blockGizBi >= 0) this.captureBlockGesture();
+        else if (this.gizmoCi >= 0) this.captureGesture(this.gizmoCi);
+      });
+      listen('dragging-changed', e => {
+        if (this.controls) this.controls.enabled = !e.value;
+        if (!e.value) this.commitBlockGesture();          // no-op without a block gesture
+      });
       this.scene.add(g.getHelper(), this.gizmoProxy);
       g.enabled = false;
       g.getHelper().visible = false;
@@ -1444,6 +1471,10 @@ void main() {
 
   // -------------------------------------------------------------- selection
 
+  /** live selection for pins (v1.5 view-lock pin: a VIEW-mode click must
+   *  leave this at {-1,-1}) */
+  selectionState(): { ci: number; sub: number } { return { ci: this.selCi, sub: this.selSub }; }
+
   select(ci: number) {
     this.selCi = ci;
     this.selSub = -1;
@@ -1774,7 +1805,11 @@ void main() {
     const g = this.gizmo;
     if (!g) return;
     const show = this.gizmoEnabled && this.gizmoMode !== 'off' && this.selCi >= 0;
-    if (!show) { g.detach(); g.enabled = false; g.getHelper().visible = false; this.gizmoCi = -1; return; }
+    if (!show) {
+      g.detach(); g.enabled = false; g.getHelper().visible = false; this.gizmoCi = -1;
+      this.syncBlockGizmo();                    // a SELECTED BLOCK may own the widget (v1.5)
+      return;
+    }
     const roots = this.compRoots.get(this.selCi) ?? [];
     const o = roots.find(r => r.visible) ?? roots[0];
     if (!o) { g.detach(); this.gizmoCi = -1; return; }
@@ -1788,6 +1823,10 @@ void main() {
     // v0.158 SPACE IS PER-MODE: translate = WORLD (arrows stay axis-aligned),
     // rotate = LOCAL (intrinsic rings, the pinned WYSIWYG model)
     g.setSpace(this.gizmoMode === 'translate' ? 'world' : 'local');
+    // restore the COMPONENT snap contract (Shift 15° / 0.25 m — the BLOCK
+    // widget always snaps CELL/90°, so re-attaching must undo its snap setup)
+    g.setTranslationSnap(this.snapOn ? 0.25 : null);
+    g.setRotationSnap(this.snapOn ? 15 * DEG : null);
     g.enabled = true;
     g.getHelper().visible = true;
   }
@@ -1893,6 +1932,172 @@ void main() {
     this.captureGesture(this.gizmoCi);
     this.gizmoProxy.position[ax] += m;
     this.gizmoWriteback();
+  }
+
+  // -------------------------------------------------------- BLOCK widget
+  /** Attach the constructor widget to a SELECTED BLOCK (BLOCKS ▸ Edit flavor
+   *  — the block analogue of the component gizmo). bi < 0 detaches. */
+  setBlockGizmo(bi: number, mirror = false) {
+    if (this.blockGizBi === bi && this.blockGizMirror === mirror) return;
+    this.blockGizBi = bi;
+    this.blockGizMirror = mirror;
+    this.blockBase = null;
+    this.syncGizmo();
+    this.invalidate();
+  }
+  /** live state for the __ARCHEAN__ hook + pins: which block owns the widget
+   *  and where its start cell currently is */
+  blockGizmoState(): { bi: number; mode: 'off' | 'translate' | 'rotate';
+    mirror: boolean; cell: [number, number, number] } | null {
+    const b = this.blockGizBi >= 0 && this.bp ? this.bp.data.blocks[this.blockGizBi] : undefined;
+    if (!b) return null;
+    const c = blockCells(b);
+    return {
+      bi: this.blockGizBi,
+      mode: !this.gizmoEnabled || this.gizmoMode === 'off' ? 'off' : this.gizmoMode,
+      mirror: this.blockGizMirror, cell: [c.x, c.y, c.z],
+    };
+  }
+  /** bbox CENTRE of a block in SCENE space (the overlay groups keep raw-file
+   *  coords inside an moff-positioned parent — the proxy lives in world) */
+  private blockCentre(b: Block): Vector3 {
+    const c = blockCells(b);
+    return new Vector3(
+      (c.x + (b.size_x + 1) / 2 - 6) * CELL + this.moff.x,
+      (c.y + (b.size_y + 1) / 2 - 6) * CELL + this.moff.y,
+      (c.z + (b.size_z + 1) / 2 - 6) * CELL + this.moff.z);
+  }
+  /** (Re)attach the widget to the block: WORLD axes (the lattice is world-
+   *  aligned) and CELL translation + QUARTER-TURN rotation snaps ALWAYS. */
+  private syncBlockGizmo() {
+    const g = this.gizmo;
+    if (!g || this.gizmoCi >= 0) return;              // a component owns the widget
+    const b = this.blockGizBi >= 0 && this.bp ? this.bp.data.blocks[this.blockGizBi] : undefined;
+    if (!b || b.type === 255 || !this.gizmoEnabled || this.gizmoMode === 'off') return;
+    this.gizmoProxy.position.copy(this.blockCentre(b));
+    this.gizmoProxy.quaternion.identity();
+    g.attach(this.gizmoProxy);
+    g.setMode(this.gizmoMode === 'translate' ? 'translate' : 'rotate');
+    g.setSpace('world');
+    g.setTranslationSnap(CELL);
+    g.setRotationSnap(Math.PI / 2);
+    g.enabled = true;
+    g.getHelper().visible = true;
+  }
+  /** gesture base = the block's CURRENT cell + the freshly re-centred proxy,
+   *  so multi-grip sweeps keep shifting from wherever the block now is */
+  private captureBlockGesture() {
+    const b = this.blockGizBi >= 0 && this.bp ? this.bp.data.blocks[this.blockGizBi] : undefined;
+    if (!b) return;
+    const c = blockCells(b);
+    this.blockBase = { cell: [c.x, c.y, c.z], center: this.gizmoProxy.position.clone() };
+  }
+  /** LIVE feedback while dragging: the golden highlight group RIDES the
+   *  widget (orbits the block centre) — the merged solid catches up at the
+   *  COMMIT rebuild, so the overlay is the drag ghost (same trick as the
+   *  constructor ghost). The ⇄ twin overlay does not ride a one-block drag. */
+  private blockGizmoDrag() {
+    const base = this.blockBase;
+    if (!base) return;
+    const q = this.gizmoProxy.quaternion;
+    const cFile = base.center.clone()
+      .sub(new Vector3(this.moff.x, this.moff.y, this.moff.z));
+    this.blockHlGroup.quaternion.copy(q);
+    this.blockHlGroup.position.copy(
+      this.gizmoProxy.position.clone().sub(cFile.applyQuaternion(q)));
+    this.blockHlGroup.children.forEach((o, i) => { o.visible = i < 2; });
+    this.invalidate();
+  }
+  /** DROP = COMMIT: a whole-cell shift (translate) or an N×90° turn (rotate)
+   *  about the dominant world axis of the gesture quaternion. A colliding
+   *  footprint REFUSES the gesture (the widget snaps back — the red-ghost
+   *  contract). Both are the panel's discrete edits, driven by the widget. */
+  private commitBlockGesture() {
+    const base = this.blockBase;
+    this.blockBase = null;
+    if (!base) return;
+    if (this.gizmoMode === 'translate') {
+      const d = this.gizmoProxy.position.clone().sub(base.center);
+      this.blockGizmoShift([Math.round(d.x / CELL), Math.round(d.y / CELL), Math.round(d.z / CELL)]);
+    } else {
+      const q = this.gizmoProxy.quaternion;
+      const s2 = Math.sqrt(Math.max(0, 1 - q.w * q.w));
+      if (s2 > 1e-6) {
+        const ax: [number, number, number] = [q.x / s2, q.y / s2, q.z / s2];
+        const dom = ax[0] * ax[0] >= ax[1] * ax[1] && ax[0] * ax[0] >= ax[2] * ax[2] ? 0
+          : ax[1] * ax[1] >= ax[2] * ax[2] ? 1 : 2;
+        const dir = ax[dom] >= 0 ? 1 : -1;
+        const n = Math.round(dir * 2 * Math.acos(Math.max(-1, Math.min(1, q.w))) / (Math.PI / 2));
+        if (((n % 4) + 4) % 4 !== 0) this.blockGizmoRotate((['x', 'y', 'z'] as const)[dom]!, n);
+      }
+    }
+    // the overlay + widget re-land on the (possibly moved) block
+    this.blockHlGroup.quaternion.identity();
+    this.blockHlGroup.position.set(this.moff.x, this.moff.y, this.moff.z);
+    for (const o of this.blockHlGroup.children) o.visible = true;
+    this.syncBlockGizmo();
+    this.invalidate();
+  }
+  /** VALIDATED whole-cell shift of the block owning the widget (+ the ⇄ twin
+   *  to its mirrored cell). false = the footprint collides (refused).
+   *  PUBLIC: the e2e pins and a future keyboard nudge drive this exact path. */
+  blockGizmoShift(step: [number, number, number]): boolean {
+    const bp = this.bp;
+    const bi = this.blockGizBi;
+    const b = bi >= 0 && bp ? bp.data.blocks[bi] : undefined;
+    if (!bp || !b) return false;
+    if (step[0] === 0 && step[1] === 0 && step[2] === 0) return true;
+    const c = blockCells(b);
+    const cell: [number, number, number] = [c.x + step[0], c.y + step[1], c.z + step[2]];
+    const size: [number, number, number] = [b.size_x, b.size_y, b.size_z];
+    const twin = this.blockGizMirror ? blockMirrorTwin(bp, bi) : -1;
+    const tw = twin >= 0 ? bp.data.blocks[twin] : undefined;
+    if (cellOverlapSkip(bp, cell, size, [bi, twin])) return false;
+    let tcell: [number, number, number] | null = null;
+    if (tw) {
+      tcell = [mirrorBlockCell(cell[0], b.size_x), cell[1], cell[2]];
+      if (cellOverlapSkip(bp, tcell, [tw.size_x, tw.size_y, tw.size_z], [bi, twin])) return false;
+    }
+    setBlockGeom(b, cell, size, b.type);
+    if (tw && tcell) setBlockGeom(tw, tcell, [tw.size_x, tw.size_y, tw.size_z], tw.type);
+    this.afterBlockGizmoEdit(twin);
+    return true;
+  }
+  /** n × +90° right-hand turns about a WORLD axis (negative wraps) — the
+   *  panel's ⟲X/Y/Z geometry (rotatedBlock: type turns, the two perpendicular
+   *  footprints exchange, the bbox CENTRE stays frozen), ⇄ twin in unison. */
+  blockGizmoRotate(axis: 'x' | 'y' | 'z', n90: number): boolean {
+    const bp = this.bp;
+    const bi = this.blockGizBi;
+    const b = bi >= 0 && bp ? bp.data.blocks[bi] : undefined;
+    if (!bp || !b) return false;
+    const n = ((Math.round(n90) % 4) + 4) % 4;
+    if (n === 0) return true;
+    const twin = this.blockGizMirror ? blockMirrorTwin(bp, bi) : -1;
+    const tw = twin >= 0 ? bp.data.blocks[twin] : undefined;
+    const turn = (x: Block): Block => {
+      let r = x;
+      for (let k = 0; k < n; k++) r = rotatedBlock(r, axis, false);
+      return r;
+    };
+    const nb = turn(b);
+    const nc = blockCells(nb);
+    setBlockGeom(b, [nc.x, nc.y, nc.z], [nb.size_x, nb.size_y, nb.size_z], nb.type);
+    if (tw) {
+      const ntb = turn(tw);
+      const ntc = blockCells(ntb);
+      setBlockGeom(tw, [ntc.x, ntc.y, ntc.z], [ntb.size_x, ntb.size_y, ntb.size_z], ntb.type);
+    }
+    this.afterBlockGizmoEdit(twin);
+    return true;
+  }
+  /** overlay rebuild + the doc/dirty/reload mirror (the Editor owns the doc) */
+  private afterBlockGizmoEdit(twin: number) {
+    this.blockHlSpec = null;                  // force a geometry rebuild
+    if (this.blockGizBi >= 0 && this.bp)
+      this.setBlockHighlight(this.blockGizBi,
+        this.blockGizMirror ? blockMirrorTwin(this.bp, this.blockGizBi) : -1);
+    this.onBlockEdit?.(twin >= 0 ? [this.blockGizBi, twin] : [this.blockGizBi]);
   }
   /** WORLD bbox of a component's REAL (node-tree) model, [min,max]; null
    *  while only the stand-in box or nothing is shown (matrix-pair pins

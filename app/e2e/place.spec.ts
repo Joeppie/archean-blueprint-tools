@@ -30,6 +30,7 @@ test.describe('KSP modes & catalog placement @place', () => {
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
     await setDrawer(page, true);
     await page.getByTestId('mode-blocks').click();
+    await page.getByTestId('tooltab-place').click();       // v1.5: the brush lives in PLACE
     await expect(page.getByTestId('block-brush')).toBeVisible();
     await expect(page.getByTestId('blocksub-tris')).toBeVisible();   // + triangles submode
     await page.getByTestId('mode-wire').click();
@@ -37,6 +38,7 @@ test.describe('KSP modes & catalog placement @place', () => {
     await page.getByTestId('mode-flight').click();
     await expect(page.getByTestId('flight-prop')).toBeVisible();
     await page.getByTestId('mode-edit').click();
+    await page.getByTestId('tooltab-edit').click();        // v1.5: the flavor is shared, set it back
     await page.getByTestId('filter').fill('smallwheel');
     await page.locator('[data-idx]').first().click();
     await expect(page.getByTestId('inspector')).toContainText('SmallWheel[');
@@ -51,7 +53,7 @@ test.describe('KSP modes & catalog placement @place', () => {
     const before = (await compsOf(page)).length;
 
     await setDrawer(page, true);
-    await page.getByTestId('compsub-place').click();       // v1.4: the catalog IS the PLACE tab
+    await page.getByTestId('tooltab-place').click();       // v1.4: the catalog IS the PLACE tab
     await expect(page.getByTestId('catalog-list')).toBeVisible();
     await page.getByTestId('filter').fill('smallwheel');
     await page.getByTestId('catalog-item').first().click();

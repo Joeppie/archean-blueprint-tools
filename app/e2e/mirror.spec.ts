@@ -33,7 +33,8 @@ test.describe('⇄ mirrored placement @place', () => {
     await page.getByTestId('gallery-new').click();
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
     await page.getByTestId('mode-blocks').click();
-    await setDrawer(page, true);
+    await setDrawer(page, true);                             // the flavor switch lives in the panel
+    await page.getByTestId('tooltab-place').click();          // v1.5: the PLACE flavor
     await expect(page.getByTestId('block-mirror')).toBeVisible();
     await page.getByTestId('block-mirror').click();          // twin ON (persisted)
     await expect(page.getByTestId('block-mirror')).toContainText('twin ON');
@@ -76,7 +77,7 @@ test.describe('⇄ mirrored placement @place', () => {
     expect(twin!.type).not.toBe(255);
     // mirror is a closed involution on the placed type
     await setDrawer(page, true);
-    await page.getByTestId('blocktool-edit').click();      // the EDIT sub-tab edits
+    await page.getByTestId('tooltab-edit').click();      // the EDIT sub-tab edits
     await expect(page.getByTestId('block-edit')).toBeVisible();
   });
 
@@ -89,7 +90,7 @@ test.describe('⇄ mirrored placement @place', () => {
     await page.getByTestId('mode-blocks').click();           // flip the shared twin switch
     await page.getByTestId('block-mirror').click();
     await page.getByTestId('mode-edit').click();
-    await page.getByTestId('compsub-place').click();       // v1.4 PLACE tab = catalog
+    await page.getByTestId('tooltab-place').click();       // v1.4 PLACE tab = catalog
     await page.getByTestId('filter').fill('smallwheel');
     await page.getByTestId('catalog-item').first().click();
     await expect(page.getByTestId('place-hint')).toContainText('SmallWheel');

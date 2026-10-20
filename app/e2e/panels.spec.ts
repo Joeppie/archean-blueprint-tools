@@ -272,15 +272,42 @@ test.describe('modes, new craft, file menu @ui', () => {
     await expect(page.getByTestId('vessel-stats')).toBeVisible();
     await expect(page.getByTestId('vessel-mass')).toBeVisible();
     await expect(page.getByTestId('filter')).toHaveCount(0);
-    await expect(page.getByTestId('compsub-place')).toHaveCount(0);
+    await expect(page.getByTestId('tooltab-place')).toHaveCount(0);
     await page.getByTestId('vsec-census').click();                   // collapse…
     await expect(page.getByTestId('vessel-census')).toHaveCount(0);
     await page.getByTestId('vsec-census').click();                   // …and expand
     await expect(page.getByTestId('vessel-census')).toBeVisible();
+    // v1.5 VIEW LOCK (user rule: "selecting components shouldnt be possible
+    // in view"): a click on a proven-comp pixel selects NOTHING in view —
+    // while the SAME pixel selects in the Edit mode. (Probe via pickAt so
+    // the pin is non-vacuous: the pixel really answers a component.)
+    const selState = () => page.evaluate(() =>
+      (window as unknown as { __ARCHEAN__?: { sel: () => { ci: number; sub: number } } })
+        .__ARCHEAN__!.sel());
+    const px = await page.evaluate(() => {
+      const c = document.querySelector('canvas')!;
+      const r = c.getBoundingClientRect();
+      const e = (window as unknown as { __ARCHEAN__?: { engine: { pendingReal: number;
+        pickAt: (x: number, y: number) => { kind: string } | null } } }).__ARCHEAN__!.engine;
+      if (e.pendingReal > 0) return null;
+      for (let fy = 0.3; fy <= 0.75; fy += 0.03)
+        for (let fx = 0.25; fx <= 0.75; fx += 0.03) {
+          const h = e.pickAt(r.left + r.width * fx, r.top + r.height * fy);
+          if (h && h.kind === 'comp') return { x: fx, y: fy };
+        }
+      return null;
+    });
+    expect(px, 'a component surface is clickable').not.toBeNull();
+    const cbox = (await page.getByTestId('canvas').boundingBox())!;
+    await page.mouse.click(cbox.x + cbox.width * px!.x, cbox.y + cbox.height * px!.y);
+    expect((await selState()).ci, 'a VIEW click selects nothing').toBe(-1);
     // edit mode brings the PLACE/EDIT sub-tabs and the editable inspector
     await page.getByTestId('mode-edit').click();
-    await expect(page.getByTestId('compsub-place')).toBeVisible();
-    await expect(page.getByTestId('compsub-edit')).toBeVisible();
+    await page.mouse.click(cbox.x + cbox.width * px!.x, cbox.y + cbox.height * px!.y);
+    expect((await selState()).ci, 'the SAME pixel selects in the Edit mode')
+      .toBeGreaterThanOrEqual(0);
+    await expect(page.getByTestId('tooltab-place')).toBeVisible();
+    await expect(page.getByTestId('tooltab-edit')).toBeVisible();
     await page.getByTestId('filter').fill('aileron');
     await page.locator('[data-idx]').first().click();
     await expect(page.getByTestId('row-n-x')).toBeEnabled();
@@ -293,6 +320,7 @@ test.describe('modes, new craft, file menu @ui', () => {
     await page.getByTestId('gallery-new').click();
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
     await page.getByTestId('mode-blocks').click();
+    await page.getByTestId('tooltab-place').click();       // v1.5: the PLACE flavor docks the brush
     // v0.183: deterministic scene state — wait for the atlas fan-out (the
     // PilotSeat's REAL model shown, its stand-in retired), then PROBE the
     // canvas through engine.pickCell for a pixel that answers a block face.
@@ -327,7 +355,7 @@ test.describe('modes, new craft, file menu @ui', () => {
     expect(after, 'a block was placed on the deck').toBe(before + 1);
     // the brush + a selected block: the EDIT sub-tab shows the selected-block
     // editor (v1.4 sub-tab split — placement auto-selects, EDIT edits)
-    await page.getByTestId('blocktool-edit').click();
+    await page.getByTestId('tooltab-edit').click();
     await expect(page.getByTestId('block-edit')).toContainText(/Block\[\d+\]/);
   });
 
@@ -449,12 +477,13 @@ test.describe('manual wiring + triangles + component meta @ui', () => {
 // The SHIPPED UI (no debug flag): the SCENE PASS tab-title and the stats
 // strip are a DEBUG channel only (user 2026-10-19: "the text in the top
 // should not show, not unless in debug mode"; "the title is incorrectly
-// changed after loading containing SCENE PASS"), and clicking the ACTIVE
-// View tile hides the side panel ("clicking view an extra time should hide
-// the side panel").
+// changed after loading containing SCENE PASS"). v1.5: the side panel's
+// expand/collapse belongs to the ▤ button and the ‹/› bookmark tab ONLY —
+// re-clicking the active View tile no longer toggles it (user: the panel
+// "shouldnt tie to view incorrectly").
 test.describe('shipped UI (no debug flag) @ui', () => {
   test.use({ storageState: { cookies: [], origins: [] } });     // no archean-app-debug
-  test('clean title, no stats strip, View-tile-again hides/restores the panel', async ({ page }) => {
+  test('clean title, no stats strip, panel toggles = ▤ + bookmark tab (never the View tile)', async ({ page }) => {
     test.skip(test.info().project.name !== 'chromium', 'desktop-only');
     await page.goto('/?craft=' + ISW);
     await expect.poll(async () => (await page.evaluate(() =>
@@ -464,17 +493,24 @@ test.describe('shipped UI (no debug flag) @ui', () => {
     await expect(page.getByTestId('scene-stats')).toHaveCount(0);
     const aside = page.getByTestId('panel-aside');
     await expect(aside).toBeVisible();                          // desktop opens WITH the panel
-    await page.getByTestId('mode-view').click();                // already in View → collapse
+    // the View tile is a MODE, not a panel toggle (v1.5): re-clicking it
+    // while already in View changes NOTHING about the panel
+    await page.getByTestId('mode-view').click();
+    await expect(aside).toBeVisible();
+    // ▤ collapses…
+    await page.getByTestId('toggle-panels').click();
     await expect(aside).toHaveCount(0);
     const tab = page.getByTestId('panel-tab');                  // only the bookmark tab remains
     await expect(tab).toBeVisible();
     await expect(tab).toHaveText('>');
     await tab.click();                                          // › re-expands
     await expect(aside).toBeVisible();
+    // …and the ‹ tab on the panel's RIGHT EDGE (md:relative fix: it used to
+    // anchor to the viewport edge = the "missing expand-collapse" report)
     await expect(aside.getByTestId('panel-tab')).toHaveText('<');
     await aside.getByTestId('panel-tab').click();               // ‹ collapses again
     await expect(aside).toHaveCount(0);
-    await page.getByTestId('mode-view').click();                // View tile re-click re-expands
+    await page.getByTestId('toggle-panels').click();            // ▤ re-expands
     await expect(aside).toBeVisible();
   });
 });

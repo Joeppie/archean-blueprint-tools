@@ -59,9 +59,11 @@ interface Props {
   /** type currently held for placement (KSP "holding a part") */
   placingType: string | null;
   onPlaceType: (t: string | null) => void;
-  /** EDIT-mode sub-tabs: PLACE (catalog + mirror) / EDIT (lists + inspector) */
-  compSub?: 'place' | 'edit';
-  onCompSub?: (t: 'place' | 'edit') => void;
+  /** EDIT-mode sub-tabs: PLACE (catalog + mirror) / EDIT (lists + inspector)
+   *  — v1.5: the SAME flavor switch also drives the BLOCKS workspace (one
+   *  "Edit | Place" panel, two flavors, on top of the pane — user rule) */
+  tool?: 'place' | 'edit';
+  onTool?: (t: 'place' | 'edit') => void;
   /** ⇄ shared mirrored-placement/edit switch (blocks AND catalog parts) */
   mirrorPlace?: boolean;
   onMirrorPlace?: (v: boolean) => void;
@@ -807,36 +809,45 @@ export default function Panel(p: Props) {
         <VesselStats engine={p.engine} bp={p.bp} rev={p.rev} />
       </div>
     );
-  const place = p.compSub === 'place';
+  const place = p.tool === 'place';
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-panel text-ink" data-testid="panels">
+      {/* THE TWO FLAVORS of this panel (v1.5 user rule: "the UI is not clear
+          about how to select and edit — it should be on top of the pane in
+          two flavors of the same panel"): ONE Edit|Place switch crowns the
+          side panel in BOTH the Edit and Blocks modes. EDIT = click to
+          SELECT (gizmo + inspector + Delete); PLACE = dock blocks/parts with
+          a ghost. */}
+      {p.onTool && p.tool && (
+        <div className="shrink-0 border-b border-white/10 px-3 pb-2 pt-2">
+          <div className="flex items-center gap-1">
+            {([['edit', '✎ Edit'], ['place', '✚ Place']] as const).map(([t, l]) => (
+              <button key={t} data-testid={`tooltab-${t}`} aria-pressed={p.tool === t}
+                onClick={() => p.onTool!(t)}
+                className={`ksp-btn flex-1 px-2 py-[5px] text-[11px] ${p.tool === t ? 'on font-semibold' : 'text-ink-dim'}`}>
+                {l}
+              </button>
+            ))}
+            {place && p.onMirrorPlace && (
+              <button data-testid="place-mirror" title="⇄ also place the x-mirrored twin"
+                aria-pressed={!!p.mirrorPlace} onClick={() => p.onMirrorPlace!(!p.mirrorPlace)}
+                className={`ksp-btn px-2 py-[3px] text-[10px] ${p.mirrorPlace ? 'on' : ''}`}>
+                ⇄ {p.mirrorPlace ? 'twin ON' : 'twin off'}
+              </button>
+            )}
+          </div>
+          <div data-testid="flavor-hint" className="pt-1 text-[10px] leading-snug text-ink-dim">
+            {place ? 'hover a surface → ghost · click to DOCK · Shift continues the aimed block'
+              : 'click a part or block to SELECT it — gizmo move/turn · inspector · Delete'}
+          </div>
+        </div>
+      )}
       {/* KSP order: the PARTS list leads, the context window follows, the
           camera/view settings sit at the bottom. Min-heights are load-
           bearing: when fixed content once exceeded the window the flex
           engine silently crushed the list to 8 px (rows rendered clipped,
           clicks intercepted) — caught by sym.spec at 1280×720. */}
       <div className="flex min-h-[160px] flex-[3] flex-col border-t border-white/10">
-        {/* components-view sub-tabs (v1.4): PLACE (catalog + ⇄) | EDIT (the
-            ship's parts). Either way the context window below keeps the
-            selection's inspector — a clicked part stays selectable/deletable
-            while holding a catalog part. */}
-        {p.onCompSub && (
-          <div className="flex items-center gap-1 px-3 pt-2">
-            {(['place', 'edit'] as const).map(t => (
-              <button key={t} data-testid={`compsub-${t}`} onClick={() => p.onCompSub!(t)}
-                className={`ksp-btn px-2 py-[3px] text-[10px] ${p.compSub === t ? 'on' : ''}`}>
-                {t === 'place' ? '✚ Place' : '✎ Edit'}
-              </button>
-            ))}
-            {place && p.onMirrorPlace && (
-              <button data-testid="place-mirror" title="⇄ also place the x-mirrored twin"
-                aria-pressed={!!p.mirrorPlace} onClick={() => p.onMirrorPlace!(!p.mirrorPlace)}
-                className={`ksp-btn ml-auto px-2 py-[3px] text-[10px] ${p.mirrorPlace ? 'on' : ''}`}>
-                ⇄ {p.mirrorPlace ? 'twin ON' : 'twin off'}
-              </button>
-            )}
-          </div>
-        )}
         <h3 className="ksp-label px-3 pt-2 text-[11px] font-semibold text-ink-dim">{place ? 'Catalog' : 'Parts'}</h3>
         <CompList bp={p.bp} rev={p.rev} sel={p.sel} onSelect={p.onSelect} onSelectSub={p.onSelectSub}
           manifest={p.manifest} placingType={p.placingType} onPlaceType={p.onPlaceType}

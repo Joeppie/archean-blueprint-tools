@@ -49,6 +49,7 @@ async function openBlocksMode(page: Page) {
   await page.goto(`/?craft=${ISW}`);
   await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
   await page.getByTestId('mode-blocks').click();
+  await page.getByTestId('tooltab-place').click();       // v1.5: brush lives in PLACE
   await expect(page.getByTestId('block-brush')).toBeVisible();
 }
 

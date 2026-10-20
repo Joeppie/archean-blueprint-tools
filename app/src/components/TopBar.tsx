@@ -3,7 +3,8 @@
 // the MODE tiles that split the workspace (icon + uppercase caption, like
 // KSP's editor/tool buttons). Dark bevelled .ksp-btn chrome, blue glow on
 // the active tile:
-//   View   — inspect only (no gizmo, no writes)
+//   View   — inspect ONLY: the vessel amounts/census panel; canvas clicks
+//            select nothing (v1.5 — selection belongs to the Edit flavor)
 //   Edit   — component editing: gizmo, sliders, data rows
 //   Blocks — block placement / resizing / deletion
 //   Wire   — the port graph: census, naive auto-wiring, warnings

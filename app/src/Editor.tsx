@@ -17,7 +17,7 @@ import { cornerOf, triAt, triangleFromCorners } from './engine/tris';
 import type { Blueprint } from './engine/format';
 import { docArrayInsert, docArrayRemoveAt, docFromValue, docValue, parseDoc } from './engine/doc';
 import { makeCtx, resetComponent, setDataField, setOrientation, setPos, setCompField,
-  setCompColor, serializeSave, type EditCtx } from './engine/edit';
+  setCompColor, serializeSave, writeBlockDoc, type EditCtx } from './engine/edit';
 import { makePipe } from './engine/wireops';
 import { normalizeDoc } from './engine/normalize';
 import { newCraftDoc, newComponent } from './engine/newcraft';
@@ -49,10 +49,16 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   const [rev, setRev] = useState(0);
   const [blockSel, setBlockSel] = useState(-1);
   const [brush, setBrush] = useState<Brush>({ type: 0, sx: 0, sy: 0, sz: 0, slot: 4 });
-  // BLOCKS sub-tabs (v1.4): PLACE docks the brush; EDIT selects + edits
-  const [blockTool, setBlockTool] = useState<'place' | 'edit'>('place');
-  // components-view sub-tabs (v1.4): PLACE (catalog) | EDIT (lists/inspector)
-  const [compSub, setCompSub] = useState<'place' | 'edit'>('edit');
+  // THE panel flavor (v1.5 user rule): ONE ✎ Edit | ✚ Place switch crowns the
+  // side panel in BOTH the Edit and Blocks modes — the two flavors of the
+  // SAME panel. Edit = select for gizmo/inspector/DELETE; Place = brush +
+  // catalog with the dock ghost. Persisted; shared across the modes.
+  const [tool, setToolState] = useState<'place' | 'edit'>(
+    () => (localStorage.getItem('archean-app-panel-tool') === 'place' ? 'place' : 'edit'));
+  const setTool = useCallback((t: 'place' | 'edit') => {
+    setToolState(t);
+    localStorage.setItem('archean-app-panel-tool', t);
+  }, []);
   const [blockSub, setBlockSub] = useState<'blocks' | 'tris'>('blocks');
   // ⇄ mirrored placement (blocks AND catalog parts): the twin lands at the
   // x-flipped cell/position about file x = 0 — the game editor's mirror tool
@@ -147,6 +153,14 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         setDataField(ctx, ['data', 'components', ci], key, v);
         markDirty(); bumpRev();
       };
+      // BLOCK gizmo commits (v1.5): the engine moved/turned the bp blocks —
+      // mirror them into the raw doc, mark dirty, reload the merged hull.
+      e.onBlockEdit = (bis) => {
+        const ctx = ctxRef.current;
+        if (!ctx) return;
+        for (const bi of bis) writeBlockDoc(ctx, bi);
+        markDirty(); bumpRev();
+      };
     }
     setEngine(e);
   }, [markDirty, bumpRev]);
@@ -155,15 +169,27 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // mode gating: gizmo in Edit AND Blocks (v1.4: clicking a component in
   // blocks mode selects it and must be movable/rotatable there too); Wire
   // forces cables visible; the wind tunnel runs ONLY in Wind mode (the solve
-  // is bounded but never free)
+  // is bounded but never free). Leaving a mode also drops any stale PICK CHIP.
   useEffect(() => {
     const e = engineRef.current;
     if (!e) return;
+    setHit(null);
     e.setGizmoEnabled((mode === 'edit' || mode === 'blocks') && gizmoOn);
     if (mode === 'wire') e.setOption('pipes', true);
     if (mode !== 'blocks') setBlockSel(-1);
     e.setWindTunnel(mode === 'aero');
   }, [mode, gizmoOn, engine]);
+
+  // BLOCK widget (v1.5): a SELECTED block owns the gizmo in BLOCKS ▸ Edit —
+  // cell-snapped arrows + 90°-snap rings; a selected COMPONENT takes it back.
+  // ⇄ on ⇒ the block's SIMILAR TWIN moves/turns in unison (blockMirrorTwin).
+  useEffect(() => {
+    const e = engineRef.current;
+    if (!e) return;
+    const on = mode === 'blocks' && tool === 'edit' && blockSel >= 0 &&
+      sel.ci < 0 && sel.sub < 0 && gizmoOn;
+    e.setBlockGizmo(on ? blockSel : -1, mirrorPlace);
+  }, [mode, tool, blockSel, sel, mirrorPlace, gizmoOn, rev, engine]);
 
   /** Delete a selected component (v1.4): bp splice + doc mirror TOGETHER,
    *  the per-component orig/applied save-sync tables shift with it, the
@@ -259,12 +285,12 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     ghostRef.current = { x: clientX, y: clientY, shift };
     const e = engineRef.current, ctx = ctxRef.current;
     if (!e || !ctx) return;
-    if (mode === 'edit' && placing) {                     // HELD part: its ghost
+    if (placing && (mode === 'edit' || mode === 'blocks')) {  // HELD part: its ghost
       const p = e.pickPlacePoint(clientX, clientY);
       e.setCompGhost(p ? { type: placing, point: p } : null, mirrorPlace);
       return;
     }
-    if (blockSub !== 'blocks' || blockTool !== 'place') { e.setPlaceGhost(null); return; }
+    if (mode !== 'blocks' || blockSub !== 'blocks' || tool !== 'place') { e.setPlaceGhost(null); return; }
     const r = e.pickCell(clientX, clientY);
     if (!r || r.kind === 'ground') { e.setPlaceGhost(null); return; }
     const info = shift && r.bi >= 0 ? blockInfo(ctx.bp, r.bi) : null;
@@ -272,16 +298,16 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       ? complementBlock(info, [cellIndex(r.point[0]), cellIndex(r.point[1]), cellIndex(r.point[2])], r.nrm)
       : { cell: r.cell, ...brushSpec(brush) };
     e.setPlaceGhost({ ...spec, valid: !cellOverlap(ctx.bp, spec.cell, spec.size), complement: !!info });
-  }, [mode, placing, mirrorPlace, blockSub, blockTool, brush]);
+  }, [mode, tool, placing, mirrorPlace, blockSub, brush]);
 
   // ghost lifecycle: re-aim when the brush changes (live preview of the
-  // panel), drop it when the tool/mode leaves block-placement
+  // panel), drop it when the flavor/mode leaves block-placement
   useEffect(() => {
     const h = ghostRef.current;
     if (!h) return;
-    if (mode === 'blocks' && blockTool === 'place' && blockSub === 'blocks') computeGhost(h.x, h.y, h.shift);
+    if (mode === 'blocks' && tool === 'place' && blockSub === 'blocks') computeGhost(h.x, h.y, h.shift);
     else { engineRef.current?.setPlaceGhost(null); ghostRef.current = null; }
-  }, [mode, blockTool, blockSub, brush, computeGhost]);
+  }, [mode, tool, blockSub, brush, computeGhost]);
 
   // BLOCKS selection highlight (v1.4 "blocks don't yet highlight"): the
   // picked block gets the golden overlay; with ⇄ on its SIMILAR TWIN rides
@@ -294,12 +320,13 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     else e.setBlockHighlight(-1);
   }, [mode, blockSel, mirrorPlace, rev, engine]);
 
-  // the CATALOG ghost (v1.4): while a part is HELD in EDIT mode, hovering
-  // the viewport docks a translucent preview at the surface (⇄ adds the
-  // mirrored twin box) — placement now works like the blocks ghost.
+  // the CATALOG ghost (v1.4): while a part is HELD, hovering the viewport
+  // docks a translucent preview at the surface (⇄ adds the mirrored twin
+  // box) — placement now works like the blocks ghost. v1.5: the PLACE flavor
+  // holds parts in the Blocks workspace too (one panel, both dockers).
   useEffect(() => {
     if (!engine) return;
-    if (!placing || mode !== 'edit') engine.setCompGhost(null);
+    if (!placing || (mode !== 'edit' && mode !== 'blocks')) engine.setCompGhost(null);
   }, [placing, mode, engine]);
 
   const onBlockPick = useCallback((clientX: number, clientY: number, shift: boolean,
@@ -336,9 +363,13 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       openWidget();            // ⊘/✥/⟳/⇄ at the part: move/rotate switch here
       return;
     }
-    if (blockTool === 'edit') {
+    if (tool === 'edit') {
+      // EDIT flavor: a block click SELECTS the block — golden highlight +
+      // the BLOCK widget (cell arrows / 90° rings, v1.5). The ⊘/✥/⟳ widget
+      // pops too: it is how the block gizmo switches between move and turn.
       if (r.bi >= 0) e.select(-1);                     // a block took the pick
       setBlockSel(r.bi >= 0 ? r.bi : -1);
+      if (r.bi >= 0) openWidget();
       return;
     }
     // PLACE — any surface DOCKS a block (the game: aim at a block or beam):
@@ -355,7 +386,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     // the game keeps the ghost under the cursor after a placement — re-aim
     // it over the fresh surface (it may now complement the block placed)
     computeGhost(clientX, clientY, shift);
-  }, [blockTool, blockSub, brush, mirrorPlace, triDraft, triBrush, sceneChanged, computeGhost]);
+  }, [tool, blockSub, brush, mirrorPlace, triDraft, triBrush, sceneChanged, computeGhost]);
 
   /** CATALOG placement (KSP part pickup): land the HELD type at the picked
    *  surface — bp + doc together, then the debounced scene reload; the part
@@ -388,7 +419,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
 
   const setGizmo = useCallback((on: boolean) => {
     setGizmoOn(on);
-    engineRef.current?.setGizmoEnabled(on && mode === 'edit');
+    engineRef.current?.setGizmoEnabled(on && (mode === 'edit' || mode === 'blocks'));
   }, [mode]);
   const setHullOp = useCallback((v: number) => {
     setHullOpacityState(v);
@@ -443,26 +474,21 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
             </button>
           ))}
         </div>
-        {/* blocks sub-tabs (v1.4): PLACE docks the brush · EDIT selects and
-            edits (highlight + rotate/flip/snap + delete, ⇄ twin-aware) */}
-        <div className="flex gap-1 px-3 pt-1">
-          {(['place', 'edit'] as const).map(t => (
-            <button key={t} data-testid={`blocktool-${t}`} onClick={() => setBlockTool(t)}
-              className={`ksp-btn px-2 py-[3px] text-[11px] ${blockTool === t ? 'on' : ''}`}>
-              {t === 'place' ? '✚ Place' : '✎ Edit'}
-            </button>
-          ))}
-          {blockSub === 'blocks' && (
+        {/* v1.5: the PLACE|EDIT flavor buttons moved UP into the panel's
+            flavor switch (one switch for both workspaces); only the ⇄ twin
+            row stays here (it belongs to the block surface itself) */}
+        {blockSub === 'blocks' && (
+          <div className="flex justify-end px-3 pt-1">
             <button data-testid="block-mirror" title="⇄ respect the mirror plane: place the x-mirrored twin AND propagate block edits to the similar twin"
               aria-pressed={mirrorPlace} onClick={() => setMirrorPlace(m => !m)}
-              className={`ksp-btn ml-auto px-2 py-[3px] text-[11px] ${mirrorPlace ? 'on' : ''}`}>
+              className={`ksp-btn px-2 py-[3px] text-[11px] ${mirrorPlace ? 'on' : ''}`}>
               ⇄ {mirrorPlace ? 'twin ON' : 'twin off'}
             </button>
-          )}
-        </div>
+          </div>
+        )}
         {blockSub === 'tris' ? triPanel : (
           <BlockPanel engine={engine} ctx={ctxRef.current} bp={bp!} blockSel={blockSel}
-            brush={brush} tab={blockTool} mirror={mirrorPlace}
+            brush={brush} tab={tool} mirror={mirrorPlace}
             onBrush={setBrush} onSelectBlock={setBlockSel} onApplied={sceneChanged} />
         )}
       </div>
@@ -481,14 +507,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         const f = e.dataTransfer.files?.[0];
         if (f) readFile(f);
       }}>
-      <TopBar mode={mode} onMode={m => {
-        // the ACTIVE mode tile clicked again is a shortcut, not a re-select:
-        // on View it toggles the side panel (user 2026-10-19: "clicking view
-        // an extra time should hide the side panel") — more screen for the
-        // craft; the ▤ button and a re-click bring it back
-        if (m === 'view' && mode === 'view') { setPanelOpen(o => !o); return; }
-        setMode(m);
-      }} dirty={dirty} title={name} craftId={craft}
+      <TopBar mode={mode} onMode={setMode} dirty={dirty} title={name} craftId={craft}
         onNew={() => { ctxRef.current = null; setBp(null); openText(emitNew()); }}
         onOpen={openFile} onSave={save} onClose={onBack} onBack={onBack}
         onRefresh={craft ? () => { forceRef.current = true; setRetrySeq(s => s + 1); } : undefined}>
@@ -525,7 +544,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
               className="absolute inset-0 z-[5] bg-black/40 md:hidden" />
             <aside data-testid="panel-aside"
               className="absolute inset-y-0 left-0 z-10 flex w-[300px] max-w-[85vw] flex-col border-r border-white/10
-                         shadow-2xl md:static md:z-auto md:shadow-none">
+                         shadow-2xl md:relative md:z-auto md:shadow-none">
               <button data-testid="panel-tab" title="collapse the parts panel"
                 aria-label="collapse the parts panel" onClick={() => setPanelOpen(false)}
                 className="absolute -right-5 top-1/2 z-20 flex h-16 w-5 -translate-y-1/2 items-center
@@ -547,7 +566,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
                   <Panel
                     engine={engine} ctx={ctxRef.current} bp={bp} sel={sel} rev={rev}
                     opts={opts} hullOpacity={hullOpacity} onHullOpacity={setHullOp}
-                                        gizmoOn={gizmoOn && mode === 'edit'} onGizmo={setGizmo}
+                    gizmoOn={gizmoOn && (mode === 'edit' || mode === 'blocks')} onGizmo={setGizmo}
                     hiDef={hiDef} onHiDef={onHiDef}
                     staticInfo={staticInfo} onStaticInfo={setStaticInfo}
                     onOpt={toggleOpt}
@@ -560,8 +579,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
                     manifest={manifest}
                     placingType={placing}
                     onPlaceType={(t) => { setPlacing(t); if (t && mode === 'view') setMode('edit'); }}
-                    compSub={mode === 'edit' ? compSub : undefined}
-                    onCompSub={mode === 'edit' ? setCompSub : undefined}
+                    tool={mode === 'edit' || mode === 'blocks' ? tool : undefined}
+                    onTool={setTool}
                     mirrorPlace={mirrorPlace}
                     onMirrorPlace={setMirrorPlace}
                     statsOnly={mode === 'view'}
@@ -583,10 +602,10 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         <main className="flex min-w-0 flex-1 flex-col">
           <div className="relative min-h-0 flex-1">
             <Viewport bp={bp} onPick={setHit} onEngine={onEngine}
-              mode={mode} onBlockPick={onBlockPick} onBlockHover={computeGhost}
-              placing={mode === 'edit' ? placing : null} onPlace={onPlacePoint}
+              mode={mode} tool={tool} onBlockPick={onBlockPick} onBlockHover={computeGhost}
+              placing={mode === 'edit' || mode === 'blocks' ? placing : null} onPlace={onPlacePoint}
               onManifest={setManifest} />
-            {placing && mode === 'edit' && (
+            {placing && (mode === 'edit' || mode === 'blocks') && (
               <div data-testid="place-hint"
                 className="ksp-win ksp-label pointer-events-none absolute left-1/2 top-2 z-20 -translate-x-1/2
                            rounded px-3 py-1 text-[11px] text-accent">

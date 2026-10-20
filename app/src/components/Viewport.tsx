@@ -24,6 +24,11 @@ declare global {
     ghost: () => Engine['placeGhostState'];
     /** BLOCKS-edit selection highlight state ({bi, twin} | null, v1.4) */
     blockHighlight: () => Engine['blockHighlightState'];
+    /** BLOCK widget state (v1.5): {bi, mode, mirror, cell} while a selected
+     *  block owns the gizmo (BLOCKS ▸ Edit), else null */
+    blockGizmo: () => ReturnType<Engine['blockGizmoState']>;
+    /** live selection ({ci, sub}) — v1.5 view-lock pin */
+    sel: () => ReturnType<Engine['selectionState']>;
     /** held-catalog-part placement ghost state (v1.4, null = no ghost) */
     compGhost: () => Engine['compGhostState'];
     /** constrained subgrid joint handles (the hinge UI at the joint line) */
@@ -37,13 +42,17 @@ declare global {
 let atlasP: Promise<ModelAtlas | null> | null = null;
 const getAtlas = (): Promise<ModelAtlas | null> => (atlasP ??= openAtlas());
 
-export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockPick, onBlockHover, placing = null, onPlace, onManifest }: {
+export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, onBlockPick, onBlockHover, placing = null, onPlace, onManifest }: {
   bp: Blueprint | null;
   onPick: (h: PickHit) => void;
   onEngine?: (e: Engine | null) => void;
   /** workspace mode: blocks clicks route to onBlockPick; the mode widget
-   *  only belongs to Edit */
+   *  only belongs to Edit; VIEW picks NOTHING (v1.5 user rule: "selecting
+   *  components shouldnt be possible in view — view shows the amounts") */
   mode?: 'view' | 'edit' | 'blocks' | 'wire' | 'flight' | 'aero';
+  /** the side panel's PLACE|EDIT flavor (v1.5): in BLOCKS the ghost hovers
+   *  only in PLACE; in EDIT only a held catalog part docks a ghost */
+  tool?: 'edit' | 'place';
   onBlockPick?: (clientX: number, clientY: number, shift: boolean,
     /** pops the ⊘/✥/⟳/⇄ mode widget at the click point (v1.4: a component
      *  picked in BLOCKS mode gets the gizmo mode switch there too) */
@@ -79,6 +88,8 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockP
       hoverState: () => engine.hoverActive,
       ghost: () => engine.placeGhostState,
       blockHighlight: () => engine.blockHighlightState,
+      blockGizmo: () => engine.blockGizmoState(),
+      sel: () => engine.selectionState(),
       compGhost: () => engine.compGhostState,
       hinge: () => engine.hingeInfo(),
       hingePoint: (i: number) => engine.hingeScreenPoint(i),
@@ -111,8 +122,10 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockP
   // hover routing (v1.4): BLOCKS mode drives the constructor ghost; while a
   // catalog part is HELD in EDIT mode the same path docks the part ghost.
   // Remember the pointer so a Shift press/release (the game's logical-
-  // continuation modifier) re-aims the ghost WITHOUT a move
-  const hoverOn = mode === 'blocks' || (mode === 'edit' && !!placing);
+  // continuation modifier) re-aims the ghost WITHOUT a move.
+  // v1.5 flavor rule: the ghost only lives in the PLACE flavor.
+  const hoverOn = (mode === 'blocks' && tool === 'place') ||
+    ((mode === 'edit' || mode === 'blocks') && !!placing);
   const lastHover = useRef<{ x: number; y: number; shift: boolean } | null>(null);
   const hoverT = useRef(0);
   const blockHover = (x: number, y: number, shift: boolean, force = false) => {
@@ -134,12 +147,12 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockP
       // the ghost re-aims the moment Shift goes down/up over a block (the
       // game swaps brush → continuation instantly, no mouse move needed)
       const h = lastHover.current;
-      if (h && mode === 'blocks') blockHover(h.x, h.y, on, true);
+      if (h && mode === 'blocks' && tool === 'place') blockHover(h.x, h.y, on, true);
     };
     const dn = (e: KeyboardEvent) => sh(e, true), up = (e: KeyboardEvent) => sh(e, false);
     addEventListener('keydown', dn); addEventListener('keyup', up);
     return () => { removeEventListener('keydown', dn); removeEventListener('keyup', up); };
-  }, [mode, onBlockHover]);
+  }, [mode, tool, onBlockHover]);
   const setMode = (m: 'off' | 'translate' | 'rotate') => {
     setGmode(m);
     engineRef.current?.setGizmoMode(m);
@@ -147,6 +160,10 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockP
   const pickClick = (e: React.PointerEvent) => {
     const engine = engineRef.current;
     if (!engine) return;
+    // VIEW picks NOTHING (v1.5 user rule: "selecting components shouldnt be
+    // possible in view — view shows the amounts"): inspect only, no select,
+    // no fly-to, no mode widget — the side panel keeps the vessel stats.
+    if (mode === 'view') return;
     if (placing) { onPlace?.(e.clientX, e.clientY); return; }   // KSP place: no select
     if (mode === 'blocks') {
       let opened = false;

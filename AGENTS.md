@@ -158,6 +158,35 @@ user's explicit say-so (Pages/release still serves it meanwhile).
   gizmo re-bind after the swap. Pinned by app/e2e/liveedit.spec.ts (panel-
   routed Propeller twist + Aileron angle: liveDataEdit counter, reload
   counter 0, real-model bbox follows the data).
+- **Panel flavors + view-lock + BLOCK widget (v1.5 user rules):** (1) ONE
+  `✎ Edit | ✚ Place` switch crowns the side panel in BOTH the Edit and Blocks
+  modes (testids `tooltab-edit`/`tooltab-place`, hint row `flavor-hint`) —
+  the two FLAVORS of the same panel (state `tool`, persisted
+  `archean-app-panel-tool`; it REPLACES the old v1.4 compSub/blockTool
+  sub-tabs). Edit flavor = click SELECTS (gizmo + inspector + Delete); Place
+  flavor = the ghost dockers (block brush + held catalog part — parts can be
+  placed in the Blocks workspace too). (2) VIEW is inspect-only: a canvas
+  click selects NOTHING (no select/fly/chip), the panel shows ONLY the
+  vessel amounts (VesselStats); pinned by panels.spec view-lock phase (probe
+  a comp pixel via `pickAt`, click in View ⇒ `sel().ci === -1`, same pixel in
+  Edit ⇒ selects) + scene.spec (chip test runs in Edit). (3) SELECTED BLOCKS
+  get the gizmo (user: "the gizmo doesnt show when selecting blocks … move
+  arrows cell snapped, rotation arrows that move in 90° increments"):
+  `Engine.setBlockGizmo(bi, mirror)` re-attaches the SAME TransformControls —
+  WORLD space, CELL translation snap + QUARTER-TURN rotation snap ALWAYS; a
+  gesture commits as `blockGizmoShift(whole-cell step)` (colliding footprints
+  REFUSE, widget snaps back — `cellOverlapSkip` ignores mover + twin) or
+  `blockGizmoRotate(axis, n×90°)` (= the panel's rotatedBlock geometry, ⇄
+  twin in unison); during drag the golden highlight group rides the widget
+  (merged solid catches up at the debounced rebuild); writes flow
+  engine→doc through `onBlockEdit` → `writeBlockDoc` (shared with BlockPanel).
+  Edit-flavor ONLY, component selection takes the widget back; hook
+  `__ARCHEAN__.blockGizmo()`, pinned in blockedit.spec. (4) The side panel's
+  expand/collapse is the ▤ button + the ‹/› bookmark tab ONLY — re-clicking
+  the active VIEW tile does NOT toggle it anymore (panels.spec shipped-UI
+  test); the open-state ‹ tab anchors to the PANEL edge (`md:relative` on
+  the aside — it used to anchor to the viewport edge = the "missing
+  expand-collapse" report).
 - **Constructor-parity block placement (v1.4.0):** BLOCKS-place docks a
   ghost preview on ANY hovered surface — block face, hull-triangle prism,
   component or subgrid content (`Engine.pickCell` returns the world face
@@ -179,9 +208,10 @@ user's explicit say-so (Pages/release still serves it meanwhile).
   block + part hover via `__ARCHEAN__.ghost()`, Shift continuation, brush +
   continuation clicks place through the doc mirror).
 - **Block EDIT + mirror + snap + component ghost (v1.4):** BLOCKS PLACE/EDIT
-  sub-tabs and components-view PLACE/EDIT sub-tabs (PLACE = brush/catalog +
-  ⇄, EDIT = selected-item editor; clicking an existing COMPONENT in ANY
-  sub-tab or mode selects it and the inspector offers Delete
+  sub-tabs and components-view PLACE/EDIT sub-tabs (v1.5: unified into the
+  panel-top Edit|Place flavor switch, see the Panel-flavors bullet; PLACE =
+  brush/catalog + ⇄, EDIT = selected-item editor; clicking an existing
+  COMPONENT in ANY sub-tab or mode selects it and the inspector offers Delete
   (`comp-delete`, bp splice + doc mirror + orig/applied shift)). A selected
   block gets the golden ENGINE highlight (`engine.setBlockHighlight`, hook
   `__ARCHEAN__.blockHighlight()`) plus a dim one on its SIMILAR TWIN

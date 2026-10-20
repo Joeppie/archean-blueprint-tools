@@ -1,8 +1,11 @@
-// blockedit.spec.ts — the BLOCKS EDIT sub-tab (v1.4): clicking a block in
-// the EDIT tab SELECTS it with a golden highlight (engine-side state, the
-// block analogue of the component outline), ⟲ turns the shape IN PLACE
-// (bbox centre frozen), ✧ snap reads the neighbour geometry, and a ⇄-placed
-// pair IDENTIFIES as similar twins whose edits propagate together.
+// blockedit.spec.ts — the BLOCKS ▸ EDIT flavor (v1.4 + v1.5): clicking a
+// block SELECTS it with a golden highlight (engine-side state, the block
+// analogue of the component outline) AND attaches the BLOCK widget —
+// cell-snapped shift arrows + 90°-snap rings (v1.5 user rule: "the gizmo
+// doesnt show when selecting blocks … move arrows cell snapped, rotation
+// arrows that move in 90° increments"). ⟲ turns the shape IN PLACE (bbox
+// centre frozen), ✧ snap reads the neighbour geometry, and a ⇄-placed pair
+// IDENTIFIES as similar twins whose edits propagate together.
 import { expect, test, type Page } from '@playwright/test';
 
 type Blk = { pos_x: number; pos_y: number; pos_z: number; frame_x?: number; frame_y?: number;
@@ -21,6 +24,20 @@ const highlight = (page: Page) => page.evaluate(() =>
   (window as unknown as { __ARCHEAN__?: { blockHighlight: () => { bi: number; twin: number } | null } }
   ).__ARCHEAN__!.blockHighlight());
 
+/** the live BLOCK-widget state (v1.5): which block owns the gizmo + its cell */
+const blockGizmo = (page: Page) => page.evaluate(() =>
+  (window as unknown as { __ARCHEAN__?: { blockGizmo: () => {
+    bi: number; mode: 'off' | 'translate' | 'rotate'; mirror: boolean;
+    cell: [number, number, number] } | null } }).__ARCHEAN__!.blockGizmo());
+
+/** select a deck block by clicking a block face (EDIT flavor) and return its bi */
+async function selectDeckBlock(page: Page, px: { x: number; y: number }): Promise<number> {
+  await page.mouse.click(px.x, px.y);
+  const hl = await highlight(page);
+  expect(hl, 'clicking a deck face selects the block').not.toBeNull();
+  return hl!.bi;
+}
+
 /** open a NEW craft in BLOCKS mode and return a canvas fraction that
  *  answers a deck block face through engine.pickCell (deterministic probe) */
 async function openDeck(page: Page, tab: 'place' | 'edit') {
@@ -28,7 +45,7 @@ async function openDeck(page: Page, tab: 'place' | 'edit') {
   await page.getByTestId('gallery-new').click();
   await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
   await page.getByTestId('mode-blocks').click();
-  await page.getByTestId(`blocktool-${tab}`).click();
+  await page.getByTestId(`tooltab-${tab}`).click();
   let click: { x: number; y: number } | null = null;
   for (let i = 0; i < 40 && !click; i++) {
     click = await page.evaluate((t) => {
@@ -88,7 +105,8 @@ test.describe('blocks EDIT: highlight, in-place rotate, snap, twin @place', () =
     await page.goto('/');
     await page.getByTestId('gallery-new').click();
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
-    await page.getByTestId('mode-blocks').click();          // PLACE tab (default)
+    await page.getByTestId('mode-blocks').click();
+    await page.getByTestId('tooltab-place').click();       // v1.5: the PLACE flavor
     let px: { x: number; y: number } | null = null;
     for (let i = 0; i < 40 && !px; i++) {
       px = await page.evaluate(() => {
@@ -136,6 +154,7 @@ test.describe('blocks EDIT: highlight, in-place rotate, snap, twin @place', () =
     await page.getByTestId('gallery-new').click();
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
     await page.getByTestId('mode-blocks').click();
+    await page.getByTestId('tooltab-place').click();       // v1.5: place with the brush
     await page.getByTestId('block-mirror').click();        // twin ON
     let click: { x: number; y: number } | null = null;
     for (let i = 0; i < 40 && !click; i++) {
@@ -166,12 +185,78 @@ test.describe('blocks EDIT: highlight, in-place rotate, snap, twin @place', () =
     ).__ARCHEAN__!.engine.blueprint.data.blocks.length)).toBe(before + 2);
     // the placed block stays selected (place auto-selects) — re-pick it in
     // the EDIT tab: the TOP face now answers the owned block, not the deck
-    await page.getByTestId('blocktool-edit').click();
+    await page.getByTestId('tooltab-edit').click();
     await page.mouse.click(box.x + box.width * click!.x, box.y + box.height * click!.y);
     const hl = await highlight(page);
     expect(hl, 'the placed block is selected').not.toBeNull();
     const twinRow = page.getByTestId('block-twin');
     await expect(twinRow).toContainText(/similar twin: Block\[\d+\]/);
     if (hl!.twin >= 0) expect(hl!.bi).not.toBe(hl!.twin);
+  });
+
+  test('BLOCK widget (v1.5): attach, refuse a colliding shift, cell-move, 90° turn, detach on flip', async ({ page }) => {
+    test.skip(test.info().project.name !== 'chromium', 'desktop-only');
+    const px = await openDeck(page, 'edit');
+    const bi = await selectDeckBlock(page, px);
+
+    // the gizmo ATTACHES to the selected block: its cell = the block's start
+    await expect.poll(() => blockGizmo(page), { timeout: 4000 }).not.toBeNull();
+    const gz = await blockGizmo(page);
+    expect(gz!.bi).toBe(bi);
+    const b0 = await blockAt(page, bi);
+    expect(gz!.cell).toEqual([b0.cx, b0.cy, b0.cz]);
+
+    // REFUSE a shift into an occupied NEIGHBOUR cell (the contiguous deck z-row):
+    // false return, the block does not move (the widget will snap back).
+    const dz = await page.evaluate((i) => {
+      const w = window as unknown as { __ARCHEAN__?: { engine: { blueprint: {
+        data: { blocks: { type: number; pos_z: number; frame_z?: number; pos_y: number;
+          frame_y?: number; pos_x: number; frame_x?: number }[] } } } } };
+      const bl = w.__ARCHEAN__!.engine.blueprint.data.blocks;
+      const cell = (p: number, f?: number) => (f ?? 0) * 12 + p;
+      const me = bl[i]!;
+      const mcz = cell(me.pos_z, me.frame_z), mcy = cell(me.pos_y, me.frame_y),
+        mcx = cell(me.pos_x, me.frame_x);
+      for (let j = 0; j < bl.length; j++) {
+        if (j === i || bl[j]!.type === 255) continue;
+        if (cell(bl[j]!.pos_x, bl[j]!.frame_x) === mcx && cell(bl[j]!.pos_y, bl[j]!.frame_y) === mcy) {
+          const jz = cell(bl[j]!.pos_z, bl[j]!.frame_z);
+          if (jz === mcz + 1) return 1;
+          if (jz === mcz - 1) return -1;
+        }
+      }
+      return 0;
+    }, bi);
+    if (dz !== 0) {
+      const bad = await page.evaluate((d) => (window as unknown as {
+        __ARCHEAN__?: { engine: { blockGizmoShift: (s: [number, number, number]) => boolean } } }
+      ).__ARCHEAN__!.engine.blockGizmoShift([0, 0, d]), dz);
+      expect(bad, 'a shift into an occupied cell is refused').toBe(false);
+      expect((await blockGizmo(page))!.cell, 'the refused shift left the block put')
+        .toEqual([b0.cx, b0.cy, b0.cz]);
+    }
+
+    // cell MOVE +1 in y (empty above the deck): the block lands one cell up
+    const moved = await page.evaluate(() => (window as unknown as {
+      __ARCHEAN__?: { engine: { blockGizmoShift: (s: [number, number, number]) => boolean } } }
+    ).__ARCHEAN__!.engine.blockGizmoShift([0, 1, 0]));
+    expect(moved, 'a shift into empty space is accepted').toBe(true);
+    await page.waitForTimeout(600);                       // debounced rebuild
+    const b1 = await blockAt(page, bi);
+    expect([b1.cx, b1.cy, b1.cz]).toEqual([b0.cx, b0.cy + 1, b0.cz]);
+
+    // 90° TURN about z: the 9×1 deck bar exchanges x↔y extents (rotatedBlock)
+    const rot = await page.evaluate(() => (window as unknown as {
+      __ARCHEAN__?: { engine: { blockGizmoRotate: (a: 'x' | 'y' | 'z', n: number) => boolean } } }
+    ).__ARCHEAN__!.engine.blockGizmoRotate('z', 1));
+    expect(rot, 'a 90° turn commits').toBe(true);
+    await page.waitForTimeout(600);
+    const b2 = await blockAt(page, bi);
+    expect([b2.sx, b2.sy], 'a z-spin exchanges the x and y footprints').toEqual([b0.sy, b0.sx]);
+
+    // FLAVOR FLIP to PLACE → the BLOCK widget detaches (it is Edit-flavor only)
+    await page.getByTestId('tooltab-place').click();
+    await page.waitForTimeout(100);
+    expect(await blockGizmo(page), 'the PLACE flavor detaches the block gizmo').toBeNull();
   });
 });

@@ -46,6 +46,8 @@ test('KSP camera cluster presets snap the eye to axis views and re-fit', async (
 
 test('a real canvas tap routes through the pick path into the info chip', async ({ page }) => {
   await openFirstCraft(page);
+  // v1.5 VIEW LOCK: VIEW picks nothing — the pick chip lives in the Edit mode
+  await page.getByTestId('mode-edit').click();
   const canvas = page.getByTestId('canvas');
   const box = (await canvas.boundingBox())!;
   const pts = [[0, 0], [0.1, 0], [-0.1, 0], [0, 0.1], [0, -0.1]];

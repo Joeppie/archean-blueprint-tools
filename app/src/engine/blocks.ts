@@ -46,8 +46,17 @@ export function blockAt(bp: Blueprint, p: { x: number; y: number; z: number }): 
  *  geometry block? (type-255 occupancy mirrors never block placement; the
  *  game's ghost turns red and refuses the click — same rule.) */
 export function cellOverlap(bp: Blueprint, cell: Cell, size: Cell): boolean {
+  return cellOverlapSkip(bp, cell, size, []);
+}
+
+/** cellOverlap that IGNORES the listed block indices — MOVE validation for
+ *  an EXISTING block (the v1.5 BLOCK gizmo: the destination must not collide
+ *  with the mover's own old cell, nor with its ⇄ twin's not-yet-moved one). */
+export function cellOverlapSkip(bp: Blueprint, cell: Cell, size: Cell, skip: number[]): boolean {
   const x1 = cell[0] + size[0] + 1, y1 = cell[1] + size[1] + 1, z1 = cell[2] + size[2] + 1;
-  for (const b of bp.data.blocks) {
+  for (let i = 0; i < bp.data.blocks.length; i++) {
+    if (skip.includes(i)) continue;
+    const b = bp.data.blocks[i]!;
     if (b.type === 255) continue;
     const c = blockCells(b);
     if (cell[0] < c.x + b.size_x + 1 && x1 > c.x

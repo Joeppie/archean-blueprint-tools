@@ -33,6 +33,20 @@ export interface EditCtx {
   applied: Vec3D[];
 }
 
+/** Mirror a LIVE bp block's geometry into the doc (pos/frame/size/type + the
+ *  7 face slots) — the block sibling of every setter here (the v1.4 lesson:
+ *  cell edits must reach the doc or they vanish on save). Used by the panel
+ *  editors AND the engine's BLOCK gizmo via Editor's onBlockEdit. */
+export function writeBlockDoc(ctx: EditCtx, bi: number): void {
+  const b = ctx.bp.data.blocks[bi];
+  if (!b) return;
+  const d = ctx.doc, path = ['data', 'blocks', bi];
+  for (const k of ['pos_x', 'pos_y', 'pos_z', 'frame_x', 'frame_y', 'frame_z',
+    'size_x', 'size_y', 'size_z', 'type'] as const)
+    docSetNumber(d, [...path, k], (b as unknown as Record<string, number>)[k] ?? 0);
+  for (let i = 0; i < 7; i++) docSetNumber(d, [...path, 'colors', i], b.colors?.[i] ?? 0);
+}
+
 export function makeCtx(doc: DocNode, bp: Blueprint): EditCtx {
   return {
     doc,

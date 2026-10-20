@@ -5,7 +5,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { Sec, Num, SearchList } from './ui';
 import type { Engine } from '../engine/scene';
 import { FLOWS, type FlowKey } from '../engine/aero';
-import type { EditCtx } from '../engine/edit';
+import { writeBlockDoc, type EditCtx } from '../engine/edit';
 import { docArrayInsert, docFromValue, docSetNumber, docArrayRemoveAt } from '../engine/doc';
 import { blockCells, blockFromCell, blockInfo, blockMirrorTwin, flippedBlock, mirroredBlock,
   rotateType, rotatedBlock, setBlockField, setBlockGeom, snapBlockType, type PlaceSpec } from '../engine/blocks';
@@ -44,19 +44,10 @@ export function BlockPanel(p: {
     [0, 'Cube'], [1, 'Ramp A'], [5, 'Ramp B'], [9, 'Ramp C'], [13, 'Corner'], [21, 'Pyramid'],
     [45, 'Inv corner'], [4, 'Thin rod'],
   ];
-  /** mirror the live bp block's geometry into the doc (pos/frame/size/type —
-   *  the v1.4 fix: the old single-key write aimed at a literal "cx", which
-   *  the doc never had, so cell edits lived only in bp and vanished on save) */
-  const writeBlock = (bi: number) => {
-    if (!p.ctx) return;
-    const b = p.ctx.bp.data.blocks[bi];
-    if (!b) return;
-    const d = p.ctx.doc, path = ['data', 'blocks', bi];
-    for (const k of ['pos_x', 'pos_y', 'pos_z', 'frame_x', 'frame_y', 'frame_z',
-      'size_x', 'size_y', 'size_z', 'type'] as const)
-      docSetNumber(d, [...path, k], (b as unknown as Record<string, number>)[k]);
-    for (let i = 0; i < 7; i++) docSetNumber(d, [...path, 'colors', i], b.colors?.[i] ?? 0);
-  };
+  /** mirror the live bp block's geometry into the doc — the shared writer
+   *  (v1.4 fix: single-key "cx" writes vanished on save), so the gizmo commit
+   *  and the panel rows can never drift apart. */
+  const writeBlock = (bi: number) => { if (p.ctx) writeBlockDoc(p.ctx, bi); };
   const apply = (k: Parameters<typeof setBlockField>[2], v: number) => {
     if (!info || !p.ctx) return;
     setBlockField(p.ctx.bp, p.blockSel, k, v);
@@ -165,8 +156,8 @@ export function BlockPanel(p: {
           <div className="pt-1 text-[10px] leading-snug text-ink-dim">
             Hover a block, part or hull triangle to preview · click to place ·
             <b> Shift</b> over a block copies it / logically continues its shape
-            (the game's rule) · ⇄ mirrors the twin · clicking an existing
-            COMPONENT selects it (EDIT tab edits and deletes).
+            (the game's rule) · ⇄ mirrors the twin · the <b>✎ Edit</b> flavor
+            selects a part or block to move, turn and delete.
           </div>
         </Sec>
       )}
