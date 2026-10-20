@@ -206,9 +206,11 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
     const hit = engine.pickAt(e.clientX, e.clientY);
     onPick(hit);
     if (hit.kind === 'comp' && hit.ci != null) {
+      // v2.0 merged editor: this path only serves WIRE/FLIGHT/AERO now (edit
+      // routes through onBlockPick, which pops the widget itself) — select +
+      // fly, no mode widget.
       engine.select(hit.ci); engine.flyTo(hit.ci);
-      const box = hostRef.current?.getBoundingClientRect();
-      if (box && mode === 'edit') setWidget({ x: e.clientX - box.left, y: e.clientY - box.top });
+      setWidget(null);
     } else {
       if (hit.kind === 'sub' && hit.sub != null) engine.selectSub(hit.sub);
       else engine.select(-1);

@@ -125,7 +125,7 @@ describe('Shift continuation placement (the game: logically add the next block)'
     for (const hit of [[4.9, 4.9, 4.05], [4.05, 4.05, 4.9], [4.9, 4.05, 4.95]]) {
       const c = complementBlock(i, hit as [number, number, number], n).cell;
       const d = [c[0] - 4, c[1] - 4, c[2] - 4];
-      expect(-d[0] + d[1] + d[2]).toBe(0);     // m·d = 0 → ghost slant plane == block slant plane
+      expect(-d[0]! + d[1]! + d[2]!).toBe(0);     // m·d = 0 → ghost slant plane == block slant plane
       expect(d).not.toEqual([0, 0, 0]);        // never back inside the aimed block
     }
   });
@@ -211,8 +211,6 @@ describe('Shift continuation placement (the game: logically add the next block)'
 
 // ------------------------------------------------ v1.4 BLOCK EDITOR layer
 describe('in-place rotate / flip (the block interface components have)', () => {
-  const bpOf = (blocks: ReturnType<typeof blockFromCell>[]) =>
-    ({ data: { blocks } } as unknown as Blueprint);
 
   it('rotateTypeAbout is a proper 4-cycle about every axis, whole table', () => {
     for (let t = 0; t <= 52; t++)

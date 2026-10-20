@@ -9,7 +9,7 @@ import { faceSlots, blockFromCell, blockMirrorTwin, mirrorFaceOrder, mirroredBlo
   mirroredFaceSlots, paintBlockFaces, paintTwinPair, setBlockGeom } from '../blocks';
 import { MIRROR_TYPE } from '../blocks';
 import { paletteUsage } from '../palette';
-import type { Blueprint } from '../format';
+import type { Block, Blueprint } from '../format';
 
 const cubePair = (): Blueprint => {
   const b = blockFromCell([8, 5, 8], [0, 0, 0], 0, 0);
@@ -103,7 +103,7 @@ describe('palette usage census', () => {
 describe('geometry twin (panel ⇄ edits)', () => {
   it('a mirrored cx move keeps the pair on mirrored cells', () => {
     const bp = cubePair();
-    const [b, t] = bp.data.blocks;
+    const [b, t] = bp.data.blocks as [Block, Block];
     setBlockGeom(b, [9, 5, 8], [0, 0, 0], 0);                  // self moves +1 x
     // mirrorGeom in the panel mirrors the NEW cell: mirrorBlockCell(9,0)=2
     setBlockGeom(t, [2, 5, 8], [0, 0, 0], 0);

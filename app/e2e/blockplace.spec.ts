@@ -15,8 +15,6 @@ type Ghost = {
 } | null;
 type Probe = { x: number; y: number };
 
-const ghost = (page: Page) => page.evaluate(() =>
-  (window as unknown as { __ARCHEAN__?: { ghost: () => Ghost } }).__ARCHEAN__!.ghost());
 const blocksCount = (page: Page) => page.evaluate(() =>
   (window as unknown as { __ARCHEAN__?: { stats: () => { blocks: number } } }).__ARCHEAN__!.stats().blocks);
 const lastBlock = (page: Page) => page.evaluate(() => {
@@ -53,10 +51,12 @@ async function openBlocksMode(page: Page) {
   await expect(page.getByTestId('block-brush')).toBeVisible();
 }
 
-/** hover a canvas point and wait for the ghost to answer it */
-async function hoverGhost(page: Page, px: number, py: number, want: (g: Ghost) => boolean) {
+/** hover a canvas point and wait for the ghost to answer it (the want is the
+ *  OBJECT passed into waitForFunction as the page arg — not a predicate) */
+async function hoverGhost(page: Page, px: number, py: number,
+  want: { valid: boolean; complement: boolean }) {
   await page.mouse.move(px, py);
-  return page.waitForFunction((w) => {
+  return page.waitForFunction((w: { valid?: boolean; complement?: boolean }) => {
     const g = (window as unknown as { __ARCHEAN__?: { ghost: () => unknown } }).__ARCHEAN__!.ghost();
     const gg = g as { valid?: boolean; complement?: boolean } | null;
     return gg && w.valid === gg.valid && w.complement === gg.complement ? g : false;

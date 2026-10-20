@@ -2991,7 +2991,8 @@ void main() {
       for (const c of cols) for (let a = 0; a < 3; a++) { lo[a] = Math.min(lo[a]!, c.min[a]!); hi[a] = Math.max(hi[a]!, c.max[a]!); }
     }
     const size: [number, number, number] = [Math.max(0.1, hi[0]! - lo[0]!), Math.max(0.1, hi[1]! - lo[1]!), Math.max(0.1, hi[2]! - lo[2]!)];
-    const ctr: [number, number, number] = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2];
+    const ctr: [number, number, number] = [(lo[0]! + hi[0]!) / 2, (lo[1]! + hi[1]!) / 2,
+      (lo[2]! + hi[2]!) / 2];
     const mat = new MeshBasicMaterial({ color: 0xffc94d, transparent: true, opacity: 0.35, depthTest: false, side: DoubleSide });
     const wmat = new LineBasicMaterial({ color: 0xffc94d, transparent: true, opacity: 0.9, depthTest: false });
     const put = (p: [number, number, number], mx = 1) => {

@@ -408,8 +408,8 @@ export function rotateTypeAbout(t: number, axis: 'x' | 'y' | 'z', cw: boolean): 
     .map(p => {
       const u: [number, number, number] = [p[0] - 0.5, p[1] - 0.5, p[2] - 0.5];
       const r: [number, number, number] = [0, 0, 0];
-      r[a] = u[a]; r[b] = -s * u[c]; r[c] = s * u[b];
-      return [r[0] + 0.5, r[1] + 0.5, r[2] + 0.5] as [number, number, number];
+      r[a] = u[a]!; r[b] = -s * u[c]!; r[c] = s * u[b]!;
+      return [r[0]! + 0.5, r[1]! + 0.5, r[2]! + 0.5] as [number, number, number];
     });
   return CLOUD_TYPE.get(cloudKey(pts)) ?? t;
 }
@@ -423,7 +423,7 @@ export function rotatedBlock(b: Block, axis: 'x' | 'y' | 'z', cw: boolean): Bloc
   const cell: Cell = [0, 1, 2].map(ax => blockCells(b)[(['x', 'y', 'z'] as const)[ax]!]) as Cell;
   const ext: Cell = [b.size_x + 1, b.size_y + 1, b.size_z + 1];
   const nExt: Cell = [...ext];
-  nExt[b1] = ext[c1]; nExt[c1] = ext[b1];
+  nExt[b1] = ext[c1]!; nExt[c1] = ext[b1]!;
   const nCell: Cell = [...cell];
   nCell[b1] = cell[b1]! + Math.round((ext[b1]! - nExt[b1]!) / 2);
   nCell[c1] = cell[c1]! + Math.round((ext[c1]! - nExt[c1]!) / 2);

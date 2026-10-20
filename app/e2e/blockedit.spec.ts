@@ -144,13 +144,17 @@ test.describe('blocks EDIT: highlight, in-place rotate, snap, twin @place', () =
     // and the part MOVES from there (inspector slider — the gizmo path is
     // pinned mode-independently by gizmo.spec)
     const x0 = await page.evaluate(() => {
-      const a = window.__ARCHEAN__!;
+      const a = (window as unknown as { __ARCHEAN__?: { engine: {
+        compViewPos: (ci: number) => { x: number } | null; gizmoState: () => { ci: number } } } })
+        .__ARCHEAN__!;
       return a.engine.compViewPos(a.engine.gizmoState().ci)!.x;
     });
     await page.getByTestId('row-n-x').fill(String(x0 + 0.5));
     await page.waitForTimeout(300);
     const x1 = await page.evaluate(() => {
-      const a = window.__ARCHEAN__!;
+      const a = (window as unknown as { __ARCHEAN__?: { engine: {
+        compViewPos: (ci: number) => { x: number } | null; gizmoState: () => { ci: number } } } })
+        .__ARCHEAN__!;
       return a.engine.compViewPos(a.engine.gizmoState().ci)!.x;
     });
     expect(x1 - x0).toBeCloseTo(0.5, 3);
