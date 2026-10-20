@@ -148,10 +148,10 @@ export default function TopBar(p: Props) {
         </Menu>
       )}
 
-      <button data-testid="new-craft" onClick={p.onNew}
-        className="ksp-btn hidden shrink-0 whitespace-nowrap px-2.5 py-1 text-[12px] hover:text-accent md:inline">
-        + New craft
-      </button>
+      {/* NO standalone + New craft button (v1.5.10 user rule: "new craft
+          should not be a button, but only under file. too dangerous"): a
+          misfire in the toolbar silently replaced the OPEN craft — the path
+          lives in File ▸ New craft only, guarded by a dirty confirm there. */}
 
       <nav data-testid="mode-bar" title="editor modes — KSP-style tool switch"
         className="order-last flex w-full justify-between gap-[3px] rounded-lg

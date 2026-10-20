@@ -754,7 +754,14 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       }}>
       <TopBar mode={mode} onMode={setMode} dirty={dirty} title={name} craftId={craft}
         canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo}
-        onNew={() => { ctxRef.current = null; setBp(null); openText(emitNew()); }}
+        onNew={() => {
+          // v1.5.10 (user: "new craft should not be a button, but only under
+          // file. too dangerous"): a NEW craft throws away the open doc AND
+          // its whole undo stack — while anything is unsaved, ask first.
+          if (dirtyRef.current &&
+              !window.confirm('Start a NEW craft? Unsaved changes to this one are lost (download it first with Save).')) return;
+          ctxRef.current = null; setBp(null); openText(emitNew());
+        }}
         onOpen={openFile} onSave={save} onClose={onBack} onBack={onBack}
         onRefresh={craft ? () => { forceRef.current = true; setRetrySeq(s => s + 1); } : undefined}
         tools={TOOLS.map(t => ({ id: t.id, label: t.label, icon: t.icon }))}

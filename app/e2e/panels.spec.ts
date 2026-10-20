@@ -261,6 +261,10 @@ test.describe('modes, new craft, file menu @ui', () => {
     expect(blocks).toBe(5);
     await expect(page.getByTestId('wslink')).toHaveCount(0);        // not a workshop item
     await expect(page.getByTestId('save-btn')).toBeVisible();
+    // v1.5.10 user rule ("new craft should not be a button, but only under
+    // file. too dangerous"): the editor toolbar carries NO + New craft button
+    // — the one cheap assertion; File ▸ New craft (dirty-guarded) is the only path.
+    await expect(page.getByTestId('new-craft')).toHaveCount(0);
   });
 
   test('view tab shows ONLY vessel stats; edit mode carries lists + inspector', async ({ page }) => {

@@ -453,6 +453,14 @@ writer-style pin; `e2e/tools.spec.ts` preview reads "shading smooth:1".
   culls, vertex-only contact 16, wire complete). OPEN: why the GAME still
   bands our file — needs the game-re-saved converted craft (client
   blueprints dir) for a byte-diff, or a small authored probe craft.
+- **v1.5.10 NEW CRAFT = FILE MENU ONLY (user: "new craft should not be a
+  button, but only under file. too dangerous"):** the editor toolbar's
+  standalone `+ New craft` button is REMOVED (a misfire silently replaced
+  the open doc AND reset the undo stack); `File ▸ New craft` is the only
+  in-editor path and it CONFIRMS first while the doc is dirty (a new craft
+  also wipes the history stack). The gallery's entry (no open doc, nothing
+  to lose) stays. Pin: the starter-deck test in `e2e/panels.spec.ts`
+  asserts the toolbar button count 0.
 - **2026-10-20 UNDO/REDO + DELETE + TRIANGLE PICK + DIALOG UX (user: "ALL
   operations should retain a undo/redo history, and be in edit menu"; "when
   I have something selected in edit mode, [delete] key should delete";
