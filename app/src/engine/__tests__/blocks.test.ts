@@ -2,11 +2,13 @@
 // cell-boundary lattice, ⇄ MIRRORED placement (cell mirror plane, the
 // mirrored shape-type table derived from the real geometry, the twin
 // builder), the game's SHIFT CONTINUATION rules (complementBlock) and the
-// footprint overlap guard.
+// footprint overlap guard; plus the v1.4 block-EDITOR layer: in-place
+// rotate/flip, SIMILAR-TWIN identification and the ✧ snap-to-neighbours.
 import { describe, expect, it } from 'vitest';
 
-import { blockAt, blockCells, blockFromCell, cellIndex, cellOverlap,
-  complementBlock, mirroredBlock, mirrorBlockCell, MIRROR_TYPE, rotateType } from '../blocks';
+import { blockAt, blockCells, blockFromCell, blockMirrorTwin, cellIndex, cellOverlap,
+  complementBlock, flippedBlock, mirroredBlock, mirrorBlockCell, MIRROR_TYPE,
+  rotateType, rotateTypeAbout, rotatedBlock, snapBlockType } from '../blocks';
 import { getBlockPoints } from '../blockshapes';
 import type { Blueprint } from '../format';
 
@@ -153,5 +155,130 @@ describe('Shift continuation placement (the game: logically add the next block)'
     expect(rotateType(44)).toBe(21);                                // pyramid 21..44
     expect(rotateType(52)).toBe(45);                                // inv corner 45..52
     expect(rotateType(99)).toBe(0);
+  });
+});
+
+// ------------------------------------------------ v1.4 BLOCK EDITOR layer
+describe('in-place rotate / flip (the block interface components have)', () => {
+  const bpOf = (blocks: ReturnType<typeof blockFromCell>[]) =>
+    ({ data: { blocks } } as unknown as Blueprint);
+
+  it('rotateTypeAbout is a proper 4-cycle about every axis, whole table', () => {
+    for (let t = 0; t <= 52; t++)
+      for (const ax of ['x', 'y', 'z'] as const) {
+        let q = t;
+        for (let i = 0; i < 4; i++) q = rotateTypeAbout(q, ax, false);
+        expect(q, `type ${t} axis ${ax}`).toBe(t);                   // 4 × 90° = identity
+        expect(rotateTypeAbout(rotateTypeAbout(t, ax, false), ax, true)).toBe(t);  // cw undoes ccw
+      }
+  });
+
+  it('rotatedBlock keeps the bbox CENTRE and swaps the perpendicular footprints', () => {
+    const b = blockFromCell([8, 5, 8], [2, 0, 0], 0, 4);            // 3×1×1 slab
+    const r = rotatedBlock(b, 'y', false);
+    const c0 = blockCells(b), c1 = blockCells(r);
+    expect([r.size_x, r.size_y, r.size_z]).toEqual([0, 0, 2]);      // x/z extents exchange
+    expect(c1.x + (r.size_x + 1) / 2).toBeCloseTo(c0.x + (b.size_x + 1) / 2, 9);
+    expect(c1.z + (r.size_z + 1) / 2).toBeCloseTo(c0.z + (b.size_z + 1) / 2, 9);
+    expect(r.type).toBe(0);                                          // cube stays a cube
+    expect(r.colors).toEqual(b.colors);                              // paint rides
+    // a slope rotates within its slope family (shape+table stay consistent)
+    const s = rotatedBlock(blockFromCell([8, 5, 8], [0, 0, 0], 1, 4), 'z', false);
+    expect(s.type).toBeGreaterThanOrEqual(1);
+    expect(s.type).toBeLessThanOrEqual(12);
+  });
+
+  it('flippedBlock mirrors the SHAPE in place (cell + footprint frozen), involutive', () => {
+    for (const t of [1, 5, 13, 21, 45]) {
+      const b = blockFromCell([4, 5, 6], [1, 0, 2], t, 7);
+      const f = flippedBlock(b);
+      expect(blockCells(f)).toEqual(blockCells(b));                  // NOT moved (that's mirroredBlock)
+      expect([f.size_x, f.size_y, f.size_z]).toEqual([1, 0, 2]);
+      expect(f.type).toBe(MIRROR_TYPE[t]);
+      expect(flippedBlock(f).type).toBe(t);
+    }
+  });
+});
+
+describe('SIMILAR blocks ⇄ (the block twin index)', () => {
+  it('identifies a placed block + its ⇄ twin both ways; none across the plane', () => {
+    const b = blockFromCell([8, 5, 6], [1, 0, 0], 13, 4);
+    const t = mirroredBlock(b);                                      // mirrored cell + MIRROR_TYPE
+    const bp = { data: { blocks: [b, t] } } as unknown as Blueprint;
+    expect(blockMirrorTwin(bp, 0)).toBe(1);
+    expect(blockMirrorTwin(bp, 1)).toBe(0);
+    expect(blockMirrorTwin({ data: { blocks: [b] } } as unknown as Blueprint, 0)).toBe(-1);
+    // a footprint straddling x = 0 has no twin
+    const s = blockFromCell([3, 5, 6], [4, 0, 0], 0, 4);
+    expect(blockMirrorTwin({ data: { blocks: [s] } } as unknown as Blueprint, 0)).toBe(-1);
+    // a wrong-shape occupant of the mirrored cell is NOT similar: the rank
+    // requires identical-or-mirrored type (15 is neither 13 nor its mirror 17)
+    expect(MIRROR_TYPE[13]).toBe(17);
+    const wrong = blockFromCell([mirrorBlockCell(8, 1), 5, 6], [1, 0, 0], 15, 4);
+    const bp2 = { data: { blocks: [b, wrong] } } as unknown as Blueprint;
+    expect(blockMirrorTwin(bp2, 0)).toBe(-1);
+  });
+});
+
+describe('✧ snap-to-neighbours (converge, else consensus)', () => {
+  const bpOf = (blocks: ReturnType<typeof blockFromCell>[]) =>
+    ({ data: { blocks } } as unknown as Blueprint);
+
+  it('a cube in a flush cube row is already matching: current type wins, converged', () => {
+    const bp = bpOf([
+      blockFromCell([7, 5, 8], [0, 0, 0], 0, 4),
+      blockFromCell([8, 5, 8], [0, 0, 0], 0, 4),
+      blockFromCell([9, 5, 8], [0, 0, 0], 0, 4),
+    ]);
+    const r = snapBlockType(bp, 1)!;
+    expect(r.type).toBe(0);
+    expect(r.converged).toBe(true);
+    expect(r.neighbours).toBe(2);
+  });
+
+  it('a cube between two flanks of one ramp CONVERGES on the ramp continuation', () => {
+    // type 1's x-faces are the full y+z≤e triangle: the same triangle glued on
+    // both sides admits a flush prism — the continuation ramp (type 1) itself
+    const bp = bpOf([
+      blockFromCell([7, 5, 8], [0, 0, 0], 1, 4),
+      blockFromCell([8, 5, 8], [0, 0, 0], 0, 4),                  // wrongly-faced cube
+      blockFromCell([9, 5, 8], [0, 0, 0], 1, 4),
+    ]);
+    const r = snapBlockType(bp, 1)!;
+    expect(r.type).toBe(1);                                        // the same-one convergence
+    expect(r.converged).toBe(true);
+  });
+
+  it('disagreeing flanks fall back to the CONSENSUS (score < 1, still argmax)', () => {
+    // a/b disagree: no type mates perfectly with BOTH (measured 0.813-class)
+    const bp = bpOf([
+      blockFromCell([7, 5, 8], [0, 0, 0], 1, 4),
+      blockFromCell([8, 5, 8], [0, 0, 0], 0, 4),
+      blockFromCell([9, 5, 8], [0, 0, 0], 2, 4),
+    ]);
+    const r = snapBlockType(bp, 1)!;
+    expect(r.converged).toBe(false);
+    expect(r.score).toBeGreaterThan(0.5);
+    expect(r.score).toBeLessThan(0.995);
+    // a lone cube flank cannot outvote two agreeing neighbours: add a second
+    // type-1 contact above and the consensus side wins the weighting
+    const bp2 = bpOf([
+      blockFromCell([7, 5, 8], [0, 0, 0], 1, 4),
+      blockFromCell([8, 5, 8], [0, 0, 0], 0, 4),
+      blockFromCell([9, 5, 8], [0, 0, 0], 2, 4),
+      blockFromCell([8, 6, 8], [0, 0, 0], 1, 4),                  // +y neighbour = type-1 family
+    ]);
+    const r2 = snapBlockType(bp2, 1)!;
+    expect(r2.neighbours).toBe(3);
+  });
+
+  it('no neighbours → nothing to snap; type-255 never counts', () => {
+    const bp = bpOf([blockFromCell([8, 5, 8], [0, 0, 0], 0, 4)]);
+    expect(snapBlockType(bp, 0)).toBeNull();
+    const bp2 = bpOf([
+      blockFromCell([8, 5, 8], [0, 0, 0], 0, 4),
+      blockFromCell([7, 5, 8], [0, 0, 0], 255, 0),
+    ]);
+    expect(snapBlockType(bp2, 0)).toBeNull();
   });
 });

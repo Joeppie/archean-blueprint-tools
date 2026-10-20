@@ -178,6 +178,31 @@ user's explicit say-so (Pages/release still serves it meanwhile).
   overlap guard, rotateType, lattice) + app/e2e/blockplace.spec.ts (ghost on
   block + part hover via `__ARCHEAN__.ghost()`, Shift continuation, brush +
   continuation clicks place through the doc mirror).
+- **Block EDIT + mirror + snap + component ghost (v1.4):** BLOCKS PLACE/EDIT
+  sub-tabs and components-view PLACE/EDIT sub-tabs (PLACE = brush/catalog +
+  ⇄, EDIT = selected-item editor; clicking an existing COMPONENT in ANY
+  sub-tab or mode selects it and the inspector offers Delete
+  (`comp-delete`, bp splice + doc mirror + orig/applied shift)). A selected
+  block gets the golden ENGINE highlight (`engine.setBlockHighlight`, hook
+  `__ARCHEAN__.blockHighlight()`) plus a dim one on its SIMILAR TWIN
+  (`blockMirrorTwin`: mirrored footprint + same extents + identical-or-
+  MIRROR_TYPE shape; while ⇄ is on, shape edits AND deletes propagate to
+  it). EDIT shape tools keep the bbox CENTRE frozen: ⟲X/Y/Z
+  (`rotateTypeAbout` cloud-table 90° turn + perpendicular footprint
+  exchange), ⇄ flip (`flippedBlock` = in-place MIRROR_TYPE), ⟲ cycle
+  (`rotateType`) and ✧ snap (`snapBlockType`: 4×4 cross-section agreement
+  over the flush neighbours' shared faces, argmax over the table, converged
+  at 1.0 else consensus; ties keep the current type — stabilise the
+  heuristic later, user 1.4 scope). Catalog parts place like blocks now:
+  hovering while holding docks a translucent collider ghost
+  (`engine.setCompGhost`, hook `__ARCHEAN__.compGhost()`, ⇄ twin box) and
+  `pickPlacePoint` returns RAW file z (its −pz was a pre-v0.180 leftover =
+  the "cannot place new components" misfire). VIEW mode's side menu is ONLY
+  the collapsable VesselStats (mass & CoM / census / heaviest classes).
+  Pinned by vitest blocks.test.ts (4-cycle rotations, in-place centre/
+  footprint, twin identity, snap convergence/consensus) +
+  app/e2e/blockedit.spec.ts, place.spec.ts (comp ghost + delete),
+  mirror.spec.ts, panels.spec.ts (view-stats-only, deck-place EDIT).
 - Toolchain lives ONLY under `app/` (own npm project); repo-root `tools/`,
   `tests/` and the zero-build regtest stay as they are until cutover.
 - app/ obeys the same rules: no hardcoded machine paths (corpus resolves via

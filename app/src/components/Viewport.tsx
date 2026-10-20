@@ -22,6 +22,10 @@ declare global {
     hoverState: () => number;
     /** blocks-place ghost preview state (null = no ghost) */
     ghost: () => Engine['placeGhostState'];
+    /** BLOCKS-edit selection highlight state ({bi, twin} | null, v1.4) */
+    blockHighlight: () => Engine['blockHighlightState'];
+    /** held-catalog-part placement ghost state (v1.4, null = no ghost) */
+    compGhost: () => Engine['compGhostState'];
     /** constrained subgrid joint handles (the hinge UI at the joint line) */
     hinge: () => ReturnType<Engine['hingeInfo']>;
     hingePoint: (i: number) => ReturnType<Engine['hingeScreenPoint']>;
@@ -71,6 +75,8 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockP
       hover: (ci: number) => engine.previewHover(ci),
       hoverState: () => engine.hoverActive,
       ghost: () => engine.placeGhostState,
+      blockHighlight: () => engine.blockHighlightState,
+      compGhost: () => engine.compGhostState,
       hinge: () => engine.hingeInfo(),
       hingePoint: (i: number) => engine.hingeScreenPoint(i),
       wind: () => engine.windState(),
@@ -99,12 +105,15 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockP
   // symmetry port) — the choice persists and drives the gizmo.
   const down = useRef({ x: 0, y: 0 });
   const hostRef = useRef<HTMLDivElement>(null);
-  // BLOCKS-place hover: remember the pointer so a Shift press/release (the
-  // game's logical-continuation modifier) re-aims the ghost WITHOUT a move
+  // hover routing (v1.4): BLOCKS mode drives the constructor ghost; while a
+  // catalog part is HELD in EDIT mode the same path docks the part ghost.
+  // Remember the pointer so a Shift press/release (the game's logical-
+  // continuation modifier) re-aims the ghost WITHOUT a move
+  const hoverOn = mode === 'blocks' || (mode === 'edit' && !!placing);
   const lastHover = useRef<{ x: number; y: number; shift: boolean } | null>(null);
   const hoverT = useRef(0);
   const blockHover = (x: number, y: number, shift: boolean, force = false) => {
-    if (mode !== 'blocks' || !onBlockHover) return;
+    if (!hoverOn || !onBlockHover) return;
     lastHover.current = { x, y, shift };
     const now = performance.now();
     if (!force && now - hoverT.current < 24) return;    // ~40 Hz raycast cap
@@ -158,7 +167,7 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockP
         onPointerLeave={() => {
           // the ghost dies with the pointer (the game's ghost too)
           lastHover.current = null;
-          if (mode === 'blocks') onBlockHover?.(-1e5, -1e5, false);
+          if (hoverOn) onBlockHover?.(-1e5, -1e5, false);
         }}
         onPointerUp={e => {
           if (Math.abs(e.clientX - down.current.x) < 4 && Math.abs(e.clientY - down.current.y) < 4)

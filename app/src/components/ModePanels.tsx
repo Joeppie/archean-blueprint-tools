@@ -7,7 +7,8 @@ import type { Engine } from '../engine/scene';
 import { FLOWS, type FlowKey } from '../engine/aero';
 import type { EditCtx } from '../engine/edit';
 import { docArrayInsert, docFromValue, docSetNumber, docArrayRemoveAt } from '../engine/doc';
-import { blockFromCell, blockInfo, mirroredBlock, rotateType, setBlockField, type PlaceSpec } from '../engine/blocks';
+import { blockCells, blockFromCell, blockInfo, blockMirrorTwin, flippedBlock, mirroredBlock,
+  rotateType, rotatedBlock, setBlockField, setBlockGeom, snapBlockType, type PlaceSpec } from '../engine/blocks';
 import { shapeName } from '../engine/blockshapes';
 import { autoWire, portCensus, connectedPorts, unconnectedPorts, WIRE_KINDS } from '../engine/wireops';
 import { triCentroid } from '../engine/tris';
@@ -24,87 +25,212 @@ export const brushSpec = (b: Brush): Pick<PlaceSpec, 'size' | 'type' | 'slot'> =
 export function BlockPanel(p: {
   engine: Engine | null; ctx: EditCtx | null; bp: Blueprint;
   blockSel: number; brush: Brush;
+  /** PLACE docks blocks with the brush; EDIT edits the selected block */
+  tab: 'place' | 'edit';
+  /** ⇄ respect the active mirror plane: shape edits + deletes go to the
+   *  block's SIMILAR TWIN (blockMirrorTwin) as well */
+  mirror: boolean;
   onBrush: (b: Brush) => void;
   onSelectBlock: (bi: number) => void;
   onApplied: () => void;                 // schedule reload + dirty
 }) {
+  const [snapMsg, setSnapMsg] = useState('');
   const info = p.blockSel >= 0 ? blockInfo(p.bp, p.blockSel) : null;
+  // SIMILAR BLOCKS ⇄ (identified always; edits only propagate when mirror is
+  // on): the block on the mirrored footprint with the same extents and a
+  // compatible (identical-or-mirrored) shape — the block twin index.
+  const twin = info ? blockMirrorTwin(p.bp, p.blockSel) : -1;
   const TYPES: [number, string][] = [
     [0, 'Cube'], [1, 'Ramp A'], [5, 'Ramp B'], [9, 'Ramp C'], [13, 'Corner'], [21, 'Pyramid'],
     [45, 'Inv corner'], [4, 'Thin rod'],
   ];
+  /** mirror the live bp block's geometry into the doc (pos/frame/size/type —
+   *  the v1.4 fix: the old single-key write aimed at a literal "cx", which
+   *  the doc never had, so cell edits lived only in bp and vanished on save) */
+  const writeBlock = (bi: number) => {
+    if (!p.ctx) return;
+    const b = p.ctx.bp.data.blocks[bi];
+    if (!b) return;
+    const d = p.ctx.doc, path = ['data', 'blocks', bi];
+    for (const k of ['pos_x', 'pos_y', 'pos_z', 'frame_x', 'frame_y', 'frame_z',
+      'size_x', 'size_y', 'size_z', 'type'] as const)
+      docSetNumber(d, [...path, k], (b as unknown as Record<string, number>)[k]);
+    for (let i = 0; i < 7; i++) docSetNumber(d, [...path, 'colors', i], b.colors?.[i] ?? 0);
+  };
   const apply = (k: Parameters<typeof setBlockField>[2], v: number) => {
     if (!info || !p.ctx) return;
     setBlockField(p.ctx.bp, p.blockSel, k, v);
-    const d = p.ctx.doc; const path = ['data', 'blocks', p.blockSel];
-    if (k === 'slot') for (let i = 0; i < 7; i++) docSetNumber(d, [...path, 'colors', i], Math.round(v));
-    else docSetNumber(d, [...path, k], Math.round(v));
+    if (k === 'slot') {
+      const d = p.ctx.doc, path = ['data', 'blocks', p.blockSel];
+      for (let i = 0; i < 7; i++) docSetNumber(d, [...path, 'colors', i], Math.round(v));
+    } else if (k === 'cx' || k === 'cy' || k === 'cz') {
+      const ax = k[1];
+      const b = p.ctx.bp.data.blocks[p.blockSel]!;
+      docSetNumber(p.ctx.doc, ['data', 'blocks', p.blockSel, `pos_${ax}`], b[`pos_${ax}` as 'pos_x']);
+      docSetNumber(p.ctx.doc, ['data', 'blocks', p.blockSel, `frame_${ax}`], b[`frame_${ax}` as 'frame_x'] ?? 0);
+    } else docSetNumber(p.ctx.doc, ['data', 'blocks', p.blockSel, k], Math.round(v));
+    p.onApplied();
+  };
+  /** Run one in-place shape edit on the selected block AND (⇄ on) its
+   *  similar twin. fn mutates bp and writes the doc; returns changed. */
+  const editBlocks = (fn: (bi: number) => boolean) => {
+    if (!p.ctx || p.blockSel < 0) return;
+    const tw = p.mirror ? blockMirrorTwin(p.bp, p.blockSel) : -1;
+    const results = [fn(p.blockSel)];
+    if (tw >= 0) results.push(fn(tw));
+    if (results.some(Boolean)) p.onApplied();
+  };
+  const rotateInPlace = (axis: 'x' | 'y' | 'z') => editBlocks(bi => {
+    const b = p.ctx!.bp.data.blocks[bi];
+    if (!b) return false;
+    const nb = rotatedBlock(b, axis, false);
+    const c = blockCells(nb);
+    setBlockGeom(b, [c.x, c.y, c.z], [nb.size_x, nb.size_y, nb.size_z], nb.type);
+    writeBlock(bi);
+    return true;
+  });
+  const flipInPlace = () => editBlocks(bi => {
+    const b = p.ctx!.bp.data.blocks[bi];
+    if (!b) return false;
+    const t = flippedBlock(b).type;
+    if (t === b.type) return false;
+    b.type = t; writeBlock(bi);
+    return true;
+  });
+  const cycleShape = () => editBlocks(bi => {
+    const b = p.ctx!.bp.data.blocks[bi];
+    if (!b) return false;
+    b.type = rotateType(b.type); writeBlock(bi);
+    return true;
+  });
+  /** ✧ snap: match the neighbours' geometry. Both self and twin snap from
+   *  their OWN neighbourhood (computed before either changes), so the pair
+   *  stays mirror-consistent. */
+  const snap = () => {
+    if (!p.ctx || p.blockSel < 0) return;
+    const tw = p.mirror ? blockMirrorTwin(p.bp, p.blockSel) : -1;
+    const rs = snapBlockType(p.bp, p.blockSel);
+    const rt = tw >= 0 ? snapBlockType(p.bp, tw) : null;
+    if (!rs) { setSnapMsg('no neighbouring blocks to match'); return; }
+    const parts: string[] = [];
+    if (rs.type !== info?.type) parts.push(`Block[${p.blockSel}] → ${shapeName(rs.type)} ${rs.type}`);
+    if (rt && tw >= 0 && rt.type !== p.bp.data.blocks[tw]?.type) parts.push(`twin → ${shapeName(rt.type)} ${rt.type}`);
+    if (!parts.length) {
+      setSnapMsg(`already flush with ${rs.neighbours} neighbour${rs.neighbours === 1 ? '' : 's'}`);
+      return;
+    }
+    editBlocks(bi => {
+      const r = bi === p.blockSel ? rs : rt;
+      const b = p.ctx!.bp.data.blocks[bi];
+      if (!b || !r || r.type === b.type) return false;
+      b.type = r.type; writeBlock(bi);
+      return true;
+    });
+    setSnapMsg(`${rs.converged ? 'converged on' : 'consensus of'} ${rs.neighbours} neighbour${rs.neighbours === 1 ? '' : 's'}: ${parts.join(', ')}`);
+  };
+  const deleteSel = () => {
+    if (!p.ctx) return;
+    const tw = p.mirror ? blockMirrorTwin(p.bp, p.blockSel) : -1;
+    const idx = [p.blockSel, ...(tw >= 0 ? [tw] : [])].sort((a, b) => b - a);
+    for (const i of idx) {
+      p.ctx.bp.data.blocks.splice(i, 1);
+      docArrayRemoveAt(p.ctx.doc, ['data', 'blocks'], i);
+    }
+    p.onSelectBlock(-1);
     p.onApplied();
   };
   return (
     <>
-      <Sec title="Blocks — brush" testid="block-brush">
-        <div className="flex flex-wrap gap-1 pb-1">
-          {TYPES.map(([t, label]) => (
-            <button key={t} data-testid={`btype-${t}`} onClick={() => p.onBrush({ ...p.brush, type: t })}
-              className={`ksp-btn px-1.5 py-[2px] text-[10px] ${p.brush.type === t ? 'on' : ''}`}>
-              {label}
-            </button>
-          ))}
-          <button data-testid="btype-rot" title="⟲ rotate the shape's orientation (the game's scroll wheel)"
-            onClick={() => p.onBrush({ ...p.brush, type: rotateType(p.brush.type) })}
-            className="ksp-btn px-1.5 py-[2px] text-[10px]">
-            ⟲ {shapeName(p.brush.type)} {p.brush.type === 0 ? '' : p.brush.type}
-          </button>
-        </div>
-        <div className="flex gap-2">
-          <Num label="sx" value={p.brush.sx} min={0} max={8} onCommit={v => p.onBrush({ ...p.brush, sx: v })} />
-          <Num label="sy" value={p.brush.sy} min={0} max={8} onCommit={v => p.onBrush({ ...p.brush, sy: v })} />
-          <Num label="sz" value={p.brush.sz} min={0} max={8} onCommit={v => p.onBrush({ ...p.brush, sz: v })} />
-        </div>
-        <Num label="slot" value={p.brush.slot} min={0} max={255} onCommit={v => p.onBrush({ ...p.brush, slot: v })} />
-        <div className="pt-1 text-[10px] leading-snug text-ink-dim">
-          Hover a block, part or hull triangle to preview · click to place ·
-          <b> Shift</b> over a block copies it / logically continues its shape
-          (the game's rule) · ⇄ mirrors the twin · Delete removes the selected block.
-        </div>
-      </Sec>
-      <Sec title={info ? `Block[${p.blockSel}]` : 'Blocks — nothing selected'} testid="block-edit">
-        {!info && <div className="text-[11px] text-ink-dim">Click an existing block to edit it.</div>}
-        {info && (
-          <>
-            <div className="flex gap-2">
-              <Num label="cx" value={info.cell[0]} min={-2048} max={2048} onCommit={v => apply('cx', v)} />
-              <Num label="cy" value={info.cell[1]} min={-2048} max={2048} onCommit={v => apply('cy', v)} />
-              <Num label="cz" value={info.cell[2]} min={-2048} max={2048} onCommit={v => apply('cz', v)} />
-            </div>
-            <div className="flex gap-2">
-              <Num label="size x" value={info.size[0]} min={0} max={12} onCommit={v => apply('size_x', v)} />
-              <Num label="size y" value={info.size[1]} min={0} max={12} onCommit={v => apply('size_y', v)} />
-              <Num label="size z" value={info.size[2]} min={0} max={12} onCommit={v => apply('size_z', v)} />
-            </div>
-            <div className="flex gap-2">
-              <Num label="type" value={info.type} min={0} max={254} onCommit={v => apply('type', v)} />
-              <Num label="slot" value={info.slot} min={0} max={255} onCommit={v => apply('slot', v)} />
-            </div>
-            <div className="mt-1 flex gap-1">
-              <button data-testid="block-delete"
-                className="rounded bg-red-900/60 px-2 py-1 text-[11px] text-ink hover:bg-red-800"
-                onClick={() => {
-                  if (!p.ctx) return;
-                  p.ctx.bp.data.blocks.splice(p.blockSel, 1);
-                  docArrayRemoveAt(p.ctx.doc, ['data', 'blocks'], p.blockSel);
-                  p.onSelectBlock(-1);
-                  p.onApplied();
-                }}>
-                Delete block
+      {p.tab === 'place' && (
+        <Sec title="Blocks — brush" testid="block-brush">
+          <div className="flex flex-wrap gap-1 pb-1">
+            {TYPES.map(([t, label]) => (
+              <button key={t} data-testid={`btype-${t}`} onClick={() => p.onBrush({ ...p.brush, type: t })}
+                className={`ksp-btn px-1.5 py-[2px] text-[10px] ${p.brush.type === t ? 'on' : ''}`}>
+                {label}
               </button>
-              <button className="rounded bg-panel2 px-2 py-1 text-[11px] text-ink-dim hover:text-ink"
-                onClick={() => p.onSelectBlock(-1)}>Deselect</button>
-            </div>
-          </>
-        )}
-      </Sec>
+            ))}
+            <button data-testid="btype-rot" title="⟲ rotate the shape's orientation (the game's scroll wheel)"
+              onClick={() => p.onBrush({ ...p.brush, type: rotateType(p.brush.type) })}
+              className="ksp-btn px-1.5 py-[2px] text-[10px]">
+              ⟲ {shapeName(p.brush.type)} {p.brush.type === 0 ? '' : p.brush.type}
+            </button>
+          </div>
+          <div className="flex gap-2">
+            <Num label="sx" value={p.brush.sx} min={0} max={8} onCommit={v => p.onBrush({ ...p.brush, sx: v })} />
+            <Num label="sy" value={p.brush.sy} min={0} max={8} onCommit={v => p.onBrush({ ...p.brush, sy: v })} />
+            <Num label="sz" value={p.brush.sz} min={0} max={8} onCommit={v => p.onBrush({ ...p.brush, sz: v })} />
+          </div>
+          <Num label="slot" value={p.brush.slot} min={0} max={255} onCommit={v => p.onBrush({ ...p.brush, slot: v })} />
+          <div className="pt-1 text-[10px] leading-snug text-ink-dim">
+            Hover a block, part or hull triangle to preview · click to place ·
+            <b> Shift</b> over a block copies it / logically continues its shape
+            (the game's rule) · ⇄ mirrors the twin · clicking an existing
+            COMPONENT selects it (EDIT tab edits and deletes).
+          </div>
+        </Sec>
+      )}
+      {p.tab === 'edit' && (
+        <Sec title={info ? `Block[${p.blockSel}]` : 'Blocks — nothing selected'} testid="block-edit">
+          {!info && <div className="text-[11px] text-ink-dim">
+            Click an existing block to select and edit it — it gets a golden
+            highlight (its ⇄ similar twin a dim one).
+          </div>}
+          {info && (
+            <>
+              <div className="flex gap-2">
+                <Num label="cx" value={info.cell[0]} min={-2048} max={2048} onCommit={v => apply('cx', v)} />
+                <Num label="cy" value={info.cell[1]} min={-2048} max={2048} onCommit={v => apply('cy', v)} />
+                <Num label="cz" value={info.cell[2]} min={-2048} max={2048} onCommit={v => apply('cz', v)} />
+              </div>
+              <div className="flex gap-2">
+                <Num label="size x" value={info.size[0]} min={0} max={12} onCommit={v => apply('size_x', v)} />
+                <Num label="size y" value={info.size[1]} min={0} max={12} onCommit={v => apply('size_y', v)} />
+                <Num label="size z" value={info.size[2]} min={0} max={12} onCommit={v => apply('size_z', v)} />
+              </div>
+              <div className="flex gap-2">
+                <Num label="type" value={info.type} min={0} max={254} onCommit={v => apply('type', v)} />
+                <Num label="slot" value={info.slot} min={0} max={255} onCommit={v => apply('slot', v)} />
+              </div>
+              {/* in-place SHAPE tools (the interface components have): every
+                  op keeps the bbox centre; ⇄ on drives the similar twin too */}
+              <div className="mt-1.5 text-[10px] uppercase tracking-wide text-ink-dim">
+                Shape {shapeName(info.type)} {info.type} — in place
+              </div>
+              <div className="mt-1 flex flex-wrap gap-1">
+                <button data-testid="block-rot-x" title="rotate the shape 90° about the world X, in place"
+                  className="ksp-btn px-1.5 py-[2px] text-[10px]" onClick={() => rotateInPlace('x')}>⟲X</button>
+                <button data-testid="block-rot-y" title="rotate the shape 90° about the world Y, in place"
+                  className="ksp-btn px-1.5 py-[2px] text-[10px]" onClick={() => rotateInPlace('y')}>⟲Y</button>
+                <button data-testid="block-rot-z" title="rotate the shape 90° about the world Z, in place"
+                  className="ksp-btn px-1.5 py-[2px] text-[10px]" onClick={() => rotateInPlace('z')}>⟲Z</button>
+                <button data-testid="block-flip" title="⇄ mirror the shape across its own plane, in place (fixes a wrongly-faced block)"
+                  className="ksp-btn px-1.5 py-[2px] text-[10px]" onClick={flipInPlace}>⇄ flip</button>
+                <button data-testid="block-rot" title="⟲ cycle the orientation family (the game's scroll wheel)"
+                  className="ksp-btn px-1.5 py-[2px] text-[10px]" onClick={cycleShape}>⟲ cycle</button>
+                <button data-testid="block-snap" title="✧ snap: adopt the shape/geometry its neighbours agree on (converged, else consensus)"
+                  className="ksp-btn px-1.5 py-[2px] text-[10px]" onClick={snap}>✧ snap</button>
+              </div>
+              {snapMsg && <div data-testid="snap-msg" className="pt-1 text-[10px] text-ink-dim">{snapMsg}</div>}
+              <div data-testid="block-twin" className="pt-1 text-[10px]">
+                {twin >= 0
+                  ? <span className="text-gold">⇄ similar twin: Block[{twin}]{p.mirror ? ' (edits mirror to it)' : ' — ⇄ OFF: edits stay local'}</span>
+                  : <span className="text-ink-dim">no similar (mirrored) block</span>}
+              </div>
+              <div className="mt-1 flex gap-1">
+                <button data-testid="block-delete"
+                  className="rounded bg-red-900/60 px-2 py-1 text-[11px] text-ink hover:bg-red-800"
+                  onClick={deleteSel}>
+                  {p.mirror && twin >= 0 ? 'Delete block + twin' : 'Delete block'}
+                </button>
+                <button data-testid="block-deselect"
+                  className="rounded bg-panel2 px-2 py-1 text-[11px] text-ink-dim hover:text-ink"
+                  onClick={() => p.onSelectBlock(-1)}>Deselect</button>
+              </div>
+            </>
+          )}
+        </Sec>
+      )}
     </>
   );
 }

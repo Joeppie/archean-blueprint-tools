@@ -12,10 +12,10 @@ import Viewport from './components/Viewport';
 import Panel, { StaticInfo, ViewOpts, type EditApi } from './components/Panel';
 import TopBar, { type Mode } from './components/TopBar';
 import { BlockPanel, FlightPanel, TriPanel, WirePanel, WindPanel, brushSpec, placeBlock, type Brush } from './components/ModePanels';
-import { blockInfo, cellIndex, cellOverlap, complementBlock } from './engine/blocks';
+import { blockInfo, blockMirrorTwin, cellIndex, cellOverlap, complementBlock } from './engine/blocks';
 import { cornerOf, triAt, triangleFromCorners } from './engine/tris';
 import type { Blueprint } from './engine/format';
-import { docArrayInsert, docFromValue, docValue, parseDoc } from './engine/doc';
+import { docArrayInsert, docArrayRemoveAt, docFromValue, docValue, parseDoc } from './engine/doc';
 import { makeCtx, resetComponent, setDataField, setOrientation, setPos, setCompField,
   setCompColor, serializeSave, type EditCtx } from './engine/edit';
 import { makePipe } from './engine/wireops';
@@ -49,7 +49,10 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   const [rev, setRev] = useState(0);
   const [blockSel, setBlockSel] = useState(-1);
   const [brush, setBrush] = useState<Brush>({ type: 0, sx: 0, sy: 0, sz: 0, slot: 4 });
-  const [blockTool, setBlockTool] = useState<'place' | 'select'>('place');
+  // BLOCKS sub-tabs (v1.4): PLACE docks the brush; EDIT selects + edits
+  const [blockTool, setBlockTool] = useState<'place' | 'edit'>('place');
+  // components-view sub-tabs (v1.4): PLACE (catalog) | EDIT (lists/inspector)
+  const [compSub, setCompSub] = useState<'place' | 'edit'>('edit');
   const [blockSub, setBlockSub] = useState<'blocks' | 'tris'>('blocks');
   // ⇄ mirrored placement (blocks AND catalog parts): the twin lands at the
   // x-flipped cell/position about file x = 0 — the game editor's mirror tool
@@ -160,6 +163,21 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     e.setWindTunnel(mode === 'aero');
   }, [mode, gizmoOn, engine]);
 
+  /** Delete a selected component (v1.4): bp splice + doc mirror TOGETHER,
+   *  the per-component orig/applied save-sync tables shift with it, the
+   *  scene rebuilds on the debounce. CABLES referencing shifted indices are
+   *  left alone (the game editor prunes them on load; a stale pipe index is
+   *  data, not a crash). */
+  const deleteComp = useCallback((ctx: EditCtx, ci: number) => {
+    ctx.bp.data.components.splice(ci, 1);
+    docArrayRemoveAt(ctx.doc, ['data', 'components'], ci);
+    ctx.orig.splice(ci, 1);
+    ctx.applied.splice(ci, 1);
+    engineRef.current?.select(-1);
+    engineRef.current?.setCompGhost(null);
+    sceneChanged();
+  }, [sceneChanged]);
+
   const edits: EditApi = useMemo(() => ({
     compField: (ctx, ci, key, v) => { setCompField(ctx, ci, key, v); markDirty(); bumpRev(); },
     compColor: (ctx, ci, which, field, v) => {
@@ -177,7 +195,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       resetComponent(ctx, ci);
       setInspKey(k => k + 1); bumpRev();
     },
-  }), [bumpRev, markDirty, sceneChanged]);
+    deleteComp,
+  }), [bumpRev, markDirty, sceneChanged, deleteComp]);
 
   const save = useCallback((as?: string) => {
     const ctx = ctxRef.current;
@@ -212,7 +231,11 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         if (cur) toggleOpt(map[e.key]!, !cur[map[e.key]!]);
       }
       if (e.key === 'Escape') {
-        if (placing) { setPlacing(null); return; }   // KSP: drop the HELD part first
+        if (placing) {                              // KSP: drop the HELD part first
+          setPlacing(null);
+          engineRef.current?.setCompGhost(null);
+          return;
+        }
         engineRef.current?.select(-1); setBlockSel(-1);
       }
       // NOTE: deleting a block goes through the BlockPanel button ONLY —
@@ -234,6 +257,11 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     ghostRef.current = { x: clientX, y: clientY, shift };
     const e = engineRef.current, ctx = ctxRef.current;
     if (!e || !ctx) return;
+    if (mode === 'edit' && placing) {                     // HELD part: its ghost
+      const p = e.pickPlacePoint(clientX, clientY);
+      e.setCompGhost(p ? { type: placing, point: p } : null, mirrorPlace);
+      return;
+    }
     if (blockSub !== 'blocks' || blockTool !== 'place') { e.setPlaceGhost(null); return; }
     const r = e.pickCell(clientX, clientY);
     if (!r || r.kind === 'ground') { e.setPlaceGhost(null); return; }
@@ -242,7 +270,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       ? complementBlock(info, [cellIndex(r.point[0]), cellIndex(r.point[1]), cellIndex(r.point[2])], r.nrm)
       : { cell: r.cell, ...brushSpec(brush) };
     e.setPlaceGhost({ ...spec, valid: !cellOverlap(ctx.bp, spec.cell, spec.size), complement: !!info });
-  }, [blockSub, blockTool, brush]);
+  }, [mode, placing, mirrorPlace, blockSub, blockTool, brush]);
 
   // ghost lifecycle: re-aim when the brush changes (live preview of the
   // panel), drop it when the tool/mode leaves block-placement
@@ -252,6 +280,25 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     if (mode === 'blocks' && blockTool === 'place' && blockSub === 'blocks') computeGhost(h.x, h.y, h.shift);
     else { engineRef.current?.setPlaceGhost(null); ghostRef.current = null; }
   }, [mode, blockTool, blockSub, brush, computeGhost]);
+
+  // BLOCKS selection highlight (v1.4 "blocks don't yet highlight"): the
+  // picked block gets the golden overlay; with ⇄ on its SIMILAR TWIN rides
+  // along dimly (blockMirrorTwin — same plane as the component twins).
+  useEffect(() => {
+    const e = engineRef.current, ctx = ctxRef.current;
+    if (!e) return;
+    if (mode === 'blocks' && blockSel >= 0 && ctx)
+      e.setBlockHighlight(blockSel, mirrorPlace ? blockMirrorTwin(ctx.bp, blockSel) : -1);
+    else e.setBlockHighlight(-1);
+  }, [mode, blockSel, mirrorPlace, rev, engine]);
+
+  // the CATALOG ghost (v1.4): while a part is HELD in EDIT mode, hovering
+  // the viewport docks a translucent preview at the surface (⇄ adds the
+  // mirrored twin box) — placement now works like the blocks ghost.
+  useEffect(() => {
+    if (!engine) return;
+    if (!placing || mode !== 'edit') engine.setCompGhost(null);
+  }, [placing, mode, engine]);
 
   const onBlockPick = useCallback((clientX: number, clientY: number, shift: boolean) => {
     const e = engineRef.current, ctx = ctxRef.current;
@@ -278,7 +325,14 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     }
     const r = e.pickCell(clientX, clientY);
     if (!r) return;
-    if (blockTool === 'select') { setBlockSel(r.bi >= 0 ? r.bi : -1); return; }
+    // clicking an existing COMPONENT selects it in BOTH sub-tabs (user v1.4)
+    // — the inspector (with Delete) takes over the context window.
+    if (r.kind === 'comp' && r.ci >= 0) { setBlockSel(-1); e.select(r.ci); return; }
+    if (blockTool === 'edit') {
+      if (r.bi >= 0) e.select(-1);                     // a block took the pick
+      setBlockSel(r.bi >= 0 ? r.bi : -1);
+      return;
+    }
     // PLACE — any surface DOCKS a block (the game: aim at a block or beam):
     // a block face, a hull-triangle prism, a component or subgrid content.
     // The green ground plane stays unfurnishable.
@@ -368,35 +422,42 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       onDeleted={sceneChanged} onClearSel={() => setTriSel(-1)} />
   );
   const modePanel = mode === 'blocks' ? (
-    <div className="overflow-y-auto">
-      <div className="flex gap-1 px-3 pt-2">
-        {(['blocks', 'tris'] as const).map(t => (
-          <button key={t} data-testid={`blocksub-${t}`} onClick={() => { setBlockSub(t); setTriDraft([]); }}
-            className={`ksp-btn px-2 py-[3px] text-[11px] ${blockSub === t ? 'on' : ''}`}>
-            {t === 'blocks' ? '▤ Blocks' : '▵ Triangles'}
-          </button>
-        ))}
-      </div>
-      <div className="flex gap-1 px-3 pt-1">
-        {(['place', 'select'] as const).map(t => (
-          <button key={t} data-testid={`blocktool-${t}`} onClick={() => setBlockTool(t)}
-            className={`ksp-btn px-2 py-[3px] text-[11px] ${blockTool === t ? 'on' : ''}`}>
-            {t === 'place' ? '✚ Place' : '▣ Select'}
-          </button>
-        ))}
-        {blockSub === 'blocks' && blockTool === 'place' && (
-          <button data-testid="block-mirror" title="⇄ also place the x-mirrored twin (blocks AND catalog parts)"
-            aria-pressed={mirrorPlace} onClick={() => setMirrorPlace(m => !m)}
-            className={`ksp-btn ml-auto px-2 py-[3px] text-[11px] ${mirrorPlace ? 'on' : ''}`}>
-            ⇄ {mirrorPlace ? 'twin ON' : 'twin off'}
-          </button>
+    // a component picked off the canvas takes the context window (inspector
+    // with Delete); the block workspace returns the moment the pick is gone
+    sel.ci >= 0 ? undefined : (
+      <div className="overflow-y-auto">
+        <div className="flex gap-1 px-3 pt-2">
+          {(['blocks', 'tris'] as const).map(t => (
+            <button key={t} data-testid={`blocksub-${t}`} onClick={() => { setBlockSub(t); setTriDraft([]); }}
+              className={`ksp-btn px-2 py-[3px] text-[11px] ${blockSub === t ? 'on' : ''}`}>
+              {t === 'blocks' ? '▤ Blocks' : '▵ Triangles'}
+            </button>
+          ))}
+        </div>
+        {/* blocks sub-tabs (v1.4): PLACE docks the brush · EDIT selects and
+            edits (highlight + rotate/flip/snap + delete, ⇄ twin-aware) */}
+        <div className="flex gap-1 px-3 pt-1">
+          {(['place', 'edit'] as const).map(t => (
+            <button key={t} data-testid={`blocktool-${t}`} onClick={() => setBlockTool(t)}
+              className={`ksp-btn px-2 py-[3px] text-[11px] ${blockTool === t ? 'on' : ''}`}>
+              {t === 'place' ? '✚ Place' : '✎ Edit'}
+            </button>
+          ))}
+          {blockSub === 'blocks' && (
+            <button data-testid="block-mirror" title="⇄ respect the mirror plane: place the x-mirrored twin AND propagate block edits to the similar twin"
+              aria-pressed={mirrorPlace} onClick={() => setMirrorPlace(m => !m)}
+              className={`ksp-btn ml-auto px-2 py-[3px] text-[11px] ${mirrorPlace ? 'on' : ''}`}>
+              ⇄ {mirrorPlace ? 'twin ON' : 'twin off'}
+            </button>
+          )}
+        </div>
+        {blockSub === 'tris' ? triPanel : (
+          <BlockPanel engine={engine} ctx={ctxRef.current} bp={bp!} blockSel={blockSel}
+            brush={brush} tab={blockTool} mirror={mirrorPlace}
+            onBrush={setBrush} onSelectBlock={setBlockSel} onApplied={sceneChanged} />
         )}
       </div>
-      {blockSub === 'tris' ? triPanel : (
-        <BlockPanel engine={engine} ctx={ctxRef.current} bp={bp!} blockSel={blockSel}
-          brush={brush} onBrush={setBrush} onSelectBlock={setBlockSel} onApplied={sceneChanged} />
-      )}
-    </div>
+    )
   ) : mode === 'flight' ? (
     <FlightPanel engine={engine} rev={rev} />
   ) : mode === 'aero' ? (
@@ -489,6 +550,11 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
                     manifest={manifest}
                     placingType={placing}
                     onPlaceType={(t) => { setPlacing(t); if (t && mode === 'view') setMode('edit'); }}
+                    compSub={mode === 'edit' ? compSub : undefined}
+                    onCompSub={mode === 'edit' ? setCompSub : undefined}
+                    mirrorPlace={mirrorPlace}
+                    onMirrorPlace={setMirrorPlace}
+                    statsOnly={mode === 'view'}
                   />
                 )}
               </div>

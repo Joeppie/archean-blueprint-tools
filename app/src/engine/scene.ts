@@ -46,7 +46,7 @@ import type { FilePalette } from './palette';
 import type { Blueprint, BlueprintComponent } from './format';
 import { CELL, isLegacyFile } from './format';
 import { getBlockEdges, getBlockFaces, getBlockPoints } from './blockshapes';
-import type { PlaceSpec } from './blocks';
+import { blockCells, type PlaceSpec } from './blocks';
 import {
   captureJrefs, masterJointState, subBlockBBox, subJointPose, subMasterEntries,
   type JRef, type SubBBox,
@@ -197,6 +197,16 @@ export class Engine {
    *  coords land at world; Editor re-aims it on every hover */
   private ghostGroup = new Group();
   private ghostSpec: (PlaceSpec & { valid: boolean; complement: boolean }) | null = null;
+  /** BLOCKS-edit selection highlight (v1.4): a golden overlay on the picked
+   *  block (+ its dim SIMILAR TWIN when ⇄ is on) — the block analogue of the
+   *  component outline. Own scene child at moff, like ghostGroup. */
+  private blockHlGroup = new Group();
+  private blockHlSpec: { bi: number; twin: number } | null = null;
+  /** CATALOG placement ghost (v1.4): a translucent collider box at the
+   *  hovered surface (+ the ⇄ mirrored twin box), the component analogue of
+   *  the block constructor ghost. Own scene child at moff. */
+  private compHlGroup = new Group();
+  private compHlSpec: { type: string; point: [number, number, number]; mirror: boolean } | null = null;
   private hullMeshes: Mesh[] = [];
   private wireLine: LineSegments | null = null;
   private occMeshes: Mesh[] = [];
@@ -325,6 +335,8 @@ export class Engine {
     this.scene.add(this.subGroup);
     this.scene.add(this.surgeGroup);
     this.scene.add(this.ghostGroup);
+    this.scene.add(this.blockHlGroup);
+    this.scene.add(this.compHlGroup);
     const loop = () => {
       this.controls?.update();                    // damping fires change→invalidate
       this.flushLiveEdits();                      // per-component geometry rebuilds (data sliders)
@@ -497,6 +509,8 @@ void main() {
       this.root.position.set(this.moff.x, this.moff.y, this.moff.z);
       this.subGroup.position.set(this.moff.x, this.moff.y, this.moff.z);
       this.ghostGroup.position.set(this.moff.x, this.moff.y, this.moff.z);
+      this.blockHlGroup.position.set(this.moff.x, this.moff.y, this.moff.z);
+      this.compHlGroup.position.set(this.moff.x, this.moff.y, this.moff.z);
     }
 
     this.batch = buildSolids(bp);
@@ -2408,7 +2422,7 @@ void main() {
    *  — the old +5.5 floor sat half a cell off and the retired −pz mirror
    *  flipped z placement across the fuselage (pre-v0.180 leftovers). */
   pickCell(clientX: number, clientY: number):
-    { bi: number; point: [number, number, number]; cell: [number, number, number];
+    { bi: number; ci: number; point: [number, number, number]; cell: [number, number, number];
       nrm: [number, number, number]; kind: 'block' | 'tri' | 'comp' | 'sub' | 'ground' } | null {
     const c = this.renderer?.domElement as HTMLCanvasElement | null;
     if (!c || !this.bp) return null;
@@ -2422,6 +2436,8 @@ void main() {
       while (o && !o.userData.kind) o = o.parent;
       const kind = o?.userData.kind as Kind | undefined;
       if (kind !== 'block' && kind !== 'ground' && kind !== 'comp' && kind !== 'sub') continue;
+      // the component behind a comp hit (blocks-mode click → selection)
+      const ci = kind === 'comp' ? (o!.userData.ci as number) : -1;
       // display anchoring off → RAW FILE metres (view == file frame, v0.180)
       const p: [number, number, number] =
         [h.point.x - this.moff.x, h.point.y - this.moff.y, h.point.z - this.moff.z];
@@ -2454,7 +2470,7 @@ void main() {
           if (d < bd) { bd = d; bi = i; }
         }
       }
-      return { bi, point: p, cell, nrm, kind: kind === 'block' && bi < 0 ? 'tri' : kind };
+      return { bi, ci, point: p, cell, nrm, kind: kind === 'block' && bi < 0 ? 'tri' : kind };
     }
     return null;
   }
@@ -2506,6 +2522,115 @@ void main() {
     this.invalidate();
   }
   get placeGhostState() { return this.ghostSpec; }
+
+  /** Build a translucent solid+wire overlay of a block shape at RAW-FILE
+   *  metres into a group (the highlight groups are positioned at moff). */
+  private addBlockOverlay(grp: Group, type: number, origin: [number, number, number],
+    size: [number, number, number], hex: number, opacity: number) {
+    const pts = getBlockPoints(type, origin, size);
+    const pos: number[] = [];
+    for (const v of pts) pos.push(v[0], v[1], v[2]);
+    const idx: number[] = [];
+    for (const f of getBlockFaces(type)) idx.push(...f);
+    const geo = new BufferGeometry();
+    geo.setAttribute('position', new BufferAttribute(new Float32Array(pos), 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    const solid = new Mesh(geo, new MeshBasicMaterial({
+      color: hex, transparent: true, opacity, depthTest: false, side: DoubleSide,
+    }));
+    solid.renderOrder = 29;
+    const ep: number[] = [];
+    for (const [a, b] of getBlockEdges(type)) ep.push(...pts[a]!, ...pts[b]!);
+    const eg = new BufferGeometry();
+    eg.setAttribute('position', new BufferAttribute(new Float32Array(ep), 3));
+    const wire = new LineSegments(eg, new LineBasicMaterial({
+      color: hex, transparent: true, opacity: Math.min(1, opacity + 0.5), depthTest: false,
+    }));
+    wire.renderOrder = 30;
+    grp.add(solid, wire);
+  }
+
+  /** BLOCKS-edit selection highlight (v1.4): the selected block gets the
+   *  golden constructor overlay, its ⇄ SIMILAR TWIN a dim one (the block
+   *  analogue of twin co-selection). -1 clears. Survives reloads visually
+   *  (raw geometry, no per-load objects) — the Editor re-issues it per edit. */
+  setBlockHighlight(bi: number, twin = -1) {
+    if ((this.blockHlSpec?.bi ?? -1) === bi && (this.blockHlSpec?.twin ?? -1) === twin) return;
+    this.blockHlSpec = bi >= 0 ? { bi, twin } : null;
+    for (const o of this.blockHlGroup.children) {
+      (o as Mesh).geometry?.dispose();
+      ((o as Mesh).material as MeshBasicMaterial)?.dispose?.();
+    }
+    this.blockHlGroup.clear();
+    if (bi >= 0 && this.bp) {
+      const add = (idx: number, opacity: number) => {
+        const b = this.bp!.data.blocks[idx];
+        if (!b || b.type === 255 || b.type > 52) return;
+        const c = blockCells(b);
+        this.addBlockOverlay(this.blockHlGroup, b.type,
+          [(c.x - 6) * CELL, (c.y - 6) * CELL, (c.z - 6) * CELL],
+          [(b.size_x + 1) * CELL, (b.size_y + 1) * CELL, (b.size_z + 1) * CELL],
+          0xffc94d, opacity);
+      };
+      add(bi, 0.34);
+      if (twin >= 0) add(twin, 0.16);
+    }
+    this.invalidate();
+  }
+  get blockHighlightState() { return this.blockHlSpec; }
+
+  /** CATALOG placement ghost (v1.4): a translucent collider box of the held
+   *  part at the hovered surface — the component analogue of the constructor
+   *  ghost ("place new components … should work like [blocks]"). With ⇄ the
+   *  mirrored twin box previews at [−x, y, z] (the exact twin geometry). */
+  setCompGhost(g: { type: string; point: [number, number, number] } | null, mirror = false) {
+    const p0 = this.compHlSpec;
+    if (!g && !p0) return;
+    if (g && p0 && p0.type === g.type && p0.mirror === mirror &&
+      p0.point.every((v, i) => Math.abs(v - g.point[i]!) < 1e-9)) return;
+    this.compHlSpec = g ? { ...g, mirror } : null;
+    for (const o of this.compHlGroup.children) {
+      (o as Mesh).geometry?.dispose();
+      ((o as Mesh).material as MeshBasicMaterial)?.dispose?.();
+    }
+    this.compHlGroup.clear();
+    if (!g) { this.invalidate(); return; }
+    // collider bbox of the type (union of its colliders), else a small cube
+    let lo = [-0.2, -0.2, -0.2], hi = [0.2, 0.2, 0.2];
+    const cols = this.atlasRef?.manifest?.[g.type]?.colliders ?? [];
+    if (cols.length) {
+      lo = [...cols[0]!.min]; hi = [...cols[0]!.max];
+      for (const c of cols) for (let a = 0; a < 3; a++) { lo[a] = Math.min(lo[a]!, c.min[a]!); hi[a] = Math.max(hi[a]!, c.max[a]!); }
+    }
+    const size: [number, number, number] = [Math.max(0.1, hi[0]! - lo[0]!), Math.max(0.1, hi[1]! - lo[1]!), Math.max(0.1, hi[2]! - lo[2]!)];
+    const ctr: [number, number, number] = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2];
+    const mat = new MeshBasicMaterial({ color: 0xffc94d, transparent: true, opacity: 0.35, depthTest: false, side: DoubleSide });
+    const wmat = new LineBasicMaterial({ color: 0xffc94d, transparent: true, opacity: 0.9, depthTest: false });
+    const put = (p: [number, number, number], mx = 1) => {
+      const geo = new BoxGeometry(size[0], size[1], size[2]);
+      const m = new Mesh(geo, mat);
+      m.position.set(mx * (p[0] + ctr[0]), p[1] + ctr[1], p[2] + ctr[2]);
+      m.renderOrder = 29;
+      const eg = new BufferGeometry();
+      const c8: number[] = [];
+      for (const sx of [-1, 1]) for (const sy of [-1, 1]) for (const sz of [-1, 1])
+        c8.push(mx * (p[0] + ctr[0] + sx * size[0] / 2), p[1] + ctr[1] + sy * size[1] / 2, p[2] + ctr[2] + sz * size[2] / 2);
+      const EI = [0, 1, 2, 3, 4, 5, 6, 7,   // x-runs
+        0, 2, 1, 3, 4, 6, 5, 7,             // y-runs
+        0, 4, 1, 5, 2, 6, 3, 7];            // z-runs
+      const ep: number[] = [];
+      for (let e = 0; e < EI.length; e += 2) { ep.push(...c8.slice(EI[e]! * 3, EI[e]! * 3 + 3), ...c8.slice(EI[e + 1]! * 3, EI[e + 1]! * 3 + 3)); }
+      eg.setAttribute('position', new BufferAttribute(new Float32Array(ep), 3));
+      const wire = new LineSegments(eg, wmat);
+      wire.renderOrder = 30;
+      this.compHlGroup.add(m, wire);
+    };
+    put(g.point);
+    if (mirror) put(g.point, -1);
+    this.invalidate();
+  }
+  get compGhostState() { return this.compHlSpec; }
   get manifest() { return this.atlasRef?.manifest ?? null; }
 
   /** PLACE mode (KSP part pickup): the surface point under the cursor in
@@ -2531,7 +2656,7 @@ void main() {
       const px = h.point.x + n.x * 0.01 - this.moff.x;
       const py = h.point.y + n.y * 0.01 - this.moff.y;
       const pz = h.point.z + n.z * 0.01 - this.moff.z;
-      return [px, py, -pz];
+      return [px, py, pz];      // v1.4: RAW file z — the old −pz was a retired
     }
     return null;
   }

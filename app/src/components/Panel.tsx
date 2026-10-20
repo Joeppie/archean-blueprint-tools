@@ -22,6 +22,8 @@ export interface EditApi {
   quatDelta(ctx: EditCtx, ci: number, p: number, y: number, r: number): void;
   dataField(ctx: EditCtx, compPath: (string | number)[], key: string, v: number | string | boolean): void;
   reset(ctx: EditCtx, ci: number): void;
+  /** remove the component from bp + doc (index-shifts everything after it) */
+  deleteComp(ctx: EditCtx, ci: number): void;
 }
 
 interface Props {
@@ -57,6 +59,15 @@ interface Props {
   /** type currently held for placement (KSP "holding a part") */
   placingType: string | null;
   onPlaceType: (t: string | null) => void;
+  /** EDIT-mode sub-tabs: PLACE (catalog + mirror) / EDIT (lists + inspector) */
+  compSub?: 'place' | 'edit';
+  onCompSub?: (t: 'place' | 'edit') => void;
+  /** ⇄ shared mirrored-placement/edit switch (blocks AND catalog parts) */
+  mirrorPlace?: boolean;
+  onMirrorPlace?: (v: boolean) => void;
+  /** VIEW mode: the side menu shows ONLY the overall vessel stats, in
+   *  collapsable sections (user v1.4) — no parts list, no inspector */
+  statsOnly?: boolean;
 }
 
 // ------------------------------------------------------------- mass & CoM
@@ -101,8 +112,92 @@ export function StaticInfo(p: { engine: Engine | null; rev: number; onClose: () 
   );
 }
 
-function MetaNum(p: { testid: string; label: string; value: number; min: number; max: number;
-  disabled?: boolean; onCommit: (v: number) => void }) {
+// ------------------------------------------------------------ vessel stats
+/** VIEW mode's side menu (v1.4 user rule): "the view tab should only show
+ *  overall vessel stats in the collapsable side menu" — no parts list, no
+ *  inspector. Collapsible sections (▾/▸ like the list groups): the mass &
+ *  CoM readout, the hull/parts census, and the heaviest part classes. */
+export function VesselStats(p: { engine: Engine | null; bp: Blueprint; rev: number }) {
+  const [open, setOpen] = useState<Set<string>>(() => new Set(['mass', 'census']));
+  const toggle = (k: string) => setOpen(s => {
+    const n = new Set(s);
+    if (n.has(k)) n.delete(k); else n.add(k);
+    return n;
+  });
+  const mm = p.engine?.massReport();
+  const fmt = (n: number, d = 2) => n.toLocaleString('en', { maximumFractionDigits: d });
+  const comps = p.bp.data.components;
+  const parts = comps.filter(c => c.type !== 'Build');
+  const nBuild = comps.length - parts.length;
+  const blocks = p.bp.data.blocks;
+  const nBl = blocks.filter(b => (b.type ?? 0) !== 255).length;
+  const secs: { id: string; title: string; body: React.ReactNode }[] = [];
+  secs.push({
+    id: 'mass', title: `Mass & CoM${mm ? ` · ${fmt(mm.total, 0)} kg` : ''}`,
+    body: mm && (
+      <div data-testid="vessel-mass" className="space-y-[2px] text-[11px]">
+        <div>declared <b className="float-right tabular-nums">{fmt(mm.declared, 0)} kg</b></div>
+        <div>computed <b className="float-right tabular-nums">{fmt(mm.total, 0)} kg</b></div>
+        <div className="text-ink-dim">hull {fmt(mm.cells, 0)} cells × {fmt(mm.cellMass, 2)} kg ·
+          parts {fmt(mm.compSum, 0)} kg</div>
+        <div className="text-ink-dim">implied structural density ≈ {fmt(mm.density, 0)} kg/m³</div>
+        <div>CoM <span className="float-right tabular-nums">
+          ({fmt(mm.com[0])}, {fmt(mm.com[1])}, {fmt(mm.com[2])}) m</span></div>
+      </div>
+    ),
+  });
+  secs.push({
+    id: 'census', title: `Census · ${parts.length} parts · ${nBl} blocks`,
+    body: (
+      <div data-testid="vessel-census" className="space-y-[2px] text-[11px]">
+        <div>components <b className="float-right tabular-nums">{parts.length}</b></div>
+        <div>subgrids (Build) <b className="float-right tabular-nums">{nBuild}</b></div>
+        <div>blocks <b className="float-right tabular-nums">{nBl}</b>
+          <span className="text-ink-dim"> · occupancy {blocks.length - nBl}</span></div>
+        <div>hull triangles <b className="float-right tabular-nums">{p.bp.data.triangles?.length ?? 0}</b></div>
+        <div>cables (pipes) <b className="float-right tabular-nums">{p.bp.data.pipes?.length ?? 0}</b></div>
+      </div>
+    ),
+  });
+  const byType = new Map<string, { n: number; mass: number }>();
+  for (const c of parts) {
+    const e = byType.get(c.type) ?? { n: 0, mass: 0 };
+    e.n++; e.mass += p.engine?.manifest?.[c.type]?.mass ?? 0;
+    byType.set(c.type, e);
+  }
+  const top = [...byType.entries()].sort((a, b) => b[1].mass - a[1].mass || b[1].n - a[1].n).slice(0, 8);
+  secs.push({
+    id: 'types', title: `Heaviest part classes (${byType.size})`,
+    body: (
+      <div data-testid="vessel-types" className="space-y-[2px] text-[11px]">
+        {!top.length && <div className="text-ink-dim">no parts</div>}
+        {top.map(([t, e]) => (
+          <div key={t} className="flex justify-between gap-2">
+            <span className="truncate">{t} <span className="text-ink-dim">×{e.n}</span></span>
+            <span className="shrink-0 tabular-nums text-ink-dim">{e.mass ? `${fmt(e.mass, 1)} kg` : ''}</span>
+          </div>
+        ))}
+      </div>
+    ),
+  });
+  p.rev;                                        // re-render on every edit
+  return (
+    <div data-testid="vessel-stats" className="divide-y divide-white/10">
+      {secs.map(s => (
+        <div key={s.id}>
+          <button data-testid={`vsec-${s.id}`} onClick={() => toggle(s.id)}
+            className="flex w-full items-center gap-1.5 px-3 py-2 text-left">
+            <span className="w-3 text-[9px] text-ink-dim">{open.has(s.id) ? '▾' : '▸'}</span>
+            <span className="ksp-label min-w-0 flex-1 truncate text-[11px] font-semibold text-ink-dim">{s.title}</span>
+          </button>
+          {open.has(s.id) && <div className="px-3 pb-2">{s.body}</div>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MetaNum(p: { testid: string; label: string; value: number; min: number; max: number;  disabled?: boolean; onCommit: (v: number) => void }) {
   const [v, setV] = useState(String(p.value));
   useEffect(() => setV(String(p.value)), [p.value]);
   return (
@@ -250,8 +345,14 @@ const tileHue = (t: string) => {
 function CompList(p: { bp: Blueprint; rev: number; sel: Props['sel'];
   onSelect: Props['onSelect']; onSelectSub: Props['onSelectSub'];
   manifest: Props['manifest']; placingType: Props['placingType'];
-  onPlaceType: Props['onPlaceType'] }) {
-  const [tab, setTab] = useState(() => localStorage.getItem('archean-app-list-tab') || 'type');
+  onPlaceType: Props['onPlaceType'];
+  /** PLACE sub-tab: the catalog (hold a part, click the craft). EDIT: the
+   *  ship's own parts (by type / by subgrid) — v1.4 sub-tab split */
+  listMode: 'place' | 'edit' }) {
+  const [tab, setTab] = useState(() => {
+    const t = localStorage.getItem('archean-app-list-tab') || 'type';
+    return t === 'catalog' ? 'type' : t;      // the catalog moved to the PLACE sub-tab
+  });
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<Set<string>>(new Set());
   const listRef = useRef<HTMLDivElement>(null);
@@ -350,22 +451,31 @@ function CompList(p: { bp: Blueprint; rev: number; sel: Props['sel'];
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {/* KSP parts-list header: Categories | Subgrids | Catalog + search */}
-      <div className="flex items-center gap-[3px] px-3 pt-2">
-        {(['type', 'sub', 'catalog'] as const).map(t => (
-          <button key={t} data-testid={`ltab-${t}`} onClick={() => switchTab(t)}
-            title={t === 'type' ? 'parts grouped by type' : t === 'sub' ? 'parts grouped by subgrid (Build)'
-              : 'the game part catalogue — click a part, then click the craft to place it'}
-            className={`ksp-btn px-2 py-[3px] text-[10px] ${tab === t ? 'on' : ''}`}>
-            {t === 'type' ? 'Categories' : t === 'sub' ? 'Subgrids' : 'Catalog'}
-          </button>
-        ))}
-      </div>
+      {/* EDIT mode: parts grouped by type / by subgrid. PLACE mode IS the
+          catalog (v1.4 sub-tab split — the old Catalog list-tab moved into
+          the PLACE sub-tab beside EDIT) */}
+      {p.listMode === 'edit' && (
+        <div className="flex items-center gap-[3px] px-3 pt-2">
+          {(['type', 'sub'] as const).map(t => (
+            <button key={t} data-testid={`ltab-${t}`} onClick={() => switchTab(t)}
+              title={t === 'type' ? 'parts grouped by type' : 'parts grouped by subgrid (Build)'}
+              className={`ksp-btn px-2 py-[3px] text-[10px] ${tab === t ? 'on' : ''}`}>
+              {t === 'type' ? 'Categories' : 'Subgrids'}
+            </button>
+          ))}
+        </div>
+      )}
+      {p.listMode === 'place' && (
+        <div className="px-3 pt-2 text-[10px] text-ink-dim">
+          click a part to HOLD it, then click a surface on the craft ·
+          ⇄ also places the mirrored twin
+        </div>
+      )}
       <input value={q} data-testid="filter" placeholder="Search parts…"
         onChange={e => setQ(e.target.value)}
         className="mx-3 mt-1.5 rounded border border-white/15 bg-black/40 px-2 py-1 text-[12px] text-ink
                    placeholder:text-ink-dim/60 focus:border-accent/60 focus:outline-none" />
-      {tab === 'catalog' ? (
+      {p.listMode === 'place' ? (
         <div data-testid="catalog-list" className="min-h-0 flex-1 overflow-y-auto px-1 py-1">
           {!p.manifest && <div className="px-2 py-1 text-[11px] text-ink-dim">catalogue loading…</div>}
           {catRows.map(t => (
@@ -538,6 +648,14 @@ function Inspector(p: Props) {
           }}>
           ⟲ reset this component
         </button>
+        {/* v1.4: parts are DELETABLE from the inspector (the user: clicking
+            an existing component selects it AND allows deletion). bp splice
+            + doc mirror together; later indices shift everywhere at once. */}
+        <button data-testid="comp-delete"
+          className="ml-2 rounded bg-red-900/60 px-2 py-1 text-[11px] text-ink hover:bg-red-800"
+          onClick={() => { if (ctx) edits.deleteComp(ctx, ci); }}>
+          Delete component
+        </button>
       </Sec>}
     </div>
   );
@@ -677,6 +795,14 @@ function SubPanel(p: Props) {
 
 // --------------------------------------------------------------------- shell
 export default function Panel(p: Props) {
+  // VIEW mode (v1.4 user rule): ONLY the overall vessel stats, collapsable.
+  if (p.statsOnly)
+    return (
+      <div className="flex h-full w-full flex-col overflow-y-auto bg-panel text-ink" data-testid="panels">
+        <VesselStats engine={p.engine} bp={p.bp} rev={p.rev} />
+      </div>
+    );
+  const place = p.compSub === 'place';
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-panel text-ink" data-testid="panels">
       {/* KSP order: the PARTS list leads, the context window follows, the
@@ -685,9 +811,31 @@ export default function Panel(p: Props) {
           engine silently crushed the list to 8 px (rows rendered clipped,
           clicks intercepted) — caught by sym.spec at 1280×720. */}
       <div className="flex min-h-[160px] flex-[3] flex-col border-t border-white/10">
-        <h3 className="ksp-label px-3 pt-2 text-[11px] font-semibold text-ink-dim">Parts</h3>
+        {/* components-view sub-tabs (v1.4): PLACE (catalog + ⇄) | EDIT (the
+            ship's parts). Either way the context window below keeps the
+            selection's inspector — a clicked part stays selectable/deletable
+            while holding a catalog part. */}
+        {p.onCompSub && (
+          <div className="flex items-center gap-1 px-3 pt-2">
+            {(['place', 'edit'] as const).map(t => (
+              <button key={t} data-testid={`compsub-${t}`} onClick={() => p.onCompSub!(t)}
+                className={`ksp-btn px-2 py-[3px] text-[10px] ${p.compSub === t ? 'on' : ''}`}>
+                {t === 'place' ? '✚ Place' : '✎ Edit'}
+              </button>
+            ))}
+            {place && p.onMirrorPlace && (
+              <button data-testid="place-mirror" title="⇄ also place the x-mirrored twin"
+                aria-pressed={!!p.mirrorPlace} onClick={() => p.onMirrorPlace!(!p.mirrorPlace)}
+                className={`ksp-btn ml-auto px-2 py-[3px] text-[10px] ${p.mirrorPlace ? 'on' : ''}`}>
+                ⇄ {p.mirrorPlace ? 'twin ON' : 'twin off'}
+              </button>
+            )}
+          </div>
+        )}
+        <h3 className="ksp-label px-3 pt-2 text-[11px] font-semibold text-ink-dim">{place ? 'Catalog' : 'Parts'}</h3>
         <CompList bp={p.bp} rev={p.rev} sel={p.sel} onSelect={p.onSelect} onSelectSub={p.onSelectSub}
-          manifest={p.manifest} placingType={p.placingType} onPlaceType={p.onPlaceType} />
+          manifest={p.manifest} placingType={p.placingType} onPlaceType={p.onPlaceType}
+          listMode={place ? 'place' : 'edit'} />
       </div>
       <div className="min-h-0 flex-[3] border-t border-white/10 overflow-y-auto">
         {p.bottom !== undefined ? p.bottom ?? null : p.sel.sub >= 0

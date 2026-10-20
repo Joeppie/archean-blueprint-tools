@@ -263,15 +263,28 @@ test.describe('modes, new craft, file menu @ui', () => {
     await expect(page.getByTestId('save-btn')).toBeVisible();
   });
 
-  test('view mode is read-only, edit mode unlocks the inspector', async ({ page }) => {
+  test('view tab shows ONLY vessel stats; edit mode carries lists + inspector', async ({ page }) => {
     desktopOnly();
     await page.goto('/?craft=' + ISW);
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });   // lands in View
+    // v1.4 user rule: the view tab's side menu is ONLY the overall vessel
+    // stats, in collapsable sections — no parts list, no inspector.
+    await expect(page.getByTestId('vessel-stats')).toBeVisible();
+    await expect(page.getByTestId('vessel-mass')).toBeVisible();
+    await expect(page.getByTestId('filter')).toHaveCount(0);
+    await expect(page.getByTestId('compsub-place')).toHaveCount(0);
+    await page.getByTestId('vsec-census').click();                   // collapse…
+    await expect(page.getByTestId('vessel-census')).toHaveCount(0);
+    await page.getByTestId('vsec-census').click();                   // …and expand
+    await expect(page.getByTestId('vessel-census')).toBeVisible();
+    // edit mode brings the PLACE/EDIT sub-tabs and the editable inspector
+    await page.getByTestId('mode-edit').click();
+    await expect(page.getByTestId('compsub-place')).toBeVisible();
+    await expect(page.getByTestId('compsub-edit')).toBeVisible();
     await page.getByTestId('filter').fill('aileron');
     await page.locator('[data-idx]').first().click();
-    await expect(page.getByTestId('row-n-x')).toBeDisabled();
-    await page.getByTestId('mode-edit').click();
     await expect(page.getByTestId('row-n-x')).toBeEnabled();
+    await expect(page.getByTestId('comp-delete')).toBeVisible();     // selectable ⇒ deletable
   });
 
   test('blocks mode: click a deck face to place a block', async ({ page }) => {
@@ -312,6 +325,9 @@ test.describe('modes, new craft, file menu @ui', () => {
     const after = await page.evaluate(() =>
       (window as unknown as { __ARCHEAN__?: { stats: () => { blocks: number } } }).__ARCHEAN__!.stats().blocks);
     expect(after, 'a block was placed on the deck').toBe(before + 1);
+    // the brush + a selected block: the EDIT sub-tab shows the selected-block
+    // editor (v1.4 sub-tab split — placement auto-selects, EDIT edits)
+    await page.getByTestId('blocktool-edit').click();
     await expect(page.getByTestId('block-edit')).toContainText(/Block\[\d+\]/);
   });
 

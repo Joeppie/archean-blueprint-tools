@@ -51,12 +51,20 @@ test.describe('KSP modes & catalog placement @place', () => {
     const before = (await compsOf(page)).length;
 
     await setDrawer(page, true);
-    await page.getByTestId('ltab-catalog').click();
+    await page.getByTestId('compsub-place').click();       // v1.4: the catalog IS the PLACE tab
     await expect(page.getByTestId('catalog-list')).toBeVisible();
     await page.getByTestId('filter').fill('smallwheel');
     await page.getByTestId('catalog-item').first().click();
     await expect(page.getByTestId('place-hint')).toContainText('SmallWheel');
     await setDrawer(page, false);                    // the held part goes onto the craft
+
+    // v1.4: holding a part DOCKS A GHOST on the craft (placement works like
+    // the blocks constructor ghost — engine-side state, no pixels)
+    const hbox = (await page.getByTestId('canvas').boundingBox())!;
+    await page.mouse.move(hbox.x + hbox.width * 0.5, hbox.y + hbox.height * 0.6);
+    await expect.poll(() => page.evaluate(() =>
+      (window as unknown as { __ARCHEAN__?: { compGhost: () => { type: string } | null } }
+      ).__ARCHEAN__!.compGhost()?.type ?? null), { timeout: 3000 }).toBe('SmallWheel');
 
     const canvas = page.getByTestId('canvas');
     const box = (await canvas.boundingBox())!;
@@ -77,6 +85,12 @@ test.describe('KSP modes & catalog placement @place', () => {
     await setDrawer(page, true);
     await expect(page.getByTestId('inspector')).toContainText('SmallWheel[', { timeout: 8000 });
 
+    // v1.4: the selected part DELETES from the inspector (bp splice + doc
+    // mirror together; the scene rebuild drops it)
+    await page.getByTestId('comp-delete').click();
+    await expect.poll(() => compsOf(page).then(c => c.length), { timeout: 8000 }).toBe(before);
+    await expect(page.getByTestId('inspector')).toHaveCount(0);
+
     // Esc drops the held part; the next click then selects, it does NOT stack
     await page.getByTestId('catalog-item').first().click();
     await expect(page.getByTestId('place-hint')).toBeVisible();
@@ -85,6 +99,6 @@ test.describe('KSP modes & catalog placement @place', () => {
     await setDrawer(page, false);
     await canvas.click({ position: { x: box.width * 0.5, y: box.height * 0.62 } });
     await page.waitForTimeout(350);
-    expect((await compsOf(page)).length).toBe(before + 1);
+    expect((await compsOf(page)).length).toBe(before);
   });
 });
