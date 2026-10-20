@@ -153,10 +153,12 @@ export const TOOLS: ToolDef[] = [
           + 'triangle as a prism whose FRONT side takes colours[0] and shades '
           + 'by that normal — so this is a GAME-side property: our viewer '
           + 'draws the closed prism both-sided with one colour on all five '
-          + 'faces, so both directions render IDENTICALLY here. If the '
-          + 'converted hull reads wrong-way/lit-from-behind in the game, pick '
-          + 'the other direction. (The in-game BEVEL look is NOT the winding '
-          + '— it is the shading option below.)',
+          + 'faces, so both directions render IDENTICALLY here. The game’s '
+          + 'own triangle authoring winds OUT (its own in-game-made '
+          + 'triangles all face away from the solid), so OUT is the default; '
+          + 'if a converted hull ever reads wrong-way/lit-from-behind in the '
+          + 'game, pick the other direction. (The in-game BEVEL look is NOT '
+          + 'the winding — it is the shading option below.)',
       },
       {
         key: 'shade', label: 'shading', kind: 'select',
@@ -166,10 +168,13 @@ export const TOOLS: ToolDef[] = [
         ],
         hint: 'The game’s Triangle struct carries a per-triangle smooth flag '
           + '(0 = flat/geometric normals, the absent default; 1 = smooth '
-          + 'normals). The game’s own hull saves set smooth:1 on their skin '
-          + 'triangles, so the sheet shades continuously; a skin without it '
-          + 'flat-shades every prism face — the beveled look on converted '
-          + 'hulls. Default writes smooth:1 like the game does.',
+          + 'normals). The game’s own freshly authored triangles carry NO key '
+          + '— flat — and snap to flush neighbours as they are placed; in '
+          + 'game a smooth:1 skin gets its shared/flush vertices welded, '
+          + 'which bulges a faceted block hull (the in-game verdict on the '
+          + 'smooth:1 default, 2026-10-20: “deformed”). Default = flat, like '
+          + 'the game’s own authoring; smooth:1 stays for continuous-sheet '
+          + 'hulls (the game’s own hull saves use it that way).',
       },
       {
         key: 'note', label: '', kind: 'note',
@@ -180,7 +185,7 @@ export const TOOLS: ToolDef[] = [
           + 'whole conversion back afterwards.',
       },
     ],
-    initial: { wind: 'inward', shade: 'smooth' },
+    initial: { wind: 'outward', shade: 'flat' },
     preview: (f, bp) => {
       const r = hullifyPreview(bp, {
         wind: f['wind'] === 'outward' ? 'outward' : 'inward',

@@ -6,7 +6,7 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 import { emitDoc, parseDoc } from '../doc';
-import { makeCtx, resetComponent, serializeSave, setDataField, setPos } from '../edit';
+import { makeCtx, pruneCompRefs, resetComponent, serializeSave, setDataField, setPos } from '../edit';
 import type { Blueprint } from '../format';
 import { corpusDir } from '../../../tools/vite-corpus.ts';
 
@@ -126,5 +126,81 @@ describe.skipIf(!haveCorpus)('corpus', () => {
     const mirror = (after.data.blocks as { type: number; pos_x: number }[])
       .find(b => b.type === 255 && key(b as never) === key({ ...occ0, pos_x: occ0x + 1 } as never));
     expect(mirror, 'a type-255 block now sits one cell +x of its twin occ').toBeTruthy();
+  });
+});
+
+// THE JIMMY PINS (v1.5.12): pipes/composite_builds reference FLATTENED
+// component indices (nested Build content numbered BEFORE its Build). A
+// component delete that only splices data.components re-points every later
+// cable and subgrid join at its neighbour — the game then re-saves the
+// mangled references instead of pruning them, so a computer's power cable
+// ends up "connected to an aileron" while the cable sits elsewhere.
+const WIRE_SRC = '{"data":{"components":['
+  + '{"type":"RTG","position":{"x":0.0,"y":0.0,"z":0.0},"orientation":{"w":1.0,"x":0.0,"y":0.0,"z":0.0}}'
+  + ',{"type":"Dashboard","position":{"x":1.0,"y":0.0,"z":0.0},"orientation":{"w":1.0,"x":0.0,"y":0.0,"z":0.0}}'
+  + ',{"type":"Build","position":{"x":2.0,"y":0.0,"z":0.0},"orientation":{"w":1.0,"x":0.0,"y":0.0,"z":0.0},"data":{"components":['
+  + '{"type":"Dashboard","position":{"x":2.0,"y":1.0,"z":0.0},"orientation":{"w":1.0,"x":0.0,"y":0.0,"z":0.0}}'
+  + ',{"type":"Lamp","position":{"x":2.0,"y":2.0,"z":0.0},"orientation":{"w":1.0,"x":0.0,"y":0.0,"z":0.0}}]}}'
+  + ',{"type":"Aileron","position":{"x":3.0,"y":0.0,"z":0.0},"orientation":{"w":1.0,"x":0.0,"y":0.0,"z":0.0}}'
+  + '],"pipes":['
+  + '{"type":"lowvoltage","a_component":0,"a_port":"lv","b_component":5,"b_port":"lv"}'
+  + ',{"type":"data","a_component":1,"a_port":"d","b_component":2,"b_port":"d"}'
+  + '],"composite_builds":[{"component":0,"slaveBuildId":4}]}}';
+// flat order: RTG=0 Dash=1 nestedDash=2 nestedLamp=3 Build=4 Aileron=5
+
+type Pipe = { a_component: number; b_component: number };
+const wireCtx = () => {
+  const doc = parseDoc(WIRE_SRC);
+  return makeCtx(doc, JSON.parse(emitDoc(doc)) as Blueprint);
+};
+const cbs = (bp: Blueprint) =>
+  (bp.data as unknown as { composite_builds?: { component: number; slaveBuildId: number }[] }).composite_builds;
+
+describe('pruneCompRefs — flattened references follow a delete (Jimmy)', () => {
+  test('deleting a top-level comp (1): its cable is pruned, LATER refs renumber in bp AND doc', () => {
+    const ctx = wireCtx();
+    pruneCompRefs(ctx, new Set([1]));
+    const pipes = ctx.bp.data.pipes as unknown as Pipe[];
+    expect(pipes.length).toBe(1);
+    expect(pipes[0]).toMatchObject({ a_component: 0, b_component: 4 });   // Aileron 5 ▸ 4
+    expect(cbs(ctx.bp)![0]).toMatchObject({ component: 0, slaveBuildId: 3 });
+    const out = emitDoc(ctx.doc);
+    expect(out).toContain('"b_component":4');
+    expect(out).toContain('"slaveBuildId":3');
+    expect(out).not.toContain('"b_component":5');
+    // the saved file agrees with the live bp
+    const saved = JSON.parse(out) as Blueprint;
+    const sp = saved.data.pipes as unknown as Pipe[];
+    expect(sp.length).toBe(1);
+    expect(sp[0]).toMatchObject({ a_component: 0, b_component: 4 });
+  });
+
+  test('deleting a Build removes its WHOLE nested subtree: nested-endpoint cables + the join drop', () => {
+    const ctx = wireCtx();
+    pruneCompRefs(ctx, new Set([2]));                       // flat 2,3,4 die
+    const pipes = ctx.bp.data.pipes as unknown as Pipe[];
+    expect(pipes.length).toBe(1);                           // (1,2) died with nestedDash
+    expect(pipes[0]).toMatchObject({ a_component: 0, b_component: 2 });  // Aileron 5 ▸ 2
+    expect(cbs(ctx.bp)!.length).toBe(0);                    // slaveBuildId 4 was dead
+    expect(emitDoc(ctx.doc)).not.toContain('slaveBuildId');
+  });
+
+  test('deleting the LAST component renumbers nothing and leaves other cables byte-verbatim', () => {
+    const ctx = wireCtx();
+    pruneCompRefs(ctx, new Set([3]));                       // Aileron (flat 5)
+    const pipes = ctx.bp.data.pipes as unknown as Pipe[];
+    expect(pipes.length).toBe(1);
+    expect(pipes[0]).toMatchObject({ a_component: 1, b_component: 2 });  // untouched
+    expect(cbs(ctx.bp)![0]).toMatchObject({ component: 0, slaveBuildId: 4 });
+  });
+
+  test('undo-safety: the doc is the single text the history stacks — refs ride back exactly', () => {
+    const ctx = wireCtx();
+    const before = emitDoc(ctx.doc);
+    pruneCompRefs(ctx, new Set([1]));
+    expect(emitDoc(ctx.doc)).not.toBe(before);
+    // a snapshot restore (the Editor's applyHistory) re-parses the BEFORE
+    // text — the untouched source still round-trips byte-identically
+    expect(emitDoc(parseDoc(before))).toBe(before);
   });
 });

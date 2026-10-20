@@ -24,7 +24,7 @@ import { docArrayInsert, docArrayRemoveAt, docFromValue, docValue, emitDoc, pars
 import { allocateSlot, paletteSlotNode, type Rgb255 } from './engine/tools';
 import { setPaletteSlot } from './engine/edit';
 import { makeCtx, openFunnel, resetComponent, setDataField, setOrientation, setPos, setCompField,
-  setCompColor, serializeSave, writeBlockDoc, type EditCtx } from './engine/edit';
+  pruneCompRefs, setCompColor, serializeSave, writeBlockDoc, type EditCtx } from './engine/edit';
 import { makePipe } from './engine/wireops';
 import { normalizeDoc } from './engine/normalize';
 import { qAxisAngle } from './engine/compparts';
@@ -297,13 +297,19 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
 
   /** Delete a selected component (v1.4): bp splice + doc mirror TOGETHER,
    *  the per-component orig/applied save-sync tables shift with it, the
-   *  scene rebuilds on the debounce. CABLES referencing shifted indices are
-   *  left alone (the game editor prunes them on load; a stale pipe index is
-   *  data, not a crash). v1.8.0 UNIFORM MIRROR RULE: whatever the selection
-   *  does, its twin pair does — deleting a part deletes its twins too. */
+   *  scene rebuilds on the debounce. v1.5.12 (the Jimmy incident): cables +
+   *  subgrid joins reference FLATTENED component indices, so the splice MUST
+   *  be preceded by pruneCompRefs — references to the deleted subtree are
+   *  dropped (its cables go with it), later references renumber. Leaving
+   *  them stale silently re-wires the craft on paper ("computer's power
+   *  cable connected to an aileron"), and the game re-saves the mangled
+   *  references instead of pruning them. v1.8.0 UNIFORM MIRROR RULE:
+   *  whatever the selection does, its twin pair does — deleting a part
+   *  deletes its twins too. */
   const deleteComp = useCallback((ctx: EditCtx, ci: number) => {
     const idx = new Set<number>([ci]);
     for (const { j } of engineRef.current?.twinPairsOf(ci) ?? []) idx.add(j);
+    pruneCompRefs(ctx, idx);
     for (const k of [...idx].sort((a, b) => b - a)) {
       ctx.bp.data.components.splice(k, 1);
       docArrayRemoveAt(ctx.doc, ['data', 'components'], k);

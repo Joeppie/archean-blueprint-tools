@@ -21,7 +21,8 @@ import {
   MATERIALS, allocateSlot, freePaletteSlots, hullifyApply, hullifyPreview,
   nearestSlot, parseHexColor, replaceAll, replaceCensus, replaceSources,
 } from '../tools';
-import { culledBlocksSolids } from '../cull';
+import { culledBlocksSolids, blkCell, blkSpan, cellM } from '../cull';
+import { getBlockPoints } from '../blockshapes';
 import type { Block, Blueprint, Triangle } from '../format';
 import { CELL } from '../format';
 import type { FilePalette } from '../palette';
@@ -177,14 +178,14 @@ describe('replaceAll', () => {
 });
 
 describe('hullify — blocks ▸ hull triangles', () => {
-  test('DIRECTION option (v1.5.7): inward (default) = the outward winding REVERSED — same triangles, same area, opposite normals', () => {
+  test('DIRECTION option: DEFAULT = OUTWARD (the game’s own authored winding, v1.5.12); inward = the exact reversed twin', () => {
     const mkPair = () => bpOf([
       block({ pos_x: 5, pos_y: 5, pos_z: 5, colors: all(3) }),
       block({ type: 1, pos_x: 6, pos_y: 5, pos_z: 5, colors: all(3) }),
     ]);
     const out = mkPair(), inn = mkPair();
-    const ro = hullifyApply(out, { wind: 'outward' });
-    const ri = hullifyApply(inn);                      // default = 'inward'
+    const ro = hullifyApply(out);                      // default = 'outward'
+    const ri = hullifyApply(inn, { wind: 'inward' });
     expect(ri.trisAdded).toBe(ro.trisAdded);
     const ta = out.data.triangles!, tb = inn.data.triangles!;
     expect(tb.length).toBe(ta.length);
@@ -211,34 +212,89 @@ describe('hullify — blocks ▸ hull triangles', () => {
       const face = bp.data.triangles!.filter(t => triWorld(t).every(p => p[0] === 0))
         .map(t => nrm(triWorld(t)));
       expect(face.length).toBe(2);
-      return face.every(n => Math.sign(n[0]!) === (wind === 'outward' ? 1 : -1));
+      return face.every(n => Math.sign(n[0]!) === (wind === 'inward' ? -1 : 1));
     };
-    expect(lone('outward')).toBe(true);
-    expect(lone()).toBe(true);                         // default inward
+    expect(lone('inward')).toBe(true);
+    expect(lone()).toBe(true);                         // default outward
   });
 
-  test('SHADE option (v1.5.9): NEW triangles carry smooth:1 like the game’s own hull saves; flat writes no key', () => {
+  test('SHADE option: DEFAULT = flat (no key — what the game’s own fresh triangles carry, v1.5.12); smooth writes smooth:1', () => {
     const mk = () => bpOf([block({ pos_x: 5, pos_y: 5, pos_z: 5, colors: all(3) })]);
     const asRec = (t: unknown) => t as Record<string, unknown>;
-    const sm = mk();
-    hullifyApply(sm);                                  // default shade = smooth
     const fl = mk();
-    hullifyApply(fl, { shade: 'flat' });
-    const ta = sm.data.triangles!, tb = fl.data.triangles!;
+    hullifyApply(fl);                                  // default shade = flat
+    const sm = mk();
+    hullifyApply(sm, { shade: 'smooth' });
+    const ta = fl.data.triangles!, tb = sm.data.triangles!;
     expect(ta.length).toBeGreaterThan(0);
     expect(tb.length).toBe(ta.length);
-    expect(ta.every(t => asRec(t)['smooth'] === 1)).toBe(true);
-    expect(tb.every(t => !('smooth' in asRec(t)))).toBe(true);
+    expect(ta.every(t => !('smooth' in asRec(t)))).toBe(true);
+    expect(tb.every(t => asRec(t)['smooth'] === 1)).toBe(true);
     // the flag is NOT geometry: every other field is IDENTICAL
-    expect(ta.map(t => { const r = { ...asRec(t) }; delete r['smooth']; return r; }))
-      .toEqual(tb.map(t => ({ ...asRec(t) })));
+    expect(tb.map(t => { const r = { ...asRec(t) }; delete r['smooth']; return r; }))
+      .toEqual(ta.map(t => ({ ...asRec(t) })));
     // EXISTING triangles are kept verbatim — the tool never re-writes them
     const keep = mk();
-    const authored = { ...asRec(tb[0]!) } as typeof tb[number];
+    const authored = { ...asRec(ta[0]!) } as typeof ta[number];
     keep.data.triangles = [authored];
     hullifyApply(keep);
     expect(asRec(keep.data.triangles![0]!)).toEqual(authored);
     expect(keep.data.triangles!.length).toBeGreaterThan(1);
+  });
+
+  test('GAME-CONVENTION (v1.5.12): the defaults reproduce the game’s own triangle authoring (fixture 9000006001 vs hullify of 9000005001)', () => {
+    const load = (id: string): Blueprint =>
+      JSON.parse(readFileSync(
+        new URL(`../../../../testdata/${id}/blueprint.json`, import.meta.url).pathname, 'utf8')) as Blueprint;
+    const asRec = (t: unknown) => t as Record<string, unknown>;
+    const nrm = (p: V3[]): V3 => vcross(vsub(p[1]!, p[0]!), vsub(p[2]!, p[0]!));
+
+    // The user's in-game-TRI-AUTHORED craft (the game's own tool snapped
+    // three triangles onto the corner block of testframe): no smooth key,
+    // every winding normal points AWAY from the corner's solid centroid.
+    const g = load('9000006001');
+    const gtris = (g.data.triangles ?? []) as unknown as Triangle[];
+    expect(gtris.length).toBe(3);
+    expect(gtris.every(t => !('smooth' in asRec(t)))).toBe(true);
+    const corner = g.data.blocks[1]!;                     // the type-13 corner
+    const gc = blkCell(corner), gs = blkSpan(corner);
+    const pts = getBlockPoints(corner.type,
+      [cellM(gc[0]!), cellM(gc[1]!), cellM(gc[2]!)],
+      [gs[0] * CELL, gs[1] * CELL, gs[2] * CELL]);
+    const mid: V3 = [0, 1, 2].map(ax => pts.reduce((s, p) => s + p[ax]!, 0) / pts.length) as V3;
+    for (const t of gtris) {
+      const w = triWorld(t);
+      expect(Math.max(...w.map(p => p[1]!))).toBeGreaterThan(Math.min(...w.map(p => p[1]!)) + 0.05);
+      expect(nrm(w).reduce((s, v, i) => s + v * (w[0]![i]! - mid[i]!), 0))
+        .toBeGreaterThan(0);                               // OUTWARD, as authored
+    }
+
+    // Hullify the SAME craft before the triangles existed (9000005001 =
+    // testframe): the defaults match the game's conventions piece for piece.
+    const bp = load('9000005001');
+    hullifyApply(bp);
+    const ours = bp.data.triangles!;
+    expect(ours.length).toBeGreaterThan(0);
+    expect(ours.every(t => !('smooth' in asRec(t)))).toBe(true);   // flat by default
+    const key = (p: V3[]) => p.map(q => q.map(x => x.toFixed(4)).join()).sort().join('|');
+    const gameKeys = new Set(gtris.map(t => key(triWorld(t))));
+    const ourCorner = ours.filter(t => {
+      const w = triWorld(t);
+      // sits on/above the deck top (y = −1.25) and is not a flat cap
+      return Math.min(...w.map(p => p[1]!)) > -1.25 - 1e-6
+        && Math.max(...w.map(p => p[1]!)) > Math.min(...w.map(p => p[1]!)) + 0.05;
+    });
+    expect(ourCorner.length).toBe(3);                      // bottom flush ▸ culled
+    for (const t of ourCorner) {
+      const w = triWorld(t);
+      expect(nrm(w).reduce((s, v, i) => s + v * (w[0]![i]! - mid[i]!), 0))
+        .toBeGreaterThan(0);                               // winds OUTWARD too
+    }
+    // vertex-for-vertex, our three corner triangles ARE the game's three
+    // faces (the flush bottom culled both ways) — the ONLY differences were
+    // the conventions: the game winds OUT and carries no smooth key, which
+    // is exactly what the defaults now emit
+    expect(ourCorner.filter(t => gameKeys.has(key(triWorld(t)))).length).toBe(3);
   });
 
   test('two glued cubes: the shared border emits NOTHING, every other face is its own quad pair', () => {

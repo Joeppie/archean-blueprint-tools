@@ -315,10 +315,18 @@ export interface HullifyResult {
  *  one colour on all five faces), and the in-game BEVEL the v1.5.7 note
  *  attributed to the winding is the per-triangle FLAT-normal default —
  *  see HullifyShade below. Corpus census: game-AUTHORED triangles read
- *  OUTWARD under the centroid heuristic; 'inward' stays the default on
- *  the user's original in-game report until a fresh A/B says otherwise. */
+ *  OUTWARD under the centroid heuristic.
+ *  v1.5.12 RE-ARBITRATION (user's in-game A/B, the sanctioned arbiter): the
+ *  user's in-game-TRI-AUTHORED craft (Triangle_Trial = corpus fixture
+ *  9000006001) carries three triangles the game's own tool snapped onto a
+ *  corner block, and ALL THREE wind OUTWARD (winding normal away from the
+ *  solid — pinned in tools.test.ts GAME-CONVENTION). The same user loaded
+ *  our then-default (inward + smooth:1) conversion of that very craft
+ *  ("corneronia") in game: "deformed and terrible", while the game's own
+ *  triangles look right. The default is now 'outward' — exactly what the
+ *  game's triangle authoring emits; 'inward' stays selectable. */
 export type HullifyWind = 'inward' | 'outward';
-export const HULLIFY_WIND_DEFAULT: HullifyWind = 'inward';
+export const HULLIFY_WIND_DEFAULT: HullifyWind = 'outward';
 
 /** Surface-shading the generated triangles ask the GAME for (v1.5.9).
  *  The game's Triangle struct (Triangle.inc.glsl) carries a per-triangle
@@ -330,9 +338,17 @@ export const HULLIFY_WIND_DEFAULT: HullifyWind = 'inward';
  *  independent — the v1.5.7 "inward fixes the bevel" reading is superseded:
  *  winding flips which side is front, not the shading). 'smooth' writes
  *  smooth:1 on every NEW triangle (existing kept verbatim); 'flat' writes
- *  no key (the pre-v1.5.9 files). */
+ *  no key (the pre-v1.5.9 files).
+ *  v1.5.12 DEFAULT FLIP (user's in-game A/B): the game's own freshly
+ *  authored triangles (fixture 9000006001, all three) carry NO smooth key
+ *  — flat shading — and the user's verdict is that the game's flat-snap
+ *  triangles look right while our smooth:1-converted hull reads "deformed"
+ *  in game (the game adjusts/welds triangles where the smooth flag asks it
+ *  to match neighbours; on a faceted block hull that bulges the prisms).
+ *  The default is now 'flat' = what the game's own authoring emits; the
+ *  smooth option stays for sheet-like hulls (3732302108's convention). */
 export type HullifyShade = 'smooth' | 'flat';
-export const HULLIFY_SHADE_DEFAULT: HullifyShade = 'smooth';
+export const HULLIFY_SHADE_DEFAULT: HullifyShade = 'flat';
 
 export interface HullifyOptions { wind?: HullifyWind; shade?: HullifyShade }
 

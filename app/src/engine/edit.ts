@@ -13,8 +13,8 @@
 //   save source) accumulates the shift once, never re-applied.
 
 import type { DocNode } from './doc';
-import { docEnsureArray, docFromValue, docGet, docSet, docSetArrayItem, docSetNumber, docValue, emitDoc, parseDoc } from './doc';
-import type { Blueprint, FileQuat, LatticeObj, Vec3D } from './format';
+import { docArrayRemoveAt, docEnsureArray, docFromValue, docGet, docSet, docSetArrayItem, docSetNumber, docValue, emitDoc, parseDoc } from './doc';
+import type { Blueprint, BlueprintComponent, FileQuat, LatticeObj, Vec3D } from './format';
 import { CELL } from './format';
 import { docLegacyQuats, normalizeDoc } from './normalize';
 import type { PaletteEntry } from './palette';
@@ -138,6 +138,68 @@ export function resetComponent(ctx: EditCtx, ci: number): void {
   if (!c || !o) return;
   for (const ax of AXES) setPos(ctx, ci, ax, o.pos0[ax]!);
   setOrientation(ctx, ci, { w: o.q0.w, x: o.q0.x, y: o.q0.y, z: o.q0.z });
+}
+
+// ------------------------------------------------- component-index surgery
+// data.pipes (a_component/b_component) and data.composite_builds
+// (component/slaveBuildId) reference FLATTENED component indices (readBuild
+// order — nested Build content numbered BEFORE its Build, AGENTS §Subgrids,
+// same walk as subgrid.flattenComponents). Splicing a component out of
+// data.components therefore INVALIDATES every later flat reference: leaving
+// them stale silently re-points cables and subgrid joins at the neighbour
+// component (the Jimmy incident 2026-10-20: two dashboards deleted, the app
+// then reported a computer's power cable as wired to an AILERON — the cable
+// physically sits elsewhere, only the index moved; and the game does NOT
+// prune such references on load, it re-saves them mangled).
+
+/** Renumber (and where the endpoint itself dies, prune) every FLATTENED
+ *  component reference in bp AND doc for a set of TOP-LEVEL indices about
+ *  to be spliced out of data.components. Run BEFORE the splice (the removed
+ *  set is keyed on pre-splice top indices; a deleted Build takes its whole
+ *  nested subtree with it, exactly like flattenComponents numbers it). */
+export function pruneCompRefs(ctx: EditCtx, removedTop: ReadonlySet<number>): void {
+  // mirror flattenComponents' ORDER (children before parent) tagging dead;
+  // removedTop keys TOP-LEVEL indices only (nested indices mean nothing there)
+  const dead: boolean[] = [];
+  const walk = (list: BlueprintComponent[], deadAbove: boolean, top: boolean): void => {
+    list.forEach((c, i) => {
+      const d = deadAbove || (top && removedTop.has(i));
+      const sub = c.data?.['components'] as BlueprintComponent[] | undefined;
+      if (c.type === 'Build' && sub?.length) walk(sub, d, false);
+      dead.push(d);
+    });
+  };
+  walk(ctx.bp.data.components, false, true);
+  const remap = new Map<number, number>();
+  let n = 0;
+  dead.forEach((d, i) => { if (!d) remap.set(i, n++); });
+  const last = dead.length;                        // refs >= last predate nothing: leave
+
+  /** one reference list: entries touching a dead flat index DROP, the rest
+   *  take their remapped index (bp + doc, int style). */
+  const fixList = (arr: Record<string, unknown>[] | undefined, keys: string[],
+    docPath: string[]): void => {
+    if (!arr) return;
+    for (let i = arr.length - 1; i >= 0; i--) {
+      const e = arr[i]!;
+      let drop = false;
+      for (const k of keys) {
+        const v = e[k];
+        if (typeof v !== 'number') continue;
+        if (v < last && !remap.has(v)) { drop = true; break; }
+      }
+      if (drop) { arr.splice(i, 1); docArrayRemoveAt(ctx.doc, docPath, i); continue; }
+      for (const k of keys) {
+        const v = e[k];
+        const m = typeof v === 'number' ? remap.get(v) : undefined;
+        if (m != null && m !== v) { e[k] = m; docSet(ctx.doc, [...docPath, i, k], m); }
+      }
+    }
+  };
+  fixList(ctx.bp.data.pipes as unknown as Record<string, unknown>[] | undefined,
+    ['a_component', 'b_component'], ['data', 'pipes']);
+  const cb = (ctx.bp.data as unknown as { composite_builds?: Record<string, unknown>[] }).composite_builds;
+  fixList(cb, ['component', 'slaveBuildId'], ['data', 'composite_builds']);
 }
 
 // ------------------------------------------------------------------- save
