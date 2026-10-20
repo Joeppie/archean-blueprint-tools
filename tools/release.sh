@@ -67,14 +67,19 @@ LATEST=$(git ls-remote --tags origin 'refs/tags/v[0-9]*' \
   | sed 's|.*refs/tags/||; s|\^{}||' | sort -Vu | tail -1)
 if [ -n "$LATEST" ]; then
   LV=${LATEST#v}
-  [ "$(printf '%s\n%s\n' "$LV" "$VER" | sort -V | head -1)" = "$LV" ] && [ "$LV" != "$VER" ] \
-    || die "v$VER does not go forward past the newest tag $LATEST (sort -V)"
-  # what kind of bump is this? (print it, so a fix-onto-Y misfire is visible)
-  read -r A B C < <(printf '%s %s %s' "${LV%%.*}" "$(echo "${LV#*.}" | cut -d. -f1)" "$(echo "$LV" | cut -s -d. -f3)")
-  read -r X Y Z < <(printf '%s %s %s' "${VER%%.*}" "$(echo "${VER#*.}" | cut -d. -f1)" "$(echo "$VER" | cut -d. -f3)")
+  # strictly BACKWARD is refused; EQUAL is allowed (re-cutting the same tag on
+  # the same commit is the "suite re-run" path the tag check below handles)
+  [ "$(printf '%s\n%s\n' "$LV" "$VER" | sort -V | head -1)" = "$VER" ] \
+    || die "v$VER goes BACKWARD — the newest tag on origin is $LATEST"
+  # what kind of bump is this? (printed so a fix-onto-Y misfire is visible at
+  # the moment of the cut). NOTE herestrings (<<<), NOT < <(printf) without a
+  # trailing newline: read returns 1 at EOF and set -e would kill the preflight.
+  local_split() { IFS=. read -r "$1" "$2" "$3" <<<"$4"; }
+  local_split A B C "${LV}.0"          # 2-part legacy tags read as X.Y.0
+  local_split X Y Z "$VER"
   KIND="major"
-  [ "$X" = "$A" ] && KIND="minor"
-  [ "$X" = "$A" ] && [ "$Y" = "$B" ] && KIND="patch"
+  [ "${X:-}" = "${A:-}" ] && KIND="minor"
+  [ "${X:-}" = "${A:-}" ] && [ "${Y:-}" = "${B:-}" ] && KIND="patch"
   say "semver bump: $LATEST → $TAG  ($KIND — Z fixes · Y features · X overhaul)"
 fi
 
