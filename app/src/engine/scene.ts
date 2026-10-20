@@ -43,6 +43,7 @@ import { propellerSurface, type PropellerData } from './propeller';
 const PROP_GEN_SPEC: PbrSpec = { color: srgbHexToLinear(0x808080), metal: 0, rough: 0.65, opacity: 1 };
 import { buildPipes, surgePaths, type PipeNetwork } from './pipes';
 import { buildBlocksSolids, buildCompProxies, buildSolids, type ProxyBox, type SolidBatch } from './build';
+import { hullVertex } from './hullfit';
 import type { FilePalette } from './palette';
 import type { Block, Blueprint, BlueprintComponent } from './format';
 import { CELL, isLegacyFile } from './format';
@@ -211,6 +212,12 @@ export class Engine {
   private blockHlSpec: { bi: number; twin: number; issues: string[]; info: boolean } | null = null;
   /** bi|twin|geometry+paint fingerprint — the v1.6 staleness guard */
   private blockHlSig = '';
+  /** v1.9 TRIANGLE selection feedback: the selected hull triangle's prism
+   *  glows GOLD + outlined (the "triangles refuse to select properly" fix —
+   *  selecting one used to update the panel while the 3D view showed
+   *  nothing). Own scene child at moff, like ghostGroup. */
+  private triHlGroup = new Group();
+  private triHlSpec = -1;
   /** CATALOG placement ghost (v1.4 box → v1.5.6 REAL MODEL): the held part
    *  rendered translucent at the hovered surface (+ the ⇄ mirrored twin), the
    *  component analogue of the block constructor ghost — "you should not just
@@ -402,6 +409,7 @@ export class Engine {
     this.scene.add(this.surgeGroup);
     this.scene.add(this.ghostGroup);
     this.scene.add(this.blockHlGroup);
+    this.scene.add(this.triHlGroup);
     this.scene.add(this.compHlGroup);
     const loop = () => {
       this.controls?.update();                    // damping fires change→invalidate
@@ -578,6 +586,7 @@ void main() {
       this.subGroup.position.set(this.moff.x, this.moff.y, this.moff.z);
       this.ghostGroup.position.set(this.moff.x, this.moff.y, this.moff.z);
       this.blockHlGroup.position.set(this.moff.x, this.moff.y, this.moff.z);
+      this.triHlGroup.position.set(this.moff.x, this.moff.y, this.moff.z);
       this.compHlGroup.position.set(this.moff.x, this.moff.y, this.moff.z);
     }
 
@@ -2888,6 +2897,56 @@ void main() {
    *  block's OLD shape/pos: a golden ghost of the pre-edit block stuck on
    *  the deck until a full deselect ("blocks become translucent and don't
    *  return to previous state", user report). */
+  /** v1.9: TRIANGLE-selection feedback — gold translucent caps ±0.03 m over
+   *  the prism + a gold outline; -1 (or a triangle that left the file)
+   *  clears. depthTest off so it reads through the skin like the block
+   *  overlay; ti is staled against the LIVE file so an undo-rebuild can never
+   *  leave a gold ghost on a triangle that no longer exists. */
+  setTriHighlight(ti: number) {
+    const t = ti >= 0 && this.bp ? (this.bp.data.triangles ?? [])[ti] : undefined;
+    const key = t ? ti : -1;
+    if (this.triHlSpec === key) return;
+    this.triHlSpec = key;
+    for (const o of this.triHlGroup.children) {
+      (o as Mesh).geometry?.dispose();
+      ((o as Mesh).material as MeshBasicMaterial)?.dispose?.();
+    }
+    this.triHlGroup.clear();
+    if (!t) { this.invalidate(); return; }
+    const v = ([0, 1, 2] as const).map(i => { const p = hullVertex(t, i); return [p.x, p.y, p.z] as const; });
+    const ux = v[1]![0] - v[0]![0], uy = v[1]![1] - v[0]![1], uz = v[1]![2] - v[0]![2];
+    const wx = v[2]![0] - v[0]![0], wy = v[2]![1] - v[0]![1], wz = v[2]![2] - v[0]![2];
+    let nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
+    const nl = Math.hypot(nx, ny, nz) || 1;
+    nx /= nl; ny /= nl; nz /= nl;
+    const off = (p: readonly number[], s: number) => [p[0]! + nx * s, p[1]! + ny * s, p[2]! + nz * s];
+    const A = v.map(p => off(p, 0.03)), B = v.map(p => off(p, -0.03));
+    const geo = new BufferGeometry();
+    const capPos: number[] = [];
+    for (const p of [...A, ...B]) capPos.push(p[0]!, p[1]!, p[2]!);
+    geo.setAttribute('position', new BufferAttribute(new Float32Array(capPos), 3));
+    geo.setIndex([0, 1, 2, 5, 4, 3]);
+    const cap = new Mesh(geo, new MeshBasicMaterial({
+      color: 0xffc94d, transparent: true, opacity: 0.55, depthTest: false, side: DoubleSide,
+    }));
+    cap.renderOrder = 32;
+    const ep: number[] = [];
+    const loop = (pts: readonly (readonly number[])[]) => {
+      for (let i = 0; i < 3; i++) ep.push(...pts[i]!, ...pts[(i + 1) % 3]!);
+    };
+    loop(A); loop(B);
+    for (let i = 0; i < 3; i++) ep.push(...A[i]!, ...B[i]!);
+    const eg = new BufferGeometry();
+    eg.setAttribute('position', new BufferAttribute(new Float32Array(ep), 3));
+    const wire = new LineSegments(eg, new LineBasicMaterial({
+      color: 0xffc94d, transparent: true, opacity: 0.95, depthTest: false,
+    }));
+    wire.renderOrder = 33;
+    this.triHlGroup.add(cap, wire);
+    this.invalidate();
+  }
+  get triHighlightState() { return this.triHlSpec; }
+
   setBlockHighlight(bi: number, twin = -1, issues: readonly string[] = [], info = false) {
     const fp = (i: number): string => {
       const b = i >= 0 && this.bp ? this.bp.data.blocks[i] : undefined;

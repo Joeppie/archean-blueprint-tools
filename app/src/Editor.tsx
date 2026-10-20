@@ -20,7 +20,7 @@ import { cornerOf, triAt, triangleFromCorners } from './engine/tris';
 import type { Blueprint } from './engine/format';
 import { isLegacyFile } from './engine/format';
 import type { ResolvedColor } from './engine/palette';
-import { docArrayInsert, docArrayRemoveAt, docFromValue, docValue, parseDoc } from './engine/doc';
+import { docArrayInsert, docArrayRemoveAt, docFromValue, docValue, emitDoc, parseDoc } from './engine/doc';
 import { allocateSlot, paletteSlotNode, type Rgb255 } from './engine/tools';
 import { setPaletteSlot } from './engine/edit';
 import { makeCtx, resetComponent, setDataField, setOrientation, setPos, setCompField,
@@ -109,6 +109,66 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   const [optsOpen, setOptsOpen] = useState(false);
   useEffect(() => { if (!toolMsg) return; const t = setTimeout(() => setToolMsg(''), 4000); return () => clearTimeout(t); }, [toolMsg]);
 
+  // ------------------------------------------------------------------ HISTORY
+  // v1.9 UNDO/REDO (user: "ALL operations should retain a undo/redo history,
+  // and be in edit menu"). Snapshot-based (the backlog design): a COMMIT is
+  // the doc's FULL literal text via emitDoc — every mutation path already
+  // mirrors bp → doc, and the raw literals keep saves byte-exact. Coalescing
+  // is time-windowed: sceneChanged/markDirty re-arm one 450 ms timer, so one
+  // gizmo/slider DRAG (dozens of writes) lands as ONE history entry while
+  // separate clicks stay separate steps. Undo/redo re-parse the snapshot
+  // through the SAME open funnel (parse → normalize → makeCtx → setBp), so
+  // engine, doc and ctx can never drift apart; Ctrl+Z / Ctrl+Shift+Z /
+  // Ctrl+Y and the Edit ▾ menu both call these.
+  const histRef = useRef<{ states: string[]; p: number; timer: ReturnType<typeof setTimeout> | null }>({
+    states: [], p: 0, timer: null,
+  });
+  const [histTick, setHistTick] = useState(0);
+  const commitSnapshot = useCallback(() => {
+    const ctx = ctxRef.current, h = histRef.current;
+    if (!ctx) return;
+    const text = emitDoc(ctx.doc);
+    if (text === h.states[h.p]) return;
+    h.states = h.states.slice(0, h.p + 1);          // a new edit drops REDO
+    h.states.push(text); h.p = h.states.length - 1;
+    setHistTick(t => t + 1);
+  }, []);
+  const snapshotSoon = useCallback(() => {
+    const h = histRef.current;
+    if (h.timer) clearTimeout(h.timer);             // extend the open gesture
+    h.timer = setTimeout(() => { h.timer = null; commitSnapshot(); }, 450);
+  }, [commitSnapshot]);
+  const flushSnapshot = useCallback(() => {
+    const h = histRef.current;
+    if (h.timer) { clearTimeout(h.timer); h.timer = null; }
+    commitSnapshot();
+  }, [commitSnapshot]);
+  const applyHistory = useCallback((state: string) => {
+    const d = parseDoc(state);
+    normalizeDoc(d);                                // idempotent on snapshots
+    ctxRef.current = makeCtx(d, docValue(d) as Blueprint);
+    const dirtyNow = state !== histRef.current.states[0];
+    dirtyRef.current = dirtyNow; setDirty(dirtyNow);
+    setSel({ ci: -1, sub: -1 }); setBlockSel(-1); setTriSel(-1); setTriDraft([]);
+    setPlacing(null); setHit(null);
+    engineRef.current?.select(-1);
+    if (reloadTimer.current) { clearTimeout(reloadTimer.current); reloadTimer.current = null; }
+    setBp(ctxRef.current.bp);                       // the Viewport reloads it
+    setHistTick(t => t + 1);
+  }, []);
+  const undo = useCallback(() => {
+    flushSnapshot();
+    const h = histRef.current;
+    if (h.p <= 0) return;
+    h.p -= 1; applyHistory(h.states[h.p]!);
+  }, [flushSnapshot, applyHistory]);
+  const redo = useCallback(() => {
+    flushSnapshot();
+    const h = histRef.current;
+    if (h.p >= h.states.length - 1) return;
+    h.p += 1; applyHistory(h.states[h.p]!);
+  }, [flushSnapshot, applyHistory]);
+
   /** parse → v1→v2 NORMALIZE → doc+ctx → live bp. One funnel for download,
    *  file-open, drag-drop and New craft. */
   const openText = useCallback((text: string) => {
@@ -117,6 +177,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     ctxRef.current = makeCtx(d, docValue(d) as Blueprint);
     dirtyRef.current = false;
     setDirty(false); setSel({ ci: -1, sub: -1 }); setBlockSel(-1); setPlacing(null);
+    histRef.current = { states: [emitDoc(d)], p: 0, timer: null };
+    setHistTick(t => t + 1);
     setBp(ctxRef.current.bp);
   }, []);
 
@@ -144,7 +206,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
 
   const markDirty = useCallback(() => {
     if (!dirtyRef.current) { dirtyRef.current = true; setDirty(true); }
-  }, []);
+    snapshotSoon();                               // v1.9 undo (drag-coalesced)
+  }, [snapshotSoon]);
   const bumpRev = useCallback(() => setRev(r => r + 1), []);
 
   /** block/wire mutations rebuild the merged scene — debounced so slider
@@ -153,7 +216,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     markDirty(); bumpRev();
     if (reloadTimer.current) clearTimeout(reloadTimer.current);
     reloadTimer.current = setTimeout(() => engineRef.current?.reload(), 180);
-  }, [markDirty, bumpRev]);
+  }, [markDirty, bumpRev, snapshotSoon]);
 
   const onEngine = useCallback((e: Engine | null) => {
     engineRef.current = e;
@@ -237,6 +300,27 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     sceneChanged();
   }, [sceneChanged]);
 
+  /** v1.9 DELETE key paths (the panel buttons and the keyboard share these).
+   *  Block: the BlockPanel geometry — self + its SIMILAR TWIN, bp + doc
+   *  together (the old "a bare key must never touch bp without the doc
+   *  mirror" rule; the key now routes through here, so it is mirrored). */
+  const deleteBlock = useCallback((ctx: EditCtx, bi: number) => {
+    const tw = blockMirrorTwin(ctx.bp, bi);
+    for (const i of [bi, ...(tw >= 0 ? [tw] : [])].sort((a, b) => b - a)) {
+      ctx.bp.data.blocks.splice(i, 1);
+      docArrayRemoveAt(ctx.doc, ['data', 'blocks'], i);
+    }
+    engineRef.current?.setBlockGizmo(-1, false);
+    setBlockSel(-1);
+    sceneChanged();
+  }, [sceneChanged]);
+  const deleteTri = useCallback((ctx: EditCtx, ti: number) => {
+    ctx.bp.data.triangles?.splice(ti, 1);
+    docArrayRemoveAt(ctx.doc, ['data', 'triangles'], ti);
+    setTriSel(-1);
+    sceneChanged();
+  }, [sceneChanged]);
+
   const edits: EditApi = useMemo(() => ({
     compField: (ctx, ci, key, v) => { setCompField(ctx, ci, key, v); markDirty(); bumpRev(); },
     compColor: (ctx, ci, which, field, v) => {
@@ -264,19 +348,29 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     const ctx = ctxRef.current;
     if (!ctx) return;
     const text = serializeSave(ctx);
+    // v1.9: serializeSave also SYNCS the occupancy/type-255 mirrors (it
+    // mutates bp + doc) — commit that as the open history group's text so
+    // undo can never resurrect a pre-sync mirror state.
+    flushSnapshot();
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
     a.download = as ?? 'blueprint.json'; a.click(); URL.revokeObjectURL(a.href);
     dirtyRef.current = false; setDirty(false);
-  }, []);
+  }, [flushSnapshot]);
 
   const openFile = useCallback(() => fileRef.current?.click(), []);
   const readFile = useCallback((f: File) => {
     f.text().then(openText).catch(console.error);
   }, [openText]);
 
-  // keyboard: g/o/h toggles, Ctrl+S save, Esc drops the HELD part else
-  // deselects (KSP pickup rule)
+  // keyboard: g/o/h toggles, Ctrl+S save, Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y
+  // UNDO/REDO (v1.9 — the Edit ▾ menu items call the same pair), Delete /
+  // Backspace deletes the selection in the EDIT mode (v1.9 user rule: "when
+  // I have something selected in edit mode, [delete] key should delete" —
+  // component ▸ block (+twin) ▸ triangle precedence; every path mutates bp
+  // AND the doc together, the stale NOTE below was the old excuse), and Esc
+  // drops the HELD part else deselects (KSP pickup rule). Undo/redo sit
+  // BEHIND the input guards so a focused text field keeps native Ctrl+Z.
   const toggleOpt = useCallback((k: keyof ViewOptions, on: boolean) => {
     const e = engineRef.current;
     if (!e) return;
@@ -286,7 +380,22 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); save(); return; }
-      if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
+      const el = e.target as HTMLElement | null;
+      const tag = el?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el?.isContentEditable) return;
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
+        e.preventDefault(); if (e.shiftKey) redo(); else undo(); return;
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y')) {
+        e.preventDefault(); redo(); return;
+      }
+      if ((e.key === 'Delete' || e.key === 'Backspace') && mode === 'edit') {
+        const ctx = ctxRef.current;
+        if (!ctx || placing) return;
+        if (sel.ci >= 0) { e.preventDefault(); deleteComp(ctx, sel.ci); return; }
+        if (blockSub === 'tris' && triSel >= 0) { e.preventDefault(); deleteTri(ctx, triSel); return; }
+        if (blockSel >= 0) { e.preventDefault(); deleteBlock(ctx, blockSel); return; }
+      }
       const map: Record<string, keyof ViewOptions> = { g: 'grid', o: 'occ', h: 'hull' };
       if (map[e.key]) {
         const cur = engineRef.current?.getOptions();
@@ -302,13 +411,11 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         }
         engineRef.current?.select(-1); setBlockSel(-1);
       }
-      // NOTE: deleting a block goes through the BlockPanel button ONLY —
-      // it mutates bp AND the doc together; a bare key must never touch bp
-      // without the doc mirror.
     };
     addEventListener('keydown', h);
     return () => removeEventListener('keydown', h);
-  }, [save, toggleOpt, placing]);
+  }, [save, toggleOpt, placing, mode, sel, blockSel, blockSub, triSel,
+    undo, redo, deleteComp, deleteBlock, deleteTri]);
 
   // blocks-mode canvas handling: place (brush/logical continuation) or
   // select, via engine.pickCell.
@@ -361,6 +468,13 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     } else e.setBlockHighlight(-1);
   }, [mode, blockSel, rev, engine]);
 
+  // v1.9: a SELECTED TRIANGLE rides the gold prism highlight — selection used
+  // to be invisible in the 3D view (only the panel changed), part of the
+  // "triangles refuse to select properly" report. Left with the sub-tab.
+  useEffect(() => {
+    engineRef.current?.setTriHighlight(mode === 'edit' && blockSub === 'tris' ? triSel : -1);
+  }, [mode, blockSub, triSel, rev, engine]);
+
   // the CATALOG ghost (v1.4): while a part is HELD, hovering the viewport
   // docks a translucent preview at the surface (⇄ adds the mirrored twin
   // box) — placement now works like the blocks ghost. v1.5: the PLACE flavor
@@ -380,8 +494,17 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     if (blockSub === 'tris') {
       const r = e.pickCell(clientX, clientY);
       if (!r) return;
-      const t = triAt(ctx.bp, r.point);
-      if (t >= 0 && triDraft.length === 0) { setTriSel(t); return; }   // select existing
+      // v1.9 (the "triangles refuse to select properly" fix): ONLY a hit on
+      // a hull PRISM itself can select — the old code centroid-tested every
+      // pick, so a block click near a triangle STOLE the click, while the
+      // middle of a large prism (beyond the 0.45 m radius) never selected at
+      // all and fell through to corner-drafting. triAt is now a geometric
+      // click-owner test (plane + inside-with-margin; edge/corner clicks
+      // still draft lattice corners).
+      if (r.kind === 'tri' && triDraft.length === 0) {
+        const t = triAt(ctx.bp, r.point);
+        if (t >= 0) { setTriSel(t); setBlockSel(-1); return; }
+      }
       const g = cornerOf(r.point);
       const next = [...triDraft, g];
       if (next.length < 3) { setTriDraft(next); return; }
@@ -558,6 +681,11 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   );
 
   const name = (bp?.data.alias?.trim()) || (craft ? craftName(craft) : 'Untitled craft');
+  // Edit ▾ Undo/Redo enabled state (v1.9). histTick is the re-render trigger —
+  // the stack itself lives in a ref (commits must never re-render mid-drag).
+  void histTick;
+  const canUndo = histRef.current.timer !== null || histRef.current.p > 0;
+  const canRedo = histRef.current.p < histRef.current.states.length - 1;
   const triPanel = (
     <TriPanel bp={bp!} ctx={ctxRef.current} draft={triDraft} triSel={triSel}
       brush={triBrush} onSlot={(i, v) => setTriBrush(b => b.map((x, j) => j === i ? v : x))}
@@ -618,6 +746,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         if (f) readFile(f);
       }}>
       <TopBar mode={mode} onMode={setMode} dirty={dirty} title={name} craftId={craft}
+        canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo}
         onNew={() => { ctxRef.current = null; setBp(null); openText(emitNew()); }}
         onOpen={openFile} onSave={save} onClose={onBack} onBack={onBack}
         onRefresh={craft ? () => { forceRef.current = true; setRetrySeq(s => s + 1); } : undefined}

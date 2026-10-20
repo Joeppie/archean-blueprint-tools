@@ -10,6 +10,7 @@
 
 import type { Blueprint, Triangle } from './format';
 import { CELL } from './format';
+import { hullVertex } from './hullfit';
 
 export type Corner = [number, number, number];      // GLOBAL lattice corners
 
@@ -62,14 +63,54 @@ export function triCentroid(t: Triangle): [number, number, number] {
   return out;
 }
 
-/** Nearest triangle whose CENTROID is within `radius` of the FILE point. */
+/** v1.9 CLICK-OWNER pick (the "triangles refuse to select properly" fix):
+ *  the old CENTROID-radius test could not reach the middle of any triangle
+ *  bigger than ~1 m — clicking a large prism hit nothing selectable, and the
+ *  click fell through to the corner-DRAFT path instead. The owner now is a
+ *  triangle whose MID-PLANE the point stands on (|d| ≤ maxD — the point came
+ *  off that prism's ±HULL_T skin face) AND whose OUTLINE contains the
+ *  projection with at least `margin` metres of clearance from every edge —
+ *  clicks hugging an edge/corner stay corner-drafts (TriPanel rule: middle =
+ *  select, corner = build). Ties (coplanar prisms) resolve to the deepest
+ *  plane, then the widest margin. */
 export function triAt(bp: Blueprint, p: readonly [number, number, number],
-  radius = 0.45): number {
-  let best = -1, bestD = radius;
+  margin = 0.06, maxD = 0.08): number {
+  let best = -1, bestD = maxD, bestM = -1;
   (bp.data.triangles ?? []).forEach((t, i) => {
-    const c = triCentroid(t);
-    const d = Math.hypot(c[0] - p[0], c[1] - p[1], c[2] - p[2]);
-    if (d < bestD) { bestD = d; best = i; }
+    const a = hullVertex(t, 0), b = hullVertex(t, 1), c = hullVertex(t, 2);
+    const u: [number, number, number] = [b.x - a.x, b.y - a.y, b.z - a.z];
+    const w: [number, number, number] = [c.x - a.x, c.y - a.y, c.z - a.z];
+    const n: [number, number, number] = [
+      u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+    const nl = Math.hypot(n[0], n[1], n[2]);
+    if (nl < 1e-9) return;                              // degenerate
+    n[0] /= nl; n[1] /= nl; n[2] /= nl;
+    const d = (p[0] - a.x) * n[0] + (p[1] - a.y) * n[1] + (p[2] - a.z) * n[2];
+    if (Math.abs(d) > maxD) return;
+    // project p onto the plane, then inside-test + edge clearance via the
+    // signed cross products over the n-consistent wind a→b→c (m = distance
+    // to each supporting edge line, signed positive toward the interior)
+    const q: [number, number, number] = [p[0] - d * n[0], p[1] - d * n[1], p[2] - d * n[2]];
+    const edges: [number, number, number, number, number, number][] = [
+      [b.x - a.x, b.y - a.y, b.z - a.z, a.x, a.y, a.z],   // a→b (from a)
+      [c.x - b.x, c.y - b.y, c.z - b.z, b.x, b.y, b.z],   // b→c (from b)
+      [a.x - c.x, a.y - c.y, a.z - c.z, c.x, c.y, c.z],   // c→a (from c)
+    ];
+    let ok = true, m = Infinity;
+    for (const [ex, ey, ez, ox, oy, oz] of edges) {
+      const el = Math.hypot(ex, ey, ez);
+      if (el < 1e-9) { ok = false; break; }
+      const qx = q[0] - ox, qy = q[1] - oy, qz = q[2] - oz;
+      const cr: [number, number, number] = [
+        ey * qz - ez * qy, ez * qx - ex * qz, ex * qy - ey * qx];
+      const side = (cr[0] * n[0] + cr[1] * n[1] + cr[2] * n[2]) / el;   // signed
+      if (side < m) m = side;
+      if (side < 0) { ok = false; break; }               // outside this edge
+    }
+    if (!ok || m < margin) return;
+    if (Math.abs(d) < bestD || (Math.abs(d) === bestD && m > bestM)) {
+      bestD = Math.abs(d); bestM = m; best = i;
+    }
   });
   return best;
 }

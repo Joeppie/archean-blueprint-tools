@@ -379,7 +379,8 @@ user's explicit say-so (Pages/release still serves it meanwhile).
   plus the literal-rule pins (glued-cube pair: shared border emits nothing,
   20 face quads' worth of tris; lone wedge: profile planes hold ONE tri
   each, square sides TWO; slant-glued wedge pair behaves like one cube).
-  The dialog is a `danger` tool (no undo yet). **v1.5.7 DIRECTION option**
+  The dialog is a `danger` tool (undoable since v1.9 via the Edit ▸ Undo
+  stack). **v1.5.7 DIRECTION option**
 (user: "all triangles are precisely the wrong way around … keep it as an
 option for their directionality"): the tool's `direction` select sets the
 generated winding — `inward` (DEFAULT: the v1↔v2 reversal of the block face's
@@ -390,17 +391,61 @@ block-shape table and the corpus census of AUTHORED files read as). Pure pin
 (`__tests__/tools.test.ts` DIRECTION test): both directions emit the SAME
 triangles/area, normals exactly antiparallel, the lone cube's +x face normal
 +x/−x per option. `hullifyApply(bp, { wind })`.
+- **v1.9 UNDO/REDO + DELETE + TRIANGLE PICK + DIALOG UX (user: "ALL
+  operations should retain a undo/redo history, and be in edit menu"; "when
+  I have something selected in edit mode, [delete] key should delete";
+  "Triangles refuse to select properly"; "the window for tools should be
+  movable"; "a more understandable OK and Confirm … rather than remaining
+  open and not doing anything anymore when clicking OK a second time";
+  "Menus dont look good in mobile, they take too much place"):**
+  (1) UNDO = the backlog design SHIPPED, but the snapshot is the doc's FULL
+  literal text (`emitDoc(doc)` — every mutation path already mirrors bp→doc
+  and raw literals keep saves exact), stacked in `Editor.tsx` `histRef`;
+  `markDirty`/`sceneChanged` (the two funnels EVERY edit already passes)
+  re-arm one 450 ms debounce, so a gizmo/slider DRAG = one entry and separate
+  clicks = separate steps; `undo`/`redo` FLUSH the open group first, then
+  re-parse the snapshot through the SAME open funnel (parse → normalize
+  (idempotent) → makeCtx → setBp), so engine/doc/ctx can never drift;
+  `save()` flushes AFTER serializeSave (the occupancy-mirror sync is part of
+  the group text); `openText` resets the stack to the opened file. Keys:
+  Ctrl/Cmd+Z, Ctrl+Shift+Z, Ctrl+Y — all BEHIND the input guards (a focused
+  text field keeps native Ctrl+Z); Edit ▾ `edit-undo`/`edit-redo` carry the
+  enabled state (histTick state re-renders, the stack itself is a ref).
+  (2) DELETE/Backspace in edit mode deletes the selection with precedence
+  component (`deleteComp`, twins included) ▸ triangle ▸ block (+similar twin)
+  — every path mutates bp AND doc together (the retired NOTE "a bare key
+  must never touch bp without the doc mirror" is obsolete: the key routes
+  through the same delete helpers as the panel buttons). (3) TRIANGLE
+  SELECTION: `tris.ts triAt()` is a geometric CLICK-OWNER test (hit point
+  within 0.08 m of the prism mid-plane AND inside the outline with ≥ 0.06 m
+  edge clearance) — the old 0.45 m CENTROID radius could never reach a big
+  prism's middle (that was "refuse to select") and a block click near a
+  centroid stole the pick; the Triangles subtab now selects ONLY when the
+  pick itself is a hull prism (`pickCell` kind 'tri'; triAt ≥ 0), edge/corner
+  clicks still draft lattice corners. Feedback: `Engine.setTriHighlight`
+  gold prism caps + outline (depthTest off, staled against the LIVE file so
+  an undo can't leave a gold ghost); hook `__ARCHEAN__.triHl()`, routing
+  probe `triPick(x,y)`. (4) ToolDialog is DRAGGABLE by its title bar
+  (`tool-drag`, pointer-captured, clamped INSIDE the backdrop — a dialog
+  dragged off a phone is one you cannot finish) and OK opens a CONFIRMATION
+  BOX (`tool-confirm-box`) carrying the live preview readout + danger note +
+  "take it back with Undo" line; `tool-confirm` runs and CLOSES the dialog
+  (result rides the toast; the old second-OK no-op is gone). (5) TopBar
+  dropdowns: `max-h-[68dvh] max-w-[min(15rem,80vw)] overflow-y-auto` +
+  tighter mobile rows (menus never hang off the screen). Pinned by
+  `e2e/undo.spec.ts` (@ui: tool round-trip Ctrl+Z/redo + menu state, Delete
+  block + undo, hullify→middle-click SELECT (triHl index)→Delete→undo,
+  dialog drag + clamp), vitest `tris.test.ts` (big-prism middle selects;
+  corner/off-plane/off-outline miss; nearest of coplanar prisms) + updated
+  `e2e/tools.spec.ts` confirm-flow pins.
 - **v1.7 declared TODOs, visible in the Edit ▾ menu** (user: "we need a stack
   to be able to undo at least the last 10 operations, for each and every
-  thing; make this a todo, visible from the Edit Menu"; the vessel-info
-  section is the user's other todo): `edit-undo` and
-  `edit-vessel-name|author|code` render DISABLED with "todo" hints. Planned
-  undo = a snapshot stack in the Editor funnel (deep-copy `{doc, bp, orig,
-  applied}` BEFORE a mutation, keyed coalescences for slider drags, Ctrl+Z +
-  the menu item, reset in `openText`); planned vessel-info section edits the
-  file's real top-level `author` + `data.alias` fields (byte-safe
-  `docSet` string writes) — a license-plate/abbreviation field has NO format
-  backing yet (see Backlog).
+  thing; make this a todo, visible from the Edit Menu") — SHIPPED in v1.9
+  (see the bullet above). The ONLY remaining declared TODO is the
+  vessel-info section: `edit-vessel-name|author|code` render DISABLED with
+  "todo" hints; planned section edits the file's real top-level `author` +
+  `data.alias` fields (byte-safe `docSet` string writes) — a
+  license-plate/abbreviation field has NO format backing yet (see Backlog).
 - **v1.5.6 ATLAS ROUTES + REAL-MODEL GHOST + SMEAR PLACE + LIVE CATALOG
   ICONS (user 2026-10-20):** (1) "a lot of errors loading the zeppelin model
   on github" = the root-absolute `/models` + `/atlas` candidates in
@@ -1490,17 +1535,15 @@ refuses to cut a tag when the strings disagree.
   'worked' — every suite bound to the invisible twin).
 
 ## Backlog
-- **Undo stack (user 2026-10-20, v1.7 TODO, visible in Edit ▾):** ≥10 levels
-  covering EVERY mutation path. Design: snapshot the whole edit state (deep
-  clone of the `DocNode` tree + `bp` + `ctx.orig`/`ctx.applied`) BEFORE each
-  committed operation — snapshot-based undo beats per-op inverses because the
-  doc is a tree and the block/wire/triangle batch ops already splice arrays.
-  Coalesce continuous gestures (gizmo/slider drags write through
-  `Engine.onEdit`/`onDataEdit` at pointer rate: group by operation id + a
-  time window so one drag = one undo step). Entry points: the Editor's
-  `sceneChanged`/`markDirty` funnel + `liveDataEdit` commits + the tools'
-  `run()`. Ctrl/Cmd+Z and the Edit ▸ Undo item (currently disabled) call it;
-  `openText` (a new craft/load) clears the stack.
+- **Undo stack: DONE v1.9 (2026-10-20).** Shipped as the doc-text snapshot
+  stack with time-windowed drag coalescing (see the v1.9 bullet above) —
+  deeper than the requested ≥10 levels (the stack is unbounded per session)
+  and it covers EVERYTHING that flows through the `markDirty`/`sceneChanged`
+  funnels, which is every mutation path in the app. The originally-planned
+  deep-clone-of-`{doc,bp,orig,applied}` form was superseded: `emitDoc(doc)`
+  already carries the complete edit state (doc mirrors are mandatory on
+  every write) and re-opening a snapshot re-derives `orig`/`applied`
+  exactly like a fresh load.
 - **Vessel information editor (user 2026-10-20, v1.7 TODO, Edit ▾ menu):**
   author, name and the abbreviation/"license-plate" code. Real format fields
   exist for two of them — top-level `author` and `data.alias` (the app's

@@ -8,9 +8,10 @@
 //   Blocks — block placement / resizing / deletion
 //   Wire   — the port graph: census, naive auto-wiring, warnings
 //   Flight — flight analysis (mass/CoM, thrust nets, control surfaces)
-// The Edit menu is the HOME of the two user-declared TODOs (v1.7): the undo
-// stack and the vessel-information section (author / name / abbreviation) —
-// listed DISABLED so the roadmap is visible in the UI, wired in the Editor.
+// The Edit menu (v1.9) carries the WORKING Undo/Redo (Ctrl+Z / Ctrl+Y, the
+// Editor's snapshot stack); it remains the HOME of the still-declared
+// vessel-information TODO (author / name / abbreviation) — listed DISABLED
+// so the roadmap is visible in the UI.
 import { useEffect, useRef, useState } from 'react';
 
 export type Mode = 'view' | 'edit' | 'wire' | 'flight' | 'aero';
@@ -21,6 +22,11 @@ interface Props {
   dirty: boolean;
   title: string;
   craftId: string | null;
+  /** Edit ▾ UNDO/REDO (v1.9): enabled state from the Editor's snapshot stack */
+  canUndo?: boolean;
+  canRedo?: boolean;
+  onUndo?: () => void;
+  onRedo?: () => void;
   onNew: () => void;
   onOpen: () => void;
   onSave: (as?: string) => void;
@@ -57,8 +63,13 @@ function Menu(p: { testid: string; label: string; width?: string;
         {p.label}
       </button>
       {open && (
+        // v1.9 MOBILE MENUS (user: "menus dont look good in mobile, they take
+        // too much place"): the dropdown never outgrows the phone screen —
+        // capped height (scrolls), capped width (the w-56 used to hang off
+        // the viewport at the right-hand menus), tighter mobile rows.
         <div data-testid={`${p.testid}-dropdown`}
-          className={`ksp-win absolute left-0 top-8 overflow-hidden rounded-md ${p.width ?? 'w-56'}`}>
+          className={`ksp-win absolute left-0 top-8 max-h-[68dvh] max-w-[min(15rem,80vw)] overflow-y-auto
+                      rounded-md ${p.width ?? 'w-56'}`}>
           {p.children(() => setOpen(false))}
         </div>
       )}
@@ -69,12 +80,13 @@ function Menu(p: { testid: string; label: string; width?: string;
 const Item = (p: { testid: string; label: string; hint?: string; disabled?: boolean;
   on?: boolean; onClick: () => void }) => (
   <button data-testid={p.testid} disabled={p.disabled}
-    className={`flex w-full items-center justify-between gap-4 px-3 py-1.5 text-left text-[12px]
+    className={`flex w-full items-center justify-between gap-4 px-2.5 py-1 text-left text-[11px]
+               md:px-3 md:py-1.5 md:text-[12px]
                ${p.disabled ? 'cursor-default text-ink-dim/60' : 'text-ink hover:bg-white/10'}
                ${p.on ? 'text-accent' : ''}`}
     onClick={() => { if (!p.disabled) p.onClick(); }}>
     <span className="ksp-label">{p.label}</span>
-    {p.hint && <span className="text-[10px] text-ink-dim">{p.hint}</span>}
+    {p.hint && <span className="text-[9px] text-ink-dim md:text-[10px]">{p.hint}</span>}
   </button>
 );
 
@@ -109,9 +121,11 @@ export default function TopBar(p: Props) {
       </Menu>
 
       <Menu testid="edit" label="Edit ▾">
-        {() => (<>
-          <Item testid="edit-undo" label="Undo" hint="todo — not wired yet" disabled
-            onClick={() => undefined} />
+        {close => (<>
+          <Item testid="edit-undo" label="Undo" hint="Ctrl+Z" disabled={!p.canUndo}
+            onClick={() => { close(); p.onUndo?.(); }} />
+          <Item testid="edit-redo" label="Redo" hint="Ctrl+Y" disabled={!p.canRedo}
+            onClick={() => { close(); p.onRedo?.(); }} />
           <Sep />
           <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-ink-dim">Vessel information</div>
           <Item testid="edit-vessel-name" label="Name…" hint="todo" disabled onClick={() => undefined} />

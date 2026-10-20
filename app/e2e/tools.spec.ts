@@ -6,8 +6,9 @@
 //  • Replace all swaps materials/appearance on the live blueprint and the
 //    merged hull repaints (stats().loads strictly increases — the AGENTS
 //    "data assertions cannot pin a repaint" rule);
-//  • Blocks → hull triangles is a DANGER tool: OK arms a confirm, the second
-//    OK converts every geometry block into covering triangles;
+//  • Blocks → hull triangles is a DANGER tool: OK opens a CONFIRMATION BOX
+//    (live readout + warning), Confirm converts every geometry block into
+//    covering triangles and the dialog CLOSES (v1.9 — no inert second OK);
 //  • the block MATERIALS row writes the file's `material` (a gameplay
 //    identity) WITHOUT touching colours;
 //  • the RGB picker writes a NEW slot into the craft's own palette.
@@ -72,7 +73,9 @@ test.describe('tools menu + dialogs @ui', () => {
     await expect(page.getByTestId('tool-hullify')).toBeVisible();
     await page.keyboard.press('Escape');
     await page.getByTestId('edit-menu').click();
-    await expect(page.getByTestId('edit-undo')).toBeDisabled();       // the declared TODOs
+    // v1.9: Undo is WIRED but a fresh, untouched craft has no history yet.
+    await expect(page.getByTestId('edit-undo')).toBeDisabled();
+    await expect(page.getByTestId('edit-redo')).toBeDisabled();
     await expect(page.getByTestId('edit-vessel-author')).toBeDisabled();
     await expect(page.getByTestId('edit-vessel-code')).toBeDisabled();
     await page.keyboard.press('Escape');
@@ -91,7 +94,11 @@ test.describe('tools menu + dialogs @ui', () => {
     // the shipped default IS the user's example: composite ▸ aluminium
     await expect(page.getByTestId('tool-preview')).toContainText(/5 blocks change material/);
     const l0 = await loads(page);
-    await page.getByTestId('tool-ok').click();                          // runs at once
+    await page.getByTestId('tool-ok').click();                          // ▸ confirm box
+    await expect(page.getByTestId('tool-confirm-box')).toBeVisible();
+    await expect(page.getByTestId('tool-preview')).toContainText(/5 blocks change material/);
+    await page.getByTestId('tool-confirm').click();                     // runs + CLOSES
+    await expect(page.getByTestId('tool-dialog-replace-all')).toBeHidden();
     await expect.poll(async () => (await bpOf(page)).blocks.every(b => b.material === 3),
       { timeout: 15_000 }).toBe(true);
     await expect.poll(() => loads(page), { timeout: 15_000 }).toBeGreaterThan(l0);  // hull rebuilt
@@ -99,14 +106,16 @@ test.describe('tools menu + dialogs @ui', () => {
     expect((await bpOf(page)).blocks[0]!.colors).toEqual([4, 4, 4, 4, 4, 4, 4]);
   });
 
-  test('blocks → hull triangles: OK arms the confirm, then converts', async ({ page }) => {
+  test('blocks → hull triangles: OK opens the info confirm box, Confirm converts + closes', async ({ page }) => {
     await openNew(page);
     await openTool(page, 'hullify');
-    await expect(page.getByTestId('tool-warning')).toContainText(/No undo/);
     await expect(page.getByTestId('tool-preview')).toContainText(/5 blocks ▸ \d+ triangles/);
-    await page.getByTestId('tool-ok').click();                          // arms only
+    await page.getByTestId('tool-ok').click();                          // ▸ confirm box only
     expect((await bpOf(page)).blocks.length).toBe(5);
-    await page.getByTestId('tool-ok').click();                          // confirms
+    await expect(page.getByTestId('tool-confirm-box')).toBeVisible();
+    await expect(page.getByTestId('tool-warning')).toContainText(/rewrites hull geometry/i);
+    await page.getByTestId('tool-confirm').click();                     // converts + closes
+    await expect(page.getByTestId('tool-dialog-hullify')).toBeHidden();
     await expect.poll(async () => (await bpOf(page)).blocks.length, { timeout: 15_000 }).toBe(0);
     const d = await bpOf(page);
     expect((d.triangles ?? []).length).toBeGreaterThanOrEqual(12);
@@ -146,6 +155,7 @@ test.describe('materials + RGB picker @ui', () => {
     await page.getByTestId('tool-select-destColor').selectOption('hull');
     await expect(page.getByTestId('tool-preview')).toContainText(/35 faces on 5 blocks repaint/);
     await page.getByTestId('tool-ok').click();
+    await page.getByTestId('tool-confirm').click();
     await expect.poll(async () => (await bpOf(page)).blocks.every(b => b.colors?.[0] === 51),
       { timeout: 15_000 }).toBe(true);
   });

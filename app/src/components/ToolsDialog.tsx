@@ -9,9 +9,11 @@
 // and a `run` that mutates bp AND the doc together (the established batch
 // idiom). The Modal below is shared: it auto-lays-out the fields in a label/
 // control grid, keeps the OK button DISABLED while the preview says there is
-// nothing to do, closes on Esc/backdrop (Cancel), and runs on Enter/OK. The
+// nothing to do, closes on Esc/backdrop (Cancel), is DRAGGABLE by its title
+// bar (v1.9), and OK leads to a CONFIRMATION BOX with the live readout —
+// Confirm runs and the dialog closes (v1.9: no inert second-OK no-op). The
 // tool list itself is a registry — adding a tool means adding one ToolDef.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Blueprint } from '../engine/format';
 import type { EditCtx } from '../engine/edit';
 import { writeBlockDoc, writeBlockMaterial } from '../engine/edit';
@@ -43,8 +45,8 @@ export interface ToolDef {
   label: string;
   icon: string;
   blurb: string;
-  /** true = the operation cannot be undone yet (no undo stack, see the Edit
-   *  menu TODO): the dialog shows a red warning and OK asks for the confirm */
+  /** true = a heavy, hard-to-eye rewrite: the confirmation box shows a red
+   *  warning line (v1.9: everything is undoable via the Edit ▾ Undo stack) */
   danger?: boolean;
   fields: ToolFieldDef[];
   initial: ToolForm;
@@ -159,8 +161,8 @@ export const TOOLS: ToolDef[] = [
         hint: 'Existing hull triangles and struts stay; type-255 component '
           + 'occupancy markers STAY (they are reservations, not geometry); '
           + 'blocks inside Build SUBGRIDS (doors/hatches) stay blocks — they '
-          + 'live in the nested blueprints. There is NO undo yet — Save first '
-          + 'if you want the block version back.',
+          + 'live in the nested blueprints. Edit ▸ Undo (Ctrl+Z) takes the '
+          + 'whole conversion back afterwards.',
       },
     ],
     initial: { wind: 'inward' },
@@ -197,8 +199,17 @@ const replaceSourceOptions = (target: string) =>
 
 // ------------------------------------------------------------------ DIALOG
 
-/** The centered modal: Esc or Cancel dismisses, backdrop click cancels, OK
- *  (Enter) runs. Field controls are generated from the ToolDef. */
+/** The modal: opens CENTRED but is DRAGGABLE by its title bar (v1.9 user
+ *  rule: "the window for tools should be movable") — pointer-captured, so
+ *  it works with mouse and touch alike. Esc or Cancel dismisses, backdrop
+ *  click cancels. v1.9 CONFIRM FLOW (user: "a more understandable OK and
+ *  Confirm and then have a confirmation box with information, rather than
+ *  remaining open and not doing anything anymore when clicking OK a second
+ *  time"): OK opens a CONFIRMATION BOX carrying the exact live readout of
+ *  what the run will change; Confirm performs the run and CLOSES the dialog
+ *  (the result rides the editor toast) — a second OK can never be a no-op
+ *  because the form is behind the confirm step, which only ever has
+ *  Back / Confirm. Field controls are generated from the ToolDef. */
 export function ToolDialog(p: {
   tool: ToolDef; bp: Blueprint; ctx: EditCtx;
   onClose: () => void;
@@ -206,8 +217,10 @@ export function ToolDialog(p: {
   onApplied: (message: string) => void;
 }) {
   const [form, setForm] = useState<ToolForm>({ ...p.tool.initial });
-  const [armed, setArmed] = useState(false);           // danger tools: OK twice
-  const [done, setDone] = useState<string | null>(null);
+  const [confirmStep, setConfirmStep] = useState(false);
+  const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
+  const dragRef = useRef<{ sx: number; sy: number; bx: number; by: number } | null>(null);
+  const boxRef = useRef<HTMLDivElement | null>(null);
   const { onClose } = p;
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -217,59 +230,118 @@ export function ToolDialog(p: {
 
   const preview = useMemo(() => p.tool.preview(form, p.bp), [p.tool, form, p.bp]);
   const runnable = preview !== '' && !preview.startsWith('nothing');
-  const set = (k: string, v: ToolValue) => { setForm(f => ({ ...f, [k]: v })); setArmed(false); };
+  const set = (k: string, v: ToolValue) => { setForm(f => ({ ...f, [k]: v })); setConfirmStep(false); };
 
-  const ok = () => {
-    if (!runnable) return;
-    if (p.tool.danger && !armed) { setArmed(true); return; }
+  const confirmRun = () => {
+    if (!runnable) { setConfirmStep(false); return; }
     const msg = p.tool.run(form, p.ctx);
-    setDone(msg);
     p.onApplied(msg);
+    p.onClose();                       // the toast prints the result — no
+  };                                    // inert "OK again" second act
+
+  const headDown = (e: React.PointerEvent) => {
+    if ((e.target as HTMLElement).closest('button')) return;      // ✕ stays ✕
+    const cur = drag ?? { x: 0, y: 0 };
+    dragRef.current = { sx: e.clientX, sy: e.clientY, bx: cur.x, by: cur.y };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   };
+  const headMove = (e: React.PointerEvent) => {
+    const d = dragRef.current;
+    if (!d) return;
+    const el = boxRef.current, host = el?.parentElement as HTMLElement | null;
+    let nx = d.bx + e.clientX - d.sx, ny = d.by + e.clientY - d.sy;
+    if (el && host) {
+      // clamp so the window NEVER leaves the backdrop (a dialog dragged off
+      // a phone screen is a dialog you cannot finish — its buttons stop hit-
+      // testing), while on a desktop it roams nearly the whole viewport.
+      const hb = host.getBoundingClientRect(), db = el.getBoundingClientRect();
+      const limX = Math.max(0, hb.width / 2 - db.width / 2);
+      const limY = Math.max(0, hb.height / 2 - db.height / 2);
+      nx = Math.min(limX, Math.max(-limX, nx));
+      ny = Math.min(limY, Math.max(-limY, ny));
+    }
+    setDrag({ x: nx, y: ny });
+  };
+  const headUp = () => { dragRef.current = null; };
 
   return (
     <div data-testid={`tool-backdrop-${p.tool.id}`}
       className="absolute inset-0 z-40 grid place-items-center bg-black/60 p-3"
       onMouseDown={e => { if (e.target === e.currentTarget) p.onClose(); }}>
-      <div data-testid={`tool-dialog-${p.tool.id}`} role="dialog" aria-label={p.tool.label}
+      <div ref={boxRef} data-testid={`tool-dialog-${p.tool.id}`} role="dialog" aria-label={p.tool.label}
         className="ksp-win w-[440px] max-w-[92vw] rounded-lg px-4 py-3"
-        onKeyDown={e => { if (e.key === 'Enter') ok(); }}>
-        <div className="ksp-label flex items-center gap-2 border-b border-white/10 pb-1.5 text-[12px] text-accent">
+        style={drag ? { transform: `translate(${drag.x}px, ${drag.y}px)` } : undefined}
+        onKeyDown={e => { if (e.key === 'Enter') (confirmStep ? confirmRun() : runnable && setConfirmStep(true)); }}>
+        {/* title bar = the drag handle (cursor-move, touch-safe) */}
+        <div data-testid="tool-drag"
+          className="ksp-label flex cursor-move touch-none select-none items-center gap-2
+                     border-b border-white/10 pb-1.5 text-[12px] text-accent"
+          onPointerDown={headDown} onPointerMove={headMove} onPointerUp={headUp}
+          onPointerCancel={headUp}>
           <span className="text-[14px]">{p.tool.icon}</span> Tools — {p.tool.label}
           <button data-testid="tool-close" onClick={p.onClose} aria-label="close"
             className="ksp-btn ml-auto rounded px-1.5 text-[11px] text-ink-dim hover:text-accent">✕</button>
         </div>
-        <p className="pt-1.5 text-[11px] leading-snug text-ink-dim">{p.tool.blurb}</p>
 
-        {/* the generated field grid: label ▸ control, one row per definition */}
-        <div className="grid grid-cols-[92px_1fr] items-start gap-x-2 gap-y-1.5 pt-2.5">
-          {p.tool.fields.filter(f => !f.showIf || f.showIf(form)).map(f => (
-            <FieldRow key={f.key} def={f} value={form[f.key]} form={form} onSet={set} />
-          ))}
-        </div>
-
-        {p.tool.danger && (
-          <div data-testid="tool-warning" className="mt-2 rounded border border-red-700/60 bg-red-950/40
-                                                     px-2 py-1 text-[10px] text-red-200">
-            No undo yet — this rewrite is immediate.{' '}
-            {armed ? 'Press OK AGAIN to confirm.' : 'OK arms the confirmation.'}
+        {confirmStep ? (
+          /* THE CONFIRMATION BOX: exactly what the run will change, then
+             Back / Confirm — nothing else (no inert OK) */
+          <div data-testid="tool-confirm-box" className="pt-2">
+            <div className={`rounded border px-3 py-2 text-[11px] leading-snug
+                             ${p.tool.danger ? 'border-red-700/60 bg-red-950/40 text-red-100'
+                               : 'border-gold/40 bg-black/30 text-ink'}`}>
+              <div className="ksp-label pb-1 text-[11px] font-semibold text-gold">
+                {p.tool.icon} {p.tool.label} — this will
+              </div>
+              <div data-testid="tool-preview" className="tabular-nums">{preview}</div>
+              {p.tool.danger && (
+                <div data-testid="tool-warning" className="pt-1.5 text-[10px] text-red-200">
+                  This rewrites hull geometry in one go.
+                </div>
+              )}
+              <div className="pt-1.5 text-[10px] text-ink-dim">
+                You can take it back afterwards with Edit ▸ Undo (Ctrl+Z).
+              </div>
+            </div>
+            <div className="mt-2.5 flex justify-end gap-2">
+              <button data-testid="tool-back" className="ksp-btn px-3 py-1 text-[12px]"
+                onClick={() => setConfirmStep(false)}>
+                ← Back
+              </button>
+              <button data-testid="tool-confirm" onClick={confirmRun}
+                className={`ksp-btn px-3 py-1 text-[12px] on ${p.tool.danger ? 'text-red-200' : ''}`}>
+                ✓ Confirm &amp; run
+              </button>
+            </div>
           </div>
+        ) : (
+          <>
+            <p className="pt-1.5 text-[11px] leading-snug text-ink-dim">{p.tool.blurb}</p>
+
+            {/* the generated field grid: label ▸ control, one row per definition */}
+            <div className="grid grid-cols-[92px_1fr] items-start gap-x-2 gap-y-1.5 pt-2.5">
+              {p.tool.fields.filter(f => !f.showIf || f.showIf(form)).map(f => (
+                <FieldRow key={f.key} def={f} value={form[f.key]} form={form} onSet={set} />
+              ))}
+            </div>
+
+            <div data-testid="tool-preview"
+              className={`mt-2.5 border-t border-white/10 pt-2 text-[11px] tabular-nums
+                          ${runnable ? 'text-gold' : 'text-ink-dim'}`}>
+              {preview || 'nothing to do'}
+            </div>
+            <div className="mt-2.5 flex justify-end gap-2">
+              <button data-testid="tool-cancel" className="ksp-btn px-3 py-1 text-[12px]" onClick={p.onClose}>
+                Cancel
+              </button>
+              <button data-testid="tool-ok" disabled={!runnable}
+                className={`ksp-btn px-3 py-1 text-[12px] ${runnable ? 'on' : ''}`}
+                onClick={() => setConfirmStep(true)}>
+                OK — review &amp; confirm
+              </button>
+            </div>
+          </>
         )}
-        <div data-testid="tool-preview"
-          className={`mt-2.5 border-t border-white/10 pt-2 text-[11px] tabular-nums
-                      ${runnable ? 'text-gold' : 'text-ink-dim'}`}>
-          {done ?? preview}
-        </div>
-        <div className="mt-2.5 flex justify-end gap-2">
-          <button data-testid="tool-cancel" className="ksp-btn px-3 py-1 text-[12px]" onClick={p.onClose}>
-            Cancel
-          </button>
-          <button data-testid="tool-ok" disabled={!runnable}
-            className={`ksp-btn px-3 py-1 text-[12px] ${runnable && (!p.tool.danger || armed) ? 'on' : ''}`}
-            onClick={ok}>
-            {p.tool.danger && !armed ? 'OK — confirm' : 'OK'}
-          </button>
-        </div>
       </div>
     </div>
   );

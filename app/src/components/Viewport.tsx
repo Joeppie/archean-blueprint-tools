@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import { openAtlas, modelFailures, type ModelAtlas } from '../engine/models';
 import type { Blueprint } from '../engine/format';
 import { Engine, type PickHit, type SceneStats } from '../engine/scene';
+import { triAt } from '../engine/tris';
 
 declare global {
   interface Window { __ARCHEAN__?: {
@@ -27,6 +28,12 @@ declare global {
     /** WORLD bboxes of the highlight overlay meshes (v1.6 stale-ghost pin:
      *  the overlay must sit ON the selected block after every edit) */
     blockHlBoxes: () => ReturnType<Engine['blockHlBoxes']>;
+    /** v1.9 TRIANGLE selection highlight: the gold-highlighted triangle index
+     *  (-1 = none) — the "triangles refuse to select properly" pin */
+    triHl: () => number;
+    /** v1.9 triangle-select routing probe: pickCell + the geometric triAt
+     *  click-owner at one pixel ({kind, bi, t}; t >= 0 = would select) */
+    triPick: (x: number, y: number) => { kind: string; bi: number; t: number } | null;
     /** BLOCK widget state (v1.5): {bi, mode, mirror, cell} while a selected
      *  block owns the gizmo (BLOCKS ▸ Edit), else null */
     blockGizmo: () => ReturnType<Engine['blockGizmoState']>;
@@ -108,6 +115,13 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
       ghost: () => engine.placeGhostState,
       blockHighlight: () => engine.blockHighlightState,
       blockHlBoxes: () => engine.blockHlBoxes(),
+      triHl: () => engine.triHighlightState,
+      triPick: (x, y) => {
+        const r = engine.pickCell(x, y);
+        if (!r) return null;
+        const b = engine.blueprint;
+        return { kind: r.kind, bi: r.bi, t: b ? triAt(b, r.point) : -1 };
+      },
       blockGizmo: () => engine.blockGizmoState(),
       sel: () => engine.selectionState(),
       twinWarn: () => engine.twinWarnState(),

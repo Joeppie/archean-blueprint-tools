@@ -39,6 +39,30 @@ describe('hull lattice', () => {
     expect(triAt(bp, [c[0] + 1, c[1], c[2]])).toBe(-1);
   });
 
+  test('v1.9 click-owner pick: the middle of a BIG prism selects, edge/corner '
+    + 'clicks stay corner-drafts, off-plane misses (the centroid-radius limit '
+    + 'that made large triangles unselectable is gone)', () => {
+    // a 20-cell right triangle (5 m legs) — the old 0.45 m centroid radius
+    // could never reach most of its surface
+    const big = triangleFromCorners([10, 10, 10], [30, 10, 10], [10, 10, 30], [1, 2, 3, 4, 5])!;
+    const bp = { data: { triangles: [big] } } as unknown as Blueprint;
+    const c = triCentroid(big);
+    expect(triAt(bp, c)).toBe(0);
+    // the plane offset of the prism skin face (±0.025) still belongs to it
+    expect(triAt(bp, [c[0], c[1] + 0.025, c[2]])).toBe(0);
+    // deep in a CORNER of the big triangle: inside, but < margin from the
+    // legs → NOT a selection (a corner-draft target instead)
+    expect(triAt(bp, [10 * 0.25 - 1.5 + 0.01, 10 * 0.25 - 1.5, 10 * 0.25 - 1.5 + 0.01])).toBe(-1);
+    // outside the outline entirely
+    expect(triAt(bp, [40 * 0.25 - 1.5, 40 * 0.25 - 1.5, 10 * 0.25 - 1.5])).toBe(-1);
+    // off the plane (beyond the prism skin)
+    expect(triAt(bp, [c[0], c[1] + 0.5, c[2]])).toBe(-1);
+    // nearest of two coplanar prisms wins by depth/margin, not centroid
+    const other = triangleFromCorners([40, 40, 10], [50, 40, 10], [40, 40, 50], [1, 2, 3, 4, 5])!;
+    const bp2 = { data: { triangles: [big, other] } } as unknown as Blueprint;
+    expect(triAt(bp2, triCentroid(other))).toBe(1);
+  });
+
   test.skipIf(!existsSync(`${corpusDir()}/3812927875/blueprint.json`))
   ('ISW: every stored vertex lands inside the craft bbox', () => {
     const bp = JSON.parse(readFileSync(`${corpusDir()}/3812927875/blueprint.json`, 'utf8')) as Blueprint;
