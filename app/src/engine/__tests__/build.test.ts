@@ -3,6 +3,7 @@
 // occupancy-mirror (type 255) skipping, proxy boxes.
 import { describe, expect, test } from 'vitest';
 import { buildCompProxies, buildSolids, colorKey } from '../build';
+import { buildHullSkin } from '../hull';
 import type { Block, Blueprint, Triangle } from '../format';
 import { resolveColor } from '../palette';
 
@@ -108,6 +109,25 @@ describe('buildSolids', () => {
       frame_x: 1, frame_y: 1, frame_z: 1, colors: [51] } as Triangle;
     const { wire } = buildSolids(bpOf([], [t]));
     expect(wire.length).toBe(3 * 2 * 3);                // 3 edges × 2 pts × xyz
+  });
+
+  test('hullified GIANT survives the wire merge (v1.5.8 RangeError pin)', () => {
+    // United-airliner scale: hullify emits 53k tris; skin.wire is then 18
+    // numbers/tri. The old wire.push(...skin.wire) spread ~1M actual
+    // arguments and died (RangeError: maximum call stack / too many args) —
+    // the scene reload AFTER a successful convert. 30k tris = 540k numbers
+    // reproduces it; the buffer must also stay EXACTLY the hull skin's.
+    const tris: Triangle[] = [];
+    for (let i = 0; i < 30000; i++) {
+      tris.push({ v0_x: 0, v0_y: 0, v0_z: 0, v1_x: 6, v1_y: 0, v1_z: 0,
+        v2_x: 0, v2_y: 0, v2_z: 6, frame_x: 1, frame_y: 1, frame_z: 1 + i,
+        colors: [51] } as Triangle);
+    }
+    const { wire, stats } = buildSolids(bpOf([], tris));
+    expect(stats.hullTris).toBe(30000);
+    const skin = buildHullSkin(tris);
+    expect(wire.length).toBe(skin.wire.length);         // 30000 × 18
+    expect(wire).toEqual(skin.wire);                    // same sequence, no loss
   });
 });
 

@@ -116,7 +116,12 @@ export function buildSolids(bp: Blueprint): SolidBatch {
     const b = bucketForIn(buckets, f.slot, legacy, palette);
     tri3(b, f.tri[0], f.tri[1], f.tri[2]);
   }
-  wire.push(...skin.wire);
+  // NO spread: skin.wire is 18 numbers per hull triangle, and a hullified
+  // giant (United airliner: 53k tris = 958k numbers) blows the engine's
+  // actual-argument limit through push(...arr) — RangeError "too many
+  // arguments / maximum call stack". Loop-append: identical sequence, no
+  // arity ceiling (v1.5.8 fix).
+  for (let i = 0; i < skin.wire.length; i++) wire.push(skin.wire[i]!);
   hullTris = skin.tris;
 
   return { buckets, wire, stats: { blocks, tris, hullTris } };
