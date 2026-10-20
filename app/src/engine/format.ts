@@ -31,10 +31,20 @@ export function worldCoord(o: LatticeObj, ax: 'x' | 'y' | 'z'): number {
  *  right-handed camera math, so this is the identity copy (kept as a seam). */
 export function toViewPos(p: Vec3D): Vec3D { return { x: p.x, y: p.y, z: p.z }; }
 
-/** File → view quaternion for palette-bearing (modern, v108+) files: the
- *  Unity-LH quaternion's plain CONJUGATE (w,−x,−y,−z) — pipes pin placement
- *  to R(q*) at 0.000 m (AGENTS §Format facts, de-mirrored v0.180). */
-export function toViewQuatModern(q: FileQuat): FileQuat { return { w: q.w, x: -q.x, y: -q.y, z: -q.z }; }
+/** File → view quaternion for palette-bearing (2026) files.
+ *  v1.5.11 RE-ARBITRATION — this is now the RAW stored quaternion, AS-IS:
+ *  the game reads palette and palette-less files by the SAME raw law
+ *  ("legacy" differs ONLY in colors). Proof: the game-written two-axis
+ *  L/R dashboard craft (testdata/9000004001): components [0]+[1] share one
+ *  quaternion and under the RAW law their boards meet corner-to-corner
+ *  (1.5 cm) as a flush, perpendicular L — the shape the user built and
+ *  sees in game; under the old conjugate law [1] missed [0] by 1.46 m and
+ *  speared through the deck ("dashboard[1] is mispositioned"). Corroborated
+ *  by the game's byte-identical ISW re-save (no conversion ever happens
+ *  across generations) and by the game placing our conjugated exports
+ *  flipped (2026-10-20 in-game screenshots). The earlier V2-conjugate claim
+ *  was a pre-v0.180 mirrored-chain artifact — see FORMAT §Handedness. */
+export function toViewQuatModern(q: FileQuat): FileQuat { return { w: q.w, x: q.x, y: q.y, z: q.z }; }
 
 /** File → view quaternion for palette-less legacy files: the stored
  *  quaternion AS-IS (those files keep the Unity LH quaternion RAW; the
@@ -47,11 +57,12 @@ export const fromViewQuatModern = toViewQuatModern;   // involutive
 export const fromViewQuatLegacy = toViewQuatLegacy;   // involutive
 
 /**
- * Unity LH → right-handed placement for MODERN files: conjugate
- * {w,−x,−y,−z} (verified against data.pipes endpoints: 0.000 m under R(q*)).
- * Since the v0.180 de-mirror this IS toViewQuatModern.
+ * Historical seam: the pre-v1.5.11 "Unity LH → RH placement for MODERN files:
+ * conjugate {w,−x,−y,−z}" law. RETIRED v1.5.11 by the raw-law re-arbitration
+ * (see toViewQuatModern) — the file quaternion IS the placement quaternion
+ * for BOTH generations; this is now an alias of that one raw law.
  */
-export function unityConjugate(q: FileQuat): FileQuat { return { w: q.w, x: -q.x, y: -q.y, z: -q.z }; }
+export function unityConjugate(q: FileQuat): FileQuat { return { w: q.w, x: q.x, y: q.y, z: q.z }; }
 
 export interface Block extends LatticeObj {
   type: number;

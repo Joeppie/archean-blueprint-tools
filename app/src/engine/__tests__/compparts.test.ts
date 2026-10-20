@@ -33,10 +33,12 @@ describe('compPartBoxes', () => {
     box!.size.forEach((v, i) => expect(v).toBeCloseTo([1, 0.5, 0.25][i]!, 6));
   });
 
-  test('yawed box grows to the rotated AABB (x↔z swap under 90°; modern law = R(q*))', () => {
+  test('yawed box grows to the rotated AABB (x↔z swap under 90°; one raw law = R(q))', () => {
     const [box] = compPartBoxes(comp(Y90) as never, man, false, 0);
     box!.size.forEach((v, i) => expect(v).toBeCloseTo([0.25, 0.5, 1][i]!, 6));
-    box!.center.forEach((v, i) => expect(v).toBeCloseTo([0.875, 2.25, -2.5][i]!, 6));
+    // v1.5.11 ONE raw law: R(Y90) maps x̂→−ẑ (RH +90 about y), so the local
+    // box x∈[0,1], z∈[0,0.25] lands at world x∈[0,0.25], z∈[−1,0] + pos.
+    box!.center.forEach((v, i) => expect(v).toBeCloseTo([1.125, 2.25, -3.5][i]!, 6));
   });
 
   test('unknown component type yields no boxes', () => {
@@ -73,18 +75,20 @@ describe('displayQuat', () => {
     expect(got.y).toBeCloseTo(want.y); expect(got.z).toBeCloseTo(want.z);
   });
 
-  test('WHEELS: legacy files ride qView as-is; MODERN files hang the arm', () => {
+  test('WHEELS: one raw law — legacy rides qView as-is; modern droops the arm to −y', () => {
     // 2026-10-19 (user: ISW casters "sticking up" in the app vs the legacy
     // viewer/in-game): the semi-truck evidence that retired the droop was
     // collected on a RAW-quat legacy file — there the rule stays OFF (app ==
-    // dev build pose, wheelpair-verified). On MODERN (conjugate) files the
-    // display rolls the suspension arm to −y about the world axle, the
-    // legacy viewer's applyDisplayPose rule.
+    // dev build pose, wheelpair-verified). On modern files the display rolls
+    // the suspension arm to −y about the world axle, the legacy viewer's
+    // applyDisplayPose rule. v1.5.11: the droop INPUT is the RAW quat now
+    // (fileToViewQuat = identity) — the ISW caster quat already hangs the
+    // arm below the mount, and the roll rule leaves a hanging arm untouched.
     const x90 = { w: Math.SQRT1_2, x: -Math.SQRT1_2, y: 0, z: 0 };   // ISW caster file quat
-    const conjX = { w: x90.w, x: -x90.x, y: 0, z: 0 };               // fileToViewQuat(x90)
+    const rawX = x90;                                                // fileToViewQuat(x90) = AS-IS
     for (const t of ['SmallWheel', 'Wheel', 'BigWheel']) {
       expect(displayQuat(t, x90, x90, true)).toEqual(x90);           // legacy: qView as-is
-      const d = displayQuat(t, conjX, x90, false);                   // modern: drooped
+      const d = displayQuat(t, rawX, x90, false);                    // modern: hangs/droops
       const arm = qRot(d, [0, 0, -1]);        // world arm (content C maps file ŷ → −ẑ)
       expect(arm[1]).toBeCloseTo(-1, 6);                             //   hangs BELOW the mount
       const axle = qRot(d, [1, 0, 0]);

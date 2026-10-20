@@ -38,16 +38,23 @@ describe('grid maths', () => {
   test('view mapping is the IDENTITY: display frame == file frame (v0.180)', () => {
     expect(toViewPos({ x: 1, y: 2, z: 3 })).toEqual({ x: 1, y: 2, z: 3 });
   });
-  test('the two quaternion conventions (de-mirrored v0.180)', () => {
+  test('ONE raw quaternion law for BOTH generations (v1.5.11)', () => {
     const q = { w: 0.5, x: 0.5, y: 0.5, z: 0.5 };
     expect(toViewQuatModern(toViewQuatModern(q))).toEqual(q);
     expect(toViewQuatLegacy(toViewQuatLegacy(q))).toEqual(q);
-    // modern = plain conjugate (w,−x,−y,−z) [pipes: placement is R(q*)],
-    // legacy = stored quaternion AS-IS [mural: raw R(q)] — the palette-keyed
-    // LEGACY_Q split, minus the old mirror conjugations.
-    expect(toViewQuatModern(q)).toEqual({ w: 0.5, x: -0.5, y: -0.5, z: -0.5 });
+    // v1.5.11 RE-ARBITRATION: the file quaternion IS the placement quaternion
+    // for palette AND palette-less files alike (raw AS-IS). Proof set: the
+    // game-built pyramid craft (IAS-418 testframe) puts its dashboards flush
+    // on the slant faces ONLY under R(q) (dot 0.999/1.000; conjugate = the
+    // boards skew through the deck = the editor misfire the user screenshotted);
+    // the game-written L/R dashboard fixture 9000004001 meets corner-to-corner
+    // flush under raw; the two ISW-241 saves (2025 workshop + 2026 re-save)
+    // keep BYTE-IDENTICAL orientations — no conversion ever happens across
+    // generations. The old conjugate law was a pre-v0.180 mirrored-chain
+    // artifact. See FORMAT §Handedness.
+    expect(toViewQuatModern(q)).toEqual({ w: 0.5, x: 0.5, y: 0.5, z: 0.5 });
     expect(toViewQuatLegacy(q)).toEqual({ w: 0.5, x: 0.5, y: 0.5, z: 0.5 });
-    expect(unityConjugate(q)).toEqual({ w: 0.5, x: -0.5, y: -0.5, z: -0.5 });
+    expect(unityConjugate(q)).toEqual({ w: 0.5, x: 0.5, y: 0.5, z: 0.5 });
   });
 });
 

@@ -58,17 +58,27 @@ this never has to be re-derived: `data.pipes` segment endpoints are *game-comput
 positions* of each component's adapter ports. For every port,
 `position + R(q*)·adapter_local` reproduces the stored pipe end to **0.000 m**, while
 `position + R(q)·adapter_local` is **0.18–0.66 m** off. The game's own data settles it.
+**⟵ RETRACTED 2026-10-21 (v1.5.11).** That measurement was taken through the pre-v0.180
+MIRRORED display chain (mirrored positions + mirror-conjugated quats + z-flipped
+adapter locals) and its conclusion — a generation-keyed conjugate READ law — did not
+survive re-measurement in the raw file frame: re-running the endpoint comparison over
+the whole corpus (6309 pipe-port pairs, correct .ini node-chain composition) puts BOTH
+laws far from 0.06 m (medians 0.29–0.39 m) with RAW scoring strictly better on V1
+(279 vs 182 hits) and no worse on V2. The 0.000 m figure was a property of the removed
+mirror chain, not of the file. The placement law is now ONE RAW LAW for every
+generation — see the v1.5.11 ruling below.
 
 **The de-mirrored display chain (v0.180, 2026-10-19 — see §"Chirality vs
 in-game truth" below, which is the arbiter):** the game projects the RAW
 file frame with standard right-handed camera math, so the viewer renders
 file coordinates directly —
 
-    view_pos  = (x, y, z)           view_quat V2 (modern) = (w, −x, −y, −z)  [= q*]
-                                    view_quat V1 (legacy) = (w, x, y, z)     [raw q]
+    view_pos  = (x, y, z)           view_quat (EVERY generation) = (w, x, y, z)  [raw q]
 
-— the conjugate/raw placement law (the LEGACY_Q split, verified by the pipes
-and mural proofs above) WITHOUT the old axis mirror. `model.data`, the
+— since v1.5.11 (2026-10-21) ONE raw placement law for palette AND
+palette-less files (the old LEGACY_Q conjugate/raw split is RETIRED — the
+v1.5.11 ruling below is normative), applied WITHOUT any axis mirror.
+`model.data`, the
 serialized save, the inspector's numbers and all reports stay in raw file
 space, and component *local* geometry keeps raw `.ini`/gltf numbers with
 **no** root mirror (the historic `scale.z = -1` + emit-time z-flip chain,
@@ -95,13 +105,41 @@ probes. Rule 4 is DELETED: open→save keeps every `components[].orientation`
 byte-exact (`savefidelity.test.ts` + `e2e/savefidelity.spec.ts`, fixture
 `testdata/9000004001` = the game-written two-axis L/R dashboards). The
 migration keeps ONLY the palette/color conversion (what the game itself
-does on re-saves). OPEN CONSEQUENCE for the read law: the user's game read
-the conjugated export with a placement that differs from its placement of
-the raw bytes ⇒ the palette-keyed V2-conjugate claim above must be
-re-arbitrated against a NATIVE palette file with multi-axis rotations
-9000004001-style using IN-GAME pixels (the only sanctioned arbiter); until
-then no tool may rewrite orientation bytes, which makes every export
-law-neutral.
+does on re-saves).
+
+**V1.5.11 RULING — ONE RAW QUATERNION LAW (2026-10-21, NORMATIVE).** The
+palette-keyed V2-conjugate READ law is DEAD: the game places components as
+`world = position + R(q)` with the STORED quaternion AS-IS, for palette AND
+palette-less files alike ("legacy" differs ONLY in colors + the colors
+shape). The arbitration set, all game-built files that load perfect in
+game (the only sanctioned arbiter — in-game pixels):
+  • IAS-418 `testdata/9000005001` (the user's `testframe.json`, a fresh
+    2026 PALETTE-BEARING craft: deck + corner-block pyramid + 8 dashboards
+    drawn onto the faces): under RAW every board normal sits EXACTLY on a
+    block face plane (|dot| = 1.000, ≤ 0.13 m to the surface; the 5-board
+    asterisk + the two deck boards + the side board); under the conjugate
+    the same boards skew through the deck (|dot| ≤ 0.94) — the user's
+    screenshot of 2026-10-21. Pinned by `placement-law.test.ts` +
+    `app/tools/flushcheck.mjs 9000005001` (live-scene audit, PASS).
+  • `testdata/9000004001` (game-written two-axis L/R dashboards): raw lands
+    the boards corner-to-corner flush (1.5 cm); conjugate misses by 1.46 m.
+  • ISW-241's two saves (V1 3518436870 + V2 re-save 3812927875) keep
+    BYTE-IDENTICAL orientations for the same scene — the game converts
+    nothing across generations, so identical bytes MUST display identically;
+    the two-law split made our OWN corpus render one craft two ways.
+  • The engine's own export-fidelity finding (v1.5.10): the game placed our
+    open-time-CONJUGATED exports flipped (wheel on the strut, murals torn)
+    — i.e. it read the written bytes RAW.
+  • The corpus-wide pipes re-measurement (above) shows the old 0.000 m
+    proof was a mirrored-chain artifact, with RAW ≥ conjugate everywhere.
+What remains true: the STORED numbers are Unity left-handed quaternions —
+but the file's coordinate numbers are read consistently in that same LH
+frame, so a right-handed renderer that plots positions as raw numbers gets
+the game's (mirrored, §Chirality) view with the RAW quaternion; conjugation
+would place the parts in the MIRRORED world, which is exactly the "united
+reads backwards / dashboards skew" mismatch. Consequence for tooling: any
+Euler-order or yaw-pitch-roll round-trip on an orientation is FORBIDDEN —
+quaternion bytes ride untouched (v1.5.10 hard rule, unchanged).
 
 **The dev viewer's convention, read from its source (viewer.xenontools.dev
 `js/blueprint.js` + `js/scene.js`, Oct 5):** components are placed with the
@@ -110,15 +148,18 @@ raw position, no conjugate, no axis mirror. Per the game's own workshop
 screenshots (§Chirality vs in-game truth, 2026-10-19) that raw-numbers scene
 IS the game's view for positions, identity mounts and unrotated text — the
 dev's one deviation is ROTATED parts in V2 files, where the game places with
-the CONJUGATE and the dev's raw quaternion mirrors the part. (The pre-2026-10
+the CONJUGATE and the dev's raw quaternion mirrors the part. ~~(The pre-2026-10
 narrative here claimed the dev's scene was "the mirror image of the game"
 and ours the game-true side — that direction was BACKWARDS; the old z-mirror
 chain was the mirror image, and the symptoms users saw when comparing
-viewers were that mirror.) Both viewers now agree with the game on the same
-side (ours since the v0.180 de-mirror); for rotated V2 parts the dev's raw
+viewers were that mirror.)~~ Both viewers now agree with the game on the same
+side (ours since the v0.180 de-mirror); ~~for rotated V2 parts the dev's raw
 chain additionally places its adapters away from its own recorded
 `data.pipes` endpoints (the conjugate law nails those to 0.000 m — the proof
-above). Dev extras worth
+above).~~ **v1.5.11: the dev's raw-quat placement is correct for rotated V2
+parts too** — its "documented own bug" never existed; it was measured against
+our conjugate law, which is the law that was wrong (§Handedness v1.5.11
+ruling). Dev extras worth
 porting, transcribed here: `components[].mirrorAxis` (1/2/3 = x/y/z) = the
 game's left-right symmetry flag, applied as a negative scale on that axis of
 the component instance (0/null in all corpus files today); dashboard button
@@ -201,10 +242,10 @@ colour shape:
 | property | V1 (legacy, 2024–25) | V2 (2026) |
 |---|---|---|
 | `data.colors` | **absent/empty** → built-in palette | present, 256 entries |
-| `components[].orientation` | Unity LH quaternion **RAW** | **CONJUGATE** `{w,−x,−y,−z}` |
+| `components[].orientation` | Unity LH quaternion **RAW** | **RAW too** (v1.5.11: one law; the old "conjugate" claim was a mirrored-chain artifact) |
 | `components[].colors` | `[slot, slot]` **index pair** | `{color1:{…}, color2:{…}}` dict |
 | finish-family bases | polished 80, metal 120, glass 160 (matte 40 shared) | polished 84, metal 128, glass 172 → `legacySlot()` +4/+8/+12 |
-| view-quat chain (v0.180) | stored quat **as-is** `(w,x,y,z)` | **conjugate** `(w,−x,−y,−z)` (pre-v0.180: `(w,−x,−y,z)` / `(w,x,y,−z)` mirrored view) |
+| view-quat chain (v1.5.11) | stored quat **as-is** `(w,x,y,z)` | stored quat **as-is** `(w,x,y,z)` (pre-v1.5.11: conj `(w,−x,−y,−z)` — RETRACTED; pre-v0.180: `(w,−x,−y,z)` / `(w,x,y,−z)` mirrored view) |
 
 **Corpus census (111 files under testdata/, 2026-10-19):** all are
 `version:1` + `data.version:2`. 60 workshop craft split **51 V1
@@ -218,11 +259,12 @@ must key on the SHAPE of `comp.colors` (`compColor`'s
 `Array.isArray(comp.colors)` test), NOT on palette presence. The fixtures'
 quaternions are all identity (matrix law: identity mounts only), so raw vs
 conjugate is convention-invariant there and neither viewer can tell them
-apart. The palette↔quat coupling is verified on the two proof craft only
+apart. ~~The palette↔quat coupling is verified on the two proof craft only
 (mosaic `3334698274` mural flushfrac 1.00 RAW; ISW `3812927875` pipes
-0.000 m CONJ); the other 7 workshop V2 craft follow the same writer and
-carry dict colours, but are not individually pipe-verified — the heuristic
-is structural, and no corpus file is known to lie about it.
+0.000 m CONJ)~~ — v1.5.11: the quat half of that coupling is VOID (one raw
+law, §Handedness); the palette + colours-SHAPE split above stands. The
+palette key now drives ONLY colour resolution (`legacySlot()`), never
+placement; every law probe craft (`9000004001`, `9000005001`) reads raw.
 
 **Mirror verdict for the "every scene seems MIRRORED" report (dev|ours
 sheets).** ~~Expected, not a bug: our z-mirror chain renders the GAME's
@@ -349,9 +391,10 @@ RAW file space, az=−90° ⇒ camera on the −x side):
 
 **Verdict B: our display chain renders the game's view horizontally
 flipped.** The dev's raw-numbers render IS the game's view (positions,
-identity mounts, unrotated text always; for ROTATED parts in V2 files
+identity mounts, unrotated text always; ~~for ROTATED parts in V2 files
 the dev still uses raw q — its one known deviation from the game, whose
-data-pinned placement is the conjugate). Our scene is exactly M(file)
+data-pinned placement is the conjugate~~ — v1.5.11: the dev's raw-q rotated
+placement equals the game too, it had no deviation). Our scene is exactly M(file)
 (M = z-mirror) rendered RH. Every selftest/postest/comptest pin is
 INVARIANT under a global reflection (nose-ward, below-pivot,
 flush-to-wall, endpoints-on-pipes), so the whole suite stayed green
@@ -367,10 +410,11 @@ text on from a given camera, because its arbiter was the dev's pixels,
 not the game's.
 
 **The corrected model of the game's pixels** (reconciles ALL evidence —
-pipes 0.000 m, mosaic murals, label readability, livery, cockpit):
-raw file POSITIONS, NO world mirror, standard RH camera; rotations
-V1-file R(q) / V2-file R(q*) (the LEGACY_Q table stands — placement
-conventions are mirror-invariant); dashboards = RAW canvas on the
+mosaic murals, label readability, livery, cockpit, and since v1.5.11 the
+pyramid/dashboard flush probes; the old "pipes 0.000 m" datum is retracted,
+§Handedness): raw file POSITIONS, NO world mirror, standard RH camera;
+rotations **R(q) AS STORED for every generation** (the LEGACY_Q table is
+RETIRED v1.5.11 — one raw law); dashboards = RAW canvas on the
 board's +z face (readable from +z, text-up = local +ŷ, string advances
 +x̂ — verified readable in the game's own s2 dash; comp551's mount quat
 maps ŷ to the up-aft slope, consistent); labels readable from the dir
@@ -906,23 +950,30 @@ Zero-build Three.js (WebGL) inspector: `python3 -m http.server 8650` (repo root)
   pipe endpoints (delta table, 100 pipes measured) show the junction cables
   were authored in the BUILDER's flat frame — outlets pointing UP (view +y),
   the 4-outlet row along the fuselage (view z), inlet down — with only the
-  0.135 m connector-stub offset. The conjugate (file) pose stands the comb
-  upright and matches NONE of these cables (the user: junctions "stick out"
-  of their pipes). Display pose = mirror-conjugate file quaternion
-  `(w,−x,−y,z)` = the builder/v0.91 layout: model lies flat, ports align with
+  0.135 m connector-stub offset. ~~The conjugate (file) pose stands the comb
+  upright and matches NONE of these cables~~ (v1.5.11: under the ONE raw law
+  the file pose IS the flat pose — the "sticks out" symptom was our own
+  conjugate read, now retracted; the user's junctions "stick out" complaint
+  was that). Display pose = the RAW file quaternion `(w,x,y,z)` = the
+  builder/v0.91 layout: model lies flat, ports align with
   its own cached cables (selftest: inlet faces view −y). Display-only via the
   wheelUndo write-back; saved quaternions stay file-exact. No endpoint
   translation is needed (and none is done): the cables' cache frame IS the
   display frame, so they meet the flat model as recorded.
-  **The display pose must be computed from the FILE quaternion as
-  `(w,−x,−y,z)` (THREE: set(−x,−y,z,w)) — convention-independent** — the
-  builder's flat pose is what both file conventions encode (RAW for legacy,
-  CONJUGATE for modern), so deriving the pose from the convention-mapped
-  view quaternion matches only modern files and conjugates legacy junctions
-  by 120° about (1,1,−1). Proof: ISW-241 and RCS-infinity (3518436870) carry
-  byte-identical FluidJunction positions+quats, rows at y 0.88 z −1..−3;
-  view-derived code rendered ISW flat and the RCS comb standing on its end
-  (bbox y-size 1.00 m). Pinned by `?postest` fixtures rcs-fj-flat/rcs-fj-touch.
+  **v1.5.11: the display pose IS the raw FILE quaternion for BOTH
+  generations** (the app's `displayQuat` returns `qFile` verbatim) — the
+  builder's flat pose is what the single storage convention encodes. The old
+  "compute `(w,−x,−y,z)` from the file quat — convention-dependent!" passage
+  below is the mirrored-era recipe; kept only as the record of how the
+  legacy/modern junction split behaved back then (byte-identical ISW/RCS
+  junctions rendered FLAT vs standing-on-end, bbox y-size 1.00 m — a
+  symptom of the two-law split, one more reason it died). Pinned by
+  `?postest` fixtures rcs-fj-flat/rcs-fj-touch (they assert the FLAT comb,
+  which the one raw law satisfies on both generations).
+  (Historical: view-derived code matched only modern files and conjugated
+  legacy junctions by 120° about (1,1,−1). Proof: ISW-241 and RCS-infinity
+  (3518436870) carry byte-identical FluidJunction positions+quats, rows at
+  y 0.88 z −1..−3.)
 - **Recorded endpoints ARE the connection points; `.ini` adapter positions
   are NOT the visible sockets:** the game writes each cable tip at the part's
   VISIBLE socket, which can differ from the `.ini` [ADAPTER] position — ISW's
@@ -983,8 +1034,13 @@ Zero-build Three.js (WebGL) inspector: `python3 -m http.server 8650` (repo root)
   corpus file has 0, so it is inert today; a non-zero value is the ONE
   genuinely per-component mirroring knob in the format (backlog: apply the
   same local scale sign so both viewers agree if such a file appears).
-- **Component rotation STORAGE flips with the game generation — two
-  conventions, keyed on `data.colors` (v108).**
+- ~~**Component rotation STORAGE flips with the game generation — two
+  conventions, keyed on `data.colors` (v108).**~~ **RETIRED v1.5.11 —
+  ONE RAW LAW (see §Handedness ruling above): both generations store the
+  quaternion AS-IS and the game places with `R(q)`.** The two bullets below
+  are kept as the historical record of what was measured where; the legacy
+  (RAW) half was always right, the 2026-conjugate half was a mirrored-chain
+  artifact of the pipes measurement.
   • **Legacy files (2024–2025, no `data.colors`): the Unity LH quaternion is
     stored RAW** — the game places parts with `R(q)` directly. Proof: the
     mosaic craft (3334698274) is a wall mural of dashboard plates; fitting a

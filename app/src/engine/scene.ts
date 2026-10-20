@@ -1968,9 +1968,7 @@ void main() {
     const origin = new Vector3(cpre.x + off.x + dp.x, cpre.y + off.y + dp.y, cpre.z + off.z + dp.z);
     comp.position = { x: origin.x, y: origin.y, z: origin.z };
     const t = quatMul({ x: q.x, y: q.y, z: q.z, w: q.w }, undo);
-    const fileQ: FileQuat = this.legacy
-      ? { w: t.w, x: t.x, y: t.y, z: t.z }
-      : { w: t.w, x: -t.x, y: -t.y, z: -t.z };
+    const fileQ: FileQuat = { w: t.w, x: t.x, y: t.y, z: t.z };   // one law (v1.5.11)
     comp.orientation = fileQ;
     for (const o of this.compRoots.get(ci) ?? []) {
       o.position.set(origin.x + this.moff.x, origin.y + this.moff.y, origin.z + this.moff.z);
@@ -1991,9 +1989,7 @@ void main() {
       const tUndo = this.rotUndo.get(tb.j);
       if (tUndo) {
         const tt = quatMul({ x: qj.x, y: qj.y, z: qj.z, w: qj.w }, tUndo);
-        tcomp.orientation = this.legacy
-          ? { w: tt.w, x: tt.x, y: tt.y, z: tt.z }
-          : { w: tt.w, x: -tt.x, y: -tt.y, z: -tt.z };
+        tcomp.orientation = { w: tt.w, x: tt.x, y: tt.y, z: tt.z };   // one law (v1.5.11)
       }
       for (const o of this.compRoots.get(tb.j) ?? []) {
         o.position.set(originT.x + this.moff.x, originT.y + this.moff.y, originT.z + this.moff.z);
@@ -2497,9 +2493,7 @@ void main() {
     const dq = quatFromEulerYXZ(pitch * DEG, yaw * DEG, roll * DEG);
     const q = quatMul(dq, base.q);                   // qd·q0 (intrinsic-free world deltas)
     const t = quatMul(q, undo);                      // strip the display pose
-    const file: FileQuat = this.legacy
-      ? { w: t.w, x: t.x, y: t.y, z: t.z }
-      : { w: t.w, x: -t.x, y: -t.y, z: -t.z };
+    const file: FileQuat = { w: t.w, x: t.x, y: t.y, z: t.z };   // one law (v1.5.11)
     for (const o of this.compRoots.get(ci) ?? []) o.quaternion.set(q.x, q.y, q.z, q.w);
     this.bp.data.components[ci]!.orientation = file;
     // MIRROR-TWIN MOTION (v0.165/166): twins take md = det(S)·S·dq applied
@@ -2514,9 +2508,7 @@ void main() {
       const qj = quatMul(md, b);
       for (const o of this.compRoots.get(j) ?? []) o.quaternion.set(qj.x, qj.y, qj.z, qj.w);
       const tt = quatMul(qj, tUndo);
-      this.bp.data.components[j]!.orientation = this.legacy
-        ? { w: tt.w, x: tt.x, y: tt.y, z: tt.z }
-        : { w: tt.w, x: -tt.x, y: -tt.y, z: -tt.z };
+      this.bp.data.components[j]!.orientation = { w: tt.w, x: tt.x, y: tt.y, z: tt.z };  // one law
       this.onEdit?.(j);
     }
     this.syncSubJoints();

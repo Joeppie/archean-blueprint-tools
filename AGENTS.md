@@ -407,6 +407,27 @@ generated record in the game's INT style (`docFromValue(t, false)` — all trian
 numbers bare, never "13.0"). Pins: `__tests__/tools.test.ts` SHADE test (smooth:1
 on all, flat none, other fields identical, existing kept); `tooldoc.test.ts`
 writer-style pin; `e2e/tools.spec.ts` preview reads "shading smooth:1".
+- **v1.5.11 ONE RAW QUATERNION LAW (2026-10-21, user's in-game arbitration):**
+  the palette-keyed V2-CONJUGATE display law was a pre-v0.180 mirrored-chain
+  artifact — the game places EVERY component (both generations) with the
+  STORED quaternion AS-IS. The user's fresh in-game craft `testframe.json`
+  (IAS-418: deck + corner pyramid + 8 dashboards drawn onto the faces, loads
+  PERFECT in game) rendered with its dashboards skewing through the deck in
+  the editor: under the conjugate read no board touches any face; under the
+  raw read all eight land EXACTLY flush (|dot| 1.000, the 5-board asterisk +
+  deck pair + side board). Landed as: `toViewQuatModern` = identity (raw),
+  the four scene.ts gizmo/slider writeback branches collapsed to one law,
+  `unityConjugate` retired to an alias; the legacy flag now selects ONLY
+  palette resolution. Fixture `testdata/9000005001` (this exact craft) +
+  `placement-law.test.ts` (flush pins, raw-vs-conj discrimination,
+  open→save verbatim) + `app/tools/flushcheck.mjs <craft>` (live-scene
+  FLUSH/FLUSHCHECK audit over the shipped blockshapes table). The wheel
+  droop/toggle/junction special cases in `displayQuat` are UNCHANGED (their
+  e2e verdicts re-ran green under the raw input). The old "pipes 0.000 m
+  under R(q*)" proof is retracted — a whole-corpus re-measure (6309 port
+  pairs, full .ini chain composition) lands NEITHER law at 0.06 m and raw
+  scores strictly better; the mirror-chain era cannot arbitrate. FORMAT
+  §Handedness carries the NORMATIVE ruling.
 - **v1.5.10 UNDO KEEPS THE CAMERA** (user: "I really cannot tell the
   difference between various options, but thats also because ctrl-z resets
   view"): undo/redo (`applyHistory` → `setBp`) ran through the Viewport's
@@ -837,39 +858,40 @@ release/functionality. but no user-unackowledged bumps."** Concretely:
 ## Format facts (verified — do not re-derive)
 - 1 grid cell = 0.25 m; `pos_*` ∈ 0..12; `frame_*` in 3 m units;
   `world = (pos − 5.5)·0.25 + frame·3.0`. −z is the nose (this craft).
-- **Unity left-handed orientation:** `orientation` is a left-handed quaternion; a
-  right-handed renderer must use the conjugate `{w,−x,−y,−z}` (raw `q` mirrors the
-  game — beacons lean the wrong way, casters pitch the wrong way, wheels go inboard).
-  Verified: `position + R(q*)·adapter_local` reproduces the game-written `data.pipes`
-  endpoints to 0.000 m (raw `q` is 0.18-0.66 m off). **Since the v0.180 de-mirror
-  the VIEW SPACE IS THE RAW FILE FRAME** (`pos (x,y,z)` — the game projects raw
-  file coordinates with standard RH camera math; FORMAT §"Chirality vs in-game
-  truth"); no axis mirror anywhere. See
-  FORMAT.md § Handedness.
-- **Rotation storage has TWO conventions keyed on `data.colors` (v108):**
-  **v1.5.10 HARD RULE: the tool NEVER rewrites an orientation it did not
-  edit.** The game stores quaternion bytes VERBATIM across generations
-  (ISW-241's 2025 workshop file and the game's 2026 palette re-save share
-  byte-identical orientations), so the old normalize rule 4 (open-time
-  raw→conjugate rewrite) made palette-less exports load FLIPPED in game —
-  user's wheel-on-top + torn dashboard murals, 2026-10-20. Rule 4 deleted;
-  the palette-less display law is carried on `bp.__legacyQ` (stamped from
-  the file as on disk, survives the palette embedding AND undo). Pins:
-  `app/src/engine/__tests__/savefidelity.test.ts` + `app/e2e/savefidelity.
-  spec.ts`; two-axis probe fixture `testdata/9000004001` (game-written L/R
-  dashboards). The palette-keyed V2-conjugate READ law awaits re-arbitration
-  with in-game pixels (FORMAT §Handedness erratum).
-  palette-less legacy files (2024-25 corpus, 23 of them) store the Unity LH
-  quaternion **RAW** — the game places with `R(q)` (proof: mosaic craft
-  3334698274's dashboard murals are flush only under raw: |dot| 0.999,
-  conj = 45° out of the wall; selftest `mural=true`); palette-bearing 2026
-  files store the **conjugate** (ISW pipes 0.000 m under `R(q*)`). Viewer:
-  `LEGACY_Q` (set in `setModel`) switches `viewQuat`/`rawFromView` between
-  the stored quat AS-IS `(w,x,y,z)` (legacy) and the plain conjugate
-  `(w,−x,−y,−z)` (modern) — the v0.180 de-mirrored chain (pre-v0.180:
-  `(w,−x,−y,z)` / `(w,x,y,−z)` in a z-mirrored view). This also explains the
-  dev viewer: raw placement is exact for legacy craft ("renders the mosaic
-  perfectly") and 45°-tilted for 2026 ones. See FORMAT.md § Handedness.
+- **ONE RAW quaternion law for BOTH generations (v1.5.11, 2026-10-21 —
+  supersedes the "two conventions keyed on data.colors" and the "pipes
+  0.000 m under R(q*)" claims, which were pre-v0.180 mirrored-chain
+  artifacts):** the game places every component as `world = position + R(q)`
+  with the STORED quaternion AS-IS; a right-handed renderer plotting raw
+  positions with standard RH camera math (the v0.180 de-mirrored view space
+  = the raw file frame, matching the game's mirrored screen, FORMAT
+  §"Chirality vs in-game truth") uses `viewQuat = (w,x,y,z)` for EVERY file.
+  Arbitration (in-game pixels, the only sanctioned arbiter): the game-built
+  palette craft IAS-418 `testdata/9000005001` seats all 8 dashboards flush
+  (|dot| 1.000, ≤ 0.13 m to their faces) ONLY under raw — the conjugate
+  skews the boards through the deck (the user's 2026-10-21 screenshot);
+  fixture `9000004001` L/R boards meet corner-to-corner only under raw;
+  ISW-241's V1 + V2 saves keep BYTE-IDENTICAL orientations (identical bytes
+  ⇒ identical display — the split law made our own corpus render one craft
+  two ways); a whole-corpus re-measure of the `data.pipes` endpoints (6309
+  port pairs) found NEITHER law near 0.06 m with RAW ≥ conj everywhere, so
+  the old 0.000 m proof cannot hold in the file frame. `toViewQuatModern` /
+  `toViewQuatLegacy` are the same identity; `fileToViewQuat(q, legacy)`
+  keeps its signature (the legacy flag still keys PALETTE resolution).
+  Pins: `app/src/engine/__tests__/placement-law.test.ts` +
+  `app/tools/flushcheck.mjs <craft>` (live-scene audit, PASS on 9000005001).
+  See FORMAT.md § Handedness (v1.5.11 ruling, NORMATIVE).
+- **v1.5.10 HARD RULE (stands): the tool NEVER rewrites an orientation it
+  did not edit.** The game stores quaternion bytes VERBATIM across
+  generations (ISW-241's 2025 workshop file and the game's 2026 palette
+  re-save share byte-identical orientations), so the old normalize rule 4
+  (open-time raw→conjugate rewrite) made palette-less exports load FLIPPED
+  in game — user's wheel-on-top + torn dashboard murals, 2026-10-20. Rule 4
+  deleted; `bp.__legacyQ` still rides the file's palette flavour (colour
+  resolution ONLY since v1.5.11 — it no longer selects a rotation law).
+  Pins: `app/src/engine/__tests__/savefidelity.test.ts` +
+  `app/e2e/savefidelity.spec.ts`; two-axis probe fixture
+  `testdata/9000004001` (game-written L/R dashboards).
 - Blocks: `type` = shape+orientation (0 cube, 1-12 slope [4 = thin tilted
   rod], 13-20 corner, 21-44 pyramid, 45-52 inverse corner — table in
   `viewer/blockshapes.js`, transcribed from the game's BlockShapes.hh via the
