@@ -533,6 +533,15 @@ settings/✕ tweak both consumed `Y` bumps):
 - **X — major**: an overhaul or a change of shape. A UI overhaul, a framework
   step (the React app replacing the legacy viewer = v1.0), an entire scope
   change (the app becoming the Pages site root).
+
+  **X bumps require the user's EXPLICIT instruction (user rule 2026-10-20:
+  "You do NOT have authority to increase full versions. you MUST get explicit
+  instruction for that").** An agent NEVER cuts itself onto a new major on
+  judgement — even for a genuine change of shape (the merged editor was
+  labelled v2.0.0 unilaterally and the user overruled it back onto the v1.5
+  line: everything since the last TAG is ONE release, numbered by the user).
+  When unsure, ship a Z; use Y for a user-visible feature; X only when the
+  user says "make it vX.0" in those terms.
 - **Y — minor**: a new FEATURE/capability the user can point at — the subgrid
   hinge UI, a new editor mode, a new analysis, a new panel/tool surface.
 - **Z — patch**: FIXES and small tweaks — a wrong pivot or mis-framed camera
