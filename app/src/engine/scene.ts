@@ -2636,6 +2636,9 @@ void main() {
       while (o && !o.userData.kind) o = o.parent;
       const kind = o?.userData.kind as Kind | undefined;
       if (!kind) continue;
+      // v2.0.0 (user: "if wireframe is on … you click through blocks"): the
+      // hull solids hidden ⇒ block/triangle meshes are NOT pickable.
+      if (kind === 'block' && !this.opts.hull) continue;
       const p: [number, number, number] = [h.point.x, h.point.y, h.point.z];
       if (kind === 'comp' && !firstComp) firstComp = { d: h.distance, ci: o!.userData.ci as number, p };
       else if (kind === 'sub') {
@@ -2743,6 +2746,8 @@ void main() {
       while (o && !o.userData.kind) o = o.parent;
       const kind = o?.userData.kind as Kind | undefined;
       if (kind !== 'block' && kind !== 'ground' && kind !== 'comp' && kind !== 'sub') continue;
+      // v2.0.0: hidden hull solids are click-through (wireframe mode)
+      if (kind === 'block' && !this.opts.hull) continue;
       // the component behind a comp hit (blocks-mode click → selection)
       const ci = kind === 'comp' ? (o!.userData.ci as number) : -1;
       // display anchoring off → RAW FILE metres (view == file frame, v0.180)
@@ -3032,6 +3037,7 @@ void main() {
       while (o && !o.userData.kind) o = o.parent;
       const kind = o?.userData.kind as Kind | undefined;
       if (kind !== 'block' && kind !== 'comp' && kind !== 'sub' && kind !== 'ground') continue;
+      if (kind === 'block' && !this.opts.hull) continue;   // v2.0.0 click-through
       const n = h.face
         ? new Vector3(h.face.normal.x, h.face.normal.y, h.face.normal.z)
         : new Vector3(0, 1, 0);

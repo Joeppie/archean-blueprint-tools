@@ -32,7 +32,7 @@ test.describe('⇄ mirrored placement @place', () => {
     await page.goto('/');
     await page.getByTestId('gallery-new').click();
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
-    await page.getByTestId('mode-blocks').click();
+    await page.getByTestId('mode-edit').click();
     await setDrawer(page, true);                             // the flavor switch lives in the panel
     await page.getByTestId('tooltab-place').click();          // v1.5: the PLACE flavor
     await expect(page.getByTestId('block-mirror')).toBeVisible();
@@ -87,9 +87,7 @@ test.describe('⇄ mirrored placement @place', () => {
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
     await page.getByTestId('mode-edit').click();
     await setDrawer(page, true);
-    await page.getByTestId('mode-blocks').click();           // flip the shared twin switch
-    await page.getByTestId('block-mirror').click();
-    await page.getByTestId('mode-edit').click();
+    await page.getByTestId('block-mirror').click();        // shared twin switch
     await page.getByTestId('tooltab-place').click();       // v1.4 PLACE tab = catalog
     await page.getByTestId('filter').fill('smallwheel');
     await page.getByTestId('catalog-item').first().click();

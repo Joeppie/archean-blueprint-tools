@@ -119,7 +119,7 @@ test.describe('materials + RGB picker @ui', () => {
   test('the block MATERIALS row writes material without touching colours', async ({ page }) => {
     test.skip(test.info().project.name !== 'chromium', 'the side panel is a drawer on phones');
     await openNew(page);
-    await page.getByTestId('mode-blocks').click();
+    await page.getByTestId('mode-edit').click();
     await page.getByTestId('tooltab-edit').click();
     const px = await blockPixel(page);
     await page.mouse.click(px.x, px.y);
@@ -153,7 +153,7 @@ test.describe('materials + RGB picker @ui', () => {
   test('RGB picker: a custom colour becomes a NEW palette slot + paints', async ({ page }) => {
     test.skip(test.info().project.name !== 'chromium', 'the side panel is a drawer on phones');
     await openNew(page);
-    await page.getByTestId('mode-blocks').click();
+    await page.getByTestId('mode-edit').click();
     await page.getByTestId('tooltab-place').click();
     await page.getByTestId('rgb-hex').fill('#ff3300');
     const l0 = await loads(page);
@@ -172,7 +172,7 @@ test.describe('materials + RGB picker @ui', () => {
   test('RGB picker: nearest-slot never grows the palette', async ({ page }) => {
     test.skip(test.info().project.name !== 'chromium', 'the side panel is a drawer on phones');
     await openNew(page);
-    await page.getByTestId('mode-blocks').click();
+    await page.getByTestId('mode-edit').click();
     await page.getByTestId('tooltab-place').click();
     await page.getByTestId('rgb-hex').fill('#ffffff');
     const before = await page.evaluate(() =>

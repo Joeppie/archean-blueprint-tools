@@ -319,7 +319,7 @@ test.describe('modes, new craft, file menu @ui', () => {
     await page.goto('/');
     await page.getByTestId('gallery-new').click();
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
-    await page.getByTestId('mode-blocks').click();
+    await page.getByTestId('mode-edit').click();
     await page.getByTestId('tooltab-place').click();       // v1.5: the PLACE flavor docks the brush
     // v0.183: deterministic scene state — wait for the atlas fan-out (the
     // PilotSeat's REAL model shown, its stand-in retired), then PROBE the
@@ -438,7 +438,7 @@ test.describe('manual wiring + triangles + component meta @ui', () => {
     await page.goto('/');
     await page.getByTestId('gallery-new').click();
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
-    await page.getByTestId('mode-blocks').click();
+    await page.getByTestId('mode-edit').click();
     await page.getByTestId('blocksub-tris').click();
     const canvas = page.getByTestId('canvas');
     const box = (await canvas.boundingBox())!;

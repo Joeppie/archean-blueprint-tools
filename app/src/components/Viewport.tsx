@@ -51,10 +51,13 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
   bp: Blueprint | null;
   onPick: (h: PickHit) => void;
   onEngine?: (e: Engine | null) => void;
-  /** workspace mode: blocks clicks route to onBlockPick; the mode widget
-   *  only belongs to Edit; VIEW picks NOTHING (v1.5 user rule: "selecting
-   *  components shouldnt be possible in view — view shows the amounts") */
-  mode?: 'view' | 'edit' | 'blocks' | 'wire' | 'flight' | 'aero';
+  /** workspace mode: v2.0.0 the BLOCKS workspace MERGED into Edit (user:
+   *  "Merge the block and component edit things, I no longer see a good
+   *  reason to seperate them") — in edit, canvas clicks route through
+   *  onBlockPick (block face → brush/select, part → select); VIEW picks
+   *  NOTHING (v1.5 user rule: "selecting components shouldnt be possible in
+   *  view — view shows the amounts") */
+  mode?: 'view' | 'edit' | 'wire' | 'flight' | 'aero';
   /** the side panel's PLACE|EDIT flavor (v1.5): in BLOCKS the ghost hovers
    *  only in PLACE; in EDIT only a held catalog part docks a ghost */
   tool?: 'edit' | 'place';
@@ -134,8 +137,7 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
   // Remember the pointer so a Shift press/release (the game's logical-
   // continuation modifier) re-aims the ghost WITHOUT a move.
   // v1.5 flavor rule: the ghost only lives in the PLACE flavor.
-  const hoverOn = (mode === 'blocks' && tool === 'place') ||
-    ((mode === 'edit' || mode === 'blocks') && !!placing);
+  const hoverOn = mode === 'edit' && (tool === 'place' || !!placing);
   const lastHover = useRef<{ x: number; y: number; shift: boolean } | null>(null);
   const hoverT = useRef(0);
   const blockHover = (x: number, y: number, shift: boolean, force = false) => {
@@ -171,7 +173,7 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
       // the ghost re-aims the moment Shift goes down/up over a block (the
       // game swaps brush → continuation instantly, no mouse move needed)
       const h = lastHover.current;
-      if (h && mode === 'blocks' && tool === 'place') blockHover(h.x, h.y, on, true);
+      if (h && mode === 'edit' && tool === 'place') blockHover(h.x, h.y, on, true);
     };
     const dn = (e: KeyboardEvent) => sh(e, true), up = (e: KeyboardEvent) => sh(e, false);
     addEventListener('keydown', dn); addEventListener('keyup', up);
@@ -189,7 +191,10 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
     // no fly-to, no mode widget — the side panel keeps the vessel stats.
     if (mode === 'view') return;
     if (placing) { onPlace?.(e.clientX, e.clientY); return; }   // KSP place: no select
-    if (mode === 'blocks') {
+    if (mode === 'edit') {                       // merged editor (v2.0.0)
+      // the info chip still rides the plain pick path (scene.spec pin: a tap
+      // routes through the pick path into the info chip)
+      onPick(engine.pickAt(e.clientX, e.clientY));
       let opened = false;
       onBlockPick?.(e.clientX, e.clientY, e.shiftKey, () => {
         const box = hostRef.current?.getBoundingClientRect();

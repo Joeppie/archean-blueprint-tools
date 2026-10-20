@@ -29,7 +29,7 @@ test.describe('KSP modes & catalog placement @place', () => {
     await page.goto(`/?craft=${ISW}`);
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
     await setDrawer(page, true);
-    await page.getByTestId('mode-blocks').click();
+    await page.getByTestId('mode-edit').click();
     await page.getByTestId('tooltab-place').click();       // v1.5: the brush lives in PLACE
     await expect(page.getByTestId('block-brush')).toBeVisible();
     await expect(page.getByTestId('blocksub-tris')).toBeVisible();   // + triangles submode

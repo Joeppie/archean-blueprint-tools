@@ -13,7 +13,7 @@
 // listed DISABLED so the roadmap is visible in the UI, wired in the Editor.
 import { useEffect, useRef, useState } from 'react';
 
-export type Mode = 'view' | 'edit' | 'blocks' | 'wire' | 'flight' | 'aero';
+export type Mode = 'view' | 'edit' | 'wire' | 'flight' | 'aero';
 
 interface Props {
   mode: Mode;
@@ -35,7 +35,7 @@ interface Props {
 }
 
 const MODES: [Mode, string, string][] = [
-  ['view', '⌖', 'View'], ['edit', '✎', 'Edit'], ['blocks', '▦', 'Blocks'],
+  ['view', '⌖', 'View'], ['edit', '✎', 'Edit'],
   ['wire', '∿', 'Wire'], ['flight', '➤', 'Flight'], ['aero', '≋', 'Wind'],
 ];
 

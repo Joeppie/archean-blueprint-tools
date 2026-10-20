@@ -260,7 +260,23 @@ user's explicit say-so (Pages/release still serves it meanwhile).
   footprint, twin identity, snap convergence/consensus) +
   app/e2e/blockedit.spec.ts, place.spec.ts (comp ghost + delete),
   mirror.spec.ts, panels.spec.ts (view-stats-only, deck-place EDIT).
-- **UNIFORM MIRROR RULE + FAUX-MIRROR screen (v1.8 user rules: "It should
+- **MERGED EDITOR + wireframe click-through (v2.0 change of shape, user:
+  "Merge the block and component edit things, I no longer see a good reason
+  to seperate them. The UI is quite good. If wireframe is on (toggle in
+  edit) then you click through blocks"): the BLOCKS mode TILE IS GONE —
+  modes are now `view | edit | wire | flight | aero`. The old blocks
+  workspace is the EDIT panel's bottom (brush + Blocks/Triangles sub-tabs +
+  ⇄ row + BlockPanel/TriPanel) beside the parts list; the ✎ Edit | ✚ Place
+  flavor drives select-vs-place for BOTH species (component click selects +
+  flies + gizmo; block face in EDIT selects the block + BLOCK widget, in
+  PLACE docks the brush ghost). All former `mode === 'blocks'` gates became
+  `mode === 'edit'`. Panel: a selected SUBGRID now ALSO stacks over the
+  workspace bottom (SubPanel was silently swallowed by the blocks section).
+  **WIREFRAME CLICK-THROUGH:** with the hull solids hidden (the ⊙ hull⇄wire
+  toggle or keyboard h — `!opts.hull`) the block/triangle meshes are NOT
+  pickable: pickNdc/pickCell/pickPlacePoint skip them, so you click through
+  to the parts/surfaces BEHIND an invisible hull ("click what you SEE").
+-  (v1.8 user rules: "It should
   also do whatever I do to the mirror block (mirrored of course)"; "This rule
   is uniform and it also applies to color, material, rotation, and to
   components"): EVERY edit on a SELECTED item ALWAYS drives its mirror twin in

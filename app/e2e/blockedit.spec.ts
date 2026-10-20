@@ -52,7 +52,7 @@ async function openDeck(page: Page, tab: 'place' | 'edit') {
   await page.goto('/');
   await page.getByTestId('gallery-new').click();
   await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
-  await page.getByTestId('mode-blocks').click();
+  await page.getByTestId('mode-edit').click();
   await page.getByTestId(`tooltab-${tab}`).click();
   let click: { x: number; y: number } | null = null;
   for (let i = 0; i < 40 && !click; i++) {
@@ -113,7 +113,7 @@ test.describe('blocks EDIT: highlight, in-place rotate, snap, twin @place', () =
     await page.goto('/');
     await page.getByTestId('gallery-new').click();
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
-    await page.getByTestId('mode-blocks').click();
+    await page.getByTestId('mode-edit').click();
     await page.getByTestId('tooltab-place').click();       // v1.5: the PLACE flavor
     let px: { x: number; y: number } | null = null;
     for (let i = 0; i < 40 && !px; i++) {
@@ -161,7 +161,7 @@ test.describe('blocks EDIT: highlight, in-place rotate, snap, twin @place', () =
     await page.goto('/');
     await page.getByTestId('gallery-new').click();
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
-    await page.getByTestId('mode-blocks').click();
+    await page.getByTestId('mode-edit').click();
     await page.getByTestId('tooltab-place').click();       // v1.5: place with the brush
     await page.getByTestId('block-mirror').click();        // twin ON
     let click: { x: number; y: number } | null = null;

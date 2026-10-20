@@ -48,7 +48,7 @@ async function openNew(page: Page) {
 }
 
 async function toBlocks(page: Page, tab: 'place' | 'edit') {
-  await page.getByTestId('mode-blocks').click();
+  await page.getByTestId('mode-edit').click();
   await page.getByTestId(`tooltab-${tab}`).click();
   await page.waitForTimeout(250);
 }

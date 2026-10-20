@@ -869,6 +869,11 @@ export default function Panel(p: Props) {
       <div className="min-h-0 flex-[3] border-t border-white/10 overflow-y-auto">
         {p.bottom !== undefined ? (
           <>
+            {/* v2.0.0 merged editor: a selected SUBGRID stacks over the
+                workspace too (its SubPanel + joint sliders used to vanish
+                behind the blocks section — the panels.spec subgrid pin) */}
+            {p.selOverBottom && p.sel.sub >= 0
+              && <SubPanel {...p} key={`s${p.sel.sub}`} />}
             {p.selOverBottom && p.sel.sub < 0 && p.sel.ci >= 0
               && <Inspector {...p} key={`c${p.sel.ci}k${p.inspKey}`} />}
             {p.bottom ?? null}
