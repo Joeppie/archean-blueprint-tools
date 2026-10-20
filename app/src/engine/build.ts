@@ -105,50 +105,16 @@ export function buildSolids(bp: Blueprint): SolidBatch {
   // hull triangle skin: the game's closed 0.05 m prisms — colours[0] front,
   // [1] back, [2..4] side walls (hull.ts carries the exact winding).
   const skin = buildHullSkin(bp.data.triangles ?? []);
-  const tri3n = (b: GeomBucket, A: readonly number[], C: readonly number[], E: readonly number[],
-    ns: readonly (readonly number[])[]) => {
+  const tri3 = (b: GeomBucket, A: readonly number[], C: readonly number[], E: readonly number[]) => {
+    const nrm = faceNormal(A as number[], C as number[], E as number[]);
     const base = b.positions.length / 3;
-    for (let k = 0; k < 3; k++) {
-      const v = [A, C, E][k]!, n = ns[k]!;
-      b.positions.push(v[0]!, v[1]!, v[2]!), b.normals.push(n[0]!, n[1]!, n[2]!);
-    }
+    for (const v of [A, C, E]) b.positions.push(v[0]!, v[1]!, v[2]!), b.normals.push(nrm[0]!, nrm[1]!, nrm[2]!);
     b.indices.push(base, base + 1, base + 2);
     tris++;
   };
-  // v1.5.10: mirror the game's `smooth` flag — within a colour bucket the
-  // prism CAPS of smooth-flagged triangles accumulate their face normals at
-  // each RAW lattice vertex (fronts blend with FRONTs, backs with backs —
-  // mixing the two would cancel to zero) and every cap corner shades by the
-  // accumulated normal. Coplanar seams stay identical, angled seams blend =
-  // the continuous sheet the game shows; flat-flagged triangles and ALL thin
-  // side walls keep the geometric face normal (sharp edges).
-  const bucketKeyOf = (slot: number) => colorKey(resolveColor(palette, slot, legacy));
-  const weldKey = (bk: string, cap: number, p: readonly number[]) =>
-    `${bk}|${cap}|${Math.round(p[0]! * 4096)},${Math.round(p[1]! * 4096)},${Math.round(p[2]! * 4096)}`;
-  const weld = new Map<string, [number, number, number]>();
-  for (const f of skin.faces) {
-    if (!f.smooth || f.cap === 2) continue;
-    const n = faceNormal(f.tri[0] as number[], f.tri[1] as number[], f.tri[2] as number[]);
-    const bk = bucketKeyOf(f.slot);
-    for (let k = 0; k < 3; k++) {
-      const key = weldKey(bk, f.cap, f.raw[f.rv[k]!]!);
-      const a = weld.get(key);
-      if (a) { a[0] += n[0]!; a[1] += n[1]!; a[2] += n[2]!; }
-      else weld.set(key, [n[0]!, n[1]!, n[2]!]);
-    }
-  }
   for (const f of skin.faces) {
     const b = bucketForIn(buckets, f.slot, legacy, palette);
-    const fn = faceNormal(f.tri[0] as number[], f.tri[1] as number[], f.tri[2] as number[]);
-    const bk = bucketKeyOf(f.slot);
-    const ns = [0, 1, 2].map(k => {
-      if (!f.smooth || f.cap === 2) return fn;
-      const a = weld.get(weldKey(bk, f.cap, f.raw[f.rv[k]!]!));
-      if (!a) return fn;
-      const l = Math.hypot(a[0], a[1], a[2]) || 1;
-      return [a[0] / l, a[1] / l, a[2] / l];
-    });
-    tri3n(b, f.tri[0], f.tri[1], f.tri[2], ns);
+    tri3(b, f.tri[0], f.tri[1], f.tri[2]);
   }
   // NO spread: skin.wire is 18 numbers per hull triangle, and a hullified
   // giant (United airliner: 53k tris = 958k numbers) blows the engine's

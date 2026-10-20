@@ -660,40 +660,32 @@ Evidence (ISW-241, 21 triangles):
   In the JSON blueprint the state word is spelled out: a `smooth` key on the
   triangle record. Corpus census: workshop files store NO `smooth` key (⇒ flat),
   except 3732302108 where 174/241 triangles carry `"smooth":1` and 67 omit it.
-  This flag — NOT the winding — is the game's per-triangle control for whether
-  a hull reads as one continuous skin or as flat-shaded facets: the "bevel"
-  that appears on EVERY blocks→triangles conversion in-game, both windings, is
-  the flat-normal default shading each prism face independently. Winding only
-  picks WHICH side is colours[0]-front; both directions are geometrically the
-  same prism (our viewer renders them identically — hull.ts offsets along the
-  winding normal and closes the solid, so inward/outward swap front/back, never
-  shape). hullify therefore writes `smooth:1` on every NEW triangle by default
-  (the game's own convention), with a `flat` option that omits the key.
-- **Flush seams & shared-edge adjacency (Oct 20 2026 — in-game close-ups +
-  the game's struct).** In-game, JOINED (in-game-placed) hull triangles meet
-  FLUSH at their edges — no 0.05 m side-wall band, flat-shaded, colours
-  meeting at clean lines; a BLUEPRINT-CONVERTED craft, by contrast, shows a
-  wall band at EVERY seam, in both windings and both shading modes (so the
-  bevel is neither the winding nor the smooth flag). The mechanism lives in
-  `Triangle.inc.glsl`: `MakeEdge` ("normalize edge representation **for
-  adjacency detection**") and `HasSameVertices` ("same physical triangle") —
-  the game keys triangle EDGES and never draws the side wall on an edge two
-  triangles share. Census of the in-game-authored Jimmy skin (3732302108,
-  241 tris): 232 shared-edge pairs, **62 joins cross FRAMES** (⇒ the weld
-  keys on the ABSOLUTE lattice, `v + 12·frame`, not the packed 5-bit slots —
-  a per-triangle `floor(min/12)` frame split is therefore harmless), 218/232
-  joins traverse the shared edge OPPOSITE (a manifold-consistent shell), and
-  197/232 joiners carry IDENTICAL `colours[0..4]` with 221/232 the same
-  `material`. A hullify conversion instead paints per FACE and carries the
-  per-block `material`, so EVERY seam joins UNLIKE records — the leading
-  suspect for the game still banding converted seams (adjacency batched per
-  palette/material, or the flush weld done at in-game placement rather than
-  file load). NOT YET PROVEN: arbitrate with a game-re-saved converted craft
-  (client blueprints dir) byte-diffed, or a small in-game-authored probe. Our
-  renderer mirrors the GOAL state: hull.ts `buildHullSkin` culls a side wall
-  whose absolute-lattice edge is shared by another triangle (a lone triangle
-  keeps its thickness rim; the wireframe overlay still draws ALL edges — it
-  is the build frame, not the render).
+  This flag is a REAL per-triangle record (what exactly it changes in the
+  game's shading is only known from its comment — "flat/geometric normals"
+  vs "smooth normals" — NOT from a mirrored behaviour; see the seam-render
+  retraction below). Winding picks WHICH side is colours[0]-front; both
+  directions are geometrically the same prism (our viewer renders them
+  identically — hull.ts offsets along the winding normal and closes the
+  solid, so inward/outward swap front/back, never shape). hullify writes
+  `smooth:1` on every NEW triangle by default (the game's own convention
+  in its hull saves), with a `flat` option that omits the key.
+- **Seam rendering — NOT a documented mechanic (retracted Oct 20 2026)**:
+  a same-day reading claimed the game keys triangle edges for adjacency
+  (`MakeEdge`) and draws side walls only on FREE edges, making joined
+  triangles render flush; our renderer briefly mirrored it (shared-edge
+  wall cull + `smooth` cap-normal welding). The user ruled the mechanic
+  does not exist, and culling rims turned the ISW-241 chrome wingtips into
+  hollow sails — the rims are what makes a prism read solid. BOTH mirrors
+  reverted; the viewer draws every prism's full 8 faces. LESSON (kept so
+  it is not re-learned): the struct's helper comments (`MakeEdge` "for
+  adjacency detection", `HasSameVertices`) describe the constructor/data
+  model, NOT proven RENDER behaviour — the game's seam handling lives in
+  its compiled builder and stays undocumented until a game-re-saved
+  converted craft is byte-diffed against what we wrote. Useful facts from
+  the census that stand as DATA (3732302108, in-game-authored skin): 232
+  shared-edge pairs among 241 tris, 62 joins cross frames (records key on
+  the absolute lattice), 197/232 joiners share identical `colours[0..4]`,
+  221/232 the same `material`.
 - Render symmetry (viewer heuristic, not the game): shared slots weld (0.025 m),
   near-mirror vertex pairs average |x|, near-axis points snap to x = 0.
 

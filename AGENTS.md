@@ -407,52 +407,34 @@ generated record in the game's INT style (`docFromValue(t, false)` — all trian
 numbers bare, never "13.0"). Pins: `__tests__/tools.test.ts` SHADE test (smooth:1
 on all, flat none, other fields identical, existing kept); `tooldoc.test.ts`
 writer-style pin; `e2e/tools.spec.ts` preview reads "shading smooth:1".
-- **v1.5.10 UNDO KEEPS THE CAMERA + APP SMOOTHS THE `smooth` FLAG** (user:
-  "I really cannot tell the difference between various options, but thats
-  also because ctrl-z resets view"): (1) undo/redo (`applyHistory` →
-  `setBp`) ran through the Viewport's load effect with `load()`'s DEFAULT
-  `keepView=false` — every Ctrl+Z/redo RE-FRAMED the camera (all live edits
-  already ride `engine.reload()` = keepView TRUE), which made tool-option
-  A/B comparison impossible. Viewport gains a `keepView` prop (Editor state
-  set true in applyHistory, false in openText — read via a ref so the load
-  effect never re-fires on the flag alone); a CRAFT SWAP still re-frames.
-  Pinned by `e2e/undo.spec.ts` "Ctrl+Z keeps the camera": orbit-drag the
-  camera (>0.5 m, non-vacuous), run replace-all, Ctrl+Z ⇒ camera drift
-  <0.05 m. (2) The viewer now MIRRORS the game's `smooth` triangle flag
-  (build.ts weld pass + hull.ts HullFace cap/raw/rv/smooth fields): prism
-  CAPS of smooth-flagged triangles accumulate face normals at each shared
-  RAW lattice vertex per colour bucket (fronts blend with fronts, backs
-  with backs — mixing cancels) and shade by the accumulated normal; flat
-  triangles and all thin side walls keep the geometric face normal.
-  Coplanar seams look identical; ANGLED seams blend = the continuous sheet
-  the game shows — so the hullify `shading` select finally differs ON
-  SCREEN, and the game's own smooth:1 hulls render closer to in-game.
-  Vitest pin `build.test.ts` (two right-angle tris sharing two raw
-  vertices: smooth ⇒ ≥2 cap normals ≈ (0.707,0,0.707); flat ⇒ none).
-  EPISTEMIC: the game's exact weld lives in its compiled mesh builder;
-  cap-only raw-vertex welding is our faithful-shape reading of the
-  Triangle.inc.glsl comment — arbitrate against in-game screenshots.
-  **SHARED-EDGE WALL CULL (v1.5.10, same report):** the user's IN-GAME
-  close-ups (all three screenshots were in-game, not the editor): joined
-  authored triangles render FLUSH at their seams — no 0.05 m wall band,
-  flat-shaded, even across colours — while EVERY seam of a hullified
-  conversion shows a wall band, in both windings and both shading modes
-  (bevel ≠ winding ≠ smooth, now proven). The game's Triangle struct keys
-  edges `for adjacency detection` (MakeEdge). JIMMY-FILE CENSUS (in-game
-  authored, renders flush): 241 tris, 232 shared-edge pairs, **62 joins
-  cross FRAMES** (⇒ the game welds on the ABSOLUTE lattice; our per-tri
-  floor(min/12) frames are fine), 218/232 joins traverse the edge OPPOSITE
-  (manifold-consistent shell), 197/232 joiners carry IDENTICAL colours[0..4]
-  and 221/232 the same material (hullify paints per FACE and carries per
-  block material ⇒ every seam joins unlike records — the leading suspect
-  for the game banding our seams: a palette/material-batched adjacency).
-  OUR RENDERER NOW MIRRORS THE GOAL: buildHullSkin culls a side wall when
-  its absolute-lattice edge is shared by another triangle (a lone triangle
-  keeps its rim; the wire overlay keeps ALL edges — it is the build frame);
-  pins in `__tests__/hull.test.ts` (pair 8+8−4=12 faces, cross-frame weld
-  culls, vertex-only contact 16, wire complete). OPEN: why the GAME still
-  bands our file — needs the game-re-saved converted craft (client
-  blueprints dir) for a byte-diff, or a small authored probe craft.
+- **v1.5.10 UNDO KEEPS THE CAMERA** (user: "I really cannot tell the
+  difference between various options, but thats also because ctrl-z resets
+  view"): undo/redo (`applyHistory` → `setBp`) ran through the Viewport's
+  load effect with `load()`'s DEFAULT `keepView=false` — every Ctrl+Z/redo
+  RE-FRAMED the camera (all live edits already ride `engine.reload()` =
+  keepView TRUE), which made tool-option A/B comparison impossible.
+  Viewport gains a `keepView` prop (Editor state set true in applyHistory,
+  false in openText — read via a ref so the load effect never re-fires on
+  the flag alone); a CRAFT SWAP still re-frames. Pinned by
+  `e2e/undo.spec.ts` "Ctrl+Z keeps the camera": orbit-drag the camera
+  (>0.5 m, non-vacuous), run replace-all, Ctrl+Z ⇒ camera drift <0.05 m.
+  **RETRACTED the same session (user ruling + the ISW-241 wingtip
+  artifact):** two renderer "mirrors of the game" landed alongside it —
+  (a) cap-normal WELDING for `smooth:1` triangles and (b) SHARED-EDGE WALL
+  CULLING (skip a prism's side wall where another triangle shares the
+  absolute-lattice edge, read from the struct's `MakeEdge` comment as a
+  "flush seam" mechanic). The user ruled the flush-seam adjacency mechanic
+  does not exist in the game, and the ISW-241 wingtips showed culling the
+  rims is what makes chrome tips read as hollow sails — the rims ARE what
+  makes a prism read solid (measured: ISW merged faces 196 → 136 with the
+  cull). BOTH reverted in `hull.ts`/`build.ts` (renderer back to drawing
+  every prism's full 8 faces) and their pins removed. DO NOT reintroduce
+  either mirror from the struct comments alone — the game's seam behaviour
+  lives in its compiled builder and is UNDOCUMENTED until an in-game probe
+  (a game-re-saved craft byte-diffed) proves it. The `smooth` flag itself
+  is REAL data (Triangle.inc.glsl + the 3732302108 census) and hullify's
+  `shading` select still writes `smooth:1` into the FILE — that is format,
+  not render.
 - **v1.5.10 NEW CRAFT = FILE MENU ONLY (user: "new craft should not be a
   button, but only under file. too dangerous"):** the editor toolbar's
   standalone `+ New craft` button is REMOVED (a misfire silently replaced

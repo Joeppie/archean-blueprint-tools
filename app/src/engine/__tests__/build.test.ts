@@ -111,37 +111,6 @@ describe('buildSolids', () => {
     expect(wire.length).toBe(3 * 2 * 3);                // 3 edges × 2 pts × xyz
   });
 
-  test('smooth flag welds the prism CAPS into one sheet (v1.5.10): angled neighbours blend, flat stays faceted', () => {
-    // A front-faces +z, B front-faces +x and shares two raw vertices with A.
-    // smooth:1 ⇒ at those welds A's cap normal blends with B's to the exact
-    // diagonal (0.707,0,0.707); without the flag every normal stays faceted
-    // (the walls' xy/yz diagonals never carry x AND z together).
-    const mk = (v: [number, number, number][], smooth: boolean) => ({
-      v0_x: v[0]![0], v0_y: v[0]![1], v0_z: v[0]![2],
-      v1_x: v[1]![0], v1_y: v[1]![1], v1_z: v[1]![2],
-      v2_x: v[2]![0], v2_y: v[2]![1], v2_z: v[2]![2],
-      frame_x: 1, frame_y: 1, frame_z: 1, colors: [51, 51, 51, 51, 51],
-      ...(smooth ? { smooth: 1 } : {}),
-    }) as Triangle;
-    const A: [number, number, number][] = [[12, 12, 12], [18, 12, 12], [12, 18, 12]];
-    const B: [number, number, number][] = [[12, 12, 12], [12, 18, 12], [12, 12, 18]];
-    const normalsOf = (smooth: boolean): number[][] => {
-      const { buckets } = buildSolids(bpOf([], [mk(A, smooth), mk(B, smooth)]));
-      expect(buckets.size).toBe(1);                    // one colour, one mesh
-      const n = [...buckets.values()][0]!.normals;
-      const out: number[][] = [];
-      for (let i = 0; i < n.length; i += 3) out.push([n[i]!, n[i + 1]!, n[i + 2]!]);
-      return out;
-    };
-    const d = 1 / Math.SQRT2;
-    const diagonal = (ns: number[][]) =>
-      ns.filter(v => Math.abs(v[0]! - d) < 0.02 && Math.abs(v[1]!) < 0.02 && Math.abs(v[2]! - d) < 0.02).length;
-    const flat = normalsOf(false), smooth = normalsOf(true);
-    expect(smooth.length).toBe(flat.length);           // same triangles, same vertices
-    expect(diagonal(flat)).toBe(0);                    // nothing blended…
-    expect(diagonal(smooth)).toBeGreaterThanOrEqual(2); // …both welds are (xz diagonals)
-  });
-
   test('hullified GIANT survives the wire merge (v1.5.8 RangeError pin)', () => {    // United-airliner scale: hullify emits 53k tris; skin.wire is then 18
     // numbers/tri. The old wire.push(...skin.wire) spread ~1M actual
     // arguments and died (RangeError: maximum call stack / too many args) —
