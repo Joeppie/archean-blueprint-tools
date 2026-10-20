@@ -478,11 +478,23 @@ unchanged.
   resize plane is the hit face's normal; the scroll wheel rotates the shape
   through its orientation family (cubes have one). **“Hold Shift before
   pressing left-click to copy the block you're aiming at or logically add
-  the next block.”** — the app's `complementBlock`: the copy rides the aimed
-  block's shape+orientation+size+paint; an AXIS face hit lands it flush on
-  that face; a SLANT hit takes the coplanar lattice step (Σ mᵢ·dᵢ/eᵢ = 0 over
-  the slant-normal pairs — for a unit slope the diagonal cell beyond the
-  high/low edge), which continues the slanted surface exactly. Removal:
+  the next block.”** — the app's `complementBlock`: the continuation rides
+  the aimed block's size+paint; a SLANT hit keeps its shape+orientation and
+  takes the coplanar lattice step (Σ mᵢ·dᵢ/eᵢ = 0 over the slant-normal
+  pairs — for a unit slope the diagonal cell beyond the high/low edge),
+  which continues the slanted surface exactly. **An AXIS-face hit takes the
+  aimed block's FLUSH MATE, not a plain copy (v1.5.2 user rule, in-game
+  observation: against a slope's flat face the game places the inverted
+  quarter, not the same type):** the next cell across the face fills with
+  the shape-family orientation whose shared-plane solid section bilaterally
+  covers the aimed face (a same-type copy behind a wedge's flat square face
+  touches only along an EDGE — a void at the joint), preferring the one
+  whose slant-face normal LINES match the aimed block's, so the surface
+  continues as a slab (slope type 1 behind its flat face → the 180°-turned
+  type 3). Cubes have one orientation (unchanged); where the copy IS the
+  flush mate (a slope's triangular side faces = the sideways ramp extension)
+  the rule keeps it. Probed 12×12 over the shared rectangle; with no flush
+  mate the plain copy stands. Removal:
   aim + hold right-click + quick left-click. Symmetry mirroring is the ⇄
   path above; the in-game axis is adjustable at 0.125 m precision (the app
   keeps the single file x = 0 plane).

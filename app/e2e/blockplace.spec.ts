@@ -114,8 +114,8 @@ test.describe('blocks-place: ghost, docks & Shift continuation @place', () => {
     expect(pixels.length).toBeGreaterThan(0);
     const box = (await page.getByTestId('canvas').boundingBox())!;
 
-    // Shift over a block: the ghost becomes the aimed block's continuation
-    // (same shape + size + paint), landing adjacent/coplanar.
+    // Shift over a block: the ghost becomes the aimed block's logical
+    // continuation at the hit face (family mate, size + paint ride over).
     let cg: Ghost = null; let cpx = 0, cpy = 0;
     for (const p of pixels) {
       cpx = box.x + box.width * p.x; cpy = box.y + box.height * p.y;
@@ -133,7 +133,12 @@ test.describe('blocks-place: ghost, docks & Shift continuation @place', () => {
       const h = e.pickCell(x, y)!;
       return e.blueprint.data.blocks[h.bi].type;
     }, { x: cpx, y: cpy });
-    expect(cg!.type, 'the continuation copies the aimed block\'s shape+orientation').toBe(aimedType);
+    // v1.5.2 (user rule): the continuation is the family's FLUSH MATE at the
+    // hit face — the same shape only where a copy glues the joint itself
+    // (cube walls, a slope's triangular sides); a wedge's flat face gets the
+    // INVERTED wedge, never a same-type copy edge-touching across a void.
+    const fam = (t: number) => (t === 0 ? 0 : t <= 12 ? 1 : t <= 20 ? 2 : t <= 44 ? 3 : 4);
+    expect(fam(cg!.type), 'the continuation stays in the aimed block\'s shape family').toBe(fam(aimedType));
 
     const before = await blocksCount(page);
     await page.keyboard.down('Shift');

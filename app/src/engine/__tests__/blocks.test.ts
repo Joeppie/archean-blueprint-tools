@@ -129,12 +129,62 @@ describe('Shift continuation placement (the game: logically add the next block)'
     }
   });
 
-  it('continuation never lands on the aimed block and keeps footprint/type', () => {
+  it('continuation never lands on the aimed block and keeps footprint/paint', () => {
     const i = info([0, 0, 0], [1, 2, 3], 45);  // inverse corner
     const s = complementBlock(i, [1, 3.9, 1], [0, 1, 0]);
     expect(s.cell).toEqual([0, 3, 0]);         // c_y + (size_y+1)
-    expect(s.type).toBe(45);
+    // v1.5.2: the aimed block's own shape is NOT kept — the flush MATE of
+    // its family is (45's cut plane continues through the joint: type 48)
+    expect(s.type).toBe(48);
     expect(s.size).toEqual([1, 2, 3]);
+    expect(s.slot).toBe(4);
+  });
+
+  // v1.5.2 user rule: "when you have the Triangle edge shape, and on the
+  // 'flat' edges place something, the 'inverted quarter' should be placed,
+  // nor the same block type right behind it; that only is logical for
+  // square blocks" — a same-type slope behind a slope's flat square face
+  // touches EDGE-ONLY (a void at the joint); the logical continuation is
+  // the inverted wedge whose own full face glues the joint and whose slant
+  // stays parallel (the ramp surface continues as a slab).
+  it('slope FLAT-face hits take the inverted slope (the flush joint)', () => {
+    const i = info([10, 20, 30], [0, 0, 0], 1);   // type 1: solid y+z ≤ 1
+    const back = complementBlock(i, [10.5, 20.5, 30.02], [0, 0, -1]);
+    expect(back.cell).toEqual([10, 20, 29]);
+    expect(back.type).toBe(3);                    // 180°-turned wedge, slant ∥
+    const under = complementBlock(i, [10.5, 20.02, 30.5], [0, -1, 0]);
+    expect(under.cell).toEqual([10, 19, 30]);
+    expect(under.type).toBe(3);
+    // the tilted pair (type 5, rise in x-z) behaves the same on its faces
+    const pair = complementBlock(info([10, 20, 30], [0, 0, 0], 5), [10.5, 20.5, 30.02], [0, 0, -1]);
+    expect(pair.type).toBe(11);
+  });
+
+  it('slope TRIANGLE-face hits keep the same slope (the flush sideways ramp)', () => {
+    const i = info([10, 20, 30], [0, 0, 0], 1);
+    const side = complementBlock(i, [10.02, 20.3, 30.3], [-1, 0, 0]);
+    expect(side.cell).toEqual([9, 20, 30]);
+    expect(side.type).toBe(1);   // the wedge's triangular side mates its OWN kind
+    const side2 = complementBlock(i, [10.98, 20.3, 30.3], [1, 0, 0]);
+    expect(side2.cell).toEqual([11, 20, 30]);
+    expect(side2.type).toBe(1);
+  });
+
+  it('axis-face continuations stay inside the aimed shape family', () => {
+    // the mate rule is geometric (flush joint + slant continuation), never a
+    // per-shape table: whatever it picks for any table shape, it stays in
+    // the family and keeps size+paint (cubes: their only orientation).
+    const fam = (t: number) => (t === 0 ? 0 : t <= 12 ? 1 : t <= 20 ? 2 : t <= 44 ? 3 : 4);
+    for (const t of [0, 1, 2, 4, 5, 13, 15, 21, 25, 45, 49])
+      for (let a = 0; a < 3; a++) for (const sgn of [1, -1]) {
+        const n: [number, number, number] = [0, 0, 0]; n[a] = sgn;
+        const sp = complementBlock(info([40, 40, 40], [1, 1, 1], t),
+          [40, 40, 40].map((c, k) => c + (k === a ? (sgn > 0 ? 2 : 0) : 1)) as [number, number, number], n);
+        expect(fam(sp.type), `t=${t} axis=${a}${sgn}`).toBe(fam(t));
+        expect(sp.size).toEqual([1, 1, 1]);
+        expect(sp.slot).toBe(4);
+        expect(sp.cell).not.toEqual([40, 40, 40]);   // never the aimed block
+      }
   });
 
   it('cellOverlap guards the footprint (the red ghost refuses)', () => {

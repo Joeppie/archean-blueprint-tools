@@ -180,12 +180,8 @@ export function setBlockField(bp: Blueprint, bi: number,
 // ------------------------------------------------- CONTINUATION (Shift-place)
 // The game's Constructor Tool (wiki §Block Modes): "Hold Shift before pressing
 // left-click to COPY the block you're aiming at or logically ADD THE NEXT
-// BLOCK." Against the hit face, that next block is the SAME shape+orientation
-// and the SAME size, landed so the geometry continues without a seam:
-//  • AXIS face hit  → the copy sits flush on that face (the full-bbox side
-//    slides against its own kind: cubes stack a wall, a slope's tall back
-//    face continues the ramp DOWN one step, ±x slope triangles extend the
-//    ramp sideways, an inv-corner's full top copies the notch upward).
+// BLOCK." Against the hit face, that next block rides the aimed block's size
+// and paint, landed so the geometry continues without a seam:
 //  • SLANT face hit → the copy steps ONE FOOTPRINT along the slant plane,
 //    continuing the slanted surface flush: for a unit slope that is the
 //    diagonal cell
@@ -193,6 +189,18 @@ export function setBlockField(bp: Blueprint, bi: number,
 //    edge); for a size-(sx,sy,sz) block the coplanar lattice step scales
 //    with each axis footprint. Which of the plane's two directions the hit
 //    point lies toward picks the candidate.
+//  • AXIS face hit  → the next cell flush on that face, filled with the
+//    shape family orientation that GLUES the joint (v1.5.2 user rule):
+//    "when you have the Triangle edge shape and on the flat edges place
+//    something, the inverted quarter should be placed, nor the same block
+//    type right behind it; that only is logical for square blocks". A
+//    same-type copy behind a wedge's flat face touches only along an EDGE
+//    (a void at the joint) — the logical mate is the inverted wedge whose
+//    own full face meets the hit face FULLY and whose slant stays PARALLEL
+//    (the ramp's surface continues as a slab, not a gable). Cubes have one
+//    orientation, so they keep stacking their own kind; a slope's triangular
+//    SIDE face already mates its own kind flush, so the sideways ramp
+//    extension is what the rule picks there (stability, not a special case).
 // Coplanarity is exact by construction: the slant plane of a shape in local
 // units is Σ mᵢ·uᵢ = κ (mᵢ ∈ {−1,0,1} the integer slant normal), and the
 // step d over axis pair (a,b) satisfies Σ mᵢ dᵢ/eᵢ = mₐ(k·m_b) + m_b(−k·m_a) = 0.
@@ -233,21 +241,96 @@ function slantCentroidLocal(type: number, e: Cell, hitN: Cell): Cell {
   return best ?? [e[0] / 2, e[1] / 2, e[2] / 2];
 }
 
+/** The shape families (type ranges): cube · slope · corner · pyramid ·
+ *  inverse corner — the same table §rotateType walks. */
+const SHAPE_FAMILIES: [number, number][] = [[0, 0], [1, 12], [13, 20], [21, 44], [45, 52]];
+
+/** Face-normal LINES of a shape's SLANT faces (non-axis normals) scaled into
+ *  the e-extent box, canonicalised as unoriented lines (first nonzero
+ *  component positive). Two blocks continue each other's surfaces iff their
+ *  slant-line multisets match — the slab behind a ramp, not the gable. */
+function slantLines(type: number, e: Cell): string {
+  const pts = getBlockPoints(type, [0, 0, 0], e);
+  const keys: string[] = [];
+  getBlockFaces(type).forEach((f) => {
+    const a = pts[f[0]!]!, b = pts[f[1]!]!, c = pts[f[2]!]!;
+    let nx = (b[1]! - a[1]!) * (c[2]! - a[2]!) - (b[2]! - a[2]!) * (c[1]! - a[1]!);
+    let ny = (b[2]! - a[2]!) * (c[0]! - a[0]!) - (b[0]! - a[0]!) * (c[2]! - a[2]!);
+    let nz = (b[0]! - a[0]!) * (c[1]! - a[1]!) - (b[1]! - a[1]!) * (c[0]! - a[0]!);
+    const l = Math.hypot(nx, ny, nz);
+    if (l < 1e-9) return;                            // degenerate (flat shape)
+    nx /= l; ny /= l; nz /= l;
+    // an AXIS face's normal is a unit coordinate axis exactly (a 45° slope
+    // carries 0.707 components — that is a SLANT, keep it)
+    if (Math.abs(nx) > 1 - 1e-6 || Math.abs(ny) > 1 - 1e-6 || Math.abs(nz) > 1 - 1e-6) return;
+    if (nx < -1e-9 || (Math.abs(nx) < 1e-9 && (ny < -1e-9 || (Math.abs(ny) < 1e-9 && nz < 0))))
+      { nx = -nx; ny = -ny; nz = -nz; }
+    keys.push([nx, ny, nz].map(v => v.toFixed(3)).join(','));
+  });
+  return keys.sort().join(';');
+}
+
+const CONT_R = 12;                                   // 12×12 probes on the joint
+
+/** The AXIS-face continuation TYPE (v1.5.2 user rule, see §CONTINUATION):
+ *  among the aimed block's shape family, the orientation that lands in the
+ *  flush next cell with a BILATERALLY FULL joint — the shared-plane solid
+ *  sections of the two blocks cover each other (probed over the aimed face
+ *  rectangle; anything below ~full contact leaves a void at the seam, e.g.
+ *  a same-type slope behind a slope touches edge-only) — preferring the one
+ *  whose slant lines match the aimed block's, so the surface continues as a
+ *  slab. A same-type copy that is ITSELF the flush mate (cube wall, the
+ *  slope's triangular side faces) wins by construction. With no flush mate
+ *  at all the plain copy stands (the pre-v1.5.2 behaviour). */
+function continuedType(info: BlockInfo, a: number, s: number, cell: Cell): number {
+  const t = info.type;
+  const fam = SHAPE_FAMILIES.find(([lo, hi]) => t >= lo && t <= hi);
+  if (!fam || fam[1] === fam[0]) return t;           // cube / unknown shape
+  const e: Cell = [info.size[0] + 1, info.size[1] + 1, info.size[2] + 1];
+  const b1 = (a + 1) % 3, c1 = (a + 2) % 3;
+  const lo: [number, number] = [info.cell[b1]!, info.cell[c1]!];
+  const hi: [number, number] = [info.cell[b1]! + e[b1]!, info.cell[c1]! + e[c1]!];
+  const mine = faceProbes(t, info.cell, e, a, s, lo, hi, CONT_R);
+  const mineN = mine.filter(Boolean).length;
+  if (!mineN) return t;                              // nothing solid at the plane
+  const lines = slantLines(t, e);
+  let best = t, bestRank = 0;
+  for (let tt = fam[0]; tt <= fam[1]; tt++) {
+    const theirs = faceProbes(tt, cell, e, a, -s as 1 | -1, lo, hi, CONT_R);
+    const theirsN = theirs.filter(Boolean).length;
+    if (!theirsN) continue;
+    let both = 0;
+    for (let k = 0; k < mine.length; k++) if (mine[k] && theirs[k]) both++;
+    const flush = Math.min(both / mineN, both / theirsN);
+    if (flush < 0.98) continue;                      // not a full joint — a void
+    let rank = 1 + flush + (slantLines(tt, e) === lines ? 2 : 0);
+    if (tt === t) rank += 0.0005;                    // ties keep the current shape
+    if (rank > bestRank) { bestRank = rank; best = tt; }
+  }
+  return best;
+}
+
 /** The game's Shift "logically add the next block" against a hit face.
  *  @param info   the aimed-at block (cell/size/type/slot)
  *  @param hit    the hit point in ABSOLUTE CELL coords (cellIndex space)
- *  @param faceN  the hit face's world/unit normal (file frame == view frame) */
+ *  @param faceN  the hit face's world/unit normal (file frame == view frame)
+ *  SLANT hit → the aimed block's own shape+orientation in the coplanar step;
+ *  AXIS hit → the flush next cell filled with the family's FLUSH MATE
+ *  (continuedType — for cubes that is the same cube; for a wedge's flat
+ *  face it is the inverted wedge, the user's "inverted quarter"). */
 export function complementBlock(info: BlockInfo, hit: Cell, faceN: Cell): PlaceSpec {
   const e: Cell = [info.size[0] + 1, info.size[1] + 1, info.size[2] + 1];
   const len = Math.hypot(faceN[0], faceN[1], faceN[2]) || 1;
   const n: Cell = [faceN[0] / len, faceN[1] / len, faceN[2] / len];
   const axisIdx = [0, 1, 2].filter(a => Math.abs(n[a]!) > 0.7);
   let cell: Cell;
+  let type = info.type;
   if (axisIdx.length === 1) {
-    // flush copy across the aimed axis-aligned face
+    // flush continuation in the next cell across the aimed axis-aligned face
     const a = axisIdx[0]!, s = n[a]! > 0 ? 1 : -1;
     cell = [info.cell[0], info.cell[1], info.cell[2]];
     cell[a] = s > 0 ? info.cell[a]! + e[a]! : info.cell[a]! - e[a]!;
+    type = continuedType(info, a, s, cell);
   } else {
     // coplanar continuation step(s) along the slant plane
     const m = signVec(n);
@@ -269,8 +352,8 @@ export function complementBlock(info: BlockInfo, hit: Cell, faceN: Cell): PlaceS
       }
     cell = [info.cell[0] + best[0], info.cell[1] + best[1], info.cell[2] + best[2]];
   }
-  // the continuation rides the aimed block's shape, size and face colour
-  return { cell, size: [info.size[0], info.size[1], info.size[2]], type: info.type, slot: info.slot };
+  // the continuation rides the aimed block's size and face colour
+  return { cell, size: [info.size[0], info.size[1], info.size[2]], type, slot: info.slot };
 }
 
 /** ⟲ brush rotation: cycle a shape through its ORIENTATION family exactly
@@ -444,14 +527,14 @@ const SNAP_R = 4;                                   // 4×4 probes per contact
  *  far face), sampled over the PHYSICAL overlap rectangle [lo,hi] of the
  *  other axes in ABSOLUTE cell coords (cell units), converted per block. */
 function faceProbes(type: number, cell: Cell, e: Cell, a: number, s: number,
-  lo: [number, number], hi: [number, number]): boolean[] {
+  lo: [number, number], hi: [number, number], n = SNAP_R): boolean[] {
   const planes = solidPlanes(type, e);
   const b1 = (a + 1) % 3, c1 = (a + 2) % 3;
   const out: boolean[] = [];
-  for (let i = 0; i < SNAP_R; i++)
-    for (let j = 0; j < SNAP_R; j++) {
-      const ub = lo[0] + (hi[0] - lo[0]) * (i + 0.5) / SNAP_R;
-      const uc = lo[1] + (hi[1] - lo[1]) * (j + 0.5) / SNAP_R;
+  for (let i = 0; i < n; i++)
+    for (let j = 0; j < n; j++) {
+      const ub = lo[0] + (hi[0] - lo[0]) * (i + 0.5) / n;
+      const uc = lo[1] + (hi[1] - lo[1]) * (j + 0.5) / n;
       const p: [number, number, number] = [0, 0, 0];
       p[a] = (s > 0 ? cell[a]! + e[a]! - 1e-4 : cell[a]! + 1e-4) - cell[a]!;   // local, inside
       p[b1] = ub - cell[b1]!;
