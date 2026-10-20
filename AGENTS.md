@@ -847,6 +847,18 @@ release/functionality. but no user-unackowledged bumps."** Concretely:
   truth"); no axis mirror anywhere. See
   FORMAT.md § Handedness.
 - **Rotation storage has TWO conventions keyed on `data.colors` (v108):**
+  **v1.5.10 HARD RULE: the tool NEVER rewrites an orientation it did not
+  edit.** The game stores quaternion bytes VERBATIM across generations
+  (ISW-241's 2025 workshop file and the game's 2026 palette re-save share
+  byte-identical orientations), so the old normalize rule 4 (open-time
+  raw→conjugate rewrite) made palette-less exports load FLIPPED in game —
+  user's wheel-on-top + torn dashboard murals, 2026-10-20. Rule 4 deleted;
+  the palette-less display law is carried on `bp.__legacyQ` (stamped from
+  the file as on disk, survives the palette embedding AND undo). Pins:
+  `app/src/engine/__tests__/savefidelity.test.ts` + `app/e2e/savefidelity.
+  spec.ts`; two-axis probe fixture `testdata/9000004001` (game-written L/R
+  dashboards). The palette-keyed V2-conjugate READ law awaits re-arbitration
+  with in-game pixels (FORMAT §Handedness erratum).
   palette-less legacy files (2024-25 corpus, 23 of them) store the Unity LH
   quaternion **RAW** — the game places with `R(q)` (proof: mosaic craft
   3334698274's dashboard murals are flush only under raw: |dot| 0.999,

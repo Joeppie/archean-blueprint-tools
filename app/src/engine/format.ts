@@ -124,15 +124,24 @@ export interface Blueprint {
   box_min: Vec3D;
   box_max: Vec3D;
   data: BlueprintData;
+  /** runtime-only rotation-law stamp (see isLegacyFile): lives on the live bp
+   *  OBJECT only — never in the doc, so it can never reach a save. */
+  __legacyQ?: boolean;
   [key: string]: unknown;
 }
 
 /**
  * v1 detection: palette-less files (2024-25 corpus) resolve colours from the
  * built-in legacy table AND store rotations RAW (the LEGACY_Q split).
+ * Since v1.5.11 the law is carried on the live bp as `__legacyQ` (stamped by
+ * the Editor from the file AS ON DISK): normalize() embeds data.colors at
+ * open, so re-deriving the law from the converted object would silently flip
+ * the display into the conjugate chain — and the game round-trips quaternion
+ * bytes VERBATIM, so the source file's law is the law of every save (the
+ * orientation-rewrite bug this prevents: ISW wheel-on-top, Jimmy's murals).
  */
 export function isLegacyFile(bp: Blueprint): boolean {
-  return bp.data.colors == null;
+  return bp.__legacyQ ?? bp.data.colors == null;
 }
 
 /**

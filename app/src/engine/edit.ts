@@ -13,9 +13,10 @@
 //   save source) accumulates the shift once, never re-applied.
 
 import type { DocNode } from './doc';
-import { docEnsureArray, docFromValue, docGet, docSet, docSetArrayItem, docSetNumber, emitDoc } from './doc';
+import { docEnsureArray, docFromValue, docGet, docSet, docSetArrayItem, docSetNumber, docValue, emitDoc, parseDoc } from './doc';
 import type { Blueprint, FileQuat, LatticeObj, Vec3D } from './format';
 import { CELL } from './format';
+import { docLegacyQuats, normalizeDoc } from './normalize';
 import type { PaletteEntry } from './palette';
 
 export type Occ = LatticeObj & { size_x?: number; size_y?: number; size_z?: number };
@@ -79,6 +80,20 @@ export function makeCtx(doc: DocNode, bp: Blueprint): EditCtx {
     })),
     applied: bp.data.components.map(() => ({ x: 0, y: 0, z: 0 })),
   };
+}
+
+/** THE open funnel: parse → read the file's rotation law (BEFORE normalize
+ *  embeds data.colors) → v1→v2 migration → docValue → EditCtx, with the law
+ *  stamped on the live bp (isLegacyFile). Editor.openText and the
+ *  save-fidelity pins share this one implementation, so the pins can never
+ *  drift from the shipped path. */
+export function openFunnel(text: string): { doc: DocNode; bp: Blueprint; ctx: EditCtx; legacy: boolean } {
+  const doc = parseDoc(text);
+  const legacy = docLegacyQuats(doc);
+  normalizeDoc(doc);
+  const bp = docValue(doc) as Blueprint;
+  bp.__legacyQ = legacy;
+  return { doc, bp, ctx: makeCtx(doc, bp), legacy };
 }
 
 const AXES = ['x', 'y', 'z'] as const;

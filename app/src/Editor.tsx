@@ -23,7 +23,7 @@ import type { ResolvedColor } from './engine/palette';
 import { docArrayInsert, docArrayRemoveAt, docFromValue, docValue, emitDoc, parseDoc } from './engine/doc';
 import { allocateSlot, paletteSlotNode, type Rgb255 } from './engine/tools';
 import { setPaletteSlot } from './engine/edit';
-import { makeCtx, resetComponent, setDataField, setOrientation, setPos, setCompField,
+import { makeCtx, openFunnel, resetComponent, setDataField, setOrientation, setPos, setCompField,
   setCompColor, serializeSave, writeBlockDoc, type EditCtx } from './engine/edit';
 import { makePipe } from './engine/wireops';
 import { normalizeDoc } from './engine/normalize';
@@ -101,6 +101,12 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   const forceRef = useRef(false);             // File ▾ Refresh: one-shot re-download
   const engineRef = useRef<Engine | null>(null);
   const ctxRef = useRef<EditCtx | null>(null);
+  /** the rotation STORAGE law of the craft AS ON DISK (raw for palette-less
+   *  sources). normalize() embeds data.colors, so the law must outlive the
+   *  migration — the game stores quaternion bytes VERBATIM, so an open→save
+   *  may never flip a rotation, and undo re-parses ALREADY-converted text
+   *  (the law cannot be re-derived from it; v1.5.11, savefidelity pins). */
+  const legacyRef = useRef(true);
   const dirtyRef = useRef(false);
   const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -149,7 +155,9 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   const applyHistory = useCallback((state: string) => {
     const d = parseDoc(state);
     normalizeDoc(d);                                // idempotent on snapshots
-    ctxRef.current = makeCtx(d, docValue(d) as Blueprint);
+    const bp = docValue(d) as Blueprint;
+    bp.__legacyQ = legacyRef.current;               // the session's law (the
+    ctxRef.current = makeCtx(d, bp);                // snapshot text is post-migration)
     const dirtyNow = state !== histRef.current.states[0];
     dirtyRef.current = dirtyNow; setDirty(dirtyNow);
     setSel({ ci: -1, sub: -1 }); setBlockSel(-1); setTriSel(-1); setTriDraft([]);
@@ -178,12 +186,12 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   /** parse → v1→v2 NORMALIZE → doc+ctx → live bp. One funnel for download,
    *  file-open, drag-drop and New craft. */
   const openText = useCallback((text: string) => {
-    const d = parseDoc(text);
-    normalizeDoc(d);                              // convert-on-open migration
-    ctxRef.current = makeCtx(d, docValue(d) as Blueprint);
+    const { doc, ctx, legacy } = openFunnel(text);   // parse → law stamp → normalize
+    legacyRef.current = legacy;
+    ctxRef.current = ctx;
     dirtyRef.current = false;
     setDirty(false); setSel({ ci: -1, sub: -1 }); setBlockSel(-1); setPlacing(null);
-    histRef.current = { states: [emitDoc(d)], p: 0, timer: null };
+    histRef.current = { states: [emitDoc(doc)], p: 0, timer: null };
     setHistTick(t => t + 1);
     setBpKeepView(false);                           // a craft swap re-frames
     setBp(ctxRef.current.bp);

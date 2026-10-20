@@ -1,11 +1,12 @@
 // normalize.ts pins: the v1 → v2 open-time migration (embedded palette at
-// the v2-base indices, slot remap, color-pair → entry dicts, raw quaternion
-// → conjugate keeping the SAME displayed rotation, version bump, recursion
-// into subgrids, idempotence).
+// the v2-base indices, slot remap, color-pair → entry dicts, orientations
+// VERBATIM [v1.5.11 — the conjugate rewrite broke the game round-trip],
+// version bump, recursion into subgrids, idempotence).
 import { describe, expect, test } from 'vitest';
 import { emitDoc, parseDoc, docValue } from '../doc';
 import { normalizeDoc } from '../normalize';
 import { displayQuat, fileToViewQuat } from '../compparts';
+import { isLegacyFile } from '../format';
 import type { Blueprint, FileQuat } from '../format';
 
 const V1 = '{"data":{"version":1,"blocks":[{"type":0,"pos_x":5,"pos_y":5,"pos_z":5,' +
@@ -30,7 +31,7 @@ describe('v1 → v2 open-time normalize', () => {
     expect(normalizeDoc(doc).converted).toBe(false);
   });
 
-  test('the file now READS as modern: colors present → no LEGACY_Q path', () => {
+  test('the file reads as v2 (palette embedded) — the QUAT LAW stays on the __legacyQ stamp', () => {
     expect(Array.isArray(bp.data.colors)).toBe(true);
     expect(bp.data.colors!.length).toBeGreaterThan(52);
     expect(bp.data.version).toBe(2);
@@ -50,19 +51,25 @@ describe('v1 → v2 open-time normalize', () => {
     expect(cols.color2!.opacity).toBeLessThan(15);                // glass stays translucent
   });
 
-  test('raw quaternion → conjugate keeps the EXACT displayed rotation', () => {
-    const qvOld = fileToViewQuat(quat({ w: 0.7071, x: 0, y: 0.7071, z: 0 }), true);   // legacy chain
-    const qvNew = fileToViewQuat(quat(bp.data.components[0]!.orientation), false);    // modern chain
-    for (const k of ['w', 'x', 'y', 'z'] as const)
-      expect(qvNew[k]).toBeCloseTo(qvOld[k], 12);
+  test('orientations stay VERBATIM; the display rides the legacy stamp (R(q) as stored)', () => {
+    // v1.5.11: the rule-4 conjugate rewrite was killed (the game round-trips
+    // quaternion bytes, so a rewritten quat = a rotated-different craft in
+    // game — user's wheel-on-top / torn-murals exports).
+    const q = quat(bp.data.components[0]!.orientation);
+    expect(q).toEqual({ w: 0.7071, x: 0, y: 0.7071, z: 0 });
+    // the palette-less source's law is RAW and the display must not move:
+    // legacy chain on the STORED quat = what the file always showed
+    const qv = fileToViewQuat(q, true);
+    expect(qv.y).toBeCloseTo(0.7071, 12);
+    expect(isLegacyFile(docValue(parseDoc(V1)) as Blueprint)).toBe(true);   // as on disk
   });
 
-  test('recursion: nested subgrid quaternions are conjugated too', () => {
+  test('recursion: nested subgrid quaternions are VERBATIM too', () => {
     const nested = (bp.data.components[0]!.data!['components'] as { orientation: FileQuat }[])[0]!;
-    expect(nested.orientation.z).toBe(-0.5);
+    expect(nested.orientation.z).toBe(0.5);
   });
 
-  test('FluidJunction orientation is EXEMPT from the conjugation (flat comb survives)', () => {
+  test('FluidJunction orientation is trivially untouched (flat comb survives)', () => {
     const fj = bp.data.components[1]!;
     expect(fj.type).toBe('FluidJunction');
     // stored quaternion keeps its v1 raw form (x̂ 90°: (0,.7071,0,.7071))

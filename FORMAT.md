@@ -78,6 +78,31 @@ beacon mast points nose-ward (raw −z) so a regression to raw-`q` placement
 on modern files fails the suite, and the `liver` pin (airliner 3309955432
 livery raster reads U-N-I-T-E-D from file −x) cannot pass under a mirror.
 
+**ERRATUM + HARD RULE (2026-10-20, user in-game reports):** whatever the
+conjugate/raw READ law per generation, the game STORES orientation values
+VERBATIM across generations and re-saves: ISW-241's workshop file
+(3518436870, 2025-07, no palette) and the game's own 2026 palette re-save
+(3812927875) carry BYTE-IDENTICAL `orientation` values for the same scene —
+the game never converted the quats when it embedded the palette. The app's
+open-time v1→v2 migration (normalize rule 4) conjugated every quaternion of
+a palette-less craft and saved the result, so such exports loaded into the
+game FLIPPED: the caster wheel spawned ON TOP of its strut (image:
+`blueprint - 2026-10-20T175450.486.json`), Jimmy's (3334698274) two-axis
+dashboard murals tore apart, while single-axis/180° parts (whose conjugate
+IS the same rotation) stayed fine — the exact symptom profile users
+reported, including the "rotation of the dashboards wrongly ordered" L/R
+probes. Rule 4 is DELETED: open→save keeps every `components[].orientation`
+byte-exact (`savefidelity.test.ts` + `e2e/savefidelity.spec.ts`, fixture
+`testdata/9000004001` = the game-written two-axis L/R dashboards). The
+migration keeps ONLY the palette/color conversion (what the game itself
+does on re-saves). OPEN CONSEQUENCE for the read law: the user's game read
+the conjugated export with a placement that differs from its placement of
+the raw bytes ⇒ the palette-keyed V2-conjugate claim above must be
+re-arbitrated against a NATIVE palette file with multi-axis rotations
+9000004001-style using IN-GAME pixels (the only sanctioned arbiter); until
+then no tool may rewrite orientation bytes, which makes every export
+law-neutral.
+
 **The dev viewer's convention, read from its source (viewer.xenontools.dev
 `js/blueprint.js` + `js/scene.js`, Oct 5):** components are placed with the
 **raw** numbers — `new THREE.Quaternion(q.x, q.y, q.z, q.w)` composed with the

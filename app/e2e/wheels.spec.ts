@@ -57,9 +57,17 @@ test.describe('ISW crawler wheels hang below their mounts @models @slow', () => 
     const cis = await openCraft(page, '3481322297', /^BigWheel$/);
     const boxes = await page.evaluate((cis) =>
       cis.map(ci => (window as unknown as W).__ARCHEAN__!.engine.compRealBox(ci)!), cis);
+    // UPRIGHT build pose, height 2.006 m. These numbers moved from the
+    // v1.5.10 pins (-2.004/-0.774, height 1.23 = the 90° suspension ROLL)
+    // because normalize's palette embedding used to hide the file's legacy
+    // flag from the engine, so the documented "droop OFF for raw-quat
+    // files" exclusion (the wheelpair truck-leg arbitration) never actually
+    // fired IN THE APP — the old numbers pinned that dormant bug. The flag
+    // is stamped from the file as on disk now (savefidelity.test.ts), the
+    // exclusion finally applies, and the truck stands its wheels up.
     for (const b of boxes) {                    // wheelpair-verified truck pose
-      expect(b!.min[1], `truck BigWheel bottom ${b!.min[1]}`).toBeCloseTo(-2.004, 2);
-      expect(b!.max[1], `truck BigWheel top ${b!.max[1]}`).toBeCloseTo(-0.774, 2);
+      expect(b!.min[1], `truck BigWheel bottom ${b!.min[1]}`).toBeCloseTo(-1.941, 2);
+      expect(b!.max[1], `truck BigWheel top ${b!.max[1]}`).toBeCloseTo(0.065, 2);
     }
   });
 });

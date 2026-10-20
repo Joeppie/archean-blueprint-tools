@@ -10,14 +10,21 @@
 //  2. block/triangle color slots are remapped through legacySlot() in place.
 //  3. components[].colors ARRAY pairs ([c1,c2] slot indices, v1 legacy
 //     editor) become v2 {color1:{...}, color2:{...}} entry objects.
-//  4. orientations: v1 stores the Unity-LH quaternion RAW, v2 stores the
-//     CONJUGATE — q' = {w, −x, −y, −z} keeps the same displayed rotation
-//     under the modern law R(q*): display = R(q) under BOTH the old and the
-//     de-mirrored (v0.180) chains. FluidJunction orientations are EXEMPT —
-//     the builder-flat comb pose is R(as-written) for both generations.
+//  4. orientations: UNTOUCHED (v1.5.11). The earlier raw→conjugate rewrite
+//     was WRONG: the GAME stores and reads quaternion values VERBATIM
+//     (proof: ISW-241's workshop file 3518436870, 2025-07 no-palette, and
+//     the game's own 2026 re-save 3812927875 with an embedded palette carry
+//     BYTE-IDENTICAL orientation values for the same scene), so a migration
+//     that flips the vector parts makes the game place the flipped rotation
+//     — the 2026-10-20 report: ISW caster wheel on TOP of its strut, Jimmy's
+//     two-axis dashboard murals torn apart, while single-axis/180° parts
+//     (whose conjugate is the same rotation) stayed fine. The engine keeps
+//     reading the RAW law for palette-less sources via the __legacyQ stamp
+//     (Editor), so the DISPLAY is unchanged; only the byte rewrite died.
 //  5. data.version 1 → 2.
 // All rules apply RECURSIVELY into Build subgrids. Saving a converted file
-// writes the v2 form (intentional: the converter is the migration).
+// writes the v2 form (intentional: the converter is the migration — the
+// palette embedding is what the game itself does on its own re-saves).
 
 import { docFromValue, docGet, docSet, docSetArrayItem, type DocNode } from './doc';
 import { DEFAULT_PALETTE, legacySlot } from './palette';
@@ -32,6 +39,17 @@ export interface NormalizeResult { converted: boolean; slots: number[] }
 function isLegacyDoc(data: DocNode): boolean {
   const c = docGet(data, ['colors']);
   return c === undefined || (c.kind === 'arr' && c.items.length === 0);
+}
+
+/** The rotation STORAGE law of the file AS ON DISK (pre-migration): a
+ *  palette-less source stores the Unity-LH quaternion RAW (the LEGACY_Q
+ *  split, FORMAT §Handedness). normalize() embeds data.colors, so the law
+ *  must be read BEFORE it and carried on the live bp (`__legacyQ`) — the
+ *  game round-trips quaternion bytes, so the law of the source is the law
+ *  of the save forever. */
+export function docLegacyQuats(doc: DocNode): boolean {
+  const data = docGet(doc, ['data']);
+  return !!data && data.kind === 'obj' && isLegacyDoc(data);
 }
 
 function remapSlotArray(arr: DocNode, used: Set<number>): void {
@@ -53,21 +71,9 @@ function normalizeComponents(list: DocNode, used: Set<number>): void {
   for (const comp of list.items) {
     if (comp.kind !== 'obj') continue;
     const get = (k: string) => comp.entries.find(([kk]) => kk === k)?.[1];
-    // 4. raw quaternion → conjugate. FluidJunction EXEMPT (de-mirror v0.180):
-    // the builder-FLAT comb pose is R(q) of the AS-WRITTEN quaternion for
-    // BOTH generations (displayQuat reads the raw file quat), so conjugating
-    // a junction's orientation would flip the legacy comb on its end — the
-    // RCS-infinity regression class. The stored quat keeps its v1 raw form.
-    const ty = get('type');
-    const isJunction = ty?.kind === 'str' && ty.value === 'FluidJunction';
-    const q = isJunction ? undefined : get('orientation');
-    if (q?.kind === 'obj') {
-      for (const [k, n] of q.entries)
-        if (n.kind === 'num' && (k === 'x' || k === 'y' || k === 'z')) {
-          n.value = -n.value;
-          n.raw = n.raw.startsWith('-') ? n.raw.slice(1) : '-' + n.raw;
-        }
-    }
+    // 4. orientation: VERBATIM — never rewritten (see the file header: the
+    //    game stores and re-reads quaternion bytes unchanged, so flipping
+    //    the vector parts here exported mirror-rotated placements).
     // 3. colors [a,b] slot pairs → {color1:{...}, color2:{...}}
     const cols = get('colors');
     if (cols?.kind === 'arr' && cols.items.length >= 2
