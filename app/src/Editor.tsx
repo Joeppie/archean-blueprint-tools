@@ -156,16 +156,19 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         markDirty(); bumpRev();
       };
       // BLOCK gizmo commits (v1.5): the engine moved/turned the bp blocks —
-      // mirror them into the raw doc, mark dirty, reload the merged hull.
+      // mirror them into the raw doc AND rebuild the merged hull (v1.5.1 fix:
+      // the old markDirty+bumpRev left the SOLID mesh at the old shape — the
+      // rotation/move updated the data but never repainted; sceneChanged is
+      // the same debounced path the BlockPanel rows use via onApplied).
       e.onBlockEdit = (bis) => {
         const ctx = ctxRef.current;
         if (!ctx) return;
         for (const bi of bis) writeBlockDoc(ctx, bi);
-        markDirty(); bumpRev();
+        sceneChanged();
       };
     }
     setEngine(e);
-  }, [markDirty, bumpRev]);
+  }, [markDirty, bumpRev, sceneChanged]);
   const [engine, setEngine] = useState<Engine | null>(null);
 
   // mode gating: gizmo in Edit AND Blocks (v1.4: clicking a component in

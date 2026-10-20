@@ -168,6 +168,18 @@ user's explicit say-so (Pages/release still serves it meanwhile).
   / `blockGizmoState()` carry `shown` = helper actually enabled+visible (block
   variant: also attached to the proxy) — pins assert PIXELS, not intent;
   gizmo.spec pins the seeded-poisoned-storage fresh-load-shows guarantee.
+- **Block gizmo commits RELOAD the merged hull (v1.5.1 fix):** user: "Rotating
+  blocks doesnt update them.." — `onBlockEdit` first did markDirty+bumpRev only,
+  so the DATA moved but the merged block MESH kept its old shape (the golden
+  overlay + panel rows updated, the solid didn't). It now routes through
+  `sceneChanged()` (the same 180 ms debounced reload the BlockPanel's
+  `onApplied` uses). Anti-blanket pin: `stats().loads` = load()/reload()
+  count — the blockedit BLOCK-widget test polls it STRICTLY INCREASES after an
+  accepted shift and after a 90° turn (a refused shift must NOT bump it).
+  Engine reload safety: `load()` ends in `select(-1)` → `syncGizmo` →
+  `syncBlockGizmo`, so the widget re-attaches + re-centres on the rebuilt
+  scene. (The lesson: blueprint-data assertions alone cannot pin a repaint —
+  assert through loads/pixels.)
 - **Panel flavors + view-lock + BLOCK widget (v1.5 user rules):** (1) ONE
   `✎ Edit | ✚ Place` switch crowns the side panel in BOTH the Edit and Blocks
   modes (testids `tooltab-edit`/`tooltab-place`, hint row `flavor-hint`) —

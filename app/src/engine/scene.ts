@@ -83,7 +83,10 @@ export interface PickHit {
 }
 export interface SceneStats { blocks: number; tris: number; hullTris: number; comps: number; subs: number; draws: number; ok: boolean;
   /** 'lite' = the heavy-craft tier (painted stand-ins, no real-model fan-out) */
-  tier: 'full' | 'lite' }
+  tier: 'full' | 'lite';
+  /** scene rebuilds so far — an e2e mutation pin asserts this bumps, i.e.
+   *  the edit actually REPAINTED the merged mesh (not just wrote the data) */
+  loads: number }
 
 /** renderer kinds carried in userData.kind (pick routes on these) */
 type Kind = 'block' | 'wire' | 'occ' | 'pipe' | 'pipe-end' | 'comp' | 'sub' | 'ground';
@@ -173,6 +176,8 @@ export class Engine {
   private atlasRef: ModelAtlas | null = null;
   private needRender = false;
   private loadSeq = 0;                  // async real-model loads die with their load()
+  private loadCount = 0;                // scene rebuilds so far (stats().loads —
+                                        //  e2e proof a mutation repainted the mesh)
   private heavy = false;                // heavy-craft tier for the current load
   private legacy = false;
   private palette: FilePalette | null = null;
@@ -519,6 +524,7 @@ void main() {
   // ------------------------------------------------------------------ load
 
   load(bp: Blueprint, atlas: ModelAtlas | null = null, keepView = false) {
+    this.loadCount++;                   // stats().loads — mutation-repaint proof
     // A same-craft rebuild (⚙ decimated-twin swap, block edit) must keep the
     // camera + selection (user report v0.182: rebuilds "reset the view").
     // Only a craft swap re-frames. (The old "real models" toggle that forced
@@ -2590,6 +2596,7 @@ void main() {
       draws: this.renderer?.info.render.calls ?? 0,
       ok: this.batch !== null && (this.batch.stats.blocks > 0 || this.batch.stats.hullTris > 0),
       tier: this.heavy ? 'lite' : 'full',
+      loads: this.loadCount,
     };
   }
 

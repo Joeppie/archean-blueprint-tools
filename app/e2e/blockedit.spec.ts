@@ -38,6 +38,12 @@ async function selectDeckBlock(page: Page, px: { x: number; y: number }): Promis
   return hl!.bi;
 }
 
+/** scene rebuild counter — a gizmo commit MUST bump it (v1.5.1: the solid
+ *  mesh once kept its old shape because the commit never reloaded the scene) */
+const loads = (page: Page) => page.evaluate(() =>
+  (window as unknown as { __ARCHEAN__?: { stats: () => { loads: number } } })
+    .__ARCHEAN__!.stats().loads);
+
 /** open a NEW craft in BLOCKS mode and return a canvas fraction that
  *  answers a deck block face through engine.pickCell (deterministic probe) */
 async function openDeck(page: Page, tab: 'place' | 'edit') {
@@ -238,22 +244,31 @@ test.describe('blocks EDIT: highlight, in-place rotate, snap, twin @place', () =
     }
 
     // cell MOVE +1 in y (empty above the deck): the block lands one cell up
+    // AND the merged hull REBUILDS (stats().loads bumps — the solid mesh is
+    // repainted, not just the data). v1.5.1: it used to stay frozen.
+    const l0 = await loads(page);
     const moved = await page.evaluate(() => (window as unknown as {
       __ARCHEAN__?: { engine: { blockGizmoShift: (s: [number, number, number]) => boolean } } }
     ).__ARCHEAN__!.engine.blockGizmoShift([0, 1, 0]));
     expect(moved, 'a shift into empty space is accepted').toBe(true);
-    await page.waitForTimeout(600);                       // debounced rebuild
     const b1 = await blockAt(page, bi);
     expect([b1.cx, b1.cy, b1.cz]).toEqual([b0.cx, b0.cy + 1, b0.cz]);
+    await expect.poll(() => loads(page), { timeout: 4000,
+      message: 'the accepted shift rebuilt the merged hull (mesh repaints)' })
+      .toBeGreaterThan(l0);
 
     // 90° TURN about z: the 9×1 deck bar exchanges x↔y extents (rotatedBlock)
+    // and again the SOLID repaints, not just the blueprint (v1.5.1).
+    const l1 = await loads(page);
     const rot = await page.evaluate(() => (window as unknown as {
       __ARCHEAN__?: { engine: { blockGizmoRotate: (a: 'x' | 'y' | 'z', n: number) => boolean } } }
     ).__ARCHEAN__!.engine.blockGizmoRotate('z', 1));
     expect(rot, 'a 90° turn commits').toBe(true);
-    await page.waitForTimeout(600);
     const b2 = await blockAt(page, bi);
     expect([b2.sx, b2.sy], 'a z-spin exchanges the x and y footprints').toEqual([b0.sy, b0.sx]);
+    await expect.poll(() => loads(page), { timeout: 4000,
+      message: 'the 90° turn rebuilt the merged hull (mesh repaints)' })
+      .toBeGreaterThan(l1);
 
     // FLAVOR FLIP to PLACE → the BLOCK widget detaches (it is Edit-flavor only)
     await page.getByTestId('tooltab-place').click();
