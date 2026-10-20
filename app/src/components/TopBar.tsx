@@ -1,14 +1,16 @@
-// TopBar.tsx — the KSP-VAB-style toolbar over the editor: a File menu
-// (New / Open / Save + Save as + Close-to-gallery), a New-craft button, and
-// the MODE tiles that split the workspace (icon + uppercase caption, like
-// KSP's editor/tool buttons). Dark bevelled .ksp-btn chrome, blue glow on
-// the active tile:
+// TopBar.tsx — the KSP-VAB-style toolbar over the editor: the MENUS (File ▾,
+// Edit ▾, Tools ▾), a New-craft button, and the MODE tiles that split the
+// workspace (icon + uppercase caption, like KSP's editor/tool buttons). Dark
+// bevelled .ksp-btn chrome, blue glow on the active tile:
 //   View   — inspect ONLY: the vessel amounts/census panel; canvas clicks
 //            select nothing (v1.5 — selection belongs to the Edit flavor)
 //   Edit   — component editing: gizmo, sliders, data rows
 //   Blocks — block placement / resizing / deletion
 //   Wire   — the port graph: census, naive auto-wiring, warnings
 //   Flight — flight analysis (mass/CoM, thrust nets, control surfaces)
+// The Edit menu is the HOME of the two user-declared TODOs (v1.7): the undo
+// stack and the vessel-information section (author / name / abbreviation) —
+// listed DISABLED so the roadmap is visible in the UI, wired in the Editor.
 import { useEffect, useRef, useState } from 'react';
 
 export type Mode = 'view' | 'edit' | 'blocks' | 'wire' | 'flight' | 'aero';
@@ -26,6 +28,9 @@ interface Props {
   onBack: () => void;
   /** File ▾ redownload: the ONLY user-forced network fetch for a cached craft */
   onRefresh?: () => void;
+  /** Tools ▾ entries (the ToolDialog registry in ToolsDialog.tsx) */
+  tools?: { id: string; label: string; icon: string }[];
+  onTool?: (id: string) => void;
   children?: React.ReactNode;              // right side: panel toggle etc.
 }
 
@@ -34,28 +39,52 @@ const MODES: [Mode, string, string][] = [
   ['wire', '∿', 'Wire'], ['flight', '➤', 'Flight'], ['aero', '≋', 'Wind'],
 ];
 
-export default function TopBar(p: Props) {
-  const [fileOpen, setFileOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
+/** One top menu: the button + a dropdown, closed by an outside mousedown. */
+function Menu(p: { testid: string; label: string; width?: string;
+  children: (close: () => void) => React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (!fileOpen) return;
-    const off = (e: MouseEvent) => { if (!menuRef.current?.contains(e.target as Node)) setFileOpen(false); };
+    if (!open) return;
+    const off = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
     addEventListener('mousedown', off);
     return () => removeEventListener('mousedown', off);
-  }, [fileOpen]);
-
-  const item = (label: string, act: () => void, key?: string) => (
-    <button data-testid={`file-${key ?? label}`}
-      className="flex w-full items-center justify-between gap-6 px-3 py-1.5 text-left text-[12px] text-ink hover:bg-white/10"
-      onClick={() => { setFileOpen(false); act(); }}>
-      <span className="ksp-label">{label}</span><span className="text-[10px] text-ink-dim">{key === 'save' ? 'Ctrl+S' : ''}</span>
-    </button>
-  );
-
+  }, [open]);
   return (
-    // mobile: the mode bar cannot share one row with File/Save/⚙ (it gets
-    // crushed to a sliver by the shrink-0 siblings), so it wraps onto a
-    // full-width second row; desktop keeps the single-row KSP chrome
+    <div ref={ref} className="relative shrink-0">
+      <button data-testid={`${p.testid}-menu`} onClick={() => setOpen(o => !o)}
+        className={`ksp-btn whitespace-nowrap px-2.5 py-1 text-[12px] ${open ? 'on' : ''}`}>
+        {p.label}
+      </button>
+      {open && (
+        <div data-testid={`${p.testid}-dropdown`}
+          className={`ksp-win absolute left-0 top-8 overflow-hidden rounded-md ${p.width ?? 'w-56'}`}>
+          {p.children(() => setOpen(false))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const Item = (p: { testid: string; label: string; hint?: string; disabled?: boolean;
+  on?: boolean; onClick: () => void }) => (
+  <button data-testid={p.testid} disabled={p.disabled}
+    className={`flex w-full items-center justify-between gap-4 px-3 py-1.5 text-left text-[12px]
+               ${p.disabled ? 'cursor-default text-ink-dim/60' : 'text-ink hover:bg-white/10'}
+               ${p.on ? 'text-accent' : ''}`}
+    onClick={() => { if (!p.disabled) p.onClick(); }}>
+    <span className="ksp-label">{p.label}</span>
+    {p.hint && <span className="text-[10px] text-ink-dim">{p.hint}</span>}
+  </button>
+);
+
+const Sep = () => <div className="my-1 border-t border-white/10" />;
+
+export default function TopBar(p: Props) {
+  return (
+    // mobile: the mode bar cannot share one row with File/Edit/Tools/Save/⚙
+    // (it gets crushed to a sliver by the shrink-0 siblings), so it wraps onto
+    // a full-width second row; desktop keeps the single-row KSP chrome
     <header className="relative z-30 flex min-h-11 shrink-0 flex-wrap items-center gap-x-2 gap-y-1
                        border-b border-[rgba(217,212,189,.22)] bg-gradient-to-b from-panel to-panel2
                        px-2 py-1 md:flex-nowrap md:py-0">
@@ -63,25 +92,48 @@ export default function TopBar(p: Props) {
         className="ksp-btn shrink-0 px-2.5 py-1 text-[12px] hover:text-accent">
         ←
       </button>
-      <div ref={menuRef} className="relative shrink-0">
-        <button data-testid="file-menu" onClick={() => setFileOpen(o => !o)}
-          className={`ksp-btn whitespace-nowrap px-2.5 py-1 text-[12px] ${fileOpen ? 'on' : ''}`}>
-          File ▾
-        </button>
-        {fileOpen && (
-          <div data-testid="file-dropdown"
-            className="ksp-win absolute left-0 top-8 w-56 overflow-hidden rounded-md">
-            {item('New craft', p.onNew, 'new')}
-            {item('Open file…', p.onOpen, 'open')}
-            <div className="my-1 border-t border-white/10" />
-            {item(p.dirty ? '● Save (download)' : 'Save (download)', () => p.onSave(), 'save')}
-            {item('Save as…', () => p.onSave('archean-craft.json'), 'saveas')}
-            <div className="my-1 border-t border-white/10" />
-            {p.onRefresh && item('Refresh craft (redownload)', p.onRefresh, 'refresh')}
-            {item('Close → gallery', p.onClose, 'close')}
-          </div>
-        )}
-      </div>
+
+      <Menu testid="file" label="File ▾">
+        {close => (<>
+          <Item testid="file-new" label="New craft" onClick={() => { close(); p.onNew(); }} />
+          <Item testid="file-open" label="Open file…" onClick={() => { close(); p.onOpen(); }} />
+          <Sep />
+          <Item testid="file-save" label={p.dirty ? '● Save (download)' : 'Save (download)'}
+            hint="Ctrl+S" onClick={() => { close(); p.onSave(); }} />
+          <Item testid="file-saveas" label="Save as…" onClick={() => { close(); p.onSave('archean-craft.json'); }} />
+          <Sep />
+          {p.onRefresh && <Item testid="file-refresh" label="Refresh craft (redownload)"
+            onClick={() => { close(); p.onRefresh?.(); }} />}
+          <Item testid="file-close" label="Close → gallery" onClick={() => { close(); p.onClose(); }} />
+        </>)}
+      </Menu>
+
+      <Menu testid="edit" label="Edit ▾">
+        {() => (<>
+          <Item testid="edit-undo" label="Undo" hint="todo — not wired yet" disabled
+            onClick={() => undefined} />
+          <Sep />
+          <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-ink-dim">Vessel information</div>
+          <Item testid="edit-vessel-name" label="Name…" hint="todo" disabled onClick={() => undefined} />
+          <Item testid="edit-vessel-author" label="Author…" hint="todo" disabled onClick={() => undefined} />
+          <Item testid="edit-vessel-code" label="Abbreviation / plate…" hint="todo" disabled
+            onClick={() => undefined} />
+        </>)}
+      </Menu>
+
+      {(p.tools?.length ?? 0) > 0 && (
+        <Menu testid="tools" label="Tools ▾">
+          {close => (<>
+            {p.tools!.map(t => (
+              <Item key={t.id} testid={`tool-${t.id}`} label={`${t.icon}  ${t.label}`}
+                onClick={() => { close(); p.onTool?.(t.id); }} />
+            ))}
+            <Sep />
+            <div className="px-3 py-1.5 text-[10px] text-ink-dim">more tools to follow</div>
+          </>)}
+        </Menu>
+      )}
+
       <button data-testid="new-craft" onClick={p.onNew}
         className="ksp-btn hidden shrink-0 whitespace-nowrap px-2.5 py-1 text-[12px] hover:text-accent md:inline">
         + New craft

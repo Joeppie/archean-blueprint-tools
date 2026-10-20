@@ -13,12 +13,15 @@ import Panel, { StaticInfo, ViewOpts, type EditApi } from './components/Panel';
 import TopBar, { type Mode } from './components/TopBar';
 import { BlockPanel, FlightPanel, TriPanel, WirePanel, WindPanel, brushSpec, placeBlock, type Brush } from './components/ModePanels';
 import { BlockPaint, CompPaint, SwatchGrid } from './components/ColorPanel';
+import { TOOLS, ToolDialog } from './components/ToolsDialog';
 import { blockInfo, blockMirrorTwin, cellIndex, cellOverlap, complementBlock, paintTwinPair } from './engine/blocks';
 import { cornerOf, triAt, triangleFromCorners } from './engine/tris';
 import type { Blueprint } from './engine/format';
 import { isLegacyFile } from './engine/format';
 import type { ResolvedColor } from './engine/palette';
 import { docArrayInsert, docArrayRemoveAt, docFromValue, docValue, parseDoc } from './engine/doc';
+import { allocateSlot, paletteSlotNode, type Rgb255 } from './engine/tools';
+import { setPaletteSlot } from './engine/edit';
 import { makeCtx, resetComponent, setDataField, setOrientation, setPos, setCompField,
   setCompColor, serializeSave, writeBlockDoc, type EditCtx } from './engine/edit';
 import { makePipe } from './engine/wireops';
@@ -56,7 +59,11 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // the brush's default paint is an OPAQUE hull grey (v1.6: slot 4 is the
   // built-in CLEAR GLASS — the old default placed translucent ghost blocks,
   // the root of the "my blocks turned translucent" report)
-  const [brush, setBrush] = useState<Brush>({ type: 0, sx: 0, sy: 0, sz: 0, slot: 51 });
+  const [brush, setBrush] = useState<Brush>({ type: 0, sx: 0, sy: 0, sz: 0, slot: 51, material: 0 });
+  // the TOOLS menu ▸ ToolDialog modal (v1.7): one open tool id at a time
+  const [toolOpen, setToolOpen] = useState<string | null>(null);
+  // the toast line a finished tool printed under the menu (auto-clears below)
+  const [toolMsg, setToolMsg] = useState('');
   // 🎨 PALETTE window over the viewport (v1.6): the paint alternative to the
   // move/rotate gizmo, opened from the canvas mode widget for the CURRENT
   // selection (block ▸ per-face, component ▸ color1/color2, else the brush).
@@ -98,6 +105,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // the user: "the full list of options shouldnt be combined into the main
   // left-hand panel/menu")
   const [optsOpen, setOptsOpen] = useState(false);
+  useEffect(() => { if (!toolMsg) return; const t = setTimeout(() => setToolMsg(''), 4000); return () => clearTimeout(t); }, [toolMsg]);
 
   /** parse → v1→v2 NORMALIZE → doc+ctx → live bp. One funnel for download,
    *  file-open, drag-drop and New craft. */
@@ -470,6 +478,20 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     if (twin >= 0) writeBlockDoc(ctx, twin);
     sceneChanged();
   }, [blockSel, mirrorPlace, sceneChanged]);
+  /** v1.7 custom RGB: write the picked colour into the next free slot of
+   *  THIS craft's palette (bp + doc, int-styled like the game writer) and
+   *  return its index; null = the palette is full / the write refused. The
+   *  picker then paints with the new slot through the dock's own path. */
+  const addPaletteColor = useCallback((c: Rgb255): number | null => {
+    const ctx = ctxRef.current;
+    if (!ctx) return null;
+    const slot = allocateSlot(ctx.bp.data.colors ?? null);
+    if (slot == null) return null;
+    if (!setPaletteSlot(ctx, slot, paletteSlotNode(c))) return null;
+    sceneChanged();                       // swatches + badges see the new slot
+    return slot;
+  }, [sceneChanged]);
+
   /** Snap a palette slot's FULL shading spec onto a component's custom
    *  color1/color2 dict (r/g/b/opacity/roughness/metallic). */
   const paintComp = useCallback((ci: number, which: 'color1' | 'color2', c: ResolvedColor) => {
@@ -541,7 +563,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
           <BlockPanel engine={engine} ctx={ctxRef.current} bp={bp!} blockSel={blockSel}
             brush={brush} tab={tool} mirror={mirrorPlace} legacy={legacy}
             onBrush={setBrush} onSelectBlock={setBlockSel} onApplied={sceneChanged}
-            onPaint={paintBlock} />
+            onPaint={paintBlock}
+            custom={{ addColor: addPaletteColor, onPickSlot: slot => setBrush(b => ({ ...b, slot })) }} />
         )}
       </div>
     )
@@ -562,7 +585,9 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       <TopBar mode={mode} onMode={setMode} dirty={dirty} title={name} craftId={craft}
         onNew={() => { ctxRef.current = null; setBp(null); openText(emitNew()); }}
         onOpen={openFile} onSave={save} onClose={onBack} onBack={onBack}
-        onRefresh={craft ? () => { forceRef.current = true; setRetrySeq(s => s + 1); } : undefined}>
+        onRefresh={craft ? () => { forceRef.current = true; setRetrySeq(s => s + 1); } : undefined}
+        tools={TOOLS.map(t => ({ id: t.id, label: t.label, icon: t.icon }))}
+        onTool={id => setToolOpen(id)}>
         <button data-testid="save-btn" onClick={() => save()}
           className={`ksp-btn shrink-0 px-2.5 py-1 text-[12px] ${dirty ? 'on font-semibold' : 'text-ink-dim'}`}>
           {dirty ? '● Save' : 'Save'}
@@ -677,13 +702,16 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
                     className="ksp-btn rounded px-1.5 text-[11px] text-ink-dim hover:text-accent">✕</button>
                 </div>
                 {mode === 'blocks' && blockSel >= 0 ? (
-                  <BlockPaint bp={bp} legacy={legacy} bi={blockSel} onPaint={paintBlock} />
+                  <BlockPaint bp={bp} legacy={legacy} bi={blockSel} onPaint={paintBlock}
+                    custom={{ addColor: addPaletteColor, onPickSlot: slot => paintBlock(slot) }} />
                 ) : sel.ci >= 0 && bp.data.components[sel.ci] ? (
                   <CompPaint bp={bp} legacy={legacy} comp={bp.data.components[sel.ci]!}
-                    onApply={(which, c) => paintComp(sel.ci, which, c)} />
+                    onApply={(which, c) => paintComp(sel.ci, which, c)}
+                    custom={{ addColor: addPaletteColor, onPickSlot: () => undefined }} />
                 ) : (
                   <SwatchGrid bp={bp} legacy={legacy} current={brush.slot}
-                    onPick={slot => setBrush(b => ({ ...b, slot }))} />
+                    onPick={slot => setBrush(b => ({ ...b, slot }))}
+                    custom={{ addColor: addPaletteColor, onPickSlot: slot => setBrush(b2 => ({ ...b2, slot })) }} />
                 )}
               </div>
             )}
@@ -706,6 +734,21 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
                 <ViewOpts opts={opts} onOpt={toggleOpt} hullOpacity={hullOpacity} onHullOpacity={setHullOp}
                                     gizmoOn={gizmoOn} onGizmo={setGizmo} hiDef={hiDef} onHiDef={onHiDef}
                                     staticInfo={staticInfo} onStaticInfo={setStaticInfo} />
+              </div>
+            )}
+            {/* TOOLS ▸ the definition-driven modal dialog (v1.7): opens over
+                the viewport, OK-and-run or Cancel. */}
+            {toolOpen && bp && ctxRef.current && (
+              <ToolDialog key={toolOpen}
+                tool={TOOLS.find(t => t.id === toolOpen)!} bp={bp} ctx={ctxRef.current}
+                onClose={() => setToolOpen(null)}
+                onApplied={msg => { sceneChanged(); setToolMsg(msg); }} />
+            )}
+            {toolMsg && (
+              <div data-testid="tool-toast"
+                className="ksp-win ksp-label pointer-events-none absolute left-1/2 top-2 z-20 -translate-x-1/2
+                           rounded px-3 py-1 text-[11px] text-gold">
+                {toolMsg}
               </div>
             )}
             {/* KSP bottom-left: the STATIC INFO black box (mass & CoM) */}

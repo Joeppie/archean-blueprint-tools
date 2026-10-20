@@ -5,25 +5,45 @@ import { useMemo, useState, useEffect } from 'react';
 import { Sec, Num, SearchList } from './ui';
 import type { Engine } from '../engine/scene';
 import { FLOWS, type FlowKey } from '../engine/aero';
-import { writeBlockDoc, type EditCtx } from '../engine/edit';
+import { writeBlockDoc, writeBlockMaterial, type EditCtx } from '../engine/edit';
 import { docArrayInsert, docFromValue, docSetNumber, docArrayRemoveAt } from '../engine/doc';
 import { blockCells, blockFromCell, blockInfo, blockMirrorTwin, cellOverlapSkip, flippedBlock,
   mirroredBlock, MIRROR_TYPE, mirrorBlockCell, rotateType, rotatedBlock, setBlockField, setBlockGeom,
   snapBlockType, type PlaceSpec } from '../engine/blocks';
 import { shapeName } from '../engine/blockshapes';
+import { MATERIALS, MATERIAL_HINT, materialName } from '../engine/tools';
 import { cssColor, resolveColor } from '../engine/palette';
-import { SwatchGrid, BlockPaint } from './ColorPanel';
+import { SwatchGrid, BlockPaint, type CustomPaint } from './ColorPanel';
 import { autoWire, portCensus, connectedPorts, unconnectedPorts, WIRE_KINDS } from '../engine/wireops';
 import { triCentroid } from '../engine/tris';
 import type { Triangle } from '../engine/format';
 import type { Blueprint } from '../engine/format';
 
 // ------------------------------------------------------------- BLOCKS mode
-export interface Brush { type: number; sx: number; sy: number; sz: number; slot: number }
+export interface Brush { type: number; sx: number; sy: number; sz: number; slot: number; material?: number }
 
 /** The brush as a placement footprint (the Editor fills `cell` from the pick). */
-export const brushSpec = (b: Brush): Pick<PlaceSpec, 'size' | 'type' | 'slot'> =>
-  ({ size: [b.sx, b.sy, b.sz], type: b.type, slot: b.slot });
+export const brushSpec = (b: Brush): Pick<PlaceSpec, 'size' | 'type' | 'slot' | 'material'> =>
+  ({ size: [b.sx, b.sy, b.sz], type: b.type, slot: b.slot, material: b.material ?? 0 });
+
+/** MATERIALS row (v1.7 user rule: "Blocks should let me edit material:
+ *  composite, iron, glass, etc; this is NOT part of the color picker, and it
+ *  should make it clear glass/metal is appearance"). The chips pick what the
+ *  block IS in the game (mass/heat/build cost, FORMAT §blocks); the hint
+ *  states the split so nobody hunts for "metal" in the palette. */
+export function MaterialChips(p: { value: number; onPick: (m: number) => void; testid: string }) {
+  return (
+    <div data-testid={p.testid} className="flex flex-wrap items-center gap-1">
+      {MATERIALS.map((name, m) => (
+        <button key={name} data-testid={`${p.testid}-m${m}`} title={MATERIAL_HINT}
+          onClick={() => p.onPick(m)}
+          className={`ksp-btn px-1.5 py-[2px] text-[10px] ${p.value === m ? 'on' : ''}`}>
+          {name}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 export function BlockPanel(p: {
   engine: Engine | null; ctx: EditCtx | null; bp: Blueprint;
@@ -42,6 +62,9 @@ export function BlockPanel(p: {
    *  undefined = all 7 uniform): the Editor funnel writes bp + doc for the
    *  block AND its ⇄ twin (paintTwinPair/mirrorFaceOrder). */
   onPaint?: (slot: number, faces?: number[]) => void;
+  /** v1.7: the RGB picker plumbing (new palette slot / nearest snap) for the
+   *  brush AND the selected block's face paint */
+  custom?: CustomPaint;
 }) {
   const [snapMsg, setSnapMsg] = useState('');
   const info = p.blockSel >= 0 ? blockInfo(p.bp, p.blockSel) : null;
@@ -165,6 +188,17 @@ export function BlockPanel(p: {
     p.onSelectBlock(-1);
     p.onApplied();
   };
+  /** MATERIALS (v1.7): write the game material of the selected block (⇄ on ⇒
+   *  the similar twin takes it too — an identity edit, no geometry to collide)
+   *  into bp AND the doc (writeBlockMaterial adds the key to files that predate
+   *  it; the game reader defaults a missing one to composite). */
+  const setMaterial = (m: number) => {
+    if (!p.ctx || p.blockSel < 0) return;
+    const tw = p.mirror ? blockMirrorTwin(p.bp, p.blockSel) : -1;
+    writeBlockMaterial(p.ctx, p.blockSel, m);
+    if (tw >= 0) writeBlockMaterial(p.ctx, tw, m);
+    p.onApplied();
+  };
   return (
     <>
       {p.tab === 'place' && (
@@ -194,10 +228,18 @@ export function BlockPanel(p: {
               className="inline-block h-5 w-5 rounded-[3px] border border-white/25"
               style={{ background: cssColor(resolveColor(p.bp.data.colors ?? null, p.brush.slot, p.legacy)) }} />
           </div>
+          {/* MATERIALS (v1.7): what the placed block IS in the game — NOT a
+              colour: glass/metal looks come from the palette slots above. */}
+          <div className="flex items-center gap-2 pb-1 pt-1">
+            <span className="w-[62px] shrink-0 text-[11px] text-ink-dim">material</span>
+            <MaterialChips testid="brush-material" value={p.brush.material ?? 0}
+              onPick={m => p.onBrush({ ...p.brush, material: m })} />
+          </div>
+          <div className="pb-1 text-[9px] leading-snug text-ink-dim">{MATERIAL_HINT}</div>
           {/* PALETTE (v1.6): choose the brush colour, badges = uses on vessel */}
           <div className="pt-1">
             <SwatchGrid bp={p.bp} legacy={p.legacy} current={p.brush.slot}
-              onPick={slot => p.onBrush({ ...p.brush, slot })} />
+              onPick={slot => p.onBrush({ ...p.brush, slot })} custom={p.custom} />
           </div>
           <div className="pt-1 text-[10px] leading-snug text-ink-dim">
             Hover a block, part or hull triangle to preview · click to place ·
@@ -229,6 +271,18 @@ export function BlockPanel(p: {
                 <Num label="type" value={info.type} min={0} max={254} onCommit={v => apply('type', v)} />
                 <Num label="slot" value={info.slot} min={0} max={255} onCommit={v => apply('slot', v)} />
               </div>
+              {/* MATERIALS (v1.7): the block's game material (mass/heat/build
+                  cost). ⇄ on drives the SIMILAR TWIN too (identity edits mirror
+                  like geometry edits — a symmetric craft is built of one
+                  material). The appearance is the Paint section below. */}
+              <div className="flex items-center gap-2 pb-1 pt-1">
+                <span className="w-[62px] shrink-0 text-[11px] text-ink-dim">
+                  material <span data-testid="block-material-name" className="text-gold">{materialName(p.bp.data.blocks[p.blockSel]?.material)}</span>
+                </span>
+              </div>
+              <MaterialChips testid="block-material" value={p.bp.data.blocks[p.blockSel]?.material ?? 0}
+                onPick={setMaterial} />
+              <div className="pt-1 text-[9px] leading-snug text-ink-dim">{MATERIAL_HINT}</div>
               {/* PALETTE (v1.6): per-face paint of THIS block (⇄ twin rides
                   the mirrored face mapping inside the Editor's onPaint) */}
               <div className="mt-1.5 text-[10px] uppercase tracking-wide text-ink-dim">
@@ -236,7 +290,7 @@ export function BlockPanel(p: {
               </div>
               <div className="mt-1">
                 <BlockPaint bp={p.bp} legacy={p.legacy} bi={p.blockSel}
-                  onPaint={(slot, faces) => p.onPaint?.(slot, faces)} />
+                  onPaint={(slot, faces) => p.onPaint?.(slot, faces)} custom={p.custom} />
               </div>
               {/* in-place SHAPE tools (the interface components have): every
                   op keeps the bbox centre; ⇄ on drives the similar twin too */}
@@ -286,7 +340,7 @@ export function BlockPanel(p: {
  *  With `mirror` the ⇄ twin lands at the x-mirrored cell too (type mirrored;
  *  same-face colour slots kept — single-slot brush paints are the exact case). */
 export function placeBlock(ctx: EditCtx, spec: PlaceSpec, mirror = false): number {
-  const block = blockFromCell(spec.cell, spec.size, spec.type, spec.slot);
+  const block = blockFromCell(spec.cell, spec.size, spec.type, spec.slot, spec.material ?? 0);
   ctx.bp.data.blocks.push(block);
   const at = ctx.bp.data.blocks.length - 1;
   docArrayInsert(ctx.doc, ['data', 'blocks'], at, docFromValue(block));

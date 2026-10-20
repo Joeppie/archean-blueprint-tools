@@ -260,6 +260,74 @@ user's explicit say-so (Pages/release still serves it meanwhile).
   footprint, twin identity, snap convergence/consensus) +
   app/e2e/blockedit.spec.ts, place.spec.ts (comp ghost + delete),
   mirror.spec.ts, panels.spec.ts (view-stats-only, deck-place EDIT).
+- **v1.7 MATERIALS / appearance split (user rule: "Blocks should let me edit
+  material: composite, iron, glass, etc; this is not part of the color picker,
+  and it should make it clear glass/metal is appearance"): the blueprint's
+  `material` 0..6 (Composite, Concrete, Steel, Aluminium, Glass, Lead,
+  Titanium — FORMAT §blocks; game `MaterialProperties.hh` DENSITY per cell
+  cube in `engine/tools.ts`) is the block's GAMEPLAY identity (mass, heat,
+  build cost). APPEARANCE is palette slots ONLY — no per-material shading
+  anywhere (measured: the game's palette carries no material field, the
+  `iconRaster.frag.glsl` mat index is editor-icon cosmetics). UI: the
+  `MaterialChips` row in the BLOCKS brush (`brush-material-mN`) and the block
+  EDIT tab (`block-material-mN` + `block-material-name` + the MATERIAL_HINT
+  line); ⇄ on, the similar twin takes the material too (identity edits mirror).
+  Writes go through `edit.writeBlockMaterial` (bp + doc; APPENDS the
+  `material` key for files that predate it — the game reader defaults a
+  missing one to 0) and `edit.writeBlockDoc` now mirrors material too.
+- **v1.7 custom RGB:** the swatch docks gained a common `<input type=color>`
+  + hex row (`rgb-input`/`rgb-hex`/`rgb-preview`) with two apply paths:
+  `+ new slot` writes the picked RGB into the NEXT FREE slot of THIS craft's
+  palette (`tools.allocateSlot` skips the engine-reserved 0..10;
+  `edit.setPaletteSlot` writes bp + an INT-styled doc node, creating
+  `data.colors` via the new `doc.docEnsureArray` when absent) and paints with
+  it; `≈ nearest slot` (`tools.nearestSlot`, reserved slots INCLUDED because
+  they are paintable, just not redefinable) never grows the palette. A v1
+  file's palette is already embedded at open by `normalize`, so both paths
+  work on every craft.
+- **v1.7 TOOLS menu:** `components/ToolsDialog.tsx` = the framework (a
+  `ToolDef` DEFINITION: typed `fields` (select/note, with `optionsFor`
+  dependent options and `showIf`), a live `preview(form, bp)` readout that
+  DISABLES OK while it says "nothing…", and `run(form, ctx)` mutating bp AND
+  doc) + the centered modal that auto-lays those fields out (Esc/backdrop/
+  Cancel close, Enter/OK run; `danger` tools arm a confirm on the first OK).
+  The registry `TOOLS` currently holds `replace-all` and `hullify`; TopBar's
+  Tools ▾ renders the list from it (adding a tool = adding one ToolDef, no
+  new UI code). Pinned by `e2e/tools.spec.ts`.
+- **v1.7 hullify (blocks ▸ hull triangles)** lives in `engine/tools.ts` and
+  is PURE. Basis: `cull.culledBlocksSolids` already computes exactly the
+  surface the game shows (cell-cut full faces, interior walls, interior
+  partitions, translucency asymmetry), and every piece it keeps now carries
+  `src` = its block index (so the MATERIAL rides along). The tool regroups
+  the pieces by (plane, colour, material), rasterises them onto the PLANE'S
+  OWN integer lattice (`planeOrigin` solves a base point by extended gcd —
+  the plane x+z=29 contains NO multiple of (1,0,1), the first attempt's bug;
+  `planeBasis` picks a basis ALIGNED with the shape face edges — a generic
+  unimodular search finds skewed bases whose cells cut the pieces apart) and
+  stitches merged rectangles (greedy maximal rects = cull's stitch). Then
+  each rectangle is SPLIT until it fits the game's per-axis 5-bit vertex
+  window (v ∈ 0..31 with f 12-aligned — a 26-cell span straddling a frame
+  boundary has NO valid f; corpus-verified, FORMAT §Triangles). Invariants:
+  the triangle area EQUALS the culled surface area (pinned across the whole
+  corpus in `__tests__/tools.test.ts`), colours = the OUTSIDE face slot
+  (interior faces were culled away), occupancy type-255 blocks SURVIVE
+  (reservations, not geometry); Build-subgrid blocks are NOT rewritten (they
+  live in the nested blueprint lists) and the preview reports them. The tool
+  derives the cull's palette GENERATION from the blueprint (`colors == null`
+  ⇒ legacy slots) — a probe that swaps the palette out re-rules the
+  translucency culling and breaks the area pin (the first corpus-red).
+  The dialog is a `danger` tool (no undo yet).
+- **v1.7 declared TODOs, visible in the Edit ▾ menu** (user: "we need a stack
+  to be able to undo at least the last 10 operations, for each and every
+  thing; make this a todo, visible from the Edit Menu"; the vessel-info
+  section is the user's other todo): `edit-undo` and
+  `edit-vessel-name|author|code` render DISABLED with "todo" hints. Planned
+  undo = a snapshot stack in the Editor funnel (deep-copy `{doc, bp, orig,
+  applied}` BEFORE a mutation, keyed coalescences for slider drags, Ctrl+Z +
+  the menu item, reset in `openText`); planned vessel-info section edits the
+  file's real top-level `author` + `data.alias` fields (byte-safe
+  `docSet` string writes) — a license-plate/abbreviation field has NO format
+  backing yet (see Backlog).
 - Toolchain lives ONLY under `app/` (own npm project); repo-root `tools/`,
   `tests/` and the zero-build regtest stay as they are until cutover.
 - **PALETTE / color picker (v1.6):** `app/src/components/ColorPanel.tsx` —
@@ -1309,6 +1377,26 @@ refuses to cut a tag when the strings disagree.
   'worked' — every suite bound to the invisible twin).
 
 ## Backlog
+- **Undo stack (user 2026-10-20, v1.7 TODO, visible in Edit ▾):** ≥10 levels
+  covering EVERY mutation path. Design: snapshot the whole edit state (deep
+  clone of the `DocNode` tree + `bp` + `ctx.orig`/`ctx.applied`) BEFORE each
+  committed operation — snapshot-based undo beats per-op inverses because the
+  doc is a tree and the block/wire/triangle batch ops already splice arrays.
+  Coalesce continuous gestures (gizmo/slider drags write through
+  `Engine.onEdit`/`onDataEdit` at pointer rate: group by operation id + a
+  time window so one drag = one undo step). Entry points: the Editor's
+  `sceneChanged`/`markDirty` funnel + `liveDataEdit` commits + the tools'
+  `run()`. Ctrl/Cmd+Z and the Edit ▸ Undo item (currently disabled) call it;
+  `openText` (a new craft/load) clears the stack.
+- **Vessel information editor (user 2026-10-20, v1.7 TODO, Edit ▾ menu):**
+  author, name and the abbreviation/"license-plate" code. Real format fields
+  exist for two of them — top-level `author` and `data.alias` (the app's
+  title already reads `data.alias`) — so the first step is a small labelled
+  form writing both through `docSet` (string writes keep byte-identity for
+  untouched keys) plus the gallery title. The abbreviation/plate has NO
+  format backing anywhere in the corpus (`grep` finds no name/code field
+  beyond `author`/`alias`) — either it IS `alias` (the workshop title) or it
+  needs a new key + the game's tolerance verified before we ship one.
 - **Slider discipline (user 2026-10-20, v1.6 TODO):** component `data` rows
   must respect INTEGER-valued fields and sensible min/max (the DataRows Row
   today gives every number `min=v−10, max=v+10, step=0.1` — the game's own

@@ -459,6 +459,24 @@ unchanged.
   “Colour & materials” below for the full PBR semantics.
 - `material`: 0..6 = composite, concrete, steel, aluminium, glass, lead,
   titanium (visual: palette slots carry the metallic/roughness per face).
+  **Appearance is NOT per material (measured, app v1.7, corpus 47 580
+  geometry blocks + every `data.colors` entry):** palette entries carry
+  exactly the six shading keys (`r,g,b,opacity,roughness,metallic`) — no
+  material/name field — and slot→material is many-to-many (340 slots map to
+  one material somewhere, 49 slots carry TWO+ materials across the corpus),
+  so no slot means "iron" and no material implies a look. `material` is the
+  GAMEPLAY identity: `GetMaterialProperties(material)` drives
+  `densityFactor` (mass = rect × density, non-cube = HALF, FORMAT §Mass
+  model), `thermalDestructionK`/`meltingPointK`, `thermalConductivity`,
+  `specificHeat`, `pressureYieldPa`, `frictionCoefficient`, `metallic`
+  (collider/shader hint), and the build cost is
+  `(sx+1)(sy+1)(sz+1) × ARCHEAN_build.<Material>Block`. The blueprint tool
+  therefore renders slots ONLY and edits `material` as a separate,
+  non-visual row (app `engine/materials.ts` + `BlockPanel` MATERIALS); the
+  `iconRaster.frag.glsl` `mat` index (Frame/Composite/Concrete/Steel/
+  Aluminium/Glass/Lead/Titanium = -1..6) is workshop-ICON cosmetics, not a
+  scene-shading rule. `Triangle` carries the SAME `material` byte
+  (`Triangle.inc.glsl`: 5-bit vertices `v∈0..31`, `color[5]`, `material`).
 - **Cell lattice (app v1.4.0 arbitration, corpus-verified):** cell `c` covers
   world `[(c−6)·CELL, (c−5)·CELL)` — the cell-BOUNDARY lattice every builder
   uses (cull's origin = `(abs−5.5)·CELL − CELL/2`, hull vertices

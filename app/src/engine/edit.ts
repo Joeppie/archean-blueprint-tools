@@ -13,9 +13,10 @@
 //   save source) accumulates the shift once, never re-applied.
 
 import type { DocNode } from './doc';
-import { docSet, docSetNumber, emitDoc } from './doc';
+import { docEnsureArray, docFromValue, docGet, docSet, docSetArrayItem, docSetNumber, emitDoc } from './doc';
 import type { Blueprint, FileQuat, LatticeObj, Vec3D } from './format';
 import { CELL } from './format';
+import type { PaletteEntry } from './palette';
 
 export type Occ = LatticeObj & { size_x?: number; size_y?: number; size_z?: number };
 
@@ -33,10 +34,12 @@ export interface EditCtx {
   applied: Vec3D[];
 }
 
-/** Mirror a LIVE bp block's geometry into the doc (pos/frame/size/type + the
- *  7 face slots) — the block sibling of every setter here (the v1.4 lesson:
- *  cell edits must reach the doc or they vanish on save). Used by the panel
- *  editors AND the engine's BLOCK gizmo via Editor's onBlockEdit. */
+/** Mirror a LIVE bp block's geometry into the doc (pos/frame/size/type/
+ *  material + the 7 face slots) — the block sibling of every setter here (the
+ *  v1.4 lesson: cell edits must reach the doc or they vanish on save). Used
+ *  by the panel editors AND the engine's BLOCK gizmo via Editor's
+ *  onBlockEdit. material is v1.7 (the MATERIALS editor); a doc block that
+ *  predates the field is left alone (writeBlockMaterial adds it). */
 export function writeBlockDoc(ctx: EditCtx, bi: number): void {
   const b = ctx.bp.data.blocks[bi];
   if (!b) return;
@@ -45,6 +48,24 @@ export function writeBlockDoc(ctx: EditCtx, bi: number): void {
     'size_x', 'size_y', 'size_z', 'type'] as const)
     docSetNumber(d, [...path, k], (b as unknown as Record<string, number>)[k] ?? 0);
   for (let i = 0; i < 7; i++) docSetNumber(d, [...path, 'colors', i], b.colors?.[i] ?? 0);
+  if (typeof b.material === 'number') writeBlockMaterial(ctx, bi, b.material);
+}
+
+/** Write a block's `material` into bp + doc. Files from before the field
+ *  exists carry no `material` key (docSet refuses a missing path), so the
+ *  entry is APPENDED to the block object when absent — the game's reader
+ *  defaults it to 0 anyway, key order only matters for byte-identity of an
+ *  UNTOUCHED file. */
+export function writeBlockMaterial(ctx: EditCtx, bi: number, v: number): boolean {
+  const b = ctx.bp.data.blocks[bi];
+  if (!b) return false;
+  b.material = v;
+  const path = ['data', 'blocks', bi];
+  if (docSetNumber(ctx.doc, [...path, 'material'], v)) return true;
+  const node = docGet(ctx.doc, path);
+  if (!node || node.kind !== 'obj') return false;
+  node.entries.push(['material', { kind: 'num', value: v, raw: String(v) }]);
+  return true;
 }
 
 export function makeCtx(doc: DocNode, bp: Blueprint): EditCtx {
@@ -167,6 +188,22 @@ export function setCompField(ctx: EditCtx, ci: number, key: CompMetaKey,
   if (!c) return false;
   (c as unknown as Record<string, unknown>)[key] = v;
   return docSet(ctx.doc, ['data', 'components', ci, key], v as number | string);
+}
+
+/** Write one slot of the file's OWN palette (bp + doc together) — the
+ *  custom-RGB picker's "new slot" path. Palette entries are int-scaled
+ *  (0..255 / 0..15 / 0..7), so the doc node forces int literals. The array
+ *  is created when the file never carried one (normalize normally embeds it
+ *  at open, but a New craft may not have used a slot yet). */
+export function setPaletteSlot(ctx: EditCtx, slot: number, e: PaletteEntry): boolean {
+  if (slot < 11 || slot > 255) return false;          // 0..10 are engine-reserved
+  const arr = (ctx.bp.data.colors ??= []);
+  arr[slot] = { ...e };
+  if (!docEnsureArray(ctx.doc, ['data', 'colors'])) return false;
+  return docSetArrayItem(ctx.doc, ['data', 'colors'], slot, docFromValue({
+    r: Math.round(e.r), g: Math.round(e.g), b: Math.round(e.b),
+    opacity: Math.round(e.opacity), roughness: Math.round(e.roughness), metallic: Math.round(e.metallic),
+  }));
 }
 
 /** One field of one player-paint colour entry (color1/color2 dict shape —

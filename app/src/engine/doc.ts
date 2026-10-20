@@ -221,6 +221,27 @@ export function docArrayInsert(root: DocNode, path: (string | number)[],
   return true;
 }
 
+/** Guarantee an ARRAY node at a path: a missing key gets one inserted in its
+ *  ALPHABETICAL position among the parent object's entries (the game writer
+ *  sorts keys, so a tool that first uses a list a file never carried keeps
+ *  the file's ordering tidy). True = the array exists afterwards. */
+export function docEnsureArray(root: DocNode, path: string[]): boolean {
+  if (path.length === 0) return false;
+  const parent = docGet(root, path.slice(0, -1));
+  if (!parent || parent.kind !== 'obj') return false;
+  const key = path[path.length - 1]!;
+  const found = parent.entries.find(([k]) => k === key);
+  if (found) {
+    if (found[1].kind !== 'arr') return false;
+    return true;
+  }
+  let at = parent.entries.length;
+  for (let i = 0; i < parent.entries.length; i++)
+    if (parent.entries[i]![0] > key) { at = i; break; }
+  parent.entries.splice(at, 0, [key, { kind: 'arr', items: [] }]);
+  return true;
+}
+
 export function docArrayRemoveAt(root: DocNode, path: (string | number)[],
   index: number): boolean {
   const arr = docGet(root, path);

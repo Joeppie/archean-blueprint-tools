@@ -108,7 +108,10 @@ function cellQuad(cell: readonly number[], axis: number, dir: readonly number[],
     ? quad : [quad[3]!, quad[2]!, quad[1]!, quad[0]!];
 }
 
-export interface CulledFace { slot: number; tri: [V3, V3, V3] }
+/** slot = the face's palette slot; src = the index into the SAME `blocks`
+ *  array the solids were built from (undefined for merged multi-block
+ *  rects) — the Tools hullify uses it to carry each face's block MATERIAL. */
+export interface CulledFace { slot: number; tri: [V3, V3, V3]; src?: number }
 export interface CulledBlocks { tris: CulledFace[]; edges: [V3, V3][] }
 
 /** Cull + stitch a block list into RAW file-space triangles (wound per the
@@ -126,7 +129,7 @@ export function culledBlocksSolids(blocks: Block[], palette: FilePalette | null,
     eseen.add(k);
     edges.push([a, b]);
   };
-  const kept: { pts: V3[]; idx: readonly number[]; slot: number; fp: string }[] = [];
+  const kept: { pts: V3[]; idx: readonly number[]; slot: number; fp: string; src: number }[] = [];
   const footprints = new Map<string, number>();
 
   blocks.forEach((b, index) => {
@@ -162,7 +165,8 @@ export function culledBlocksSolids(blocks: Block[], palette: FilePalette | null,
           cell[axis] = dir[axis]! > 0 ? min[axis]! + sz[axis]! - 1 : min[axis]! - 1;
           cell[u] = min[u]! + i; cell[v] = min[v]! + j;
           const q = cellQuad(cell, axis, dir, w, h);
-          tris.push({ slot, tri: [q[0]!, q[1]!, q[2]!] }, { slot, tri: [q[2]!, q[3]!, q[0]!] });
+          tris.push({ slot, tri: [q[0]!, q[1]!, q[2]!], src: index },
+            { slot, tri: [q[2]!, q[3]!, q[0]!], src: index });
           addEdge(q[0]!, q[1]!); addEdge(q[1]!, q[2]!); addEdge(q[2]!, q[3]!); addEdge(q[3]!, q[0]!);
         };
         for (let i = 0; i < sz[u]!; i++)
@@ -179,7 +183,7 @@ export function culledBlocksSolids(blocks: Block[], palette: FilePalette | null,
       if (faceCovered(faces, b, index, dir, opaque)) continue;   // interior wall
       const fp = faceFootprint(pts, trisOf[f]!);
       footprints.set(fp, (footprints.get(fp) ?? 0) + 1);
-      kept.push({ pts, idx: trisOf[f]!, slot, fp });
+      kept.push({ pts, idx: trisOf[f]!, slot, fp, src: index });
     }
   });
 
@@ -187,7 +191,7 @@ export function culledBlocksSolids(blocks: Block[], palette: FilePalette | null,
     if ((footprints.get(face.fp) ?? 0) > 1) continue;            // interior partition
     const P = face.idx.map(i => face.pts[i]!);
     for (let t = 0; t + 2 < P.length; t += 3) {
-      tris.push({ slot: face.slot, tri: [P[t]!, P[t + 1]!, P[t + 2]!] });
+      tris.push({ slot: face.slot, tri: [P[t]!, P[t + 1]!, P[t + 2]!], src: face.src });
       for (const [a, b] of [[P[t]!, P[t + 1]!], [P[t + 1]!, P[t + 2]!], [P[t + 2]!, P[t]!]] as [V3, V3][])
         addEdge(a, b);
     }

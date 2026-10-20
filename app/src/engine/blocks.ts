@@ -66,15 +66,19 @@ export function cellOverlapSkip(bp: Blueprint, cell: Cell, size: Cell, skip: num
   return false;
 }
 
-/** A fresh block occupying exactly the cell cube [cell, cell+size+1). */
-export function blockFromCell(cell: Cell, size: Cell, type: number, slot: number): Block {
+/** A fresh block occupying exactly the cell cube [cell, cell+size+1).
+ *  `material` (v1.7, the MATERIALS editor): the game's 0..6 build material
+ *  (composite…titanium) — gameplay identity, the colours[] slots carry the
+ *  APPEARANCE. Default 0 = composite, like every block the game writes. */
+export function blockFromCell(cell: Cell, size: Cell, type: number, slot: number,
+  material = 0): Block {
   const fr = (a: number) => floorDiv(a, CELLS_PER_FRAME);
   return {
     colors: [slot, slot, slot, slot, slot, slot, slot],
     frame_x: fr(cell[0]), pos_x: cell[0] - fr(cell[0]) * CELLS_PER_FRAME,
     frame_y: fr(cell[1]), pos_y: cell[1] - fr(cell[1]) * CELLS_PER_FRAME,
     frame_z: fr(cell[2]), pos_z: cell[2] - fr(cell[2]) * CELLS_PER_FRAME,
-    material: 0,
+    material,
     size_x: Math.max(0, size[0]), size_y: Math.max(0, size[1]), size_z: Math.max(0, size[2]),
     type,
   };
@@ -206,7 +210,8 @@ export function setBlockField(bp: Blueprint, bi: number,
 // units is Σ mᵢ·uᵢ = κ (mᵢ ∈ {−1,0,1} the integer slant normal), and the
 // step d over axis pair (a,b) satisfies Σ mᵢ dᵢ/eᵢ = mₐ(k·m_b) + m_b(−k·m_a) = 0.
 
-export interface PlaceSpec { cell: Cell; size: Cell; type: number; slot: number }
+/** material (v1.7) = the game build material (0..6), default composite. */
+export interface PlaceSpec { cell: Cell; size: Cell; type: number; slot: number; material?: number }
 
 /** Unit normal's integer sign vector (slant normals carry 2–3 nonzero
  *  ±1 components; an axis normal carries exactly one). */
