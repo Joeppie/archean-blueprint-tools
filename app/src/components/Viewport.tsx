@@ -34,8 +34,13 @@ declare global {
     sel: () => ReturnType<Engine['selectionState']>;
     /** v1.8.0 faux-mirror ⚠ popup state (text + client-px anchor at the twin) */
     twinWarn: () => ReturnType<Engine['twinWarnState']>;
-    /** held-catalog-part placement ghost state (v1.4, null = no ghost) */
+    /** held-catalog-part placement ghost state (v1.4, null = no ghost;
+     *  v1.5.6 carries the smear-drag yaw) */
     compGhost: () => Engine['compGhostState'];
+    /** v1.5.6: the ghost shows the REAL translucent model (not the box
+     *  stand-in that streams until it lands) + its world mesh bboxes */
+    compGhostReal: () => boolean;
+    compGhostBoxes: () => ReturnType<Engine['compGhostBoxes']>;
     /** constrained subgrid joint handles (the hinge UI at the joint line) */
     hinge: () => ReturnType<Engine['hingeInfo']>;
     hingePoint: (i: number) => ReturnType<Engine['hingeScreenPoint']>;
@@ -72,7 +77,10 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
   /** KSP part placement: a held catalog type — the next canvas click
    *  places it at the picked surface instead of selecting */
   placing?: string | null;
-  onPlace?: (clientX: number, clientY: number) => void;
+  /** KSP part placement: a held catalog type — releasing the smear-drag (see
+   *  the canvas handlers) lands it at the picked surface with the drag's yaw
+   *  (radians about the world ŷ) instead of selecting */
+  onPlace?: (clientX: number, clientY: number, yaw: number) => void;
   /** 🎨 PALETTE button in the mode widget (v1.6): toggles the Editor's paint
    *  window — the colour alternative to the move/rotate gizmo modes */
   onPaintOpen?: () => void;
@@ -104,6 +112,8 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
       sel: () => engine.selectionState(),
       twinWarn: () => engine.twinWarnState(),
       compGhost: () => engine.compGhostState,
+      compGhostReal: () => engine.compGhostReal(),
+      compGhostBoxes: () => engine.compGhostBoxes(),
       hinge: () => engine.hingeInfo(),
       hingePoint: (i: number) => engine.hingeScreenPoint(i),
       wind: () => engine.windState(),
@@ -168,12 +178,18 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
   }, []);
   useEffect(() => {
     const sh = (e: KeyboardEvent, on: boolean) => {
-      if (e.key !== 'Shift') return;
-      engineRef.current?.setGizmoSnap(on);
-      // the ghost re-aims the moment Shift goes down/up over a block (the
-      // game swaps brush → continuation instantly, no mouse move needed)
-      const h = lastHover.current;
-      if (h && mode === 'edit' && tool === 'place') blockHover(h.x, h.y, on, true);
+      if (e.key === 'Shift') {
+        engineRef.current?.setGizmoSnap(on);
+        // the ghost re-aims the moment Shift goes down/up over a block (the
+        // game swaps brush → continuation instantly, no mouse move needed)
+        const h = lastHover.current;
+        if (h && mode === 'edit' && tool === 'place') blockHover(h.x, h.y, on, true);
+      }
+      // a mid-smear Esc (the Editor drops the held part): yield the orbit NOW
+      if (e.key === 'Escape' && placeDrag.current) {
+        engineRef.current?.placeDragEnd();
+        placeDrag.current = null;
+      }
     };
     const dn = (e: KeyboardEvent) => sh(e, true), up = (e: KeyboardEvent) => sh(e, false);
     addEventListener('keydown', dn); addEventListener('keyup', up);
@@ -183,6 +199,14 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
     setGmode(m);
     engineRef.current?.setGizmoMode(m);
   };
+  /** held-part smear-drag (v1.5.6, user: "placing it down it should not
+   *  immediately place, but you can drag towards where the back of it should
+   *  be, like smearing on"): pointerdown on a placeable surface asks the
+   *  Engine to CAPTURE the gesture (orbit off — the drag is the tool), moves
+   *  re-dock the real-model ghost along the hull and aim its back, and the
+   *  release lands it at the final yaw. A press that hits nothing placeable
+   *  stays a plain camera gesture. */
+  const placeDrag = useRef<{ yaw: number } | null>(null);
   const pickClick = (e: React.PointerEvent) => {
     const engine = engineRef.current;
     if (!engine) return;
@@ -190,7 +214,7 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
     // possible in view — view shows the amounts"): inspect only, no select,
     // no fly-to, no mode widget — the side panel keeps the vessel stats.
     if (mode === 'view') return;
-    if (placing) { onPlace?.(e.clientX, e.clientY); return; }   // KSP place: no select
+    if (placing) { onPlace?.(e.clientX, e.clientY, 0); return; }   // KSP place: no select
     if (mode === 'edit') {                       // merged editor (v2.0.0)
       // the info chip still rides the plain pick path (scene.spec pin: a tap
       // routes through the pick path into the info chip)
@@ -221,14 +245,37 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
   return (
     <div ref={hostRef} className="relative h-full w-full" data-testid="viewport">
       <canvas ref={canvasRef} data-testid="canvas" className="block h-full w-full touch-none"
-        onPointerDown={e => { down.current = { x: e.clientX, y: e.clientY }; }}
-        onPointerMove={e => blockHover(e.clientX, e.clientY, e.shiftKey)}
+        onPointerDown={e => {
+          down.current = { x: e.clientX, y: e.clientY };
+          if (placing && mode === 'edit' && e.button === 0 && !e.shiftKey &&
+            engineRef.current?.placeDragStart(e.clientX, e.clientY))
+            placeDrag.current = { yaw: engineRef.current.compGhostState?.yaw ?? 0 };
+        }}
+        onPointerMove={e => {
+          if (placeDrag.current) {
+            const y = engineRef.current?.placeDragMove(e.clientX, e.clientY);
+            if (y != null) placeDrag.current.yaw = y;
+            return;                       // the smear aims the ghost, not hover
+          }
+          blockHover(e.clientX, e.clientY, e.shiftKey);
+        }}
         onPointerLeave={() => {
           // the ghost dies with the pointer (the game's ghost too)
           lastHover.current = null;
+          if (placeDrag.current) { engineRef.current?.placeDragEnd(); placeDrag.current = null; }
           if (hoverOn) onBlockHover?.(-1e5, -1e5, false);
         }}
         onPointerUp={e => {
+          if (placeDrag.current) {
+            // the RELEASE places (the press only pins — "should not just
+            // place immediately"; a zero-motion release = the old click,
+            // yaw 0 = the identity pose)
+            const yaw = placeDrag.current.yaw;
+            engineRef.current?.placeDragEnd();
+            placeDrag.current = null;
+            onPlace?.(e.clientX, e.clientY, yaw);
+            return;
+          }
           if (Math.abs(e.clientX - down.current.x) < 4 && Math.abs(e.clientY - down.current.y) < 4)
             pickClick(e);
         }} />

@@ -89,12 +89,25 @@ export interface ModelAtlas {
   geoFor(type: string): Promise<LoadedModel | null>;
 }
 
-const BASES = ['/models', '/atlas',     // dev/preview plugin aliases (the
-                                           // blocker-pattern dodge — see
-                                           // vite-corpus.ts)
-               'viewer/models',          // STATIC Pages layout, app at the
-                                         // SITE ROOT (tools/deploy_pages.py)
-               '../viewer/models'];      // …same site served under /app/
+// LAYOUT-EXACT ORDER (user report 2026-10-20: "a lot of errors loading the
+// zeppelin model on github" — https://joeppie.github.io/atlas/TiltSensor.json
+// 404ed): a URL starting with '/' resolves at the DOMAIN root, but the Pages
+// site is a PROJECT site under /archean-blueprint-tools/ — so the old
+// root-absolute '/models' + '/atlas' candidates (vite-corpus DEV aliases)
+// escaped the prefix and 404'd on every single model + the manifest, each
+// retried ×{fetch, fetch+cb, XHR, XHR+cb} before the relative route finally
+// worked. That is the error storm; the models themselves were fine. The
+// STATIC Pages routes (app at the site root, tools/deploy_pages.py) come
+// FIRST; the dev/preview plugin aliases stay as the fallback tier (they are
+// the blocker-pattern dodge — see vite-corpus.ts — and the dev server also
+// serves page-relative /viewer/models/…, so the first candidate hits in
+// EVERY layout with zero 404s).
+const BASES = ['viewer/models', '../viewer/models', '/models', '/atlas'];
+
+/** which base the manifest actually resolved through — every per-type file
+ *  lives in the SAME directory, so geoFor goes straight there first */
+let baseOk: string | null = null;
+export function atlasBase(): string | null { return baseOk; }
 
 /** types whose last fetch FAILED (network/HTTP). A poisoned cache entry or a
  *  flaky client (the user's "white block, not a beacon" Firefox session,
@@ -118,18 +131,20 @@ function xhrJson(url: string): Promise<unknown> {
   });
 }
 
-async function getJson(paths: string[], tag: string): Promise<unknown | null> {
-  const tries: Array<() => Promise<unknown>> = [];
+interface Got { json: unknown; path: string }
+
+async function getJson(paths: string[], tag: string): Promise<Got | null> {
+  const tries: Array<{ path: string; run: () => Promise<unknown> }> = [];
   for (const p of paths) {
-    tries.push(() => fetch(p).then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))));
-    tries.push(() => fetch(`${p}?cb=${Date.now()}`).then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))));
-    tries.push(() => xhrJson(p));
-    tries.push(() => xhrJson(`${p}?cb=${Date.now()}`));
+    tries.push({ path: p, run: () => fetch(p).then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))) });
+    tries.push({ path: p, run: () => fetch(`${p}?cb=${Date.now()}`).then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))) });
+    tries.push({ path: p, run: () => xhrJson(p) });
+    tries.push({ path: p, run: () => xhrJson(`${p}?cb=${Date.now()}`) });
   }
   for (const t of tries) {
     try {
-      const j = await t();
-      if (j) { failures.delete(tag); return j; }
+      const j = await t.run();
+      if (j) { failures.delete(tag); return { json: j, path: t.path }; }
     } catch { /* next recovery step */ }
   }
   failures.add(tag);
@@ -142,8 +157,11 @@ export function loadManifest(): Promise<ModelManifest | null> {
   // recovery chain (an earlier version memoised the null for the session,
   // turning one snag into permanent stand-ins)
   manifestP ??= getJson(BASES.map(b => `${b}/manifest.json`), 'manifest')
-    .then(j => j as ModelManifest | null)
-    .then(m => { if (!m) manifestP = null; return m; });
+    .then(g => {
+      if (!g) { manifestP = null; return null; }
+      baseOk = g.path.replace(/\/manifest\.json.*$/, '');
+      return g.json as ModelManifest;
+    });
   return manifestP;
 }
 
@@ -160,22 +178,58 @@ export function geoFor(type: string): Promise<LoadedModel | null> {
     cache.set(type, loadManifest().then(async m => {
       const info = m?.[type];
       if (!info) return null;
-      // indexed /atlas/<n>.json FIRST: type NAMES can collide with generic
-      // filter-list rules (EasyPrivacy '/beacon.js' substring-matches
-      // 'Beacon.json' — the user's Firefox blocked ONLY the beacon part;
-      // user 2026-10-19: "change the URL of the beacon so it doesnt cause
-      // a problem"), the numeric route carries no words a rule can key on
+      // Go DIRECTLY through the base the manifest resolved through (every
+      // layout-exact first hit = zero 404 noise in the console). The indexed
+      // /atlas/<n>.json form exists ONLY on the vite dev/preview aliases —
+      // the Pages bundle has no '/atlas' tree, so asking it there is the
+      // 404 storm this replaced. Why the indexed form exists at all: type
+      // NAMES can collide with generic filter-list rules (EasyPrivacy
+      // '/beacon.js' substring-matches 'Beacon.json' — the user's Firefox
+      // blocked ONLY the beacon part; user 2026-10-19: "change the URL of
+      // the beacon so it doesnt cause a problem"). KNOWN CAVEAT: on Pages
+      // the named route is all the static layout has — an adblock list that
+      // substring-matches a type name still needs the numeric alias tree to
+      // be fixed there (would duplicate the 60 MB atlas; not done).
       const names = Object.keys(m).sort();
       const idx = names.indexOf(type);
+      const indexed = import.meta.env.DEV && idx >= 0 ? [`/atlas/${idx}.json`] : [];
+      const resolved = baseOk && BASES.includes(baseOk) ? [`${baseOk}/${type}.json`] : [];
       const j = await getJson([
-        ...(idx >= 0 ? [`/atlas/${idx}.json`] : []),
+        ...indexed, ...resolved,
         ...BASES.map(b => `${b}/${type}.json`),
       ], type);
       if (!j) return null;
-      return { geo: bakeGeo(j as ModelGeo), info };
+      return { geo: bakeGeo(j.json as ModelGeo), info };
     }).catch(() => null).then(r => { if (!r) cache.delete(type); return r; }));
   }
   return cache.get(type)!;
+}
+
+/** THUMB variant of geoFor (v1.5.6 catalog previews): the DECIMATED twin
+ *  only — the full twin is dropped the moment the JSON parses, because
+ *  pre-loading the WHOLE 106-type catalog for preview icons would otherwise
+ *  retain hundreds of MB of arrays for parts that never get placed. Never
+ *  throws; a type the atlas lacks resolves to null. */
+const liteCache = new Map<string, Promise<LoadedModel | null>>();
+export function geoLiteFor(type: string): Promise<LoadedModel | null> {
+  if (!liteCache.has(type)) {
+    liteCache.set(type, loadManifest().then(async m => {
+      const info = m?.[type];
+      if (!info) return null;
+      const resolved = baseOk && BASES.includes(baseOk) ? [`${baseOk}/${type}.json`] : [];
+      const j = await getJson(resolved.length ? resolved : BASES.map(b => `${b}/${type}.json`), type);
+      if (!j) return null;
+      const src = j.json as ModelGeo;
+      const lite: Record<string, NodeGeo> = {};
+      for (const [name, nd] of Object.entries(src))
+        lite[name] = { ...nd, prims: nd.prims.map(p => {
+          const v = p.lv ?? p.v, i = p.li ?? p.i;
+          return { material: p.material, v: unityBake(v), i };   // no twin: lite
+        }) };
+      return { geo: lite as ModelGeo, info };
+    }).catch(() => null).then(r => { if (!r) liteCache.delete(type); return r; }));
+  }
+  return liteCache.get(type)!;
 }
 
 // ---------- glTF → engine content basis (FORMAT §Per-asset gltf VERTEX SPACE)

@@ -8,6 +8,7 @@
 // reads file-space data. Mass & CoM moved out: the StaticInfo KSP black
 // box floats over the viewport (App).
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { requestThumb, startSpin, stopSpin } from '../engine/thumbs';
 import type { Engine, ViewOptions } from '../engine/scene';
 import type { EditCtx } from '../engine/edit';
 import type { Blueprint, BlueprintComponent, LatticeObj } from '../engine/format';
@@ -352,6 +353,41 @@ const tileHue = (t: string) => {
   return h;
 };
 
+/** v1.5.6 LIVE catalog icon (user: "a preview render of each icon … an
+ *  animated 3D version … generate these one-by-one when opening the place
+ *  component page"): the real game model rendered through the shared hidden
+ *  thumb renderer (engine/thumbs.ts). The job is enqueued only once the row
+ *  SCROLLS INTO VIEW (the catalog is 100+ rows; parsing every atlas file the
+ *  moment the tab opens starved the main thread — caught by the blockplace
+ *  timing pins), and thumbs.ts runs the visible jobs STRICTLY one per idle
+ *  slice in row order. Until the still lands, the initials tile shows
+ *  through the transparent canvas; hovering a row SPINS the part. */
+function PartThumb({ type }: { type: string }) {
+  const ref = useRef<HTMLImageElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    let cancel: (() => void) | null = null;
+    const io = new IntersectionObserver(es => {
+      if (es.some(e => e.isIntersecting) && !cancel)
+        cancel = requestThumb(el, type);
+    });
+    io.observe(el);
+    return () => { io.disconnect(); cancel?.(); };
+  }, [type]);
+  return (
+    <span
+      className="relative grid h-[22px] w-[22px] shrink-0 place-items-center overflow-hidden rounded-[3px] border"
+      style={{ background: `hsl(${tileHue(type)} 20% 22%)`, borderColor: `hsl(${tileHue(type)} 24% 44%)` }}
+      onPointerEnter={() => ref.current && startSpin(ref.current, type)}
+      onPointerLeave={() => ref.current && stopSpin(ref.current)}>
+      <span className="pointer-events-none absolute text-[8px] font-bold text-ink/70">{partCode(type)}</span>
+      <img ref={ref} alt="" data-testid={`thumb-${type}`}
+        className="pointer-events-none absolute inset-0 h-[22px] w-[22px]" />
+    </span>
+  );
+}
+
 function CompList(p: { bp: Blueprint; rev: number; sel: Props['sel'];
   onSelect: Props['onSelect']; onSelectSub: Props['onSelectSub'];
   manifest: Props['manifest']; placingType: Props['placingType'];
@@ -492,11 +528,7 @@ function CompList(p: { bp: Blueprint; rev: number; sel: Props['sel'];
             <div key={t} data-testid="catalog-item" title={`hold a ${t} — then click a surface on the craft`}
               className={rowCls(p.placingType === t)}
               onClick={() => p.onPlaceType(p.placingType === t ? null : t)}>
-              <span
-                className="grid h-[16px] w-[16px] shrink-0 place-items-center rounded-[3px] border text-[8px] font-bold text-ink"
-                style={{ background: `hsl(${tileHue(t)} 20% 22%)`, borderColor: `hsl(${tileHue(t)} 24% 44%)` }}>
-                {partCode(t)}
-              </span>
+              <PartThumb type={t} />
               <span className="min-w-0 flex-1 truncate">{t}</span>
               <span className="shrink-0 text-[10px] tabular-nums text-ink-dim">
                 {p.manifest![t]!.mass ? `${+p.manifest![t]!.mass.toFixed(1)} kg` : ''}</span>

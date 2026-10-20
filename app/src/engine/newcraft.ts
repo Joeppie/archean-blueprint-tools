@@ -60,10 +60,14 @@ export function newCraftDoc(alias = 'New craft'): DocNode {
  *  copies the PilotSeat above (the game's writer order); defaults are the
  *  file defaults. OCCUPANCIES are deliberately absent — the type-255 mirror
  *  is the game BUILDER's bookkeeping, and sync edits stay exact for parts
- *  that HAVE them (edit.test pins that); a bare part round-trips untouched. */
+ *  that HAVE them (edit.test pins that); a bare part round-trips untouched.
+ *  orientation = the FILE quaternion (the smear-drag heading, v1.5.6 —
+ *  already generation-mapped by the caller); omitted = the identity. */
 export function newComponent(type: string, module: string,
-  pos: readonly [number, number, number]) {
+  pos: readonly [number, number, number],
+  orientation: { w: number; x: number; y: number; z: number } = { w: 1.0, x: 0.0, y: 0.0, z: 0.0 }) {
   const r3 = (n: number) => +n.toFixed(3);
+  const r6 = (n: number) => +n.toFixed(6);
   return {
     alias: '',
     colors: {
@@ -73,7 +77,7 @@ export function newComponent(type: string, module: string,
     data: {},
     mirrorAxis: 0,
     module,
-    orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 },
+    orientation: { w: r6(orientation.w), x: r6(orientation.x), y: r6(orientation.y), z: r6(orientation.z) },
     position: { x: r3(pos[0]), y: r3(pos[1]), z: r3(pos[2]) },
     type,
   };

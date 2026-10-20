@@ -11,10 +11,10 @@ const ISW = '3812927875';
 
 const compsOf = (page: Page) => page.evaluate(() => {
   const w = window as unknown as { __ARCHEAN__?: { engine: { blueprint: {
-    data: { components: { type: string; position: { x: number; y: number; z: number } }[] } } } } };
+    data: { components: { type: string; position: { x: number; y: number; z: number };
+      orientation?: { w: number; x: number; y: number; z: number } }[] } } } } };
   return w.__ARCHEAN__!.engine.blueprint.data.components;
 });
-
 /** the parts panel is a drawer under md: open/close it on phones only */
 async function setDrawer(page: Page, want: boolean) {
   if (await page.evaluate(() => window.innerWidth >= 768)) return;
@@ -102,5 +102,91 @@ test.describe('KSP modes & catalog placement @place', () => {
     await canvas.click({ position: { x: box.width * 0.5, y: box.height * 0.62 } });
     await page.waitForTimeout(350);
     expect((await compsOf(page)).length).toBe(before);
+  });
+
+  // v1.5.6 — the "zeppelin TiltSensor.json 404 storm" fix: the root-absolute
+  // '/models' + '/atlas' candidates (vite DEV aliases) ESCAPED the Pages
+  // project prefix, so EVERY model + the manifest walked 8–16 failed requests
+  // before the layout-exact route hit. ZERO atlas-tree failures is the pin.
+  test('atlas loads with ZERO 404 noise (no root-absolute prefix escape)', async ({ page }) => {
+    const bad: string[] = [];
+    page.on('response', r => {
+      const p = new URL(r.url()).pathname;
+      if (r.status() >= 400 && (/\/models\//.test(p) || /\/atlas\//.test(p)))
+        bad.push(`${r.status()} ${p}`);
+    });
+    await page.goto(`/?craft=${ISW}`);
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
+    await page.waitForTimeout(2500);     // let the real-model fan-out run too
+    expect(bad).toEqual([]);
+  });
+
+  test('the placement ghost is the REAL model; a smear-drag lands it with its BACK on the drag', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('gallery-new').click();
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
+    await page.getByTestId('mode-edit').click();
+    await setDrawer(page, true);
+    await page.getByTestId('tooltab-place').click();
+    await page.getByTestId('filter').fill('smallwheel');
+    await page.getByTestId('catalog-item').first().click();
+    await setDrawer(page, false);
+
+    const hbox = (await page.getByTestId('canvas').boundingBox())!;
+    const cx = hbox.x + hbox.width * 0.5, cy = hbox.y + hbox.height * 0.6;
+    await page.mouse.move(cx, cy);
+    await expect.poll(() => page.evaluate(() =>
+      (window as unknown as { __ARCHEAN__?: { compGhost: () => { type: string } | null } }
+      ).__ARCHEAN__!.compGhost()?.type ?? null), { timeout: 5000 }).toBe('SmallWheel');
+    // v1.5.6: the ghost is a translucent MODEL, not the collider-box stand-in
+    // (which only shows while that type streams): template-shared meshes.
+    await expect.poll(() => page.evaluate(() =>
+      (window as unknown as { __ARCHEAN__?: { compGhostReal: () => boolean } }
+      ).__ARCHEAN__!.compGhostReal()), { timeout: 10_000 }).toBe(true);
+
+    const before = (await compsOf(page)).length;
+    // press-drag-release: the press PINS (no instant place), the drag smears
+    // the ghost along the hull and aims its BACK (+z) along the travel
+    await page.mouse.move(cx, cy);
+    await page.mouse.down();
+    for (let i = 1; i <= 6; i++) await page.mouse.move(cx + i * 16, cy + i * 3, { steps: 2 });
+    await page.mouse.up();
+    await expect.poll(() => compsOf(page).then(c => c.length), { timeout: 8000 })
+      .toBe(before + 1);
+    const q = (await compsOf(page)).slice(-1)[0]!.orientation!;
+    // a PURE world-ŷ yaw: x/z stay 0, y is a real turn, the quat is unit
+    expect(Math.abs(q.x)).toBeLessThan(1e-6);
+    expect(Math.abs(q.z)).toBeLessThan(1e-6);
+    expect(Math.abs(q.y)).toBeGreaterThan(0.05);
+    expect(Math.hypot(q.w, q.x, q.y, q.z)).toBeCloseTo(1, 5);
+  });
+
+  test('PLACE catalog renders a live 3D preview per row, one-by-one; hover spins', async ({ page }) => {
+    await page.goto('/');
+    await page.getByTestId('gallery-new').click();
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
+    await page.getByTestId('mode-edit').click();
+    await setDrawer(page, true);
+    await page.getByTestId('tooltab-place').click();
+    await expect(page.getByTestId('catalog-list')).toBeVisible();
+    // rows trickle previews in (one geometry per idle slice, decimated
+    // twins): after a moment several <img> tiles carry a real rendered part
+    const painted = () => page.evaluate(() =>
+      [...document.querySelectorAll('img[data-testid^="thumb-"]')]
+        .filter(el => (el as HTMLImageElement).src.length > 300).length);
+    await expect.poll(painted, { timeout: 30_000, intervals: [500, 1000] })
+      .toBeGreaterThan(3);
+    // hovering a painted preview ANIMATES it: consecutive frames differ
+    const idx = await page.evaluate(() => [...document.querySelectorAll('img[data-testid^="thumb-"]')]
+      .findIndex(el => (el as HTMLImageElement).src.length > 300));
+    const first = page.locator('img[data-testid^="thumb-"]').nth(idx);
+    const tb = (await first.boundingBox())!;
+    await page.mouse.move(tb.x + tb.width / 2, tb.y + tb.height / 2);
+    await expect.poll(async () => {
+      const a = await first.evaluate(el => (el as HTMLImageElement).src);
+      await page.waitForTimeout(300);
+      const b = await first.evaluate(el => (el as HTMLImageElement).src);
+      return a !== b && a.length > 1200;
+    }, { timeout: 10_000 }).toBe(true);
   });
 });

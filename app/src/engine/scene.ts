@@ -33,6 +33,7 @@ import { buildPartBoxes, displayQuat, fileToViewQuat, occStandLocal, qMul, stand
 import type { FileQuat, Vec3D } from './format';
 import type { LoadedModel, ModelAtlas, NodeRec } from './models';
 import { droppedParts, unityBake } from './models';
+import { buildAtlasPreview } from './thumbs';
 import { envIntensity, nodeMaterialSpec, pbr, srgbHexToLinear, type PbrSpec } from './materials';
 import { propellerSurface, type PropellerData } from './propeller';
 
@@ -210,11 +211,23 @@ export class Engine {
   private blockHlSpec: { bi: number; twin: number; issues: string[]; info: boolean } | null = null;
   /** bi|twin|geometry+paint fingerprint — the v1.6 staleness guard */
   private blockHlSig = '';
-  /** CATALOG placement ghost (v1.4): a translucent collider box at the
-   *  hovered surface (+ the ⇄ mirrored twin box), the component analogue of
-   *  the block constructor ghost. Own scene child at moff. */
+  /** CATALOG placement ghost (v1.4 box → v1.5.6 REAL MODEL): the held part
+   *  rendered translucent at the hovered surface (+ the ⇄ mirrored twin), the
+   *  component analogue of the block constructor ghost — "you should not just
+   *  show the bounding box but the actual component as a ghost, so we can
+   *  see how it would land and what it is". yaw = the smear-drag heading
+   *  about the world ŷ (the part's BACK, +z, points along the drag — "drag
+   *  towards where the back of it should be, like smearing on"). Own scene
+   *  child at moff. */
   private compHlGroup = new Group();
-  private compHlSpec: { type: string; point: [number, number, number]; mirror: boolean } | null = null;
+  private compHlSpec: { type: string; point: [number, number, number]; yaw: number; mirror: boolean } | null = null;
+  /** per-type translucent model templates shared by every ghost holder (the
+   *  holders CLONE them — geometry/materials are never disposed per update) */
+  private ghostCache = new Map<string, Group>();
+  private ghostPending = new Set<string>();
+  /** smear-drag state (v1.5.6): anchor = the last point the yaw was taken
+   *  from; orbit controls are OFF while it lives (the gesture is the tool) */
+  private placeDrag: { anchor: [number, number, number]; yaw: number } | null = null;
   private hullMeshes: Mesh[] = [];
   private wireLine: LineSegments | null = null;
   private occMeshes: Mesh[] = [];
@@ -2967,19 +2980,24 @@ void main() {
     return out;
   }
 
-  /** CATALOG placement ghost (v1.4): a translucent collider box of the held
-   *  part at the hovered surface — the component analogue of the constructor
-   *  ghost ("place new components … should work like [blocks]"). With ⇄ the
-   *  mirrored twin box previews at [−x, y, z] (the exact twin geometry). */
-  setCompGhost(g: { type: string; point: [number, number, number] } | null, mirror = false) {
+  /** CATALOG placement ghost (v1.5.6): the ACTUAL held component rendered
+   *  translucent at the hovered surface — the collider BOX of v1.4 stays as
+   *  the stand-in while that type's geometry streams in (it is re-issued the
+   *  moment the template lands, so the box BECOMES the part under the
+   *  cursor). yaw turns the part about the world ŷ (its BACK, +z, follows
+   *  the smear-drag). With ⇄ the mirrored twin previews at [−x, y, z] with
+   *  the SAME orientation — the exact twin identity sym.ts indexes. */
+  setCompGhost(g: { type: string; point: [number, number, number]; yaw?: number } | null, mirror = false) {
     const p0 = this.compHlSpec;
+    const yaw = g?.yaw ?? 0;
     if (!g && !p0) return;
-    if (g && p0 && p0.type === g.type && p0.mirror === mirror &&
+    if (g && p0 && p0.type === g.type && p0.mirror === mirror && (p0.yaw ?? 0) === yaw &&
       p0.point.every((v, i) => Math.abs(v - g.point[i]!) < 1e-9)) return;
-    this.compHlSpec = g ? { ...g, mirror } : null;
+    this.compHlSpec = g ? { ...g, yaw, mirror } : null;
     for (const o of this.compHlGroup.children) {
-      (o as Mesh).geometry?.dispose();
-      ((o as Mesh).material as MeshBasicMaterial)?.dispose?.();
+      if (o.userData.shared) continue;    // model clones share their template's
+      (o as Mesh).geometry?.dispose();    // resources — only the box stand-in
+      ((o as Mesh).material as MeshBasicMaterial)?.dispose?.();   // is ours
     }
     this.compHlGroup.clear();
     if (!g) { this.invalidate(); return; }
@@ -2993,9 +3011,18 @@ void main() {
     const size: [number, number, number] = [Math.max(0.1, hi[0]! - lo[0]!), Math.max(0.1, hi[1]! - lo[1]!), Math.max(0.1, hi[2]! - lo[2]!)];
     const ctr: [number, number, number] = [(lo[0]! + hi[0]!) / 2, (lo[1]! + hi[1]!) / 2,
       (lo[2]! + hi[2]!) / 2];
-    const mat = new MeshBasicMaterial({ color: 0xffc94d, transparent: true, opacity: 0.35, depthTest: false, side: DoubleSide });
-    const wmat = new LineBasicMaterial({ color: 0xffc94d, transparent: true, opacity: 0.9, depthTest: false });
     const put = (p: [number, number, number], mx = 1) => {
+      const tmpl = this.ghostCache.get(g.type);
+      if (tmpl) {
+        const c = tmpl.clone(true);
+        c.rotation.order = 'ZYX';
+        c.rotation.y = yaw;
+        c.position.set(mx * p[0], p[1], p[2]);
+        this.compHlGroup.add(c);
+        return;
+      }
+      const mat = new MeshBasicMaterial({ color: 0xffc94d, transparent: true, opacity: 0.35, depthTest: false, side: DoubleSide });
+      const wmat = new LineBasicMaterial({ color: 0xffc94d, transparent: true, opacity: 0.9, depthTest: false });
       const geo = new BoxGeometry(size[0], size[1], size[2]);
       const m = new Mesh(geo, mat);
       m.position.set(mx * (p[0] + ctr[0]), p[1] + ctr[1], p[2] + ctr[2]);
@@ -3016,7 +3043,85 @@ void main() {
     };
     put(g.point);
     if (mirror) put(g.point, -1);
+    this.ghostStream(g.type);
     this.invalidate();
+  }
+  /** stream + build the translucent template for a held type (once); when it
+   *  lands, the ghost still under the cursor is re-issued so the box stand-in
+   *  becomes the part without waiting for the next pointer move */
+  private ghostStream(type: string) {
+    if (!this.atlasRef || this.ghostCache.has(type) || this.ghostPending.has(type)) return;
+    this.ghostPending.add(type);
+    void this.atlasRef.geoFor(type).then(model => {
+      this.ghostPending.delete(type);
+      if (!model) return;
+      const tmpl = buildAtlasPreview(type, model, { opacity: 0.5, depthTest: false,
+        palette: this.palette, legacy: this.legacy });
+      tmpl.traverse(o => { if ((o as Mesh).isMesh) (o as Mesh).renderOrder = 29; });
+      this.ghostCache.set(type, tmpl);
+      const s = this.compHlSpec;
+      if (s && s.type === type) {
+        this.compHlSpec = null;
+        this.setCompGhost({ type: s.type, point: s.point, yaw: s.yaw }, s.mirror);
+      }
+      this.invalidate();
+    }).catch(() => this.ghostPending.delete(type));
+  }
+  /** smear-drag (v1.5.6): a press on a placeable surface while a part is
+   *  HELD captures the gesture (ORBIT OFF — the drag is the tool, as in the
+   *  game's part attach); dragging re-docks the ghost on whatever surface the
+   *  pointer crosses (the part rides ALONG the hull = "smearing on") and
+   *  aims its BACK (+z, the nose is −z) along the file-plane travel; the
+   *  release commits at the final yaw. Returns null while nothing is aimed
+   *  (the press then stays a camera gesture). */
+  placeDragStart(clientX: number, clientY: number): boolean {
+    const s = this.compHlSpec;
+    if (!s) return false;
+    const p = this.pickPlacePoint(clientX, clientY);
+    if (!p) return false;
+    this.placeDrag = { anchor: p, yaw: s.yaw };
+    if (this.controls) this.controls.enabled = false;
+    return true;
+  }
+  placeDragMove(clientX: number, clientY: number): number | null {
+    const d = this.placeDrag, s = this.compHlSpec;
+    if (!d || !s) return null;
+    const p = this.pickPlacePoint(clientX, clientY);
+    if (p) {
+      const dx = p[0] - d.anchor[0], dz = p[2] - d.anchor[2];
+      if (Math.hypot(dx, dz) > 0.05) {          // a real smear, not a jitter
+        d.yaw = Math.atan2(dx, dz);             // back (+z) along the travel
+        d.anchor = p;
+      }
+      this.setCompGhost({ type: s.type, point: p, yaw: d.yaw }, s.mirror);
+    }
+    return d.yaw;
+  }
+  /** release/cancel: orbit back on; returns the committed yaw (null = no
+   *  gesture was live). The GHOST stays — the Editor places or drops it. */
+  placeDragEnd(): number | null {
+    if (!this.placeDrag) return null;
+    const y = this.placeDrag.yaw;
+    this.placeDrag = null;
+    if (this.controls) this.controls.enabled = true;
+    return y;
+  }
+  /** true while the ghost shows the REAL model (not the box stand-in) — the
+   *  e2e pin that placement previews the part itself (v1.5.6) */
+  compGhostReal(): boolean {
+    let real = false;
+    this.compHlGroup.traverse(o => { if ((o as Mesh).isMesh && o.userData.shared) real = true; });
+    return real;
+  }
+  /** WORLD bboxes of the ghost's meshes (e2b hook, like blockHlBoxes) */
+  compGhostBoxes(): { min: [number, number, number]; max: [number, number, number] }[] {
+    this.scene.updateMatrixWorld(true);
+    const out: { min: [number, number, number]; max: [number, number, number] }[] = [];
+    for (const o of this.compHlGroup.children) {
+      const b = new Box3().setFromObject(o);
+      if (!b.isEmpty()) out.push({ min: [b.min.x, b.min.y, b.min.z], max: [b.max.x, b.max.y, b.max.z] });
+    }
+    return out;
   }
   get compGhostState() { return this.compHlSpec; }
   get manifest() { return this.atlasRef?.manifest ?? null; }
@@ -3126,6 +3231,14 @@ void main() {
     this.warnHl.dispose();
     this.matCache.forEach(m => m.dispose());
     this.matCache.clear();
+    for (const t of this.ghostCache.values())
+      t.traverse(o => {
+        const m = o as Mesh;
+        if (m.isMesh) { m.geometry.dispose(); (m.material as MeshStandardMaterial).dispose(); }
+      });
+    this.ghostCache.clear();
+    this.ghostPending.clear();
+    this.placeDrag = null;
     this.gizmo?.dispose();
     this.gizmo = null;
     this.renderer?.dispose();

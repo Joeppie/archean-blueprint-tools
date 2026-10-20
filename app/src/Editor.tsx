@@ -27,6 +27,7 @@ import { makeCtx, resetComponent, setDataField, setOrientation, setPos, setCompF
   setCompColor, serializeSave, writeBlockDoc, type EditCtx } from './engine/edit';
 import { makePipe } from './engine/wireops';
 import { normalizeDoc } from './engine/normalize';
+import { qAxisAngle } from './engine/compparts';
 import { newCraftDoc, newComponent } from './engine/newcraft';
 import { loadCraft } from './crafts';
 
@@ -293,6 +294,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       }
       if (e.key === 'Escape') {
         setPaintOpen(false);                           // 🎨 palette window first
+        engineRef.current?.placeDragEnd();             // smear-drag yields the orbit back
         if (placing) {                              // KSP: drop the HELD part first
           setPlacing(null);
           engineRef.current?.setCompGhost(null);
@@ -363,9 +365,12 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // docks a translucent preview at the surface (⇄ adds the mirrored twin
   // box) — placement now works like the blocks ghost. v1.5: the PLACE flavor
   // holds parts in the Blocks workspace too (one panel, both dockers).
+  // v1.5.6: the ghost is the REAL translucent model, and a press-DRAG on a
+  // surface SMEARS the part along the hull aiming its back (Viewport drives
+  // engine.placeDragStart/Move/End; the release lands it).
   useEffect(() => {
     if (!engine) return;
-    if (!placing || mode !== 'edit') engine.setCompGhost(null);
+    if (!placing || mode !== 'edit') { engine.placeDragEnd(); engine.setCompGhost(null); }
   }, [placing, mode, engine]);
 
   const onBlockPick = useCallback((clientX: number, clientY: number, shift: boolean,
@@ -439,8 +444,11 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
    *  surface — bp + doc together, then the debounced scene reload; the part
    *  auto-selects once the fresh roots exist (load() clears the selection,
    *  so the select rides just behind the 180 ms reload). Like KSP, one
-   *  click places ONE part and the hand empties. */
-  const onPlacePoint = useCallback((clientX: number, clientY: number) => {
+   *  click places ONE part and the hand empties. v1.5.6: the click IS the
+   *  release of the Viewport's smear-drag — yaw (radians about the world ŷ)
+   *  is where the drag pointed the part's BACK (+z, the nose is −z); a plain
+   *  click carries yaw 0 (the old identity pose). */
+  const onPlacePoint = useCallback((clientX: number, clientY: number, yaw = 0) => {
     const e = engineRef.current, ctx = ctxRef.current;
     if (!e || !ctx || !placing) return;
     const p = e.pickPlacePoint(clientX, clientY);
@@ -448,7 +456,10 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     setPlacing(null);
     const type = placing;
     const module = e.manifest?.[type]?.module ?? 'ARCHEAN_general';
-    const comp = newComponent(type, module, p);
+    // view-space heading → the file quaternion of THIS file's generation
+    const qView = qAxisAngle([0, 1, 0], yaw);
+    const qFile = isLegacyFile(ctx.bp) ? qView : { w: qView.w, x: -qView.x, y: -qView.y, z: -qView.z };
+    const comp = newComponent(type, module, p, qFile);
     ctx.bp.data.components.push(comp as never);
     const at = ctx.bp.data.components.length - 1;
     docArrayInsert(ctx.doc, ['data', 'components'], at, docFromValue(comp));
@@ -456,7 +467,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       // ⇄ twin: mirrored POSITION, same orientation — exactly the geometry
       // sym.ts indexes (mask bit 1), so the pair co-selects and every later
       // edit propagates through the established twin path.
-      const twin = newComponent(type, module, [-p[0], p[1], p[2]]);
+      const twin = newComponent(type, module, [-p[0], p[1], p[2]], qFile);
       ctx.bp.data.components.push(twin as never);
       docArrayInsert(ctx.doc, ['data', 'components'], ctx.bp.data.components.length - 1, docFromValue(twin));
     }
@@ -743,7 +754,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
               <div data-testid="place-hint"
                 className="ksp-win ksp-label pointer-events-none absolute left-1/2 top-2 z-20 -translate-x-1/2
                            rounded px-3 py-1 text-[11px] text-accent">
-                holding <b>{placing}</b> — click a surface · Esc drops it
+                holding <b>{placing}</b> — press-drag on a surface to smear it
+                (the drag points its BACK) · release lands it · Esc drops it
               </div>
             )}
             {bp && hit && hit.kind !== 'none' && mode !== 'view' && (

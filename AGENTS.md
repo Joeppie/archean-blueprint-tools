@@ -391,6 +391,37 @@ user's explicit say-so (Pages/release still serves it meanwhile).
   file's real top-level `author` + `data.alias` fields (byte-safe
   `docSet` string writes) — a license-plate/abbreviation field has NO format
   backing yet (see Backlog).
+- **v1.5.6 ATLAS ROUTES + REAL-MODEL GHOST + SMEAR PLACE + LIVE CATALOG
+  ICONS (user 2026-10-20):** (1) "a lot of errors loading the zeppelin model
+  on github" = the root-absolute `/models` + `/atlas` candidates in
+  `engine/models.ts` BASES (vite-corpus DEV aliases) escape the Pages PROJECT
+  prefix (joeppie.github.io/atlas/… 404), so every model + the manifest
+  walked 8–16 failed requests before the relative route hit — BASES is now
+  layout-exact (`viewer/models`, `../viewer/models` first; the dev server
+  already serves `/viewer/models/…` through the retired-viewer route, so the
+  FIRST candidate hits in every layout); `geoFor` goes straight through the
+  base the manifest resolved through (`atlasBase()`), and the numeric
+  `/atlas/<n>.json` adblock-dodge alias is tried only under the dev aliases
+  (Pages has no such tree — KNOWN CAVEAT: a filter-list substring on a type
+  name still needs an alias tree generated at deploy to fix there). Pinned:
+  place.spec "atlas loads with ZERO 404 noise". (2) The held-catalog
+  placement ghost is the REAL component model translucent
+  (`Engine.setCompGhost` + `thumbs.ts buildAtlasPreview`, the collider box
+  stays as the stream-in stand-in and re-issues when the geometry lands;
+  `__ARCHEAN__.compGhostReal()`), (3) and a press-drag-release SMEAR drag
+  places it: `placeDragStart/Move/End` capture the gesture (orbit OFF during
+  it), the ghost rides the crossed surfaces and aims its BACK (+z) along the
+  file-plane travel, the RELEASE places (a still click = yaw 0 = old
+  behaviour) through `newComponent(type, module, pos, quat)` with
+  `qAxisAngle(ŷ,yaw)` mapped to the file generation. Pinned by the
+  pure-yaw quat pin in place.spec. (4) The PLACE catalog rows render LIVE 3D
+  previews (`PartThumb` + `engine/thumbs.ts`: ONE hidden WebGLRenderer,
+  decimated twins via `models.geoLiteFor` — the full twin is dropped at parse
+  so the 106-type preload can't retain hundreds of MB; jobs run one-per-idle-
+  slice and ONLY for rows scrolled into view — an eager queue starved the
+  main thread and broke the blockplace timing pins; tiles are `<img>` —
+  catalog `<canvas>`es stole the viewport's "first canvas" identity the
+  scene probes use), hovering a tile spins it.
 - Toolchain lives ONLY under `app/` (own npm project); repo-root `tools/`,
   `tests/` and the zero-build regtest stay as they are until cutover.
 - **PALETTE / color picker (v1.6):** `app/src/components/ColorPanel.tsx` —
