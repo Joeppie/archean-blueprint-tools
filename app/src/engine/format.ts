@@ -63,6 +63,10 @@ export interface Block extends LatticeObj {
 export interface Triangle {
   frame_x: number; frame_y: number; frame_z: number;
   colors?: number[];
+  /** the game's per-triangle shading flag (Triangle.inc.glsl): absent/0 =
+   *  flat geometric normals, 1 = smooth normals. In-game hull saves set it
+   *  (3732302108: 174 of 241); hullify writes it per the SHADE option. */
+  smooth?: number;
   /** v0_x … v2_z vertex lattice slots live here too (see hullfit). */
   [key: string]: unknown;
 }

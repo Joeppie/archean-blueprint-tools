@@ -217,6 +217,30 @@ describe('hullify — blocks ▸ hull triangles', () => {
     expect(lone()).toBe(true);                         // default inward
   });
 
+  test('SHADE option (v1.5.9): NEW triangles carry smooth:1 like the game’s own hull saves; flat writes no key', () => {
+    const mk = () => bpOf([block({ pos_x: 5, pos_y: 5, pos_z: 5, colors: all(3) })]);
+    const asRec = (t: unknown) => t as Record<string, unknown>;
+    const sm = mk();
+    hullifyApply(sm);                                  // default shade = smooth
+    const fl = mk();
+    hullifyApply(fl, { shade: 'flat' });
+    const ta = sm.data.triangles!, tb = fl.data.triangles!;
+    expect(ta.length).toBeGreaterThan(0);
+    expect(tb.length).toBe(ta.length);
+    expect(ta.every(t => asRec(t)['smooth'] === 1)).toBe(true);
+    expect(tb.every(t => !('smooth' in asRec(t)))).toBe(true);
+    // the flag is NOT geometry: every other field is IDENTICAL
+    expect(ta.map(t => { const r = { ...asRec(t) }; delete r['smooth']; return r; }))
+      .toEqual(tb.map(t => ({ ...asRec(t) })));
+    // EXISTING triangles are kept verbatim — the tool never re-writes them
+    const keep = mk();
+    const authored = { ...asRec(tb[0]!) } as typeof tb[number];
+    keep.data.triangles = [authored];
+    hullifyApply(keep);
+    expect(asRec(keep.data.triangles![0]!)).toEqual(authored);
+    expect(keep.data.triangles!.length).toBeGreaterThan(1);
+  });
+
   test('two glued cubes: the shared border emits NOTHING, every other face is its own quad pair', () => {
     const bp = bpOf([
       block({ pos_x: 5, pos_y: 5, pos_z: 5, colors: all(3), material: 2 }),

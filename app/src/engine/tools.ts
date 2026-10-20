@@ -307,31 +307,50 @@ export interface HullifyResult {
 /** Which way the generated triangles' winding faces (v1.5.7 user rule:
  *  "all triangles are precisely the wrong way around … but want to keep it
  *  as an option for their directionality"). 'inward' = the v1↔v2 swap of
- *  the face's authored winding — the direction the user's in-game check of
- *  the generated hull says is RIGHT (the bevel artifact disappears);
- *  'outward' = keep the block face's own winding (front = the RH cross
- *  points away from the solid), the v1.5.6 behaviour, kept selectable.
- *  NOTE: the corpus census of game-AUTHORED triangles reads outward under
- *  the centroid heuristic — the user's in-game observation arbitrates, so
- *  'inward' is the default and BOTH directions stay one click away. */
+ *  the face's authored winding; 'outward' = keep the block face's own
+ *  winding (front = the RH cross points away from the solid), the v1.5.6
+ *  behaviour, kept selectable. v1.5.9 EPISTEMIC NOTE: the winding is the
+ *  GAME's front-side choice (Triangle.inc.glsl GetNormal = the winding
+ *  cross); our viewer renders both directions identically (closed prism,
+ *  one colour on all five faces), and the in-game BEVEL the v1.5.7 note
+ *  attributed to the winding is the per-triangle FLAT-normal default —
+ *  see HullifyShade below. Corpus census: game-AUTHORED triangles read
+ *  OUTWARD under the centroid heuristic; 'inward' stays the default on
+ *  the user's original in-game report until a fresh A/B says otherwise. */
 export type HullifyWind = 'inward' | 'outward';
 export const HULLIFY_WIND_DEFAULT: HullifyWind = 'inward';
 
-export interface HullifyOptions { wind?: HullifyWind }
+/** Surface-shading the generated triangles ask the GAME for (v1.5.9).
+ *  The game's Triangle struct (Triangle.inc.glsl) carries a per-triangle
+ *  `smooth` flag: "0 = flat/geometric normals (default), 1 = smooth
+ *  normals". The in-game-authored gantry save 3732302108 sets smooth:1 on
+ *  174 of its 241 hull triangles — its skin reads as one continuous sheet;
+ *  a skin without the flag is flat-shaded per prism FACE, which is the
+ *  beveled look the user sees in-game for EVERY converted hull (winding-
+ *  independent — the v1.5.7 "inward fixes the bevel" reading is superseded:
+ *  winding flips which side is front, not the shading). 'smooth' writes
+ *  smooth:1 on every NEW triangle (existing kept verbatim); 'flat' writes
+ *  no key (the pre-v1.5.9 files). */
+export type HullifyShade = 'smooth' | 'flat';
+export const HULLIFY_SHADE_DEFAULT: HullifyShade = 'smooth';
+
+export interface HullifyOptions { wind?: HullifyWind; shade?: HullifyShade }
 
 /** Preview the conversion without touching bp. */
 export function hullifyPreview(bp: Blueprint, opts: HullifyOptions = {}): HullifyResult {
-  return hullifyCore(bp, false, opts.wind ?? HULLIFY_WIND_DEFAULT);
+  return hullifyCore(bp, false, opts.wind ?? HULLIFY_WIND_DEFAULT,
+    opts.shade ?? HULLIFY_SHADE_DEFAULT);
 }
 
 /** Convert bp IN PLACE: remove every geometry block, append the covering
  *  hull triangles (existing triangles stay). Returns the report; ok=false
  *  (+reason) leaves bp untouched. */
 export function hullifyApply(bp: Blueprint, opts: HullifyOptions = {}): HullifyResult {
-  return hullifyCore(bp, true, opts.wind ?? HULLIFY_WIND_DEFAULT);
+  return hullifyCore(bp, true, opts.wind ?? HULLIFY_WIND_DEFAULT,
+    opts.shade ?? HULLIFY_SHADE_DEFAULT);
 }
 
-function hullifyCore(bp: Blueprint, apply: boolean, wind: HullifyWind): HullifyResult {
+function hullifyCore(bp: Blueprint, apply: boolean, wind: HullifyWind, shade: HullifyShade): HullifyResult {
   const blocks = bp.data.blocks ?? [];
   const geometry = blocks.filter(b => b.type !== OCCUPANCY_TYPE);
   if (!geometry.length) return { ...EMPTY_HULL, reason: 'the craft has no blocks to convert' };
@@ -394,7 +413,7 @@ function hullifyCore(bp: Blueprint, apply: boolean, wind: HullifyWind): HullifyR
         for (let t = 0; t + 2 < g.length; t += 3) {
           const tri: [G3, G3, G3] = wind === 'outward'
             ? [g[t]!, g[t + 1]!, g[t + 2]!] : [g[t]!, g[t + 2]!, g[t + 1]!];
-          const enc = encodeTri(tri, slot, material);
+          const enc = encodeTri(tri, slot, material, shade === 'smooth');
           if (enc) newTris.push(enc); else skipped++;
         }
       };
@@ -428,7 +447,7 @@ function hullifyCore(bp: Blueprint, apply: boolean, wind: HullifyWind): HullifyR
             for (const t of [[q[0]!, q[1]!, q[2]!], [q[2]!, q[3]!, q[0]!]] as [G3, G3, G3][]) {
               const tri: [G3, G3, G3] = wind === 'outward'
                 ? t : [t[0]!, t[2]!, t[1]!];
-              const enc = encodeTri(tri, slot, material);
+              const enc = encodeTri(tri, slot, material, shade === 'smooth');
               if (enc) newTris.push(enc); else skipped++;
             }
           }
@@ -483,9 +502,15 @@ function hullifyCore(bp: Blueprint, apply: boolean, wind: HullifyWind): HullifyR
  *  carry the block's palette slot (front/back/side walls = the same paint).
  *  null = a vertex outside the 0..31 window even after the frame shift
  *  (span > 31 cells — the game cannot store it). */
-function encodeTri(g: [G3, G3, G3], slot: number, material: number): Triangle | null {
-  const t = { colors: [slot, slot, slot, slot, slot], material } as unknown as Record<string, unknown> as Triangle;
-  const o = t as unknown as Record<string, number>;
+function encodeTri(g: [G3, G3, G3], slot: number, material: number, smooth: boolean): Triangle | null {
+  // The game's Triangle struct (Triangle.inc.glsl) has a per-triangle
+  // smooth flag (0 = flat/geometric normals = default, 1 = smooth normals);
+  // its own hull saves carry "smooth":1 right after `material` — spelled the
+  // same here (frame_*/v* keys are appended after, as before).
+  const t = smooth
+    ? { colors: [slot, slot, slot, slot, slot], material, smooth: 1 }
+    : { colors: [slot, slot, slot, slot, slot], material };
+  const o = t as unknown as Record<string, unknown> as Record<string, number>;
   const AX = [0, 1, 2] as const;
   for (const ax of AX) {
     const name = 'xyz'[ax]!;
@@ -498,5 +523,5 @@ function encodeTri(g: [G3, G3, G3], slot: number, material: number): Triangle | 
       o[`v${i}_${name}`] = v;
     }
   }
-  return t;
+  return t as unknown as Triangle;
 }

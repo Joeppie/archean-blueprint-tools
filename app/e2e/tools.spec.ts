@@ -110,6 +110,7 @@ test.describe('tools menu + dialogs @ui', () => {
     await openNew(page);
     await openTool(page, 'hullify');
     await expect(page.getByTestId('tool-preview')).toContainText(/5 blocks ▸ \d+ triangles/);
+    await expect(page.getByTestId('tool-preview')).toContainText(/shading smooth:1/);
     await page.getByTestId('tool-ok').click();                          // ▸ confirm box only
     expect((await bpOf(page)).blocks.length).toBe(5);
     await expect(page.getByTestId('tool-confirm-box')).toBeVisible();

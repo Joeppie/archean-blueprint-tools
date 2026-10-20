@@ -151,10 +151,25 @@ export const TOOLS: ToolDef[] = [
         ],
         hint: 'Which way the triangle winding faces. The game extrudes each '
           + 'triangle as a prism whose FRONT side takes colours[0] and shades '
-          + 'by that normal — if the converted hull shows a beveled/wrong-way '
-          + 'look in the game, pick the other direction here. (v1.5.7 user '
-          + 'report: the block face’s own winding read wrong-way in-game; '
-          + 'front-IN is the default, front-OUT is the v1.5.6 behaviour.)',
+          + 'by that normal — so this is a GAME-side property: our viewer '
+          + 'draws the closed prism both-sided with one colour on all five '
+          + 'faces, so both directions render IDENTICALLY here. If the '
+          + 'converted hull reads wrong-way/lit-from-behind in the game, pick '
+          + 'the other direction. (The in-game BEVEL look is NOT the winding '
+          + '— it is the shading option below.)',
+      },
+      {
+        key: 'shade', label: 'shading', kind: 'select',
+        options: [
+          { id: 'smooth', label: 'smooth skin (smooth:1)' },
+          { id: 'flat', label: 'flat (no key)' },
+        ],
+        hint: 'The game’s Triangle struct carries a per-triangle smooth flag '
+          + '(0 = flat/geometric normals, the absent default; 1 = smooth '
+          + 'normals). The game’s own hull saves set smooth:1 on their skin '
+          + 'triangles, so the sheet shades continuously; a skin without it '
+          + 'flat-shades every prism face — the beveled look on converted '
+          + 'hulls. Default writes smooth:1 like the game does.',
       },
       {
         key: 'note', label: '', kind: 'note',
@@ -165,11 +180,15 @@ export const TOOLS: ToolDef[] = [
           + 'whole conversion back afterwards.',
       },
     ],
-    initial: { wind: 'inward' },
+    initial: { wind: 'inward', shade: 'smooth' },
     preview: (f, bp) => {
-      const r = hullifyPreview(bp, { wind: f['wind'] === 'outward' ? 'outward' : 'inward' });
+      const r = hullifyPreview(bp, {
+        wind: f['wind'] === 'outward' ? 'outward' : 'inward',
+        shade: f['shade'] === 'flat' ? 'flat' : 'smooth',
+      });
       if (!r.ok) return r.reason ?? 'nothing to convert';
       return `${r.blocksRemoved} blocks ▸ ${r.trisAdded} triangles · front faces ${f['wind'] === 'outward' ? 'OUT' : 'IN'}`
+        + ` · shading ${f['shade'] === 'flat' ? 'flat' : 'smooth:1'}`
         + (r.keptOcc ? ` · ${r.keptOcc} occupancy markers kept` : '')
         + (r.subBlocks ? ` · ${r.subBlocks} SUBGRID blocks stay blocks` : '')
         + ` · mass ≈ ${(r.massRemoved).toFixed(0)} kg ▸ ${r.massAdded.toFixed(0)} kg`
@@ -181,13 +200,20 @@ export const TOOLS: ToolDef[] = [
         .filter(i => i >= 0)
         .sort((a, b) => b - a);
       const trisBefore = ctx.bp.data.triangles?.length ?? 0;
-      const res = hullifyApply(ctx.bp, { wind: f['wind'] === 'outward' ? 'outward' : 'inward' });
+      const res = hullifyApply(ctx.bp, {
+        wind: f['wind'] === 'outward' ? 'outward' : 'inward',
+        shade: f['shade'] === 'flat' ? 'flat' : 'smooth',
+      });
       if (!res.ok) return res.reason ?? 'nothing converted';
       for (const i of geo) docArrayRemoveAt(ctx.doc, ['data', 'blocks'], i);
       docEnsureArray(ctx.doc, ['data', 'triangles']);
       (ctx.bp.data.triangles ?? []).forEach((t, k) => {
         if (k < trisBefore) return;
-        docArrayInsert(ctx.doc, ['data', 'triangles'], k, docFromValue(t, true));
+        // INT style (floaty = false): the game writer stores ALL triangle
+        // numbers bare — "frame_x":-1,"material":3,"smooth":1,"v0_x":13
+        // (3732302108 raw); a "13.0" is the double-modelled style of WORLD
+        // coords, not this record's.
+        docArrayInsert(ctx.doc, ['data', 'triangles'], k, docFromValue(t, false));
       });
       return `converted ${res.blocksRemoved} blocks into ${res.trisAdded} hull triangles`;
     },

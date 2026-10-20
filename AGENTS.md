@@ -390,7 +390,23 @@ wants, the outward one rendered the "weird beveled" hull) or `outward`
 block-shape table and the corpus census of AUTHORED files read as). Pure pin
 (`__tests__/tools.test.ts` DIRECTION test): both directions emit the SAME
 triangles/area, normals exactly antiparallel, the lone cube's +x face normal
-+x/−x per option. `hullifyApply(bp, { wind })`.
++x/−x per option. `hullifyApply(bp, { wind })`. **v1.5.9 SHADE option**
+(user: "the triangles really different in versus out? … I see the bevel
+occurring either way, which as I remember should not happen"): the winding is
+NOT the bevel — inward/outward are the SAME closed prism (hull.ts extrudes
+along the winding normal, so the two directions swap front/back, never shape;
+our viewer renders them IDENTICALLY, and `Triangle.inc.glsl` GetNormal() = the
+winding cross only picks the colours[0]-front side). The in-game bevel on EVERY
+conversion is the per-triangle FLAT-normal default: the game's 16-byte Triangle
+has a `smooth` bit (JSON `smooth` key) — 0 flat, 1 smooth — its own hull saves
+set smooth:1 (3732302108: 174/241), so the skin shades continuously; a flat skin
+flat-shades every prism face = the bevel. The tool's new `shading` select writes
+`smooth:1` on every NEW triangle by DEFAULT (the game's convention; existing
+triangles stay verbatim) or, on `flat`, omits the key. The writer spells the
+generated record in the game's INT style (`docFromValue(t, false)` — all triangle
+numbers bare, never "13.0"). Pins: `__tests__/tools.test.ts` SHADE test (smooth:1
+on all, flat none, other fields identical, existing kept); `tooldoc.test.ts`
+writer-style pin; `e2e/tools.spec.ts` preview reads "shading smooth:1".
 - **2026-10-20 UNDO/REDO + DELETE + TRIANGLE PICK + DIALOG UX (user: "ALL
   operations should retain a undo/redo history, and be in edit menu"; "when
   I have something selected in edit mode, [delete] key should delete";

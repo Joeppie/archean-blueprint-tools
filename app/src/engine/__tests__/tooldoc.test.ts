@@ -74,7 +74,7 @@ describe('v1.7 write paths keep bp + doc', () => {
     docEnsureArray(ctx.doc, ['data', 'triangles']);
     (ctx.bp.data.triangles ?? []).forEach((t, k) => {
       if (k < trisBefore) return;
-      docArrayInsert(ctx.doc, ['data', 'triangles'], k, docFromValue(t, true));
+      docArrayInsert(ctx.doc, ['data', 'triangles'], k, docFromValue(t, false));
     });
     const out = JSON.parse(serializeSave(ctx)) as {
       data: { blocks: { type: number }[]; triangles: Record<string, number>[] };
@@ -85,5 +85,10 @@ describe('v1.7 write paths keep bp + doc', () => {
     expect(out.data.triangles[0]).toHaveProperty('v0_x');
     expect(out.data.triangles[0]).toHaveProperty('frame_y');
     expect(emitDoc(doc)).toContain('"triangles"');
+    // v1.5.9 writer-style pins: the smooth flag rides every generated
+    // triangle (the game's own hull convention, 3732302108) and its numbers
+    // stay INT-modelled bare — never the "13.0" double style of world coords.
+    expect(out.data.triangles.every(t => (t as Record<string, unknown>)['smooth'] === 1)).toBe(true);
+    expect(emitDoc(doc)).not.toMatch(/"(v0_x|frame_x|smooth)":\d+\.\d/);
   });
 });

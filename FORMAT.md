@@ -653,6 +653,22 @@ Evidence (ISW-241, 21 triangles):
   normal. The viewer renders the prisms per-colour; the wireframe overlay
   (“wireframe (hull + blocks)”) shows the raw triangle edges **and** the block
   face edges together — one LineSegments each, vertex-coloured.
+- **The `smooth` flag (game `Triangle.inc.glsl` struct, verified Oct 20 2026)**:
+  the in-game Triangle is a 16-byte record — 3 packed 5-bit vertices, `color[5]`,
+  `material`, `temperature`, then a 16-bit state word whose bits 0-2 are
+  `smooth` (`0` = flat/geometric normals, the default; `1` = smooth normals).
+  In the JSON blueprint the state word is spelled out: a `smooth` key on the
+  triangle record. Corpus census: workshop files store NO `smooth` key (⇒ flat),
+  except 3732302108 where 174/241 triangles carry `"smooth":1` and 67 omit it.
+  This flag — NOT the winding — is the game's per-triangle control for whether
+  a hull reads as one continuous skin or as flat-shaded facets: the "bevel"
+  that appears on EVERY blocks→triangles conversion in-game, both windings, is
+  the flat-normal default shading each prism face independently. Winding only
+  picks WHICH side is colours[0]-front; both directions are geometrically the
+  same prism (our viewer renders them identically — hull.ts offsets along the
+  winding normal and closes the solid, so inward/outward swap front/back, never
+  shape). hullify therefore writes `smooth:1` on every NEW triangle by default
+  (the game's own convention), with a `flat` option that omits the key.
 - Render symmetry (viewer heuristic, not the game): shared slots weld (0.025 m),
   near-mirror vertex pairs average |x|, near-axis points snap to x = 0.
 
