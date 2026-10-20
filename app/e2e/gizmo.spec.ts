@@ -87,7 +87,7 @@ test.describe('gizmo writeback @gizmo @slow', () => {
     const ci = +(await row.getAttribute('data-idx'))!;
     await row.click();
 
-    expect(await eng('state')(page)).toEqual({ mode: 'rotate', ci });
+    expect(await eng('state')(page)).toMatchObject({ mode: 'rotate', ci, shown: true });
 
     const pivot0 = (await eng('pivot')(page)) as [number, number, number];
     const pos0 = (await eng("pos", { ci })(page)) as { x: number; y: number; z: number };
@@ -145,7 +145,7 @@ test.describe('gizmo writeback @gizmo @slow', () => {
     await page.locator('[data-idx]').first().click();
     expect(((await eng('state')(page)) as { ci: number }).ci).toBeGreaterThanOrEqual(0);
     await eng('selsub', { bi: 4 })(page);
-    expect(await eng('state')(page)).toEqual({ mode: 'off', ci: -1 });
+    expect(await eng('state')(page)).toMatchObject({ mode: 'off', ci: -1, shown: false });
   });
 
   test('multi-grip RING drags keep spinning in unison: the ring plane follows the live pose, per-event poses stay continuous (v0.181 continuity backlog)', async ({ page }) => {
@@ -231,5 +231,28 @@ test.describe('gizmo writeback @gizmo @slow', () => {
     expect(((await eng('state')(page)) as { mode: string }).mode).toBe('off');
     await page.getByTestId('mode-rotate').click();
     expect(((await eng('state')(page)) as { mode: string }).mode).toBe('rotate');
+  });
+
+  // v1.5.1 user report: "GIZMO DOES NOT SHOW FOR EITHER BLOCKS OR COMPONENTS"
+  // — one stray ⊘ click persisted gizmo-mode 'off' and silently killed every
+  // widget in every mode FOREVER. ⊘ is now a SESSION hide: a fresh load heals
+  // a persisted 'off' back to the rotate default, so the widget is on-screen.
+  test('a persisted ⊘ (gizmo-mode=off) never traps a fresh session — the gizmo shows again', async ({ page }) => {
+    desktopOnly();
+    await page.addInitScript(() => localStorage.setItem('archean-app-gizmo-mode', 'off'));
+    await page.goto(`/?craft=${ISW}`);
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
+    await page.getByTestId('mode-edit').click();
+    await page.evaluate(() => {
+      const w = window as unknown as { __ARCHEAN__?: { engine: {
+        blueprint: { data: { components: { type: string }[] } }; select: (ci: number) => void } } };
+      const e = w.__ARCHEAN__!.engine;
+      e.select(e.blueprint.data.components.findIndex((c) => c.type !== 'Build'));
+    });
+    const st = await page.evaluate(() => (window as unknown as {
+      __ARCHEAN__?: { engine: { gizmoState: () => { mode: string; shown: boolean } } } }
+    ).__ARCHEAN__!.engine.gizmoState());
+    expect(st.mode, 'a persisted off is healed to the rotate default on load').toBe('rotate');
+    expect(st.shown, 'the component widget is ON-SCREEN despite the persisted ⊘').toBe(true);
   });
 });

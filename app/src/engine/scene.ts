@@ -329,8 +329,12 @@ export class Engine {
     {
       const g = this.gizmo = new TransformControls(this.camera, canvas);
       this.gizmoEnabled = localStorage.getItem('archean-app-gizmo') !== '0';    // legacy default ON
+      // 'off' NEVER survives a load (v1.5.1 user report: "GIZMO DOES NOT SHOW
+      // FOR EITHER BLOCKS OR COMPONENTS" — the modebox ⊘ persisted 'off' and
+      // silently killed every widget in every mode forever). ⊘ is a SESSION
+      // hide; the persisted master switch is the labeled ⚙ gizmo row.
       const m = localStorage.getItem('archean-app-gizmo-mode');
-      this.gizmoMode = m === 'off' || m === 'translate' || m === 'rotate' ? m : 'rotate';
+      this.gizmoMode = m === 'translate' || m === 'rotate' ? m : 'rotate';
       const listen = (t: string, f: (e: { value?: boolean }) => void) =>
         (g.addEventListener as unknown as (t: string, f: (e: { value?: boolean }) => void) => void)(t, f);
       listen('objectChange', () => {
@@ -1780,8 +1784,14 @@ void main() {
     g.setTranslationSnap(on ? 0.25 : null);
     g.setRotationSnap(on ? 15 * DEG : null);
   }
-  gizmoState(): { mode: 'off' | 'translate' | 'rotate'; ci: number } {
-    return { mode: !this.gizmoEnabled || this.gizmoCi < 0 ? 'off' : this.gizmoMode, ci: this.gizmoCi };
+  gizmoState(): { mode: 'off' | 'translate' | 'rotate'; ci: number; shown: boolean } {
+    const g = this.gizmo;
+    return {
+      mode: !this.gizmoEnabled || this.gizmoCi < 0 ? 'off' : this.gizmoMode, ci: this.gizmoCi,
+      // v1.5.1: the ACTUAL widget visibility (helper on-screen), so pins
+      // cannot pass on intent alone — the ⊘-persisted "no gizmo anywhere" trap
+      shown: !!g && g.enabled === true && g.getHelper().visible === true,
+    };
   }
   /** the live pivot in PRE-MOFF VIEW space (pins compare against (x, y, −z)
    *  of the part's file position) */
@@ -1948,14 +1958,18 @@ void main() {
   /** live state for the __ARCHEAN__ hook + pins: which block owns the widget
    *  and where its start cell currently is */
   blockGizmoState(): { bi: number; mode: 'off' | 'translate' | 'rotate';
-    mirror: boolean; cell: [number, number, number] } | null {
+    mirror: boolean; cell: [number, number, number]; shown: boolean } | null {
     const b = this.blockGizBi >= 0 && this.bp ? this.bp.data.blocks[this.blockGizBi] : undefined;
     if (!b) return null;
     const c = blockCells(b);
+    const g = this.gizmo;
     return {
       bi: this.blockGizBi,
       mode: !this.gizmoEnabled || this.gizmoMode === 'off' ? 'off' : this.gizmoMode,
       mirror: this.blockGizMirror, cell: [c.x, c.y, c.z],
+      // the widget is ACTUALLY on-screen AND attached to THIS block's proxy
+      shown: !!g && g.enabled === true && g.getHelper().visible === true &&
+        (g as unknown as { object?: unknown }).object === this.gizmoProxy,
     };
   }
   /** bbox CENTRE of a block in SCENE space (the overlay groups keep raw-file

@@ -28,7 +28,7 @@ const highlight = (page: Page) => page.evaluate(() =>
 const blockGizmo = (page: Page) => page.evaluate(() =>
   (window as unknown as { __ARCHEAN__?: { blockGizmo: () => {
     bi: number; mode: 'off' | 'translate' | 'rotate'; mirror: boolean;
-    cell: [number, number, number] } | null } }).__ARCHEAN__!.blockGizmo());
+    cell: [number, number, number]; shown: boolean } | null } }).__ARCHEAN__!.blockGizmo());
 
 /** select a deck block by clicking a block face (EDIT flavor) and return its bi */
 async function selectDeckBlock(page: Page, px: { x: number; y: number }): Promise<number> {
@@ -203,6 +203,7 @@ test.describe('blocks EDIT: highlight, in-place rotate, snap, twin @place', () =
     await expect.poll(() => blockGizmo(page), { timeout: 4000 }).not.toBeNull();
     const gz = await blockGizmo(page);
     expect(gz!.bi).toBe(bi);
+    expect(gz!.shown, 'the BLOCK widget is ACTUALLY on-screen (not just attached)').toBe(true);
     const b0 = await blockAt(page, bi);
     expect(gz!.cell).toEqual([b0.cx, b0.cy, b0.cz]);
 

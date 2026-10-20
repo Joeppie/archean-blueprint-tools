@@ -137,8 +137,12 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
     onBlockHover(x, y, shift);
   };
   const [widget, setWidget] = useState<{ x: number; y: number } | null>(null);
-  const [gmode, setGmode] = useState<'off' | 'translate' | 'rotate'>(
-    () => (localStorage.getItem('archean-app-gizmo-mode') as 'off' | 'translate' | 'rotate') || 'rotate');
+  // ⊘ ('off') is SESSION-only — healed to the default at load, exactly like
+  // the Engine (v1.5.1: the persisted ⊘ was the silent "no gizmo anywhere" trap)
+  const [gmode, setGmode] = useState<'off' | 'translate' | 'rotate'>(() => {
+    const m = localStorage.getItem('archean-app-gizmo-mode');
+    return m === 'translate' || m === 'rotate' ? m : 'rotate';
+  });
   const [, setSymTick] = useState(0);
   useEffect(() => {
     const sh = (e: KeyboardEvent, on: boolean) => {
