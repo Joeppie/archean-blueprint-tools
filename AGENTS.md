@@ -276,7 +276,7 @@ user's explicit say-so (Pages/release still serves it meanwhile).
   toggle or keyboard h — `!opts.hull`) the block/triangle meshes are NOT
   pickable: pickNdc/pickCell/pickPlacePoint skip them, so you click through
   to the parts/surfaces BEHIND an invisible hull ("click what you SEE").
--  (v1.8 user rules: "It should
+- **UNIFORM MIRROR RULE + FAUX-MIRROR screen (v1.8 user rules: "It should
   also do whatever I do to the mirror block (mirrored of course)"; "This rule
   is uniform and it also applies to color, material, rotation, and to
   components"): EVERY edit on a SELECTED item ALWAYS drives its mirror twin in
