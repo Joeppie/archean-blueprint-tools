@@ -77,12 +77,55 @@ export function hullPrism(t: Triangle): HullFace[] {
   return faces;
 }
 
-/** whole skin: every triangle of the file → prism faces + wire edges */
+/** absolute 0.25 m lattice slot of a vertex (frame-shifted), the game's
+ *  edge-adjacency key space (Triangle.inc.glsl MakeEdge/HasSameVertices). */
+function absVert(t: Triangle, i: number): [number, number, number] {
+  const g = (ax: 'x' | 'y' | 'z') =>
+    Math.round(((t[`v${i}_${ax}`] as number | undefined) ?? 0) +
+      12 * ((t[`frame_${ax}`] as number | undefined) ?? 0));
+  return [g('x'), g('y'), g('z')];
+}
+const vertKey = (v: readonly number[]) => v.join(',');
+const edgeKey = (a: readonly number[], b: readonly number[]) => {
+  const ka = vertKey(a), kb = vertKey(b);
+  return ka < kb ? `${ka}#${kb}` : `${kb}#${ka}`;
+};
+
+/** whole skin: every triangle of the file → prism faces + wire edges.
+ *  SHARED-EDGE WALL CULL (v1.5.10, the user's in-game close-ups of Jimmy's
+ *  hull: "if you place triangles face down, they are precisely flush … you
+ *  legitimately cannot tell whether it's Triangles or not" — while our old
+ *  renderer drew EVERY prism's own 0.05 m side walls, so every seam showed
+ *  a wall band = the "bevel", in BOTH windings): the game keys triangle
+ *  EDGES for adjacency (MakeEdge), and where two triangles are joined on an
+ *  edge that edge's side wall is never drawn — the slabs meet flush even at
+ *  an ANGLE (the wall of one would poke through the other's cap). A lone
+ *  triangle keeps all three walls (its thickness rim). Walls are culled by
+ *  ADJACENCY only, independent of the smooth flag — in-game flush seams are
+ *  flat-shaded, so the bevel was never a shading issue. */
 export function buildHullSkin(triangles: readonly Triangle[] | undefined): HullSkin {
+  const tris = triangles ?? [];
+  const verts = tris.map(t => [0, 1, 2].map(i => absVert(t, i)));
+  const edgeUses = new Map<string, number>();
+  tris.forEach((_, ti) => {
+    for (let i = 0; i < 3; i++) {
+      const k = edgeKey(verts[ti]![i]!, verts[ti]![(i + 1) % 3]!);
+      edgeUses.set(k, (edgeUses.get(k) ?? 0) + 1);
+    }
+  });
   const faces: HullFace[] = [];
   const wire: number[] = [];
-  for (const t of triangles ?? []) {
-    faces.push(...hullPrism(t));
+  tris.forEach((t, ti) => {
+    const all = hullPrism(t);
+    // walls come in pairs per edge i→j: faces[2 + 2i], faces[3 + 2i]
+    for (let f = 0; f < all.length; f++) {
+      if (all[f]!.cap === 2) {
+        const i = ((f - 2) / 2) | 0;
+        const k = edgeKey(verts[ti]![i]!, verts[ti]![(i + 1) % 3]!);
+        if ((edgeUses.get(k) ?? 0) > 1) continue;     // joined to a neighbour
+      }
+      faces.push(all[f]!);
+    }
     const p: V3[] = ([0, 1, 2] as const).map(i => {
       const v = hullVertex(t, i);
       return [v.x, v.y, v.z];
@@ -91,6 +134,6 @@ export function buildHullSkin(triangles: readonly Triangle[] | undefined): HullS
       const a = p[i]!, b = p[(i + 1) % 3]!;
       wire.push(a[0]!, a[1]!, a[2]!, b[0]!, b[1]!, b[2]!);
     }
-  }
-  return { faces, wire, tris: (triangles ?? []).length };
+  });
+  return { faces, wire, tris: tris.length };
 }

@@ -432,6 +432,27 @@ writer-style pin; `e2e/tools.spec.ts` preview reads "shading smooth:1".
   EPISTEMIC: the game's exact weld lives in its compiled mesh builder;
   cap-only raw-vertex welding is our faithful-shape reading of the
   Triangle.inc.glsl comment — arbitrate against in-game screenshots.
+  **SHARED-EDGE WALL CULL (v1.5.10, same report):** the user's IN-GAME
+  close-ups (all three screenshots were in-game, not the editor): joined
+  authored triangles render FLUSH at their seams — no 0.05 m wall band,
+  flat-shaded, even across colours — while EVERY seam of a hullified
+  conversion shows a wall band, in both windings and both shading modes
+  (bevel ≠ winding ≠ smooth, now proven). The game's Triangle struct keys
+  edges `for adjacency detection` (MakeEdge). JIMMY-FILE CENSUS (in-game
+  authored, renders flush): 241 tris, 232 shared-edge pairs, **62 joins
+  cross FRAMES** (⇒ the game welds on the ABSOLUTE lattice; our per-tri
+  floor(min/12) frames are fine), 218/232 joins traverse the edge OPPOSITE
+  (manifold-consistent shell), 197/232 joiners carry IDENTICAL colours[0..4]
+  and 221/232 the same material (hullify paints per FACE and carries per
+  block material ⇒ every seam joins unlike records — the leading suspect
+  for the game banding our seams: a palette/material-batched adjacency).
+  OUR RENDERER NOW MIRRORS THE GOAL: buildHullSkin culls a side wall when
+  its absolute-lattice edge is shared by another triangle (a lone triangle
+  keeps its rim; the wire overlay keeps ALL edges — it is the build frame);
+  pins in `__tests__/hull.test.ts` (pair 8+8−4=12 faces, cross-frame weld
+  culls, vertex-only contact 16, wire complete). OPEN: why the GAME still
+  bands our file — needs the game-re-saved converted craft (client
+  blueprints dir) for a byte-diff, or a small authored probe craft.
 - **2026-10-20 UNDO/REDO + DELETE + TRIANGLE PICK + DIALOG UX (user: "ALL
   operations should retain a undo/redo history, and be in edit menu"; "when
   I have something selected in edit mode, [delete] key should delete";

@@ -3,7 +3,7 @@
 // normal (cross(v1−v0, v2−v0), the game's colours[0] side), everything convex.
 // The file frame IS the display frame since the v0.180 de-mirror (no z-mirror).
 import { describe, expect, test } from 'vitest';
-import { HULL_T, hullPrism } from '../hull';
+import { HULL_T, hullPrism, buildHullSkin } from '../hull';
 import type { Triangle } from '../format';
 
 // right triangle in the file y=0 plane at frame 1: legs 6 cells (1.5 m)
@@ -75,5 +75,42 @@ describe('hullPrism', () => {
   test('missing colours default to slot 0 (opaque hull, never magenta by omission)', () => {
     const bare = hullPrism({ ...T, colors: undefined });
     expect(bare.every(f => f.slot === 0)).toBe(true);
+  });
+});
+
+// v1.5.10 SHARED-EDGE WALL CULL (the user's in-game close-ups: joined
+// triangles render FLUSH — no 0.05 m wall band at the seam; the game keys
+// triangle edges for adjacency, MakeEdge in Triangle.inc.glsl). A wall only
+// draws on a FREE edge; a lone triangle keeps its full rim.
+describe('buildHullSkin — shared-edge wall cull', () => {
+  // coplanar pair sharing the hypotenuse edge (6,0,0)-(0,0,6) at frame 1
+  const A = { v0_x: 0, v0_y: 0, v0_z: 0, v1_x: 6, v1_y: 0, v1_z: 0, v2_x: 0, v2_y: 0, v2_z: 6,
+    frame_x: 1, frame_y: 1, frame_z: 1, colors: [10, 10, 10, 10, 10] } as Triangle;
+  const B = { v0_x: 6, v0_y: 0, v0_z: 0, v1_x: 6, v1_y: 0, v1_z: 6, v2_x: 0, v2_y: 0, v2_z: 6,
+    frame_x: 1, frame_y: 1, frame_z: 1, colors: [10, 10, 10, 10, 10] } as Triangle;
+
+  test('lone triangle = 8 faces; a shared edge culls BOTH joiners wall pair', () => {
+    expect(buildHullSkin([A]).faces.length).toBe(8);
+    const pair = buildHullSkin([A, B]);
+    expect(pair.faces.length).toBe(12);               // 16 − 2 wall pairs
+    expect(pair.tris).toBe(2);
+  });
+
+  test('cross-frame weld still culls: same absolute edge, frame shifted by 1', () => {
+    const Bf = { ...B, frame_x: 2,
+      v0_x: B.v0_x! - 12, v2_x: B.v2_x! - 12 } as unknown as Triangle;
+    // Bf sits one FULL frame (+12 cells) in +x — the same absolute edge,
+    // different packed 5-bit slots: adjacency is keyed on ABSOLUTE lattice.
+    expect(buildHullSkin([A, Bf]).faces.length).toBe(12);
+  });
+
+  test('vertex-only contact shares no edge: both rims stay (16 faces)', () => {
+    const C = { v0_x: 6, v0_y: 0, v0_z: 0, v1_x: 12, v1_y: 0, v1_z: 0, v2_x: 9, v2_y: 0, v2_z: 6,
+      frame_x: 1, frame_y: 1, frame_z: 1, colors: [10, 10, 10, 10, 10] } as Triangle;
+    expect(buildHullSkin([A, C]).faces.length).toBe(16);
+  });
+
+  test('wire keeps ALL triangle edges (the lattice overlay is the build frame)', () => {
+    expect(buildHullSkin([A, B]).wire.length).toBe(2 * 3 * 6);
   });
 });

@@ -669,6 +669,31 @@ Evidence (ISW-241, 21 triangles):
   winding normal and closes the solid, so inward/outward swap front/back, never
   shape). hullify therefore writes `smooth:1` on every NEW triangle by default
   (the game's own convention), with a `flat` option that omits the key.
+- **Flush seams & shared-edge adjacency (Oct 20 2026 — in-game close-ups +
+  the game's struct).** In-game, JOINED (in-game-placed) hull triangles meet
+  FLUSH at their edges — no 0.05 m side-wall band, flat-shaded, colours
+  meeting at clean lines; a BLUEPRINT-CONVERTED craft, by contrast, shows a
+  wall band at EVERY seam, in both windings and both shading modes (so the
+  bevel is neither the winding nor the smooth flag). The mechanism lives in
+  `Triangle.inc.glsl`: `MakeEdge` ("normalize edge representation **for
+  adjacency detection**") and `HasSameVertices` ("same physical triangle") —
+  the game keys triangle EDGES and never draws the side wall on an edge two
+  triangles share. Census of the in-game-authored Jimmy skin (3732302108,
+  241 tris): 232 shared-edge pairs, **62 joins cross FRAMES** (⇒ the weld
+  keys on the ABSOLUTE lattice, `v + 12·frame`, not the packed 5-bit slots —
+  a per-triangle `floor(min/12)` frame split is therefore harmless), 218/232
+  joins traverse the shared edge OPPOSITE (a manifold-consistent shell), and
+  197/232 joiners carry IDENTICAL `colours[0..4]` with 221/232 the same
+  `material`. A hullify conversion instead paints per FACE and carries the
+  per-block `material`, so EVERY seam joins UNLIKE records — the leading
+  suspect for the game still banding converted seams (adjacency batched per
+  palette/material, or the flush weld done at in-game placement rather than
+  file load). NOT YET PROVEN: arbitrate with a game-re-saved converted craft
+  (client blueprints dir) byte-diffed, or a small in-game-authored probe. Our
+  renderer mirrors the GOAL state: hull.ts `buildHullSkin` culls a side wall
+  whose absolute-lattice edge is shared by another triangle (a lone triangle
+  keeps its thickness rim; the wireframe overlay still draws ALL edges — it
+  is the build frame, not the render).
 - Render symmetry (viewer heuristic, not the game): shared slots weld (0.025 m),
   near-mirror vertex pairs average |x|, near-axis points snap to x = 0.
 
