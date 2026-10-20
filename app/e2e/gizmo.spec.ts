@@ -234,12 +234,18 @@ test.describe('gizmo writeback @gizmo @slow', () => {
   });
 
   // v1.5.1 user report: "GIZMO DOES NOT SHOW FOR EITHER BLOCKS OR COMPONENTS"
-  // — one stray ⊘ click persisted gizmo-mode 'off' and silently killed every
-  // widget in every mode FOREVER. ⊘ is now a SESSION hide: a fresh load heals
-  // a persisted 'off' back to the rotate default, so the widget is on-screen.
-  test('a persisted ⊘ (gizmo-mode=off) never traps a fresh session — the gizmo shows again', async ({ page }) => {
+  // — TWO persistence traps: (a) the modebox ⊘ persisted gizmo-mode 'off',
+  // and (b) the VIEW-MODE GATE persisted the ⚙ master 'archean-app-gizmo'
+  // = '0' — closing a tab in View poisoned EVERY later session with a dead
+  // gizmo while the mode popup kept showing (exactly what the user saw).
+  // Both keys are now session-only: a fresh load lands with a VISIBLE
+  // widget no matter what old storage says (the legacy keys are deleted).
+  test('persisted ⊘ + poisoned ⚙ master never trap a fresh session — the gizmo shows again', async ({ page }) => {
     desktopOnly();
-    await page.addInitScript(() => localStorage.setItem('archean-app-gizmo-mode', 'off'));
+    await page.addInitScript(() => {
+      localStorage.setItem('archean-app-gizmo-mode', 'off');
+      localStorage.setItem('archean-app-gizmo', '0');
+    });
     await page.goto(`/?craft=${ISW}`);
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
     await page.getByTestId('mode-edit').click();

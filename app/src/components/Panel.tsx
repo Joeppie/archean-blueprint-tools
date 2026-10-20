@@ -314,7 +314,7 @@ export function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHu
       <Check testid="opt-subs" label="subgrids (doors/hatches)" checked={p.opts.subs} onChange={v => p.onOpt('subs', v)} />
       <Check testid="opt-mirror" label="mirror plane (x symmetry)" checked={p.opts.mirror} onChange={v => p.onOpt('mirror', v)} />
       <Check testid="opt-labels" label="labels on interactive/aliased parts" checked={p.opts.labels} onChange={v => p.onOpt('labels', v)} />
-      <Check testid="opt-gizmo" label="gizmo on selection (Shift snaps)" checked={p.gizmoOn} onChange={p.onGizmo} />
+      <Check testid="opt-gizmo" label="gizmo on selection (this session · Shift snaps)" checked={p.gizmoOn} onChange={p.onGizmo} />
       {/* the FULL game meshes are the DEFAULT (v0.182 user rule) — the row
           offers the decimated twins as the opt-in for weak GPUs */}
       <Check testid="opt-hidef" label="decimated low-poly meshes (weak GPUs)" checked={!p.hiDef}

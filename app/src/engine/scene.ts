@@ -328,7 +328,14 @@ export class Engine {
     // controls yield while an axis is dragged. Custom TGC events are untyped.
     {
       const g = this.gizmo = new TransformControls(this.camera, canvas);
-      this.gizmoEnabled = localStorage.getItem('archean-app-gizmo') !== '0';    // legacy default ON
+      // v1.5.1 SECOND trap, same family: the MODE GATE (view mode → off) used
+      // to persist this key, so merely closing a tab while in VIEW poisoned
+      // every later session with a dead gizmo (user: "I DO NOT SEE the gizmo
+      // … just the menu that allows me to select which gizmo SHOULD show").
+      // The ⚙ gizmo row is therefore SESSION-only now (default ON); drop the
+      // legacy key so an old poisoned value can never bite again.
+      localStorage.removeItem('archean-app-gizmo');
+      this.gizmoEnabled = true;
       // 'off' NEVER survives a load (v1.5.1 user report: "GIZMO DOES NOT SHOW
       // FOR EITHER BLOCKS OR COMPONENTS" — the modebox ⊘ persisted 'off' and
       // silently killed every widget in every mode forever). ⊘ is a SESSION
@@ -1765,14 +1772,18 @@ void main() {
 
   setGizmoEnabled(on: boolean) {
     this.gizmoEnabled = on;
-    localStorage.setItem('archean-app-gizmo', on ? '1' : '0');
+    // NO localStorage write (v1.5.1): every caller includes the MODE GATE,
+    // which flips this off in VIEW constantly — persisting it poisoned the
+    // user's storage with a "chosen" off. The ⚙ row is a session toggle.
     this.syncGizmo();
     this.hingeGroup.visible = on && this.hingeHandles.length > 0;   // hinge UI is an EDIT-mode handle too
     this.invalidate();
   }
   setGizmoMode(m: 'off' | 'translate' | 'rotate') {
     this.gizmoMode = m;
-    localStorage.setItem('archean-app-gizmo-mode', m);
+    // 'off' is SESSION-only (v1.5.1): persist the last REAL mode so a reload
+    // lands on a visible widget (⊘ hides now, never forever).
+    if (m !== 'off') localStorage.setItem('archean-app-gizmo-mode', m);
     this.syncGizmo();
     this.invalidate();
   }

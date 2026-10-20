@@ -33,7 +33,9 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     new URLSearchParams(window.location.search).has('aero') ? 'aero' : 'view');
   const [opts, setOpts] = useState<ViewOptions>(DEFAULT_OPTS);
   const [hullOpacity, setHullOpacityState] = useState(1);
-  const [gizmoOn, setGizmoOn] = useState(() => localStorage.getItem('archean-app-gizmo') !== '0');
+  // v1.5.1: the gizmo master is SESSION-only (default ON) — its old persisted
+  // key was poisoned by the view-mode gate, so it is no longer read at all.
+  const [gizmoOn, setGizmoOn] = useState(true);
   const [hiDef, setHiDefState] = useState(() => localStorage.getItem('archean-app-hidef') !== '0');
   // the KSP STATIC INFO box (mass & CoM) is OPTIONAL (user 2026-10-19: "static
   // info shouldn't necessarily show. it's too large on mobile, hide it under

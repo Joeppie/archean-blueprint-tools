@@ -158,6 +158,16 @@ user's explicit say-so (Pages/release still serves it meanwhile).
   gizmo re-bind after the swap. Pinned by app/e2e/liveedit.spec.ts (panel-
   routed Propeller twist + Aileron angle: liveDataEdit counter, reload
   counter 0, real-model bbox follows the data).
+- **Gizmo persistence = SESSION-only (v1.5.1 traps):** NEITHER gizmo setting
+  persists. (a) the modebox ⊘ ('off') never survives a load (gizmoMode heals
+  to rotate; setGizmoMode only WRITES translate/rotate); (b) the ⚙ row
+  `archean-app-gizmo` key is dead — the engine deletes it on attach and
+  setGizmoEnabled never writes it, because the VIEW-MODE GATE calls
+  setGizmoEnabled(false) and used to poison the user's storage ("closing a
+  tab in View = no gizmo ever again", user report 2026-10-20). `gizmoState()`
+  / `blockGizmoState()` carry `shown` = helper actually enabled+visible (block
+  variant: also attached to the proxy) — pins assert PIXELS, not intent;
+  gizmo.spec pins the seeded-poisoned-storage fresh-load-shows guarantee.
 - **Panel flavors + view-lock + BLOCK widget (v1.5 user rules):** (1) ONE
   `✎ Edit | ✚ Place` switch crowns the side panel in BOTH the Edit and Blocks
   modes (testids `tooltab-edit`/`tooltab-place`, hint row `flavor-hint`) —
