@@ -407,6 +407,31 @@ generated record in the game's INT style (`docFromValue(t, false)` — all trian
 numbers bare, never "13.0"). Pins: `__tests__/tools.test.ts` SHADE test (smooth:1
 on all, flat none, other fields identical, existing kept); `tooldoc.test.ts`
 writer-style pin; `e2e/tools.spec.ts` preview reads "shading smooth:1".
+- **v1.5.10 UNDO KEEPS THE CAMERA + APP SMOOTHS THE `smooth` FLAG** (user:
+  "I really cannot tell the difference between various options, but thats
+  also because ctrl-z resets view"): (1) undo/redo (`applyHistory` →
+  `setBp`) ran through the Viewport's load effect with `load()`'s DEFAULT
+  `keepView=false` — every Ctrl+Z/redo RE-FRAMED the camera (all live edits
+  already ride `engine.reload()` = keepView TRUE), which made tool-option
+  A/B comparison impossible. Viewport gains a `keepView` prop (Editor state
+  set true in applyHistory, false in openText — read via a ref so the load
+  effect never re-fires on the flag alone); a CRAFT SWAP still re-frames.
+  Pinned by `e2e/undo.spec.ts` "Ctrl+Z keeps the camera": orbit-drag the
+  camera (>0.5 m, non-vacuous), run replace-all, Ctrl+Z ⇒ camera drift
+  <0.05 m. (2) The viewer now MIRRORS the game's `smooth` triangle flag
+  (build.ts weld pass + hull.ts HullFace cap/raw/rv/smooth fields): prism
+  CAPS of smooth-flagged triangles accumulate face normals at each shared
+  RAW lattice vertex per colour bucket (fronts blend with fronts, backs
+  with backs — mixing cancels) and shade by the accumulated normal; flat
+  triangles and all thin side walls keep the geometric face normal.
+  Coplanar seams look identical; ANGLED seams blend = the continuous sheet
+  the game shows — so the hullify `shading` select finally differs ON
+  SCREEN, and the game's own smooth:1 hulls render closer to in-game.
+  Vitest pin `build.test.ts` (two right-angle tris sharing two raw
+  vertices: smooth ⇒ ≥2 cap normals ≈ (0.707,0,0.707); flat ⇒ none).
+  EPISTEMIC: the game's exact weld lives in its compiled mesh builder;
+  cap-only raw-vertex welding is our faithful-shape reading of the
+  Triangle.inc.glsl comment — arbitrate against in-game screenshots.
 - **2026-10-20 UNDO/REDO + DELETE + TRIANGLE PICK + DIALOG UX (user: "ALL
   operations should retain a undo/redo history, and be in edit menu"; "when
   I have something selected in edit mode, [delete] key should delete";

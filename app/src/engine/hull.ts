@@ -21,7 +21,16 @@ export type V3 = readonly [number, number, number];
 /** One outward-wound view-space triangle of the prism + its palette slot. */
 export interface HullFace {
   slot: number;
+  /** 0 = front cap, 1 = back cap, 2 = side wall. Only the CAPS weld their
+   *  normals for the game's `smooth` flag (a continuous sheet across angled
+   *  seams); the thin walls stay sharp-shaded. */
+  cap: 0 | 1 | 2;
   tri: readonly [V3, V3, V3];
+  /** the RAW (un-offset) triangle this prism was extruded from, and which
+   *  raw vertex each cap corner came from (the weld key for smoothing) */
+  raw: readonly [V3, V3, V3];
+  rv: readonly [number, number, number];
+  smooth: boolean;
 }
 
 export interface HullSkin {
@@ -54,15 +63,16 @@ export function hullPrism(t: Triangle): HullFace[] {
   const B = p.map(v => off(v, -HULL_T)) as [V3, V3, V3];
 
   const slot = (i: number): number => t.colors?.[i] ?? 0;
+  const smooth = !!t.smooth;                  // the game's per-triangle flag
   const faces: HullFace[] = [
-    { slot: slot(0), tri: [F[0]!, F[1]!, F[2]!] },        // front (+normal)
-    { slot: slot(1), tri: [B[2]!, B[1]!, B[0]!] },        // back
+    { slot: slot(0), cap: 0, tri: [F[0]!, F[1]!, F[2]!], raw: p, rv: [0, 1, 2], smooth },
+    { slot: slot(1), cap: 1, tri: [B[2]!, B[1]!, B[0]!], raw: p, rv: [2, 1, 0], smooth },
   ];
   for (let i = 0; i < 3; i++) {                           // side walls, edge i→j
     const j = (i + 1) % 3;
     const s = slot(2 + i);
-    faces.push({ slot: s, tri: [F[i]!, B[i]!, B[j]!] });
-    faces.push({ slot: s, tri: [F[i]!, B[j]!, F[j]!] });
+    faces.push({ slot: s, cap: 2, tri: [F[i]!, B[i]!, B[j]!], raw: p, rv: [i, i, j], smooth });
+    faces.push({ slot: s, cap: 2, tri: [F[i]!, B[j]!, F[j]!], raw: p, rv: [i, j, j], smooth });
   }
   return faces;
 }

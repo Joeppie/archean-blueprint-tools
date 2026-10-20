@@ -33,6 +33,9 @@ import { loadCraft } from './crafts';
 
 export default function Editor({ craft, onBack }: { craft: string | null; onBack: () => void }) {
   const [bp, setBp] = useState<Blueprint | null>(null);
+  /** the bp-swaps that are UNDO/REDO (same craft) keep the camera; see the
+   *  Viewport keepView prop. openText (a craft swap) always clears it. */
+  const [bpKeepView, setBpKeepView] = useState(false);
   const [sel, setSel] = useState<{ ci: number; sub: number }>({ ci: -1, sub: -1 });
   const [hit, setHit] = useState<PickHit | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -153,6 +156,9 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     setPlacing(null); setHit(null);
     engineRef.current?.select(-1);
     if (reloadTimer.current) { clearTimeout(reloadTimer.current); reloadTimer.current = null; }
+    // undo/redo = the SAME craft's earlier text: the Viewport load must KEEP
+    // the camera (user: "ctrl-z resets view" — it killed tool-option A/B).
+    setBpKeepView(true);
     setBp(ctxRef.current.bp);                       // the Viewport reloads it
     setHistTick(t => t + 1);
   }, []);
@@ -179,6 +185,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     setDirty(false); setSel({ ci: -1, sub: -1 }); setBlockSel(-1); setPlacing(null);
     histRef.current = { states: [emitDoc(d)], p: 0, timer: null };
     setHistTick(t => t + 1);
+    setBpKeepView(false);                           // a craft swap re-frames
     setBp(ctxRef.current.bp);
   }, []);
 
@@ -847,6 +854,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
               mode={mode} tool={tool} onBlockPick={onBlockPick} onBlockHover={computeGhost}
               placing={mode === 'edit' ? placing : null} onPlace={onPlacePoint}
               onPaintOpen={() => setPaintOpen(o => !o)}
+              keepView={bpKeepView}
               onManifest={setManifest} />
             {/* 🎨 PALETTE window (v1.6): the paint alternative to the gizmo
                 modes, opened from the mode widget — targets the CURRENT

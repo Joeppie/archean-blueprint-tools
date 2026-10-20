@@ -59,7 +59,7 @@ declare global {
 let atlasP: Promise<ModelAtlas | null> | null = null;
 const getAtlas = (): Promise<ModelAtlas | null> => (atlasP ??= openAtlas());
 
-export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, onBlockPick, onBlockHover, placing = null, onPlace, onPaintOpen, onManifest }: {
+export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, onBlockPick, onBlockHover, placing = null, onPlace, onPaintOpen, onManifest, keepView = false }: {
   bp: Blueprint | null;
   onPick: (h: PickHit) => void;
   onEngine?: (e: Engine | null) => void;
@@ -93,6 +93,9 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
   onPaintOpen?: () => void;
   /** game manifest once the model atlas is open (drives the Catalog tab) */
   onManifest?: (m: Record<string, { mass: number; module: string }> | null) => void;
+  /** UNDO/REDO swaps bp for the SAME craft — keep the camera (do NOT re-frame).
+   *  A craft swap (openText) never sets this, so it re-frames as ever. */
+  keepView?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<Engine | null>(null);
@@ -138,12 +141,21 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
     };
   }, []);                                    // eslint-disable-line react-hooks/exhaustive-deps
 
+  // load()'s keepView: UNDO/REDO restores the SAME craft's earlier text, so
+  // the camera must survive it (user v1.5.10: "ctrl-z resets view" — it made
+  // A/B-comparing tool options impossible: every undo re-framed the shot).
+  // A craft swap (openText) re-frames as ever. The prop is set in the SAME
+  // batch as the bp it belongs to; read through a ref so the load effect
+  // never re-fires on the flag alone.
+  const keepViewRef = useRef(!!keepView);
+  keepViewRef.current = !!keepView;
+
   useEffect(() => {
     if (!bp) return;
     let dead = false;
     (async () => {
       const atlas = await getAtlas();
-      if (!dead) engineRef.current?.load(bp, atlas);
+      if (!dead) engineRef.current?.load(bp, atlas, keepViewRef.current);
       if (!dead) onManifest?.(atlas?.manifest ?? null);
     })().catch(console.error);
     return () => { dead = true; };

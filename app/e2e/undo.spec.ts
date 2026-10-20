@@ -99,6 +99,42 @@ test.describe('undo/redo + delete key + triangle select @ui', () => {
       { timeout: 15_000 }).toBe(true);
   });
 
+  test('Ctrl+Z keeps the camera (v1.5.10 user: "ctrl-z resets view")', async ({ page }) => {
+    await openNew(page);
+    const cam = () => page.evaluate(() =>
+      (window as unknown as { __ARCHEAN__: { engine: { camPos: () => number[] } } })
+        .__ARCHEAN__.engine.camPos());
+    const c0 = await cam();
+    // ORBIT the camera off the framing pose (a >4px canvas drag is an orbit,
+    // never a pick): the pin is only meaningful from a NON-default view.
+    const box = await page.locator('canvas').boundingBox();
+    await page.mouse.move(box!.x + box!.width * 0.5, box!.y + box!.height * 0.5);
+    await page.mouse.down();
+    for (let i = 1; i <= 8; i++)
+      await page.mouse.move(box!.x + box!.width * (0.5 + 0.02 * i),
+        box!.y + box!.height * (0.5 + 0.01 * i));
+    await page.mouse.up();
+    await page.waitForTimeout(400);                            // damping settles
+    const c1 = await cam();
+    const moved = Math.hypot(c1[0]! - c0[0]!, c1[1]! - c0[1]!, c1[2]! - c0[2]!);
+    expect(moved, 'the orbit must actually move the camera (non-vacuous)')
+      .toBeGreaterThan(0.5);
+    // a tool run + an UNDO of it: the view must not be re-framed back
+    await openTool(page, 'replace-all');
+    await page.getByTestId('tool-ok').click();
+    await page.getByTestId('tool-confirm').click();
+    await expect.poll(async () => (await bpOf(page)).blocks.every(b => b.material === 3),
+      { timeout: 15_000 }).toBe(true);
+    const c2 = await cam();
+    await page.keyboard.press('Control+z');
+    await expect.poll(async () => (await bpOf(page)).blocks.every(b => (b.material ?? 0) === 0),
+      { timeout: 15_000 }).toBe(true);
+    await page.waitForTimeout(400);
+    const c3 = await cam();
+    const drift = Math.hypot(c3[0]! - c2[0]!, c3[1]! - c2[1]!, c3[2]! - c2[2]!);
+    expect(drift, 'undo must not move the camera').toBeLessThan(0.05);
+  });
+
   test('Delete deletes the selected block; Ctrl+Z brings it back', async ({ page }) => {
     test.skip(test.info().project.name !== 'chromium', 'the side panel is a drawer on phones');
     await openNew(page);
