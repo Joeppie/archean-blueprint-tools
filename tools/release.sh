@@ -68,8 +68,11 @@ LATEST=$(git ls-remote --tags origin 'refs/tags/v[0-9]*' \
 if [ -n "$LATEST" ]; then
   LV=${LATEST#v}
   # strictly BACKWARD is refused; EQUAL is allowed (re-cutting the same tag on
-  # the same commit is the "suite re-run" path the tag check below handles)
-  [ "$(printf '%s\n%s\n' "$LV" "$VER" | sort -V | head -1)" = "$VER" ] \
+  # the same commit is the "suite re-run" path the tag check below handles).
+  # sort -V puts the SMALLER first: the bump is backward iff that smaller one
+  # is the NEW version (and the two are not simply equal).
+  SMALL=$(printf '%s\n%s\n' "$LV" "$VER" | sort -V | head -1)
+  { [ "$SMALL" != "$VER" ] || [ "$VER" = "$LV" ]; } \
     || die "v$VER goes BACKWARD — the newest tag on origin is $LATEST"
   # what kind of bump is this? (printed so a fix-onto-Y misfire is visible at
   # the moment of the cut). NOTE herestrings (<<<), NOT < <(printf) without a
