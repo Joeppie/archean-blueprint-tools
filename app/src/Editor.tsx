@@ -11,7 +11,8 @@ import { DEFAULT_OPTS, type Engine, type PickHit, type ViewOptions } from './eng
 import Viewport from './components/Viewport';
 import Panel, { StaticInfo, ViewOpts, type EditApi } from './components/Panel';
 import TopBar, { type Mode } from './components/TopBar';
-import { BlockPanel, FlightPanel, TriPanel, WirePanel, WindPanel, placeBlock, type Brush } from './components/ModePanels';
+import { BlockPanel, FlightPanel, TriPanel, WirePanel, WindPanel, brushSpec, placeBlock, type Brush } from './components/ModePanels';
+import { blockInfo, cellIndex, cellOverlap, complementBlock } from './engine/blocks';
 import { cornerOf, triAt, triangleFromCorners } from './engine/tris';
 import type { Blueprint } from './engine/format';
 import { docArrayInsert, docFromValue, docValue, parseDoc } from './engine/doc';
@@ -222,8 +223,37 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     return () => removeEventListener('keydown', h);
   }, [save, toggleOpt, placing]);
 
-  // blocks-mode canvas handling: place (brush) or select, via engine.pickCell
-  const onBlockPick = useCallback((clientX: number, clientY: number) => {
+  // blocks-mode canvas handling: place (brush/logical continuation) or
+  // select, via engine.pickCell.
+  /** the ghost preview under the cursor (BLOCKS-place): brush footprint at
+   *  the pick cell, or the game's Shift rule — over an existing block the
+   *  ghost becomes the block that LOGICALLY CONTINUES it (complementBlock);
+   *  red ghost when the footprint collides (the click is then refused). */
+  const ghostRef = useRef<{ x: number; y: number; shift: boolean } | null>(null);
+  const computeGhost = useCallback((clientX: number, clientY: number, shift: boolean) => {
+    ghostRef.current = { x: clientX, y: clientY, shift };
+    const e = engineRef.current, ctx = ctxRef.current;
+    if (!e || !ctx) return;
+    if (blockSub !== 'blocks' || blockTool !== 'place') { e.setPlaceGhost(null); return; }
+    const r = e.pickCell(clientX, clientY);
+    if (!r || r.kind === 'ground') { e.setPlaceGhost(null); return; }
+    const info = shift && r.bi >= 0 ? blockInfo(ctx.bp, r.bi) : null;
+    const spec = info
+      ? complementBlock(info, [cellIndex(r.point[0]), cellIndex(r.point[1]), cellIndex(r.point[2])], r.nrm)
+      : { cell: r.cell, ...brushSpec(brush) };
+    e.setPlaceGhost({ ...spec, valid: !cellOverlap(ctx.bp, spec.cell, spec.size), complement: !!info });
+  }, [blockSub, blockTool, brush]);
+
+  // ghost lifecycle: re-aim when the brush changes (live preview of the
+  // panel), drop it when the tool/mode leaves block-placement
+  useEffect(() => {
+    const h = ghostRef.current;
+    if (!h) return;
+    if (mode === 'blocks' && blockTool === 'place' && blockSub === 'blocks') computeGhost(h.x, h.y, h.shift);
+    else { engineRef.current?.setPlaceGhost(null); ghostRef.current = null; }
+  }, [mode, blockTool, blockSub, brush, computeGhost]);
+
+  const onBlockPick = useCallback((clientX: number, clientY: number, shift: boolean) => {
     const e = engineRef.current, ctx = ctxRef.current;
     if (!e || !ctx) return;
     if (blockSub === 'tris') {
@@ -249,9 +279,21 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     const r = e.pickCell(clientX, clientY);
     if (!r) return;
     if (blockTool === 'select') { setBlockSel(r.bi >= 0 ? r.bi : -1); return; }
-    if (r.bi >= 0) { setBlockSel(placeBlock(ctx, r.cell, brush, mirrorPlace)); sceneChanged(); }
-    else setBlockSel(-1);
-  }, [blockTool, blockSub, brush, mirrorPlace, triDraft, triBrush, sceneChanged]);
+    // PLACE — any surface DOCKS a block (the game: aim at a block or beam):
+    // a block face, a hull-triangle prism, a component or subgrid content.
+    // The green ground plane stays unfurnishable.
+    if (r.kind === 'ground') { setBlockSel(-1); return; }
+    const info = shift && r.bi >= 0 ? blockInfo(ctx.bp, r.bi) : null;
+    const spec = info
+      ? complementBlock(info, [cellIndex(r.point[0]), cellIndex(r.point[1]), cellIndex(r.point[2])], r.nrm)
+      : { cell: r.cell, ...brushSpec(brush) };
+    if (cellOverlap(ctx.bp, spec.cell, spec.size)) return;   // the red ghost refuses
+    setBlockSel(placeBlock(ctx, spec, mirrorPlace));
+    sceneChanged();
+    // the game keeps the ghost under the cursor after a placement — re-aim
+    // it over the fresh surface (it may now complement the block placed)
+    computeGhost(clientX, clientY, shift);
+  }, [blockTool, blockSub, brush, mirrorPlace, triDraft, triBrush, sceneChanged, computeGhost]);
 
   /** CATALOG placement (KSP part pickup): land the HELD type at the picked
    *  surface — bp + doc together, then the debounced scene reload; the part
@@ -465,7 +507,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         <main className="flex min-w-0 flex-1 flex-col">
           <div className="relative min-h-0 flex-1">
             <Viewport bp={bp} onPick={setHit} onEngine={onEngine}
-              mode={mode} onBlockPick={onBlockPick}
+              mode={mode} onBlockPick={onBlockPick} onBlockHover={computeGhost}
               placing={mode === 'edit' ? placing : null} onPlace={onPlacePoint}
               onManifest={setManifest} />
             {placing && mode === 'edit' && (

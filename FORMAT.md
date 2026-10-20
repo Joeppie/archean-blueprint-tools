@@ -459,6 +459,33 @@ unchanged.
   “Colour & materials” below for the full PBR semantics.
 - `material`: 0..6 = composite, concrete, steel, aluminium, glass, lead,
   titanium (visual: palette slots carry the metallic/roughness per face).
+- **Cell lattice (app v1.4.0 arbitration, corpus-verified):** cell `c` covers
+  world `[(c−6)·CELL, (c−5)·CELL)` — the cell-BOUNDARY lattice every builder
+  uses (cull's origin = `(abs−5.5)·CELL − CELL/2`, hull vertices
+  `(v+12f)·CELL − 1.5`, tris.ts `cornerOf = round(p/CELL + 6)`); a point's
+  cell is `floor(p/CELL + 6)`. The ⇄ block twin of footprint `[c, c+e)` about
+  the FILE world x = 0 plane is `[12−c−e, 12−c)` — counting x-twin block
+  pairs across the workshop corpus gives the `12−c−e` constant overwhelmingly
+  (airliner 3309955432: 3705 pairs vs 592 accidental for `11−c−e`). The old
+  app constant `11−c−(e−1)` (plane at cell 5.5) and the legacy `+5.5` point→
+  cell floor were pre-v0.180 corner-convention leftovers (half-cell off).
+  `pos_*` may exceed 12 together with `size_*` (corpus max `pos+size` 15) —
+  blocks legitimately span frame boundaries; only the WRITER's pos_ ∈ 0..12
+  re-anchoring (floorDiv to the frame) is required.
+- **Constructor-tool placement UX (official wiki, ConstructorTool §Block
+  Modes, transcribed 2026-10-20 — drives the app's Blocks-place mode):**
+  aim at a block or beam and quick left-click places the block; the drag/
+  resize plane is the hit face's normal; the scroll wheel rotates the shape
+  through its orientation family (cubes have one). **“Hold Shift before
+  pressing left-click to copy the block you're aiming at or logically add
+  the next block.”** — the app's `complementBlock`: the copy rides the aimed
+  block's shape+orientation+size+paint; an AXIS face hit lands it flush on
+  that face; a SLANT hit takes the coplanar lattice step (Σ mᵢ·dᵢ/eᵢ = 0 over
+  the slant-normal pairs — for a unit slope the diagonal cell beyond the
+  high/low edge), which continues the slanted surface exactly. Removal:
+  aim + hold right-click + quick left-click. Symmetry mirroring is the ⇄
+  path above; the in-game axis is adjustable at 0.125 m precision (the app
+  keeps the single file x = 0 plane).
 
 ## `components` — the machines (30 here)
 

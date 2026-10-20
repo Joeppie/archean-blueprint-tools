@@ -8,7 +8,7 @@
 
 import type { Block, Blueprint } from './format';
 import { CELL, CELLS_PER_FRAME } from './format';
-import { getBlockPoints } from './blockshapes';
+import { getBlockFaceDirections, getBlockFaces, getBlockPoints } from './blockshapes';
 
 type Cell = [number, number, number];   // absolute cells (x, y, z)
 
@@ -20,9 +20,16 @@ export const blockCells = (b: Block) => ({
   z: (b.frame_z ?? 0) * CELLS_PER_FRAME + b.pos_z,
 });
 
+/** The cell index containing a FILE-space metre coordinate. Cell c covers
+ *  world [(c−6)·CELL, (c−5)·CELL) — the cell-BOUNDARY lattice every builder
+ *  uses (cull.ts origin = (abs−5.5)·CELL − CELL/2, tris.ts cornerOf rounds
+ *  p/CELL + 6): a 0-size block at pos 5 CENTERS at (5−5.5)·CELL, its single
+ *  cell spans [(5−6)·CELL, (5−5)·CELL) about that centre. */
+export const cellIndex = (v: number) => Math.floor(v / CELL + 6);
+
 /** The block list index covering the FILE-space point, or -1. */
 export function blockAt(bp: Blueprint, p: { x: number; y: number; z: number }): number {
-  const cx = p.x / CELL + 5.5, cy = p.y / CELL + 5.5, cz = p.z / CELL + 5.5;
+  const cx = cellIndex(p.x), cy = cellIndex(p.y), cz = cellIndex(p.z);
   const blocks = bp.data.blocks;
   for (let i = 0; i < blocks.length; i++) {
     const b = blocks[i]!;
@@ -33,6 +40,21 @@ export function blockAt(bp: Blueprint, p: { x: number; y: number; z: number }): 
       && cz >= c.z && cz < c.z + b.size_z + 1) return i;
   }
   return -1;
+}
+
+/** Would a fresh block [cell, cell+size+1) collide with an existing
+ *  geometry block? (type-255 occupancy mirrors never block placement; the
+ *  game's ghost turns red and refuses the click — same rule.) */
+export function cellOverlap(bp: Blueprint, cell: Cell, size: Cell): boolean {
+  const x1 = cell[0] + size[0] + 1, y1 = cell[1] + size[1] + 1, z1 = cell[2] + size[2] + 1;
+  for (const b of bp.data.blocks) {
+    if (b.type === 255) continue;
+    const c = blockCells(b);
+    if (cell[0] < c.x + b.size_x + 1 && x1 > c.x
+      && cell[1] < c.y + b.size_y + 1 && y1 > c.y
+      && cell[2] < c.z + b.size_z + 1 && z1 > c.z) return true;
+  }
+  return false;
 }
 
 /** A fresh block occupying exactly the cell cube [cell, cell+size+1). */
@@ -66,16 +88,22 @@ export function blockInfo(bp: Blueprint, bi: number): BlockInfo | null {
 
 // ------------------------------------------------------------ MIRRORED place
 // The ⇄ path for BLOCKS: the game's editor mirror builds the twin as the
-// same footprint at the x-FLIPPED cell range ([c, c+size+1) → [−(c+size+1),
-// −c)) with the shape mirrored in x too (ramps/corners change orientation;
-// cubes/pyramid-centres are x-symmetric). The plane is file x = 0 — exactly
-// the plane the component twin index (sym.ts, mask bit 1) uses.
+// same footprint at the x-FLIPPED cell range with the shape mirrored in x
+// too (ramps/corners change orientation; cubes/pyramid-centres are
+// x-symmetric). The plane is file world x = 0 — exactly the plane the
+// component twin index (sym.ts, mask bit 1) uses. In the cell-boundary
+// lattice (cell c covers [(c−6)·CELL, (c−5)·CELL), see cellIndex) world
+// x = 0 sits at cell coord 6, so [c, c+e) → [12−c−e, 12−c). EMPIRICAL:
+// counting x-twin block pairs across the workshop corpus confirms the
+// 12−c−e constant overwhelmingly (airliner 3309955432: 3705 twin pairs for
+// it vs 592 accidental for the alternative) — the old 10−c−size (cell-space
+// plane 5.5) was a pre-v0.180 corner-convention leftover that mirrored
+// blocks a half cell off the true plane.
 
 /** Mirror a block START cell of footprint extent e = size+1 (cells) in x
- *  about the FILE WORLD x = 0 plane — the same plane ⇄ uses (world =
- *  (abs−5.5)·CELL ⇒ cell-space plane at 5.5): [c, c+e) → [11−c−e, 11−c). */
+ *  about the FILE WORLD x = 0 plane (cell coord 6): [c, c+e) → [12−c−e, 12−c). */
 export function mirrorBlockCell(cx: number, sizeX: number): number {
-  return 10 - cx - sizeX;
+  return 11 - cx - sizeX;
 }
 
 /** type → its x-mirror type, derived from the vertex clouds of the real
@@ -138,4 +166,112 @@ export function setBlockField(bp: Blueprint, bi: number,
   const cell = Math.round(v);
   (b as unknown as Record<string, number>)[`frame_${ax}`] = floorDiv(cell, CELLS_PER_FRAME);
   (b as unknown as Record<string, number>)[`pos_${ax}`] = cell - floorDiv(cell, CELLS_PER_FRAME) * CELLS_PER_FRAME;
+}
+
+// ------------------------------------------------- CONTINUATION (Shift-place)
+// The game's Constructor Tool (wiki §Block Modes): "Hold Shift before pressing
+// left-click to COPY the block you're aiming at or logically ADD THE NEXT
+// BLOCK." Against the hit face, that next block is the SAME shape+orientation
+// and the SAME size, landed so the geometry continues without a seam:
+//  • AXIS face hit  → the copy sits flush on that face (the full-bbox side
+//    slides against its own kind: cubes stack a wall, a slope's tall back
+//    face continues the ramp DOWN one step, ±x slope triangles extend the
+//    ramp sideways, an inv-corner's full top copies the notch upward).
+//  • SLANT face hit → the copy steps ONE FOOTPRINT along the slant plane,
+//    continuing the slanted surface flush: for a unit slope that is the
+//    diagonal cell
+//    (up-and-back beyond the high edge, down-and-forward beyond the low
+//    edge); for a size-(sx,sy,sz) block the coplanar lattice step scales
+//    with each axis footprint. Which of the plane's two directions the hit
+//    point lies toward picks the candidate.
+// Coplanarity is exact by construction: the slant plane of a shape in local
+// units is Σ mᵢ·uᵢ = κ (mᵢ ∈ {−1,0,1} the integer slant normal), and the
+// step d over axis pair (a,b) satisfies Σ mᵢ dᵢ/eᵢ = mₐ(k·m_b) + m_b(−k·m_a) = 0.
+
+export interface PlaceSpec { cell: Cell; size: Cell; type: number; slot: number }
+
+/** Unit normal's integer sign vector (slant normals carry 2–3 nonzero
+ *  ±1 components; an axis normal carries exactly one). */
+const signVec = (n: Cell): Cell =>
+  [n[0] > 0.2 ? 1 : n[0] < -0.2 ? -1 : 0,
+   n[1] > 0.2 ? 1 : n[1] < -0.2 ? -1 : 0,
+   n[2] > 0.2 ? 1 : n[2] < -0.2 ? -1 : 0] as Cell;
+
+/** The HIT slant face's centroid in local cell coords (relative to the
+ *  block's start cell). Shapes carry up to two slants (pyramid) — the one
+ *  whose geometric normal matches the hit normal is the aimed-at face. */
+function slantCentroidLocal(type: number, e: Cell, hitN: Cell): Cell {
+  const pts = getBlockPoints(type, [0, 0, 0], e);
+  const dirs = getBlockFaceDirections(type);
+  const faces = getBlockFaces(type);
+  let best: Cell | null = null, bestDot = 0.9;
+  faces.forEach((f, fi) => {
+    if (dirs[fi] !== null) return;                       // not a slant
+    const a = pts[f[0]!]!, b = pts[f[1]!]!, c = pts[f[2]!]!;
+    const ux = b[0]! - a[0]!, uy = b[1]! - a[1]!, uz = b[2]! - a[2]!;
+    const vx = c[0]! - a[0]!, vy = c[1]! - a[1]!, vz = c[2]! - a[2]!;
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const l = Math.hypot(nx, ny, nz) || 1;
+    nx /= l; ny /= l; nz /= l;
+    const dot = Math.abs(nx * hitN[0] + ny * hitN[1] + nz * hitN[2]);
+    if (dot < bestDot) return;
+    bestDot = dot;
+    let x = 0, y = 0, z = 0;
+    for (const vi of new Set(f)) { x += pts[vi]![0]; y += pts[vi]![1]; z += pts[vi]![2]; }
+    const n = new Set(f).size;
+    best = [x / n, y / n, z / n];
+  });
+  return best ?? [e[0] / 2, e[1] / 2, e[2] / 2];
+}
+
+/** The game's Shift "logically add the next block" against a hit face.
+ *  @param info   the aimed-at block (cell/size/type/slot)
+ *  @param hit    the hit point in ABSOLUTE CELL coords (cellIndex space)
+ *  @param faceN  the hit face's world/unit normal (file frame == view frame) */
+export function complementBlock(info: BlockInfo, hit: Cell, faceN: Cell): PlaceSpec {
+  const e: Cell = [info.size[0] + 1, info.size[1] + 1, info.size[2] + 1];
+  const len = Math.hypot(faceN[0], faceN[1], faceN[2]) || 1;
+  const n: Cell = [faceN[0] / len, faceN[1] / len, faceN[2] / len];
+  const axisIdx = [0, 1, 2].filter(a => Math.abs(n[a]!) > 0.7);
+  let cell: Cell;
+  if (axisIdx.length === 1) {
+    // flush copy across the aimed axis-aligned face
+    const a = axisIdx[0]!, s = n[a]! > 0 ? 1 : -1;
+    cell = [info.cell[0], info.cell[1], info.cell[2]];
+    cell[a] = s > 0 ? info.cell[a]! + e[a]! : info.cell[a]! - e[a]!;
+  } else {
+    // coplanar continuation step(s) along the slant plane
+    const m = signVec(n);
+    const nz = [0, 1, 2].filter(a => m[a] !== 0);
+    const c0 = slantCentroidLocal(info.type, e, n);
+    let best: Cell = [0, 0, 0], bestDot = -Infinity;
+    for (let p = 0; p < nz.length; p++)
+      for (let q = p + 1; q < nz.length; q++) {
+        const a = nz[p]!, b = nz[q]!;
+        for (const k of [1, -1]) {
+          const d: Cell = [0, 0, 0];
+          d[a] = k * m[b]! * e[a]!;
+          d[b] = -k * m[a]! * e[b]!;
+          const dot = d[0] * (hit[0] - info.cell[0] - c0[0])
+            + d[1] * (hit[1] - info.cell[1] - c0[1])
+            + d[2] * (hit[2] - info.cell[2] - c0[2]);
+          if (dot > bestDot) { bestDot = dot; best = d; }
+        }
+      }
+    cell = [info.cell[0] + best[0], info.cell[1] + best[1], info.cell[2] + best[2]];
+  }
+  // the continuation rides the aimed block's shape, size and face colour
+  return { cell, size: [info.size[0], info.size[1], info.size[2]], type: info.type, slot: info.slot };
+}
+
+/** ⟲ brush rotation: cycle a shape through its ORIENTATION family exactly
+ *  like the game's scroll wheel in Cube/Slope/Corner/Pyramid/InvCorner mode
+ *  (cubes have one orientation, so they stay cubes). Families per FORMAT
+ *  §blocks: 0 cube · 1..12 slope · 13..20 corner · 21..44 pyramid ·
+ *  45..52 inverse corner. */
+export function rotateType(t: number): number {
+  const fams: [number, number][] = [[0, 1], [1, 12], [13, 8], [21, 24], [45, 8]];
+  for (const [lo, len] of fams)
+    if (t >= lo && t < lo + len) return lo + (t - lo + 1) % len;
+  return 0;
 }

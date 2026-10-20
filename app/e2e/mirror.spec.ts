@@ -67,8 +67,11 @@ test.describe('⇄ mirrored placement @place', () => {
     const after = await blocksOf(page);
     expect(after.length, 'ONE click placed the block AND its twin').toBe(before + 2);
     const [self, twin] = after.slice(-2);
-    // twin footprint: [c, c+size+1) mirrored to [10−c−size, 11−c) about x = 0
-    expect(cellX(twin!)).toBe(10 - cellX(self!) - self!.size_x);
+    // twin footprint: [c, c+size+1) mirrored to [12−c−(size+1), 12−c) =
+    // start 11−c−size about the world x = 0 plane (cell coord 6 — the
+    // corpus twin census arbitrates; v1.4.0 fixed the old 10−c−size,
+    // a pre-v0.180 corner-convention leftover half a cell off the plane)
+    expect(cellX(twin!)).toBe(11 - cellX(self!) - self!.size_x);
     expect(twin!.size_x).toBe(self!.size_x);
     expect(twin!.type).not.toBe(255);
     // mirror is a closed involution on the placed type

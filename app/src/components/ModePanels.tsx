@@ -7,7 +7,8 @@ import type { Engine } from '../engine/scene';
 import { FLOWS, type FlowKey } from '../engine/aero';
 import type { EditCtx } from '../engine/edit';
 import { docArrayInsert, docFromValue, docSetNumber, docArrayRemoveAt } from '../engine/doc';
-import { blockFromCell, blockInfo, mirroredBlock, setBlockField } from '../engine/blocks';
+import { blockFromCell, blockInfo, mirroredBlock, rotateType, setBlockField, type PlaceSpec } from '../engine/blocks';
+import { shapeName } from '../engine/blockshapes';
 import { autoWire, portCensus, connectedPorts, unconnectedPorts, WIRE_KINDS } from '../engine/wireops';
 import { triCentroid } from '../engine/tris';
 import type { Triangle } from '../engine/format';
@@ -15,6 +16,10 @@ import type { Blueprint } from '../engine/format';
 
 // ------------------------------------------------------------- BLOCKS mode
 export interface Brush { type: number; sx: number; sy: number; sz: number; slot: number }
+
+/** The brush as a placement footprint (the Editor fills `cell` from the pick). */
+export const brushSpec = (b: Brush): Pick<PlaceSpec, 'size' | 'type' | 'slot'> =>
+  ({ size: [b.sx, b.sy, b.sz], type: b.type, slot: b.slot });
 
 export function BlockPanel(p: {
   engine: Engine | null; ctx: EditCtx | null; bp: Blueprint;
@@ -46,6 +51,11 @@ export function BlockPanel(p: {
               {label}
             </button>
           ))}
+          <button data-testid="btype-rot" title="⟲ rotate the shape's orientation (the game's scroll wheel)"
+            onClick={() => p.onBrush({ ...p.brush, type: rotateType(p.brush.type) })}
+            className="ksp-btn px-1.5 py-[2px] text-[10px]">
+            ⟲ {shapeName(p.brush.type)} {p.brush.type === 0 ? '' : p.brush.type}
+          </button>
         </div>
         <div className="flex gap-2">
           <Num label="sx" value={p.brush.sx} min={0} max={8} onCommit={v => p.onBrush({ ...p.brush, sx: v })} />
@@ -54,8 +64,9 @@ export function BlockPanel(p: {
         </div>
         <Num label="slot" value={p.brush.slot} min={0} max={255} onCommit={v => p.onBrush({ ...p.brush, slot: v })} />
         <div className="pt-1 text-[10px] leading-snug text-ink-dim">
-          Click a block FACE to place beside it · click empty space to select ·
-          Delete removes the selected block.
+          Hover a block, part or hull triangle to preview · click to place ·
+          <b> Shift</b> over a block copies it / logically continues its shape
+          (the game's rule) · ⇄ mirrors the twin · Delete removes the selected block.
         </div>
       </Sec>
       <Sec title={info ? `Block[${p.blockSel}]` : 'Blocks — nothing selected'} testid="block-edit">
@@ -98,12 +109,12 @@ export function BlockPanel(p: {
   );
 }
 
-/** App-side: place a block from a picked cell (blocks mode). With `mirror`
- *  the ⇄ twin lands at the x-mirrored cell too (type mirrored; same-face
- *  colour slots kept — single-slot brush paints are the exact case). */
-export function placeBlock(ctx: EditCtx, cell: [number, number, number], brush: Brush,
-  mirror = false): number {
-  const block = blockFromCell(cell, [brush.sx, brush.sy, brush.sz], brush.type, brush.slot);
+/** App-side: place a block from a placement spec (blocks mode): the brush at
+ *  the picked cell, or the Shift continuation block complementBlock computed.
+ *  With `mirror` the ⇄ twin lands at the x-mirrored cell too (type mirrored;
+ *  same-face colour slots kept — single-slot brush paints are the exact case). */
+export function placeBlock(ctx: EditCtx, spec: PlaceSpec, mirror = false): number {
+  const block = blockFromCell(spec.cell, spec.size, spec.type, spec.slot);
   ctx.bp.data.blocks.push(block);
   const at = ctx.bp.data.blocks.length - 1;
   docArrayInsert(ctx.doc, ['data', 'blocks'], at, docFromValue(block));

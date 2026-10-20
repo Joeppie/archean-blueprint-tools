@@ -158,6 +158,26 @@ user's explicit say-so (Pages/release still serves it meanwhile).
   gizmo re-bind after the swap. Pinned by app/e2e/liveedit.spec.ts (panel-
   routed Propeller twist + Aileron angle: liveDataEdit counter, reload
   counter 0, real-model bbox follows the data).
+- **Constructor-parity block placement (v1.4.0):** BLOCKS-place docks a
+  ghost preview on ANY hovered surface — block face, hull-triangle prism,
+  component or subgrid content (`Engine.pickCell` returns the world face
+  normal + kind; ground stays unfurnishable). The ghost (yellow brush /
+  mint ⇧-continuation / red = footprint collides, click refused) is
+  `Engine.setPlaceGhost`, re-aimed on hover (~40 Hz cap) and instantly on
+  Shift press/release (the game's rule, wiki ConstructorTool §Block Modes:
+  "copy the aimed block or logically add the next block"). ⇧ over a block
+  swaps the ghost to `complementBlock` (engine/blocks.ts): the aimed block's
+  shape+orientation+size+paint, flush across the hit AXIS face or the
+  COPLANAR lattice step along a SLANT face (Σ mᵢdᵢ/eᵢ = 0 — unit slope =
+  the diagonal cell past the high/low edge). Brush ⟲ cycles the orientation
+  family (the game's scroll wheel). THE CELL LATTICE was arbitrated here:
+  cell c covers [(c−6)·CELL, (c−5)·CELL) (point→cell floor(p/CELL+6)), the
+  ⇄ block twin of [c,c+e) is [12−c−e,12−c) (corpus twin census — the old
+  10−c−size, pickCell's −pz mirror and +5.5 floors were pre-v0.180 leftovers,
+  FORMAT §blocks). Pinned by vitest blocks.test.ts (continuation coplanarity,
+  overlap guard, rotateType, lattice) + app/e2e/blockplace.spec.ts (ghost on
+  block + part hover via `__ARCHEAN__.ghost()`, Shift continuation, brush +
+  continuation clicks place through the doc mirror).
 - Toolchain lives ONLY under `app/` (own npm project); repo-root `tools/`,
   `tests/` and the zero-build regtest stay as they are until cutover.
 - app/ obeys the same rules: no hardcoded machine paths (corpus resolves via

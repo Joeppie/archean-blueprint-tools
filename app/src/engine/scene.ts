@@ -18,7 +18,7 @@
 import {
   Box3, BoxGeometry, BufferAttribute, BufferGeometry, Color, DirectionalLight,
   DoubleSide, Fog, GridHelper, Group, HemisphereLight, InstancedMesh,
-  LineBasicMaterial, LineSegments, LinearSRGBColorSpace, Matrix4, Mesh,
+  LineBasicMaterial, LineSegments, LinearSRGBColorSpace, Matrix3, Matrix4, Mesh,
   MeshBasicMaterial, MeshStandardMaterial, Object3D, PerspectiveCamera,
   AdditiveBlending, Plane, PlaneGeometry, PMREMGenerator, Quaternion, Raycaster,
   Scene, ShaderMaterial, SphereGeometry, Sprite, SpriteMaterial, TorusGeometry, Vector2, Vector3, WebGLRenderer,
@@ -44,7 +44,9 @@ import { buildPipes, surgePaths, type PipeNetwork } from './pipes';
 import { buildBlocksSolids, buildCompProxies, buildSolids, type ProxyBox, type SolidBatch } from './build';
 import type { FilePalette } from './palette';
 import type { Blueprint, BlueprintComponent } from './format';
-import { isLegacyFile } from './format';
+import { CELL, isLegacyFile } from './format';
+import { getBlockEdges, getBlockFaces, getBlockPoints } from './blockshapes';
+import type { PlaceSpec } from './blocks';
 import {
   captureJrefs, masterJointState, subBlockBBox, subJointPose, subMasterEntries,
   type JRef, type SubBBox,
@@ -190,6 +192,11 @@ export class Engine {
 
   // ---------- view-option groups (visibility targets) ----------
   private groundGroup = new Group();
+  /** BLOCKS-place ghost preview (game constructor ghost): its own scene
+   *  child (disposeScene never eats it), position = moff so raw-file child
+   *  coords land at world; Editor re-aims it on every hover */
+  private ghostGroup = new Group();
+  private ghostSpec: (PlaceSpec & { valid: boolean; complement: boolean }) | null = null;
   private hullMeshes: Mesh[] = [];
   private wireLine: LineSegments | null = null;
   private occMeshes: Mesh[] = [];
@@ -317,6 +324,7 @@ export class Engine {
     this.scene.add(this.root);
     this.scene.add(this.subGroup);
     this.scene.add(this.surgeGroup);
+    this.scene.add(this.ghostGroup);
     const loop = () => {
       this.controls?.update();                    // damping fires change→invalidate
       this.flushLiveEdits();                      // per-component geometry rebuilds (data sliders)
@@ -488,6 +496,7 @@ void main() {
       this.moff = { x: -3 * min('frame_x'), y: -3 * min('frame_y'), z: -3 * min('frame_z') };
       this.root.position.set(this.moff.x, this.moff.y, this.moff.z);
       this.subGroup.position.set(this.moff.x, this.moff.y, this.moff.z);
+      this.ghostGroup.position.set(this.moff.x, this.moff.y, this.moff.z);
     }
 
     this.batch = buildSolids(bp);
@@ -2388,11 +2397,19 @@ void main() {
    *  outside the engine; the merged geometry is rebuilt wholesale) */
   reload() { if (this.bp) this.load(this.bp, this.atlasRef, true); }
 
-  /** BLOCKS mode: raycast for the placement/select cell. Returns the hit
-   *  block index (-1 for ground/other), the FILE-space point, and the cell
-   *  adjacent to the hit face (where a new block would land). */
+  /** BLOCKS mode: raycast for the placement/select cell. The hit face's
+   *  WORLD normal (view frame == raw file frame since the v0.180 de-mirror;
+   *  the face's LOCAL normal is carried through the hit object's normal
+   *  matrix — component/subgrid parents carry rotations) picks the adjacent
+   *  cell where a new block would land. `kind` splits the merged hull/block
+   *  bucket: bi >= 0 means a real block face (complementable), a bucket hit
+   *  with no owning block is a HULL TRIANGLE prism. `cell` uses the exact
+   *  cell-boundary lattice (cellIndex: cell c covers [(c−6)·CELL, (c−5)·CELL))
+   *  — the old +5.5 floor sat half a cell off and the retired −pz mirror
+   *  flipped z placement across the fuselage (pre-v0.180 leftovers). */
   pickCell(clientX: number, clientY: number):
-    { bi: number; point: [number, number, number]; cell: [number, number, number] } | null {
+    { bi: number; point: [number, number, number]; cell: [number, number, number];
+      nrm: [number, number, number]; kind: 'block' | 'tri' | 'comp' | 'sub' | 'ground' } | null {
     const c = this.renderer?.domElement as HTMLCanvasElement | null;
     if (!c || !this.bp) return null;
     const rect = c.getBoundingClientRect();
@@ -2404,36 +2421,91 @@ void main() {
       let o: Object3D | null = h.object;
       while (o && !o.userData.kind) o = o.parent;
       const kind = o?.userData.kind as Kind | undefined;
-      if (kind !== 'block' && kind !== 'ground' && kind !== 'comp') continue;
-      const px = h.point.x - this.moff.x, py = h.point.y - this.moff.y, pz = h.point.z - this.moff.z;
-      const file: [number, number, number] = [px, py, -pz];
-      const n = h.face
-        ? new Vector3(h.face.normal.x, h.face.normal.y, h.face.normal.z)
+      if (kind !== 'block' && kind !== 'ground' && kind !== 'comp' && kind !== 'sub') continue;
+      // display anchoring off → RAW FILE metres (view == file frame, v0.180)
+      const p: [number, number, number] =
+        [h.point.x - this.moff.x, h.point.y - this.moff.y, h.point.z - this.moff.z];
+      const nrm3 = h.face
+        ? h.face.normal.clone().applyMatrix3(new Matrix3().getNormalMatrix(h.object.matrixWorld)).normalize()
         : new Vector3(0, 1, 0);
-      const CELLW = 0.25;
-      const cell = [
-        Math.floor((file[0] + n.x * CELLW * 0.6) / CELLW + 5.5),
-        Math.floor((file[1] + n.y * CELLW * 0.6) / CELLW + 5.5),
-        Math.floor((file[2] + n.z * CELLW * 0.6) / CELLW + 5.5),
-      ] as [number, number, number];
+      const nrm: [number, number, number] = [nrm3.x, nrm3.y, nrm3.z];
+      // the cell adjacent to the hit face: nudge the point 0.6 cell along
+      // the normal so the face-boundary coordinate lands in the next cell
+      const cell = [0, 1, 2].map(a =>
+        Math.floor((p[a]! + nrm[a]! * CELL * 0.6) / CELL + 6)) as [number, number, number];
       let bi = -1;
       if (kind === 'block') {
-        // which merged block: containment test on the block cell ranges
-        const cc = [file[0] / CELLW + 5.5 - 1e-6, file[1] / CELLW + 5.5 - 1e-6, file[2] / CELLW + 5.5 - 1e-6];
+        // which merged block owns the face: nudge the hit cell-coords INTO
+        // the surface along −normal (a hair, so glued neighbours on the far
+        // side never claim it); nearest-centre breaks exact-edge ties
+        const q = [0, 1, 2].map(a => p[a]! / CELL + 6 - Math.sign(nrm[a]!) * 1e-6);
         const bl = this.bp.data.blocks;
+        let bd = Infinity;
         for (let i = 0; i < bl.length; i++) {
           const b = bl[i]!;
           if (b.type === 255) continue;
           const c0 = [((b.frame_x ?? 0) * 12 + b.pos_x), ((b.frame_y ?? 0) * 12 + b.pos_y), ((b.frame_z ?? 0) * 12 + b.pos_z)];
-          if (cc[0]! >= c0[0]! && cc[0]! < c0[0]! + b.size_x + 1
-            && cc[1]! >= c0[1]! && cc[1]! < c0[1]! + b.size_y + 1
-            && cc[2]! >= c0[2]! && cc[2]! < c0[2]! + b.size_z + 1) { bi = i; break; }
+          if (q[0]! < c0[0]! || q[0]! >= c0[0]! + b.size_x + 1
+            || q[1]! < c0[1]! || q[1]! >= c0[1]! + b.size_y + 1
+            || q[2]! < c0[2]! || q[2]! >= c0[2]! + b.size_z + 1) continue;
+          const dx = q[0]! - (c0[0]! + (b.size_x + 1) / 2), dy = q[1]! - (c0[1]! + (b.size_y + 1) / 2),
+            dz = q[2]! - (c0[2]! + (b.size_z + 1) / 2);
+          const d = dx * dx + dy * dy + dz * dz;
+          if (d < bd) { bd = d; bi = i; }
         }
       }
-      return { bi, point: file, cell };
+      return { bi, point: p, cell, nrm, kind: kind === 'block' && bi < 0 ? 'tri' : kind };
     }
     return null;
   }
+
+  // ---------------------------------------------------- placement ghost
+  /** The translucent block preview under the cursor in BLOCKS-place mode
+   *  (the game's constructor ghost: KSP-yellow brush, mint-green logical
+   *  continuation on Shift, red when the footprint collides). Lives in its
+   *  OWN scene group (never under root — disposeScene must not eat it),
+   *  positioned by moff so raw-file child coords render at world position. */
+  setPlaceGhost(g: (PlaceSpec & { valid: boolean; complement: boolean }) | null) {
+    if (!g && !this.ghostSpec) return;
+    this.ghostSpec = g;
+    for (const o of this.ghostGroup.children) {
+      (o as Mesh).geometry?.dispose();
+      ((o as Mesh).material as MeshBasicMaterial)?.dispose();
+    }
+    this.ghostGroup.clear();
+    if (g) {
+      const origin = [(g.cell[0] - 6) * CELL, (g.cell[1] - 6) * CELL, (g.cell[2] - 6) * CELL] as
+        [number, number, number];
+      const size = [(g.size[0] + 1) * CELL, (g.size[1] + 1) * CELL, (g.size[2] + 1) * CELL] as
+        [number, number, number];
+      const pts = getBlockPoints(g.type, origin, size);
+      const pos: number[] = [];
+      for (const v of pts) pos.push(v[0], v[1], v[2]);
+      const idx: number[] = [];
+      for (const f of getBlockFaces(g.type)) idx.push(f[0]!, f[1]!, f[2]!, f[3]!, f[4]!, f[5]!);
+      const geo = new BufferGeometry();
+      geo.setAttribute('position', new BufferAttribute(new Float32Array(pos), 3));
+      geo.setIndex(idx);
+      geo.computeVertexNormals();
+      const hex = !g.valid ? 0xff4d4d : g.complement ? 0x7dffcf : 0xffc94d;
+      const solid = new Mesh(geo, new MeshBasicMaterial({
+        color: hex, transparent: true, opacity: 0.42, depthTest: false, side: DoubleSide,
+      }));
+      solid.renderOrder = 30;
+      const ep: number[] = [];
+      for (const [a, b] of getBlockEdges(g.type))
+        ep.push(...pts[a]!, ...pts[b]!);
+      const eg = new BufferGeometry();
+      eg.setAttribute('position', new BufferAttribute(new Float32Array(ep), 3));
+      const wire = new LineSegments(eg, new LineBasicMaterial({
+        color: hex, transparent: true, opacity: 0.95, depthTest: false,
+      }));
+      wire.renderOrder = 31;
+      this.ghostGroup.add(solid, wire);
+    }
+    this.invalidate();
+  }
+  get placeGhostState() { return this.ghostSpec; }
   get manifest() { return this.atlasRef?.manifest ?? null; }
 
   /** PLACE mode (KSP part pickup): the surface point under the cursor in

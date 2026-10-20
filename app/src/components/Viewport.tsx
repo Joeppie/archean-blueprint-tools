@@ -20,6 +20,8 @@ declare global {
     /** wire-mode list-hover 3D preview (accent glow beside the selection) */
     hover: (ci: number) => void;
     hoverState: () => number;
+    /** blocks-place ghost preview state (null = no ghost) */
+    ghost: () => Engine['placeGhostState'];
     /** constrained subgrid joint handles (the hinge UI at the joint line) */
     hinge: () => ReturnType<Engine['hingeInfo']>;
     hingePoint: (i: number) => ReturnType<Engine['hingeScreenPoint']>;
@@ -31,14 +33,18 @@ declare global {
 let atlasP: Promise<ModelAtlas | null> | null = null;
 const getAtlas = (): Promise<ModelAtlas | null> => (atlasP ??= openAtlas());
 
-export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockPick, placing = null, onPlace, onManifest }: {
+export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockPick, onBlockHover, placing = null, onPlace, onManifest }: {
   bp: Blueprint | null;
   onPick: (h: PickHit) => void;
   onEngine?: (e: Engine | null) => void;
   /** workspace mode: blocks clicks route to onBlockPick; the mode widget
    *  only belongs to Edit */
   mode?: 'view' | 'edit' | 'blocks' | 'wire' | 'flight' | 'aero';
-  onBlockPick?: (clientX: number, clientY: number) => void;
+  onBlockPick?: (clientX: number, clientY: number, shift: boolean) => void;
+  /** BLOCKS-place hover: the engine re-aims the ghost preview (shiftKey =
+   *  the game's logical-continuation modifier). Throttled here (~40 Hz):
+   *  one raycast per pointermove event would tax a giant on a phone. */
+  onBlockHover?: (clientX: number, clientY: number, shift: boolean) => void;
   /** KSP part placement: a held catalog type — the next canvas click
    *  places it at the picked surface instead of selecting */
   placing?: string | null;
@@ -64,6 +70,7 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockP
       labels: () => engine.labelState(),
       hover: (ci: number) => engine.previewHover(ci),
       hoverState: () => engine.hoverActive,
+      ghost: () => engine.placeGhostState,
       hinge: () => engine.hingeInfo(),
       hingePoint: (i: number) => engine.hingeScreenPoint(i),
       wind: () => engine.windState(),
@@ -92,16 +99,35 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockP
   // symmetry port) — the choice persists and drives the gizmo.
   const down = useRef({ x: 0, y: 0 });
   const hostRef = useRef<HTMLDivElement>(null);
+  // BLOCKS-place hover: remember the pointer so a Shift press/release (the
+  // game's logical-continuation modifier) re-aims the ghost WITHOUT a move
+  const lastHover = useRef<{ x: number; y: number; shift: boolean } | null>(null);
+  const hoverT = useRef(0);
+  const blockHover = (x: number, y: number, shift: boolean, force = false) => {
+    if (mode !== 'blocks' || !onBlockHover) return;
+    lastHover.current = { x, y, shift };
+    const now = performance.now();
+    if (!force && now - hoverT.current < 24) return;    // ~40 Hz raycast cap
+    hoverT.current = now;
+    onBlockHover(x, y, shift);
+  };
   const [widget, setWidget] = useState<{ x: number; y: number } | null>(null);
   const [gmode, setGmode] = useState<'off' | 'translate' | 'rotate'>(
     () => (localStorage.getItem('archean-app-gizmo-mode') as 'off' | 'translate' | 'rotate') || 'rotate');
   const [, setSymTick] = useState(0);
   useEffect(() => {
-    const sh = (e: KeyboardEvent, on: boolean) => { if (e.key === 'Shift') engineRef.current?.setGizmoSnap(on); };
+    const sh = (e: KeyboardEvent, on: boolean) => {
+      if (e.key !== 'Shift') return;
+      engineRef.current?.setGizmoSnap(on);
+      // the ghost re-aims the moment Shift goes down/up over a block (the
+      // game swaps brush → continuation instantly, no mouse move needed)
+      const h = lastHover.current;
+      if (h && mode === 'blocks') blockHover(h.x, h.y, on, true);
+    };
     const dn = (e: KeyboardEvent) => sh(e, true), up = (e: KeyboardEvent) => sh(e, false);
     addEventListener('keydown', dn); addEventListener('keyup', up);
     return () => { removeEventListener('keydown', dn); removeEventListener('keyup', up); };
-  }, []);
+  }, [mode, onBlockHover]);
   const setMode = (m: 'off' | 'translate' | 'rotate') => {
     setGmode(m);
     engineRef.current?.setGizmoMode(m);
@@ -110,7 +136,7 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockP
     const engine = engineRef.current;
     if (!engine) return;
     if (placing) { onPlace?.(e.clientX, e.clientY); return; }   // KSP place: no select
-    if (mode === 'blocks') { onBlockPick?.(e.clientX, e.clientY); return; }
+    if (mode === 'blocks') { onBlockPick?.(e.clientX, e.clientY, e.shiftKey); return; }
     const hit = engine.pickAt(e.clientX, e.clientY);
     onPick(hit);
     if (hit.kind === 'comp' && hit.ci != null) {
@@ -128,6 +154,12 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', onBlockP
     <div ref={hostRef} className="relative h-full w-full" data-testid="viewport">
       <canvas ref={canvasRef} data-testid="canvas" className="block h-full w-full touch-none"
         onPointerDown={e => { down.current = { x: e.clientX, y: e.clientY }; }}
+        onPointerMove={e => blockHover(e.clientX, e.clientY, e.shiftKey)}
+        onPointerLeave={() => {
+          // the ghost dies with the pointer (the game's ghost too)
+          lastHover.current = null;
+          if (mode === 'blocks') onBlockHover?.(-1e5, -1e5, false);
+        }}
         onPointerUp={e => {
           if (Math.abs(e.clientX - down.current.x) < 4 && Math.abs(e.clientY - down.current.y) < 4)
             pickClick(e);
