@@ -8,7 +8,7 @@
 //   Blocks — block placement / resizing / deletion
 //   Wire   — the port graph: census, naive auto-wiring, warnings
 //   Flight — flight analysis (mass/CoM, thrust nets, control surfaces)
-// The Edit menu (v1.9) carries the WORKING Undo/Redo (Ctrl+Z / Ctrl+Y, the
+// The Edit menu (2026-10-20) carries the WORKING Undo/Redo (Ctrl+Z / Ctrl+Y, the
 // Editor's snapshot stack); it remains the HOME of the still-declared
 // vessel-information TODO (author / name / abbreviation) — listed DISABLED
 // so the roadmap is visible in the UI.
@@ -22,7 +22,7 @@ interface Props {
   dirty: boolean;
   title: string;
   craftId: string | null;
-  /** Edit ▾ UNDO/REDO (v1.9): enabled state from the Editor's snapshot stack */
+  /** Edit ▾ UNDO/REDO (2026-10-20): enabled state from the Editor's snapshot stack */
   canUndo?: boolean;
   canRedo?: boolean;
   onUndo?: () => void;
@@ -63,7 +63,7 @@ function Menu(p: { testid: string; label: string; width?: string;
         {p.label}
       </button>
       {open && (
-        // v1.9 MOBILE MENUS (user: "menus dont look good in mobile, they take
+        // 2026-10-20 MOBILE MENUS (user: "menus dont look good in mobile, they take
         // too much place"): the dropdown never outgrows the phone screen —
         // capped height (scrolls), capped width (the w-56 used to hang off
         // the viewport at the right-hand menus), tighter mobile rows.

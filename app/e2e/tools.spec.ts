@@ -8,7 +8,7 @@
 //    "data assertions cannot pin a repaint" rule);
 //  • Blocks → hull triangles is a DANGER tool: OK opens a CONFIRMATION BOX
 //    (live readout + warning), Confirm converts every geometry block into
-//    covering triangles and the dialog CLOSES (v1.9 — no inert second OK);
+//    covering triangles and the dialog CLOSES (2026-10-20 — no inert second OK);
 //  • the block MATERIALS row writes the file's `material` (a gameplay
 //    identity) WITHOUT touching colours;
 //  • the RGB picker writes a NEW slot into the craft's own palette.
@@ -73,7 +73,7 @@ test.describe('tools menu + dialogs @ui', () => {
     await expect(page.getByTestId('tool-hullify')).toBeVisible();
     await page.keyboard.press('Escape');
     await page.getByTestId('edit-menu').click();
-    // v1.9: Undo is WIRED but a fresh, untouched craft has no history yet.
+    // 2026-10-20: Undo is WIRED but a fresh, untouched craft has no history yet.
     await expect(page.getByTestId('edit-undo')).toBeDisabled();
     await expect(page.getByTestId('edit-redo')).toBeDisabled();
     await expect(page.getByTestId('edit-vessel-author')).toBeDisabled();

@@ -63,7 +63,7 @@ export function triCentroid(t: Triangle): [number, number, number] {
   return out;
 }
 
-/** v1.9 CLICK-OWNER pick (the "triangles refuse to select properly" fix):
+/** 2026-10-20 CLICK-OWNER pick (the "triangles refuse to select properly" fix):
  *  the old CENTROID-radius test could not reach the middle of any triangle
  *  bigger than ~1 m — clicking a large prism hit nothing selectable, and the
  *  click fell through to the corner-DRAFT path instead. The owner now is a

@@ -379,7 +379,7 @@ user's explicit say-so (Pages/release still serves it meanwhile).
   plus the literal-rule pins (glued-cube pair: shared border emits nothing,
   20 face quads' worth of tris; lone wedge: profile planes hold ONE tri
   each, square sides TWO; slant-glued wedge pair behaves like one cube).
-  The dialog is a `danger` tool (undoable since v1.9 via the Edit ▸ Undo
+  The dialog is a `danger` tool (undoable since 2026-10-20 via the Edit ▸ Undo
   stack). **v1.5.7 DIRECTION option**
 (user: "all triangles are precisely the wrong way around … keep it as an
 option for their directionality"): the tool's `direction` select sets the
@@ -391,7 +391,7 @@ block-shape table and the corpus census of AUTHORED files read as). Pure pin
 (`__tests__/tools.test.ts` DIRECTION test): both directions emit the SAME
 triangles/area, normals exactly antiparallel, the lone cube's +x face normal
 +x/−x per option. `hullifyApply(bp, { wind })`.
-- **v1.9 UNDO/REDO + DELETE + TRIANGLE PICK + DIALOG UX (user: "ALL
+- **2026-10-20 UNDO/REDO + DELETE + TRIANGLE PICK + DIALOG UX (user: "ALL
   operations should retain a undo/redo history, and be in edit menu"; "when
   I have something selected in edit mode, [delete] key should delete";
   "Triangles refuse to select properly"; "the window for tools should be
@@ -440,7 +440,7 @@ triangles/area, normals exactly antiparallel, the lone cube's +x face normal
   `e2e/tools.spec.ts` confirm-flow pins.
 - **v1.7 declared TODOs, visible in the Edit ▾ menu** (user: "we need a stack
   to be able to undo at least the last 10 operations, for each and every
-  thing; make this a todo, visible from the Edit Menu") — SHIPPED in v1.9
+  thing; make this a todo, visible from the Edit Menu") — SHIPPED in 2026-10-20
   (see the bullet above). The ONLY remaining declared TODO is the
   vessel-info section: `edit-vessel-name|author|code` render DISABLED with
   "todo" hints; planned section edits the file's real top-level `author` +
@@ -738,6 +738,16 @@ server (:8650) serves the working tree, so an in-progress tree must carry
 the NEXT version label; a dev snapshot wearing the last release's string is
 indistinguishable from a pushed one (2026-10-09 user report). `release.sh`
 refuses to cut a tag when the strings disagree.
+**2026-10-20 USER OVERRIDE — the NUMBER belongs to the user alone:** "It's
+1.5.7 or something. DO NOT INCREMENT THAT WITHOUT MY CONSENT" (an agent
+bumped v1.5.7 → v1.9.0 uninvited and had it reverted). NO agent edits ANY
+release string (X, Y or Z, session-start or otherwise) without the user's
+explicit number for it. The session-start ritual above therefore means:
+AT SESSION START ASK the user whether the tree should carry a new number —
+and until they answer, the working tree keeps the last user-set strings
+(the dev-snapshot ambiguity is accepted, the user's number outranks it).
+The X/Y/Z guidance in § Versioning describes how to NUMBER a release once
+the user says a number is due; it never authorises the bump itself.
 
 ## Sources of truth (all offline — do NOT web-fetch to answer format questions)
 - **FORMAT.md is the knowledge base.** Everything reverse-engineered lives
@@ -1535,8 +1545,8 @@ refuses to cut a tag when the strings disagree.
   'worked' — every suite bound to the invisible twin).
 
 ## Backlog
-- **Undo stack: DONE v1.9 (2026-10-20).** Shipped as the doc-text snapshot
-  stack with time-windowed drag coalescing (see the v1.9 bullet above) —
+- **Undo stack: DONE (2026-10-20).** Shipped as the doc-text snapshot
+  stack with time-windowed drag coalescing (see the 2026-10-20 bullet above) —
   deeper than the requested ≥10 levels (the stack is unbounded per session)
   and it covers EVERYTHING that flows through the `markDirty`/`sceneChanged`
   funnels, which is every mutation path in the app. The originally-planned

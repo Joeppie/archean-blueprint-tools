@@ -28,10 +28,10 @@ declare global {
     /** WORLD bboxes of the highlight overlay meshes (v1.6 stale-ghost pin:
      *  the overlay must sit ON the selected block after every edit) */
     blockHlBoxes: () => ReturnType<Engine['blockHlBoxes']>;
-    /** v1.9 TRIANGLE selection highlight: the gold-highlighted triangle index
+    /** 2026-10-20 TRIANGLE selection highlight: the gold-highlighted triangle index
      *  (-1 = none) — the "triangles refuse to select properly" pin */
     triHl: () => number;
-    /** v1.9 triangle-select routing probe: pickCell + the geometric triAt
+    /** 2026-10-20 triangle-select routing probe: pickCell + the geometric triAt
      *  click-owner at one pixel ({kind, bi, t}; t >= 0 = would select) */
     triPick: (x: number, y: number) => { kind: string; bi: number; t: number } | null;
     /** BLOCK widget state (v1.5): {bi, mode, mirror, cell} while a selected

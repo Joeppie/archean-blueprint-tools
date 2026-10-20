@@ -212,7 +212,7 @@ export class Engine {
   private blockHlSpec: { bi: number; twin: number; issues: string[]; info: boolean } | null = null;
   /** bi|twin|geometry+paint fingerprint — the v1.6 staleness guard */
   private blockHlSig = '';
-  /** v1.9 TRIANGLE selection feedback: the selected hull triangle's prism
+  /** 2026-10-20 TRIANGLE selection feedback: the selected hull triangle's prism
    *  glows GOLD + outlined (the "triangles refuse to select properly" fix —
    *  selecting one used to update the panel while the 3D view showed
    *  nothing). Own scene child at moff, like ghostGroup. */
@@ -2897,7 +2897,7 @@ void main() {
    *  block's OLD shape/pos: a golden ghost of the pre-edit block stuck on
    *  the deck until a full deselect ("blocks become translucent and don't
    *  return to previous state", user report). */
-  /** v1.9: TRIANGLE-selection feedback — gold translucent caps ±0.03 m over
+  /** 2026-10-20: TRIANGLE-selection feedback — gold translucent caps ±0.03 m over
    *  the prism + a gold outline; -1 (or a triangle that left the file)
    *  clears. depthTest off so it reads through the skin like the block
    *  overlay; ti is staled against the LIVE file so an undo-rebuild can never

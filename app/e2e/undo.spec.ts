@@ -1,4 +1,4 @@
-// undo.spec.ts — v1.9 editor-workflow guarantees:
+// undo.spec.ts — 2026-10-20 editor-workflow guarantees:
 //  • EVERY operation lands in the undo/redo stack (snapshot funnel: tool
 //    runs, block deletes, hullify, triangle deletes all round-trip through
 //    Ctrl+Z / Ctrl+Shift+Z); the Edit ▾ menu items follow the stack;

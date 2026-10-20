@@ -10,8 +10,8 @@
 // idiom). The Modal below is shared: it auto-lays-out the fields in a label/
 // control grid, keeps the OK button DISABLED while the preview says there is
 // nothing to do, closes on Esc/backdrop (Cancel), is DRAGGABLE by its title
-// bar (v1.9), and OK leads to a CONFIRMATION BOX with the live readout —
-// Confirm runs and the dialog closes (v1.9: no inert second-OK no-op). The
+// bar (2026-10-20), and OK leads to a CONFIRMATION BOX with the live readout —
+// Confirm runs and the dialog closes (2026-10-20: no inert second-OK no-op). The
 // tool list itself is a registry — adding a tool means adding one ToolDef.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Blueprint } from '../engine/format';
@@ -46,7 +46,7 @@ export interface ToolDef {
   icon: string;
   blurb: string;
   /** true = a heavy, hard-to-eye rewrite: the confirmation box shows a red
-   *  warning line (v1.9: everything is undoable via the Edit ▾ Undo stack) */
+   *  warning line (2026-10-20: everything is undoable via the Edit ▾ Undo stack) */
   danger?: boolean;
   fields: ToolFieldDef[];
   initial: ToolForm;
@@ -199,10 +199,10 @@ const replaceSourceOptions = (target: string) =>
 
 // ------------------------------------------------------------------ DIALOG
 
-/** The modal: opens CENTRED but is DRAGGABLE by its title bar (v1.9 user
+/** The modal: opens CENTRED but is DRAGGABLE by its title bar (2026-10-20 user
  *  rule: "the window for tools should be movable") — pointer-captured, so
  *  it works with mouse and touch alike. Esc or Cancel dismisses, backdrop
- *  click cancels. v1.9 CONFIRM FLOW (user: "a more understandable OK and
+ *  click cancels. 2026-10-20 CONFIRM FLOW (user: "a more understandable OK and
  *  Confirm and then have a confirmation box with information, rather than
  *  remaining open and not doing anything anymore when clicking OK a second
  *  time"): OK opens a CONFIRMATION BOX carrying the exact live readout of

@@ -110,7 +110,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   useEffect(() => { if (!toolMsg) return; const t = setTimeout(() => setToolMsg(''), 4000); return () => clearTimeout(t); }, [toolMsg]);
 
   // ------------------------------------------------------------------ HISTORY
-  // v1.9 UNDO/REDO (user: "ALL operations should retain a undo/redo history,
+  // 2026-10-20 UNDO/REDO (user: "ALL operations should retain a undo/redo history,
   // and be in edit menu"). Snapshot-based (the backlog design): a COMMIT is
   // the doc's FULL literal text via emitDoc — every mutation path already
   // mirrors bp → doc, and the raw literals keep saves byte-exact. Coalescing
@@ -206,7 +206,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
 
   const markDirty = useCallback(() => {
     if (!dirtyRef.current) { dirtyRef.current = true; setDirty(true); }
-    snapshotSoon();                               // v1.9 undo (drag-coalesced)
+    snapshotSoon();                               // 2026-10-20 undo (drag-coalesced)
   }, [snapshotSoon]);
   const bumpRev = useCallback(() => setRev(r => r + 1), []);
 
@@ -300,7 +300,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     sceneChanged();
   }, [sceneChanged]);
 
-  /** v1.9 DELETE key paths (the panel buttons and the keyboard share these).
+  /** 2026-10-20 DELETE key paths (the panel buttons and the keyboard share these).
    *  Block: the BlockPanel geometry — self + its SIMILAR TWIN, bp + doc
    *  together (the old "a bare key must never touch bp without the doc
    *  mirror" rule; the key now routes through here, so it is mirrored). */
@@ -348,7 +348,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     const ctx = ctxRef.current;
     if (!ctx) return;
     const text = serializeSave(ctx);
-    // v1.9: serializeSave also SYNCS the occupancy/type-255 mirrors (it
+    // 2026-10-20: serializeSave also SYNCS the occupancy/type-255 mirrors (it
     // mutates bp + doc) — commit that as the open history group's text so
     // undo can never resurrect a pre-sync mirror state.
     flushSnapshot();
@@ -364,8 +364,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   }, [openText]);
 
   // keyboard: g/o/h toggles, Ctrl+S save, Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y
-  // UNDO/REDO (v1.9 — the Edit ▾ menu items call the same pair), Delete /
-  // Backspace deletes the selection in the EDIT mode (v1.9 user rule: "when
+  // UNDO/REDO (2026-10-20 — the Edit ▾ menu items call the same pair), Delete /
+  // Backspace deletes the selection in the EDIT mode (2026-10-20 user rule: "when
   // I have something selected in edit mode, [delete] key should delete" —
   // component ▸ block (+twin) ▸ triangle precedence; every path mutates bp
   // AND the doc together, the stale NOTE below was the old excuse), and Esc
@@ -468,7 +468,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     } else e.setBlockHighlight(-1);
   }, [mode, blockSel, rev, engine]);
 
-  // v1.9: a SELECTED TRIANGLE rides the gold prism highlight — selection used
+  // 2026-10-20: a SELECTED TRIANGLE rides the gold prism highlight — selection used
   // to be invisible in the 3D view (only the panel changed), part of the
   // "triangles refuse to select properly" report. Left with the sub-tab.
   useEffect(() => {
@@ -494,7 +494,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     if (blockSub === 'tris') {
       const r = e.pickCell(clientX, clientY);
       if (!r) return;
-      // v1.9 (the "triangles refuse to select properly" fix): ONLY a hit on
+      // 2026-10-20 (the "triangles refuse to select properly" fix): ONLY a hit on
       // a hull PRISM itself can select — the old code centroid-tested every
       // pick, so a block click near a triangle STOLE the click, while the
       // middle of a large prism (beyond the 0.45 m radius) never selected at
@@ -681,7 +681,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   );
 
   const name = (bp?.data.alias?.trim()) || (craft ? craftName(craft) : 'Untitled craft');
-  // Edit ▾ Undo/Redo enabled state (v1.9). histTick is the re-render trigger —
+  // Edit ▾ Undo/Redo enabled state (2026-10-20). histTick is the re-render trigger —
   // the stack itself lives in a ref (commits must never re-render mid-drag).
   void histTick;
   const canUndo = histRef.current.timer !== null || histRef.current.p > 0;

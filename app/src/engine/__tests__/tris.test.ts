@@ -39,7 +39,7 @@ describe('hull lattice', () => {
     expect(triAt(bp, [c[0] + 1, c[1], c[2]])).toBe(-1);
   });
 
-  test('v1.9 click-owner pick: the middle of a BIG prism selects, edge/corner '
+  test('2026-10-20 click-owner pick: the middle of a BIG prism selects, edge/corner '
     + 'clicks stay corner-drafts, off-plane misses (the centroid-radius limit '
     + 'that made large triangles unselectable is gone)', () => {
     // a 20-cell right triangle (5 m legs) — the old 0.45 m centroid radius
