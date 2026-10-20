@@ -91,6 +91,12 @@ async function pixelOfBlock(page: Page, bi: number): Promise<{ x: number; y: num
 }
 
 test.describe('palette: census, block paint, ⇄ twin, widget 🎨 @place', () => {
+  // openNew (gallery ▸ SCENE PASS) + the 45 ms hover-walk pixel scans + the
+  // placement's debounced scene RELOAD together legitimately exceed the
+  // default 30 s on the iGPU box (the two block-paint pins timed out in
+  // toBlocks('edit') at the budget cliff — same on v1.5.12, not a
+  // behaviour change; the paint assertions themselves never failed).
+  test.setTimeout(90_000);
   test('the swatch grid badges the deck with 35 uses (5 blocks × 7 faces)', async ({ page }) => {
     test.skip(test.info().project.name !== 'chromium', 'desktop-only');
     await openNew(page);
