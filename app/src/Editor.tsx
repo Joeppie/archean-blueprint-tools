@@ -334,15 +334,20 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   }, [mode, tool, blockSub, brush, computeGhost]);
 
   // BLOCKS selection highlight (v1.4 "blocks don't yet highlight"): the
-  // picked block gets the golden overlay; with ⇄ on its SIMILAR TWIN rides
-  // along dimly (blockMirrorTwin — same plane as the component twins).
+  // picked block gets the golden overlay and its SIMILAR TWIN rides along
+  // dimly (blockMirrorTwin — same plane as the component twins). v1.7.1: the
+  // twin is IDENTIFIED on EVERY selection, ⇄ or not (user: "Selecting blocks
+  // does NOT SELECT MIRROR SYMMETRY" — ⇄ defaults OFF, so the pair read as
+  // un-symmetrised). The ⇄ toggle gates only whether EDITS propagate to the
+  // twin (paint/gizmo/panel rows), never whether it is shown co-selected —
+  // exactly how the BlockPanel's twin row already behaves.
   useEffect(() => {
     const e = engineRef.current, ctx = ctxRef.current;
     if (!e) return;
     if (mode === 'blocks' && blockSel >= 0 && ctx)
-      e.setBlockHighlight(blockSel, mirrorPlace ? blockMirrorTwin(ctx.bp, blockSel) : -1);
+      e.setBlockHighlight(blockSel, blockMirrorTwin(ctx.bp, blockSel));
     else e.setBlockHighlight(-1);
-  }, [mode, blockSel, mirrorPlace, rev, engine]);
+  }, [mode, blockSel, rev, engine]);
 
   // the CATALOG ghost (v1.4): while a part is HELD, hovering the viewport
   // docks a translucent preview at the surface (⇄ adds the mirrored twin

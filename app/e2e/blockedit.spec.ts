@@ -189,15 +189,21 @@ test.describe('blocks EDIT: highlight, in-place rotate, snap, twin @place', () =
     expect(await page.evaluate(() => (window as unknown as {
       __ARCHEAN__?: { engine: { blueprint: { data: { blocks: unknown[] } } } } }
     ).__ARCHEAN__!.engine.blueprint.data.blocks.length)).toBe(before + 2);
+    // v1.7.1 (user: "Selecting blocks does NOT SELECT MIRROR SYMMETRY"):
+    // turn ⇄ OFF BEFORE selecting — the twin must still be identified as the
+    // co-selection (⇄ gates only edit PROPAGATION, never identification).
+    await page.getByTestId('block-mirror').click();        // twin OFF
     // the placed block stays selected (place auto-selects) — re-pick it in
     // the EDIT tab: the TOP face now answers the owned block, not the deck
     await page.getByTestId('tooltab-edit').click();
     await page.mouse.click(box.x + box.width * click!.x, box.y + box.height * click!.y);
     const hl = await highlight(page);
     expect(hl, 'the placed block is selected').not.toBeNull();
+    expect(hl!.twin, 'the mirror twin is co-selected with ⇄ OFF').toBeGreaterThanOrEqual(0);
+    expect(hl!.bi).not.toBe(hl!.twin);
     const twinRow = page.getByTestId('block-twin');
     await expect(twinRow).toContainText(/similar twin: Block\[\d+\]/);
-    if (hl!.twin >= 0) expect(hl!.bi).not.toBe(hl!.twin);
+    await expect(twinRow).toContainText(/⇄ OFF: edits stay local/);
   });
 
   test('BLOCK widget (v1.5): attach, refuse a colliding shift, cell-move, 90° turn, detach on flip', async ({ page }) => {

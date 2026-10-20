@@ -204,8 +204,8 @@ export class Engine {
   private ghostGroup = new Group();
   private ghostSpec: (PlaceSpec & { valid: boolean; complement: boolean }) | null = null;
   /** BLOCKS-edit selection highlight (v1.4): a golden overlay on the picked
-   *  block (+ its dim SIMILAR TWIN when ⇄ is on) — the block analogue of the
-   *  component outline. Own scene child at moff, like ghostGroup. */
+   *  block (+ its dim SIMILAR TWIN, identified regardless of ⇄) — the block
+   *  analogue of the component outline. Own scene child at moff, like ghostGroup. */
   private blockHlGroup = new Group();
   private blockHlSpec: { bi: number; twin: number } | null = null;
   /** bi|twin|geometry+paint fingerprint — the v1.6 staleness guard */
@@ -2127,9 +2127,9 @@ void main() {
   /** overlay rebuild + the doc/dirty/reload mirror (the Editor owns the doc) */
   private afterBlockGizmoEdit(twin: number) {
     this.blockHlSpec = null;                  // force a geometry rebuild
-    if (this.blockGizBi >= 0 && this.bp)
-      this.setBlockHighlight(this.blockGizBi,
-        this.blockGizMirror ? blockMirrorTwin(this.bp, this.blockGizBi) : -1);
+    if (this.blockGizBi >= 0 && this.bp)      // twin IDENTIFIED always (v1.7.1);
+      this.setBlockHighlight(this.blockGizBi, // blockGizMirror only gated EDITS
+        blockMirrorTwin(this.bp, this.blockGizBi));
     this.onBlockEdit?.(twin >= 0 ? [this.blockGizBi, twin] : [this.blockGizBi]);
   }
   /** WORLD bbox of a component's REAL (node-tree) model, [min,max]; null
@@ -2791,8 +2791,10 @@ void main() {
   }
 
   /** BLOCKS-edit selection highlight (v1.4): the selected block gets the
-   *  golden constructor overlay, its ⇄ SIMILAR TWIN a dim one (the block
-   *  analogue of twin co-selection). -1 clears. Survives reloads visually
+   *  golden constructor overlay, its SIMILAR TWIN a dim one (the block
+   *  analogue of twin co-selection) — the twin is identified regardless of
+   *  ⇄, the toggle only gates whether edits propagate to it (v1.7.1).
+   *  -1 clears. Survives reloads visually
    *  (raw geometry, no per-load objects) — the Editor re-issues it per edit.
    *  v1.6: the dedup key carries a GEOMETRY/PAINT FINGERPRINT too — the
    *  old {bi,twin}-only guard returned early when a panel edit (cx move,
