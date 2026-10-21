@@ -177,21 +177,6 @@ export const TOOLS: ToolDef[] = [
           + 'hulls (the game’s own hull saves use it that way).',
       },
       {
-        key: 'avoid', label: 'mounted parts', kind: 'select',
-        options: [
-          { id: 'parts', label: 'keep clear (default)' },
-          { id: 'off', label: 'skin over everything' },
-        ],
-        hint: 'The skin prism is 0.05 m thick CENTRED on the surface plane '
-          + '(±0.025 m), while a flush-mounted panel (Dashboard) stands only '
-          + '0.02 m proud — so a triangle placed OVER a mount buries it, for '
-          + 'every winding and shading (that is why earlier conversions kept '
-          + 'hiding the dashboards). Default: the skin keeps OFF every face '
-          + 'cell under a mounted Dashboard — the block face stays there and '
-          + 'the panel stays visible. “Skin over everything” is the pure '
-          + 'face-exact conversion (how the game’s own authoring behaves).',
-      },
-      {
         key: 'note', label: '', kind: 'note',
         hint: 'Existing hull triangles and struts stay; type-255 component '
           + 'occupancy markers STAY (they are reservations, not geometry); '
@@ -200,17 +185,15 @@ export const TOOLS: ToolDef[] = [
           + 'whole conversion back afterwards.',
       },
     ],
-    initial: { wind: 'outward', shade: 'flat', avoid: 'parts' },
+    initial: { wind: 'outward', shade: 'flat' },
     preview: (f, bp) => {
       const r = hullifyPreview(bp, {
         wind: f['wind'] === 'outward' ? 'outward' : 'inward',
         shade: f['shade'] === 'flat' ? 'flat' : 'smooth',
-        avoid: f['avoid'] === 'off' ? 'off' : 'parts',
       });
       if (!r.ok) return r.reason ?? 'nothing to convert';
       return `${r.blocksRemoved} blocks ▸ ${r.trisAdded} triangles · front faces ${f['wind'] === 'outward' ? 'OUT' : 'IN'}`
         + ` · shading ${f['shade'] === 'flat' ? 'flat' : 'smooth:1'}`
-        + (r.avoided ? ` · ${r.avoided} face cells kept clear of mounted parts` : '')
         + (r.keptOcc ? ` · ${r.keptOcc} occupancy markers kept` : '')
         + (r.subBlocks ? ` · ${r.subBlocks} SUBGRID blocks stay blocks` : '')
         + ` · mass ≈ ${(r.massRemoved).toFixed(0)} kg ▸ ${r.massAdded.toFixed(0)} kg`
@@ -225,7 +208,6 @@ export const TOOLS: ToolDef[] = [
       const res = hullifyApply(ctx.bp, {
         wind: f['wind'] === 'outward' ? 'outward' : 'inward',
         shade: f['shade'] === 'flat' ? 'flat' : 'smooth',
-        avoid: f['avoid'] === 'off' ? 'off' : 'parts',
       });
       if (!res.ok) return res.reason ?? 'nothing converted';
       for (const i of geo) docArrayRemoveAt(ctx.doc, ['data', 'blocks'], i);

@@ -1,9 +1,24 @@
 // hull.ts — hull triangle SKIN: the game renders every hull triangle as a
-// closed 0.05 m prism (±HULL_T about the surface), NOT a flat sheet:
+// closed 0.05 m prism, NOT a flat sheet:
 //   colours[0] = front face (+normal), colours[1] = back face,
 //   colours[2..4] = the three side walls along edges v0-v1, v1-v2, v2-v0.
 // All five colours matter (ISW-241 uses slots 0/4/51 = hull/glass/chrome);
 // a single-triangle render reads paper-thin from the side (P2a look).
+//
+// EXTRUSION DIRECTION — THE PRISM BODY SITS BEHIND THE TRIANGLE PLANE
+// (v1.5.14, user ruling + in-game example): the front (colours[0]) cap
+// lands ON the plane, the solid extends HALF·2 = 0.05 m along −normal.
+// Evidence (2026-10-21): the game's OWN authored craft Triangle_Trial
+// (fixture 9000006001) carries skin triangles EXACTLY coplanar with the
+// faces its dashboards are mounted on (and the airliner 3309955432 has 58
+// dashboards under coplanar in-game skin, planes at 0.000) — and IN GAME
+// those flush panels stay VISIBLE. Flush Dashboard content is only
+// 0..0.02 m proud of the face, so a prism centred on the plane (±0.025,
+// the reading XenonViewer's buildTriangles uses) buries ALL of it — that
+// centred extrusion is what made every conversion "hide the dashboards",
+// and the game demonstrably does not do it. A tiny SEAM keeps the flush
+// cap from z-fighting a block face it rides (ISW/airliner keep BOTH
+// block hull and skin); it is far below any mount's relief.
 //
 // Winding (de-mirrored v0.180, FORMAT §Chirality): vertices are in the RAW
 // frame == the view frame, so the FRONT normal is the ordinary winding cross
@@ -15,6 +30,10 @@ import { hullVertex } from './hullfit';
 
 /** half-thickness of the hull skin (m) — legacy HULL_T. */
 export const HULL_T = 0.025;
+
+/** the flush cap rides SEAM BEHIND the triangle plane (z-fight guard vs a
+ *  coexisting block face — 0.002 m, invisible at any mount relief). */
+export const HULL_SEAM = 0.002;
 
 export type V3 = readonly [number, number, number];
 
@@ -50,8 +69,11 @@ export function hullPrism(t: Triangle): HullFace[] {
   const len = Math.hypot(n[0], n[1], n[2]) || 1;
   const u: V3 = [n[0]! / len, n[1]! / len, n[2]! / len];
   const off = (v: V3, s: number): V3 => [v[0]! + u[0]! * s, v[1]! + u[1]! * s, v[2]! + u[2]! * s];
-  const F = p.map(v => off(v, HULL_T)) as [V3, V3, V3];
-  const B = p.map(v => off(v, -HULL_T)) as [V3, V3, V3];
+  // body BEHIND the plane: front cap flush (SEAM back), back cap 0.05 m
+  // deeper along −normal — so NOTHING stands in front of the surface and a
+  // flush-mounted panel (0..0.02 m proud) is never covered (v1.5.14 rule).
+  const F = p.map(v => off(v, -HULL_SEAM)) as [V3, V3, V3];
+  const B = p.map(v => off(v, -HULL_SEAM - 2 * HULL_T)) as [V3, V3, V3];
 
   const slot = (i: number): number => t.colors?.[i] ?? 0;
   const faces: HullFace[] = [

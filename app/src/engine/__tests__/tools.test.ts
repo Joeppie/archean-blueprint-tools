@@ -18,7 +18,7 @@ import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 import { corpusDir } from '../../../tools/vite-corpus.ts';
 import {
-  MATERIALS, allocateSlot, componentAvoidBoxes, freePaletteSlots, hullifyApply, hullifyPreview,
+  MATERIALS, allocateSlot, freePaletteSlots, hullifyApply, hullifyPreview,
   nearestSlot, parseHexColor, replaceAll, replaceCensus, replaceSources,
 } from '../tools';
 import { culledBlocksSolids, blkCell, blkSpan, cellM } from '../cull';
@@ -271,11 +271,8 @@ describe('hullify — blocks ▸ hull triangles', () => {
 
     // Hullify the SAME craft before the triangles existed (9000005001 =
     // testframe): the defaults match the game's conventions piece for piece.
-    // avoid:'off' — this pin is about the CONVENTIONS (winding/shading/
-    // corners) against the game's authoring, which covered its own mounted
-    // dashboards; the AVOID placement rule has its own test below.
     const bp = load('9000005001');
-    hullifyApply(bp, { avoid: 'off' });
+    hullifyApply(bp);
     const ours = bp.data.triangles!;
     expect(ours.length).toBeGreaterThan(0);
     expect(ours.every(t => !('smooth' in asRec(t)))).toBe(true);   // flat by default
@@ -298,54 +295,6 @@ describe('hullify — blocks ▸ hull triangles', () => {
     // the conventions: the game winds OUT and carries no smooth key, which
     // is exactly what the defaults now emit
     expect(ourCorner.filter(t => gameKeys.has(key(triWorld(t)))).length).toBe(3);
-  });
-
-  test('AVOID (v1.5.13, DEFAULT ON): no generated triangle is placed over a mounted dashboard (testframe 9000005001)', () => {
-    const load = (id: string): Blueprint =>
-      JSON.parse(readFileSync(
-        new URL(`../../../../testdata/${id}/blueprint.json`, import.meta.url).pathname, 'utf8')) as Blueprint;
-    const bp = load('9000005001');
-    const boxes = componentAvoidBoxes(bp);
-    expect(boxes.length).toBe(8);                       // the 8 dashboards
-    const res = hullifyApply(bp);                       // default = avoid parts
-    expect(res.avoided).toBeGreaterThan(0);
-
-    // NOT ONE emitted prism reaches into a mount: the prism is the triangle
-    // swept ±0.025 m along its normal, so its world AABB is the vertex bbox
-    // grown by 0.025·|n_ax| per axis — that box must miss every box.
-    for (const t of bp.data.triangles!) {
-      const w = triWorld(t);
-      const nrm = vcross(vsub(w[1]!, w[0]!), vsub(w[2]!, w[0]!));
-      const len = Math.hypot(...nrm) || 1;
-      const lo = [0, 1, 2].map(a => Math.min(...w.map(p => p[a]!)) - 0.025 * Math.abs(nrm[a]! / len));
-      const hi = [0, 1, 2].map(a => Math.max(...w.map(p => p[a]!)) + 0.025 * Math.abs(nrm[a]! / len));
-      for (const av of boxes) {
-        const hit = lo[0]! < av.max[0]! && hi[0]! > av.min[0]!
-          && lo[1]! < av.max[1]! && hi[1]! > av.min[1]!
-          && lo[2]! < av.max[2]! && hi[2]! > av.min[2]!;
-        expect(hit, `triangle ${JSON.stringify(w)} over a dashboard mount`).toBe(false);
-      }
-    }
-
-    // NON-VACUOUS: the skin still happens where nothing is mounted — the
-    // deck TOP (plane y = −1.25) keeps its cells but covers STRICTLY LESS
-    // area than the un-avoided conversion (the panels' footprints stay open);
-    // the deck BOTTOM (y = −1.5, nothing mounted) is byte-for-byte the rule's
-    // equal: same cells, same area.
-    const deckTopTris = (tris: Triangle[]) =>
-      tris.filter(t => triWorld(t).every(p => Math.abs(p[1]! + 1.25) < 1e-6));
-    const deckBottomTris = (tris: Triangle[]) =>
-      tris.filter(t => triWorld(t).every(p => Math.abs(p[1]! + 1.5) < 1e-6));
-    const off = load('9000005001');
-    hullifyApply(off, { avoid: 'off' });
-    expect(areaSum(deckTopTris(bp.data.triangles!).map(triWorld))).toBeGreaterThan(0);
-    // the whole deck top is 3 × 3 = 9 m²; the 8 panels cut visible holes
-    expect(areaSum(deckTopTris(bp.data.triangles!).map(triWorld)))
-      .toBeLessThan(areaSum(deckTopTris(off.data.triangles!).map(triWorld)) - 0.01);
-    expect(areaSum(deckBottomTris(bp.data.triangles!).map(triWorld)))
-      .toBeCloseTo(areaSum(deckBottomTris(off.data.triangles!).map(triWorld)), 9);
-    expect(areaSum(bp.data.triangles!.map(triWorld)))
-      .toBeLessThan(areaSum(off.data.triangles!.map(triWorld)));
   });
 
   test('two glued cubes: the shared border emits NOTHING, every other face is its own quad pair', () => {
