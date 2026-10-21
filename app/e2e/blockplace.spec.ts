@@ -141,8 +141,14 @@ test.describe('blocks-place: ghost, docks & Shift continuation @place', () => {
     expect(fam(cg!.type), 'the continuation stays in the aimed block\'s shape family').toBe(fam(aimedType));
 
     const before = await blocksCount(page);
+    // aim and CLICK at the SAME pixel: since the skin prisms extrude into
+    // the solid (v1.5.15) the exposed block faces answer picks directly, so
+    // a stray +2px offset could straddle a face boundary and land a
+    // different family mate than the ghost previewed
+    await page.mouse.move(cpx + 1, cpy);
+    await page.waitForTimeout(80);
     await page.keyboard.down('Shift');
-    await page.mouse.click(cpx + 2, cpy);
+    await page.mouse.click(cpx + 1, cpy);
     await page.keyboard.up('Shift');
     await page.waitForTimeout(600);                            // debounced scene reload
     expect(await blocksCount(page), 'the continuation lands').toBe(before + 1);
