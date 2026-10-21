@@ -409,6 +409,41 @@ on all, flat none, other fields identical, existing kept); `tooldoc.test.ts`
 writer-style pin; `e2e/tools.spec.ts` preview reads "shading smooth:1".
 SUPERSEDED v1.5.12: the DEFAULT is now flat + outward (the game's own
 freshly-authored triangles, fixture 9000006001 — see the v1.5.12 bullet).
+- **v1.6.0 SPHEROID TOOL (user feature: "make a tool that can generate a
+  spheroid and make it out of blocks. Like a block it should be movable and
+  its label should have a cancel and build button, that appears after the
+  tool window where you ok off on material, color, solid, size (…dynamic so
+  you can stretch it)"):** the GENERATOR is `engine/spheroid.ts` (pure): each
+  unit cell is classified by the 8-bit inside-corner mask of the implicit
+  ellipsoid; an EXACT shape-corner match wins first (inv-corner/slope/corner/
+  pyramid ARE the corner-plane cuts), else volume error vs the corner-count
+  estimate ▸ mask IoU ▸ slant-normal-vs-gradient alignment ▸ lowest type —
+  the gradient tiebreak is what makes the pole bands tilt with the surface
+  and keeps the whole plan mirror-symmetric about every axis plane. SOLID =
+  cells whose CENTRE is inside become full cubes (100 % filled, no internal
+  skin of gaps) GREEDY-MERGED x→y→z into the fewest boxes, split at the
+  12-cell frame borders; SHELL = the boundary shapes only. `blocks.ts
+  shiftBlocks` re-lands a generated cluster after a placement drag (boxes
+  that cross a frame border re-split). The TOOL is the first PLACEMENT tool:
+  `ToolDef.place{stage,commit}` + new dialog field kinds (`range` sliders —
+  live-retuning the plan, `toggle`, `color` swatch+hex resolving to a NEW
+  palette slot or the ≈nearest existing one at commit); Confirm stages a
+  `PlacePayload` instead of mutating. The Engine ghosts it as a CLUSTER
+  (`setClusterGhost`, own group at moff+cell-offset) on the SAME widget the
+  block uses (world translate, CELL snap ALWAYS — it raises the widget even
+  in VIEW mode, restoring the gate at Cancel/Build), red while the footprint
+  collides; `clusterGhostState/Shift/ScreenPoint` + hook `placeGhost/
+  placeShift`. The Viewport's `place-label` (✕ Cancel = also Esc, ✔ Build
+  disabled while colliding) commits through `shiftBlocks` + the standard
+  doc-insert idiom (one Undo step). Fixture `testdata/9000007001`
+  (`app/tools/makespheroid.mjs` regenerates from the shipped generator);
+  corpus gate green (115 → 116 files, byte-round-trip included). Pins:
+  vitest `spheroid.test.ts` (sealed/disjoint/bounded, circle-vertex band,
+  volume ±20 %, fewest-cube merge ratio, x-mirror symmetry, the shape-law
+  cases) + e2e `spheroid.spec.ts` (live sliders, dialog→ghost→label ORDER,
+  shown-widget pin, build counts + loads + new slot + Ctrl+Z, Cancel/Esc,
+  red-collision refusal). NOTE the debug TITLE only re-arms on a bp-object
+  swap — a same-bp `reload()` repaint is pinned through `stats().blocks`.
 - **v1.5.16 REVERT of the v1.5.13–15 hull-prism experiments (user ruling
   2026-10-21: "lots of geometry problems now with blocks sticking through,
   indicating it got way worse … undo publication of this version and

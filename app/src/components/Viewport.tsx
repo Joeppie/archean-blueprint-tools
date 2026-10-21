@@ -53,13 +53,18 @@ declare global {
     hingePoint: (i: number) => ReturnType<Engine['hingeScreenPoint']>;
     /** wind tunnel (engine/aero.ts) live state */
     wind: () => ReturnType<Engine['windState']>;
+    /** v1.6 TOOLS ▸ placement ghost (Spheroid): state, screen anchor and
+     *  the pin-driven whole-cell nudge (same path the widget commits) */
+    placeGhost: () => ReturnType<Engine['clusterGhostState']>;
+    placePoint: () => ReturnType<Engine['clusterGhostScreenPoint']>;
+    placeShift: (s: [number, number, number]) => boolean;
   } }
 }
 
 let atlasP: Promise<ModelAtlas | null> | null = null;
 const getAtlas = (): Promise<ModelAtlas | null> => (atlasP ??= openAtlas());
 
-export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, onBlockPick, onBlockHover, placing = null, onPlace, onPaintOpen, onManifest, keepView = false }: {
+export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, onBlockPick, onBlockHover, placing = null, onPlace, onPaintOpen, onPlaceCancel, onPlaceBuild, onManifest, keepView = false }: {
   bp: Blueprint | null;
   onPick: (h: PickHit) => void;
   onEngine?: (e: Engine | null) => void;
@@ -91,6 +96,10 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
   /** 🎨 PALETTE button in the mode widget (v1.6): toggles the Editor's paint
    *  window — the colour alternative to the move/rotate gizmo modes */
   onPaintOpen?: () => void;
+  /** v1.6 TOOLS ▸ placement (Spheroid): the confirmed tool's movable ghost
+   *  carries a label with ✕ Cancel / ✔ Build — both owned by the Editor */
+  onPlaceCancel?: () => void;
+  onPlaceBuild?: () => void;
   /** game manifest once the model atlas is open (drives the Catalog tab) */
   onManifest?: (m: Record<string, { mass: number; module: string }> | null) => void;
   /** UNDO/REDO swaps bp for the SAME craft — keep the camera (do NOT re-frame).
@@ -134,6 +143,11 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
       hinge: () => engine.hingeInfo(),
       hingePoint: (i: number) => engine.hingeScreenPoint(i),
       wind: () => engine.windState(),
+      // v1.6 TOOLS ▸ placement ghost (Spheroid): state + the pin-driven
+      // whole-cell nudge (the widget commit routes through the same path)
+      placeGhost: () => engine.clusterGhostState(),
+      placePoint: () => engine.clusterGhostScreenPoint(),
+      placeShift: (s: [number, number, number]) => engine.clusterGhostShift(s),
     };
     onEngine?.(engine);
     return () => {
@@ -202,6 +216,18 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
     }, 250);
     return () => clearInterval(h);
   }, []);
+  // v1.6 TOOLS ▸ placement: the ✕ Cancel / ✔ Build label rides the ghost
+  const [place, setPlace] = useState<{ blocks: number; valid: boolean; x: number; y: number } | null>(null);
+  useEffect(() => {
+    const h = setInterval(() => {
+      const e = engineRef.current, box = hostRef.current?.getBoundingClientRect();
+      const st = e?.clusterGhostState();
+      const pt = st ? e!.clusterGhostScreenPoint() : null;
+      setPlace(st && pt && box
+        ? { blocks: st.blocks, valid: st.valid, x: pt.x - box.left, y: pt.y - box.top } : null);
+    }, 200);
+    return () => clearInterval(h);
+  }, []);
   useEffect(() => {
     const sh = (e: KeyboardEvent, on: boolean) => {
       if (e.key === 'Shift') {
@@ -216,11 +242,13 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
         engineRef.current?.placeDragEnd();
         placeDrag.current = null;
       }
+      // Esc ALSO cancels a tool placement ghost (v1.6, the label's ✕ twin)
+      if (e.key === 'Escape' && engineRef.current?.clusterGhostState()) onPlaceCancel?.();
     };
     const dn = (e: KeyboardEvent) => sh(e, true), up = (e: KeyboardEvent) => sh(e, false);
     addEventListener('keydown', dn); addEventListener('keyup', up);
     return () => { removeEventListener('keydown', dn); removeEventListener('keyup', up); };
-  }, [mode, tool, onBlockHover]);
+  }, [mode, tool, onBlockHover, onPlaceCancel]);
   const setMode = (m: 'off' | 'translate' | 'rotate') => {
     setGmode(m);
     engineRef.current?.setGizmoMode(m);
@@ -345,6 +373,27 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
           <span className={`text-[13px] leading-none ${warn.info ? 'text-[#4da3ff]' : 'text-[#ff4d4d]'}`}>
             {warn.info ? 'ℹ' : '⚠'}</span>
           <span>{warn.text}</span>
+        </div>
+      )}
+      {place && (
+        // v1.6 placement label (user: "its label should have a cancel and
+        // build button"): ✕ drops the ghost, ✔ writes it in — red while the
+        // footprint collides (Build disabled, the constructor-ghost contract)
+        <div data-testid="place-label"
+          className={`ksp-win absolute z-30 flex -translate-x-1/2 items-center gap-1.5 rounded
+                      px-2 py-1 text-[10px] leading-none ${place.valid ? 'text-[#9cffd4]' : 'text-[#ff9c9c]'}`}
+          style={{ left: place.x, top: Math.max(8, place.y + 18) }}>
+          <span>◍ {place.blocks} blocks{place.valid ? '' : ' — collides'}</span>
+          <button data-testid="place-cancel" title="cancel this placement"
+            onClick={() => onPlaceCancel?.()}
+            className="ksp-btn rounded px-1.5 py-[3px] text-[11px] text-ink-dim hover:text-red-300">✕</button>
+          <button data-testid="place-build" title="build it into the craft"
+            disabled={!place.valid}
+            onClick={() => onPlaceBuild?.()}
+            className={`ksp-btn rounded px-2 py-[3px] text-[11px] font-semibold ${
+              place.valid ? 'on' : 'opacity-50'}`}>
+            ✔ Build
+          </button>
         </div>
       )}
       {DEBUG_MODE && <StatsStrip engine={engineRef} bp={bp} />}
