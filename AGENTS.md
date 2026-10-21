@@ -409,33 +409,35 @@ on all, flat none, other fields identical, existing kept); `tooldoc.test.ts`
 writer-style pin; `e2e/tools.spec.ts` preview reads "shading smooth:1".
 SUPERSEDED v1.5.12: the DEFAULT is now flat + outward (the game's own
 freshly-authored triangles, fixture 9000006001 — see the v1.5.12 bullet).
-- **v1.5.15 SKIN PRISM EXTRUDES TOWARD THE SOLID — Jimmy murals fix (user
-  ruling 2026-10-21: "The keep clear functionality is poison and shouldn't
-  exist … the game can do it, you have an example, try again"; same-day
-  follow-up: "Dashboards on Jimmy get Hidden on the outside mural/mosaic"
-  disproved v1.5.14's winding-relative law)**: hullify `avoid:'parts'` was
-  EXCISED in full (tools/ToolsDialog/tests reverted to the pure v1.5.12
-  face-exact conversion — the game skins straight over its mounts: fixture
-  9000006001 outward-wound coplanar over dashboards, hullified Jimmy
-  INWARD-wound coplanar over its murals at offset 0.0000 / winding dot
-  −1.00, both visible in game). `hull.ts` extrudes the 0.05 m prism body
-  toward the SOLID side, per triangle (`skinSolidDirs`): block-cell probe
-  at inset corners + centroid when geometry blocks exist; else a global
-  SHELL-PARITY vote (sample 0.01 m along +winding-normal, ray along the
-  signed dominant axis, odd crossings ⇒ inside ⇒ dir +1; ≥80% agreement
-  decides the uniform hullify shell); parallel-skin columns + majority as
-  tie-breakers; default −1 = outward-winding law. REJECTED after
-  measurement: centred ±0.025 (XenonViewer — buries reliefs), winding-only
-  law (v1.5.14 — breaks inward-wound legacy conversions), signed-volume
-  sign (origin-dependent for open skins), parallel-skin DENSITY (cabin
-  clutter outvotes). Caps stay colour-correct (colours[0] = winding-side
-  cap either way), 0.002 m seam = z-fight guard only. Real-file census
-  (3 coverage points/panel): jimminey 194/2 (corner-pixel grazes only),
-  stratoLUNCH 3165/8, testframe/Triangle_Trial/corneronia/ISW/SU-57/F-A18/
-  XYQ all 0. Pins: hull.test.ts behind-the-plane caps, mirrored +1 convex
-  prism, closed INWARD box flips wholly (the Jimmy case), deck block-probe
-  flip. Do NOT reintroduce avoid/keep-clear or the winding-only law; see
-  FORMAT §Triangles for the full evidence chain.
+- **v1.5.16 REVERT of the v1.5.13–15 hull-prism experiments (user ruling
+  2026-10-21: "lots of geometry problems now with blocks sticking through,
+  indicating it got way worse … undo publication of this version and
+  publish last known [good] week working version, even though dashboards
+  problematic")**: the three-day experiment line — v1.5.13 hullify
+  `avoid:'parts'` (keep-clear, user: "poison"), v1.5.14 backward
+  (winding-relative) prism extrusion, v1.5.15 solid-side extrusion with
+  shell-parity/block probes — is PUBLISHED NO MORE. The fatal flaw of any
+  flush-behind cap: on crafts where authored skin RIDES the block hull
+  (ISW-241, airliner, Jimmy), block faces bulge slightly proud of the
+  skin plane; the old CENTRED prism (±0.025) enclosed the block face, so
+  bulges up to 2.5 cm stayed inside the prism — a flush cap lets them
+  stick THROUGH the skin everywhere, far worse than the dashboard problem
+  it fixed. main now carries the v1.5.12 tree again (centred prism,
+  face-exact hullify, pruneCompRefs wiring fix) under strings v1.5.16;
+  the experiment + its pins live on branch `experimental/skin-solid-side`
+  (tag v1.5.15 = its tip ancestor). MEASURED FACTS THAT STAND (do not
+  re-litigate): the game authors skin EXACTLY coplanar over its
+  dashboards (fixture 9000006001; Jimmy murals at offset 0.0000, inward-
+  wound) and keeps them visible in game; the game NEVER moves stored
+  anchors (byte-diffed re-saves); XenonViewer centres the prism too. The
+  OPEN PROBLEM those facts pin: in game BOTH no-poke-through AND flush-
+  mount visibility hold, so the game's builder does something BEYOND a
+  per-triangle extrusion law (component draw priority / seam handling in
+  the compiled builder) — a future attempt must attack the RENDER pass
+  (e.g. components never occluded by coplanar skin), NOT the extrusion
+  direction, and must keep the prism enclosing block faces where both
+  coexist. The centred prism's dashboard burial stays a KNOWN, ACCEPTED
+  defect until then (user: "even though dashboards problematic").
 - **v1.5.12 HULLIFY DEFAULTS = THE GAME'S OWN AUTHORING + DELETE RENUMBERS
   FLATTENED REFS (user's in-game A/B + the Jimmy wiring incident):** (1) The
   user's craft `Triangle_Trial.json` (in-game-TRI-AUTHORED: the game's own

@@ -104,7 +104,7 @@ export function buildSolids(bp: Blueprint): SolidBatch {
 
   // hull triangle skin: the game's closed 0.05 m prisms — colours[0] front,
   // [1] back, [2..4] side walls (hull.ts carries the exact winding).
-  const skin = buildHullSkin(bp.data.triangles ?? [], bp.data.blocks);
+  const skin = buildHullSkin(bp.data.triangles ?? []);
   const tri3 = (b: GeomBucket, A: readonly number[], C: readonly number[], E: readonly number[]) => {
     const nrm = faceNormal(A as number[], C as number[], E as number[]);
     const base = b.positions.length / 3;

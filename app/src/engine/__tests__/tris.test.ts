@@ -48,9 +48,7 @@ describe('hull lattice', () => {
     const bp = { data: { triangles: [big] } } as unknown as Blueprint;
     const c = triCentroid(big);
     expect(triAt(bp, c)).toBe(0);
-    // the prism skin face sits at/behind the plane (v1.5.14 back extrusion);
-    // a probe point slightly in FRONT of it still belongs to the triangle
-    // (triAt's mid-plane tolerance covers the prism depth either way)
+    // the plane offset of the prism skin face (±0.025) still belongs to it
     expect(triAt(bp, [c[0], c[1] + 0.025, c[2]])).toBe(0);
     // deep in a CORNER of the big triangle: inside, but < margin from the
     // legs → NOT a selection (a corner-draft target instead)

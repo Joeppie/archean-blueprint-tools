@@ -23,13 +23,10 @@ export const HULL_C = -FRAME / 2;                  // -1.5
 
 export function hullVertex(t: Triangle, i: 0 | 1 | 2): { x: number; y: number; z: number } {
   const v = (ax: 'x' | 'y' | 'z') => (t[`v${i}_${ax}`] ?? 0) as number;
-  // frames are ALWAYS stored in real files; the ?? 0 only guards synthetic
-  // records (without it a missing frame_* key poisons every coord with NaN)
-  const f = (ax: 'x' | 'y' | 'z') => (t[`frame_${ax}`] ?? 0) as number;
   return {
-    x: (v('x') + HULL_W * f('x')) * HULL_PITCH + HULL_C,
-    y: (v('y') + HULL_W * f('y')) * HULL_PITCH + HULL_C,
-    z: (v('z') + HULL_W * f('z')) * HULL_PITCH + HULL_C,
+    x: (v('x') + HULL_W * t.frame_x) * HULL_PITCH + HULL_C,
+    y: (v('y') + HULL_W * t.frame_y) * HULL_PITCH + HULL_C,
+    z: (v('z') + HULL_W * t.frame_z) * HULL_PITCH + HULL_C,
   };
 }
 

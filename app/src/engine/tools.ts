@@ -271,16 +271,6 @@ export function replaceAll(
 // (component reservations, not geometry — the same rule as block delete);
 // Build-subgrid blocks live in the nested blueprint lists and stay blocks
 // (reported as `subBlocks`).
-//
-// v1.5.14: the v1.5.13 "AVOID" placement rule (skip skin cells under
-// mounted parts) was EXCISED the same day on the user's ruling — "the
-// game can do it": its own authored craft (fixture 9000006001, and the
-// airliner's 58 dashboards under coplanar skin) proves skin triangles DO
-// sit over mounts while the panels stay visible IN GAME. The hiding was
-// our RENDERER centring the prism on the plane; the prism body now sits
-// BEHIND the plane (hull.ts), so flush content is never covered and the
-// conversion stays face-exact with no special cases. Do not reintroduce
-// placement-time avoidance.
 
 type G3 = [number, number, number];
 
