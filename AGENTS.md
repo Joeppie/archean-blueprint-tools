@@ -409,28 +409,33 @@ on all, flat none, other fields identical, existing kept); `tooldoc.test.ts`
 writer-style pin; `e2e/tools.spec.ts` preview reads "shading smooth:1".
 SUPERSEDED v1.5.12: the DEFAULT is now flat + outward (the game's own
 freshly-authored triangles, fixture 9000006001 — see the v1.5.12 bullet).
-- **v1.5.14 SKIN PRISM EXTRUDES BACKWARD — the "dashboards hidden" fix
-  (user ruling 2026-10-21: "The keep clear functionality is poison and
-  shouldn't exist … the game can do it, you have an example, try again")**:
-  the v1.5.13 same-day fix (hullify `avoid:'parts'`: skip skin cells under
-  mounted Dashboards) was EXCISED in full — placement-time avoidance is
-  wrong-on-principle because the game's OWN authored craft (fixture
-  9000006001) skins triangles EXACTLY coplanar over its dashboards (and
-  the airliner has 58 dashboards under coplanar in-game skin at 0.000)
-  while IN GAME the flush panels stay visible. The real bug was our
-  RENDERER centring the 0.05 m prism on the plane (±0.025 vs the panels'
-  0..0.02 m relief = guaranteed burial; XenonViewer centres too — the dev
-  viewer is NOT right here). `hull.ts` now extrudes BEHIND the triangle
-  plane: colours[0] cap flush at the plane less `HULL_SEAM` 0.002 m (a
-  z-fight guard vs block faces the skin rides — our render choice, NOT
-  format), body 0.05 m along −normal; NOTHING of a prism stands in front
-  of the plane (property-pinned in `hull.test.ts` "dashboards-stay-visible
-  law"). tools.ts/ToolsDialog/tools.test.ts were reverted to the pure
-  v1.5.12 face-exact conversion (GAME-CONVENTION runs the DEFAULTS again);
-  do NOT reintroduce avoid/keep-clear. Settled by in-game evidence: the
-  game never moves stored anchors and never lifts skin in placement; the
-  exact prism normalisation in its compiled builder stays undocumented.
-  The legacy `viewer/` still centres (frozen port reference).
+- **v1.5.15 SKIN PRISM EXTRUDES TOWARD THE SOLID — Jimmy murals fix (user
+  ruling 2026-10-21: "The keep clear functionality is poison and shouldn't
+  exist … the game can do it, you have an example, try again"; same-day
+  follow-up: "Dashboards on Jimmy get Hidden on the outside mural/mosaic"
+  disproved v1.5.14's winding-relative law)**: hullify `avoid:'parts'` was
+  EXCISED in full (tools/ToolsDialog/tests reverted to the pure v1.5.12
+  face-exact conversion — the game skins straight over its mounts: fixture
+  9000006001 outward-wound coplanar over dashboards, hullified Jimmy
+  INWARD-wound coplanar over its murals at offset 0.0000 / winding dot
+  −1.00, both visible in game). `hull.ts` extrudes the 0.05 m prism body
+  toward the SOLID side, per triangle (`skinSolidDirs`): block-cell probe
+  at inset corners + centroid when geometry blocks exist; else a global
+  SHELL-PARITY vote (sample 0.01 m along +winding-normal, ray along the
+  signed dominant axis, odd crossings ⇒ inside ⇒ dir +1; ≥80% agreement
+  decides the uniform hullify shell); parallel-skin columns + majority as
+  tie-breakers; default −1 = outward-winding law. REJECTED after
+  measurement: centred ±0.025 (XenonViewer — buries reliefs), winding-only
+  law (v1.5.14 — breaks inward-wound legacy conversions), signed-volume
+  sign (origin-dependent for open skins), parallel-skin DENSITY (cabin
+  clutter outvotes). Caps stay colour-correct (colours[0] = winding-side
+  cap either way), 0.002 m seam = z-fight guard only. Real-file census
+  (3 coverage points/panel): jimminey 194/2 (corner-pixel grazes only),
+  stratoLUNCH 3165/8, testframe/Triangle_Trial/corneronia/ISW/SU-57/F-A18/
+  XYQ all 0. Pins: hull.test.ts behind-the-plane caps, mirrored +1 convex
+  prism, closed INWARD box flips wholly (the Jimmy case), deck block-probe
+  flip. Do NOT reintroduce avoid/keep-clear or the winding-only law; see
+  FORMAT §Triangles for the full evidence chain.
 - **v1.5.12 HULLIFY DEFAULTS = THE GAME'S OWN AUTHORING + DELETE RENUMBERS
   FLATTENED REFS (user's in-game A/B + the Jimmy wiring incident):** (1) The
   user's craft `Triangle_Trial.json` (in-game-TRI-AUTHORED: the game's own

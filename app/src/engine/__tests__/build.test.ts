@@ -124,7 +124,7 @@ describe('buildSolids', () => {
     }
     const { wire, stats } = buildSolids(bpOf([], tris));
     expect(stats.hullTris).toBe(30000);
-    const skin = buildHullSkin(tris);
+    const skin = buildHullSkin(tris, []);
     expect(wire.length).toBe(skin.wire.length);         // 30000 × 18
     expect(wire).toEqual(skin.wire);                    // same sequence, no loss
   });

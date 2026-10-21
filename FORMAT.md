@@ -755,32 +755,60 @@ Evidence (ISW-241, 21 triangles):
   shared-edge pairs among 241 tris, 62 joins cross frames (records key on
   the absolute lattice), 197/232 joiners share identical `colours[0..4]`,
   221/232 the same `material`.
-- **Flush mounts vs the skin — THE PRISM BODY SITS BEHIND THE PLANE (v1.5.14,
-  Oct 21 2026, user ruling: "The keep clear functionality is poison and
-  shouldn't exist … the game can do it, you have an example, try again")**:
-  the game's OWN authored craft (fixture 9000006001 / Triangle_Trial)
-  carries skin triangles EXACTLY coplanar with the faces its dashboards are
-  mounted on, and the airliner 3309955432 has 58 dashboards under coplanar
-  in-game skin (planes at distance 0.000) — yet IN GAME those flush panels
-  stay VISIBLE. A flush Dashboard's entire generated content is only
-  0..0.02 m proud of the face (board 0.01, elements 0.02), so the prism
-  CANNOT be centred on the plane (±0.025 buries all of it — that centred
-  extrusion, which XenonViewer's `buildTriangles` copies verbatim
-  "répartie de part et d'autre du plan", is what made every conversion
-  "hide the dashboards"). The app's renderer therefore extrudes BACKWARD:
-  front (colours[0]) cap flush at the plane less a 0.002 m seam (z-fight
-  guard vs a block face the skin rides, e.g. ISW/airliner keep BOTH hulls),
-  solid body 0.05 m along −normal (`hull.ts` `hullPrism`, pinned in
-  `hull.test.ts`). The v1.5.13 same-day attempt to fix this at PLACEMENT
-  time (hullify `avoid:'parts'` — skip skin cells under mounts) was
-  EXCISED the next day as wrong-on-principle: the game skins straight over
-  mounts, so no conversion-time special case exists or belongs. NOTE what
-  stays UNKNOWN: exactly how the game's compiled builder offsets/normalises
-  the prism (the 0.002 seam is our render-stability choice, not format);
-  what IS settled by in-game evidence is only this: nothing of the skin
-  stands IN FRONT of the triangle plane. (The centred ±0.025 reading and
-  the AVOID placement rule are both RETRACTED; the legacy `viewer/` still
-  centres — frozen port reference, its pins predate this ruling.)
+- **Flush mounts vs the skin — THE PRISM BODY EXTRUDES TOWARD THE SOLID
+  (v1.5.15, Oct 21 2026; supersedes v1.5.14's winding-relative law, which
+  the user's Jimmy murals disproved the same day)**: the game's OWN
+  authored craft (fixture 9000006001 / Triangle_Trial) carries skin
+  triangles EXACTLY coplanar with the faces its dashboards are mounted on,
+  wound OUTWARD; hullified Jimmy (jimminey.json — converted with the OLD
+  inward default, re-saved in game) carries them coplanar wound INWARD
+  (mural dashboards at offset 0.0000, winding dot −1.00) — and in BOTH
+  crafts the flush panels stay VISIBLE IN GAME. A flush Dashboard's whole
+  generated content is only 0..0.02 m proud of the face (board 0.01,
+  elements 0.02), so the prism can be neither centred on the plane
+  (±0.025 buries all of it — XenonViewer's `buildTriangles` copies that
+  centring verbatim "répartie de part et d'autre du plan", and buries
+  panels just the same — the dev viewer is NOT right here) nor keyed on
+  the WINDING (v1.5.14, disproved by Jimmy). The side is the SOLID side,
+  decided per triangle by `hull.ts skinSolidDirs`:
+  1. block probe (files WITH geometry blocks — partial skins like ISW,
+     airliner, testframe, Mach 6): probe the occupied-cell set at the
+     triangle's inset corners + centroid, ±0.06 along the dominant axis,
+     and vote (a centroid can straddle an opening where corners sit on
+     solid — the Mach 6 canopy case);
+  2. shell-parity vote (hullified files store NO geometry blocks): the
+     skin is the closed boundary of the old block hull — a sample 0.01 m
+     along +winding-normal from a face centroid lies inside the solid iff
+     a ray cast along the winding's SIGNED dominant axis crosses the skin
+     an ODD number of times (the sample's own face sits behind the ray
+     start and is excluded by construction). ≥80% agreement over ≤48
+     samples decides the whole file (hullify skins are uniformly wound by
+     construction); inconsistent = open skin = no global call. TWO
+     SHORTCUTS WERE MEASURED AND REJECTED: signed-volume sign (open
+     patches have origin-dependent volume — Triangle_Trial measures
+     −0.0176 despite its pinned-outward windings) and parallel-skin
+     column DENSITY counts (cabin clutter outvotes the wall's far face —
+     left in only as a tertiary tie-breaker);
+  3. parallel-skin column probe + majority vote for stragglers; default
+     −1 = the outward-winding law, which every in-game-authored skin and
+     every conversion since the v1.5.12 default obeys.
+  Verified against the REAL files (2D-coverage test: coplanar prism body
+  over a Dashboard content sample, 3 points per panel): jimminey 194
+  coverings / 2 residual bad (both a CORNER pixel of a mid soffit panel
+  grazing one cell quad — the murals are all clean), stratoLUNCH 3165/8,
+  testframe + corneronia + Triangle_Trial + ISW + SU-57 + F/A-18 + XYQ 0.
+  Pins in `hull.test.ts`: BEHIND-THE-PLANE caps, the mirrored body = +1
+  convex prism, the closed INWARD box flipping wholly (the Jimmy case),
+  and the deck block-probe flip. The v1.5.13 "keep clear" placement rule
+  (hullify `avoid:'parts'`) stays EXCISED — the game skins straight over
+  mounts, so no conversion-time special case belongs (user: "The keep
+  clear functionality is poison and shouldn't exist"). What stays
+  UNKNOWN: exactly how the game's compiled builder offsets/normalises the
+  prism (the 0.002 m seam is our z-fight guard, not format); settled by
+  in-game evidence: nothing of the skin stands in front of the plane on
+  either winding, and the game never moves stored anchors (below). (The
+  centred ±0.025 reading and the AVOID rule are both RETRACTED; the
+  legacy `viewer/` still centres — frozen port reference.)
 - **The game never moves stored anchors (byte-diffed Oct 20 2026)**: a
   hullified Jimmy re-saved in game (`fresh_jimmy_or_not` 11 960 tris vs
   `jimminey` 11 958) and the airliner copy (`blueprint - 2026-10-20T173944`
