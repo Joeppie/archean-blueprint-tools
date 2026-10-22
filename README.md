@@ -1,4 +1,4 @@
-# Archean Blueprint Tools · v1.5.24
+# Archean Blueprint Tools · v1.6.0
 
 **Reverse-engineered file format + a zero-build browser viewer/inspector for
 workshop craft of [Archean](https://store.steampowered.com/app/2941660/Archean/)**
@@ -32,6 +32,36 @@ Loads the ISW-241 fighter by default. Click any component to edit position,
 rotation and data fields with live 3D feedback; *Open file…* (or drag-drop)
 loads any `blueprint.json`, and **Save** writes it back byte-exact in the
 game's own compact JSON format, keeping the block/occupancy mirror in sync.
+
+## What the app editor does
+
+The Inspector app (the site root) is the actively developed editor. Beyond
+gallery/live-edit/save it ships:
+
+- **Build-friendly ground** — the ground pad FITS the craft and its grid
+  granularity rides zoom on the blueprint-cell ladder (0.25 m → 1.25 → 2.5 →
+  12.5 m; majors every 5). The **x = 0 line reads RED, the z = 0 line BLUE**,
+  ±-labelled at the ends: world orientation at a glance (file law: flat
+  plane x–z, **y is UP**, nose −z).
+- **Hover coordinate readout** — a small black label follows the cursor and
+  raytraces what it lands on: the visible surface's full snapped `x y z`
+  (wireframe measures through the hull — you measure what you see).
+- **Settable mirror axis** — ⚙ ▸ mirror axis X/Y/Z drives ⇄ twin placement
+  and block twins; every mirrored axis the craft shows (detected twin pairs,
+  the game's per-component `mirrorAxis` field) gets its overlay plane. The
+  uniform mirror rule propagates every edit — shape, paint, material,
+  delete — to the twin, and flags faux-mirror conflicts instead of half
+  applying.
+- **Real-time everything** — data sliders rebuild one part's real model per
+  frame (propellers, dashboards), joint handles ride the captured hinge
+  lines, subgrids swing with their masters; full **undo/redo** on every
+  mutation (Ctrl+Z keeps the camera for A/B comparing).
+- **Tools & analysis** — TOOLS ▸ dialogs (replace-all, hullify with the
+  game's authoring defaults, Sphere skin lattice hull planner with
+  deviation/lift previews), the lift & altitude widget (US Standard
+  Atmosphere 1976, vacuum/He/H₂ buoyancy, weight-limit ladder), flight and
+  wind-tunnel panels, and a searchable in-app **help manual** (Help ▸
+  Manual).
 
 ## What the viewer shows
 
@@ -150,7 +180,7 @@ say-so**: green tests or merged work never imply one.
 
 ## Ideas welcome — open an issue!
 
-This is v1.5.24: the format is decoded and the viewer is useful, but the good
+This is v1.6.0: the format is decoded and the viewer is useful, but the good
 ideas are not all in yet. Feature requests, format questions, and craft that
 render wrong (attach the `blueprint.json`) are all best filed as
 [issues](https://github.com/Joeppie/archean-blueprint-tools/issues) — that is
