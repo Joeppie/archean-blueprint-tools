@@ -409,6 +409,33 @@ on all, flat none, other fields identical, existing kept); `tooldoc.test.ts`
 writer-style pin; `e2e/tools.spec.ts` preview reads "shading smooth:1".
 SUPERSEDED v1.5.12: the DEFAULT is now flat + outward (the game's own
 freshly-authored triangles, fixture 9000006001 — see the v1.5.12 bullet).
+- **v1.6.2 SPHEROID ADDITIVE REWRITE (user verdict on v1.6.1: "all spheres
+  have edges with indentations where I can see a triangle is missing …
+  indentations create aerodynamic problems and actively damage volume — not
+  acceptable. Also the triangle mesh/skin looks bad and it's unnecessarily
+  complex"):** CUTTING into solid cells is BANNED geometry — v1.6.1's
+  wedges/tetras/coves replaced solid blocks, and any cut not ending flush
+  (tetra keeping 1/6 of a cell, a wedge run meeting a plateau, a cove carved
+  into a wall) IS a dent. `spheroid.ts` is now purely ADDITIVE: S = pure
+  cube staircase (merged boxes, never cut); bevels are placed into AIR cells
+  only, which can only ever BUMP the surface, never lower it: an air cell
+  with 2 adjacent solid neighbours → SLOPE ramp floor→wall (the full-face
+  pair {bottom,side} fixes the orientation uniquely — SLOPE_BY_PAIR built
+  from blockshapes isFullFace/getBlockFaceDirections), tapering to a PYRAMID
+  where the ramp RUN ends (its big slant is coplanar with the ramp, flush
+  join); an air cell with 3 mutually adjacent solid neighbours → INVERSE
+  CORNER filler (three full faces seat on floor + 2 walls). The corner tetra
+  family is deliberately UNUSED — no full face ⇒ can never seat flush.
+  THE PIN that makes dents impossible: `solid r=…m` asserts every non-cube
+  block occupies an AIR cell AND all its full-face directions touch solid
+  neighbours (flush seats ⇒ no crack/cavity under any bevel). Skin: the SAME
+  dent class came from snapping vertices to the NEAREST lattice point (some
+  land INSIDE the body → facets cut in) — snap is now outward-biased (pin:
+  no vertex has u<1); and the facet budget follows the craft size
+  (chord = max(1.5, rMean/3) — the in-game hull look is BIG calm panels, the
+  ISW airliner is 241 tris for 30 m; the v1.6.1 dense snap-noise is gone).
+  Still watertight (edge = exactly 2 tris), outward, smooth:1, 24 m axes.
+  Fixture 9000007001 regenerated; vitest 17 spheroid + 279 total, e2e 10/10.
 - **v1.6.1 SPHEROID REWORK (user verdict on v1.6.0: "the outside geometry is
   jagged … there are many indentations, this isn't acceptable. Can you maybe
   do it with just triangles instead … size needs much larger if we will

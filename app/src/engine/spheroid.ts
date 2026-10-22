@@ -1,51 +1,47 @@
 // spheroid.ts — generate a SPHEROID/ELLIPSOID out of blocks, or as a
-// hull-TRIANGLE skin (v1.6 tool; v1.6.1 rewrite per the user's verdict that
-// the first corner-mask matcher read "jagged … lots of indentations").
+// hull-TRIANGLE skin (v1.6 tool; v1.6.2 ADDITIVE rewrite).
 //
-// THE BLOCK SHAPE — a coherent staircase, then chamfer it.
-// A convex spheroid voxelised on the 0.25 m lattice IS a staircase of unit
-// steps — that is the resolution the lattice allows. The first version
-// matched every cell against the shape table INDEPENDENTLY (corner masks +
-// volume/IoU/gradient ranking), so a wedge could land beside a flat cap and
-// the mismatched seams read as indentations. v1.6.1 derives every shape from
-// the VOXEL NEIGHBOURHOOD instead, so neighbours agree by construction:
+// THE BLOCK SHAPE — a staircase that only ever GAINS material.
+// v1.6.0 matched cells against the shape table independently (indentations);
+// v1.6.1 derived shapes from the voxel neighbourhood but still CUT into
+// solid cells — and wherever such a cut did not end flush (corner tetras
+// keeping 1/6 of a cell, wedges whose ends met plateaus, coves carved into
+// walls) it left exactly the "a triangle is missing" gouges the user
+// rejected: dents damage volume and aerodynamics. v1.6.2 follows the in-game
+// building method, which is PROVABLY dent-free — a block placed into an AIR
+// cell can never lower the surface below the existing solid:
 //
-//   S = the solid cell set — SOLID: centre inside the ellipsoid (a digital
-//   solid of a convex body: sealed); SHELL: every cell the surface touches
-//   (a sealed one-cell skin).
-//   For each solid cell look at which of its SIX face neighbours are air:
-//     • none / an opposite pair / ≥ 4 exposed ▸ CUBE — flat walls and caps;
-//       the cubes then GREEDY-MERGE into the fewest big square boxes (the
-//       user's "100 % filled with the least square blocks"), split at the
-//       12-cell frame borders.
-//     • two ADJACENT faces, the edge CONVEX (the cell diagonally across it
-//       is air too) ▸ the edge of a step: a SLOPE (wedge) cuts that edge at
-//       45°, oriented by the true ellipsoid gradient. When the step also
-//       falls away at BOTH ridge ends (the diagonal shoulders of a round
-//       hull) ▸ a PYRAMID (triangle) tapers the ridge instead.
-//     • three faces (no opposite pair) = a corner of the staircase: every
-//       pair-diagonal air and the body diagonal air ▸ a CORNER tetra shaves
-//       the protruding corner; body diagonal solid but most pair-diagonals
-//       air ▸ an INVERSE CORNER coves the recessed corner.
-//     • concave edges and everything else ▸ CUBE.
-//   Every chamfer fits inside its own cell and only REMOVES material from a
-//   cell that already touches air, so the solid stays sealed, blocks never
-//   overlap, and the staircase reads as a bevelled hull using all four
-//   shape families exactly where each belongs — like in-game rounded builds.
+//   S = the solid cell set (centre inside the ellipsoid) — pure CUBES,
+//   merged into the fewest big boxes (never cut), split at frame borders.
+//   Bevels are then ADDED into air cells along the surface, seated by the
+//   FULL-FACE rule (every flush face of a bevel rests on a solid neighbour,
+//   so no crack or cavity can open between them):
+//     • an air cell touching solid on TWO ADJACENT faces (the cell above a
+//       step, against the wall) → a SLOPE ramp bridging floor to wall; the
+//       full-face pair (bottom + side) fixes the orientation uniquely.
+//       Where the step RUN ends, a PYRAMID tapers the ramp instead — its
+//       big slant is coplanar with the ramp, so the join stays flush.
+//     • an air cell touching solid on THREE mutually adjacent faces (an
+//       inside corner) → an INVERSE CORNER filler: its three full faces
+//       seat on floor + two walls, its slant rounds the corner outward.
+//     • everything else stays air.
+//   The hull is therefore a cube staircase whose every step is ramped and
+//   every inner corner rounded: bumpy at worst — NEVER dented. Convex
+//   corners keep their cube (an overfill bump); the corner tetra stays
+//   unused — it has no full face and can never seat flush.
 //
-// THE TRIANGLE SKIN — the zeppelin answer. Blocks cost one cell per 0.25 m
-// of surface; a hull-TRIANGLE skin (FORMAT §Hull triangles — the game draws
-// each triangle as a 0.05 m prism) costs one triangle per ~1 m² and goes as
-// smooth as the lattice allows: an ellipsoid UV grid snapped to the exact
-// vertex lattice (world = (g−6)·CELL; shared slots weld), OUTWARD winding
-// (the game's own authoring convention, v1.5.12), and the smooth:1 shading
-// bit — the game's sheet-hull convention (3732302108) that welds normals in
-// game, which is what makes a big airship read ROUNDED.
+// THE TRIANGLE SKIN — the smooth, huge, cheap mode (zeppelin). It carried
+// the same class of bug: snapping a mesh vertex to the NEAREST lattice point
+// pulled some vertices INSIDE the ellipsoid, so their facets cut in.
+// Vertices now snap to the nearest lattice point that stays ON/OUTSIDE the
+// surface — the skin can only ever bulge (volume-preserving outward) — and
+// the facet budget is deliberately coarse-but-even (arc-even rings, ~0.75 m
+// chord): fewer, calmer, flusher triangles instead of a dense noisy shell.
 
 import type { Block, Triangle } from './format';
 import { CELL, CELLS_PER_FRAME } from './format';
 import { blockFromCell } from './blocks';
-import { getTypeRotation, SHAPE, type ShapeId } from './blockshapes';
+import { getBlockFaceDirections, isFullFace, getTypeRotation, SHAPE, type ShapeId } from './blockshapes';
 import { MATERIAL_DENSITY } from './tools';
 
 export interface SpheroidSpec {
@@ -74,7 +70,7 @@ function unkey(k: number): [number, number, number] {
   return [x, y, z];
 }
 
-// ------------------------------------------------- shape orientation table
+// ------------------------------------------------- shape orientation tables
 
 function shapeOf(type: number): ShapeId {
   if (type === 0) return SHAPE.CUBE;
@@ -86,14 +82,10 @@ function shapeOf(type: number): ShapeId {
 
 /** One block type's cut OUTWARD unit normal (the direction the shape removes
  *  material) AFTER the type's orientation — the same ROTATIONS table
- *  blockshapes/getBlockPoints applies, so "which wedge goes where" is an
- *  exact rotation question with a table answer, never a guess. Canonical
- *  (blockshapes vertex transcription):
+ *  blockshapes/getBlockPoints applies. Canonical (blockshapes transcription):
  *    SLOPE keeps y+z ≤ 1                → removes toward (0, 1, 1)/√2
- *    CORNER = tetra kept at (1,0,0)     → removes toward (−1, 1, 1)/√3
- *    INVCORNER = cube − tetra at (1,1,1)→ removes toward (1, 1, 1)/√3
  *    PYRAMID cuts slants (0,1,1)/√2 and (−1,1,0)/√2 → the mean names the
- *      removed side. */
+ *      removed side. INVCORNER = cube − tetra at (1,1,1) → (1,1,1)/√3. */
 const TYPE_OUT: (readonly [number, number, number] | null)[] = (() => {
   const S = Math.SQRT1_2, T = Math.sqrt(1 / 3);
   const pv: [number, number, number] = [-S, 2 * S, S];
@@ -119,17 +111,49 @@ const TYPE_OUT: (readonly [number, number, number] | null)[] = (() => {
   return list;
 })();
 
-const FAMILY: Record<'slope' | 'corner' | 'pyramid' | 'invcorner', [number, number]> = {
-  slope: [1, 13], corner: [13, 21], pyramid: [21, 45], invcorner: [45, 53],
-};
+/** The type's FULL-FACE directions (faces covering a whole side of its box —
+ *  blockshapes isFullFace), rotated. A bevel seats its full faces on solid
+ *  neighbours; that is what makes an additive bevel flush and crack-free. */
+const TYPE_FULLDIRS: readonly (readonly string[])[] = (() => {
+  const list: string[][] = [];
+  for (let type = 0; type < 53; type++) {
+    const dirs = getBlockFaceDirections(type);
+    const full: string[] = [];
+    dirs.forEach((d, i) => {
+      if (d && isFullFace(type, i)) full.push(`${d[0]},${d[1]},${d[2]}`);
+    });
+    list.push(full.sort());
+  }
+  return list;
+})();
 
-/** The type of `family` whose cut normal best aligns with ghat (ties → the
- *  lowest type; on a mirror-symmetric solid the gradient is mirror-
- *  equivariant, so mirrored cells choose mirrored types). */
-function orient(family: keyof typeof FAMILY, ghat: readonly [number, number, number]): number {
-  const [lo, hi] = FAMILY[family]!;
-  let best = lo, bestD = -Infinity;
-  for (let t = lo; t < hi; t++) {
+const dirKey = (dirs: readonly (readonly number[])[]) =>
+  dirs.map(d => `${d[0]},${d[1]},${d[2]}`).sort().join('|');
+
+/** SLOPE type by its full-face PAIR (bottom + one side; the 12 slopes cover
+ *  all 12 adjacent pairs uniquely). */
+const SLOPE_BY_PAIR = new Map<string, number>();
+/** INVERSE CORNER type by its full-face TRIPLE (the 8 cover all corners). */
+const INVCORNERS_BY_TRIPLE = new Map<string, number>();
+/** PYRAMID types by their single full face (the floor it stands on). */
+const PYRAMIDS_BY_FLOOR = new Map<string, number[]>();
+for (let t = 1; t < 53; t++) {
+  const full = TYPE_FULLDIRS[t]!;
+  if (shapeOf(t) === SHAPE.SLOPE && full.length === 2) SLOPE_BY_PAIR.set(full.join('|'), t);
+  if (shapeOf(t) === SHAPE.INVCORNER && full.length === 3) INVCORNERS_BY_TRIPLE.set(full.join('|'), t);
+  if (shapeOf(t) === SHAPE.PYRAMID && full.length === 1) {
+    const arr = PYRAMIDS_BY_FLOOR.get(full[0]!) ?? [];
+    arr.push(t);
+    PYRAMIDS_BY_FLOOR.set(full[0]!, arr);
+  }
+}
+
+/** the type of `family` whose cut normal best aligns with ghat. */
+function orientBy(family: ShapeId, ghat: readonly [number, number, number],
+  candidates: readonly number[]): number {
+  let best = candidates[0]!, bestD = -Infinity;
+  for (const t of candidates) {
+    if (shapeOf(t) !== family) continue;
     const o = TYPE_OUT[t]!;
     const d = o[0] * ghat[0] + o[1] * ghat[1] + o[2] * ghat[2];
     if (d > bestD + 1e-9) { bestD = d; best = t; }
@@ -143,9 +167,7 @@ const AX = [
   [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1],
 ] as const;
 
-/** Unit outward gradient ∝ ((p−o)/r²) at the cell centre — the true surface
- *  fall. The voxel rules choose WHICH family, the gradient picks the
- *  orientation within it. */
+/** Unit outward gradient ∝ ((p−o)/r²) at a cell's centre. */
 function gradAt(cell: [number, number, number], o: number[], r: number[]): [number, number, number] {
   const v: [number, number, number] = [0, 0, 0];
   for (let a = 0; a < 3; a++)
@@ -162,85 +184,60 @@ const insidePt = (px: number, py: number, pz: number, o: number[], r: number[]) 
 const centreIn = (x: number, y: number, z: number, o: number[], r: number[]) =>
   insidePt(x + 0.5, y + 0.5, z + 0.5, o, r);
 
-/** fraction of the cell inside the ellipsoid — a 4×4×4 sub-sample (exact to
- *  ~±0.06 cell volume, plenty to choose cube vs inverse corner vs wedge vs
- *  pyramid vs tetra). */
-function fill(x: number, y: number, z: number, o: number[], r: number[]): number {
-  let n = 0;
-  for (let i = 0; i < 4; i++)
-    for (let j = 0; j < 4; j++)
-      for (let k = 0; k < 4; k++)
-        if (insidePt(x + (i + 0.5) / 4, y + (j + 0.5) / 4, z + (k + 0.5) / 4, o, r)) n++;
-  return n / 64;
-}
-
 /** does the surface CLIP this cell (boundary only)? some corner or face
- *  centre inside AND at least one corner outside — a cell whose eight
- *  corners are all inside is BURIED (deep interior), never shell. */
+ *  centre inside AND at least one corner outside (all-inside = buried). */
 function touches(x: number, y: number, z: number, o: number[], r: number[]): boolean {
   let cin = 0;
   for (const [dx, dy, dz] of [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 0], [1, 0, 1], [0, 1, 1], [1, 1, 1]] as const)
     if (insidePt(x + dx, y + dy, z + dz, o, r)) cin++;
-  if (cin === 8) return false;                        // buried: no surface here
-  if (cin > 0) return true;                           // mixed corners: clipped
+  if (cin === 8) return false;
+  if (cin > 0) return true;
   for (const [dx, dy, dz] of [[0.5, 0.5, 0], [0.5, 0.5, 1], [0.5, 0, 0.5], [0.5, 1, 0.5], [0, 0.5, 0.5], [1, 0.5, 0.5], [0.5, 0.5, 0.5]] as const)
-    if (insidePt(x + dx, y + dy, z + dz, o, r)) return true;   // tangent dip
+    if (insidePt(x + dx, y + dy, z + dz, o, r)) return true;
   return false;
 }
 
-/** The chamfer rule. air = the cell's exposed face directions (1..3, no
- *  opposite pair — the caller screens those), solidAt = neighbour lookup,
- *  ghat = true surface normal, fill = the cell's inside fraction.
- *  Returns the block TYPE (0 = keep the CUBE). The fraction picks how much
- *  to remove (cube → inverse corner → slope/pyramid → corner tetra), the
- *  faces + gradient pick which piece and which way it cuts:
- *    • two faces, convex edge: a SLOPE chamfers it; where the surface also
- *      falls along the ridge axis the wedge would leave a wind-cut shoulder,
- *      so a PYRAMID tapers it; a nearly-full cell keeps its CUBE (overfill
- *      reads as a bump, the slope's underfill would read as an indentation).
- *    • three faces: a recessed corner (body diagonal solid) is COVED with
- *      an inverse corner; a protruding one shaves by fill: inverse corner,
- *      tapered pyramid, or the corner tetra for the last tip lump.
- *  Concave edges and everything else keep the CUBE. */
-export function classify(
-  air: readonly (readonly [number, number, number])[],
-  solidAt: (dx: number, dy: number, dz: number) => boolean,
+/** The additive bevel rule for one AIR cell. solidAt = neighbour test, ghat
+ *  = the true surface normal there. Returns the block TYPE to ADD (0 = keep
+ *  the cell air). Every returned type seats its full faces on solid
+ *  neighbours — flush by construction, additive by construction. */
+export function bevelAt(
+  solidDirs: readonly (readonly number[])[],
   ghat: readonly [number, number, number],
-  fill = 0.5,
+  runIsRamp: (side: [number, number, number]) => boolean,
 ): number {
-  if (air.length !== 2 && air.length !== 3) return 0;   // flat / thin tip: cube
-  {
-    const l = Math.hypot(ghat[0], ghat[1], ghat[2]) || 1;
-    ghat = [ghat[0] / l, ghat[1] / l, ghat[2] / l];
+  const l = Math.hypot(ghat[0], ghat[1], ghat[2]) || 1;
+  const g: readonly [number, number, number] = [ghat[0] / l, ghat[1] / l, ghat[2] / l];
+  const opp = solidDirs.some(p => solidDirs.some(q =>
+    p[0]! === -q[0]! && p[1]! === -q[1]! && p[2]! === -q[2]!));
+  if (solidDirs.length === 3 && !opp) {
+    // inside corner: floor + two walls → inverse-corner filler (unique type)
+    const t = INVCORNERS_BY_TRIPLE.get(dirKey(solidDirs));
+    if (t !== undefined) return t;
+    return 0;
   }
-  if (air.length === 2) {
-    const [a, b] = air as [readonly [number, number, number], readonly [number, number, number]];
-    if (solidAt(a[0] + b[0], a[1] + b[1], a[2] + b[2])) return 0;   // concave edge: flat
-    if (fill >= 0.75) return 0;                                      // nearly full: keep the bump
-    // ridge axis = the third axis; a shoulder that also falls along it wants
-    // the tapering PYRAMID rather than a full-length wedge
-    const ridge = [0, 1, 2].find(ax => a[ax] === 0 && b[ax] === 0)!;
-    if (Math.abs(ghat[ridge]!) >= 0.35 && fill < 0.62) return orient('pyramid', ghat);
-    return orient('slope', ghat);
-  }
-  // three exposed faces, mutually adjacent (no opposite pair survived)
-  const [a, b, c] = air as unknown as [readonly [number, number, number], readonly [number, number, number], readonly [number, number, number]];
-  const diag = (u: readonly number[], v: readonly number[]) => solidAt(u[0]! + v[0]!, u[1]! + v[1]!, u[2]! + v[2]!);
-  const nAirPair = [!diag(a, b), !diag(b, c), !diag(c, a)].filter(Boolean).length;
-  const body = solidAt(a[0] + b[0] + c[0], a[1] + b[1] + c[1], a[2] + b[2] + c[2]);
-  if (body && nAirPair >= 2) return orient('invcorner', ghat);   // recess: cove it
-  if (fill >= 0.65) return orient('invcorner', ghat);             // shave one corner
-  // the DIAGONAL staircase band: the surface falls toward one or both side
-  // faces. Equal side falls (a pure diagonal step) → the tapering PYRAMID;
-  // an unequal fall → a SLOPE toward the steeper side. The top axis = the
-  // air face the gradient aligns with most.
-  const align = air.map(d => Math.abs(ghat[0] * d[0] + ghat[1] * d[1] + ghat[2] * d[2]));
-  const top = align.indexOf(Math.max(...align));
-  const sides = [0, 1, 2].filter(i => i !== top);
-  const s0 = Math.max(align[sides[0]!]!, 1e-6), s1 = Math.max(align[sides[1]!]!, 1e-6);
-  if (Math.min(s0, s1) / Math.max(s0, s1) >= 0.5 && fill >= 0.3) return orient('pyramid', ghat);
-  if (fill >= 0.28) return orient('slope', ghat);
-  return orient('corner', ghat);                                  // the last tip lump
+  if (solidDirs.length !== 2 || opp) return 0;
+  // step corner (floor + wall): a ramp; taper with a pyramid where the run
+  // of ramps ends along the ridge axis
+  const [a, b] = solidDirs as [readonly [number, number, number], readonly [number, number, number]];
+  const pairKey = [`${a[0]},${a[1]},${a[2]}`, `${b[0]},${b[1]},${b[2]}`].sort().join('|');
+  const slope = SLOPE_BY_PAIR.get(pairKey);
+  if (slope === undefined) return 0;
+  const ridge = [0, 1, 2].find(ax => a[ax] === 0 && b[ax] === 0)!;
+  const e1 = [0, 0, 0] as [number, number, number];
+  e1[ridge] = 1;
+  const e2 = [-e1[0]!, -e1[1]!, -e1[2]!] as [number, number, number];
+  if (runIsRamp(e1) && runIsRamp(e2)) return slope;
+  // a run end (or a single-cell step): the tapering PYRAMID. It stands on
+  // the floor (its one full face); among those types the cut normal decides
+  // which way it tapers. The floor = the solid direction least aligned with
+  // the outward gradient (the wall rises ALONG the surface, the floor faces
+  // against it).
+  const dots = [a, b].map(d => d[0] * g[0] + d[1] * g[1] + d[2] * g[2]);
+  const floorD = dots[0]! <= dots[1]! ? a : b;
+  const cands = PYRAMIDS_BY_FLOOR.get(`${floorD[0]},${floorD[1]},${floorD[2]}`) ?? [];
+  if (!cands.length) return slope;
+  return orientBy(SHAPE.PYRAMID, g, cands);
 }
 
 // ------------------------------------------------------------ the generator
@@ -249,7 +246,7 @@ export function classify(
 export interface SpheroidPlan {
   /** merged cube boxes in absolute cells (min corner + cell EXTENT) */
   interior: { cell: [number, number, number]; ext: [number, number, number] }[];
-  /** per-cell blocks: the chamfered shapes — plus plain unit CUBES where a
+  /** per-cell blocks: the additive bevels — plus plain unit CUBES where a
    *  shell mode has no merged interior */
   boundary: { cell: [number, number, number]; type: number }[];
 }
@@ -257,8 +254,8 @@ export interface SpheroidPlan {
 export function spheroidPlan(spec: SpheroidSpec): SpheroidPlan {
   const o = spec.center;
   const r = spec.radii.map(v => Math.max(v, CELL / 2)) as [number, number, number];
-  const g0 = [0, 1, 2].map(a => Math.floor((o[a]! - r[a]!) / CELL + 6) - 1) as number[];
-  const g1 = [0, 1, 2].map(a => Math.ceil((o[a]! + r[a]!) / CELL + 6) + 1) as number[];
+  const g0 = [0, 1, 2].map(a => Math.floor((o[a]! - r[a]!) / CELL + 6) - 2) as number[];
+  const g1 = [0, 1, 2].map(a => Math.ceil((o[a]! + r[a]!) / CELL + 6) + 2) as number[];
 
   // the solid set: SOLID = centre-inside (sealed digital solid of a convex
   // body); SHELL = every cell the surface touches (a sealed one-cell skin).
@@ -270,31 +267,39 @@ export function spheroidPlan(spec: SpheroidSpec): SpheroidPlan {
           solid.add(key(gx, gy, gz));
   const inS = (x: number, y: number, z: number) => solid.has(key(x, y, z));
 
-  const plain = new Set<number>();
-  const chamfer: { cell: [number, number, number]; type: number }[] = [];
-  for (const k of [...solid].sort((a, b) => a - b)) {
-    const [gx, gy, gz] = unkey(k);
-    const air = AX.filter(d => !inS(gx + d[0], gy + d[1], gz + d[2]));
-    if (!air.length) { plain.add(k); continue; }
-    const hasOpp = air.some(p => air.some(q =>
-      p[0] === -q[0] && p[1] === -q[1] && p[2] === -q[2]));
-    if (hasOpp || air.length >= 4) { plain.add(k); continue; }
-    const t = classify(air, (dx, dy, dz) => inS(gx + dx, gy + dy, gz + dz),
-      gradAt([gx, gy, gz], o, r), fill(gx, gy, gz, o, r));
-    if (t === 0) plain.add(k);
-    else chamfer.push({ cell: [gx, gy, gz], type: t });
-  }
+  // ---- additive bevels: walk the AIR cells hugging the surface ----------
+  const bevels: { cell: [number, number, number]; type: number }[] = [];
+  const solidDirsAt = (x: number, y: number, z: number) =>
+    AX.filter(d => inS(x + d[0], y + d[1], z + d[2]));
+  const isRampEligible = (x: number, y: number, z: number) => {
+    if (inS(x, y, z)) return false;
+    const sd = solidDirsAt(x, y, z);
+    if (sd.length !== 2) return false;
+    const opp = sd.some(p => sd.some(q => p[0] === -q[0] && p[1] === -q[1] && p[2] === -q[2]));
+    return !opp;
+  };
+  for (let gz = g0[2]!; gz <= g1[2]!; gz++)
+    for (let gy = g0[1]!; gy <= g1[1]!; gy++)
+      for (let gx = g0[0]!; gx <= g1[0]!; gx++) {
+        if (inS(gx, gy, gz)) continue;                 // air only — additive
+        const sd = solidDirsAt(gx, gy, gz);
+        if (sd.length < 2 || sd.length > 3) continue;
+        const t = bevelAt(sd, gradAt([gx, gy, gz], o, r),
+          (e) => isRampEligible(gx + e[0], gy + e[1], gz + e[2]));
+        if (t !== 0) bevels.push({ cell: [gx, gy, gz], type: t });
+      }
 
+  // ---- the solid itself: pure cubes, merged ------------------------------
   if (!spec.solid) {
-    // a shell has no merged interior: its plain pool cells ARE unit skin
-    // blocks (the inside faces read flat by construction)
-    for (const k of [...plain].sort((a, b) => a - b)) {
+    // a shell: its (boundary) cells ARE unit skin blocks, plus the bevels
+    const out: { cell: [number, number, number]; type: number }[] = [];
+    for (const k of [...solid].sort((a, b) => a - b)) {
       const [x, y, z] = unkey(k);
-      chamfer.push({ cell: [x, y, z], type: 0 });
+      out.push({ cell: [x, y, z], type: 0 });
     }
-    return { interior: [], boundary: chamfer };
+    return { interior: [], boundary: [...out, ...bevels] };
   }
-  return { interior: mergeBoxes(plain), boundary: chamfer };
+  return { interior: mergeBoxes(solid), boundary: bevels };
 }
 
 /** GREEDY 3D merge: x-runs → rectangles (y) → slabs (z), deterministic. */
@@ -346,7 +351,7 @@ function* frameChunks(box: SpheroidPlan['interior'][number]): Generator<[number,
 }
 
 /** THE block generator: every Block record of the spheroid (interior boxes
- *  first, then the chamfered skin, deterministic; frame-legal). */
+ *  first, then the additive bevels, deterministic; frame-legal). */
 export function spheroidBlocks(spec: SpheroidSpec): Block[] {
   const plan = spheroidPlan(spec);
   const out: Block[] = [];
@@ -367,8 +372,7 @@ export function spheroidBlocks(spec: SpheroidSpec): Block[] {
 // ----------------------------------------------------------- triangle skin
 
 export interface SpheroidSkinOptions {
-  /** target mesh edge length (m) the ring/segment counts aim for; 1 m keeps
-   *  the chord sagitta a fraction of a cell on anything but tiny caps */
+  /** target mesh edge length (m) the ring/segment counts aim for */
   chord?: number;
   /** the game's per-triangle shading: 'smooth' writes smooth:1 (the sheet-
    *  hull convention that welds normals in game — the ROUND look), 'flat'
@@ -379,10 +383,9 @@ export interface SpheroidSkinOptions {
 /** the UV grid sizes for a spheroid skin at the target chord. The parameter
  *  turns about the Y axis (rings stack in y, poles at ±ry), so the RINGS
  *  count the dominant meridional ARC (Ramanujan perimeter of the widest
- *  profile ellipse (max(rx,rz), ry) — a stretched side ellipsoid would be
- *  starved of rings by parametric spacing) and the SEGMENTS the widest
- *  ring's perimeter P(rx,rz). */
-export function spheroidSkinGrid(spec: SpheroidSpec, chord = 0.5): { rings: number; segs: number } {
+ *  profile ellipse) and the SEGMENTS the widest ring's perimeter — an
+ *  even, deliberately calm facet budget. */
+export function spheroidSkinGrid(spec: SpheroidSpec, chord = 0.75): { rings: number; segs: number } {
   const [rx, ry, rz] = spec.radii;
   const perim = (a: number, b: number) =>
     Math.PI * (3 * (a + b) - Math.sqrt((3 * a + b) * (a + 3 * b)));
@@ -394,19 +397,41 @@ export function spheroidSkinGrid(spec: SpheroidSpec, chord = 0.5): { rings: numb
 }
 
 /** THE triangle-skin generator: a watertight ellipsoid of hull triangles.
- *  Vertices are snapped to the exact lattice g (world = (g−6)·CELL, shared
- *  slots weld), the winding is OUTWARD (normal · (centroid − centre) ≥ 0),
- *  degeneracies collapsed by the snap are skipped, and records carry the
- *  game's INT lattice encoding (per-axis frame + 0..31 vertex window, five
- *  colour faces on the paint slot) — hullify's encodeTri rules. */
+ *  Vertices lie on the exact lattice g (world = (g−6)·CELL; shared slots
+ *  weld) snapped OUTWARD-BIASED — the nearest lattice point that stays
+ *  on/outside the surface — so no facet ever cuts INTO the body (the v1.6.1
+ *  skin dents came from nearest-point snapping pulling vertices inside).
+ *  Winding is OUTWARD, degeneracies collapsed by the snap are skipped, and
+ *  records carry the game's INT lattice encoding (per-axis frame + 0..31
+ *  vertex window, five colour faces on the paint slot). */
 export function spheroidTriangles(spec: SpheroidSpec, opts: SpheroidSkinOptions = {}): Triangle[] {
   const o = spec.center;
   const r = spec.radii.map(v => Math.max(v, CELL / 2)) as [number, number, number];
-  const { rings, segs } = spheroidSkinGrid(spec, opts.chord ?? 0.5);
+  // the facet budget deliberately grows with the craft: big clean panels on
+  // an airship (the in-game hull look — the ISW airliner skin is 241 tris
+  // for 30 m), finer only on small bodies where a coarse facet would read
+  // as a different shape. A fixed dense chord is what made the v1.6.1 skin
+  // look like a noisy shell.
+  const rMean = (r[0]! + r[1]! + r[2]!) / 3;
+  const chord = opts.chord ?? Math.max(1.5, rMean / 3);
+  const { rings, segs } = spheroidSkinGrid(spec, chord);
   const shade = opts.shade ?? 'smooth';
 
-  const snap = (p: readonly [number, number, number]): [number, number, number] =>
-    [Math.round(p[0] / CELL + 6), Math.round(p[1] / CELL + 6), Math.round(p[2] / CELL + 6)];
+  /** outward-biased lattice snap: nearest point with f(p) ≥ 1 */
+  const snap = (p: readonly [number, number, number]): [number, number, number] => {
+    const bx = Math.round(p[0] / CELL + 6), by = Math.round(p[1] / CELL + 6), bz = Math.round(p[2] / CELL + 6);
+    let best: [number, number, number] | null = null, bestD = Infinity;
+    let fb: [number, number, number] | null = null, fbD = Infinity;
+    for (let ox = -1; ox <= 1; ox++)
+      for (let oy = -1; oy <= 1; oy++)
+        for (let oz = -1; oz <= 1; oz++) {
+          const g: [number, number, number] = [bx + ox, by + oy, bz + oz];
+          const d = ((g[0] - 6) * CELL - p[0]) ** 2 + ((g[1] - 6) * CELL - p[1]) ** 2 + ((g[2] - 6) * CELL - p[2]) ** 2;
+          if (d < fbD) { fbD = d; fb = g; }
+          if (!insidePt(g[0], g[1], g[2], o, r) && d < bestD) { bestD = d; best = g; }
+        }
+    return best ?? fb!;
+  };
   const vert = (t: number, phi: number): [number, number, number] => {
     const s = Math.sqrt(Math.max(0, 1 - t * t));
     return snap([o[0]! + r[0]! * s * Math.cos(phi), o[1]! + r[1]! * t, o[2]! + r[2]! * s * Math.sin(phi)]);
@@ -421,9 +446,9 @@ export function spheroidTriangles(spec: SpheroidSpec, opts: SpheroidSkinOptions 
     const ux = gB[0] - gA[0], uy = gB[1] - gA[1], uz = gB[2] - gA[2];
     const wx = gC[0] - gA[0], wy = gC[1] - gA[1], wz = gC[2] - gA[2];
     const nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
-    const mx = (gA[0] + gB[0] + gC[0]) / 3 - 6 - o[0] / CELL;
-    const my = (gA[1] + gB[1] + gC[1]) / 3 - 6 - o[1] / CELL;
-    const mz = (gA[2] + gB[2] + gC[2]) / 3 - 6 - o[2] / CELL;
+    const mx = (gA[0] + gB[0] + gC[0]) / 3 - 6 - o[0]! / CELL;
+    const my = (gA[1] + gB[1] + gC[1]) / 3 - 6 - o[1]! / CELL;
+    const mz = (gA[2] + gB[2] + gC[2]) / 3 - 6 - o[2]! / CELL;
     const [A, B, C] = nx * mx + ny * my + nz * mz < 0 ? [gA, gC, gB] : [gA, gB, gC];
     const id = `${A}:${B}:${C}`;
     if (seen.has(id)) return;
@@ -432,9 +457,8 @@ export function spheroidTriangles(spec: SpheroidSpec, opts: SpheroidSkinOptions 
     if (t) tris.push(t);
   };
 
-  // ARC-EVEN ring placement: the parametric t = cos(lat) spacing is starved
-  // along the LONG side of a stretched ellipsoid — sample the meridian fine
-  // and invert by arc length (poles at t = ±1, ring radii follow t)
+  // ARC-EVEN ring placement (parametric t = cos(lat) is starved along the
+  // long side of a stretched ellipsoid)
   const rs = [...r].sort((x, y) => y - x);
   const tb = r[1]!;                                  // rings stack along y
   const N = 512;
@@ -507,8 +531,8 @@ export function skinArea(spec: SpheroidSpec): number {
 }
 
 /** live dialog readout numbers. BLOCKS: block count + kg = the FILLED cell
- *  volume × the material's per-cell-cube density. SKIN: triangle count +
- *  kg = surface area × the 0.05 m prism × the volumetric density. */
+ *  volume × the material's per-cell-cube density (bevels ADD volume).
+ *  SKIN: triangle count + kg = surface area × the 0.05 m prism. */
 export function spheroidStats(spec: SpheroidSpec, opts: SpheroidSkinOptions = {}): {
   blocks: number; interiorCells: number; shellCells: number; tris: number;
   kgBlocks: number; kgSkin: number;

@@ -61,7 +61,7 @@ async function stage(page: Page, over: { fill?: 'solid' | 'shell' | 'skin'; rx?:
   await expect(page.getByTestId('tool-dialog-spheroid')).toBeVisible();
   if (over.fill) await setFill(page, over.fill);
   for (const [k, v] of Object.entries(over))
-    if (k !== 'fill') await setRange(page, k, v);
+    if (k !== 'fill') await setRange(page, k, v as number);
   await page.getByTestId('tool-ok').click();
   await expect(page.getByTestId('tool-confirm-box')).toBeVisible();
   await page.getByTestId('tool-confirm').click();
@@ -98,7 +98,7 @@ test.describe('spheroid tool: dialog → movable ghost → cancel/build @ui', ()
 
     const g = await ghost(page);
     expect(g).not.toBeNull();
-    expect(g!.tris).toBeGreaterThan(150);                   // a real skin
+    expect(g!.tris).toBeGreaterThan(40);                      // a real skin
     expect(g!.shown).toBe(true);                            // the WIDGET is on it
 
     // MOVABLE: whole-cell nudge, always valid (skins never collide)
