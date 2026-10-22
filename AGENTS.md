@@ -923,6 +923,44 @@ Rules:
 - One live session per repo: before starting a NEW conversation here, have
   the current one merge to main, then `git worktree remove <it>` (stale
   entries: `git worktree prune`). `git worktree list` is the live map.
+- **ONE SERVER RULE (user rule 2026-10-22: "never more than one server"):
+  exactly ONE dev/preview server for this repo may run on the machine at
+  any time.** Two vite servers from different worktrees (5175 old-tree +
+  5199 stray) made the user browse a STALE tree and rightly asked "where is
+  the help? no menu?" — the new feature was on main the whole time, served
+  by the other port. The ritual:
+  ① BEFORE starting any dev server, sweep: `ss -tlnp` the ports (5175 +
+  any E2E_PORT) and resolve every listener's cwd (`readlink /proc/<pid>/cwd`)
+  + `pgrep -af vite` — KILL every repo-vite you find, whoever started it;
+  ② start exactly one, from the checkout the USER browses (normally the
+  main checkout), bound `--host 0.0.0.0` (Tailscale rule), and hand over
+  THE user's browsing URL — `http://<tailscale-ip>:5175/` (fetch the CURRENT
+  ip with `tailscale ip -4`; at the 2026-10-22 ruling it was
+  100.117.137.1, machine ark);
+  ③ VERIFY the served tree, never assume — e.g.
+  `curl -s localhost:5175/src/components/TopBar.tsx | grep -c Manual` must
+  match the feature set you just shipped (a port answering 200 says nothing
+  about WHICH tree it is);
+  ③b AFTER EVERY LANDED CHANGE the server must run the CURRENT tree: vite
+  HMR covers ordinary edits automatically, but a checkout switch, a worktree
+  move or a dependency change means RESTART it (kill + start + re-verify ③)
+  — the user always browses the up-to-date app, never a stale process;
+  ④ before ending the session, kill the server you started (and any stray
+  repo-vite) and re-run ①. Playwright's webServer (app/playwright.config
+  .ts) starts its OWN server only when the port is free (`reuseExistingServer
+  `!) — a foreign server on the port means the suite silently tests THAT
+  tree: always pass a dedicated E2E_PORT and sweep first.
+- **CLEAN UP STALE WORKTREES (user rule 2026-10-22: "always clean up stale
+  worktrees that have no work!!"):** at session START and again before
+  session END, `git worktree list`; for every sibling worktree check
+  `git -C <it> status --short` + `git -C <it> log main..HEAD` — no dirty
+  files AND no unmerged commits = no work: remove it
+  (`git worktree remove --force <it>` — the force covers the gitignored
+  node_modules), then `git worktree prune`. A worktree carrying work is
+  NEVER deleted — reconcile (merge) first. The shared stash lives in the
+  COMMON repo (`refs/stash`), so it survives worktree removal untouched.
+  Rationale: every live worktree is another session (or another zombie dev
+  server) that can fork the graph or squat the user's ports.
 
 ## Checkin gate (mandatory — the hook is the enforcement)
 Every commit passes `tests/pre-commit` (install once: `bash
