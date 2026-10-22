@@ -135,6 +135,10 @@ test.describe('tools menu + dialogs @ui', () => {
     const box = (await page.getByTestId('tool-dialog-sphere-skin').boundingBox())!;
     expect(box.height).toBeLessThanOrEqual(vp.height * 0.95);
     expect(box.width).toBeLessThanOrEqual(vp.width * 0.95);
+    // PHONE bottom clear zone (user 2026-10-22: mobile Brave's bottom
+    // toolbar paints OVER the page — "impossible to hit ok … there MUST be
+    // a margin"): the dialog's lower edge never enters the 48 px band
+    if (vp.width < 768) expect(vp.height - (box.y + box.height)).toBeGreaterThanOrEqual(48);
     // the MIDDLE scrolls (only when the content actually overflows), while
     // the OK button stays inside the viewport at BOTH scroll extremes
     const ok = page.getByTestId('tool-ok');

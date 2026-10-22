@@ -523,10 +523,29 @@ freshly-authored triangles, fixture 9000006001 — see the v1.5.12 bullet).
   spec.ts` (async preview polling + the built-skin widget) + `e2e/tools.
   spec.ts` (dialog ≤95 % of the viewport on desktop AND Pixel 7, `.tool-scroll`
   middle scrolls, footer pinned).
-  (3) THE DIALOG WINDOW: capped `max-h-[86dvh]` flex column — pinned title
-  bar / smooth-scrolling body (`overflow-y-auto overscroll-contain`,
-  `.tool-scroll` slim themed bar, no scroll-chaining) / pinned preview+
-  buttons footer; the confirm box rides the same body.
+  (3) THE DIALOG WINDOW: capped `max-h-[min(86dvh,100%)]` flex column —
+  pinned title bar / smooth-scrolling body (`overflow-y-auto
+  overscroll-contain`, `.tool-scroll` slim themed bar, no scroll-chaining) /
+  pinned preview+ buttons footer; the confirm box rides the same body.
+  **PHONE BOTTOM CLEAR ZONE** (user's Brave screenshot: "impossible to hit
+  ok … there MUST be a margin"): mobile Brave floats its action row AND nav
+  OVER the web content ~100 px up, so the backdrop reserves
+  `pb-[max(.75rem,calc(env(safe-area-inset-bottom)+7.5rem))]` on <768 px
+  (md:pb-3 on desktop) — and grid padding alone does NOT clip an auto-sized
+  row (measured: the dialog sat INTO the padding): the backdrop is
+  `grid-rows-[minmax(0,1fr)]`, which makes the dialog's `100%` cap = the
+  padding box. Pinned: dialog bottom ≥48 px above the viewport on Pixel 7.
+  (4) ⚖ FIX — a refusal is never a dead end (`ToolDef.fix`,
+  `applyAsync`-capable): the sphere tool's NEEDLE message prints the actual
+  axes and the button PROBES the worker for the nearest FULLY-storable
+  blend (shorten the long axis 0.9…0.2, then thicken the short ones; the
+  sphere always stores). WHY probing, not a rule — measured with the
+  shipped ladder: (1.5,1.5,12) r=8 OK but (2,2,20) r=10 REFUSED and even
+  (19.75,19.75,48) r=2.4 REFUSED (24 faces) while (32,32,48) stores — the
+  frame-aligned 31-cell window limit is size-dependent, NO clean ratio
+  exists (the old "~12×" claim in v1.5.17's note is hereby FALSIFIED).
+  Pinned e2e: refusal → ⚖ → preview resolves to a triangle line + OK
+  ENABLES (a probe storm of worker plans, 60 s budget).
 - **FAILED ATTEMPT — DO NOT RESURRECT blind: the Spheroid generator
   (2026-10-21/22).** (SUCCESSOR SHIPPED ABOVE — v1.5.17.) Three iterations (block-matching → staircase chamfers →
   additive bevels + a watertight triangle SKIN) were all reverted from main:

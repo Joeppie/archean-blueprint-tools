@@ -86,6 +86,21 @@ export interface ToolDef {
     stageAsync?: (f: ToolForm, bp: Blueprint) => Promise<PlacePayload>;
     commit: (f: ToolForm, payload: PlacePayload, offset: [number, number, number], ctx: EditCtx) => string;
   };
+  /** when the preview REFUSES the current form, a ONE-TAP repair the dialog
+   *  offers beside the readout (2026-10-22 user report: "I also cannot
+   *  place it, fix the error" — a refusal without a repair path is a dead
+   *  end; the needle rejection STAYS, ⚖ fixes the form instead) */
+  fix?: {
+    show: (preview: string) => boolean;
+    label: string;
+    hint?: string;
+    apply?: (f: ToolForm) => ToolForm;
+    /** background search (worker) for a placeable form — the dialog shows
+     *  '… fixing' while candidates are planned (2026-10-22: the storable
+     *  shape limit is NOT a clean ratio — measured, a 48 m ellipsoid needs
+     *  ratio ≤ ~1.5 while a 12 m one takes 8× — so ⚖ must PROBE, not guess) */
+    applyAsync?: (f: ToolForm) => Promise<ToolForm>;
+  };
 }
 
 // ------------------------------------------------------------------- TOOLS
@@ -347,6 +362,50 @@ export const TOOLS: ToolDef[] = [
           + `triangles at slot ${slot}`;
       },
     },
+    // THE REPAIR PATH (user 2026-10-22: "I also cannot place it, fix the
+    // error"): the refusal is HONEST (the game's 31-cell frame-aligned
+    // triangle window cannot store that flank) but it must not be a DEAD
+    // END. The storable limit is NOT a clean ratio — measured: an 8:1
+    // needle of length 12 m stores, a 2:1 ellipsoid of length 96 m does
+    // NOT — so ⚖ PROBES candidates through the worker and lands on the
+    // first FULLY placeable blend: first shortening the long axis (the
+    // zeppelin keeps its girth), then thickening the short axes.
+    fix: {
+      show: (p) => p.startsWith('nothing to place'),
+      label: '⚖ Fix the shape',
+      hint: 'probe the nearest shape the game can store',
+      applyAsync: async (f) => {
+        const ks = ['rx', 'ry', 'rz'] as const;
+        const a = ks.map(k => Math.max(0.5, +String(f[k]) || 0.5));
+        const top = Math.max(...a), bot = Math.min(...a);
+        if (top / bot < 1.02 && top >= 0.5) return { ...f };    // nothing to blend
+        const snap = (x: number) => Math.max(0.5, Math.round(x / 0.25) * 0.25);
+        const placeable = async (v: number[]) => {
+          const st = await sphereStatsAsync({ rx: v[0]!, ry: v[1]!, rz: v[2]! });
+          return st.skipped === 0 && st.tris > 0;
+        };
+        const formOf = (v: number[]) => {
+          const out = { ...f };
+          ks.forEach((k, i) => { out[k] = v[i] ?? a[i]!; });
+          return out;
+        };
+        // ① shorten the LONGEST axis (the zeppelin keeps its girth)
+        const ki = a.indexOf(top);
+        for (const s of [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2]) {
+          const v = [...a];
+          v[ki] = Math.max(bot, snap(top * s));
+          if (await placeable(v)) return formOf(v);
+          if (v[ki] === bot) break;
+        }
+        // ② thicken the SHORT axes toward the long one (a sphere always
+        // stores — this branch is guaranteed to terminate)
+        for (const t of [0.25, 0.4, 0.6, 0.8, 1]) {
+          const v = a.map(x => Math.max(x, snap(top * t)));
+          if (await placeable(v)) return formOf(v);
+        }
+        return { ...f };
+      },
+    },
   },
 ];
 
@@ -375,11 +434,15 @@ function skinOptions(f: ToolForm): SkinOptions {
  *  vacuum at sea level, helium or hydrogen") reads the envelope volume the
  *  convex hull encloses against the ISA real-world atmosphere (engine/atmo). */
 function spherePreviewLine(f: ToolForm, st: SphereStats): string {
-  if (st.skipped > 0)
+  if (st.skipped > 0) {
+    const ax = [Math.max(0.01, +String(f['rx']) || 0), Math.max(0.01, +String(f['ry']) || 0),
+      Math.max(0.01, +String(f['rz']) || 0)];
+    const ratio = Math.max(...ax) / Math.min(...ax);
     return `nothing to place — ${st.skipped} faces exceed the game’s `
-      + `31-cell triangle window (the lattice offers no points to cut them). `
-      + `A long axis over ~12× the short one cannot be skinned convexly — `
-      + `balance the axes.`;
+      + `31-cell triangle window. These axes ${ax.map(a => a % 1 ? +a.toFixed(2) : a).join('×')} m `
+      + `(long ${ratio.toFixed(1)}× the short) cannot be skinned convexly at this size — `
+      + `tap ⚖ Fix below: it probes the nearest shape the game CAN store.`;
+  }
   if (!st.tris) return 'nothing to place — the shape is too small for a hull';
   const mat = MATERIALS[+String(f['material']).slice(1)] ?? '?';
   const V = st.volumeM3;
@@ -456,6 +519,7 @@ export function ToolDialog(p: {
   const set = (k: string, v: ToolValue) => { setForm(f => ({ ...f, [k]: v })); setConfirmStep(false); };
 
   const [staging, setStaging] = useState(false);
+  const [fixing, setFixing] = useState(false);
   const confirmRun = async () => {
     if (!runnable || staging) { if (!staging) setConfirmStep(false); return; }
     if (p.tool.place && p.onPlaced) {
@@ -505,10 +569,11 @@ export function ToolDialog(p: {
 
   return (
     <div data-testid={`tool-backdrop-${p.tool.id}`}
-      className="absolute inset-0 z-40 grid place-items-center bg-black/60 p-3"
+      className="absolute inset-0 z-40 grid grid-rows-[minmax(0,1fr)] place-items-center bg-black/60 p-3
+                 pb-[max(0.75rem,calc(env(safe-area-inset-bottom)_+_7.5rem))] md:pb-3"
       onMouseDown={e => { if (e.target === e.currentTarget) p.onClose(); }}>
       <div ref={boxRef} data-testid={`tool-dialog-${p.tool.id}`} role="dialog" aria-label={p.tool.label}
-        className="ksp-win flex max-h-[86dvh] w-[440px] max-w-[92vw] flex-col rounded-lg px-4 py-3"
+        className="ksp-win flex max-h-[min(86dvh,100%)] w-[440px] max-w-[92vw] flex-col rounded-lg px-4 py-3"
         style={drag ? { transform: `translate(${drag.x}px, ${drag.y}px)` } : undefined}
         onKeyDown={e => { if (e.key === 'Enter') (confirmStep ? confirmRun() : runnable && setConfirmStep(true)); }}>
         {/* title bar = the drag handle (cursor-move, touch-safe) */}
@@ -524,9 +589,17 @@ export function ToolDialog(p: {
 
         {/* THE SCROLLING BODY (2026-10-22 user rule: "Fix the tool windows
             so they don't use 100% of view and that they can scroll smoothly
-            down"): the window caps at 86 dvh and ONLY this middle section
-            scrolls (overscroll-contain — the page behind never chains);
-            the title, the live readout and the buttons stay pinned. */}
+            down"): the window caps at 86 dvh (and NEVER past the backdrop's
+            padding box) and ONLY this middle section scrolls
+            (overscroll-contain — the page behind never chains); the title,
+            the live readout and the buttons stay pinned. On phones the
+            backdrop reserves a 120 px BOTTOM CLEAR ZONE (md:pb-3 restores
+            the plain 12 px on ≥768 px): mobile Brave floats its action row
+            AND nav bar OVER the web content (the action row sits ~100 px
+            above the content bottom — the user's screenshot showed the
+            icons biting into an 80 px margin), and a footer centered to the
+            layout viewport hid behind them — "It is impossible for me to
+            hit ok on phone in the tools window! There MUST be a margin". */}
         <div className="tool-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1"
              style={{ scrollBehavior: 'smooth' }}>
           {confirmStep ? (
@@ -586,6 +659,24 @@ export function ToolDialog(p: {
                 {preview || (planning ? 'planning…' : 'nothing to do')}
                 {planning && preview ? ' · planning…' : ''}
               </div>
+              {/* the refusal's ONE-TAP repair (see ToolDef.fix): the needle
+                  stays refused, but the user is never stranded (2026-10-22) */}
+              {p.tool.fix && !planning && p.tool.fix.show(preview) && (
+                <div className="mt-1.5 flex items-center gap-2">
+                  <button data-testid="tool-fix" title={p.tool.fix.hint} disabled={fixing}
+                    className="ksp-btn on shrink-0 px-2.5 py-[5px] text-[11px]"
+                    onClick={async () => {
+                      const fix = p.tool.fix!;
+                      if (fix.applyAsync) {
+                        setFixing(true);
+                        try { setForm(await fix.applyAsync(form)); } finally { setFixing(false); }
+                      } else if (fix.apply) setForm(f => fix.apply!(f));
+                    }}>
+                    {fixing ? '… probing' : p.tool.fix.label}
+                  </button>
+                  {p.tool.fix.hint && <span className="text-[10px] leading-snug text-ink-dim">{p.tool.fix.hint}</span>}
+                </div>
+              )}
               <div className="mt-2.5 flex justify-end gap-2">
                 <button data-testid="tool-cancel" className="ksp-btn px-3 py-1 text-[12px]" onClick={p.onClose}>
                   Cancel

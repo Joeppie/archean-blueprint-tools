@@ -126,6 +126,14 @@ test.describe('sphere skin tool: dialog → movable ghost → cancel/build @ui',
     await setNum(page, 'rz', 12);
     await expect(prev).toContainText(/nothing to place/, { timeout: 15_000 });
     await expect(page.getByTestId('tool-ok')).toBeDisabled();
+    // THE REPAIR (user 2026-10-22: "I also cannot place it, fix the error"):
+    // the refusal names the axes AND offers ⚖ Fix — a worker-side PROBE
+    // (the storable limit is size-dependent, not a clean ratio) lands on
+    // the nearest fully placeable shape and OK enables without hand-sliders.
+    await expect(prev).toContainText(/tap ⚖ Fix below/);
+    await page.getByTestId('tool-fix').click();
+    await expect(prev).toContainText(/triangles/, { timeout: 60_000 });
+    await expect(page.getByTestId('tool-ok')).toBeEnabled();
     await page.getByTestId('tool-cancel').click();
   });
 
