@@ -484,11 +484,17 @@ export function ToolDialog(p: {
   const dragRef = useRef<{ sx: number; sy: number; bx: number; by: number } | null>(null);
   const boxRef = useRef<HTMLDivElement | null>(null);
   const { onClose } = p;
+  // Esc closes — subscribed ONCE via a ref (same lesson as HelpDialog,
+  // v1.5.20: the Editor re-renders constantly during scene load; a
+  // deps-[onClose] resubscription made a REAL keypress miss the listener
+  // that the e2e Esc pins had always exercised — HelpDialog reproduced it).
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') closeRef.current(); };
     addEventListener('keydown', h);
     return () => removeEventListener('keydown', h);
-  }, [onClose]);
+  }, []);
 
   // ---- live preview: sync tools compute inline; HEAVY tools (previewAsync)
   // run DEBOUNCED off the main thread (latsphere worker) so the sliders keep

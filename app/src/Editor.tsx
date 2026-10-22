@@ -14,6 +14,7 @@ import TopBar, { type Mode } from './components/TopBar';
 import { BlockPanel, FlightPanel, TriPanel, WirePanel, WindPanel, brushSpec, placeBlock, type Brush } from './components/ModePanels';
 import { BlockPaint, CompPaint, SwatchGrid } from './components/ColorPanel';
 import { TOOLS, ToolDialog, type PlacePayload, type ToolForm } from './components/ToolsDialog';
+import HelpDialog from './components/HelpDialog';
 import { blockInfo, blockMirrorTwin, blockTwinIssues, cellIndex, cellOverlap,
   complementBlock, paintTwinPair } from './engine/blocks';
 import { cornerOf, triAt, triangleFromCorners } from './engine/tris';
@@ -67,6 +68,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   const [brush, setBrush] = useState<Brush>({ type: 0, sx: 0, sy: 0, sz: 0, slot: 51, material: 0 });
   // the TOOLS menu ▸ ToolDialog modal (v1.7): one open tool id at a time
   const [toolOpen, setToolOpen] = useState<string | null>(null);
+  // Help ▸ Manual… — the built-in markdown manual (v1.5.20)
+  const [helpOpen, setHelpOpen] = useState(false);
   // v1.6 PLACEMENT staging (Spheroid): the dialog confirmed, the engine
   // ghosts the cluster (movable, CELL-snapped) and the viewport label offers
   // ✕ Cancel / ✔ Build; the commit lands at the user's final cell offset.
@@ -818,7 +821,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         onOpen={openFile} onSave={save} onClose={onBack} onBack={onBack}
         onRefresh={craft ? () => { forceRef.current = true; setRetrySeq(s => s + 1); } : undefined}
         tools={TOOLS.map(t => ({ id: t.id, label: t.label, icon: t.icon }))}
-        onTool={id => setToolOpen(id)}>
+        onTool={id => setToolOpen(id)}
+        onHelp={() => setHelpOpen(true)}>
         <button data-testid="save-btn" onClick={() => save()}
           className={`ksp-btn shrink-0 px-2.5 py-1 text-[12px] ${dirty ? 'on font-semibold' : 'text-ink-dim'}`}>
           {dirty ? '● Save' : 'Save'}
@@ -986,6 +990,9 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
                 {toolMsg}
               </div>
             )}
+            {/* HELP ▸ the built-in manual (v1.5.20): markdown topics with a
+                word search; works with no craft open too */}
+            {helpOpen && <HelpDialog onClose={() => setHelpOpen(false)} />}
             {/* KSP bottom-left: the STATIC INFO black box (mass & CoM) */}
             {bp && staticInfo && (
               <div className="absolute bottom-2 left-3 z-[5]">

@@ -481,6 +481,40 @@ freshly-authored triangles, fixture 9000006001 — see the v1.5.12 bullet).
   SILHOUETTE from screenshot pixels (largest blob, scanline-filled area ÷
   its convex hull): 0.99–1.00 at every size — the picture itself has no
   bite. In-game judgment stays the user's (AGENTS: in-game pixels arbitrate).
+- **v1.5.20 HELP MANUAL (user: "document other things … add documentation in
+  a help menu, with search for words for topics, keep it simple, markdown,
+  generate html table, make it a manual so people can learn how to use it
+  effectively"):** the manual is PLAIN MARKDOWN in `app/src/help/topics/*.md`
+  (13 topics: start, interface, keys, parts, blocks, mirror, subgrids,
+  display, tools, hullify, sphere [the algorithm + its game-validity
+  limits], lift, wire, save). Conventions: file starts with `# Title` and an
+  optional `Tags:` line (extra SEARCH words the prose lacks — 'zeppelin'
+  must find the sphere topic); the registry `app/src/help/manual.ts`
+  (vite ?raw glob) strips those lines into metadata and scores a query over
+  title(8) + tag(4) + body(1×) — EVERY word must match (AND); a search never
+  blanks the article, it shows `help-noresults` honestly. Renderer
+  `app/src/engine/markdown.ts` is a deliberate ~150-line dependency-free
+  md→HTML (headings+slug ids, **bold**/*it*/`code`/https links, lists one
+  level deep, fenced code, blockquotes, and PIPE TABLES → real
+  `<table class="md-table">` with alignment — "generate html table"; ALL
+  input is escaped first, so a topic can never inject markup). UI:
+  TopBar `Help ▾ ▸ Manual…` → `components/HelpDialog.tsx` reuses the
+  approved tool-dialog chrome (86 dvh cap, draggable title, phone-safe
+  bottom zone, tool-scroll) with a search box + topic rail + rendered
+  article; the Help menu is prop-gated (`onHelp`) so older callers are
+  unaffected. ESC CLOSE LESSON (now pinned in HelpDialog AND retrofitted to
+  ToolDialog): a `useEffect(..., [onClose])` window-keydown subscription
+  MISSES real presses because the Editor re-renders during scene load and
+  the resubscription lands between keydown dispatches — subscribe ONCE with
+  a callback ref. Two parser bugs the unit suite caught the hard way (an
+  unbounded blockquote/nested-list loop OOM-killed the vitest worker):
+  every parser loop MUST advance `i`; `tools/mdcheck.mjs` renders every
+  shipped topic directly (node --experimental-strip-types) as the fast
+  watchdog. Pins: vitest `__tests__/markdown.test.ts` (escape-safety, table
+  alignment, topic-render sweep, search ranking/AND/empty) + e2e
+  `help.spec.ts` (@ui, desktop+pixel7: menu→dialog, h1, sphere LIMITS table
+  as a real <table>, search by title/tag/body word, Esc/✕/backdrop close,
+  dialog never outgrows the viewport).
 - **v1.5.18 SMOOTH TOOLS + THE LIFT & ALTITUDE WIDGET (user 2026-10-22:
   "shouldn't block slider if resizing it, delay it's calculation or do it
   background"; "tell us what lift would be if vacuum at sea level, helium or

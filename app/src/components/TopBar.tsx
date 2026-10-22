@@ -37,6 +37,8 @@ interface Props {
   /** Tools ▾ entries (the ToolDialog registry in ToolsDialog.tsx) */
   tools?: { id: string; label: string; icon: string }[];
   onTool?: (id: string) => void;
+  /** Help ▸ Manual… — the built-in markdown manual (HelpDialog.tsx) */
+  onHelp?: () => void;
   children?: React.ReactNode;              // right side: panel toggle etc.
 }
 
@@ -144,6 +146,18 @@ export default function TopBar(p: Props) {
             ))}
             <Sep />
             <div className="px-3 py-1.5 text-[10px] text-ink-dim">more tools to follow</div>
+          </>)}
+        </Menu>
+      )}
+
+      {/* HELP ▾ (v1.5.20 user request: "add documentation in a help menu …
+          make it a manual so people can learn how to use it effectively"):
+          the built-in markdown manual with word search over the topics */}
+      {p.onHelp && (
+        <Menu testid="help" label="Help ▾">
+          {close => (<>
+            <Item testid="help-manual" label="ⓘ  Manual & topics…" hint="search"
+              onClick={() => { close(); p.onHelp?.(); }} />
           </>)}
         </Menu>
       )}
