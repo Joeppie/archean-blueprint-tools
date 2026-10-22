@@ -123,6 +123,31 @@ test.describe('tools menu + dialogs @ui', () => {
     expect(d.triangles!.every(t => t.colors && (t.colors as number[]).length === 5)).toBe(true);
     await expect(page.getByTestId('tool-toast')).toContainText(/converted 5 blocks/);
   });
+
+  test('the dialog never fills the view; its body scrolls and the footer stays pinned', async ({ page }) => {
+    // 2026-10-22 user rule: "Fix the tool windows so they don't use 100% of
+    // view and that they can scroll smoothly down" — the sphere dialog is the
+    // tallest definition in the registry, so it is the probe. Runs on BOTH
+    // viewports of the suite (desktop Chrome + Pixel 7).
+    await openNew(page);
+    await openTool(page, 'sphere-skin');
+    const vp = page.viewportSize()!;
+    const box = (await page.getByTestId('tool-dialog-sphere-skin').boundingBox())!;
+    expect(box.height).toBeLessThanOrEqual(vp.height * 0.95);
+    expect(box.width).toBeLessThanOrEqual(vp.width * 0.95);
+    // the MIDDLE scrolls (only when the content actually overflows), while
+    // the OK button stays inside the viewport at BOTH scroll extremes
+    const ok = page.getByTestId('tool-ok');
+    await expect(ok).toBeInViewport();
+    const scroll = page.locator('.tool-scroll');
+    const overflows = await scroll.evaluate(el => el.scrollHeight - el.clientHeight);
+    if (overflows > 4) {
+      await scroll.evaluate(el => { el.scrollTop = el.scrollHeight; });
+      await expect.poll(() => scroll.evaluate(el => el.scrollTop)).toBeGreaterThan(0);
+    }
+    await expect(ok).toBeInViewport();
+    await page.getByTestId('tool-cancel').click();
+  });
 });
 
 test.describe('materials + RGB picker @ui', () => {

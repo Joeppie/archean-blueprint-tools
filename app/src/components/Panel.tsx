@@ -14,6 +14,7 @@ import type { EditCtx } from '../engine/edit';
 import type { Blueprint, BlueprintComponent, LatticeObj } from '../engine/format';
 import { subMasterEntries } from '../engine/subgrid';
 import { CompPaint } from './ColorPanel';
+import { LiftWidget } from './LiftWidget';
 
 export interface EditApi {
   compField(ctx: EditCtx, ci: number, key: 'alias' | 'module' | 'mirrorAxis', v: string | number): void;
@@ -143,6 +144,9 @@ export function VesselStats(p: { engine: Engine | null; bp: Blueprint; rev: numb
   const blocks = p.bp.data.blocks;
   const nBl = blocks.filter(b => (b.type ?? 0) !== 255).length;
   const secs: { id: string; title: string; body: React.ReactNode }[] = [];
+  // (the buoyancy planner rides this panel as its OWN collapsible row — see
+  // the LiftWidget return below — a fresh craft opens in VIEW, so the
+  // builder's lift readout must be reachable here too, user 2026-10-22)
   secs.push({
     id: 'mass', title: `Mass & CoM${mm ? ` · ${fmt(mm.total, 0)} kg` : ''}`,
     body: mm && (
@@ -194,6 +198,10 @@ export function VesselStats(p: { engine: Engine | null; bp: Blueprint; rev: numb
   p.rev;                                        // re-render on every edit
   return (
     <div data-testid="vessel-stats" className="divide-y divide-white/10">
+      {/* the builder's buoyancy planner (user 2026-10-22): a fresh craft
+          opens in VIEW, so the lift widget rides this side menu too — its
+          own collapsible row (localStorage-persisted), above the sections */}
+      <LiftWidget engine={p.engine} bp={p.bp} rev={p.rev} />
       {secs.map(s => (
         <div key={s.id}>
           <button data-testid={`vsec-${s.id}`} onClick={() => toggle(s.id)}
@@ -887,6 +895,11 @@ export default function Panel(p: Props) {
           </div>
         </div>
       )}
+      {/* the buoyancy planner (user 2026-10-22): a collapsible widget PART OF
+          THE BUILDER — envelope volume from the hull skin, vacuum/helium/
+          hydrogen lift at sea level, the per-altitude weight limit and the
+          equilibrium ("floats at") altitude per gas. Collapsed = one row. */}
+      <LiftWidget engine={p.engine} bp={p.bp} rev={p.rev} />
       {/* KSP order: the PARTS list leads, the context window follows, the
           camera/view settings sit at the bottom. Min-heights are load-
           bearing: when fixed content once exceeded the window the flex

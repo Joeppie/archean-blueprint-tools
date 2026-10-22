@@ -23,7 +23,9 @@ import {
   MATERIALS, blockMaterial, hullifyApply, hullifyPreview, replaceCensus, replaceColorDests,
   replaceSources, replaceAll, parseHexColor, paletteSlotNode, allocateSlot, nearestSlot,
 } from '../engine/tools';
-import { sphereSkinTris, sphereStats, shiftSkinTris, skinKg, type SphereSpec } from '../engine/latsphere';
+import { sphereSkinTris, sphereStats, shiftSkinTris, skinKg, type SphereSpec, type SphereStats } from '../engine/latsphere';
+import { sphereStatsAsync } from '../engine/latsphere-async';
+import { liftKg } from '../engine/atmo';
 
 export type ToolValue = string | number;
 export type ToolForm = Record<string, ToolValue>;
@@ -62,6 +64,13 @@ export interface ToolDef {
   initial: ToolForm;
   /** live readout above the buttons; '' = nothing to do (OK disabled) */
   preview: (f: ToolForm, bp: Blueprint) => string;
+  /** HEAVY preview (a planner run, not a census): the dialog defers it
+   *  (debounced) and awaits it OFF the main thread — the sliders never
+   *  stall while it thinks (user 2026-10-22: "shouldn't block slider if
+   *  resizing it … delay it's calculation or do it background"). When set,
+   *  the dialog uses THIS and shows a 'planning…' state (OK disabled until
+   *  the line lands); `preview` stays as the sync fallback contract. */
+  previewAsync?: (f: ToolForm, bp: Blueprint) => Promise<string>;
   /** mutate bp AND the doc; returns the line the dialog shows after running */
   run: (f: ToolForm, ctx: EditCtx) => string;
   /** PLACEMENT tool (the Spheroid line's framework, kept from the placement
@@ -290,24 +299,14 @@ export const TOOLS: ToolDef[] = [
       },
     ],
     initial: { rx: 1, ry: 1, rz: 1, shade: 'flat', material: 'm0', color: '#c9c9c9', colorhow: 'new' },
-    preview: (f) => {
-      const spec = sphereForm(f);
-      const st = sphereStats(spec);
-      if (st.skipped > 0)
-        return `nothing to place — ${st.skipped} faces exceed the game’s `
-          + `31-cell triangle window (the lattice offers no points to cut them). `
-          + `A long axis over ~12× the short one cannot be skinned convexly — `
-          + `balance the axes.`;
-      if (!st.tris) return 'nothing to place — the shape is too small for a hull';
-      const mat = MATERIALS[+String(f['material']).slice(1)] ?? '?';
-      // THE line that used to be missing on the Spheroid attempts: the
-      // deviation vs the IDEAL surface, printed BEFORE anything is built.
-      // sag ≤ ~0.06 m is sub-cell rounding; anything the eye could call a
-      // DENT shows up in this number.
-      return `${st.tris} triangles · dev −${st.sagInM.toFixed(2)}/+${st.maxOutM.toFixed(2)} m · `
-        + `skin ${f['shade'] === 'smooth' ? 'smooth:1' : 'flat'} · material ${mat} · `
-        + `≈ ${skinKg(st.areaM2, +String(f['material']).slice(1) || 0).toFixed(0)} kg`;
-    },
+    // THE line that used to be missing on the Spheroid attempts: the
+    // deviation vs the IDEAL surface, printed BEFORE anything is built.
+    // sag ≤ ~0.06 m is sub-cell rounding; anything the eye could call a
+    // DENT shows up in this number. Planning a hull is HEAVY, so the
+    // dialog uses previewAsync: debounced + worker-run (2026-10-22 user
+    // rule: "shouldn't block slider if resizing it … do it background").
+    preview: (f) => spherePreviewLine(f, sphereStats(sphereForm(f))),
+    previewAsync: async (f) => spherePreviewLine(f, await sphereStatsAsync(sphereForm(f))),
     run: () => 'use placement',            // place tools never run()
     place: {
       stage: (f) => ({ triangles: sphereSkinTris(sphereForm(f), {
@@ -354,6 +353,30 @@ function sphereForm(f: ToolForm): SphereSpec {
   return { rx: +String(f['rx']), ry: +String(f['ry']), rz: +String(f['rz']) };
 }
 
+/** kg, then tonnes past 10 t (one glance, no digit soup) */
+const fmtKg = (n: number) =>
+  Math.abs(n) >= 10000 ? `${(n / 1000).toFixed(1)} t` : `${n.toFixed(0)} kg`;
+
+/** The sphere tool's readout line, shared by the sync and the worker path.
+ *  The gas lift segment (user 2026-10-22: "tell us what lift would be if
+ *  vacuum at sea level, helium or hydrogen") reads the envelope volume the
+ *  convex hull encloses against the ISA real-world atmosphere (engine/atmo). */
+function spherePreviewLine(f: ToolForm, st: SphereStats): string {
+  if (st.skipped > 0)
+    return `nothing to place — ${st.skipped} faces exceed the game’s `
+      + `31-cell triangle window (the lattice offers no points to cut them). `
+      + `A long axis over ~12× the short one cannot be skinned convexly — `
+      + `balance the axes.`;
+  if (!st.tris) return 'nothing to place — the shape is too small for a hull';
+  const mat = MATERIALS[+String(f['material']).slice(1)] ?? '?';
+  const V = st.volumeM3;
+  return `${st.tris} triangles · dev −${st.sagInM.toFixed(2)}/+${st.maxOutM.toFixed(2)} m · `
+    + `skin ${f['shade'] === 'smooth' ? 'smooth:1' : 'flat'} · material ${mat} · `
+    + `≈ ${skinKg(st.areaM2, +String(f['material']).slice(1) || 0).toFixed(0)} kg · `
+    + `${V.toFixed(0)} m³ · lift@SL vacuum ${fmtKg(liftKg('vacuum', V, 0))}`
+    + ` · He ${fmtKg(liftKg('helium', V, 0))} · H₂ ${fmtKg(liftKg('hydrogen', V, 0))}`;
+}
+
 const replaceSourceOptions = (target: string) =>
   replaceSources(target === 'material' ? 'material' : 'colors').map(s => ({ id: s.id, label: s.label }));
 
@@ -391,8 +414,32 @@ export function ToolDialog(p: {
     return () => removeEventListener('keydown', h);
   }, [onClose]);
 
-  const preview = useMemo(() => p.tool.preview(form, p.bp), [p.tool, form, p.bp]);
-  const runnable = preview !== '' && !preview.startsWith('nothing');
+  // ---- live preview: sync tools compute inline; HEAVY tools (previewAsync)
+  // run DEBOUNCED off the main thread (latsphere worker) so the sliders keep
+  // sliding while the hull re-plans (2026-10-22 user rule). Stale answers
+  // are dropped by a sequence counter; OK stays disabled while planning.
+  const isAsync = !!p.tool.previewAsync;
+  const [asyncPrev, setAsyncPrev] = useState('');
+  const [planning, setPlanning] = useState(isAsync);
+  const seqRef = useRef(0);
+  const syncPreview = useMemo(
+    () => (isAsync ? '' : p.tool.preview(form, p.bp)),
+    [isAsync, p.tool, form, p.bp]);
+  useEffect(() => {
+    const run = p.tool.previewAsync;
+    if (!run) return;
+    const my = ++seqRef.current;
+    setPlanning(true);
+    const t = setTimeout(() => {
+      run(form, p.bp).then(
+        txt => { if (seqRef.current === my) { setAsyncPrev(txt); setPlanning(false); } },
+        () => { if (seqRef.current === my) { setAsyncPrev('nothing to place — the planner failed'); setPlanning(false); } },
+      );
+    }, 140);
+    return () => clearTimeout(t);
+  }, [p.tool, form, p.bp]);
+  const preview = isAsync ? asyncPrev : syncPreview;
+  const runnable = !planning && preview !== '' && !preview.startsWith('nothing');
   const set = (k: string, v: ToolValue) => { setForm(f => ({ ...f, [k]: v })); setConfirmStep(false); };
 
   const confirmRun = () => {
@@ -439,12 +486,12 @@ export function ToolDialog(p: {
       className="absolute inset-0 z-40 grid place-items-center bg-black/60 p-3"
       onMouseDown={e => { if (e.target === e.currentTarget) p.onClose(); }}>
       <div ref={boxRef} data-testid={`tool-dialog-${p.tool.id}`} role="dialog" aria-label={p.tool.label}
-        className="ksp-win w-[440px] max-w-[92vw] rounded-lg px-4 py-3"
+        className="ksp-win flex max-h-[86dvh] w-[440px] max-w-[92vw] flex-col rounded-lg px-4 py-3"
         style={drag ? { transform: `translate(${drag.x}px, ${drag.y}px)` } : undefined}
         onKeyDown={e => { if (e.key === 'Enter') (confirmStep ? confirmRun() : runnable && setConfirmStep(true)); }}>
         {/* title bar = the drag handle (cursor-move, touch-safe) */}
         <div data-testid="tool-drag"
-          className="ksp-label flex cursor-move touch-none select-none items-center gap-2
+          className="ksp-label flex shrink-0 cursor-move touch-none select-none items-center gap-2
                      border-b border-white/10 pb-1.5 text-[12px] text-accent"
           onPointerDown={headDown} onPointerMove={headMove} onPointerUp={headUp}
           onPointerCancel={headUp}>
@@ -453,26 +500,51 @@ export function ToolDialog(p: {
             className="ksp-btn ml-auto rounded px-1.5 text-[11px] text-ink-dim hover:text-accent">✕</button>
         </div>
 
-        {confirmStep ? (
-          /* THE CONFIRMATION BOX: exactly what the run will change, then
-             Back / Confirm — nothing else (no inert OK) */
-          <div data-testid="tool-confirm-box" className="pt-2">
-            <div className={`rounded border px-3 py-2 text-[11px] leading-snug
-                             ${p.tool.danger ? 'border-red-700/60 bg-red-950/40 text-red-100'
-                               : 'border-gold/40 bg-black/30 text-ink'}`}>
-              <div className="ksp-label pb-1 text-[11px] font-semibold text-gold">
-                {p.tool.icon} {p.tool.label} — this will
-              </div>
-              <div data-testid="tool-preview" className="tabular-nums">{preview}</div>
-              {p.tool.danger && (
-                <div data-testid="tool-warning" className="pt-1.5 text-[10px] text-red-200">
-                  This rewrites hull geometry in one go.
+        {/* THE SCROLLING BODY (2026-10-22 user rule: "Fix the tool windows
+            so they don't use 100% of view and that they can scroll smoothly
+            down"): the window caps at 86 dvh and ONLY this middle section
+            scrolls (overscroll-contain — the page behind never chains);
+            the title, the live readout and the buttons stay pinned. */}
+        <div className="tool-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1"
+             style={{ scrollBehavior: 'smooth' }}>
+          {confirmStep ? (
+            /* THE CONFIRMATION BOX: exactly what the run will change
+               (no inert OK — the form is behind this step) */
+            <div data-testid="tool-confirm-box" className="pt-2">
+              <div className={`rounded border px-3 py-2 text-[11px] leading-snug
+                               ${p.tool.danger ? 'border-red-700/60 bg-red-950/40 text-red-100'
+                                 : 'border-gold/40 bg-black/30 text-ink'}`}>
+                <div className="ksp-label pb-1 text-[11px] font-semibold text-gold">
+                  {p.tool.icon} {p.tool.label} — this will
                 </div>
-              )}
-              <div className="pt-1.5 text-[10px] text-ink-dim">
-                You can take it back afterwards with Edit ▸ Undo (Ctrl+Z).
+                <div data-testid="tool-preview" className="tabular-nums">{preview}</div>
+                {p.tool.danger && (
+                  <div data-testid="tool-warning" className="pt-1.5 text-[10px] text-red-200">
+                    This rewrites hull geometry in one go.
+                  </div>
+                )}
+                <div className="pt-1.5 text-[10px] text-ink-dim">
+                  You can take it back afterwards with Edit ▸ Undo (Ctrl+Z).
+                </div>
               </div>
             </div>
+          ) : (
+            <>
+              <p className="pt-1.5 text-[11px] leading-snug text-ink-dim">{p.tool.blurb}</p>
+
+              {/* the generated field grid: label ▸ control, one row per definition */}
+              <div className="grid grid-cols-[92px_1fr] items-start gap-x-2 gap-y-1.5 pt-2.5">
+                {p.tool.fields.filter(f => !f.showIf || f.showIf(form)).map(f => (
+                  <FieldRow key={f.key} def={f} value={form[f.key]} form={form} onSet={set} />
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* pinned FOOTER: live readout + the buttons — always reachable */}
+        <div className="shrink-0">
+          {confirmStep ? (
             <div className="mt-2.5 flex justify-end gap-2">
               <button data-testid="tool-back" className="ksp-btn px-3 py-1 text-[12px]"
                 onClick={() => setConfirmStep(false)}>
@@ -483,35 +555,27 @@ export function ToolDialog(p: {
                 {p.tool.place ? '✓ Confirm & place' : <>✓ Confirm &amp; run</>}
               </button>
             </div>
-          </div>
-        ) : (
-          <>
-            <p className="pt-1.5 text-[11px] leading-snug text-ink-dim">{p.tool.blurb}</p>
-
-            {/* the generated field grid: label ▸ control, one row per definition */}
-            <div className="grid grid-cols-[92px_1fr] items-start gap-x-2 gap-y-1.5 pt-2.5">
-              {p.tool.fields.filter(f => !f.showIf || f.showIf(form)).map(f => (
-                <FieldRow key={f.key} def={f} value={form[f.key]} form={form} onSet={set} />
-              ))}
-            </div>
-
-            <div data-testid="tool-preview"
-              className={`mt-2.5 border-t border-white/10 pt-2 text-[11px] tabular-nums
-                          ${runnable ? 'text-gold' : 'text-ink-dim'}`}>
-              {preview || 'nothing to do'}
-            </div>
-            <div className="mt-2.5 flex justify-end gap-2">
-              <button data-testid="tool-cancel" className="ksp-btn px-3 py-1 text-[12px]" onClick={p.onClose}>
-                Cancel
-              </button>
-              <button data-testid="tool-ok" disabled={!runnable}
-                className={`ksp-btn px-3 py-1 text-[12px] ${runnable ? 'on' : ''}`}
-                onClick={() => setConfirmStep(true)}>
-                OK — review &amp; confirm
-              </button>
-            </div>
-          </>
-        )}
+          ) : (
+            <>
+              <div data-testid="tool-preview"
+                className={`mt-2.5 border-t border-white/10 pt-2 text-[11px] tabular-nums
+                            ${runnable ? 'text-gold' : 'text-ink-dim'}`}>
+                {preview || (planning ? 'planning…' : 'nothing to do')}
+                {planning && preview ? ' · planning…' : ''}
+              </div>
+              <div className="mt-2.5 flex justify-end gap-2">
+                <button data-testid="tool-cancel" className="ksp-btn px-3 py-1 text-[12px]" onClick={p.onClose}>
+                  Cancel
+                </button>
+                <button data-testid="tool-ok" disabled={!runnable}
+                  className={`ksp-btn px-3 py-1 text-[12px] ${runnable ? 'on' : ''}`}
+                  onClick={() => setConfirmStep(true)}>
+                  OK — review &amp; confirm
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -5,12 +5,16 @@
 // archived branch unchanged; the VERTICES are the fresh lattice convex-hull
 // shrinkwrap (engine/latsphere.ts) — a convex polyhedron cannot indent.
 //  • the dialog previews triangle count + THE DEVIATION LINE (dev −sag/+out m)
-//    and the size sliders retune the plan LIVE;
+//    and the size sliders retune the plan — the planning runs DEBOUNCED in a
+//    WORKER (2026-10-22: "shouldn't block slider if resizing it"), so the
+//    suite READS THE PREVIEW BY POLLING, never as a single shot;
 //  • OK ▸ Confirm CLOSES the dialog and opens a MOVABLE ghost skin on the
 //    widget with the ✕ Cancel / ✔ Build label (a skin never collides);
 //  • ✔ Build writes every triangle into bp AND the doc (loads strictly
 //    increase — the AGENTS repaint rule; Ctrl+Z reverts the whole skin as
 //    ONE step; '+ new palette slot' resolves the paint at Build);
+//  • the built skin feeds the builder's Lift & altitude widget (vacuum /
+//    helium / hydrogen envelope readout, engine/atmo.ts);
 //  • flat is the shipped shading default (the game's authored convention,
 //    v1.5.12) — smooth:1 is the opt-in; ✕ Cancel and Esc leave the file
 //    byte-untouched.
@@ -73,23 +77,28 @@ const toastCount = async (page: Page) =>
   +(await toastText(page))!.match(/: (\d+) /)![1]!;
 
 test.describe('sphere skin tool: dialog → movable ghost → cancel/build @ui', () => {
-  test('the sliders retune the plan LIVE and the preview prints the deviation line', async ({ page }) => {
+  test('the sliders retune the plan (worker) and the preview prints the deviation line', async ({ page }) => {
     await openNew(page);
     await page.getByTestId('tools-menu').click();
     await page.getByTestId('tool-sphere-skin').click();
-    await expect(page.locator('[data-testid="tool-preview"]')).toContainText(/triangles/);
+    const prev = page.locator('[data-testid="tool-preview"]');
+    await expect(prev).toContainText(/triangles/);
     // THE line the Spheroid attempts never had: deviation vs the ideal surface
-    await expect(page.locator('[data-testid="tool-preview"]')).toContainText(/dev −0\.\d\d\/\+0\.\d\d m/);
-    const small = +(await page.locator('[data-testid="tool-preview"]').textContent())!
-      .match(/(\d+) triangles/)![1]!;
+    await expect(prev).toContainText(/dev −0\.\d\d\/\+0\.\d\d m/);
+    // the gas readout (user 2026-10-22): vacuum / helium / hydrogen at SL
+    await expect(prev).toContainText(/lift@SL vacuum .* · He .* · H₂ /);
+    const small = +(await prev.textContent())!.match(/(\d+) triangles/)![1]!;
     await setRange(page, 'rx', 8);
     await setRange(page, 'ry', 8);
     await setRange(page, 'rz', 8);
-    const big = +(await page.locator('[data-testid="tool-preview"]').textContent())!
-      .match(/(\d+) triangles/)![1]!;
-    expect(big).toBeGreaterThan(small * 8);                  // area grows r²
+    // the planner is ASYNC (worker + debounce): poll the readout, never a
+    // single shot — the stale line lags on purpose so the slider keeps sliding
+    await expect.poll(async () => {
+      const m = ((await prev.textContent()) ?? '').match(/(\d+) triangles/);
+      return m ? +m[1]! : 0;
+    }, { timeout: 15_000 }).toBeGreaterThan(small * 8);
     // and the sag stays round at zeppelin size (the pin the old suites lacked)
-    await expect(page.locator('[data-testid="tool-preview"]')).toContainText(/dev −0\.0\d\/\+0\.\d\d m/);
+    await expect(prev).toContainText(/dev −0\.0\d\/\+0\.\d\d m/);
     await page.getByTestId('tool-cancel').click();
   });
 
@@ -97,13 +106,15 @@ test.describe('sphere skin tool: dialog → movable ghost → cancel/build @ui',
     await openNew(page);
     await page.getByTestId('tools-menu').click();
     await page.getByTestId('tool-sphere-skin').click();
+    const prev = page.locator('[data-testid="tool-preview"]');
     // a 20 m radius is over the slider-free planning range — the box takes it
     await setNum(page, 'rx', 20);
     await setNum(page, 'ry', 20);
     await setNum(page, 'rz', 20);
-    const big = +(await page.locator('[data-testid="tool-preview"]').textContent())!
-      .match(/(\d+) triangles/)![1]!;
-    expect(big).toBeGreaterThan(5000);                       // zeppelin-plus
+    await expect.poll(async () => {
+      const m = ((await prev.textContent()) ?? '').match(/(\d+) triangles/);
+      return m ? +m[1]! : 0;
+    }, { timeout: 30_000 }).toBeGreaterThan(5000);              // zeppelin-plus
     await page.getByTestId('tool-cancel').click();
     // an extreme needle exceeds the game's 31-cell window with no lattice
     // cut possible → the preview refuses and OK stays DISABLED (never a
@@ -113,7 +124,7 @@ test.describe('sphere skin tool: dialog → movable ghost → cancel/build @ui',
     await setNum(page, 'rx', 0.5);
     await setNum(page, 'ry', 1);
     await setNum(page, 'rz', 12);
-    await expect(page.locator('[data-testid="tool-preview"]')).toContainText(/nothing to place/);
+    await expect(prev).toContainText(/nothing to place/, { timeout: 15_000 });
     await expect(page.getByTestId('tool-ok')).toBeDisabled();
     await page.getByTestId('tool-cancel').click();
   });
@@ -154,6 +165,25 @@ test.describe('sphere skin tool: dialog → movable ghost → cancel/build @ui',
     // PAINT: '+ new palette slot' wrote the chosen RGB into a NEW slot
     const colors = (await bpData(page)).colors ?? [];
     expect(colors.filter(c => c).length).toBeGreaterThanOrEqual(1);
+    // THE BUILDER'S LIFT WIDGET (user 2026-10-22): the built skin IS the
+    // envelope — the collapsible row now reads its volume and the vacuum
+    // lift at sea level, and the opened body lists all three gases.
+    // (On a PHONE the side panel opens collapsed: ‹ tab first.)
+    if (await page.getByTestId('lift-widget').count() === 0)
+      await page.getByTestId('panel-tab').click();
+    await expect(page.getByTestId('lift-widget')).toBeVisible();
+    await expect(page.getByTestId('lift-toggle')).toContainText(/vacuum \d+/);
+    await page.getByTestId('lift-toggle').click();
+    const vol = +((await page.getByTestId('lift-volume').textContent())!.match(/([\d.,]+)/)![1]!
+      .replace(/,/g, ''));
+    expect(vol).toBeGreaterThan(7);        // the 2×1×1 m ellipsoid ≈ 8.4 m³
+    for (const gas of ['vacuum', 'helium', 'hydrogen'])
+      await expect(page.getByTestId(`lift-row-${gas}`)).toContainText(/lift|kg|t|—/);
+    // vacuum lift ≈ 1.225 kg/m³ · volume (±1 kg of display rounding)
+    const vacKg = Math.round(vol * 1.225);
+    await expect(page.getByTestId('lift-row-vacuum')).toContainText(
+      new RegExp(`${vacKg - 1}|${vacKg}|${vacKg + 1} kg`));
+    await page.getByTestId('lift-toggle').click();   // collapse again (persisted)
     // the repaint pin (AGENTS: data assertions cannot pin a repaint)
     await expect.poll(() => loads(page), { timeout: 10_000 }).toBeGreaterThan(l0);
     // one Undo = the whole skin back (the doc mirrored EVERY insert)

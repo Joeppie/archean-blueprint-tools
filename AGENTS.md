@@ -481,6 +481,45 @@ freshly-authored triangles, fixture 9000006001 — see the v1.5.12 bullet).
   SILHOUETTE from screenshot pixels (largest blob, scanline-filled area ÷
   its convex hull): 0.99–1.00 at every size — the picture itself has no
   bite. In-game judgment stays the user's (AGENTS: in-game pixels arbitrate).
+- **v1.5.18 SMOOTH TOOLS + THE LIFT & ALTITUDE WIDGET (user 2026-10-22:
+  "shouldn't block slider if resizing it, delay it's calculation or do it
+  background"; "tell us what lift would be if vacuum at sea level, helium or
+  hydrogen, make a collapsible widget part of the builder … performance/
+  weight limit at altitudes/equilibrium. Archean uses real world data";
+  "Fix the tool windows so they don't use 100% of view and that they can
+  scroll smoothly down"):**
+  (1) `ToolDef.previewAsync` — a HEAVY live readout the dialog runs DEBOUNCED
+  (140 ms) and AWAITED OFF-THREAD (`engine/latsphere-async.ts` → a module
+  worker running the pure `sphereStats`; request-id correlated, sequence-
+  guarded, sync fallback when no Worker). The sphere-skin sliders never
+  stall; while pending the footer keeps the last line + 'planning…' and OK
+  is DISABLED (`runnable = !planning && …`). The confirm box shows the
+  RESOLVED line (e2e reads previews by POLLING now, never a single shot).
+  (2) `engine/atmo.ts` — the U.S. Standard Atmosphere 1976 layer table
+  (barometric formula per layer, real lapse rates; clamps to 84 852 m) +
+  ideal-gas buoyancy: lift(V,h) = V·(ρ_air − ρ_gas) for vacuum/helium/
+  hydrogen (real molar masses), the equilibrium ("floats at") altitude by
+  monotone bisection (sinks/ceiling branches explicit), and
+  `envelopeVolume(triangles)` — the closed-skin divergence sum on the EXACT
+  FORMAT lattice (hullVertex), winding-agnostic. The SPHERE preview prints
+  the volume + lift@SL per gas. THE WIDGET: `components/LiftWidget.tsx`, a
+  collapsible ▾/▸ row (persisted `archean-app-lift-open`) inside the builder
+  panel AND the VIEW VesselStats (a fresh craft opens in VIEW): envelope
+  from the hull skin, per-gas lift@SL / margin / equilibrium, and the
+  weight-limit ladder (max floatable total mass at SL/2/5/11/20/32 km;
+  engine mass = the same calibrated massReport as StaticInfo). NOTE the
+  triangle array MUTATES IN PLACE — useMemo on its REFERENCE is a stale-
+  forever trap; key the memo on `rev` (the widget's first bug, caught by
+  the pixel7 pin). Pins: vitest `atmo.test.ts` (17: ISA published values
+  per layer, handbook SL lifts 1.225/1.056/1.140 kg·m⁻³, solver branches,
+  tetra/cube/sphere-skin volumes vs the planner's own) + `e2e/sphereskin.
+  spec.ts` (async preview polling + the built-skin widget) + `e2e/tools.
+  spec.ts` (dialog ≤95 % of the viewport on desktop AND Pixel 7, `.tool-scroll`
+  middle scrolls, footer pinned).
+  (3) THE DIALOG WINDOW: capped `max-h-[86dvh]` flex column — pinned title
+  bar / smooth-scrolling body (`overflow-y-auto overscroll-contain`,
+  `.tool-scroll` slim themed bar, no scroll-chaining) / pinned preview+
+  buttons footer; the confirm box rides the same body.
 - **FAILED ATTEMPT — DO NOT RESURRECT blind: the Spheroid generator
   (2026-10-21/22).** (SUCCESSOR SHIPPED ABOVE — v1.5.17.) Three iterations (block-matching → staircase chamfers →
   additive bevels + a watertight triangle SKIN) were all reverted from main:
