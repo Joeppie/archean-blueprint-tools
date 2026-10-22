@@ -6,7 +6,8 @@
 //
 // The envelope is the craft's OWN hull-triangle skin (engine/atmo
 // envelopeVolume — the exact FORMAT lattice, divergence-theorem volume),
-// the mass is the same calibrated model the StaticInfo card uses, and the
+// the mass is the game's own mass model (engine/mass.ts — the same number
+// the StaticInfo card shows, hull SKIN included since v1.7.1), and the
 // air is the real ISA table (the game floats craft on real-world numbers).
 // A collapsible row under the panel header: one glance shows which gas at
 // which altitude still carries the craft — open it for the per-altitude

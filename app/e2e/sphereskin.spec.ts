@@ -137,9 +137,17 @@ test.describe('sphere skin tool: dialog → movable ghost → cancel/build @ui',
     await page.getByTestId('tool-cancel').click();
   });
 
+  /** the engine's LIVE mass report (the StaticInfo card's source) */
+  const massReport = (page: Page) => page.evaluate(() =>
+    (window as unknown as { __ARCHEAN__: { engine: { massReport: () =>
+      { total: number; families: { skin: number } } | null } } })
+      .__ARCHEAN__.engine.massReport());
+
   test('OK ghosts a closed skin; Build writes flat hull triangles + a new slot; undo reverts', async ({ page }) => {
     await openNew(page);
     const trisBefore = ((await bpData(page)).triangles ?? []).length;
+    const m0 = await massReport(page);               // skin family empty before
+    expect(m0!.families.skin).toBe(0);
     const l0 = await loads(page);
     await stage(page, { rx: 2, ry: 1, rz: 1 });
 
@@ -192,6 +200,18 @@ test.describe('sphere skin tool: dialog → movable ghost → cancel/build @ui',
     await expect(page.getByTestId('lift-row-vacuum')).toContainText(
       new RegExp(`${vacKg - 1}|${vacKg}|${vacKg + 1} kg`));
     await page.getByTestId('lift-toggle').click();   // collapse again (persisted)
+    // THE WEIGHT MOVES (user 2026-10-22: a big sphere inserted, "the weight
+    // did not change"): the game mass model (v1.7.1) charges the committed
+    // skin its area·0.05 m × material density — the STATIC INFO card's
+    // source reports the skin family now, and the total is strictly higher.
+    const m1 = await massReport(page);
+    expect(m1!.families.skin).toBeGreaterThan(0);
+    expect(m1!.total).toBeGreaterThan(m0!.total);
+    // and the StaticInfo card itself prints the skin family (desktop card;
+    // the phone card is the compact variant without the family line)
+    if (await page.getByTestId('mass-families').count() > 0
+        && await page.getByTestId('mass-families').isVisible())
+      await expect(page.getByTestId('mass-families')).toContainText(/skin [1-9]/);
     // the repaint pin (AGENTS: data assertions cannot pin a repaint)
     await expect.poll(() => loads(page), { timeout: 10_000 }).toBeGreaterThan(l0);
     // one Undo = the whole skin back (the doc mirrored EVERY insert)
@@ -199,6 +219,8 @@ test.describe('sphere skin tool: dialog → movable ghost → cancel/build @ui',
     await expect
       .poll(async () => ((await bpData(page)).triangles ?? []).length, { timeout: 10_000 })
       .toBe(trisBefore);
+    // the weight drops back with it (the mass report follows the doc live)
+    await expect.poll(async () => (await massReport(page))!.families.skin).toBe(0);
   });
 
   test('shading=smooth writes the game’s smooth:1 on every triangle', async ({ page }) => {

@@ -17,8 +17,9 @@ curve.
   **vacuum**, **helium** and **hydrogen** (real molar masses), i.e.
   ≈ 1.225 / 1.05 / 1.14 kg per m³ at sea level, falling with altitude as
   the air thins.
-* **Margin** — lift minus the vessel's calibrated mass (the same number the
-  Static info card shows).
+* **Margin** — lift minus the vessel's computed mass (the game's own mass
+  model — hull SKIN included: a committed sphere skin weighs its area ×
+  0.05 m × material density, the same number the Static info card shows).
 * **Floats at** — the equilibrium altitude where lift equals weight (or
   *sinks* / *ceiling* when it never crosses).
 * **Weight ladder** — the maximum total mass that still floats at

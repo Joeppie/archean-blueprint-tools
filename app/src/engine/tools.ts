@@ -37,8 +37,10 @@ export const MATERIALS = [
 ] as const;
 
 /** kg per 0.25 m CELL CUBE per material (game MaterialProperties.hh via
- *  FORMAT §Mass model) — the hullify mass estimate. */
-export const MATERIAL_DENSITY = [0.25, 10, 1, 0.5, 1, 150, 0.6] as const;
+ *  FORMAT §Mass model) — the hullify mass estimate. Home of the table is
+ *  engine/mass.ts (the mass model); re-exported for the tools/latsphere. */
+export { MATERIAL_DENSITY } from './mass';
+import { MATERIAL_DENSITY } from './mass';
 
 export const MATERIAL_HINT =
   'Material = what the block IS in the game (mass, heat, build cost). The '

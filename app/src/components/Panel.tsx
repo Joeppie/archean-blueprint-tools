@@ -114,11 +114,18 @@ export function StaticInfo(p: { engine: Engine | null; rev: number; onClose: () 
         </button>
       </div>
       <div data-testid="mass-report" className="space-y-[1px] leading-snug">
-        <div>declared <b className="float-right tabular-nums">{fmt(mm.declared, 0)} kg</b></div>
         <div>computed <b className="float-right tabular-nums">{fmt(mm.total, 0)} kg</b></div>
-        <div className="hidden text-ink-dim md:block">hull {fmt(mm.cells, 0)} cells × {fmt(mm.cellMass, 2)} kg ·
-          parts {fmt(mm.compSum, 0)} kg</div>
-        <div data-testid="mass-density" className="hidden text-ink-dim md:block">implied structural density ≈ {fmt(mm.density, 0)} kg/m³ (plausibility)</div>
+        <div className="text-ink-dim">
+          {mm.declared > 0
+            ? `game-declared ${fmt(mm.declared, 0)} kg · Δ ${fmt((mm.total - mm.declared) / mm.declared * 100, 1)} %`
+            : 'no declared mass (never built in game)'}
+        </div>
+        <div data-testid="mass-families" className="hidden text-ink-dim md:block">
+          hull {fmt(mm.families.hull, 0)} · skin {fmt(mm.families.skin, 0)} · parts {fmt(mm.families.parts, 0)} kg
+          {mm.families.fluids + mm.families.struts + mm.families.beams > 0 &&
+            ` + fluids ${fmt(mm.families.fluids, 0)} · struts ${fmt(mm.families.struts, 0)}`}</div>
+        <div data-testid="mass-density" className="hidden text-ink-dim md:block">hull {fmt(mm.cells, 0)} cells · skin {fmt(mm.skinTris, 0)} tris
+          {' · '}{fmt(mm.skinAreaM2, 1)} m²</div>
         <div>CoM <span className="float-right tabular-nums">({fmt(mm.com[0])}, {fmt(mm.com[1])}, {fmt(mm.com[2])}) m</span></div>
       </div>
     </div>
@@ -152,11 +159,18 @@ export function VesselStats(p: { engine: Engine | null; bp: Blueprint; rev: numb
     id: 'mass', title: `Mass & CoM${mm ? ` · ${fmt(mm.total, 0)} kg` : ''}`,
     body: mm && (
       <div data-testid="vessel-mass" className="space-y-[2px] text-[11px]">
-        <div>declared <b className="float-right tabular-nums">{fmt(mm.declared, 0)} kg</b></div>
         <div>computed <b className="float-right tabular-nums">{fmt(mm.total, 0)} kg</b></div>
-        <div className="text-ink-dim">hull {fmt(mm.cells, 0)} cells × {fmt(mm.cellMass, 2)} kg ·
-          parts {fmt(mm.compSum, 0)} kg</div>
-        <div className="text-ink-dim">implied structural density ≈ {fmt(mm.density, 0)} kg/m³</div>
+        <div className="text-ink-dim">
+          {mm.declared > 0
+            ? `game-declared ${fmt(mm.declared, 0)} kg · Δ ${fmt((mm.total - mm.declared) / mm.declared * 100, 1)} %`
+            : 'no declared mass (never built in game)'}
+        </div>
+        <div className="text-ink-dim">hull {fmt(mm.families.hull, 0)} · skin {fmt(mm.families.skin, 0)} ·
+          parts {fmt(mm.families.parts, 0)} kg
+          {mm.families.fluids + mm.families.struts + mm.families.beams > 0 &&
+            ` + fluids ${fmt(mm.families.fluids, 0)} · struts ${fmt(mm.families.struts, 0)}`}</div>
+        <div className="text-ink-dim">hull {fmt(mm.cells, 0)} cells · skin {fmt(mm.skinTris, 0)} tris
+          {' · '}{fmt(mm.skinAreaM2, 1)} m²</div>
         <div>CoM <span className="float-right tabular-nums">
           ({fmt(mm.com[0])}, {fmt(mm.com[1])}, {fmt(mm.com[2])}) m</span></div>
       </div>

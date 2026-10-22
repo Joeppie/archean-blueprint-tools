@@ -655,6 +655,16 @@ verified vs the installed build 136 + the dev viewer panels; implementation
 - The viewer's mass panel (view3d.js) is its own calibration display (declared
   vs computed); the AUTHORITATIVE calculator for the matrix suite is
   `tools/game_data.py compute_mass/required_items/expand_to_raw`.
+  **v1.7.1: the APP's `engine/mass.ts` now implements this model DIRECTLY**
+  (the TS twin of `compute_mass`, pinned against its corpus numbers) plus the
+  subgrid recursion the python top-level scan omits: `Build` components nest
+  their content in `c.data` (parent-frame absolute coords) — counting it
+  recursively closes the gap to the game-written mass (giant 151 189.5 vs
+  151 195.5 kg, dolphin 1 620 vs 1 621). The old calibrated display is retired
+  in the app (it absorbed every edit into a recalibrated hull, so a committed
+  hull skin could never move the displayed weight); the legacy viewer keeps
+  its calibration display (frozen). Frame beams count mass but are not
+  CoM-weighted (the corpus carries no frame record to pin a position for).
 
 ## `pipes`
 

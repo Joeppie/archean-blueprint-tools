@@ -59,7 +59,7 @@ import {
   compPaintDiff, craftMirrorMask, hasMirrorX, mirrorDelta, mirrorQuat, symAllowed,
   symTwinIndex, type TwinPair,
 } from './sym';
-import { calibrateCellMass, massModel, type MassModel } from './mass';
+import { massModel, type MassModel } from './mass';
 import { Highlight } from './highlight';
 import { flightReport } from './flight';
 import { buildTunnel, createSolve, FLOWS, scanAnalysis, solveStep, streamlines,
@@ -320,7 +320,6 @@ export class Engine {
 
 
   // ---------- mass & CoM ----------
-  private cellMass = 1.5;
   private comMarker: Group | null = null;
   /** hi-def: the FULL game meshes (prim.v) instead of the decimated twins.
    *  THE DEFAULT since the user's v0.182 call (2026-10-19): the app used to
@@ -702,7 +701,6 @@ void main() {
     this.buildSubgrids(bp);
 
     const parts = buildPartBoxes(bp, atlas?.manifest ?? null);
-    this.cellMass = calibrateCellMass(bp, atlas?.manifest ?? null);   // total ⇒ declared
     this.updateCoM();
     this.addGround(bp, parts);
     this.buildMirrorPlane(parts);
@@ -1729,10 +1727,12 @@ void main() {
   // ---------- mass & CoM ----------
 
   /** the orange CoM marker (sphere + equator ring) at the RAW-space centre of
-   *  mass, displayed through the view mirror (physics itself is file-space) */
+   *  mass, displayed through the view mirror (physics itself is file-space).
+   *  v1.7.1: the GAME's mass model (engine/mass.ts) — hull skin, struts,
+   *  beams, tank fluids and subgrid content all ride the marker live. */
   private updateCoM(): MassModel | null {
     if (!this.bp) return null;
-    const mm = massModel(this.bp, this.atlasRef?.manifest ?? null, this.cellMass);
+    const mm = massModel(this.bp, this.atlasRef?.manifest ?? null);
     if (!this.comMarker) {
       const g = new Group();
       const m = new Mesh(new SphereGeometry(0.07, 16, 12),
@@ -1751,7 +1751,7 @@ void main() {
   }
   flightReportData() {
     // lazy import avoided: flight.ts is cheap and pure — direct
-    return this.bp ? flightReport(this.bp, this.atlasRef?.manifest ?? null, this.cellMass) : null;
+    return this.bp ? flightReport(this.bp, this.atlasRef?.manifest ?? null) : null;
   }
     massReport(): (MassModel & { comVisible: boolean }) | null {
     const mm = this.updateCoM();

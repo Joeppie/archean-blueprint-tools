@@ -41,7 +41,7 @@ const norm = (v: V3): V3 => {
   return [v[0] / l, v[1] / l, v[2] / l];
 };
 
-export function flightReport(bp: Blueprint, manifest: ModelManifest | null, cellMass: number): FlightReport {
+export function flightReport(bp: Blueprint, manifest: ModelManifest | null): FlightReport {
   const legacy = bp.data.colors == null || bp.data.colors.length === 0;
   const comps = bp.data.components;
   const rcsOnly = comps.some(c => c.type === 'RCS')
@@ -85,7 +85,7 @@ export function flightReport(bp: Blueprint, manifest: ModelManifest | null, cell
       surfaces.push({ ci, type: c.type, angle: c.data['angle'] as number });
   });
 
-  const mm = massModel(bp, manifest, cellMass);
+  const mm = massModel(bp, manifest);
   return { engines, net, mainNet, rcsOnly, heading, surfaces,
     mass: { total: mm.total, declared: mm.declared, com: mm.com } };
 }

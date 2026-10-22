@@ -658,6 +658,37 @@ freshly-authored triangles, fixture 9000006001 — see the v1.5.12 bullet).
   `help.spec.ts` (@ui, desktop+pixel7: menu→dialog, h1, sphere LIMITS table
   as a real <table>, search by title/tag/body word, Esc/✕/backdrop close,
   dialog never outgrows the viewport).
+- **v1.7.1 THE GAME MASS MODEL (user 2026-10-22: "I put a large x,y=8,z=16
+  sphere above, and the weight did not change, but that weights over 1500 KG,
+  but provides 5000 KG lift if vacuum"):** the old display model (cellMass
+  CALIBRATED so total ≡ declared, components + blocks only) could never move:
+  hull triangles (and struts/beams/tank fluids/subgrid content) contributed
+  0 kg, and the calibration re-absorbed every edit into the hull, so a
+  committed sphere skin of >1 t left the card and the LiftWidget's margin
+  EXACTLY as they were. `engine/mass.ts` is now the TS twin of the game's
+  server model (`tools/game_data.py compute_mass`, FORMAT §Mass model):
+  blocks rect × per-material density (non-cube HALF), skin
+  `area·0.05 m ÷ cell³ × density`, struts 1 kg/m, beams 10 kg, parts the .ini
+  mass, tank contents fraction × capacity × the crude Chemistry.cpp density —
+  and subgrid `Build` content counted RECURSIVELY through `c.data` (the
+  nested data is parent-frame ABSOLUTE, so it sums straight in; this is what
+  lands the giant at 151 189.5 vs the game's declared 151 195.5 kg).
+  `massModel(bp, manifest)` (no cellMass arg — `calibrateCellMass` is
+  deleted); `MassModel.families {hull,skin,struts,beams,parts,fluids}` +
+  total/com/cells/skinTris/skinAreaM2; `maximumLiquidDensity` ported. Static
+  info + VesselStats print computed/Δ-vs-declared + the family line
+  (`mass-families`); the CoM marker rides skin/strut/fluid centroids; the
+  LiftWidget margin now sinks when you build the envelope. `MATERIAL_DENSITY`
+  moved to mass.ts (tools.ts re-exports). Pins: vitest `mass.test.ts` numbers
+  are THAT python tool's output (sphere-probe 1131.0 kg skin / 1185.0 total;
+  corpus ISW 329.0, dolphin 1619.9 subgrid-aware, gantry skin 55.3 + fluids
+  152.9), the corpus pins read the committed testdata + atlas manifest;
+  e2e `sphereskin.spec` pins skin 0 → > 0 and total strictly up on Build,
+  back to 0 after one Ctrl+Z. NOTE the two tools stay complementary: COST
+  (`economy.ts structuralItems`, game `GetBlueprintContents`) charges each
+  triangle `max(ceil(cells),1)` ITEMS — its per-triangle minimum inflates a
+  3532-tri skin to 6098 blocks vs the 4524 physical cells the MASS model
+  weighs; both sides cross-pin against the python reference.
 - **v1.7.0 VIEW ▸ BUILD COST (user 2026-10-22: "In the view tab,
   summarize the total cost of all components expressed in raw materials, do a
   complete breakdown per component; e.g. what does the fluidport cost? and
