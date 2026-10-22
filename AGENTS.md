@@ -946,7 +946,10 @@ Rules:
   move or a dependency change means RESTART it (kill + start + re-verify ③)
   — the user always browses the up-to-date app, never a stale process;
   ④ before ending the session, kill the server you started (and any stray
-  repo-vite) and re-run ①. Playwright's webServer (app/playwright.config
+  repo-vite) and re-run ①. Start it DETACHED — `nohup setsid npm run dev
+  … >/tmp/opencode/dev5175.log 2>&1 & disown` — a harness background shell
+  dies with its session and silently takes the server with it (the user's
+  "dev server not up?" 2026-10-22). Playwright's webServer (app/playwright.config
   .ts) starts its OWN server only when the port is free (`reuseExistingServer
   `!) — a foreign server on the port means the suite silently tests THAT
   tree: always pass a dedicated E2E_PORT and sweep first.
