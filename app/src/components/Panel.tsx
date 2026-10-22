@@ -315,16 +315,36 @@ const Check = (p: { label: string; checked: boolean; onChange: (v: boolean) => v
 /** MOVED OUT of the left parts panel (the user: "the full list of options
  *  shouldnt be combined into the main left-hand panel"): rendered in a
  *  floating ⚙ popover window over the viewport by the Editor. */
-export function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHullOpacity' | 'gizmoOn' | 'onGizmo' | 'hiDef' | 'onHiDef' | 'staticInfo' | 'onStaticInfo'>) {
+export function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHullOpacity' | 'gizmoOn' | 'onGizmo' | 'hiDef' | 'onHiDef' | 'staticInfo' | 'onStaticInfo'> & {
+  /** v1.5.21 SETTABLE MIRROR AXIS (user: "mirror axes should be settable.
+   *  Game is not hardcoded x"): the SESSION plane for ⇄ twin placement,
+   *  block twin identity and the overlay's solid sheet. Detected mirror
+   *  axes (twin pairs, per-component mirrorAxis) always get their sheet. */
+  mirrorAxis: 'x' | 'y' | 'z';
+  onMirrorAxis: (a: 'x' | 'y' | 'z') => void;
+}) {
   return (
     <Sec title="View options" testid="viewopts">
-      <Check testid="opt-grid" label="ground grid" checked={p.opts.grid} onChange={v => p.onOpt('grid', v)} />
+      <Check testid="opt-grid" label="ground grid (zoom-adaptive)" checked={p.opts.grid} onChange={v => p.onOpt('grid', v)} />
       <Check testid="opt-occ" label="occupancy boxes (type-255)" checked={p.opts.occ} onChange={v => p.onOpt('occ', v)} />
       <Check testid="opt-hull" label="hull (blocks + triangles)" checked={p.opts.hull} onChange={v => p.onOpt('hull', v)} />
       <Check testid="opt-wire" label="wireframe (hull)" checked={p.opts.wire} onChange={v => p.onOpt('wire', v)} />
       <Check testid="opt-pipes" label="pipes (cables)" checked={p.opts.pipes} onChange={v => p.onOpt('pipes', v)} />
       <Check testid="opt-subs" label="subgrids (doors/hatches)" checked={p.opts.subs} onChange={v => p.onOpt('subs', v)} />
-      <Check testid="opt-mirror" label="mirror plane (x symmetry)" checked={p.opts.mirror} onChange={v => p.onOpt('mirror', v)} />
+      <Check testid="opt-mirror" label="mirror plane(s)" checked={p.opts.mirror} onChange={v => p.onOpt('mirror', v)} />
+      {/* v1.5.21: the game stores a per-component mirrorAxis (0=none,
+          1=x, 2=y, 3=z) and non-x twin pairs are indexed by sym.ts — the
+          editor's OWN plane (⇄ placement, block twins) is settable too */}
+      <div className="flex items-center gap-2 py-[2px] text-[12px] text-ink">
+        <span className="flex-1">mirror axis</span>
+        {(['x', 'y', 'z'] as const).map(a => (
+          <button key={a} data-testid={`mirror-axis-${a}`} title={`mirror plane ${a} = 0 (twins + ⇄ placement)`}
+            onClick={() => p.onMirrorAxis(a)}
+            className={`ksp-btn px-2 py-[1px] text-[11px] uppercase ${p.mirrorAxis === a ? 'on' : ''}`}>
+            {a}
+          </button>
+        ))}
+      </div>
       <Check testid="opt-labels" label="labels on interactive/aliased parts" checked={p.opts.labels} onChange={v => p.onOpt('labels', v)} />
       <Check testid="opt-gizmo" label="gizmo on selection (this session · Shift snaps)" checked={p.gizmoOn} onChange={p.onGizmo} />
       {/* the FULL game meshes are the DEFAULT (v0.182 user rule) — the row
@@ -637,7 +657,12 @@ function Inspector(p: Props) {
             className="min-w-0 flex-1 rounded border border-white/10 bg-panel2 px-1 py-[1px] text-[11px] font-mono text-ink"
             onChange={e => { if (ctx) edits.compField(ctx, ci, 'module', e.target.value); markDirty(); }} />
         </label>
-        <Row label="mirrorAxis" min={0} max={2} step={1} value={Number(comp.mirrorAxis ?? 0)} disabled={readOnly}
+        {/* the GAME's own mirror field (FORMAT §components): 0 = none,
+            axis indices 1=x, 2=y, 3=z (the dev viewer mirrors the part with
+            scale[mirrorAxis−1] = −1 about its origin). The row used to stop
+            at 2 — off by one against the format law (v1.5.21 fix). */}
+        <Row label="mirrorAxis" min={0} max={3} step={1} value={Number(comp.mirrorAxis ?? 0)} disabled={readOnly}
+          title="0 = none · 1 = x · 2 = y · 3 = z (the game's mirror-axis field)"
           onInput={v => { if (ctx) edits.compField(ctx, ci, 'mirrorAxis', Math.round(v)); markDirty(); }} />
       </Sec>
       <Sec title="Paint (linear 0-255)">

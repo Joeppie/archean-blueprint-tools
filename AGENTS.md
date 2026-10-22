@@ -481,6 +481,44 @@ freshly-authored triangles, fixture 9000006001 — see the v1.5.12 bullet).
   SILHOUETTE from screenshot pixels (largest blob, scanline-filled area ÷
   its convex hull): 0.99–1.00 at every size — the picture itself has no
   bite. In-game judgment stays the user's (AGENTS: in-game pixels arbitrate).
+- **v1.5.21 ORIENTATION & GROUND batch (user 2026-10-22: "We need to see
+  directions for XYZ axes, also grid needs to fit build comfortably. Probably
+  granularity depending on zoom 1x or 5, 10, depending. Also, mirror axes
+  should be settable. Game is not hardcoded x"):**
+  (1) AXIS COMPASS: `Engine.axisView()` projects the world X/Y/Z unit
+  directions through the live camera (`onView(cb)` fires exactly on real
+  renders — the on-demand loop stays asleep), `Viewport.tsx AxisGizmo` draws
+  the Blender-style top-left mini gizmo (head labels + faded tail dots are
+  buttons -> `Engine.viewAxis(a, back)`, the axis-general twin of viewPreset).
+  testids `axis-gizmo` / `axis-view-x|y|z(-back)`; hooks `axis()/viewAxis()`.
+  (2) ADAPTIVE GRID (`engine/grid.ts` pure + `scene syncGrid()`): the fixed
+  28 m GridHelper is GONE — the green sheet and grid FIT THE BUILD FOOTPRINT
+  (bp box UNION part boxes, rounded out to whole MAJOR cells, majors every 5
+  minor lines) and the cell rides zoom on the CELL ladder 0.25*{1,5,10,50,
+  100} UNION 0.05 (the user's 1x/5x/10x rhythm; the step flips when one
+  minor cell stops projecting >=14 px), lines ride the WORLD lattice
+  (k*step — at the finest rung the grid IS the block cell). Rebuilds only on
+  step change, inside the frame that renders (no timers); a line-count cap
+  BUMPS the step, never holes the coverage. The ground-pin rule (y = lowest
+  geometry − 0.05) is UNCHANGED; `gridInfo()` hook `grid()`. Options row
+  relabeled "ground grid (zoom-adaptive)".
+  (3) SETTABLE MIRROR AXIS (options row `mirror-axis-x|y|z`, localStorage
+  `archean-app-mirror-axis`, default x): Engine.mirrorAxis drives the
+  twin PLACEMENT (components mirror that coord; block twins via the now
+  axis-PARAMETERIZED blocks.ts: per-axis cloud-derived `MIRROR_TYPES[x|y|z]`
+  tables, `mirroredBlock/flippedBlock/blockMirrorTwin/blockTwinIssues/
+  mirrorFaceOrder/paintTwinPair (…, axis='x')` — every existing x pin stays
+  green through the default) and the block-gizmo twin-cell/rotate paths.
+  The overlay `buildMirrorPlane` draws ONE sheet per axis of
+  `sym.ts craftMirrorMask` = twin-pair masks UNION the GAME's per-component
+  `mirrorAxis` field (0=none,1=x,2=y,3=z — the inspector row now offers the
+  real 0..3 range, it used to stop at 2). Component PROPAGATION stays
+  mask-per-pair (sym.ts, unchanged). Pins: vitest `grid.test.ts` (ladder/
+  coverage/cap), `blocks.test.ts` v1.5.21 group (per-axis tables involutive
+  + cloud-exact 13->16/14, y/z twins non-vacuous, issues + face-order
+  involutive per axis), `sym.test.ts` craftMirrorMask, e2e `views.spec.ts`
+  (@ui: compass + camera flights, grid covers the bbox + wheel-zoom step
+  change, options-row round-trip). Help topics mirror/display updated.
 - **v1.5.20 HELP MANUAL (user: "document other things … add documentation in
   a help menu, with search for words for topics, keep it simple, markdown,
   generate html table, make it a manual so people can learn how to use it

@@ -146,44 +146,70 @@ export function blockInfo(bp: Blueprint, bi: number): BlockInfo | null {
 // plane 5.5) was a pre-v0.180 corner-convention leftover that mirrored
 // blocks a half cell off the true plane.
 
-/** Mirror a block START cell of footprint extent e = size+1 (cells) in x
- *  about the FILE WORLD x = 0 plane (cell coord 6): [c, c+e) → [12−c−e, 12−c). */
+/** Mirror a block START cell of footprint extent e = size+1 (cells) about
+ *  the FILE WORLD 0-plane of one axis (cell coord 6): [c, c+e) → [12−c−e,
+ *  12−c). The lattice is axis-symmetric (world = (g−6)·CELL on EVERY axis),
+ *  so the SAME formula serves the x, y and z mirror planes — v1.5.21 made
+ *  the mirror axis settable (user: "mirror axes should be settable. Game is
+ *  not hardcoded x"). */
 export function mirrorBlockCell(cx: number, sizeX: number): number {
   return 11 - cx - sizeX;
 }
 
-/** type → its x-mirror type, derived from the vertex clouds of the real
- *  shape table (x → 1−x in local space), so it can never drift from
- *  blockshapes.ts. Types whose mirrored cloud is not in the table (none in
- *  0..52) map to themselves. Involutory by construction. */
-export const MIRROR_TYPE: Uint8Array = (() => {
-  const table = new Uint8Array(256);
-  for (let t = 0; t < 256; t++) table[t] = t;
+/** The craft's mirror plane axis (v1.5.21). Default 'x' everywhere — the
+ *  corpus crafts are x-symmetric; settable per session via the ⚙ row. */
+export type MirrorAxis = 'x' | 'y' | 'z';
+export const MIRROR_AXES: MirrorAxis[] = ['x', 'y', 'z'];
+export const mirrorAxisIdx = (a: MirrorAxis): number => (a === 'x' ? 0 : a === 'y' ? 1 : 2);
+
+/** type → its mirror type per AXIS, derived from the vertex clouds of the
+ *  real shape table (coord a → 1−a in local space), so it can never drift
+ *  from blockshapes.ts. Types whose mirrored cloud is not in the table map
+ *  to themselves (the x table maps none of 0..52 out of the table).
+ *  Involutory by construction. */
+export const MIRROR_TYPES: Record<MirrorAxis, Uint8Array> = (() => {
   const key = (pts: [number, number, number][]) =>
     pts.map(p => p.map(v => Math.round(v * 1000)).join(',')).sort().join(';');
   const set = new Map<string, number>();
   for (let t = 0; t <= 52; t++) set.set(key(getBlockPoints(t, [0, 0, 0], [1, 1, 1])), t);
-  for (let t = 0; t <= 52; t++) {
-    const m = getBlockPoints(t, [0, 0, 0], [1, 1, 1]).map(p => [1 - p[0], p[1], p[2]] as [number, number, number]);
-    const hit = set.get(key(m));
-    if (hit !== undefined) table[t] = hit;
+  const out = {} as Record<MirrorAxis, Uint8Array>;
+  for (const axis of MIRROR_AXES) {
+    const a = mirrorAxisIdx(axis);
+    const table = new Uint8Array(256);
+    for (let t = 0; t < 256; t++) table[t] = t;
+    for (let t = 0; t <= 52; t++) {
+      const m = getBlockPoints(t, [0, 0, 0], [1, 1, 1])
+        .map(p => p.map((v, k) => (k === a ? 1 - v : v)) as [number, number, number]);
+      const hit = set.get(key(m));
+      if (hit !== undefined) table[t] = hit;
+    }
+    out[axis] = table;
   }
-  return table;
+  return out;
 })();
 
+/** The x-plane table (the corpus default — every existing x-mirror call
+ *  site and pin keeps this name; axis-general code takes MIRROR_TYPES[ax]). */
+export const MIRROR_TYPE: Uint8Array = MIRROR_TYPES.x;
+
 /** The ⇄ twin of a fresh block (same footprint, mirrored cell + type). */
-export function mirroredBlock(b: Block): Block {
-  const cx = (b.frame_x ?? 0) * CELLS_PER_FRAME + b.pos_x;
-  const mc = mirrorBlockCell(cx, b.size_x);
-  const fr = (a: number) => Math.floor(a / CELLS_PER_FRAME);
-  const t = MIRROR_TYPE[b.type] ?? b.type;
-  const twin: Block = { ...b, type: t };
-  twin.frame_x = fr(mc);
-  twin.pos_x = mc - fr(mc) * CELLS_PER_FRAME;
+export function mirroredBlock(b: Block, axis: MirrorAxis = 'x'): Block {
+  const a = mirrorAxisIdx(axis);
+  const cell = [(b.frame_x ?? 0) * CELLS_PER_FRAME + b.pos_x,
+    (b.frame_y ?? 0) * CELLS_PER_FRAME + b.pos_y,
+    (b.frame_z ?? 0) * CELLS_PER_FRAME + b.pos_z];
+  const ext = [b.size_x, b.size_y, b.size_z];
+  cell[a] = mirrorBlockCell(cell[a]!, ext[a]!);
+  const fr = (v: number) => Math.floor(v / CELLS_PER_FRAME);
+  const twin: Block = { ...b, type: MIRROR_TYPES[axis][b.type] ?? b.type };
+  twin.frame_x = fr(cell[0]!); twin.pos_x = cell[0]! - fr(cell[0]!) * CELLS_PER_FRAME;
+  twin.frame_y = fr(cell[1]!); twin.pos_y = cell[1]! - fr(cell[1]!) * CELLS_PER_FRAME;
+  twin.frame_z = fr(cell[2]!); twin.pos_z = cell[2]! - fr(cell[2]!) * CELLS_PER_FRAME;
   // colours ride the block's face slots: the twin's face i takes the
-  // source face that faces the OPPOSITE world x (direction mapping, so a
-  // per-face paint mirrors correctly even across slope↔slope pairs)
-  if (Array.isArray(b.colors) && b.colors.length === 7) twin.colors = mirroredFaceSlots(b, twin);
+  // source face that faces the OPPOSITE world direction on the mirror axis
+  // (direction mapping, so a per-face paint mirrors correctly even across
+  // slope↔slope pairs)
+  if (Array.isArray(b.colors) && b.colors.length === 7) twin.colors = mirroredFaceSlots(b, twin, axis);
   return twin;
 }
 
@@ -466,12 +492,13 @@ export function rotatedBlock(b: Block, axis: 'x' | 'y' | 'z', cw: boolean): Bloc
   return nb;
 }
 
-/** The block's shape MIRRORED in x but NOT moved: same cell, same size, the
- *  mirrored type (⇄ in place — the fix for a wrongly-faced block; the ⇄
- *  TWIN placement keeps using mirroredBlock, which also moves the cell). */
-export function flippedBlock(b: Block): Block {
+/** The block's shape MIRRORED in the chosen axis but NOT moved: same cell,
+ *  same size, the mirrored type (⇄ in place — the fix for a wrongly-faced
+ *  block; the ⇄ TWIN placement keeps using mirroredBlock, which also moves
+ *  the cell). */
+export function flippedBlock(b: Block, axis: MirrorAxis = 'x'): Block {
   return { ...b, colors: Array.isArray(b.colors) ? [...b.colors] : b.colors,
-    type: MIRROR_TYPE[b.type] ?? b.type };
+    type: MIRROR_TYPES[axis][b.type] ?? b.type };
 }
 
 /** Write cell/size/type back onto a live block (frame re-anchored, the same
@@ -487,18 +514,23 @@ export function setBlockGeom(b: Block, cell: Cell, size: Cell, type: number): vo
 
 // ------------------------------------------------------ SIMILAR BLOCKS ⇄
 /** The block's MIRROR-TWIN among the blocks: the block sitting on this
- *  one's x-mirrored footprint with the same extents and a compatible shape
- *  (identical type or its x-mirror — a cube pair AND a ramp/counter-ramp
- *  pair both identify). Slot match wins ties; blocks whose footprint
- *  straddles the plane have no twin (-1). This is the block analogue of
- *  sym.ts's component twin index — same plane, same mask-bit-1 geometry. */
-export function blockMirrorTwin(bp: Blueprint, bi: number): number {
+ *  one's mirrored footprint (on the chosen axis's 0-plane, default x) with
+ *  the same extents and a compatible shape (identical type or its mirror —
+ *  a cube pair AND a ramp/counter-ramp pair both identify). Slot match
+ *  wins ties; blocks whose footprint straddles the plane have no twin (-1).
+ *  This is the block analogue of sym.ts's component twin index — same plane
+ *  as the selected mirror axis, same mask-bit geometry. */
+export function blockMirrorTwin(bp: Blueprint, bi: number, axis: MirrorAxis = 'x'): number {
   const bl = bp.data.blocks;
   const b = bl[bi];
   if (!b || b.type === 255) return -1;
+  const a = mirrorAxisIdx(axis);
   const c = blockCells(b);
-  const mcx = mirrorBlockCell(c.x, b.size_x);
-  const want = MIRROR_TYPE[b.type] ?? b.type;
+  const cv: [number, number, number] = [c.x, c.y, c.z];
+  const ext: [number, number, number] = [b.size_x, b.size_y, b.size_z];
+  const mc = [...cv] as [number, number, number];
+  mc[a] = mirrorBlockCell(cv[a]!, ext[a]!);
+  const want = MIRROR_TYPES[axis][b.type] ?? b.type;
   let best = -1, bestRank = -1;
   for (let j = 0; j < bl.length; j++) {
     if (j === bi) continue;
@@ -506,9 +538,10 @@ export function blockMirrorTwin(bp: Blueprint, bi: number): number {
     if (o.type === 255) continue;
     if (o.size_x !== b.size_x || o.size_y !== b.size_y || o.size_z !== b.size_z) continue;
     const cj = blockCells(o);
-    if (cj.x !== mcx || cj.y !== c.y || cj.z !== c.z) continue;
-    // SIMILAR = a compatible shape (identical or the x-mirror): an unrelated
-    // shape on the mirrored footprint is NOT the symmetric pair
+    const ov: [number, number, number] = [cj.x, cj.y, cj.z];
+    if (ov[a] !== mc[a] || ov[(a + 1) % 3] !== cv[(a + 1) % 3] || ov[(a + 2) % 3] !== cv[(a + 2) % 3]) continue;
+    // SIMILAR = a compatible shape (identical or the axis-mirror): an
+    // unrelated shape on the mirrored footprint is NOT the symmetric pair
     if (o.type !== b.type && o.type !== want) continue;
     let rank = 2;
     if ((o.colors?.[0] ?? -1) === (b.colors?.[0] ?? -2)) rank++;
@@ -534,43 +567,51 @@ export function blockMirrorTwin(bp: Blueprint, bi: number): number {
  *  Everything else (shape, extents, material — the gameplay identity) is a
  *  conflict: RED overlay + ⚠ popup. */
 export function blockTwinIssues(
-  bp: Blueprint, bi: number): { twin: number; issues: string[]; info: boolean } | null {
+  bp: Blueprint, bi: number, axis: MirrorAxis = 'x'): { twin: number; issues: string[]; info: boolean } | null {
   const bl = bp.data.blocks;
   const b = bl[bi];
   if (!b || b.type === 255) return null;
-  const twin = blockMirrorTwin(bp, bi);
+  const a = mirrorAxisIdx(axis);
+  const twin = blockMirrorTwin(bp, bi, axis);
   let other = twin;
   if (other < 0) {
     // faux-mirror CANDIDATE: something on the mirrored span that fails the
     // twin test (wrong extents, wrong shape) — still worth flagging
     const c = blockCells(b);
-    const mcx = mirrorBlockCell(c.x, b.size_x);
+    const cv: [number, number, number] = [c.x, c.y, c.z];
+    const ext: [number, number, number] = [b.size_x, b.size_y, b.size_z];
+    const mc = [...cv] as [number, number, number];
+    mc[a] = mirrorBlockCell(cv[a]!, ext[a]!);
     let best = -1, bestOv = 0;
     for (let j = 0; j < bl.length; j++) {
       if (j === bi) continue;
       const o = bl[j]!;
       if (o.type === 255) continue;
       const cj = blockCells(o);
-      if (cj.y !== c.y || cj.z !== c.z) continue;
-      const ov = Math.min(cj.x + o.size_x, mcx + b.size_x) - Math.max(cj.x, mcx) + 1;
-      if (ov > 0 && ov > bestOv) { bestOv = ov; best = j; }
+      const ov: [number, number, number] = [cj.x, cj.y, cj.z];
+      if (ov[(a + 1) % 3] !== cv[(a + 1) % 3] || ov[(a + 2) % 3] !== cv[(a + 2) % 3]) continue;
+      const oe: [number, number, number] = [o.size_x, o.size_y, o.size_z];
+      const ovl = Math.min(ov[a]! + oe[a]!, mc[a]! + ext[a]!) - Math.max(ov[a]!, mc[a]!) + 1;
+      if (ovl > 0 && ovl > bestOv) { bestOv = ovl; best = j; }
     }
     other = best;
     if (other < 0) return null;
   }
   const o = bl[other]!;
   const c = blockCells(b), cj = blockCells(o);
+  const cv: [number, number, number] = [c.x, c.y, c.z];
+  const ov: [number, number, number] = [cj.x, cj.y, cj.z];
   const issues: string[] = [];
-  if (cj.x !== mirrorBlockCell(c.x, b.size_x) || cj.y !== c.y || cj.z !== c.z ||
+  if (ov.some((v, k) => k === a ? v !== mirrorBlockCell(cv[k]!, [b.size_x, b.size_y, b.size_z][k]!) : v !== cv[k]) ||
     o.size_x !== b.size_x || o.size_y !== b.size_y || o.size_z !== b.size_z)
     issues.push(`size/position ${b.size_x + 1}×${b.size_y + 1}×${b.size_z + 1} ≠ ` +
       `${o.size_x + 1}×${o.size_y + 1}×${o.size_z + 1}`);
-  const want = MIRROR_TYPE[b.type] ?? b.type;
+  const want = MIRROR_TYPES[axis][b.type] ?? b.type;
   if (o.type !== b.type && o.type !== want)
     issues.push(`shape ${shapeName(b.type)} ≠ ${shapeName(o.type)}`);
   if ((b.material ?? 0) !== (o.material ?? 0))
     issues.push(`material ${MATERIALS[b.material ?? 0] ?? b.material} ≠ ${MATERIALS[o.material ?? 0] ?? o.material}`);
-  const expect = mirroredFaceSlots(b, o), got = faceSlots(o);
+  const expect = mirroredFaceSlots(b, o, axis), got = faceSlots(o);
   let diff = 0;
   for (let f = 0; f < 7; f++) if (expect[f] !== got[f]) diff++;
   if (diff) issues.push(`face paint on ${diff} of 7 faces`);
@@ -591,7 +632,12 @@ export function blockTwinIssues(
 type Dir3 = readonly number[] | null;
 
 /** slot i of `twin` takes the source slot `order[i]` (length 7). */
-export function mirrorFaceOrder(src: Block, twin: Block): number[] {
+/** slot i of `twin` takes the source slot `order[i]` (length 7). The
+ *  mirrored AXIS is a parameter (v1.5.21 settable mirror axis): the twin's
+ *  face pointing along +d takes the source face pointing along d with the
+ *  mirror-axis component negated (x default — the corpus symmetry axis). */
+export function mirrorFaceOrder(src: Block, twin: Block, axis: MirrorAxis = 'x'): number[] {
+  const a = mirrorAxisIdx(axis);
   const ds = getBlockFaceDirections(src.type);
   const dt = getBlockFaceDirections(twin.type);
   const order: number[] = [];
@@ -605,7 +651,7 @@ export function mirrorFaceOrder(src: Block, twin: Block): number[] {
       order.push(k >= 0 && k < slantsS.length ? slantsS[k]! : i);
       continue;
     }
-    const want: Dir3 = [-d[0]!, d[1]!, d[2]!];  // the source face behind it
+    const want: Dir3 = d.map((v, k) => (k === a ? -v : v));  // the source face behind it
     const k = ds.findIndex(e => e && e[0] === want[0] && e[1] === want[1] && e[2] === want[2]);
     order.push(k >= 0 ? k : i);
   }
@@ -637,13 +683,13 @@ export function paintBlockFaces(b: Block, slot: number, faces?: number[]): numbe
  *  on the twin's right). Pure writes onto the live blocks — the caller
  *  writeBlockDocs both. Returns the source faces actually changed. */
 export function paintTwinPair(bp: Blueprint, bi: number, twin: number,
-  slot: number, faces?: number[]): number[] {
+  slot: number, faces?: number[], axis: MirrorAxis = 'x'): number[] {
   const b = bp.data.blocks[bi];
   if (!b) return [];
   const changed = paintBlockFaces(b, slot, faces);
   const tw = twin >= 0 ? bp.data.blocks[twin] : undefined;
   if (tw && changed.length) {
-    const order = mirrorFaceOrder(b, tw);
+    const order = mirrorFaceOrder(b, tw, axis);
     const tfaces = changed.map(f => order[f]!).filter(f => f >= 0 && f < 7);
     paintBlockFaces(tw, slot, tfaces);
   }
@@ -652,9 +698,9 @@ export function paintTwinPair(bp: Blueprint, bi: number, twin: number,
 
 /** The whole 7-slot list mirrored for a twin: twin slot i = source slot
  *  order[i]. */
-export function mirroredFaceSlots(b: Block, twin: Block): number[] {
+export function mirroredFaceSlots(b: Block, twin: Block, axis: MirrorAxis = 'x'): number[] {
   const src = faceSlots(b);
-  return mirrorFaceOrder(b, twin).map(i => src[i] ?? 0);
+  return mirrorFaceOrder(b, twin, axis).map(i => src[i] ?? 0);
 }
 
 // ------------------------------------------------------------ SNAP ✧

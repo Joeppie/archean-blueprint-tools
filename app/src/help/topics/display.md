@@ -9,8 +9,11 @@ have keys where it matters.
 | Hull (h) | block + triangle solids on/off — OFF means WIREFRAME and click-through |
 | Wireframe | the lattice wire overlay (mutually exclusive with hull solids) |
 | Hull opacity | fades blocks, skin AND wire together — see through the shell without hiding it |
-| Grid (g) | the ground grid; the green ground plane always sits just under the craft's lowest geometry |
+| Grid (g) | the ground grid — it FITS the build and its granularity rides zoom (0.25 m cells → 1.25 → 2.5 → 12.5 m as you pull back; majors every 5); the green ground plane always sits just under the craft's lowest geometry |
 | Occupancy (o) | the type-255 occupancy boxes (reserved cells around parts) |
+| Mirror plane(s) | the gold sheets at the 0-plane of every mirrored axis (see the Mirror rule topic) |
+| Mirror axis | which axis ⇄ twin placement and block twins ride: X, Y or Z (the game's own `mirrorAxis` field is per-part, 1=x 2=y 3=z) |
+| Axis compass | the little XYZ gizmo at the top left shows world directions; click a labelled head to view the craft along that axis (the faded tail dot = the opposite side) |
 | Labels | part name labels in the scene |
 | Connectors | adapter port nubs (cables/pipes keep their own toggle) |
 | Real game models | full game meshes (default ON); the ⚙ row can switch weak GPUs to the decimated twins |

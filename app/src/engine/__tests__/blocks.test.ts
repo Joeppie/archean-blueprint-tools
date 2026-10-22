@@ -9,9 +9,10 @@ import { describe, expect, it } from 'vitest';
 import { blockAt, blockCells, blockFromCell, blockMirrorTwin, blockTwinIssues,
   cellIndex, cellOverlap,
   complementBlock, flippedBlock, mirroredBlock, mirrorBlockCell, MIRROR_TYPE,
+  MIRROR_TYPES, mirrorAxisIdx, mirrorFaceOrder, mirroredFaceSlots,
   rotateType, rotateTypeAbout, rotatedBlock, snapBlockType } from '../blocks';
 import { getBlockPoints } from '../blockshapes';
-import type { Blueprint } from '../format';
+import type { Block, Blueprint } from '../format';
 
 describe('⇄ mirrored placement', () => {
   it('cell mirror is about the FILE world x = 0 plane and involutive', () => {
@@ -378,5 +379,101 @@ describe('✧ snap-to-neighbours (converge, else consensus)', () => {
       blockFromCell([7, 5, 8], [0, 0, 0], 255, 0),
     ]);
     expect(snapBlockType(bp2, 0)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v1.5.21 SETTABLE MIRROR AXIS (user: "mirror axes should be settable. Game
+// is not hardcoded x"): every mirror table/identity above parameterizes on
+// the axis; default x keeps the corpus law, y/z compose the same way.
+describe('v1.5.21 settable mirror axis (blocks)', () => {
+  const bpOf = (blocks: Block[]): Blueprint => ({ data: { blocks } } as unknown as Blueprint);
+
+  it('MIRROR_TYPES: all three axes closed + involutive on 0..52, cube-stable', () => {
+    for (const ax of ['x', 'y', 'z'] as const) {
+      const T = MIRROR_TYPES[ax];
+      expect(T[0]).toBe(0);
+      for (let t = 0; t <= 52; t++) expect(T[T[t]!]).toBe(t);
+    }
+    expect(MIRROR_TYPE).toBe(MIRROR_TYPES.x);          // legacy name = the x plane
+    // y/z mirroring is NOT a copy of x (the tables genuinely differ):
+    let diffY = 0, diffZ = 0;
+    for (let t = 0; t <= 52; t++) {
+      if (MIRROR_TYPES.y[t] !== MIRROR_TYPES.x[t]) diffY++;
+      if (MIRROR_TYPES.z[t] !== MIRROR_TYPES.x[t]) diffZ++;
+    }
+    expect(diffY).toBeGreaterThan(0);
+    expect(diffZ).toBeGreaterThan(0);
+    // the axis tables are genuinely different maps of the SAME shapes:
+    // corner 13 mirrors to 17 (x), 16 (y), 14 (z) — the other corners of
+    // the corner family (a flipped corner is still a corner), matching the
+    // true vertex clouds coord-by-coord (table truth, like the x pin above)
+    expect(MIRROR_TYPES.x[13]).toBe(17);
+    expect(MIRROR_TYPES.y[13]).toBe(16);
+    expect(MIRROR_TYPES.z[13]).toBe(14);
+    for (const ax of ['y', 'z'] as const) {
+      const key = (pts: [number, number, number][]) =>
+        pts.map(pt => pt.map(v => Math.round(v * 1000)).join(',')).sort().join(';');
+      const a = ax === 'y' ? 1 : 2;
+      const flipped = getBlockPoints(13, [0, 0, 0], [1, 1, 1])
+        .map(pt => pt.map((v, k) => (k === a ? 1 - v : v)) as [number, number, number]);
+      expect(key(getBlockPoints(MIRROR_TYPES[ax][13]!, [0, 0, 0], [1, 1, 1]))).toBe(key(flipped));
+    }
+  });
+
+  it('mirroredBlock on y/z: mirrored cell on THAT axis only, type per axis', () => {
+    const b = blockFromCell([4, 3, 2], [1, 0, 1], 13, 4);
+    for (const ax of ['y', 'z'] as const) {
+      const t = mirroredBlock(b, ax);
+      const c = blockCells(b), ct = blockCells(t);
+      const cv: [number, number, number] = [c.x, c.y, c.z];
+      const tv: [number, number, number] = [ct.x, ct.y, ct.z];
+      const ext: [number, number, number] = [b.size_x, b.size_y, b.size_z];
+      const a = mirrorAxisIdx(ax);
+      for (let k = 0; k < 3; k++)
+        expect(tv[k]).toBe(k === a ? mirrorBlockCell(cv[k]!, ext[k]!) : cv[k]);
+      expect(t.type).toBe(MIRROR_TYPES[ax][13]);
+      // involutive: mirroring the twin again returns the original
+      const back = mirroredBlock(t, ax);
+      expect(blockCells(back)).toEqual(c);
+      expect(back.type).toBe(13);
+    }
+  });
+
+  it('blockMirrorTwin finds y/z pairs (and NOT on the wrong axis)', () => {
+    for (const ax of ['y', 'z'] as const) {
+      const b = blockFromCell([4, 3, 2], [0, 0, 0], 0, 4);
+      const t = mirroredBlock(b, ax);
+      const bp = bpOf([b, t]);
+      expect(blockMirrorTwin(bp, 0, ax)).toBe(1);
+      expect(blockMirrorTwin(bp, 1, ax)).toBe(0);
+      // the same pair is NOT a pair on x (or the other off-axis): non-vacuous
+      expect(blockMirrorTwin(bp, 0, ax === 'y' ? 'x' : 'y')).toBe(-1);
+    }
+  });
+
+  it('blockTwinIssues on a z pair: clean twin has no issues, material conflict is RED', () => {
+    const b = blockFromCell([4, 3, 2], [1, 0, 0], 13, 4);
+    const t = mirroredBlock(b, 'z');
+    const r = blockTwinIssues(bpOf([b, t]), 0, 'z')!;
+    expect(r.twin).toBe(1);
+    expect(r.issues).toEqual([]);
+    t.material = 3;
+    const r2 = blockTwinIssues(bpOf([b, t]), 0, 'z')!;
+    expect(r2.issues.some(i => i.startsWith('material'))).toBe(true);
+    expect(r2.info).toBe(false);
+  });
+
+  it('mirrorFaceOrder mirrors the face directions of the CHOSEN axis, involutive', () => {
+    const a = blockFromCell([4, 3, 2], [1, 0, 1], 13, 4);
+    for (const ax of ['x', 'y', 'z'] as const) {
+      const t = mirroredBlock(a, ax);
+      const slots = [1, 2, 3, 4, 5, 6, 7];
+      const fwd = mirroredFaceSlots({ ...a, colors: slots }, t, ax);
+      // mirror again (twin back through itself) restores every slot
+      const back = mirroredFaceSlots({ ...t, colors: fwd }, a, ax);
+      expect(back).toEqual(slots);
+      expect(mirrorFaceOrder(a, t, ax).length).toBe(7);
+    }
   });
 });

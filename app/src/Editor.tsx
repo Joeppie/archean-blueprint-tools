@@ -16,7 +16,7 @@ import { BlockPaint, CompPaint, SwatchGrid } from './components/ColorPanel';
 import { TOOLS, ToolDialog, type PlacePayload, type ToolForm } from './components/ToolsDialog';
 import HelpDialog from './components/HelpDialog';
 import { blockInfo, blockMirrorTwin, blockTwinIssues, cellIndex, cellOverlap,
-  complementBlock, paintTwinPair } from './engine/blocks';
+  complementBlock, mirrorAxisIdx, paintTwinPair, type MirrorAxis } from './engine/blocks';
 import { cornerOf, triAt, triangleFromCorners } from './engine/tris';
 import type { Blueprint } from './engine/format';
 import { isLegacyFile } from './engine/format';
@@ -93,9 +93,23 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   }, []);
   const [blockSub, setBlockSub] = useState<'blocks' | 'tris'>('blocks');
   // ⇄ mirrored placement (blocks AND catalog parts): the twin lands at the
-  // x-flipped cell/position about file x = 0 — the game editor's mirror tool
+  // mirrored cell/position about the SESSION mirror axis's 0-plane — the
+  // game editor's mirror tool
   const [mirrorPlace, setMirrorPlace] = useState(() => localStorage.getItem('archean-app-plsym') === '1');
   useEffect(() => { localStorage.setItem('archean-app-plsym', mirrorPlace ? '1' : '0'); }, [mirrorPlace]);
+  // v1.5.21 SETTABLE MIRROR AXIS (⚙ row, user: "mirror axes should be
+  // settable. Game is not hardcoded x"): the Engine owns the live value
+  // (same localStorage key, its own default); the React twin exists so the
+  // ⚙ row re-renders. Engine reads are through engineRef for the callbacks.
+  const [mirAxis, setMirAxis] = useState<MirrorAxis>(() =>
+    (['x', 'y', 'z'] as string[]).includes(localStorage.getItem('archean-app-mirror-axis') ?? '')
+      ? localStorage.getItem('archean-app-mirror-axis') as MirrorAxis : 'x');
+  const onMirrorAxis = useCallback((a: MirrorAxis) => {
+    setMirAxis(a);
+    engineRef.current?.setMirrorAxis(a);
+  }, []);
+  /** the axis for callbacks that run outside React render (engine is truth) */
+  const mirAx = useCallback((): MirrorAxis => engineRef.current?.mirrorAxis ?? 'x', []);
   const [triDraft, setTriDraft] = useState<number[][]>([]);
   const [triSel, setTriSel] = useState(-1);
   const [triBrush, setTriBrush] = useState<number[]>([51, 51, 51, 51, 51]);
@@ -368,7 +382,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
    *  together (the old "a bare key must never touch bp without the doc
    *  mirror" rule; the key now routes through here, so it is mirrored). */
   const deleteBlock = useCallback((ctx: EditCtx, bi: number) => {
-    const tw = blockMirrorTwin(ctx.bp, bi);
+    const tw = blockMirrorTwin(ctx.bp, bi, mirAx());
     for (const i of [bi, ...(tw >= 0 ? [tw] : [])].sort((a, b) => b - a)) {
       ctx.bp.data.blocks.splice(i, 1);
       docArrayRemoveAt(ctx.doc, ['data', 'blocks'], i);
@@ -526,7 +540,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     const e = engineRef.current, ctx = ctxRef.current;
     if (!e) return;
     if (mode === 'edit' && blockSel >= 0 && ctx) {
-      const tw = blockTwinIssues(ctx.bp, blockSel);
+      const tw = blockTwinIssues(ctx.bp, blockSel, mirAx());
       e.setBlockHighlight(blockSel, tw?.twin ?? -1, tw?.issues ?? [], tw?.info ?? false);
     } else e.setBlockHighlight(-1);
   }, [mode, blockSel, rev, engine]);
@@ -619,7 +633,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       ? complementBlock(info, [cellIndex(r.point[0]), cellIndex(r.point[1]), cellIndex(r.point[2])], r.nrm)
       : { cell: r.cell, ...brushSpec(brush) };
     if (cellOverlap(ctx.bp, spec.cell, spec.size)) return;   // the red ghost refuses
-    setBlockSel(placeBlock(ctx, spec, mirrorPlace));
+    setBlockSel(placeBlock(ctx, spec, mirrorPlace, mirAx()));
     sceneChanged();
     // the game keeps the ghost under the cursor after a placement — re-aim
     // it over the fresh surface (it may now complement the block placed)
@@ -653,7 +667,9 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       // ⇄ twin: mirrored POSITION, same orientation — exactly the geometry
       // sym.ts indexes (mask bit 1), so the pair co-selects and every later
       // edit propagates through the established twin path.
-      const twin = newComponent(type, module, [-p[0], p[1], p[2]], qFile);
+      const ma = mirAx();
+      const tp = p.map((v, k) => (k === mirrorAxisIdx(ma) ? -v : v)) as [number, number, number];
+      const twin = newComponent(type, module, tp, qFile);
       ctx.bp.data.components.push(twin as never);
       docArrayInsert(ctx.doc, ['data', 'components'], ctx.bp.data.components.length - 1, docFromValue(twin));
     }
@@ -685,8 +701,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   const paintBlock = useCallback((slot: number, faces?: number[]) => {
     const ctx = ctxRef.current;
     if (!ctx || blockSel < 0) return;
-    const twin = blockMirrorTwin(ctx.bp, blockSel);
-    if (!paintTwinPair(ctx.bp, blockSel, twin, slot, faces).length) return;
+    const twin = blockMirrorTwin(ctx.bp, blockSel, mirAx());
+    if (!paintTwinPair(ctx.bp, blockSel, twin, slot, faces, mirAx()).length) return;
     writeBlockDoc(ctx, blockSel);
     if (twin >= 0) writeBlockDoc(ctx, twin);
     sceneChanged();
@@ -787,7 +803,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         )}
         {blockSub === 'tris' ? triPanel : (
           <BlockPanel engine={engine} ctx={ctxRef.current} bp={bp!} blockSel={blockSel}
-            brush={brush} tab={tool} mirror={mirrorPlace} legacy={legacy}
+            brush={brush} tab={tool} mirror={mirrorPlace} legacy={legacy} mirrorAxis={mirAxis}
             onBrush={setBrush} onSelectBlock={setBlockSel} onApplied={sceneChanged}
             onPaint={paintBlock}
             custom={{ addColor: addPaletteColor, onPickSlot: slot => setBrush(b => ({ ...b, slot })) }} />
@@ -932,7 +948,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
                 <div className="ksp-label mb-1 flex items-center justify-between gap-2 border-b
                                border-white/10 pb-1 text-[10px] text-ink-dim">
                   Paint —{' '}
-                  {mode === 'edit' && blockSel >= 0 ? `Block[${blockSel}]${bp.data.blocks[blockSel] && blockMirrorTwin(bp, blockSel) >= 0 ? ' + twin' : ''}`
+                  {mode === 'edit' && blockSel >= 0 ? `Block[${blockSel}]${bp.data.blocks[blockSel] && blockMirrorTwin(bp, blockSel, mirAxis) >= 0 ? ' + twin' : ''}`
                     : sel.ci >= 0 ? `${bp.data.components[sel.ci]?.type ?? 'part'}[${sel.ci}]`
                       : 'brush'}
                   <button data-testid="palette-close" onClick={() => setPaintOpen(false)}
@@ -971,7 +987,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
                            overflow-y-auto rounded-lg">
                 <ViewOpts opts={opts} onOpt={toggleOpt} hullOpacity={hullOpacity} onHullOpacity={setHullOp}
                                     gizmoOn={gizmoOn} onGizmo={setGizmo} hiDef={hiDef} onHiDef={onHiDef}
-                                    staticInfo={staticInfo} onStaticInfo={setStaticInfo} />
+                                    staticInfo={staticInfo} onStaticInfo={setStaticInfo}
+                                    mirrorAxis={mirAxis} onMirrorAxis={onMirrorAxis} />
               </div>
             )}
             {/* TOOLS ▸ the definition-driven modal dialog (v1.7): opens over

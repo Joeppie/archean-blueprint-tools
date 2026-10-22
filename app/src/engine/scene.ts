@@ -17,7 +17,7 @@
 
 import {
   Box3, BoxGeometry, BufferAttribute, BufferGeometry, Color, DirectionalLight,
-  DoubleSide, GridHelper, Group, HemisphereLight, InstancedMesh,
+  DoubleSide, Group, HemisphereLight, InstancedMesh,
   LineBasicMaterial, LineSegments, LinearSRGBColorSpace, Matrix3, Matrix4, Mesh,
   MeshBasicMaterial, MeshStandardMaterial, Object3D, PerspectiveCamera,
   AdditiveBlending, Plane, PlaneGeometry, PMREMGenerator, Quaternion, Raycaster,
@@ -48,14 +48,16 @@ import type { FilePalette } from './palette';
 import type { Block, Blueprint, BlueprintComponent, Triangle } from './format';
 import { CELL, CELLS_PER_FRAME, isLegacyFile } from './format';
 import { getBlockEdges, getBlockFaces, getBlockPoints } from './blockshapes';
-import { blockCells, blockMirrorTwin, cellOverlapSkip, mirrorBlockCell,
-  rotatedBlock, setBlockGeom, type PlaceSpec } from './blocks';
+import { blockCells, blockMirrorTwin, cellOverlapSkip, mirrorBlockCell, mirrorAxisIdx,
+  rotatedBlock, setBlockGeom, type MirrorAxis, type PlaceSpec } from './blocks';
+import { gridPlan, pxPerMeter } from './grid';
 import {
   captureJrefs, masterJointState, subBlockBBox, subJointPose, subMasterEntries,
   type JRef, type SubBBox,
 } from './subgrid';
 import {
-  compPaintDiff, hasMirrorX, mirrorDelta, mirrorQuat, symAllowed, symTwinIndex, type TwinPair,
+  compPaintDiff, craftMirrorMask, hasMirrorX, mirrorDelta, mirrorQuat, symAllowed,
+  symTwinIndex, type TwinPair,
 } from './sym';
 import { calibrateCellMass, massModel, type MassModel } from './mass';
 import { Highlight } from './highlight';
@@ -286,6 +288,27 @@ export class Engine {
   private symIdx = new Map<number, TwinPair[]>();
   private symOn = localStorage.getItem('archean-app-sym') !== '0';   // the ⇄ switch
   private mirrorPlane: Group | null = null;
+  /** v1.5.21 SETTABLE mirror axis (user: "mirror axes should be settable.
+   *  Game is not hardcoded x."): the plane block twins, ⇄ twin placement and
+   *  the overlay's SESSION sheet ride. Default x = the corpus convention. */
+  private mirAxis: MirrorAxis =
+    (['x', 'y', 'z'] as string[]).includes(localStorage.getItem('archean-app-mirror-axis') ?? '')
+      ? (localStorage.getItem('archean-app-mirror-axis') as MirrorAxis) : 'x';
+  /** the part boxes of the last load (re-sizes the mirror sheets on a
+   *  mirror-axis change without a full reload) */
+  private lastPartBoxes: PartBox[] = [];
+
+  // ---------- adaptive ground grid (engine/grid.ts, v1.5.21) ----------
+  private gridLines: LineSegments | null = null;
+  private gridStepNow = 0;
+  /** the build footprint the grid fits (FILE coords — groundGroup rides
+   *  root's moff, so raw-file child coords land at world) */
+  private gridBox: { cx: number; cz: number; hx: number; hz: number } | null = null;
+  private gridY = 0;
+
+  /** view-frame subscribers (the corner axis indicator repaints after every
+   *  real render — the loop is on-demand, so no timers are involved) */
+  private viewCbs = new Set<() => void>();
 
   // ---------- mass & CoM ----------
   private cellMass = 1.5;
@@ -444,7 +467,9 @@ export class Engine {
       this.pumpWind();
       if (this.needRender && this.renderer) {
         this.needRender = false;
+        this.syncGrid();                          // zoom-adaptive cell (no-op if unchanged)
         this.renderer.render(this.scene, this.camera);
+        for (const cb of this.viewCbs) cb();      // corner axis indicator repaint
       }
       requestAnimationFrame(loop);
     };
@@ -1306,20 +1331,93 @@ void main() {
     };
   }
 
+  /** The ground pad (v1.5.21): the green sheet AND the grid now FIT THE
+   *  BUILD (the old fixed 28 m GridHelper patch drowned tiny crafts and
+   *  vanished under the giant). The height rule is unchanged (the ground
+   *  pin): just below the lowest rendered geometry, nothing of a craft
+   *  renders below it. The grid lines themselves are zoom-adaptive —
+   *  drawn by syncGrid() from engine/grid.ts's plan on every rendered
+   *  frame whose step changed. */
   private addGround(bp: Blueprint, parts: PartBox[]) {
     let y = bp.box_min.y;
-    for (const p of parts) y = Math.min(y, p.center[1] - p.size[1] / 2);
+    let x0 = bp.box_min.x, x1 = bp.box_max.x, z0 = bp.box_min.z, z1 = bp.box_max.z;
+    for (const p of parts) {
+      y = Math.min(y, p.center[1] - p.size[1] / 2);
+      x0 = Math.min(x0, p.center[0] - p.size[0] / 2); x1 = Math.max(x1, p.center[0] + p.size[0] / 2);
+      z0 = Math.min(z0, p.center[2] - p.size[2] / 2); z1 = Math.max(z1, p.center[2] + p.size[2] / 2);
+    }
     y -= 0.05;
     this.groundGroup = new Group();                  // fresh per load (dispose-safe)
-    const plane = new Mesh(new PlaneGeometry(120, 120), this.flatMat(0x3d5a34));
+    this.gridStepNow = 0;                            // force a grid rebuild on frame 1
+    if (this.gridLines) { this.gridLines.geometry.dispose(); (this.gridLines.material as LineBasicMaterial).dispose(); this.gridLines = null; }
+    this.gridY = y;
+    this.gridBox = { cx: (x0 + x1) / 2, cz: (z0 + z1) / 2,
+      hx: Math.max((x1 - x0) / 2, 2), hz: Math.max((z1 - z0) / 2, 2) };
+    const plane = new Mesh(new PlaneGeometry(this.gridPad(), this.gridPad()), this.flatMat(0x3d5a34));
     plane.rotation.x = -Math.PI / 2;
-    plane.position.y = y;
+    plane.position.set(this.gridBox.cx, y, this.gridBox.cz);
     plane.userData.kind = 'ground' satisfies Kind;
     this.groundGroup.add(plane);
-    const grid = new GridHelper(28, 112, 0x223322, 0x2c4429);
-    grid.position.y = y + 0.002;
-    this.groundGroup.add(grid);
     this.root.add(this.groundGroup);
+  }
+  /** the green sheet: covers the build comfortably, minimum 120 m patch */
+  private gridPad(): number {
+    const g = this.gridBox;
+    return 2 * Math.max(60, g ? g.hx + 30 : 0, g ? g.hz + 30 : 0);
+  }
+
+  /** v1.5.21 ADAPTIVE GRID (user: "grid needs to fit build comfortably.
+   *  Probably granularity depending on zoom 1x or 5, 10, depending"): the
+   *  ladder is planned by engine/grid.ts from the projected px scale (1×,
+   *  5×, 10× of the 0.25 m cell …) and the build footprint. Runs on every
+   *  frame that ACTUALLY renders (orbit damping fires change→invalidate, so
+   *  zoom is caught without timers); a frame whose chosen cell is unchanged
+   *  pays only the plan's arithmetic. Lines ride the WORLD lattice (every
+   *  k·step), so at the finest step the grid is exactly the block cell. */
+  private syncGrid() {
+    if (!this.gridBox || !this.controls || !this.renderer || !this.groundGroup.visible) return;
+    const h = this.renderer.domElement.clientHeight || 1;
+    const d = this.camera.position.distanceTo(this.controls.target);
+    const plan = gridPlan(this.gridBox.hx, this.gridBox.hz, pxPerMeter(h, this.camera.fov, d));
+    if (plan.step === this.gridStepNow && this.gridLines) return;
+    this.gridStepNow = plan.step;
+    if (this.gridLines) {
+      this.groundGroup.remove(this.gridLines);
+      this.gridLines.geometry.dispose();
+      (this.gridLines.material as LineBasicMaterial).dispose();
+      this.gridLines = null;
+    }
+    const { step, halfX, halfZ } = plan;
+    const { cx, cz } = this.gridBox, y = this.gridY + 0.002;
+    const pos: number[] = [], col: number[] = [];
+    const cMinor = new Color(0x2c4429), cMajor = new Color(0x41703c);
+    const line = (ax: number, x: number, major: boolean) => {
+      const c = major ? cMajor : cMinor;
+      if (ax === 0) { pos.push(x, y, cz - halfZ, x, y, cz + halfZ); }
+      else { pos.push(cx - halfX, y, x, cx + halfX, y, x); }
+      col.push(c.r, c.g, c.b, c.r, c.g, c.b);
+    };
+    // whole-cell indices k with k·step inside the span; majors every 5th
+    for (let k = Math.ceil((cx - halfX) / step); k * step <= cx + halfX; k++)
+      line(0, k * step, ((k % 5) + 5) % 5 === 0);
+    for (let k = Math.ceil((cz - halfZ) / step); k * step <= cz + halfZ; k++)
+      line(1, k * step, ((k % 5) + 5) % 5 === 0);
+    const geo = new BufferGeometry();
+    geo.setAttribute('position', new BufferAttribute(new Float32Array(pos), 3));
+    geo.setAttribute('color', new BufferAttribute(new Float32Array(col), 3));
+    this.gridLines = new LineSegments(geo,
+      new LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9 }));
+    this.groundGroup.add(this.gridLines);
+  }
+  /** live grid plan for the pins (testid hook __ARCHEAN__.grid()): the
+   *  chosen cell + the covered half-spans in file coords */
+  gridInfo(): { step: number; major: number; halfX: number; halfZ: number; cx: number; cz: number; y: number } | null {
+    if (!this.gridBox) return null;
+    const h = this.renderer?.domElement.clientHeight || 1;
+    const d = this.controls ? this.camera.position.distanceTo(this.controls.target) : 10;
+    const plan = gridPlan(this.gridBox.hx, this.gridBox.hz, pxPerMeter(h, this.camera.fov, d));
+    return { step: this.gridStepNow || plan.step, major: plan.step * 5,
+      halfX: plan.halfX, halfZ: plan.halfZ, cx: this.gridBox.cx, cz: this.gridBox.cz, y: this.gridY };
   }
 
   /** legacy fit: d = max(1.85r, 3.6), eye (0.6d, max(.34d,1.4), .72d) (fog off;
@@ -1366,6 +1464,7 @@ void main() {
     if ((key === 'hull' && on && this.opts.wire) || (key === 'wire' && on && this.opts.hull))
       this.opts = { ...this.opts, [key === 'hull' ? 'wire' : 'hull']: false };   // mutually exclusive (legacy)
     this.applyViewOptions();
+    if (key === 'grid' && on) this.gridStepNow = 0;   // re-draw the pad on re-enable
     this.invalidate();
   }
   private applyViewOptions() {
@@ -1389,13 +1488,27 @@ void main() {
     this.paintSelection();
     this.invalidate();
   }
-  symState(): { on: boolean; mirrorX: boolean; active: boolean } {
+  symState(): { on: boolean; mirrorX: boolean; axes: MirrorAxis[]; active: boolean } {
+    const mask = craftMirrorMask(this.bp?.data.components ?? [], this.symIdx);
     return {
       on: this.symOn,
       mirrorX: hasMirrorX(this.symIdx),
+      axes: (['x', 'y', 'z'] as MirrorAxis[]).filter(a => (mask & (1 << mirrorAxisIdx(a))) !== 0),
       active: this.selCi >= 0 && this.twinPairsFor(this.selCi).length > 0,
     };
   }
+  /** v1.5.21 SETTABLE MIRROR AXIS (⚙ row): the SESSION plane for ⇄ twin
+   *  placement and block twin identity. The game is not hardcoded x — the
+   *  per-component `mirrorAxis` field and non-x twin pairs are additionally
+   *  detected and sheeted by buildMirrorPlane. */
+  setMirrorAxis(a: MirrorAxis) {
+    if (a === this.mirAxis) return;
+    this.mirAxis = a;
+    localStorage.setItem('archean-app-mirror-axis', a);
+    this.buildMirrorPlane(this.lastPartBoxes);
+    this.invalidate();
+  }
+  get mirrorAxis(): MirrorAxis { return this.mirAxis; }
   /** live pairs that PROPAGATE for comp i, while the pair is still aligned
    *  (drift > 5 cm auto-disables — a drifted pair is a FAUX-MIRROR: red ⚠,
    *  no propagation). v1.8.0 UNIFORM MIRROR RULE (user: the rule applies to
@@ -1489,9 +1602,16 @@ void main() {
   }
   get hiDefOn() { return this.hiDef; }
 
-  /** the striped x-symmetry sheet (v0.161) at FILE x = 0 — view x = moff.x.
-   *  Shown only when the craft actually carries x-mirror pairs. */
+  /** v1.5.21 MIRROR SHEETS (was the x-only sheet): one gold plane per axis
+   *  the craft mirrors on — the geometric twin-pair masks ∪ per-component
+   *  `mirrorAxis` fields (craftMirrorMask, the legacy viewer's mask ∪
+   *  mirrorAxis precedent) ∪ the SESSION axis (⚙ row, so the plane you
+   *  BUILD against is visible while placing the twin). Each sheet sits at
+   *  FILE coord 0 on its axis (the dev viewer's scale[mirrorAxis−1] = −1
+   *  mirrors about 0); the session axis's sheet is solid gold, purely
+   *  detected ones are faint. */
   private buildMirrorPlane(parts: PartBox[]) {
+    this.lastPartBoxes = parts;
     if (this.mirrorPlane) {
       this.root.remove(this.mirrorPlane);
       this.mirrorPlane.traverse(o => {
@@ -1501,26 +1621,42 @@ void main() {
       });
       this.mirrorPlane = null;
     }
-    if (!hasMirrorX(this.symIdx)) return;
-    let y0 = Infinity, y1 = -Infinity, z0 = Infinity, z1 = -Infinity;
-    for (const p of parts) {
-      y0 = Math.min(y0, p.center[1] - p.size[1] / 2); y1 = Math.max(y1, p.center[1] + p.size[1] / 2);
-      z0 = Math.min(z0, p.center[2] - p.size[2] / 2); z1 = Math.max(z1, p.center[2] + p.size[2] / 2);
-    }
-    if (!isFinite(y0)) return;
-    const h = Math.max(y1 - y0, 1) * 1.15, w = Math.max(z1 - z0, 1) * 1.15;
+    const bp = this.bp;
+    if (!bp) return;
+    const mask = craftMirrorMask(bp.data.components, this.symIdx) | (1 << mirrorAxisIdx(this.mirAxis));
+    const lo = [bp.box_min.x, bp.box_min.y, bp.box_min.z];
+    const hi = [bp.box_max.x, bp.box_max.y, bp.box_max.z];
+    for (const p of parts)
+      for (let k = 0; k < 3; k++) {
+        lo[k] = Math.min(lo[k]!, p.center[k]! - p.size[k]! / 2);
+        hi[k] = Math.max(hi[k]!, p.center[k]! + p.size[k]! / 2);
+      }
+    for (let k = 0; k < 3; k++)
+      if (!isFinite(lo[k]!) || !isFinite(hi[k]!)) { lo[k] = -4; hi[k] = 4; }
+    const span = (ax: number) => Math.max(hi[ax]! - lo[ax]!, 1) * 1.15;
+    const mid = (ax: number) => (hi[ax]! + lo[ax]!) / 2;
     const g = new Group();
-    const sheet = new Mesh(new PlaneGeometry(w, h),
-      new MeshStandardMaterial({ color: 0xffc94d, transparent: true, opacity: 0.10,
-        roughness: 1, side: DoubleSide, depthWrite: false }));
-    sheet.material.envMapIntensity = 0;
-    sheet.rotation.y = Math.PI / 2;                       // normal = x
-    const edges = new LineSegments(new BufferGeometry().setFromPoints([
-      new Vector3(0, -h / 2, -w / 2), new Vector3(0, -h / 2, w / 2),
-      new Vector3(0, h / 2, w / 2), new Vector3(0, h / 2, -w / 2), new Vector3(0, -h / 2, -w / 2),
-    ]), new LineBasicMaterial({ color: GOLD, transparent: true, opacity: 0.6 }));
-    g.add(sheet, edges);
-    g.position.set(this.moff.x, (y0 + y1) / 2, (z0 + z1) / 2);
+    for (let a = 0; a < 3; a++) {
+      if (!(mask & (1 << a))) continue;
+      const session = a === mirrorAxisIdx(this.mirAxis);
+      let rotX = 0, rotY = 0, w = 0, h = 0;
+      if (a === 0) { rotY = Math.PI / 2; w = span(2); h = span(1); }      // normal x: width z, height y
+      else if (a === 1) { rotX = -Math.PI / 2; w = span(0); h = span(2); } // normal y: width x, height z
+      else { w = span(0); h = span(1); }                                   // normal z: width x, height y
+      const s = new Group();
+      s.rotation.set(rotX, rotY, 0);
+      s.position.set(a === 0 ? 0 : mid(0), a === 1 ? 0 : mid(1), a === 2 ? 0 : mid(2));
+      const sheet = new Mesh(new PlaneGeometry(w, h),
+        new MeshStandardMaterial({ color: 0xffc94d, transparent: true, opacity: session ? 0.10 : 0.05,
+          roughness: 1, side: DoubleSide, depthWrite: false }));
+      sheet.material.envMapIntensity = 0;
+      const edges = new LineSegments(new BufferGeometry().setFromPoints([
+        new Vector3(-w / 2, -h / 2, 0), new Vector3(w / 2, -h / 2, 0),
+        new Vector3(w / 2, h / 2, 0), new Vector3(-w / 2, h / 2, 0), new Vector3(-w / 2, -h / 2, 0),
+      ]), new LineBasicMaterial({ color: GOLD, transparent: true, opacity: session ? 0.6 : 0.3 }));
+      s.add(sheet, edges);
+      g.add(s);
+    }
     this.mirrorPlane = g;
     this.root.add(g);
   }
@@ -1854,6 +1990,44 @@ void main() {
   camPos(): [number, number, number] {
     const p = this.camera.position;
     return [p.x, p.y, p.z];
+  }
+
+  // ---------- corner axis indicator (v1.5.21, user: "We need to see
+  // directions for XYZ axes") ----------
+  /** subscribe to real renders (the loop is on-demand: the callback fires
+   *  exactly when a frame was drawn — the indicator never polls a timer) */
+  onView(cb: () => void): () => void {
+    this.viewCbs.add(cb);
+    return () => { this.viewCbs.delete(cb); };
+  }
+  /** the world X/Y/Z unit directions projected to screen for the corner
+   *  gizmo: sx/sy are SCREEN-space directions (y down), toward > 0 when the
+   *  axis head points at the viewer (draw order + fade follow it) */
+  axisView(): { k: MirrorAxis; sx: number; sy: number; toward: number }[] {
+    this.camera.updateMatrixWorld();
+    const inv = this.camera.matrixWorldInverse.copy(this.camera.matrixWorld).invert();
+    const dirs: [MirrorAxis, Vector3][] = [
+      ['x', new Vector3(1, 0, 0)], ['y', new Vector3(0, 1, 0)], ['z', new Vector3(0, 0, 1)],
+    ];
+    return dirs.map(([k, v]) => {
+      const c = v.transformDirection(inv);
+      return { k, sx: c.x, sy: -c.y, toward: -c.z };
+    });
+  }
+  /** fly the eye onto ±one world axis through the framed centre (a corner
+   *  indicator click): the viewPreset trio, made axis-general and 2-sided */
+  viewAxis(a: MirrorAxis, back = false) {
+    if (!this.controls || !this.frameC) return;
+    const c = this.frameC, d = Math.max(this.frameD, 3.6), s = back ? -1 : 1, t = 0.002;
+    const p = a === 'x' ? new Vector3(c.x + s * d, c.y + t * d, c.z + t * d)
+      : a === 'y' ? new Vector3(c.x + t * d, c.y + s * d, c.z)
+        : new Vector3(c.x + t * d, c.y + t * d, c.z - s * d);
+    this.fly = null;
+    this.camera.position.copy(p);
+    this.controls.target.copy(c);
+    this.camera.lookAt(c);
+    this.controls.update();
+    this.invalidate();
   }
 
   // -------------------------------------------------------------- gizmo ops
@@ -2190,12 +2364,14 @@ void main() {
     const c = blockCells(b);
     const cell: [number, number, number] = [c.x + step[0], c.y + step[1], c.z + step[2]];
     const size: [number, number, number] = [b.size_x, b.size_y, b.size_z];
-    const twin = blockMirrorTwin(bp, bi);
+    const twin = blockMirrorTwin(bp, bi, this.mirAxis);
     const tw = twin >= 0 ? bp.data.blocks[twin] : undefined;
     if (cellOverlapSkip(bp, cell, size, [bi, twin])) return false;
     let tcell: [number, number, number] | null = null;
     if (tw) {
-      tcell = [mirrorBlockCell(cell[0], b.size_x), cell[1], cell[2]];
+      const ma = mirrorAxisIdx(this.mirAxis);
+      tcell = [cell[0], cell[1], cell[2]];
+      tcell[ma] = mirrorBlockCell(cell[ma]!, size[ma]!);
       if (cellOverlapSkip(bp, tcell, [tw.size_x, tw.size_y, tw.size_z], [bi, twin])) return false;
     }
     setBlockGeom(b, cell, size, b.type);
@@ -2214,7 +2390,7 @@ void main() {
     if (!bp || !b) return false;
     const n = ((Math.round(n90) % 4) + 4) % 4;
     if (n === 0) return true;
-    const twin = blockMirrorTwin(bp, bi);
+    const twin = blockMirrorTwin(bp, bi, this.mirAxis);
     const tw = twin >= 0 ? bp.data.blocks[twin] : undefined;
     const turn = (x: Block): Block => {
       let r = x;
@@ -2237,7 +2413,7 @@ void main() {
     this.blockHlSpec = null;                  // force a geometry rebuild
     if (this.blockGizBi >= 0 && this.bp)      // twin IDENTIFIED always (v1.7.1)
       this.setBlockHighlight(this.blockGizBi,
-        blockMirrorTwin(this.bp, this.blockGizBi));
+        blockMirrorTwin(this.bp, this.blockGizBi, this.mirAxis));
     this.onBlockEdit?.(twin >= 0 ? [this.blockGizBi, twin] : [this.blockGizBi]);
   }
   /** WORLD bbox of a component's REAL (node-tree) model, [min,max]; null
@@ -3287,13 +3463,17 @@ void main() {
     const size: [number, number, number] = [Math.max(0.1, hi[0]! - lo[0]!), Math.max(0.1, hi[1]! - lo[1]!), Math.max(0.1, hi[2]! - lo[2]!)];
     const ctr: [number, number, number] = [(lo[0]! + hi[0]!) / 2, (lo[1]! + hi[1]!) / 2,
       (lo[2]! + hi[2]!) / 2];
-    const put = (p: [number, number, number], mx = 1) => {
+    const mi = mirrorAxisIdx(this.mirAxis);
+    const put = (p: [number, number, number], mirrored = false) => {
+      // ⇄ twin = mirrored POSITION on the SESSION mirror axis, same
+      // orientation (v1.5.21 settable axis; the old hard x-flip)
+      const q = p.map((v, k) => (mirrored && k === mi ? -v : v)) as [number, number, number];
       const tmpl = this.ghostCache.get(g.type);
       if (tmpl) {
         const c = tmpl.clone(true);
         c.rotation.order = 'ZYX';
         c.rotation.y = yaw;
-        c.position.set(mx * p[0], p[1], p[2]);
+        c.position.set(q[0], q[1], q[2]);
         this.compHlGroup.add(c);
         return;
       }
@@ -3301,12 +3481,13 @@ void main() {
       const wmat = new LineBasicMaterial({ color: 0xffc94d, transparent: true, opacity: 0.9, depthTest: false });
       const geo = new BoxGeometry(size[0], size[1], size[2]);
       const m = new Mesh(geo, mat);
-      m.position.set(mx * (p[0] + ctr[0]), p[1] + ctr[1], p[2] + ctr[2]);
+      const ctrF: [number, number, number] = [q[0] + ctr[0], q[1] + ctr[1], q[2] + ctr[2]];
+      m.position.set(ctrF[0], ctrF[1], ctrF[2]);
       m.renderOrder = 29;
       const eg = new BufferGeometry();
       const c8: number[] = [];
       for (const sx of [-1, 1]) for (const sy of [-1, 1]) for (const sz of [-1, 1])
-        c8.push(mx * (p[0] + ctr[0] + sx * size[0] / 2), p[1] + ctr[1] + sy * size[1] / 2, p[2] + ctr[2] + sz * size[2] / 2);
+        c8.push(ctrF[0] + sx * size[0] / 2, ctrF[1] + sy * size[1] / 2, ctrF[2] + sz * size[2] / 2);
       const EI = [0, 1, 2, 3, 4, 5, 6, 7,   // x-runs
         0, 2, 1, 3, 4, 6, 5, 7,             // y-runs
         0, 4, 1, 5, 2, 6, 3, 7];            // z-runs
@@ -3318,7 +3499,7 @@ void main() {
       this.compHlGroup.add(m, wire);
     };
     put(g.point);
-    if (mirror) put(g.point, -1);
+    if (mirror) put(g.point, true);
     this.ghostStream(g.type);
     this.invalidate();
   }

@@ -88,6 +88,24 @@ export function hasMirrorX(index: Map<number, TwinPair[]>): boolean {
   return false;
 }
 
+/** v1.5.21 SETTABLE MIRROR AXIS (user: "mirror axes should be settable.
+ *  Game is not hardcoded x"): every axis the craft mirrors on — the union
+ *  of the geometric twin-pair masks AND the per-component `mirrorAxis`
+ *  field the game itself stores (0 = none; axis indices 1=x, 2=y, 3=z, see
+ *  FORMAT §components and the dev viewer's scale[mirrorAxis−1] = −1).
+ *  The Engine draws one overlay sheet per bit (the legacy viewer's
+ *  mask ∪ mirrorAxis precedent) and the ⚙ row adds the SESSION axis. */
+export function craftMirrorMask(comps: readonly BlueprintComponent[],
+  index: Map<number, TwinPair[]>): number {
+  let m = 0;
+  for (const [, pairs] of index) for (const p of pairs) m |= p.mask;
+  for (const c of comps) {
+    const a = Number((c as { mirrorAxis?: number | string }).mirrorAxis ?? 0);
+    if (a >= 1 && a <= 3) m |= 1 << (Math.round(a) - 1);
+  }
+  return m;
+}
+
 /** v1.8.0 UNIFORM MIRROR RULE diagnostics: appearance of a component pair.
  *  A twin pair whose PAINT differs (v2 color1/color2 spec dicts or v1
  *  [slot,slot] index pairs) is a mirror-conflicting FAUX-MIRROR: it must be

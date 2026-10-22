@@ -8,8 +8,8 @@ import { FLOWS, type FlowKey } from '../engine/aero';
 import { writeBlockDoc, writeBlockMaterial, type EditCtx } from '../engine/edit';
 import { docArrayInsert, docFromValue, docSetNumber, docArrayRemoveAt } from '../engine/doc';
 import { blockCells, blockFromCell, blockInfo, blockTwinIssues, blockMirrorTwin, cellOverlapSkip, flippedBlock,
-  mirroredBlock, MIRROR_TYPE, mirrorBlockCell, rotateType, rotatedBlock, setBlockField, setBlockGeom,
-  snapBlockType, type PlaceSpec } from '../engine/blocks';
+  mirroredBlock, mirrorAxisIdx, MIRROR_TYPES, mirrorBlockCell, rotateType, rotatedBlock, setBlockField, setBlockGeom,
+  snapBlockType, type MirrorAxis, type PlaceSpec } from '../engine/blocks';
 import { shapeName } from '../engine/blockshapes';
 import { MATERIALS, MATERIAL_HINT, materialName } from '../engine/tools';
 import { cssColor, resolveColor } from '../engine/palette';
@@ -56,6 +56,9 @@ export function BlockPanel(p: {
   mirror: boolean;
   /** v1 files carry no data.colors — the palette picker applies the remap */
   legacy: boolean;
+  /** v1.5.21 SETTABLE mirror axis (⚙ row): the plane block twin identity,
+   *  mirrored rows and in-place shape flips ride. Default x. */
+  mirrorAxis?: MirrorAxis;
   onBrush: (b: Brush) => void;
   onSelectBlock: (bi: number) => void;
   onApplied: () => void;                 // schedule reload + dirty
@@ -68,15 +71,17 @@ export function BlockPanel(p: {
   custom?: CustomPaint;
 }) {
   const [snapMsg, setSnapMsg] = useState('');
+  const mAx = p.mirrorAxis ?? 'x';               // v1.5.21 settable mirror axis
+  const mIdx = mirrorAxisIdx(mAx);
   const info = p.blockSel >= 0 ? blockInfo(p.bp, p.blockSel) : null;
   // SIMILAR BLOCKS ⇄: the block on the mirrored footprint with the same
   // extents and a compatible (identical-or-mirrored) shape — the block twin
   // index. Identified always; since v1.7.1 EVERY edit below drives it too
   // (mirrored), the ⇄ toggle gating only twin PLACEMENT.
-  const twin = info ? blockMirrorTwin(p.bp, p.blockSel) : -1;
+  const twin = info ? blockMirrorTwin(p.bp, p.blockSel, mAx) : -1;
   // v1.8.0 UNIFORM MIRROR RULE diagnostic: what (if anything) breaks the
   // mirror on the footprint opposite this block — the RED ⚠ row + popup
-  const twDiag = info ? blockTwinIssues(p.bp, p.blockSel) : null;
+  const twDiag = info ? blockTwinIssues(p.bp, p.blockSel, mAx) : null;
   const TYPES: [number, string][] = [
     [0, 'Cube'], [1, 'Ramp A'], [5, 'Ramp B'], [9, 'Ramp C'], [13, 'Corner'], [21, 'Pyramid'],
     [45, 'Inv corner'], [4, 'Thin rod'],
@@ -86,29 +91,36 @@ export function BlockPanel(p: {
    *  and the panel rows can never drift apart. */
   const writeBlock = (bi: number) => { if (p.ctx) writeBlockDoc(p.ctx, bi); };
   /** v1.6: EVERY field edit (cx/cy/cz/size/type) mirrors — the twin takes
-   *  the mirrored x cell, the same y/z DELTA, its own clamped size and the
-   *  MIRROR_TYPE turn (user: "ensure mirroring is respected, which currently
-   *  it is not, when editing a block"). v1.7.1 (user: "it should also do
-   *  whatever I do to the mirror block"): ALWAYS, not just while ⇄ is on.
-   *  A colliding cell move REFUSES the twin's move (the gizmo's
-   *  cellOverlapSkip contract — the pair may not interpenetrate); the self
-   *  edit already applied stands. */
+   *  the mirrored cell ON THE MIRROR AXIS (v1.5.21 settable — the corpus
+   *  crafts are x), the EQUAL DELTA on the other two, its own clamped size
+   *  and the mirrored-type turn (user: "ensure mirroring is respected,
+   *  which currently it is not, when editing a block"). v1.7.1 (user: "it
+   *  should also do whatever I do to the mirror block"): ALWAYS, not just
+   *  while ⇄ is on. A colliding cell move REFUSES the twin's move (the
+   *  gizmo's cellOverlapSkip contract — the pair may not interpenetrate);
+   *  the self edit already applied stands. */
   const mirrorGeom = (k: 'cx' | 'cy' | 'cz' | 'size_x' | 'size_y' | 'size_z' | 'type', v: number) => {
     if (twin < 0 || !p.ctx) return;
     const bp = p.ctx.bp;
     const tw = bp.data.blocks[twin];
     if (!tw) return;
-    if (k === 'cx') {
-      const tcx = mirrorBlockCell(Math.round(v), tw.size_x);
-      const c = blockCells(tw);
-      if (cellOverlapSkip(bp, [tcx, c.y, c.z], [tw.size_x, tw.size_y, tw.size_z], [p.blockSel, twin])) return;
-      setBlockField(bp, twin, 'cx', tcx);
-    } else if (k === 'cy' || k === 'cz') {
-      const ax = k[1] as 'x' | 'y' | 'z';
+    if (k === 'cx' || k === 'cy' || k === 'cz') {
+      const ax = mirrorAxisIdx(k[1] as MirrorAxis);
       const b = bp.data.blocks[p.blockSel]!;
-      setBlockField(bp, twin, k, blockCells(tw)[ax] + (Math.round(v) - blockCells(b)[ax]));
+      const bc = blockCells(b);
+      const cv = blockCells(tw);
+      const cell: [number, number, number] = [cv.x, cv.y, cv.z];
+      const c: [number, number, number] = [cv.x, cv.y, cv.z];
+      const bcv: [number, number, number] = [bc.x, bc.y, bc.z];
+      if (ax === mIdx) {
+        cell[ax] = mirrorBlockCell(Math.round(v), [tw.size_x, tw.size_y, tw.size_z][ax]!);
+        if (cellOverlapSkip(bp, cell, [tw.size_x, tw.size_y, tw.size_z], [p.blockSel, twin])) return;
+      } else {
+        cell[ax] = c[ax]! + (Math.round(v) - bcv[ax]!);
+      }
+      setBlockField(bp, twin, k, cell[ax]!);
     } else if (k === 'type') {
-      setBlockField(bp, twin, 'type', MIRROR_TYPE[Math.round(v)] ?? Math.round(v));
+      setBlockField(bp, twin, 'type', MIRROR_TYPES[mAx][Math.round(v)] ?? Math.round(v));
     } else {
       setBlockField(bp, twin, k, v);            // setBlockField clamps per-twin
     }
@@ -131,7 +143,7 @@ export function BlockPanel(p: {
    *  similar twin (v1.7.1). fn mutates bp and writes the doc; returns changed. */
   const editBlocks = (fn: (bi: number) => boolean) => {
     if (!p.ctx || p.blockSel < 0) return;
-    const tw = blockMirrorTwin(p.bp, p.blockSel);
+    const tw = blockMirrorTwin(p.bp, p.blockSel, mAx);
     const results = [fn(p.blockSel)];
     if (tw >= 0) results.push(fn(tw));
     if (results.some(Boolean)) p.onApplied();
@@ -148,7 +160,7 @@ export function BlockPanel(p: {
   const flipInPlace = () => editBlocks(bi => {
     const b = p.ctx!.bp.data.blocks[bi];
     if (!b) return false;
-    const t = flippedBlock(b).type;
+    const t = flippedBlock(b, mAx).type;
     if (t === b.type) return false;
     b.type = t; writeBlock(bi);
     return true;
@@ -164,7 +176,7 @@ export function BlockPanel(p: {
    *  stays mirror-consistent. */
   const snap = () => {
     if (!p.ctx || p.blockSel < 0) return;
-    const tw = blockMirrorTwin(p.bp, p.blockSel);
+    const tw = blockMirrorTwin(p.bp, p.blockSel, mAx);
     const rs = snapBlockType(p.bp, p.blockSel);
     const rt = tw >= 0 ? snapBlockType(p.bp, tw) : null;
     if (!rs) { setSnapMsg('no neighbouring blocks to match'); return; }
@@ -186,7 +198,7 @@ export function BlockPanel(p: {
   };
   const deleteSel = () => {
     if (!p.ctx) return;
-    const tw = blockMirrorTwin(p.bp, p.blockSel);
+    const tw = blockMirrorTwin(p.bp, p.blockSel, mAx);
     const idx = [p.blockSel, ...(tw >= 0 ? [tw] : [])].sort((a, b) => b - a);
     for (const i of idx) {
       p.ctx.bp.data.blocks.splice(i, 1);
@@ -201,7 +213,7 @@ export function BlockPanel(p: {
    *  it; the game reader defaults a missing one to composite). */
   const setMaterial = (m: number) => {
     if (!p.ctx || p.blockSel < 0) return;
-    const tw = blockMirrorTwin(p.bp, p.blockSel);
+    const tw = blockMirrorTwin(p.bp, p.blockSel, mAx);
     writeBlockMaterial(p.ctx, p.blockSel, m);
     if (tw >= 0) writeBlockMaterial(p.ctx, tw, m);
     p.onApplied();
@@ -349,15 +361,17 @@ export function BlockPanel(p: {
 
 /** App-side: place a block from a placement spec (blocks mode): the brush at
  *  the picked cell, or the Shift continuation block complementBlock computed.
- *  With `mirror` the ⇄ twin lands at the x-mirrored cell too (type mirrored;
- *  same-face colour slots kept — single-slot brush paints are the exact case). */
-export function placeBlock(ctx: EditCtx, spec: PlaceSpec, mirror = false): number {
+ *  With `mirror` the ⇄ twin lands at the mirrored cell too (v1.5.21: on the
+ *  SETTABLE mirror axis, default x; type mirrored; same-face colour slots
+ *  kept — single-slot brush paints are the exact case). */
+export function placeBlock(ctx: EditCtx, spec: PlaceSpec, mirror = false,
+  axis: MirrorAxis = 'x'): number {
   const block = blockFromCell(spec.cell, spec.size, spec.type, spec.slot, spec.material ?? 0);
   ctx.bp.data.blocks.push(block);
   const at = ctx.bp.data.blocks.length - 1;
   docArrayInsert(ctx.doc, ['data', 'blocks'], at, docFromValue(block));
   if (mirror) {
-    const twin = mirroredBlock(block);
+    const twin = mirroredBlock(block, axis);
     ctx.bp.data.blocks.push(twin);
     docArrayInsert(ctx.doc, ['data', 'blocks'], ctx.bp.data.blocks.length - 1, docFromValue(twin));
   }

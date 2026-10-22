@@ -5,7 +5,7 @@
 // wheel bug of v0.165 must stay dead).
 import { readFileSync, existsSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
-import { compPaintDiff, mirrorQuat, symAllowed, symMaskAt, symTwinIndex } from '../sym';
+import { compPaintDiff, craftMirrorMask, mirrorQuat, symAllowed, symMaskAt, symTwinIndex } from '../sym';
 import type { Blueprint, BlueprintComponent, Vec3D } from '../format';
 import { corpusDir } from '../../../tools/vite-corpus.ts';
 
@@ -97,5 +97,24 @@ describe('v1.8.0 UNIFORM MIRROR RULE: compPaintDiff (faux-mirror paint screen)',
   });
   test('one side painted, the other not → paint issue', () => {
     expect(compPaintDiff({ color1: spec(1) } as never, undefined)).toEqual(['paint differs']);
+  });
+});
+
+describe('v1.5.21 craftMirrorMask (settable mirror axis)', () => {
+  const comp2 = (type: string, position: Vec3D, mirrorAxis?: number): BlueprintComponent =>
+    ({ type, position, orientation: { w: 1, x: 0, y: 0, z: 0 }, ...(mirrorAxis ? { mirrorAxis } : {}) } as BlueprintComponent);
+  test('geometric pairs feed the mask (y-pair ⇒ bit 2, NOT x)', () => {
+    const comps = [comp2('SmallWheel', p(0, 1, 3)), comp2('SmallWheel', p(0, -1, 3))];
+    expect(craftMirrorMask(comps, symTwinIndex(comps))).toBe(2);
+  });
+  test('the game mirrorAxis FIELD (0=none, 1=x, 2=y, 3=z) adds axes', () => {
+    const comps = [comp2('Crate', p(1, 0, 0), 3)];          // declares z
+    expect(craftMirrorMask(comps, symTwinIndex(comps))).toBe(4);
+    expect(craftMirrorMask([comp2('Crate', p(1, 0, 0), 0)], new Map())).toBe(0);
+  });
+  test('union: pairs ∪ declared fields', () => {
+    const comps = [comp2('SmallWheel', p(3, 0, 1)), comp2('SmallWheel', p(-3, 0, 1)),
+                   comp2('Crate', p(0, 0, 2), 2)];          // x pair + declared y
+    expect(craftMirrorMask(comps, symTwinIndex(comps))).toBe(1 | 2);
   });
 });
