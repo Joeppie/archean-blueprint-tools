@@ -3,11 +3,17 @@
 // `material` key (appended for files that predate it), the custom-RGB
 // palette slot (int-styled, array created when absent) and the hullify batch
 // (geometry blocks spliced out of BOTH lists, triangles inserted in order).
+// v1.6.1 adds the SPHERE-SKIN persistence class: a write whose doc path does
+// not exist yet (a file without data.triangles / data.pipes) must CREATE it —
+// bp-only edits are invisible to the save (emitDoc(doc)) AND to the doc-text
+// undo snapshots, which is exactly how "sphere gone after save, cannot redo"
+// shipped in v1.6.0. These pins run the SHIPPED TOOLS registry headless.
 import { describe, expect, test } from 'vitest';
-import { docArrayInsert, docArrayRemoveAt, docEnsureArray, docFromValue, emitDoc, parseDoc, docValue } from '../doc';
-import { makeCtx, serializeSave, setPaletteSlot, writeBlockDoc, writeBlockMaterial } from '../edit';
+import { docArrayInsert, docArrayRemoveAt, docEnsureArray, docFromValue, docGet, emitDoc, parseDoc, docValue } from '../doc';
+import { appendTrianglesDoc, makeCtx, openFunnel, serializeSave, setPaletteSlot, writeBlockDoc, writeBlockMaterial } from '../edit';
 import { hullifyApply } from '../tools';
-import type { Blueprint } from '../format';
+import { TOOLS } from '../../components/ToolsDialog';
+import type { Blueprint, Triangle } from '../format';
 
 const SRC = '{"author":"jo","data":{"blocks":['
   + '{"colors":[51,51,51,51,51,51,51],"frame_x":0,"frame_y":0,"frame_z":0,"pos_x":5,"pos_y":5,"pos_z":5,"size_x":0,"size_y":0,"size_z":0,"type":0},'
@@ -91,5 +97,121 @@ describe('v1.7 write paths keep bp + doc', () => {
     // world coords.
     expect(out.data.triangles.every(t => !('smooth' in (t as Record<string, unknown>)))).toBe(true);
     expect(emitDoc(doc)).not.toMatch(/"(v0_x|frame_x|smooth)":\d+\.\d/);
+  });
+});
+
+// ---------------------------------------------------------- v1.6.1 PINS
+// The reported failure (user 2026-10-22): "When I create a sphere, save it,
+// then load my craft; the sphere is gone… There seems to also be
+// inconsistency where I cannot redo it." Root cause: the sphere commit (and
+// the corner-drafted triangle) wrote bp but their docArrayInsert FAILED
+// SILENTLY on a file without a data.triangles key — the SAVE is emitDoc(doc)
+// and the UNDO/REDO snapshots are doc text, so the skin existed only in the
+// live session. Class rule pinned here: EVERY generated-record append must
+// guarantee its doc array first (appendTrianglesDoc / docEnsureArray).
+describe('v1.6.1 generated records persist into doc + save + history', () => {
+  const sphere = TOOLS.find(t => t.id === 'sphere-skin')!;
+  const hullify = TOOLS.find(t => t.id === 'hullify')!;
+
+  test('the shipped sphere-skin commit lands in the SAVE of a triangles-less file', () => {
+    const { doc, bp, ctx } = openFunnel(SRC);
+    expect(docGet(doc, ['data', 'triangles'])).toBeUndefined();   // the trap
+    const msg = sphere.place!.commit({ ...sphere.initial }, { triangles: [] }, [0, 0, 0], ctx);
+    expect(msg).toContain('sphere SKIN');
+    const n = bp.data.triangles!.length;
+    expect(n).toBeGreaterThan(0);
+    // SAVE = emitDoc(doc): the triangles must be IN the saved text…
+    const saved = serializeSave(ctx);
+    const out = JSON.parse(saved) as { data: { triangles: Record<string, unknown>[] } };
+    expect(out.data.triangles.length).toBe(n);
+    expect(out.data.triangles[0]).toHaveProperty('v0_x');
+    // …and reload through the SHIPPED open funnel shows the skin (the editor
+    // AND the game read the file, not the dead bp)
+    expect(openFunnel(saved).bp.data.triangles!.length).toBe(n);
+  });
+
+  test('the skin stores game-INT bare numbers, flat default = no smooth key', () => {
+    const { ctx } = openFunnel(SRC);
+    sphere.place!.commit({ ...sphere.initial }, { triangles: [] }, [2, 0, -1], ctx);
+    const saved = serializeSave(ctx);
+    expect(saved).not.toMatch(/"(v0_x|v1_y|frame_x|material|smooth)":\d+\.\d/);
+    const out = JSON.parse(saved) as { data: { triangles: Record<string, unknown>[] } };
+    expect(out.data.triangles.every(t => !('smooth' in t))).toBe(true);
+  });
+
+  test('commit APPENDS on a file that already has triangles (authored ones verbatim)', () => {
+    const src = SRC.replace('"components":[],', '"components":[],'
+      + '"triangles":[{"colors":[51,51,51,51,51,51,51],"frame_x":0,"frame_y":0,"frame_z":0,'
+      + '"material":0,"v0_x":6,"v0_y":6,"v0_z":6,"v1_x":7,"v1_y":6,"v1_z":6,"v2_x":6,"v2_y":7,"v2_z":6}],');
+    const { bp, ctx } = openFunnel(src);
+    sphere.place!.commit({ ...sphere.initial }, { triangles: [] }, [0, 0, 0], ctx);
+    const saved = serializeSave(ctx);
+    const out = JSON.parse(saved) as { data: { triangles: Record<string, unknown>[] } };
+    expect(out.data.triangles.length).toBe(bp.data.triangles!.length);   // doc = bp
+    expect(out.data.triangles.length).toBeGreaterThan(1);                // + the skin
+    // the authored record is byte-untouched and stays FIRST
+    expect(saved).toContain('"triangles":[{"colors":[51,51,51,51,51,51,51],"frame_x":0');
+    expect(out.data.triangles[0]).toHaveProperty('v2_y', 7);
+  });
+
+  test('HISTORY contract: a built sphere makes a real snapshot AND redo restores it', () => {
+    // exact Editor semantics (Editor.tsx commitSnapshot + applyHistory):
+    // states are doc TEXT, a snapshot equal to the current one is SKIPPED,
+    // and undo/redo re-open a snapshot text through the open funnel.
+    const { doc, ctx } = openFunnel(SRC);
+    const states = [emitDoc(doc)];                       // openText
+    sphere.place!.commit({ ...sphere.initial }, { triangles: [] }, [0, 0, 0], ctx);
+    const text = emitDoc(doc);                           // commitSnapshotSoon
+    if (text !== states[states.length - 1]) states.push(text);
+    // v1.6.0 failure: this pushed NOTHING (doc unchanged) and no redo state
+    // EVER contained the skin — the literal "cannot redo it".
+    expect(states.length).toBe(2);
+    expect(openFunnel(states[0]!).bp.data.triangles ?? []).toHaveLength(0);   // undo
+    expect(openFunnel(states[1]!).bp.data.triangles!.length).toBeGreaterThan(0); // redo
+  });
+
+  test('appendTrianglesDoc: [] never dirties, creates the array, INT-styled', () => {
+    const doc = parseDoc(SRC);
+    const ctx = makeCtx(doc, docValue(doc) as Blueprint);
+    appendTrianglesDoc(ctx, []);
+    expect(emitDoc(doc)).toBe(SRC);                      // untouched file
+    expect(docGet(doc, ['data', 'triangles'])).toBeUndefined();
+    const t: Triangle = {
+      frame_x: 0, frame_y: 0, frame_z: 0, material: 0,
+      colors: [51, 51, 51, 51, 51, 51, 51],
+      v0_x: 6, v0_y: 6, v0_z: 6, v1_x: 7, v1_y: 6, v1_z: 6, v2_x: 6, v2_y: 6, v2_z: 7,
+    };
+    appendTrianglesDoc(ctx, [t]);
+    const saved = serializeSave(ctx);
+    expect(saved).toContain('"v2_z":7');                 // bare int, not "7.0"
+    expect((JSON.parse(saved) as { data: { triangles: unknown[] } }).data.triangles).toHaveLength(1);
+  });
+
+  test('the shipped hullify run persists through the doc mirror (bp = doc)', () => {
+    const { doc, ctx } = openFunnel(SRC);
+    const msg = hullify.run({ wind: 'outward', shade: 'flat' }, ctx);
+    expect(msg).toContain('hull triangles');
+    const out = JSON.parse(serializeSave(ctx)) as { data: { blocks: { type: number }[]; triangles: unknown[] } };
+    // the v1.6.1 double-push trap: hullifyApply appends to bp itself, so the
+    // tool must only MIRROR — a bp push there doubles bp vs the saved doc
+    // (the undo e2e pin caught 88 vs 44). doc must equal bp EXACTLY.
+    expect(out.data.triangles.length).toBe(ctx.bp.data.triangles!.length);
+    expect(out.data.triangles.length).toBeGreaterThan(0);
+    expect(out.data.blocks.map(b => b.type)).toEqual([255]);
+    expect(emitDoc(doc)).toContain('"triangles"');
+  });
+
+  test('WIRE class guard: docEnsureArray lets the FIRST pipe of a file persist', () => {
+    // mirrors Editor.onConnect: a file that never carried data.pipes must
+    // still save its first wired cable (same silent-fail class as triangles)
+    const doc = parseDoc(SRC);
+    const ctx = makeCtx(doc, docValue(doc) as Blueprint);
+    expect(docGet(doc, ['data', 'pipes'])).toBeUndefined();
+    docArrayInsert(ctx.doc, ['data', 'pipes'], 0, docFromValue({ a_component: 0 }));
+    expect(serializeSave(ctx)).not.toContain('"pipes"');   // the bare insert FAILS (the bug)
+    docEnsureArray(ctx.doc, ['data', 'pipes']);
+    docArrayInsert(ctx.doc, ['data', 'pipes'], 0, docFromValue({ a_component: 0 }));
+    const out = JSON.parse(serializeSave(ctx)) as { data: { pipes: unknown[] } };
+    expect(out.data.pipes).toHaveLength(1);
   });
 });

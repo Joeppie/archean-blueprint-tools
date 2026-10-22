@@ -16,8 +16,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Blueprint, Block, Triangle } from '../engine/format';
 import type { EditCtx } from '../engine/edit';
-import { writeBlockDoc, writeBlockMaterial, setPaletteSlot } from '../engine/edit';
-import { docArrayInsert, docArrayRemoveAt, docEnsureArray, docFromValue } from '../engine/doc';
+import { appendTrianglesDoc, mirrorTrisDoc, writeBlockDoc, writeBlockMaterial, setPaletteSlot } from '../engine/edit';
+import { docArrayRemoveAt } from '../engine/doc';
 import { OCCUPANCY_TYPE } from '../engine/blockshapes';
 import {
   MATERIALS, blockMaterial, hullifyApply, hullifyPreview, replaceCensus, replaceColorDests,
@@ -258,15 +258,12 @@ export const TOOLS: ToolDef[] = [
       });
       if (!res.ok) return res.reason ?? 'nothing converted';
       for (const i of geo) docArrayRemoveAt(ctx.doc, ['data', 'blocks'], i);
-      docEnsureArray(ctx.doc, ['data', 'triangles']);
-      (ctx.bp.data.triangles ?? []).forEach((t, k) => {
-        if (k < trisBefore) return;
-        // INT style (floaty = false): the game writer stores ALL triangle
-        // numbers bare — "frame_x":-1,"material":3,"smooth":1,"v0_x":13
-        // (3732302108 raw); a "13.0" is the double-modelled style of WORLD
-        // coords, not this record's.
-        docArrayInsert(ctx.doc, ['data', 'triangles'], k, docFromValue(t, false));
-      });
+      // hullifyApply ALREADY appended the new triangles to bp — mirror them
+      // into the doc (created when the file predates triangles) with the
+      // game's INT writer style (v1.5.12 pin — all triangle numbers bare:
+      // "frame_x":-1,"v0_x":13, never "13.0"). v1.6.1: the shared append
+      // helper must NOT run here — pushing bp again doubled the records.
+      mirrorTrisDoc(ctx, trisBefore);
       return `converted ${res.blocksRemoved} blocks into ${res.trisAdded} hull triangles`;
     },
   },
@@ -352,12 +349,11 @@ export const TOOLS: ToolDef[] = [
             smooth: f['shade'] === 'smooth',
           }),
           [Math.round(offset[0]), Math.round(offset[1]), Math.round(offset[2])]);
-        ctx.bp.data.triangles ??= [];
-        for (const t of tris) {
-          ctx.bp.data.triangles.push(t);
-          // the game's INT writer style for generated triangles (v1.5.12 pin)
-          docArrayInsert(ctx.doc, ['data', 'triangles'], ctx.bp.data.triangles.length - 1, docFromValue(t, false));
-        }
+        // bp + doc TOGETHER (v1.6.1 fix): the doc array must be created when
+        // the file never carried triangles — the old bare push+insert silently
+        // dropped every triangle on block-only crafts, so the saved file and
+        // the undo snapshots never held the skin (sphere gone after save).
+        appendTrianglesDoc(ctx, tris);
         return `built a ${f['rx']}×${f['ry']}×${f['rz']} m sphere SKIN: ${tris.length} hull `
           + `triangles at slot ${slot}`;
       },

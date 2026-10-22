@@ -13,8 +13,8 @@
 //   save source) accumulates the shift once, never re-applied.
 
 import type { DocNode } from './doc';
-import { docArrayRemoveAt, docEnsureArray, docFromValue, docGet, docSet, docSetArrayItem, docSetNumber, docValue, emitDoc, parseDoc } from './doc';
-import type { Blueprint, BlueprintComponent, FileQuat, LatticeObj, Vec3D } from './format';
+import { docArrayInsert, docArrayRemoveAt, docEnsureArray, docFromValue, docGet, docSet, docSetArrayItem, docSetNumber, docValue, emitDoc, parseDoc } from './doc';
+import type { Blueprint, BlueprintComponent, FileQuat, LatticeObj, Triangle, Vec3D } from './format';
 import { CELL } from './format';
 import { docLegacyQuats, normalizeDoc } from './normalize';
 import type { PaletteEntry } from './palette';
@@ -281,6 +281,34 @@ export function setPaletteSlot(ctx: EditCtx, slot: number, e: PaletteEntry): boo
     r: Math.round(e.r), g: Math.round(e.g), b: Math.round(e.b),
     opacity: Math.round(e.opacity), roughness: Math.round(e.roughness), metallic: Math.round(e.metallic),
   }));
+}
+
+/** Mirror the bp triangles from index startLen ON into the doc (records the
+ *  bp ALREADY carries — hullify's own append). Guarantees the doc array
+ *  first (v1.6.1: silent-fail class). */
+export function mirrorTrisDoc(ctx: EditCtx, startLen: number): void {
+  const all = ctx.bp.data.triangles ?? [];
+  if (all.length <= startLen) return;
+  if (!docEnsureArray(ctx.doc, ['data', 'triangles'])) return;
+  for (let k = startLen; k < all.length; k++)
+    docArrayInsert(ctx.doc, ['data', 'triangles'], k, docFromValue(all[k]!, false));
+}
+
+/** Append FRESHLY GENERATED triangles to bp AND doc TOGETHER (the triangle
+ *  sibling of writeBlockDoc). The doc array is CREATED when the file never
+ *  carried a triangle list — docArrayInsert fails SILENTLY on a missing
+ *  path, and v1.6.0 shipped the sphere-skin commit without this guarantee:
+ *  on a block-only craft the skin lived only in bp (visible in the session),
+ *  the saved file never held it (gone after reload + in game) and the doc-text
+ *  undo snapshots could not see it (undo/redo had nothing to restore).
+ *  Records the bp already holds (hullify) mirror through mirrorTrisDoc —
+ *  pushing here too would DOUBLE them (the e2e undo pin caught exactly that).
+ *  Numbers keep the game's INT writer style (v1.5.12 pin). */
+export function appendTrianglesDoc(ctx: EditCtx, tris: Triangle[]): void {
+  if (!tris.length) return;
+  const at = (ctx.bp.data.triangles ??= []).length;
+  for (const t of tris) ctx.bp.data.triangles.push(t);
+  mirrorTrisDoc(ctx, at);
 }
 
 /** One field of one player-paint colour entry (color1/color2 dict shape —

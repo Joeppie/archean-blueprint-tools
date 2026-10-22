@@ -481,6 +481,34 @@ freshly-authored triangles, fixture 9000006001 — see the v1.5.12 bullet).
   SILHOUETTE from screenshot pixels (largest blob, scanline-filled area ÷
   its convex hull): 0.99–1.00 at every size — the picture itself has no
   bite. In-game judgment stays the user's (AGENTS: in-game pixels arbitrate).
+- **v1.6.1 DOC-MIRROR CLASS FIX — generated records must guarantee their doc
+  array (user: "I create a sphere, save it, then load my craft; the sphere is
+  gone… in either the editor or game… also inconsistency where I cannot redo
+  it"):** the sphere-skin commit, the corner-drafted triangle (Editor) and
+  the FIRST wire connection all wrote the live bp and then `docArrayInsert`
+  into a list the FILE may never have carried (`data.triangles` / `data.pipes`
+  are ABSENT on most real crafts) — `docArrayInsert` fails SILENTLY on a
+  missing path, so the saved text (save = `emitDoc(doc)`, and every undo/redo
+  snapshot is that same text) NEVER contained the new records: visible in the
+  session, gone after reload AND in game, and commitSnapshot's text-dedup
+  meant the build not even made an undo step (redo had nothing to restore —
+  the reported "cannot redo"). THE RULE now lives in TWO funnels in
+  `engine/edit.ts`: `appendTrianglesDoc(ctx, tris)` for FRESHLY GENERATED
+  records (sphere-skin commit, corner-drafted triangle — pushes bp AND
+  mirrors doc) and `mirrorTrisDoc(ctx, startLen)` for records bp ALREADY
+  carries (hullify's run appends to bp inside hullifyApply, so the tool only
+  mirrors — routing it through the appending funnel DOUBLED bp vs the doc,
+  88 vs 44, and the e2e undo pin caught it; vitest pin now asserts doc = bp
+  EXACTLY). `onConnect` ensures `['data','pipes']`. The lesson generalises:
+  ANY new write path must end in the DOC, not only in bp — the doc is the
+  save AND the history.
+  Regression pins (pure vitest, no e2e, `tooldoc.test.ts` "v1.6.1" describe):
+  the SHIPPED TOOLS registry runs headless — save of a triangles-less file
+  contains the skin and RELOADS through the open funnel, bare-INT/no-smooth
+  style, authored triangles stay verbatim-first, the undo/redo snapshot
+  sequence is REAL (2 states) and replay restores the skin, `[]` never dirties
+  the file, and the bare-pipes-insert pin documents the silent failure it
+  guards. Verified discriminating: reverting the fix fails 5 of them.
 - **v1.5.24 COORD READOUT v2 (user: "your implementation of letting the
   corner be measured just by raytracing what lands on is excellent … But we
   need full 3d coordinates then, ANd I still need an indicator IN THE GRID

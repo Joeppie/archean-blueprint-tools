@@ -21,10 +21,10 @@ import { cornerOf, triAt, triangleFromCorners } from './engine/tris';
 import type { Blueprint } from './engine/format';
 import { isLegacyFile } from './engine/format';
 import type { ResolvedColor } from './engine/palette';
-import { docArrayInsert, docArrayRemoveAt, docFromValue, docValue, emitDoc, parseDoc } from './engine/doc';
+import { docArrayInsert, docArrayRemoveAt, docEnsureArray, docFromValue, docValue, emitDoc, parseDoc } from './engine/doc';
 import { allocateSlot, paletteSlotNode, type Rgb255 } from './engine/tools';
 import { setPaletteSlot } from './engine/edit';
-import { makeCtx, openFunnel, resetComponent, setDataField, setOrientation, setPos, setCompField,
+import { appendTrianglesDoc, makeCtx, openFunnel, resetComponent, setDataField, setOrientation, setPos, setCompField,
   pruneCompRefs, setCompColor, serializeSave, writeBlockDoc, type EditCtx } from './engine/edit';
 import { makePipe } from './engine/wireops';
 import { normalizeDoc } from './engine/normalize';
@@ -589,10 +589,11 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         next[2] as [number,number,number], triBrush);
       setTriDraft([]);
       if (!tri) return;
-      ctx.bp.data.triangles = ctx.bp.data.triangles ?? [];
-      ctx.bp.data.triangles.push(tri);
-      const at = ctx.bp.data.triangles.length - 1;
-      docArrayInsert(ctx.doc, ['data', 'triangles'], at, docFromValue(tri));
+      // v1.6.1: the shared bp+doc append — on a craft whose file never
+      // carried data.triangles the old bare docArrayInsert failed silently
+      // (no array at the path), so a hand-drafted triangle vanished on save
+      const at = ctx.bp.data.triangles?.length ?? 0;
+      appendTrianglesDoc(ctx, [tri]);
       setTriSel(at);
       sceneChanged();
       return;
@@ -752,8 +753,9 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         const pipe = makePipe(ctx.bp, engineRef.current?.manifest ?? null, aCi, aPort, bCi, bPort);
         if (!pipe) return false;
         ctx.bp.data.pipes = ctx.bp.data.pipes ?? [];
-        ctx.bp.data.pipes.push(pipe as never);
-        docArrayInsert(ctx.doc, ['data', 'pipes'], ctx.bp.data.pipes.length - 1, docFromValue(pipe));
+        docEnsureArray(ctx.doc, ['data', 'pipes']);   // v1.6.1: files that
+        ctx.bp.data.pipes.push(pipe as never);        // never wired carry no
+        docArrayInsert(ctx.doc, ['data', 'pipes'], ctx.bp.data.pipes.length - 1, docFromValue(pipe)); // pipes key at all
         sceneChanged();
         return true;
       }} />
