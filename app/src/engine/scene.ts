@@ -17,7 +17,7 @@
 
 import {
   Box3, BoxGeometry, BufferAttribute, BufferGeometry, Color, DirectionalLight,
-  DoubleSide, Fog, GridHelper, Group, HemisphereLight, InstancedMesh,
+  DoubleSide, GridHelper, Group, HemisphereLight, InstancedMesh,
   LineBasicMaterial, LineSegments, LinearSRGBColorSpace, Matrix3, Matrix4, Mesh,
   MeshBasicMaterial, MeshStandardMaterial, Object3D, PerspectiveCamera,
   AdditiveBlending, Plane, PlaneGeometry, PMREMGenerator, Quaternion, Raycaster,
@@ -366,9 +366,11 @@ export class Engine {
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.enableDamping = true;
     this.controls.addEventListener('change', () => this.invalidate());
-    // legacy lighting rig (view3d r0.178): sky blue + fog, hemi fill, warm sun
+    // legacy lighting rig (view3d r0.178): sky blue, hemi fill, warm sun.
+    // FOG DISABLED (user rule 2026-10-22: "that is harmful") — it washed
+    // out the far side of large hulls: exactly the zeppelin-scale shapes
+    // the Sphere skin tool produces, hiding what the user must judge.
     this.scene.background = new Color(0x8fb4d8);
-    this.scene.fog = new Fog(0x8fb4d8, 40, 90);
     this.bakeEnv();
     // Phones recycle GPU contexts constantly (tab switches, memory
     // pressure). three re-uploads buffers on webglcontextrestored but NOT
@@ -1320,8 +1322,8 @@ void main() {
     this.root.add(this.groundGroup);
   }
 
-  /** legacy fit: d = max(1.85r, 3.6), eye (0.6d, max(.34d,1.4), .72d), fog
-   *  scales with r — over the UNION of file box, built solids and part boxes,
+  /** legacy fit: d = max(1.85r, 3.6), eye (0.6d, max(.34d,1.4), .72d) (fog off;
+   *  frames over the UNION of file box, built solids and part boxes,
    *  so geometry that rides outside the file bbox still frames (whole craft).
    *  All in ANCHORED coords (moff shifts the rendered groups; frame with it). */
   private fit(parts: PartBox[]) {
@@ -1352,10 +1354,6 @@ void main() {
     this.camera.position.set(c.x + d * 0.6, c.y + Math.max(d * 0.34, 1.4), c.z - d * 0.72);
     this.camera.near = Math.max(0.05, r / 400);
     this.camera.far = Math.max(300, r * 10);
-    if (this.scene.fog) {
-      (this.scene.fog as { near: number }).near = Math.max(30, r * 2.5);
-      (this.scene.fog as { far: number }).far = Math.max(80, r * 7);
-    }
     this.frameC = c.clone(); this.frameD = d;      // presets ride this framing
     this.camera.lookAt(c);
     this.controls?.update();

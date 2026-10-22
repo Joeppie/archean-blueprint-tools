@@ -404,7 +404,10 @@ view.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x8fb4d8);
-scene.fog = new THREE.Fog(0x8fb4d8, 40, 90);
+// FOG DISABLED (user rule 2026-10-22: "disable the fog … that is harmful"
+// — it washed out the far side of large hulls, exactly the zeppelin-scale
+// shapes users build with the sphere tool). Sky colour + lighting unchanged.
+scene.fog = null;
 // PBR metal has NO diffuse term: lights-only, chrome renders near-black
 // (user: "metallic colours too dark, not enough reflection" — the game's
 // raytracer reflects the world). PMREM studio env, baked once at startup,
@@ -443,8 +446,6 @@ function fitCameraToModel() {
   camera.position.set(c.x + d * 0.6, c.y + Math.max(d * 0.34, 1.4), c.z - d * 0.72);
   camera.near = Math.max(0.05, r / 400);
   camera.far = Math.max(300, r * 10);
-  scene.fog.near = Math.max(30, r * 2.5);
-  scene.fog.far = Math.max(80, r * 7);
   camera.updateProjectionMatrix();
   controls.update();
 }
