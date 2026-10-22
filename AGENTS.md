@@ -671,7 +671,9 @@ freshly-authored triangles, fixture 9000006001 — see the v1.5.12 bullet).
   row per component TYPE (`×count`, raw summary), then per species —
   BLOCKS (per block material + cell count), HULL TRIANGLES (per material +
   tris/m²), CABLES (per class + the physical RUN LENGTH and the spool items
-  it costs), FRAMES and STRUTS. Every row OPENS its recipe chain: each
+  it costs), FRAMES and STRUTS. Each SECTION folds (its header keeps the
+  summary line; the fold is persisted in `archean-app-cost-sections`, and a
+  folded section still renders its note). Every row OPENS its recipe chain: each
   constituent carries its own raw cost and expands further, so
   "FluidPort = 1 Casing + 1 Connector" and "Casing = 1 000 g Iron" are one
   click apart — the structural rows use the same tree.
@@ -707,8 +709,9 @@ freshly-authored triangles, fixture 9000006001 — see the v1.5.12 bullet).
   python reference) + e2e `cost.spec.ts` (@ui desktop: total list, FluidPort
   row ×4 + `subgrid`, 4 kg Iron summary, expansion → Casing/Connector →
   Wire/Plastic; blocks/triangles/cables sections with their cell / m² / run
-  length measures and a cable's Wire+Connector chain; phone: reachable in
-  VIEW and never wider than the viewport). Help: `topics/cost.md`.
+  length measures and a cable's Wire+Connector chain; every section folds +
+  the fold survives a reload; phone: reachable in VIEW and never wider than
+  the viewport). Help: `topics/cost.md`.
 - **v1.5.18 SMOOTH TOOLS + THE LIFT & ALTITUDE WIDGET (user 2026-10-22:
   "shouldn't block slider if resizing it, delay it's calculation or do it
   background"; "tell us what lift would be if vacuum at sea level, helium or

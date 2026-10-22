@@ -114,6 +114,40 @@ test.describe('VIEW ▸ build cost @ui', () => {
     await expect(page.getByTestId('cost-node-Connector')).toBeVisible();
   });
 
+  test('every section folds, and the fold survives a reload', async ({ page }) => {
+    desktopOnly();
+    await page.goto(`/?craft=${STRUCTURE}`);
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
+    await expect(page.getByTestId('cost-widget')).toBeVisible();
+
+    // BLOCKS: folding hides the rows but keeps the header's summary
+    const blockRow = page.getByTestId('cost-source-row-blocks-AluminiumBlock');
+    await expect(blockRow).toBeVisible();
+    await page.getByTestId('cost-sec-blocks').click();
+    await expect(blockRow).toHaveCount(0);
+    await expect(page.getByTestId('cost-source-note-blocks')).toBeVisible();
+    await expect(page.getByTestId('cost-source-note-blocks')).toContainText('cells');
+    await page.getByTestId('cost-sec-blocks').click();
+    await expect(blockRow).toBeVisible();
+
+    // the raw-material list and the parts list fold too
+    await page.getByTestId('cost-sec-raw').click();
+    await expect(page.getByTestId('cost-total')).toHaveCount(0);
+    await page.getByTestId('cost-sec-raw').click();
+    await expect(page.getByTestId('cost-total')).toBeVisible();
+
+    // a fold is a PREFERENCE: it comes back folded after a reload
+    await page.getByTestId('cost-sec-components').click();
+    await expect(page.getByTestId('cost-rows')).toHaveCount(0);
+    await page.reload();
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
+    await expect(page.getByTestId('cost-rows')).toHaveCount(0);
+    await expect(page.getByTestId('cost-sec-components')).toHaveAttribute('aria-expanded', 'false');
+    // … and can be opened again (the state is not sticky-locked)
+    await page.getByTestId('cost-sec-components').click();
+    await expect(page.getByTestId('cost-rows')).toBeVisible();
+  });
+
   test('a recipe-less part is flagged, not silently free', async ({ page }) => {
     desktopOnly();
     await openView(page);

@@ -16,6 +16,7 @@ raw materials.
 | Hull triangles | per material: triangle count and surface area, billed as block items |
 | Cables | per cable class: the LENGTH of the runs on the craft and the spool items that length costs |
 | Frames / Struts | frame beams (`SteelBeam`) and rods (`SteelRod`) |
+| ▾ section header | every group (raw materials, per component, blocks, hull triangles, cables, frames, struts) folds — the folded header keeps its summary line, and the fold is remembered for the next visit |
 | ▸ row | opens that line's recipe chain — its DIRECT constituents, each with its own raw cost, expandable further |
 | one unit (…) | a component row's per-part cost and crafter time (`×4` multiplies that by the count) |
 | no recipe | a part the game never sells as a recipe (sensors …): it stays in the list, it just cannot be unfolded |

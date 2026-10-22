@@ -21,6 +21,8 @@ import {
 } from '../engine/economy';
 
 const LS_KEY = 'archean-app-cost-open';
+/** which SECTIONS are folded (persisted; the rows' own trees use `expanded`) */
+const LS_SECTIONS = 'archean-app-cost-sections';
 
 const fmt = (n: number, d = 0) => n.toLocaleString('en', { maximumFractionDigits: d });
 
@@ -157,13 +159,41 @@ function SourceRowView(p: {
   );
 }
 
+/** a foldable section header: title + a one-line note that stays visible when
+ *  the section is collapsed (so a folded group still says what it holds). */
+function SectionHeader(p: {
+  id: string; title: string; note: string;
+  noteTestId?: string; collapsed: boolean; toggle: (id: string) => void;
+}) {
+  const { id, title, note, noteTestId, collapsed, toggle } = p;
+  return (
+    <button data-testid={`cost-sec-${id}`} onClick={() => toggle(id)} aria-expanded={!collapsed}
+      className="mb-1 mt-2 flex w-full items-baseline gap-1 text-left text-[9px] uppercase tracking-wider text-ink-dim hover:text-accent">
+      <span className="w-2 shrink-0" aria-hidden="true">{collapsed ? '▸' : '▾'}</span>
+      <span className="shrink-0">{title}</span>
+      <span data-testid={noteTestId ?? `cost-sec-note-${id}`}
+        className="min-w-0 flex-1 truncate text-right normal-case tracking-normal opacity-70">
+        {note}
+      </span>
+    </button>
+  );
+}
+
 export function CostWidget(p: { bp: Blueprint; rev: number }) {
   const [open, setOpen] = useState(() => localStorage.getItem(LS_KEY) !== '0');
   // undefined = still fetching, null = the table is unavailable (hide the body)
   const [econ, setEcon] = useState<Economy | null | undefined>(undefined);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  // FOLDED sections (persisted, like the widget's own open state)
+  const [closed, setClosed] = useState<Set<string>>(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(LS_SECTIONS) ?? '[]');
+      return new Set(Array.isArray(raw) ? raw as string[] : []);
+    } catch { return new Set(); }
+  });
 
   useEffect(() => { localStorage.setItem(LS_KEY, open ? '1' : '0'); }, [open]);
+  useEffect(() => { localStorage.setItem(LS_SECTIONS, JSON.stringify([...closed])); }, [closed]);
   useEffect(() => { let live = true; loadEconomy().then(e => { if (live) setEcon(e); }); return () => { live = false; }; }, []);
 
   // the blueprint arrays MUTATE in place — `rev` is the real dependency
@@ -175,6 +205,13 @@ export function CostWidget(p: { bp: Blueprint; rev: number }) {
     if (n.has(k)) n.delete(k); else n.add(k);
     return n;
   });
+
+  const toggleSection = (id: string) => setClosed(s => {
+    const n = new Set(s);
+    if (n.has(id)) n.delete(id); else n.add(id);
+    return n;
+  });
+  const isClosed = (id: string) => closed.has(id);
 
   const totalRaw = cost ? Object.entries(cost.total.raw)
     .sort((a, b) => b[1] - a[1]) : [];
@@ -200,36 +237,38 @@ export function CostWidget(p: { bp: Blueprint; rev: number }) {
       {open && cost && (
         <div className="px-3 pb-2 text-[11px] leading-snug">
           {/* ---- the craft's raw-material shopping list (EVERYTHING) ---- */}
-          <div className="mb-1 text-[9px] uppercase tracking-wider text-ink-dim">
-            raw materials — whole craft
-          </div>
-          <div data-testid="cost-total" className="space-y-[1px]">
-            {!totalRaw.length && !totalStuck.length && <div className="text-ink-dim">no material</div>}
-            {totalRaw.map(([id, q]) => (
-              <div key={id} data-testid={`cost-total-${materialName(id)}`} className="flex justify-between gap-2">
-                <span className="truncate">{materialName(id)}</span>
-                <b className="shrink-0 tabular-nums">{qtyText(id, q)}</b>
+          <SectionHeader id="raw" title="raw materials — whole craft"
+            note={`${totalRaw.length} materials`} collapsed={isClosed('raw')} toggle={toggleSection} />
+          {!isClosed('raw') && (
+            <>
+              <div data-testid="cost-total" className="space-y-[1px]">
+                {!totalRaw.length && !totalStuck.length && <div className="text-ink-dim">no material</div>}
+                {totalRaw.map(([id, q]) => (
+                  <div key={id} data-testid={`cost-total-${materialName(id)}`} className="flex justify-between gap-2">
+                    <span className="truncate">{materialName(id)}</span>
+                    <b className="shrink-0 tabular-nums">{qtyText(id, q)}</b>
+                  </div>
+                ))}
+                {totalStuck.map(([id, q]) => (
+                  <div key={id} className="flex justify-between gap-2 text-gold/90">
+                    <span className="truncate">{materialName(id)} <span className="text-[9px]">(no recipe)</span></span>
+                    <b className="shrink-0 tabular-nums">{qtyText(id, q)}</b>
+                  </div>
+                ))}
               </div>
-            ))}
-            {totalStuck.map(([id, q]) => (
-              <div key={id} className="flex justify-between gap-2 text-gold/90">
-                <span className="truncate">{materialName(id)} <span className="text-[9px]">(no recipe)</span></span>
-                <b className="shrink-0 tabular-nums">{qtyText(id, q)}</b>
-              </div>
-            ))}
-          </div>
-          {cost.total.time > 0 && (
-            <div className="mt-1 text-[10px] text-ink-dim">
-              crafter time {secs(cost.total.time)} (sum of the unfolded recipes)
-            </div>
+              {cost.total.time > 0 && (
+                <div className="mt-1 text-[10px] text-ink-dim">
+                  crafter time {secs(cost.total.time)} (sum of the unfolded recipes)
+                </div>
+              )}
+            </>
           )}
 
           {/* ---- per component: click for its recipe chain + constituents ---- */}
-          <div className="mb-1 mt-2 flex items-baseline gap-1 text-[9px] uppercase tracking-wider text-ink-dim">
-            <span>per component</span>
-            <span className="normal-case tracking-normal opacity-70">{parts} parts</span>
-          </div>
-          <div data-testid="cost-rows" className="space-y-[1px]">
+          <SectionHeader id="components" title="per component"
+            note={`${parts} parts`} collapsed={isClosed('components')} toggle={toggleSection} />
+          {!isClosed('components') && (
+            <div data-testid="cost-rows" className="space-y-[1px]">
             {cost.rows.map(r => {
               const isOpen = expanded.has(r.id);
               const known = !r.unit.stuck && r.unit.children.length > 0;
@@ -268,30 +307,29 @@ export function CostWidget(p: { bp: Blueprint; rev: number }) {
                 </div>
               );
             })}
-          </div>
+            </div>
+          )}
 
           {/* ---- the structural species: blocks / hull triangles / cables /
                   frames / struts, each row openable to its constituents ---- */}
           {cost.sources.map(src => (
             <div key={src.id} data-testid={`cost-source-${src.id}`}>
-              <div className="mb-1 mt-2 flex items-baseline gap-1 text-[9px] uppercase tracking-wider text-ink-dim">
-                <span>{src.title}</span>
-                <span data-testid={`cost-source-note-${src.id}`}
-                  className="min-w-0 flex-1 truncate normal-case tracking-normal opacity-70">
-                  {src.note}
-                </span>
-              </div>
-              <div className="space-y-[1px]">
-                {!src.rows.length && (
-                  <div className="pl-[13px] text-[10px] text-ink-dim">
-                    no unit charged — each segment truncates below 1 cm
-                  </div>
-                )}
-                {src.rows.map(row => (
-                  <SourceRowView key={row.item} source={src} row={row}
-                    open={expanded} toggle={toggle} />
-                ))}
-              </div>
+              <SectionHeader id={src.id} title={src.title} note={src.note}
+                noteTestId={`cost-source-note-${src.id}`}
+                collapsed={isClosed(src.id)} toggle={toggleSection} />
+              {!isClosed(src.id) && (
+                <div className="space-y-[1px]">
+                  {!src.rows.length && (
+                    <div className="pl-[13px] text-[10px] text-ink-dim">
+                      no unit charged — each segment truncates below 1 cm
+                    </div>
+                  )}
+                  {src.rows.map(row => (
+                    <SourceRowView key={row.item} source={src} row={row}
+                      open={expanded} toggle={toggle} />
+                  ))}
+                </div>
+              )}
             </div>
           ))}
 
