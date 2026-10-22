@@ -109,6 +109,14 @@ const BASES = ['viewer/models', '../viewer/models', '/models', '/atlas'];
 let baseOk: string | null = null;
 export function atlasBase(): string | null { return baseOk; }
 
+/** Candidate URLs for a SIBLING file of the atlas (economy.json — the cost
+ *  view's recipe table): the resolved base first, then the layout aliases.
+ *  Shared so a new atlas-tree file never re-invents the route list. */
+export function atlasJsonPaths(file: string): string[] {
+  const resolved = baseOk ? [`${baseOk}/${file}`] : [];
+  return [...resolved, ...BASES.map(b => `${b}/${file}`)];
+}
+
 /** types whose last fetch FAILED (network/HTTP). A poisoned cache entry or a
  *  flaky client (the user's "white block, not a beacon" Firefox session,
  *  2026-10-19) must never leave the viewer silently drawing stand-ins:

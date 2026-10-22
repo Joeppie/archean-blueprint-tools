@@ -15,6 +15,7 @@ import type { Blueprint, BlueprintComponent, LatticeObj } from '../engine/format
 import { subMasterEntries } from '../engine/subgrid';
 import { CompPaint } from './ColorPanel';
 import { LiftWidget } from './LiftWidget';
+import { CostWidget } from './CostWidget';
 
 export interface EditApi {
   compField(ctx: EditCtx, ci: number, key: 'alias' | 'module' | 'mirrorAxis', v: string | number): void;
@@ -202,6 +203,9 @@ export function VesselStats(p: { engine: Engine | null; bp: Blueprint; rev: numb
           opens in VIEW, so the lift widget rides this side menu too — its
           own collapsible row (localStorage-persisted), above the sections */}
       <LiftWidget engine={p.engine} bp={p.bp} rev={p.rev} />
+      {/* raw-material cost of every part (user 2026-10-22): the shopping
+          list on top, each component's recipe chain on demand */}
+      <CostWidget bp={p.bp} rev={p.rev} />
       {secs.map(s => (
         <div key={s.id}>
           <button data-testid={`vsec-${s.id}`} onClick={() => toggle(s.id)}

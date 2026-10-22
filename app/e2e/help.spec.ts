@@ -63,10 +63,13 @@ test.describe('help manual @ui', () => {
     // a BODY word from another topic: mirror severity prose
     await search.fill('faux');
     await expect(page.getByTestId('help-topic-mirror')).toBeVisible();
+    // the cost topic is findable by its example part (tag word)
+    await search.fill('fluidport');
+    await expect(page.getByTestId('help-topic-cost')).toBeVisible();
     // gibberish: an honest note, the rail empties, count says 0
     await search.fill('zzqxwordnever');
     await expect(page.getByTestId('help-noresults')).toBeVisible();
-    await expect(page.getByTestId('help-matchcount')).toHaveText('0/14');
+    await expect(page.getByTestId('help-matchcount')).toHaveText('0/15');
     // clearing the search restores the full rail
     await search.fill('');
     await expect(page.getByTestId('help-topic-start')).toBeVisible();

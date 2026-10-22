@@ -1,5 +1,5 @@
 # Interface tour
-Tags: interface ui panel topbar modes options settings widgets layout tabs
+Tags: interface ui panel topbar modes options settings widgets layout tabs cost raw materials recipe economy shopping list
 
 ## Top bar
 
@@ -30,7 +30,9 @@ switch (in Edit and Wire-free modes), then context:
   material chips, paint slot), the Blocks | Triangles sub-tabs and the
   selected-item editor (shape turns, cx/cy/cz, material, face paint).
 * **VesselStats** (View mode) — mass & CoM, census, heaviest classes, the
-  collapsible ⚖ Lift row.
+  collapsible ⚖ Lift row and the **Component cost** row (every part unfolded
+  through the game's crafter recipes to raw ores/molecules — the craft-wide
+  shopping list on top, each part's own recipe chain one click down).
 
 ## Viewport furniture
 

@@ -183,7 +183,16 @@ def _tri_area_m2(v):
 
 
 def required_items(bp):
-    """Blueprint-tool content list: item id -> count (GetBlueprintContents)."""
+    """Blueprint-tool content list: item id -> count (GetBlueprintContents).
+
+    SUBGRID CONTENT IS COUNTED: a Build's nested blueprint is flattened in
+    (its parts are material you still have to craft — only the Build
+    construction GHOST itself is dropped, at every level). The dev viewer's
+    cost panel has never been compared on a craft carrying nested parts
+    (the matrix fixtures are component-only), so this rule follows the
+    material logic, not a scrape — pinned by app/src/engine/__tests__/
+    economy.test.ts on the same fixture the app's VIEW ▸ Component cost shows.
+    """
     data = load_game_data()
     items = {}
 
@@ -216,9 +225,16 @@ def required_items(bp):
         for seg in p.get('segments') or []:
             # the game truncates PER SEGMENT (2x1.5cm segments cost 2, not 3)
             add(f'{BUILD}.{item}', int(seg['length'] * 100))
-    for c in d.get('components') or []:
-        add(f"{c['module']}.{c['type']}", 1)
-    items.pop(f'{BUILD}.Build', None)      # a subgrid is not a placed item
+
+    def add_components(comps):
+        for c in comps or []:
+            if c.get('type') == 'Build':
+                add_components((c.get('data') or {}).get('components'))
+                continue
+            add(f"{c['module']}.{c['type']}", 1)
+
+    add_components(d.get('components'))
+    items.pop(f'{BUILD}.Build', None)      # subgrid ghosts are never an item
     if f'{BUILD}.Dashboard' in items:      # dashboards arrive by their tool
         items.pop(f'{BUILD}.Dashboard')
         add(f'{BUILD}.DashboardTool', 1)

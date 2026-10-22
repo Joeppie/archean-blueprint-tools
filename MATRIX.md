@@ -53,6 +53,7 @@ FORMAT.md so answers stay offline.
 | path | role |
 |---|---|
 | `tools/game_data.py` | our extraction + mass/cost model from GAME FILES; `--selfcheck <blueprint>` prints items/raw/mass for any craft |
+| `tools/extract_economy.py` | ships the same crafter-recipe tables to the app as `viewer/models/economy.json` (VIEW ▸ Component cost); `--check` detects game drift |
 | `tools/make_matrix_test.py` | generates the fixture corpus rows (ids `90000010NN` rest, `90000020NN` deflected) — deterministic |
 | `app/tools/devscrape.mjs` | Playwright: uploads each fixture to the Xenon viewer (it has NO URL loader — file input only), scrapes mass/cost/contents/notes panels, screenshots; drives OUR viewer via `?open=` + the `window.HARCHEAN` hooks only (frozen viewer untouched), camera matched to the dev iso, proxy + `&real` shots |
 | `tools/matrix_verify.py` | diffs the scraped panels vs `game_data` numbers → `reports/matrix/REPORT.md`, exit code |
