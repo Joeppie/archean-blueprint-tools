@@ -97,12 +97,12 @@ type Kind = 'block' | 'wire' | 'occ' | 'pipe' | 'pipe-end' | 'comp' | 'sub' | 'g
 
 export interface ViewOptions {
   grid: boolean; occ: boolean; hull: boolean; wire: boolean; pipes: boolean; subs: boolean;
-  mirror: boolean; com: boolean; probe: boolean;
+  mirror: boolean; com: boolean;
   /** labels on interactive/aliased parts — OFF by default (legacy user rule:
    *  opt-in per session, NOT persisted) */
   labels: boolean;
 }
-export const DEFAULT_OPTS: ViewOptions = { grid: true, occ: false, hull: true, wire: false, pipes: true, subs: true, mirror: true, com: true, labels: false, probe: true };
+export const DEFAULT_OPTS: ViewOptions = { grid: true, occ: false, hull: true, wire: false, pipes: true, subs: true, mirror: true, com: true, labels: false };
 
 const DEG = Math.PI / 180;
 const STAND_IN_HEX = 0x88aaff;          // legacy colliderProxy stand-in tint
@@ -303,22 +303,20 @@ export class Engine {
   private gridStepNow = 0;
   /** the build footprint the grid fits (FILE coords — groundGroup rides
    *  root's moff, so raw-file child coords land at world) */
-  private gridBox: { cx: number; cz: number; hx: number; hz: number } | null = null;
+  private gridBox: { cx: number; cz: number; hx: number; hz: number; yTop: number } | null = null;
   private gridY = 0;
 
-  // ---------- measure ruler (v1.5.22, REPLACES the v1.5.21 corner axis
-  // compass — user: "The indicator for xyz is useless. it must be on the
-  // grid, movable and where it snaps on the grid for horizontal, I want the
-  // coordinate also shown e.g. z 10.0 and a single line up and down for z,
-  // same segmenting for measuring, eyeballing.") ----------
-  /** the probe sits at raw-file (x, z) on the grid plane; h = height above
-   *  the pad. COORDINATE LAW for the readouts (the user counts z UP):
-   *  x = file x, y = −file z (forward = the nose), z = h — a right-handed
-   *  x/y/z-up triple over the file's (x, z, y). */
-  private probeGroup: Group | null = null;
-  private probe = { x: 0, z: 0, h: 2, drag: null as null | 'base' | 'cap' };
-  /** the ladder step the ruler was last drawn at (rides syncGrid) */
-  private probeStep = 0;
+  // ---------- hover COORD READOUT (v1.5.23, replaces the v1.5.22 ruler) ---
+  /** Blender-style: a black crosshair snaps onto the grid CORNER under the
+   *  cursor; on Shift the most camera-facing VERTICAL grid plane (normal x
+   *  or z, the axis whose vertical plane is most coplanar with the screen)
+   *  appears through that corner so the third coordinate becomes readable
+   *  too. COORDINATE LAW (FORMAT line 30, checked 2026-10-22): x lateral,
+   *  y = UP, z longitudinal (nose = −z) — the flat plane is x–z, NOT x–y. */
+  private coordGroup = new Group();
+  private coordSnap: { x: number; y: number; z: number; step: number; shift: boolean } | null = null;
+  private coordHoverLast: { x: number; y: number; shift: boolean } | null = null;
+
 
   // ---------- mass & CoM ----------
   private cellMass = 1.5;
@@ -462,8 +460,7 @@ export class Engine {
     this.scene.add(this.subGroup);
     this.scene.add(this.surgeGroup);
     this.scene.add(this.ghostGroup);
-    this.probeGroup = new Group();               // measure ruler (v1.5.22)
-    this.scene.add(this.probeGroup);
+    this.scene.add(this.coordGroup);             // hover coord readout (v1.5.23)
     this.scene.add(this.clusterGroup);
     this.scene.add(this.blockHlGroup);
     this.scene.add(this.triHlGroup);
@@ -708,7 +705,8 @@ void main() {
     this.updateCoM();
     this.addGround(bp, parts);
     this.buildMirrorPlane(parts);
-    this.ensureProbe();          // measure ruler: rides the fresh pad (v1.5.22)
+    this.coordGroup.position.set(this.moff.x, this.moff.y, this.moff.z);
+    this.coordHoverClear();      // readout re-arms on the next pointer move
     this.applyViewOptions();
     if (camP && camT) {                    // same-craft rebuild: camera stays put
       this.camera!.position.copy(camP);
@@ -1352,9 +1350,11 @@ void main() {
    *  frame whose step changed. */
   private addGround(bp: Blueprint, parts: PartBox[]) {
     let y = bp.box_min.y;
+    let yTop = bp.box_max.y;
     let x0 = bp.box_min.x, x1 = bp.box_max.x, z0 = bp.box_min.z, z1 = bp.box_max.z;
     for (const p of parts) {
       y = Math.min(y, p.center[1] - p.size[1] / 2);
+      yTop = Math.max(yTop, p.center[1] + p.size[1] / 2);
       x0 = Math.min(x0, p.center[0] - p.size[0] / 2); x1 = Math.max(x1, p.center[0] + p.size[0] / 2);
       z0 = Math.min(z0, p.center[2] - p.size[2] / 2); z1 = Math.max(z1, p.center[2] + p.size[2] / 2);
     }
@@ -1364,7 +1364,7 @@ void main() {
     if (this.gridLines) { this.gridLines.geometry.dispose(); (this.gridLines.material as LineBasicMaterial).dispose(); this.gridLines = null; }
     this.gridY = y;
     this.gridBox = { cx: (x0 + x1) / 2, cz: (z0 + z1) / 2,
-      hx: Math.max((x1 - x0) / 2, 2), hz: Math.max((z1 - z0) / 2, 2) };
+      hx: Math.max((x1 - x0) / 2, 2), hz: Math.max((z1 - z0) / 2, 2), yTop };
     const plane = new Mesh(new PlaneGeometry(this.gridPad(), this.gridPad()), this.flatMat(0x3d5a34));
     plane.rotation.x = -Math.PI / 2;
     plane.position.set(this.gridBox.cx, y, this.gridBox.cz);
@@ -1420,15 +1420,11 @@ void main() {
     this.gridLines = new LineSegments(geo,
       new LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9 }));
     this.groundGroup.add(this.gridLines);
-    // the ruler ticks ride the SAME ladder (user: "same segmenting for
-    // measuring, eyeballing")
-    if (plan.step !== this.probeStep) {
-      // the ruler rides the SAME ladder: re-SNAP the probe (an h of 2 m on
-      // a 1.25 m rung must become 2.5, the pixel7 pin caught this) and
-      // re-tick the stick
-      this.probeStep = plan.step;
-      this.clampProbe();
-      this.buildProbe();
+    // the hover COORD READOUT snaps on the SAME ladder: a rung change
+    // re-snaps a live readout (its step field rides to the chip)
+    if (this.coordSnap && plan.step !== this.coordSnap.step) {
+      const c = this.coordHoverLast;
+      if (c) this.coordHoverMove(c.x, c.y, c.shift);
     }
   }
   /** live grid plan for the pins (testid hook __ARCHEAN__.grid()): the
@@ -1442,194 +1438,141 @@ void main() {
       halfX: plan.halfX, halfZ: plan.halfZ, cx: this.gridBox.cx, cz: this.gridBox.cz, y: this.gridY };
   }
 
-  // -------------------------------------------------- measure ruler (v1.5.22)
-  /** the ruler defaults to the BUILD CENTRE on the first load and survives
-   *  scene reloads (a placement re-load must not teleport it back); it is
-   *  clamped onto the pad's footprint + a small walk-out margin */
-  private ensureProbe() {
-    const grp = this.probeGroup, g = this.gridBox;
-    if (!grp || !g) return;
-    grp.position.set(this.moff.x, this.moff.y, this.moff.z);
-    if (!this.probeInit) {
-      // NOT the build centre: that is where half the editor's clicks land
-      // (and the pick-walk e2e pins aim) — start the ruler just off the
-      // SIDE of the build, in clear ground
-      this.probeInit = true;
-      this.probe.x = g.cx - g.hx - 2;
-      this.probe.z = g.cz;
-    }
-    this.clampProbe();
-    if (!this.probeStep) this.probeStep = 0.25;
-    this.buildProbe();
-    grp.visible = this.opts.probe;
-  }
-  private probeInit = false;
-  private clampProbe() {
+  // ------------------------------------------------ hover COORD READOUT
+  /** Blender-style grid-corner readout (v1.5.23, user: "a small black label
+   *  to indicate grid position on the corners of the displayed grid under
+   *  cursor … for a ad-hoc vertical grid also black to be visible only when
+   *  pressing shift, that is the most coplanar for our horizontal grid
+   *  (either x or z) … so that when pressing shift, you can also see
+   *  coordinates for that, and get the full x-y-z of a chosen location").
+   *  Convention (checked, FORMAT §world maths): x lateral, y UP, z
+   *  longitudinal (nose = −z) — the FLAT plane is x–z. Returns the snapped
+   *  file-space point for the black chip, or null when the ray misses the
+   *  pad. The vertical plane is the one most parallel to the screen: the
+   *  normal (x̂ or ẑ) whose |camera-view component| is LARGER. */
+  coordHoverMove(clientX: number, clientY: number, shift: boolean)
+    : { x: number; y: number; z: number; step: number; shift: boolean } | null {
     const g = this.gridBox;
-    if (!g) return;
-    const step = this.probeStep || 0.25;
-    const lim = (v: number, c: number, h: number) =>
-      Math.round(Math.min(c + h + 4, Math.max(c - h - 4, v)) / step) * step;
-    this.probe.x = lim(this.probe.x, g.cx, g.hx);
-    this.probe.z = lim(this.probe.z, g.cz, g.hz);
-    this.probe.h = Math.max(0, Math.round(this.probe.h / step) * step);
-  }
-  /** decimals follow the rung (0.25 m and coarser ⇒ one decimal: "z 10.0") */
-  private probeDec(): number { return this.probeStep < 0.25 ? 2 : 1; }
-  private probeCapText(): string {
-    const h = this.probe.h;
-    return 'z ' + (Object.is(h, -0) ? 0 : h).toFixed(this.probeDec());
-  }
-  private probeBaseText(): string {
-    const d = this.probeDec();
-    const f = (v: number) => (Object.is(v, -0) ? 0 : v).toFixed(d);
-    // the user's z-UP law: x = file x, y = −file z (nose = forward)
-    return 'x ' + f(this.probe.x) + ' · y ' + f(-this.probe.z);
-  }
-  /** live ruler state for the pins (positions in the user's z-up law) */
-  probeState(): { x: number; y: number; z: number; step: number; visible: boolean } {
-    return { x: this.probe.x, y: -this.probe.z, z: this.probe.h,
-      step: this.probeStep, visible: this.opts.probe };
-  }
-  /** client-px anchor of the two drag handles (hit test + e2e aiming) */
-  probePointScreen(which: 'base' | 'cap'): { x: number; y: number } | null {
-    if (!this.probeGroup || !this.renderer || !this.opts.probe) return null;
-    const y = this.gridY + (which === 'cap' ? this.probe.h : 0);
-    const p = new Vector3(this.probe.x + this.moff.x, y + this.moff.y, this.probe.z + this.moff.z)
-      .project(this.camera);
-    const r = this.renderer.domElement.getBoundingClientRect();
-    return { x: r.left + (p.x * 0.5 + 0.5) * r.width, y: r.top + (-p.y * 0.5 + 0.5) * r.height };
-  }
-  /** grab the ruler? (within 18 px of a handle — press BEFORE orbit picks
-   *  up the drag; twin of the placeDrag contract) */
-  probeDragStart(clientX: number, clientY: number): boolean {
-    if (!this.opts.probe || !this.probeGroup) return false;
-    for (const kind of ['cap', 'base'] as const) {
-      const p = this.probePointScreen(kind);
-      if (p && Math.hypot(p.x - clientX, p.y - clientY) <= 18) {
-        this.probe.drag = kind;
-        if (this.controls) this.controls.enabled = false;
-        return true;
-      }
-    }
-    return false;
-  }
-  probeDragMove(clientX: number, clientY: number): void {
-    const kind = this.probe.drag;
-    if (!kind || !this.renderer) return;
+    if (!g || !this.renderer) { this.coordHoverClear(); return null; }
+    const step = this.gridStepNow || 0.25;
     const r = this.renderer.domElement.getBoundingClientRect();
     const ndc = new Vector2(((clientX - r.left) / r.width) * 2 - 1,
       -((clientY - r.top) / r.height) * 2 + 1);
     const ray = new Raycaster();
     ray.setFromCamera(ndc, this.camera);
-    const step = this.probeStep || 0.25;
     const mo = this.moffV();
     const p = new Vector3();
-    if (kind === 'base') {
-      // the PAD plane: horizontal travel SNAPS onto the visible grid lines
-      const plane = new Plane(new Vector3(0, 1, 0), -(this.gridY + mo.y));
-      if (!ray.ray.intersectPlane(plane, p)) return;
-      this.probe.x = Math.round((p.x - mo.x) / step) * step;
-      this.probe.z = Math.round((p.z - mo.z) / step) * step;
-      this.clampProbe();
-    } else {
-      // the cap rides a camera-facing VERTICAL plane through the stem
-      const wx = this.probe.x + mo.x, wz = this.probe.z + mo.z;
+    // the PAD plane first: the grid CORNER under the cursor (x–z, y = up)
+    const pad = new Plane(new Vector3(0, 1, 0), -(this.gridY + mo.y));
+    if (!ray.ray.intersectPlane(pad, p)) { this.coordHoverClear(); return null; }
+    const snap = (v: number) => Math.round(v / step) * step;
+    let sx = snap(p.x - mo.x), sz = snap(p.z - mo.z);
+    let sy = this.gridY;
+    let planeAxis: 'x' | 'z' | null = null;
+    if (shift) {
       const dir = new Vector3();
       this.camera.getWorldDirection(dir);
-      const n = new Vector3(dir.x, 0, dir.z);
-      if (n.lengthSq() < 1e-9) return;
-      n.normalize();
-      const plane = new Plane(n, -(n.x * wx + n.z * wz));
-      if (!ray.ray.intersectPlane(plane, p)) return;
-      this.probe.h = Math.max(0, Math.round((p.y - mo.y - this.gridY) / step) * step);
+      planeAxis = Math.abs(dir.x) >= Math.abs(dir.z) ? 'x' : 'z';
+      // the vertical plane through the corner, most coplanar with the view
+      const wx = sx + mo.x, wz = sz + mo.z;
+      const n = planeAxis === 'x' ? new Vector3(1, 0, 0) : new Vector3(0, 0, 1);
+      const P0 = planeAxis === 'x' ? new Vector3(wx, 0, wz) : new Vector3(wx, 0, wz);
+      const plane = new Plane(n, -(n.dot(P0)));
+      const q = new Vector3();
+      if (ray.ray.intersectPlane(plane, q)) {
+        sy = snap(q.y - mo.y);
+        if (planeAxis === 'x') sz = snap(q.z - mo.z); else sx = snap(q.x - mo.x);
+      }
     }
-    this.buildProbe();
-    this.invalidate();
+    const info = { x: sx, y: sy, z: sz, step, shift, plane: planeAxis } as const;
+    const prev = this.coordSnap;
+    this.coordSnap = { x: sx, y: sy, z: sz, step, shift };
+    this.coordHoverLast = { x: clientX, y: clientY, shift };
+    if (!prev || prev.x !== sx || prev.y !== sy || prev.z !== sz || prev.step !== step || prev.shift !== shift)
+      this.buildCoordMarks(info);
+    return info;
   }
-  probeDragEnd(): void {
-    if (!this.probe.drag) return;
-    this.probe.drag = null;
-    if (this.controls) this.controls.enabled = true;
+  coordHoverState() { return this.coordSnap; }
+  /** Shift pressed/released WITHOUT a pointer move re-runs the last hover */
+  coordHoverShift(shift: boolean) {
+    const c = this.coordHoverLast;
+    if (c) this.coordHoverMove(c.x, c.y, shift);
   }
-  /** draw the ruler: coloured base arms on the horizontal axes, ONE blue
-   *  line up-and-down for z with the SAME minor/major segmentation as the
-   *  ground grid (ticks every ladder step, longer every 5th, the pad-level
-   *  zero tick brightest), a draggable cap sphere and coordinate labels:
-   *  "z 10.0" beside the cap, "x 3.0 · y -2.0" under the base. */
-  private buildProbe() {
-    const grp = this.probeGroup;
-    if (!grp) return;
+  coordHoverClear() {
+    this.coordSnap = null;
+    this.coordHoverLast = null;
+    this.clearGroup(this.coordGroup);
+  }
+  /** dispose helper for the readout group */
+  private clearGroup(grp: Group) {
     for (const o of [...grp.children]) {
       const m = o as Mesh;
       m.geometry?.dispose?.();
-      const mat = (o as unknown as Sprite).material as SpriteMaterial | undefined;
-      if (mat) { mat.map?.dispose?.(); mat.dispose(); }
+      (m.material as MeshBasicMaterial)?.dispose?.();
       grp.remove(o);
     }
-    const step = this.probeStep || 0.25, major = step * 5;
-    const gx = this.probe.x, gz = this.probe.z, gy = this.gridY, h = this.probe.h;
-    const arm = Math.min(Math.max(major * 0.5, 0.5), 4);
-    const cX = new Color(0xff6b6b), cY = new Color(0x8fe36b), cZ = new Color(0x6aa8ff),
-      cT = new Color(0xbdd9ff), c0 = new Color(0xffffff);
+  }
+  /** BLACK marks only (user: "also black"): a crosshair on the pad corner
+   *  and, on Shift, a black ad-hoc VERTICAL GRID on the chosen plane — the
+   *  SAME ladder spacing and absolute lattice as the ground grid (minor
+   *  lines, brighter majors every 5 rungs), plus a black 3-D cross at the
+   *  chosen (x, y, z) point. All coordinates are raw-file (the group rides
+   *  moff); y is UP. */
+  private buildCoordMarks(info: { x: number; y: number; z: number; step: number; shift: boolean; plane: 'x' | 'z' | null }) {
+    this.clearGroup(this.coordGroup);
+    const step = info.step, major = step * 5;
+    const g = this.gridBox!;
+    const gx = info.x, gz = info.z;
+    const cMinor = new Color(0x2a2e33), cMajor = new Color(0x000000);
     const pos: number[] = [], col: number[] = [];
     const seg = (a: [number, number, number], b: [number, number, number], c: Color) => {
       pos.push(a[0], a[1], a[2], b[0], b[1], b[2]);
       col.push(c.r, c.g, c.b, c.r, c.g, c.b);
     };
-    // base arms: +x red, game +y (= file −z, the nose) green
-    seg([gx, gy, gz], [gx + arm, gy, gz], cX);
-    seg([gx, gy, gz], [gx, gy, gz - arm], cY);
-    // the z line: up AND down over the pad, ticks on the SAME ladder
-    const lo = gy - 2 * major, hi = gy + Math.max(h, 0) + 2 * major;
-    seg([gx, lo, gz], [gx, hi, gz], cZ);
-    for (let k = Math.ceil((lo - gy) / step); gy + k * step <= hi; k++) {
-      const yy = gy + k * step;
-      const big = ((k % 5) + 5) % 5 === 0, zero = k === 0;
-      const len = zero ? major * 0.6 : big ? major * 0.45 : step * 0.35;
-      const c = zero ? c0 : big ? cT : cZ;
-      seg([gx - len, yy, gz], [gx + len, yy, gz], c);
-      seg([gx, yy, gz - len], [gx, yy, gz + len], c);
+    // the corner crosshair ON the pad (the corner of the displayed grid)
+    const arm = Math.max(step * 0.9, 0.12);
+    seg([gx - arm, this.gridY + 0.003, gz], [gx + arm, this.gridY + 0.003, gz], cMajor);
+    seg([gx, this.gridY + 0.003, gz - arm], [gx, this.gridY + 0.003, gz + arm], cMajor);
+    if (info.shift && info.plane) {
+      // the plane spans the pad horizontally and reaches comfortably over
+      // the craft; its lines sit on the WORLD lattice (k·step) exactly
+      // like the ground grid, so chips and ticks agree
+      const yLo = this.gridY - 2 * major, yHi = g.yTop + 2 * major;
+      const half = info.plane === 'x'
+        ? Math.max(g.hz, Math.abs(gz - g.cz)) + 2 * major
+        : Math.max(g.hx, Math.abs(gx - g.cx)) + 2 * major;
+      const ctr = info.plane === 'x' ? gz : gx;
+      for (let k = Math.ceil(yLo / step); k * step <= yHi; k++) {
+        const yy = k * step;
+        const big = ((k % 5) + 5) % 5 === 0;
+        const c = big ? cMajor : cMinor;
+        if (info.plane === 'x') seg([gx, yy, ctr - half], [gx, yy, ctr + half], c);
+        else seg([ctr - half, yy, gz], [ctr + half, yy, gz], c);
+      }
+      for (let k = Math.ceil((ctr - half) / step); k * step <= ctr + half; k++) {
+        const h = k * step;
+        const big = ((k % 5) + 5) % 5 === 0;
+        const c = big ? cMajor : cMinor;
+        if (info.plane === 'x') seg([gx, yLo, h], [gx, yHi, h], c);
+        else seg([h, yLo, gz], [h, yHi, gz], c);
+      }
+      // the full-coordinate cross at the chosen point
+      const m = Math.max(step * 1.2, 0.18);
+      const py = info.y;
+      seg([gx - m, py, gz], [gx + m, py, gz], cMajor);
+      seg([gx, py - m, gz], [gx, py + m, gz], cMajor);
+      seg([gx, py, gz - m], [gx, py, gz + m], cMajor);
     }
     const geo = new BufferGeometry();
     geo.setAttribute('position', new BufferAttribute(new Float32Array(pos), 3));
     geo.setAttribute('color', new BufferAttribute(new Float32Array(col), 3));
-    const lines = new LineSegments(geo,
-      new LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.95, depthTest: false }));
-    lines.renderOrder = 28;
+    const lines = new LineSegments(geo, new LineBasicMaterial({
+      vertexColors: true, transparent: true, opacity: 0.95, depthTest: false }));
+    lines.renderOrder = 31;
     lines.raycast = () => {};
-    grp.add(lines);
-    // the cap sphere: drag it UP/DOWN (snapped to the ladder)
-    const cap = new Mesh(new SphereGeometry(Math.max(step * 0.28, 0.07), 12, 8),
-      new MeshBasicMaterial({ color: 0x6aa8ff, transparent: true, opacity: 0.95, depthTest: false }));
-    cap.position.set(gx, gy + h, gz);
-    cap.renderOrder = 29;
-    cap.raycast = () => {};
-    grp.add(cap);
-    // the base puck: drag it ALONG THE GRID (snapped onto the grid lines)
-    const puckPts: number[] = [];
-    const pr = Math.max(step * 0.5, 0.14);
-    for (let i = 0; i < 24; i++) {
-      const a0 = (i / 24) * Math.PI * 2, a1 = ((i + 1) / 24) * Math.PI * 2;
-      puckPts.push(gx + Math.cos(a0) * pr, gy + 0.004, gz + Math.sin(a0) * pr,
-        gx + Math.cos(a1) * pr, gy + 0.004, gz + Math.sin(a1) * pr);
-    }
-    const pg = new BufferGeometry();
-    pg.setAttribute('position', new BufferAttribute(new Float32Array(puckPts), 3));
-    const puck = new LineSegments(pg, new LineBasicMaterial({
-      color: 0xffffff, transparent: true, opacity: 0.8, depthTest: false }));
-    puck.renderOrder = 29;
-    puck.raycast = () => {};
-    grp.add(puck);
-    // coordinate labels (same sprite factory as the part labels)
-    const capL = this.makeLabel(this.probeCapText(), false);
-    capL.position.set(gx + Math.max(0.5, major * 0.7), gy + h, gz);
-    capL.renderOrder = 32;
-    const baseL = this.makeLabel(this.probeBaseText(), false);
-    baseL.position.set(gx, gy - Math.max(step * 1.5, 0.45), gz);
-    baseL.renderOrder = 32;
-    grp.add(capL, baseL);
+    this.coordGroup.add(lines);
   }
+
 
   /** legacy fit: d = max(1.85r, 3.6), eye (0.6d, max(.34d,1.4), .72d) (fog off;
    *  frames over the UNION of file box, built solids and part boxes,
@@ -1687,7 +1630,6 @@ void main() {
     this.subGroup.visible = this.opts.subs;
     if (this.mirrorPlane) this.mirrorPlane.visible = this.opts.mirror;
     if (this.comMarker) this.comMarker.visible = this.opts.com;
-    if (this.probeGroup) this.probeGroup.visible = this.opts.probe;
     for (const l of this.labels) l.sp.visible = this.opts.labels;
   }
   getOptions(): ViewOptions { return { ...this.opts }; }

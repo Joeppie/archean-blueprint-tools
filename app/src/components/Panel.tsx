@@ -352,11 +352,6 @@ export function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHu
       <Check testid="opt-hidef" label="decimated low-poly meshes (weak GPUs)" checked={!p.hiDef}
         onChange={v => p.onHiDef(!v)} />
       <Check testid="opt-com" label="center-of-mass marker" checked={p.opts.com} onChange={v => p.onOpt('com', v)} />
-      {/* v1.5.22 MEASURE RULER: an in-world z-stick ON the grid — drag the
-          puck (snaps onto the grid lines) and the cap (height, snapped),
-          ticks share the grid's segmentation; labels read z-up ("z 10.0") */}
-      <Check testid="opt-probe" label="measure ruler (drag it · snaps to grid)" checked={p.opts.probe}
-        onChange={v => p.onOpt('probe', v)} />
       {/* the KSP STATIC INFO overlay (mass & CoM) is optional: on phones it is
           OFF by default (it ate a third of the viewport — user 2026-10-19);
           its own ✕ hides it and this row brings it back */}
@@ -366,7 +361,7 @@ export function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHu
         onInput={p.onHullOpacity}
         title="dims the whole hull skin: blocks, triangle plates and their wireframes" />
       <div className="mt-1 text-[10px] leading-snug text-ink-dim">
-        keys: g grid · o occupancy · h hull · m ruler · Esc deselect
+        keys: g grid · o occupancy · h hull · Esc deselect · Shift at cursor = vertical coord plane
       </div>
     </Sec>
   );

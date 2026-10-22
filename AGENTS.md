@@ -481,7 +481,37 @@ freshly-authored triangles, fixture 9000006001 — see the v1.5.12 bullet).
   SILHOUETTE from screenshot pixels (largest blob, scanline-filled area ÷
   its convex hull): 0.99–1.00 at every size — the picture itself has no
   bite. In-game judgment stays the user's (AGENTS: in-game pixels arbitrate).
-- **v1.5.22 MEASURE RULER (user 2026-10-22: "The indicator for xyz is
+- **v1.5.23 COORD READOUT (user 2026-10-22: "a small black label to indicate
+  grid position on the corners of the displayed grid under cursor … for a
+  ad-hoc vertical grid also black to be visible only when pressing shift,
+  that is the most coplanar for our horizontal grid (either x or z) … get
+  the full x-y-z of a chosen location … Is x-y the plane that is flat, and Z
+  up, or is that Y? please check"):** the CONVENTION IS CHECKED AND PINNED —
+  FORMAT §world maths / line 30: **x lateral, y = UP, z longitudinal (nose =
+  −z)**; the FLAT plane is x–z (Blender's own UI is z-up, this format is
+  NOT); the readout, chips and help all say so, and an e2e pin asserts that
+  raising the pointer RAISES y. ENGINE (`coordHoverMove/State/Clear/Shift`):
+  ray ∩ PAD plane → snap x/z onto the visible grid rung; on Shift the
+  camera-facing vertical plane (normal = x̂ or ẑ by the larger |camera view
+  component| — "most coplanar") through that corner yields the third coord
+  (all three snapped to the ladder, lines on the WORLD lattice like the
+  ground grid). `coordGroup` (scene child, rides moff) draws BLACK marks
+  only: pad-corner crosshair, the plane's minor/major grid lines, and a 3-D
+  cross at the chosen point; rebuilt only when a snap value changes; syncGrid
+  re-snaps a live readout when zoom changes the rung. VIEWPORT: the chip is
+  a BLACK div `coord-chip` following the cursor, text set imperatively (no
+  React state per pointermove) — `x 3.00  z -2.50`, growing to
+  `… y …` on Shift; a window keydown/keyup listener toggles the plane even
+  without pointer motion; pointerleave clears. Hooks `coord()`. Pins:
+  views.spec @ui (chip visible, snapped to the ladder, no y without Shift,
+  full triple with it, THE Y-UP CONVENTION PIN). No new option row — the
+  readout is always on while the cursor is over the viewport (the ⚙ key
+  hint mentions Shift).
+- **v1.5.22 MEASURE RULER — REPLACED SAME DAY by the v1.5.23 COORD
+  READOUT (user: "that is not what I thought. I thought more like the way
+  blender does it"): the ruler, `probeState()/probePointScreen()/
+  probeDrag*()`, ⚙ opt-probe and the m key are REMOVED; see v1.5.23.
+  Original brief: "The indicator for xyz is
   useless. it must be on the grid, movable and where it snaps on the grid for
   horizontal, I want the coordinate also shown e.g. z 10.0 and a single line
   up and down for z, same segmenting for measuring, eyeballing"):** the

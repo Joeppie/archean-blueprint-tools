@@ -60,10 +60,9 @@ declare global {
     placeShift: (s: [number, number, number]) => boolean;
     /** v1.5.21 adaptive ground grid plan (step/major/spans in file coords) */
     grid: () => ReturnType<Engine['gridInfo']>;
-    /** v1.5.22 MEASURE RULER: state in the user's z-up law (x, y=-filez,
-     *  z=height above the pad) + the screen anchor of a drag handle */
-    probe: () => ReturnType<Engine['probeState']>;
-    probePoint: (w: 'base' | 'cap') => { x: number; y: number } | null;
+    /** v1.5.23 COORD READOUT: the snapped file-space point under the cursor
+     *  (y = UP per FORMAT §world maths), null when the ray misses the pad */
+    coord: () => ReturnType<Engine['coordHoverState']>;
     /** v1.5.21 settable mirror axis (⚙ row) */
     mirAxis: () => 'x' | 'y' | 'z';
   } }
@@ -121,6 +120,11 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
     const engine = new Engine();
     engine.attach(canvasRef.current!);
     engineRef.current = engine;
+    const shiftSync = (e: KeyboardEvent) => {
+      if (e.key === 'Shift') engine.coordHoverShift(e.type === 'keydown');
+    };
+    window.addEventListener('keydown', shiftSync);
+    window.addEventListener('keyup', shiftSync);
     const ro = new ResizeObserver(() => engine.resize());
     ro.observe(canvasRef.current!);
     window.__ARCHEAN__ = {
@@ -156,14 +160,15 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
       placeGhost: () => engine.clusterGhostState(),
       placePoint: () => engine.clusterGhostScreenPoint(),
       placeShift: (s: [number, number, number]) => engine.clusterGhostShift(s),
-      // v1.5.21 adaptive grid + mirror axis; v1.5.22 measure ruler pins
+      // v1.5.21 adaptive grid + mirror axis; v1.5.23 coord readout pins
       grid: () => engine.gridInfo(),
       mirAxis: () => engine.mirrorAxis,
-      probe: () => engine.probeState(),
-      probePoint: (w: 'base' | 'cap') => engine.probePointScreen(w),
+      coord: () => engine.coordHoverState(),
     };
     onEngine?.(engine);
     return () => {
+      window.removeEventListener('keydown', shiftSync);
+      window.removeEventListener('keyup', shiftSync);
       ro.disconnect(); engine.dispose(); window.__ARCHEAN__ = undefined; onEngine?.(null);
     };
   }, []);                                    // eslint-disable-line react-hooks/exhaustive-deps
@@ -275,9 +280,9 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
    *  release lands it at the final yaw. A press that hits nothing placeable
    *  stays a plain camera gesture. */
   const placeDrag = useRef<{ yaw: number } | null>(null);
-  // v1.5.22 measure-ruler drag (a grabbed handle: base glides on the grid,
-  // cap sets the height; orbit yields while held, twin of placeDrag)
-  const probeDrag = useRef(false);
+  // v1.5.23 coord-readout chip (Blender-style black label following the
+  // cursor; text set imperatively — a React state per pointermove is waste)
+  const chipRef = useRef<HTMLDivElement>(null);
   const pickClick = (e: React.PointerEvent) => {
     const engine = engineRef.current;
     if (!engine) return;
@@ -318,37 +323,45 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
       <canvas ref={canvasRef} data-testid="canvas" className="block h-full w-full touch-none"
         onPointerDown={e => {
           down.current = { x: e.clientX, y: e.clientY };
-          // the MEASURE RULER grabs first (v1.5.22): a press within a
-          // handle's 18 px rides the ruler, not the orbit/placement
-          if (e.button === 0 && engineRef.current?.probeDragStart(e.clientX, e.clientY)) {
-            probeDrag.current = true;
-            return;
-          }
           if (placing && mode === 'edit' && e.button === 0 && !e.shiftKey &&
             engineRef.current?.placeDragStart(e.clientX, e.clientY))
             placeDrag.current = { yaw: engineRef.current.compGhostState?.yaw ?? 0 };
         }}
         onPointerMove={e => {
-          if (probeDrag.current) {
-            engineRef.current?.probeDragMove(e.clientX, e.clientY);
-            return;                         // the ruler rides, not the orbit
-          }
           if (placeDrag.current) {
             const y = engineRef.current?.placeDragMove(e.clientX, e.clientY);
             if (y != null) placeDrag.current.yaw = y;
             return;                       // the smear aims the ghost, not hover
           }
           blockHover(e.clientX, e.clientY, e.shiftKey);
+          // BLENDER-STYLE COORD READOUT (v1.5.23): the grid corner under
+          // the cursor; Shift adds the camera-facing vertical plane so the
+          // full x/y/z (y = UP, FORMAT §world maths) becomes readable
+          const info = engineRef.current?.coordHoverMove(e.clientX, e.clientY, e.shiftKey) ?? null;
+          const chip = chipRef.current, host = hostRef.current;
+          if (chip && host) {
+            if (info) {
+              const hr = host.getBoundingClientRect();
+              const dg = info.step < 0.25 ? 2 : 1;
+              const f = (v: number) => (Object.is(v, -0) ? 0 : v).toFixed(dg);
+              chip.textContent = info.shift
+                ? `x ${f(info.x)}  y ${f(info.y)}  z ${f(info.z)}`
+                : `x ${f(info.x)}  z ${f(info.z)}`;
+              chip.style.display = 'block';
+              chip.style.left = `${Math.min(Math.max(4, e.clientX - hr.left + 14), hr.width - 170)}px`;
+              chip.style.top = `${Math.max(4, e.clientY - hr.top + 16)}px`;
+            } else chip.style.display = 'none';
+          }
         }}
         onPointerLeave={() => {
-          if (probeDrag.current) { engineRef.current?.probeDragEnd(); probeDrag.current = false; }
+          engineRef.current?.coordHoverClear();
+          if (chipRef.current) chipRef.current.style.display = 'none';
           // the ghost dies with the pointer (the game's ghost too)
           lastHover.current = null;
           if (placeDrag.current) { engineRef.current?.placeDragEnd(); placeDrag.current = null; }
           if (hoverOn) onBlockHover?.(-1e5, -1e5, false);
         }}
         onPointerUp={e => {
-          if (probeDrag.current) { engineRef.current?.probeDragEnd(); probeDrag.current = false; return; }
           if (placeDrag.current) {
             // the RELEASE places (the press only pins — "should not just
             // place immediately"; a zero-motion release = the old click,
@@ -426,6 +439,10 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
         </div>
       )}
       {DEBUG_MODE && <StatsStrip engine={engineRef} bp={bp} />}
+      {/* the black coord label, Blender-style, follows the cursor */}
+      <div ref={chipRef} data-testid="coord-chip" style={{ display: 'none' }}
+        className="pointer-events-none absolute z-30 rounded-sm bg-black/85 px-1.5 py-[1px]
+                   font-mono text-[11px] tracking-tight text-[#e8e8e8]" />
     </div>
   );
 }
