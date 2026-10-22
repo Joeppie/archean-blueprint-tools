@@ -45,8 +45,8 @@ import { buildPipes, surgePaths, type PipeNetwork } from './pipes';
 import { buildBlocksSolids, buildCompProxies, buildSolids, type ProxyBox, type SolidBatch } from './build';
 import { hullVertex } from './hullfit';
 import type { FilePalette } from './palette';
-import type { Block, Blueprint, BlueprintComponent } from './format';
-import { CELL, isLegacyFile } from './format';
+import type { Block, Blueprint, BlueprintComponent, Triangle } from './format';
+import { CELL, CELLS_PER_FRAME, isLegacyFile } from './format';
 import { getBlockEdges, getBlockFaces, getBlockPoints } from './blockshapes';
 import { blockCells, blockMirrorTwin, cellOverlapSkip, mirrorBlockCell,
   rotatedBlock, setBlockGeom, type PlaceSpec } from './blocks';
@@ -212,6 +212,10 @@ export class Engine {
    *  child (disposeScene never eats it), children keep RAW-FILE metres. */
   private clusterGroup = new Group();
   private clusterBlocks: Block[] = [];
+  /** v1.6.1: a TOOL skin placement (Spheroid ▸ SKIN) — hull TRIANGLES
+   *  ghosted as flat translucent faces (a skin never "collides": skins
+   *  overlap blocks by design, so a tri-only cluster is always valid) */
+  private clusterTris: Triangle[] = [];
   private clusterOffset: [number, number, number] = [0, 0, 0];
   private clusterHex = 0x7dffcf;
   private clusterValid = true;
@@ -399,7 +403,7 @@ export class Engine {
       listen('mouseDown', () => {
         if (this.blockGizBi >= 0) this.captureBlockGesture();
         else if (this.gizmoCi >= 0) this.captureGesture(this.gizmoCi);
-        else if (this.clusterBlocks.length) this.captureClusterGesture();
+        else if (this.clusterBlocks.length || this.clusterTris.length) this.captureClusterGesture();
       });
       listen('dragging-changed', e => {
         if (this.controls) this.controls.enabled = !e.value;
@@ -2874,8 +2878,9 @@ void main() {
    *  movable on the BLOCK widget (CELL snap) with a Cancel/Build label.
    *  Children keep RAW-FILE metres (the group rides moff + the cell offset),
    *  so a commit only has to shift the block records. null clears. */
-  setClusterGhost(blocks: Block[] | null, hex = 0x7dffcf) {
+  setClusterGhost(blocks: Block[] | null, hex = 0x7dffcf, tris: Triangle[] | null = null) {
     this.clusterBlocks = blocks ? blocks.slice() : [];
+    this.clusterTris = tris ? tris.slice() : [];
     this.clusterHex = hex;
     this.clusterOffset = [0, 0, 0];
     this.clusterBase = null;
@@ -2884,7 +2889,7 @@ void main() {
       ((o as unknown as { material?: { dispose?: () => void } }).material)?.dispose?.();
     }
     this.clusterGroup.clear();
-    if (this.clusterBlocks.length) {
+    if (this.clusterBlocks.length || this.clusterTris.length) {
       const pos: number[] = [], idx: number[] = [], ep: number[] = [];
       for (const b of this.clusterBlocks) {
         const c = blockCells(b);
@@ -2897,6 +2902,20 @@ void main() {
         for (const v of pts) pos.push(v[0], v[1], v[2]);
         for (const f of getBlockFaces(b.type)) idx.push(f[0]! + base, f[1]! + base, f[2]! + base, f[3]! + base, f[4]! + base, f[5]! + base);
         for (const [a, e] of getBlockEdges(b.type)) ep.push(...pts[a]!, ...pts[e]!);
+      }
+      // skin triangles: decode the frame + 0..31 window to lattice points
+      const triG = (t: Triangle, i: number, ax: 0 | 1 | 2) =>
+        (t[`v${i}_${'xyz'[ax]!}`] as number) + CELLS_PER_FRAME * (t[`frame_${'xyz'[ax]!}`] as number);
+      for (const t of this.clusterTris) {
+        const base = pos.length / 3;
+        for (let i = 0; i < 3; i++) {
+          const g: [number, number, number] = [triG(t, i, 0), triG(t, i, 1), triG(t, i, 2)];
+          pos.push((g[0] - 6) * CELL, (g[1] - 6) * CELL, (g[2] - 6) * CELL);
+        }
+        idx.push(base, base + 1, base + 2);
+        ep.push(...pos.slice(base * 3, base * 3 + 3), ...pos.slice(base * 3 + 3, base * 3 + 6),
+          ...pos.slice(base * 3 + 6, base * 3 + 9), ...pos.slice(base * 3 + 6, base * 3 + 9),
+          ...pos.slice(base * 3 + 3, base * 3 + 6), ...pos.slice(base * 3, base * 3 + 3));
       }
       const geo = new BufferGeometry();
       geo.setAttribute('position', new BufferAttribute(new Float32Array(pos), 3));
@@ -2927,7 +2946,7 @@ void main() {
   /** bbox centre of the cluster (WORLD incl. moff + offset) — widget pivot
    *  and the label anchor */
   private clusterCentre(): Vector3 | null {
-    if (!this.clusterBlocks.length) return null;
+    if (!this.clusterBlocks.length && !this.clusterTris.length) return null;
     let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
     for (const b of this.clusterBlocks) {
       const c = blockCells(b);
@@ -2935,6 +2954,13 @@ void main() {
       x1 = Math.max(x1, c.x + b.size_x + 1); y1 = Math.max(y1, c.y + b.size_y + 1);
       z1 = Math.max(z1, c.z + b.size_z + 1);
     }
+    const tg = (t: Triangle, i: number, ax: 0 | 1 | 2) =>
+      (t[`v${i}_${'xyz'[ax]!}`] as number) + CELLS_PER_FRAME * (t[`frame_${'xyz'[ax]!}`] as number);
+    for (const t of this.clusterTris)
+      for (let i = 0; i < 3; i++) {
+        x0 = Math.min(x0, tg(t, i, 0)); y0 = Math.min(y0, tg(t, i, 1)); z0 = Math.min(z0, tg(t, i, 2));
+        x1 = Math.max(x1, tg(t, i, 0)); y1 = Math.max(y1, tg(t, i, 1)); z1 = Math.max(z1, tg(t, i, 2));
+      }
     const o = this.clusterOffset;
     return new Vector3(
       (x0 + x1) / 2 - 6 + o[0], (y0 + y1) / 2 - 6 + o[1], (z0 + z1) / 2 - 6 + o[2]).multiplyScalar(CELL)
@@ -2945,7 +2971,8 @@ void main() {
   private clusterCheckValid() {
     const bp = this.bp;
     this.clusterValid = true;
-    if (bp) {
+    // a skin (tri-only) never collides — hull skins overlap blocks by design
+    if (bp && this.clusterBlocks.length) {
       const o = this.clusterOffset;
       const ex = bp.data.blocks.filter(b => b.type !== 255).map(b => {
         const c = blockCells(b);
@@ -2969,11 +2996,12 @@ void main() {
     }
   }
   /** live state for the viewport label + the e2e pins */
-  clusterGhostState(): { blocks: number; offset: [number, number, number]; valid: boolean; shown: boolean } | null {
-    if (!this.clusterBlocks.length) return null;
+  clusterGhostState(): { blocks: number; tris: number; offset: [number, number, number]; valid: boolean; shown: boolean } | null {
+    if (!this.clusterBlocks.length && !this.clusterTris.length) return null;
     const g = this.gizmo;
     return {
-      blocks: this.clusterBlocks.length, offset: this.clusterOffset.slice() as [number, number, number],
+      blocks: this.clusterBlocks.length, tris: this.clusterTris.length,
+      offset: this.clusterOffset.slice() as [number, number, number],
       valid: this.clusterValid,
       shown: !!g && g.enabled === true && g.getHelper().visible === true &&
         (g as unknown as { object?: unknown }).object === this.gizmoProxy,
@@ -2982,7 +3010,7 @@ void main() {
   /** PUBLIC whole-cell nudge of the placement (keyboard, pins — the widget
    *  commit routes through the same offset math); false = now colliding */
   clusterGhostShift(step: [number, number, number]): boolean {
-    if (!this.clusterBlocks.length) return false;
+    if (!this.clusterBlocks.length && !this.clusterTris.length) return false;
     const o = this.clusterOffset;
     this.clusterOffset = [o[0] + step[0], o[1] + step[1], o[2] + step[2]];
     this.syncClusterGroupPos();

@@ -14,7 +14,7 @@
 // Confirm runs and the dialog closes (2026-10-20: no inert second-OK no-op). The
 // tool list itself is a registry — adding a tool means adding one ToolDef.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Blueprint, Block } from '../engine/format';
+import type { Blueprint, Block, Triangle } from '../engine/format';
 import type { EditCtx } from '../engine/edit';
 import { writeBlockDoc, writeBlockMaterial, setPaletteSlot } from '../engine/edit';
 import { docArrayInsert, docArrayRemoveAt, docEnsureArray, docFromValue } from '../engine/doc';
@@ -24,15 +24,16 @@ import {
   MATERIALS, blockMaterial, hullifyApply, hullifyPreview, replaceCensus, replaceColorDests,
   replaceSources, replaceAll, parseHexColor, paletteSlotNode, allocateSlot, nearestSlot,
 } from '../engine/tools';
-import { spheroidBlocks, spheroidStats, type SpheroidSpec } from '../engine/spheroid';
+import { spheroidBlocks, spheroidStats, spheroidTriangles, encodeTriSkin,
+  type SpheroidSpec } from '../engine/spheroid';
 
 export type ToolValue = string | number;
 export type ToolForm = Record<string, ToolValue>;
 
-/** A PLACEMENT tool's payload: block records at the stage-time position —
- *  the viewport ghosts them, the user moves the cluster, and Build commits
- *  with the final cell offset. Generic: ANY place-tool ships blocks. */
-export interface PlacePayload { blocks: Block[] }
+/** A PLACEMENT tool's payload: block records and/or hull triangles at the
+ *  stage-time position — the viewport ghosts them, the user moves the
+ *  cluster, and Build commits with the final cell offset. Generic. */
+export interface PlacePayload { blocks?: Block[]; triangles?: Triangle[] }
 
 export interface ToolFieldDef {
   key: string;
@@ -260,38 +261,65 @@ export const TOOLS: ToolDef[] = [
       + 'only the skin. OK previews it as a ghost you can MOVE — Build '
       + 'writes it into the craft.',
     fields: [
-      { key: 'rx', label: 'width x (m)', kind: 'range', min: 0.25, max: 4, step: 0.25, unit: ' m',
-        hint: 'stretch the axes freely — equal = a sphere, different = an ellipsoid' },
-      { key: 'ry', label: 'height y (m)', kind: 'range', min: 0.25, max: 4, step: 0.25, unit: ' m' },
-      { key: 'rz', label: 'length z (m)', kind: 'range', min: 0.25, max: 4, step: 0.25, unit: ' m' },
-      { key: 'solid', label: 'fill', kind: 'toggle',
-        hint: 'SOLID = 100 % filled with the fewest square blocks · SHELL = skin only' },
+      { key: 'rx', label: 'width x (m)', kind: 'range', min: 0.25, max: 24, step: 0.25, unit: ' m',
+        hint: 'stretch the axes freely — equal = a sphere, different = an ellipsoid; '
+          + 'up to 24 m (zeppelin) in SKIN mode' },
+      { key: 'ry', label: 'height y (m)', kind: 'range', min: 0.25, max: 24, step: 0.25, unit: ' m' },
+      { key: 'rz', label: 'length z (m)', kind: 'range', min: 0.25, max: 24, step: 0.25, unit: ' m' },
+      { key: 'fill', label: 'shape', kind: 'select',
+        options: [
+          { id: 'skin', label: 'Skin — hull triangles (smooth, huge)' },
+          { id: 'solid', label: 'Solid blocks (100 % filled)' },
+          { id: 'shell', label: 'Shell — blocks, hollow' },
+        ],
+        hint: 'the staircase of blocks is chamfered with wedges, tapers and '
+          + 'inverse corners; the SKIN is one watertight smooth triangle hull '
+          + '(cheap enough for airship sizes blocks could never afford)' },
+      { key: 'shade', label: 'shading', kind: 'select',
+        showIf: f => f['fill'] === 'skin',
+        options: [
+          { id: 'smooth', label: 'smooth (smooth:1, welds normals)' },
+          { id: 'flat', label: 'flat (faceted)' },
+        ],
+        hint: 'smooth:1 is the game’s sheet-hull convention — the in-game '
+          + 'welding is what makes a big skin read ROUNDED' },
       { key: 'material', label: 'material', kind: 'select',
         options: MATERIALS.map((label, m) => ({ id: `m${m}`, label })) },
       { key: 'color', label: 'paint', kind: 'color',
-        hint: 'the RGB is painted on every face of every block' },
+        hint: 'the RGB is painted on every face of every block/triangle' },
       { key: 'colorhow', label: 'paint slot', kind: 'select',
         options: [
           { id: 'new', label: '+ new palette slot' },
           { id: 'nearest', label: '≈ nearest existing slot' },
         ] },
       { key: 'note', label: '', kind: 'note',
-        hint: 'OK starts a PLACEMENT: the spheroid appears as a translucent '
-          + 'cluster you can drag with the widget (cell-snapped, red = it '
+        hint: 'OK starts a PLACEMENT: the shape appears as a translucent '
+          + 'ghost you can drag with the widget (cell-snapped, red = it '
           + 'collides); its label has ✕ Cancel and ✔ Build. Edit ▸ Undo '
           + '(Ctrl+Z) takes a built spheroid back as one step.',
       },
     ],
-    initial: { rx: 1, ry: 1, rz: 1, solid: 1, material: 'm0', color: '#c9c9c9', colorhow: 'new' },
+    initial: { rx: 1, ry: 1, rz: 1, fill: 'skin', shade: 'smooth', material: 'm0', color: '#c9c9c9', colorhow: 'new' },
     preview: (f) => {
-      const st = spheroidStats(spheroidForm(f, 51));
-      return `${st.blocks} blocks (${st.shellCells} shaped) · `
-        + `${f['solid'] ? 'SOLID' : 'SHELL'} · material ${MATERIALS[+String(f['material']).slice(1)] ?? '?'}`
-        + ` · ≈ ${st.kg.toFixed(0)} kg`;
+      const spec = spheroidForm(f, 51);
+      const st = spheroidStats(spec, { shade: f['shade'] === 'flat' ? 'flat' : 'smooth' });
+      const mat = MATERIALS[+String(f['material']).slice(1)] ?? '?';
+      if (f['fill'] === 'skin')
+        return `${st.tris} triangles · skin ${f['shade'] === 'flat' ? 'flat' : 'smooth'} · `
+          + `material ${mat} · ≈ ${st.kgSkin.toFixed(0)} kg`;
+      const heavy = st.blocks > 3000 ? ' · HEAVY — skin recommended' : '';
+      return `${st.blocks} blocks (${st.shellCells} chamfered) · `
+        + `${f['fill'] === 'solid' ? 'SOLID' : 'SHELL'} · material ${mat}`
+        + ` · ≈ ${st.kgBlocks.toFixed(0)} kg${heavy}`;
     },
     run: () => 'use placement',            // place tools never run()
     place: {
-      stage: (f) => ({ blocks: spheroidBlocks(spheroidForm(f, 51)) }),
+      stage: (f) => {
+        const spec = spheroidForm(f, 51);
+        return f['fill'] === 'skin'
+          ? { triangles: spheroidTriangles(spec, { shade: f['shade'] === 'flat' ? 'flat' : 'smooth' }) }
+          : { blocks: spheroidBlocks(spec) };
+      },
       commit: (f, _payload, offset, ctx) => {
         // the PAINT resolves at Build (it can GROW the palette — an edit,
         // not a preview): a new free slot or the nearest existing colour
@@ -305,7 +333,19 @@ export const TOOLS: ToolDef[] = [
             else { setPaletteSlot(ctx, free, paletteSlotNode(rgb)); slot = free; }
           }
         }
-        const blocks = shiftBlocks(spheroidBlocks(spheroidForm(f, slot)), offset);
+        const spec = spheroidForm(f, slot);
+        if (f['fill'] === 'skin') {
+          const tris = shiftTriangles(
+            spheroidTriangles(spec, { shade: f['shade'] === 'flat' ? 'flat' : 'smooth' }), offset);
+          for (const t of tris) {
+            ctx.bp.data.triangles ??= [];
+            ctx.bp.data.triangles.push(t);
+            docArrayInsert(ctx.doc, ['data', 'triangles'], ctx.bp.data.triangles.length - 1, docFromValue(t, false));
+          }
+          return `built a ${f['rx']}×${f['ry']}×${f['rz']} m spheroid SKIN: ${tris.length} `
+            + `hull triangles, ${f['shade'] === 'flat' ? 'flat' : 'smooth'} (paint slot ${slot})`;
+        }
+        const blocks = shiftBlocks(spheroidBlocks(spec), offset);
         for (const b of blocks) {
           ctx.bp.data.blocks.push(b);
           docArrayInsert(ctx.doc, ['data', 'blocks'], ctx.bp.data.blocks.length - 1, docFromValue(b));
@@ -315,6 +355,25 @@ export const TOOLS: ToolDef[] = [
     },
   },
 ];
+
+/** Whole-cell shift of generated triangles (placement drag): every vertex is
+ *  stored back through the frame + 0..31 window at cell + step. */
+type TriVerts = [[number, number, number], [number, number, number], [number, number, number]];
+function shiftTriangles(tris: Triangle[], step: [number, number, number]): Triangle[] {
+  const out: Triangle[] = [];
+  for (const t of tris) {
+    const g: number[][] = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+    for (let i = 0; i < 3; i++)
+      for (let ax = 0; ax < 3; ax++) {
+        const name = 'xyz'[ax]!;
+        g[i]![ax] = (t[`v${i}_${name}`] as number) + 12 * (t[`frame_${name}`] as number) + step[ax]!;
+      }
+    const shifted = encodeTriSkin(g as unknown as TriVerts,
+      Number(t.colors?.[0] ?? 51), Number(t.material ?? 0), t.smooth === 1);
+    if (shifted) out.push(shifted);
+  }
+  return out;
+}
 
 /** The dialog form → a generation spec. The centre sits ABOVE the world
  *  origin so the spheroid lands clear of a fresh craft's deck plate; the
@@ -326,7 +385,7 @@ function spheroidForm(f: ToolForm, slot: number): SpheroidSpec {
     center: [0, ry + 0.25, 0],
     radii: [+f['rx']!, ry, +f['rz']!],
     material: +String(f['material']).slice(1),
-    slot, solid: !!f['solid'],
+    slot, solid: f['fill'] !== 'shell',
   };
 }
 

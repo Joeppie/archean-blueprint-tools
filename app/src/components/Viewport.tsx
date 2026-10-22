@@ -217,14 +217,15 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
     return () => clearInterval(h);
   }, []);
   // v1.6 TOOLS ▸ placement: the ✕ Cancel / ✔ Build label rides the ghost
-  const [place, setPlace] = useState<{ blocks: number; valid: boolean; x: number; y: number } | null>(null);
+  const [place, setPlace] = useState<
+    { blocks: number; tris: number; valid: boolean; x: number; y: number } | null>(null);
   useEffect(() => {
     const h = setInterval(() => {
       const e = engineRef.current, box = hostRef.current?.getBoundingClientRect();
       const st = e?.clusterGhostState();
       const pt = st ? e!.clusterGhostScreenPoint() : null;
       setPlace(st && pt && box
-        ? { blocks: st.blocks, valid: st.valid, x: pt.x - box.left, y: pt.y - box.top } : null);
+        ? { blocks: st.blocks, tris: st.tris, valid: st.valid, x: pt.x - box.left, y: pt.y - box.top } : null);
     }, 200);
     return () => clearInterval(h);
   }, []);
@@ -383,7 +384,7 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
           className={`ksp-win absolute z-30 flex -translate-x-1/2 items-center gap-1.5 rounded
                       px-2 py-1 text-[10px] leading-none ${place.valid ? 'text-[#9cffd4]' : 'text-[#ff9c9c]'}`}
           style={{ left: place.x, top: Math.max(8, place.y + 18) }}>
-          <span>◍ {place.blocks} blocks{place.valid ? '' : ' — collides'}</span>
+          <span>◍ {place.tris ? `${place.tris} triangles` : `${place.blocks} blocks`}{place.valid ? '' : ' — collides'}</span>
           <button data-testid="place-cancel" title="cancel this placement"
             onClick={() => onPlaceCancel?.()}
             className="ksp-btn rounded px-1.5 py-[3px] text-[11px] text-ink-dim hover:text-red-300">✕</button>

@@ -409,6 +409,32 @@ on all, flat none, other fields identical, existing kept); `tooldoc.test.ts`
 writer-style pin; `e2e/tools.spec.ts` preview reads "shading smooth:1".
 SUPERSEDED v1.5.12: the DEFAULT is now flat + outward (the game's own
 freshly-authored triangles, fixture 9000006001 — see the v1.5.12 bullet).
+- **v1.6.1 SPHEROID REWORK (user verdict on v1.6.0: "the outside geometry is
+  jagged … there are many indentations, this isn't acceptable. Can you maybe
+  do it with just triangles instead … size needs much larger if we will
+  create zeppelins"):** the per-cell corner-mask matcher is GONE — it placed
+  shapes independently, so wedges landed beside flat caps (the indentations).
+  `spheroid.ts` now builds a COHERENT staircase: the solid voxel set drives
+  every boundary cell's shape from its SIX-face air pattern (two adjacent +
+  convex diagonal ▸ SLOPE on the step edge; equal side-falls ▸ PYRAMID taper;
+  three faces by FILL FRACTION ▸ inverse-corner / pyramid / corner tetra;
+  recessed corners ▸ INVERSE CORNER cove; ≥75 %-full step cells keep the
+  cube — a bump reads smooth, an underfill cut would read as an indentation),
+  orientations via `orient()` on the true gradient through the shared
+  ROTATIONS table (`getTypeRotation` export); still sealed / disjoint /
+  frame-legal / mirror-symmetric. NEW third mode: **SKIN** — a watertight
+  hull-TRIANGLE ellipsoid (`spheroidTriangles`: arc-even rings over the true
+  meridian arc, vertices snapped to the lattice so slots weld, OUTWARD
+  winding, smooth:1 default = the sheet-hull convention), so sizes a block
+  shell could never afford (axes to **24 m** — zeppelins) stay smooth; the
+  ghost, shift, label and Build commit (`shiftTriangles`, data.triangles doc
+  inserts) work for skins too (a skin never "collides"). The dialog's fill
+  toggle became a SKIN/SOLID/SHELL select (default SKIN). Pins: vitest 21
+  (chamfer coherence: every cut faces the gradient; ≥95 % of convex step
+  edges handled; skin: every edge exactly two triangles, lattice-exact,
+  outward, cheap) + e2e 10 (skin build/undo/shift, solid count match, red
+  refusal for blocks only). Fixture 9000007001 regenerated (chamfered sphere
+  + shell + a 4 m skin airship; `app/tools/makespheroid.mjs`).
 - **v1.6.0 SPHEROID TOOL (user feature: "make a tool that can generate a
   spheroid and make it out of blocks. Like a block it should be movable and
   its label should have a cancel and build button, that appears after the

@@ -249,7 +249,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     // even when the VIEW-mode gate holds it down — Cancel/Build restore the
     // gated state (the ⚙ SESSION row itself is untouched, v1.5.1 rule)
     engineRef.current?.setGizmoEnabled(true);
-    engineRef.current?.setClusterGhost(payload.blocks);
+    engineRef.current?.setClusterGhost(payload.blocks ?? null, 0x7dffcf, payload.triangles ?? null);
     setPlaceStage({ toolId: tool.id, form, payload });
   }, []);
   const onPlaceCancel = useCallback(() => {
