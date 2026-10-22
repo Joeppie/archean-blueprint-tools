@@ -619,10 +619,23 @@ verified vs the installed build 136 + the dev viewer panels; implementation
   Concrete, Steel, Aluminium, Glass, Lead, Titanium by `material` 0..6) —
   shape/orientation irrelevant; hull triangles cost
   `max(ceil(area·0.05 m / 0.25³), 1)` blocks; struts `ceil(len·100)`
-  SteelRod; frame beams 1 × SteelBeam each; cables cost their length in cm
+  SteelRod; **frame beams** 1 × SteelBeam each — a `frames[]` RECORD is a 3 m
+  cube carrying up to 12 beams (its `beams` boolean flags), so the bill is
+  one beam per LIT FLAG, not one per record; cables cost their length in cm
   with the game's quirk of **truncating per SEGMENT** (2×1.5 cm = 2 cm);
   components 1 item keyed by the file's `module.Type`; `Build` subgrid items
   deleted; `Dashboard` replaced by 1 × DashboardTool.
+- **Strut endpoints** (`data.struts[] {color, frame_x/y/z, v0_*, v1_*}`):
+  MODERN files store `v0_*`/`v1_*` in METRES relative to the frame corner
+  (`f·3 m − 1.5 m`); LEGACY files stored lattice CELLS and are recognised by
+  the dev viewer's own probe `Number.isInteger(v0_x) && |v0_x| < 32`, which
+  scales by 0.25 (js/blueprint.js; a modern endpoint that happens to be an
+  exact integer below 32 is therefore ambiguous). The corner offset cancels
+  in the endpoint difference, so only the scale matters for length/cost.
+  Verified 2026-10-22 on `testdata/3803780241` (18 struts, 75.39 m of rod,
+  7,548 SteelRod items; mass family `struts` 75.4 kg = 1 kg/m agrees with the
+  file's declared 10,700.19 kg to 0.06 %).
+
 - **Raw-material unfold** (game `RepairEconomy.h`): recursive through crafter
   recipes, first recipe outputting an item wins, fractional batches
   `qty/out_qty`, craft time += `time·batches`. No recipe ⇒ RAW, unless the id

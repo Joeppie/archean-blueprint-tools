@@ -1,6 +1,7 @@
-// economy.test.ts — the VIEW ▸ Component cost math (engine/economy.ts):
-// recipe unfold, the per-component tree, nested subgrid content, and the
-// SHIPPED table (viewer/models/economy.json) against the game's own numbers.
+// economy.test.ts — the VIEW ▸ Build cost math (engine/economy.ts): recipe
+// unfold, the per-component tree, nested subgrid content, the STRUCTURAL items
+// (blocks, hull triangles, cables, frames, struts), and the SHIPPED table
+// (viewer/models/economy.json) against the game's own numbers.
 //
 // The pinned FluidPort numbers are the game's: Casing = 1000 g Iron,
 // Connector = Wire (1 g Copper + Plastic) + Plastic (125 g Carbon +
@@ -10,8 +11,8 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { Blueprint } from '../format';
 import {
-  componentCosts, componentEntries, componentItemId, costNode, expandToRaw,
-  isMassUnit, loadEconomy, materialName,
+  buildCost, componentCosts, componentEntries, componentItemId, costNode, expandToRaw,
+  isMassUnit, loadEconomy, materialName, OCCUPANCY_TYPE, requiredItems, structuralItems,
 } from '../economy';
 
 const ECON = JSON.parse(readFileSync(
@@ -168,5 +169,147 @@ describe('economy — the SHIPPED table', () => {
 
   it('loadEconomy is exported for the widget (fetch-backed, no throw offline)', () => {
     expect(typeof loadEconomy).toBe('function');
+  });
+});
+
+describe('economy — structural build cost (blocks, triangles, cables, frames, struts)', () => {
+  const load = (id: string) => JSON.parse(readFileSync(
+    new URL(`../../../../testdata/${id}/blueprint.json`, import.meta.url), 'utf8')) as Blueprint;
+  const sheet = (data: Record<string, unknown>) => ({
+    box_min: { x: 0, y: 0, z: 0 }, box_max: { x: 1, y: 1, z: 1 },
+    data: { version: 2, blocks: [], components: [], ...data },
+  }) as unknown as Blueprint;
+
+  it('blocks bill their FULL cell rect, type-255 reservations bill nothing', () => {
+    const bp = sheet({
+      blocks: [
+        { type: 3, material: 2, pos_x: 0, pos_y: 0, pos_z: 0, size_x: 1, size_y: 1, size_z: 2 },
+        { type: OCCUPANCY_TYPE, material: 5, pos_x: 0, pos_y: 0, pos_z: 0, size_x: 9, size_y: 9, size_z: 9 },
+      ],
+    });
+    const s = structuralItems(bp);
+    // (1+1)(1+1)(2+1) = 12 steel cells — the occupancy record costs nothing
+    expect(s.blocks['ARCHEAN_build.SteelBlock']).toMatchObject({ qty: 12, cells: 12 });
+    expect(Object.keys(s.blocks)).toHaveLength(1);
+  });
+
+  it('cables bill per SEGMENT truncation (2 × 1.5 cm = 2 cm, not 3)', () => {
+    const bp = sheet({
+      pipes: [{ type: 'data', a_component: 0, a_port: 'a', b_component: 1, b_port: 'b',
+        segments: [{ dir: 0, length: 0.015, start: { x: 0, y: 0, z: 0 } },
+          { dir: 0, length: 0.015, start: { x: 0, y: 0, z: 0 } }] }],
+    });
+    const s = structuralItems(bp);
+    expect(s.cables['ARCHEAN_build.DataCable']).toMatchObject({ qty: 2, runs: 1 });
+    expect(s.cables['ARCHEAN_build.DataCable']!.metres).toBeCloseTo(0.03, 9);
+    expect(requiredItems(ECON as never, bp)['ARCHEAN_build.DataCable']).toBe(2);
+  });
+
+  it('a hull triangle bills ceil(area·0.05 m ÷ cell volume) blocks, min 1', () => {
+    // a unit square split in two: each half = 0.5 m² → 0.5·3.2 = 1.6 → 2 cells
+    const tri = (pts: number[][]) => ({
+      frame_x: 0, frame_y: 0, frame_z: 0, material: 2,
+      v0_x: pts[0]![0], v0_y: pts[0]![1], v0_z: pts[0]![2],
+      v1_x: pts[1]![0], v1_y: pts[1]![1], v1_z: pts[1]![2],
+      v2_x: pts[2]![0], v2_y: pts[2]![1], v2_z: pts[2]![2],
+    });
+    const s = structuralItems(sheet({ triangles: [
+      tri([[0, 0, 0], [4, 0, 0], [0, 4, 0]]),          // 0.5 m²
+      tri([[0, 0, 0], [0, 0, 1], [0, 1, 0]]),          // 0.03125 m² → still 1
+    ] }));
+    const t = s.triangles['ARCHEAN_build.SteelBlock']!;
+    expect(t.qty).toBe(3);                             // ceil(1.6) + ceil(0.1) = 2 + 1
+    expect(t.tris).toBe(2);
+    expect(t.area).toBeCloseTo(0.53125, 9);
+  });
+
+  it('frames bill one beam per LIT beam flag, struts their endpoint distance', () => {
+    const bp = sheet({
+      frames: [
+        { frame_x: 0, frame_y: 0, frame_z: 0, beams: [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+        { frame_x: 1, frame_y: 0, frame_z: 0, beams: [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+        { frame_x: 2, frame_y: 0, frame_z: 0, beams: [] },
+      ],
+      struts: [
+        // modern files: METRES from the frame corner (a FRACTIONAL v0_x is the
+        // dev probe's modern marker — an exact integer < 32 reads as legacy)
+        { v0_x: 0.5, v0_y: 0, v0_z: 0, v1_x: 0.5, v1_y: 0, v1_z: 1 },
+        { v0_x: 0.5, v0_y: 0, v0_z: 0, v1_x: 0.515, v1_y: 0, v1_z: 0 },
+        // legacy files: lattice CELLS — 4 cells = 1 m
+        { v0_x: 0, v0_y: 0, v0_z: 0, v1_x: 4, v1_y: 0, v1_z: 0 },
+      ],
+    });
+    const s = structuralItems(bp);
+    // 2 + 1 lit beams (an empty frame record bills nothing)
+    expect(s.frames['ARCHEAN_build.SteelBeam']!.qty).toBe(3);
+    // 1 m = 100 rods, 1.5 cm rounds UP to 2 rods (struts ceil, cables trunc),
+    // and the legacy cell strut is the same 1 m rod run
+    expect(s.struts['ARCHEAN_build.SteelRod']).toMatchObject({ qty: 202 });
+    expect(s.struts['ARCHEAN_build.SteelRod']!.metres).toBeCloseTo(2.015, 9);
+  });
+
+  it('3732302108 — the deck + hull skin craft matches the game content list', () => {
+    const bp = load('3732302108');
+    const c = buildCost(ECON as never, bp);
+    // blocks 157 Al + 1 Pb, triangles 248 Al + 9 Composite + 5 Glass
+    expect(requiredItems(ECON as never, bp)).toMatchObject({
+      'ARCHEAN_build.AluminiumBlock': 405,
+      'ARCHEAN_build.LeadBlock': 1,
+      'ARCHEAN_build.CompositeBlock': 9,
+      'ARCHEAN_build.GlassBlock': 5,
+      'ARCHEAN_build.DataCable': 7362,
+      'ARCHEAN_build.LowVoltageCable': 5776,
+      'ARCHEAN_build.HighVoltageCable': 1289,
+      'ARCHEAN_build.FluidPipe': 390,
+    });
+    expect(c.blocks).toEqual({ records: 47, cells: 158, materials: 2 });
+    expect(c.triangles.tris).toBe(241);
+    expect(c.triangles.area).toBeCloseTo(34.461, 2);
+    expect(c.cables.runs).toBe(110);
+    expect(c.cables.metres).toBeCloseTo(150.639, 2);
+    // the sections carry the same numbers the rows show (and a recipe chain)
+    const blocks = c.sources.find(s => s.id === 'blocks')!;
+    const aluminium = blocks.rows.find(r => r.item.endsWith('.AluminiumBlock'))!;
+    expect(aluminium).toMatchObject({ qty: 157 });
+    expect(aluminium.measure.cells).toBe(157);
+    // an aluminium cell = one AluminiumBlock = 500 g Aluminium
+    expect(aluminium.node.children.map(k => materialName(k.id))).toEqual(['Aluminium']);
+    const cables = c.sources.find(s => s.id === 'cables')!;
+    const data = cables.rows.find(r => r.item.endsWith('.DataCable'))!;
+    expect(data.qty).toBe(7362);                        // item units = cm of cable
+    expect(data.measure.metres).toBeCloseTo(74.849, 2); // … while the run is 74.8 m
+    expect(data.measure.runs).toBeGreaterThan(0);
+    // the craft total is parts + structure: Iron includes the block cells
+    expect(c.total.raw['ARCHEAN_celestial.Iron']).toBeGreaterThan(400_000);
+  });
+
+  it('dolphin — 2058 composite cells, and 1 cm cable stubs charge no unit', () => {
+    const bp = load('3417786605');
+    const c = buildCost(ECON as never, bp);
+    expect(c.blocks).toEqual({ records: 443, cells: 2060, materials: 2 });
+    const comp = c.sources.find(s => s.id === 'blocks')!.rows
+      .find(r => r.item.endsWith('.CompositeBlock'))!;
+    expect(comp.qty).toBe(2058);
+    // 73 runs / 5.58 m whose segments are 1 cm float32 stubs → trunc to 0
+    expect(c.cables).toMatchObject({ runs: 73 });
+    expect(c.cables.metres).toBeCloseTo(5.58, 2);
+    expect(c.sources.find(s => s.id === 'cables')!.rows).toEqual([]);
+    // dashboards are billed as their authoring tool, once (8 boards on board)
+    const rows = c.rows.map(r => r.type);
+    expect(rows).toContain('DashboardTool');
+    expect(rows).not.toContain('Dashboard');
+    expect(c.rows.find(r => r.type === 'DashboardTool')!.count).toBe(1);
+  });
+
+  it('frames and struts use the game’s own beam / rod rule on real crafts', () => {
+    // 47 frame records carrying 493 lit beams (tools/game_data.py agrees)
+    const framed = buildCost(ECON as never, load('3284539247'));
+    expect(framed.structural.frames['ARCHEAN_build.SteelBeam']).toBe(493);
+    // 18 struts, 75.39 m of rod — 7,548 rods at 1 cm each
+    const strutted = buildCost(ECON as never, load('3803780241'));
+    expect(strutted.structural.struts['ARCHEAN_build.SteelRod']).toBe(7548);
+    const row = strutted.sources.find(s => s.id === 'struts')!.rows[0]!;
+    expect(row.measure.metres).toBeCloseTo(75.393, 2);
+    expect(row.node.children.map(k => materialName(k.id))).toEqual(['Iron']);
   });
 });

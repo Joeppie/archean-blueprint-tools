@@ -170,8 +170,24 @@ def load_game_data():
 
 # ---------- blueprint side ----------
 
+def _tri_pts(tri):
+    """The triangle's three lattice points (ints).
+
+    The FILE stores them FLAT as v0_x/v0_y/v0_z … v2_z (FORMAT §Triangles);
+    older tooling assumed a nested 'v' array, which no corpus file carries —
+    keeping that assumption made every craft with a hull skin crash here.
+    """
+    if 'v' in tri:
+        return tri['v']
+    return [[tri[f'v{i}_{ax}'] for ax in 'xyz'] for i in range(3)]
+
+
 def _tri_area_m2(v):
-    """Hull-triangle area in m² from lattice ints (world pitch = CELL)."""
+    """Hull-triangle area in m² from lattice ints (world pitch = CELL).
+
+    The frame offsets (12·f·CELL − 1.5) cancel in the edge differences, so
+    the pitch alone maps lattice ints to metres.
+    """
     ax = (v[1][0] - v[0][0]) * CELL; ay = (v[1][1] - v[0][1]) * CELL
     az = (v[1][2] - v[0][2]) * CELL
     bx = (v[2][0] - v[0][0]) * CELL; by = (v[2][1] - v[0][1]) * CELL
@@ -180,6 +196,26 @@ def _tri_area_m2(v):
     cy = az * bx - ax * bz
     cz = ax * by - ay * bx
     return 0.5 * math.sqrt(cx * cx + cy * cy + cz * cz)
+
+
+def _strut_length(s):
+    """Strut length in m. MODERN files store the endpoints in METRES relative
+    to the frame corner; LEGACY ones in lattice CELLS and are recognised by an
+    integer v0_x < 32 (the dev viewer's own compatibility probe,
+    js/blueprint.js — transcribed in FORMAT §Struts). The frame offset cancels
+    in the difference, so only the scale matters here."""
+    v0x = s.get('v0_x')
+    legacy = (isinstance(v0x, (int, float)) and float(v0x).is_integer()
+              and abs(v0x) < 32)
+    k = CELL if legacy else 1.0
+    return math.sqrt(sum(((s[f'v1_{ax}'] - s[f'v0_{ax}']) * k) ** 2 for ax in 'xyz'))
+
+
+def _frame_beams(bp):
+    """SteelBeam count: a frame record is a 3 m cube carrying up to 12 beams
+    (the `beams` flags) — ONE beam item per lit flag, not per frame record."""
+    return sum(sum(1 for b in (f.get('beams') or []) if b)
+               for f in (bp['data'].get('frames') or []))
 
 
 def required_items(bp):
@@ -201,7 +237,7 @@ def required_items(bp):
             items[iid] = items.get(iid, 0) + count
 
     d = bp['data']
-    add(f'{BUILD}.SteelBeam', len(d.get('frames') or []))
+    add(f'{BUILD}.SteelBeam', _frame_beams(bp))
     for b in d.get('blocks') or []:
         if b['type'] == OCCUPANCY_TYPE:
             continue
@@ -210,14 +246,12 @@ def required_items(bp):
         add(f'{BUILD}.{BLOCK_ITEMS[mat] if 0 <= mat < len(BLOCK_ITEMS) else BLOCK_ITEMS[0]}',
             count)
     for tri in d.get('triangles') or []:
-        cells = _tri_area_m2(tri['v']) * TRIANGLE_THICKNESS / CELL_VOLUME
+        cells = _tri_area_m2(_tri_pts(tri)) * TRIANGLE_THICKNESS / CELL_VOLUME
         mat = tri.get('material', 0)
         add(f'{BUILD}.{BLOCK_ITEMS[mat] if 0 <= mat < len(BLOCK_ITEMS) else BLOCK_ITEMS[0]}',
             max(math.ceil(cells), 1))
     for s in d.get('struts') or []:
-        a, b = s['a'], s['b']
-        length = math.sqrt(sum((b[k] - a[k]) ** 2 for k in 'xyz'))
-        add(f'{BUILD}.SteelRod', math.ceil(length * 100))
+        add(f'{BUILD}.SteelRod', math.ceil(_strut_length(s) * 100))
     for p in d.get('pipes') or []:
         item = PIPE_ITEMS.get(p.get('type'))
         if not item:
@@ -320,12 +354,11 @@ def compute_mass(bp):
         fam['blocks'] += vol * (DENSITY[mat] if 0 <= mat < len(DENSITY) else 1.0)
     for tri in d.get('triangles') or []:
         mat = tri.get('material', 0)
-        fam['triangles'] += (_tri_area_m2(tri['v']) * TRIANGLE_THICKNESS /
+        fam['triangles'] += (_tri_area_m2(_tri_pts(tri)) * TRIANGLE_THICKNESS /
                              CELL_VOLUME) * (DENSITY[mat] if 0 <= mat < len(DENSITY) else 1.0)
     for s in d.get('struts') or []:
-        a, b = s['a'], s['b']
-        fam['struts'] += STRUT_KG_PER_M * math.sqrt(sum((b[k] - a[k]) ** 2 for k in 'xyz'))
-    fam['frames'] = BEAM_MASS * len(d.get('frames') or [])
+        fam['struts'] += STRUT_KG_PER_M * _strut_length(s)
+    fam['frames'] = BEAM_MASS * _frame_beams(bp)
     for c in d.get('components') or []:
         iid = f"{c['module']}.{c['type']}"
         m = masses.get(iid)

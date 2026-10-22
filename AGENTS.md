@@ -51,7 +51,7 @@ tools/add_workshop.py <id>      ingest a locally-subscribed workshop craft
 tools/extract_models.py         regenerates viewer/models/ from an installed game
 tools/extract_economy.py        regenerates viewer/models/economy.json — the
                                 crafter recipes + catalog ids behind the app's
-                                VIEW ▸ Component cost (same game tables as
+                                VIEW ▸ Build cost (same game tables as
                                 game_data.py); --check fails when stale
 tools/make_solo_test.py         SOLO component fixtures (1 type/craft, ids
                                 90000030NN) for the vertex-space pair ritual
@@ -658,35 +658,57 @@ freshly-authored triangles, fixture 9000006001 — see the v1.5.12 bullet).
   `help.spec.ts` (@ui, desktop+pixel7: menu→dialog, h1, sphere LIMITS table
   as a real <table>, search by title/tag/body word, Esc/✕/backdrop close,
   dialog never outgrows the viewport).
-- **v1.6.2 VIEW ▸ COMPONENT COST (user 2026-10-22: "In the view tab,
+- **v1.6.2 VIEW ▸ BUILD COST (user 2026-10-22: "In the view tab,
   summarize the total cost of all components expressed in raw materials, do a
   complete breakdown per component; e.g. what does the fluidport cost? and
-  what do its constituents cost?"):** the VIEW side panel (VesselStats) gains
-  a collapsible **Component cost** row beside the ⚖ Lift row
-  (`components/CostWidget.tsx`): the craft-wide RAW-MATERIAL SHOPPING LIST
-  (every part unfolded, sorted by quantity) on top, then one row per
-  component TYPE (`×count`, raw summary) that OPENS its recipe chain — each
+  what do its constituents cost?" — then "it doesnt calculate the cost of
+  cables. Figure out how the game calculates that and how much length the
+  current cables actually take" and "also calculate triangles and blocks …
+  similar breakdown as for components, where it does specify what is
+  required"):** the VIEW side panel (VesselStats) gains a collapsible **Build
+  cost** row beside the ⚖ Lift row (`components/CostWidget.tsx`): the
+  craft-wide RAW-MATERIAL SHOPPING LIST of the WHOLE BUILD on top, then one
+  row per component TYPE (`×count`, raw summary), then per species —
+  BLOCKS (per block material + cell count), HULL TRIANGLES (per material +
+  tris/m²), CABLES (per class + the physical RUN LENGTH and the spool items
+  it costs), FRAMES and STRUTS. Every row OPENS its recipe chain: each
   constituent carries its own raw cost and expands further, so
   "FluidPort = 1 Casing + 1 Connector" and "Casing = 1 000 g Iron" are one
-  click apart. The math is `engine/economy.ts`, a port of game_data.py's
-  unfold (first CRAFTER recipe per item wins; an item with no recipe is
-  terminal — raw ore/molecule, or `no recipe` when it is a catalog part);
-  units are the game's (ores/molecules GRAMS, parts counts), and SUBGRID
-  CONTENT IS COUNTED (a nested part is material you still craft — marked
-  `subgrid`; the Build ghost never is; game_data.required_items now recurses
-  the same way). DATA: `viewer/models/economy.json` (23 kB), generated from
-  the installed game by the new `tools/extract_economy.py` (same
-  `modules/*/config.yaml` tables as game_data.py — re-run after a game
-  update; `--check` fails when stale) and fetched through
-  `models.atlasJsonPaths()` so it follows the SAME layout-exact base
-  candidates as the model atlas; a missing table hides the body, never
-  breaks the panel. Pins: vitest `economy.test.ts` (batch arithmetic, cycle
-  guard, raw-vs-`stuck`, nested Builds counted + Builds dropped, the SHIPPED
-  table's FluidPort constants and the dolphin's ×4 incl. its nested one) +
-  e2e `cost.spec.ts` (@ui desktop: total list, FluidPort row ×4 + `subgrid`,
-  4 kg Iron summary, expansion → Casing/Connector → Wire/Plastic, collapse;
-  phone: reachable in VIEW and never wider than the viewport). Help:
-  `topics/cost.md`.
+  click apart — the structural rows use the same tree.
+  The math is `engine/economy.ts`, a faithful port of the game's
+  `GetBlueprintContents` (`tools/game_data.py required_items` — the two are
+  cross-pinned): blocks bill their FULL rect `(sx+1)(sy+1)(sz+1)` cells of
+  the material's block item (type-255 reservations free), triangles
+  `max(ceil(area·0.05 m ÷ 0.25³), 1)` block items, cables `trunc(len·100)`
+  PER SEGMENT of the class's spool item (1 unit = 1 cm; the 10 000-unit
+  batch = the 100 m spool), frames ONE SteelBeam per LIT `beams` flag of a
+  frame record, struts `ceil(len·100)` SteelRod, parts 1 each with SUBGRID
+  CONTENT COUNTED (`subgrid` mark) and Build ghosts dropped; a Dashboard is
+  billed as its authoring tool (DashboardTool ×1, `via tool`). Unfold is
+  game_data's (first CRAFTER recipe per item wins; no recipe = terminal raw,
+  or `no recipe` for a catalog part); units are the game's (ores/molecules
+  GRAMS shown g/kg/t, parts counts) plus the metres of cable/strut run.
+  FORMAT findings this batch fixed in BOTH the TS and the python:
+  `data.struts[]` stores `v0_*/v1_*` in METRES from the frame corner
+  (legacy files: lattice cells, the dev probe `Number.isInteger(v0_x) &&
+  |v0_x| < 32` → ×0.25) — the old `a`/`b` assumption crashed on every strut
+  craft; frame records bill per lit beam, not per record; and triangles have
+  always been FLAT `v0_x…v2_z` (the old nested `v` read crashed on every
+  hull-skin craft). DATA: `viewer/models/economy.json` (23 kB), generated by
+  `tools/extract_economy.py` (same `modules/*/config.yaml` tables as
+  game_data.py — re-run after a game update; `--check` fails when stale) and
+  fetched through `models.atlasJsonPaths()` so it follows the SAME
+  layout-exact bases as the model atlas; a missing table hides the body,
+  never breaks the panel. Pins: vitest `economy.test.ts` (batch arithmetic,
+  cycle guard, raw-vs-`stuck`, nested Builds, the SHIPPED table's FluidPort
+  constants, per-segment cable truncation, the triangle ceil/min-1 rule,
+  block rect vs type-255, beam flags + modern/legacy struts, and the corpus
+  numbers 3732302108 / 3417786605 / 3284539247 / 3803780241 against the
+  python reference) + e2e `cost.spec.ts` (@ui desktop: total list, FluidPort
+  row ×4 + `subgrid`, 4 kg Iron summary, expansion → Casing/Connector →
+  Wire/Plastic; blocks/triangles/cables sections with their cell / m² / run
+  length measures and a cable's Wire+Connector chain; phone: reachable in
+  VIEW and never wider than the viewport). Help: `topics/cost.md`.
 - **v1.5.18 SMOOTH TOOLS + THE LIFT & ALTITUDE WIDGET (user 2026-10-22:
   "shouldn't block slider if resizing it, delay it's calculation or do it
   background"; "tell us what lift would be if vacuum at sea level, helium or

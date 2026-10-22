@@ -30,9 +30,10 @@ switch (in Edit and Wire-free modes), then context:
   material chips, paint slot), the Blocks | Triangles sub-tabs and the
   selected-item editor (shape turns, cx/cy/cz, material, face paint).
 * **VesselStats** (View mode) — mass & CoM, census, heaviest classes, the
-  collapsible ⚖ Lift row and the **Component cost** row (every part unfolded
-  through the game's crafter recipes to raw ores/molecules — the craft-wide
-  shopping list on top, each part's own recipe chain one click down).
+  collapsible ⚖ Lift row and the **Build cost** row (every part, block, hull
+  triangle, cable, frame beam and strut unfolded through the game's crafter
+  recipes to raw ores/molecules — the craft-wide shopping list on top, then a
+  section per species, each line's own recipe chain one click down).
 
 ## Viewport furniture
 

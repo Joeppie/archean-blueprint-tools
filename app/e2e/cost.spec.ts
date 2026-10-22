@@ -1,7 +1,9 @@
-// cost.spec.ts — VIEW ▸ Component cost (user 2026-10-22: "In the view tab,
+// cost.spec.ts — VIEW ▸ Build cost (user 2026-10-22: "In the view tab,
 // summarize the total cost of all components expressed in raw materials, do a
 // complete breakdown per component; e.g. what does the fluidport cost? and
-// what do its constituents cost?").
+// what do its constituents cost?" — then cables, blocks and hull triangles:
+// "similar breakdown as for components, where it does specify what is
+// required").
 //
 // Pinned through the REAL UI on the dolphin (3417786605 — 4 FluidPorts, one of
 // them inside a Build subgrid, so the nested-content rule is exercised):
@@ -12,6 +14,8 @@
 import { expect, test, type Page } from '@playwright/test';
 
 const DOLPHIN = '3417786605';
+/** decks + a hull skin + 110 cable runs — the structural sections' fixture */
+const STRUCTURE = '3732302108';
 
 async function openView(page: Page) {
   await page.goto(`/?craft=${DOLPHIN}`);
@@ -22,7 +26,7 @@ async function openView(page: Page) {
 
 const desktopOnly = () => test.skip(test.info().project.name !== 'chromium', 'desktop-only');
 
-test.describe('VIEW ▸ component cost @ui', () => {
+test.describe('VIEW ▸ build cost @ui', () => {
   test('raw-material total + per-component breakdown with constituents', async ({ page }) => {
     desktopOnly();
     await openView(page);
@@ -30,7 +34,7 @@ test.describe('VIEW ▸ component cost @ui', () => {
     const widget = page.getByTestId('cost-widget');
     await expect(widget).toBeVisible();
     await expect(page.getByTestId('cost-head')).toContainText('parts');
-    await expect(page.getByTestId('cost-head')).toContainText('raw materials');
+    await expect(page.getByTestId('cost-head')).toContainText('cells');
 
     // the craft-wide shopping list carries the dolphin's biggest ore
     const iron = page.getByTestId('cost-total-Iron');
@@ -65,6 +69,49 @@ test.describe('VIEW ▸ component cost @ui', () => {
     // collapsing hides the chain again (no stale tree)
     await page.getByTestId('cost-open-FluidPort').click();
     await expect(detail).toHaveCount(0);
+  });
+
+  test('blocks, hull triangles and cables: their own quantity + breakdown', async ({ page }) => {
+    desktopOnly();
+    await page.goto(`/?craft=${STRUCTURE}`);
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
+    await expect(page.getByTestId('mode-view')).toHaveClass(/\bon\b/);
+    await expect(page.getByTestId('cost-widget')).toBeVisible();
+
+    // BLOCKS — 157 aluminium cells on the deck, and the section says so
+    await expect(page.getByTestId('cost-source-note-blocks')).toContainText('cells');
+    const alu = page.getByTestId('cost-source-row-blocks-AluminiumBlock');
+    await expect(alu).toBeVisible();
+    await expect(alu).toContainText('×157');
+    await expect(page.getByTestId('cost-source-measure-blocks-AluminiumBlock'))
+      .toContainText('157 cells');
+    // a block row opens into ITS constituents (a cell = 1 AluminiumBlock = 500 g Al)
+    await page.getByTestId('cost-source-open-blocks-AluminiumBlock').click();
+    const detail = page.getByTestId('cost-source-detail-blocks-AluminiumBlock');
+    await expect(detail).toBeVisible();
+    await expect(detail).toContainText('Aluminium');
+
+    // HULL TRIANGLES — 241 tris over 34.5 m², billed in block items
+    await expect(page.getByTestId('cost-source-note-triangles')).toContainText('241 tris');
+    await expect(page.getByTestId('cost-source-note-triangles')).toContainText('m²');
+    const triAlu = page.getByTestId('cost-source-row-triangles-AluminiumBlock');
+    await expect(triAlu).toContainText('×248');
+    await expect(page.getByTestId('cost-source-measure-triangles-AluminiumBlock'))
+      .toContainText('m²');
+
+    // CABLES — the LENGTH the craft actually needs, plus the spool items
+    await expect(page.getByTestId('cost-source-note-cables')).toContainText('110 runs');
+    await expect(page.getByTestId('cost-source-note-cables')).toContainText('150.6 m');
+    const data = page.getByTestId('cost-source-row-cables-DataCable');
+    await expect(data).toContainText('×7,362');
+    await expect(page.getByTestId('cost-source-measure-cables-DataCable'))
+      .toContainText('74.8 m');
+    // … and a cable's own constituents: Wire + Connector per spool batch
+    await page.getByTestId('cost-source-open-cables-DataCable').click();
+    const cabDetail = page.getByTestId('cost-source-detail-cables-DataCable');
+    await expect(cabDetail).toBeVisible();
+    await expect(page.getByTestId('cost-node-Wire')).toBeVisible();
+    await expect(page.getByTestId('cost-node-Connector')).toBeVisible();
   });
 
   test('a recipe-less part is flagged, not silently free', async ({ page }) => {
