@@ -49,6 +49,11 @@ async function setRange(page: Page, key: string, v: number) {
   }, v);
 }
 
+/** type a size into the number box beside the slider (past-slider reach) */
+async function setNum(page: Page, key: string, v: number) {
+  await page.locator(`[data-testid="tool-num-${key}"]`).fill(String(v));
+}
+
 /** open Tools ▸ Sphere skin, OK ▸ Confirm — the dialog closes and the
  *  ghost label appears (the dialog→ghost→label ORDER is the user's spec) */
 async function stage(page: Page, over: { rx?: number; ry?: number; rz?: number } = {}) {
@@ -85,6 +90,31 @@ test.describe('sphere skin tool: dialog → movable ghost → cancel/build @ui',
     expect(big).toBeGreaterThan(small * 8);                  // area grows r²
     // and the sag stays round at zeppelin size (the pin the old suites lacked)
     await expect(page.locator('[data-testid="tool-preview"]')).toContainText(/dev −0\.0\d\/\+0\.\d\d m/);
+    await page.getByTestId('tool-cancel').click();
+  });
+
+  test('the number box reaches past the slider, and needles refuse honestly', async ({ page }) => {
+    await openNew(page);
+    await page.getByTestId('tools-menu').click();
+    await page.getByTestId('tool-sphere-skin').click();
+    // a 20 m radius is over the slider-free planning range — the box takes it
+    await setNum(page, 'rx', 20);
+    await setNum(page, 'ry', 20);
+    await setNum(page, 'rz', 20);
+    const big = +(await page.locator('[data-testid="tool-preview"]').textContent())!
+      .match(/(\d+) triangles/)![1]!;
+    expect(big).toBeGreaterThan(5000);                       // zeppelin-plus
+    await page.getByTestId('tool-cancel').click();
+    // an extreme needle exceeds the game's 31-cell window with no lattice
+    // cut possible → the preview refuses and OK stays DISABLED (never a
+    // silently-holed skin)
+    await page.getByTestId('tools-menu').click();
+    await page.getByTestId('tool-sphere-skin').click();
+    await setNum(page, 'rx', 0.5);
+    await setNum(page, 'ry', 1);
+    await setNum(page, 'rz', 12);
+    await expect(page.locator('[data-testid="tool-preview"]')).toContainText(/nothing to place/);
+    await expect(page.getByTestId('tool-ok')).toBeDisabled();
     await page.getByTestId('tool-cancel').click();
   });
 

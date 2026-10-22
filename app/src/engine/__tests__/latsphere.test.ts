@@ -20,7 +20,7 @@ import { CELL } from '../format';
  *  the exact quantitative statement of a dent in direction n̂. */
 function radialDeviation(spec: SphereSpec) {
   const plan = spherePlan(spec);
-  const cx = spec.cx ?? 6, cy = spec.cy ?? 6, cz = spec.cz ?? 6;
+  const [cx, cy, cz] = plan.center;
   const rx = spec.rx / CELL, ry = spec.ry / CELL, rz = spec.rz / CELL;
   const faces = plan.faces.map(([i, j, k]) => {
     const a = plan.shell[i]!, b = plan.shell[j]!, c = plan.shell[k]!;
@@ -128,8 +128,9 @@ describe('latsphere — convexity + watertightness (structure for free)', () => 
       }
     });
     test(`${name}: mirror-symmetric vertex set (the shell test is even in q)`, () => {
-      const { shell, faces } = spherePlan(spec);
-      const cx = 6;
+      const plan = spherePlan(spec);
+      const { shell, faces } = plan;
+      const cx = plan.center[0];
       const on = new Set(faces.flat());
       const key = (p: number[]) => `${p[0]},${p[1]},${p[2]}`;
       const shellSet = new Set(shell.map(p => key(p)));
@@ -205,14 +206,16 @@ describe('latsphere — the shipped records', () => {
   });
   test('off-origin centres work (multi-frame craft)', () => {
     const spec: SphereSpec = { rx: 4, ry: 4, rz: 4, cx: 30, cy: 20, cz: 14 };
-    const { shell, faces } = spherePlan(spec);
+    const plan = spherePlan(spec);
+    const { shell, faces } = plan;
+    const [cx, cy, cz] = plan.center;
     expect(faces.length).toBeGreaterThan(20);
     for (const [i, j, k] of faces)
       for (const v of [i, j, k]) {
         const p = shell[v]!;
-        const d = Math.hypot(p[0] - 30, p[1] - 20, p[2] - 14);
+        const d = Math.hypot(p[0] - cx, p[1] - cy, p[2] - cz);
         expect(d).toBeGreaterThanOrEqual(16);                 // never inside
-        expect(d).toBeLessThanOrEqual(16 + 1.5 + 1e-9);       // ≤ τ out
+        expect(d).toBeLessThanOrEqual(16 + 0.75 + 1e-9);      // ≤ τ out
       }
   });
   test('mass model: steel skin ≈ area × 0.05 m × density', () => {
@@ -229,6 +232,94 @@ describe('latsphere — the shipped records', () => {
       const r = 2 / CELL;
       expect(d - r).toBeLessThanOrEqual(0.75 + 1e-9);
       expect(d - r).toBeGreaterThanOrEqual(-1e-6);           // NEVER inside
+    }
+  });
+});
+
+describe('latsphere — the game’s triangle limits, always', () => {
+  test('every stored record obeys the 5-bit window law (floor(min/12), v ∈ 0..31)', () => {
+    for (const spec of [{ rx: 1, ry: 1, rz: 1 }, { rx: 8, ry: 2, rz: 3 },
+      { rx: 24, ry: 24, rz: 24 }, { rx: 4, ry: 4, rz: 4, cx: 30, cy: -6, cz: 80 }]) {
+      const tris = sphereSkinTris(spec, { slot: 40, material: 2 });
+      expect(tris.length).toBeGreaterThan(8);
+      for (const t of tris) {
+        const g = decodeSkinTri(t);
+        for (const [ax, name] of [[0, 'x'], [1, 'y'], [2, 'z']] as const) {
+          const min = Math.min(g[0]![ax], g[1]![ax], g[2]![ax]);
+          expect(t[`frame_${name}`]).toBe(Math.floor(min / 12));
+          for (let i = 0; i < 3; i++) {
+            const v = t[`v${i}_${name}`] as number;
+            expect(v).toBeGreaterThanOrEqual(0);
+            expect(v).toBeLessThanOrEqual(31);               // the 5-bit limit
+          }
+        }
+      }
+    }
+  });
+
+  test('no plan ever emits a face spanning > 31 cells when it claims success', () => {
+    for (const spec of [{ rx: 48, ry: 48, rz: 48 }, { rx: 30, ry: 8, rz: 8 },
+      { rx: 0.5, ry: 0.75, rz: 12 }, { rx: 12, ry: 0.5, rz: 12 }, { rx: 16, ry: 16, rz: 2 }]) {
+      const plan = spherePlan(spec);
+      if (plan.skipped) continue;                            // refusals are loud
+      for (const [i, j, k] of plan.faces) {
+        for (const ax of [0, 1, 2] as const) {
+          const s = Math.max(plan.shell[i]![ax], plan.shell[j]![ax], plan.shell[k]![ax])
+            - Math.min(plan.shell[i]![ax], plan.shell[j]![ax], plan.shell[k]![ax]);
+          expect(s).toBeLessThanOrEqual(31);
+        }
+      }
+      // a claim of success must mean ZERO encode losses
+      const out = sphereSkinTris(spec, { slot: 51 });
+      expect(out.length).toBe(plan.faces.length);
+      // …and the frame law must hold on the FIRST record too (the old
+      // `tris.length - 11` bug hid here: only the last record was checked)
+      for (const t of out) {
+        const g = decodeSkinTri(t);
+        for (const [ax, name] of [[0, 'x'], [1, 'y'], [2, 'z']] as const) {
+          const min = Math.min(g[0]![ax], g[1]![ax], g[2]![ax]);
+          expect(t[`frame_${name}`]).toBe(Math.floor(min / 12));
+          for (let i = 0; i < 3; i++) {
+            const v = t[`v${i}_${name}`] as number;
+            expect(v).toBeGreaterThanOrEqual(0);
+            expect(v).toBeLessThanOrEqual(31);
+          }
+        }
+      }
+    }
+  }, 120_000);
+
+  test('the centre ladder keeps zero window violations across the slider range', () => {
+    // the sweep that found 18/1000 violations pre-ladder: every in-range
+    // blend of radii must now plan clean (skipped === 0) or be a >12:1
+    // needle the dialog refuses (skipped > 0 with no possible lattice cut)
+    const sizes = [0.5, 1, 2, 4, 8, 12];
+    let refused = 0, total = 0;
+    for (const rx of sizes) for (const ry of sizes) for (const rz of sizes) {
+      const st = spherePlan({ rx, ry, rz });
+      total++;
+      const ratio = Math.max(rx, ry, rz) / Math.min(rx, ry, rz);
+      if (st.skipped) { refused++; expect(ratio).toBeGreaterThanOrEqual(12); }
+    }
+    expect(total).toBe(216);
+  }, 300_000);
+
+  test('placement records land exactly on the FORMAT world lattice', () => {
+    // world = (v + 12·frame)·0.25 − 1.5 (FORMAT §Triangles) — the very
+    // formula the game's own authored skins satisfy
+    const tris = sphereSkinTris({ rx: 1.5, ry: 2, rz: 1 }, { slot: 51 });
+    for (const t of tris) {
+      for (let i = 0; i < 3; i++) for (const name of ['x', 'y', 'z']) {
+        const world = (t[`v${i}_${name}`] as number) * 0.25 + 12 * ((t[`frame_${name}`] as number) ?? 0) * 0.25 - 1.5;
+        expect(Math.abs(world / CELL - Math.round(world / CELL))).toBeLessThan(1e-9);
+      }
+    }
+    // and a whole-cell drag shifts every world position by exactly step·CELL
+    const moved = shiftSkinTris(tris, [3, -2, 5]);
+    for (let n = 0; n < tris.length; n++) {
+      const a = decodeSkinTri(tris[n]!), b = decodeSkinTri(moved[n]!);
+      for (const i of [0, 1, 2] as const) for (const ax of [0, 1, 2] as const)
+        expect(b[i]![ax] - a[i]![ax]).toBe([3, -2, 5][ax]);
     }
   });
 });

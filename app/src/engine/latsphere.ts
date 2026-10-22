@@ -73,6 +73,8 @@ export interface SpherePlan {
   faces: [number, number, number][];
   /** faces dropped for spanning > 31 cells (the 5-bit window) */
   skipped: number;
+  /** the centre the plan was built at (the ladder may offset the spec's) */
+  center: [number, number, number];
   stats: SphereStats;
 }
 
@@ -89,6 +91,10 @@ export interface SphereStats {
   /** surface area of the hull, m² (mass model input) */
   areaM2: number;
   skipped: number;
+  /** window-illegal faces repaired by micro-splits (0 = strict convex hull) */
+  split: number;
+  /** deepest micro-crease the splits consumed, METRES (≤ 0.125 = SPLIT_D) */
+  creaseM: number;
 }
 
 const TAU_DEFAULT = 0.75;   // measured: sag stays EXACTLY 0 down to 0.75 cells,
@@ -167,16 +173,22 @@ interface QHFace {
  *  points (orient = 0) never join an outside set — Qhull's rule that keeps
  *  non-extreme points out of the vertex set. */
 export function quickhullFaces(shell: GP3[]): [number, number, number][] | null {
-  const P = vecsOf(shell);
-  const n = shell.length;
+  return quickhullSubset(shell.map((_, i) => i), vecsOf(shell));
+}
+
+/** Quickhull over a SUBSET of shell point indices (the repair passes add
+ *  support points one at a time and re-hull only the vertex candidate set). */
+export function quickhullSubset(idx0: number[], P: Vecs): [number, number, number][] | null {
+  const idx = [...new Set(idx0)];
+  const n = idx.length;
   if (n < 4) return null;
   const orient = (f: QHFace, p: number) => orient3d(f.a, f.b, f.c, p, P);
 
   // initial tetra: the axis extremes, extended until affinely independent
   const ex = (ax: 0 | 1 | 2, min: boolean): number => {
-    let best = 0, bv = min ? Infinity : -Infinity;
-    for (let i = 0; i < n; i++) {
-      const v = P.x[i]!, w = ax === 0 ? v : ax === 1 ? P.y[i]! : P.z[i]!;
+    let best = idx[0]!, bv = min ? Infinity : -Infinity;
+    for (const i of idx) {
+      const w = ax === 0 ? P.x[i]! : ax === 1 ? P.y[i]! : P.z[i]!;
       if (min ? w < bv : w > bv) { bv = w; best = i; }
     }
     return best;
@@ -218,7 +230,7 @@ export function quickhullFaces(shell: GP3[]): [number, number, number][] | null 
   }
   // initial outside sets — CONFLICT lists: a point stays with EVERY face
   // plane it sees (assigning it to only one loses it at redistribution)
-  for (let p = 0; p < n; p++) {
+  for (const p of idx) {
     if (p === A || p === B || p === C || p === D) continue;
     for (const f of seed) if (orient(f, p) > 0) f.outside.push(p);
   }
@@ -262,7 +274,12 @@ export function quickhullFaces(shell: GP3[]): [number, number, number][] | null 
     // horizon + harvest of every outside set being deleted
     const hor: [number, number][] = [];
     const pool: number[] = [];
-    for (const g of visible) { g.alive = false; pool.push(...g.outside); }
+    for (const g of visible) {
+      g.alive = false;
+      // NO spread here: on a 96 m zeppelin the seed faces' conflict sets
+      // hold ~10⁵ points and push(...arr) overflows the argument stack
+      for (const w of g.outside) pool.push(w);
+    }
     const halfEdges = (g: QHFace): [number, number][] => [[g.a, g.b], [g.b, g.c], [g.c, g.a]];
     for (const g of visible)
       for (const [u, v] of halfEdges(g)) {
@@ -316,26 +333,140 @@ export function quickhullFaces(shell: GP3[]): [number, number, number][] | null 
   return vol2 > 0 ? out : out.map(f => [f[0], f[2], f[1]] as [number, number, number]);
 }
 
+// --------------------------------------- face-window repair (game limit #1)
+/** Faces the aligned 32-slot window still cannot store after the centre
+ *  ladder are SPLIT locally — the way the game's own hulls skin a curved
+ *  flank (the airliner skin is a fine staircase, not a strict convex hull):
+ *  a shell point inside the face and at most SPLIT_D CELLS BELOW its plane
+ *  becomes a forced vertex (three child faces). Quickhull can never pick
+ *  such a point (invisible under the strict rule), so the split is applied
+ *  directly on the face list — no re-hull. The micro-crease is ≤ 0.125 m,
+ *  HALF the lattice's own 0.25 m granularity and far below visibility;
+ *  in exchange every stored triangle becomes legal. A face with NO point
+ *  inside even at that depth stays skipped — truly unstoreable. */
+const SPLIT_D = 0.5;   // cells below the face plane a split vertex may sit at
+
+function repairSplit(shell: GP3[], faces: [number, number, number][]):
+  { faces: [number, number, number][]; split: number; crease: number } {
+  const winBad = ([i, j, k]: [number, number, number]): boolean => {
+    const A = shell[i]!, B = shell[j]!, C = shell[k]!;
+    for (const ax of [0, 1, 2] as const) {
+      const min = Math.min(A[ax], B[ax], C[ax]);
+      const max = Math.max(A[ax], B[ax], C[ax]);
+      if (max - 12 * Math.floor(min / 12) > 31) return true;
+    }
+    return false;
+  };
+  let crease = 0;
+  let split = 0;
+  const out: [number, number, number][] = [];
+  // iterative (children may themselves violate) with a work stack
+  const stack = [...faces];
+  while (stack.length) {
+    const f = stack.pop()!;
+    if (!winBad(f)) { out.push(f); continue; }
+    if (split > 4096) { out.push(f); continue; }   // hard guard
+    const [i, j, k] = f;
+    const A = shell[i]!, B = shell[j]!, C = shell[k]!;
+    const nx = (B[1] - A[1]) * (C[2] - A[2]) - (B[2] - A[2]) * (C[1] - A[1]);
+    const ny = (B[2] - A[2]) * (C[0] - A[0]) - (B[0] - A[0]) * (C[2] - A[2]);
+    const nz = (B[0] - A[0]) * (C[1] - A[1]) - (B[1] - A[1]) * (C[0] - A[0]);
+    const h = nx * A[0] + ny * A[1] + nz * A[2];
+    const nl = Math.hypot(nx, ny, nz);
+    if (!(nl > 0)) { out.push(f); continue; }
+    const u = Math.abs(nx) <= Math.abs(ny) && Math.abs(nx) <= Math.abs(nz) ? 0
+      : Math.abs(ny) <= Math.abs(nz) ? 1 : 2;
+    const a = (u + 1) % 3, b = (u + 2) % 3;
+    const side = (px: number, py: number, qx: number, qy: number, rx: number, ry: number) =>
+      Math.sign((qx - px) * (ry - py) - (qy - py) * (rx - px));
+    let bestP = -1, bestScore = Infinity;
+    for (let p = 0; p < shell.length; p++) {
+      if (p === i || p === j || p === k) continue;
+      const q = shell[p]!;
+      // depth below the plane in CELLS (hull faces are supporting ▸ d ≤ 0)
+      const d = (nx * q[0] + ny * q[1] + nz * q[2] - h) / nl;
+      if (d > 1e-9 || d < -SPLIT_D) continue;
+      const s1 = side(A[a]!, A[b]!, B[a]!, B[b]!, q[a]!, q[b]!);
+      const s2 = side(B[a]!, B[b]!, C[a]!, C[b]!, q[a]!, q[b]!);
+      const s3 = side(C[a]!, C[b]!, A[a]!, A[b]!, q[a]!, q[b]!);
+      // STRICTLY interior: a boundary-collinear point yields a zero-area
+      // child that re-splits forever (the runaway the first cut showed)
+      if (!((s1 > 0 && s2 > 0 && s3 > 0) || (s1 < 0 && s2 < 0 && s3 < 0))) continue;
+      // prefer a point that breaks the worst aligned axis AND sits shallow
+      let span = 0;
+      for (const ax of [0, 1, 2] as const)
+        span = Math.max(span, Math.abs(q[ax] - A[ax]), Math.abs(q[ax] - B[ax]), Math.abs(q[ax] - C[ax]));
+      const score = span + Math.abs(d) * 24;      // shallow, central split
+      if (score < bestScore) { bestScore = score; bestP = p; }
+    }
+    if (bestP < 0) { out.push(f); continue; }     // empty patch ▸ unstoreable
+    split++;
+    // the crease depth actually consumed (for the stats + the pins)
+    const q = shell[bestP]!;
+    crease = Math.max(crease, Math.abs((nx * q[0] + ny * q[1] + nz * q[2] - h) / nl));
+    stack.push([i, j, bestP], [j, k, bestP], [k, i, bestP]);
+  }
+  return { faces: out, split, crease };
+}
+
 // ------------------------------------------------------------------ planner
-/** Build the whole plan: shell ▸ certified hull ▸ metrics. Pure +
- *  deterministic; the editor ghosts and commits plan.faces. */
+/** plan() over a small CENTRE LADDER for game limit #1 (the 5-bit / 31-cell
+ *  triangle window): an integer centre makes huge spheres hold EXACTLY
+ *  coplanar flat lattice patches, and the strict hull triangulates such a
+ *  patch as ONE big face (coplanar points are never vertices — Qhull's own
+ *  degeneracy). A half/quarter-cell centre offset keeps the shape exactly
+ *  mirror-symmetric (the centre maps to itself under every axis-plane
+ *  mirror) yet breaks the exact coplanarity, so the patch cuts into small
+ *  windowable faces naturally. The first zero-violation centre wins; a
+ *  residual means the surface patch is EMPTY of lattice (true needle
+ *  flanks) — NO convex lattice-exact ≤31-cell skin exists for the game to
+ *  store there, and the dialog refuses to place it (skipped > 0). */
+const PLAN_CACHE = new Map<string, SpherePlan>();
 export function spherePlan(spec: SphereSpec): SpherePlan {
+  const key = JSON.stringify([spec.rx, spec.ry, spec.rz, spec.cx ?? 6, spec.cy ?? 6, spec.cz ?? 6, spec.tau ?? null]);
+  const hit = PLAN_CACHE.get(key);
+  if (hit) return hit;
+  let best: SpherePlan | null = null;
+  // τ ladder: a thicker shell band = shorter facets on low-curvature flanks
+  // (a 60 m zeppelin nose facets SPANS that no aligned window holds from a
+  // thin band). The trade is the outward bulge ≤ τ·CELL, which the preview
+  // line prints (dev +…) before Build — the hull stays dent-free either way.
+  for (const tau of spec.tau != null ? [spec.tau] : [0.75, 1.5, 3]) {
+    for (const o of [0, 0.5, 0.25, 0.75, 0.375]) {
+      const p = planAt({ ...spec, tau, cx: (spec.cx ?? 6) + o, cy: (spec.cy ?? 6) + o, cz: (spec.cz ?? 6) + o });
+      if (!best || p.skipped < best.skipped) best = p;
+      if (best.skipped === 0) break;
+    }
+    if (best?.skipped === 0) break;
+  }
+  if (PLAN_CACHE.size > 24) PLAN_CACHE.clear();
+  PLAN_CACHE.set(key, best!);
+  return best!;
+}
+
+function planAt(spec: SphereSpec): SpherePlan {
   const cx = spec.cx ?? 6, cy = spec.cy ?? 6, cz = spec.cz ?? 6;
   const shell = sphereShell(spec);
-  const faces0 = quickhullFaces(shell);
+  const strict = quickhullFaces(shell) ?? [];
+  // window-illegal faces are repaired by micro-splits (see repairSplit)
+  const rep = repairSplit(shell, strict);
+  const faces0 = rep.faces;
   const keptFaces: [number, number, number][] = [];
   let skipped = 0;
   for (const f of faces0 ?? []) {
-    const A = shell[f[0]!]!, B = shell[f[1]!]!, C = shell[f[2]!]!;
-    const fits = Math.max(A[0], B[0], C[0]) - Math.min(A[0], B[0], C[0]) <= 31
-      && Math.max(A[1], B[1], C[1]) - Math.min(A[1], B[1], C[1]) <= 31
-      && Math.max(A[2], B[2], C[2]) - Math.min(A[2], B[2], C[2]) <= 31;
-    if (fits) keptFaces.push(f); else skipped++;
+    // The game's exact limit (Triangle.inc.glsl): with f = floor(min/12)
+    // every vertex must satisfy v = g − 12f ∈ 0..31 — the 32-slot window is
+    // FRAME-ALIGNED, so it is stricter than span ≤ 31 (a 29-cell span across
+    // a misaligned frame border stores NOTHING; encodeSkinTri is the law).
+    if (encodeSkinTri([shell[f[0]!]!, shell[f[1]!]!, shell[f[2]!]!], { slot: 0 })) keptFaces.push(f);
+    else skipped++;
   }
   const verts = [...new Set(keptFaces.flat())].sort((x, y) => x - y);
   const stats = metrics(shell, keptFaces, spec, cx, cy, cz);
   stats.skipped = skipped;
-  return { shell, verts, faces: keptFaces, skipped, stats };
+  stats.split = rep.split;
+  stats.creaseM = rep.crease * CELL;
+  return { shell, verts, faces: keptFaces, skipped, center: [cx, cy, cz], stats };
 }
 
 // ------------------------------------------------------------------ metrics
@@ -382,6 +513,8 @@ function metrics(shell: GP3[], faces: [number, number, number][], spec: SphereSp
     idealM3: (4 / 3) * Math.PI * spec.rx * spec.ry * spec.rz,
     areaM2: area,
     skipped: 0,
+    split: 0,
+    creaseM: 0,
   };
 }
 

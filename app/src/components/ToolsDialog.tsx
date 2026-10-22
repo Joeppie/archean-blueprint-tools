@@ -257,13 +257,15 @@ export const TOOLS: ToolDef[] = [
       + 'lattice points forming the CONVEX HULL around the ideal ellipsoid, '
       + 'so the hull is round with NO indentations by construction (a convex '
       + 'polyhedron has no concavity to see). Stretch x/y/z into any '
-      + 'ellipsoid up to 24 m across. OK previews it as a ghost you can '
-      + 'MOVE — Build writes it into the craft.',
+      + 'ellipsoid — slider to 96 m across, the number boxes beyond. OK '
+      + 'previews it as a ghost you can MOVE — Build writes it into the craft.',
     fields: [
-      { key: 'rx', label: 'radius x (m)', kind: 'range', min: 0.5, max: 12, step: 0.25, unit: ' m',
-        hint: 'stretch the axes freely — equal = a sphere, different = an ellipsoid' },
-      { key: 'ry', label: 'radius y (m)', kind: 'range', min: 0.5, max: 12, step: 0.25, unit: ' m' },
-      { key: 'rz', label: 'radius z (m)', kind: 'range', min: 0.5, max: 12, step: 0.25, unit: ' m' },
+      { key: 'rx', label: 'radius x (m)', kind: 'range', min: 0.5, max: 48, step: 0.25, unit: ' m',
+        hint: 'stretch the axes freely — equal = a sphere, different = an ellipsoid. '
+          + 'The slider tops out at 48 m (96 m across); the number box takes any '
+          + 'size beyond it — the game stores triangle frames unbounded.' },
+      { key: 'ry', label: 'radius y (m)', kind: 'range', min: 0.5, max: 48, step: 0.25, unit: ' m' },
+      { key: 'rz', label: 'radius z (m)', kind: 'range', min: 0.5, max: 48, step: 0.25, unit: ' m' },
       { key: 'shade', label: 'shading', kind: 'select',
         options: [
           { id: 'flat', label: 'flat (the game’s authored default)' },
@@ -291,6 +293,11 @@ export const TOOLS: ToolDef[] = [
     preview: (f) => {
       const spec = sphereForm(f);
       const st = sphereStats(spec);
+      if (st.skipped > 0)
+        return `nothing to place — ${st.skipped} faces exceed the game’s `
+          + `31-cell triangle window (the lattice offers no points to cut them). `
+          + `A long axis over ~12× the short one cannot be skinned convexly — `
+          + `balance the axes.`;
       if (!st.tris) return 'nothing to place — the shape is too small for a hull';
       const mat = MATERIALS[+String(f['material']).slice(1)] ?? '?';
       // THE line that used to be missing on the Spheroid attempts: the
@@ -523,18 +530,29 @@ function FieldRow(p: {
     );
   if (d.kind === 'range') {
     const v = typeof p.value === 'number' ? p.value : +(p.value ?? d.min ?? 0);
+    // slider for the feel, NUMBER BOX for the reach: the slider tops out at
+    // its max, the box types any size past it (zeppelins — user: "Slider +
+    // size input boxes will do"). NaN keeps the last value (empty box while
+    // typing must not plan a 0-radius shape).
     return (
       <>
         <span className="pt-1 text-[11px] text-ink-dim">{d.label}</span>
         <div data-testid={`tool-field-${d.key}`}>
           <div className="flex items-center gap-2">
             <input data-testid={`tool-range-${d.key}`} type="range"
-              min={d.min} max={d.max} step={d.step} value={v}
+              min={d.min} max={d.max} step={d.step} value={Math.min(v, d.max ?? v)}
               onChange={e => p.onSet(d.key, +e.target.value)}
               className="h-1 flex-1 accent-[#ffc94d]" />
-            <span data-testid={`tool-range-val-${d.key}`}
-              className="w-14 text-right text-[11px] tabular-nums text-gold">
-              {v}{d.unit ?? ''}
+            <input data-testid={`tool-num-${d.key}`} type="number"
+              min={d.min} step={d.step} value={v}
+              onChange={e => {
+                const n = +e.target.value;
+                if (Number.isFinite(n) && n > 0) p.onSet(d.key, n);
+              }}
+              className="w-20 rounded border border-white/10 bg-panel2 px-1.5 py-[3px]
+                         text-right text-[11px] tabular-nums text-gold" />
+            <span data-testid={`tool-range-val-${d.key}`} className="text-[10px] text-ink-dim">
+              {(d.unit ?? '').trim()}
             </span>
           </div>
           {d.hint && <div className="pt-1 text-[9px] text-ink-dim">{d.hint}</div>}

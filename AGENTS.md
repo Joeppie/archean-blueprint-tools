@@ -446,6 +446,36 @@ freshly-authored triangles, fixture 9000006001 — see the v1.5.12 bullet).
   (one Undo step). Pins: vitest `latsphere.test.ts` + `e2e/sphereskin.spec.ts`
   (@ui: dialog→ghost→label order, shown widget, live sliders, flat/smooth,
   new-slot paint, loads-INCREASE repaint, Ctrl+Z one step, Cancel/Esc).
+  **Size reach + the game's REAL triangle law (same session):** the sliders
+  go to 48 m and every `range` field carries a NUMBER BOX past the slider
+  (user: "people will want larger shapes for larger blimps … Slider+size
+  input boxes will do"; `tool-num-<key>`, frames are unbounded integers —
+  verified the corpus stores negative ones). The real storage law is
+  STRICTER than span ≤ 31: the game's 32-slot vertex window is
+  FRAME-ALIGNED (v = g − 12·floor(min/12) ∈ 0..31 — a 29-cell span across a
+  misaligned frame border stores NOTHING; `encodeSkinTri` IS the law and
+  the audit proved plan ≡ encodable). Two lattice-legal repairs, both pinned:
+  ① a CENTRE LADDER (0/+0.5/+0.25/… cells — still exactly mirror-symmetric)
+  breaks the exact coplanarity of flat lattice patches that the strict hull
+  otherwise triangulates as ONE oversized face (Qhull's coplanar degeneracy:
+  coplanar points are NEVER vertices, so adding coplanar support and
+  re-hulling is a NO-OP — measured, don't retry it); ② a τ LADDER (0.75→1.5→3
+  cells) shortens the long facets of low-curvature flanks (a 30×8×8 m
+  ZEPPELIN NOSE needs τ=3: bulge +0.75 m, printed in the preview; sag stays
+  0). A residual `skipped > 0` = a surface patch EMPTY of lattice (long
+  axes ≥ 12× the short one) — NO convex lattice-exact skin is storable there
+  (the game skins those with non-convex staircases, a different feature) —
+  and the dialog REFUSES (preview starts 'nothing to place', OK disabled)
+  rather than build a silently-holed skin; a micro-SPLIT escape hatch
+  (split a bad face at a shell point ≤ 0.5 cells under its plane) exists in
+  `repairSplit` for dense-patch alignments (strict-interior points only —
+  boundary-collinear points re-split forever, measured). Verified by the
+  'the game's triangle limits' vitest group: 216-blend slider sweep (only
+  ratio ≥ 12 refuses), the frame law on decoded records, plan≡encode
+  equality, and FORMAT-lattice placement — corpus-record agreement: our
+  decode matches FORMAT §Triangles `world = (v + 12·f)·0.25 − 1.5` on 60
+  authored records of 3732302108, and `shiftSkinTris` lands whole-cell
+  world offsets exactly.
   EYEBALL: `node app/tools/sphereshot.mjs <rx> <ry> <rz> <out> [port]`
   builds in the LIVE editor through the real UI and measures the RENDERED
   SILHOUETTE from screenshot pixels (largest blob, scanline-filled area ÷
