@@ -495,6 +495,13 @@ freshly-authored triangles, fixture 9000006001 — see the v1.5.12 bullet).
   stall; while pending the footer keeps the last line + 'planning…' and OK
   is DISABLED (`runnable = !planning && …`). The confirm box shows the
   RESOLVED line (e2e reads previews by POLLING now, never a single shot).
+  `place.stageAsync` puts the CONFIRM staging on the SAME worker (job kind
+  'tris', button reads '… placing') — a zeppelin skin planning seconds on
+  the UI thread was the literal "Nothing happens when I press review and
+  confirm" freeze. `latsphere-async` DEGRADES, NEVER DEADLOCKS: Worker
+  construction try/catch'd (a throw previously left OK disabled forever),
+  a 6 s watchdog answers silent requests synchronously (2 misses retire
+  the worker), onerror releases every open request.
   (2) `engine/atmo.ts` — the U.S. Standard Atmosphere 1976 layer table
   (barometric formula per layer, real lapse rates; clamps to 84 852 m) +
   ideal-gas buoyancy: lift(V,h) = V·(ρ_air − ρ_gas) for vacuum/helium/
