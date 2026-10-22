@@ -409,94 +409,24 @@ on all, flat none, other fields identical, existing kept); `tooldoc.test.ts`
 writer-style pin; `e2e/tools.spec.ts` preview reads "shading smooth:1".
 SUPERSEDED v1.5.12: the DEFAULT is now flat + outward (the game's own
 freshly-authored triangles, fixture 9000006001 — see the v1.5.12 bullet).
-- **v1.6.2 SPHEROID ADDITIVE REWRITE (user verdict on v1.6.1: "all spheres
-  have edges with indentations where I can see a triangle is missing …
-  indentations create aerodynamic problems and actively damage volume — not
-  acceptable. Also the triangle mesh/skin looks bad and it's unnecessarily
-  complex"):** CUTTING into solid cells is BANNED geometry — v1.6.1's
-  wedges/tetras/coves replaced solid blocks, and any cut not ending flush
-  (tetra keeping 1/6 of a cell, a wedge run meeting a plateau, a cove carved
-  into a wall) IS a dent. `spheroid.ts` is now purely ADDITIVE: S = pure
-  cube staircase (merged boxes, never cut); bevels are placed into AIR cells
-  only, which can only ever BUMP the surface, never lower it: an air cell
-  with 2 adjacent solid neighbours → SLOPE ramp floor→wall (the full-face
-  pair {bottom,side} fixes the orientation uniquely — SLOPE_BY_PAIR built
-  from blockshapes isFullFace/getBlockFaceDirections), tapering to a PYRAMID
-  where the ramp RUN ends (its big slant is coplanar with the ramp, flush
-  join); an air cell with 3 mutually adjacent solid neighbours → INVERSE
-  CORNER filler (three full faces seat on floor + 2 walls). The corner tetra
-  family is deliberately UNUSED — no full face ⇒ can never seat flush.
-  THE PIN that makes dents impossible: `solid r=…m` asserts every non-cube
-  block occupies an AIR cell AND all its full-face directions touch solid
-  neighbours (flush seats ⇒ no crack/cavity under any bevel). Skin: the SAME
-  dent class came from snapping vertices to the NEAREST lattice point (some
-  land INSIDE the body → facets cut in) — snap is now outward-biased (pin:
-  no vertex has u<1); and the facet budget follows the craft size
-  (chord = max(1.5, rMean/3) — the in-game hull look is BIG calm panels, the
-  ISW airliner is 241 tris for 30 m; the v1.6.1 dense snap-noise is gone).
-  Still watertight (edge = exactly 2 tris), outward, smooth:1, 24 m axes.
-  Fixture 9000007001 regenerated; vitest 17 spheroid + 279 total, e2e 10/10.
-- **v1.6.1 SPHEROID REWORK (user verdict on v1.6.0: "the outside geometry is
-  jagged … there are many indentations, this isn't acceptable. Can you maybe
-  do it with just triangles instead … size needs much larger if we will
-  create zeppelins"):** the per-cell corner-mask matcher is GONE — it placed
-  shapes independently, so wedges landed beside flat caps (the indentations).
-  `spheroid.ts` now builds a COHERENT staircase: the solid voxel set drives
-  every boundary cell's shape from its SIX-face air pattern (two adjacent +
-  convex diagonal ▸ SLOPE on the step edge; equal side-falls ▸ PYRAMID taper;
-  three faces by FILL FRACTION ▸ inverse-corner / pyramid / corner tetra;
-  recessed corners ▸ INVERSE CORNER cove; ≥75 %-full step cells keep the
-  cube — a bump reads smooth, an underfill cut would read as an indentation),
-  orientations via `orient()` on the true gradient through the shared
-  ROTATIONS table (`getTypeRotation` export); still sealed / disjoint /
-  frame-legal / mirror-symmetric. NEW third mode: **SKIN** — a watertight
-  hull-TRIANGLE ellipsoid (`spheroidTriangles`: arc-even rings over the true
-  meridian arc, vertices snapped to the lattice so slots weld, OUTWARD
-  winding, smooth:1 default = the sheet-hull convention), so sizes a block
-  shell could never afford (axes to **24 m** — zeppelins) stay smooth; the
-  ghost, shift, label and Build commit (`shiftTriangles`, data.triangles doc
-  inserts) work for skins too (a skin never "collides"). The dialog's fill
-  toggle became a SKIN/SOLID/SHELL select (default SKIN). Pins: vitest 21
-  (chamfer coherence: every cut faces the gradient; ≥95 % of convex step
-  edges handled; skin: every edge exactly two triangles, lattice-exact,
-  outward, cheap) + e2e 10 (skin build/undo/shift, solid count match, red
-  refusal for blocks only). Fixture 9000007001 regenerated (chamfered sphere
-  + shell + a 4 m skin airship; `app/tools/makespheroid.mjs`).
-- **v1.6.0 SPHEROID TOOL (user feature: "make a tool that can generate a
-  spheroid and make it out of blocks. Like a block it should be movable and
-  its label should have a cancel and build button, that appears after the
-  tool window where you ok off on material, color, solid, size (…dynamic so
-  you can stretch it)"):** the GENERATOR is `engine/spheroid.ts` (pure): each
-  unit cell is classified by the 8-bit inside-corner mask of the implicit
-  ellipsoid; an EXACT shape-corner match wins first (inv-corner/slope/corner/
-  pyramid ARE the corner-plane cuts), else volume error vs the corner-count
-  estimate ▸ mask IoU ▸ slant-normal-vs-gradient alignment ▸ lowest type —
-  the gradient tiebreak is what makes the pole bands tilt with the surface
-  and keeps the whole plan mirror-symmetric about every axis plane. SOLID =
-  cells whose CENTRE is inside become full cubes (100 % filled, no internal
-  skin of gaps) GREEDY-MERGED x→y→z into the fewest boxes, split at the
-  12-cell frame borders; SHELL = the boundary shapes only. `blocks.ts
-  shiftBlocks` re-lands a generated cluster after a placement drag (boxes
-  that cross a frame border re-split). The TOOL is the first PLACEMENT tool:
-  `ToolDef.place{stage,commit}` + new dialog field kinds (`range` sliders —
-  live-retuning the plan, `toggle`, `color` swatch+hex resolving to a NEW
-  palette slot or the ≈nearest existing one at commit); Confirm stages a
-  `PlacePayload` instead of mutating. The Engine ghosts it as a CLUSTER
-  (`setClusterGhost`, own group at moff+cell-offset) on the SAME widget the
-  block uses (world translate, CELL snap ALWAYS — it raises the widget even
-  in VIEW mode, restoring the gate at Cancel/Build), red while the footprint
-  collides; `clusterGhostState/Shift/ScreenPoint` + hook `placeGhost/
-  placeShift`. The Viewport's `place-label` (✕ Cancel = also Esc, ✔ Build
-  disabled while colliding) commits through `shiftBlocks` + the standard
-  doc-insert idiom (one Undo step). Fixture `testdata/9000007001`
-  (`app/tools/makespheroid.mjs` regenerates from the shipped generator);
-  corpus gate green (115 → 116 files, byte-round-trip included). Pins:
-  vitest `spheroid.test.ts` (sealed/disjoint/bounded, circle-vertex band,
-  volume ±20 %, fewest-cube merge ratio, x-mirror symmetry, the shape-law
-  cases) + e2e `spheroid.spec.ts` (live sliders, dialog→ghost→label ORDER,
-  shown-widget pin, build counts + loads + new slot + Ctrl+Z, Cancel/Esc,
-  red-collision refusal). NOTE the debug TITLE only re-arms on a bp-object
-  swap — a same-bp `reload()` repaint is pinned through `stats().blocks`.
+- **FAILED ATTEMPT — DO NOT RESURRECT blind: the Spheroid generator
+  (2026-10-21/22).** Three iterations (block-matching → staircase chamfers →
+  additive bevels + a watertight triangle SKIN) were all reverted from main:
+  **every version showed visible indentations in the hull** — the user's
+  final verdict: "All spheres have indents… Triangles instead of blocks",
+  then "scrap the entire approach". Root cause (documented in full on branch
+  **`failed/spheroid-hull-dents-lattice-quantization`**, `SPHEROID-FAILURE.md`
+  there): quantizing a curved hull onto the 0.25 m integer lattice with
+  per-position heuristics (corner masks, cuts, nearest/outward vertex snaps)
+  always leaves uneven facets = dents; a proper error-diffusing lattice
+  quantization algorithm (Bresenham-style, lattice convex-hull wrap,
+  sub-lattice marching cubes) was never implemented, and the green test
+  suites pinned topology (sealed/watertight/symmetric) — NEVER "no visible
+  indentations", which is the actual spec ("indentations damage volume and
+  aerodynamics"). If rebuilt: study existing algorithms first, pin hull
+  deviation against the ideal surface BEFORE building UI, and judge in the
+  real editor / in-game pixels, not our viewer. The reverted code + its
+  working placement-ghost plumbing live on that branch.
 - **v1.5.16 REVERT of the v1.5.13–15 hull-prism experiments (user ruling
   2026-10-21: "lots of geometry problems now with blocks sticking through,
   indicating it got way worse … undo publication of this version and

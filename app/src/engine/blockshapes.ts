@@ -157,13 +157,6 @@ const SHAPE_EDGES: Record<ShapeId, readonly (readonly [number, number])[]> = {
   [SHAPE.INVCORNER]: [[0, 1], [1, 2], [0, 2], [3, 4], [4, 5], [5, 6], [6, 3], [0, 3], [1, 4], [2, 5]],
 };
 
-/** The type's orientation as the game's 3×3 rotation matrix (column-major,
- *  signed permutation). Exported for pure-geometry tools (spheroid.ts) that
- *  must rotate vectors through the SAME map getBlockPoints applies. */
-export function getTypeRotation(type: number): readonly number[] {
-  return ROTATIONS[TYPE_ROTATION[type] ?? 0]!;
-}
-
 export function getShapeFromType(type: number): ShapeId {
   if (type === 0) return SHAPE.CUBE;
   if (type < CORNER_INDEX) return SHAPE.SLOPE;

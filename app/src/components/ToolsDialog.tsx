@@ -14,31 +14,23 @@
 // Confirm runs and the dialog closes (2026-10-20: no inert second-OK no-op). The
 // tool list itself is a registry — adding a tool means adding one ToolDef.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Blueprint, Block, Triangle } from '../engine/format';
+import type { Blueprint } from '../engine/format';
 import type { EditCtx } from '../engine/edit';
-import { writeBlockDoc, writeBlockMaterial, setPaletteSlot } from '../engine/edit';
+import { writeBlockDoc, writeBlockMaterial } from '../engine/edit';
 import { docArrayInsert, docArrayRemoveAt, docEnsureArray, docFromValue } from '../engine/doc';
 import { OCCUPANCY_TYPE } from '../engine/blockshapes';
-import { shiftBlocks } from '../engine/blocks';
 import {
   MATERIALS, blockMaterial, hullifyApply, hullifyPreview, replaceCensus, replaceColorDests,
-  replaceSources, replaceAll, parseHexColor, paletteSlotNode, allocateSlot, nearestSlot,
+  replaceSources, replaceAll,
 } from '../engine/tools';
-import { spheroidBlocks, spheroidStats, spheroidTriangles, encodeTriSkin,
-  type SpheroidSpec } from '../engine/spheroid';
 
 export type ToolValue = string | number;
 export type ToolForm = Record<string, ToolValue>;
 
-/** A PLACEMENT tool's payload: block records and/or hull triangles at the
- *  stage-time position — the viewport ghosts them, the user moves the
- *  cluster, and Build commits with the final cell offset. Generic. */
-export interface PlacePayload { blocks?: Block[]; triangles?: Triangle[] }
-
 export interface ToolFieldDef {
   key: string;
   label: string;
-  kind: 'select' | 'note' | 'range' | 'toggle' | 'color';
+  kind: 'select' | 'note';
   /** static options (select) */
   options?: { id: string; label: string }[];
   /** dependent options, e.g. the colour sources follow the chosen target */
@@ -46,10 +38,6 @@ export interface ToolFieldDef {
   /** hide the field for some form states */
   showIf?: (f: ToolForm) => boolean;
   hint?: string;
-  /** range bounds (metres or counts — whatever the tool measures in) */
-  min?: number; max?: number; step?: number;
-  /** range: suffix for the live readout, e.g. ' m' */
-  unit?: string;
 }
 
 export interface ToolDef {
@@ -66,14 +54,6 @@ export interface ToolDef {
   preview: (f: ToolForm, bp: Blueprint) => string;
   /** mutate bp AND the doc; returns the line the dialog shows after running */
   run: (f: ToolForm, ctx: EditCtx) => string;
-  /** PLACEMENT tool (v1.6): Confirm does NOT mutate — `stage` builds the
-   *  ghost payload, the viewport shows the movable cluster with the
-   *  ✕ Cancel / ✔ Build label, and Build calls `commit` with the final
-   *  whole-cell offset the user moved it to. (`run` stays unused.) */
-  place?: {
-    stage: (f: ToolForm, bp: Blueprint) => PlacePayload;
-    commit: (f: ToolForm, payload: PlacePayload, offset: [number, number, number], ctx: EditCtx) => string;
-  };
 }
 
 // ------------------------------------------------------------------- TOOLS
@@ -243,151 +223,7 @@ export const TOOLS: ToolDef[] = [
       return `converted ${res.blocksRemoved} blocks into ${res.trisAdded} hull triangles`;
     },
   },
-  {
-    // v1.6 PLACEMENT tool: the dialog OK's the SHAPE (stretchable size,
-    // material, paint, solid/shell); the spheroid then appears as a movable
-    // ghost with its own ✕ Cancel / ✔ Build label (user: "make a tool that
-    // can generate a spheroid and make it out of blocks. Like a block it
-    // should be movable and its label should have cancel and build buttons,
-    // that appears after the tool window where you ok off on material,
-    // color, solid, size (…dynamic so you can stretch it)").
-    id: 'spheroid',
-    label: 'Spheroid…',
-    icon: '◍',
-    blurb: 'Generate a SPHEROID out of blocks — as round as the shape table '
-      + 'gets: corner, slope and inverse-corner blocks round the surface, a '
-      + 'SOLID interior is 100 % filled with the fewest square blocks (merged '
-      + 'into big boxes). Stretch x/y/z into any ellipsoid; a SHELL keeps '
-      + 'only the skin. OK previews it as a ghost you can MOVE — Build '
-      + 'writes it into the craft.',
-    fields: [
-      { key: 'rx', label: 'width x (m)', kind: 'range', min: 0.25, max: 24, step: 0.25, unit: ' m',
-        hint: 'stretch the axes freely — equal = a sphere, different = an ellipsoid; '
-          + 'up to 24 m (zeppelin) in SKIN mode' },
-      { key: 'ry', label: 'height y (m)', kind: 'range', min: 0.25, max: 24, step: 0.25, unit: ' m' },
-      { key: 'rz', label: 'length z (m)', kind: 'range', min: 0.25, max: 24, step: 0.25, unit: ' m' },
-      { key: 'fill', label: 'shape', kind: 'select',
-        options: [
-          { id: 'skin', label: 'Skin — hull triangles (smooth, huge)' },
-          { id: 'solid', label: 'Solid blocks (100 % filled)' },
-          { id: 'shell', label: 'Shell — blocks, hollow' },
-        ],
-        hint: 'the staircase of blocks is chamfered with wedges, tapers and '
-          + 'inverse corners; the SKIN is one watertight smooth triangle hull '
-          + '(cheap enough for airship sizes blocks could never afford)' },
-      { key: 'shade', label: 'shading', kind: 'select',
-        showIf: f => f['fill'] === 'skin',
-        options: [
-          { id: 'smooth', label: 'smooth (smooth:1, welds normals)' },
-          { id: 'flat', label: 'flat (faceted)' },
-        ],
-        hint: 'smooth:1 is the game’s sheet-hull convention — the in-game '
-          + 'welding is what makes a big skin read ROUNDED' },
-      { key: 'material', label: 'material', kind: 'select',
-        options: MATERIALS.map((label, m) => ({ id: `m${m}`, label })) },
-      { key: 'color', label: 'paint', kind: 'color',
-        hint: 'the RGB is painted on every face of every block/triangle' },
-      { key: 'colorhow', label: 'paint slot', kind: 'select',
-        options: [
-          { id: 'new', label: '+ new palette slot' },
-          { id: 'nearest', label: '≈ nearest existing slot' },
-        ] },
-      { key: 'note', label: '', kind: 'note',
-        hint: 'OK starts a PLACEMENT: the shape appears as a translucent '
-          + 'ghost you can drag with the widget (cell-snapped, red = it '
-          + 'collides); its label has ✕ Cancel and ✔ Build. Edit ▸ Undo '
-          + '(Ctrl+Z) takes a built spheroid back as one step.',
-      },
-    ],
-    initial: { rx: 1, ry: 1, rz: 1, fill: 'skin', shade: 'smooth', material: 'm0', color: '#c9c9c9', colorhow: 'new' },
-    preview: (f) => {
-      const spec = spheroidForm(f, 51);
-      const st = spheroidStats(spec, { shade: f['shade'] === 'flat' ? 'flat' : 'smooth' });
-      const mat = MATERIALS[+String(f['material']).slice(1)] ?? '?';
-      if (f['fill'] === 'skin')
-        return `${st.tris} triangles · skin ${f['shade'] === 'flat' ? 'flat' : 'smooth'} · `
-          + `material ${mat} · ≈ ${st.kgSkin.toFixed(0)} kg`;
-      const heavy = st.blocks > 3000 ? ' · HEAVY — skin recommended' : '';
-      return `${st.blocks} blocks (${st.shellCells} chamfered) · `
-        + `${f['fill'] === 'solid' ? 'SOLID' : 'SHELL'} · material ${mat}`
-        + ` · ≈ ${st.kgBlocks.toFixed(0)} kg${heavy}`;
-    },
-    run: () => 'use placement',            // place tools never run()
-    place: {
-      stage: (f) => {
-        const spec = spheroidForm(f, 51);
-        return f['fill'] === 'skin'
-          ? { triangles: spheroidTriangles(spec, { shade: f['shade'] === 'flat' ? 'flat' : 'smooth' }) }
-          : { blocks: spheroidBlocks(spec) };
-      },
-      commit: (f, _payload, offset, ctx) => {
-        // the PAINT resolves at Build (it can GROW the palette — an edit,
-        // not a preview): a new free slot or the nearest existing colour
-        const rgb = parseHexColor(String(f['color']));
-        let slot = 51;
-        if (rgb) {
-          if (f['colorhow'] === 'nearest') slot = nearestSlot(ctx.bp.data.colors, rgb) ?? 51;
-          else {
-            const free = allocateSlot(ctx.bp.data.colors);
-            if (free === null) slot = nearestSlot(ctx.bp.data.colors, rgb) ?? 51;
-            else { setPaletteSlot(ctx, free, paletteSlotNode(rgb)); slot = free; }
-          }
-        }
-        const spec = spheroidForm(f, slot);
-        if (f['fill'] === 'skin') {
-          const tris = shiftTriangles(
-            spheroidTriangles(spec, { shade: f['shade'] === 'flat' ? 'flat' : 'smooth' }), offset);
-          for (const t of tris) {
-            ctx.bp.data.triangles ??= [];
-            ctx.bp.data.triangles.push(t);
-            docArrayInsert(ctx.doc, ['data', 'triangles'], ctx.bp.data.triangles.length - 1, docFromValue(t, false));
-          }
-          return `built a ${f['rx']}×${f['ry']}×${f['rz']} m spheroid SKIN: ${tris.length} `
-            + `hull triangles, ${f['shade'] === 'flat' ? 'flat' : 'smooth'} (paint slot ${slot})`;
-        }
-        const blocks = shiftBlocks(spheroidBlocks(spec), offset);
-        for (const b of blocks) {
-          ctx.bp.data.blocks.push(b);
-          docArrayInsert(ctx.doc, ['data', 'blocks'], ctx.bp.data.blocks.length - 1, docFromValue(b));
-        }
-        return `built a ${f['rx']}×${f['ry']}×${f['rz']} m spheroid: ${blocks.length} blocks (paint slot ${slot})`;
-      },
-    },
-  },
 ];
-
-/** Whole-cell shift of generated triangles (placement drag): every vertex is
- *  stored back through the frame + 0..31 window at cell + step. */
-type TriVerts = [[number, number, number], [number, number, number], [number, number, number]];
-function shiftTriangles(tris: Triangle[], step: [number, number, number]): Triangle[] {
-  const out: Triangle[] = [];
-  for (const t of tris) {
-    const g: number[][] = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
-    for (let i = 0; i < 3; i++)
-      for (let ax = 0; ax < 3; ax++) {
-        const name = 'xyz'[ax]!;
-        g[i]![ax] = (t[`v${i}_${name}`] as number) + 12 * (t[`frame_${name}`] as number) + step[ax]!;
-      }
-    const shifted = encodeTriSkin(g as unknown as TriVerts,
-      Number(t.colors?.[0] ?? 51), Number(t.material ?? 0), t.smooth === 1);
-    if (shifted) out.push(shifted);
-  }
-  return out;
-}
-
-/** The dialog form → a generation spec. The centre sits ABOVE the world
- *  origin so the spheroid lands clear of a fresh craft's deck plate; the
- *  placement offset moves it from there. SLOT is a preview stand-in — the
- *  final paint resolves in commit (it can grow the palette). */
-function spheroidForm(f: ToolForm, slot: number): SpheroidSpec {
-  const ry = +f['ry']!;
-  return {
-    center: [0, ry + 0.25, 0],
-    radii: [+f['rx']!, ry, +f['rz']!],
-    material: +String(f['material']).slice(1),
-    slot, solid: f['fill'] !== 'shell',
-  };
-}
 
 const replaceSourceOptions = (target: string) =>
   replaceSources(target === 'material' ? 'material' : 'colors').map(s => ({ id: s.id, label: s.label }));
@@ -410,9 +246,6 @@ export function ToolDialog(p: {
   onClose: () => void;
   /** after a successful run: dirty + bumpRev + debounced scene reload */
   onApplied: (message: string) => void;
-  /** PLACEMENT tool: the confirmed payload goes to the viewport ghost
-   *  (movable cluster + Cancel/Build label) instead of mutating */
-  onPlaced?: (tool: ToolDef, form: ToolForm, payload: PlacePayload) => void;
 }) {
   const [form, setForm] = useState<ToolForm>({ ...p.tool.initial });
   const [confirmStep, setConfirmStep] = useState(false);
@@ -432,13 +265,6 @@ export function ToolDialog(p: {
 
   const confirmRun = () => {
     if (!runnable) { setConfirmStep(false); return; }
-    if (p.tool.place && p.onPlaced) {
-      // PLACEMENT: stage the ghost payload, close — the viewport label's
-      // ✔ Build performs the commit at the position the user moved it to
-      p.onPlaced(p.tool, { ...form }, p.tool.place.stage(form, p.bp));
-      p.onClose();
-      return;
-    }
     const msg = p.tool.run(form, p.ctx);
     p.onApplied(msg);
     p.onClose();                       // the toast prints the result — no
@@ -515,7 +341,7 @@ export function ToolDialog(p: {
               </button>
               <button data-testid="tool-confirm" onClick={confirmRun}
                 className={`ksp-btn px-3 py-1 text-[12px] on ${p.tool.danger ? 'text-red-200' : ''}`}>
-                {p.tool.place ? '✓ Confirm & place' : <>✓ Confirm &amp; run</>}
+                ✓ Confirm &amp; run
               </button>
             </div>
           </div>
@@ -553,8 +379,7 @@ export function ToolDialog(p: {
 }
 
 /** One definition row: a select (ksp-btn chips for short lists, a native
- *  select for long ones), a live RANGE slider, a two-state TOGGLE, a colour
- *  PICKER (swatch + hex) or a plain hint note. */
+ *  select for long ones) or a plain hint note. */
 function FieldRow(p: {
   def: ToolFieldDef; value: ToolValue | undefined; form: ToolForm;
   onSet: (k: string, v: ToolValue) => void;
@@ -564,59 +389,6 @@ function FieldRow(p: {
     return (
       <div className="col-start-2 text-[10px] leading-snug text-ink-dim">{d.hint}</div>
     );
-  if (d.kind === 'range') {
-    const v = typeof p.value === 'number' ? p.value : +(p.value ?? d.min ?? 0);
-    return (
-      <>
-        <span className="pt-1 text-[11px] text-ink-dim">{d.label}</span>
-        <div data-testid={`tool-field-${d.key}`}>
-          <div className="flex items-center gap-2">
-            <input data-testid={`tool-range-${d.key}`} type="range"
-              min={d.min} max={d.max} step={d.step} value={v}
-              onChange={e => p.onSet(d.key, +e.target.value)}
-              className="h-1 flex-1 accent-[#ffc94d]" />
-            <span data-testid={`tool-range-val-${d.key}`}
-              className="w-14 text-right text-[11px] tabular-nums text-gold">
-              {v}{d.unit ?? ''}
-            </span>
-          </div>
-          {d.hint && <div className="pt-1 text-[9px] text-ink-dim">{d.hint}</div>}
-        </div>
-      </>
-    );
-  }
-  if (d.kind === 'toggle') {
-    const on = !!p.value;
-    return (
-      <>
-        <span className="pt-1 text-[11px] text-ink-dim">{d.label}</span>
-        <div data-testid={`tool-field-${d.key}`} className="flex items-center gap-2">
-          <button data-testid={`tool-toggle-${d.key}`} role="switch" aria-checked={on}
-            onClick={() => p.onSet(d.key, on ? 0 : 1)}
-            className={`ksp-btn px-2 py-[3px] text-[10px] ${on ? 'on' : ''}`}>
-            {on ? '● solid' : '○ shell'}
-          </button>
-          {d.hint && <span className="text-[9px] leading-snug text-ink-dim">{d.hint}</span>}
-        </div>
-      </>
-    );
-  }
-  if (d.kind === 'color') {
-    const v = String(p.value ?? '#ffffff');
-    return (
-      <>
-        <span className="pt-1 text-[11px] text-ink-dim">{d.label}</span>
-        <div data-testid={`tool-field-${d.key}`} className="flex items-center gap-2">
-          <input data-testid={`tool-color-${d.key}`} type="color" value={v}
-            onChange={e => p.onSet(d.key, e.target.value)}
-            className="h-6 w-9 cursor-pointer rounded border border-white/10 bg-transparent p-0" />
-          <input data-testid={`tool-hex-${d.key}`} type="text" value={v} spellCheck={false}
-            onChange={e => p.onSet(d.key, e.target.value)}
-            className="w-24 rounded border border-white/10 bg-panel2 px-1.5 py-[3px] text-[11px] tabular-nums text-ink" />
-        </div>
-      </>
-    );
-  }
   const opts = (d.optionsFor ? d.optionsFor(p.form) : d.options) ?? [];
   const short = opts.length <= 8 && opts.every(o => o.label.length <= 18);
   return (

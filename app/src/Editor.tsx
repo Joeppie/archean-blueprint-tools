@@ -13,7 +13,7 @@ import Panel, { StaticInfo, ViewOpts, type EditApi } from './components/Panel';
 import TopBar, { type Mode } from './components/TopBar';
 import { BlockPanel, FlightPanel, TriPanel, WirePanel, WindPanel, brushSpec, placeBlock, type Brush } from './components/ModePanels';
 import { BlockPaint, CompPaint, SwatchGrid } from './components/ColorPanel';
-import { TOOLS, ToolDialog, type PlacePayload, type ToolForm } from './components/ToolsDialog';
+import { TOOLS, ToolDialog } from './components/ToolsDialog';
 import { blockInfo, blockMirrorTwin, blockTwinIssues, cellIndex, cellOverlap,
   complementBlock, paintTwinPair } from './engine/blocks';
 import { cornerOf, triAt, triangleFromCorners } from './engine/tris';
@@ -67,11 +67,6 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   const [brush, setBrush] = useState<Brush>({ type: 0, sx: 0, sy: 0, sz: 0, slot: 51, material: 0 });
   // the TOOLS menu ▸ ToolDialog modal (v1.7): one open tool id at a time
   const [toolOpen, setToolOpen] = useState<string | null>(null);
-  // v1.6 PLACEMENT staging (Spheroid): the dialog confirmed, the engine
-  // ghosts the cluster (movable, CELL-snapped) and the viewport label offers
-  // ✕ Cancel / ✔ Build; the commit lands at the user's final cell offset.
-  const [placeStage, setPlaceStage] = useState<
-    { toolId: string; form: ToolForm; payload: PlacePayload } | null>(null);
   // the toast line a finished tool printed under the menu (auto-clears below)
   const [toolMsg, setToolMsg] = useState('');
   // 🎨 PALETTE window over the viewport (v1.6): the paint alternative to the
@@ -199,8 +194,6 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     histRef.current = { states: [emitDoc(doc)], p: 0, timer: null };
     setHistTick(t => t + 1);
     setBpKeepView(false);                           // a craft swap re-frames
-    engineRef.current?.setClusterGhost(null);       // a pending tool placement dies with the craft
-    setPlaceStage(null);
     setBp(ctxRef.current.bp);
   }, []);
 
@@ -239,38 +232,6 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     if (reloadTimer.current) clearTimeout(reloadTimer.current);
     reloadTimer.current = setTimeout(() => engineRef.current?.reload(), 180);
   }, [markDirty, bumpRev, snapshotSoon]);
-
-  // ---- v1.6 TOOLS ▸ placement flow (Spheroid): dialog OK → movable ghost +
-  // ✕ Cancel / ✔ Build label → Build commits at the final cell offset ------
-  const onPlaced = useCallback((tool: { id: string }, form: ToolForm, payload: PlacePayload) => {
-    engineRef.current?.setBlockGizmo(-1, false);   // free the widget from a block
-    engineRef.current?.select(-1);                 // …and from a component
-    // the placement widget IS the tool (the user drags the ghost): raise it
-    // even when the VIEW-mode gate holds it down — Cancel/Build restore the
-    // gated state (the ⚙ SESSION row itself is untouched, v1.5.1 rule)
-    engineRef.current?.setGizmoEnabled(true);
-    engineRef.current?.setClusterGhost(payload.blocks ?? null, 0x7dffcf, payload.triangles ?? null);
-    setPlaceStage({ toolId: tool.id, form, payload });
-  }, []);
-  const onPlaceCancel = useCallback(() => {
-    engineRef.current?.setClusterGhost(null);
-    engineRef.current?.setGizmoEnabled(mode === 'edit' && gizmoOn);
-    setPlaceStage(null);
-  }, [mode, gizmoOn]);
-  const onPlaceBuild = useCallback(() => {
-    const st = engineRef.current?.clusterGhostState();
-    const stage = placeStage, ctx = ctxRef.current;
-    if (!st || !stage || !ctx) return;
-    if (!st.valid) { setToolMsg('the spheroid collides with existing blocks — move it first'); return; }
-    const tool = TOOLS.find(t => t.id === stage.toolId);
-    if (!tool?.place) return;
-    const msg = tool.place.commit(stage.form, stage.payload, st.offset, ctx);
-    engineRef.current?.setClusterGhost(null);
-    engineRef.current?.setGizmoEnabled(mode === 'edit' && gizmoOn);
-    setPlaceStage(null);
-    sceneChanged();
-    setToolMsg(msg);
-  }, [placeStage, sceneChanged, mode, gizmoOn]);
 
   const onEngine = useCallback((e: Engine | null) => {
     engineRef.current = e;
@@ -914,7 +875,6 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
               mode={mode} tool={tool} onBlockPick={onBlockPick} onBlockHover={computeGhost}
               placing={mode === 'edit' ? placing : null} onPlace={onPlacePoint}
               onPaintOpen={() => setPaintOpen(o => !o)}
-              onPlaceCancel={onPlaceCancel} onPlaceBuild={onPlaceBuild}
               keepView={bpKeepView}
               onManifest={setManifest} />
             {/* 🎨 PALETTE window (v1.6): the paint alternative to the gizmo
@@ -976,7 +936,6 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
               <ToolDialog key={toolOpen}
                 tool={TOOLS.find(t => t.id === toolOpen)!} bp={bp} ctx={ctxRef.current}
                 onClose={() => setToolOpen(null)}
-                onPlaced={(t, f, p) => onPlaced(t, f, p)}
                 onApplied={msg => { sceneChanged(); setToolMsg(msg); }} />
             )}
             {toolMsg && (

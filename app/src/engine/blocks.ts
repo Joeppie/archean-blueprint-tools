@@ -85,38 +85,6 @@ export function blockFromCell(cell: Cell, size: Cell, type: number, slot: number
   };
 }
 
-/** Whole-cell shift of a block SET (a generated cluster after its placement
- *  drag): every block re-lands at cell + step, and any box that would CROSS
- *  a 12-cell frame border is RE-SPLIT there (pos_* must stay ∈ 0..11 beside
- *  size_*, blockFromCell's own lattice rule). Colours/material/type ride. */
-export function shiftBlocks(blocks: Block[], step: Cell): Block[] {
-  const out: Block[] = [];
-  for (const b of blocks) {
-    const c = blockCells(b);
-    const cell: Cell = [c.x + step[0], c.y + step[1], c.z + step[2]];
-    const ext: Cell = [b.size_x + 1, b.size_y + 1, b.size_z + 1];
-    const split = (s: number, e: number): [number, number][] => {
-      const parts: [number, number][] = [];
-      let a = s;
-      while (a < e) {
-        const n = Math.min(e, (floorDiv(a, CELLS_PER_FRAME) + 1) * CELLS_PER_FRAME);
-        parts.push([a, n]);
-        a = n;
-      }
-      return parts;
-    };
-    for (const [x0, x1] of split(cell[0], cell[0] + ext[0]))
-      for (const [y0, y1] of split(cell[1], cell[1] + ext[1]))
-        for (const [z0, z1] of split(cell[2], cell[2] + ext[2])) {
-          const nb = blockFromCell([x0, y0, z0],
-            [x1 - x0 - 1, y1 - y0 - 1, z1 - z0 - 1], b.type, b.colors?.[0] ?? 0, b.material ?? 0);
-          if (b.colors) nb.colors = b.colors.slice();
-          out.push(nb);
-        }
-  }
-  return out;
-}
-
 export interface BlockInfo {
   bi: number; cell: Cell; size: Cell; type: number; slot: number;
 }

@@ -45,8 +45,8 @@ import { buildPipes, surgePaths, type PipeNetwork } from './pipes';
 import { buildBlocksSolids, buildCompProxies, buildSolids, type ProxyBox, type SolidBatch } from './build';
 import { hullVertex } from './hullfit';
 import type { FilePalette } from './palette';
-import type { Block, Blueprint, BlueprintComponent, Triangle } from './format';
-import { CELL, CELLS_PER_FRAME, isLegacyFile } from './format';
+import type { Block, Blueprint, BlueprintComponent } from './format';
+import { CELL, isLegacyFile } from './format';
 import { getBlockEdges, getBlockFaces, getBlockPoints } from './blockshapes';
 import { blockCells, blockMirrorTwin, cellOverlapSkip, mirrorBlockCell,
   rotatedBlock, setBlockGeom, type PlaceSpec } from './blocks';
@@ -205,22 +205,6 @@ export class Engine {
    *  coords land at world; Editor re-aims it on every hover */
   private ghostGroup = new Group();
   private ghostSpec: (PlaceSpec & { valid: boolean; complement: boolean }) | null = null;
-  /** v1.6 TOOLS ▸ Spheroid PLACEMENT ghost: a generated BLOCK CLUSTER (the
-   *  dialog OK'd its material/colour/fill/size, THEN the spheroid appears as
-   *  a translucent cluster you can MOVE like a block — same widget, CELL
-   *  snap — while the viewport label offers ✕ Cancel / ✔ Build. Own scene
-   *  child (disposeScene never eats it), children keep RAW-FILE metres. */
-  private clusterGroup = new Group();
-  private clusterBlocks: Block[] = [];
-  /** v1.6.1: a TOOL skin placement (Spheroid ▸ SKIN) — hull TRIANGLES
-   *  ghosted as flat translucent faces (a skin never "collides": skins
-   *  overlap blocks by design, so a tri-only cluster is always valid) */
-  private clusterTris: Triangle[] = [];
-  private clusterOffset: [number, number, number] = [0, 0, 0];
-  private clusterHex = 0x7dffcf;
-  private clusterValid = true;
-  /** live widget gesture: the committed offset + the proxy centre at press */
-  private clusterBase: { off: [number, number, number]; center: Vector3 } | null = null;
   /** BLOCKS-edit selection highlight (v1.4): a golden overlay on the picked
    *  block (+ its dim SIMILAR TWIN, identified regardless of ⇄) — the block
    *  analogue of the component outline. Own scene child at moff, like ghostGroup. */
@@ -397,18 +381,15 @@ export class Engine {
         (g.addEventListener as unknown as (t: string, f: (e: { value?: boolean }) => void) => void)(t, f);
       listen('objectChange', () => {
         if (this.blockGizBi >= 0) this.blockGizmoDrag();
-        else if (this.clusterBase) this.clusterGhostDrag();
         else this.gizmoWriteback();
       });
       listen('mouseDown', () => {
         if (this.blockGizBi >= 0) this.captureBlockGesture();
         else if (this.gizmoCi >= 0) this.captureGesture(this.gizmoCi);
-        else if (this.clusterBlocks.length || this.clusterTris.length) this.captureClusterGesture();
       });
       listen('dragging-changed', e => {
         if (this.controls) this.controls.enabled = !e.value;
         if (!e.value) this.commitBlockGesture();          // no-op without a block gesture
-        if (!e.value) this.commitClusterGesture();        // idem for a cluster gesture
       });
       this.scene.add(g.getHelper(), this.gizmoProxy);
       g.enabled = false;
@@ -427,7 +408,6 @@ export class Engine {
     this.scene.add(this.subGroup);
     this.scene.add(this.surgeGroup);
     this.scene.add(this.ghostGroup);
-    this.scene.add(this.clusterGroup);
     this.scene.add(this.blockHlGroup);
     this.scene.add(this.triHlGroup);
     this.scene.add(this.compHlGroup);
@@ -606,7 +586,6 @@ void main() {
       this.subGroup.position.set(this.moff.x, this.moff.y, this.moff.z);
       this.ghostGroup.position.set(this.moff.x, this.moff.y, this.moff.z);
       this.blockHlGroup.position.set(this.moff.x, this.moff.y, this.moff.z);
-      this.syncClusterGroupPos();
       this.triHlGroup.position.set(this.moff.x, this.moff.y, this.moff.z);
       this.compHlGroup.position.set(this.moff.x, this.moff.y, this.moff.z);
     }
@@ -2084,10 +2063,7 @@ void main() {
     const g = this.gizmo;
     if (!g || this.gizmoCi >= 0) return;              // a component owns the widget
     const b = this.blockGizBi >= 0 && this.bp ? this.bp.data.blocks[this.blockGizBi] : undefined;
-    if (!b || b.type === 255 || !this.gizmoEnabled || this.gizmoMode === 'off') {
-      this.syncClusterGizmo();                        // v1.6: a placement cluster may own it
-      return;
-    }
+    if (!b || b.type === 255 || !this.gizmoEnabled || this.gizmoMode === 'off') return;
     this.gizmoProxy.position.copy(this.blockCentre(b));
     this.gizmoProxy.quaternion.identity();
     g.attach(this.gizmoProxy);
@@ -2872,209 +2848,6 @@ void main() {
     this.invalidate();
   }
   get placeGhostState() { return this.ghostSpec; }
-
-  // ------------------------------------------------- cluster placement ghost
-  /** v1.6 TOOLS ▸ Spheroid: preview a generated block CLUSTER translucent,
-   *  movable on the BLOCK widget (CELL snap) with a Cancel/Build label.
-   *  Children keep RAW-FILE metres (the group rides moff + the cell offset),
-   *  so a commit only has to shift the block records. null clears. */
-  setClusterGhost(blocks: Block[] | null, hex = 0x7dffcf, tris: Triangle[] | null = null) {
-    this.clusterBlocks = blocks ? blocks.slice() : [];
-    this.clusterTris = tris ? tris.slice() : [];
-    this.clusterHex = hex;
-    this.clusterOffset = [0, 0, 0];
-    this.clusterBase = null;
-    for (const o of this.clusterGroup.children) {
-      (o as Mesh).geometry?.dispose();
-      ((o as unknown as { material?: { dispose?: () => void } }).material)?.dispose?.();
-    }
-    this.clusterGroup.clear();
-    if (this.clusterBlocks.length || this.clusterTris.length) {
-      const pos: number[] = [], idx: number[] = [], ep: number[] = [];
-      for (const b of this.clusterBlocks) {
-        const c = blockCells(b);
-        const origin: [number, number, number] =
-          [(c.x - 6) * CELL, (c.y - 6) * CELL, (c.z - 6) * CELL];
-        const size: [number, number, number] =
-          [(b.size_x + 1) * CELL, (b.size_y + 1) * CELL, (b.size_z + 1) * CELL];
-        const base = pos.length / 3;
-        const pts = getBlockPoints(b.type, origin, size);
-        for (const v of pts) pos.push(v[0], v[1], v[2]);
-        for (const f of getBlockFaces(b.type)) idx.push(f[0]! + base, f[1]! + base, f[2]! + base, f[3]! + base, f[4]! + base, f[5]! + base);
-        for (const [a, e] of getBlockEdges(b.type)) ep.push(...pts[a]!, ...pts[e]!);
-      }
-      // skin triangles: decode the frame + 0..31 window to lattice points
-      const triG = (t: Triangle, i: number, ax: 0 | 1 | 2) =>
-        (t[`v${i}_${'xyz'[ax]!}`] as number) + CELLS_PER_FRAME * (t[`frame_${'xyz'[ax]!}`] as number);
-      for (const t of this.clusterTris) {
-        const base = pos.length / 3;
-        for (let i = 0; i < 3; i++) {
-          const g: [number, number, number] = [triG(t, i, 0), triG(t, i, 1), triG(t, i, 2)];
-          pos.push((g[0] - 6) * CELL, (g[1] - 6) * CELL, (g[2] - 6) * CELL);
-        }
-        idx.push(base, base + 1, base + 2);
-        ep.push(...pos.slice(base * 3, base * 3 + 3), ...pos.slice(base * 3 + 3, base * 3 + 6),
-          ...pos.slice(base * 3 + 6, base * 3 + 9), ...pos.slice(base * 3 + 6, base * 3 + 9),
-          ...pos.slice(base * 3 + 3, base * 3 + 6), ...pos.slice(base * 3, base * 3 + 3));
-      }
-      const geo = new BufferGeometry();
-      geo.setAttribute('position', new BufferAttribute(new Float32Array(pos), 3));
-      geo.setIndex(idx);
-      geo.computeVertexNormals();
-      const solid = new Mesh(geo, new MeshBasicMaterial({
-        color: this.clusterHex, transparent: true, opacity: 0.38, depthTest: false, side: DoubleSide,
-      }));
-      solid.renderOrder = 30;
-      const eg = new BufferGeometry();
-      eg.setAttribute('position', new BufferAttribute(new Float32Array(ep), 3));
-      const wire = new LineSegments(eg, new LineBasicMaterial({
-        color: this.clusterHex, transparent: true, opacity: 0.9, depthTest: false,
-      }));
-      wire.renderOrder = 31;
-      this.clusterGroup.add(solid, wire);
-    }
-    this.syncClusterGroupPos();
-    this.clusterCheckValid();
-    this.syncGizmo();                        // the widget lands on the cluster
-    this.invalidate();
-  }
-  private syncClusterGroupPos() {
-    const o = this.clusterOffset;
-    this.clusterGroup.position.set(
-      this.moff.x + o[0] * CELL, this.moff.y + o[1] * CELL, this.moff.z + o[2] * CELL);
-  }
-  /** bbox centre of the cluster (WORLD incl. moff + offset) — widget pivot
-   *  and the label anchor */
-  private clusterCentre(): Vector3 | null {
-    if (!this.clusterBlocks.length && !this.clusterTris.length) return null;
-    let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
-    for (const b of this.clusterBlocks) {
-      const c = blockCells(b);
-      x0 = Math.min(x0, c.x); y0 = Math.min(y0, c.y); z0 = Math.min(z0, c.z);
-      x1 = Math.max(x1, c.x + b.size_x + 1); y1 = Math.max(y1, c.y + b.size_y + 1);
-      z1 = Math.max(z1, c.z + b.size_z + 1);
-    }
-    const tg = (t: Triangle, i: number, ax: 0 | 1 | 2) =>
-      (t[`v${i}_${'xyz'[ax]!}`] as number) + CELLS_PER_FRAME * (t[`frame_${'xyz'[ax]!}`] as number);
-    for (const t of this.clusterTris)
-      for (let i = 0; i < 3; i++) {
-        x0 = Math.min(x0, tg(t, i, 0)); y0 = Math.min(y0, tg(t, i, 1)); z0 = Math.min(z0, tg(t, i, 2));
-        x1 = Math.max(x1, tg(t, i, 0)); y1 = Math.max(y1, tg(t, i, 1)); z1 = Math.max(z1, tg(t, i, 2));
-      }
-    const o = this.clusterOffset;
-    return new Vector3(
-      (x0 + x1) / 2 - 6 + o[0], (y0 + y1) / 2 - 6 + o[1], (z0 + z1) / 2 - 6 + o[2]).multiplyScalar(CELL)
-      .add(this.moffV());
-  }
-  /** red while the footprint collides with existing blocks (the constructor
-   *  ghost contract — Build is refused until it is mint again) */
-  private clusterCheckValid() {
-    const bp = this.bp;
-    this.clusterValid = true;
-    // a skin (tri-only) never collides — hull skins overlap blocks by design
-    if (bp && this.clusterBlocks.length) {
-      const o = this.clusterOffset;
-      const ex = bp.data.blocks.filter(b => b.type !== 255).map(b => {
-        const c = blockCells(b);
-        return [c.x, c.y, c.z, c.x + b.size_x + 1, c.y + b.size_y + 1, c.z + b.size_z + 1] as const;
-      });
-      outer: for (const b of this.clusterBlocks) {
-        const c = blockCells(b);
-        const lo: [number, number, number] = [c.x + o[0], c.y + o[1], c.z + o[2]];
-        const hi: [number, number, number] = [lo[0]! + b.size_x + 1, lo[1]! + b.size_y + 1, lo[2]! + b.size_z + 1];
-        for (const e of ex)
-          if (lo[0] < e[3] && hi[0] > e[0] && lo[1] < e[4] && hi[1] > e[1] && lo[2] < e[5] && hi[2] > e[2]) {
-            this.clusterValid = false;
-            break outer;
-          }
-      }
-    }
-    const hex = this.clusterValid ? this.clusterHex : 0xff4d4d;
-    for (const o of this.clusterGroup.children) {
-      const m = (o as Mesh).material as MeshBasicMaterial | LineBasicMaterial;
-      m.color.set(hex);
-    }
-  }
-  /** live state for the viewport label + the e2e pins */
-  clusterGhostState(): { blocks: number; tris: number; offset: [number, number, number]; valid: boolean; shown: boolean } | null {
-    if (!this.clusterBlocks.length && !this.clusterTris.length) return null;
-    const g = this.gizmo;
-    return {
-      blocks: this.clusterBlocks.length, tris: this.clusterTris.length,
-      offset: this.clusterOffset.slice() as [number, number, number],
-      valid: this.clusterValid,
-      shown: !!g && g.enabled === true && g.getHelper().visible === true &&
-        (g as unknown as { object?: unknown }).object === this.gizmoProxy,
-    };
-  }
-  /** PUBLIC whole-cell nudge of the placement (keyboard, pins — the widget
-   *  commit routes through the same offset math); false = now colliding */
-  clusterGhostShift(step: [number, number, number]): boolean {
-    if (!this.clusterBlocks.length && !this.clusterTris.length) return false;
-    const o = this.clusterOffset;
-    this.clusterOffset = [o[0] + step[0], o[1] + step[1], o[2] + step[2]];
-    this.syncClusterGroupPos();
-    this.clusterCheckValid();
-    this.syncClusterGizmo();
-    this.invalidate();
-    return this.clusterValid;
-  }
-  /** screen point of the cluster centre (CLIENT px) for the label */
-  clusterGhostScreenPoint(): { x: number; y: number } | null {
-    const renderer = this.renderer, cam = this.camera;
-    const c = this.clusterCentre();
-    if (!renderer || !cam || !c) return null;
-    c.project(cam);
-    if (c.z > 1) return null;
-    const rect = renderer.domElement.getBoundingClientRect();
-    return { x: rect.left + (c.x + 1) / 2 * rect.width, y: rect.top + (1 - c.y) / 2 * rect.height };
-  }
-  /** the BLOCK widget on the cluster: WORLD translate + CELL snap ALWAYS.
-   *  A selected component or block owns the widget first. */
-  private syncClusterGizmo() {
-    const g = this.gizmo;
-    if (!g || this.gizmoCi >= 0 || this.blockGizBi >= 0) return;
-    const c = this.clusterCentre();
-    if (!c || !this.gizmoEnabled) {
-      if (this.clusterBlocks.length && (g as unknown as { object?: unknown }).object === this.gizmoProxy) {
-        g.detach(); g.enabled = false; g.getHelper().visible = false;
-      }
-      return;
-    }
-    this.gizmoProxy.position.copy(c);
-    this.gizmoProxy.quaternion.identity();
-    g.attach(this.gizmoProxy);
-    g.setMode('translate');
-    g.setSpace('world');
-    g.setTranslationSnap(CELL);
-    g.setRotationSnap(null);
-    g.enabled = true;
-    g.getHelper().visible = true;
-  }
-  private captureClusterGesture() {
-    this.showHullWireframe(true);            // whole hull wire while placing (v1.8.1 rule)
-    this.clusterBase = { off: this.clusterOffset.slice() as [number, number, number],
-      center: this.gizmoProxy.position.clone() };
-  }
-  private clusterGhostDrag() {
-    const base = this.clusterBase;
-    if (!base) return;
-    const d = this.gizmoProxy.position.clone().sub(base.center);
-    const q: [number, number, number] = [Math.round(d.x / CELL), Math.round(d.y / CELL), Math.round(d.z / CELL)];
-    const o = base.off;
-    if (q[0] !== this.clusterOffset[0] || q[1] !== this.clusterOffset[1] || q[2] !== this.clusterOffset[2]) {
-      this.clusterOffset = [o[0] + q[0], o[1] + q[1], o[2] + q[2]];
-      this.syncClusterGroupPos();
-      this.clusterCheckValid();
-      this.invalidate();
-    }
-  }
-  private commitClusterGesture() {
-    this.showHullWireframe(false);
-    this.clusterBase = null;
-    this.syncClusterGizmo();
-    this.invalidate();
-  }
 
   /** Build a translucent solid+wire overlay of a block shape at RAW-FILE
    *  metres into a group (the highlight groups are positioned at moff). */
