@@ -58,12 +58,12 @@ declare global {
     placeGhost: () => ReturnType<Engine['clusterGhostState']>;
     placePoint: () => ReturnType<Engine['clusterGhostScreenPoint']>;
     placeShift: (s: [number, number, number]) => boolean;
-    /** v1.5.21 corner axis indicator: projected world-axis directions + the
-     *  click-to-view flight */
-    axis: () => ReturnType<Engine['axisView']>;
-    viewAxis: (a: 'x' | 'y' | 'z', back?: boolean) => void;
     /** v1.5.21 adaptive ground grid plan (step/major/spans in file coords) */
     grid: () => ReturnType<Engine['gridInfo']>;
+    /** v1.5.22 MEASURE RULER: state in the user's z-up law (x, y=-filez,
+     *  z=height above the pad) + the screen anchor of a drag handle */
+    probe: () => ReturnType<Engine['probeState']>;
+    probePoint: (w: 'base' | 'cap') => { x: number; y: number } | null;
     /** v1.5.21 settable mirror axis (⚙ row) */
     mirAxis: () => 'x' | 'y' | 'z';
   } }
@@ -156,11 +156,11 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
       placeGhost: () => engine.clusterGhostState(),
       placePoint: () => engine.clusterGhostScreenPoint(),
       placeShift: (s: [number, number, number]) => engine.clusterGhostShift(s),
-      // v1.5.21: corner axis indicator + adaptive grid + mirror axis pins
-      axis: () => engine.axisView(),
-      viewAxis: (a: 'x' | 'y' | 'z', back?: boolean) => engine.viewAxis(a, back),
+      // v1.5.21 adaptive grid + mirror axis; v1.5.22 measure ruler pins
       grid: () => engine.gridInfo(),
       mirAxis: () => engine.mirrorAxis,
+      probe: () => engine.probeState(),
+      probePoint: (w: 'base' | 'cap') => engine.probePointScreen(w),
     };
     onEngine?.(engine);
     return () => {
@@ -275,6 +275,9 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
    *  release lands it at the final yaw. A press that hits nothing placeable
    *  stays a plain camera gesture. */
   const placeDrag = useRef<{ yaw: number } | null>(null);
+  // v1.5.22 measure-ruler drag (a grabbed handle: base glides on the grid,
+  // cap sets the height; orbit yields while held, twin of placeDrag)
+  const probeDrag = useRef(false);
   const pickClick = (e: React.PointerEvent) => {
     const engine = engineRef.current;
     if (!engine) return;
@@ -315,11 +318,21 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
       <canvas ref={canvasRef} data-testid="canvas" className="block h-full w-full touch-none"
         onPointerDown={e => {
           down.current = { x: e.clientX, y: e.clientY };
+          // the MEASURE RULER grabs first (v1.5.22): a press within a
+          // handle's 18 px rides the ruler, not the orbit/placement
+          if (e.button === 0 && engineRef.current?.probeDragStart(e.clientX, e.clientY)) {
+            probeDrag.current = true;
+            return;
+          }
           if (placing && mode === 'edit' && e.button === 0 && !e.shiftKey &&
             engineRef.current?.placeDragStart(e.clientX, e.clientY))
             placeDrag.current = { yaw: engineRef.current.compGhostState?.yaw ?? 0 };
         }}
         onPointerMove={e => {
+          if (probeDrag.current) {
+            engineRef.current?.probeDragMove(e.clientX, e.clientY);
+            return;                         // the ruler rides, not the orbit
+          }
           if (placeDrag.current) {
             const y = engineRef.current?.placeDragMove(e.clientX, e.clientY);
             if (y != null) placeDrag.current.yaw = y;
@@ -328,12 +341,14 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
           blockHover(e.clientX, e.clientY, e.shiftKey);
         }}
         onPointerLeave={() => {
+          if (probeDrag.current) { engineRef.current?.probeDragEnd(); probeDrag.current = false; }
           // the ghost dies with the pointer (the game's ghost too)
           lastHover.current = null;
           if (placeDrag.current) { engineRef.current?.placeDragEnd(); placeDrag.current = null; }
           if (hoverOn) onBlockHover?.(-1e5, -1e5, false);
         }}
         onPointerUp={e => {
+          if (probeDrag.current) { engineRef.current?.probeDragEnd(); probeDrag.current = false; return; }
           if (placeDrag.current) {
             // the RELEASE places (the press only pins — "should not just
             // place immediately"; a zero-motion release = the old click,
@@ -411,7 +426,6 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
         </div>
       )}
       {DEBUG_MODE && <StatsStrip engine={engineRef} bp={bp} />}
-      <AxisGizmo engine={engineRef} />
     </div>
   );
 }
@@ -452,60 +466,4 @@ function StatsStrip({ engine, bp }: { engine: { current: Engine | null }; bp: Bl
   return <p data-testid="scene-stats" ref={ref}
     className="pointer-events-none absolute left-3 top-2 max-w-[calc(100%-1.5rem)] truncate rounded
                bg-black/50 px-2 py-1 text-[11px] text-ink-dim" />;
-}
-
-/** v1.5.21 CORNER AXIS INDICATOR (user: "We need to see directions for XYZ
- *  axes"): a Blender-style mini gizmo — the world X/Y/Z unit directions
- *  projected through the live camera, repainted on the engine's on-demand
- *  renders (engine.onView — no timers, the loop sleeps when idle). Head
- *  labels are buttons: clicking one flies the camera onto that world axis
- *  (the faded tail dot views it from the opposite side). Stays under the
- *  debug stats strip, above StaticInfo/CameraCluster corners. */
-const AXIS_COLORS = { x: '#ff6b6b', y: '#8fe36b', z: '#6aa8ff' } as const;
-
-function AxisGizmo({ engine }: { engine: { current: Engine | null } }) {
-  const [, bump] = useState(0);
-  useEffect(() => {
-    let stop = false, raf = 0;
-    let unsub: (() => void) | null = null;
-    const trySub = () => {                      // the engine lands a tick after mount
-      if (stop) return;
-      const e = engine.current;
-      if (e && !unsub) unsub = e.onView(() => bump(n => n + 1));
-      if (!unsub) raf = requestAnimationFrame(trySub);
-    };
-    trySub();
-    return () => { stop = true; unsub?.(); cancelAnimationFrame(raf); };
-  }, [engine]);
-  const e = engine.current;
-  const av = e ? e.axisView() : null;
-  const C = 34, R = 22;
-  return (
-    <svg data-testid="axis-gizmo" width={68} height={68} viewBox="0 0 68 68"
-      className="pointer-events-none absolute left-3 top-8 z-20 select-none"
-      style={{ filter: 'drop-shadow(0 1px 2px rgba(0,0,0,.55))' }}>
-      <circle cx={C} cy={C} r={30} fill="rgba(10,16,24,0.35)" />
-      {av && [...av].sort((a, b) => a.toward - b.toward).map(a => {
-        const col = AXIS_COLORS[a.k];
-        const hx = C + a.sx * R, hy = C + a.sy * R;
-        const front = a.toward < 0;             // axis head points at the viewer
-        return (
-          <g key={a.k} opacity={front ? 1 : 0.5}>
-            <line x1={2 * C - hx} y1={2 * C - hy} x2={hx} y2={hy} stroke={col} strokeWidth={front ? 1.6 : 1.2} />
-            {/* tail: view the craft from the OPPOSITE end of this axis */}
-            <circle data-testid={`axis-view-${a.k}-back`} cx={2 * C - hx} cy={2 * C - hy} r={4}
-              fill={col} opacity={0.45} className="pointer-events-auto cursor-pointer"
-              onClick={() => engine.current?.viewAxis(a.k, true)} />
-            {/* head: the labelled direction — click to look along +axis */}
-            <g data-testid={`axis-view-${a.k}`} className="pointer-events-auto cursor-pointer"
-              onClick={() => engine.current?.viewAxis(a.k, false)}>
-              <circle cx={hx} cy={hy} r={7.5} fill={col} />
-              <text x={hx} y={hy + 0.5} textAnchor="middle" dominantBaseline="middle"
-                fontSize={9.5} fontWeight={700} fill="#10151c">{a.k.toUpperCase()}</text>
-            </g>
-          </g>
-        );
-      })}
-    </svg>
-  );
 }

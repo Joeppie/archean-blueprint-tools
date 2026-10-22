@@ -12,6 +12,7 @@ Tags: keyboard shortcuts keys mouse controls orbit pan zoom delete escape shift 
 | g | grid on/off |
 | o | occupancy boxes on/off |
 | h | hull solids ⇄ wireframe — in wireframe you CLICK THROUGH the hull to what is behind it ("click what you SEE") |
+| m | measure ruler on/off — the z-stick standing on the grid (drag the puck / the cap) |
 | Shift (held) | snaps: gizmo moves to 0.25 m cells, rotations to 15°, subgrid joint handles snap, block ghost = mirror continuation |
 | Esc | close the top window → cancel a placement drag/skin → drop a held part → deselect |
 
@@ -28,6 +29,8 @@ Tags: keyboard shortcuts keys mouse controls orbit pan zoom delete escape shift 
 | press-drag-release (holding a part) | SMEAR-place it, aimed along the drag |
 | double-click a list row | fly the camera to that part |
 | drag a gizmo ring | rotate (the ring you grab is the axis you turn) |
+| drag the ruler puck (on the grid) | slide the measure ruler across the pad — snaps onto the grid lines |
+| drag the ruler cap | set its height — the `z 10.0` label follows, snapped to the ladder |
 | drag a gizmo arrow | move (world axes, always axis-aligned) |
 
 The camera never moves on its own: a fly-to happens only on your click or

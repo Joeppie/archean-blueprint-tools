@@ -481,16 +481,38 @@ freshly-authored triangles, fixture 9000006001 — see the v1.5.12 bullet).
   SILHOUETTE from screenshot pixels (largest blob, scanline-filled area ÷
   its convex hull): 0.99–1.00 at every size — the picture itself has no
   bite. In-game judgment stays the user's (AGENTS: in-game pixels arbitrate).
+- **v1.5.22 MEASURE RULER (user 2026-10-22: "The indicator for xyz is
+  useless. it must be on the grid, movable and where it snaps on the grid for
+  horizontal, I want the coordinate also shown e.g. z 10.0 and a single line
+  up and down for z, same segmenting for measuring, eyeballing"):** the
+  orientation indicator lives IN THE WORLD on the pad: `Engine` probe state
+  {x, z, h} (raw-file coords, group rides moff like ghostGroup) draws ONE
+  blue line up-and-down at the snapped spot with tick pairs EVERY ladder
+  step, longer every 5th, the pad-level zero tick WHITE (the SAME grid.ts
+  segmentation as the ground grid — re-snapped when syncGrid changes the
+  rung, pixel7 pin caught the missing re-snap), red +x / green −z base arms,
+  a draggable CAP sphere (height, camera-facing vertical plane, snapped to
+  the rung) and a white PUCK (horizontal travel on the pad plane, SNAPPED
+  ONTO THE GRID LINES), labels via makeLabel in the USER'S z-UP COORDINATE
+  LAW: `z 10.0` at the cap, `x 3.0 · y -2.0` under the puck,
+  x = file x, y = −file z, decimals follow the rung. Drag plumbing twins
+  placeDrag (`probeDragStart/Move/End`, 18 px handle grab, orbit yields;
+  Viewport grabs it BEFORE the placement/orbit paths, any mode). Default ON
+  (⚙ `opt-probe`, key `m`, ViewOptions.probe); DEFAULT SPOT off the SIDE of
+  the build (cx−hx−2) — NOT the centre, which is where editor clicks/pick-
+  walks land; position survives scene reloads (probeInit), clamped to the
+  pad. Hooks `probe()` (z-up law) + `probePoint('base'|'cap')` (client px
+  for the drag pins); e2e views.spec: snap-to-ladder asserts (onLadder),
+  puck drag moves+snaps AND the camera stays put (orbit-yield), cap drag
+  raises z cleanly.
 - **v1.5.21 ORIENTATION & GROUND batch (user 2026-10-22: "We need to see
   directions for XYZ axes, also grid needs to fit build comfortably. Probably
   granularity depending on zoom 1x or 5, 10, depending. Also, mirror axes
   should be settable. Game is not hardcoded x"):**
-  (1) AXIS COMPASS: `Engine.axisView()` projects the world X/Y/Z unit
-  directions through the live camera (`onView(cb)` fires exactly on real
-  renders — the on-demand loop stays asleep), `Viewport.tsx AxisGizmo` draws
-  the Blender-style top-left mini gizmo (head labels + faded tail dots are
-  buttons -> `Engine.viewAxis(a, back)`, the axis-general twin of viewPreset).
-  testids `axis-gizmo` / `axis-view-x|y|z(-back)`; hooks `axis()/viewAxis()`.
+  (1) AXIS COMPASS — **REPLACED SAME DAY by the v1.5.22 MEASURE RULER**
+  (user verdict: "The indicator for xyz is useless. it must be on the
+  grid…"): the corner gizmo, `Engine.axisView()/viewAxis()/onView()` and the
+  `axis()/viewAxis()` hooks are REMOVED; see the v1.5.22 bullet.
   (2) ADAPTIVE GRID (`engine/grid.ts` pure + `scene syncGrid()`): the fixed
   28 m GridHelper is GONE — the green sheet and grid FIT THE BUILD FOOTPRINT
   (bp box UNION part boxes, rounded out to whole MAJOR cells, majors every 5

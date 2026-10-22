@@ -1,5 +1,5 @@
 # Display and view options
-Tags: display options hull wireframe labels opacity real models quality static info fog adapters connectors ground
+Tags: display options hull wireframe labels opacity real models quality static info fog adapters connectors ground ruler measure stick height ticks axis
 
 The **⚙** window (top right) collects the display state; the same toggles
 have keys where it matters.
@@ -13,7 +13,7 @@ have keys where it matters.
 | Occupancy (o) | the type-255 occupancy boxes (reserved cells around parts) |
 | Mirror plane(s) | the gold sheets at the 0-plane of every mirrored axis (see the Mirror rule topic) |
 | Mirror axis | which axis ⇄ twin placement and block twins ride: X, Y or Z (the game's own `mirrorAxis` field is per-part, 1=x 2=y 3=z) |
-| Axis compass | the little XYZ gizmo at the top left shows world directions; click a labelled head to view the craft along that axis (the faded tail dot = the opposite side) |
+| Measure ruler (m) | an in-world measuring stick STANDING ON the grid: drag the white puck along the pad (it SNAPS onto the grid lines), drag the blue cap up/down for height; the stick carries the same tick segmentation as the ground grid (minor every cell-ladder step, longer every 5th, the pad-level zero tick white) so heights eyeball against it — the labels read z-up: `z 10.0` beside the cap, `x 3.0 · y -2.0` under the puck (x = file x, y = forward = −file z) |
 | Labels | part name labels in the scene |
 | Connectors | adapter port nubs (cables/pipes keep their own toggle) |
 | Real game models | full game meshes (default ON); the ⚙ row can switch weak GPUs to the decimated twins |

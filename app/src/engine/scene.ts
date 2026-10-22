@@ -97,12 +97,12 @@ type Kind = 'block' | 'wire' | 'occ' | 'pipe' | 'pipe-end' | 'comp' | 'sub' | 'g
 
 export interface ViewOptions {
   grid: boolean; occ: boolean; hull: boolean; wire: boolean; pipes: boolean; subs: boolean;
-  mirror: boolean; com: boolean;
+  mirror: boolean; com: boolean; probe: boolean;
   /** labels on interactive/aliased parts — OFF by default (legacy user rule:
    *  opt-in per session, NOT persisted) */
   labels: boolean;
 }
-export const DEFAULT_OPTS: ViewOptions = { grid: true, occ: false, hull: true, wire: false, pipes: true, subs: true, mirror: true, com: true, labels: false };
+export const DEFAULT_OPTS: ViewOptions = { grid: true, occ: false, hull: true, wire: false, pipes: true, subs: true, mirror: true, com: true, labels: false, probe: true };
 
 const DEG = Math.PI / 180;
 const STAND_IN_HEX = 0x88aaff;          // legacy colliderProxy stand-in tint
@@ -306,9 +306,19 @@ export class Engine {
   private gridBox: { cx: number; cz: number; hx: number; hz: number } | null = null;
   private gridY = 0;
 
-  /** view-frame subscribers (the corner axis indicator repaints after every
-   *  real render — the loop is on-demand, so no timers are involved) */
-  private viewCbs = new Set<() => void>();
+  // ---------- measure ruler (v1.5.22, REPLACES the v1.5.21 corner axis
+  // compass — user: "The indicator for xyz is useless. it must be on the
+  // grid, movable and where it snaps on the grid for horizontal, I want the
+  // coordinate also shown e.g. z 10.0 and a single line up and down for z,
+  // same segmenting for measuring, eyeballing.") ----------
+  /** the probe sits at raw-file (x, z) on the grid plane; h = height above
+   *  the pad. COORDINATE LAW for the readouts (the user counts z UP):
+   *  x = file x, y = −file z (forward = the nose), z = h — a right-handed
+   *  x/y/z-up triple over the file's (x, z, y). */
+  private probeGroup: Group | null = null;
+  private probe = { x: 0, z: 0, h: 2, drag: null as null | 'base' | 'cap' };
+  /** the ladder step the ruler was last drawn at (rides syncGrid) */
+  private probeStep = 0;
 
   // ---------- mass & CoM ----------
   private cellMass = 1.5;
@@ -452,6 +462,8 @@ export class Engine {
     this.scene.add(this.subGroup);
     this.scene.add(this.surgeGroup);
     this.scene.add(this.ghostGroup);
+    this.probeGroup = new Group();               // measure ruler (v1.5.22)
+    this.scene.add(this.probeGroup);
     this.scene.add(this.clusterGroup);
     this.scene.add(this.blockHlGroup);
     this.scene.add(this.triHlGroup);
@@ -467,9 +479,8 @@ export class Engine {
       this.pumpWind();
       if (this.needRender && this.renderer) {
         this.needRender = false;
-        this.syncGrid();                          // zoom-adaptive cell (no-op if unchanged)
+        this.syncGrid();                          // zoom-adaptive cell + ruler ticks
         this.renderer.render(this.scene, this.camera);
-        for (const cb of this.viewCbs) cb();      // corner axis indicator repaint
       }
       requestAnimationFrame(loop);
     };
@@ -697,6 +708,7 @@ void main() {
     this.updateCoM();
     this.addGround(bp, parts);
     this.buildMirrorPlane(parts);
+    this.ensureProbe();          // measure ruler: rides the fresh pad (v1.5.22)
     this.applyViewOptions();
     if (camP && camT) {                    // same-craft rebuild: camera stays put
       this.camera!.position.copy(camP);
@@ -1408,6 +1420,16 @@ void main() {
     this.gridLines = new LineSegments(geo,
       new LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9 }));
     this.groundGroup.add(this.gridLines);
+    // the ruler ticks ride the SAME ladder (user: "same segmenting for
+    // measuring, eyeballing")
+    if (plan.step !== this.probeStep) {
+      // the ruler rides the SAME ladder: re-SNAP the probe (an h of 2 m on
+      // a 1.25 m rung must become 2.5, the pixel7 pin caught this) and
+      // re-tick the stick
+      this.probeStep = plan.step;
+      this.clampProbe();
+      this.buildProbe();
+    }
   }
   /** live grid plan for the pins (testid hook __ARCHEAN__.grid()): the
    *  chosen cell + the covered half-spans in file coords */
@@ -1418,6 +1440,195 @@ void main() {
     const plan = gridPlan(this.gridBox.hx, this.gridBox.hz, pxPerMeter(h, this.camera.fov, d));
     return { step: this.gridStepNow || plan.step, major: plan.step * 5,
       halfX: plan.halfX, halfZ: plan.halfZ, cx: this.gridBox.cx, cz: this.gridBox.cz, y: this.gridY };
+  }
+
+  // -------------------------------------------------- measure ruler (v1.5.22)
+  /** the ruler defaults to the BUILD CENTRE on the first load and survives
+   *  scene reloads (a placement re-load must not teleport it back); it is
+   *  clamped onto the pad's footprint + a small walk-out margin */
+  private ensureProbe() {
+    const grp = this.probeGroup, g = this.gridBox;
+    if (!grp || !g) return;
+    grp.position.set(this.moff.x, this.moff.y, this.moff.z);
+    if (!this.probeInit) {
+      // NOT the build centre: that is where half the editor's clicks land
+      // (and the pick-walk e2e pins aim) — start the ruler just off the
+      // SIDE of the build, in clear ground
+      this.probeInit = true;
+      this.probe.x = g.cx - g.hx - 2;
+      this.probe.z = g.cz;
+    }
+    this.clampProbe();
+    if (!this.probeStep) this.probeStep = 0.25;
+    this.buildProbe();
+    grp.visible = this.opts.probe;
+  }
+  private probeInit = false;
+  private clampProbe() {
+    const g = this.gridBox;
+    if (!g) return;
+    const step = this.probeStep || 0.25;
+    const lim = (v: number, c: number, h: number) =>
+      Math.round(Math.min(c + h + 4, Math.max(c - h - 4, v)) / step) * step;
+    this.probe.x = lim(this.probe.x, g.cx, g.hx);
+    this.probe.z = lim(this.probe.z, g.cz, g.hz);
+    this.probe.h = Math.max(0, Math.round(this.probe.h / step) * step);
+  }
+  /** decimals follow the rung (0.25 m and coarser ⇒ one decimal: "z 10.0") */
+  private probeDec(): number { return this.probeStep < 0.25 ? 2 : 1; }
+  private probeCapText(): string {
+    const h = this.probe.h;
+    return 'z ' + (Object.is(h, -0) ? 0 : h).toFixed(this.probeDec());
+  }
+  private probeBaseText(): string {
+    const d = this.probeDec();
+    const f = (v: number) => (Object.is(v, -0) ? 0 : v).toFixed(d);
+    // the user's z-UP law: x = file x, y = −file z (nose = forward)
+    return 'x ' + f(this.probe.x) + ' · y ' + f(-this.probe.z);
+  }
+  /** live ruler state for the pins (positions in the user's z-up law) */
+  probeState(): { x: number; y: number; z: number; step: number; visible: boolean } {
+    return { x: this.probe.x, y: -this.probe.z, z: this.probe.h,
+      step: this.probeStep, visible: this.opts.probe };
+  }
+  /** client-px anchor of the two drag handles (hit test + e2e aiming) */
+  probePointScreen(which: 'base' | 'cap'): { x: number; y: number } | null {
+    if (!this.probeGroup || !this.renderer || !this.opts.probe) return null;
+    const y = this.gridY + (which === 'cap' ? this.probe.h : 0);
+    const p = new Vector3(this.probe.x + this.moff.x, y + this.moff.y, this.probe.z + this.moff.z)
+      .project(this.camera);
+    const r = this.renderer.domElement.getBoundingClientRect();
+    return { x: r.left + (p.x * 0.5 + 0.5) * r.width, y: r.top + (-p.y * 0.5 + 0.5) * r.height };
+  }
+  /** grab the ruler? (within 18 px of a handle — press BEFORE orbit picks
+   *  up the drag; twin of the placeDrag contract) */
+  probeDragStart(clientX: number, clientY: number): boolean {
+    if (!this.opts.probe || !this.probeGroup) return false;
+    for (const kind of ['cap', 'base'] as const) {
+      const p = this.probePointScreen(kind);
+      if (p && Math.hypot(p.x - clientX, p.y - clientY) <= 18) {
+        this.probe.drag = kind;
+        if (this.controls) this.controls.enabled = false;
+        return true;
+      }
+    }
+    return false;
+  }
+  probeDragMove(clientX: number, clientY: number): void {
+    const kind = this.probe.drag;
+    if (!kind || !this.renderer) return;
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const ndc = new Vector2(((clientX - r.left) / r.width) * 2 - 1,
+      -((clientY - r.top) / r.height) * 2 + 1);
+    const ray = new Raycaster();
+    ray.setFromCamera(ndc, this.camera);
+    const step = this.probeStep || 0.25;
+    const mo = this.moffV();
+    const p = new Vector3();
+    if (kind === 'base') {
+      // the PAD plane: horizontal travel SNAPS onto the visible grid lines
+      const plane = new Plane(new Vector3(0, 1, 0), -(this.gridY + mo.y));
+      if (!ray.ray.intersectPlane(plane, p)) return;
+      this.probe.x = Math.round((p.x - mo.x) / step) * step;
+      this.probe.z = Math.round((p.z - mo.z) / step) * step;
+      this.clampProbe();
+    } else {
+      // the cap rides a camera-facing VERTICAL plane through the stem
+      const wx = this.probe.x + mo.x, wz = this.probe.z + mo.z;
+      const dir = new Vector3();
+      this.camera.getWorldDirection(dir);
+      const n = new Vector3(dir.x, 0, dir.z);
+      if (n.lengthSq() < 1e-9) return;
+      n.normalize();
+      const plane = new Plane(n, -(n.x * wx + n.z * wz));
+      if (!ray.ray.intersectPlane(plane, p)) return;
+      this.probe.h = Math.max(0, Math.round((p.y - mo.y - this.gridY) / step) * step);
+    }
+    this.buildProbe();
+    this.invalidate();
+  }
+  probeDragEnd(): void {
+    if (!this.probe.drag) return;
+    this.probe.drag = null;
+    if (this.controls) this.controls.enabled = true;
+  }
+  /** draw the ruler: coloured base arms on the horizontal axes, ONE blue
+   *  line up-and-down for z with the SAME minor/major segmentation as the
+   *  ground grid (ticks every ladder step, longer every 5th, the pad-level
+   *  zero tick brightest), a draggable cap sphere and coordinate labels:
+   *  "z 10.0" beside the cap, "x 3.0 · y -2.0" under the base. */
+  private buildProbe() {
+    const grp = this.probeGroup;
+    if (!grp) return;
+    for (const o of [...grp.children]) {
+      const m = o as Mesh;
+      m.geometry?.dispose?.();
+      const mat = (o as unknown as Sprite).material as SpriteMaterial | undefined;
+      if (mat) { mat.map?.dispose?.(); mat.dispose(); }
+      grp.remove(o);
+    }
+    const step = this.probeStep || 0.25, major = step * 5;
+    const gx = this.probe.x, gz = this.probe.z, gy = this.gridY, h = this.probe.h;
+    const arm = Math.min(Math.max(major * 0.5, 0.5), 4);
+    const cX = new Color(0xff6b6b), cY = new Color(0x8fe36b), cZ = new Color(0x6aa8ff),
+      cT = new Color(0xbdd9ff), c0 = new Color(0xffffff);
+    const pos: number[] = [], col: number[] = [];
+    const seg = (a: [number, number, number], b: [number, number, number], c: Color) => {
+      pos.push(a[0], a[1], a[2], b[0], b[1], b[2]);
+      col.push(c.r, c.g, c.b, c.r, c.g, c.b);
+    };
+    // base arms: +x red, game +y (= file −z, the nose) green
+    seg([gx, gy, gz], [gx + arm, gy, gz], cX);
+    seg([gx, gy, gz], [gx, gy, gz - arm], cY);
+    // the z line: up AND down over the pad, ticks on the SAME ladder
+    const lo = gy - 2 * major, hi = gy + Math.max(h, 0) + 2 * major;
+    seg([gx, lo, gz], [gx, hi, gz], cZ);
+    for (let k = Math.ceil((lo - gy) / step); gy + k * step <= hi; k++) {
+      const yy = gy + k * step;
+      const big = ((k % 5) + 5) % 5 === 0, zero = k === 0;
+      const len = zero ? major * 0.6 : big ? major * 0.45 : step * 0.35;
+      const c = zero ? c0 : big ? cT : cZ;
+      seg([gx - len, yy, gz], [gx + len, yy, gz], c);
+      seg([gx, yy, gz - len], [gx, yy, gz + len], c);
+    }
+    const geo = new BufferGeometry();
+    geo.setAttribute('position', new BufferAttribute(new Float32Array(pos), 3));
+    geo.setAttribute('color', new BufferAttribute(new Float32Array(col), 3));
+    const lines = new LineSegments(geo,
+      new LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.95, depthTest: false }));
+    lines.renderOrder = 28;
+    lines.raycast = () => {};
+    grp.add(lines);
+    // the cap sphere: drag it UP/DOWN (snapped to the ladder)
+    const cap = new Mesh(new SphereGeometry(Math.max(step * 0.28, 0.07), 12, 8),
+      new MeshBasicMaterial({ color: 0x6aa8ff, transparent: true, opacity: 0.95, depthTest: false }));
+    cap.position.set(gx, gy + h, gz);
+    cap.renderOrder = 29;
+    cap.raycast = () => {};
+    grp.add(cap);
+    // the base puck: drag it ALONG THE GRID (snapped onto the grid lines)
+    const puckPts: number[] = [];
+    const pr = Math.max(step * 0.5, 0.14);
+    for (let i = 0; i < 24; i++) {
+      const a0 = (i / 24) * Math.PI * 2, a1 = ((i + 1) / 24) * Math.PI * 2;
+      puckPts.push(gx + Math.cos(a0) * pr, gy + 0.004, gz + Math.sin(a0) * pr,
+        gx + Math.cos(a1) * pr, gy + 0.004, gz + Math.sin(a1) * pr);
+    }
+    const pg = new BufferGeometry();
+    pg.setAttribute('position', new BufferAttribute(new Float32Array(puckPts), 3));
+    const puck = new LineSegments(pg, new LineBasicMaterial({
+      color: 0xffffff, transparent: true, opacity: 0.8, depthTest: false }));
+    puck.renderOrder = 29;
+    puck.raycast = () => {};
+    grp.add(puck);
+    // coordinate labels (same sprite factory as the part labels)
+    const capL = this.makeLabel(this.probeCapText(), false);
+    capL.position.set(gx + Math.max(0.5, major * 0.7), gy + h, gz);
+    capL.renderOrder = 32;
+    const baseL = this.makeLabel(this.probeBaseText(), false);
+    baseL.position.set(gx, gy - Math.max(step * 1.5, 0.45), gz);
+    baseL.renderOrder = 32;
+    grp.add(capL, baseL);
   }
 
   /** legacy fit: d = max(1.85r, 3.6), eye (0.6d, max(.34d,1.4), .72d) (fog off;
@@ -1476,6 +1687,7 @@ void main() {
     this.subGroup.visible = this.opts.subs;
     if (this.mirrorPlane) this.mirrorPlane.visible = this.opts.mirror;
     if (this.comMarker) this.comMarker.visible = this.opts.com;
+    if (this.probeGroup) this.probeGroup.visible = this.opts.probe;
     for (const l of this.labels) l.sp.visible = this.opts.labels;
   }
   getOptions(): ViewOptions { return { ...this.opts }; }
@@ -1992,43 +2204,6 @@ void main() {
     return [p.x, p.y, p.z];
   }
 
-  // ---------- corner axis indicator (v1.5.21, user: "We need to see
-  // directions for XYZ axes") ----------
-  /** subscribe to real renders (the loop is on-demand: the callback fires
-   *  exactly when a frame was drawn — the indicator never polls a timer) */
-  onView(cb: () => void): () => void {
-    this.viewCbs.add(cb);
-    return () => { this.viewCbs.delete(cb); };
-  }
-  /** the world X/Y/Z unit directions projected to screen for the corner
-   *  gizmo: sx/sy are SCREEN-space directions (y down), toward > 0 when the
-   *  axis head points at the viewer (draw order + fade follow it) */
-  axisView(): { k: MirrorAxis; sx: number; sy: number; toward: number }[] {
-    this.camera.updateMatrixWorld();
-    const inv = this.camera.matrixWorldInverse.copy(this.camera.matrixWorld).invert();
-    const dirs: [MirrorAxis, Vector3][] = [
-      ['x', new Vector3(1, 0, 0)], ['y', new Vector3(0, 1, 0)], ['z', new Vector3(0, 0, 1)],
-    ];
-    return dirs.map(([k, v]) => {
-      const c = v.transformDirection(inv);
-      return { k, sx: c.x, sy: -c.y, toward: -c.z };
-    });
-  }
-  /** fly the eye onto ±one world axis through the framed centre (a corner
-   *  indicator click): the viewPreset trio, made axis-general and 2-sided */
-  viewAxis(a: MirrorAxis, back = false) {
-    if (!this.controls || !this.frameC) return;
-    const c = this.frameC, d = Math.max(this.frameD, 3.6), s = back ? -1 : 1, t = 0.002;
-    const p = a === 'x' ? new Vector3(c.x + s * d, c.y + t * d, c.z + t * d)
-      : a === 'y' ? new Vector3(c.x + t * d, c.y + s * d, c.z)
-        : new Vector3(c.x + t * d, c.y + t * d, c.z - s * d);
-    this.fly = null;
-    this.camera.position.copy(p);
-    this.controls.target.copy(c);
-    this.camera.lookAt(c);
-    this.controls.update();
-    this.invalidate();
-  }
 
   // -------------------------------------------------------------- gizmo ops
 

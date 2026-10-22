@@ -473,7 +473,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         if (blockSub === 'tris' && triSel >= 0) { e.preventDefault(); deleteTri(ctx, triSel); return; }
         if (blockSel >= 0) { e.preventDefault(); deleteBlock(ctx, blockSel); return; }
       }
-      const map: Record<string, keyof ViewOptions> = { g: 'grid', o: 'occ', h: 'hull' };
+      const map: Record<string, keyof ViewOptions> = { g: 'grid', o: 'occ', h: 'hull', m: 'probe' };
       if (map[e.key]) {
         const cur = engineRef.current?.getOptions();
         if (cur) toggleOpt(map[e.key]!, !cur[map[e.key]!]);

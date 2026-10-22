@@ -1,9 +1,10 @@
-// views.spec.ts — v1.5.21 orientation & ground batch (user: "We need to see
-// directions for XYZ axes, also grid needs to fit build comfortably.
-// Probably granularity depending on zoom 1x or 5, 10, depending. Also,
-// mirror axes should be settable. Game is not hardcoded x."):
-//  • the corner AXIS COMPASS answers and its heads FLY THE CAMERA along the
-//    world axes (camPos comparison between the X and Y views),
+// views.spec.ts — v1.5.21/22 orientation & ground batch (user: "grid needs
+// to fit build comfortably. Probably granularity depending on zoom 1x or 5,
+// 10, depending"; "mirror axes should be settable. Game is not hardcoded
+// x"; "The indicator for xyz is useless. it must be on the grid, movable
+// and where it snaps on the grid for horizontal, I want the coordinate also
+// shown e.g. z 10.0 and a single line up and down for z, same segmenting
+// for measuring, eyeballing"):
 //  • the ground grid COVERS the build footprint and its CELL ADAPTS to zoom
 //    (wheel out ⇒ coarser rung of the 0.25/1.25/2.5/12.5 m ladder),
 //  • the ⚙ mirror-axis row (X/Y/Z) is live on the engine (⇄ placement, block
@@ -14,15 +15,15 @@ import { expect, test, type Page } from '@playwright/test';
 const ISW = '3812927875';
 
 type Grid = { step: number; major: number; halfX: number; halfZ: number; cx: number; cz: number; y: number };
-type Ax = { k: 'x' | 'y' | 'z'; sx: number; sy: number; toward: number };
 type Win = { __ARCHEAN__?: {
   engine: {
     camPos(): [number, number, number];
     blueprint: { box_min: { x: number; y: number; z: number }; box_max: { x: number; y: number; z: number } } | null;
   };
-  axis(): Ax[];
   grid(): Grid | null;
   mirAxis(): 'x' | 'y' | 'z';
+  probe(): { x: number; y: number; z: number; step: number; visible: boolean };
+  probePoint(w: 'base' | 'cap'): { x: number; y: number } | null;
 } };
 
 const camPos = (page: Page) =>
@@ -37,39 +38,66 @@ async function openCraft(page: Page, id: string) {
   await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
 }
 
-test.describe('axis compass + adaptive grid + settable mirror axis @ui', () => {
+test.describe('measure ruler + adaptive grid + settable mirror axis @ui', () => {
   const desktopOnly = () => test.skip(test.info().project.name !== 'chromium', 'desktop-only');
 
-  test('the compass shows the three world axes', async ({ page }) => {
+  const onLadder = (v: number, step: number) =>
+    Math.abs(v / step - Math.round(v / step)) < 1e-6;
+
+  test('the measure ruler sits ON the grid and reads z-up coordinates', async ({ page }) => {
     await openCraft(page, ISW);
-    await expect(page.getByTestId('axis-gizmo')).toBeVisible();
-    const av = await page.evaluate(() => (window as unknown as Win).__ARCHEAN__!.axis());
-    expect(av.map(x => x.k).sort()).toEqual(['x', 'y', 'z']);
-    for (const x of av) {
-      expect(Number.isFinite(x.sx)).toBe(true);
-      expect(Number.isFinite(x.sy)).toBe(true);
-      expect(Math.abs(x.toward)).toBeLessThanOrEqual(1.001);
-    }
+    const st = await page.evaluate(() => (window as unknown as Win).__ARCHEAN__!.probe());
+    expect(st.visible).toBe(true);                    // ⚙ default ON (m toggles)
+    expect(st.step).toBeGreaterThan(0);
+    expect(onLadder(st.z, st.step)).toBe(true);       // height snapped to the ladder
+    expect(onLadder(st.x, st.step)).toBe(true);       // base sits on grid lines
+    expect(onLadder(st.y, st.step)).toBe(true);
+    // the default spot is just off the SIDE of the build (not the centre —
+    // that is where the editor's clicks land), within reach of the pad
+    const box = await page.evaluate(() => {
+      const b = (window as unknown as Win).__ARCHEAN__!.engine.blueprint!;
+      return { mn: [b.box_min.x, b.box_min.z], mx: [b.box_max.x, b.box_max.z] };
+    });
+    expect(st.x).toBeGreaterThan(box.mn[0]! - 8);
+    expect(st.x).toBeLessThan(box.mx[0]! + 8);
   });
 
-  test('clicking a compass head flies the camera along that axis', async ({ page }) => {
+  test('dragging the puck moves the ruler along the grid, SNAPPED; orbit yields', async ({ page }) => {
     desktopOnly();
     await openCraft(page, ISW);
-    await page.getByTestId('axis-view-x').click();
-    await page.waitForTimeout(250);
-    const px = await camPos(page);
-    await page.getByTestId('axis-view-y').click();
-    await page.waitForTimeout(250);
-    const py = await camPos(page);
-    // X view: eye at cx+d; Y view: eye at cy+d. d ≥ 3.6 ⇒ the dominant
-    // coordinates separate by roughly the framing distance each way.
-    expect(px[0] - py[0]).toBeGreaterThan(1);        // X view is +x-ward
-    expect(py[1] - px[1]).toBeGreaterThan(1);        // Y view is up
-    // the faded TAIL dot views the same axis from the opposite side
-    await page.getByTestId('axis-view-x-back').click();
-    await page.waitForTimeout(250);
-    const pxb = await camPos(page);
-    expect(px[0] - pxb[0]).toBeGreaterThan(1);       // opposite sides of the craft
+    const p0 = await page.evaluate(() => (window as unknown as Win).__ARCHEAN__!.probePoint('base'));
+    const s0 = await page.evaluate(() => (window as unknown as Win).__ARCHEAN__!.probe());
+    const cam0 = await camPos(page);
+    expect(p0).not.toBeNull();
+    await page.mouse.move(p0!.x, p0!.y);
+    await page.mouse.down();
+    await page.mouse.move(p0!.x + 90, p0!.y - 40, { steps: 6 });
+    await page.mouse.move(p0!.x + 160, p0!.y - 70, { steps: 6 });
+    await page.mouse.up();
+    const s1 = await page.evaluate(() => (window as unknown as Win).__ARCHEAN__!.probe());
+    const moved = Math.hypot(s1.x - s0.x, s1.y - s0.y);
+    expect(moved).toBeGreaterThan(0.5);               // it MOVED (non-vacuous)
+    expect(onLadder(s1.x, s1.step)).toBe(true);       // … and SNAPPED onto the grid
+    expect(onLadder(s1.y, s1.step)).toBe(true);
+    const cam1 = await camPos(page);
+    expect(Math.max(...cam0.map((v, i) => Math.abs(v - cam1[i]!)))).toBeLessThan(1e-6);
+  });
+
+  test('dragging the cap raises the z line and re-snaps the "z" readout', async ({ page }) => {
+    desktopOnly();
+    await openCraft(page, ISW);
+    const p0 = await page.evaluate(() => (window as unknown as Win).__ARCHEAN__!.probePoint('cap'));
+    const s0 = await page.evaluate(() => (window as unknown as Win).__ARCHEAN__!.probe());
+    expect(p0).not.toBeNull();
+    await page.mouse.move(p0!.x, p0!.y);
+    await page.mouse.down();
+    await page.mouse.move(p0!.x, p0!.y - 120, { steps: 8 });
+    await page.mouse.up();
+    const s1 = await page.evaluate(() => (window as unknown as Win).__ARCHEAN__!.probe());
+    expect(s1.z).toBeGreaterThan(s0.z);               // screen-up = UP in z
+    expect(onLadder(s1.z, s1.step)).toBe(true);       // "z 10.0"-clean rung steps
+    // the horizontal spot stayed put under a vertical drag
+    expect(s1.x).toBeCloseTo(s0.x, 6);
   });
 
   test('the grid fits the build footprint', async ({ page }) => {
