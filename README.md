@@ -1,4 +1,4 @@
-# Archean Blueprint Tools · v1.6.3
+# Archean Blueprint Tools · v1.7.0
 
 **Reverse-engineered file format + a zero-build browser viewer/inspector for
 workshop craft of [Archean](https://store.steampowered.com/app/2941660/Archean/)**
@@ -60,10 +60,13 @@ gallery/live-edit/save it ships:
   game's authoring defaults, Sphere skin lattice hull planner with
   deviation/lift previews), the lift & altitude widget (US Standard
   Atmosphere 1976, vacuum/He/H₂ buoyancy, weight-limit ladder), the
-  **component cost** readout in View (every part unfolded through the game's
-  crafter recipes to raw ores — the craft-wide shopping list plus each part's
-  own recipe chain, e.g. a FluidPort = 1 Casing + 1 Connector = 1 000 g iron,
-  250 g carbon, 250 g silicon, 1 g copper), flight and wind-tunnel panels,
+  **build cost** readout in View (the WHOLE craft unfolded through the game's
+  crafter recipes to raw ores — parts, blocks, hull triangles, cables, frames
+  and struts in their own foldable groups, the craft-wide shopping list plus
+  each line's own recipe chain, e.g. a FluidPort = 1 Casing + 1 Connector =
+  1 000 g iron, 250 g carbon, 250 g silicon, 1 g copper; cables priced by the
+  game's per-segment centimetre rule with the real run length shown), flight
+  and wind-tunnel panels,
   and a searchable in-app **help manual** (Help ▸ Manual).
 
 ## What the viewer shows
@@ -183,7 +186,7 @@ say-so**: green tests or merged work never imply one.
 
 ## Ideas welcome — open an issue!
 
-This is v1.6.3: the format is decoded and the viewer is useful, but the good
+This is v1.7.0: the format is decoded and the viewer is useful, but the good
 ideas are not all in yet. Feature requests, format questions, and craft that
 render wrong (attach the `blueprint.json`) are all best filed as
 [issues](https://github.com/Joeppie/archean-blueprint-tools/issues) — that is

@@ -658,7 +658,7 @@ freshly-authored triangles, fixture 9000006001 — see the v1.5.12 bullet).
   `help.spec.ts` (@ui, desktop+pixel7: menu→dialog, h1, sphere LIMITS table
   as a real <table>, search by title/tag/body word, Esc/✕/backdrop close,
   dialog never outgrows the viewport).
-- **v1.6.2 VIEW ▸ BUILD COST (user 2026-10-22: "In the view tab,
+- **v1.7.0 VIEW ▸ BUILD COST (user 2026-10-22: "In the view tab,
   summarize the total cost of all components expressed in raw materials, do a
   complete breakdown per component; e.g. what does the fluidport cost? and
   what do its constituents cost?" — then "it doesnt calculate the cost of
