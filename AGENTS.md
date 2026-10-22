@@ -481,6 +481,23 @@ freshly-authored triangles, fixture 9000006001 — see the v1.5.12 bullet).
   SILHOUETTE from screenshot pixels (largest blob, scanline-filled area ÷
   its convex hull): 0.99–1.00 at every size — the picture itself has no
   bite. In-game judgment stays the user's (AGENTS: in-game pixels arbitrate).
+- **v1.5.24 COORD READOUT v2 (user: "your implementation of letting the
+  corner be measured just by raytracing what lands on is excellent … But we
+  need full 3d coordinates then, ANd I still need an indicator IN THE GRID
+  for the major axis lines to get an understanding for X and Z, + and
+  −"):** `coordHoverMove` now RAYTRACES WHAT LANDS ON — `pickCell`'s first
+  VISIBLE surface (block/part/sub/ground, wireframe click-through included)
+  in raw-file metres, pad-plane fallback off-craft — and the black chip +
+  pin read the FULL snapped `x y z` (y = UP law, FORMAT line 30; every coord
+  on the visible grid rung). coordGroup draws the pad-corner crosshair PLUS
+  a black 3-D cross at the point with a thin connector down to the pad.
+  PAD AXIS MARKERS: syncGrid adds the WORLD x = 0 line in RED and the z = 0
+  line in BLUE across the full visible span (part of the grid LineSegments,
+  same rebuild), with makeAxisLabel black-chip sprites '+x' '−x' '+z' '−z'
+  at the ends (rebuilt with the grid, live in groundGroup so g toggles
+  them); pin hook `axis()`. Shift-grid and coordLock are GONE. Pins:
+  views.spec (chip full x/y/z snapped; hovering the CRAFT raises y — the
+  y-UP convention + raytrace proof; axis labels present). v1.5.24 (Z).
 - **v1.5.23 COORD READOUT (user 2026-10-22: "a small black label to indicate
   grid position on the corners of the displayed grid under cursor … for a
   ad-hoc vertical grid also black to be visible only when pressing shift,
@@ -505,8 +522,12 @@ freshly-authored triangles, fixture 9000006001 — see the v1.5.12 bullet).
   without pointer motion; pointerleave clears. Hooks `coord()`. Pins:
   views.spec @ui (chip visible, snapped to the ladder, no y without Shift,
   full triple with it, THE Y-UP CONVENTION PIN). No new option row — the
-  readout is always on while the cursor is over the viewport (the ⚙ key
-  hint mentions Shift).
+  readout is always on while the cursor is over the viewport.
+  **THE SHIFT PLANE WAS REMOVED THE SAME DAY (v1.5.24, user: "Just remove
+  this shift-grid. I dont want it for now") — after one iteration where it
+  also had to be PINNED to the press-corner for measurement ("the other
+  grid … should not move against the ground plane, or no measurement is
+  possible"); do not resurrect without the user asking.**
 - **v1.5.22 MEASURE RULER — REPLACED SAME DAY by the v1.5.23 COORD
   READOUT (user: "that is not what I thought. I thought more like the way
   blender does it"): the ruler, `probeState()/probePointScreen()/

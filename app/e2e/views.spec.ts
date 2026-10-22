@@ -26,7 +26,8 @@ type Win = { __ARCHEAN__?: {
   };
   grid(): Grid | null;
   mirAxis(): 'x' | 'y' | 'z';
-  coord(): { x: number; y: number; z: number; step: number; shift: boolean } | null;
+  coord(): { x: number; y: number; z: number; step: number } | null;
+  axis(): string[];
 } };
 
 const gridOf = (page: Page) =>
@@ -53,7 +54,7 @@ test.describe('coord readout + adaptive grid + settable mirror axis @ui', () => 
     return { x: r!.x + r!.width * 0.5, y: r!.y + r!.height * fy };
   };
 
-  test('hovering the pad shows a BLACK chip SNAPPED to grid corners (x–z, y up)', async ({ page }) => {
+  test('hovering the pad shows a BLACK chip with the full SNAPPED x/y/z', async ({ page }) => {
     desktopOnly();
     await openCraft(page, ISW);
     const p = await padPixel(page);
@@ -62,44 +63,41 @@ test.describe('coord readout + adaptive grid + settable mirror axis @ui', () => 
     const st = (await coordOf(page))!;
     const chip = page.getByTestId('coord-chip');
     await expect(chip).toBeVisible();
-    // snapped onto the visible ladder (the same rung the ground grid draws)
+    // every coord snapped onto the visible ladder (the rung the grid draws)
     expect(onLadder(st.x, st.step)).toBe(true);
+    expect(onLadder(st.y, st.step)).toBe(true);
     expect(onLadder(st.z, st.step)).toBe(true);
-    expect(st.shift).toBe(false);
-    // WITHOUT Shift only the flat-grid (x–z) corner is readable — no y yet
     const text = (await chip.textContent())!;
-    expect(text).toContain('x');
-    expect(text).toContain('z');
-    expect(text).not.toContain('y');
+    for (const k of ['x', 'y', 'z']) expect(text).toContain(k);
+    // THE CONVENTION (checked, FORMAT line 30): the FLAT plane is x–z and
+    // y is the vertical coordinate — on the pad, y reads the (snapped)
+    // ground height, a clean rung value
+    expect(st.y).toBeLessThanOrEqual(0.5);
   });
 
-  test('Shift adds the vertical plane: full x/y/z, and y is the UP axis', async ({ page }) => {
+  test('hovering the CRAFT raytraces the SURFACE: y rises with it', async ({ page }) => {
     desktopOnly();
     await openCraft(page, ISW);
-    const p = await padPixel(page);
-    await page.mouse.move(p.x, p.y);
+    const pad = await padPixel(page);
+    await page.mouse.move(pad.x, pad.y);
     await expect.poll(() => coordOf(page), { timeout: 5_000 }).not.toBeNull();
-    await page.keyboard.down('Shift');
-    await page.mouse.move(p.x, p.y - 4, { steps: 2 });    // re-run under Shift
-    await expect.poll(() => coordOf(page)?.then(c => c?.shift), { timeout: 5_000 }).toBe(true);
-    const s1 = (await coordOf(page))!;
-    const chip = page.getByTestId('coord-chip');
-    const text = (await chip.textContent())!;
-    expect(text).toContain('y');                          // full x/y/z now
-    expect(onLadder(s1.y, s1.step)).toBe(true);
-    // THE CONVENTION PIN (user: "Is x-y the plane that is flat, and Z up,
-    // or is that Y?"): raising the pointer on screen RAISES y (never z) —
-    // y is the vertical coordinate of the file/viewer (FORMAT §world maths)
-    await page.mouse.move(p.x, p.y - 150, { steps: 6 });
+    const ground = (await coordOf(page))!;
+    // straight at the framed centre lands on the craft itself
+    const r = await page.getByTestId('canvas').boundingBox();
+    await page.mouse.move(r!.x + r!.width * 0.5, r!.y + r!.height * 0.45);
     await expect.poll(async () => {
-      const s2 = await coordOf(page);
-      return !!s2 && s2.y > s1.y;
+      const c = await coordOf(page);
+      return !!c && c.y > ground.y;               // y = UP (never z here)
     }, { timeout: 5_000 }).toBe(true);
-    const s2 = (await coordOf(page))!;
-    expect(onLadder(s2.y, s2.step)).toBe(true);
-    await page.keyboard.up('Shift');
-    await page.mouse.move(p.x, p.y - 148, { steps: 1 });
-    await expect.poll(() => coordOf(page)?.then(c => c?.shift), { timeout: 5_000 }).toBe(false);
+    const surf = (await coordOf(page))!;
+    expect(onLadder(surf.y, surf.step)).toBe(true);
+  });
+
+  test('the pad carries ±X / ±Z axis markers (red x-line, blue z-line)', async ({ page }) => {
+    await openCraft(page, ISW);
+    await expect.poll(() => page.evaluate(() =>
+      (window as unknown as Win).__ARCHEAN__!.axis()), { timeout: 10_000 }
+    ).toEqual(expect.arrayContaining(['+x', '\u2212x', '+z', '\u2212z']));
   });
 
   test('the grid fits the build footprint', async ({ page }) => {

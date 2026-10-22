@@ -60,9 +60,12 @@ declare global {
     placeShift: (s: [number, number, number]) => boolean;
     /** v1.5.21 adaptive ground grid plan (step/major/spans in file coords) */
     grid: () => ReturnType<Engine['gridInfo']>;
-    /** v1.5.23 COORD READOUT: the snapped file-space point under the cursor
-     *  (y = UP per FORMAT §world maths), null when the ray misses the pad */
+    /** COORD READOUT: the snapped file-space point the ray LANDS ON —
+     *  the visible surface's full x/y/z (flat plane x–z, y = UP per
+     *  FORMAT §world maths), null when the ray misses the pad */
     coord: () => ReturnType<Engine['coordHoverState']>;
+    /** the pad axis-marker labels (['−x','+x','−z','+z']) */
+    axis: () => string[];
     /** v1.5.21 settable mirror axis (⚙ row) */
     mirAxis: () => 'x' | 'y' | 'z';
   } }
@@ -120,11 +123,6 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
     const engine = new Engine();
     engine.attach(canvasRef.current!);
     engineRef.current = engine;
-    const shiftSync = (e: KeyboardEvent) => {
-      if (e.key === 'Shift') engine.coordHoverShift(e.type === 'keydown');
-    };
-    window.addEventListener('keydown', shiftSync);
-    window.addEventListener('keyup', shiftSync);
     const ro = new ResizeObserver(() => engine.resize());
     ro.observe(canvasRef.current!);
     window.__ARCHEAN__ = {
@@ -164,11 +162,10 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
       grid: () => engine.gridInfo(),
       mirAxis: () => engine.mirrorAxis,
       coord: () => engine.coordHoverState(),
+      axis: () => engine.axisMarks(),
     };
     onEngine?.(engine);
     return () => {
-      window.removeEventListener('keydown', shiftSync);
-      window.removeEventListener('keyup', shiftSync);
       ro.disconnect(); engine.dispose(); window.__ARCHEAN__ = undefined; onEngine?.(null);
     };
   }, []);                                    // eslint-disable-line react-hooks/exhaustive-deps
@@ -334,19 +331,16 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
             return;                       // the smear aims the ghost, not hover
           }
           blockHover(e.clientX, e.clientY, e.shiftKey);
-          // BLENDER-STYLE COORD READOUT (v1.5.23): the grid corner under
-          // the cursor; Shift adds the camera-facing vertical plane so the
-          // full x/y/z (y = UP, FORMAT §world maths) becomes readable
-          const info = engineRef.current?.coordHoverMove(e.clientX, e.clientY, e.shiftKey) ?? null;
+          // BLENDER-STYLE COORD READOUT: the grid corner the ray lands on
+          // (x–z flat plane, y = UP per FORMAT §world maths)
+          const info = engineRef.current?.coordHoverMove(e.clientX, e.clientY) ?? null;
           const chip = chipRef.current, host = hostRef.current;
           if (chip && host) {
             if (info) {
               const hr = host.getBoundingClientRect();
               const dg = info.step < 0.25 ? 2 : 1;
               const f = (v: number) => (Object.is(v, -0) ? 0 : v).toFixed(dg);
-              chip.textContent = info.shift
-                ? `x ${f(info.x)}  y ${f(info.y)}  z ${f(info.z)}`
-                : `x ${f(info.x)}  z ${f(info.z)}`;
+              chip.textContent = `x ${f(info.x)}  y ${f(info.y)}  z ${f(info.z)}`;
               chip.style.display = 'block';
               chip.style.left = `${Math.min(Math.max(4, e.clientX - hr.left + 14), hr.width - 170)}px`;
               chip.style.top = `${Math.max(4, e.clientY - hr.top + 16)}px`;

@@ -305,17 +305,18 @@ export class Engine {
    *  root's moff, so raw-file child coords land at world) */
   private gridBox: { cx: number; cz: number; hx: number; hz: number; yTop: number } | null = null;
   private gridY = 0;
+  /** the ±X/±Z end labels of the pad axis markers (rebuilt with the grid) */
+  private axisLabels: Sprite[] = [];
 
   // ---------- hover COORD READOUT (v1.5.23, replaces the v1.5.22 ruler) ---
   /** Blender-style: a black crosshair snaps onto the grid CORNER under the
-   *  cursor; on Shift the most camera-facing VERTICAL grid plane (normal x
-   *  or z, the axis whose vertical plane is most coplanar with the screen)
-   *  appears through that corner so the third coordinate becomes readable
-   *  too. COORDINATE LAW (FORMAT line 30, checked 2026-10-22): x lateral,
+   *  cursor (v1.5.24: the Shift vertical-grid experiment was REMOVED by the
+   *  user — "Just remove this shift-grid"; the raytraced corner readout is
+   *  what stays). COORDINATE LAW (FORMAT line 30, checked 2026-10-22): x lateral,
    *  y = UP, z longitudinal (nose = −z) — the flat plane is x–z, NOT x–y. */
   private coordGroup = new Group();
-  private coordSnap: { x: number; y: number; z: number; step: number; shift: boolean } | null = null;
-  private coordHoverLast: { x: number; y: number; shift: boolean } | null = null;
+  private coordSnap: { x: number; y: number; z: number; step: number } | null = null;
+  private coordHoverLast: { x: number; y: number } | null = null;
 
 
   // ---------- mass & CoM ----------
@@ -1414,21 +1415,71 @@ void main() {
       line(0, k * step, ((k % 5) + 5) % 5 === 0);
     for (let k = Math.ceil((cz - halfZ) / step); k * step <= cz + halfZ; k++)
       line(1, k * step, ((k % 5) + 5) % 5 === 0);
+    // WORLD-AXIS MARKERS ON THE PAD (v1.5.24, user: "I still need an
+    // indicator IN THE GRID for the major axis lines to get an
+    // understanding for X and Z, + and −"): Blender-style — the x = 0 and
+    // z = 0 grid lines ride in FULL COLOUR (x-axis RED, z-axis BLUE — the
+    // y-up file law, FORMAT line 30) across the whole visible span, with
+    // +/− end labels.
+    const axY = y + 0.0015;
+    const cAxX = new Color(0xc23b3b), cAxZ = new Color(0x3b5fc2);
+    pos.push(cx - halfX, axY, 0, cx + halfX, axY, 0);
+    col.push(cAxX.r, cAxX.g, cAxX.b, cAxX.r, cAxX.g, cAxX.b);
+    pos.push(0, axY, cz - halfZ, 0, axY, cz + halfZ);
+    col.push(cAxZ.r, cAxZ.g, cAxZ.b, cAxZ.r, cAxZ.g, cAxZ.b);
     const geo = new BufferGeometry();
     geo.setAttribute('position', new BufferAttribute(new Float32Array(pos), 3));
     geo.setAttribute('color', new BufferAttribute(new Float32Array(col), 3));
     this.gridLines = new LineSegments(geo,
       new LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9 }));
     this.groundGroup.add(this.gridLines);
+    // +/− end labels for the two axis lines
+    for (const l of this.axisLabels) { l.material.map?.dispose(); l.material.dispose(); this.groundGroup.remove(l); }
+    const lbl = (t: string, css: string, lx: number, lz: number) => {
+      const sp = this.makeAxisLabel(t, css);
+      sp.position.set(lx, y + 0.03, lz);
+      this.groundGroup.add(sp);
+      return sp;
+    };
+    const maj = step * 5;
+    const inX = Math.max(cx + halfX - maj, cx), inZ = Math.max(cz + halfZ - maj, cz);
+    this.axisLabels = [
+      lbl('+x', '#ff8080', inX, 0), lbl('\u2212x', '#ff8080', Math.min(cx - halfX + maj, cx), 0),
+      lbl('+z', '#8ab0ff', 0, inZ), lbl('\u2212z', '#8ab0ff', 0, Math.min(cz - halfZ + maj, cz)),
+    ];
     // the hover COORD READOUT snaps on the SAME ladder: a rung change
     // re-snaps a live readout (its step field rides to the chip)
     if (this.coordSnap && plan.step !== this.coordSnap.step) {
       const c = this.coordHoverLast;
-      if (c) this.coordHoverMove(c.x, c.y, c.shift);
+      if (c) this.coordHoverMove(c.x, c.y);
     }
   }
   /** live grid plan for the pins (testid hook __ARCHEAN__.grid()): the
    *  chosen cell + the covered half-spans in file coords */
+  /** the current pad axis-marker labels (pin hook axis()) */
+  axisMarks(): string[] { return this.axisLabels.map(l => l.userData.t as string); }
+  /** small BLACK-chip label in a fixed colour for the axis ends */
+  private makeAxisLabel(text: string, css: string): Sprite {
+    const cv = document.createElement('canvas');
+    const ctx0 = cv.getContext('2d')!;
+    ctx0.font = 'bold 40px monospace';
+    const w = Math.max(56, Math.ceil(ctx0.measureText(text).width) + 20);
+    cv.width = w; cv.height = 52;
+    const ctx = cv.getContext('2d')!;
+    ctx.fillStyle = 'rgba(8,12,16,0.78)';
+    ctx.fillRect(0, 0, w, 52);
+    ctx.font = 'bold 40px monospace';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = css;
+    ctx.fillText(text, 10, 28);
+    const sp = new Sprite(new SpriteMaterial({
+      map: new CanvasTexture(cv), depthTest: false, transparent: true }));
+    sp.scale.set(w / 52 * 0.26, 0.26, 1);
+    sp.renderOrder = 10;
+    sp.raycast = () => {};
+    sp.userData = { t: text };
+    return sp;
+  }
   gridInfo(): { step: number; major: number; halfX: number; halfZ: number; cx: number; cz: number; y: number } | null {
     if (!this.gridBox) return null;
     const h = this.renderer?.domElement.clientHeight || 1;
@@ -1450,54 +1501,43 @@ void main() {
    *  file-space point for the black chip, or null when the ray misses the
    *  pad. The vertical plane is the one most parallel to the screen: the
    *  normal (x̂ or ẑ) whose |camera-view component| is LARGER. */
-  coordHoverMove(clientX: number, clientY: number, shift: boolean)
-    : { x: number; y: number; z: number; step: number; shift: boolean } | null {
+  coordHoverMove(clientX: number, clientY: number)
+    : { x: number; y: number; z: number; step: number } | null {
     const g = this.gridBox;
     if (!g || !this.renderer) { this.coordHoverClear(); return null; }
     const step = this.gridStepNow || 0.25;
-    const r = this.renderer.domElement.getBoundingClientRect();
-    const ndc = new Vector2(((clientX - r.left) / r.width) * 2 - 1,
-      -((clientY - r.top) / r.height) * 2 + 1);
-    const ray = new Raycaster();
-    ray.setFromCamera(ndc, this.camera);
-    const mo = this.moffV();
-    const p = new Vector3();
-    // the PAD plane first: the grid CORNER under the cursor (x–z, y = up)
-    const pad = new Plane(new Vector3(0, 1, 0), -(this.gridY + mo.y));
-    if (!ray.ray.intersectPlane(pad, p)) { this.coordHoverClear(); return null; }
     const snap = (v: number) => Math.round(v / step) * step;
-    let sx = snap(p.x - mo.x), sz = snap(p.z - mo.z);
-    let sy = this.gridY;
-    let planeAxis: 'x' | 'z' | null = null;
-    if (shift) {
-      const dir = new Vector3();
-      this.camera.getWorldDirection(dir);
-      planeAxis = Math.abs(dir.x) >= Math.abs(dir.z) ? 'x' : 'z';
-      // the vertical plane through the corner, most coplanar with the view
-      const wx = sx + mo.x, wz = sz + mo.z;
-      const n = planeAxis === 'x' ? new Vector3(1, 0, 0) : new Vector3(0, 0, 1);
-      const P0 = planeAxis === 'x' ? new Vector3(wx, 0, wz) : new Vector3(wx, 0, wz);
-      const plane = new Plane(n, -(n.dot(P0)));
-      const q = new Vector3();
-      if (ray.ray.intersectPlane(plane, q)) {
-        sy = snap(q.y - mo.y);
-        if (planeAxis === 'x') sz = snap(q.z - mo.z); else sx = snap(q.x - mo.x);
-      }
+    // RAYTRACE WHAT LANDS ON (user v1.5.24): pickCell answers the first
+    // VISIBLE surface under the cursor — block face, part, subgrid, the
+    // ground — in raw FILE metres (wireframe stays click-through, matching
+    // what you see). Off-craft/horizon misses fall back to the pad plane.
+    const hit = this.pickCell(clientX, clientY);
+    let fx: number, fy: number, fz: number;
+    if (hit) {
+      fx = hit.point[0]!; fy = hit.point[1]!; fz = hit.point[2]!;
+    } else {
+      const r = this.renderer.domElement.getBoundingClientRect();
+      const ndc = new Vector2(((clientX - r.left) / r.width) * 2 - 1,
+        -((clientY - r.top) / r.height) * 2 + 1);
+      const ray = new Raycaster();
+      ray.setFromCamera(ndc, this.camera);
+      const mo = this.moffV();
+      const p = new Vector3();
+      const pad = new Plane(new Vector3(0, 1, 0), -(this.gridY + mo.y));
+      if (!ray.ray.intersectPlane(pad, p)) { this.coordHoverClear(); return null; }
+      fx = p.x - mo.x; fy = this.gridY; fz = p.z - mo.z;
     }
-    const info = { x: sx, y: sy, z: sz, step, shift, plane: planeAxis } as const;
+    const sx = snap(fx), sy = snap(fy), sz = snap(fz);
     const prev = this.coordSnap;
-    this.coordSnap = { x: sx, y: sy, z: sz, step, shift };
-    this.coordHoverLast = { x: clientX, y: clientY, shift };
-    if (!prev || prev.x !== sx || prev.y !== sy || prev.z !== sz || prev.step !== step || prev.shift !== shift)
+    const info = { x: sx, y: sy, z: sz, step };
+    this.coordSnap = info;
+    this.coordHoverLast = { x: clientX, y: clientY };
+    if (!prev || prev.x !== sx || prev.y !== sy || prev.z !== sz || prev.step !== step)
       this.buildCoordMarks(info);
     return info;
   }
+
   coordHoverState() { return this.coordSnap; }
-  /** Shift pressed/released WITHOUT a pointer move re-runs the last hover */
-  coordHoverShift(shift: boolean) {
-    const c = this.coordHoverLast;
-    if (c) this.coordHoverMove(c.x, c.y, shift);
-  }
   coordHoverClear() {
     this.coordSnap = null;
     this.coordHoverLast = null;
@@ -1512,56 +1552,26 @@ void main() {
       grp.remove(o);
     }
   }
-  /** BLACK marks only (user: "also black"): a crosshair on the pad corner
-   *  and, on Shift, a black ad-hoc VERTICAL GRID on the chosen plane — the
-   *  SAME ladder spacing and absolute lattice as the ground grid (minor
-   *  lines, brighter majors every 5 rungs), plus a black 3-D cross at the
-   *  chosen (x, y, z) point. All coordinates are raw-file (the group rides
-   *  moff); y is UP. */
-  private buildCoordMarks(info: { x: number; y: number; z: number; step: number; shift: boolean; plane: 'x' | 'z' | null }) {
+  /** BLACK marks (v1.5.24 full 3D): the corner crosshair on the pad AND a
+   *  pin at the measured point — a black 3-D cross at the snapped (x, y, z)
+   *  with a thin connector down to the pad, so the height reads in place. */
+  private buildCoordMarks(info: { x: number; y: number; z: number; step: number }) {
     this.clearGroup(this.coordGroup);
-    const step = info.step, major = step * 5;
-    const g = this.gridBox!;
-    const gx = info.x, gz = info.z;
-    const cMinor = new Color(0x2a2e33), cMajor = new Color(0x000000);
+    const arm = Math.max(info.step * 0.9, 0.12);
+    const cMajor = new Color(0x000000);
     const pos: number[] = [], col: number[] = [];
     const seg = (a: [number, number, number], b: [number, number, number], c: Color) => {
       pos.push(a[0], a[1], a[2], b[0], b[1], b[2]);
       col.push(c.r, c.g, c.b, c.r, c.g, c.b);
     };
-    // the corner crosshair ON the pad (the corner of the displayed grid)
-    const arm = Math.max(step * 0.9, 0.12);
-    seg([gx - arm, this.gridY + 0.003, gz], [gx + arm, this.gridY + 0.003, gz], cMajor);
-    seg([gx, this.gridY + 0.003, gz - arm], [gx, this.gridY + 0.003, gz + arm], cMajor);
-    if (info.shift && info.plane) {
-      // the plane spans the pad horizontally and reaches comfortably over
-      // the craft; its lines sit on the WORLD lattice (k·step) exactly
-      // like the ground grid, so chips and ticks agree
-      const yLo = this.gridY - 2 * major, yHi = g.yTop + 2 * major;
-      const half = info.plane === 'x'
-        ? Math.max(g.hz, Math.abs(gz - g.cz)) + 2 * major
-        : Math.max(g.hx, Math.abs(gx - g.cx)) + 2 * major;
-      const ctr = info.plane === 'x' ? gz : gx;
-      for (let k = Math.ceil(yLo / step); k * step <= yHi; k++) {
-        const yy = k * step;
-        const big = ((k % 5) + 5) % 5 === 0;
-        const c = big ? cMajor : cMinor;
-        if (info.plane === 'x') seg([gx, yy, ctr - half], [gx, yy, ctr + half], c);
-        else seg([ctr - half, yy, gz], [ctr + half, yy, gz], c);
-      }
-      for (let k = Math.ceil((ctr - half) / step); k * step <= ctr + half; k++) {
-        const h = k * step;
-        const big = ((k % 5) + 5) % 5 === 0;
-        const c = big ? cMajor : cMinor;
-        if (info.plane === 'x') seg([gx, yLo, h], [gx, yHi, h], c);
-        else seg([h, yLo, gz], [h, yHi, gz], c);
-      }
-      // the full-coordinate cross at the chosen point
-      const m = Math.max(step * 1.2, 0.18);
-      const py = info.y;
-      seg([gx - m, py, gz], [gx + m, py, gz], cMajor);
-      seg([gx, py - m, gz], [gx, py + m, gz], cMajor);
-      seg([gx, py, gz - m], [gx, py, gz + m], cMajor);
+    seg([info.x - arm, this.gridY + 0.003, info.z], [info.x + arm, this.gridY + 0.003, info.z], cMajor);
+    seg([info.x, this.gridY + 0.003, info.z - arm], [info.x, this.gridY + 0.003, info.z + arm], cMajor);
+    if (info.y > this.gridY + 1e-6) {
+      const m = Math.max(info.step * 0.6, 0.09);
+      seg([info.x, this.gridY, info.z], [info.x, info.y, info.z], new Color(0x30343a));
+      seg([info.x - m, info.y, info.z], [info.x + m, info.y, info.z], cMajor);
+      seg([info.x, info.y - m, info.z], [info.x, info.y + m, info.z], cMajor);
+      seg([info.x, info.y, info.z - m], [info.x, info.y, info.z + m], cMajor);
     }
     const geo = new BufferGeometry();
     geo.setAttribute('position', new BufferAttribute(new Float32Array(pos), 3));
@@ -1572,7 +1582,6 @@ void main() {
     lines.raycast = () => {};
     this.coordGroup.add(lines);
   }
-
 
   /** legacy fit: d = max(1.85r, 3.6), eye (0.6d, max(.34d,1.4), .72d) (fog off;
    *  frames over the UNION of file box, built solids and part boxes,

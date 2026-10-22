@@ -28,8 +28,7 @@ Tags: keyboard shortcuts keys mouse controls orbit pan zoom delete escape shift 
 | press-drag-release (holding a part) | SMEAR-place it, aimed along the drag |
 | double-click a list row | fly the camera to that part |
 | drag a gizmo ring | rotate (the ring you grab is the axis you turn) |
-| hover the ground grid | a black label shows the snapped grid-corner position under the cursor |
-| Shift while hovering | adds the camera-facing VERTICAL grid plane + the full x/y/z (y is UP) readout |
+| hover the scene | a black label shows the full snapped x/y/z the ray lands on (y is UP; the pad's red line is x, the blue line z, both ±-labelled) |
 | drag a gizmo arrow | move (world axes, always axis-aligned) |
 
 The camera never moves on its own: a fly-to happens only on your click or

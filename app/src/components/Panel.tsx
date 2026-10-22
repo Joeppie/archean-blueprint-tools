@@ -361,7 +361,7 @@ export function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHu
         onInput={p.onHullOpacity}
         title="dims the whole hull skin: blocks, triangle plates and their wireframes" />
       <div className="mt-1 text-[10px] leading-snug text-ink-dim">
-        keys: g grid · o occupancy · h hull · Esc deselect · Shift at cursor = vertical coord plane
+        keys: g grid · o occupancy · h hull · Esc deselect
       </div>
     </Sec>
   );

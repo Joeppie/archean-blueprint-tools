@@ -9,12 +9,12 @@ have keys where it matters.
 | Hull (h) | block + triangle solids on/off — OFF means WIREFRAME and click-through |
 | Wireframe | the lattice wire overlay (mutually exclusive with hull solids) |
 | Hull opacity | fades blocks, skin AND wire together — see through the shell without hiding it |
-| World axes | in the file and the viewer: **x** lateral, **y = UP**, **z** longitudinal (the nose is −z) — the FLAT plane is x–z, so the readout labels height as y (Blender's own UI is z-up; this format is not) |
+| World axes | in the file and the viewer: **x** lateral, **y = UP**, **z** longitudinal (the nose is −z) — the FLAT plane is x–z (Blender's own UI is z-up; this format is not). The pad shows it: the x = 0 grid line is RED, the z = 0 line BLUE, both labelled +/− at their ends |
 | Grid (g) | the ground grid — it FITS the build and its granularity rides zoom (0.25 m cells → 1.25 → 2.5 → 12.5 m as you pull back; majors every 5); the green ground plane always sits just under the craft's lowest geometry |
 | Occupancy (o) | the type-255 occupancy boxes (reserved cells around parts) |
 | Mirror plane(s) | the gold sheets at the 0-plane of every mirrored axis (see the Mirror rule topic) |
 | Mirror axis | which axis ⇄ twin placement and block twins ride: X, Y or Z (the game's own `mirrorAxis` field is per-part, 1=x 2=y 3=z) |
-| Coord readout | Blender-style: hover the ground grid and a small BLACK label follows the cursor with the GRID CORNER position under it (snapped to the current grid step); hold **Shift** and a black ad-hoc VERTICAL grid plane appears through that corner — the one most facing your camera (x or z) — and the label grows to the full position, so you can eyeball the x/y/z of any spot and measure between them |
+| Coord readout | Blender-style: hover the viewport and a small BLACK label follows the cursor with the full snapped position the ray LANDS ON — the visible surface's `x y z` in file metres (blocks, parts, the ground all measure; wireframe stays click-through, you measure what you SEE). A black pin marks the spot on the pad and in the air at its height |
 | Labels | part name labels in the scene |
 | Connectors | adapter port nubs (cables/pipes keep their own toggle) |
 | Real game models | full game meshes (default ON); the ⚙ row can switch weak GPUs to the decimated twins |
