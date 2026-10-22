@@ -409,8 +409,50 @@ on all, flat none, other fields identical, existing kept); `tooldoc.test.ts`
 writer-style pin; `e2e/tools.spec.ts` preview reads "shading smooth:1".
 SUPERSEDED v1.5.12: the DEFAULT is now flat + outward (the game's own
 freshly-authored triangles, fixture 9000006001 — see the v1.5.12 bullet).
+- **v1.5.17 SPHERE SKIN tool — the spheroid RETRY that fixed the dents
+  (user: "find online algo … coordinates snapped to a grid that does NOT
+  result in indentations. Get the coords, then build a triangle mesh into
+  that. For UI extract but do NOT reuse the logic from our branch with the
+  failed logic — just its tools-window interface approach and the movable
+  ghost logic. Vertices logic MUST be fresh"):** the generator is
+  `app/src/engine/latsphere.ts` — a LATTICE CONVEX-HULL SHRINKWRAP, a class
+  the failure post-mortem itself named and the online literature documents
+  (Quickhull: Barber, Dobkin & Huhdanpaa, ACM TOMS 22(4) 1996; Beneath-Beyond
+  horizon cones; CGAL convex_hull_3). Procedure: ① enumerate every lattice
+  point whose RADIAL excess over the implicit ellipsoid lies in [0, τ=0.75
+  cells] — a thin mirror-symmetric shell sitting just OUTSIDE the ideal
+  surface (the test is a function of q² only); ② Quickhull with per-face
+  CONFLICT LISTS (a point stays with EVERY face it sees — first-match-only
+  assignment LOSES points at redistribution) and horizon = visible-cap edges
+  with a SURVIVING neighbour, cone face (u,v,p) keeping the half-edge
+  direction; ③ the hull faces ARE the skin — a convex polyhedron is convex
+  from EVERY direction, so INDENTATIONS ARE IMPOSSIBLE BY CONSTRUCTION, not
+  by hoping a heuristic lands evenly. Measured (vitest `latsphere.test.ts`,
+  38 pins — the FIRST suite property is the DEVIATION the post-mortem
+  demanded, never the topology): face-plane sag INTO the ideal surface is
+  EXACTLY 0 m at every size from r=0.4 m to the 24 m zeppelin, outward
+  bulge ≤ τ·CELL ≤ 0.19 m, volume ≥ ideal, closed manifold + outward winding
+  + integer vertices + 5-bit windows + determinism + shift round-trip;
+  zeppelin plans in 127 ms (the outside-set distribution is O(n log h) — a
+  full-scan certificate loop stalls at that size). THE TOOL: TOOLS ▸
+  'Sphere skin…' (`sphere-skin`, triangles ONLY) — the placement PLUMBING is
+  the archived branch's, ported back VERBATIM per the user's carve-out
+  (ToolDef.place stage → movable ghost on the block widget, CELL snap,
+  ✕ Cancel / ✔ Build label, Esc twin, `range`/`color` dialog field kinds;
+  a skin never collides); the PREVIEW prints the deviation line
+  ("dev −0.00/+0.18 m") BEFORE Build; shading default FLAT (the game's
+  authored default, v1.5.12), smooth:1 opt-in; paint resolves at commit
+  (+ new slot / ≈ nearest); commit = `shiftSkinTris` + the doc-insert idiom
+  (one Undo step). Pins: vitest `latsphere.test.ts` + `e2e/sphereskin.spec.ts`
+  (@ui: dialog→ghost→label order, shown widget, live sliders, flat/smooth,
+  new-slot paint, loads-INCREASE repaint, Ctrl+Z one step, Cancel/Esc).
+  EYEBALL: `node app/tools/sphereshot.mjs <rx> <ry> <rz> <out> [port]`
+  builds in the LIVE editor through the real UI and measures the RENDERED
+  SILHOUETTE from screenshot pixels (largest blob, scanline-filled area ÷
+  its convex hull): 0.99–1.00 at every size — the picture itself has no
+  bite. In-game judgment stays the user's (AGENTS: in-game pixels arbitrate).
 - **FAILED ATTEMPT — DO NOT RESURRECT blind: the Spheroid generator
-  (2026-10-21/22).** Three iterations (block-matching → staircase chamfers →
+  (2026-10-21/22).** (SUCCESSOR SHIPPED ABOVE — v1.5.17.) Three iterations (block-matching → staircase chamfers →
   additive bevels + a watertight triangle SKIN) were all reverted from main:
   **every version showed visible indentations in the hull** — the user's
   final verdict: "All spheres have indents… Triangles instead of blocks",
