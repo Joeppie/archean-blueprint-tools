@@ -23,8 +23,8 @@ import {
   MATERIALS, blockMaterial, hullifyApply, hullifyPreview, replaceCensus, replaceColorDests,
   replaceSources, replaceAll, parseHexColor, paletteSlotNode, allocateSlot, nearestSlot,
 } from '../engine/tools';
-import { sphereSkinTris, sphereStats, shiftSkinTris, skinKg, type SphereSpec, type SphereStats } from '../engine/latsphere';
-import { sphereStatsAsync } from '../engine/latsphere-async';
+import { sphereSkinTris, sphereStats, shiftSkinTris, skinKg, type SkinOptions, type SphereSpec, type SphereStats } from '../engine/latsphere';
+import { sphereSkinTrisAsync, sphereStatsAsync } from '../engine/latsphere-async';
 import { liftKg } from '../engine/atmo';
 
 export type ToolValue = string | number;
@@ -80,6 +80,10 @@ export interface ToolDef {
    *  moved it to. (`run` stays unused.) */
   place?: {
     stage: (f: ToolForm, bp: Blueprint) => PlacePayload;
+    /** ASYNC staging (heavy payloads): Confirm awaits this (worker) and the
+     *  button says 'placing…' meanwhile — a 96 m skin must never plan on
+     *  the UI thread, or the dialog looks dead after Confirm (2026-10-22) */
+    stageAsync?: (f: ToolForm, bp: Blueprint) => Promise<PlacePayload>;
     commit: (f: ToolForm, payload: PlacePayload, offset: [number, number, number], ctx: EditCtx) => string;
   };
 }
@@ -309,11 +313,10 @@ export const TOOLS: ToolDef[] = [
     previewAsync: async (f) => spherePreviewLine(f, await sphereStatsAsync(sphereForm(f))),
     run: () => 'use placement',            // place tools never run()
     place: {
-      stage: (f) => ({ triangles: sphereSkinTris(sphereForm(f), {
-        slot: 51,                            // preview stand-in — commit re-resolves
-        material: +String(f['material']).slice(1) || 0,
-        smooth: f['shade'] === 'smooth',
-      }) }),
+      stage: (f) => ({ triangles: sphereSkinTris(sphereForm(f), skinOptions(f)) }),
+      // Confirm stages in the WORKER: a zeppelin skin plans for seconds,
+      // and a frozen dialog reads as "Confirm does nothing" (user 2026-10-22)
+      stageAsync: async (f) => ({ triangles: await sphereSkinTrisAsync(sphereForm(f), skinOptions(f)) }),
       commit: (f, _payload, offset, ctx) => {
         // the PAINT resolves at Build (it can GROW the palette — an edit,
         // not a preview): a new free slot or the nearest existing colour
@@ -356,6 +359,16 @@ function sphereForm(f: ToolForm): SphereSpec {
 /** kg, then tonnes past 10 t (one glance, no digit soup) */
 const fmtKg = (n: number) =>
   Math.abs(n) >= 10000 ? `${(n / 1000).toFixed(1)} t` : `${n.toFixed(0)} kg`;
+
+/** The ghost's triangle options: the palette slot 51 is a preview stand-in
+ *  — commit() re-resolves the paint when it can grow the palette. */
+function skinOptions(f: ToolForm): SkinOptions {
+  return {
+    slot: 51,
+    material: +String(f['material']).slice(1) || 0,
+    smooth: f['shade'] === 'smooth',
+  };
+}
 
 /** The sphere tool's readout line, shared by the sync and the worker path.
  *  The gas lift segment (user 2026-10-22: "tell us what lift would be if
@@ -442,13 +455,22 @@ export function ToolDialog(p: {
   const runnable = !planning && preview !== '' && !preview.startsWith('nothing');
   const set = (k: string, v: ToolValue) => { setForm(f => ({ ...f, [k]: v })); setConfirmStep(false); };
 
-  const confirmRun = () => {
-    if (!runnable) { setConfirmStep(false); return; }
+  const [staging, setStaging] = useState(false);
+  const confirmRun = async () => {
+    if (!runnable || staging) { if (!staging) setConfirmStep(false); return; }
     if (p.tool.place && p.onPlaced) {
-      // PLACEMENT: stage the ghost payload, close — the viewport label's
-      // ✔ Build performs the commit at the position the user moved it to
-      p.onPlaced(p.tool, { ...form }, p.tool.place.stage(form, p.bp));
-      p.onClose();
+      // PLACEMENT: stage the ghost payload (ASYNC = worker + 'placing…'
+      // label, so a multi-second skin never freezes the dialog), close —
+      // the viewport label's ✔ Build performs the commit at the position
+      // the user moved it to
+      setStaging(true);
+      try {
+        const payload = p.tool.place.stageAsync
+          ? await p.tool.place.stageAsync(form, p.bp)
+          : p.tool.place.stage(form, p.bp);
+        p.onPlaced(p.tool, { ...form }, payload);
+        p.onClose();
+      } finally { setStaging(false); }
       return;
     }
     const msg = p.tool.run(form, p.ctx);
@@ -551,8 +573,9 @@ export function ToolDialog(p: {
                 ← Back
               </button>
               <button data-testid="tool-confirm" onClick={confirmRun}
+                disabled={staging}
                 className={`ksp-btn px-3 py-1 text-[12px] on ${p.tool.danger ? 'text-red-200' : ''}`}>
-                {p.tool.place ? '✓ Confirm & place' : <>✓ Confirm &amp; run</>}
+                {staging ? '… placing' : p.tool.place ? '✓ Confirm & place' : <>✓ Confirm &amp; run</>}
               </button>
             </div>
           ) : (
