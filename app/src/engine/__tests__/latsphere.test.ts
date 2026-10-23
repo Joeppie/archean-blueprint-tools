@@ -430,4 +430,91 @@ describe('latsphere — simple body: cylinder flanks + pointy nose (v1.7.2)', ()
     const b = JSON.stringify(sphereSkinTris({ rx: 2, ry: 1.5, rz: 6, profile: 'cylinder', shoulder: 0.5 }, { slot: 51 }));
     expect(a).toBe(b);
   }, 60_000);
+
+  // ------------------------------------------------------------ v1.7.3 ---
+  // "Nose pointiness isn't high enough … Also, nose and tail are two
+  // different things imo, the current value is good for tail": the ends
+  // taper INDEPENDENTLY (nose = the − longest-axis end, tail = the + end).
+  // The legality law is UNCHANGED (closed manifold, integer vertices,
+  // skipped 0) — the asymmetry must not break a single triangle.
+  describe('asymmetric nose / tail (v1.7.3)', () => {
+    const ASYM: { name: string; spec: SphereSpec }[] = [
+      { name: 'pointy nose, blunt tail 2×2×6', spec: { rx: 2, ry: 2, rz: 6, profile: 'cylinder', noseShoulder: 0.1, tailShoulder: 0.8 } },
+      { name: 'blunt nose, pointy tail 2×2×6', spec: { rx: 2, ry: 2, rz: 6, profile: 'cylinder', noseShoulder: 0.8, tailShoulder: 0.1 } },
+      { name: 'needle 0.5×0.5×12 with a long NOSE', spec: { rx: 0.5, ry: 0.5, rz: 12, profile: 'cylinder', noseShoulder: 0.1, tailShoulder: 0.5 } },
+      { name: 'x-long rocket 6×2×2, nose on −x', spec: { rx: 6, ry: 2, rz: 2, profile: 'cylinder', noseShoulder: 0.15, tailShoulder: 0.9 } },
+    ];
+    for (const { name, spec } of ASYM) {
+      test(`${name}: closed manifold, integer verts, outward, skipped 0, apex per tip`, () => {
+        const plan = spherePlan(spec);
+        expect(plan.skipped).toBe(0);
+        expect(plan.faces.length).toBeGreaterThan(8);
+        const dir = new Map<string, number>(), und = new Map<string, number>();
+        for (const [i, j, k] of plan.faces) {
+          for (const v of [i, j, k]) {
+            const p = plan.shell[v]!;
+            expect(Number.isInteger(p[0]) && Number.isInteger(p[1]) && Number.isInteger(p[2])).toBe(true);
+          }
+          for (const [u, v] of [[i, j], [j, k], [k, i]] as const) {
+            dir.set(`${u}>${v}`, (dir.get(`${u}>${v}`) ?? 0) + 1);
+            const key = u < v ? `${u}-${v}` : `${v}-${u}`;
+            und.set(key, (und.get(key) ?? 0) + 1);
+          }
+        }
+        for (const v of dir.values()) expect(v).toBe(1);
+        for (const v of und.values()) expect(v).toBe(2);
+        let vol2 = 0;
+        for (const [i, j, k] of plan.faces) {
+          const a = plan.shell[i]!, b = plan.shell[j]!, c = plan.shell[k]!;
+          vol2 += a[0]! * (b[1]! * c[2]! - c[1]! * b[2]!)
+                - a[1]! * (b[0]! * c[2]! - c[0]! * b[2]!)
+                + a[2]! * (b[0]! * c[1]! - b[1]! * c[0]!);
+        }
+        expect(vol2).toBeGreaterThan(0);
+        const la = spec.rx >= spec.ry && spec.rx >= spec.rz ? 0 : spec.ry >= spec.rz ? 1 : 2;
+        const per = [0, 1, 2].filter(a => a !== la);
+        const zs = plan.verts.map(i => plan.shell[i]![la]!);
+        for (const zEnd of [Math.min(...zs), Math.max(...zs)]) {
+          const tip = plan.verts.filter(i => plan.shell[i]![la] === zEnd);
+          expect(tip.length).toBe(1);                    // a POINT at each tip
+          for (const i of tip) {
+            expect(plan.shell[i]![per[0]!]).toBe(6);
+            expect(plan.shell[i]![per[1]!]).toBe(6);
+          }
+        }
+      }, 60_000);
+    }
+
+    test('the pointed NOSE end tapers where the blunt TAIL stays cylindrical', () => {
+      // L = 24 cells, nose taper starts at |dz| 2.4, tail cylinder runs to
+      // 19.2. At the RING LEVELS the loft picks (deterministic for this
+      // spec): the nose ring at z = −7 (dz −13) has radius 6 while the tail
+      // ring at z = 25 (dz +19) still carries the FULL flank radius 8 —
+      // and the mirror spec flips exactly which side is blunt.
+      const radBands = (sN: number, sT: number) => {
+        const plan = spherePlan({ rx: 2, ry: 2, rz: 6, profile: 'cylinder', noseShoulder: sN, tailShoulder: sT });
+        const rad = (lo: number, hi: number) => {
+          let m = -1;
+          for (const i of plan.verts) {
+            const p = plan.shell[i]!;
+            if (p[2]! >= lo && p[2]! <= hi) m = Math.max(m, Math.abs(p[0]! - 6), Math.abs(p[1]! - 6));
+          }
+          return m;
+        };
+        return { nose: rad(-14, -6), tail: rad(18, 26) };
+      };
+      const pointyNose = radBands(0.1, 0.8);
+      expect(pointyNose.tail).toBeGreaterThanOrEqual(7);          // blunt tail: FULL flank
+      expect(pointyNose.nose).toBeLessThan(pointyNose.tail);      // nose: deeply tapered
+      const pointyTail = radBands(0.8, 0.1);
+      expect(pointyTail.nose).toBeGreaterThanOrEqual(7);          // sides swap
+      expect(pointyTail.tail).toBeLessThan(pointyTail.nose);
+    }, 60_000);
+
+    test('equal end tapers ≡ the v1.7.2 symmetric shoulder spec', () => {
+      const a = JSON.stringify(sphereSkinTris({ rx: 2, ry: 1.5, rz: 6, profile: 'cylinder', shoulder: 0.5 }, { slot: 51 }));
+      const b = JSON.stringify(sphereSkinTris({ rx: 2, ry: 1.5, rz: 6, profile: 'cylinder', noseShoulder: 0.5, tailShoulder: 0.5 }, { slot: 51 }));
+      expect(a).toBe(b);
+    }, 60_000);
+  });
 });

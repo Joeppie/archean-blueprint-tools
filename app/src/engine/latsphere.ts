@@ -73,8 +73,16 @@ export interface SphereSpec {
    *  silhouette), so the dent-free property carries over. Default ellipsoid. */
   profile?: 'ellipsoid' | 'cylinder';
   /** cylinder profile: fraction of the half-length that stays cylindrical
-   *  (default 0.6; the rest tapers to the tip — smaller = pointier nose). */
+   *  (default 0.6; the rest tapers to the tip — smaller = pointier nose).
+   *  Sets BOTH ends unless noseShoulder/tailShoulder refine them. */
   shoulder?: number;
+  /** v1.7.3 per-end taper (user: "nose and tail are two different things imo,
+   *  the current value is good for tail"): shoulder fraction at the NOSE end
+   *  (the −longest-axis end — the aircraft's −z nose for a z-longest
+   *  zeppelin; the ghost's ⟲ turns aim it) and at the TAIL (+) end. Omitted
+   *  side falls back to `shoulder`, so a v1.7.2 symmetric spec is unchanged. */
+  noseShoulder?: number;
+  tailShoulder?: number;
   /** cylinder profile: support directions per ring (0/undefined = 'fine'
    *  = 48, still sub-cell accurate at zeppelin radii; 12 = 'simple',
    *  8 = 'blocky'). Fewer directions = fewer, larger facets; vertices stay
@@ -129,10 +137,16 @@ function radiusAlong(nx: number, ny: number, nz: number, rx: number, ry: number,
 /** cylinder flanks + ellipsoidal pointed noses about the LONGEST axis, the
  *  'cylinder' profile of the dialog (user: "a cylinder on the sides and
  *  slightly pointier nose"). All in CELLS about the centre. The body is the
- *  union of the cylinder (|axial| ≤ shoulder·L) and two full ellipsoids of
- *  semi-axes (r1, r2, (1−s)L) centred at ±shoulder·L — the union is convex
- *  (concave ρ(axial) profile) and its back halves hide inside the cylinder. */
-interface SimpleBody { la: 0 | 1 | 2; r1: number; r2: number; L: number; s: number }
+ *  union of the cylinder (−sT·L ≤ axial ≤ +sN·L) and two full ellipsoids of
+ *  semi-axes (r1, r2, (1−s_end)·L) centred at the shoulder planes — the
+ *  union is convex (concave ρ(axial) profile on BOTH ends) and its back
+ *  halves hide inside the cylinder. v1.7.3: the two ends taper
+ *  INDEPENDENTLY (nose = the − axial end, tail = +; user: "nose and tail
+ *  are two different things imo"). */
+interface SimpleBody { la: 0 | 1 | 2; r1: number; r2: number; L: number; sN: number; sT: number }
+
+const clampShoulder = (v: number | undefined, fb: number | undefined): number =>
+  Math.min(0.9, Math.max(0.1, v ?? fb ?? 0.6));
 
 function simpleBody(spec: SphereSpec): SimpleBody {
   const r = [spec.rx / CELL, spec.ry / CELL, spec.rz / CELL];
@@ -140,7 +154,8 @@ function simpleBody(spec: SphereSpec): SimpleBody {
   const per = ([0, 1, 2] as const).filter(a => a !== la);
   return {
     la, r1: r[per[0]!]!, r2: r[per[1]!]!, L: r[la]!,
-    s: Math.min(0.9, Math.max(0.1, spec.shoulder ?? 0.6)),
+    sN: clampShoulder(spec.noseShoulder, spec.shoulder),
+    sT: clampShoulder(spec.tailShoulder, spec.noseShoulder ?? spec.shoulder),
   };
 }
 
@@ -154,7 +169,8 @@ function bodyRadius(b: SimpleBody, n: [number, number, number]): number {
   const [p1, p2] = perpAxes(b.la);
   const nA = n[b.la]!, n1 = n[p1]!, n2 = n[p2]!;
   const en2 = (n1 / b.r1) ** 2 + (n2 / b.r2) ** 2;
-  const sL = b.s * b.L, nl = b.L - sL;
+  // v1.7.3: the ray leaves through the shoulder/nose of ITS OWN side
+  const sL = (nA >= 0 ? b.sT : b.sN) * b.L, nl = b.L - sL;
   const tFlank = en2 > 1e-18 ? 1 / Math.sqrt(en2) : Infinity;
   const tShoulder = Math.abs(nA) > 1e-12 ? sL / Math.abs(nA) : Infinity;
   let R = Math.min(tFlank, tShoulder);
@@ -173,19 +189,21 @@ function bodyRadius(b: SimpleBody, n: [number, number, number]): number {
 }
 
 /** ring radius scale f(dz) of the simple body at axial offset dz (cells):
- *  1 through the flanks, the ellipse arc through the nose, 0 at/beyond L. */
+ *  1 through the flanks, the ellipse arc through the tapered end, 0 at/beyond
+ *  L. dz < 0 is the NOSE side, dz > 0 the TAIL side (v1.7.3). */
 function profileScale(b: SimpleBody, dz: number): number {
-  const a = Math.abs(dz), sL = b.s * b.L, nl = b.L - sL;
+  const a = Math.abs(dz), sL = (dz >= 0 ? b.sT : b.sN) * b.L, nl = b.L - sL;
   if (a <= sL) return 1;
   if (a >= b.L) return 0;
   const t = (a - sL) / nl;
   return Math.sqrt(Math.max(0, 1 - t * t));
 }
 
-/** exact enclosed volume of the simple body, CELLS³ */
+/** exact enclosed volume of the simple body, CELLS³ (cylinder between the
+ *  two shoulder planes + the two end semi-ellipsoids, per-side v1.7.3) */
 function bodyVolume(b: SimpleBody): number {
-  const sL = b.s * b.L, nl = b.L - sL;
-  return Math.PI * b.r1 * b.r2 * (2 * sL + (4 / 3) * nl);
+  const nlN = b.L - b.sN * b.L, nlT = b.L - b.sT * b.L;
+  return Math.PI * b.r1 * b.r2 * ((b.sN + b.sT) * b.L + (2 / 3) * (nlN + nlT));
 }
 
 /** convex hull of 2D integer points (Andrew's monotone chain), CCW, no
@@ -530,7 +548,8 @@ function repairSplit(shell: GP3[], faces: [number, number, number][]):
 const PLAN_CACHE = new Map<string, SpherePlan>();
 export function spherePlan(spec: SphereSpec): SpherePlan {
   const key = JSON.stringify([spec.rx, spec.ry, spec.rz, spec.cx ?? 6, spec.cy ?? 6, spec.cz ?? 6,
-    spec.tau ?? null, spec.profile ?? null, spec.shoulder ?? null, spec.facets ?? null]);
+    spec.tau ?? null, spec.profile ?? null, spec.shoulder ?? null,
+    spec.noseShoulder ?? null, spec.tailShoulder ?? null, spec.facets ?? null]);
   const hit = PLAN_CACHE.get(key);
   if (hit) return hit;
   const best = spec.profile === 'cylinder' ? planLoft(spec) : planEllipsoid(spec);
@@ -610,19 +629,19 @@ function planLoft(spec: SphereSpec): SpherePlan {
     return i;
   };
   // ---- levels: apexes at lo/hi, the SHOULDER rings kept as real levels,
-  // the flanks and each nose split into ≤ LOFT_GAP slices (an axial span
-  // no triangle may exceed). For an integral centre (the only centre the
-  // placement flow uses) lo+hi = 2c is even, so the split is mirror-
-  // symmetric about the mid-plane by construction.
+  // the flanks and each tapered end split into ≤ LOFT_GAP slices (an axial
+  // span no triangle may exceed). For an integral centre (the only centre
+  // the placement flow uses) with EQUAL end tapers the split is mirror-
+  // symmetric about the mid-plane; v1.7.3 asymmetric ends split each side
+  // on its own geometry (still legal — the gap rule is per-slab).
   const levels = new Set<number>();
   const addSplit = (a: number, b: number) => {
     const steps = Math.max(1, Math.ceil((b - a) / LOFT_GAP));
     for (let k = 0; k <= steps; k++) levels.add(Math.round(a + (b - a) * k / steps));
   };
   if (hi > lo) {
-    const sL = body.s * body.L;
     const clamp = (z: number) => Math.min(hi - 1, Math.max(lo + 1, z));
-    const loSh = clamp(Math.round(cA - sL)), hiSh = clamp(Math.round(cA + sL));
+    const loSh = clamp(Math.round(cA - body.sN * body.L)), hiSh = clamp(Math.round(cA + body.sT * body.L));
     if (hiSh > loSh) { addSplit(loSh, hiSh); addSplit(lo, loSh); addSplit(hiSh, hi); }
     else { const m = Math.round((lo + hi) / 2); addSplit(lo, m); addSplit(m, hi); }
   }
@@ -726,10 +745,11 @@ function planLoft(spec: SphereSpec): SpherePlan {
   for (const end of [0, 1] as const) {
     const apexZ = end === 0 ? rings[0]!.z : rings[rings.length - 1]!.z;
     const rMax = Math.max(body.r1, body.r2);
-    const nl = body.L - body.s * body.L;
+    const sEnd = end === 0 ? body.sN : body.sT;   // v1.7.3: each end its own taper
+    const nl = body.L - sEnd * body.L;
     const fit = 19;   // + lattice rounding stays inside the 31-cell window
-    const dzFit = rMax <= fit ? body.s * body.L
-      : body.s * body.L + nl * Math.sqrt(Math.max(0, 1 - (fit / rMax) ** 2));
+    const dzFit = rMax <= fit ? sEnd * body.L
+      : sEnd * body.L + nl * Math.sqrt(Math.max(0, 1 - (fit / rMax) ** 2));
     const sign = end === 0 ? -1 : 1;
     let zf = Math.round(cA + sign * Math.min(dzFit, body.L - 0.5));
     if ((zf - apexZ) * sign >= 0) zf = apexZ + sign;   // strictly inside

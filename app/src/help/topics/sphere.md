@@ -1,17 +1,21 @@
 # Sphere skin — the algorithm and its limits
-Tags: sphere ellipsoid spheroid skin hull triangles algorithm convex hull lattice limitations dents bulge sag quickhull zeppelin blimp aspect ratio window tau cylinder rocket nose rotate quarter-turn facets
+Tags: sphere ellipsoid spheroid skin hull triangles algorithm convex hull lattice limitations dents bulge sag quickhull zeppelin blimp aspect ratio window tau cylinder rocket nose tail paint finish metallic matte polished glass rotate quarter-turn facets
 
 **Tools ▸ Sphere skin…** grows an ellipsoid out of hull triangles — a closed
 convex SKIN whose vertices are integer lattice points (the same 0.25 m grid
 the blocks and the game's own hull triangles share). Slider to 48 m radii
 (96 m across); the number boxes take any size beyond.
 
-## Two bodies (v1.7.2)
+## Two bodies (v1.7.2, ends independent since v1.7.3)
 
 | Body | Shape | When |
 |---|---|---|
 | **ellipsoid hull** | the convex hull of every lattice point hugging the ideal ellipsoid — maximum roundness | spheres and gentle blends |
-| **cyl + nose** | FLAT CYLINDER SIDES along the longest axis + tapered, POINTIER noses (the `nose %` slider sets how much of each half tapers; `facets` picks 48/12/8 sides around the section) | pointy blends and zeppelins: FEWER triangles, and it stores sizes where the pure hull hits the game's triangle-window limit and must refuse |
+| **cyl + nose** | FLAT CYLINDER SIDES along the longest axis + tapered, POINTIER ends (`nose %` and `tail %` sliders set how much of EACH half tapers — the nose is the − end of the longest axis, the aircraft's −z nose; `facets` picks 48/12/8 sides around the section) | pointy blends and zeppelins: FEWER triangles, and it stores sizes where the pure hull hits the game's triangle-window limit and must refuse |
+
+The two ends taper INDEPENDENTLY (v1.7.3): the defaults (nose 65 %, tail
+40 %, both sliders 10…90) give a rocket/airship profile — a long pointy
+nose, a blunt tail. Aim the nose with the ghost's ⟲ quarter-turns.
 
 The simple body is built as a LOFT: integer cross-section rings at ≤ 20-cell
 axial slices (shoulder rings kept), a single lattice APEX at each tip, and
@@ -83,5 +87,10 @@ label carries the whole placement kit (v1.7.2):
 - **✕ Cancel** (or Esc while the ghost is up) drops it — but Esc while the
   ↩-reopened dialog is up closes the DIALOG only.
 - **✔ Build** writes the triangles into the craft (your chosen material +
-  one palette slot for all five faces of every triangle; pick **+ new
-  slot** or **≈ nearest**). Ctrl+Z removes the whole skin as ONE undo step.
+  ONE palette slot for all five faces of every triangle). The **paint is a
+  single control** (v1.7.3): the RGB swatch/hex, the **finish** — `matte`,
+  `polished`, `metal` or `glass`, exactly the shading the game's palette
+  families carry — and where it lands: **+ new palette slot** writes a new
+  slot WITH that finish, **≈ nearest** snaps to the closest existing slot
+  that WEARS it (falling back to the nearest colour when none does).
+  Ctrl+Z removes the whole skin as ONE undo step.

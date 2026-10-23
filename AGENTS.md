@@ -658,6 +658,41 @@ freshly-authored triangles, fixture 9000006001 — see the v1.5.12 bullet).
   `help.spec.ts` (@ui, desktop+pixel7: menu→dialog, h1, sphere LIMITS table
   as a real <table>, search by title/tag/body word, Esc/✕/backdrop close,
   dialog never outgrows the viewport).
+- **v1.7.3 SPHERE NOSE ≠ TAIL + THE FINISH-IN-PAINT CONTROL (user
+  2026-10-23: "Nose pointiness isn't high enough; needs a slider as well,
+  default should probably be longer. Also, nose and tail are two different
+  things imo, the current value is good for tail. Also let me choose whether
+  the paint is metallic/matte etc. as per the other controls; ensure that is
+  properly integrated into a single control"):** (1) The loft's ends taper
+  INDEPENDENTLY: `SphereSpec.noseShoulder/tailShoulder` (nose = the
+  −longest-axis end — the aircraft −z nose, aim it with the ghost's ⟲;
+  tail = +), each falling back to `shoulder` (so the symmetric v1.7.2 spec
+  plans BYTE-IDENTICAL — pinned). `SimpleBody.s → sN/sT`; `bodyRadius`
+  picks the shoulder/nose of the ray's OWN side, `profileScale` the end of
+  dz's sign, `bodyVolume` the asymmetric π·r1·r2·((sN+sT)L + ⅔(nlN+nlT)),
+  the level split and the tip-ring GROW both go per-end. Dialog: `nose %`
+  reaches 90 (was 70-capped — "pointiness isn't high enough") and DEFAULTS
+  nose 65 / tail 40 ("current value is good for tail"). Preview prints
+  `+ N% nose / M% tail`. (2) PAINT IS ONE CONTROL: the tool field kind
+  `paint` renders swatch + hex + as-drawn preview tile + FINISH chips +
+  the +new/≈nearest choice in ONE row driving form keys color/finish/
+  colorhow (the separate 'paint slot' select field is GONE). `PAINT_
+  FINISHES` (tools.ts) mirror the game's four palette families' shading
+  EXACTLY (palette.ts LEGACY_GROUPS: matte 15/7/0, polished 15/0/0,
+  metal 15/0/1, glass 2/0/0 opacity/roughness/metallic); `paletteSlotNode
+  (c, shade?)` writes the picked finish onto the NEW slot (no-arg keeps
+  the historic 15/4/0 — ColorPanel untouched), `nearestSlot(p, c, shade?)`
+  PREFERS slots wearing that finish (same metallic + roughness + the
+  opacity<8 glass class), falling back to plain colour distance; commit
+  passes it through and the toast/preview name the finish. Pins: vitest
+  latsphere 'asymmetric nose/tail' group (4 blends closed/integer/outward/
+  skipped-0/apex-per-tip, the radial-band test that the pointed end tapers
+  6 where the blunt end stays 8 AND its mirror flip, equal-ends ≡ legacy
+  shoulder) + tooldoc 'v1.7.3 paint finishes' (finish spec on the new
+  slot via the SHIPPED commit, matte default, nearestSlot finish-over-
+  colour, no-finish-key form compat) + e2e sphereskin (paint-finish-*/
+  paint-how-* one control, metal rides the committed slot metallic:1/
+  roughness:0, nose 90 + tail 15 re-plan still stores, preview regexes).
 - **v1.7.2 SPHERE SIMPLIFIED BODY + GHOST ROTATION + BACK BUTTON (user
   2026-10-23: "Geometry for sphere can be too complex… when making sphere
   pointy, I want it to be simplified, so a cylinder on the sides and slightly

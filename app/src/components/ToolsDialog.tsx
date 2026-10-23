@@ -22,10 +22,12 @@ import { OCCUPANCY_TYPE } from '../engine/blockshapes';
 import {
   MATERIALS, blockMaterial, hullifyApply, hullifyPreview, replaceCensus, replaceColorDests,
   replaceSources, replaceAll, parseHexColor, paletteSlotNode, allocateSlot, nearestSlot,
+  PAINT_FINISHES, paintFinish,
 } from '../engine/tools';
 import { sphereSkinTris, sphereStats, shiftSkinTris, skinKg, type SkinOptions, type SphereSpec, type SphereStats } from '../engine/latsphere';
 import { sphereSkinTrisAsync, sphereStatsAsync } from '../engine/latsphere-async';
 import { liftKg } from '../engine/atmo';
+import { cssColor } from '../engine/palette';
 
 export type ToolValue = string | number;
 export type ToolForm = Record<string, ToolValue>;
@@ -38,7 +40,10 @@ export interface PlacePayload { blocks?: Block[]; triangles?: Triangle[] }
 export interface ToolFieldDef {
   key: string;
   label: string;
-  kind: 'select' | 'note' | 'range' | 'color';
+  /** 'paint' = the COMPOSITE one-row paint control (v1.7.3): RGB swatch +
+   *  hex + FINISH chips + new/nearest slot choice; it drives the form keys
+   *  `color`, `finish` and `colorhow` together as a single control. */
+  kind: 'select' | 'note' | 'range' | 'color' | 'paint';
   /** static options (select) */
   options?: { id: string; label: string }[];
   /** dependent options, e.g. the colour sources follow the chosen target */
@@ -301,10 +306,15 @@ export const TOOLS: ToolDef[] = [
           + 'very long needles. SIMPLE gives FLAT CYLINDER SIDES (few big '
           + 'facets, always storable) plus tapered, POINTIER noses on the '
           + 'longest axis — a zeppelin/rocket body (v1.7.2).' },
-      { key: 'nose', label: 'nose %', kind: 'range', min: 10, max: 70, step: 5, unit: ' %',
+      { key: 'nose', label: 'nose %', kind: 'range', min: 10, max: 90, step: 5, unit: ' %',
         showIf: f => f['profile'] === 'cylinder',
-        hint: 'how much of each half tapers to the tip — less = longer '
-          + 'cylinder, POINTIER ends' },
+        hint: 'how much of the NOSE half tapers to the tip — more = longer, '
+          + 'POINTIER nose. The nose end is the − end of the longest axis '
+          + '(the aircraft’s −z nose); aim it with the ghost’s ⟲ turns.' },
+      { key: 'tail', label: 'tail %', kind: 'range', min: 10, max: 90, step: 5, unit: ' %',
+        showIf: f => f['profile'] === 'cylinder',
+        hint: 'the TAIL (+) end tapers independently — set it lower than the '
+          + 'nose for a classic airship/rocket profile (v1.7.3)' },
       { key: 'facets', label: 'facets', kind: 'select',
         options: [
           { id: 'fine', label: 'fine (48)' },
@@ -323,13 +333,12 @@ export const TOOLS: ToolDef[] = [
           + 'in-game normal welding is what may make a big skin read ROUNDER' },
       { key: 'material', label: 'material', kind: 'select',
         options: MATERIALS.map((label, m) => ({ id: `m${m}`, label })) },
-      { key: 'color', label: 'paint', kind: 'color',
-        hint: 'the RGB is painted on all five faces of every triangle' },
-      { key: 'colorhow', label: 'paint slot', kind: 'select',
-        options: [
-          { id: 'new', label: '+ new palette slot' },
-          { id: 'nearest', label: '≈ nearest existing slot' },
-        ] },
+      { key: 'color', label: 'paint', kind: 'paint',
+        hint: 'ONE control: the RGB + the FINISH (the game palette families’ '
+          + 'shading — matte, polished, metal, translucent glass) + where it '
+          + 'goes: a NEW palette slot written with that finish, or ≈ NEAREST '
+          + 'existing slot wearing it. Painted on all five faces of every '
+          + 'triangle.' },
       { key: 'note', label: '', kind: 'note',
         hint: 'OK starts a PLACEMENT: the skin appears as a translucent '
           + 'ghost you can drag with the widget (cell-snapped) and TURN ⟲ '
@@ -338,8 +347,8 @@ export const TOOLS: ToolDef[] = [
           + 'Edit ▸ Undo (Ctrl+Z) takes a built skin back as one step.',
       },
     ],
-    initial: { rx: 1, ry: 1, rz: 1, profile: 'round', nose: 40, facets: 'fine',
-      shade: 'flat', material: 'm0', color: '#c9c9c9', colorhow: 'new' },
+    initial: { rx: 1, ry: 1, rz: 1, profile: 'round', nose: 65, tail: 40, facets: 'fine',
+      shade: 'flat', material: 'm0', color: '#c9c9c9', finish: 'matte', colorhow: 'new' },
     // THE line that used to be missing on the Spheroid attempts: the
     // deviation vs the IDEAL surface, printed BEFORE anything is built.
     // sag ≤ ~0.06 m is sub-cell rounding; anything the eye could call a
@@ -356,15 +365,18 @@ export const TOOLS: ToolDef[] = [
       stageAsync: async (f) => ({ triangles: await sphereSkinTrisAsync(sphereForm(f), skinOptions(f)) }),
       commit: (f, payload, offset, ctx) => {
         // the PAINT resolves at Build (it can GROW the palette — an edit,
-        // not a preview): a new free slot or the nearest existing colour
+        // not a preview): the picked RGB is written WITH the picked FINISH
+        // (v1.7.3 single control: colour + matte/polished/metal/glass +
+        // new-vs-nearest are ONE control), nearest prefers that finish
         const rgb = parseHexColor(String(f['color']));
+        const fin = paintFinish(String(f['finish'] ?? 'matte'));
         let slot = 51;
         if (rgb) {
-          if (f['colorhow'] === 'nearest') slot = nearestSlot(ctx.bp.data.colors, rgb) ?? 51;
+          if (f['colorhow'] === 'nearest') slot = nearestSlot(ctx.bp.data.colors, rgb, fin.spec) ?? 51;
           else {
             const free = allocateSlot(ctx.bp.data.colors);
-            if (free === null) slot = nearestSlot(ctx.bp.data.colors, rgb) ?? 51;
-            else { setPaletteSlot(ctx, free, paletteSlotNode(rgb)); slot = free; }
+            if (free === null) slot = nearestSlot(ctx.bp.data.colors, rgb, fin.spec) ?? 51;
+            else { setPaletteSlot(ctx, free, paletteSlotNode(rgb, fin.spec)); slot = free; }
           }
         }
         const material = +String(f['material']).slice(1) || 0;
@@ -390,7 +402,7 @@ export const TOOLS: ToolDef[] = [
         // the undo snapshots never held the skin (sphere gone after save).
         appendTrianglesDoc(ctx, tris);
         return `built a ${f['rx']}×${f['ry']}×${f['rz']} m sphere SKIN: ${tris.length} hull `
-          + `triangles at slot ${slot}`;
+          + `triangles at slot ${slot}, ${fin.label} paint`;
       },
     },
     // THE REPAIR PATH (user 2026-10-22: "I also cannot place it, fix the
@@ -441,17 +453,24 @@ export const TOOLS: ToolDef[] = [
 ];
 
 /** The dialog form → a generation spec. The centre sits at the lattice 6,6,6
- *  (= world origin); the placement offset moves it from there. 'nose %' is
- *  the TAPERED fraction of each half, so shoulder = 1 − nose/100. */
+ *  (= world origin); the placement offset moves it from there. 'nose %' and
+ *  'tail %' are the TAPERED fraction of each half (v1.7.3 — nose = the −
+ *  longest-axis end, tail = the + end), so shoulder = 1 − taper/100. */
 function sphereForm(f: ToolForm): SphereSpec {
   const spec: SphereSpec = { rx: +String(f['rx']), ry: +String(f['ry']), rz: +String(f['rz']) };
   if (f['profile'] === 'cylinder') {
     spec.profile = 'cylinder';
-    spec.shoulder = 1 - Math.min(70, Math.max(10, +String(f['nose']) || 40)) / 100;
+    const taper = (k: string, d: number) => Math.min(90, Math.max(10, +String(f[k]) || d));
+    spec.noseShoulder = 1 - taper('nose', 65) / 100;
+    spec.tailShoulder = 1 - taper('tail', 40) / 100;
     spec.facets = f['facets'] === 'simple' ? 12 : f['facets'] === 'blocky' ? 8 : 0;
   }
   return spec;
 }
+
+/** nose % / tail % as the form clamps them (preview line + pins) */
+const formTaper = (f: ToolForm, k: string, d: number) =>
+  Math.round(Math.min(90, Math.max(10, +String(f[k]) || d)));
 
 /** kg, then tonnes past 10 t (one glance, no digit soup) */
 const fmtKg = (n: number) =>
@@ -486,9 +505,10 @@ function spherePreviewLine(f: ToolForm, st: SphereStats): string {
   const V = st.volumeM3;
   return `${st.tris} triangles · dev −${st.sagInM.toFixed(2)}/+${st.maxOutM.toFixed(2)} m · `
     + (f['profile'] === 'cylinder'
-      ? `body cylinder + ${Math.round(Math.min(70, Math.max(10, +String(f['nose']) || 40)))}% pointy nose · `
+      ? `body cylinder + ${formTaper(f, 'nose', 65)}% nose / ${formTaper(f, 'tail', 40)}% tail · `
       : '')
     + `skin ${f['shade'] === 'smooth' ? 'smooth:1' : 'flat'} · material ${mat} · `
+    + `${paintFinish(String(f['finish'] ?? 'matte')).label} paint · `
     + `≈ ${skinKg(st.areaM2, +String(f['material']).slice(1) || 0).toFixed(0)} kg · `
     + `${V.toFixed(0)} m³ · lift@SL vacuum ${fmtKg(liftKg('vacuum', V, 0))}`
     + ` · He ${fmtKg(liftKg('helium', V, 0))} · H₂ ${fmtKg(liftKg('hydrogen', V, 0))}`;
@@ -819,6 +839,58 @@ function FieldRow(p: {
           <input data-testid={`tool-hex-${d.key}`} type="text" value={v} spellCheck={false}
             onChange={e => p.onSet(d.key, e.target.value)}
             className="w-24 rounded border border-white/10 bg-panel2 px-1.5 py-[3px] text-[11px] tabular-nums text-ink" />
+        </div>
+      </>
+    );
+  }
+  if (d.kind === 'paint') {
+    // THE COMPOSITE PAINT CONTROL (v1.7.3 user rule: "let me choose whether
+    // the paint is metallic/matte etc. as per the other controls; ensure
+    // that is properly integrated into a single control"): swatch + hex,
+    // the FINISH chips (the game palette families' shading), and the slot
+    // choice — ONE row, all three form keys (color/finish/colorhow) written
+    // together, the preview tile showing colour AND finish as the engine
+    // draws it (glass reads translucent here).
+    const hex = String(p.form['color'] ?? '#c9c9c9');
+    const rgb = parseHexColor(hex);
+    const finishId = String(p.form['finish'] ?? 'matte');
+    const how = String(p.form['colorhow'] ?? 'new');
+    const fin = paintFinish(finishId);
+    const live = { r: rgb?.r ?? 201, g: rgb?.g ?? 201, b: rgb?.b ?? 201, ...fin.spec };
+    return (
+      <>
+        <span className="pt-1 text-[11px] text-ink-dim">{d.label}</span>
+        <div data-testid={`tool-field-${d.key}`} className="flex flex-col gap-1">
+          <div className="flex items-center gap-2">
+            <input data-testid={`tool-color-${d.key}`} type="color" value={rgb ? hex : '#c9c9c9'}
+              onChange={e => p.onSet('color', e.target.value)}
+              className="h-6 w-9 cursor-pointer rounded border border-white/10 bg-transparent p-0" />
+            <input data-testid={`tool-hex-${d.key}`} type="text" value={hex} spellCheck={false}
+              onChange={e => p.onSet('color', e.target.value)}
+              className="w-24 rounded border border-white/10 bg-panel2 px-1.5 py-[3px] text-[11px] tabular-nums text-ink" />
+            <span data-testid="paint-preview" title="the colour + finish as the engine draws it"
+              className="h-5 w-5 rounded-[3px] border border-white/25"
+              style={{ background: cssColor(live) }} />
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {PAINT_FINISHES.map(fl => (
+              <button key={fl.id} data-testid={`paint-finish-${fl.id}`}
+                onClick={() => p.onSet('finish', fl.id)}
+                className={`ksp-btn px-1.5 py-[3px] text-[10px] ${finishId === fl.id ? 'on' : ''}`}>
+                {fl.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {([['new', '+ new palette slot'], ['nearest', '≈ nearest existing slot']] as const).map(([id, label]) => (
+              <button key={id} data-testid={`paint-how-${id}`}
+                onClick={() => p.onSet('colorhow', id)}
+                className={`ksp-btn px-1.5 py-[3px] text-[10px] ${how === id ? 'on' : ''}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+          {d.hint && <div className="pt-0.5 text-[9px] leading-snug text-ink-dim">{d.hint}</div>}
         </div>
       </>
     );

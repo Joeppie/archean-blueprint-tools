@@ -40,12 +40,6 @@ const shift = (page: Page, s: [number, number, number]) => page.evaluate((st) =>
   (window as unknown as { __ARCHEAN__: { placeShift: (s: [number, number, number]) => boolean } })
     .__ARCHEAN__.placeShift(st), s);
 
-/** v1.7.2: 90° quarter-turn of the ghost about a world axis (same path the
- *  label's ⟲ buttons drive) */
-const rotate = (page: Page, axis: 'x' | 'y' | 'z') => page.evaluate((ax) =>
-  (window as unknown as { __ARCHEAN__: { placeRotate: (a: 'x' | 'y' | 'z') => boolean } })
-    .__ARCHEAN__.placeRotate(ax), axis);
-
 /** bbox span per axis (max − min) of the ghost, in lattice cells */
 async function spans(page: Page): Promise<number[]> {
   const g = await ghost(page);
@@ -194,8 +188,18 @@ test.describe('sphere skin tool: dialog → movable ghost → cancel/build @ui',
     expect(rec.faces).toBe(5);
     expect(typeof rec.frameX).toBe('number');
     expect(typeof rec.vx).toBe('number');
-    // PAINT: '+ new palette slot' wrote the chosen RGB into a NEW slot
+    // PAINT: '+ new palette slot' wrote the chosen RGB (#c9c9c9 = 201) INTO
+    // a NEW slot — v1.7.3: with the picked FINISH (default matte: the game
+    // family's roughness 7), the slot read straight off the built triangles
     const colors = (await bpData(page)).colors ?? [];
+    const painted = await page.evaluate((n) => {
+      const d = (window as unknown as { __ARCHEAN__: { engine: { blueprint: { data: {
+        triangles?: Record<string, unknown>[]; colors?: (Record<string, number> | null)[] } } } } })
+        .__ARCHEAN__.engine.blueprint.data;
+      const t = d.triangles![d.triangles!.length - n]! as { colors?: number[] };
+      return (d.colors ?? [])[t.colors![0]!] ?? null;
+    }, built);
+    expect(painted).toMatchObject({ r: 201, g: 201, b: 201, opacity: 15, roughness: 7, metallic: 0 });
     expect(colors.filter(c => c).length).toBeGreaterThanOrEqual(1);
     // THE BUILDER'S LIFT WIDGET (user 2026-10-22): the built skin IS the
     // envelope — the collapsible row now reads its volume and the vacuum
@@ -321,23 +325,74 @@ test.describe('sphere skin tool: dialog → movable ghost → cancel/build @ui',
     const prev = page.locator('[data-testid="tool-preview"]');
     // the ellipsoid path REFUSES this blend (31-cell window, no lattice cut)
     await expect(prev).toContainText(/nothing to place/, { timeout: 15_000 });
-    // the simple body takes it: flat cylinder flanks + pointy nose
+    // the simple body takes it: flat cylinder flanks + tapered nose/tail
     await page.getByTestId('tool-opt-profile-cylinder').click();
     await expect.poll(async () => {
       const t = (await prev.textContent()) ?? '';
       return /triangles/.test(t) && !/nothing to place/.test(t);
     }, { timeout: 20_000 }).toBe(true);
-    await expect(prev).toContainText(/cylinder \+ \d+% pointy nose/);
+    // v1.7.3: the two ends print SEPARATELY (nose = −axis, tail = +axis)
+    await expect(prev).toContainText(/cylinder \+ \d+% nose \/ \d+% tail/);
     await expect(page.getByTestId('tool-ok')).toBeEnabled();
     await expect(page.getByTestId('tool-field-nose')).toBeVisible();
+    await expect(page.getByTestId('tool-field-tail')).toBeVisible();
     await expect(page.getByTestId('tool-field-facets')).toBeVisible();
-    // the nose slider re-plans: pointier (more taper) still stores
-    await setRange(page, 'nose', 70);
+    // the nose slider reaches PAST the old 70 cap now (user: "pointiness
+    // isn't high enough") and the tail retunes INDEPENDENTLY — both still
+    // store (poll the async preview line, never a single shot)
+    await setRange(page, 'nose', 90);
     await expect.poll(async () => {
       const t = (await prev.textContent()) ?? '';
-      return /triangles/.test(t) && !/nothing to place/.test(t);
+      return /90% nose/.test(t) && /triangles/.test(t) && !/nothing to place/.test(t);
+    }, { timeout: 20_000 }).toBe(true);
+    await setRange(page, 'tail', 15);
+    await expect.poll(async () => {
+      const t = (await prev.textContent()) ?? '';
+      return /15% tail/.test(t) && /triangles/.test(t) && !/nothing to place/.test(t);
     }, { timeout: 20_000 }).toBe(true);
     await page.getByTestId('tool-cancel').click();
+  });
+
+  // ------------------------------------------------------------ v1.7.3 ---
+  // "Let me choose whether the paint is metallic/matte etc. as per the other
+  // controls; ensure that is properly integrated into a single control."
+
+  test('paint is ONE control: the finish rides the committed palette slot', async ({ page }) => {
+    await openNew(page);
+    await page.getByTestId('tools-menu').click();
+    await page.getByTestId('tool-sphere-skin').click();
+    const prev = page.locator('[data-testid="tool-preview"]');
+    // one row carries swatch + hex + FINISH chips + the slot mode (the old
+    // separate 'paint slot' select field is gone from the definition)
+    await expect(page.getByTestId('tool-field-color')).toBeVisible();
+    await expect(page.getByTestId('paint-finish-matte')).toBeVisible();
+    await expect(page.getByTestId('paint-finish-metal')).toBeVisible();
+    await expect(page.getByTestId('paint-finish-glass')).toBeVisible();
+    await expect(page.getByTestId('paint-how-new')).toBeVisible();
+    await expect(page.getByTestId('paint-how-nearest')).toBeVisible();
+    await expect(page.getByTestId('tool-opt-colorhow-new')).toHaveCount(0);
+    // the preview line reports the finish (matte is the default)
+    await expect(prev).toContainText(/matte paint/);
+    await page.getByTestId('paint-finish-metal').click();
+    await expect(prev).toContainText(/metal paint/);
+    // Build: the NEW slot must carry the METAL shading spec (metallic 1,
+    // roughness 0) together with the picked RGB — the finish is not cosmetic
+    await page.getByTestId('tool-ok').click();
+    await expect(page.getByTestId('tool-confirm-box')).toBeVisible();
+    await page.getByTestId('tool-confirm').click();
+    await expect(page.getByTestId('place-label')).toBeVisible({ timeout: 15_000 });
+    await page.getByTestId('place-build').click();
+    await expect(page.getByTestId('place-label')).toBeHidden();
+    const painted = await page.evaluate(() => {
+      const d = (window as unknown as { __ARCHEAN__: { engine: { blueprint: { data: {
+        triangles?: Record<string, unknown>[]; colors?: (Record<string, number> | null)[] } } } } })
+        .__ARCHEAN__.engine.blueprint.data;
+      const t = d.triangles![d.triangles!.length - 1]! as { colors?: number[] };
+      return (d.colors ?? [])[t.colors![0]!] ?? null;
+    });
+    expect(painted).toMatchObject({ r: 201, g: 201, b: 201, opacity: 15, roughness: 0, metallic: 1 });
+    // the toast names the finish too (the result the user gets after Build)
+    await expect(page.locator('[data-testid="tool-toast"]')).toContainText(/metal paint/);
   });
 
   test('the label ↩ reopens the dialog with the parameters AND the dragged spot', async ({ page }) => {

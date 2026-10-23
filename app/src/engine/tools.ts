@@ -72,17 +72,29 @@ const rgbDist = (a: Rgb255, b: Rgb255): number =>
 
 /** Nearest OCCUPIED palette slot (file palette first, built-ins fill the
  *  gaps; empty/magenta-marker slots skipped). Engine-reserved slots 0..10
- *  ARE paintable (they just cannot be redefined), so they participate. */
-export function nearestSlot(palette: FilePalette | null | undefined, c: Rgb255): number | null {
-  let best = -1, bestD = Infinity;
-  for (let s = 0; s < 256; s++) {
-    const fileE = palette?.[s];
-    const e = fileE ?? DEFAULT_PALETTE[s];
-    if (!e || typeof e !== 'object') continue;
-    const d = rgbDist(c, { r: e.r ?? 255, g: e.g ?? 255, b: e.b ?? 255 });
-    if (d < bestD) { bestD = d; best = s; }
-  }
-  return best < 0 ? null : best;
+ *  ARE paintable (they just cannot be redefined), so they participate.
+ *  v1.7.3: with a FINISH (`shade`), the search PREFERS slots carrying that
+ *  shading family — "≈ nearest" means nearest with the SAME finish; only
+ *  when no slot wears it does it fall back to the plain colour distance. */
+export function nearestSlot(palette: FilePalette | null | undefined, c: Rgb255,
+  shade?: PaintShade): number | null {
+  const scan = (only: boolean): number => {
+    let best = -1, bestD = Infinity;
+    for (let s = 0; s < 256; s++) {
+      const fileE = palette?.[s];
+      const e = fileE ?? DEFAULT_PALETTE[s];
+      if (!e || typeof e !== 'object') continue;
+      if (only && !sameShade(e, shade!)) continue;
+      const d = rgbDist(c, { r: e.r ?? 255, g: e.g ?? 255, b: e.b ?? 255 });
+      if (d < bestD) { bestD = d; best = s; }
+    }
+    return best;
+  };
+  const hit = shade ? scan(true) : scan(false);
+  if (hit >= 0) return hit;
+  if (!shade) return null;                    // unfiltered scan missed = no slots at all
+  const fb = scan(false);                     // no slot wears that finish — plain nearest
+  return fb < 0 ? null : fb;
 }
 
 /** The palette's free indices, engine-reserved 0..10 excluded: a slot is
@@ -107,11 +119,38 @@ export function allocateSlot(palette: FilePalette | null | undefined): number | 
   return null;
 }
 
-/** A NEW custom-slot palette entry with the picked RGB, opacity at its
- *  default FULL 15 and a matte-ish finish (the picker's shade sliders are
- *  the palette rows' job, not this one). */
-export function paletteSlotNode(c: Rgb255): ResolvedColor {
-  return { r: c.r, g: c.g, b: c.b, opacity: 15, roughness: 4, metallic: 0 };
+/** A palette slot's SHADING spec (the finish, not the hue): what the game's
+ *  four finish families carry uniformly across their 17 colours. */
+export interface PaintShade { opacity: number; roughness: number; metallic: number }
+
+/** The four FINISHES, exactly the shading the game's palette families carry
+ *  (palette.ts LEGACY_GROUPS: matte roughness 7, polished roughness 0,
+ *  metal metallic 1, tinted glass opacity 2). The sphere tool's paint
+ *  control writes a NEW slot — or snaps to a nearest slot — WITH this spec,
+ *  so the picked finish is what the game's shaders see. */
+export const PAINT_FINISHES: { id: string; label: string; spec: PaintShade }[] = [
+  { id: 'matte', label: 'matte', spec: { opacity: 15, roughness: 7, metallic: 0 } },
+  { id: 'polished', label: 'polished', spec: { opacity: 15, roughness: 0, metallic: 0 } },
+  { id: 'metal', label: 'metal', spec: { opacity: 15, roughness: 0, metallic: 1 } },
+  { id: 'glass', label: 'glass', spec: { opacity: 2, roughness: 0, metallic: 0 } },
+];
+
+export const paintFinish = (id: string | undefined): { id: string; label: string; spec: PaintShade } =>
+  PAINT_FINISHES.find(f => f.id === id) ?? PAINT_FINISHES[0]!;
+
+/** Same finish family? metallic + roughness exact, glassiness (opacity < 8,
+ *  the FORMAT's "glass" line) as a class — the family rows vary opacity a
+ *  little within the class, the FINISH is what must agree. */
+const sameShade = (e: { opacity?: number; roughness?: number; metallic?: number }, s: PaintShade): boolean =>
+  (e.metallic ?? 0) === s.metallic && (e.roughness ?? 0) === s.roughness
+  && ((e.opacity ?? 15) < 8) === (s.opacity < 8);
+
+/** A NEW custom-slot palette entry with the picked RGB and FINISH (default:
+ *  opacity FULL and the old matte-ish 4/0 spec — the palette rows' sliders
+ *  stay the fine-tune path). v1.7.3: paint tools pass the family spec. */
+export function paletteSlotNode(c: Rgb255, shade?: PaintShade): ResolvedColor {
+  return { r: c.r, g: c.g, b: c.b,
+    opacity: shade?.opacity ?? 15, roughness: shade?.roughness ?? 4, metallic: shade?.metallic ?? 0 };
 }
 
 // ------------------------------------------------------------- REPLACE ALL

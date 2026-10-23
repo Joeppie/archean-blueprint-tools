@@ -11,7 +11,8 @@
 import { describe, expect, test } from 'vitest';
 import { docArrayInsert, docArrayRemoveAt, docEnsureArray, docFromValue, docGet, emitDoc, parseDoc, docValue } from '../doc';
 import { appendTrianglesDoc, makeCtx, openFunnel, serializeSave, setPaletteSlot, writeBlockDoc, writeBlockMaterial } from '../edit';
-import { hullifyApply } from '../tools';
+import { hullifyApply, nearestSlot, paletteSlotNode, PAINT_FINISHES } from '../tools';
+import type { FilePalette } from '../palette';
 import { TOOLS } from '../../components/ToolsDialog';
 import type { Blueprint, Triangle } from '../format';
 
@@ -213,5 +214,62 @@ describe('v1.6.1 generated records persist into doc + save + history', () => {
     docArrayInsert(ctx.doc, ['data', 'pipes'], 0, docFromValue({ a_component: 0 }));
     const out = JSON.parse(serializeSave(ctx)) as { data: { pipes: unknown[] } };
     expect(out.data.pipes).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------- v1.7.3 PINS
+// "Let me choose whether the paint is metallic/matte etc. as per the other
+// controls; ensure that is properly integrated into a single control." The
+// FINISHES mirror the game's four palette families (palette.ts LEGACY_GROUPS
+// rows); the sphere tool's single paint control writes a NEW slot carrying
+// that shading, or snaps ≈ nearest preferring slots that WEAR it.
+describe('v1.7.3 paint finishes', () => {
+  test('paletteSlotNode carries the FINISH spec; default keeps the old style', () => {
+    const metal = PAINT_FINISHES.find(f => f.id === 'metal')!;
+    expect(paletteSlotNode({ r: 10, g: 20, b: 30 }, metal.spec))
+      .toEqual({ r: 10, g: 20, b: 30, opacity: 15, roughness: 0, metallic: 1 });
+    const glass = PAINT_FINISHES.find(f => f.id === 'glass')!;
+    expect(paletteSlotNode({ r: 1, g: 2, b: 3 }, glass.spec).opacity).toBeLessThan(8);
+    // no finish passed = the v1.7 behaviour, untouched (15 / 4 / 0)
+    expect(paletteSlotNode({ r: 1, g: 2, b: 3 }))
+      .toEqual({ r: 1, g: 2, b: 3, opacity: 15, roughness: 4, metallic: 0 });
+  });
+
+  test('nearestSlot with a finish PREFERS slots wearing it over a nearer colour', () => {
+    const palette = new Array(256).fill(null) as FilePalette;
+    palette[12] = { r: 10, g: 10, b: 10, opacity: 15, roughness: 7, metallic: 0 };  // matte-ish
+    palette[13] = { r: 12, g: 12, b: 12, opacity: 15, roughness: 0, metallic: 0 };  // polished
+    const matte = PAINT_FINISHES.find(f => f.id === 'matte')!.spec;
+    // plain nearest = the exact-ish 12
+    expect(nearestSlot(palette, { r: 12, g: 12, b: 12 })).toBe(13);
+    // matte finish = the matte slot, even though its colour is FARTHER
+    expect(nearestSlot(palette, { r: 12, g: 12, b: 12 }, matte)).toBe(12);
+  });
+
+  test('the shipped sphere commit writes the picked finish into the saved slot', () => {
+    const sphere = TOOLS.find(t => t.id === 'sphere-skin')!;
+    const { ctx } = openFunnel(SRC);
+    const msg = sphere.place!.commit(
+      { ...sphere.initial, colorhow: 'new', finish: 'metal' }, { triangles: [] }, [0, 0, 0], ctx);
+    expect(msg).toContain('metal paint');
+    const out = JSON.parse(serializeSave(ctx)) as {
+      data: { triangles: { colors?: number[] }[]; colors: (Record<string, number> | null)[] };
+    };
+    const slot = out.data.triangles[out.data.triangles.length - 1]!.colors![0]!;
+    // #c9c9c9 = 201 + the METAL family shading, straight into the save
+    expect(out.data.colors[slot]).toMatchObject({ r: 201, g: 201, b: 201, opacity: 15, roughness: 0, metallic: 1 });
+  });
+
+  test('a form carrying NO finish key keeps the historic slot style (compat)', () => {
+    const sphere = TOOLS.find(t => t.id === 'sphere-skin')!;
+    const { ctx } = openFunnel(SRC);
+    const form = { ...sphere.initial, colorhow: 'new' } as Record<string, string | number>;
+    delete form['finish'];                          // pre-v1.7.3 stored form
+    sphere.place!.commit(form, { triangles: [] }, [0, 0, 0], ctx);
+    const out = JSON.parse(serializeSave(ctx)) as {
+      data: { triangles: { colors?: number[] }[]; colors: (Record<string, number> | null)[] };
+    };
+    const slot = out.data.triangles[out.data.triangles.length - 1]!.colors![0]!;
+    expect(out.data.colors[slot]).toMatchObject({ roughness: 7, metallic: 0 });  // matte = the default chip
   });
 });
