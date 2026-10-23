@@ -89,6 +89,15 @@ export interface SphereSpec {
    *  lattice points (each ring vertex is a lattice point of the ideal
    *  cross-section), so coarsening can never add a bulge. */
   facets?: number;
+  /** v1.9 BALLOON TAIL (balloonfin.ts): truncate the loft at this LAU-axis
+   *  lattice level — rings beyond the cut (including the tail apex) are NOT
+   *  emitted, leaving an OPEN ring boundary there. The balloon tool closes
+   *  it with the fin-sleeve + tail cap, which share the cut ring's exact
+   *  vertices, so the outer surface stays continuous ("a contiguous area
+   *  that connects where the tail can sit — flush with the end of the tail
+   *  section of the cone"). Undefined = the full closed body, byte-identical
+   *  to every pre-v1.9 plan. */
+  tailCutG?: number;
 }
 
 export interface SpherePlan {
@@ -142,13 +151,15 @@ function radiusAlong(nx: number, ny: number, nz: number, rx: number, ry: number,
  *  union is convex (concave ρ(axial) profile on BOTH ends) and its back
  *  halves hide inside the cylinder. v1.7.3: the two ends taper
  *  INDEPENDENTLY (nose = the − axial end, tail = +; user: "nose and tail
- *  are two different things imo"). */
-interface SimpleBody { la: 0 | 1 | 2; r1: number; r2: number; L: number; sN: number; sT: number }
+ *  are two different things imo").
+ *  v1.9: EXPORTED — balloonfin.ts reads the same body law to place the tail
+ *  sleeve, the fins, the hinges and the "inside the envelope" cable checks. */
+export interface SimpleBody { la: 0 | 1 | 2; r1: number; r2: number; L: number; sN: number; sT: number }
 
 const clampShoulder = (v: number | undefined, fb: number | undefined): number =>
   Math.min(0.9, Math.max(0.1, v ?? fb ?? 0.6));
 
-function simpleBody(spec: SphereSpec): SimpleBody {
+export function simpleBody(spec: SphereSpec): SimpleBody {
   const r = [spec.rx / CELL, spec.ry / CELL, spec.rz / CELL];
   const la: 0 | 1 | 2 = r[0]! >= r[1]! && r[0]! >= r[2]! ? 0 : r[1]! >= r[2]! ? 1 : 2;
   const per = ([0, 1, 2] as const).filter(a => a !== la);
@@ -190,8 +201,9 @@ function bodyRadius(b: SimpleBody, n: [number, number, number]): number {
 
 /** ring radius scale f(dz) of the simple body at axial offset dz (cells):
  *  1 through the flanks, the ellipse arc through the tapered end, 0 at/beyond
- *  L. dz < 0 is the NOSE side, dz > 0 the TAIL side (v1.7.3). */
-function profileScale(b: SimpleBody, dz: number): number {
+ *  L. dz < 0 is the NOSE side, dz > 0 the TAIL side (v1.7.3). EXPORTED v1.9
+ *  for balloonfin.ts (sleeve root radius + the inside-envelope test). */
+export function profileScale(b: SimpleBody, dz: number): number {
   const a = Math.abs(dz), sL = (dz >= 0 ? b.sT : b.sN) * b.L, nl = b.L - sL;
   if (a <= sL) return 1;
   if (a >= b.L) return 0;
@@ -609,6 +621,124 @@ interface LoftRing {
  *  the strip's outward winding derives from. */
 const loftPerp = (la: 0 | 1 | 2): [number, number] => [(la + 1) % 3, (la + 2) % 3];
 
+/** Ring-table cache key: identical cross-section ⇒ identical table (planLoft
+ *  shares flank levels; balloonfin re-reads the cut ring). */
+export type LoftRingCache = Map<string, { slots: [number, number][]; chains: [number, number][][] } | null>;
+
+/** The loft cross-section ring at profile scale f — EXPORTED so balloonfin
+ *  gets the EXACT ring table the loft itself uses at the tail cut (shared
+ *  vertices are what make the sleeve contiguous with the cone). Same law as
+ *  the pre-v1.9 planLoft closure, moved verbatim to module scope:
+ *  N support directions; per direction the extreme lattice point of the
+ *  ideal cross-section's lattice hull (mirror-equivariant ties, v1.7.4),
+ *  then the chain subdivision so no chain segment exceeds 9 cells.
+ *  null = the cross-section is a ≤ 1-cell-thin sliver (no ring). */
+export function loftRingTable(
+  body: SimpleBody, c1: number, c2: number, f: number, nd: number,
+  cache?: LoftRingCache,
+): { slots: [number, number][]; chains: [number, number][][] } | null {
+  const key = `${body.r1.toFixed(6)},${body.r2.toFixed(6)},${c1},${c2},${f.toFixed(9)},${nd}`;
+  const hit = cache?.get(key);
+  if (hit !== undefined) return hit;
+  const dirs: [number, number][] = [];
+  for (let k = 0; k < nd; k++) {
+    const th = 2 * Math.PI * k / nd;
+    dirs.push([Math.cos(th), Math.sin(th)]);
+  }
+  const a1 = body.r1 * f, a2 = body.r2 * f;
+  const scan: [number, number][] = [];
+  for (let u = Math.floor(c1 - a1); u <= Math.ceil(c1 + a1); u++)
+    for (let v = Math.floor(c2 - a2); v <= Math.ceil(c2 + a2); v++)
+      if (((u - c1) / a1) ** 2 + ((v - c2) / a2) ** 2 <= 1) scan.push([u, v]);
+  if (hull2d(scan).length < 3) { cache?.set(key, null); return null; }   // ≤ 1-cell-thin sliver
+  // MIRROR-SYMMETRIC slot pick (v1.7.4, user: "the zeppelin… not fully
+  // symmetrical"): the old monotone WALK advanced to the LAST maximizer on a
+  // flat plateau edge — a walk-order-dependent tie-break the mirrored ring
+  // resolved the OPPOSITE way, so port/starboard got different facet lines.
+  // Per direction: argmax of the support score, ties broken by (1) distance
+  // to the CONTINUOUS ideal-ellipse support point (mirror-equivariant), then
+  // (2)(3) the mirror-INVARIANT |u|,|v| (picks the plateau MIDPOINT on
+  // self-mirror directions). Slots remain cyclically monotone (support
+  // maximizers of a convex set are).
+  const slots: [number, number][] = [];
+  for (let k = 0; k < nd; k++) {
+    const [dx, dy] = dirs[k]!;
+    let best = -Infinity;
+    for (const q of scan) {
+      const sc = q[0] * dx + q[1] * dy;
+      if (sc > best) best = sc;
+    }
+    const den = Math.hypot(a1 * dx, a2 * dy) || 1;
+    const sx = c1 + (a1 * a1 * dx) / den, sy = c2 + (a2 * a2 * dy) / den;
+    let bi = -1, bd = 0, bu = 0, bv = 0;
+    for (let i = 0; i < scan.length; i++) {
+      const q = scan[i]!;
+      if (q[0] * dx + q[1] * dy < best - 1e-9) continue;
+      const du = q[0] - sx, dv = q[1] - sy;
+      const d2 = du * du + dv * dv, au = Math.abs(q[0] - c1), av = Math.abs(q[1] - c2);
+      if (bi < 0 || d2 < bd - 1e-9
+        || (Math.abs(d2 - bd) <= 1e-9 && (au < bu - 1e-9
+        || (Math.abs(au - bu) <= 1e-9 && av < bv - 1e-9)))) { bi = i; bd = d2; bu = au; bv = av; }
+    }
+    slots.push(scan[bi]!);
+  }
+  // Chains: the digital ellipse has AXIS-ALIGNED PLATEAU edges ~2√(2r) cells
+  // wide — a 96 m cross-section runs 28-cell single edges, and any strip face
+  // spanning one breaks the 31-cell window no axial slicing can fix (the
+  // exact cause of the giant-zeppelin refusals). Subdivide every slot→slot
+  // segment into ≤ 9-cell lattice steps: a merge-walked strip face then spans
+  // ≤ 9+9 along the chain + the radial step perpendicular — the window holds
+  // by construction, and the repair loop keeps shrinking the radial part.
+  // Segments are lattice (rounded), chords are inside the convex
+  // cross-section, so nothing bulges. v1.7.4: the rounding ties (exact .5)
+  // fall AWAY from the chain midpoint — Math.round's .5 bias is NOT
+  // odd-symmetric, and the old +0.5 tie made the mirrored ring's chains
+  // differ from the port side by a cell (visible facet asymmetry).
+  const rt = (x: number, mid: number): number => {
+    const fl = Math.floor(x);
+    if (Math.abs(x - fl - 0.5) < 1e-9) return x > mid ? fl + 1 : fl;   // tie: away from midpoint
+    return Math.round(x);
+  };
+  const chains: [number, number][][] = [];
+  for (let k = 0; k < slots.length; k++) {
+    const s = slots[k]!, t = slots[(k + 1) % slots.length]!;
+    const du = t[0]! - s[0]!, dv = t[1]! - s[1]!;
+    const segs = Math.max(1, Math.ceil(Math.max(Math.abs(du), Math.abs(dv)) / 9));
+    const ch: [number, number][] = [];
+    if (segs === 1) { ch.push(s, t); chains.push(ch); continue; }
+    const mx = s[0]! + du / 2, my = s[1]! + dv / 2;
+    for (let i = 0; i < segs; i++)
+      ch.push([rt(s[0]! + du * i / segs, mx), rt(s[1]! + dv * i / segs, my)]);
+    ch.push(t);
+    chains.push(ch);
+  }
+  const out = { slots, chains };
+  cache?.set(key, out);
+  return out;
+}
+
+/** The loft's sorted lattice LEVELS (lattice coords on the la axis) for a
+ *  body centred at c — exported v1.9: balloonfin picks the tail cut FROM
+ *  this list, so the cut is guaranteed to be a real loft level and the
+ *  sleeve can share the cut ring vertex-for-vertex. Same split law the
+ *  pre-v1.9 planLoft closure used, moved verbatim to module scope. */
+export function loftZLevels(body: SimpleBody, c: GP3): number[] {
+  const cA = c[body.la]!;
+  const lo = Math.ceil(cA - body.L), hi = Math.floor(cA + body.L);
+  const levels = new Set<number>();
+  const addSplit = (a: number, b: number) => {
+    const steps = Math.max(1, Math.ceil((b - a) / LOFT_GAP));
+    for (let k = 0; k <= steps; k++) levels.add(Math.round(a + (b - a) * k / steps));
+  };
+  if (hi > lo) {
+    const clamp = (z: number) => Math.min(hi - 1, Math.max(lo + 1, z));
+    const loSh = clamp(Math.round(cA - body.sN * body.L)), hiSh = clamp(Math.round(cA + body.sT * body.L));
+    if (hiSh > loSh) { addSplit(loSh, hiSh); addSplit(lo, loSh); addSplit(hiSh, hi); }
+    else { const m = Math.round((lo + hi) / 2); addSplit(lo, m); addSplit(m, hi); }
+  }
+  return [...levels].sort((a, b) => a - b);
+}
+
 function planLoft(spec: SphereSpec): SpherePlan {
   const body = simpleBody(spec);
   const c: [number, number, number] = [spec.cx ?? 6, spec.cy ?? 6, spec.cz ?? 6];
@@ -634,18 +764,23 @@ function planLoft(spec: SphereSpec): SpherePlan {
   // the placement flow uses) with EQUAL end tapers the split is mirror-
   // symmetric about the mid-plane; v1.7.3 asymmetric ends split each side
   // on its own geometry (still legal — the gap rule is per-slab).
-  const levels = new Set<number>();
-  const addSplit = (a: number, b: number) => {
-    const steps = Math.max(1, Math.ceil((b - a) / LOFT_GAP));
-    for (let k = 0; k <= steps; k++) levels.add(Math.round(a + (b - a) * k / steps));
-  };
-  if (hi > lo) {
-    const clamp = (z: number) => Math.min(hi - 1, Math.max(lo + 1, z));
-    const loSh = clamp(Math.round(cA - body.sN * body.L)), hiSh = clamp(Math.round(cA + body.sT * body.L));
-    if (hiSh > loSh) { addSplit(loSh, hiSh); addSplit(lo, loSh); addSplit(hiSh, hi); }
-    else { const m = Math.round((lo + hi) / 2); addSplit(lo, m); addSplit(m, hi); }
-  }
-  const zlevels = [...levels].sort((a, b) => a - b);
+  const zlevels = loftZLevels(body, c);
+  // v1.9 BALLOON TAIL (balloonfin.ts): with tailCutG the loft STOPS at that
+  // lattice level — the tail apex and every ring beyond it are not emitted,
+  // the shell is left OPEN at the cut ring, and the balloon tool closes it
+  // with the fin sleeve + tail cap built from the cut ring's EXACT vertices
+  // (contiguity = shared vertices, not coincident ones). Undefined ⇒ the
+  // full closed body, byte-identical to every pre-v1.9 plan.
+  const cut = spec.tailCutG;
+  const keptZ = (() => {
+    if (cut == null) return zlevels;
+    const kept = zlevels.filter(z => z <= cut);
+    // the cut ring itself becomes a REAL level (the loft's split grid may
+    // not have one inside a short tail taper — balloonfin picks the cut for
+    // the sleeve root, and the root must sit on a ring the loft emits)
+    if (kept.length && kept[kept.length - 1] !== cut && cut < zlevels[zlevels.length - 1]!) kept.push(cut);
+    return kept;
+  })();
   // ---- rings: N support directions, shared by EVERY level. Each ring
   // stores, per direction, its extreme lattice point of the ideal cross-
   // section's lattice hull in that direction (ties advance to the LAST
@@ -660,100 +795,8 @@ function planLoft(spec: SphereSpec): SpherePlan {
   // caps every strip segment at 9 cells), so a coarse body just trades
   // roundness for triangle count, honestly printed in the dev line.
   const nd = spec.facets && spec.facets >= 3 ? spec.facets : LOFT_DIRS;
-  const dirs: [number, number][] = [];
-  for (let k = 0; k < nd; k++) {
-    const th = 2 * Math.PI * k / nd;
-    dirs.push([Math.cos(th), Math.sin(th)]);
-  }
-  const ringSlots = (pts: [number, number][], a1: number, a2: number): [number, number][] => {
-    // MIRROR-SYMMETRIC slot pick (v1.7.4, user: "the zeppelin… not fully
-    // symmetrical"): the old monotone WALK advanced to the LAST maximizer
-    // on a flat plateau edge — a walk-order-dependent tie-break the
-    // mirrored ring resolved the OPPOSITE way, so port/starboard got
-    // different facet lines. Per direction: argmax of the support score,
-    // ties broken by (1) distance to the CONTINUOUS ideal-ellipse support
-    // point (mirror-equivariant), then (2)(3) the mirror-INVARIANT |u|,|v|
-    // (picks the plateau MIDPOINT on self-mirror directions). Slots remain
-    // cyclically monotone (support maximizers of a convex set are).
-    const slots: [number, number][] = [];
-    for (let k = 0; k < nd; k++) {
-      const [dx, dy] = dirs[k]!;
-      let best = -Infinity;
-      for (const q of pts) {
-        const sc = q[0] * dx + q[1] * dy;
-        if (sc > best) best = sc;
-      }
-      const den = Math.hypot(a1 * dx, a2 * dy) || 1;
-      const sx = c1 + (a1 * a1 * dx) / den, sy = c2 + (a2 * a2 * dy) / den;
-      let bi = -1, bd = 0, bu = 0, bv = 0;
-      for (let i = 0; i < pts.length; i++) {
-        const q = pts[i]!;
-        if (q[0] * dx + q[1] * dy < best - 1e-9) continue;
-        const du = q[0] - sx, dv = q[1] - sy;
-        const d2 = du * du + dv * dv, au = Math.abs(q[0] - c1), av = Math.abs(q[1] - c2);
-        if (bi < 0 || d2 < bd - 1e-9
-          || (Math.abs(d2 - bd) <= 1e-9 && (au < bu - 1e-9
-          || (Math.abs(au - bu) <= 1e-9 && av < bv - 1e-9)))) { bi = i; bd = d2; bu = au; bv = av; }
-      }
-      slots.push(pts[bi]!);
-    }
-    return slots;
-  };
-  // Chains: the digital ellipse has AXIS-ALIGNED PLATEAU edges ~2√(2r) cells
-  // wide — a 96 m cross-section runs 28-cell single edges, and any strip
-  // face spanning one breaks the 31-cell window no axial slicing can fix
-  // (the exact cause of the giant-zeppelin refusals). Subdivide every slot
-  //→slot segment into ≤ 9-cell lattice steps: a merge-walked strip face then
-  // spans ≤ 9+9 along the chain + the radial step perpendicular — the
-  // window holds by construction, and the repair loop keeps shrinking the
-  // radial part. Segments are lattice (rounded), chords are inside the
-  // convex cross-section, so nothing bulges. v1.7.4: the rounding ties
-  // (exact .5) fall AWAY from the chain midpoint — Math.round's .5 bias is
-  // NOT odd-symmetric, and the old +0.5 tie made the mirrored ring's chains
-  // differ from the port side by a cell (visible facet asymmetry).
-  const rt = (x: number, mid: number): number => {
-    const f = Math.floor(x);
-    if (Math.abs(x - f - 0.5) < 1e-9) return x > mid ? f + 1 : f;   // tie: away from midpoint
-    return Math.round(x);
-  };
-  const chainsOf = (slots: [number, number][]): [number, number][][] => {
-    const out: [number, number][][] = [];
-    for (let k = 0; k < slots.length; k++) {
-      const s = slots[k]!, t = slots[(k + 1) % slots.length]!;
-      const du = t[0]! - s[0]!, dv = t[1]! - s[1]!;
-      const segs = Math.max(1, Math.ceil(Math.max(Math.abs(du), Math.abs(dv)) / 9));
-      const ch: [number, number][] = [];
-      if (segs === 1) { ch.push(s, t); out.push(ch); continue; }
-      const mx = s[0]! + du / 2, my = s[1]! + dv / 2;
-      for (let i = 0; i < segs; i++)
-        ch.push([rt(s[0]! + du * i / segs, mx), rt(s[1]! + dv * i / segs, my)]);
-      ch.push(t);
-      out.push(ch);
-    }
-    return out;
-  };
-  // Ring table per profile SCALE f: the flank levels share f = 1, so the
-  // scan + slots + chains are computed ONCE per distinct cross-section
-  // (the argmax slot pick is O(nd·|scan|) — the cache keeps a zeppelin
-  // planning in milliseconds, and every level of one f is EXACTLY the
-  // same ring table, which is also what stitches the flank into a closed
-  // strip manifold.)
-  const ringCache = new Map<string, { slots: [number, number][]; chains: [number, number][][] } | null>();
-  const ringsAt = (f: number) => {
-    const key = f.toFixed(9);
-    const hit = ringCache.get(key);
-    if (hit !== undefined) return hit;
-    const a1 = body.r1 * f, a2 = body.r2 * f;
-    const scan: [number, number][] = [];
-    for (let u = Math.floor(c1 - a1); u <= Math.ceil(c1 + a1); u++)
-      for (let v = Math.floor(c2 - a2); v <= Math.ceil(c2 + a2); v++)
-        if (((u - c1) / a1) ** 2 + ((v - c2) / a2) ** 2 <= 1) scan.push([u, v]);
-    if (hull2d(scan).length < 3) { ringCache.set(key, null); return null; }   // ≤ 1-cell-thin sliver
-    const built = { slots: ringSlots(scan, a1, a2), chains: [] as [number, number][][] };
-    built.chains = chainsOf(built.slots);
-    ringCache.set(key, built);
-    return built;
-  };
+  const ringCache: LoftRingCache = new Map();
+  const ringsAt = (f: number) => loftRingTable(body, c1, c2, f, nd, ringCache);
   const rings: LoftRing[] = [];
   const apexRing = (z: number): LoftRing => {
     const apex: [number, number] = [Math.round(c1), Math.round(c2)];
@@ -767,8 +810,11 @@ function planLoft(spec: SphereSpec): SpherePlan {
     if (!built) return null;
     return { z, slots: built.slots, chains: built.chains };
   };
-  zlevels.forEach((z, k) => {
-    if (k === 0 || k === zlevels.length - 1) { rings.push(apexRing(z)); return; }
+  keptZ.forEach((z, k) => {
+    // v1.9: the apex rings belong to the TRUE ends only — with tailCutG the
+    // last kept level is the cut ring, a BODY ring (the pre-v1.9 "first/last
+    // level is an apex" rule held because lo/hi were always the ends).
+    if ((k === 0 && z === lo) || (k === keptZ.length - 1 && z === hi)) { rings.push(apexRing(z)); return; }
     const r = bodyRing(z);
     if (r) rings.push(r);
   });
@@ -785,6 +831,10 @@ function planLoft(spec: SphereSpec): SpherePlan {
   // whole nose to triangles=0). Anything strictly between apex and tip is
   // dropped; the fat rings beyond stitch on normally.
   for (const end of [0, 1] as const) {
+    // v1.9: with tailCutG the TAIL end ring is a body ring, not an apex —
+    // there is nothing to fit there (the sleeve + cap close the tail).
+    if (!(end === 0 ? rings[0] : rings[rings.length - 1])
+      || !isApexRing((end === 0 ? rings[0] : rings[rings.length - 1])!)) continue;
     const apexZ = end === 0 ? rings[0]!.z : rings[rings.length - 1]!.z;
     const rMax = Math.max(body.r1, body.r2);
     const sEnd = end === 0 ? body.sN : body.sT;   // v1.7.3: each end its own taper
