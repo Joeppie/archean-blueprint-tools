@@ -2445,6 +2445,8 @@ release/functionality. but no user-unackowledged bumps."** Concretely:
    (W=12, pitch=CELL, C=−FRAME/2) passes on all 24 corpus files, not just ISW-241.
 
 ## Conventions
+- **Say "we / us", never "the user"** (2026-10-23) — in replies, commit messages,
+  comments and docs alike; quoted history that already reads `user:` stays.
 - view3d.js is one flat file with `// ---------- sections ----------`; follow it.
 - UI = DevTools-style rows built by `row()`; new tunables get sliders, not prompts.
 - Component list (v0.156 tabs, v0.157 collapsible): two tabs (`#ltabs`,
