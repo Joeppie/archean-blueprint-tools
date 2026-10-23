@@ -75,6 +75,9 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // ✕ Cancel / ✔ Build; the commit lands at the user's final cell offset.
   const [placeStage, setPlaceStage] = useState<
     { toolId: string; form: ToolForm; payload: PlacePayload } | null>(null);
+  /** v1.7.2 ↩: the cell offset the ghost had when the dialog reopened —
+   *  re-staging after a parameter change lands where the user dragged it */
+  const pendingPlaceOffset = useRef<[number, number, number] | null>(null);
   // the toast line a finished tool printed under the menu (auto-clears below)
   const [toolMsg, setToolMsg] = useState('');
   // 🎨 PALETTE window over the viewport (v1.6): the paint alternative to the
@@ -121,6 +124,10 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   const [dlErr, setDlErr] = useState(false);
   const [retrySeq, setRetrySeq] = useState(0);
   const forceRef = useRef(false);             // File ▾ Refresh: one-shot re-download
+  /** Esc precedence (v1.7.2): while a tool dialog is open, Esc belongs to
+   *  the DIALOG — the viewport's Esc-⇒-place-cancel must stand down */
+  const toolOpenRef = useRef<string | null>(null);
+  toolOpenRef.current = toolOpen;
   const engineRef = useRef<Engine | null>(null);
   const ctxRef = useRef<EditCtx | null>(null);
   /** the rotation STORAGE law of the craft AS ON DISK (raw for palette-less
@@ -267,9 +274,28 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     // gated state (the ⚙ SESSION row itself is untouched, v1.5.1 rule)
     engineRef.current?.setGizmoEnabled(true);
     engineRef.current?.setClusterGhost(payload.blocks ?? null, 0x7dffcf, payload.triangles ?? null);
+    // v1.7.2 ↩ BACK: re-staging after a parameter change carries the cell
+    // offset the user already dragged to (the shape changed, not the spot)
+    const po = pendingPlaceOffset.current;
+    pendingPlaceOffset.current = null;
+    if (po) engineRef.current?.clusterGhostShift(po);
     setPlaceStage({ toolId: tool.id, form, payload });
   }, []);
+  /** ↩ on the placement label: reopen the tool dialog with the SAME form
+   *  (the ghost waits behind the backdrop — "change parameters without
+   *  starting from scratch") */
+  const onPlaceBack = useCallback(() => {
+    const st = engineRef.current?.clusterGhostState();
+    if (st) pendingPlaceOffset.current = st.offset;
+    if (placeStage) setToolOpen(placeStage.toolId);
+  }, [placeStage]);
+  const onPlaceRotate = useCallback((axis: 'x' | 'y' | 'z') => {
+    engineRef.current?.clusterGhostRotate(axis);
+  }, []);
   const onPlaceCancel = useCallback(() => {
+    // Esc ALSO routes here (the viewport's ✕ twin) — while ↩ re-opened the
+    // dialog, Esc belongs to the DIALOG, never kills the waiting ghost
+    if (toolOpenRef.current) return;
     engineRef.current?.setClusterGhost(null);
     engineRef.current?.setGizmoEnabled(mode === 'edit' && gizmoOn);
     setPlaceStage(null);
@@ -281,7 +307,14 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     if (!st.valid) { setToolMsg('the placement collides with existing blocks — move it first'); return; }
     const tool = TOOLS.find(t => t.id === stage.toolId);
     if (!tool?.place) return;
-    const msg = tool.place.commit(stage.form, stage.payload, st.offset, ctx);
+    // the LIVE ghost data: ⟲ quarter-turns (and the drag) happened in the
+    // engine — the commit must write what is GHOSTED, not a fresh un-rotated
+    // plan (the paint still resolves at commit)
+    const live = engineRef.current?.clusterGhostData();
+    const msg = tool.place.commit(stage.form, {
+      blocks: live?.blocks ?? stage.payload.blocks,
+      triangles: live?.triangles ?? stage.payload.triangles,
+    }, st.offset, ctx);
     engineRef.current?.setClusterGhost(null);
     engineRef.current?.setGizmoEnabled(mode === 'edit' && gizmoOn);
     setPlaceStage(null);
@@ -937,6 +970,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
               placing={mode === 'edit' ? placing : null} onPlace={onPlacePoint}
               onPaintOpen={() => setPaintOpen(o => !o)}
               onPlaceCancel={onPlaceCancel} onPlaceBuild={onPlaceBuild}
+              onPlaceRotate={onPlaceRotate} onPlaceBack={onPlaceBack}
               keepView={bpKeepView}
               onManifest={setManifest} />
             {/* 🎨 PALETTE window (v1.6): the paint alternative to the gizmo
@@ -998,6 +1032,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
             {toolOpen && bp && ctxRef.current && (
               <ToolDialog key={toolOpen}
                 tool={TOOLS.find(t => t.id === toolOpen)!} bp={bp} ctx={ctxRef.current}
+                initialForm={placeStage?.toolId === toolOpen ? placeStage.form : undefined}
                 onClose={() => setToolOpen(null)}
                 onPlaced={(t, f, p) => onPlaced(t, f, p)}
                 onApplied={msg => { sceneChanged(); setToolMsg(msg); }} />

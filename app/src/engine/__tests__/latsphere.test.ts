@@ -323,3 +323,111 @@ describe('latsphere — the game’s triangle limits, always', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------- v1.7.2
+// THE SIMPLIFIED BODY (user: "Geometry for sphere can be too complex… when
+// making sphere pointy, I want it to be simplified, so a cylinder on the
+// sides and slightly pointier nose"): lattice cross-section rings lofted
+// along the longest axis + single-vertex lattice apexes. THE POINT of the
+// whole feature is that needles — which the ellipsoid hull must REFUSE (its
+// full-length flank facets do not fit the 31-cell window) — become storable
+// with FEW triangles; the pins below assert exactly that, plus the closed
+// manifold the ring-edge stitching is claimed to give, and that loft
+// vertices never bulge outside the ideal body (maxOut is exactly 0).
+describe('latsphere — simple body: cylinder flanks + pointy nose (v1.7.2)', () => {
+  const CYL: { name: string; spec: SphereSpec }[] = [
+    { name: 'cylinder 1×1×4', spec: { rx: 1, ry: 1, rz: 4, profile: 'cylinder' } },
+    { name: 'needle 0.5×0.5×12 (ellipsoid refuses this)', spec: { rx: 0.5, ry: 0.5, rz: 12, profile: 'cylinder' } },
+    { name: 'elliptic rod 3×2×8, shoulder .4', spec: { rx: 3, ry: 2, rz: 8, profile: 'cylinder', shoulder: 0.4 } },
+    { name: 'near-straight 2×2×4, shoulder .9', spec: { rx: 2, ry: 2, rz: 4, profile: 'cylinder', shoulder: 0.9 } },
+    { name: 'x-long 8×3×3', spec: { rx: 8, ry: 3, rz: 3, profile: 'cylinder' } },
+    { name: 'zeppelin 12×12×40', spec: { rx: 12, ry: 12, rz: 40, profile: 'cylinder' } },
+  ];
+
+  for (const { name, spec } of CYL) {
+    test(`${name}: closed manifold, integer vertices, outward winding`, () => {
+      const plan = spherePlan(spec);
+      expect(plan.faces.length).toBeGreaterThan(8);
+      const dir = new Map<string, number>(), und = new Map<string, number>();
+      for (const [i, j, k] of plan.faces) {
+        for (const v of [i, j, k]) {
+          const p = plan.shell[v]!;
+          expect(Number.isInteger(p[0]) && Number.isInteger(p[1]) && Number.isInteger(p[2])).toBe(true);
+        }
+        for (const [u, v] of [[i, j], [j, k], [k, i]] as const) {
+          dir.set(`${u}>${v}`, (dir.get(`${u}>${v}`) ?? 0) + 1);
+          const key = u < v ? `${u}-${v}` : `${v}-${u}`;
+          und.set(key, (und.get(key) ?? 0) + 1);
+        }
+      }
+      for (const v of dir.values()) expect(v).toBe(1);          // each HALFEDGE once
+      for (const v of und.values()) expect(v).toBe(2);          // each edge twice → closed
+      let vol2 = 0;
+      for (const [i, j, k] of plan.faces) {
+        const a = plan.shell[i]!, b = plan.shell[j]!, c = plan.shell[k]!;
+        vol2 += a[0]! * (b[1]! * c[2]! - c[1]! * b[2]!)
+              - a[1]! * (b[0]! * c[2]! - c[0]! * b[2]!)
+              + a[2]! * (b[0]! * c[1]! - b[1]! * c[0]!);
+      }
+      expect(vol2).toBeGreaterThan(0);                          // OUTWARD winding
+    }, 60_000);
+    test(`${name}: EVERY triangle is window-legal (skipped 0) and nothing bulges out`, () => {
+      const st = spherePlan(spec).stats;
+      expect(st.skipped).toBe(0);
+      // loft rings are hulls of points INSIDE the ideal cross-section ▸ the
+      // skin never sits outside the ideal body
+      expect(st.maxOutM).toBe(0);
+      expect(sphereSkinTris(spec, { slot: 51 }).length).toBe(st.tris);
+    }, 60_000);
+    test(`${name}: pointed nose — one lattice apex at each tip`, () => {
+      const plan = spherePlan(spec);
+      const la = spec.rx >= spec.ry && spec.rx >= spec.rz ? 0 : spec.ry >= spec.rz ? 1 : 2;
+      const per = [0, 1, 2].filter(a => a !== la);
+      const zs = plan.verts.map(i => plan.shell[i]![la]!);
+      const zMax = Math.max(...zs), zMin = Math.min(...zs);
+      const top = plan.verts.filter(i => plan.shell[i]![la] === zMax);
+      const bot = plan.verts.filter(i => plan.shell[i]![la] === zMin);
+      expect(top.length).toBe(1);                               // a POINT, not a cap
+      expect(bot.length).toBe(1);
+      for (const i of [...top, ...bot]) {
+        expect(plan.shell[i]![per[0]!]).toBe(6);                // on the axis
+        expect(plan.shell[i]![per[1]!]).toBe(6);
+      }
+    }, 60_000);
+  }
+
+  test('the needle the ELLIPSOID refuses becomes a small storable skin', () => {
+    const needle = { rx: 0.5, ry: 0.5, rz: 12 };
+    expect(spherePlan(needle).skipped).toBeGreaterThan(0);      // old: refused
+    const cyl = spherePlan({ ...needle, profile: 'cylinder' });
+    expect(cyl.skipped).toBe(0);                                // simple body: stores
+    // the whole 24 m needle with pointed caps is FEWER triangles than a
+    // 3 m ellipsoid hull — "too complex" is what this option exists to fix
+    expect(cyl.stats.tris).toBeLessThan(spherePlan({ rx: 2, ry: 2, rz: 2 }).stats.tris);
+  }, 120_000);
+
+  test('facet decimation simplifies further, still on lattice, still closed', () => {
+    const spec = { rx: 3, ry: 2, rz: 8, profile: 'cylinder' as const };
+    const fine = spherePlan(spec).stats.tris;
+    const simple = spherePlan({ ...spec, facets: 12 }).stats.tris;
+    const blocky = spherePlan({ ...spec, facets: 8 }).stats.tris;
+    expect(simple).toBeLessThanOrEqual(fine);
+    expect(blocky).toBeLessThan(simple);
+    const plan = spherePlan({ ...spec, facets: 8 });
+    for (const [i, j, k] of plan.faces)
+      for (const v of [i, j, k])
+        for (const ax of [0, 1, 2]) expect(Number.isInteger(plan.shell[v]![ax]!)).toBe(true);
+  }, 60_000);
+
+  test('the loft encloses most of the ideal body and never more of it', () => {
+    const st = spherePlan({ rx: 12, ry: 12, rz: 40, profile: 'cylinder' }).stats;
+    expect(st.volumeM3).toBeGreaterThan(st.idealM3 * 0.8);
+    expect(st.volumeM3).toBeLessThanOrEqual(st.idealM3 * 1.02);
+  }, 60_000);
+
+  test('determinism: the same spec plans the same skin', () => {
+    const a = JSON.stringify(sphereSkinTris({ rx: 2, ry: 1.5, rz: 6, profile: 'cylinder', shoulder: 0.5 }, { slot: 51 }));
+    const b = JSON.stringify(sphereSkinTris({ rx: 2, ry: 1.5, rz: 6, profile: 'cylinder', shoulder: 0.5 }, { slot: 51 }));
+    expect(a).toBe(b);
+  }, 60_000);
+});

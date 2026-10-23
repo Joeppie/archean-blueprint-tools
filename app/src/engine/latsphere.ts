@@ -62,6 +62,25 @@ export interface SphereSpec {
    *  coverage of a convex curved surface holds at this width, sag stays 0).
    *  Larger = denser candidates at CPU cost + a taller outward bulge. */
   tau?: number;
+  /** v1.7.2 SIMPLIFIED BODY (user: "Geometry for sphere can be too complex…
+   *  when making sphere pointy, I want it to be simplified, so a cylinder on
+   *  the sides and slightly pointier nose"): 'cylinder' LOFTS integer lattice
+   *  cross-section rings along the LONGEST axis — flat cylindrical flanks
+   *  (few big facets, no length-dependent refinement, no window refusals at
+   *  needle aspect ratios where the ellipsoid hull cannot store) — capped by
+   *  ellipsoidal noses that taper to a lattice-vertex point. The body stays
+   *  convex (flat flank + concave elliptic arc = concave profile ⇒ convex
+   *  silhouette), so the dent-free property carries over. Default ellipsoid. */
+  profile?: 'ellipsoid' | 'cylinder';
+  /** cylinder profile: fraction of the half-length that stays cylindrical
+   *  (default 0.6; the rest tapers to the tip — smaller = pointier nose). */
+  shoulder?: number;
+  /** cylinder profile: support directions per ring (0/undefined = 'fine'
+   *  = 48, still sub-cell accurate at zeppelin radii; 12 = 'simple',
+   *  8 = 'blocky'). Fewer directions = fewer, larger facets; vertices stay
+   *  lattice points (each ring vertex is a lattice point of the ideal
+   *  cross-section), so coarsening can never add a bulge. */
+  facets?: number;
 }
 
 export interface SpherePlan {
@@ -104,6 +123,89 @@ const TAU_DEFAULT = 0.75;   // measured: sag stays EXACTLY 0 down to 0.75 cells,
 function radiusAlong(nx: number, ny: number, nz: number, rx: number, ry: number, rz: number): number {
   const a = nx / rx, b = ny / ry, c = nz / rz;
   return 1 / Math.sqrt(a * a + b * b + c * c);
+}
+
+// ------------------------------------------------ the SIMPLE body (v1.7.2)
+/** cylinder flanks + ellipsoidal pointed noses about the LONGEST axis, the
+ *  'cylinder' profile of the dialog (user: "a cylinder on the sides and
+ *  slightly pointier nose"). All in CELLS about the centre. The body is the
+ *  union of the cylinder (|axial| ≤ shoulder·L) and two full ellipsoids of
+ *  semi-axes (r1, r2, (1−s)L) centred at ±shoulder·L — the union is convex
+ *  (concave ρ(axial) profile) and its back halves hide inside the cylinder. */
+interface SimpleBody { la: 0 | 1 | 2; r1: number; r2: number; L: number; s: number }
+
+function simpleBody(spec: SphereSpec): SimpleBody {
+  const r = [spec.rx / CELL, spec.ry / CELL, spec.rz / CELL];
+  const la: 0 | 1 | 2 = r[0]! >= r[1]! && r[0]! >= r[2]! ? 0 : r[1]! >= r[2]! ? 1 : 2;
+  const per = ([0, 1, 2] as const).filter(a => a !== la);
+  return {
+    la, r1: r[per[0]!]!, r2: r[per[1]!]!, L: r[la]!,
+    s: Math.min(0.9, Math.max(0.1, spec.shoulder ?? 0.6)),
+  };
+}
+
+const perpAxes = (la: 0 | 1 | 2): [number, number] =>
+  [0, 1, 2].filter(a => a !== la) as [number, number];
+
+/** ray-exit distance of the simple body along the UNIT direction n, CELLS:
+ *  min(flank exit, shoulder plane) with the nose-ellipsoid root splicing on
+ *  whenever its near interval touches the cylinder's covered segment. */
+function bodyRadius(b: SimpleBody, n: [number, number, number]): number {
+  const [p1, p2] = perpAxes(b.la);
+  const nA = n[b.la]!, n1 = n[p1]!, n2 = n[p2]!;
+  const en2 = (n1 / b.r1) ** 2 + (n2 / b.r2) ** 2;
+  const sL = b.s * b.L, nl = b.L - sL;
+  const tFlank = en2 > 1e-18 ? 1 / Math.sqrt(en2) : Infinity;
+  const tShoulder = Math.abs(nA) > 1e-12 ? sL / Math.abs(nA) : Infinity;
+  let R = Math.min(tFlank, tShoulder);
+  if (nl > 1e-9) {
+    const A = en2 + (nA / nl) ** 2;
+    const B = -2 * Math.abs(nA) * sL / (nl * nl);
+    const C = (sL * sL) / (nl * nl) - 1;
+    const disc = B * B - 4 * A * C;
+    if (disc >= 0) {
+      const t1 = (-B - Math.sqrt(disc)) / (2 * A);
+      const t2 = (-B + Math.sqrt(disc)) / (2 * A);
+      if (t2 > 0 && t1 <= R + 1e-9) R = Math.max(R, t2);
+    }
+  }
+  return R;
+}
+
+/** ring radius scale f(dz) of the simple body at axial offset dz (cells):
+ *  1 through the flanks, the ellipse arc through the nose, 0 at/beyond L. */
+function profileScale(b: SimpleBody, dz: number): number {
+  const a = Math.abs(dz), sL = b.s * b.L, nl = b.L - sL;
+  if (a <= sL) return 1;
+  if (a >= b.L) return 0;
+  const t = (a - sL) / nl;
+  return Math.sqrt(Math.max(0, 1 - t * t));
+}
+
+/** exact enclosed volume of the simple body, CELLS³ */
+function bodyVolume(b: SimpleBody): number {
+  const sL = b.s * b.L, nl = b.L - sL;
+  return Math.PI * b.r1 * b.r2 * (2 * sL + (4 / 3) * nl);
+}
+
+/** convex hull of 2D integer points (Andrew's monotone chain), CCW, no
+ *  collinear interior vertices — the cross-section ring of the loft. */
+function hull2d(pts: [number, number][]): [number, number][] {
+  if (pts.length < 3) return pts.slice();
+  const p = [...pts].sort((a, c) => a[0]! - c[0]! || a[1]! - c[1]!);
+  const cross = (o: number[], a: number[], b: number[]) =>
+    (a[0]! - o[0]!) * (b[1]! - o[1]!) - (a[1]! - o[1]!) * (b[0]! - o[0]!);
+  const half = (arr: [number, number][]) => {
+    const h: [number, number][] = [];
+    for (const q of arr) {
+      while (h.length >= 2 && cross(h[h.length - 2]!, h[h.length - 1]!, q) <= 0) h.pop();
+      h.push(q);
+    }
+    return h;
+  };
+  const up = half(p), down = half([...p].reverse());
+  up.pop(); down.pop();
+  return up.concat(down);
 }
 
 // ------------------------------------------------------------- 1. the shell
@@ -420,12 +522,24 @@ function repairSplit(shell: GP3[], faces: [number, number, number][]):
  *  windowable faces naturally. The first zero-violation centre wins; a
  *  residual means the surface patch is EMPTY of lattice (true needle
  *  flanks) — NO convex lattice-exact ≤31-cell skin exists for the game to
- *  store there, and the dialog refuses to place it (skipped > 0). */
+ *  store there, and the dialog refuses to place it (skipped > 0).
+ *  The SIMPLIFIED body (profile 'cylinder', v1.7.2 — user: "a cylinder on
+ *  the sides and slightly pointier nose") takes the LOFT path below: the
+ *  flank is sliced DELIBERATELY, so the ladder's coplanarity problem never
+ *  arises and needles store fine. */
 const PLAN_CACHE = new Map<string, SpherePlan>();
 export function spherePlan(spec: SphereSpec): SpherePlan {
-  const key = JSON.stringify([spec.rx, spec.ry, spec.rz, spec.cx ?? 6, spec.cy ?? 6, spec.cz ?? 6, spec.tau ?? null]);
+  const key = JSON.stringify([spec.rx, spec.ry, spec.rz, spec.cx ?? 6, spec.cy ?? 6, spec.cz ?? 6,
+    spec.tau ?? null, spec.profile ?? null, spec.shoulder ?? null, spec.facets ?? null]);
   const hit = PLAN_CACHE.get(key);
   if (hit) return hit;
+  const best = spec.profile === 'cylinder' ? planLoft(spec) : planEllipsoid(spec);
+  if (PLAN_CACHE.size > 24) PLAN_CACHE.clear();
+  PLAN_CACHE.set(key, best);
+  return best;
+}
+
+function planEllipsoid(spec: SphereSpec): SpherePlan {
   let best: SpherePlan | null = null;
   // τ ladder: a thicker shell band = shorter facets on low-curvature flanks
   // (a 60 m zeppelin nose facets SPANS that no aligned window holds from a
@@ -439,9 +553,272 @@ export function spherePlan(spec: SphereSpec): SpherePlan {
     }
     if (best?.skipped === 0) break;
   }
-  if (PLAN_CACHE.size > 24) PLAN_CACHE.clear();
-  PLAN_CACHE.set(key, best!);
   return best!;
+}
+
+// ------------------------------------------------- the LOFT (simple body)
+/** The v1.7.2 simple-body surface: integer cross-section RINGS lofted along
+ *  the long axis. Structure, not search: every ring is the convex hull of
+ *  the lattice points inside the ideal cross-section at that level (scales
+ *  grow toward the middle, and a bigger cross-section contains every lattice
+ *  point of the smaller one, so the rings nest); the two END levels are
+ *  forced to a single lattice apex on the axis (the "pointy nose"), and a
+ *  slab's side surface is the convex hull of its two rings with the interior
+ *  section caps dropped. A hull face never uses a DIAGONAL of its ring (a
+ *  plane through one would cut the nested ring off its supporting side), so
+ *  every side face meets a ring plane along a full RING EDGE — the strips
+ *  stitch into a CLOSED manifold across the shared rings. Every triangle
+ *  spans two consecutive levels, and with the level gap ≤ LOFT_GAP the
+ *  31-cell window is held BY CONSTRUCTION: exactly the flank slicing the
+ *  ellipsoid hull cannot do on a needle. Levels whose ring degenerates to
+ *  < 3 points (a ≤ 1-cell-thin tip sliver) are dropped — the neighbours
+ *  stitch across them within about one gap. */
+const LOFT_GAP = 20;   // axial cells between rings: the worst 12-frame
+                       // residue (11) + span 20 = 31 keeps EVERY strip
+                       // face inside the frame-aligned 31-cell window
+const LOFT_DIRS = 48;  // 'fine' support directions (spec.facets overrides)
+
+interface LoftRing {
+  z: number;
+  slots: [number, number][];              // support point per direction k
+  chains: [number, number][][];           // per direction pair k→k+1: the full
+                                          // boundary chain, lattice-subdivided
+                                          // so NO segment exceeds 9 cells
+}
+
+/** CYCLIC perpendicular axes: p1 × p2 = +ê_la — the ring plane's CCW sense
+ *  the strip's outward winding derives from. */
+const loftPerp = (la: 0 | 1 | 2): [number, number] => [(la + 1) % 3, (la + 2) % 3];
+
+function planLoft(spec: SphereSpec): SpherePlan {
+  const body = simpleBody(spec);
+  const c: [number, number, number] = [spec.cx ?? 6, spec.cy ?? 6, spec.cz ?? 6];
+  const [p1, p2] = loftPerp(body.la);
+  const cA = c[body.la]!, c1 = c[p1]!, c2 = c[p2]!;
+  const lo = Math.ceil(cA - body.L), hi = Math.floor(cA + body.L);
+  const pts: GP3[] = [];
+  const idxOf = new Map<string, number>();
+  const gid = (z: number, u: number, v: number): [number, number, number] => {
+    const g: [number, number, number] = [0, 0, 0];
+    g[body.la] = z; g[p1] = u; g[p2] = v;
+    return g;
+  };
+  const gpt = (g: [number, number, number]): number => {
+    const k = `${g[0]},${g[1]},${g[2]}`;
+    let i = idxOf.get(k);
+    if (i === undefined) { i = pts.length; idxOf.set(k, i); pts.push(g); }
+    return i;
+  };
+  // ---- levels: apexes at lo/hi, the SHOULDER rings kept as real levels,
+  // the flanks and each nose split into ≤ LOFT_GAP slices (an axial span
+  // no triangle may exceed). For an integral centre (the only centre the
+  // placement flow uses) lo+hi = 2c is even, so the split is mirror-
+  // symmetric about the mid-plane by construction.
+  const levels = new Set<number>();
+  const addSplit = (a: number, b: number) => {
+    const steps = Math.max(1, Math.ceil((b - a) / LOFT_GAP));
+    for (let k = 0; k <= steps; k++) levels.add(Math.round(a + (b - a) * k / steps));
+  };
+  if (hi > lo) {
+    const sL = body.s * body.L;
+    const clamp = (z: number) => Math.min(hi - 1, Math.max(lo + 1, z));
+    const loSh = clamp(Math.round(cA - sL)), hiSh = clamp(Math.round(cA + sL));
+    if (hiSh > loSh) { addSplit(loSh, hiSh); addSplit(lo, loSh); addSplit(hiSh, hi); }
+    else { const m = Math.round((lo + hi) / 2); addSplit(lo, m); addSplit(m, hi); }
+  }
+  const zlevels = [...levels].sort((a, b) => a - b);
+  // ---- rings: N support directions, shared by EVERY level. Each ring
+  // stores, per direction, its extreme lattice point of the ideal cross-
+  // section's lattice hull in that direction (ties advance to the LAST
+  // maximiser, so the slot sequence walks the hull cyclically and can
+  // never jitter backwards). Two slots that repeat a point mark a flat
+  // flank patch — the strip pass turns those into single triangles, so
+  // coplanar degeneracy (what a strict convex hull drops into HOLES)
+  // cannot occur. Consecutive ring edges therefore coincide EXACTLY at
+  // the shared level: the strips stitch into a closed manifold.
+  // Direction count: the user's knob ('fine' = 48, 'simple' = 12,
+  // 'blocky' = 8) — legality does NOT depend on it (the chain subdivision
+  // caps every strip segment at 9 cells), so a coarse body just trades
+  // roundness for triangle count, honestly printed in the dev line.
+  const nd = spec.facets && spec.facets >= 3 ? spec.facets : LOFT_DIRS;
+  const dirs: [number, number][] = [];
+  for (let k = 0; k < nd; k++) {
+    const th = 2 * Math.PI * k / nd;
+    dirs.push([Math.cos(th), Math.sin(th)]);
+  }
+  const ringSlots = (poly: [number, number][]): [number, number][] => {
+    const slots: [number, number][] = [];
+    let i = 0;
+    for (let k = 0; k < nd; k++) {
+      const [dx, dy] = dirs[k]!;
+      // monotone walk: advance while the NEXT hull vertex scores ≥ current
+      for (let guard = 0; guard < poly.length; guard++) {
+        const nx = poly[(i + 1) % poly.length]!;
+        const cu = poly[i]!;
+        if (nx[0]! * dx + nx[1]! * dy >= cu[0]! * dx + cu[1]! * dy) i = (i + 1) % poly.length;
+        else break;
+      }
+      slots.push(poly[i]!);
+    }
+    return slots;
+  };
+  // Chains: the digital ellipse has AXIS-ALIGNED PLATEAU edges ~2√(2r) cells
+  // wide — a 96 m cross-section runs 28-cell single edges, and any strip
+  // face spanning one breaks the 31-cell window no axial slicing can fix
+  // (the exact cause of the giant-zeppelin refusals). Subdivide every slot
+  //→slot segment into ≤ 9-cell lattice steps: a merge-walked strip face then
+  // spans ≤ 9+9 along the chain + the radial step perpendicular — the
+  // window holds by construction, and the repair loop keeps shrinking the
+  // radial part. Segments are lattice (rounded), chords are inside the
+  // convex cross-section, so nothing bulges.
+  const chainsOf = (slots: [number, number][]): [number, number][][] => {
+    const out: [number, number][][] = [];
+    for (let k = 0; k < slots.length; k++) {
+      const s = slots[k]!, t = slots[(k + 1) % slots.length]!;
+      const du = t[0]! - s[0]!, dv = t[1]! - s[1]!;
+      const segs = Math.max(1, Math.ceil(Math.max(Math.abs(du), Math.abs(dv)) / 9));
+      const ch: [number, number][] = [];
+      for (let i = 0; i < segs; i++)
+        ch.push(segs === 1 ? s : [s[0]! + Math.round(du * i / segs), s[1]! + Math.round(dv * i / segs)]);
+      ch.push(t);
+      out.push(ch);
+    }
+    return out;
+  };
+  const rings: LoftRing[] = [];
+  const apexRing = (z: number): LoftRing => {
+    const apex: [number, number] = [Math.round(c1), Math.round(c2)];
+    const slots = Array.from({ length: nd }, () => apex);
+    return { z, slots, chains: slots.map(s => [s, s]) };   // lattice apex
+  };
+  const bodyRing = (z: number): LoftRing | null => {
+    const f = profileScale(body, z - cA);
+    if (f <= 0) return null;
+    const a1 = body.r1 * f, a2 = body.r2 * f;
+    const scan: [number, number][] = [];
+    for (let u = Math.floor(c1 - a1); u <= Math.ceil(c1 + a1); u++)
+      for (let v = Math.floor(c2 - a2); v <= Math.ceil(c2 + a2); v++)
+        if (((u - c1) / a1) ** 2 + ((v - c2) / a2) ** 2 <= 1) scan.push([u, v]);
+    const poly = hull2d(scan);
+    // < 3 points at an interior level = a ≤ 1-cell-thin tip sliver; the
+    // neighbouring RINGS stitch across it (the span stays ≈ one gap)
+    if (poly.length < 3) return null;
+    const slots = ringSlots(poly);
+    return { z, slots, chains: chainsOf(slots) };
+  };
+  zlevels.forEach((z, k) => {
+    if (k === 0 || k === zlevels.length - 1) { rings.push(apexRing(z)); return; }
+    const r = bodyRing(z);
+    if (r) rings.push(r);
+  });
+  const isApexRing = (r: LoftRing) =>
+    r.slots.every(q => q[0] === r.slots[0]![0] && q[1] === r.slots[0]![1]);
+  // TIP RING: an apex triangle spans from the axis to the ring it reaches,
+  // and a big nose tapers INSIDE the last axial slice — a 96 m zeppelin has
+  // NO split-grid ring thinner than 95 cells, and the ring one cell off a
+  // 12 m nose tip is still 39 wide. Grow a fitting one: the profile crosses
+  // the 20-cell fit radius at dz = sL + nl·√(1−(20/r)²), and a ring there
+  // (slot span ≤ 20) always shares one aligned window with the apex.
+  // PRUNING fat rings instead is wrong — they stitch the body; only the
+  // ring the apex cone touches must fit (the first cut pruned and ate the
+  // whole nose to triangles=0). Anything strictly between apex and tip is
+  // dropped; the fat rings beyond stitch on normally.
+  for (const end of [0, 1] as const) {
+    const apexZ = end === 0 ? rings[0]!.z : rings[rings.length - 1]!.z;
+    const rMax = Math.max(body.r1, body.r2);
+    const nl = body.L - body.s * body.L;
+    const fit = 19;   // + lattice rounding stays inside the 31-cell window
+    const dzFit = rMax <= fit ? body.s * body.L
+      : body.s * body.L + nl * Math.sqrt(Math.max(0, 1 - (fit / rMax) ** 2));
+    const sign = end === 0 ? -1 : 1;
+    let zf = Math.round(cA + sign * Math.min(dzFit, body.L - 0.5));
+    if ((zf - apexZ) * sign >= 0) zf = apexZ + sign;   // strictly inside
+    const between = (q: LoftRing) => (q.z - apexZ) * sign > 0 && (q.z - zf) * sign < 0;
+    for (let i = rings.length - 1; i >= 0; i--)
+      if (between(rings[i]!)) rings.splice(i, 1);
+    if (!rings.some(q => q.z === zf)) {
+      const tip = bodyRing(zf);
+      if (tip) rings.splice(end === 0 ? 1 : rings.length - 1, 0, tip);
+    }
+  }
+  // ---- strip builder + window REPAIR: faces the frame-aligned 31-cell
+  // window still refuses (a long tip cone, a steep nose step, a coarse
+  // facet on a huge ring) SPLIT their slab — one extra ring at the mid
+  // level — and the WHOLE surface re-stitches. Every round strictly halves
+  // the offending axial spans; a slab that cannot split further keeps its
+  // faces dropped and counts them as skipped (the dialog refuses honestly).
+  // Winding: rings walk CCW in the (p1,p2)-plane with p1 × p2 = +ê_la and
+  // B sits at +la from A, so (a0,a1,b1) and (a0,b1,b0) face OUTWARD
+  // (e × ê_la = outward radial), and the cone triangles (a0,b1,b0) /
+  // (a0,a1,b1) of a degenerated side likewise (verified on the circle).
+  let faces: [number, number, number][] = [];
+  let droppedSlabs = new Set<number>();
+  let droppedFaces = 0;
+  for (let round = 0; ; round++) {
+    faces = [];
+    droppedSlabs = new Set<number>();
+    droppedFaces = 0;
+    const push = (f: [number, number, number], slab: number) => {
+      if (f[0] === f[1] || f[1] === f[2] || f[0] === f[2]) return;   // collapsed
+      if (encodeSkinTri([pts[f[0]!]!, pts[f[1]!]!, pts[f[2]!]!], { slot: 0 })) faces.push(f);
+      else { droppedSlabs.add(slab); droppedFaces++; }
+    };
+    for (let k = 0; k + 1 < rings.length; k++) {
+      const A = rings[k]!, B = rings[k + 1]!;
+      for (let d = 0; d < nd; d++) {
+        // merge-walk the two chains: advance whichever chain's next vertex
+        // comes first along the pair direction (ties → A). Emission forms
+        // (aᵢ, aᵢ₊₁, bⱼ) / (aᵢ, bⱼ₊₁, bⱼ) are outward for a CCW ring with B
+        // at +la (verified against the prism AND taper quads), share the
+        // walk diagonal pairwise, and leave every chain edge used exactly
+        // once per side — the strips stitch into a closed manifold.
+        const ca = A.chains[d]!, cb = B.chains[d]!;
+        const ddx = (ca[ca.length - 1]![0]! - ca[0]![0]!) + (cb[cb.length - 1]![0]! - cb[0]![0]!);
+        const ddy = (ca[ca.length - 1]![1]! - ca[0]![1]!) + (cb[cb.length - 1]![1]! - cb[0]![1]!);
+        const dl = Math.hypot(ddx, ddy);
+        const ux = dl > 1e-9 ? ddx / dl : 1, uy = dl > 1e-9 ? ddy / dl : 0;
+        const ga = ca.map(q => gpt(gid(A.z, q[0]!, q[1]!)));
+        const gb = cb.map(q => gpt(gid(B.z, q[0]!, q[1]!)));
+        const pa = ca.map(q => q[0]! * ux + q[1]! * uy);
+        const pb = cb.map(q => q[0]! * ux + q[1]! * uy);
+        const P = ca.length - 1, Q = cb.length - 1;
+        let i = 0, j = 0;
+        while (i < P || j < Q) {
+          if (j >= Q || (i < P && pa[i + 1]! <= pb[j + 1]! + 1e-9)) {
+            push([ga[i]!, ga[i + 1]!, gb[j]!], k);
+            i++;
+          } else {
+            push([ga[i]!, gb[j + 1]!, gb[j]!], k);
+            j++;
+          }
+        }
+      }
+    }
+    if (!droppedSlabs.size) break;
+    // one mid ring per offending slab (only where the level is new)
+    const fresh: { at: number; r: LoftRing }[] = [];
+    for (const k of droppedSlabs) {
+      const A = rings[k]!, B = rings[k + 1]!;
+      if (isApexRing(A) || isApexRing(B)) continue;   // tips are PRUNED, not split
+      const zm = Math.round((A.z + B.z) / 2);
+      if (zm === A.z || zm === B.z) continue;         // gap 1 — cannot split
+      const mid = bodyRing(zm);
+      if (!mid) continue;
+      fresh.push({ at: k + 1, r: mid });
+    }
+    if (!fresh.length) break;
+    fresh.sort((x, y) => y.at - x.at);                // keep splice indices valid
+    for (const f of fresh) rings.splice(f.at, 0, f.r);
+    if (round > 20) break;                            // runaway guard
+  }
+  // faces the FINAL pass dropped with no split left possible (exotic
+  // blends only — the pin corpus measures zero)
+  const skipped = droppedFaces;
+  const stats = metrics(pts, faces, spec, c[0], c[1], c[2]);
+  stats.skipped = skipped;
+  stats.idealM3 = bodyVolume(body) * CELL ** 3;
+  return { shell: pts, verts: [...new Set(faces.flat())].sort((x, y) => x - y),
+    faces, skipped, center: c, stats };
 }
 
 function planAt(spec: SphereSpec): SpherePlan {
@@ -473,6 +850,11 @@ function planAt(spec: SphereSpec): SpherePlan {
 function metrics(shell: GP3[], faces: [number, number, number][], spec: SphereSpec,
   cx: number, cy: number, cz: number): SphereStats {
   const rx = spec.rx / CELL, ry = spec.ry / CELL, rz = spec.rz / CELL;
+  // the IDEAL radial distance along a unit direction: the ellipsoid, or the
+  // simple body (loft profile) — the deviation lines mean the same thing
+  const body = spec.profile === 'cylinder' ? simpleBody(spec) : null;
+  const rBody = (nx: number, ny: number, nz: number) =>
+    body ? bodyRadius(body, [nx, ny, nz]) : radiusAlong(nx, ny, nz, rx, ry, rz);
   let maxOut = 0, sag = 0, area = 0, vol = 0;
   const seen = new Set<number>();
   for (const [i, j, k] of faces) {
@@ -483,7 +865,7 @@ function metrics(shell: GP3[], faces: [number, number, number][], spec: SphereSp
       const qx = p[0] - cx, qy = p[1] - cy, qz = p[2] - cz;
       const d = Math.sqrt(qx * qx + qy * qy + qz * qz);
       if (d > 1e-9) {
-        const excess = d - radiusAlong(qx / d, qy / d, qz / d, rx, ry, rz);
+        const excess = d - rBody(qx / d, qy / d, qz / d);
         if (excess > maxOut) maxOut = excess;
       }
     }
@@ -496,7 +878,7 @@ function metrics(shell: GP3[], faces: [number, number, number][], spec: SphereSp
     area += 0.5 * nl * CELL * CELL;
     // plane distance from the centre along the OUTWARD unit normal
     const dist = (nx * (pi[0] - cx) + ny * (pi[1] - cy) + nz * (pi[2] - cz)) / nl;
-    const r = radiusAlong(nx / nl, ny / nl, nz / nl, rx, ry, rz);
+    const r = rBody(nx / nl, ny / nl, nz / nl);
     if (r - dist > sag) sag = r - dist;
     // signed volume about the origin (outward winding ▸ positive), g units
     vol += (pi[0] * (pj[1] * pk[2] - pj[2] * pk[1])
@@ -507,7 +889,9 @@ function metrics(shell: GP3[], faces: [number, number, number][], spec: SphereSp
     shellPoints: shell.length,
     vertices: seen.size,
     tris: faces.length,
-    maxOutM: Math.max(0, maxOut) * CELL,
+    // <1e-9 cells = float noise on vertices sitting exactly ON the ideal
+    // surface (the loft's ring hulls do) — report it as a clean zero
+    maxOutM: Math.max(0, maxOut < 1e-9 ? 0 : maxOut) * CELL,
     sagInM: Math.max(0, sag) * CELL,
     volumeM3: vol * CELL * CELL * CELL,
     idealM3: (4 / 3) * Math.PI * spec.rx * spec.ry * spec.rz,
@@ -567,25 +951,39 @@ export function decodeSkinTri(t: Triangle): [GP3, GP3, GP3] {
   return g as [GP3, GP3, GP3];
 }
 
-/** Whole-cell shift of already-encoded skin triangles (the placement drag):
- *  decode → shift g → re-encode (frames re-floor; colours/material/shading
- *  ride verbatim). Offsets are integer lattice steps. */
-export function shiftSkinTris(tris: Triangle[], step: GP3): Triangle[] {
+/** Lattice-vertex transform of already-encoded skin triangles: decode → map
+ *  every g point through fn → re-encode (frames re-floor; colours/material/
+ *  shading ride verbatim). fn must map integer g → integer g (whole-cell
+ *  shifts and quarter-turns about an INTEGER pivot do); a triangle whose
+ *  image no longer fits the 5-bit window drops out. */
+export function transformSkinTris(tris: Triangle[], fn: (g: GP3) => GP3): Triangle[] {
   const out: Triangle[] = [];
   for (const t of tris) {
-    const g = decodeSkinTri(t);
+    const g = decodeSkinTri(t).map(fn) as [GP3, GP3, GP3];
     const o: Record<string, unknown> = { ...t };
     const AXES: (0 | 1 | 2)[] = [0, 1, 2];
+    let ok = true;
     for (const ax of AXES) {
       const name = 'xyz'[ax]!;
-      const s: [number, number, number] = [g[0]![ax] + step[ax], g[1]![ax] + step[ax], g[2]![ax] + step[ax]];
+      const s: [number, number, number] = [g[0]![ax], g[1]![ax], g[2]![ax]];
       const f = Math.floor(Math.min(s[0], s[1], s[2]) / CELLS_PER_FRAME);
       o[`frame_${name}`] = f;
-      for (const i of [0, 1, 2] as const) o[`v${i}_${name}`] = s[i] - CELLS_PER_FRAME * f;
+      for (const i of [0, 1, 2] as const) {
+        const v = s[i] - CELLS_PER_FRAME * f;
+        if (v < 0 || v > 31) { ok = false; break; }
+        o[`v${i}_${name}`] = v;
+      }
+      if (!ok) break;
     }
-    out.push(o as unknown as Triangle);
+    if (ok) out.push(o as unknown as Triangle);
   }
   return out;
+}
+
+/** Whole-cell shift of already-encoded skin triangles (the placement drag).
+ *  Offsets are integer lattice steps. */
+export function shiftSkinTris(tris: Triangle[], step: GP3): Triangle[] {
+  return transformSkinTris(tris, g => [g[0] + step[0], g[1] + step[1], g[2] + step[2]]);
 }
 
 /** The shipped generator: hull faces of the plan as game Triangle records,

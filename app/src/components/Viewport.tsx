@@ -58,6 +58,8 @@ declare global {
     placeGhost: () => ReturnType<Engine['clusterGhostState']>;
     placePoint: () => ReturnType<Engine['clusterGhostScreenPoint']>;
     placeShift: (s: [number, number, number]) => boolean;
+    /** v1.7.2: 90° quarter-turn of the ghost about a world axis (lattice law) */
+    placeRotate: (axis: 'x' | 'y' | 'z') => boolean;
     /** v1.5.21 adaptive ground grid plan (step/major/spans in file coords) */
     grid: () => ReturnType<Engine['gridInfo']>;
     /** COORD READOUT: the snapped file-space point the ray LANDS ON —
@@ -74,7 +76,7 @@ declare global {
 let atlasP: Promise<ModelAtlas | null> | null = null;
 const getAtlas = (): Promise<ModelAtlas | null> => (atlasP ??= openAtlas());
 
-export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, onBlockPick, onBlockHover, placing = null, onPlace, onPaintOpen, onPlaceCancel, onPlaceBuild, onManifest, keepView = false }: {
+export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, onBlockPick, onBlockHover, placing = null, onPlace, onPaintOpen, onPlaceCancel, onPlaceBuild, onPlaceRotate, onPlaceBack, onManifest, keepView = false }: {
   bp: Blueprint | null;
   onPick: (h: PickHit) => void;
   onEngine?: (e: Engine | null) => void;
@@ -110,6 +112,11 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
    *  carries a label with ✕ Cancel / ✔ Build — both owned by the Editor */
   onPlaceCancel?: () => void;
   onPlaceBuild?: () => void;
+  /** v1.7.2: ⟲ quarter-turn of the ghost (world axis) and ↩ back to the
+   *  tool dialog with the parameters kept ("change parameters without
+   *  starting from scratch") */
+  onPlaceRotate?: (axis: 'x' | 'y' | 'z') => void;
+  onPlaceBack?: () => void;
   /** game manifest once the model atlas is open (drives the Catalog tab) */
   onManifest?: (m: Record<string, { mass: number; module: string }> | null) => void;
   /** UNDO/REDO swaps bp for the SAME craft — keep the camera (do NOT re-frame).
@@ -158,6 +165,7 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
       placeGhost: () => engine.clusterGhostState(),
       placePoint: () => engine.clusterGhostScreenPoint(),
       placeShift: (s: [number, number, number]) => engine.clusterGhostShift(s),
+      placeRotate: (axis: 'x' | 'y' | 'z') => engine.clusterGhostRotate(axis),
       // v1.5.21 adaptive grid + mirror axis; v1.5.23 coord readout pins
       grid: () => engine.gridInfo(),
       mirAxis: () => engine.mirrorAxis,
@@ -254,6 +262,11 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
         if (h && mode === 'edit' && tool === 'place') blockHover(h.x, h.y, on, true);
       }
       // a mid-smear Esc (the Editor drops the held part): yield the orbit NOW
+      // (KEYDOWN ONLY — the same keystroke's keyup fires after the tool
+      // dialog's capture-phase Escape handler has already closed the modal,
+      // and canceling THEN would kill the ghost that ↩ deliberately left
+      // waiting behind the dialog, v1.7.2 e2e)
+      if (!on) return;
       if (e.key === 'Escape' && placeDrag.current) {
         engineRef.current?.placeDragEnd();
         placeDrag.current = null;
@@ -414,12 +427,28 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
       {place && (
         // v1.6 placement label (user: "its label should have a cancel and
         // build button"): ✕ drops the ghost, ✔ writes it in — red while the
-        // footprint collides (Build disabled, the constructor-ghost contract)
+        // footprint collides (Build disabled, the constructor-ghost contract).
+        // v1.7.2 adds ⟲x/⟲y/⟲z quarter-turns (the lattice only stores 90°
+        // steps — quarter-snap BY LAW, not taste) and ↩ back to the tool
+        // dialog with the form intact ("without starting from scratch").
         <div data-testid="place-label"
-          className={`ksp-win absolute z-30 flex -translate-x-1/2 items-center gap-1.5 rounded
+          className={`ksp-win absolute z-30 flex max-w-[min(96vw,30rem)] -translate-x-1/2 flex-wrap
+                      items-center gap-1.5 rounded
                       px-2 py-1 text-[10px] leading-none ${place.valid ? 'text-[#9cffd4]' : 'text-[#ff9c9c]'}`}
           style={{ left: place.x, top: Math.max(8, place.y + 18) }}>
           <span>◍ {place.tris ? `${place.tris} triangles` : `${place.blocks} blocks`}{place.valid ? '' : ' — collides'}</span>
+          {(['x', 'y', 'z'] as const).map(ax => (
+            <button key={ax} data-testid={`place-rot-${ax}`} title={`turn 90° about world ${ax.toUpperCase()} (lattice quarter-turn)`}
+              onClick={() => onPlaceRotate?.(ax)}
+              className="ksp-btn rounded px-1.5 py-[3px] text-[11px] text-ink-dim hover:text-gold">
+              ⟲{ax}
+            </button>
+          ))}
+          <button data-testid="place-back" title="back to the parameters (nothing is lost)"
+            onClick={() => onPlaceBack?.()}
+            className="ksp-btn rounded px-1.5 py-[3px] text-[11px] text-ink-dim hover:text-accent">
+            ↩ edit
+          </button>
           <button data-testid="place-cancel" title="cancel this placement"
             onClick={() => onPlaceCancel?.()}
             className="ksp-btn rounded px-1.5 py-[3px] text-[11px] text-ink-dim hover:text-red-300">✕</button>

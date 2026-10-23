@@ -49,7 +49,8 @@ import type { Block, Blueprint, BlueprintComponent, Triangle } from './format';
 import { CELL, CELLS_PER_FRAME, isLegacyFile } from './format';
 import { getBlockEdges, getBlockFaces, getBlockPoints } from './blockshapes';
 import { blockCells, blockMirrorTwin, cellOverlapSkip, mirrorBlockCell, mirrorAxisIdx,
-  rotatedBlock, setBlockGeom, type MirrorAxis, type PlaceSpec } from './blocks';
+  blockFromCell, rotateTypeAbout, rotatedBlock, setBlockGeom, type MirrorAxis, type PlaceSpec } from './blocks';
+import { transformSkinTris } from './latsphere';
 import { gridPlan, pxPerMeter } from './grid';
 import {
   captureJrefs, masterJointState, subBlockBBox, subJointPose, subMasterEntries,
@@ -219,6 +220,8 @@ export class Engine {
    *  overlap blocks by design, so a tri-only cluster is always valid) */
   private clusterTris: Triangle[] = [];
   private clusterOffset: [number, number, number] = [0, 0, 0];
+  /** v1.7.2: quarter-turns applied to the ghost since staging (⟲ buttons) */
+  private clusterTurns = 0;
   private clusterHex = 0x7dffcf;
   private clusterValid = true;
   /** live widget gesture: the committed offset + the proxy centre at press */
@@ -3183,7 +3186,16 @@ void main() {
     this.clusterTris = tris ? tris.slice() : [];
     this.clusterHex = hex;
     this.clusterOffset = [0, 0, 0];
+    this.clusterTurns = 0;
     this.clusterBase = null;
+    this.rebuildClusterMesh();
+    this.clusterCheckValid();
+    this.syncGizmo();                        // the widget lands on the cluster
+    this.invalidate();
+  }
+  /** (re)build the translucent solid+wire mesh of clusterBlocks+clusterTris
+   *  (RAW-FILE metres; the group rides moff + the cell offset). */
+  private rebuildClusterMesh() {
     for (const o of this.clusterGroup.children) {
       (o as Mesh).geometry?.dispose();
       ((o as unknown as { material?: { dispose?: () => void } }).material)?.dispose?.();
@@ -3234,9 +3246,78 @@ void main() {
       this.clusterGroup.add(solid, wire);
     }
     this.syncClusterGroupPos();
+  }
+  /** g-coordinate bbox [min,max] of the cluster data (NO cell offset) */
+  private clusterBBoxG(): [[number, number, number], [number, number, number]] | null {
+    if (!this.clusterBlocks.length && !this.clusterTris.length) return null;
+    let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+    for (const b of this.clusterBlocks) {
+      const c = blockCells(b);
+      x0 = Math.min(x0, c.x); y0 = Math.min(y0, c.y); z0 = Math.min(z0, c.z);
+      x1 = Math.max(x1, c.x + b.size_x + 1); y1 = Math.max(y1, c.y + b.size_y + 1);
+      z1 = Math.max(z1, c.z + b.size_z + 1);
+    }
+    const tg = (t: Triangle, i: number, ax: 0 | 1 | 2) =>
+      (t[`v${i}_${'xyz'[ax]!}`] as number) + CELLS_PER_FRAME * (t[`frame_${'xyz'[ax]!}`] as number);
+    for (const t of this.clusterTris)
+      for (let i = 0; i < 3; i++) {
+        x0 = Math.min(x0, tg(t, i, 0)); y0 = Math.min(y0, tg(t, i, 1)); z0 = Math.min(z0, tg(t, i, 2));
+        x1 = Math.max(x1, tg(t, i, 0)); y1 = Math.max(y1, tg(t, i, 1)); z1 = Math.max(z1, tg(t, i, 2));
+      }
+    return [[x0, y0, z0], [x1, y1, z1]];
+  }
+  /** v1.7.2 QUARTER-TURN of the placement ghost about a WORLD axis through
+   *  the bbox centre (user: "Add … a rotation option for the ghost preview").
+   *  The lattice only stores quarter-turns (integer vertices survive ±90°
+   *  exactly — FORMAT §Triangles), so ⟲x/⟲y/⟲z snap by construction: the
+   *  triangles rotate about the nearest INTEGER lattice pivot (transformSkinTris
+   *  re-floors the frames, colours/material/shading ride), block records
+   *  rotate footprint + type (the panel ⟲ / BLOCK-widget law). The cell
+   *  offset is the widget's own and stays put. */
+  clusterGhostRotate(axis: 'x' | 'y' | 'z'): boolean {
+    if (!this.clusterBlocks.length && !this.clusterTris.length) return false;
+    const bb = this.clusterBBoxG();
+    if (!bb) return false;
+    const p: [number, number, number] = [
+      Math.round((bb[0][0] + bb[1][0]) / 2),
+      Math.round((bb[0][1] + bb[1][1]) / 2),
+      Math.round((bb[0][2] + bb[1][2]) / 2),
+    ];
+    const a = axis === 'x' ? 0 : axis === 'y' ? 1 : 2;
+    const b1 = (a + 1) % 3, c1 = (a + 2) % 3;
+    const pp: number[] = p;
+    // +90° right-hand about axis a, about the integer lattice pivot p
+    const rot = (g: [number, number, number]): [number, number, number] => {
+      const q: number[] = [g[0]!, g[1]!, g[2]!];
+      q[b1] = pp[b1]! - (g[c1]! - pp[c1]!);
+      q[c1] = pp[c1]! + (g[b1]! - pp[b1]!);
+      return [q[0]!, q[1]!, q[2]!];
+    };
+    if (this.clusterTris.length)
+      this.clusterTris = transformSkinTris(this.clusterTris, rot);
+    for (let i = 0; i < this.clusterBlocks.length; i++) {
+      const b = this.clusterBlocks[i]!;
+      const c = blockCells(b);
+      const lo: number[] = [c.x, c.y, c.z];
+      const ext: number[] = [b.size_x + 1, b.size_y + 1, b.size_z + 1];
+      const nlo: number[] = [...lo];
+      const next: number[] = [...ext];
+      nlo[b1] = pp[b1]! + pp[c1]! - (lo[c1]! + ext[c1]!) + 1;
+      nlo[c1] = pp[c1]! + lo[b1]! - pp[b1]!;
+      next[b1] = ext[c1]!; next[c1] = ext[b1]!;
+      const nb = blockFromCell([nlo[0]!, nlo[1]!, nlo[2]!],
+        [next[0]! - 1, next[1]! - 1, next[2]! - 1],
+        rotateTypeAbout(b.type, axis, false), b.colors?.[0] ?? 0);
+      nb.colors = Array.isArray(b.colors) ? [...b.colors] : nb.colors;
+      nb.material = b.material;
+      this.clusterBlocks[i] = nb;
+    }
+    this.clusterTurns++;
+    this.rebuildClusterMesh();
     this.clusterCheckValid();
-    this.syncGizmo();                        // the widget lands on the cluster
+    this.syncClusterGizmo();
     this.invalidate();
+    return true;
   }
   private syncClusterGroupPos() {
     const o = this.clusterOffset;
@@ -3295,17 +3376,31 @@ void main() {
       m.color.set(hex);
     }
   }
-  /** live state for the viewport label + the e2e pins */
-  clusterGhostState(): { blocks: number; tris: number; offset: [number, number, number]; valid: boolean; shown: boolean } | null {
+  /** live state for the viewport label + the e2e pins (v1.7.2: bb = the g
+   *  bbox INCLUDING the cell offset, turns = quarter-turns applied) */
+  clusterGhostState(): {
+    blocks: number; tris: number; offset: [number, number, number]; valid: boolean; shown: boolean;
+    turns: number; bb: [[number, number, number], [number, number, number]] | null;
+  } | null {
     if (!this.clusterBlocks.length && !this.clusterTris.length) return null;
     const g = this.gizmo;
+    const bb = this.clusterBBoxG();
+    const o = this.clusterOffset;
     return {
       blocks: this.clusterBlocks.length, tris: this.clusterTris.length,
       offset: this.clusterOffset.slice() as [number, number, number],
       valid: this.clusterValid,
+      turns: this.clusterTurns,
+      bb: bb ? [[bb[0][0] + o[0], bb[0][1] + o[1], bb[0][2] + o[2]],
+               [bb[1][0] + o[0], bb[1][1] + o[1], bb[1][2] + o[2]]] : null,
       shown: !!g && g.enabled === true && g.getHelper().visible === true &&
         (g as unknown as { object?: unknown }).object === this.gizmoProxy,
     };
+  }
+  /** v1.7.2: the CURRENT ghost records (after ⟲ quarter-turns) — the commit
+   *  writes what the user actually ghosted, not a fresh un-rotated plan */
+  clusterGhostData(): { blocks: Block[]; triangles: Triangle[] } {
+    return { blocks: this.clusterBlocks.slice(), triangles: this.clusterTris.slice() };
   }
   /** PUBLIC whole-cell nudge of the placement (keyboard, pins — the widget
    *  commit routes through the same offset math); false = now colliding */

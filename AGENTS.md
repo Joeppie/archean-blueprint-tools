@@ -658,6 +658,49 @@ freshly-authored triangles, fixture 9000006001 — see the v1.5.12 bullet).
   `help.spec.ts` (@ui, desktop+pixel7: menu→dialog, h1, sphere LIMITS table
   as a real <table>, search by title/tag/body word, Esc/✕/backdrop close,
   dialog never outgrows the viewport).
+- **v1.7.2 SPHERE SIMPLIFIED BODY + GHOST ROTATION + BACK BUTTON (user
+  2026-10-23: "Geometry for sphere can be too complex… when making sphere
+  pointy, I want it to be simplified, so a cylinder on the sides and slightly
+  pointier nose might be nice. Add options and a rotation option for the ghost
+  preview as well as a back button to go back to tool window where we can
+  change parameters without starting from scratch"):** THREE things landed.
+  (1) The Sphere tool gains a **body** choice (`sphereForm`→`SphereSpec`): the
+  existing ellipsoid hull, or **cyl + nose** — a LOFT (`latsphere.ts planLoft`)
+  of integer cross-section RINGS along the LONGEST axis (a `nose %` slider sets
+  the tapered fraction ⇒ shoulder = 1−nose/100; a `facets` select picks 48/12/8
+  support directions), single lattice APEXes at the tips, merge-walked triangle
+  strips. CONVEX by construction (concave ρ(profile)) and every strip edge is
+  lattice-subdivided to ≤ 9 cells so EACH face fits the frame-aligned 31-cell
+  window BY CONSTRUCTION — pointy/needle blends the ellipsoid hull must REFUSE
+  become its SIMPLEST skins (two arbitrated traps: the digital-ellipse
+  AXIS-ALIGNED PLATEAU edges ~2√(2r) cells wide break the window TRANSVERSELY,
+  which NO axial slicing fixes — hence the ≤9-cell chain subdivision + merge
+  strip; and a single-vertex apex cone spans the ring it TOUCHES, so a fitting
+  tip ring is GROWN at dz = sL + nl·√(1−(19/r)²) — PRUNING fat rings instead
+  ate whole noses to tris=0). Vitest `latsphere.test.ts` "simple body" group:
+  closed manifold, integer verts, outward winding, skipped 0, one apex per
+  tip, the needle stores where the hull refuses, fewer facets = fewer tris.
+  (2) `Engine.clusterGhostRotate(axis)` turns the ghost +90° about a WORLD
+  axis through the bbox pivot (the LATTICE only stores exact quarter-turns of
+  integer vertices; `transformSkinTris` = shiftSkinTris generalized, frames
+  re-floor, colours ride; ghost BLOCKS rotate footprint+type per the panel ⟲
+  law). The ghost label gained ⟲x/⟲y/⟲z + ↩ edit and `clusterGhostState()`
+  carries `turns`/`bb` for pins; **✔ Build writes the LIVE ghost data**
+  (`clusterGhostData()`, quarter-turns included) RE-COLOURED, never a fresh
+  un-rotated plan (empty payload ⇒ re-plan fallback keeps headless callers).
+  (3) **↩** reopens the dialog with the SAME form (`ToolDialog initialForm`)
+  AND the dragged cell offset (`pendingPlaceOffset` re-applied in `onPlaced`).
+  ESC/LISTENER LESSON (a real race the e2e caught, worth remembering): React
+  18 flushes the dialog's `setToolOpen(null)` SYNCHRONOUSLY between same-phase
+  window keydown listeners, so a `toolOpenRef` guard alone read null and the
+  viewport's "Esc cancels the placement ghost" twin killed the ghost ↩
+  deliberately left waiting — the dialog's Escape is now CAPTURE-phase +
+  `stopImmediatePropagation` AND the viewport's Escape branches are
+  KEYDOWN-only (the shared keydown/keyup handler let the same keystroke's
+  keyup fall through and cancel). `set()` forces `planning=true` synchronously
+  so a fast OK can never confirm off the STALE preview line. Pinned by
+  `e2e/sphereskin.spec.ts` (⟲ survives Build, needle stores, ↩ keeps
+  params+spot, Esc-over-dialog spares the ghost).
 - **v1.7.1 THE GAME MASS MODEL (user 2026-10-22: "I put a large x,y=8,z=16
   sphere above, and the weight did not change, but that weights over 1500 KG,
   but provides 5000 KG lift if vacuum"):** the old display model (cellMass

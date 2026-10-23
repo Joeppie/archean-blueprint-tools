@@ -291,6 +291,29 @@ export const TOOLS: ToolDef[] = [
           + 'size beyond it — the game stores triangle frames unbounded.' },
       { key: 'ry', label: 'radius y (m)', kind: 'range', min: 0.5, max: 48, step: 0.25, unit: ' m' },
       { key: 'rz', label: 'radius z (m)', kind: 'range', min: 0.5, max: 48, step: 0.25, unit: ' m' },
+      { key: 'profile', label: 'body', kind: 'select',
+        options: [
+          { id: 'round', label: 'ellipsoid hull' },
+          { id: 'cylinder', label: 'cyl + nose' },
+        ],
+        hint: 'the hull follows the ideal ellipsoid everywhere — dense on a '
+          + 'pointy blend, and the game’s 31-cell triangle window can refuse '
+          + 'very long needles. SIMPLE gives FLAT CYLINDER SIDES (few big '
+          + 'facets, always storable) plus tapered, POINTIER noses on the '
+          + 'longest axis — a zeppelin/rocket body (v1.7.2).' },
+      { key: 'nose', label: 'nose %', kind: 'range', min: 10, max: 70, step: 5, unit: ' %',
+        showIf: f => f['profile'] === 'cylinder',
+        hint: 'how much of each half tapers to the tip — less = longer '
+          + 'cylinder, POINTIER ends' },
+      { key: 'facets', label: 'facets', kind: 'select',
+        options: [
+          { id: 'fine', label: 'fine (48)' },
+          { id: 'simple', label: 'simple (12)' },
+          { id: 'blocky', label: 'blocky (8)' },
+        ],
+        showIf: f => f['profile'] === 'cylinder',
+        hint: 'facets around the cross-section — fewer = simpler geometry '
+          + '(rounder read of the dev line costs sag, printed live)' },
       { key: 'shade', label: 'shading', kind: 'select',
         options: [
           { id: 'flat', label: 'flat (the game’s authored default)' },
@@ -309,12 +332,14 @@ export const TOOLS: ToolDef[] = [
         ] },
       { key: 'note', label: '', kind: 'note',
         hint: 'OK starts a PLACEMENT: the skin appears as a translucent '
-          + 'ghost you can drag with the widget (cell-snapped); its label has '
-          + '✕ Cancel and ✔ Build. Edit ▸ Undo (Ctrl+Z) takes a built skin '
-          + 'back as one step.',
+          + 'ghost you can drag with the widget (cell-snapped) and TURN ⟲ '
+          + '90° per click (the lattice only stores quarter-turns). The '
+          + 'label has ↩ back to the parameters, ✕ Cancel and ✔ Build. '
+          + 'Edit ▸ Undo (Ctrl+Z) takes a built skin back as one step.',
       },
     ],
-    initial: { rx: 1, ry: 1, rz: 1, shade: 'flat', material: 'm0', color: '#c9c9c9', colorhow: 'new' },
+    initial: { rx: 1, ry: 1, rz: 1, profile: 'round', nose: 40, facets: 'fine',
+      shade: 'flat', material: 'm0', color: '#c9c9c9', colorhow: 'new' },
     // THE line that used to be missing on the Spheroid attempts: the
     // deviation vs the IDEAL surface, printed BEFORE anything is built.
     // sag ≤ ~0.06 m is sub-cell rounding; anything the eye could call a
@@ -329,7 +354,7 @@ export const TOOLS: ToolDef[] = [
       // Confirm stages in the WORKER: a zeppelin skin plans for seconds,
       // and a frozen dialog reads as "Confirm does nothing" (user 2026-10-22)
       stageAsync: async (f) => ({ triangles: await sphereSkinTrisAsync(sphereForm(f), skinOptions(f)) }),
-      commit: (f, _payload, offset, ctx) => {
+      commit: (f, payload, offset, ctx) => {
         // the PAINT resolves at Build (it can GROW the palette — an edit,
         // not a preview): a new free slot or the nearest existing colour
         const rgb = parseHexColor(String(f['color']));
@@ -342,12 +367,22 @@ export const TOOLS: ToolDef[] = [
             else { setPaletteSlot(ctx, free, paletteSlotNode(rgb)); slot = free; }
           }
         }
-        const tris = shiftSkinTris(
-          sphereSkinTris(sphereForm(f), {
-            slot,
-            material: +String(f['material']).slice(1) || 0,
-            smooth: f['shade'] === 'smooth',
-          }),
+        const material = +String(f['material']).slice(1) || 0;
+        const smooth = f['shade'] === 'smooth';
+        // v1.7.2: the payload is the LIVE ghost (quarter-turns included —
+        // the lattice rotated the vertices in the engine), so the commit
+        // RE-COLOURS it rather than re-planning a fresh un-rotated skin.
+        // An EMPTY payload (headless callers) falls back to the plan.
+        const ghost = payload.triangles?.length
+          ? payload.triangles
+          : sphereSkinTris(sphereForm(f), { slot, material, smooth });
+        const recoloured = ghost.map(t => {
+          const o: Record<string, unknown> = { ...t,
+            colors: [slot, slot, slot, slot, slot], material };
+          if (smooth) o.smooth = 1; else delete o.smooth;
+          return o as unknown as Triangle;
+        });
+        const tris = shiftSkinTris(recoloured,
           [Math.round(offset[0]), Math.round(offset[1]), Math.round(offset[2])]);
         // bp + doc TOGETHER (v1.6.1 fix): the doc array must be created when
         // the file never carried triangles — the old bare push+insert silently
@@ -406,9 +441,16 @@ export const TOOLS: ToolDef[] = [
 ];
 
 /** The dialog form → a generation spec. The centre sits at the lattice 6,6,6
- *  (= world origin); the placement offset moves it from there. */
+ *  (= world origin); the placement offset moves it from there. 'nose %' is
+ *  the TAPERED fraction of each half, so shoulder = 1 − nose/100. */
 function sphereForm(f: ToolForm): SphereSpec {
-  return { rx: +String(f['rx']), ry: +String(f['ry']), rz: +String(f['rz']) };
+  const spec: SphereSpec = { rx: +String(f['rx']), ry: +String(f['ry']), rz: +String(f['rz']) };
+  if (f['profile'] === 'cylinder') {
+    spec.profile = 'cylinder';
+    spec.shoulder = 1 - Math.min(70, Math.max(10, +String(f['nose']) || 40)) / 100;
+    spec.facets = f['facets'] === 'simple' ? 12 : f['facets'] === 'blocky' ? 8 : 0;
+  }
+  return spec;
 }
 
 /** kg, then tonnes past 10 t (one glance, no digit soup) */
@@ -443,6 +485,9 @@ function spherePreviewLine(f: ToolForm, st: SphereStats): string {
   const mat = MATERIALS[+String(f['material']).slice(1)] ?? '?';
   const V = st.volumeM3;
   return `${st.tris} triangles · dev −${st.sagInM.toFixed(2)}/+${st.maxOutM.toFixed(2)} m · `
+    + (f['profile'] === 'cylinder'
+      ? `body cylinder + ${Math.round(Math.min(70, Math.max(10, +String(f['nose']) || 40)))}% pointy nose · `
+      : '')
     + `skin ${f['shade'] === 'smooth' ? 'smooth:1' : 'flat'} · material ${mat} · `
     + `≈ ${skinKg(st.areaM2, +String(f['material']).slice(1) || 0).toFixed(0)} kg · `
     + `${V.toFixed(0)} m³ · lift@SL vacuum ${fmtKg(liftKg('vacuum', V, 0))}`
@@ -473,8 +518,11 @@ export function ToolDialog(p: {
   /** PLACEMENT tool: the confirmed payload goes to the viewport ghost
    *  (movable cluster + Cancel/Build label) instead of mutating */
   onPlaced?: (tool: ToolDef, form: ToolForm, payload: PlacePayload) => void;
+  /** v1.7.2 BACK path: the placement label's ↩ reopens the dialog with the
+   *  LAST form ("change parameters without starting from scratch") */
+  initialForm?: ToolForm;
 }) {
-  const [form, setForm] = useState<ToolForm>({ ...p.tool.initial });
+  const [form, setForm] = useState<ToolForm>({ ...p.tool.initial, ...(p.initialForm ?? {}) });
   const [confirmStep, setConfirmStep] = useState(false);
   const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
   const dragRef = useRef<{ sx: number; sy: number; bx: number; by: number } | null>(null);
@@ -487,9 +535,20 @@ export function ToolDialog(p: {
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
   useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') closeRef.current(); };
-    addEventListener('keydown', h);
-    return () => removeEventListener('keydown', h);
+    // The dialog is MODAL: while it is up, Esc closes ONLY the dialog and
+    // never reaches the viewport's "Esc cancels the placement ghost" twin —
+    // otherwise the ghost that ↩ left waiting would vanish with it. Capture
+    // phase + stopImmediatePropagation makes this independent of listener
+    // registration order (React 18 flushes the dialog's setToolOpen(null)
+    // synchronously between same-phase bubble listeners, which made a
+    // toolOpenRef guard alone read null — the v1.7.2 e2e caught it).
+    const h = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopImmediatePropagation();
+      closeRef.current();
+    };
+    addEventListener('keydown', h, { capture: true });
+    return () => removeEventListener('keydown', h, { capture: true } as EventListenerOptions);
   }, []);
 
   // ---- live preview: sync tools compute inline; HEAVY tools (previewAsync)
@@ -518,7 +577,15 @@ export function ToolDialog(p: {
   }, [p.tool, form, p.bp]);
   const preview = isAsync ? asyncPrev : syncPreview;
   const runnable = !planning && preview !== '' && !preview.startsWith('nothing');
-  const set = (k: string, v: ToolValue) => { setForm(f => ({ ...f, [k]: v })); setConfirmStep(false); };
+  const set = (k: string, v: ToolValue) => {
+    // a HEAVY tool is instantly un-runnable on ANY field change: the async
+    // effect's setPlanning only flips on the next commit, and a fast click
+    // (or Enter) in that window would confirm off the STALE preview line
+    // (v1.7.2 e2e: the ↩-retune re-confirm silently no-oped)
+    if (isAsync) setPlanning(true);
+    setForm(f => ({ ...f, [k]: v }));
+    setConfirmStep(false);
+  };
 
   const [staging, setStaging] = useState(false);
   const [fixing, setFixing] = useState(false);

@@ -20,7 +20,10 @@
 //    byte-untouched.
 import { expect, test, type Page } from '@playwright/test';
 
-type Ghost = { blocks: number; tris: number; offset: [number, number, number]; valid: boolean; shown: boolean } | null;
+type Ghost = {
+  blocks: number; tris: number; offset: [number, number, number]; valid: boolean; shown: boolean;
+  turns: number; bb: [[number, number, number], [number, number, number]] | null;
+} | null;
 
 const bpData = (page: Page) => page.evaluate(() =>
   (window as unknown as { __ARCHEAN__: { engine: { blueprint: { data: {
@@ -36,6 +39,19 @@ const ghost = (page: Page) => page.evaluate(() =>
 const shift = (page: Page, s: [number, number, number]) => page.evaluate((st) =>
   (window as unknown as { __ARCHEAN__: { placeShift: (s: [number, number, number]) => boolean } })
     .__ARCHEAN__.placeShift(st), s);
+
+/** v1.7.2: 90° quarter-turn of the ghost about a world axis (same path the
+ *  label's ⟲ buttons drive) */
+const rotate = (page: Page, axis: 'x' | 'y' | 'z') => page.evaluate((ax) =>
+  (window as unknown as { __ARCHEAN__: { placeRotate: (a: 'x' | 'y' | 'z') => boolean } })
+    .__ARCHEAN__.placeRotate(ax), axis);
+
+/** bbox span per axis (max − min) of the ghost, in lattice cells */
+async function spans(page: Page): Promise<number[]> {
+  const g = await ghost(page);
+  if (!g?.bb) return [];
+  return [0, 1, 2].map(i => g.bb![1][i] - g.bb![0][i]);
+}
 
 async function openNew(page: Page) {
   await page.goto('/');
@@ -259,5 +275,103 @@ test.describe('sphere skin tool: dialog → movable ghost → cancel/build @ui',
     await page.keyboard.press('Escape');
     await expect(page.getByTestId('place-label')).toBeHidden();
     expect(await ghost(page)).toBeNull();
+  });
+
+  // ------------------------------------------------------------ v1.7.2 ---
+  // "Geometry for sphere can be too complex imo … I want it to be simplified,
+  // so a cylinder on the sides and slightly pointier nose might be nice. Add
+  // options and a rotation option for the ghost preview as well as a back
+  // button to go back to tool window where we can change parameters without
+  // starting from scratch."
+
+  test('⟲ quarter-turns rotate the ghost (lattice law) and survive Build', async ({ page }) => {
+    await openNew(page);
+    await stage(page, { rx: 2, ry: 1, rz: 1 });
+    const s0 = await spans(page);
+    expect(s0[0]).toBeGreaterThan(s0[2]);                 // long along x
+    await page.getByTestId('place-rot-y').click();        // world-Y: x ↔ z
+    await expect.poll(() => spans(page), { timeout: 5_000 }).toEqual([s0[2], s0[1], s0[0]]);
+    expect((await ghost(page))!.turns).toBe(1);
+    // Build the ROTATED ghost: the file must carry what was ghosted (the
+    // commit writes the live ghost data, not a fresh un-rotated plan)
+    await page.getByTestId('place-build').click();
+    const built = await page.evaluate(() => {
+      const ts = (window as unknown as { __ARCHEAN__: { engine: { blueprint: { data: {
+        triangles?: Record<string, number>[] } } } } }).__ARCHEAN__.engine.blueprint.data.triangles!;
+      const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+      for (const t of ts) for (let i = 0; i < 3; i++)
+        for (const ax of ['x', 'y', 'z'] as const) {
+          const g = (t[`v0_${ax}`.replace('0', String(i))] as number)
+            + 12 * ((t[`frame_${ax}`] as number) ?? 0);
+          const k = ax === 'x' ? 0 : ax === 'y' ? 1 : 2;
+          mn[k] = Math.min(mn[k]!, g); mx[k] = Math.max(mx[k]!, g);
+        }
+      return [mx[0]! - mn[0]!, mx[1]! - mn[1]!, mx[2]! - mn[2]!];
+    });
+    expect(built).toEqual([s0[2], s0[1], s0[0]]);
+  });
+
+  test('the simple body stores a needle the ellipsoid hull must refuse', async ({ page }) => {
+    await openNew(page);
+    await page.getByTestId('tools-menu').click();
+    await page.getByTestId('tool-sphere-skin').click();
+    await setNum(page, 'rx', 0.5);
+    await setNum(page, 'ry', 1);
+    await setNum(page, 'rz', 12);
+    const prev = page.locator('[data-testid="tool-preview"]');
+    // the ellipsoid path REFUSES this blend (31-cell window, no lattice cut)
+    await expect(prev).toContainText(/nothing to place/, { timeout: 15_000 });
+    // the simple body takes it: flat cylinder flanks + pointy nose
+    await page.getByTestId('tool-opt-profile-cylinder').click();
+    await expect.poll(async () => {
+      const t = (await prev.textContent()) ?? '';
+      return /triangles/.test(t) && !/nothing to place/.test(t);
+    }, { timeout: 20_000 }).toBe(true);
+    await expect(prev).toContainText(/cylinder \+ \d+% pointy nose/);
+    await expect(page.getByTestId('tool-ok')).toBeEnabled();
+    await expect(page.getByTestId('tool-field-nose')).toBeVisible();
+    await expect(page.getByTestId('tool-field-facets')).toBeVisible();
+    // the nose slider re-plans: pointier (more taper) still stores
+    await setRange(page, 'nose', 70);
+    await expect.poll(async () => {
+      const t = (await prev.textContent()) ?? '';
+      return /triangles/.test(t) && !/nothing to place/.test(t);
+    }, { timeout: 20_000 }).toBe(true);
+    await page.getByTestId('tool-cancel').click();
+  });
+
+  test('the label ↩ reopens the dialog with the parameters AND the dragged spot', async ({ page }) => {
+    await openNew(page);
+    await stage(page, { rx: 2, ry: 1, rz: 1 });
+    expect(await shift(page, [4, 0, 0])).toBe(true);
+    const s0 = await spans(page);
+    await page.getByTestId('place-back').click();
+    await expect(page.getByTestId('tool-dialog-sphere-skin')).toBeVisible();
+    await expect(page.getByTestId('tool-num-rx')).toHaveValue('2');
+    // retune without starting from scratch: rz grows → the bbox reaches longer
+    await setRange(page, 'rz', 3);
+    await page.getByTestId('tool-ok').click();
+    await expect(page.getByTestId('tool-confirm-box')).toBeVisible();
+    await page.getByTestId('tool-confirm').click();
+    await expect(page.getByTestId('tool-dialog-sphere-skin')).toBeHidden({ timeout: 15_000 });
+    // the ghost label NEVER hid (back only reopened the dialog) — polling
+    // is the only honest read while the worker re-stages (AGENTS: poll the
+    // async readout, never a single shot)
+    await expect.poll(async () => {
+      const s = await spans(page);
+      return s[2] > s0[2] && s[0] === s0[0];
+    }, { timeout: 15_000 }).toBe(true);
+    const g = await ghost(page);
+    expect(g!.offset).toEqual([4, 0, 0]);          // the dragged spot survived
+    await page.getByTestId('place-build').click();
+    await expect(page.getByTestId('tool-toast')).toContainText('2×1×3 m sphere SKIN');
+    // Esc with the dialog open over a ghost: closes the DIALOG only (the
+    // waiting ghost survives — Esc belongs to the topmost window)
+    await stage(page);
+    await page.getByTestId('place-back').click();
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('tool-dialog-sphere-skin')).toBeHidden();
+    expect(await ghost(page)).not.toBeNull();
+    await page.getByTestId('place-cancel').click();
   });
 });

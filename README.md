@@ -1,4 +1,4 @@
-# Archean Blueprint Tools · v1.7.1
+# Archean Blueprint Tools · v1.7.2
 
 **Reverse-engineered file format + a zero-build browser viewer/inspector for
 workshop craft of [Archean](https://store.steampowered.com/app/2941660/Archean/)**
@@ -58,7 +58,9 @@ gallery/live-edit/save it ships:
   mutation (Ctrl+Z keeps the camera for A/B comparing).
 - **Tools & analysis** — TOOLS ▸ dialogs (replace-all, hullify with the
   game's authoring defaults, Sphere skin lattice hull planner with
-  deviation/lift previews), the lift & altitude widget (US Standard
+  deviation/lift previews and a SIMPLE cylinder+nose body for pointy blends,
+  its ghost quarter-turning ⟲x/⟲y/⟲z with a ↩ back-to-parameters button),
+  the lift & altitude widget (US Standard
   Atmosphere 1976, vacuum/He/H₂ buoyancy, weight-limit ladder), the
   **build cost** readout in View (the WHOLE craft unfolded through the game's
   crafter recipes to raw ores — parts, blocks, hull triangles, cables, frames
@@ -186,7 +188,7 @@ say-so**: green tests or merged work never imply one.
 
 ## Ideas welcome — open an issue!
 
-This is v1.7.1: the format is decoded and the viewer is useful, but the good
+This is v1.7.2: the format is decoded and the viewer is useful, but the good
 ideas are not all in yet. Feature requests, format questions, and craft that
 render wrong (attach the `blueprint.json`) are all best filed as
 [issues](https://github.com/Joeppie/archean-blueprint-tools/issues) — that is
