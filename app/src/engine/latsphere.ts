@@ -665,19 +665,37 @@ function planLoft(spec: SphereSpec): SpherePlan {
     const th = 2 * Math.PI * k / nd;
     dirs.push([Math.cos(th), Math.sin(th)]);
   }
-  const ringSlots = (poly: [number, number][]): [number, number][] => {
+  const ringSlots = (pts: [number, number][], a1: number, a2: number): [number, number][] => {
+    // MIRROR-SYMMETRIC slot pick (v1.7.4, user: "the zeppelin… not fully
+    // symmetrical"): the old monotone WALK advanced to the LAST maximizer
+    // on a flat plateau edge — a walk-order-dependent tie-break the
+    // mirrored ring resolved the OPPOSITE way, so port/starboard got
+    // different facet lines. Per direction: argmax of the support score,
+    // ties broken by (1) distance to the CONTINUOUS ideal-ellipse support
+    // point (mirror-equivariant), then (2)(3) the mirror-INVARIANT |u|,|v|
+    // (picks the plateau MIDPOINT on self-mirror directions). Slots remain
+    // cyclically monotone (support maximizers of a convex set are).
     const slots: [number, number][] = [];
-    let i = 0;
     for (let k = 0; k < nd; k++) {
       const [dx, dy] = dirs[k]!;
-      // monotone walk: advance while the NEXT hull vertex scores ≥ current
-      for (let guard = 0; guard < poly.length; guard++) {
-        const nx = poly[(i + 1) % poly.length]!;
-        const cu = poly[i]!;
-        if (nx[0]! * dx + nx[1]! * dy >= cu[0]! * dx + cu[1]! * dy) i = (i + 1) % poly.length;
-        else break;
+      let best = -Infinity;
+      for (const q of pts) {
+        const sc = q[0] * dx + q[1] * dy;
+        if (sc > best) best = sc;
       }
-      slots.push(poly[i]!);
+      const den = Math.hypot(a1 * dx, a2 * dy) || 1;
+      const sx = c1 + (a1 * a1 * dx) / den, sy = c2 + (a2 * a2 * dy) / den;
+      let bi = -1, bd = 0, bu = 0, bv = 0;
+      for (let i = 0; i < pts.length; i++) {
+        const q = pts[i]!;
+        if (q[0] * dx + q[1] * dy < best - 1e-9) continue;
+        const du = q[0] - sx, dv = q[1] - sy;
+        const d2 = du * du + dv * dv, au = Math.abs(q[0] - c1), av = Math.abs(q[1] - c2);
+        if (bi < 0 || d2 < bd - 1e-9
+          || (Math.abs(d2 - bd) <= 1e-9 && (au < bu - 1e-9
+          || (Math.abs(au - bu) <= 1e-9 && av < bv - 1e-9)))) { bi = i; bd = d2; bu = au; bv = av; }
+      }
+      slots.push(pts[bi]!);
     }
     return slots;
   };
@@ -689,7 +707,15 @@ function planLoft(spec: SphereSpec): SpherePlan {
   // spans ≤ 9+9 along the chain + the radial step perpendicular — the
   // window holds by construction, and the repair loop keeps shrinking the
   // radial part. Segments are lattice (rounded), chords are inside the
-  // convex cross-section, so nothing bulges.
+  // convex cross-section, so nothing bulges. v1.7.4: the rounding ties
+  // (exact .5) fall AWAY from the chain midpoint — Math.round's .5 bias is
+  // NOT odd-symmetric, and the old +0.5 tie made the mirrored ring's chains
+  // differ from the port side by a cell (visible facet asymmetry).
+  const rt = (x: number, mid: number): number => {
+    const f = Math.floor(x);
+    if (Math.abs(x - f - 0.5) < 1e-9) return x > mid ? f + 1 : f;   // tie: away from midpoint
+    return Math.round(x);
+  };
   const chainsOf = (slots: [number, number][]): [number, number][][] => {
     const out: [number, number][][] = [];
     for (let k = 0; k < slots.length; k++) {
@@ -697,12 +723,36 @@ function planLoft(spec: SphereSpec): SpherePlan {
       const du = t[0]! - s[0]!, dv = t[1]! - s[1]!;
       const segs = Math.max(1, Math.ceil(Math.max(Math.abs(du), Math.abs(dv)) / 9));
       const ch: [number, number][] = [];
+      if (segs === 1) { ch.push(s, t); out.push(ch); continue; }
+      const mx = s[0]! + du / 2, my = s[1]! + dv / 2;
       for (let i = 0; i < segs; i++)
-        ch.push(segs === 1 ? s : [s[0]! + Math.round(du * i / segs), s[1]! + Math.round(dv * i / segs)]);
+        ch.push([rt(s[0]! + du * i / segs, mx), rt(s[1]! + dv * i / segs, my)]);
       ch.push(t);
       out.push(ch);
     }
     return out;
+  };
+  // Ring table per profile SCALE f: the flank levels share f = 1, so the
+  // scan + slots + chains are computed ONCE per distinct cross-section
+  // (the argmax slot pick is O(nd·|scan|) — the cache keeps a zeppelin
+  // planning in milliseconds, and every level of one f is EXACTLY the
+  // same ring table, which is also what stitches the flank into a closed
+  // strip manifold.)
+  const ringCache = new Map<string, { slots: [number, number][]; chains: [number, number][][] } | null>();
+  const ringsAt = (f: number) => {
+    const key = f.toFixed(9);
+    const hit = ringCache.get(key);
+    if (hit !== undefined) return hit;
+    const a1 = body.r1 * f, a2 = body.r2 * f;
+    const scan: [number, number][] = [];
+    for (let u = Math.floor(c1 - a1); u <= Math.ceil(c1 + a1); u++)
+      for (let v = Math.floor(c2 - a2); v <= Math.ceil(c2 + a2); v++)
+        if (((u - c1) / a1) ** 2 + ((v - c2) / a2) ** 2 <= 1) scan.push([u, v]);
+    if (hull2d(scan).length < 3) { ringCache.set(key, null); return null; }   // ≤ 1-cell-thin sliver
+    const built = { slots: ringSlots(scan, a1, a2), chains: [] as [number, number][][] };
+    built.chains = chainsOf(built.slots);
+    ringCache.set(key, built);
+    return built;
   };
   const rings: LoftRing[] = [];
   const apexRing = (z: number): LoftRing => {
@@ -713,17 +763,9 @@ function planLoft(spec: SphereSpec): SpherePlan {
   const bodyRing = (z: number): LoftRing | null => {
     const f = profileScale(body, z - cA);
     if (f <= 0) return null;
-    const a1 = body.r1 * f, a2 = body.r2 * f;
-    const scan: [number, number][] = [];
-    for (let u = Math.floor(c1 - a1); u <= Math.ceil(c1 + a1); u++)
-      for (let v = Math.floor(c2 - a2); v <= Math.ceil(c2 + a2); v++)
-        if (((u - c1) / a1) ** 2 + ((v - c2) / a2) ** 2 <= 1) scan.push([u, v]);
-    const poly = hull2d(scan);
-    // < 3 points at an interior level = a ≤ 1-cell-thin tip sliver; the
-    // neighbouring RINGS stitch across it (the span stays ≈ one gap)
-    if (poly.length < 3) return null;
-    const slots = ringSlots(poly);
-    return { z, slots, chains: chainsOf(slots) };
+    const built = ringsAt(f);
+    if (!built) return null;
+    return { z, slots: built.slots, chains: built.chains };
   };
   zlevels.forEach((z, k) => {
     if (k === 0 || k === zlevels.length - 1) { rings.push(apexRing(z)); return; }

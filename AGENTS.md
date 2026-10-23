@@ -658,6 +658,44 @@ freshly-authored triangles, fixture 9000006001 — see the v1.5.12 bullet).
   `help.spec.ts` (@ui, desktop+pixel7: menu→dialog, h1, sphere LIMITS table
   as a real <table>, search by title/tag/body word, Esc/✕/backdrop close,
   dialog never outgrows the viewport).
+- **v1.7.4 LOFT MESH MADE MIRROR-SYMMETRIC (user 2026-10-23: "the
+  cylindrical zeppelin seems not fully symmetrical and it has some
+  indentations — is that correct? Is that fixable?"):** measured before
+  touching anything. Truth: the SILHOUETTE was always mirror-symmetric
+  (ring scans/ellipse profiles are exact mirrors; the rendered fill vs
+  convex hull is 1.002 at a fair mask threshold — the 0.972 the dev metric
+  printed is the MATTE PAINT's sky-coloured rim reflection reading as
+  background in the #8fb4d8-sky classifier), and the surface is CONVEX
+  (every manifold edge measured: zero concave folds ⇒ no geometric dent
+  exists). What WAS asymmetric: two tie-break bugs in the loft. (1) The
+  ring-slot monotone WALK broke plateau ties to the LAST maximizer — a
+  walk-order choice a mirrored ring resolves to the FIRST, so the two
+  sides picked different plateau endpoints. (2) The ≤9-cell chain
+  subdivision used Math.round, whose .5 bias is not odd-symmetric, so the
+  mirrored chain's interior points were off by a cell. Both fixed:
+  ringSlots is now a per-direction argmax over the LATTICE SCAN with a
+  mirror-EQUIVARIANT tie chain (distance to the continuous ideal-ellipse
+  support point, then the mirror-INVARIANT |u−c|,|v−c| — which lands on
+  the plateau MIDPOINT for self-mirror directions), and chainsOf rounds
+  exact .5 ties AWAY from the chain midpoint (proved equivariant). The
+  scan-argmax also collapsed degenerate coarse modes honestly (a 3×2 m
+  section has ≤ 8 natural corners: fine/simple/blocky equalize there —
+  the decimation pin now runs on the zeppelin 12 m section where 48/12/8
+  really differ 1728/1176/1120). The ring table is cached per profile
+  SCALE f (the flanks share f=1 — the argmax runs once per distinct
+  section, zeppelin plans stay ~ms). Remaining, provably invisible
+  residue: the merged-strip fan DIAGONALS are chiral (every triangulation
+  of a quad band is) — they lie in flat plateau chords (coplanar, zero
+  crease) or taper quads at sub-cell creases; a pin documents that fan
+  corners may sit asymmetrically INSIDE a flat plateau without moving any
+  level's extremes. Pins (vitest 'symmetric, dent-free loft mesh'): every
+  level's transverse extremes mirror exactly (4 blends incl. asymmetric
+  nose/tail + blocky), zero concave fold over EVERY edge, exact vertex
+  mirror for small bodies, and the v1.7.3 radial-band/determinism pins
+  stay green. If the user still READS dents after this: it is the coarse
+  flat-shaded faceting (the simplification trade) — levers are facets,
+  the ellipsoid hull body, or smooth:1 for the game's in-engine welding;
+  the app itself must NOT weld normals (the v1.5.10 retract stands).
 - **v1.7.3 SPHERE NOSE ≠ TAIL + THE FINISH-IN-PAINT CONTROL (user
   2026-10-23: "Nose pointiness isn't high enough; needs a slider as well,
   default should probably be longer. Also, nose and tail are two different

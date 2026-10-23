@@ -407,7 +407,11 @@ describe('latsphere — simple body: cylinder flanks + pointy nose (v1.7.2)', ()
   }, 120_000);
 
   test('facet decimation simplifies further, still on lattice, still closed', () => {
-    const spec = { rx: 3, ry: 2, rz: 8, profile: 'cylinder' as const };
+    // on a BIG cross-section, where 48/12/8 support directions really differ
+    // (a 3×2 m section collapses to ≤ 8 natural hull corners for BOTH coarse
+    // modes — v1.7.4's distance-to-ideal tie-break makes that collapse
+    // explicit and honest: no meaningless facets)
+    const spec = { rx: 12, ry: 12, rz: 40, profile: 'cylinder' as const };
     const fine = spherePlan(spec).stats.tris;
     const simple = spherePlan({ ...spec, facets: 12 }).stats.tris;
     const blocky = spherePlan({ ...spec, facets: 8 }).stats.tris;
@@ -517,4 +521,91 @@ describe('latsphere — simple body: cylinder flanks + pointy nose (v1.7.2)', ()
       expect(a).toBe(b);
     }, 60_000);
   });
+});
+
+// ------------------------------------------------------------ v1.7.4 ---
+// "it seems like it is not fully symmetrical and it has some indentations"
+// — the SILHOUETTE was always mirror-symmetric and the surface convex, but
+// the facet STRUCTURE was not: the ring-slot walk broke plateau ties by
+// WALK ORDER (a mirrored ring resolved the same tie the opposite way) and
+// the chain subdivision used Math.round, whose .5 bias is not odd-symmetric.
+// Both fixed (argmax + mirror-equivariant tie-break; midpoint-away chain
+// rounding). These pins keep the mesh geometry symmetric and dent-free:
+// the vertex set mirrors exactly, and no edge folds CONCAVE anywhere.
+describe('symmetric, dent-free loft mesh (v1.7.4)', () => {
+  const SYM: { name: string; spec: SphereSpec; axialMirror: boolean }[] = [
+    { name: 'zeppelin 12×12×40 (round)', spec: { rx: 12, ry: 12, rz: 40, profile: 'cylinder' }, axialMirror: true },
+    { name: 'rocket 8×8×24, long nose', spec: { rx: 8, ry: 8, rz: 24, profile: 'cylinder', noseShoulder: 0.15, tailShoulder: 0.7 }, axialMirror: false },
+    { name: 'needle 0.5×0.5×12', spec: { rx: 0.5, ry: 0.5, rz: 12, profile: 'cylinder' }, axialMirror: true },
+    { name: 'blocky 10×10×30', spec: { rx: 10, ry: 10, rz: 30, profile: 'cylinder', facets: 8 }, axialMirror: true },
+  ];
+  for (const { name, spec, axialMirror } of SYM) {
+    test(`${name}: silhouette mirrors exactly (every level's extremes)`, () => {
+      // What the PICTURE can show is the outline per level: the max/min x
+      // and y of every z-ring must mirror exactly. Interior VERTEX choices
+      // inside a FLAT plateau (merged-strip fan corners, all coplanar) may
+      // sit asymmetrically without moving the silhouette by a hair — the
+      // old ring-slot walk and Math.round broke even the extremes; the
+      // mirror-equivariant slot pick + midpoint-away chain rounding do not.
+      const plan = spherePlan(spec);
+      const P = plan.shell, c = plan.center;
+      const la = spec.rx >= spec.ry && spec.rx >= spec.rz ? 0 : spec.ry >= spec.rz ? 1 : 2;
+      const levels = new Map<number, [number, number, number, number]>();  // z → minx,maxx,miny,maxy
+      for (const i of plan.verts) {
+        const p = P[i]!;
+        const z = p[la]!;
+        const e = levels.get(z) ?? [Infinity, -Infinity, Infinity, -Infinity];
+        const o = la === 0 ? p[1]! : p[0]!;
+        const q = la === 1 ? p[2]! : p[1]!;
+        e[0] = Math.min(e[0], o); e[1] = Math.max(e[1], o);
+        e[2] = Math.min(e[2], q); e[3] = Math.max(e[3], q);
+        levels.set(z, e);
+      }
+      for (const [, [o0, o1, q0, q1]] of levels) {
+        const co = la === 0 ? c[1]! : c[0]!;
+        const cq = la === 1 ? c[2]! : c[1]!;
+        expect(Math.max(Math.abs(o0 + o1 - 2 * co), Math.abs(q0 + q1 - 2 * cq)),
+          `level off-centre`).toBeLessThan(1e-9);
+      }
+      // AND exact vertex mirroring for the transverse axes on SMALL bodies
+      // (no merged-plateau fan corners to hide behind) + axial when the
+      // ends are equal.
+      const small = Math.max(spec.rx, spec.ry, spec.rz) / 0.25 < 60;
+      if (small) {
+        for (const ax of [0, 1, 2] as const) {
+          if (ax === la && !axialMirror) continue;
+          let miss = 0;
+          for (const i of plan.verts) {
+            const q = [P[i]![0], P[i]![1], P[i]![2]] as [number, number, number];
+            q[ax] = 2 * c[ax]! - q[ax]!;
+            if (!plan.verts.some(j => P[j]![0] === q[0] && P[j]![1] === q[1] && P[j]![2] === q[2])) miss++;
+          }
+          expect(miss, `axis ${'xyz'[ax]}`).toBe(0);
+        }
+      }
+    }, 60_000);
+    test(`${name}: NO concave fold anywhere (a dent is geometrically impossible)`, () => {
+      const plan = spherePlan(spec);
+      const P = plan.shell, c = plan.center;
+      const adj = new Map<string, [number, number, number]>();
+      for (const f of plan.faces)
+        for (const [u, v] of [[f[0], f[1]], [f[1], f[2]], [f[2], f[0]]] as const)
+          adj.set(`${u}>${v}`, f);
+      for (const [i, j, k] of plan.faces) {
+        for (const [u, v] of [[i, j], [j, k], [k, i]] as const) {
+          const opp = adj.get(`${v}>${u}`);
+          if (!opp) continue;
+          const a = P[u]!, b = P[v]!, cc = P[k]!, d = P[opp[0] === v ? opp[1]! : opp[2]!]!;
+          const n: [number, number, number] = [
+            (b[1]! - a[1]!) * (cc[2]! - a[2]!) - (b[2]! - a[2]!) * (cc[1]! - a[1]!),
+            (b[2]! - a[2]!) * (cc[0]! - a[0]!) - (b[0]! - a[0]!) * (cc[2]! - a[2]!),
+            (b[0]! - a[0]!) * (cc[1]! - a[1]!) - (b[1]! - a[1]!) * (cc[0]! - a[0]!)];
+          const sgn = n[0] * (cc[0]! - c[0]) + n[1] * (cc[1]! - c[1]) + n[2] * (cc[2]! - c[2]) >= 0 ? 1 : -1;
+          const depth = sgn * ((d[0]! - a[0]!) * n[0] + (d[1]! - a[1]!) * n[1] + (d[2]! - a[2]!) * n[2])
+                      / (Math.hypot(n[0], n[1], n[2]) || 1);
+          expect(depth, `fold at edge ${u}-${v}`).toBeLessThan(1e-6);
+        }
+      }
+    }, 60_000);
+  }
 });
