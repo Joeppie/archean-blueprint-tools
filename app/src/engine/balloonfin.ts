@@ -29,12 +29,14 @@
 //    honoured at both plugs; the game writer expects ≥ 2 segments).
 //
 // Pure lattice math in g coordinates (world = (g−6)·CELL) and raw-file
-// world metres; every emitted face passes encodeSkinTri, so it is storable
-// in the game's frame-aligned 31-cell window (refused faces count toward
-// `skipped` and the dialog refuses the build).
+// world metres; every emitted face is storable in the game's frame-aligned
+// 31-cell window — a piece that outgrows it is SPLIT by splitFace rather
+// than refused (user 2026-10-23: "segment whatever is breaking"); only a
+// face the subdivision itself cannot rescue counts toward `skipped` and
+// makes the dialog refuse the build.
 
 import {
-  simpleBody, profileScale, encodeSkinTri, decodeSkinTri,
+  simpleBody, profileScale, encodeSkinTri, decodeSkinTri, splitFace,
   type GP3, type SphereSpec,
 } from './latsphere';
 import { adapterSocket } from './sockets';
@@ -245,7 +247,12 @@ export function planBalloonTail(
       || t1[0] === t2[0] && t1[1] === t2[1] && t1[2] === t2[2]
       || t0[0] === t2[0] && t0[1] === t2[1] && t0[2] === t2[2]) return;
     const t = encodeSkinTri([t0, t1, t2], SKIN0);
-    if (t) sink.push(t); else skipped++;
+    if (t) { sink.push(t); return; }
+    // never refuse a face that can be split (user 2026-10-23): the mid-
+    // point subdivision returns window-legal pieces; `skipped` keeps
+    // counting only the depth-cap rescues that failed (practically 0)
+    const parts = splitFace([t0, t1, t2], SKIN0);
+    if (parts) sink.push(...parts); else skipped++;
   };
   /** A fin region in the plane of `wAxis` at wVal: for z ∈ [zFrom, zTo] the
    *  plate spans outboard from lo(z) to hi(z), built in ≤ 9-cell strips so

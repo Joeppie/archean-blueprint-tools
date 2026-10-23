@@ -115,7 +115,7 @@ volume and sea-level lift per gas (vacuum / helium / hydrogen).
 | Limit | Value | What it means for you |
 |---|---|---|
 | lattice | 0.25 m cells, integers | radii snap to 0.25 m steps; placement moves in whole cells |
-| triangle window | 32 slots, FRAME-ALIGNED | every face must fit one 31-cell aligned window (v = g − 12·floor(min/12)); long flat flanks can fail **for the ellipsoid hull** — the simple LOFT body holds the window by construction |
+| triangle window | 32 slots, FRAME-ALIGNED | every face must fit one 31-cell aligned window (v = g − 12·floor(min/12)); faces that outgrow it are now **subdivided by splitFace** (midpoint 1→4, mirror-symmetric) instead of refused — smooth spheroids at any size |
 | convexity | strict | no dents, hollows or tori — a skin is a convex blob |
 | smallest radius | ≥ 0.25 m | below a cell there is no lattice to hull |
 | shading | flat │ smooth:1 | flat = the game's authored default; smooth:1 asks the game to weld normals |
@@ -125,10 +125,12 @@ The storable size/shape limit of the ellipsoid hull is **not a clean ratio**
 r=10 does not, while a 32×32×48 one does). The **cyl + nose** body sidesteps
 it entirely (the flank is sliced, so no face spans more than two slices —
 pointy blends that the hull refuses become the SIMPLEST skins on the craft).
-If even a blend refuses, the dialog says so and **⚖ Fix the shape** PROBES
-the worker for the nearest fully-storable blend (first shortening the long
-axis — a zeppelin keeps its girth — then thickening the short ones). A
-sphere always stores.
+Since v1.9 window-blown faces SPLIT instead of refusing, so the ellipsoid
+path really always stores. The one honest refusal left is a shape below a
+lattice cell (no hull to build) — **⚖ Fix the shape** one-tap lifts it to
+the smallest storable sphere; for near-limit blends it still PROBES the
+worker for the nearest fully-storable blend (first shortening the long
+axis — a zeppelin keeps its girth — then thickening the short ones).
 
 ## Workflow
 

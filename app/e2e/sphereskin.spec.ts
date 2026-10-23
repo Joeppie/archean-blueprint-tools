@@ -115,6 +115,7 @@ test.describe('generate balloon tool: dialog → movable ghost → cancel/build 
   });
 
   test('the number box reaches past the slider, and needles refuse honestly', async ({ page }) => {
+    test.setTimeout(120_000);   // a 20 m ellipsoid + a splitFace needle + a repair probe
     await openNew(page);
     await page.getByTestId('tools-menu').click();
     await page.getByTestId('tool-balloon').click();
@@ -128,22 +129,35 @@ test.describe('generate balloon tool: dialog → movable ghost → cancel/build 
       return m ? +m[1]! : 0;
     }, { timeout: 30_000 }).toBeGreaterThan(5000);              // zeppelin-plus
     await page.getByTestId('tool-cancel').click();
-    // an extreme needle exceeds the game's 31-cell window with no lattice
-    // cut possible → the preview refuses and OK stays DISABLED (never a
-    // silently-holed skin)
+    // v1.9 splitFace (user: "segment whatever is breaking"): an extreme
+    // needle whose convex-hull faces blow the 31-cell window no longer
+    // REFUSES — the faces subdivide and the spheroid stores smooth
     await page.getByTestId('tools-menu').click();
     await page.getByTestId('tool-balloon').click();
     await setNum(page, 'rx', 0.5);
     await setNum(page, 'ry', 1);
     await setNum(page, 'rz', 12);
+    await expect.poll(async () => {
+      const t = (await prev.textContent()) ?? '';
+      return /\d+ triangles/.test(t) && !/nothing to place/.test(t);
+    }, { timeout: 20_000 }).toBe(true);
+    // an honest refusal still exists for the genuinely impossible: under a
+    // lattice cell there is NO hull to build → refused, OK DISABLED
+    await page.getByTestId('tool-cancel').click();
+    await page.getByTestId('tools-menu').click();
+    await page.getByTestId('tool-balloon').click();
+    await setNum(page, 'rx', 0.05);
+    await setNum(page, 'ry', 0.05);
+    await setNum(page, 'rz', 0.05);
     await expect(prev).toContainText(/nothing to place/, { timeout: 15_000 });
     await expect(page.getByTestId('tool-ok')).toBeDisabled();
-    // THE REPAIR (user 2026-10-22: "I also cannot place it, fix the error"):
-    // the refusal names the axes AND offers ⚖ Fix — a worker-side PROBE
-    // (the storable limit is size-dependent, not a clean ratio) lands on
-    // the nearest fully placeable shape and OK enables without hand-sliders.
-    await expect(prev).toContainText(/tap ⚖ Fix below/);
+    // THE REPAIR (user 2026-10-22: "I also cannot place it, fix the error")
+    // still applies: ⚖ Fix probes a nearest placeable shape, OK enables.
     await page.getByTestId('tool-fix').click();
+    await expect.poll(async () => {
+      const t = (await prev.textContent()) ?? '';
+      return /\d+ triangles/.test(t) && !/nothing to place/.test(t);
+    }, { timeout: 60_000 }).toBe(true);
     await expect(prev).toContainText(/triangles/, { timeout: 60_000 });
     await expect(page.getByTestId('tool-ok')).toBeEnabled();
     await page.getByTestId('tool-cancel').click();
@@ -317,7 +331,7 @@ test.describe('generate balloon tool: dialog → movable ghost → cancel/build 
     expect(built).toEqual([s0[2], s0[1], s0[0]]);
   });
 
-  test('the simple body stores a needle the ellipsoid hull must refuse', async ({ page }) => {
+  test('BOTH bodies store the needle — splitFace keeps the spheroid smooth', async ({ page }) => {
     await openNew(page);
     await page.getByTestId('tools-menu').click();
     await page.getByTestId('tool-balloon').click();
@@ -325,8 +339,12 @@ test.describe('generate balloon tool: dialog → movable ghost → cancel/build 
     await setNum(page, 'ry', 1);
     await setNum(page, 'rz', 12);
     const prev = page.locator('[data-testid="tool-preview"]');
-    // the ellipsoid path REFUSES this blend (31-cell window, no lattice cut)
-    await expect(prev).toContainText(/nothing to place/, { timeout: 15_000 });
+    // v1.9 splitFace: the ellipsoid path stores this blend now (window
+    // faces SUBDIVIDE instead of refusing — "a completely smooth spheroid")
+    await expect.poll(async () => {
+      const t = (await prev.textContent()) ?? '';
+      return /\d+ triangles/.test(t) && !/nothing to place/.test(t);
+    }, { timeout: 20_000 }).toBe(true);
     // the simple body takes it: flat cylinder flanks + tapered nose/tail
     await page.getByTestId('tool-opt-profile-cylinder').click();
     await expect.poll(async () => {

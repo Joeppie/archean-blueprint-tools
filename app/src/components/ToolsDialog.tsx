@@ -461,9 +461,15 @@ export const TOOLS: ToolDef[] = [
       hint: 'probe the nearest shape the game can store',
       applyAsync: async (f) => {
         const ks = ['rx', 'ry', 'rz'] as const;
-        const a = ks.map(k => Math.max(0.5, +String(f[k]) || 0.5));
+        const raw = ks.map(k => +String(f[k]) || 0.5);
+        // below the smallest lattice hull (the 'too small for a hull'
+        // refusal) there is nothing to BLEND — one-tap LIFT to the smallest
+        // placeable shape instead (2026-10-22 rule: a refusal is never a
+        // dead end; v1.9 splitFace made this the remaining repair case)
+        if (Math.max(...raw) < 0.5) return { ...f, rx: 0.5, ry: 0.5, rz: 0.5 };
+        const a = raw.map(x => Math.max(0.5, x));
         const top = Math.max(...a), bot = Math.min(...a);
-        if (top / bot < 1.02 && top >= 0.5) return { ...f };    // nothing to blend
+        if (top / bot < 1.02) return { ...f };                   // nothing to blend
         const snap = (x: number) => Math.max(0.5, Math.round(x / 0.25) * 0.25);
         const placeable = async (v: number[]) => {
           const st = await sphereStatsAsync({ rx: v[0]!, ry: v[1]!, rz: v[2]! });

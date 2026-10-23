@@ -107,7 +107,8 @@ export interface SpherePlan {
   verts: number[];
   /** hull faces as shell-index triples, OUTWARD wound */
   faces: [number, number, number][];
-  /** faces dropped for spanning > 31 cells (the 5-bit window) */
+  /** faces even the splitFace rescue could not store (depth-cap artifacts;
+   *  practically 0 since v1.9 — window faces SUBDIVIDE instead of refusing) */
   skipped: number;
   /** the centre the plan was built at (the ladder may offset the spec's) */
   center: [number, number, number];
@@ -549,10 +550,12 @@ function repairSplit(shell: GP3[], faces: [number, number, number][]):
  *  degeneracy). A half/quarter-cell centre offset keeps the shape exactly
  *  mirror-symmetric (the centre maps to itself under every axis-plane
  *  mirror) yet breaks the exact coplanarity, so the patch cuts into small
- *  windowable faces naturally. The first zero-violation centre wins; a
- *  residual means the surface patch is EMPTY of lattice (true needle
- *  flanks) — NO convex lattice-exact ≤31-cell skin exists for the game to
- *  store there, and the dialog refuses to place it (skipped > 0).
+ *  windowable faces naturally. The first zero-violation centre wins; since
+ *  v1.9 a residual no longer means REFUSED — planAt's splitFace rescue
+ *  subdivides whatever piece the ladder could not window (user 2026-10-23:
+ *  "segment whatever is breaking"), so skipped > 0 only survives as a
+ *  depth-cap artifact for pathological inputs. The ladder still PREFERS
+ *  natural faces: a rung that plans clean stays byte-identical.
  *  The SIMPLIFIED body (profile 'cylinder', v1.7.2 — user: "a cylinder on
  *  the sides and slightly pointier nose") takes the LOFT path below: the
  *  flank is sliced DELIBERATELY, so the ladder's coplanarity problem never
@@ -572,19 +575,30 @@ export function spherePlan(spec: SphereSpec): SpherePlan {
 
 function planEllipsoid(spec: SphereSpec): SpherePlan {
   let best: SpherePlan | null = null;
+  let bestAt: SphereSpec | null = null;
   // τ ladder: a thicker shell band = shorter facets on low-curvature flanks
   // (a 60 m zeppelin nose facets SPANS that no aligned window holds from a
   // thin band). The trade is the outward bulge ≤ τ·CELL, which the preview
   // line prints (dev +…) before Build — the hull stays dent-free either way.
   for (const tau of spec.tau != null ? [spec.tau] : [0.75, 1.5, 3]) {
     for (const o of [0, 0.5, 0.25, 0.75, 0.375]) {
-      const p = planAt({ ...spec, tau, cx: (spec.cx ?? 6) + o, cy: (spec.cy ?? 6) + o, cz: (spec.cz ?? 6) + o });
-      if (!best || p.skipped < best.skipped) best = p;
+      const rung = { ...spec, tau, cx: (spec.cx ?? 6) + o, cy: (spec.cy ?? 6) + o, cz: (spec.cz ?? 6) + o };
+      const p = planAt(rung, false);
+      if (!best || p.skipped < best.skipped) { best = p; bestAt = rung; }
       if (best.skipped === 0) break;
     }
     if (best?.skipped === 0) break;
   }
-  return best!;
+  // v1.9 NEVER REFUSE (user 2026-10-23: "segment whatever is breaking"):
+  // the natural ladder found no clean plan → re-plan its BEST rung WITH
+  // the splitFace rescue, so window faces subdivide instead of the whole
+  // shape being refused. The ladder keeps its first pick whenever a rung
+  // plans clean — every plan that stored before v1.9 stays byte-identical
+  // (a rescued rung's natural repair loop is the better sculptor when it
+  // works: splitting a face keeps it PLANAR, which on coarse coplanar
+  // patches would preserve exactly the sag/flatness the ladder avoids).
+  if (best!.skipped === 0) return best!;
+  return planAt(bestAt!, true);
 }
 
 // ------------------------------------------------- the LOFT (simple body)
@@ -933,7 +947,7 @@ function planLoft(spec: SphereSpec): SpherePlan {
     faces, skipped, center: c, stats };
 }
 
-function planAt(spec: SphereSpec): SpherePlan {
+function planAt(spec: SphereSpec, rescue: boolean): SpherePlan {
   const cx = spec.cx ?? 6, cy = spec.cy ?? 6, cz = spec.cz ?? 6;
   const shell = sphereShell(spec);
   const strict = quickhullFaces(shell) ?? [];
@@ -942,13 +956,42 @@ function planAt(spec: SphereSpec): SpherePlan {
   const faces0 = rep.faces;
   const keptFaces: [number, number, number][] = [];
   let skipped = 0;
+  // v1.9 SPLITFACE RESCUE (user 2026-10-23: "segment whatever is breaking"
+  // — never refuse a face that can be split): only when the whole centre/τ
+  // ladder found NO clean plan (planEllipsoid's last resort, rescue=true),
+  // a face that still breaks the window gets the mirror-symmetric midpoint
+  // subdivision applied until every piece fits. The split's NEW vertices
+  // join the shell (the plan keeps its shell-index shape, so
+  // sphereSkinTris' "a claim of success means ZERO encode losses" rule
+  // holds for rescued faces too). Rungs planned the natural way are
+  // byte-identical to every pre-v1.9 plan — the ladder's own repair loop
+  // (coplanar-patch splitting toward the SURFACE) is the better sculptor
+  // and keeps its first pick; `skipped` then counts only faces even the
+  // splitting could not rescue — depth-cap artifacts, practically 0.
+  let shellIdx: Map<string, number> | null = null;
+  const intern = (p: GP3): number => {
+    if (!shellIdx) {
+      shellIdx = new Map();
+      for (let i = 0; i < shell.length; i++) shellIdx.set(shell[i]!.join(','), i);
+    }
+    const k = p.join(',');
+    let i = shellIdx.get(k);
+    if (i === undefined) { i = shell.length; shell.push(p); shellIdx.set(k, i); }
+    return i;
+  };
   for (const f of faces0 ?? []) {
     // The game's exact limit (Triangle.inc.glsl): with f = floor(min/12)
     // every vertex must satisfy v = g − 12f ∈ 0..31 — the 32-slot window is
     // FRAME-ALIGNED, so it is stricter than span ≤ 31 (a 29-cell span across
     // a misaligned frame border stores NOTHING; encodeSkinTri is the law).
-    if (encodeSkinTri([shell[f[0]!]!, shell[f[1]!]!, shell[f[2]!]!], { slot: 0 })) keptFaces.push(f);
-    else skipped++;
+    const tri: [GP3, GP3, GP3] = [shell[f[0]!]!, shell[f[1]!]!, shell[f[2]!]!];
+    if (encodeSkinTri(tri, { slot: 0 })) { keptFaces.push(f); continue; }
+    const parts = rescue ? splitFace(tri, { slot: 0 }) : null;
+    if (!parts) { skipped++; continue; }
+    for (const t of parts) {
+      const g = decodeSkinTri(t);
+      keptFaces.push([intern(g[0]!), intern(g[1]!), intern(g[2]!)]);
+    }
   }
   const verts = [...new Set(keptFaces.flat())].sort((x, y) => x - y);
   const stats = metrics(shell, keptFaces, spec, cx, cy, cz);
@@ -1048,6 +1091,79 @@ export function encodeSkinTri(g: [GP3, GP3, GP3], opt: SkinOptions): Triangle | 
     }
   }
   return o as unknown as Triangle;
+}
+
+// ----------------------------------------------- the face splitter (never refuse)
+/** SPLIT MIDPOINT — an edge midpoint rounded to the lattice, ties (odd
+ *  vertex sums ▸ exact .5) broken AWAY FROM THE TRIANGLE'S COMPONENTWISE
+ *  CENTROID, never toward it. This is the v1.7.4 chain-rule precedent
+ *  ("the rounding ties fall AWAY from the chain midpoint — Math.round's
+ *  .5 bias is NOT odd-symmetric") transplanted onto face subdivision: a
+ *  mirrored triangle pair must split into mirrored pieces, so every tie
+ *  must resolve mirror-equivariantly. The comparison is EXACT INTEGER
+ *  arithmetic: 2·m = p+q and 3·cen = a+b+c, so m vs cen is decided by
+ *  3·(p+q) vs 2·(a+b+c) — no floating point can flip an outcome (and
+ *  m = cen exactly is impossible: 2·(p+q)/2 odd vs an integer sum).
+ *  Equivariance check (mirror x → 2C−x): the sum becomes 4C−(p+q) and
+ *  the centroid sum 6C−(a+b+c), so the comparison flips side AND the
+ *  floor shifts by 2C−k−1 — the rounded point mirrors EXACTLY. */
+function splitMid(p: GP3, q: GP3, cenSum: GP3): GP3 {
+  const out: GP3 = [0, 0, 0];
+  for (const ax of [0, 1, 2] as const) {
+    const s2 = p[ax] + q[ax];                 // = 2·m, exact
+    if (s2 % 2 === 0) { out[ax] = s2 / 2; continue; }
+    const k = (s2 - 1) / 2;                   // floor(m); correct for negatives
+    out[ax] = 3 * s2 > 2 * cenSum[ax] ? k + 1 : k;   // tie ▸ away from the centroid
+  }
+  return out;
+}
+
+/** Recursion cap: each level halves every per-axis span (+ ≤ 1 rounding
+ *  cell), and span ≤ 20 is always window-encodable (the worst frame-aligned
+ *  residue leaves 31 − 11 = 20 cells of room), so depth ≤ 8 covers any span
+ *  up to ~4600 cells. The cap only guards absurd inputs, which then
+ *  honestly return null. */
+const SPLIT_DEPTH = 8;
+
+const gEq = (p: GP3, q: GP3) => p[0] === q[0] && p[1] === q[1] && p[2] === q[2];
+
+function splitRec(tri: [GP3, GP3, GP3], opt: SkinOptions, depth: number): Triangle[] | null {
+  if (depth >= SPLIT_DEPTH) return null;
+  const [a, b, c] = tri;
+  const cenSum: GP3 = [a[0] + b[0] + c[0], a[1] + b[1] + c[1], a[2] + b[2] + c[2]];
+  const mab = splitMid(a, b, cenSum), mbc = splitMid(b, c, cenSum), mca = splitMid(c, a, cenSum);
+  // the classic 1→4 midpoint split — corners first (a,mab,mca / mab,b,mbc /
+  // mca,mbc,c, each oriented WITH the parent), centre last. Deterministic
+  // order; every midpoint lies at ≤ 0.5 + the tie shift from the true
+  // edge midpoint, so no piece leaves the parent bbox by more than a cell.
+  const subs: [GP3, GP3, GP3][] = [[a, mab, mca], [mab, b, mbc], [mca, mbc, c], [mab, mbc, mca]];
+  const out: Triangle[] = [];
+  for (const s of subs) {
+    if (gEq(s[0], s[1]) || gEq(s[1], s[2]) || gEq(s[0], s[2])) continue;   // collapsed ▸ drop
+    const t = encodeSkinTri(s, opt);
+    if (t) { out.push(t); continue; }
+    const parts = splitRec(s, opt, depth + 1);
+    if (parts === null) return null;          // a branch the cap could not save
+    out.push(...parts);
+  }
+  return out;
+}
+
+/** SPLIT-A-FACE-INSTEAD-OF-REFUSING (user 2026-10-23: "segment whatever is
+ *  breaking" — the dialog must never refuse a face that can be split). A
+ *  lattice triangle → the game Triangle records it stores as: if the face
+ *  already passes encodeSkinTri it is returned UNTOUCHED (one record); else
+ *  the classic 1→4 midpoint subdivision is applied and recursed per piece
+ *  (midpoints mirror-symmetric, see splitMid) until every piece fits the
+ *  frame-aligned 31-cell window. Degenerate input (any two vertices equal)
+ *  emits NOTHING ([]); a branch the depth cap cannot rescue returns null
+ *  (whole face refused — practically unreachable at real sizes). Winding,
+ *  colours/material/shading ride every emitted piece. Pure. */
+export function splitFace(tri: [GP3, GP3, GP3], opt: SkinOptions): Triangle[] | null {
+  if (gEq(tri[0], tri[1]) || gEq(tri[1], tri[2]) || gEq(tri[0], tri[2])) return [];
+  const t = encodeSkinTri(tri, opt);
+  if (t) return [t];                          // already-valid faces are NEVER touched
+  return splitRec(tri, opt, 0);
 }
 
 /** Decode a Triangle record to three absolute lattice points (g). */

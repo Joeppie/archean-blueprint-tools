@@ -398,7 +398,13 @@ describe('latsphere — simple body: cylinder flanks + pointy nose (v1.7.2)', ()
 
   test('the needle the ELLIPSOID refuses becomes a small storable skin', () => {
     const needle = { rx: 0.5, ry: 0.5, rz: 12 };
-    expect(spherePlan(needle).skipped).toBeGreaterThan(0);      // old: refused
+    // window faces now SUBDIVIDE instead of refusing — v1.9 splitFace
+    // (user 2026-10-23: "segment whatever is breaking"): the ellipsoid no
+    // longer REFUSES the needle, it stores it with split pieces — the
+    // simple body is still the SMALL skin this option exists to be.
+    const ell = spherePlan(needle);
+    expect(ell.skipped).toBe(0);                                // old: refused
+    expect(ell.stats.tris).toBeGreaterThan(78);                 // 78 holed + 16 refused before the split
     const cyl = spherePlan({ ...needle, profile: 'cylinder' });
     expect(cyl.skipped).toBe(0);                                // simple body: stores
     // the whole 24 m needle with pointed caps is FEWER triangles than a

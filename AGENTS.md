@@ -1063,7 +1063,26 @@ fillets join the main skin, panels nest into the Builds);
 (f) commit = ONE undo step: `appendTrianglesDoc` (skin+fillets) +
 newComponent/docArrayInsert components + `docEnsureArray` joins + LV pipes
 (the v1.6.1 class rule — everything lands in the DOC = the save = the
-history). Pins: vitest `balloonfin.test.ts` (9), `tooldoc.test.ts` v1.9
+history);
+(g) SPLIT-A-FACE, NEVER REFUSE (user 2026-10-23: "segment whatever is
+breaking … pass in a single triangle that violates structure; break into
+smaller using a simple predictable algo" — implemented+tested by subagent,
+verified same session): `latsphere.splitFace(tri, opt)` — already-valid
+faces returned UNTOUCHED; else the classic 1→4 MIDPOINT subdivision,
+recursed (cap 8 ⇒ spans to ~4600 cells), degenerate subs dropped, colours/
+material/shading ride every piece; midpoint .5 ties round AWAY FROM THE
+COMPONENTWISE CENTROID in exact integer arithmetic (3·(p+q) vs 2·Σverts)
+so mirrored triangles split mirror-identically (pinned). Wired: planAt's
+LAST-RESORT rescue (only when the τ-ladder found no clean plan — natural
+rungs stay BYTE-IDENTICAL, hash-proven) so the "spherical" balloon stores
+smooth at sizes the old hull refused (48×48×1: 688 skipped → 0; needles
+0); balloonfin.emit() splits too (a guarantee for future region growth —
+today's ≤9-cell strips never trip it). The ⚖ Fix repair now also handles
+the only remaining honest refusal (sub-cell 'too small for a hull'): a
+raw-values check (NOT the 0.5-clamped probe list!) one-tap lifts to 0.5³.
+Pins: `splitface.test.ts` (contract, determinism, mirror equivariance,
+area/bbox preservation, termination, integration) + the needle/number-box
+e2e re-pinned to STORE. Pins: vitest `balloonfin.test.ts` (9), `tooldoc.test.ts` v1.9
 (shipped-tool save/reload + rotated-ghost map), e2e `sphereskin.spec.ts`
 "the TAIL section" (@ui desktop+pixel7). In-game arbitration of triangle
 panels on hinges is the USER's (no corpus precedent — flagged in the help
