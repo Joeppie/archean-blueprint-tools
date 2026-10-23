@@ -1627,6 +1627,20 @@ Adventure = 3334698274).
   the user never inspected), the rules apply as heuristics.
   `p' = pivot₀ + R(axis₀, angle)·(base.p − pivot₀) + slide₀·pos` then
   `q' = R(axis₀, angle) · base.q`.
+  **v1.9.0 THE PLATE LAW (part model ≡ panel, urgent-fix §1):** the part's
+  OWN `.ini` chain hangs under the content basis C (§Component VERTEX
+  SPACE), so spinning its axle node about the RAW key ê makes the plate's
+  WORLD line `R(q)·C·ê` — NOT the panel's pinned `R(q)·axleEuler·ê`. For
+  x̂ keys C is invariant (the Aileron-flap origin of the rule never bit);
+  for SmallHinge `angular_y` the rudder plate ROLLED about the fore–aft
+  axis like a propeller while its triangle panel yawed correctly about
+  the vertical (measured live: app/tools/plateprobe.mjs). The part plate
+  must therefore rotate about the node-local `v = baseQ⁻¹·C⁻¹·baseQ·ê`
+  (slide: `d = C⁻¹·baseQ·ê`) — engine/subgrid.ts
+  `jointNodeAxis/jointNodeSlide` (THE PLATE LAW pins) feed
+  `JointPose.axisV/slideV`. A related silent defect: overwriting
+  `real.userData` wholesale clobbers the `jrefs` handle the live joint
+  pose needs (v1.9.0 → Object.assign merges).
   **v0.172 rigid riding:** the master's own pose delta then rides the
   whole composed pose: `p'' = p₀ + dq·(p' − p₀) + (p − p₀)`,
   `q'' = dq · q'` with `dq = viewQuat(orient)·viewQuat(orient₀)⁻¹` —

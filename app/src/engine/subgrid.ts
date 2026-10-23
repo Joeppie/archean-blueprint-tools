@@ -144,6 +144,38 @@ export function jointChain(
   return { axis, slide, pivot };
 }
 
+// ------------------------------------------------- THE PLATE LAW (v1.9.0)
+// A part model's .ini node chain hangs under the engine CONTENT BASIS C =
+// Rx(−90) (file (x,y,z) → content (x,z,−y); FORMAT §Component VERTEX SPACE).
+// The subgrid PANEL law (jointChain — the in-game-pinned axis for EVERY
+// corpus hinge: dolphin car-doors, XYQ, truck flaps, gantry) rotates the
+// panel about the world line R(q)·qAxle·ê with the .ini axis key ê read in
+// the part-local FILE frame. The part's OWN slave plate must turn about the
+// SAME line — rotating the axle node about the raw key ê inside the C basis
+// instead spins it about R(q)·C·ê (urgent-fix.md §1: the balloon's rudder
+// plate rolled about the fore–aft axis like a PROPELLER while its panel
+// yawned correctly about the vertical). Measured live with
+// app/tools/plateprobe.mjs / rudderprobe.mjs. Conjugating C out of the
+// node-local axis lands the plate on the panel's line:
+//   rotation: v = baseQ⁻¹ · C⁻¹ · baseQ · ê   (node space, right-multiplied)
+//   slide:    d = C⁻¹ · baseQ · ê             (node position = parent space)
+// For ê = x̂ the content basis is INVARIANT (C·x̂ = x̂), so every historic
+// x-axis pin (Aileron flap, LinearTrack slide) is byte-identical.
+const C_INV: FileQuat = { w: Math.SQRT1_2, x: Math.SQRT1_2, y: 0, z: 0 }; // Rx(+90)
+
+/** The axle-node LOCAL rotation axis whose WORLD line equals the panel law
+ *  R(q)·baseQ·ê (see THE PLATE LAW header). baseQ = the axle's authored .ini
+ *  rotation (eulerZYX of its rotation keys). */
+export function jointNodeAxis(baseQ: FileQuat, axis: 'x' | 'y' | 'z'): V3 {
+  return vNorm(qRot(qMul(qInv(baseQ), qMul(C_INV, baseQ)), UNIT[axis]));
+}
+
+/** The axle-node position (parent-space) direction whose WORLD line equals
+ *  the panel slide law R(q)·baseQ·ê. */
+export function jointNodeSlide(baseQ: FileQuat, axis: 'x' | 'y' | 'z'): V3 {
+  return vNorm(qRot(qMul(C_INV, baseQ), UNIT[axis]));
+}
+
 // ---------------------------------------------------------- panel bbox + jref
 
 export interface SubBBox { min: V3; max: V3 }

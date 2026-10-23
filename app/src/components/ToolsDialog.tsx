@@ -308,9 +308,9 @@ export const TOOLS: ToolDef[] = [
       + 'ellipsoid — slider to 96 m across, the number boxes beyond. The '
       + 'cylindrical profile gains a TAIL section: a contiguous fin post '
       + 'flush with the tail cone, a rudder + mirrored aileron pair as '
-      + 'triangle panels on LV-wired pivots, and a coupler + volume stack '
-      + 'enclosed inside. OK previews it as a ghost you can MOVE — Build '
-      + 'writes it into the craft.',
+      + 'triangle panels on LV-wired SmallHinges, and a coupler + one '
+      + 'enclosed Volume block inside. OK previews it as a ghost you can '
+      + 'MOVE — Build writes it into the craft.',
     fields: [
       { key: 'rx', label: 'radius x (m)', kind: 'range', min: 0.5, max: 48, step: 0.25, unit: ' m',
         hint: 'stretch the axes freely — equal = a sphere, different = an ellipsoid. '
@@ -360,19 +360,12 @@ export const TOOLS: ToolDef[] = [
           + 'just before the apex; the MOVABLE rudder/ailerons HANG AFT of '
           + 'that line like stern-post rudders — a tall top vane (yaws) and '
           + 'a MIRRORED port/starboard pair (roll). Panels are hull '
-          + 'TRIANGLES riding SmallHinge pivots joined as subgrids; each '
-          + 'pivot gets an LV cable that dives into the body right behind '
+          + 'TRIANGLES riding SmallHinges (±90° — the hinge’s limited '
+          + 'travel IS the control-surface limit) joined as subgrids; each '
+          + 'hinge gets an LV cable that dives into the body right behind '
           + 'the socket and runs HIDDEN to a LowVoltageJunction at the '
-          + 'centre, with the Volume blocks stacked up out of it, enclosed. '
-          + 'In-game, turning a pivot turns its panel.' },
-      { key: 'pivot', label: 'pivot part', kind: 'select',
-        options: [
-          { id: 'SmallHinge', label: 'SmallHinge (±90°, limited)' },
-          { id: 'SmallPivot', label: 'SmallPivot (±360°, free)' },
-        ],
-        showIf: f => finsOn(f),
-        hint: 'the rotating part each panel rides: the hinge gives limited, '
-          + 'precise control-surface travel; the pivot turns unbounded' },
+          + 'centre, with ONE Volume block up out of it, enclosed. '
+          + 'In-game, turning a hinge turns its panel.' },
       { key: 'finsize', label: 'fin size %', kind: 'range', min: 25, max: 200, step: 5, unit: ' %',
         showIf: f => finsOn(f),
         hint: 'the NORMAL proportion of the balloon: the fillet clings to '
@@ -382,11 +375,15 @@ export const TOOLS: ToolDef[] = [
         showIf: f => finsOn(f),
         hint: 'an EXTRA factor past the normal scale — oversized fins bite '
           + 'harder (clamped to what the game’s triangle window stores)' },
-      { key: 'volumes', label: 'volume blocks', kind: 'range', min: 0, max: 16, step: 1,
+      { key: 'volumes', label: 'volume block', kind: 'select',
+        options: [
+          { id: 'off', label: 'no volume' },
+          { id: 'on', label: 'ONE volume' },
+        ],
         showIf: f => finsOn(f),
-        hint: 'Volume blocks facing UP out of the coupler (displacement, '
-          + '1 kg each) — the count CLAMPS so the stack stays guaranteed '
-          + 'enclosed inside the envelope' },
+        hint: 'exactly ONE Volume block facing UP out of the coupler '
+          + '(displacement, 1 kg) — ON only when it stays guaranteed '
+          + 'enclosed inside the envelope, OFF otherwise' },
       { key: 'shade', label: 'shading', kind: 'select',
         options: [
           { id: 'flat', label: 'flat (the game’s authored default)' },
@@ -410,8 +407,8 @@ export const TOOLS: ToolDef[] = [
           + 'Edit ▸ Undo (Ctrl+Z) takes a built skin back as one step.',
       },
     ],
-    initial: { rx: 1, ry: 1, rz: 1, profile: 'round', nose: 65, tail: 40, facets: 'fine',
-      fins: 'off', pivot: 'SmallHinge', finsize: 100, oversize: 100, volumes: 1,
+    initial: { rx: 1, ry: 1, rz: 1, profile: 'cylinder', nose: 65, tail: 40, facets: 'fine',
+      fins: 'off', finsize: 100, oversize: 100, volumes: 'on',
       shade: 'flat', material: 'm0', color: '#c9c9c9', finish: 'matte', colorhow: 'new' },
     // THE line that used to be missing on the Spheroid attempts: the
     // deviation vs the IDEAL surface, printed BEFORE anything is built.
@@ -427,7 +424,7 @@ export const TOOLS: ToolDef[] = [
     preview: (f) => {
       const spec = sphereForm(f);
       if (!finsOn(f)) return spherePreviewLine(f, sphereStats(spec));
-      const ad = balloonAdapters(f);
+      const ad = balloonAdapters();
       const plan = ad ? planBalloonTail(spec, balloonOptions(f), ad) : null;
       if (!plan?.ok) return `nothing to place — ${plan?.reason ?? 'the model atlas is not loaded yet'}`;
       return spherePreviewLine(f, sphereStats(spec)) + tailNote(f, plan);
@@ -435,7 +432,7 @@ export const TOOLS: ToolDef[] = [
     previewAsync: async (f) => {
       const spec = sphereForm(f);
       if (!finsOn(f)) return spherePreviewLine(f, await sphereStatsAsync(spec));
-      const ad = await balloonAdaptersAsync(f);
+      const ad = await balloonAdaptersAsync();
       const plan = ad ? planBalloonTail(spec, balloonOptions(f), ad) : null;
       if (!plan?.ok) return `nothing to place — ${plan?.reason ?? 'the model atlas is unavailable'}`;
       return spherePreviewLine(f, await sphereStatsAsync(spec)) + tailNote(f, plan);
@@ -535,10 +532,14 @@ function skinOptions(f: ToolForm): SkinOptions {
   };
 }
 
-/** The sphere tool's readout line, shared by the sync and the worker path.
- *  The gas lift segment (user 2026-10-22: "tell us what lift would be if
- *  vacuum at sea level, helium or hydrogen") reads the envelope volume the
- *  convex hull encloses against the ISA real-world atmosphere (engine/atmo). */
+/** The balloon tool's readout line, shared by the sync and the worker path —
+ *  ONE compact line saying what the CURRENT settings produce (v1.9.0,
+ *  urgent-fix §3: the old multi-sentence readout "reads the same whatever we
+ *  pick"; numbers stay only where a control changes them). The gas-lift
+ *  segment (user 2026-10-22: "tell us what lift would be if vacuum at sea
+ *  level, helium or hydrogen") COMPACTED into one lift@SL segment — the full
+ *  per-gas ladder lives in the builder's Lift widget (engine/atmo.ts). THE
+ *  deviation line stays: it is the line the Spheroid attempts were missing. */
 function spherePreviewLine(f: ToolForm, st: SphereStats): string {
   if (st.skipped > 0) {
     const ax = [Math.max(0.01, +String(f['rx']) || 0), Math.max(0.01, +String(f['ry']) || 0),
@@ -554,10 +555,12 @@ function spherePreviewLine(f: ToolForm, st: SphereStats): string {
   const V = st.volumeM3;
   return `${st.tris} triangles · dev −${st.sagInM.toFixed(2)}/+${st.maxOutM.toFixed(2)} m · `
     + (f['profile'] === 'cylinder'
-      ? `body cylinder + ${formTaper(f, 'nose', 65)}% nose / ${formTaper(f, 'tail', 40)}% tail · `
-      : '')
-    + `skin ${f['shade'] === 'smooth' ? 'smooth:1' : 'flat'} · material ${mat} · `
-    + `${paintFinish(String(f['finish'] ?? 'matte')).label} paint · `
+      ? `cylinder + ${formTaper(f, 'nose', 65)}% nose / ${formTaper(f, 'tail', 40)}% tail · `
+      : 'ellipsoid · ')
+    + `${f['rx']}×${f['ry']}×${f['rz']} m · `
+    + `${f['shade'] === 'smooth' ? 'smooth:1' : 'flat'} · ${mat} · `
+    + `${paintFinish(String(f['finish'] ?? 'matte')).label} paint `
+    + `${f['colorhow'] === 'nearest' ? '≈ nearest' : '+ new slot'} · `
     + `≈ ${skinKg(st.areaM2, +String(f['material']).slice(1) || 0).toFixed(0)} kg · `
     + `${V.toFixed(0)} m³ · lift@SL vacuum ${fmtKg(liftKg('vacuum', V, 0))}`
     + ` · He ${fmtKg(liftKg('helium', V, 0))} · H₂ ${fmtKg(liftKg('hydrogen', V, 0))}`;
@@ -580,40 +583,43 @@ const finsOn = (f: ToolForm) => f['profile'] === 'cylinder' && f['fins'] === 'on
 function balloonOptions(f: ToolForm): BalloonOptions {
   const cl = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
   return {
-    pivotType: f['pivot'] === 'SmallPivot' ? 'SmallPivot' : 'SmallHinge',
     finScale: cl(+String(f['finsize']) || 100, 25, 200) / 100,
     oversize: cl(+String(f['oversize']) || 100, 100, 400) / 100,
-    volumes: Math.round(cl(+String(f['volumes']) || 0, 0, 16)),
+    volumes: f['volumes'] !== 'off',
   };
 }
 
 /** the model manifest's lowvoltage sockets: the pivot's cable anchor + the
- *  junction's FREE ports (the input port stays free for a battery later) */
-function balloonAdaptersFrom(man: ModelManifest, f: ToolForm): BalloonAdapters | null {
-  const pivotType = balloonOptions(f).pivotType;
-  const pivot = man[pivotType]?.adapters.find(a => a.type === 'lowvoltage');
+ *  junction's FREE ports (the input port stays free for a battery later).
+ *  The panels ride SmallHinges ONLY (v1.9.0 — the ±360° SmallPivot option
+ *  was removed: unbounded travel makes no sense for a control surface). */
+function balloonAdaptersFrom(man: ModelManifest): BalloonAdapters | null {
+  const pivot = man.SmallHinge?.adapters.find(a => a.type === 'lowvoltage');
   const coupler = (man.LowVoltageJunction?.adapters ?? [])
     .filter(a => a.type === 'lowvoltage' && a.name !== 'lowvoltage-input');
   if (!pivot || !coupler.length) return null;
   return { pivot, coupler };
 }
-const balloonAdapters = (f: ToolForm): BalloonAdapters | null => {
+const balloonAdapters = (): BalloonAdapters | null => {
   const man = peekManifest();
-  return man ? balloonAdaptersFrom(man, f) : null;
+  return man ? balloonAdaptersFrom(man) : null;
 };
-const balloonAdaptersAsync = async (f: ToolForm): Promise<BalloonAdapters | null> => {
+const balloonAdaptersAsync = async (): Promise<BalloonAdapters | null> => {
   const man = await loadManifest();
-  return man ? balloonAdaptersFrom(man, f) : null;
+  return man ? balloonAdaptersFrom(man) : null;
 };
 
 /** the tail segment of the live preview line (the refusal already left via
- *  the 'nothing to place' path — this only runs for an ok plan) */
-function tailNote(f: ToolForm, plan: BalloonPlan): string {
+ *  the 'nothing to place' path — this only runs for an ok plan). v1.9.0
+ *  urgent-fix §3: ONE compact, choice-specific clause — fin triangles only
+ *  move with the fin sliders, the hinge line says what the panels ride (the
+ *  SmallHinge's ±90° IS the control-surface limit), and the volume reads as
+ *  the yes/no toggle it is (no more "(clamped from N)" sentence). */
+function tailNote(_f: ToolForm, plan: BalloonPlan): string {
   const c = plan.counts;
-  const want = balloonOptions(f).volumes;
-  return ` · tail (cone untouched): fillets ${c.fillets} tri + hung rudder/aileron panels `
-    + `${c.panels} tri on ${balloonOptions(f).pivotType} pivots, LV×3 hidden inside `
-    + `· volume ${c.volumes}${want > c.volumes ? ` (clamped from ${want} — envelope)` : ''} enclosed`;
+  return ` · tail: +${c.fillets}+${c.panels} fin tri · rudder + 2 ailerons on `
+    + `SmallHinges (±90°) · LV×3 hidden · `
+    + (c.volumes > 0 ? 'volume 1 enclosed' : 'volume off');
 }
 
 /** The ghost is ONE shape (skin + fillets + panels) and the commit writes the
@@ -636,7 +642,7 @@ function balloonPayload(plan: BalloonPlan, skin: Triangle[]): PlacePayload {
 function stageBalloon(f: ToolForm): PlacePayload {
   const spec = sphereForm(f);
   if (!finsOn(f)) return { triangles: sphereSkinTris(spec, skinOptions(f)) };
-  const ad = balloonAdapters(f);
+  const ad = balloonAdapters();
   const plan = ad ? planBalloonTail(spec, balloonOptions(f), ad) : null;
   if (!plan?.ok) return { triangles: [] };        // preview already disabled OK
   return balloonPayload(plan, sphereSkinTris(spec, skinOptions(f)));
@@ -645,7 +651,7 @@ function stageBalloon(f: ToolForm): PlacePayload {
 async function stageBalloonAsync(f: ToolForm): Promise<PlacePayload> {
   const spec = sphereForm(f);
   if (!finsOn(f)) return { triangles: await sphereSkinTrisAsync(spec, skinOptions(f)) };
-  const ad = await balloonAdaptersAsync(f);
+  const ad = await balloonAdaptersAsync();
   const plan = ad ? planBalloonTail(spec, balloonOptions(f), ad) : null;
   if (!plan?.ok) return { triangles: [] };
   return balloonPayload(plan, await sphereSkinTrisAsync(spec, skinOptions(f)));
@@ -797,8 +803,8 @@ function commitBalloon(f: ToolForm, payload: PlacePayload,
   const nFil = fillet.rudder.length + fillet.aileronL.length + fillet.aileronR.length;
   return `built a ${f['rx']}×${f['ry']}×${f['rz']} m BALLOON: ${skin.length} hull + ${nFil} `
     + `fillet triangles at slot ${slot}, ${fin.label} paint · hung rudder + 2 aileron `
-    + `panels on ${balloonOptions(f).pivotType} pivots (LV×3 hidden inside) · coupler + `
-    + `${c.volumes} volume enclosed`;
+    + `panels on SmallHinges (±90°, LV×3 hidden inside) · coupler + `
+    + `${c.volumes === 1 ? 'ONE Volume block enclosed' : 'no Volume'}`;
 }
 
 // ------------------------------------------------------------------ DIALOG

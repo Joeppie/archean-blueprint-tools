@@ -1039,7 +1039,9 @@ jagged": stepped against the fillet, never touching the cone radius);
 the LV dive HOPS 2 cells up the tail first, THEN marches inboard (from a
 plug at the closed apex a straight inward march never crosses the hull);
 straight-line/keel/contour/flush/gap pins in balloonfin.test.ts;
-(c) each panel rides a SmallHinge (default) / SmallPivot as a SUBGRID:
+(c) each panel rides a SmallHinge (default) / SmallPivot as a SUBGRID
+    [SUPERSEDED v1.9.0: SmallHinges ONLY — the ±360° SmallPivot option was
+    removed, unbounded travel makes no sense for a control surface]:
 Build record with nested `data.triangles` (parent-absolute, v0.168 law —
 the dev readBuild recurses nested triangles, FORMAT §Subgrids) joined via
 `composite_builds {component: flatIdx(pivot), slaveBuildId: flatIdx(Build)}`
@@ -1048,7 +1050,9 @@ nested COMPONENTS); scene.ts buildSubgrids renders nested triangles through
 buildSolids (same prism buckets as the main skin);
 (d) LowVoltageJunction at the envelope centre + `volume blocks` Volume stack
 facing UP out of it (first centre +0.187 m, 1-cell pitch, count CLAMPS to
-the local envelope); one LV pipe per pivot, coupler→pivot, waypoints
+the local envelope) [SUPERSEDED v1.9.0: a yes/no toggle placing exactly
+ONE Volume at +0.187 m, ON only where the 1-cell enclosed margin holds];
+one LV pipe per pivot, coupler→pivot, waypoints
 lead(2r stub) → DIVE one cell through the skin → long INSIDE-envelope run
 → port lead (≥2 axis-aligned segments per the game writer rule; every
 interior waypoint asserted with `insideBalloon`);
@@ -1087,6 +1091,35 @@ e2e re-pinned to STORE. Pins: vitest `balloonfin.test.ts` (9), `tooldoc.test.ts`
 "the TAIL section" (@ui desktop+pixel7). In-game arbitration of triangle
 panels on hinges is the USER's (no corpus precedent — flagged in the help
 topic + FORMAT).
+- **v1.9.0 THE PLATE LAW + the tool-desk batch (urgent-fix.md, we: "the tail
+ rudder swings like a propeller"; "remove the option for a 360 rotation for
+ the rudder/tail, that doesn't make sense")**: MEASURED FIRST (kept audit tools
+ `app/tools/rudderprobe.mjs` panel-axis/bbox + `plateprobe.mjs` part-plate box —
+ plateprobe RE-RESOLVES the real root per read, liveDataEdit replaces it): the
+ fin PANELS were right (rudder group axis (0,1,0) yaw on a fixed pin, ailerons
+ (0,0,1) roll) — the hinge PART'S OWN PLATE rolled about the fore–aft axis.
+ Root: `applyJointPoses` spun the axle node about the RAW .ini key INSIDE the
+ content-basis C group ⇒ world line `R(q)·C·ê`, not the in-game-pinned panel
+ law `R(q)·qAxle·ê` (x̂ keys are C-INVARIANT — that's why the Aileron-flap
+ origin of the rule never bit; SmallHinge is `angular_y`). SECOND latent
+ defect found: `real.userData = {…}` CLOBBERED `userData.jrefs` at all four
+ sites, so `applyLiveJointPose` was a silent no-op everywhere. Fix = pure
+ `subgrid.jointNodeAxis/Slide` (rotation `v = baseQ⁻¹·C⁻¹·baseQ·ê`, slide
+ `d = C⁻¹·baseQ·ê`) feeding `JointPose.axisV/slideV`; userData merges
+ (Object.assign) keep jrefs alive. Pins: vitest subgrid "THE PLATE LAW"
+ (C·(baseQ·v) ≡ baseQ·ê for 4 eulers × 3 keys, x̂-invariance, rudder ≡ up) +
+ e2e sphereskin TAIL SWEEP-DIRECTION pin from WORLD COORDINATES (rudder axis
+ ∝ ŷ, panel vertical extent constant + lateral grows; PLATE vertical extent
+ > 0.9 and |Δcentre.x| < 0.03 — pre-fix prop roll fails both; aileron twins
+ ∥ ẑ). TOOL DESK: volumes = a yes/no toggle (ONE Volume at the coupler, ON
+ only where the 1-cell enclosed margin holds; boolean in BalloonOptions);
+ the ±360° SmallPivot `pivot part` select is GONE — panels ride SmallHinges
+ (±90°) ONLY (vitest-pinned); the preview line is compact + choice-specific
+ (`+F+P fin tri · rudder + 2 ailerons on SmallHinges (±90°) · LV×3 hidden ·
+ volume 1 enclosed|volume off`, body size + paint-slot added, every pinned
+ token kept); the CYLINDER is the shipped DEFAULT body (tail fields visible
+ on open — e2e asserts the cycle; the ellipsoid-era suites click round
+ EXPLICITLY via `stage()`, deliberate re-pins).
 - **v1.8.6 THE SKIN TRANSFORM CUTS, NEVER DROPS (urgent-fix.md, user: "a valid
  zeppelin suddenly misses a face after rotations … the size doesn't inherently
  change"):** the frame-aligned 31-slot window is a FRAME law, so a face with

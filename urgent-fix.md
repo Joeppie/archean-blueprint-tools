@@ -1,136 +1,122 @@
-# URGENT FIX — tail rudder swings on the wrong axis (+ four tool-desk fixes)
+# URGENT FIX — DONE (v1.9.0 batch): tail rudder, tool-desk fixes
 
-**Status: UNFIXED — documented deliberately at the end of a full session so the
-work continues in a fresh prompt (the v1.8.6 face-drop fix below is DONE and
-shipped; it stays here as the post-mortem of that bug class).**
+**Status: FIXED and pinned (this file documents the fixes; the v1.8.6
+face-drop post-mortem stays at the bottom as the post-mortem of that bug
+class).**
 
-Naming/style note for this repo's messages, effective immediately and
-permanently: **never refer to us as "the user" — write "we / us / our"** (the
-same rule now lives in the shared `~/.config/opencode/AGENTS.md`). Historical
-`user:` quotes in older bullets stay as they are.
-
----
-
-## 1 · THE TAIL RUDDER SWINGS SIDEWAYS LIKE A PROPELLER (the real bug)
-
-**What we see:** after Generate balloon ▸ fins, the **rudder** panel (the vertical
-vane on the centreline) turns *sideways about the fore–aft axis — the way a
-propeller spins* — instead of swinging **left/right about the vertical**, which
-is what a rudder does. It must NOT copy the ailerons' motion (they roll about
-the longitudinal axis, and for them that is right). Desired: yaw, left/right,
-about the world UP axis through the hinge line.
-
-**Measured (this session, live editor, rx 2 / ry 2 / rz 8, fins on, nothing
-rotated — the captured joint lines from `engine.subJrefs`):**
-
-| subgrid | master | captured `axis0` | verdict |
-|---|---|---|---|
-| rudder Build | SmallHinge | **(0, 1, 0) = world up** | the *stored* axis is already the yaw axis |
-| aileron R Build | SmallHinge | (0, 0, 1) = longitudinal | correct for an aileron |
-| aileron L Build | SmallHinge | (0, 0, 1) = longitudinal | correct for an aileron |
-
-So the AXIS the file+engine pair carries for the rudder is up, yet the motion we
-watch is a prop-like roll. The wrong motion therefore does NOT come from the
-axis choice — it comes from **how the pose is composed/applied for this panel**
-(or from which handle drives it). Do not "fix" it by flipping an axis sign
-before measuring the actual swing.
-
-**Measure the swing first (the arbitration, ~10 min):**
-`node app/tools/jointturn.mjs <craft>` traces one joint's angle turn — a point
-on the joint line must not move and the panel centre must circle it at a
-constant radius. Build a finned balloon (`app/tools/tailshot.mjs` /
-`tailview.mjs` drive the same tool), set the rudder master's `data.angle`
-through a range and print the panel's world bbox / a vertex path. Expectation
-for a correct rudder: the panel's **lateral (|x|) extent grows/shifting while
-its vertical extent stays constant** (a yaw), NOT the vertical extent swinging
-sideways (a roll).
-
-**Prime suspects, in order:**
-
-1. **The panel subgrid has NO blocks and NO nested parts — only `data.triangles`.**
-   `subBlockBBox()` (app/src/engine/subgrid.ts:161) returns **null** for it, so
-   `captureJrefs` takes the **parts-only branch** (line 210): `pivot0` = the raw
-   `.ini` axle pivot and `axis0` = the `.ini` pin. The panel-bbox clamp AND the
-   v0.175-177 kinematic-triad rule NEVER RUN for our fin panels. The whole
-   motion is then decided by the authored mount quaternion + the `.ini` pin.
-   A triangle-only panel is a case this rule set has never had to serve.
-2. **The mount frame written by the tool** —
-   `app/src/engine/balloonfin.ts:366-368` authors the rudder pivot with
-   `frame = { ax: uHat × tHat, ay: uHat, az: tHat }`, i.e. the part's local ŷ
-   (= the SmallHinge barrel axis, `.ini` `axis: "y"`, axle euler 0) lands on
-   world up. If instead the *display* composes the master's quat differently
-   (`fileToViewQuat`, or the `nested triangles are parent-absolute` rule), the
-   hinge's own ring visual and the panel's rotation can disagree — the gold
-   ring we drag may sit on the aileron-style axis while the stored axis reads
-   up (see the `hinging.mjs` audit tool: "a mirrored clamp line put the handle
-   metres away").
-3. **The rigid master-pose delta** riding the group
-   (`X' = p0 + dq·(p−p0) + (p−p0)`) plus the fact that all three pivots share
-   the same authored frame style: if the rudder's `dq` term dominates (pivot
-   far from the panel content because there is no block bbox to clamp onto),
-   the visible motion is a big roll around a distant axis — which reads exactly
-   like a prop.
-
-**What "fixed" means:** dragging the rudder's hinge ring (or its panel
-`data.angle` slider) swings the vane left/right about the vertical hinge line,
-the ailerons keep rolling, and the twin pair stays mirror-symmetric. Pin it in
-`app/e2e/` (a real drag like `hinge.spec.ts`, or a `subride`-style joint-line
-audit on a generated balloon) asserting the SWEEP DIRECTION from world
-coordinates — data-only assertions cannot pin a rotation direction (the
-standing AGENTS lesson).
+Naming/style note (permanent): we write "we / us / our", never "the user"
+(the shared `~/.config/opencode/AGENTS.md` rule). Historical `user:` quotes
+in older bullets stay as written.
 
 ---
 
-## 2 · VOLUME: exactly ONE block — a yes/no toggle
+## 1 · THE TAIL RUDDER SWUNG SIDEWAYS LIKE A PROPELLER — FIXED
 
-We allow **at most one** `Volume` block: it is a **toggle**, not a count.
-Today `volumes` is a 0-16 count (`balloonfin.ts` `nVol = clamp(round(opt.volumes),
-0, min(16, volFit))`, one Volume per cell stacked up from `c[up] + 0.748`), and
-the plan even reports `counts.volumes` with a "(clamped from N — envelope)"
-note in the preview. Change it to ONE boolean (off / on → 0 or 1 Volume at the
-envelope centre) and drop the clamp note:
-- `ToolsDialog.tsx:385` the `volumes` field is `kind: 'range', min 0, max 16` →
-  a two-option `select` off/on exactly like `fins` (`ToolsDialog.tsx:350`), and
-  `balloonOptions(f)` maps it to `BalloonOptions.volumes` (0/1);
-- `balloonfin.ts:351` `nVol = clamp(round(opt.volumes), 0, min(16, volFit))` →
-  `opt.volumes ? (volFit >= 1 ? 1 : 0) : 0` (keep the honest "does not fit"
-  behaviour), and the `volumes` loop `p[up] = c[up] + 0.748 + i` keeps only i=0;
-- re-pin `balloonfin.test.ts` (count expectations), `e2e/sphereskin.spec.ts`
-  (the TAIL test's `volumes: 1` assertion + any `tool-range-volumes` testid →
-  `tool-opt-volumes-*`), and help `topics/balloon.md`.
+**What we saw:** after Generate balloon ▸ fins, the rudder's visible plate
+turned sideways about the fore–aft axis — the way a propeller spins — while
+the big triangle panel yawed about the vertical. The part and its panel
+disagreed about which line the hinge turns on.
 
-## 3 · THE PREVIEW LINE IS TOO LONG AND DOESN'T REFLECT OUR CHOICES
+**Measured first (the arbitration, as demanded).** Three live-scene probes
+(now kept as audit tools): `app/tools/rudderprobe.mjs` (subgrid group
+quaternion axis + panel bbox under a data.angle turn), `app/tools/plateprobe.mjs`
+(the hinge PART's real-model world box under the same turn — it re-resolves
+the root on every read because liveDataEdit rebuilds it in place) and
+`app/tools/jointturn.mjs` (joint-line fixedness). Result at rx 2 / ry 2 /
+rz 8, no ghost turns:
 
-The dialog's live readout runs to several sentences
-(`ToolsDialog.tsx` `tailNote()` appends "· tail (cone untouched): fillets N tri
-+ hung rudder/aileron panels N tri on SmallHinge pivots, LV×3 hidden inside ·
-volume N (clamped from M — envelope) enclosed" to the base stats line), and it
-reads the same whatever we pick. Make it **short and choice-specific**: say what
-the current settings actually produce (body + size, fins on/off and which pivot
-type, shading, paint finish/slot), one compact line, numbers only where they
-change with a control. Keep the deviation line (`dev −x/+y m`) and the honest
-"nothing to place…" refusal wording — pins read those
-(`e2e/sphereskin.spec.ts` polls `/rudder/`, `/triangles/`, `/nothing to place/`,
-`/90% nose/`; the TAIL test polls for `rudder` and `enclosed`), so re-pin the
-tests to the new short phrasing rather than leaving both.
+| item | captured axis / measured motion | verdict |
+|---|---|---|
+| rudder PANEL subgrid | group quaternion axis (0,1,0); pin fixed; vertical span constant; lateral span grows | yaw — CORRECT |
+| aileron PANEL subgrids | axis (0,0,1); twins the same axis | roll — CORRECT |
+| rudder part PLATE | bbox tilts sideways: tip travels ~0.2 m lateral at +35°, rotates about (±1,0,0) | ROLL about fore–aft — THE BUG |
 
-## 4 · CYLINDER (zeppelin-style) IS THE DEFAULT BODY
+So the panel law (jointChain: world axis `R(q)·qAxle·ê`, the in-game-pinned
+law for every corpus hinge) was right; the part's OWN model was wrong.
 
-`ToolsDialog.tsx:413` opens with `initial: { …, profile: 'round', … }` →
-**`profile: 'cylinder'`**, so the tool opens on the zeppelin shape we actually
-use (and the tail section is then visible immediately instead of hidden).
-Check the dialogs that inherit/restore a previous form (the ↩ back path keeps
-the form, `initialForm`) and any test that stages a ROUND body without setting
-the body select explicitly (`e2e/sphereskin.spec.ts` `stage()` uses ranges only
-— those tests currently ride the round default and will switch to the
-cylinder; re-pin deliberately, don't let them pass by accident). Help
-`topics/balloon.md` + `topics/tools.md` follow.
+**Root cause.** `applyJointPoses` (scene.ts) spun the part's `.ini` axle
+node about the RAW axis-key vector ê while the node chain hangs under the
+engine CONTENT BASIS C = Rx(−90) (FORMAT §Component VERTEX SPACE). The
+plate's WORLD line was therefore `R(q)·C·ê` — for ê = ŷ that is the
+fore–aft axis: a propeller. For ê = x̂ the content basis is INVARIANT
+(C·x̂ = x̂), which is exactly why the law was introduced on the X-axis
+Aileron flap and never bit until a y/z-axis joint (SmallHinge = `angular_y`)
+got a visible subgrid panel. A latent second defect hid next to it:
+`real.userData = {…}` REPLACED the userData that buildReal had filled with
+`jrefs`, so `applyLiveJointPose` (the dataEdited path) was a silent no-op
+on every real model.
 
-## 5 · LANGUAGE: write "we / us", never "the user"
+**The fix — THE PLATE LAW.** Pure helpers `jointNodeAxis` / `jointNodeSlide`
+(engine/subgrid.ts) conjugate the content basis out of the node-local axis:
+rotation `v = baseQ⁻¹·C⁻¹·baseQ·ê`, slide `d = C⁻¹·baseQ·ê`, so the plate's
+world line is EXACTLY the panel's captured line. scene.ts builds the
+`JointPose.axisV/slideV` vectors through them, `applyJointPoses` turns about
+those, and all four `real.userData` write sites became `Object.assign`
+merges so the `jrefs` handle survives (applyLiveJointPose is live again).
+x-key joints (Aileron, LinearTrack) are byte-identical by construction.
 
-Applies to replies, commit messages, code comments and docs written from now on
-(existing quoted history untouched). Recorded in the shared AGENTS.md so every
-session picks it up; keep it consistent in the bullets above.
+**Pins.** vitest `subgrid.test.ts` "THE PLATE LAW" (26 pins: for four axle
+eulers × three keys the C-image of the node axis equals the panel-law line
+to 1e-9; x̂ invariance; the rudder end-to-end case axis == world up). e2e
+`sphereskin.spec.ts` TAIL test now sweeps each built hinge +30° and asserts
+the SWEEP DIRECTION from WORLD COORDINATES (the standing lesson: data-only
+assertions cannot pin a rotation direction): rudder group axis ∝ ŷ, panel
+vertical extent constant while the lateral extent grows, the PART PLATE's
+vertical extent survives (>0.9) and its centre stays on the hinge line
+(|Δx| < 0.03 — a prop roll circles it ~0.06 m and shears the extent toward
+cos); aileron twins keep (0,0,±1). Verified discriminating: pre-fix the
+plate assertions fail, the panel ones already passed.
+
+## 2 · VOLUME: exactly ONE block — a yes/no toggle — DONE
+
+`volumes` is a two-option select (`off` / `on`, default ON, exactly like
+`fins`) and `BalloonOptions.volumes` a boolean: ON places ONE Volume at
+`centre +0.187 m` on the coupler roof where a 1-cell margin under the skin
+is guaranteed (`volFit >= 1`), OFF places none — the honest "does not fit"
+path. `counts.volumes` ∈ {0,1}; the "(clamped from N — envelope)" preview
+note is gone. Re-pinned: `balloonfin.test.ts` (ONE on / none off + the
+enclosed guarantee; a new pin asserts EVERY pivot is a SmallHinge),
+`tooldoc.test.ts` (one Volume in the saved file), e2e tail test
+(`tool-opt-volumes-on/off`, the choice-specific line, `volumes: 1` in the
+built craft).
+
+## 3 · THE PREVIEW LINE — short and choice-specific — DONE
+
+`tailNote` is one compact clause that mirrors the controls:
+`· tail: +F+P fin tri · rudder + 2 ailerons on SmallHinges (±90°) · LV×3
+hidden · volume 1 enclosed` (or `volume off`). `spherePreviewLine` gained
+the `N×N×N m` body size and the paint SLOT mode (`+ new slot` / `≈ nearest`)
+and kept every token the pins read (`N triangles`, `dev −x/+y m`,
+`cylinder + N% nose / M% tail`, `smooth:1`/`flat`, `<finish> paint`,
+`lift@SL … He … H₂`, the honest `nothing to place` refusals). The e2e polls
+`rudder` / `volume 1 enclosed` / `volume off` (the toggle flips the line —
+proven in the tail test).
+
+## 4 · CYLINDER (zeppelin) IS THE DEFAULT BODY — DONE
+
+`initial.profile = 'cylinder'`: the tool opens on the zeppelin shape and
+the tail section is visible immediately (the tail test now asserts
+fin-fields-VISIBLE on open and the round ▸ hidden ▸ cylinder ▸ visible
+cycle). Deliberate re-pins, not accidents: the ellipsoid-era suites
+(`needles/refuse/repair`, `BOTH bodies store`, the skin/lift/mass build
+test, the ↩ test) now click `tool-opt-profile-round` EXPLICITLY — the
+`stage()` helper does it for them — so their round-body numbers keep
+meaning what they meant.
+
+## 5 · NO ±360° PIVOT FOR THE TAIL — DONE (the same-day request)
+
+"Remove the option for a 360 rotation for the rudder/tail that doesn't
+make sense": the `pivot part` select (SmallHinge ±90° vs SmallPivot
+±360° free) is GONE from the tool; `BalloonOptions.pivotType` is deleted;
+the planner authors SmallHinges ONLY (vitest-pinned above). A control
+surface with unbounded travel steers nothing — the hinge's ±90° IS the
+control law. The help topic tells the story; e2e asserts
+`tool-field-pivot` has count 0.
+
+## 6 · LANGUAGE: we / us, never "the user" — standing
+
+Recorded in the shared AGENTS.md; new prose here and in the code follows it
+(older quotes stay as written).
 
 ---
 
@@ -177,8 +163,8 @@ premise, every shift/quarter-turn keeps `length >= base`, every piece passes
 moves it ~6, a dropped fat face hundreds — thin crafts vertex-exact, pieces
 re-wear the record's paint, shift round-trips), `balloonfin.test.ts` (the big
 tail batch is COMPLETE: no undefined, every record inside its own window),
-e2e `sphereskin.spec.ts` "rotate + drag a big balloon" (⟲Y + a 5-cell drag ⇒
-the FILE's area, top-level PLUS nested Build triangles, equals the ghost's).
+e2e `sphereskin.spec.ts` "rotate + drag a big balloon" (⟲Y + a 5-cell drag ⇒ the
+FILE's area, top-level PLUS nested Build triangles, equals the ghost's).
 
 **Standing rule:** any helper that maps stored skin records through a POSITION
 change treats the frame-aligned window as something to CUT, never to filter —

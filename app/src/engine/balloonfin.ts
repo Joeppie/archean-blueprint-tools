@@ -21,12 +21,14 @@
 //  • the aileron pair is mirror-symmetric about the up-longitudinal plane
 //    BY CONSTRUCTION (every L record is derived from its R twin);
 //  • a LowVoltageJunction (the "low power coupler") sits at the envelope
-//    centre with N Volume blocks stacked straight UP out of it (count
-//    CLAMPS so the stack is guaranteed enclosed), and one LV cable per
-//    pivot: lead off the socket → dive through the skin IMMEDIATELY behind
-//    the plug → a long run INSIDE the envelope → the coupler port (hidden
-//    as the user demanded; FORMAT §pipes style + the v1.8.2 direction rule
-//    honoured at both plugs; the game writer expects ≥ 2 segments).
+//    centre with ONE Volume block straight UP out of it (v1.9.0: a yes/no
+//    toggle, not a count — OFF, or ONE when a 1-cell margin under the skin
+//    is guaranteed; "guaranteed to be enclosed in the blimp"), and one LV
+//    cable per pivot: lead off the socket → dive through the skin
+//    IMMEDIATELY behind the plug → a long run INSIDE the envelope → the
+//    coupler port (hidden as we demanded; FORMAT §pipes style + the v1.8.2
+//    direction rule honoured at both plugs; the game writer expects
+//    ≥ 2 segments).
 //
 // Pure lattice math in g coordinates (world = (g−6)·CELL) and raw-file
 // world metres; every emitted face is storable in the game's frame-aligned
@@ -46,13 +48,13 @@ import type { Triangle } from './format';
 export type FinRole = 'rudder' | 'aileronL' | 'aileronR';
 
 export interface BalloonOptions {
-  pivotType: 'SmallHinge' | 'SmallPivot';
   /** normal proportion of the balloon (form % / 100) */
   finScale: number;
   /** extra oversize on top of the normal scale (form % / 100) */
   oversize: number;
-  /** Volume blocks stacked on the coupler (clamped to the envelope) */
-  volumes: number;
+  /** exactly ONE Volume block on the coupler (yes/no — v1.9.0: the count
+   *  slider made no sense; it stays guaranteed enclosed or is left off) */
+  volumes: boolean;
 }
 
 /** A component the commit must place (stage frame = ghost offset 0, no
@@ -343,12 +345,12 @@ export function planBalloonTail(
     kind: 'coupler', type: 'LowVoltageJunction', module: 'ARCHEAN_junction',
     pos: wv(c), quat: { w: 1, x: 0, y: 0, z: 0 },
   };
-  // Volume stack facing UP out of the coupler: junction collider roof is
-  // +0.062 m, a Volume spans ±0.125 m → first centre at +0.187 m (0.748
-  // cells), one cell of pitch; the count CLAMPS so the top keeps a 1-cell
-  // margin under the skin — "guaranteed to be enclosed in the blimp".
-  const volFit = clamp(Math.floor(rUp - 2.25), 0, 16);
-  const nVol = clamp(Math.round(opt.volumes), 0, Math.min(16, volFit));
+  // ONE Volume block facing UP out of the coupler (v1.9.0, we: "allow at
+  // most one — it's a yes/no toggle, not a count"): junction collider roof
+  // is +0.062 m, a Volume spans ±0.125 m → centre at +0.187 m (0.748 cells)
+  // where a 1-cell margin under the skin is guaranteed; else OFF.
+  const volFit = rUp - 2.25;                   // whole cells of headroom
+  const nVol = opt.volumes && volFit >= 1 ? 1 : 0;
   const volumes: PlannedComp[] = [];
   for (let i = 0; i < nVol; i++) {
     const p: G3 = [c[0]!, c[1]!, c[2]!];
@@ -381,7 +383,11 @@ export function planBalloonTail(
   const comps: PlannedComp[] = [coupler];
   for (const pd of pivotDefs) {
     comps.push({
-      kind: 'pivot', type: opt.pivotType, module: 'ARCHEAN_build',
+      // THE PANELS RIDE SmallHinge ONLY (v1.9.0, we: "remove the 360° pivot
+      // option for the rudder/tail, that doesn't make sense"): a control
+      // surface gets LIMITED travel (the hinge's ±90°), not the SmallPivot's
+      // unbounded ±360° — a rudder that free-spins full circle steers nothing.
+      kind: 'pivot', type: 'SmallHinge', module: 'ARCHEAN_build',
       pos: wv(pd.pos), quat: frameQuat(pd.frame), role: pd.role,
     });
     comps.push({

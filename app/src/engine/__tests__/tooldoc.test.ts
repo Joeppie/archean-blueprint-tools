@@ -297,13 +297,13 @@ describe('v1.9 balloon tail persists through the SHIPPED commit', () => {
     rx: 2, ry: 2, rz: 8, profile: 'cylinder' as const, noseShoulder: 0.35, tailShoulder: 0.6,
   };
   const plan = planBalloonTail(
-    spec, { pivotType: 'SmallHinge', finScale: 1, oversize: 1, volumes: 2 }, adapters);
+    spec, { finScale: 1, oversize: 1, volumes: true }, adapters);
   expect(plan.ok).toBe(true);
   const skinTris = sphereSkinTris(
     spec, { slot: 51, material: 0, smooth: false });
   const form = {
     ...balloon.initial, rx: 2, ry: 2, rz: 8, profile: 'cylinder',
-    fins: 'on', pivot: 'SmallHinge', finsize: 100, oversize: 100, volumes: 2,
+    fins: 'on', finsize: 100, oversize: 100, volumes: 'on',
   };
   // GHOST order (the commit's slice contract): SKIN | fillets | panels
   const payload = {
@@ -335,7 +335,7 @@ describe('v1.9 balloon tail persists through the SHIPPED commit', () => {
     expect(saved.data.triangles.length).toBe(skinTris.length + plan.counts.fillets);
     const kinds = saved.data.components.map(c => c.type);
     expect(kinds.filter(t => t === 'SmallHinge')).toHaveLength(3);
-    expect(kinds.filter(t => t === 'Volume')).toHaveLength(2);
+    expect(kinds.filter(t => t === 'Volume')).toHaveLength(1);   // ONE — the toggle
     expect(kinds.filter(t => t === 'Build')).toHaveLength(3);
     expect(kinds).toContain('LowVoltageJunction');
     // joins point at (hinge, build) — the flat list here equals the top list

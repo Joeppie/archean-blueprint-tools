@@ -8,10 +8,12 @@ import { readFileSync } from 'node:fs';
 import { existsSync, readdirSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 import {
-  captureJrefs, flattenComponents, jointChain, masterJointState, subBlockBBox,
+  captureJrefs, eulerZYX, jointChain, jointNodeAxis, jointNodeSlide,
+  flattenComponents, masterJointState, subBlockBBox,
   subJointPose, subMasterEntries,
 } from '../subgrid';
 import type { Blueprint, BlueprintComponent, Block, FileQuat } from '../format';
+import { qRot } from '../compparts';
 import type { ModelManifest } from '../models';
 import { corpusDir, craftFile } from '../../../tools/vite-corpus.ts';
 
@@ -210,5 +212,76 @@ describe('joint line capture + pose', () => {
     expect(pose.p[0]).toBeCloseTo(0.5, 9);
     expect(pose.p[1]).toBeCloseTo(0, 9);
     expect(pose.p[2]).toBeCloseTo(0, 9);
+  });
+});
+
+// ------------------------------------------------------- THE PLATE LAW pins
+// v1.9.0 urgent-fix.md §1: the balloon's rudder plate rolled about the
+// fore–aft axis (a PROPELLER) while its panel yawed about the vertical —
+// applyJointPoses spun the axle node about the raw .ini key INSIDE the
+// content basis C = Rx(−90), so the plate's world line was R(q)·C·ê while
+// the in-game-pinned panel law is R(q)·ê. jointNodeAxis/jointNodeSlide
+// conjugate C out; these pins hold the plate EXACTLY on the panel's line.
+describe('THE PLATE LAW — the part plate turns on the panel’s line', () => {
+  const CQ: FileQuat = { w: Math.SQRT1_2, x: -Math.SQRT1_2, y: 0, z: 0 };  // Rx(−90)
+  const UNIT: Record<'x' | 'y' | 'z', [number, number, number]> = {
+    x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1],
+  };
+  const baseQs: { name: string; q: FileQuat }[] = [
+    { name: 'identity (SmallHinge axle)', q: { w: 1, x: 0, y: 0, z: 0 } },
+    { name: 'Ry10 (SmallPivot axle)', q: eulerZYX(0, 10, 0) },
+    { name: 'Rx30', q: eulerZYX(30, 0, 0) },
+    { name: 'ZYX mix', q: eulerZYX(15, -40, 70) },
+  ];
+  for (const { name, q } of baseQs) {
+    for (const k of ['x', 'y', 'z'] as const) {
+      test(`rotation line: C·(${name}·v) == ${name}·ê_${k} (panel law)`, () => {
+        const v = jointNodeAxis(q, k);
+        const plate = qRot(CQ, qRot(q, v));
+        const panel = qRot(q, UNIT[k]);
+        expect(plate[0]).toBeCloseTo(panel[0]!, 9);
+        expect(plate[1]).toBeCloseTo(panel[1]!, 9);
+        expect(plate[2]).toBeCloseTo(panel[2]!, 9);
+      });
+      test(`slide line: C·(${name}·d) == ${name}·ê_${k}`, () => {
+        const d = jointNodeSlide(q, k);
+        const plate = qRot(CQ, d);
+        const panel = qRot(q, UNIT[k]);
+        expect(plate[0]).toBeCloseTo(panel[0]!, 9);
+        expect(plate[1]).toBeCloseTo(panel[1]!, 9);
+        expect(plate[2]).toBeCloseTo(panel[2]!, 9);
+      });
+    }
+  }
+  const near = (v: readonly number[], e: readonly number[]) => {
+    expect(v.length).toBe(e.length);
+    v.forEach((x, i) => expect(x).toBeCloseTo(e[i]!, 9));
+  };
+  test('x̂ is C-INVARIANT at identity — the Aileron/LinearTrack look is byte-identical', () => {
+    const id: FileQuat = { w: 1, x: 0, y: 0, z: 0 };
+    near(jointNodeAxis(id, 'x'), [1, 0, 0]);
+    near(jointNodeSlide(id, 'x'), [1, 0, 0]);
+  });
+  test('SmallHinge ê_y lands the plate on CONTENT ẑ (world up at the rudder mount)', () => {
+    const id: FileQuat = { w: 1, x: 0, y: 0, z: 0 };
+    near(jointNodeAxis(id, 'y'), [0, 0, 1]);
+    near(jointNodeAxis(id, 'z'), [0, -1, 0]);
+  });
+  test('the rudder case end-to-end: plate axis == jointChain axis == world up', () => {
+    // the balloon rudder mount at stage (balloonfin frameQuat = identity):
+    // the authored frame maps part ŷ → world up, so the file quat is plain I
+    // and the in-game-pinned panel law gives UP…
+    const mc: BlueprintComponent = comp({
+      type: 'SmallHinge', orientation: { w: 1, x: 0, y: 0, z: 0 },
+      data: { angle: 25 },
+    });
+    const manifest = {
+      SmallHinge: { joints: [{ name: 'axle', position: [0, 0, 0], rotation: [0, 0, 0], axis: 'y' }] },
+    } as unknown as ModelManifest;
+    const chain = jointChain(mc, manifest, false);
+    expect(chain!.axis).toEqual([0, 1, 0]);               // the panel yaws about UP
+    const v = jointNodeAxis({ w: 1, x: 0, y: 0, z: 0 }, 'y');
+    const plateWorld = qRot({ w: Math.SQRT1_2, x: -Math.SQRT1_2, y: 0, z: 0 }, v);
+    expect(plateWorld[1]!).toBeCloseTo(1, 9);             // the plate turns about UP too
   });
 });

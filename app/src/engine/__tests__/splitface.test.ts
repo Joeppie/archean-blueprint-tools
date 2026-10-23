@@ -169,7 +169,7 @@ describe('the sizes that used to REFUSE now store (integration)', () => {
     const spec: SphereSpec = {
       rx: 2, ry: 2, rz: 30, profile: 'cylinder', noseShoulder: 0.35, tailShoulder: 0.5,
     };
-    const p = planBalloonTail(spec, { pivotType: 'SmallHinge', finScale: 3, oversize: 4, volumes: 3 }, adapters);
+    const p = planBalloonTail(spec, { finScale: 3, oversize: 4, volumes: true }, adapters);
     expect(p.ok, p.reason).toBe(true);
     expect(p.skipped).toBe(0);
     expect(p.counts.fillets).toBeGreaterThan(0);

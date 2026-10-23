@@ -53,7 +53,8 @@ import { blockCells, blockMirrorTwin, cellOverlapSkip, mirrorBlockCell, mirrorAx
 import { transformSkinTris } from './latsphere';
 import { gridPlan, pxPerMeter } from './grid';
 import {
-  captureJrefs, flattenComponents, masterJointState, subBlockBBox, subJointPose, subMasterEntries,
+  captureJrefs, eulerZYX, flattenComponents, jointNodeAxis, jointNodeSlide,
+  masterJointState, subBlockBBox, subJointPose, subMasterEntries,
   type JRef, type SubBBox,
 } from './subgrid';
 import { pipeSockets } from './sockets';
@@ -115,22 +116,28 @@ const Q_ID: FileQuat = { w: 1, x: 0, y: 0, z: 0 };
  *  chain), so the data-driven joint pose re-applies from base on every edit */
 interface JointPose {
   node: Group;
-  /** .ini angular_x/y/z key → unit axis in the part's CONTENT frame */
+  /** .ini angular_x/y/z key (undefined = no angular joint) */
   axis?: 'x' | 'y' | 'z';
-  /** .ini linear_x/y/z key → slide direction */
+  /** .ini linear_x/y/z key (undefined = no slide) */
   slide?: 'x' | 'y' | 'z';
+  /** THE PLATE LAW (v1.9.0, subgrid.jointNodeAxis): the node-local rotation
+   *  axis whose WORLD line equals the subgrid PANEL's in-game-pinned axis
+   *  R(q)·qAxle·ê — the raw .ini key inside the content basis is the v1.9
+   *  rudder bug (plate rolls ⟂ panel). null = no angular joint. */
+  axisV: Vector3 | null;
+  /** THE PLATE LAW slide direction (world line = panel slide law). */
+  slideV: Vector3 | null;
   baseP: Vector3;
   baseQ: Quaternion;
 }
-const AXIS_V: Record<'x' | 'y' | 'z', Vector3> = {
-  x: new Vector3(1, 0, 0), y: new Vector3(0, 1, 0), z: new Vector3(0, 0, 1),
-};
-
 /** joint-state pose (data.angle DEGREES / data.pos metres — the same fields
  *  the panel/hinge UI write): ANGLE multiplies about the node origin (the
  *  Aileron flap rule, generalised to every type whose manifest carries a
- *  joints[0].axis), POS translates ALONG the .ini slide axis. Types without
- *  the field (Lamp/SpotLight whose angle = the light aim) are skipped. */
+ *  joints[0].axis), POS translates ALONG the slide. The directions are the
+ *  PLATE-LAW vectors (JointPose.axisV/slideV) so the part's plate turns
+ *  about the SAME world line as its subgrid panel — v1.9.0, urgent-fix §1.
+ *  Types without the field (Lamp/SpotLight whose angle = the light aim) are
+ *  skipped. */
 function applyJointPoses(jrefs: JointPose[], c: BlueprintComponent) {
   const d = c.data ?? {};
   const angle = typeof d['angle'] === 'number' ? (d['angle'] as number) : null;
@@ -138,10 +145,10 @@ function applyJointPoses(jrefs: JointPose[], c: BlueprintComponent) {
   for (const j of jrefs) {
     j.node.position.copy(j.baseP);
     j.node.quaternion.copy(j.baseQ);
-    if (angle !== null && j.axis)
-      j.node.quaternion.multiply(new Quaternion().setFromAxisAngle(AXIS_V[j.axis], angle * DEG));
-    if (pos !== null && j.slide)
-      j.node.position.addScaledVector(AXIS_V[j.slide], pos);
+    if (angle !== null && j.axisV)
+      j.node.quaternion.multiply(new Quaternion().setFromAxisAngle(j.axisV, angle * DEG));
+    if (pos !== null && j.slideV)
+      j.node.position.addScaledVector(j.slideV, pos);
   }
 }
 const qInv = (q: FileQuat): FileQuat => ({ w: q.w, x: -q.x, y: -q.y, z: -q.z });
@@ -751,7 +758,7 @@ void main() {
       const real = this.buildReal(c, model);
       real.position.copy(g0.position);
       real.quaternion.copy(g0.quaternion);
-      real.userData = { kind: 'comp', ci, real: true };
+      Object.assign(real.userData, { kind: 'comp', ci, real: true });   // keep jrefs
       this.root.add(real);
       this.pushRoot(ci, real);
       g0.visible = false;                 // stand-in retires (kept for dispose symmetry)
@@ -984,7 +991,10 @@ void main() {
         const real = this.buildReal(c, model);
         real.position.copy(g.position);
         real.quaternion.copy(g.quaternion);
-        real.userData = { kind: 'comp', ci, real: true };
+        // FIELDS, never a wholesale replace: buildReal stored userData.jrefs
+        // (the live joint-pose handle) and a re-assignment SILENCED every
+        // data.angle edit (v1.9.0, urgent-fix §1 follow-up).
+        Object.assign(real.userData, { kind: 'comp', ci, real: true });
         g.visible = false;               // stand-in retires (kept for dispose symmetry)
         this.root.add(real);
         this.pushRoot(ci, real);
@@ -1093,8 +1103,19 @@ void main() {
     for (const j of info.joints) {
       const node = nodes.get(j.name);
       if (!node) continue;
-      jrefs.push({ node, axis: j.axis, slide: j.slide,
-        baseP: node.position.clone(), baseQ: node.quaternion.clone() });
+      // THE PLATE LAW (v1.9.0, urgent-fix §1): the axle node sits under the
+      // content basis C, so its LOCAL axes are NOT the panel's world lines.
+      // Conjugate C out (subgrid.jointNodeAxis/Slide) so the part's plate
+      // turns about the SAME axis the (in-game-pinned) panel law uses —
+      // jointChain composes the identical eulerZYX(jn.rotation) baseQ.
+      const rot = j.rotation ?? [0, 0, 0];
+      const bq = eulerZYX(rot[0]!, rot[1]!, rot[2]!);
+      jrefs.push({
+        node, axis: j.axis, slide: j.slide,
+        axisV: j.axis ? new Vector3(...jointNodeAxis(bq, j.axis)) : null,
+        slideV: j.slide ? new Vector3(...jointNodeSlide(bq, j.slide)) : null,
+        baseP: node.position.clone(), baseQ: node.quaternion.clone(),
+      });
     }
     if (jrefs.length) applyJointPoses(jrefs, c);
     if (jrefs.length) (root.userData as { jrefs?: JointPose[] }).jrefs = jrefs;
@@ -1341,7 +1362,7 @@ void main() {
             const real = this.buildReal(sc, model, true);
             real.position.copy(m.position);
             real.quaternion.copy(m.quaternion);
-            real.userData = { real: true, noRaycast: true };   // liveDataEdit pose-ride marker
+            Object.assign(real.userData, { real: true, noRaycast: true });   // keep jrefs
             m.visible = false;
             g.add(real);
             this.invalidate();
@@ -3078,7 +3099,7 @@ void main() {
     const real = this.buildReal(c, model, !!(pose.userData as { noRaycast?: boolean }));
     real.position.copy(pose.position);
     real.quaternion.copy(pose.quaternion);
-    real.userData = { kind: 'comp', ci, real: true };
+    Object.assign(real.userData, { kind: 'comp', ci, real: true });      // keep jrefs
     this.root.add(real);
     roots.push(real);
     if (this.selCi === ci || this.hoverCi === ci) { this.scene.updateMatrixWorld(true); this.paintSelection(); this.syncGizmo(); }

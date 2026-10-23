@@ -5,15 +5,16 @@ Tags: sphere ellipsoid spheroid skin hull triangles algorithm convex hull lattic
 convex SKIN whose vertices are integer lattice points (the same 0.25 m grid
 the blocks and the game's own hull triangles share). Slider to 48 m radii
 (96 m across); the number boxes take any size beyond. The **cyl + nose**
-body gains a **tail section** (v1.9) — rudder + aileron fins, pivots, a
-coupler and a volume stack, all described below.
+body (the shipped default, v1.9.0) gains a **tail section** (v1.9) —
+rudder + aileron fins on hinge subgrids, a coupler and one enclosed
+Volume block, all described below.
 
 ## Two bodies (v1.7.2, ends independent since v1.7.3)
 
 | Body | Shape | When |
 |---|---|---|
 | **ellipsoid hull** | the convex hull of every lattice point hugging the ideal ellipsoid — maximum roundness | spheres and gentle blends |
-| **cyl + nose** | FLAT CYLINDER SIDES along the longest axis + tapered, POINTIER ends (`nose %` and `tail %` sliders set how much of EACH half tapers — the nose is the − end of the longest axis, the aircraft's −z nose; `facets` picks 48/12/8 sides around the section) | pointy blends and zeppelins: FEWER triangles, and it stores sizes where the pure hull hits the game's triangle-window limit and must refuse |
+| **cyl + nose** *(the shipped default, v1.9.0)* | FLAT CYLINDER SIDES along the longest axis + tapered, POINTIER ends (`nose %` and `tail %` sliders set how much of EACH half tapers — the nose is the − end of the longest axis, the aircraft's −z nose; `facets` picks 48/12/8 sides around the section) | zeppelins — and the body the TAIL section builds on; also stores sizes where the pure hull hits the game's triangle-window limit and must refuse |
 
 The two ends taper INDEPENDENTLY (v1.7.3): the defaults (nose 65 %, tail
 40 %, both sliders 10…90) give a rocket/airship profile — a long pointy
@@ -58,11 +59,16 @@ line and was retired: the fins now ride the natural cone).
   at the hinge line for the normal setting); `oversize` multiplies past
   it — clamped to what the game's triangle window stores, the preview
   refuses before a silently-holed fin.
-- **Panels rotate on pivots.** Each hung panel rides a SmallHinge
-  (±90°, the default) or SmallPivot (±360°) part joined as a SUBGRID
-  (`composite_builds` → the pivot's joint, nested `triangles` in
-  parent-absolute coordinates — the same door/hatch mechanics the editor
-  itself builds). In the pilot, turning the pivot turns its panel. This
+- **Panels rotate on SmallHinges.** Each hung panel rides a SmallHinge
+  (±90°) part joined as a SUBGRID (`composite_builds` → the hinge's
+  joint, nested `triangles` in parent-absolute coordinates — the same
+  door/hatch mechanics the editor itself builds). In the pilot, turning
+  the hinge turns its panel. A free-turning ±360° SmallPivot was offered
+  early on and REMOVED (v1.9.0 — a control surface that spins full circle
+  steers nothing; the hinge's limited travel IS the control law). Since
+  v1.9.0 the hinge's own visible plate turns about the SAME world line as
+  its panel (the rudder yaws about the vertical, the ailerons roll about
+  the longitudinal — it used to roll the plate like a propeller). This
   triangle-panel-in-a-subgrid combo is what the game's READER carries
   (the dev reader recurses nested `triangles`); the corpus has no
   authored precedent, so the final in-game look of the rotating panels is
@@ -72,9 +78,11 @@ line and was retired: the fins now ride the natural cone).
   socket, dives into the body IMMEDIATELY behind the plug, then runs the
   body's long axis INSIDE the envelope to a coupler port — visible only if
   you open the hull.
-- **Volume blocks enclosed.** `volume blocks` stacks Volume parts straight
-  UP out of the coupler (facing up, 1 cell pitch); the count CLAMPS so the
-  top keeps a skin margin — the stack is guaranteed enclosed.
+- **ONE Volume block, on/off.** `volume block` is a yes/no toggle
+  (v1.9.0): ON places exactly ONE Volume straight UP out of the coupler
+  (facing up, 1 kg displacement) where a 1-cell skin margin is guaranteed
+  — OFF places none. (The old 0…16 count stack made no sense: one block
+  is what the game's airtight volume mechanic wants.)
 - **Everything rides the ghost.** ⟲ quarter-turns and the cell drag carry
   the fillets, panels, pivots, coupler, volumes AND cables with the skin
   (a probe tetrahedron round-trips the exact turn matrix), and ✔ Build is

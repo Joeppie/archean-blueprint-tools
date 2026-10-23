@@ -70,12 +70,17 @@ async function setNum(page: Page, key: string, v: number) {
   await page.locator(`[data-testid="tool-num-${key}"]`).fill(String(v));
 }
 
-/** open Tools ▸ Sphere skin, OK ▸ Confirm — the dialog closes and the
- *  ghost label appears (the dialog→ghost→label ORDER is the user's spec) */
+/** open Tools ▸ Generate balloon, OK ▸ Confirm — the dialog closes and the
+ *  ghost label appears (the dialog→ghost→label ORDER is the user's spec).
+ *  v1.9.0 (urgent-fix §4) the SHIPPED default body is the CYLINDER; this
+ *  helper pins the ELLIPSOID lineage the skin/lift/span suite was written
+ *  against — it selects the round hull EXPLICITLY (deliberate re-pin, so
+ *  the round-era numbers keep meaning what they meant). */
 async function stage(page: Page, over: { rx?: number; ry?: number; rz?: number } = {}) {
   await page.getByTestId('tools-menu').click();
   await page.getByTestId('tool-balloon').click();
   await expect(page.getByTestId('tool-dialog-balloon')).toBeVisible();
+  await page.getByTestId('tool-opt-profile-round').click();
   for (const [k, v] of Object.entries(over)) await setRange(page, k, v as number);
   await page.getByTestId('tool-ok').click();
   await expect(page.getByTestId('tool-confirm-box')).toBeVisible();
@@ -93,6 +98,11 @@ test.describe('generate balloon tool: dialog → movable ghost → cancel/build 
     await openNew(page);
     await page.getByTestId('tools-menu').click();
     await page.getByTestId('tool-balloon').click();
+    // v1.9.0 re-pin (urgent-fix §4): the shipped default is now the CYLINDER
+    // whose loft sag is legitimately coarser; THIS suite pins the ELLIPSOID
+    // deviation lineage ("the sag stays round at zeppelin size"), so the
+    // round hull is selected EXPLICITLY.
+    await page.getByTestId('tool-opt-profile-round').click();
     const prev = page.locator('[data-testid="tool-preview"]');
     await expect(prev).toContainText(/triangles/);
     // THE line the Spheroid attempts never had: deviation vs the ideal surface
@@ -119,6 +129,10 @@ test.describe('generate balloon tool: dialog → movable ghost → cancel/build 
     await openNew(page);
     await page.getByTestId('tools-menu').click();
     await page.getByTestId('tool-balloon').click();
+    // v1.9.0 re-pin (urgent-fix §4): the shipped DEFAULT body is now the
+    // cylinder (zeppelin); this suite pins the ELLIPSOID needle/refusal/repair
+    // lineage, so the round hull is selected EXPLICITLY.
+    await page.getByTestId('tool-opt-profile-round').click();
     const prev = page.locator('[data-testid="tool-preview"]');
     // a 20 m radius is over the slider-free planning range — the box takes it
     await setNum(page, 'rx', 20);
@@ -335,6 +349,9 @@ test.describe('generate balloon tool: dialog → movable ghost → cancel/build 
     await openNew(page);
     await page.getByTestId('tools-menu').click();
     await page.getByTestId('tool-balloon').click();
+    // v1.9.0 re-pin: the shipped default is the cylinder now — this suite's
+    // FIRST phase is the ELLIPSOID (the round hull then the cylinder body).
+    await page.getByTestId('tool-opt-profile-round').click();
     await setNum(page, 'rx', 0.5);
     await setNum(page, 'ry', 1);
     await setNum(page, 'rz', 12);
@@ -456,28 +473,45 @@ test.describe('generate balloon tool: dialog → movable ghost → cancel/build 
     await openNew(page);
     await page.getByTestId('tools-menu').click();
     await page.getByTestId('tool-balloon').click();
-    // the section is CYLINDER-ONLY (user: "only applicable to the cylindrical craft")
+    // v1.9.0 (urgent-fix §4): the CYLINDER (zeppelin) is the SHIPPED default
+    // body — the TAIL section is visible the moment the dialog opens, and
+    // the section stays CYLINDER-ONLY (user: "only applicable to the
+    // cylindrical craft").
+    const prev = page.locator('[data-testid="tool-preview"]');
+    await expect(page.getByTestId('tool-field-fins')).toBeVisible();
+    await expect(prev).toContainText(/cylinder \+ \d+% nose \/ \d+% tail/);
+    await page.getByTestId('tool-opt-profile-round').click();
     await expect(page.getByTestId('tool-field-fins')).toBeHidden();
     await page.getByTestId('tool-opt-profile-cylinder').click();
     await expect(page.getByTestId('tool-field-fins')).toBeVisible();
     await page.getByTestId('tool-opt-fins-on').click();
-    await expect(page.getByTestId('tool-field-pivot')).toBeVisible();
+    // v1.9.0 (we: "remove the option for a 360 rotation for the rudder/tail,
+    // that doesn't make sense"): the ±360° SmallPivot field is GONE — the
+    // panels ride SmallHinges (±90°), and the volume is a yes/no TOGGLE.
+    await expect(page.getByTestId('tool-field-pivot')).toHaveCount(0);
+    await expect(page.getByTestId('tool-opt-volumes-on')).toBeVisible();
     await expect(page.getByTestId('tool-field-oversize')).toBeVisible();
     // a stubby tail refuses honestly (tail zone ≥ 3 m)
     await setRange(page, 'rx', 3);
     await setRange(page, 'ry', 3);
     await setRange(page, 'rz', 4);
-    const prev = page.locator('[data-testid="tool-preview"]');
     await expect.poll(async () => ((await prev.textContent()) ?? ''),
       { timeout: 15_000 }).toMatch(/nothing to place/);
     await expect(page.getByTestId('tool-ok')).toBeDisabled();
-    // a proper zeppelin plans the whole batch
+    // the preview line is CHOICE-SPECIFIC (urgent-fix §3): OFF reads 'volume
+    // off', ON reads 'volume 1 enclosed' — poll the async readout.
     await setRange(page, 'rx', 2);
     await setRange(page, 'ry', 2);
     await setRange(page, 'rz', 8);
     await expect.poll(async () => ((await prev.textContent()) ?? '').includes('rudder'),
       { timeout: 30_000 }).toBe(true);
-    await expect(prev).toContainText('enclosed');
+    await expect(prev).toContainText('volume 1 enclosed');
+    await page.getByTestId('tool-opt-volumes-off').click();
+    await expect.poll(async () => ((await prev.textContent()) ?? '').includes('volume off'),
+      { timeout: 15_000 }).toBe(true);
+    await page.getByTestId('tool-opt-volumes-on').click();
+    await expect.poll(async () => ((await prev.textContent()) ?? '').includes('volume 1 enclosed'),
+      { timeout: 15_000 }).toBe(true);
     await page.getByTestId('tool-ok').click();
     await expect(page.getByTestId('tool-confirm-box')).toBeVisible();
     await page.getByTestId('tool-confirm').click();
@@ -528,6 +562,132 @@ test.describe('generate balloon tool: dialog → movable ghost → cancel/build 
     }).__ARCHEAN__.engine.pipeInfo().leads);
     expect(leads.checked).toBeGreaterThanOrEqual(6);   // 3 cables × 2 ends
     expect(leads.bad, 'no wire leaves its plug sideways').toBe(0);
+    // ---------------------------------------------------------------
+    // v1.9.0 THE RUDDER SWINGS LIKE A RUDDER (urgent-fix.md §1). The SWEEP
+    // DIRECTION is arbitrated from WORLD COORDINATES (the standing lesson:
+    // data-only assertions cannot pin a rotation direction). Turning each
+    // panel master +30° must:
+    //  • rudder PANEL: yaw about the WORLD-UP line (group quaternion axis
+    //    ∝ ŷ; the vertical extent CONSTANT, the lateral extent GROWS);
+    //  • rudder PART PLATE: turn about that SAME up line — the plate's
+    //    vertical extent survives and its centre does NOT swing sideways.
+    //    Pre-fix it rolled about the FORE–AFT axis (a propeller): the centre
+    //    circled ±0.06 m and the vertical extent shrank with cos.
+    //  • ailerons: keep ROLLING (axis ∥ ẑ) — both twins the SAME axis.
+    const swing = await page.evaluate(async () => {
+      /* eslint-disable @typescript-eslint/no-explicit-any */
+      const e = (window as any).__ARCHEAN__.engine;
+      const d = e.blueprint.data;
+      const frames = () => new Promise<void>(r =>
+        requestAnimationFrame(() => requestAnimationFrame(() => r())));
+      const worldBox = (obj: any) => {
+        e.scene.updateMatrixWorld(true);
+        const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+        obj.traverse((o: any) => {
+          if (!o.isMesh || !o.visible) return;
+          const pos = o.geometry?.attributes?.position;
+          if (!pos) return;
+          const m = o.matrixWorld.elements;
+          for (let i = 0; i < pos.count; i++) {
+            const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+            const q = [m[0] * x + m[4] * y + m[8] * z + m[12],
+              m[1] * x + m[5] * y + m[9] * z + m[13],
+              m[2] * x + m[6] * y + m[10] * z + m[14]];
+            for (let k = 0; k < 3; k++) { mn[k] = Math.min(mn[k], q[k]); mx[k] = Math.max(mx[k], q[k]); }
+          }
+        });
+        return { span: mn.map((v: number, i: number) => mx[i] - v), c: mn.map((v: number, i: number) => (v + mx[i]) / 2) };
+      };
+      const out: any[] = [];
+      // THE JOIN ORDER IS THE COMMIT'S CONTRACT (commitBalloon appends in
+      // the fixed order rudder, aileronL, aileronR) — the ⟲Y this test put
+      // on the ghost moved the rudder off x = 0, so geometry can NOT name
+      // the role here; the order can.
+      let joinIx = 0;
+      for (const j of (d.composite_builds ?? [])) {
+        const role = joinIx++ === 0 ? 'rudder' : 'aileron';
+        const master = d.components[j.component];
+        if (!master || master.type !== 'SmallHinge') continue;
+        const grp = e.subGroups.get(j.slaveBuildId);
+        if (!grp) continue;
+        // the CAPTURED joint line (the law that drives the panel) — the
+        // ⟲Y on the ghost keeps world UP but carries the aileron roll line
+        // ẑ → x̂, so the assertions below go against THIS, not constants
+        const jr = (e.subJrefs.get(j.slaveBuildId) ?? [])[0];
+        // liveDataEdit REBUILDS the real root in place — re-resolve it on
+        // every read (a stale handle would measure a disposed tree)
+        const plateBox = () => {
+          const real = (e.compRoots.get(j.component) ?? []).find((o: any) => o.userData?.real);
+          return real ? worldBox(real) : null;
+        };
+        const set = (a: number) => {
+          master.data = { ...(master.data ?? {}), angle: a };
+          e.dataEdited();
+          if (plateBox() !== null) e.liveDataEdit(j.component);   // the part model re-poses
+        };
+        set(0); await frames();
+        const p0 = worldBox(grp), t0 = plateBox();
+        set(30); await frames();
+        const q = grp.quaternion, n = Math.hypot(q.x, q.y, q.z) || 1;
+        const axis = [q.x / n, q.y / n, q.z / n];
+        const p1 = worldBox(grp), t1 = plateBox();
+        set(0); await frames();
+        out.push({
+          role,
+          axis,
+          jrefAxis: jr ? [jr.axis0[0], jr.axis0[1], jr.axis0[2]] : null,
+          panelY0: p0.span[1], panelY1: p1.span[1],
+          panelX0: p0.span[0], panelX1: p1.span[0],
+          panelZ0: p0.span[2], panelZ1: p1.span[2],
+          plateY0: t0?.span[1], plateY1: t1?.span[1],
+          plateDx: t0 && t1 ? Math.abs(t1.c[0] - t0.c[0]) : null,
+          plateDz: t0 && t1 ? Math.abs(t1.c[2] - t0.c[2]) : null,
+        });
+      }
+      return out;
+    });
+    expect(swing).toHaveLength(3);
+    const rud = swing.filter(s => s.role === 'rudder');
+    const ail = swing.filter(s => s.role === 'aileron');
+    expect(rud).toHaveLength(1);
+    expect(ail).toHaveLength(2);
+    const dot3 = (a: number[], b: number[]) => a[0]! * b[0]! + a[1]! * b[1]! + a[2]! * b[2]!;
+    const UP = [0, 1, 0];
+    // the rudder: YAW about the vertical — its CAPTURED joint line is UP
+    // (the ⟲Y on the ghost keeps world up), the group actually turns about
+    // that line, and the panel's vertical extent stays while the lateral
+    // extent grows (it sweeps left/right).
+    const r = rud[0]!;
+    expect(Math.abs(dot3(r.jrefAxis!, UP)), `rudder joint line ${JSON.stringify(r.jrefAxis)} must be UP`)
+      .toBeGreaterThan(0.99);
+    expect(Math.abs(dot3(r.axis, r.jrefAxis!)), 'the panel turns ON its captured line')
+      .toBeGreaterThan(0.999);
+    expect(r.panelY1 / r.panelY0, 'rudder vertical extent under yaw')
+      .toBeGreaterThan(0.95);
+    // the panel is a THIN vane: at rest the smaller horizontal span is its
+    // thickness; a yaw about UP swings it so THAT span grows toward the
+    // chord (rotation-invariant phrasing — the ⟲Y swapped which axis is x)
+    expect(Math.min(r.panelX1, r.panelZ1), 'rudder swept sideways under yaw')
+      .toBeGreaterThan(Math.min(r.panelX0, r.panelZ0) + 1.0);
+    // …and the PART PLATE turns on the SAME line: its centre barely shifts
+    // laterally and its vertical extent survives (a prop roll would circle
+    // the centre ~0.06 m and shear the extent toward cos 30°)
+    expect(r.plateY0, 'plate model loaded').toBeTruthy();
+    expect((r.plateY1 ?? 0) / (r.plateY0 ?? 1),
+      'rudder plate vertical extent (a PROP ROLL would shrink/tilt it)')
+      .toBeGreaterThan(0.9);
+    expect(Math.hypot(r.plateDx ?? 9, r.plateDz ?? 9),
+      'rudder plate centre stays on the hinge line (no prop circle)')
+      .toBeLessThan(0.03);
+    // the ailerons: ROLL about a HORIZONTAL line (the ⟲Y-carried
+    // longitudinal), both twins on the SAME line
+    for (const a of ail) {
+      expect(Math.abs(dot3(a.jrefAxis!, UP)), `aileron joint line ${JSON.stringify(a.jrefAxis)} must be horizontal`)
+        .toBeLessThan(0.05);
+      expect(Math.abs(dot3(a.axis, a.jrefAxis!)), 'the aileron panel turns ON its captured line')
+        .toBeGreaterThan(0.999);
+    }
+    expect(dot3(ail[0]!.jrefAxis!, ail[1]!.jrefAxis!)).toBeGreaterThan(0.999);
     // Ctrl+Z = ONE step for the WHOLE batch (skin, tail, parts, joins, cables)
     await page.keyboard.press('Control+z');
     await expect.poll(async () => {

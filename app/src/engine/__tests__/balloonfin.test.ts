@@ -29,7 +29,7 @@ const adapters: BalloonAdapters = {
 const spec: SphereSpec = {
   rx: 2, ry: 2, rz: 8, profile: 'cylinder', noseShoulder: 0.35, tailShoulder: 0.6,
 };
-const OPT = { pivotType: 'SmallHinge', finScale: 1, oversize: 1, volumes: 3 } as const;
+const OPT = { finScale: 1, oversize: 1, volumes: true } as const;
 
 /** decoded lattice vertex of a skin record: g = v + 12·frame */
 function gOf(t: Record<string, number>, i: 0 | 1 | 2): [number, number, number] {
@@ -213,15 +213,29 @@ describe('balloon tail plan (untouched cone, hung vanes)', () => {
     }
   });
 
-  test('volume blocks face up on the coupler, clamped INSIDE the skin', () => {
+  test('the Volume block is a YES/NO toggle, guaranteed enclosed', () => {
+    // v1.9.0 (urgent-fix §2): ONE Volume, not a stack — the plan either
+    // places a single block on the coupler roof (with a guaranteed 1-cell
+    // margin under the skin) or places none.
     const vols = p.comps.filter(c => c.kind === 'volume');
-    expect(vols.length).toBe(3);
-    expect(vols[0]!.pos[1]).toBeCloseTo(0.187, 3);        // sits on the coupler roof
-    for (let i = 1; i < vols.length; i++)
-      expect(vols[i]!.pos[1] - vols[i - 1]!.pos[1]).toBeCloseTo(0.25, 3);  // one cell up
-    for (const v of vols) expect(insideBalloon(spec, v.pos, 0.9)).toBe(true);
-    expect(planBalloonTail(spec, { ...OPT, volumes: 16 }, adapters).counts.volumes)
-      .toBeLessThan(8);
+    expect(vols.length).toBe(1);
+    expect(vols[0]!.type).toBe('Volume');
+    expect(vols[0]!.pos[1]).toBeCloseTo(0.187, 3);         // sits on the coupler roof
+    expect(insideBalloon(spec, vols[0]!.pos, 0.9)).toBe(true);
+    expect(p.counts.volumes).toBe(1);
+    // OFF ⇒ none
+    const off = planBalloonTail(spec, { ...OPT, volumes: false }, adapters);
+    expect(off.ok, off.reason).toBe(true);
+    expect(off.comps.filter(c => c.kind === 'volume').length).toBe(0);
+    expect(off.counts.volumes).toBe(0);
+  });
+
+  test('panels ride SmallHinges ONLY — the ±360° SmallPivot is gone', () => {
+    // v1.9.0 (we: "remove the option for a 360 rotation for the rudder/tail,
+    // that doesn't make sense"): every pivot part is a SmallHinge (±90°
+    // limited travel — the control-surface law).
+    for (const c of p.comps.filter(x => x.kind === 'pivot'))
+      expect(c.type).toBe('SmallHinge');
   });
 
   test('the ghost map follows quarter-turns + cell offsets exactly', () => {
@@ -267,7 +281,7 @@ describe('v1.8.6 — the mirror never holes a fin face (urgent-fix.md)', () => {
     // encode-else-split; this pins the shipped plan at the user's size.
     const p = planBalloonTail(
       { rx: 12, ry: 8, rz: 12, profile: 'cylinder', noseShoulder: 0.35, tailShoulder: 0.6 },
-      { pivotType: 'SmallHinge', finScale: 1, oversize: 1, volumes: 3 }, adapters);
+      { finScale: 1, oversize: 1, volumes: true }, adapters);
     expect(p.ok, p.reason).toBe(true);
     for (const key of ['fillets', 'panels'] as const) {
       for (const role of ['rudder', 'aileronL', 'aileronR'] as const) {
