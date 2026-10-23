@@ -352,16 +352,18 @@ export const TOOLS: ToolDef[] = [
           { id: 'on', label: 'rudder+2 ailerons' },
         ],
         showIf: f => f['profile'] === 'cylinder',
-        hint: 'classical blimp tail: the last fifth of the tail cone becomes '
-          + 'a straight fin POST (contiguous with the cone — the sleeve '
-          + 'shares its cut ring vertex-for-vertex), carrying a TOP rudder '
-          + '(yaws) and a MIRRORED port/starboard aileron pair (roll). The '
-          + 'fin panels are hull TRIANGLES riding SmallHinge pivots joined '
-          + 'as subgrids; each pivot gets an LV cable that dives into the '
-          + 'body right behind the socket and runs HIDDEN to a '
-          + 'LowVoltageJunction at the centre, with the Volume blocks '
-          + 'stacked up out of it, enclosed. In-game, turning a pivot in '
-          + 'the pilot turns its panel (composite_builds joint).' },
+        hint: 'classical airship tail ON THE UNTOUCHED CONE (no post — the '
+          + 'tail pattern stays intact): a FIXED fillet clings tightly to '
+          + 'the hull from the SHOULDERS where the cone starts yielding, '
+          + 'its straight leading edge sloping up to a vertical hinge line '
+          + 'just before the apex; the MOVABLE rudder/ailerons HANG AFT of '
+          + 'that line like stern-post rudders — a tall top vane (yaws) and '
+          + 'a MIRRORED port/starboard pair (roll). Panels are hull '
+          + 'TRIANGLES riding SmallHinge pivots joined as subgrids; each '
+          + 'pivot gets an LV cable that dives into the body right behind '
+          + 'the socket and runs HIDDEN to a LowVoltageJunction at the '
+          + 'centre, with the Volume blocks stacked up out of it, enclosed. '
+          + 'In-game, turning a pivot turns its panel.' },
       { key: 'pivot', label: 'pivot part', kind: 'select',
         options: [
           { id: 'SmallHinge', label: 'SmallHinge (±90°, limited)' },
@@ -372,9 +374,9 @@ export const TOOLS: ToolDef[] = [
           + 'precise control-surface travel; the pivot turns unbounded' },
       { key: 'finsize', label: 'fin size %', kind: 'range', min: 25, max: 200, step: 5, unit: ' %',
         showIf: f => finsOn(f),
-        hint: 'the NORMAL proportion of the balloon: the fin root runs from '
-          + 'the MIDDLE of the tail taper out to the post, the height/span '
-          + 'sweeps out to 45 % of the girth at the trailing edge' },
+        hint: 'the NORMAL proportion of the balloon: the fillet clings to '
+          + 'the cone from the shoulders and sweeps out to half the girth '
+          + 'at the hinge line; the hung vane matches it' },
       { key: 'oversize', label: 'oversize', kind: 'range', min: 100, max: 400, step: 10, unit: ' %',
         showIf: f => finsOn(f),
         hint: 'an EXTRA factor past the normal scale — oversized fins bite '
@@ -427,8 +429,7 @@ export const TOOLS: ToolDef[] = [
       const ad = balloonAdapters(f);
       const plan = ad ? planBalloonTail(spec, balloonOptions(f), ad) : null;
       if (!plan?.ok) return `nothing to place — ${plan?.reason ?? 'the model atlas is not loaded yet'}`;
-      return spherePreviewLine(f, sphereStats({ ...spec, tailCutG: plan.tailCutG }))
-        + tailNote(f, plan);
+      return spherePreviewLine(f, sphereStats(spec)) + tailNote(f, plan);
     },
     previewAsync: async (f) => {
       const spec = sphereForm(f);
@@ -436,8 +437,7 @@ export const TOOLS: ToolDef[] = [
       const ad = await balloonAdaptersAsync(f);
       const plan = ad ? planBalloonTail(spec, balloonOptions(f), ad) : null;
       if (!plan?.ok) return `nothing to place — ${plan?.reason ?? 'the model atlas is unavailable'}`;
-      return spherePreviewLine(f, await sphereStatsAsync({ ...spec, tailCutG: plan.tailCutG }))
-        + tailNote(f, plan);
+      return spherePreviewLine(f, await sphereStatsAsync(spec)) + tailNote(f, plan);
     },
     run: () => 'use placement',            // place tools never run()
     place: {
@@ -604,17 +604,20 @@ const balloonAdaptersAsync = async (f: ToolForm): Promise<BalloonAdapters | null
 function tailNote(f: ToolForm, plan: BalloonPlan): string {
   const c = plan.counts;
   const want = balloonOptions(f).volumes;
-  return ` · tail ${c.tailPostM.toFixed(1)} m: post+cap ${c.sleeveTris} tri · rudder + 2 ailerons `
-    + `(${c.finTris} panel tri) on ${balloonOptions(f).pivotType} pivots, LV×3 hidden inside `
+  return ` · tail (cone untouched): fillets ${c.fillets} tri + hung rudder/aileron panels `
+    + `${c.panels} tri on ${balloonOptions(f).pivotType} pivots, LV×3 hidden inside `
     + `· volume ${c.volumes}${want > c.volumes ? ` (clamped from ${want} — envelope)` : ''} enclosed`;
 }
 
 /** GHOST triangle order = the commit's LIVE slice order:
- *  SKIN | SLEEVE+CAP | rudder | aileronL | aileronR */
+ *  SKIN | fillet rudder/L/R | panel rudder/L/R (the fixed skin AND the
+ *  fillets join data.triangles; the MOVABLE panels end up nested in the
+ *  Build subgrids) */
 function balloonPayload(plan: BalloonPlan, skin: Triangle[]): PlacePayload {
   return {
-    triangles: [...skin, ...plan.sleeveTris,
-      ...plan.finTris.rudder, ...plan.finTris.aileronL, ...plan.finTris.aileronR],
+    triangles: [...skin,
+      ...plan.fillets.rudder, ...plan.fillets.aileronL, ...plan.fillets.aileronR,
+      ...plan.panels.rudder, ...plan.panels.aileronL, ...plan.panels.aileronR],
     rides: [plan.probes],
     balloon: { plan, skinCount: skin.length },
   };
@@ -626,8 +629,7 @@ function stageBalloon(f: ToolForm): PlacePayload {
   const ad = balloonAdapters(f);
   const plan = ad ? planBalloonTail(spec, balloonOptions(f), ad) : null;
   if (!plan?.ok) return { triangles: [] };        // preview already disabled OK
-  const skin = sphereSkinTris({ ...spec, tailCutG: plan.tailCutG }, skinOptions(f));
-  return balloonPayload(plan, skin);
+  return balloonPayload(plan, sphereSkinTris(spec, skinOptions(f)));
 }
 
 async function stageBalloonAsync(f: ToolForm): Promise<PlacePayload> {
@@ -636,8 +638,7 @@ async function stageBalloonAsync(f: ToolForm): Promise<PlacePayload> {
   const ad = await balloonAdaptersAsync(f);
   const plan = ad ? planBalloonTail(spec, balloonOptions(f), ad) : null;
   if (!plan?.ok) return { triangles: [] };
-  const skin = await sphereSkinTrisAsync({ ...spec, tailCutG: plan.tailCutG }, skinOptions(f));
-  return balloonPayload(plan, skin);
+  return balloonPayload(plan, await sphereSkinTrisAsync(spec, skinOptions(f)));
 }
 
 /** Build SUBGRID record: nested blueprint data, parent-frame ABSOLUTE
@@ -707,13 +708,18 @@ function commitBalloon(f: ToolForm, payload: PlacePayload,
   let cur = 0;
   const take = (n: number): Triangle[] => { const s = shifted.slice(cur, cur + n); cur += n; return s; };
   const skin = take(bc.skinCount);
-  const sleeve = take(plan.sleeveTris.length);
-  const panel: Record<FinRole, Triangle[]> = {
-    rudder: take(plan.finTris.rudder.length),
-    aileronL: take(plan.finTris.aileronL.length),
-    aileronR: take(plan.finTris.aileronR.length),
+  const fillet: Record<FinRole, Triangle[]> = {
+    rudder: take(plan.fillets.rudder.length),
+    aileronL: take(plan.fillets.aileronL.length),
+    aileronR: take(plan.fillets.aileronR.length),
   };
-  appendTrianglesDoc(ctx, [...skin, ...sleeve]);
+  const panel: Record<FinRole, Triangle[]> = {
+    rudder: take(plan.panels.rudder.length),
+    aileronL: take(plan.panels.aileronL.length),
+    aileronR: take(plan.panels.aileronR.length),
+  };
+  // the tail cone stays UNTOUCHED — the fixed fillets join the main skin
+  appendTrianglesDoc(ctx, [...skin, ...fillet.rudder, ...fillet.aileronL, ...fillet.aileronR]);
   // the ghost's quarter-turns + cell offset, recovered from the probe
   // tetrahedron the engine turned WITH the skin (scene.clusterGhostData)
   const map = ghostMap(plan.probes, payload.rides?.[0], offset);
@@ -769,9 +775,10 @@ function commitBalloon(f: ToolForm, payload: PlacePayload,
       ctx.bp.data.pipes.length - 1, docFromValue(rec, false));
   }
   const c = plan.counts;
-  return `built a ${f['rx']}×${f['ry']}×${f['rz']} m BALLOON: ${skin.length} hull + ${sleeve.length} `
-    + `tail triangles at slot ${slot}, ${fin.label} paint · rudder + 2 ailerons on `
-    + `${balloonOptions(f).pivotType} pivots (LV×3 hidden inside) · coupler + `
+  const nFil = fillet.rudder.length + fillet.aileronL.length + fillet.aileronR.length;
+  return `built a ${f['rx']}×${f['ry']}×${f['rz']} m BALLOON: ${skin.length} hull + ${nFil} `
+    + `fillet triangles at slot ${slot}, ${fin.label} paint · hung rudder + 2 aileron `
+    + `panels on ${balloonOptions(f).pivotType} pivots (LV×3 hidden inside) · coupler + `
     + `${c.volumes} volume enclosed`;
 }
 

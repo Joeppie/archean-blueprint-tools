@@ -300,14 +300,16 @@ describe('v1.9 balloon tail persists through the SHIPPED commit', () => {
     spec, { pivotType: 'SmallHinge', finScale: 1, oversize: 1, volumes: 2 }, adapters);
   expect(plan.ok).toBe(true);
   const skinTris = sphereSkinTris(
-    { ...spec, tailCutG: plan.tailCutG }, { slot: 51, material: 0, smooth: false });
+    spec, { slot: 51, material: 0, smooth: false });
   const form = {
     ...balloon.initial, rx: 2, ry: 2, rz: 8, profile: 'cylinder',
     fins: 'on', pivot: 'SmallHinge', finsize: 100, oversize: 100, volumes: 2,
   };
+  // GHOST order (the commit's slice contract): SKIN | fillets | panels
   const payload = {
-    triangles: [...skinTris, ...plan.sleeveTris,
-      ...plan.finTris.rudder, ...plan.finTris.aileronL, ...plan.finTris.aileronR],
+    triangles: [...skinTris,
+      ...plan.fillets.rudder, ...plan.fillets.aileronL, ...plan.fillets.aileronR,
+      ...plan.panels.rudder, ...plan.panels.aileronL, ...plan.panels.aileronR],
     rides: [plan.probes],
     balloon: { plan, skinCount: skinTris.length },
   };
@@ -329,8 +331,8 @@ describe('v1.9 balloon tail persists through the SHIPPED commit', () => {
     const msg = balloon.place!.commit(form as never, payload as never, [0, 0, 0], ctx);
     expect(msg).toContain('BALLOON');
     const saved = JSON.parse(serializeSave(ctx)) as Saved;
-    // the MAIN skin carries the truncated envelope AND the sleeve/cap
-    expect(saved.data.triangles.length).toBe(skinTris.length + plan.sleeveTris.length);
+    // the MAIN skin stays UNTOUCHED and gains only the FIXED fillets
+    expect(saved.data.triangles.length).toBe(skinTris.length + plan.counts.fillets);
     const kinds = saved.data.components.map(c => c.type);
     expect(kinds.filter(t => t === 'SmallHinge')).toHaveLength(3);
     expect(kinds.filter(t => t === 'Volume')).toHaveLength(2);
@@ -373,8 +375,9 @@ describe('v1.9 balloon tail persists through the SHIPPED commit', () => {
     balloon.place!.commit(form as never, {
       ...payload,
       triangles: [
-        ...turned(skinTris), ...turned(plan.sleeveTris),
-        ...turned(plan.finTris.rudder), ...turned(plan.finTris.aileronL), ...turned(plan.finTris.aileronR),
+        ...turned(skinTris),
+        ...turned(plan.fillets.rudder), ...turned(plan.fillets.aileronL), ...turned(plan.fillets.aileronR),
+        ...turned(plan.panels.rudder), ...turned(plan.panels.aileronL), ...turned(plan.panels.aileronR),
       ],
       rides,
     } as never, [3, 1, -2], ctx);

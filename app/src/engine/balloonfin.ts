@@ -1,39 +1,32 @@
 // ---------------------------------------------------------------- balloonfin
 // BALLOON TAIL — the fin/coupler/volume half of the Generate-balloon tool
-// (v1.9, user 2026-10-23: "add a section to its tool to generate a tail
-// rudder and two ailerons … based on a symmetrically placed (mirrored) fins,
-// which help stabilize the balloon … firstly so that there is a contiguous
-// area that connects where the tail can sit — flush with the end of the
-// 'tail' section of the cone … wired in to a low power coupler that sits
-// near the center … on top of that power coupler, a volume block facing up,
-// so it is guaranteed to be enclosed in the blimp … the LV cables hook into
-// the pivots that do the rotating … the wire after connecting to the pivot
-// must immediately run into the zeppelin's body, so they are hidden").
+// (v1.9, user 2026-10-23 brief + two shape arbitrations the same day).
 //
-// SHAPE OF THE RESULT (cylinder profile only):
-//  • the tail cone is TRUNCATED at tailCutG (SphereSpec.tailCutG) and the
-//    loft's open cut ring is closed here by a straight-sided SLEEVE + a
-//    shrinking tail CAP + tip cone: the sleeve re-uses the cut ring's EXACT
-//    slot table (loftRingTable — the same law the loft itself applies at
-//    that level), so sleeve and cone share vertices: the contiguous flush
-//    tail-post the user asked for, classical-zeppelin style;
-//  • THREE fins (a top rudder yawing about the vertical + port/starboard
-//    ailerons rolling about the longitudinal axis — cruciform): every panel
-//    is a flat lattice plate of hull TRIANGLES (the surfaces are never
-//    components), riding a SmallHinge/SmallPivot part. The panel lives in
-//    a Build SUBGRID joined to that pivot through composite_builds, so
-//    turning the pivot turns the panel (the repo's decoded subgrid
-//    mechanics; the dev viewer's readBuild reads nested `triangles`
-//    recursively — the schema carries them, FORMAT §Subgrids). The aileron
-//    pair is the EXACT side-plane mirror of itself, the rudder sits on the
-//    mirror plane (self-mirror);
+// FINAL SHAPE LAW (user sketch #2 — colours are the spec):
+//  • the TAIL CONE STAYS UNTOUCHED — no truncation, no sleeve, no cap.
+//    The first build post-sleeve read as "an undesirable break in the
+//    tail's pattern … visually jarring and breaks the design" (blue in the
+//    sketch), so the fin geometry rides the NATURAL cone instead;
+//  • RED/ORANGE: a FIXED FILLET per fin plane — the root clings tightly to
+//    the hull ("orange … taper the fuselage closely") from the SHOULDERS,
+//    where the cone starts yielding, to just before the apex; the outboard
+//    extent grows LINEARLY outwards, so the plate is a right triangle with
+//    a vertical trailing edge at the hinge line and a long sloping leading
+//    edge (red) running down to the shoulder;
+//  • GREEN: the MOVABLE rudder/aileron is a plate HUNG AFT of that vertical
+//    hinge line at the tail end — the rudder a tall vertical vane (yaw
+//    about the vertical axis), the ailerons its cruciform twin planes
+//    rolling about the longitudinal axis — like a classical stern-post
+//    rudder ("the movable part comes out there");
+//  • the aileron pair is mirror-symmetric about the up-longitudinal plane
+//    BY CONSTRUCTION (every L record is derived from its R twin);
 //  • a LowVoltageJunction (the "low power coupler") sits at the envelope
-//    centre with N Volume blocks stacked straight UP out of it (facing up;
-//    the count CLAMPS so the stack is guaranteed enclosed), and one LV
-//    cable per pivot: lead off the socket → dive through the skin →
-//    a long run INSIDE the envelope → the coupler port (hidden as the user
-//    demanded, FORMAT §pipes style + v1.8.2 direction rule honoured at both
-//    plugs; the game writer expects ≥ 2 segments per pipe).
+//    centre with N Volume blocks stacked straight UP out of it (count
+//    CLAMPS so the stack is guaranteed enclosed), and one LV cable per
+//    pivot: lead off the socket → dive through the skin IMMEDIATELY behind
+//    the plug → a long run INSIDE the envelope → the coupler port (hidden
+//    as the user demanded; FORMAT §pipes style + the v1.8.2 direction rule
+//    honoured at both plugs; the game writer expects ≥ 2 segments).
 //
 // Pure lattice math in g coordinates (world = (g−6)·CELL) and raw-file
 // world metres; every emitted face passes encodeSkinTri, so it is storable
@@ -41,8 +34,8 @@
 // `skipped` and the dialog refuses the build).
 
 import {
-  simpleBody, loftZLevels, loftRingTable, profileScale, encodeSkinTri, decodeSkinTri,
-  type GP3, type LoftRingCache, type SimpleBody, type SphereSpec,
+  simpleBody, profileScale, encodeSkinTri, decodeSkinTri,
+  type GP3, type SphereSpec,
 } from './latsphere';
 import { adapterSocket } from './sockets';
 import { CELL } from './format';
@@ -90,12 +83,10 @@ export interface PlannedPipe {
 export interface BalloonPlan {
   ok: boolean;
   reason?: string;
-  /** pass into SphereSpec.tailCutG when ok (re-plan the skin WITH it) */
-  tailCutG?: number;
-  /** sleeve + tail-cap faces (stage frame, encoded) — join the main skin */
-  sleeveTris: Triangle[];
-  /** per-fin panel triangles (stage frame, encoded) — nested into Builds */
-  finTris: Record<FinRole, Triangle[]>;
+  /** FIXED fillets (stage frame, encoded) — join the main skin */
+  fillets: Record<FinRole, Triangle[]>;
+  /** MOVABLE panels (stage frame, encoded) — nested into the Builds */
+  panels: Record<FinRole, Triangle[]>;
   comps: PlannedComp[];
   pipes: PlannedPipe[];
   /** lattice tetrahedron [centre, +x̂, +ŷ, +ẑ] the placement ghost rides:
@@ -103,7 +94,7 @@ export interface BalloonPlan {
   probes: GP3[];
   /** faces exceeding the 31-cell window (must be 0 to build) */
   skipped: number;
-  counts: { volumes: number; sleeveTris: number; finTris: number; tailPostM: number };
+  counts: { volumes: number; fillets: number; panels: number; hingeZ: number };
 }
 
 /** Adapter entries balloonfin needs (subset of the manifest records — the
@@ -118,17 +109,16 @@ export interface AdapterLike {
 export interface BalloonAdapters {
   /** the pivot type's 'lowvoltage' adapter (its socket = the cable anchor) */
   pivot: AdapterLike;
-  /** the junction's FREE lowvoltage ports (the input port excluded) */
+  /** the junction's FREE lowvoltage ports (the input port stays free for a battery later) */
   coupler: AdapterLike[];
 }
 
 const SKIN0 = { slot: 51, material: 0, smooth: false };
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 /** the window is FRAME-ALIGNED: worst case 11 window cells sit BELOW the
- *  face's minimum (min − 12·floor(min/12) ≤ 11), so a span may not exceed
- *  31 − 11 = 20 cells */
+ *  face's minimum (min − 12·floor(min/12) ≤ 11), so a single-face span may
+ *  not exceed 31 − 11 = 20 cells */
 const MAX_SPAN = 20;
-const LOFT_GAP = 20;   // the loft's own max axial ring gap (latsphere)
 
 type G3 = [number, number, number];
 
@@ -146,20 +136,20 @@ function quatFromFrame(m: readonly (readonly [number, number, number])[]): {
 } {
   const r0 = m[0]!, r1 = m[1]!, r2 = m[2]!;
   const [m00, m01, m02] = r0, [m10, m11, m12] = r1, [m20, m21, m22] = r2;
-  const tr = m00! + m11! + m22!;
+  const tr = m00 + m11 + m22;
   let w: number, x: number, y: number, z: number;
   if (tr > 0) {
     const s = Math.sqrt(tr + 1) * 2;
-    w = 0.25 * s; x = (m21! - m12!) / s; y = (m02! - m20!) / s; z = (m10! - m01!) / s;
-  } else if (m00! > m11! && m00! > m22!) {
-    const s = Math.sqrt(1 + m00! - m11! - m22!) * 2;
-    w = (m21! - m12!) / s; x = 0.25 * s; y = (m01! + m10!) / s; z = (m02! + m20!) / s;
-  } else if (m11! > m22!) {
-    const s = Math.sqrt(1 + m11! - m00! - m22!) * 2;
-    w = (m02! - m20!) / s; x = (m01! + m10!) / s; y = 0.25 * s; z = (m12! + m21!) / s;
+    w = 0.25 * s; x = (m21 - m12) / s; y = (m02 - m20) / s; z = (m10 - m01) / s;
+  } else if (m00 > m11 && m00 > m22) {
+    const s = Math.sqrt(1 + m00 - m11 - m22) * 2;
+    w = (m21 - m12) / s; x = 0.25 * s; y = (m01 + m10) / s; z = (m02 + m20) / s;
+  } else if (m11 > m22) {
+    const s = Math.sqrt(1 + m11 - m00 - m22) * 2;
+    w = (m02 - m20) / s; x = (m01 + m10) / s; y = 0.25 * s; z = (m12 + m21) / s;
   } else {
-    const s = Math.sqrt(1 + m22! - m00! - m11!) * 2;
-    w = (m10! - m01!) / s; x = (m02! + m20!) / s; y = (m12! + m21!) / s; z = 0.25 * s;
+    const s = Math.sqrt(1 + m22 - m00 - m11) * 2;
+    w = (m10 - m01) / s; x = (m02 + m20) / s; y = (m12 + m21) / s; z = 0.25 * s;
   }
   const n = Math.hypot(w, x, y, z) || 1;
   const r6 = (v: number) => +v.toFixed(6);
@@ -168,46 +158,22 @@ function quatFromFrame(m: readonly (readonly [number, number, number])[]): {
 const frameQuat = (f: Frame): { w: number; x: number; y: number; z: number } => quatFromFrame(
   [0, 1, 2].map(row => [f.ax[row]!, f.ay[row]!, f.az[row]!] as [number, number, number]));
 
-/** ring coords (z along la, u along p1, v along p2) → lattice point */
-const ringG = (la: number, z: number, u: number, v: number): GP3 => {
-  const g: GP3 = [0, 0, 0];
-  g[la] = z; g[(la + 1) % 3] = u; g[(la + 2) % 3] = v;
-  return g;
-};
 const wv = (g: readonly number[]): [number, number, number] =>
   [(g[0]! - 6) * CELL, (g[1]! - 6) * CELL, (g[2]! - 6) * CELL];
 
-/** Where the fin post lives on a body: cut at 80 % of the tail taper (the
- *  cone stays clearly visible — the post + cap only replace its last
- *  fifth), end at 95 % of the tail zone. Shared by the planner and the
- *  inside-envelope pin so both see the SAME post. */
-function tailPostGeom(body: SimpleBody, c: GP3): {
-  zT: number; zE: number; fT: number; hiZ: number; shZ: number;
-} {
-  const cA = c[body.la]!;
-  const nT = body.L - body.sT * body.L;
-  const hiZ = Math.round(cA + body.L);
-  const shZ = clamp(Math.round(cA + body.sT * body.L), Math.round(cA - body.L) + 1, hiZ - 1);
-  const zE = Math.min(Math.round(cA + body.sT * body.L + 0.95 * nT), hiZ - 3);
-  const zT = clamp(Math.round(cA + body.sT * body.L + 0.8 * nT), shZ + 1, zE - 2);
-  return { zT, zE, fT: profileScale(body, zT - cA), hiZ, shZ };
-}
-
 /**
  * Plan the whole tail batch. `spec` must be the CYLINDER-profile spec (the
- * dialog hides the section otherwise; the planner still re-checks). The
- * returned tailCutG must be re-applied to the spec BEFORE the skin is
- * planned (the tail apex is gone — the skin's face count comes from that
- * truncated plan).
+ * dialog hides the section otherwise). The SKIN is planned unchanged — the
+ * fillets and panels are added next to it; nothing truncates the tail.
  */
 export function planBalloonTail(
   spec: SphereSpec, opt: BalloonOptions, adapters: BalloonAdapters,
 ): BalloonPlan {
   const empty: BalloonPlan = {
-    ok: false, tailCutG: undefined, sleeveTris: [], skipped: 0,
-    finTris: { rudder: [], aileronL: [], aileronR: [] },
-    comps: [], pipes: [], probes: [],
-    counts: { volumes: 0, sleeveTris: 0, finTris: 0, tailPostM: 0 },
+    ok: false, fillets: { rudder: [], aileronL: [], aileronR: [] },
+    panels: { rudder: [], aileronL: [], aileronR: [] },
+    comps: [], pipes: [], probes: [], skipped: 0,
+    counts: { volumes: 0, fillets: 0, panels: 0, hingeZ: 0 },
   };
   const fail = (reason: string): BalloonPlan => ({ ...empty, reason });
   const body = simpleBody(spec);
@@ -215,73 +181,45 @@ export function planBalloonTail(
   const la = body.la;
   const p1 = (la + 1) % 3, p2 = (la + 2) % 3;
   const cA = c[la]!, c1 = c[p1]!, c2 = c[p2]!;
-  const nd = spec.facets && spec.facets >= 3 ? spec.facets : 48;
 
   // ---- body axes: tail = +ê_la (nose = the − end), up = file ŷ (a
-  // vertical balloon stands on +ẑ), side = the third axis. The RING coords
-  // are (u along p1, v along p2); up/side live on whichever of the two.
+  // vertical balloon stands on +ẑ instead), side = the third axis. The
+  // RING coords are (u along p1, v along p2); up/side live on whichever.
   const upIdx: 0 | 1 | 2 = la === 1 ? 2 : 1;
   const tHat = unit(la), uHat = unit(upIdx);
   const upIsP1 = p1 === upIdx;
   const gSide = (upIsP1 ? p2 : p1) as 0 | 1 | 2;   // file axis carrying the ring's side coord
   const sHat = unit(gSide);
   const rUp = upIsP1 ? body.r1 : body.r2;
+  const rSide = upIsP1 ? body.r2 : body.r1;
+  const cUp = (upIsP1 ? c1 : c2)!;                 // ring centre on the up coord
+  const cSide = (upIsP1 ? c2 : c1)!;               // ring centre on the side coord
 
-  // ---- tail cut + tail post --------------------------------------------
+  // ---- stations along the (UNTOUCHED) tail cone -------------------------
   const nT = body.L - body.sT * body.L;             // tail zone, cells
   if (nT < 12) return fail('the tail zone is shorter than 3 m — lower the '
     + 'tail % or lengthen the balloon before adding fins');
-  const post0 = tailPostGeom(body, c);
-  const { zT, zE, fT, hiZ, shZ } = post0;
-  const fT0 = fT;
-  if (fT0 <= 0.05) return fail('the tail taper is too thin at the fin-post root');
-  if (zE <= zT + 1) return fail('the tail post would be shorter than 2 cells');
+  const hiZ = Math.round(cA + body.L);
+  const zA = Math.round(cA + body.sT * body.L);     // shoulder: where the cone starts
+  const zB = Math.round(cA + body.sT * body.L + 0.95 * nT);  // hinge line, just before the apex
+  if (zB - zA < 6 || zB >= hiZ) return fail('the tail cone is too short to hang fins on');
+  // the hull surface at a station — the fin root CLINGS to this (the orange
+  // line: "taper the fuselage closely"); +1 cell of clearance only where a
+  // hinge barrel fills the gap
+  const surfUp = (z: number) => Math.round(cUp + rUp * profileScale(body, z - cA));
+  const surfSide = (z: number) => Math.round(cSide + rSide * profileScale(body, z - cA));
 
-  const cache: LoftRingCache = new Map();
-  const root = loftRingTable(body, c1, c2, fT, nd, cache);
-  if (!root) return fail('the tail cross-section is a sliver too thin for a post');
-
-  // The post's envelope = the ring's own extents (the sleeve shares them).
-  let upMax = -Infinity, sideMax = -Infinity, sideMin = Infinity;
-  for (const [u, v] of root.slots) {
-    const up = upIsP1 ? u : v, side = upIsP1 ? v : u;
-    upMax = Math.max(upMax, up);
-    sideMax = Math.max(sideMax, side); sideMin = Math.min(sideMin, side);
-  }
-  const cSide = Math.round((sideMax + sideMin) / 2);
-  const cUp = Math.round(c2 * (upIsP1 ? 0 : 1) + c1 * (upIsP1 ? 1 : 0));  // ring centre on the up coord
-  const hw = Math.max(1, Math.round(Math.max(sideMax - cSide, cSide - sideMin)));
-
-  // ---- fin sizes: SWEPT TRIANGULAR fins (user sketch, 2026-10-23) --------
-  // The root starts at the MIDDLE of the tail taper ("start further
-  // forward, about halfway in the tapering of the tail-cone") and runs to
-  // the post end; the outboard height/span grows LINEARLY along it — a
-  // right-triangle fin with the vertical trailing edge at the post and a
-  // long sloping leading edge coming down towards where the cone starts
-  // yielding (the red outline in the sketch). The pivots sit on the root
-  // chord NEAR the aft end, so the MOVABLE vane sweeps out of the cone
-  // region past the tail ("so that the movable part comes out there").
-  const rSide = upIsP1 ? body.r2 : body.r1;
+  // ---- fin sizes (proportional to the balloon, × oversize slider) -------
   const k = clamp(opt.finScale, 0.25, 3) * clamp(opt.oversize, 1, 4);
-  const finH = clamp(Math.round(Math.max(4, 0.45 * rUp * k)), 4, MAX_SPAN);
-  const finSpan = clamp(Math.round(Math.max(4, 0.45 * rSide * k)), 4, MAX_SPAN);
-  const zA = clamp(Math.round(cA + body.sT * body.L + 0.5 * nT), shZ + 1, zE - 3);
-  const zB = zE;
-  if (zB - zA < 3) return fail('the fin chord does not fit the tail — lengthen the balloon');
-  const zh = zB - 1;                         // pivot line (aft root, at the post)
-  // the hull's own surface at a station (the ring envelope: the ideal scale
-  // through the taper, the post's root extent beyond it) — the fin root
-  // CLINGS to this, so the triangle literally grows out of the hull
-  const surfUp = (z: number) => z <= zT
-    ? Math.round(cUp + rUp * profileScale(body, z - cA))
-    : upMax;
-  const surfSide = (z: number) => z <= zT
-    ? Math.round(cSide + rSide * profileScale(body, z - cA))
-    : sideMax;
+  const filletH = clamp(Math.round(Math.max(4, 0.5 * rUp * k)), 4, MAX_SPAN);
+  const filletS = clamp(Math.round(Math.max(4, 0.5 * rSide * k)), 4, MAX_SPAN);
+  const rudderH = clamp(Math.round(Math.max(5, 0.6 * rUp * k)), 5, MAX_SPAN);
+  const rudderC = clamp(Math.round(Math.max(3, 0.35 * rUp * k)), 3, MAX_SPAN);
+  const ailSpan = clamp(Math.round(Math.max(4, 0.55 * rSide * k)), 4, MAX_SPAN);
+  const ailChord = clamp(Math.round(Math.max(3, 0.35 * rSide * k)), 3, MAX_SPAN);
 
   // ---- triangles --------------------------------------------------------
   let skipped = 0;
-  const sleeveTris: Triangle[] = [];
   const emit = (t0: GP3, t1: GP3, t2: GP3, sink: Triangle[]) => {
     if (t0[0] === t1[0] && t0[1] === t1[1] && t0[2] === t1[2]
       || t1[0] === t2[0] && t1[1] === t2[1] && t1[2] === t2[2]
@@ -289,103 +227,13 @@ export function planBalloonTail(
     const t = encodeSkinTri([t0, t1, t2], SKIN0);
     if (t) sink.push(t); else skipped++;
   };
-  /** strip between two ring tables — the loft's OWN merge-walk law (B at
-   *  +la from A faces outward; identical chains = the straight sleeve,
-   *  smaller upper chains = the cap cone) */
-  const band = (zA0: number, chA: [number, number][][], zB0: number, chB: [number, number][][]) => {
-    for (let d = 0; d < chA.length; d++) {
-      const ca = chA[d]!, cb = chB[d]!;
-      const ga = ca.map(q => ringG(la, zA0, q[0]!, q[1]!));
-      const gb = cb.map(q => ringG(la, zB0, q[0]!, q[1]!));
-      const ddx = (ca[ca.length - 1]![0]! - ca[0]![0]!) + (cb[cb.length - 1]![0]! - cb[0]![0]!);
-      const ddy = (ca[ca.length - 1]![1]! - ca[0]![1]!) + (cb[cb.length - 1]![1]! - cb[0]![1]!);
-      const dl = Math.hypot(ddx, ddy);
-      const ux = dl > 1e-9 ? ddx / dl : 1, uy = dl > 1e-9 ? ddy / dl : 0;
-      const pa = ca.map(q => q[0]! * ux + q[1]! * uy);
-      const pb = cb.map(q => q[0]! * ux + q[1]! * uy);
-      const P = ca.length - 1, Q = cb.length - 1;
-      let i = 0, j = 0;
-      while (i < P || j < Q) {
-        if (j >= Q || (i < P && pa[i + 1]! <= pb[j + 1]! + 1e-9)) {
-          emit(ga[i]!, ga[i + 1]!, gb[j]!, sleeveTris); i++;
-        } else {
-          emit(ga[i]!, gb[j + 1]!, gb[j]!, sleeveTris); j++;
-        }
-      }
-    }
-  };
-  // sleeve levels: the loft's own level grid beyond the cut, + the post end
-  const levels = loftZLevels(body, c);
-  const grid: number[] = [zT, ...levels.filter(z => z > zT && z < zE), zE];
-  for (let i = 0; i + 1 < grid.length;) {
-    if (grid[i + 1]! - grid[i]! > LOFT_GAP) {
-      grid.splice(i + 1, 0, grid[i]! + LOFT_GAP);
-      continue;
-    }
-    band(grid[i]!, root.chains, grid[i + 1]!, root.chains);
-    i++;
-  }
-  // tail cap: inward-shrinking rings (lattice-rounded scales, chains
-  // resubdivided so every segment stays ≤ 9 cells) down to a ≤ 2-cell ring
-  const scaleChains = (alpha: number): [number, number][][] => {
-    const pts = root.slots.map(([u, v]) =>
-      [c1 + Math.round((u - c1) * alpha), c2 + Math.round((v - c2) * alpha)] as [number, number]);
-    const out: [number, number][][] = [];
-    for (let kIdx = 0; kIdx < pts.length; kIdx++) {
-      const s = pts[kIdx]!, t = pts[(kIdx + 1) % pts.length]!;
-      const du = t[0]! - s[0]!, dv = t[1]! - s[1]!;
-      const segs = Math.max(1, Math.ceil(Math.max(Math.abs(du), Math.abs(dv)) / 9));
-      const ch: [number, number][] = [];
-      for (let i = 0; i < segs; i++)
-        ch.push([Math.round(s[0]! + du * i / segs), Math.round(s[1]! + dv * i / segs)]);
-      ch.push(t);
-      out.push(ch);
-    }
-    return out;
-  };
-  let spanRings = 0;
-  for (const [u, v] of root.slots)
-    spanRings = Math.max(spanRings, Math.abs(u - c1), Math.abs(v - c2));
-  spanRings = Math.max(1, spanRings * 2);
-  // how many shrink rings until the cap mouth is a ≤ 2-cell ring — then the
-  // cap is UNIFORM-length so its apex stays at/before the original body end
-  // (the fin option must not stretch the balloon beyond its own nose-tail
-  // length by more than a cell)
-  const rings: number[] = [];
-  {
-    let sp = spanRings;
-    for (let j = 0; j < 8 && sp > 2; j++) {
-      sp = Math.max(1, sp * Math.min(0.5, 19 / Math.max(sp, 19)));
-      rings.push(sp);
-    }
-  }
-  const delta = Math.max(1, Math.floor(Math.max(2, hiZ - zE) / (rings.length + 1)));
-  let chPrev = root.chains, zPrev = zE;
-  let alphaCum = 1, sp = spanRings;
-  for (const spNext of rings) {
-    alphaCum *= Math.min(0.5, 19 / Math.max(sp, 19));
-    sp = spNext;
-    const chN = scaleChains(alphaCum);
-    band(zPrev, chPrev, zPrev + delta, chN);
-    chPrev = chN; zPrev += delta;
-  }
-  // tip cone: the last ring onto the axis apex (ring ≤ ~2 cells ⇒ storable)
-  const apexZ = zPrev + delta;
-  const apex = ringG(la, apexZ, c1, c2);
-  for (const ch of chPrev)
-    for (let i = 0; i + 1 < ch.length; i++)
-      emit(ringG(la, zPrev, ch[i]![0]!, ch[i]![1]!), ringG(la, zPrev, ch[i + 1]![0]!, ch[i + 1]![1]!), apex, sleeveTris);
-
-  // ---- fin plates: SWEPT triangles --------------------------------------
-  // One plate lives in the plane of the `w` axis at wVal; the chord walks
-  // the la axis from aStart (mid taper) to aEnd (the post); the outboard
-  // extent at station z runs from the hull surface `base(z)` (+1 cell of
-  // clearance the hinge barrel fills) up to base(z) + h·(z−aStart)/(aEnd−
-  // aStart) — ZERO at the start, FULL height at the trailing edge: the
-  // right triangle of the sketch, root clinging to the cone, vertical
-  // trailing edge, long sloping leading edge. Triangulated in ≤ 9-cell
-  // chord strips; the winding faces `front`.
-  const sweptFin = (
+  /** FIXED FILLET: a right-triangle plate in the plane of `wAxis` at wVal.
+   *  The root clings to base(z) from aStart (the SHOULDER, height 0 = flush
+   *  with where the cone starts) to aEnd (the hinge line); the outboard
+   *  extent grows LINEARLY to `h` at aEnd — red leading edge straight to
+   *  the shoulder, vertical trailing edge, orange root on the hull. Built
+   *  in ≤ 9-cell chord strips so every quad stores. */
+  const fillet = (
     wAxis: 0 | 1 | 2, wVal: number, aStart: number, aEnd: number, h: number,
     base: (a: number) => number, front: G3, sink: Triangle[],
   ) => {
@@ -400,7 +248,7 @@ export function planBalloonTail(
     const n = Math.max(1, Math.ceil((aEnd - aStart) / 9));
     const zs: number[] = [];
     for (let i = 0; i <= n; i++) zs.push(Math.round(aStart + (aEnd - aStart) * i / n));
-    const ext = (z: number) => base(z) + 1 + Math.round(h * (z - aStart) / (aEnd - aStart));
+    const ext = (z: number) => base(z) + Math.round(h * (z - aStart) / (aEnd - aStart));
     for (let i = 0; i + 1 < zs.length; i++) {
       const z0 = zs[i]!, z1 = zs[i + 1]!;
       if (z1 === z0) continue;
@@ -410,29 +258,63 @@ export function planBalloonTail(
       else { emit(p00, p11, p10, sink); emit(p00, p01, p11, sink); }
     }
   };
-  const finTris: Record<FinRole, Triangle[]> = { rudder: [], aileronL: [], aileronR: [] };
-  // Rudder: VERTICAL swept triangle in the mirror plane (side = cSide),
-  // rooted on the cone's TOP from mid-taper to the post, yawing about the
-  // vertical pivot at z = zh (aft root) — the vane sweeps out past the tail.
-  sweptFin(gSide, cSide, zA, zB, finH, surfUp, sHat, finTris.rudder);
-  // Ailerons: HORIZONTAL swept triangles at mid height, rooted on the ±side
-  // faces from mid-taper out to the post, rolling about the longitudinal
-  // pivot line. L is R's EXACT mirror: the mirrored triangles are literally
-  // derived from R's records (side coord reflected about the mirror plane,
-  // two vertices swapped = the flipped normal), so the pair is triangle-
-  // for-triangle symmetric — the plate itself is flat, so the fan diagonals
-  // carry no crease either way.
-  sweptFin(upIdx, cUp, zA, zB, finSpan, surfSide, uHat, finTris.aileronR);
-  finTris.aileronL = finTris.aileronR.map(t => {
+  /** MOVABLE PANEL: a rectangular plate in the plane of `wAxis` at wVal,
+   *  a ∈ [a0,a1], b ∈ [b0,b1], subdivided ≤ 9 cells per axis; the panel
+   *  HANGS AFT of the hinge line (a0 = the hinge), green in the sketch. */
+  const rectPlate = (
+    wAxis: 0 | 1 | 2, wVal: number, a0: number, a1: number, b0: number, b1: number,
+    front: G3, sink: Triangle[],
+  ) => {
+    const bAxis = ([0, 1, 2] as const).find(a => a !== la && a !== wAxis)!;
+    const at = (a: number, b: number): GP3 => {
+      const g: GP3 = [0, 0, 0];
+      g[la] = Math.round(a); g[bAxis] = Math.round(b); g[wAxis] = wVal;
+      return g;
+    };
+    const flip = cross(unit(la), unit(bAxis));
+    const rev = flip[0] * front[0] + flip[1] * front[1] + flip[2] * front[2] < 0;
+    const nA = Math.max(1, Math.ceil(Math.abs(a1 - a0) / 9));
+    const nB = Math.max(1, Math.ceil(Math.abs(b1 - b0) / 9));
+    for (let i = 0; i < nA; i++)
+      for (let j = 0; j < nB; j++) {
+        const p00 = at(a0 + (a1 - a0) * i / nA, b0 + (b1 - b0) * j / nB);
+        const p10 = at(a0 + (a1 - a0) * (i + 1) / nA, b0 + (b1 - b0) * j / nB);
+        const p11 = at(a0 + (a1 - a0) * (i + 1) / nA, b0 + (b1 - b0) * (j + 1) / nB);
+        const p01 = at(a0 + (a1 - a0) * i / nA, b0 + (b1 - b0) * (j + 1) / nB);
+        if (!rev) { emit(p00, p10, p11, sink); emit(p00, p11, p01, sink); }
+        else { emit(p00, p11, p10, sink); emit(p00, p01, p11, sink); }
+      }
+  };
+  const fillets: Record<FinRole, Triangle[]> = { rudder: [], aileronL: [], aileronR: [] };
+  const panels: Record<FinRole, Triangle[]> = { rudder: [], aileronL: [], aileronR: [] };
+  // the R-side generator (the L twin is mirror-derived from R's records)
+  // Rudder: fillet in the mirror plane clinging to the TOP of the cone from
+  // the shoulder to the hinge line; the rudder panel a tall vertical vane
+  // HUNG AFT of the hinge line (green), spanning from around the hull's
+  // middle height up past the fillet's top.
+  fillet(gSide, cSide, zA, zB, filletH, surfUp, sHat, fillets.rudder);
+  const rudHi = surfUp(zB) + Math.max(filletH, rudderH);
+  const rudLo = cUp - Math.round(0.2 * rUp);
+  rectPlate(gSide, cSide, zB, zB + rudderC, rudLo, rudHi, sHat, panels.rudder);
+  // Ailerons: fillets clinging to the ±side faces, panels hung aft rolling
+  // about the longitudinal axis at the fillet's trailing edge.
+  fillet(upIdx, cUp, zA, zB, filletS, surfSide, uHat, fillets.aileronR);
+  const ailIn = surfSide(zB) + 1;
+  rectPlate(upIdx, cUp, zB, zB + ailChord, ailIn, ailIn + ailSpan, uHat, panels.aileronR);
+  // L twins: mirror EVERYTHING (side coord reflected about the mirror
+  // plane, two vertices swapped = the flipped normal) — the pair is
+  // triangle-for-triangle symmetric BY CONSTRUCTION.
+  const mirror = (src: Triangle[]): Triangle[] => src.map(t => {
     const [a, b, cc] = decodeSkinTri(t);
     const m = (g: GP3): GP3 => {
       const q: GP3 = [g[0]!, g[1]!, g[2]!];
       q[gSide] = 2 * cSide - q[gSide]!;
       return q;
     };
-    const mirrored = encodeSkinTri([m(a), m(cc), m(b)], SKIN0);
-    return mirrored!;   // a mirrored face of a storable face is storable
+    return encodeSkinTri([m(a), m(cc), m(b)], SKIN0)!;
   });
+  fillets.aileronL = mirror(fillets.aileronR);
+  panels.aileronL = mirror(panels.aileronR);
 
   // ---- components (stage frame) ------------------------------------------
   const coupler: PlannedComp = {
@@ -454,21 +336,21 @@ export function planBalloonTail(
       pos: wv(p), quat: { w: 1, x: 0, y: 0, z: 0 },
     });
   }
-  // the three pivots + their subgrid Builds
+  // the three pivots ON the hinge line (zB) + their subgrid panels
   const pivotDefs: { role: FinRole; pos: GP3; frame: Frame }[] = [];
   {
     // rudder: joint axis = up (its ŷ), slave (+ẑ) faces the tail — the
     // parts-only subgrid rule (subgrid.ts) animates the panel about R(q)·ŷ
     const p: GP3 = [c[0]!, c[1]!, c[2]!];
-    p[la] = zh; p[upIdx] = upMax + 0.5; p[gSide] = cSide;
+    p[la] = zB; p[upIdx] = Math.round((rudHi + rudLo) / 2); p[gSide] = cSide;
     pivotDefs.push({ role: 'rudder', pos: p, frame: { ax: cross(uHat, tHat), ay: uHat, az: tHat } });
   }
   for (const sgn of [1, -1] as const) {
-    // ailerons: joint axis = longitudinal, slave faces OUT to its side; the
-    // pair is the exact mirror of itself (out and ax flip together)
+    // ailerons: joint axis = longitudinal, the hung panel rolls about it;
+    // the pair is the exact mirror of itself (out and ax flip together)
     const out: G3 = sgn > 0 ? sHat : neg(sHat);
     const p: GP3 = [c[0]!, c[1]!, c[2]!];
-    p[la] = zh; p[upIdx] = cUp; p[gSide] = cSide + sgn * (hw + 0.5);
+    p[la] = zB; p[upIdx] = cUp; p[gSide] = cSide + sgn * (surfSide(zB) + 0.5 - cSide);
     pivotDefs.push({
       role: sgn > 0 ? 'aileronR' : 'aileronL', pos: p,
       frame: { ax: cross(tHat, out), ay: tHat, az: out },
@@ -483,7 +365,7 @@ export function planBalloonTail(
     comps.push({
       kind: 'build', type: 'Build', module: 'ARCHEAN_build',
       pos: [0, 0, 0], quat: { w: 1, x: 0, y: 0, z: 0 }, role: pd.role,
-      nestedTris: finTris[pd.role].map(t => ({ ...t })),
+      nestedTris: panels[pd.role].map(t => ({ ...t })),
     });
   }
   comps.push(...volumes);
@@ -511,16 +393,32 @@ export function planBalloonTail(
     const Bat: G3 = [B.at[0], B.at[1], B.at[2]];
     const Alead: G3 = Aat.map((x, k2) => x + aAx[k2]! * lead) as G3;
     const Blead: G3 = Bat.map((x, k2) => x + bAx[k2]! * lead) as G3;
-    // DIVE one cell further along the pivot's own stub axis (through the
-    // skin, immediately after the lead — the user's "immediately run into
-    // the body"); the long run then walks the LONGITUDINAL axis inside the
-    // envelope to the coupler's station, and (up → side → la) lands the la
-    // hop LAST on the coupler's port lead.
-    const dive: G3 = Blead.map((x, k2) => x + bAx[k2]! * CELL) as G3;
-    const run: G3 = [...dive] as G3; run[la] = Alead[la];
-    const s1: G3 = [...run] as G3; s1[upIdx] = Alead[upIdx];
-    const s2: G3 = [...s1] as G3; s2[gSide] = Alead[gSide];
-    const fwd: G3[] = [Bat, Blead, dive, run, s1, s2, Alead, Aat];
+    // The hinge-side approach: lead off the plug, then reach the INSIDE of
+    // the cone by the shortest inward march (radial toward the body axis —
+    // the "immediately run into the body" rule), the long run then walks
+    // the LONGITUDINAL axis inside the envelope to the coupler's station,
+    // and (side → up → la) lands the final lead on the coupler's port
+    // axis. The march keeps the LAST hop at each plug collinear with that
+    // plug's stub (v1.8.2 direction rule) and is capped so it terminates.
+    const axisPt: G3 = [Bat[0], Bat[1], Bat[2]];
+    axisPt[upIdx] = (cUp - 6) * CELL; axisPt[gSide] = (cSide - 6) * CELL;
+    const inward = snap([axisPt[0] - Blead[0], axisPt[1] - Blead[1], axisPt[2] - Blead[2]]);
+    let Din: G3 = [...Blead] as G3;
+    if (!insideBalloon(spec, Din)) {
+      let found = false;
+      for (let step = 1; step <= 40; step++) {
+        Din = Blead.map((x, k2) => x + inward[k2]! * CELL * step) as G3;
+        if (insideBalloon(spec, Din)) { found = true; break; }
+      }
+      if (!found) Din = [...Blead] as G3;
+    }
+    // the long-run far end: same lateral/height as the dive point
+    const runEnd: G3 = [Bat[0], Bat[1], Bat[2]];
+    runEnd[upIdx] = Din[upIdx]; runEnd[gSide] = Din[gSide];
+    runEnd[la] = Alead[la];
+    const s1: G3 = [...runEnd] as G3; s1[gSide] = Alead[gSide];
+    const s2: G3 = [...s1] as G3; s2[upIdx] = Alead[upIdx];
+    const fwd: G3[] = [Bat, Blead, Din, runEnd, s1, s2, Alead, Aat];
     const pts: G3[] = [];
     for (const p of fwd.reverse())
       if (!pts.length || Math.hypot(pts[pts.length - 1]![0] - p[0],
@@ -529,21 +427,18 @@ export function planBalloonTail(
     pipes.push({ portA: port.name, role: pd.role, portB: adapters.pivot.name, points: pts });
   });
 
-  const finTriCount = finTris.rudder.length + finTris.aileronL.length + finTris.aileronR.length;
-  const ok = skipped === 0 && sleeveTris.length > 0 && finTriCount > 0 && pipes.length === pivotDefs.length;
+  const nFillets = fillets.rudder.length + fillets.aileronL.length + fillets.aileronR.length;
+  const nPanels = panels.rudder.length + panels.aileronL.length + panels.aileronR.length;
+  const ok = skipped === 0 && nFillets > 0 && nPanels > 0 && pipes.length === pivotDefs.length;
   return {
     ok,
     reason: ok ? undefined
       : `${skipped} tail faces exceed the game's 31-cell window — shrink the fins or the oversize`,
-    tailCutG: zT,
-    sleeveTris, finTris, comps, pipes,
+    fillets, panels, comps, pipes,
     probes: [[c[0]!, c[1]!, c[2]!], [c[0]! + 1, c[1]!, c[2]!],
       [c[0]!, c[1]! + 1, c[2]!], [c[0]!, c[1]!, c[2]! + 1]],
     skipped,
-    counts: {
-      volumes: nVol, sleeveTris: sleeveTris.length, finTris: finTriCount,
-      tailPostM: (apexZ - zT) * CELL,
-    },
+    counts: { volumes: nVol, fillets: nFillets, panels: nPanels, hingeZ: zB },
   };
 }
 
@@ -600,10 +495,8 @@ export function ghostMap(
   return { g, world, quat };
 }
 
-/** Inside-envelope test in the STAGE frame (a pin helper): the ideal
- *  profile up to the fin-post cut, the post's STRAIGHT envelope to its end
- *  (the contiguous sleeve keeps the root radius), the cap's linear shrink
- *  to the tip. */
+/** Inside-envelope test in the STAGE frame (a pin helper): the simple
+ *  body's own ellipse law on the tail side (the cone is UNTOUCHED). */
 export function insideBalloon(
   spec: SphereSpec, p: [number, number, number], margin = 0.98,
 ): boolean {
@@ -614,11 +507,7 @@ export function insideBalloon(
   const dz = gp[la]! - c[la]!;
   let f = 1;
   if (dz > 0) {
-    const { zT, zE, fT, hiZ } = tailPostGeom(body, c);
-    const dzT = zT - c[la]!, dzE = zE - c[la]!;
-    if (dz <= dzT) f = profileScale(body, dz);
-    else if (dz <= dzE) f = fT;
-    else f = fT * Math.max(0, 1 - (dz - dzE) / Math.max(1e-9, hiZ + 2 - zE));
+    f = profileScale(body, dz);
     if (f <= 0.01) return false;
   }
   const q1 = (gp[p1]! - c[p1]!) / (body.r1 * f), q2 = (gp[p2]! - c[p2]!) / (body.r2 * f);

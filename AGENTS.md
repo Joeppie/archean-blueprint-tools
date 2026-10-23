@@ -1003,22 +1003,29 @@ proportion + extra oversize slider"):** the tool is TOOLS ▸ 'Generate
 balloon…' (id `balloon`, was `sphere-skin` — the e2e testids and help topic
 followed; the topic's Tags keep 'sphere' findable). Cylinder profile only,
 and the fin section must fit the tail zone (≥ 3 m) or the preview refuses.
-The pure planner is `app/src/engine/balloonfin.ts`:
-(a) the tail cone TRUNCATES at `SphereSpec.tailCutG` (80 % of the taper;
-planLoft ADDS that level — flag-guarded, uncut plans byte-identical) and
-`planBalloonTail` closes the open cut ring with a straight SLEEVE + shrinking
-CAP + tip cone built from the SAME `loftRingTable` cut ring → contiguous by
-SHARED VERTICES (vitest pins the shared count);
-(b) THREE SWEPT TRIANGLE panels (user sketch 2026-10-23: root starts at
-MID-TAPER clinging to the cone, height/span grows LINEARLY outward to a
-vertical trailing edge at the post, pivots on the aft root so the MOVABLE
-vane sweeps out past the tail — "start further forward … triangle outward
-… movable part comes out there"): top rudder (yaw about ŷ) + aileron pair
-(roll about the longitudinal) — panels are TRIANGLE plates, never parts;
-`aileronL` is `aileronR` mirror-derived triangle-for-triangle (side coord
-reflected, two vertices swapped = the flipped normal); `fin size %` = 45 %
-of the girth at the trailing edge, `oversize` multiplies, height clamped to
-the 20-cell window safe span; swept-shape pins in balloonfin.test.ts;
+The pure planner is `app/src/engine/balloonfin.ts`. SHAPE LAW after TWO
+user arbitrations (sketches 2026-10-23, colours = spec):
+(a) the tail cone STAYS UNTOUCHED — no truncation/post/cap. The first
+build truncated the cone at 80 % and closed it with a straight sleeve+cap;
+the user's BLUE sketch circle called that "an undesirable break in the
+tail's pattern … visually jarring" and it is GONE (pinned: with fins on
+`sphereSkinTris(spec)` == the plain plan — balloonfin.test 'the tail cone
+is UNTOUCHED'); `SphereSpec.tailCutG` + the `loftZLevels`/`loftRingTable`
+exports REMAIN in latsphere (flag-guarded, byte-identical when unset);
+(b) per fin plane: a FIXED FILLET clings tight to the cone ("orange …
+taper the fuselage closely") from the SHOULDER (where the cone starts
+yielding; height 0 = flush there) to the hinge line just before the apex,
+its width growing LINEARLY so the leading edge is a straight slope (red)
+into a VERTICAL trailing edge — that edge IS the hinge line; the MOVABLE
+rudder/ailerons HANG AFT of it like stern-post rudders (green): the rudder
+a tall vertical vane (yaw about ŷ, spanning from below the axis to above
+the fillet top), the aileron pair hung plates rolling about the
+longitudinal; panels are TRIANGLE plates, never parts, `aileronL`
+mirror-derived from R triangle-for-triangle; `fin size %` = half the girth
+at the hinge line, `oversize` multiplies, spans clamped to the 20-cell
+window; cling/grow/hang pins in balloonfin.test.ts; the LV dive MARCHES
+INWARD until inside the envelope (the hinge sits near the narrow apex
+where a stub-axis dive would hover outside);
 (c) each panel rides a SmallHinge (default) / SmallPivot as a SUBGRID:
 Build record with nested `data.triangles` (parent-absolute, v0.168 law —
 the dev readBuild recurses nested triangles, FORMAT §Subgrids) joined via
@@ -1037,9 +1044,10 @@ tetrahedron the engine quarter-turns WITH the triangles (scene
 clusterGhost{Rides,Data}); the commit recovers the turn matrix + cell
 offset via `ghostMap` and maps component positions, quaternions (qA ⊗ q,
 LEFT compose) and cable waypoints — the triangles themselves come from the
-LIVE ghost slice in the staged order SKIN|SLEEVE|rudder|L|R (order is the
-contract between `balloonPayload` and `commitBalloon`);
-(f) commit = ONE undo step: `appendTrianglesDoc` (skin+sleeve) +
+LIVE ghost slice in the staged order SKIN|fillet rud|L|R|panel rud|L|R
+(order is the contract between `balloonPayload` and `commitBalloon` —
+fillets join the main skin, panels nest into the Builds);
+(f) commit = ONE undo step: `appendTrianglesDoc` (skin+fillets) +
 newComponent/docArrayInsert components + `docEnsureArray` joins + LV pipes
 (the v1.6.1 class rule — everything lands in the DOC = the save = the
 history). Pins: vitest `balloonfin.test.ts` (9), `tooldoc.test.ts` v1.9
