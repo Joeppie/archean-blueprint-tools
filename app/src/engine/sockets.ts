@@ -128,18 +128,50 @@ export function pipeSockets(
   });
 }
 
-/** Where an end is DRAWN: the recorded tip while it still sits ON its
- *  socket stub (it encodes how deep the plug was seated) — else the socket
- *  itself, pushed out along the stub by the recorded seating depth when
- *  that depth is inside the game's [0, TIP_MAX] band. Staleness is BOTH
- *  radial (part moved away) and tangential (part turned/moved: the tip
- *  left the stub axis, e.g. the 0.40 m lateral Dashboard tip on 3481322297). */
-export function endAnchor(recorded: V3, s: SocketAnchor | null): V3 {
-  if (!s) return recorded;
+/** Where an end is DRAWN and in which direction the wire leaves it.
+ *
+ *  THE DIRECTION RULE (v1.8.2, user: "the wire must always connect in the
+ *  right direction ONTO/FROM the connector and the radius of the wire is
+ *  the minimum distance it must continue in the same direction as the
+ *  connector"): the bar touching a connector runs along the connector's
+ *  stub axis and continues straight for at least the cable's own lead
+ *  (2× the cable radius) before the route may bend — the plug tip itself
+ *  sits at least one cable radius out of the socket, so the plug is visible
+ *  ON the circle. Measured: the game's fresh routes already leave along the
+ *  axis (median dot(seg0 dir, stub axis) +0.97..+1.000 over 17 815 fresh
+ *  ends) — for them the lead bar is collinear and the rule costs nothing;
+ *  it bites exactly where the cached route came loose from the part.
+ *
+ *  Fresh ⇔ within STALE_R of the socket AND within TAN_MAX of the stub
+ *  axis: the recorded tip is kept verbatim (it encodes how deep the plug
+ *  was seated). A stale end re-seats on the socket, keeping an in-band
+ *  [0, TIP_MAX] recorded depth (garbage → TIP_DEF), never closer than one
+ *  cable radius. */
+export interface Plug {
+  /** the drawn connection point (plug tip, on the stub axis) */
+  tip: V3;
+  /** how far OUT along the stub the tip sits — the recorded seating depth
+   *  when fresh; ≥ radius (the plug must stand off the face visibly) */
+  depth: number;
+  /** how far the wire runs STRAIGHT along the stub before it may bend */
+  lead: number;
+  stale: boolean;
+}
+
+export function plugAnchor(recorded: V3, s: SocketAnchor | null, radius: number): Plug {
+  if (!s) return { tip: recorded, depth: 0, lead: 0, stale: false };
   const dx = recorded[0] - s.at[0], dy = recorded[1] - s.at[1], dz = recorded[2] - s.at[2];
   const proj = dx * s.axis[0] + dy * s.axis[1] + dz * s.axis[2];
   const tan = Math.hypot(dx - proj * s.axis[0], dy - proj * s.axis[1], dz - proj * s.axis[2]);
-  if (tan <= TAN_MAX && Math.hypot(dx, dy, dz) <= STALE_R) return recorded;
-  const t = proj > 0 && proj <= TIP_MAX ? proj : TIP_DEF;
-  return [s.at[0] + s.axis[0] * t, s.at[1] + s.axis[1] * t, s.at[2] + s.axis[2] * t];
+  if (tan <= TAN_MAX && Math.hypot(dx, dy, dz) <= STALE_R) {
+    return { tip: recorded, depth: Math.max(proj, 0), lead: 2 * radius, stale: false };
+  }
+  const seat = proj > 0 && proj <= TIP_MAX ? proj : TIP_DEF;
+  const depth = Math.max(seat, radius);
+  return {
+    tip: [s.at[0] + s.axis[0] * depth, s.at[1] + s.axis[1] * depth, s.at[2] + s.axis[2] * depth],
+    depth,
+    lead: 2 * radius,
+    stale: true,
+  };
 }

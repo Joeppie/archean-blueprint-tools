@@ -41,7 +41,7 @@ import { propellerSurface, type PropellerData } from './propeller';
  *  neutral NON-metallic grey — `ReverseGamma(vec3(0.5))` in the shader, i.e.
  *  written in sRGB (dev propellerGeometry agrees). */
 const PROP_GEN_SPEC: PbrSpec = { color: srgbHexToLinear(0x808080), metal: 0, rough: 0.65, opacity: 1 };
-import { buildPipes, surgePaths, type PipeNetwork } from './pipes';
+import { buildPipes, checkLeads, surgePaths, type PipeNetwork } from './pipes';
 import { buildBlocksSolids, buildCompProxies, buildSolids, type ProxyBox, type SolidBatch } from './build';
 import { hullVertex } from './hullfit';
 import type { FilePalette } from './palette';
@@ -916,6 +916,7 @@ void main() {
       metal: net.segs.filter(s => s.metal).length,
       kinds: [...new Set(net.segs.map(s => s.kind))].sort(),
       style,
+      leads: checkLeads(net),
       ends: net.ends.map(e => ({ a: [...e.a], b: [...e.b] })),
     };
   }

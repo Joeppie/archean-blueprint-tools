@@ -742,7 +742,21 @@ engine CONTENT frame; its FILE-frame socket pose is
   after wiring) and the LowVoltageBattery gantry tip 0.20 m — both re-seat. The old
   wireops port census read `(x, y, −z)`-double-mirrored (a pre-v0.180 artifact); it
   is this law now — auto-created cables start at the true sockets, with the game's
-  per-kind segment styles. Pins: `app/src/engine/__tests__/sockets.test.ts` (law +
+  per-kind segment styles.
+• **THE DIRECTION RULE** (v1.8.2, user: "the wire must always connect in the right
+  direction ONTO/FROM the connector and the radius of the wire is the minimum
+  distance it must continue in the same direction as the connector"): the bar
+  touching a connector runs ALONG the connector's stub axis and continues straight
+  for a LEAD of 2× the cable radius (clamped to the first hop) before the route may
+  bend — elbow sphere at the bend — and a re-seated plug tip stands at least ONE
+  cable radius off the socket face. The game agrees quantitatively: over 17 815
+  fresh ends the first recorded hop leaves along the stub axis with median dot
+  +0.97..+1.000 per kind, so for fresh files the lead bar is collinear with the
+  route (invisible); it bites exactly where the cache came loose from the part.
+  Guard: a lead is laid only while the route leaves the plug outward/sideways
+  (dot ≥ −0.25 of the axis) — a stale route that dives back INTO the part through
+  the socket gets an honest straight lead-in instead of a folded wire. Audit:
+  `checkLeads(net)` (exposed through `__ARCHEAN__.engine.pipeInfo().leads`). Pins: `app/src/engine/__tests__/sockets.test.ts` (law +
   corpus sweep), `pipes.test.ts` (drawing + re-anchoring), `app/e2e/pipes.spec.ts`
   (rendered net + a moved part drags its ends), triage: `app/tools/worsttangent.mts`.
 Note: `components` may contain a `Build` type — the editor's construction-site ghost

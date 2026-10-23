@@ -7,7 +7,7 @@
 // LAST segment stored reversed, and the flexible two-segment sag chain whose
 // `dir` means nothing.
 import { describe, expect, test } from 'vitest';
-import { buildPipes, surgePaths } from '../pipes';
+import { buildPipes, checkLeads, surgePaths } from '../pipes';
 import type { Pipe } from '../format';
 import type { PipeSockets } from '../sockets';
 
@@ -191,6 +191,77 @@ describe('buildPipes — socket re-anchoring (stale caches follow the part)', ()
     ] }], sockets);
     vec(junk.ends[0]!.a, [4.95, 2, 3]);
     expect(junk.stale).toBe(1);
+  });
+});
+
+describe('buildPipes — THE DIRECTION RULE (v1.8.2: wire onto the connector axis)', () => {
+  // The user's screenshot case: a stale cached route runs HORIZONTAL while
+  // the moved port's socket points +z. The bar touching the connector must
+  // leave/enter ALONG that axis, straight for the lead (2× radius) before
+  // the route may bend.
+  const UP: Pipe = {
+    a_component: 0, a_port: 'pa', b_component: 1, b_port: 'pb',
+    type: 'fluid', radius: 0.045,
+    segments: [
+      { start: { x: 1, y: 2, z: 3 }, dir: 0, length: 0.5 },         // +x
+      { start: { x: 1.6, y: 2, z: 3 }, dir: 1, length: 0.25 },      // +y
+      { start: { x: 1.6, y: 2.25, z: 3.5 }, dir: 5, length: 0.5 },  // reversed tail: tip at (1.6,2.25,3)
+    ],
+  };
+  const socks: PipeSockets[] = [{
+    a: { at: [5, 2, 3], axis: [0, 0, 1], kind: 'fluid' },              // part moved here
+    b: { at: [1.6, 2.25, 2.9], axis: [0, 0, 1], kind: 'fluid' },       // fresh, cap faces +z
+  }];
+  const net = buildPipes([UP], socks);
+
+  test('the bar touching the a-connector leaves ALONG the stub axis', () => {
+    const bar0 = net.segs[0]!;
+    vec(bar0.a, [5, 2, 3.05]);                                   // re-seated tip, one seat out
+    const d = [bar0.b[0] - bar0.a[0]!, bar0.b[1] - bar0.a[1]!, bar0.b[2] - bar0.a[2]!];
+    expect(d[2]! / Math.hypot(...d)).toBeCloseTo(1, 6);          // +z = the connector direction
+    expect(Math.hypot(...d)).toBeCloseTo(0.09, 6);               // lead = 2× radius
+  });
+
+  test('the wire enters the b-connector AGAINST its outward axis (onto the circle)', () => {
+    const last = net.segs[net.segs.length - 1]!;
+    vec(last.b, [1.6, 2.25, 3]);                                 // tip kept (fresh)
+    const d = [last.b[0] - last.a[0]!, last.b[1] - last.a[1]!, last.b[2] - last.a[2]!];
+    expect(d[2]! / Math.hypot(...d)).toBeCloseTo(-1, 6);         // −z into the +z-facing cap
+  });
+
+  test('the bends at the necks close with elbow spheres', () => {
+    const neckA = net.joints.find(j => Math.abs(j.at[0]! - 5) < 1e-9
+      && Math.abs(j.at[1]! - 2) < 1e-9);
+    expect(neckA, 'elbow where the lead leaves the axis').toBeTruthy();
+    expect(neckA!.radius).toBeCloseTo(0.045, 10);
+    expect(net.joints.some(j => Math.abs(j.at[0]! - 1.6) < 1e-9
+      && Math.abs(j.at[1]! - 2.25) < 1e-9
+      && Math.abs(j.at[2]! - 3.09) < 1e-6), 'b-neck elbow').toBeTruthy();
+  });
+
+  test('a route diving THROUGH the socket gets NO lead (honest direct line)', () => {
+    const plunge = buildPipes([UP], [{
+      a: null,
+      b: { at: [1.6, 2.25, 3.9], axis: [0, 0, 1], kind: 'fluid' },   // the cached tail below would fold the wire
+    }]);
+    // 3 recorded bars only — no neck bar added at b
+    expect(plunge.segs.length).toBe(3);
+    const last = plunge.segs[plunge.segs.length - 1]!;
+    vec(last.b, [1.6, 2.25, 3.95]);                                // tip still re-seats on the socket
+    const d = [last.b[0] - last.a[0]!, last.b[1] - last.a[1]!, last.b[2] - last.a[2]!];
+    expect(Math.hypot(d[0]!, d[1]!), 'straight lead-in, no sideways jog').toBeLessThan(1e-9);
+  });
+
+  test('the surge polyline starts at the plug tip and leaves along the axis', () => {
+    const p = surgePaths(net, 0)[0]!;
+    vec(p.pts[0], [5, 2, 3.05]);
+    vec(p.pts[1], [5, 2, 3.14]);                                  // the neck point
+  });
+
+  test('checkLeads audits the rule: clean here, dirty when the lead is stripped', () => {
+    expect(checkLeads(net)).toEqual({ checked: 2, bad: 0 });
+    const stripped = buildPipes([UP]);                            // no sockets → no leads
+    expect(checkLeads(stripped)).toEqual({ checked: 0, bad: 0 });
   });
 });
 

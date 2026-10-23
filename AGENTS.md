@@ -658,6 +658,30 @@ freshly-authored triangles, fixture 9000006001 — see the v1.5.12 bullet).
   `help.spec.ts` (@ui, desktop+pixel7: menu→dialog, h1, sphere LIMITS table
   as a real <table>, search by title/tag/body word, Esc/✕/backdrop close,
   dialog never outgrows the viewport).
+- **v1.8.2 CABLE DIRECTION RULE (user 2026-10-23: "the wire must always
+  connect in the right direction ONTO/FROM the connector and the radius of
+  the wire is the minimum distance it must continue in the same direction as
+  the connector, for it to make sense" — screenshot: a re-seated fluid tube
+  stabbing into the junction cap at an angle):** the bar touching a connector
+  now runs ALONG the connector's stub axis and continues straight for a LEAD
+  of 2× the cable radius (clamped to the first hop) before the route may bend
+  (elbow sphere at the bend), and `plugAnchor` (sockets.ts — replaces
+  endAnchor) seats a re-anchored tip at least ONE radius off the face, so
+  the plug stands visibly ON the grey circle. Measured first (arbitration,
+  not taste): over 17 815 FRESH corpus ends the game's first recorded hop
+  leaves along the stub axis, median dot +0.97..+1.000 per kind — so for
+  fresh files the lead bar is collinear (the rule costs nothing); it bites
+  exactly where the cache came loose. GUARD: the lead is laid only while the
+  route leaves outward/sideways (dot ≥ −0.25 of the axis) — a stale route
+  diving back INTO the part through the socket gets an honest straight
+  lead-in, never a folded wire. The surge polyline starts at the plug tip
+  and leaves along the axis; flexible chains sag BETWEEN the necks. Audit:
+  `checkLeads(net)` (pure) exposed as `__ARCHEAN__.engine.pipeInfo().leads`
+  — e2e asserts `bad === 0` on ISW, the truck (incl. its live stale re-seats)
+  and after a part move. Pins: `pipes.test.ts` "THE DIRECTION RULE" describe
+  (axis leaves/enters, lead = 2r, neck elbows, no-lead-on-dive, surge pts,
+  checkLeads) + `sockets.test.ts` plugAnchor group; FORMAT §pipes bullet
+  "THE DIRECTION RULE".
 - **v1.8.1 CABLES LIKE THE GAME + SOCKET SEATING (user 2026-10-23: "the
   cables for the fluid look quite different in game … the gray circles on
   components that take fluid are the ones that it should connect to … round,

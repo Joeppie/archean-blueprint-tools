@@ -41,6 +41,13 @@ a moved or turned part re-seats onto the socket. Move a part and its cables
 ride with it — the game re-routes the paths at save; the editor keeps them
 plugged in while you work.
 
+And the wire always connects **in the connector's direction**: the cable bar
+touching a socket runs along the socket's axis and continues straight for a
+short lead (twice the cable's radius) before the route may bend, so plugs
+enter the round sockets head-on with a visible neck, never stab in at an
+angle. (A cached route that dives straight back into the part gets a plain
+lead-in instead of a folded wire.)
+
 Cables also draw like the game: ROUND hoses (fluid and HV are cylinders;
 only the item ducts are square), each segment in its own recorded colour
 (navy data, dark-red low voltage, orange high voltage, white chrome fluid —

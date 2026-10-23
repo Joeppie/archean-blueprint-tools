@@ -23,11 +23,20 @@
 //    still sit on their socket (sockets.ts). A stale cached tip (the part
 //    moved) re-anchors to the live socket so the cable plugs into the round
 //    grey circle the model shows, as the game redraws it on save.
+//  • THE DIRECTION RULE (v1.8.2, user: "the wire must always connect in the
+//    right direction ONTO/FROM the connector and the radius of the wire is
+//    the minimum distance it must continue in the same direction as the
+//    connector"): the bar touching a connector runs ALONG the connector's
+//    stub axis for a lead of 2× the cable radius before the route may bend
+//    (elbow sphere at the bend), and a re-seated plug tip stands at least
+//    one cable radius off the face. The game agrees — measured, its fresh
+//    routes leave along the axis (median dot +0.97..1.0 over 17 815 fresh
+//    ends), so for fresh files the lead bar is collinear and free.
 //  • The client adds a black COLLAR at every cable end (not serialised) —
 //    drawn here as `plugs`, round like the cable, square for box ducts.
 
 import type { Pipe } from './format';
-import { endAnchor, KIND_RADIUS, type PipeSockets, type V3 } from './sockets';
+import { KIND_RADIUS, plugAnchor, type PipeSockets, type V3 } from './sockets';
 
 export type { V3 } from './sockets';
 
@@ -48,7 +57,12 @@ export interface CableSeg {
 export interface PipeJoint { at: V3; radius: number; color: CableSeg['color'] }
 
 /** the client's black end collar (a plug seat), oriented along the cable */
-export interface PipePlug { at: V3; axis: V3; radius: number; box: boolean }
+export interface PipePlug {
+  at: V3; axis: V3; radius: number; box: boolean;
+  /** true when the plug sits on a resolved socket AND its axial lead was
+   *  laid (checkLeads audits exactly these ends) */
+  led: boolean;
+}
 
 /** one cable run's two world connector points (view space) */
 export interface PipeEnds { a: V3; b: V3 }
@@ -150,46 +164,101 @@ export function buildPipes(
     const dl = DIRS[last.dir] ?? DIRS[0]!;
     const recB: V3 = [last.start.x + dl[0] * last.length,
       last.start.y + dl[1] * last.length, last.start.z + dl[2] * last.length];
-    const endA = endAnchor(recA, sock?.a ?? null);
-    const endB = endAnchor(recB, sock?.b ?? null);
-    if (endA !== recA) net.stale++;                    // off-socket tips get re-seated
-    if (endB !== recB) net.stale++;
+    const plugA = plugAnchor(recA, sock?.a ?? null, radius);
+    const plugB = plugAnchor(recB, sock?.b ?? null, radius);
+    if (plugA.stale) net.stale++;                    // off-socket tips get re-seated
+    if (plugB.stale) net.stale++;
+    const tipA = plugA.tip, tipB = plugB.tip;
+    const axisA = sock?.a?.axis ?? null, axisB = sock?.b?.axis ?? null;
+    const n = p.segments.length;
+    const sts = p.segments.map(s => [s.start.x, s.start.y, s.start.z] as V3);
+    const raws = p.segments.map((s, si) => {
+      const d = DIRS[s.dir] ?? DIRS[0]!;
+      return [sts[si]![0] + d[0] * s.length, sts[si]![1] + d[1] * s.length,
+        sts[si]![2] + d[2] * s.length] as V3;
+    });
+
+    // ---- THE DIRECTION RULE (sockets.ts Plug): the bar touching the
+    // connector runs along its stub axis for a LEAD of 2× the cable radius
+    // (clamped to the first hop, so the neck never overshoots the route).
+    // Game-equivalent for fresh files (their first hop leaves along the
+    // axis — median dot +0.97..1.0 measured) and the fix where the cache
+    // came loose.
+    const along = (v: V3, ax: V3, d: number): V3 =>
+      [v[0] + ax[0] * d, v[1] + ax[1] * d, v[2] + ax[2] * d];
+    const dist = (a: V3, b: V3) => Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+    const isFlex = n === 2 && !!first.flexible && !!last.flexible;
+    // the next ROUTE point after each plug tip (for the lead clamp and the
+    // outward test); a flexible pair has no meaningful dirs, its chain runs
+    // tip to tip
+    const nextA = isFlex || n === 1 ? tipB : raws[0]!;
+    const nextB = isFlex || n === 1 ? tipA : sts[n - 1]!;
+    const hopA = dist(tipA, nextA);
+    const hopB = dist(tipB, nextB);
+    // a lead only makes sense when the route leaves the plug OUTWARD,
+    // sideways or shallow — never when the stale cache dives back INTO the
+    // part through the socket (beyond ~105° the neck would fold the wire
+    // onto itself; there a straight lead-in is the honest picture)
+    const outward = (from: V3, to: V3, ax: V3) => {
+      const L = dist(from, to);
+      return L < 1e-6 ? false : ((to[0] - from[0]) * ax[0] + (to[1] - from[1]) * ax[1]
+        + (to[2] - from[2]) * ax[2]) / L >= -0.25;
+    };
+    const leadA = axisA && plugA.lead > 1e-9 && hopA > 1e-6
+      && outward(tipA, nextA, axisA) ? Math.min(plugA.lead, hopA) : 0;
+    const leadB = axisB && plugB.lead > 1e-9 && hopB > 1e-6
+      && outward(tipB, nextB, axisB) ? Math.min(plugB.lead, hopB) : 0;
+    const neckA = axisA && leadA > 0 ? along(tipA, axisA, leadA) : null;
+    const neckB = axisB && leadB > 0 ? along(tipB, axisB, leadB) : null;
 
     // ---- flexible pair: ONE sagging cable, not two segments --------------
-    if (p.segments.length === 2 && first.flexible && last.flexible) {
+    if (isFlex) {
       const color = segColor(first);
       const metal = !!first.metal || !!first.chrome;
       const box = !!first.box;
-      const pts = sagChain(endA, endB, first.length, radius);
+      const pts = sagChain(neckA ?? tipA, neckB ?? tipB, first.length, radius);
+      if (neckA) {
+        segs.push({ a: tipA, b: neckA, radius, box, color, metal, kind });
+        joints.push({ at: neckA, radius, color });         // the bend leaves the axis here
+      }
       let prev = pts[0]!;
       for (let i = 1; i < pts.length; i++) {
         segs.push({ a: prev, b: pts[i]!, radius, box, color, metal, kind });
         if (i < pts.length - 1) joints.push({ at: pts[i]!, radius, color });
         prev = pts[i]!;
       }
-      ends.push({ a: endA, b: endB });
+      if (neckB) {
+        segs.push({ a: neckB, b: tipB, radius, box, color, metal, kind });
+        joints.push({ at: neckB, radius, color });
+      }
+      ends.push({ a: tipA, b: tipB });
       links.push({ a: p.a_component, b: p.b_component });
-      polys.push(pts);
+      polys.push([
+        tipA, ...(neckA ? [neckA] : []), ...pts.slice(1, -1),
+        ...(neckB ? [neckB] : []), tipB,
+      ]);
       plugs.push(
-        { at: endA, axis: unit(pts[0]!, pts[1]!), radius, box },
-        { at: endB, axis: unit(pts[pts.length - 1]!, pts[pts.length - 2]!), radius, box },
+        { at: tipA, axis: axisA ?? unit(neckA ?? tipA, pts[1] ?? tipB), radius, box, led: !!neckA },
+        { at: tipB, axis: axisB ?? unit(neckB ?? tipB, pts[pts.length - 2] ?? tipA), radius, box, led: !!neckB },
       );
       return;
     }
 
     // ---- rigid routed cable ----------------------------------------------
-    let barEnd: V3 = endA;                          // overwritten per seg
-    const pts: V3[] = [];
+    const s0 = p.segments[0]!, sn = p.segments[n - 1]!;
+    if (neckA) {
+      segs.push({ a: tipA, b: neckA, radius, box: !!s0.box,
+        color: segColor(s0), metal: !!s0.metal || !!s0.chrome, kind });
+      joints.push({ at: neckA, radius, color: segColor(s0) });
+    }
+    const pts: V3[] = [tipA];
+    if (neckA) pts.push(neckA);
     p.segments.forEach((s, si) => {
-      const d = DIRS[s.dir] ?? DIRS[0]!;
-      const st: V3 = si === 0 ? endA
-        : [s.start.x, s.start.y, s.start.z];
-      const raw: V3 = [s.start.x + d[0] * s.length, s.start.y + d[1] * s.length,
-        s.start.z + d[2] * s.length];
-      barEnd = si === p.segments.length - 1 ? endB : raw;
-      pts.push(st, barEnd);
+      const a: V3 = si === 0 ? (neckA ?? tipA) : sts[si]!;
+      const b: V3 = si === n - 1 ? (neckB ?? tipB) : raws[si]!;
+      pts.push(b);
       segs.push({
-        a: st, b: barEnd, radius, box: !!s.box,
+        a, b, radius, box: !!s.box,
         color: segColor(s), metal: !!s.metal || !!s.chrome, kind,
       });
       // elbow: a direction change closes with a sphere of the cable radius.
@@ -197,22 +266,57 @@ export function buildPipes(
       // back into the path) → its useful direction is the opposite.
       const next = p.segments[si + 1];
       if (next) {
-        const nd = si + 2 === p.segments.length ? (next.dir + 3) % 6 : next.dir;
-        if (nd !== s.dir) joints.push({ at: raw, radius, color: segColor(s) });
+        const nd = si + 2 === n ? (next.dir + 3) % 6 : next.dir;
+        if (nd !== s.dir) joints.push({ at: raws[si]!, radius, color: segColor(s) });
+        pts.push(sts[si + 1]!);                          // the drawn joint zigzag
       }
     });
-    ends.push({ a: endA, b: barEnd });
+    if (neckB) {
+      segs.push({ a: neckB, b: tipB, radius, box: !!sn.box,
+        color: segColor(sn), metal: !!sn.metal || !!sn.chrome, kind });
+      joints.push({ at: neckB, radius, color: segColor(sn) });
+      pts.push(tipB);                    // pts already ends at neckB
+    }
+    ends.push({ a: tipA, b: tipB });
     links.push({ a: p.a_component, b: p.b_component });
     polys.push(pts);
-    const s0 = p.segments[0]!, sn = p.segments[p.segments.length - 1]!;
     const d0 = DIRS[s0.dir] ?? DIRS[0]!, dn = DIRS[sn.dir] ?? DIRS[0]!;
     plugs.push(
-      { at: endA, axis: [-d0[0], -d0[1], -d0[2]], radius, box: !!s0.box },
-      { at: endB, axis: dn, radius, box: !!sn.box },
+      { at: tipA, axis: axisA ?? [-d0[0], -d0[1], -d0[2]], radius, box: !!s0.box, led: !!neckA },
+      { at: tipB, axis: axisB ?? dn, radius, box: !!sn.box, led: !!neckB },
     );
   });
   net.pipes = pipes.length;
   return net;
+}
+
+/** audit the DIRECTION RULE on the drawn network: every leaded plug must
+ *  have a bar at its tip running ALONG the socket axis (a-end leaving it,
+ *  b-end entering it). Pure so the pin can run headless and in the browser. */
+export function checkLeads(net: PipeNetwork): { checked: number; bad: number } {
+  let checked = 0, bad = 0;
+  net.plugs.forEach((pl, i) => {
+    if (!pl.led) return;
+    checked++;
+    const isA = i % 2 === 0;
+    let ok = false;
+    for (const s of net.segs) {
+      const p = isA ? s.a : s.b;
+      if (Math.hypot(p[0] - pl.at[0], p[1] - pl.at[1], p[2] - pl.at[2]) >= 1e-9) continue;
+      const src = isA ? s.b : s.a;                          // the bar's far end
+      const L = Math.hypot(src[0] - pl.at[0], src[1] - pl.at[1], src[2] - pl.at[2]);
+      if (L < 1e-9) continue;
+      const dot = ((src[0] - pl.at[0]) * pl.axis[0] + (src[1] - pl.at[1]) * pl.axis[1]
+        + (src[2] - pl.at[2]) * pl.axis[2]) / L;
+      // the lead stands OUTWARD from the tip on BOTH ends: the a-wire leaves
+      // along +axis, the b-wire arrives FROM the neck above (travels −axis).
+      // An incidental route bar touching the same point does not count —
+      // the plug needs AN axial bar, so any axial bar satisfies the rule.
+      if (dot >= 0.999) { ok = true; break; }
+    }
+    if (!ok) bad++;
+  });
+  return { checked, bad };
 }
 
 /** the cable runs that light up when component ci is selected: every pipe

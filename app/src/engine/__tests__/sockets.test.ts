@@ -9,8 +9,8 @@ import { describe, expect, test } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { adapterSocket, endAnchor, manifestAdapter, pipeSockets, TAN_MAX, TIP_MAX,
-  type SocketAnchor } from '../sockets';
+import { adapterSocket, KIND_RADIUS, manifestAdapter, pipeSockets, plugAnchor, TAN_MAX,
+  TIP_MAX, type SocketAnchor } from '../sockets';
 import { flattenComponents } from '../subgrid';
 import type { Blueprint } from '../format';
 import type { ModelManifest } from '../models';
@@ -75,32 +75,46 @@ describe('adapterSocket — the anchor law (known-good poses)', () => {
   });
 });
 
-describe('endAnchor — fresh caches keep the recorded tip, stale ones follow the part', () => {
+describe('plugAnchor — fresh caches keep the recorded tip, stale ones follow the part', () => {
   const at: readonly [number, number, number] = [0, 0, 0];
   const axis: readonly [number, number, number] = [0, 0, 1];
   const s: SocketAnchor = { at, axis, kind: 'fluid' };
+  const R = 0.045;                                     // fluid hose radius
 
   test('recorded tips ON the stub, near the socket, are kept verbatim', () => {
     const rec = [0, 0, TIP_MAX] as const;
-    expect(endAnchor(rec, s)).toEqual(rec);
-    expect(endAnchor([0.05, 0.05, 0.1], s)).toEqual([0.05, 0.05, 0.1]);   // 5 cm tangent, fresh
+    const pl = plugAnchor(rec, s, R);
+    expect(pl.tip).toEqual(rec);
+    expect(pl.stale).toBe(false);
+    expect(pl.lead).toBeCloseTo(2 * R, 10);            // the mandatory axial lead
+    expect(plugAnchor([0.05, 0.05, 0.1], s, R).tip).toEqual([0.05, 0.05, 0.1]);
   });
 
   test('beyond STALE_R → socket + stub-projected depth, garbage falls to the default seat', () => {
-    expect(endAnchor([0, 0, 1], s)).toEqual([0, 0, 0.05]);              // out-of-band → TIP_DEF
-    expect(endAnchor([0, 0, -1], s)).toEqual([0, 0, 0.05]);             // behind → TIP_DEF
-    expect(endAnchor([5, 0, 0], s)).toEqual([0, 0, 0.05]);              // lateral garbage → TIP_DEF
-    expect(endAnchor([0, 0, 0.05], s)).toEqual([0, 0, 0.05]);           // fresh, kept
+    expect(plugAnchor([0, 0, 1], s, R).tip).toEqual([0, 0, 0.05]);         // out-of-band → TIP_DEF
+    expect(plugAnchor([0, 0, -1], s, R).tip).toEqual([0, 0, 0.05]);        // behind → TIP_DEF
+    expect(plugAnchor([5, 0, 0], s, R).tip).toEqual([0, 0, 0.05]);         // lateral garbage
+    expect(plugAnchor([0, 0, 0.05], s, R).tip).toEqual([0, 0, 0.05]);      // fresh, kept
     // a stale-but-sane seating depth (inside the band ALONG the stub) rides
     // the moved socket EXACTLY — the plug keeps how deep it was seated
-    expect(endAnchor([10, 0, 0.1], s)).toEqual([0, 0, 0.1]);
+    expect(plugAnchor([10, 0, 0.1], s, R).tip).toEqual([0, 0, 0.1]);
     // the 3481322297 Dashboard case: INSIDE STALE_R but OFF the stub axis
     // (the board turned after wiring) → re-seated on the socket
-    expect(endAnchor([0.4, 0, 0.013], s)).toEqual([0, 0, 0.013]);
+    expect(plugAnchor([0.4, 0, 0.013], s, R).tip).toEqual([0, 0, R]);      // never closer than r
+  });
+
+  test('the plug tip stands at least ONE CABLE RADIUS off the face (visible ON the circle)', () => {
+    const fat = plugAnchor([3, 0, 0], s, 0.2);         // radius beats the default seat
+    expect(fat.tip).toEqual([0, 0, 0.2]);
+    expect(fat.depth).toBeGreaterThanOrEqual(0.2);
+    expect(fat.lead).toBeCloseTo(0.4, 10);
   });
 
   test('no socket resolved → recorded kept, untouched', () => {
-    expect(endAnchor([1, 2, 3], null)).toEqual([1, 2, 3]);
+    const pl = plugAnchor([1, 2, 3], null, R);
+    expect(pl.tip).toEqual([1, 2, 3]);
+    expect(pl.stale).toBe(false);
+    expect(pl.lead).toBe(0);
   });
 });
 
@@ -133,10 +147,9 @@ describe.skipIf(!MANIFEST)('the corpus sweep — 18k+ recorded tips prove the la
             exemptSkipped++;
             continue;
           }
-          // what the RENDERER decides: an end endAnchor() re-seats is a stale
+          // what the RENDERER decides: an end plugAnchor() re-seats is a stale
           // cache — excluded from the law statistics (the renderer fixes it)
-          const kept = endAnchor(rec, sock);
-          if (kept[0] !== rec[0] || kept[1] !== rec[1] || kept[2] !== rec[2]) {
+          if (plugAnchor(rec, sock, p.radius ?? KIND_RADIUS[p.type ?? 'data'] ?? 0.02).stale) {
             staleSkipped++;
             continue;
           }

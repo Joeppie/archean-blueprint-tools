@@ -14,6 +14,7 @@ interface PipeInfo {
   pipes: number; segs: number; joints: number; plugs: number; stale: number;
   round: number; square: number; metal: number; kinds: string[];
   style: Record<string, { r: number; g: number; b: number; box: boolean; metal: boolean; radius: number }>;
+  leads: { checked: number; bad: number };
   ends: { a: number[]; b: number[] }[];
 }
 const info = (page: Page) => page.evaluate(() => {
@@ -37,6 +38,8 @@ test.describe('cables render like the game and plug into their sockets', () => {
     expect(i.square).toBe(0);
     expect(i.joints, 'elbow spheres close the direction changes').toBeGreaterThan(0);
     expect(i.plugs, 'one black collar per cable end').toBe(2 * i.pipes);
+    expect(i.leads.checked, 'plugs with an axial lead exist').toBeGreaterThan(0);
+    expect(i.leads.bad, 'every leaded bar touches its connector ALONG the axis').toBe(0);
     expect(i.kinds).toContain('fluid');
     expect(i.style.fluid!.radius).toBeCloseTo(0.045, 4);
     expect(i.style.fluid!.box, 'the fluid hose is ROUND').toBe(false);
@@ -65,6 +68,8 @@ test.describe('cables render like the game and plug into their sockets', () => {
     // renderer re-seats those onto the live sockets
     expect(i.stale, 'off-socket cached tips get re-seated').toBeGreaterThan(0);
     expect(i.stale, 'but only a minority of the 750 ends').toBeLessThan(i.pipes);
+    expect(i.leads.checked, 'plugs with an axial lead exist').toBeGreaterThan(0);
+    expect(i.leads.bad, 'even the re-seated ones plug ALONG the connector axis').toBe(0);
   });
 
   test('a moved part drags its cable ends back onto the sockets', async ({ page }) => {
@@ -85,15 +90,17 @@ test.describe('cables render like the game and plug into their sockets', () => {
       bp.data.components[ci]!.position.y += 1.5;
       eng.rebuildPipes();
       const after = eng.pipeInfo().ends[pi]!.a;
+      const leads = eng.pipeInfo().leads;
       bp.data.components[ci]!.position.y -= 1.5;
       eng.rebuildPipes();
       const rest = eng.pipeInfo().ends[pi]!.a;
       const d = (p: number[], q: readonly number[]) =>
         Math.hypot(p[0] - q[0]!, p[1] - q[1]!, p[2] - q[2]!);
-      return { pi, moved: d([...before], after), restored: d([...before], rest) };
+      return { pi, moved: d([...before], after), restored: d([...before], rest), leads };
     });
     expect(r.moved, 'the a-end rides the moved part (+1.5 m in y)').toBeGreaterThan(1.3);
     expect(r.moved, 'the a-end rides the moved part (+1.5 m in y)').toBeLessThan(1.7);
     expect(r.restored, 'restoring the part restores the cable end').toBeLessThan(1e-6);
+    expect(r.leads.bad, 'the re-seated ends still connect ALONG the connector axis').toBe(0);
   });
 });
