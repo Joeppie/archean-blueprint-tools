@@ -1009,12 +1009,16 @@ planLoft ADDS that level — flag-guarded, uncut plans byte-identical) and
 `planBalloonTail` closes the open cut ring with a straight SLEEVE + shrinking
 CAP + tip cone built from the SAME `loftRingTable` cut ring → contiguous by
 SHARED VERTICES (vitest pins the shared count);
-(b) THREE panels: top rudder (yaw about ŷ) + aileron pair (roll about the
-longitudinal) — panels are TRIANGLE plates, never parts; `aileronL` is
-`aileronR` mirror-derived triangle-for-triangle (side coord reflected, two
-vertices swapped = the flipped normal); `fin size %` = 28 % of the girth /
-35 % of the post, `oversize` multiplies, both clamped to the 20-cell window
-safe span;
+(b) THREE SWEPT TRIANGLE panels (user sketch 2026-10-23: root starts at
+MID-TAPER clinging to the cone, height/span grows LINEARLY outward to a
+vertical trailing edge at the post, pivots on the aft root so the MOVABLE
+vane sweeps out past the tail — "start further forward … triangle outward
+… movable part comes out there"): top rudder (yaw about ŷ) + aileron pair
+(roll about the longitudinal) — panels are TRIANGLE plates, never parts;
+`aileronL` is `aileronR` mirror-derived triangle-for-triangle (side coord
+reflected, two vertices swapped = the flipped normal); `fin size %` = 45 %
+of the girth at the trailing edge, `oversize` multiplies, height clamped to
+the 20-cell window safe span; swept-shape pins in balloonfin.test.ts;
 (c) each panel rides a SmallHinge (default) / SmallPivot as a SUBGRID:
 Build record with nested `data.triangles` (parent-absolute, v0.168 law —
 the dev readBuild recurses nested triangles, FORMAT §Subgrids) joined via

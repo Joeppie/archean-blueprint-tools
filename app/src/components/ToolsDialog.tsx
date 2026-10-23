@@ -372,8 +372,9 @@ export const TOOLS: ToolDef[] = [
           + 'precise control-surface travel; the pivot turns unbounded' },
       { key: 'finsize', label: 'fin size %', kind: 'range', min: 25, max: 200, step: 5, unit: ' %',
         showIf: f => finsOn(f),
-        hint: 'the NORMAL proportion of the balloon (28 % of the girth, '
-          + '35 % of the post length)' },
+        hint: 'the NORMAL proportion of the balloon: the fin root runs from '
+          + 'the MIDDLE of the tail taper out to the post, the height/span '
+          + 'sweeps out to 45 % of the girth at the trailing edge' },
       { key: 'oversize', label: 'oversize', kind: 'range', min: 100, max: 400, step: 10, unit: ' %',
         showIf: f => finsOn(f),
         hint: 'an EXTRA factor past the normal scale — oversized fins bite '

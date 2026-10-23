@@ -35,13 +35,20 @@ straight-sided **fin post** + shrinking cap: the post re-uses the cone's own
 cut ring vertex-for-vertex, so the surface stays one CONTIGUOUS area — flush
 with the end of the tail section, exactly where the fins can sit.
 
-- **Fins are triangle panels, never parts.** A TOP rudder (yaws about the
-  vertical) and a MIRRORED port/starboard aileron pair (roll about the
+- **Fins are SWEPT triangle panels, never parts** (shape from the user's
+  sketch): the root starts about HALFWAY through the tail-cone taper and
+  runs to the post end, clinging to the hull; the height/span grows
+  LINEARLY outward so the panel is a right triangle — vertical trailing
+  edge at the post, a long sloping leading edge coming down towards where
+  the cone starts yielding, exactly like a classical airship fin. The
+  pivots sit on the root chord near the aft end, so the MOVABLE vane
+  sweeps out of the cone region past the tail. A TOP rudder (yaws about
+  the vertical) and a MIRRORED port/starboard aileron pair (roll about the
   longitudinal axis) — the pair is one plate reflected in the mirror plane,
-  triangle for triangle. `fin size %` sets the NORMAL proportion of the
-  balloon (28 % of the girth, 35 % of the post); `oversize` multiplies past
-  it (clamped to what the game's triangle window stores — the preview
-  refuses before a silently-holed fin).
+  triangle for triangle. `fin size %` sets the NORMAL proportion (45 % of
+  the girth at the trailing edge); `oversize` multiplies past it (clamped
+  to what the game's triangle window stores — the preview refuses before a
+  silently-holed fin).
 - **Panels rotate on pivots.** Each panel rides a SmallHinge (±90°, the
   default) or SmallPivot (±360°) part joined as a SUBGRID (`composite_builds`
   → the pivot's joint, the subgrid's nested triangles in parent-absolute

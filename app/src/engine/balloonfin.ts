@@ -181,14 +181,16 @@ const wv = (g: readonly number[]): [number, number, number] =>
  *  cone stays clearly visible — the post + cap only replace its last
  *  fifth), end at 95 % of the tail zone. Shared by the planner and the
  *  inside-envelope pin so both see the SAME post. */
-function tailPostGeom(body: SimpleBody, c: GP3): { zT: number; zE: number; fT: number; hiZ: number } {
+function tailPostGeom(body: SimpleBody, c: GP3): {
+  zT: number; zE: number; fT: number; hiZ: number; shZ: number;
+} {
   const cA = c[body.la]!;
   const nT = body.L - body.sT * body.L;
   const hiZ = Math.round(cA + body.L);
   const shZ = clamp(Math.round(cA + body.sT * body.L), Math.round(cA - body.L) + 1, hiZ - 1);
   const zE = Math.min(Math.round(cA + body.sT * body.L + 0.95 * nT), hiZ - 3);
   const zT = clamp(Math.round(cA + body.sT * body.L + 0.8 * nT), shZ + 1, zE - 2);
-  return { zT, zE, fT: profileScale(body, zT - cA), hiZ };
+  return { zT, zE, fT: profileScale(body, zT - cA), hiZ, shZ };
 }
 
 /**
@@ -230,7 +232,7 @@ export function planBalloonTail(
   if (nT < 12) return fail('the tail zone is shorter than 3 m — lower the '
     + 'tail % or lengthen the balloon before adding fins');
   const post0 = tailPostGeom(body, c);
-  const { zT, zE, fT, hiZ } = post0;
+  const { zT, zE, fT, hiZ, shZ } = post0;
   const fT0 = fT;
   if (fT0 <= 0.05) return fail('the tail taper is too thin at the fin-post root');
   if (zE <= zT + 1) return fail('the tail post would be shorter than 2 cells');
@@ -250,16 +252,32 @@ export function planBalloonTail(
   const cUp = Math.round(c2 * (upIsP1 ? 0 : 1) + c1 * (upIsP1 ? 1 : 0));  // ring centre on the up coord
   const hw = Math.max(1, Math.round(Math.max(sideMax - cSide, cSide - sideMin)));
 
-  // ---- fin sizes (proportional to the balloon, × oversize slider) -------
-  const post = zE - zT;
+  // ---- fin sizes: SWEPT TRIANGULAR fins (user sketch, 2026-10-23) --------
+  // The root starts at the MIDDLE of the tail taper ("start further
+  // forward, about halfway in the tapering of the tail-cone") and runs to
+  // the post end; the outboard height/span grows LINEARLY along it — a
+  // right-triangle fin with the vertical trailing edge at the post and a
+  // long sloping leading edge coming down towards where the cone starts
+  // yielding (the red outline in the sketch). The pivots sit on the root
+  // chord NEAR the aft end, so the MOVABLE vane sweeps out of the cone
+  // region past the tail ("so that the movable part comes out there").
+  const rSide = upIsP1 ? body.r2 : body.r1;
   const k = clamp(opt.finScale, 0.25, 3) * clamp(opt.oversize, 1, 4);
-  const chord = clamp(Math.round(Math.max(4, 0.35 * post * k)), 4, MAX_SPAN);
-  const finH = clamp(Math.round(Math.max(3, 0.28 * rUp * k)), 3, MAX_SPAN);
-  const finSpan = clamp(Math.round(Math.max(3, 0.28 * (upIsP1 ? body.r2 : body.r1) * k)), 3, MAX_SPAN);
-  const zA = clamp(zT + Math.round(0.1 * post), zT + 1, zE);
-  const zB = Math.min(zA + chord, Math.round(cA + body.L));
-  if (zB - zA < 3) return fail('the fin chord does not fit the tail post');
-  const zh = zA + Math.round(0.35 * (zB - zA));     // pivot line (front third)
+  const finH = clamp(Math.round(Math.max(4, 0.45 * rUp * k)), 4, MAX_SPAN);
+  const finSpan = clamp(Math.round(Math.max(4, 0.45 * rSide * k)), 4, MAX_SPAN);
+  const zA = clamp(Math.round(cA + body.sT * body.L + 0.5 * nT), shZ + 1, zE - 3);
+  const zB = zE;
+  if (zB - zA < 3) return fail('the fin chord does not fit the tail — lengthen the balloon');
+  const zh = zB - 1;                         // pivot line (aft root, at the post)
+  // the hull's own surface at a station (the ring envelope: the ideal scale
+  // through the taper, the post's root extent beyond it) — the fin root
+  // CLINGS to this, so the triangle literally grows out of the hull
+  const surfUp = (z: number) => z <= zT
+    ? Math.round(cUp + rUp * profileScale(body, z - cA))
+    : upMax;
+  const surfSide = (z: number) => z <= zT
+    ? Math.round(cSide + rSide * profileScale(body, z - cA))
+    : sideMax;
 
   // ---- triangles --------------------------------------------------------
   let skipped = 0;
@@ -358,50 +376,53 @@ export function planBalloonTail(
     for (let i = 0; i + 1 < ch.length; i++)
       emit(ringG(la, zPrev, ch[i]![0]!, ch[i]![1]!), ringG(la, zPrev, ch[i + 1]![0]!, ch[i + 1]![1]!), apex, sleeveTris);
 
-  // ---- fin plates -------------------------------------------------------
-  // A plate is a flat lattice rectangle: the chord walks the la axis, the
-  // height/span walks the `b` axis, the plate lives in the plane of the
-  // `w` axis at wVal. Triangulated into ≤ 9-cell grid quads; the winding is
-  // chosen so the front normal faces `front` (the aileron pair passes
-  // opposite normals = the exact mirror).
-  const plate = (
-    wAxis: 0 | 1 | 2, wVal: number, a0: number, a1: number, b0: number, b1: number,
-    front: G3, sink: Triangle[],
+  // ---- fin plates: SWEPT triangles --------------------------------------
+  // One plate lives in the plane of the `w` axis at wVal; the chord walks
+  // the la axis from aStart (mid taper) to aEnd (the post); the outboard
+  // extent at station z runs from the hull surface `base(z)` (+1 cell of
+  // clearance the hinge barrel fills) up to base(z) + h·(z−aStart)/(aEnd−
+  // aStart) — ZERO at the start, FULL height at the trailing edge: the
+  // right triangle of the sketch, root clinging to the cone, vertical
+  // trailing edge, long sloping leading edge. Triangulated in ≤ 9-cell
+  // chord strips; the winding faces `front`.
+  const sweptFin = (
+    wAxis: 0 | 1 | 2, wVal: number, aStart: number, aEnd: number, h: number,
+    base: (a: number) => number, front: G3, sink: Triangle[],
   ) => {
     const bAxis = ([0, 1, 2] as const).find(a => a !== la && a !== wAxis)!;
     const at = (a: number, b: number): GP3 => {
       const g: GP3 = [0, 0, 0];
-      g[la] = a; g[bAxis] = b; g[wAxis] = wVal;
+      g[la] = a; g[bAxis] = Math.round(b); g[wAxis] = wVal;
       return g;
     };
-    const nA = Math.max(1, Math.ceil((a1 - a0) / 9)), nB = Math.max(1, Math.ceil((b1 - b0) / 9));
     const flip = cross(unit(la), unit(bAxis));
     const rev = flip[0] * front[0] + flip[1] * front[1] + flip[2] * front[2] < 0;
-    const rd = (p: GP3): GP3 => [Math.round(p[0]!), Math.round(p[1]!), Math.round(p[2]!)];
-    for (let i = 0; i < nA; i++)
-      for (let j = 0; j < nB; j++) {
-        const p00 = rd(at(a0 + (a1 - a0) * i / nA, b0 + (b1 - b0) * j / nB));
-        const p10 = rd(at(a0 + (a1 - a0) * (i + 1) / nA, b0 + (b1 - b0) * j / nB));
-        const p11 = rd(at(a0 + (a1 - a0) * (i + 1) / nA, b0 + (b1 - b0) * (j + 1) / nB));
-        const p01 = rd(at(a0 + (a1 - a0) * i / nA, b0 + (b1 - b0) * (j + 1) / nB));
-        if (!rev) { emit(p00, p10, p11, sink); emit(p00, p11, p01, sink); }
-        else { emit(p00, p11, p10, sink); emit(p00, p01, p11, sink); }
-      }
+    const n = Math.max(1, Math.ceil((aEnd - aStart) / 9));
+    const zs: number[] = [];
+    for (let i = 0; i <= n; i++) zs.push(Math.round(aStart + (aEnd - aStart) * i / n));
+    const ext = (z: number) => base(z) + 1 + Math.round(h * (z - aStart) / (aEnd - aStart));
+    for (let i = 0; i + 1 < zs.length; i++) {
+      const z0 = zs[i]!, z1 = zs[i + 1]!;
+      if (z1 === z0) continue;
+      const p00 = at(z0, base(z0)), p10 = at(z1, base(z1));
+      const p11 = at(z1, ext(z1)), p01 = at(z0, ext(z0));
+      if (!rev) { emit(p00, p10, p11, sink); emit(p00, p11, p01, sink); }
+      else { emit(p00, p11, p10, sink); emit(p00, p01, p11, sink); }
+    }
   };
   const finTris: Record<FinRole, Triangle[]> = { rudder: [], aileronL: [], aileronR: [] };
-  // Rudder: VERTICAL plate in the mirror plane (side = cSide), standing on
-  // the post 1 cell above the surface (the hinge barrel fills the gap),
-  // yawing about the vertical pivot at z = zh.
-  plate(gSide, cSide, zA, zB, upMax + 1, upMax + 1 + finH, sHat, finTris.rudder);
-  // Ailerons: HORIZONTAL plates at mid height, out from the ±side faces,
-  // rolling about the longitudinal pivot line. L is R's EXACT mirror: the
-  // mirrored triangles are literally derived from R's records (side coord
-  // reflected about the mirror plane, two vertices swapped = the flipped
-  // normal), so the pair is triangle-for-triangle symmetric — the plate
-  // itself is flat, so the fan diagonals carry no crease either way.
-  const o0 = cSide + hw + 1;
-  const wAil = upIdx;
-  plate(wAil, cUp, zA, zB, o0, o0 + finSpan, uHat, finTris.aileronR);
+  // Rudder: VERTICAL swept triangle in the mirror plane (side = cSide),
+  // rooted on the cone's TOP from mid-taper to the post, yawing about the
+  // vertical pivot at z = zh (aft root) — the vane sweeps out past the tail.
+  sweptFin(gSide, cSide, zA, zB, finH, surfUp, sHat, finTris.rudder);
+  // Ailerons: HORIZONTAL swept triangles at mid height, rooted on the ±side
+  // faces from mid-taper out to the post, rolling about the longitudinal
+  // pivot line. L is R's EXACT mirror: the mirrored triangles are literally
+  // derived from R's records (side coord reflected about the mirror plane,
+  // two vertices swapped = the flipped normal), so the pair is triangle-
+  // for-triangle symmetric — the plate itself is flat, so the fan diagonals
+  // carry no crease either way.
+  sweptFin(upIdx, cUp, zA, zB, finSpan, surfSide, uHat, finTris.aileronR);
   finTris.aileronL = finTris.aileronR.map(t => {
     const [a, b, cc] = decodeSkinTri(t);
     const m = (g: GP3): GP3 => {

@@ -197,6 +197,38 @@ describe('balloon tail plan', () => {
     expect(Math.abs(q.y)).toBeCloseTo(Math.SQRT1_2, 5);
   });
 
+  test('fins are SWEPT triangles rooted at MID-TAPER, growing outward aft '
+    + '(user sketch 2026-10-23: "start further forward, about halfway in the '
+    + 'tapering … triangle outward … movable part comes out there")', () => {
+    const dec = (t: Record<string, number>) => [0, 1, 2].map(i => gOf(t, i as 0 | 1 | 2));
+    // recompute the stations the planner must honour (rz 8 ⇒ L 32 cells,
+    // sT 0.6 ⇒ tail zone 12.8 cells, mid taper ≈ lattice z 32, post 33..35)
+    const midTaper = Math.round(6 + 0.6 * 32 + 0.5 * (32 - 0.6 * 32));   // 32
+    for (const role of ['rudder', 'aileronR'] as const) {
+      const out = role === 'rudder' ? 1 : 0;   // up coord / side coord
+      const verts = p.finTris[role].flatMap(t => dec(t as unknown as Record<string, number>));
+      const zs = verts.map(v => v[2]);
+      const zMin = Math.min(...zs), zMax = Math.max(...zs);
+      // starts FORWARD of the post root (zT = tailCutG) at mid taper
+      expect(zMin, `${role} root start`).toBeLessThanOrEqual(midTaper + 1);
+      expect(zMin).toBeLessThan(p.tailCutG!);
+      // and runs to the post end
+      expect(zMax).toBe(p.tailCutG! + 2);      // zE = zT + 2 at this size
+      // the triangle GROWS: the farthest outboard vertex sits at the aft end
+      const far = verts.reduce((a, b) => (b[out] > a[out] ? b : a));
+      expect(far[2], `${role} max outboard must be aft`).toBe(zMax);
+      // the root clings: at the forward-most station the plate is a ≤ 2-cell
+      // sliver right at the hull surface (it flares out of the cone)
+      const front = verts.filter(v => v[2] === zMin);
+      const reach = Math.max(...front.map(v => v[out]));
+      const midOut = Math.max(...verts.filter(v => v[2] === zMax).map(v => v[out]));
+      expect(midOut - reach).toBeGreaterThanOrEqual(3);
+    }
+    // the pivots sit on the root chord NEAR the aft end (zh = zB − 1)
+    const rudder = p.comps.find(c => c.kind === 'pivot' && c.role === 'rudder')!;
+    expect(rudder.pos[2]).toBeCloseTo((p.tailCutG! + 1 - 6) * 0.25, 6);
+  });
+
   test('small / fat bodies refuse or adapt honestly', () => {
     // a stubby body: tail zone shorter than 3 m → honest refusal
     const stub = planBalloonTail({ rx: 2, ry: 2, rz: 3, profile: 'cylinder', noseShoulder: 0.6, tailShoulder: 0.6 }, OPT, adapters);
