@@ -1,4 +1,6 @@
-// sphereskin.spec.ts — the TOOLS ▸ SPHERE SKIN PLACEMENT tool. The user's
+// sphereskin.spec.ts — the TOOLS ▸ GENERATE BALLOON placement tool (the
+// renamed Sphere skin, v1.9; the TAIL batch tests live at the file's end).
+// The user's
 // order after three reverted block-Spheroid attempts ("All spheres have
 // indents … Find algo online! … Triangles instead of blocks"): the dialog
 // interface approach + the movable-ghost plumbing are PORTED from the
@@ -86,7 +88,7 @@ const toastText = (page: Page) => page.locator('[data-testid="tool-toast"]').tex
 const toastCount = async (page: Page) =>
   +(await toastText(page))!.match(/: (\d+) /)![1]!;
 
-test.describe('sphere skin tool: dialog → movable ghost → cancel/build @ui', () => {
+test.describe('generate balloon tool: dialog → movable ghost → cancel/build @ui', () => {
   test('the sliders retune the plan (worker) and the preview prints the deviation line', async ({ page }) => {
     await openNew(page);
     await page.getByTestId('tools-menu').click();
@@ -501,6 +503,13 @@ test.describe('sphere skin tool: dialog → movable ghost → cancel/build @ui',
       (window as unknown as { __ARCHEAN__: { stats: () => { subs: number } } })
         .__ARCHEAN__.stats())).subs, { timeout: 20_000 }).toBe(3);
     expect(await loads(page)).toBeGreaterThan(s0);
+    // the v1.8.2 DIRECTION RULE holds on the cables this tool WRITES: every
+    // bar touching a connector leaves along its stub axis (checkLeads audit)
+    const leads = await page.evaluate(() => (window as unknown as {
+      __ARCHEAN__: { engine: { pipeInfo: () => { leads: { checked: number; bad: number } } } }
+    }).__ARCHEAN__.engine.pipeInfo().leads);
+    expect(leads.checked).toBeGreaterThanOrEqual(6);   // 3 cables × 2 ends
+    expect(leads.bad, 'no wire leaves its plug sideways').toBe(0);
     // Ctrl+Z = ONE step for the WHOLE batch (skin, tail, parts, joins, cables)
     await page.keyboard.press('Control+z');
     await expect.poll(async () => {
