@@ -429,4 +429,90 @@ test.describe('sphere skin tool: dialog → movable ghost → cancel/build @ui',
     expect(await ghost(page)).not.toBeNull();
     await page.getByTestId('place-cancel').click();
   });
+
+  // ------------------------------------------------------ v1.9 TAIL batch
+  test('the TAIL section: fin fields, ghost, build writes panels + pivots + '
+    + 'coupler + hidden LV cables, ONE undo reverts the batch', async ({ page }) => {
+    await openNew(page);
+    await page.getByTestId('tools-menu').click();
+    await page.getByTestId('tool-balloon').click();
+    // the section is CYLINDER-ONLY (user: "only applicable to the cylindrical craft")
+    await expect(page.getByTestId('tool-field-fins')).toBeHidden();
+    await page.getByTestId('tool-opt-profile-cylinder').click();
+    await expect(page.getByTestId('tool-field-fins')).toBeVisible();
+    await page.getByTestId('tool-opt-fins-on').click();
+    await expect(page.getByTestId('tool-field-pivot')).toBeVisible();
+    await expect(page.getByTestId('tool-field-oversize')).toBeVisible();
+    // a stubby tail refuses honestly (tail zone ≥ 3 m)
+    await setRange(page, 'rx', 3);
+    await setRange(page, 'ry', 3);
+    await setRange(page, 'rz', 4);
+    const prev = page.locator('[data-testid="tool-preview"]');
+    await expect.poll(async () => ((await prev.textContent()) ?? ''),
+      { timeout: 15_000 }).toMatch(/nothing to place/);
+    await expect(page.getByTestId('tool-ok')).toBeDisabled();
+    // a proper zeppelin plans the whole batch
+    await setRange(page, 'rx', 2);
+    await setRange(page, 'ry', 2);
+    await setRange(page, 'rz', 8);
+    await expect.poll(async () => ((await prev.textContent()) ?? '').includes('rudder'),
+      { timeout: 30_000 }).toBe(true);
+    await expect(prev).toContainText('enclosed');
+    await page.getByTestId('tool-ok').click();
+    await expect(page.getByTestId('tool-confirm-box')).toBeVisible();
+    await page.getByTestId('tool-confirm').click();
+    await expect(page.getByTestId('place-label')).toBeVisible({ timeout: 30_000 });
+    // the ghost carries skin + sleeve/cap + fin panels as ONE shape
+    const g = await ghost(page);
+    expect(g!.tris).toBeGreaterThan(150);
+    // turn the ghost: the commit maps every tail record with it (verified
+    // headless in tooldoc — here just that the ghost itself turns)
+    await page.getByTestId('place-rot-y').click();
+    expect((await ghost(page))!.turns).toBe(1);
+    const s0 = await loads(page);
+    await page.getByTestId('place-build').click();
+    await expect(page.getByTestId('tool-toast')).toContainText('BALLOON');
+    const craft = await page.evaluate(() => {
+      const d = (window as unknown as { __ARCHEAN__: { engine: {
+        blueprint: { data: Record<string, unknown> } } } }).__ARCHEAN__.engine.blueprint.data;
+      const comps = (d.components ?? []) as { type: string; data?: Record<string, unknown> }[];
+      const kinds = comps.map(c => c.type);
+      const pipes = (d.pipes ?? []) as { type?: string; segments: unknown[] }[];
+      return {
+        junction: kinds.filter(t => t === 'LowVoltageJunction').length,
+        hinges: kinds.filter(t => t === 'SmallHinge').length,
+        builds: kinds.filter(t => t === 'Build').length,
+        volumes: kinds.filter(t => t === 'Volume').length,
+        joins: ((d.composite_builds ?? []) as unknown[]).length,
+        pipes: pipes.length,
+        lv: pipes.filter(p => p.type === 'lowvoltage').length,
+        segsMin: Math.min(...pipes.map(p => p.segments.length)),
+        nested: comps.filter(c => c.type === 'Build')
+          .map(c => ((c.data?.['triangles'] as unknown[] | undefined) ?? []).length),
+      };
+    });
+    expect(craft).toMatchObject({ junction: 1, hinges: 3, builds: 3, volumes: 1,
+      joins: 3, pipes: 3, lv: 3 });
+    expect(craft.segsMin).toBeGreaterThanOrEqual(2);   // the game writer's rule
+    expect(Math.min(...craft.nested)).toBeGreaterThan(0);
+    // the three TRIANGLE PANELS render as subgrid groups (scene nested-skin
+    // pass) and the batch REPAINTS: loads strictly increase (AGENTS rule)
+    await expect.poll(async () => (await page.evaluate(() =>
+      (window as unknown as { __ARCHEAN__: { stats: () => { subs: number } } })
+        .__ARCHEAN__.stats())).subs, { timeout: 20_000 }).toBe(3);
+    expect(await loads(page)).toBeGreaterThan(s0);
+    // Ctrl+Z = ONE step for the WHOLE batch (skin, tail, parts, joins, cables)
+    await page.keyboard.press('Control+z');
+    await expect.poll(async () => {
+      const c2 = await page.evaluate(() => {
+        const d = (window as unknown as { __ARCHEAN__: { engine: {
+          blueprint: { data: Record<string, unknown> } } } }).__ARCHEAN__.engine.blueprint.data;
+        return [(d.components ?? []) as unknown[], (d.pipes ?? []) as unknown[],
+          (d.triangles ?? []) as unknown[], (d.composite_builds ?? []) as unknown[]];
+      });
+      return c2[0].length === 1 && c2[1].length === 0 && c2[2].length === 0
+        && c2[3].length === 0 ? 'clean'
+        : `${c2[0].length}/${c2[1].length}/${c2[2].length}/${c2[3].length}`;
+    }, { timeout: 20_000 }).toBe('clean');
+  });
 });

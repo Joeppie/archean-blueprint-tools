@@ -348,8 +348,8 @@ export const TOOLS: ToolDef[] = [
       // ---------------------------------------------- v1.9 TAIL (cylinder only)
       { key: 'fins', label: 'tail fins', kind: 'select',
         options: [
-          { id: 'off', label: 'none (bare balloon)' },
-          { id: 'on', label: 'rudder + 2 ailerons' },
+          { id: 'off', label: 'no fins' },
+          { id: 'on', label: 'rudder+2 ailerons' },
         ],
         showIf: f => f['profile'] === 'cylinder',
         hint: 'classical blimp tail: the last fifth of the tail cone becomes '
