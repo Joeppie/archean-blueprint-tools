@@ -762,6 +762,15 @@ engine CONTENT frame; its FILE-frame socket pose is
   `checkLeads(net)` (exposed through `__ARCHEAN__.engine.pipeInfo().leads`). Pins: `app/src/engine/__tests__/sockets.test.ts` (law +
   corpus sweep), `pipes.test.ts` (drawing + re-anchoring), `app/e2e/pipes.spec.ts`
   (rendered net + a moved part drags its ends), triage: `app/tools/worsttangent.mjs`.
+• **A pipe needs ≥ 2 segments IN THE FILE** — the dev reader warns
+  (`blueprint.js`: "the game expects at least two"), and the balloon-tail
+  generator honours it at write time (`balloonfin.pipeSegments` keeps only
+  true axis-aligned hops, so a broken route is DROPPED, never patched into
+  a diagonal). The Generate-balloon LV runs (v1.9) additionally honour the
+  user rule "the wire must, right after the pivot plug, run INTO the body":
+  lead off the stub axis → one cell deeper through the skin → a long run
+  along the body axis INSIDE the envelope (hidden), all waypoints asserted
+  inside-envelope by the vitest pins (`balloonfin.test.ts`).
 Note: `components` may contain a `Build` type — the editor's construction-site ghost
 (e.g. y −24.75, far outside the craft). It is not physical geometry; the viewer skips it.
 
@@ -1439,6 +1448,17 @@ transcribed). Corpus: every craft with subgrids has exactly one
 `data.composite_builds` entry per Build component (5 in dolphin; 1 in Jimmy's
 Adventure = 3334698274).
 
+- **The nested data carries `triangles` (v1.9, transcribed from the dev
+  reader `blueprint.js`):** `readBuild` is invoked recursively per `Build`
+  component and iterates `buildData.triangles` (same frame-corner + CELL
+  lattice math as the top level, palette = the build's own), exactly like
+  `blocks`/`components`/`pipes`. So a SUBGRID PANEL can be hull triangles —
+  the corpus has no authored precedent (no Build ever carried triangles),
+  which makes the app's nested-skin pass (`scene.ts buildSubgrids` renders
+  `data.triangles` through the same prism buckets as the main skin) and the
+  in-game look of a TRIANGLE panel on a hinge the user's in-game territory:
+  the Generate-balloon fin panels ship on this law (their rotation follows
+  the §Subgrids joint kinematics — panels-ride-pivot like every door).
 - **Stored at grid coords, in the PARENT frame (v0.168 correction):** the nested
   `data.blocks`/`data.components` are authored in the PARENT craft's cell/
   metre coords (a CLOSED hatch seals the hull at its parent cell — see

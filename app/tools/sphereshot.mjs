@@ -1,5 +1,5 @@
 // sphereshot.mjs — dev aid for the SPHERE SKIN tool: drives the REAL editor
-// (new craft → TOOLS ▸ Sphere skin → Confirm & place → ✔ Build through the
+// (new craft → TOOLS ▸ Generate balloon → Confirm & place → ✔ Build through the
 // live UI), parks the camera, screenshots, AND measures the rendered
 // SILHOUETTE: object-vs-background mask area vs the mask's convex hull area
 // from the actual screenshot pixels. fill = mask/hull; 1.000 = the picture
@@ -20,7 +20,7 @@ await p.waitForFunction(() => document.title.includes('SCENE PASS'), null, { tim
 
 // stage through the UI exactly like the e2e spec
 await p.getByTestId('tools-menu').click();
-await p.getByTestId('tool-sphere-skin').click();
+await p.getByTestId('tool-balloon').click();
 for (const [k, v] of [['rx', +rx], ['ry', +ry], ['rz', +rz]])
   await p.locator(`[data-testid="tool-range-${k}"]`).evaluate((el, val) => {
     const i = el; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, String(val));

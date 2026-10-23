@@ -57,7 +57,7 @@ gallery/live-edit/save it ships:
   lines, subgrids swing with their masters; full **undo/redo** on every
   mutation (Ctrl+Z keeps the camera for A/B comparing).
 - **Tools & analysis** — TOOLS ▸ dialogs (replace-all, hullify with the
-  game's authoring defaults, Sphere skin lattice hull planner with
+  game's authoring defaults, Generate balloon lattice hull planner with
   deviation/lift previews and a SIMPLE cylinder+nose body for pointy blends,
   its ghost quarter-turning ⟲x/⟲y/⟲z with a ↩ back-to-parameters button),
   the lift & altitude widget (US Standard

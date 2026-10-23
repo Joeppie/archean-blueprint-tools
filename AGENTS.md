@@ -992,6 +992,57 @@ freshly-authored triangles, fixture 9000006001 — see the v1.5.12 bullet).
   exists (the old "~12×" claim in v1.5.17's note is hereby FALSIFIED).
   Pinned e2e: refusal → ⚖ → preview resolves to a triangle line + OK
   ENABLES (a probe storm of worker plans, 60 s budget).
+- **v1.9 GENERATE BALLOON + TAIL SECTION (user 2026-10-23: "rename it to
+generate balloon, add a section to its tool to generate a tail rudder and
+two ailerons (not the components) but based on a symmetrically placed
+(mirrored) fins … contiguous area … flush with the end of the 'tail'
+section of the cone … wired in to a low power couple near the center … a
+volume block facing up, guaranteed enclosed … LV cables into the pivots …
+after connecting, immediately run into the body … fins scale to the
+proportion + extra oversize slider"):** the tool is TOOLS ▸ 'Generate
+balloon…' (id `balloon`, was `sphere-skin` — the e2e testids and help topic
+followed; the topic's Tags keep 'sphere' findable). Cylinder profile only,
+and the fin section must fit the tail zone (≥ 3 m) or the preview refuses.
+The pure planner is `app/src/engine/balloonfin.ts`:
+(a) the tail cone TRUNCATES at `SphereSpec.tailCutG` (80 % of the taper;
+planLoft ADDS that level — flag-guarded, uncut plans byte-identical) and
+`planBalloonTail` closes the open cut ring with a straight SLEEVE + shrinking
+CAP + tip cone built from the SAME `loftRingTable` cut ring → contiguous by
+SHARED VERTICES (vitest pins the shared count);
+(b) THREE panels: top rudder (yaw about ŷ) + aileron pair (roll about the
+longitudinal) — panels are TRIANGLE plates, never parts; `aileronL` is
+`aileronR` mirror-derived triangle-for-triangle (side coord reflected, two
+vertices swapped = the flipped normal); `fin size %` = 28 % of the girth /
+35 % of the post, `oversize` multiplies, both clamped to the 20-cell window
+safe span;
+(c) each panel rides a SmallHinge (default) / SmallPivot as a SUBGRID:
+Build record with nested `data.triangles` (parent-absolute, v0.168 law —
+the dev readBuild recurses nested triangles, FORMAT §Subgrids) joined via
+`composite_builds {component: flatIdx(pivot), slaveBuildId: flatIdx(Build)}`
+(flat index = flattenComponents length + append order — new Builds carry no
+nested COMPONENTS); scene.ts buildSubgrids renders nested triangles through
+buildSolids (same prism buckets as the main skin);
+(d) LowVoltageJunction at the envelope centre + `volume blocks` Volume stack
+facing UP out of it (first centre +0.187 m, 1-cell pitch, count CLAMPS to
+the local envelope); one LV pipe per pivot, coupler→pivot, waypoints
+lead(2r stub) → DIVE one cell through the skin → long INSIDE-envelope run
+→ port lead (≥2 axis-aligned segments per the game writer rule; every
+interior waypoint asserted with `insideBalloon`);
+(e) the GHOST carries everything: `PlacePayload.rides` = a lattice probe
+tetrahedron the engine quarter-turns WITH the triangles (scene
+clusterGhost{Rides,Data}); the commit recovers the turn matrix + cell
+offset via `ghostMap` and maps component positions, quaternions (qA ⊗ q,
+LEFT compose) and cable waypoints — the triangles themselves come from the
+LIVE ghost slice in the staged order SKIN|SLEEVE|rudder|L|R (order is the
+contract between `balloonPayload` and `commitBalloon`);
+(f) commit = ONE undo step: `appendTrianglesDoc` (skin+sleeve) +
+newComponent/docArrayInsert components + `docEnsureArray` joins + LV pipes
+(the v1.6.1 class rule — everything lands in the DOC = the save = the
+history). Pins: vitest `balloonfin.test.ts` (9), `tooldoc.test.ts` v1.9
+(shipped-tool save/reload + rotated-ghost map), e2e `sphereskin.spec.ts`
+"the TAIL section" (@ui desktop+pixel7). In-game arbitration of triangle
+panels on hinges is the USER's (no corpus precedent — flagged in the help
+topic + FORMAT).
 - **FAILED ATTEMPT — DO NOT RESURRECT blind: the Spheroid generator
   (2026-10-21/22).** (SUCCESSOR SHIPPED ABOVE — v1.5.17.) Three iterations (block-matching → staircase chamfers →
   additive bevels + a watertight triangle SKIN) were all reverted from main:
