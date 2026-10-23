@@ -16,7 +16,7 @@
 // matte/painted surfaces look exactly as before.
 
 import {
-  Box3, BoxGeometry, BufferAttribute, BufferGeometry, Color, DirectionalLight,
+  Box3, BoxGeometry, BufferAttribute, BufferGeometry, Color, CylinderGeometry, DirectionalLight,
   DoubleSide, Group, HemisphereLight, InstancedMesh,
   LineBasicMaterial, LineSegments, LinearSRGBColorSpace, Matrix3, Matrix4, Mesh,
   MeshBasicMaterial, MeshStandardMaterial, Object3D, PerspectiveCamera,
@@ -53,9 +53,10 @@ import { blockCells, blockMirrorTwin, cellOverlapSkip, mirrorBlockCell, mirrorAx
 import { transformSkinTris } from './latsphere';
 import { gridPlan, pxPerMeter } from './grid';
 import {
-  captureJrefs, masterJointState, subBlockBBox, subJointPose, subMasterEntries,
+  captureJrefs, flattenComponents, masterJointState, subBlockBBox, subJointPose, subMasterEntries,
   type JRef, type SubBBox,
 } from './subgrid';
+import { pipeSockets } from './sockets';
 import {
   compPaintDiff, craftMirrorMask, hasMirrorX, mirrorDelta, mirrorQuat, symAllowed,
   symTwinIndex, type TwinPair,
@@ -264,7 +265,7 @@ export class Engine {
   // travelling glow along every connected pipe; on arrival the far part
   // blips. Pulses/blips render additive with depthTest OFF — they shine
   // THROUGH the hull — and the on-demand loop wakes only while alive.
-  private pipeNet: PipeNetwork = { tubes: [], ends: [], links: [], polys: [], pipes: 0 };
+  private pipeNet: PipeNetwork = { segs: [], joints: [], plugs: [], ends: [], links: [], polys: [], pipes: 0, stale: 0 };
   private surgeGroup = new Group();
   private surgeGeo = new SphereGeometry(0.055, 10, 8);
   private surges: { pts: Vector3[]; cum: number[]; total: number; to: number;
@@ -755,28 +756,98 @@ void main() {
     });
   }
 
-  /** cables: ONE merged tube mesh + instanced connector endpoint spheres
-   *  (cyan = a-end, green = b-end — legacy buildPipes colours, MeshBasic) */
+  /** cables: merged CYLINDER/BOX bars + elbow spheres with the file's
+   *  per-segment colours (XenonViewer buildPipes port — the game draws round
+   *  hoses with a black collar at each end, item ducts are the only square
+   *  species), the socket-plugs, and instanced connector endpoint markers
+   *  (cyan = a-end, green = b-end, MeshBasic). Ends sit on the LIVE sockets
+   *  when the cached route drifted (sockets.ts). */
   private buildPipesMesh(bp: Blueprint) {
-    const net = buildPipes(bp.data.pipes);
+    const flat = flattenComponents(bp);
+    const net = buildPipes(bp.data.pipes, pipeSockets(bp.data.pipes, flat, this.atlasRef?.manifest ?? null));
     this.pipeNet = net;
     this.clearSurges();                            // paths change on rebuild
-    if (!net.tubes.length) return;
-    const geos = net.tubes.map(t => {
-      const g = new BoxGeometry(t.size[0], t.size[1], t.size[2]);
-      g.applyMatrix4(new Matrix4().makeTranslation(t.center[0], t.center[1], t.center[2]));
+    if (!net.segs.length) return;
+
+    // unit templates (dev scene.js): cable = cylinder, box duct = 2r×L×2r,
+    // elbow/plug caps = sphere/cylinder; one merged mesh per material pass
+    const CYL = new CylinderGeometry(1, 1, 1, 14);
+    const BOX = new BoxGeometry(2, 1, 2);
+    const SPH = new SphereGeometry(1, 12, 8);
+    const Y = new Vector3(0, 1, 0);
+    const paintGeo = (g: BufferGeometry, c: readonly [number, number, number]) => {
+      const n = g.attributes.position!.count;
+      const col = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) col.set(c, i * 3);
+      g.setAttribute('color', new BufferAttribute(col, 3));
       return g;
-    });
-    const merged = mergeGeometries(geos, false);
-    geos.forEach(g => g.dispose());
-    if (merged) {
-      const tube = new Mesh(merged, this.flatMat(0x222228));
-      tube.material.roughness = 0.9;
-      tube.userData.kind = 'pipe' satisfies Kind;
-      this.pipeMeshes.push(tube);
-      this.root.add(tube);
+    };
+    /** bar a→b of the unit template, dev barGeometry's compose exactly */
+    const barGeo = (unit: 'cyl' | 'box', a: readonly number[], b: readonly number[], r: number) => {
+      const dir = new Vector3(b[0]! - a[0]!, b[1]! - a[1]!, b[2]! - a[2]!);
+      const L = dir.length();
+      if (L < 1e-6) return null;
+      const g = (unit === 'box' ? BOX : CYL).clone();
+      const q = new Quaternion().setFromUnitVectors(Y, dir.normalize());
+      g.applyMatrix4(new Matrix4().compose(
+        new Vector3((a[0]! + b[0]!) / 2, (a[1]! + b[1]!) / 2, (a[2]! + b[2]!) / 2), q,
+        new Vector3(r, L, r)));
+      return g;
+    };
+    const plain: BufferGeometry[] = [], metal: BufferGeometry[] = [];
+    for (const s of net.segs) {
+      const g = barGeo(s.box ? 'box' : 'cyl', s.a, s.b, s.radius);
+      if (g) (s.metal ? metal : plain).push(paintGeo(g, s.color));
     }
-    const sph = new SphereGeometry(0.035, 8, 6);
+    for (const j of net.joints) {
+      const g = SPH.clone();
+      g.applyMatrix4(new Matrix4().makeScale(j.radius, j.radius, j.radius));
+      g.translate(j.at[0], j.at[1], j.at[2]);
+      plain.push(paintGeo(g, j.color));
+    }
+    const addMesh = (geos: BufferGeometry[], mat: MeshStandardMaterial, kind: Kind) => {
+      if (!geos.length) return;
+      const merged = mergeGeometries(geos, false);
+      geos.forEach(g => g.dispose());
+      if (!merged) return;
+      merged.computeVertexNormals();               // dev: per-vertex normals
+      const m = new Mesh(merged, mat);
+      m.userData.kind = kind satisfies Kind;
+      this.pipeMeshes.push(m);
+      this.root.add(m);
+    };
+    const matPlain = new MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.1 });
+    const matMetal = new MeshStandardMaterial({ vertexColors: true, roughness: 0.25, metalness: 1 });
+    addMesh(plain, matPlain, 'pipe');
+    addMesh(metal, matMetal, 'pipe');
+
+    // the client's BLACK COLLARS at every cable end (not serialised in the
+    // file — dev scene.js says so): short fat sleeves coaxial with the cable,
+    // round like the hose, square for the box ducts
+    const collar: BufferGeometry[] = [];
+    for (const p of net.plugs) {
+      const r = p.radius * 1.8, h = Math.max(0.03, p.radius * 3);
+      const g = (p.box ? new BoxGeometry(2 * r, h, 2 * r) : new CylinderGeometry(r, r, h, 14)).clone();
+      const dir = new Vector3(p.axis[0], p.axis[1], p.axis[2]);
+      const q = new Quaternion().setFromUnitVectors(Y, dir);
+      // hug the cable side: centre the collar INWARD from the tip
+      g.applyMatrix4(new Matrix4().compose(
+        new Vector3(p.at[0] - p.axis[0] * h * 0.35, p.at[1] - p.axis[1] * h * 0.35, p.at[2] - p.axis[2] * h * 0.35),
+        q, new Vector3(1, 1, 1)));
+      collar.push(g);
+    }
+    if (collar.length) {
+      const merged = mergeGeometries(collar, false);
+      collar.forEach(g => g.dispose());
+      if (merged) {
+        const m = new Mesh(merged, new MeshStandardMaterial({ color: 0x141419, roughness: 0.85, metalness: 0 }));
+        m.userData.kind = 'pipe' satisfies Kind;
+        this.pipeMeshes.push(m);
+        this.root.add(m);
+      }
+    }
+
+    const sph = new SphereGeometry(0.03, 8, 6);
     const mkEnds = (color: number, end: (e: (typeof net.ends)[number]) => readonly [number, number, number]) => {
       const im = new InstancedMesh(sph, new MeshBasicMaterial({ color }), net.ends.length);
       const m4 = new Matrix4();
@@ -791,6 +862,62 @@ void main() {
     };
     mkEnds(0x33ddff, e => e.a);
     mkEnds(0x33ff88, e => e.b);
+  }
+
+  /** Re-run ONLY the cable pass (no scene reload): a moved part's cached
+   *  pipe route re-anchors to its live socket. Cheap enough to run on the
+   *  Editor's edit-debounce — merges ≤ a few thousand short bars. */
+  rebuildPipes() {
+    if (!this.bp) return;
+    for (const m of this.pipeMeshes) {
+      m.traverse(o => {
+        const mm = o as Mesh;
+        if (mm.geometry && !this.shared.has(mm.geometry)) mm.geometry.dispose();
+        const mat = mm.material as MeshStandardMaterial | undefined;
+        if (mat && !this.shared.has(mat)) mat.dispose();
+      });
+      m.removeFromParent();
+    }
+    this.pipeMeshes = [];
+    this.buildPipesMesh(this.bp);
+    this.invalidate();
+  }
+
+  /** test hook: the live cable network summary (round vs square cross-
+   *  sections, per-kind MAJORITY style, the socket-anchored ends). The
+   *  per-kind sample is the corpus-majority segment, not the first: the
+   *  first bar of a run is often the black sheath stub. */
+  pipeInfo() {
+    const net = this.pipeNet;
+    interface Sample { n: number; cols: Map<string, number>; metal: number; box: number; radius: number }
+    const per = new Map<string, Sample>();
+    for (const s of net.segs) {
+      let p = per.get(s.kind);
+      if (!p) per.set(s.kind, p = { n: 0, cols: new Map(), metal: 0, box: 0, radius: s.radius });
+      p.n++;
+      const key = `${s.color[0]},${s.color[1]},${s.color[2]}`;
+      p.cols.set(key, (p.cols.get(key) ?? 0) + 1);
+      if (s.metal) p.metal++;
+      if (s.box) p.box++;
+    }
+    const style: Record<string, { r: number; g: number; b: number; box: boolean; metal: boolean; radius: number }> = {};
+    for (const [kind, p] of per) {
+      const top = [...p.cols.entries()].sort((a, b) => b[1] - a[1])[0]![0].split(',').map(Number);
+      style[kind] = {
+        r: top[0]!, g: top[1]!, b: top[2]!,
+        box: p.box * 2 > p.n, metal: p.metal > 0, radius: p.radius,
+      };
+    }
+    return {
+      pipes: net.pipes, segs: net.segs.length, joints: net.joints.length,
+      plugs: net.plugs.length, stale: net.stale,
+      round: net.segs.filter(s => !s.box).length,
+      square: net.segs.filter(s => s.box).length,
+      metal: net.segs.filter(s => s.metal).length,
+      kinds: [...new Set(net.segs.map(s => s.kind))].sort(),
+      style,
+      ends: net.ends.map(e => ({ a: [...e.a], b: [...e.b] })),
+    };
   }
 
   /** every non-Build component: a group at the DISPLAY pose — the painted

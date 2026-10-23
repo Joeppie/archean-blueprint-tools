@@ -29,3 +29,21 @@ reporting those claims — repair them by deleting the stale cable rows.
 
 > Cables draw exactly as recorded: every segment anchors at its own `start`
 > (joints carry real offsets), so tube paths are never assumed straight.
+
+## Where a cable plugs in (v1.8.1)
+
+The round grey sockets you see on tanks, ports and machines in the game ARE
+the parts' `.ini` adapter ports — the editor computes each one's live pose
+(`position + R(q)·adapter`, the same raw-quat law the models use) and the
+cable ends follow it: a recorded tip that still sits on its socket stub is
+kept verbatim (it encodes how deep the plug was seated), a tip left behind by
+a moved or turned part re-seats onto the socket. Move a part and its cables
+ride with it — the game re-routes the paths at save; the editor keeps them
+plugged in while you work.
+
+Cables also draw like the game: ROUND hoses (fluid and HV are cylinders;
+only the item ducts are square), each segment in its own recorded colour
+(navy data, dark-red low voltage, orange high voltage, white chrome fluid —
+older saves write near-black sheaths), with elbow spheres at direction
+changes, sagging chains for flexible data runs, and a black collar at every
+plug seat.

@@ -103,6 +103,19 @@ export interface PipeSegment {
   /** dir 0..5 = +x,+y,+z,−x,−y,−z */
   dir: number;
   length: number;
+  // ---- per-segment style, serialized by the game (XenonViewer scene.js
+  // buildPipes; FORMAT §pipes). r/g/b are LINEAR albedo like palette slots.
+  /** colour 0..255 (blueprint.js default 128 when absent) */
+  r?: number; g?: number; b?: number; a?: number;
+  /** square cross-section (the item ducts); every other cable is a CYLINDER */
+  box?: boolean;
+  /** shiny pass: metalness + low roughness (fluid hoses ride `chrome`) */
+  metal?: boolean; chrome?: boolean; glossy?: boolean;
+  /** two-segment sag-chain cable (data/lv runs; segment[1] only marks the
+   *  arrival point — its dir/length are meaningless, the game's own rule) */
+  flexible?: boolean;
+  rounded_caps?: boolean;
+  striped?: boolean;
 }
 
 export interface Pipe {

@@ -10,16 +10,16 @@
 //  • adapter kinds come from the manifest: data / lowvoltage / highvoltage /
 //    fluid / item. Auto-wiring covers the ELECTRIC kinds (data, lv, hv);
 //    fluid and item ports are only censused for the warnings list.
-//  • cable start points are the VISIBLE sockets: the game writes endpoints
-//    at position + R(q*)·(a.x, a.y, −a.z)-mirrored — computed here exactly
-//    like compparts does for the collider boxes (file world space).
+//  • cable start points are the VISIBLE sockets: the adapter anchor law
+//    (sockets.ts — position + R(qraw)·(ax, az, −ay), file world space), which
+//    the whole-corpus pipe-endpoint sweep pins to tangential residual 0.
 //  • the naive router pairs the GLOBAL nearest free port pair per kind,
 //    different components only, until fewer than two free ports remain;
 //    routes are axis-aligned L-runs in x→y→z order, like the game writes.
 
-import { fileToViewQuat, qRot } from './compparts';
+import { adapterSocket, KIND_RADIUS } from './sockets';
 import { flattenComponents } from './subgrid';
-import type { Blueprint, FileQuat } from './format';
+import type { Blueprint } from './format';
 import type { ModelManifest } from './models';
 
 export type WireKind = 'data' | 'lowvoltage' | 'highvoltage' | 'fluid' | 'item';
@@ -27,15 +27,15 @@ export const WIRE_KINDS: WireKind[] = ['data', 'lowvoltage', 'highvoltage', 'flu
 
 export interface PortInfo { ci: number; type: string; name: string; kind: WireKind; at: [number, number, number] }
 
-const Q_ID: FileQuat = { w: 1, x: 0, y: 0, z: 0 };
-
-/** FILE-world socket position of an adapter port (built pose): the view
- *  chain origin (x, y, −z) plus R(qv)·(ax, ay, −az), mirrored back. */
-function portWorld(bp: Blueprint, ci: number, a: { position: [number, number, number] }, legacy: boolean) {
-  const c = bp.data.components[ci]!;
-  const qv = fileToViewQuat(c.orientation ?? Q_ID, legacy);
-  const v = qRot(qv, [a.position[0], a.position[1], -a.position[2]]);
-  return [c.position.x + v[0], c.position.y + v[1], c.position.z - v[2]] as [number, number, number];
+/** FILE-world socket position of an adapter port (built pose): the v1.8.1
+ *  anchor law (sockets.ts) — position + R(qraw)·(ax, az, −ay). The old
+ *  (x, y, −z)-double-mirror read was a pre-v0.180 artifact: auto-created
+ *  cables routed from the MIRRORED socket (the z of every run's endpoints
+ *  landed off the part). */
+function portWorld(_bp: Blueprint, ci: number, a: { type: string; position: [number, number, number]; rotation: [number, number, number] }, _legacy: boolean) {
+  const c = _bp.data.components[ci]!;
+  const s = adapterSocket(c.position, c.orientation, a);
+  return [s.at[0], s.at[1], s.at[2]] as [number, number, number];
 }
 
 export function portCensus(bp: Blueprint, manifest: ModelManifest | null): PortInfo[] {
@@ -74,17 +74,22 @@ export function unconnectedPorts(bp: Blueprint, manifest: ModelManifest | null):
 
 // ---------------------------------------------------------------- auto-wire
 
-// Segment style fields as the game writes them (r/g/b/a/b are the cable
-// style scalars; data & lv ride the plain white sheath, hv the grouped one).
-const CABLE_STYLE = {
-  a: 255, b: 12, box: false, chrome: false, flexible: false, g: 1,
-  glossy: false, metal: false, r: 1, rounded_caps: true, striped: false,
+// Segment style fields as the game writes them — every segment carries all
+// 14 keys, and the corpus majority per kind (FORMAT §pipes): data navy
+// (16,24,96), lowvoltage dark red (96,8,4), highvoltage orange (255,64,4),
+// fluid WHITE + chrome, item WHITE + box + metal (the only square species).
+const KIND_STYLE: Record<string, Record<string, unknown>> = {
+  data:        { r: 16, g: 24, b: 96, a: 255, box: false, chrome: false, flexible: false, glossy: false, metal: false, rounded_caps: true, striped: false },
+  lowvoltage:  { r: 96, g: 8, b: 4, a: 255, box: false, chrome: false, flexible: false, glossy: false, metal: false, rounded_caps: true, striped: false },
+  highvoltage: { r: 255, g: 64, b: 4, a: 255, box: false, chrome: false, flexible: false, glossy: false, metal: false, rounded_caps: true, striped: false },
+  fluid:       { r: 255, g: 255, b: 255, a: 255, box: false, chrome: true, flexible: false, glossy: false, metal: false, rounded_caps: true, striped: false },
+  item:        { r: 255, g: 255, b: 255, a: 255, box: true, chrome: false, flexible: false, glossy: false, metal: true, rounded_caps: true, striped: false },
 };
-const HV_STYLE = { ...CABLE_STYLE, g: 2 };
+const styleFor = (kind: WireKind) => KIND_STYLE[kind] ?? KIND_STYLE.data!;
 
 /** Axis-aligned L-run from a to b (x→y→z), zero spans skipped. */
 function route(a: [number, number, number], b: [number, number, number], kind: WireKind) {
-  const style = kind === 'highvoltage' ? HV_STYLE : CABLE_STYLE;
+  const style = styleFor(kind);
   const segs: Record<string, unknown>[] = [];
   const cur = [...a] as [number, number, number];
   for (let ax = 0; ax < 3; ax++) {
@@ -300,7 +305,7 @@ export function makePipe(bp: Blueprint, manifest: ModelManifest | null,
   return {
     a_component: topToFlat.get(aCi)!, a_port: aPort,
     b_component: topToFlat.get(bCi)!, b_port: bPort,
-    radius: A.kind === 'fluid' ? 0.045 : 0.02,
+    radius: KIND_RADIUS[A.kind],
     segments: route(A.at, B.at, A.kind) as never,
     type: A.kind,
   };

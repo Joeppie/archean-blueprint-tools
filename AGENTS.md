@@ -658,6 +658,38 @@ freshly-authored triangles, fixture 9000006001 — see the v1.5.12 bullet).
   `help.spec.ts` (@ui, desktop+pixel7: menu→dialog, h1, sphere LIMITS table
   as a real <table>, search by title/tag/body word, Esc/✕/backdrop close,
   dialog never outgrows the viewport).
+- **v1.8.1 CABLES LIKE THE GAME + SOCKET SEATING (user 2026-10-23: "the
+  cables for the fluid look quite different in game … the gray circles on
+  components that take fluid are the ones that it should connect to … round,
+  not square … but for data and small power cables square is fine … (item is
+  square indeed)"):** the game's cable truth, transcribed from XenonViewer
+  scene.js + a whole-corpus endpoint sweep (18 407 tips, 57 files, tangent
+  p95 0.000 m — FORMAT §pipes v1.8.1): ① new pure module `engine/sockets.ts` —
+  THE SOCKET LAW: an `.ini [ADAPTER]`'s file-frame socket is
+  `position + R(qraw)·(ax, az, −ay)`, stub axis `R(qraw)·(Rz·Ry·Rx·ẑ` same map`;
+  every recorded cable tip lies ON that stub axis, so a tip that left it (part
+  moved/turned after wiring — 3481322297's Dashboard tip sits 0.40 m LATERAL)
+  is a STALE CACHE and `endAnchor` re-seats it on the live socket (fresh ⇔
+  ≤0.45 m from socket AND ≤0.15 m off the axis; sane [0,0.135] recorded depth
+  rides along, garbage → 0.05 default). ② `pipes.ts` draws what the file says
+  (dev port): CYLINDER bars of `pipe.radius` (data/lv 0.02, hv 0.04, fluid
+  0.045, item 0.08) — square ONLY under the segment `box` flag (corpus: only
+  item ducts set it) — per-segment vertex COLOURS (linear /255, default 128;
+  kinds: navy/red/orange/white-chrome/white-metal, older saves near-black),
+  metal/chrome → shiny pass, elbow SPHERES at direction changes (the LAST
+  segment is stored REVERSED: useful dir `(d+3)%6`), FLEXIBLE 2-segment pairs
+  drawn as the game's sagging parabolic chain (segment[0].dir is MEANINGLESS —
+  drawing along it is what made wires fly everywhere), black plug COLLARS at
+  every end. ③ `Engine.rebuildPipes()` + Editor `pipesSoon` (250 ms debounce on
+  `onEdit`): moving a part with the gizmo/sliders makes its cable ends FOLLOW
+  the sockets (the game re-routes at save; the display stays plugged in).
+  ④ wireops portWorld FIXED from the pre-v0.180 (x,y,−z)-double-mirror to the
+  socket law (auto-created cables start at TRUE sockets) + route() writes the
+  game's per-kind segment style table. Pins: vitest `sockets.test.ts` (law,
+  exemptions PilotSeat/Beacon, corpus sweep), `pipes.test.ts` (shapes/colours/
+  elbows/chains/re-anchor + stale counter), e2e `pipes.spec.ts` (ISW round+
+  chrome, truck five species incl. square item + live stale re-seats, moved
+  part drags its ends ±1.5 m + exact restore); triage `app/tools/worsttangent.mts`.
 - **v1.7.4 LOFT MESH MADE MIRROR-SYMMETRIC (user 2026-10-23: "the
   cylindrical zeppelin seems not fully symmetrical and it has some
   indentations — is that correct? Is that fixable?"):** measured before

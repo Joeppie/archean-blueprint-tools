@@ -264,6 +264,17 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     reloadTimer.current = setTimeout(() => engineRef.current?.reload(), 180);
   }, [markDirty, bumpRev, snapshotSoon]);
 
+  // v1.8.1 CABLES FOLLOW THE PART: data.pipes is the game's cached route, so
+  // a moved part leaves the recorded tips behind. The engine re-anchors the
+  // ends onto the LIVE sockets (sockets.ts); this only pokes that cheap
+  // cable-pass rebuild on the same drag-debounce rhythm as the reload.
+  const pipesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pipesSoon = useCallback(() => {
+    if (!engineRef.current?.pipeInfo().pipes) return;   // craft without cables: no-op
+    if (pipesTimer.current) clearTimeout(pipesTimer.current);
+    pipesTimer.current = setTimeout(() => { pipesTimer.current = null; engineRef.current?.rebuildPipes(); }, 250);
+  }, []);
+
   // ---- v1.6 TOOLS ▸ placement flow (Spheroid): dialog OK → movable ghost +
   // ✕ Cancel / ✔ Build label → Build commits at the final cell offset ------
   const onPlaced = useCallback((tool: { id: string }, form: ToolForm, payload: PlacePayload) => {
@@ -334,6 +345,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         setPos(ctx, ci, 'x', c.position.x); setPos(ctx, ci, 'y', c.position.y); setPos(ctx, ci, 'z', c.position.z);
         setOrientation(ctx, ci, c.orientation ?? { w: 1, x: 0, y: 0, z: 0 });
         markDirty(); bumpRev();
+        pipesSoon();                                    // cables re-anchor to the moved sockets
       };
       e.onDataEdit = (ci, key) => {
         const ctx = ctxRef.current;
@@ -355,7 +367,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       };
     }
     setEngine(e);
-  }, [markDirty, bumpRev, sceneChanged]);
+  }, [markDirty, bumpRev, sceneChanged, pipesSoon]);
   const [engine, setEngine] = useState<Engine | null>(null);
 
   // mode gating: gizmo in Edit AND Blocks (v1.4: clicking a component in

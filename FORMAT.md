@@ -690,6 +690,61 @@ frame (`p + (0,−0.145,±0.062)` for every orientation) — exempt in the conne
 The viewer's `?comptest` sweeps all of this on ISW-241: every endpoint must have a nub
 (≤0.06 m), a tube (≤0.06 m) and the owner's model surface (≤0.35 m) — 60/60, with
 PilotSeat (user-moved in editor) and Beacon exempt from the model check only.
+
+### v1.8.1 — the drawing law, the style fields, and where a cable REALLY plugs in
+
+Transcribed from the game client through the dev's XenonViewer (`scene.js buildPipes`,
+user-confirmed = the game's look) and arbitrated by a whole-corpus sweep of 18 407
+recorded endpoints in 57 files:
+
+• **A cable is a CYLINDER** of the pipe's `radius` (corpus per kind: data/lowvoltage
+0.02, highvoltage 0.04, fluid 0.045, item 0.08). Square ONLY where the segment carries
+`box: true` — the corpus census shows **only `item` ducts set it** (the user's
+"in-game: round, not square… item is square indeed"). Elbow direction changes close
+with a SPHERE of the cable radius (two butt cylinders leave a notch), and the LAST
+segment is stored REVERSED (it points from the b-adapter back into the path) — the
+elbow test must read its useful direction as `(dir+3)%6`.
+• **Every segment serialises its full style**: `r,g,b,a` (0..255, LINEAR albedo like
+palette slots — blueprint.js defaults absent channels to 128), `box`, `chrome`, `metal`,
+`glossy`, `flexible`, `striped`, `rounded_caps`. The client draws those verbatim; the
+corpus majority per kind: data navy `(16,24,96)`, lowvoltage `(96,8,4)`, highvoltage
+orange `(255,64,4)`, fluid WHITE + `chrome`, item WHITE + `box`+`metal`. OLDER saves
+(the ISW) write nearly-black sheaths like `(1,1,12)` — the FILE colour is truth, there
+is no fixed per-kind palette (the dev's `PIPE_COLORS` is UI legend only).
+• **FLEXIBLE pairs are not two segments**: when both segments of a 2-segment pipe carry
+`flexible`, segment[0] carries the cable's LENGTH + colour (its `dir` is meaningless —
+drawing along it made "wires fly in every direction") and segment[1] (zero length) only
+marks the ARRIVAL point. The client draws a sagging parabolic chain between the ends:
+`slack = len/dist − 1`, `sag = dist·√(3·slack/8)`, chunk count `≈ 4·√(len/r/12)` capped
+2..64, 1 chunk when the sag drops under the radius.
+• **The client adds a black COLLAR at every cable end** — not serialised (the dev's
+viewer deliberately draws "exactly what the file contains"; the app draws the collars
+as plug seats).
+• **THE SOCKET ANCHOR LAW** (`app/src/engine/sockets.ts`): a `.ini [ADAPTER]` is in the
+engine CONTENT frame; its FILE-frame socket pose is
+
+      at   = position + R(qraw)·(ax, az, −ay)
+      axis = R(qraw)·(Rz(rz)·Ry(ry)·Rx(rx)·ẑ  mapped the same way)
+
+  with the quaternion stored AS-IS (the v1.5.11 raw law — one law both generations;
+  the Euler order is confirmed by the 114 multi-axis adapters). The corpus sweep:
+  p95 tangential residual **0.000 m**, seating offset along the stub 0..0.135 m —
+  i.e. **every cable tip lies ON the adapter's stub axis** (this is "how to determine
+  where they go in": the round grey socket discs on the models ARE the adapters —
+  e.g. FluidPort's `fluid-connector` flange is model material `fluid-connector`, grey
+  0.5, on the socket face). Exemptions as in comptest: PilotSeat (user-moved) and
+  Beacon (connector-frame tips).
+• **The cached route goes stale** when a part moves after wiring (the game re-routes
+  at save; a file is a snapshot). An end is FRESH iff it is within 0.45 m of its
+  socket AND within 0.15 m of its stub axis; otherwise it re-anchors onto the live
+  socket keeping an in-band [0, 0.135] recorded depth (garbage → 0.05 default seat).
+  Live proof: 3481322297's Dashboard tips sit 0.40 m LATERAL off-axis (board turned
+  after wiring) and the LowVoltageBattery gantry tip 0.20 m — both re-seat. The old
+  wireops port census read `(x, y, −z)`-double-mirrored (a pre-v0.180 artifact); it
+  is this law now — auto-created cables start at the true sockets, with the game's
+  per-kind segment styles. Pins: `app/src/engine/__tests__/sockets.test.ts` (law +
+  corpus sweep), `pipes.test.ts` (drawing + re-anchoring), `app/e2e/pipes.spec.ts`
+  (rendered net + a moved part drags its ends), triage: `app/tools/worsttangent.mts`.
 Note: `components` may contain a `Build` type — the editor's construction-site ghost
 (e.g. y −24.75, far outside the craft). It is not physical geometry; the viewer skips it.
 
