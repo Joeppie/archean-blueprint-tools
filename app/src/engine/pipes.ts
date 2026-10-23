@@ -7,8 +7,10 @@
 //  • Pipes are NOT straight chains — every segment anchors at its OWN
 //    `start` (joints carry 0.04-0.14 m offsets); accumulating dir·len drifts
 //    tubes off the cables (the v0.99 regression).
-//  • A cable is a CYLINDER of the pipe's `radius`, square only where the
-//    segment carries the `box` flag (the item ducts). Data/HV/fluid hoses
+//  • A cable is a CYLINDER of the pipe's `radius`, square where the segment
+//    carries the `box` flag (the item ducts) — and the DATA kind draws as a
+//    thin square bus (KIND_SECTION, v1.8.3 user override; the FILE stays
+//    truth, this is the viewport read). Data/HV/fluid hoses
 //    are round — the file says so (only item sets box:true).
 //  • Every segment carries its own colour (r/g/b, LINEAR like palette slots)
 //    and material flags (metal/chrome → shiny pass).
@@ -40,11 +42,27 @@ import { KIND_RADIUS, plugAnchor, type PipeSockets, type V3 } from './sockets';
 
 export type { V3 } from './sockets';
 
+/** per-kind DISPLAY cross-section override (v1.8.3, user: "Data cables
+ *  should be thinner. And less round, item cables square."): the DATA bus
+ *  draws as a thin SQUARE ribbon at 60% of its file radius — the user's
+ *  earlier ruling "for data and small power cables square is fine" — while
+ *  every other kind keeps the file's own shape (round default, square only
+ *  under the segment `box` flag, which in the whole corpus is the item
+ *  ducts alone). The FILE radius stays the physical truth (cost/length
+ *  math); this is purely how the bus reads in the viewport. */
+export const KIND_SECTION: Record<string, { box: boolean; scale: number }> = {
+  data: { box: true, scale: 0.6 },
+};
+
 /** one drawn cable bar: endpoints (view space), cross-section, style */
 export interface CableSeg {
   a: V3; b: V3;
+  /** the pipe's recorded radius (the plug/collar scale) */
   radius: number;
-  /** square cross-section (item ducts); false = cylinder */
+  /** DRAWN half-extent of the cross-section: `radius` for the file's own
+   *  shapes, scaled for the thin data bus (KIND_SECTION) */
+  half: number;
+  /** square cross-section (item ducts + the drawn-as-bus data); false = cylinder */
   box: boolean;
   /** LINEAR rgb, 0..1 (per-segment file colour, palette law) */
   color: readonly [number, number, number];
@@ -58,7 +76,7 @@ export interface PipeJoint { at: V3; radius: number; color: CableSeg['color'] }
 
 /** the client's black end collar (a plug seat), oriented along the cable */
 export interface PipePlug {
-  at: V3; axis: V3; radius: number; box: boolean;
+  at: V3; axis: V3; radius: number; half: number; box: boolean;
   /** true when the plug sits on a resolved socket AND its axial lead was
    *  laid (checkLeads audits exactly these ends) */
   led: boolean;
@@ -159,6 +177,8 @@ export function buildPipes(
     if (!first || !last) return;
     const radius = p.radius ?? KIND_RADIUS[p.type ?? 'data'] ?? 0.02;
     const kind = p.type ?? 'data';
+    const sec = KIND_SECTION[kind] ?? { box: false, scale: 1 };
+    const half = radius * sec.scale;             // DRAWN half-extent (thin data bus)
     const sock = sockets?.[pi] ?? null;
     const recA: V3 = [first.start.x, first.start.y, first.start.z];
     const dl = DIRS[last.dir] ?? DIRS[0]!;
@@ -215,21 +235,21 @@ export function buildPipes(
     if (isFlex) {
       const color = segColor(first);
       const metal = !!first.metal || !!first.chrome;
-      const box = !!first.box;
+      const box = !!first.box || sec.box;
       const pts = sagChain(neckA ?? tipA, neckB ?? tipB, first.length, radius);
       if (neckA) {
-        segs.push({ a: tipA, b: neckA, radius, box, color, metal, kind });
-        joints.push({ at: neckA, radius, color });         // the bend leaves the axis here
+        segs.push({ a: tipA, b: neckA, radius, half, box, color, metal, kind });
+        joints.push({ at: neckA, radius: half, color });      // the bend leaves the axis here
       }
       let prev = pts[0]!;
       for (let i = 1; i < pts.length; i++) {
-        segs.push({ a: prev, b: pts[i]!, radius, box, color, metal, kind });
-        if (i < pts.length - 1) joints.push({ at: pts[i]!, radius, color });
+        segs.push({ a: prev, b: pts[i]!, radius, half, box, color, metal, kind });
+        if (i < pts.length - 1) joints.push({ at: pts[i]!, radius: half, color });
         prev = pts[i]!;
       }
       if (neckB) {
-        segs.push({ a: neckB, b: tipB, radius, box, color, metal, kind });
-        joints.push({ at: neckB, radius, color });
+        segs.push({ a: neckB, b: tipB, radius, half, box, color, metal, kind });
+        joints.push({ at: neckB, radius: half, color });
       }
       ends.push({ a: tipA, b: tipB });
       links.push({ a: p.a_component, b: p.b_component });
@@ -238,8 +258,8 @@ export function buildPipes(
         ...(neckB ? [neckB] : []), tipB,
       ]);
       plugs.push(
-        { at: tipA, axis: axisA ?? unit(neckA ?? tipA, pts[1] ?? tipB), radius, box, led: !!neckA },
-        { at: tipB, axis: axisB ?? unit(neckB ?? tipB, pts[pts.length - 2] ?? tipA), radius, box, led: !!neckB },
+        { at: tipA, axis: axisA ?? unit(neckA ?? tipA, pts[1] ?? tipB), radius, half, box, led: !!neckA },
+        { at: tipB, axis: axisB ?? unit(neckB ?? tipB, pts[pts.length - 2] ?? tipA), radius, half, box, led: !!neckB },
       );
       return;
     }
@@ -247,9 +267,9 @@ export function buildPipes(
     // ---- rigid routed cable ----------------------------------------------
     const s0 = p.segments[0]!, sn = p.segments[n - 1]!;
     if (neckA) {
-      segs.push({ a: tipA, b: neckA, radius, box: !!s0.box,
+      segs.push({ a: tipA, b: neckA, radius, half, box: !!s0.box || sec.box,
         color: segColor(s0), metal: !!s0.metal || !!s0.chrome, kind });
-      joints.push({ at: neckA, radius, color: segColor(s0) });
+      joints.push({ at: neckA, radius: half, color: segColor(s0) });
     }
     const pts: V3[] = [tipA];
     if (neckA) pts.push(neckA);
@@ -258,7 +278,7 @@ export function buildPipes(
       const b: V3 = si === n - 1 ? (neckB ?? tipB) : raws[si]!;
       pts.push(b);
       segs.push({
-        a, b, radius, box: !!s.box,
+        a, b, radius, half, box: !!s.box || sec.box,
         color: segColor(s), metal: !!s.metal || !!s.chrome, kind,
       });
       // elbow: a direction change closes with a sphere of the cable radius.
@@ -267,14 +287,14 @@ export function buildPipes(
       const next = p.segments[si + 1];
       if (next) {
         const nd = si + 2 === n ? (next.dir + 3) % 6 : next.dir;
-        if (nd !== s.dir) joints.push({ at: raws[si]!, radius, color: segColor(s) });
+        if (nd !== s.dir) joints.push({ at: raws[si]!, radius: half, color: segColor(s) });
         pts.push(sts[si + 1]!);                          // the drawn joint zigzag
       }
     });
     if (neckB) {
-      segs.push({ a: neckB, b: tipB, radius, box: !!sn.box,
+      segs.push({ a: neckB, b: tipB, radius, half, box: !!sn.box || sec.box,
         color: segColor(sn), metal: !!sn.metal || !!sn.chrome, kind });
-      joints.push({ at: neckB, radius, color: segColor(sn) });
+      joints.push({ at: neckB, radius: half, color: segColor(sn) });
       pts.push(tipB);                    // pts already ends at neckB
     }
     ends.push({ a: tipA, b: tipB });
@@ -282,8 +302,10 @@ export function buildPipes(
     polys.push(pts);
     const d0 = DIRS[s0.dir] ?? DIRS[0]!, dn = DIRS[sn.dir] ?? DIRS[0]!;
     plugs.push(
-      { at: tipA, axis: axisA ?? [-d0[0], -d0[1], -d0[2]], radius, box: !!s0.box, led: !!neckA },
-      { at: tipB, axis: axisB ?? dn, radius, box: !!sn.box, led: !!neckB },
+      { at: tipA, axis: axisA ?? [-d0[0], -d0[1], -d0[2]], radius, half,
+        box: !!s0.box || sec.box, led: !!neckA },
+      { at: tipB, axis: axisB ?? dn, radius, half,
+        box: !!sn.box || sec.box, led: !!neckB },
     );
   });
   net.pipes = pipes.length;

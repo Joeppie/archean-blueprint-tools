@@ -48,9 +48,10 @@ enter the round sockets head-on with a visible neck, never stab in at an
 angle. (A cached route that dives straight back into the part gets a plain
 lead-in instead of a folded wire.)
 
-Cables also draw like the game: ROUND hoses (fluid and HV are cylinders;
-only the item ducts are square), each segment in its own recorded colour
-(navy data, dark-red low voltage, orange high voltage, white chrome fluid —
-older saves write near-black sheaths), with elbow spheres at direction
-changes, sagging chains for flexible data runs, and a black collar at every
-plug seat.
+Cables also draw like the game: ROUND hoses (fluid and HV are cylinders),
+each segment in its own recorded colour (dark-red low voltage, orange high
+voltage, white chrome fluid — older saves write near-black sheaths), with
+elbow spheres at direction changes, sagging chains for flexible data runs,
+and a black collar at every plug seat. The two flat species: the ITEM ducts
+are square exactly as the file flags them, and DATA runs draw as a THIN
+square bus (the file keeps its real radius — this is the viewport read).

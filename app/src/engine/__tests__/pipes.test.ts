@@ -38,14 +38,19 @@ describe('buildPipes — rigid routed cables', () => {
     vec(s2!.a, [1.6, 2.25, 3]); vec(s2!.b, [1.6, 2.25, 3.25]); // dir 2: +z (raw == view)
   });
 
-  test('round by default; `box` flags the square item ducts', () => {
-    expect(net.segs.every(s => !s.box)).toBe(true);
+  test('cross-sections: data bus thin+square, file box = square ducts, rest round', () => {
+    const data = buildPipes([P]);                    // untyped P draws as the data bus
+    expect(data.segs.every(s => s.box), 'v1.8.3: the data bus draws SQUARE').toBe(true);
+    expect(data.segs[0]!.half, 'and THINNER: 60% of the file radius').toBeCloseTo(0.012, 10);
     const item = buildPipes([{
       ...P, type: 'item', radius: 0.08,
       segments: P.segments.map(s => ({ ...s, box: true })),
     }]);
     expect(item.segs.every(s => s.box)).toBe(true);
-    expect(item.segs[0]!.radius).toBe(0.08);
+    expect(item.segs[0]!.half, 'item ducts keep their full file section').toBeCloseTo(0.08, 10);
+    const lv = buildPipes([{ ...P, type: 'lowvoltage' }]);
+    expect(lv.segs.every(s => !s.box), 'round unless the file/kind says square').toBe(true);
+    expect(lv.segs[0]!.half).toBeCloseTo(0.02, 10);
   });
 
   test('per-segment colours (LINEAR /255, blueprint.js default 128) and the metal/chrome pass', () => {

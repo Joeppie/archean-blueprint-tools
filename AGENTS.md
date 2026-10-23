@@ -658,6 +658,18 @@ freshly-authored triangles, fixture 9000006001 — see the v1.5.12 bullet).
   `help.spec.ts` (@ui, desktop+pixel7: menu→dialog, h1, sphere LIMITS table
   as a real <table>, search by title/tag/body word, Esc/✕/backdrop close,
   dialog never outgrows the viewport).
+- **v1.8.3 CABLE CROSS-SECTION TIERS (user 2026-10-23: "Data cables should be
+  thinner. And less round, item cables square."):** `pipes.ts KIND_SECTION` —
+  the per-kind DISPLAY override, the one place the viewport departs from the
+  file's cylinder: `data → { box: true, scale: 0.6 }` (thin square bus, drawn
+  half-extent 0.012; the user's earlier "square is fine" for data), every
+  other kind unchanged (round; square only under the segment `box` flag —
+  the item ducts keep their full 0.08 section). `CableSeg/PipePlug.half` is
+  the DRAWN half-extent (bars, elbow spheres and plug collars size from it;
+  `radius` stays the file/physical truth); `pipeInfo().style[kind].half`
+  exposes it. Pins: `pipes.test.ts` "cross-sections" (data square+thin, item
+  full section, lv round) + e2e ISW/truck (square data with `half < 0.015`,
+  round+square partition, item half 0.08).
 - **v1.8.2 CABLE DIRECTION RULE (user 2026-10-23: "the wire must always
   connect in the right direction ONTO/FROM the connector and the radius of
   the wire is the minimum distance it must continue in the same direction as

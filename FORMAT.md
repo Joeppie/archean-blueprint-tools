@@ -700,7 +700,10 @@ recorded endpoints in 57 files:
 • **A cable is a CYLINDER** of the pipe's `radius` (corpus per kind: data/lowvoltage
 0.02, highvoltage 0.04, fluid 0.045, item 0.08). Square ONLY where the segment carries
 `box: true` — the corpus census shows **only `item` ducts set it** (the user's
-"in-game: round, not square… item is square indeed"). Elbow direction changes close
+"in-game: round, not square… item is square indeed"). DISPLAY OVERRIDE (v1.8.3,
+`KIND_SECTION`): the user rules the viewport read — "Data cables should be thinner.
+And less round, item cables square" — so the DATA bus draws SQUARE at 60% of its
+file radius (`half = 0.012`); the file's radius stays the physical truth. Elbow direction changes close
 with a SPHERE of the cable radius (two butt cylinders leave a notch), and the LAST
 segment is stored REVERSED (it points from the b-adapter back into the path) — the
 elbow test must read its useful direction as `(dir+3)%6`.

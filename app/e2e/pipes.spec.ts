@@ -1,10 +1,12 @@
-// CABLE fidelity pins (v1.8.1, user: "the cables for the fluid look quite
+// CABLE fidelity pins (v1.8.1+, user: "the cables for the fluid look quite
 // different in game … the gray circles on components that take fluid are the
-// ones that it should connect to … round, not square"): round cross-sections
-// except the box-flagged item ducts, the file's per-kind colours, and cable
-// ENDS that follow a moved part back onto its socket (sockets.ts law — the
-// pure corpus proof lives in engine/__tests__/sockets.test.ts; this suite
-// pins the RENDERED network through __ARCHEAN__.engine).
+// ones that it should connect to … round, not square"; v1.8.3: "Data cables
+// should be thinner. And less round, item cables square."): round hoses,
+// square where the file/kind says so (item ducts, the thin data bus), the
+// file's per-kind colours, and cable ENDS that follow a moved part back onto
+// its socket (sockets.ts law — the pure corpus proof lives in
+// engine/__tests__/sockets.test.ts; this suite pins the RENDERED network
+// through __ARCHEAN__.engine).
 import { expect, test, type Page } from '@playwright/test';
 
 const ISW = '3812927875';                    // fluid + data + lv + hv cables
@@ -13,7 +15,8 @@ const TRUCK = '3481322297';                  // Classic American Semi: all five 
 interface PipeInfo {
   pipes: number; segs: number; joints: number; plugs: number; stale: number;
   round: number; square: number; metal: number; kinds: string[];
-  style: Record<string, { r: number; g: number; b: number; box: boolean; metal: boolean; radius: number }>;
+  style: Record<string, { r: number; g: number; b: number; box: boolean; metal: boolean;
+    radius: number; half: number }>;
   leads: { checked: number; bad: number };
   ends: { a: number[]; b: number[] }[];
 }
@@ -34,8 +37,9 @@ test.describe('cables render like the game and plug into their sockets', () => {
     await openCables(page, ISW);
     const i = (await info(page))!;
     expect(i.pipes).toBeGreaterThanOrEqual(20);
-    expect(i.round, 'every drawn bar is a CYLINDER (no item pipes on the ISW)').toBe(i.segs);
-    expect(i.square).toBe(0);
+    expect(i.square, 'the data bus draws as the thin square species').toBeGreaterThan(0);
+    expect(i.round, 'fluid and HV stay round hoses').toBeGreaterThan(0);
+    expect(i.round + i.square, 'every bar has exactly one cross-section').toBe(i.segs);
     expect(i.joints, 'elbow spheres close the direction changes').toBeGreaterThan(0);
     expect(i.plugs, 'one black collar per cable end').toBe(2 * i.pipes);
     expect(i.leads.checked, 'plugs with an axial lead exist').toBeGreaterThan(0);
@@ -45,7 +49,8 @@ test.describe('cables render like the game and plug into their sockets', () => {
     expect(i.style.fluid!.box, 'the fluid hose is ROUND').toBe(false);
     expect(i.style.fluid!.metal, 'ISW fluid cables ride the file chrome flag').toBe(true);
     expect(i.style.fluid!.r, 'the ISW (an older save) writes its hose nearly BLACK — the file colour is truth').toBeLessThan(0.1);
-    expect(i.style.data!.box, 'data stays its recorded cross-section').toBe(false);
+    expect(i.style.data!.box, 'v1.8.3: data draws square').toBe(true);
+    expect(i.style.data!.half, 'v1.8.3: data draws THINNER').toBeLessThan(0.015);
     expect(i.style.data!.b, 'data sheath: the blue channel leads (navy family)').toBeGreaterThan(i.style.data!.r);
   });
 
@@ -59,6 +64,9 @@ test.describe('cables render like the game and plug into their sockets', () => {
     expect(i.style.item!.box).toBe(true);
     expect(i.style.item!.metal, 'item ducts ride the file metal flag').toBe(true);
     expect(i.style.item!.radius).toBeCloseTo(0.08, 4);
+    expect(i.style.item!.half, 'item ducts keep their full section').toBeCloseTo(0.08, 4);
+    expect(i.style.data!.box, 'data: square').toBe(true);
+    expect(i.style.data!.half, 'data: thinner than its file radius').toBeLessThan(0.015);
     expect(i.style.fluid!.r, 'this craft writes its fluid hoses WHITE').toBeGreaterThan(0.9);
     expect(i.style.fluid!.metal, 'fluid hoses ride the chrome flag into the shiny pass').toBe(true);
     expect(i.style.highvoltage!.box, 'HV cable is round').toBe(false);

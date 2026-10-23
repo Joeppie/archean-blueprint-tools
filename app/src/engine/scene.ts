@@ -796,7 +796,7 @@ void main() {
     };
     const plain: BufferGeometry[] = [], metal: BufferGeometry[] = [];
     for (const s of net.segs) {
-      const g = barGeo(s.box ? 'box' : 'cyl', s.a, s.b, s.radius);
+      const g = barGeo(s.box ? 'box' : 'cyl', s.a, s.b, s.half);
       if (g) (s.metal ? metal : plain).push(paintGeo(g, s.color));
     }
     for (const j of net.joints) {
@@ -826,7 +826,7 @@ void main() {
     // round like the hose, square for the box ducts
     const collar: BufferGeometry[] = [];
     for (const p of net.plugs) {
-      const r = p.radius * 1.8, h = Math.max(0.03, p.radius * 3);
+      const r = p.half * 1.8, h = Math.max(0.03, p.half * 3);
       const g = (p.box ? new BoxGeometry(2 * r, h, 2 * r) : new CylinderGeometry(r, r, h, 14)).clone();
       const dir = new Vector3(p.axis[0], p.axis[1], p.axis[2]);
       const q = new Quaternion().setFromUnitVectors(Y, dir);
@@ -889,23 +889,27 @@ void main() {
    *  first bar of a run is often the black sheath stub. */
   pipeInfo() {
     const net = this.pipeNet;
-    interface Sample { n: number; cols: Map<string, number>; metal: number; box: number; radius: number }
+    interface Sample { n: number; cols: Map<string, number>; metal: number; box: number;
+      radius: number; half: number }
     const per = new Map<string, Sample>();
     for (const s of net.segs) {
       let p = per.get(s.kind);
-      if (!p) per.set(s.kind, p = { n: 0, cols: new Map(), metal: 0, box: 0, radius: s.radius });
+      if (!p) per.set(s.kind, p = { n: 0, cols: new Map(), metal: 0, box: 0,
+        radius: s.radius, half: 0 });
       p.n++;
+      p.half += s.half;
       const key = `${s.color[0]},${s.color[1]},${s.color[2]}`;
       p.cols.set(key, (p.cols.get(key) ?? 0) + 1);
       if (s.metal) p.metal++;
       if (s.box) p.box++;
     }
-    const style: Record<string, { r: number; g: number; b: number; box: boolean; metal: boolean; radius: number }> = {};
+    const style: Record<string, { r: number; g: number; b: number; box: boolean;
+      metal: boolean; radius: number; half: number }> = {};
     for (const [kind, p] of per) {
       const top = [...p.cols.entries()].sort((a, b) => b[1] - a[1])[0]![0].split(',').map(Number);
       style[kind] = {
         r: top[0]!, g: top[1]!, b: top[2]!,
-        box: p.box * 2 > p.n, metal: p.metal > 0, radius: p.radius,
+        box: p.box * 2 > p.n, metal: p.metal > 0, radius: p.radius, half: p.half / p.n,
       };
     }
     return {
