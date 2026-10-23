@@ -56,6 +56,9 @@ declare global {
     /** v1.6 TOOLS ▸ placement ghost (Spheroid): state, screen anchor and
      *  the pin-driven whole-cell nudge (same path the widget commits) */
     placeGhost: () => ReturnType<Engine['clusterGhostState']>;
+    /** v1.8.6: the ghost's LIVE triangle records (what ✔ Build writes) — the
+     *  urgent-fix pin compares the ghost's AREA to the built file's */
+    placeData: () => ReturnType<Engine['clusterGhostData']>;
     placePoint: () => ReturnType<Engine['clusterGhostScreenPoint']>;
     placeShift: (s: [number, number, number]) => boolean;
     /** v1.7.2: 90° quarter-turn of the ghost about a world axis (lattice law) */
@@ -163,6 +166,7 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
       // v1.6 TOOLS ▸ placement ghost (Spheroid): state + the pin-driven
       // whole-cell nudge (the widget commit routes through the same path)
       placeGhost: () => engine.clusterGhostState(),
+      placeData: () => engine.clusterGhostData(),
       placePoint: () => engine.clusterGhostScreenPoint(),
       placeShift: (s: [number, number, number]) => engine.clusterGhostShift(s),
       placeRotate: (axis: 'x' | 'y' | 'z') => engine.clusterGhostRotate(axis),

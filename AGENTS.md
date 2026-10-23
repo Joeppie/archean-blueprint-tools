@@ -1087,6 +1087,44 @@ e2e re-pinned to STORE. Pins: vitest `balloonfin.test.ts` (9), `tooldoc.test.ts`
 "the TAIL section" (@ui desktop+pixel7). In-game arbitration of triangle
 panels on hinges is the USER's (no corpus precedent — flagged in the help
 topic + FORMAT).
+- **v1.8.6 THE SKIN TRANSFORM CUTS, NEVER DROPS (urgent-fix.md, user: "a valid
+ zeppelin suddenly misses a face after rotations … the size doesn't inherently
+ change"):** the frame-aligned 31-slot window is a FRAME law, so a face with
+ span > 20 cells encodes only while its `min` sits low inside its 12-cell
+ frame — a ⟲ quarter-turn or a cell drag keeps the SPAN but re-places `min`,
+ and `transformSkinTris` (shared by `Engine.clusterGhostRotate` and
+ `shiftSkinTris`, the balloon/sphere commit's offset) used to DROP those
+ images: holes in the ghost PERSISTED into the built file and every undo
+ snapshot (measured: the 12×8×12 cyl+nose spec has 32 fat faces, a z+2 shift
+ or a rotX about pivot 7/11 lost 4–6 of them). Now: encode-else-`splitRec`
+ (the shipped midpoint splitter) with a RECORD PAINTER (`reencodeSkinTri`) so
+ pieces re-wear the source's colours[5]/material/smooth verbatim — faces that
+ already encode stay byte-identical. `balloonfin.mirror()`'s
+ `encodeSkinTri(...)!` (same class: x → 2c−x moves `min` too, so the L twin
+ could push `undefined`) is encode-else-split `flatMap`. **SECOND DEFECT found
+ while pinning (the file-level hole):** `commitBalloon` transformed the whole
+ ghost list once then SLICED it by the STAGED group sizes — splitting ADDS
+ records, so every later boundary drifted (fin pieces into the skin, panels
+ into the wrong Build, the tail off the end: ghost 960 faces → file 942). The
+ batch now maps EACH GROUP through the recovered `ghostMap` on its own
+ (`paintGroup`), so a split stays GROUP-LOCAL; the `take()` cursor is gone and
+ the `balloon.skinCount` count contract is DELETED from `PlacePayload` so it
+ cannot be resurrected (tooldoc's payload simplified with it).
+ **Standing rule: any helper mapping stored skin records through a POSITION
+ change treats the window as something to CUT, never to filter — and never
+ slices a transformed list by pre-transform counts.** Pins: vitest
+ `splitface.test.ts` "transformSkinTris NEVER DROPS" (non-vacuous fat premise,
+ every shift/quarter-turn keeps length ≥ base + every piece encodes + the
+ summed signed AREA vector within 1 % + 64 cells² — a split moves it ~6, a
+ dropped fat face hundreds, thin crafts vertex-exact, pieces re-wear the
+ record's paint, shift round-trip), `balloonfin.test.ts` (big-zeppelin tail
+ batch complete, no undefined, every record in its own window), e2e
+ `sphereskin.spec.ts` "rotate + drag a big balloon" (⟲Y + a 5-cell drag ⇒ the
+ FILE's area, top-level PLUS nested Build triangles, equals the ghost's;
+ discriminating — the old count-slicing fails it). `sphereSkinTris` routes its
+ plan faces through `splitFace` too (already-valid faces are byte-identical,
+ so every pin stands) and the hook `__ARCHEAN__.placeData()` exposes the
+ ghost's live records = what ✔ Build writes.
 - **FAILED ATTEMPT — DO NOT RESURRECT blind: the Spheroid generator
   (2026-10-21/22).** (SUCCESSOR SHIPPED ABOVE — v1.5.17.) Three iterations (block-matching → staircase chamfers →
   additive bevels + a watertight triangle SKIN) were all reverted from main:

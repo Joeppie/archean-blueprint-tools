@@ -542,4 +542,91 @@ test.describe('generate balloon tool: dialog → movable ghost → cancel/build 
         : `${c2[0].length}/${c2[1].length}/${c2[2].length}/${c2[3].length}`;
     }, { timeout: 20_000 }).toBe('clean');
   });
+  // ------------------------------------------------------------- v1.8.6 ---
+  // urgent-fix.md: "a valid zeppelin suddenly misses a face after rotations
+  // … depending on where it is rotated, possibly moved". The ghost's ⟲ and
+  // drag transforms used to DROP every fat face whose image left the frame-
+  // aligned window — and the hole was PERSISTED into the built file. The
+  // law: split, never drop. This pin ghosts the user's 12×8×12 cyl+nose
+  // balloon WITH fins, ⟲Y + a 5-cell drag, ✔ Builds, and asserts the FILE's
+  // skin area equals the ghost's (the pre-fix tree lost ~2.5 % of it).
+  test('rotate + drag a big balloon: the FILE keeps the ghost’s whole skin @ui', async ({ page }) => {
+    test.setTimeout(180_000);      // a 24 m zeppelin's fin batch plans on the worker
+    await openNew(page);
+    await page.getByTestId('tools-menu').click();
+    await page.getByTestId('tool-balloon').click();
+    await page.getByTestId('tool-opt-profile-cylinder').click();
+    await page.getByTestId('tool-opt-fins-on').click();
+    await setRange(page, 'rx', 12);
+    await setRange(page, 'ry', 8);
+    await setRange(page, 'rz', 12);
+    const prev = page.locator('[data-testid="tool-preview"]');
+    await expect.poll(async () => ((await prev.textContent()) ?? '').includes('rudder'),
+      { timeout: 60_000 }).toBe(true);
+    await page.getByTestId('tool-ok').click();
+    await expect(page.getByTestId('tool-confirm-box')).toBeVisible();
+    await page.getByTestId('tool-confirm').click();
+    await expect(page.getByTestId('place-label')).toBeVisible({ timeout: 60_000 });
+
+    // the transforms that used to bite: ONE quarter-turn, ONE whole-cell drag
+    // (evaluate-click: on the 412 px viewport the label's turn row overflows
+    // the viewport, and a real pointer click waits for visibility forever)
+    await page.getByTestId('place-rot-y').evaluate(el => (el as HTMLElement).click());
+    expect((await ghost(page))!.turns).toBe(1);
+    expect(await shift(page, [0, 0, 5])).toBe(true);
+
+    const ghostArea = await page.evaluate(() => {
+      const d = (window as unknown as { __ARCHEAN__: { placeData: () => {
+        triangles: Record<string, number>[] } } }).__ARCHEAN__.placeData();
+      const g = (t: Record<string, number>, i: number, ax: string) =>
+        t[`v${i}_${ax}`]! + 12 * (t[`frame_${ax}`] ?? 0);
+      let a = 0;
+      for (const t of d.triangles) {
+        const u = [0, 1, 2].map(k => g(t, 1, ['x', 'y', 'z'][k]!) - g(t, 0, ['x', 'y', 'z'][k]!));
+        const w = [0, 1, 2].map(k => g(t, 2, ['x', 'y', 'z'][k]!) - g(t, 0, ['x', 'y', 'z'][k]!));
+        a += Math.hypot(u[1]! * w[2]! - u[2]! * w[1]!,
+          u[2]! * w[0]! - u[0]! * w[2]!,
+          u[0]! * w[1]! - u[1]! * w[0]!) / 2;
+      }
+      return a;
+    });
+    expect(ghostArea).toBeGreaterThan(1000);          // premise: a fat-face skin
+
+    await page.getByTestId('place-build').click();
+    await expect(page.getByTestId('tool-toast')).toContainText('BALLOON');
+    const built = await page.evaluate(() => {
+      const ts0 = ((window as unknown as { __ARCHEAN__: { engine: { blueprint: { data: {
+        triangles?: Record<string, number>[] } } } } }).__ARCHEAN__.engine.blueprint.data.triangles) ?? [];
+      // the ghost payload is skin + fillets + the three PANELS; the commit
+      // nests the panels into their Build subgrids (data.triangles there),
+      // so the file-side total = the top skin PLUS every nested list
+      const comps = ((window as unknown as { __ARCHEAN__: { engine: { blueprint: { data: {
+        components?: { type: string; data?: Record<string, unknown> }[] } } } } })
+        .__ARCHEAN__.engine.blueprint.data.components) ?? [];
+      const ts = [...ts0];
+      for (const c of comps)
+        for (const t of ((c.data?.['triangles'] as Record<string, number>[] | undefined) ?? [])) ts.push(t);
+      const g = (t: Record<string, number>, i: number, ax: string) =>
+        t[`v${i}_${ax}`]! + 12 * (t[`frame_${ax}`] ?? 0);
+      let a = 0, bad = 0;
+      for (const t of ts) {
+        // every stored record must decode inside its own 32-slot window
+        for (const ax of ['x', 'y', 'z'])
+          for (let i = 0; i < 3; i++) {
+            const wv = t[`v${i}_${ax}`]!;
+            if (wv < 0 || wv > 31) bad++;
+          }
+        const u = [0, 1, 2].map(k => g(t, 1, ['x', 'y', 'z'][k]!) - g(t, 0, ['x', 'y', 'z'][k]!));
+        const w = [0, 1, 2].map(k => g(t, 2, ['x', 'y', 'z'][k]!) - g(t, 0, ['x', 'y', 'z'][k]!));
+        a += Math.hypot(u[1]! * w[2]! - u[2]! * w[1]!,
+          u[2]! * w[0]! - u[0]! * w[2]!,
+          u[0]! * w[1]! - u[1]! * w[0]!) / 2;
+      }
+      return { area: a, bad };
+    });
+    expect(built.bad, 'every stored record is window-legal').toBe(0);
+    // the hole was ~2.5 % of the skin — a 1 % band catches it with room
+    expect(Math.abs(built.area - ghostArea), 'file area vs ghost area')
+      .toBeLessThan(ghostArea * 0.01);
+  });
 });

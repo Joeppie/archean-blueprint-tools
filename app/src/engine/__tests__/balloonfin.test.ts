@@ -258,3 +258,35 @@ describe('balloon tail plan (untouched cone, hung vanes)', () => {
     expect(skin.length).toBeGreaterThan(0);
   });
 });
+
+describe('v1.8.6 — the mirror never holes a fin face (urgent-fix.md)', () => {
+  test('the big zeppelin tail batch is COMPLETE: no undefined, every record stores', () => {
+    // mirror() x → 2·cSide − x moves `min` within its 12-cell frame, so a
+    // fat R face could fail the window on the L side — the old
+    // `encodeSkinTri(...)!` then pushed undefined into the triangle list.
+    // encode-else-split; this pins the shipped plan at the user's size.
+    const p = planBalloonTail(
+      { rx: 12, ry: 8, rz: 12, profile: 'cylinder', noseShoulder: 0.35, tailShoulder: 0.6 },
+      { pivotType: 'SmallHinge', finScale: 1, oversize: 1, volumes: 3 }, adapters);
+    expect(p.ok, p.reason).toBe(true);
+    for (const key of ['fillets', 'panels'] as const) {
+      for (const role of ['rudder', 'aileronL', 'aileronR'] as const) {
+        const list = p[key][role];
+        expect(list.length, `${key}.${role} non-empty`).toBeGreaterThan(0);
+        expect(list.every(Boolean), `${key}.${role}: no undefined/null entry`).toBe(true);
+        for (const t of list) {                       // every record round-trips
+          const g = [0, 1, 2].map(i => gOf(rec(t), i as 0 | 1 | 2)) as
+            [[number, number, number], [number, number, number], [number, number, number]];
+          for (const ax of [0, 1, 2] as const) {
+            const f = Math.floor(Math.min(g[0]![ax]!, g[1]![ax]!, g[2]![ax]!) / 12);
+            for (const q of g) {
+              const w = q[ax]! - 12 * f;
+              expect(w, `${key}.${role} window`).toBeGreaterThanOrEqual(0);
+              expect(w, `${key}.${role} window`).toBeLessThanOrEqual(31);
+            }
+          }
+        }
+      }
+    }
+  }, 120_000);
+});

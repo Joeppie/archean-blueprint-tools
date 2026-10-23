@@ -842,6 +842,26 @@ Evidence (ISW-241, 21 triangles):
   solid, so inward/outward swap front/back, never shape). hullify writes
   `smooth:1` on every NEW triangle by default (the game's own convention
   in its hull saves), with a `flat` option that omits the key.
+- **The storage window is FRAME-ALIGNED, so a MOVE can un-store a face (app
+  v1.5.17 law, v1.8.6 consequence):** per axis the record holds
+  `frame_ax = floor(min_ax/12)` and three 5-bit `v_ax ∈ 0..31`, i.e. a face
+  stores only if its per-axis span fits `31 − (min − 12·floor(min/12))` —
+  STRICTER than span ≤ 31: a 29-cell span straddling a frame border stores
+  NOTHING while the same face 1 cell over does. Consequence (the user's "a
+  valid zeppelin suddenly misses a face after rotations … the size doesn't
+  inherently change", urgent-fix.md): a quarter-turn or a whole-cell drag
+  keeps the SPAN but re-places `min` inside its frame, so any face with span
+  > 20 can encode where it was authored and fail after the move. THE WRITER'S
+  LAW therefore is CUT, NEVER FILTER: a position-mapped face whose image
+  fails the window is subdivided (midpoint 1→4, mirror-symmetric ties) until
+  every piece stores, and a group of records (main skin vs a Build subgrid's
+  panels) is mapped GROUP-WISE — splitting adds records, so slicing one
+  transformed list by pre-transform counts mis-assigns and drops faces.
+  Implemented in `app/src/engine/latsphere.ts` (`splitFace` /
+  `transformSkinTris` / `reencodeSkinTri`); pins `__tests__/splitface.test.ts`
+  "transformSkinTris NEVER DROPS" + e2e `sphereskin.spec.ts` "rotate + drag a
+  big balloon" (the BUILT file's area, top-level plus nested Build triangles,
+  must equal the ghost's).
 - **Seam rendering — NOT a documented mechanic (retracted Oct 20 2026)**:
   a same-day reading claimed the game keys triangle edges for adjacency
   (`MakeEdge`) and draws side walls only on FREE edges, making joined

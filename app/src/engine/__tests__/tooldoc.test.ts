@@ -311,7 +311,7 @@ describe('v1.9 balloon tail persists through the SHIPPED commit', () => {
       ...plan.fillets.rudder, ...plan.fillets.aileronL, ...plan.fillets.aileronR,
       ...plan.panels.rudder, ...plan.panels.aileronL, ...plan.panels.aileronR],
     rides: [plan.probes],
-    balloon: { plan, skinCount: skinTris.length },
+    balloon: { plan },
   };
   type Saved = {
     data: {

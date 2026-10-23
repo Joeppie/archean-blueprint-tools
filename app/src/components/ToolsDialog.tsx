@@ -24,7 +24,8 @@ import {
   replaceSources, replaceAll, parseHexColor, paletteSlotNode, allocateSlot, nearestSlot,
   PAINT_FINISHES, paintFinish,
 } from '../engine/tools';
-import { sphereSkinTris, sphereStats, shiftSkinTris, skinKg, type GP3, type SkinOptions, type SphereSpec, type SphereStats } from '../engine/latsphere';
+import { sphereSkinTris, sphereStats, shiftSkinTris, transformSkinTris, skinKg,
+  type GP3, type SkinOptions, type SphereSpec, type SphereStats } from '../engine/latsphere';
 import { sphereSkinTrisAsync, sphereStatsAsync } from '../engine/latsphere-async';
 import {
   planBalloonTail, ghostMap, pipeSegments,
@@ -50,7 +51,7 @@ export type ToolForm = Record<string, ToolValue>;
 export interface PlacePayload {
   blocks?: Block[]; triangles?: Triangle[];
   rides?: GP3[][];
-  balloon?: { plan: BalloonPlan; skinCount: number };
+  balloon?: { plan: BalloonPlan };
 }
 
 export interface ToolFieldDef {
@@ -615,17 +616,20 @@ function tailNote(f: ToolForm, plan: BalloonPlan): string {
     + `· volume ${c.volumes}${want > c.volumes ? ` (clamped from ${want} — envelope)` : ''} enclosed`;
 }
 
-/** GHOST triangle order = the commit's LIVE slice order:
- *  SKIN | fillet rudder/L/R | panel rudder/L/R (the fixed skin AND the
- *  fillets join data.triangles; the MOVABLE panels end up nested in the
- *  Build subgrids) */
+/** The ghost is ONE shape (skin + fillets + panels) and the commit writes the
+ *  LIVE ghost data for the skin-only case; the TAIL batch instead re-maps each
+ *  GROUP of the plan through the recovered ghost map, so the list order here
+ *  is presentation only (v1.8.6: it used to be a COUNT CONTRACT — slicing the
+ *  transformed list by these sizes broke the moment a face split). The fixed
+ *  skin AND the fillets join data.triangles; the MOVABLE panels nest into the
+ *  Build subgrids. */
 function balloonPayload(plan: BalloonPlan, skin: Triangle[]): PlacePayload {
   return {
     triangles: [...skin,
       ...plan.fillets.rudder, ...plan.fillets.aileronL, ...plan.fillets.aileronR,
       ...plan.panels.rudder, ...plan.panels.aileronL, ...plan.panels.aileronR],
     rides: [plan.probes],
-    balloon: { plan, skinCount: skin.length },
+    balloon: { plan },
   };
 }
 
@@ -684,22 +688,25 @@ function commitBalloon(f: ToolForm, payload: PlacePayload,
   }
   const material = +String(f['material']).slice(1) || 0;
   const smooth = f['shade'] === 'smooth';
-  // v1.7.2: the payload is the LIVE ghost (quarter-turns included — the
-  // lattice rotated the vertices in the engine), so the commit RE-COLOURS
-  // it rather than re-planning a fresh un-rotated skin. An EMPTY payload
-  // (headless callers) falls back to the plan.
-  const ghost = payload.triangles?.length
-    ? payload.triangles
-    : sphereSkinTris(sphereForm(f), { slot, material, smooth });
-  const recoloured = ghost.map(t => {
+  // every record the batch writes wears the COMMIT-resolved paint
+  const recolour = (t: Triangle): Triangle => {
     const o: Record<string, unknown> = { ...t, colors: [slot, slot, slot, slot, slot], material };
     if (smooth) o.smooth = 1; else delete o.smooth;
     return o as unknown as Triangle;
-  });
-  const shifted = shiftSkinTris(recoloured,
-    [Math.round(offset[0]), Math.round(offset[1]), Math.round(offset[2])]);
+  };
   const bc = payload.balloon;
   if (!bc) {
+    // SKIN ONLY: the payload is the LIVE ghost (quarter-turns included — the
+    // lattice rotated the vertices in the engine), so the commit RE-COLOURS
+    // it rather than re-planning a fresh un-rotated skin. An EMPTY payload
+    // (headless callers) falls back to the plan.
+    const ghost = payload.triangles?.length
+      ? payload.triangles
+      : sphereSkinTris(sphereForm(f), { slot, material, smooth });
+    // v1.8.6: shiftSkinTris SPLITS a face whose shifted image leaves the
+    // frame-aligned window (never drops), so the skin alone can never hole.
+    const shifted = shiftSkinTris(ghost.map(recolour),
+      [Math.round(offset[0]), Math.round(offset[1]), Math.round(offset[2])]);
     // bp + doc TOGETHER (v1.6.1 fix): the doc array must be created when
     // the file never carried triangles — the old bare push+insert silently
     // dropped every triangle on block-only crafts, so the saved file and
@@ -711,24 +718,30 @@ function commitBalloon(f: ToolForm, payload: PlacePayload,
   // ---- the v1.9 TAIL batch: one Undo step writes skin + sleeve + panels
   // + coupler + pivots + volumes + joins + cables, ALL through the doc ----
   const plan = bc.plan;
-  let cur = 0;
-  const take = (n: number): Triangle[] => { const s = shifted.slice(cur, cur + n); cur += n; return s; };
-  const skin = take(bc.skinCount);
-  const fillet: Record<FinRole, Triangle[]> = {
-    rudder: take(plan.fillets.rudder.length),
-    aileronL: take(plan.fillets.aileronL.length),
-    aileronR: take(plan.fillets.aileronR.length),
-  };
-  const panel: Record<FinRole, Triangle[]> = {
-    rudder: take(plan.panels.rudder.length),
-    aileronL: take(plan.panels.aileronL.length),
-    aileronR: take(plan.panels.aileronR.length),
-  };
-  // the tail cone stays UNTOUCHED — the fixed fillets join the main skin
-  appendTrianglesDoc(ctx, [...skin, ...fillet.rudder, ...fillet.aileronL, ...fillet.aileronR]);
   // the ghost's quarter-turns + cell offset, recovered from the probe
   // tetrahedron the engine turned WITH the skin (scene.clusterGhostData)
   const map = ghostMap(plan.probes, payload.rides?.[0], offset);
+  // v1.8.6 (urgent-fix.md): the batch used to slice the ONE transformed
+  // ghost list by the STAGED group sizes. A face whose image left the
+  // frame-aligned window then either dropped (a HOLE persisted into the
+  // file) or, once splitting added records, shifted every later boundary —
+  // panels leaked into the main skin and the tail overflowed off the end.
+  // Each GROUP now travels through the recovered map on its own, so a split
+  // stays GROUP-LOCAL: the panels still nest into their own Build.
+  const paintGroup = (list: Triangle[]) => transformSkinTris(list.map(recolour), map.g);
+  const skin = paintGroup(sphereSkinTris(sphereForm(f), { slot, material, smooth }));
+  const fillet: Record<FinRole, Triangle[]> = {
+    rudder: paintGroup(plan.fillets.rudder),
+    aileronL: paintGroup(plan.fillets.aileronL),
+    aileronR: paintGroup(plan.fillets.aileronR),
+  };
+  const panel: Record<FinRole, Triangle[]> = {
+    rudder: paintGroup(plan.panels.rudder),
+    aileronL: paintGroup(plan.panels.aileronL),
+    aileronR: paintGroup(plan.panels.aileronR),
+  };
+  // the tail cone stays UNTOUCHED — the fixed fillets join the main skin
+  appendTrianglesDoc(ctx, [...skin, ...fillet.rudder, ...fillet.aileronL, ...fillet.aileronR]);
   // flattened indices (composite_builds / pipes keys): appended top-level
   // entries with EMPTY nested content ride straight onto the flat tail
   const flat0 = flattenComponents(ctx.bp).length;

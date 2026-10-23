@@ -1127,7 +1127,15 @@ const SPLIT_DEPTH = 8;
 
 const gEq = (p: GP3, q: GP3) => p[0] === q[0] && p[1] === q[1] && p[2] === q[2];
 
-function splitRec(tri: [GP3, GP3, GP3], opt: SkinOptions, depth: number): Triangle[] | null {
+/** How a split piece is spelled into a record. Defaults to encodeSkinTri's
+ *  uniform-slot style; transformSkinTris passes a painter that reproduces
+ *  the SOURCE record's full colours[5]/material/shading (prisms use all
+ *  five slots — a split face's pieces must wear them verbatim). */
+type PiecePainter = (g: [GP3, GP3, GP3]) => Triangle | null;
+
+const optPainter = (opt: SkinOptions): PiecePainter => g => encodeSkinTri(g, opt);
+
+function splitRec(tri: [GP3, GP3, GP3], paint: PiecePainter, depth: number): Triangle[] | null {
   if (depth >= SPLIT_DEPTH) return null;
   const [a, b, c] = tri;
   const cenSum: GP3 = [a[0] + b[0] + c[0], a[1] + b[1] + c[1], a[2] + b[2] + c[2]];
@@ -1140,9 +1148,9 @@ function splitRec(tri: [GP3, GP3, GP3], opt: SkinOptions, depth: number): Triang
   const out: Triangle[] = [];
   for (const s of subs) {
     if (gEq(s[0], s[1]) || gEq(s[1], s[2]) || gEq(s[0], s[2])) continue;   // collapsed ▸ drop
-    const t = encodeSkinTri(s, opt);
+    const t = paint(s);
     if (t) { out.push(t); continue; }
-    const parts = splitRec(s, opt, depth + 1);
+    const parts = splitRec(s, paint, depth + 1);
     if (parts === null) return null;          // a branch the cap could not save
     out.push(...parts);
   }
@@ -1163,7 +1171,7 @@ export function splitFace(tri: [GP3, GP3, GP3], opt: SkinOptions): Triangle[] | 
   if (gEq(tri[0], tri[1]) || gEq(tri[1], tri[2]) || gEq(tri[0], tri[2])) return [];
   const t = encodeSkinTri(tri, opt);
   if (t) return [t];                          // already-valid faces are NEVER touched
-  return splitRec(tri, opt, 0);
+  return splitRec(tri, optPainter(opt), 0);
 }
 
 /** Decode a Triangle record to three absolute lattice points (g). */
@@ -1179,31 +1187,52 @@ export function decodeSkinTri(t: Triangle): [GP3, GP3, GP3] {
   return g as [GP3, GP3, GP3];
 }
 
+/** Re-encode absolute lattice points into an EXISTING record's shape: the
+ *  record's colours[5]/material/smooth ride verbatim, frames re-floor, the
+ *  5-bit window is re-checked. null = the image no longer fits (the caller
+ *  decides: transformSkinTris SPLITS, see below). */
+function reencodeSkinTri(t: Triangle, g: [GP3, GP3, GP3]): Triangle | null {
+  const o: Record<string, unknown> = { ...t };
+  const AXES: (0 | 1 | 2)[] = [0, 1, 2];
+  for (const ax of AXES) {
+    const name = 'xyz'[ax]!;
+    const s: [number, number, number] = [g[0]![ax], g[1]![ax], g[2]![ax]];
+    const f = Math.floor(Math.min(s[0], s[1], s[2]) / CELLS_PER_FRAME);
+    o[`frame_${name}`] = f;
+    for (const i of [0, 1, 2] as const) {
+      const v = s[i] - CELLS_PER_FRAME * f;
+      if (v < 0 || v > 31) return null;
+      o[`v${i}_${name}`] = v;
+    }
+  }
+  return o as unknown as Triangle;
+}
+
 /** Lattice-vertex transform of already-encoded skin triangles: decode → map
  *  every g point through fn → re-encode (frames re-floor; colours/material/
  *  shading ride verbatim). fn must map integer g → integer g (whole-cell
- *  shifts and quarter-turns about an INTEGER pivot do); a triangle whose
- *  image no longer fits the 5-bit window drops out. */
+ *  shifts and quarter-turns about an INTEGER pivot do).
+ *  v1.8.6 NEVER DROPS (urgent-fix.md): a quarter-turn SWAPS two axes' spans
+ *  and any move re-places `min` inside its 12-cell frame, so a face whose
+ *  span exceeds 20 encodes at its staged position and fails at unlucky
+ *  ones — exactly the "valid zeppelin misses faces after rotating/moving"
+ *  hole. Such an image is SUBDIVIDED by splitFace (the same "segment
+ *  whatever is breaking" law as generation) and every piece re-wears the
+ *  source record's exact colours[5]/material/shading. Faces that already
+ *  encode stay byte-identical. */
 export function transformSkinTris(tris: Triangle[], fn: (g: GP3) => GP3): Triangle[] {
   const out: Triangle[] = [];
   for (const t of tris) {
     const g = decodeSkinTri(t).map(fn) as [GP3, GP3, GP3];
-    const o: Record<string, unknown> = { ...t };
-    const AXES: (0 | 1 | 2)[] = [0, 1, 2];
-    let ok = true;
-    for (const ax of AXES) {
-      const name = 'xyz'[ax]!;
-      const s: [number, number, number] = [g[0]![ax], g[1]![ax], g[2]![ax]];
-      const f = Math.floor(Math.min(s[0], s[1], s[2]) / CELLS_PER_FRAME);
-      o[`frame_${name}`] = f;
-      for (const i of [0, 1, 2] as const) {
-        const v = s[i] - CELLS_PER_FRAME * f;
-        if (v < 0 || v > 31) { ok = false; break; }
-        o[`v${i}_${name}`] = v;
-      }
-      if (!ok) break;
-    }
-    if (ok) out.push(o as unknown as Triangle);
+    const t2 = reencodeSkinTri(t, g);
+    if (t2) { out.push(t2); continue; }
+    // never drop: split the image (midpoint 1→4, mirror-symmetric ties) and
+    // re-spell every piece in the SOURCE record's clothes
+    const pieces = splitRec(g, s => reencodeSkinTri(t, s), 0);
+    if (pieces) { out.push(...pieces); continue; }
+    // only the depth-cap artifact reaches here (span > ~4600 cells — the
+    // same honest residual splitFace reports; generation screens it long
+    // before). A collapsed image returns [] and simply contributes nothing.
   }
   return out;
 }
@@ -1216,13 +1245,17 @@ export function shiftSkinTris(tris: Triangle[], step: GP3): Triangle[] {
 
 /** The shipped generator: hull faces of the plan as game Triangle records,
  *  OUTWARD-wound (the hull's own orientation), flat/smooth per option, all
- *  five colour faces = one slot. */
+ *  five colour faces = one slot. The plan pre-screens every face against the
+ *  frame-aligned window (planAt splits what it must), so this is a pass-
+ *  through; splitFace is the SAFETY NET of the same law — an already-valid
+ *  face is byte-identical, so nothing changes unless a face would otherwise
+ *  vanish (v1.8.6: never drop, cut). */
 export function sphereSkinTris(spec: SphereSpec, opt: SkinOptions): Triangle[] {
   const plan = spherePlan(spec);
   const out: Triangle[] = [];
   for (const [i, j, k] of plan.faces) {
-    const t = encodeSkinTri([plan.shell[i]!, plan.shell[j]!, plan.shell[k]!], opt);
-    if (t) out.push(t);
+    const parts = splitFace([plan.shell[i]!, plan.shell[j]!, plan.shell[k]!], opt);
+    if (parts) out.push(...parts);
   }
   return out;
 }

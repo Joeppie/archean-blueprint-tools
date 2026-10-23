@@ -13,7 +13,7 @@
 import { describe, expect, test } from 'vitest';
 import {
   splitFace, encodeSkinTri, decodeSkinTri, spherePlan, sphereSkinTris,
-  type GP3, type SkinOptions, type SphereSpec,
+  transformSkinTris, shiftSkinTris, type GP3, type SkinOptions, type SphereSpec,
 } from '../latsphere';
 import type { Triangle } from '../format';
 import { planBalloonTail, type BalloonAdapters } from '../balloonfin';
@@ -175,4 +175,129 @@ describe('the sizes that used to REFUSE now store (integration)', () => {
     expect(p.counts.fillets).toBeGreaterThan(0);
     expect(p.counts.panels).toBeGreaterThan(0);
   }, 120_000);
+});
+
+// --------------------------------------------------- v1.8.6 urgent-fix
+// transformSkinTris (the ⟲ ghost quarter-turns AND the placement-drag/commit
+// shift) used to DROP every face whose image no longer fit the frame-aligned
+// window. A quarter-turn SWAPS two axes' spans and any move re-places `min`
+// inside its 12-cell frame, so a fat face (> 20-cell span) that encoded at
+// its staged position vanished at unlucky ones — the user's "a valid
+// zeppelin suddenly misses a face after rotations … the size doesn't
+// inherently change" hole, persisted into the BUILT file (urgent-fix.md).
+// The law now: NEVER drop — split the image (same splitFace as generation)
+// and re-spell every piece in the source record's clothes.
+const areaMag = (v: GP3) => Math.hypot(v[0]!, v[1]!, v[2]!);
+const rotG = (ax: 0 | 1 | 2, pivot: number) => (g: GP3): GP3 => {
+  const q: GP3 = [g[0]!, g[1]!, g[2]!];
+  const o = (ax + 1) % 3, p = (ax + 2) % 3;
+  const a = g[o]! - pivot, b = g[p]! - pivot;
+  q[o] = pivot - b!; q[p] = pivot + a!;
+  return q;
+};
+
+const BIG: SphereSpec = {
+  rx: 12, ry: 8, rz: 12, profile: 'cylinder', noseShoulder: 0.35, tailShoulder: 0.6,
+};
+
+describe('transformSkinTris NEVER DROPS (urgent-fix.md)', () => {
+  const base = sphereSkinTris(BIG, { slot: 51, material: 0 });
+
+  test('the repro spec carries fat faces (non-vacuous premise)', () => {
+    const fat = base.filter(t => {
+      const g = decodeSkinTri(t);
+      return [0, 1, 2].some(ax =>
+        Math.max(g[0]![ax]!, g[1]![ax]!, g[2]![ax]!) - Math.min(g[0]![ax]!, g[1]![ax]!, g[2]![ax]!) > 20);
+    });
+    expect(fat.length).toBeGreaterThan(0);           // 32 measured 2026-10-23
+  });
+
+  test('every whole-cell shift keeps ALL coverage and every piece stores', () => {
+    const want = signedAreaSum(base);
+    for (const d of [1, 2, 3, 4, 5, 6]) {
+      for (const step of [[0, 0, d], [d, 0, 0], [0, d, 0], [d, d, 0]] as GP3[]) {
+        const out = shiftSkinTris(base, step);
+        expect(out.length, `shift ${step}`).toBeGreaterThanOrEqual(base.length);
+        expect(out.every(Boolean), `shift ${step}: no undefined`).toBe(true);
+        for (const t of out) expect(encodeSkinTri(decodeSkinTri(t), OPT), 'piece stores').not.toBeNull();
+        const got = signedAreaSum(out);
+        for (const ax of [0, 1, 2] as const) {
+          // a SPLIT face's rounded midpoints move its pieces ≤ ~1 cell ⇒ per-
+          // face area drift ≤ ~perim/4 cells² (measured: 6 cells² over the 32
+          // fat faces). DROPPING one fat face instead moves the sum by HUNDREDS.
+          expect(Math.abs(got[ax]! - want[ax]!), `shift ${step} area ax${ax}`)
+            .toBeLessThan(areaMag(want) * 0.01 + 64);
+        }
+      }
+    }
+  }, 120_000);
+
+  test('every quarter-turn keeps ALL coverage (the ⟲X/⟲Y/⟲Z ghost buttons)', () => {
+    const want = signedAreaSum(base);
+    for (const ax of [0, 1, 2] as const) {
+      for (const pivot of [7, 11]) {                // the measured killers
+        const out = transformSkinTris(base, rotG(ax, pivot));
+        expect(out.length, `rot${ax}@${pivot}`).toBeGreaterThanOrEqual(base.length);
+        for (const t of out) expect(encodeSkinTri(decodeSkinTri(t), OPT), 'piece stores').not.toBeNull();
+        const got = signedAreaSum(out);
+        for (const a2 of [0, 1, 2] as const)
+          expect(Math.abs(got[a2]! - want[a2]!), `rot${ax}@${pivot} area`)
+            .toBeLessThan(areaMag(want) * 0.01 + 64);
+      }
+    }
+  }, 120_000);
+
+  test('a face that already encodes after the map stays BYTE-IDENTICAL', () => {
+    // the thin craft: no fat faces ⇒ a shift is a pure relabel, no splitting
+    const slim = sphereSkinTris({ rx: 2, ry: 2, rz: 2 }, { slot: 3, material: 1 });
+    const moved = shiftSkinTris(slim, [12, 0, 0]);
+    expect(moved.length).toBe(slim.length);
+    for (let i = 0; i < slim.length; i++) {
+      const a = decodeSkinTri(slim[i]!), b = decodeSkinTri(moved[i]!);
+      for (let v = 0; v < 3; v++) expect(b[v], `v${v}`).toEqual([a[v]![0] + 12, a[v]![1], a[v]![2]]);
+      expect(moved[i]!.colors).toEqual(slim[i]!.colors);
+    }
+  });
+
+  test('a split piece re-wears the SOURCE record’s colours[5]/material/smooth', () => {
+    // distinct per-slot colours (a hullify-style prism record): the pieces of
+    // a dropped face must carry all five slots VERBATIM, not a uniform slot
+    const rec = {
+      colors: [51, 0, 4, 5, 6], material: 3, smooth: 1,
+      frame_x: 0, frame_y: 0, frame_z: 0,
+      v0_x: 0, v0_y: 0, v0_z: 0, v1_x: 30, v1_y: 0, v1_z: 0, v2_x: 0, v2_y: 30, v2_z: 0,
+    } as unknown as Triangle;
+    const out = transformSkinTris([rec], g => [g[0] + 3, g[1], g[2]]);
+    expect(out.length).toBeGreaterThan(1);          // premise: it had to split
+    for (const t of out) {
+      expect(t.colors).toEqual([51, 0, 4, 5, 6]);
+      expect(t.material).toBe(3);
+      expect(t.smooth).toBe(1);
+      expect(encodeSkinTri(decodeSkinTri(t), OPT)).not.toBeNull();
+    }
+  });
+
+  test('shift round-trip restores the exact vertices (split pieces included)', () => {
+    const out = shiftSkinTris(shiftSkinTris(base, [1, 0, 5]), [-1, 0, -5]);
+    expect(out.length).toBeGreaterThanOrEqual(base.length);
+    const want = signedAreaSum(base), got = signedAreaSum(out);
+    for (const ax of [0, 1, 2] as const)
+      expect(Math.abs(got[ax]! - want[ax]!)).toBeLessThan(areaMag(want) * 0.01 + 64);
+  }, 120_000);
+
+  test('the mirror twin of a fat face is complete (no undefined in the list)', () => {
+    // the balloonfin.mirror() class: x → 2c − x moves `min` within its frame,
+    // so encode succeeds on one side and fails on the other. splitFace-else-
+    // drop is now the law there too; here: a hand-built fat pair.
+    const T: [GP3, GP3, GP3] = [[0, 0, 0], [30, 0, 0], [0, 30, 0]];
+    const enc = encodeSkinTri(T, OPT);
+    const mir = (g: GP3): GP3 => [24 - g[0]!, g[1]!, g[2]!];
+    const twin: [GP3, GP3, GP3] = [mir(T[0]), mir(T[2]), mir(T[1])];
+    const twinEnc = encodeSkinTri(twin, OPT);
+    // at least one side must be non-encodable for the pin to be non-vacuous
+    expect(enc === null || twinEnc === null, 'a side violates the window').toBe(true);
+    const list = [enc, twinEnc].flatMap(t => t ? [t] : (splitFace(t === enc ? T : twin, OPT) ?? []));
+    expect(list.every(Boolean), 'no undefined/null pushed').toBe(true);
+    for (const t of list) expect(encodeSkinTri(decodeSkinTri(t), OPT)).not.toBeNull();
+  });
 });

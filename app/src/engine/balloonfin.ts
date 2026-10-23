@@ -321,15 +321,19 @@ export function planBalloonTail(
   region(upIdx, cUp, zB, zB + ailChord, () => surfSide(zB) + 2, lineS, uHat, panels.aileronR);
   // L twins: mirror EVERYTHING (side coord reflected about the mirror
   // plane, two vertices swapped = the flipped normal) — the pair is
-  // triangle-for-triangle symmetric BY CONSTRUCTION.
-  const mirror = (src: Triangle[]): Triangle[] => src.map(t => {
+  // triangle-for-triangle symmetric BY CONSTRUCTION. v1.8.6: the mirror
+  // moves `min` within its 12-cell frame, so a fat face that encoded on
+  // one side can fail the window on the other — encode-else-SPLIT, never
+  // assert (the old `encodeSkinTri(...)!` pushed undefined into the list
+  // = a render hole / JSON null).
+  const mirror = (src: Triangle[]): Triangle[] => src.flatMap(t => {
     const [a, b, cc] = decodeSkinTri(t);
     const m = (g: GP3): GP3 => {
       const q: GP3 = [g[0]!, g[1]!, g[2]!];
       q[gSide] = 2 * cSide - q[gSide]!;
       return q;
     };
-    return encodeSkinTri([m(a), m(cc), m(b)], SKIN0)!;
+    return splitFace([m(a), m(cc), m(b)], SKIN0) ?? [];
   });
   fillets.aileronL = mirror(fillets.aileronR);
   panels.aileronL = mirror(panels.aileronR);

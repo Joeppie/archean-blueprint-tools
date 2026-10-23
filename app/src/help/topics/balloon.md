@@ -115,7 +115,7 @@ volume and sea-level lift per gas (vacuum / helium / hydrogen).
 | Limit | Value | What it means for you |
 |---|---|---|
 | lattice | 0.25 m cells, integers | radii snap to 0.25 m steps; placement moves in whole cells |
-| triangle window | 32 slots, FRAME-ALIGNED | every face must fit one 31-cell aligned window (v = g − 12·floor(min/12)); faces that outgrow it are now **subdivided by splitFace** (midpoint 1→4, mirror-symmetric) instead of refused — smooth spheroids at any size |
+| triangle window | 32 slots, FRAME-ALIGNED | every face must fit one 31-cell aligned window (v = g − 12·floor(min/12)); faces that outgrow it are **subdivided by splitFace** (midpoint 1→4, mirror-symmetric) instead of refused — smooth spheroids at any size. The same cut applies when you ⟲-turn or drag the ghost: a big face can fit its window where it was planned and not after the move, so the transform re-cuts it — a balloon never loses a panel to a rotation |
 | convexity | strict | no dents, hollows or tori — a skin is a convex blob |
 | smallest radius | ≥ 0.25 m | below a cell there is no lattice to hull |
 | shading | flat │ smooth:1 | flat = the game's authored default; smooth:1 asks the game to weld normals |
