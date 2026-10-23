@@ -44,10 +44,13 @@ line and was retired: the fins now ride the natural cone).
 - **A fixed fillet** fills between the hull and that line (root clinging
   tight to the cone — the orange of the sketch), shoulder to hinge.
   **The MOVABLE rudder/ailerons hang to a horizontal keel line** like
-  stern-post rudders (the green shape): under the hull the panel's upper
-  edge FOLLOWS THE HULL CONTOUR (its hinge side is contour-following,
-  not square), and aft of the hinge line the vane spans keel-to-line to
-  a vertical trailing edge past the tail. The TOP rudder yaws about the
+  stern-post rudders (the green shape) hanging BEHIND the tail: under
+  the hull the panel's upper edge FOLLOWS THE HULL CONTOUR onto the tail
+  end (its hinge side is contour-following, not square, and it never
+  cuts into the ship), and aft of the hinge the vane spans keel-to-line
+  to a vertical trailing edge. The side fins' hung panels keep a clear
+  gap to the cone — their inner edge is a flat, slightly stepped plane,
+  so nothing strikes the tail's radius. The TOP rudder yaws about the
   vertical pivot; the MIRRORED port/starboard pair rolls about the
   longitudinal axis. Panels are hull TRIANGLES, never parts; the pair is
   one plate reflected in the mirror plane, triangle for triangle.

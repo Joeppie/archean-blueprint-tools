@@ -202,8 +202,12 @@ export function planBalloonTail(
     + 'tail % or lengthen the balloon before adding fins');
   const hiZ = Math.round(cA + body.L);
   const zA = Math.round(cA + body.sT * body.L);     // shoulder: where the cone starts
-  const zB = Math.round(cA + body.sT * body.L + 0.95 * nT);  // hinge line, just before the apex
-  if (zB - zA < 6 || zB >= hiZ) return fail('the tail cone is too short to hang fins on');
+  // hinge line AT the apex (user sketch #4 blue: the rudder's full-height
+  // part must start BEHIND the cone; the keel strip follows the last
+  // section's contour onto the tail end — the hinge was "a bit too far
+  // inward (barely so)")
+  const zB = hiZ;
+  if (zB - zA < 6) return fail('the tail cone is too short to hang fins on');
   // the hull surface at a station — the fin root CLINGS to this (the orange
   // line: "taper the fuselage closely"); +1 cell of clearance only where a
   // hinge barrel fills the gap
@@ -302,7 +306,12 @@ export function planBalloonTail(
   // top line; the hung panel continues aft of the hinge line between the
   // (contour-following) inner edge and the continued line.
   region(upIdx, cUp, zA, zB, surfSide, lineS, uHat, fillets.aileronR);
-  region(upIdx, cUp, zB, zB + ailChord, (z) => surfSide(z) + 1, lineS, uHat, panels.aileronR);
+  // the hung aileron does NOT reach in toward the tail (red/green sketch
+  // #4: "the movable part strike the tail … the radius where the tail goes
+  // should not strike the rudders"): its inner edge is a FLAT plane two
+  // cells out from the root, constant aft — stepped (jagged) against the
+  // fillet, never touching the cone's radius.
+  region(upIdx, cUp, zB, zB + ailChord, () => surfSide(zB) + 2, lineS, uHat, panels.aileronR);
   // L twins: mirror EVERYTHING (side coord reflected about the mirror
   // plane, two vertices swapped = the flipped normal) — the pair is
   // triangle-for-triangle symmetric BY CONSTRUCTION.
@@ -352,7 +361,7 @@ export function planBalloonTail(
     // the pair is the exact mirror of itself (out and ax flip together)
     const out: G3 = sgn > 0 ? sHat : neg(sHat);
     const p: GP3 = [c[0]!, c[1]!, c[2]!];
-    p[la] = zB; p[upIdx] = cUp; p[gSide] = cSide + sgn * (surfSide(zB) + 0.5 - cSide);
+    p[la] = zB; p[upIdx] = cUp; p[gSide] = cSide + sgn * (surfSide(zB) + 1.5 - cSide);
     pivotDefs.push({
       role: sgn > 0 ? 'aileronR' : 'aileronL', pos: p,
       frame: { ax: cross(tHat, out), ay: tHat, az: out },
@@ -405,14 +414,19 @@ export function planBalloonTail(
     const axisPt: G3 = [Bat[0], Bat[1], Bat[2]];
     axisPt[upIdx] = (cUp - 6) * CELL; axisPt[gSide] = (cSide - 6) * CELL;
     const inward = snap([axisPt[0] - Blead[0], axisPt[1] - Blead[1], axisPt[2] - Blead[2]]);
-    let Din: G3 = [...Blead] as G3;
+    // from a plug at/behind the apex the CONE has already closed: hop two
+    // cells up the tail (along la) first, only then march inboard — still
+    // the "immediately run into the body" rule (at most two hops)
+    const D1: G3 = [...Blead] as G3;
+    if (!insideBalloon(spec, D1)) D1[la] = Blead[la] - 2 * CELL;
+    let Din: G3 = [...D1] as G3;
     if (!insideBalloon(spec, Din)) {
       let found = false;
       for (let step = 1; step <= 40; step++) {
-        Din = Blead.map((x, k2) => x + inward[k2]! * CELL * step) as G3;
+        Din = D1.map((x, k2) => x + inward[k2]! * CELL * step) as G3;
         if (insideBalloon(spec, Din)) { found = true; break; }
       }
-      if (!found) Din = [...Blead] as G3;
+      if (!found) Din = [...D1] as G3;
     }
     // the long-run far end: same lateral/height as the dive point
     const runEnd: G3 = [Bat[0], Bat[1], Bat[2]];
@@ -420,7 +434,7 @@ export function planBalloonTail(
     runEnd[la] = Alead[la];
     const s1: G3 = [...runEnd] as G3; s1[gSide] = Alead[gSide];
     const s2: G3 = [...s1] as G3; s2[upIdx] = Alead[upIdx];
-    const fwd: G3[] = [Bat, Blead, Din, runEnd, s1, s2, Alead, Aat];
+    const fwd: G3[] = [Bat, Blead, D1, Din, runEnd, s1, s2, Alead, Aat];
     const pts: G3[] = [];
     for (const p of fwd.reverse())
       if (!pts.length || Math.hypot(pts[pts.length - 1]![0] - p[0],

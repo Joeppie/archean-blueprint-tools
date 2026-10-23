@@ -1028,9 +1028,17 @@ line to a vertical trailing edge; the ailerons are the side-plane twin
 (fillet contour→line, panel inner edge = contour+1 past the hinge);
 `aileronL` mirror-derived from R triangle-for-triangle; regions are
 `region(wAxis, …, lo(z), hi(z))` strips subdivided ≤9 cells BOTH ways
-(window-safe at oversize 4); straight-line/keel/contour/flush pins in
-balloonfin.test.ts; the LV dive MARCHES INWARD until inside the envelope
-(the hinge sits near the narrow apex where a stub dive hovers outside);
+(window-safe at oversize 4); SKETCH #4 fixes: the hinge line sits AT THE
+APEX (blue — the rudder's full-height part starts BEHIND the cone, its
+keel strip follows the last section's contour; the hinge was "barely too
+far inward"), and the hung aileron's inner edge is a FLAT plane 2 cells
+out from the root, constant aft (red/green — "the movable part strikes
+the tail … the radius where the tail goes should not strike the rudders
+… rather than a simple out-out … not reach all the way … a bit more
+jagged": stepped against the fillet, never touching the cone radius);
+the LV dive HOPS 2 cells up the tail first, THEN marches inboard (from a
+plug at the closed apex a straight inward march never crosses the hull);
+straight-line/keel/contour/flush/gap pins in balloonfin.test.ts;
 (c) each panel rides a SmallHinge (default) / SmallPivot as a SUBGRID:
 Build record with nested `data.triangles` (parent-absolute, v0.168 law —
 the dev readBuild recurses nested triangles, FORMAT §Subgrids) joined via
