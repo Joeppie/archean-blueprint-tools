@@ -17,15 +17,23 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Blueprint, Block, Triangle } from '../engine/format';
 import type { EditCtx } from '../engine/edit';
 import { appendTrianglesDoc, mirrorTrisDoc, writeBlockDoc, writeBlockMaterial, setPaletteSlot } from '../engine/edit';
-import { docArrayRemoveAt } from '../engine/doc';
+import { docArrayInsert, docArrayRemoveAt, docEnsureArray, docFromValue } from '../engine/doc';
 import { OCCUPANCY_TYPE } from '../engine/blockshapes';
 import {
   MATERIALS, blockMaterial, hullifyApply, hullifyPreview, replaceCensus, replaceColorDests,
   replaceSources, replaceAll, parseHexColor, paletteSlotNode, allocateSlot, nearestSlot,
   PAINT_FINISHES, paintFinish,
 } from '../engine/tools';
-import { sphereSkinTris, sphereStats, shiftSkinTris, skinKg, type SkinOptions, type SphereSpec, type SphereStats } from '../engine/latsphere';
+import { sphereSkinTris, sphereStats, shiftSkinTris, skinKg, type GP3, type SkinOptions, type SphereSpec, type SphereStats } from '../engine/latsphere';
 import { sphereSkinTrisAsync, sphereStatsAsync } from '../engine/latsphere-async';
+import {
+  planBalloonTail, ghostMap, pipeSegments,
+  type BalloonAdapters, type BalloonOptions, type BalloonPlan, type FinRole,
+} from '../engine/balloonfin';
+import { loadManifest, peekManifest, type ModelManifest } from '../engine/models';
+import { KIND_STYLE } from '../engine/wireops';
+import { flattenComponents } from '../engine/subgrid';
+import { newComponent } from '../engine/newcraft';
 import { liftKg } from '../engine/atmo';
 import { cssColor } from '../engine/palette';
 
@@ -34,8 +42,16 @@ export type ToolForm = Record<string, ToolValue>;
 
 /** A PLACEMENT tool's payload: block records and/or hull triangles at the
  *  stage-time position — the viewport ghosts them, the user moves the
- *  shape, and Build commits with the final cell offset. Generic. */
-export interface PlacePayload { blocks?: Block[]; triangles?: Triangle[] }
+ *  shape, and Build commits with the final cell offset. Generic.
+ *  v1.9: `rides` are lattice point-sets (g coords) the engine quarter-turns
+ *  WITH the ghost (the balloon tail reads its turn matrix back from its
+ *  probe tetrahedron); `balloon` is the opaque commit metadata the balloon
+ *  tool stages for itself (plan + skin count). */
+export interface PlacePayload {
+  blocks?: Block[]; triangles?: Triangle[];
+  rides?: GP3[][];
+  balloon?: { plan: BalloonPlan; skinCount: number };
+}
 
 export interface ToolFieldDef {
   key: string;
@@ -274,21 +290,26 @@ export const TOOLS: ToolDef[] = [
   },
   {
     // PLACEMENT tool: the dialog OK's the SHAPE (stretchable axes, material,
-    // paint, shading); the skin then appears as a MOVABLE ghost on the block
-    // widget (cell-snapped) with its own ✕ Cancel / ✔ Build label. The
-    // VERTICES come from engine/latsphere.ts: the convex hull of the lattice
-    // points hugging the ideal ellipsoid — a convex polyhedron CANNOT dent
-    // (the three reverted block-Spheroid attempts all did; see that module's
-    // header + SPHEROID-FAILURE.md on failed/spheroid-hull-dents-lattice-quantization).
-    id: 'sphere-skin',
-    label: 'Sphere skin…',
+    // paint, shading, v1.9 TAIL FINS); the skin then appears as a MOVABLE
+    // ghost on the block widget (cell-snapped) with its own ✕ Cancel / ✔
+    // Build label. The VERTICES come from engine/latsphere.ts: the convex
+    // hull of the lattice points hugging the ideal ellipsoid — a convex
+    // polyhedron CANNOT dent (the three reverted block-Spheroid attempts
+    // all did; see that module's header + SPHEROID-FAILURE.md on
+    // failed/spheroid-hull-dents-lattice-quantization).
+    id: 'balloon',
+    label: 'Generate balloon…',
     icon: '◍',
-    blurb: 'Generate a SPHERE SKIN — hull triangles whose vertices are the '
+    blurb: 'Generate a BALLOON — hull triangles whose vertices are the '
       + 'lattice points forming the CONVEX HULL around the ideal ellipsoid, '
       + 'so the hull is round with NO indentations by construction (a convex '
       + 'polyhedron has no concavity to see). Stretch x/y/z into any '
-      + 'ellipsoid — slider to 96 m across, the number boxes beyond. OK '
-      + 'previews it as a ghost you can MOVE — Build writes it into the craft.',
+      + 'ellipsoid — slider to 96 m across, the number boxes beyond. The '
+      + 'cylindrical profile gains a TAIL section: a contiguous fin post '
+      + 'flush with the tail cone, a rudder + mirrored aileron pair as '
+      + 'triangle panels on LV-wired pivots, and a coupler + volume stack '
+      + 'enclosed inside. OK previews it as a ghost you can MOVE — Build '
+      + 'writes it into the craft.',
     fields: [
       { key: 'rx', label: 'radius x (m)', kind: 'range', min: 0.5, max: 48, step: 0.25, unit: ' m',
         hint: 'stretch the axes freely — equal = a sphere, different = an ellipsoid. '
@@ -324,6 +345,44 @@ export const TOOLS: ToolDef[] = [
         showIf: f => f['profile'] === 'cylinder',
         hint: 'facets around the cross-section — fewer = simpler geometry '
           + '(rounder read of the dev line costs sag, printed live)' },
+      // ---------------------------------------------- v1.9 TAIL (cylinder only)
+      { key: 'fins', label: 'tail fins', kind: 'select',
+        options: [
+          { id: 'off', label: 'none (bare balloon)' },
+          { id: 'on', label: 'rudder + 2 ailerons' },
+        ],
+        showIf: f => f['profile'] === 'cylinder',
+        hint: 'classical blimp tail: the last fifth of the tail cone becomes '
+          + 'a straight fin POST (contiguous with the cone — the sleeve '
+          + 'shares its cut ring vertex-for-vertex), carrying a TOP rudder '
+          + '(yaws) and a MIRRORED port/starboard aileron pair (roll). The '
+          + 'fin panels are hull TRIANGLES riding SmallHinge pivots joined '
+          + 'as subgrids; each pivot gets an LV cable that dives into the '
+          + 'body right behind the socket and runs HIDDEN to a '
+          + 'LowVoltageJunction at the centre, with the Volume blocks '
+          + 'stacked up out of it, enclosed. In-game, turning a pivot in '
+          + 'the pilot turns its panel (composite_builds joint).' },
+      { key: 'pivot', label: 'pivot part', kind: 'select',
+        options: [
+          { id: 'SmallHinge', label: 'SmallHinge (±90°, limited)' },
+          { id: 'SmallPivot', label: 'SmallPivot (±360°, free)' },
+        ],
+        showIf: f => finsOn(f),
+        hint: 'the rotating part each panel rides: the hinge gives limited, '
+          + 'precise control-surface travel; the pivot turns unbounded' },
+      { key: 'finsize', label: 'fin size %', kind: 'range', min: 25, max: 200, step: 5, unit: ' %',
+        showIf: f => finsOn(f),
+        hint: 'the NORMAL proportion of the balloon (28 % of the girth, '
+          + '35 % of the post length)' },
+      { key: 'oversize', label: 'oversize', kind: 'range', min: 100, max: 400, step: 10, unit: ' %',
+        showIf: f => finsOn(f),
+        hint: 'an EXTRA factor past the normal scale — oversized fins bite '
+          + 'harder (clamped to what the game’s triangle window stores)' },
+      { key: 'volumes', label: 'volume blocks', kind: 'range', min: 0, max: 16, step: 1,
+        showIf: f => finsOn(f),
+        hint: 'Volume blocks facing UP out of the coupler (displacement, '
+          + '1 kg each) — the count CLAMPS so the stack stays guaranteed '
+          + 'enclosed inside the envelope' },
       { key: 'shade', label: 'shading', kind: 'select',
         options: [
           { id: 'flat', label: 'flat (the game’s authored default)' },
@@ -348,6 +407,7 @@ export const TOOLS: ToolDef[] = [
       },
     ],
     initial: { rx: 1, ry: 1, rz: 1, profile: 'round', nose: 65, tail: 40, facets: 'fine',
+      fins: 'off', pivot: 'SmallHinge', finsize: 100, oversize: 100, volumes: 1,
       shade: 'flat', material: 'm0', color: '#c9c9c9', finish: 'matte', colorhow: 'new' },
     // THE line that used to be missing on the Spheroid attempts: the
     // deviation vs the IDEAL surface, printed BEFORE anything is built.
@@ -355,55 +415,36 @@ export const TOOLS: ToolDef[] = [
     // DENT shows up in this number. Planning a hull is HEAVY, so the
     // dialog uses previewAsync: debounced + worker-run (2026-10-22 user
     // rule: "shouldn't block slider if resizing it … do it background").
-    preview: (f) => spherePreviewLine(f, sphereStats(sphereForm(f))),
-    previewAsync: async (f) => spherePreviewLine(f, await sphereStatsAsync(sphereForm(f))),
+    // v1.9 TAIL (user: "rename it to generate balloon, add a section to
+    // its tool to generate a tail rudder and two ailerons"): with fins on,
+    // the whole tail batch is planned against the TRUNCATED body and the
+    // tail stats ride the line; a refusal starts with 'nothing to place'
+    // so OK stays disabled exactly like a window refusal.
+    preview: (f) => {
+      const spec = sphereForm(f);
+      if (!finsOn(f)) return spherePreviewLine(f, sphereStats(spec));
+      const ad = balloonAdapters(f);
+      const plan = ad ? planBalloonTail(spec, balloonOptions(f), ad) : null;
+      if (!plan?.ok) return `nothing to place — ${plan?.reason ?? 'the model atlas is not loaded yet'}`;
+      return spherePreviewLine(f, sphereStats({ ...spec, tailCutG: plan.tailCutG }))
+        + tailNote(f, plan);
+    },
+    previewAsync: async (f) => {
+      const spec = sphereForm(f);
+      if (!finsOn(f)) return spherePreviewLine(f, await sphereStatsAsync(spec));
+      const ad = await balloonAdaptersAsync(f);
+      const plan = ad ? planBalloonTail(spec, balloonOptions(f), ad) : null;
+      if (!plan?.ok) return `nothing to place — ${plan?.reason ?? 'the model atlas is unavailable'}`;
+      return spherePreviewLine(f, await sphereStatsAsync({ ...spec, tailCutG: plan.tailCutG }))
+        + tailNote(f, plan);
+    },
     run: () => 'use placement',            // place tools never run()
     place: {
-      stage: (f) => ({ triangles: sphereSkinTris(sphereForm(f), skinOptions(f)) }),
+      stage: (f) => stageBalloon(f),
       // Confirm stages in the WORKER: a zeppelin skin plans for seconds,
       // and a frozen dialog reads as "Confirm does nothing" (user 2026-10-22)
-      stageAsync: async (f) => ({ triangles: await sphereSkinTrisAsync(sphereForm(f), skinOptions(f)) }),
-      commit: (f, payload, offset, ctx) => {
-        // the PAINT resolves at Build (it can GROW the palette — an edit,
-        // not a preview): the picked RGB is written WITH the picked FINISH
-        // (v1.7.3 single control: colour + matte/polished/metal/glass +
-        // new-vs-nearest are ONE control), nearest prefers that finish
-        const rgb = parseHexColor(String(f['color']));
-        const fin = paintFinish(String(f['finish'] ?? 'matte'));
-        let slot = 51;
-        if (rgb) {
-          if (f['colorhow'] === 'nearest') slot = nearestSlot(ctx.bp.data.colors, rgb, fin.spec) ?? 51;
-          else {
-            const free = allocateSlot(ctx.bp.data.colors);
-            if (free === null) slot = nearestSlot(ctx.bp.data.colors, rgb, fin.spec) ?? 51;
-            else { setPaletteSlot(ctx, free, paletteSlotNode(rgb, fin.spec)); slot = free; }
-          }
-        }
-        const material = +String(f['material']).slice(1) || 0;
-        const smooth = f['shade'] === 'smooth';
-        // v1.7.2: the payload is the LIVE ghost (quarter-turns included —
-        // the lattice rotated the vertices in the engine), so the commit
-        // RE-COLOURS it rather than re-planning a fresh un-rotated skin.
-        // An EMPTY payload (headless callers) falls back to the plan.
-        const ghost = payload.triangles?.length
-          ? payload.triangles
-          : sphereSkinTris(sphereForm(f), { slot, material, smooth });
-        const recoloured = ghost.map(t => {
-          const o: Record<string, unknown> = { ...t,
-            colors: [slot, slot, slot, slot, slot], material };
-          if (smooth) o.smooth = 1; else delete o.smooth;
-          return o as unknown as Triangle;
-        });
-        const tris = shiftSkinTris(recoloured,
-          [Math.round(offset[0]), Math.round(offset[1]), Math.round(offset[2])]);
-        // bp + doc TOGETHER (v1.6.1 fix): the doc array must be created when
-        // the file never carried triangles — the old bare push+insert silently
-        // dropped every triangle on block-only crafts, so the saved file and
-        // the undo snapshots never held the skin (sphere gone after save).
-        appendTrianglesDoc(ctx, tris);
-        return `built a ${f['rx']}×${f['ry']}×${f['rz']} m sphere SKIN: ${tris.length} hull `
-          + `triangles at slot ${slot}, ${fin.label} paint`;
-      },
+      stageAsync: async (f) => stageBalloonAsync(f),
+      commit: (f, payload, offset, ctx) => commitBalloon(f, payload, offset, ctx),
     },
     // THE REPAIR PATH (user 2026-10-22: "I also cannot place it, fix the
     // error"): the refusal is HONEST (the game's 31-cell frame-aligned
@@ -516,6 +557,222 @@ function spherePreviewLine(f: ToolForm, st: SphereStats): string {
 
 const replaceSourceOptions = (target: string) =>
   replaceSources(target === 'material' ? 'material' : 'colors').map(s => ({ id: s.id, label: s.label }));
+
+// ------------------------------------------- v1.9 BALLOON TAIL (user brief)
+// "a tail rudder and two ailerons … symmetrically placed (mirrored) fins …
+// a contiguous area that connects where the tail can sit — flush with the
+// end of the tail section of the cone … wired in to a low power coupler
+// near the center … a volume block facing up, guaranteed enclosed … the LV
+// cables hook into the pivots … after connecting to the pivot, immediately
+// run into the zeppelin's body, so they are hidden". Geometry in
+// engine/balloonfin.ts; here: the form ↔ plan ↔ write plumbing.
+
+const finsOn = (f: ToolForm) => f['profile'] === 'cylinder' && f['fins'] === 'on';
+
+function balloonOptions(f: ToolForm): BalloonOptions {
+  const cl = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
+  return {
+    pivotType: f['pivot'] === 'SmallPivot' ? 'SmallPivot' : 'SmallHinge',
+    finScale: cl(+String(f['finsize']) || 100, 25, 200) / 100,
+    oversize: cl(+String(f['oversize']) || 100, 100, 400) / 100,
+    volumes: Math.round(cl(+String(f['volumes']) || 0, 0, 16)),
+  };
+}
+
+/** the model manifest's lowvoltage sockets: the pivot's cable anchor + the
+ *  junction's FREE ports (the input port stays free for a battery later) */
+function balloonAdaptersFrom(man: ModelManifest, f: ToolForm): BalloonAdapters | null {
+  const pivotType = balloonOptions(f).pivotType;
+  const pivot = man[pivotType]?.adapters.find(a => a.type === 'lowvoltage');
+  const coupler = (man.LowVoltageJunction?.adapters ?? [])
+    .filter(a => a.type === 'lowvoltage' && a.name !== 'lowvoltage-input');
+  if (!pivot || !coupler.length) return null;
+  return { pivot, coupler };
+}
+const balloonAdapters = (f: ToolForm): BalloonAdapters | null => {
+  const man = peekManifest();
+  return man ? balloonAdaptersFrom(man, f) : null;
+};
+const balloonAdaptersAsync = async (f: ToolForm): Promise<BalloonAdapters | null> => {
+  const man = await loadManifest();
+  return man ? balloonAdaptersFrom(man, f) : null;
+};
+
+/** the tail segment of the live preview line (the refusal already left via
+ *  the 'nothing to place' path — this only runs for an ok plan) */
+function tailNote(f: ToolForm, plan: BalloonPlan): string {
+  const c = plan.counts;
+  const want = balloonOptions(f).volumes;
+  return ` · tail ${c.tailPostM.toFixed(1)} m: post+cap ${c.sleeveTris} tri · rudder + 2 ailerons `
+    + `(${c.finTris} panel tri) on ${balloonOptions(f).pivotType} pivots, LV×3 hidden inside `
+    + `· volume ${c.volumes}${want > c.volumes ? ` (clamped from ${want} — envelope)` : ''} enclosed`;
+}
+
+/** GHOST triangle order = the commit's LIVE slice order:
+ *  SKIN | SLEEVE+CAP | rudder | aileronL | aileronR */
+function balloonPayload(plan: BalloonPlan, skin: Triangle[]): PlacePayload {
+  return {
+    triangles: [...skin, ...plan.sleeveTris,
+      ...plan.finTris.rudder, ...plan.finTris.aileronL, ...plan.finTris.aileronR],
+    rides: [plan.probes],
+    balloon: { plan, skinCount: skin.length },
+  };
+}
+
+function stageBalloon(f: ToolForm): PlacePayload {
+  const spec = sphereForm(f);
+  if (!finsOn(f)) return { triangles: sphereSkinTris(spec, skinOptions(f)) };
+  const ad = balloonAdapters(f);
+  const plan = ad ? planBalloonTail(spec, balloonOptions(f), ad) : null;
+  if (!plan?.ok) return { triangles: [] };        // preview already disabled OK
+  const skin = sphereSkinTris({ ...spec, tailCutG: plan.tailCutG }, skinOptions(f));
+  return balloonPayload(plan, skin);
+}
+
+async function stageBalloonAsync(f: ToolForm): Promise<PlacePayload> {
+  const spec = sphereForm(f);
+  if (!finsOn(f)) return { triangles: await sphereSkinTrisAsync(spec, skinOptions(f)) };
+  const ad = await balloonAdaptersAsync(f);
+  const plan = ad ? planBalloonTail(spec, balloonOptions(f), ad) : null;
+  if (!plan?.ok) return { triangles: [] };
+  const skin = await sphereSkinTrisAsync({ ...spec, tailCutG: plan.tailCutG }, skinOptions(f));
+  return balloonPayload(plan, skin);
+}
+
+/** Build SUBGRID record: nested blueprint data, parent-frame ABSOLUTE
+ *  (v0.168 rule) — key order mirrors the corpus Builds (3251580044). The
+ *  panel triangles are the LIVE ghost slice: quarter-turned, repainted,
+ *  cell-shifted, so what BUILDS is what was GHOSTED. */
+function buildRecord(triangles: Triangle[]) {
+  return {
+    alias: '',
+    colors: [0, 3],
+    data: {
+      blocks: [], components: [], composite_builds: [], doors: [], frames: [],
+      labels: [], pipes: [], symmetry_axis: 1, triangles, version: 2,
+    },
+    module: 'ARCHEAN_build',
+    orientation: { w: 1.0, x: 0.0, y: 0.0, z: 0.0 },
+    position: { x: 0.0, y: 0.0, z: 0.0 },
+    type: 'Build',
+  };
+}
+
+function commitBalloon(f: ToolForm, payload: PlacePayload,
+  offset: [number, number, number], ctx: EditCtx): string {
+  // the PAINT resolves at Build (it can GROW the palette — an edit,
+  // not a preview): the picked RGB is written WITH the picked FINISH
+  // (v1.7.3 single control), nearest prefers that finish
+  const rgb = parseHexColor(String(f['color']));
+  const fin = paintFinish(String(f['finish'] ?? 'matte'));
+  let slot = 51;
+  if (rgb) {
+    if (f['colorhow'] === 'nearest') slot = nearestSlot(ctx.bp.data.colors, rgb, fin.spec) ?? 51;
+    else {
+      const free = allocateSlot(ctx.bp.data.colors);
+      if (free === null) slot = nearestSlot(ctx.bp.data.colors, rgb, fin.spec) ?? 51;
+      else { setPaletteSlot(ctx, free, paletteSlotNode(rgb, fin.spec)); slot = free; }
+    }
+  }
+  const material = +String(f['material']).slice(1) || 0;
+  const smooth = f['shade'] === 'smooth';
+  // v1.7.2: the payload is the LIVE ghost (quarter-turns included — the
+  // lattice rotated the vertices in the engine), so the commit RE-COLOURS
+  // it rather than re-planning a fresh un-rotated skin. An EMPTY payload
+  // (headless callers) falls back to the plan.
+  const ghost = payload.triangles?.length
+    ? payload.triangles
+    : sphereSkinTris(sphereForm(f), { slot, material, smooth });
+  const recoloured = ghost.map(t => {
+    const o: Record<string, unknown> = { ...t, colors: [slot, slot, slot, slot, slot], material };
+    if (smooth) o.smooth = 1; else delete o.smooth;
+    return o as unknown as Triangle;
+  });
+  const shifted = shiftSkinTris(recoloured,
+    [Math.round(offset[0]), Math.round(offset[1]), Math.round(offset[2])]);
+  const bc = payload.balloon;
+  if (!bc) {
+    // bp + doc TOGETHER (v1.6.1 fix): the doc array must be created when
+    // the file never carried triangles — the old bare push+insert silently
+    // dropped every triangle on block-only crafts, so the saved file and
+    // the undo snapshots never held the skin (sphere gone after save).
+    appendTrianglesDoc(ctx, shifted);
+    return `built a ${f['rx']}×${f['ry']}×${f['rz']} m balloon SKIN: ${shifted.length} hull `
+      + `triangles at slot ${slot}, ${fin.label} paint`;
+  }
+  // ---- the v1.9 TAIL batch: one Undo step writes skin + sleeve + panels
+  // + coupler + pivots + volumes + joins + cables, ALL through the doc ----
+  const plan = bc.plan;
+  let cur = 0;
+  const take = (n: number): Triangle[] => { const s = shifted.slice(cur, cur + n); cur += n; return s; };
+  const skin = take(bc.skinCount);
+  const sleeve = take(plan.sleeveTris.length);
+  const panel: Record<FinRole, Triangle[]> = {
+    rudder: take(plan.finTris.rudder.length),
+    aileronL: take(plan.finTris.aileronL.length),
+    aileronR: take(plan.finTris.aileronR.length),
+  };
+  appendTrianglesDoc(ctx, [...skin, ...sleeve]);
+  // the ghost's quarter-turns + cell offset, recovered from the probe
+  // tetrahedron the engine turned WITH the skin (scene.clusterGhostData)
+  const map = ghostMap(plan.probes, payload.rides?.[0], offset);
+  // flattened indices (composite_builds / pipes keys): appended top-level
+  // entries with EMPTY nested content ride straight onto the flat tail
+  const flat0 = flattenComponents(ctx.bp).length;
+  const startIdx = ctx.bp.data.components.length;
+  const flatOf = (top: number) => flat0 + (top - startIdx);
+  const pushComp = (rec: Record<string, unknown>): number => {
+    const top = ctx.bp.data.components.length;
+    ctx.bp.data.components.push(rec as never);
+    docArrayInsert(ctx.doc, ['data', 'components'], top, docFromValue(rec));
+    return top;
+  };
+  const topOf = new Map<string, number>();
+  for (const pc of plan.comps) {
+    if (pc.kind === 'build') {
+      const top = pushComp(buildRecord(panel[pc.role ?? 'rudder']));
+      topOf.set(`build:${pc.role}`, top);
+    } else {
+      const rec = newComponent(pc.type, pc.module, map.world(pc.pos), map.quat(pc.quat));
+      const top = pushComp(rec);
+      if (pc.kind === 'coupler') topOf.set('coupler', top);
+      else if (pc.role) topOf.set(`pivot:${pc.role}`, top);
+    }
+  }
+  ctx.bp.data.composite_builds = ctx.bp.data.composite_builds ?? [];
+  docEnsureArray(ctx.doc, ['data', 'composite_builds']);
+  for (const role of ['rudder', 'aileronL', 'aileronR'] as FinRole[]) {
+    const join = {
+      component: flatOf(topOf.get(`pivot:${role}`)!),
+      slaveBuildId: flatOf(topOf.get(`build:${role}`)!),
+    };
+    ctx.bp.data.composite_builds.push(join as never);
+    docArrayInsert(ctx.doc, ['data', 'composite_builds'],
+      ctx.bp.data.composite_builds.length - 1, docFromValue(join, false));
+  }
+  const couplerFlat = flatOf(topOf.get('coupler')!);
+  ctx.bp.data.pipes = ctx.bp.data.pipes ?? [];
+  docEnsureArray(ctx.doc, ['data', 'pipes']);
+  for (const pp of plan.pipes) {
+    const rec = {
+      a_component: couplerFlat, a_port: pp.portA,
+      b_component: flatOf(topOf.get(`pivot:${pp.role}`)!), b_port: pp.portB,
+      radius: 0.02,
+      // the route follows the ghost too: every waypoint through the SAME
+      // map (axis-aligned hops stay axis-aligned under a quarter-turn)
+      segments: pipeSegments(pp.points, KIND_STYLE.lowvoltage!, map.world),
+      type: 'lowvoltage',
+    };
+    ctx.bp.data.pipes.push(rec as never);
+    docArrayInsert(ctx.doc, ['data', 'pipes'],
+      ctx.bp.data.pipes.length - 1, docFromValue(rec, false));
+  }
+  const c = plan.counts;
+  return `built a ${f['rx']}×${f['ry']}×${f['rz']} m BALLOON: ${skin.length} hull + ${sleeve.length} `
+    + `tail triangles at slot ${slot}, ${fin.label} paint · rudder + 2 ailerons on `
+    + `${balloonOptions(f).pivotType} pivots (LV×3 hidden inside) · coupler + `
+    + `${c.volumes} volume enclosed`;
+}
 
 // ------------------------------------------------------------------ DIALOG
 

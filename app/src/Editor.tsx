@@ -284,7 +284,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     // even when the VIEW-mode gate holds it down — Cancel/Build restore the
     // gated state (the ⚙ SESSION row itself is untouched, v1.5.1 rule)
     engineRef.current?.setGizmoEnabled(true);
-    engineRef.current?.setClusterGhost(payload.blocks ?? null, 0x7dffcf, payload.triangles ?? null);
+    engineRef.current?.setClusterGhost(payload.blocks ?? null, 0x7dffcf,
+      payload.triangles ?? null, payload.rides ?? null);
     // v1.7.2 ↩ BACK: re-staging after a parameter change carries the cell
     // offset the user already dragged to (the shape changed, not the spot)
     const po = pendingPlaceOffset.current;
@@ -322,9 +323,13 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     // engine — the commit must write what is GHOSTED, not a fresh un-rotated
     // plan (the paint still resolves at commit)
     const live = engineRef.current?.clusterGhostData();
+    // v1.9: the lattice RIDES (the balloon's probe tetrahedron) come back
+    // with the live data, so the tail batch turns + shifts with the skin.
     const msg = tool.place.commit(stage.form, {
       blocks: live?.blocks ?? stage.payload.blocks,
       triangles: live?.triangles ?? stage.payload.triangles,
+      rides: live?.rides ?? stage.payload.rides,
+      balloon: stage.payload.balloon,
     }, st.offset, ctx);
     engineRef.current?.setClusterGhost(null);
     engineRef.current?.setGizmoEnabled(mode === 'edit' && gizmoOn);

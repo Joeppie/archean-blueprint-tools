@@ -160,6 +160,7 @@ async function getJson(paths: string[], tag: string): Promise<Got | null> {
 }
 
 let manifestP: Promise<ModelManifest | null> | null = null;
+let manifestCache: ModelManifest | null = null;
 export function loadManifest(): Promise<ModelManifest | null> {
   // a FAILED manifest load is not cached: the next call retries the whole
   // recovery chain (an earlier version memoised the null for the session,
@@ -168,10 +169,17 @@ export function loadManifest(): Promise<ModelManifest | null> {
     .then(g => {
       if (!g) { manifestP = null; return null; }
       baseOk = g.path.replace(/\/manifest\.json.*$/, '');
-      return g.json as ModelManifest;
+      manifestCache = g.json as ModelManifest;
+      return manifestCache;
     });
   return manifestP;
 }
+
+/** v1.9: the manifest IF it is already loaded (null while pending / never
+ *  loaded) — the SYNC stage path of the balloon tool reads the adapter
+ *  table through this; the editor has the atlas open long before any tool
+ *  dialog can be opened, so in the app flow this is always resolved. */
+export function peekManifest(): ModelManifest | null { return manifestCache; }
 
 export function openAtlas(): Promise<ModelAtlas | null> {
   return loadManifest().then(m => (m ? { manifest: m, geoFor } : null));

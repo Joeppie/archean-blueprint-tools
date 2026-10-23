@@ -42,7 +42,7 @@ import { propellerSurface, type PropellerData } from './propeller';
  *  written in sRGB (dev propellerGeometry agrees). */
 const PROP_GEN_SPEC: PbrSpec = { color: srgbHexToLinear(0x808080), metal: 0, rough: 0.65, opacity: 1 };
 import { buildPipes, checkLeads, surgePaths, type PipeNetwork } from './pipes';
-import { buildBlocksSolids, buildCompProxies, buildSolids, type ProxyBox, type SolidBatch } from './build';
+import { buildCompProxies, buildSolids, type ProxyBox, type SolidBatch } from './build';
 import { hullVertex } from './hullfit';
 import type { FilePalette } from './palette';
 import type { Block, Blueprint, BlueprintComponent, Triangle } from './format';
@@ -220,6 +220,11 @@ export class Engine {
    *  ghosted as flat translucent faces (a skin never "collides": skins
    *  overlap blocks by design, so a tri-only cluster is always valid) */
   private clusterTris: Triangle[] = [];
+  /** v1.9 BALLOON: lattice point-sets (g coords) that RIDE the ghost's
+   *  quarter-turns — the commit recovers the exact affine map from the
+   *  probe tetrahedron and turns the tool's components/cables/subgrids
+   *  with the skin. Not rendered, only carried. */
+  private clusterRides: [number, number, number][][] = [];
   private clusterOffset: [number, number, number] = [0, 0, 0];
   /** v1.7.2: quarter-turns applied to the ghost since staging (⟲ buttons) */
   private clusterTurns = 0;
@@ -1261,14 +1266,24 @@ void main() {
     let sn = 0;
     bp.data.components.forEach((c, bi) => {
       const nested = (c.data?.['components'] as BlueprintComponent[] | undefined) ?? [];
-      if (c.type !== 'Build' || (!c.data?.['blocks'] && !nested.length)) return;
+      // v1.9 BALLOON fins: a triangle-only Build (the fin panels) renders
+      // too — the dev reader carries nested `triangles` recursively, so
+      // they are first-class subgrid content (FORMAT §Subgrids).
+      const nestedTris = (c.data?.['triangles'] as Blueprint['data']['triangles'] | undefined) ?? [];
+      if (c.type !== 'Build'
+        || (!c.data?.['blocks'] && !nested.length && !nestedTris.length)) return;
       const g = new Group();
       g.userData = { kind: 'sub', sub: bi, subn: ++sn };
       this.subGroup.add(g);
       this.subGroups.set(bi, g);
 
       const blocks = (c.data?.['blocks'] as Blueprint['data']['blocks'] | undefined) ?? [];
-      const solids = buildBlocksSolids(blocks, this.palette, this.legacy);
+      // blocks AND the nested hull skin through ONE colour-bucket pass
+      // (buildSolids reads data.blocks + data.triangles + data.colors;
+      // the nested triangles are parent-frame ABSOLUTE like the blocks)
+      const solids = buildSolids({
+        data: { blocks, triangles: nestedTris, colors: bp.data.colors ?? null },
+      } as unknown as Blueprint);
       for (const b of solids.buckets.values()) {
         const gg = new BufferGeometry();
         gg.setAttribute('position', new BufferAttribute(new Float32Array(b.positions), 3));
@@ -3313,9 +3328,11 @@ void main() {
    *  movable on the BLOCK widget (CELL snap) with a Cancel/Build label.
    *  Children keep RAW-FILE metres (the group rides moff + the cell offset),
    *  so a commit only has to shift the block records. null clears. */
-  setClusterGhost(blocks: Block[] | null, hex = 0x7dffcf, tris: Triangle[] | null = null) {
+  setClusterGhost(blocks: Block[] | null, hex = 0x7dffcf, tris: Triangle[] | null = null,
+    rides: [number, number, number][][] | null = null) {
     this.clusterBlocks = blocks ? blocks.slice() : [];
     this.clusterTris = tris ? tris.slice() : [];
+    this.clusterRides = rides ? rides.map(r => r.map(p => [p[0], p[1], p[2]] as [number, number, number])) : [];
     this.clusterHex = hex;
     this.clusterOffset = [0, 0, 0];
     this.clusterTurns = 0;
@@ -3427,6 +3444,8 @@ void main() {
     };
     if (this.clusterTris.length)
       this.clusterTris = transformSkinTris(this.clusterTris, rot);
+    if (this.clusterRides.length)
+      this.clusterRides = this.clusterRides.map(r => r.map(p => rot([p[0], p[1], p[2]])));
     for (let i = 0; i < this.clusterBlocks.length; i++) {
       const b = this.clusterBlocks[i]!;
       const c = blockCells(b);
@@ -3530,9 +3549,14 @@ void main() {
     };
   }
   /** v1.7.2: the CURRENT ghost records (after ⟲ quarter-turns) — the commit
-   *  writes what the user actually ghosted, not a fresh un-rotated plan */
-  clusterGhostData(): { blocks: Block[]; triangles: Triangle[] } {
-    return { blocks: this.clusterBlocks.slice(), triangles: this.clusterTris.slice() };
+   *  writes what the user actually ghosted, not a fresh un-rotated plan.
+   *  v1.9: + the carried lattice rides (balloon components/cables ride the
+   *  same turn map — the commit recovers it from the probe tetrahedron). */
+  clusterGhostData(): { blocks: Block[]; triangles: Triangle[]; rides: [number, number, number][][] } {
+    return {
+      blocks: this.clusterBlocks.slice(), triangles: this.clusterTris.slice(),
+      rides: this.clusterRides.map(r => r.map(p => [p[0], p[1], p[2]] as [number, number, number])),
+    };
   }
   /** PUBLIC whole-cell nudge of the placement (keyboard, pins — the widget
    *  commit routes through the same offset math); false = now colliding */

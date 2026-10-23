@@ -78,7 +78,8 @@ export function unconnectedPorts(bp: Blueprint, manifest: ModelManifest | null):
 // 14 keys, and the corpus majority per kind (FORMAT §pipes): data navy
 // (16,24,96), lowvoltage dark red (96,8,4), highvoltage orange (255,64,4),
 // fluid WHITE + chrome, item WHITE + box + metal (the only square species).
-const KIND_STYLE: Record<string, Record<string, unknown>> = {
+// v1.9 EXPORTED: the balloon tail's LV runs are written with this same table
+export const KIND_STYLE: Record<string, Record<string, unknown>> = {
   data:        { r: 16, g: 24, b: 96, a: 255, box: false, chrome: false, flexible: false, glossy: false, metal: false, rounded_caps: true, striped: false },
   lowvoltage:  { r: 96, g: 8, b: 4, a: 255, box: false, chrome: false, flexible: false, glossy: false, metal: false, rounded_caps: true, striped: false },
   highvoltage: { r: 255, g: 64, b: 4, a: 255, box: false, chrome: false, flexible: false, glossy: false, metal: false, rounded_caps: true, striped: false },
