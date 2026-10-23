@@ -1025,7 +1025,7 @@ shoulder to hinge; the MOVABLE panel hangs to a horizontal KEEL line
 edge FOLLOWS THE UNDERSIDE CONTOUR (the hinge side is contour-following,
 "not entirely square"), aft of the hinge it spans keel→the continued
 line to a vertical trailing edge; the ailerons are the side-plane twin
-(fillet contour→line, panel inner edge = contour+1 past the hinge);
+(fillet contour→line, panel inner edge a flat stepped plane past the hinge);
 `aileronL` mirror-derived from R triangle-for-triangle; regions are
 `region(wAxis, …, lo(z), hi(z))` strips subdivided ≤9 cells BOTH ways
 (window-safe at oversize 4); SKETCH #4 fixes: the hinge line sits AT THE
