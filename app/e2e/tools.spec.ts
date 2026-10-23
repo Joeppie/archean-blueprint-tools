@@ -130,9 +130,9 @@ test.describe('tools menu + dialogs @ui', () => {
     // tallest definition in the registry, so it is the probe. Runs on BOTH
     // viewports of the suite (desktop Chrome + Pixel 7).
     await openNew(page);
-    await openTool(page, 'sphere-skin');
+    await openTool(page, 'balloon');
     const vp = page.viewportSize()!;
-    const box = (await page.getByTestId('tool-dialog-sphere-skin').boundingBox())!;
+    const box = (await page.getByTestId('tool-dialog-balloon').boundingBox())!;
     expect(box.height).toBeLessThanOrEqual(vp.height * 0.95);
     expect(box.width).toBeLessThanOrEqual(vp.width * 0.95);
     // PHONE bottom clear zone (user 2026-10-22: mobile Brave's bottom

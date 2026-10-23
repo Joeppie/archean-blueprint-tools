@@ -23,7 +23,7 @@ export interface HelpTopic {
 /** reading order of the manual (new topic files not listed land at the end) */
 const ORDER = [
   'start', 'interface', 'keys', 'parts', 'blocks', 'mirror', 'subgrids',
-  'display', 'tools', 'hullify', 'sphere', 'lift', 'wire', 'save',
+  'display', 'tools', 'hullify', 'balloon', 'lift', 'wire', 'save',
 ];
 
 function parse(id: string, src: string): HelpTopic {

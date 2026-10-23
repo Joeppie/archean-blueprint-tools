@@ -104,18 +104,22 @@ describe('manual registry + word search', () => {
       expect(d.headings.length, t.id).toBeGreaterThan(0);
     }
     // the limits/keys tables must become real HTML tables
-    expect(renderMarkdown(TOPICS.find(t => t.id === 'sphere')!.body).html)
+    expect(renderMarkdown(TOPICS.find(t => t.id === 'balloon')!.body).html)
       .toContain('<table class="md-table">');
     expect(renderMarkdown(TOPICS.find(t => t.id === 'keys')!.body).html)
       .toContain('<table class="md-table">');
   });
 
-  it('search finds the sphere topic by title, by tag word and by body word', () => {
-    expect(searchTopics('sphere')[0]!.topic.id).toBe('sphere');
-    expect(searchTopics('zeppelin').some(r => r.topic.id === 'sphere')).toBe(true);   // tag
+  it('search finds the balloon topic by title, by tag word and by body word', () => {
+    expect(searchTopics('balloon')[0]!.topic.id).toBe('balloon');
+    // the renamed tool keeps its history findable: 'sphere' is a TAG word
+    expect(searchTopics('sphere').some(r => r.topic.id === 'balloon')).toBe(true);
+    expect(searchTopics('zeppelin').some(r => r.topic.id === 'balloon')).toBe(true);   // tag
+    // v1.9: the tail section answers fin searches
+    expect(searchTopics('rudder').some(r => r.topic.id === 'balloon')).toBe(true);
     // prose-only words must match too ("search for words"): 'certificate'
-    // appears ONLY in the sphere topic's algorithm prose, never its tags
-    expect(searchTopics('certificate').some(r => r.topic.id === 'sphere')).toBe(true);
+    // appears ONLY in the balloon topic's algorithm prose, never its tags
+    expect(searchTopics('certificate').some(r => r.topic.id === 'balloon')).toBe(true);
   });
 
   it('multi-word queries AND; an unknown word matches nothing', () => {

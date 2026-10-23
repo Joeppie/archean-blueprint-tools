@@ -1,10 +1,12 @@
-# Sphere skin — the algorithm and its limits
-Tags: sphere ellipsoid spheroid skin hull triangles algorithm convex hull lattice limitations dents bulge sag quickhull zeppelin blimp aspect ratio window tau cylinder rocket nose tail paint finish metallic matte polished glass rotate quarter-turn facets
+# Generate balloon — the algorithm and its limits
+Tags: sphere ellipsoid spheroid skin hull triangles algorithm convex hull lattice limitations dents bulge sag quickhull zeppelin blimp aspect ratio window tau cylinder rocket nose tail paint finish metallic matte polished glass rotate quarter-turn facets balloon balloon fins rudder aileron pivot hinge coupler junction volume wire LV tail post cap
 
-**Tools ▸ Sphere skin…** grows an ellipsoid out of hull triangles — a closed
+**Tools ▸ Generate balloon…** grows an ellipsoid out of hull triangles — a closed
 convex SKIN whose vertices are integer lattice points (the same 0.25 m grid
 the blocks and the game's own hull triangles share). Slider to 48 m radii
-(96 m across); the number boxes take any size beyond.
+(96 m across); the number boxes take any size beyond. The **cyl + nose**
+body gains a **tail section** (v1.9) — rudder + aileron fins, pivots, a
+coupler and a volume stack, all described below.
 
 ## Two bodies (v1.7.2, ends independent since v1.7.3)
 
@@ -24,6 +26,44 @@ closed manifold, no dents (the profile is concave), and the 31-cell window
 holds BY CONSTRUCTION, so long needles store too. The live preview prints
 the deviation: a coarse `blocky` body is simpler but the sag it prints
 grows — the trade is honest.
+
+## Tail section (v1.9 — cyl + nose bodies)
+
+With **tail fins ▸ rudder + 2 ailerons**, the balloon grows a classical
+blimp tail. The tail cone is TRUNCATED at 80 % of its taper and closed by a
+straight-sided **fin post** + shrinking cap: the post re-uses the cone's own
+cut ring vertex-for-vertex, so the surface stays one CONTIGUOUS area — flush
+with the end of the tail section, exactly where the fins can sit.
+
+- **Fins are triangle panels, never parts.** A TOP rudder (yaws about the
+  vertical) and a MIRRORED port/starboard aileron pair (roll about the
+  longitudinal axis) — the pair is one plate reflected in the mirror plane,
+  triangle for triangle. `fin size %` sets the NORMAL proportion of the
+  balloon (28 % of the girth, 35 % of the post); `oversize` multiplies past
+  it (clamped to what the game's triangle window stores — the preview
+  refuses before a silently-holed fin).
+- **Panels rotate on pivots.** Each panel rides a SmallHinge (±90°, the
+  default) or SmallPivot (±360°) part joined as a SUBGRID (`composite_builds`
+  → the pivot's joint, the subgrid's nested triangles in parent-absolute
+  coordinates — the same door/hatch mechanics the editor itself builds). In
+  the pilot, turning the pivot turns its panel. This triangle-panel-in-a-
+  subgrid combo is what the game's READER carries (the dev reader recurses
+  nested `triangles`); the corpus has no authored precedent, so the final
+  in-game look of the rotating panels is YOUR arbitration — report it if it
+  reads wrong.
+- **LV wiring, hidden.** A LowVoltageJunction (the low-power COUPLER) sits
+  at the envelope centre; every pivot gets one LV cable that leads off its
+  socket, dives through the skin IMMEDIATELY behind the plug, then runs the
+  body's long axis INSIDE the envelope to a coupler port — visible only if
+  you open the hull.
+- **Volume blocks enclosed.** `volume blocks` stacks Volume parts straight
+  UP out of the coupler (facing up, 1 cell pitch); the count CLAMPS so the
+  top keeps a skin margin — the stack is guaranteed enclosed.
+- **Everything rides the ghost.** ⟲ quarter-turns and the cell drag carry
+  the panels, pivots, coupler, volumes AND cables with the skin (a probe
+  tetrahedron round-trips the exact turn matrix), and ✔ Build is ONE undo
+  step for the whole batch. Tail bodies need a tail zone of at least 3 m —
+  the preview says so instead of failing.
 
 ## The algorithm (ellipsoid hull): a lattice convex-hull shrinkwrap
 

@@ -72,13 +72,13 @@ async function setNum(page: Page, key: string, v: number) {
  *  ghost label appears (the dialog→ghost→label ORDER is the user's spec) */
 async function stage(page: Page, over: { rx?: number; ry?: number; rz?: number } = {}) {
   await page.getByTestId('tools-menu').click();
-  await page.getByTestId('tool-sphere-skin').click();
-  await expect(page.getByTestId('tool-dialog-sphere-skin')).toBeVisible();
+  await page.getByTestId('tool-balloon').click();
+  await expect(page.getByTestId('tool-dialog-balloon')).toBeVisible();
   for (const [k, v] of Object.entries(over)) await setRange(page, k, v as number);
   await page.getByTestId('tool-ok').click();
   await expect(page.getByTestId('tool-confirm-box')).toBeVisible();
   await page.getByTestId('tool-confirm').click();
-  await expect(page.getByTestId('tool-dialog-sphere-skin')).toBeHidden();
+  await expect(page.getByTestId('tool-dialog-balloon')).toBeHidden();
   await expect(page.getByTestId('place-label')).toBeVisible({ timeout: 15_000 });
 }
 
@@ -90,7 +90,7 @@ test.describe('sphere skin tool: dialog → movable ghost → cancel/build @ui',
   test('the sliders retune the plan (worker) and the preview prints the deviation line', async ({ page }) => {
     await openNew(page);
     await page.getByTestId('tools-menu').click();
-    await page.getByTestId('tool-sphere-skin').click();
+    await page.getByTestId('tool-balloon').click();
     const prev = page.locator('[data-testid="tool-preview"]');
     await expect(prev).toContainText(/triangles/);
     // THE line the Spheroid attempts never had: deviation vs the ideal surface
@@ -115,7 +115,7 @@ test.describe('sphere skin tool: dialog → movable ghost → cancel/build @ui',
   test('the number box reaches past the slider, and needles refuse honestly', async ({ page }) => {
     await openNew(page);
     await page.getByTestId('tools-menu').click();
-    await page.getByTestId('tool-sphere-skin').click();
+    await page.getByTestId('tool-balloon').click();
     const prev = page.locator('[data-testid="tool-preview"]');
     // a 20 m radius is over the slider-free planning range — the box takes it
     await setNum(page, 'rx', 20);
@@ -130,7 +130,7 @@ test.describe('sphere skin tool: dialog → movable ghost → cancel/build @ui',
     // cut possible → the preview refuses and OK stays DISABLED (never a
     // silently-holed skin)
     await page.getByTestId('tools-menu').click();
-    await page.getByTestId('tool-sphere-skin').click();
+    await page.getByTestId('tool-balloon').click();
     await setNum(page, 'rx', 0.5);
     await setNum(page, 'ry', 1);
     await setNum(page, 'rz', 12);
@@ -246,7 +246,7 @@ test.describe('sphere skin tool: dialog → movable ghost → cancel/build @ui',
   test('shading=smooth writes the game’s smooth:1 on every triangle', async ({ page }) => {
     await openNew(page);
     await page.getByTestId('tools-menu').click();
-    await page.getByTestId('tool-sphere-skin').click();
+    await page.getByTestId('tool-balloon').click();
     await page.selectOption('[data-testid="tool-select-shade"]', 'smooth');
     await page.getByTestId('tool-ok').click();
     await expect(page.getByTestId('tool-confirm-box')).toContainText(/smooth:1/);
@@ -318,7 +318,7 @@ test.describe('sphere skin tool: dialog → movable ghost → cancel/build @ui',
   test('the simple body stores a needle the ellipsoid hull must refuse', async ({ page }) => {
     await openNew(page);
     await page.getByTestId('tools-menu').click();
-    await page.getByTestId('tool-sphere-skin').click();
+    await page.getByTestId('tool-balloon').click();
     await setNum(page, 'rx', 0.5);
     await setNum(page, 'ry', 1);
     await setNum(page, 'rz', 12);
@@ -360,7 +360,7 @@ test.describe('sphere skin tool: dialog → movable ghost → cancel/build @ui',
   test('paint is ONE control: the finish rides the committed palette slot', async ({ page }) => {
     await openNew(page);
     await page.getByTestId('tools-menu').click();
-    await page.getByTestId('tool-sphere-skin').click();
+    await page.getByTestId('tool-balloon').click();
     const prev = page.locator('[data-testid="tool-preview"]');
     // one row carries swatch + hex + FINISH chips + the slot mode (the old
     // separate 'paint slot' select field is gone from the definition)
@@ -401,14 +401,14 @@ test.describe('sphere skin tool: dialog → movable ghost → cancel/build @ui',
     expect(await shift(page, [4, 0, 0])).toBe(true);
     const s0 = await spans(page);
     await page.getByTestId('place-back').click();
-    await expect(page.getByTestId('tool-dialog-sphere-skin')).toBeVisible();
+    await expect(page.getByTestId('tool-dialog-balloon')).toBeVisible();
     await expect(page.getByTestId('tool-num-rx')).toHaveValue('2');
     // retune without starting from scratch: rz grows → the bbox reaches longer
     await setRange(page, 'rz', 3);
     await page.getByTestId('tool-ok').click();
     await expect(page.getByTestId('tool-confirm-box')).toBeVisible();
     await page.getByTestId('tool-confirm').click();
-    await expect(page.getByTestId('tool-dialog-sphere-skin')).toBeHidden({ timeout: 15_000 });
+    await expect(page.getByTestId('tool-dialog-balloon')).toBeHidden({ timeout: 15_000 });
     // the ghost label NEVER hid (back only reopened the dialog) — polling
     // is the only honest read while the worker re-stages (AGENTS: poll the
     // async readout, never a single shot)
@@ -419,13 +419,13 @@ test.describe('sphere skin tool: dialog → movable ghost → cancel/build @ui',
     const g = await ghost(page);
     expect(g!.offset).toEqual([4, 0, 0]);          // the dragged spot survived
     await page.getByTestId('place-build').click();
-    await expect(page.getByTestId('tool-toast')).toContainText('2×1×3 m sphere SKIN');
+    await expect(page.getByTestId('tool-toast')).toContainText('2×1×3 m balloon SKIN');
     // Esc with the dialog open over a ghost: closes the DIALOG only (the
     // waiting ghost survives — Esc belongs to the topmost window)
     await stage(page);
     await page.getByTestId('place-back').click();
     await page.keyboard.press('Escape');
-    await expect(page.getByTestId('tool-dialog-sphere-skin')).toBeHidden();
+    await expect(page.getByTestId('tool-dialog-balloon')).toBeHidden();
     expect(await ghost(page)).not.toBeNull();
     await page.getByTestId('place-cancel').click();
   });

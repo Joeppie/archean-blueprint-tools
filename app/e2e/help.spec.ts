@@ -5,7 +5,7 @@
 //  • Help ▾ Manual… opens the dialog: a search box, the topic rail, and a
 //    markdown-rendered article — the topics' pipe tables as REAL <table>
 //    elements;
-//  • the word search matches TITLE, TAG ("zeppelin" finds the Sphere topic)
+//  • the word search matches TITLE, TAG ("zeppelin" finds the Balloon topic)
 //    and BODY words, ANDs multiple words, and admits "no topic matches"
 //    for gibberish instead of blanking the manual;
 //  • Esc / ✕ / backdrop close it;
@@ -31,17 +31,20 @@ test.describe('help manual @ui', () => {
     await openHelp(page);
     // the rail lists the topics in reading order, Quick start first
     await expect(page.getByTestId('help-topic-start')).toBeVisible();
-    await expect(page.getByTestId('help-topic-sphere')).toBeVisible();
+    await expect(page.getByTestId('help-topic-balloon')).toBeVisible();
     // the article is the rendered markdown of the selected topic
     await expect(page.getByTestId('help-article').locator('h1'))
       .toContainText('Quick start');
-    // the sphere topic: its limits table must be a REAL html <table>
-    await page.getByTestId('help-topic-sphere').click();
+    // the balloon topic: its tables must be REAL html <table>s (v1.9:
+    // two tables ride the topic — the body table AND the limits table)
+    await page.getByTestId('help-topic-balloon').click();
     const art = page.getByTestId('help-article');
-    await expect(art.locator('h1')).toContainText('Sphere skin');
+    await expect(art.locator('h1')).toContainText('Generate balloon');
     await expect(art).toContainText(/convex[- ]hull/i);
-    await expect(art.locator('table.md-table')).toHaveCount(1);
-    await expect(art.locator('table.md-table th').first()).toHaveText('Limit');
+    await expect(art.locator('table.md-table')).toHaveCount(2);
+    await expect(art.locator('table.md-table').last().locator('th').first()).toHaveText('Limit');
+    // v1.9: the tail section documents the fin/coupler/volume batch
+    await expect(art).toContainText('2 ailerons');
     // keys topic: the shortcut table lists Ctrl+Z
     await page.getByTestId('help-topic-keys').click();
     await expect(art.locator('table.md-table').first())
@@ -53,13 +56,13 @@ test.describe('help manual @ui', () => {
     await openHelp(page);
     const search = page.getByTestId('help-search');
     // title hit ranks first and the article follows the best match
-    await search.fill('sphere');
+    await search.fill('balloon');
     await expect(page.getByTestId('help-rail').locator('button').first())
-      .toHaveAttribute('data-testid', 'help-topic-sphere');
+      .toHaveAttribute('data-testid', 'help-topic-balloon');
     await expect(page.getByTestId('help-article')).toContainText('Quickhull');
     // a TAG word (not in the prose) finds the same topic
     await search.fill('zeppelin');
-    await expect(page.getByTestId('help-topic-sphere')).toBeVisible();
+    await expect(page.getByTestId('help-topic-balloon')).toBeVisible();
     // a BODY word from another topic: mirror severity prose
     await search.fill('faux');
     await expect(page.getByTestId('help-topic-mirror')).toBeVisible();
