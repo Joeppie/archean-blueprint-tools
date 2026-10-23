@@ -761,7 +761,7 @@ engine CONTENT frame; its FILE-frame socket pose is
   the socket gets an honest straight lead-in instead of a folded wire. Audit:
   `checkLeads(net)` (exposed through `__ARCHEAN__.engine.pipeInfo().leads`). Pins: `app/src/engine/__tests__/sockets.test.ts` (law +
   corpus sweep), `pipes.test.ts` (drawing + re-anchoring), `app/e2e/pipes.spec.ts`
-  (rendered net + a moved part drags its ends), triage: `app/tools/worsttangent.mts`.
+  (rendered net + a moved part drags its ends), triage: `app/tools/worsttangent.mjs`.
 Note: `components` may contain a `Build` type — the editor's construction-site ghost
 (e.g. y −24.75, far outside the craft). It is not physical geometry; the viewer skips it.
 

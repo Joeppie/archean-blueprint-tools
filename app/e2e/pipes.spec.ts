@@ -84,7 +84,8 @@ test.describe('cables render like the game and plug into their sockets', () => {
     await openCables(page, ISW);
     const r = await page.evaluate(() => {
       const eng = (window as unknown as { __ARCHEAN__?: { engine: {
-        pipeInfo: () => { ends: { a: number[]; b: number[] }[] };
+        pipeInfo: () => { ends: { a: number[]; b: number[] }[];
+          leads: { checked: number; bad: number } };
         blueprint: { data: { components: { position: { x: number; y: number; z: number } }[];
           pipes?: { type?: string; a_component: number }[] } };
         rebuildPipes: () => void;

@@ -143,7 +143,7 @@ describe.skipIf(!MANIFEST)('the corpus sweep — 18k+ recorded tips prove the la
           const sock = sk[side];
           const rec = recorded(p, side);
           if (!sock || !rec) continue;
-          if (EXEMPT.has(flat[side === 'a' ? p.a_component : p.b_component]?.comp?.type)) {
+          if (EXEMPT.has(flat[side === 'a' ? p.a_component : p.b_component]?.comp?.type ?? '')) {
             exemptSkipped++;
             continue;
           }
@@ -153,7 +153,8 @@ describe.skipIf(!MANIFEST)('the corpus sweep — 18k+ recorded tips prove the la
             staleSkipped++;
             continue;
           }
-          const d = [rec[0] - sock.at[0], rec[1] - sock.at[1], rec[2] - sock.at[2]];
+          const d: readonly [number, number, number] =
+            [rec[0] - sock.at[0], rec[1] - sock.at[1], rec[2] - sock.at[2]];
           const proj = d[0] * sock.axis[0] + d[1] * sock.axis[1] + d[2] * sock.axis[2];
           const tan = Math.hypot(d[0] - proj * sock.axis[0], d[1] - proj * sock.axis[1],
             d[2] - proj * sock.axis[2]);

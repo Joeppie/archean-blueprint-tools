@@ -725,7 +725,7 @@ freshly-authored triangles, fixture 9000006001 — see the v1.5.12 bullet).
   exemptions PilotSeat/Beacon, corpus sweep), `pipes.test.ts` (shapes/colours/
   elbows/chains/re-anchor + stale counter), e2e `pipes.spec.ts` (ISW round+
   chrome, truck five species incl. square item + live stale re-seats, moved
-  part drags its ends ±1.5 m + exact restore); triage `app/tools/worsttangent.mts`.
+  part drags its ends ±1.5 m + exact restore); triage `app/tools/worsttangent.mjs`.
 - **v1.7.4 LOFT MESH MADE MIRROR-SYMMETRIC (user 2026-10-23: "the
   cylindrical zeppelin seems not fully symmetrical and it has some
   indentations — is that correct? Is that fixable?"):** measured before
