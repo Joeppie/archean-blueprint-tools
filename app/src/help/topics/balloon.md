@@ -34,23 +34,27 @@ airship tail ON THE UNTOUCHED CONE — the tail's triangle pattern keeps
 flowing (an early build added a straight fin POST; it broke the tail's
 line and was retired: the fins now ride the natural cone).
 
-- **A fixed fillet clings to the hull** (the orange line of the user's
-  sketch): its root hugs the cone tightly from the SHOULDERS, where the
-  cone starts yielding, to just before the apex, and its width grows
-  linearly outwards — a right triangle with a straight leading edge
-  sloping down to the shoulder (the red line) and a VERTICAL trailing
-  edge that forms the hinge line.
-- **The MOVABLE rudder/ailerons HANG AFT of that hinge line** like
-  stern-post rudders (the green shape): the TOP rudder is a tall vertical
-  vane (yaws about the vertical pivot), the MIRRORED port/starboard
-  aileron pair rolls about the longitudinal axis — the panels start AT
-  the hinge line and reach past the tail end, so the movable part comes
-  out there. Panels are hull TRIANGLES, never parts; the pair is one
-  plate reflected in the mirror plane, triangle for triangle.
-- `fin size %` sets the NORMAL proportion (the fillet sweeps out to half
-  the girth at the hinge line, the vane matches it); `oversize`
-  multiplies past it — clamped to what the game's triangle window stores,
-  the preview refuses before a silently-holed fin.
+- **ONE straight top line** rules the whole tail (sketch #3: the moving
+  part must CONTINUE the beginning, and the line "should be straight" —
+  no curvature): it starts at the SHOULDERS where the cone begins to
+  yield and rises aft at a slope that IS the fin size, through a hinge
+  line just before the apex and CONTINUING over the hung fin to its
+  trailing edge. A modest fin keeps the line nearly horizontal — flush
+  with the top of the ship; a big one steepens the taper.
+- **A fixed fillet** fills between the hull and that line (root clinging
+  tight to the cone — the orange of the sketch), shoulder to hinge.
+  **The MOVABLE rudder/ailerons hang to a horizontal keel line** like
+  stern-post rudders (the green shape): under the hull the panel's upper
+  edge FOLLOWS THE HULL CONTOUR (its hinge side is contour-following,
+  not square), and aft of the hinge line the vane spans keel-to-line to
+  a vertical trailing edge past the tail. The TOP rudder yaws about the
+  vertical pivot; the MIRRORED port/starboard pair rolls about the
+  longitudinal axis. Panels are hull TRIANGLES, never parts; the pair is
+  one plate reflected in the mirror plane, triangle for triangle.
+- `fin size %` sets the line's slope (half the girth above the shoulder
+  at the hinge line for the normal setting); `oversize` multiplies past
+  it — clamped to what the game's triangle window stores, the preview
+  refuses before a silently-holed fin.
 - **Panels rotate on pivots.** Each hung panel rides a SmallHinge
   (±90°, the default) or SmallPivot (±360°) part joined as a SUBGRID
   (`composite_builds` → the pivot's joint, nested `triangles` in

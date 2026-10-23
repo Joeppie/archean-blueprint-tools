@@ -115,6 +115,7 @@ export interface BalloonAdapters {
 
 const SKIN0 = { slot: 51, material: 0, smooth: false };
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
+const oversizeK = (opt: BalloonOptions) => clamp(opt.oversize, 1, 4);
 /** the window is FRAME-ALIGNED: worst case 11 window cells sit BELOW the
  *  face's minimum (min − 12·floor(min/12) ≤ 11), so a single-face span may
  *  not exceed 31 − 11 = 20 cells */
@@ -209,14 +210,29 @@ export function planBalloonTail(
   const surfUp = (z: number) => Math.round(cUp + rUp * profileScale(body, z - cA));
   const surfSide = (z: number) => Math.round(cSide + rSide * profileScale(body, z - cA));
 
-  // ---- fin sizes (proportional to the balloon, × oversize slider) -------
-  const k = clamp(opt.finScale, 0.25, 3) * clamp(opt.oversize, 1, 4);
-  const filletH = clamp(Math.round(Math.max(4, 0.5 * rUp * k)), 4, MAX_SPAN);
-  const filletS = clamp(Math.round(Math.max(4, 0.5 * rSide * k)), 4, MAX_SPAN);
-  const rudderH = clamp(Math.round(Math.max(5, 0.6 * rUp * k)), 5, MAX_SPAN);
+  // ---- fin sizes: ONE STRAIGHT top line (user sketch #3) ----------------
+  // The top edge is a single straight line from the shoulder POINT on the
+  // hull (zA, base(zA)) rising aft through the hinge line and CONTINUING
+  // over the hung fin — no curvature anywhere ("that too should be
+  // straight"; the old width rode the cone and curved back IN). FIN SIZE
+  // IS THE SLOPE: at the modest end the line stays near-horizontal, flush
+  // with the top of the ship; more size steepens the taper. The hung fin
+  // closes on a horizontal KEEL line below; its hinge side follows the
+  // hull contour (not square).
+  const k = clamp(opt.finScale, 0.25, 3) * clamp(oversizeK(opt), 1, 4);
+  const riseUp = clamp(Math.round(0.5 * rUp * k), 0, MAX_SPAN);
+  const riseS = clamp(Math.round(0.5 * rSide * k), 0, MAX_SPAN);
   const rudderC = clamp(Math.round(Math.max(3, 0.35 * rUp * k)), 3, MAX_SPAN);
-  const ailSpan = clamp(Math.round(Math.max(4, 0.55 * rSide * k)), 4, MAX_SPAN);
   const ailChord = clamp(Math.round(Math.max(3, 0.35 * rSide * k)), 3, MAX_SPAN);
+  // the single line: TOP(z) = base(zA) + rise·(z − zA)/(zB − zA), z up to
+  // the fin's trailing edge (the same function serves forward AND aft —
+  // the continuation IS the rule)
+  const lineUp = (z: number) => Math.round(surfUp(zA) + riseUp * (z - zA) / (zB - zA));
+  const lineS = (z: number) => Math.round(surfSide(zA) + riseS * (z - zA) / (zB - zA));
+  // horizontal keel: the hull UNDERSIDE level at the shoulder (the modest
+  // fin's flush bottom line); the rudder hangs to it, its forward strip
+  // clings to the rising underside contour
+  const keelU = 2 * cUp - surfUp(zA);
 
   // ---- triangles --------------------------------------------------------
   let skipped = 0;
@@ -227,42 +243,13 @@ export function planBalloonTail(
     const t = encodeSkinTri([t0, t1, t2], SKIN0);
     if (t) sink.push(t); else skipped++;
   };
-  /** FIXED FILLET: a right-triangle plate in the plane of `wAxis` at wVal.
-   *  The root clings to base(z) from aStart (the SHOULDER, height 0 = flush
-   *  with where the cone starts) to aEnd (the hinge line); the outboard
-   *  extent grows LINEARLY to `h` at aEnd — red leading edge straight to
-   *  the shoulder, vertical trailing edge, orange root on the hull. Built
-   *  in ≤ 9-cell chord strips so every quad stores. */
-  const fillet = (
-    wAxis: 0 | 1 | 2, wVal: number, aStart: number, aEnd: number, h: number,
-    base: (a: number) => number, front: G3, sink: Triangle[],
-  ) => {
-    const bAxis = ([0, 1, 2] as const).find(a => a !== la && a !== wAxis)!;
-    const at = (a: number, b: number): GP3 => {
-      const g: GP3 = [0, 0, 0];
-      g[la] = a; g[bAxis] = Math.round(b); g[wAxis] = wVal;
-      return g;
-    };
-    const flip = cross(unit(la), unit(bAxis));
-    const rev = flip[0] * front[0] + flip[1] * front[1] + flip[2] * front[2] < 0;
-    const n = Math.max(1, Math.ceil((aEnd - aStart) / 9));
-    const zs: number[] = [];
-    for (let i = 0; i <= n; i++) zs.push(Math.round(aStart + (aEnd - aStart) * i / n));
-    const ext = (z: number) => base(z) + Math.round(h * (z - aStart) / (aEnd - aStart));
-    for (let i = 0; i + 1 < zs.length; i++) {
-      const z0 = zs[i]!, z1 = zs[i + 1]!;
-      if (z1 === z0) continue;
-      const p00 = at(z0, base(z0)), p10 = at(z1, base(z1));
-      const p11 = at(z1, ext(z1)), p01 = at(z0, ext(z0));
-      if (!rev) { emit(p00, p10, p11, sink); emit(p00, p11, p01, sink); }
-      else { emit(p00, p11, p10, sink); emit(p00, p01, p11, sink); }
-    }
-  };
-  /** MOVABLE PANEL: a rectangular plate in the plane of `wAxis` at wVal,
-   *  a ∈ [a0,a1], b ∈ [b0,b1], subdivided ≤ 9 cells per axis; the panel
-   *  HANGS AFT of the hinge line (a0 = the hinge), green in the sketch. */
-  const rectPlate = (
-    wAxis: 0 | 1 | 2, wVal: number, a0: number, a1: number, b0: number, b1: number,
+  /** A fin region in the plane of `wAxis` at wVal: for z ∈ [zFrom, zTo] the
+   *  plate spans outboard from lo(z) to hi(z), built in ≤ 9-cell strips so
+   *  every quad stores; the winding faces `front`. lo/hi may follow the
+   *  hull CONTOUR (cling/hinge side) or the straight TOP line. */
+  const region = (
+    wAxis: 0 | 1 | 2, wVal: number, zFrom: number, zTo: number,
+    lo: (z: number) => number, hi: (z: number) => number,
     front: G3, sink: Triangle[],
   ) => {
     const bAxis = ([0, 1, 2] as const).find(a => a !== la && a !== wAxis)!;
@@ -273,18 +260,29 @@ export function planBalloonTail(
     };
     const flip = cross(unit(la), unit(bAxis));
     const rev = flip[0] * front[0] + flip[1] * front[1] + flip[2] * front[2] < 0;
-    const nA = Math.max(1, Math.ceil(Math.abs(a1 - a0) / 9));
-    const nB = Math.max(1, Math.ceil(Math.abs(b1 - b0) / 9));
-    for (let i = 0; i < nA; i++)
-      for (let j = 0; j < nB; j++) {
-        const p00 = at(a0 + (a1 - a0) * i / nA, b0 + (b1 - b0) * j / nB);
-        const p10 = at(a0 + (a1 - a0) * (i + 1) / nA, b0 + (b1 - b0) * j / nB);
-        const p11 = at(a0 + (a1 - a0) * (i + 1) / nA, b0 + (b1 - b0) * (j + 1) / nB);
-        const p01 = at(a0 + (a1 - a0) * i / nA, b0 + (b1 - b0) * (j + 1) / nB);
+    const n = Math.max(1, Math.ceil(Math.abs(zTo - zFrom) / 9));
+    const zs: number[] = [];
+    for (let i = 0; i <= n; i++) zs.push(Math.round(zFrom + (zTo - zFrom) * i / n));
+    const band = (z: number, t: number) => lo(z) + t * (hi(z) - lo(z));
+    for (let i = 0; i + 1 < zs.length; i++) {
+      const z0 = zs[i]!, z1 = zs[i + 1]!;
+      if (z1 === z0) continue;
+      // subdivide WISE too: the window caps a single face at ~20 cells and
+      // an oversized fin's chord band can outgrow it
+      const w = Math.max(Math.abs(hi(z0) - lo(z0)), Math.abs(hi(z1) - lo(z1)));
+      const m = Math.max(1, Math.ceil(w / 9));
+      for (let j = 0; j < m; j++) {
+        const t0 = j / m, t1 = (j + 1) / m;
+        const p00 = at(z0, band(z0, t0)), p10 = at(z1, band(z1, t0));
+        const p11 = at(z1, band(z1, t1)), p01 = at(z0, band(z0, t1));
+        if (p00[0] === p01[0] && p00[1] === p01[1] && p00[2] === p01[2]
+          && p10[0] === p11[0] && p10[1] === p11[1] && p10[2] === p11[2]) continue;
         if (!rev) { emit(p00, p10, p11, sink); emit(p00, p11, p01, sink); }
         else { emit(p00, p11, p10, sink); emit(p00, p01, p11, sink); }
       }
+    }
   };
+  const underside = (z: number) => 2 * cUp - surfUp(z);   // the hull's OTHER face at z
   const fillets: Record<FinRole, Triangle[]> = { rudder: [], aileronL: [], aileronR: [] };
   const panels: Record<FinRole, Triangle[]> = { rudder: [], aileronL: [], aileronR: [] };
   // the R-side generator (the L twin is mirror-derived from R's records)
@@ -292,15 +290,19 @@ export function planBalloonTail(
   // the shoulder to the hinge line; the rudder panel a tall vertical vane
   // HUNG AFT of the hinge line (green), spanning from around the hull's
   // middle height up past the fillet's top.
-  fillet(gSide, cSide, zA, zB, filletH, surfUp, sHat, fillets.rudder);
-  const rudHi = surfUp(zB) + Math.max(filletH, rudderH);
-  const rudLo = cUp - Math.round(0.2 * rUp);
-  rectPlate(gSide, cSide, zB, zB + rudderC, rudLo, rudHi, sHat, panels.rudder);
-  // Ailerons: fillets clinging to the ±side faces, panels hung aft rolling
-  // about the longitudinal axis at the fillet's trailing edge.
-  fillet(upIdx, cUp, zA, zB, filletS, surfSide, uHat, fillets.aileronR);
-  const ailIn = surfSide(zB) + 1;
-  rectPlate(upIdx, cUp, zB, zB + ailChord, ailIn, ailIn + ailSpan, uHat, panels.aileronR);
+  // Rudder: the fillet fills between the cone top and the straight TOP
+  // line (shoulder → hinge); the hung panel spans from the horizontal KEEL
+  // line up to the hull UNDERSIDE contour forward (so its hinge side is
+  // contour-following, not square) and up to the CONTINUED top line aft —
+  // one straight edge across the whole assembly.
+  region(gSide, cSide, zA, zB, surfUp, lineUp, sHat, fillets.rudder);
+  region(gSide, cSide, zA, zB, () => keelU, underside, sHat, panels.rudder);
+  region(gSide, cSide, zB, zB + rudderC, () => keelU, lineUp, sHat, panels.rudder);
+  // Ailerons: the fillet fills between the side contour and the outward
+  // top line; the hung panel continues aft of the hinge line between the
+  // (contour-following) inner edge and the continued line.
+  region(upIdx, cUp, zA, zB, surfSide, lineS, uHat, fillets.aileronR);
+  region(upIdx, cUp, zB, zB + ailChord, (z) => surfSide(z) + 1, lineS, uHat, panels.aileronR);
   // L twins: mirror EVERYTHING (side coord reflected about the mirror
   // plane, two vertices swapped = the flipped normal) — the pair is
   // triangle-for-triangle symmetric BY CONSTRUCTION.
@@ -342,7 +344,7 @@ export function planBalloonTail(
     // rudder: joint axis = up (its ŷ), slave (+ẑ) faces the tail — the
     // parts-only subgrid rule (subgrid.ts) animates the panel about R(q)·ŷ
     const p: GP3 = [c[0]!, c[1]!, c[2]!];
-    p[la] = zB; p[upIdx] = Math.round((rudHi + rudLo) / 2); p[gSide] = cSide;
+    p[la] = zB; p[upIdx] = Math.round((keelU + lineUp(zB)) / 2); p[gSide] = cSide;
     pivotDefs.push({ role: 'rudder', pos: p, frame: { ax: cross(uHat, tHat), ay: uHat, az: tHat } });
   }
   for (const sgn of [1, -1] as const) {

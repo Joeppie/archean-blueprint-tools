@@ -1012,20 +1012,25 @@ tail's pattern … visually jarring" and it is GONE (pinned: with fins on
 `sphereSkinTris(spec)` == the plain plan — balloonfin.test 'the tail cone
 is UNTOUCHED'); `SphereSpec.tailCutG` + the `loftZLevels`/`loftRingTable`
 exports REMAIN in latsphere (flag-guarded, byte-identical when unset);
-(b) per fin plane: a FIXED FILLET clings tight to the cone ("orange …
-taper the fuselage closely") from the SHOULDER (where the cone starts
-yielding; height 0 = flush there) to the hinge line just before the apex,
-its width growing LINEARLY so the leading edge is a straight slope (red)
-into a VERTICAL trailing edge — that edge IS the hinge line; the MOVABLE
-rudder/ailerons HANG AFT of it like stern-post rudders (green): the rudder
-a tall vertical vane (yaw about ŷ, spanning from below the axis to above
-the fillet top), the aileron pair hung plates rolling about the
-longitudinal; panels are TRIANGLE plates, never parts, `aileronL`
-mirror-derived from R triangle-for-triangle; `fin size %` = half the girth
-at the hinge line, `oversize` multiplies, spans clamped to the 20-cell
-window; cling/grow/hang pins in balloonfin.test.ts; the LV dive MARCHES
-INWARD until inside the envelope (the hinge sits near the narrow apex
-where a stub-axis dive would hover outside);
+(b) ONE STRAIGHT top line (sketch #3: "the moving part should continue
+the beginning … that too should be straight … the modest fin would
+probably continue horizontal, flush with the top"): the line runs from
+the SHOULDER point on the hull, rising aft with a slope that IS the fin
+size (finScale 0.25 ⇒ nearly flush), through the hinge line just before
+the apex and CONTINUING over the hung fin to its trailing edge — no
+curvature anywhere (the earlier rule rode the cone and curved back IN —
+wrong for stability surfaces). A FIXED FILLET fills hull→line from
+shoulder to hinge; the MOVABLE panel hangs to a horizontal KEEL line
+(= the hull-underside level at the shoulder): under the hull its upper
+edge FOLLOWS THE UNDERSIDE CONTOUR (the hinge side is contour-following,
+"not entirely square"), aft of the hinge it spans keel→the continued
+line to a vertical trailing edge; the ailerons are the side-plane twin
+(fillet contour→line, panel inner edge = contour+1 past the hinge);
+`aileronL` mirror-derived from R triangle-for-triangle; regions are
+`region(wAxis, …, lo(z), hi(z))` strips subdivided ≤9 cells BOTH ways
+(window-safe at oversize 4); straight-line/keel/contour/flush pins in
+balloonfin.test.ts; the LV dive MARCHES INWARD until inside the envelope
+(the hinge sits near the narrow apex where a stub dive hovers outside);
 (c) each panel rides a SmallHinge (default) / SmallPivot as a SUBGRID:
 Build record with nested `data.triangles` (parent-absolute, v0.168 law —
 the dev readBuild recurses nested triangles, FORMAT §Subgrids) joined via

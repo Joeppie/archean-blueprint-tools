@@ -47,6 +47,10 @@ describe('balloon tail plan (untouched cone, hung vanes)', () => {
   // stations recomputed from the body law (rz 8 ⇒ L 32 cells, sT 0.6):
   const zA = Math.round(6 + 0.6 * 32);                            // shoulder = 25
   const zB = p.counts.hingeZ;                                     // hinge line
+  const prof = (z: number) => {
+    const dz = z - 6, sL = 0.6 * 32, nl = 32 - sL;
+    return dz <= sL ? 1 : Math.sqrt(Math.max(0, 1 - ((dz - sL) / nl) ** 2));
+  };
 
   test('the tail batch plans clean', () => {
     expect(p.ok, p.reason).toBe(true);
@@ -72,10 +76,6 @@ describe('balloon tail plan (untouched cone, hung vanes)', () => {
   test('fillets cling to the cone from the SHOULDER and grow outward', () => {
     expect(zB).toBeGreaterThan(zA + 5);
     const cUp = 6;
-    const prof = (z: number) => {
-      const dz = z - cUp, sL = 0.6 * 32, nl = 32 - sL;
-      return dz <= sL ? 1 : Math.sqrt(Math.max(0, 1 - ((dz - sL) / nl) ** 2));
-    };
     for (const role of ['rudder', 'aileronR'] as const) {
       const out = role === 'rudder' ? 1 : 0;         // up coord / side coord
       const verts = p.fillets[role].flatMap(t => [0, 1, 2].map(i => gOf(rec(t), i as 0 | 1 | 2)));
@@ -97,26 +97,60 @@ describe('balloon tail plan (untouched cone, hung vanes)', () => {
     }
   });
 
-  test('the MOVABLE panels hang AFT of the hinge line (green)', () => {
-    // rudder: a tall vertical vane from around the hull middle to above the
-    // fillet top, starting exactly at the hinge line and reaching past it
+  test('one STRAIGHT top line: fillet and hung panel share it; keel is '
+    + 'horizontal; the hinge side follows the contour; the modest fin is '
+    + 'flush (user sketch #3: "that too should be straight … the smallest '
+    + 'fin would probably continue horizontal, flush with the top")', () => {
     const rud = p.panels.rudder.flatMap(t => [0, 1, 2].map(i => gOf(rec(t), i as 0 | 1 | 2)));
-    const zs = rud.map(v => v[2]);
-    expect(Math.min(...zs)).toBe(zB);
-    expect(Math.max(...zs)).toBeGreaterThan(zB);
-    const ups = rud.map(v => v[1]);
-    expect(Math.min(...ups)).toBeLessThan(6);         // reaches below the axis
-    expect(Math.max(...ups)).toBeGreaterThan(zB > 30 ? 9 : 9);
-    // rudder plate stays ON the mirror plane (side coord = 6)
-    for (const v of rud) expect(v[0]).toBe(6);
-    // ailerons: hung aft too, on the +side; panel is outboard of the skin
-    const ail = p.panels.aileronR.flatMap(t => [0, 1, 2].map(i => gOf(rec(t), i as 0 | 1 | 2)));
-    expect(Math.min(...ail.map(v => v[2]))).toBe(zB);
-    expect(Math.max(...ail.map(v => v[0]))).toBeGreaterThan(6);
-    expect(Math.min(...ail.map(v => v[0]))).toBeGreaterThan(6);
-    // the hung rudder hinge sits ON the hinge line, mid vane height
+    const all = [...p.fillets.rudder, ...p.panels.rudder]
+      .flatMap(t => [0, 1, 2].map(i => gOf(rec(t), i as 0 | 1 | 2)));
+    // the hung panel starts at the shoulder as a keel strip UNDER the hull
+    // and reaches AFT of the hinge line
+    expect(Math.min(...rud.map(v => v[2]))).toBeLessThanOrEqual(zA + 1);
+    expect(Math.max(...rud.map(v => v[2]))).toBeGreaterThan(zB);
+    // horizontal keel: the panel bottom is ONE level, the hull-underside
+    // level at the shoulder
+    const keel = 12 - Math.round(6 + 8 * prof(zA));            // 2·cUp − base(zA)
+    expect(Math.min(...rud.map(v => v[1]))).toBe(keel);
+    // ONE straight top: the highest vertex at each station rides the line
+    // (no curve back in): sample shoulder, hinge and trailing
+    const topAt = (z: number) => {
+      const vs = all.filter(v => v[2] === z);
+      return vs.length ? Math.max(...vs.map(v => v[1])) : NaN;
+    };
+    const lineAt = (z: number) => Math.round((6 + 8 * prof(zA)) + rise * (z - zA) / (zB - zA));
+    const rise = Math.round(0.5 * 8 * 1);                      // finScale 1 × oversize 1
+    for (const z of [zA + 6, zB, Math.max(...rud.map(v => v[2]))]) {
+      const top = topAt(z);
+      if (!Number.isNaN(top)) expect(Math.abs(top - lineAt(z)), `top at z=${z}`).toBeLessThanOrEqual(1);
+    }
+    // CONTINUOUS across the hinge: the fillet top at zB equals the panel
+    // top at zB (the line continues, it does not jump or bend)
+    expect(topAt(zB)).toBe(Math.max(...all.filter(v => v[2] === zB).map(v => v[1])));
+    // hinge side NOT square: the panel's forward upper boundary rides the
+    // hull underside contour (2·cUp − base) between shoulder and hinge
+    const strip = rud.filter(v => v[2] > zA + 1 && v[2] < zB - 1);
+    const upper = Math.max(...strip.map(v => v[1]));
+    expect(upper).toBeLessThanOrEqual(Math.max(...[zA + 2, zB - 2].map(z => 12 - Math.round(6 + 8 * prof(z)))) + 2);
+    // a modest fin (finScale 0.25) stays FLUSH: top ≤ hull top at shoulder
+    const modest = planBalloonTail(spec, { ...OPT, finScale: 0.25, oversize: 1 }, adapters);
+    const mAll = [...modest.fillets.rudder, ...modest.panels.rudder]
+      .flatMap(t => [0, 1, 2].map(i => gOf(rec(t), i as 0 | 1 | 2)));
+    // (exclude the hung keel strip's underside; check the TOP surface)
+    expect(Math.max(...mAll.map(v => v[1])))
+      .toBeLessThanOrEqual(Math.round(6 + 8 * prof(zA)) + 2);
+    // the rudder hinge sits ON the hinge line
     const h = p.comps.find(c => c.kind === 'pivot' && c.role === 'rudder')!;
     expect(h.pos[2]).toBeCloseTo((zB - 6) * 0.25, 6);
+    // ailerons: hung aft of the hinge, INNER edge contour-following (out of
+    // the hull side), outer edge on the continued outward line
+    const ail = p.panels.aileronR.flatMap(t => [0, 1, 2].map(i => gOf(rec(t), i as 0 | 1 | 2)));
+    expect(Math.min(...ail.map(v => v[2]))).toBe(zB);
+    expect(Math.max(...ail.map(v => v[2]))).toBeGreaterThan(zB);
+    // the inner edge at the HINGE clears the cone; aft it follows the
+    // contour in toward the apex (contour-following hinge side)
+    expect(Math.min(...ail.filter(v => v[2] === zB).map(v => v[0])))
+      .toBeGreaterThan(Math.round(6 + 8 * prof(zB)));
   });
 
   test('the aileron pair (fillets AND panels) is mirror-exact', () => {
