@@ -2221,6 +2221,19 @@ release/functionality. but no user-unackowledged bumps."** Concretely:
 ## Known open issues
 - Beacon "point forward" display convention (user): parked — blocked on an asymmetric
   probe craft (180°-quaternion z-sign ambiguity, see FORMAT.md).
+- GAME-hullified saves vs our triangle decode (found 2026-10-24): the airliner's
+  in-game hullify save (backup: client/blueprints/3309955432/*.bak) carries 53 235
+  game-authored skin records whose per-axis `frame_*` (e.g. −11 on a side skin at
+  x ≈ −4 m) decode as GIANT stray prisms under FORMAT §Triangles `world=(v+12f)·0.25−1.5`
+  — the game evidently anchors hullify skins differently. Arbitrate against the dev
+  viewer before supporting hullified saves visually; the coplanar-dashboard burial
+  (v1.5.16 open problem) bites these files too.
+- Data-source drift is the FIRST check when a craft renders differently in the dev
+  server vs Pages: the dev corpus resolves through tools/config.py to the MACHINE-LOCAL
+  in-game save dir while the deploy pins repo testdata — diff the two blueprint.json
+  first (app/tools/livery.mjs arbitrates live: world boxes, face pixels, hull on/off,
+  chromium/firefox, ANGLE vulkan/gl). "Browser-only" render reports were here caused
+  by exactly this (github.io = blocks original, dev = the hullified save).
 
 ## Invariants that tests enforce (keep them green)
 1. `?selftest`: edit→serialize round-trip preserves bytes except intended fields;
