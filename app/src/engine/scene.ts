@@ -25,8 +25,7 @@ import {
   TorusGeometry, Vector2, Vector3, WebGLRenderer,
   type Camera, type MeshStandardMaterialParameters,
 } from 'three';
-import earthBackdropUrl from '../assets/backdrops/earth.jpg';
-import marsBackdropUrl from '../assets/backdrops/mars.jpg';
+import backdropManifest from '../assets/backdrops/manifest.json';
 import { CanvasTexture, NearestFilter, SRGBColorSpace } from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
@@ -117,14 +116,32 @@ export const DEFAULT_OPTS: ViewOptions = { grid: true, occ: false, hull: true, w
  *  being a cube"): SURFACE panoramas — real sky above, terrain below — drawn
  *  on a BackSide SPHERE DOME that rides the eye. NOT scene.background: three's
  *  orthographic background fakes a perspective direction field and corners
- *  the panorama into cube walls; geometry is projection-honest. The textures
- *  are a NASA/JPL Perseverance Mastcam-Z Jezero 360° (public domain, resampled
- *  to the dome) and Poly Haven's "Waterbuck trail" by Greg Zaal (CC0) — see
- *  NOTICE.md — committed under src/assets/backdrops so the app stays offline-
- *  first. 'none' = the flat sky colour. */
-export type Backdrop = 'none' | 'mars' | 'earth';
-const BACKDROP_URL: Record<Backdrop, string | null> =
-  { none: null, mars: marsBackdropUrl, earth: earthBackdropUrl };
+ *  the panorama into cube walls; geometry is projection-honest.
+ *  v1.9.4 (we: "Add goegap call it desert, kloofendal… call it sky … Keep
+ *  the images in their own folder, with attribution and a URL to them. Make
+ *  the code enumerate them automatically when doing a build"): the set is
+ *  MANIFEST-DRIVEN — every panorama lives in src/assets/backdrops next to
+ *  manifest.json (name, source URL, author, license), vite enumerates the
+ *  folder at BUILD time via import.meta.glob, and the View menu, the
+ *  tooltips and the e2e pin all follow the manifest. Adding a backdrop =
+ *  drop a 2:1 JPG + one manifest entry, no code (see that folder's
+ *  README.md + NOTICE.md §2 for the attributions). 'none' = flat sky. */
+export type Backdrop = string;              // 'none' or a manifest name
+export interface BackdropMeta {
+  name: string; file: string; source: string; author: string; license: string;
+  note?: string;
+}
+const BACKDROP_FILE: Record<string, string> = import.meta.glob(
+  '../assets/backdrops/*.jpg', { eager: true, query: '?url', import: 'default' });
+export const BACKDROPS: readonly BackdropMeta[] = backdropManifest.backdrops;
+/** every menu name, 'none' first — the View menu and the e2e pin enumerate
+ *  THIS, so a new manifest entry appears without touching code */
+export const backdropNames = (): string[] => ['none', ...BACKDROPS.map(b => b.name)];
+const backdropUrl = (b: string): string | null => {
+  if (b === 'none') return null;
+  const m = BACKDROPS.find(x => x.name === b);
+  return m ? BACKDROP_FILE[`../assets/backdrops/${m.file}`] ?? null : null;
+};
 const BACKDROP_KEY = 'archean-app-backdrop';
 const ORTHO_KEY = 'archean-app-ortho';
 const SKY_HEX = 0x8fb4d8;
@@ -210,7 +227,7 @@ export class Engine {
    *  (persisted — the mirror-axis precedent) */
   private skyColor = new Color(SKY_HEX);
   private backdropNow: Backdrop =
-    (['none', 'mars', 'earth'] as string[]).includes(localStorage.getItem(BACKDROP_KEY) ?? '')
+    backdropNames().includes(localStorage.getItem(BACKDROP_KEY) ?? '')
       ? (localStorage.getItem(BACKDROP_KEY) as Backdrop) : 'none';
   private backdrops = new Map<Backdrop, Texture>();
   /** the panorama dome (lazy: only exists while a backdrop is shown) —
@@ -2565,7 +2582,7 @@ void main() {
     if (b === 'none') { showDome(null); return; }
     const cached = this.backdrops.get(b);
     if (cached) { showDome(cached); return; }
-    const url = BACKDROP_URL[b];
+    const url = backdropUrl(b);
     if (!url) return;
     new TextureLoader().load(url, (tex) => {
       tex.colorSpace = SRGBColorSpace;         // a photo, not albedo

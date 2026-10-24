@@ -9,6 +9,7 @@
 // box floats over the viewport (App).
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { requestThumb, startSpin, stopSpin } from '../engine/thumbs';
+import { BACKDROPS } from '../engine/scene';
 import type { Backdrop, Engine, ViewOptions } from '../engine/scene';
 import type { EditCtx } from '../engine/edit';
 import type { Blueprint, BlueprintComponent, LatticeObj } from '../engine/format';
@@ -362,14 +363,25 @@ export function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHu
       <Check testid="opt-subs" label="subgrids (doors/hatches)" checked={p.opts.subs} onChange={v => p.onOpt('subs', v)} />
       <Check testid="opt-mirror" label="mirror plane(s)" checked={p.opts.mirror} onChange={v => p.onOpt('mirror', v)} />
       {/* v1.9.2 SKY BACKDROPS: the ground is a see-through pick pad now, so
-          the world behind it is a choice — CC BY planet panoramas (NOTICE) */}
-      <div className="flex items-center gap-2 py-[2px] text-[12px] text-ink">
+          the world behind it is a choice. v1.9.4 (we: "keep the images in
+          their own folder, with attribution and a URL … make the code
+          enumerate them automatically"): the rows ENUMERATE the manifest
+          (src/assets/backdrops/manifest.json), so a new panorama appears
+          without touching this file; the tooltips carry the attribution
+          (author, licence, source — see the folder README + NOTICE §2) */}
+      <div className="flex flex-wrap items-center gap-2 py-[2px] text-[12px] text-ink">
         <span className="flex-1">sky backdrop</span>
-        {(['none', 'mars', 'earth'] as const).map(b => (
-          <button key={b} data-testid={`backdrop-${b}`} title={`sky backdrop: ${b}`}
-            onClick={() => p.onBackdrop(b)}
-            className={`ksp-btn px-2 py-[1px] text-[11px] ${p.backdrop === b ? 'on' : ''}`}>
-            {b}
+        <button data-testid="backdrop-none" title="flat sky colour"
+          onClick={() => p.onBackdrop('none')}
+          className={`ksp-btn px-2 py-[1px] text-[11px] ${p.backdrop === 'none' ? 'on' : ''}`}>
+          none
+        </button>
+        {BACKDROPS.map(b => (
+          <button key={b.name} data-testid={`backdrop-${b.name}`}
+            title={`${b.author} — ${b.license}\n${b.source}`}
+            onClick={() => p.onBackdrop(b.name)}
+            className={`ksp-btn px-2 py-[1px] text-[11px] ${p.backdrop === b.name ? 'on' : ''}`}>
+            {b.name}
           </button>
         ))}
       </div>

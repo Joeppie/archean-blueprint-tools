@@ -1,12 +1,12 @@
 # Display and view options
-Tags: display options hull wireframe labels opacity real models quality static info fog adapters connectors ground coord coordinate readout cursor shift vertical plane measure height axes axis x y z up backdrop sky mars earth planet panorama equirectangular orthographic ortho projection parallel camera
+Tags: display options hull wireframe labels opacity real models quality static info fog adapters connectors ground coord coordinate readout cursor shift vertical plane measure height axes axis x y z up backdrop sky mars earth desert hangar goegap kloofendal waterbuck attribution credit panorama equirectangular orthographic ortho projection parallel camera
 
 The **⚙ View** window (top right) collects the display state; the same
 toggles have keys where it matters.
 
 | Option | What it does |
 |---|---|
-| Sky backdrop | what you see THROUGH and BEYOND the build pad: **none** (the flat sky colour), **mars** (the real Perseverance Jezero 360° panorama, NASA) or **earth** (a savanna dawn panorama, Poly Haven CC0) — true surface panoramas, so it's SKY overhead and TERRAIN below with the horizon at eye level, drawn on a dome that follows the camera and looks right in both perspective and orthographic. The ground pad itself is see-through now; the grid lines and ±axis marks are all that render of it |
+| Sky backdrop | what you see THROUGH and BEYOND the build pad: **none** (the flat sky colour) plus every panorama the app enumerates (see credits below) — **mars** (the real Perseverance Jezero 360°), **earth** (a savanna trail), **desert** (Goegap's red sand under a big sky) and **sky** (a bright partly-cloudy pure sky) — true surface panoramas, so it's SKY overhead and TERRAIN below with the horizon at eye level, drawn on a dome that follows the camera and looks right in both perspective and orthographic. The ground pad itself is see-through now; the grid lines and ±axis marks are all that render of it |
 | Orthographic (5) | parallel projection — no perspective shrink, parallel edges stay parallel: align, measure and square up blueprints like a CAD sheet. The framing survives the swap both ways; wheel zoom scales the ortho sheet |
 | Hull (h) | block + triangle solids on/off — OFF means WIREFRAME and click-through |
 | Wireframe | the lattice wire overlay (mutually exclusive with hull solids) |
@@ -39,3 +39,24 @@ Everything is touch-first: the mode bar wraps to its own row, menus and
 dialogs cap to the phone screen, tool dialogs sit clear of Brave's floating
 bottom bar, and the parts panel is a drawer (tap the dimmed viewport or ✕
 to dismiss).
+
+## Sky backdrop credits
+
+The View menu's panoramas are free-licensed surface panoramas, committed
+under `src/assets/backdrops` next to a `manifest.json` that carries each
+file's author, licence and source URL — the menu enumerates that manifest,
+so a new panorama needs no code. With thanks to their authors:
+
+- **mars** — *Mastcam-Z's First 360-Degree Panorama* (Perseverance rover,
+  Jezero Crater, Sol 3), NASA/JPL-Caltech/ASU/MSSS — public domain,
+  [PIA23862](https://www.nasa.gov/multimedia/imagegallery/iotd/piasmall/PIA23862/)
+- **earth** — *Waterbuck trail*, Greg Zaal, Poly Haven — CC0 1.0,
+  [polyhaven.com/a/waterbuck_trail](https://polyhaven.com/a/waterbuck_trail)
+- **desert** — *Goegap*, Greg Zaal, Poly Haven — CC0 1.0,
+  [polyhaven.com/a/goegap](https://polyhaven.com/a/goegap)
+- **sky** — *Kloofendal 48d Partly Cloudy (Pure Sky)*, Greg Zaal & Jarod
+  Guest, Poly Haven — CC0 1.0,
+  [polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky](https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky)
+
+`desert` and `sky` ship as low-quality (2 k, compressed) tone-mapped
+variants to keep the bundle small.

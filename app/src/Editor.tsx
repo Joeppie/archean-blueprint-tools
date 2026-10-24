@@ -7,7 +7,7 @@
 // download). Holds the raw-literal DOC + live bp; see App.tsx for the shell.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { craftName } from './gallery-catalog';
-import { DEFAULT_OPTS, type Backdrop, type Engine, type PickHit, type ViewOptions } from './engine/scene';
+import { DEFAULT_OPTS, backdropNames, type Backdrop, type Engine, type PickHit, type ViewOptions } from './engine/scene';
 import Viewport from './components/Viewport';
 import Panel, { StaticInfo, ViewOpts, type EditApi } from './components/Panel';
 import TopBar, { type Mode } from './components/TopBar';
@@ -117,7 +117,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // attach); the React twins exist so the rows re-render — the mirAxis
   // precedent. onEngine re-syncs both from the engine (engine is truth).
   const [backdrop, setBackdrop] = useState<Backdrop>(() =>
-    (['none', 'mars', 'earth'] as string[]).includes(localStorage.getItem('archean-app-backdrop') ?? '')
+    backdropNames().includes(localStorage.getItem('archean-app-backdrop') ?? '')
       ? localStorage.getItem('archean-app-backdrop') as Backdrop : 'none');
   const onBackdrop = useCallback((b: Backdrop) => {
     setBackdrop(b);

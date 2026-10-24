@@ -4,25 +4,44 @@
 // as options, in the cog menu, rename that to view because, under view also
 // add a mode for orthogonal"):
 //  • the ⚙ popover IS the View menu (section header "View") and carries the
-//    sky-backdrop segment (none/mars/earth) + the orthographic row;
+//    sky-backdrop segment (none + every name in the backdrop manifest) + the
+//    orthographic row;
 //  • the ground pad is SEE-THROUGH — asserted on FRAMEBUFFER PIXELS:
 //    Engine.probePixel forces one fresh frame, the raw GL context reads it
 //    (pixels, not intent). The band under the craft shows SKY between the
 //    grid lines; the OLD opaque green sheet made EVERY band pixel green;
 //  • a backdrop really swaps the sky dome (pixels change; 'none' restores);
+//  • v1.9.4 (we: "keep the images in their own folder, with attribution and
+//    a URL … make the code enumerate them automatically"): the rows and the
+//    swap list are read FROM THE MANIFEST (src/assets/backdrops/manifest.json
+//    + the *.jpg next to it) — a new entry appears in the menu and in THIS
+//    pin without touching either;
 //  • ORTHOGRAPHIC mode is truly parallel: an off-axis point displaced 1 m
 //    along the sight axis projects 0 px apart (perspective moves it
 //    clearly), the swap round-trips the framing, key 5 toggles, and BOTH
 //    the projection and the backdrop persist across a reload.
+import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 
 const ISW = '3812927875';
+
+/** THE ENUMERATION PIN: the menu builds its rows from the manifest, so the
+ *  expectations read the SAME file — add a panorama (jpg + manifest entry)
+ *  and every backdrop pin below covers it automatically. */
+const MANIFEST = JSON.parse(readFileSync(
+  new URL('../src/assets/backdrops/manifest.json', import.meta.url), 'utf8',
+)) as { backdrops: { name: string; file: string }[] };
+const NAMES = ['none', ...MANIFEST.backdrops.map(b => b.name)];
+// every manifest file must actually sit in the folder (vite's build-time
+// glob can only enumerate what is there — fail early, not as a silent 404)
+for (const b of MANIFEST.backdrops)
+  readFileSync(new URL(`../src/assets/backdrops/${b.file}`, import.meta.url));
 
 type ViewState = { proj: 'perspective' | 'orthographic';
   eye: [number, number, number]; target: [number, number, number]; zoom: number };
 type Win = { __ARCHEAN__?: {
   view(): ViewState;
-  backdrop(): { current: 'none' | 'mars' | 'earth'; ready: boolean; dome: boolean };
+  backdrop(): { current: string; ready: boolean; dome: boolean };
   screen(x: number, y: number, z: number): [number, number] | null;
   pixel(u: number, v: number): [number, number, number] | null;
   grid(): { step: number } | null;
@@ -67,7 +86,7 @@ test.describe('view menu: see-through ground, sky backdrops, ortho @ui', () => {
     await openMenu(page);
     // renamed by the user rule: the section header says "View"
     await expect(page.getByTestId('viewopts').locator('h3')).toHaveText('View');
-    for (const b of ['none', 'mars', 'earth'])
+    for (const b of NAMES)
       await expect(page.getByTestId(`backdrop-${b}`)).toBeVisible();
     await expect(page.getByTestId('opt-ortho')).toBeVisible();
   });
@@ -102,7 +121,7 @@ test.describe('view menu: see-through ground, sky backdrops, ortho @ui', () => {
       .toBeLessThan(0.5);
   });
 
-  test('backdrop mars/earth swap the sky dome; none restores', async ({ page }) => {
+  test('every manifest backdrop swaps the sky dome; none restores', async ({ page }) => {
     desktopOnly();
     await openCraft(page, ISW);
     await expect.poll(() => backdropOf(page)).toEqual({ current: 'none', ready: true, dome: false });
@@ -110,7 +129,7 @@ test.describe('view menu: see-through ground, sky backdrops, ortho @ui', () => {
     // 'none' = the flat sky colour #8fb4d8
     expect(far(sky0, [143, 180, 216])).toBeLessThan(24);
     await openMenu(page);
-    for (const b of ['mars', 'earth'] as const) {
+    for (const b of NAMES.filter(n => n !== 'none')) {
       await page.getByTestId(`backdrop-${b}`).click();
       await expect.poll(() => backdropOf(page), { timeout: 10_000 })
         .toEqual({ current: b, ready: true, dome: true });
@@ -190,7 +209,8 @@ test.describe('view menu: see-through ground, sky backdrops, ortho @ui', () => {
     test.skip(test.info().project.name === 'chromium', 'phone-only');
     await openCraft(page, ISW);
     await openMenu(page);
-    await expect(page.getByTestId('backdrop-earth')).toBeVisible();
+    for (const b of NAMES)
+      await expect(page.getByTestId(`backdrop-${b}`)).toBeVisible();
     await expect(page.getByTestId('opt-ortho')).toBeVisible();
     await page.getByTestId('opt-ortho').check();
     await expect.poll(async () => (await viewOf(page)).proj).toBe('orthographic');

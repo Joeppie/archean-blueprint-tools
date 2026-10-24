@@ -1,0 +1,37 @@
+{
+  "$comment": "Sky backdrops for the View menu. The engine ENUMERATES this at build time (scene.ts import.meta.glob over *.jpg next to it) — adding a backdrop = drop a 2:1 equirectangular panorama here + one entry below; no code changes. Keep files small (≤ ~400 KB): the app is a static Pages bundle.",
+  "backdrops": [
+    {
+      "name": "mars",
+      "file": "mars.jpg",
+      "source": "https://www.nasa.gov/multimedia/imagegallery/iotd/piasmall/PIA23862/",
+      "author": "NASA/JPL-Caltech/ASU/MSSS — Mastcam-Z's First 360-Degree Panorama (Perseverance, Jezero Crater, Sol 3)",
+      "license": "public domain (NASA image use policy)",
+      "note": "resampled from the stitched cylinder onto the full 2:1 dome (sky/soil rows extended to the poles)"
+    },
+    {
+      "name": "earth",
+      "file": "earth.jpg",
+      "source": "https://polyhaven.com/a/waterbuck_trail",
+      "author": "Greg Zaal — Poly Haven \"Waterbuck trail\"",
+      "license": "CC0 1.0",
+      "note": "resampled 16k → 2k"
+    },
+    {
+      "name": "desert",
+      "file": "desert.jpg",
+      "source": "https://polyhaven.com/a/goegap",
+      "author": "Greg Zaal — Poly Haven \"Goegap\"",
+      "license": "CC0 1.0",
+      "note": "low-quality variant: tone-mapped preview 8k → 2k, q70"
+    },
+    {
+      "name": "sky",
+      "file": "sky.jpg",
+      "source": "https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky",
+      "author": "Greg Zaal, Jarod Guest — Poly Haven \"Kloofendal 48d Partly Cloudy (Pure Sky)\"",
+      "license": "CC0 1.0",
+      "note": "low-quality variant: tone-mapped preview 8k → 2k, q70"
+    }
+  ]
+}

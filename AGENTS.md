@@ -1259,6 +1259,32 @@ topic + FORMAT).
   (0.234 m) do, a designed 0.0105 re-centring). Help topic balloon.md
   retold. In-game arbitration of the sideways sweep stays OURS jointly
   (AGENTS: in-game pixels arbitrate). Version strings v1.9.3 (patch).
+- **v1.9.4 SKY BACKDROPS ARE A MANIFEST (we: "Add goegap call it desert,
+  kloofendal… call it sky … Attribute these in the help … try a low-quality
+  version … Keep the images in their own folder, with attribution and a URL
+  to them. Make the code enumerate them automatically when doing a build")**
+  — `src/assets/backdrops/` is now DATA: every panorama sits next to
+  `manifest.json` (name, file, source URL, author, license, note) + a
+  human README.md, and `scene.ts` enumerates the folder at BUILD time
+  (`import.meta.glob('…/backdrops/*.jpg', eager, ?url)` + the json). The
+  `Backdrop` type WIDENED from the 'none'|'mars'|'earth' union to a string
+  ('none' or a manifest name); `BACKDROPS`/`backdropNames()` are the single
+  source — the View-menu rows (with author+licence+URL tooltips), the
+  Editor's localStorage validation and the Engine cache all follow it, so
+  ADDING A BACKDROP = drop a 2:1 JPG + one manifest entry, ZERO code. New
+  entries (both Poly Haven CC0, low-quality tone-mapped 2 k variants, q70 —
+  208/85 KB): **desert** = "Goegap" (Greg Zaal), **sky** = "Kloofendal 48d
+  Partly Cloudy (Pure Sky)" (Greg Zaal & Jarod Guest); mars/earth migrated
+  in with their NOTICE §2 attributions. Attribution rides THREE places per
+  the ask: the folder manifest+README, the NOTICE §2 rewrite, and the in-app
+  manual (Display topic ▸ "Sky backdrop credits" — search words added).
+  e2e `viewmenu.spec` is manifest-DRIVEN now: it reads the json + checks
+  every listed jpg EXISTS (module top, fails before any click) and loops
+  rows/phone-rows/swap-pixels over every name — a new entry is pinned the
+  moment it lands (proven: desert + sky swap pixels green). Build proof:
+  `vite build` emits all four panoramas; 508 vitest + viewmenu @ui green.
+  `hangar` awaited the user's URL choice (their paste re-used the sky URL) —
+  Poly Haven hangar candidates offered: hangar_interior, small_hangar_01/02.
 - **v1.8.6 THE SKIN TRANSFORM CUTS, NEVER DROPS (urgent-fix.md, user: "a valid
  zeppelin suddenly misses a face after rotations … the size doesn't inherently
  change"):** the frame-aligned 31-slot window is a FRAME law, so a face with
