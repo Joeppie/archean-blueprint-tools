@@ -8,7 +8,7 @@ Tags: interface ui panel topbar modes options settings widgets layout tabs cost 
 | ← | back to the gallery (space center) |
 | File ▾ | New craft (confirms while unsaved) · Open file… · Save / Save as… · Refresh (redownload) · Close |
 | Edit ▾ | Undo / Redo with their live enabled state; the vessel-information rows that are still TODO |
-| Tools ▾ | the generated batch tools: Replace all…, Blocks → hull triangles…, Sphere skin… |
+| Tools ▾ | the generated batch tools: Replace all…, Blocks → hull triangles…, Generate balloon… (with the tail rudder + aileron section) |
 | Help ▾ | this manual |
 | Mode tiles | View · Edit · Wire · Flight · Wind — the workspace split |
 | ● Save | download the file; the gold ● means unsaved changes |

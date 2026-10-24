@@ -1,127 +1,150 @@
-# Archean Blueprint Tools · v1.10.3
+# Archean Blueprint Tools · v1.10.4
 
-**Reverse-engineered file format + a zero-build browser viewer/inspector for
-workshop craft of [Archean](https://store.steampowered.com/app/2941660/Archean/)**
-— the voxel/particle space-sim sandbox by batcholi / FloDKSM.
+**Reverse-engineered file format + a browser editor for workshop craft of
+[Archean](https://store.steampowered.com/app/2941660/Archean/)** —
+the voxel/particle space-sim sandbox by batcholi / FloDKSM.
 
-![ISW-241 fighter in the viewer](assets/screenshot.png)
+![A generated zeppelin — balloon skin plus rudder and aileron fins on hinge subgrids — under the sky backdrop](assets/zeppelin-fins.png)
 
 Archean stores every workshop craft as a compact `blueprint.json` — components,
-voxel blocks, hull-triangle meshes, fluid/power wiring, nested door subgrids.
-The format is undocumented; this repository reverse-engineers it (see
-[FORMAT.md](FORMAT.md)) and ships the tooling that grew out of that work.
-
-Everything outside the React app in `app/` is static — plain ES modules +
-Three.js from a CDN. No build step, no npm, no server-side code (`app/` has
-its own npm project; see [app/README.md](app/README.md)).
+voxel blocks, hull-triangle meshes, power/data/fluid wiring, nested door
+subgrids. The format is undocumented; this repository reverse-engineers it
+(see [FORMAT.md](FORMAT.md)) and ships the tooling that grew out of that work.
 
 ## ▶ Live site
 
 **The Blueprint Inspector app IS the site:
 https://joeppie.github.io/archean-blueprint-tools/** —
-the React + TypeScript editor: craft gallery, full game meshes, live editing,
-byte-exact saves (also reachable as `/app/index.html`). This is the app
-`viewer/` is being ported to (see [REWRITE.md](REWRITE.md)).
-
-The legacy zero-build inspector stays reachable at
+the React + TypeScript editor: craft gallery, the game's real component
+meshes, live editing, generation tools, byte-exact saves. The legacy zero-build
+inspector stays reachable at
 **https://joeppie.github.io/archean-blueprint-tools/viewer/index.html**
-(small link at the end of the app's gallery — it is the frozen port
-reference, not the front door).
+(small link at the end of the gallery — it is the frozen port reference, not
+the front door).
 
-Loads the ISW-241 fighter by default. Click any component to edit position,
-rotation and data fields with live 3D feedback; *Open file…* (or drag-drop)
-loads any `blueprint.json`, and **Save** writes it back byte-exact in the
-game's own compact JSON format, keeping the block/occupancy mirror in sync.
+Everything outside the React app in `app/` is static — plain ES modules +
+Three.js from a CDN. No build step, no npm, no server-side code (`app/` has
+its own npm project; see [app/README.md](app/README.md)).
 
-## What the app editor does
+## What the editor does
 
-The Inspector app (the site root) is the actively developed editor. Beyond
-gallery/live-edit/save it ships:
+A craft opens in **View** (inspect: mass & CoM, census, the ⚖ Lift widget, the
+**Build cost** readout). Five mode tiles split the workspaces —
+**⌖ View · ✎ Edit · ∿ Wire · ➤ Flight · ≋ Wind**.
 
-- **Build-friendly ground** — the ground pad FITS the craft and its grid
-  granularity rides zoom on the blueprint-cell ladder (0.25 m → 1.25 → 2.5 →
-  12.5 m; majors every 5). The **x = 0 line reads RED, the z = 0 line BLUE**,
-  ±-labelled at the ends: world orientation at a glance (file law: flat
-  plane x–z, **y is UP**, nose −z).
-- **Hover coordinate readout** — a small black label follows the cursor and
-  raytraces what it lands on: the visible surface's full snapped `x y z`
-  (wireframe measures through the hull — you measure what you see).
-- **Settable mirror axis** — ⚙ ▸ mirror axis X/Y/Z drives ⇄ twin placement
-  and block twins; every mirrored axis the craft shows (detected twin pairs,
-  the game's per-component `mirrorAxis` field) gets its overlay plane. The
-  uniform mirror rule propagates every edit — shape, paint, material,
-  delete — to the twin, and flags faux-mirror conflicts instead of half
-  applying.
-- **Real-time everything** — data sliders rebuild one part's real model per
-  frame (propellers, dashboards), joint handles ride the captured hinge
-  lines, subgrids swing with their masters; full **undo/redo** on every
-  mutation (Ctrl+Z keeps the camera for A/B comparing).
-- **Tools & analysis** — TOOLS ▸ dialogs (replace-all, hullify with the
-  game's authoring defaults, Generate balloon lattice hull planner with
-  deviation/lift previews and a SIMPLE cylinder+nose body for pointy blends,
-  its ghost quarter-turning ⟲x/⟲y/⟲z with a ↩ back-to-parameters button),
-  the lift & altitude widget (US Standard
-  Atmosphere 1976, vacuum/He/H₂ buoyancy, weight-limit ladder), the
-  **build cost** readout in View (the WHOLE craft unfolded through the game's
-  crafter recipes to raw ores — parts, blocks, hull triangles, cables, frames
-  and struts in their own foldable groups, the craft-wide shopping list plus
-  each line's own recipe chain, e.g. a FluidPort = 1 Casing + 1 Connector =
-  1 000 g iron, 250 g carbon, 250 g silicon, 1 g copper; cables priced by the
-  game's per-segment centimetre rule with the real run length shown), flight
-  and wind-tunnel panels,
-  and a searchable in-app **help manual** (Help ▸ Manual).
+### The Wire workspace — every cable, where it goes
 
-## What the viewer shows
+Chip Patton's Badger quad below sits in **Wire** mode with the hull switched to
+**wireframe** (`h`) — the whole `data.pipes` graph is visible *through* the
+skin, and resting the cursor on a cable prints a gold chip naming both ends
+(`SmallWheel.data-port ↔ MiniRouter.data_port.3`) while the cable itself
+gold-lights. The panel lists every cable as a `Type[9].port ↔ Type[0].port`
+row with a ✕ that disconnects (Ctrl+Z reconnects exactly), a per-kind port
+census, a NETWORKS overview ordered sources → hubs → devices, and an
+auto-wire that follows the game's own port *naming* logic — inputs face
+outputs, hubs feed devices, a junction's upstream input stays free for the
+power source — and otherwise leaves ports honestly open instead of
+force-pairing junk.
 
-- **Real game components** — the game's own models (extracted from installed
-  game modules) with your painted colours (`color1`/`color2`), real masses,
-  joint limits (aileron ±45° hinge) and port positions. The game renders with
-  raytracing, so its meshes are far denser than a raster GPU likes: the
-  default view is therefore a **same-shape decimated twin** (boxes + hexagons,
-  micro-detail removed), verified per-type against the real mesh by
-  `?proxytest`. Tick “real game models” for the full geometry.
-- **Hull skins** — hull triangles share the *exact* voxel lattice
-  (`world = frame·3 − 1.5 + v·0.25`, welded shared vertices) and render as the
-  closed 0.05 m prisms the game draws, with all five stored colours
-  (front/back/rim). A “wireframe (hull + blocks)” overlay shows triangle and
-  block edges together, in their real colours.
-- **Everything else in the file** — voxel blocks in their real shapes (a block's
-  `type` packs shape+orientation: cubes, slopes, corners, pyramids, inverse
-  corners — the reason voxel hulls look curved) in their real **linear**
-  palette colours with the game's roughness/metallicity/transparency rules,
-  nested door/hatch subgrids, fluid pipes with port markers, adapter nubs,
-  CoM/declared-mass cross-check, stylized thin-plate flight analysis
-  (CoP/static margin, particles + streamlines — labelled *not CFD*),
-  floating labels on cockpit-interactive parts (`dash`, `seat`, `button`,…
-  plus in-game aliases).
-- **Built for weak GPUs** — blocks/pipes/streamlines/ports each merged into
-  single draw calls, on-demand rendering (idle = GPU asleep), clamped pixel
-  ratio. ~150 draw calls for a 30-component fighter.
+![The Badger's wiring through the wireframe hull — WIRE mode, hover chip on](assets/wiring-badger.png)
+
+### Generate balloon — hull triangles from a shape, not a brush
+
+**TOOLS ▸ Generate balloon…** grows a closed, convex skin of the game's hull
+triangles out of the 0.25 m lattice — a convex polyhedron by construction, so
+it cannot show the indentations every heuristic attempt left behind. The live
+preview prints the deviation against the ideal surface, the skin mass, the
+enclosed volume and sea-level lift per gas **before** anything is built; OK
+drops it on the pad as a movable, cell-snapped ghost with ⟲x/⟲y/⟲z quarter-
+turns, ↩ back-to-parameters and ✔ Build as one undo step (below: a 10 × 8 m
+spheroid ghost with its parameter dialog dragged aside).
+
+![Generating a spheroid balloon — dialog parameters, translucent lattice-exact ghost, ⟲ ↩ ✕ ✔ placement kit](assets/balloon-generating.png)
+
+The cylindrical body gains a **tail section**: a fixed fin fillet clinging to
+the untouched tail cone plus a rudder and a mirrored aileron pair as triangle
+panels riding SmallHinge subgrids — LV cables diving into the envelope to a
+coupler at the centre — the hero picture at the top, under the **sky**
+backdrop. The ⚖ Lift widget scores the built envelope against the real U.S.
+Standard Atmosphere 1976: lift at sea level per gas and the equilibrium
+altitude.
+
+### Look at it however the blueprint asks
+
+Chip Patton's *Falcon* under the **desert** (Goegap) backdrop — one of the
+manifest-enumerated surface panoramas (real sky above, terrain below, the
+ground pad see-through). Alongside them: **orthographic projection** (key `5`)
+for CAD-style parallel framing, a zoom-adaptive ground grid that fits the
+build, red/blue world-axis lines with ±-labels, and the Blender-style black
+coord chip that raytraces what the cursor lands on and prints the full
+snapped `x y z` (file law: x lateral, **y is UP**, nose −z).
+
+![Chip Patton's Falcon under the desert (Goegap) panorama backdrop — see-through pad, adaptive grid](assets/falcon-desert.png)
+
+### And the rest of the bench
+
+* **Real game components** — the game's own dense meshes with your painted
+  palette colours, live: every inspector field rebuilds that one part per
+  frame (propellers regenerate from `data`, dashboards draw their elements).
+  Hull triangles render as the closed 0.05 m prisms the game draws, on the
+  exact shared lattice.
+* **Edit with the mirror rule** — every edit on a selected item drives its
+  mirror twin in mirrored unison (shape, paint, material, joint data, delete)
+  and flags faux-mirror conflicts instead of half applying; settable mirror
+  axis; block brush with ⇄ continuation; per-face paint; seven gameplay
+  materials.
+* **Subgrids swing with their masters** — nested door/hatch/fin content rides
+  the hinge law the game's own baked benches prove (`R(q)·C·ê`, see FORMAT
+  §Subgrids), gold ring/arrow handles at the captured joint line.
+* **Undo/redo over everything** (Ctrl+Z keeps the camera for A/B comparing),
+  occupancy/type-255 mirrors stay synced, and **Save** writes byte-exact game
+  JSON — untouched fields keep their original number style.
+* **Build cost** (View panel) — the whole craft unfolded through the game's
+  crafter recipes to raw ores: parts, blocks, hull triangles, cables, frames
+  and struts each in their own foldable group.
+* **Tools ▸** also holds *Replace all…* (face colour / material batches) and
+  *Blocks → hull triangles…* (face-exact hullify with the game's authoring
+  defaults).
+* **A validated craft cache** — every gallery craft is stored with its
+  revision + SHA-256; a workshop edit after your last download is flagged on
+  the card and gated by a dialog (redownload or use the cached copy — never
+  silently replaced).
+* **A searchable in-app manual** — Help ▸ Manual, every panel, key and tool.
+
+## The legacy viewer (frozen port reference)
+
+`viewer/index.html` is the zero-build inspector the app grew out of; it still
+opens any blueprint (`?open=…`, `?real`, `?flow`, `?selftest` …) and is where
+the engine semantics are pinned, but new features land in `app/` only.
+Its renders — decimated/real twins, exact-lattice hull skins, linear palette
+colours, merged draw calls (~150 for a 30-part fighter) — are documented in
+[REWRITE.md](REWRITE.md) and the invariant list in [AGENTS.md](AGENTS.md).
 
 ## Repository map
 
 | path | what |
 |---|---|
-| `viewer/` | the 3D inspector/editor (one ES module + hullfit + palette + lazy model atlas) |
-| `viewer/models/` | 106 component types: geometry (full + low-poly), mass, joints, ports, colliders — generated by `tools/extract_models.py` from an installed game |
-| `regtest/` | format-validation suite over the whole `testdata/` corpus (auto-discovers craft) |
-| `testdata/` | 25 workshop blueprints (1 kB–2.5 MB, incl. the Classic American Semi Truck) used as regression corpus |
-| `tools/extract_models.py` | regenerates `viewer/models/` from a local Archean install |
-| `tools/find_install.py` | finds the local Archean install / blueprint saves / Workshop dir on any machine (see `LOCATIONS.md`) |
-| `tools/adjust_seat.py` | example of a safe scripted format edit |
-| `tests/run_tests.sh` | headless-Chromium suite: selftest, regtest, proxytest, render shots |
-| `tools/release.sh` | cuts the stable release onto the `release` branch — **only ever run when the maintainer explicitly says so** |
+| `app/` | the React + TypeScript editor (Vite; own npm project) — all new work |
+| `app/src/engine/` | the headless scene/engine core (pure vitest pins, no React) |
+| `viewer/` | the legacy zero-build inspector + frozen test suites |
+| `viewer/models/` | 106 component types: geometry, mass, joints, ports, colliders — generated by `tools/extract_models.py` from an installed game |
+| `testdata/` | regression corpus: 64 workshop craft + generated fixtures (117 files, 1 kB–6 MB) |
+| `tools/` | format tooling: install discovery, fixture generators, matrix rituals, the release cut, the security gate |
+| `tests/run_tests.sh` | headless-Chromium suite for the legacy viewer (selftest, regtest, renders) |
+| `tools/release.sh` | cuts the stable release — **only ever run when the maintainer explicitly says so** |
 | `FORMAT.md` | the format documentation — start here |
-| `LOCATIONS.md` | how to reliably find an Archean install, its local blueprint saves and Workshop downloads on any machine |
+| `LOCATIONS.md` | how to find an Archean install, its blueprint saves and Workshop downloads on any machine |
 | `AGENTS.md` | development guide for humans *and* coding agents |
 | `NOTICE.md` | licensing: code GPL-3.0; game/player content belongs to its respective owners |
 
 ## Running locally
 
 ```bash
-python3 -m http.server 8650          # repo root
-# viewer:  http://127.0.0.1:8650/viewer/index.html
-# suite:   tests/run_tests.sh        (python3 + chromium; exit 0 = all green)
+python3 -m http.server 8650          # repo root → the legacy viewer
+cd app && npm install && npm run dev -- --host 0.0.0.0    # the editor (Vite)
+bash tests/run_tests.sh              # legacy headless suite (python3 + chromium)
+cd app && npm test                   # vitest — pure engine core
+cd app && npm run test:e2e           # Playwright UI suite (desktop + phone)
 ```
 
 The repo works anywhere — it does not have to live inside the Steam tree, and
@@ -134,32 +157,28 @@ no tool hardcodes a machine path. To point the tools at YOUR Archean install
 ## Development setup
 
 ```bash
-git clone https://github.com/Joeppie/archean-blueprint-tools.git ~/archean-blueprint-tools
-cd ~/archean-blueprint-tools
+git clone https://github.com/Joeppie/archean-blueprint-tools.git
+cd archean-blueprint-tools
 bash tools/install-hooks.sh                               # one-per-clone: the mandatory
                                                           # checkin gate (credential-shape +
                                                           # version-string scan, headless
                                                           # selftest + regtest on viewer edits)
 python3 tools/find_install.py --conf >> blueprints.conf   # optional: point at your local
                                                           # Archean install (gitignored file)
-cd app && npm install                                     # only for the React app/ rewrite
+cd app && npm install && npx playwright install chromium  # the editor + its UI suite
 ```
 
-Clone over HTTPS as above, or use the SSH URL
-(`git@github.com:Joeppie/archean-blueprint-tools.git`) if you have a key on the
-repo. Everything outside `app/` is zero-build — Python 3 + Chromium for the
-test suite, no other dependencies. `blueprints.conf` is the only place a
-machine-local path may live and it is gitignored, so nothing machine-specific
-is ever committed (see `blueprints.conf.example`). The React rewrite in `app/`
-is its own npm project (`npm test` = vitest, `npm run test:e2e` = Playwright,
-`npm run dev`); its phase plan and the current `viewer/` → `app/` porting
-status are in [REWRITE.md](REWRITE.md), and the full contributor guide —
-checkin gate, test suites, release policy — is [AGENTS.md](AGENTS.md).
+`blueprints.conf` is the only place a machine-local path may live and it is
+gitignored, so nothing machine-specific is ever committed (see
+`blueprints.conf.example`). The contributor guide — checkin gate, test-suite
+tags, versioning, release policy — is [AGENTS.md](AGENTS.md); the port status
+of the rewrite is [REWRITE.md](REWRITE.md).
 
-Useful URL parameters: `?open=<url>` open another blueprint ·
-`?real` full game geometry · `?flow` particles + streamlines ·
-`?hull` / `?occ` toggles · `?cam=x,y,z,tx,ty,tz` camera pose ·
-`?perf` draw-call probe in the tab title · `?selftest`, `?proxytest` test modes.
+Useful legacy-URL parameters: `?open=<url>` open another blueprint ·
+`?real` full game geometry · `?flow` particles + streamlines · `?hull` /
+`?occ` toggles · `?cam=x,y,z,tx,ty,tz` camera pose · `?perf` draw-call probe ·
+`?selftest`, `?proxytest` test modes. The editor deep-links with
+`?craft=<workshop-id>`.
 
 ## Upstream references
 
@@ -188,7 +207,7 @@ say-so**: green tests or merged work never imply one.
 
 ## Ideas welcome — open an issue!
 
-This is v1.10.3: the format is decoded and the viewer is useful, but the good
+This is v1.10.4: the format is decoded and the editor is useful, but the good
 ideas are not all in yet. Feature requests, format questions, and craft that
 render wrong (attach the `blueprint.json`) are all best filed as
 [issues](https://github.com/Joeppie/archean-blueprint-tools/issues) — that is
@@ -201,7 +220,9 @@ where the roadmap lives. Already on the list:
 - **Code**: GPL-3.0 (copyleft is deliberate — improvements stay open).
 - **Game content** (`viewer/models/`, `testdata/`, FORMAT.md knowledge):
   belongs to the Archean developer (batcholi / FloDKSM). Player-made workshop
-  craft in `testdata/` belong to their workshop authors. All works belong to
+  craft in `testdata/` (and the craft in these screenshots) belong to their
+  workshop authors. The sky backdrops are CC0 panoramas from Poly Haven —
+  credits in NOTICE §2 and `app/src/assets/backdrops/`. All works belong to
   their respective owners.
 - **No rights-holder permissions are claimed.** Reuse of the included
   third-party content is presumed acceptable in good faith, CC-attribution

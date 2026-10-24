@@ -1,5 +1,5 @@
 # Saving, palettes and file fidelity
-Tags: save file json palette colour color slot rgb v1 v2 legacy byte occupancy fidelity workshop
+Tags: save file json palette colour color slot rgb v1 v2 legacy byte occupancy fidelity workshop cache stale staleness chip sha download validated cached
 
 ## Saving is byte-conservative
 
@@ -40,3 +40,9 @@ Gallery cards load the cached corpus; **File ▸ Open file…** (or drag-drop
 anywhere) loads a local `blueprint.json`; **File ▸ Refresh** redownloads a
 workshop craft. A v1 export from the game opens directly — normalization
 adds what the format expects but rewrites nothing you can see.
+
+Every cached copy is validated: the gallery stamps each craft with its
+revision + SHA-256, a card you cached BEFORE the workshop author edited the
+craft carries an amber *edited since cached* chip, and opening a stale or
+unverifiable copy asks first — **[Download latest]** or **[Open cached
+copy]** — it is never silently replaced.

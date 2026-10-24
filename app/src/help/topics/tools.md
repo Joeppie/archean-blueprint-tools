@@ -11,7 +11,7 @@ behaves the same:
   *nothing to…*, OK stays disabled;
 * **OK** opens a confirmation box repeating that readout; **Confirm** runs
   and closes (the result rides a toast). Esc / Cancel / backdrop = no-op;
-* heavy previews (the sphere planner) run in a background WORKER — sliders
+* heavy previews (the balloon planner) run in a background WORKER — sliders
   stay smooth and the footer says *planning…*;
 * anything a tool did is one **Ctrl+Z** undo step.
 
@@ -27,10 +27,12 @@ mirrors are untouched.
 Converts geometry blocks into a hull-triangle skin — see the *Hullify*
 topic for what it guarantees and its Direction/Shading options.
 
-## Sphere skin…
+## Generate balloon…
 
-Generates a convex ellipsoid skin of hull triangles — see the *Sphere skin*
-topic for the algorithm and the storage limits.
+Generates a convex ellipsoid or cyl + nose skin of hull triangles, with the
+optional airship TAIL section (rudder + aileron panels on SmallHinge
+subgrids, hidden LV wiring, one enclosed Volume) — see the *Generate balloon*
+topic for the algorithm, the ghost workflow and the storage limits.
 
 > Adding a tool is one entry in the TOOLS registry
 > (`app/src/components/ToolsDialog.tsx`): fields, preview, run (or a
