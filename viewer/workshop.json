@@ -1,0 +1,422 @@
+{
+ "3246850258": {
+  "name": "Mining Quadcopter",
+  "author": "batcholi"
+ },
+ "3251580044": {
+  "name": "Beginner's Mining Helicopter",
+  "author": "FloDKSM"
+ },
+ "3270476420": {
+  "name": "VTOL Cargo Shuttle",
+  "author": "batcholi"
+ },
+ "3270802273": {
+  "name": "Color ore scanner",
+  "author": "Snjo"
+ },
+ "3272419455": {
+  "name": "Water-Powered Amphibious Car",
+  "author": "batcholi"
+ },
+ "3278621686": {
+  "name": "Icarus Inc. Auto Crafter",
+  "author": "Luke322"
+ },
+ "3278744757": {
+  "name": "Automatic Crafter",
+  "author": "Snjo"
+ },
+ "3281212435": {
+  "name": "Code Wizard - tutorials and code function library",
+  "author": "Snjo"
+ },
+ "3284539247": {
+  "name": "\"GETEM\" SSTO",
+  "author": "Rdoom2003"
+ },
+ "3285660336": {
+  "name": "Cargo Plane",
+  "author": "Mind Raper"
+ },
+ "3288012440": {
+  "name": "Space Invaders",
+  "author": "Shad"
+ },
+ "3290177994": {
+  "name": "UFO (Admin/Test Vehicle)",
+  "author": "batcholi"
+ },
+ "3294879498": {
+  "name": "Mini Base",
+  "author": "Godsilla187"
+ },
+ "3294880085": {
+  "name": "Just-Plane-Easy",
+  "author": "DocRabbit"
+ },
+ "3298465282": {
+  "name": "C-130",
+  "author": "FuzzyMonkey"
+ },
+ "3308603448": {
+  "name": "Dorito SSTO",
+  "author": "XPGamer97"
+ },
+ "3309955432": {
+  "name": "United Airlines Airliner",
+  "author": "DOMINATOR"
+ },
+ "3322048134": {
+  "name": "The Quad - Autopilot",
+  "author": "Chip Patton"
+ },
+ "3326372833": {
+  "name": "Badger Smart Quad [v4.5]",
+  "author": "Chip Patton"
+ },
+ "3327182790": {
+  "name": "Cheap Exploration Plane",
+  "author": "General Inaptitude"
+ },
+ "3328340564": {
+  "name": "MTQ-327",
+  "author": "Little908"
+ },
+ "3332349780": {
+  "name": "Falchion MKI",
+  "author": "Kuojin"
+ },
+ "3332465933": {
+  "name": "A400M Atlas",
+  "author": "Huge Yakman"
+ },
+ "3332487383": {
+  "name": "Stiletto MKI",
+  "author": "Kuojin"
+ },
+ "3334698274": {
+  "name": "Jimmy's Adventure",
+  "author": "General Inaptitude"
+ },
+ "3348745601": {
+  "name": "Chip Patton's Falcon",
+  "author": "Chip Patton"
+ },
+ "3353727171": {
+  "name": "BHCP 302",
+  "author": "nutz1386"
+ },
+ "3371634039": {
+  "name": "P-38 Lightning",
+  "author": "Toxxin"
+ },
+ "3373508061": {
+  "name": "Transcede-1060 (outdated)",
+  "author": "General Inaptitude"
+ },
+ "3381670618": {
+  "name": "Dolphin-700 (Updated)",
+  "author": "General Inaptitude"
+ },
+ "3382439824": {
+  "name": "CH1-MNR",
+  "author": "nutz1386"
+ },
+ "3385814436": {
+  "name": "Golden Throne",
+  "author": "General Inaptitude"
+ },
+ "3385870429": {
+  "name": "Christmas Present",
+  "author": "General Inaptitude"
+ },
+ "3385876909": {
+  "name": "Christmas Tree",
+  "author": "General Inaptitude"
+ },
+ "3386936607": {
+  "name": "Plain",
+  "author": "General Inaptitude"
+ },
+ "3403011843": {
+  "name": "Cyclops - Subnautica",
+  "author": "DOMINATOR"
+ },
+ "3406490327": {
+  "name": "Magic Carpet",
+  "author": "General Inaptitude"
+ },
+ "3409663016": {
+  "name": "Spider Mining Rover",
+  "author": "General Inaptitude"
+ },
+ "3410883996": {
+  "name": "Radius 5 propellor with 5 blades",
+  "author": "General Inaptitude"
+ },
+ "3417173321": {
+  "name": "Exploration Zepplin",
+  "author": "Kurz01"
+ },
+ "3445304576": {
+  "name": "SU-57",
+  "author": "Ginkelburg"
+ },
+ "3468267043": {
+  "name": "ZGW-277",
+  "author": "Little908"
+ },
+ "3481322297": {
+  "name": "Classic American Semi Truck",
+  "author": "JKL117"
+ },
+ "3481737379": {
+  "name": "ZMJ-424",
+  "author": "ColdestImp92378"
+ },
+ "3509975859": {
+  "name": "DHD-773",
+  "author": "DOMINATOR"
+ },
+ "3510792645": {
+  "name": "Serenity EXP",
+  "author": "cuh4"
+ },
+ "3518436870": {
+  "name": "RCS Infinity",
+  "author": "General Inaptitude"
+ },
+ "3521588534": {
+  "name": "F/A-18F",
+  "author": "Ginkelburg"
+ },
+ "3732302108": {
+  "name": "Mach 6",
+  "author": "Ginkelburg"
+ },
+ "3803780241": {
+  "name": "XYQ-615",
+  "author": "MauseLoch9000"
+ },
+ "3812927875": {
+  "name": "RCS Infinity",
+  "author": "General Inaptitude"
+ },
+ "3816936540": {
+  "name": "THOR X8 v:EN",
+  "author": "FL3au"
+ },
+ "9000001001": {
+  "name": "C01 ActiveRadiator · Aileron · AltitudeSensor",
+  "author": "matrix-test"
+ },
+ "9000001002": {
+  "name": "C02 AngularVelocitySensor · ArrowButton · Beacon",
+  "author": "matrix-test"
+ },
+ "9000001003": {
+  "name": "C03 BigFluidTank · BigThruster · BigTurboPump",
+  "author": "matrix-test"
+ },
+ "9000001004": {
+  "name": "C04 BigWheel · Bobblehead · Buzzer",
+  "author": "matrix-test"
+ },
+ "9000001005": {
+  "name": "C05 ChemicalFurnace · ChemicalReactor · Computer",
+  "author": "matrix-test"
+ },
+ "9000001006": {
+  "name": "C06 Container · Crafter · Crusher",
+  "author": "matrix-test"
+ },
+ "9000001007": {
+  "name": "C07 Dashboard · DataBridge · DataJunction",
+  "author": "matrix-test"
+ },
+ "9000001008": {
+  "name": "C08 DensitySensor · DieselGenerator · DistanceSensor",
+  "author": "matrix-test"
+ },
+ "9000001009": {
+  "name": "C09 DockableDoor · DockingPort · Electrolyser",
+  "author": "matrix-test"
+ },
+ "9000001010": {
+  "name": "C10 EnrichmentCentrifuge · FissionReactor · FluidBridge",
+  "author": "matrix-test"
+ },
+ "9000001011": {
+  "name": "C11 FluidJunction · FluidPort · FluidPump",
+  "author": "matrix-test"
+ },
+ "9000001012": {
+  "name": "C12 FluidTank · FluidValve · GeothermalExchanger",
+  "author": "matrix-test"
+ },
+ "9000001013": {
+  "name": "C13 GroundAnchor · Gyroscope · HighVoltageBattery",
+  "author": "matrix-test"
+ },
+ "9000001014": {
+  "name": "C14 HighVoltageBridge · HighVoltageJunction · HighVoltageRelay",
+  "author": "matrix-test"
+ },
+ "9000001015": {
+  "name": "C15 Hitch · HudController · ItemBridge",
+  "author": "matrix-test"
+ },
+ "9000001016": {
+  "name": "C16 ItemConveyor · ItemJunction · Keyboard",
+  "author": "matrix-test"
+ },
+ "9000001017": {
+  "name": "C17 Lamp · Led · LinearTrack",
+  "author": "matrix-test"
+ },
+ "9000001018": {
+  "name": "C18 LinearVelocitySensor · LowVoltageBattery · LowVoltageBridge",
+  "author": "matrix-test"
+ },
+ "9000001019": {
+  "name": "C19 LowVoltageJunction · LowVoltageRelay · MagicCube",
+  "author": "matrix-test"
+ },
+ "9000001020": {
+  "name": "C20 MiniComputer · MiniNavInstrument · MiniRouter",
+  "author": "matrix-test"
+ },
+ "9000001021": {
+  "name": "C21 MiniThruster · MiningDrill · NavInstrument",
+  "author": "matrix-test"
+ },
+ "9000001022": {
+  "name": "C22 Numpad · OreScanner · OwnerPad",
+  "author": "matrix-test"
+ },
+ "9000001023": {
+  "name": "C23 PassiveRadiator · PilotSeat · PlayerSensor",
+  "author": "matrix-test"
+ },
+ "9000001024": {
+  "name": "C24 PowerConverter · Propeller · PushButton",
+  "author": "matrix-test"
+ },
+ "9000001025": {
+  "name": "C25 RCS · RTG · Router",
+  "author": "matrix-test"
+ },
+ "9000001026": {
+  "name": "C26 SabatierReactor · SlopeLight · SmallContainer",
+  "author": "matrix-test"
+ },
+ "9000001027": {
+  "name": "C27 SmallFluidTank · SmallGyroscope · SmallHinge",
+  "author": "matrix-test"
+ },
+ "9000001028": {
+  "name": "C28 SmallPivot · SmallSteamTurbine · SmallThruster",
+  "author": "matrix-test"
+ },
+ "9000001029": {
+  "name": "C29 SmallTurboPump · SmallWheel · SmokeTuner",
+  "author": "matrix-test"
+ },
+ "9000001030": {
+  "name": "C30 SolarPanel · SolarSensor · SparkTuner",
+  "author": "matrix-test"
+ },
+ "9000001031": {
+  "name": "C31 SpeedSensor · SpotLight · SteamTurbine",
+  "author": "matrix-test"
+ },
+ "9000001032": {
+  "name": "C32 Step · TemperatureProbe · TemperatureSensor",
+  "author": "matrix-test"
+ },
+ "9000001033": {
+  "name": "C33 TerrainScanner · ThrottleLever · TiltSensor",
+  "author": "matrix-test"
+ },
+ "9000001034": {
+  "name": "C34 ToggleButton · ToiletSeat · TrashCan",
+  "author": "matrix-test"
+ },
+ "9000001035": {
+  "name": "C35 Turbojet · VehiclePhysicsSensor · Volume",
+  "author": "matrix-test"
+ },
+ "9000001036": {
+  "name": "C36 Wheel",
+  "author": "matrix-test"
+ },
+ "9000002001": {
+  "name": "C01D ActiveRadiator · Aileron · AltitudeSensor",
+  "author": "matrix-test"
+ },
+ "9000002004": {
+  "name": "C04D BigWheel · Bobblehead · Buzzer",
+  "author": "matrix-test"
+ },
+ "9000002009": {
+  "name": "C09D DockableDoor · DockingPort · Electrolyser",
+  "author": "matrix-test"
+ },
+ "9000002012": {
+  "name": "C12D FluidTank · FluidValve · GeothermalExchanger",
+  "author": "matrix-test"
+ },
+ "9000002013": {
+  "name": "C13D GroundAnchor · Gyroscope · HighVoltageBattery",
+  "author": "matrix-test"
+ },
+ "9000002017": {
+  "name": "C17D Lamp · Led · LinearTrack",
+  "author": "matrix-test"
+ },
+ "9000002018": {
+  "name": "C18D LinearVelocitySensor · LowVoltageBattery · LowVoltageBridg",
+  "author": "matrix-test"
+ },
+ "9000002024": {
+  "name": "C24D PowerConverter · Propeller · PushButton",
+  "author": "matrix-test"
+ },
+ "9000002027": {
+  "name": "C27D SmallFluidTank · SmallGyroscope · SmallHinge",
+  "author": "matrix-test"
+ },
+ "9000002028": {
+  "name": "C28D SmallPivot · SmallSteamTurbine · SmallThruster",
+  "author": "matrix-test"
+ },
+ "9000002031": {
+  "name": "C31D SpeedSensor · SpotLight · SteamTurbine",
+  "author": "matrix-test"
+ },
+ "9000002033": {
+  "name": "C33D TerrainScanner · ThrottleLever · TiltSensor",
+  "author": "matrix-test"
+ },
+ "9000002034": {
+  "name": "C34D ToggleButton · ToiletSeat · TrashCan",
+  "author": "matrix-test"
+ },
+ "9000002036": {
+  "name": "C36D Wheel",
+  "author": "matrix-test"
+ },
+ "9000004001": {
+  "name": "ISS-792",
+  "author": "General Inaptitude"
+ },
+ "9000005001": {
+  "name": "IAS-418",
+  "author": "General Inaptitude"
+ },
+ "9000006001": {
+  "name": "IAS-418",
+  "author": "General Inaptitude"
+ }
+}

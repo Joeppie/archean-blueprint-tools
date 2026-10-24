@@ -1,0 +1,4876 @@
+// Archean blueprint live inspector — renders components + blocks of blueprint.json
+// with Firefox-DevTools-style sliders on their attributes. See FORMAT.md for the
+// file format. World mapping: world = (pos - 5.5) * 0.25 + frame * 3.0 per axis.
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+// surface crashes in the document title (visible to headless test dumps)
+addEventListener('error', (e) => { document.title = 'ERR ' + (e.message || 'load') + ' @' + e.lineno + ':' + e.colno; });
+addEventListener('unhandledrejection', (e) => {
+  const st = String(e.reason?.stack || '').split('\n').find(l => l.includes('view3d')) || '';
+  document.title = 'ERR ' + (e.reason?.message || e.reason) + ' |' + st.trim().replace(/^at /, '').slice(0, 60);
+});
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+import { getBlockPoints, getBlockFaces, getBlockFaceDirections, isFullFace } from './blockshapes.js?v=142';
+import { resolveColor } from './palette.js?v=142';
+
+// ---- zoom: the site-zoom-cancel machinery was REMOVED (todo cleanup) ----
+// The old inverse-CSS-zoom / dpr-baseline "zoom saga" (persisted per-site
+// Chrome zoom + Linux fractional scaling) misfired more than it cured. The
+// viewer now renders at whatever zoom the browser reports; only the renderer
+// pixel-ratio clamp (setPixelRatio floor 1 / cap 2.5) stays.
+
+
+// ---- game component models (extracted from installed game modules) ----
+// manifest: per-type metadata (mass, renderable node tree, joints, adapters,
+// colliders); geometry fetched lazily per type. Material names color1/color2
+// are the player-painted surfaces (blueprint colors.color1/color2).
+const MODEL = { manifest: null, cache: {} };
+// Default is LIGHT proxies (boxes + hexagon cylinders): the game ships dense
+// raytracing-grade geometry that overloads raster GPUs. The checkbox swaps in
+// the real game models on demand; the choice persists across sessions.
+let realModelsOn = localStorage.getItem('archean-real-models-v2') === '1';   // v2 key: fresh defaults (real models OFF by default, user)
+function setRealModels(on) {
+  realModelsOn = on;
+  localStorage.setItem('archean-real-models-v2', on ? '1' : '0');
+  buildScene();               // rebuild: proxy-only (light) vs real geometry
+}
+async function loadModelManifest() {
+  try { MODEL.manifest = await (await fetch('models/manifest.json')).json(); }
+  catch { MODEL.manifest = null; }
+}
+function getModel(type) {
+  if (!MODEL.manifest) return null;
+  if (!(type in MODEL.cache))
+    MODEL.cache[type] = fetch(`models/${type}.json`)
+      .then(r => (r.ok ? r.json() : null))
+      .then(geo => (geo ? { geo, info: MODEL.manifest[type] } : null))
+      .catch(() => null);
+  return MODEL.cache[type];
+}
+const ADAPTER_COL = { data: 0x2244cc, fluid: 0x22aa88, highvoltage: 0xcc8811, lowvoltage: 0xcc4444, item: 0x886622, heat: 0xcc2222 };
+const ADP_GEO = new THREE.SphereGeometry(0.03, 8, 6);
+// fallback materials for atlas files predating the materials table (glTF
+// factors are LINEAR, like the game's own material colours)
+const MAT_FIX = {
+  'data-connector': { color: [0, 0.05, 0.5], metal: 1, rough: 1 },
+  'data-connector-m': { color: [0, 0.05, 0.5], metal: 1, rough: 1 },
+  glass: { color: [0.75, 0.84, 0.9, 0.4], metal: 0.1, rough: 0.1, alpha: 'BLEND' },
+};
+function modelMaterial(c, name, mats) {
+  if (name === 'color1') return compColor(c, 'color1');
+  if (name === 'color2') return compColor(c, 'color2');
+  const m = mats?.[name] || MAT_FIX[name];
+  if (m) return { color: new THREE.Color(...m.color.slice(0, 3)),
+                  metal: m.metal ?? 1, rough: clamp(m.rough ?? 1, 0.03, 1),
+                  op: m.alpha === 'BLEND' ? clamp(m.color[3] ?? 0.5, 0.05, 1) : 1 };
+  return { color: new THREE.Color(0x8d949e), metal: 0.5, rough: 0.55, op: 1 };
+}
+// renderables the game only shows under a condition (client behaviour, same
+// table as XenonViewer's CONDITIONAL_PARTS): a wheel's gltf contains BOTH tire
+// toruses (only one is mounted, per data.reverse) and an optional mudguard —
+// showing all of them stacks a double tire and a guard the craft never wore.
+const DROP_PARTS = {
+  Wheel: (c) => [...(c.data?.mudguard === false ? ['mudguard'] : []),
+                  c.data?.reverse ? 'Torus' : 'TorusReverse'],
+  BigWheel: (c) => [c.data?.reverse ? 'Torus' : 'TorusReverse'],
+  // ToggleButton is a TWO-STATE device: .ini pairs axle/switch (rotation z −180
+  // = pressed) with axle2/switch2 (z 0 = released) — the game shows exactly one
+  // lever, keyed on data.state. base2 is the optional second-face plate, only
+  // for isDualSided buttons. Rendering every part stacked a phantom lever
+  // through the mount (dolphin 3417786605 door buttons: "misplaced").
+  ToggleButton: (c) => [c.data?.state ? 'switch2' : 'switch',
+                        c.data?.isDualSided ? null : 'base2'].filter(Boolean),
+  PushButton: (c) => [c.data?.isDualSided ? null : 'base2'].filter(Boolean),
+};
+// The Dashboard's geometry is GENERATED by the game from `data` — its glTF is
+// the 1.5×1 m editor template, NOT the panel (port of the XenonViewer
+// scene.js buildDashboard under NOTICE §2). Units are CENTIMETRES: the board
+// runs from the local origin (CORNER pivot, not centred) to
+// (size_x/100, size_y/100, 0.01); the panel plane is local X·Y with normal
+// +z; elements sit at pos_*/100 with size_*/100 between z 0.01 and 0.02; the
+// dataport — the one glTF piece the game keeps — is re-centred at
+// (w/2, h/2, 0). Colours are 0..255 LINEAR with metallic/roughness used
+// straight off 0..255 (NOT the blocks' 0..7 / 0|1 scales — rounding those
+// flattens the paint). Simplifications vs the client: buttons are painted
+// main-colour faceplates (their extra glTF models are not in our atlas) and
+// Label text uses a monospace face (the game ships xenon-pixel.ttf; we keep
+// its 6×9 px grid, 8 px cell, 5 px/cm density, alpha threshold, nearest filter).
+const dashMat = (c, metallic, roughness) => {
+  const rough = (roughness ?? 0) / 255;
+  return new THREE.MeshStandardMaterial({
+    color: new THREE.Color().setRGB((c?.r ?? 255) / 255, (c?.g ?? 255) / 255,
+      (c?.b ?? 255) / 255, THREE.LinearSRGBColorSpace),
+    roughness: Math.max(rough, 0.02),
+    metalness: ((metallic ?? 0) / 255) * (1 - rough),
+    envMapIntensity: (metallic ?? 0) > 127 ? 1.25 : 0,
+  });
+};
+function dashTextTex(el) {
+  const lines = String(el.text ?? '').split('\n');
+  const longest = Math.max(0, ...lines.map(l => l.length));
+  const ts = Math.max(1, el.textSize | 0);
+  const cv = document.createElement('canvas');
+  cv.width = Math.max(1, Math.round((el.size_x || 0) * 5));
+  cv.height = Math.max(1, Math.round((el.size_y || 0) * 5));
+  const x = cv.getContext('2d', { willReadFrequently: true });
+  // RAW canvas, drawn left-to-right (de-mirror v0.180). FORMAT.md §Chirality
+  // vs in-game truth proved with the game's own cockpit screenshots that the
+  // game authors the Label text readable from the board's +z face (text-up =
+  // local +y, string advances +x) — the dev viewer's un-mirrored chain shows
+  // it too. The old x→width−x PRE-MIRROR was compensation for our removed
+  // world mirror: inside the mirrored world it was a local double-mirror.
+  x.fillStyle = '#fff'; x.textBaseline = 'alphabetic'; x.textAlign = 'left';
+  x.font = `${8 * ts}px monospace`;
+  const center = (el.textAlign ?? 16) === 16;   // textAlign 16 = centred
+  let y = 3;
+  for (const line of lines) {
+    let px = center ? Math.ceil((cv.width - line.length * 6 * ts) / 2) : 3;
+    for (const ch of line) { x.fillText(ch, px, y + 9 * ts); px += 6 * ts; }
+    y += 9 * ts;
+  }
+  const img = x.getImageData(0, 0, cv.width, cv.height), p = img.data;
+  const bg = el.baseColor || { r: 255, g: 255, b: 255 };
+  const fg = el.mainColor || { r: 0, g: 0, b: 0 };
+  for (let i = 0; i < p.length; i += 4) {
+    const lit = p[i + 3] > 0;   // the engine lights a pixel with no half-tones
+    p[i] = lit ? fg.r : bg.r; p[i + 1] = lit ? fg.g : bg.g;
+    p[i + 2] = lit ? fg.b : bg.b; p[i + 3] = 255;
+  }
+  x.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;   // the few sRGB places in the format
+  t.magFilter = THREE.NearestFilter;
+  t.minFilter = THREE.NearestFilter;
+  return t;
+}
+function buildDashboard(c, model, idx, low) {
+  const g = new THREE.Group();
+  const d = c.data || {};
+  const w = (Number(d.size_x) || 0) / 100, h = (Number(d.size_y) || 0) / 100;
+  if (w <= 0 || h <= 0) return g;
+  const board = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.01),
+    dashMat(d.color, d.metallic, d.roughness));
+  board.position.set(w / 2, h / 2, 0.005);
+  board.userData.ci = idx;
+  g.add(board);
+  const dp = model.geo?.dataport;          // the one glTF piece the game keeps
+  if (dp && !d.hideConnector) {
+    const byMat = new Map();
+    for (const prim of dp.prims) {
+      const gg = new THREE.BufferGeometry();
+      gg.setAttribute('position', new THREE.Float32BufferAttribute(low && prim.lv ? prim.lv : prim.v, 3));
+      gg.setIndex(low && prim.li ? prim.li : prim.i);
+      gg.computeVertexNormals();
+      let arr = byMat.get(prim.material);
+      if (!arr) byMat.set(prim.material, arr = []);
+      arr.push(gg);
+    }
+    for (const [mname, geos] of byMat) {
+      const gg = geos.length > 1 ? mergeGeometries(geos, false) : geos[0];
+      if (!gg) continue;
+      const m = new THREE.Mesh(gg, mat(modelMaterial(c, mname, model.info.materials)));
+      m.userData.ci = idx;
+      m.position.set(w / 2, h / 2, 0);     // centred behind the board
+      g.add(m);
+    }
+  }
+  for (const el of d.elements || []) {     // labels/screens/mouldings: generated boxes
+    if (!el || !el.type) continue;
+    const ew = (el.size_x || 0) / 100, eh = (el.size_y || 0) / 100;
+    if (ew <= 0 || eh <= 0) continue;
+    const ex = (el.pos_x || 0) / 100, ey = (el.pos_y || 0) / 100;
+    const tex = el.type === 'Label' && el.text ? dashTextTex(el) : null;
+    const body = dashMat(el.baseColor, el.baseMetallic, el.baseRoughness);
+    const face = tex
+      ? new THREE.MeshStandardMaterial({ map: tex, envMapIntensity: 0,
+          roughness: Math.max((el.baseRoughness ?? 0) / 255, 0.02), metalness: 0 })
+      : dashMat(el.mainColor, el.mainMetallic, el.mainRoughness);  // buttons/plates
+    const m = new THREE.Mesh(new THREE.BoxGeometry(ew, eh, 0.01),
+      [body, body, body, body, face, body]);   // +Z carries the text (BoxGeometry face order)
+    m.position.set(ex + ew / 2, ey + eh / 2, 0.015);
+    m.userData.ci = idx;
+    g.add(m);
+  }
+  return g;
+}
+// Baked-in component text prims (MiniComputer 'CODE' buttons, HUD rows)
+// are authored readable from the plate's +normal side and now render RAW —
+// the old TEXT_MIRROR_X in-plane flip (and its flipGeomX helper) existed
+// only to counteract the removed world mirror (de-mirror v0.180; FORMAT.md
+// §Chirality). buildDashboard's Label canvas above and these prims now share
+// the single rule: raw geometry, readable from +z/+normal.
+function buildRealComponent(c, model, idx, low = false) {
+  const { geo, info } = model;
+  if (c.type === 'Dashboard') return buildDashboard(c, model, idx, low);
+  const g = new THREE.Group();
+  // Placement truth is the .ini node tree (renderables/joints/targets, ZYX
+  // euler like the game engine) — NOT the gltf node translations, which are
+  // Blender authoring offsets (MiniComputer's model sits 3 m from its origin!).
+  const nodes = new Map();
+  const RAD = Math.PI / 180;
+  const mkNode = (n) => {
+    const p = new THREE.Group();
+    p.rotation.order = 'ZYX';
+    p.position.set(...n.position);
+    p.rotation.set(n.rotation[0] * RAD, n.rotation[1] * RAD, n.rotation[2] * RAD);
+    nodes.set(n.name, p);
+  };
+  // two passes: create every node, then link — a joint parented to a target
+  // (or any forward reference) must not fall back to the root
+  for (const j of info.joints || []) mkNode(j);
+  for (const t of info.targets || []) mkNode(t);
+  for (const r of info.renderables) mkNode(r);
+  const link = (n) => (nodes.get(n.parent) || g).add(nodes.get(n.name));
+  for (const n of [...(info.joints || []), ...(info.targets || []), ...info.renderables]) link(n);
+  const drop = new Set(DROP_PARTS[c.type]?.(c) || []);
+  for (const r of info.renderables) {
+    if (drop.has(r.name)) continue;
+    const nd = geo[r.name];
+    if (!nd) continue;
+    const rg = nodes.get(r.name);
+    const byMat = new Map();          // merge same-material prims → fewer draws
+    for (const prim of nd.prims) {
+      const v = low && prim.lv ? prim.lv : prim.v;
+      const i = low && prim.li ? prim.li : prim.i;
+      const gg = new THREE.BufferGeometry();
+      gg.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
+      gg.setIndex(i);
+      gg.computeVertexNormals();
+      let arr = byMat.get(prim.material);
+      if (!arr) byMat.set(prim.material, arr = []);
+      arr.push(gg);
+    }
+    for (const [mname, geos] of byMat) {
+      const gg = geos.length > 1 ? mergeGeometries(geos, false) : geos[0];
+      if (!gg) continue;
+      const m = new THREE.Mesh(gg, mat(modelMaterial(c, mname, info.materials)));
+      m.userData.ci = idx;
+      m.userData.node = r.name;                    // .ini node name (postest probes state parts)
+      rg.add(m);
+    }
+  }
+  // aileron: hinge the real flap like the game does (front ailerons droop)
+  const jp = nodes.get('joint');
+  if (jp && c.type === 'Aileron') jp.rotateX(aileronAngle(c));   // saved data.angle deflection
+  // Beacon: the game's flashing red light is PROCEDURAL — the gltf carries no
+  // lens material (just housing + mast), the game shader animates the flash.
+  // Rendered straight, the part is a grey pin and users stop recognising it
+  // ("beacon no longer looks like a beacon"). Give the mast tip a static
+  // emissive red lens: the beacon's visual identity (no animation: the render
+  // loop stays on-demand).
+  if (c.type === 'Beacon') {
+    for (const r of info.renderables) {
+      const nd = geo[r.name];
+      if (!nd) continue;
+      let top = null;
+      for (const prim of nd.prims) {
+        if (prim.material !== 'body') continue;
+        const v = low && prim.lv ? prim.lv : prim.v;
+        for (let k = 1; k + 1 < v.length; k += 3)
+          if (!top || v[k] > top[1]) top = [v[k - 1], v[k], v[k + 1]];
+      }
+      if (top) {
+        const lens = new THREE.Mesh(new THREE.SphereGeometry(0.055, 12, 10),
+          new THREE.MeshStandardMaterial({ color: 0x550000, emissive: 0xff2222, envMapIntensity: 0 }));
+        lens.position.set(top[0], top[1] + 0.03, top[2]);
+        lens.userData.ci = idx;
+        (nodes.get(r.name) || g).add(lens);
+      }
+    }
+  }
+  // adapter nubs: queue in world space, merged into ONE mesh per port type (see adpFlush)
+  const qo = viewQuat(c.orientation);
+  const po = viewPos(c.position);
+  for (const a of info.adapters || []) {
+    if (adpEndpoint.get(idx)?.has(a.name)) continue;   // cable port: nub drawn at the endpoint
+    // Cable-free ports whose .ini adapter sits >0.5 m from the part origin are
+    // BUILD-TIME flanges, not visible sockets: SolarPanel's spare data/lowv
+    // ports are 1.0 m below the pivot (reaching into the deck at build time),
+    // so their nubs rendered as "red & blue spheres sitting on the ground
+    // plane right under the solar panel" (user report). Skip them.
+    if (Math.hypot(a.position[0], a.position[1], a.position[2]) > 0.5) continue;
+    const p = new THREE.Vector3(...a.position).applyQuaternion(qo);
+    adpQueue.push({ x: p.x + po.x, y: p.y + po.y, z: p.z + po.z,
+                    t: a.type, ci: idx, lx: a.position[0], ly: a.position[1], lz: a.position[2] });
+  }
+  scheduleAdpFlush();
+  g.userData.ci = idx;
+  return g;
+}
+
+// adpQueue lives in the component-index domain: index it once (v0.155) so a
+// gizmo/livePos drag is O(occs of THAT part), not O(all nubs+cables) per
+// drag event. Rebuilt lazily whenever pushes appended (length sentinel).
+let adpIdx = null, adpIdxN = -1;
+function invalidateAdpIdx() { adpIdx = null; adpIdxN = -1; }   // on queue rebuild
+function syncAdapters(obj) {
+  if (!adpIdx || adpIdxN !== adpQueue.length) {
+    adpIdx = new Map(); adpIdxN = adpQueue.length;
+    for (const a of adpQueue) {
+      if (a.lx == null) continue;   // endpoint nub: belongs to the CABLE, stays
+      let l = adpIdx.get(a.ci);
+      if (!l) adpIdx.set(a.ci, l = []);
+      l.push(a);
+    }
+  }
+  const lst = adpIdx.get(obj.userData.ci);
+  if (!lst) return;
+  for (const a of lst) {
+    const p = new THREE.Vector3(a.lx, a.ly, a.lz).applyQuaternion(obj.quaternion);
+    a.x = p.x + obj.position.x; a.y = p.y + obj.position.y; a.z = p.z + obj.position.z;
+  }
+  scheduleAdpFlush();
+}
+
+// merged adapter-nub meshes (big craft: hundreds of tiny spheres → 1 draw per type)
+const adpQueue = [];
+// (ci, port name) → cable endpoint recorded by the GAME (data.pipes): the real
+// connection point at the part's VISIBLE socket (may differ from the .ini
+// adapter position). Nubs are drawn there when a cable exists (user:
+// connection markers must sit where the cables physically are); cable-free
+// ports keep the flange (skipped if >0.5 m from the part origin).
+const adpEndpoint = new Map();
+let adpTimer = 0;
+function scheduleAdpFlush() {
+  clearTimeout(adpTimer);
+  adpTimer = setTimeout(() => {
+    adpGroup.clear();
+    const byT = new Map();
+    for (const a of adpQueue) {
+      const gg = ADP_GEO.clone().applyMatrix4(new THREE.Matrix4().makeTranslation(a.x, a.y, a.z));
+      let arr = byT.get(a.t);
+      if (!arr) byT.set(a.t, arr = []);
+      arr.push(gg);
+    }
+    for (const [t, geos] of byT) {
+      const gg = geos.length > 1 ? mergeGeometries(geos, false) : geos[0];
+      if (gg) adpGroup.add(new THREE.Mesh(gg,
+        mat({ color: new THREE.Color(ADAPTER_COL[t] ?? 0x33ddff), metal: 0.2, rough: 0.4, op: 1 })));
+    }
+    invalidate();
+  }, 350);
+}
+
+const CELL = 0.25, FRAME = 3.0;
+const cellW = (p) => (p - 5.5) * CELL;               // cell -> world metres
+const occWorld = (o, ax) => cellW(o['pos_' + ax]) + o['frame_' + ax] * FRAME;
+
+// ---------- file space → view space (de-mirrored, v0.180) -----------------
+// VERDICT (FORMAT.md §"Chirality vs in-game truth", 2026-10-19, proven against
+// the game's OWN workshop screenshots of craft 3309955432): the game projects
+// the RAW FILE frame with STANDARD RIGHT-HANDED camera math — a viewer that
+// draws raw positions, NO world mirror, RH camera renders the game's view
+// (the old z-mirror chain rendered its horizontal MIRROR image; every data
+// pin was reflection-invariant, so the mirror stayed green its whole life).
+// The game IS Unity-left-handed for ROTATION STORAGE (a placement fact, not a
+// camera fact): a right-handed renderer must place with the conjugate for
+// 2026 files — pipes settle it: data.pipes endpoints are game-computed world
+// adapter positions matching p + R(q*)·a (0.000 m) but not R(q) (0.18–0.66 m).
+// Conventions here (view space == raw file space):
+//  * positions enter the scene through viewPos (the identity copy);
+//  * component-local geometry keeps RAW .ini/gltf numbers, no root mirror;
+//  * raw-coordinate subsystems (CoM marker, flow, aero/thrust arrows) live
+//    under worldM (identity anchor group), and baked geometry (blocks, hull,
+//    pipes, occupancy) emits raw coordinates with the raw winding;
+//  * model.data, serialize(), the inspector numbers and the reports stay in
+//    RAW file space (selftest asserts the placements).
+const viewPos = (p) => new THREE.Vector3(p.x, p.y, p.z);
+// Rotation STORAGE convention flips with the game generation:
+// • Pre-palette files (no data.colors, 2024-2025 exports) store the Unity LH
+//   quaternion RAW. Proof: the mosaic craft (3334698274) glues 49 dashboard
+//   plates flat onto one hull wall — only raw R(q) makes every plate normal
+//   parallel to the fitted wall plane (flushfrac 1.00 raw vs 0.00 conj);
+//   conj renders them standing out of the wall at an angle (user: murals
+//   "not flush", 'test' dash "rotated away from the seat").
+// • 2026 files (data.colors present) store the CONJUGATE: ISW-241's own
+//   data.pipes endpoints reproduce only under R(q*) (comptest 60/60, 0.000 m).
+// View space == raw file space, so legacy files place with q AS STORED
+// (w,x,y,z) and modern files with the plain conjugate (w,−x,−y,−z). Saved
+// files stay byte-exact: edits invert through rawFromView.
+let LEGACY_Q = false;
+const viewQuat = (q) => LEGACY_Q ? new THREE.Quaternion(q.x, q.y, q.z, q.w)
+                                 : new THREE.Quaternion(-q.x, -q.y, -q.z, q.w);   // file {w,x,y,z}
+
+// ---------- three.js boilerplate ----------
+const view = document.getElementById('view');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.max(1, Math.min(devicePixelRatio, 2.5)));  // floor 1: browser zoom-out pushes dpr <1 (canvas below CSS res = "zoomed in and grainy"); cap 2.5: Chrome SAVES per-site zoom, so HiDPI 150% zoom => dpr 3 — a 2.0 cap rendered 2/3 res = grainy (user's "stuck zoom after Ctrl-F5")
+view.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x8fb4d8);
+// FOG DISABLED (user rule 2026-10-22: "disable the fog … that is harmful"
+// — it washed out the far side of large hulls, exactly the zeppelin-scale
+// shapes users build with the sphere tool). Sky colour + lighting unchanged.
+scene.fog = null;
+// PBR metal has NO diffuse term: lights-only, chrome renders near-black
+// (user: "metallic colours too dark, not enough reflection" — the game's
+// raytracer reflects the world). PMREM studio env, baked once at startup,
+// zero per-frame cost; only metal materials get envMapIntensity > 0, so
+// matte/painted surfaces stay exactly as before.
+{
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  pmrem.dispose();
+}
+
+const camera = new THREE.PerspectiveCamera(55, 1, 0.05, 300);
+camera.position.set(-6.5, 3.4, -8.5);             // raw frame: nose (−z) toward camera
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0.9, 0.5);
+controls.enableDamping = true;
+// Per-craft framing: the ISW-tuned defaults bury the camera in a 16 m truck
+// (user: "deeply zoomed in, fades out when zooming out, moving behaves
+// weird" — fixed fog(40,90) ate the far parts, fixed far=300 clipped the
+// ground, and the orbit pivot sat inside the hull). Frame the bbox, scale
+// fog/far to the model size; ?cam= still overrides afterwards.
+function fitCameraToModel() {
+  scene.updateMatrixWorld(true);   // matrixWorld is lazy: frame the CURRENT scene
+  const box = new THREE.Box3();
+  [compGroup, blockGroup, hullGroup, pipeGroup, subGroup].forEach(g => box.expandByObject(g));
+  if (!isFinite(box.min.x)) return;
+  const c = box.getCenter(new THREE.Vector3());
+  const sz = box.getSize(new THREE.Vector3());
+  const r = Math.max(1, sz.x, sz.y, sz.z);
+  controls.target.copy(c);
+  // Minimum framing distance: on a 1 m craft a 1.1 m camera reads as tiny
+  // FOV + low res + ultra-sensitive orbit (user's "stuck in a zoomed
+  // viewer" — no fly-to ran; the AUTO fit was the zoom). Small crafts get
+  // a >= 3.6 m view; big crafts keep the 1.85r framing.
+  const d = Math.max(r * 1.85, 3.6);
+  camera.position.set(c.x + d * 0.6, c.y + Math.max(d * 0.34, 1.4), c.z - d * 0.72);
+  camera.near = Math.max(0.05, r / 400);
+  camera.far = Math.max(300, r * 10);
+  camera.updateProjectionMatrix();
+  controls.update();
+}
+
+scene.add(new THREE.HemisphereLight(0xcfe8ff, 0x444422, 1.1));
+const sun = new THREE.DirectionalLight(0xfff2dd, 2.2);
+sun.position.set(-6, 10, -4);
+scene.add(sun);
+
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(120, 120),
+  new THREE.MeshStandardMaterial({ color: 0x3d5a34, roughness: 1, envMapIntensity: 0 }));
+ground.rotation.x = -Math.PI / 2;
+scene.add(ground);
+
+const grid = new THREE.GridHelper(28, 112, 0x223322, 0x2c4429);
+grid.position.y = 0.002;
+scene.add(grid);
+
+// Render-loop state + invalidate — HOISTED to the top of the module (v0.161):
+// invalidate() is referenced from ~40 call sites across the whole file; with
+// the declarations down at the animate section, ANY call during module
+// evaluation (listener wiring, mid-edit dev trees) threw
+// 'Cannot access needsRender before initialization' (TDZ). Safe anywhere now.
+let needsRender = true, invalSeq = 0;      // repaint request + counter (pins)
+function invalidate() { needsRender = true; invalSeq++; }
+
+function onResize() {
+  const w = view.clientWidth, h = view.clientHeight;
+  renderer.setPixelRatio(Math.max(1, Math.min(devicePixelRatio, 2.5)));  // browser zoom changes dpr (fires resize); Chrome persists per-site zoom across reloads
+  renderer.setSize(w, h);
+  selEdgesMat.resolution.set(w, h);              // fat-line screen units
+  invalidate();
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+addEventListener('resize', onResize);
+// Back/forward returns the page from bfcache with the frozen camera (a zoom
+// left in some cockpit), a residual damping velocity (weird camera glide) and
+// a suspended render — the user's "deep zoom + fades + moves oddly after
+// back/forward, fine on fresh open". Treat restore like a fresh open:
+// refit framing to the craft, resize, and repaint.
+addEventListener('pageshow', (e) => {
+  if (!e.persisted) return;
+  fitCameraToModel();
+  onResize();
+  invalidate();
+});
+
+// ---------- state ----------
+let model = null;              // parsed blueprint, components kept live-synced
+let orig = [];                 // per component: {pos0, q0, occ0[]} for save sync
+const compGroup = new THREE.Group();   // clickable component proxies
+const blockGroup = new THREE.Group();
+const occGroup = new THREE.Group();    // type-255 occupancy boxes
+const hullGroup = new THREE.Group();   // extruded hull plates
+const pipeGroup = new THREE.Group();   // pipes/cables + port markers
+const adpGroup = new THREE.Group();    // adapter/port nubs, merged across all components
+adpGroup.visible = false;              // v0.156 (user): connectors OFF by default
+const subGroup = new THREE.Group();    // subgrids: nested Build blueprints (hatches/doors)
+scene.add(compGroup, blockGroup, occGroup, hullGroup, pipeGroup, adpGroup, subGroup);
+occGroup.visible = false;
+hullGroup.visible = true;
+
+let selected = -1, hovered = -1, dirty = false, selectedSub = -1;   // selectedSub: Build-comp index of a clicked subgrid (v0.153)
+let fileHandle = null;
+
+// ---------- helpers ----------
+const $ = (id) => document.getElementById(id);
+const toast = (msg) => { const t = $('toast'); t.textContent = msg; t.style.opacity = 1;
+  clearTimeout(toast._h); toast._h = setTimeout(() => t.style.opacity = 0, 1800); };
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const fmt = (v) => (Math.round(v * 1000) / 1000).toString();
+
+// Game colour semantics (ported from the dev's XenonViewer, see NOTICE §2):
+// palette/component colours are 0-255 LINEAR albedo (the engine's shaders
+// take vec3(r,g,b)/255 raw — decoding them as sRGB darkens everything ~^2.2),
+// roughness is a 0..7 scale, metallic is 0|1, and opacity <15 is transparent.
+// The game's tracer lights every surface with diffuse when roughness>0 even
+// for metallic=1 (a rough-steel plate sun-lit bright, chrome mirror-dark),
+// so metalness is modelled as metallic·(1 − roughness/7).
+function pbr(c) {
+  const rough = clamp((c.roughness ?? 0) / 7, 0.03, 1);
+  const op = c.opacity ?? 15;
+  return {
+    color: new THREE.Color().setRGB(c.r / 255, c.g / 255, c.b / 255, THREE.LinearSRGBColorSpace),
+    metal: c.metallic ? Math.max(0, 1 - (c.roughness ?? 0) / 7) : 0,
+    rough,
+    op: op >= 15 ? 1 : clamp((op + 1) / 16, 0.02, 1),
+  };
+}
+const matKey = (s) => s.color.getHex() + ',' + s.op.toFixed(3) + ',' + s.metal.toFixed(3) + ',' + s.rough.toFixed(3);
+function palColor(slot) {
+  return pbr(resolveColor(model?.data?.colors, slot, LEGACY_Q));
+}
+// component colours: same format as palette entries; the game's painted-material
+// defaults stand in for missing fields (color1 = polished white, color2 = matte grey)
+const COMP_COLOR_DEFAULTS = {
+  color1: { r: 255, g: 255, b: 255, opacity: 15, roughness: 0, metallic: 0 },
+  color2: { r: 204, g: 204, b: 204, opacity: 15, roughness: 7, metallic: 1 },
+};
+function compColor(comp, which, fallback) {
+  let c = comp.colors?.[which];
+  if (c == null && Array.isArray(comp.colors)) {
+    // v1-format files store colours as PALETTE SLOT INDICES: [color1, color2]
+    // (legacy editor; e.g. [48,48] = matte dark green). Resolve against the
+    // file palette — the built-in table for v1 files, which have none.
+    const idx = comp.colors[which === 'color2' ? 1 : 0];
+    if (typeof idx === 'number') c = resolveColor(model.data?.colors, idx, LEGACY_Q);
+  }
+  if (!c) {
+    if (fallback === undefined || fallback === null) return pbr(COMP_COLOR_DEFAULTS[which] || COMP_COLOR_DEFAULTS.color1);
+    return { color: new THREE.Color(fallback), metal: 0.5, rough: 0.55, op: 1 };
+  }
+  const d = COMP_COLOR_DEFAULTS[which] || COMP_COLOR_DEFAULTS.color1;
+  return pbr({ r: c.r ?? d.r, g: c.g ?? d.g, b: c.b ?? d.b,
+               opacity: c.opacity ?? d.opacity, roughness: c.roughness ?? d.roughness,
+               metallic: c.metallic ?? d.metallic });
+}
+function mat(spec, extra = {}) {
+  return new THREE.MeshStandardMaterial({
+    color: spec.color, metalness: spec.metal, roughness: spec.rough,
+    envMapIntensity: spec.metal > 0.5 ? 1.25 : 0,
+    transparent: spec.op < 1, opacity: spec.op, ...extra });
+}
+const box = (w, h, d) => new THREE.BoxGeometry(w, h, d);
+const cyl = (r, h, seg = 6) => new THREE.CylinderGeometry(r, r, h, seg);
+
+// ---------- component proxies (pivot at local origin = comp.position) ----------
+// In-game a loaded wheel hangs BELOW its mount: the suspension arm droops to
+// −y. The blueprint stores the BUILD pose (arm horizontal: wheel centre 0.447 m
+// off the pivot), so a file-accurate render buries the tire in the deck edge.
+// Droop = the smallest world rotation about the (horizontal) axle that brings
+// the arm to −y — a physical wheel-roll: the axle and tire plane are untouched,
+// so rolling geometry stays exact. Vertical-axle casters (ISW crawler mounts)
+// can't droop around their axle and keep the file pose. Pure display: edits
+// write back through the undo in userData (saved quaternions stay file-exact).
+const WHEEL_TYPES = new Set(['SmallWheel', 'Wheel', 'BigWheel']);
+// FluidJunction display pose: builder-file cables are cached in the builder's
+// FLAT frame (outlets up, row along the fuselage — the v0.91 look); the file
+// quaternion's conjugate pose (standing comb, ports sideways) matches none of
+// them, so the junction read as "sticking out" of its own pipes. Display pose
+// (de-mirror v0.180: view space == raw file space) = the RAW file quaternion
+// for BOTH generations: the old chain's flat comb in view was the file quat
+// (w,−x,−y,z) under its mirrored placement law, whose raw-space rotation IS
+// R(q) — the flat frame is a property of the builder's raw pose. Display-only:
+// edits write back through wheelUndo, saved quaternions stay file-exact.
+const JUNCTION_TYPES = new Set(['FluidJunction']);
+function applyDisplayPose(obj, qV, qF) {
+  obj.userData.wheelUndo = undefined;
+  if (JUNCTION_TYPES.has(obj.userData.wType)) {
+    obj.quaternion.set(qF.x, qF.y, qF.z, qF.w);
+    obj.userData.wheelUndo = obj.quaternion.clone().invert().multiply(qV);
+    return;
+  }
+  if (obj.userData.wType === 'ToggleButton') {
+    // Mount bake: the game mounts the button base_planes-FLUSH — the mount
+    // face (plate front) sits on the surface facing the pilot, which bakes a
+    // local yaw-180 into the model: plate covers the authored hull gap, the
+    // lever hides in the wall (pressed state flips it UP out of a deck
+    // mount). Raw file-quat placement puts the 0.24 m plate box 0.68 m
+    // BEHIND the pivot = dolphin/Cede "gap in the fuselage, button further
+    // back, away from cockpit". Pinned by postest btn-plate-flush/-lever-pose.
+    obj.quaternion.copy(qV).multiply(new THREE.Quaternion(0, 1, 0, 0));   // yaw 180
+    obj.userData.wheelUndo = obj.quaternion.clone().invert().multiply(qV);
+    return;
+  }
+  if (!WHEEL_TYPES.has(obj.userData.wType)) { obj.quaternion.copy(qV); return; }
+  const a = new THREE.Vector3(1, 0, 0).applyQuaternion(qV);   // axle
+  const u = new THREE.Vector3(0, 1, 0).applyQuaternion(qV);   // suspension arm
+  const c = -u.y, s = -new THREE.Vector3().crossVectors(a, u).y;   // cos/sin of arm→down
+  const L = Math.hypot(c, s);
+  if (L > 0.9 && c <= 0.02) {        // roll reachable: arm horizontal (90°) or tilted
+    const phi = Math.atan2(s, c);
+    obj.quaternion.setFromAxisAngle(a, phi).multiply(qV);
+    obj.userData.wheelUndo = obj.quaternion.clone().invert().multiply(qV);
+  } else obj.quaternion.copy(qV);
+}
+const rawFromView = (obj, q) => {                   // strip droop, view → file
+  const t = obj.userData.wheelUndo ? q.clone().multiply(obj.userData.wheelUndo) : q;
+  // view space == file space (v0.180): legacy stores q as displayed, modern
+  // stores the conjugate of the displayed rotation.
+  return LEGACY_Q ? { w: t.w, x: t.x, y: t.y, z: t.z }
+                  : { w: t.w, x: -t.x, y: -t.y, z: -t.z };
+};
+// saved aileron deflection: components[].data.angle is in DEGREES (the .ini
+// [JOINT] angular_x limits are −45/+45, so ISW-241's −4.609 = a gentle −4.6°
+// droop — NOT radians; a normalized-rad reading gives 95.9°, past the
+// physical joint limit). Axis = hinge span (local x); view-space sign is +.
+const aileronAngle = c => {
+  const a = (c.data && typeof c.data.angle === 'number') ? c.data.angle : 0;
+  return a * Math.PI / 180;
+};
+
+function footprint(comp) {
+  const o = comp.occupancies[0] || { size_x: 0, size_y: 0, size_z: 0 };
+  return { x: (o.size_x + 1) * CELL, y: (o.size_y + 1) * CELL, z: (o.size_z + 1) * CELL };
+}
+const PROXY = {
+  PilotSeat(c) {
+    const up = mat(compColor(c, 'Material.003', 0x1a1a1a)), frame = mat(compColor(c, 'color2', 0x444444));
+    const g = new THREE.Group();
+    const add = (geo, m, x, y, z) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); g.add(o); };
+    add(box(0.10, 0.20, 0.10), frame, 0, -0.10, 0);            // pedestal
+    add(box(0.42, 0.07, 0.44), up, 0, 0.035, 0);               // seat pan
+    add(box(0.42, 0.50, 0.07), up, 0, 0.32, 0.185);            // backrest (+z = tail, faces nose)
+    add(box(0.22, 0.14, 0.07), up, 0, 0.64, 0.20);             // headrest
+    add(box(0.06, 0.10, 0.40), frame, -0.24, 0.12, 0.02);      // armrests
+    add(box(0.06, 0.10, 0.40), frame, 0.24, 0.12, 0.02);
+    return g;
+  },
+  SmallWheel(c) {
+    const g = new THREE.Group();
+    const tire = new THREE.Mesh(cyl(0.17, 0.10, 8), mat(compColor(c, 'color1', 0x1c1c1c)));
+    tire.rotation.z = Math.PI / 2;                             // axle along local X
+    const hub = new THREE.Mesh(cyl(0.06, 0.13, 6), mat(compColor(c, 'color2', 0xcccccc)));
+    hub.rotation.z = Math.PI / 2;
+    g.add(tire, hub);
+    return g;
+  },
+  Aileron(c) {
+    // facsimile of the game model: control plate + hinge rod (the "broom
+    // handle" on the [JOINT] axis at local y=0.181) + flap (the .ini
+    // 'aileron' renderable, joint +0.07 y) hinged on the local -z edge.
+    // Flap deflection = the SAVED control state, components[].data.angle in
+    // DEGREES (.ini [JOINT] angular_x limits −45/+45; ISW-241: front canard
+    // −4.609° gentle droop, rear pair ±0.096° ≈ neutral, saved mid-roll).
+    const f = footprint(c);
+    const g = new THREE.Group();
+    const m = mat(compColor(c, 'color1', 0xdddddd));
+    const plate = new THREE.Mesh(box(f.x, 0.045, f.z * 0.6), m);
+    plate.position.z = f.z * 0.2;                  // fixed surface, rear 60% (original side)
+    const rod = new THREE.Mesh(cyl(0.025, f.x + 0.5, 6), mat(compColor(c, 'color2', 0x999999)));
+    rod.rotation.z = Math.PI / 2;
+    rod.position.y = 0.181;                        // hinge rod on the [JOINT] axis line
+    const flap = new THREE.Mesh(box(f.x, 0.03, f.z * 0.4), m);
+    flap.position.set(0, 0.07, -f.z * 0.3);        // aileron node = joint +0.07 y (.ini)
+    const pivot = new THREE.Group();
+    pivot.position.set(0, 0.181, 0);               // .ini [JOINT] hinge, above the plate
+    pivot.add(flap);
+    pivot.rotation.x = aileronAngle(c);            // saved data.angle (degrees → rad, view +)
+    g.add(plate, rod, pivot);
+    return g;
+  },
+  SolarPanel(c) {
+    // panel plane is local X-Y (normal local Z): quaternion maps local -Z to
+    // world +Y, so the plate renders flat facing straight up (verified from q
+    // and from the lowvoltage port position in data.pipes).
+    const f = footprint(c);
+    return new THREE.Mesh(box(f.x, f.z, 0.03),
+      mat(compColor(c, 'color1', 0x102a88), { emissive: 0x001144 }));
+  },
+  FluidPort(c) {
+    const g = new THREE.Group();
+    const m = mat(compColor(c, 'color1', 0x222222));
+    const s = new THREE.Mesh(new THREE.SphereGeometry(0.05, 14, 10), m);
+    const stub = new THREE.Mesh(cyl(0.03, 0.14), m);
+    stub.rotation.x = Math.PI / 2; stub.position.z = 0.07;
+    g.add(s, stub);
+    return g;
+  },
+  FluidJunction(c) {
+    // comb manifold, ports per the game .ini adapters: inlet on local −z,
+    // four outlets (x ±0.375/±0.125) on local +z, body long axis local x
+    const g = new THREE.Group(), m = mat(compColor(c, 'color1', 0xdddddd));
+    g.add(new THREE.Mesh(box(1.0, 0.22, 0.3), m));
+    const inlet = new THREE.Mesh(cyl(0.045, 0.16), m);
+    inlet.rotation.x = Math.PI / 2; inlet.position.z = -0.16;
+    g.add(inlet);
+    for (const x of [-0.375, -0.125, 0.125, 0.375]) {
+      const o = new THREE.Mesh(cyl(0.04, 0.16), m);
+      o.rotation.x = Math.PI / 2; o.position.set(x, 0, 0.16);
+      g.add(o);
+    }
+    return g;
+  },
+  RCS(c) {
+    // nozzle along local -y; quaternion maps local -y -> world -z (nose-ward):
+    // thrust points away from the nose (braking thruster, per craft behaviour)
+    const g = new THREE.Group(), m = mat(compColor(c, 'color2', 0xcccccc));
+    g.add(new THREE.Mesh(box(0.14, 0.2, 0.14), m));
+    const n = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.18, 12), m);
+    n.rotation.x = Math.PI / 2; n.position.y = -0.18;
+    g.add(n);
+    const fi = new THREE.Mesh(cyl(0.03, 0.1), m);
+    fi.rotation.x = Math.PI / 2; fi.position.y = 0.14;   // fuel inlet, tail side
+    g.add(fi);
+    return g;
+  },
+};
+const PROXY2 = {
+  SmallTurboPump(c) {
+    // rounded cylinder, axis local y (maps to world x: pump lies sideways
+    // left-right in the craft). Ports from data.pipes: fluid-in at world -x
+    // (local +y end), fluid-out at +x (local -y end), highvoltage on local -z.
+    const g = new THREE.Group();
+    const m = mat(compColor(c, 'color2', 0xbbbbbb));
+    const pm = mat(compColor(c, 'color1', 0x333333));
+    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.11, 0.36, 6, 14), m);
+    body.rotation.z = Math.PI / 2;                  // local y axis
+    g.add(body);
+    for (const s of [1, -1]) {
+      const nub = new THREE.Mesh(cyl(0.045, 0.14), pm);
+      nub.rotation.z = Math.PI / 2; nub.position.y = s * 0.28;
+      g.add(nub);
+    }
+    const hv = new THREE.Mesh(box(0.06, 0.05, 0.06), pm);
+    hv.position.set(0, 0, -0.12);
+    g.add(hv);
+    return g;
+  },
+};
+function defaultProxy(c) {
+  // exact game collider footprint (from occupancies): box, axis-aligned
+  const f = footprint(c);
+  return new THREE.Mesh(box(f.x, f.y, f.z), mat(compColor(c, 'color1', 0x88aaff)));
+}
+
+// ---------- player-interactive labels ----------
+// Components the player touches in-cockpit get a short floating label; an
+// in-game alias (components[].alias) always wins and renders in blue.
+const INTERACT = {
+  Dashboard: 'dash', PushButton: 'button', ToggleButton: 'toggle', ArrowButton: 'arrow',
+  Keyboard: 'keyboard', Numpad: 'numpad', Led: 'led', Buzzer: 'buzzer', Beacon: 'beacon',
+  NavInstrument: 'nav', MiniNavInstrument: 'nav', HudController: 'hud',
+  PilotSeat: 'seat', ToiletSeat: 'toilet', OwnerPad: 'pad',
+  Computer: 'computer', MiniComputer: 'computer', Volume: 'volume',
+};
+let labelsOn = false;   // labels OFF by default (user): opt-in per session
+function makeLabel(c) {
+  const text = c.alias || INTERACT[c.type];
+  const cv = document.createElement('canvas');
+  let ctx = cv.getContext('2d');
+  ctx.font = 'bold 44px monospace';
+  const w = Math.max(72, Math.ceil(ctx.measureText(text).width) + 28);
+  cv.width = w; cv.height = 64;
+  ctx = cv.getContext('2d');
+  ctx.fillStyle = 'rgba(8,12,16,0.72)';
+  ctx.fillRect(0, 0, w, 64);
+  ctx.font = 'bold 44px monospace';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = c.alias ? '#7fd0ff' : '#ffd479';
+  ctx.fillText(text, 14, 34);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: new THREE.CanvasTexture(cv), depthTest: false, transparent: true }));
+  sp.scale.set(w / 64 * 0.3, 0.3, 1);
+  sp.renderOrder = 10;
+  sp.userData.isLabel = true;
+  sp.raycast = () => {};                  // labels are never pick targets
+  return sp;
+}
+
+// instant stand-in until the low-poly mesh loads: exact game collider box
+function colliderProxy(c) {
+  const col = MODEL.manifest?.[c.type]?.colliders?.[0];
+  const g = new THREE.Group();
+  if (col && col.max[0] - col.min[0] > 1e-6) {
+    const b = new THREE.Mesh(
+      box(col.max[0] - col.min[0], col.max[1] - col.min[1], col.max[2] - col.min[2]),
+      mat(compColor(c, 'color1', 0x88aaff)));
+    b.position.set((col.min[0] + col.max[0]) / 2, (col.min[1] + col.max[1]) / 2,
+                   (col.min[2] + col.max[2]) / 2);
+    g.add(b);
+  } else {
+    const f = footprint(c);
+    g.add(new THREE.Mesh(box(f.x, f.y, f.z), mat(compColor(c, 'color1', 0x88aaff))));
+  }
+  return g;
+}
+
+// ---- block shapes -------------------------------------------------------
+// blocks[].type encodes shape + orientation (cube/slope/corner/pyramid/
+// inverse-corner, blockshapes.js, transcribed from the game's BlockShapes.hh).
+// blocks.colors = 7 palette slots, one per face. Faces whose whole slice is
+// covered by a neighbour's full face are interior walls → skipped (culling
+// grid ported from the game developer's XenonViewer).
+const CELLS_PER_FRAME = FRAME / CELL;                                  // 12
+const C_ORIGIN = 4096, C_SPAN = 8192;
+const cellKey = (x, y, z) => ((x + C_ORIGIN) * C_SPAN + (y + C_ORIGIN)) * C_SPAN + (z + C_ORIGIN);
+const faceKey = (x, y, z, axis) => cellKey(x, y, z) * 3 + axis;
+const blkCell = (b) => [b.frame_x * CELLS_PER_FRAME + b.pos_x,
+                        b.frame_y * CELLS_PER_FRAME + b.pos_y,
+                        b.frame_z * CELLS_PER_FRAME + b.pos_z];
+const blkSpan = (b) => [b.size_x + 1, b.size_y + 1, b.size_z + 1];
+function forEachFaceCell(b, dir, visit) {
+  const axis = dir[0] ? 0 : dir[1] ? 1 : 2;
+  const min = blkCell(b), size = blkSpan(b);
+  // the face lives between two cells; file it on the lower-cell side
+  const plane = dir[axis] > 0 ? min[axis] + size[axis] - 1 : min[axis] - 1;
+  const u = (axis + 1) % 3, v = (axis + 2) % 3;
+  const cell = [0, 0, 0];
+  cell[axis] = plane;
+  for (let i = 0; i < size[u]; i++)
+    for (let j = 0; j < size[v]; j++) {
+      cell[u] = min[u] + i; cell[v] = min[v] + j;
+      visit(cell, axis);
+    }
+}
+function buildFaceGrid(blocks) {
+  const faces = new Map();
+  blocks.forEach((b, index) => {
+    if (b.type === 255) return;
+    const dirs = getBlockFaceDirections(b.type);
+    for (let f = 0; f < dirs.length; f++) {
+      const dir = dirs[f];
+      if (!dir || !isFullFace(b.type, f)) continue;
+      const slot = b.colors?.[f] ?? b.colors?.[0] ?? 0;
+      const opaque = resolveColor(model.data.colors, slot, LEGACY_Q).opacity >= 15;
+      forEachFaceCell(b, dir, (cell, axis) => {
+        const key = faceKey(cell[0], cell[1], cell[2], axis);
+        const e = faces.get(key);
+        if (!e) faces.set(key, [{ block: index, opaque }]);
+        else if (!e.some((x) => x.block === index)) e.push({ block: index, opaque });
+      });
+    }
+  });
+  return faces;
+}
+function faceCovered(faces, b, index, faceDir, opaque) {
+  if (!faceDir || Math.abs(faceDir[0]) + Math.abs(faceDir[1]) + Math.abs(faceDir[2]) !== 1) return false;
+  const axis = faceDir[0] ? 0 : faceDir[1] ? 1 : 2;
+  let covered = true;
+  forEachFaceCell(b, faceDir, (cell) => {
+    if (!covered) return;
+    const entry = faces.get(faceKey(cell[0], cell[1], cell[2], axis)) || [];
+    if (!entry.some((e) => e.block !== index && (!opaque || e.opaque))) covered = false;
+  });
+  return covered;
+}
+
+// ---- block geometry (algorithm ported from the dev's XenonViewer) --------
+// Blocks render as merged geometry, ONE mesh per distinct palette colour
+// (crafts use a handful of colours), with the game's interior-wall rules:
+//  * full faces are cut cell-by-cell against the face grid; surviving cells
+//    are stitched back into rectangles (a 3 m deck = 2 quads, not 144);
+//  * partial faces (slope sides, corner slants) die when fully cell-covered;
+//  * two blocks sharing the same partial-face footprint (a slope glued to a
+//    slope) form an interior partition — both copies drop, else they z-fight.
+// Every surviving face edge also goes into one wire geometry (face colour as
+// vertex colour) so the wireframe overlay shows blocks and hull uniformly.
+function faceFootprint(points, indices) {
+  const uniq = new Set();
+  for (const i of indices) { const p = points[i]; uniq.add(`${p[0].toFixed(4)},${p[1].toFixed(4)},${p[2].toFixed(4)}`); }
+  return [...uniq].sort().join('|');
+}
+const cellM = (c) => c * CELL - FRAME / 2;
+/** Quad covering spanU×spanV cells from `cell`, wound so its normal follows dir. */
+function cellQuad(cell, axis, dir, spanU = 1, spanV = 1) {
+  const u = (axis + 1) % 3, v = (axis + 2) % 3;
+  const plane = cellM(cell[axis] + 1);       // a face lives between cells: plane = cell+1
+  const corner = (du, dv) => {
+    const p = [0, 0, 0];
+    p[axis] = plane; p[u] = cellM(cell[u] + du); p[v] = cellM(cell[v] + dv);
+    return p;
+  };
+  const quad = [corner(0, 0), corner(spanU, 0), corner(spanU, spanV), corner(0, spanV)];
+  const e1 = quad[1].map((x, i) => x - quad[0][i]), e2 = quad[2].map((x, i) => x - quad[0][i]);
+  const n = [e1[1]*e2[2]-e1[2]*e2[1], e1[2]*e2[0]-e1[0]*e2[2], e1[0]*e2[1]-e1[1]*e2[0]];
+  return n[0]*dir[0] + n[1]*dir[1] + n[2]*dir[2] >= 0 ? quad : [quad[3], quad[2], quad[1], quad[0]];
+}
+function buildBlockGeometry(blocks, offset) {
+  const faces = buildFaceGrid(blocks);
+  const buckets = new Map();                 // matKey -> {pos:[], spec}
+  const kept = [], footprints = new Map();
+  const epos = [], ecol = [], eseen = new Set();
+  const ek1 = (p) => `${Math.round(p[0]*1e3)},${Math.round(p[1]*1e3)},${Math.round(p[2]*1e3)}`;
+  const addEdge = (a, b, spec) => {
+    const ka = ek1(a), kb = ek1(b), k = ka < kb ? ka + ';' + kb : kb + ';' + ka;
+    if (eseen.has(k)) return;
+    eseen.add(k);
+    epos.push(a[0]+offset.x, a[1]+offset.y, a[2]+offset.z, b[0]+offset.x, b[1]+offset.y, b[2]+offset.z);
+    ecol.push(spec.color.r, spec.color.g, spec.color.b, spec.color.r, spec.color.g, spec.color.b);
+  };
+  const push = (spec, pts) => {          // raw coords, raw winding (de-mirrored)
+    let bk = buckets.get(matKey(spec));
+    if (!bk) buckets.set(matKey(spec), bk = { pos: [], spec });
+    for (let i = 0; i + 2 < pts.length; i += 3)
+      for (const p of [pts[i], pts[i + 1], pts[i + 2]])
+        bk.pos.push(p[0] + offset.x, p[1] + offset.y, p[2] + offset.z);
+  };
+  blocks.forEach((b, index) => {
+    if (b.type === 255) return;
+    const origin = [occWorld(b, 'x') - CELL / 2, occWorld(b, 'y') - CELL / 2, occWorld(b, 'z') - CELL / 2];
+    const size = [(b.size_x + 1) * CELL, (b.size_y + 1) * CELL, (b.size_z + 1) * CELL];
+    const pts = getBlockPoints(b.type, origin, size);
+    const tris = getBlockFaces(b.type);
+    const dirs = getBlockFaceDirections(b.type);
+    for (let f = 0; f < tris.length; f++) {
+      const spec = palColor(b.colors?.[f] ?? b.colors?.[0] ?? 0);
+      const opaque = spec.op >= 1;
+      const dir = dirs[f];
+      if (dir && isFullFace(b.type, f)) {    // full face: per-cell cull + rectangle stitch
+        const axis = dir[0] ? 0 : dir[1] ? 1 : 2, u = (axis + 1) % 3, v = (axis + 2) % 3;
+        const min = blkCell(b), sz = blkSpan(b);
+        const free = new Uint8Array(sz[u] * sz[v]);
+        let freeCount = 0;
+        forEachFaceCell(b, dir, (cell) => {
+          const entry = faces.get(faceKey(cell[0], cell[1], cell[2], axis)) || [];
+          if (entry.some((e) => e.block !== index && (!opaque || e.opaque))) return;
+          free[(cell[u] - min[u]) * sz[v] + (cell[v] - min[v])] = 1;
+          freeCount++;
+        });
+        if (!freeCount) continue;
+        const emit = (i, j, w, h) => {
+          const cell = [0, 0, 0];
+          cell[axis] = dir[axis] > 0 ? min[axis] + sz[axis] - 1 : min[axis] - 1;
+          cell[u] = min[u] + i; cell[v] = min[v] + j;
+          const q = cellQuad(cell, axis, dir, w, h);
+          push(spec, [q[0], q[1], q[2], q[2], q[3], q[0]]);
+          addEdge(q[0], q[1], spec); addEdge(q[1], q[2], spec);
+          addEdge(q[2], q[3], spec); addEdge(q[3], q[0], spec);
+        };
+        for (let i = 0; i < sz[u]; i++)
+          for (let j = 0; j < sz[v]; j++) {
+            if (!free[i * sz[v] + j]) continue;
+            let h = 1; while (j + h < sz[v] && free[i * sz[v] + j + h]) h++;
+            let w = 1;
+            grow: while (i + w < sz[u]) { for (let k = 0; k < h; k++) if (!free[(i + w) * sz[v] + j + k]) break grow; w++; }
+            emit(i, j, w, h);
+            for (let di = 0; di < w; di++) for (let dj = 0; dj < h; dj++) free[(i + di) * sz[v] + j + dj] = 0;
+          }
+        continue;
+      }
+      if (faceCovered(faces, b, index, dir, opaque)) continue;   // interior wall
+      const fp = faceFootprint(pts, tris[f]);
+      footprints.set(fp, (footprints.get(fp) || 0) + 1);
+      kept.push({ pts, idx: tris[f], spec, fp });
+    }
+  });
+  for (const face of kept) {
+    if (footprints.get(face.fp) > 1) continue;                   // interior partition
+    const P = face.idx.map((i) => face.pts[i]);
+    push(face.spec, P);
+    for (let t = 0; t + 2 < P.length; t += 3)
+      for (const [a, b] of [[P[t], P[t+1]], [P[t+1], P[t+2]], [P[t+2], P[t]]]) addEdge(a, b, face.spec);
+  }
+  const meshes = [];
+  for (const { pos, spec } of buckets.values()) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.computeVertexNormals();
+    meshes.push({ geo: g, spec });
+  }
+  return { meshes, edges: { pos: epos, col: ecol } };
+}
+function addBlockMeshes(group, blocks, offset) {
+  const { meshes, edges } = buildBlockGeometry(blocks, offset);
+  for (const { geo, spec } of meshes)
+    group.add(new THREE.Mesh(geo, mat(spec, {
+      side: spec.op < 1 ? THREE.DoubleSide : THREE.FrontSide,
+      depthWrite: spec.op >= 1 })));
+  return edges;
+}
+
+// subgrids: nested blueprint data inside 'Build' components (hatches/doors),
+// stored in the CLOSED pose using the same cell-grid encoding as the parent.
+// The subgrid's authoritative attach transform is the Build component's OWN
+// position/orientation (dev viewer: nested world = BuildMatrix ∘ local);
+// hinge anchors live in data.composite_builds — see FORMAT §Subgrids for what
+// is/isn't decodable there. Each subgrid becomes ONE group (userData.sub =
+// Build comp index): pick target, pivot-edit subject, one visibility unit.
+// The group rides the same un-mirrored chain as any component (v0.180), so
+// with the near-universal identity pivot it renders EXACTLY as before, and a
+// pivot edit rotates/offsets the whole subgrid around the mount.
+function buildSubgrids() {
+  subGroup.clear();
+  let sn = 0;
+  model.data.components.forEach((c, bi) => {
+    if (c.type !== 'Build' || !c.data?.blocks?.length) return;
+    const g = new THREE.Group();
+    g.userData.sub = bi; g.userData.subn = ++sn;
+    // v0.168 BASE = IDENTITY (user: "SU-57 looks like parts of it exploded
+    // out" + "rotation on the dolphin doesnt work as it should for
+    // subgrids/pivots"): the nested data.blocks/components are stored in the
+    // PARENT's absolute grid coords — sealStats proves it (nested hatch cells
+    // flood-seal the dolphin cabin straight off pos+12f−5.5), and masters'
+    // data.angle=0 (closed) agrees with "the game stores subgrids CLOSED".
+    // The Build component's own position/orientation is the builder's bench
+    // pose (same construction-site ghost as the top-level Build = far outside
+    // the bbox, never rendered) — composing it on top of absolute content
+    // double-offsets it (SU-57's gear doors: bench at x=±21 ⇒ rendered at
+    // x=±39; dolphin gizmos parked 51 m from their doors). The kinematic
+    // joint chain J (syncSubJoints) composes on top of THIS identity base,
+    // so a door at angle 0 renders closed at its stored cells and swings
+    // about the master's pivot exactly as the joint sliders say.
+    g.position.set(0, 0, 0);
+    g.quaternion.identity();
+    g.userData.base = { p: g.position.clone(), q: g.quaternion.clone() };   // attach-offset pose (v0.157 joints compose on top)
+    subGroup.add(g);
+    addBlockMeshes(g, c.data.blocks, new THREE.Vector3());
+    for (const sc of c.data.components || []) {
+      if (sc.type === 'Build') continue;
+      const m = MODEL.manifest?.[sc.type] ? colliderProxy(sc) : (PROXY[sc.type] || PROXY2[sc.type] || defaultProxy)(sc);
+      m.position.copy(viewPos(sc.position));
+      m.userData.wType = sc.type;
+      applyDisplayPose(m, viewQuat(sc.orientation), sc.orientation);
+      g.add(m);
+      // real/decimated geometry for nested parts too (Spider Mining Rover:
+      // a Wheel lives in a hatch subgrid — the box stand-in alone read as a
+      // "missing wheel"). ci = -1: nested parts are not list/select targets —
+      // their (invisible, still-raycastable) proxy under the group routes the
+      // click to the SUBGRID ("a clock or a triangle" inside a subgrid = the
+      // subgrid's own content, v0.153).
+      const mp = MODEL.manifest?.[sc.type] ? getModel(sc.type) : null;
+      if (mp) mp.then(mm => {
+        if (!mm || !mm.geo || !g.children.includes(m)) return;
+        const real = buildRealComponent(sc, mm, -1, !realModelsOn);
+        real.position.copy(m.position);
+        real.quaternion.copy(m.quaternion);
+        m.visible = false;
+        real.raycast = () => {};
+        real.traverse(o => { o.raycast = () => {}; });
+        g.add(real);
+        invalidate();
+      });
+    }
+    // v0.173/174/175/176/177 JOINT-LINE capture (after the content
+    // exists, so the bbox is real). Every panel subgrid pivots at the
+    // bbox point nearest the axle pivot (the edge line closest to the
+    // master); the AXIS rule is in the map below (v0.177: the hinge's
+    // kinematic triad — edge-mounted swings on its pin, face-mounted
+    // swings on pin×span, the dolphin fins' ẑ "hatch roll"; pivots/
+    // tracks along the longest dimension). EPISTEMIC STATUS (v0.177
+    // audit): these axis rules are an EMPIRICAL FIT to user-confirmed
+    // in-game motions (dolphin/XYQ/truck/gantry pins) — the format
+    // stores NO kinematic fields for the join (all 342 corpus entries
+    // carry exactly {component, slaveBuildId}; dev blueprint.js ignores
+    // composite_builds entirely), and the .ini part graph only fixes
+    // the PART's own pin (SmallHinge: slave slot on local +ẑ, pin
+    // angular_y; SmallPivot: turntable at (0,0.152,0) angular_y;
+    // LinearTrack: carriage linear_x). See FORMAT.md §Subgrids
+    // EPISTEMIC STATUS.
+    // A master mounted ON its content (XYQ/SMR: ~0.1 m) has its axle pivot
+    // INSIDE that bbox ⇒ the clamp is the pivot itself. PARTS-ONLY subgrids
+    // (empty block bbox) ride the axle node itself: their axis stays the
+    // .ini key chain (v0.171, pinned by dooraxis/subjoint-angle).
+    const bbj = new THREE.Box3();
+    for (const b of c.data.blocks) {
+      if (b.type === 255) continue;   // occupancy mirrors sit AT the master
+      for (const s of [[0, 0, 0],
+        [(b.size_x || 0) + 1, (b.size_y || 0) + 1, (b.size_z || 0) + 1]])
+        bbj.expandByPoint(new THREE.Vector3(
+          (b.pos_x + s[0] + b.frame_x * 12 - 5.5) * 0.25,
+          (b.pos_y + s[1] + b.frame_y * 12 - 5.5) * 0.25,
+          (b.pos_z + s[2] + b.frame_z * 12 - 5.5) * 0.25));
+    }
+    g.userData.jref = (subMasterEntries().get(bi) || [])
+      .filter((e) => e.mc && subJointAxis(e.mc))
+      .map((e) => { const j0 = subJointAxis(e.mc);
+        if (bbj.isEmpty()) return { mc: e.mc, p0: viewPos(e.mc.position),
+          q0: viewQuat(e.mc.orientation), pivot0: j0.pivot.clone(),
+          axle0: j0.pivot, axis0: j0.axis, slide0: j0.slide };
+        const sz = bbj.getSize(new THREE.Vector3());
+        const pivot0 = new THREE.Vector3(
+          THREE.MathUtils.clamp(j0.pivot.x, bbj.min.x, bbj.max.x),
+          THREE.MathUtils.clamp(j0.pivot.y, bbj.min.y, bbj.max.y),
+          THREE.MathUtils.clamp(j0.pivot.z, bbj.min.z, bbj.max.z));
+        // v0.175-177 panel axis (user: "looking at the rotation of the
+        // hinge or pivot we can determine the precise way that it should
+        // rotate"). The hinge's own kinematic triad fixes it: pin = the
+        // barrel axis (the .ini key, chain axis₀); span d = the content's
+        // LONGEST bbox dimension (the direction the content extends from
+        // the joint). EDGE-mounted hinge (content runs ALONG its pin,
+        // |pin·d|≈1: the XYQ car doors, the truck's tailgate flaps): the
+        // content swings ABOUT THE PIN — axis = pin (== longest dim, the
+        // v0.174-confirmed yaws). FACE-mounted hinge (content welded
+        // laterally, in its face plane: BOTH dolphin fins — Build[4] a
+        // 0.25 m skin-fin with the axle 0.25 m off its plane, Build[27]
+        // a 2-cell-deep fin with the axle inside its bbox, v0.176): the
+        // content swings about the THIRD axis pin×span — the knuckle's
+        // swivel axis, perpendicular to pin and span: world ẑ at the
+        // clamped bottom edge, the 2.5 m top edge sweeping in x·y
+        // "collapsing outward or inward, rotating around the bottom".
+        // The cross's sign is mirror-antisymmetric (Build[4] −ẑ,
+        // Build[27] +ẑ), so equal angles ARE the mirror-symmetric fold:
+        // the skin fin deploys outward while the inner-built fin
+        // retracts into the hull (v0.177: "one of the doors opens
+        // correctly, like a hatch folding down, but the other opens like
+        // a door, incorrectly"). PIVOT/TRACK panels (turntables/rails
+        // whose pin aims at nothing on the panel — truck doors, Jimmy's
+        // gantry, flukes, rails) keep the longest dimension.
+        const k = sz.x >= sz.y && sz.x >= sz.z ? 0 : sz.y >= sz.z ? 1 : 2;
+        const d = new THREE.Vector3(k === 0 ? 1 : 0, k === 1 ? 1 : 0,
+          k === 2 ? 1 : 0);
+        const axis = e.mc.type === 'SmallHinge'
+          && Math.abs(j0.axis.dot(d)) < 0.7071
+          ? new THREE.Vector3().crossVectors(j0.axis, d).normalize()
+          : d;
+        return { mc: e.mc, p0: viewPos(e.mc.position),
+          q0: viewQuat(e.mc.orientation), pivot0, axle0: j0.pivot,
+          axis0: axis, slide0: d }; });
+  });
+  syncSubJoints();
+}
+
+// ---------- subgrid JOINT drive (v0.157) ----------
+// The user's "subgrids could rotate or move based on the value in the
+// hinge/pivot/…": composite_builds masters that carry a .ini [JOINT]
+// (SmallHinge, SmallPivot, Aileron, LinearTrack, …) store the live joint
+// state on the MASTER: data.angle (DEGREES, spin about the axle node's own
+// axis — the aileron/wheel convention pinned by selftest) and data.pos
+// (m, slide along that axis). The dev viewer composes nested content under
+// the master's joint node, so the subgrid display pose = joint offset ∘
+// Build attach: q = qOff·baseQ, p = pivot + qOff·(baseP−pivot) (spin about
+// the hinge line) and p += axis·pos (slide). Static hosts (dashboards, RTGs,
+// pumps — no manifest joint) leave the group at its attach pose.
+function subJointAxis(mc) {
+  const jn = (MODEL.manifest?.[mc.type]?.joints || [])[0];
+  if (!jn) return null;
+  const qAxle = new THREE.Quaternion().setFromEuler(new THREE.Euler(
+    jn.rotation[0] * Math.PI / 180, jn.rotation[1] * Math.PI / 180,
+    jn.rotation[2] * Math.PI / 180, 'ZYX'));                        // .ini euler order
+  // The SPIN/SLIDE axes are the .ini JOINT keys themselves (extract_models
+  // stores axis=angular_x/y/z, slide=linear_x/y/z): SmallHinge/SmallPivot/
+  // Propeller spin about the axle's local Y, Aileron/Wheels about X/Z,
+  // Gyroscopes/Drills about Z, LinearTrack slides along X. Assuming x̂ for
+  // every joint swung the dolphin's pivot-mounted doors DOWN & OUT like
+  // barn doors, not the car doors the game shows
+  // (v0.171, user: "dolphin misunderstands axis. doors swing down and out,
+  // unlike car doors").
+  const UNIT = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] };
+  const axis = new THREE.Vector3(...(UNIT[jn.axis] || UNIT.x)).applyQuaternion(qAxle);
+  const mq = viewQuat(mc.orientation);
+  axis.applyQuaternion(mq).normalize();
+  const slide = new THREE.Vector3(...(UNIT[jn.slide] || UNIT[jn.axis] || UNIT.x))
+    .applyQuaternion(qAxle).applyQuaternion(mq).normalize();
+  const pivot = new THREE.Vector3(...jn.position)
+    .applyQuaternion(mq).add(viewPos(mc.position));                 // hinge line anchor (view)
+  return { axis, slide, pivot };
+}
+function syncSubJoints() {
+  if (!model) return;
+  const byB = subMasterEntries();
+  for (const g of subGroup.children) {
+    const base = g.userData.base;
+    if (!base) continue;
+    g.quaternion.copy(base.q);
+    g.position.copy(base.p);
+    for (const e of byB.get(g.userData.sub) || []) {
+      const mc = e.mc;                                              // master obj (v0.171)
+      if (!mc || !subJointAxis(mc)) continue;                       // static host
+      const { axis, slide, pivot } = subJointAxis(mc);
+      const r = (g.userData.jref || []).find((x) => x.mc === mc);
+      const a = typeof mc.data?.angle === 'number' ? mc.data.angle : 0;
+      const s = typeof mc.data?.pos === 'number' ? mc.data.pos : 0;
+      // v0.172/173: the JOINT term composes about the CAPTURED joint line
+      // (axis from the .ini, anchor clamped to the content bbox = the
+      // edge line closest to the master), then the master's rigid pose
+      // delta rides the whole thing — the game graph is M·J·R(angle)·L, so
+      // the hinge line itself moves with the master (composing about the
+      // CURRENT line first double-applies the delta).
+      const ax = r ? r.axis0 : axis, pv0 = r ? r.pivot0 : pivot;
+      const sl = r ? r.slide0 : slide;
+      if (a) {
+        g.position.sub(pv0)
+          .applyQuaternion(new THREE.Quaternion().setFromAxisAngle(ax, a * Math.PI / 180))
+          .add(pv0);
+        g.quaternion.premultiply(
+          new THREE.Quaternion().setFromAxisAngle(ax, a * Math.PI / 180));
+      }
+      if (s) g.position.addScaledVector(sl, s);
+      // rigid riding (user: "i move the hinger, the subgrid should
+      // immediately move in unison with it"): X' = p0 + dq·(X − p0) + (p − p0),
+      // dq = q·q0⁻¹ — the master's pose delta about its own origin.
+      // Identity while the master sits at its built pose ⇒ load-time
+      // display (mid-swing doors, tracks slid open) is bit-identical.
+      if (r) {
+        const dq = viewQuat(mc.orientation).multiply(r.q0.clone().invert());
+        g.position.sub(r.p0).applyQuaternion(dq).add(r.p0)
+          .add(viewPos(mc.position).sub(r.p0));
+        g.quaternion.premultiply(dq);
+      }
+    }
+  }
+  invalidate();
+}
+
+// ---------- mirror-plane overlay (v0.161, user: "show mirror axes as a
+// striped barred plane that indicates the mirror direction, toggle off in
+// options") ----------
+// One zebra-barred plane per mirror axis present in the craft (v0.166):
+// the twin pairs' masks ∪ self-mirrored parts' mirrorAxis — x=0 (the
+// game's left-right symmetry: ⇄ arrows along ±x), y=0 (top-bottom, a
+// horizontal sheet) and z=0 (nose-tail) alike. Each plane RESTS on the
+// ground plane (the selftest ground pin now scans it). Shown only on
+// crafts that ARE symmetric; View-Options "mirror plane" toggles it;
+// never pickable.
+const mirrorGroup = new THREE.Group();
+scene.add(mirrorGroup);
+function buildMirrorPlane() {
+  mirrorGroup.clear();
+  if (!model) return;
+  let mask = 0;
+  for (const ts of symTwinIndex().values())
+    for (const [, m] of ts) mask |= m;
+  for (const c of model.data.components || [])
+    if (c.mirrorAxis >= 1 && c.mirrorAxis <= 3) mask |= 1 << (c.mirrorAxis - 1);
+  if (!mask) return;
+  const bb = new THREE.Box3();
+  for (const g of [compGroup, blockGroup, hullGroup, subGroup]) bb.expandByObject(g);
+  if (!isFinite(bb.min.x)) return;
+  // v0.161 restyle (user: "mirror plane looks very weird"): the sheet RESTS
+  // on the ground plane (nothing renders below ground — same rule as the
+  // craft, now pinned by selftest ok14 which scans mirrorGroup too), spans
+  // the hull's extent, and is quiet: 1.4 m zebra bars at 12 % + a slim
+  // outline frame so it reads as a PLANE, not fog. The ⇄ pair along the
+  // mirrored axis rides at mid-height, sized to the craft. For a horizontal
+  // plane (y mirror) the arrows straddle the sheet upward from it, so the
+  // down-arrow TIP lands ON the plane — never below ground.
+  const y0 = ground.position.y + 0.02;
+  const y1 = bb.max.y + 0.03 * Math.max(bb.max.y - y0, 1);
+  const ex = [bb.min.x - 0.02 * (bb.max.x - bb.min.x),
+    bb.max.x + 0.02 * (bb.max.x - bb.min.x)];
+  const ey = [y0, y1];
+  const ez = [bb.min.z - 0.02 * (bb.max.z - bb.min.z),
+    bb.max.z + 0.02 * (bb.max.z - bb.min.z)];
+  const cv = document.createElement('canvas');
+  cv.width = 4; cv.height = 16;
+  const g2 = cv.getContext('2d');
+  g2.fillStyle = '#bfe9ff';
+  for (let y = 0; y < 16; y += 8) g2.fillRect(0, y, 4, 4);    // 1:2 zebra bars
+  for (const [k, bit] of SYM_AX) {
+    if (!(mask & bit)) continue;
+    const u = k === 'x' ? ez : ex, v = k === 'y' ? ez : ey;    // sheet axes
+    const su = u[1] - u[0], sv = v[1] - v[0];
+    const tex = new THREE.CanvasTexture(cv);
+    tex.magFilter = tex.minFilter = THREE.NearestFilter;
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(1, Math.max(2, Math.round(sv / 1.4)));
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(su, sv),
+      new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.17,
+        side: THREE.DoubleSide, depthWrite: false, color: 0x63c8ff }));
+    const cU = (u[0] + u[1]) / 2, cV = (v[0] + v[1]) / 2;
+    if (k === 'x') { m.rotation.y = Math.PI / 2; m.position.set(0, cV, cU); }
+    else if (k === 'y') { m.rotation.x = -Math.PI / 2; m.position.set(cU, 0, cV); }
+    else { m.position.set(cU, cV, 0); }
+    m.renderOrder = -2;
+    mirrorGroup.add(m);
+    const fr = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry),
+      new THREE.LineBasicMaterial({ color: 0x63c8ff, transparent: true,
+        opacity: 0.55, depthWrite: false }));
+    fr.rotation.copy(m.rotation);
+    fr.position.copy(m.position);
+    fr.renderOrder = -2;
+    mirrorGroup.add(fr);
+    const len = Math.min(6, Math.max(1.2, su * 0.12));
+    const n = new THREE.Vector3(k === 'x' ? 1 : 0, k === 'y' ? 1 : 0,
+      k === 'z' ? 1 : 0);
+    const org = m.position.clone();
+    if (k === 'y') org.y = len;                               // straddle upward
+    for (const s of [1, -1]) {
+      const a = new THREE.ArrowHelper(n.clone().multiplyScalar(s),
+        org, len, 0x8fdcff, len * 0.32, len * 0.18);
+      a.traverse((o) => {
+        if (o.isMesh || o.isLine) {
+          o.material.transparent = true; o.material.opacity = 0.9;
+        }
+      });
+      mirrorGroup.add(a);
+    }
+  }
+  mirrorGroup.traverse((o) => { o.raycast = () => {}; });
+}
+
+let compObjs = [];
+const realMap = new Map();   // component index → real game-model groups (follow live edits)
+function buildScene() {
+  for (const g of [compGroup, blockGroup, occGroup, hullGroup]) {
+    g.clear();
+  }
+  compObjs = [];
+  realMap.clear();
+  adpQueue.length = 0; invalidateAdpIdx();
+  adpGroup.clear();
+  const { blocks, components } = model.data;
+
+  for (const [i, c] of components.entries()) {
+    if (c.type === 'Build') continue;   // editor construction-site ghost, not physical
+    // Default = decimated real mesh (same shape as the game asset, squares +
+    // hexagons, no micro-detail); checkbox swaps in the full raytracing-grade
+    // geometry. Components without an atlas entry keep the hand proxies.
+    const atlas = !!MODEL.manifest?.[c.type];
+    const mesh = atlas ? colliderProxy(c) : (PROXY[c.type] || PROXY2[c.type] || defaultProxy)(c);
+    mesh.position.copy(viewPos(c.position));
+    mesh.userData.wType = c.type;
+    applyDisplayPose(mesh, viewQuat(c.orientation), c.orientation);
+    mesh.traverse(o => { o.userData.ci = i; });
+    mesh.userData.ci = i;
+    compGroup.add(mesh);
+    compObjs[i] = mesh;
+    if (INTERACT[c.type] || c.alias) {              // floating label above part
+      const sp = makeLabel(c);
+      const top = new THREE.Box3().setFromObject(mesh).max.y;
+      sp.userData.ci = i;
+      sp.userData.dy = top - mesh.position.y + 0.18;
+      sp.position.set(mesh.position.x, top + 0.18, mesh.position.z);
+      sp.visible = labelsOn;
+      compGroup.add(sp);   // NEVER parented to the component mesh: GPU sprite
+                           // quads under a transformed parent render flipped
+                           // text on some rasterizers
+    }
+    const mp = atlas ? getModel(c.type) : null;
+    if (mp) mp.then(mm => {
+      if (!mm || !mm.geo || !compObjs.includes(mesh)) return;
+      const real = buildRealComponent(c, mm, i, !realModelsOn);   // low by default
+      real.position.copy(mesh.position);
+      real.quaternion.copy(mesh.quaternion);
+      real.userData.real = true;
+      mesh.visible = false;
+      mesh.userData.hasReal = true;
+      const lab = compGroup.children.find(o => o.userData.isLabel && o.userData.ci === i);
+      if (lab) {                                   // labels ride the visible model
+        lab.userData.dy = new THREE.Box3().setFromObject(real).max.y - real.position.y + 0.18;
+        lab.position.y = real.position.y + lab.userData.dy;
+      }
+      compGroup.add(real);
+      (realMap.get(i) || realMap.set(i, []).get(i)).push(real);
+      invalidate();
+    });
+  }
+
+  // blocks: merged meshes per palette colour + wire edges; the wireframe
+  // overlay shows blocks and hull triangles uniformly; occupancy → 1 line mesh
+  const oedges = [];
+  for (const b of blocks) {
+    if (b.type !== 255) continue;                                       // occupancy mirror box
+    const s = new THREE.Box3(   // world-space (raw) occupancy box
+      new THREE.Vector3(occWorld(b, 'x') - CELL / 2, occWorld(b, 'y') - CELL / 2,
+                        occWorld(b, 'z') - CELL / 2),
+      new THREE.Vector3(occWorld(b, 'x') + b.size_x * CELL + CELL / 2,
+                        occWorld(b, 'y') + b.size_y * CELL + CELL / 2,
+                        occWorld(b, 'z') + b.size_z * CELL + CELL / 2));
+    const sz = s.getSize(new THREE.Vector3()), ct = s.getCenter(new THREE.Vector3());
+    const eg = new THREE.EdgesGeometry(box(sz.x, sz.y, sz.z));
+    eg.applyMatrix4(new THREE.Matrix4().makeTranslation(ct.x, ct.y, ct.z));
+    oedges.push(eg);
+  }
+  const blkEdges = addBlockMeshes(blockGroup, blocks, new THREE.Vector3());
+  if (oedges.length) occGroup.add(new THREE.LineSegments(mergeGeometries(oedges, false),
+    new THREE.LineBasicMaterial({ color: 0xff4444, transparent: true, opacity: 0.35 })));
+  buildHull();
+  setBlockWire(blkEdges);
+  buildPipes();
+  buildSubgrids();
+  // ground plane: never through the craft — blueprint y can dip below 0
+  // (the VKG-955 truck builds down to y=-1.5), so park BOTH the grid and the
+  // green ground plane just under the model's lowest point: the craft always
+  // stands ON the ground, nothing renders below it (user rule).
+  const gbb = new THREE.Box3().setFromObject(compGroup);
+  gbb.expandByObject(blockGroup); gbb.expandByObject(subGroup); gbb.expandByObject(hullGroup);
+  gbb.expandByObject(pipeGroup);
+  const gy = isFinite(gbb.min.y) ? Math.min(0, gbb.min.y - 0.02) : 0;
+  ground.position.y = gy;
+  grid.position.y = gy + 0.002;
+  applyHullOpacity();
+  invalidate();
+}
+
+import { fitHull } from './hullfit.js?v=142';
+
+// hull triangles: vertices live on the SAME lattice as blocks —
+// world_ax = frame·3 − 1.5 + v·0.25 (see hullfit.js). The skin is a closed
+// 0.05 m prism per triangle (the game's TRIANGLE_THICKNESS): colours[0] front,
+// colours[1] back, colours[2..4] the side walls along edges v0-v1, v1-v2,
+// v2-v0. Raw surface edges join the wireframe overlay (hullWire) alongside
+// block edges — blocks and triangles are treated uniformly there.
+// TODO(future): aerodynamics with full 360° velocity vector (crafts fly along
+// any axis — nose may be ±X/±Z; Y is always up), automatic search of the
+// aerodynamically stable flight direction at low/high speed, and an ambiguity
+// warning when the stability scan finds multiple stable directions.
+const hullP = { W: 12, px: 0.25, py: 0.25, pz: 0.25, Cx: -1.5, Cy: -1.5, Cz: -1.5 };
+const HULL_T = 0.025;                        // half-thickness of hull skin (m)
+let hullOpacity = Math.min(1, Math.max(0.1,
+  Number(new URLSearchParams(location.search).get('op')) || 1));   // ?op= preset
+// "hull" is blocks AND triangles (one skin, one slider): dim both groups,
+// plus the wireframe overlay (v0.149 user: "make hull opacity pertain to
+// blocks also" — the bright un-faded edges made the block dimming read as
+// "nothing happens").
+// Blocks are a closed skin — a view ray crosses TWO faces (enter+exit), so
+// linear alpha composites back toward opaque and the slider "does nothing"
+// (user report). Their alpha is sqrt-compensated: 1-(1-a)^2 == slider value.
+// Hull triangles are single 0.05 m prisms seen through one face: linear.
+function applyHullOpacity() {
+  const effB = hullOpacity >= 1 ? 1 : 1 - Math.sqrt(1 - hullOpacity);
+  for (const [grp, k] of [[blockGroup, effB], [hullGroup, hullOpacity],
+                          [hullWire, hullOpacity]])
+    grp.traverse(o => {
+      if (!o.isMesh && !o.isLineSegments) return;
+      for (const m of (Array.isArray(o.material) ? o.material : [o.material])) {
+        const base = m.userData.op0 ?? (m.userData.op0 = m.opacity);
+        m.opacity = base * k;
+        m.transparent = m.opacity < 1;
+        m.depthWrite = m.opacity >= 0.995;
+      }
+    });
+}
+function hullPt(t, ax, i) {
+  return (t[`v${i}_${ax}`] + hullP.W * t['frame_' + ax]) * hullP['p' + ax] + hullP['C' + ax];
+}
+// welded hull triangles: shared lattice slots merge into single points (like
+// the game's welded vertices); near-mirror vertex pairs average their |x| so
+// the skin renders symmetric, and near-axis points snap to x=0.
+function weldedTris() {
+  const tris = model.data.triangles.map(t => ({
+    c: [0, 1, 2, 3, 4].map(k => t.colors?.[k] ?? t.colors?.[0] ?? 0),
+    p: [0, 1, 2].map(i => [hullPt(t, 'x', i), hullPt(t, 'y', i), hullPt(t, 'z', i)]),
+  }));                                            // raw file coords (v0.180)
+  const K = p => `${Math.round(p[0] * 40)},${Math.round(p[1] * 40)},${Math.round(p[2] * 40)}`;
+  const map = new Map(), canon = [];
+  const idx = tris.map(t => t.p.map(p => {
+    const k = K(p);
+    if (!map.has(k)) { map.set(k, canon.length); canon.push(p); }
+    return map.get(k);
+  }));
+  const used = new Set();
+  const cand = (a, b) => canon[a][0] * canon[b][0] < 0 &&
+    Math.abs(canon[a][1] - canon[b][1]) < 0.12 && Math.abs(canon[a][2] - canon[b][2]) < 0.12 &&
+    Math.abs(canon[a][0] + canon[b][0]) < 0.3;
+  for (let a = 0; a < canon.length; a++) {
+    if (used.has(a)) continue;
+    let bj = -1, bd = 0.3;
+    for (let b = 0; b < canon.length; b++) {
+      if (b === a || used.has(b) || !cand(a, b)) continue;
+      const d = Math.abs(canon[a][0] + canon[b][0]);
+      if (d < bd) { bd = d; bj = b; }
+    }
+    if (bj >= 0) {
+      const m = (Math.abs(canon[a][0]) + Math.abs(canon[bj][0])) / 2;
+      canon[a] = [Math.sign(canon[a][0]) * m, ...canon[a].slice(1)];
+      canon[bj] = [Math.sign(canon[bj][0]) * m, ...canon[bj].slice(1)];
+      used.add(bj);
+    }
+  }
+  for (const p of canon) if (Math.abs(p[0]) < 0.15) p[0] = 0;
+  return tris.map((t, i) => ({ c: t.c, p: idx[i].map(j => canon[j]) }));
+}
+const hullWire = new THREE.Group(); hullWire.visible = false; scene.add(hullWire);   // wireframe OFF by default (user): checkbox derives visibility
+let blockWireObj = null;
+function setBlockWire(e) {
+  if (blockWireObj) { hullWire.remove(blockWireObj); blockWireObj.geometry.dispose(); blockWireObj = null; }
+  if (!e.pos.length) return;
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(e.pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(e.col, 3));
+  blockWireObj = new THREE.LineSegments(g,
+    new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.55 }));
+  hullWire.add(blockWireObj);
+}
+function buildHull() {
+  hullGroup.clear(); hullWire.clear();
+  const T = HULL_T, wpos = [];
+  const buckets = new Map();                 // matKey -> {pos:[], spec}
+  const add = (spec, pts) => {
+    let bk = buckets.get(matKey(spec));
+    if (!bk) buckets.set(matKey(spec), bk = { pos: [], spec });
+    for (const p of pts) bk.pos.push(p[0], p[1], p[2]);
+  };
+  for (const { c, p } of weldedTris()) {
+    const e1 = p[1].map((v, i) => v - p[0][i]), e2 = p[2].map((v, i) => v - p[0][i]);
+    // raw front normal of the winding (de-mirror v0.180): colours[0] paints
+    // the (v1−v0)×(v2−v0) side — the mirror chain drew its z-mirror image;
+    // this is the game's front normal, the same face the dev viewer paints
+    const n = [e1[1]*e2[2] - e1[2]*e2[1], e1[2]*e2[0] - e1[0]*e2[2], e1[0]*e2[1] - e1[1]*e2[0]];
+    const u = n.map(x => x / (Math.hypot(...n) || 1));
+    const F = p.map(v => v.map((x, i) => x + u[i] * T));      // front face (+normal)
+    const B = p.map(v => v.map((x, i) => x - u[i] * T));      // back face
+    add(palColor(c[0]), [F[0], F[1], F[2]]);                  // windings face +n raw
+    add(palColor(c[1]), [B[2], B[1], B[0]]);
+    for (let i = 0; i < 3; i++) {                             // side walls (prism)
+      const j = (i + 1) % 3;
+      add(palColor(c[2 + i]), [F[i], B[i], B[j], F[i], B[j], F[j]]);
+      wpos.push(...p[i], ...p[j]);                            // raw surface edges
+    }
+  }
+  for (const { pos, spec } of buckets.values()) {
+    const hg = new THREE.BufferGeometry();
+    hg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    hg.computeVertexNormals();
+    const s = { ...spec, op: spec.op * hullOpacity };
+    hullGroup.add(new THREE.Mesh(hg, new THREE.MeshStandardMaterial({
+      color: s.color, metalness: s.metal, roughness: s.rough,
+      envMapIntensity: s.metal > 0.5 ? 1.25 : 0,
+      transparent: s.op < 1, opacity: s.op, depthWrite: s.op >= 1,
+      side: THREE.DoubleSide, flatShading: true })));
+  }
+  const wg = new THREE.BufferGeometry();
+  wg.setAttribute('position', new THREE.Float32BufferAttribute(wpos, 3));
+  hullWire.add(new THREE.LineSegments(wg,
+    new THREE.LineBasicMaterial({ color: 0x7dffcf, transparent: true, opacity: 0.65 })));
+  if (blockWireObj) hullWire.add(blockWireObj);   // blocks ride the same overlay
+}
+
+// pipes: data.pipes segments are axis-aligned runs {start, dir(0..5=+x,-x,+y,-y,+z,-z),
+// length}; connectors drawn as markers at the a/b endpoints
+const DIRV = [[1,0,0],[0,1,0],[0,0,1],[-1,0,0],[0,-1,0],[0,0,-1]];
+// Recorded endpoints ARE the connection points: the game writes the cable tip
+// at the part's VISIBLE socket (ISW battery: cable tip at the front-face
+// socket, while the .ini adapters are the 2x2 terminal grid on the other face
+// — snapping nubs to adapter positions unseats them from the cables, v0.99
+// regression). Paths are drawn EXACTLY as recorded: no re-routing, no
+// per-segment shifts (axis-aligned joints break apart under taper shifts).
+const pipeEndsV = [];                             // [{ci, port, v}] — consumed by ?comptest
+function buildPipes() {
+  pipeGroup.clear();
+  adpEndpoint.clear();
+  pipeEndsV.length = 0;
+  pipePolys.length = 0;
+  clearSurges();                              // paths change on rebuild
+  const segs = [], endsA = [], endsB = [];
+  const sph = (pt) => {
+    const g = new THREE.SphereGeometry(0.035, 8, 6);
+    g.applyMatrix4(new THREE.Matrix4().makeTranslation(pt[0], pt[1], pt[2]));
+    return g;
+  };
+  const setEp = (ci, port, v) => {
+    let m = adpEndpoint.get(ci);
+    if (!m) adpEndpoint.set(ci, m = new Map());
+    m.set(port, v);
+  };
+  const portType = (ci, name) => {
+    const ad = MODEL.manifest?.[model.data.components[ci]?.type]?.adapters?.find(a => a.name === name);
+    return ad ? ad.type : /^(fluid|data|power|lowvoltage|highvoltage)/.exec(name)?.[0] ?? 'connector';
+  };
+  for (const p of model.data.pipes) {
+    // Every segment tube anchors at ITS OWN start (raw coords, v0.180): the
+    // game's cables are NOT a straight chain — joints have 0.04-0.14 m offsets
+    // between seg[i].start + dir·len and seg[i+1].start (rounded cap
+    // smoothing). The old chained cur += dir·len drifted every pipe and left
+    // the endpoint spheres far off the real ports (user's "green spheres
+    // don't match").
+    const aE = new THREE.Vector3(p.segments[0].start.x, p.segments[0].start.y, p.segments[0].start.z);
+    let cur = aE;
+    const pts = [];                           // surge polyline (a-end → b-end)
+    for (const s of p.segments) {
+      const d = DIRV[s.dir], L = s.length + 0.01;
+      const st = new THREE.Vector3(s.start.x, s.start.y, s.start.z);
+      cur = st.clone().add(new THREE.Vector3(d[0], d[1], d[2]).multiplyScalar(s.length));
+      pts.push(st.clone(), cur.clone());
+      const g = new THREE.BoxGeometry(d[0] ? L : 0.022, d[1] ? L : 0.022, d[2] ? L : 0.022);
+      g.applyMatrix4(new THREE.Matrix4().makeTranslation(
+        st.x + d[0] * L / 2, st.y + d[1] * L / 2, st.z + d[2] * L / 2));
+      segs.push(g);
+    }
+    pipePolys.push(pts);
+    endsA.push(sph(aE.toArray())); endsB.push(sph(cur.toArray()));
+    setEp(p.a_component, p.a_port, aE); setEp(p.b_component, p.b_port, cur);
+    pipeEndsV.push({ ci: p.a_component, port: p.a_port, v: aE },
+                   { ci: p.b_component, port: p.b_port, v: cur });
+  }
+  // cable-port nubs sit at the game's endpoint (dedup via the map; type from the
+  // manifest adapter so the colour matches the port family)
+  for (const [ci, m] of adpEndpoint)
+    for (const [port, v] of m)
+      adpQueue.push({ x: v.x, y: v.y, z: v.z, t: portType(ci, port), ci, lx: null });
+  const add = (geos, color, basic) => {
+    if (!geos.length) return;
+    const mg = mergeGeometries(geos, false);
+    if (basic) mg.computeVertexNormals();
+    pipeGroup.add(new THREE.Mesh(mg, basic
+      ? new THREE.MeshBasicMaterial({ color })
+      : new THREE.MeshStandardMaterial({ color, roughness: 0.9, envMapIntensity: 0 })));
+  };
+  add(segs, 0x222228, false);
+  add(endsA, 0x33ddff, true);
+  add(endsB, 0x33ff88, true);
+  scheduleAdpFlush();
+}
+// hull lattice is EXACT (hullfit.js: W=12, pitch=0.25, C=−1.5) and applied
+// silently per file in setModel — the manual fit button + offset sliders were
+// approximation-era leftovers, removed v0.149 (user: "remove the autofit
+// offsets… these things just complicate things").
+
+// ---------- loading / saving ----------
+let wsNames = null;
+function setModel(obj, srcName) {
+  model = obj;
+  symTwins = null; symTwinIndex();          // twin cache: per-model, at CLEAN positions
+  // workshop link (header): real numeric item ids get a ↗ to the Steam page
+  { const w = document.getElementById('wslink');
+    if (w) {
+      const id = String(model.workshop_item_id || '');
+      if (/^\d{6,}$/.test(id) && id !== '0000000000' && id !== '9000000001') {
+        w.href = 'https://steamcommunity.com/sharedfiles/filedetails/?id=' + id;
+        w.style.display = '';
+        const nm = () => w.title = (wsNames && wsNames[id] && wsNames[id].name)
+          || (model.data.alias || 'Workshop page for this craft');
+        nm();
+        if (!wsNames) fetch('workshop.json').then(r => r.ok ? r.json() : null)
+          .then(j => { if (j) { wsNames = j; nm(); } }).catch(() => {});
+      } else w.style.display = 'none';
+    } }
+  // rotation storage convention (see viewQuat): palette-bearing files are
+  // 2026-generation = conjugate; palette-less = raw Unity LH
+  LEGACY_Q = !(Array.isArray(model.data.colors) && model.data.colors.length > 0);
+  // block-only files omit these keys — normalise so consumers can iterate freely
+  model.data.triangles = model.data.triangles || [];
+  model.data.pipes = model.data.pipes || [];
+  model.data.colors = model.data.colors || [];   // some files ship no palette
+  // Display anchoring (user: the frame·3 anchor offset "makes zero sense"
+  // for viewing — it is WHERE THE BUILDER STOOD: Jimmy sits at x=1102 m).
+  // Shift the craft's minimal frame to the origin. The shift is a multiple
+  // of 3.0 m = 12 cells, so every cell-grid index stays an exact integer
+  // (model.cv); craft anchored at frame (0,0,0) — ISW and most of the
+  // corpus — get moff = 0 and are bit-identical to before. Saved files are
+  // untouched: this is a view-only transform, reports stay raw.
+  { const fs = model.data.components;
+    const fx0 = fs.length ? Math.min(...fs.map(c => c.frame_x | 0)) : 0;
+    const fy0 = fs.length ? Math.min(...fs.map(c => c.frame_y | 0)) : 0;
+    const fz0 = fs.length ? Math.min(...fs.map(c => c.frame_z | 0)) : 0;
+    model.moff = [-3 * fx0, -3 * fy0, -3 * fz0];
+    model.cv = [12 * fx0, 12 * fy0, 12 * fz0];   // raw cell = decode(p − moff) = decode(p) + 12f0
+    for (const o of [compGroup, blockGroup, hullGroup, hullWire, pipeGroup, adpGroup, subGroup, occGroup, worldM, surgeGroup])
+      o.position.set(model.moff[0], model.moff[1], model.moff[2]);
+    for (const k of ['x', 'y', 'z']) { model.box_min[k] += model.moff['xyz'.indexOf(k)]; model.box_max[k] += model.moff['xyz'.indexOf(k)]; } }
+  orig = model.data.components.map(c => ({
+    pos0: { ...c.position },
+    occ0: c.occupancies.map(o => ({ ...o })),
+  }));
+  selected = -1;
+  selectedSub = -1;
+  hideModeBox();
+  dirty = false;
+  document.body.classList.remove('dirty');
+  ensureOrigQ();
+  // generic hull-grid fit for this file (no per-blueprint constants)
+  const fit = fitHull(model);
+  if (fit) {
+    Object.assign(hullP, fit);
+    toast(`hull fit: grid W=${fit.W} · pitch (${fit.px.toFixed(4)}, ${fit.py.toFixed(4)}, ${fit.pz.toFixed(4)}) m `
+        + `· C (${fit.Cx.toFixed(2)}, ${fit.Cy.toFixed(2)}, ${fit.Cz.toFixed(2)}) · anchor ${fit.d.toFixed(1)}m`);
+  }
+  buildScene();
+  fitCameraToModel();          // frame the loaded craft (fog/far scaled)
+  buildList();
+  buildInspector();
+  calibrateCellMass();
+  buildAero();
+  buildFlight();
+  buildHullList();
+  buildMirrorPlane();           // striped x-symmetry sheet (v0.161, if symmetric)
+  // ?open=../testdata/<id>/ files have no workshop alias — show the source
+  // id/filename (was: literal 'undefined' in the header, user screenshot)
+  $('filestatus').textContent = `— ${model.data.alias || srcName || 'craft'} · ${model.data.components.length} components`;
+}
+
+async function fetchDefault() {
+  const open = new URLSearchParams(location.search).get('open');
+  const urls = open ? [open] : ['blueprint.json', '../testdata/3812927875/blueprint.json'];
+  for (const u of urls) {
+    let r = null;
+    try { r = await fetch(u, { cache: 'no-store' }); } catch { continue; }
+    if (!r.ok) continue;
+    setModel(await r.json(), u.split('/').slice(-2, -1)[0]);   // let scene-build bugs surface (window.onerror → title)
+    return;
+  }
+  toast('no blueprint.json — drop a file or use “Open file…”');
+}
+
+function serialize() {
+  const out = structuredClone(model);
+  const blocks = out.data.blocks;
+  // Type-255 mirror sync (v0.155): live Map index keyed by CURRENT cell+size
+  // replaces the per-occ full-block scan (was O(comps×occs×blocks) per save).
+  // Sequential semantics are EXACT: a block that matched an earlier occ sits
+  // at its NEW cell now, so a later occ keyed by that cell matches it again —
+  // live reindexing reproduces the scan-order behaviour of the old loop.
+  const mkey = (p) => `${p.pos_x},${p.pos_y},${p.pos_z}|`
+    + `${p.size_x},${p.size_y},${p.size_z}|${p.frame_x},${p.frame_y},${p.frame_z}`;
+  const mirrors = new Map();
+  for (const bl of blocks) if (bl.type === 255) {
+    const k = mkey(bl);
+    if (!mirrors.has(k)) mirrors.set(k, []);
+    mirrors.get(k).push(bl);
+  }
+  out.data.components.forEach((c, i) => {
+    const o = orig[i];
+    const cells = {
+      x: Math.round((c.position.x - o.pos0.x) / CELL),
+      y: Math.round((c.position.y - o.pos0.y) / CELL),
+      z: Math.round((c.position.z - o.pos0.z) / CELL),
+    };
+    c.occupancies.forEach((occ, k) => {
+      const b0 = o.occ0[k];
+      occ.pos_x = b0.pos_x + cells.x; occ.pos_y = b0.pos_y + cells.y; occ.pos_z = b0.pos_z + cells.z;
+      const lst = mirrors.get(mkey(b0));                     // keep type-255 mirror in sync
+      if (!lst) return;
+      for (const bl of lst.splice(0)) {                      // consume: block leaves old key
+        bl.pos_x += cells.x; bl.pos_y += cells.y; bl.pos_z += cells.z;
+        const nk = mkey(bl);
+        if (!mirrors.has(nk)) mirrors.set(nk, []);
+        mirrors.get(nk).push(bl);
+      }
+    });
+  });
+  return JSON.stringify(out);                                    // matches game compact format
+}
+
+async function save() {
+  if (!model) return;
+  const text = serialize();
+  if (fileHandle) {
+    const w = await fileHandle.createWritable();
+    await w.write(text); await w.close();
+    toast(`saved ${fileHandle.name}`);
+  } else {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+    a.download = 'blueprint.json'; a.click(); URL.revokeObjectURL(a.href);
+    toast('downloaded — overwrite blueprint.json (Chrome/Edge “Open file…” enables direct save)');
+  }
+  dirty = false;
+  document.body.classList.remove('dirty');
+}
+
+async function openFile() {
+  if (window.showOpenFilePicker) {
+    [fileHandle] = await window.showOpenFilePicker({
+      mode: 'readwrite', types: [{ description: 'JSON', accept: { 'application/json': ['.json'] } }] });
+    setModel(JSON.parse(await (await fileHandle.getFile()).text()), fileHandle.name.replace(/\.json$/i, ''));
+  } else {
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = '.json';
+    inp.onchange = async () => setModel(JSON.parse(await inp.files[0].text()), inp.files[0].name.replace(/\.json$/i, ''));
+    inp.click();
+  }
+}
+
+$('saveBtn').onclick = save;
+$('openBtn').onclick = openFile;
+addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); save(); }
+  if (e.target.tagName === 'INPUT') return;
+  if (e.key === 'Escape') { select(-1); selectSub(-1); hideModeBox(); }
+  // shortcuts drive the SAME checkboxes as the mouse (v0.147): the checkbox
+  // change handler owns exclusivity + visibility, so flip through it.
+  const kb = (k) => { const t = viewToggles[k]; if (t) { t.cb.checked = !t.cb.checked;
+                       t.cb.dispatchEvent(new Event('change')); } };
+  if (e.key === 'g') kb('grid');
+  if (e.key === 'o') kb('occ');
+  if (e.key === 'h') kb('hull');
+  if (e.key === 'f' && selected >= 0) {
+    controls.target.copy(compObjs[selected].position);
+  }
+});
+addEventListener('dragover', (e) => e.preventDefault());
+addEventListener('drop', async (e) => {
+  e.preventDefault();
+  const f = e.dataTransfer.files[0];
+  if (f) setModel(JSON.parse(await f.text()), f.name.replace(/\.json$/i, ''));
+});
+
+// ---------- selection & picking ----------
+const ray = new THREE.Raycaster(), ptr = new THREE.Vector2();
+// subgrid owner of a hit: nearest ancestor tagged by buildSubgrids
+function subOwner(o) { while (o) { if (o.userData.sub !== undefined) return o.userData.sub; o = o.parent; } return -1; }
+// The pick ray rules (v0.169, user: "normal component selection prioritizes
+// subgrids, making it impossible to select by looking at a component"):
+// a subgrid wins over a component ONLY when the ray lands on VISIBLE
+// subgrid content (its merged block/triangle meshes) closer than any
+// component. The invisible collider proxies of NESTED parts (flush hull
+// boxes, raycast-enabled so doors stay clickable) no longer jump component
+// clicks: they route a click to their subgrid only when the ray hit NO
+// component at all (a component hidden behind a hatch box keeps the
+// v0.153 rule — the subgrid behind a visible part loses, a part behind
+// an invisible box wins: you select what you can SEE).
+function pickRay() {
+  const hc = ray.intersectObjects(compGroup.children, true);
+  const hs = subGroup.visible ? ray.intersectObjects(subGroup.children, true) : [];
+  const dc = hc.length ? hc[0].distance : Infinity;
+  // WORLD visibility: a nested part's collider proxy is a group flagged
+  // invisible once its real model loads (the box MESH inside stays visible)
+  const vis = hs.filter((h) => {
+    for (let p = h.object; p; p = p.parent) if (!p.visible) return false;
+    return true;
+  });
+  if (vis.length && vis[0].distance < dc) return { ci: -1, sub: subOwner(vis[0].object) };
+  if (hc.length) return { ci: hc[0].object.userData.ci, sub: -1 };
+  if (hs.length) return { ci: -1, sub: subOwner(hs[0].object) };
+  return { ci: -1, sub: -1 };
+}
+function pick(ev) {
+  const r = renderer.domElement.getBoundingClientRect();
+  ptr.set(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(ptr, camera);
+  return pickRay();
+}
+// No hover picking (PERF.md #1, user): pointermove fired a recursive
+// raycast over every component mesh — during orbit drags too — costing
+// 1-10 ms per event on component-heavy crafts. Picking now happens on a
+// DELIBERATE press only: one raycast at pointerdown (the moment a drag
+// starts), reused by the click test in pointerup.
+// Ring presses need NO pick special-case: a ring DRAG moves the pointer, so
+// the deliberate-press test below never selects on it; a zero-move press is a
+// real click — the trackball applies zero rotation, the click selects.
+let downPick = { ci: -1, sub: -1 };
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  renderer.domElement.dataset.dx = e.clientX; renderer.domElement.dataset.dy = e.clientY;
+  downPick = pick(e);                            // the ONLY scene raycast loop
+});
+renderer.domElement.addEventListener('pointerup', (e) => {
+  const dx = Math.abs(e.clientX - (renderer.domElement.dataset.dx | 0));
+  const dy = Math.abs(e.clientY - (renderer.domElement.dataset.dy | 0));
+  if (dx < 4 && dy < 4) {                        // canvas click = the ONLY fly trigger
+    if (downPick.sub >= 0) selectSub(downPick.sub);
+    else select(downPick.ci, true);
+    // the mode widget is PROJECTION-TIED to the picked component (v0.156);
+    // v0.170: subgrids get NO gizmo/mode widget — they ride their masters'
+    // joints (user: "i can select and move or rotate a subgrid. that is
+    // WRONG"), the info panel opens on the click itself
+    if (downPick.ci >= 0)
+      showModeBox(e.clientX, e.clientY, compObjs[downPick.ci]);
+    else hideModeBox();
+  }
+});
+
+function select(i, doFly) {
+  selected = i;
+  selectedSub = -1;
+  invalidate();
+  buildInspector();
+  buildList({ reveal: true });
+  paintHighlights();
+  syncGizmo();               // gizmo follows the selection (mode permitting)
+  startSurges(i);              // cable power-surge: fires on every selection
+  // v0.169: an OPEN mode widget rides the new selection (it pops at the
+  // click point on canvas picks; list/menu selections kept it glued to the
+  // PREVIOUS part — user: "manipulation widget not correctly positioned")
+  if (modeBox.classList.contains('vis'))
+    showModeBox(0, 0, compObjs?.[i] || null);
+  if (doFly) flyTo(i);         // camera fly is manual-only (canvas click / list dblclick)
+}
+// subgrid selection: INFO-ONLY (v0.170) — the inspector swaps to the
+// subgrid panel with mount + pivot rotation/offset; subgrids have no
+// gizmo and no mode widget (user: "i can select and move or rotate a
+// subgrid. that is WRONG") — they move only kinematically, driven by
+// their masters' joint state (sliders/presets on the master parts).
+function selectSub(i) {
+  selectedSub = i;
+  selected = -1;
+  invalidate();
+  buildInspector();
+  buildList({ reveal: true });
+  paintHighlights();
+  syncGizmo();
+  hideModeBox();
+}
+
+// ---------- rotate gizmo (Blender-style, v0.150; order fix v0.151) ----------
+// Rings on the selected part; the big outer ring is a free trackball, Shift
+// snaps to 15°. WYSIWYG ORDER semantics live in the PURE gizmoSpinRing/
+// gizmoSpinEye model below (space='local' = intrinsic spin about each ring's
+// currently-drawn axis). v0.150 shipped world space — fixed view axes
+// spinning while the rings visibly moved with the part: after a 90° pitch
+// the next ring no longer spun the axis it showed (user: "I expect it to
+// rotate according to what is shown"). Written
+// back through the exact inverse of the display chain, so saved files stay
+// byte-consistent for BOTH quaternion conventions (rawFromView also strips
+// the wheel-droop / junction / button display poses).
+// THE PROXY IS MANDATORY: TransformControls writes the ATTACHED object's
+// quaternion raw, while components must be written through our pipeline
+// (applyGizmoOrientation → dirty flag, realMap mirrors, syncAdapters, and
+// rawFromView for the file quaternion incl. droop/junction display-pose
+// undo). Since the de-mirror (v0.180) component roots carry no negative
+// scale, so the proxy pose is the plain component quaternion — the removed
+// P·Ry(π) frame trick only existed because decompose() absorbed the old
+// scale.z=−1 root by negating sx. The scene-root proxy also keeps the
+// component transform hierarchy out of the control's own world math. Pinned
+// by ?gizmatest (order algebra + live writeback) and selftest `gizmo=true`.
+let gizmoOn = true;
+// ---------- gizmo rotation model (PURE — validated by ?gizmatest) ----------
+// WYSIWYG order-of-operations, Blender-style: dragging ring k by θ spins the
+// part about the axis that ring is DRAWN ALONG right now — the part's own
+// axis — i.e. the INTRINSIC update  q ← q·R(e_k, θ), which equals the
+// world-space premultiply R(q·e_k, θ)·q through the currently-visible axis.
+// Successive drags compose in drag order: after a 90° pitch, the ring that
+// now reads as "roll" truly spins the apparent axis (world-space mode, which
+// we had first, spins old view axes while the rings visibly moved — the part
+// then never turns the way the gesture shows, user report v0.150).
+// The big trackball ring instead spins about the camera eye axis (extrinsic,
+// inherently screen-consistent). TransformControls space='local' implements
+// exactly these two rules; the model functions below are the contract the
+// gizmo tests assert, independent of any UI.
+const _gUnit = { x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), z: new THREE.Vector3(0, 0, 1) };
+const gizmoSpinRing = (q, k, ang) =>
+  q.clone().multiply(new THREE.Quaternion().setFromAxisAngle(_gUnit[k], ang)).normalize();
+const gizmoSpinEye = (q, eye, ang) =>
+  new THREE.Quaternion().setFromAxisAngle(eye.clone().normalize(), ang).multiply(q).normalize();
+const gizmoCol = (q, k) => _gUnit[k].clone().applyQuaternion(q);   // visible ring axis
+const gizmoShot = new URLSearchParams(location.search).get('shot'); // render stop for screenshots
+const gizmoProxy = new THREE.Object3D(); gizmoProxy.name = 'rotProxy';
+scene.add(gizmoProxy);
+const tctl = new TransformControls(camera, renderer.domElement);
+tctl.setMode('rotate');
+tctl.space = 'local';                 // ring = part axis (see model above)
+tctl.setSize(0.8);
+// Ring drag CONTINUITY (v0.156, user: "turn it like a knob, it suddenly pops
+// over, finding the angle closest to the original"): TransformControls draws
+// each ring move as startQuat·R(axis, signed-angle(pointer start → pointer
+// now)) — a plain atan2, so sweeping the knob PAST 180° wraps back toward
+// the start pose. We unwrap the raw relative angle across events (add the
+// wrapped per-event delta to a continuous accumulator) and re-apply the
+// accumulated spin; the intrinsic RING algebra itself (gizmoSpinRing) is
+// unchanged, the unwrap only removes the ±π wrap. Pure part = gizmoUnwrap,
+// pinned by ?gizmatest.
+const _knobQ = new THREE.Quaternion(), _knobA = new THREE.Vector3();
+let knobQ0 = new THREE.Quaternion(), knobAxis = null, knobRaw = 0, knobAcc = 0;
+function gizmoUnwrap(raw, prevRaw, accum) {
+  let d = raw - prevRaw;
+  d = Math.atan2(Math.sin(d), Math.cos(d));        // wrap into (−π, π]
+  return accum + d;
+}
+tctl.addEventListener('objectChange', () => {
+  if (tctl.mode === 'translate') return applyGizmoPosition(gizmoProxy.position);
+  const P = gizmoProxy.quaternion;
+  _knobQ.copy(knobQ0).invert().multiply(P);         // raw relative spin q0⁻¹·P
+  const len = Math.hypot(_knobQ.x, _knobQ.y, _knobQ.z);
+  if (len < 1e-4) return applyGizmoOrientation(P);  // snap
+  if (!knobAxis) {                                 // first real spin: the raw
+    knobAxis = _knobA.set(_knobQ.x, _knobQ.y, _knobQ.z).normalize();   // axis IS the ring axis
+    knobRaw = 2 * Math.atan2(len, _knobQ.w); knobAcc = knobRaw;
+    return applyGizmoOrientation(P);
+  }
+  const s = _knobA.x * knobAxis.x + _knobA.y * knobAxis.y + _knobA.z * knobAxis.z;
+  const raw = 2 * Math.atan2(len * Math.sign(s), _knobQ.w);
+  knobAcc = gizmoUnwrap(raw, knobRaw, knobAcc); knobRaw = raw;
+  applyGizmoOrientation(_knobQ.copy(knobQ0).multiply(
+    new THREE.Quaternion().setFromAxisAngle(knobAxis, knobAcc)));
+});
+tctl.addEventListener('mouseDown', () => {
+  controls.enabled = false; hideModeBox();
+  knobQ0.copy(tctl.object ? tctl.object.quaternion : gizmoProxy.quaternion);
+  knobAxis = null; knobRaw = knobAcc = 0;
+  // v0.167: capture the ROTATION PIVOTS once per gesture (mouseUp clears
+  // them). The self pivot is the GIZMO CENTRE = the part's visible bbox
+  // centre (where the rings are drawn); every aligned twin gets its OWN
+  // bbox centre — the mirror twin of a spin about the self centre is a
+  // spin about the mirrored centre, and the mirrored self-centre IS the
+  // twin's centre (positions are mirrored, geometry identical/mirrored).
+  gizPivotL = null; symRotPiv.clear();
+  const go = compObjs?.[selected];
+  if (go && tctl.mode === 'rotate') {
+    scene.updateMatrixWorld(true);
+    gizPivotL = gizmoCentre(selected) ?? go.position.clone().add(_gizOff);
+    for (const [j] of symAllowed(selected)) {
+      const oj = compObjs[j];
+      if (!oj) continue;
+      const c = gizmoCentre(j);
+      if (c) symRotPiv.set(j, c);
+    }
+  }
+});
+tctl.addEventListener('mouseUp', () => {
+  controls.enabled = true;
+  gizPivotL = null; symRotPiv.clear();   // pivots are per-gesture (v0.167)
+  buildInspector();                    // rebases the euler sliders on the new pose
+  paintHighlights();
+  invalidate();
+});
+scene.add(tctl.getHelper());
+// v0.165 ring hover truth (user: "the thicker selection handle for
+// rotation STILL DOES NOT MATCH"): hover picking switches from TGC's
+// picker raycast to a true ray↔ring-CIRCLE distance on the VISIBLE
+// semicircle — camera-side wins at crossings. The v0.162/163 picker
+// system was unfixable at its root: r169's updateGizmoResolution runs
+// handle.rotation.set(0,0,0) on the PICKER meshes too, so all three ring
+// pickers (raw toruses positioned by mesh rotation) collapse into ONE
+// coincident XY-plane torus — every ring hover raycast-hits ALL of them
+// and the first-surface sort answers a DIFFERENT axis than the ring
+// under the cursor (the v0.162 "wrong axis becomes yellow and thick",
+// v0.163's picker reshape band landed 10 cm inside the visible rings).
+const rayRingVis = {};                       // 'X'|'Y'|'Z' -> visible ring mesh
+const _rgO = new THREE.Vector3(), _rgD = new THREE.Vector3(),
+  _rgP = new THREE.Vector3(), _rgQ = new THREE.Quaternion(),
+  _rgV = new THREE.Vector3();
+// r169's baked ring planes + arc parametrization, in each mesh's LOCAL
+// frame (geometry fully baked: CircleGeometry Rx(90)·Ry(90) + per-axis
+// mesh rotation folded in by setupGizmo):
+//   X ring: (0, r cosθ,  r sinθ) → normal x̂,  θ = atan2(z, y)
+//   Y ring: (r cosθ, 0,  r sinθ) → normal ŷ,  θ = atan2(z, x)
+//   Z ring: (r sinθ, r cosθ, 0) → normal ẑ,  θ = atan2(x, y)
+// RING_PLANE[name] = [normalAxis, [cosArgAxis, sinArgAxis]].
+const RING_PLANE = { X: [0, [1, 2]], Y: [1, [0, 2]], Z: [2, [1, 0]] };
+function ringPickerRaycast(raycaster, intersects) {
+  const vis = rayRingVis[this.name];
+  if (!vis) return;
+  vis.updateWorldMatrix(true, false);
+  const r = vis.geometry.parameters.radius;
+  const arc = vis.geometry.parameters.arc ?? Math.PI * 2;
+  const [ax, [ia, ib]] = RING_PLANE[this.name];
+  const o = _rgO.copy(raycaster.ray.origin); vis.worldToLocal(o);
+  const d = _rgD.copy(raycaster.ray.direction).applyQuaternion(
+    _rgQ.copy(vis.getWorldQuaternion(_rgQ)).invert());   // unit ✓
+  // TGC's updateGizmoResolution rescales every handle by the camera
+  // distance EVERY frame — worldToLocal divides the origin by that scale,
+  // so the direction must be divided too, else the local ray is skewed.
+  d.divideScalar(vis.getWorldScale(_rgV).x || 1);
+  // circle: {|p| = r, p·n̂ = 0} about the LOCAL ORIGIN (the bake is
+  // origin-centred: a semicircle's bbox centre is NOT the ring centre)
+  const R = r + 0.3;
+  const a = d.dot(d), b = 2 * o.dot(d), c = o.lengthSq() - R * R;
+  const disc = b * b - 4 * a * c;
+  if (disc <= 0) return;                                  // passes > 0.3 away
+  const sq = Math.sqrt(disc);
+  let lo = (-b - sq) / (2 * a), hi = (-b + sq) / (2 * a);
+  const dist = (t) => { _rgP.copy(d).multiplyScalar(t).add(o);
+    const dn = _rgP.getComponent(ax);
+    return Math.hypot(Math.sqrt(Math.max(0,
+      _rgP.getComponent(ia) ** 2 + _rgP.getComponent(ib) ** 2)) - r,
+      Math.abs(dn)); };
+  let tb = lo, dm = Infinity;
+  for (let k = 0; k <= 48; k++) {
+    const t = lo + (hi - lo) * k / 48, dd = dist(t);
+    if (dd < dm) { dm = dd; tb = t; } }
+  lo = tb - (hi - lo) / 48; hi = tb + (hi - lo) / 48;
+  for (let k = 0; k < 24; k++) { const m1 = lo + (hi - lo) / 3,
+    m2 = hi - (hi - lo) / 3; if (dist(m1) < dist(m2)) hi = m2; else lo = m1; }
+  tb = (lo + hi) / 2;
+  if (dist(tb) > 0.06) return;                            // miss the ring
+  _rgP.copy(d).multiplyScalar(tb).add(o);
+  const th = Math.atan2(_rgP.getComponent(ib), _rgP.getComponent(ia));
+  if (th < -0.12 || th > arc + 0.12) return;              // drawn semicircle only
+  const wp = vis.localToWorld(_rgP.clone());
+  intersects.push({ distance: raycaster.ray.origin.distanceTo(wp),
+    point: wp, object: this, face: null, faceIndex: null, uv: null });
+}
+// Rotate-gizmo ring style (v0.160/161/162, user: "the axis for rotation
+// selected should be thicker when I move it"; v0.162: "the WRONG axis
+// rotater becomes yellow and thick, KEEP THE COLOR"): TransformControls'
+// highlight writes colour/opacity to the MATERIALS of the raycast hit
+// mesh — and the hit-toruses of ALL axes share ONE material (as do the
+// full-track rings), so hovering one ring paints the shared materials
+// yellow/opacity-1 everywhere, and at ring crossings the raycaster picks
+// the nearest hit-torus, i.e. a DIFFERENT ring's visual. Counter: every
+// rendered frame restore _color/_opacity on EVERY handle mesh of EVERY
+// gizmo group from TGC's own caches (the invisible hit-toruses included
+// — v0.161 restored only the visible rings, so the flash survived), and
+// swap ONLY the active axis's visible rings to the fat tube — colours
+// stay theirs (no opacity forcing: v0.161's `on ? 1 : ...` set the
+// shared track material to 1 = all rings blazed yellow).
+tctl.getHelper().traverse(o => {
+  if (!o.isMesh) return;
+  const g0 = o.geometry;
+  if (g0?.type === 'RingGeometry' || g0?.type === 'TorusGeometry') {
+    o.userData.ringThin = g0;
+    // VISIBLE rings only: the shared hit-torus material rides opacity
+    // 0.15 (v0.162 probe) — thickening THOSE would shrink the raycast
+    // hit area (fat geometry replaces the 0.1-tube pick torus)
+    o.userData.thickable = o.material.opacity >= 0.2;
+    // v0.163 (user: "a large yellow circle around it that I dont know
+    // which angle it is"): TGC's axis-less visible TRACKBALL rings —
+    // 'E' (full yellow circle at 25%) + 'XYZE' (grey). Hide the visuals
+    // (styleGizmo forces opacity 0 every frame); the pick meshes stay.
+    // Guard on opacity >= 0.2 so the E PICK torus (matInvisible 0.15,
+    // shared across all picks) is never touched — TGC lazily caches
+    // matInvisible._opacity from its live opacity on its FIRST
+    // updateMatrixWorld, and pre-zeroing it poisons that cache.
+    if ((o.name === 'E' || o.name === 'XYZE') && o.material.opacity >= 0.2)
+      o.userData.trackHide = true;
+    // THE root cause of the v0.162 "the WRONG axis rotater becomes yellow
+    // and thick": the trackball PICK torus (radius 0.75, tube 0.1) is the
+    // closest raycast hit for EVERY screen point inside 0.85 of the
+    // gizmo, so hovering any ring sets axis='E' — the E ring blazed
+    // yellow (opacity 1) + fattened, and the intended rings never did.
+    // Shrink it to a fingertip sphere: ring hovers pick the rings,
+    // centre hovers keep the trackball.
+    if (o.name === 'E' && g0.type === 'TorusGeometry' && g0.parameters.tube > 0.05) {
+      o.geometry.dispose();
+      o.geometry = new THREE.SphereGeometry(0.16, 12, 8);
+    }
+    // v0.165 (user: the fat ring "STILL DOES NOT MATCH" the normal one):
+    // the picker toruses no longer decide hover at all — ringPickerRaycast
+    // (below) replaces Mesh.raycast with a true ray↔ring-CIRCLE distance
+    // test on the VISIBLE semicircle. The v0.163 reshape (r 0.42) put the
+    // pick band 0.35..0.49, i.e. 10 cm INSIDE the visible rings (r 0.5 —
+    // the r150 value was assumed), and the first-surface raycast entered
+    // a crossing ring's solid slab before the aimed ring's: the fat ring
+    // blazed on a different ring than the one under the cursor. Geometry
+    // kept (invisible); the mesh transform maps it onto the ring planes.
+    if (['X', 'Y', 'Z'].includes(o.name) && g0.type === 'TorusGeometry'
+        && o.material.opacity < 0.2) o.raycast = ringPickerRaycast;
+    // the XYZE trackball PICK sphere (r 0.25) covers the far ring
+    // crossings' centre-passing rays: shrink it to the E sphere's size so
+    // ring hovers pick the rings (centre drags keep the trackball)
+    if (o.name === 'XYZE' && g0.type === 'SphereGeometry') {
+      o.geometry.dispose();
+      o.geometry = new THREE.SphereGeometry(0.16, 10, 8);
+    }
+    // FAT rings: CLONE-and-fatten the baked geometry (setupGizmo bakes the
+    // per-mesh rotation into it, so a raw+bake reconstruction lands in a
+    // neighbour ring's plane for Y/Z). Grow the tube IN ITS OWN PLANE:
+    // per vertex, snap onto the ring circle (center = LOCAL ORIGIN, radius
+    // preserved) and scale the tube offset — fanning about the bbox centre
+    // would shift the fat semicircle, since a semicircle's bbox centre is
+    // NOT the ring centre.
+    let fatR;
+    if (g0.type === 'TorusGeometry') {
+      fatR = g0.clone(); fatR.computeBoundingBox();
+      const bb = fatR.boundingBox, sz = bb.getSize(new THREE.Vector3());
+      const ax = sz.x <= sz.y && sz.x <= sz.z ? 0 : sz.y <= sz.z ? 1 : 2;
+      const nrm = new THREE.Vector3(ax === 0 ? 1 : 0, ax === 1 ? 1 : 0,
+        ax === 2 ? 1 : 0);
+      const r = g0.parameters.radius, f = 0.035 / g0.parameters.tube;
+      const pos = fatR.attributes.position, v = new THREE.Vector3(),
+        u = new THREE.Vector3(), w = new THREE.Vector3();
+      for (let k = 0; k < pos.count; k++) {
+        v.set(pos.getX(k), pos.getY(k), pos.getZ(k));
+        u.copy(v).addScaledVector(nrm, -v.dot(nrm));
+        const rho = Math.max(u.length(), 1e-6);
+        u.multiplyScalar(r / rho);                      // onto the circle
+        w.copy(v).sub(u).multiplyScalar(f).add(u);      // fat tube
+        pos.setXYZ(k, w.x, w.y, w.z); }
+      fatR.boundingBox = null;
+    } else fatR = new THREE.RingGeometry(0.28, 0.36, 64);
+    o.userData.ringFat = fatR;
+    if (o.userData.thickable) rayRingVis[o.name] = o;
+    return;
+  }
+  // v0.164/165 (user: "they dont light up for the entire thing … make the
+  // thicker selected version match location of the normal handles"): the
+  // fattened hover state covers the WHOLE handle of EVERY mode. r169's
+  // setupGizmo BAKES every per-mesh position/rotation/scale INTO the
+  // geometry (tempGeometry.applyMatrix4(object.matrix), mesh transform
+  // reset) — a fat variant built from raw constructor params lands in the
+  // WRONG place (the v0.164 "location does not match"). So the fat
+  // variants CLONE the baked geometry and fatten it in place: cylinders
+  // (arrow shafts/tips, scale sticks) grow radially about their own axis
+  // (axis component preserved), boxes (drag planes, scale cubes) and the
+  // centre octahedron grow uniformly about their centre.
+  if (o.material.opacity < 0.2) return;                          // pick meshes
+  const p = g0?.parameters;
+  let fat = null;
+  if (g0?.type === 'CylinderGeometry' && p) {
+    fat = g0.clone(); fat.computeBoundingBox();
+    const bb = fat.boundingBox, c = bb.getCenter(new THREE.Vector3()),
+      sz = bb.getSize(new THREE.Vector3());
+    const ax = sz.x >= sz.y && sz.x >= sz.z ? 0 : sz.y >= sz.z ? 1 : 2;
+    const rad = Math.max(sz[ax === 0 ? 'y' : ax === 1 ? 'x' : 'x'],
+      sz[ax === 0 ? 'z' : ax === 1 ? 'z' : 'y']) / 2;
+    const f = Math.min(60, 0.045 / Math.max(rad, 1e-4));
+    const pos = fat.attributes.position, v = new THREE.Vector3();
+    for (let k = 0; k < pos.count; k++) {
+      v.set(pos.getX(k), pos.getY(k), pos.getZ(k)).sub(c);
+      const al = v.getComponent(ax);
+      v.setComponent(ax, 0).multiplyScalar(f).setComponent(ax, al);
+      pos.setXYZ(k, v.x + c.x, v.y + c.y, v.z + c.z); }
+    fat.boundingBox = null;
+  } else if (g0?.type === 'BoxGeometry' && p) {
+    fat = g0.clone(); fat.computeBoundingBox();
+    const c = fat.boundingBox.getCenter(new THREE.Vector3());
+    fat.translate(-c.x, -c.y, -c.z); fat.scale(2.4, 2.4, 2.4);
+    fat.translate(c.x, c.y, c.z); fat.boundingBox = null;
+  } else if (g0?.type === 'OctahedronGeometry' && p) {
+    fat = g0.clone(); fat.scale(2, 2, 2);
+  }
+  if (fat) { o.userData.ringThin = g0; o.userData.ringFat = fat;
+    o.userData.thickable = true; }
+});
+function styleGizmo() {
+  const G = tctl.getHelper().children.find(o => o.isTransformControlsGizmo);
+  if (!G) return;
+  // TGC's highlight writes colour/opacity on the MATERIAL of the raycast
+  // hit-mesh — and those hit-meshes (this build's TransformControlsGizmo
+  // UNNAMED children: an invisible torus/sphere per axis) share ONE
+  // material across all axes, as do the full-track rings: highlighting
+  // anything flashes EVERYTHING. Restore every handle material in the
+  // whole helper subtree from TGC's own _color/_opacity caches, every
+  // rendered frame (paintHighlights), then fat-swap ONLY the active
+  // axis's VISIBLE rings (userData.thickable).
+  G.traverse(m => {
+    if (!m.isMesh || !m.material) return;
+    if (m.material._color) m.material.color.copy(m.material._color);
+    if (m.material._opacity !== undefined) m.material.opacity = m.material._opacity;
+    if (m.userData.trackHide) m.material.opacity = 0;    // axis-less rings stay hidden
+  });
+  for (const grp of ['translate', 'rotate', 'scale'])
+    for (const m of G.gizmo[grp].children)
+      if (m.userData.thickable)
+        m.geometry = m.name === tctl.axis ? m.userData.ringFat : m.userData.ringThin;
+}
+tctl.addEventListener('change', () => invalidate());   // hover repaints the style
+// (styleGizmo + the hover invalidation listener live with the ring-style
+// block above)
+// THE reason v0.162's restore did not reach the screen: TransformControls
+// applies its hover/drag yellow flash inside the GIZMO'S OWN
+// updateMatrixWorld (runs on EVERY scene matrix update, i.e. every render)
+// — paintHighlights' restore runs BEFORE that write in the frame, so the
+// flash always drew, and the suite (which simulated the material writes
+// then restored) stayed blind. Chain styleGizmo onto the gizmo's
+// updateMatrixWorld: the restore + fat-swap now runs immediately AFTER
+// TGC writes, in the same pass, before anything is drawn.
+const _tgz = tctl.getHelper().children.find(o => o.isTransformControlsGizmo);
+const _tgzUpd = Object.getPrototypeOf(_tgz).updateMatrixWorld;
+_tgz.updateMatrixWorld = function (force) { _tgzUpd.call(this, force); styleGizmo(); };
+const _gq = new THREE.Quaternion(), _gcen = new THREE.Vector3(), _gow = new THREE.Vector3();
+// v0.163 (user: "And then I select it is in a different spot"): the gizmo
+// rides the part's VISIBLE CENTRE (bbox centre — the same anchor the mode
+// widget, selection box and click point use), not its pivot: parts like
+// dashboards pivot at a corner, so a pivot-placed gizmo lands off the
+// part. The quaternion writeback is pivot-agnostic; the MOVE writeback
+// subtracts the stored centre→origin offset, so drag deltas map exactly.
+const _gizOff = new THREE.Vector3();
+let gizPivotL = null;                  // v0.167: self rotation pivot (compGroup
+const symRotPiv = new Map();           // frame), captured at gizmo mouseDown
+// The gizmo/rotation centre = bbox centre of the VISIBLE geometry: with
+// real models on, compObjs[idx] is the hidden proxy (origin-centred box)
+// while the real game geometry renders offset from the origin (the beacon
+// mast, MiniComputer 3 m off) — pivot over the union of proxy + real
+// siblings = the part's visual centre (user: "the pivot locations dont
+// seem to be properly positioned, causing parts to rotate/orbit around
+// the wrong position"). Returned in the compGroup frame.
+function gizmoCentre (idx) {
+  const o = compObjs?.[idx];
+  if (!o) return null;
+  const bb = new THREE.Box3().setFromObject(o);
+  for (const r of realMap.get(idx) || []) bb.expandByObject(r);
+  return isFinite(bb.min.x)
+    ? bb.getCenter(new THREE.Vector3()).sub(compGroup.position) : null;
+}
+function syncGizmoPose() {
+  const o = compObjs?.[selected];
+  if (!o) return;
+  scene.updateMatrixWorld(true);
+  const bb = new THREE.Box3().setFromObject(o);
+  for (const r of realMap.get(selected) || []) bb.expandByObject(r);
+  if (isFinite(bb.min.x)) gizmoProxy.position.copy(bb.getCenter(_gcen));
+  else gizmoProxy.position.setFromMatrixPosition(o.matrixWorld);
+  _gizOff.copy(gizmoProxy.position).sub(o.getWorldPosition(_gow));
+  if (!tctl.dragging) gizmoProxy.quaternion.copy(o.getWorldQuaternion(_gq));
+}
+function syncGizmo() {
+  // v0.170: the gizmo is COMPONENT-ONLY — subgrids ride their masters'
+  // joints, never a free gizmo (user: "i can select and move or rotate a
+  // subgrid. that is WRONG").
+  const o = selected >= 0 ? compObjs?.[selected] : null;
+  if (gizmoOn && o && (gizmoMode === 'move' || gizmoMode === 'rotate')) {
+    syncGizmoPose();
+    tctl.attach(gizmoProxy);
+    tctl.space = gizmoMode === 'move' ? 'world' : 'local';   // v0.158 per-mode
+  } else tctl.detach();
+}
+// ---------- gizmo MODE widget (v0.153: context switch at the click point) ----
+// A canvas click on a widget pops a 4-button switch where you clicked:
+// ⊘ none / ✥ move (world position) / ⟳ rotate / ℹ info-only. Move and rotate
+// share the TransformControls proxy; last choice persists. The old
+// "rotate gizmo on selection" checkbox stays the master enable.
+let gizmoMode = localStorage.getItem('archean-gizmo-mode') || 'rotate';
+const modeBox = document.createElement('div');
+modeBox.id = 'modebox';
+for (const [m, ic, ti] of [['none', '⊘', 'no gizmo'],
+                           ['move', '✥', 'move — world axes'],
+                           ['rotate', '⟳', 'rotate'], ['info', 'ℹ', 'info only (no gizmo)'],
+                           ['sym', '⇄', 'mirror symmetry']]) {
+  const b = document.createElement('button');
+  b.textContent = ic; b.title = ti; b.dataset.m = m;
+  b.addEventListener('pointerdown', (e) => e.stopPropagation());
+  b.onclick = (e) => {
+    e.stopPropagation();
+    if (m === 'sym') {
+      symOn = !symOn;
+      localStorage.setItem('archean-sym', symOn ? '1' : '0');
+      paintModeBox(); invalidate();
+    } else setGizmoMode(m);
+  };
+  modeBox.appendChild(b);
+}
+document.body.appendChild(modeBox);
+function paintModeBox() {
+  for (const b of modeBox.children) {
+    if (b.dataset.m === 'sym') {                 // ⇄ mirror-moves switch (v0.161)
+      const t = selected >= 0 ? selected : selectedSub;
+      const has = t >= 0 && !!symTwinIndex().get(t)?.length;
+      const eff = symOn && has && symAllowed(t).length > 0;
+      b.classList.toggle('on', eff);
+      b.classList.toggle('off', !eff);           // strikethrough: off (user)
+      b.title = !has ? 'mirror moves: this part has no twin'
+        : !symOn ? 'mirror moves: OFF (clicked off) — click to enable'
+        : symAllowed(t).length ? 'mirror moves: ON — twins follow the move'
+        : 'mirror moves: AUTO-OFF — this pair is no longer mirrored (it was moved apart)';
+      continue;
+    }
+    b.classList.toggle('on', b.dataset.m === gizmoMode);
+  }
+}
+// v0.156 (user): the widget is PROJECTION-tied to the component, not the raw
+// click pixel — it pops at the part's projected bbox centre and keeps tracking
+// it while open (camera orbits, live edits). Falls back to the given pixel
+// when no anchor is passed.
+const _mbV = new THREE.Vector3();
+let modeAnchor = null;
+function placeModeBox(x, y) {
+  // v0.157: the widget got bigger — clamp on its MEASURED size, not the
+  // old 13px-button constants (it ran off the right screen edge)
+  const w = modeBox.offsetWidth || 118, h = modeBox.offsetHeight || 44;
+  modeBox.style.left = Math.min(x + 10, innerWidth - w - 6) + 'px';
+  modeBox.style.top = Math.min(y + 8, innerHeight - h - 6) + 'px';
+}
+function projectModeAnchor() {
+  const bb = new THREE.Box3().setFromObject(modeAnchor);
+  if (bb.isEmpty()) return;
+  bb.getCenter(_mbV).project(camera);
+  const r = renderer.domElement.getBoundingClientRect();
+  placeModeBox(r.left + (_mbV.x * .5 + .5) * r.width, r.top + (-_mbV.y * .5 + .5) * r.height);
+}
+function showModeBox(x, y, anchor = null) {
+  modeAnchor = anchor;
+  modeBox.classList.add('vis');            // visible FIRST: placeModeBox measures it
+  if (anchor) projectModeAnchor(); else placeModeBox(x, y);
+  paintModeBox();
+}
+function hideModeBox() { if (modeBox) { modeAnchor = null; modeBox.classList.remove('vis'); } }
+function setGizmoMode(m) {
+  gizmoMode = m;
+  localStorage.setItem('archean-gizmo-mode', m);
+  tctl.setMode(m === 'move' ? 'translate' : 'rotate');
+  // v0.158: the MOVE arrows must stay WORLD-axis aligned (user: "the move
+  // gizmo rotates and becomes non axis aligned, that's bad") — only the
+  // rotate RINGS are part-axis (local, the pinned intrinsic model).
+  tctl.space = m === 'move' ? 'world' : 'local';
+  syncGizmo(); paintModeBox(); invalidate();
+}
+// move writeback: the proxy lives at scene root, so undo the compGroup display
+// anchor (the scene frame IS the raw file frame since v0.180 — no mirror to
+// undo). occ + type-255 mirror cells follow automatically at save time via
+// serialize()'s round(delta/CELL) shift — same contract as the position
+// sliders, so the gizmo never touches the blueprint math itself.
+function applyGizmoPosition(pW) {
+  const i = selected, o = compObjs?.[i];
+  if (!o) return;
+  o.position.copy(pW).sub(compGroup.position).sub(_gizOff);   // centre-anchored (v0.163)
+  const p = model.data.components[i].position;
+  const d = { x: o.position.x - p.x, y: o.position.y - p.y, z: o.position.z - p.z };
+  const tw = symAllowed(i);                 // twins aligned at the PRE-MOVE spots
+  p.x = o.position.x; p.y = o.position.y; p.z = o.position.z;
+  for (const r of realMap.get(i) || []) r.position.copy(o.position);
+  syncAdapters(o);
+  symPropagate(i, d, tw);                   // left-right twins ride along
+  markDirty();
+}
+// ---------- symmetry twin index (v0.160, user: "moving a part that is in
+// symmetry should respect that") ----------
+// The game's left-right symmetry is GEOMETRIC in the file: the editor's
+// mirror tool places the twin as a SEPARATE component of the same type at
+// mirrored position (x flips, y/z identical) — 12/25 corpus crafts carry
+// twin Build pairs, the dolphin's twin tail doors hinge on SmallHinge
+// [29]/[49] at x=±1.125. Twins are NOT pose-mirrored (the dolphin pair
+// mounts its hinges 90° apart — builder geometry, not a file law), so a
+// gizmo move propagates the mirrored delta (dx,dy,dz)→(−dx,dy,dz) and
+// leaves each twin's own pose (and joint state) intact. Components with
+// mirrorAxis=1 (gantry craft) are self-mirrored instances — their own twin,
+// nothing to propagate. occ/type-255 mirrors follow via serialize()'s
+// per-component delta shift, exactly like the moved part itself.
+// Twin pairs are load-time geometry. If a builder (or a slider edit) has
+// since moved one twin off its mirrored spot ("notable discrepancy",
+// > 5 cm), the pair AUTO-DISABLES propagation — dragging one half of a
+// broken pair must not chase a twin that is no longer its mirror. The mode
+// widget's ⇄ button shows the state (strikethrough = off) and toggles the
+// master switch (persisted `archean-sym`).
+// v0.166 (user: "define robust logic … no matter whether we have x, y or
+// z symmetry"): every pair carries a MIRROR MASK — the axes it is placed
+// mirrored on (|a+b| ≈ 0, off-plane); every remaining axis must be equal
+// (|a−b| ≈ 0), else NO symmetry (drift ⇒ mask changes ⇒ auto-disable).
+// The game's left-right symmetry is mask 1 (x mirrored, y/z equal); pairs
+// mirrored in y (top-bottom, e.g. the mosaic truck) get 2, in z 4; two
+// mirrored axes = a 180° twist, three = point symmetry — all compose.
+// An axis where both positions are ≈0 (on-plane, |a| ≤ ε) is equal AND
+// mirrored ⇒ classifies as EQUAL (a centreline part is its own twin
+// there; the v0.160 centreline skip generalises to per-axis).
+const SYM_AX = [['x', 1], ['y', 2], ['z', 4]];
+const symMaskAt = (a, b, eps) => {
+  if (!a || !b) return 0;
+  let m = 0;
+  for (const [k, bit] of SYM_AX) {
+    if (Math.abs(a[k] + b[k]) < eps && Math.abs(a[k]) > eps) m |= bit;
+    else if (Math.abs(a[k] - b[k]) > eps) return 0;
+  }
+  return m;
+};
+let symTwins = null;                    // compIdx -> [ [twinIdx, mask]... ]
+function symTwinIndex() {
+  if (symTwins) return symTwins;
+  symTwins = new Map();
+  const byType = new Map();
+  (model?.data.components || []).forEach((c, i) =>
+    (byType.get(c.type) || byType.set(c.type, []).get(c.type)).push(i));
+  for (const idxs of byType.values())
+    for (const i of idxs)
+      for (const j of idxs)
+        if (j !== i) {
+          const m = symMaskAt(model.data.components[i].position,
+            model.data.components[j].position, 0.011);
+          if (m) (symTwins.get(i) || symTwins.set(i, []).get(i)).push([j, m]);
+        }
+  return symTwins;
+}
+const symPairAligned = (i, j) => symMaskAt(model.data.components[i].position,
+  model.data.components[j].position, 0.05);
+let symOn = localStorage.getItem('archean-sym') !== '0';     // the ⇄ widget switch
+const symAllowed = (i) => (!symOn ? []
+  : (symTwinIndex().get(i) || [])
+    .filter(([j, m]) => symPairAligned(i, j) === m));
+// Propagate a file-space delta (dx,dy,dz) to the given twins of comp i
+// (pre-filtered via symAllowed at the pre-move positions): the delta
+// mirrors on the pair's mask axes and stays equal on the rest (v0.166:
+// x-mirror pairs get (−dx,dy,dz) exactly as v0.160, y/z pairs flip their
+// own component); meshes follow live, files carry the twins' own occ
+// mirrors (the save-time delta shift handles them).
+function symPropagate(i, d, twins) {
+  if (!model || (!d.x && !d.y && !d.z)) return;
+  for (const [j, m] of twins || []) {
+    const sx = m & 1 ? -d.x : d.x, sy = m & 2 ? -d.y : d.y,
+      sz = m & 4 ? -d.z : d.z;
+    const q = model.data.components[j].position;
+    q.x += sx; q.y += sy; q.z += sz;
+    const oj = compObjs[j];
+    if (oj) {
+      oj.position.set(q.x, q.y, q.z);
+      for (const r of realMap.get(j) || []) r.position.copy(oj.position);
+      syncAdapters(oj);
+    }
+    // v0.172: twin SUBGRIDS need no direct write — their kinematic masters
+    // (the twin hinge/pivot) just moved above, and syncSubJoints' rigid
+    // master-delta term rides the twin group in unison (the v0.164 base.p
+    // write would DOUBLE-move it).
+  }
+}
+// v0.165 (user: "manipulation of its rotation does NOT affect the
+// counterpart"), generalised v0.166 (user: "rotate two wheels … all axes
+// behave correctly, exact the one that is red. If I move my wheel back,
+// the mirrored wheel moves forward … define robust logic … no matter
+// whether we have x, y or z symmetry"): a rotation edit propagates to the
+// twins as the MIRROR-TWIN MOTION — conjugate the self delta by R180°
+// about every mirror-normal axis of the pair's mask: the spin component
+// along a mirror NORMAL is PRESERVED (both wheels roll backwards
+// together), the tangential components FLIP (a steered pair yaws in
+// opposite, mirror-symmetric, directions; the aileron pair deflects
+// mirror-symmetrically). v0.165 shipped (w,−x,−y,−z) — the full
+// quaternion conjugate — which flipped the mirror-normal component too:
+// exactly the red-axis wheel bug (the pins only tested ŷ/ẑ, so x̂ was
+// never asserted). General rule: md = det(S)·S·dq with S = the pairs'
+// per-axis diag(−1 on mask axes) — one axis ⇒ (w, dx, −dy, −dz); two
+// mirrored axes compose to the R180 twist conjugation; three (point
+// symmetry) give the plain delta. The view/file frames agree because
+// every mask is a diagonal sign map, and those commute with the view
+// chain's z-conjugation. `base` (Map j→their pose at edit start) makes
+// the write ABSOLUTE — sliders are absolute (self gets qd·q0), gizmo
+// spins are per-event incremental.
+function symPropagateRot(i, dq, twins, base, piv) {
+  if (!model) return;
+  for (const [j, m] of twins || []) {
+    const sx = m & 1 ? -1 : 1, sy = m & 2 ? -1 : 1, sz = m & 4 ? -1 : 1;
+    const det = sx * sy * sz;
+    const md = new THREE.Quaternion(det * sx * dq.x, det * sy * dq.y,
+      det * sz * dq.z, dq.w);
+    const oj = compObjs[j];
+    if (oj) {
+      const b = base && base.get(j);
+      if (b) oj.quaternion.copy(md).multiply(b); else oj.quaternion.premultiply(md);
+      // v0.167: gizmo spins orbit the twin's OWN centre (piv, captured at
+      // mouseDown); slider edits (no piv) spin about the twin's pivot,
+      // matching the self part's slider semantics.
+      const c = piv && piv.get(j);
+      if (c) oj.position.sub(c).applyQuaternion(md).add(c);
+      for (const r of realMap.get(j) || [])
+        { r.quaternion.copy(oj.quaternion); if (c) r.position.copy(oj.position); }
+      model.data.components[j].orientation = rawFromView(oj, oj.quaternion);
+      if (c) {
+        const q = model.data.components[j].position;
+        q.x = oj.position.x; q.y = oj.position.y; q.z = oj.position.z;
+      }
+      syncAdapters(oj);
+    }
+    // v0.172: twin subgrids ride their twin masters' new pose through
+    // syncSubJoints' rigid delta (the v0.165 base.q write would DOUBLE it).
+  }
+}
+// v0.176 (user: "for [a]symmetric hinges, the subgrids do not move in
+// unison, when really they should ... both the hinges are active when
+// modifying the one"): a JOINT-STATE edit (data.angle DEGREES / data.pos
+// metres) on a kinematic master propagates the SAME delta to its live
+// symmetry twins, so a symmetric pair animates in unison — as the game
+// builds it (the XYQ twin doors are authored at 24.3°/24.3°, every
+// corpus twin pair carries equal joint state). Same value, NOT the
+// mirror-conjugated quaternion of symPropagateRot: the twins' captured
+// joint axes already encode the mirror (face-mount fins fold
+// symmetrically about their own ẑ, hinge doors yaw symmetrically about
+// their own ŷ), so equal angles ARE the symmetric motion. Callers invoke
+// this BEFORE writing self's value (the delta is self-new minus self-old).
+function symPropagateJoint(i, k, val) {
+  if (!model) return;
+  const c = model.data.components[i];
+  if (!c || !MODEL.manifest?.[c.type]?.joints?.[0]) return;
+  const self = typeof c.data?.[k] === 'number' ? c.data[k] : 0;
+  for (const [j] of symAllowed(i)) {
+    const t = model.data.components[j];
+    if (t.type !== c.type) continue;
+    t.data[k] = (typeof t.data?.[k] === 'number' ? t.data[k] : 0)
+      + (val - self);
+  }
+}
+// apply the persisted mode WITHOUT invalidate(): module-eval order forbids
+// touching the render pipeline here; attach/paint happen on the first click.
+tctl.setMode(gizmoMode === 'move' ? 'translate' : 'rotate');
+tctl.space = gizmoMode === 'move' ? 'world' : 'local';      // same per-mode rule
+// Proxy pose = obj.getWorldQuaternion() VERBATIM (de-mirror v0.180): with no
+// negative-scale root there is no sx-absorb, and the rings draw along the
+// part's visible raw axes (x̂, ŷ, ẑ). A local-mode ring drag (P ← P·R(e_k,θ))
+// therefore maps 1:1 into the WYSIWYG world form qv' = R(drawn axis, θ)·qv —
+// the removed GIZMO_Y180 compensated the old scale.z=−1 root only. Components
+// must still be written through our pipeline (applyGizmoOrientation → dirty
+// flag, realMap mirrors, syncAdapters, rawFromView for the file quaternion
+// incl. droop/junction display-pose undo). A plain copy without the pipeline
+// was the v0.150 writeback bug: the part rendered 180° off its rings
+// (?gizmatest live/proxy pins). Pinned by ?gizmatest (order algebra + live
+// writeback) and selftest `gizmo=true`.
+function applyGizmoOrientation(qW) {
+  const i = selected, o = compObjs?.[i];
+  if (!o) return;
+  const twins = symAllowed(i);                           // v0.165 mirror twins
+  const qv = qW.clone();                                 // proxy carries the plain pose
+  const dq = qv.clone().multiply(o.quaternion.clone().invert());  // view delta
+  // v0.167 (user: "the pivot locations dont seem to be properly
+  // positioned, causing parts to rotate/orbit around the wrong
+  // position"): the rings are DRAWN at the part's VISIBLE CENTRE (the
+  // proxy rides the bbox centre, v0.163), so the spin must ORBIT that
+  // point — p' = c + R(dq)·(p − c) — with c captured once per gesture
+  // (mouseDown); a live fallback covers programmatic calls. Off-origin
+  // geometry (beacon mast, corner-pivoted dashboard, junction comb) no
+  // longer swings on a lever arm about the file origin. The inspector
+  // rotation SLIDERS keep the game's semantics: orientation edits spin
+  // about the part's own pivot, no orbit (they pass no pivots).
+  let c = gizPivotL;
+  if (!c) {
+    const bb = new THREE.Box3().setFromObject(o);
+    c = isFinite(bb.min.x)
+      ? bb.getCenter(new THREE.Vector3()).sub(compGroup.position)
+      : o.position.clone().add(_gizOff);
+  }
+  o.quaternion.copy(qv);
+  o.position.sub(c).applyQuaternion(dq).add(c);
+  for (const r of realMap.get(i) || [])
+    { r.quaternion.copy(qv); r.position.copy(o.position); }
+  const p = model.data.components[i].position;
+  p.x = o.position.x; p.y = o.position.y; p.z = o.position.z;
+  model.data.components[i].orientation = rawFromView(o, qv);
+  syncAdapters(o);
+  symPropagateRot(i, dq, twins, undefined, symRotPiv);   // twins orbit too
+  markDirty();
+  invalidate();
+}
+// Shift = 15° rotate snap + 0.25 m cell move snap, Blender-style
+addEventListener('keydown', (e) => { if (e.key === 'Shift') { tctl.setRotationSnap(Math.PI / 12); tctl.setTranslationSnap(CELL); } });
+addEventListener('keyup', (e) => { if (e.key === 'Shift') { tctl.setRotationSnap(null); tctl.setTranslationSnap(null); } });
+// ---------- selection fly-in + glow ----------
+// Fly-in: animate camera+target onto the component (~0.5 s, smoothstep) from
+// the current heading — an in-flight pan+approach. The landing spot is picked
+// from candidate view directions and validated with a raycast: the first
+// direction with a clear line of sight to the part (no hull/blocks/other
+// parts in between) wins, so the camera never parks inside a wall; it never
+// lands below the ground plane. A user drag cancels the flight.
+let fly = null;
+const flyRay = new THREE.Raycaster();
+flyRay.camera = camera;         // Sprite.raycast (labels) dereferences it
+// Landing-spot search: score every candidate direction by how much geometry
+// sits between the camera and the part's centre. A fully buried part (cabin
+// interior, engine bay) must still end up VISIBLE and on ITS OWN side:
+// directions are scored by (occluder count, angle to the part's outward
+// normal), so the camera lands in the clear spot nearest the part's exposed
+// face — never on the far side of the craft. Distance shrinks for small
+// parts so deeply enclosed ones get a genuinely close, unobstructed look.
+function flyTo(i) {
+  const o = compObjs?.[i];
+  if (!o) return;
+  const bb = new THREE.Box3().setFromObject(o);
+  if (!isFinite(bb.min.x)) return;
+  const c = bb.getCenter(new THREE.Vector3());
+  const sz = bb.getSize(new THREE.Vector3());
+  const r = Math.max(sz.x, sz.y, sz.z, 0.35);
+  const dist = Math.min(6, Math.max(0.75, r * 3.4 + 0.4));
+  const mc = new THREE.Box3();
+  [compGroup, blockGroup].forEach(g => mc.expandByObject(g));
+  const out = isFinite(mc.min.x)
+    ? c.clone().sub(mc.getCenter(new THREE.Vector3())).setY(r * 0.4)
+    : new THREE.Vector3(0, 0.4, 1);
+  if (!isFinite(out.x) || out.lengthSq() < 1e-4) out.set(0, 0.4, 1);
+  out.normalize();
+  const dirs = [out,
+    new THREE.Vector3(0.7, 0.5, 0.55).normalize(), new THREE.Vector3(-0.7, 0.5, 0.55).normalize(),
+    new THREE.Vector3(0.55, 0.45, -0.8).normalize(), new THREE.Vector3(-0.55, 0.45, -0.8).normalize(),
+    new THREE.Vector3(0, 0.95, 0.3).normalize(), new THREE.Vector3(0.92, 0.4, 0.15).normalize(),
+    camera.position.clone().sub(controls.target).normalize()];
+  const occ = [compGroup, blockGroup];
+  if (hullGroup.visible) occ.push(hullGroup);
+  let best = null;
+  for (const d of dirs) {
+    const from = c.clone().addScaledVector(d, dist);
+    flyRay.set(from, c.clone().sub(from).normalize());
+    flyRay.near = 0; flyRay.far = dist - r * 0.55;
+    const score = flyRay.intersectObjects(occ, true)
+      .filter(h => h.object.userData.ci !== i && !h.object.userData.isLabel
+                   && !h.object.userData.isXray).length;
+    const ang = d.angleTo(out);
+    if (!best || score < best[0] || (score === best[0] && ang < best[1])) best = [score, ang, d];
+    if (!score && d === dirs[0]) break;                       // exposed side: instant
+  }
+  const dir = best[2];
+  const p1 = c.clone().addScaledVector(dir, dist);
+  p1.y = Math.max(p1.y, ground.position.y + 0.15);
+  fly = { p0: camera.position.clone(), g0: controls.target.clone(), p1, g1: c,
+          t0: performance.now(), dur: 520 };
+  invalidate();
+}
+controls.addEventListener('start', () => { fly = null; });   // user takes over
+// Selection outline (v0.156, user: "selection should be more clear"): the old
+// Box3Helper draws 1 px GL lines, invisible on HiDPI displays. LineSegments2
+// renders true screen-space-fat borders (3 px), depthTest off so the box
+// reads through the hull like the incandescence layer.
+const selEdgesMat = new LineMaterial({ color: 0xffc233, linewidth: 3.5,
+  transparent: true, depthTest: false, depthWrite: false });
+selEdgesMat.resolution.set(1400, 900);            // onResize keeps it live
+const selBox = new LineSegments2(new LineSegmentsGeometry(), selEdgesMat);
+selBox.visible = false;
+selBox.raycast = () => {};                                   // never pickable
+selBox.renderOrder = 20;
+scene.add(selBox);
+// v0.164 MIRROR CO-SELECTION (user: "I dont see the mirror-component being
+// identified and co-selected"): the twin's own golden box, synced every
+// rendered frame while ⇄ is live and the pair is aligned
+const selBox2 = new LineSegments2(new LineSegmentsGeometry(), selEdgesMat);
+selBox2.visible = false;
+selBox2.raycast = () => {};
+selBox2.renderOrder = 20;
+scene.add(selBox2);
+const _selPts = new Float32Array(72);
+const _selPts2 = new Float32Array(72);
+function boxEdges(bb, out) {                                // 12 segments
+  const V = [bb.min.x, bb.min.y, bb.min.z, bb.max.x, bb.min.y, bb.min.z,
+             bb.max.x, bb.min.y, bb.max.z, bb.min.x, bb.min.y, bb.max.z,
+             bb.min.x, bb.max.y, bb.min.z, bb.max.x, bb.max.y, bb.min.z,
+             bb.max.x, bb.max.y, bb.max.z, bb.min.x, bb.max.y, bb.max.z];
+  const E = [0,1, 1,2, 2,3, 3,0, 4,5, 5,6, 6,7, 7,4, 0,4, 1,5, 2,6, 3,7];
+  for (let i = 0; i < E.length; i++) { const j = E[i] * 3;
+    out[i * 3] = V[j]; out[i * 3 + 1] = V[j + 1]; out[i * 3 + 2] = V[j + 2]; }
+}
+function paintHighlights() {
+  // Golden PULSE (v0.160, user: "should be pulsing, like a golden glow ...
+  // so we know its selected"): the selected part's incandescent layer,
+  // emissive shimmer and outline breathe together; the on-demand loop
+  // stays awake only while a selection lives.
+  const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 385);
+  selXrayMat.opacity = 0.42 + 0.46 * pulse;
+  selEdgesMat.opacity = 0.7 + 0.3 * pulse;
+  compGroup.children.forEach((g, i) => {
+    g.traverse(o => {
+      if (!o.isMesh || !o.material.emissive) return;
+      if (i === selected) { o.material.emissive.setHex(0xa8761e);
+        o.material.emissiveIntensity = 1.0 + 1.4 * pulse; }
+      else if (i === hovered) { o.material.emissive.setHex(0x222200); o.material.emissiveIntensity = 1; }
+      else { o.material.emissive.setHex(0x000000); o.material.emissiveIntensity = 1; }
+    });
+  });
+  // selection outline: the clearest "what is selected" cue (stays in sync
+  // with live edits — this runs on every frame we render)
+  const tSel = selected >= 0 ? selected : selectedSub;
+  const tw = tSel >= 0 && symOn ? symAllowed(tSel) : [];
+  if (selected >= 0 && compObjs?.[selected]) {
+    const bb = new THREE.Box3().setFromObject(compObjs[selected]);
+    bb.expandByScalar(0.07);                       // box stands OFF the part (v0.157)
+    selBox.visible = isFinite(bb.min.x);
+    if (selBox.visible) { boxEdges(bb, _selPts); selBox.geometry.setPositions(_selPts); }
+  } else if (selectedSub >= 0) {                   // v0.169: a SUBGRID gets the
+    const g = subGroup.children.find((x) => x.userData.sub === selectedSub);
+    const bb = g && new THREE.Box3().setFromObject(g);   // same golden box,
+    selBox.visible = !!bb && isFinite(bb.min.x);         // whole-content wireframe
+    if (selBox.visible) { bb.expandByScalar(0.07); boxEdges(bb, _selPts);
+      selBox.geometry.setPositions(_selPts); }
+  } else selBox.visible = false;
+  // twin co-selection box: the first twin's own golden box (corpus pairs
+  // are 2-element; ALL twins get the x-ray glow, component and subgrid)
+  const tRoot = selected >= 0 ? compObjs?.[tw[0]?.[0]]
+    : subGroup.children.find((x) => x.userData.sub === tw[0]?.[0]);
+  if (tRoot) {
+    const tb = new THREE.Box3().setFromObject(tRoot);
+    selBox2.visible = isFinite(tb.min.x);
+    if (selBox2.visible) { boxEdges(tb, _selPts2); selBox2.geometry.setPositions(_selPts2); }
+  } else selBox2.visible = false;
+  // incandescent X-ray layer: synced every rendered frame (tracks sliders
+  // live; rebuilt on selection change, model rebuild, proxy→real swap,
+  // and whenever the twin set changes — ⇄ flip, pair drift, slider edits)
+  const twinKey = tSel + '|' + tw.join(',') + '|'
+    + [selected, ...tw.map(([j]) => j)]
+        .map(i => realMap.get(i)?.length || 0).join(',');
+  if (selKey !== selected || twinKey !== selTwinKey
+      || selPairs.some(([o]) => !o.parent)) rebuildSelXray();
+  selTwinKey = twinKey;
+  for (const [o, ov] of selPairs) ov.matrix.copy(o.matrix);
+  for (const f of flashes)
+    f.mat.opacity = 0.6 * Math.pow(1 - (performance.now() - f.t0) / f.dur, 2);
+  if (modeAnchor && modeBox.classList.contains('vis')) projectModeAnchor();
+  styleGizmo();
+  if (selected >= 0 || selectedSub >= 0) invalidate();   // keep the golden pulse alive
+}
+
+// ---------- cable power-surge + incandescent X-ray highlight ----------
+// Selecting a component sends a travelling glow along every connected pipe
+// (data.pipes = the cable graph); on arrival the far component blips briefly.
+// Paths are the exact drawn cable polylines (per-segment anchored, joint
+// zigzag included). Pulses, blips and the selection incandescence all render
+// additive with depthTest off — they shine THROUGH the hull (user: "visible
+// above anything else, like an incandescence effect"). The on-demand loop
+// wakes only while an animation lives.
+const pipePolys = [];                       // per-pipe view-space polyline
+const surgeGroup = new THREE.Group();
+surgeGroup.raycast = () => {};
+scene.add(surgeGroup);
+const surgeGeo = new THREE.SphereGeometry(0.055, 10, 8);
+let surges = [], flashes = [];
+const selXrayMat = new THREE.MeshBasicMaterial({ color: 0xffb020, transparent: true,
+  opacity: 0.6, blending: THREE.AdditiveBlending, depthTest: false,
+  depthWrite: false, side: THREE.DoubleSide });
+let selPairs = [], selKey = -1, selTwinKey = '';
+function rebuildSelXray() {
+  for (const [, ov] of selPairs) ov.parent && ov.parent.remove(ov);
+  selPairs = []; selKey = selected;
+  const addTree = (root) => root?.traverse(o => {
+    if (!o.isMesh) return;
+    const ov = new THREE.Mesh(o.geometry, selXrayMat);
+    ov.matrixAutoUpdate = false; ov.matrix.copy(o.matrix);
+    ov.renderOrder = 15; ov.raycast = () => {}; ov.userData.isXray = true;
+    o.parent.add(ov);
+    selPairs.push([o, ov]);
+  });
+  const addReal = (i) => { for (const r of realMap.get(i) || []) addTree(r); };
+  addTree(compObjs?.[selected]);
+  // v0.170 (user: "the highlight effect is good and should alsways happen
+  // for xomponents"): the REAL game models of the selection glow with the
+  // same whole effect — with real models on the proxy is hidden, and the
+  // proxy-geometry-only overlay glowed a box-shaped ghost of the part.
+  if (selected >= 0) addReal(selected);
+  // v0.169 (user: "subgrid should highlight as a whole … so we understand
+  // its a subgrid"): selecting a SUBGRID glows its whole content tree —
+  // the merged block meshes + nested part proxies of the group.
+  if (selectedSub >= 0)
+    addTree(subGroup.children.find((x) => x.userData.sub === selectedSub));
+  // twin co-selection: aligned twins glow WITH the selection (same shared,
+  // pulsing x-ray material) — component twins and SUBGRID (Build) twins
+  // alike; the twin set is re-evaluated whenever ⇄ flips or a pair drifts
+  // (the twinKey staleness check in paintHighlights)
+  if (selected >= 0) for (const [j] of symAllowed(selected))
+    { addTree(compObjs?.[j]); addReal(j); }
+  if (selectedSub >= 0) for (const [j] of symAllowed(selectedSub))
+    addTree(subGroup.children.find((x) => x.userData.sub === j));
+}
+function clearSurges() {
+  surges.forEach(s => { surgeGroup.remove(s.mesh); s.mesh.material.dispose(); });
+  surges = [];
+  flashes.forEach(f => { scene.remove(f.grp); f.mat.dispose(); });
+  flashes = [];
+}
+function buildFlash(ci, color = 0x9fe0ff, dur = 620) {   // X-ray blip (arrival / source)
+  const grp = new THREE.Group(), mat = new THREE.MeshBasicMaterial({ color,
+    transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending,
+    depthTest: false, depthWrite: false, side: THREE.DoubleSide });
+  grp.raycast = () => {};
+  compObjs?.[ci]?.traverse(o => {
+    if (!o.isMesh) return;
+    o.updateWorldMatrix(true, false);
+    const ov = new THREE.Mesh(o.geometry, mat);
+    ov.matrixAutoUpdate = false; ov.matrix.copy(o.matrixWorld);
+    ov.renderOrder = 16; ov.raycast = () => {}; ov.userData.isXray = true;
+    grp.add(ov);
+  });
+  scene.add(grp);
+  flashes.push({ ci, grp, mat, t0: performance.now(), dur });
+}
+function startSurges(ci) {
+  clearSurges();
+  if (!model || ci < 0) return;
+  // source blip on the SELECTED part: makes the origin of the bolts
+  // unmistakable (Jimmy aileron report: far-end travel read as "the prop
+  // on the other side fired them")
+  buildFlash(ci, 0xffb347, 500);
+  model.data.pipes.forEach((p, pi) => {
+    let pts = pipePolys[pi], to = -1;
+    if (p.a_component === ci) to = p.b_component;
+    else if (p.b_component === ci) { to = p.a_component; pts = pts.slice().reverse(); }
+    else return;
+    if (!pts || pts.length < 2) return;
+    const cum = [0];
+    for (let k = 1; k < pts.length; k++) cum.push(cum[k - 1] + pts[k].distanceTo(pts[k - 1]));
+    const total = cum[cum.length - 1];
+    if (total < 0.05) return;
+    const mesh = new THREE.Mesh(surgeGeo, new THREE.MeshBasicMaterial({ color: 0xaef3ff,
+      transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending,
+      depthTest: false, depthWrite: false }));
+    mesh.renderOrder = 17; mesh.raycast = () => {};
+    mesh.position.copy(pts[0]);
+    surgeGroup.add(mesh);
+    surges.push({ pts, cum, total, mesh, to, t0: performance.now(),
+                  dur: Math.min(1600, Math.max(550, total * 300)) });
+  });
+  if (surges.length) invalidate();
+}
+function stepSurges(now) {
+  surges = surges.filter(s => {
+    const u = (now - s.t0) / s.dur;
+    if (u < 1) {
+      let d = u * s.total, k = 1;
+      while (k < s.cum.length - 1 && s.cum[k] < d) k++;
+      const t = (d - s.cum[k - 1]) / Math.max(1e-6, s.cum[k] - s.cum[k - 1]);
+      s.mesh.position.lerpVectors(s.pts[k - 1], s.pts[k], Math.min(1, Math.max(0, t)));
+      return true;
+    }
+    surgeGroup.remove(s.mesh); s.mesh.material.dispose();
+    buildFlash(s.to);
+    return false;
+  });
+  flashes = flashes.filter(f => {
+    if (now - f.t0 < f.dur) return true;
+    scene.remove(f.grp); f.mat.dispose();
+    return false;
+  });
+  if (surges.length || flashes.length) invalidate();
+}
+
+// ---------- component list (v0.156 tabs; v0.157 collapsible groups) ----------
+// TWO tabs on top: group by TYPE (alphabetical sections) or by SUBGRID
+// (one section per Build: its decoded masters + nested parts, then the
+// subgrid-free hull parts). A single search box — where it has always lived
+// — filters both tabs. Groups are COLLAPSED by default (click the header);
+// selecting a part (canvas, list, dblclick, Esc-state) or typing a filter
+// AUTO-EXPANDS the containing group and scrolls it into view.
+let listTab = localStorage.getItem('archean-list-tab') || 'type';
+const listOpen = new Map();               // "tab|sectionKey" -> open (absent = collapsed)
+function buildList(opts = {}) {
+  const list = $('complist'), q = $('filter').value.toLowerCase();
+  const ltabs = $('ltabs');
+  for (const t of ltabs.children) t.classList.toggle('on', t.dataset.k === listTab);
+  list.innerHTML = '';
+  const comps = model?.data.components || [];
+  const sections = [];
+  const section = (key, title, n) => {
+    const h = document.createElement('div');
+    h.className = 'sec';
+    const grp = document.createElement('div');
+    grp.className = 'grp'; grp.dataset.sec = `${listTab}|${key}`;
+    h.innerHTML = `<span class="chev">▸</span>&nbsp;${title} <span style="color:var(--dim)">· ${n}</span>`;
+    h.onclick = () => {
+      const k = grp.dataset.sec, open = !listOpen.get(k);
+      listOpen.set(k, open);
+      grp.style.display = open ? '' : 'none';
+      h.querySelector('.chev').textContent = open ? '▾' : '▸';
+    };
+    list.append(h, grp);
+    sections.push({ h, grp });
+    return grp;
+  };
+  const mk = (grp, idx, c, sel, sub) => {
+    const d = document.createElement('div');
+    d.innerHTML = `<span class="i">${String(idx).padStart(2, '0')}</span> <span class="t">${c.type}</span>`
+                + (c.alias ? ` “${c.alias}”` : '');
+    if (sel) d.classList.add('sel');
+    if (sub) d.classList.add('sub');
+    d.dataset.idx = idx;
+    d.onclick = () => select(idx);
+    d.ondblclick = () => select(idx, true);          // dblclick = fly to part
+    grp.appendChild(d);
+    return d;
+  };
+  const hits = (c) => !q || c.type.toLowerCase().includes(q)
+                    || (c.alias || '').toLowerCase().includes(q);
+  if (listTab === 'type') {
+    const byT = new Map();
+    comps.forEach((c, i) =>
+      (byT.get(c.type) || byT.set(c.type, []).get(c.type)).push(i));
+    for (const type of [...byT.keys()].sort()) {
+      const idxs = byT.get(type).filter(i => hits(comps[i]));
+      if (!idxs.length && !(q && type.toLowerCase().includes(q))) continue;
+      const grp = section('t:' + type, type, byT.get(type).length);
+      for (const i of idxs) mk(grp, i, comps[i], i === selected);
+    }
+  } else {
+    // by subgrid: Build[i] ← its decoded masters (composite_builds.component)
+    const masters = new Map();
+    for (const [bi, es] of subMasterEntries())
+      for (const e of es)
+        if (e.top >= 0) (masters.get(bi) || masters.set(bi, []).get(bi)).push(e.top);
+    const builds = comps.map((c, i) => c.type === 'Build' ? i : -1).filter(i => i >= 0);
+    for (const bi of builds) {
+      const bc = comps[bi], nested = (bc.data?.components || []).filter(c => c.type !== 'Build');
+      const ms = (masters.get(bi) || []).filter(i => comps[i]);
+      // v0.169: nested rows are INDICES (nested.filter(hits) returned
+      // component OBJECTS that then indexed nested[] — buildList threw and
+      // the whole tab died at the first subgrid with nested parts); and
+      // EVERY subgrid gets its own row — subgrids are mostly BLOCKS
+      // (hatch/gear-door panels), so a parts-only list made them invisible
+      // and unselectable (user: "a subgrid list is not properly visible,
+      // and I cant properly select them").
+      const nN = nested.map((c, k) => hits(c) ? k : -1).filter(k => k >= 0);
+      const nM = ms.filter(i => hits(comps[i]));
+      const title = `⬓ Build[${bi}]` + (bc.data?.alias ? ` “${bc.data.alias}”` : '');
+      if (q && !nN.length && !nM.length && !title.toLowerCase().includes(q)
+          && !'subgrid'.includes(q)) continue;
+      const grp = section('b' + bi, title + (ms.length
+        ? ` ← ${ms.map(m => comps[m].type).join(', ')}` : ' (floating)'), nested.length);
+      const nB = (bc.data?.blocks || []).length;
+      const ds = mk(grp, bi, { type: `SUBGRID · ${nB} blocks` +
+        (nested.length ? `, ${nested.length} parts` : '') }, bi === selectedSub, true);
+      ds.dataset.b = bi;
+      ds.onclick = ds.ondblclick = () => selectSub(bi);
+      for (const m of nM) mk(grp, m, comps[m], m === selected);
+      for (const k of nN) {
+        const d = mk(grp, k, nested[k], false, true);
+        if (bi === selectedSub) d.classList.add('sel');
+        d.dataset.b = bi;
+        d.onclick = () => selectSub(bi);            // nested content IS the subgrid
+        d.ondblclick = d.onclick;
+      }
+    }
+    const inSub = new Set([...builds, ...[...masters.values()].flat()]);
+    const rest = comps.map((c, i) => i).filter(i => !inSub.has(i) && hits(comps[i]));
+    if (rest.length || !q) {
+      const grp = section('rest', 'Hull & parts (no subgrid)',
+        comps.filter((c, i) => !inSub.has(i)).length);
+      for (const i of rest) mk(grp, i, comps[i], i === selected);
+    }
+  }
+  // collapse state: search force-opens (you want to SEE matches), else the
+  // per-section open map (default collapsed)
+  for (const s of sections) {
+    const open = q ? true : !!listOpen.get(s.grp.dataset.sec);
+    s.grp.style.display = open ? '' : 'none';
+    s.h.querySelector('.chev').textContent = open ? '▾' : '▸';
+  }
+  if (opts.reveal) {                        // selection → open its group, scroll to it
+    const el = selectedSub >= 0
+      ? list.querySelector(`.grp div[data-b="${selectedSub}"]`)
+      : list.querySelector(`.grp div[data-idx="${selected}"]`);
+    const grp = el && el.closest('.grp');
+    if (grp) {
+      listOpen.set(grp.dataset.sec, true);
+      grp.style.display = '';
+      grp.previousElementSibling.querySelector('.chev').textContent = '▾';
+      el.scrollIntoView({ block: 'nearest' });
+    }
+  }
+}
+$('filter').oninput = () => buildList();
+{
+  const ltabs = $('ltabs');
+  for (const [k, lab] of [['type', 'by type'], ['sub', 'by subgrid']]) {
+    const b = document.createElement('button');
+    b.textContent = lab; b.dataset.k = k;
+    b.onclick = () => { listTab = k; localStorage.setItem('archean-list-tab', k); buildList(); };
+    ltabs.appendChild(b);
+  }
+}
+
+// ---------- DevTools-style inspector ----------
+function row(sec, label, min, max, step, value, onInput) {
+  const r = document.createElement('div');
+  r.className = 'row';
+  r.innerHTML = `<label>${label}</label>`;
+  const rng = document.createElement('input');
+  Object.assign(rng, { type: 'range', min, max, step, value });
+  const num = document.createElement('input');
+  Object.assign(num, { type: 'number', min, max, step, value });
+  const rst = document.createElement('span');
+  rst.className = 'rst'; rst.textContent = '⟲'; rst.title = 'reset';
+  r.append(rng, num, rst);
+  // set() MUST run onInput — presets/⟲ previously only moved the thumb while
+  // the model (and the part on screen) stayed put (dead-button bug, v0.147).
+  const set = (v, mark = true) => {
+    rng.value = num.value = String(v);
+    onInput(+v, mark);
+    if (mark) { r.classList.add('mod'); markDirty(); }
+    // programmatic .value assignment fires NO 'input' event, so the global
+    // input→invalidate listener never saw ⟲/presets — sliders moved while the
+    // picture stayed frozen (user v0.149: "reset... changes sliders but no
+    // visual update is triggered"). Repaint from here.
+    invalidate();
+  };
+  rng.oninput = () => { num.value = rng.value; onInput(+rng.value); };
+  num.oninput = () => { if (num.value === '') return; const v = +num.value;
+                        if (isFinite(v)) { rng.value = v; onInput(v); } };
+  rst.onclick = () => { r.classList.remove('mod'); set(+value, false); };
+  sec.appendChild(r);
+  return { set, thumb: (v) => { rng.value = num.value = String(v); }, el: r };
+}
+function markDirty() {
+  dirty = true;
+  document.body.classList.add('dirty');
+  if (model) updateReport();          // live CoM/aero feedback while dragging sliders
+  if (gizmoOn && tctl.object === gizmoProxy) syncGizmoPose();   // rings track position edits
+  if (model && subGroup.children.length) syncSubJoints();       // master joint/pose edits ride the subgrid (v0.157)
+  paintModeBox();               // ⇄ button tracks auto-off as pairs drift apart (v0.161)
+  invalidate();   // EVERY data edit repaints — sliders rely on the input-event
+}                 // listener, but BUTTONS (⟲ reset this component) fire none
+                  // (v0.152: "resetting the component still doesnt update the 3d view")
+
+function secHeader(t) { const h = document.createElement('h3'); h.textContent = t; $('inspector').appendChild(h); }
+function secBody() { const s = document.createElement('div'); s.className = 'sec'; $('inspector').appendChild(s); return s; }
+
+function livePos(comp, obj, ax) {
+  return (v) => {
+    const i = obj.userData.ci;
+    const d = { x: 0, y: 0, z: 0 };
+    d[ax] = v - comp.position[ax];
+    const tw = symAllowed(i);                    // twins aligned at PRE-MOVE
+    comp.position[ax] = v;                       // data stays in RAW file space
+    obj.position[ax] = v;                        // object lives in the raw frame too
+    for (const r of realMap.get(i) || []) r.position[ax] = v;
+    syncAdapters(obj);
+    symPropagate(i, d, tw);                      // ⇄ mirror moves cover the
+    markDirty();                                 // sliders too (v0.162 user:
+  };                                             // "edited one wheel, it didnt
+}                                                // do the other")
+function liveRot(comp, obj, q0) {
+  const qd = new THREE.Quaternion(), e = new THREE.Euler(0, 0, 0, 'YXZ');
+  const delta = { p: 0, y: 0, r: 0 };
+  const ci = obj.userData.ci;
+  let tBase = null;              // twins' pose at inspector build (v0.165)
+  return (kind) => (deg, mark = true) => {
+    delta[kind] = deg * Math.PI / 180;
+    e.set(delta.p, delta.y, delta.r);
+    qd.setFromEuler(e);
+    obj.quaternion.copy(qd).multiply(q0);
+    for (const r of realMap.get(ci) || []) r.quaternion.copy(obj.quaternion);
+    syncAdapters(obj);
+    const q = obj.quaternion;
+    comp.orientation = rawFromView(obj, q);         // view quaternion → file (droop stripped)
+    // v0.165: the rotation sliders are a twin writeback path too (the
+    // position sliders' v0.162 contract, rotation edition): twins take the
+    // MIRRORED delta absolutely from their pose at edit start (the sliders
+    // are absolute qd·q0 writes, so premultiplying an incremental delta
+    // per input event would accumulate)
+    if (tBase === null) {
+      tBase = new Map();
+      for (const [j] of symAllowed(ci)) {
+        const oj = compObjs[j];
+        if (oj) tBase.set(j, oj.quaternion.clone());
+      }
+    }
+    symPropagateRot(ci, qd, symAllowed(ci), tBase);
+    if (mark) markDirty();
+  };
+}
+
+// Decoded subgrid→master join (v0.154): a composite_builds entry's
+// slaveBuildId is the index the Build component carries in the FLATTENED
+// component array — nested content numbers BEFORE its Build (the dev viewer's
+// readBuild recursion order), subtree sizes counted recursively.
+// Verified 342/342 entries over all 36 corpus crafts with subgrids.
+// Returns Map<Build comp index, entries[]> (entries can be >1 per subgrid).
+function subMasterEntries() {
+  // v0.171 (user: "jimmy and dorito dont properly id hinge or pivot for
+  // subgrids"): BOTH composite_builds indices — master component AND
+  // slaveBuildId — are FLATTENED indices (dev readBuild order: nested
+  // content numbers before its Build, recursively). The master index read
+  // TOP-LEVEL is a systematic off-by-(nested-prefix) shift: it lands on
+  // static junk (SpotLight/Junction/Dashboard/RTG) and turned 69 masters
+  // into "deleted editor references". Flattened, EVERY entry of every
+  // corpus craft lands on a joint part carrying live state — dolphin door
+  // pivots 0/126/180°, XYQ door hinges 24.3°, gantry LinearTrack slides —
+  // the join IS the game's kinematic record. Entries gain:
+  //   mc = master component object, top = its top-level index (-1 nested).
+  const flat = [];
+  const rec = (list) => { for (const c of list) {
+    const sub = (c.data && c.data.components) || null;
+    if (c.type === 'Build' && sub && sub.length) rec(sub);
+    flat.push(c);
+  } };
+  rec(model.data.components);
+  const byBuild = new Map();
+  for (const e of model.data.composite_builds || []) {
+    const bc = flat[e.slaveBuildId];
+    if (!bc || bc.type !== 'Build') continue;
+    const mc = flat[e.component] || null;
+    const ent = { component: e.component, mc,
+      top: mc ? model.data.components.indexOf(mc) : -1 };
+    const bi = model.data.components.indexOf(bc);
+    if (!byBuild.has(bi)) byBuild.set(bi, []);
+    byBuild.get(bi).push(ent);
+  }
+  return byBuild;
+}
+
+// ---------- subgrid info panel (v0.153; decoded mount v0.154) ----------
+// Contents + Mount only (v0.173): the Build ghost fields are not editable
+// here — the subgrid's kinematics are the MASTER's pose and joint state
+// (user: the pivot sliders "should not be a separate interface").
+// The Mount section lists the DECODED master(s) via subMasterEntries()
+// (BOTH indices flattened component indices, v0.171 — see FORMAT §Subgrids) with
+// each master's stored joint state and its distance to the subgrid; for a
+// kinematic master the joint angle/slide sliders write the master's own
+// data verbatim (same fields its own inspector's Component data shows).
+function buildSubInspector() {
+  const name = $('selname');
+  const bi = selectedSub;
+  const bc = model?.data.components[bi];
+  const g = subGroup.children.find(o => o.userData.sub === bi);
+  if (!bc || !g) { selectedSub = -1; name.innerHTML = '<span class="none">subgrid gone — reselect</span>'; return; }
+  name.innerHTML = `<b>Subgrid</b> #${g.userData.subn} · Build[${bi}]` + (bc.data?.alias ? ` · ${bc.data.alias}` : '');
+
+  const bb = new THREE.Box3().setFromObject(g);
+  const sz = bb.isEmpty() ? new THREE.Vector3() : bb.getSize(new THREE.Vector3());
+  const nb = bc.data?.blocks?.length || 0;
+  const ncs = (bc.data?.components || []).filter(s => s.type !== 'Build');
+  secHeader('Contents');
+  const b1 = secBody();
+  const d1 = document.createElement('div'); d1.className = 'checkrow';
+  d1.innerHTML = `<span style="color:var(--dim)">${nb} blocks · ${ncs.length} parts` +
+    (ncs.length ? ` (${[...new Set(ncs.map(s => s.type))].slice(0, 6).join(', ')})` : '') +
+    ` · ${sz.x.toFixed(2)} × ${sz.y.toFixed(2)} × ${sz.z.toFixed(2)} m</span>`;
+  b1.appendChild(d1);
+
+  secHeader('Mount (master part)');
+  const b2 = secBody();
+  const ents = subMasterEntries().get(bi) || [];
+  for (const e of ents) {
+    const mc = e.mc;
+    const d = document.createElement('div'); d.className = 'checkrow';
+    if (!mc) {
+      d.innerHTML = `<span style="color:var(--dim)">master = component[${e.component}] — not in file (deleted editor reference)</span>`;
+      b2.appendChild(d); continue;
+    }
+    const jd = mc.data || {};
+    const zc = (v) => Math.abs(v) < 1e-4 ? 0 : v;
+    const st = typeof jd.angle === 'number' ? ` · angle ${jd.angle.toFixed(1)}°`
+      : typeof jd.pos === 'number' ? ` · offset ${jd.pos.toFixed(3)} m` : '';
+    const vp = viewPos(mc.position);         // the viewer's own placement rule
+    const v = new THREE.Vector3(vp.x + (model.moff?.[0] || 0),
+      vp.y + (model.moff?.[1] || 0), vp.z + (model.moff?.[2] || 0));
+    const dist = bb.isEmpty() ? 0 : bb.distanceToPoint(v);
+    d.innerHTML = `<b>${mc.type}</b>${e.top >= 0 ? `[${e.top}]` : ' (nested)'}${mc.alias ? ' ' + mc.alias : ''}` +
+      `<span style="color:var(--dim)">${st} · ${dist.toFixed(2)} m to subgrid</span>`;
+    b2.appendChild(d);
+    // Kinematic master (has a .ini joint) → the joint state is EDITABLE and
+    // drives the subgrid live (v0.157): hinges/pivots/ailerons spin, linear
+    // tracks slide; the value saves verbatim into the master's data.
+    if (mc.data && MODEL.manifest?.[mc.type]?.joints?.[0]) {
+      if (typeof jd.angle === 'number')
+        row(b2, 'joint angle (°)', -180, 180, 0.5, zc(jd.angle),
+          (val) => {
+            symPropagateJoint(model.data.components.indexOf(mc), 'angle', val);
+            mc.data.angle = val; syncSubJoints(); });
+      if (typeof jd.pos === 'number')
+        row(b2, 'joint slide (m)', -1, 1, 0.005, zc(jd.pos),
+          (val) => {
+            symPropagateJoint(model.data.components.indexOf(mc), 'pos', val);
+            mc.data.pos = val; syncSubJoints(); });
+    }
+  }
+  if (!ents.length) {
+    const d = document.createElement('div'); d.className = 'checkrow';
+    d.innerHTML = '<span style="color:var(--dim)">no composite_builds entry names this subgrid</span>';
+    b2.appendChild(d);
+  }
+
+  // v0.173: the Pivot offset/rotation slider rows are REMOVED (user: "the
+  // six sliders under the hinge ... none of them are actually logical. Each
+  // of them is something that should inherently be a part of ... moving the
+  // hinge itself. It should not be a separate interface"): they edited the
+  // Build ghost pose — a construction-site field the game never displays,
+  // and the subgrid's real kinematics are the MASTER's pose (v0.172 rigid
+  // riding) and joint state. The master rows above stay: their joint angle/
+  // slide sliders write the hinge's own data, and every kinematic part also
+  // exposes them in its own inspector via Component data.
+}
+
+function buildInspector() {
+  const insp = $('inspector');
+  insp.innerHTML = '';
+  const name = $('selname');
+  if (selectedSub >= 0) { buildSubInspector(); return; }   // v0.153 subgrid panel
+  if (selected < 0) { name.innerHTML = '<span class="none">nothing selected — click a component</span>'; return; }
+
+  const comp = model.data.components[selected];
+  const obj = compObjs[selected];
+  const q0 = obj.quaternion.clone();          // base for rotation deltas = current live rotation
+  name.innerHTML = `<b>${comp.type}</b>[${selected}] · ${comp.module}`;
+
+  secHeader('Position (m)');
+  const body = secBody();
+  const p = comp.position;
+  const rx = row(body, 'x', p.x - 2, p.x + 2, 0.005, p.x, livePos(comp, obj, 'x'));
+  const ry = row(body, 'y', p.y - 1.5, p.y + 1.5, 0.005, p.y, livePos(comp, obj, 'y'));
+  const rz = row(body, 'z', p.z - 2, p.z + 2, 0.005, p.z, livePos(comp, obj, 'z'));
+
+  secHeader('Rotation (° deltas, world axes)');
+  const rb = secBody();
+  const setR = liveRot(comp, obj, q0.clone());
+  const rp = row(rb, 'pitch', -180, 180, 0.5, 0, setR('p'));
+  rp.el.title = 'world-axis pitch delta; near ±90° the yaw/pitch decomposition gets ambiguous (gimbal lock) — orientation itself is stored as a quaternion and stays exact';
+  const ryw = row(rb, 'yaw', -180, 180, 0.5, 0, setR('y'));
+  const rrl = row(rb, 'roll', -180, 180, 0.5, 0, setR('r'));
+  if (comp.type === 'PilotSeat') {
+    const presets = document.createElement('div');
+    presets.className = 'presets';
+    const pb = (t, v) => { const b = document.createElement('button'); b.className = 'btn'; b.textContent = t;
+      b.onclick = () => rp.set(-v); presets.appendChild(b); };
+    pb('lean fwd 12°', 12); pb('20°', 20); pb('30°', 30); pb('45°', 45); pb('upright', 0);
+    rb.appendChild(presets);
+    const note = document.createElement('div');
+    note.style.color = 'var(--dim)';
+    note.textContent = 'negative pitch = lean toward nose (raw −z)';
+    rb.appendChild(note);
+  }
+
+  secHeader('Component data');
+  const db = secBody();
+  let shown = 0;
+  for (const [k, v] of Object.entries(comp.data ?? {})) {
+    if (typeof v === 'boolean') {
+      shown++;
+      const l = document.createElement('label');
+      l.className = 'checkrow';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox'; cb.checked = v;
+      cb.onchange = () => { comp.data[k] = cb.checked; markDirty(); };
+      l.append(cb, document.createTextNode(k));
+      db.appendChild(l);
+    } else if (typeof v === 'number') {
+      shown++;
+      row(db, k, Math.min(v - 10, -100), Math.max(v + 10, 100), 0.1, v, (nv) => {
+        if (k === 'angle' || k === 'pos')
+          symPropagateJoint(model.data.components.indexOf(comp), k, nv);
+        comp.data[k] = nv; markDirty(); });
+    } else if (typeof v === 'string' && v.length <= 80) {
+      shown++;
+      const d = document.createElement('div');
+      d.className = 'checkrow';
+      d.innerHTML = `<span style="color:var(--dim);font-family:monospace">${k}</span>`;
+      const ti = document.createElement('input');
+      ti.type = 'text'; ti.value = v;
+      ti.oninput = () => { comp.data[k] = ti.value; markDirty(); };
+      d.appendChild(ti);
+      db.appendChild(d);
+    } else if (v && typeof v === 'object') {
+      const d = document.createElement('div');
+      d.className = 'checkrow';
+      d.innerHTML = `<span style="color:var(--dim)">${k} — ${Array.isArray(v) ? `${v.length} items` : 'object'} (not editable here)</span>`;
+      db.appendChild(d);
+    }
+  }
+  if (!shown) db.innerHTML = '<span style="color:var(--dim)">no editable fields</span>';
+
+  secHeader('Actions');
+  const ab = secBody();
+  const reset = document.createElement('button');
+  reset.className = 'btn';
+  reset.textContent = '⟲ reset this component';
+  reset.onclick = () => {
+    comp.position = { ...orig[selected].pos0 };
+    obj.position.copy(viewPos(comp.position));
+    obj.userData.wheelUndo = undefined;
+    obj.userData.wType = comp.type;
+    applyDisplayPose(obj, viewQuat(orig[selected].q0), orig[selected].q0);
+    // PLAIN file object with explicit fields: spreading a THREE.Quaternion
+    // copies its _x/_y/_z/_w accessor BACKING ({isQuaternion,_x,…} lands in
+    // the data, .x reads undefined) → NaN quats at the next rebuild/serialize
+    // (v0.152 catch: uitest flow pin saw seatFwd()=NaN after a reset+rebuild).
+    const qf0 = orig[selected].q0;
+    comp.orientation = { w: qf0.w, x: qf0.x, y: qf0.y, z: qf0.z };
+    // real game models are SIBLINGS of the proxy (livePos/liveRot mirror every
+    // edit) — reset must drag them along too, else the view never appears to
+    // move while "real game models" is on (v0.152 user report)
+    for (const r of realMap.get(selected) || []) {
+      r.position.copy(obj.position);
+      r.quaternion.copy(obj.quaternion);
+    }
+    syncAdapters(obj);                // port nubs back to the pristine pose
+    buildInspector();
+    markDirty();                      // invalidates (v0.152) — repaint guaranteed
+    toast('component reset');
+  };
+  ab.appendChild(reset);
+}
+
+// capture pristine quaternions (from the file as loaded) for the reset button
+function ensureOrigQ() {
+  orig.forEach((o, i) => {
+    if (!o.q0) {
+      const q = model.data.components[i].orientation;
+      o.q0 = new THREE.Quaternion(q.x, q.y, q.z, q.w);
+    }
+  });
+}
+
+// ---------- view options ----------
+// keyed registry so keyboard shortcuts (and ?uitest) can flip a toggle and
+// keep its checkbox in sync — the g/o/h keys used to move groups behind a
+// stale checkbox, and 'h' only hid the triangles while blocks stayed.
+// (cb.onchange also invalidates: the on-demand loop would otherwise show
+// nothing until the next camera interaction — "checkbox does nothing".)
+const viewToggles = {};
+function buildViewOpts() {
+  const s = $('viewopts');
+  const toggle = (key, label, targets) => {
+    const arr = Array.isArray(targets) ? targets : [targets];
+    const l = document.createElement('label');
+    l.className = 'checkrow';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.checked = arr.every(t => t.visible);
+    cb.onchange = () => { for (const t of arr) t.visible = cb.checked; invalidate(); };
+    l.append(cb, document.createTextNode(label));
+    s.appendChild(l);
+    viewToggles[key] = { cb, arr };
+    return cb;
+  };
+  toggle('grid', 'ground grid', grid);
+  toggle('occ', 'occupancy boxes (type-255)', occGroup);
+  // blocks and hull triangles are ONE thing in-game — the hull skin (the
+  // user: "they're one and the same thing to us") — so they share a toggle
+  const tHull = toggle('hull', 'hull (blocks + triangles)', [blockGroup, hullGroup]);
+  const tWire = toggle('wire', 'wireframe (hull)', hullWire);
+  // mutually exclusive (user): solid triangles under a wire overlay cost the
+  // full fill rate for zero added readability; drawing one replaces the other
+  const excl = (a, b) => a.addEventListener('change', () => {
+    if (a.checked && b.checked) { b.checked = false; b.dispatchEvent(new Event('change')); }
+  });
+  excl(tHull, tWire); excl(tWire, tHull);
+  if (tWire.checked && tHull.checked) { tHull.checked = false; tHull.dispatchEvent(new Event('change')); }
+  toggle('pipes', 'pipes (cables)', pipeGroup);
+  toggle('adapters', 'connectors (adapter ports)', adpGroup);   // v0.156: own toggle, off by default
+  toggle('subs', 'subgrids (doors/hatches)', subGroup);
+  toggle('mirror', 'mirror plane (x symmetry)', mirrorGroup);   // v0.161
+  const rl = document.createElement('label');
+  rl.className = 'checkrow';
+  const rcb = document.createElement('input');
+  rcb.type = 'checkbox'; rcb.checked = realModelsOn;
+  rcb.onchange = () => setRealModels(rcb.checked);
+  rl.append(rcb, document.createTextNode('real game models (off = same-shape low-poly)'));
+  s.appendChild(rl);
+  const ll = document.createElement('label');
+  ll.className = 'checkrow';
+  const lcb = document.createElement('input');
+  lcb.type = 'checkbox'; lcb.checked = labelsOn;
+  lcb.onchange = () => {
+    labelsOn = lcb.checked;
+    compGroup.traverse(o => { if (o.userData.isLabel) o.visible = labelsOn; });
+    invalidate();
+  };
+  ll.append(lcb, document.createTextNode('labels on interactive/aliased parts'));
+  s.appendChild(ll);
+  // (the ⟲ "reset page zoom" button + dpr-baseline inverse-CSS-zoom machinery
+  //  was REMOVED — todo cleanup: it was a Chrome/Linux site-zoom misfire and
+  //  cured less than it caused. Ctrl+0 in the browser is the only zoom reset.)
+
+  const hs = document.createElement('div');
+  hs.className = 'sec';
+  // rotate gizmo (v0.150, user: "when you select a component you can rotate
+  // its axes in an intuitive way, like in blender"): rings attach to the
+  // selection, world axes, outer ring = free trackball, Shift = 15° snap.
+  const gl = document.createElement('label');
+  gl.className = 'checkrow';
+  const gcb = document.createElement('input');
+  gcb.type = 'checkbox';
+  gcb.checked = localStorage.getItem('archean-gizmo') !== '0';    // default ON
+  gizmoOn = gcb.checked;
+  gcb.onchange = () => {
+    gizmoOn = gcb.checked;
+    localStorage.setItem('archean-gizmo', gizmoOn ? '1' : '0');
+    syncGizmo();
+    invalidate();
+  };
+  gl.append(gcb, document.createTextNode('rotate gizmo on selection (Shift = 15° snap)'));
+  hs.append(gl);
+  // Hull-lattice pitch/offset sliders + the auto-fit button REMOVED in v0.149
+  // (user: "these things just complicate things"): the exact lattice
+  // (W=12, pitch=0.25, C=−1.5) that fitHull() proves per file is applied
+  // silently on load — there is nothing left to tune by hand.
+  row(hs, 'hull opacity', 0.1, 1, 0.05, hullOpacity,
+    v => { hullOpacity = v; buildHull(); applyHullOpacity(); });
+  const note = document.createElement('div');
+  note.style.color = 'var(--dim)';
+  note.style.marginTop = '4px';
+  note.textContent = 'dims the whole hull skin: blocks, triangle plates and their wireframes.';
+  hs.appendChild(note);
+  s.appendChild(hs);
+}
+
+// ---------- mass & center of mass ----------
+// Component masses are estimates (kg); structural blocks = cellMass per 0.25m
+// cell. On load, cellMass is calibrated so the total matches blueprint.mass —
+// this verifies CoM bookkeeping, and the implied density is shown as a
+// plausibility check. Volume-block masses are not in the blueprint.
+const COMP_MASS = { PilotSeat: 40, MiniComputer: 2, HudController: 1, Beacon: 1,
+  Aileron: 5, SmallWheel: 4, SmallTurboPump: 6, PowerConverter: 2, LowVoltageBattery: 8,
+  SolarPanel: 6, FluidJunction: 1, FluidPort: 0.5, RCS: 2, TiltSensor: 0.5, OwnerPad: 1 };
+let cellMass = 1.5;
+// raw-space subsystems: CoM/flow/arrows are computed from FILE coordinates and
+// displayed through ONE shared anchor group — under the un-mirrored chain
+// (v0.180) worldM is a pure position anchor (identity rotation/scale), the
+// display frame IS the file frame
+const worldM = new THREE.Group(); scene.add(worldM);
+const comMarker = new THREE.Group();
+worldM.add(comMarker);
+(function () {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(0.07, 16, 12),
+    new THREE.MeshBasicMaterial({ color: 0xff8800 }));
+  const ax = new THREE.Mesh(new THREE.SphereGeometry(0.015, 6, 4),
+    new THREE.MeshBasicMaterial({ color: 0xffcc00 }));
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.012, 8, 32),
+    new THREE.MeshBasicMaterial({ color: 0xff8800 }));
+  ring.rotation.x = Math.PI / 2;
+  comMarker.add(m, ring);
+})();
+
+function massModel() {
+  let compSum = 0, cells = 0, mx = 0, my = 0, mz = 0, tot = 0;
+  for (const c of model.data.components) {
+    const m = MODEL.manifest?.[c.type]?.mass ?? COMP_MASS[c.type] ?? 2;
+    compSum += m;
+    mx += m * c.position.x; my += m * c.position.y; mz += m * c.position.z; tot += m;
+  }
+  for (const b of model.data.blocks) {
+    if (b.type === 255) continue;
+    const n = (b.size_x + 1) * (b.size_y + 1) * (b.size_z + 1);
+    cells += n;
+    const m = n * cellMass;
+    mx += m * (occWorld(b, 'x') + b.size_x * CELL / 2);
+    my += m * (occWorld(b, 'y') + b.size_y * CELL / 2);
+    mz += m * (occWorld(b, 'z') + b.size_z * CELL / 2);
+    tot += m;
+  }
+  return { compSum, cells, tot, com: [mx / tot, my / tot, mz / tot],
+           declared: model.mass, density: cellMass / (CELL ** 3) };
+}
+
+function calibrateCellMass() {
+  const { compSum, cells, declared } = massModel();
+  cellMass = Math.max(0.01, (declared - compSum) / cells);
+}
+
+function updateCoM() {
+  const mm = massModel();
+  comMarker.position.set(...mm.com);
+  comMarker.visible = comMarker.visible;   // controlled by UI checkbox
+  return mm;
+}
+
+// ---------- aerodynamics (stylized plate model — not CFD) ----------
+// Flow: freestream relative wind = -forward*V. Forward = PilotSeat facing
+// (seat quaternion × (0,0,-1)), i.e. "the direction the pilot faces".
+// Thin-plate normal force Cn = 2π·sinα·cosα (clamped), boxes/wheels as bluff
+// bodies. Gives sane comparative numbers per element, not certifiable data.
+let aeroPlates = [], flowPts = null, flowData = null, flowTrails = null, flowOn = false;
+let flowFast = null, flowLUT = null;   // big-dot fast layer + speed colour ramp
+// 3D windsock HUD: camera-anchored top-of-screen, translucent, aims along
+// flowDir() and flutters with turbulence/speed — the classic tunnel reference
+// for what the streamlines/particles are showing (user request)
+const windHud = new THREE.Group();
+let sockPivot = null, sockLabel = null;
+{ const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.013, 0.52, 6),
+    new THREE.MeshBasicMaterial({ color: 0xc8d2d8, transparent: true, opacity: 0.8, depthTest: false }));
+  pole.position.y = 0.26;
+  sockPivot = new THREE.Group(); sockPivot.position.y = 0.44;
+  const segL = 0.2;
+  [[0xff7a1a, 0], [0xf2f2f2, 1], [0xff7a1a, 2]].forEach(([c, i]) => {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(0.083 + (2 - i) * 0.028, 0.083 + (2 - i - 1) * 0.028, segL, 10, 1, true),
+      new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.85, depthTest: false, side: THREE.DoubleSide }));
+    m.rotation.x = Math.PI / 2;          // axis y -> z: tail (wide) streams +z downwind
+    m.position.z = i * segL + segL / 2;
+    sockPivot.add(m);
+  });
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.083, 0.01, 6, 14),
+    new THREE.MeshBasicMaterial({ color: 0x2a2a2a, transparent: true, opacity: 0.85, depthTest: false }));
+  ring.position.z = 0.004;
+  sockPivot.add(ring);
+  windHud.add(pole, sockPivot);
+  { const cv = document.createElement('canvas'); cv.width = 160; cv.height = 48;
+    const tx = new THREE.CanvasTexture(cv);
+    const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tx, transparent: true,
+      opacity: 0.9, depthTest: false }));
+    spr.scale.set(0.52, 0.156, 1);
+    spr.position.set(0, -0.16, 0);
+    spr.renderOrder = 30;
+    windHud.add(spr);
+    sockLabel = { cv, tx, spr, last: '' };
+  }
+  windHud.traverse(o => { o.renderOrder = 30; o.raycast = () => {}; });
+  scene.add(camera);                     // camera children (the HUD) render
+  camera.add(windHud);
+  windHud.position.set(0, 1.18, -3.4);
+  windHud.visible = false;
+}
+function updateWindHud(tms) {
+  if (!windHud.visible) return;
+  const V = flowState.speed;
+  const dv = flowDir();                                    // raw-space travel dir
+  const dcam = new THREE.Vector3(dv[0], dv[1], dv[2])      // scene == file frame (v0.180)
+    .applyQuaternion(camera.quaternion.clone().invert()).normalize();   // world -> cam
+  sockPivot.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dcam);
+  // droop: only airflow inflates the sock horizontal; in little wind it hangs
+  // down the pole (user). ~70 deg droop at 0 m/s, level by 45 m/s
+  const infl = clamp(V / 45, 0, 1);
+  sockPivot.rotateOnAxis(new THREE.Vector3(1, 0, 0), (1 - infl) * 1.22);
+  // flutter ∝ real wind: at 0 m/s the sock is dead still (user), turbulence
+  // adds the gustiness on top once there IS wind
+  const A = flowState.turb * 0.38 * Math.min(1, V / 25);
+  const t = tms * 0.001;
+  sockPivot.rotateOnAxis(new THREE.Vector3(0, 1, 0), Math.sin(t * 1.9) * A);
+  sockPivot.rotateOnAxis(new THREE.Vector3(1, 0, 0), Math.sin(t * 1.3 + 1) * A * 0.7);
+  sockPivot.rotateOnAxis(new THREE.Vector3(1, 0.4, 0).normalize(), Math.sin(t * 4.1) * A * 0.35);
+  // speed readout, redrawn only when the text changes
+  if (sockLabel) {
+    const txt = `${Math.round(V)} m/s`;
+    if (txt !== sockLabel.last) {
+      sockLabel.last = txt;
+      const g = sockLabel.cv.getContext('2d');
+      g.clearRect(0, 0, 160, 48);
+      g.fillStyle = 'rgba(8,12,16,0.45)';
+      g.fillRect(0, 8, 160, 34);
+      g.font = 'bold 26px monospace'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillStyle = infl > 0.55 ? '#eaf4ff' : infl > 0.2 ? '#ffd9a0' : '#9fb4c4';
+      g.fillText(txt, 80, 25);
+      sockLabel.tx.needsUpdate = true;
+    }
+  }
+}
+let flowSm = null, flowSmT = null;      // EMA-smoothed speed/turb per particle
+let flowAge = null, flowAgeMax = null;  // particle lifetimes (anti-piling)
+let flowPhase = null;                   // per-particle turbulence phase (anti-striping)
+// colour map (user's): blue = slow, green/yellow = mid, red = fast; local
+// speed normalised on 2x freestream. 64-entry LUT: stepFlow is per-frame.
+function flowLutAt(t, out) {          // t in 0..1 -> linear rgb into out[0..2]
+  if (!flowLUT) {
+    flowLUT = new Float32Array(64 * 3);
+    const c = new THREE.Color();
+    for (let k = 0; k < 64; k++) {
+      c.setHSL(0.66 - (k / 63) * 0.64, 1.0, 0.55);
+      flowLUT[k * 3] = c.r; flowLUT[k * 3 + 1] = c.g; flowLUT[k * 3 + 2] = c.b;
+    }
+  }
+  const li = (Math.min(1, Math.max(0, t)) * 63) | 0;
+  out[0] = flowLUT[li * 3] * 1.7; out[1] = flowLUT[li * 3 + 1] * 1.7; out[2] = flowLUT[li * 3 + 2] * 1.7;
+}
+const flowMode = { m: 'off' };          // three-way wind-tunnel toggle: 'off' | 'lines' | 'wind'
+function setFlowMode(m) {
+  flowMode.m = m; flowOn = m === 'wind';
+  flowGroup.visible = m !== 'off';
+  windHud.visible = m !== 'off';
+  if (flowPts) flowPts.visible = m === 'wind';
+  if (flowFast) flowFast.visible = m === 'wind';
+  if (flowTrails) flowTrails.mesh.visible = m === 'wind';
+  for (const o of flowGroup.children)
+    if (o.isLine && !o.userData.isTrail || o.userData.isLineHot) o.visible = m === 'lines';
+  if (m === 'lines' && !flowGroup.children.some(o => o.userData.isLineHot)) buildStreamlines();
+  invalidate();
+}
+const flowGroup = new THREE.Group(); worldM.add(flowGroup);
+const aeroArrows = new THREE.Group(); worldM.add(aeroArrows);
+const flowState = { speed: 60, aoa: 4, az: 0, turb: 0.35 };
+
+// ---------- thrust (display + flow direction suggestion) ----------
+// Local thrust axes from each propulsor's [TARGET thrust/plasma] node in the
+// game .ini (exhaust side -> reaction pushes the craft the other way):
+// Big/MiniThruster & Propeller thrust = local -y, SmallThruster = +y.
+// Weights are per-class display ratios (the blueprint has no newton figures).
+// Arrows render in VIEW space; file-space nose (-z) shows as view +z.
+// RCS is SPECIAL: the unit is a fixed multi-nozzle blob (no joint/gimbal in
+// its .ini) that the GAME can fire in 5 selectable directions — the blueprint
+// stores NOTHING about which. Its lone [TARGET thrust] sits at local +z with
+// rotation 0 (not even aimed like the jets' -90; the model's bell flare is on
+// +y, so the TARGET is a template pose at best): trusting it drew a
+// straight-DOWN thrust arrow at the ISW's nose pod (user: "we have no
+// downward pointing propulsion of any kind"). Display rule (user): an RCS is
+// propulsion ONLY when nothing else propels the craft, and then "normally it
+// pushes backward" — arrow points tail-ward along −flight heading (cockpit
+// first, fallback fly-view-+z). FluidPort/FluidJunction are no more
+// propulsors than wheels are — they never enter this table.
+const THRUST = {
+  BigThruster:   { ax: [0, -1, 0], w: 1.0 },
+  MiniThruster:  { ax: [0, -1, 0], w: 0.4 },
+  SmallThruster: { ax: [0,  1, 0], w: 0.15 },
+  RCS:           { ax: null,       w: 0.25 },   // direction = −heading, below
+  Propeller:     { ax: [0, -1, 0], w: 0.6 },
+};
+let thrustArrowsOn = true;
+const flowSrc = { mode: 'auto' };          // 'auto' | 'thrust' | 'seat'
+let netThrust = null;                                 // {v:[x,y,z] view|null, w, n}
+const thrustGroup = new THREE.Group(); worldM.add(thrustGroup);
+function buildThrustArrows() {
+  thrustGroup.clear();
+  netThrust = null;
+  if (!model) return;
+  const matA = new THREE.MeshBasicMaterial({ color: 0xff9a3c, transparent: true, opacity: 0.95 });
+  const matN = new THREE.MeshBasicMaterial({ color: 0x53e0ff, transparent: true, opacity: 0.95 });
+  let acc = [0, 0, 0], wsum = 0, n = 0;
+  let accM = [0, 0, 0], wsumM = 0, nM = 0;      // MAIN drive net (direction)
+  // RCS blob rule (see THRUST): treated as propulsion only when it is the
+  // SOLE class — "normally it pushes backward, and that's only considered if
+  // there's no other props or jets" (user). Its normal push = tail-ward,
+  // opposite the flight heading (cockpit first, same source auto flow uses;
+  // heading only — a reclined seat is comfort, not yaw).
+  const comps = model.data.components;
+  const rcsOnly = comps.some(c => c.type === 'RCS')
+    && !comps.some(c => c.type in THRUST && c.type !== 'RCS');
+  let back = seatFwd() || [0, 0, -1];
+  { const fh = Math.hypot(back[0], back[2]);
+    back = fh > 0.15 ? [back[0] / fh, 0, back[2] / fh]
+      : back.map(x => x / (Math.hypot(...back) || 1)); }
+  back = back.map(x => -x);
+  comps.forEach((c, i) => {
+    const th = THRUST[c.type];
+    if (!th) return;
+    const o = compObjs?.[i];
+    if (!o) return;
+    if (c.type === 'RCS' && !rcsOnly) return;   // attitude control beside
+                                                // real engines: not drawn
+    // axis in the component's RAW-local frame (the .ini TARGET axis as
+    // stored), rotated by the display quaternion the mesh actually carries
+    // (de-mirror v0.180: the scene renders in the file frame, so the arrow
+    // now sits ON its part — the old chain built it from view-space part
+    // positions under the mirrored worldM and the per-engine arrows drew on
+    // the z-mirrored side of the craft, latent-mirror bug)
+    const ax = c.type === 'RCS' ? new THREE.Vector3(...back)
+      : new THREE.Vector3(...th.ax)
+          .applyQuaternion(o.quaternion).normalize();
+    const twoWay = c.type === 'Propeller';     // props thrust BOTH ways:
+    if (!twoWay) acc = acc.map((x, k) => x + ax.toArray()[k] * th.w);   // not in the net
+    // MAIN DRIVE = BigThruster only; an RCS-ONLY craft has nothing else, so
+    // its normal backward push IS its main drive. Mini/Small are landing/trim
+    // jets: the old all-RCS main net tilted the ISW's flow to 'wind from
+    // below' (user: cockpit, not RCS, defines the flight direction).
+    if ((c.type === 'BigThruster' || (c.type === 'RCS' && rcsOnly)) && !twoWay) {
+      accM = accM.map((x, k) => x + ax.toArray()[k] * th.w); wsumM += th.w; nM++;
+    }
+    wsum += th.w; n++;
+    const len = 0.45 + th.w * 1.15;
+    const g = new THREE.Group();
+    const shaft = new THREE.Mesh(cyl(0.035, twoWay ? len * 2 : len), matA);
+    shaft.rotation.x = Math.PI / 2;                    // cylinder axis y -> z
+    shaft.position.z = twoWay ? 0 : len / 2;
+    const head = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.26, 10), matA);
+    head.rotation.x = Math.PI / 2;
+    head.position.z = len + 0.1;
+    g.add(shaft, head);
+    if (twoWay) {
+      const head2 = head.clone();
+      head2.rotation.x = -Math.PI / 2;
+      head2.position.z = -len - 0.1;
+      g.add(head2);
+    }
+    g.position.copy(o.position);
+    g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), ax);
+    g.raycast = () => {};
+    thrustGroup.add(g);
+  });
+  if (n) {
+    const L = Math.hypot(...acc);
+    // Symmetric RCS banks net to ~0: normalized noise would send the flow
+    // in a random direction (the ISW rendered vertical streamlines). Below
+    // 15% of total class the net is declared ~0 and flow falls back to seat.
+    const strong = L > 0.15 * wsum;
+    const LM = Math.hypot(...accM);
+    netThrust = {
+      v: strong ? acc.map(x => x / L) : null, w: wsum, n,
+      // auto flow direction uses ONLY the main drive; null = fall back cockpit
+      main: nM > 0 && LM > 0.15 * wsumM ? accM.map(x => x / LM) : null,
+    };
+    if (strong) {
+      const dir = new THREE.Vector3(...netThrust.v);
+      const b = model.box_min, B = model.box_max;
+      const len = 1.4 + wsum * 0.25;
+      const g = new THREE.Group();
+      const shaft = new THREE.Mesh(cyl(0.07, len), matN);
+      shaft.rotation.x = Math.PI / 2; shaft.position.z = len / 2;
+      const head = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.6, 12), matN);
+      head.rotation.x = Math.PI / 2; head.position.z = len + 0.22;
+      g.add(shaft, head);
+      g.position.set((b[0] + B[0]) / 2, (b[1] + B[1]) / 2 + 1.1, (b[2] + B[2]) / 2);
+      g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), dir);
+      g.raycast = () => {};
+      thrustGroup.add(g);
+    }
+  }
+  thrustGroup.visible = thrustArrowsOn;
+}
+// Cockpit axis (view space): "cockpits almost always face in the right
+// direction, so fall back on that assumption if there is ambiguity; the
+// PilotSeat with a connection to a Computer takes precedence if contested".
+function seatFwd() {
+  const comps = model?.data.components;
+  if (!comps) return null;
+  const seats = [];
+  comps.forEach((c, i) => { if (c.type === 'PilotSeat') seats.push(i); });
+  if (!seats.length) return null;
+  let best = seats[0];
+  if (seats.length > 1) {
+    const term = new Set();
+    comps.forEach((c, i) => {
+      if (c.type === 'Computer' || c.type === 'MiniComputer' || c.type === 'OwnerPad') term.add(i);
+    });
+    const adj = new Map();
+    const link = (a, b) => {
+      if (a == null || b == null) return;
+      if (!adj.has(a)) adj.set(a, new Set()); adj.get(a).add(b);
+      if (!adj.has(b)) adj.set(b, new Set()); adj.get(b).add(a);
+    };
+    (model.data.pipes || []).forEach(p => link(p.a_component, p.b_component));
+    const hitsComp = (s) => {
+      const seen = new Set([s]), q = [s];
+      while (q.length) {
+        const x = q.pop();
+        if (term.has(x)) return true;
+        for (const y of adj.get(x) || []) if (!seen.has(y)) { seen.add(y); q.push(y); }
+      }
+      return false;
+    };
+    const win = seats.find(hitsComp);
+    if (win != null) best = win;
+  }
+  const o = compObjs?.[best];
+  // LEGACY (raw-quat) files mount parts in a 180-deg-yawed frame, so the
+  // seat's facing axis is local +z there; modern (conjugate) files place the
+  // part as authored: local −z = the pilot's view (the seat-proxy backrest at
+  // local +z is behind it). De-mirror v0.180: view space == file space (the
+  // old chain read (0,0, LEGACY ? −1 : +1) in its mirrored frame).
+  return o ? new THREE.Vector3(0, 0, LEGACY_Q ? 1 : -1).applyQuaternion(o.quaternion).toArray() : [0, 0, -1];
+}
+function flowDir() {
+  // Relative wind travels opposite to flight. Auto: MAIN drive net (rockets);
+  // landing jets / prop craft are ambiguous, so the cockpit wins (user). The
+  // RCS blob enters the nets only as a sole-class backward push (see THRUST).
+  // 'flow src' cycles auto/seat/thrust; ?flowsrc= presets it. 'thrust' mode
+  // = user override, uses the full net (all thrusters, RCS included).
+  const useT = flowSrc.mode === 'thrust' ? netThrust?.v : null;
+  // auto = COCKPIT FIRST (user: 'cockpits almost always face in the right
+  // direction'): the United airliner's 2 gimbal-tilted BigThrusters netted
+  // downward and auto chose 'wind from below' — thrust is only the suggestion
+  // for cockpits-less craft (rockets, missiles), and 'thrust' mode = override.
+  const f0 = useT ? useT.slice()
+    : seatFwd() || netThrust?.main || [0, 0, -1];  // default: fly nose-ward (raw −z)
+  // Use the seat's HEADING (yaw) only. A chair's pitch/roll is a comfort
+  // axis: feeding it through raw made reclining the ISW seat shrink the
+  // (un-normalised) wind vector — the whole tunnel slowed to cos(pitch)
+  // AND pitched — "pitch the chair and the wind direction and speed
+  // change" (user). Craft attitude is the AoA slider's job, unit length
+  // always; the cockpit-first rule cares which way the pilot FACES.
+  const fh = Math.hypot(f0[0], f0[2]);
+  const fwd = fh > 0.15 ? [f0[0] / fh, 0, f0[2] / fh]
+    : f0.map(x => x / (Math.hypot(...f0) || 1));   // near-vertical (thrust-override
+                                                   // net straight up/down): keep 3D
+
+  // 'wind from side' azimuth: rotate the flight axis in yaw before taking
+  // the wind direction — props produce thrust BOTH ways (user), so the
+  // direction must stay user-controllable, not implied by thrust sign.
+  // AoA lives in the WIND-AXIS system: tilt the relative wind (tail-ward,
+  // rising) FIRST, then yaw the whole vector with the azimuth. The old
+  // order glued the +y tilt to the world, so reversing az=180 kept the
+  // 'attack' face on the nose side and drove rising flow into the tail +
+  // belly gap (ground blockage): front/back behaved drastically different
+  // on near-symmetric Jimmy (user). Now az=180 is a true mirror of az=0.
+  const a = flowState.aoa * Math.PI / 180;
+  const w = [-fwd[0] * Math.cos(a), Math.sin(a), -fwd[2] * Math.cos(a)];
+  const azr = flowState.az * Math.PI / 180;
+  const ca = Math.cos(azr), sa = Math.sin(azr);
+  // de-mirror v0.180: the old chain yawed by −az in its mirrored frame, which
+  // is +az in the raw file frame the flow field now lives in.
+  return [w[0] * ca - w[2] * sa, w[1], w[0] * sa + w[2] * ca];
+}
+
+function plateFromTri(t) {
+  const p = [];
+  for (let i = 0; i < 3; i++) {
+    // RAW file coords (de-mirror v0.180): the flow field, streamlines and
+    // seeds all live in the raw frame the scene itself renders in.
+    p.push([hullPt(t, 'x', i), hullPt(t, 'y', i), hullPt(t, 'z', i)]);
+  }
+  const a = p[0], b = p[1], c = p[2];
+  const e1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+  const e2 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+  const n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+  const len = Math.hypot(...n) || 1e-9;
+  return { name: 'hull', c: [(a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3, (a[2] + b[2] + c[2]) / 3],
+           n: n.map(x => x / len), area: len / 2, R: Math.sqrt(len / 2 / Math.PI) + 0.15 };
+}
+
+// Solid 0.25 m cells (RAW space): every block (type != 255) plus every
+// component's `occupancies` box. sampleVel pushes flow around these, so the
+// streamlines wrap the actual voxel hull and protruding parts — the blocks
+// ARE taken into account (part 2 of 2 of the user report).
+let solidCells = null;
+let extGrid = null;                     // {b0:[ix,iy,iz], n:[nx,ny,nz], ext:Uint8Array, counts}
+const cellKeyV = (x, y, z) => ((x + 4096) * 8192 + (y + 4096)) * 8192 + (z + 4096);
+// Pure voxelization + sealing of a blueprint's `data` in the raw file frame
+// (de-mirrored v0.180; the scene renders in this same frame).
+// Exact universal lattice (W=12, pitch=0.25, C=−1.5, FORMAT.md),
+// so it needs no per-file hull fit → selftest can run it on any file.
+// ext: 1 = exterior (wind), 2 = cabin (ray-enclosed, windless), 0 = solid/sealed.
+function sealStats(data) {
+  const cells = new Set();
+  const add = (fx, fy, fz, px, py, pz, sx, sy, sz) => {
+    // world = (pos + 12·frame)·0.25 − 1.375  (AGENTS: (pos−5.5)·0.25 + frame·3;
+    // (12f)·0.25 IS the 3f — do not add frame·3 again, that was the old
+    // double-pitch bug making the voxel shell 3 m off at frame ≥ 1)
+    for (let i = 0; i <= sx; i++)
+      for (let j = 0; j <= sy; j++)
+        for (let k = 0; k <= sz; k++)
+          cells.add(cellKeyV(
+            Math.round(px + i + fx * 12 - 5.5),
+            Math.round(py + j + fy * 12 - 5.5),
+            Math.round(pz + k + fz * 12 - 5.5)));
+  };
+  for (const b of data.blocks || [])
+    if (b.type !== 255) add(b.frame_x, b.frame_y, b.frame_z, b.pos_x, b.pos_y, b.pos_z, b.size_x, b.size_y, b.size_z);
+  // hull-triangle skins (ISW-241's hull is 21 big prisms; Golden Throne has
+  // NO blocks): rasterize each triangle into every cell its surface crosses
+  // (0.11 m sampling: every crossed 0.25 m cell gets a hit even on 45° faces),
+  // so wind blocks at and seals behind triangle-only hulls.
+  const hpt = (t, ax, i) => (t['v' + i + '_' + ax] + 12 * t['frame_' + ax]) * 0.25 - 1.5;
+  let triBudget = 500000;
+  for (const t of data.triangles || []) {
+    const a = [hpt(t, 'x', 0), hpt(t, 'y', 0), hpt(t, 'z', 0)];
+    const e1 = [hpt(t, 'x', 1) - a[0], hpt(t, 'y', 1) - a[1], hpt(t, 'z', 1) - a[2]];
+    const e2 = [hpt(t, 'x', 2) - a[0], hpt(t, 'y', 2) - a[1], hpt(t, 'z', 2) - a[2]];
+    const el = Math.hypot(...e1), e2l = Math.hypot(...e2), e3 = Math.hypot(e1[0] - e2[0], e1[1] - e2[1], e1[2] - e2[2]);
+    const n = Math.min(110, Math.max(1, Math.ceil(Math.max(el, e2l, e3) / 0.11)));
+    triBudget -= (n + 1) * (n + 2) / 2;
+    if (triBudget < 0) break;
+    for (let i = 0; i <= n; i++)
+      for (let j = 0; j <= n - i; j++) {
+        const u = i / n, v = j / n;
+        cells.add(cellKeyV(
+          Math.round((a[0] + e1[0] * u + e2[0] * v) / 0.25),
+          Math.round((a[1] + e1[1] * u + e2[1] * v) / 0.25),
+          Math.round((a[2] + e1[2] * u + e2[2] * v) / 0.25)));
+      }
+  }
+  for (const c of data.components || []) {
+    // Build = editor construction-site ghost: its own position/occupancies
+    // sit far outside the bbox (skip), but its nested blocks are the real
+    // closed hatch/door geometry at true grid coords (keep).
+    if (c.type !== 'Build')
+      for (const o of c.occupancies || [])
+        add(o.frame_x, o.frame_y, o.frame_z, o.pos_x, o.pos_y, o.pos_z, o.size_x, o.size_y, o.size_z);
+    if (c.type === 'Build' && c.data?.blocks)            // closed hatches seal the hull
+      for (const b of c.data.blocks)
+        if (b.type !== 255) add(b.frame_x, b.frame_y, b.frame_z, b.pos_x, b.pos_y, b.pos_z, b.size_x, b.size_y, b.size_z);
+  }
+  // Flood-fill from the padded bbox corner: cells not reachable from outside
+  // are SEALED INTERIOR — the wind simulation skips them entirely (user:
+  // "wind shouldnt be simulated in something enclosed").
+  // Grid from the CELL extent, not the file box: workshop files' box_min/max
+  // can clip subgrid geometry (BionicDolphin: 16 m box around a 46 m craft).
+  let mnx = 1e9, mny = 1e9, mnz = 1e9, mxx = -1e9, mxy = -1e9, mxz = -1e9;
+  for (const k of cells) {
+    const z = (k % 8192) - 4096, t = Math.floor(k / 8192);
+    const y = (t % 8192) - 4096, x = Math.floor(t / 8192) - 4096;
+    if (x < mnx) mnx = x; if (y < mny) mny = y; if (z < mnz) mnz = z;
+    if (x > mxx) mxx = x; if (y > mxy) mxy = y; if (z > mxz) mxz = z;
+  }
+  if (mnx > mxx) return { cells, sealedCount: 0, tooBig: true };       // no geometry
+  const b0 = [mnx - 3, mny - 3, mnz - 3];
+  const n = [mxx - mnx + 7, mxy - mny + 7, mxz - mnz + 7];
+  const size = n[0] * n[1] * n[2];
+  if (size > 1600000) return { cells, sealedCount: 0, tooBig: true };   // huge craft: skip sealing
+  const solid = new Uint8Array(size), ext = new Uint8Array(size);
+  const idx = (x, y, z) => ((y * n[0]) + x) * n[2] + z;
+  let solidCount = 0;
+  for (const k of cells) {
+    const z = (k % 8192) - 4096, t = Math.floor(k / 8192);
+    const y = (t % 8192) - 4096, x = Math.floor(t / 8192) - 4096;
+    const gx = x - b0[0], gy = y - b0[1], gz = z - b0[2];
+    if (gx >= 0 && gy >= 0 && gz >= 0 && gx < n[0] && gy < n[1] && gz < n[2] && !solid[idx(gx, gy, gz)]) {
+      solid[idx(gx, gy, gz)] = 1; solidCount++;
+    }
+  }
+  const q = new Int32Array(size);
+  let qh = 0, qt = 0;
+  q[qt++] = 0; ext[0] = 1;                               // (b0 corner = always outside)
+  while (qh < qt) {
+    const c = q[qh++];
+    // decode MUST match idx = (y*n[0] + x)*n[2] + z: the old (y = %n[1],
+    // x = /(n[2]*n[1])) swapped strides turned the 6-neighbour flood into a
+    // phantom walk on non-cubic grids, marking sealed interiors wind-open
+    // (the mosaic craft's 'leaked' cabin: the shell never leaked)
+    const z = c % n[2], t2 = Math.floor(c / n[2]); const x = t2 % n[0], y = Math.floor(t2 / n[0]);
+    const nb = [[x + 1, y, z], [x - 1, y, z], [x, y + 1, z], [x, y - 1, z], [x, y, z + 1], [x, y, z - 1]];
+    for (const [a, b2, d] of nb) {
+      if (a < 0 || b2 < 0 || d < 0 || a >= n[0] || b2 >= n[1] || d >= n[2]) continue;
+      const i2 = idx(a, b2, d);
+      if (solid[i2] || ext[i2]) continue;
+      ext[i2] = 1; q[qt++] = i2;
+    }
+  }
+  // Ray-enclosure pass: cells the flood reached through intake/gap LEAKS
+  // that are nevertheless fully shell-enclosed (axial rays in all 6
+  // directions hit solid) are CABIN cells — the "Dolphin interior with the
+  // doors closed" case: voxel shells of block-built crafts leak through
+  // intakes, so pure flood fill alone under-seals. Verified: BionicDolphin
+  // (testdata/3417786605) → 253 cabin cells; ISW-241 → 0 (open-tail tube,
+  // physically wind-swept: correct).
+  // 1-cell PINHOLES count as wall (mosaic crafts art their shells with
+  // single-cell holes; the game's pressurisation doesn't leak through those):
+  // an open scan cell flanked by solid on both sides IN THE WALL PLANE is
+  // bridged. Real openings (doors, tail ramps) flank air -> still leak.
+  const sAt = (x, y, z) => (x >= 0 && y >= 0 && z >= 0 && x < n[0] && y < n[1] && z < n[2])
+    ? !!solid[idx(x, y, z)] : false;
+  for (let i = 0; i < size; i++) {
+    if (solid[i] || !ext[i]) continue;
+    const z = i % n[2], t2 = Math.floor(i / n[2]); const x = t2 % n[0], y = Math.floor(t2 / n[0]);
+    let enc = true;
+    for (let d = 0; d < 6 && enc; d++) {
+      const ax = d >> 1, sgn = (d & 1) ? -1 : 1;
+      for (let a = x + sgn;; a += sgn) {
+        if (ax === 0) {
+          if (a < 0 || a >= n[0]) { enc = false; break; }
+          if (solid[idx(a, y, z)]) break;
+          if ((sAt(a, y + 1, z) && sAt(a, y - 1, z)) || (sAt(a, y, z + 1) && sAt(a, y, z - 1))) break;
+        } else if (ax === 1) {
+          if (a < 0 || a >= n[1]) { enc = false; break; }
+          if (solid[idx(x, a, z)]) break;
+          if ((sAt(x + 1, a, z) && sAt(x - 1, a, z)) || (sAt(x, a, z + 1) && sAt(x, a, z - 1))) break;
+        } else {
+          if (a < 0 || a >= n[2]) { enc = false; break; }
+          if (solid[idx(x, y, a)]) break;
+          if ((sAt(x + 1, y, a) && sAt(x - 1, y, a)) || (sAt(x, y + 1, a) && sAt(x, y - 1, a))) break;
+        }
+      }
+    }
+    if (enc) ext[i] = 2;                                          // no-wind cabin
+  }
+  let sealedCount = 0, sealedSample = null, extCount = 0;
+  for (let i = 0; i < size; i++) {
+    if (ext[i] === 1) extCount++;
+    if (!solid[i] && ext[i] !== 1) {
+      sealedCount++;
+      if (!sealedSample) {
+        const z = i % n[2], t2 = Math.floor(i / n[2]); const x = t2 % n[0], y = Math.floor(t2 / n[0]);
+        sealedSample = [(x + b0[0] + 0.5) * 0.25, (y + b0[1] + 0.5) * 0.25, (z + b0[2] + 0.5) * 0.25];
+      }
+    }
+  }
+  return { cells, b0, n, ext, extCount, solidCount, sealedCount, sealedSample };
+}
+function buildSolid() {
+  solidCells = null;
+  extGrid = null;
+  if (!model) return;
+  const r = sealStats(model.data);
+  solidCells = r.cells;
+  extGrid = r.tooBig ? null : r;
+}
+function inExterior(p) {
+  if (!extGrid) return true;
+  const cv = model ? model.cv : [0, 0, 0];   // display anchoring (see setModel)
+  const gx = Math.round(p[0] / 0.25) + cv[0] - extGrid.b0[0];
+  const gy = Math.round(p[1] / 0.25) + cv[1] - extGrid.b0[1];
+  const gz = Math.round(p[2] / 0.25) + cv[2] - extGrid.b0[2];
+  const n = extGrid.n;
+  if (gx < 0 || gy < 0 || gz < 0 || gx >= n[0] || gy >= n[1] || gz >= n[2]) return true;
+  return extGrid.ext[((gy * n[0]) + gx) * n[2] + gz] === 1;
+}
+
+function buildAero() {
+  if (!model) return;
+  aeroPlates = [];
+  for (const t of model.data.triangles) aeroPlates.push(plateFromTri(t));
+  for (const c of model.data.components) {
+    const q = viewQuat(c.orientation);                 // display pose (raw frame)
+    const f = footprint(c);
+    const P = [c.position.x, c.position.y, c.position.z];
+    if (c.type === 'Aileron') {
+      const n = new THREE.Vector3(0, 1, 0).applyQuaternion(q);
+      aeroPlates.push({ name: c.position.z < 0 ? 'canard' : 'aileron',
+        c: P, n: [n.x, n.y, n.z],
+        area: f.x * f.z * 0.72, R: 0.75 });
+      const defl = c.position.z < 0 ? 1.05 : 0.12;
+      const fl = new THREE.Vector3(0, Math.cos(defl), Math.sin(defl))   // = M(old view vec)
+        .applyQuaternion(q).normalize();
+      aeroPlates.push({ name: 'flap', c: P, n: [fl.x, fl.y, fl.z], area: f.x * f.z * 0.3, R: 0.4 });
+    } else if (c.type === 'SolarPanel') {
+      const n = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
+      aeroPlates.push({ name: 'solar panel', c: P, n: [n.x, n.y, n.z], area: f.x * f.z, R: 1.2 });
+    } else if (c.type === 'SmallWheel') {
+      aeroPlates.push({ name: 'wheel', bluff: true, c: P,
+        n: [0, 0, -1], area: Math.PI * 0.17 * 0.10, R: 0.3 });
+    }
+  }
+  buildAeroGrid();
+  buildSolid();
+  buildThrustArrows();
+  initFlow();
+  updateReport();
+}
+
+// Uniform-grid SUPERSET index over aero plates (v0.155): the old per-particle
+// O(plates) scan is the sim's hot path (flowBudget() had to CUT PARTICLES on
+// plate-heavy crafts — 6000 plates x 2200 pts = 13 M scans/frame). Cell size
+// 1.5 m >= max influence distance sqrt(0.25 + Rmax^2 + 0.5) ~ 1.48, so a
+// plate's influence never leaves the 3x3x3 cell block around its centre, and
+// a particle's query (3x3x3) sees a guaranteed superset of its influencing
+// plates. The exact slab/r2 tests below run unchanged on that superset —
+// streamlines are BIT-IDENTICAL, budgets can go back up. Integer cell keys
+// (cellKeyV's encoding, zero string garbage per probe). ADAPTIVE: the ~6 ns
+// allocation-free scan beats 27 hash probes below ~200 plates (measured: the
+// 92-plate airliner regressed 2.4→5.0 ms/frame under the grid; the 1024-plate
+// giant inverts the crossover), so sparse scenes keep the plain scan.
+const AERO_CELL = 1.5, AERO_GRID_MIN = 200;
+let aeroGrid = new Map(), aeroUseGrid = false;
+function buildAeroGrid() {
+  aeroGrid = new Map();
+  aeroUseGrid = aeroPlates.length >= AERO_GRID_MIN;
+  if (!aeroUseGrid) return;
+  aeroPlates.forEach((pl, i) => {
+    const cx = Math.floor(pl.c[0] / AERO_CELL), cy = Math.floor(pl.c[1] / AERO_CELL),
+          cz = Math.floor(pl.c[2] / AERO_CELL);
+    for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (let c = -1; c <= 1; c++) {
+      const key = ((cx + a + 4096) * 8192 + cy + b + 4096) * 8192 + cz + c + 4096;
+      let l = aeroGrid.get(key);
+      if (!l) aeroGrid.set(key, l = []);
+      l.push(i);
+    }
+  });
+}
+const nearPl = [];                          // scratch (sampleVel is sequential)
+function platesNear(p) {
+  nearPl.length = 0;
+  const cx = Math.floor(p[0] / AERO_CELL), cy = Math.floor(p[1] / AERO_CELL),
+        cz = Math.floor(p[2] / AERO_CELL);
+  for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (let c = -1; c <= 1; c++) {
+    const l = aeroGrid.get(((cx + a + 4096) * 8192 + cy + b + 4096) * 8192 + cz + c + 4096);
+    if (l) for (const i of l) nearPl.push(aeroPlates[i]);
+  }
+  return nearPl;
+}
+
+function sampleVel(p, dir, V) {
+  if (extGrid && !inExterior(p)) return [0, 0, 0];   // sealed interior: no wind
+  const cv = model ? model.cv : [0, 0, 0];   // display anchoring cell shift
+  let v = [dir[0] * V, dir[1] * V, dir[2] * V];
+  for (const pl of aeroUseGrid ? platesNear(p) : aeroPlates) {
+    const d = (p[0] - pl.c[0]) * pl.n[0] + (p[1] - pl.c[1]) * pl.n[1] + (p[2] - pl.c[2]) * pl.n[2];
+    if (Math.abs(d) > 0.5) continue;
+    const qd = [(p[0] - pl.c[0]) - d * pl.n[0], (p[1] - pl.c[1]) - d * pl.n[1], (p[2] - pl.c[2]) - d * pl.n[2]];
+    const r2 = qd[0] ** 2 + qd[1] ** 2 + qd[2] ** 2, R2 = pl.R * pl.R;
+    if (r2 > (R2 + 0.5)) continue;
+    const w = Math.exp(-d * d / 0.08) * (r2 < R2 ? 1 : Math.exp(-(r2 - R2) / 0.6));
+    const vn = v[0] * pl.n[0] + v[1] * pl.n[1] + v[2] * pl.n[2];
+    const s = d >= 0 ? 1 : -1;
+    v[0] += pl.n[0] * s * V * 0.9 * w + (vn < 0 ? -pl.n[0] * vn * 1.6 * w : 0);
+    v[1] += pl.n[1] * s * V * 0.9 * w + (vn < 0 ? -pl.n[1] * vn * 1.6 * w : 0);
+    v[2] += pl.n[2] * s * V * 0.9 * w + (vn < 0 ? -pl.n[2] * vn * 1.6 * w : 0);
+  }
+  // voxel hull + component occupancy cells (VIEW-space 0.25 m grid): radial
+  // push-out from solid cell centres kills inflow and bends the stream —
+  // blocks and components now shape the flow, not just the hull triangles.
+  if (solidCells && solidCells.size) {
+    const cx = Math.floor(p[0] / 0.25), cy = Math.floor(p[1] / 0.25), cz = Math.floor(p[2] / 0.25);
+    for (let i = -1; i <= 1; i++)
+      for (let j = -1; j <= 1; j++)
+        for (let k = -1; k <= 1; k++) {
+          const rx = cx + i + cv[0], ry = cy + j + cv[1], rz = cz + k + cv[2];
+          if (!solidCells.has(cellKeyV(rx, ry, rz))) continue;
+          const d = [p[0] - (rx + 0.5) * 0.25 - model.moff[0], p[1] - (ry + 0.5) * 0.25 - model.moff[1], p[2] - (rz + 0.5) * 0.25 - model.moff[2]];
+          const r = Math.hypot(d[0], d[1], d[2]);
+          if (r > 0.62 || r < 1e-6) continue;
+          // influence width 0.1->0.3: with a ~0.3 m reach, each crossed cell
+          // boundary delivered one discrete 0.25 m kick -> particles climbed
+          // the hull in cell-sized STAIRS (user). Overlapping neighbours
+          // make the push continuous; particles hug surfaces as ramps.
+          const w = Math.exp(-(Math.max(0, r - 0.18) ** 2) / 0.3);
+          const nx = d[0] / r, ny = d[1] / r, nz = d[2] / r;
+          const vn = v[0] * nx + v[1] * ny + v[2] * nz;
+          // incidence-proportional push-out: the old base 0.6·V fired along
+          // EVERY cell normal (roof normals launched front-wind streamlines
+          // into the sky = 'radically different' front vs back, user). Now
+          // push scales with incoming normal velocity: head-on = strong
+          // stagnation, grazing = gentle hug. Front/back behave alike.
+          const g = (V * 0.12 + (vn < 0 ? -1.9 * vn : -0.25 * vn)) * w;
+          v[0] += nx * g; v[1] += ny * g; v[2] += nz * g;
+        }
+  }
+  // Stylized WAKE DEFICIT (user: 'the response to geometry seems really
+  // premature / magical'): inviscid thin-plate flow has NO separation — the
+  // air behind a blunt barge ran at full freestream, so the flow appeared
+  // to ignore the hull entirely. Real tunnels leave a slow, turbulent wake
+  // downstream of the body: walk up to 3 m UPSTREAM along the flow; the
+  // first solid cell casts a deficit cone (~60 % at the face, e-folds in
+  // 3.5 m). 4th return value = deficit fraction (turbulence/wave coupling).
+  let wake = 0;
+  if (solidCells && solidCells.size) {
+    for (let s = 1; s <= 12; s++) {
+      const qx = Math.floor((p[0] - dir[0] * s * 0.25) / 0.25) + cv[0];
+      const qy = Math.floor((p[1] - dir[1] * s * 0.25) / 0.25) + cv[1];
+      const qz = Math.floor((p[2] - dir[2] * s * 0.25) / 0.25) + cv[2];
+      if (solidCells.has(cellKeyV(qx, qy, qz))) { wake = 0.6 * Math.exp(-s * 0.25 / 3.5); break; }
+    }
+    if (wake) { v[0] *= 1 - wake; v[1] *= 1 - wake; v[2] *= 1 - wake; }
+  }
+  return wake ? [v[0], v[1], v[2], wake] : v;
+}
+
+let flowN = 0;
+function flowBudget() {
+  // v0.155: plates are GRID-INDEXED (platesNear), so plate count is no longer
+  // the per-frame cost driver — the measured driver is solid-cell lookup
+  // pressure. v0.156 (user: "more wind particles, from further away"): the
+  // grid + wider spawn made room — baseline 2200 → 4000, tiers raised with
+  // it; cell pressure still tiers the giants.
+  if (location.search.includes('flowlow')) return 500;           // headless shots
+  const c = solidCells ? solidCells.size : 0;
+  let n = 4000;
+  if (c > 400000) n = 1000; else if (c > 100000) n = 1600; else if (c > 40000) n = 3000;
+  return n;
+}
+function initFlow() {
+  flowGroup.clear();
+  const N = flowBudget();
+  flowN = N;
+  flowData = new Float32Array(N * 3);
+  flowSm = new Float32Array(N); flowSmT = new Float32Array(N);   // colour EMA
+  flowAge = new Float32Array(N); flowAgeMax = new Float32Array(N);
+  flowPhase = new Float32Array(N);
+  for (let i = 0; i < N; i++) { flowAgeMax[i] = 2 + Math.random() * 5; flowPhase[i] = Math.random() * 6.283; }   // 2..7 s
+  const b = model.box_min, B = model.box_max;
+  for (let i = 0; i < N; i++) respawn(flowData, i * 3, b, B);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(flowData, 3));
+  flowPts = new THREE.Points(g, new THREE.PointsMaterial({
+    size: 0.09, sizeAttenuation: true, vertexColors: true, transparent: true, opacity: 0.95,
+    // depthTest TRUE: X-ray particles showed the far-side flow THROUGH the
+    // hull — the wing's occlusion shadow in that field read as an offset
+    // ghost 'echo' of the plane (user: United airliner, low wind)
+    depthTest: true }));
+  flowPts.renderOrder = 12;
+  flowPts.raycast = () => {};
+  g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(N * 3), 3));
+  flowGroup.add(flowPts);
+  // fast-flow layer: accelerated air (over canopy, in gaps) draws as BIG dots
+  // (user: diverted wind should be 'thicker'); shares the position buffer so
+  // moving it costs nothing, its own colour buffer hides slow particles
+  // (black + additive = invisible).
+  const gf = new THREE.BufferGeometry();
+  gf.setAttribute('position', g.attributes.position);
+  gf.setAttribute('color', new THREE.BufferAttribute(new Float32Array(N * 3), 3));
+  flowFast = new THREE.Points(gf, new THREE.PointsMaterial({
+    size: 0.2, sizeAttenuation: true, vertexColors: true, transparent: true, opacity: 0.95,
+    depthTest: true, blending: THREE.AdditiveBlending }));
+  flowFast.renderOrder = 13;
+  flowFast.raycast = () => {};
+  flowGroup.add(flowFast);
+  // motion trails: prev->cur segments, additive, depthTest off so the wind
+  // reads over the hull (the plain wavy lines alone read as 'not good enough')
+  flowTrails = {
+    pos: new Float32Array(N * 6),
+    col: new Float32Array(N * 6),
+  };
+  const tg = new THREE.BufferGeometry();
+  tg.setAttribute('position', new THREE.BufferAttribute(flowTrails.pos, 3));
+  tg.setAttribute('color', new THREE.BufferAttribute(flowTrails.col, 3));
+  const tmesh = new THREE.LineSegments(tg, new THREE.LineBasicMaterial({
+    vertexColors: true, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending,
+    depthWrite: false, depthTest: true }));   // real smoke: hidden by the hull
+  tmesh.renderOrder = 11;
+  tmesh.raycast = () => {};
+  tmesh.userData.isTrail = true;                 // not a streamline (mode filter)
+  flowGroup.add(tmesh);
+  flowTrails.mesh = tmesh;
+  flowOn = flowMode.m === 'wind';
+  flowGroup.visible = flowMode.m !== 'off';
+  windHud.visible = flowMode.m !== 'off';   // ?flow/?lines on load
+  flowPts.visible = flowMode.m === 'wind';
+  buildStreamlines();
+}
+// streamlines: integrate the same deflected velocity field both ways from a
+// seed grid, so the eye can follow how air is routed around the craft.
+// Blue = freestream speed, red = accelerated flow (stylized, not CFD).
+function buildStreamlines() {
+  const _b0 = performance.now();
+  for (const o of [...flowGroup.children])
+    if ((o.isLine && !o.userData.isTrail) || o.userData.isLineHot) flowGroup.remove(o);
+  if (!model || flowMode.m !== 'lines') return;
+  const V = Math.max(1, flowState.speed), dir = flowDir();
+  const b = model.box_min, B = model.box_max;
+  const matS = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9 });
+  const ALL = [], ALLC = [], ALLF = [], ALLFC = [];
+  const rgb = [0, 0, 0];
+  // DEVIATION map (user: show velocity DIFFERENCES, blue=low red=high):
+  // freestream = blue, slowed flow = deep blue, accelerated = yellow->red.
+  // The old absolute map put freestream mid-ramp = green = ground colour,
+  // so 4 m/s streamlines were invisible over the plane (user's dolphin shot).
+  const gA = 2.0 * V / (V + 40);
+  const devT = (sp) => clamp(0.5 + (sp / V - 1) * gA, 0, 1);
+  // Colour INTENSITY uses ABSOLUTE deviation (dynamic pressure scales V²):
+  // at 25 m/s the nose sees ±3 m/s = muted ramp; at 150 m/s ±45 m/s = full
+  // blue/red. Inviscid pattern SHAPE is speed-invariant (physics), so the
+  // intensity is the honest visible answer to the speed slider (user).
+  const colOf = (sp, arr) => { flowLutAt(devT(sp), rgb); arr.push(rgb[0], rgb[1], rgb[2]); };
+  // Seed plane PERPENDICULAR to the flow, one body-radius upstream — the old
+  // fixed x·y/z-centre grid only made sense for pure tailward flow; with wind
+  // azimuth / vertical thrust flow it seeded inside the hull.
+  const dv = new THREE.Vector3(dir[0], dir[1], dir[2]).normalize();
+  const cen = new THREE.Vector3((b.x + B.x) / 2, (b.y + B.y) / 2, (b.z + B.z) / 2);
+  const ref = Math.abs(dv.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+  const e1 = ref.cross(dv).normalize();
+  const e2 = new THREE.Vector3().crossVectors(dv, e1).normalize();
+  const rad = Math.hypot(B.x - b.x, B.y - b.y, B.z - b.z) / 2 * 1.1 + 0.5;
+  const sga = location.search.includes('flowlow') ? 1.1 : 0.55;   // coarser seed grid
+  const R2 = (rad + 10) * (rad + 10);   // v0.156 wider kill radius (particles spawn 4 m out)
+  const FA = 0.055;                                            // 'thick line' offset
+  const FASTOFF = [[0, 0, 0],
+    [e1.x * FA, e1.y * FA, e1.z * FA], [-e1.x * FA, -e1.y * FA, -e1.z * FA],
+    [e2.x * FA, e2.y * FA, e2.z * FA], [-e2.x * FA, -e2.y * FA, -e2.z * FA]];
+  for (let a = -rad; a <= rad; a += sga * 1.7)
+    for (let c2 = -rad; c2 <= rad; c2 += sga) {
+      if (a * a + c2 * c2 > rad * rad) continue;              // disc, not square
+      const seed = cen.clone().addScaledVector(dv, -(rad + 9))   // v0.156: longer approach run
+        .addScaledVector(e1, a).addScaledVector(e2, c2);
+      const seedA = [seed.x, seed.y, seed.z];
+      const ph = a * 0.9 + c2 * 1.4;                          // wake meander phase
+      const fwd = [], fc = [], back = [], bc = [], spsF = [], spsB = [];
+      const walk = (sgn, pts, cs, sps) => {
+        let p = [...seedA];
+        // heading low-pass + speed EMA: a 0.35 m step through the 0.25 m
+        // voxel field flips cell normals frame to frame — raw integration
+        // drew lightning-bolt zigzags coloured by the spiking |v| (a rainbow
+        // 'turbulence' cloud around the craft, user screenshot). Limiting the
+        // turn rate per step keeps smooth hull-hugging bends; 1-cell spikes
+        // average out, colours stop flickering.
+        let hx = sgn * dir[0], hy = sgn * dir[1], hz = sgn * dir[2];
+        let spSm = V;
+        for (let k = 0; k < 160; k++) {
+          const v = sampleVel(p, dir, V);
+          let sp = Math.hypot(v[0], v[1], v[2]);
+          pts.push(p[0], p[1], p[2]);
+          spSm += clamp(sp - spSm, -0.12 * V, 0.12 * V);
+          sps.push(spSm);
+          // wake meander (speed response): every stylised deflection scales
+          // with V, so inviscid streamline SHAPE is V-invariant -> the speed
+          // slider changed nothing at all (user). Wake unsteadiness grows
+          // with speed (stylised Reynolds effect): lateral sine in the
+          // accelerated/shear region, amplitude ∝ V.
+          // wake meander (the speed response): gated to DECELERATED flow
+          // BEHIND the body mid-plane — the wake. The old gate fired on
+          // >2 % acceleration, i.e. on nose-flow over the hull: at 150 m/s
+          // that whipped 25 deg waves into clean upstream air and streamlines
+          // 'magically happened 10 m in front of' the craft (user); the
+          // inflow side (shape-invariant, as incompressible flow is) then
+          // showed nothing changing with the speed slider. Real tunnels:
+          // pattern is speed-invariant, only the wake gets unsteady with
+          // Reynolds number — so the waves live in the wake only, amplitude
+          // ∝ V: speed 25 = glass-smooth, 150 = full vortex-street billow.
+          const wkx = p[0] - cen.x, wky = p[1] - cen.y, wkz = p[2] - cen.z;
+          const wake = wkx * dv.x + wky * dv.y + wkz * dv.z;   // + = downstream
+          const wm = wake > 0 ? clamp(Math.max(1 - spSm / V, 0.7 * (spSm / V - 1), (v[3] || 0) * 1.3), 0, 0.7) : 0;   // wake deficit + shear-layer billow (rear half only)
+          if (wm > 0.05) {
+            const mg = Math.sin(k * 0.55 + ph) * wm * V * 0.45 * Math.min(1.6, V / 60);
+            v[0] += e1.x * mg; v[1] += e1.y * mg; v[2] += e1.z * mg;
+            sp = Math.hypot(v[0], v[1], v[2]);
+          }
+          colOf(spSm, cs);
+          if (sp < V * 0.03) break;                           // sealed interior /
+          const dx = p[0] - cen.x, dy = p[1] - cen.y, dz = p[2] - cen.z;  //   stagnation
+          if (dx * dx + dy * dy + dz * dz > R2) break;
+          const inv = 1 / Math.max(sp, 1e-3);
+          const nx = sgn * v[0] * inv, ny = sgn * v[1] * inv, nz = sgn * v[2] * inv;
+          const a = 0.3;                                      // heading smoothing
+          hx += (nx - hx) * a; hy += (ny - hy) * a; hz += (nz - hz) * a;
+          const hl = Math.max(1e-3, Math.hypot(hx, hy, hz));
+          // constant 0.35 m spatial steps: speed-scaled steps (0.07·V = 4 m at
+          // 60 m/s) leapt straight over the 3 m-wide craft, so side-wind flow
+          // never resolved the hull and "didn't cover the craft" (user)
+          p = [p[0] + hx / hl * 0.35, p[1] + hy / hl * 0.35, p[2] + hz / hl * 0.35];
+        }
+      };
+      walk(1, fwd, fc, spsF); walk(-1, back, bc, spsB);
+      if (fwd.length + back.length < 12) continue;
+      const pts = [], cs = [], sps = [];
+      for (let k = back.length - 3; k >= 0; k -= 3) { pts.push(back[k], back[k + 1], back[k + 2]); cs.push(bc[k], bc[k + 1], bc[k + 2]); }
+      for (let k = spsB.length - 1; k >= 0; k--) sps.push(spsB[k]);
+      pts.push(...fwd); cs.push(...fc); sps.push(...spsF);
+      for (let k = 0; k + 5 < pts.length; k += 3) {          // polyline → segments
+        ALL.push(pts[k], pts[k + 1], pts[k + 2], pts[k + 3], pts[k + 4], pts[k + 5]);
+        ALLC.push(cs[k], cs[k + 1], cs[k + 2], cs[k + 3], cs[k + 4], cs[k + 5]);
+        // high-speed flow (deflected/accelerated: >1.25·V) gets a THICK hot-red
+        // render: 4 offset copies (1px GL lines can't widen) = user "thicker, red"
+        const pm = (sps[k / 3] + sps[k / 3 + 1]) / 2;
+        if (pm > V * 1.15) {   // accelerated: hot + thick (matches gain-2 map)
+          for (const o of FASTOFF) {
+            ALLF.push(
+              pts[k] + o[0], pts[k + 1] + o[1], pts[k + 2] + o[2],
+              pts[k + 3] + o[0], pts[k + 4] + o[1], pts[k + 5] + o[2]);
+            ALLFC.push(1, 0.28, 0.1, 1, 0.28, 0.1);
+          }
+        }
+      }
+    }
+  if (ALL.length >= 6) {
+    const lg = new THREE.BufferGeometry();
+    lg.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(ALL), 3));
+    lg.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(ALLC), 3));
+    flowGroup.add(new THREE.LineSegments(lg, matS));
+  }
+  if (ALLF.length >= 6) {                     // accelerated flow: hot + thick
+    const lg = new THREE.BufferGeometry();
+    lg.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(ALLF), 3));
+    lg.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(ALLFC), 3));
+    const hot = new THREE.LineSegments(lg, new THREE.LineBasicMaterial({
+      vertexColors: true, transparent: true, opacity: 0.85,
+      blending: THREE.AdditiveBlending, depthWrite: false }));
+    hot.userData.isTrail = true;              // not removed by streamline rebuild
+    hot.userData.isLineHot = true;
+    flowGroup.add(hot);
+  }
+  perfBuild += performance.now() - _b0;
+}
+function respawn(arr, i, b, B) {
+  // Seed UNIFORMLY in bbox inflated by 2.5 m. The old span-scaled upstream
+  // shell (0.55·span per axis) put every seed beyond the kill-margin on long
+  // craft (dolphin: 25 m out), so particles died the frame they spawned and
+  // respawned on that shell — a boiling rainbow cloud 'far ahead of the
+  // craft' (user screenshot). Uniform works for any flow direction.
+  const M = 4.0;  // v0.156 "from further away": spawn 4 m outside the bbox
+                    // (was 1.3). MUST stay < the kill margin R in stepFlow:
+                    // spawning outside it parks particles (instant respawn in
+                    // place, user)
+  for (let att = 0; att < 24; att++) {
+    arr[i] = b.x - M + Math.random() * (B.x - b.x + 2 * M);
+    arr[i + 1] = b.y - M + Math.random() * (B.y - b.y + 2 * M);
+    arr[i + 2] = b.z - M + Math.random() * (B.z - b.z + 2 * M);
+    if (!extGrid || inExterior([arr[i], arr[i + 1], arr[i + 2]])) break;   // never seed inside a sealed hull
+  }
+  if (flowTrails) {                       // trail anchors to the spawn point
+    flowTrails.pos[i * 2] = arr[i]; flowTrails.pos[i * 2 + 1] = arr[i + 1]; flowTrails.pos[i * 2 + 2] = arr[i + 2];
+    flowTrails.pos[i * 2 + 3] = arr[i]; flowTrails.pos[i * 2 + 4] = arr[i + 1]; flowTrails.pos[i * 2 + 5] = arr[i + 2];
+  }
+}
+function stepFlow(dt) {
+  if (!flowData || !flowOn) return;
+  const _t0 = perfW0 ? performance.now() : 0;
+  const V = Math.max(1, flowState.speed), dir = flowDir();
+  const b = model.box_min, B = model.box_max;
+  const R = 9.0, tt = performance.now() * 0.0006;   // > respawn margin M (4.0), v0.156
+  const pos = flowPts.geometry.attributes.position.array;
+  const col = flowPts.geometry.attributes.color.array;
+  const tp = flowTrails && flowTrails.pos, tc = flowTrails && flowTrails.col;
+  const rgb = [0, 0, 0];
+  const fc = flowFast && flowFast.geometry.attributes.color.array;
+  for (let i = 0, j = 0; i < pos.length; i += 3, j += 6) {
+    const px = pos[i], py = pos[i + 1], pz = pos[i + 2];
+    const v = sampleVel([px, py, pz], dir, V);
+    const sp0 = Math.hypot(v[0], v[1], v[2]);
+    // animated turbulence: sinusoidal field, amplitude rising in the
+    // wake/shear (where |v| departs from freestream) — laminar far field
+    // stays calm blue, separated flow around edges boils red-magenta.
+    const wake = clamp(sp0 / V - 1, 0, 1.5) + clamp(v[3] || 0, 0, 1) * 1.3 + 0.12;   // deficit = shear = boiling
+    let ta = 0;
+    if (flowState.turb > 0 && sp0 > 1e-3) {
+      // per-particle phase offset: a shared-phase sine field organises the
+      // particles into marching wavy bands — the 'nonsensical echo' the user
+      // screenshotted from behind-wind on the ISW. Random phase per particle
+      // decorrelates them into eddies.
+      const s = 0.7, A = V * 0.16 * flowState.turb * wake, ph = flowPhase[i / 3];
+      const tx = A * Math.sin(py * s + tt * 3.5 + ph) * Math.cos(pz * s * 1.3 - tt * 2.8 + ph * 0.7);
+      const ty = A * Math.sin(pz * s * 1.1 - tt * 3.2 + ph * 1.3) * Math.cos(px * s - tt * 3.8 + ph);
+      const tz = A * Math.sin(px * s * 0.9 + tt * 4.2 + ph * 0.4) * Math.cos(py * s * 1.2 + tt * 2.3 + ph * 1.1);
+      v[0] += tx; v[1] += ty; v[2] += tz;
+      ta = Math.hypot(tx, ty, tz) / V;
+    }
+    // Brownian jitter: particles otherwise lane onto voxel-cell boundaries
+    // and pile up in stagnation zones into 'spark clusters' (user)
+    v[0] += (Math.random() - 0.5) * V * 0.10;
+    v[1] += (Math.random() - 0.5) * V * 0.10;
+    v[2] += (Math.random() - 0.5) * V * 0.10;
+    const sp = Math.hypot(v[0], v[1], v[2]);
+    pos[i] += v[0] * dt * 0.35; pos[i + 1] += v[1] * dt * 0.35; pos[i + 2] += v[2] * dt * 0.35;
+    const t = clamp(sp / (V * 1.35), 0, 1), tr0 = clamp(ta * 2.2, 0, 1);
+    // EMA-smooth speed & turbulence per particle (raw |v| jumps between LUT
+    // entries frame to frame = rainbow confetti, user: 'is that right?')
+    const pi3 = i / 3;
+    const td = clamp(0.5 + (sp / V - 1) * 2.0 * V / (V + 40), 0, 1);   // deviation map: ABSOLUTE intensity (∝V², speed-slider responsive)
+    const t2 = flowSm[pi3] + clamp(td - flowSm[pi3], -0.06, 0.06); flowSm[pi3] = t2;
+    const tr = flowSmT[pi3] + clamp(tr0 - flowSmT[pi3], -0.06, 0.06); flowSmT[pi3] = tr;
+    flowLutAt(t2, rgb);
+    // turbulence pushes the colour to hot magenta: 'when wind causes
+    // turbulence, it could be visible' (user)
+    // stagnation bubbles (inflow vs plate push-out cancel) parked glowing
+    // dots mid-air ('inexplicable drag'): real smoke DISSIPATES there, so
+    // fade slow particles out as they crawl
+    const fade = clamp(sp / (V * 0.15), 0, 1);
+    col[i] = (rgb[0] * (1 - tr) + tr) * fade;
+    col[i + 1] = (rgb[1] * (1 - tr) + tr * 0.1) * fade;
+    col[i + 2] = (rgb[2] * (1 - tr) + tr * 0.9) * fade;
+    if (fc) {                                     // fast layer: big red dots
+      if (t2 > 0.8) {   // sp > ~1.15V: accelerated (gain-2 map)
+        fc[i] = col[i]; fc[i + 1] = col[i + 1]; fc[i + 2] = col[i + 2];
+        col[i] *= 0.2; col[i + 1] *= 0.2; col[i + 2] *= 0.2;   // dim the small dot
+      } else { fc[i] = 0; fc[i + 1] = 0; fc[i + 2] = 0; }
+    }
+    if (tp) {                                     // trail: prev -> new
+      tp[j] = px; tp[j + 1] = py; tp[j + 2] = pz;
+      tp[j + 3] = pos[i]; tp[j + 4] = pos[i + 1]; tp[j + 5] = pos[i + 2];
+      tc[j] = col[i] * 0.15; tc[j + 1] = col[i + 1] * 0.15; tc[j + 2] = col[i + 2] * 0.15;
+      tc[j + 3] = col[i]; tc[j + 4] = col[i + 1]; tc[j + 5] = col[i + 2];
+    }
+    // lifetime cap: stagnation makes particles LINGER, so slow zones keep
+    // receiving new arrivals -> glowing dust clumps (user's spark clusters)
+    const pi0 = i / 3;
+    flowAge[pi0] += dt;
+    let out = pos[i] < b.x - R || pos[i] > B.x + R || pos[i + 2] < b.z - R || pos[i + 2] > B.z + R
+             || pos[i + 1] > B.y + R || sp < V * 0.06 || flowAge[pi0] > flowAgeMax[pi0];
+    // hard rule (user): particles must not be inside a sealed hull, and if
+    // one gets there (fast step, seeding edge case) it DIES this frame —
+    // no visible frame at all, not just the zero-velocity fade
+    if (!out && extGrid && !inExterior([pos[i], pos[i + 1], pos[i + 2]])) out = true;
+    if (out) { respawn(pos, i, b, B); flowAge[pi0] = 0;
+      flowSm[pi0] = flowSmT[pi0] = 0; }   // fresh colour EMA at the new seed
+  }
+  flowPts.geometry.attributes.position.needsUpdate = true;
+  flowPts.geometry.attributes.color.needsUpdate = true;
+  if (fc) flowFast.geometry.attributes.color.needsUpdate = true;
+  if (tp) {
+    flowTrails.mesh.geometry.attributes.position.needsUpdate = true;
+    flowTrails.mesh.geometry.attributes.color.needsUpdate = true;
+  }
+  if (perfW0) { perfFlow += performance.now() - _t0; perfFlowN++; }
+}
+
+function computeAero() {
+  const V = flowState.speed, qd = 0.5 * 1.225 * V * V;
+  const dir = flowDir(), dl = Math.hypot(...dir) || 1, u = dir.map(x => x / dl);
+  const fx = { x: 0, y: 0, z: 0 }, cp = { x: 0, y: 0, z: 0 };
+  const byKind = {};
+  for (const pl of aeroPlates) {
+    const s = u[0] * pl.n[0] + u[1] * pl.n[1] + u[2] * pl.n[2];
+    const cn = pl.bluff ? 1.05
+      : Math.min(2.2, 2 * Math.PI * Math.abs(s) * Math.sqrt(Math.max(0, 1 - s * s)));
+    const F = qd * pl.area * cn;
+    const f = [pl.n[0] * F * s, pl.n[1] * F * s, pl.n[2] * F * s];   // flow pushes surface along n
+    fx.x += f[0]; fx.y += f[1]; fx.z += f[2];
+    const w = Math.hypot(f[0], f[1], f[2]);
+    cp.x += pl.c[0] * w; cp.y += pl.c[1] * w; cp.z += pl.c[2] * w;
+    const e = byKind[pl.name] || (byKind[pl.name] = { n: 0, A: 0, F: 0 });
+    e.n++; e.A += pl.area; e.F += w;
+  }
+  const totF = Math.hypot(fx.x, fx.y, fx.z) || 1e-9;
+  return { byKind,
+    bodyDrag: fx.x * u[0] + fx.y * u[1] + fx.z * u[2],   // force along relative wind = drag
+    bodyLift: fx.y, fx,
+    cp: { x: cp.x / totF, y: cp.y / totF, z: cp.z / totF }, V, qd };
+}
+
+function dirLabel(v) {
+  const [x, y, z] = v;                          // raw file space: nose = −z
+  const ax = Math.abs(x), ay = Math.abs(y), az = Math.abs(z);
+  if (az >= ax && az >= ay) return z > 0 ? 'tail-ward' : 'nose-ward';
+  if (ax >= ay) return x > 0 ? 'right-ward' : 'left-ward';
+  return y > 0 ? 'up-ward' : 'down-ward';
+}
+
+function updateReport() {
+  if (!model) return;
+  const mm = updateCoM();
+  const A = computeAero();
+  const el = $('aeroreport');
+  if (!el) return;
+  const rows = Object.entries(A.byKind).sort((a, b) => b[1].F - a[1].F)
+    .map(([k, e]) => `${k.padEnd(12)} ${String(e.n).padStart(3)}×  A=${e.A.toFixed(2)}m²  F=${e.F.toFixed(1)}N`)
+    .join('\n');
+  const fwd = flowDir();
+  const dl = Math.hypot(...fwd) || 1;
+  const axial = (A.cp.x - mm.com[0]) * (fwd[0] / dl) + (A.cp.z - mm.com[2]) * (fwd[2] / dl);
+  const mac = model.box_max.z - model.box_min.z;
+  const azA = Math.abs(flowState.az);
+  const azL = azA < 5 ? 'nose' : azA > 175 ? 'tail'
+    : `${azA}° ${flowState.az > 0 ? 'from left' : 'from right'}`;
+  el.textContent =
+`speed ${flowState.speed} m/s (${(flowState.speed * 3.6).toFixed(0)} km/h) · AoA ${flowState.aoa}° · wind from ${azL} · turb ${flowState.turb.toFixed(2)} · q=${A.qd.toFixed(0)}Pa${flowN && flowN < 2200 ? ` · sim ${flowN} pts (large-craft approx)` : ''}
+thrust: ${netThrust ? `${netThrust.n} engine${netThrust.n > 1 ? 's' : ''} · class Σ${netThrust.w.toFixed(2)}${netThrust.v ? ` · net ${dirLabel(netThrust.v)}` : ' · net ~0 (symmetric bank)'} · flow src: ${flowSrc.mode === 'thrust' ? 'thrust (override)' : flowSrc.mode === 'seat' ? 'cockpit' : seatFwd() ? 'cockpit' : netThrust.main ? 'main thrust' : 'nose default'}` : 'no thrusters · flow src: ' + (flowSrc.mode === 'thrust' ? 'none' : 'cockpit')}${extGrid && extGrid.sealedCount > 0 ? `
+sealed interior: ${extGrid.sealedCount.toLocaleString()} cells windless (doors closed)` : ''}
+mass: declared ${mm.declared.toFixed(1)} kg | computed ${mm.tot.toFixed(1)} kg (${mm.compSum.toFixed(0)} kg parts
+      + ${mm.cells} cells × ${cellMass.toFixed(2)} kg → ${mm.density.toFixed(0)} kg/m³) ${
+        Math.abs(mm.tot - mm.declared) / mm.declared < 0.02 ? '✔ matches' : '⚠ MISMATCH'}
+CoM  x=${mm.com[0].toFixed(2)} y=${mm.com[1].toFixed(2)} z=${mm.com[2].toFixed(2)}
+CoP  x=${A.cp.x.toFixed(2)} y=${A.cp.y.toFixed(2)} z=${A.cp.z.toFixed(2)}
+static margin (CoM ahead of CoP): ${(axial / mac * 100).toFixed(1)}% MAC ${axial > 0.05 ? '✔ stable' : axial < -0.05 ? '⚠ unstable' : '≈ neutral'}
+drag ≈ ${A.bodyDrag.toFixed(1)} N · lift ≈ ${A.bodyLift.toFixed(1)} N · L/D ${
+  Math.abs(A.bodyDrag) > 0.01 ? Math.abs(A.bodyLift / A.bodyDrag).toFixed(2) : '∞'}
+${rows}
+(stylized thin-plate + bluff-body model, sea-level air — comparative insight, not CFD)`;
+  aeroArrows.clear();
+  const org = new THREE.Vector3(...mm.com);
+  const fcol = new THREE.Vector3(A.fx.x, A.fx.y, A.fx.z);
+  if (fcol.lengthSq() > 1e-6) fcol.normalize(); else fcol.set(0, 1, 0);
+  aeroArrows.add(new THREE.ArrowHelper(fcol, org, 1.2, 0xff4444, 0.2, 0.12));            // net aero force (drag dir)
+  aeroArrows.add(new THREE.ArrowHelper(new THREE.Vector3(0, A.bodyLift >= 0 ? 1 : -1, 0), org,
+    1.2, 0x44ff66, 0.2, 0.12));                                                          // lift
+}
+
+// ---------- flight UI ----------
+function buildFlight() {
+  const s = $('flight');
+  s.innerHTML = '';
+  // rebuild ~120 ms after the last drag event (PERF.md #2: a full rebuild
+  // per pointer-event ate the whole frame budget); wind mode reads flowState
+  // live and needs no rebuild at all
+  const debLines = (() => {
+    let h = 0;
+    return () => { clearTimeout(h); h = setTimeout(() => {
+      if (flowMode.m === 'lines') { buildStreamlines(); invalidate(); }
+    }, 120); };
+  })();
+  row(s, 'speed', 0, 160, 1, flowState.speed, v => { flowState.speed = v; updateReport(); debLines(); });
+  row(s, 'AoA °', -8, 20, 0.5, flowState.aoa, v => { flowState.aoa = v; updateReport(); debLines(); });
+  row(s, 'wind from side °', -180, 180, 5, flowState.az, v => { flowState.az = v; updateReport(); debLines(); });
+  row(s, 'turbulence', 0, 1, 0.05, flowState.turb, v => { flowState.turb = v; });
+  row(s, 'kg / block cell (0.25 m cube)', 0.2, 20, 0.05, cellMass, v => { cellMass = v; updateReport(); });
+  // the 'calibrate cells to declared mass' button was removed (v0.149, user:
+  // "I don't understand what that even means"): the calibration runs
+  // AUTOMATICALLY on load (setModel), which is what the report's ✔ compares.
+  // three-way wind-tunnel toggle: none / streamlines / animated wind
+  const FM = [['off', '⏻ off'], ['lines', '≋ streamlines'], ['wind', '💨 wind']];
+  const fbtns = [];
+  const setFM = () => fbtns.forEach((b, i) => {
+    const on = flowMode.m === FM[i][0];
+    b.style.background = on ? '#2b6a8f' : '';
+    b.style.borderColor = on ? '#53e0ff' : '';
+  });
+  for (const [m, lab] of FM) {
+    const b = document.createElement('button');
+    b.className = 'btn'; b.style.marginLeft = '4px'; b.textContent = lab;
+    b.title = m === 'lines' ? 'static streamlines around the craft'
+      : m === 'wind' ? 'animated wind particles + turbulence trails' : 'no flow display';
+    b.onclick = () => { setFlowMode(m); setFM(); };
+    fbtns.push(b); s.appendChild(b);
+  }
+  setFM();
+  const comB = document.createElement('button');
+  comB.className = 'btn'; comB.style.marginLeft = '4px';
+  comB.textContent = 'CoM/arrows: ' + (aeroArrows.visible ? 'on' : 'off');
+  comB.onclick = () => { aeroArrows.visible = comMarker.visible = !aeroArrows.visible;
+    comB.textContent = 'CoM/arrows: ' + (aeroArrows.visible ? 'on' : 'off'); };
+  const thB = document.createElement('button');
+  thB.className = 'btn'; thB.style.marginLeft = '4px';
+  thB.textContent = 'thrust: ' + (thrustArrowsOn ? 'shown' : 'hidden');
+  thB.onclick = () => { thrustArrowsOn = !thrustArrowsOn; thrustGroup.visible = thrustArrowsOn;
+    invalidate();
+    thB.textContent = 'thrust: ' + (thrustArrowsOn ? 'shown' : 'hidden'); };
+  const fsB = document.createElement('button');
+  fsB.className = 'btn'; fsB.style.marginLeft = '4px';
+  fsB.title = 'Direction the air flows past: net thrust (auto = thrust when the bank is asymmetric, seat nose otherwise)';
+  fsB.textContent = 'flow src: ' + flowSrc.mode;
+  fsB.onclick = () => {
+    flowSrc.mode = flowSrc.mode === 'auto' ? 'seat' : flowSrc.mode === 'seat' ? 'thrust' : 'auto';
+    buildStreamlines(); updateReport();
+    fsB.textContent = 'flow src: ' + flowSrc.mode;
+  };
+  s.appendChild(comB); s.appendChild(thB); s.appendChild(fsB);
+  const pre = document.createElement('pre');
+  pre.id = 'aeroreport';
+  pre.style.cssText = 'margin:6px 0 2px;padding:6px;background:var(--panel2);border-radius:4px;font-size:11px;white-space:pre-wrap;color:#cfe';
+  s.appendChild(pre);
+  updateReport();
+}
+
+// ---------- hull element list ----------
+function buildHullList() {
+  const el = $('hulllist');
+  el.innerHTML = '';
+  if (!model) return;
+  $('hullcount').textContent = `— ${model.data.triangles.length} triangles (toggle in view options)`;
+  model.data.triangles.forEach((t, i) => {
+    const p = [];
+    for (let k = 0; k < 3; k++) p.push([hullPt(t, 'x', k), hullPt(t, 'y', k), hullPt(t, 'z', k)]);
+    const e1 = p[1].map((x, j) => x - p[0][j]), e2 = p[2].map((x, j) => x - p[0][j]);
+    const area = Math.hypot(e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]) / 2;
+    const d = document.createElement('div');
+    d.style.cssText = 'padding:2px 10px;cursor:pointer;font-family:monospace;';
+    d.textContent = `tri ${String(i).padStart(2, '0')}  ${area.toFixed(2)} m²  f(${t.frame_x},${t.frame_y},${t.frame_z})  c${t.colors?.[0] ?? 0}`;
+    d.onmouseenter = () => d.style.background = '#2a2836';
+    d.onmouseleave = () => d.style.background = '';
+    d.onclick = () => {
+      hullGroup.visible = true;
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(
+        p.map((v) => [v[0], v[1], -v[2]]).flat(), 3));          // into view space
+      const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0xff3355, side: THREE.DoubleSide }));
+      hullGroup.add(m);
+      setTimeout(() => hullGroup.remove(m), 1400);
+    };
+    el.appendChild(d);
+  });
+}
+
+// ---------- animate (on-demand: iGPUs idle at ~0% until something changes) ----------
+let perfFrames = 0, perfFlowN = 0, perfFlow = 0, perfBuild = 0, loadMs = 0;
+let perfW0 = 0, perfArm = 0;   // real-clock window: start (ms) + arm timestamp
+// (needsRender/invalSeq/invalidate() hoisted to the scene section — v0.161)
+let lastT = 0;
+function tick(t) {
+  requestAnimationFrame(tick);
+  const dt = Math.min(0.05, (t - lastT) / 1000 || 0.016);
+  lastT = t;
+  if (fly) {
+    const u = Math.min(1, (performance.now() - fly.t0) / fly.dur);
+    const e = u * u * (3 - 2 * u);                       // smoothstep ease
+    camera.position.lerpVectors(fly.p0, fly.p1, e);
+    controls.target.lerpVectors(fly.g0, fly.g1, e);
+    if (u >= 1) fly = null;
+    invalidate();
+  }
+  stepSurges(performance.now());              // cable pulses + arrival blips
+  controls.update();                                  // 'change' event → invalidate
+  if (windHud.visible) { updateWindHud(t); invalidate(); }   // sock flutters
+
+  if (labelsOn) for (const o of compGroup.children)   // labels follow dragged/moved parts
+    if (o.userData.isLabel) {
+      const m = compObjs[o.userData.ci];
+      if (m) o.position.set(m.position.x, m.position.y + o.userData.dy, m.position.z);
+    }
+  if (flowOn) stepFlow(dt);
+  { const nowR = Date.now();
+    if (perfArm && !perfW0 && nowR >= perfArm) { perfW0 = nowR; perfFrames = 0; }
+    if (perfW0 && nowR - perfW0 < 1600) needsRender = true; }
+  if (!loadMs && model) {
+    loadMs = performance.now();
+    if (perfOn) perfArm = Date.now() + 800;   // measure the live scene
+  }
+  if (!needsRender && !flowOn) return;
+  needsRender = false;
+  { const wm = flowMode.m === 'wind';
+    if (flowPts) flowPts.visible = wm;
+    if (flowFast) flowFast.visible = wm;
+    if (flowTrails) flowTrails.mesh.visible = wm; }
+  paintHighlights();
+  renderer.render(scene, camera);
+  const sel = selected >= 0 ? model.data.components[selected] : null;
+  $('hud').textContent = sel
+    ? `${sel.type}[${selected}]  pos(${fmt(sel.position.x)}, ${fmt(sel.position.y)}, ${fmt(sel.position.z)})` +
+      `  pitch ${fmt(2 * Math.asin(clamp(-sel.orientation.x, -1, 1)) * 180 / Math.PI)}°`
+    : 'Archean blueprint viewer — click a component';
+  if (perfW0) {
+    perfFrames++;
+    const elR = Date.now() - perfW0;
+    if (elR >= 1500 || (perfFrames >= 3 && elR >= 250)) {
+      document.title = `PERF fps=${(perfFrames / Math.max(1, elR) * 1000).toFixed(1)} draw=${renderer.info.render.calls}` +
+        ` flowms=${perfFlowN ? (perfFlow / perfFlowN).toFixed(2) : '-'} buildms=${perfBuild.toFixed(0)} loadms=${loadMs.toFixed(0)}`
+        + ` tris=${renderer.info.render.triangles} geo=${renderer.info.memory.geometries}` +
+        ` plates=${aeroPlates.length} cells=${solidCells ? solidCells.size : 0} windpts=${flowN}`;
+      perfW0 = 0;
+    }
+  }
+}
+controls.addEventListener('change', invalidate);
+addEventListener('input', invalidate, true);
+addEventListener('keydown', invalidate);
+
+// ---------- init ----------
+if (location.search.includes('real')) realModelsOn = true;   // before buildViewOpts (checkbox state)
+function applyCamQ() {                              // ?cam=px,py,pz,tx,ty,tz · ?sel=idx
+  const q = new URLSearchParams(location.search);
+  const camQ = q.get('cam');
+  if (camQ) {
+    const [x, y, z, tx = 0, ty = 0, tz = 0] = camQ.split(',').map(Number);
+    camera.position.set(x, y, z);                 // ?cam is FILE space == view space (v0.180)
+    controls.target.set(tx, ty, tz);
+  }
+  const si = Number(q.get('sel'));                // deep-link a selection (+fly-in)
+  if (Number.isInteger(si) && si >= 0 && model?.data.components[si]) select(si);
+  invalidate();
+}
+buildViewOpts();
+// flight panel expand/close (v0.149 user request), remembered like the other
+// view prefs (the sweep/tests still drive controls inside a closed <details>)
+{ const fsec = $('flightsec');
+  if (localStorage.getItem('archean-flight-open') === '0') fsec.open = false;
+  fsec.addEventListener('toggle',
+    () => localStorage.setItem('archean-flight-open', fsec.open ? '1' : '0')); }
+buildFlight();
+onResize();
+if (location.search.includes('hull')) hullGroup.visible = true;
+if (location.search.includes('occ')) occGroup.visible = true;
+if (location.search.includes('nosub')) subGroup.visible = false;   // debug: hide subgrids
+{ const q0 = new URLSearchParams(location.search);        // ?flow = wind, ?lines = streamlines
+  if (q0.has('lines')) flowMode.m = 'lines';
+  if (q0.has('flow') || q0.has('wind')) flowMode.m = 'wind';
+  const azv = parseFloat(q0.get('az')); if (Number.isFinite(azv)) flowState.az = azv;
+  const spv = parseFloat(q0.get('speed')); if (Number.isFinite(spv)) flowState.speed = spv; }
+{ const fsP = new URLSearchParams(location.search).get('flowsrc');   // ?flowsrc=seat|thrust|auto
+  if (fsP === 'seat' || fsP === 'thrust' || fsP === 'auto') flowSrc.mode = fsP; }
+const perfOn = location.search.includes('perf');   // arm at load-complete (below), not wall-clock
+loadModelManifest().then(fetchDefault).then(applyCamQ);
+requestAnimationFrame(tick);
+
+// ---------- test-suite hooks (v0.169) ----------
+// The headless suites moved to tests.js; module scope is not visible
+// from there, so every binding they touch is exposed here. Getters are
+// live views (rebindings like `model`/`compObjs` stay current); the
+// setters are suite-side edits (gesture captures, switches). Test
+// scaffolding only — the viewer itself never touches `hooks`.
+export const hooks = {
+  get $ () { return $ },
+  get CELL () { return CELL },
+  get MODEL () { return MODEL },
+  get THRUST () { return THRUST },
+  get _gizOff () { return _gizOff },
+  get adpGroup () { return adpGroup },
+  get aeroArrows () { return aeroArrows },
+  get aeroGrid () { return aeroGrid },
+  get aeroPlates () { return aeroPlates },
+  get aeroUseGrid () { return aeroUseGrid },
+  get applyGizmoOrientation () { return applyGizmoOrientation },
+  get applyGizmoPosition () { return applyGizmoPosition },
+  get blockGroup () { return blockGroup },
+  get blockWireObj () { return blockWireObj },
+  get buildDashboard () { return buildDashboard },
+  get buildList () { return buildList },
+  get buildRealComponent () { return buildRealComponent },
+  get camera () { return camera },
+  get clearSurges () { return clearSurges },
+  get comMarker () { return comMarker },
+  get compColor () { return compColor },
+  get compGroup () { return compGroup },
+  get compObjs () { return compObjs },
+  get components () { return model?.data.components },
+  get controls () { return controls },
+  get dashTextTex () { return dashTextTex },
+  get dirty () { return dirty },
+  get extGrid () { return extGrid },
+  get flashes () { return flashes },
+  get flowDir () { return flowDir },
+  get flowGroup () { return flowGroup },
+  get flowMode () { return flowMode },
+  get flowN () { return flowN },
+  get flowPts () { return flowPts },
+  get flowSrc () { return flowSrc },
+  get fly () { return fly },
+  set fly (v) { fly = v },
+  get flyTo () { return flyTo },
+  get getModel () { return getModel },
+  get gizPivotL () { return gizPivotL },
+  set gizPivotL (v) { gizPivotL = v },
+  get gizmoCentre () { return gizmoCentre },
+  get gizmoCol () { return gizmoCol },
+  get gizmoMode () { return gizmoMode },
+  get gizmoProxy () { return gizmoProxy },
+  get gizmoShot () { return gizmoShot },
+  get gizmoSpinEye () { return gizmoSpinEye },
+  get gizmoSpinRing () { return gizmoSpinRing },
+  get gizmoUnwrap () { return gizmoUnwrap },
+  get grid () { return grid },
+  get ground () { return ground },
+  get hideModeBox () { return hideModeBox },
+  get hullGroup () { return hullGroup },
+  get hullOpacity () { return hullOpacity },
+  get hullWire () { return hullWire },
+  get inExterior () { return inExterior },
+  get invalSeq () { return invalSeq },
+  get invalidate () { return invalidate },
+  get knobAcc () { return knobAcc },
+  set knobAcc (v) { knobAcc = v },
+  get knobAxis () { return knobAxis },
+  set knobAxis (v) { knobAxis = v },
+  get knobQ0 () { return knobQ0 },
+  get knobRaw () { return knobRaw },
+  set knobRaw (v) { knobRaw = v },
+  get labelsOn () { return labelsOn },
+  get listTab () { return listTab },
+  set listTab (v) { listTab = v },
+  get loadModelManifest () { return loadModelManifest },
+  get markDirty () { return markDirty },
+  get massModel () { return massModel },
+  get mirrorGroup () { return mirrorGroup },
+  get modeAnchor () { return modeAnchor },
+  get pickRay () { return pickRay },
+  get modeBox () { return modeBox },
+  get model () { return model },
+  get needsRender () { return needsRender },
+  set needsRender (v) { needsRender = v },
+  get netThrust () { return netThrust },
+  get occGroup () { return occGroup },
+  get orig () { return orig },
+  get paintHighlights () { return paintHighlights },
+  get pipeEndsV () { return pipeEndsV },
+  get pipeGroup () { return pipeGroup },
+  get platesNear () { return platesNear },
+  get rawFromView () { return rawFromView },
+  get ray () { return ray },
+  get rayRingVis () { return rayRingVis },
+  get realMap () { return realMap },
+  get realModelsOn () { return realModelsOn },
+  get renderer () { return renderer },
+  get sampleVel () { return sampleVel },
+  get scene () { return scene },
+  get sealStats () { return sealStats },
+  get selBox () { return selBox },
+  get selBox2 () { return selBox2 },
+  get selPairs () { return selPairs },
+  get select () { return select },
+  get selectSub () { return selectSub },
+  get selected () { return selected },
+  get selectedSub () { return selectedSub },
+  get serialize () { return serialize },
+  get setFlowMode () { return setFlowMode },
+  get setGizmoMode () { return setGizmoMode },
+  get setModel () { return setModel },
+  get setRealModels () { return setRealModels },
+  get showModeBox () { return showModeBox },
+  get sockPivot () { return sockPivot },
+  get solidCells () { return solidCells },
+  get startSurges () { return startSurges },
+  get subGroup () { return subGroup },
+  get subJointAxis () { return subJointAxis },
+  get subMasterEntries () { return subMasterEntries },
+  get surges () { return surges },
+  get symAllowed () { return symAllowed },
+  get symOn () { return symOn },
+  set symOn (v) { symOn = v },
+  get symPropagateJoint () { return symPropagateJoint },
+  get symRotPiv () { return symRotPiv },
+  get symTwinIndex () { return symTwinIndex },
+  get syncAdapters () { return syncAdapters },
+  get syncGizmo () { return syncGizmo },
+  get syncSubJoints () { return syncSubJoints },
+  get tctl () { return tctl },
+  get thrustGroup () { return thrustGroup },
+  get updateWindHud () { return updateWindHud },
+  get viewPos () { return viewPos },
+  get viewQuat () { return viewQuat },
+  get viewToggles () { return viewToggles },
+  get windHud () { return windHud },
+};
+window.HARCHEAN = hooks;   // global handle: tests.js is loaded
+// with the release cache-bust query, so a static import specifier
+// from it would resolve to a SECOND view3d module instance.
