@@ -414,7 +414,7 @@ export function WirePanel(p: {
   /** list-hover gold-lights ONE CABLE in the viewport (null clears) */
   onHoverPipe?: (pi: number | null) => void;
 }) {
-  const [draft, setDraft] = useState<{ ci: number; name: string; kind: string; at: number[] } | null>(null);
+  const [draft, setDraft] = useState<{ ci: number; name: string; kind: string; at: readonly [number, number, number] } | null>(null);
   // two-step manual wiring: candidate COMPONENT first, then explicitly one
   // of ITS free ports (the user: "let me select target ports on compatible
   // elements manually, so that this can be evaluated")
@@ -477,7 +477,7 @@ export function WirePanel(p: {
     if (p.sel < 0) return [] as number[];
     const fi = flatIdxOf(p.sel);
     if (fi < 0) return [];
-    return pipes.map((q, i) => i)
+    return pipes.map((_q, i) => i)
       .filter(i => { const q = pipes[i]!; return q.a_component === fi || q.b_component === fi; });
   })();
   /** ranked candidates for the draft port (wiremodel order; ALL kept) */

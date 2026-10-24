@@ -109,7 +109,7 @@ export const KIND_STYLE: Record<string, Record<string, unknown>> = {
 const styleFor = (kind: WireKind) => KIND_STYLE[kind] ?? KIND_STYLE.data!;
 
 /** Axis-aligned L-run from a to b (x→y→z), zero spans skipped. */
-function route(a: [number, number, number], b: [number, number, number], kind: WireKind) {
+function route(a: readonly [number, number, number], b: readonly [number, number, number], kind: WireKind) {
   const style = styleFor(kind);
   const segs: Record<string, unknown>[] = [];
   const cur = [...a] as [number, number, number];
@@ -359,7 +359,7 @@ export function wireNets(bp: Blueprint, manifest: ModelManifest | null): WireNet
       members.sort((x, y) => rank[x.group] - rank[y.group] || x.type.localeCompare(y.type) || x.ci - y.ci);
       out.push({
         kind,
-        pipes: idx.filter(({ p, i }) => {
+        pipes: idx.filter(({ p }) => {
           const a = flatToTop.get(p.a_component);
           return a != null && find(a) === r;
         }).map(({ i }) => i),

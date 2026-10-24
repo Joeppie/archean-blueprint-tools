@@ -136,7 +136,7 @@ test.describe('wire overview, hover labels, disconnect / reconnect @ui', () => {
         __ARCHEAN__?: { engine: { blueprint: { data: { components: { type: string }[] } } } };
       }).__ARCHEAN__!.engine.blueprint.data.components[ci]!.type, c0.b_component);
       await page.getByTestId('wire-target-search').fill(bType);
-      const target = page.getByTestId('wire-target-item', { hasText: `[${c0.b_component}]` }).first();
+      const target = page.locator('[data-testid="wire-target-item"]', { hasText: `[${c0.b_component}]` }).first();
       await target.click();                                 // STEP 1: the part
       const port = page.locator('[data-testid="wire-target-port"]',
         { hasText: new RegExp(`(^|\\s)${c0.b_port.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$)`) }).first();
