@@ -2233,7 +2233,13 @@ release/functionality. but no user-unackowledged bumps."** Concretely:
   in-game save dir while the deploy pins repo testdata — diff the two blueprint.json
   first (app/tools/livery.mjs arbitrates live: world boxes, face pixels, hull on/off,
   chromium/firefox, ANGLE vulkan/gl). "Browser-only" render reports were here caused
-  by exactly this (github.io = blocks original, dev = the hullified save).
+  by exactly this (github.io = blocks original, dev = the hullified save). SECOND
+  check: the app's own IndexedDB craft cache (crafts.ts `archean-crafts`) — it serves
+  opens with ZERO network requests, so it survives Ctrl+F5, HTTP no-cache headers and
+  server-side file restores alike; a stale entry is invisible to every cache-busting
+  reflex. Cure: File ▸ 'Refresh craft (redownload)' (file-refresh), or any fresh
+  storage partition (incognito). stats().loads staying 1 with old data = served from
+  IndexedDB, not the network.
 
 ## Invariants that tests enforce (keep them green)
 1. `?selftest`: edit→serialize round-trip preserves bytes except intended fields;
