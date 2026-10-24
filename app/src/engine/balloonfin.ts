@@ -363,11 +363,21 @@ export function planBalloonTail(
   // the three pivots ON the hinge line (zB) + their subgrid panels
   const pivotDefs: { role: FinRole; pos: GP3; frame: Frame }[] = [];
   {
-    // rudder: joint axis = up (its ŷ), slave (+ẑ) faces the tail — the
-    // parts-only subgrid rule (subgrid.ts) animates the panel about R(q)·ŷ
+    // Rudder: joint axis = up (the part's ŷ), so the parts-only subgrid
+    // rule (subgrid.ts) yaws the panel about the vertical hinge line.
+    // v1.9.1 (we: "the hinge for the rudder is wrongly pointed … it
+    // shouldn't be positioned as though it was a pivot"): the ATTITUDE
+    // about that line is the aileron frame turned ONE −90° about the
+    // lateral axis — {x̂→−tHat, ŷ→uHat, ẑ→out}: the arm hangs where the
+    // fin hinges' arms hang, just quarter-turned, so the part reads as a
+    // HINGE like theirs. The old frame {ŷ→u, ẑ→tHat} was a cyclic 120°
+    // permutation of the fin mount: barrel-up with the arm sticking out
+    // of the cone tail like a pointer — exactly the SmallPivot turntable
+    // look we rejected. The PANEL kinematics are untouched either way
+    // (axis0 = R(q)·ŷ = up).
     const p: GP3 = [c[0]!, c[1]!, c[2]!];
     p[la] = zB; p[upIdx] = Math.round((keelU + lineUp(zB)) / 2); p[gSide] = cSide;
-    pivotDefs.push({ role: 'rudder', pos: p, frame: { ax: cross(uHat, tHat), ay: uHat, az: tHat } });
+    pivotDefs.push({ role: 'rudder', pos: p, frame: { ax: neg(tHat), ay: uHat, az: sHat } });
   }
   for (const sgn of [1, -1] as const) {
     // ailerons: joint axis = longitudinal, the hung panel rolls about it;

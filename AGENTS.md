@@ -1120,6 +1120,22 @@ topic + FORMAT).
  token kept); the CYLINDER is the shipped DEFAULT body (tail fields visible
  on open — e2e asserts the cycle; the ellipsoid-era suites click round
  EXPLICITLY via `stage()`, deliberate re-pins).
+ - **v1.9.1 follow-up (we: "the hinge for the rudder is wrongly pointed …
+ it shouldn't be positioned as though it was a pivot")**: the rudder hinge's
+ ATTITUDE about its joint line. The SmallHinge's displayed slave hub lies
+ ALONG its joint line (bbox-proven; the game's own XYQ door mounts stand it
+ up the same way), so hub-up is law-mandatory for a yawing rudder — what
+ was wrong was the TWIST about it: {ax: u×t, ay: u, az: t} was a cyclic 120°
+ permutation of the aileron mount, lying the master slab flat = a turntable
+ silhouette. The mount is now the aileron frame turned ONE −90° about the
+ lateral axis — `frame {ax: −tHat, ay: uHat, az: sHat}` — slab upright in
+ the fin plane, barrel lateral, the fin hinge stood on end. PANEL
+ KINEMATICS UNCHANGED (axis0 = R(q)·ŷ = up either way). Pins: balloonfin
+ 'the rudder hinge is the FIN hinge turned ONE 90°' (part axes + q_rud ≡
+ Rx(−90)·q_ail to 5 dp — 6-dp quat literals cap the precision) and the e2e
+ tail plate-pin reframed FRAME-FREE: a spin about a vertical line keeps the
+ model's vertical extent and centroid height EXACT (a horizontal-axis roll
+ shears both) — holds for any mount attitude.
 - **v1.8.6 THE SKIN TRANSFORM CUTS, NEVER DROPS (urgent-fix.md, user: "a valid
  zeppelin suddenly misses a face after rotations … the size doesn't inherently
  change"):** the frame-aligned 31-slot window is a FRAME law, so a face with

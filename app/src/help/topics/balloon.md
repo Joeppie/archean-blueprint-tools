@@ -68,7 +68,10 @@ line and was retired: the fins now ride the natural cone).
   steers nothing; the hinge's limited travel IS the control law). Since
   v1.9.0 the hinge's own visible plate turns about the SAME world line as
   its panel (the rudder yaws about the vertical, the ailerons roll about
-  the longitudinal — it used to roll the plate like a propeller). This
+  the longitudinal — it used to roll the plate like a propeller), and
+  since v1.9.1 the rudder hinge wears the fin hinges' attitude QUARTER-
+  TURNED: its slab stands upright in the fin plane, a hinge stood on end,
+  not lying flat like a turntable pivot. This
   triangle-panel-in-a-subgrid combo is what the game's READER carries
   (the dev reader recurses nested `triangles`); the corpus has no
   authored precedent, so the final in-game look of the rotating panels is

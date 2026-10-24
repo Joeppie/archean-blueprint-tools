@@ -16,6 +16,7 @@ import {
   type BalloonAdapters,
 } from '../balloonfin';
 import { spherePlan, sphereSkinTris, transformSkinTris, type SphereSpec } from '../latsphere';
+import { qAxisAngle, qMul, qRot, type V3 } from '../compparts';
 import manifest from '../../../../viewer/models/manifest.json';
 
 type Adm = { name: string; type: string; position: [number, number, number]; rotation: [number, number, number] };
@@ -236,6 +237,32 @@ describe('balloon tail plan (untouched cone, hung vanes)', () => {
     // limited travel — the control-surface law).
     for (const c of p.comps.filter(x => x.kind === 'pivot'))
       expect(c.type).toBe('SmallHinge');
+  });
+
+  test('the rudder hinge is the FIN hinge turned ONE 90° — not a pivot pose', () => {
+    // v1.9.1 (we: "the hinge for the rudder is wrongly pointed … it
+    // shouldn't be positioned as though it was a pivot"): the attitude is
+    // the aileron mount rotated −90° about the lateral axis. The part's
+    // barrel (ŷ, the .ini angular_y pin) still lands on the vertical yaw
+    // line, but its ARM (ẑ, the slave direction) hangs to the side like
+    // the fins' arms — NOT sticking tail-ward out of the cone (the old
+    // cyclic 120° permutation that read as a turntable pointer).
+    const qOf = (role: string) => {
+      const q = p.comps.find(c => c.kind === 'pivot' && c.role === role)!.quat;
+      // component quats carry the writer's 6-decimal literal style — the
+      // comparison below uses that precision
+      return q;
+    };
+    const qr = qOf('rudder'), qa = qOf('aileronR');
+    // barrel up (the panel yaw line — unchanged), arm LATERAL not tail-ward
+    expect(Math.abs(qRot(qr, [0, 1, 0])[1]!)).toBeGreaterThan(0.999);
+    expect(Math.abs(qRot(qr, [0, 0, 1])[0]!)).toBeGreaterThan(0.999);   // ∥ ±x̂
+    expect(Math.abs(qRot(qr, [0, 0, 1])[2]!)).toBeLessThan(0.001);      // not along ẑ
+    // and it IS one quarter-turn from the aileron mount about x̂
+    const quarter = qMul(qAxisAngle([1, 0, 0], -Math.PI / 2), qa);
+    const E: V3[] = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+    E.forEach(e => [0, 1, 2].forEach(k =>
+      expect(qRot(quarter, e)[k]!).toBeCloseTo(qRot(qr, e)[k]!, 5)));
   });
 
   test('the ghost map follows quarter-turns + cell offsets exactly', () => {

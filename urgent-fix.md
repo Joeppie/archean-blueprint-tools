@@ -120,6 +120,46 @@ Recorded in the shared AGENTS.md; new prose here and in the code follows it
 
 ---
 
+## ADDENDUM (v1.9.1) · "the hinge for the rudder is wrongly pointed … it
+shouldn't be positioned as though it was a pivot" — FIXED
+
+What we saw: at the tail, the two aileron SmallHinges read as hinges lying
+along their panels, but the rudder's stood at the cone apex like a
+turntable — a pivot silhouette.
+
+Measured before touching anything (screenshots + world bboxes + the game
+files): the SmallHinge's displayed slave hub extends ALONG its joint line
+(gltf slave bbox y −0.09..0.375 with the mass concentrated at the knuckle;
+baked chain ẑ → under the content basis C the part's FILE ŷ — the same
+direction jointChain rotates the panel about). The game's own XYQ-615 door
+hinges prove the same pose in authored data: hub UP along the vertical car
+door line, barrel horizontal. So a yawing rudder MUST show its hub up —
+that half is law, not taste. What was wrong was the TWIST about the hub:
+the old frame {ax: u×t, ay: u, az: t} is a cyclic 120° permutation of the
+aileron mount — it laid the master slab FLAT (thin axis up) and stuck the
+barrel boss fore–aft: lying on its back, the turntable look.
+
+Fix: the rudder mount is now the aileron mount turned ONE −90° about the
+lateral axis — frame {ax: −tHat, ay: uHat, az: sHat}. The slab stands
+upright in the fin plane, the barrel points sideways, the hub stays on the
+vertical joint line: literally "just one angle 90 degrees rotated compared
+to those for fins". Panel kinematics are untouched (axis0 = R(q)·ŷ = up in
+both), so every v1.9.0 kinematic pin still holds.
+
+Pins: `balloonfin.test.ts` 'the rudder hinge is the FIN hinge turned ONE
+90°' (barrel/arm axes + the exact quarter relation q_rud ≡ Rx(−90)·q_ail;
+5 dp because component quats carry the writer's 6-decimal literals) and
+the reframed e2e tail pin — the plate discriminator is now FRAME-FREE: a
+spin about a vertical line keeps the model's vertical extent and centroid
+height EXACT (≤5 %/≤0.01 m), while any horizontal-axis roll shears both.
+`tooldoc.test.ts` re-pinned: the authored rudder quat is Ry(+90), so
+after a ghost ⟲y the stored orientation is a pure 180° about y.
+
+Recorded in the shared AGENTS.md; new prose here and in the code follows it
+(older quotes stay as written).
+
+---
+
 # DONE · v1.8.6 — the skin transform CUTS, never drops (post-mortem, shipped in `b13e6a5`)
 
 Kept as the post-mortem — the bug class (frame-alignment, not sizing) is subtle

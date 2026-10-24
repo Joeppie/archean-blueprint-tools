@@ -387,12 +387,15 @@ describe('v1.9 balloon tail persists through the SHIPPED commit', () => {
     expect(coupler.position.x).toBeCloseTo(0.75, 3);
     expect(coupler.position.y).toBeCloseTo(0.25, 3);
     expect(coupler.position.z).toBeCloseTo(-0.5, 3);
-    // the rudder hinge turned from identity into a pure ±90° about y
+    // The rudder hinge turns WITH the ghost. v1.9.1: its authored mount is
+    // already Ry(+90) (the fin frame quarter-turned — arm out, barrel up,
+    // never the old identity "turntable pointer" pose), so after the ⟲y the
+    // stored orientation is a pure 180° about y: |y| ≈ 1, w ≈ 0.
     const rudder = saved.data.components.find(c2 => c2.type === 'SmallHinge')!;
-    expect(Math.abs(rudder.orientation.y)).toBeCloseTo(Math.SQRT1_2, 4);
-    expect(Math.abs(rudder.orientation.w)).toBeCloseTo(Math.SQRT1_2, 4);
-    expect(rudder.orientation.x).toBeCloseTo(0, 4);
-    expect(rudder.orientation.z).toBeCloseTo(0, 4);
+    expect(Math.abs(rudder.orientation.y)).toBeCloseTo(1, 3);
+    expect(Math.abs(rudder.orientation.w)).toBeCloseTo(0, 3);
+    expect(rudder.orientation.x).toBeCloseTo(0, 3);
+    expect(rudder.orientation.z).toBeCloseTo(0, 3);
     // the rudder panel turned WITH the map: its centre plane x=6 became z=6−2=4
     const rudderBuild = saved.data.components.filter(c2 => c2.type === 'Build')[0]!;
     const tris = rudderBuild.data?.['triangles'] as Record<string, number>[];

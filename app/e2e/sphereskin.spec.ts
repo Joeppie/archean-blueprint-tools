@@ -567,13 +567,16 @@ test.describe('generate balloon tool: dialog → movable ghost → cancel/build 
     // DIRECTION is arbitrated from WORLD COORDINATES (the standing lesson:
     // data-only assertions cannot pin a rotation direction). Turning each
     // panel master +30° must:
-    //  • rudder PANEL: yaw about the WORLD-UP line (group quaternion axis
-    //    ∝ ŷ; the vertical extent CONSTANT, the lateral extent GROWS);
-    //  • rudder PART PLATE: turn about that SAME up line — the plate's
-    //    vertical extent survives and its centre does NOT swing sideways.
-    //    Pre-fix it rolled about the FORE–AFT axis (a propeller): the centre
-    //    circled ±0.06 m and the vertical extent shrank with cos.
-    //  • ailerons: keep ROLLING (axis ∥ ẑ) — both twins the SAME axis.
+    //  • rudder PANEL: yaw about the WORLD-UP captured joint line — the
+    //    group quaternion turns ON it; the vertical extent CONSTANT, the
+    //    thin horizontal extent GROWS (it sweeps sideways);
+    //  • rudder PART PLATE: turn about that SAME up line. The frame-free
+    //    discriminator (v1.9.1, after we re-pointed the hinge attitude):
+    //    a spin about a VERTICAL line keeps the model's vertical extent
+    //    and centroid height EXACT; the old horizontal-axis prop roll
+    //    sheared both.
+    //  • ailerons: keep ROLLING about the horizontal joint line — both
+    //    twins on the SAME line.
     const swing = await page.evaluate(async () => {
       /* eslint-disable @typescript-eslint/no-explicit-any */
       const e = (window as any).__ARCHEAN__.engine;
@@ -632,6 +635,9 @@ test.describe('generate balloon tool: dialog → movable ghost → cancel/build 
         const axis = [q.x / n, q.y / n, q.z / n];
         const p1 = worldBox(grp), t1 = plateBox();
         set(0); await frames();
+        // (a turn about a VERTICAL line keeps a body's vertical extent and
+        // centroid height EXACT; a roll about a horizontal axis shears both
+        // — the frame-independent plate-axis discriminator, v1.9.1)
         out.push({
           role,
           axis,
@@ -639,9 +645,8 @@ test.describe('generate balloon tool: dialog → movable ghost → cancel/build 
           panelY0: p0.span[1], panelY1: p1.span[1],
           panelX0: p0.span[0], panelX1: p1.span[0],
           panelZ0: p0.span[2], panelZ1: p1.span[2],
-          plateY0: t0?.span[1], plateY1: t1?.span[1],
-          plateDx: t0 && t1 ? Math.abs(t1.c[0] - t0.c[0]) : null,
-          plateDz: t0 && t1 ? Math.abs(t1.c[2] - t0.c[2]) : null,
+          plateY0: t0 ? t0.span[1] : null, plateY1: t1 ? t1.span[1] : null,
+          plateCy0: t0 ? t0.c[1] : null, plateCy1: t1 ? t1.c[1] : null,
         });
       }
       return out;
@@ -669,16 +674,20 @@ test.describe('generate balloon tool: dialog → movable ghost → cancel/build 
     // chord (rotation-invariant phrasing — the ⟲Y swapped which axis is x)
     expect(Math.min(r.panelX1, r.panelZ1), 'rudder swept sideways under yaw')
       .toBeGreaterThan(Math.min(r.panelX0, r.panelZ0) + 1.0);
-    // …and the PART PLATE turns on the SAME line: its centre barely shifts
-    // laterally and its vertical extent survives (a prop roll would circle
-    // the centre ~0.06 m and shear the extent toward cos 30°)
+    // …and the PART PLATE turns on the SAME (vertical) line: a body spun
+    // about a VERTICAL line keeps its vertical extent and centroid height
+    // EXACTLY; the pre-fix plate rolled about a horizontal axis (prop
+    // style) and sheared both — this discriminator holds for ANY mount
+    // attitude (v1.9.1: the rudder hinge now wears the fin frame turned
+    // one −90° about the lateral axis — arm out like the fins, barrel on
+    // the vertical joint line, no turntable-pointer pose).
     expect(r.plateY0, 'plate model loaded').toBeTruthy();
-    expect((r.plateY1 ?? 0) / (r.plateY0 ?? 1),
-      'rudder plate vertical extent (a PROP ROLL would shrink/tilt it)')
-      .toBeGreaterThan(0.9);
-    expect(Math.hypot(r.plateDx ?? 9, r.plateDz ?? 9),
-      'rudder plate centre stays on the hinge line (no prop circle)')
-      .toBeLessThan(0.03);
+    expect(Math.abs(r.plateY1 / (r.plateY0 ?? 1) - 1),
+      'plate vertical extent is EXACT under a yaw (a horizontal-axis roll shears it)')
+      .toBeLessThan(0.05);
+    expect(Math.abs((r.plateCy1 ?? 9) - (r.plateCy0 ?? 0)),
+      'plate centroid height is EXACT under a yaw (a prop roll lifts/drops it)')
+      .toBeLessThan(0.01);
     // the ailerons: ROLL about a HORIZONTAL line (the ⟲Y-carried
     // longitudinal), both twins on the SAME line
     for (const a of ail) {
