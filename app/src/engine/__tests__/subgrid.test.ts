@@ -262,26 +262,34 @@ describe('THE PLATE LAW — the part plate turns on the panel’s line', () => {
     near(jointNodeAxis(id, 'x'), [1, 0, 0]);
     near(jointNodeSlide(id, 'x'), [1, 0, 0]);
   });
-  test('SmallHinge ê_y lands the plate on CONTENT ẑ (world up at the rudder mount)', () => {
+  test('SmallHinge ê_y lands the plate on CONTENT ẑ (lying mounts: part ŷ → ship axis)', () => {
     const id: FileQuat = { w: 1, x: 0, y: 0, z: 0 };
     near(jointNodeAxis(id, 'y'), [0, 0, 1]);
     near(jointNodeAxis(id, 'z'), [0, -1, 0]);
   });
-  test('the rudder case end-to-end: plate axis == jointChain axis == world up', () => {
-    // the balloon rudder mount at stage (balloonfin frameQuat = identity):
-    // the authored frame maps part ŷ → world up, so the file quat is plain I
-    // and the in-game-pinned panel law gives UP…
+  test('the rudder case end-to-end: plate axis == jointChain axis == lying ship line', () => {
+    // v1.9.3 re-pin: the balloon rudder mount now lies the hinge DOWN — its
+    // authored frame maps part ŷ → the LONGITUDINAL ship line (the fin
+    // hinge rolled +90° about that line), so a stand-in file quat rotating
+    // ŷ onto ẑ drives both the panel and the plate about the lying line
+    // (the old sky-pointing mount used the identity quat and read UP).
+    const q90 = eulerZYX(90, 0, 0);                        // Rx(90): ŷ → ẑ
     const mc: BlueprintComponent = comp({
-      type: 'SmallHinge', orientation: { w: 1, x: 0, y: 0, z: 0 },
-      data: { angle: 25 },
+      type: 'SmallHinge', orientation: q90, data: { angle: 25 },
     });
     const manifest = {
       SmallHinge: { joints: [{ name: 'axle', position: [0, 0, 0], rotation: [0, 0, 0], axis: 'y' }] },
     } as unknown as ModelManifest;
     const chain = jointChain(mc, manifest, false);
-    expect(chain!.axis).toEqual([0, 1, 0]);               // the panel yaws about UP
+    expect(Math.abs(chain!.axis[2]!)).toBeGreaterThan(0.999);   // panel rolls along ẑ
+    expect(Math.abs(chain!.axis[1]!)).toBeLessThan(1e-9);       // not the retired UP line
+    // the axle's own euler is IDENTITY (the .ini), so v is the same
+    // content-ẑ as at identity; the plate's world line then rides the
+    // scene chain part-quat ∘ C ∘ v — and lands on the panel law q·ŷ
     const v = jointNodeAxis({ w: 1, x: 0, y: 0, z: 0 }, 'y');
-    const plateWorld = qRot({ w: Math.SQRT1_2, x: -Math.SQRT1_2, y: 0, z: 0 }, v);
-    expect(plateWorld[1]!).toBeCloseTo(1, 9);             // the plate turns about UP too
+    const plateWorld = qRot(q90,
+      qRot({ w: Math.SQRT1_2, x: -Math.SQRT1_2, y: 0, z: 0 }, v));
+    const expectToPanel = qRot(q90, [0, 1, 0]);                 // the in-game panel law
+    plateWorld.forEach((x, i) => expect(x).toBeCloseTo(expectToPanel[i]!, 9));
   });
 });

@@ -239,14 +239,16 @@ describe('balloon tail plan (untouched cone, hung vanes)', () => {
       expect(c.type).toBe('SmallHinge');
   });
 
-  test('the rudder hinge is the FIN hinge turned ONE 90° — not a pivot pose', () => {
-    // v1.9.1 (we: "the hinge for the rudder is wrongly pointed … it
-    // shouldn't be positioned as though it was a pivot"): the attitude is
-    // the aileron mount rotated −90° about the lateral axis. The part's
-    // barrel (ŷ, the .ini angular_y pin) still lands on the vertical yaw
-    // line, but its ARM (ẑ, the slave direction) hangs to the side like
-    // the fins' arms — NOT sticking tail-ward out of the cone (the old
-    // cyclic 120° permutation that read as a turntable pointer).
+  test('the rudder hinge is the FIN hinge rolled ONE 90° about the ship axis', () => {
+    // v1.9.3 (we: "the hinge should be 'laying down' … connectors same
+    // side (near the fuselage) … rotated 90° while still laying down"):
+    // the mount is the aileron frame rolled +90° about t̂ (ẑ here). The
+    // tower (ŷ, the .ini angular_y pin) LIES along the ship axis like
+    // the fins' towers — it no longer points skyward (v1.9.1's stance
+    // is retired) — and the plug face (ẑ, where the lv/data connectors
+    // live) lands on UP, so the plugs point DOWN at the body exactly as
+    // the fins' plugs point inboard at it. The panel rolls about the
+    // LONGITUDINAL line: the tall vane's top swings sideways.
     const qOf = (role: string) => {
       const q = p.comps.find(c => c.kind === 'pivot' && c.role === role)!.quat;
       // component quats carry the writer's 6-decimal literal style — the
@@ -254,12 +256,14 @@ describe('balloon tail plan (untouched cone, hung vanes)', () => {
       return q;
     };
     const qr = qOf('rudder'), qa = qOf('aileronR');
-    // barrel up (the panel yaw line — unchanged), arm LATERAL not tail-ward
-    expect(Math.abs(qRot(qr, [0, 1, 0])[1]!)).toBeGreaterThan(0.999);
-    expect(Math.abs(qRot(qr, [0, 0, 1])[0]!)).toBeGreaterThan(0.999);   // ∥ ±x̂
-    expect(Math.abs(qRot(qr, [0, 0, 1])[2]!)).toBeLessThan(0.001);      // not along ẑ
-    // and it IS one quarter-turn from the aileron mount about x̂
-    const quarter = qMul(qAxisAngle([1, 0, 0], -Math.PI / 2), qa);
+    // joint axis LYING on the ship axis — not the sky
+    expect(Math.abs(qRot(qr, [0, 1, 0])[2]!)).toBeGreaterThan(0.999);    // ∥ ±ẑ
+    expect(Math.abs(qRot(qr, [0, 1, 0])[1]!)).toBeLessThan(0.001);       // not up
+    // the plug face (−ẑ) faces the body: part ẑ → world up ⇒ plugs DOWN
+    expect(Math.abs(qRot(qr, [0, 0, 1])[1]!)).toBeGreaterThan(0.999);    // ∥ ±ŷ
+    expect(Math.abs(qRot(qr, [0, 0, 1])[2]!)).toBeLessThan(0.001);       // not along ẑ
+    // and it IS one quarter-turn about the SHIP AXIS from the fin mount
+    const quarter = qMul(qAxisAngle([0, 0, 1], Math.PI / 2), qa);
     const E: V3[] = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
     E.forEach(e => [0, 1, 2].forEach(k =>
       expect(qRot(quarter, e)[k]!).toBeCloseTo(qRot(qr, e)[k]!, 5)));

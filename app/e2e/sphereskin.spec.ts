@@ -563,18 +563,19 @@ test.describe('generate balloon tool: dialog → movable ghost → cancel/build 
     expect(leads.checked).toBeGreaterThanOrEqual(6);   // 3 cables × 2 ends
     expect(leads.bad, 'no wire leaves its plug sideways').toBe(0);
     // ---------------------------------------------------------------
-    // v1.9.0 THE RUDDER SWINGS LIKE A RUDDER (urgent-fix.md §1). The SWEEP
-    // DIRECTION is arbitrated from WORLD COORDINATES (the standing lesson:
-    // data-only assertions cannot pin a rotation direction). Turning each
-    // panel master +30° must:
-    //  • rudder PANEL: yaw about the WORLD-UP captured joint line — the
-    //    group quaternion turns ON it; the vertical extent CONSTANT, the
-    //    thin horizontal extent GROWS (it sweeps sideways);
-    //  • rudder PART PLATE: turn about that SAME up line. The frame-free
-    //    discriminator (v1.9.1, after we re-pointed the hinge attitude):
-    //    a spin about a VERTICAL line keeps the model's vertical extent
-    //    and centroid height EXACT; the old horizontal-axis prop roll
-    //    sheared both.
+    // v1.9.3 THE RUDDER HINGE LIES DOWN (we: "points upward … It should
+    // be in a lying position, like the two other generated hinges;
+    // connectors same side (near the fuselage) … rotated 90° while still
+    // laying down"). The mount is now the aileron mount rolled +90° about
+    // the ship axis, so the SWEEP DIRECTION re-pins (world coordinates —
+    // the standing lesson: data-only assertions cannot pin a rotation):
+    //  • rudder joint line LYING (horizontal) — the v1.9.0/9.1 up-line
+    //    pin is RETIRED; the group quaternion turns ON that line;
+    //  • the vane's TOP and BOTTOM halves SCISSOR SIDEWAYS along
+    //    axis×UP — the tall top swings to one side, the keel strip to
+    //    the other (a yaw about UP would move them the SAME way);
+    //  • rudder PART PLATE spins about its OWN long (lying) axis: its
+    //    world centroid never shifts;
     //  • ailerons: keep ROLLING about the horizontal joint line — both
     //    twins on the SAME line.
     const swing = await page.evaluate(async () => {
@@ -599,7 +600,7 @@ test.describe('generate balloon tool: dialog → movable ghost → cancel/build 
             for (let k = 0; k < 3; k++) { mn[k] = Math.min(mn[k], q[k]); mx[k] = Math.max(mx[k], q[k]); }
           }
         });
-        return { span: mn.map((v: number, i: number) => mx[i] - v), c: mn.map((v: number, i: number) => (v + mx[i]) / 2) };
+        return { span: mn.map((v: number, i: number) => mx[i] - v), c: mn.map((v: number, i: number) => (v + mx[i]) / 2), mn, mx };
       };
       const out: any[] = [];
       // THE JOIN ORDER IS THE COMMIT'S CONTRACT (commitBalloon appends in
@@ -628,25 +629,58 @@ test.describe('generate balloon tool: dialog → movable ghost → cancel/build 
           e.dataEdited();
           if (plateBox() !== null) e.liveDataEdit(j.component);   // the part model re-poses
         };
+        // half-body CENTROIDS split by the joint line's height (pivot0 +
+        // moff): the vane's top and keel halves, for the SCISSOR test
+        const mo = [e.moffView.x, e.moffView.y, e.moffView.z];
+        const halves = (obj: any, midY: number) => {
+          e.scene.updateMatrixWorld(true);
+          const acc = { t: [0, 0, 0, 0], b: [0, 0, 0, 0] };
+          obj.traverse((o: any) => {
+            if (!o.isMesh || !o.visible) return;
+            const pos = o.geometry?.attributes?.position;
+            if (!pos) return;
+            const m2 = o.matrixWorld.elements;
+            for (let i = 0; i < pos.count; i++) {
+              const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+              const q = [m2[0] * x + m2[4] * y + m2[8] * z + m2[12],
+                m2[1] * x + m2[5] * y + m2[9] * z + m2[13],
+                m2[2] * x + m2[6] * y + m2[10] * z + m2[14]];
+              const s = q[1]! > midY + 0.05 ? acc.t : q[1]! < midY - 0.05 ? acc.b : null;
+              if (s) { s[0] += q[0]; s[1] += q[1]; s[2] += q[2]; s[3]++; }
+            }
+          });
+          const c = (s: number[]) => (s[3] ? [s[0] / s[3], s[1] / s[3], s[2] / s[3]] : null);
+          return { top: c(acc.t), bot: c(acc.b) };
+        };
         set(0); await frames();
         const p0 = worldBox(grp), t0 = plateBox();
+        const midY = jr ? jr.pivot0[1] + mo[1] : p0.c[1];
+        const h0 = halves(grp, midY);
+        // the plate's extent ALONG its own joint axis: a spin on that axis
+        // leaves it EXACT; a prop-style roll shears it
+        const along = (t: ReturnType<typeof worldBox> | null) => {
+          if (!t || !jr) return null;
+          let lo = Infinity, hi = -Infinity;
+          for (let i = 0; i < 8; i++) {
+            const v = [(i & 1 ? t.mx[0] : t.mn[0]), (i & 2 ? t.mx[1] : t.mn[1]), (i & 4 ? t.mx[2] : t.mn[2])];
+            const d = jr.axis0[0] * v[0] + jr.axis0[1] * v[1] + jr.axis0[2] * v[2];
+            lo = Math.min(lo, d); hi = Math.max(hi, d);
+          }
+          return hi - lo;
+        };
         set(30); await frames();
         const q = grp.quaternion, n = Math.hypot(q.x, q.y, q.z) || 1;
         const axis = [q.x / n, q.y / n, q.z / n];
-        const p1 = worldBox(grp), t1 = plateBox();
+        const t1 = plateBox();
+        const h1 = halves(grp, midY);
         set(0); await frames();
-        // (a turn about a VERTICAL line keeps a body's vertical extent and
-        // centroid height EXACT; a roll about a horizontal axis shears both
-        // — the frame-independent plate-axis discriminator, v1.9.1)
         out.push({
           role,
           axis,
           jrefAxis: jr ? [jr.axis0[0], jr.axis0[1], jr.axis0[2]] : null,
-          panelY0: p0.span[1], panelY1: p1.span[1],
-          panelX0: p0.span[0], panelX1: p1.span[0],
-          panelZ0: p0.span[2], panelZ1: p1.span[2],
-          plateY0: t0 ? t0.span[1] : null, plateY1: t1 ? t1.span[1] : null,
-          plateCy0: t0 ? t0.c[1] : null, plateCy1: t1 ? t1.c[1] : null,
+          topC0: h0.top, topC1: h1.top, botC0: h0.bot, botC1: h1.bot,
+          plateC0: t0 ? t0.c : null, plateC1: t1 ? t1.c : null,
+          plateAx0: along(t0), plateAx1: along(t1),
         });
       }
       return out;
@@ -658,36 +692,45 @@ test.describe('generate balloon tool: dialog → movable ghost → cancel/build 
     expect(ail).toHaveLength(2);
     const dot3 = (a: number[], b: number[]) => a[0]! * b[0]! + a[1]! * b[1]! + a[2]! * b[2]!;
     const UP = [0, 1, 0];
-    // the rudder: YAW about the vertical — its CAPTURED joint line is UP
-    // (the ⟲Y on the ghost keeps world up), the group actually turns about
-    // that line, and the panel's vertical extent stays while the lateral
-    // extent grows (it sweeps left/right).
+    // the rudder: a LYING joint line — horizontal (the ⟲Y on the ghost
+    // keeps horizontal lines horizontal); the v1.9.0/9.1 UP-line pin is
+    // RETIRED, and the sky-pointing mount fails THIS assertion. The
+    // group turns exactly ON that line.
     const r = rud[0]!;
-    expect(Math.abs(dot3(r.jrefAxis!, UP)), `rudder joint line ${JSON.stringify(r.jrefAxis)} must be UP`)
-      .toBeGreaterThan(0.99);
+    expect(Math.abs(dot3(r.jrefAxis!, UP)), `rudder joint line ${JSON.stringify(r.jrefAxis)} must LIE DOWN`)
+      .toBeLessThan(0.05);
     expect(Math.abs(dot3(r.axis, r.jrefAxis!)), 'the panel turns ON its captured line')
       .toBeGreaterThan(0.999);
-    expect(r.panelY1 / r.panelY0, 'rudder vertical extent under yaw')
-      .toBeGreaterThan(0.95);
-    // the panel is a THIN vane: at rest the smaller horizontal span is its
-    // thickness; a yaw about UP swings it so THAT span grows toward the
-    // chord (rotation-invariant phrasing — the ⟲Y swapped which axis is x)
-    expect(Math.min(r.panelX1, r.panelZ1), 'rudder swept sideways under yaw')
-      .toBeGreaterThan(Math.min(r.panelX0, r.panelZ0) + 1.0);
-    // …and the PART PLATE turns on the SAME (vertical) line: a body spun
-    // about a VERTICAL line keeps its vertical extent and centroid height
-    // EXACTLY; the pre-fix plate rolled about a horizontal axis (prop
-    // style) and sheared both — this discriminator holds for ANY mount
-    // attitude (v1.9.1: the rudder hinge now wears the fin frame turned
-    // one −90° about the lateral axis — arm out like the fins, barrel on
-    // the vertical joint line, no turntable-pointer pose).
-    expect(r.plateY0, 'plate model loaded').toBeTruthy();
-    expect(Math.abs(r.plateY1 / (r.plateY0 ?? 1) - 1),
-      'plate vertical extent is EXACT under a yaw (a horizontal-axis roll shears it)')
-      .toBeLessThan(0.05);
-    expect(Math.abs((r.plateCy1 ?? 9) - (r.plateCy0 ?? 0)),
-      'plate centroid height is EXACT under a yaw (a prop roll lifts/drops it)')
-      .toBeLessThan(0.01);
+    // the SIDESWAYS scissor: perpendicular to the lying joint line (the
+    // frame-free phrasing — via the axis, not a constant). The vane's top
+    // half travels to one side, its keel strip to the OTHER; a yaw about
+    // UP would carry both halves the same way (product ≥ 0).
+    const nn = Math.hypot(r.jrefAxis![2], r.jrefAxis![0]) || 1;
+    const m = [-r.jrefAxis![2]! / nn, 0, r.jrefAxis![0]! / nn];
+    const dTop = r.topC1!.map((v: number, i: number) => v - r.topC0![i]!);
+    const dBot = r.botC1!.map((v: number, i: number) => v - r.botC0![i]!);
+    const sTop = dot3(dTop, m), sBot = dot3(dBot, m);
+    expect(Math.abs(sTop), `rudder top sweeps SIDEWAYS (${sTop.toFixed(3)} m)`)
+      .toBeGreaterThan(0.05);
+    expect(Math.abs(sBot), `the keel strip sweeps too (${sBot.toFixed(3)} m)`)
+      .toBeGreaterThan(0.05);
+    expect(Math.sign(sTop) * Math.sign(sBot),
+      'top and keel SCISSOR opposite (a yaw about UP moves them alike)')
+      .toBeLessThan(0);
+    // the PART PLATE spins about its OWN lying long axis (its tower IS the
+    // joint line): its extent ALONG that line is EXACT (a reintroduced
+    // C-basis roll would shear it — the tower would tilt OFF the line).
+    // The union-box CENTROID may drift ≤ ~0.011 by design: at rest the
+    // static LV plug (0.146 m) owns the silhouette, mid-turn the rotating
+    // tower corners (0.234 m) do, which centres the box on the axis.
+    expect(r.plateC0, 'plate model loaded').toBeTruthy();
+    expect(Math.abs(r.plateAx1! - r.plateAx0!),
+      'plate extent along its joint line is EXACT — it spins on its own axis')
+      .toBeLessThan(0.005);
+    r.plateC1!.forEach((v: number, i: number) =>
+      expect(Math.abs(v - r.plateC0![i]!),
+        'plate centroid stays on its own axis')
+        .toBeLessThan(0.02));
     // the ailerons: ROLL about a HORIZONTAL line (the ⟲Y-carried
     // longitudinal), both twins on the SAME line
     for (const a of ail) {

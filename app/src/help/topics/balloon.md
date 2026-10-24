@@ -51,9 +51,10 @@ line and was retired: the fins now ride the natural cone).
   cuts into the ship), and aft of the hinge the vane spans keel-to-line
   to a vertical trailing edge. The side fins' hung panels keep a clear
   gap to the cone — their inner edge is a flat, slightly stepped plane,
-  so nothing strikes the tail's radius. The TOP rudder yaws about the
-  vertical pivot; the MIRRORED port/starboard pair rolls about the
-  longitudinal axis. Panels are hull TRIANGLES, never parts; the pair is
+  so nothing strikes the tail's radius. The TOP rudder rolls about the
+  LONGITUDINAL hinge line — its tall vane swings SIDEWAYS at the top;
+  the MIRRORED port/starboard pair rolls about the same longitudinal
+  axis. Panels are hull TRIANGLES, never parts; the pair is
   one plate reflected in the mirror plane, triangle for triangle.
 - `fin size %` sets the line's slope (half the girth above the shoulder
   at the hinge line for the normal setting); `oversize` multiplies past
@@ -67,11 +68,17 @@ line and was retired: the fins now ride the natural cone).
   early on and REMOVED (v1.9.0 — a control surface that spins full circle
   steers nothing; the hinge's limited travel IS the control law). Since
   v1.9.0 the hinge's own visible plate turns about the SAME world line as
-  its panel (the rudder yaws about the vertical, the ailerons roll about
-  the longitudinal — it used to roll the plate like a propeller), and
-  since v1.9.1 the rudder hinge wears the fin hinges' attitude QUARTER-
-  TURNED: its slab stands upright in the fin plane, a hinge stood on end,
-  not lying flat like a turntable pivot. This
+  its panel (it used to roll the plate like a propeller). And since
+  v1.9.3 all three hinges are ONE part rolled around the ship's axis: the
+  two fin hinges lie with their tower pointing AFT and their connectors
+  facing the hull side, and the rudder hinge is that mount quarter-turned
+  90° — still lying down, connector pointing DOWN toward the body — so
+  its panel rolls about the longitudinal line and the tall vane's top
+  swings sideways. (A stance-up attitude with the tower pointing skyward
+  was tried and retired the same day: "the hinge should be laying down
+  … connectors same side (near the fuselage) … rotated 90° while still
+  laying down".)
+  This
   triangle-panel-in-a-subgrid combo is what the game's READER carries
   (the dev reader recurses nested `triangles`); the corpus has no
   authored precedent, so the final in-game look of the rotating panels is

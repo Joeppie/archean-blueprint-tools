@@ -363,21 +363,24 @@ export function planBalloonTail(
   // the three pivots ON the hinge line (zB) + their subgrid panels
   const pivotDefs: { role: FinRole; pos: GP3; frame: Frame }[] = [];
   {
-    // Rudder: joint axis = up (the part's ŷ), so the parts-only subgrid
-    // rule (subgrid.ts) yaws the panel about the vertical hinge line.
-    // v1.9.1 (we: "the hinge for the rudder is wrongly pointed … it
-    // shouldn't be positioned as though it was a pivot"): the ATTITUDE
-    // about that line is the aileron frame turned ONE −90° about the
-    // lateral axis — {x̂→−tHat, ŷ→uHat, ẑ→out}: the arm hangs where the
-    // fin hinges' arms hang, just quarter-turned, so the part reads as a
-    // HINGE like theirs. The old frame {ŷ→u, ẑ→tHat} was a cyclic 120°
-    // permutation of the fin mount: barrel-up with the arm sticking out
-    // of the cone tail like a pointer — exactly the SmallPivot turntable
-    // look we rejected. The PANEL kinematics are untouched either way
-    // (axis0 = R(q)·ŷ = up).
+    // Rudder: THE AILERON MOUNT ROLLED ONE +90° ABOUT THE SHIP AXIS
+    // (v1.9.3, we: "the hinge should be 'laying down' but, connectors
+    // same side (near the fuselage) as the other hinges, and of course
+    // rotated 90° while still laying down"). The frame is the fin frame
+    // {x̂→up, ŷ→tail, ẑ→out} turned +90° about tHat: {x̂→−side, ŷ→tail,
+    // ẑ→up} — the tower (part ŷ, the .ini angular_y pin) LIES along the
+    // longitudinal line like both fin hinges' towers, and the plug face
+    // (part −ẑ, where the lv/data connectors live) points DOWN at the
+    // body, exactly as the fins' plugs face inboard at it. All three
+    // hinges are then ONE part rolled around the ship: aft-tower down,
+    // connector toward the fuselage. The panel rolls about that
+    // LONGITUDINAL joint line (axis0 = R(q)·ŷ = tHat): the tall vane's
+    // top swings SIDEWAYS. RETIRED the same day: v1.9.1's stance-up
+    // fin attitude {−t̂,û,ŝ} (tower pointing skyward — "it points
+    // upward, so it can bend the tail fin down and up").
     const p: GP3 = [c[0]!, c[1]!, c[2]!];
     p[la] = zB; p[upIdx] = Math.round((keelU + lineUp(zB)) / 2); p[gSide] = cSide;
-    pivotDefs.push({ role: 'rudder', pos: p, frame: { ax: neg(tHat), ay: uHat, az: sHat } });
+    pivotDefs.push({ role: 'rudder', pos: p, frame: { ax: neg(sHat), ay: tHat, az: uHat } });
   }
   for (const sgn of [1, -1] as const) {
     // ailerons: joint axis = longitudinal, the hung panel rolls about it;

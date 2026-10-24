@@ -1221,6 +1221,44 @@ topic + FORMAT).
   the overhead would live.
   Version strings sit at v1.9.2 (patch line; the batch adds user-facing
   functionality → a v1.10.0 MINOR was PROPOSED to the user, not self-applied).
+- **v1.9.3 THE RUDDER HINGE LIES DOWN (we: "the TAIL RUDDER hinge … points
+  upward so it can bend the tail fin down and up, but the tail should move
+  sideways!!! … It should be in a lying position, like the two other
+  generated hinges; the hinge should be 'laying down' but, connectors same
+  side (near the fuselage) as the other hinges, and of course rotated 90°
+  while still laying down")**: the THIRD ruling on this one mount
+  (v1.9.0 join → v1.9.1 stance-up "fin attitude" → RETIRED here). The
+  rudder pivotDef in `balloonfin.ts` is now THE AILERON MOUNT ROLLED ONE
+  +90° ABOUT THE SHIP AXIS: frame `{ ax: −ŝ, ay: t̂, az: û }` (was
+  `{−t̂, û, ŝ}`) — the part's tower (local ŷ = the .ini angular_y pin, the
+  slave hub the bbox proved lies ALONG the joint line) LIES along the
+  longitudinal line like both fin hinges' towers, and the plug face
+  (local −ẑ, where the gltf's lv/data connectors live) points DOWN at the
+  body — every connector in the tail batch now faces the fuselage. All
+  three hinges are then ONE part rolled around the ship: towers aft,
+  plugs in toward the hull. Kinematics follow the mount (axis0 = R(q)·ŷ):
+  the rudder panel now rolls about the LONGITUDINAL line — the tall
+  vane's TOP swings SIDEWAYS (the keel strip the opposite way), and the
+  plate spins on its own lying axis, so its world box CENTROID never
+  moves. The v1.9.1 claim "hub-up is law-mandatory for a yawing rudder"
+  (XYQ-door precedent) is OVERRULED by this pose spec; the PLATE LAW
+  itself (R(q)·qAxle·ê) is untouched. Pins re-cut to the new law, each
+  DISCRIMINATING (the old mount fails them): vitest `balloonfin.test.ts`
+  'the rudder hinge is the FIN hinge rolled ONE 90° about the ship axis'
+  (tower ∥ ±ẑ not up, plug face up ⇒ plugs down, qr ≡ qMul(qAxisAngle(ẑ,
+  +90°), q_ailR) to 5 dp); `subgrid.test.ts` rudder end-to-end (file quat
+  Rx(90): jointChain axis ∥ ẑ, plate ≡ panel law); `tooldoc.test.ts`
+  rotated-ghost commit (authored 180° about (û+t̂)/√2 × the ⟲y ⇒ stored
+  |w|=|x|=|y|=|z|=½; the stance mount stored a pure |y|=1); e2e
+  `sphereskin.spec` TAIL section from WORLD COORDINATES (captured line
+  LYING |dot(axis,UP)|<0.05; panel turns ON it; half-centroid SCISSOR:
+  top and keel travel OPPOSITE along axis×UP — a yaw moves them alike;
+  plate extent ALONG its joint line EXACT under the spin — a C-basis
+  roll would shear it; centroid ≤ 0.02 — at rest the static LV plug
+  (0.146 m) owns the bbox silhouette, mid-turn the tower corners
+  (0.234 m) do, a designed 0.0105 re-centring). Help topic balloon.md
+  retold. In-game arbitration of the sideways sweep stays OURS jointly
+  (AGENTS: in-game pixels arbitrate). Version strings v1.9.3 (patch).
 - **v1.8.6 THE SKIN TRANSFORM CUTS, NEVER DROPS (urgent-fix.md, user: "a valid
  zeppelin suddenly misses a face after rotations … the size doesn't inherently
  change"):** the frame-aligned 31-slot window is a FRAME law, so a face with
