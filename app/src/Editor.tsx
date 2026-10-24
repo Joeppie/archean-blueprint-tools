@@ -7,7 +7,7 @@
 // download). Holds the raw-literal DOC + live bp; see App.tsx for the shell.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { craftName } from './gallery-catalog';
-import { DEFAULT_OPTS, type Engine, type PickHit, type ViewOptions } from './engine/scene';
+import { DEFAULT_OPTS, type Backdrop, type Engine, type PickHit, type ViewOptions } from './engine/scene';
 import Viewport from './components/Viewport';
 import Panel, { StaticInfo, ViewOpts, type EditApi } from './components/Panel';
 import TopBar, { type Mode } from './components/TopBar';
@@ -110,6 +110,23 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   const onMirrorAxis = useCallback((a: MirrorAxis) => {
     setMirAxis(a);
     engineRef.current?.setMirrorAxis(a);
+  }, []);
+  // v1.9.2 THE VIEW MENU (⚙ renamed, user: "rename that to view … under view
+  // also add a mode for orthogonal"): SKY BACKDROP + ORTHOGRAPHIC rows.
+  // The Engine owns the live values (localStorage + its own defaults at
+  // attach); the React twins exist so the rows re-render — the mirAxis
+  // precedent. onEngine re-syncs both from the engine (engine is truth).
+  const [backdrop, setBackdrop] = useState<Backdrop>(() =>
+    (['none', 'mars', 'earth'] as string[]).includes(localStorage.getItem('archean-app-backdrop') ?? '')
+      ? localStorage.getItem('archean-app-backdrop') as Backdrop : 'none');
+  const onBackdrop = useCallback((b: Backdrop) => {
+    setBackdrop(b);
+    engineRef.current?.setBackdrop(b);
+  }, []);
+  const [ortho, setOrtho] = useState(() => localStorage.getItem('archean-app-ortho') === '1');
+  const onOrtho = useCallback((v: boolean) => {
+    setOrtho(v);
+    engineRef.current?.setProjection(v);
   }, []);
   /** the axis for callbacks that run outside React render (engine is truth) */
   const mirAx = useCallback((): MirrorAxis => engineRef.current?.mirrorAxis ?? 'x', []);
@@ -341,6 +358,9 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   const onEngine = useCallback((e: Engine | null) => {
     engineRef.current = e;
     if (e) {
+      // the VIEW MENU rows mirror the engine's persisted state (v1.9.2)
+      setBackdrop(e.backdropState().current);
+      setOrtho(e.projection() === 'orthographic');
       e.onSelection = s => setSel(s);
       // engine-side writes (sliders/gizmo/twins) mirror bp → doc + dirty
       e.onEdit = ci => {
@@ -527,6 +547,13 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       if (map[e.key]) {
         const cur = engineRef.current?.getOptions();
         if (cur) toggleOpt(map[e.key]!, !cur[map[e.key]!]);
+      }
+      // v1.9.2: '5' flips the PROJECTION (Blender's numpad-5 habit — the
+      // user's ortho mode lives in the View menu; the key is the fast path)
+      if (e.key === '5' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const on = engineRef.current?.projection() !== 'orthographic';
+        setOrtho(!!on);
+        engineRef.current?.setProjection(!!on);
       }
       if (e.key === 'Escape') {
         setPaintOpen(false);                           // 🎨 palette window first
@@ -899,10 +926,10 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
           className="ksp-btn shrink-0 px-2.5 py-1 text-[12px] hover:text-accent">
           ▤
         </button>
-        <button data-testid="toggle-options" title="view options" aria-pressed={optsOpen}
+        <button data-testid="toggle-options" title="View" aria-pressed={optsOpen}
           onClick={() => setOptsOpen(o => !o)}
           className={`ksp-btn shrink-0 px-2.5 py-1 text-[12px] hover:text-accent ${optsOpen ? 'on' : ''}`}>
-          ⚙
+          ⚙<span className="hidden sm:inline"> View</span>
         </button>
       </TopBar>
       <input ref={fileRef} type="file" accept=".json,application/json" className="hidden"
@@ -1041,7 +1068,9 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
                 <ViewOpts opts={opts} onOpt={toggleOpt} hullOpacity={hullOpacity} onHullOpacity={setHullOp}
                                     gizmoOn={gizmoOn} onGizmo={setGizmo} hiDef={hiDef} onHiDef={onHiDef}
                                     staticInfo={staticInfo} onStaticInfo={setStaticInfo}
-                                    mirrorAxis={mirAxis} onMirrorAxis={onMirrorAxis} />
+                                    mirrorAxis={mirAxis} onMirrorAxis={onMirrorAxis}
+                                    backdrop={backdrop} onBackdrop={onBackdrop}
+                                    ortho={ortho} onOrtho={onOrtho} />
               </div>
             )}
             {/* TOOLS ▸ the definition-driven modal dialog (v1.7): opens over

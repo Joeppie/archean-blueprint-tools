@@ -17,13 +17,16 @@
 
 import {
   Box3, BoxGeometry, BufferAttribute, BufferGeometry, Color, CylinderGeometry, DirectionalLight,
-  DoubleSide, Group, HemisphereLight, InstancedMesh,
+  DoubleSide, EquirectangularReflectionMapping, Group, HemisphereLight, InstancedMesh,
   LineBasicMaterial, LineSegments, LinearSRGBColorSpace, Matrix3, Matrix4, Mesh,
-  MeshBasicMaterial, MeshStandardMaterial, Object3D, PerspectiveCamera,
+  MeshBasicMaterial, MeshStandardMaterial, Object3D, OrthographicCamera, PerspectiveCamera,
   AdditiveBlending, Plane, PlaneGeometry, PMREMGenerator, Quaternion, Raycaster,
-  Scene, ShaderMaterial, SphereGeometry, Sprite, SpriteMaterial, TorusGeometry, Vector2, Vector3, WebGLRenderer,
-  type MeshStandardMaterialParameters,
+  Scene, ShaderMaterial, SphereGeometry, Sprite, SpriteMaterial, Texture, TextureLoader,
+  TorusGeometry, Vector2, Vector3, WebGLRenderer,
+  type Camera, type MeshStandardMaterialParameters,
 } from 'three';
+import earthBackdropUrl from '../assets/backdrops/earth.jpg';
+import marsBackdropUrl from '../assets/backdrops/mars.jpg';
 import { CanvasTexture, NearestFilter, SRGBColorSpace } from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
@@ -107,6 +110,22 @@ export interface ViewOptions {
 }
 export const DEFAULT_OPTS: ViewOptions = { grid: true, occ: false, hull: true, wire: false, pipes: true, subs: true, mirror: true, com: true, labels: false };
 
+/** v1.9.2 SKY BACKDROPS (user: "The ground being solid and not se through is
+ *  unacceptable … use an equi backdrop from a free site … mars and earth and
+ *  none as options"): equirectangular panoramas drawn as the scene background
+ *  dome. The textures are the Solar System Scope planet textures (CC BY 4.0,
+ *  NASA-data based — NOTICE.md), committed under src/assets/backdrops so the
+ *  app stays offline-first. 'none' = the old flat sky colour. */
+export type Backdrop = 'none' | 'mars' | 'earth';
+const BACKDROP_URL: Record<Backdrop, string | null> =
+  { none: null, mars: marsBackdropUrl, earth: earthBackdropUrl };
+const BACKDROP_KEY = 'archean-app-backdrop';
+const ORTHO_KEY = 'archean-app-ortho';
+const SKY_HEX = 0x8fb4d8;
+/** the perspective vertical FOV — ONE constant, so the ortho ↔ persp
+ *  framing swap (setProjection) round-trips exactly */
+const PERSP_FOV = 55;
+
 const DEG = Math.PI / 180;
 const STAND_IN_HEX = 0x88aaff;          // legacy colliderProxy stand-in tint
 const GOLD = 0xffc94d;                  // selection outline (legacy golden box)
@@ -169,7 +188,25 @@ const HEAVY_COMPONENTS = 800;
 export class Engine {
   readonly scene = new Scene();
   private renderer: WebGLRenderer | null = null;
-  private camera = new PerspectiveCamera(55, 1, 0.05, 4000);
+  /** v1.9.2 DUAL PROJECTION (user: "under view also add a mode for
+   *  orthogonal"): TWO cameras, ONE orbit rig — setProjection swaps
+   *  controls.object / gizmo.camera and hands the SAME framing over (the
+   *  ortho frustum inherits the perspective view height; back, the eye
+   *  distance is re-derived from the ortho zoom). PERSP_FOV is the shared
+   *  law, so the swap round-trips. Everything downstream (raycasts,
+   *  project(), lookAt, fly glide) is projection-agnostic three.js. */
+  private persp = new PerspectiveCamera(PERSP_FOV, 1, 0.05, 4000);
+  private orthoCam = new OrthographicCamera(-1, 1, 1, -1, 0.05, 4000);
+  private camera: PerspectiveCamera | OrthographicCamera = this.persp;
+  private orthoOn = localStorage.getItem(ORTHO_KEY) === '1';
+  /** v1.9.2 backdrop state: the flat sky colour of 'none', the engine-owned
+   *  texture cache (NEVER disposed by a scene load), and the live choice
+   *  (persisted — the mirror-axis precedent) */
+  private skyColor = new Color(SKY_HEX);
+  private backdropNow: Backdrop =
+    (['none', 'mars', 'earth'] as string[]).includes(localStorage.getItem(BACKDROP_KEY) ?? '')
+      ? (localStorage.getItem(BACKDROP_KEY) as Backdrop) : 'none';
+  private backdrops = new Map<Backdrop, Texture>();
   private controls: OrbitControls | null = null;
   private root = new Group();
   /** placed components (stand-in group + real-model sibling), keyed by ci */
@@ -413,11 +450,25 @@ export class Engine {
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.enableDamping = true;
     this.controls.addEventListener('change', () => this.invalidate());
+    // v1.9.2 PERF (audit, viewperf.mjs): the DECORATION meshes (wire edges,
+    // occupancy boxes, cable/pipe meshes + end dots) are drawn on LAYER 1.
+    // The cameras enable that bit so they render, but every Raycaster
+    // defaults to layer 0 ONLY — so all three pick scans (pickNdc, pickCell,
+    // pickPlacePoint) stop raycasting them. Those kinds are never a legal
+    // pick result anyway (the pick loops accept block/ground/comp/sub), and
+    // three's Raycaster IGNORES visibility — on the giant craft the cable
+    // and wire meshes were eating part of the measured 145 ms hover raycast
+    // for hits every caller throws away.
+    this.persp.layers.enable(1);
+    this.orthoCam.layers.enable(1);
     // legacy lighting rig (view3d r0.178): sky blue, hemi fill, warm sun.
     // FOG DISABLED (user rule 2026-10-22: "that is harmful") — it washed
     // out the far side of large hulls: exactly the zeppelin-scale shapes
     // the Sphere skin tool produces, hiding what the user must judge.
-    this.scene.background = new Color(0x8fb4d8);
+    this.scene.background = this.skyColor;
+    // a persisted SKY BACKDROP (View menu) re-applies here; the texture
+    // cache is engine-owned, so it survives every scene load (v1.9.2)
+    if (this.backdropNow !== 'none') this.setBackdrop(this.backdropNow);
     this.bakeEnv();
     // Phones recycle GPU contexts constantly (tab switches, memory
     // pressure). three re-uploads buffers on webglcontextrestored but NOT
@@ -498,6 +549,10 @@ export class Engine {
       requestAnimationFrame(loop);
     };
     requestAnimationFrame(loop);
+    // a persisted ORTHO choice (View menu) restores BEFORE the first
+    // resize/load fit, so the very first framing happens in the ortho
+    // frustum (v1.9.2)
+    this.applyProjection();
     this.resize();
   }
 
@@ -506,8 +561,15 @@ export class Engine {
     if (!c || !this.renderer) return;
     const w = c.clientWidth || 1, h = c.clientHeight || 1;
     this.renderer.setSize(w, h, false);
-    this.camera.aspect = w / h;
-    this.camera.updateProjectionMatrix();
+    this.persp.aspect = w / h;
+    this.persp.updateProjectionMatrix();
+    // the ortho frustum keeps its VERTICAL view height; only the horizontal
+    // half re-derives from the new aspect (OrbitControls wheels ortho via zoom)
+    const o = this.orthoCam, halfH = (o.top - o.bottom) / 2;
+    if (halfH > 0) {
+      o.left = -halfH * (w / h); o.right = halfH * (w / h);
+      o.updateProjectionMatrix();
+    }
     this.hl.setResolution(w, h);                 // fat lines live in screen px
     this.hoverHl.setResolution(w, h);
     this.warnHl.setResolution(w, h);
@@ -682,6 +744,7 @@ void main() {
       const wire = new LineSegments(g, new LineBasicMaterial({ color: 0x0b0d10, transparent: true, opacity: 0.55 }));
       wire.visible = this.opts.wire;         // wireframe (hull) defaults OFF (legacy)
       wire.userData.kind = 'wire' satisfies Kind;
+      wire.layers.set(1);                    // draw-only, never raycast (see attach)
       this.wireLine = wire;
       this.root.add(wire);
     }
@@ -702,6 +765,7 @@ void main() {
       m.position.set(box.min.x + box.size.x / 2, box.min.y + box.size.y / 2, box.min.z + box.size.z / 2);
       m.scale.set(box.size.x, box.size.y, box.size.z);
       m.userData = { kind: 'occ', ci: box.ci };
+      m.layers.set(1);                       // draw-only, never raycast (see attach)
       m.visible = this.opts.occ;             // occupancy boxes default OFF (legacy rule)
       this.occMeshes.push(m);
       this.root.add(m);
@@ -825,6 +889,7 @@ void main() {
       merged.computeVertexNormals();               // dev: per-vertex normals
       const m = new Mesh(merged, mat);
       m.userData.kind = kind satisfies Kind;
+      m.layers.set(1);                       // draw-only, never raycast (see attach)
       this.pipeMeshes.push(m);
       this.root.add(m);
     };
@@ -854,6 +919,7 @@ void main() {
       if (merged) {
         const m = new Mesh(merged, new MeshStandardMaterial({ color: 0x141419, roughness: 0.85, metalness: 0 }));
         m.userData.kind = 'pipe' satisfies Kind;
+        m.layers.set(1);                     // draw-only, never raycast (see attach)
         this.pipeMeshes.push(m);
         this.root.add(m);
       }
@@ -869,6 +935,7 @@ void main() {
       });
       im.instanceMatrix.needsUpdate = true;
       im.userData.kind = 'pipe-end' satisfies Kind;
+      im.layers.set(1);                      // draw-only, never raycast (see attach)
       this.pipeMeshes.push(im);
       this.root.add(im);
     };
@@ -1539,6 +1606,16 @@ void main() {
     plane.rotation.x = -Math.PI / 2;
     plane.position.set(this.gridBox.cx, y, this.gridBox.cz);
     plane.userData.kind = 'ground' satisfies Kind;
+    // THE PAD IS SEE-THROUGH NOW (v1.9.2 user rule: "The ground being solid
+    // and not se through is unacceptable"): the OLD opaque green sheet ate
+    // the sky and read as a billiard table under every craft. The mesh
+    // stays (invisible) as the PICK PAD — three's Raycaster ignores
+    // visibility, so the coord readout, the pad-plane fallback and the
+    // ground-kind placement rules behave EXACTLY as before, and the
+    // ground-height rule (just under the lowest geometry) is untouched.
+    // What you SEE of the pad now is the grid lines + axis marks — over
+    // whatever backdrop the View menu draws.
+    plane.visible = false;
     this.groundGroup.add(plane);
     this.root.add(this.groundGroup);
   }
@@ -1559,8 +1636,7 @@ void main() {
   private syncGrid() {
     if (!this.gridBox || !this.controls || !this.renderer || !this.groundGroup.visible) return;
     const h = this.renderer.domElement.clientHeight || 1;
-    const d = this.camera.position.distanceTo(this.controls.target);
-    const plan = gridPlan(this.gridBox.hx, this.gridBox.hz, pxPerMeter(h, this.camera.fov, d));
+    const plan = gridPlan(this.gridBox.hx, this.gridBox.hz, this.pxPerM(h));
     if (plan.step === this.gridStepNow && this.gridLines) return;
     this.gridStepNow = plan.step;
     if (this.gridLines) {
@@ -1652,8 +1728,7 @@ void main() {
   gridInfo(): { step: number; major: number; halfX: number; halfZ: number; cx: number; cz: number; y: number } | null {
     if (!this.gridBox) return null;
     const h = this.renderer?.domElement.clientHeight || 1;
-    const d = this.controls ? this.camera.position.distanceTo(this.controls.target) : 10;
-    const plan = gridPlan(this.gridBox.hx, this.gridBox.hz, pxPerMeter(h, this.camera.fov, d));
+    const plan = gridPlan(this.gridBox.hx, this.gridBox.hz, this.pxPerM(h));
     return { step: this.gridStepNow || plan.step, major: plan.step * 5,
       halfX: plan.halfX, halfZ: plan.halfZ, cx: this.gridBox.cx, cz: this.gridBox.cz, y: this.gridY };
   }
@@ -1779,13 +1854,22 @@ void main() {
     const d0 = Math.max(1.85 * r, 3.6);
     // fov is VERTICAL: on portrait screens the horizontal view narrows — pull
     // back by the aspect deficit so the whole craft stays framed on phones
-    const d = this.camera.aspect < 1 ? d0 / Math.max(this.camera.aspect, 0.4) : d0;
+    // (persp.aspect tracks the canvas shape for BOTH projections, v1.9.2)
+    const d = this.persp.aspect < 1 ? d0 / Math.max(this.persp.aspect, 0.4) : d0;
     this.controls?.target.copy(c);
     this.camera.position.set(c.x + d * 0.6, c.y + Math.max(d * 0.34, 1.4), c.z - d * 0.72);
-    this.camera.near = Math.max(0.05, r / 400);
-    this.camera.far = Math.max(300, r * 10);
+    this.persp.near = this.orthoCam.near = Math.max(0.05, r / 400);
+    this.persp.far = this.orthoCam.far = Math.max(300, r * 10);
     this.frameC = c.clone(); this.frameD = d;      // presets ride this framing
     this.camera.lookAt(c);
+    // ORTHO FRAMING (v1.9.2): the same fit distance owns the view height —
+    // the portrait aspect pullback rides d, so a phone-framed craft fits
+    // the ortho sheet exactly like the perspective one
+    if (this.orthoOn) {
+      this.orthoCam.zoom = 1;
+      this.setOrthoFrustum(Math.max(d, 0.1) * Math.tan((PERSP_FOV * DEG) / 2), this.persp.aspect);
+      this.gridStepNow = 0;
+    }
     this.controls?.update();
   }
 
@@ -2326,6 +2410,141 @@ void main() {
     return [p.x, p.y, p.z];
   }
 
+  // ------------------------------------------------- projection + backdrop
+  /** active projection — the e2e pin hook */
+  projection(): 'perspective' | 'orthographic' {
+    return this.camera === this.orthoCam ? 'orthographic' : 'perspective';
+  }
+  /** eye + orbit target + the ortho zoom — the parallel-projection pins */
+  viewState(): { proj: 'perspective' | 'orthographic'; eye: [number, number, number];
+    target: [number, number, number]; zoom: number } {
+    const p = this.camera.position, t = this.controls?.target ?? new Vector3();
+    return { proj: this.projection(), eye: [p.x, p.y, p.z],
+      target: [t.x, t.y, t.z], zoom: this.orthoCam.zoom };
+  }
+  /** View menu row: persist + swap the orbit rig's camera */
+  setProjection(ortho: boolean) {
+    if (ortho === this.orthoOn) return;
+    this.orthoOn = ortho;
+    localStorage.setItem(ORTHO_KEY, ortho ? '1' : '0');
+    this.applyProjection();
+  }
+  /** THE FRAMING TRANSFER (v1.9.2): persp→ortho inherits the current view
+   *  HEIGHT (d·tan(fov/2)); ortho→persp re-derives the eye distance from the
+   *  ortho zoom. Both halves use PERSP_FOV, so a round-trip is exact.
+   *  OrbitControls stores its camera as `object`, TransformControls exposes a
+   *  proper `camera` setter — the ONE rig keeps its target and state. */
+  private applyProjection() {
+    const want = this.orthoOn ? this.orthoCam : this.persp;
+    if (want === this.camera) return;
+    const tgt = this.controls?.target ?? new Vector3();
+    const c = this.renderer?.domElement as HTMLCanvasElement | null;
+    const aspect = (c && c.clientHeight) ? c.clientWidth / c.clientHeight : 1;
+    if (this.orthoOn) {
+      const d = Math.max(this.persp.position.distanceTo(tgt), 0.1);
+      const o = this.orthoCam;
+      o.zoom = 1; o.near = this.persp.near; o.far = this.persp.far;
+      this.setOrthoFrustum(d * Math.tan((PERSP_FOV * DEG) / 2), aspect);
+      o.position.copy(this.persp.position);
+      o.quaternion.copy(this.persp.quaternion);
+    } else {
+      const halfH = ((this.orthoCam.top - this.orthoCam.bottom) / 2) / this.orthoCam.zoom;
+      const d = Math.max(halfH / Math.tan((PERSP_FOV * DEG) / 2), 0.1);
+      const dir = this.orthoCam.position.clone().sub(tgt);
+      if (dir.lengthSq() < 1e-9) dir.set(0.6, 0.34, -0.72);
+      this.persp.position.copy(tgt).addScaledVector(dir.normalize(), d);
+      this.persp.quaternion.copy(this.orthoCam.quaternion);
+      this.persp.aspect = aspect;
+      this.persp.updateProjectionMatrix();
+    }
+    want.updateMatrixWorld();
+    this.camera = want;
+    if (this.controls) { this.controls.object = want; this.controls.update(); }
+    if (this.gizmo) this.gizmo.camera = want as Camera;
+    this.gridStepNow = 0;                        // the px scale changed — re-plan
+    if (this.coordSnap) this.coordHoverClear();  // a stale snapped chip never lies
+    this.invalidate();
+  }
+  private setOrthoFrustum(halfH: number, aspect: number) {
+    const o = this.orthoCam;
+    o.top = halfH; o.bottom = -halfH;
+    o.left = -halfH * aspect; o.right = halfH * aspect;
+    o.updateProjectionMatrix();
+  }
+  /** screen px per world metre for the ACTIVE projection (grid ladder +
+   *  coord snap): perspective rides the orbit distance, ortho the frustum
+   *  height over the OrbitControls zoom. */
+  private pxPerM(canvasH: number): number {
+    if (this.camera === this.orthoCam)
+      return (canvasH * this.orthoCam.zoom) / (this.orthoCam.top - this.orthoCam.bottom);
+    const d = this.controls ? this.persp.position.distanceTo(this.controls.target) : 10;
+    return pxPerMeter(canvasH, PERSP_FOV, d);
+  }
+  /** world → client px (both projections) — the ortho parallelism pin */
+  screenPoint(x: number, y: number, z: number): [number, number] | null {
+    const c = this.renderer?.domElement as HTMLCanvasElement | null;
+    if (!c) return null;
+    const r = c.getBoundingClientRect();
+    const p = new Vector3(x + this.moff.x, y + this.moff.y, z + this.moff.z).project(this.camera);
+    return [r.left + (p.x + 1) / 2 * r.width, r.top + (1 - p.y) / 2 * r.height];
+  }
+  /** THE PIXEL PROBE (e2e-only): force one fresh frame, then read the pixel
+   *  at normalized canvas coords (u,v ∈ 0..1, v from the TOP) straight off
+   *  the framebuffer. The see-through-ground and backdrop pins assert this —
+   *  pixels, not intent (the v1.5.1 lesson). Legal without
+   *  preserveDrawingBuffer because we read BEFORE returning to the event
+   *  loop (the same task as the draw); three's readRenderTargetPixels
+   *  refuses the default framebuffer in r186, so this goes through the
+   *  raw context. */
+  probePixel(u: number, v: number): [number, number, number] | null {
+    const r = this.renderer;
+    if (!r) return null;
+    r.render(this.scene, this.camera);           // read BEFORE the buffer dies
+    const w = r.domElement.width, h = r.domElement.height;
+    const x = Math.min(Math.max(Math.floor(u * w), 0), w - 1);
+    const y = Math.min(Math.max(Math.floor((1 - v) * h), 0), h - 1);
+    const buf = new Uint8Array(4);
+    try {
+      const gl = r.getContext();
+      gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+    } catch { return null; }
+    return [buf[0]!, buf[1]!, buf[2]!];
+  }
+  /** View menu row: swap the SKY DOME (v1.9.2). 'none' restores the flat
+   *  sky colour; the panoramas load once and live in the engine cache. */
+  setBackdrop(b: Backdrop) {
+    this.backdropNow = b;
+    localStorage.setItem(BACKDROP_KEY, b);
+    if (b === 'none') { this.scene.background = this.skyColor; this.invalidate(); return; }
+    const cached = this.backdrops.get(b);
+    if (cached) { this.scene.background = cached; this.invalidate(); return; }
+    const url = BACKDROP_URL[b];
+    if (!url) return;
+    new TextureLoader().load(url, (tex) => {
+      tex.mapping = EquirectangularReflectionMapping;   // 2:1 equirect dome
+      tex.colorSpace = SRGBColorSpace;                  // a photo, not albedo
+      this.backdrops.set(b, tex);
+      if (this.backdropNow === b) { this.scene.background = tex; this.invalidate(); }
+    });
+  }
+  /** live backdrop state — the e2e pin hook (ready = texture actually set) */
+  backdropState(): { current: Backdrop; ready: boolean } {
+    return { current: this.backdropNow,
+      ready: this.backdropNow === 'none' || this.backdrops.has(this.backdropNow) };
+  }
+  /** PERF GAUGE (tools/viewperf.mjs): render n frames synchronously and
+   *  return ms/frame. A 1-px readPixels at the end FLUSHES the GPU queue,
+   *  so the number is the real frame cost — not rAF pacing (which caps at
+   *  60 fps on a healthy machine and would hide every scenario delta). */
+  timeRender(n: number): number {
+    if (!this.renderer) return 0;
+    const t0 = performance.now();
+    for (let i = 0; i < n; i++) this.renderer.render(this.scene, this.camera);
+    const gl = this.renderer.getContext();
+    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
+    return (performance.now() - t0) / n;
+  }
+
 
   // -------------------------------------------------------------- gizmo ops
 
@@ -2748,8 +2967,14 @@ void main() {
     // TGC's per-frame handle scale (TransformControls.updateMatrixWorld):
     // factor * size/4, size = 1; the ring's pick torus radius is 0.5 UNIT
     const dist = cam.getWorldPosition(new Vector3()).distanceTo(this.gizmoProxy.getWorldPosition(new Vector3()));
-    const fov = (cam as { fov?: number }).fov ?? 50;
-    const r = dist * Math.min(1.9 * Math.tan(Math.PI * fov / 360), 7) / 4 * 0.5;
+    // TGC's OWN handle-scale factor for BOTH projections (r186
+    // TransformControls.updateMatrixWorld: ortho uses the frustum height
+    // over zoom, never a distance) — the grab point lands on the DRAWN ring
+    const oc = cam as OrthographicCamera;
+    const factor = (cam as { isOrthographicCamera?: boolean }).isOrthographicCamera
+      ? (oc.top - oc.bottom) / oc.zoom
+      : dist * Math.min(1.9 * Math.tan(Math.PI * ((cam as { fov?: number }).fov ?? PERSP_FOV) / 360), 7);
+    const r = factor / 4 * 0.5;
     const t = deg * DEG;
     const p = this.gizmoProxy.getWorldPosition(new Vector3())
       .addScaledVector(u, Math.cos(t) * r).addScaledVector(v, Math.sin(t) * r);
@@ -4093,6 +4318,8 @@ void main() {
       });
     this.ghostCache.clear();
     this.ghostPending.clear();
+    for (const t of this.backdrops.values()) t.dispose();   // sky domes are engine-owned
+    this.backdrops.clear();
     this.placeDrag = null;
     this.gizmo?.dispose();
     this.gizmo = null;

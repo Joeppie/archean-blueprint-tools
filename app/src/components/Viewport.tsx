@@ -71,6 +71,14 @@ declare global {
     coord: () => ReturnType<Engine['coordHoverState']>;
     /** the pad axis-marker labels (['−x','+x','−z','+z']) */
     axis: () => string[];
+    /** v1.9.2 VIEW MENU: active projection + eye/target/zoom */
+    view: () => ReturnType<Engine['viewState']>;
+    /** v1.9.2 sky backdrop ({current, ready}) */
+    backdrop: () => ReturnType<Engine['backdropState']>;
+    /** v1.9.2 world (FILE metres) → client px — the ortho parallelism pin */
+    screen: (x: number, y: number, z: number) => [number, number] | null;
+    /** v1.9.2 framebuffer probe at normalized canvas coords (v from top) */
+    pixel: (u: number, v: number) => [number, number, number] | null;
     /** v1.5.21 settable mirror axis (⚙ row) */
     mirAxis: () => 'x' | 'y' | 'z';
   } }
@@ -175,6 +183,12 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
       mirAxis: () => engine.mirrorAxis,
       coord: () => engine.coordHoverState(),
       axis: () => engine.axisMarks(),
+      // v1.9.2 VIEW MENU pins: projection swap, sky backdrop, world→px and
+      // the framebuffer probe (the see-through-ground pin asserts PIXELS)
+      view: () => engine.viewState(),
+      backdrop: () => engine.backdropState(),
+      screen: (x: number, y: number, z: number) => engine.screenPoint(x, y, z),
+      pixel: (u: number, v: number) => engine.probePixel(u, v),
     };
     onEngine?.(engine);
     return () => {
@@ -297,6 +311,35 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
   // v1.5.23 coord-readout chip (Blender-style black label following the
   // cursor; text set imperatively — a React state per pointermove is waste)
   const chipRef = useRef<HTMLDivElement>(null);
+  // v1.9.2 coord-readout throttle (see onPointerMove): the last raycast
+  // result rides between the ~40 Hz re-probes; coordLast/coordTrail give
+  // the throttle a TRAILING edge — the pointer's final position ALWAYS
+  // gets its raycast (a hover that stops mid-window must still converge;
+  // the views.spec "hovering the CRAFT" pin asserts exactly that)
+  const coordT = useRef(0);
+  const coordInfo = useRef<{ x: number; y: number; z: number; step: number } | null>(null);
+  const coordTrail = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const coordLast = useRef({ x: 0, y: 0 });
+  /** paint the black chip (imperative — a React state per move is waste) */
+  const showCoord = (info: { x: number; y: number; z: number; step: number } | null,
+    cx: number, cy: number) => {
+    const chip = chipRef.current, host = hostRef.current;
+    if (!chip || !host) return;
+    if (!info) { chip.style.display = 'none'; return; }
+    const hr = host.getBoundingClientRect();
+    const dg = info.step < 0.25 ? 2 : 1;
+    const f = (v: number) => (Object.is(v, -0) ? 0 : v).toFixed(dg);
+    chip.textContent = `x ${f(info.x)}  y ${f(info.y)}  z ${f(info.z)}`;
+    chip.style.display = 'block';
+    chip.style.left = `${Math.min(Math.max(4, cx - hr.left + 14), hr.width - 170)}px`;
+    chip.style.top = `${Math.max(4, cy - hr.top + 16)}px`;
+  };
+  /** one throttled raycast + chip repaint */
+  const coordRun = (x: number, y: number) => {
+    coordT.current = performance.now();
+    coordInfo.current = engineRef.current?.coordHoverMove(x, y) ?? null;
+    showCoord(coordInfo.current, x, y);
+  };
   const pickClick = (e: React.PointerEvent) => {
     const engine = engineRef.current;
     if (!engine) return;
@@ -349,23 +392,31 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
           }
           blockHover(e.clientX, e.clientY, e.shiftKey);
           // BLENDER-STYLE COORD READOUT: the grid corner the ray lands on
-          // (x–z flat plane, y = UP per FORMAT §world maths)
-          const info = engineRef.current?.coordHoverMove(e.clientX, e.clientY) ?? null;
-          const chip = chipRef.current, host = hostRef.current;
-          if (chip && host) {
-            if (info) {
-              const hr = host.getBoundingClientRect();
-              const dg = info.step < 0.25 ? 2 : 1;
-              const f = (v: number) => (Object.is(v, -0) ? 0 : v).toFixed(dg);
-              chip.textContent = `x ${f(info.x)}  y ${f(info.y)}  z ${f(info.z)}`;
-              chip.style.display = 'block';
-              chip.style.left = `${Math.min(Math.max(4, e.clientX - hr.left + 14), hr.width - 170)}px`;
-              chip.style.top = `${Math.max(4, e.clientY - hr.top + 16)}px`;
-            } else chip.style.display = 'none';
+          // (x–z flat plane, y = UP per FORMAT §world maths).
+          // v1.9.2 PERF (audit): the SAME ~40 Hz raycast cap as the ghost —
+          // this used to pay a FULL recursive scene raycast on EVERY
+          // pointermove event; high-poll mice fire ~120 Hz, so the readout
+          // silently taxed every hover on a giant craft. With TRAILING EDGE:
+          // the position the pointer STOPS at always gets raycast.
+          coordLast.current = { x: e.clientX, y: e.clientY };
+          const cnow = performance.now();
+          if (cnow - coordT.current >= 24) {
+            if (coordTrail.current) { clearTimeout(coordTrail.current); coordTrail.current = null; }
+            coordRun(e.clientX, e.clientY);
+          } else {
+            if (!coordTrail.current) {
+              coordTrail.current = setTimeout(() => {
+                coordTrail.current = null;
+                coordRun(coordLast.current.x, coordLast.current.y);
+              }, Math.max(1, 25 - (cnow - coordT.current)));
+            }
+            showCoord(coordInfo.current, e.clientX, e.clientY);   // follows live, cheap
           }
         }}
         onPointerLeave={() => {
+          if (coordTrail.current) { clearTimeout(coordTrail.current); coordTrail.current = null; }
           engineRef.current?.coordHoverClear();
+          coordInfo.current = null;
           if (chipRef.current) chipRef.current.style.display = 'none';
           // the ghost dies with the pointer (the game's ghost too)
           lastHover.current = null;

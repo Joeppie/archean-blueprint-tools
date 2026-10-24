@@ -1,16 +1,18 @@
 # Display and view options
-Tags: display options hull wireframe labels opacity real models quality static info fog adapters connectors ground coord coordinate readout cursor shift vertical plane measure height axes axis x y z up
+Tags: display options hull wireframe labels opacity real models quality static info fog adapters connectors ground coord coordinate readout cursor shift vertical plane measure height axes axis x y z up backdrop sky mars earth planet panorama equirectangular orthographic ortho projection parallel camera
 
-The **⚙** window (top right) collects the display state; the same toggles
-have keys where it matters.
+The **⚙ View** window (top right) collects the display state; the same
+toggles have keys where it matters.
 
 | Option | What it does |
 |---|---|
+| Sky backdrop | what you see THROUGH and BEYOND the build pad: **none** (the flat sky colour), **mars** or **earth** — full equirectangular planet panoramas (CC BY, see NOTICE) drawn as the sky dome. The ground pad itself is see-through now; the grid lines and ±axis marks are all that render of it |
+| Orthographic (5) | parallel projection — no perspective shrink, parallel edges stay parallel: align, measure and square up blueprints like a CAD sheet. The framing survives the swap both ways; wheel zoom scales the ortho sheet |
 | Hull (h) | block + triangle solids on/off — OFF means WIREFRAME and click-through |
 | Wireframe | the lattice wire overlay (mutually exclusive with hull solids) |
 | Hull opacity | fades blocks, skin AND wire together — see through the shell without hiding it |
 | World axes | in the file and the viewer: **x** lateral, **y = UP**, **z** longitudinal (the nose is −z) — the FLAT plane is x–z (Blender's own UI is z-up; this format is not). The pad shows it: the x = 0 grid line is RED, the z = 0 line BLUE, both labelled +/− at their ends |
-| Grid (g) | the ground grid — it FITS the build and its granularity rides zoom (0.25 m cells → 1.25 → 2.5 → 12.5 m as you pull back; majors every 5); the green ground plane always sits just under the craft's lowest geometry |
+| Grid (g) | the ground grid — it FITS the build and its granularity rides zoom (0.25 m cells → 1.25 → 2.5 → 12.5 m as you pull back; majors every 5); the pad sits just under the craft's lowest geometry and is SEE-THROUGH (an invisible pick surface plus the drawn lines — the backdrop shows through) |
 | Occupancy (o) | the type-255 occupancy boxes (reserved cells around parts) |
 | Mirror plane(s) | the gold sheets at the 0-plane of every mirrored axis (see the Mirror rule topic) |
 | Mirror axis | which axis ⇄ twin placement and block twins ride: X, Y or Z (the game's own `mirrorAxis` field is per-part, 1=x 2=y 3=z) |

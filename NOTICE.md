@@ -29,6 +29,16 @@ Read this file together with LICENSE (GNU GPL v3).
    licenses. If you redistribute this repository, keep these attributions
    intact and review the game's EULA/ToS for what redistribution of
    player-created workshop data permits.
+
+   **Sky backdrop textures** — `app/src/assets/backdrops/mars.jpg` and
+   `earth.jpg` are the 2 k equirectangular planet textures by *Solar System
+   Scope* (https://solarsystemscope.com/textures/), based on NASA imagery/
+   elevation data, licensed **CC BY 4.0** (https://creativecommons.org/
+   licenses/by/4.0/); retrieved via Wikimedia Commons, re-encoded (JPEG q82,
+   metadata stripped), colours not otherwise altered. They are NOT GPL:
+   the CC BY 4.0 attribution requirement travels with any redistribution
+   that keeps them.
+
    **XenonViewer-derived material**: `viewer/blockshapes.js` and
    `viewer/palette.js` (shape/rotation tables and the built-in palette, both
    transcriptions of the game's `BlockShapes.hh`), and the block face-culling,

@@ -9,7 +9,7 @@
 // box floats over the viewport (App).
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { requestThumb, startSpin, stopSpin } from '../engine/thumbs';
-import type { Engine, ViewOptions } from '../engine/scene';
+import type { Backdrop, Engine, ViewOptions } from '../engine/scene';
 import type { EditCtx } from '../engine/edit';
 import type { Blueprint, BlueprintComponent, LatticeObj } from '../engine/format';
 import { subMasterEntries } from '../engine/subgrid';
@@ -330,9 +330,13 @@ const Check = (p: { label: string; checked: boolean; onChange: (v: boolean) => v
 );
 
 // ------------------------------------------------------------- view options
-/** MOVED OUT of the left parts panel (the user: "the full list of options
- *  shouldnt be combined into the main left-hand panel"): rendered in a
- *  floating ⚙ popover window over the viewport by the Editor. */
+/** THE VIEW MENU (⚙ popover over the viewport, renamed v1.9.2 by user rule:
+ *  "rename that to view, because under view also add a mode for orthogonal").
+ *  MOVED OUT of the left parts panel (the user: "the full list of options
+ *  shouldnt be combined into the main left-hand panel"). v1.9.2 added the
+ *  two camera rows the user asked for there: SKY BACKDROP (none / mars /
+ *  earth — equirect panoramas, the solid green sheet is gone) and the
+ *  ORTHOGRAPHIC projection toggle. */
 export function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHullOpacity' | 'gizmoOn' | 'onGizmo' | 'hiDef' | 'onHiDef' | 'staticInfo' | 'onStaticInfo'> & {
   /** v1.5.21 SETTABLE MIRROR AXIS (user: "mirror axes should be settable.
    *  Game is not hardcoded x"): the SESSION plane for ⇄ twin placement,
@@ -340,9 +344,16 @@ export function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHu
    *  axes (twin pairs, per-component mirrorAxis) always get their sheet. */
   mirrorAxis: 'x' | 'y' | 'z';
   onMirrorAxis: (a: 'x' | 'y' | 'z') => void;
+  /** v1.9.2 sky backdrop + projection (user: "use an equi backdrop from a
+   *  free site like pixabay, mars and earth and non as options, in the cog
+   *  menu … under view also add a mode for orthogonal") */
+  backdrop: Backdrop;
+  onBackdrop: (b: Backdrop) => void;
+  ortho: boolean;
+  onOrtho: (v: boolean) => void;
 }) {
   return (
-    <Sec title="View options" testid="viewopts">
+    <Sec title="View" testid="viewopts">
       <Check testid="opt-grid" label="ground grid (zoom-adaptive)" checked={p.opts.grid} onChange={v => p.onOpt('grid', v)} />
       <Check testid="opt-occ" label="occupancy boxes (type-255)" checked={p.opts.occ} onChange={v => p.onOpt('occ', v)} />
       <Check testid="opt-hull" label="hull (blocks + triangles)" checked={p.opts.hull} onChange={v => p.onOpt('hull', v)} />
@@ -350,6 +361,22 @@ export function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHu
       <Check testid="opt-pipes" label="pipes (cables)" checked={p.opts.pipes} onChange={v => p.onOpt('pipes', v)} />
       <Check testid="opt-subs" label="subgrids (doors/hatches)" checked={p.opts.subs} onChange={v => p.onOpt('subs', v)} />
       <Check testid="opt-mirror" label="mirror plane(s)" checked={p.opts.mirror} onChange={v => p.onOpt('mirror', v)} />
+      {/* v1.9.2 SKY BACKDROPS: the ground is a see-through pick pad now, so
+          the world behind it is a choice — CC BY planet panoramas (NOTICE) */}
+      <div className="flex items-center gap-2 py-[2px] text-[12px] text-ink">
+        <span className="flex-1">sky backdrop</span>
+        {(['none', 'mars', 'earth'] as const).map(b => (
+          <button key={b} data-testid={`backdrop-${b}`} title={`sky backdrop: ${b}`}
+            onClick={() => p.onBackdrop(b)}
+            className={`ksp-btn px-2 py-[1px] text-[11px] ${p.backdrop === b ? 'on' : ''}`}>
+            {b}
+          </button>
+        ))}
+      </div>
+      {/* v1.9.2 ORTHOGRAPHIC mode: parallel edges stay parallel — measure
+          and align blueprints without perspective distortion (key 5) */}
+      <Check testid="opt-ortho" label="orthographic projection (key 5)" checked={p.ortho}
+        onChange={p.onOrtho} />
       {/* v1.5.21: the game stores a per-component mirrorAxis (0=none,
           1=x, 2=y, 3=z) and non-x twin pairs are indexed by sym.ts — the
           editor's OWN plane (⇄ placement, block twins) is settable too */}
@@ -379,7 +406,7 @@ export function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHu
         onInput={p.onHullOpacity}
         title="dims the whole hull skin: blocks, triangle plates and their wireframes" />
       <div className="mt-1 text-[10px] leading-snug text-ink-dim">
-        keys: g grid · o occupancy · h hull · Esc deselect
+        keys: g grid · o occupancy · h hull · 5 projection · Esc deselect
       </div>
     </Sec>
   );

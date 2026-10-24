@@ -1136,6 +1136,79 @@ topic + FORMAT).
  tail plate-pin reframed FRAME-FREE: a spin about a vertical line keeps the
  model's vertical extent and centroid height EXACT (a horizontal-axis roll
  shears both) — holds for any mount attitude.
+- **v1.9.2 THE VIEW MENU — see-through ground, sky backdrops, ORTHOGRAPHIC
+  (user: "The ground being solid and not se through is unacceptable … use an
+  equi backdrop from a free site like pixabay, mars and earth and non as
+  options, in the cog menu, rename that to view … under view also add a mode
+  for orthogonal … gauge relative performance")**: (1) the solid green sheet
+  is GONE as geometry: `addGround` keeps the plane mesh but `visible =
+  false` — three's Raycaster IGNORES visibility (r186 `intersect()` checks
+  only layers), so the coord readout, the pad-plane fallback and the
+  ground-kind placement rules behave EXACTLY as before while the pad is a
+  see-through PICK surface; the grid lines + ±axis marks stay, the
+  ground-height rule is unchanged. (2) `Engine.setBackdrop('none'|'mars'|
+  'earth')` (persisted `archean-app-backdrop`, default none = the flat sky
+  colour): 2 k equirect panoramas (Solar System Scope, CC BY 4.0 — NOTICE §2)
+  committed under `src/assets/backdrops/` (offline-first; vite-imported, so
+  layout-exact on Pages), loaded once into an ENGINE-owned texture cache
+  (never disposed by a scene load; `dispose()` releases them),
+  `EquirectangularReflectionMapping` + SRGB as `scene.background`.
+  (3) The ⚙ popover is THE VIEW MENU (Sec title "View", button "⚙ View");
+  rows `backdrop-none|mars|earth` + `opt-ortho`; the keys hint row says `5`.
+  (4) DUAL PROJECTION: `persp`/`orthoCam`, ONE orbit rig — `setProjection`
+  (persisted `archean-app-ortho`, key 5 Blender-style) swaps
+  `controls.object` (r186 OrbitControls stores the camera as `object`) and
+  `gizmo.camera` (TGC's proper setter); persp→ortho inherits the view
+  height `d·tan(PERSP_FOV/2)`, ortho→persp re-derives `d` from the ortho
+  zoom — a round-trip is EXACT (pinned). PERSP_FOV is one constant;
+  `pxPerM()` feeds the grid ladder from the frustum height/zoom in ortho;
+  fit() sizes the ortho sheet from the same framing distance (portrait
+  pullback rides `persp.aspect` for BOTH cameras); resize keeps the ortho
+  vertical height; `ringScreenPoint` mirrors TGC's ortho handle-scale law.
+  (5) Pins `e2e/viewmenu.spec.ts` (@ui): header "View" + rows; SEE-THROUGH
+  asserted on FRAMEBUFFER PIXELS (`Engine.probePixel` = one fresh render +
+  raw `gl.readPixels` in the same task — `readRenderTargetPixels` refuses
+  the null target in r186; a dense scan of the band under the craft must be
+  MOSTLY sky b>g, the green share = only the grid lines; the old sheet
+  read g>b EVERYWHERE — ONE evaluate per scan, 75 round-trips blew the poll
+  budget), backdrop swap/restore pixels + persistence, `axialPx`: a 1 m
+  step along the sight axis projects 0 px in ortho (>3 px in persp — THE
+  parallel law), framing round-trip <1e-3, key 5 (BLUR the checkbox first —
+  the key handler stands down while an INPUT has focus), reload persistence
+  both ways, phone rows.
+  (6) PERF (this batch's audit + `tools/viewperf.mjs`, user: "gauge relative
+  performance … hot paths too intensive when rendering … does three work
+  nicely with the DOM"): TWO hot paths FOUND and FIXED, both measured on
+  the LIVE editor (iGPU, 1280×720, frames closed with a 1-px readPixels).
+  (a) `coordHoverMove` (a full recursive pickCell raycast) ran on EVERY
+  pointermove event (~120 Hz mice); it now shares the ghost's ~40 Hz cap
+  WITH A TRAILING EDGE (Viewport `coordT/coordInfo/coordLast/coordTrail` —
+  the position the pointer STOPS at always gets its raycast: the
+  views.spec "hovering the CRAFT" pin caught the leading-only variant
+  going stale forever; the chip itself follows every move, cheaply).
+  (b) THE PICK SCAN RAYCASTED THE DECORATION MESHES: three's Raycaster
+  IGNORES visibility, so the merged wire-edges LineSegments, the occupancy
+  unit boxes and every cable/pipe mesh + end dot were triangle/segment-
+  tested by EVERY pick pass — for hits the pick loops then THREW AWAY
+  (only block/ground/comp/sub are legal results). They now render on
+  LAYER 1 (both cameras enable that bit; every Raycaster defaults to
+  layer 0 only) — `wire/occ/pipe/pipe-end` meshes get `layers.set(1)` at
+  creation. MEASURED (viewperf): giant-craft hover raycast 144.8 → 2.5 ms
+  median (58×; @120 Hz uncapped that was ~17 cores-worth → ~2), ISW 2.7 ms
+  unchanged; frame cost and draw counts unchanged. The View-menu features
+  themselves are ~free: a backdrop dome is +1 draw / +0.1 ms per frame,
+  ORTHO equals perspective frame-for-frame (giant 10.2 vs 10.3 ms, ISW
+  1.9–2.1 ms). Everything else per-rAF early-exits when idle (`stepSurges/
+  stepHolo/stepLabels/flushLiveEdits/pulseSelection` gate on state,
+  `syncGrid` is arithmetic until the step rung flips, `twinWarnState`
+  returns before any matrix work, `StatsStrip`'s rAF stops after the first
+  drawn frame) and the DOM pattern is already the cheap one: three.js
+  itself only ever touches the canvas, the overlays are imperative
+  style/text writes or ≤5 Hz interval syncs, NEVER React state per frame —
+  the answer to "three + DOM" is that the reconciler, not three, is where
+  the overhead would live.
+  Version strings sit at v1.9.2 (patch line; the batch adds user-facing
+  functionality → a v1.10.0 MINOR was PROPOSED to the user, not self-applied).
 - **v1.8.6 THE SKIN TRANSFORM CUTS, NEVER DROPS (urgent-fix.md, user: "a valid
  zeppelin suddenly misses a face after rotations … the size doesn't inherently
  change"):** the frame-aligned 31-slot window is a FRAME law, so a face with
