@@ -3,7 +3,7 @@
 //
 // Measures the LIVE editor (real scene, real materials, iGPU-pinned headless
 // chromium) across the scenario matrix this batch introduced:
-//   perspective ⇄ orthographic   ×   backdrop none ⇄ mars ⇄ earth
+//   perspective ⇄ orthographic   ×   backdrop none ⇄ every manifest pano
 // plus the DOM→three hover path (Engine.coordHoverMove = the pickCell
 // raycast the pointermove handler drives — the hot path the batch THROTTLED
 // to ~40 Hz; the numbers show what one raycast costs and what the cap
@@ -18,6 +18,7 @@
 // usage: node tools/viewperf.mjs [workshop-id]        (default ISW-241)
 //        node tools/viewperf.mjs 3509975859           (the 1024-comp giant)
 import { chromium } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 
 const craft = process.argv[2] ?? '3812927875';
 const browser = await chromium.launch({
@@ -49,8 +50,12 @@ const frameMs = async () => page.evaluate(() => {
 });
 
 console.log(`craft ${craft} · 1280×720 · iGPU-pinned ANGLE (Vulkan/radeon)`);
+// the backdrop set is the manifest (src/assets/backdrops), 'none' included
+const manifest = JSON.parse(readFileSync(
+  new URL('../src/assets/backdrops/manifest.json', import.meta.url), 'utf8'));
+const BACKDROPS = ['none', ...manifest.backdrops.map(b => b.name)];
 for (const ortho of [false, true])
-  for (const backdrop of ['none', 'mars', 'earth']) {
+  for (const backdrop of BACKDROPS) {
     await setView(ortho, backdrop);
     const { ms, draws } = await frameMs();
     console.log(`  ${(ortho ? 'ortho ' : 'persp ').padEnd(6)} backdrop=${backdrop.padEnd(5)}`

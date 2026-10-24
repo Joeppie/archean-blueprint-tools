@@ -137,6 +137,12 @@ export const BACKDROPS: readonly BackdropMeta[] = backdropManifest.backdrops;
 /** every menu name, 'none' first — the View menu and the e2e pin enumerate
  *  THIS, so a new manifest entry appears without touching code */
 export const backdropNames = (): string[] => ['none', ...BACKDROPS.map(b => b.name)];
+/** the fresh-profile backdrop (v1.9.4, we: "make sky backdrop default") —
+ *  a MANIFEST field, validated; an explicit stored pick always wins */
+export const backdropDefault = (): string => {
+  const d = (backdropManifest as { default?: string }).default;
+  return d && backdropNames().includes(d) ? d : 'none';
+};
 const backdropUrl = (b: string): string | null => {
   if (b === 'none') return null;
   const m = BACKDROPS.find(x => x.name === b);
@@ -228,7 +234,7 @@ export class Engine {
   private skyColor = new Color(SKY_HEX);
   private backdropNow: Backdrop =
     backdropNames().includes(localStorage.getItem(BACKDROP_KEY) ?? '')
-      ? (localStorage.getItem(BACKDROP_KEY) as Backdrop) : 'none';
+      ? (localStorage.getItem(BACKDROP_KEY) as Backdrop) : backdropDefault();
   private backdrops = new Map<Backdrop, Texture>();
   /** the panorama dome (lazy: only exists while a backdrop is shown) —
    *  engine-owned geometry, NEVER disposed by a scene load */

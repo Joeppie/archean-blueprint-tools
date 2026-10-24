@@ -371,10 +371,10 @@ export function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHu
           (author, licence, source — see the folder README + NOTICE §2) */}
       <div className="flex flex-wrap items-center gap-2 py-[2px] text-[12px] text-ink">
         <span className="flex-1">sky backdrop</span>
-        <button data-testid="backdrop-none" title="flat sky colour"
+        <button data-testid="backdrop-none" title="none — the flat sky colour (no panorama)"
           onClick={() => p.onBackdrop('none')}
           className={`ksp-btn px-2 py-[1px] text-[11px] ${p.backdrop === 'none' ? 'on' : ''}`}>
-          none
+          ⊘
         </button>
         {BACKDROPS.map(b => (
           <button key={b.name} data-testid={`backdrop-${b.name}`}

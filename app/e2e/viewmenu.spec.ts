@@ -32,6 +32,12 @@ const MANIFEST = JSON.parse(readFileSync(
   new URL('../src/assets/backdrops/manifest.json', import.meta.url), 'utf8',
 )) as { backdrops: { name: string; file: string }[] };
 const NAMES = ['none', ...MANIFEST.backdrops.map(b => b.name)];
+/** the fresh-profile backdrop from the manifest (v1.9.4 "make sky backdrop
+ *  default") — the boot expectation follows the DATA, never a constant */
+const DEF = (MANIFEST as { default?: string }).default ?? 'none';
+/** a real panorama for the tests that need ONE (no name is hardcoded — the
+ *  retired mars/earth were exactly such a pin; the manifest is the source) */
+const FIRST = MANIFEST.backdrops[0]!.name;
 // every manifest file must actually sit in the folder (vite's build-time
 // glob can only enumerate what is there — fail early, not as a silent 404)
 for (const b of MANIFEST.backdrops)
@@ -94,6 +100,15 @@ test.describe('view menu: see-through ground, sky backdrops, ortho @ui', () => {
   test('the ground pad is SEE-THROUGH — the band under the craft shows SKY', async ({ page }) => {
     desktopOnly();
     await openCraft(page, ISW);
+    // The scan's discriminator (sky-blue vs the OLD solid green SHEET) is
+    // read in FLAT-SKY mode: since v1.9.4 the default is a panorama, whose
+    // terrain seen THROUGH the pad could be green as well — that would be
+    // the backdrop showing, not a sheet. ⊘ first; the swap pins cover the
+    // panoramas themselves.
+    await openMenu(page);
+    await page.getByTestId('backdrop-none').click();
+    await expect.poll(() => backdropOf(page), { timeout: 10_000 })
+      .toEqual({ current: 'none', ready: true, dome: false });
     // the pad mesh stays (invisible) as the PICK pad — three's Raycaster
     // ignores visibility, so the coord-readout chip keeps its ground hit
     // (views.spec pins that); what must be GONE is the rendered sheet.
@@ -124,11 +139,18 @@ test.describe('view menu: see-through ground, sky backdrops, ortho @ui', () => {
   test('every manifest backdrop swaps the sky dome; none restores', async ({ page }) => {
     desktopOnly();
     await openCraft(page, ISW);
-    await expect.poll(() => backdropOf(page)).toEqual({ current: 'none', ready: true, dome: false });
+    // BOOT DEFAULT (v1.9.4, we: "make sky backdrop default"): a fresh
+    // profile starts ON the manifest default panorama, dome live
+    await expect.poll(() => backdropOf(page), { timeout: 15_000 })
+      .toEqual({ current: DEF, ready: true, dome: DEF !== 'none' });
+    await openMenu(page);
+    // the flat-sky BASELINE for the swaps below: click the ⊘ button
+    await page.getByTestId('backdrop-none').click();
+    await expect.poll(() => backdropOf(page), { timeout: 10_000 })
+      .toEqual({ current: 'none', ready: true, dome: false });
     const sky0 = (await pixelOf(page, 0.5, 0.03))!;
     // 'none' = the flat sky colour #8fb4d8
     expect(far(sky0, [143, 180, 216])).toBeLessThan(24);
-    await openMenu(page);
     for (const b of NAMES.filter(n => n !== 'none')) {
       await page.getByTestId(`backdrop-${b}`).click();
       await expect.poll(() => backdropOf(page), { timeout: 10_000 })
@@ -180,9 +202,9 @@ test.describe('view menu: see-through ground, sky backdrops, ortho @ui', () => {
     // band stays SMOOTH — a background-texture projection corners the pano
     // into cube walls (measured: dome corner↔centre ≤ 20, walls ≫ 60)
     await openMenu(page);
-    await page.getByTestId('backdrop-mars').click();
+    await page.getByTestId(`backdrop-${FIRST}`).click();
     await expect.poll(() => backdropOf(page), { timeout: 10_000 })
-      .toEqual({ current: 'mars', ready: true, dome: true });
+      .toEqual({ current: FIRST, ready: true, dome: true });
     const band = await page.evaluate(() => {
       const h = (window as unknown as Win).__ARCHEAN__!;
       return [h.pixel(0.05, 0.05)!, h.pixel(0.5, 0.05)!, h.pixel(0.95, 0.05)!];
@@ -197,12 +219,12 @@ test.describe('view menu: see-through ground, sky backdrops, ortho @ui', () => {
     desktopOnly();
     await openCraft(page, ISW);
     await openMenu(page);
-    await page.getByTestId('backdrop-mars').click();
-    await expect.poll(() => backdropOf(page)).toEqual({ current: 'mars', ready: true, dome: true });
+    await page.getByTestId(`backdrop-${FIRST}`).click();
+    await expect.poll(() => backdropOf(page)).toEqual({ current: FIRST, ready: true, dome: true });
     await page.reload();
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
     await expect.poll(() => backdropOf(page), { timeout: 10_000 })
-      .toEqual({ current: 'mars', ready: true, dome: true });
+      .toEqual({ current: FIRST, ready: true, dome: true });
   });
 
   test('phone: the View menu reaches the new rows', async ({ page }) => {

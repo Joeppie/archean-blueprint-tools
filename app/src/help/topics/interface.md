@@ -13,7 +13,7 @@ Tags: interface ui panel topbar modes options settings widgets layout tabs cost 
 | Mode tiles | View · Edit · Wire · Flight · Wind — the workspace split |
 | ● Save | download the file; the gold ● means unsaved changes |
 | ▤ | collapse / expand the left parts panel (also the ‹ / › bookmark tab on its edge) |
-| ⚙ View | the view window: sky backdrop (none / mars / earth / desert / sky — everything in the backdrop manifest), orthographic projection, hull, wireframe, labels, gizmo, real models, static info, mesh quality |
+| ⚙ View | the view window: sky backdrop (⊘ none / desert / sky / hangar — everything in the backdrop manifest; **sky** boots by default), orthographic projection, hull, wireframe, labels, gizmo, real models, static info, mesh quality |
 
 ## The side panel
 

@@ -30,24 +30,21 @@ Read this file together with LICENSE (GNU GPL v3).
    intact and review the game's EULA/ToS for what redistribution of
    player-created workshop data permits.
 
-   **Sky backdrop panoramas** — `app/src/assets/backdrops/mars.jpg` is
-   "Mastcam-Z's First 360-Degree Panorama" (Perseverance rover, Jezero
-   Crater, Sol 3) by **NASA/JPL-Caltech/ASU/MSSS — public domain** (NASA
-   image use policy); resampled from the stitched cylinder onto the full
-   2:1 dome (the sky/soil edge rows extended to the poles), colour
-   unchanged. `earth.jpg` is "Waterbuck trail" by **Greg Zaal / Poly
-   Haven (https://polyhaven.com/a/waterbuck_trail), CC0 1.0** — resampled
-   16 k → 2 k, colour unchanged. `desert.jpg` is "Goegap" by **Greg Zaal /
-   Poly Haven (https://polyhaven.com/a/goegap), CC0 1.0** and `sky.jpg` is
-   "Kloofendal 48d Partly Cloudy (Pure Sky)" by **Greg Zaal & Jarod Guest /
-   Poly Haven (https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky),
-   CC0 1.0** — both the site's tone-mapped preview, reduced to a
-   low-quality 2 k variant (8192×4096 → 2048×1024, JPEG q70). All are
-   surface panoramas (sky above, terrain below), matching the viewer's dome
-   rendering. The set is manifest-enumerated
-   (`app/src/assets/backdrops/manifest.json` — name, source URL, author,
-   licence per file; see that folder's README.md and the in-app manual's
-   Display topic, which credit the authors too).
+   **Sky backdrop panoramas** — the shipped set
+   (`app/src/assets/backdrops/`, enumerated by its `manifest.json`):
+   `desert.jpg` is "Goegap" by **Greg Zaal / Poly Haven
+   (https://polyhaven.com/a/goegap), CC0 1.0**; `sky.jpg` is "Kloofendal
+   48d Partly Cloudy (Pure Sky)" by **Greg Zaal & Jarod Guest / Poly Haven
+   (https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky), CC0
+   1.0**; `hangar.jpg` is "Hangar Interior" (an interior panorama — roof
+   overhead, floor below) by **Dimitrios Savva & Jarod Guest / Poly Haven
+   (https://polyhaven.com/a/hangar_interior), CC0 1.0**. Each is the
+   site's tone-mapped preview, reduced to a low-quality 2 k variant
+   (8192×4096 → 2048×1024, JPEG q70). The earlier two (a NASA Jezero
+   panorama and Poly Haven's "Waterbuck trail") were retired 2026-10-24
+   (we: "they werent vey suitable"). The manifest carries name, source
+   URL, author and licence per file; see that folder's README.md and the
+   in-app manual's Display topic, which credit the authors too..
 
    **XenonViewer-derived material**: `viewer/blockshapes.js` and
    `viewer/palette.js` (shape/rotation tables and the built-in palette, both

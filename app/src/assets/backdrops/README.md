@@ -5,6 +5,8 @@ rows. The engine enumerates `manifest.json` at build time (`scene.ts` →
 `import.meta.glob('…/backdrops/*.jpg')`), so **adding one is a drop-file +
 one manifest entry — no code changes**. The View-menu buttons, the tooltips
 (author + license) and the e2e enumeration pin all follow the manifest.
+The manifest's top-level `"default"` names the backdrop a fresh profile
+boots on (an explicit `⊘`/stored pick wins).
 
 ## Adding a backdrop
 
@@ -19,7 +21,6 @@ one manifest entry — no code changes**. The View-menu buttons, the tooltips
 
 | menu name   | asset | author | license | source |
 |-------------|-------|--------|---------|--------|
-| `mars`      | Mastcam-Z's First 360-Degree Panorama (Perseverance, Jezero, Sol 3) | NASA/JPL-Caltech/ASU/MSSS | public domain (NASA use policy) | [PIA23862](https://www.nasa.gov/multimedia/imagegallery/iotd/piasmall/PIA23862/) |
-| `earth`     | Waterbuck trail | Greg Zaal (Poly Haven) | CC0 1.0 | [polyhaven.com/a/waterbuck_trail](https://polyhaven.com/a/waterbuck_trail) |
 | `desert`    | Goegap (low-quality tone-mapped 2k variant) | Greg Zaal (Poly Haven) | CC0 1.0 | [polyhaven.com/a/goegap](https://polyhaven.com/a/goegap) |
 | `sky`       | Kloofendal 48d Partly Cloudy (Pure Sky) (low-quality tone-mapped 2k variant) | Greg Zaal, Jarod Guest (Poly Haven) | CC0 1.0 | [polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky](https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky) |
+| `hangar`    | Hangar Interior (interior panorama; roof above, floor below — low-quality tone-mapped 2k variant) | Dimitrios Savva, Jarod Guest (Poly Haven) | CC0 1.0 | [polyhaven.com/a/hangar_interior](https://polyhaven.com/a/hangar_interior) |

@@ -1283,8 +1283,30 @@ topic + FORMAT).
   rows/phone-rows/swap-pixels over every name — a new entry is pinned the
   moment it lands (proven: desert + sky swap pixels green). Build proof:
   `vite build` emits all four panoramas; 508 vitest + viewmenu @ui green.
-  `hangar` awaited the user's URL choice (their paste re-used the sky URL) —
-  Poly Haven hangar candidates offered: hangar_interior, small_hangar_01/02.
+  **hangar** (we first re-pasted the sky URL, then: "I meant this one
+  https://polyhaven.com/a/hangar_interior") landed as the SAME drop-in —
+  one jpg + one manifest line, zero code — proving the design: Poly Haven
+  "Hangar Interior" (Dimitrios Savva & Jarod Guest, CC0, interior panorama
+  roof-above/floor-below, 341 KB tone-mapped 2k q70). Then **mars + earth
+  RETIRED** (we: "Remove the earth and mars they werent vey suitable") —
+  `git rm` both jpgs + manifest entries, all credits updated; the manifest
+  = desert, sky, hangar, which is all `vite build` emits. The retire also
+  re-pinned the LAST hardcoded-name tests to the manifest (viewmenu
+  ortho-dome + reload-persistence now use `FIRST = MANIFEST.backdrops[0]`,
+  `viewperf.mjs` loops the manifest) — no backdrop NAME survives in test
+  or tooling outside the manifest itself. And the off-option is an ICON
+  now (we: "reword none option for equi as a simple n/a icon, the one with
+  a strike through"): the button reads ⊘ (the mode-widget's off glyph),
+  value/testid `none` unchanged, tooltip says it. Fresh profiles finally
+  BOOT ON A BACKDROP (we: "make sky backdrop default") — a top-level
+  `"default": "sky"` in the manifest (validated by `backdropDefault()`,
+  scene.ts; stored picks and an explicit ⊘ always win; the engine's boot
+  re-apply at construction loads the dome). Stale stored names from the
+  retired mars/earth fall back to the default too. e2e: boot now expects
+  `{current: DEF}` from the manifest, and the flat-sky BASELINE + the
+  see-through scan switch to ⊘ explicitly first (behind a see-through pad
+  a PANORAMA's terrain may read green — the swap pins cover panoramas,
+  this pin covers the sheet).
 - **v1.8.6 THE SKIN TRANSFORM CUTS, NEVER DROPS (urgent-fix.md, user: "a valid
  zeppelin suddenly misses a face after rotations … the size doesn't inherently
  change"):** the frame-aligned 31-slot window is a FRAME law, so a face with
