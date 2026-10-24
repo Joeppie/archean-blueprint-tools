@@ -387,15 +387,17 @@ describe('v1.9 balloon tail persists through the SHIPPED commit', () => {
     expect(coupler.position.x).toBeCloseTo(0.75, 3);
     expect(coupler.position.y).toBeCloseTo(0.25, 3);
     expect(coupler.position.z).toBeCloseTo(-0.5, 3);
-    // The rudder hinge turns WITH the ghost. v1.9.3: its authored mount is
-    // the LYING fin frame rolled +90° about the ship axis (a 180° about the
-    // (up+tail)/√2 diagonal — tower aft, plugs down at the body), so after
-    // the ⟲y the stored orientation is a 120° cycle: |w|=|x|=|y|=|z|=½.
-    // (The retired stance-up mount stored Ry(90), turning to a pure 180°
-    // about y: |y|≈1, w≈0 — so this pin discriminates the attitude.)
+    // The rudder hinge turns WITH the ghost. v1.10.2 GAME-STATUTE mount:
+    // a half-turn about ŷ (upright hinge, plug axle aft along the hinge
+    // line), so ⟲y stays a PURE-y composition: Ry(90)·Ry(180) = Ry(270) ⇒
+    // |w|=|y|=√2/2, |x|=|z|=0. (The retired v1.9.3 lying-diagonal mount
+    // composed into a 120° cycle |w|=|x|=|y|=|z|=½ — so this pin keeps
+    // discriminating the attitude.)
     const rudder = saved.data.components.find(c2 => c2.type === 'SmallHinge')!;
-    [rudder.orientation.w, rudder.orientation.x, rudder.orientation.y,
-      rudder.orientation.z].forEach(v => expect(Math.abs(v)).toBeCloseTo(0.5, 3));
+    expect(Math.abs(rudder.orientation.w)).toBeCloseTo(Math.SQRT1_2, 3);
+    expect(Math.abs(rudder.orientation.y)).toBeCloseTo(Math.SQRT1_2, 3);
+    expect(Math.abs(rudder.orientation.x)).toBeCloseTo(0, 3);
+    expect(Math.abs(rudder.orientation.z)).toBeCloseTo(0, 3);
     // the rudder panel turned WITH the map: its centre plane x=6 became z=6−2=4
     const rudderBuild = saved.data.components.filter(c2 => c2.type === 'Build')[0]!;
     const tris = rudderBuild.data?.['triangles'] as Record<string, number>[];

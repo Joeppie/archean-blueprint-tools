@@ -16,7 +16,7 @@ import {
   type BalloonAdapters,
 } from '../balloonfin';
 import { spherePlan, sphereSkinTris, transformSkinTris, type SphereSpec } from '../latsphere';
-import { qAxisAngle, qMul, qRot, type V3 } from '../compparts';
+import { qRot, type V3 } from '../compparts';
 import manifest from '../../../../viewer/models/manifest.json';
 
 type Adm = { name: string; type: string; position: [number, number, number]; rotation: [number, number, number] };
@@ -239,34 +239,37 @@ describe('balloon tail plan (untouched cone, hung vanes)', () => {
       expect(c.type).toBe('SmallHinge');
   });
 
-  test('the rudder hinge is the FIN hinge rolled ONE 90° about the ship axis', () => {
-    // v1.9.3 (we: "the hinge should be 'laying down' … connectors same
-    // side (near the fuselage) … rotated 90° while still laying down"):
-    // the mount is the aileron frame rolled +90° about t̂ (ẑ here). The
-    // tower (ŷ, the .ini angular_y pin) LIES along the ship axis like
-    // the fins' towers — it no longer points skyward (v1.9.1's stance
-    // is retired) — and the plug face (ẑ, where the lv/data connectors
-    // live) lands on UP, so the plugs point DOWN at the body exactly as
-    // the fins' plugs point inboard at it. The panel rolls about the
-    // LONGITUDINAL line: the tall vane's top swings sideways.
+  test('the tail hinges are the GAME-STATUTE mount (upright, plug axle fore–aft)', () => {
+    // v1.10.2 (bench census, tools/bench_census.py): the hinge line IS the
+    // plug axle — jointChain R(q)·C·ŷ = R(q)·(0,0,−1) — so the upright
+    // XYQ-615 stance (bench-exact) becomes the statute: tower ŷ → UP, plug
+    // face −ẑ → AFT along the hinge line, and the panel rolls about the
+    // LONGITUDINAL line (v1.9.3's kinematics stand: top and keel scissor
+    // sideways). The retired trio of old-law mounts: sky-pointing tower
+    // (v1.9.1), lying tower + plug down (v1.9.3 — impossible under the
+    // statute, the plug normal IS the spin line).
     const qOf = (role: string) => {
       const q = p.comps.find(c => c.kind === 'pivot' && c.role === role)!.quat;
       // component quats carry the writer's 6-decimal literal style — the
       // comparison below uses that precision
       return q;
     };
-    const qr = qOf('rudder'), qa = qOf('aileronR');
-    // joint axis LYING on the ship axis — not the sky
-    expect(Math.abs(qRot(qr, [0, 1, 0])[2]!)).toBeGreaterThan(0.999);    // ∥ ±ẑ
-    expect(Math.abs(qRot(qr, [0, 1, 0])[1]!)).toBeLessThan(0.001);       // not up
-    // the plug face (−ẑ) faces the body: part ẑ → world up ⇒ plugs DOWN
-    expect(Math.abs(qRot(qr, [0, 0, 1])[1]!)).toBeGreaterThan(0.999);    // ∥ ±ŷ
-    expect(Math.abs(qRot(qr, [0, 0, 1])[2]!)).toBeLessThan(0.001);       // not along ẑ
-    // and it IS one quarter-turn about the SHIP AXIS from the fin mount
-    const quarter = qMul(qAxisAngle([0, 0, 1], Math.PI / 2), qa);
+    const qr = qOf('rudder'), qa = qOf('aileronR'), qal = qOf('aileronL');
+    // joint axis (the law line R·C·ŷ = −R·ẑ) LYING on the ship axis
+    const axisR = qRot(qr, [0, 0, -1]);
+    expect(Math.abs(axisR[2]!)).toBeGreaterThan(0.999);                 // ∥ ±ẑ
+    expect(Math.abs(axisR[1]!)).toBeLessThan(0.001);                    // not up
+    // the plug face (−ẑ) faces ALONG the hinge line (statute) — aft
+    const plug = qRot(qr, [0, 0, -1]);
+    expect(Math.abs(plug[2]!)).toBeGreaterThan(0.999);                  // ∥ ±ẑ
+    // the tower (part ŷ) stands UP
+    const tower = qRot(qr, [0, 1, 0]);
+    expect(Math.abs(tower[1]!)).toBeGreaterThan(0.999);                 // ∥ ±ŷ
+    // one half-turn about ŷ: all three hinges are the SAME mount (it is its
+    // own x-mirror, so the L/R pair stays the exact mirror of itself)
     const E: V3[] = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
-    E.forEach(e => [0, 1, 2].forEach(k =>
-      expect(qRot(quarter, e)[k]!).toBeCloseTo(qRot(qr, e)[k]!, 5)));
+    [qa, qal].forEach(q => E.forEach(e => [0, 1, 2].forEach(k =>
+      expect(qRot(q, e)[k]!).toBeCloseTo(qRot(qr, e)[k]!, 5))));
   });
 
   test('the ghost map follows quarter-turns + cell offsets exactly', () => {

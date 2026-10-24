@@ -363,34 +363,36 @@ export function planBalloonTail(
   // the three pivots ON the hinge line (zB) + their subgrid panels
   const pivotDefs: { role: FinRole; pos: GP3; frame: Frame }[] = [];
   {
-    // Rudder: THE AILERON MOUNT ROLLED ONE +90° ABOUT THE SHIP AXIS
-    // (v1.9.3, we: "the hinge should be 'laying down' but, connectors
-    // same side (near the fuselage) as the other hinges, and of course
-    // rotated 90° while still laying down"). The frame is the fin frame
-    // {x̂→up, ŷ→tail, ẑ→out} turned +90° about tHat: {x̂→−side, ŷ→tail,
-    // ẑ→up} — the tower (part ŷ, the .ini angular_y pin) LIES along the
-    // longitudinal line like both fin hinges' towers, and the plug face
-    // (part −ẑ, where the lv/data connectors live) points DOWN at the
-    // body, exactly as the fins' plugs face inboard at it. All three
-    // hinges are then ONE part rolled around the ship: aft-tower down,
-    // connector toward the fuselage. The panel rolls about that
-    // LONGITUDINAL joint line (axis0 = R(q)·ŷ = tHat): the tall vane's
-    // top swings SIDEWAYS. RETIRED the same day: v1.9.1's stance-up
-    // fin attitude {−t̂,û,ŝ} (tower pointing skyward — "it points
-    // upward, so it can bend the tail fin down and up").
+    // THE GAME-STATUTE MOUNT (v1.10.2, supersedes the v1.9.x trio of
+    // rulings): the corpus bench census (tools/bench_census.py, the game's
+    // own baked panel transforms) pins the PANEL LAW — a subgrid spins about
+    // R(q)·C·ê through the part. For a SmallHinge (ê = ŷ_content = the plug
+    // axle) that is R(q)·(0,0,−1): THE HINGE LINE IS THE PLUG AXIS, so the
+    // mount solves R·ẑ = −tHat → az = −t̂: the hinge stands UPRIGHT (tower
+    // ay = û) with its axle fore–aft and its plug face pointing AFT along
+    // the hinge line — exactly the XYQ-615 door hinge's authored stance
+    // (identity mount, bench rotation about the ẑ line), which the census
+    // verifies byte-exact. RETIRED (old-law artifacts, no game precedent):
+    // v1.9.3 "lay the tower down, plug faces down" — impossible under the
+    // statute (plug normal IS the spin line); v1.9.1 stance-up-with-plug-
+    // inboard; the panel KINEMATICS the user ruled in v1.9.3 stand: the
+    // rudder rolls about the LONGITUDINAL line — top and keel scissor
+    // sideways — and the ailerons roll with it.
     const p: GP3 = [c[0]!, c[1]!, c[2]!];
     p[la] = zB; p[upIdx] = Math.round((keelU + lineUp(zB)) / 2); p[gSide] = cSide;
-    pivotDefs.push({ role: 'rudder', pos: p, frame: { ax: neg(sHat), ay: tHat, az: uHat } });
+    pivotDefs.push({ role: 'rudder', pos: p, frame: { ax: neg(sHat), ay: uHat, az: neg(tHat) } });
   }
   for (const sgn of [1, -1] as const) {
-    // ailerons: joint axis = longitudinal, the hung panel rolls about it;
-    // the pair is the exact mirror of itself (out and ax flip together)
-    const out: G3 = sgn > 0 ? sHat : neg(sHat);
+    // ailerons: the same upright statute mount on BOTH sides — this frame is
+    // a HALF-TURN about û, and the x-mirror of a half-turn about û is
+    // ITSELF, so identical quaternions at mirrored positions ARE the exact
+    // mirror pair; both panels then spin about +tHat (equal angles = equal
+    // roll, elevon-style).
     const p: GP3 = [c[0]!, c[1]!, c[2]!];
     p[la] = zB; p[upIdx] = cUp; p[gSide] = cSide + sgn * (surfSide(zB) + 1.5 - cSide);
     pivotDefs.push({
       role: sgn > 0 ? 'aileronR' : 'aileronL', pos: p,
-      frame: { ax: cross(tHat, out), ay: tHat, az: out },
+      frame: { ax: neg(sHat), ay: uHat, az: neg(tHat) },
     });
   }
   const comps: PlannedComp[] = [coupler];

@@ -151,25 +151,38 @@ describe('joint line capture + pose', () => {
     expect(captureJrefs([{ component: 0, mc: lamp, top: 0 }], null, manifest)).toHaveLength(0);
   });
 
-  test('EDGE-mounted hinge keeps the pin; FACE-mounted hinge swings on pin×span', () => {
-    // content spans along x (longest dim x̂). Pin ŷ (SmallHinge angular_y):
-    // |pin·d| = 0 → face-mounted → axis = ŷ×x̂ = −ẑ (dolphin skin-fin roll).
-    const face = comp({ type: 'SmallHinge', position: { x: 0, y: 0.4, z: 0 } });
-    const [jf] = captureJrefs([{ component: 0, mc: face, top: 0 }], bbx, manifest);
+  test('panel axis = THE PANEL LAW line; pivot clamped onto the panel bbox', () => {
+    // v1.10.2 replaces the v0.175-177 empirical triad: the spin line is
+    // R(q)·C·ê through the clamped axle pivot — bench-exact against the
+    // game's own baked transforms (describe BENCH CENSUS below).
+    // SmallHinge angular_y at an identity mount: C·ŷ = −ẑ (a standing
+    // hinge hinges about the horizontal fore–aft line — the XYQ-615 bench
+    // confirms this byte-exactly).
+    const mc = comp({ type: 'SmallHinge', position: { x: 0, y: 0.4, z: 0 } });
+    const [jf] = captureJrefs([{ component: 0, mc, top: 0 }], bbx, manifest);
     expect(jf!.axis0[2]).toBeCloseTo(-1, 6);
     expect(jf!.axis0[0]).toBeCloseTo(0, 9);
     // pivot clamped onto the panel bbox: the axle floats at y=0.4+0.15, the
     // CLAMPED line rides the panel's top edge (v0.173 "rotating around the bottom/edge")
     expect(jf!.pivot0[1]).toBeCloseTo(bbx.max[1], 6);
-    // edge-mounted: content runs along its pin — a y-span panel |pin·d|≈1 keeps d
-    const bbY = { min: [-0.125, 0, -0.25] as [number, number, number], max: [0.125, 1.25, 0.25] as [number, number, number] };
-    const edge = comp({ type: 'SmallHinge', position: { x: 0, y: 0.4, z: 0 } });
-    const [je] = captureJrefs([{ component: 0, mc: edge, top: 0 }], bbY, manifest);
-    expect(Math.abs(je!.axis0[1])).toBeCloseTo(1, 6);       // ±ŷ long-edge yaw (XYQ doors)
-    // a SmallPIVOT never takes the triad branch — panels keep the longest dim
-    const piv = comp({ type: 'SmallPivot', position: { x: 0, y: 0.4, z: 0 } });
-    const [jp] = captureJrefs([{ component: 0, mc: piv, top: 0 }], bbx, manifest);
-    expect(Math.abs(jp!.axis0[0])).toBeCloseTo(1, 6);
+    // a rotated mount spins the line WITH the part: Rz(90)·(−ẑ) = −ẑ stays
+    // (z is the Rz axis) while Rz(90)·ŷ would have become ∓x̂ — the Badger
+    // door bug: SmallPivots mounted Rz(∓90) drawbridged about x̂.
+    const rz = comp({
+      type: 'SmallPivot', orientation: eulerZYX(0, 0, 90),
+      position: { x: 0.375, y: 1.375, z: -0.375 },
+    });
+    const [jr] = captureJrefs([{ component: 0, mc: rz, top: 0 }], null, manifest);
+    expect(jr!.axis0[2]).toBeCloseTo(-1, 6);
+    expect(jr!.axis0[0]).toBeCloseTo(0, 9);
+    // the slide key maps through the same content basis
+    const trk = comp({
+      type: 'LinearTrack', orientation: eulerZYX(0, 0, 90),
+      position: { x: 0, y: 0, z: 0 }, data: { pos: 0.25 },
+    });
+    const [jt] = captureJrefs([{ component: 0, mc: trk, top: 0 }], bbx, manifest);
+    expect(jt!.axis0[0]).toBeCloseTo(0, 6);              // C·x̂ = x̂, Rz(90)·x̂ = ŷ
+    expect(jt!.axis0[1]).toBeCloseTo(1, 6);
   });
 
   test('joint pose: angle 0 + built master pose ⇒ EXACTLY the base (bit-identical load)', () => {
@@ -196,11 +209,13 @@ describe('joint line capture + pose', () => {
     expect(pose.p[0]).toBeCloseTo(r!.pivot0[0], 9);
     expect(pose.p[1]).toBeCloseTo(r!.pivot0[1] - 1, 9);
     expect(pose.p[2]).toBeCloseTo(r!.pivot0[2], 9);
-    // slide +0.25 along d = x̂ (longest dim)
+    // slide +0.25 along the LAW slide (SmallHinge has no slide key ⇒ the
+    // spin key maps through C: ŷ → −ẑ; a LinearTrack's x̂ stays x̂ — next test)
     const st2 = [{ angle: 0, slide: 0.25, pos: [0, 0.4, 0] as [number, number, number], quat: { w: 1, x: 0, y: 0, z: 0 } }];
     const pose2 = subJointPose(base, [r!], st2);
-    expect(pose2.p[0]).toBeCloseTo(0.25, 9);
+    expect(pose2.p[0]).toBeCloseTo(0, 9);
     expect(pose2.p[1]).toBeCloseTo(0, 9);
+    expect(pose2.p[2]).toBeCloseTo(-0.25, 9);
   });
 
   test('rigid riding: the master TRANSLATING +0.5 x moves the subgrid +0.5 x (subfollow)', () => {
@@ -215,14 +230,13 @@ describe('joint line capture + pose', () => {
   });
 });
 
-// ------------------------------------------------------- THE PLATE LAW pins
-// v1.9.0 THE PLATE LAW: the balloon's rudder plate rolled about the
-// fore–aft axis (a PROPELLER) while its panel yawed about the vertical —
-// applyJointPoses spun the axle node about the raw .ini key INSIDE the
-// content basis C = Rx(−90), so the plate's world line was R(q)·C·ê while
-// the in-game-pinned panel law is R(q)·ê. jointNodeAxis/jointNodeSlide
-// conjugate C out; these pins hold the plate EXACTLY on the panel's line.
-describe('THE PLATE LAW — the part plate turns on the panel’s line', () => {
+// ------------------------------------------------------- THE PLATE LAW v2 pins
+// v1.10.2 THE PANEL LAW (file header of subgrid.ts): the panel spins about
+// R(q)·C·ê (C = Rx(−90)), byte-proven on the game's own baked
+// Build.orientation transforms (tools/bench_census.py). The part's OWN axle
+// node hangs under the same C and must follow the SAME line:
+//   node-local v = baseQ⁻¹·ê (world R(q)·C·baseQ·v ≡ R(q)·C·ê), slide d = ê.
+describe('THE PLATE LAW v2 — the part plate turns on the panel’s line', () => {
   const CQ: FileQuat = { w: Math.SQRT1_2, x: -Math.SQRT1_2, y: 0, z: 0 };  // Rx(−90)
   const UNIT: Record<'x' | 'y' | 'z', [number, number, number]> = {
     x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1],
@@ -235,18 +249,18 @@ describe('THE PLATE LAW — the part plate turns on the panel’s line', () => {
   ];
   for (const { name, q } of baseQs) {
     for (const k of ['x', 'y', 'z'] as const) {
-      test(`rotation line: C·(${name}·v) == ${name}·ê_${k} (panel law)`, () => {
+      test(`rotation line: C·(${name}·v) == C·ê_${k} (panel law)`, () => {
         const v = jointNodeAxis(q, k);
         const plate = qRot(CQ, qRot(q, v));
-        const panel = qRot(q, UNIT[k]);
+        const panel = qRot(CQ, UNIT[k]);
         expect(plate[0]).toBeCloseTo(panel[0]!, 9);
         expect(plate[1]).toBeCloseTo(panel[1]!, 9);
         expect(plate[2]).toBeCloseTo(panel[2]!, 9);
       });
-      test(`slide line: C·(${name}·d) == ${name}·ê_${k}`, () => {
+      test(`slide line: C·(${name}·d) == C·ê_${k}`, () => {
         const d = jointNodeSlide(q, k);
         const plate = qRot(CQ, d);
-        const panel = qRot(q, UNIT[k]);
+        const panel = qRot(CQ, UNIT[k]);
         expect(plate[0]).toBeCloseTo(panel[0]!, 9);
         expect(plate[1]).toBeCloseTo(panel[1]!, 9);
         expect(plate[2]).toBeCloseTo(panel[2]!, 9);
@@ -262,34 +276,171 @@ describe('THE PLATE LAW — the part plate turns on the panel’s line', () => {
     near(jointNodeAxis(id, 'x'), [1, 0, 0]);
     near(jointNodeSlide(id, 'x'), [1, 0, 0]);
   });
-  test('SmallHinge ê_y lands the plate on CONTENT ẑ (lying mounts: part ŷ → ship axis)', () => {
+  test('the node formula is the statute v = baseQ⁻¹·ê, slide d = ê', () => {
     const id: FileQuat = { w: 1, x: 0, y: 0, z: 0 };
-    near(jointNodeAxis(id, 'y'), [0, 0, 1]);
-    near(jointNodeAxis(id, 'z'), [0, -1, 0]);
+    near(jointNodeAxis(id, 'y'), [0, 1, 0]);               // raw key at identity
+    near(jointNodeSlide(id, 'y'), [0, 1, 0]);              // parent space = C space
+    const ry = eulerZYX(0, 10, 0);
+    const v = jointNodeAxis(ry, 'y');
+    near(qRot(ry, v), [0, 1, 0]);                          // baseQ·v ≡ ê
   });
-  test('the rudder case end-to-end: plate axis == jointChain axis == lying ship line', () => {
-    // v1.9.3 re-pin: the balloon rudder mount now lies the hinge DOWN — its
-    // authored frame maps part ŷ → the LONGITUDINAL ship line (the fin
-    // hinge rolled +90° about that line), so a stand-in file quat rotating
-    // ŷ onto ẑ drives both the panel and the plate about the lying line
-    // (the old sky-pointing mount used the identity quat and read UP).
-    const q90 = eulerZYX(90, 0, 0);                        // Rx(90): ŷ → ẑ
+  test('the balloon tail mount end-to-end: plate axis == jointChain axis == the ship longitudinal', () => {
+    // v1.10.2 GAME-STATUTE mount: upright hinge, plug axle fore–aft — the
+    // file quat is the half-turn about file ŷ (frame x̂→−x̂, ŷ→ŷ, ẑ→−ẑ),
+    // so jointChain reads R(180ŷ)·C·ŷ = R·(0,0,−1) = +ẑ = the longitudinal
+    // line the v1.9.3 ruling demands (top and keel scissor sideways).
+    const qStat: FileQuat = { w: 0, x: 0, y: 1, z: 0 };
     const mc: BlueprintComponent = comp({
-      type: 'SmallHinge', orientation: q90, data: { angle: 25 },
+      type: 'SmallHinge', orientation: qStat, data: { angle: 25 },
     });
     const manifest = {
       SmallHinge: { joints: [{ name: 'axle', position: [0, 0, 0], rotation: [0, 0, 0], axis: 'y' }] },
     } as unknown as ModelManifest;
     const chain = jointChain(mc, manifest);
     expect(Math.abs(chain!.axis[2]!)).toBeGreaterThan(0.999);   // panel rolls along ẑ
-    expect(Math.abs(chain!.axis[1]!)).toBeLessThan(1e-9);       // not the retired UP line
-    // the axle's own euler is IDENTITY (the .ini), so v is the same
-    // content-ẑ as at identity; the plate's world line then rides the
-    // scene chain part-quat ∘ C ∘ v — and lands on the panel law q·ŷ
+    expect(Math.abs(chain!.axis[1]!)).toBeLessThan(1e-9);       // not vertical
     const v = jointNodeAxis({ w: 1, x: 0, y: 0, z: 0 }, 'y');
-    const plateWorld = qRot(q90,
-      qRot({ w: Math.SQRT1_2, x: -Math.SQRT1_2, y: 0, z: 0 }, v));
-    const expectToPanel = qRot(q90, [0, 1, 0]);                 // the in-game panel law
-    plateWorld.forEach((x, i) => expect(x).toBeCloseTo(expectToPanel[i]!, 9));
+    const plateWorld = qRot(qStat, qRot(CQ, v));
+    plateWorld.forEach((x, i) => expect(x).toBeCloseTo(chain!.axis[i]!, 9));
+  });
+});
+
+// ------------------------------------------------- THE BENCH LAW (v1.10.2)
+// Build.orientation is the game's OWN saved panel transform. Where it is a
+// rotation, captureJrefs reads the display angle off it (bakedAngle) and
+// edits ride as deltas — so a load lands on the game's pose even when the
+// file's data.angle has the mirrored-twin sign the game's physics wrote.
+describe('THE BENCH LAW — baked display pose + edit deltas', () => {
+  const manifest: ModelManifest = {
+    SmallPivot: { joints: [{ name: 'axle', position: [0, 0, 0], rotation: [0, 0, 0], axis: 'y' }] },
+  } as unknown as ModelManifest;
+  const base = { p: [0, 0, 0] as [number, number, number], q: { w: 1, x: 0, y: 0, z: 0 } as FileQuat };
+  // Badger door 6 verbatim: SmallPivot at Rz(−90), angle 306, bench +54°
+  // about the ẑ law line (the game's own transform, 3326372833).
+  const door = comp({
+    type: 'SmallPivot',
+    orientation: { w: Math.SQRT1_2, x: 0, y: 0, z: -Math.SQRT1_2 },
+    position: { x: 1.125, y: 3.375, z: 0.875 }, data: { angle: 306 },
+  });
+  const bench: FileQuat = { w: 0.8910064767442805, x: 0, y: 0, z: 0.4539905928537991 };
+
+  test('bench rotation wins the load pose (306 authored ⇒ game shows +54)', () => {
+    const [r] = captureJrefs([{ component: 0, mc: door, top: 0 }], null, manifest, bench);
+    expect(r!.axis0[2]).toBeCloseTo(-1, 6);                      // law line Rz(−90)·C·ŷ = −ẑ
+    // the bench is +54° about ẑ ⇒ −54° about the law line −ẑ (same spin);
+    // data.angle 306 about the law line is the SAME rotation (306 ≡ −54).
+    expect(r!.bakedAngle).toBeCloseTo(-54, 4);  // file floats carry 54.000012
+    expect(r!.authoredAngle).toBeCloseTo(306, 6);
+    const st = [{ angle: 306, slide: 0, pos: [1.125, 3.375, 0.875] as [number, number, number],
+      quat: { w: Math.SQRT1_2, x: 0, y: 0, z: -Math.SQRT1_2 } }];
+    const pose = subJointPose(base, [r!], st);
+    // the load rotation EQUALS the game's bench rotation: the relative
+    // rotation pose·bench⁻¹ is the identity (double cover absorbed by |w|)
+    const inv: FileQuat = { w: bench.w, x: -bench.x, y: -bench.y, z: -bench.z };
+    const a = pose.q, b = inv;
+    const rel = {
+      w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
+      x: a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+      y: a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+      z: a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+    };
+    expect(Math.abs(rel.w)).toBeCloseTo(1, 9);
+  });
+  test('edits ride as DELTAS from the authored angle (slider to 0 closes the door)', () => {
+    const [r] = captureJrefs([{ component: 0, mc: door, top: 0 }], null, manifest, bench);
+    const st = (a: number) => [{ angle: a, slide: 0, pos: [1.125, 3.375, 0.875] as [number, number, number],
+      quat: { w: Math.SQRT1_2, x: 0, y: 0, z: -Math.SQRT1_2 } }];
+    const closed = subJointPose(base, [r!], st(0));
+    expect(Math.abs(closed.q.w)).toBeCloseTo(1, 9);              // identity ⇒ shut
+    expect(Math.abs(closed.q.x) + Math.abs(closed.q.y) + Math.abs(closed.q.z)).toBeLessThan(1e-5);
+    // a −10° edit (306→296) turns the LOAD pose by exactly −10° about the
+    // law line, whatever the wrap: pose·bench⁻¹ = qAxisAngle(−ẑ, −10°)
+    const open = subJointPose(base, [r!], st(296));
+    const inv: FileQuat = { w: bench.w, x: -bench.x, y: -bench.y, z: -bench.z };
+    const a = open.q, b = inv;
+    const rel = {
+      w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
+      x: a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+      y: a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+      z: a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+    };
+    expect(2 * Math.atan2(Math.hypot(rel.x, rel.y, rel.z), Math.abs(rel.w)) / (Math.PI / 180))
+      .toBeCloseTo(10, 6);
+    expect(rel.z / Math.hypot(rel.x, rel.y, rel.z)).toBeCloseTo(1, 6);    // −10° about −ẑ = +10° about ẑ
+  });
+  test('identity bench ⇒ baked == authored (historic no-bench behaviour untouched)', () => {
+    const mc = comp({ type: 'SmallPivot', position: { x: 1, y: 0, z: 0 }, data: { angle: 126 } });
+    const [r] = captureJrefs([{ component: 0, mc, top: 0 }], null, manifest, { w: 1, x: 0, y: 0, z: 0 });
+    expect(r!.bakedAngle).toBeCloseTo(126, 12);
+    const [r2] = captureJrefs([{ component: 0, mc, top: 0 }], null, manifest, null);
+    expect(r2!.bakedAngle).toBeCloseTo(126, 12);
+  });
+});
+
+// ------------------------------------------------- BENCH CENSUS (the statute)
+// The golden corpus net: for EVERY (subgrid, master) pair whose Build carries
+// a baked rotation, the law line R(q)·C·ê must be that rotation's axis, and
+// the baked angle must equal data.angle — or, for the game's mirrored mirror-
+// twins, exactly −data.angle (the physics mirrored one twin's travel at
+// save). tools/bench_census.py established 157/166 exact + 9 mirrored; this
+// pin keeps the statute green on the whole corpus, forever.
+describe('BENCH CENSUS — the game’s baked transforms obey the law on the whole corpus', () => {
+  const manifestPath = new URL('../../../../viewer/models/manifest.json', import.meta.url);
+  const MAN = JSON.parse(readFileSync(manifestPath, 'utf8')) as ModelManifest;
+  const qeq = (a: FileQuat, b: FileQuat) =>
+    [0, 1, 2, 3].every(i => Math.abs((a as any)[i] - (b as any)[i]) < 1e-3)
+    || [0, 1, 2, 3].every(i => Math.abs((a as any)[i] + (b as any)[i]) < 1e-3);
+  const KEYS = ['w', 'x', 'y', 'z'] as const;
+  const asArr = (q: FileQuat) => ({ 0: q.w, 1: q.x, 2: q.y, 3: q.z } as Record<number, number>);
+  const qSame = (a: FileQuat, b: FileQuat) => {
+    const A = asArr(a), B = asArr(b);
+    return [0, 1, 2, 3].every(i => Math.abs(A[i]! - B[i]!) < 1e-3)
+      || [0, 1, 2, 3].every(i => Math.abs(A[i]! + B[i]!) < 1e-3);
+  };
+  test('every baked bench is a law-axis rotation of ±data.angle', () => {
+    // the COMMITTED testdata corpus (148 baked pairs, 2026-10-24) — the
+    // machine-local save corpus may differ, so the statute is pinned here.
+    const TESTDATA = new URL('../../../../testdata/', import.meta.url);
+    const ids = readdirSync(TESTDATA).filter(d =>
+      existsSync(new URL(`${d}/blueprint.json`, TESTDATA)));
+    expect(ids.length).toBeGreaterThan(20);
+    let baked = 0, exact = 0, mirrored = 0, drifted = 0;
+    for (const id of ids) {
+      let bp: Blueprint;
+      try { bp = JSON.parse(readFileSync(new URL(`${id}/blueprint.json`, TESTDATA), 'utf8')) as Blueprint; } catch { continue; }
+      const byBuild = subMasterEntries(bp);
+      for (const [bi, entries] of byBuild) {
+        const bench = bp.data.components[bi]?.orientation ?? null;
+        if (!bench) continue;
+        let { w, x, y, z } = bench;
+        if (w < 0) { w = -w; x = -x; y = -y; z = -z; }
+        const s = Math.hypot(x, y, z);
+        if (s < 1e-6) continue;                                  // no baked rotation
+        const jref = captureJrefs(entries, null, MAN, bench)[0];
+        if (!jref) continue;
+        baked += 1;
+        const axisDot = Math.abs(jref.axis0[0]! * x / s + jref.axis0[1]! * y / s + jref.axis0[2]! * z / s);
+        expect(axisDot, `${id} build ${bi}: bench axis not the law line ${jref.axis0}`).toBeGreaterThan(0.999);
+        const pred = (sign: number): FileQuat => {
+          const a = sign * jref.authoredAngle * (Math.PI / 180);
+          const hh = a / 2, sh = Math.sin(hh);
+          return {
+            w: Math.cos(hh), x: jref.axis0[0]! * sh,
+            y: jref.axis0[1]! * sh, z: jref.axis0[2]! * sh,
+          };
+        };
+        const bq = { w, x, y, z };
+        if (qSame(pred(1), bq)) exact += 1;
+        else if (qSame(pred(-1), bq)) mirrored += 1;
+        else drifted += 1;
+      }
+    }
+    void KEYS; void qeq;
+    // The census measurement of 2026-10-24: ≥ 85 % exact, the rest mirror-
+    // twin flips or ≤1.5° authoring drift — NO pair may point off the line
+    // (asserted above), and the law must keep the exact share.
+    expect(baked).toBeGreaterThanOrEqual(140);
+    expect(exact / baked).toBeGreaterThan(0.85);
+    expect(exact + mirrored + drifted).toBe(baked);
   });
 });

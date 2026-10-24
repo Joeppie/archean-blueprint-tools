@@ -1586,7 +1586,8 @@ void main() {
       }
       // build-captured joint lines (v0.173-177 rules live in subgrid.ts)
       const bb: SubBBox | null = subBlockBBox(blocks);
-      this.subJrefs.set(bi, captureJrefs(masters.get(bi) ?? [], bb, manifest));
+      this.subJrefs.set(bi, captureJrefs(masters.get(bi) ?? [], bb, manifest, c.orientation ?? null,
+        [c.position.x, c.position.y, c.position.z]));
     });
     this.subCount = sn;
     this.syncSubJoints();

@@ -587,6 +587,7 @@ test.describe('generate balloon tool: dialog → movable ghost → cancel/build 
       const worldBox = (obj: any) => {
         e.scene.updateMatrixWorld(true);
         const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+        const mean = [0, 0, 0, 0];
         obj.traverse((o: any) => {
           if (!o.isMesh || !o.visible) return;
           const pos = o.geometry?.attributes?.position;
@@ -598,9 +599,12 @@ test.describe('generate balloon tool: dialog → movable ghost → cancel/build 
               m[1] * x + m[5] * y + m[9] * z + m[13],
               m[2] * x + m[6] * y + m[10] * z + m[14]];
             for (let k = 0; k < 3; k++) { mn[k] = Math.min(mn[k], q[k]); mx[k] = Math.max(mx[k], q[k]); }
+            for (let k = 0; k < 3; k++) mean[k] += q[k];
+            mean[3]++;
           }
         });
-        return { span: mn.map((v: number, i: number) => mx[i] - v), c: mn.map((v: number, i: number) => (v + mx[i]) / 2), mn, mx };
+        if (mean[3]) for (let k = 0; k < 3; k++) mean[k] /= mean[3];
+        return { span: mn.map((v: number, i: number) => mx[i] - v), c: mn.map((v: number, i: number) => (v + mx[i]) / 2), mn, mx, mean };
       };
       const out: any[] = [];
       // THE JOIN ORDER IS THE COMMIT'S CONTRACT (commitBalloon appends in
@@ -680,6 +684,7 @@ test.describe('generate balloon tool: dialog → movable ghost → cancel/build 
           jrefAxis: jr ? [jr.axis0[0], jr.axis0[1], jr.axis0[2]] : null,
           topC0: h0.top, topC1: h1.top, botC0: h0.bot, botC1: h1.bot,
           plateC0: t0 ? t0.c : null, plateC1: t1 ? t1.c : null,
+          plateM0: t0 ? t0.mean : null, plateM1: t1 ? t1.mean : null,
           plateAx0: along(t0), plateAx1: along(t1),
         });
       }
@@ -717,20 +722,22 @@ test.describe('generate balloon tool: dialog → movable ghost → cancel/build 
     expect(Math.sign(sTop) * Math.sign(sBot),
       'top and keel SCISSOR opposite (a yaw about UP moves them alike)')
       .toBeLessThan(0);
-    // the PART PLATE spins about its OWN lying long axis (its tower IS the
-    // joint line): its extent ALONG that line is EXACT (a reintroduced
-    // C-basis roll would shear it — the tower would tilt OFF the line).
-    // The union-box CENTROID may drift ≤ ~0.011 by design: at rest the
-    // static LV plug (0.146 m) owns the silhouette, mid-turn the rotating
-    // tower corners (0.234 m) do, which centres the box on the axis.
-    expect(r.plateC0, 'plate model loaded').toBeTruthy();
+    // the PART PLATE spins about its OWN lying long axis (plug axle = joint
+    // line, v1.10.2 statute): its extent ALONG that line is EXACT (a
+    // reintroduced C-basis roll would shear it — the tower would tilt OFF
+    // the line) and the VERTEX MEAN barely moves (≤ 0.05: only the slave
+    // fork's own asymmetry as it rolls; a wrong-line axis — the old raw-key
+    // roll put the plate on a 90°-off line — drags the mean ≫ 0.1). The
+    // union-box CENTRE is NOT the instrument: static silhouettes (the LV
+    // plug) own it and it wobbles with the mount by design (v1.9.3 note).
+    expect(r.plateM0, 'plate model loaded').toBeTruthy();
     expect(Math.abs(r.plateAx1! - r.plateAx0!),
       'plate extent along its joint line is EXACT — it spins on its own axis')
       .toBeLessThan(0.005);
-    r.plateC1!.forEach((v: number, i: number) =>
-      expect(Math.abs(v - r.plateC0![i]!),
-        'plate centroid stays on its own axis')
-        .toBeLessThan(0.02));
+    r.plateM1!.forEach((v: number, i: number) =>
+      expect(Math.abs(v - r.plateM0![i]!),
+        'plate vertex mean stays put — it rolls on its own axis')
+        .toBeLessThan(0.05));
     // the ailerons: ROLL about a HORIZONTAL line (the ⟲Y-carried
     // longitudinal), both twins on the SAME line
     for (const a of ail) {

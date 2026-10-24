@@ -1772,6 +1772,69 @@ Adventure = 3334698274).
   `slaveBuildId`-geometry heuristics (v0.153) are OBSOLETE — the decode is
   exact.
 
+### THE PANEL LAW — the byte-proven statute (v1.10.2, 2026-10-24) — NORMATIVE
+
+The v0.174-177 axis rules above are SUPERSEDED as axis law (kept for
+history; they remain close wherever the mount is upright or the pin×span
+proxy happens to land on the part line). The corpus itself carries the
+game's own answer: **wherever a jointed `Build` is left in a rotated
+state, `Build.orientation` IS the panel's saved world rotation** — a
+whole-corpus sweep (`tools/bench_census.py`, 2026-10-24, 166 baked pairs
+over testdata + the local in-game save dir) shows that rotation is
+EXACTLY
+
+    axis₀ = R(viewQuat(master)) · C · ê        (C = Rx(−90) content basis,
+    angle = data.angle DEGREES                  §Component VERTEX SPACE)
+
+about the axle-pivot line: **157/166 pairs match `qAxisAngle(axis₀,
+data.angle)` to 1e-4, 18/18 collinear** with it. The law includes NEITHER
+the axle node's authored euler (R·qAxle·ê: 9/18 on rotated mounts) NOR
+the old R·ê chain (0/18). Interpretation: the `.ini` joint keys live in
+the part's CONTENT basis, and the part's plug face (−ẑ of a SmallHinge)
+IS its hinge line — a hinge standing upright hinges about the horizontal
+fore–aft line (XYQ-615's identity mount + Rz(∓24.3) benches prove this
+directly; the old "car door ±ŷ" reading was a viewer artifact whose
+motion looked plausible). C·ê is x̂-invariant, so every historic
+Aileron/LinearTrack x-key behaviour is byte-identical under the law.
+
+The 9 non-exact pairs are the GAME'S MIRRORED TWINS: the physics mirrors
+one twin's travel at save, so its bench is `qAxisAngle(axis₀, −angle)`
+while `data.angle` keeps the shared authored value (XYQ door 2: bench
+Rz(+24.3) vs angle +24.3 about axis −ẑ ⇒ the display is −24.3 — the file
+itself records the asymmetry the author complains about in his changelog,
+"Batch has fixed the mirroring issue"). A handful of benches also carry
+authoring drift (87° baked vs 86° stored).
+
+**Build.POSITION is NOT part of the law** — it is the construction-site
+ghost translation: pure-rotation benches sit metres away from their
+hinge lines (a gantry case: 23 m). Trust only the rotation part.
+
+Viewer consequences (all shipped v1.10.2, `app/src/engine/subgrid.ts`):
+`jointChain` axis/slide = R·C·ê (`CONTENT_KEY`); `captureJrefs` derives
+`bakedAngle` = the signed bench angle about axis₀ when a rotated bench
+exists (the group renders at the GAME's pose at load — including the
+mirror-twin flips — and further data.angle edits ride as DELTAS from the
+authored value); the bench rotation's fixed line ANCHORS the pivot for
+parts-only subgrids when it lies within 1 m of the raw axle line (a
+farther line = ghost, raw axle stays); THE PLATE LAW v2: the part's own
+axle node follows the same line via node-local `v = baseQ⁻¹·ê`,
+slide `d = ê`. Golden pin: `subgrid.test.ts > BENCH CENSUS` replays the
+whole committed testdata corpus through these laws every CI run.
+
+Trigger craft: `3326372833` "Chip's Badger" cockpit doors — SmallPivots
+mounted Rz(∓90°) whose data.angle 48/306 the old law drewbridged about
+x̂ while the game hinges both about the fore–aft ẑ line through the part
+(bench-verified; the door pair also documents the palette law below).
+
+**Palette corollary (same session):** `data.colors` entries may be `0`
+(a CLEARED custom slot) while triangles/blocks still reference them.
+The game renders such faces with the engine's default (light neutral —
+user in-game screenshot); our renderer's dev-viewer-inherited magenta
+marker made the Badger's door show pink. Repair the FILE (author the
+lost slot — `{255,255,255,15,0,0}` matches the engine default and the
+in-game look); do not change the global marker (it still catches v1
+family-base bugs).
+
 ## Editing recipe (used for the seat adjustment)
 
 Tilt forward = rotate about world **X** with a **negative** angle (Unity left-handed:

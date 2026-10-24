@@ -1342,6 +1342,46 @@ topic + FORMAT).
   re-stamped to silent fresh. Bonus rule learned: corpus identity — catalog
   and /corpus route resolve the SAME file (one `craftFile()`), so a staleness
   flag can never describe a different file than the download would fetch.
+- **v1.10.2 THE PANEL LAW — the subgrid axis statute (we: "only one of the
+  two doors rotated wrong … also the color is not right" — craft 3326372833
+  Chip's Badger):** the game's OWN baked panel transforms settle the axis
+  question the v0.174-177 triad could only approximate: 166 (subgrid,
+  master) pairs across the corpus carry a rotated `Build.orientation`, and
+  `tools/bench_census.py` proves its rotation part equals
+  **`qAxisAngle(R(q)·C·ê, data.angle)` on 157 pairs, collinear 18/18 on
+  rotated mounts** (old chain R·qAxle·ê: 9/18; triad-era R·ê: 0/18). So
+  `jointChain` axis/slide = **R(q)·CONTENT·ê** (`CONTENT_KEY` = the
+  C = Rx(−90) map x̂→x̂, ŷ→−ẑ, ẑ→+ŷ; x̂-invariant ⇒ Aileron/LinearTrack
+  pins byte-identical); the .ini axle euler is NOT in the law; the hinge part's
+  plug face IS its hinge line (XYQ's upright bench proves it — its old
+  "car-door ±ŷ" pin was our artifact). Where a rotated bench exists,
+  `captureJrefs.bakedAngle` reads the GAME's display angle off it (XYQ
+  door 2: the game's mirror flipped the twin at save — data.angle +24.3
+  shows as −24.3; we render the bench) and edits ride as deltas; the bench
+  rotation's fixed line anchors parts-only pivots within 1 m (farther =
+  construction ghost → raw axle line); THE PLATE LAW v2 node formulas
+  `v = baseQ⁻¹·ê`, `d = ê` keep the part's plate on the same line;
+  `jointNodeAxis/Slide` consumers unchanged. Balloon tail mounts re-solved
+  to the statute (v1.9.x's lying-tower/plug-down design is geometrically
+  impossible under it — the plug normal IS the spin line): all three fin
+  hinges are now one UPRIGHT half-turn mount {ax:−ŝ, ay:û, az:−t̂}, panel
+  kinematics (v1.9.3's lying-axis scissor sweep, plate-on-own-axis)
+  re-pinned + green; sphereskin e2e centroid check re-cut to the VERTEX
+  MEAN (the union-box centre is plug-dominated, by design). Golden net:
+  vitest `BENCH CENSUS` replays every committed testdata bench pair.
+  Run the census via `python3 tools/bench_census.py` before touching ANY
+  subgrid axis code; FORMAT §Subgrids "THE PANEL LAW" is normative.
+  COLOR half of the report: the Badger's file palette carries `0` (CLEARED)
+  at custom slot 12 while 41 skin-triangle faces still reference it — the
+  app's (and XenonViewer's) magenta missing-slot marker painted the door
+  pink; the game shows the engine default (light neutral — verified
+  against our in-game screenshot). Fixed IN THE FILE (client/blueprints
+  save, byte-safe palette edit, original preserved as
+  `blueprint.json.bak-slot12-20261024`): slot 12 := the slot-0 white
+  default. Standing rule: a magenta craft face = EMPTY palette slot in the
+  file; repair the data (the marker itself stays — it still catches the v1
+  family-base class). IndexedDB revalidates the edit via the v1.9.4 stamp
+  (chip goes stale → Download latest).
 - **v1.10.1 THE LOGICAL WIRING MODEL + WIRE workspace (we: "the wiring is very
  naive and stupid right now. The auto-wire observed patterns is wrong, and I
  want to be able to disconnect/reconnect wires and get a better overview …
