@@ -7,7 +7,7 @@
 // LAST segment stored reversed, and the flexible two-segment sag chain whose
 // `dir` means nothing.
 import { describe, expect, test } from 'vitest';
-import { buildPipes, checkLeads, surgePaths } from '../pipes';
+import { buildPipes, checkLeads, pipeAt, surgePaths } from '../pipes';
 import type { Pipe } from '../format';
 import type { PipeSockets } from '../sockets';
 
@@ -310,5 +310,37 @@ describe('surgePaths', () => {
 
   test('links record the component edge of every cable run', () => {
     expect(net.links).toEqual([{ a: 0, b: 1 }]);
+  });
+});
+
+// ---------------------------------------------------------- cable hover-pick
+describe('pipeAt — the v1.10.1 cable hover-pick', () => {
+  const net = buildPipes([P]);            // polyline (1,2,3)→(1.5,2,3)→(1.6,2.25,3)→…
+
+  test('a ray crossing a bar picks that run', () => {
+    const hit = pipeAt(net, [1.25, 2, 5], [0, 0, -1]);
+    expect(hit, 'the sight line through the first bar').not.toBeNull();
+    expect(net.piOf![hit!.i]).toBe(0);
+    expect(hit!.dist).toBeLessThan(1e-9);
+  });
+  test('piOf maps net runs to the SOURCE pipe index (degenerate entries skipped)', () => {
+    const degenerate: Pipe = { a_component: 2, a_port: 'x', b_component: 3, b_port: 'y', segments: [] };
+    const n2 = buildPipes([degenerate, P]);
+    expect(n2.polys.length, 'the empty run draws nothing').toBe(1);
+    const hit = pipeAt(n2, [1.25, 2, 5], [0, 0, -1]);
+    expect(n2.piOf![hit!.i], '…and the survivor still labels as data.pipes[1]').toBe(1);
+  });
+  test('a ray missing every cable answers null', () => {
+    expect(pipeAt(net, [50, 50, 50], [0, 0, -1])).toBeNull();
+    // BEHIND the cable: the ray is a RAY, t ≥ 0 (closest-points clamps)
+    expect(pipeAt(net, [1.25, 2, 5], [0, 0, 1]), 'pointing away never hits').toBeNull();
+  });
+  test('tolerance = finger margin + the drawn half-extent', () => {
+    // the data bus draws at half 0.012, the finger margin is 0.05 → the
+    // pick band around the bar is ±0.062 m
+    expect(pipeAt(net, [1.25, 2.08, 5], [0, 0, -1]), 'just outside the finger margin').toBeNull();
+    expect(pipeAt(net, [1.25, 2.04, 5], [0, 0, -1]), 'just inside it').not.toBeNull();
+    // the elbow knob region on a mid vertex is part of the polyline too
+    expect(pipeAt(net, [1.6, 2.25, 5], [0, 0, -1]), 'the joint vertex still picks').not.toBeNull();
   });
 });

@@ -32,7 +32,7 @@ import {
   type BalloonAdapters, type BalloonOptions, type BalloonPlan, type FinRole,
 } from '../engine/balloonfin';
 import { loadManifest, peekManifest, type ModelManifest } from '../engine/models';
-import { KIND_STYLE } from '../engine/wireops';
+import { KIND_STYLE, portRole } from '../engine/wireops';
 import { flattenComponents } from '../engine/subgrid';
 import { newComponent } from '../engine/newcraft';
 import { liftKg } from '../engine/atmo';
@@ -595,8 +595,11 @@ function balloonOptions(f: ToolForm): BalloonOptions {
  *  was removed: unbounded travel makes no sense for a control surface). */
 function balloonAdaptersFrom(man: ModelManifest): BalloonAdapters | null {
   const pivot = man.SmallHinge?.adapters.find(a => a.type === 'lowvoltage');
+  // the wiremodel's DIRECTION law (v1.10.1, was a hardcoded port name):
+  // the coupler feeds OUT — every in-role port (`lowvoltage-input`) stays
+  // free for the battery, devices may never sit on it
   const coupler = (man.LowVoltageJunction?.adapters ?? [])
-    .filter(a => a.type === 'lowvoltage' && a.name !== 'lowvoltage-input');
+    .filter(a => a.type === 'lowvoltage' && portRole(a.name) !== 'in');
   if (!pivot || !coupler.length) return null;
   return { pivot, coupler };
 }

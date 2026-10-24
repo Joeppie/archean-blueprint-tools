@@ -79,6 +79,11 @@ declare global {
     screen: (x: number, y: number, z: number) => [number, number] | null;
     /** v1.9.2 framebuffer probe at normalized canvas coords (v from top) */
     pixel: (u: number, v: number) => [number, number, number] | null;
+    /** v1.10.1 CABLE HOVER: the {pi, label} the cursor rests on (also set by
+     *  the WIRE panel list-hover), null when nothing is hovered */
+    wireHover: () => ReturnType<Engine['pipeHoverState']>;
+    /** client px at the middle of a cable's drawn path (pins aim the mouse) */
+    cablePoint: (pi: number) => { x: number; y: number } | null;
     /** v1.5.21 settable mirror axis (⚙ row) */
     mirAxis: () => 'x' | 'y' | 'z';
   } }
@@ -191,6 +196,8 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
       backdrop: () => engine.backdropState(),
       screen: (x: number, y: number, z: number) => engine.screenPoint(x, y, z),
       pixel: (u: number, v: number) => engine.probePixel(u, v),
+      wireHover: () => engine.pipeHoverState(),
+      cablePoint: (pi: number) => engine.pipeScreenPoint(pi),
     };
     onEngine?.(engine);
     return () => {
@@ -337,11 +344,30 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
     chip.style.left = `${Math.min(Math.max(4, cx - hr.left + 14), hr.width - 170)}px`;
     chip.style.top = `${Math.max(4, cy - hr.top + 16)}px`;
   };
+  // v1.10.1 CABLE HOVER chip (user: "on mouse-over of a cable, it should
+  // tell us where things are going. e.g. 'propeller[9].1 <-> Computer[0].1'"):
+  // the SAME throttled pass ray-to-polyline-tests the drawn cable net; when
+  // a cable is under the cursor its endpoint label rides a gold chip right
+  // below the coord chip and the engine gold-lights the cable itself.
+  const wireChipRef = useRef<HTMLDivElement>(null);
+  const wireInfo = useRef<{ pi: number; label: string } | null>(null);
+  const showWire = (info: { pi: number; label: string } | null, cx: number, cy: number) => {
+    const chip = wireChipRef.current, host = hostRef.current;
+    if (!chip || !host) return;
+    if (!info || !info.label) { chip.style.display = 'none'; return; }
+    const hr = host.getBoundingClientRect();
+    chip.textContent = info.label;
+    chip.style.display = 'block';
+    chip.style.left = `${Math.min(Math.max(4, cx - hr.left + 14), hr.width - 260)}px`;
+    chip.style.top = `${Math.max(4, cy - hr.top + 38)}px`;
+  };
   /** one throttled raycast + chip repaint */
   const coordRun = (x: number, y: number) => {
     coordT.current = performance.now();
     coordInfo.current = engineRef.current?.coordHoverMove(x, y) ?? null;
     showCoord(coordInfo.current, x, y);
+    wireInfo.current = engineRef.current?.pipeHoverMove(x, y) ?? null;
+    showWire(wireInfo.current, x, y);
   };
   const pickClick = (e: React.PointerEvent) => {
     const engine = engineRef.current;
@@ -414,13 +440,17 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
               }, Math.max(1, 25 - (cnow - coordT.current)));
             }
             showCoord(coordInfo.current, e.clientX, e.clientY);   // follows live, cheap
+            showWire(wireInfo.current, e.clientX, e.clientY);     // idem the cable label
           }
         }}
         onPointerLeave={() => {
           if (coordTrail.current) { clearTimeout(coordTrail.current); coordTrail.current = null; }
           engineRef.current?.coordHoverClear();
+          engineRef.current?.clearPipeHover();
           coordInfo.current = null;
+          wireInfo.current = null;
           if (chipRef.current) chipRef.current.style.display = 'none';
+          if (wireChipRef.current) wireChipRef.current.style.display = 'none';
           // the ghost dies with the pointer (the game's ghost too)
           lastHover.current = null;
           if (placeDrag.current) { engineRef.current?.placeDragEnd(); placeDrag.current = null; }
@@ -524,6 +554,11 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
       <div ref={chipRef} data-testid="coord-chip" style={{ display: 'none' }}
         className="pointer-events-none absolute z-30 rounded-sm bg-black/85 px-1.5 py-[1px]
                    font-mono text-[11px] tracking-tight text-[#e8e8e8]" />
+      {/* v1.10.1 the GOLD cable label: "Propeller[9].lowvoltage ↔ Computer[0].data_port.001" */}
+      <div ref={wireChipRef} data-testid="wire-chip" style={{ display: 'none' }}
+        className="pointer-events-none absolute z-30 max-w-[280px] truncate rounded-sm
+                   bg-[#241c05]/90 px-1.5 py-[1px] font-mono text-[11px] tracking-tight
+                   text-[#ffd479] ring-1 ring-[#ffd479]/40" />
     </div>
   );
 }

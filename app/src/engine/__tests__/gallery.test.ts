@@ -25,14 +25,19 @@ describe('compiled gallery catalog', () => {
     expect(byId.has('9000002001')).toBe(false);
   });
   it('applies the landing exclusions', () => {
-    for (const id of ['3384910875', '3334593406', '3347018068', '3334591920']) {
+    // the 2026-10-24 trio (dolphin / Sprite-500 / Cede) stay in testdata/ as
+    // regtest + e2e FIXTURES — hidden from the gallery only, deep links and
+    // /corpus routes still resolve them (craftFile is not EXCLUDE-gated)
+    for (const id of ['3384910875', '3334593406', '3347018068', '3334591920',
+      '3417786605', '3404843025', '3348400160']) {
       expect(byId.has(id), id).toBe(false);
     }
+    expect(existsSync(craftFile('3417786605')), 'hidden ≠ gone: the fixture still resolves').toBe(true);
   });
   it('lists the corpus workshop crafts OUTSIDE the machine corpus too', () => {
     // the fixture floor: a Steam client/blueprints folder carries only a
     // subset — testdata crafts must appear regardless of the conf
-    for (const id of ['3327182790', '3417786605', '3481322297', '3803780241']) {
+    for (const id of ['3327182790', '3816936540', '3481322297', '3803780241']) {
       expect(byId.has(id), id).toBe(true);
     }
   });
@@ -76,7 +81,7 @@ describe('compiled gallery catalog', () => {
     }
     // spot-check one entry against the bytes on disk, hashed through node
     // crypto independently of the plugin's memoised path
-    const id = '3417786605';
+    const id = '3481322297';
     const g = byId.get(id)!;
     const st = statSync(craftFile(id));
     expect(g.rev).toBe(`${st.size}-${Math.round(st.mtimeMs)}`);

@@ -863,7 +863,20 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         docArrayInsert(ctx.doc, ['data', 'pipes'], ctx.bp.data.pipes.length - 1, docFromValue(pipe)); // pipes key at all
         sceneChanged();
         return true;
-      }} />
+      }}
+      onDisconnect={pi => {
+        // v1.10.1 DISCONNECT: bp AND doc (the doc is the save and the undo
+        // history — the v1.6.1 class rule), then the debounced reload makes
+        // the picture match (the cable mesh dies with the rebuild).
+        const ctx = ctxRef.current;
+        const arr = ctx?.bp.data.pipes;
+        if (!ctx || !arr || pi < 0 || pi >= arr.length) return false;
+        arr.splice(pi, 1);
+        docArrayRemoveAt(ctx.doc, ['data', 'pipes'], pi);
+        sceneChanged();
+        return true;
+      }}
+      onHoverPipe={pi => engineRef.current?.setPipeHover(pi)} />
   );
 
   const name = (bp?.data.alias?.trim()) || (craft ? craftName(craft) : 'Untitled craft');

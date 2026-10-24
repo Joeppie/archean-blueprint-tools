@@ -1342,6 +1342,56 @@ topic + FORMAT).
   re-stamped to silent fresh. Bonus rule learned: corpus identity — catalog
   and /corpus route resolve the SAME file (one `craftFile()`), so a staleness
   flag can never describe a different file than the download would fetch.
+- **v1.10.1 THE LOGICAL WIRING MODEL + WIRE workspace (we: "the wiring is very
+ naive and stupid right now. The auto-wire observed patterns is wrong, and I
+ want to be able to disconnect/reconnect wires and get a better overview …
+ on mouse-over of a cable it should tell us where things are going … the
+ automatic wiring in the zeppelin rudders … connects every single port on the
+ LV junction, and it ignores the fact the rudders should only take input, not
+ deliver into the junction, that should be left open … candidates logically
+ listed by distance and normal association … This shouldn't take precedence
+ though — ensure logical wiring decisions are possible for users"):** the
+ game's ADAPTER NAMES are the semantics (whole-game .ini census: `in`/`input`
+ and `out`/`output` are the ONLY direction tokens; DataBridge literally names
+ `data-computer.1`/`data-device.0`). One pure module owns it all:
+ `app/src/engine/wiremodel.ts` — `portRole` (in|out|any from the NAME),
+ `compGroup` (source|hub|device per KIND — PowerConverter is an lv SOURCE and
+ an hv DEVICE), `hubInputIndex` (a hub WITH an input port has downstream
+ outputs; a bridge's port1/port2 are two-way), `compatible` (never in↔in /
+ out↔out; a hub INPUT never faces a device; a junction output never points at
+ a source — THAT is the rudder/junction bug; power never device↔device;
+ neutral fluid/item ports need a junction), `candidatesFor` (tier 0 = the
+ game-named association, tier 1 = legitimate alternatives, distance ONLY
+ WITHIN a tier — an ORDERING, never a filter: every compatible port stays
+ pickable and `makePipe` runs no role check, a manual pairing is law).
+ Auto-wire v2 (wireops.ts) runs staged phases per kind through that matrix
+ and **NEVER force-pairs leftovers — an unsatisfied port stays OPEN with an
+ actionable reason in Warnings** (the old "last resort: any port" pass was
+ the junk wiring); existing cables are never touched (button-only, idempotent;
+ naive nearest-pair stays as the labeled fallback). WIRE workspace: CABLES
+ list (`Type[9].port ↔ Type[0].port` rows, hover gold-lights the cable in 3D
+ via `Engine.setPipeHover`, ✕ DISCONNECT per row), THIS-PART port rows with
+ partner + ✕, reconnect through the ranked candidate flow, NETWORKS overview
+ (per kind, connected groups ordered sources→hubs→devices via `wireNets`),
+ viewport HOVER chip `wire-chip` ("Propeller[9].lowvoltage ↔
+ Computer[0].data_port.001") — `pipes.ts pipeAt()` ray-to-polyline pick with
+ per-run `radii` + `piOf` (net index → data.pipes index; degenerate runs
+ shift the arrays!), `Engine.pipeHoverMove/pipeScreenPoint`, Viewport reuses
+ the coord ~40 Hz throttle, the overlay rides `root` (moff). Disconnect is a
+ bp+DOC write (the doc is the save and the undo history — v1.6.1 rule; the
+ e2e pins cut → net rebuild → Ctrl+Z restores). The balloon coupler filter
+ now asks `portRole(name)!=='in'` (was the hardcoded `lowvoltage-input`
+ name). Pins: vitest `wiremodel.test.ts` (naming census, role table, matrix,
+ ranking, THE RUDDER REGRESSION: hinge ports only ever meet hub outputs, the
+ input only faces battery/hub), `pipes.test.ts` pipeAt group (ray clamps,
+ tolerance, piOf), `gallery.test.ts` re-pinned for the hidden trio (hidden ≠
+ gone: craftFile still resolves); e2e `wire.spec.ts` (@ui both viewports:
+ list format, hover chip = `__ARCHEAN__.wireHover()` label, row-hover 3D
+ highlight, disconnect→undo, RECONNECT onto the same two ports, auto-wire
+ idempotence, phone fit). Lesson: JSX collapses a newline between `{name}`
+ and `<span>` — list labels need an explicit `{' '}` or textContent locators
+ glue name+kind together. FORMAT §pipes carries the normative write-up; help
+ topic `wire.md` retold (search words disconnect/reconnect).
 - **v1.8.6 THE SKIN TRANSFORM CUTS, NEVER DROPS (user: "a valid
  zeppelin suddenly misses a face after rotations … the size doesn't inherently
  change"):** the frame-aligned 31-slot window is a FRAME law, so a face with

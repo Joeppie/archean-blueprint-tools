@@ -775,6 +775,73 @@ engine CONTENT frame; its FILE-frame socket pose is
   lead off the stub axis → one cell deeper through the skin → a long run
   along the body axis INSIDE the envelope (hidden), all waypoints asserted
   inside-envelope by the vitest pins (`balloonfin.test.ts`).
+
+### v1.10.1 — PORT ROLES AND LOGICAL WIRING (`app/src/engine/wiremodel.ts`)
+
+The `.ini` adapter NAMES are the game's own wiring semantics — a whole-game
+census (107 adapter-bearing types) shows the tokens `in`/`input` and
+`out`/`output` are the ONLY direction hints, and one type names its TOPOLOGY
+outright:
+
+| evidence | reading |
+| --- | --- |
+| `LowVoltageJunction`: `lowvoltage-input` + `lowvoltage-port.001..004` | exactly ONE input, four downstream outputs |
+| `HighVoltageJunction` / `HighVoltageRelay`: `highvoltage-input`, `highvoltage-output` | the same law spelled out |
+| `FluidJunction` `fluid-in` + `fluid-out.NNN`; `ItemJunction` `item-in` + `item-out.NNN`; pumps/tanks/furnaces `fluid-in`/`fluidout`/`item-out` | named flows on the EDGES too |
+| `DataBridge`: `data-computer.1` + `data-device.0` | the port name states WHO it talks to — computer→router→component is literally in the data |
+| `data`, `connector.000`, `hv1`, `data_port.003`, `port1/port2` (bridges) | neutral: any side of a link |
+
+`wiremodel.ts` turns that into one shared abstraction:
+
+- **`portRole(name)`** → `in | out | any` (token-split on `[-_.0-9]`, the
+  `fluidin`/`itemout2` names ride the endsWith arms).
+- **`compGroup(type, kind)`** → `source | hub | device`: producers
+  (batteries, solar panels, RTG, generators, turbines, converters' LV side),
+  routers/distributors (*Junction, *Bridge, *Relay, Router, MiniRouter,
+  Computer, MiniComputer — per kind), everything else consumes. The same
+  type may differ per kind: `PowerConverter` is a lowvoltage SOURCE and a
+  highvoltage DEVICE.
+- **`hubInputIndex`** — a hub that OWNS an in-role port (junction-style) has
+  its remaining ports as downstream outputs; a bridge (`port1/port2`, no
+  input) is a two-way link. This is what keeps a device cable off
+  `lowvoltage-input` — the balloon rudder bug: control surfaces may only
+  TAKE power; the junction input stays free for the battery.
+- **`compatible(a, b)`** — never IN↔IN, never OUT↔OUT; a hub input faces
+  upstream (sources/hubs, never a device); a junction output never points
+  back at a source; power never runs device-to-device; neutral fluid/item
+  ports never pair directly (a pump→tank direct edge needs BOTH sides named).
+- **`candidatesFor(draft, free)`** — the manual picker's ranking: tier 0 =
+  the game's naming/topology says so (device→hub, source→hub input, hub
+  output→device, the named `data-computer` side), tier 1 = legitimate
+  alternatives (direct source tap, hub cascade, sources in parallel), tier 2
+  = other compatible ports; nearest FIRST WITHIN a tier. **Ranking orders
+  the list; it never removes an option** — every compatible port stays
+  pickable and a manual pairing is never second-guessed (`makePipe` runs no
+  role check: the user's decision wins over the heuristic).
+
+The WIRE workspace (v1.10.1) is built on this: every cable listed
+(`Propeller[9].lowvoltage ↔ Computer[0].data_port.001`), a ✕ DISCONNECT per
+cable and per component port (bp AND doc — the doc is the save and the
+history), reconnect through the ranked candidate flow, a NETWORKS overview
+(per kind, connected groups ordered sources → hubs → devices), and the
+viewport hover chip + gold overlay for the cable under the cursor
+(`pipes.ts pipeAt()` ray-to-polyline pick; net runs carry `piOf` so a
+drawn run maps back to its `data.pipes` index for labelling).
+
+Auto-wire (button-only, NEVER on open/edit/save) now runs the model's
+STAGES per kind — power: batteries ∥, sources→hub inputs, hub-input cascade,
+devices→hub outputs, a direct source tap as the last legitimate step; data:
+the named bridge sides, devices→routers/switches, routers→computers, hub
+daisy-chains; fluid/item: named flows and junction ports. **A port with no
+compatible partner stays OPEN with a printed reason — the v1 pass paired
+leftovers "last resort" and that is exactly what plugged devices into the
+junction input and painted every LV port** (the user's zeppelin-rudder
+report). Re-running auto-wire on a satisfied state is a no-op.
+Pins: `app/src/engine/__tests__/wiremodel.test.ts` (naming census, role
+table, compatibility matrix, ranking, the rudder regression),
+`pipes.test.ts` (`pipeAt`), `app/e2e/wire.spec.ts` (list, hover label,
+disconnect → undo → reconnect, phone).
+
 Note: `components` may contain a `Build` type — the editor's construction-site ghost
 (e.g. y −24.75, far outside the craft). It is not physical geometry; the viewer skips it.
 

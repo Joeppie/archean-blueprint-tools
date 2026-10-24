@@ -15,7 +15,9 @@ import { shapeName } from '../engine/blockshapes';
 import { MATERIALS, MATERIAL_HINT, materialName } from '../engine/tools';
 import { cssColor, resolveColor } from '../engine/palette';
 import { SwatchGrid, BlockPaint, type CustomPaint } from './ColorPanel';
-import { autoWire, portCensus, connectedPorts, unconnectedPorts, WIRE_KINDS } from '../engine/wireops';
+import { autoWire, portCensus, connectedPorts, unconnectedPorts, WIRE_KINDS,
+  hubInputIndex, candidatesFor, pipeLabel, wireNets } from '../engine/wireops';
+import { flattenComponents } from '../engine/subgrid';
 import { triCentroid } from '../engine/tris';
 import type { Triangle } from '../engine/format';
 import type { Blueprint } from '../engine/format';
@@ -379,6 +381,23 @@ export function placeBlock(ctx: EditCtx, spec: PlaceSpec, mirror = false,
 }
 
 // -------------------------------------------------------------- WIRE mode
+/**
+ * WIRE workspace (v1.10.1 redesign, user: "I want to be able to
+ * disconnect/reconnect wires and get a better overview of what is wired to
+ * what … a disconnect/reconnect for every component … ensure that logical
+ * wiring decisions are possible"):
+ *  • CABLES — every cable as `Type[9].port ↔ Computer[0].port` with a ✕
+ *    DISCONNECT per row; hovering a row gold-lights that cable in 3D.
+ *  • THIS PART — the selected component's ports: wired ones show their
+ *    partner + a ✕, free ones arm the manual Connect flow.
+ *  • Connect candidates are ranked by the wiremodel (logical association
+ *    first, then distance) — but the list shows EVERY compatible port:
+ *    the ranking orders the choices, the user makes them.
+ *  • NETWORKS — per kind, each connected group of parts (sources → hubs →
+ *    devices): the "what is wired to what" overview.
+ *  • Auto-wire stays button-only and only ever fills FREE ports (existing
+ *    cables are the user's decisions; the heuristic never overrides them).
+ */
 export function WirePanel(p: {
   engine: Engine | null; ctx: EditCtx | null; bp: Blueprint; rev: number;
   onApplied: () => void; onSelectComp: (ci: number) => void;
@@ -386,9 +405,14 @@ export function WirePanel(p: {
   sel: number;
   /** manual connect: returns success (the App writes bp + doc + reload) */
   onConnect: (aCi: number, aPort: string, bCi: number, bPort: string) => boolean;
+  /** v1.10.1 disconnect one cable by data.pipes index (Editor writes bp +
+   *  doc); returns success */
+  onDisconnect: (pi: number) => boolean;
   /** list-hover 3D preview of a candidate (null restores the selection-only
    *  glow — the part being edited is never replaced, only supplemented) */
   onHoverComp: (ci: number | null) => void;
+  /** list-hover gold-lights ONE CABLE in the viewport (null clears) */
+  onHoverPipe?: (pi: number | null) => void;
 }) {
   const [draft, setDraft] = useState<{ ci: number; name: string; kind: string; at: number[] } | null>(null);
   // two-step manual wiring: candidate COMPONENT first, then explicitly one
@@ -400,6 +424,10 @@ export function WirePanel(p: {
   const census = useMemo(() => portCensus(p.bp, manifest), [p.bp, manifest, p.rev]);
   const used = useMemo(() => connectedPorts(p.bp), [p.bp, p.rev]);
   const open = useMemo(() => unconnectedPorts(p.bp, manifest), [p.bp, manifest, p.rev]);
+  const hubIn = useMemo(() => hubInputIndex(census), [census, p.rev]);
+  const flat = useMemo(() => flattenComponents(p.bp), [p.bp, p.rev]);
+  const pipes = p.bp.data.pipes ?? [];
+  const nets = useMemo(() => wireNets(p.bp, manifest), [p.bp, manifest, p.rev]);
   const [msg, setMsg] = useState('');
   const run = (strategy: 'observed' | 'naive') => {
     if (!p.ctx) return;
@@ -408,7 +436,10 @@ export function WirePanel(p: {
     for (let i = before; i < (p.ctx.bp.data.pipes ?? []).length; i++)
       docArrayInsert(p.ctx.doc, ['data', 'pipes'], i, docFromValue(p.ctx.bp.data.pipes![i]));
     setMsg(res.created
-      ? `wired ${res.created} cable${res.created === 1 ? '' : 's'} \u2014 ${strategy === 'observed' ? 'batteries ∥, edges→hubs, routers→computer' : 'nearest free pairs'}`
+      ? `wired ${res.created} cable${res.created === 1 ? '' : 's'} \u2014 ` +
+        (strategy === 'observed' ? 'sources→hub inputs, devices←hub outputs, devices→routers→computer; '
+          + `${res.skipped.length} port${res.skipped.length === 1 ? '' : 's'} left open (reasons in Warnings)`
+          : 'nearest free pairs')
       : 'nothing to pair — no compatible free ports remained');
     p.onApplied();
   };
@@ -417,126 +448,243 @@ export function WirePanel(p: {
     total: census.filter(c => c.kind === k).length,
     wired: census.filter(c => c.kind === k && used.has(`${c.ci}/${c.name}`)).length,
   })).filter(k => k.total > 0);
+  const roleBadge = (r: string) => r === 'in' ? '▼' : r === 'out' ? '▲' : '±';
+  const roleTip = (r: string) => r === 'in' ? 'input (the game names it in/input)'
+    : r === 'out' ? 'output (the game names it out/output)' : 'neutral port';
+  /** partner label for a wired port of ci (top indices), else null */
+  const flatIdxOf = (top: number) => flat.findIndex(f => f.top === top);
+  const partnerOf = (topCi: number, name: string): { pi: number; label: string } | null => {
+    const fi = flatIdxOf(topCi);
+    if (fi < 0) return null;
+    const pi = pipes.findIndex(q => (q.a_component === fi && q.a_port === name)
+      || (q.b_component === fi && q.b_port === name));
+    if (pi < 0) return null;
+    const q = pipes[pi]!;
+    const other = q.a_component === fi && q.a_port === name ? 'b' : 'a';
+    const oi = q[`${other}_component` as 'a_component' | 'b_component'];
+    const op = q[`${other}_port` as 'a_port' | 'b_port'];
+    const e = flat[oi];
+    const label = e ? (e.top >= 0 ? `${e.comp.type}[${e.top}].${op}` : `${e.comp.type}[B${e.path[2]}].${op}`)
+      : `#${oi}.${op}`;
+    return { pi, label };
+  };
+  const cut = (pi: number) => {
+    if (p.onDisconnect(pi)) setMsg(`disconnected ${pipeLabel(p.bp, pi, flat) ?? `cable ${pi}`} — the ports are free again`);
+  };
+  /** the selected part's own cable list (the "disconnect for every
+   *  component" path): every pipe touching the selection */
+  const selPipes = (() => {
+    if (p.sel < 0) return [] as number[];
+    const fi = flatIdxOf(p.sel);
+    if (fi < 0) return [];
+    return pipes.map((q, i) => i)
+      .filter(i => { const q = pipes[i]!; return q.a_component === fi || q.b_component === fi; });
+  })();
+  /** ranked candidates for the draft port (wiremodel order; ALL kept) */
+  const cands = useMemo(() => {
+    if (!draft) return [] as ReturnType<typeof candidatesFor>;
+    const d = open.find(q => q.ci === draft.ci && q.name === draft.name)
+      ?? census.find(q => q.ci === draft.ci && q.name === draft.name);
+    if (!d) return [];
+    return candidatesFor(d as never, open.filter(q => q.kind === draft.kind), hubIn);
+  }, [draft, open, hubIn, census, p.rev]);
+  const candParts = (() => {
+    const byCi = new Map<number, { type: string; n: number; d: number; why: string; tier: number }>();
+    for (const c of cands) {
+      const cur = byCi.get(c.port.ci);
+      if (!cur) byCi.set(c.port.ci, { type: c.port.type, n: 1, d: c.dist, why: c.why, tier: c.tier });
+      else { cur.n += 1; if (c.tier < cur.tier || (c.tier === cur.tier && c.dist < cur.d)) { cur.d = c.dist; cur.why = c.why; cur.tier = c.tier; } }
+    }
+    return [...byCi.entries()];      // candidatesFor already sorted
+  })();
   return (
-    <div className="grid items-start gap-x-4 px-1 pb-2 md:grid-cols-3">
-      <Sec title="Ports" testid="wire-census">
-        {perKind.map(k => (
-          <div key={k.kind} className="flex justify-between text-[11px]">
-            <span className="text-ink">{k.kind}</span>
-            <span className={k.wired < k.total ? 'text-gold' : 'text-emerald-400'}>
-              {k.wired}/{k.total} connected
-            </span>
-          </div>
-        ))}
-        {perKind.length === 0 && <div className="text-[11px] text-ink-dim">no ports on this craft</div>}
-        <button data-testid="auto-wire"
-          className="mt-2 w-full rounded bg-accent px-2 py-1 text-[12px] font-semibold text-black hover:brightness-110"
-          onClick={() => run('observed')}
-          title="batteries in parallel · pumps & intakes to the nearest junction · data to the nearest router, routers on to the computer">
-          Auto-wire (observed patterns)
-        </button>
-        <button data-testid="auto-wire-naive"
-          className="mt-1 w-full rounded bg-panel2 px-2 py-1 text-[11px] text-ink-dim hover:text-ink"
-          onClick={() => run('naive')}>
-          fallback: naive nearest pairs
-        </button>
-        {msg && <div className="pt-1 text-[10px] text-ink-dim">{msg}</div>}
-      </Sec>
-      <Sec title="Manual wiring" testid="wire-manual">
-        {p.sel < 0 && <div className="text-[11px] text-ink-dim">Select a component (list or viewport) to see its ports.</div>}
-        {p.sel >= 0 && (
-          <>
-            <div className="pb-1 text-[11px] text-ink">
-              {p.bp.data.components[p.sel]?.type}[{p.sel}] ports:
+    <div className="grid grid-cols-1 items-start gap-x-4 px-1 pb-2 md:grid-cols-3">
+      <div className="space-y-3">
+        <Sec title="Ports" testid="wire-census">
+          {perKind.map(k => (
+            <div key={k.kind} className="flex justify-between text-[11px]">
+              <span className="text-ink">{k.kind}</span>
+              <span className={k.wired < k.total ? 'text-gold' : 'text-emerald-400'}>
+                {k.wired}/{k.total} connected
+              </span>
             </div>
-            {census.filter(c => c.ci === p.sel).map(c => {
-              const wired = used.has(`${c.ci}/${c.name}`);
+          ))}
+          {perKind.length === 0 && <div className="text-[11px] text-ink-dim">no ports on this craft</div>}
+          <button data-testid="auto-wire"
+            className="mt-2 w-full rounded bg-accent px-2 py-1 text-[12px] font-semibold text-black hover:brightness-110"
+            onClick={() => run('observed')}
+            title="logical stages: batteries ∥ · sources into hub INPUTS · devices onto hub OUTPUTS · devices→routers→computer · named fluid/item flows — incompatible ports stay OPEN with a reason; existing cables are never touched">
+            Auto-wire (logical wiring)
+          </button>
+          <button data-testid="auto-wire-naive"
+            className="mt-1 w-full rounded bg-panel2 px-2 py-1 text-[11px] text-ink-dim hover:text-ink"
+            onClick={() => run('naive')}>
+            fallback: naive nearest pairs
+          </button>
+          {msg && <div className="pt-1 text-[10px] text-ink-dim">{msg}</div>}
+        </Sec>
+        <Sec title={`Networks — what is wired to what (${nets.length})`} testid="wire-nets">
+          {nets.length === 0 && <div className="text-[11px] text-ink-dim">no cables yet</div>}
+          <div className="max-h-64 space-y-1 overflow-y-auto">
+            {nets.map((n, i) => {
+              const by = { source: [] as string[], hub: [] as string[], device: [] as string[] };
+              for (const m of n.members) by[m.group].push(`${m.type}[${m.ci}]`);
+              const chain = (arr: string[], cap = 5) =>
+                arr.length <= cap ? arr.join(', ') : `${arr.slice(0, cap).join(', ')} +${arr.length - cap}`;
+              const segs = [by.source, by.hub, by.device].filter(a => a.length)
+                .map(a => chain(a));
               return (
-                <button key={c.name} data-testid="wire-port" disabled={wired}
-                  className={`block w-full truncate rounded px-2 py-[2px] text-left text-[11px] ${
-                    draft?.name === c.name && draft?.ci === c.ci ? 'bg-accent/30 text-accent'
-                      : wired ? 'text-ink-dim' : 'bg-panel2 text-ink hover:bg-white/10'}`}
-                  onClick={() => setDraft({ ci: c.ci, name: c.name, kind: c.kind, at: c.at })}>
-                  {wired ? '✓' : '○'} {c.name}
-                  <span className="ml-2 text-[10px] text-ink-dim">{c.kind}</span>
-                </button>
-              );
-            })}
-            {draft && (
-              <div className="pt-2">
-                <div className="flex items-center justify-between pb-1">
-                  <span className="text-[10px] uppercase tracking-wide text-ink-dim">
-                    {draft.kind} from {draft.name} →
-                  </span>
-                  <button className="text-[10px] text-ink-dim hover:text-ink"
-                    onClick={() => { setDraft(null); setTPart(null); p.onHoverComp(null); }}>cancel</button>
-                </div>
-                <SearchList testid="wire-target" placeholder="choose a compatible part (hover previews it)…"
-                  onHover={id => p.onHoverComp(id ? +id.split('/')[0]! : null)}
-                  entries={(() => {
-                    const byCi = new Map<number, { type: string; n: number; d: number; port: string }>();
-                    for (const q of open) {
-                      if (q.ci === draft.ci || q.kind !== draft.kind) continue;
-                      const dd = Math.hypot(q.at[0]! - draft.at[0]!, q.at[1]! - draft.at[1]!, q.at[2]! - draft.at[2]!);
-                      const cur = byCi.get(q.ci);
-                      if (!cur || dd < cur.d)
-                        byCi.set(q.ci, { type: q.type, n: (cur?.n ?? 0) + 1, d: dd, port: q.name });
-                      else cur.n += 1;
-                    }
-                    return [...byCi.entries()]
-                      .sort((a, b) => a[1].d - b[1].d)
-                      .map(([ci, v]) => ({
-                        id: `${ci}/${v.port}`,
-                        label: `${v.type}[${ci}]${tPart === ci ? '  ◂' : ''}`,
-                        sub: `${v.n} free · ${v.d.toFixed(1)} m`,
-                      }));
-                  })()}
-                  onPick={id => { setTPart(+id.split('/')[0]!); setConnectMsg(''); }} />
-                {tPart !== null && (
-                  <div className="pt-2">
-                    <div className="pb-1 text-[10px] uppercase tracking-wide text-ink-dim">
-                      free {draft.kind} ports on {p.bp.data.components[tPart]?.type}[{tPart}]:
-                    </div>
-                    {open.filter(q => q.ci === tPart && q.kind === draft.kind).map(q => (
-                      <button key={q.name} data-testid="wire-target-port"
-                        className="mt-[2px] block w-full truncate rounded bg-panel2 px-2 py-[2px] text-left text-[11px] text-ink hover:bg-white/10"
-                        onMouseEnter={() => p.onHoverComp(tPart)}
-                        onClick={() => {
-                          const ok = p.onConnect(draft.ci, draft.name, tPart, q.name);
-                          setConnectMsg(ok ? `wired ${draft.name} → ${p.bp.data.components[tPart]?.type}[${tPart}]/${q.name}`
-                            : 'invalid pairing (port busy or incompatible)');
-                          if (ok) { setDraft(null); setTPart(null); }
-                          p.onHoverComp(null);
-                        }}>
-                        ○ {q.name} <span className="text-[10px] text-ink-dim">{q.kind}</span>
+                <div key={i} data-testid="wire-net" className="rounded bg-panel2 px-2 py-[3px]">
+                  <div className="flex justify-between text-[10px] uppercase tracking-wide text-ink-dim">
+                    <span>{n.kind}</span><span>{n.pipes.length} cables · {n.members.length} parts</span>
+                  </div>
+                  <div className="text-[11px] text-ink">{segs.join(' → ')}</div>
+                  <div className="flex flex-wrap gap-1 pt-[2px]">
+                    {n.members.slice(0, 12).map(m => (
+                      <button key={m.ci} data-testid="wire-net-part"
+                        className="rounded bg-black/25 px-1 text-[10px] text-ink hover:text-accent"
+                        onMouseEnter={() => p.onHoverComp(m.ci)} onMouseLeave={() => p.onHoverComp(null)}
+                        onClick={() => p.onSelectComp(m.ci)}>
+                        {m.type}[{m.ci}]
                       </button>
                     ))}
                   </div>
-                )}
-                {connectMsg && <div className="pt-1 text-[10px] text-ink-dim">{connectMsg}</div>}
+                </div>
+              );
+            })}
+          </div>
+        </Sec>
+      </div>
+      <Sec title={`Cables (${pipes.length})`} testid="wire-cables"
+        >
+        <div className="max-h-[22rem] space-y-[2px] overflow-y-auto" onMouseLeave={() => p.onHoverPipe?.(null)}>
+          {pipes.length === 0 && <div className="text-[11px] text-ink-dim">no cables — wire manually or auto-wire</div>}
+          {pipes.map((q, pi) => {
+            const label = pipeLabel(p.bp, pi, flat) ?? `#${pi}`;
+            return (
+              <div key={pi} className="flex items-center gap-1">
+                <button data-testid={`wire-cable-${pi}`}
+                  className="min-w-0 flex-1 truncate rounded bg-panel2 px-2 py-[3px] text-left text-[11px] text-ink hover:bg-white/10"
+                  onMouseEnter={() => p.onHoverPipe?.(pi)}
+                  onClick={() => {
+                    const e = flat[q.a_component];
+                    if (e?.top != null && e.top >= 0) p.onSelectComp(e.top);
+                  }}
+                  title={`${q.type ?? 'data'} cable — click selects the A part; ✕ disconnects`}>
+                  {label}
+                  <span className="ml-1 text-[9px] uppercase text-ink-dim">{q.type ?? 'data'}</span>
+                </button>
+                <button data-testid={`wire-cut-${pi}`}
+                  className="rounded bg-panel2 px-1.5 py-[3px] text-[11px] text-red-300 hover:bg-red-500/25"
+                  title="Disconnect this cable (Undo brings it back)"
+                  onClick={() => cut(pi)}>✕</button>
               </div>
-            )}
-          </>
-        )}
-      </Sec>
-      <Sec title={`Warnings — unconnected (${open.length})`} testid="wire-warnings">
-        {open.length === 0 && <div className="text-[11px] text-emerald-400">every port is wired ✓</div>}
-        <div className="max-h-64 space-y-[2px] overflow-y-auto" onMouseLeave={() => p.onHoverComp(null)}>
-          {open.map(w => (
-            <button key={`${w.ci}/${w.name}`} data-testid="wire-warning"
-              className="block w-full truncate rounded bg-panel2 px-2 py-[3px] text-left text-[11px] text-ink hover:bg-white/10"
-              onMouseEnter={() => p.onHoverComp(w.ci)}
-              onClick={() => p.onSelectComp(w.ci)}
-              title={`${w.type} ${w.name} — ${w.kind} port not on any cable`}>
-              <span className="text-gold">⚠</span> {w.type}[{w.ci}] {w.name} — {w.kind}
-            </button>
-          ))}
+            );
+          })}
         </div>
       </Sec>
+      <div className="space-y-3">
+        <Sec title={p.sel >= 0 ? `This part — ${p.bp.data.components[p.sel]?.type}[${p.sel}]` : 'Manual wiring'}
+          testid="wire-manual">
+          {p.sel < 0 && <div className="text-[11px] text-ink-dim">Select a component (list or viewport) to see its ports.</div>}
+          {p.sel >= 0 && (
+            <>
+              <div className="pb-1 text-[11px] text-ink">
+                {p.bp.data.components[p.sel]?.type}[{p.sel}] ports:
+              </div>
+              {census.filter(c => c.ci === p.sel).map(c => {
+                const part = partnerOf(p.sel, c.name);
+                return (
+                  <div key={c.name} className="flex items-center gap-1">
+                    <button data-testid="wire-port" disabled={!!part}
+                      className={`min-w-0 flex-1 truncate rounded px-2 py-[2px] text-left text-[11px] ${
+                        draft?.name === c.name && draft?.ci === c.ci ? 'bg-accent/30 text-accent'
+                          : part ? 'text-ink-dim' : 'bg-panel2 text-ink hover:bg-white/10'}`}
+                      title={`${roleTip(c.role)} · ${c.kind}${part ? ` — on: ${part.label}` : ' — click to wire'}`}
+                      onClick={() => setDraft({ ci: c.ci, name: c.name, kind: c.kind, at: c.at })}>
+                      {part ? '⇄' : '○'} {c.name}{' '}
+                      <span className="ml-1 text-[9px] uppercase text-ink-dim">{c.kind}</span>
+                      <span className="ml-1 text-[9px] text-ink-dim" title={roleTip(c.role)}>{roleBadge(c.role)}</span>
+                      {part && <span className="ml-1 text-[10px] text-ink-dim">↔ {part.label}</span>}
+                    </button>
+                    {part && (
+                      <button data-testid={`wire-cut-part-${c.name}`}
+                        className="rounded bg-panel2 px-1.5 py-[2px] text-[11px] text-red-300 hover:bg-red-500/25"
+                        title="Disconnect" onClick={() => cut(part.pi)}>✕</button>
+                    )}
+                  </div>
+                );
+              })}
+              {selPipes.length > 0 && (
+                <div className="pt-1 text-[10px] text-ink-dim">{selPipes.length} cable{selPipes.length === 1 ? '' : 's'} on this part</div>
+              )}
+              {draft && (
+                <div className="pt-2">
+                  <div className="flex items-center justify-between pb-1">
+                    <span className="text-[10px] uppercase tracking-wide text-ink-dim">
+                      {draft.kind} from {draft.name} →
+                    </span>
+                    <button className="text-[10px] text-ink-dim hover:text-ink"
+                      onClick={() => { setDraft(null); setTPart(null); p.onHoverComp(null); }}>cancel</button>
+                  </div>
+                  <SearchList testid="wire-target" placeholder="logical candidates (hover previews the part)…"
+                    onHover={id => p.onHoverComp(id ? +id.split('/')[0]! : null)}
+                    entries={candParts.map(([ci, v]) => ({
+                      id: `${ci}/0`,
+                      label: `${v.type}[${ci}]${tPart === ci ? '  ◂' : ''}`,
+                      sub: `${v.n} free · ${v.why} · ${v.d.toFixed(1)} m`,
+                    }))}
+                    onPick={id => { setTPart(+id.split('/')[0]!); setConnectMsg(''); }} />
+                  {tPart !== null && (
+                    <div className="pt-2">
+                      <div className="pb-1 text-[10px] uppercase tracking-wide text-ink-dim">
+                        free {draft.kind} ports on {p.bp.data.components[tPart]?.type}[{tPart}]:
+                      </div>
+                      {candidatesFor(
+                        (open.find(q => q.ci === draft.ci && q.name === draft.name) ?? draft) as never,
+                        open.filter(q => q.ci === tPart && q.kind === draft.kind), hubIn)
+                        .map(c => (
+                          <button key={c.port.name} data-testid="wire-target-port"
+                            className="mt-[2px] block w-full truncate rounded bg-panel2 px-2 py-[2px] text-left text-[11px] text-ink hover:bg-white/10"
+                            onMouseEnter={() => p.onHoverComp(tPart)}
+                            onClick={() => {
+                              const ok = p.onConnect(draft.ci, draft.name, tPart, c.port.name);
+                              setConnectMsg(ok ? `wired ${draft.name} → ${p.bp.data.components[tPart]?.type}[${tPart}]/${c.port.name}`
+                                : 'invalid pairing (port busy or incompatible)');
+                              if (ok) { setDraft(null); setTPart(null); }
+                              p.onHoverComp(null);
+                            }}>
+                            ○ {c.port.name}{' '}
+                            <span className="text-[10px] text-ink-dim">{c.why} · {c.dist.toFixed(1)} m</span>
+                          </button>
+                        ))}
+                    </div>
+                  )}
+                  {connectMsg && <div className="pt-1 text-[10px] text-ink-dim">{connectMsg}</div>}
+                </div>
+              )}
+            </>
+          )}
+        </Sec>
+        <Sec title={`Warnings — unconnected (${open.length})`} testid="wire-warnings">
+          {open.length === 0 && <div className="text-[11px] text-emerald-400">every port is wired ✓</div>}
+          <div className="max-h-64 space-y-[2px] overflow-y-auto" onMouseLeave={() => p.onHoverComp(null)}>
+            {open.map(w => (
+              <button key={`${w.ci}/${w.name}`} data-testid="wire-warning"
+                className="block w-full truncate rounded bg-panel2 px-2 py-[3px] text-left text-[11px] text-ink hover:bg-white/10"
+                onMouseEnter={() => p.onHoverComp(w.ci)}
+                onClick={() => p.onSelectComp(w.ci)}
+                title={`${w.type} ${w.name} — ${w.kind} ${roleTip(w.role)} (${w.group}${
+                  w.group === 'hub' ? (hubIn.has(`${w.ci}/${w.kind}`) ? ', has inputs: this side is downstream' : '') : ''})`}>
+                <span className="text-gold">⚠</span> {w.type}[{w.ci}] {w.name} — {w.kind} {roleBadge(w.role)}
+              </button>
+            ))}
+          </div>
+        </Sec>
+      </div>
     </div>
   );
 }
-
 // ------------------------------------------------------------ FLIGHT mode
 const v3 = (v: readonly number[]) => `(${v[0]!.toFixed(2)}, ${v[1]!.toFixed(2)}, ${v[2]!.toFixed(2)})`;
 

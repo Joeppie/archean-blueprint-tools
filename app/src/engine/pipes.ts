@@ -97,6 +97,11 @@ export interface PipeNetwork {
   /** per-pipe surge polyline (a-end → b-end; the EXACT drawn cable path,
    *  joint zigzag / sag chain included; legacy pipePolys) */
   polys: V3[][];
+  /** DRAWN half-extent per net run (hover-pick tolerance, v1.10.1) */
+  radii: number[];
+  /** which data.pipes index each net run came from (degenerate entries are
+   *  skipped by the builder, so polys index ≠ pipe index without this) */
+  piOf: number[];
   pipes: number;
   /** ends the recorded cache left off its socket (re-anchored, sockets.ts) */
   stale: number;
@@ -167,7 +172,9 @@ export function buildPipes(
   const ends: PipeEnds[] = [];
   const links: PipeLink[] = [];
   const polys: V3[][] = [];
-  const net: PipeNetwork = { segs, joints, plugs, ends, links, polys, pipes: 0, stale: 0 };
+  const radii: number[] = [];
+  const piOf: number[] = [];
+  const net: PipeNetwork = { segs, joints, plugs, ends, links, polys, radii, piOf, pipes: 0, stale: 0 };
   if (!pipes?.length) return net;
   net.pipes = 0;
 
@@ -257,6 +264,7 @@ export function buildPipes(
         tipA, ...(neckA ? [neckA] : []), ...pts.slice(1, -1),
         ...(neckB ? [neckB] : []), tipB,
       ]);
+      radii.push(half); piOf.push(pi);
       plugs.push(
         { at: tipA, axis: axisA ?? unit(neckA ?? tipA, pts[1] ?? tipB), radius, half, box, led: !!neckA },
         { at: tipB, axis: axisB ?? unit(neckB ?? tipB, pts[pts.length - 2] ?? tipA), radius, half, box, led: !!neckB },
@@ -300,6 +308,7 @@ export function buildPipes(
     ends.push({ a: tipA, b: tipB });
     links.push({ a: p.a_component, b: p.b_component });
     polys.push(pts);
+    radii.push(half); piOf.push(pi);
     const d0 = DIRS[s0.dir] ?? DIRS[0]!, dn = DIRS[sn.dir] ?? DIRS[0]!;
     plugs.push(
       { at: tipA, axis: axisA ?? [-d0[0], -d0[1], -d0[2]], radius, half,
@@ -310,6 +319,52 @@ export function buildPipes(
   });
   net.pipes = pipes.length;
   return net;
+}
+
+/** distance from a ray (origin o, UNIT direction dd) to the segment a—b,
+ *  closest-points solution with t ≥ 0 and s ∈ [0, 1] clamps. */
+function raySegDist(o: V3, dd: V3, a: V3, b: V3): number {
+  const ux = o[0] - a[0], uy = o[1] - a[1], uz = o[2] - a[2];   // o − a
+  const abx = b[0] - a[0], aby = b[1] - a[1], abz = b[2] - a[2];
+  const ab2 = abx * abx + aby * aby + abz * abz;
+  const abd = abx * dd[0] + aby * dd[1] + abz * dd[2];
+  const du = dd[0] * ux + dd[1] * uy + dd[2] * uz;
+  const abdu = abx * ux + aby * uy + abz * uz;
+  let t: number, s: number;
+  const det = ab2 - abd * abd;                       // |ab|²·|dd|² − (ab·dd)²
+  if (ab2 < 1e-12) { t = Math.max(0, -du); s = 0; }
+  else if (det < 1e-9) { s = 0; t = Math.max(0, -du); }
+  else {
+    t = (-du * ab2 + abd * abdu) / det;
+    s = (abdu - abd * du) / det;
+    s = s < 0 ? 0 : s > 1 ? 1 : s;
+    // with s clamped, the ray's best t re-projects (a + s·ab) − o onto dd
+    const qx = a[0] + s * abx - o[0], qy = a[1] + s * aby - o[1], qz = a[2] + s * abz - o[2];
+    t = Math.max(0, qx * dd[0] + qy * dd[1] + qz * dd[2]);
+  }
+  t = Math.max(0, t);
+  const cx = ux + t * dd[0] - s * abx, cy = uy + t * dd[1] - s * aby, cz = uz + t * dd[2] - s * abz;
+  return Math.hypot(cx, cy, cz);
+}
+
+/**
+ * HOVER-PICK A CABLE (v1.10.1, user: "on mouse-over of a cable, it should
+ * tell us where things are going"): the NET RUN whose polyline passes
+ * closest to the ray, when that distance is within the cable's drawn
+ * half-extent plus a `tol` finger margin. Returns the NET index (map to a
+ * data.pipes index with net.piOf) and the residual distance.
+ */
+export function pipeAt(net: PipeNetwork, o: V3, dd: V3,
+  tol = 0.05): { i: number; dist: number } | null {
+  let bi = -1, bd = Infinity;
+  net.polys.forEach((poly, i) => {
+    const lim = tol + (net.radii[i] ?? 0.02);
+    for (let k = 1; k < poly.length; k++) {
+      const dseg = raySegDist(o, dd, poly[k - 1]!, poly[k]!);
+      if (dseg < bd && dseg <= lim) { bd = dseg; bi = i; break; }
+    }
+  });
+  return bi < 0 ? null : { i: bi, dist: bd };
 }
 
 /** audit the DIRECTION RULE on the drawn network: every leaded plug must

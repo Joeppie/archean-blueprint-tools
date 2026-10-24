@@ -43,7 +43,8 @@ import { propellerSurface, type PropellerData } from './propeller';
  *  neutral NON-metallic grey — `ReverseGamma(vec3(0.5))` in the shader, i.e.
  *  written in sRGB (dev propellerGeometry agrees). */
 const PROP_GEN_SPEC: PbrSpec = { color: srgbHexToLinear(0x808080), metal: 0, rough: 0.65, opacity: 1 };
-import { buildPipes, checkLeads, surgePaths, type PipeNetwork } from './pipes';
+import { buildPipes, checkLeads, pipeAt, surgePaths, type PipeNetwork } from './pipes';
+import { pipeLabel } from './wireops';
 import { buildCompProxies, buildSolids, type ProxyBox, type SolidBatch } from './build';
 import { hullVertex } from './hullfit';
 import type { FilePalette } from './palette';
@@ -57,7 +58,7 @@ import { gridPlan, pxPerMeter } from './grid';
 import {
   captureJrefs, eulerZYX, flattenComponents, jointNodeAxis, jointNodeSlide,
   masterJointState, subBlockBBox, subJointPose, subMasterEntries,
-  type JRef, type SubBBox,
+  type JRef, type SubBBox, type FlatEntry,
 } from './subgrid';
 import { pipeSockets } from './sockets';
 import {
@@ -349,7 +350,16 @@ export class Engine {
   // travelling glow along every connected pipe; on arrival the far part
   // blips. Pulses/blips render additive with depthTest OFF — they shine
   // THROUGH the hull — and the on-demand loop wakes only while alive.
-  private pipeNet: PipeNetwork = { segs: [], joints: [], plugs: [], ends: [], links: [], polys: [], pipes: 0, stale: 0 };
+  private pipeNet: PipeNetwork = { segs: [], joints: [], plugs: [], ends: [], links: [],
+    polys: [], radii: [], piOf: [], pipes: 0, stale: 0 };
+  // ---- cable HOVER (v1.10.1, user: "on mouse-over of a cable, it should
+  // tell us where things are going … propeller[9].lv <-> Computer[0].lv"):
+  // the file pipe index under the cursor + a gold overlay riding its drawn
+  // polyline. The flat list is kept from the last pipe build for the label.
+  private pipeHoverPi = -1;
+  private pipeHlGroup = new Group();
+  private pipeHoverInfo: { pi: number; label: string } | null = null;
+  private flatMap: FlatEntry[] = [];
   private surgeGroup = new Group();
   private surgeGeo = new SphereGeometry(0.055, 10, 8);
   private surges: { pts: Vector3[]; cum: number[]; total: number; to: number;
@@ -559,6 +569,8 @@ export class Engine {
     this.scene.add(sun);
     this.surgeGroup.raycast = () => {};
     this.scene.add(this.root);
+    this.root.add(this.pipeHlGroup);             // cable hover overlay rides moff WITH the cables
+    this.pipeHlGroup.raycast = () => {};
     this.scene.add(this.subGroup);
     this.scene.add(this.surgeGroup);
     this.scene.add(this.ghostGroup);
@@ -878,6 +890,8 @@ void main() {
     const flat = flattenComponents(bp);
     const net = buildPipes(bp.data.pipes, pipeSockets(bp.data.pipes, flat, this.atlasRef?.manifest ?? null));
     this.pipeNet = net;
+    this.flatMap = flat;                          // cable labels resolve flat → top
+    this.clearPipeHover();                        // net indices die with the rebuild
     this.clearSurges();                            // paths change on rebuild
     if (!net.segs.length) return;
 
@@ -1038,6 +1052,96 @@ void main() {
       leads: checkLeads(net),
       ends: net.ends.map(e => ({ a: [...e.a], b: [...e.b] })),
     };
+  }
+
+  // ---------- cable hover (v1.10.1) ----------
+
+  /** HOVER A CABLE with the cursor (client px, throttled by the Viewport's
+   *  pointer pass): the drawn polyline closest to the sight ray (pipes.ts
+   *  pipeAt — the net lives in FILE coords, so the world ray is shifted by
+   *  −moff first). Answers the file pipe index + the endpoint label
+   *  ("Propeller[9].lowvoltage ↔ Computer[0].data_port.001") and gold-
+   *  lights the cable; null (or a miss) clears it. */
+  pipeHoverMove(clientX: number, clientY: number): { pi: number; label: string } | null {
+    if (!this.bp || !this.renderer || !this.opts.pipes || !this.pipeNet.polys.length) {
+      this.clearPipeHover();
+      return null;
+    }
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const ndc = new Vector2(((clientX - r.left) / r.width) * 2 - 1,
+      -((clientY - r.top) / r.height) * 2 + 1);
+    const ray = new Raycaster();
+    ray.setFromCamera(ndc, this.camera);
+    const mo = this.moffV();
+    const hit = pipeAt(this.pipeNet,
+      [ray.ray.origin.x - mo.x, ray.ray.origin.y - mo.y, ray.ray.origin.z - mo.z],
+      [ray.ray.direction.x, ray.ray.direction.y, ray.ray.direction.z]);
+    if (!hit) { this.clearPipeHover(); return null; }
+    const pi = this.pipeNet.piOf[hit.i] ?? -1;
+    if (pi < 0 || !this.bp.data.pipes?.[pi]) { this.clearPipeHover(); return null; }
+    if (pi !== this.pipeHoverPi) this.applyPipeHover(pi);
+    return this.pipeHoverInfo;
+  }
+
+  /** gold-light a cable from OUTSIDE the viewport (the WIRE panel's cable
+   *  list hover): the same overlay, no raycast, no cursor chip. */
+  setPipeHover(pi: number | null) {
+    if (pi == null || pi < 0) { this.clearPipeHover(); return; }
+    if (pi !== this.pipeHoverPi) this.applyPipeHover(pi);
+  }
+
+  pipeHoverState(): { pi: number; label: string } | null { return this.pipeHoverInfo; }
+
+  clearPipeHover() {
+    if (this.pipeHoverPi < 0 && !this.pipeHoverInfo) return;
+    this.pipeHoverPi = -1;
+    this.pipeHoverInfo = null;
+    this.clearGroup(this.pipeHlGroup);
+    this.invalidate();
+  }
+
+  /** the overlay: gold additive bars + elbow knobs along the run's drawn
+   *  polyline (additive + depthTest OFF — visible THROUGH the hull, the
+   *  surge-material idiom), rebuilt only when the hovered cable changes. */
+  private applyPipeHover(pi: number) {
+    this.pipeHoverPi = pi;
+    this.clearGroup(this.pipeHlGroup);
+    const netIdx = this.pipeNet.piOf.indexOf(pi);
+    const poly = netIdx >= 0 ? this.pipeNet.polys[netIdx] ?? null : null;
+    if (!poly || poly.length < 2 || !this.bp) { this.pipeHoverInfo = null; return; }
+    const half = (this.pipeNet.radii[netIdx] ?? 0.02) * 1.7 + 0.008;
+    const mat = new MeshBasicMaterial({ color: 0xffd479, transparent: true, opacity: 0.85,
+      blending: AdditiveBlending, depthTest: false, depthWrite: false });
+    const Y = new Vector3(0, 1, 0);
+    for (let k = 1; k < poly.length; k++) {
+      const a = poly[k - 1]!, b = poly[k]!;
+      const dir = new Vector3(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+      const L = dir.length();
+      if (L < 1e-6) continue;
+      const bar = new Mesh(new CylinderGeometry(half, half, L, 8), mat);
+      bar.position.set((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2);
+      bar.quaternion.setFromUnitVectors(Y, dir.normalize());
+      this.pipeHlGroup.add(bar);
+      const knob = new Mesh(new SphereGeometry(half * 1.15, 8, 6), mat);
+      knob.position.set(b[0], b[1], b[2]);
+      this.pipeHlGroup.add(knob);
+    }
+    this.pipeHlGroup.traverse(o => { o.renderOrder = 18; o.raycast = () => {}; o.layers.set(1); });
+    this.pipeHoverInfo = { pi, label: pipeLabel(this.bp, pi, this.flatMap) ?? '' };
+    this.invalidate();
+  }
+
+  /** client-space point at the middle of a cable's drawn path — what the
+   *  e2e aims the mouse at to prove the hover label. */
+  pipeScreenPoint(pi: number): { x: number; y: number } | null {
+    const netIdx = this.pipeNet.piOf.indexOf(pi);
+    const poly = netIdx >= 0 ? this.pipeNet.polys[netIdx] : undefined;
+    if (!poly?.length || !this.renderer || !this.camera) return null;
+    const mo = this.moffV();
+    const mid = poly[Math.max(0, Math.floor(poly.length / 2) - 1)] ?? poly[0]!;
+    const v = new Vector3(mid[0] + mo.x, mid[1] + mo.y, mid[2] + mo.z).project(this.camera);
+    const r = this.renderer.domElement.getBoundingClientRect();
+    return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height };
   }
 
   /** every non-Build component: a group at the DISPLAY pose — the painted
