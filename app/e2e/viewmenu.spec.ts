@@ -22,7 +22,7 @@ type ViewState = { proj: 'perspective' | 'orthographic';
   eye: [number, number, number]; target: [number, number, number]; zoom: number };
 type Win = { __ARCHEAN__?: {
   view(): ViewState;
-  backdrop(): { current: 'none' | 'mars' | 'earth'; ready: boolean };
+  backdrop(): { current: 'none' | 'mars' | 'earth'; ready: boolean; dome: boolean };
   screen(x: number, y: number, z: number): [number, number] | null;
   pixel(u: number, v: number): [number, number, number] | null;
   grid(): { step: number } | null;
@@ -105,7 +105,7 @@ test.describe('view menu: see-through ground, sky backdrops, ortho @ui', () => {
   test('backdrop mars/earth swap the sky dome; none restores', async ({ page }) => {
     desktopOnly();
     await openCraft(page, ISW);
-    await expect.poll(() => backdropOf(page)).toEqual({ current: 'none', ready: true });
+    await expect.poll(() => backdropOf(page)).toEqual({ current: 'none', ready: true, dome: false });
     const sky0 = (await pixelOf(page, 0.5, 0.03))!;
     // 'none' = the flat sky colour #8fb4d8
     expect(far(sky0, [143, 180, 216])).toBeLessThan(24);
@@ -113,13 +113,14 @@ test.describe('view menu: see-through ground, sky backdrops, ortho @ui', () => {
     for (const b of ['mars', 'earth'] as const) {
       await page.getByTestId(`backdrop-${b}`).click();
       await expect.poll(() => backdropOf(page), { timeout: 10_000 })
-        .toEqual({ current: b, ready: true });
-      // the dome is LIVE: the sky pixel is a TEXTURED colour, not the flat one
+        .toEqual({ current: b, ready: true, dome: true });
+      // the dome is LIVE geometry: the sky pixel is a PANORAMA colour
+      // (real dusk sky / terrain), not the flat one
       const p = (await pixelOf(page, 0.5, 0.03))!;
       expect(far(p, sky0)).toBeGreaterThan(30);
     }
     await page.getByTestId('backdrop-none').click();
-    await expect.poll(() => backdropOf(page)).toEqual({ current: 'none', ready: true });
+    await expect.poll(() => backdropOf(page)).toEqual({ current: 'none', ready: true, dome: false });
     await expect.poll(async () => far((await pixelOf(page, 0.5, 0.03))!, sky0))
       .toBeLessThan(8);
   });
@@ -154,6 +155,23 @@ test.describe('view menu: see-through ground, sky backdrops, ortho @ui', () => {
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
     await expect.poll(async () => (await viewOf(page)).proj).toBe('orthographic');
     expect(await axialPx(page)).toBeLessThan(0.5);
+    // THE SKY STAYS A DOME IN ORTHO (user: "it shouldnt orthographically
+    // project our skybox into being a cube"): the backdrop is a BackSide
+    // sphere riding the eye, so the panorama renders in ortho AND its top
+    // band stays SMOOTH — a background-texture projection corners the pano
+    // into cube walls (measured: dome corner↔centre ≤ 20, walls ≫ 60)
+    await openMenu(page);
+    await page.getByTestId('backdrop-mars').click();
+    await expect.poll(() => backdropOf(page), { timeout: 10_000 })
+      .toEqual({ current: 'mars', ready: true, dome: true });
+    const band = await page.evaluate(() => {
+      const h = (window as unknown as Win).__ARCHEAN__!;
+      return [h.pixel(0.05, 0.05)!, h.pixel(0.5, 0.05)!, h.pixel(0.95, 0.05)!];
+    });
+    expect(far(band[0], band[2])).toBeLessThan(60);
+    // and the sky is genuinely the panorama, not the flat fallback colour
+    expect(far(band[1], [143, 180, 216])).toBeGreaterThan(30);
+    await page.getByTestId('backdrop-none').click();
   });
 
   test('the backdrop choice persists across a reload', async ({ page }) => {
@@ -161,11 +179,11 @@ test.describe('view menu: see-through ground, sky backdrops, ortho @ui', () => {
     await openCraft(page, ISW);
     await openMenu(page);
     await page.getByTestId('backdrop-mars').click();
-    await expect.poll(() => backdropOf(page)).toEqual({ current: 'mars', ready: true });
+    await expect.poll(() => backdropOf(page)).toEqual({ current: 'mars', ready: true, dome: true });
     await page.reload();
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
     await expect.poll(() => backdropOf(page), { timeout: 10_000 })
-      .toEqual({ current: 'mars', ready: true });
+      .toEqual({ current: 'mars', ready: true, dome: true });
   });
 
   test('phone: the View menu reaches the new rows', async ({ page }) => {

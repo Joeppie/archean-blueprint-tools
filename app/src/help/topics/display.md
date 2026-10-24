@@ -6,7 +6,7 @@ toggles have keys where it matters.
 
 | Option | What it does |
 |---|---|
-| Sky backdrop | what you see THROUGH and BEYOND the build pad: **none** (the flat sky colour), **mars** or **earth** — full equirectangular planet panoramas (CC BY, see NOTICE) drawn as the sky dome. The ground pad itself is see-through now; the grid lines and ±axis marks are all that render of it |
+| Sky backdrop | what you see THROUGH and BEYOND the build pad: **none** (the flat sky colour), **mars** (the real Perseverance Jezero 360° panorama, NASA) or **earth** (a savanna dawn panorama, Poly Haven CC0) — true surface panoramas, so it's SKY overhead and TERRAIN below with the horizon at eye level, drawn on a dome that follows the camera and looks right in both perspective and orthographic. The ground pad itself is see-through now; the grid lines and ±axis marks are all that render of it |
 | Orthographic (5) | parallel projection — no perspective shrink, parallel edges stay parallel: align, measure and square up blueprints like a CAD sheet. The framing survives the swap both ways; wheel zoom scales the ortho sheet |
 | Hull (h) | block + triangle solids on/off — OFF means WIREFRAME and click-through |
 | Wireframe | the lattice wire overlay (mutually exclusive with hull solids) |

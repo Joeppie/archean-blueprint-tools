@@ -1148,11 +1148,21 @@ topic + FORMAT).
   see-through PICK surface; the grid lines + ±axis marks stay, the
   ground-height rule is unchanged. (2) `Engine.setBackdrop('none'|'mars'|
   'earth')` (persisted `archean-app-backdrop`, default none = the flat sky
-  colour): 2 k equirect panoramas (Solar System Scope, CC BY 4.0 — NOTICE §2)
-  committed under `src/assets/backdrops/` (offline-first; vite-imported, so
-  layout-exact on Pages), loaded once into an ENGINE-owned texture cache
-  (never disposed by a scene load; `dispose()` releases them),
-  `EquirectangularReflectionMapping` + SRGB as `scene.background`.
+  colour): SURFACE panoramas — real sky above, terrain below (user: "the
+  backdrops sohuldnt be the entire planet, but a skybox+ground") — mars =
+  the Perseverance Mastcam-Z Jezero 360° (NASA PD, cylindrical pano
+  resampled to the full 2:1 dome with sky/soil rows extended to the
+  poles), earth = Poly Haven "Waterbuck trail" by Greg Zaal (CC0);
+  NOTICE §2. Committed under `src/assets/backdrops/` (offline-first;
+  vite-imported, layout-exact on Pages), loaded once into an ENGINE-owned
+  texture cache (never disposed by a scene load). THE DOME IS GEOMETRY
+  (user: "it shouldnt orthographically project our skybox into being a
+  cube"): a BackSide sphere (unit geo + `depthTest:false, depthWrite:false,
+  renderOrder -1000`, layer 1, `raycast` noop) riding the eye every frame
+  (`rideSkyDome`), NOT `scene.background` — three's orthographic background
+  derives view directions from the projection matrix and corners the pano
+  into CUBE WALLS; a sphere is projection-honest. `backdropState().dome`
+  reports the live dome.
   (3) The ⚙ popover is THE VIEW MENU (Sec title "View", button "⚙ View");
   rows `backdrop-none|mars|earth` + `opt-ortho`; the keys hint row says `5`.
   (4) DUAL PROJECTION: `persp`/`orthoCam`, ONE orbit rig — `setProjection`
@@ -1171,7 +1181,9 @@ topic + FORMAT).
   the null target in r186; a dense scan of the band under the craft must be
   MOSTLY sky b>g, the green share = only the grid lines; the old sheet
   read g>b EVERYWHERE — ONE evaluate per scan, 75 round-trips blew the poll
-  budget), backdrop swap/restore pixels + persistence, `axialPx`: a 1 m
+  budget), backdrop swap/restore pixels + persistence (+ the `dome` state),
+  ORTHO keeps the SKY as a dome with a SMOOTH top band (corner↔centre
+  ≤ 60 px-sum — the cube-wall artifact fails this), `axialPx`: a 1 m
   step along the sight axis projects 0 px in ortho (>3 px in persp — THE
   parallel law), framing round-trip <1e-3, key 5 (BLUR the checkbox first —
   the key handler stands down while an INPUT has focus), reload persistence

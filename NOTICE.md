@@ -30,14 +30,15 @@ Read this file together with LICENSE (GNU GPL v3).
    intact and review the game's EULA/ToS for what redistribution of
    player-created workshop data permits.
 
-   **Sky backdrop textures** — `app/src/assets/backdrops/mars.jpg` and
-   `earth.jpg` are the 2 k equirectangular planet textures by *Solar System
-   Scope* (https://solarsystemscope.com/textures/), based on NASA imagery/
-   elevation data, licensed **CC BY 4.0** (https://creativecommons.org/
-   licenses/by/4.0/); retrieved via Wikimedia Commons, re-encoded (JPEG q82,
-   metadata stripped), colours not otherwise altered. They are NOT GPL:
-   the CC BY 4.0 attribution requirement travels with any redistribution
-   that keeps them.
+   **Sky backdrop panoramas** — `app/src/assets/backdrops/mars.jpg` is
+   "Mastcam-Z's First 360-Degree Panorama" (Perseverance rover, Jezero
+   Crater, Sol 3) by **NASA/JPL-Caltech/ASU/MSSS — public domain** (NASA
+   image use policy); resampled from the stitched cylinder onto the full
+   2:1 dome (the sky/soil edge rows extended to the poles), colour
+   unchanged. `earth.jpg` is "Waterbuck trail" by **Greg Zaal / Poly
+   Haven (https://polyhaven.com/a/waterbuck_trail), CC0 1.0** — resampled
+   16 k → 2 k, colour unchanged. Both are surface panoramas (sky above,
+   terrain below), matching the viewer's dome rendering.
 
    **XenonViewer-derived material**: `viewer/blockshapes.js` and
    `viewer/palette.js` (shape/rotation tables and the built-in palette, both

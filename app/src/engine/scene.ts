@@ -17,11 +17,11 @@
 
 import {
   Box3, BoxGeometry, BufferAttribute, BufferGeometry, Color, CylinderGeometry, DirectionalLight,
-  DoubleSide, EquirectangularReflectionMapping, Group, HemisphereLight, InstancedMesh,
+  DoubleSide, Group, HemisphereLight, InstancedMesh,
   LineBasicMaterial, LineSegments, LinearSRGBColorSpace, Matrix3, Matrix4, Mesh,
   MeshBasicMaterial, MeshStandardMaterial, Object3D, OrthographicCamera, PerspectiveCamera,
-  AdditiveBlending, Plane, PlaneGeometry, PMREMGenerator, Quaternion, Raycaster,
-  Scene, ShaderMaterial, SphereGeometry, Sprite, SpriteMaterial, Texture, TextureLoader,
+  AdditiveBlending, BackSide, Plane, PlaneGeometry, PMREMGenerator, Quaternion, Raycaster,
+  RepeatWrapping, Scene, ShaderMaterial, SphereGeometry, Sprite, SpriteMaterial, Texture, TextureLoader,
   TorusGeometry, Vector2, Vector3, WebGLRenderer,
   type Camera, type MeshStandardMaterialParameters,
 } from 'three';
@@ -112,10 +112,16 @@ export const DEFAULT_OPTS: ViewOptions = { grid: true, occ: false, hull: true, w
 
 /** v1.9.2 SKY BACKDROPS (user: "The ground being solid and not se through is
  *  unacceptable … use an equi backdrop from a free site … mars and earth and
- *  none as options"): equirectangular panoramas drawn as the scene background
- *  dome. The textures are the Solar System Scope planet textures (CC BY 4.0,
- *  NASA-data based — NOTICE.md), committed under src/assets/backdrops so the
- *  app stays offline-first. 'none' = the old flat sky colour. */
+ *  none as options"; then "the backdrops sohuldnt be the entire planet, but a
+ *  skybox+ground" and "it shouldnt orthographically project our skybox into
+ *  being a cube"): SURFACE panoramas — real sky above, terrain below — drawn
+ *  on a BackSide SPHERE DOME that rides the eye. NOT scene.background: three's
+ *  orthographic background fakes a perspective direction field and corners
+ *  the panorama into cube walls; geometry is projection-honest. The textures
+ *  are a NASA/JPL Perseverance Mastcam-Z Jezero 360° (public domain, resampled
+ *  to the dome) and Poly Haven's "Waterbuck trail" by Greg Zaal (CC0) — see
+ *  NOTICE.md — committed under src/assets/backdrops so the app stays offline-
+ *  first. 'none' = the flat sky colour. */
 export type Backdrop = 'none' | 'mars' | 'earth';
 const BACKDROP_URL: Record<Backdrop, string | null> =
   { none: null, mars: marsBackdropUrl, earth: earthBackdropUrl };
@@ -207,6 +213,11 @@ export class Engine {
     (['none', 'mars', 'earth'] as string[]).includes(localStorage.getItem(BACKDROP_KEY) ?? '')
       ? (localStorage.getItem(BACKDROP_KEY) as Backdrop) : 'none';
   private backdrops = new Map<Backdrop, Texture>();
+  /** the panorama dome (lazy: only exists while a backdrop is shown) —
+   *  engine-owned geometry, NEVER disposed by a scene load */
+  private skyDome: Mesh | null = null;
+  private skyDomeGeo: SphereGeometry | null = null;
+  private skyDomeMat: MeshBasicMaterial | null = null;
   private controls: OrbitControls | null = null;
   private root = new Group();
   /** placed components (stand-in group + real-model sibling), keyed by ci */
@@ -543,6 +554,7 @@ export class Engine {
       this.pumpWind();
       if (this.needRender && this.renderer) {
         this.needRender = false;
+        this.rideSkyDome();                       // the sky follows the eye
         this.syncGrid();                          // zoom-adaptive cell + ruler ticks
         this.renderer.render(this.scene, this.camera);
       }
@@ -2511,26 +2523,74 @@ void main() {
     return [buf[0]!, buf[1]!, buf[2]!];
   }
   /** View menu row: swap the SKY DOME (v1.9.2). 'none' restores the flat
-   *  sky colour; the panoramas load once and live in the engine cache. */
+   *  sky colour; the panoramas load once and live in the engine cache. THE
+   *  DOME IS GEOMETRY (BackSide sphere riding the eye), never
+   *  scene.background — three's ortho background derives per-pixel view
+   *  directions from the projection matrix and stretches the panorama into
+   *  CUBE WALLS in ortho (user: "it shouldnt orthographically project our
+   *  skybox into being a cube"); a sphere is honest in both projections. */
   setBackdrop(b: Backdrop) {
     this.backdropNow = b;
     localStorage.setItem(BACKDROP_KEY, b);
-    if (b === 'none') { this.scene.background = this.skyColor; this.invalidate(); return; }
+    const showDome = (tex: Texture | null) => {
+      if (!tex) {
+        if (this.skyDome) this.skyDome.visible = false;
+        this.scene.background = this.skyColor;
+        this.invalidate();
+        return;
+      }
+      if (!this.skyDome) {
+        const geo = this.skyDomeGeo = new SphereGeometry(1, 64, 40);
+        const mat = this.skyDomeMat = new MeshBasicMaterial({
+          side: BackSide, depthWrite: false,
+          // background semantics: painted FIRST (renderOrder below), ignoring
+          // depth — so it can never occlude grid lines or craft geometry
+          // however far the user dollies, and needs no far-plane chasing
+          depthTest: false,
+        });
+        const dome = this.skyDome = new Mesh(geo, mat);
+        dome.renderOrder = -1000;              // always the first thing drawn
+        dome.raycast = () => { };              // never a pick target…
+        dome.layers.set(1);                    // …belt & braces (draw layer)
+        this.scene.add(dome);
+      }
+      this.skyDomeMat!.map = tex;
+      this.skyDomeMat!.needsUpdate = true;
+      this.skyDome.visible = true;
+      // the flat sky stays as the (never-seen) clear fallback mid-load
+      this.scene.background = this.skyColor;
+      this.rideSkyDome();
+      this.invalidate();
+    };
+    if (b === 'none') { showDome(null); return; }
     const cached = this.backdrops.get(b);
-    if (cached) { this.scene.background = cached; this.invalidate(); return; }
+    if (cached) { showDome(cached); return; }
     const url = BACKDROP_URL[b];
     if (!url) return;
     new TextureLoader().load(url, (tex) => {
-      tex.mapping = EquirectangularReflectionMapping;   // 2:1 equirect dome
-      tex.colorSpace = SRGBColorSpace;                  // a photo, not albedo
+      tex.colorSpace = SRGBColorSpace;         // a photo, not albedo
+      tex.wrapS = RepeatWrapping;              // the 0°/360° seam stays shut
       this.backdrops.set(b, tex);
-      if (this.backdropNow === b) { this.scene.background = tex; this.invalidate(); }
+      if (this.backdropNow === b) showDome(tex);
     });
   }
-  /** live backdrop state — the e2e pin hook (ready = texture actually set) */
-  backdropState(): { current: Backdrop; ready: boolean } {
+  /** the dome rides the EYE (a fixed modest radius suffices: depthTest false
+   *  + renderOrder -1000 make it the first thing painted, and a sphere around
+   *  the camera covers every ray in EITHER projection — perspective and
+   *  orthographic alike see a dome, never the cube walls three's background
+   *  shader fakes for an ortho camera) */
+  private rideSkyDome() {
+    const d = this.skyDome;
+    if (!d || !d.visible) return;
+    d.position.copy(this.camera.position);
+    d.scale.setScalar(30);
+  }
+  /** live backdrop state — the e2e pin hook (ready = texture actually set;
+   *  dome = the panorama is rendered as geometry right now) */
+  backdropState(): { current: Backdrop; ready: boolean; dome: boolean } {
     return { current: this.backdropNow,
-      ready: this.backdropNow === 'none' || this.backdrops.has(this.backdropNow) };
+      ready: this.backdropNow === 'none' || this.backdrops.has(this.backdropNow),
+      dome: this.skyDome?.visible === true };
   }
   /** PERF GAUGE (tools/viewperf.mjs): render n frames synchronously and
    *  return ms/frame. A 1-px readPixels at the end FLUSHES the GPU queue,
@@ -4320,6 +4380,11 @@ void main() {
     this.ghostPending.clear();
     for (const t of this.backdrops.values()) t.dispose();   // sky domes are engine-owned
     this.backdrops.clear();
+    this.skyDome?.dispose();
+    this.skyDomeGeo?.dispose();
+    this.skyDomeMat?.dispose();
+    this.skyDome = this.skyDomeGeo = null;
+    this.skyDomeMat = null;
     this.placeDrag = null;
     this.gizmo?.dispose();
     this.gizmo = null;
