@@ -1308,6 +1308,40 @@ topic + FORMAT).
   see-through scan switch to ⊘ explicitly first (behind a see-through pad
   a PANORAMA's terrain may read green — the swap pins cover panoramas,
   this pin covers the sheet).
+- **v1.9.4 VERSIONED, VALIDATED CRAFT CACHE (user: "use a versioning and store
+  a SHA for each file … the user can choose whether or not to [redownload];
+  warning label … each corpus item must display whether it is up-to-date or
+  workshop was edited afterward"):** the IndexedDB cache (crafts.ts
+  `archean-crafts`, DB bumped to v2 ADDITIVELY — v1 data survives but legacy
+  entries are `unknown`, never silently trusted) now versions every copy with
+  `rev = bytes-mtime` + **SHA-256**. The catalog (`virtual:gallery`,
+  vite-corpus.ts) stamps every entry `{rev, sha, bytes, mtime}` (eager sha,
+  memoised per path+size+mtime; 244 files/44 MiB measure tens of ms) and the
+  blueprint routes answer `X-Blueprint-Sha`/`X-Blueprint-Rev`; downloads verify
+  the fetched bytes against the served digest (static Pages: against the
+  catalog stamp) — a mismatch is delivered-but-untrusted (`unknown` +
+  console.warn). `sha256Hex` uses WebCrypto with a pure-JS fallback, because
+  crypto.subtle is absent on the plain-http Tailscale origin. States
+  fresh/stale/unknown/absent; FRESH opens keep the ZERO-network rule
+  (download.spec contract re-run green); stale/unknown open through
+  `components/StaleDialog.tsx` — one-line meaning + both dates + the CHOICE
+  (`stale-download` / `stale-usecached`, testids `stale-open-dialog`); never
+  auto-replaced. Gallery cards carry a status chip per cached craft
+  (`card-status-<state>-<id>`, tooltip = both dates). Catalog stamps follow
+  real file changes: the dev watcher now INVALIDATES the compiled gallery
+  module (a bare full-reload kept serving old stamps — proven with a canary
+  fixture). Pins: `crafts.test.ts` (sha vectors, versioned-cache suite:
+  fresh-zero-fetch / stale→redownload→fresh / sha-reject / legacy-unknown),
+  `corpus-staleness.test.ts` (temp-corpus chain via ARCHEAN_BLUEPRINTS —
+  file edited ⇒ rev AND sha change ⇒ state stale ⇒ Download latest ⇒ fresh),
+  `gallery.test.ts` (every entry stamped), e2e `staleness.spec.ts` (@ui, both
+  viewports). Tool: `app/tools/stalecheck.mjs <id> [url]` — real-data UI walk
+  (persistent /tmp profile; NEVER writes ~/.steam). VALIDATED LIVE on two REAL
+  revisions of the airliner (workshop original ba4c07c7… → the game's Oct-20
+  hullified save a31ea68e…): gate fired with both dates, [Download latest]
+  re-stamped to silent fresh. Bonus rule learned: corpus identity — catalog
+  and /corpus route resolve the SAME file (one `craftFile()`), so a staleness
+  flag can never describe a different file than the download would fetch.
 - **v1.8.6 THE SKIN TRANSFORM CUTS, NEVER DROPS (user: "a valid
  zeppelin suddenly misses a face after rotations … the size doesn't inherently
  change"):** the frame-aligned 31-slot window is a FRAME law, so a face with
@@ -2232,14 +2266,14 @@ release/functionality. but no user-unackowledged bumps."** Concretely:
   server vs Pages: the dev corpus resolves through tools/config.py to the MACHINE-LOCAL
   in-game save dir while the deploy pins repo testdata — diff the two blueprint.json
   first (app/tools/livery.mjs arbitrates live: world boxes, face pixels, hull on/off,
-  chromium/firefox, ANGLE vulkan/gl). "Browser-only" render reports were here caused
-  by exactly this (github.io = blocks original, dev = the hullified save). SECOND
-  check: the app's own IndexedDB craft cache (crafts.ts `archean-crafts`) — it serves
-  opens with ZERO network requests, so it survives Ctrl+F5, HTTP no-cache headers and
-  server-side file restores alike; a stale entry is invisible to every cache-busting
-  reflex. Cure: File ▸ 'Refresh craft (redownload)' (file-refresh), or any fresh
-  storage partition (incognito). stats().loads staying 1 with old data = served from
-  IndexedDB, not the network.
+  chromium/firefox, ANGLE vulkan/gl). SECOND check: the app's own IndexedDB craft
+  cache (crafts.ts `archean-crafts`) — it serves opens with ZERO network requests,
+  so it outlived Ctrl+F5, HTTP no-cache headers and server-side file restores
+  alike (the airliner incident). NOW VALIDATED (see the v1.9.4 versioned-cache
+  bullet): every copy carries rev+SHA-256, stale/unknown copies warn and the user
+  chooses redownload-or-not, gallery chips show the state. Manual paths: File ▸
+  'Refresh craft (redownload)' (file-refresh) or any fresh storage partition.
+  stats().loads staying 1 with old data = served from IndexedDB, not the network.
 
 ## Invariants that tests enforce (keep them green)
 1. `?selftest`: edit→serialize round-trip preserves bytes except intended fields;

@@ -10,6 +10,10 @@
 //      baked into the bundle at build time (dev: watched + invalidated), so
 //      the gallery paints with zero runtime fetches. Rebuild after moving
 //      the corpus (npm run serve) — that is the point of compiling it in.
+//      Since the v1.9.5 VERSIONED CACHE every entry also carries
+//      {rev, sha, bytes, mtime} of its blueprint.json — the SAME stamp the
+//      /corpus route publishes as X-Blueprint-Rev / X-Blueprint-Sha, so the
+//      app's IndexedDB cache can prove which revision it holds (crafts.ts).
 //      The catalog is the UNION of the configured corpus over the repo
 //      testdata fixture floor (a Steam client/blueprints folder carries only
 //      the craft the player touched in-game — the V1 landing catalog lived on
@@ -17,6 +21,7 @@
 //      with make_landing.py's name table + numeric-name skip, so the app
 //      gallery shows the SAME workshop catalog as the landing page — never
 //      the individual-component test cases (user report 2026-10-19).
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -24,7 +29,15 @@ import type { PluginOption, PreviewServer, ViteDevServer } from 'vite';
 
 const REPO = path.resolve(import.meta.dirname, '..', '..');
 
-export interface GalleryEntry { id: string; name: string; author?: string; preview: string | null }
+export interface GalleryEntry { id: string; name: string; author?: string; preview: string | null;
+  /** version tag of the served blueprint.json: '<bytes>-<mtimeMs>' (crafts.ts validates against it) */
+  rev: string;
+  /** hex SHA-256 of the blueprint.json bytes as served ('' only when unreadable) */
+  sha: string;
+  /** blueprint.json size in bytes */
+  bytes: number;
+  /** blueprint.json mtime (ms since epoch) — the "file changed <date>" of the staleness chip */
+  mtime: number }
 
 function expandUser(p: string): string {
   return p.startsWith('~') ? path.join(process.env.HOME ?? '', p.slice(2)) : p;
@@ -73,6 +86,53 @@ export function craftFile(id: string, file = 'blueprint.json'): string {
   if (fs.existsSync(inRoot)) return inRoot;
   return path.join(REPO, 'testdata', id, file);
 }
+
+// ---------- VERSIONED CACHE: rev + SHA-256 of every craft's blueprint.json ---
+// The stamp rides THREE places and must always describe the SAME file: the
+// catalog entry (virtual:gallery), the /corpus route's X-Blueprint-Rev /
+// X-Blueprint-Sha response headers, and the bytes actually served. All three
+// go through blueprintMeta()/blueprintSha() below, which resolve through
+// craftFile()'s corpus-first-fixture-floor — a staleness flag can therefore
+// NEVER lie about a different file than the one a download would fetch.
+//
+// Strategy: EAGER hashing at catalog compile, memoised per
+// (path, size, mtimeMs). Measured on the full machine corpus (244
+// blueprint.json, 44 MiB under the configured Steam client/blueprints +
+// the testdata floor): the FIRST compile spends ~150 ms; every later
+// compile (dev-watch change, rebuild) re-hashes ONLY the changed files.
+// A lazy background fill + module invalidation was deliberately NOT built:
+// at this corpus scale it only adds invalidation races for no perceptible
+// gain. If a corpus ever grows into the many-thousands range, move the
+// galleryData() sha line into a deferred fill that invalidates the virtual
+// module once digests land (escape hatch, documented in app/README.md).
+
+const shaMemo = new Map<string, { size: number; mtimeMs: number; sha: string }>();
+
+/** hex SHA-256 of the file AS SERVED (UTF-8 JSON bytes); memoised on the
+ *  (size, mtimeMs) identity, so unchanged files never rehash. '' unreadable. */
+export function blueprintSha(file: string): string {
+  let st: fs.Stats;
+  try { st = fs.statSync(file); } catch { return ''; }
+  const hit = shaMemo.get(file);
+  if (hit && hit.size === st.size && hit.mtimeMs === st.mtimeMs) return hit.sha;
+  const sha = createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+  shaMemo.set(file, { size: st.size, mtimeMs: st.mtimeMs, sha });
+  return sha;
+}
+
+/** the version stamp of a craft's blueprint.json EXACTLY as the /corpus
+ *  route would serve it (same craftFile resolution). null = no file. */
+export function blueprintMeta(id: string): { rev: string; sha: string; bytes: number; mtime: number } | null {
+  const file = craftFile(id);
+  let st: fs.Stats;
+  try { st = fs.statSync(file); } catch { return null; }
+  return { rev: `${st.size}-${Math.round(st.mtimeMs)}`, sha: blueprintSha(file),
+    bytes: st.size, mtime: st.mtimeMs };
+}
+
+/** TEST-ONLY: forget the memoised corpus root so an env change
+ *  (ARCHEAN_BLUEPRINTS) takes effect mid-process. */
+export function resetCorpusCache(): void { corpusCache = null; }
 
 // ---------- catalog rules (mirror tools/make_landing.py — keep in sync) ----------
 /** synthetic viewer/matrix fixtures: the orient probe + the COMPONENT MATRIX
@@ -163,9 +223,15 @@ export function galleryData(): GalleryEntry[] {
     // testdata, so it never carries corpus-only files).
     const prevTest = fs.existsSync(path.join(REPO, 'testdata', id, 'preview.jpg'));
     const prevCorpus = !prevTest && fs.existsSync(path.join(dir, 'preview.jpg'));
+    // version stamp of blueprint.json (EAGER, memoised — see § VERSIONED
+    // CACHE above): dir is the SAME folder the /corpus route resolves
+    // (corpus wins when it carries the file), so entry ≡ served bytes.
+    const meta = blueprintMeta(id);
     out.push({ id, name, author: ws[id]?.author,
       preview: prevTest ? `testdata/${id}/preview.jpg`
-        : prevCorpus ? `corpus/${id}/preview.jpg` : null });
+        : prevCorpus ? `corpus/${id}/preview.jpg` : null,
+      rev: meta?.rev ?? '', sha: meta?.sha ?? '',
+      bytes: meta?.bytes ?? 0, mtime: meta?.mtime ?? 0 });
   }
   return out;
 }
@@ -181,6 +247,14 @@ function sendFile(req: IncomingMessage, res: ServerResponse, file: string, type:
   res.setHeader('Content-Type', type);
   res.setHeader('ETag', etag);
   res.setHeader('Cache-Control', maxAge ? `public, max-age=${maxAge}` : 'no-cache');
+  // VERSIONED CACHE: the app's cache validates the fetched bytes against
+  // X-Blueprint-Sha and stamps the entry with X-Blueprint-Rev (crafts.ts).
+  // The digest is memoised per (size, mtimeMs), so this is a Map hit for
+  // every unchanged file; the stat we already did IS the memo validator.
+  if (file.endsWith('blueprint.json')) {
+    res.setHeader('X-Blueprint-Sha', blueprintSha(file));
+    res.setHeader('X-Blueprint-Rev', `${st.size}-${Math.round(st.mtimeMs)}`);
+  }
   res.end(fs.readFileSync(file));
 }
 
@@ -289,9 +363,15 @@ export default function corpus(): PluginOption {
         server.watcher.add(path.join(REPO, 'viewer/workshop.json'));
         server.watcher.add(path.join(REPO, 'tools/ws-names.tsv'));
       } catch { /* watching is best-effort */ }
-      server.watcher.on('change', f => {
+      server.watcher.on('change', async f => {
         if (f.startsWith(corpusDir()) || f.startsWith(path.join(REPO, 'testdata'))
           || f.endsWith('workshop.json') || f.endsWith('ws-names.tsv')) {
+          // the compiled catalog is load()-cached in the module graph, so a
+          // bare full-reload would keep serving the PREVIOUS rev/sha stamps.
+          // Invalidate the virtual module so the reload re-runs galleryData()
+          // (blueprint edits re-hash via the (size,mtime) memo — cheap).
+          const mod = server.moduleGraph.getModuleById(RESOLVED);
+          if (mod) await server.moduleGraph.invalidateModule(mod);
           server.ws.send({ type: 'full-reload' });
         }
       });

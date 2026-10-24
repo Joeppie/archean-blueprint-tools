@@ -6,7 +6,8 @@
 // touched in-game. The catalog is now the corpus ∪ testdata fixture floor
 // minus fixtures/excludes, with make_landing.py's name tiers + numeric skip:
 // the SAME workshop catalog as the landing page.
-import { existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { craftFile, galleryData } from '../../../tools/vite-corpus.ts';
 
@@ -60,5 +61,26 @@ describe('compiled gallery catalog', () => {
   });
   it('dedupes: one entry per id across both roots', () => {
     expect(new Set(G.map(g => g.id)).size).toBe(G.length);
+  });
+  it('VERSIONED CACHE: every entry stamps rev + sha + bytes + mtime of its blueprint.json', () => {
+    // (v1.9.5) The IndexedDB cache validation and the X-Blueprint-Sha route
+    // header depend on this: rev = '<bytes>-<mtimeMs>', sha = hex SHA-256 of
+    // the bytes as served, and the stamp describes the SAME file the
+    // craftFile()//corpus-route resolution downloads — so a staleness flag
+    // can never lie about a different file.
+    for (const g of G) {
+      expect(g.rev, g.id).toMatch(/^\d+-\d+$/);
+      expect(g.sha, g.id).toMatch(/^[0-9a-f]{64}$/);
+      expect(g.bytes, g.id).toBeGreaterThan(0);
+      expect(g.mtime, g.id).toBeGreaterThan(0);
+    }
+    // spot-check one entry against the bytes on disk, hashed through node
+    // crypto independently of the plugin's memoised path
+    const id = '3417786605';
+    const g = byId.get(id)!;
+    const st = statSync(craftFile(id));
+    expect(g.rev).toBe(`${st.size}-${Math.round(st.mtimeMs)}`);
+    expect(g.sha).toBe(createHash('sha256').update(readFileSync(craftFile(id))).digest('hex'));
+    expect(g.bytes).toBe(st.size);
   });
 });

@@ -18,6 +18,7 @@
 // IndexedDB (crafts.ts) — a cached craft opens with zero network.
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { GALLERY } from './gallery-catalog';
+import { cacheSnapshot, craftStateOf, type CacheInfo, type CraftState } from './crafts';
 
 const Editor = lazy(() => import('./Editor'));
 
@@ -58,6 +59,19 @@ export default function App() {
 
 // ---------------------------------------------------------------- gallery
 function Gallery({ onOpen, onNew }: { onOpen: (id: string) => void; onNew: () => void }) {
+  // v1.9.5 VERSIONED CACHE chip: ONE pass over the IndexedDB cache paints a
+  // status badge on every CACHED card (never on uncached ones). The state
+  // comes from craftStateOf(cache record, catalog stamp) — the SAME rule the
+  // editor's open gate runs, so chip and dialog can never disagree about a
+  // craft. fresh = the copy provably is the file as served (subtle ✓);
+  // stale = the folder holds a newer file (amber ⚠); unknown = legacy or
+  // unverified copy (⚠) — both warned states ASK before opening.
+  const [snap, setSnap] = useState<Map<string, CacheInfo> | null>(null);
+  useEffect(() => {
+    let dead = false;
+    cacheSnapshot().then(s => { if (!dead) setSnap(s); }).catch(() => { /* chips are cosmetic */ });
+    return () => { dead = true; };
+  }, []);
   return (
     <div className="min-h-dvh overflow-y-auto bg-[#0e1013] px-4 py-6 md:px-10">
       <header className="mx-auto flex max-w-5xl flex-wrap items-end justify-between gap-3">
@@ -80,9 +94,13 @@ function Gallery({ onOpen, onNew }: { onOpen: (id: string) => void; onNew: () =>
         {GALLERY.map(g => (
           <button key={g.id} data-testid={`card-${g.id}`} onClick={() => onOpen(g.id)}
             className="group text-left">
-            <div className="aspect-square overflow-hidden rounded-lg border border-white/10 bg-panel2
+            <div className="relative aspect-square overflow-hidden rounded-lg border border-white/10 bg-panel2
                             transition group-hover:border-accent/60">
               {g.preview && <CardPreview preview={g.preview} />}
+              {snap && snap.has(g.id) && (
+                <CardStatusChip state={craftStateOf(snap.get(g.id), g)}
+                  saved={snap.get(g.id)?.saved} changed={g.mtime} id={g.id} />
+              )}
             </div>
             <div className="mt-1.5 truncate text-[13px] font-semibold text-ink group-hover:text-accent">
               {g.name}
@@ -121,4 +139,31 @@ function CardPreview({ preview }: { preview: string }) {
   return <img src={src} alt="" loading="lazy" decoding="async"
     onError={() => { if (alt && src !== alt) setSrc(alt); }}
     className="h-full w-full object-cover" />;
+}
+
+const chipDate = (ms?: number) =>
+  ms && ms > 0 ? new Date(ms).toISOString().slice(0, 10) : 'unknown';
+
+/** VERSIONED CACHE status badge (v1.9.5) — shown ONLY for cached crafts:
+ *  fresh ✓ (subtle) · stale ⚠ amber "edited since cached" · unversioned ⚠.
+ *  The tooltip carries the dates the open dialog repeats; the testid keeps
+ *  the state IN THE NAME (`card-status-stale-<id>`) so a pin asserts the
+ *  EXACT state, not merely a chip. */
+function CardStatusChip(p: { state: CraftState; saved?: number; changed?: number; id: string }) {
+  if (p.state === 'absent') return null;
+  const [icon, cls, tip] = p.state === 'fresh'
+    ? ['\u2713', 'bg-black/55 text-emerald-300/90',
+       `cached copy matches the blueprint folder (cached ${chipDate(p.saved)})`]
+    : p.state === 'stale'
+      ? ['\u26a0', 'bg-amber-400/95 text-black',
+         `cached ${chipDate(p.saved)} \u00b7 file changed ${chipDate(p.changed)} \u2014 will ask before opening`]
+      : ['\u26a0', 'bg-amber-500/80 text-black',
+         `cached copy unversioned (cached ${chipDate(p.saved)}) \u2014 will ask before opening`];
+  return (
+    <span data-testid={`card-status-${p.state}-${p.id}`} data-state={p.state} title={tip}
+      className={`absolute right-1 top-1 grid h-4 min-w-4 place-items-center rounded px-[3px]
+                  text-[10px] font-bold leading-none shadow ${cls}`}>
+      {icon}
+    </span>
+  );
 }

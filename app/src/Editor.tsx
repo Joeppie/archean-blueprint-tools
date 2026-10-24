@@ -6,7 +6,7 @@
 // network; the KSP "receiving blueprint" overlay shows only on a real
 // download). Holds the raw-literal DOC + live bp; see App.tsx for the shell.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { craftName } from './gallery-catalog';
+import { craftMeta, craftName } from './gallery-catalog';
 import { DEFAULT_OPTS, backdropDefault, backdropNames, type Backdrop, type Engine, type PickHit, type ViewOptions } from './engine/scene';
 import Viewport from './components/Viewport';
 import Panel, { StaticInfo, ViewOpts, type EditApi } from './components/Panel';
@@ -30,7 +30,8 @@ import { makePipe } from './engine/wireops';
 import { normalizeDoc } from './engine/normalize';
 import { qAxisAngle } from './engine/compparts';
 import { newCraftDoc, newComponent } from './engine/newcraft';
-import { loadCraft } from './crafts';
+import { craftState, craftInfo, loadCraft, type CacheInfo, type CraftState } from './crafts';
+import StaleDialog from './components/StaleDialog';
 
 export default function Editor({ craft, onBack }: { craft: string | null; onBack: () => void }) {
   const [bp, setBp] = useState<Blueprint | null>(null);
@@ -141,6 +142,14 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   const [dlErr, setDlErr] = useState(false);
   const [retrySeq, setRetrySeq] = useState(0);
   const forceRef = useRef(false);             // File ▾ Refresh: one-shot re-download
+  // v1.9.5 VERSIONED CACHE open gate: a cached copy that is not provably the
+  // file as served ('stale' rev / 'unknown' legacy-or-unverified) NEVER opens
+  // silently — this state raises the [Download latest] / [Open cached copy]
+  // choice; askChoice carries the answer back into the load effect (askSeq
+  // re-runs it), so the two doors are ONE code path with the download overlay.
+  const [staleAsk, setStaleAsk] = useState<{ state: CraftState; info: CacheInfo | null } | null>(null);
+  const askChoice = useRef<'download' | 'cached' | null>(null);
+  const [askSeq, setAskSeq] = useState(0);
   /** Esc precedence (v1.7.2): while a tool dialog is open, Esc belongs to
    *  the DIALOG — the viewport's Esc-⇒-place-cancel must stand down */
   const toolOpenRef = useRef<string | null>(null);
@@ -247,19 +256,35 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
 
   useEffect(() => {
     setBp(null);
+    setStaleAsk(null);
     if (!craft) { openText(emitNew()); return; }    // New craft (craft === null)
     let dead = false;
     const force = forceRef.current; forceRef.current = false;
+    const choice = askChoice.current; askChoice.current = null;
     setDlErr(false);
     (async () => {
-      const r = await loadCraft(craft, (frac, bytes) => { if (!dead) setDl({ frac, bytes }); }, force);
+      const meta = craftMeta(craft);
+      // validate the cache against the catalog BEFORE touching the network:
+      // absent → download, fresh → open with ZERO requests (the standing user
+      // rule), stale/unknown → the open gate asks (nothing used or replaced
+      // silently). A forced refresh or an answered dialog skips the gate.
+      if (!force && !choice) {
+        const st = await craftState(craft, meta);
+        if (dead) return;
+        if (st === 'stale' || st === 'unknown') {
+          setStaleAsk({ state: st, info: await craftInfo(craft) });
+          return;
+        }
+      }
+      const r = await loadCraft(craft, (frac, bytes) => { if (!dead) setDl({ frac, bytes }); },
+        force || choice === 'download', fetch, meta);
       if (dead) return;
       setDl(null);
       if (!r) { setDlErr(true); return; }           // no cache + network failed
       openText(r.text);                             // cache hit: no overlay, no network
     })().catch(console.error);
     return () => { dead = true; };
-  }, [craft, openText, retrySeq]);
+  }, [craft, openText, retrySeq, askSeq]);
 
   const emitNew = () => {
     // doc → text round trip through the SAME doc the editor then keeps
@@ -1117,6 +1142,14 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
           <DownloadOverlay name={name} dl={dl} err={dlErr}
             onRetry={() => { forceRef.current = true; setRetrySeq(s => s + 1); }}
             onBack={onBack} />
+        )}
+        {/* VERSIONED CACHE open gate: the cached copy is not provably current
+            — the user picks which copy opens (see StaleDialog.tsx) */}
+        {staleAsk && craft && (
+          <StaleDialog name={name} state={staleAsk.state} cached={staleAsk.info}
+            meta={craftMeta(craft)}
+            onDownload={() => { askChoice.current = 'download'; setStaleAsk(null); setAskSeq(s => s + 1); }}
+            onCached={() => { askChoice.current = 'cached'; setStaleAsk(null); setAskSeq(s => s + 1); }} />
         )}
       </div>
     </div>
