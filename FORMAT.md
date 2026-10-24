@@ -278,12 +278,15 @@ screens related by one horizontal flip at the M-paired camera, which
 `tools/matrix_iou.py`'s mask mirror compensated — RETIRED with the v0.180
 de-mirror: ours now renders the same side as the dev, so the masks compare
 directly). Two
-further sheet effects must not be confused with it: (a) on **rotated
+further sheet effects must not be confused with it: ~~(a) on **rotated
 mounts in V2 files** the DEV mirrors the part itself (raw-quat bug,
 matrix triage step 8 — fixtures are identity, so matrix rows never show
 it; per the pipes/mural data proofs the GAME places rotated V2 parts
 with the CONJUGATE, so here dev ≠ game — this remains the ONE live
-divergence); (b) **deflected**
+divergence)~~ — **VOID v1.5.11**: the ONE raw law is the game's law for
+BOTH generations (§Handedness), so the dev's raw placement AGREES with
+the game and (a) was never a divergence — the pipes-0.000 m / mural
+"conjugate proofs" it leaned on were mirrored-chain artifacts; (b) **deflected**
 twins (`90000020NN`) differ because the dev renders parts AT REST while we
 apply `data.angle`/`data.pos` — ours-only by definition (triage step 5).
 A flip maps faces to faces, so it can NEVER make geometry appear on one
@@ -299,24 +302,25 @@ the dev's — CONFIRM on the next `bash tests/matrix.sh 9000001007` re-shoot
 before closing it out.
 
 **DECISION (user, 2026-10-19): the viewer/app support V2 semantics
-internally; V1 files get an ad-hoc LOAD-TIME conversion; the LEGACY_Q
-branching is the migration target.** Implemented in `app/` as
-`app/src/engine/normalize.ts` (`normalizeDoc`, called at open in
+internally; V1 files get an ad-hoc LOAD-TIME conversion.** Implemented in
+`app/` as `app/src/engine/normalize.ts` (`normalizeDoc`, called at open in
 `Editor.tsx`): embed used built-in entries at their v2-base indices, remap
-block/triangle slots through `legacySlot`, pair→dict comp colours,
-`q' = {w,−x,−y,−z}` (display-invariant: the legacy view chain on `q` equals
-the modern chain on `q'`, pinned in `normalize.test.ts`), recurse into
-Build subgrids, bump `data.version=2`; saving a converted file writes the
-V2 form (intentional migration — such a file no longer round-trips
-byte-identical to the game's original; the q→q* step stays display-invariant
-under BOTH the old and the de-mirrored laws — both reduce to R(q), pinned in
-`normalize.test.ts`). The FluidJunction interaction below was REALISED by
-the v0.180 de-mirror: the flat-comb rule is now "display = R(the as-written
-file quat)" for both generations, which is NOT invariant under the q→q*
-rewrite either — so `normalizeDoc` EXEMPTS FluidJunction `orientation` from
-the step-4 conjugation (the legacy comb keeps its flat pose after
-conversion; pinned in `normalize.test`, viewer-side pinned by postest
-rcs-fj-flat/-touch).
+block/triangle slots through `legacySlot`, pair→dict comp colours, recurse
+into Build subgrids, bump `data.version=2`; saving a converted file writes
+the V2 form (intentional migration — such a file no longer round-trips
+byte-identical to the game's original). ~~The conversion also rewrote
+orientations `q' = {w,−x,−y,−z}` (the "rule-4 conjugation", with a
+FluidJunction exemption to keep the legacy comb flat)~~ — **DELETED
+v1.5.10**: the game round-trips quaternion bytes VERBATIM, so a rewriting
+converter placed the flipped rotations in game (ISW caster wheel on TOP of
+its strut, Jimmy's two-axis murals torn apart); orientations are now
+UNTOUCHED at open AND save (the savefidelity pins). The FluidJunction
+flat-comb display rule stands on its own: "display = R(the as-written
+file quat)" for both generations, which needs no conversion step to keep
+the legacy comb flat (viewer-side pinned by postest rcs-fj-flat/-touch).
+The file's GENERATION is still read before the migration and carried on
+the live bp (`__legacyQ`) — since v1.5.11 it keys palette resolution and
+the wheel-droop gate only, never a rotation law.
 
 ### Chirality vs in-game truth (2026-10-19) — VERDICT B CONFIRMED; DE-MIRRORED IN v0.180 — this section is NORMATIVE
 
@@ -849,7 +853,7 @@ Evidence (ISW-241, 21 triangles):
   STRICTER than span ≤ 31: a 29-cell span straddling a frame border stores
   NOTHING while the same face 1 cell over does. Consequence (the user's "a
   valid zeppelin suddenly misses a face after rotations … the size doesn't
-  inherently change", urgent-fix.md): a quarter-turn or a whole-cell drag
+  inherently change", v1.8.6): a quarter-turn or a whole-cell drag
   keeps the SPAN but re-places `min` inside its frame, so any face with span
   > 20 can encode where it was authored and fail after the move. THE WRITER'S
   LAW therefore is CUT, NEVER FILTER: a position-mapped face whose image
@@ -1627,7 +1631,7 @@ Adventure = 3334698274).
   the user never inspected), the rules apply as heuristics.
   `p' = pivot₀ + R(axis₀, angle)·(base.p − pivot₀) + slide₀·pos` then
   `q' = R(axis₀, angle) · base.q`.
-  **v1.9.0 THE PLATE LAW (part model ≡ panel, urgent-fix §1):** the part's
+  **v1.9.0 THE PLATE LAW (part model ≡ panel):** the part's
   OWN `.ini` chain hangs under the content basis C (§Component VERTEX
   SPACE), so spinning its axle node about the RAW key ê makes the plate's
   WORLD line `R(q)·C·ê` — NOT the panel's pinned `R(q)·axleEuler·ê`. For

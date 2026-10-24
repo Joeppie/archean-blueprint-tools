@@ -1212,7 +1212,7 @@ function reencodeSkinTri(t: Triangle, g: [GP3, GP3, GP3]): Triangle | null {
  *  every g point through fn → re-encode (frames re-floor; colours/material/
  *  shading ride verbatim). fn must map integer g → integer g (whole-cell
  *  shifts and quarter-turns about an INTEGER pivot do).
- *  v1.8.6 NEVER DROPS (urgent-fix.md): a quarter-turn SWAPS two axes' spans
+ *  v1.8.6 NEVER DROPS: a quarter-turn SWAPS two axes' spans
  *  and any move re-places `min` inside its 12-cell frame, so a face whose
  *  span exceeds 20 encodes at its staged position and fails at unlucky
  *  ones — exactly the "valid zeppelin misses faces after rotating/moving"

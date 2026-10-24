@@ -1,6 +1,7 @@
-// ModePanels.tsx — the workspace panels for the BLOCKS / WIRE / FLIGHT
-// modes. Every mutation goes through the pure model modules onto bp + doc
-// (App provides the funnel), then schedules the debounced scene reload.
+// ModePanels.tsx — the merged editor's WORKSPACE panels: the EDIT panel's
+// bottom (BlockPanel / TriPanel), the WIRE dock and the FLIGHT / WIND
+// bottoms. Every mutation goes through the pure model modules onto bp + doc
+// (Editor.tsx provides the funnel), then schedules the debounced scene reload.
 import { useMemo, useState, useEffect } from 'react';
 import { Sec, Num, SearchList } from './ui';
 import type { Engine } from '../engine/scene';
@@ -19,7 +20,7 @@ import { triCentroid } from '../engine/tris';
 import type { Triangle } from '../engine/format';
 import type { Blueprint } from '../engine/format';
 
-// ------------------------------------------------------------- BLOCKS mode
+// --------------------------------------------------- EDIT ▸ blocks workspace
 export interface Brush { type: number; sx: number; sy: number; sz: number; slot: number; material?: number }
 
 /** The brush as a placement footprint (the Editor fills `cell` from the pick). */
@@ -50,10 +51,6 @@ export function BlockPanel(p: {
   blockSel: number; brush: Brush;
   /** PLACE docks blocks with the brush; EDIT edits the selected block */
   tab: 'place' | 'edit';
-  /** ⇄ mirrored PLACEMENT (the brush + held-part ghosts). v1.7.1: block
-   *  EDITS no longer consult it — every edit on a selected block always
-   *  drives its SIMILAR TWIN (blockMirrorTwin) in mirrored unison */
-  mirror: boolean;
   /** v1 files carry no data.colors — the palette picker applies the remap */
   legacy: boolean;
   /** v1.5.21 SETTABLE mirror axis (⚙ row): the plane block twin identity,
@@ -207,8 +204,9 @@ export function BlockPanel(p: {
     p.onSelectBlock(-1);
     p.onApplied();
   };
-  /** MATERIALS (v1.7): write the game material of the selected block (⇄ on ⇒
-   *  the similar twin takes it too — an identity edit, no geometry to collide)
+  /** MATERIALS (v1.7): write the game material of the selected block (the
+   *  similar twin always takes it too — an identity edit under the v1.8.0
+   *  uniform mirror rule, no geometry to collide)
    *  into bp AND the doc (writeBlockMaterial adds the key to files that predate
    *  it; the game reader defaults a missing one to composite). */
   const setMaterial = (m: number) => {
@@ -312,7 +310,8 @@ export function BlockPanel(p: {
                   onPaint={(slot, faces) => p.onPaint?.(slot, faces)} custom={p.custom} />
               </div>
               {/* in-place SHAPE tools (the interface components have): every
-                  op keeps the bbox centre; ⇄ on drives the similar twin too */}
+                  op keeps the bbox centre AND drives the similar twin in
+                  unison (editBlocks — the v1.8.0 uniform mirror rule) */}
               <div className="mt-1.5 text-[10px] uppercase tracking-wide text-ink-dim">
                 Shape {shapeName(info.type)} {info.type} — in place
               </div>
@@ -359,7 +358,8 @@ export function BlockPanel(p: {
   );
 }
 
-/** App-side: place a block from a placement spec (blocks mode): the brush at
+/** Editor-side: place a block from a placement spec (the Edit mode's PLACE
+ *  flavor): the brush at
  *  the picked cell, or the Shift continuation block complementBlock computed.
  *  With `mirror` the ⇄ twin lands at the mirrored cell too (v1.5.21: on the
  *  SETTABLE mirror axis, default x; type mirrored; same-face colour slots

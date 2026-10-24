@@ -1,5 +1,5 @@
 # Display and view options
-Tags: display options hull wireframe labels opacity real models quality static info fog adapters connectors ground coord coordinate readout cursor shift vertical plane measure height axes axis x y z up backdrop sky mars earth desert hangar goegap kloofendal waterbuck hangar_interior attribution credit panorama equirectangular orthographic ortho projection parallel camera
+Tags: display options hull wireframe labels opacity real models quality static info fog adapters connectors ground coord coordinate readout cursor shift vertical plane measure height axes axis x y z up backdrop sky desert hangar goegap kloofendal hangar_interior attribution credit panorama equirectangular orthographic ortho projection parallel camera
 
 The **⚙ View** window (top right) collects the display state; the same
 toggles have keys where it matters.

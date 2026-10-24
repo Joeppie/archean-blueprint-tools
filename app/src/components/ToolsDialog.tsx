@@ -534,7 +534,7 @@ function skinOptions(f: ToolForm): SkinOptions {
 
 /** The balloon tool's readout line, shared by the sync and the worker path —
  *  ONE compact line saying what the CURRENT settings produce (v1.9.0,
- *  urgent-fix §3: the old multi-sentence readout "reads the same whatever we
+ *  v1.9.0: the old multi-sentence readout "reads the same whatever we
  *  pick"; numbers stay only where a control changes them). The gas-lift
  *  segment (user 2026-10-22: "tell us what lift would be if vacuum at sea
  *  level, helium or hydrogen") COMPACTED into one lift@SL segment — the full
@@ -611,7 +611,7 @@ const balloonAdaptersAsync = async (): Promise<BalloonAdapters | null> => {
 
 /** the tail segment of the live preview line (the refusal already left via
  *  the 'nothing to place' path — this only runs for an ok plan). v1.9.0
- *  urgent-fix §3: ONE compact, choice-specific clause — fin triangles only
+ *  v1.9.0: ONE compact, choice-specific clause — fin triangles only
  *  move with the fin sliders, the hinge line says what the panels ride (the
  *  SmallHinge's ±90° IS the control-surface limit), and the volume reads as
  *  the yes/no toggle it is (no more "(clamped from N)" sentence). */
@@ -727,7 +727,7 @@ function commitBalloon(f: ToolForm, payload: PlacePayload,
   // the ghost's quarter-turns + cell offset, recovered from the probe
   // tetrahedron the engine turned WITH the skin (scene.clusterGhostData)
   const map = ghostMap(plan.probes, payload.rides?.[0], offset);
-  // v1.8.6 (urgent-fix.md): the batch used to slice the ONE transformed
+  // v1.8.6: the batch used to slice the ONE transformed
   // ghost list by the STAGED group sizes. A face whose image left the
   // frame-aligned window then either dropped (a HOLE persisted into the
   // file) or, once splitting added records, shifted every later boundary —

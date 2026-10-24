@@ -129,7 +129,8 @@ invariant list — transfer to vitest/Playwright pins as modules port; see
 REWRITE.md for the phase plan, the WASM candidate list and the three.js
 fork/WebGPU verdict). Do not delete `viewer/` until REWRITE P5 with the
 user's explicit say-so (Pages/release still serves it meanwhile).
-- App subgrid UX (todo, v0.179): a selected SUBGRID gets no free gizmo (the
+- App subgrid UX (SHIPPED; the bullet's own pin app/e2e/hinge.spec.ts is in
+  the suite): a selected SUBGRID gets no free gizmo (the
   v0.170 rule) BUT a constrained UI AT THE JOINT LINE — a gold ring per angle
   master (drag writes the master's data.angle in DEGREES about the captured
   axis) and an arrow per slide master (data.pos in metres), Shift-snapped,
@@ -1091,7 +1092,7 @@ e2e re-pinned to STORE. Pins: vitest `balloonfin.test.ts` (9), `tooldoc.test.ts`
 "the TAIL section" (@ui desktop+pixel7). In-game arbitration of triangle
 panels on hinges is the USER's (no corpus precedent — flagged in the help
 topic + FORMAT).
-- **v1.9.0 THE PLATE LAW + the tool-desk batch (urgent-fix.md, we: "the tail
+- **v1.9.0 THE PLATE LAW + the tool-desk batch (we: "the tail
  rudder swings like a propeller"; "remove the option for a 360 rotation for
  the rudder/tail, that doesn't make sense")**: MEASURED FIRST (kept audit tools
  `app/tools/rudderprobe.mjs` panel-axis/bbox + `plateprobe.mjs` part-plate box —
@@ -1307,7 +1308,7 @@ topic + FORMAT).
   see-through scan switch to ⊘ explicitly first (behind a see-through pad
   a PANORAMA's terrain may read green — the swap pins cover panoramas,
   this pin covers the sheet).
-- **v1.8.6 THE SKIN TRANSFORM CUTS, NEVER DROPS (urgent-fix.md, user: "a valid
+- **v1.8.6 THE SKIN TRANSFORM CUTS, NEVER DROPS (user: "a valid
  zeppelin suddenly misses a face after rotations … the size doesn't inherently
  change"):** the frame-aligned 31-slot window is a FRAME law, so a face with
  span > 20 cells encodes only while its `min` sits low inside its 12-cell
@@ -1434,10 +1435,12 @@ topic + FORMAT).
   PERFECT in game) rendered with its dashboards skewing through the deck in
   the editor: under the conjugate read no board touches any face; under the
   raw read all eight land EXACTLY flush (|dot| 1.000, the 5-board asterisk +
-  deck pair + side board). Landed as: `toViewQuatModern` = identity (raw),
-  the four scene.ts gizmo/slider writeback branches collapsed to one law,
-  `unityConjugate` retired to an alias; the legacy flag now selects ONLY
-  palette resolution. Fixture `testdata/9000005001` (this exact craft) +
+  deck pair + side board). Landed as: the file→view quaternion = identity
+  (raw), the four scene.ts gizmo/slider writeback branches collapsed to one
+  law; the legacy flag now selects ONLY palette resolution (and the
+  wheel-droop gate). The per-generation mappers and the `unityConjugate`
+  alias were removed in the v1.9.4 cleanup — `toViewQuat` is the single
+  raw seam. Fixture `testdata/9000005001` (this exact craft) +
   `placement-law.test.ts` (flush pins, raw-vs-conj discrimination,
   open→save verbatim) + `app/tools/flushcheck.mjs <craft>` (live-scene
   FLUSH/FLUSHCHECK audit over the shipped blockshapes table). The wheel
@@ -1935,9 +1938,10 @@ release/functionality. but no user-unackowledged bumps."** Concretely:
   ⇒ identical display — the split law made our own corpus render one craft
   two ways); a whole-corpus re-measure of the `data.pipes` endpoints (6309
   port pairs) found NEITHER law near 0.06 m with RAW ≥ conj everywhere, so
-  the old 0.000 m proof cannot hold in the file frame. `toViewQuatModern` /
-  `toViewQuatLegacy` are the same identity; `fileToViewQuat(q, legacy)`
-  keeps its signature (the legacy flag still keys PALETTE resolution).
+  the old 0.000 m proof cannot hold in the file frame. `toViewQuat` (the
+  single raw seam; the per-generation mappers were removed in the v1.9.4
+  cleanup) is the identity for BOTH generations; the legacy flag keys only
+  PALETTE resolution (and the wheel-droop gate).
   Pins: `app/src/engine/__tests__/placement-law.test.ts` +
   `app/tools/flushcheck.mjs <craft>` (live-scene audit, PASS on 9000005001).
   See FORMAT.md § Handedness (v1.5.11 ruling, NORMATIVE).
@@ -2214,22 +2218,7 @@ release/functionality. but no user-unackowledged bumps."** Concretely:
   ISW-241 scene is ≈150 draws. SwiftShader fps numbers are meaningless —
   compare draw-call counts only.
 
-## Known open issues (v0.146 state)
-- **CHIRALITY: RESOLVED — DE-MIRRORED v0.180 (2026-10-19).** The viewer/app
-  now render the game's own view (raw positions, standard RH camera, V2 q* /
-  V1 raw q); the z-mirror chain, its text pre-mirrors and the matrix mask
-  compensation are retired. Normative write-up + landing notes:
-  FORMAT §"Chirality vs in-game truth" (mirror-proof pins: selftest
-  `dashtext`/`orienttext`/`liver`). Chirality claims must still cite
-  in-game pixels, never a viewer's.
-- **v0.143/v0.145 were REVERTED** (user-confirmed regressions on Pages: beacon mast +
-  aileron real models rotated wrong). v0.144 (IBL) was re-landed as the PMREM commit.
-  RESOLVED 2026-10-19 IN APP ONLY, final form: the engine content basis C=(x,z,−y)
-  over C⁻¹-baked atlas verts (uniform, XenonViewer-arbitrated — FORMAT §Component
-  VERTEX SPACE; solo-pair routine tools/make_solo_test.py + app/tools/solopair.mjs +
-  tools/solo_verify.py). The LEGACY viewer still draws the old raw-chain look (its
-  Oct-6 pin numbers were derived there); porting C there needs the user's call +
-  those pins re-derived.
+## Known open issues
 - Beacon "point forward" display convention (user): parked — blocked on an asymmetric
   probe craft (180°-quaternion z-sign ambiguity, see FORMAT.md).
 

@@ -16,9 +16,10 @@
 // models ARE the adapters, and the .ini gives their exact pose.
 //
 // Caches lie: data.pipes stores the route the game built at save time, so a
-// part moved afterwards leaves the tips behind. endAnchor() keeps a fresh
-// recorded tip (it is the truth of how deep the plug sits) but re-anchors an
-// endpoint that has drifted off its socket beyond STALE_R.
+// part moved afterwards leaves the tips behind. plugAnchor() keeps a fresh
+// recorded tip (it is the truth of how deep the plug sits) but re-seats an
+// endpoint that has drifted off its socket beyond STALE_R — standing it at
+// least one cable radius off the face on the live socket (v1.8.2).
 //
 // FORMAT §pipes carries the normative write-up; pipes.test.ts + sockets.test.ts
 // pin it, and the e2e pipe spec proves the rendered ends.

@@ -53,7 +53,7 @@ export function flightReport(bp: Blueprint, manifest: ModelManifest | null): Fli
   const seat = comps.findIndex(c => c.type === 'PilotSeat');
   if (seat >= 0) {
     const s = comps[seat]!;
-    const qv = fileToViewQuat(s.orientation ?? Q_ID, legacy);
+    const qv = fileToViewQuat(s.orientation ?? Q_ID);
     const f = qRot(qv, [0, 0, 1]);
     const l = Math.hypot(f[0], f[2]);
     heading = l > 0.15 ? norm([f[0]!, 0, f[2]!]) : norm(f);
@@ -65,7 +65,7 @@ export function flightReport(bp: Blueprint, manifest: ModelManifest | null): Fli
     const th = THRUST[c.type];
     if (!th) return;
     if (c.type === 'RCS' && !rcsOnly) return;            // beside real engines: attitude only
-    const qDisp = displayQuat(c.type, fileToViewQuat(c.orientation ?? Q_ID, legacy), c.orientation ?? Q_ID, legacy);
+    const qDisp = displayQuat(c.type, fileToViewQuat(c.orientation ?? Q_ID), c.orientation ?? Q_ID, legacy);
     // the .ini TARGET axis lives in the part's raw-LH local frame; the view
     // mirror maps (x, y, z)file-local → (x, y, −z) before the quaternion
     let ax = qRot(qDisp, [th.ax[0], th.ax[1], -th.ax[2]]);

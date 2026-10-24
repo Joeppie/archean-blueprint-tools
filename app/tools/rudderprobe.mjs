@@ -1,4 +1,4 @@
-// rudderprobe.mjs — ARBITRATION (urgent-fix.md §1): build the finned balloon
+// rudderprobe.mjs — ARBITRATION (v1.9.0): build the finned balloon
 // through the live UI, turn each panel master's data.angle and print HOW the
 // panel actually moves in world space: the group's rotation AXIS (from the
 // live quaternion), whether a point ON the captured joint line stays fixed,

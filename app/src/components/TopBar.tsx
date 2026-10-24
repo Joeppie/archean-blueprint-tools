@@ -4,10 +4,11 @@
 // bevelled .ksp-btn chrome, blue glow on the active tile:
 //   View   — inspect ONLY: the vessel amounts/census panel; canvas clicks
 //            select nothing (v1.5 — selection belongs to the Edit flavor)
-//   Edit   — component editing: gizmo, sliders, data rows
-//   Blocks — block placement / resizing / deletion
+//   Edit   — the MERGED workspace (v2.0): components (gizmo, sliders, data
+//            rows) AND the blocks/triangles panel bottom
 //   Wire   — the port graph: census, naive auto-wiring, warnings
 //   Flight — flight analysis (mass/CoM, thrust nets, control surfaces)
+//   Wind   — the aero tunnel (wind state, flow source, solve readout)
 // The Edit menu (2026-10-20) carries the WORKING Undo/Redo (Ctrl+Z / Ctrl+Y, the
 // Editor's snapshot stack); it remains the HOME of the still-declared
 // vessel-information TODO (author / name / abbreviation) — listed DISABLED

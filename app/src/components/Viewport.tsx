@@ -35,7 +35,7 @@ declare global {
      *  click-owner at one pixel ({kind, bi, t}; t >= 0 = would select) */
     triPick: (x: number, y: number) => { kind: string; bi: number; t: number } | null;
     /** BLOCK widget state (v1.5): {bi, mode, mirror, cell} while a selected
-     *  block owns the gizmo (BLOCKS ▸ Edit), else null */
+     *  block owns the gizmo (Edit ▸ ✎ Edit flavor), else null */
     blockGizmo: () => ReturnType<Engine['blockGizmoState']>;
     /** live selection ({ci, sub}) — v1.5 view-lock pin */
     sel: () => ReturnType<Engine['selectionState']>;
@@ -57,7 +57,7 @@ declare global {
      *  the pin-driven whole-cell nudge (same path the widget commits) */
     placeGhost: () => ReturnType<Engine['clusterGhostState']>;
     /** v1.8.6: the ghost's LIVE triangle records (what ✔ Build writes) — the
-     *  urgent-fix pin compares the ghost's AREA to the built file's */
+     *  v1.8.6 pin compares the ghost's AREA to the built file's */
     placeData: () => ReturnType<Engine['clusterGhostData']>;
     placePoint: () => ReturnType<Engine['clusterGhostScreenPoint']>;
     placeShift: (s: [number, number, number]) => boolean;
@@ -98,14 +98,16 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
    *  NOTHING (v1.5 user rule: "selecting components shouldnt be possible in
    *  view — view shows the amounts") */
   mode?: 'view' | 'edit' | 'wire' | 'flight' | 'aero';
-  /** the side panel's PLACE|EDIT flavor (v1.5): in BLOCKS the ghost hovers
-   *  only in PLACE; in EDIT only a held catalog part docks a ghost */
+  /** the side panel's PLACE|EDIT flavor (v1.5): the constructor ghost
+   *  hovers only in PLACE; in the EDIT flavor only a held catalog part
+   *  docks a ghost */
   tool?: 'edit' | 'place';
   onBlockPick?: (clientX: number, clientY: number, shift: boolean,
     /** pops the ⊘/✥/⟳/⇄ mode widget at the click point (v1.4: a component
-     *  picked in BLOCKS mode gets the gizmo mode switch there too) */
+     *  picked in the merged EDIT workspace gets the gizmo mode switch there
+     *  too) */
     openWidget: () => void) => void;
-  /** BLOCKS-place hover: the engine re-aims the ghost preview (shiftKey =
+  /** PLACE-flavor hover: the engine re-aims the ghost preview (shiftKey =
    *  the game's logical-continuation modifier). Throttled here (~40 Hz):
    *  one raycast per pointermove event would tax a giant on a phone. */
   onBlockHover?: (clientX: number, clientY: number, shift: boolean) => void;
@@ -223,8 +225,9 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
   // symmetry port) — the choice persists and drives the gizmo.
   const down = useRef({ x: 0, y: 0 });
   const hostRef = useRef<HTMLDivElement>(null);
-  // hover routing (v1.4): BLOCKS mode drives the constructor ghost; while a
-  // catalog part is HELD in EDIT mode the same path docks the part ghost.
+  // hover routing (v1.4): the Edit mode's PLACE flavor drives the
+  // constructor ghost; while a catalog part is HELD the same path docks
+  // the part ghost.
   // Remember the pointer so a Shift press/release (the game's logical-
   // continuation modifier) re-aims the ghost WITHOUT a move.
   // v1.5 flavor rule: the ghost only lives in the PLACE flavor.

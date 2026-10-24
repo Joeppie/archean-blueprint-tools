@@ -19,7 +19,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { emitDoc, parseDoc } from '../doc';
 import { openFunnel, serializeSave } from '../edit';
 import type { Blueprint, BlueprintComponent, FileQuat } from '../format';
-import { toViewQuatLegacy, toViewQuatModern } from '../format';
+import { toViewQuat } from '../format';
 import { getBlockFaces, getBlockPoints } from '../blockshapes';
 
 const FIXTURE = new URL('../../../../testdata/9000005001/blueprint.json', import.meta.url).pathname;
@@ -75,7 +75,7 @@ describe.skipIf(!have)('IAS-418 pyramid probe (testdata/9000005001): ONE RAW law
 
   test('every dashboard board normal lands EXACTLY on a block face under R(q raw)', () => {
     for (const c of dashboards) {
-      const qv = toViewQuatModern(c.orientation);          // raw AS-IS since v1.5.11
+      const qv = toViewQuat(c.orientation);                 // raw AS-IS since v1.5.11
       expect(qv).toEqual(c.orientation);                    // the law IS the identity
       const n = qRotV(qv, [0, 0, 1]);
       const p: V3 = [c.position.x, c.position.y, c.position.z];
@@ -111,9 +111,8 @@ describe.skipIf(!have)('IAS-418 pyramid probe (testdata/9000005001): ONE RAW law
     expect(emitDoc(parseDoc(serializeSave(ctx))) !== '').toBe(true);
   });
 
-  test('the law is generation-blind: legacy mapper is the same identity', () => {
+  test('the law is generation-blind: the one mapper IS the identity', () => {
     const q: FileQuat = { w: 0.6246950143, x: -0.2676769936, y: -0.2567870021, z: -0.1108429972 };
-    expect(toViewQuatLegacy(q)).toEqual(q);
-    expect(toViewQuatModern(q)).toEqual(q);
+    expect(toViewQuat(q)).toEqual(q);
   });
 });

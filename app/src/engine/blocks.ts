@@ -1,7 +1,8 @@
-// blocks.ts — the BLOCKS mode model layer (pure): absolute-cell ↔ block
-// conversions, placement from a picked face, safe field writes, and
-// MIRRORED placement (the ⇄ twin path for blocks/parts — same plane the
-// component symmetry index uses: file x = 0).
+// blocks.ts — the merged EDIT workspace's block model layer (pure):
+// absolute-cell ↔ block conversions, placement from a picked face, safe
+// field writes, and MIRRORED placement (the ⇄ twin path for blocks/parts —
+// on the SESSION mirror axis, default the file-plane the component symmetry
+// index uses).
 // Absolute cell = frame·12 + pos (the same keying cull.ts uses); a block at
 // cell C spans [C, C+size+1). Files store pos_* ∈ 0..12 + frame_* — the
 // writer keeps content in the minimal frames, same rule as normalize.
@@ -134,17 +135,18 @@ export function blockInfo(bp: Blueprint, bi: number): BlockInfo | null {
 
 // ------------------------------------------------------------ MIRRORED place
 // The ⇄ path for BLOCKS: the game's editor mirror builds the twin as the
-// same footprint at the x-FLIPPED cell range with the shape mirrored in x
-// too (ramps/corners change orientation; cubes/pyramid-centres are
-// x-symmetric). The plane is file world x = 0 — exactly the plane the
-// component twin index (sym.ts, mask bit 1) uses. In the cell-boundary
-// lattice (cell c covers [(c−6)·CELL, (c−5)·CELL), see cellIndex) world
-// x = 0 sits at cell coord 6, so [c, c+e) → [12−c−e, 12−c). EMPIRICAL:
-// counting x-twin block pairs across the workshop corpus confirms the
-// 12−c−e constant overwhelmingly (airliner 3309955432: 3705 twin pairs for
-// it vs 592 accidental for the alternative) — the old 10−c−size (cell-space
-// plane 5.5) was a pre-v0.180 corner-convention leftover that mirrored
-// blocks a half cell off the true plane.
+// same footprint at the FLIPPED cell range with the shape mirrored too
+// (ramps/corners change orientation; cubes/pyramid-centres are symmetric).
+// The default plane is the SESSION mirror axis's file-world 0-plane (x —
+// exactly the plane the component twin index (sym.ts, mask bit 1) uses;
+// v1.5.21 made the axis settable, MIRROR_TYPES[x|y|z]). In the cell-boundary
+// lattice (cell c covers [(c−6)·CELL, (c−5)·CELL), see cellIndex) the world
+// 0-plane sits at cell coord 6 on EVERY axis, so [c, c+e) → [12−c−e, 12−c).
+// EMPIRICAL: counting x-twin block pairs across the workshop corpus confirms
+// the 12−c−e constant overwhelmingly (airliner 3309955432: 3705 twin pairs
+// for it vs 592 accidental for the alternative) — the old 10−c−size
+// (cell-space plane 5.5) was a pre-v0.180 corner-convention leftover that
+// mirrored blocks a half cell off the true plane.
 
 /** Mirror a block START cell of footprint extent e = size+1 (cells) about
  *  the FILE WORLD 0-plane of one axis (cell coord 6): [c, c+e) → [12−c−e,
@@ -681,7 +683,7 @@ export function paintBlockFaces(b: Block, slot: number, faces?: number[]): numbe
 /** Paint a block AND (twin >= 0) its mirrored twin, mapping the twin's face
  *  slots through mirrorFaceOrder (a paint on the source's left face lands
  *  on the twin's right). Pure writes onto the live blocks — the caller
- *  writeBlockDocs both. Returns the source faces actually changed. */
+ *  writeBlockDoc both (called per block). Returns the source faces actually changed. */
 export function paintTwinPair(bp: Blueprint, bi: number, twin: number,
   slot: number, faces?: number[], axis: MirrorAxis = 'x'): number[] {
   const b = bp.data.blocks[bi];

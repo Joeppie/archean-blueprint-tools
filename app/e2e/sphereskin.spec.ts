@@ -72,7 +72,7 @@ async function setNum(page: Page, key: string, v: number) {
 
 /** open Tools ▸ Generate balloon, OK ▸ Confirm — the dialog closes and the
  *  ghost label appears (the dialog→ghost→label ORDER is the user's spec).
- *  v1.9.0 (urgent-fix §4) the SHIPPED default body is the CYLINDER; this
+ *  v1.9.0 the SHIPPED default body is the CYLINDER; this
  *  helper pins the ELLIPSOID lineage the skin/lift/span suite was written
  *  against — it selects the round hull EXPLICITLY (deliberate re-pin, so
  *  the round-era numbers keep meaning what they meant). */
@@ -98,7 +98,7 @@ test.describe('generate balloon tool: dialog → movable ghost → cancel/build 
     await openNew(page);
     await page.getByTestId('tools-menu').click();
     await page.getByTestId('tool-balloon').click();
-    // v1.9.0 re-pin (urgent-fix §4): the shipped default is now the CYLINDER
+    // v1.9.0 re-pin: the shipped default is now the CYLINDER
     // whose loft sag is legitimately coarser; THIS suite pins the ELLIPSOID
     // deviation lineage ("the sag stays round at zeppelin size"), so the
     // round hull is selected EXPLICITLY.
@@ -129,7 +129,7 @@ test.describe('generate balloon tool: dialog → movable ghost → cancel/build 
     await openNew(page);
     await page.getByTestId('tools-menu').click();
     await page.getByTestId('tool-balloon').click();
-    // v1.9.0 re-pin (urgent-fix §4): the shipped DEFAULT body is now the
+    // v1.9.0 re-pin: the shipped DEFAULT body is now the
     // cylinder (zeppelin); this suite pins the ELLIPSOID needle/refusal/repair
     // lineage, so the round hull is selected EXPLICITLY.
     await page.getByTestId('tool-opt-profile-round').click();
@@ -473,7 +473,7 @@ test.describe('generate balloon tool: dialog → movable ghost → cancel/build 
     await openNew(page);
     await page.getByTestId('tools-menu').click();
     await page.getByTestId('tool-balloon').click();
-    // v1.9.0 (urgent-fix §4): the CYLINDER (zeppelin) is the SHIPPED default
+    // v1.9.0: the CYLINDER (zeppelin) is the SHIPPED default
     // body — the TAIL section is visible the moment the dialog opens, and
     // the section stays CYLINDER-ONLY (user: "only applicable to the
     // cylindrical craft").
@@ -498,7 +498,7 @@ test.describe('generate balloon tool: dialog → movable ghost → cancel/build 
     await expect.poll(async () => ((await prev.textContent()) ?? ''),
       { timeout: 15_000 }).toMatch(/nothing to place/);
     await expect(page.getByTestId('tool-ok')).toBeDisabled();
-    // the preview line is CHOICE-SPECIFIC (urgent-fix §3): OFF reads 'volume
+    // the preview line is CHOICE-SPECIFIC (v1.9.0): OFF reads 'volume
     // off', ON reads 'volume 1 enclosed' — poll the async readout.
     await setRange(page, 'rx', 2);
     await setRange(page, 'ry', 2);
@@ -755,7 +755,7 @@ test.describe('generate balloon tool: dialog → movable ghost → cancel/build 
     }, { timeout: 20_000 }).toBe('clean');
   });
   // ------------------------------------------------------------- v1.8.6 ---
-  // urgent-fix.md: "a valid zeppelin suddenly misses a face after rotations
+  // v1.8.6: "a valid zeppelin suddenly misses a face after rotations
   // … depending on where it is rotated, possibly moved". The ghost's ⟲ and
   // drag transforms used to DROP every fat face whose image left the frame-
   // aligned window — and the hole was PERSISTED into the built file. The

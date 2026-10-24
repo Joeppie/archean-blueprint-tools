@@ -353,7 +353,9 @@ new build dep, kept inside `app/`).
 ## Non-negotiables carried over
 - AGENTS § Blueprint folder (paths via tools/config.py — the vite plugin
   reads it; no hardcoded paths in `app/` either).
-- Byte-identical serialize; occupancy/type-255 mirror sync; Unity-LH
-  conjugate + LEGACY_Q split; integer grid keys; on-demand rendering;
+- Byte-identical serialize; occupancy/type-255 mirror sync; ONE raw
+  quaternion law (v1.5.11 — the earlier Unity-LH conjugate + LEGACY_Q split
+  was re-arbitrated away; the generation stamp keys palette resolution
+  only); integer grid keys; on-demand rendering;
   merged static geometry; iGPU-pinned headless runs (never contend the
   NVIDIA GPU); release cuts only on explicit user say-so.

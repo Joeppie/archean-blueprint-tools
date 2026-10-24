@@ -92,14 +92,14 @@ describe('open → save preserves component orientations VERBATIM', () => {
     }
   });
 
-  test('legacy files KEEP the raw-quat display law after the funnel (flag survives palette embedding)', () => {
-    // normalize embeds data.colors — if the engine re-derived the law from
-    // the converted file it would flip to the conjugate chain and render
-    // every legacy part mirror-rotated (the mural/"not flush" bug class).
+  test('legacy files KEEP the generation stamp after the funnel (flag survives palette embedding)', () => {
+    // normalize embeds data.colors — if the engine re-derived the generation
+    // from the converted file every opened craft would read as v2: its legacy
+    // palette bookkeeping and the wheel-droop gate would silently flip.
     const text = readFileSync(`${REPO_TESTDATA}/3518436870/blueprint.json`, 'utf8');
     const { bp } = funnel(text);
     expect(bp.data.colors, 'funnel embedded the palette (migration as designed)').toBeTruthy();
-    expect(isLegacyFile(bp), 'the RAW-quat law of the source file survives the migration').toBe(true);
+    expect(isLegacyFile(bp), 'the GENERATION of the source file survives the migration').toBe(true);
   });
 
   test('undo re-open of the FIRST snapshot keeps the law too (same-text funnel)', () => {

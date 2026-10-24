@@ -84,8 +84,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // move/rotate gizmo, opened from the canvas mode widget for the CURRENT
   // selection (block ▸ per-face, component ▸ color1/color2, else the brush).
   const [paintOpen, setPaintOpen] = useState(false);
-  // THE panel flavor (v1.5 user rule): ONE ✎ Edit | ✚ Place switch crowns the
-  // side panel in BOTH the Edit and Blocks modes — the two flavors of the
+  // THE panel flavor (v1.5 user rule): ONE ✎ Edit | ✚ Place switch crowns
+  // the side panel of the merged Edit mode — the two flavors of the
   // SAME panel. Edit = select for gizmo/inspector/DELETE; Place = brush +
   // catalog with the dock ghost. Persisted; shared across the modes.
   const [tool, setToolState] = useState<'place' | 'edit'>(
@@ -202,7 +202,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     const d = parseDoc(state);
     normalizeDoc(d);                                // idempotent on snapshots
     const bp = docValue(d) as Blueprint;
-    bp.__legacyQ = legacyRef.current;               // the session's law (the
+    bp.__legacyQ = legacyRef.current;               // the session's generation (the
     ctxRef.current = makeCtx(d, bp);                // snapshot text is post-migration)
     const dirtyNow = state !== histRef.current.states[0];
     dirtyRef.current = dirtyNow; setDirty(dirtyNow);
@@ -395,10 +395,11 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   }, [markDirty, bumpRev, sceneChanged, pipesSoon]);
   const [engine, setEngine] = useState<Engine | null>(null);
 
-  // mode gating: gizmo in Edit AND Blocks (v1.4: clicking a component in
-  // blocks mode selects it and must be movable/rotatable there too); Wire
-  // forces cables visible; the wind tunnel runs ONLY in Wind mode (the solve
-  // is bounded but never free). Leaving a mode also drops any stale PICK CHIP.
+  // mode gating: the gizmo lives ONLY in the merged Edit mode (v1.4 rule
+  // kept: a component picked there selects and must be movable/rotatable);
+  // Wire forces cables visible; the wind tunnel runs ONLY in Wind mode (the
+  // solve is bounded but never free). Leaving a mode also drops any stale
+  // PICK CHIP.
   useEffect(() => {
     const e = engineRef.current;
     if (!e) return;
@@ -409,7 +410,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     e.setWindTunnel(mode === 'aero');
   }, [mode, gizmoOn, engine]);
 
-  // BLOCK widget (v1.5): a SELECTED block owns the gizmo in BLOCKS ▸ Edit —
+  // BLOCK widget (v1.5): a SELECTED block owns the gizmo in the EDIT flavor —
   // cell-snapped arrows + 90°-snap rings; a selected COMPONENT takes it back.
   // v1.7.1: the block's SIMILAR TWIN always moves/turns in unison (mirrored);
   // mirrorPlace (⇄) only rides as the reported placement-twin state.
@@ -734,9 +735,11 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     setPlacing(null);
     const type = placing;
     const module = e.manifest?.[type]?.module ?? 'ARCHEAN_general';
-    // view-space heading → the file quaternion of THIS file's generation
-    const qView = qAxisAngle([0, 1, 0], yaw);
-    const qFile = isLegacyFile(ctx.bp) ? qView : { w: qView.w, x: -qView.x, y: -qView.y, z: -qView.z };
+    // view-space heading → the FILE quaternion VERBATIM (v1.5.11 one raw law:
+    // the display frame IS the file frame, so the stored quaternion is the
+    // yaw itself — the retired per-generation conjugate would place the part
+    // turning the OPPOSITE way from where the drag pointed on palette files)
+    const qFile = qAxisAngle([0, 1, 0], yaw);
     const comp = newComponent(type, module, p, qFile);
     ctx.bp.data.components.push(comp as never);
     const at = ctx.bp.data.components.length - 1;
@@ -882,7 +885,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         )}
         {blockSub === 'tris' ? triPanel : (
           <BlockPanel engine={engine} ctx={ctxRef.current} bp={bp!} blockSel={blockSel}
-            brush={brush} tab={tool} mirror={mirrorPlace} legacy={legacy} mirrorAxis={mirAxis}
+            brush={brush} tab={tool} legacy={legacy} mirrorAxis={mirAxis}
             onBrush={setBrush} onSelectBlock={setBlockSel} onApplied={sceneChanged}
             onPaint={paintBlock}
             custom={{ addColor: addPaletteColor, onPickSlot: slot => setBrush(b => ({ ...b, slot })) }} />

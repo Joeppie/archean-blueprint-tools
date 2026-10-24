@@ -177,14 +177,14 @@ describe('the sizes that used to REFUSE now store (integration)', () => {
   }, 120_000);
 });
 
-// --------------------------------------------------- v1.8.6 urgent-fix
+// --------------------------------------------------- v1.8.6 skin-cut
 // transformSkinTris (the ⟲ ghost quarter-turns AND the placement-drag/commit
 // shift) used to DROP every face whose image no longer fit the frame-aligned
 // window. A quarter-turn SWAPS two axes' spans and any move re-places `min`
 // inside its 12-cell frame, so a fat face (> 20-cell span) that encoded at
 // its staged position vanished at unlucky ones — the user's "a valid
 // zeppelin suddenly misses a face after rotations … the size doesn't
-// inherently change" hole, persisted into the BUILT file (urgent-fix.md).
+// inherently change" hole, persisted into the BUILT file (v1.8.6).
 // The law now: NEVER drop — split the image (same splitFace as generation)
 // and re-spell every piece in the source record's clothes.
 const areaMag = (v: GP3) => Math.hypot(v[0]!, v[1]!, v[2]!);
@@ -200,7 +200,7 @@ const BIG: SphereSpec = {
   rx: 12, ry: 8, rz: 12, profile: 'cylinder', noseShoulder: 0.35, tailShoulder: 0.6,
 };
 
-describe('transformSkinTris NEVER DROPS (urgent-fix.md)', () => {
+describe('transformSkinTris NEVER DROPS (v1.8.6)', () => {
   const base = sphereSkinTris(BIG, { slot: 51, material: 0 });
 
   test('the repro spec carries fat faces (non-vacuous premise)', () => {

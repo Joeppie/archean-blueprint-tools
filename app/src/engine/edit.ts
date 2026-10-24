@@ -16,7 +16,7 @@ import type { DocNode } from './doc';
 import { docArrayInsert, docArrayRemoveAt, docEnsureArray, docFromValue, docGet, docSet, docSetArrayItem, docSetNumber, docValue, emitDoc, parseDoc } from './doc';
 import type { Blueprint, BlueprintComponent, FileQuat, LatticeObj, Triangle, Vec3D } from './format';
 import { CELL } from './format';
-import { docLegacyQuats, normalizeDoc } from './normalize';
+import { docLegacyGeneration, normalizeDoc } from './normalize';
 import type { PaletteEntry } from './palette';
 
 export type Occ = LatticeObj & { size_x?: number; size_y?: number; size_z?: number };
@@ -82,14 +82,14 @@ export function makeCtx(doc: DocNode, bp: Blueprint): EditCtx {
   };
 }
 
-/** THE open funnel: parse → read the file's rotation law (BEFORE normalize
- *  embeds data.colors) → v1→v2 migration → docValue → EditCtx, with the law
- *  stamped on the live bp (isLegacyFile). Editor.openText and the
+/** THE open funnel: parse → read the file's GENERATION (BEFORE normalize
+ *  embeds data.colors) → v1→v2 migration → docValue → EditCtx, with the
+ *  generation stamped on the live bp (isLegacyFile). Editor.openText and the
  *  save-fidelity pins share this one implementation, so the pins can never
  *  drift from the shipped path. */
 export function openFunnel(text: string): { doc: DocNode; bp: Blueprint; ctx: EditCtx; legacy: boolean } {
   const doc = parseDoc(text);
-  const legacy = docLegacyQuats(doc);
+  const legacy = docLegacyGeneration(doc);
   normalizeDoc(doc);
   const bp = docValue(doc) as Blueprint;
   bp.__legacyQ = legacy;

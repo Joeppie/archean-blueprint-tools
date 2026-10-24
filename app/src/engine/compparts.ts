@@ -2,14 +2,15 @@
 // and the DISPLAY-POSE rules (pure, no THREE — pinned by vitest, applied by
 // scene.ts to stand-in boxes AND real game models alike).
 //
-// Display poses are LEGACY display-only conventions (saved quaternions stay
-// file-exact — the app is currently read-only, so no writeback path exists):
-//  • WHEEL DROOP (2026-10-19, MODERN files only): the blueprint stores the
+// Display poses are display-only conventions (saved quaternions stay
+// file-exact — every writeback path strips them again, rotUndo):
+//  • WHEEL DROOP (2026-10-19, palette-bearing files only): the blueprint stores the
 //    BUILD pose; in-game a loaded wheel hangs BELOW its mount. The display
 //    rolls the suspension arm to −y about the world axle (legacy viewer's
 //    applyDisplayPose; vertical-axle casters can't droop and keep the pose).
 //    The same-day RETIREMENT was arbitrated on the semi truck 3481322297 —
-//    a LEGACY (raw-quat) file, where the rule stays OFF and the app keeps
+//    a palette-less legacy-generation file, where the rule stays OFF and
+//    the app keeps
 //    the wheelpair-verified dev-matching build pose. On modern files dev's
 //    raw-quat roots are its own known bug and cannot arbitrate; the app
 //    showing ISW's crawler casters sticking UP (user, 2026-10-19) settled it.
@@ -23,7 +24,7 @@
 //  • ToggleButton mounts plate-FLUSH: a local yaw-180 under the view quat.
 
 import type { Blueprint, BlueprintComponent, FileQuat } from './format';
-import { isLegacyFile, toViewQuatLegacy, toViewQuatModern } from './format';
+import { toViewQuat } from './format';
 import type { ColliderRec, ModelManifest } from './models';
 
 export type { ModelManifest };
@@ -40,10 +41,11 @@ export interface PartBox {
   size: V3;
 }
 
-/** one component's stand-in collider box (raw LOCAL space, first collider;
- *  scene.ts mirrors it through the group's scale.z=-1 like the legacy
- *  colliderProxy — growing a world AABB after rotation would inflate
- *  rotated parts). Footprint box when the atlas has no collider. */
+/** one component's stand-in collider box (raw LOCAL / baked-FILE space,
+ *  first collider; scene.ts hangs it under the group's content basis C —
+ *  the mirrored scale.z=-1 chain was removed in v0.180 — growing a world
+ *  AABB after rotation would inflate rotated parts). Footprint box when the
+ *  atlas has no collider. */
 export interface StandInBox { center: V3; size: V3 }
 
 export function standInBox(c: BlueprintComponent, info: CollidersEntry | undefined): StandInBox {
@@ -89,8 +91,10 @@ export function qAxisAngle(axis: V3, angle: number): FileQuat {
   return { w: Math.cos(h), x: (axis[0]! / l) * s, y: (axis[1]! / l) * s, z: (axis[2]! / l) * s };
 }
 
-export const fileToViewQuat = (q: FileQuat, legacy: boolean): FileQuat =>
-  legacy ? toViewQuatLegacy(q) : toViewQuatModern(q);
+/** The file→view placement map: raw AS-IS (v1.5.11 ONE raw law — the file
+ *  quaternion IS the placement quaternion for BOTH generations). Kept as a
+ *  named seam; see format.ts toViewQuat. */
+export const fileToViewQuat = toViewQuat;
 
 const JUNCTION_TYPES: ReadonlySet<string> = new Set(['FluidJunction']);
 const WHEEL_TYPES: ReadonlySet<string> = new Set(['SmallWheel', 'Wheel', 'BigWheel']);
@@ -100,15 +104,16 @@ const WHEEL_TYPES: ReadonlySet<string> = new Set(['SmallWheel', 'Wheel', 'BigWhe
  * is qFile and mapped view quaternion is qView. Everything except the special
  * types rides qView unchanged.
  *
- * WHEEL DROOP RE-LANDED 2026-10-19 for MODERN (conjugate) files, legacy-
- * generation files excluded (user: the ISW crawler's casters rendered
+ * WHEEL DROOP RE-LANDED 2026-10-19 for palette-bearing (2026-generation)
+ * files, palette-less legacy-generation files excluded (user: the ISW
+ * crawler's casters rendered
  * "sticking UP" in the app while the legacy JS viewer — and in-game — hang
  * them BELOW the mount). The blueprint stores the BUILD pose; the physical
  * wheel hangs, so the display rolls the suspension arm to −y about the world
  * axle (axle + tire plane untouched, rolling geometry stays exact; the
  * vertical-axle case can't droop and keeps the file pose — the legacy
  * viewer's applyDisplayPose rule, same formula). The 2026-10-19 retirement
- * (a99d801) was arbitrated on the SEMI TRUCK — a LEGACY (raw-quat) file,
+ * (a99d801) was arbitrated on the SEMI TRUCK — a LEGACY-generation file,
  * where app == dev build pose and this rule is NOT applied; on the modern
  * ISW file dev's raw roots are its documented own bug and cannot arbitrate.
  * Pure display: rotUndo strips qDisp→qView, saved quaternions stay file-exact.
@@ -153,10 +158,10 @@ export function occStandLocal(center: V3, origin: V3, qDisp: FileQuat): { pos: V
 }
 
 /** one component → its collider boxes in view space (empty when unknown type) */
-export function compPartBoxes(c: BlueprintComponent, manifest: CollidersManifest, legacy: boolean, ci: number): PartBox[] {
+export function compPartBoxes(c: BlueprintComponent, manifest: CollidersManifest, ci: number): PartBox[] {
   const entry = manifest[c.type];
   if (!entry?.colliders?.length) return [];
-  const qv = fileToViewQuat(c.orientation ?? { w: 1, x: 0, y: 0, z: 0 }, legacy);
+  const qv = fileToViewQuat(c.orientation ?? { w: 1, x: 0, y: 0, z: 0 });
   const origin: V3 = [c.position.x, c.position.y, c.position.z];
   return entry.colliders.map(col => {
     // eight corners of the local box, spun by the placement law, grown to
@@ -184,11 +189,10 @@ export function compPartBoxes(c: BlueprintComponent, manifest: CollidersManifest
 
 export function buildPartBoxes(bp: Blueprint, manifest: CollidersManifest | null): PartBox[] {
   if (!manifest) return [];
-  const legacy = isLegacyFile(bp);
   const out: PartBox[] = [];
   bp.data.components.forEach((c, ci) => {
     if (c.type === 'Build') return;              // construction-site ghost
-    out.push(...compPartBoxes(c, manifest, legacy, ci));
+    out.push(...compPartBoxes(c, manifest, ci));
   });
   return out;
 }

@@ -171,9 +171,10 @@ layer:
    surface here first.
 7. **Whole part scaled** → unit traps: Dashboard cm/100, ini metres, hull
    lattice 0.25, Propeller `radius` metres.
-8. **Rotated mounts mirrored (dev side only)** → known dev raw-quaternion
-   bug — since the v0.180 de-mirror OUR render is the game-true one here;
-   not fixable on our side (identity fixtures; see divergences).
+8. ~~**Rotated mounts mirrored (dev side only)** → known dev raw-quaternion
+   bug~~ — RETRACTED v1.5.11 (one raw law both generations; the dev was
+   right). If a rotated mount still disagrees, it is a real render bug on
+   OUR side — triage steps 1–7 again.
 
 Loop: fix the owning layer → re-run the single id → pair agrees → run the
 FULL matrix → transcribe the root cause into FORMAT.md in the SAME commit
@@ -209,16 +210,14 @@ dev's implementation).
   VISIBLE on one side and MISSING on the other (e.g. the 9000001007
   Dashboard 'TEST' Label): that class was a text/SIDE-path question anyway —
   and the raw-canvas dashboard fixed it.
-* **rotated 2026 files**: the ONE remaining true divergence — the dev places
+* ~~**rotated 2026 files**: the ONE remaining true divergence — the dev places
   components with the RAW Unity quaternion, while the game (and we) place
   palette-bearing files with the CONJUGATE (data-pinned: pipes 0.000 m,
-  mural flushfrac; FORMAT §"Chirality vs in-game truth"). After the
-  de-mirror ours and the dev's sheets agree everywhere EXCEPT here: rotated
-  mounts in V2 files show the dev mirroring the PART (its raw-quat bug;
-  triage step 8). **V1 files are the dev's correct case** — raw placement IS
-  the legacy convention, so side-by-sides of mosaic-era craft agree
-  pose-wise (FORMAT §V1/V2). Fixtures therefore all sit at identity —
-  rotated comparisons against the dev would flag a KNOWN dev-side error.
+  mural flushfrac; FORMAT §"Chirality vs in-game truth")~~ — **RETRACTED
+  v1.5.11**: the ONE raw law holds for BOTH generations (FORMAT §Handedness),
+  so the dev's raw placement equals the game's even for rotated mounts and
+  the sheets agree there too. The fixtures keep their identity poses
+  (harmless); rotated dev comparisons need no dev-bug caveat any more.
 * our default is proxies, `&real` the game models; the dev always renders the
   real models — compare `<id>-ours-real.png` against `<id>-dev.png`.
 * `ArrowButton` + `Led` are dashboard-BUILTIN element models (they live under

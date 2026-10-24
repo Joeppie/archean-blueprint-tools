@@ -129,12 +129,12 @@ export function eulerZYX(rx: number, ry: number, rz: number): FileQuat {
  *  NOTE Lamp/SpotLight carry angle fields (light AIM) but joints:[] — the
  *  joint drive must not fire on them, which the joints[0] test guarantees. */
 export function jointChain(
-  mc: BlueprintComponent, manifest: ModelManifest | null, legacy: boolean,
+  mc: BlueprintComponent, manifest: ModelManifest | null,
 ): JointChain | null {
   const jn = manifest?.[mc.type]?.joints?.[0];
   if (!jn) return null;
   const qAxle = eulerZYX(jn.rotation[0]!, jn.rotation[1]!, jn.rotation[2]!);
-  const mq = fileToViewQuat(mc.orientation ?? { w: 1, x: 0, y: 0, z: 0 }, legacy);
+  const mq = fileToViewQuat(mc.orientation ?? { w: 1, x: 0, y: 0, z: 0 });
   const axis = vNorm(qRot(mq, qRot(qAxle, UNIT[jn.axis ?? 'x'])));
   const slide = vNorm(qRot(mq, qRot(qAxle, UNIT[jn.slide ?? jn.axis ?? 'x'])));
   const pivot = vAdd(
@@ -152,7 +152,7 @@ export function jointChain(
 // panel about the world line R(q)·qAxle·ê with the .ini axis key ê read in
 // the part-local FILE frame. The part's OWN slave plate must turn about the
 // SAME line — rotating the axle node about the raw key ê inside the C basis
-// instead spins it about R(q)·C·ê (urgent-fix.md §1: the balloon's rudder
+// instead spins it about R(q)·C·ê (v1.9.0: the balloon's rudder
 // plate rolled about the fore–aft axis like a PROPELLER while its panel
 // yawned correctly about the vertical). Measured live with
 // app/tools/plateprobe.mjs / rudderprobe.mjs. Conjugating C out of the
@@ -229,16 +229,16 @@ export interface JRef {
 }
 
 export function captureJrefs(
-  entries: SubMasterEntry[], bb: SubBBox | null, manifest: ModelManifest | null, legacy: boolean,
+  entries: SubMasterEntry[], bb: SubBBox | null, manifest: ModelManifest | null,
 ): JRef[] {
   const out: JRef[] = [];
   for (const e of entries) {
     const mc = e.mc;
     if (!mc) continue;
-    const j0 = jointChain(mc, manifest, legacy);
+    const j0 = jointChain(mc, manifest);
     if (!j0) continue;                                 // static host: no joint term
     const p0: V3 = [mc.position.x, mc.position.y, mc.position.z];
-    const q0 = fileToViewQuat(mc.orientation ?? { w: 1, x: 0, y: 0, z: 0 }, legacy);
+    const q0 = fileToViewQuat(mc.orientation ?? { w: 1, x: 0, y: 0, z: 0 });
     if (!bb) {                                          // parts-only: ride the axle
       out.push({ mc, mcPath: e.mcPath, top: e.top, p0, q0, pivot0: j0.pivot, axis0: j0.axis, slide0: j0.slide });
       continue;
@@ -300,11 +300,11 @@ export function subJointPose(
 
 /** Live joint state read from the master's file data + CURRENT pose.
  *  Lamp/SpotLight 'angle' (aim) never reaches here — no .ini joint ⇒ no JRef. */
-export function masterJointState(mc: BlueprintComponent, legacy: boolean) {
+export function masterJointState(mc: BlueprintComponent) {
   return {
     angle: typeof mc.data?.['angle'] === 'number' ? (mc.data['angle'] as number) : 0,
     slide: typeof mc.data?.['pos'] === 'number' ? (mc.data['pos'] as number) : 0,
     pos: [mc.position.x, mc.position.y, mc.position.z] as V3,
-    quat: fileToViewQuat(mc.orientation ?? { w: 1, x: 0, y: 0, z: 0 }, legacy),
+    quat: fileToViewQuat(mc.orientation ?? { w: 1, x: 0, y: 0, z: 0 }),
   };
 }

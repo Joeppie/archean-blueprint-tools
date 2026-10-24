@@ -1,8 +1,9 @@
 // normalize.ts — convert the OLD (v1, 2024-25) file format to the NEW (v2)
 // representation AT OPEN TIME, so the rest of the app speaks exactly one
 // dialect (user's design call: "convert first, done when opening — reduces
-// complexity"). The engine keeps its LEGACY_Q handling for byte-faithful
-// READING of v1 docs, but everything downstream of normalize() is v2:
+// complexity"). The engine keeps reading the file's GENERATION
+// (`__legacyQ`) for byte-faithful palette handling of v1 docs, but
+// everything downstream of normalize() is v2:
 //
 //  1. data.colors is embedded: every USED legacy slot is written at its
 //     v2-base index (legacySlot +4/+8/+12) with the built-in entry, so the
@@ -19,8 +20,9 @@
 //     — the 2026-10-20 report: ISW caster wheel on TOP of its strut, Jimmy's
 //     two-axis dashboard murals torn apart, while single-axis/180° parts
 //     (whose conjugate is the same rotation) stayed fine. The engine keeps
-//     reading the RAW law for palette-less sources via the __legacyQ stamp
-//     (Editor), so the DISPLAY is unchanged; only the byte rewrite died.
+//     carrying the palette-less source's GENERATION on the live bp
+//     (`__legacyQ`, Editor) for palette/wheel-droop handling; the display
+//     never depended on it, only the byte rewrite died.
 //  5. data.version 1 → 2.
 // All rules apply RECURSIVELY into Build subgrids. Saving a converted file
 // writes the v2 form (intentional: the converter is the migration — the
@@ -41,13 +43,13 @@ function isLegacyDoc(data: DocNode): boolean {
   return c === undefined || (c.kind === 'arr' && c.items.length === 0);
 }
 
-/** The rotation STORAGE law of the file AS ON DISK (pre-migration): a
- *  palette-less source stores the Unity-LH quaternion RAW (the LEGACY_Q
- *  split, FORMAT §Handedness). normalize() embeds data.colors, so the law
- *  must be read BEFORE it and carried on the live bp (`__legacyQ`) — the
- *  game round-trips quaternion bytes, so the law of the source is the law
- *  of the save forever. */
-export function docLegacyQuats(doc: DocNode): boolean {
+/** The GENERATION of the file AS ON DISK (pre-migration): palette-less v1
+ *  sources resolve colours through the built-in legacy table (legacySlot)
+ *  and keep the wheel-droop display gate. normalize() embeds data.colors,
+ *  so the generation must be read BEFORE it and carried on the live bp
+ *  (`__legacyQ`) — it selects NO rotation law (since v1.5.11 there is only
+ *  the raw one, FORMAT §Handedness). */
+export function docLegacyGeneration(doc: DocNode): boolean {
   const data = docGet(doc, ['data']);
   return !!data && data.kind === 'obj' && isLegacyDoc(data);
 }

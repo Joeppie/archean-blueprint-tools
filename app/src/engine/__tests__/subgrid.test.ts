@@ -132,7 +132,7 @@ describe('joint line capture + pose', () => {
     const mcOn = comp({ type: 'SmallPivot', position: { x: 0.375, y: 0, z: 0.25 } });
     const jc = jointChain(mcOn, {
       SmallPivot: { joints: [{ name: 'axle', position: [0, 0, 0], rotation: [0, 0, 0], axis: 'y' }] },
-    } as unknown as ModelManifest, false)!;
+    } as unknown as ModelManifest)!;
     expect(Math.abs(jc.pivot[2] - 0.25)).toBeLessThan(1e-9);
     expect(jc.pivot[2]).toBeGreaterThanOrEqual(b.min[2]);
     expect(jc.pivot[2]).toBeLessThanOrEqual(b.max[2]);
@@ -140,22 +140,22 @@ describe('joint line capture + pose', () => {
 
   test('pivot-only subgrid (no blocks): axis stays the .ini key chain', () => {
     const mc = comp({ type: 'SmallPivot', position: { x: 2, y: 1, z: -3 }, data: { angle: 126 } });
-    const jref = captureJrefs([{ component: 0, mc, top: 0, mcPath: [] }], null, manifest, false);
+    const jref = captureJrefs([{ component: 0, mc, top: 0, mcPath: [] }], null, manifest);
     expect(jref).toHaveLength(1);
-    expect(jref[0]!.axis0).toEqual(jointChain(mc, manifest, false)!.axis);
-    expect(jref[0]!.pivot0).toEqual(jointChain(mc, manifest, false)!.pivot);
+    expect(jref[0]!.axis0).toEqual(jointChain(mc, manifest)!.axis);
+    expect(jref[0]!.pivot0).toEqual(jointChain(mc, manifest)!.pivot);
   });
 
   test('static hosts get NO joint term (Lamp angle = light aim, not a hinge)', () => {
     const lamp = comp({ type: 'Lamp', data: { angle: 45 } });
-    expect(captureJrefs([{ component: 0, mc: lamp, top: 0 }], null, manifest, false)).toHaveLength(0);
+    expect(captureJrefs([{ component: 0, mc: lamp, top: 0 }], null, manifest)).toHaveLength(0);
   });
 
   test('EDGE-mounted hinge keeps the pin; FACE-mounted hinge swings on pin×span', () => {
     // content spans along x (longest dim x̂). Pin ŷ (SmallHinge angular_y):
     // |pin·d| = 0 → face-mounted → axis = ŷ×x̂ = −ẑ (dolphin skin-fin roll).
     const face = comp({ type: 'SmallHinge', position: { x: 0, y: 0.4, z: 0 } });
-    const [jf] = captureJrefs([{ component: 0, mc: face, top: 0 }], bbx, manifest, false);
+    const [jf] = captureJrefs([{ component: 0, mc: face, top: 0 }], bbx, manifest);
     expect(jf!.axis0[2]).toBeCloseTo(-1, 6);
     expect(jf!.axis0[0]).toBeCloseTo(0, 9);
     // pivot clamped onto the panel bbox: the axle floats at y=0.4+0.15, the
@@ -164,18 +164,18 @@ describe('joint line capture + pose', () => {
     // edge-mounted: content runs along its pin — a y-span panel |pin·d|≈1 keeps d
     const bbY = { min: [-0.125, 0, -0.25] as [number, number, number], max: [0.125, 1.25, 0.25] as [number, number, number] };
     const edge = comp({ type: 'SmallHinge', position: { x: 0, y: 0.4, z: 0 } });
-    const [je] = captureJrefs([{ component: 0, mc: edge, top: 0 }], bbY, manifest, false);
+    const [je] = captureJrefs([{ component: 0, mc: edge, top: 0 }], bbY, manifest);
     expect(Math.abs(je!.axis0[1])).toBeCloseTo(1, 6);       // ±ŷ long-edge yaw (XYQ doors)
     // a SmallPIVOT never takes the triad branch — panels keep the longest dim
     const piv = comp({ type: 'SmallPivot', position: { x: 0, y: 0.4, z: 0 } });
-    const [jp] = captureJrefs([{ component: 0, mc: piv, top: 0 }], bbx, manifest, false);
+    const [jp] = captureJrefs([{ component: 0, mc: piv, top: 0 }], bbx, manifest);
     expect(Math.abs(jp!.axis0[0])).toBeCloseTo(1, 6);
   });
 
   test('joint pose: angle 0 + built master pose ⇒ EXACTLY the base (bit-identical load)', () => {
     const mc = comp({ type: 'SmallPivot', position: { x: 1, y: 0.5, z: 2 }, data: { angle: 0 } });
-    const [r] = captureJrefs([{ component: 0, mc, top: 0 }], bbx, manifest, false);
-    const st = [masterJointState(mc, false)];
+    const [r] = captureJrefs([{ component: 0, mc, top: 0 }], bbx, manifest);
+    const st = [masterJointState(mc)];
     const base = { p: [0, 0, 0] as [number, number, number], q: { w: 1, x: 0, y: 0, z: 0 } as FileQuat };
     const pose = subJointPose(base, [r!], st);
     expect(pose.p[0]).toBeCloseTo(0, 12); expect(pose.p[1]).toBeCloseTo(0, 12); expect(pose.p[2]).toBeCloseTo(0, 12);
@@ -184,7 +184,7 @@ describe('joint line capture + pose', () => {
 
   test('90° spin orbits the group about the CAPTURED line; slide rides slide0', () => {
     const mc = comp({ type: 'SmallHinge', position: { x: 0, y: 0.4, z: 0 }, data: { angle: 0 } });
-    const [r] = captureJrefs([{ component: 0, mc, top: 0 }], bbx, manifest, false);
+    const [r] = captureJrefs([{ component: 0, mc, top: 0 }], bbx, manifest);
     const base = { p: [0, 0, 0] as [number, number, number], q: { w: 1, x: 0, y: 0, z: 0 } as FileQuat };
     // pivot0 = (0, 0.25, 0) clamped; axis0 = −ẑ → spin 90° about (0,0.25,0)+ẑ⁻
     // (st.pos = the master's OWN capture position: it sits at its built pose,
@@ -205,9 +205,9 @@ describe('joint line capture + pose', () => {
 
   test('rigid riding: the master TRANSLATING +0.5 x moves the subgrid +0.5 x (subfollow)', () => {
     const mc = comp({ type: 'SmallPivot', position: { x: 1, y: 0.5, z: 2 }, data: { angle: 0 } });
-    const [r] = captureJrefs([{ component: 0, mc, top: 0 }], bbx, manifest, false);
+    const [r] = captureJrefs([{ component: 0, mc, top: 0 }], bbx, manifest);
     const base = { p: [0, 0, 0] as [number, number, number], q: { w: 1, x: 0, y: 0, z: 0 } as FileQuat };
-    const moved = { ...masterJointState(mc, false), pos: [1.5, 0.5, 2] as [number, number, number] };   // raw == view (v0.180)
+    const moved = { ...masterJointState(mc), pos: [1.5, 0.5, 2] as [number, number, number] };   // raw == view (v0.180)
     const pose = subJointPose(base, [r!], [moved]);
     expect(pose.p[0]).toBeCloseTo(0.5, 9);
     expect(pose.p[1]).toBeCloseTo(0, 9);
@@ -216,7 +216,7 @@ describe('joint line capture + pose', () => {
 });
 
 // ------------------------------------------------------- THE PLATE LAW pins
-// v1.9.0 urgent-fix.md §1: the balloon's rudder plate rolled about the
+// v1.9.0 THE PLATE LAW: the balloon's rudder plate rolled about the
 // fore–aft axis (a PROPELLER) while its panel yawed about the vertical —
 // applyJointPoses spun the axle node about the raw .ini key INSIDE the
 // content basis C = Rx(−90), so the plate's world line was R(q)·C·ê while
@@ -280,7 +280,7 @@ describe('THE PLATE LAW — the part plate turns on the panel’s line', () => {
     const manifest = {
       SmallHinge: { joints: [{ name: 'axle', position: [0, 0, 0], rotation: [0, 0, 0], axis: 'y' }] },
     } as unknown as ModelManifest;
-    const chain = jointChain(mc, manifest, false);
+    const chain = jointChain(mc, manifest);
     expect(Math.abs(chain!.axis[2]!)).toBeGreaterThan(0.999);   // panel rolls along ẑ
     expect(Math.abs(chain!.axis[1]!)).toBeLessThan(1e-9);       // not the retired UP line
     // the axle's own euler is IDENTITY (the .ini), so v is the same

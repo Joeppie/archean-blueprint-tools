@@ -59,15 +59,17 @@ interface Props {
   markDirty: () => void;
   /** view mode: everything read-only */
   readOnly?: boolean;
-  /** mode workspaces (Blocks/Wire/Flight) replace the inspector section */
+  /** the mode workspace docked at the panel bottom (Edit's blocks/triangles
+   *  section, Flight, Wind); with selOverBottom the Inspector stacks above
+   *  it instead of replacing it */
   bottom?: React.ReactNode;
   /** game model manifest (drives the KSP-style parts CATALOG tab) */
   manifest: Record<string, { mass: number; module: string }> | null;
   /** type currently held for placement (KSP "holding a part") */
   placingType: string | null;
   onPlaceType: (t: string | null) => void;
-  /** EDIT-mode sub-tabs: PLACE (catalog + mirror) / EDIT (lists + inspector)
-   *  — v1.5: the SAME flavor switch also drives the BLOCKS workspace (one
+  /** the panel's flavors: PLACE (catalog + brush) / EDIT (lists + inspector)
+   *  — v1.5: the SAME flavor switch drives the block workspace too (one
    *  "Edit | Place" panel, two flavors, on top of the pane — user rule) */
   tool?: 'place' | 'edit';
   onTool?: (t: 'place' | 'edit') => void;
@@ -77,10 +79,10 @@ interface Props {
   /** VIEW mode: the side menu shows ONLY the overall vessel stats, in
    *  collapsable sections (user v1.4) — no parts list, no inspector */
   statsOnly?: boolean;
-  /** with a mode workspace in `bottom` (BLOCKS), a selected component's
-   *  Inspector stacks ABOVE it instead of replacing it (v1.4: entering
-   *  blocks mode with a part selected kept its move/rotate/edit panel AND
-   *  kept the brush workspace) */
+  /** with a mode workspace in `bottom` (the merged Edit mode), a selected
+   *  component's Inspector stacks ABOVE it instead of replacing it (v1.4:
+   *  a part selected while the brush workspace shows kept its
+   *  move/rotate/edit panel AND the workspace) */
   selOverBottom?: boolean;
 }
 
@@ -335,8 +337,9 @@ const Check = (p: { label: string; checked: boolean; onChange: (v: boolean) => v
  *  "rename that to view, because under view also add a mode for orthogonal").
  *  MOVED OUT of the left parts panel (the user: "the full list of options
  *  shouldnt be combined into the main left-hand panel"). v1.9.2 added the
- *  two camera rows the user asked for there: SKY BACKDROP (none / mars /
- *  earth — equirect panoramas, the solid green sheet is gone) and the
+ *  two camera rows the user asked for there: SKY BACKDROP (⊘ + every name
+ *  in src/assets/backdrops/manifest.json — surface panoramas on a geometry
+ *  dome; the solid green sheet is gone) and the
  *  ORTHOGRAPHIC projection toggle. */
 export function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHullOpacity' | 'gizmoOn' | 'onGizmo' | 'hiDef' | 'onHiDef' | 'staticInfo' | 'onStaticInfo'> & {
   /** v1.5.21 SETTABLE MIRROR AXIS (user: "mirror axes should be settable.
@@ -950,7 +953,7 @@ export default function Panel(p: Props) {
       {/* THE TWO FLAVORS of this panel (v1.5 user rule: "the UI is not clear
           about how to select and edit — it should be on top of the pane in
           two flavors of the same panel"): ONE Edit|Place switch crowns the
-          side panel in BOTH the Edit and Blocks modes. EDIT = click to
+          side panel of the merged Edit mode. EDIT = click to
           SELECT (gizmo + inspector + Delete); PLACE = dock blocks/parts with
           a ghost. */}
       {p.onTool && p.tool && (

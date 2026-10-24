@@ -1,8 +1,0 @@
-Keep this line; here is a list of impromptu todos that may or may not be relevant anymore, remove as is needed, include in release notes/commit message when done.
-
-(2026-10-19: both items DONE —
- - the reset-zoom/dpr-baseline machinery is REMOVED from the viewer (Chrome/Linux
-   site-zoom misfire; Ctrl+0 is the only cure, the app never had it);
- - subgrids stay ATTACHED to their hinges (no free gizmo) and now get a UI AT
-   the joint line in the app: a gold ring (angle masters) / arrow (slides) that
-   writes the master's data.angle/data.pos with twin unison — app/e2e/hinge.spec.ts.)

@@ -379,9 +379,10 @@ function makeLevel(nx: number, ny: number, nz: number, kap: Float32Array, axis: 
 }
 
 /** the shared operator: aw·φ_p = Σ w·φ_nbr + src_p (solid cells aw=0 ⇒ 0).
- *  Coarse levels run the SAME operator (no source: the correction equation
- *  with a cell-centred source restricted through the residual below keeps
- *  the FMV-cycle stable; src is restricted too via restrictSource). */
+ *  Coarse levels run the SAME operator with src = 0 (createSolve zeroes the
+ *  coarse src): the coarse level is the HOMOGENEOUS correction equation —
+ *  the fine source enters it only through the residual that restrict()
+ *  spreads (adding a restricted source on top would diverge). */
 function gsweep(l: Level): void {
   const { nx, ny, nz, u, cx, cy, cz, rb, src, kap } = l;
   const nxy = nx * ny;

@@ -183,7 +183,7 @@ interface JointPose {
  *  Aileron flap rule, generalised to every type whose manifest carries a
  *  joints[0].axis), POS translates ALONG the slide. The directions are the
  *  PLATE-LAW vectors (JointPose.axisV/slideV) so the part's plate turns
- *  about the SAME world line as its subgrid panel — v1.9.0, urgent-fix §1.
+ *  about the SAME world line as its subgrid panel — v1.9.0 THE PLATE LAW.
  *  Types without the field (Lamp/SpotLight whose angle = the light aim) are
  *  skipped. */
 function applyJointPoses(jrefs: JointPose[], c: BlueprintComponent) {
@@ -248,11 +248,12 @@ export class Engine {
   /** per-type LoadedModel of every real root currently in the scene — the
    *  cache liveDataEdit rebuilds from (no async refetch mid-slider-drag) */
   private liveGeo = new Map<string, LoadedModel>();
-  /** writeback undo for the DISPLAY pose (junction/toggle; the RETIRED wheel
-   *  droop was a third): file quat =
-   *  mirror(qView · undo), undo = dispQ0⁻¹·viewQ0 captured at build — the
-   *  legacy userData.wheelUndo right-multiplier, so inspector deltas applied
-   *  on the LEFT (qd·q0) strip exactly (rawFromView parity). */
+  /** writeback undo for the DISPLAY pose (junction flat / toggle yaw-180 /
+   *  wheel droop on palette-bearing files): file quat = qView · undo (RAW
+   *  product — no mirror since the v0.180 de-mirror), undo = dispQ0⁻¹·viewQ0
+   *  captured at build — the legacy userData.wheelUndo right-multiplier, so
+   *  inspector deltas applied on the LEFT (qd·q0) strip exactly
+   *  (rawFromView parity). */
   private rotUndo = new Map<number, FileQuat>();
   private rotBase = new Map<number, { q: Vector4like }>();
   private batch: SolidBatch | null = null;
@@ -1055,7 +1056,7 @@ void main() {
     bp.data.components.forEach((c, ci) => {
       if (c.type === 'Build') return;                        // construction-site ghost
       const qFile = c.orientation ?? Q_ID;
-      const qView = fileToViewQuat(qFile, this.legacy);
+      const qView = fileToViewQuat(qFile);
       const qDisp = displayQuat(c.type, qView, qFile, this.legacy);
       const g = new Group();
       g.position.set(c.position.x + this.moff.x, c.position.y + this.moff.y, c.position.z + this.moff.z);
@@ -1064,8 +1065,9 @@ void main() {
       g.userData = { kind: 'comp', ci };
       // writeback undo (legacy wheelUndo semantics): undo = dispQ0⁻¹·viewQ0
       // (a PRODUCT, not an inverse — applyDisplayPose stores exactly this
-      // right-multiplier), so file = mirror(qDisp · undo) = the ORIGINAL
-      // view quaternion and slider deltas qd·qDisp strip to qd·qView0.
+      // right-multiplier), so file = qDisp · undo = the ORIGINAL view
+      // quaternion (raw law v1.5.11) and slider deltas qd·qDisp strip to
+      // qd·qView0.
       this.rotUndo.set(ci, qMul(qInv(qDisp), qView));
       this.root.add(g);
       this.pushRoot(ci, g);
@@ -1095,7 +1097,7 @@ void main() {
         real.quaternion.copy(g.quaternion);
         // FIELDS, never a wholesale replace: buildReal stored userData.jrefs
         // (the live joint-pose handle) and a re-assignment SILENCED every
-        // data.angle edit (v1.9.0, urgent-fix §1 follow-up).
+        // data.angle edit (v1.9.0 PLATE-LAW follow-up).
         Object.assign(real.userData, { kind: 'comp', ci, real: true });
         g.visible = false;               // stand-in retires (kept for dispose symmetry)
         this.root.add(real);
@@ -1205,7 +1207,7 @@ void main() {
     for (const j of info.joints) {
       const node = nodes.get(j.name);
       if (!node) continue;
-      // THE PLATE LAW (v1.9.0, urgent-fix §1): the axle node sits under the
+      // THE PLATE LAW (v1.9.0): the axle node sits under the
       // content basis C, so its LOCAL axes are NOT the panel's world lines.
       // Conjugate C out (subgrid.jointNodeAxis/Slide) so the part's plate
       // turns about the SAME axis the (in-game-pinned) panel law uses —
@@ -1425,7 +1427,7 @@ void main() {
         const key = JSON.stringify([spec.color, spec.metal, spec.rough, spec.opacity]);
         const box = standInBox(sc, manifest?.[sc.type]);
         const bg = new BoxGeometry(box.size[0], box.size[1], box.size[2]);
-        const q = displayQuat(sc.type, fileToViewQuat(sc.orientation ?? Q_ID, this.legacy), sc.orientation ?? Q_ID, this.legacy);
+        const q = displayQuat(sc.type, fileToViewQuat(sc.orientation ?? Q_ID), sc.orientation ?? Q_ID, this.legacy);
         bg.translate(box.center[0], box.center[1], box.center[2]);
         bg.rotateX(-Math.PI / 2);      // under content basis C (BAKED-FILE colliders)
         bg.applyMatrix4(new Matrix4().compose(
@@ -1442,7 +1444,7 @@ void main() {
         const qFile = sc.orientation ?? Q_ID;
         const m = new Group();
         m.position.set(sc.position.x, sc.position.y, sc.position.z);
-        const qDisp = displayQuat(sc.type, fileToViewQuat(qFile, this.legacy), qFile, this.legacy);
+        const qDisp = displayQuat(sc.type, fileToViewQuat(qFile), qFile, this.legacy);
         m.quaternion.set(qDisp.x, qDisp.y, qDisp.z, qDisp.w);
         const box = standInBox(sc, manifest?.[sc.type]);
         const basis = new Group();               // colliders are BAKED-FILE frame
@@ -1480,7 +1482,7 @@ void main() {
       }
       // build-captured joint lines (v0.173-177 rules live in subgrid.ts)
       const bb: SubBBox | null = subBlockBBox(blocks);
-      this.subJrefs.set(bi, captureJrefs(masters.get(bi) ?? [], bb, manifest, this.legacy));
+      this.subJrefs.set(bi, captureJrefs(masters.get(bi) ?? [], bb, manifest));
     });
     this.subCount = sn;
     this.syncSubJoints();
@@ -1495,7 +1497,7 @@ void main() {
     for (const [bi, g] of this.subGroups) {
       const jrefs = this.subJrefs.get(bi) ?? [];
       const pose = subJointPose({ p: [0, 0, 0], q: Q_ID }, jrefs,
-        jrefs.map(r => masterJointState(r.mc, this.legacy)));
+        jrefs.map(r => masterJointState(r.mc)));
       g.position.set(pose.p[0] + this.moff.x, pose.p[1] + this.moff.y, pose.p[2] + this.moff.z);
       g.quaternion.set(pose.q.x, pose.q.y, pose.q.z, pose.q.w);
     }
@@ -2813,8 +2815,8 @@ void main() {
   }
 
   // -------------------------------------------------------- BLOCK widget
-  /** Attach the constructor widget to a SELECTED BLOCK (BLOCKS ▸ Edit flavor
-   *  — the block analogue of the component gizmo). bi < 0 detaches. */
+  /** Attach the constructor widget to a SELECTED BLOCK (the Edit mode's
+   *  ✎ Edit flavor — the block analogue of the component gizmo). bi < 0 detaches. */
   setBlockGizmo(bi: number, mirror = false) {
     if (this.blockGizBi === bi && this.blockGizMirror === mirror) return;
     this.blockGizBi = bi;
@@ -3327,7 +3329,7 @@ void main() {
     const c = this.bp?.data.components[ci];
     if (!c) return;
     const qFile = c.orientation ?? Q_ID;
-    const qView = fileToViewQuat(qFile, this.legacy);
+    const qView = fileToViewQuat(qFile);
     const qDisp = displayQuat(c.type, qView, qFile, this.legacy);
     this.rotUndo.set(ci, qMul(qInv(qDisp), qView));
     this.rotBase.delete(ci);
@@ -3538,7 +3540,7 @@ void main() {
    *  outside the engine; the merged geometry is rebuilt wholesale) */
   reload() { if (this.bp) this.load(this.bp, this.atlasRef, true); }
 
-  /** BLOCKS mode: raycast for the placement/select cell. The hit face's
+  /** Edit workspace: raycast for the placement/select cell. The hit face's
    *  WORLD normal (view frame == raw file frame since the v0.180 de-mirror;
    *  the face's LOCAL normal is carried through the hit object's normal
    *  matrix — component/subgrid parents carry rotations) picks the adjacent

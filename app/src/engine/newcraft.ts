@@ -1,7 +1,7 @@
 // newcraft.ts — the "New craft" document: a minimal but FULLY v2 blueprint,
 // key-ordered like the game's writer. One PilotSeat on a 3×3-cell deck
 // plate so the editor opens on something you can immediately click, extend
-// in blocks mode, and wire. (Byte-exact writer style only matters for the
+// in the Edit workspace, and wire. (Byte-exact writer style only matters for the
 // round-trip of EXISTING files — pinned in edit.test — a fresh doc just has
 // to parse everywhere, so plain docFromValue is enough here.)
 

@@ -2,7 +2,7 @@
 // full-screen EDITOR laid out KSP-VAB-style: a viewport that fills the
 // window, the PARTS panel docked LEFT (mobile: drawer), the STATIC INFO
 // (mass/CoM) black box bottom-left, the camera-preset cluster bottom-right
-// and the File menu + View / Edit / Blocks / Wire / Flight mode tiles in a
+// and the File menu + View / Edit / Wire / Flight / Wind mode tiles in a
 // thin toolbar. ?craft=<id> deep-links straight into the editor. The
 // catalog is STATICALLY COMPILED at build time (virtual:gallery — AGENTS
 // § Blueprint folder), so the gallery paints with zero runtime fetches.

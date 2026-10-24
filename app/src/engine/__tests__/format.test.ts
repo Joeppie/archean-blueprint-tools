@@ -6,8 +6,7 @@ import { describe, expect, test } from 'vitest';
 import { corpusDir } from '../../../tools/vite-corpus.ts';
 import { emitDoc, parseDoc } from '../doc';
 import {
-  CELL, FRAME, cellCoord, parseBlueprint, toViewPos,
-  toViewQuatLegacy, toViewQuatModern, unityConjugate, worldCoord, type Blueprint,
+  CELL, FRAME, cellCoord, parseBlueprint, toViewQuat, worldCoord, type Blueprint,
 } from '../format';
 import { fitHull, hullVertex } from '../hullfit';
 
@@ -35,26 +34,21 @@ describe('grid maths', () => {
     expect(cellCoord({ pos_x: 6, pos_y: 0, pos_z: 0, frame_x: 0 }, 'x')).toBe(1);
     expect(cellCoord({ pos_x: 5, pos_y: 0, pos_z: 0, frame_x: 1 }, 'x')).toBe(12);  // 2.875 m → 11.5 → 12
   });
-  test('view mapping is the IDENTITY: display frame == file frame (v0.180)', () => {
-    expect(toViewPos({ x: 1, y: 2, z: 3 })).toEqual({ x: 1, y: 2, z: 3 });
-  });
   test('ONE raw quaternion law for BOTH generations (v1.5.11)', () => {
     const q = { w: 0.5, x: 0.5, y: 0.5, z: 0.5 };
-    expect(toViewQuatModern(toViewQuatModern(q))).toEqual(q);
-    expect(toViewQuatLegacy(toViewQuatLegacy(q))).toEqual(q);
     // v1.5.11 RE-ARBITRATION: the file quaternion IS the placement quaternion
-    // for palette AND palette-less files alike (raw AS-IS). Proof set: the
-    // game-built pyramid craft (IAS-418 testframe) puts its dashboards flush
-    // on the slant faces ONLY under R(q) (dot 0.999/1.000; conjugate = the
-    // boards skew through the deck = the editor misfire the user screenshotted);
-    // the game-written L/R dashboard fixture 9000004001 meets corner-to-corner
-    // flush under raw; the two ISW-241 saves (2025 workshop + 2026 re-save)
-    // keep BYTE-IDENTICAL orientations — no conversion ever happens across
-    // generations. The old conjugate law was a pre-v0.180 mirrored-chain
-    // artifact. See FORMAT §Handedness.
-    expect(toViewQuatModern(q)).toEqual({ w: 0.5, x: 0.5, y: 0.5, z: 0.5 });
-    expect(toViewQuatLegacy(q)).toEqual({ w: 0.5, x: 0.5, y: 0.5, z: 0.5 });
-    expect(unityConjugate(q)).toEqual({ w: 0.5, x: 0.5, y: 0.5, z: 0.5 });
+    // for palette AND palette-less files alike (raw AS-IS — the display frame
+    // IS the file frame since the v0.180 de-mirror, so the law is the
+    // identity). Proof set: the game-built pyramid craft (IAS-418 testframe)
+    // puts its dashboards flush on the slant faces ONLY under R(q) (dot
+    // 0.999/1.000; conjugate = the boards skew through the deck = the editor
+    // misfire the user screenshotted); the game-written L/R dashboard fixture
+    // 9000004001 meets corner-to-corner flush under raw; the two ISW-241
+    // saves (2025 workshop + 2026 re-save) keep BYTE-IDENTICAL orientations —
+    // no conversion ever happens across generations. The old conjugate law
+    // was a pre-v0.180 mirrored-chain artifact. See FORMAT §Handedness.
+    expect(toViewQuat(q)).toEqual({ w: 0.5, x: 0.5, y: 0.5, z: 0.5 });
+    expect(toViewQuat(toViewQuat(q))).toEqual(q);
   });
 });
 

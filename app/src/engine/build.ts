@@ -48,13 +48,14 @@ function faceNormal(a: number[], b: number[], c: number[]): number[] {
 }
 
 /**
- * Merge a block list into per-colour buckets (view space, flipped winding),
- * applying the game's INTERIOR-WALL rules via cull.ts (cell-cut full faces
- * stitched into rectangles, covered partials + duplicate footprints dropped,
- * translucent neighbours never cull opaque faces). The surviving edges are
- * exactly the stitched face outlines — the wire overlay draws blocks and
- * hull uniformly. Shared by the main build AND subgrid nested blocks
- * (subgrid.ts supplies the PARENT palette).
+ * Merge a block list into per-colour buckets (view space == raw file frame,
+ * authored winding kept — v0.180), applying the game's INTERIOR-WALL rules
+ * via cull.ts (cell-cut full faces stitched into rectangles, covered
+ * partials + duplicate footprints dropped, translucent neighbours never
+ * cull opaque faces). The surviving edges are exactly the stitched face
+ * outlines — the wire overlay draws blocks and hull uniformly. Shared by
+ * the main build AND subgrid nested blocks (subgrid.ts supplies the PARENT
+ * palette).
  */
 export function buildBlocksSolids(
   blocks: Block[], palette: FilePalette | null, legacy: boolean,
@@ -93,8 +94,8 @@ const countBlocks = (blocks: Block[]) => blocks.filter(b => b.type !== 255).leng
 
 /**
  * Merge every block solid + hull triangle skin into colour buckets.
- * Interior-wall culling (legacy face-grid cut + rectangle stitch) lands in
- * the next commit — the scene is CORRECT without it, only batch-heavier.
+ * Interior-wall culling (face-grid cut + rectangle stitch) happens in
+ * cull.ts — see buildBlocksSolids.
  */
 export function buildSolids(bp: Blueprint): SolidBatch {
   const legacy = isLegacyFile(bp);

@@ -215,7 +215,7 @@ describe('balloon tail plan (untouched cone, hung vanes)', () => {
   });
 
   test('the Volume block is a YES/NO toggle, guaranteed enclosed', () => {
-    // v1.9.0 (urgent-fix §2): ONE Volume, not a stack — the plan either
+    // v1.9.0: ONE Volume, not a stack — the plan either
     // places a single block on the coupler roof (with a guaranteed 1-cell
     // margin under the skin) or places none.
     const vols = p.comps.filter(c => c.kind === 'volume');
@@ -304,7 +304,7 @@ describe('balloon tail plan (untouched cone, hung vanes)', () => {
   });
 });
 
-describe('v1.8.6 — the mirror never holes a fin face (urgent-fix.md)', () => {
+describe('v1.8.6 — the mirror never holes a fin face', () => {
   test('the big zeppelin tail batch is COMPLETE: no undefined, every record stores', () => {
     // mirror() x → 2·cSide − x moves `min` within its 12-cell frame, so a
     // fat R face could fail the window on the L side — the old

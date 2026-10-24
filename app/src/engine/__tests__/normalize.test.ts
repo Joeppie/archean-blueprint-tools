@@ -31,7 +31,7 @@ describe('v1 → v2 open-time normalize', () => {
     expect(normalizeDoc(doc).converted).toBe(false);
   });
 
-  test('the file reads as v2 (palette embedded) — the QUAT LAW stays on the __legacyQ stamp', () => {
+  test('the file reads as v2 after the migration (palette embedded, version 2)', () => {
     expect(Array.isArray(bp.data.colors)).toBe(true);
     expect(bp.data.colors!.length).toBeGreaterThan(52);
     expect(bp.data.version).toBe(2);
@@ -51,17 +51,16 @@ describe('v1 → v2 open-time normalize', () => {
     expect(cols.color2!.opacity).toBeLessThan(15);                // glass stays translucent
   });
 
-  test('orientations stay VERBATIM; the display rides the legacy stamp (R(q) as stored)', () => {
+  test('orientations stay VERBATIM; the display rides the raw law (R(q) as stored)', () => {
     // v1.5.11: the rule-4 conjugate rewrite was killed (the game round-trips
     // quaternion bytes, so a rewritten quat = a rotated-different craft in
     // game — user's wheel-on-top / torn-murals exports).
     const q = quat(bp.data.components[0]!.orientation);
     expect(q).toEqual({ w: 0.7071, x: 0, y: 0.7071, z: 0 });
-    // the palette-less source's law is RAW and the display must not move:
-    // legacy chain on the STORED quat = what the file always showed
-    const qv = fileToViewQuat(q, true);
+    // the raw law is generation-blind: display = R(STORED quat), unmoved
+    const qv = fileToViewQuat(q);
     expect(qv.y).toBeCloseTo(0.7071, 12);
-    expect(isLegacyFile(docValue(parseDoc(V1)) as Blueprint)).toBe(true);   // as on disk
+    expect(isLegacyFile(docValue(parseDoc(V1)) as Blueprint)).toBe(true);   // generation, as on disk
   });
 
   test('recursion: nested subgrid quaternions are VERBATIM too', () => {
@@ -75,7 +74,7 @@ describe('v1 → v2 open-time normalize', () => {
     // stored quaternion keeps its v1 raw form (x̂ 90°: (0,.7071,0,.7071))
     expect(quat(fj.orientation)).toEqual({ w: 0, x: 0.7071, y: 0, z: 0.7071 });
     // the builder-FLAT display pose = R(raw file quat) — unchanged
-    expect(displayQuat('FluidJunction', fileToViewQuat(quat(fj.orientation), false), quat(fj.orientation)))
+    expect(displayQuat('FluidJunction', fileToViewQuat(quat(fj.orientation)), quat(fj.orientation)))
       .toEqual({ w: 0, x: 0.7071, y: 0, z: 0.7071 });
   });
 

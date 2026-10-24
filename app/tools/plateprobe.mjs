@@ -2,7 +2,7 @@
 // turns? Measures the real-model world box of each Small* master component at
 // angle 0/+35 (the part model is REBUILT in place between the reads). A plate
 // must move with the panel's yaw; standing still or rolling about the
-// fore-aft axis is the defect urgent-fix.md §1 reports.
+// fore-aft axis is the defect v1.9.0 THE PLATE LAW fixed.
 // usage: node tools/plateprobe.mjs [port]
 import { chromium } from 'playwright';
 const PORT = process.argv[2] ?? 5175;
