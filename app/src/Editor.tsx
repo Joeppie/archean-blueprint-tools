@@ -16,7 +16,7 @@ import { BlockPaint, CompPaint, SwatchGrid } from './components/ColorPanel';
 import { TOOLS, ToolDialog, type PlacePayload, type ToolForm } from './components/ToolsDialog';
 import HelpDialog from './components/HelpDialog';
 import { blockInfo, blockMirrorTwin, blockTwinIssues, cellIndex, cellOverlap,
-  complementBlock, mirrorAxisIdx, paintTwinPair, type MirrorAxis } from './engine/blocks';
+  complementBlock, mirrorAxisIdx, paintTwinPair, type MirrorAxisOpt } from './engine/blocks';
 import { cornerOf, triAt, triangleFromCorners } from './engine/tris';
 import type { Blueprint } from './engine/format';
 import { isLegacyFile } from './engine/format';
@@ -105,10 +105,10 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // settable. Game is not hardcoded x"): the Engine owns the live value
   // (same localStorage key, its own default); the React twin exists so the
   // ⚙ row re-renders. Engine reads are through engineRef for the callbacks.
-  const [mirAxis, setMirAxis] = useState<MirrorAxis>(() =>
-    (['x', 'y', 'z'] as string[]).includes(localStorage.getItem('archean-app-mirror-axis') ?? '')
-      ? localStorage.getItem('archean-app-mirror-axis') as MirrorAxis : 'x');
-  const onMirrorAxis = useCallback((a: MirrorAxis) => {
+  const [mirAxis, setMirAxis] = useState<MirrorAxisOpt>(() =>
+    (['x', 'y', 'z', 'off'] as string[]).includes(localStorage.getItem('archean-app-mirror-axis') ?? '')
+      ? localStorage.getItem('archean-app-mirror-axis') as MirrorAxisOpt : 'x');
+  const onMirrorAxis = useCallback((a: MirrorAxisOpt) => {
     setMirAxis(a);
     engineRef.current?.setMirrorAxis(a);
   }, []);
@@ -129,8 +129,9 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     setOrtho(v);
     engineRef.current?.setProjection(v);
   }, []);
-  /** the axis for callbacks that run outside React render (engine is truth) */
-  const mirAx = useCallback((): MirrorAxis => engineRef.current?.mirrorAxis ?? 'x', []);
+  /** the axis for callbacks that run outside React render (engine is truth);
+   *  v1.10.5: 'off' = the session mirror is disabled entirely */
+  const mirAx = useCallback((): MirrorAxisOpt => engineRef.current?.mirrorAxis ?? 'x', []);
   const [triDraft, setTriDraft] = useState<number[][]>([]);
   const [triSel, setTriSel] = useState(-1);
   const [triBrush, setTriBrush] = useState<number[]>([51, 51, 51, 51, 51]);
@@ -769,10 +770,11 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     ctx.bp.data.components.push(comp as never);
     const at = ctx.bp.data.components.length - 1;
     docArrayInsert(ctx.doc, ['data', 'components'], at, docFromValue(comp));
-    if (mirrorPlace) {
+    if (mirrorPlace && mirAx() !== 'off') {
       // ⇄ twin: mirrored POSITION, same orientation — exactly the geometry
       // sym.ts indexes (mask bit 1), so the pair co-selects and every later
       // edit propagates through the established twin path.
+      // v1.10.5: with the session plane ⊘ off, no twin lands at all.
       const ma = mirAx();
       const tp = p.map((v, k) => (k === mirrorAxisIdx(ma) ? -v : v)) as [number, number, number];
       const twin = newComponent(type, module, tp, qFile);

@@ -143,4 +143,16 @@ test.describe('coord readout + adaptive grid + settable mirror axis @ui', () => 
     await page.getByTestId('mirror-axis-y').click();
     await expect.poll(() => mirAxis(page)).toBe('y');
   });
+
+  test('⚙ mirror axis ⊘ OFF: the session plane is fully disabled (v1.10.5)', async ({ page }) => {
+    await openCraft(page, ISW);
+    await page.getByTestId('toggle-options').click();
+    // the row must carry the ⊘ option next to x/y/z
+    await page.getByTestId('mirror-axis-off').click();
+    await expect.poll(() => mirAxis(page)).toBe('off');
+    expect(await page.evaluate(() => localStorage.getItem('archean-app-mirror-axis'))).toBe('off');
+    // and it goes back on: the session axis is a FULL round-trip, x/y/z ⊕ off
+    await page.getByTestId('mirror-axis-x').click();
+    await expect.poll(() => mirAxis(page)).toBe('x');
+  });
 });

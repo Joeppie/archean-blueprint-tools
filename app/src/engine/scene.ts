@@ -52,7 +52,7 @@ import type { Block, Blueprint, BlueprintComponent, Triangle } from './format';
 import { CELL, CELLS_PER_FRAME, isLegacyFile } from './format';
 import { getBlockEdges, getBlockFaces, getBlockPoints } from './blockshapes';
 import { blockCells, blockMirrorTwin, cellOverlapSkip, mirrorBlockCell, mirrorAxisIdx,
-  blockFromCell, rotateTypeAbout, rotatedBlock, setBlockGeom, type MirrorAxis, type PlaceSpec } from './blocks';
+  blockFromCell, rotateTypeAbout, rotatedBlock, setBlockGeom, type MirrorAxis, type MirrorAxisOpt, type PlaceSpec } from './blocks';
 import { transformSkinTris } from './latsphere';
 import { gridPlan, pxPerMeter } from './grid';
 import {
@@ -388,10 +388,13 @@ export class Engine {
   private mirrorPlane: Group | null = null;
   /** v1.5.21 SETTABLE mirror axis (user: "mirror axes should be settable.
    *  Game is not hardcoded x."): the plane block twins, ⇄ twin placement and
-   *  the overlay's SESSION sheet ride. Default x = the corpus convention. */
-  private mirAxis: MirrorAxis =
-    (['x', 'y', 'z'] as string[]).includes(localStorage.getItem('archean-app-mirror-axis') ?? '')
-      ? (localStorage.getItem('archean-app-mirror-axis') as MirrorAxis) : 'x';
+   *  the overlay's SESSION sheet ride. Default x = the corpus convention.
+   *  v1.10.5: 'off' = no session plane — block edits touch only the selected
+   *  item, the sheet and ghost/brush twin placement stand down (the mask/pair
+   *  machinery from the FILES stays, that is data, not the session plane). */
+  private mirAxis: MirrorAxisOpt =
+    (['x', 'y', 'z', 'off'] as string[]).includes(localStorage.getItem('archean-app-mirror-axis') ?? '')
+      ? (localStorage.getItem('archean-app-mirror-axis') as MirrorAxisOpt) : 'x';
   /** the part boxes of the last load (re-sizes the mirror sheets on a
    *  mirror-axis change without a full reload) */
   private lastPartBoxes: PartBox[] = [];
@@ -2059,14 +2062,14 @@ void main() {
    *  placement and block twin identity. The game is not hardcoded x — the
    *  per-component `mirrorAxis` field and non-x twin pairs are additionally
    *  detected and sheeted by buildMirrorPlane. */
-  setMirrorAxis(a: MirrorAxis) {
+  setMirrorAxis(a: MirrorAxisOpt) {
     if (a === this.mirAxis) return;
     this.mirAxis = a;
     localStorage.setItem('archean-app-mirror-axis', a);
     this.buildMirrorPlane(this.lastPartBoxes);
     this.invalidate();
   }
-  get mirrorAxis(): MirrorAxis { return this.mirAxis; }
+  get mirrorAxis(): MirrorAxisOpt { return this.mirAxis; }
   /** live pairs that PROPAGATE for comp i, while the pair is still aligned
    *  (drift > 5 cm auto-disables — a drifted pair is a FAUX-MIRROR: red ⚠,
    *  no propagation). v1.8.0 UNIFORM MIRROR RULE (user: the rule applies to
@@ -2183,7 +2186,8 @@ void main() {
     }
     const bp = this.bp;
     if (!bp) return;
-    const mask = craftMirrorMask(bp.data.components, this.symIdx) | (1 << mirrorAxisIdx(this.mirAxis));
+    const mask = craftMirrorMask(bp.data.components, this.symIdx) |
+      (this.mirAxis === 'off' ? 0 : (1 << mirrorAxisIdx(this.mirAxis)));
     const lo = [bp.box_min.x, bp.box_min.y, bp.box_min.z];
     const hi = [bp.box_max.x, bp.box_max.y, bp.box_max.z];
     for (const p of parts)
@@ -2198,7 +2202,7 @@ void main() {
     const g = new Group();
     for (let a = 0; a < 3; a++) {
       if (!(mask & (1 << a))) continue;
-      const session = a === mirrorAxisIdx(this.mirAxis);
+      const session = a === mirrorAxisIdx(this.mirAxis);        // off ⇒ -1, no session sheet
       let rotX = 0, rotY = 0, w = 0, h = 0;
       if (a === 0) { rotY = Math.PI / 2; w = span(2); h = span(1); }      // normal x: width z, height y
       else if (a === 1) { rotX = -Math.PI / 2; w = span(0); h = span(2); } // normal y: width x, height z

@@ -1,12 +1,14 @@
 # The mirror rule
-Tags: mirror symmetry twin sym plane flag warning faux propagate unison axis axes
+Tags: mirror symmetry twin sym plane flag warning faux propagate unison axis axes off disable ⊘
 
-The mirror plane rides the **mirror axis** — ⚙ ▸ *mirror axis* picks X, Y or
-Z (default x, the corpus convention; the game itself is not hardcoded x: it
-stores a per-component `mirrorAxis` field, 0 = none, 1=x, 2=y, 3=z). Every
-axis the craft genuinely mirrors on gets a gold sheet at that coordinate's
-0-plane: geometrically detected twin pairs, parts that declare `mirrorAxis`,
-and your session choice (the solid sheet is the plane ⇄ places against).
+The mirror plane rides the **mirror axis** — ⚙ ▸ *mirror axis* picks X, Y,
+Z or **⊘ off** (default x, the corpus convention; the game itself is not
+hardcoded x: it stores a per-component `mirrorAxis` field, 0 = none, 1=x,
+2=y, 3=z). With ⊘ there is NO session mirror — every edit touches only the
+selected item, no twin is placed and no gold session sheet appeared. The
+axes the craft genuinely mirrors on still get their sheets (those are DATA:
+detected twin pairs and declared `mirrorAxis` parts), but under ⊘ blocks no
+longer ride any of them as pairs.
 The rule is UNIFORM — it always applies while a live twin pair exists:
 
 > Every edit on a selected item drives its mirror twin in mirrored unison.

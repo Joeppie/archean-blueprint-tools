@@ -84,8 +84,8 @@ declare global {
     wireHover: () => ReturnType<Engine['pipeHoverState']>;
     /** client px at the middle of a cable's drawn path (pins aim the mouse) */
     cablePoint: (pi: number) => { x: number; y: number } | null;
-    /** v1.5.21 settable mirror axis (⚙ row) */
-    mirAxis: () => 'x' | 'y' | 'z';
+    /** v1.5.21 settable mirror axis (⚙ row) — 'off' (v1.10.5) disables it */
+    mirAxis: () => 'x' | 'y' | 'z' | 'off';
   } }
 }
 

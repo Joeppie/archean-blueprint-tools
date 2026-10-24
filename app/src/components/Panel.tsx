@@ -345,9 +345,11 @@ export function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHu
   /** v1.5.21 SETTABLE MIRROR AXIS (user: "mirror axes should be settable.
    *  Game is not hardcoded x"): the SESSION plane for ⇄ twin placement,
    *  block twin identity and the overlay's solid sheet. Detected mirror
-   *  axes (twin pairs, per-component mirrorAxis) always get their sheet. */
-  mirrorAxis: 'x' | 'y' | 'z';
-  onMirrorAxis: (a: 'x' | 'y' | 'z') => void;
+   *  axes (twin pairs, per-component mirrorAxis) always get their sheet.
+   *  v1.10.5 (user: "mirror option doesn't let me turn it completely off"):
+   *  ⊘ = no session mirror at all. */
+  mirrorAxis: 'x' | 'y' | 'z' | 'off';
+  onMirrorAxis: (a: 'x' | 'y' | 'z' | 'off') => void;
   /** v1.9.2 sky backdrop + projection (user: "use an equi backdrop from a
    *  free site like pixabay, mars and earth and non as options, in the cog
    *  menu … under view also add a mode for orthogonal") */
@@ -397,6 +399,11 @@ export function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHu
           editor's OWN plane (⇄ placement, block twins) is settable too */}
       <div className="flex items-center gap-2 py-[2px] text-[12px] text-ink">
         <span className="flex-1">mirror axis</span>
+        <button data-testid="mirror-axis-off" title="no mirror — edits touch ONLY the selected item (⊘)"
+          onClick={() => p.onMirrorAxis('off')}
+          className={`ksp-btn px-2 py-[1px] text-[11px] ${p.mirrorAxis === 'off' ? 'on' : ''}`}>
+          ⊘
+        </button>
         {(['x', 'y', 'z'] as const).map(a => (
           <button key={a} data-testid={`mirror-axis-${a}`} title={`mirror plane ${a} = 0 (twins + ⇄ placement)`}
             onClick={() => p.onMirrorAxis(a)}

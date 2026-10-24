@@ -7,9 +7,9 @@
 import { describe, expect, it } from 'vitest';
 
 import { blockAt, blockCells, blockFromCell, blockMirrorTwin, blockTwinIssues,
-  cellIndex, cellOverlap,
+  cellIndex, cellOverlap, faceSlots,
   complementBlock, flippedBlock, mirroredBlock, mirrorBlockCell, MIRROR_TYPE,
-  MIRROR_TYPES, mirrorAxisIdx, mirrorFaceOrder, mirroredFaceSlots,
+  MIRROR_TYPES, mirrorAxisIdx, mirrorFaceOrder, mirroredFaceSlots, paintTwinPair,
   rotateType, rotateTypeAbout, rotatedBlock, snapBlockType } from '../blocks';
 import { getBlockPoints } from '../blockshapes';
 import type { Block, Blueprint } from '../format';
@@ -475,5 +475,44 @@ describe('v1.5.21 settable mirror axis (blocks)', () => {
       expect(back).toEqual(slots);
       expect(mirrorFaceOrder(a, t, ax).length).toBe(7);
     }
+  });
+});
+
+// v1.10.5 MIRROR OFF (user: "mirror option doesn't let me turn it completely
+// off, which I need to be able to do"): the ⚙ row's ⊘ option — the SESSION
+// plane is gone entirely. 'off' semantics concentrate in blocks.ts so every
+// consumer shares one law: no twin identity, no faux-mirror popup, no twin
+// paint/placement, and index math answers -1 (nothing may coat over it).
+describe('v1.10.5 mirror axis ⊘ off (blocks)', () => {
+  const bpOf = (blocks: Block[]): Blueprint => ({ data: { blocks } } as unknown as Blueprint);
+
+  it('mirrorAxisIdx("off") = -1; blockMirrorTwin finds NO twin even on a genuine x pair', () => {
+    expect(mirrorAxisIdx('off')).toBe(-1);
+    const b = blockFromCell([4, 3, 2], [0, 0, 0], 0, 4);
+    const t = mirroredBlock(b, 'x');
+    const bp = bpOf([b, t]);
+    expect(blockMirrorTwin(bp, 0, 'x')).toBe(1);          // the pair IS an x pair
+    expect(blockMirrorTwin(bp, 1, 'x')).toBe(0);
+    expect(blockMirrorTwin(bp, 0, 'off')).toBe(-1);        // …but off hides it
+    expect(blockMirrorTwin(bp, 1, 'off')).toBe(-1);
+  });
+
+  it('blockTwinIssues is null under off — no red/informational faux-mirror popup', () => {
+    const b = blockFromCell([4, 3, 2], [1, 0, 0], 13, 4);
+    const twin = mirroredBlock(b, 'x');
+    twin.material = 3;
+    expect(blockTwinIssues(bpOf([b, twin]), 0, 'x')!.issues.length).toBeGreaterThan(0);
+    expect(blockTwinIssues(bpOf([b, twin]), 0, 'off')).toBeNull();
+  });
+
+  it('paintTwinPair under off paints ONLY the source (twin untouched)', () => {
+    const b = blockFromCell([4, 3, 2], [0, 0, 0], 0, 0);
+    const twin = mirroredBlock(b, 'x');
+    const bp = bpOf([b, twin]);
+    expect(blockMirrorTwin(bp, 0, 'x')).toBe(1);           // non-vacuous premise
+    const changed = paintTwinPair(bp, 0, 1, 51, undefined, 'off');
+    expect(changed.length).toBe(7);                        // the source repaints
+    expect(faceSlots(bp.data.blocks[1]!).every(s => s === 0)).toBe(true);  // twin NOT painted
+    expect(faceSlots(bp.data.blocks[0]!).every(s => s === 51)).toBe(true);
   });
 });

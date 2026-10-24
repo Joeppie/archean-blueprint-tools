@@ -162,7 +162,14 @@ export function mirrorBlockCell(cx: number, sizeX: number): number {
  *  corpus crafts are x-symmetric; settable per session via the ⚙ row. */
 export type MirrorAxis = 'x' | 'y' | 'z';
 export const MIRROR_AXES: MirrorAxis[] = ['x', 'y', 'z'];
-export const mirrorAxisIdx = (a: MirrorAxis): number => (a === 'x' ? 0 : a === 'y' ? 1 : 2);
+/** the ⚙ row's full domain (v1.10.5): the three axes PLUS 'off' — a session
+ *  with NO session mirror plane at all (the user asked to turn mirroring
+ *  OFF, not merely change the plane). Pure consumers returning a twin /
+ *  issues / placement accept the opt value and treat 'off' as "no mirror". */
+export type MirrorAxisOpt = MirrorAxis | 'off';
+/** -1 for 'off' — index consumers gate on >=0 where a real axis is needed. */
+export const mirrorAxisIdx = (a: MirrorAxisOpt): number =>
+  (a === 'x' ? 0 : a === 'y' ? 1 : a === 'z' ? 2 : -1);
 
 /** type → its mirror type per AXIS, derived from the vertex clouds of the
  *  real shape table (coord a → 1−a in local space), so it can never drift
@@ -522,10 +529,11 @@ export function setBlockGeom(b: Block, cell: Cell, size: Cell, type: number): vo
  *  wins ties; blocks whose footprint straddles the plane have no twin (-1).
  *  This is the block analogue of sym.ts's component twin index — same plane
  *  as the selected mirror axis, same mask-bit geometry. */
-export function blockMirrorTwin(bp: Blueprint, bi: number, axis: MirrorAxis = 'x'): number {
+export function blockMirrorTwin(bp: Blueprint, bi: number, axis: MirrorAxisOpt = 'x'): number {
   const bl = bp.data.blocks;
   const b = bl[bi];
   if (!b || b.type === 255) return -1;
+  if (axis === 'off') return -1;          // no session plane ⇒ no twin identity
   const a = mirrorAxisIdx(axis);
   const c = blockCells(b);
   const cv: [number, number, number] = [c.x, c.y, c.z];
@@ -569,10 +577,11 @@ export function blockMirrorTwin(bp: Blueprint, bi: number, axis: MirrorAxis = 'x
  *  Everything else (shape, extents, material — the gameplay identity) is a
  *  conflict: RED overlay + ⚠ popup. */
 export function blockTwinIssues(
-  bp: Blueprint, bi: number, axis: MirrorAxis = 'x'): { twin: number; issues: string[]; info: boolean } | null {
+  bp: Blueprint, bi: number, axis: MirrorAxisOpt = 'x'): { twin: number; issues: string[]; info: boolean } | null {
   const bl = bp.data.blocks;
   const b = bl[bi];
   if (!b || b.type === 255) return null;
+  if (axis === 'off') return null;        // no plane ⇒ no mirrored footprint to flag
   const a = mirrorAxisIdx(axis);
   const twin = blockMirrorTwin(bp, bi, axis);
   let other = twin;
@@ -685,12 +694,12 @@ export function paintBlockFaces(b: Block, slot: number, faces?: number[]): numbe
  *  on the twin's right). Pure writes onto the live blocks — the caller
  *  writeBlockDoc both (called per block). Returns the source faces actually changed. */
 export function paintTwinPair(bp: Blueprint, bi: number, twin: number,
-  slot: number, faces?: number[], axis: MirrorAxis = 'x'): number[] {
+  slot: number, faces?: number[], axis: MirrorAxisOpt = 'x'): number[] {
   const b = bp.data.blocks[bi];
   if (!b) return [];
   const changed = paintBlockFaces(b, slot, faces);
-  const tw = twin >= 0 ? bp.data.blocks[twin] : undefined;
-  if (tw && changed.length) {
+  const tw = twin >= 0 && axis !== 'off' ? bp.data.blocks[twin] : undefined;
+  if (tw && changed.length && axis !== 'off') {
     const order = mirrorFaceOrder(b, tw, axis);
     const tfaces = changed.map(f => order[f]!).filter(f => f >= 0 && f < 7);
     paintBlockFaces(tw, slot, tfaces);

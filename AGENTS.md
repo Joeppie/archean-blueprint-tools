@@ -609,7 +609,11 @@ freshly-authored triangles, fixture 9000006001 — see the v1.5.12 bullet).
   geometry − 0.05) is UNCHANGED; `gridInfo()` hook `grid()`. Options row
   relabeled "ground grid (zoom-adaptive)".
   (3) SETTABLE MIRROR AXIS (options row `mirror-axis-x|y|z`, localStorage
-  `archean-app-mirror-axis`, default x): Engine.mirrorAxis drives the
+  `archean-app-mirror-axis`, default x; v1.10.5: plus a ⊘ `mirror-axis-off`
+  that disables the SESSION mirror entirely — block twin identity, panel
+  geometry/paint mirroring, ghost/brush twin placement and the session sheet
+  all stand down; 'off' semantics in blocks.ts, pinned in vitest blocks
+  "⊘ off" + views.spec): Engine.mirrorAxis drives the
   twin PLACEMENT (components mirror that coord; block twins via the now
   axis-PARAMETERIZED blocks.ts: per-axis cloud-derived `MIRROR_TYPES[x|y|z]`
   tables, `mirroredBlock/flippedBlock/blockMirrorTwin/blockTwinIssues/

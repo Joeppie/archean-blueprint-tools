@@ -10,7 +10,7 @@ import { writeBlockDoc, writeBlockMaterial, type EditCtx } from '../engine/edit'
 import { docArrayInsert, docFromValue, docSetNumber, docArrayRemoveAt } from '../engine/doc';
 import { blockCells, blockFromCell, blockInfo, blockTwinIssues, blockMirrorTwin, cellOverlapSkip, flippedBlock,
   mirroredBlock, mirrorAxisIdx, MIRROR_TYPES, mirrorBlockCell, rotateType, rotatedBlock, setBlockField, setBlockGeom,
-  snapBlockType, type MirrorAxis, type PlaceSpec } from '../engine/blocks';
+  snapBlockType, type MirrorAxis, type MirrorAxisOpt, type PlaceSpec } from '../engine/blocks';
 import { shapeName } from '../engine/blockshapes';
 import { MATERIALS, MATERIAL_HINT, materialName } from '../engine/tools';
 import { cssColor, resolveColor } from '../engine/palette';
@@ -56,8 +56,9 @@ export function BlockPanel(p: {
   /** v1 files carry no data.colors — the palette picker applies the remap */
   legacy: boolean;
   /** v1.5.21 SETTABLE mirror axis (⚙ row): the plane block twin identity,
-   *  mirrored rows and in-place shape flips ride. Default x. */
-  mirrorAxis?: MirrorAxis;
+   *  mirrored rows and in-place shape flips ride. Default x.
+   *  v1.10.5: 'off' disables the session plane entirely. */
+  mirrorAxis?: MirrorAxisOpt;
   onBrush: (b: Brush) => void;
   onSelectBlock: (bi: number) => void;
   onApplied: () => void;                 // schedule reload + dirty
@@ -119,7 +120,8 @@ export function BlockPanel(p: {
       }
       setBlockField(bp, twin, k, cell[ax]!);
     } else if (k === 'type') {
-      setBlockField(bp, twin, 'type', MIRROR_TYPES[mAx][Math.round(v)] ?? Math.round(v));
+      // twin >= 0 implies a real plane (off yields twin = -1, the guard above)
+      setBlockField(bp, twin, 'type', MIRROR_TYPES[mAx as MirrorAxis][Math.round(v)] ?? Math.round(v));
     } else {
       setBlockField(bp, twin, k, v);            // setBlockField clamps per-twin
     }
@@ -159,7 +161,7 @@ export function BlockPanel(p: {
   const flipInPlace = () => editBlocks(bi => {
     const b = p.ctx!.bp.data.blocks[bi];
     if (!b) return false;
-    const t = flippedBlock(b, mAx).type;
+    const t = flippedBlock(b, mAx === 'off' ? 'x' : mAx).type;   // self flip is a geometry op; off has no plane, x is the neutral self-mirror
     if (t === b.type) return false;
     b.type = t; writeBlock(bi);
     return true;
@@ -367,12 +369,12 @@ export function BlockPanel(p: {
  *  SETTABLE mirror axis, default x; type mirrored; same-face colour slots
  *  kept — single-slot brush paints are the exact case). */
 export function placeBlock(ctx: EditCtx, spec: PlaceSpec, mirror = false,
-  axis: MirrorAxis = 'x'): number {
+  axis: MirrorAxisOpt = 'x'): number {
   const block = blockFromCell(spec.cell, spec.size, spec.type, spec.slot, spec.material ?? 0);
   ctx.bp.data.blocks.push(block);
   const at = ctx.bp.data.blocks.length - 1;
   docArrayInsert(ctx.doc, ['data', 'blocks'], at, docFromValue(block));
-  if (mirror) {
+  if (mirror && axis !== 'off') {
     const twin = mirroredBlock(block, axis);
     ctx.bp.data.blocks.push(twin);
     docArrayInsert(ctx.doc, ['data', 'blocks'], ctx.bp.data.blocks.length - 1, docFromValue(twin));
