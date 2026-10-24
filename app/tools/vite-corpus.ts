@@ -141,7 +141,11 @@ export function resetCorpusCache(): void { corpusCache = null; }
  *  ANY corpus folder never pollutes the gallery. */
 const FIXTURE = /^900000\d{4}$/;
 /** novelty/repeat builds kept in the corpus but not on the landing page (V1) */
-const EXCLUDE = new Set(['3384910875', '3334593406', '3347018068', '3334591920']);
+// Gallery-only hiding (mirrors make_landing.py EXCLUDE — 2026-10-24: the
+// dolphin/Sprite-500/Cede trio stay in testdata/ as fixtures; /corpus routes
+// and ?craft= deep links resolve via craftFile(), NOT gated by this set).
+const EXCLUDE = new Set(['3384910875', '3334593406', '3347018068', '3334591920',
+  '3417786605', '3404843025', '3348400160']);
 /** "23", "Workshop item 3406025722"… (deleted/untitled) → skip (V1 rule) */
 const NUMERIC_NAME = /^(Workshop item\s+)?[\d\s.,_\-]+$/;
 /** titles the V1 landing curates offline (tsv rows may be missing/stale) */

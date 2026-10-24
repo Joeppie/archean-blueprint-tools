@@ -1,4 +1,4 @@
-// staleness.spec.ts — the VERSIONED CACHE UI (v1.9.5): the gallery status
+// staleness.spec.ts — the VERSIONED CACHE UI (v1.10.0): the gallery status
 // chip + the [Download latest] / [Open cached copy] open gate.
 //
 // The staleness is SEALED IN THROUGH THE WIRE, not a debug backdoor: the
@@ -13,7 +13,9 @@
 import { expect, test } from '@playwright/test';
 import { createHash } from 'node:crypto';
 
-const ID = '3417786605';                       // Dolphin — on the testdata floor
+const ID = '3803780241';                       // XYQ-615 — a cataloged craft (a
+//                                               hidden craft has no gallery card,
+//                                               so it can't carry the chip the test asserts)
 
 const fakeRevRoute = async (route: import('@playwright/test').Route) => {
   const res = await route.fetch();

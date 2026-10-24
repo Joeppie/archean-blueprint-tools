@@ -56,6 +56,12 @@ EXCLUDE = {
     '3334593406',   # port-a-power-plugin
     '3347018068',   # Oh no.. it flies
     '3334591920',   # 7x-Port-a-MiningRig
+    # 2026-10-24 (user): retired from the COLLECTION — files stay in testdata/
+    # as regtest + viewer-postest + app-e2e fixtures (deep links keep working;
+    # only the gallery listing hides them):
+    '3417786605',   # BionicDolphin  (subgrid/hinge/gizmo pins load it by id)
+    '3404843025',   # Sprite 500 - RCS ("RCS-500")
+    '3348400160',   # Cede (outdated)
 }
 NUMERIC_NAME = re.compile(r'^(Workshop item\s+)?[\d\s.,_\-]+$', re.U)  # "23", "Workshop item 3406025722"… (deleted/untitled) -> skip (user)
 
