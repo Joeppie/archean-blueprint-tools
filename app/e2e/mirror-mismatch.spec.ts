@@ -122,9 +122,9 @@ test.describe('faux-mirror screen: mismatches are flagged, not silent @place', (
     await page.getByTestId('gallery-new').click();
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
     await page.getByTestId('mode-edit').click();
+    await page.getByTestId('block-mirror').click();        // shared twin switch (dock header)
+    await page.getByTestId('tooltab-place').click();       // dock header (drawer closed)
     await setDrawer(page, true);
-    await page.getByTestId('block-mirror').click();        // shared twin switch
-    await page.getByTestId('tooltab-place').click();
     await page.getByTestId('filter').fill('smallwheel');
     await page.getByTestId('catalog-item').first().click();
     await expect(page.getByTestId('place-hint')).toContainText('SmallWheel');

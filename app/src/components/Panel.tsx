@@ -957,36 +957,12 @@ export default function Panel(p: Props) {
   const place = p.tool === 'place';
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-panel text-ink" data-testid="panels">
-      {/* THE TWO FLAVORS of this panel (v1.5 user rule: "the UI is not clear
-          about how to select and edit — it should be on top of the pane in
-          two flavors of the same panel"): ONE Edit|Place switch crowns the
-          side panel of the merged Edit mode. EDIT = click to
-          SELECT (gizmo + inspector + Delete); PLACE = dock blocks/parts with
-          a ghost. */}
-      {p.onTool && p.tool && (
-        <div className="shrink-0 border-b border-white/10 px-3 pb-2 pt-2">
-          <div className="flex items-center gap-1">
-            {([['edit', '✎ Edit'], ['place', '✚ Place']] as const).map(([t, l]) => (
-              <button key={t} data-testid={`tooltab-${t}`} aria-pressed={p.tool === t}
-                onClick={() => p.onTool!(t)}
-                className={`ksp-btn flex-1 px-2 py-[5px] text-[11px] ${p.tool === t ? 'on font-semibold' : 'text-ink-dim'}`}>
-                {l}
-              </button>
-            ))}
-            {place && p.onMirrorPlace && (
-              <button data-testid="place-mirror" title="⇄ also place the x-mirrored twin"
-                aria-pressed={!!p.mirrorPlace} onClick={() => p.onMirrorPlace!(!p.mirrorPlace)}
-                className={`ksp-btn px-2 py-[3px] text-[10px] ${p.mirrorPlace ? 'on' : ''}`}>
-                ⇄ {p.mirrorPlace ? 'twin ON' : 'twin off'}
-              </button>
-            )}
-          </div>
-          <div data-testid="flavor-hint" className="pt-1 text-[10px] leading-snug text-ink-dim">
-            {place ? 'hover a surface → ghost · click to DOCK · Shift continues the aimed block'
-              : 'click a part or block to SELECT it — gizmo move/turn · inspector · Delete'}
-          </div>
-        </div>
-      )}
+      {/* v1.10.7 (we: "the side panel is still edit/place toggle, which makes
+          no sense. It's also far too wide on phone"): the ✎ Edit | ✚ Place
+          switch MOVED to the build-dock header — it sets what a canvas tap
+          DOES, so it belongs with the workspace, and the phone drawer must
+          not be the only place to find it. This panel is now purely the
+          parts catalogue (PLACE flavor) / parts list + inspector (EDIT). */}
       {/* the buoyancy planner (user 2026-10-22): a collapsible widget PART OF
           THE BUILDER — envelope volume from the hull skin, vacuum/helium/
           hydrogen lift at sea level, the per-altitude weight limit and the

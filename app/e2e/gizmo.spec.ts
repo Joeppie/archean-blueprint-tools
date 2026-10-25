@@ -243,7 +243,7 @@ test.describe('gizmo writeback @gizmo @slow', () => {
     expect(spot, 'a part/block surface answers the pickCell click path').not.toBeNull();
     let picked = false;
     for (const [jx, jy] of [[0, 0], [0.004, 0.004], [-0.004, 0]]) {
-      await canvas.click({ position: { x: box.width * (spot.x + jx), y: box.height * (spot.y + jy) } });
+      await canvas.click({ position: { x: box.width * (spot!.x + jx), y: box.height * (spot!.y + jy) } });
       if (await page.getByTestId('modebox').isVisible().catch(() => false)) { picked = true; break; }
     }
     expect(picked, 'a deliberate canvas tap on the craft pops the mode widget').toBe(true);

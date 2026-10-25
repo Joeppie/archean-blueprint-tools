@@ -274,22 +274,42 @@ export function BlockPanel(p: {
                 Blocks don't currently let you make them square"): the active
                 axis for the viewport [ ] keys, one-tap SQUARE + reset, and
                 the fields up to the sanity cap (frame borders no longer
-                cap growth — the square-block engine fix). */}
-            <div className="flex flex-wrap items-center gap-1 pb-1">
-              {(['x', 'y', 'z'] as const).map((ax, i) => (
-                <button key={ax} data-testid={`brush-axis-${ax}`} title={`active axis for the [ ] resize keys (key ${ax})`}
-                  onClick={() => p.onAxis?.(i)}
-                  className={`ksp-btn px-2 py-[2px] text-[10px] ${p.axisSel === i ? 'on' : ''}`}>
-                  {ax}
-                </button>
-              ))}
+                cap growth — the square-block engine fix).
+                v1.10.7 (we: "on phone I've no idea how to place"): the axis
+                chips gained −/+ STEPPERS — the touch twin of the keys
+                (shared brushAxis/brush state), sized for a thumb. */}
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pb-1">
+              {(['x', 'y', 'z'] as const).map((ax, i) => {
+                const k = `s${ax}` as const;
+                const step = (d: number) =>
+                  p.onBrush({ ...p.brush, [k]: Math.max(0, Math.min(BLOCK_SIZE_MAX, p.brush[k] + d)) });
+                return (
+                  <span key={ax} className="flex items-center gap-[3px]">
+                    <button data-testid={`brush-axis-${ax}`} title={`active axis — the [ ] keys resize it; tap −/+ here (key ${ax})`}
+                      onClick={() => p.onAxis?.(i)}
+                      className={`ksp-btn px-2 py-[3px] text-[11px] ${p.axisSel === i ? 'on' : ''}`}>
+                      {ax}
+                    </button>
+                    <button data-testid={`brush-step-${ax}-m`} title={`shrink the ${ax} size by one cell (key [)`}
+                      onClick={() => step(-1)}
+                      className="ksp-btn px-2 py-[3px] text-[12px]">−</button>
+                    <span data-testid={`brush-size-${ax}`} title={`${ax} footprint in cells`}
+                      className="w-6 text-center text-[12px] font-semibold text-ink">
+                      {p.brush[k] + 1}
+                    </span>
+                    <button data-testid={`brush-step-${ax}-p`} title={`grow the ${ax} size by one cell (key ] )`}
+                      onClick={() => step(1)}
+                      className="ksp-btn px-2 py-[3px] text-[12px]">+</button>
+                  </span>
+                );
+              })}
               <button data-testid="brush-square" title="square the brush: every axis to the largest (key s)"
                 onClick={() => { const m = Math.max(p.brush.sx, p.brush.sy, p.brush.sz);
                   p.onBrush({ ...p.brush, sx: m, sy: m, sz: m }); }}
-                className="ksp-btn px-2 py-[2px] text-[10px]">▣ square</button>
+                className="ksp-btn px-2 py-[3px] text-[10px]">▣ square</button>
               <button data-testid="brush-reset" title="reset the brush to one cell"
                 onClick={() => p.onBrush({ ...p.brush, sx: 0, sy: 0, sz: 0 })}
-                className="ksp-btn px-2 py-[2px] text-[10px]">1×1×1</button>
+                className="ksp-btn px-2 py-[3px] text-[10px]">1×1×1</button>
             </div>
             <div className="flex gap-2">
               <Num label="sx" value={p.brush.sx} min={0} max={BLOCK_SIZE_MAX} onCommit={v => p.onBrush({ ...p.brush, sx: v })} />

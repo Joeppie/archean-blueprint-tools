@@ -17,23 +17,39 @@ Tags: interface ui panel topbar modes options settings widgets layout tabs cost 
 
 ## The side panel
 
-The panel is one column with a fixed crown: the **✎ Edit | ✚ Place** flavour
-switch (in Edit and Wire-free modes), then context:
+The panel is the parts context column (on phones it is a drawer — the ▤
+button opens it; the canvas stays usable beside it):
 
 * **Parts list** — two tabs: *by type* and *by subgrid*; one search filters
   both; groups start collapsed and a click on a row expands and reveals it.
-  Double-click flies the camera to the part.
+  Double-click flies the camera to the part. In the **✚ Place** flavour the
+  list becomes the parts **catalog** — tap a part to hold it, then tap a
+  surface on the craft.
 * **Inspector** — the selection's position/orientation sliders, `data` rows,
   Paint section, Delete. Every field applies LIVE (one model rebuild per
   frame, no scene reload).
-* **Blocks section** (Edit mode, panel bottom) — the brush (shape ⟲ cycle,
-  material chips, paint slot), the Blocks | Triangles sub-tabs and the
-  selected-item editor (shape turns, cx/cy/cz, material, face paint).
 * **VesselStats** (View mode) — mass & CoM, census, heaviest classes, the
   collapsible ⚖ Lift row and the **Build cost** row (every part, block, hull
   triangle, cable, frame beam and strut unfolded through the game's crafter
   recipes to raw ores/molecules — the craft-wide shopping list on top, then a
   section per species, each line's own recipe chain one click down).
+
+## The build dock (Edit mode)
+
+The **✎ Edit | ✚ Place** flavour switch lives in this WIDE bottom dock (not
+the sidebar): it sets what a canvas click / tap DOES. Beside it: the
+▤ Blocks | ▵ Triangles sub-tabs and the ⇄ twin toggle. The dock is three
+columns — the **brush + census**, a **searchable list** of every
+block/triangle (hover a row to light it gold in the 3D view, click to
+select, ✕ deletes it and its twin — Undo brings them back), and the
+**editor of the selected item**.
+
+* **Placing on a phone**: pick ✚ Place, set the size with the **− / +**
+  steppers (▣ squares it), then **tap a surface** — the ghost chip at the
+  top shows the footprint. (On a keyboard the same sizing is **x y z** to
+  pick the axis, **[ ]** to shrink/grow, **s** to square.)
+* **Editing**: pick ✎ Edit and tap a part (the inspector opens) or a block
+  face (the block editor + the BLOCK widget open).
 
 ## Viewport furniture
 

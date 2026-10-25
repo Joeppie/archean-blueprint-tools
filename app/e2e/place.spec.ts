@@ -28,17 +28,23 @@ test.describe('KSP modes & catalog placement @place', () => {
   test('mode tiles: blocks / wire / flight / edit each show their workspace', async ({ page }) => {
     await page.goto(`/?craft=${ISW}`);
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
-    await setDrawer(page, true);
+    // v1.10.7: TopBar tiles + the dock header flavor switch are all clicked
+    // with the drawer CLOSED (its backdrop covers the dock on phones); the
+    // drawer opens only for the parts-list / inspector phase at the end.
     await page.getByTestId('mode-edit').click();
-    await page.getByTestId('tooltab-place').click();       // v1.5: the brush lives in PLACE
+    await page.getByTestId('tooltab-place').click();       // the brush lives in PLACE (dock header)
     await expect(page.getByTestId('block-brush')).toBeVisible();
     await expect(page.getByTestId('blocksub-tris')).toBeVisible();   // + triangles submode
     await page.getByTestId('mode-wire').click();
     await expect(page.getByTestId('wire-census')).toBeVisible();
+    // FLIGHT/analysis panels live in the side panel = the drawer on phones
+    await setDrawer(page, true);
     await page.getByTestId('mode-flight').click();
     await expect(page.getByTestId('flight-prop')).toBeVisible();
+    await setDrawer(page, false);
     await page.getByTestId('mode-edit').click();
-    await page.getByTestId('tooltab-edit').click();        // v1.5: the flavor is shared, set it back
+    await page.getByTestId('tooltab-edit').click();        // the flavor is shared, set it back
+    await setDrawer(page, true);
     await page.getByTestId('filter').fill('smallwheel');
     await page.locator('[data-idx]').first().click();
     await expect(page.getByTestId('inspector')).toContainText('SmallWheel[');
@@ -52,8 +58,8 @@ test.describe('KSP modes & catalog placement @place', () => {
     await page.getByTestId('mode-edit').click();
     const before = (await compsOf(page)).length;
 
+    await page.getByTestId('tooltab-place').click();       // v1.4: the catalog IS the PLACE tab (dock header)
     await setDrawer(page, true);
-    await page.getByTestId('tooltab-place').click();       // v1.4: the catalog IS the PLACE tab
     await expect(page.getByTestId('catalog-list')).toBeVisible();
     await page.getByTestId('filter').fill('smallwheel');
     await page.getByTestId('catalog-item').first().click();
@@ -126,8 +132,8 @@ test.describe('KSP modes & catalog placement @place', () => {
     await page.getByTestId('gallery-new').click();
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
     await page.getByTestId('mode-edit').click();
+    await page.getByTestId('tooltab-place').click();       // dock header (drawer closed)
     await setDrawer(page, true);
-    await page.getByTestId('tooltab-place').click();
     await page.getByTestId('filter').fill('smallwheel');
     await page.getByTestId('catalog-item').first().click();
     await setDrawer(page, false);
@@ -166,8 +172,8 @@ test.describe('KSP modes & catalog placement @place', () => {
     await page.getByTestId('gallery-new').click();
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
     await page.getByTestId('mode-edit').click();
+    await page.getByTestId('tooltab-place').click();       // dock header (drawer closed)
     await setDrawer(page, true);
-    await page.getByTestId('tooltab-place').click();
     await expect(page.getByTestId('catalog-list')).toBeVisible();
     // rows trickle previews in (one geometry per idle slice, decimated
     // twins): after a moment several <img> tiles carry a real rendered part

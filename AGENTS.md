@@ -1346,6 +1346,32 @@ topic + FORMAT).
   re-stamped to silent fresh. Bonus rule learned: corpus identity — catalog
   and /corpus route resolve the SAME file (one `craftFile()`), so a staleness
   flag can never describe a different file than the download would fetch.
+- **v1.10.7 PHONE BUILD UX (we: "On phone I've no idea how to place and the
+  side panel is still edit/place toggle, which makes no sense. It's also far
+  too wide on phone")**: (1) the ✎ Edit | ✚ Place flavor switch MOVED from
+  the sidebar crown into the BUILD-DOCK HEADER (it sets what a canvas tap
+  DOES — it belongs with the workspace; the phone drawer used to be the
+  only place to find it, and its backdrop covering the dock made every
+  dock tap a drawer dance). `place-mirror` (panel) is GONE — the dock's
+  ⇄ twin row is the one mirror toggle (brush + held parts + edits). The
+  Panel keeps `tool` for its Catalog/Parts heading. (2) THE DRAWER is
+  `w-[68vw] max-w-[300px] md:w-[300px]` (was 300/85vw — the 412 px phone
+  lost 73 % of the screen; now 68 % drawer, 32 % live canvas). (3) TOUCH
+  PLACEMENT: the brush axis chips gained −/+ **steppers** (`brush-step-{ax}-m/p`,
+  value span `brush-size-{ax}`) — the touch twin of the v1.10.6 keys
+  (shared brushAxis/brush state; ▣ square / 1×1×1 by tap); the dock
+  `flavor-hint` and the `brush-chip` are DEVICE-HONEST (hidden md:inline
+  key text / md:hidden TAP wording — innerText excludes the hidden span,
+  pins assert 'TAP' on pixel7). e2e: phone flow re-pinned across
+  place/mirror/mirror-mismatch (dock-header clicks happen with the DRAWER
+  CLOSED — the backdrop `panel-backdrop` intercepts dock taps on phones;
+  assertions through Playwright visibility pass behind the drawer, CLICKS
+  do not; FLIGHT/Wind panels live in the sidebar = open the drawer for
+  those tiles), builddock gains the phone pin (dock-header switch visible
+  without the drawer, drawer ≤ 72 % viewport, stepper taps → chip 1×1×4 →
+  square 4×4×4 → reset, a canvas tap lands a block). Lesson: canvas
+  FRACTIONS are not aspect-stable — the phone canvas resizes with the
+  drawer dock, probe through engine pickers, never hardcode fractions.
 - **v1.10.6 THE BUILD DOCK + THE SQUARE-BLOCK FIX (we: "UX is crap. Placing
   blocks isn't fun, and editing triangles also sucks … use the same kind of
   panel like for wires, also when placing we should be able to resize.

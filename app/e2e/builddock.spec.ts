@@ -116,6 +116,66 @@ test.describe('build-dock: blocks workspace, resize-while-placing, square fix @p
   });
 });
 
+test.describe('build-dock: phone placement @ui', () => {
+  // v1.10.7 (we: "on phone I've no idea how to place and the side panel is
+  // still edit/place toggle, which makes no sense. It's also far too wide"):
+  // the flavor switch + TAP hints live in the DOCK HEADER (no drawer round
+  // trip), −/+ STEPPERS resize the brush by touch, and the drawer stays a
+  // drawer — never wider than 72 % of the viewport.
+  test('the dock header carries the flavor switch; steppers resize by tap; the drawer is narrow', async ({ page }) => {
+    await open(page);
+    // the switch is in the dock header — visible with the drawer never opened
+    await expect(page.getByTestId('tooltab-place')).toBeVisible();
+    await expect(page.getByTestId('tooltab-edit')).toBeVisible();
+    // the drawer (phone): narrow, so the canvas stays usable behind it
+    const vp = page.viewportSize()!;
+    if (vp.width < 768) {
+      await page.getByTestId('toggle-panels').click();
+      const w = (await page.getByTestId('panel-aside').boundingBox())!.width;
+      expect(w / vp.width, 'the phone drawer leaves real canvas room').toBeLessThanOrEqual(0.72);
+      await page.getByTestId('toggle-panels').click();
+    }
+    // PLACE flavor: the hint tells the touch user what to do (no key names)
+    await page.getByTestId('tooltab-place').click();
+    const hint = page.getByTestId('flavor-hint');
+    await expect(hint).toBeVisible();
+    if (vp.width < 768) await expect(hint).toContainText('TAP');
+    // steppers: tap + on z three times → 1×1×4, chip + value follow
+    await expect(page.getByTestId('brush-chip')).toContainText('1×1×1');
+    for (let i = 0; i < 3; i++) await page.getByTestId('brush-step-z-p').click();
+    await expect(page.getByTestId('brush-size-z')).toHaveText('4');
+    await expect(page.getByTestId('brush-chip')).toContainText('1×1×4');
+    // square by tap, reset by tap
+    await page.getByTestId('brush-square').click();
+    await expect(page.getByTestId('brush-chip')).toContainText('4×4×4');
+    await page.getByTestId('brush-reset').click();
+    await expect(page.getByTestId('brush-chip')).toContainText('1×1×1');
+    // a TAP on a surface places (the touch placement path end to end)
+    const n0 = await page.evaluate(() => (window as unknown as {
+      __ARCHEAN__?: { stats: () => { blocks: number } } }).__ARCHEAN__!.stats().blocks);
+    const spot = await page.evaluate(() => {
+      const c = document.querySelector('canvas')!;
+      const r = c.getBoundingClientRect();
+      const e = (window as unknown as { __ARCHEAN__?: { engine: { pendingReal: number;
+        pickCell: (x: number, y: number) => { bi: number } | null } } }).__ARCHEAN__!.engine;
+      if (e.pendingReal > 0) return null;
+      for (let fy = 0.3; fy <= 0.85; fy += 0.04)
+        for (let fx = 0.2; fx <= 0.8; fx += 0.04) {
+          const h = e.pickCell(r.left + r.width * fx, r.top + r.height * fy);
+          if (h && h.bi >= 0) return { x: fx, y: fy };
+        }
+      return null;
+    });
+    expect(spot, 'a block face answers the tap path').not.toBeNull();
+    const box = (await page.getByTestId('canvas').boundingBox())!;
+    await page.getByTestId('canvas').click({
+      position: { x: box.width * spot!.x, y: box.height * spot!.y } });
+    await expect.poll(() => page.evaluate(() => (window as unknown as {
+      __ARCHEAN__?: { stats: () => { blocks: number } } }).__ARCHEAN__!.stats().blocks),
+    { timeout: 5000 }).toBeGreaterThan(n0);
+  });
+});
+
 test.describe('build-dock: triangle workspace @ui', () => {
   test('tri list selects, ±cell move round-trips, window refusal is honest', async ({ page }) => {
     test.skip(test.info().project.name !== 'chromium', 'desktop-only');

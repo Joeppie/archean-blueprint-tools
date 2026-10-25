@@ -24,6 +24,9 @@ part. Click places; red ghost = the footprint collides, the click is refused.
   axis, **[** and **]** shrink / grow it one cell (`−`/`=` work too), and
   **s** squares the brush (every axis to the largest). The chip under the
   top edge shows the live footprint, e.g. `▤ 4×4×2 cells ▸ x`.
+* **On a phone** the same sizing is in the dock: the **x / y / z** chips
+  pick the active axis and the **− / +** steppers size it by tap; **▣
+  square** and **1×1×1** are one tap. Then tap a surface to place.
 * **▣ square** / **1×1×1** buttons in the brush do the same with the mouse.
   Blocks grow freely in all three axes — a block near a frame border is no
   longer capped there (the game stores multi-frame blocks itself), so a

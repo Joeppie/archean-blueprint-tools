@@ -33,12 +33,11 @@ test.describe('⇄ mirrored placement @place', () => {
     await page.getByTestId('gallery-new').click();
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
     await page.getByTestId('mode-edit').click();
-    // v1.10.6: the flavor switch lives in the drawer, the ⇄ twin row in the
-    // build-dock — on phones the open drawer's backdrop covers the dock, so
-    // the mirror switch is clicked with the drawer CLOSED.
-    await setDrawer(page, true);
-    await page.getByTestId('tooltab-place').click();          // v1.5: the PLACE flavor
-    await setDrawer(page, false);
+    // v1.10.7: the flavor switch and the ⇄ twin row BOTH live in the
+    // build-dock header now (the phone drawer no longer hosts any of it) —
+    // the drawer's backdrop covers the dock while open, so every dock tap
+    // happens with the drawer CLOSED.
+    await page.getByTestId('tooltab-place').click();          // the PLACE flavor (dock header)
     await expect(page.getByTestId('block-mirror')).toBeVisible();
     await page.getByTestId('block-mirror').click();          // twin ON (persisted)
     await expect(page.getByTestId('block-mirror')).toContainText('twin ON');
@@ -81,8 +80,7 @@ test.describe('⇄ mirrored placement @place', () => {
     expect(twin!.size_x).toBe(self!.size_x);
     expect(twin!.type).not.toBe(255);
     // mirror is a closed involution on the placed type
-    await setDrawer(page, true);
-    await page.getByTestId('tooltab-edit').click();      // the EDIT sub-tab edits
+    await page.getByTestId('tooltab-edit').click();      // the EDIT flavor (dock header)
     await expect(page.getByTestId('block-edit')).toBeVisible();
   });
 
@@ -91,15 +89,16 @@ test.describe('⇄ mirrored placement @place', () => {
     await page.getByTestId('gallery-new').click();
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
     await page.getByTestId('mode-edit').click();
+    // v1.10.7: PLACE flavor from the dock header (drawer closed), then the
+    // drawer hosts ONLY the catalog (the parts catalogue is the panel's
+    // PLACE flavor content — that is where the drawer stays useful).
+    await page.getByTestId('tooltab-place').click();       // PLACE flavor = catalog
     await setDrawer(page, true);
-    await page.getByTestId('tooltab-place').click();       // v1.4 PLACE tab = catalog
     await page.getByTestId('filter').fill('smallwheel');
     await page.getByTestId('catalog-item').first().click();
     await expect(page.getByTestId('place-hint')).toContainText('SmallWheel');
     await setDrawer(page, false);
-    // v1.10.6: the ⇄ twin row is in the build-dock (backdrop-free with the
-    // drawer closed)
-    await page.getByTestId('block-mirror').click();        // shared twin switch
+    await page.getByTestId('block-mirror').click();        // shared twin switch (dock)
     await expect(page.getByTestId('block-mirror')).toContainText('twin ON');
 
     const before = (await compsOf(page)).length;

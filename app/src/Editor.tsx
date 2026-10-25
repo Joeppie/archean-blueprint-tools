@@ -945,7 +945,22 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   );
   const buildWorkspace = (
     <>
+      {/* v1.10.7 (we: "on phone I've no idea how to place and the side panel
+          is still edit/place toggle, which makes no sense"): the flavor
+          switch MOVES from the sidebar into the dock header — it is the
+          WORKSPACE's mode (what canvas taps do), so it lives with the
+          workspace, not with the parts list. On phones the dock is always
+          visible; the sidebar is a drawer the switch used to hide behind.
+          The hint is device-honest: keys on desktop, TAP wording on touch. */}
       <div className="flex flex-wrap items-center gap-1 px-3 pt-2">
+        {(['edit', 'place'] as const).map(t => (
+          <button key={t} data-testid={`tooltab-${t}`} aria-pressed={tool === t}
+            onClick={() => setTool(t)}
+            className={`ksp-btn px-2 py-[3px] text-[11px] ${tool === t ? 'on font-semibold' : 'text-ink-dim'}`}>
+            {t === 'edit' ? '✎ Edit' : '✚ Place'}
+          </button>
+        ))}
+        <span className="mx-1 hidden h-4 w-px bg-white/15 md:inline-block" />
         {(['blocks', 'tris'] as const).map(t => (
           <button key={t} data-testid={`blocksub-${t}`} onClick={() => { setBlockSub(t); setTriDraft([]); }}
             className={`ksp-btn px-2 py-[3px] text-[11px] ${blockSub === t ? 'on' : ''}`}>
@@ -953,16 +968,24 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
           </button>
         ))}
         {blockSub === 'blocks' && (
-          <button data-testid="block-mirror" title="⇄ respect the mirror plane: place the x-mirrored twin AND propagate block edits to the similar twin"
+          <button data-testid="block-mirror" title="⇄ respect the mirror plane: place the x-mirrored twin (brush AND held parts) AND propagate edits to the similar twin"
             aria-pressed={mirrorPlace} onClick={() => setMirrorPlace(m => !m)}
             className={`ksp-btn px-2 py-[3px] text-[11px] ${mirrorPlace ? 'on' : ''}`}>
             ⇄ {mirrorPlace ? 'twin ON' : 'twin off'}
           </button>
         )}
-        <span className="ml-auto pr-2 text-[10px] text-ink-dim">
-          {tool === 'place'
-            ? 'PLACE — hover a surface, click lands the brush · x y z [ ] s resize while placing'
-            : 'EDIT — a click selects · list rows preview, ✕ deletes (Undo returns)'}
+        <span data-testid="flavor-hint" className="ml-auto pr-2 text-[10px] text-ink-dim">
+          {tool === 'place' ? (
+            <>
+              <span className="hidden md:inline">PLACE — hover a surface, click lands the brush · x y z [ ] s resize · ⇧ continues</span>
+              <span className="md:hidden">PLACE — set the size with −/+ below, then TAP a surface</span>
+            </>
+          ) : (
+            <>
+              <span className="hidden md:inline">EDIT — a click selects · list rows preview, ✕ deletes (Undo returns)</span>
+              <span className="md:hidden">EDIT — TAP a part or block, the rows below edit it</span>
+            </>
+          )}
         </span>
       </div>
       {blockSub === 'tris' ? triPanel : (
@@ -1038,8 +1061,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
             <div data-testid="panel-backdrop" onClick={() => setPanelOpen(false)}
               className="absolute inset-0 z-[5] bg-black/40 md:hidden" />
             <aside data-testid="panel-aside"
-              className="absolute inset-y-0 left-0 z-10 flex w-[300px] max-w-[85vw] flex-col border-r border-white/10
-                         shadow-2xl md:relative md:z-auto md:shadow-none">
+              className="absolute inset-y-0 left-0 z-10 flex w-[68vw] max-w-[300px] flex-col border-r border-white/10
+                         shadow-2xl md:relative md:z-auto md:w-[300px] md:shadow-none">
               <button data-testid="panel-tab" title="collapse the parts panel"
                 aria-label="collapse the parts panel" onClick={() => setPanelOpen(false)}
                 className="absolute -right-5 top-1/2 z-20 flex h-16 w-5 -translate-y-1/2 items-center
@@ -1145,13 +1168,18 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
               </div>
             )}
             {/* v1.10.6 RESIZE-WHILE-PLACING chip: the live brush footprint +
-                the keys (we: "when placing we should be able to resize") */}
+                the keys (we: "when placing we should be able to resize").
+                v1.10.7: on touch the key list is replaced by the TAP tell —
+                "no idea how to place" — the steppers in the dock mirror it. */}
             {mode === 'edit' && tool === 'place' && blockSub === 'blocks' && !placing && (
               <div data-testid="brush-chip"
                 className="ksp-win ksp-label pointer-events-none absolute left-1/2 top-2 z-20 -translate-x-1/2
                            rounded px-3 py-1 text-[11px] text-gold">
                 ▤ {brush.sx + 1}×{brush.sy + 1}×{brush.sz + 1} cells ▸ <b>{'xyz'[brushAxis]}</b>
-                {' '}— <b>[ ]</b> size · <b>x y z</b> axis · <b>s</b> square
+                <span className="hidden md:inline">
+                  {' '}— <b>[ ]</b> size · <b>x y z</b> axis · <b>s</b> square
+                </span>
+                <span className="md:hidden"> — −/+ in the dock · TAP a surface to place</span>
               </div>
             )}
             {bp && hit && hit.kind !== 'none' && mode !== 'view' && (
