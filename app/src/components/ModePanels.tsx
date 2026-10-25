@@ -10,7 +10,7 @@ import { writeBlockDoc, writeBlockMaterial, type EditCtx } from '../engine/edit'
 import { docArrayInsert, docFromValue, docSetNumber, docArrayRemoveAt } from '../engine/doc';
 import { blockCells, blockFromCell, blockInfo, blockTwinIssues, blockMirrorTwin, cellOverlapSkip, flippedBlock,
   mirroredBlock, mirrorAxisIdx, MIRROR_TYPES, mirrorBlockCell, rotateType, rotatedBlock, setBlockField, setBlockGeom,
-  snapBlockType, type MirrorAxis, type MirrorAxisOpt, type PlaceSpec } from '../engine/blocks';
+  snapBlockType, BLOCK_SIZE_MAX, type MirrorAxis, type MirrorAxisOpt, type PlaceSpec } from '../engine/blocks';
 import { shapeName } from '../engine/blockshapes';
 import { MATERIALS, MATERIAL_HINT, materialName } from '../engine/tools';
 import { cssColor, resolveColor } from '../engine/palette';
@@ -18,9 +18,9 @@ import { SwatchGrid, BlockPaint, type CustomPaint } from './ColorPanel';
 import { autoWire, portCensus, connectedPorts, unconnectedPorts, WIRE_KINDS,
   hubInputIndex, candidatesFor, pipeLabel, wireNets } from '../engine/wireops';
 import { flattenComponents } from '../engine/subgrid';
-import { triCentroid } from '../engine/tris';
-import type { Triangle } from '../engine/format';
-import type { Blueprint } from '../engine/format';
+import { triCentroid, triCorners, triSpan, setTriCorner, shiftTriCells } from '../engine/tris';
+import { hullVertex } from '../engine/hullfit';
+import type { Triangle, Blueprint, Block } from '../engine/format';
 
 // --------------------------------------------------- EDIT ▸ blocks workspace
 export interface Brush { type: number; sx: number; sy: number; sz: number; slot: number; material?: number }
@@ -69,6 +69,17 @@ export function BlockPanel(p: {
   /** v1.7: the RGB picker plumbing (new palette slot / nearest snap) for the
    *  brush AND the selected block's face paint */
   custom?: CustomPaint;
+  /** v1.10.6 dock: rev re-keys the census memo (bp mutates in place) */
+  rev?: number;
+  /** list-hover 3D preview (the Editor lights that block gold, restoring
+   *  the selection's highlight when the list is left) */
+  onHoverBlock?: (bi: number) => void;
+  /** list ✕: the Editor's DELETE path (self + twin, bp + doc + undo) */
+  onDeleteBlock?: (bi: number) => void;
+  /** v1.10.6 RESIZE-WHILE-PLACING: the brush's ACTIVE axis for the [ ] keys
+   *  (the viewport keys live in Editor.tsx; the chips here show + pick it) */
+  axisSel?: number;
+  onAxis?: (ax: number) => void;
 }) {
   const [snapMsg, setSnapMsg] = useState('');
   const mAx = p.mirrorAxis ?? 'x';               // v1.5.21 settable mirror axis
@@ -220,146 +231,302 @@ export function BlockPanel(p: {
     if (tw >= 0) writeBlockMaterial(p.ctx, tw, m);
     p.onApplied();
   };
+  // v1.10.6 THE WIRE-STYLE DOCK (we: "placing blocks isn't fun … I'm thinking
+  // we use the same kind of panel like for wires"): the blocks workspace
+  // moves out of the 300 px sidebar into a WIDE bottom dock, laid out like
+  // WirePanel — column 1 brush + census, column 2 the searchable LIST of
+  // every block (hover = gold 3D preview, click = select, ✕ = delete),
+  // column 3 THIS BLOCK (the full edit rows + shape tools).
+  const census = useBlockCensus(p.bp, p.rev ?? 0, mAx);
+  const [lq, setLq] = useState('');
+  const rows = (() => {
+    const needle = lq.trim().toLowerCase();
+    const out: { bi: number; b: Block; cell: [number, number, number] }[] = [];
+    p.bp.data.blocks.forEach((b, bi) => {
+      if (b.type === 255) return;                      // occupancy mirrors: census only
+      const c = blockCells(b);
+      out.push({ bi, b, cell: [c.x, c.y, c.z] });
+    });
+    const filtered = !needle ? out : out.filter(r =>
+      `${shapeName(r.b.type)} block[${r.bi}] ${materialName(r.b.material ?? 0)} ${r.cell.join(' ')}`
+        .toLowerCase().includes(needle));
+    return filtered.slice(0, 150);
+  })();
   return (
-    <>
-      {p.tab === 'place' && (
-        <Sec title="Blocks — brush" testid="block-brush">
-          <div className="flex flex-wrap gap-1 pb-1">
-            {TYPES.map(([t, label]) => (
-              <button key={t} data-testid={`btype-${t}`} onClick={() => p.onBrush({ ...p.brush, type: t })}
-                className={`ksp-btn px-1.5 py-[2px] text-[10px] ${p.brush.type === t ? 'on' : ''}`}>
-                {label}
-              </button>
-            ))}
-            <button data-testid="btype-rot" title="⟲ rotate the shape's orientation (the game's scroll wheel)"
-              onClick={() => p.onBrush({ ...p.brush, type: rotateType(p.brush.type) })}
-              className="ksp-btn px-1.5 py-[2px] text-[10px]">
-              ⟲ {shapeName(p.brush.type)} {p.brush.type === 0 ? '' : p.brush.type}
-            </button>
-          </div>
-          <div className="flex gap-2">
-            <Num label="sx" value={p.brush.sx} min={0} max={8} onCommit={v => p.onBrush({ ...p.brush, sx: v })} />
-            <Num label="sy" value={p.brush.sy} min={0} max={8} onCommit={v => p.onBrush({ ...p.brush, sy: v })} />
-            <Num label="sz" value={p.brush.sz} min={0} max={8} onCommit={v => p.onBrush({ ...p.brush, sz: v })} />
-          </div>
-          <div className="flex items-center gap-2">
-            <Num label="slot" value={p.brush.slot} min={0} max={255} onCommit={v => p.onBrush({ ...p.brush, slot: v })} />
-            {/* the brush's live colour (palette picker below) */}
-            <span data-testid="brush-swatch" title={`brush slot ${p.brush.slot}`}
-              className="inline-block h-5 w-5 rounded-[3px] border border-white/25"
-              style={{ background: cssColor(resolveColor(p.bp.data.colors ?? null, p.brush.slot, p.legacy)) }} />
-          </div>
-          {/* MATERIALS (v1.7): what the placed block IS in the game — NOT a
-              colour: glass/metal looks come from the palette slots above. */}
-          <div className="flex items-center gap-2 pb-1 pt-1">
-            <span className="w-[62px] shrink-0 text-[11px] text-ink-dim">material</span>
-            <MaterialChips testid="brush-material" value={p.brush.material ?? 0}
-              onPick={m => p.onBrush({ ...p.brush, material: m })} />
-          </div>
-          <div className="pb-1 text-[9px] leading-snug text-ink-dim">{MATERIAL_HINT}</div>
-          {/* PALETTE (v1.6): choose the brush colour, badges = uses on vessel */}
-          <div className="pt-1">
-            <SwatchGrid bp={p.bp} legacy={p.legacy} current={p.brush.slot}
-              onPick={slot => p.onBrush({ ...p.brush, slot })} custom={p.custom} />
-          </div>
-          <div className="pt-1 text-[10px] leading-snug text-ink-dim">
-            Hover a block, part or hull triangle to preview · click to place ·
-            <b> Shift</b> over a block copies it / logically continues its shape
-            (the game's rule) · ⇄ mirrors the twin · the <b>✎ Edit</b> flavor
-            selects a part or block to move, turn and delete.
-          </div>
-        </Sec>
-      )}
-      {p.tab === 'edit' && (
-        <Sec title={info ? `Block[${p.blockSel}]` : 'Blocks — nothing selected'} testid="block-edit">
-          {!info && <div className="text-[11px] text-ink-dim">
-            Click an existing block to select and edit it — it gets a golden
-            highlight (its ⇄ similar twin a dim one).
-          </div>}
-          {info && (
-            <>
-              <div className="flex gap-2">
-                <Num label="cx" value={info.cell[0]} min={-2048} max={2048} onCommit={v => apply('cx', v)} />
-                <Num label="cy" value={info.cell[1]} min={-2048} max={2048} onCommit={v => apply('cy', v)} />
-                <Num label="cz" value={info.cell[2]} min={-2048} max={2048} onCommit={v => apply('cz', v)} />
-              </div>
-              <div className="flex gap-2">
-                <Num label="size x" value={info.size[0]} min={0} max={12} onCommit={v => apply('size_x', v)} />
-                <Num label="size y" value={info.size[1]} min={0} max={12} onCommit={v => apply('size_y', v)} />
-                <Num label="size z" value={info.size[2]} min={0} max={12} onCommit={v => apply('size_z', v)} />
-              </div>
-              <div className="flex gap-2">
-                <Num label="type" value={info.type} min={0} max={254} onCommit={v => apply('type', v)} />
-                <Num label="slot" value={info.slot} min={0} max={255} onCommit={v => apply('slot', v)} />
-              </div>
-              {/* MATERIALS (v1.7): the block's game material (mass/heat/build
-                  cost). v1.7.1: the SIMILAR TWIN is driven too (identity edits mirror
-                  like geometry edits — a symmetric craft is built of one
-                  material). The appearance is the Paint section below. */}
-              <div className="flex items-center gap-2 pb-1 pt-1">
-                <span className="w-[62px] shrink-0 text-[11px] text-ink-dim">
-                  material <span data-testid="block-material-name" className="text-gold">{materialName(p.bp.data.blocks[p.blockSel]?.material)}</span>
-                </span>
-              </div>
-              <MaterialChips testid="block-material" value={p.bp.data.blocks[p.blockSel]?.material ?? 0}
-                onPick={setMaterial} />
-              <div className="pt-1 text-[9px] leading-snug text-ink-dim">{MATERIAL_HINT}</div>
-              {/* PALETTE (v1.6): per-face paint of THIS block (⇄ twin rides
-                  the mirrored face mapping inside the Editor's onPaint) */}
-              <div className="mt-1.5 text-[10px] uppercase tracking-wide text-ink-dim">
-                Paint — pick a face, then a colour
-              </div>
-              <div className="mt-1">
-                <BlockPaint bp={p.bp} legacy={p.legacy} bi={p.blockSel}
-                  onPaint={(slot, faces) => p.onPaint?.(slot, faces)} custom={p.custom} />
-              </div>
-              {/* in-place SHAPE tools (the interface components have): every
-                  op keeps the bbox centre AND drives the similar twin in
-                  unison (editBlocks — the v1.8.0 uniform mirror rule) */}
-              <div className="mt-1.5 text-[10px] uppercase tracking-wide text-ink-dim">
-                Shape {shapeName(info.type)} {info.type} — in place
-              </div>
-              <div className="mt-1 flex flex-wrap gap-1">
-                <button data-testid="block-rot-x" title="rotate the shape 90° about the world X, in place"
-                  className="ksp-btn px-1.5 py-[2px] text-[10px]" onClick={() => rotateInPlace('x')}>⟲X</button>
-                <button data-testid="block-rot-y" title="rotate the shape 90° about the world Y, in place"
-                  className="ksp-btn px-1.5 py-[2px] text-[10px]" onClick={() => rotateInPlace('y')}>⟲Y</button>
-                <button data-testid="block-rot-z" title="rotate the shape 90° about the world Z, in place"
-                  className="ksp-btn px-1.5 py-[2px] text-[10px]" onClick={() => rotateInPlace('z')}>⟲Z</button>
-                <button data-testid="block-flip" title="⇄ mirror the shape across its own plane, in place (fixes a wrongly-faced block)"
-                  className="ksp-btn px-1.5 py-[2px] text-[10px]" onClick={flipInPlace}>⇄ flip</button>
-                <button data-testid="block-rot" title="⟲ cycle the orientation family (the game's scroll wheel)"
-                  className="ksp-btn px-1.5 py-[2px] text-[10px]" onClick={cycleShape}>⟲ cycle</button>
-                <button data-testid="block-snap" title="✧ snap: adopt the shape/geometry its neighbours agree on (converged, else consensus)"
-                  className="ksp-btn px-1.5 py-[2px] text-[10px]" onClick={snap}>✧ snap</button>
-              </div>
-              {snapMsg && <div data-testid="snap-msg" className="pt-1 text-[10px] text-ink-dim">{snapMsg}</div>}
-              <div data-testid="block-twin" className="pt-1 text-[10px]">
-                {twDiag?.issues.length
-                  ? <span className={twDiag.info ? 'text-sky-300' : 'text-red-400'}>
-                      {twDiag.info ? 'ℹ' : '⚠'} {twDiag.info ? 'differs in appearance' : 'mirror conflict'}
-                      {twin >= 0 ? `: Block[${twin}]` : ''}
-                      — {twDiag.issues.join(', ')}{twin < 0 ? ' (edits do NOT mirror)' : ''}</span>
-                  : twin >= 0
-                    ? <span className="text-gold">⇄ similar twin: Block[{twin}] (edits mirror to it)</span>
-                    : <span className="text-ink-dim">no similar (mirrored) block</span>}
-              </div>
-              <div className="mt-1 flex gap-1">
-                <button data-testid="block-delete"
-                  className="rounded bg-red-900/60 px-2 py-1 text-[11px] text-ink hover:bg-red-800"
-                  onClick={deleteSel}>
-                  {twin >= 0 ? 'Delete block + twin' : 'Delete block'}
+    <div className="grid grid-cols-1 items-start gap-x-4 px-1 pb-2 md:grid-cols-3">
+      <div className="space-y-3">
+        {p.tab === 'place' && (
+          <Sec title="Blocks — brush" testid="block-brush">
+            <div className="flex flex-wrap gap-1 pb-1">
+              {TYPES.map(([t, label]) => (
+                <button key={t} data-testid={`btype-${t}`} onClick={() => p.onBrush({ ...p.brush, type: t })}
+                  className={`ksp-btn px-1.5 py-[2px] text-[10px] ${p.brush.type === t ? 'on' : ''}`}>
+                  {label}
                 </button>
-                <button data-testid="block-deselect"
-                  className="rounded bg-panel2 px-2 py-1 text-[11px] text-ink-dim hover:text-ink"
-                  onClick={() => p.onSelectBlock(-1)}>Deselect</button>
+              ))}
+              <button data-testid="btype-rot" title="⟲ rotate the shape's orientation (the game's scroll wheel)"
+                onClick={() => p.onBrush({ ...p.brush, type: rotateType(p.brush.type) })}
+                className="ksp-btn px-1.5 py-[2px] text-[10px]">
+                ⟲ {shapeName(p.brush.type)} {p.brush.type === 0 ? '' : p.brush.type}
+              </button>
+            </div>
+            {/* v1.10.6 SIZING (we: "when placing we should be able to resize.
+                Blocks don't currently let you make them square"): the active
+                axis for the viewport [ ] keys, one-tap SQUARE + reset, and
+                the fields up to the sanity cap (frame borders no longer
+                cap growth — the square-block engine fix). */}
+            <div className="flex flex-wrap items-center gap-1 pb-1">
+              {(['x', 'y', 'z'] as const).map((ax, i) => (
+                <button key={ax} data-testid={`brush-axis-${ax}`} title={`active axis for the [ ] resize keys (key ${ax})`}
+                  onClick={() => p.onAxis?.(i)}
+                  className={`ksp-btn px-2 py-[2px] text-[10px] ${p.axisSel === i ? 'on' : ''}`}>
+                  {ax}
+                </button>
+              ))}
+              <button data-testid="brush-square" title="square the brush: every axis to the largest (key s)"
+                onClick={() => { const m = Math.max(p.brush.sx, p.brush.sy, p.brush.sz);
+                  p.onBrush({ ...p.brush, sx: m, sy: m, sz: m }); }}
+                className="ksp-btn px-2 py-[2px] text-[10px]">▣ square</button>
+              <button data-testid="brush-reset" title="reset the brush to one cell"
+                onClick={() => p.onBrush({ ...p.brush, sx: 0, sy: 0, sz: 0 })}
+                className="ksp-btn px-2 py-[2px] text-[10px]">1×1×1</button>
+            </div>
+            <div className="flex gap-2">
+              <Num label="sx" value={p.brush.sx} min={0} max={BLOCK_SIZE_MAX} onCommit={v => p.onBrush({ ...p.brush, sx: v })} />
+              <Num label="sy" value={p.brush.sy} min={0} max={BLOCK_SIZE_MAX} onCommit={v => p.onBrush({ ...p.brush, sy: v })} />
+              <Num label="sz" value={p.brush.sz} min={0} max={BLOCK_SIZE_MAX} onCommit={v => p.onBrush({ ...p.brush, sz: v })} />
+            </div>
+            <div className="flex items-center gap-2">
+              <Num label="slot" value={p.brush.slot} min={0} max={255} onCommit={v => p.onBrush({ ...p.brush, slot: v })} />
+              {/* the brush's live colour (palette picker below) */}
+              <span data-testid="brush-swatch" title={`brush slot ${p.brush.slot}`}
+                className="inline-block h-5 w-5 rounded-[3px] border border-white/25"
+                style={{ background: cssColor(resolveColor(p.bp.data.colors ?? null, p.brush.slot, p.legacy)) }} />
+            </div>
+            {/* MATERIALS (v1.7): what the placed block IS in the game — NOT a
+                colour: glass/metal looks come from the palette slots above. */}
+            <div className="flex items-center gap-2 pb-1 pt-1">
+              <span className="w-[62px] shrink-0 text-[11px] text-ink-dim">material</span>
+              <MaterialChips testid="brush-material" value={p.brush.material ?? 0}
+                onPick={m => p.onBrush({ ...p.brush, material: m })} />
+            </div>
+            <div className="pb-1 text-[9px] leading-snug text-ink-dim">{MATERIAL_HINT}</div>
+            {/* PALETTE (v1.6): choose the brush colour, badges = uses on vessel */}
+            <div className="pt-1">
+              <SwatchGrid bp={p.bp} legacy={p.legacy} current={p.brush.slot}
+                onPick={slot => p.onBrush({ ...p.brush, slot })} custom={p.custom} />
+            </div>
+            <div className="pt-1 text-[10px] leading-snug text-ink-dim">
+              Hover a block, part or hull triangle to preview · click to place · over the
+              viewport <b>x y z</b> pick the size axis, <b>[ ]</b> shrink/grow it,
+              <b> s</b> squares the brush ·
+              <b> Shift</b> over a block copies it / logically continues its shape
+              (the game's rule) · ⇄ mirrors the twin · the <b>✎ Edit</b> flavor
+              selects a part or block to move, turn and delete.
+            </div>
+          </Sec>
+        )}
+        {p.tab === 'edit' && (
+          <Sec title="Blocks — picking" testid="block-pick-hint">
+            <div className="text-[11px] leading-snug text-ink-dim">
+              Click a block on the vessel (or a row in the list beside) to
+              select it — the golden overlay and the BLOCK widget (cell-snap
+              move, 90° rings) ride. Hovering a list row previews that block
+              in 3D; ✕ deletes it (with its ⇄ twin, Undo brings both back).
+            </div>
+          </Sec>
+        )}
+        <Sec title={`Block census — ${census.n} blocks`} testid="block-census">
+          <div className="space-y-[2px] text-[11px] text-ink-dim">
+            {census.fams.map(([f, n]) => (
+              <div key={f} className="flex justify-between">
+                <span className="text-ink">{f}</span><span>{n}</span>
               </div>
-            </>
-          )}
+            ))}
+            <div className="flex justify-between pt-1">
+              <span className="text-ink">materials</span>
+              <span>{census.mats.map(([m, n]) => `${materialName(m)}×${n}`).join(' · ') || '—'}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-ink">cells</span><span>{census.cells.toLocaleString()}</span>
+            </div>
+            {census.occ > 0 && (
+              <div className="flex justify-between">
+                <span className="text-ink">occupancy mirrors</span><span>{census.occ}</span>
+              </div>
+            )}
+            <div className="flex justify-between">
+              <span className="text-ink">⇄ mirror conflicts</span>
+              <span className={census.conflicts > 0 ? 'text-red-400' : 'text-emerald-400'}>
+                {census.conflicts < 0 ? '—' : census.conflicts}
+              </span>
+            </div>
+          </div>
         </Sec>
-      )}
-    </>
+      </div>
+      <Sec title={`Blocks on the vessel (${census.n})`} testid="block-list">
+        <input value={lq} data-testid="block-list-search" placeholder="shape · cell · material…"
+          onChange={e => setLq(e.target.value)}
+          className="mb-1 w-full rounded border border-white/10 bg-panel2 px-2 py-1 text-[12px] text-ink placeholder:text-ink-dim/60" />
+        <div className="max-h-[22rem] space-y-[2px] overflow-y-auto" onMouseLeave={() => p.onHoverBlock?.(-1)}>
+          {rows.length === 0 && <div className="text-[11px] text-ink-dim">no blocks match</div>}
+          {rows.map(({ bi, b, cell }) => (
+            <div key={bi} className="flex items-center gap-1">
+              <button data-testid={`block-row-${bi}`}
+                className={`min-w-0 flex-1 truncate rounded px-2 py-[3px] text-left text-[11px] hover:bg-white/10 ${
+                  bi === p.blockSel ? 'bg-accent/30 text-accent' : 'bg-panel2 text-ink'}`}
+                onMouseEnter={() => p.onHoverBlock?.(bi)}
+                onClick={() => p.onSelectBlock(bi)}
+                title={`${shapeName(b.type)} ${b.type} · ${(b.size_x + 1)}×${(b.size_y + 1)}×${(b.size_z + 1)} cells — click selects; ✕ deletes`}>
+                <span className="inline-block h-2.5 w-2.5 rounded-[2px] border border-white/25 align-middle"
+                  style={{ background: cssColor(resolveColor(p.bp.data.colors ?? null, b.colors?.[0] ?? 0, p.legacy)) }} />{' '}
+                {shapeName(b.type)} [{bi}] {(b.size_x + 1)}×{b.size_y + 1}×{b.size_z + 1}
+                <span className="ml-1 text-[10px] text-ink-dim">
+                  ({cell[0]}, {cell[1]}, {cell[2]}) · {materialName(b.material ?? 0)}
+                </span>
+              </button>
+              <button data-testid={`block-cut-${bi}`}
+                className="rounded bg-panel2 px-1.5 py-[3px] text-[11px] text-red-300 hover:bg-red-500/25"
+                title="Delete this block (and its ⇄ twin) — Undo brings them back"
+                onClick={() => p.onDeleteBlock?.(bi)}>✕</button>
+            </div>
+          ))}
+        </div>
+      </Sec>
+      <Sec title={info ? `Block[${p.blockSel}]` : 'Blocks — nothing selected'} testid="block-edit">
+        {!info && <div className="text-[11px] text-ink-dim">
+          Click an existing block to select and edit it — it gets a golden
+          highlight (its ⇄ similar twin a dim one).
+        </div>}
+        {info && (
+          <>
+            <div className="flex gap-2">
+              <Num label="cx" value={info.cell[0]} min={-2048} max={2048} onCommit={v => apply('cx', v)} />
+              <Num label="cy" value={info.cell[1]} min={-2048} max={2048} onCommit={v => apply('cy', v)} />
+              <Num label="cz" value={info.cell[2]} min={-2048} max={2048} onCommit={v => apply('cz', v)} />
+            </div>
+            <div className="flex gap-2">
+              <Num label="size x" value={info.size[0]} min={0} max={BLOCK_SIZE_MAX} onCommit={v => apply('size_x', v)} />
+              <Num label="size y" value={info.size[1]} min={0} max={BLOCK_SIZE_MAX} onCommit={v => apply('size_y', v)} />
+              <Num label="size z" value={info.size[2]} min={0} max={BLOCK_SIZE_MAX} onCommit={v => apply('size_z', v)} />
+            </div>
+            <div className="flex flex-wrap gap-1 pb-1">
+              {TYPES.map(([t, label]) => (
+                <button key={t} data-testid={`edit-type-${t}`} title={`set this block's shape to ${label} (in place)`}
+                  onClick={() => editBlocks(bi => {
+                    const b = p.ctx!.bp.data.blocks[bi];
+                    if (!b) return false;
+                    b.type = t; writeBlock(bi);
+                    return true;
+                  })}
+                  className={`ksp-btn px-1.5 py-[2px] text-[10px] ${info.type === t ? 'on' : ''}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <Num label="type" value={info.type} min={0} max={254} onCommit={v => apply('type', v)} />
+              <Num label="slot" value={info.slot} min={0} max={255} onCommit={v => apply('slot', v)} />
+            </div>
+            {/* MATERIALS (v1.7): the block's game material (mass/heat/build
+                cost). v1.7.1: the SIMILAR TWIN is driven too (identity edits mirror
+                like geometry edits — a symmetric craft is built of one
+                material). The appearance is the Paint section below. */}
+            <div className="flex items-center gap-2 pb-1 pt-1">
+              <span className="w-[62px] shrink-0 text-[11px] text-ink-dim">
+                material <span data-testid="block-material-name" className="text-gold">{materialName(p.bp.data.blocks[p.blockSel]?.material)}</span>
+              </span>
+            </div>
+            <MaterialChips testid="block-material" value={p.bp.data.blocks[p.blockSel]?.material ?? 0}
+              onPick={setMaterial} />
+            <div className="pt-1 text-[9px] leading-snug text-ink-dim">{MATERIAL_HINT}</div>
+            {/* PALETTE (v1.6): per-face paint of THIS block (⇄ twin rides
+                the mirrored face mapping inside the Editor's onPaint) */}
+            <div className="mt-1.5 text-[10px] uppercase tracking-wide text-ink-dim">
+              Paint — pick a face, then a colour
+            </div>
+            <div className="mt-1">
+              <BlockPaint bp={p.bp} legacy={p.legacy} bi={p.blockSel}
+                onPaint={(slot, faces) => p.onPaint?.(slot, faces)} custom={p.custom} />
+            </div>
+            {/* in-place SHAPE tools (the interface components have): every
+                op keeps the bbox centre AND drives the similar twin in
+                unison (editBlocks — the v1.8.0 uniform mirror rule) */}
+            <div className="mt-1.5 text-[10px] uppercase tracking-wide text-ink-dim">
+              Shape {shapeName(info.type)} {info.type} — in place
+            </div>
+            <div className="mt-1 flex flex-wrap gap-1">
+              <button data-testid="block-rot-x" title="rotate the shape 90° about the world X, in place"
+                className="ksp-btn px-1.5 py-[2px] text-[10px]" onClick={() => rotateInPlace('x')}>⟲X</button>
+              <button data-testid="block-rot-y" title="rotate the shape 90° about the world Y, in place"
+                className="ksp-btn px-1.5 py-[2px] text-[10px]" onClick={() => rotateInPlace('y')}>⟲Y</button>
+              <button data-testid="block-rot-z" title="rotate the shape 90° about the world Z, in place"
+                className="ksp-btn px-1.5 py-[2px] text-[10px]" onClick={() => rotateInPlace('z')}>⟲Z</button>
+              <button data-testid="block-flip" title="⇄ mirror the shape across its own plane, in place (fixes a wrongly-faced block)"
+                className="ksp-btn px-1.5 py-[2px] text-[10px]" onClick={flipInPlace}>⇄ flip</button>
+              <button data-testid="block-rot" title="⟲ cycle the orientation family (the game's scroll wheel)"
+                className="ksp-btn px-1.5 py-[2px] text-[10px]" onClick={cycleShape}>⟲ cycle</button>
+              <button data-testid="block-snap" title="✧ snap: adopt the shape/geometry its neighbours agree on (converged, else consensus)"
+                className="ksp-btn px-1.5 py-[2px] text-[10px]" onClick={snap}>✧ snap</button>
+            </div>
+            {snapMsg && <div data-testid="snap-msg" className="pt-1 text-[10px] text-ink-dim">{snapMsg}</div>}
+            <div data-testid="block-twin" className="pt-1 text-[10px]">
+              {twDiag?.issues.length
+                ? <span className={twDiag.info ? 'text-sky-300' : 'text-red-400'}>
+                    {twDiag.info ? 'ℹ' : '⚠'} {twDiag.info ? 'differs in appearance' : 'mirror conflict'}
+                    {twin >= 0 ? `: Block[${twin}]` : ''}
+                    — {twDiag.issues.join(', ')}{twin < 0 ? ' (edits do NOT mirror)' : ''}</span>
+                : twin >= 0
+                  ? <span className="text-gold">⇄ similar twin: Block[{twin}] (edits mirror to it)</span>
+                  : <span className="text-ink-dim">no similar (mirrored) block</span>}
+            </div>
+            <div className="mt-1 flex gap-1">
+              <button data-testid="block-delete"
+                className="rounded bg-red-900/60 px-2 py-1 text-[11px] text-ink hover:bg-red-800"
+                onClick={deleteSel}>
+                {twin >= 0 ? 'Delete block + twin' : 'Delete block'}
+              </button>
+              <button data-testid="block-deselect"
+                className="rounded bg-panel2 px-2 py-1 text-[11px] text-ink-dim hover:text-ink"
+                onClick={() => p.onSelectBlock(-1)}>Deselect</button>
+            </div>
+          </>
+        )}
+      </Sec>
+    </div>
   );
+}
+
+/** v1.10.6 dock census: counts by shape family + material, total cells,
+ *  the occupancy-mirror count and the ⇄ geometry-conflict count (faux-
+ *  mirrors, v1.8.0 law). Re-keyed on `rev` (bp mutates in place); the
+ *  conflict sweep is O(n²) so it is SKIPPED (−1 = '—') above 800 blocks. */
+function useBlockCensus(bp: Blueprint, rev: number, mAx: MirrorAxisOpt) {
+  return useMemo(() => {
+    const fam = new Map<string, number>();
+    const mat = new Map<number, number>();
+    let n = 0, occ = 0, cells = 0;
+    for (const b of bp.data.blocks) {
+      if (b.type === 255) { occ++; continue; }
+      n++;
+      const f = b.type === 0 ? 'Cube' : b.type <= 12 ? 'Slope' : b.type <= 20 ? 'Corner'
+        : b.type <= 44 ? 'Pyramid' : b.type <= 52 ? 'Inv corner' : 'Other';
+      fam.set(f, (fam.get(f) ?? 0) + 1);
+      mat.set(b.material ?? 0, (mat.get(b.material ?? 0) ?? 0) + 1);
+      cells += (b.size_x + 1) * (b.size_y + 1) * (b.size_z + 1);
+    }
+    let conflicts = -1;
+    if (n <= 800 && mAx !== 'off') {
+      conflicts = 0;
+      for (let i = 0; i < bp.data.blocks.length; i++) {
+        if (bp.data.blocks[i]!.type === 255) continue;
+        const t = blockTwinIssues(bp, i, mAx);
+        if (t?.issues.length && !t.info) conflicts++;
+      }
+    }
+    return { n, occ, cells, fams: [...fam.entries()], mats: [...mat.entries()], conflicts };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bp, rev, mAx]);
 }
 
 /** Editor-side: place a block from a placement spec (the Edit mode's PLACE
@@ -815,42 +982,217 @@ export function WindPanel(p: { engine: Engine | null; rev: number }) {
 // ------------------------------------------------------------ TRIANGLES
 const TRI_SLOTS = ['front', 'back', 'side v0-v1', 'side v1-v2', 'side v2-v0'];
 
+/** The prism face area (m²) from the exact lattice corners (dock census +
+ *  list labels — the same hullVertex maths the renderer uses). */
+function triArea(t: Triangle): number {
+  const a = hullVertex(t, 0), b = hullVertex(t, 1), c = hullVertex(t, 2);
+  const ux = b.x - a.x, uy = b.y - a.y, uz = b.z - a.z;
+  const wx = c.x - a.x, wy = c.y - a.y, wz = c.z - a.z;
+  const nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
+  return Math.hypot(nx, ny, nz) / 2;
+}
+
+/**
+ * v1.10.6 THE TRIANGLE DOCK (we: "editing triangles also sucks … use the
+ * same kind of panel like for wires"): WIREPanel-style 3 columns —
+ *  • col 1: the corner DRAFT + brush colours + the SKIN CENSUS (count,
+ *    total m², materials) — the skin overview the sidebar never gave.
+ *  • col 2: the searchable LIST of every triangle (area · material,
+ *    centroid) — hover = gold 3D preview, click = select, ✕ = delete.
+ *  • col 3: THIS TRIANGLE — the five face colours, plus REAL editing: the
+ *    three corner cell indices (v0/v1/v2 on x, y, z — setTriCorner keeps
+ *    the (frame, v) factorisation and refuses the 32-slot window), a
+ *    ±-cell nudge per axis (shiftTriCells, the whole triangle along the
+ *    lattice), the smooth/flat shading row and Delete. Every write goes
+ *    bp + doc (the v1.6.1 rule — the doc is the save and the history).
+ */
 export function TriPanel(p: {
   bp: Blueprint; ctx: EditCtx | null; draft: number[][]; triSel: number;
   onSlot: (i: number, v: number) => void; brush: number[];
   onUndo: () => void; onDeleted: () => void; onClearSel: () => void;
+  /** v1.10.6: rev re-keys the census memo (bp mutates in place) */
+  rev?: number;
+  /** list-hover 3D preview (the Editor gold-lights that triangle) */
+  onHoverTri?: (ti: number) => void;
+  /** list row click */
+  onSelectTri?: (ti: number) => void;
+  /** list ✕ (the Editor's DELETE path: bp + doc + undo) */
+  onDeleteTri?: (ti: number) => void;
 }) {
   const t: Triangle | undefined = p.triSel >= 0
     ? (p.bp.data.triangles ?? [])[p.triSel] : undefined;
   const o = t as unknown as Record<string, unknown> | undefined;
   const tn = (v: unknown) => Number(v ?? 0);
+  const [lq, setLq] = useState('');
+  const [msg, setMsg] = useState('');
+  const census = useMemo(() => {
+    const tris = p.bp.data.triangles ?? [];
+    let area = 0;
+    const mats = new Map<number, number>();
+    for (const tr of tris) {
+      area += triArea(tr);
+      const m = (tr as unknown as { material?: number }).material ?? 0;
+      mats.set(m, (mats.get(m) ?? 0) + 1);
+    }
+    return { n: tris.length, area, mats: [...mats.entries()] };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.bp, p.rev]);
+  const rows = (() => {
+    const tris = p.bp.data.triangles ?? [];
+    const needle = lq.trim().toLowerCase();
+    const out: { ti: number; area: number; mat: number; cen: [number, number, number] }[] = [];
+    tris.forEach((tr, ti) => {
+      out.push({ ti, area: triArea(tr), mat: (tr as unknown as { material?: number }).material ?? 0,
+        cen: triCentroid(tr) });
+    });
+    const f = !needle ? out : out.filter(r =>
+      `tri[${r.ti}] ${materialName(r.mat)} ${r.area.toFixed(2)}`.toLowerCase().includes(needle)
+      || r.cen.some(v => v.toFixed(1).includes(needle)));
+    return f.slice(0, 150);
+  })();
+  /** mirror changed record fields onto the doc + repaint (the v1.6.1 rule) */
+  const writeChanged = (changed: Record<string, number> | null): boolean => {
+    if (!changed) return false;
+    if (p.ctx) for (const [k, v] of Object.entries(changed))
+      docSetNumber(p.ctx.doc, ['data', 'triangles', p.triSel, k], v);
+    p.onDeleted();                             // reuse: mark dirty + reload
+    return true;
+  };
+  const corners = t ? triCorners(t) : null;
+  const span = t ? triSpan(t) : null;
+  const smooth = tn((o as Record<string, unknown> | undefined)?.smooth) === 1;
   return (
-    <>
-      <Sec title={`Triangles — draft ${p.draft.length}/3 corners`} testid="tri-draft">
-        <div className="text-[10px] leading-snug text-ink-dim">
-          Click lattice corners on any surface; the third click commits the
-          prism. Click an existing triangle's middle to select it.
-          Snapping is to the 0.25 m hull lattice.
+    <div className="grid grid-cols-1 items-start gap-x-4 px-1 pb-2 md:grid-cols-3">
+      <div className="space-y-3">
+        <Sec title={`Triangles — draft ${p.draft.length}/3 corners`} testid="tri-draft">
+          <div className="text-[10px] leading-snug text-ink-dim">
+            Click lattice corners on any surface; the third click commits the
+            prism. Click an existing triangle's middle to select it.
+            Snapping is to the 0.25 m hull lattice.
+          </div>
+          {p.draft.length > 0 && (
+            <button data-testid="tri-undo" onClick={p.onUndo}
+              className="mt-1 rounded bg-panel2 px-2 py-[3px] text-[11px] text-ink hover:bg-white/10">
+              ↩ undo corner ({p.draft.length}/3)
+            </button>
+          )}
+          <div className="pt-1 text-[10px] text-ink-dim">brush colours (palette slots):</div>
+          {TRI_SLOTS.map((label, i) => (
+            <Num key={i} label={label.slice(0, 9)} value={p.brush[i] ?? 51} min={0} max={255}
+              onCommit={v => p.onSlot(i, v)} />
+          ))}
+        </Sec>
+        <Sec title={`Skin census — ${census.n} triangles`} testid="tri-census">
+          <div className="space-y-[2px] text-[11px] text-ink-dim">
+            <div className="flex justify-between">
+              <span className="text-ink">skin area</span>
+              <span>{census.area.toFixed(2)} m²</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-ink">materials</span>
+              <span>{census.mats.map(([m, n]) => `${materialName(m)}×${n}`).join(' · ') || '—'}</span>
+            </div>
+          </div>
+        </Sec>
+      </div>
+      <Sec title={`Skin triangles (${census.n})`} testid="tri-list">
+        <input value={lq} data-testid="tri-list-search" placeholder="index · material · position…"
+          onChange={e => setLq(e.target.value)}
+          className="mb-1 w-full rounded border border-white/10 bg-panel2 px-2 py-1 text-[12px] text-ink placeholder:text-ink-dim/60" />
+        <div className="max-h-[22rem] space-y-[2px] overflow-y-auto" onMouseLeave={() => p.onHoverTri?.(-1)}>
+          {rows.length === 0 && <div className="text-[11px] text-ink-dim">no triangles — draft one on the hull</div>}
+          {rows.map(r => (
+            <div key={r.ti} className="flex items-center gap-1">
+              <button data-testid={`tri-row-${r.ti}`}
+                className={`min-w-0 flex-1 truncate rounded px-2 py-[3px] text-left text-[11px] hover:bg-white/10 ${
+                  r.ti === p.triSel ? 'bg-accent/30 text-accent' : 'bg-panel2 text-ink'}`}
+                onMouseEnter={() => p.onHoverTri?.(r.ti)}
+                onClick={() => p.onSelectTri?.(r.ti)}
+                title={`click selects; ✕ deletes (Undo brings it back)`}>
+                ▵ tri[{r.ti}] {r.area.toFixed(2)} m² · {materialName(r.mat)}
+                <span className="ml-1 text-[10px] text-ink-dim">
+                  ({r.cen.map(v => v.toFixed(1)).join(', ')})
+                </span>
+              </button>
+              <button data-testid={`tri-cut-${r.ti}`}
+                className="rounded bg-panel2 px-1.5 py-[3px] text-[11px] text-red-300 hover:bg-red-500/25"
+                title="Delete this triangle (Undo brings it back)"
+                onClick={() => p.onDeleteTri?.(r.ti)}>✕</button>
+            </div>
+          ))}
         </div>
-        {p.draft.length > 0 && (
-          <button data-testid="tri-undo" onClick={p.onUndo}
-            className="mt-1 rounded bg-panel2 px-2 py-[3px] text-[11px] text-ink hover:bg-white/10">
-            ↩ undo corner ({p.draft.length}/3)
-          </button>
-        )}
-        <div className="pt-1 text-[10px] text-ink-dim">brush colours (palette slots):</div>
-        {TRI_SLOTS.map((label, i) => (
-          <Num key={i} label={label.slice(0, 9)} value={p.brush[i] ?? 51} min={0} max={255}
-            onCommit={v => p.onSlot(i, v)} />
-        ))}
       </Sec>
       <Sec title={p.triSel >= 0 ? `Triangle[${p.triSel}]` : 'Triangles — none selected'} testid="tri-edit">
-        {!o && <div className="text-[11px] text-ink-dim">Click near a prism's centre to edit it.</div>}
-        {o && (
+        {!o && <div className="text-[11px] text-ink-dim">Click near a prism's centre (or a row beside) to edit it.</div>}
+        {o && t && corners && span && (
           <>
             <div className="pb-1 font-mono text-[10px] text-ink-dim">
-              frame ({tn(o.frame_x)}, {tn(o.frame_y)}, {tn(o.frame_z)}) · centroid
-              ({triCentroid(t!).map(n => n.toFixed(2)).join(', ')})
+              span {span[0]}×{span[1]}×{span[2]} cells · {triArea(t).toFixed(2)} m² · centroid
+              ({triCentroid(t).map(n => n.toFixed(2)).join(', ')})
+            </div>
+            {/* CORNERS (v1.10.6): the three vertices as GLOBAL lattice
+                corners g (world = (g−6)·0.25) — the corner a click snapped
+                to. Editing one re-factorises (frame, v) writer-style; a
+                move that leaves the 32-slot vertex window, or that folds
+                two corners together, is REFUSED with the reason. */}
+            <div className="mt-1 text-[10px] uppercase tracking-wide text-ink-dim">
+              Corners — lattice cells (resize by moving one)
+            </div>
+            {[0, 1, 2].map(i => (
+              <div key={i} className="flex gap-2">
+                {[0, 1, 2].map(ax => (
+                  <Num key={ax} label={`v${i} ${'xyz'[ax]}`} value={corners[i]![ax]!} min={-4096} max={4096}
+                    testid={`tri-v${i}-${'xyz'[ax]}`}
+                    onCommit={g => {
+                      const ch = setTriCorner(t, i, ax, g);
+                      setMsg(ch ? '' : 'refused: corners coincide / the 32-slot vertex window');
+                      if (ch) writeChanged(ch);
+                    }} />
+                ))}
+              </div>
+            ))}
+            {/* MOVE: the whole triangle along the lattice, one cell per tap */}
+            <div className="mt-1 text-[10px] uppercase tracking-wide text-ink-dim">
+              Move (cells)
+            </div>
+            <div className="mt-1 flex flex-wrap gap-1">
+              {(['x', 'y', 'z'] as const).map((ax, ai) => (
+                <span key={ax} className="flex items-center gap-1">
+                  <button data-testid={`tri-move-${ax}-m`} title={`shift the triangle one cell toward −${ax}`}
+                    className="ksp-btn px-1.5 py-[2px] text-[10px]"
+                    onClick={() => {
+                      const d: [number, number, number] = [0, 0, 0]; d[ai] = -1;
+                      const ch = shiftTriCells(t, d);
+                      setMsg(ch ? '' : 'refused: the 32-slot vertex window');
+                      if (ch) writeChanged(ch);
+                    }}>−{ax}</button>
+                  <button data-testid={`tri-move-${ax}-p`} title={`shift the triangle one cell toward +${ax}`}
+                    className="ksp-btn px-1.5 py-[2px] text-[10px]"
+                    onClick={() => {
+                      const d: [number, number, number] = [0, 0, 0]; d[ai] = 1;
+                      const ch = shiftTriCells(t, d);
+                      setMsg(ch ? '' : 'refused: the 32-slot vertex window');
+                      if (ch) writeChanged(ch);
+                    }}>+{ax}</button>
+                </span>
+              ))}
+            </div>
+            {/* SHADE: the game's smooth bit (v1.5.9 FORMAT finding) — flat
+                (no key / 0) shows the faceted prism, 1 welds the shading */}
+            <div className="mt-1 flex items-center gap-2">
+              <span className="text-[10px] uppercase tracking-wide text-ink-dim">Shading</span>
+              <button data-testid="tri-smooth" title="smooth:1 welds the skin's shading in game (flat = faceted)"
+                className={`ksp-btn px-2 py-[2px] text-[10px] ${smooth ? 'on' : ''}`}
+                onClick={() => {
+                  (o as Record<string, unknown>).smooth = smooth ? 0 : 1;
+                  if (p.ctx) docSetNumber(p.ctx.doc, ['data', 'triangles', p.triSel, 'smooth'], smooth ? 0 : 1);
+                  p.onDeleted();
+                }}>
+                {smooth ? 'smooth:1' : 'flat'}
+              </button>
+            </div>
+            <div className="mt-1 text-[10px] uppercase tracking-wide text-ink-dim">
+              Face colours (palette slots)
             </div>
             {TRI_SLOTS.map((label, i) => (
               <Num key={i} label={label.slice(0, 9)} value={tn((o.colors as number[] | undefined)?.[i])} min={0} max={255}
@@ -861,15 +1203,16 @@ export function TriPanel(p: {
                   p.onDeleted();                      // reuse: mark dirty + reload
                 }} />
             ))}
+            {msg && <div data-testid="tri-msg" className="pt-1 text-[10px] text-gold">{msg}</div>}
             <div className="mt-1 flex gap-1">
               <button data-testid="tri-delete"
                 className="rounded bg-red-900/60 px-2 py-1 text-[11px] text-ink hover:bg-red-800"
-                onClick={() => {
+                onClick={() => p.onDeleteTri ? p.onDeleteTri(p.triSel) : (() => {
                   if (!p.ctx) return;
                   p.ctx.bp.data.triangles!.splice(p.triSel, 1);
                   docArrayRemoveAt(p.ctx.doc, ['data', 'triangles'], p.triSel);
                   p.onDeleted();
-                }}>
+                })()}>
                 Delete triangle
               </button>
               <button className="rounded bg-panel2 px-2 py-1 text-[11px] text-ink-dim hover:text-ink"
@@ -878,6 +1221,6 @@ export function TriPanel(p: {
           </>
         )}
       </Sec>
-    </>
+    </div>
   );
 }

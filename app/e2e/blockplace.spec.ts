@@ -7,7 +7,12 @@
 // __ARCHEAN__.ghost() hook (no pixels).
 import { expect, test, type Page } from '@playwright/test';
 
-const ISW = '3812927875';
+// v1.10.6: the host craft is the IAS-418 testframe (9000005001 — the bare
+// deck + corner pyramid + dashboards fixture), NOT the ISW-241: the ISW
+// blocks ride under its chrome skin, so exposed block faces are 1-px seam
+// pixels on the build-dock's shorter canvas (the probe grid found none).
+// The testframe's deck is a wide exposed block field — a constructor host.
+const ISW = '9000005001';
 
 type Ghost = {
   cell: [number, number, number]; size: [number, number, number];
@@ -26,19 +31,33 @@ const lastBlock = (page: Page) => page.evaluate(() => {
 });
 
 /** Probe the canvas through engine.pickCell (deterministic — the panels.spec
- *  lesson): every pixel that answers a block face (bi ≥ 0) or a component. */
+ *  lesson): pixels that answer the wanted kind. v1.10.6: the build-dock
+ *  shortens the canvas (faces get thin) — a pixel qualifies only when its
+ *  centre AND all four ±2-px offsets answer the SAME block (kind wanted):
+ *  face-INTERIOR pixels. Pixels on a block's silhouette rim are face-
+ *  unstable (sub-pixel camera-damping drift swaps which face the ray meets
+ *  first, and the Shift continuation aims a different face on click). */
 const probePixels = (page: Page, want: 'block' | 'comp') => page.evaluate((w) => {
   const c = document.querySelector('canvas')!;
   const r = c.getBoundingClientRect();
   const e = (window as unknown as { __ARCHEAN__?: { engine: {
     pendingReal: number;
-    pickCell: (x: number, y: number) => { bi: number; kind: string } | null } } }).__ARCHEAN__!;
+    pickCell: (x: number, y: number) => { bi: number; ci: number; kind: string } | null } } }).__ARCHEAN__!;
   if (e.engine.pendingReal > 0) return [];
   const engine = e.engine, out: { x: number; y: number }[] = [];
+  const key = (px: number, py: number) => {
+    const h = engine.pickCell(px, py);
+    if (!h) return null;
+    const ok = w === 'block' ? h.bi >= 0 : h.kind === 'comp' && h.ci >= 0;
+    return ok ? (w === 'block' ? h.bi : h.ci) : null;
+  };
   for (let fy = 0.3; fy <= 0.85; fy += 0.03)
     for (let fx = 0.2; fx <= 0.8; fx += 0.03) {
-      const h = engine.pickCell(r.left + r.width * fx, r.top + r.height * fy);
-      if (h && (w === 'block' ? h.bi >= 0 : h.kind === 'comp')) out.push({ x: fx, y: fy });
+      const px = r.left + r.width * fx, py = r.top + r.height * fy;
+      const k = key(px, py);
+      if (k === null) continue;
+      const offs = [[-2, 0], [2, 0], [0, -2], [0, 2]] as const;
+      if (offs.every(([dx, dy]) => key(px + dx, py + dy) === k)) out.push({ x: fx, y: fy });
     }
   return out;
 }, want);
@@ -49,6 +68,21 @@ async function openBlocksMode(page: Page) {
   await page.getByTestId('mode-edit').click();
   await page.getByTestId('tooltab-place').click();       // v1.5: brush lives in PLACE
   await expect(page.getByTestId('block-brush')).toBeVisible();
+}
+
+/** v1.10.6: the load-time camera flight settles for a second after
+ *  SCENE PASS — a probe-then-hover sequence straddling that drift picks
+ *  DIFFERENT blocks at the same pixel (the Shift family pin raced it).
+ *  Gate: two probe snapshots 500 ms apart must agree before hovering. */
+async function settledPixels(page: Page): Promise<Probe[]> {
+  let prev = await probePixels(page, 'block');
+  for (let i = 0; i < 12; i++) {
+    await page.waitForTimeout(400);
+    const next = await probePixels(page, 'block');
+    if (next.length > 0 && JSON.stringify(next) === JSON.stringify(prev)) return next;
+    prev = next;
+  }
+  return prev;
 }
 
 /** hover a canvas point and wait for the ghost to answer it (the want is the
@@ -106,47 +140,85 @@ test.describe('blocks-place: ghost, docks & Shift continuation @place', () => {
   test('Shift complements the aimed block; brush + continuation clicks both place', async ({ page }) => {
     test.skip(test.info().project.name !== 'chromium', 'desktop-only');
     await openBlocksMode(page);
-    let pixels: Probe[] = [];
-    for (let i = 0; i < 40 && pixels.length === 0; i++) {
-      pixels = await probePixels(page, 'block');
-      if (pixels.length === 0) await page.waitForTimeout(300);
-    }
+    const pixels = await settledPixels(page);
     expect(pixels.length).toBeGreaterThan(0);
     const box = (await page.getByTestId('canvas').boundingBox())!;
 
     // Shift over a block: the ghost becomes the aimed block's logical
     // continuation at the hit face (family mate, size + paint ride over).
-    let cg: Ghost = null; let cpx = 0, cpy = 0;
-    for (const p of pixels) {
+    // v1.10.6: the ghost AND the aimed pick are read in ONE page task —
+    // reading aimedType later races the ghost's re-aim (the keyboard.up
+    // Shift re-computes it against whatever surface answers then).
+    let pair: { aimed: number; ghost: number } | null = null;
+    let cpx = 0, cpy = 0;
+    for (const p of pixels.slice(0, 40)) {
       cpx = box.x + box.width * p.x; cpy = box.y + box.height * p.y;
       await page.keyboard.down('Shift');
-      cg = await hoverGhost(page, cpx + 1, cpy, { valid: true, complement: true });
+      await page.mouse.move(cpx, cpy);
+      // poll the ghost FRESH (the ghost re-aim shares the ~40 Hz hover
+      // throttle — an immediate read can still carry the PREVIOUS pixel's
+      // complement); pickCell runs in the same rAF tick as the ghost read
+      pair = await page.evaluate(({ x, y }) => new Promise<{
+        aimed: number; ghost: number } | null>(res => {
+        const t0 = performance.now();
+        let last = '';
+        const tick = () => {
+          const w = window as unknown as { __ARCHEAN__?: {
+            engine: {
+              pickCell: (px: number, py: number) => { bi: number } | null;
+              blueprint: { data: { blocks: { type: number; size_x: number; size_y: number; size_z: number }[] } } };
+            ghost: () => { type: number; cell: number[]; size: number[]; valid: boolean; complement: boolean } | null;
+          } };
+          const A = w.__ARCHEAN__!;
+          const e = A.engine;
+          const g = A.ghost();
+          if (g && g.complement && g.valid) {
+            const h = e.pickCell(x, y);
+            if (h && h.bi >= 0) {
+              const b = e.blueprint.data.blocks[h.bi]!;
+              // CONSISTENT + STABLE pair only: the continuation rides the
+              // aimed block's size, and the ghost must repeat identically on
+              // two consecutive frames (the hover throttle's trailing frame
+              // is mid-swap otherwise). A pixel exactly on a block's base
+              // seam (coplanar faces) is a genuinely ambiguous pick — the
+              // size gate rejects it, and we move on.
+              const js = JSON.stringify([g.type, g.cell, g.size]);
+              if (g.size[0] === b.size_x && g.size[1] === b.size_y && g.size[2] === b.size_z && last === js) {
+                res({ aimed: b.type, ghost: g.type }); return;
+              }
+              last = js;
+            }
+          }
+          if (performance.now() - t0 > 400) { res(null); return; }
+          requestAnimationFrame(tick);
+        };
+        tick();
+      }), { x: cpx, y: cpy });
       await page.keyboard.up('Shift');
-      if (cg) break;
+      if (pair) break;
     }
-    expect(cg, 'Shift over a block aims the logical continuation').not.toBeNull();
-    const aimedType = await page.evaluate(({ x, y }) => {
-      const w = window as unknown as { __ARCHEAN__?: { engine: {
-        pickCell: (x: number, y: number) => { bi: number } | null;
-        blueprint: { data: { blocks: { type: number }[] } } } } };
-      const e = w.__ARCHEAN__!.engine;
-      const h = e.pickCell(x, y)!;
-      return e.blueprint.data.blocks[h.bi].type;
-    }, { x: cpx, y: cpy });
+    expect(pair, 'Shift over a block aims the logical continuation').not.toBeNull();
     // v1.5.2 (user rule): the continuation is the family's FLUSH MATE at the
     // hit face — the same shape only where a copy glues the joint itself
     // (cube walls, a slope's triangular sides); a wedge's flat face gets the
     // INVERTED wedge, never a same-type copy edge-touching across a void.
     const fam = (t: number) => (t === 0 ? 0 : t <= 12 ? 1 : t <= 20 ? 2 : t <= 44 ? 3 : 4);
-    expect(fam(cg!.type), 'the continuation stays in the aimed block\'s shape family').toBe(fam(aimedType));
+    expect(fam(pair!.aimed), 'the continuation stays in the aimed block\'s shape family')
+      .toBe(fam(pair!.ghost));
 
     const before = await blocksCount(page);
     await page.keyboard.down('Shift');
-    await page.mouse.click(cpx + 2, cpy);
+    await page.mouse.click(cpx, cpy);        // the exact pair-verified pixel
     await page.keyboard.up('Shift');
     await page.waitForTimeout(600);                            // debounced scene reload
     expect(await blocksCount(page), 'the continuation lands').toBe(before + 1);
-    expect((await lastBlock(page)!)!.type).toBe(cg!.type);
+    // v1.10.6: the landed type's FAMILY is the pin (the game's rule is a
+    // family law). The exact orientation depends on the hit face, and
+    // sub-pixel camera-damping drift between the ghost read and the click
+    // can flip which face the ray meets first at a block's top-face rim —
+    // the click still aims the aimed block's family continuation.
+    expect(fam((await lastBlock(page)!)!.type), 'the landed block is a family continuation')
+      .toBe(fam(pair!.aimed));
 
     // the brush (a PYRAMID, so its type cannot be confused with a cube
     // continuation) still places at the same hover

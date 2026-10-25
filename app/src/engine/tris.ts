@@ -49,6 +49,99 @@ export function triangleFromCorners(g0: Corner, g1: Corner, g2: Corner,
   return t as unknown as Triangle;
 }
 
+// ------------------------------------------------- PANEL VERTEX EDITING
+// v1.10.6 TRIANGLE WORKSPACE (we: "editing triangles also sucks"): the dock
+// edits a selected triangle's corners as GLOBAL lattice corners g (the same
+// indices cornerOf snaps clicks to — world = (g − 6)·CELL). Every write
+// re-factorises (frame, v) exactly like triangleFromCorners (f = floorDiv
+// (min, 12), v starts near 0, the game-writer style) and REFUSES records
+// whose per-axis span exceeds the 32-slot vertex window (v ∈ 0..31, FORMAT
+// §Triangles) — an honest refusal, never a silently deformed skin. Each
+// helper mutates the live record and returns the numeric fields it changed
+// (name → value, e.g. { v0_x: 14, frame_x: 1 }) so the caller mirrors
+// EXACTLY those onto the doc path ['data','triangles', ti] — the doc is the
+// save and the undo history (v1.6.1 rule).
+
+/** The three GLOBAL corner indices of a stored triangle. */
+export function triCorners(t: Triangle): [Corner, Corner, Corner] {
+  const o = t as unknown as Record<string, number>;
+  const g = (ax: number): [number, number, number] => {
+    const f = o[`frame_${'xyz'[ax]!}`] ?? 0;
+    return [0, 1, 2].map(i => (o[`v${i}_${'xyz'[ax]!}`] ?? 0) + 12 * f) as [number, number, number];
+  };
+  const ax = g(0), ay = g(1), az = g(2);
+  return [[ax[0]!, ay[0]!, az[0]!], [ax[1]!, ay[1]!, az[1]!], [ax[2]!, ay[2]!, az[2]!]];
+}
+
+/** Refactor corner list → (frame, v) per axis (f = floorDiv(min, 12), v
+ *  starts near 0 like the game writer). Returns the changed numeric fields,
+ *  or null when an axis breaks the game's vertex law: the 32-slot window is
+ *  FRAME-ALIGNED (v1.5.17 finding) — v = g − 12·floor(min/12) must stay
+ *  ∈ 0..31, so a shift that pushes the fattest vertex past the frame's
+ *  window is REFUSED, not silently hoisted (that is what encodeSkinTri and
+ *  the hullify writer enforce over generated records). */
+function refactorTri(c: [Corner, Corner, Corner]): Record<string, number> | null {
+  const delta: Record<string, number> = {};
+  for (let ax = 0; ax < 3; ax++) {
+    const name = 'xyz'[ax]!;
+    const vs = c.map(g => g[ax]!);
+    const f = floorDiv(Math.min(...vs), 12);
+    if (Math.max(...vs) - 12 * f > 31) return null;    // 32-slot vertex window
+    c.forEach((g, i) => { delta[`v${i}_${name}`] = g[ax]! - 12 * f; });
+    delta[`frame_${name}`] = f;
+  }
+  return delta;
+}
+
+/** Apply a (frame, v) refactor to the record, keeping fields not listed in
+ *  `delta` verbatim; returns the fields the record did not already carry. */
+function applyTriDelta(t: Triangle, delta: Record<string, number>): Record<string, number> {
+  const o = t as unknown as Record<string, number | number[] | string>;
+  const changed: Record<string, number> = {};
+  for (const [k, v] of Object.entries(delta)) {
+    if (o[k] === v) continue;
+    o[k] = v;
+    changed[k] = v;
+  }
+  return changed;
+}
+
+/** Move ONE corner of a triangle to a new GLOBAL lattice corner index.
+ *  Mutates + returns the changed record fields, null = refused (the vertex
+ *  window, degenerate corners). */
+export function setTriCorner(t: Triangle, i: number, ax: number, g: number):
+  Record<string, number> | null {
+  const c = triCorners(t);
+  const nc: [Corner, Corner, Corner] = c.map(q => [...q] as Corner) as [Corner, Corner, Corner];
+  nc[i]![ax] = Math.round(g);
+  if ([0, 1, 2].some(k => k !== i && nc[k]![0] === nc[i]![0] && nc[k]![1] === nc[i]![1]
+    && nc[k]![2] === nc[i]![2])) return null;                 // two corners coincide
+  const d = refactorTri(nc);
+  return d ? applyTriDelta(t, d) : null;
+}
+
+/** Shift the WHOLE triangle by integer cells (the dock's ± rows). Same
+ *  contract as setTriCorner. */
+export function shiftTriCells(t: Triangle, d: readonly [number, number, number]):
+  Record<string, number> | null {
+  const c = triCorners(t);
+  const nc: [Corner, Corner, Corner] = [
+    [c[0]![0]! + d[0]!, c[0]![1]! + d[1]!, c[0]![2]! + d[2]!],
+    [c[1]![0]! + d[0]!, c[1]![1]! + d[1]!, c[1]![2]! + d[2]!],
+    [c[2]![0]! + d[0]!, c[2]![1]! + d[1]!, c[2]![2]! + d[2]!],
+  ];
+  const r = refactorTri(nc);
+  return r ? applyTriDelta(t, r) : null;
+}
+
+/** The triangle's per-axis cell spans (its size in lattice cells). */
+export function triSpan(t: Triangle): [number, number, number] {
+  const c = triCorners(t);
+  const sp = (ax: number) =>
+    Math.max(c[0]![ax]!, c[1]![ax]!, c[2]![ax]!) - Math.min(c[0]![ax]!, c[1]![ax]!, c[2]![ax]!);
+  return [sp(0), sp(1), sp(2)];
+}
+
 /** FILE-space centroid of a stored triangle (exact lattice maths). */
 export function triCentroid(t: Triangle): [number, number, number] {
   const o = t as unknown as Record<string, number>;

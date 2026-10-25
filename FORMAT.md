@@ -562,7 +562,12 @@ unchanged.
   cell floor were pre-v0.180 corner-convention leftovers (half-cell off).
   `pos_*` may exceed 12 together with `size_*` (corpus max `pos+size` 15) —
   blocks legitimately span frame boundaries; only the WRITER's pos_ ∈ 0..12
-  re-anchoring (floorDiv to the frame) is required.
+  re-anchoring (floorDiv to the frame) is required. Census (2026-10-25,
+  over testdata/): **26 053 blocks** have `pos + size + 1 > 12` (max 16-cell
+  spans at pos 11 — e.g. 3521588534, 3510792645). A size write moves no
+  cell, so growing a block NEVER violates pos ∈ 0..12 — an editor clamp
+  `size ≤ 12 − pos_in_frame` (the app had one until v1.10.6) is pure loss
+  of function: blocks near a frame edge become un-growable on that axis.
 - **Constructor-tool placement UX (official wiki, ConstructorTool §Block
   Modes, transcribed 2026-10-20 — drives the app's Blocks-place mode):**
   aim at a block or beam and quick left-click places the block; the drag/

@@ -16,7 +16,7 @@ import { BlockPaint, CompPaint, SwatchGrid } from './components/ColorPanel';
 import { TOOLS, ToolDialog, type PlacePayload, type ToolForm } from './components/ToolsDialog';
 import HelpDialog from './components/HelpDialog';
 import { blockInfo, blockMirrorTwin, blockTwinIssues, cellIndex, cellOverlap,
-  complementBlock, mirrorAxisIdx, paintTwinPair, type MirrorAxisOpt } from './engine/blocks';
+  complementBlock, mirrorAxisIdx, paintTwinPair, BLOCK_SIZE_MAX, type MirrorAxisOpt } from './engine/blocks';
 import { cornerOf, triAt, triangleFromCorners } from './engine/tris';
 import type { Blueprint } from './engine/format';
 import { isLegacyFile } from './engine/format';
@@ -67,6 +67,14 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // built-in CLEAR GLASS — the old default placed translucent ghost blocks,
   // the root of the "my blocks turned translucent" report)
   const [brush, setBrush] = useState<Brush>({ type: 0, sx: 0, sy: 0, sz: 0, slot: 51, material: 0 });
+  // v1.10.6 RESIZE-WHILE-PLACING (we: "when placing we should be able to
+  // resize"): the brush's ACTIVE axis for the viewport [ ] keys (x/y/z pick
+  // it, s squares the brush) + the live brush chip over the viewport.
+  const [brushAxis, setBrushAxis] = useState(0);
+  // v1.10.6 WIRE-style dock: hovering a block/triangle LIST row previews it
+  // gold in 3D (the selection's own highlight returns when the list is left)
+  const [blockHover, setBlockHover] = useState(-1);
+  const [triHover, setTriHover] = useState(-1);
   // the TOOLS menu ▸ ToolDialog modal (v1.7): one open tool id at a time
   const [toolOpen, setToolOpen] = useState<string | null>(null);
   // Help ▸ Manual… — the built-in markdown manual (v1.5.20)
@@ -570,6 +578,27 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         if (blockSub === 'tris' && triSel >= 0) { e.preventDefault(); deleteTri(ctx, triSel); return; }
         if (blockSel >= 0) { e.preventDefault(); deleteBlock(ctx, blockSel); return; }
       }
+      // v1.10.6 RESIZE-WHILE-PLACING (we: "when placing we should be able to
+      // resize. Blocks don't currently let you make them square"): over the
+      // EDIT ▸ PLACE ▸ Blocks workspace the brush is LIVE-EDITABLE from the
+      // keyboard — x/y/z pick the active axis, [ / ] (− / = twins) shrink /
+      // grow it one cell, s squares the brush. The ghost re-aims through the
+      // existing brush-change effect (the same live path as the panel rows).
+      if (mode === 'edit' && tool === 'place' && blockSub === 'blocks' && !placing) {
+        const size: [number, number, number] = [brush.sx, brush.sy, brush.sz];
+        const put = () => setBrush(b => ({ ...b, sx: size[0]!, sy: size[1]!, sz: size[2]! }));
+        if (e.key === 'x' || e.key === 'y' || e.key === 'z') { setBrushAxis('xyz'.indexOf(e.key)); return; }
+        if (e.key === '[' || e.key === '-') {
+          size[brushAxis] = Math.max(0, size[brushAxis]! - 1); put(); return;
+        }
+        if (e.key === ']' || e.key === '=' || e.key === '+') {
+          size[brushAxis] = Math.min(BLOCK_SIZE_MAX, size[brushAxis]! + 1); put(); return;
+        }
+        if (e.key === 's') {
+          const m = Math.max(size[0]!, size[1]!, size[2]!);
+          size[0] = size[1] = size[2] = m; put(); return;
+        }
+      }
       const map: Record<string, keyof ViewOptions> = { g: 'grid', o: 'occ', h: 'hull' };
       if (map[e.key]) {
         const cur = engineRef.current?.getOptions();
@@ -595,8 +624,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     };
     addEventListener('keydown', h);
     return () => removeEventListener('keydown', h);
-  }, [save, toggleOpt, placing, mode, sel, blockSel, blockSub, triSel,
-    undo, redo, deleteComp, deleteBlock, deleteTri]);
+  }, [save, toggleOpt, placing, mode, tool, blockSub, sel, blockSel, triSel,
+    brush, brushAxis, undo, redo, deleteComp, deleteBlock, deleteTri]);
 
   // blocks-mode canvas handling: place (brush/logical continuation) or
   // select, via engine.pickCell.
@@ -640,21 +669,26 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // RULE: blockTwinIssues flags a mirror-conflicting FAUX-MIRROR (shape,
   // size, material or face-paint mismatch on the mirrored footprint) — the
   // twin overlay then rides RED and the Viewport shows the ⚠ popup.
+  // v1.10.6: the dock LIST's hovered row PREEMPTS the selection (wire-mode
+  // previewHover law — the selection returns the moment the list is left).
   useEffect(() => {
     const e = engineRef.current, ctx = ctxRef.current;
     if (!e) return;
-    if (mode === 'edit' && blockSel >= 0 && ctx) {
-      const tw = blockTwinIssues(ctx.bp, blockSel, mirAx());
-      e.setBlockHighlight(blockSel, tw?.twin ?? -1, tw?.issues ?? [], tw?.info ?? false);
+    const hi = blockHover >= 0 ? blockHover : blockSel;
+    if (mode === 'edit' && hi >= 0 && ctx) {
+      const tw = blockTwinIssues(ctx.bp, hi, mirAx());
+      e.setBlockHighlight(hi, tw?.twin ?? -1, tw?.issues ?? [], tw?.info ?? false);
     } else e.setBlockHighlight(-1);
-  }, [mode, blockSel, rev, engine]);
+  }, [mode, blockSel, blockHover, rev, engine]);
 
   // 2026-10-20: a SELECTED TRIANGLE rides the gold prism highlight — selection used
   // to be invisible in the 3D view (only the panel changed), part of the
   // "triangles refuse to select properly" report. Left with the sub-tab.
+  // v1.10.6: the dock list's hovered triangle preempts it (same law).
   useEffect(() => {
-    engineRef.current?.setTriHighlight(mode === 'edit' && blockSub === 'tris' ? triSel : -1);
-  }, [mode, blockSub, triSel, rev, engine]);
+    engineRef.current?.setTriHighlight(mode === 'edit' && blockSub === 'tris'
+      ? (triHover >= 0 ? triHover : triSel) : -1);
+  }, [mode, blockSub, triSel, triHover, rev, engine]);
 
   // the CATALOG ghost (v1.4): while a part is HELD, hovering the viewport
   // docks a translucent preview at the surface (⇄ adds the mirrored twin
@@ -887,12 +921,6 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   void histTick;
   const canUndo = histRef.current.timer !== null || histRef.current.p > 0;
   const canRedo = histRef.current.p < histRef.current.states.length - 1;
-  const triPanel = (
-    <TriPanel bp={bp!} ctx={ctxRef.current} draft={triDraft} triSel={triSel}
-      brush={triBrush} onSlot={(i, v) => setTriBrush(b => b.map((x, j) => j === i ? v : x))}
-      onUndo={() => setTriDraft(d => d.slice(0, -1))}
-      onDeleted={sceneChanged} onClearSel={() => setTriSel(-1)} />
-  );
   // v2.0.0 MERGED EDITOR (user: "Merge the block and component edit things,
   // I no longer see a good reason to seperate them. The UI is quite good."):
   // the old BLOCKS workspace is the EDIT mode's panel bottom — brush +
@@ -900,39 +928,56 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // parts list; the ✎ Edit | ✚ Place flavor drives select-vs-place for BOTH
   // species. The blocks workspace stays visible even with a component
   // selected — the Inspector stacks ABOVE it (Panel's selOverBottom).
-  const modePanel = mode === 'edit' ? (
-    (
-      <div className="overflow-y-auto">
-        <div className="flex gap-1 px-3 pt-2">
-          {(['blocks', 'tris'] as const).map(t => (
-            <button key={t} data-testid={`blocksub-${t}`} onClick={() => { setBlockSub(t); setTriDraft([]); }}
-              className={`ksp-btn px-2 py-[3px] text-[11px] ${blockSub === t ? 'on' : ''}`}>
-              {t === 'blocks' ? '▤ Blocks' : '▵ Triangles'}
-            </button>
-          ))}
-        </div>
-        {/* v1.5: the PLACE|EDIT flavor buttons moved UP into the panel's
-            flavor switch (one switch for both workspaces); only the ⇄ twin
-            row stays here (it belongs to the block surface itself) */}
+  // v1.10.6 (we: "placing blocks isn't fun, and editing triangles also
+  // sucks … use the same kind of panel like for wires"): the blocks/triangles
+  // workspace MOVES to a WIDE BOTTOM DOCK (build-dock) exactly like
+  // wire-dock — the 300 px sidebar slot was the crux of the complaint. The
+  // left panel keeps the parts list + inspector (and gets taller).
+  const triPanel = (
+    <TriPanel bp={bp!} ctx={ctxRef.current} draft={triDraft} triSel={triSel}
+      brush={triBrush} onSlot={(i, v) => setTriBrush(b => b.map((x, j) => j === i ? v : x))}
+      onUndo={() => setTriDraft(d => d.slice(0, -1))}
+      onDeleted={sceneChanged} onClearSel={() => setTriSel(-1)}
+      rev={rev}
+      onHoverTri={setTriHover}
+      onSelectTri={ti => { setTriSel(ti); setTriHover(-1); }}
+      onDeleteTri={ti => ctxRef.current && deleteTri(ctxRef.current, ti)} />
+  );
+  const buildWorkspace = (
+    <>
+      <div className="flex flex-wrap items-center gap-1 px-3 pt-2">
+        {(['blocks', 'tris'] as const).map(t => (
+          <button key={t} data-testid={`blocksub-${t}`} onClick={() => { setBlockSub(t); setTriDraft([]); }}
+            className={`ksp-btn px-2 py-[3px] text-[11px] ${blockSub === t ? 'on' : ''}`}>
+            {t === 'blocks' ? '▤ Blocks' : '▵ Triangles'}
+          </button>
+        ))}
         {blockSub === 'blocks' && (
-          <div className="flex justify-end px-3 pt-1">
-            <button data-testid="block-mirror" title="⇄ respect the mirror plane: place the x-mirrored twin AND propagate block edits to the similar twin"
-              aria-pressed={mirrorPlace} onClick={() => setMirrorPlace(m => !m)}
-              className={`ksp-btn px-2 py-[3px] text-[11px] ${mirrorPlace ? 'on' : ''}`}>
-              ⇄ {mirrorPlace ? 'twin ON' : 'twin off'}
-            </button>
-          </div>
+          <button data-testid="block-mirror" title="⇄ respect the mirror plane: place the x-mirrored twin AND propagate block edits to the similar twin"
+            aria-pressed={mirrorPlace} onClick={() => setMirrorPlace(m => !m)}
+            className={`ksp-btn px-2 py-[3px] text-[11px] ${mirrorPlace ? 'on' : ''}`}>
+            ⇄ {mirrorPlace ? 'twin ON' : 'twin off'}
+          </button>
         )}
-        {blockSub === 'tris' ? triPanel : (
-          <BlockPanel engine={engine} ctx={ctxRef.current} bp={bp!} blockSel={blockSel}
-            brush={brush} tab={tool} legacy={legacy} mirrorAxis={mirAxis}
-            onBrush={setBrush} onSelectBlock={setBlockSel} onApplied={sceneChanged}
-            onPaint={paintBlock}
-            custom={{ addColor: addPaletteColor, onPickSlot: slot => setBrush(b => ({ ...b, slot })) }} />
-        )}
+        <span className="ml-auto pr-2 text-[10px] text-ink-dim">
+          {tool === 'place'
+            ? 'PLACE — hover a surface, click lands the brush · x y z [ ] s resize while placing'
+            : 'EDIT — a click selects · list rows preview, ✕ deletes (Undo returns)'}
+        </span>
       </div>
-    )
-  ) : mode === 'flight' ? (
+      {blockSub === 'tris' ? triPanel : (
+        <BlockPanel engine={engine} ctx={ctxRef.current} bp={bp!} blockSel={blockSel}
+          brush={brush} tab={tool} legacy={legacy} mirrorAxis={mirAxis}
+          onBrush={setBrush} onSelectBlock={setBlockSel} onApplied={sceneChanged}
+          onPaint={paintBlock}
+          rev={rev} onHoverBlock={setBlockHover}
+          onDeleteBlock={bi => ctxRef.current && deleteBlock(ctxRef.current, bi)}
+          axisSel={brushAxis} onAxis={setBrushAxis}
+          custom={{ addColor: addPaletteColor, onPickSlot: slot => setBrush(b => ({ ...b, slot })) }} />
+      )}
+    </>
+  );
+  const modePanel = mode === 'flight' ? (
     <FlightPanel engine={engine} rev={rev} />
   ) : mode === 'aero' ? (
     <div className="overflow-y-auto"><WindPanel engine={engine} rev={rev} /></div>
@@ -1099,6 +1144,16 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
                 (the drag points its BACK) · release lands it · Esc drops it
               </div>
             )}
+            {/* v1.10.6 RESIZE-WHILE-PLACING chip: the live brush footprint +
+                the keys (we: "when placing we should be able to resize") */}
+            {mode === 'edit' && tool === 'place' && blockSub === 'blocks' && !placing && (
+              <div data-testid="brush-chip"
+                className="ksp-win ksp-label pointer-events-none absolute left-1/2 top-2 z-20 -translate-x-1/2
+                           rounded px-3 py-1 text-[11px] text-gold">
+                ▤ {brush.sx + 1}×{brush.sy + 1}×{brush.sz + 1} cells ▸ <b>{'xyz'[brushAxis]}</b>
+                {' '}— <b>[ ]</b> size · <b>x y z</b> axis · <b>s</b> square
+              </div>
+            )}
             {bp && hit && hit.kind !== 'none' && mode !== 'view' && (
               <PickChip hit={hit} bp={bp} />
             )}
@@ -1145,6 +1200,13 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
             {/* KSP bottom-right: the camera cluster over the viewport */}
             <CameraCluster engine={engine} />
           </div>
+          {mode === 'edit' && bp && (
+            <div data-testid="build-dock"
+              className="h-[38%] max-h-[46%] min-h-[200px] shrink-0 overflow-y-auto border-t
+                         border-[rgba(217,212,189,.22)] bg-panel">
+              {buildWorkspace}
+            </div>
+          )}
           {mode === 'wire' && bp && (
             <div data-testid="wire-dock"
               className="h-[38%] max-h-[46%] min-h-[200px] shrink-0 overflow-y-auto border-t

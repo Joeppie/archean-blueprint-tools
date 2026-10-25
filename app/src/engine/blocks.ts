@@ -16,6 +16,11 @@ type Cell = [number, number, number];   // absolute cells (x, y, z)
 
 const floorDiv = (a: number, b: number) => Math.floor(a / b);
 
+/** Size cap (cells − 1, i.e. 25-cell spans) — a SANITY bound, not a frame
+ *  rule (v1.10.6 square-block fix, see setBlockField): the game stores
+ *  multi-frame blocks (corpus max 15 cells). */
+export const BLOCK_SIZE_MAX = 24;
+
 export const blockCells = (b: Block) => ({
   x: (b.frame_x ?? 0) * CELLS_PER_FRAME + b.pos_x,
   y: (b.frame_y ?? 0) * CELLS_PER_FRAME + b.pos_y,
@@ -81,7 +86,9 @@ export function blockFromCell(cell: Cell, size: Cell, type: number, slot: number
     frame_y: fr(cell[1]), pos_y: cell[1] - fr(cell[1]) * CELLS_PER_FRAME,
     frame_z: fr(cell[2]), pos_z: cell[2] - fr(cell[2]) * CELLS_PER_FRAME,
     material,
-    size_x: Math.max(0, size[0]), size_y: Math.max(0, size[1]), size_z: Math.max(0, size[2]),
+    size_x: Math.min(BLOCK_SIZE_MAX, Math.max(0, size[0])),
+    size_y: Math.min(BLOCK_SIZE_MAX, Math.max(0, size[1])),
+    size_z: Math.min(BLOCK_SIZE_MAX, Math.max(0, size[2])),
     type,
   };
 }
@@ -235,11 +242,18 @@ export function setBlockField(bp: Blueprint, bi: number,
     return;
   }
   if (key.startsWith('size')) {
-    const ax = key.slice(5) as 'x' | 'y' | 'z';
-    let n = Math.max(0, Math.min(12, Math.round(v)));
-    const c = blockCells(b);
-    const off = c[ax] - (b[`frame_${ax}`] ?? 0) * CELLS_PER_FRAME;   // keep the frame
-    n = Math.min(n, 12 - off);                                       // pos_* stays ≤ 12
+    // v1.10.6 THE SQUARE-BLOCK FIX (user: "Blocks don't currently let you
+    // make them square, just in 2 dimensions can you size"): the old clamp
+    // `n = min(n, 12 - pos_in_frame)` assumed a block may not CROSS its
+    // 12-cell frame border. It may: the format's only storage rule is
+    // pos_* ∈ 0..12, and the game's own workshop files carry 26 053 blocks
+    // whose footprint crosses the frame border (max 16-cell spans, e.g.
+    // 3521588534, 3510792645) — measured over testdata/. The old clamp made
+    // a block near a frame edge un-growable on that axis (a block at pos
+    // (10,6,6) grew in y/z but capped at 3 cells in x — never square).
+    // A size write moves NO cell, so pos_* cannot leave 0..12; the only cap
+    // left is a sanity bound (24 = 25 cells, above the corpus max of 15).
+    const n = Math.max(0, Math.min(BLOCK_SIZE_MAX, Math.round(v)));
     (b as unknown as Record<string, number>)[key] = n;
     return;
   }

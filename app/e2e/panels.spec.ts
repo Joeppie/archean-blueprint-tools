@@ -288,27 +288,41 @@ test.describe('modes, new craft, file menu @ui', () => {
     const selState = () => page.evaluate(() =>
       (window as unknown as { __ARCHEAN__?: { sel: () => { ci: number; sub: number } } })
         .__ARCHEAN__!.sel());
-    const px = await page.evaluate(() => {
+    // v1.10.6: the probe runs against the LIVE canvas — entering Edit docks
+    // the build-dock, which SHRINKS the canvas and reframes the projection,
+    // so the Edit-mode click re-probes (the old shared pixel maps elsewhere
+    // once the dock lands). It uses pickCell — the SAME surface pick the
+    // Edit click routes through (onBlockPick): a pickAt 'comp' whose
+    // pickCell is a hull 'tri' (the part sits behind a skin prism) selects
+    // nothing on click, so it is not a valid target.
+    const probeComp = () => page.evaluate(() => {
       const c = document.querySelector('canvas')!;
       const r = c.getBoundingClientRect();
       const e = (window as unknown as { __ARCHEAN__?: { engine: { pendingReal: number;
-        pickAt: (x: number, y: number) => { kind: string } | null } } }).__ARCHEAN__!.engine;
+        pickCell: (x: number, y: number) => { kind: string; ci: number } | null } } }).__ARCHEAN__!.engine;
       if (e.pendingReal > 0) return null;
       for (let fy = 0.3; fy <= 0.75; fy += 0.03)
         for (let fx = 0.25; fx <= 0.75; fx += 0.03) {
-          const h = e.pickAt(r.left + r.width * fx, r.top + r.height * fy);
-          if (h && h.kind === 'comp') return { x: fx, y: fy };
+          const h = e.pickCell(r.left + r.width * fx, r.top + r.height * fy);
+          if (h && h.kind === 'comp' && h.ci >= 0) return { x: fx, y: fy };
         }
       return null;
     });
+    let px = await probeComp();
+    for (let i = 0; i < 20 && !px; i++) { await page.waitForTimeout(300); px = await probeComp(); }
     expect(px, 'a component surface is clickable').not.toBeNull();
-    const cbox = (await page.getByTestId('canvas').boundingBox())!;
+    let cbox = (await page.getByTestId('canvas').boundingBox())!;
     await page.mouse.click(cbox.x + cbox.width * px!.x, cbox.y + cbox.height * px!.y);
     expect((await selState()).ci, 'a VIEW click selects nothing').toBe(-1);
     // edit mode brings the PLACE/EDIT sub-tabs and the editable inspector
     await page.getByTestId('mode-edit').click();
+    await expect(page.getByTestId('build-dock')).toBeVisible();
+    px = await probeComp();
+    for (let i = 0; i < 20 && !px; i++) { await page.waitForTimeout(300); px = await probeComp(); }
+    expect(px, 'a component surface is clickable in the Edit canvas too').not.toBeNull();
+    cbox = (await page.getByTestId('canvas').boundingBox())!;
     await page.mouse.click(cbox.x + cbox.width * px!.x, cbox.y + cbox.height * px!.y);
-    expect((await selState()).ci, 'the SAME pixel selects in the Edit mode')
+    expect((await selState()).ci, 'the component surface selects in the Edit mode')
       .toBeGreaterThanOrEqual(0);
     await expect(page.getByTestId('tooltab-place')).toBeVisible();
     await expect(page.getByTestId('tooltab-edit')).toBeVisible();

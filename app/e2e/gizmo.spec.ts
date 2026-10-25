@@ -218,10 +218,32 @@ test.describe('gizmo writeback @gizmo @slow', () => {
     await openCraft(page, ISW);
     const canvas = page.getByTestId('canvas');
     const box = (await canvas.boundingBox())!;
-    const pts = [[0, 0], [0.08, 0], [-0.08, 0], [0, 0.08], [0, -0.08], [0.16, 0.05]];
+    // v1.10.6: PROBE a comp pixel (pickCell — the click's picker; the widget
+    // opens on the comp AND block branches) instead of the fixed center ±8%
+    // offsets: the build-dock shortens the canvas, the wider aspect fans
+    // those fractions into a much wider world slice, and they all fell on
+    // skin prisms / ground.
+    let spot: { x: number; y: number } | null = null;
+    for (let i = 0; i < 30 && !spot; i++) {
+      spot = await page.evaluate(() => {
+        const c = document.querySelector('canvas')!;
+        const r = c.getBoundingClientRect();
+        const e = (window as unknown as { __ARCHEAN__?: { engine: { pendingReal: number;
+          pickCell: (x: number, y: number) => { kind: string; ci: number; bi: number } | null } } }).__ARCHEAN__!.engine;
+        if (e.pendingReal > 0) return null;
+        for (let fy = 0.25; fy <= 0.85; fy += 0.03)
+          for (let fx = 0.2; fx <= 0.8; fx += 0.03) {
+            const h = e.pickCell(r.left + r.width * fx, r.top + r.height * fy);
+            if (h && ((h.kind === 'comp' && h.ci >= 0) || h.bi >= 0)) return { x: fx, y: fy };
+          }
+        return null;
+      });
+      if (!spot) await page.waitForTimeout(300);
+    }
+    expect(spot, 'a part/block surface answers the pickCell click path').not.toBeNull();
     let picked = false;
-    for (const [dx, dy] of pts) {
-      await canvas.click({ position: { x: box.width / 2 + dx * box.width, y: box.height / 2 + dy * box.height } });
+    for (const [jx, jy] of [[0, 0], [0.004, 0.004], [-0.004, 0]]) {
+      await canvas.click({ position: { x: box.width * (spot.x + jx), y: box.height * (spot.y + jy) } });
       if (await page.getByTestId('modebox').isVisible().catch(() => false)) { picked = true; break; }
     }
     expect(picked, 'a deliberate canvas tap on the craft pops the mode widget').toBe(true);

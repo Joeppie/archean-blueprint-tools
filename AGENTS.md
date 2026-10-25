@@ -1346,6 +1346,62 @@ topic + FORMAT).
   re-stamped to silent fresh. Bonus rule learned: corpus identity — catalog
   and /corpus route resolve the SAME file (one `craftFile()`), so a staleness
   flag can never describe a different file than the download would fetch.
+- **v1.10.6 THE BUILD DOCK + THE SQUARE-BLOCK FIX (we: "UX is crap. Placing
+  blocks isn't fun, and editing triangles also sucks … use the same kind of
+  panel like for wires, also when placing we should be able to resize.
+  Blocks don't currently let you make them square, just in 2 dimensions can
+  you size")**: (1) THE SQUARE FIX — `blocks.ts setBlockField` capped every
+  size at `12 − pos-in-frame` (assumed a block may not cross its 12-cell
+  frame border). It may: the format's only storage rule is pos_* ∈ 0..12
+  and the game's own files carry **26 053 blocks crossing the border**
+  (max 16-cell spans; measured over testdata/) — a block at pos (10,6,6)
+  grew in y/z but froze at 3 cells in x: the exact "2 dimensions" report.
+  Now: sanity cap `BLOCK_SIZE_MAX = 24` (corpus max is 15 cells) on
+  setBlockField + blockFromCell, Num fields follow. (2) THE BUILD DOCK: the
+  Blocks/Triangles workspace moved out of the 300 px sidebar into a WIDE
+  BOTTOM DOCK (`build-dock`, the wire-dock twin) — 3 columns each: brush +
+  BLOCK CENSUS (families/materials/cells/⇄ conflicts, O(n²) sweep capped at
+  800 blocks) │ the searchable BLOCK LIST (hover = gold 3D preview via the
+  merged setBlockHighlight effect — a hovered row preempts the selection
+  like wire previewHover; click = select; ✕ = the Editor DELETE path, one
+  Ctrl+Z restores) │ THIS BLOCK (all edit rows + a shape-type chip row).
+  Triangles got the same: SKIN CENSUS (n, Σ m², materials) │ TRIANGLE LIST
+  (area · material · centroid, hover/click/✕) │ THIS TRIANGLE with REAL
+  editing — the three corners as global lattice cells (`tris.ts triCorners/
+  setTriCorner`, writer-style (frame, v) refactor, honest refusals: the
+  frame-aligned 32-slot vertex window + corner folds), a ±1-cell MOVE per
+  axis (`shiftTriCells`) and the smooth/flat shading row; every write
+  mirrors ONLY the changed fields onto the doc (v1.6.1 rule).
+  `ui.tsx Num` gained an EXTERNAL-commit sync (a field shows state — the
+  keys/undo/twin writes repaint it; the local string survives while it
+  carries the same number). (3) RESIZE-WHILE-PLACING: over the canvas in
+  the Place flavor, **x/y/z** pick the active brush axis, **[ ]** (− =)
+  shrink/grow it, **s** squares the brush; the `brush-chip` shows the live
+  footprint and the ghost re-aims through the existing brush-change effect;
+  the panel gains ▣ square / 1×1×1 + axis chips. Pins: vitest blocks.test.ts
+  "SQUARE-BLOCK FIX" + tris.test.ts "panel vertex editing" (window/fold
+  refusals keep the record byte-intact, shift re-anchors the frame, v near
+  0); e2e `builddock.spec.ts` (@place @ui: dock columns, list select/✕/undo,
+  keys→chip→panel fields→SQUARE ghost, a deck block grows to 10×10×10, tri
+  list + ±cell round-trip on global corners + `refused` message). e2e
+  re-pins the dock implies (canvas shrinks): blockplace.spec hosts on
+  9000005001 (ISW's blocks sit under its skin — 1-px faces on the shorter
+  canvas), its probe takes only face-INTERIOR pixels (the ±2-px cross
+  answers the SAME block — silhouette-rim pixels are face-unstable), the
+  Shift pin pairs ghost+pickCell in ONE rAF poll with a size-consistency +
+  two-frame-stability gate, and the family law is pinned per family (a
+  sub-pixel camera-damping drift flips which face the click aims);
+  panels.spec re-probes the component pixel after the mode flip (the canvas
+  resized) through pickCell (the click's picker — a pickAt 'comp' behind a
+  skin prism selects nothing); mirror.spec's phone probes widened + the ⇄
+  row (now in the dock) is clicked with the drawer closed; gizmo.spec's
+  modebox tap PROBEs a pickCell-verified part/block pixel (the fixed
+  center ±8% offsets fan wider with the short canvas's aspect and all fell
+  on skin prisms/ground — canvas fractions are NOT aspect-stable). Env
+  note: asset-space's SOLO fixtures (90000030NN) live in the machine-local
+  corpus, not testdata — a worktree needs the gitignored `blueprints.conf`
+  copied in (the §Blueprint folder hierarchy working as designed, NOT a
+  code failure; 40 s `?craft=` open timeouts + findIndex −2 = corpus miss).
 - **v1.10.2 THE PANEL LAW — the subgrid axis statute (we: "only one of the
   two doors rotated wrong … also the color is not right" — craft 3326372833
   Chip's Badger):** the game's OWN baked panel transforms settle the axis

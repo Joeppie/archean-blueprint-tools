@@ -10,7 +10,8 @@ import { blockAt, blockCells, blockFromCell, blockMirrorTwin, blockTwinIssues,
   cellIndex, cellOverlap, faceSlots,
   complementBlock, flippedBlock, mirroredBlock, mirrorBlockCell, MIRROR_TYPE,
   MIRROR_TYPES, mirrorAxisIdx, mirrorFaceOrder, mirroredFaceSlots, paintTwinPair,
-  rotateType, rotateTypeAbout, rotatedBlock, snapBlockType } from '../blocks';
+  rotateType, rotateTypeAbout, rotatedBlock, snapBlockType,
+  setBlockField, BLOCK_SIZE_MAX } from '../blocks';
 import { getBlockPoints } from '../blockshapes';
 import type { Block, Blueprint } from '../format';
 
@@ -514,5 +515,46 @@ describe('v1.10.5 mirror axis ⊘ off (blocks)', () => {
     expect(changed.length).toBe(7);                        // the source repaints
     expect(faceSlots(bp.data.blocks[1]!).every(s => s === 0)).toBe(true);  // twin NOT painted
     expect(faceSlots(bp.data.blocks[0]!).every(s => s === 51)).toBe(true);
+  });
+});
+
+describe('v1.10.6 SQUARE-BLOCK FIX (size growth is not capped by the frame)', () => {
+  // The old setBlockField clamp `min(n, 12 - pos_in_frame)` silently
+  // truncated any growth that would CROSS the block's 12-cell frame border.
+  // The game's own files carry 26 053 blocks that cross it (max 16-cell
+  // spans) — the format's only storage rule is pos_* ∈ 0..12, and a size
+  // write moves no cell, so the clamp was pure loss of function: a block at
+  // pos (10,6,6) grew in y/z but froze at 3 cells in x — never square.
+  const bpOf = (blocks: ReturnType<typeof blockFromCell>[]) =>
+    ({ data: { blocks } }) as unknown as Blueprint;
+
+  it('a block near a frame edge grows to a SQUARE on all three axes', () => {
+    // cell (10, 6, 6) = the classic near-edge anchor (x offset 10 in frame 0)
+    const b = blockFromCell([10, 6, 6], [0, 0, 0], 0, 0);
+    const bp = bpOf([b]);
+    for (const k of ['size_x', 'size_y', 'size_z'] as const) setBlockField(bp, 0, k, 9);
+    expect([b.size_x, b.size_y, b.size_z]).toEqual([9, 9, 9]);   // 10×10×10, square
+    // storage law: pos_* stays 0..12 (the size write moved NO cell)
+    expect(b.pos_x).toBe(10); expect(b.pos_x).toBeLessThanOrEqual(12);
+    expect(b.pos_y).toBe(6); expect(b.pos_z).toBe(6);
+    // …and the footprint crosses the frame border exactly like the corpus:
+    expect(b.pos_x + b.size_x + 1).toBeGreaterThan(12);
+  });
+
+  it('growth caps at the sanity bound, shrinking never clamps up', () => {
+    const b = blockFromCell([0, 0, 0], [0, 0, 0], 0, 0);
+    const bp = bpOf([b]);
+    setBlockField(bp, 0, 'size_x', 9999);
+    expect(b.size_x).toBe(BLOCK_SIZE_MAX);
+    setBlockField(bp, 0, 'size_x', -5);
+    expect(b.size_x).toBe(0);
+    setBlockField(bp, 0, 'size_x', 100);
+    expect(b.size_x).toBe(100 > BLOCK_SIZE_MAX ? BLOCK_SIZE_MAX : 100);
+  });
+
+  it('the brush honors the cap; blockFromCell never stores a fatter block', () => {
+    const b = blockFromCell([5, 5, 5], [99, 3, 3], 0, 0);
+    expect(b.size_x).toBe(BLOCK_SIZE_MAX);
+    expect(b.size_y).toBe(3);
   });
 });

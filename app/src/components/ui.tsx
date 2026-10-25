@@ -14,6 +14,17 @@ export const Sec = (p: { title: string; children?: React.ReactNode; testid?: str
 export function Num(p: { label: string; value: number; min: number; max: number;
   disabled?: boolean; testid?: string; onCommit: (v: number) => void }) {
   const [v, setV] = useState(String(p.value));
+  // v1.10.6: EXTERNAL commits (the dock's keyboard brush resize, twin
+  // mirrors, undo) must repaint the field — the local string stays while it
+  // already carries the same number, so typing "3." / "-" mid-keystroke is
+  // never yanked (the v0.149 row().set() lesson: a control that shows a
+  // stale value is a dead button the user cannot trust). Render-phase
+  // adjustment (React's derived-state idiom), not an effect.
+  const [last, setLast] = useState(p.value);
+  if (last !== p.value) {
+    setLast(p.value);
+    setV(s => (+s === p.value && s.trim() !== '' ? s : String(p.value)));
+  }
   return (
     <label className="flex items-center gap-1.5 py-[2px] text-[11px]">
       <span className="w-[62px] shrink-0 text-ink-dim">{p.label}</span>

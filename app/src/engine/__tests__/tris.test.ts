@@ -4,7 +4,8 @@
 // ISW corpus check that stored vertices land inside the craft bbox.
 import { readFileSync, existsSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
-import { cornerOf, cornerWorld, triAt, triCentroid, triangleFromCorners } from '../tris';
+import { cornerOf, cornerWorld, triAt, triCentroid, triangleFromCorners,
+  triCorners, setTriCorner, shiftTriCells, triSpan } from '../tris';
 import type { Blueprint } from '../format';
 import { corpusDir } from '../../../tools/vite-corpus.ts';
 
@@ -75,5 +76,69 @@ describe('hull lattice', () => {
         expect(c[ax]).toBeLessThanOrEqual(hi + 0.3);
       }
     }
+  });
+});
+
+describe('v1.10.6 panel vertex editing (setTriCorner / shiftTriCells)', () => {
+
+  test('triCorners round-trips the (frame, v) split to global corners', () => {
+    const g0: [number, number, number] = [25, 21, 22];
+    const g1: [number, number, number] = [17, 22, 22];
+    const g2: [number, number, number] = [25, 22, 6];
+    const t = triangleFromCorners(g0, g1, g2, [51, 51, 51, 51, 51])!;
+    expect(triCorners(t)).toEqual([g0, g1, g2]);
+  });
+
+  test('setTriCorner moves ONE corner, writer-style refactor, returns changes', () => {
+    const t = triangleFromCorners([8, 8, 8], [12, 8, 8], [8, 12, 8], [51, 51, 51, 51, 51])!;
+    const ch = setTriCorner(t, 2, 1, 20);                      // v1.y 12 → 20
+    expect(ch).not.toBeNull();
+    expect(triCorners(t)[2]).toEqual([8, 20, 8]);
+    // the changed-field map carries ONLY the fields whose number moved
+    // (applyTriDelta filters the rest) — exactly what the doc must mirror
+    expect(Object.keys(ch!)).toEqual(['v2_y']);
+    // …and re-applying them to the doc is consistent (world maths preserved)
+    const o = t as unknown as Record<string, number>;
+    for (let i = 0; i < 3; i++)
+      for (let ax = 0; ax < 3; ax++) {
+        const name = 'xyz'[ax]!;
+        const world = (o[`v${i}_${name}`]! + 12 * o[`frame_${name}`]! - 6) * 0.25;
+        expect(world).toBeCloseTo(triCorners(t)[i]![ax]! * 0.25 - 1.5, 9);
+      }
+    expect(triSpan(t)).toEqual([4, 12, 0]);
+  });
+
+  test('setTriCorner REFUSES degenerate corners and the 32-slot window', () => {
+    const t = triangleFromCorners([8, 8, 8], [12, 8, 8], [8, 12, 8], [51, 51, 51, 51, 51])!;
+    const before = JSON.stringify(t);
+    // v2 (8,12,8) pulled to (8,8,8) would FOLD onto v0 — the degenerate
+    // guard fires on that single axis move…
+    expect(setTriCorner(t, 2, 1, 8)).toBeNull();
+    expect(JSON.stringify(t)).toBe(before);                    // record untouched
+    // …and the frame-aligned window guard: y 12 → 48 puts v2_y = 48 − 0 > 31
+    expect(setTriCorner(t, 2, 1, 48)).toBeNull();
+    expect(JSON.stringify(t)).toBe(before);
+  });
+
+  test('shiftTriCells moves the WHOLE triangle; window refusal is honest', () => {
+    const t = triangleFromCorners([8, 8, 8], [12, 8, 8], [8, 12, 8], [51, 51, 51, 51, 51])!;
+    const ch = shiftTriCells(t, [1, 0, -2]);
+    expect(ch).not.toBeNull();
+    expect(triCorners(t)).toEqual([[9, 8, 6], [13, 8, 6], [9, 12, 6]]);
+    for (let i = 0; i < 3; i++) expect(Object.keys(ch!).includes(`v${i}_x`)).toBe(true);
+    // a triangle hugging the window (span 31…): +1 is REFUSED, record kept
+    const big = triangleFromCorners([0, 0, 0], [31, 0, 0], [0, 31, 0], [51, 51, 51, 51, 51])!;
+    const before = JSON.stringify(big);
+    expect(shiftTriCells(big, [1, 0, 0])).toBeNull();
+    expect(JSON.stringify(big)).toBe(before);
+  });
+
+  test('frame re-anchor: a negative shift stays writer-style (v near 0)', () => {
+    const t = triangleFromCorners([8, 8, 8], [12, 8, 8], [8, 12, 8], [51, 51, 51, 51, 51])!;
+    expect(shiftTriCells(t, [-10, 0, 0])).not.toBeNull();
+    const o = t as unknown as Record<string, number>;
+    expect(o.frame_x).toBeLessThan(0);                          // frame followed
+    expect(o.v0_x).toBeGreaterThanOrEqual(0);                   // v starts near 0
+    expect(triCorners(t)[0]).toEqual([-2, 8, 8]);
   });
 });

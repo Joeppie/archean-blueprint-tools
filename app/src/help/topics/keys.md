@@ -1,5 +1,5 @@
 # Keyboard and mouse
-Tags: keyboard shortcuts keys mouse controls orbit pan zoom delete escape shift snap
+Tags: keyboard shortcuts keys mouse controls orbit pan zoom delete escape shift snap resize square brush
 
 ## Keys (ignored while a text field has focus)
 
@@ -13,6 +13,9 @@ Tags: keyboard shortcuts keys mouse controls orbit pan zoom delete escape shift 
 | o | occupancy boxes on/off |
 | h | hull solids ⇄ wireframe — in wireframe you CLICK THROUGH the hull to what is behind it ("click what you SEE") |
 | 5 | projection: perspective ⇄ ORTHOGRAPHIC (parallel) — the same toggle as ⚙ View ▸ orthographic |
+| x / y / z (✚ Place, Blocks) | pick the brush's active size axis |
+| [ / ] (✚ Place, Blocks) | shrink / grow the active axis one cell (`−`/`=` also work) |
+| s (✚ Place, Blocks) | square the brush — every axis to the largest |
 | Shift (held) | snaps: gizmo moves to 0.25 m cells, rotations to 15°, subgrid joint handles snap, block ghost = mirror continuation |
 | Esc | close the top window → cancel a placement drag/skin → drop a held part → deselect |
 
