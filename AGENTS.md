@@ -1386,6 +1386,26 @@ topic + FORMAT).
   snaps the pin back), the third click commits + the pins STAY; the tri LIST
   row puts pins on any committed triangle; Esc leaves; deletes drop the pins
   (splice-shift safety); undo clears pins. `cornerOf` snaps every drop.
+  (4b) CENTROID WIDGET (we: "the centroid should allow rotating the triangle
+  or moving it wholesale for all three pins, again using the sort of widget
+  you can grab onto"): a pinned COMMITTED triangle wears the SAME
+  TransformControls as a block, attached at its CENTROID with the LOCAL
+  frame = the triangle plane (x = edge v0→v1, z = winding normal) — last
+  owner in the gizmo chain (component → block → cluster → `syncTriGizmo`,
+  entered from syncClusterGizmo's no-cluster branch; setPinEdit/clearPins/
+  setPinDraft call syncGizmo so the widget lands/leaves with the pins). ✥ =
+  WORLD translate, CELL snap → whole-cell `onPinShift` → shiftTriCells;
+  ⟳ = LOCAL rotate → the engine quantises EVERY corner back to the lattice
+  per objectChange (WYSIWYG storable pose live) and commits atomically via
+  `onPinRotate` → tris.ts `setTriCornersAll` (refused window/coincidence =
+  writes nothing, pins + widget snap back). Callbacks return success for
+  the snap-back. The canvas tri-face select clears comp/block selection +
+  pops the modebox (⊘ ✥ ⟳; no ⤢ — scale never applies to a triangle; in
+  scale mode the tri widget detaches). Hooks `triGizmo()`, `triShift(d)`,
+  `triRotate(axis, deg)`; pins: e2e builddock (widget shows on list-row
+  select, wholesale move keeps per-corner deltas equal, 90° rotate + TWO
+  Ctrl+Z steps back through rotate→move, Esc drops pins AND widget) +
+  vitest `setTriCornersAll` (atomic write, refusals byte-intact).
   (5) The BLOCK widget now attaches in BOTH flavors (a placed block wears it
   immediately — the old detach-on-flip pin re-cut). Hooks: `pins()`,
   `pinPoint(i)`, `blockScale(ext, signs?)`; `blockGizmo()` carries `ext`.

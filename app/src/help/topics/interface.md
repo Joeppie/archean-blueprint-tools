@@ -54,8 +54,9 @@ them back), and the **editor of the selected item**.
 * **Triangles**: pick **▵ Triangles**, then click three spots — each lands
   a **pin** on the lattice, draggable before the third lands; the third
   click commits the prism and the pins + a direction **arrow** stay on it
-  (drag a pin to reshape the triangle; a list row puts pins on any
-  committed triangle; Esc leaves).
+  (drag a pin to reshape the triangle; a list row puts its pins AND the
+  ✥/⟳ centroid widget on any committed triangle — ✥ moves all three corners,
+  ⟳ turns it, lattice-quantised; Esc leaves).
 * **Editing**: pick ✎ Edit and tap a part (the inspector opens) or a block
   face (the block editor + the BLOCK widget open).
 

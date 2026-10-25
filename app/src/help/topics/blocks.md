@@ -67,8 +67,15 @@ the prism (brush colours, material 0). The pins are the point:
   which way the triangle faces (its FRONT colour side). Moving a pin across
   the opposite side flips it, exactly like the game's direction tell.
 * Click an existing prism's middle, or a row in the triangle list, to put
-  that triangle's pins on the surface. **Esc** leaves the pins; the list
-  dock keeps the number rows (corners, ±cell moves, colours, shading).
+  that triangle's pins on the surface — and its **centroid widget** on the
+  gizmo: the SAME grab-onto widget a block wears. **✥** moves the WHOLE
+  triangle (all three corners, whole-cell snaps), **⟳** turns it about its
+  own plane (the ring on the normal spins it in-plane) — and because the
+  hull is an integer lattice every pose is QUANTISED: corners re-snap to
+  the nearest lattice corner live, so you always see the storable shape.
+  A refused turn (vertex window) snaps the pins back. **Esc** leaves the
+  pins; the list dock keeps the number rows (corners, ±cell moves,
+  colours, shading).
 
 ## Materials — the block's gameplay identity
 

@@ -5,7 +5,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 import { cornerOf, cornerWorld, triAt, triCentroid, triangleFromCorners,
-  triCorners, setTriCorner, setTriCornerAll, shiftTriCells, triSpan } from '../tris';
+  triCorners, setTriCorner, setTriCornerAll, setTriCornersAll, shiftTriCells, triSpan } from '../tris';
 import type { Blueprint } from '../format';
 import { corpusDir } from '../../../tools/vite-corpus.ts';
 
@@ -140,6 +140,20 @@ describe('v1.10.6 panel vertex editing (setTriCorner / shiftTriCells)', () => {
     expect(o.frame_x).toBeLessThan(0);                          // frame followed
     expect(o.v0_x).toBeGreaterThanOrEqual(0);                   // v starts near 0
     expect(triCorners(t)[0]).toEqual([-2, 8, 8]);
+  });
+
+  test('v1.11 setTriCornersAll writes a ROTATED corner triple atomically', () => {
+    const t = triangleFromCorners([8, 8, 8], [12, 8, 8], [8, 12, 8], [51, 51, 51, 51, 51])!;
+    const ch = setTriCornersAll(t, [[10, 6, 10], [10, 10, 10], [6, 10, 12]]);
+    expect(ch).not.toBeNull();
+    expect(triCorners(t)).toEqual([[10, 6, 10], [10, 10, 10], [6, 10, 12]]);
+    const before = JSON.stringify(t);
+    // ANY pair collapsing → whole write refused, record byte-intact
+    expect(setTriCornersAll(t, [[5, 5, 5], [5, 5, 5], [7, 7, 7]])).toBeNull();
+    expect(JSON.stringify(t)).toBe(before);
+    // the 32-slot window applies to the WHOLE triple, not one corner
+    expect(setTriCornersAll(t, [[8, 8, 8], [60, 8, 8], [8, 12, 8]])).toBeNull();
+    expect(JSON.stringify(t)).toBe(before);
   });
 
   test('v1.11 setTriCornerAll moves ONE corner on ALL 3 axes (the pin editor)', () => {

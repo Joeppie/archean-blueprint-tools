@@ -135,6 +135,22 @@ export function setTriCornerAll(t: Triangle, i: number, g: Corner):
   return d ? applyTriDelta(t, d) : null;
 }
 
+/** Move ALL THREE corners at once (the v1.11 centroid widget's ROTATE
+ *  commit: the engine quantises the rotated corners back onto the lattice,
+ *  this writes them atomically). Same contract as setTriCorner: mutates,
+ *  returns the changed fields, null = refused (ANY pair coincident / the
+ *  32-slot window) — a refused rotate leaves the record byte-intact. */
+export function setTriCornersAll(t: Triangle, ng: [Corner, Corner, Corner]):
+  Record<string, number> | null {
+  const nc = ng.map(g => [Math.round(g[0]!), Math.round(g[1]!), Math.round(g[2]!)] as Corner);
+  for (let i = 0; i < 3; i++)
+    for (let k = i + 1; k < 3; k++)
+      if (nc[i]![0] === nc[k]![0] && nc[i]![1] === nc[k]![1] && nc[i]![2] === nc[k]![2])
+        return null;
+  const d = refactorTri(nc as [Corner, Corner, Corner]);
+  return d ? applyTriDelta(t, d) : null;
+}
+
 /** Shift the WHOLE triangle by integer cells (the dock's ± rows). Same
  *  contract as setTriCorner. */
 export function shiftTriCells(t: Triangle, d: readonly [number, number, number]):

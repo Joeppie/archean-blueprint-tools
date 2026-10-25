@@ -354,7 +354,7 @@ test.describe('build-dock: triangle PIN placement @ui', () => {
     await expect.poll(corners, { timeout: 5000 }).toEqual(before);
   });
 
-  test('a LIST row puts the pins on any committed triangle', async ({ page }) => {
+  test('a LIST row puts the pins + the CENTROID widget on a triangle; ✥ moves it wholesale, ⟳ rotates', async ({ page }) => {
     test.skip(test.info().project.name !== 'chromium', 'desktop-only');
     await open(page, '3732302108');                        // the gantry: authored skin
     await page.getByTestId('blocksub-tris').click();
@@ -366,9 +366,50 @@ test.describe('build-dock: triangle PIN placement @ui', () => {
       __ARCHEAN__?: { pins: () => { mode: string; ti: number; pts: number[][] } | null } }).__ARCHEAN__!.pins());
     await expect.poll(pins, { timeout: 5000 }).toMatchObject({ mode: 'edit', ti: idx });
     expect(((await pins())!).pts.length).toBe(3);
-    // Esc leaves the pins (they are edit UI, never saved state)
+    // the CENTROID widget: the same grab-onto TransformControls a block wears
+    const giz = () => page.evaluate(() => (window as unknown as {
+      __ARCHEAN__?: { triGizmo: () => { ti: number; mode: string; shown: boolean } | null } })
+      .__ARCHEAN__!.triGizmo());
+    await expect.poll(giz, { timeout: 5000 }).toMatchObject({ ti: idx, shown: true });
+    const corners = () => page.evaluate((i) => {
+      const w = window as unknown as {
+        __ARCHEAN__?: { engine: { blueprint: { data: { triangles: Record<string, number>[] } } } };
+      };
+      const t = w.__ARCHEAN__!.engine.blueprint.data.triangles[+i]!;
+      return [0, 1, 2].map(vi => [0, 1, 2].map(ai => {
+        const name = 'xyz'[ai]!;
+        return t[`v${vi}_${name}`]! + 12 * t[`frame_${name}`]!;
+      }));
+    }, idx);
+    const before = await corners();
+    // ✥ MOVE WHOLESALE: all three corners ride the same whole-cell delta…
+    const moved = await page.evaluate(() => (window as unknown as {
+      __ARCHEAN__?: { triShift: (d: [number, number, number]) => boolean } })
+      .__ARCHEAN__!.triShift([2, 0, -2]));
+    expect(moved, 'a whole-cell move commits').toBe(true);
+    const mid = await corners();
+    for (const [vi, c] of mid.entries())
+      expect(c).toEqual([before[vi]![0] + 2, before[vi]![1], before[vi]![2] - 2]);
+    // …and a no-op move is accepted trivially
+    expect(await page.evaluate(() => (window as unknown as {
+      __ARCHEAN__?: { triShift: (d: [number, number, number]) => boolean } })
+      .__ARCHEAN__!.triShift([0, 0, 0]))).toBe(true);
+    // ⟳ ROTATE about the triangle's centroid, lattice-quantised: corners
+    // move, one Ctrl+Z brings the record back (one history step)
+    await page.waitForTimeout(600);                        // separate undo group
+    const rotated = await page.evaluate(() => (window as unknown as {
+      __ARCHEAN__?: { triRotate: (a: 'x' | 'y' | 'z', d: number) => boolean } })
+      .__ARCHEAN__!.triRotate('y', 90));
+    expect(rotated, 'a 90° turn commits').toBe(true);
+    await expect.poll(corners, { timeout: 5000 }).not.toEqual(mid);
+    await page.keyboard.press('Control+z');
+    await expect.poll(corners, { timeout: 5000 }).toEqual(mid);
+    await page.keyboard.press('Control+z');
+    await expect.poll(corners, { timeout: 5000 }).toEqual(before);
+    // Esc leaves the pins — and the centroid widget leaves WITH them
     await page.keyboard.press('Escape');
     await expect.poll(pins, { timeout: 5000 }).toBeNull();
+    await expect.poll(giz, { timeout: 5000 }).toBeNull();
   });
 });
 

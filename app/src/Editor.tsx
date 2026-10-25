@@ -17,7 +17,7 @@ import { TOOLS, ToolDialog, type PlacePayload, type ToolForm } from './component
 import HelpDialog from './components/HelpDialog';
 import { blockInfo, blockMirrorTwin, blockTwinIssues, cellIndex, cellOverlap,
   complementBlock, mirrorAxisIdx, paintTwinPair, type MirrorAxisOpt } from './engine/blocks';
-import { cornerOf, triAt, triangleFromCorners, setTriCornerAll, type Corner } from './engine/tris';
+import { cornerOf, triAt, triangleFromCorners, setTriCornerAll, setTriCornersAll, shiftTriCells, type Corner } from './engine/tris';
 import type { Blueprint } from './engine/format';
 import { isLegacyFile } from './engine/format';
 import type { ResolvedColor } from './engine/palette';
@@ -450,6 +450,35 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       // click reads the dragged positions, not the pre-drag ones (the engine
       // owns the drag, React mirrors — one source of truth for the corners).
       e.onPinDraft = (pts) => setTriDraft(pts.map(p => [...p] as Corner));
+      // v1.11 CENTROID WIDGET: ✥ moves ALL THREE corners by whole cells
+      // (shiftTriCells), ⟳ writes the engine's lattice-quantised rotated
+      // corners atomically (setTriCornersAll). Both mirror bp → the changed
+      // doc fields (v1.6.1: the doc is the save and the history) and repaint
+      // on the debounced merged reload; a refused record (window / coincident)
+      // writes nothing → the engine snaps the pins + widget back. Returns
+      // success so the engine knows to snap back.
+      e.onPinShift = (ti, d) => {
+        const ctx = ctxRef.current;
+        const t = ctx?.bp.data.triangles?.[ti];
+        if (!ctx || !t) return false;
+        const changed = shiftTriCells(t, d);
+        if (!changed) return false;
+        for (const [k, v] of Object.entries(changed))
+          docSetNumber(ctx.doc, ['data', 'triangles', ti, k], v);
+        sceneChanged();
+        return true;
+      };
+      e.onPinRotate = (ti, c) => {
+        const ctx = ctxRef.current;
+        const t = ctx?.bp.data.triangles?.[ti];
+        if (!ctx || !t) return false;
+        const changed = setTriCornersAll(t, c as [Corner, Corner, Corner]);
+        if (!changed) return false;
+        for (const [k, v] of Object.entries(changed))
+          docSetNumber(ctx.doc, ['data', 'triangles', ti, k], v);
+        sceneChanged();
+        return true;
+      };
     }
     setEngine(e);
   }, [markDirty, bumpRev, sceneChanged, pipesSoon]);
@@ -749,7 +778,9 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         const t = triAt(ctx.bp, r.point);
         if (t >= 0) {
           setTriSel(t); setBlockSel(-1); setPinTi(t);
+          e.select(-1);                     // the CENTROID widget takes the gizmo
           e.setPinEdit(t, triBrush[0] ?? 51);
+          openWidget();                     // ⊘/✥/⟳ at the click: move/turn switch
           return;
         }
       }
@@ -990,11 +1021,18 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
           return next;
         });
       }}
-      onDeleted={sceneChanged} onClearSel={() => setTriSel(-1)}
+      onDeleted={sceneChanged}
+      onClearSel={() => {
+        setTriSel(-1);
+        setPinTi(-1);
+        engineRef.current?.clearPins();     // v1.11: pins + centroid widget leave
+      }}
       rev={rev}
       onHoverTri={setTriHover}
       onSelectTri={ti => {
         setTriSel(ti); setTriHover(-1); setTriDraft([]);
+        setBlockSel(-1);                                  // free the widget chain
+        engineRef.current?.select(-1);
         setPinTi(ti);                                   // v1.11: list row puts the pins on it
         engineRef.current?.setPinEdit(ti, triBrush[0] ?? 51);
       }}

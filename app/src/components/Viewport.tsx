@@ -94,6 +94,12 @@ declare global {
     pins: () => ReturnType<Engine['pinsState']>;
     pinPoint: (i: number) => { x: number; y: number } | null;
     blockScale: (ext: [number, number, number], signs?: [number, number, number]) => boolean;
+    /** v1.11 CENTROID WIDGET: the pinned triangle owning the gizmo, the
+     *  whole-cell MOVE and the lattice-quantised ROTATE (the widget commit's
+     *  exact paths, driven headless by the pins) */
+    triGizmo: () => ReturnType<Engine['triGizmoState']>;
+    triShift: (d: [number, number, number]) => boolean;
+    triRotate: (axis: 'x' | 'y' | 'z', deg: number) => boolean;
   } }
 }
 
@@ -210,6 +216,9 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
       pins: () => engine.pinsState(),
       pinPoint: (i: number) => engine.pinScreenPoint(i),
       blockScale: (ext, signs) => engine.blockGizmoScale(ext, signs),
+      triGizmo: () => engine.triGizmoState(),
+      triShift: (d) => engine.triGizmoShift(d),
+      triRotate: (axis, deg) => engine.triGizmoRotate(axis, deg),
     };
     onEngine?.(engine);
     return () => {

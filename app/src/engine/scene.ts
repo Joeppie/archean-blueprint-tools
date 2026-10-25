@@ -361,8 +361,22 @@ export class Engine {
   /** engine→App: a pin drag landed a new corner on a COMMITTED triangle
    *  (index, corner 0..2, new global corner) — the Editor writes bp + doc */
   onPinEdit: ((ti: number, i: number, g: Corner) => void) | null = null;
+  /** engine→App: the centroid widget MOVED the whole triangle by whole
+   *  cells — the Editor writes shiftTriCells + doc, returns success (false
+   *  = refused by the vertex window; the pins + widget snap back) */
+  onPinShift: ((ti: number, d: [number, number, number]) => boolean) | null = null;
+  /** engine→App: the centroid widget ROTATED the triangle — the corners are
+   *  already lattice-quantised by the engine; written atomically
+   *  (setTriCornersAll). Returns success (false = refused → snap back) */
+  onPinRotate: ((ti: number, c: [Corner, Corner, Corner]) => boolean) | null = null;
   /** engine→App: the draft pins changed (the Editor mirrors into triDraft) */
   onPinDraft: ((pts: Corner[]) => void) | null = null;
+  /** v1.11 CENTROID WIDGET (we: "the centroid should allow rotating the
+   *  triangle or moving it wholesale for all three pins, again using the
+   *  sort of widget you can grab onto"): the triangle index currently
+   *  owning the TransformControls (−1 = none) + the live gesture base */
+  private triGizTi = -1;
+  private triGizBase: { corners: Corner[]; center: Vector3; quat: Quaternion } | null = null;
   private hullMeshes: Mesh[] = [];
   private wireLine: LineSegments | null = null;
   private occMeshes: Mesh[] = [];
@@ -581,17 +595,20 @@ export class Engine {
       listen('objectChange', () => {
         if (this.blockGizBi >= 0) this.blockGizmoDrag();
         else if (this.clusterBase) this.clusterGhostDrag();
+        else if (this.triGizBase) this.triGizDrag();
         else this.gizmoWriteback();
       });
       listen('mouseDown', () => {
         if (this.blockGizBi >= 0) this.captureBlockGesture();
         else if (this.gizmoCi >= 0) this.captureGesture(this.gizmoCi);
         else if (this.clusterBlocks.length || this.clusterTris.length) this.captureClusterGesture();
+        else if (this.triGizTi >= 0) this.captureTriGesture();
       });
       listen('dragging-changed', e => {
         if (this.controls) this.controls.enabled = !e.value;
         if (!e.value) this.commitBlockGesture();          // no-op without a block gesture
         if (!e.value) this.commitClusterGesture();        // idem for a cluster gesture
+        if (!e.value) this.commitTriGesture();            // idem for the tri widget (v1.11)
       });
       this.scene.add(g.getHelper(), this.gizmoProxy);
       g.enabled = false;
@@ -3591,6 +3608,7 @@ void main() {
     this.pinEditTi = -1;
     this.pinCorners = pts.map(p => [p[0], p[1], p[2]] as Corner);
     this.rebuildPinMesh();
+    this.syncGizmo();      // v1.11: a DRAFT has no centroid widget (no triangle yet)
     this.invalidate();
   }
   /** EDIT mode: pins on the corners of a COMMITTED triangle (bp index). The
@@ -3602,6 +3620,7 @@ void main() {
     this.pinMode = 'edit';
     this.pinEditTi = ti;
     this.refreshPins();
+    this.syncGizmo();      // v1.11: the CENTROID widget lands on the triangle
     this.invalidate();
   }
   clearPins() {
@@ -3610,6 +3629,8 @@ void main() {
     this.pinCorners = [];
     this.disposeGroup(this.pinGroup);
     this.pinGroup.visible = false;
+    this.triGizBase = null;
+    this.syncGizmo();      // v1.11: the centroid widget leaves with the pins
     this.invalidate();
   }
   /** a pin drag COMPLETED since the last read (the Viewport consumes it to
@@ -4481,14 +4502,16 @@ void main() {
    *  A selected component or block owns the widget first. */
   private syncClusterGizmo() {
     const g = this.gizmo;
-    if (!g || this.gizmoCi >= 0 || this.blockGizBi >= 0) return;
+    if (!g || this.gizmoCi >= 0 || this.blockGizBi >= 0) { this.triGizTi = -1; return; }
     const c = this.clusterCentre();
     if (!c || !this.gizmoEnabled) {
       if (this.clusterBlocks.length && (g as unknown as { object?: unknown }).object === this.gizmoProxy) {
         g.detach(); g.enabled = false; g.getHelper().visible = false;
       }
+      this.syncTriGizmo();       // v1.11: a pinned TRIANGLE may own the widget
       return;
     }
+    this.triGizTi = -1;                          // the cluster owns the widget
     this.gizmoProxy.position.copy(c);
     this.gizmoProxy.quaternion.identity();
     g.attach(this.gizmoProxy);
@@ -4522,6 +4545,179 @@ void main() {
     this.clusterBase = null;
     this.syncClusterGizmo();
     this.invalidate();
+  }
+
+  // ------------------------------------------- v1.11 TRIANGLE CENTROID WIDGET
+  // (we: "the centroid should allow rotating the triangle or moving it
+  // wholesale for all three pins, again using the sort of widget you can
+  // grab onto") — a pinned COMMITTED triangle wears the SAME TransformControls
+  // as a block, landing on its CENTROID: ✥ moves ALL THREE corners in
+  // whole-cell snaps (shiftTriCells), ⟳ turns it about its OWN frame (the
+  // ring on the triangle's normal spins it in its plane) — and because the
+  // hull is an integer lattice, every live pose is QUANTISED: each corner
+  // re-snaps to the nearest lattice corner continuously while dragging (the
+  // WYSIWYG law of lattice editors — you always see the storable shape).
+  // A refused commit (32-slot vertex window, coincident corners) writes
+  // nothing: the pins + widget snap back to the bp truth.
+
+  /** the widget's frame for a triangle: x = edge v0→v1, z = the winding
+   *  normal, y = z×x (right-handed) — the LOCAL rings ride the triangle */
+  private triFrame(corners: Corner[]): Quaternion {
+    const p = corners.map(g => this.pinWorld(g));
+    const x = p[1]!.clone().sub(p[0]!).normalize();
+    const n = p[1]!.clone().sub(p[0]!).cross(p[2]!.clone().sub(p[0]!)).normalize();
+    const y = new Vector3().crossVectors(n, x).normalize();
+    return new Quaternion().setFromRotationMatrix(new Matrix4().makeBasis(x, y, n));
+  }
+  private triCentre(corners: Corner[]): Vector3 {
+    const p = corners.map(g => this.pinWorld(g));
+    return new Vector3(
+      (p[0]!.x + p[1]!.x + p[2]!.x) / 3,
+      (p[0]!.y + p[1]!.y + p[2]!.y) / 3,
+      (p[0]!.z + p[1]!.z + p[2]!.z) / 3);
+  }
+  /** (re)attach the widget to the pinned triangle's centroid. Last owner in
+   *  the chain (component → block → cluster → triangle); translate = WORLD
+   *  with CELL snap, rotate = LOCAL (the triangle's own frame). */
+  private syncTriGizmo() {
+    const g = this.gizmo;
+    if (!g) return;
+    const ti = this.pinMode === 'edit' ? this.pinEditTi : -1;
+    const t = ti >= 0 ? this.bp?.data.triangles?.[ti] : undefined;
+    const mode = this.gizmoMode;
+    if (!t || !this.gizmoEnabled || this.gizmoCi >= 0 || this.blockGizBi >= 0
+      || (mode !== 'translate' && mode !== 'rotate')
+      || this.clusterBlocks.length || this.clusterTris.length) {
+      this.triGizTi = -1;
+      if ((g as unknown as { object?: unknown }).object === this.gizmoProxy
+        && this.gizmoCi < 0 && this.blockGizBi < 0 && !this.clusterBlocks.length && !this.clusterTris.length) {
+        g.detach(); g.enabled = false; g.getHelper().visible = false;
+      }
+      return;
+    }
+    const cs = triCorners(t);
+    this.gizmoProxy.position.copy(this.triCentre(cs));
+    this.gizmoProxy.quaternion.copy(this.triFrame(cs));
+    this.gizmoProxy.scale.set(1, 1, 1);
+    g.attach(this.gizmoProxy);
+    g.setMode(mode === 'rotate' ? 'rotate' : 'translate');
+    g.setSpace(mode === 'rotate' ? 'local' : 'world');
+    g.setTranslationSnap(CELL);
+    g.setRotationSnap(this.snapOn ? 15 * DEG : null);
+    g.setScaleSnap(null);
+    g.enabled = true;
+    g.getHelper().visible = true;
+    this.triGizTi = ti;
+  }
+  /** live/committed corner set the widget's CURRENT pose asks for: a
+   *  translate is whole-cell exact (CELL snap); a rotation is rotated about
+   *  the centroid and RE-SNAPPED to the lattice per corner (quantised —
+   *  the preview shows exactly the storable corners while dragging) */
+  private triCornersFromGizmo(base: { corners: Corner[]; center: Vector3; quat: Quaternion }):
+    Corner[] {
+    if (this.gizmoMode !== 'rotate') {
+      const d = this.gizmoProxy.position.clone().sub(base.center);
+      const q: [number, number, number] =
+        [Math.round(d.x / CELL), Math.round(d.y / CELL), Math.round(d.z / CELL)];
+      return base.corners.map(g => [g[0]! + q[0]!, g[1]! + q[1]!, g[2]! + q[2]!] as Corner);
+    }
+    const dq = this.gizmoProxy.quaternion.clone().multiply(base.quat.clone().invert());
+    const cen = base.center.clone().sub(this.moffV());       // raw-file metres
+    return base.corners.map(g => {
+      const p = new Vector3((g[0]! - 6) * CELL, (g[1]! - 6) * CELL, (g[2]! - 6) * CELL)
+        .sub(cen).applyQuaternion(dq).add(cen);
+      return cornerOf([p.x, p.y, p.z]);
+    });
+  }
+  private captureTriGesture() {
+    const t = this.triGizTi >= 0 ? this.bp?.data.triangles?.[this.triGizTi] : undefined;
+    if (!t) return;
+    this.triGizBase = {
+      corners: triCorners(t).map(g => [...g] as Corner),
+      center: this.gizmoProxy.position.clone(),
+      quat: this.gizmoProxy.quaternion.clone(),
+    };
+  }
+  private triGizDrag() {
+    const base = this.triGizBase;
+    if (!base) return;
+    const cs = this.triCornersFromGizmo(base);
+    const same = cs.every((g, i) =>
+      g[0] === base.corners[i]![0] && g[1] === base.corners[i]![1] && g[2] === base.corners[i]![2]);
+    if (same) return;
+    this.pinCorners = cs;                 // the pins + face + arrow ride the quantised pose
+    this.rebuildPinMesh();
+    this.invalidate();
+  }
+  private commitTriGesture() {
+    const base = this.triGizBase;
+    this.triGizBase = null;
+    if (!base) return;
+    const ti = this.triGizTi;
+    if (ti < 0) return;
+    const cs = this.triCornersFromGizmo(base);
+    const noop = cs.every((g, i) =>
+      g[0] === base.corners[i]![0] && g[1] === base.corners[i]![1] && g[2] === base.corners[i]![2]);
+    if (noop) { this.syncTriGizmo(); this.invalidate(); return; }
+    const ok = this.gizmoMode === 'rotate'
+      ? (this.onPinRotate?.(ti, cs as [Corner, Corner, Corner]) ?? false)
+      : (this.onPinShift?.(ti, [
+        cs[0]![0]! - base.corners[0]![0]!,
+        cs[0]![1]! - base.corners[0]![1]!,
+        cs[0]![2]! - base.corners[0]![2]!]) ?? false);
+    if (!ok) {                            // refused: bp untouched, pins snap back
+      this.pinCorners = base.corners.map(g => [...g] as Corner);
+      this.rebuildPinMesh();
+    }
+    this.syncTriGizmo();
+    this.invalidate();
+  }
+  /** widget state for the pins/hooks: which pinned triangle owns the widget */
+  triGizmoState(): { ti: number; mode: 'translate' | 'rotate'; shown: boolean } | null {
+    if (this.triGizTi < 0) return null;
+    const g = this.gizmo;
+    return {
+      ti: this.triGizTi,
+      mode: this.gizmoMode === 'rotate' ? 'rotate' : 'translate',
+      shown: !!g && g.enabled === true && g.getHelper().visible === true &&
+        (g as unknown as { object?: unknown }).object === this.gizmoProxy,
+    };
+  }
+  /** PUBLIC whole-cell move of the pinned triangle (the widget commit's
+   *  exact path — e2e pins drive this headless) */
+  triGizmoShift(step: [number, number, number]): boolean {
+    const ti = this.pinMode === 'edit' ? this.pinEditTi : -1;
+    if (ti < 0 || (step[0] === 0 && step[1] === 0 && step[2] === 0)) return step[0] === 0 && step[1] === 0 && step[2] === 0;
+    if (!this.onPinShift?.(ti, step)) return false;
+    this.pinCorners = this.pinCorners.map(g =>
+      [g[0]! + step[0]!, g[1]! + step[1]!, g[2]! + step[2]!] as Corner);
+    this.rebuildPinMesh();
+    this.syncTriGizmo();
+    this.invalidate();
+    return true;
+  }
+  /** PUBLIC lattice-quantised rotation: n° about a WORLD axis through the
+   *  centroid, corners re-snapped (the ⟳ widget commit's quantise+write,
+   *  driven headless by the pins) */
+  triGizmoRotate(axis: 'x' | 'y' | 'z', deg: number): boolean {
+    const ti = this.pinMode === 'edit' ? this.pinEditTi : -1;
+    const t = ti >= 0 ? this.bp?.data.triangles?.[ti] : undefined;
+    if (!t) return false;
+    const base = triCorners(t).map(g => [...g] as Corner);
+    const dq = new Quaternion().setFromAxisAngle(
+      new Vector3(axis === 'x' ? 1 : 0, axis === 'y' ? 1 : 0, axis === 'z' ? 1 : 0), deg * DEG);
+    const cen = this.triCentre(base).sub(this.moffV());
+    const cs = base.map(g => {
+      const p = new Vector3((g[0]! - 6) * CELL, (g[1]! - 6) * CELL, (g[2]! - 6) * CELL)
+        .sub(cen).applyQuaternion(dq).add(cen);
+      return cornerOf([p.x, p.y, p.z]);
+    });
+    if (!this.onPinRotate?.(ti, cs as [Corner, Corner, Corner])) return false;
+    this.pinCorners = cs;
+    this.rebuildPinMesh();
+    this.syncTriGizmo();
+    this.invalidate();
+    return true;
   }
 
   /** Build a translucent solid+wire overlay of a block shape at RAW-FILE
