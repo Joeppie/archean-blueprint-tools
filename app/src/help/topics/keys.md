@@ -1,5 +1,5 @@
 # Keyboard and mouse
-Tags: keyboard shortcuts keys mouse controls orbit pan zoom delete escape shift snap resize square brush
+Tags: keyboard shortcuts keys mouse controls orbit pan zoom delete escape shift snap brush stretch widget pin
 
 ## Keys (ignored while a text field has focus)
 
@@ -13,11 +13,8 @@ Tags: keyboard shortcuts keys mouse controls orbit pan zoom delete escape shift 
 | o | occupancy boxes on/off |
 | h | hull solids ⇄ wireframe — in wireframe you CLICK THROUGH the hull to what is behind it ("click what you SEE") |
 | 5 | projection: perspective ⇄ ORTHOGRAPHIC (parallel) — the same toggle as ⚙ View ▸ orthographic |
-| x / y / z (✚ Place, Blocks) | pick the brush's active size axis |
-| [ / ] (✚ Place, Blocks) | shrink / grow the active axis one cell (`−`/`=` also work) |
-| s (✚ Place, Blocks) | square the brush — every axis to the largest |
 | Shift (held) | snaps: gizmo moves to 0.25 m cells, rotations to 15°, subgrid joint handles snap, block ghost = mirror continuation |
-| Esc | close the top window → cancel a placement drag/skin → drop a held part → deselect |
+| Esc | close the top window → cancel a placement drag/skin → drop a held part → leave the triangle PINS → deselect |
 
 ## Mouse / touch in the viewport
 
@@ -32,6 +29,8 @@ Tags: keyboard shortcuts keys mouse controls orbit pan zoom delete escape shift 
 | press-drag-release (holding a part) | SMEAR-place it, aimed along the drag |
 | double-click a list row | fly the camera to that part |
 | drag a gizmo ring | rotate (the ring you grab is the axis you turn) |
+| drag a gizmo ⤢ handle (block) | STRETCH that direction — the grabbed face moves, the opposite face stays anchored (whole cells) |
+| drag a triangle PIN | re-drop that corner onto the surface under the cursor (hull-lattice snap) |
 | hover the scene | a black label shows the full snapped x/y/z the ray lands on (y is UP; the pad's red line is x, the blue line z, both ±-labelled) |
 | drag a gizmo arrow | move (world axes, always axis-aligned) |
 

@@ -41,7 +41,7 @@ test.describe('faux-mirror screen: mismatches are flagged, not silent @place', (
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
     await page.getByTestId('mode-edit').click();
     await page.getByTestId('tooltab-place').click();
-    await page.getByTestId('block-mirror').click();        // ⇄ twin ON: place the pair
+    await page.getByTestId('mirror-twin').click();        // ⇄ twin ON: place the pair
     let click: { x: number; y: number } | null = null;
     for (let i = 0; i < 40 && !click; i++) {
       click = await page.evaluate(() => {
@@ -122,7 +122,7 @@ test.describe('faux-mirror screen: mismatches are flagged, not silent @place', (
     await page.getByTestId('gallery-new').click();
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
     await page.getByTestId('mode-edit').click();
-    await page.getByTestId('block-mirror').click();        // shared twin switch (dock header)
+    await page.getByTestId('mirror-twin').click();        // shared twin switch (dock header)
     await page.getByTestId('tooltab-place').click();       // dock header (drawer closed)
     await setDrawer(page, true);
     await page.getByTestId('filter').fill('smallwheel');

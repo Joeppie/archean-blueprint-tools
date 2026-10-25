@@ -38,9 +38,9 @@ test.describe('⇄ mirrored placement @place', () => {
     // the drawer's backdrop covers the dock while open, so every dock tap
     // happens with the drawer CLOSED.
     await page.getByTestId('tooltab-place').click();          // the PLACE flavor (dock header)
-    await expect(page.getByTestId('block-mirror')).toBeVisible();
-    await page.getByTestId('block-mirror').click();          // twin ON (persisted)
-    await expect(page.getByTestId('block-mirror')).toContainText('twin ON');
+    await expect(page.getByTestId('mirror-twin')).toBeVisible();
+    await page.getByTestId('mirror-twin').click();          // twin ON (persisted)
+    await expect(page.getByTestId('mirror-twin')).toContainText('twin ON');
 
     const before = (await blocksOf(page)).length;
     const canvas = page.getByTestId('canvas');
@@ -98,8 +98,8 @@ test.describe('⇄ mirrored placement @place', () => {
     await page.getByTestId('catalog-item').first().click();
     await expect(page.getByTestId('place-hint')).toContainText('SmallWheel');
     await setDrawer(page, false);
-    await page.getByTestId('block-mirror').click();        // shared twin switch (dock)
-    await expect(page.getByTestId('block-mirror')).toContainText('twin ON');
+    await page.getByTestId('mirror-twin').click();        // shared twin switch (dock)
+    await expect(page.getByTestId('mirror-twin')).toContainText('twin ON');
 
     const before = (await compsOf(page)).length;
     const canvas = page.getByTestId('canvas');

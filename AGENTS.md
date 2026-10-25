@@ -1346,6 +1346,59 @@ topic + FORMAT).
   re-stamped to silent fresh. Bonus rule learned: corpus identity — catalog
   and /corpus route resolve the SAME file (one `craftFile()`), so a staleness
   flag can never describe a different file than the download would fetch.
+- **v1.11 PLACEMENT REWRITE — place-then-transform + TRIANGLE PINS (we:
+  "I am unhappy with how placing blocks work. The same for triangles. Remove
+  the existing functionality and do a total rewrite; the bottom bar should be
+  used only. Placing a block, you can choose to move/rotate/scale it; scaling
+  means stretching in a direction. Also ensure mirroring is possible and
+  easily switchable by axis, should be a visible widget for that showing if
+  x/y/z mirrored. Placing triangles is done by putting down three points,
+  which you can move around before and after placing all three of them, it
+  should look like a pin, and an arrow should point down/up for the direction
+  of the triangle, just like in-game. Choosing a block size before placing it
+  shouldn't be a thing." + "sizing seems to be 'mirrored' if I resize in e.g.
+  +z, then it also stretches the block in −z. That is undesirable.")**:
+  (1) BLOCKS: the brush carries SHAPE+PAINT+MATERIAL ONLY — the size UI, the
+  x/y/z + [ ] + s keys, the brush-chip and the phone steppers are GONE; every
+  click lands a 1×1×1 cell, auto-selected, the modebox pops at it (Shift
+  continuation + the ghost/red-ghost law kept). (2) The gizmo gained a third
+  MODE `scale` (⤢, engine `gizmoMode` domain + the modebox `mode-scale` row,
+  BLOCK-only — a component's widget never shows it, TGC reads scale as
+  translate there, the game has no part scale): a gesture QUANTISES to whole
+  cells and commits through `Engine.blockGizmoScale(ext, signs)` —
+  DIRECTIONAL: the face the grabbed handle sits on MOVES, the OPPOSITE face
+  stays anchored (the sign comes from which side of the proxy centre the
+  press landed on, projected on the camera plane — TGC's axis is signless;
+  the centre-frozen first cut was the "mirrored resize" complaint). Twin
+  mirrors the sign on the session axis; collision refuses + snaps the widget
+  back; live preview rides the placement ghost. (3) The dock's MIRROR WIDGET
+  (`mirror-twin` ⇄ arm + `mirw-off|x|y|z` chips, lit chip = the plane, ⊘ =
+  off) is the one visible axis switch (same engine value + localStorage keys
+  as the ⚙ View rows — the old dock `block-mirror` toggle row is GONE, e2e
+  re-pinned to mirror-twin). (4) TRIANGLES: PIN PLACEMENT — clicks drop
+  draggable map-PIN meshes on lattice corners (engine pinGroup: needle cone +
+  head + v0/v1/v2 chips + mint preview face + GOLD NORMAL ARROW at the
+  centroid = the winding normal, the in-game direction tell), pins drag
+  BEFORE the third lands (engine `onPinDraft` → React triDraft mirrors — the
+  engine owns the drag) and AFTER the commit (`onPinEdit` → `setTriCornerAll`
+  → bp + the changed doc fields + debounced merged reload; a refused
+  32-slot/coincident move writes nothing and the reload's `refreshPins`
+  snaps the pin back), the third click commits + the pins STAY; the tri LIST
+  row puts pins on any committed triangle; Esc leaves; deletes drop the pins
+  (splice-shift safety); undo clears pins. `cornerOf` snaps every drop.
+  (5) The BLOCK widget now attaches in BOTH flavors (a placed block wears it
+  immediately — the old detach-on-flip pin re-cut). Hooks: `pins()`,
+  `pinPoint(i)`, `blockScale(ext, signs?)`; `blockGizmo()` carries `ext`.
+  Pins: vitest tris `setTriCornerAll` (all-axis move, refusal keeps the
+  record byte-intact) + e2e builddock (1×1×1 lands, ⤢ stretch + DIRECTIONAL
+  anchors: cell invariant on +z, cell+ext invariant on −z; ⤢ never on a
+  part; MIRROR widget live; size UI count 0; pin 3-click + arrow + drag
+  rewrites the stored corner, one Ctrl+Z per gesture; list-row pins + Esc)
+  and blockedit (widget survives the flavor flip, scale mode answers).
+  LESSONS: e2e suites running WHILE scene.ts edits HMR reload = phantom
+  failures (the 3 pixel7 flakes re-ran green on the final tree); the pin
+  commit + a following drag inside the 450 ms snapshot window coalesce into
+  ONE undo group — pins that must undo SEPARATELY wait > 450 ms.
 - **v1.10.7 PHONE BUILD UX (we: "On phone I've no idea how to place and the
   side panel is still edit/place toggle, which makes no sense. It's also far
   too wide on phone")**: (1) the ✎ Edit | ✚ Place flavor switch MOVED from

@@ -167,7 +167,7 @@ test.describe('blocks EDIT: highlight, in-place rotate, snap, twin @place', () =
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
     await page.getByTestId('mode-edit').click();
     await page.getByTestId('tooltab-place').click();       // v1.5: place with the brush
-    await page.getByTestId('block-mirror').click();        // twin ON
+    await page.getByTestId('mirror-twin').click();        // twin ON
     let click: { x: number; y: number } | null = null;
     for (let i = 0; i < 40 && !click; i++) {
       click = await page.evaluate(() => {
@@ -198,7 +198,7 @@ test.describe('blocks EDIT: highlight, in-place rotate, snap, twin @place', () =
     // v1.7.1 (user: "Selecting blocks does NOT SELECT MIRROR SYMMETRY"):
     // turn ⇄ OFF BEFORE selecting — the twin must still be identified as the
     // co-selection (⇄ gates only edit PROPAGATION, never identification).
-    await page.getByTestId('block-mirror').click();        // twin OFF
+    await page.getByTestId('mirror-twin').click();        // twin OFF
     // the placed block stays selected (place auto-selects) — re-pick it in
     // the EDIT tab: the TOP face now answers the owned block, not the deck
     await page.getByTestId('tooltab-edit').click();
@@ -226,7 +226,7 @@ test.describe('blocks EDIT: highlight, in-place rotate, snap, twin @place', () =
       .toMatchObject({ cy: t0.cy + 1 });
   });
 
-  test('BLOCK widget (v1.5): attach, refuse a colliding shift, cell-move, 90° turn, detach on flip', async ({ page }) => {
+  test('BLOCK widget (v1.5/1.11): attach, refuse a colliding shift, cell-move, 90° turn, ⤢ STRETCH mode', async ({ page }) => {
     test.skip(test.info().project.name !== 'chromium', 'desktop-only');
     const px = await openDeck(page, 'edit');
     const bi = await selectDeckBlock(page, px);
@@ -296,9 +296,34 @@ test.describe('blocks EDIT: highlight, in-place rotate, snap, twin @place', () =
       message: 'the 90° turn rebuilt the merged hull (mesh repaints)' })
       .toBeGreaterThan(l1);
 
-    // FLAVOR FLIP to PLACE → the BLOCK widget detaches (it is Edit-flavor only)
+    // v1.11 PLACEMENT REWRITE (we: "you can choose to move/rotate/scale it"):
+    // the FLAVOR FLIP to PLACE KEEPS the block widget — the widget is the
+    // workspace's move/turn/STRETCH tool, and a freshly placed block in the
+    // PLACE flavor wears it the same way (the modebox ⤢ row is the tell).
     await page.getByTestId('tooltab-place').click();
     await page.waitForTimeout(100);
-    expect(await blockGizmo(page), 'the PLACE flavor detaches the block gizmo').toBeNull();
+    const gz2 = await blockGizmo(page);
+    expect(gz2, 'the PLACE flavor keeps the block widget (place-then-edit)').not.toBeNull();
+    expect(gz2!.bi).toBe(bi);
+    // the STRETCH mode is a first-class widget mode (uniform with ✥/⟳)
+    const scaled = await page.evaluate(() => {
+      const w = window as unknown as { __ARCHEAN__?: {
+        engine: { setGizmoMode: (m: string) => void; blockGizmoScale:
+          (e: [number, number, number]) => boolean };
+        blockGizmo: () => { mode: string; ext: [number, number, number] } | null } };
+      w.__ARCHEAN__!.engine.setGizmoMode('scale');
+      const gz = w.__ARCHEAN__!.blockGizmo()!;
+      // the deck bar is 1×1×9 cells after the z-spin — scale to its OWN ext
+      // is the no-op (the engine commits centre-frozen stretches)
+      return { mode: gz.mode, same: w.__ARCHEAN__!.engine.blockGizmoScale(gz.ext) };
+    });
+    expect(scaled.mode, 'the widget answers the ⤢ STRETCH mode').toBe('scale');
+    expect(scaled.same, 'a no-op stretch is accepted').toBe(true);
+    const b3 = await blockAt(page, bi);
+    expect([b3.cx, b3.cy, b3.cz], 'the no-op stretch moved nothing')
+      .toEqual([b2.cx, b2.cy, b2.cz]);
+    await page.evaluate(() => (window as unknown as {
+      __ARCHEAN__?: { engine: { setGizmoMode: (m: string) => void } } })
+      .__ARCHEAN__!.engine.setGizmoMode('rotate'));
   });
 });

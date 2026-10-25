@@ -109,7 +109,7 @@ test.describe('palette: census, block paint, ⇄ twin, widget 🎨 @place', () =
     test.skip(test.info().project.name !== 'chromium', 'desktop-only');
     await openNew(page);
     await toBlocks(page, 'place');
-    await page.getByTestId('block-mirror').click();               // ⇄ twin ON (place + edits)
+    await page.getByTestId('mirror-twin').click();               // ⇄ twin ON (place + edits)
     await page.getByTestId('num-slot').fill('0');
     const pt = await ghostPixel(page);
     await page.mouse.click(pt.x, pt.y);                           // mirrored PAIR placed

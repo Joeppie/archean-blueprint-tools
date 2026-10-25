@@ -73,9 +73,6 @@ interface Props {
    *  "Edit | Place" panel, two flavors, on top of the pane — user rule) */
   tool?: 'place' | 'edit';
   onTool?: (t: 'place' | 'edit') => void;
-  /** ⇄ shared mirrored-placement/edit switch (blocks AND catalog parts) */
-  mirrorPlace?: boolean;
-  onMirrorPlace?: (v: boolean) => void;
   /** VIEW mode: the side menu shows ONLY the overall vessel stats, in
    *  collapsable sections (user v1.4) — no parts list, no inspector */
   statsOnly?: boolean;

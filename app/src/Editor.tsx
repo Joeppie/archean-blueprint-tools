@@ -16,12 +16,12 @@ import { BlockPaint, CompPaint, SwatchGrid } from './components/ColorPanel';
 import { TOOLS, ToolDialog, type PlacePayload, type ToolForm } from './components/ToolsDialog';
 import HelpDialog from './components/HelpDialog';
 import { blockInfo, blockMirrorTwin, blockTwinIssues, cellIndex, cellOverlap,
-  complementBlock, mirrorAxisIdx, paintTwinPair, BLOCK_SIZE_MAX, type MirrorAxisOpt } from './engine/blocks';
-import { cornerOf, triAt, triangleFromCorners } from './engine/tris';
+  complementBlock, mirrorAxisIdx, paintTwinPair, type MirrorAxisOpt } from './engine/blocks';
+import { cornerOf, triAt, triangleFromCorners, setTriCornerAll, type Corner } from './engine/tris';
 import type { Blueprint } from './engine/format';
 import { isLegacyFile } from './engine/format';
 import type { ResolvedColor } from './engine/palette';
-import { docArrayInsert, docArrayRemoveAt, docEnsureArray, docFromValue, docValue, emitDoc, parseDoc } from './engine/doc';
+import { docArrayInsert, docArrayRemoveAt, docEnsureArray, docFromValue, docSetNumber, docValue, emitDoc, parseDoc } from './engine/doc';
 import { allocateSlot, paletteSlotNode, type Rgb255 } from './engine/tools';
 import { setPaletteSlot } from './engine/edit';
 import { appendTrianglesDoc, makeCtx, openFunnel, resetComponent, setDataField, setOrientation, setPos, setCompField,
@@ -63,14 +63,11 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   useEffect(() => { localStorage.setItem('archean-app-static-info', staticInfo ? '1' : '0'); }, [staticInfo]);
   const [rev, setRev] = useState(0);
   const [blockSel, setBlockSel] = useState(-1);
-  // the brush's default paint is an OPAQUE hull grey (v1.6: slot 4 is the
-  // built-in CLEAR GLASS — the old default placed translucent ghost blocks,
-  // the root of the "my blocks turned translucent" report)
-  const [brush, setBrush] = useState<Brush>({ type: 0, sx: 0, sy: 0, sz: 0, slot: 51, material: 0 });
-  // v1.10.6 RESIZE-WHILE-PLACING (we: "when placing we should be able to
-  // resize"): the brush's ACTIVE axis for the viewport [ ] keys (x/y/z pick
-  // it, s squares the brush) + the live brush chip over the viewport.
-  const [brushAxis, setBrushAxis] = useState(0);
+  // v1.11 PLACEMENT REWRITE (we: "Choosing a block size before placing it
+  // shouldn't be a thing"): the brush carries SHAPE, PAINT and MATERIAL only
+  // — every click lands a 1×1×1 block; size comes AFTER via the widget's
+  // ⤢ STRETCH mode (Engine.blockGizmoScale) or the dock's size rows.
+  const [brush, setBrush] = useState<Brush>({ type: 0, slot: 51, material: 0 });
   // v1.10.6 WIRE-style dock: hovering a block/triangle LIST row previews it
   // gold in 3D (the selection's own highlight returns when the list is left)
   const [blockHover, setBlockHover] = useState(-1);
@@ -106,7 +103,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   const [blockSub, setBlockSub] = useState<'blocks' | 'tris'>('blocks');
   // ⇄ mirrored placement (blocks AND catalog parts): the twin lands at the
   // mirrored cell/position about the SESSION mirror axis's 0-plane — the
-  // game editor's mirror tool
+  // game editor's mirror tool. v1.11: the dock's MIRROR WIDGET (⇄ + ⊘ x y z)
+  // is the one visible switch for this + mirAxis (which axis mirrors).
   const [mirrorPlace, setMirrorPlace] = useState(() => localStorage.getItem('archean-app-plsym') === '1');
   useEffect(() => { localStorage.setItem('archean-app-plsym', mirrorPlace ? '1' : '0'); }, [mirrorPlace]);
   // v1.5.21 SETTABLE MIRROR AXIS (⚙ row, user: "mirror axes should be
@@ -140,9 +138,14 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   /** the axis for callbacks that run outside React render (engine is truth);
    *  v1.10.5: 'off' = the session mirror is disabled entirely */
   const mirAx = useCallback((): MirrorAxisOpt => engineRef.current?.mirrorAxis ?? 'x', []);
-  const [triDraft, setTriDraft] = useState<number[][]>([]);
+  const [triDraft, setTriDraft] = useState<Corner[]>([]);
   const [triSel, setTriSel] = useState(-1);
   const [triBrush, setTriBrush] = useState<number[]>([51, 51, 51, 51, 51]);
+  // v1.11 PIN placement (we: "putting down three points, which you can move
+  // around before and after placing all three"): the index of the COMMITTED
+  // triangle whose pins are live-draggable in the viewport (the engine owns
+  // the drawing + drag, writes corners back through onPinEdit → the doc).
+  const [pinTi, setPinTi] = useState(-1);
   // KSP part placement: the catalog type currently HELD (null = nothing)
   const [placing, setPlacing] = useState<string | null>(null);
   const [manifest, setManifest] = useState<Record<string, { mass: number; module: string }> | null>(null);
@@ -225,6 +228,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     const dirtyNow = state !== histRef.current.states[0];
     dirtyRef.current = dirtyNow; setDirty(dirtyNow);
     setSel({ ci: -1, sub: -1 }); setBlockSel(-1); setTriSel(-1); setTriDraft([]);
+    setPinTi(-1); engineRef.current?.clearPins();     // v1.11: stale pins never haunt undo
     setPlacing(null); setHit(null);
     engineRef.current?.select(-1);
     if (reloadTimer.current) { clearTimeout(reloadTimer.current); reloadTimer.current = null; }
@@ -424,6 +428,28 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         for (const bi of bis) writeBlockDoc(ctx, bi);
         sceneChanged();
       };
+      // v1.11 PIN drags (the triangle pin editor): the engine moved corner
+      // i of triangle ti to a new lattice corner — write the record (bp was
+      // mutated by setTriCornerAll), mirror EXACTLY the changed fields into
+      // the doc (v1.6.1: the doc is the save and the undo history) and
+      // repaint on the debounced merged-skin reload. A REFUSED move (32-slot
+      // window / coincident corners) writes nothing: the reload's
+      // refreshPins() re-reads the bp and snaps the pin back honestly.
+      e.onPinEdit = (ti, i, g) => {
+        const ctx = ctxRef.current;
+        const t = ctx?.bp.data.triangles?.[ti];
+        if (!ctx || !t) return;
+        const changed = setTriCornerAll(t, i, g as Corner);
+        if (!changed) return;
+        for (const [k, v] of Object.entries(changed))
+          docSetNumber(ctx.doc, ['data', 'triangles', ti, k], v);
+        sceneChanged();
+      };
+      // v1.11: a DRAFT-pin drag (before the third lands) moves the corner in
+      // the engine — mirror it into React's triDraft so the COMMIT's third
+      // click reads the dragged positions, not the pre-drag ones (the engine
+      // owns the drag, React mirrors — one source of truth for the corners).
+      e.onPinDraft = (pts) => setTriDraft(pts.map(p => [...p] as Corner));
     }
     setEngine(e);
   }, [markDirty, bumpRev, sceneChanged, pipesSoon]);
@@ -448,10 +474,13 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // cell-snapped arrows + 90°-snap rings; a selected COMPONENT takes it back.
   // v1.7.1: the block's SIMILAR TWIN always moves/turns in unison (mirrored);
   // mirrorPlace (⇄) only rides as the reported placement-twin state.
+  // v1.11 (we: "Placing a block, you can choose to move/rotate/scale it"):
+  // the gate covers the PLACE flavor too — a freshly PLACED block is
+  // selected, so the widget lands on it at once (✥ move · ⟳ turn · ⤢ stretch).
   useEffect(() => {
     const e = engineRef.current;
     if (!e) return;
-    const on = mode === 'edit' && tool === 'edit' && blockSel >= 0 &&
+    const on = mode === 'edit' && blockSel >= 0 &&
       sel.ci < 0 && sel.sub < 0 && gizmoOn;
     e.setBlockGizmo(on ? blockSel : -1, mirrorPlace);
   }, [mode, tool, blockSel, sel, mirrorPlace, gizmoOn, rev, engine]);
@@ -500,6 +529,9 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     ctx.bp.data.triangles?.splice(ti, 1);
     docArrayRemoveAt(ctx.doc, ['data', 'triangles'], ti);
     setTriSel(-1);
+    // v1.11: the pin editor indexes triangles by position — a splice shifts
+    // them, so the pins are dropped (they would ride the NEIGHBOUR's corners)
+    setPinTi(p => { if (p >= 0) engineRef.current?.clearPins(); return -1; });
     sceneChanged();
   }, [sceneChanged]);
 
@@ -578,27 +610,11 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         if (blockSub === 'tris' && triSel >= 0) { e.preventDefault(); deleteTri(ctx, triSel); return; }
         if (blockSel >= 0) { e.preventDefault(); deleteBlock(ctx, blockSel); return; }
       }
-      // v1.10.6 RESIZE-WHILE-PLACING (we: "when placing we should be able to
-      // resize. Blocks don't currently let you make them square"): over the
-      // EDIT ▸ PLACE ▸ Blocks workspace the brush is LIVE-EDITABLE from the
-      // keyboard — x/y/z pick the active axis, [ / ] (− / = twins) shrink /
-      // grow it one cell, s squares the brush. The ghost re-aims through the
-      // existing brush-change effect (the same live path as the panel rows).
-      if (mode === 'edit' && tool === 'place' && blockSub === 'blocks' && !placing) {
-        const size: [number, number, number] = [brush.sx, brush.sy, brush.sz];
-        const put = () => setBrush(b => ({ ...b, sx: size[0]!, sy: size[1]!, sz: size[2]! }));
-        if (e.key === 'x' || e.key === 'y' || e.key === 'z') { setBrushAxis('xyz'.indexOf(e.key)); return; }
-        if (e.key === '[' || e.key === '-') {
-          size[brushAxis] = Math.max(0, size[brushAxis]! - 1); put(); return;
-        }
-        if (e.key === ']' || e.key === '=' || e.key === '+') {
-          size[brushAxis] = Math.min(BLOCK_SIZE_MAX, size[brushAxis]! + 1); put(); return;
-        }
-        if (e.key === 's') {
-          const m = Math.max(size[0]!, size[1]!, size[2]!);
-          size[0] = size[1] = size[2] = m; put(); return;
-        }
-      }
+      // v1.11 PLACEMENT REWRITE (we: "Choosing a block size before placing
+      // it shouldn't be a thing"): the v1.10.6 brush-resize keys (x/y/z pick
+      // axis, [ ] grow, s square) are GONE — every click lands a 1×1×1
+      // block and the WIDGET scales it after (✥/⟳/⤢). Size lives in the
+      // dock's THIS BLOCK rows and on the ⤢ gizmo, not on the brush.
       const map: Record<string, keyof ViewOptions> = { g: 'grid', o: 'occ', h: 'hull' };
       if (map[e.key]) {
         const cur = engineRef.current?.getOptions();
@@ -619,13 +635,20 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
           engineRef.current?.setCompGhost(null);
           return;
         }
+        // v1.11 PIN editor: Esc leaves the pin tool (drop the draft / the
+        // edited triangle's pins) before it touches the selection
+        if (blockSub === 'tris' && (triDraft.length || pinTi >= 0)) {
+          setTriDraft([]); setPinTi(-1);
+          engineRef.current?.clearPins();
+          return;
+        }
         engineRef.current?.select(-1); setBlockSel(-1);
       }
     };
     addEventListener('keydown', h);
     return () => removeEventListener('keydown', h);
   }, [save, toggleOpt, placing, mode, tool, blockSub, sel, blockSel, triSel,
-    brush, brushAxis, undo, redo, deleteComp, deleteBlock, deleteTri]);
+    triDraft, pinTi, brush, undo, redo, deleteComp, deleteBlock, deleteTri]);
 
   // blocks-mode canvas handling: place (brush/logical continuation) or
   // select, via engine.pickCell.
@@ -647,6 +670,9 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     const r = e.pickCell(clientX, clientY);
     if (!r || r.kind === 'ground') { e.setPlaceGhost(null); return; }
     const info = shift && r.bi >= 0 ? blockInfo(ctx.bp, r.bi) : null;
+    // v1.11: the brush lands ONE CELL (size 0) — scale comes after the click
+    // (widget ⤢ / dock rows); Shift keeps the game's logical continuation,
+    // which copies the aimed block's own size (the game's rule).
     const spec = info
       ? complementBlock(info, [cellIndex(r.point[0]), cellIndex(r.point[1]), cellIndex(r.point[2])], r.nrm)
       : { cell: r.cell, ...brushSpec(brush) };
@@ -707,32 +733,48 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     const e = engineRef.current, ctx = ctxRef.current;
     if (!e || !ctx) return;
     if (blockSub === 'tris') {
+      // v1.11 PIN PLACEMENT (we: "putting down three points, which you can
+      // move around before and after placing all three of them, it should
+      // look like a pin, and an arrow should point down/up for the direction
+      // of the triangle"): every click drops a PIN on the lattice corner of
+      // the surface aimed at; the pins are draggable BEFORE the third lands,
+      // the third click commits the prism, and the pins STAY on the committed
+      // triangle — dragging one rewrites its stored corner (engine.onPinEdit).
       const r = e.pickCell(clientX, clientY);
       if (!r) return;
-      // 2026-10-20 (the "triangles refuse to select properly" fix): ONLY a hit on
-      // a hull PRISM itself can select — the old code centroid-tested every
-      // pick, so a block click near a triangle STOLE the click, while the
-      // middle of a large prism (beyond the 0.45 m radius) never selected at
-      // all and fell through to corner-drafting. triAt is now a geometric
-      // click-owner test (plane + inside-with-margin; edge/corner clicks
-      // still draft lattice corners).
+      const drafted = e.pinsState()?.mode === 'draft' ? (e.pinsState()?.pts.length ?? 0) : 0;
+      // a click on an existing prism's face SELECTS it and puts ITS pins on
+      // the surface (the "after placing" editing path, any committed triangle)
       if (r.kind === 'tri' && triDraft.length === 0) {
         const t = triAt(ctx.bp, r.point);
-        if (t >= 0) { setTriSel(t); setBlockSel(-1); return; }
+        if (t >= 0) {
+          setTriSel(t); setBlockSel(-1); setPinTi(t);
+          e.setPinEdit(t, triBrush[0] ?? 51);
+          return;
+        }
       }
+      // clicking a DIFFERENT spot while editing a committed triangle starts
+      // a fresh draft (the old pins retire with it)
+      if (drafted === 0 && pinTi >= 0) { setPinTi(-1); e.setPinEdit(-1); }
       const g = cornerOf(r.point);
       const next = [...triDraft, g];
-      if (next.length < 3) { setTriDraft(next); return; }
+      if (next.length < 3) {
+        setTriDraft(next);
+        e.setPinDraft(next, triBrush[0] ?? 51);
+        return;
+      }
       const tri = triangleFromCorners(next[0] as [number,number,number], next[1] as [number,number,number],
         next[2] as [number,number,number], triBrush);
       setTriDraft([]);
-      if (!tri) return;
+      if (!tri) { e.setPinDraft(null); return; }
       // v1.6.1: the shared bp+doc append — on a craft whose file never
       // carried data.triangles the old bare docArrayInsert failed silently
       // (no array at the path), so a hand-drafted triangle vanished on save
       const at = ctx.bp.data.triangles?.length ?? 0;
       appendTrianglesDoc(ctx, [tri]);
       setTriSel(at);
+      setPinTi(at);
+      e.setPinEdit(at, triBrush[0] ?? 51);   // pins STAY: drag them to fix
       sceneChanged();
       return;
     }
@@ -756,16 +798,19 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     }
     if (tool === 'edit') {
       // EDIT flavor: a block click SELECTS the block — golden highlight +
-      // the BLOCK widget (cell arrows / 90° rings, v1.5). The ⊘/✥/⟳ widget
-      // pops too: it is how the block gizmo switches between move and turn.
+      // the BLOCK widget (cell arrows / 90° rings / ⤢ stretch, v1.5/1.11).
+      // The ⊘/✥/⟳/⤢ widget pops too: it is how the block gizmo picks its mode.
       if (r.bi >= 0) e.select(-1);                     // a block took the pick
       setBlockSel(r.bi >= 0 ? r.bi : -1);
       if (r.bi >= 0) openWidget();
       return;
     }
-    // PLACE — any surface DOCKS a block (the game: aim at a block or beam):
-    // a block face, a hull-triangle prism, a component or subgrid content.
-    // The green ground plane stays unfurnishable.
+    // PLACE — any surface DOCKS a 1×1×1 block (the game: aim at a block or
+    // beam): a block face, a hull-triangle prism, a component or subgrid
+    // content. The green ground plane stays unfurnishable. v1.11 (we:
+    // "Choosing a block size before placing it shouldn't be a thing"): the
+    // brush has no size — the placed block is SELECTED and the mode widget
+    // pops at it, so ✥ move / ⟳ turn / ⤢ stretch are one click away.
     if (r.kind === 'ground') { setBlockSel(-1); return; }
     const info = shift && r.bi >= 0 ? blockInfo(ctx.bp, r.bi) : null;
     const spec = info
@@ -774,10 +819,11 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     if (cellOverlap(ctx.bp, spec.cell, spec.size)) return;   // the red ghost refuses
     setBlockSel(placeBlock(ctx, spec, mirrorPlace, mirAx()));
     sceneChanged();
+    openWidget();             // the move/rotate/scale switch at the new block
     // the game keeps the ghost under the cursor after a placement — re-aim
     // it over the fresh surface (it may now complement the block placed)
     computeGhost(clientX, clientY, shift);
-  }, [tool, blockSub, brush, mirrorPlace, triDraft, triBrush, sceneChanged, computeGhost, blockSel]);
+  }, [tool, blockSub, brush, mirrorPlace, triDraft, triBrush, pinTi, sceneChanged, computeGhost, blockSel]);
 
   /** CATALOG placement (KSP part pickup): land the HELD type at the picked
    *  surface — bp + doc together, then the debounced scene reload; the part
@@ -935,13 +981,24 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // left panel keeps the parts list + inspector (and gets taller).
   const triPanel = (
     <TriPanel bp={bp!} ctx={ctxRef.current} draft={triDraft} triSel={triSel}
+      pinTi={pinTi}
       brush={triBrush} onSlot={(i, v) => setTriBrush(b => b.map((x, j) => j === i ? v : x))}
-      onUndo={() => setTriDraft(d => d.slice(0, -1))}
+      onUndo={() => {
+        setTriDraft(d => {
+          const next = d.slice(0, -1);
+          engineRef.current?.setPinDraft(next.length ? next : null, triBrush[0] ?? 51);
+          return next;
+        });
+      }}
       onDeleted={sceneChanged} onClearSel={() => setTriSel(-1)}
       rev={rev}
       onHoverTri={setTriHover}
-      onSelectTri={ti => { setTriSel(ti); setTriHover(-1); }}
-      onDeleteTri={ti => ctxRef.current && deleteTri(ctxRef.current, ti)} />
+      onSelectTri={ti => {
+        setTriSel(ti); setTriHover(-1); setTriDraft([]);
+        setPinTi(ti);                                   // v1.11: list row puts the pins on it
+        engineRef.current?.setPinEdit(ti, triBrush[0] ?? 51);
+      }}
+      onDeleteTri={ti => { if (ctxRef.current) deleteTri(ctxRef.current, ti); }} />
   );
   const buildWorkspace = (
     <>
@@ -962,27 +1019,49 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         ))}
         <span className="mx-1 hidden h-4 w-px bg-white/15 md:inline-block" />
         {(['blocks', 'tris'] as const).map(t => (
-          <button key={t} data-testid={`blocksub-${t}`} onClick={() => { setBlockSub(t); setTriDraft([]); }}
+          <button key={t} data-testid={`blocksub-${t}`} onClick={() => {
+            setBlockSub(t); setTriDraft([]); setPinTi(-1);
+            engineRef.current?.clearPins();
+          }}
             className={`ksp-btn px-2 py-[3px] text-[11px] ${blockSub === t ? 'on' : ''}`}>
             {t === 'blocks' ? '▤ Blocks' : '▵ Triangles'}
           </button>
         ))}
-        {blockSub === 'blocks' && (
-          <button data-testid="block-mirror" title="⇄ respect the mirror plane: place the x-mirrored twin (brush AND held parts) AND propagate edits to the similar twin"
+        {/* v1.11 THE MIRROR WIDGET (we: "ensure mirroring is possible and
+            easily switchable by axis, should be a visible widget showing if
+            x/y/z mirrored"): ⇄ arms mirrored PLACEMENT (brush + held parts;
+            edits always mirror to the identified twin, v1.8.0 rule) and the
+            ⊘ x y z chips are the ONE visible axis switch — the lit chip IS
+            the plane the twins live across (⊘ = the session mirror is off:
+            no twin placement, no twin identity). Same engine value
+            (archean-app-mirror-axis) as the ⚙ View rows. */}
+        <span className="mx-1 hidden h-4 w-px bg-white/15 md:inline-block" />
+        <span data-testid="mirror-widget" className="flex items-center gap-1"
+          title="mirroring: ⇄ arms mirrored placement · ⊘ x y z pick the mirror plane">
+          <button data-testid="mirror-twin" title="⇄ mirrored placement: a click lands the mirrored twin too (brush AND held parts); edits always mirror to the identified twin"
             aria-pressed={mirrorPlace} onClick={() => setMirrorPlace(m => !m)}
             className={`ksp-btn px-2 py-[3px] text-[11px] ${mirrorPlace ? 'on' : ''}`}>
             ⇄ {mirrorPlace ? 'twin ON' : 'twin off'}
           </button>
-        )}
+          {(['off', 'x', 'y', 'z'] as const).map(a => (
+            <button key={a} data-testid={`mirw-${a}`} title={`mirror plane ${a === 'off' ? '— OFF (no session mirror)' : `${a} = 0`}`}
+              aria-pressed={mirAxis === a}
+              onClick={() => onMirrorAxis(a)}
+              className={`ksp-btn grid h-6 w-6 place-items-center px-0 py-[3px] text-[11px] leading-none ${
+                mirAxis === a ? 'on font-semibold' : 'text-ink-dim'}`}>
+              {a === 'off' ? '⊘' : a}
+            </button>
+          ))}
+        </span>
         <span data-testid="flavor-hint" className="ml-auto pr-2 text-[10px] text-ink-dim">
           {tool === 'place' ? (
             <>
-              <span className="hidden md:inline">PLACE — hover a surface, click lands the brush · x y z [ ] s resize · ⇧ continues</span>
-              <span className="md:hidden">PLACE — set the size with −/+ below, then TAP a surface</span>
+              <span className="hidden md:inline">PLACE — click a surface lands a block · the widget then moves ✥ / turns ⟳ / stretches ⤢ it · ⇧ continues · Esc cancels</span>
+              <span className="md:hidden">PLACE — TAP a surface to land a block, the widget then moves/turns/stretches it</span>
             </>
           ) : (
             <>
-              <span className="hidden md:inline">EDIT — a click selects · list rows preview, ✕ deletes (Undo returns)</span>
+              <span className="hidden md:inline">EDIT — a click selects · ✥ move · ⟳ turn · ⤢ stretch · ✕ deletes (Undo returns)</span>
               <span className="md:hidden">EDIT — TAP a part or block, the rows below edit it</span>
             </>
           )}
@@ -995,7 +1074,6 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
           onPaint={paintBlock}
           rev={rev} onHoverBlock={setBlockHover}
           onDeleteBlock={bi => ctxRef.current && deleteBlock(ctxRef.current, bi)}
-          axisSel={brushAxis} onAxis={setBrushAxis}
           custom={{ addColor: addPaletteColor, onPickSlot: slot => setBrush(b => ({ ...b, slot })) }} />
       )}
     </>
@@ -1100,8 +1178,6 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
                     onPlaceType={(t) => { setPlacing(t); if (t && mode === 'view') setMode('edit'); }}
                     tool={mode === 'edit' ? tool : undefined}
                     onTool={setTool}
-                    mirrorPlace={mirrorPlace}
-                    onMirrorPlace={setMirrorPlace}
                     statsOnly={mode === 'view'}
                   />
                 )}
@@ -1165,21 +1241,6 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
                            rounded px-3 py-1 text-[11px] text-accent">
                 holding <b>{placing}</b> — press-drag on a surface to smear it
                 (the drag points its BACK) · release lands it · Esc drops it
-              </div>
-            )}
-            {/* v1.10.6 RESIZE-WHILE-PLACING chip: the live brush footprint +
-                the keys (we: "when placing we should be able to resize").
-                v1.10.7: on touch the key list is replaced by the TAP tell —
-                "no idea how to place" — the steppers in the dock mirror it. */}
-            {mode === 'edit' && tool === 'place' && blockSub === 'blocks' && !placing && (
-              <div data-testid="brush-chip"
-                className="ksp-win ksp-label pointer-events-none absolute left-1/2 top-2 z-20 -translate-x-1/2
-                           rounded px-3 py-1 text-[11px] text-gold">
-                ▤ {brush.sx + 1}×{brush.sy + 1}×{brush.sz + 1} cells ▸ <b>{'xyz'[brushAxis]}</b>
-                <span className="hidden md:inline">
-                  {' '}— <b>[ ]</b> size · <b>x y z</b> axis · <b>s</b> square
-                </span>
-                <span className="md:hidden"> — −/+ in the dock · TAP a surface to place</span>
               </div>
             )}
             {bp && hit && hit.kind !== 'none' && mode !== 'view' && (

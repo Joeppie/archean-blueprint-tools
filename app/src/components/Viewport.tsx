@@ -86,6 +86,14 @@ declare global {
     cablePoint: (pi: number) => { x: number; y: number } | null;
     /** v1.5.21 settable mirror axis (⚙ row) — 'off' (v1.10.5) disables it */
     mirAxis: () => 'x' | 'y' | 'z' | 'off';
+    /** v1.11 TRIANGLE PIN EDITOR: {mode, pts, ti, arrow} | null, the client
+     *  px of pin i (aim the mouse there to drag it), and the block STRETCH
+     *  nudge (whole-cell footprint ext; signs[ax] = +1 grows the +a face /
+     *  −1 the −a face, the OPPOSITE face stays anchored — the ⤢ widget's
+     *  programmatic twin, for the size pins) */
+    pins: () => ReturnType<Engine['pinsState']>;
+    pinPoint: (i: number) => { x: number; y: number } | null;
+    blockScale: (ext: [number, number, number], signs?: [number, number, number]) => boolean;
   } }
 }
 
@@ -198,6 +206,10 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
       pixel: (u: number, v: number) => engine.probePixel(u, v),
       wireHover: () => engine.pipeHoverState(),
       cablePoint: (pi: number) => engine.pipeScreenPoint(pi),
+      // v1.11 TRIANGLE PIN EDITOR + BLOCK STRETCH hooks for the pins
+      pins: () => engine.pinsState(),
+      pinPoint: (i: number) => engine.pinScreenPoint(i),
+      blockScale: (ext, signs) => engine.blockGizmoScale(ext, signs),
     };
     onEngine?.(engine);
     return () => {
@@ -250,11 +262,23 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
     onBlockHover(x, y, shift);
   };
   const [widget, setWidget] = useState<{ x: number; y: number } | null>(null);
+  // v1.11: does a BLOCK own the widget (→ the ⤢ stretch row shows)? The
+  // Editor's setBlockGizmo effect lands AFTER this component's render, so
+  // the flag is polled (120 ms) while the widget is open, never derived at
+  // render time — a component-owned widget never shows the row.
+  const [wBlock, setWBlock] = useState(false);
+  useEffect(() => {
+    if (!widget) return;
+    const read = () => setWBlock(!!engineRef.current?.blockGizmoState()?.shown);
+    read();
+    const h = setInterval(read, 120);
+    return () => clearInterval(h);
+  }, [widget]);
   // ⊘ ('off') is SESSION-only — healed to the default at load, exactly like
   // the Engine (v1.5.1: the persisted ⊘ was the silent "no gizmo anywhere" trap)
-  const [gmode, setGmode] = useState<'off' | 'translate' | 'rotate'>(() => {
+  const [gmode, setGmode] = useState<'off' | 'translate' | 'rotate' | 'scale'>(() => {
     const m = localStorage.getItem('archean-app-gizmo-mode');
-    return m === 'translate' || m === 'rotate' ? m : 'rotate';
+    return m === 'translate' || m === 'rotate' || m === 'scale' ? m : 'rotate';
   });
   // v1.8.0 FAUX-MIRROR ⚠ popup: poll the engine's conflict state (selection-
   // scoped, cheap) and re-anchor it every ~250 ms so it rides camera motion.
@@ -306,7 +330,7 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
     addEventListener('keydown', dn); addEventListener('keyup', up);
     return () => { removeEventListener('keydown', dn); removeEventListener('keyup', up); };
   }, [mode, tool, onBlockHover, onPlaceCancel]);
-  const setMode = (m: 'off' | 'translate' | 'rotate') => {
+  const setMode = (m: 'off' | 'translate' | 'rotate' | 'scale') => {
     setGmode(m);
     engineRef.current?.setGizmoMode(m);
   };
@@ -372,6 +396,12 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
   const pickClick = (e: React.PointerEvent) => {
     const engine = engineRef.current;
     if (!engine) return;
+    // v1.11: a pin drag just ended → the release is NOT a canvas click (it
+    // must not drop a 4th pin / re-place under the pin that was moved)
+    if (engine.pinGesture()) return;
+    // v1.11: the pointer rests ON a gizmo handle (TGC's live axis) — the
+    // click belongs to the widget, it must not place/select through it
+    if (engine.gizmoDragAxis()) return;
     // VIEW picks NOTHING (v1.5 user rule: "selecting components shouldnt be
     // possible in view — view shows the amounts"): inspect only, no select,
     // no fly-to, no mode widget — the side panel keeps the vessel stats.
@@ -480,6 +510,18 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
               {ic}
             </button>
           ))}
+          {/* v1.11 STRETCH (we: "you can choose to move/rotate/scale it;
+              scaling means stretching in a direction"): the ⤢ row appears
+              ONLY when a BLOCK owns the widget — the game has no part scale,
+              so a component never sees it. A gesture grows/shrinks the
+              footprint in whole cells about the bbox centre. */}
+          {wBlock && (
+            <button title="stretch — drag a face; that face moves, the opposite one stays anchored (whole cells)" data-testid="mode-scale"
+              onClick={() => setMode('scale')}
+              className={`ksp-btn grid h-8 w-9 place-items-center text-[15px] leading-none ${gmode === 'scale' ? 'on' : ''}`}>
+              ⤢
+            </button>
+          )}
           {/* ⇄ mirror-twin BADGE (v1.8.0 uniform rule): a selection's twin always
               rides EVERY edit (position, rotation, shape, colour, material, delete)
               — this is an indicator: lit = a live twin pair, struck = none or the

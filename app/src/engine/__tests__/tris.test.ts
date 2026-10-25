@@ -5,7 +5,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 import { cornerOf, cornerWorld, triAt, triCentroid, triangleFromCorners,
-  triCorners, setTriCorner, shiftTriCells, triSpan } from '../tris';
+  triCorners, setTriCorner, setTriCornerAll, shiftTriCells, triSpan } from '../tris';
 import type { Blueprint } from '../format';
 import { corpusDir } from '../../../tools/vite-corpus.ts';
 
@@ -140,5 +140,32 @@ describe('v1.10.6 panel vertex editing (setTriCorner / shiftTriCells)', () => {
     expect(o.frame_x).toBeLessThan(0);                          // frame followed
     expect(o.v0_x).toBeGreaterThanOrEqual(0);                   // v starts near 0
     expect(triCorners(t)[0]).toEqual([-2, 8, 8]);
+  });
+
+  test('v1.11 setTriCornerAll moves ONE corner on ALL 3 axes (the pin editor)', () => {
+    const t = triangleFromCorners([8, 8, 8], [12, 8, 8], [8, 12, 8], [51, 51, 51, 51, 51])!;
+    // a pin drag lands a full 3-vector (cornerOf of a surface point)
+    const ch = setTriCornerAll(t, 0, [30, 9, 25]);
+    expect(ch).not.toBeNull();
+    expect(triCorners(t)[0]).toEqual([30, 9, 25]);
+    // every axis moved → the changed map carries v0_x, v0_y, v0_z (frames too,
+    // the record re-anchors so v stays in the 32-slot window)
+    for (const k of ['v0_x', 'v0_y', 'v0_z']) expect(ch!).toHaveProperty(k);
+    // re-applying to the doc keeps the exact lattice (world = (v+12f−6)·0.25)
+    const o = t as unknown as Record<string, number>;
+    for (let ax = 0; ax < 3; ax++) {
+      const name = 'xyz'[ax]!;
+      expect((o[`v0_${name}`]! + 12 * o[`frame_${name}`]! - 6) * 0.25)
+        .toBeCloseTo(triCorners(t)[0]![ax]! * 0.25 - 1.5, 9);
+    }
+  });
+
+  test('v1.11 setTriCornerAll REFUSES coincident corners + the vertex window', () => {
+    const t = triangleFromCorners([8, 8, 8], [12, 8, 8], [8, 12, 8], [51, 51, 51, 51, 51])!;
+    const before = JSON.stringify(t);
+    expect(setTriCornerAll(t, 2, [8, 8, 8])).toBeNull();        // folds onto v0
+    expect(JSON.stringify(t)).toBe(before);
+    expect(setTriCornerAll(t, 1, [8, 8, 60])).toBeNull();       // v1_z 60 > 31
+    expect(JSON.stringify(t)).toBe(before);
   });
 });

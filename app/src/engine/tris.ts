@@ -120,6 +120,21 @@ export function setTriCorner(t: Triangle, i: number, ax: number, g: number):
   return d ? applyTriDelta(t, d) : null;
 }
 
+/** Move ONE corner to a new GLOBAL lattice corner on ALL THREE axes (the
+ *  v1.11 PIN editor: a pin drag lands on a surface point, cornerOf snaps the
+ *  full 3-vector). Same contract as setTriCorner (mutates, returns the
+ *  changed fields, null = refused: coincident corners / the 32-slot window). */
+export function setTriCornerAll(t: Triangle, i: number, g: Corner):
+  Record<string, number> | null {
+  const c = triCorners(t);
+  const nc: [Corner, Corner, Corner] = c.map(q => [...q] as Corner) as [Corner, Corner, Corner];
+  nc[i] = [Math.round(g[0]!), Math.round(g[1]!), Math.round(g[2]!)];
+  if ([0, 1, 2].some(k => k !== i && nc[k]![0] === nc[i]![0] && nc[k]![1] === nc[i]![1]
+    && nc[k]![2] === nc[i]![2])) return null;
+  const d = refactorTri(nc);
+  return d ? applyTriDelta(t, d) : null;
+}
+
 /** Shift the WHOLE triangle by integer cells (the dock's ± rows). Same
  *  contract as setTriCorner. */
 export function shiftTriCells(t: Triangle, d: readonly [number, number, number]):

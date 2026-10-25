@@ -16,11 +16,10 @@
 // matte/painted surfaces look exactly as before.
 
 import {
-  Box3, BoxGeometry, BufferAttribute, BufferGeometry, Color, CylinderGeometry, DirectionalLight,
-  DoubleSide, Group, HemisphereLight, InstancedMesh,
-  LineBasicMaterial, LineSegments, LinearSRGBColorSpace, Matrix3, Matrix4, Mesh,
+  Box3, BoxGeometry, BufferAttribute, BufferGeometry, Color, ConeGeometry, CylinderGeometry, DirectionalLight,
+  DoubleSide, Group, HemisphereLight, InstancedMesh, Line, LineBasicMaterial, LineSegments, LinearSRGBColorSpace, Matrix3, Matrix4, Mesh,
   MeshBasicMaterial, MeshStandardMaterial, Object3D, OrthographicCamera, PerspectiveCamera,
-  AdditiveBlending, BackSide, Plane, PlaneGeometry, PMREMGenerator, Quaternion, Raycaster,
+  AdditiveBlending, BackSide, Material, Plane, PlaneGeometry, PMREMGenerator, Quaternion, Raycaster,
   RepeatWrapping, Scene, ShaderMaterial, SphereGeometry, Sprite, SpriteMaterial, Texture, TextureLoader,
   TorusGeometry, Vector2, Vector3, WebGLRenderer,
   type Camera, type MeshStandardMaterialParameters,
@@ -52,8 +51,10 @@ import type { Block, Blueprint, BlueprintComponent, Triangle } from './format';
 import { CELL, CELLS_PER_FRAME, isLegacyFile } from './format';
 import { getBlockEdges, getBlockFaces, getBlockPoints } from './blockshapes';
 import { blockCells, blockMirrorTwin, cellOverlapSkip, mirrorBlockCell, mirrorAxisIdx,
-  blockFromCell, rotateTypeAbout, rotatedBlock, setBlockGeom, type MirrorAxis, type MirrorAxisOpt, type PlaceSpec } from './blocks';
+  blockFromCell, rotateTypeAbout, rotatedBlock, setBlockGeom, BLOCK_SIZE_MAX,
+  type MirrorAxis, type MirrorAxisOpt, type PlaceSpec } from './blocks';
 import { transformSkinTris } from './latsphere';
+import { cornerOf, triCorners, type Corner } from './tris';
 import { gridPlan, pxPerMeter } from './grid';
 import {
   captureJrefs, eulerZYX, flattenComponents, jointNodeAxis, jointNodeSlide,
@@ -342,6 +343,26 @@ export class Engine {
   /** smear-drag state (v1.5.6): anchor = the last point the yaw was taken
    *  from; orbit controls are OFF while it lives (the gesture is the tool) */
   private placeDrag: { anchor: [number, number, number]; yaw: number } | null = null;
+  // ---------- v1.11 TRIANGLE PIN EDITOR ----------
+  /** pins laid at the 3 hull-lattice corners of the triangle being drafted
+   *  (mode 'draft') or EDITED (mode 'edit', a committed triangle). Each pin
+   *  is a grab sphere riding a lattice corner; dragging one re-drops it onto
+   *  the surface under the cursor (pickCell → cornerOf), writing the corner
+   *  through onPinEdit. A translucent preview face + a normal arrow (points
+   *  +normal for CCW winding, −normal for CW — flip by swapping two pins)
+   *  ride the pins, like in-game. Own scene child at moff. */
+  private pinGroup = new Group();
+  private pinMode: 'off' | 'draft' | 'edit' = 'off';
+  private pinCorners: Corner[] = [];           // the 3 (or fewer) lattice corners
+  private pinEditTi = -1;                       // committed triangle index (edit mode)
+  private pinBrush = 51;                        // preview face colour slot
+  private pinDrag: { i: number } | null = null;
+  private pinCanvas: HTMLCanvasElement | null = null;
+  /** engine→App: a pin drag landed a new corner on a COMMITTED triangle
+   *  (index, corner 0..2, new global corner) — the Editor writes bp + doc */
+  onPinEdit: ((ti: number, i: number, g: Corner) => void) | null = null;
+  /** engine→App: the draft pins changed (the Editor mirrors into triDraft) */
+  onPinDraft: ((pts: Corner[]) => void) | null = null;
   private hullMeshes: Mesh[] = [];
   private wireLine: LineSegments | null = null;
   private occMeshes: Mesh[] = [];
@@ -461,7 +482,13 @@ export class Engine {
    *  a ring drag ORBITS the centre exactly. Shift snaps 15° / 0.25 m. */
   private gizmo: TransformControls | null = null;
   private gizmoProxy = new Group();
-  private gizmoMode: 'off' | 'translate' | 'rotate' = 'rotate';
+  /** v1.11: 'scale' is the BLOCK-only STRETCH mode (we: "you can choose to
+   *  move/rotate/scale it; scaling means stretching in a direction"): the
+   *  widget shows TGC's scale handles; a gesture grows/shrinks the block's
+   *  cell footprint about its bbox centre (the panel's centre-frozen law).
+   *  A COMPONENT never scales (the game has no part scale) — its syncGizmo
+   *  reads a stray 'scale' as 'translate', and the modebox hides the row. */
+  private gizmoMode: 'off' | 'translate' | 'rotate' | 'scale' = 'rotate';
   private gizmoEnabled = true;
   private gizmoCi = -1;
   private gBase = new Map<number, {
@@ -483,8 +510,16 @@ export class Engine {
    *  only twin PLACEMENT. -1 detaches. */
   private blockGizBi = -1;
   private blockGizMirror = false;
-  /** gesture base: the block's cell + the proxy centre at mouseDown */
-  private blockBase: { cell: [number, number, number]; center: Vector3 } | null = null;
+  /** the client px of the LAST pointerdown (capture recorder, see attach):
+   *  which side of a ⤢ handle the press landed on decides the stretch sign */
+  private gizmoPointer: { x: number; y: number } | null = null;
+  /** gesture base: the block's cell + the proxy centre at mouseDown (v1.11:
+   *  plus the footprint ext in cells and the per-axis DRAG SIGNS of a SCALE
+   *  gesture — which side of the block the grabbed handle sits on). */
+  private blockBase: { cell: [number, number, number]; center: Vector3;
+    ext: [number, number, number]; signs: [number, number, number] } | null = null;
+  /** the live translucent preview of a SCALE gesture (reuses the ghost) */
+  private scalePreview = false;
   /** view options saved at a BLOCK-widget drag start (v1.8.1 wireframe hint) */
   private wireDragOpts: { hull: boolean; wire: boolean } | null = null;
   /** block-side writes (gizmo commits): the Editor mirrors the bp blocks into
@@ -540,7 +575,7 @@ export class Engine {
       // silently killed every widget in every mode forever). ⊘ is a SESSION
       // hide; the persisted master switch is the labeled ⚙ gizmo row.
       const m = localStorage.getItem('archean-app-gizmo-mode');
-      this.gizmoMode = m === 'translate' || m === 'rotate' ? m : 'rotate';
+      this.gizmoMode = m === 'translate' || m === 'rotate' || m === 'scale' ? m : 'rotate';
       const listen = (t: string, f: (e: { value?: boolean }) => void) =>
         (g.addEventListener as unknown as (t: string, f: (e: { value?: boolean }) => void) => void)(t, f);
       listen('objectChange', () => {
@@ -566,7 +601,13 @@ export class Engine {
     this.scene.add(this.hingeGroup);
     this.hingeGroup.visible = false;
     canvas.addEventListener('pointerdown', this.onHingeDown, { capture: true });
+    // v1.11 TRIANGLE PIN EDITOR: capture-phase so a pin drag claims the
+    // gesture (orbit off) BEFORE the viewport's pick/place paths see it
+    canvas.addEventListener('pointerdown', this.onPinDown, { capture: true });
+    // record the press position (the ⤢ stretch sign reads it at mouseDown)
+    canvas.addEventListener('pointerdown', this.onRecordPointer, { capture: true });
     this.hingeCanvas = canvas;
+    this.pinCanvas = canvas;
     const sun = new DirectionalLight(0xfff2dd, 2.2);
     sun.position.set(-6, 10, -4);
     this.scene.add(sun);
@@ -582,6 +623,8 @@ export class Engine {
     this.scene.add(this.blockHlGroup);
     this.scene.add(this.triHlGroup);
     this.scene.add(this.compHlGroup);
+    this.scene.add(this.pinGroup);
+    this.pinGroup.visible = false;
     const loop = () => {
       this.controls?.update();                    // damping fires change→invalidate
       this.flushLiveEdits();                      // per-component geometry rebuilds (data sliders)
@@ -773,6 +816,7 @@ void main() {
       this.syncClusterGroupPos();
       this.triHlGroup.position.set(this.moff.x, this.moff.y, this.moff.z);
       this.compHlGroup.position.set(this.moff.x, this.moff.y, this.moff.z);
+      this.pinGroup.position.set(this.moff.x, this.moff.y, this.moff.z);
     }
 
     this.batch = buildSolids(bp);
@@ -847,6 +891,7 @@ void main() {
     else if (selSub >= 0) this.selectSub(selSub);
     else this.select(-1);
     if (this.windOn) this.startTunnel();          // rebuild the tunnel on the fresh bp
+    this.refreshPins();     // v1.11: triangle pins ride every merged rebuild
     this.invalidate();
   }
 
@@ -2751,7 +2796,7 @@ void main() {
     this.hingeGroup.visible = on && this.hingeHandles.length > 0;   // hinge UI is an EDIT-mode handle too
     this.invalidate();
   }
-  setGizmoMode(m: 'off' | 'translate' | 'rotate') {
+  setGizmoMode(m: 'off' | 'translate' | 'rotate' | 'scale') {
     this.gizmoMode = m;
     // 'off' is SESSION-only (v1.5.1): persist the last REAL mode so a reload
     // lands on a visible widget (⊘ hides now, never forever).
@@ -2759,6 +2804,7 @@ void main() {
     this.syncGizmo();
     this.invalidate();
   }
+  gizmoModeNow(): 'off' | 'translate' | 'rotate' | 'scale' { return this.gizmoMode; }
   /** Shift = 15° / 0.25 m snap (legacy) — shared by the TGC gizmo AND the hinge handles */
   setGizmoSnap(on: boolean) {
     this.snapOn = on;
@@ -2767,7 +2813,7 @@ void main() {
     g.setTranslationSnap(on ? 0.25 : null);
     g.setRotationSnap(on ? 15 * DEG : null);
   }
-  gizmoState(): { mode: 'off' | 'translate' | 'rotate'; ci: number; shown: boolean } {
+  gizmoState(): { mode: 'off' | 'translate' | 'rotate' | 'scale'; ci: number; shown: boolean } {
     const g = this.gizmo;
     return {
       mode: !this.gizmoEnabled || this.gizmoCi < 0 ? 'off' : this.gizmoMode, ci: this.gizmoCi,
@@ -2812,14 +2858,20 @@ void main() {
     this.gizmoProxy.quaternion.copy(o.quaternion);
     if (rebind) this.captureGesture(this.selCi);        // base = the pose JUST placed
     g.attach(this.gizmoProxy);
-    g.setMode(this.gizmoMode === 'translate' ? 'translate' : 'rotate');   // 'off' never reaches here
+    // v1.11: a COMPONENT never scales (the game has no part scale) — a stray
+    // 'scale' mode reads as translate on the component widget; the modebox
+    // hides the ⤢ row for parts anyway.
+    g.setMode(this.gizmoMode === 'rotate' ? 'rotate'
+      : this.gizmoMode === 'scale' ? 'translate' : 'translate');
     // v0.158 SPACE IS PER-MODE: translate = WORLD (arrows stay axis-aligned),
     // rotate = LOCAL (intrinsic rings, the pinned WYSIWYG model)
-    g.setSpace(this.gizmoMode === 'translate' ? 'world' : 'local');
+    g.setSpace(this.gizmoMode === 'rotate' ? 'local' : 'world');
     // restore the COMPONENT snap contract (Shift 15° / 0.25 m — the BLOCK
     // widget always snaps CELL/90°, so re-attaching must undo its snap setup)
     g.setTranslationSnap(this.snapOn ? 0.25 : null);
     g.setRotationSnap(this.snapOn ? 15 * DEG : null);
+    g.setScaleSnap(null);
+    g.getHelper().scale?.set(1, 1, 1);          // (TGC rescales handles itself)
     g.enabled = true;
     g.getHelper().visible = true;
   }
@@ -2936,8 +2988,9 @@ void main() {
   }
   /** live state for the __ARCHEAN__ hook + pins: which block owns the widget
    *  and where its start cell currently is */
-  blockGizmoState(): { bi: number; mode: 'off' | 'translate' | 'rotate';
-    mirror: boolean; cell: [number, number, number]; shown: boolean } | null {
+  blockGizmoState(): { bi: number; mode: 'off' | 'translate' | 'rotate' | 'scale';
+    mirror: boolean; cell: [number, number, number];
+    ext: [number, number, number]; shown: boolean } | null {
     const b = this.blockGizBi >= 0 && this.bp ? this.bp.data.blocks[this.blockGizBi] : undefined;
     if (!b) return null;
     const c = blockCells(b);
@@ -2946,6 +2999,7 @@ void main() {
       bi: this.blockGizBi,
       mode: !this.gizmoEnabled || this.gizmoMode === 'off' ? 'off' : this.gizmoMode,
       mirror: this.blockGizMirror, cell: [c.x, c.y, c.z],
+      ext: [b.size_x + 1, b.size_y + 1, b.size_z + 1],
       // the widget is ACTUALLY on-screen AND attached to THIS block's proxy
       shown: !!g && g.enabled === true && g.getHelper().visible === true &&
         (g as unknown as { object?: unknown }).object === this.gizmoProxy,
@@ -2961,7 +3015,10 @@ void main() {
       (c.z + (b.size_z + 1) / 2 - 6) * CELL + this.moff.z);
   }
   /** (Re)attach the widget to the block: WORLD axes (the lattice is world-
-   *  aligned) and CELL translation + QUARTER-TURN rotation snaps ALWAYS. */
+   *  aligned) and CELL translation + QUARTER-TURN rotation snaps ALWAYS;
+   *  v1.11 SCALE mode stretches the footprint in CELL units (quantised at
+   *  the commit), the proxy scale is reset so each gesture starts from the
+   *  block's CURRENT size. */
   private syncBlockGizmo() {
     const g = this.gizmo;
     if (!g || this.gizmoCi >= 0) return;              // a component owns the widget
@@ -2972,16 +3029,24 @@ void main() {
     }
     this.gizmoProxy.position.copy(this.blockCentre(b));
     this.gizmoProxy.quaternion.identity();
+    this.gizmoProxy.scale.set(1, 1, 1);
     g.attach(this.gizmoProxy);
-    g.setMode(this.gizmoMode === 'translate' ? 'translate' : 'rotate');
+    g.setMode(this.gizmoMode === 'rotate' ? 'rotate'
+      : this.gizmoMode === 'scale' ? 'scale' : 'translate');
     g.setSpace('world');
     g.setTranslationSnap(CELL);
     g.setRotationSnap(Math.PI / 2);
+    g.setScaleSnap(null);                             // cell-quantised at the commit
     g.enabled = true;
     g.getHelper().visible = true;
   }
   /** gesture base = the block's CURRENT cell + the freshly re-centred proxy,
-   *  so multi-grip sweeps keep shifting from wherever the block now is */
+   *  so multi-grip sweeps keep shifting from wherever the block now is.
+   *  v1.11 DIRECTIONAL STRETCH (we: "if I resize in e.g. +z, then it also
+   *  stretches the block in −z. That is undesirable"): a SCALE gesture also
+   *  records the DRAG SIGNS — which end of each axis the grabbed handle sits
+   *  on (pointer vs the projected footprint ends at mouseDown). The grabbed
+   *  face moves, the OPPOSITE face stays anchored. */
   private captureBlockGesture() {
     const b = this.blockGizBi >= 0 && this.bp ? this.bp.data.blocks[this.blockGizBi] : undefined;
     if (!b) return;
@@ -2989,7 +3054,33 @@ void main() {
     // blocks"): the WHOLE hull goes wireframe for the gesture's duration
     this.showHullWireframe(true);
     const c = blockCells(b);
-    this.blockBase = { cell: [c.x, c.y, c.z], center: this.gizmoProxy.position.clone() };
+    this.gizmoProxy.scale.set(1, 1, 1);          // a SCALE gesture starts from the CURRENT size
+    const signs: [number, number, number] = [1, 1, 1];
+    const ax = this.gizmo?.axis;
+    if (this.gizmoMode === 'scale' && (ax === 'X' || ax === 'Y' || ax === 'Z')) {
+      const ai = ax === 'X' ? 0 : ax === 'Y' ? 1 : 2;
+      const c = this.gizmoPointer;
+      const rect = this.renderer?.domElement.getBoundingClientRect();
+      if (c && rect && this.camera) {
+        // Which side of the block centre the PRESS landed on, measured on
+        // the camera plane through the centre along the drag axis: the +
+        // handle lives on the + side, the − handle on the − side.
+        const rc = new Raycaster();
+        rc.setFromCamera(new Vector2(
+          ((c.x - rect.left) / rect.width) * 2 - 1, -((c.y - rect.top) / rect.height) * 2 + 1),
+        this.camera);
+        const n = new Vector3();
+        this.camera.getWorldDirection(n);
+        const plane = new Plane().setFromNormalAndCoplanarPoint(n, this.gizmoProxy.position);
+        const p = new Vector3();
+        if (rc.ray.intersectPlane(plane, p)) {
+          p.sub(this.gizmoProxy.position);
+          signs[ai] = [p.x, p.y, p.z][ai]! >= 0 ? 1 : -1;
+        }
+      }
+    }
+    this.blockBase = { cell: [c.x, c.y, c.z], center: this.gizmoProxy.position.clone(),
+      ext: [b.size_x + 1, b.size_y + 1, b.size_z + 1], signs };
   }
   /** LIVE feedback while dragging: the golden highlight group RIDES the
    *  widget (orbits the block centre) — the merged solid catches up at the
@@ -2998,6 +3089,14 @@ void main() {
   private blockGizmoDrag() {
     const base = this.blockBase;
     if (!base) return;
+    if (this.gizmoMode === 'scale') {
+      // v1.11 SCALE: the footprint grows/shrinks in WHOLE CELLS about the
+      // bbox centre; the translucent GHOST is the live preview (the merged
+      // solid only catches up at the commit, same trick as a move drag).
+      const ext = this.scaleTargetExt(base);
+      this.scaleGhost(base, ext);
+      return;
+    }
     const q = this.gizmoProxy.quaternion;
     const cFile = base.center.clone()
       .sub(new Vector3(this.moff.x, this.moff.y, this.moff.z));
@@ -3005,6 +3104,46 @@ void main() {
     this.blockHlGroup.position.copy(
       this.gizmoProxy.position.clone().sub(cFile.applyQuaternion(q)));
     this.blockHlGroup.children.forEach((o, i) => { o.visible = i < 2; });
+    this.invalidate();
+  }
+  /** quantised footprint ext (cells) a scale gesture currently asks for */
+  private scaleTargetExt(base: { ext: [number, number, number] }):
+    [number, number, number] {
+    const s = this.gizmoProxy.scale;
+    return [0, 1, 2].map(a =>
+      Math.max(1, Math.min(BLOCK_SIZE_MAX + 1,
+        Math.round(base.ext[a]! * s[['x', 'y', 'z'][a] as 'x' | 'y' | 'z']!))
+    )) as [number, number, number];
+  }
+  /** the ANCHORED cell of a footprint ext' stretched from the base (v1.11
+   *  directional, we: "if I resize in e.g. +z, it also stretches in −z —
+   *  undesirable"): the face the grabbed handle sits on MOVES, the OPPOSITE
+   *  face stays put: for a +a drag cell' = cell, for a −a drag the +a face
+   *  is fixed, so cell' = cell + (ext − ext'). Axes the gesture does not
+   *  change (ext' = ext) never move. */
+  private scaleAnchorCell(cell: [number, number, number], ext: [number, number, number],
+    ext2: [number, number, number], signs: [number, number, number]): [number, number, number] {
+    return [0, 1, 2].map(a =>
+      cell[a]! + (signs[a]! < 0 ? ext[a]! - ext2[a]! : 0)) as [number, number, number];
+  }
+  /** show (ext = base) / hide the translucent preview of a scale gesture */
+  private scaleGhost(base: { cell: [number, number, number]; ext: [number, number, number];
+    signs: [number, number, number] }, ext2: [number, number, number]) {
+    const b = this.blockGizBi >= 0 && this.bp ? this.bp.data.blocks[this.blockGizBi] : undefined;
+    const same = ext2[0] === base.ext[0] && ext2[1] === base.ext[1] && ext2[2] === base.ext[2];
+    if (!b || same) {
+      if (this.scalePreview) { this.scalePreview = false; this.setPlaceGhost(null); }
+      return;
+    }
+    const cell = this.scaleAnchorCell(base.cell, base.ext, ext2, base.signs);
+    this.scalePreview = true;
+    this.setPlaceGhost({
+      cell, size: [ext2[0]! - 1, ext2[1]! - 1, ext2[2]! - 1], type: b.type,
+      slot: b.colors?.[0] ?? 0, material: b.material ?? 0,
+      valid: !cellOverlapSkip(this.bp!, cell, [ext2[0]! - 1, ext2[1]! - 1, ext2[2]! - 1],
+        [this.blockGizBi, blockMirrorTwin(this.bp!, this.blockGizBi, this.mirAxis)]),
+      complement: false,
+    });
     this.invalidate();
   }
   /** DROP = COMMIT: a whole-cell shift (translate) or an N×90° turn (rotate)
@@ -3019,6 +3158,16 @@ void main() {
     if (this.gizmoMode === 'translate') {
       const d = this.gizmoProxy.position.clone().sub(base.center);
       this.blockGizmoShift([Math.round(d.x / CELL), Math.round(d.y / CELL), Math.round(d.z / CELL)]);
+    } else if (this.gizmoMode === 'scale') {
+      // v1.11 DIRECTIONAL STRETCH: commit the cell-quantised footprint with
+      // the gesture's DRAG SIGNS (the grabbed face moves, the opposite face
+      // stays); a refused (colliding) growth snaps the widget back
+      if (this.scalePreview) {
+        const ext2 = this.scaleTargetExt(base);
+        if (!this.blockGizmoScale(ext2, base.signs)) this.gizmoProxy.scale.set(1, 1, 1);
+        this.scalePreview = false;
+        this.setPlaceGhost(null);
+      }
     } else {
       const q = this.gizmoProxy.quaternion;
       const s2 = Math.sqrt(Math.max(0, 1 - q.w * q.w));
@@ -3086,6 +3235,49 @@ void main() {
     }
     setBlockGeom(b, cell, size, b.type);
     if (tw && tcell) setBlockGeom(tw, tcell, [tw.size_x, tw.size_y, tw.size_z], tw.type);
+    this.afterBlockGizmoEdit(twin);
+    return true;
+  }
+  /** v1.11 DIRECTIONAL STRETCH (we: "scaling means stretching in a direction"
+   *  + "if I resize in e.g. +z, it also stretches the block in −z — that is
+   *  undesirable"): set the block owning the widget to footprint ext (WHOLE
+   *  CELLS per axis), anchored so the face the grabbed ⤢ handle sits on
+   *  (signs[a] = +1 the +a face, −1 the −a face) MOVES and the OPPOSITE face
+   *  stays put — a +z stretch never touches the −z face. The SIMILAR TWIN
+   *  stretches the SAME cells on its MIRRORED side (v1.8.0 uniform mirror
+   *  rule). A colliding footprint REFUSES the whole gesture (false — the
+   *  widget snaps back, the red-ghost contract).
+   *  PUBLIC: the widget commit AND the e2e pins drive this exact path. */
+  blockGizmoScale(ext: [number, number, number],
+    signs: [number, number, number] = [1, 1, 1]): boolean {
+    const bp = this.bp;
+    const bi = this.blockGizBi;
+    const b = bi >= 0 && bp ? bp.data.blocks[bi] : undefined;
+    if (!bp || !b) return false;
+    const e2 = ext.map(v => Math.max(1, Math.min(BLOCK_SIZE_MAX + 1, Math.round(v)))) as
+      [number, number, number];
+    const cell = blockCells(b);
+    const ext0: [number, number, number] = [b.size_x + 1, b.size_y + 1, b.size_z + 1];
+    if (e2[0] === ext0[0] && e2[1] === ext0[1] && e2[2] === ext0[2]) return true;
+    const twin = blockMirrorTwin(bp, bi, this.mirAxis);
+    const tw = twin >= 0 ? bp.data.blocks[twin] : undefined;
+    const size2: [number, number, number] = [e2[0]! - 1, e2[1]! - 1, e2[2]! - 1];
+    const cell2 = this.scaleAnchorCell([cell.x, cell.y, cell.z], ext0, e2, signs);
+    if (cellOverlapSkip(bp, cell2, size2, [bi, twin])) return false;
+    let tcell2: [number, number, number] | null = null;
+    if (tw) {
+      const tcell = blockCells(tw);
+      const text: [number, number, number] = [tw.size_x + 1, tw.size_y + 1, tw.size_z + 1];
+      // the twin mirrors on the session axis: its drag-side face is the
+      // MIRRORED sign there (a +x stretch of the self grows the twin toward
+      // −x — the pair keeps growing AWAY from / INTO the plane symmetrically)
+      const tsigns = signs.map((s, a) =>
+        a === mirrorAxisIdx(this.mirAxis) ? -s : s) as [number, number, number];
+      tcell2 = this.scaleAnchorCell([tcell.x, tcell.y, tcell.z], text, e2, tsigns);
+      if (cellOverlapSkip(bp, tcell2, size2, [bi, twin])) return false;
+    }
+    setBlockGeom(b, cell2, size2, b.type);
+    if (tw && tcell2) setBlockGeom(tw, tcell2, size2, tw.type);
     this.afterBlockGizmoEdit(twin);
     return true;
   }
@@ -3365,6 +3557,271 @@ void main() {
     removeEventListener('pointermove', this.onHingeMove);
     removeEventListener('pointerup', this.onHingeUp);
   };
+  /** v1.11: record the LAST pointerdown px (capture phase, before TGC) —
+   *  a ⤢ SCALE gesture reads it in captureBlockGesture to learn which end
+   *  of the axis the grabbed handle sits on (the DIRECTION of the stretch). */
+  private onRecordPointer = (ev: PointerEvent) => {
+    this.gizmoPointer = { x: ev.clientX, y: ev.clientY };
+  };
+
+  // ------------------------------------------- v1.11 TRIANGLE PIN EDITOR
+  // (we: "Placing triangles is done by putting down three points, which you
+  // can move around before and after placing all three of them, it should
+  // look like a pin, and an arrow should point down/up for the direction of
+  // the triangle, just like in-game in archean")
+  // Three states: 'off' (nothing shown) → 'draft' (the pins placed so far,
+  // 0..3, draggable BEFORE the third lands) → the third click COMMITS the
+  // prism and the engine flips to 'edit' on that triangle: the pins stay,
+  // dragging one rewrites the stored corner (onPinEdit → the Editor mirrors
+  // bp + doc; the merged skin follows on its debounce). Every pin sits ON a
+  // global lattice corner (cornerOf — the 0.25 m hull lattice); drags
+  // re-drop onto the surface the cursor crosses, snapped to the same lattice.
+  // The GOLD ARROW rides the face centroid along the winding normal
+  // ((c1−c0)×(c2−c0)) — up over the face, flipping when the winding flips
+  // (a clockwise corner order points it down): that is the triangle's
+  // FRONT (colours[0]) direction, the same law FORMAT §Triangles draws.
+
+  /** DRAFT mode: show (replace) the pins for the corners placed so far.
+   *  null = back to 'off'. The Editor owns the draft state; the engine only
+   *  draws + drags (a draft-pin drag updates pinCorners + onPinDraft). */
+  setPinDraft(pts: Corner[] | null, brushSlot = this.pinBrush) {
+    this.pinBrush = brushSlot;
+    if (!pts) { this.clearPins(); return; }
+    this.pinMode = 'draft';
+    this.pinEditTi = -1;
+    this.pinCorners = pts.map(p => [p[0], p[1], p[2]] as Corner);
+    this.rebuildPinMesh();
+    this.invalidate();
+  }
+  /** EDIT mode: pins on the corners of a COMMITTED triangle (bp index). The
+   *  corners are READ FROM the bp every refresh, so the debounced merged
+   *  reload and the pin drags can never drift apart. -1 = clear. */
+  setPinEdit(ti: number, brushSlot = this.pinBrush) {
+    this.pinBrush = brushSlot;
+    if (ti < 0) { this.clearPins(); return; }
+    this.pinMode = 'edit';
+    this.pinEditTi = ti;
+    this.refreshPins();
+    this.invalidate();
+  }
+  clearPins() {
+    this.pinMode = 'off';
+    this.pinEditTi = -1;
+    this.pinCorners = [];
+    this.disposeGroup(this.pinGroup);
+    this.pinGroup.visible = false;
+    this.invalidate();
+  }
+  /** a pin drag COMPLETED since the last read (the Viewport consumes it to
+   *  swallow the click that follows a drag — no accidental 4th pin) */
+  pinGesture(): boolean {
+    const g = this.pinGestureFlag;
+    this.pinGestureFlag = false;
+    return g;
+  }
+  private pinGestureFlag = false;
+  pinsState(): { mode: 'off' | 'draft' | 'edit'; pts: Corner[]; ti: number;
+    arrow: [number, number, number] | null } | null {
+    if (this.pinMode === 'off') return null;
+    const c = this.pinCorners;
+    let arrow: [number, number, number] | null = null;
+    if (c.length >= 3) {
+      const u: [number, number, number] = [c[1]![0]! - c[0]![0]!, c[1]![1]! - c[0]![1]!, c[1]![2]! - c[0]![2]!];
+      const w: [number, number, number] = [c[2]![0]! - c[0]![0]!, c[2]![1]! - c[0]![1]!, c[2]![2]! - c[0]![2]!];
+      const n: [number, number, number] = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2],
+        u[0] * w[1] - u[1] * w[0]];
+      const l = Math.hypot(n[0], n[1], n[2]);
+      if (l > 1e-9) arrow = [n[0] / l, n[1] / l, n[2] / l];
+    }
+    return { mode: this.pinMode, pts: c.map(p => [...p] as Corner), ti: this.pinEditTi, arrow };
+  }
+  /** client px of pin i's head (e2e: where to press to drag it) */
+  pinScreenPoint(i: number): { x: number; y: number } | null {
+    const p = this.pinCorners[i];
+    if (!p || !this.renderer) return null;
+    const v = new Vector3((p[0] - 6) * CELL, (p[1] - 6) * CELL + 0.30, (p[2] - 6) * CELL)
+      .add(this.moffV());
+    v.project(this.camera!);
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    return { x: rect.left + (v.x * 0.5 + 0.5) * rect.width, y: rect.top + (-v.y * 0.5 + 0.5) * rect.height };
+  }
+  /** re-read the corners from the bp (edit mode) and repaint; drops the pins
+   *  when the edited triangle is gone (deleted / undone away). load() calls
+   *  this so pins survive every merged rebuild. */
+  refreshPins() {
+    if (this.pinMode === 'edit' && this.bp) {
+      const t = (this.bp.data.triangles ?? [])[this.pinEditTi];
+      if (!t) { this.clearPins(); return; }
+      this.pinCorners = triCorners(t).map(g => [g[0], g[1], g[2]] as Corner);
+      this.rebuildPinMesh();
+    } else if (this.pinMode !== 'off') {
+      this.rebuildPinMesh();
+    }
+  }
+
+  private pinWorld(p: Corner, lift = 0): Vector3 {
+    return new Vector3((p[0] - 6) * CELL, (p[1] - 6) * CELL + lift, (p[2] - 6) * CELL);
+  }
+  /** (re)draw: one map-PIN (needle cone into the surface + gold head) per
+   *  corner, a translucent preview face over 3 corners (a gold chord over
+   *  2), and the normal arrow at the centroid. Raw-file metres (the group
+   *  rides moff); depthTest off so the pins read through the hull. */
+  private rebuildPinMesh() {
+    this.disposeGroup(this.pinGroup);
+    const c = this.pinCorners;
+    if (!c.length) { this.pinGroup.visible = false; return; }
+    const pinR = Math.max(0.05, CELL * 0.55);
+    c.forEach((p, i) => {
+      const base = this.pinWorld(p);
+      const mat = new MeshBasicMaterial({
+        color: i === 0 ? 0xffc94d : i === 1 ? 0x7dffcf : 0xff9c6b,
+        transparent: true, opacity: 0.95, depthTest: false,
+      });
+      const needle = new Mesh(new ConeGeometry(pinR * 0.5, pinR * 3.2, 10), mat);
+      needle.position.y = pinR * 1.6;            // apex down AT the corner
+      needle.rotation.x = Math.PI;
+      const head = new Mesh(new SphereGeometry(pinR, 14, 10), mat);
+      head.position.y = pinR * 4.2;
+      const grp = new Group();
+      grp.add(needle, head);
+      grp.position.copy(base);
+      grp.renderOrder = 998;
+      grp.children.forEach(m => { m.renderOrder = 998; m.userData.pin = i; });
+      this.pinGroup.add(grp);
+      const lab = this.makeAxisLabel(`v${i}`, '#ffd479');
+      lab.position.copy(base).add(new Vector3(0, pinR * 7.5, 0));
+      lab.renderOrder = 999;
+      this.pinGroup.add(lab);
+    });
+    // preview surface: a triangle over 3 corners, a chord over 2
+    const pts = c.map(p => this.pinWorld(p));
+    if (pts.length >= 2) {
+      const pos: number[] = [];
+      for (const v of pts) pos.push(v.x, v.y, v.z);
+      if (pts.length === 3) {
+        const geo = new BufferGeometry();
+        geo.setAttribute('position', new BufferAttribute(new Float32Array(pos), 3));
+        geo.setIndex([0, 1, 2]);
+        geo.computeVertexNormals();
+        const face = new Mesh(geo, new MeshBasicMaterial({
+          color: 0x7dffcf, transparent: true, opacity: 0.35, depthTest: false, side: DoubleSide,
+        }));
+        face.renderOrder = 996;
+        face.raycast = () => {};
+        this.pinGroup.add(face);
+      } else {
+        const geo = new BufferGeometry();
+        geo.setAttribute('position', new BufferAttribute(new Float32Array(pos), 3));
+        const line = new Line(geo, new LineBasicMaterial({
+          color: 0x7dffcf, transparent: true, opacity: 0.9, depthTest: false,
+        }));
+        line.renderOrder = 996;
+        line.raycast = () => {};
+        this.pinGroup.add(line);
+      }
+    }
+    // the DIRECTION ARROW: along the winding normal at the centroid (the
+    // in-game tell for which way the triangle faces)
+    if (pts.length === 3) {
+      const st = this.pinsState();
+      if (st?.arrow) {
+        const cen = new Vector3(
+          (pts[0]!.x + pts[1]!.x + pts[2]!.x) / 3,
+          (pts[0]!.y + pts[1]!.y + pts[2]!.y) / 3,
+          (pts[0]!.z + pts[1]!.z + pts[2]!.z) / 3);
+        const span = Math.max(0.25, Math.min(1.0,
+          pts[0]!.distanceTo(pts[1]!) + pts[1]!.distanceTo(pts[2]!)) * 0.18);
+        const n = new Vector3(st.arrow[0], st.arrow[1], st.arrow[2]);
+        const ag = new Group();
+        const amat = new MeshBasicMaterial({
+          color: 0xffd479, transparent: true, opacity: 0.95, depthTest: false, side: DoubleSide,
+        });
+        const shaft = new Mesh(new CylinderGeometry(0.012, 0.012, span, 6), amat);
+        shaft.position.y = span / 2;
+        const tip = new Mesh(new ConeGeometry(0.05, span * 0.42, 10), amat);
+        tip.position.y = span + span * 0.21;
+        ag.add(shaft, tip);
+        ag.position.copy(cen);
+        ag.quaternion.setFromUnitVectors(new Vector3(0, 1, 0), n);
+        ag.renderOrder = 997;
+        ag.children.forEach(m => { m.renderOrder = 997; m.raycast = () => {}; });
+        this.pinGroup.add(ag);
+      }
+    }
+    this.pinGroup.visible = true;
+  }
+
+  private pinRay(ev: PointerEvent) {
+    if (!this.renderer) return null;
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const rc = new Raycaster();
+    rc.setFromCamera(new Vector2(((ev.clientX - rect.left) / rect.width) * 2 - 1,
+      -((ev.clientY - rect.top) / rect.height) * 2 + 1), this.camera);
+    return rc;
+  }
+
+  private onPinDown = (ev: PointerEvent) => {
+    if (!this.pinGroup.visible || !this.pinCorners.length) return;
+    const rc = this.pinRay(ev);
+    if (!rc) return;
+    const hit = rc.intersectObjects(this.pinGroup.children, true)[0];
+    if (!hit) return;
+    let o: Object3D | null = hit.object;
+    let i = -1;
+    while (o && i < 0) {
+      const p = (o.userData as { pin?: number }).pin;
+      if (p != null) i = p;
+      o = o.parent;
+    }
+    if (i < 0) return;
+    ev.stopPropagation();                     // the pin claims the gesture
+    this.pinDrag = { i };
+    this.pinGestureFlag = true;
+    if (this.controls) this.controls.enabled = false;
+    this.renderer?.domElement.setPointerCapture(ev.pointerId);
+    addEventListener('pointermove', this.onPinMove);
+    addEventListener('pointerup', this.onPinUp);
+  };
+
+  private onPinMove = (ev: PointerEvent) => {
+    const dr = this.pinDrag;
+    if (!dr) return;
+    // the pin RE-DROPS onto the first placeable surface under the cursor —
+    // the same surface lattice a fresh pin click uses (pickCell → cornerOf)
+    const r = this.pickCell(ev.clientX, ev.clientY);
+    if (!r) return;
+    const g = cornerOf(r.point);
+    const cur = this.pinCorners[dr.i];
+    if (!cur || (cur[0] === g[0] && cur[1] === g[1] && cur[2] === g[2])) return;
+    this.pinCorners[dr.i] = g;
+    this.rebuildPinMesh();
+    if (this.pinMode === 'edit' && this.pinEditTi >= 0)
+      this.onPinEdit?.(this.pinEditTi, dr.i, g);      // live write (undo coalesces the drag)
+    else
+      this.onPinDraft?.(this.pinCorners.map(p => [...p] as Corner));
+    this.invalidate();
+  };
+
+  private onPinUp = () => {
+    this.pinDrag = null;
+    if (this.controls) this.controls.enabled = true;
+    removeEventListener('pointermove', this.onPinMove);
+    removeEventListener('pointerup', this.onPinUp);
+  };
+
+  /** dispose children geometries/materials of a decoration group */
+  private disposeGroup(g: Group) {
+    for (const o of g.children) {
+      o.traverse(m => {
+        const mm = m as Mesh;
+        mm.geometry?.dispose?.();
+        const mat = (mm as Mesh).material as Material | Material[] | undefined;
+        if (Array.isArray(mat)) mat.forEach(x => x.dispose?.());
+        else mat?.dispose?.();
+      });
+    }
+    g.clear();
+  }
 
   // -------------------------------------------------------------- editing
 
@@ -4489,8 +4946,12 @@ void main() {
     this.disposeScene();
     this.renderer?.domElement.removeEventListener('webglcontextrestored', this.onRestore);
     this.hingeCanvas?.removeEventListener('pointerdown', this.onHingeDown, { capture: true } as EventListenerOptions);
+    this.pinCanvas?.removeEventListener('pointerdown', this.onPinDown, { capture: true } as EventListenerOptions);
+    this.hingeCanvas?.removeEventListener('pointerdown', this.onRecordPointer, { capture: true } as EventListenerOptions);
     removeEventListener('pointermove', this.onHingeMove);
     removeEventListener('pointerup', this.onHingeUp);
+    removeEventListener('pointermove', this.onPinMove);
+    removeEventListener('pointerup', this.onPinUp);
     for (const h of this.hingeHandles) { h.mesh.geometry.dispose(); (h.mesh.material as MeshBasicMaterial).dispose(); }
     this.hingeHandles = [];
     this.hingeCanvas = null;

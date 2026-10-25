@@ -38,23 +38,32 @@ button opens it; the canvas stays usable beside it):
 
 The **✎ Edit | ✚ Place** flavour switch lives in this WIDE bottom dock (not
 the sidebar): it sets what a canvas click / tap DOES. Beside it: the
-▤ Blocks | ▵ Triangles sub-tabs and the ⇄ twin toggle. The dock is three
-columns — the **brush + census**, a **searchable list** of every
-block/triangle (hover a row to light it gold in the 3D view, click to
-select, ✕ deletes it and its twin — Undo brings them back), and the
-**editor of the selected item**.
+▤ Blocks | ▵ Triangles sub-tabs and the **mirror widget** — the **⇄ twin**
+arm plus the **⊘ x y z** chips: the lit chip IS the mirror plane (⊘ = no
+session mirror). The dock is three columns — the **brush + census**, a
+**searchable list** of every block/triangle (hover a row to light it gold
+in the 3D view, click to select, ✕ deletes it and its twin — Undo brings
+them back), and the **editor of the selected item**.
 
-* **Placing on a phone**: pick ✚ Place, set the size with the **− / +**
-  steppers (▣ squares it), then **tap a surface** — the ghost chip at the
-  top shows the footprint. (On a keyboard the same sizing is **x y z** to
-  pick the axis, **[ ]** to shrink/grow, **s** to square.)
+* **Placing (v1.11: no size to choose)**: pick ✚ Place and **click / tap a
+  surface** — one 1×1×1 block lands, is selected, and the mode widget pops
+  at it: **✥ move · ⟳ turn · ⤢ stretch**. Stretch drags a face — that face
+  moves and the opposite face stays anchored, in whole cells; the dock's
+  size rows do the same by number. The brush carries shape, paint and
+  material only.
+* **Triangles**: pick **▵ Triangles**, then click three spots — each lands
+  a **pin** on the lattice, draggable before the third lands; the third
+  click commits the prism and the pins + a direction **arrow** stay on it
+  (drag a pin to reshape the triangle; a list row puts pins on any
+  committed triangle; Esc leaves).
 * **Editing**: pick ✎ Edit and tap a part (the inspector opens) or a block
   face (the block editor + the BLOCK widget open).
 
 ## Viewport furniture
 
-* **⊘ ✥ ⟳ ⇄ ℹ 🎨** mode widget — pops at a clicked part: no gizmo / move /
-  rotate / mirror indicator / info / paint window.
+* **⊘ ✥ ⟳ ⤢ ⇄ 🎨** mode widget — pops at a clicked part or freshly placed
+  block: no gizmo / move / rotate / **stretch (blocks only)** / mirror
+  indicator / paint window.
 * **Static info card** (bottom-left) — mass & CoM; toggle under ⚙, ✕ closes.
 * **Camera cluster** (bottom-right) — reframe the vessel / reset the view.
 * **Ghost hints** — placement states (held part, brush ghost, skin Build/

@@ -1,5 +1,5 @@
 # Blocks
-Tags: blocks brush place paint material face rotate snap twin mirror cell lattice ghost
+Tags: blocks brush place paint material face rotate snap twin mirror cell lattice ghost stretch scale widget pin arrow triangle
 
 Blocks are the craft's solid hull: shape + orientation (`type`), a palette
 slot per face (`colors`), and a **material** (what it IS — see the table).
@@ -14,38 +14,61 @@ a **searchable list of every block** (hover a row to light it gold in 3D,
 click to select, ✕ deletes it and its twin — Undo brings them back), and
 the editor of the selected block on the right.
 
-## Placing
+## Placing — a click lands one cell, the widget sizes it
 
-Pick **✚ Place**, choose the brush, then hover:
-a ghost docks on ANY surface you aim at — a block face, a hull triangle, a
-part. Click places; red ghost = the footprint collides, the click is refused.
+v1.11 (we: *"choosing a block size before placing it shouldn't be a
+thing"*): the brush carries **shape, paint and material ONLY** — there is
+no size to pick first. Pick **✚ Place** and click (or tap) ANY surface —
+a block face, a hull triangle, a part — and a **1×1×1 cell** lands, is
+auto-selected, and the mode widget pops at it so you can immediately:
 
-* **Resize while placing** — over the canvas: **x / y / z** pick the active
-  axis, **[** and **]** shrink / grow it one cell (`−`/`=` work too), and
-  **s** squares the brush (every axis to the largest). The chip under the
-  top edge shows the live footprint, e.g. `▤ 4×4×2 cells ▸ x`.
-* **On a phone** the same sizing is in the dock: the **x / y / z** chips
-  pick the active axis and the **− / +** steppers size it by tap; **▣
-  square** and **1×1×1** are one tap. Then tap a surface to place.
-* **▣ square** / **1×1×1** buttons in the brush do the same with the mouse.
-  Blocks grow freely in all three axes — a block near a frame border is no
-  longer capped there (the game stores multi-frame blocks itself), so a
-  10×10×10 cube lands anywhere.
+* **✥ move** — cell-snapped arrows (whole-cell steps, the twin mirrors),
+* **⟳ turn** — 90° rings,
+* **⤢ stretch** — grab a face's handle and pull: **that face moves, the
+  opposite face stays anchored** (a +z stretch grows only toward +z — it
+  never touches the −z side). The footprint grows/shrinks in **whole cells**;
+  a block near a frame border grows freely on every axis — a 10×10×10 cube
+  is one stretch away, and the dock's **size x/y/z** rows do the same by
+  number.
+
+Every one of those is ONE undo step. Other placement rules:
+
 * **⇧ Shift** over an existing block swaps the ghost to the *continuation*:
   the aimed block's shape/size/paint flush-added across the shared face —
   the game's "logically add the next block" rule.
 * **⟲** in the brush cycles the shape family (the game's scroll wheel).
-* **⇄** also places the x-mirrored twin when the mirror plane is on.
+* **⇄ twin ON** (the dock's mirror widget) also lands the mirrored twin,
+  across the axis the **⊘ x y z** chips light.
+* A red ghost over an occupied cell = the click is refused.
 
 ## Editing a block
 
 In **✎ Edit**, click a block face (or a row in the list): the block
-highlights gold and the BLOCK widget (world space) attaches — arrows move
-it in **whole-cell snaps**, the rings turn it in **90° steps**; both
+highlights gold and the SAME BLOCK widget (world space) attaches — **✥**
+arrows move it in **whole-cell snaps**, **⟳** rings turn it in **90°
+steps**, **⤢** handles stretch it in **whole cells** (grab a face, that
+face moves, the opposite one stays anchored); all
 propagate to the mirror twin. The dock's block editor offers the same as
 rows plus shape turns: ⟲X ⟲Y ⟲Z (turn in place), ⇄ flip, ⟲ cycle, and ✧
 **snap** (pick the shape whose cross-section best agrees with the
 neighbours).
+
+## Placing triangles — pins (v1.11)
+
+In **▵ Triangles**, a click drops a **pin** on the lattice corner of the
+surface you aim at. Three pins = one hull triangle: the third click commits
+the prism (brush colours, material 0). The pins are the point:
+
+* **Drag any pin** — before and after the commit. A pin re-drops onto the
+  surface under the cursor, snapped to the 0.25 m hull lattice, and the
+  stored corner follows (the 32-slot vertex window is enforced honestly:
+  a refused move snaps the pin back).
+* The gold **arrow** at the face centre points along the winding normal —
+  which way the triangle faces (its FRONT colour side). Moving a pin across
+  the opposite side flips it, exactly like the game's direction tell.
+* Click an existing prism's middle, or a row in the triangle list, to put
+  that triangle's pins on the surface. **Esc** leaves the pins; the list
+  dock keeps the number rows (corners, ±cell moves, colours, shading).
 
 ## Materials — the block's gameplay identity
 

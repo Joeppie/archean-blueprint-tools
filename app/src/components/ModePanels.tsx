@@ -23,11 +23,20 @@ import { hullVertex } from '../engine/hullfit';
 import type { Triangle, Blueprint, Block } from '../engine/format';
 
 // --------------------------------------------------- EDIT ▸ blocks workspace
-export interface Brush { type: number; sx: number; sy: number; sz: number; slot: number; material?: number }
+/** v1.11 PLACEMENT REWRITE (we: "Choosing a block size before placing it
+ *  shouldn't be a thing"): the brush is SHAPE + PAINT + MATERIAL only. Every
+ *  click lands a 1×1×1 cell; the footprint grows AFTER the placement — the
+ *  BLOCK widget's ⤢ STRETCH mode (Engine.blockGizmoScale) or the THIS BLOCK
+ *  size rows below — the size rows anchor the block's cell face (grow
+ *  toward +), the ⤢ widget anchors the face you did NOT grab, so a block
+ *  near a frame edge is growable on every axis (the v1.10.6 square-block
+ *  law). */
+export interface Brush { type: number; slot: number; material?: number }
 
-/** The brush as a placement footprint (the Editor fills `cell` from the pick). */
+/** The brush as a placement footprint (the Editor fills `cell` from the
+ *  pick; v1.11: the brush carries NO size — every placed block is one cell). */
 export const brushSpec = (b: Brush): Pick<PlaceSpec, 'size' | 'type' | 'slot' | 'material'> =>
-  ({ size: [b.sx, b.sy, b.sz], type: b.type, slot: b.slot, material: b.material ?? 0 });
+  ({ size: [0, 0, 0], type: b.type, slot: b.slot, material: b.material ?? 0 });
 
 /** MATERIALS row (v1.7 user rule: "Blocks should let me edit material:
  *  composite, iron, glass, etc; this is NOT part of the color picker, and it
@@ -76,10 +85,6 @@ export function BlockPanel(p: {
   onHoverBlock?: (bi: number) => void;
   /** list ✕: the Editor's DELETE path (self + twin, bp + doc + undo) */
   onDeleteBlock?: (bi: number) => void;
-  /** v1.10.6 RESIZE-WHILE-PLACING: the brush's ACTIVE axis for the [ ] keys
-   *  (the viewport keys live in Editor.tsx; the chips here show + pick it) */
-  axisSel?: number;
-  onAxis?: (ax: number) => void;
 }) {
   const [snapMsg, setSnapMsg] = useState('');
   const mAx = p.mirrorAxis ?? 'x';               // v1.5.21 settable mirror axis
@@ -270,51 +275,15 @@ export function BlockPanel(p: {
                 ⟲ {shapeName(p.brush.type)} {p.brush.type === 0 ? '' : p.brush.type}
               </button>
             </div>
-            {/* v1.10.6 SIZING (we: "when placing we should be able to resize.
-                Blocks don't currently let you make them square"): the active
-                axis for the viewport [ ] keys, one-tap SQUARE + reset, and
-                the fields up to the sanity cap (frame borders no longer
-                cap growth — the square-block engine fix).
-                v1.10.7 (we: "on phone I've no idea how to place"): the axis
-                chips gained −/+ STEPPERS — the touch twin of the keys
-                (shared brushAxis/brush state), sized for a thumb. */}
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pb-1">
-              {(['x', 'y', 'z'] as const).map((ax, i) => {
-                const k = `s${ax}` as const;
-                const step = (d: number) =>
-                  p.onBrush({ ...p.brush, [k]: Math.max(0, Math.min(BLOCK_SIZE_MAX, p.brush[k] + d)) });
-                return (
-                  <span key={ax} className="flex items-center gap-[3px]">
-                    <button data-testid={`brush-axis-${ax}`} title={`active axis — the [ ] keys resize it; tap −/+ here (key ${ax})`}
-                      onClick={() => p.onAxis?.(i)}
-                      className={`ksp-btn px-2 py-[3px] text-[11px] ${p.axisSel === i ? 'on' : ''}`}>
-                      {ax}
-                    </button>
-                    <button data-testid={`brush-step-${ax}-m`} title={`shrink the ${ax} size by one cell (key [)`}
-                      onClick={() => step(-1)}
-                      className="ksp-btn px-2 py-[3px] text-[12px]">−</button>
-                    <span data-testid={`brush-size-${ax}`} title={`${ax} footprint in cells`}
-                      className="w-6 text-center text-[12px] font-semibold text-ink">
-                      {p.brush[k] + 1}
-                    </span>
-                    <button data-testid={`brush-step-${ax}-p`} title={`grow the ${ax} size by one cell (key ] )`}
-                      onClick={() => step(1)}
-                      className="ksp-btn px-2 py-[3px] text-[12px]">+</button>
-                  </span>
-                );
-              })}
-              <button data-testid="brush-square" title="square the brush: every axis to the largest (key s)"
-                onClick={() => { const m = Math.max(p.brush.sx, p.brush.sy, p.brush.sz);
-                  p.onBrush({ ...p.brush, sx: m, sy: m, sz: m }); }}
-                className="ksp-btn px-2 py-[3px] text-[10px]">▣ square</button>
-              <button data-testid="brush-reset" title="reset the brush to one cell"
-                onClick={() => p.onBrush({ ...p.brush, sx: 0, sy: 0, sz: 0 })}
-                className="ksp-btn px-2 py-[3px] text-[10px]">1×1×1</button>
-            </div>
-            <div className="flex gap-2">
-              <Num label="sx" value={p.brush.sx} min={0} max={BLOCK_SIZE_MAX} onCommit={v => p.onBrush({ ...p.brush, sx: v })} />
-              <Num label="sy" value={p.brush.sy} min={0} max={BLOCK_SIZE_MAX} onCommit={v => p.onBrush({ ...p.brush, sy: v })} />
-              <Num label="sz" value={p.brush.sz} min={0} max={BLOCK_SIZE_MAX} onCommit={v => p.onBrush({ ...p.brush, sz: v })} />
+            {/* v1.11 PLACEMENT REWRITE (we: "Choosing a block size before
+                placing it shouldn't be a thing"): the brush carries shape,
+                paint and material ONLY. The click lands a 1×1×1 cell; the
+                footprint grows AFTER — the BLOCK widget's ⤢ STRETCH mode
+                (drag a face, whole cells, the opposite face anchored) or the
+                THIS BLOCK size rows. No size pre-selection, no keys. */}
+            <div className="pb-1 pt-0.5 text-[10px] leading-snug text-gold">
+              the brush places a <b>1×1×1</b> block · grow it afterwards with
+              the <b>⤢ stretch</b> widget (drag a face, whole cells)
             </div>
             <div className="flex items-center gap-2">
               <Num label="slot" value={p.brush.slot} min={0} max={255} onCommit={v => p.onBrush({ ...p.brush, slot: v })} />
@@ -337,12 +306,11 @@ export function BlockPanel(p: {
                 onPick={slot => p.onBrush({ ...p.brush, slot })} custom={p.custom} />
             </div>
             <div className="pt-1 text-[10px] leading-snug text-ink-dim">
-              Hover a block, part or hull triangle to preview · click to place · over the
-              viewport <b>x y z</b> pick the size axis, <b>[ ]</b> shrink/grow it,
-              <b> s</b> squares the brush ·
+              Hover a block, part or hull triangle to preview · click to place a cell ·
+              the widget then <b>✥</b> moves, <b>⟳</b> turns and <b>⤢</b> stretches it ·
               <b> Shift</b> over a block copies it / logically continues its shape
-              (the game's rule) · ⇄ mirrors the twin · the <b>✎ Edit</b> flavor
-              selects a part or block to move, turn and delete.
+              (the game's rule) · the ⇄ MIRROR widget lands the twin too · the
+              <b> ✎ Edit</b> flavor selects a part or block to move, turn and delete.
             </div>
           </Sec>
         )}
@@ -350,8 +318,10 @@ export function BlockPanel(p: {
           <Sec title="Blocks — picking" testid="block-pick-hint">
             <div className="text-[11px] leading-snug text-ink-dim">
               Click a block on the vessel (or a row in the list beside) to
-              select it — the golden overlay and the BLOCK widget (cell-snap
-              move, 90° rings) ride. Hovering a list row previews that block
+              select it — the golden overlay and the BLOCK widget ride:
+              <b> ✥</b> move (cell snap), <b>⟳</b> turn (90° rings),
+              <b> ⤢</b> stretch (drag a face in whole cells — that face moves,
+              the opposite stays). Hovering a list row previews that block
               in 3D; ✕ deletes it (with its ⇄ twin, Undo brings both back).
             </div>
           </Sec>
@@ -1014,9 +984,11 @@ function triArea(t: Triangle): number {
 
 /**
  * v1.10.6 THE TRIANGLE DOCK (we: "editing triangles also sucks … use the
- * same kind of panel like for wires"): WIREPanel-style 3 columns —
- *  • col 1: the corner DRAFT + brush colours + the SKIN CENSUS (count,
- *    total m², materials) — the skin overview the sidebar never gave.
+ * same kind of panel like for wires"), v1.11 PIN PLACEMENT (we: "putting
+ * down three points, which you can move around before and after placing
+ * all three"): 3 columns —
+ *  • col 1: the PIN status (draft progress / the pinned triangle) + brush
+ *    colours + the SKIN CENSUS (count, total m², materials).
  *  • col 2: the searchable LIST of every triangle (area · material,
  *    centroid) — hover = gold 3D preview, click = select, ✕ = delete.
  *  • col 3: THIS TRIANGLE — the five face colours, plus REAL editing: the
@@ -1028,6 +1000,9 @@ function triArea(t: Triangle): number {
  */
 export function TriPanel(p: {
   bp: Blueprint; ctx: EditCtx | null; draft: number[][]; triSel: number;
+  /** v1.11: index of the triangle whose PINS ride the viewport (drag them
+   *  to move corners — before AND after the commit) */
+  pinTi?: number;
   onSlot: (i: number, v: number) => void; brush: number[];
   onUndo: () => void; onDeleted: () => void; onClearSel: () => void;
   /** v1.10.6: rev re-keys the census memo (bp mutates in place) */
@@ -1084,16 +1059,40 @@ export function TriPanel(p: {
   return (
     <div className="grid grid-cols-1 items-start gap-x-4 px-1 pb-2 md:grid-cols-3">
       <div className="space-y-3">
-        <Sec title={`Triangles — draft ${p.draft.length}/3 corners`} testid="tri-draft">
+        <Sec title={p.pinTi != null && p.pinTi >= 0
+          ? `Triangles — pins on Triangle[${p.pinTi}]`
+          : `Triangles — pins ${p.draft.length}/3 placed`} testid="tri-draft">
+          {/* v1.11 PIN PLACEMENT (we: "putting down three points, which you
+              can move around before and after placing all three of them, it
+              should look like a pin, and an arrow should point down/up for
+              the direction of the triangle, just like in-game"): clicks drop
+              PINS on the lattice corners of any surface, the pins DRAG (they
+              re-drop onto the surface under the cursor), the third click
+              commits the prism and the pins STAY on it — the gold arrow at
+              the centroid is the winding normal (which way the face looks). */}
           <div className="text-[10px] leading-snug text-ink-dim">
-            Click lattice corners on any surface; the third click commits the
-            prism. Click an existing triangle's middle to select it.
-            Snapping is to the 0.25 m hull lattice.
+            {p.pinTi != null && p.pinTi >= 0 ? (
+              <>
+                The three pins ride <b>Triangle[{p.pinTi}]</b> — <b>drag</b> one to
+                move that corner (it re-drops on the surface under the cursor, snapped
+                to the 0.25 m hull lattice). The gold <b>arrow</b> shows the triangle's
+                direction (its front face); listing a triangle beside also puts its pins
+                on. <b>Esc</b> leaves the pins.
+              </>
+            ) : (
+              <>
+                Click any surface to drop a <b>pin</b> on its lattice corner — three
+                pins make a triangle, the third click commits the prism. Pins are
+                <b> draggable</b> before and after the commit; the gold <b>arrow</b>
+                points along the face's direction (front = colours[0]). Snapping is
+                to the 0.25 m hull lattice.
+              </>
+            )}
           </div>
           {p.draft.length > 0 && (
             <button data-testid="tri-undo" onClick={p.onUndo}
               className="mt-1 rounded bg-panel2 px-2 py-[3px] text-[11px] text-ink hover:bg-white/10">
-              ↩ undo corner ({p.draft.length}/3)
+              ↩ undo pin ({p.draft.length}/3)
             </button>
           )}
           <div className="pt-1 text-[10px] text-ink-dim">brush colours (palette slots):</div>
@@ -1120,7 +1119,7 @@ export function TriPanel(p: {
           onChange={e => setLq(e.target.value)}
           className="mb-1 w-full rounded border border-white/10 bg-panel2 px-2 py-1 text-[12px] text-ink placeholder:text-ink-dim/60" />
         <div className="max-h-[22rem] space-y-[2px] overflow-y-auto" onMouseLeave={() => p.onHoverTri?.(-1)}>
-          {rows.length === 0 && <div className="text-[11px] text-ink-dim">no triangles — draft one on the hull</div>}
+          {rows.length === 0 && <div className="text-[11px] text-ink-dim">no triangles — drop three pins on a surface</div>}
           {rows.map(r => (
             <div key={r.ti} className="flex items-center gap-1">
               <button data-testid={`tri-row-${r.ti}`}
