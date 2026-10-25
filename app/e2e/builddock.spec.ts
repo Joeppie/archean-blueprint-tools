@@ -64,9 +64,9 @@ test.describe('build-dock: blocks workspace, place-then-stretch, mirror widget @
   test('the dock shows brush, census, list, edit and the MIRROR widget columns', async ({ page }) => {
     test.skip(test.info().project.name !== 'chromium', 'desktop-only');
     await open(page);
-    await page.getByTestId('tooltab-place').click();
+    await page.getByTestId('ws-blocks').click();
     for (const t of ['block-brush', 'block-census', 'block-list', 'block-edit',
-      'block-list-search', 'mirror-widget', 'mirror-twin', 'mirw-x', 'mirw-y', 'mirw-z', 'mirw-off'])
+      'block-list-search', 'mirror-widget', 'mirw-x', 'mirw-y', 'mirw-z', 'mirw-off'])
       await expect(page.getByTestId(t).first(), t).toBeVisible();
     // v1.11: the pre-placement SIZE UI is GONE (choosing a size before
     // placing shouldn't be a thing)
@@ -94,7 +94,8 @@ test.describe('build-dock: blocks workspace, place-then-stretch, mirror widget @
   test('a click lands a 1×1×1 block; the widget offers ✥ ⟳ ⤢ and ⤢ STRETCHES it', async ({ page }) => {
     test.skip(test.info().project.name !== 'chromium', 'desktop-only');
     await open(page);
-    await page.getByTestId('tooltab-place').click();
+    await page.getByTestId('ws-blocks').click();
+    await page.getByTestId('mirw-off').click();                  // single-cell: no auto twin
     const spot = await faceSpot(page);
     expect(spot, 'a block face answers the place path').not.toBeNull();
     const box = (await page.getByTestId('canvas').boundingBox())!;
@@ -146,7 +147,7 @@ test.describe('build-dock: blocks workspace, place-then-stretch, mirror widget @
   test('⤢ is BLOCK-only: a component-owned widget never shows it', async ({ page }) => {
     test.skip(test.info().project.name !== 'chromium', 'desktop-only');
     await open(page);
-    await page.getByTestId('tooltab-edit').click();
+    await page.getByTestId('ws-edit').click();
     // click a part pixel (pickCell kind comp) — the modebox pops for it
     const spot = await page.evaluate(() => {
       const c = document.querySelector('canvas')!;
@@ -170,30 +171,136 @@ test.describe('build-dock: blocks workspace, place-then-stretch, mirror widget @
     await expect(page.getByTestId('mode-rotate')).toBeVisible();
     await expect(page.getByTestId('mode-scale'), 'the game has no part scale')
       .toHaveCount(0);
+    await expect(page.getByTestId('mode-tris'), 'parts are not block skins')
+      .toHaveCount(0);
   });
 
-  test('the MIRROR widget switches the axis live (⊘ x y z)', async ({ page }) => {
+  test('⇄ twin ON lands the MIRROR TWIN of a drafted triangle (v1.11)', async ({ page }) => {
+    // we: "mirror for triangle is not placed"
+    test.skip(test.info().project.name !== 'chromium', 'desktop-only');
+    await open(page, '3732302108');                            // the gantry: x-mirrored craft
+    await page.getByTestId('ws-tris').click();
+    // v1.11: the x chip is AUTO-lit — the gantry's data mirrors across x
+    // (21 declared mirrorAxis parts + detected pairs), so the drafted
+    // triangle twins WITHOUT arming (we: "I created a triangle but it was
+    // not mirrored")
+    await expect(page.getByTestId('mirw-x')).toHaveAttribute('aria-pressed', 'true');
+    const trisOf = () => page.evaluate(() => {
+      const w = window as unknown as {
+        __ARCHEAN__?: { engine: { blueprint: { data: { triangles?: Record<string, number>[] } } } };
+      };
+      return (w.__ARCHEAN__!.engine.blueprint.data.triangles ?? []).map(t =>
+        [0, 1, 2].map(vi => [0, 1, 2].map(ai => {
+          const name = 'xyz'[ai]!;
+          return t[`v${vi}_${name}`]! + 12 * t[`frame_${name}`]!;
+        })));
+    });
+    const n0 = (await trisOf()).length;
+    const spots = await page.evaluate(() => {
+      const c = document.querySelector('canvas')!;
+      const r = c.getBoundingClientRect();
+      const e = (window as unknown as { __ARCHEAN__?: { engine: {
+        pickCell: (x: number, y: number) => { bi: number } | null } } }).__ARCHEAN__!.engine;
+      // (the gantry is LITE tier — real models never stream, no pendingReal gate)
+      const pts: { x: number; y: number }[] = [];
+      for (let fy = 0.25; fy <= 0.9; fy += 0.03)
+        for (let fx = 0.15; fx <= 0.9; fx += 0.03) {
+          const h = e.pickCell(r.left + r.width * fx, r.top + r.height * fy);
+          if (h && h.bi >= 0) pts.push({ x: r.left + r.width * fx, y: r.top + r.height * fy });
+        }
+      if (!pts.length) return null;
+      const d = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+        Math.hypot(a.x - b.x, a.y - b.y);
+      const p1 = pts[0]!;
+      const p2 = pts.reduce((m, p) => (d(p, p1) > d(m, p1) ? p : m), p1);
+      const p3 = pts.reduce((m, p) => (Math.min(d(p, p1), d(p, p2)) >
+        Math.min(d(m, p1), d(m, p2)) ? p : m), p1);
+      if (d(p1, p2) < 80 || Math.min(d(p3, p1), d(p3, p2)) < 60) return null;
+      return [p1, p2, p3];
+    });
+    expect(spots, 'gantry block faces answer the pin path').not.toBeNull();
+    const box = (await page.getByTestId('canvas').boundingBox())!;
+    for (const p of spots!) {
+      await page.getByTestId('canvas').click({ position: { x: p.x - box.x, y: p.y - box.y } });
+    }
+    await expect.poll(async () => (await trisOf()).length, { timeout: 5000 }).toBe(n0 + 2);
+    const norm = (cs: number[][]) =>
+      JSON.stringify([...cs].sort((a, b) => a[0]! - b[0]! || a[1]! - b[1]! || a[2]! - b[2]!));
+    const all = await trisOf();
+    const orig = all[all.length - 2]!, twin = all[all.length - 1]!;
+    // the twin's corner SET = the x-reflection (g → 12 − g) of the original's
+    expect(norm(twin)).toEqual(norm(orig.map(g => [12 - g[0]!, g[1]!, g[2]!])));
+  });
+
+  test('widget ▵ turns the SELECTED BLOCK into hull triangles (+ Undo)', async ({ page }) => {
+    // we: "Button should exist to turn block to triangle when selecting a
+    // block, on its widget."
     test.skip(test.info().project.name !== 'chromium', 'desktop-only');
     await open(page);
+    await page.getByTestId('ws-edit').click();
+    await page.getByTestId('mirw-off').click();                  // no twin: one block
+    const spot = await faceSpot(page);
+    expect(spot, 'a block face answers').not.toBeNull();
+    const box = (await page.getByTestId('canvas').boundingBox())!;
+    await page.getByTestId('canvas').click({
+      position: { x: box.width * spot!.x, y: box.height * spot!.y } });
+    await expect(page.getByTestId('mode-tris'), 'the ▵ row shows on a block-owned widget')
+      .toBeVisible();
+    const counts = () => page.evaluate(() => {
+      const w = window as unknown as { __ARCHEAN__?: { engine: { blueprint: {
+        data: { blocks: { type: number }[]; triangles?: unknown[] } } } } };
+      const b = w.__ARCHEAN__!.engine.blueprint.data.blocks;
+      return [b.filter(x => x.type !== 255).length,
+        (w.__ARCHEAN__!.engine.blueprint.data.triangles ?? []).length];
+    });
+    const [b0, t0] = await counts();
+    await page.getByTestId('mode-tris').click();
+    await expect.poll(async () => (await counts())[0], { timeout: 5000 }).toBe(b0 - 1);
+    await expect.poll(async () => (await counts())[1], { timeout: 5000 })
+      .toBeGreaterThanOrEqual(t0 + 6);                           // ≥ 3 free faces
+    // one Ctrl+Z: the block is back, the skin triangles are gone
+    await page.keyboard.press('Control+z');
+    await expect.poll(async () => (await counts()).join(), { timeout: 5000 })
+      .toBe(`${b0},${t0}`);
+  });
+
+  test('the MIRROR widget switches the axis live — GLYPH chips (plane+triangle, strikethrough off)', async ({ page }) => {
+    test.skip(test.info().project.name !== 'chromium', 'desktop-only');
+    await open(page, '3732302108');                            // mirrored: the arm auto-lights
     const mir = () => page.evaluate(() => (window as unknown as {
       __ARCHEAN__?: { mirAxis: () => string } }).__ARCHEAN__!.mirAxis());
     await expect.poll(mir).toBe('x');                         // default
+    // v1.11 (we: "the mirror option is not understandable, it should be
+    // visually understood, add a mirror icon with a strikethrough, and x y z
+    // also with mirror behind it"): every chip carries the mirror GLYPH (an
+    // SVG plane + solid triangle + reflected ghost); the off chip wears the
+    // red strike line; the axis chips wear the glyph behind the letter.
+    await expect(page.locator('[data-testid="mirw-off"] [data-g="mirror-off"]')).toBeVisible();
+    await expect(page.locator('[data-testid="mirw-off"] [data-g="mirror-strike"]')).toBeVisible();
+    for (const a of ['x', 'y', 'z']) {
+      await expect(page.locator(`[data-testid="mirw-${a}"] [data-g="mirror"]`), a).toBeVisible();
+      await expect(page.getByTestId(`mirw-${a}`)).toContainText(a);
+    }
     await page.getByTestId('mirw-z').click();
     await expect.poll(mir).toBe('z');
     await page.getByTestId('mirw-off').click();
     await expect.poll(mir).toBe('off');
     await page.getByTestId('mirw-x').click();
     await expect.poll(mir).toBe('x');
-    // the ⇄ twin arm persists like the old switch (same localStorage key)
-    await page.getByTestId('mirror-twin').click();
-    await expect(page.getByTestId('mirror-twin')).toContainText('twin ON');
+    // v1.11 ONE LINGO: the lit x chip IS the state — clicking the lit plane
+    // stops pairing, clicking again re-arms it (explicit, persisted 1)
+    await expect(page.getByTestId('mirw-x')).toHaveAttribute('aria-pressed', 'true');
+    await page.getByTestId('mirw-x').click();
+    await expect(page.getByTestId('mirw-x')).toHaveAttribute('aria-pressed', 'false');
+    await page.getByTestId('mirw-x').click();
+    await expect(page.getByTestId('mirw-x')).toHaveAttribute('aria-pressed', 'true');
     expect(await page.evaluate(() => localStorage.getItem('archean-app-plsym'))).toBe('1');
   });
 
   test('SQUARE FIX: a block grows to a 10×10×10 square (frame borders do not cap)', async ({ page }) => {
     test.skip(test.info().project.name !== 'chromium', 'desktop-only');
     await open(page);
-    await page.getByTestId('tooltab-edit').click();
+    await page.getByTestId('ws-edit').click();
     await page.getByTestId(/^block-row-\d+/).first().click();
     await expect(page.getByTestId('block-edit')).toContainText(/Block\[\d+\]/);
     const sel = () => page.evaluate(() => {
@@ -216,24 +323,25 @@ test.describe('build-dock: phone placement @ui', () => {
   // v1.11: the flavor switch + TAP hints live in the DOCK HEADER, the brush
   // has NO size UI (steppers GONE with the pre-placement sizing), and the
   // drawer stays narrow — a phone TAP lands one cell, the widget stretches.
-  test('the dock header carries the flavor switch + mirror widget; the drawer is narrow', async ({ page }) => {
+  test('the dock header carries the mode switch + mirror widget; the dock fits phone', async ({ page }) => {
     await open(page);
     // the switch is in the dock header — visible with the drawer never opened
-    await expect(page.getByTestId('tooltab-place')).toBeVisible();
-    await expect(page.getByTestId('tooltab-edit')).toBeVisible();
+    await expect(page.getByTestId('ws-blocks')).toBeVisible();
+    await expect(page.getByTestId('ws-edit')).toBeVisible();
     // v1.11: no size UI anywhere on phone either
     await expect(page.getByTestId('brush-step-z-p')).toHaveCount(0);
     await expect(page.getByTestId('mirror-widget')).toBeVisible();
-    // the drawer (phone): narrow, so the canvas stays usable behind it
+    // v1.11 NO DRAWER: the bottom dock spans the viewport and the canvas
+    // keeps the full width above it
     const vp = page.viewportSize()!;
     if (vp.width < 768) {
-      await page.getByTestId('toggle-panels').click();
-      const w = (await page.getByTestId('panel-aside').boundingBox())!.width;
-      expect(w / vp.width, 'the phone drawer leaves real canvas room').toBeLessThanOrEqual(0.72);
-      await page.getByTestId('toggle-panels').click();
+      const dock = page.getByTestId('build-dock');
+      await expect(dock).toBeVisible();
+      const w = (await dock.boundingBox())!.width;
+      expect(w / vp.width, 'the dock spans the phone width (canvas keeps the height above)').toBeLessThanOrEqual(1.02);
     }
     // PLACE flavor: the hint tells the touch user what to do (no key names)
-    await page.getByTestId('tooltab-place').click();
+    await page.getByTestId('ws-blocks').click();
     const hint = page.getByTestId('flavor-hint');
     await expect(hint).toBeVisible();
     if (vp.width < 768) await expect(hint).toContainText('TAP');
@@ -259,8 +367,8 @@ test.describe('build-dock: triangle PIN placement @ui', () => {
   test('three clicks land a triangle; the pins + direction arrow stay on it', async ({ page }) => {
     test.skip(test.info().project.name !== 'chromium', 'desktop-only');
     await open(page);
-    await page.getByTestId('blocksub-tris').click();
-    await page.getByTestId('tooltab-place').click();
+    await page.getByTestId('ws-tris').click();
+    await page.getByTestId('mirw-off').click();                  // single-triangle pins
     const tris = () => page.evaluate(() => (window as unknown as {
       __ARCHEAN__?: { engine: { blueprint: { data: { triangles?: unknown[] } } } } })
       .__ARCHEAN__!.engine.blueprint.data.triangles?.length ?? 0);
@@ -357,7 +465,7 @@ test.describe('build-dock: triangle PIN placement @ui', () => {
   test('a LIST row puts the pins + the CENTROID widget on a triangle; ✥ moves it wholesale, ⟳ rotates', async ({ page }) => {
     test.skip(test.info().project.name !== 'chromium', 'desktop-only');
     await open(page, '3732302108');                        // the gantry: authored skin
-    await page.getByTestId('blocksub-tris').click();
+    await page.getByTestId('ws-edit').click();             // the widget is an EDIT-mode tool
     const row = page.getByTestId(/^tri-row-\d+/).first();
     await expect(row).toBeVisible();
     const idx = +(await row.getAttribute('data-testid'))!.replace('tri-row-', '');
@@ -411,13 +519,243 @@ test.describe('build-dock: triangle PIN placement @ui', () => {
     await expect.poll(pins, { timeout: 5000 }).toBeNull();
     await expect.poll(giz, { timeout: 5000 }).toBeNull();
   });
+
+  test('pin drags are FREE 3D — screen-plane drag moves world Y, ⇧ locks one axis', async ({ page }) => {
+    // v1.11 (we: "I cannot move the pins in 3 dimenensions"): the old drag
+    // raycast at scene surfaces, so a pin could only slide over geometry.
+    // The plane drag rides the CAMERA-FACING plane through the pin (screen
+    // drag = 3D placement; orbit changes depth), ⇧ locks to the world axis
+    // most facing the camera.
+    test.skip(test.info().project.name !== 'chromium', 'desktop-only');
+    await open(page);
+    await page.getByTestId('ws-tris').click();
+    await page.getByTestId('mirw-off').click();                  // single-triangle pins
+    const spots = await page.evaluate(() => {
+      const c = document.querySelector('canvas')!;
+      const r = c.getBoundingClientRect();
+      const e = (window as unknown as { __ARCHEAN__?: { engine: { pendingReal: number;
+        pickCell: (x: number, y: number) => { bi: number } | null } } }).__ARCHEAN__!.engine;
+      if (e.pendingReal > 0) return null;
+      const pts: { x: number; y: number }[] = [];
+      for (let fy = 0.25; fy <= 0.9; fy += 0.03)
+        for (let fx = 0.15; fx <= 0.85; fx += 0.03) {
+          const h = e.pickCell(r.left + r.width * fx, r.top + r.height * fy);
+          if (h && h.bi >= 0) pts.push({ x: r.left + r.width * fx, y: r.top + r.height * fy });
+        }
+      if (!pts.length) return null;
+      const d = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+        Math.hypot(a.x - b.x, a.y - b.y);
+      const p1 = pts[0]!;
+      const p2 = pts.reduce((m, p) => (d(p, p1) > d(m, p1) ? p : m), p1);
+      const p3 = pts.reduce((m, p) => (Math.min(d(p, p1), d(p, p2)) >
+        Math.min(d(m, p1), d(m, p2)) ? p : m), p1);
+      if (d(p1, p2) < 80 || Math.min(d(p3, p1), d(p3, p2)) < 60) return null;
+      return [p1, p2, p3];
+    });
+    expect(spots, 'the deck answers the pin path').not.toBeNull();
+    const box = (await page.getByTestId('canvas').boundingBox())!;
+    for (const p of spots!) {
+      await page.getByTestId('canvas').click({ position: { x: p.x - box.x, y: p.y - box.y } });
+    }
+    const corners = () => page.evaluate(() => {
+      const w = window as unknown as {
+        __ARCHEAN__?: { engine: { blueprint: { data: { triangles?: Record<string, number>[] } } } };
+      };
+      const arr = w.__ARCHEAN__!.engine.blueprint.data.triangles ?? [];
+      const t = arr[arr.length - 1];
+      if (!t) return null;
+      return [0, 1, 2].map(vi => [0, 1, 2].map(ai => {
+        const name = 'xyz'[ai]!;
+        return t[`v${vi}_${name}`]! + 12 * t[`frame_${name}`]!;
+      }));
+    });
+    await expect.poll(corners, { timeout: 5000 }).not.toBeNull();
+    await page.waitForTimeout(600);
+    // A straight screen-UP drag (camera-facing plane) moves the corner's
+    // world Y — the drag is NOT surface-bound.
+    const b1 = (await corners())!;
+    const head = await page.evaluate(() => (window as unknown as {
+      __ARCHEAN__?: { pinPoint: (i: number) => { x: number; y: number } | null } })
+      .__ARCHEAN__!.pinPoint(1));
+    expect(head).not.toBeNull();
+    await page.mouse.move(head!.x, head!.y);
+    await page.mouse.down();
+    await page.mouse.move(head!.x, head!.y - 150, { steps: 6 });
+    await page.mouse.up();
+    await expect.poll(corners, { timeout: 5000 }).not.toEqual(b1);
+    const m1 = (await corners())!;
+    expect(m1[1]![1], 'a screen-vertical drag carries world Y (3D, not surface-bound)')
+      .not.toBe(b1[1]![1]);
+    await page.waitForTimeout(600);
+    // ⇧ AXIS LOCK: dragging along the on-screen projection of the axis the
+    // camera most faces moves EXACTLY that axis.
+    const lock = await page.evaluate(() => {
+      const w = (window as unknown as { __ARCHEAN__?: {
+        engine: { viewState: () => { eye: [number, number, number]; target: [number, number, number] };
+          screenPoint: (x: number, y: number, z: number) => [number, number] | null };
+        pins: () => { pts: number[][] } | null } }).__ARCHEAN__!;
+      const v = w.engine.viewState();
+      const d = [v.target[0] - v.eye[0], v.target[1] - v.eye[1], v.target[2] - v.eye[2]];
+      let ai = 0;
+      for (let k = 1; k < 3; k++) if (Math.abs(d[k]!) > Math.abs(d[ai]!)) ai = k;
+      const A = [[1, 0, 0], [0, 1, 0], [0, 0, 1]][ai]!;
+      const g = w.pins()!.pts[1]!;
+      const f = g.map(x => (x - 6) * 0.25) as [number, number, number];
+      const s1 = w.engine.screenPoint(f[0], f[1], f[2]);
+      const s2 = w.engine.screenPoint(f[0] + A[0] * 2, f[1] + A[1] * 2, f[2] + A[2] * 2);
+      if (!s1 || !s2) return null;
+      const dx = s2[0] - s1[0], dy = s2[1] - s1[1];
+      const l = Math.hypot(dx, dy) || 1;
+      return { ai, ux: dx / l, uy: dy / l };
+    });
+    expect(lock).not.toBeNull();
+    const head2 = await page.evaluate(() => (window as unknown as {
+      __ARCHEAN__?: { pinPoint: (i: number) => { x: number; y: number } | null } })
+      .__ARCHEAN__!.pinPoint(1));
+    await page.mouse.move(head2!.x, head2!.y);
+    await page.mouse.down();
+    await page.keyboard.down('Shift');
+    await page.mouse.move(head2!.x + lock!.ux * 200, head2!.y + lock!.uy * 200, { steps: 6 });
+    await page.keyboard.up('Shift');
+    await page.mouse.up();
+    await expect.poll(corners, { timeout: 5000 }).not.toEqual(m1);
+    const m2 = (await corners())!;
+    for (let ax = 0; ax < 3; ax++)
+      if (ax !== lock!.ai)
+        expect(m2[1]![ax], `axis ${ax} stays locked (only ${'xyz'[lock!.ai]} moves)`).toBe(m1[1]![ax]);
+    expect(m2[1]![lock!.ai]).not.toBe(m1[1]![lock!.ai]);
+  });
+
+  test('triangle PAINT: the brush card colours NEW prisms, the face rows recolour a selected one', async ({ page }) => {
+    // we: "WHEN I PICK A COLOR FOR A TRIANGLE IT DOES NOT APPLY"
+    test.skip(test.info().project.name !== 'chromium', 'desktop-only');
+    await open(page);
+    await page.getByTestId('ws-tris').click();
+    await page.getByTestId('mirw-off').click();
+    // the picker is VISIBLE in triangles mode and drives new prisms
+    await expect(page.getByTestId('tri-brush'), 'the paint card lives in the triangles dock')
+      .toBeVisible();
+    await page.getByTestId('num-slot').fill('60');
+    const spots = await page.evaluate(() => {
+      const c = document.querySelector('canvas')!;
+      const r = c.getBoundingClientRect();
+      const e = (window as unknown as { __ARCHEAN__?: { engine: {
+        pickCell: (x: number, y: number) => { bi: number } | null } } }).__ARCHEAN__!.engine;
+      const pts: { x: number; y: number }[] = [];
+      for (let fy = 0.25; fy <= 0.9; fy += 0.03)
+        for (let fx = 0.15; fx <= 0.9; fx += 0.03) {
+          const h = e.pickCell(r.left + r.width * fx, r.top + r.height * fy);
+          if (h && h.bi >= 0) pts.push({ x: r.left + r.width * fx, y: r.top + r.height * fy });
+        }
+      if (!pts.length) return null;
+      const d = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+        Math.hypot(a.x - b.x, a.y - b.y);
+      const p1 = pts[0]!;
+      const p2 = pts.reduce((m, p) => (d(p, p1) > d(m, p1) ? p : m), p1);
+      const p3 = pts.reduce((m, p) => (Math.min(d(p, p1), d(p, p2)) >
+        Math.min(d(m, p1), d(m, p2)) ? p : m), p1);
+      if (d(p1, p2) < 80 || Math.min(d(p3, p1), d(p3, p2)) < 60) return null;
+      return [p1, p2, p3];
+    });
+    expect(spots).not.toBeNull();
+    const box = (await page.getByTestId('canvas').boundingBox())!;
+    for (const p of spots!) {
+      await page.getByTestId('canvas').click({ position: { x: p.x - box.x, y: p.y - box.y } });
+    }
+    const lastCols = () => page.evaluate(() => {
+      const t = (window as unknown as { __ARCHEAN__?: { engine: { blueprint: {
+        data: { triangles?: { colors?: number[] }[] } } } } }).__ARCHEAN__!.engine.blueprint.data.triangles!;
+      return [...(t[t.length - 1]?.colors ?? [])];
+    });
+    await expect.poll(lastCols, { timeout: 5000,
+      message: 'the new prism wears the BRUSH slot on all five faces' })
+      .toEqual([60, 60, 60, 60, 60]);
+    // select it (EDIT mode list) and recolour the FRONT face through the
+    // triangle's own editor (the same bp+doc funnel the 🎨 window uses)
+    await page.getByTestId('ws-edit').click();
+    await page.getByTestId(/^tri-row-\d+/).last().click();
+    await expect(page.getByTestId('num-front')).toHaveValue('60');
+    await page.getByTestId('num-front').fill('70');
+    await expect.poll(lastCols, { timeout: 5000 })
+      .toEqual([70, 60, 60, 60, 60]);
+    // ⇄ FLIP (we: "it should be possible to flip it just like the in game
+    // triangles, determining whether it goes outside or inside"): the
+    // winding reverses — the normal EXACTLY negates, front/back colours swap
+    const nrm = () => page.evaluate(() => {
+      const arr = (window as unknown as { __ARCHEAN__?: { engine: { blueprint: {
+        data: { triangles: Record<string, number>[] } } } } }).__ARCHEAN__!.engine.blueprint.data.triangles;
+      const t = arr[arr.length - 1]!;
+      const g = (i: number, ai: number) =>
+        t[`v${i}_${'xyz'[ai]}`]! + 12 * t[`frame_${'xyz'[ai]}`]!;
+      const u = [0, 1, 2].map(ai => g(1, ai) - g(0, ai));
+      const w = [0, 1, 2].map(ai => g(2, ai) - g(0, ai));
+      return [u[1]! * w[2]! - u[2]! * w[1]!, u[2]! * w[0]! - u[0]! * w[2]!, u[0]! * w[1]! - u[1]! * w[0]!];
+    });
+    const n0 = await nrm();
+    await page.getByTestId('tri-flip').click();
+    await expect.poll(nrm, { timeout: 5000 }).not.toEqual(n0);
+    const n1 = await nrm();
+    for (let k = 0; k < 3; k++) expect(n1[k]).toBeCloseTo(-n0[k]!, 9);
+    await expect.poll(lastCols, { timeout: 5000 })
+      .toEqual([60, 70, 60, 60, 60]);            // front ↔ back followed
+    // one Ctrl+Z: the flip (corners + colours) is ONE history step
+    await page.keyboard.press('Control+z');
+    await expect.poll(lastCols, { timeout: 5000 })
+      .toEqual([70, 60, 60, 60, 60]);
+    await expect.poll(nrm, { timeout: 5000 }).toEqual(n0);
+  });
+
+  test('mode law: TRIANGLES mode only DROPS PINS, EDIT selects the prism (merged pick)', async ({ page }) => {
+    // v1.11 (we: "nor does it respect my place/edit mode. This is wrong.")
+    test.skip(test.info().project.name !== 'chromium', 'desktop-only');
+    await open(page, '3732302108');                        // the gantry: authored skin
+    await page.getByTestId('ws-tris').click();
+    const px = await page.evaluate(() => {
+      const c = document.querySelector('canvas')!;
+      const r = c.getBoundingClientRect();
+      const w = (window as unknown as { __ARCHEAN__?: {
+        triPick: (x: number, y: number) => { t: number } | null } }).__ARCHEAN__!;
+      for (let fy = 0.2; fy <= 0.9; fy += 0.02)
+        for (let fx = 0.15; fx <= 0.85; fx += 0.02) {
+          const t = w.triPick(r.left + r.width * fx, r.top + r.height * fy);
+          if (t && t.t >= 0) return { x: r.left + r.width * fx, y: r.top + r.height * fy };
+        }
+      return null;
+    });
+    expect(px, 'a prism face answers the probe').not.toBeNull();
+    const box = (await page.getByTestId('canvas').boundingBox())!;
+    const clickPx = () => page.getByTestId('canvas').click({
+      position: { x: px!.x - box.x, y: px!.y - box.y } });
+    const pins = () => page.evaluate(() => (window as unknown as {
+      __ARCHEAN__?: { pins: () => { mode: string; pts: number[][] } | null } }).__ARCHEAN__!.pins());
+    const triHl = () => page.evaluate(() => (window as unknown as {
+      __ARCHEAN__?: { triHl: () => number } }).__ARCHEAN__!.triHl());
+    // ▵ TRIANGLES mode: the prism-face click DROPS A PIN — selects NOTHING
+    await page.getByTestId('ws-tris').click();
+    await clickPx();
+    await expect.poll(async () => { const s = await pins(); return s && `${s.mode}:${s.pts.length}`; },
+      { timeout: 5000 }).toBe('draft:1');
+    expect(await triHl(), 'placement never selects').toBe(-1);
+    await page.keyboard.press('Escape');
+    await expect.poll(pins, { timeout: 5000 }).toBeNull();
+    // ✎ EDIT: the SAME pixel click SELECTS the prism (merged pick) and the
+    // pins + centroid widget land on it
+    await page.getByTestId('ws-edit').click();
+    await clickPx();
+    await expect.poll(triHl, { timeout: 5000 }).toBeGreaterThanOrEqual(0);
+    await expect.poll(async () => { const s = await pins(); return s?.mode; },
+      { timeout: 5000 }).toBe('edit');
+    await expect.poll(() => page.evaluate(() => (window as unknown as {
+      __ARCHEAN__?: { triGizmo: () => { ti: number } | null } }).__ARCHEAN__!.triGizmo()),
+    { timeout: 5000 }).not.toBeNull();
+  });
 });
 
 test.describe('build-dock: triangle workspace @ui', () => {
   test('tri list selects, ±cell move round-trips, window refusal is honest', async ({ page }) => {
     test.skip(test.info().project.name !== 'chromium', 'desktop-only');
     await open(page, '3732302108');                        // the gantry: authored skin
-    await page.getByTestId('blocksub-tris').click();
+    await page.getByTestId('ws-tris').click();
     await expect(page.getByTestId('tri-list')).toBeVisible();
     const row = page.getByTestId(/^tri-row-\d+/).first();
     await expect(row).toBeVisible();

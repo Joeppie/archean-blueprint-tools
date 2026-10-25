@@ -4,6 +4,32 @@
 // over callbacks, so every mode panel stays independently testable.
 import { useMemo, useState } from 'react';
 
+/** v1.11 MIRROR GLYPH (we: "the mirror option is not understandable, it
+ *  should be visually understood, add a mirror icon with a strikethrough,
+ *  and x y z also with mirror behind it"): a dashed MIRROR PLANE with a
+ *  solid triangle on one side and its reflected ghost on the other — the
+ *  whole mirror rule in one mark. `strike` adds the red diagonal (mirroring
+ *  OFF). In the dock's axis chips the glyph sits BEHIND the axis letter
+ *  (see the mirw-* buttons in Editor.tsx). currentColor keeps it theme
+ *  honest: a lit chip (gold text) lights the glyph. */
+export function MirrorGlyph(p: { strike?: boolean; size?: number }) {
+  const s = p.size ?? 16;
+  return (
+    <svg data-g={p.strike ? 'mirror-off' : 'mirror'} width={s} height={s} viewBox="0 0 16 16"
+      className="inline-block align-middle" aria-hidden="true">
+      <line x1="8" y1="1" x2="8" y2="15" stroke="currentColor" strokeWidth="1"
+        strokeDasharray="2.2 2" opacity="0.75" />
+      <path d="M2.2 12.4 L6.8 12.4 L4.5 3.6 Z" fill="currentColor" />
+      <path d="M13.8 12.4 L9.2 12.4 L11.5 3.6 Z" fill="none" stroke="currentColor"
+        strokeWidth="1" opacity="0.45" />
+      {p.strike && (
+        <line data-g="mirror-strike" x1="1.4" y1="14" x2="14.6" y2="2" stroke="#ff6b6b"
+          strokeWidth="1.8" strokeLinecap="round" />
+      )}
+    </svg>
+  );
+}
+
 export const Sec = (p: { title: string; children?: React.ReactNode; testid?: string }) => (
   <section className="border-t border-white/10 px-3 py-2" data-testid={p.testid}>
     <h3 className="ksp-label mb-1 text-[11px] font-semibold text-ink-dim">{p.title}</h3>

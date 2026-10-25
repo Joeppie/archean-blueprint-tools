@@ -18,7 +18,7 @@ the editor of the selected block on the right.
 
 v1.11 (we: *"choosing a block size before placing it shouldn't be a
 thing"*): the brush carries **shape, paint and material ONLY** — there is
-no size to pick first. Pick **✚ Place** and click (or tap) ANY surface —
+no size to pick first. Pick **▤ Blocks** and click (or tap) ANY surface —
 a block face, a hull triangle, a part — and a **1×1×1 cell** lands, is
 auto-selected, and the mode widget pops at it so you can immediately:
 
@@ -48,27 +48,46 @@ highlights gold and the SAME BLOCK widget (world space) attaches — **✥**
 arrows move it in **whole-cell snaps**, **⟳** rings turn it in **90°
 steps**, **⤢** handles stretch it in **whole cells** (grab a face, that
 face moves, the opposite one stays anchored); all
-propagate to the mirror twin. The dock's block editor offers the same as
+propagate to the mirror twin. The widget also carries **▵** — turn this
+block into hull triangles: its free faces become the hull skin (faces
+glued to neighbours stay walls, the game's outward+flat authoring), the
+block is removed, one Ctrl+Z brings it back. The dock's block editor offers the same as
 rows plus shape turns: ⟲X ⟲Y ⟲Z (turn in place), ⇄ flip, ⟲ cycle, and ✧
 **snap** (pick the shape whose cross-section best agrees with the
 neighbours).
 
 ## Placing triangles — pins (v1.11)
 
-In **▵ Triangles**, a click drops a **pin** on the lattice corner of the
-surface you aim at. Three pins = one hull triangle: the third click commits
-the prism (brush colours, material 0). The pins are the point:
+In **▵ Triangles mode**, a click drops a **pin** on the lattice corner
+of the surface you aim at. Three pins = one hull triangle: the third click
+commits the prism (brush colours, material 0). The pins are the point:
 
-* **Drag any pin** — before and after the commit. A pin re-drops onto the
-  surface under the cursor, snapped to the 0.25 m hull lattice, and the
-  stored corner follows (the 32-slot vertex window is enforced honestly:
-  a refused move snaps the pin back).
+* **Drag any pin in 3D** — before and after the commit. The pin rides the
+  plane facing the camera through its corner: a screen drag places it on
+  all three world axes (orbit to change the depth), snapped to the 0.25 m
+  hull lattice, and the stored corner follows (the 32-slot vertex window
+  is enforced honestly: a refused move snaps the pin back). Hold **⇧** to
+  LOCK to one axis — the world axis the camera most faces — for clean
+  vertical/straight slides.
+* With the dock's ⇄ twin arm on, the commit lands the **mirror twin** too:
+  corners reflected across the lit axis (g → 12 − g) with the winding
+  flipped, so the twin's FRONT faces the mirrored way — blocks and
+  triangles mirror by the same law.
 * The gold **arrow** at the face centre points along the winding normal —
   which way the triangle faces (its FRONT colour side). Moving a pin across
   the opposite side flips it, exactly like the game's direction tell.
-* Click an existing prism's middle, or a row in the triangle list, to put
-  that triangle's pins on the surface — and its **centroid widget** on the
-  gizmo: the SAME grab-onto widget a block wears. **✥** moves the WHOLE
+* **Paint**: the triangles dock carries the **brush paint** card — the
+  palette slot + material NEW prisms inherit (one paint story for both
+  species). A SELECTED prism paints via the 🎨 window (all faces) or the
+  five **face colour** rows (front / back / three side walls) on its own
+  editor.
+* **The mode law**: in ▵ Triangles a canvas click ONLY places (a prism face
+  is just another placeable surface — placement never selects). In
+  **✎ Edit** a canvas click selects ANYTHING you aim at — part, block **or
+  prism** — blocks and triangles are one merged workspace.
+* In **✎ Edit**, click a prism's middle (or a row in the triangle list) to
+  put that triangle's pins on the surface — and its **centroid widget** on
+  the gizmo: the SAME grab-onto widget a block wears. **✥** moves the WHOLE
   triangle (all three corners, whole-cell snaps), **⟳** turns it about its
   own plane (the ring on the normal spins it in-plane) — and because the
   hull is an integer lattice every pose is QUANTISED: corners re-snap to

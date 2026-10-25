@@ -15,7 +15,7 @@
 // so the roadmap is visible in the UI.
 import { useEffect, useRef, useState } from 'react';
 
-export type Mode = 'view' | 'edit' | 'wire' | 'flight' | 'aero';
+export type Mode = 'clean' | 'view' | 'edit' | 'wire' | 'flight' | 'aero';
 
 interface Props {
   mode: Mode;
@@ -44,7 +44,7 @@ interface Props {
 }
 
 const MODES: [Mode, string, string][] = [
-  ['view', '⌖', 'View'], ['edit', '✎', 'Edit'],
+  ['clean', '⌖', 'View'], ['view', 'ℹ', 'Info'], ['edit', '✎', 'Modify'],
   ['wire', '∿', 'Wire'], ['flight', '➤', 'Flight'], ['aero', '≋', 'Wind'],
 ];
 
@@ -173,8 +173,12 @@ export default function TopBar(p: Props) {
                    border border-[rgba(217,212,189,.16)] bg-black/30 p-[3px]
                    md:order-none md:ml-1 md:w-auto md:max-w-[52vw] md:justify-start
                    md:shrink md:overflow-x-auto">
+        {/* v1.11 (we: "clicking the active tab again should focus the View
+            tab"): re-clicking the ACTIVE mode tile drops into ⌖ View — the
+            canvas-focus mode; the dock steps aside */}
         {MODES.map(([m, ic, label]) => (
-          <button key={m} data-testid={`mode-${m}`} onClick={() => p.onMode(m)}
+          <button key={m} data-testid={`mode-${m}`}
+            onClick={() => p.onMode(p.mode === m ? 'clean' : m)}
             className={`ksp-btn flex flex-1 flex-col items-center rounded px-2 py-[2px] leading-tight
                         md:flex-none md:px-3 ${p.mode === m ? 'on' : ''}`}>
             <span className="text-[13px] leading-[15px]">{ic}</span>

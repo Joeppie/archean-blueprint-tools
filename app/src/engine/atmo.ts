@@ -21,7 +21,7 @@
 // built by the Sphere skin tool is convex and closed, so the number is the
 // true gas volume; several disjoint skins sum.
 // ---------------------------------------------------------------------------
-import type { Triangle } from './format';
+import type { Block, Triangle } from './format';
 import { hullVertex } from './hullfit';
 
 // ------------------------------------------------------- ISA layer table
@@ -123,6 +123,138 @@ export interface Envelope { m3: number; tris: number }
  *  value): mixed winds still bound the same volume; disjoint skins sum.
  *  An OPEN skin under/overcounts by the missing faces — the widget labels
  *  the number as an estimate either way. */
+/** v1.11 SEALED envelope (we: "lift should calculate from a volume block.
+ *  Note we only look at enclosed blocks/triangles. Implement that, then use
+ *  it"): every block cell (occupancy mirrors included — a part's body walls
+ *  the seal) and every hull triangle (voxel-sampled at half-cell steps in
+ *  its dominant projection plane) become WALLS on the 0.25 m lattice; a
+ *  6-connected flood fills OUTSIDE from the padded bounding-box rim; the
+ *  ENVELOPE is every cell the flood cannot reach — the sealed interior plus
+ *  its enclosing shell. Volume markers are never trusted: the enclosure IS
+ *  the volume. The flood cannot squeeze through the 6-disconnected
+ *  staircase walls the sampling lays down, so a closed skin seals. */
+export function sealedEnvelopeVolume(
+  tris: readonly Triangle[], blocks: readonly Block[]): { m3: number; cells: number } {
+  const P = 0.25;
+  const toC = (v: number) => Math.floor(v / P + 6);
+  let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+  const acc = (cx: number, cy: number, cz: number) => {
+    if (cx < x0) x0 = cx; if (cx > x1) x1 = cx;
+    if (cy < y0) y0 = cy; if (cy > y1) y1 = cy;
+    if (cz < z0) z0 = cz; if (cz > z1) z1 = cz;
+  };
+  const bc = blocks.map(b => {
+    const bx = (b.frame_x ?? 0) * 12 + b.pos_x, by = (b.frame_y ?? 0) * 12 + b.pos_y,
+      bz = (b.frame_z ?? 0) * 12 + b.pos_z;
+    acc(bx - 1, by - 1, bz - 1);
+    acc(bx + b.size_x + 1, by + b.size_y + 1, bz + b.size_z + 1);
+    return { bx, by, bz, sx: b.size_x, sy: b.size_y, sz: b.size_z };
+  });
+  const tv = tris.map(t => {
+    const a = hullVertex(t, 0), b = hullVertex(t, 1), c = hullVertex(t, 2);
+    acc(toC(a.x), toC(a.y), toC(a.z));
+    acc(toC(b.x), toC(b.y), toC(b.z));
+    acc(toC(c.x), toC(c.y), toC(c.z));
+    return { a, b, c };
+  });
+  if (!isFinite(x0)) return { m3: 0, cells: 0 };
+  x0 -= 1; y0 -= 1; z0 -= 1; x1 += 1; y1 += 1; z1 += 1;      // padded flood rim
+  const sx = x1 - x0 + 1, sy = y1 - y0 + 1, sz = z1 - z0 + 1;
+  const n = sx * sy * sz;
+  if (n > 24e6) return { m3: 0, cells: 0 };                  // honest give-up
+  const wall = new Uint8Array(n);
+  for (const b of bc)
+    for (let cz = b.bz; cz <= b.bz + b.sz; cz++)
+      for (let cy = b.by; cy <= b.by + b.sy; cy++)
+        for (let cx = b.bx; cx <= b.bx + b.sx; cx++)
+          wall[((cz - z0) * sy + (cy - y0)) * sx + (cx - x0)] = 1;
+  // ── voxelize the triangles (dominant-plane half-cell sampling)
+  const inTri = (px: number, py: number, ax: number, ay: number, bx: number, by: number,
+    cx: number, cy: number): boolean => {
+    const s1 = (bx - ax) * (py - ay) - (by - ay) * (px - ax);
+    const s2 = (cx - bx) * (py - by) - (cy - by) * (px - bx);
+    const s3 = (ax - cx) * (py - cy) - (ay - cy) * (px - cx);
+    return (s1 >= -1e-9 && s2 >= -1e-9 && s3 >= -1e-9) || (s1 <= 1e-9 && s2 <= 1e-9 && s3 <= 1e-9);
+  };
+  for (const { a, b, c } of tv) {
+    const A: [number, number, number] = [a.x, a.y, a.z];
+    const B: [number, number, number] = [b.x, b.y, b.z];
+    const C: [number, number, number] = [c.x, c.y, c.z];
+    const ux = B[0] - A[0], uy = B[1] - A[1], uz = B[2] - A[2];
+    const wx = C[0] - A[0], wy = C[1] - A[1], wz = C[2] - A[2];
+    const nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
+    const an: [number, number, number] = [Math.abs(nx), Math.abs(ny), Math.abs(nz)];
+    const wAxis: 0 | 1 | 2 = an[0] >= an[1] && an[0] >= an[2] ? 0 : an[1] >= an[2] ? 1 : 2;
+    const uAxis: 0 | 1 | 2 = wAxis === 0 ? 1 : 0, vAxis: 0 | 1 | 2 = wAxis === 2 ? 1 : 2;
+    const at = (q: [number, number, number], i: 0 | 1 | 2) =>
+      i === 0 ? q[0] : i === 1 ? q[1] : q[2];
+    const mnU = Math.min(at(A, uAxis), at(B, uAxis), at(C, uAxis));
+    const mxU = Math.max(at(A, uAxis), at(B, uAxis), at(C, uAxis));
+    const mnV = Math.min(at(A, vAxis), at(B, vAxis), at(C, vAxis));
+    const mxV = Math.max(at(A, vAxis), at(B, vAxis), at(C, vAxis));
+    const dX1 = at(B, uAxis) - at(A, uAxis), dY1 = at(B, vAxis) - at(A, vAxis);
+    const dX2 = at(C, uAxis) - at(A, uAxis), dY2 = at(C, vAxis) - at(A, vAxis);
+    const den = dX1 * dY2 - dY1 * dX2;
+    if (Math.abs(den) < 1e-12) continue;                     // degenerate sliver
+    // QUARTER-cell sampling: consecutive sample cells then differ by at
+    // most one lattice step in one axis (for any slope ≤ 1 in the dominant
+    // projection), so the wall chain is 6-CONNECTED — the exact pairing
+    // the 6-connected outside flood cannot slip through
+    for (let iu = Math.floor(mnU / P * 4); iu <= Math.ceil(mxU / P * 4); iu++) {
+      const pu = (iu * P) / 4;
+      for (let iv = Math.floor(mnV / P * 4); iv <= Math.ceil(mxV / P * 4); iv++) {
+        const pv = (iv * P) / 4;
+        if (!inTri(pu, pv, A[uAxis], A[vAxis], B[uAxis], B[vAxis], C[uAxis], C[vAxis])) continue;
+        const px = pu - A[uAxis], py = pv - A[vAxis];
+        const s = (px * dY2 - py * dX2) / den, t = (dX1 * py - dY1 * px) / den;
+        const pw = at(A, wAxis) + s * (at(B, wAxis) - at(A, wAxis)) + t * (at(C, wAxis) - at(A, wAxis));
+        const cc: [number, number, number] = [0, 0, 0];
+        cc[uAxis] = toC(pu); cc[vAxis] = toC(pv); cc[wAxis] = toC(pw);
+        // mark the cell AND its six face neighbours: sample chains can step
+        // DIAGONALLY ((1,0,1)) when u and w cells flip together; the
+        // thickening guarantees a 6-connected wall — the pairing the
+        // 6-connected outside flood cannot cross
+        const gx = cc[0] - x0, gy = cc[1] - y0, gz = cc[2] - z0;
+        for (let dz = -1; dz <= 1; dz++)
+          for (let dy = -1; dy <= 1; dy++)
+            for (let dx = -1; dx <= 1; dx++) {
+              if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) > 1) continue;
+              const ax = gx + dx, ay = gy + dy, az = gz + dz;
+              if (ax < 0 || ay < 0 || az < 0 || ax >= sx || ay >= sy || az >= sz) continue;
+              wall[(az * sy + ay) * sx + ax] = 1;
+            }
+      }
+    }
+  }
+  // ── flood the outside from the padded rim
+  const seen = new Uint8Array(n);
+  const q = new Int32Array(n);
+  let qh = 0, qt = 0;
+  seen[0] = 1; q[qt++] = 0;
+  const push = (i: number) => { if (!seen[i] && !wall[i]) { seen[i] = 1; q[qt++] = i; } };
+  const sxy = sx * sy;
+  while (qh < qt) {
+    const i = q[qh++]!;
+    const cx = i % sx, cy = ((i / sx) | 0) % sy, cz = (i / sxy) | 0;
+    if (cx > 0) push(i - 1);
+    if (cx < sx - 1) push(i + 1);
+    if (cy > 0) push(i - sx);
+    if (cy < sy - 1) push(i + sx);
+    if (cz > 0) push(i - sxy);
+    if (cz < sz - 1) push(i + sxy);
+  }
+  // ENVELOPE = the sealed interior + the shell that encloses it. An open
+  // structure floods through (interior 0) and yields NOTHING — its walls
+  // alone displace no lift.
+  let insideFree = 0, wallc = 0;
+  for (let i = 0; i < n; i++) {
+    if (wall[i]) wallc++;
+    else if (!seen[i]) insideFree++;
+  }
+  const env = insideFree > 0 ? insideFree + wallc : 0;
+  return { m3: env * P ** 3, cells: env };
+}
+
 export function envelopeVolume(tris: readonly Triangle[]): Envelope {
   let v6 = 0;
   for (const t of tris) {

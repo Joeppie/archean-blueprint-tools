@@ -9,20 +9,24 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { craftMeta, craftName } from './gallery-catalog';
 import { DEFAULT_OPTS, backdropDefault, backdropNames, type Backdrop, type Engine, type PickHit, type ViewOptions } from './engine/scene';
 import Viewport from './components/Viewport';
-import Panel, { StaticInfo, ViewOpts, type EditApi } from './components/Panel';
+import {
+  StaticInfo, ViewOpts, VesselStats, CompList, Inspector, SubPanel,
+  type EditApi, type PanelProps,
+} from './components/Panel';
 import TopBar, { type Mode } from './components/TopBar';
 import { BlockPanel, FlightPanel, TriPanel, WirePanel, WindPanel, brushSpec, placeBlock, type Brush } from './components/ModePanels';
+import { MirrorGlyph } from './components/ui';
 import { BlockPaint, CompPaint, SwatchGrid } from './components/ColorPanel';
 import { TOOLS, ToolDialog, type PlacePayload, type ToolForm } from './components/ToolsDialog';
 import HelpDialog from './components/HelpDialog';
 import { blockInfo, blockMirrorTwin, blockTwinIssues, cellIndex, cellOverlap,
   complementBlock, mirrorAxisIdx, paintTwinPair, type MirrorAxisOpt } from './engine/blocks';
-import { cornerOf, triAt, triangleFromCorners, setTriCornerAll, setTriCornersAll, shiftTriCells, type Corner } from './engine/tris';
-import type { Blueprint } from './engine/format';
+import { cornerOf, triAt, triangleFromCorners, setTriCornerAll, setTriCornersAll, shiftTriCells, mirroredTriangle, rotateCornersQ, triCorners, triTwinIndex, type Corner } from './engine/tris';
+import type { Blueprint, Triangle } from './engine/format';
 import { isLegacyFile } from './engine/format';
 import type { ResolvedColor } from './engine/palette';
 import { docArrayInsert, docArrayRemoveAt, docEnsureArray, docFromValue, docSetNumber, docValue, emitDoc, parseDoc } from './engine/doc';
-import { allocateSlot, paletteSlotNode, type Rgb255 } from './engine/tools';
+import { allocateSlot, blockSkinTris, paletteSlotNode, type Rgb255 } from './engine/tools';
 import { setPaletteSlot } from './engine/edit';
 import { appendTrianglesDoc, makeCtx, openFunnel, resetComponent, setDataField, setOrientation, setPos, setCompField,
   pruneCompRefs, setCompColor, serializeSave, writeBlockDoc, type EditCtx } from './engine/edit';
@@ -90,23 +94,37 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // move/rotate gizmo, opened from the canvas mode widget for the CURRENT
   // selection (block ▸ per-face, component ▸ color1/color2, else the brush).
   const [paintOpen, setPaintOpen] = useState(false);
-  // THE panel flavor (v1.5 user rule): ONE ✎ Edit | ✚ Place switch crowns
-  // the side panel of the merged Edit mode — the two flavors of the
-  // SAME panel. Edit = select for gizmo/inspector/DELETE; Place = brush +
-  // catalog with the dock ghost. Persisted; shared across the modes.
-  const [tool, setToolState] = useState<'place' | 'edit'>(
-    () => (localStorage.getItem('archean-app-panel-tool') === 'place' ? 'place' : 'edit'));
-  const setTool = useCallback((t: 'place' | 'edit') => {
-    setToolState(t);
-    localStorage.setItem('archean-app-panel-tool', t);
-  }, []);
-  const [blockSub, setBlockSub] = useState<'blocks' | 'tris'>('blocks');
+  // v1.11 THE SINGLE MODE CONTROL (we: "We are either in Triangle or block
+  // mode, and we have a button to place triangles or blocks or neither,
+  // which is a toggle between one of the two or neither, i.e. edit. not 2
+  // sets of 2 flips which is insane"): ONE persisted tri-state — ▤ Blocks /
+  // ▵ Triangles are the two PLACE modes (a canvas click lands a cell / drops
+  // a pin), ✎ Edit is NEITHER (clicks select anything). The derived tool/
+  // blockSub shims keep every internal reading its old vocabulary.
+  const [ws, setWsState] = useState<'blocks' | 'tris' | 'parts' | 'edit'>(() => {
+    const v = localStorage.getItem('archean-app-ws');
+    return v === 'blocks' || v === 'tris' || v === 'parts' || v === 'edit' ? v : 'edit';
+  });
+  const tool: 'place' | 'edit' = ws === 'edit' ? 'edit' : 'place';
   // ⇄ mirrored placement (blocks AND catalog parts): the twin lands at the
   // mirrored cell/position about the SESSION mirror axis's 0-plane — the
   // game editor's mirror tool. v1.11: the dock's MIRROR WIDGET (⇄ + ⊘ x y z)
   // is the one visible switch for this + mirAxis (which axis mirrors).
-  const [mirrorPlace, setMirrorPlace] = useState(() => localStorage.getItem('archean-app-plsym') === '1');
-  useEffect(() => { localStorage.setItem('archean-app-plsym', mirrorPlace ? '1' : '0'); }, [mirrorPlace]);
+  // v1.11 AUTO twin arm (we: "I created a triangle but it was not mirrored,
+  // but the craft has two mirror axes visible. This isnt how the game
+  // should work, nor our editor"): 'auto' (the default) arms mirrored
+  // placement on crafts whose DATA is mirrored across the lit axis — the
+  // detected twin pairs that used to draw the extra sheets. A mirrored
+  // craft therefore places mirrored pairs (blocks, parts AND triangles)
+  // out of the box, like the game. ⇄ is the explicit override (on/off).
+  const [mirrorPlace, setMirrorPlace] = useState<'auto' | 'on' | 'off'>(() => {
+    const v = localStorage.getItem('archean-app-plsym');
+    return v === '1' ? 'on' : v === '0' ? 'off' : 'auto';
+  });
+  useEffect(() => {
+    if (mirrorPlace !== 'auto')
+      localStorage.setItem('archean-app-plsym', mirrorPlace === 'on' ? '1' : '0');
+  }, [mirrorPlace]);
   // v1.5.21 SETTABLE MIRROR AXIS (⚙ row, user: "mirror axes should be
   // settable. Game is not hardcoded x"): the Engine owns the live value
   // (same localStorage key, its own default); the React twin exists so the
@@ -138,9 +156,42 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   /** the axis for callbacks that run outside React render (engine is truth);
    *  v1.10.5: 'off' = the session mirror is disabled entirely */
   const mirAx = useCallback((): MirrorAxisOpt => engineRef.current?.mirrorAxis ?? 'x', []);
+  /** v1.11 UNIFORM MIRROR RULE for prisms (we: "when I moved a triangle, it
+   *  didn't see it as mirrored"): the triangle's identified twin (corner-set
+   *  reflection, triTwinIndex) rides EVERY edit — the twin INDEX, −1 when
+   *  mirroring is off / no pair. A drifted pair stops matching (faux-mirror
+   *  semantics), exactly like the block twins' 5 cm rule. */
+  const triTwinOf = useCallback((ti: number): { tw: number; a: number } => {
+    const ax = mirAx();
+    const ctx = ctxRef.current;
+    if (ax === 'off' || !ctx) return { tw: -1, a: 0 };
+    const tw = triTwinIndex(ctx.bp, ti, ax);
+    return { tw, a: ax === 'x' ? 0 : ax === 'y' ? 1 : 2 };
+  }, [mirAx]);
+
+  /** the EFFECTIVE twin arm at placement time: explicit on/off, or auto =
+   *  the craft's detected twin axes include the lit one (⊘ never twins) */
+  const twins = useCallback((): boolean => {
+    const ax = mirAx();
+    if (ax === 'off') return false;
+    if (mirrorPlace === 'on') return true;
+    if (mirrorPlace === 'off') return false;
+    return (engineRef.current?.craftMirrorAxes() ?? []).includes(ax);
+  }, [mirrorPlace, mirAx]);
+  /** the mode control's button: switch species/mode and retire the pin
+   *  draft + pins with it (they belong to the mode being left) */
+  const setWs = useCallback((w: 'blocks' | 'tris' | 'parts' | 'edit') => {
+    setWsState(w);
+    localStorage.setItem('archean-app-ws', w);
+    setTriDraft([]); setPinTi(-1);
+    // v1.11 (we: "Main modify should not do anything until you select your
+    // block or triangle"): entering a mode clears the previous species
+    // selection — ✎ Modify opens EMPTY, the editor appears on pick
+    setBlockSel(-1); setTriSel(-1);
+    engineRef.current?.clearPins();
+  }, []);
   const [triDraft, setTriDraft] = useState<Corner[]>([]);
   const [triSel, setTriSel] = useState(-1);
-  const [triBrush, setTriBrush] = useState<number[]>([51, 51, 51, 51, 51]);
   // v1.11 PIN placement (we: "putting down three points, which you can move
   // around before and after placing all three"): the index of the COMMITTED
   // triangle whose pins are live-draggable in the viewport (the engine owns
@@ -177,8 +228,6 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   const dirtyRef = useRef(false);
   const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  // mobile: the panel is a drawer; desktop opens it by default
-  const [panelOpen, setPanelOpen] = useState(() => window.innerWidth >= 768);
   // view options live in their own ⚙ popover (NOT the left parts panel —
   // the user: "the full list of options shouldnt be combined into the main
   // left-hand panel/menu")
@@ -443,6 +492,21 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         if (!changed) return;
         for (const [k, v] of Object.entries(changed))
           docSetNumber(ctx.doc, ['data', 'triangles', ti, k], v);
+        // v1.11 uniform rule: the twin's MIRRORED corner rides the drag
+        // (mirroredTriangle swaps v1↔v2, so twin corner σ(i), σ = [0,2,1],
+        // mirrors self corner i; the corner-set twin key is winding-agnostic)
+        const { tw, a } = triTwinOf(ti);
+        if (tw >= 0) {
+          const tt = ctx.bp.data.triangles?.[tw];
+          if (tt) {
+            const gT: Corner = [g[0]!, g[1]!, g[2]!];
+            gT[a] = 12 - gT[a]!;
+            const chT = setTriCornerAll(tt, [0, 2, 1][i]!, gT);
+            if (chT)
+              for (const [k, v] of Object.entries(chT))
+                docSetNumber(ctx.doc, ['data', 'triangles', tw, k], v);
+          }
+        }
         sceneChanged();
       };
       // v1.11: a DRAFT-pin drag (before the third lands) moves the corner in
@@ -465,10 +529,23 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         if (!changed) return false;
         for (const [k, v] of Object.entries(changed))
           docSetNumber(ctx.doc, ['data', 'triangles', ti, k], v);
+        // v1.11 uniform rule: the twin shifts by the MIRRORED delta
+        const { tw, a } = triTwinOf(ti);
+        if (tw >= 0) {
+          const tt = ctx.bp.data.triangles?.[tw];
+          if (tt) {
+            const td: [number, number, number] = [d[0], d[1], d[2]];
+            td[a] = -td[a]!;
+            const chT = shiftTriCells(tt, td);
+            if (chT)
+              for (const [k, v] of Object.entries(chT))
+                docSetNumber(ctx.doc, ['data', 'triangles', tw, k], v);
+          }
+        }
         sceneChanged();
         return true;
       };
-      e.onPinRotate = (ti, c) => {
+      e.onPinRotate = (ti, c, dq) => {
         const ctx = ctxRef.current;
         const t = ctx?.bp.data.triangles?.[ti];
         if (!ctx || !t) return false;
@@ -476,6 +553,21 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         if (!changed) return false;
         for (const [k, v] of Object.entries(changed))
           docSetNumber(ctx.doc, ['data', 'triangles', ti, k], v);
+        // v1.11 uniform rule: the twin rides the MIRRORED rotation — the
+        // conjugate qM keeps the mirror-axis component, negates the other two
+        const { tw, a } = triTwinOf(ti);
+        if (tw >= 0 && dq) {
+          const tt = ctx.bp.data.triangles?.[tw];
+          if (tt) {
+            const qM = { w: dq.w,
+              x: a === 0 ? dq.x : -dq.x, y: a === 1 ? dq.y : -dq.y, z: a === 2 ? dq.z : -dq.z };
+            const cT = rotateCornersQ(triCorners(tt), qM);
+            const chT = setTriCornersAll(tt, cT);
+            if (chT)
+              for (const [k, v] of Object.entries(chT))
+                docSetNumber(ctx.doc, ['data', 'triangles', tw, k], v);
+          }
+        }
         sceneChanged();
         return true;
       };
@@ -511,8 +603,14 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     if (!e) return;
     const on = mode === 'edit' && blockSel >= 0 &&
       sel.ci < 0 && sel.sub < 0 && gizmoOn;
-    e.setBlockGizmo(on ? blockSel : -1, mirrorPlace);
-  }, [mode, tool, blockSel, sel, mirrorPlace, gizmoOn, rev, engine]);
+    e.setBlockGizmo(on ? blockSel : -1, twins());
+  }, [mode, tool, blockSel, sel, mirrorPlace, twins, gizmoOn, rev, engine]);
+  // v1.11 FLAVOUR GATE for the TRIANGLE CENTROID WIDGET (we: "nor does it
+  // respect my place/edit mode"): the widget is an EDIT-flavour tool (select
+  // → gizmo); pins show in both flavors (place-then-drag is the ritual).
+  useEffect(() => {
+    engineRef.current?.setTriWidgetOn(mode === 'edit' && tool === 'edit' && gizmoOn && pinTi >= 0);
+  }, [mode, tool, gizmoOn, pinTi, engine]);
 
   /** Delete a selected component (v1.4): bp splice + doc mirror TOGETHER,
    *  the per-component orig/applied save-sync tables shift with it, the
@@ -554,15 +652,120 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     setBlockSel(-1);
     sceneChanged();
   }, [sceneChanged]);
+  /** v1.11 widget ▵ (we: "Button should exist to turn block to triangle when
+   *  selecting a block, on its widget"): convert the SELECTED block into the
+   *  hull skin of its FREE faces — the scoped hullify law (adjacency culling
+   *  sees the whole hull, so walls glued to neighbours emit nothing; the
+   *  game's outward + flat authoring convention, v1.5.12). The block goes,
+   *  the triangles land through the appendTrianglesDoc funnel (bp AND doc —
+   *  v1.6.1: the doc is the save and the history). v1.8.0 uniform mirror
+   *  rule: the block's IDENTIFIED similar twin converts with it. */
+  /** v1.11: paint the SELECTED triangle (the 🎨 window + the Triangles-mode
+   *  brush + the face rows) — bp AND doc (v1.6.1), repaint on the debounce.
+   *  v1.8.0 UNIFORM MIRROR RULE (we: "I modified color on a triangle, with
+   *  mirroring on and it did not carry over to its twin"): the identified
+   *  twin paints the SAME face slots — a mirrored prism's face f is its own
+   *  front/back/wall (the construction colour swap made it so), so the
+   *  paint mapping is the identity. */
+  const paintTriFaces = useCallback((slot: number, faces: number[]) => {
+    const ctx = ctxRef.current;
+    const t = ctx?.bp.data.triangles?.[triSel];
+    if (!ctx || !t) return;
+    const paintOne = (rec: object, idx: number) => {
+      const o = rec as { colors?: number[] };
+      const arr = [...(o.colors ?? [51, 51, 51, 51, 51])];
+      while (arr.length < 5) arr.push(51);
+      for (const f of faces) {
+        arr[f] = slot;
+        docSetNumber(ctx.doc, ['data', 'triangles', idx, 'colors', f], slot);
+      }
+      o.colors = arr;
+    };
+    paintOne(t, triSel);
+    const { tw } = triTwinOf(triSel);
+    if (tw >= 0) {
+      const tt = ctx.bp.data.triangles?.[tw];
+      if (tt) paintOne(tt as object, tw);
+    }
+    sceneChanged();
+  }, [triSel, sceneChanged, triTwinOf]);
+  const paintTri = useCallback((slot: number) => paintTriFaces(slot, [0, 1, 2, 3, 4]),
+    [paintTriFaces]);
+
+  /** v1.11 FLIP (we: "it should be possible to flip it just like the in
+   *  game triangles, determining whether it goes outside or inside"): the
+   *  winding reverses (v1↔v2) so the normal — the FRONT (colours[0]) side —
+   *  points the other way; the geometry stays. The face colours follow the
+   *  edge relabelling (front↔back, the v0-v1 ↔ v2-v0 walls). */
+  const triFlip = useCallback(() => {
+    const ctx = ctxRef.current;
+    const t = ctx?.bp.data.triangles?.[triSel];
+    if (!ctx || !t) return;
+    const c = triCorners(t);
+    const changed = setTriCornersAll(t, [c[0]!, c[2]!, c[1]!]);
+    if (!changed) return;
+    for (const [k, v] of Object.entries(changed))
+      docSetNumber(ctx.doc, ['data', 'triangles', triSel, k], v);
+    const o = t as unknown as { colors?: number[] };
+    const col = o.colors ?? [51, 51, 51, 51, 51];
+    o.colors = [col[1]!, col[0]!, col[4]!, col[3]!, col[2]!];
+    for (let i = 0; i < 5; i++)
+      docSetNumber(ctx.doc, ['data', 'triangles', triSel, 'colors', i], o.colors![i]!);
+    // v1.11 uniform rule: the twin flips with it (mirror keeps the pair's
+    // facing relation: both skins then face inward/outward together)
+    const { tw } = triTwinOf(triSel);
+    if (tw >= 0) {
+      const tt = ctx.bp.data.triangles?.[tw];
+      if (tt) {
+        const tc = triCorners(tt);
+        const chT = setTriCornersAll(tt, [tc[0]!, tc[2]!, tc[1]!]);
+        if (chT)
+          for (const [k, v] of Object.entries(chT))
+            docSetNumber(ctx.doc, ['data', 'triangles', tw, k], v);
+        const to = tt as unknown as { colors?: number[] };
+        const tcol = to.colors ?? [51, 51, 51, 51, 51];
+        to.colors = [tcol[1]!, tcol[0]!, tcol[4]!, tcol[3]!, tcol[2]!];
+        for (let i = 0; i < 5; i++)
+          docSetNumber(ctx.doc, ['data', 'triangles', tw, 'colors', i], to.colors![i]!);
+      }
+    }
+    sceneChanged();
+  }, [triSel, sceneChanged, triTwinOf]);
+
+  const blockToTriangles = useCallback(() => {
+    const ctx = ctxRef.current, e = engineRef.current;
+    if (!ctx || blockSel < 0) return;
+    const b = ctx.bp.data.blocks[blockSel];
+    if (!b || b.type === 255) return;
+    const twin = blockMirrorTwin(ctx.bp, blockSel, mirAx());
+    const idxs = twin >= 0 ? [blockSel, twin] : [blockSel];
+    const tris: Triangle[] = [];
+    for (const i of idxs) tris.push(...blockSkinTris(ctx.bp, i));
+    if (!tris.length) { setToolMsg('every face of this block is glued to a neighbour — nothing to skin'); return; }
+    appendTrianglesDoc(ctx, tris);
+    for (const i of [...idxs].sort((a, c) => c - a)) {
+      ctx.bp.data.blocks.splice(i, 1);
+      docArrayRemoveAt(ctx.doc, ['data', 'blocks'], i);
+    }
+    setBlockSel(-1);
+    e?.setBlockGizmo(-1, false);
+    sceneChanged();
+    setToolMsg(`▵ Block → ${tris.length} hull triangle${tris.length === 1 ? '' : 's'}${twin >= 0 ? ' (twin included)' : ''} — Ctrl+Z restores the block`);
+  }, [blockSel, sceneChanged]);
+
   const deleteTri = useCallback((ctx: EditCtx, ti: number) => {
-    ctx.bp.data.triangles?.splice(ti, 1);
-    docArrayRemoveAt(ctx.doc, ['data', 'triangles'], ti);
+    // v1.11 uniform rule: the twin prism deletes with it (v1.8.0 law)
+    const { tw } = triTwinOf(ti);
+    for (const i of [ti, ...(tw >= 0 ? [tw] : [])].sort((a, b) => b - a)) {
+      ctx.bp.data.triangles?.splice(i, 1);
+      docArrayRemoveAt(ctx.doc, ['data', 'triangles'], i);
+    }
     setTriSel(-1);
     // v1.11: the pin editor indexes triangles by position — a splice shifts
     // them, so the pins are dropped (they would ride the NEIGHBOUR's corners)
     setPinTi(p => { if (p >= 0) engineRef.current?.clearPins(); return -1; });
     sceneChanged();
-  }, [sceneChanged]);
+  }, [sceneChanged, triTwinOf]);
 
   const edits: EditApi = useMemo(() => ({
     compField: (ctx, ci, key, v) => { setCompField(ctx, ci, key, v); markDirty(); bumpRev(); },
@@ -636,7 +839,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         const ctx = ctxRef.current;
         if (!ctx || placing) return;
         if (sel.ci >= 0) { e.preventDefault(); deleteComp(ctx, sel.ci); return; }
-        if (blockSub === 'tris' && triSel >= 0) { e.preventDefault(); deleteTri(ctx, triSel); return; }
+        if ((ws === 'tris' || ws === 'edit') && triSel >= 0) { e.preventDefault(); deleteTri(ctx, triSel); return; }
         if (blockSel >= 0) { e.preventDefault(); deleteBlock(ctx, blockSel); return; }
       }
       // v1.11 PLACEMENT REWRITE (we: "Choosing a block size before placing
@@ -666,7 +869,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         }
         // v1.11 PIN editor: Esc leaves the pin tool (drop the draft / the
         // edited triangle's pins) before it touches the selection
-        if (blockSub === 'tris' && (triDraft.length || pinTi >= 0)) {
+        if ((ws === 'tris' || ws === 'edit') && (triDraft.length || pinTi >= 0)) {
           setTriDraft([]); setPinTi(-1);
           engineRef.current?.clearPins();
           return;
@@ -676,7 +879,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     };
     addEventListener('keydown', h);
     return () => removeEventListener('keydown', h);
-  }, [save, toggleOpt, placing, mode, tool, blockSub, sel, blockSel, triSel,
+  }, [save, toggleOpt, placing, mode, ws, sel, blockSel, triSel,
     triDraft, pinTi, brush, undo, redo, deleteComp, deleteBlock, deleteTri]);
 
   // blocks-mode canvas handling: place (brush/logical continuation) or
@@ -692,10 +895,12 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     if (!e || !ctx) return;
     if (placing && mode === 'edit') {           // HELD part: its ghost
       const p = e.pickPlacePoint(clientX, clientY);
-      e.setCompGhost(p ? { type: placing, point: p } : null, mirrorPlace);
+      e.setCompGhost(p ? { type: placing, point: p } : null, twins());
       return;
     }
-    if (mode !== 'edit' || blockSub !== 'blocks' || tool !== 'place') { e.setPlaceGhost(null); return; }
+    // v1.11 (we: "dont show the block when placing a component"): the
+    // brush ghost belongs to + Blocks ONLY — + Parts and + Triangles hover clean
+    if (mode !== 'edit' || ws !== 'blocks') { e.setPlaceGhost(null); return; }
     const r = e.pickCell(clientX, clientY);
     if (!r || r.kind === 'ground') { e.setPlaceGhost(null); return; }
     const info = shift && r.bi >= 0 ? blockInfo(ctx.bp, r.bi) : null;
@@ -706,16 +911,16 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       ? complementBlock(info, [cellIndex(r.point[0]), cellIndex(r.point[1]), cellIndex(r.point[2])], r.nrm)
       : { cell: r.cell, ...brushSpec(brush) };
     e.setPlaceGhost({ ...spec, valid: !cellOverlap(ctx.bp, spec.cell, spec.size), complement: !!info });
-  }, [mode, tool, placing, mirrorPlace, blockSub, brush]);
+  }, [mode, ws, placing, mirrorPlace, twins, brush]);
 
   // ghost lifecycle: re-aim when the brush changes (live preview of the
   // panel), drop it when the flavor/mode leaves block-placement
   useEffect(() => {
     const h = ghostRef.current;
     if (!h) return;
-    if (mode === 'edit' && tool === 'place' && blockSub === 'blocks') computeGhost(h.x, h.y, h.shift);
+    if (mode === 'edit' && ws === 'blocks') computeGhost(h.x, h.y, h.shift);
     else { engineRef.current?.setPlaceGhost(null); ghostRef.current = null; }
-  }, [mode, tool, blockSub, brush, computeGhost]);
+  }, [mode, ws, brush, computeGhost]);
 
   // BLOCKS selection highlight (v1.4 "blocks don't yet highlight"): the
   // picked block gets the golden overlay and its SIMILAR TWIN rides along
@@ -741,9 +946,12 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // "triangles refuse to select properly" report. Left with the sub-tab.
   // v1.10.6: the dock list's hovered triangle preempts it (same law).
   useEffect(() => {
-    engineRef.current?.setTriHighlight(mode === 'edit' && blockSub === 'tris'
+    // v1.11: the merged ✎ Edit selects prisms too — the gold prism highlight
+    // is NOT gated on the triangles dock anymore (a selected prism that never
+    // lit gold read as "selection does nothing")
+    engineRef.current?.setTriHighlight(mode === 'edit'
       ? (triHover >= 0 ? triHover : triSel) : -1);
-  }, [mode, blockSub, triSel, triHover, rev, engine]);
+  }, [mode, triSel, triHover, rev, engine]);
 
   // the CATALOG ghost (v1.4): while a part is HELD, hovering the viewport
   // docks a translucent preview at the surface (⇄ adds the mirrored twin
@@ -757,104 +965,135 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     if (!placing || mode !== 'edit') { engine.placeDragEnd(); engine.setCompGhost(null); }
   }, [placing, mode, engine]);
 
+  /** v1.11 THE FLAVOUR LAW (we: "nor does it respect my place/edit mode.
+   *  This is wrong." + "blocks and triangles … should be merged"):
+   *  ✚ PLACE clicks ONLY PLACE (the species tab picks the tool: ▤ block
+   *  brush · ▵ triangle pins) and never select; ✎ Edit clicks ONLY SELECT
+   *  — the MERGED editor picks WHATEVER you clicked (part · prism · block)
+   *  under one widget law (gizmo + pins + modebox). */
   const onBlockPick = useCallback((clientX: number, clientY: number, shift: boolean,
     openWidget: () => void) => {
     const e = engineRef.current, ctx = ctxRef.current;
     if (!e || !ctx) return;
-    if (blockSub === 'tris') {
-      // v1.11 PIN PLACEMENT (we: "putting down three points, which you can
-      // move around before and after placing all three of them, it should
-      // look like a pin, and an arrow should point down/up for the direction
-      // of the triangle"): every click drops a PIN on the lattice corner of
-      // the surface aimed at; the pins are draggable BEFORE the third lands,
-      // the third click commits the prism, and the pins STAY on the committed
-      // triangle — dragging one rewrites its stored corner (engine.onPinEdit).
-      const r = e.pickCell(clientX, clientY);
-      if (!r) return;
-      const drafted = e.pinsState()?.mode === 'draft' ? (e.pinsState()?.pts.length ?? 0) : 0;
-      // a click on an existing prism's face SELECTS it and puts ITS pins on
-      // the surface (the "after placing" editing path, any committed triangle)
-      if (r.kind === 'tri' && triDraft.length === 0) {
-        const t = triAt(ctx.bp, r.point);
-        if (t >= 0) {
-          setTriSel(t); setBlockSel(-1); setPinTi(t);
-          e.select(-1);                     // the CENTROID widget takes the gizmo
-          e.setPinEdit(t, triBrush[0] ?? 51);
-          openWidget();                     // ⊘/✥/⟳ at the click: move/turn switch
-          return;
-        }
-      }
-      // clicking a DIFFERENT spot while editing a committed triangle starts
-      // a fresh draft (the old pins retire with it)
-      if (drafted === 0 && pinTi >= 0) { setPinTi(-1); e.setPinEdit(-1); }
-      const g = cornerOf(r.point);
-      const next = [...triDraft, g];
-      if (next.length < 3) {
-        setTriDraft(next);
-        e.setPinDraft(next, triBrush[0] ?? 51);
-        return;
-      }
-      const tri = triangleFromCorners(next[0] as [number,number,number], next[1] as [number,number,number],
-        next[2] as [number,number,number], triBrush);
-      setTriDraft([]);
-      if (!tri) { e.setPinDraft(null); return; }
-      // v1.6.1: the shared bp+doc append — on a craft whose file never
-      // carried data.triangles the old bare docArrayInsert failed silently
-      // (no array at the path), so a hand-drafted triangle vanished on save
-      const at = ctx.bp.data.triangles?.length ?? 0;
-      appendTrianglesDoc(ctx, [tri]);
-      setTriSel(at);
-      setPinTi(at);
-      e.setPinEdit(at, triBrush[0] ?? 51);   // pins STAY: drag them to fix
-      sceneChanged();
-      return;
-    }
     const r = e.pickCell(clientX, clientY);
     if (!r) {
-      // v1.6: clicking EMPTY SPACE (sky — nothing picked) deselects in the
-      // EDIT flavor: the golden block overlay used to sit on the deck with
-      // nothing selected anymore ("don't return to previous state" report —
-      // a stale selection the user believed they had cleared)
-      if (tool === 'edit' && blockSel >= 0) { setBlockSel(-1); e.select(-1); }
+      // v1.6: clicking EMPTY SPACE (sky) in ✎ Modify clears ALL the
+      // selection (block overlay, pins, component) — a stale golden overlay
+      // the user believed cleared was the report; place modes keep their ghost.
+      if (ws === 'edit') {
+        setBlockSel(-1); e.select(-1);
+        setTriSel(-1); setTriDraft([]); setPinTi(-1);
+        e.setPinDraft(null); e.clearPins();
+      }
       return;
     }
-    // clicking an existing COMPONENT selects it in BOTH sub-tabs (user v1.4)
-    // — the inspector (with Delete) takes over the context window.
+    // a COMPONENT hit selects in BOTH flavors (v1.4 law — the inspector +
+    // gizmo take the part; PLACE only "places" on surfaces, a part you
+    // clicked directly is a selection, and the pin-flow tests pin this)
     if (r.kind === 'comp' && r.ci >= 0) {
-      setBlockSel(-1);
-      e.select(r.ci);          // the gizmo rides it (merged editor)
+      setBlockSel(-1); setTriSel(-1); setPinTi(-1); e.clearPins();
+      e.select(r.ci);          // the gizmo rides it
       e.flyTo(r.ci);           // like the old Edit mode: click flies in
-      openWidget();            // ⊘/✥/⟳/⇄ at the part: move/rotate switch here
+      openWidget();            // ⊘/✥/⟳/⇄ at the part
+      // v1.11 (we: "switch to that automatically when you click edit for
+      // one of those"): selecting a part in ✎ Modify opens the + Parts
+      // subpanel — the inspector lives there now
+      if (ws === 'edit') setWs('parts');
       return;
     }
-    if (tool === 'edit') {
-      // EDIT flavor: a block click SELECTS the block — golden highlight +
-      // the BLOCK widget (cell arrows / 90° rings / ⤢ stretch, v1.5/1.11).
-      // The ⊘/✥/⟳/⤢ widget pops too: it is how the block gizmo picks its mode.
-      if (r.bi >= 0) e.select(-1);                     // a block took the pick
-      setBlockSel(r.bi >= 0 ? r.bi : -1);
-      if (r.bi >= 0) openWidget();
+    // ── ▵ TRIANGLES: surface clicks drop PINS, never select ────────────
+    if (ws === 'tris') {
+        // v1.11 PIN PLACEMENT (we: "putting down three points, which you
+        // can move around before and after placing all three of them, it
+        // should look like a pin, and an arrow should point down/up for the
+        // direction of the triangle"): every click drops a PIN on the
+        // lattice corner of the aimed surface — a prism face is a placeable
+        // surface too, placement mode NEVER selects. Pins are draggable
+        // before the third lands; the third click commits the prism and the
+        // pins STAY (drag one → engine.onPinEdit rewrites its corner).
+        if (pinTi >= 0 && triDraft.length === 0) { setPinTi(-1); e.setPinEdit(-1); }
+        const g = cornerOf(r.point);
+        const next = [...triDraft, g];
+        if (next.length < 3) {
+          setTriDraft(next);
+          e.setPinDraft(next, brush.slot);
+          return;
+        }
+        // v1.11 (we: "colors dont seem to apply to the triangles when
+        // picked"): the triangle inherits the BRUSH — its palette slot on
+        // all five faces and its material — one paint story for both
+        // species. Per-face colours stay editable on the triangle itself.
+        const tri = triangleFromCorners(next[0] as [number,number,number], next[1] as [number,number,number],
+          next[2] as [number,number,number],
+          [brush.slot, brush.slot, brush.slot, brush.slot, brush.slot]);
+        if (tri) (tri as unknown as { material: number }).material = brush.material ?? 0;
+        setTriDraft([]);
+        if (!tri) { e.setPinDraft(null); return; }
+        // v1.11 (we: "mirror for triangle is not placed"): with the twin arm
+        // on, the mirrored twin lands too — corners reflected (g → 12 − g),
+        // winding flipped so the twin's FRONT faces the mirrored way, side
+        // colours relabelled (mirroredTriangle).
+        const batch = [tri];
+        if (twins()) {   // AUTO on a mirrored craft (v1.11)
+          const mt = mirroredTriangle(tri, mirAx() as 'x' | 'y' | 'z');
+          if (mt) batch.push(mt);
+        }
+        // v1.6.1: the shared bp+doc append (files without data.triangles)
+        const at = ctx.bp.data.triangles?.length ?? 0;
+        appendTrianglesDoc(ctx, batch);
+        setTriSel(at);
+        setPinTi(at);
+      e.setPinEdit(at, brush.slot);   // pins STAY: drag them to fix
+        sceneChanged();
       return;
     }
-    // PLACE — any surface DOCKS a 1×1×1 block (the game: aim at a block or
-    // beam): a block face, a hull-triangle prism, a component or subgrid
-    // content. The green ground plane stays unfurnishable. v1.11 (we:
-    // "Choosing a block size before placing it shouldn't be a thing"): the
-    // brush has no size — the placed block is SELECTED and the mode widget
-    // pops at it, so ✥ move / ⟳ turn / ⤢ stretch are one click away.
-    if (r.kind === 'ground') { setBlockSel(-1); return; }
-    const info = shift && r.bi >= 0 ? blockInfo(ctx.bp, r.bi) : null;
-    const spec = info
-      ? complementBlock(info, [cellIndex(r.point[0]), cellIndex(r.point[1]), cellIndex(r.point[2])], r.nrm)
-      : { cell: r.cell, ...brushSpec(brush) };
-    if (cellOverlap(ctx.bp, spec.cell, spec.size)) return;   // the red ghost refuses
-    setBlockSel(placeBlock(ctx, spec, mirrorPlace, mirAx()));
-    sceneChanged();
-    openWidget();             // the move/rotate/scale switch at the new block
-    // the game keeps the ghost under the cursor after a placement — re-aim
-    // it over the fresh surface (it may now complement the block placed)
-    computeGhost(clientX, clientY, shift);
-  }, [tool, blockSub, brush, mirrorPlace, triDraft, triBrush, pinTi, sceneChanged, computeGhost, blockSel]);
+    // ── + PARTS: comp picks (above) inspect AND modify; a held part lands
+    //    through the place flow; a bare surface click clears species picks
+    if (ws === 'parts') {
+      setBlockSel(-1); setTriSel(-1);
+      return;
+    }
+    // ── ▤ BLOCKS: surface clicks dock a cell ─────────────────────────────
+    if (ws === 'blocks') {
+      if (r.kind === 'ground') { setBlockSel(-1); return; }
+      const info = shift && r.bi >= 0 ? blockInfo(ctx.bp, r.bi) : null;
+      const spec = info
+        ? complementBlock(info, [cellIndex(r.point[0]), cellIndex(r.point[1]), cellIndex(r.point[2])], r.nrm)
+        : { cell: r.cell, ...brushSpec(brush) };
+      if (cellOverlap(ctx.bp, spec.cell, spec.size)) return;   // the red ghost refuses
+      setBlockSel(placeBlock(ctx, spec, twins(), mirAx()));
+      sceneChanged();
+      // the placed block is SELECTED so the widget (✥ ⟳ ⤢) is one click away
+      openWidget();
+      // the game keeps the ghost under the cursor after a placement — re-aim
+      computeGhost(clientX, clientY, shift);
+      return;
+    }
+    // ── ✎ MODIFY: clicks select — the MERGED species-agnostic pick ──────
+    if (r.kind === 'tri') {
+      // a prism click SELECTS the triangle: pins + CENTROID widget (a
+      // persisted ⤢ mode reads as ✥ here — a triangle has no scale)
+      const t = triAt(ctx.bp, r.point);
+      if (t >= 0) {
+        setTriSel(t); setBlockSel(-1); setTriDraft([]); setPinTi(t);
+        e.select(-1);
+        if (e.gizmoModeNow() === 'scale') e.setGizmoMode('translate');
+        e.setPinEdit(t, brush.slot);
+        openWidget();
+        return;
+      }
+    }
+    if (r.bi >= 0) {
+      // a block click SELECTS the block — golden highlight + the BLOCK
+      // widget (cell arrows / 90° rings / ⤢ stretch)
+      e.select(-1); setTriSel(-1); setPinTi(-1); e.clearPins();
+      setBlockSel(r.bi);
+      openWidget();
+      return;
+    }
+    // ground in EDIT clears the selection (nothing valid was clicked)
+    setBlockSel(-1); e.select(-1);
+  }, [brush, mirrorPlace, twins, triDraft, pinTi, sceneChanged, computeGhost, ws, setWs]);
 
   /** CATALOG placement (KSP part pickup): land the HELD type at the picked
    *  surface — bp + doc together, then the debounced scene reload; the part
@@ -881,7 +1120,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     ctx.bp.data.components.push(comp as never);
     const at = ctx.bp.data.components.length - 1;
     docArrayInsert(ctx.doc, ['data', 'components'], at, docFromValue(comp));
-    if (mirrorPlace && mirAx() !== 'off') {
+    if (twins()) {   // AUTO on a mirrored craft (v1.11)
       // ⇄ twin: mirrored POSITION, same orientation — exactly the geometry
       // sym.ts indexes (mask bit 1), so the pair co-selects and every later
       // edit propagates through the established twin path.
@@ -894,7 +1133,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     }
     sceneChanged();
     setTimeout(() => engineRef.current?.select(at), 350);
-  }, [placing, mirrorPlace, sceneChanged]);
+  }, [placing, mirrorPlace, twins, sceneChanged]);
 
   const setGizmo = useCallback((on: boolean) => {
     setGizmoOn(on);
@@ -1010,14 +1249,44 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // workspace MOVES to a WIDE BOTTOM DOCK (build-dock) exactly like
   // wire-dock — the 300 px sidebar slot was the crux of the complaint. The
   // left panel keeps the parts list + inspector (and gets taller).
+  const blockPanel = (
+    <BlockPanel engine={engine} ctx={ctxRef.current} bp={bp!} blockSel={blockSel}
+      brush={brush} tab={tool} legacy={legacy} mirrorAxis={mirAxis}
+      onBrush={setBrush} onApplied={sceneChanged}
+      onSelectBlock={bi => {
+        setBlockSel(bi);
+        setTriSel(-1); setPinTi(-1);          // one selection, one editor
+        engineRef.current?.clearPins();
+      }}
+      onPaint={paintBlock}
+      rev={rev} onHoverBlock={setBlockHover}
+      onDeleteBlock={bi => ctxRef.current && deleteBlock(ctxRef.current, bi)}
+      custom={{ addColor: addPaletteColor, onPickSlot: slot => setBrush(b => ({ ...b, slot })) }} />
+  );
+  /** v1.11 (we: "I put on mirror X for the craft.. then placed a triangle
+   *  … but no matching triangle was made"): picking an AXIS on the widget IS
+   *  the intent to mirror — it arms mirrored placement explicitly (the AUTO
+   *  state only decides the default before the user speaks; a craft whose
+   *  data has no twin pairs must not silently ignore an explicit axis). */
+  const onMirrorAxisArm = useCallback((a: MirrorAxisOpt) => {
+    onMirrorAxis(a);
+    if (a !== 'off') setMirrorPlace('on');
+  }, [onMirrorAxis]);
+  /** render-side twin lit state (the widget; same rule as twins()) */
+  const twinNow = mirAxis !== 'off' && (mirrorPlace === 'on'
+    || (mirrorPlace === 'auto'
+      && (engine?.craftMirrorAxes() ?? []).includes(mirAxis as 'x' | 'y' | 'z')));
   const triPanel = (
     <TriPanel bp={bp!} ctx={ctxRef.current} draft={triDraft} triSel={triSel}
-      pinTi={pinTi}
-      brush={triBrush} onSlot={(i, v) => setTriBrush(b => b.map((x, j) => j === i ? v : x))}
+      pinTi={pinTi} tab={tool}
+      brush={brush} onBrush={setBrush} legacy={legacy}
+      onFlip={triFlip} onFaceSlot={(i, v) => paintTriFaces(v, [i])}
+      custom={{ addColor: addPaletteColor, onPickSlot: slot => setBrush(b => ({ ...b, slot })) }}
+
       onUndo={() => {
         setTriDraft(d => {
           const next = d.slice(0, -1);
-          engineRef.current?.setPinDraft(next.length ? next : null, triBrush[0] ?? 51);
+          engineRef.current?.setPinDraft(next.length ? next : null, brush.slot);
           return next;
         });
       }}
@@ -1033,94 +1302,168 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         setTriSel(ti); setTriHover(-1); setTriDraft([]);
         setBlockSel(-1);                                  // free the widget chain
         engineRef.current?.select(-1);
+        // a persisted ⤢ mode reads as ✥ on a triangle (no part/tri scale)
+        if (engineRef.current?.gizmoModeNow() === 'scale')
+          engineRef.current.setGizmoMode('translate');
         setPinTi(ti);                                   // v1.11: list row puts the pins on it
-        engineRef.current?.setPinEdit(ti, triBrush[0] ?? 51);
+        engineRef.current?.setPinEdit(ti, brush.slot);
       }}
       onDeleteTri={ti => { if (ctxRef.current) deleteTri(ctxRef.current, ti); }} />
   );
+  const onSelect = (ci: number, fly?: boolean) => {
+    engineRef.current?.select(ci);
+    if (fly) engineRef.current?.flyTo(ci);
+  };
+  const mkPanelProps = (): PanelProps => ({
+    engine, ctx: ctxRef.current as never, bp: bp as never, sel, rev, legacy,
+    opts, hullOpacity, onHullOpacity: setHullOp, gizmoOn: gizmoOn && mode === 'edit', onGizmo: setGizmo,
+    hiDef, onHiDef, staticInfo, onStaticInfo: setStaticInfo,
+    onOpt: toggleOpt, onSelect, onSelectSub: bi => engineRef.current?.selectSub(bi),
+    edits, inspKey, markDirty, readOnly: mode === 'view' || mode === 'clean',
+    manifest, placingType: placing,
+    onPlaceType: t => { setPlacing(t); if (t && (mode === 'view' || mode === 'clean')) setMode('edit'); },
+  });
+  /** v1.11 THE CATALOG MOVES TO THE DOCK (we: "Move the sideview catalog to
+   *  the bottom part, where it fits better for mobile") — a card under the
+   *  place-mode workspace columns; ✎ Modify gets the parts list + inspector
+   *  row above the merged block/triangle workspaces. */
+  /** v1.11 + PARTS: its own subpanel (we: "Move parts into its own
+   *  subpanel… Make it +Parts as well, so you can specifically place a
+   *  part") — catalog (place), the vessel list, and the inspector of the
+   *  selected part. ✎ Modify part clicks land here automatically. */
+  const partsPanel = bp && (
+    <div className="grid grid-cols-1 items-start gap-x-4 px-1 pb-2 md:grid-cols-3">
+      <div className="min-h-[140px] border-t border-white/10 px-1 pb-2" data-testid="catalog-dock">
+        <h3 className="ksp-label px-2 pt-2 text-[11px] font-semibold text-ink-dim">
+          Catalog — hold a part, then click a surface</h3>
+        <div className="max-h-72 overflow-y-auto px-1">
+          <CompList bp={bp} rev={rev} sel={sel} onSelect={onSelect}
+            onSelectSub={bi => engineRef.current?.selectSub(bi)} manifest={manifest}
+            placingType={placing}
+            onPlaceType={t => { setPlacing(t); if (t && (mode === 'view' || mode === 'clean')) setMode('edit'); }}
+            listMode="place" />
+        </div>
+      </div>
+      <div className="min-h-[140px] border-t border-white/10 px-1 pb-2" data-testid="parts-list">
+        <h3 className="ksp-label px-2 pt-2 text-[11px] font-semibold text-ink-dim">
+          Parts on the vessel</h3>
+        <div className="max-h-72 overflow-y-auto">
+          <CompList bp={bp} rev={rev} sel={sel} onSelect={onSelect}
+            onSelectSub={bi => engineRef.current?.selectSub(bi)} manifest={manifest}
+            placingType={placing} onPlaceType={t => setPlacing(t)} listMode="edit" />
+        </div>
+      </div>
+      {sel.sub >= 0 ? <SubPanel {...mkPanelProps()} key={`s${sel.sub}`} />
+        : sel.ci >= 0 ? <Inspector {...mkPanelProps()} key={`c${sel.ci}k${inspKey}`} />
+        : <div className="border-t border-white/10 px-3 py-3 text-[11px] leading-snug text-ink-dim">
+            Nothing selected — a canvas click (or a row beside) inspects a part here:
+            sliders, data, paint, delete.
+          </div>}
+    </div>
+  );
   const buildWorkspace = (
     <>
-      {/* v1.10.7 (we: "on phone I've no idea how to place and the side panel
-          is still edit/place toggle, which makes no sense"): the flavor
-          switch MOVES from the sidebar into the dock header — it is the
-          WORKSPACE's mode (what canvas taps do), so it lives with the
-          workspace, not with the parts list. On phones the dock is always
-          visible; the sidebar is a drawer the switch used to hide behind.
-          The hint is device-honest: keys on desktop, TAP wording on touch. */}
+      {/* v1.11 THE SINGLE MODE CONTROL (we: "not 2 sets of 2 flips which is
+          insane"): ONE tri-state segmented row — ▤ Blocks and ▵ Triangles
+          are the two PLACE modes (a canvas click lands a cell / drops a
+          pin), ✎ Edit is NEITHER (clicks select anything; both workspaces
+          stack below). The mode is persisted (archean-app-ws). */}
       <div className="flex flex-wrap items-center gap-1 px-3 pt-2">
-        {(['edit', 'place'] as const).map(t => (
-          <button key={t} data-testid={`tooltab-${t}`} aria-pressed={tool === t}
-            onClick={() => setTool(t)}
-            className={`ksp-btn px-2 py-[3px] text-[11px] ${tool === t ? 'on font-semibold' : 'text-ink-dim'}`}>
-            {t === 'edit' ? '✎ Edit' : '✚ Place'}
+        {([
+          ['blocks', '+ Blocks', 'ADD blocks: a canvas click lands a 1×1×1 block (paint + material from the brush below)'],
+          ['tris', '+ Triangles', 'ADD hull triangles: canvas clicks drop the three PINS of a hull triangle'],
+          ['parts', '+ Parts', 'ADD parts: the catalog — hold a part, click a surface; the vessel list + inspector live here'],
+          ['edit', '✎ Modify', 'a canvas click SELECTS anything — part, block or prism — the widget moves/turns/stretches it'],
+        ] as const).map(([k, label, tip]) => (
+          <button key={k} data-testid={`ws-${k}`} aria-pressed={ws === k} title={tip}
+            onClick={() => setWs(k)}
+            className={`ksp-btn px-2 py-[3px] text-[11px] ${ws === k ? 'on font-semibold' : 'text-ink-dim'}`}>
+            {label}
           </button>
         ))}
         <span className="mx-1 hidden h-4 w-px bg-white/15 md:inline-block" />
-        {(['blocks', 'tris'] as const).map(t => (
-          <button key={t} data-testid={`blocksub-${t}`} onClick={() => {
-            setBlockSub(t); setTriDraft([]); setPinTi(-1);
-            engineRef.current?.clearPins();
-          }}
-            className={`ksp-btn px-2 py-[3px] text-[11px] ${blockSub === t ? 'on' : ''}`}>
-            {t === 'blocks' ? '▤ Blocks' : '▵ Triangles'}
-          </button>
-        ))}
         {/* v1.11 THE MIRROR WIDGET (we: "ensure mirroring is possible and
             easily switchable by axis, should be a visible widget showing if
-            x/y/z mirrored"): ⇄ arms mirrored PLACEMENT (brush + held parts;
-            edits always mirror to the identified twin, v1.8.0 rule) and the
-            ⊘ x y z chips are the ONE visible axis switch — the lit chip IS
-            the plane the twins live across (⊘ = the session mirror is off:
-            no twin placement, no twin identity). Same engine value
-            (archean-app-mirror-axis) as the ⚙ View rows. */}
-        <span className="mx-1 hidden h-4 w-px bg-white/15 md:inline-block" />
+            x/y/z mirrored" + "the mirror option is not understandable, it
+            should be visually understood, add a mirror icon with a
+            strikethrough, and x y z also with mirror behind it"): every chip
+            carries the MIRROR GLYPH (plane + solid triangle + reflected
+            ghost, currentColor-lit); the OFF chip wears a red strikethrough,
+            the axis chips wear the glyph BEHIND their letter. The lit chip
+            IS the plane; the twin arm arms mirrored placement. Same engine
+            value (archean-app-mirror-axis) as the ⚙ View rows. */}
+        {/* v1.11 ONE LINGO (we: "the twin versus no mirroring is the issue.
+            thats duplicate lingo for editing"): the widget IS 'Mirror' — the
+            glyph chips pick the plane AND toggle pairing (lit = placements
+            land as mirrored pairs; click the lit plane again to stop). No
+            separate twin arm. 'auto' badge = the craft's own pairs light it
+            before you touch anything. */}
         <span data-testid="mirror-widget" className="flex items-center gap-1"
-          title="mirroring: ⇄ arms mirrored placement · ⊘ x y z pick the mirror plane">
-          <button data-testid="mirror-twin" title="⇄ mirrored placement: a click lands the mirrored twin too (brush AND held parts); edits always mirror to the identified twin"
-            aria-pressed={mirrorPlace} onClick={() => setMirrorPlace(m => !m)}
-            className={`ksp-btn px-2 py-[3px] text-[11px] ${mirrorPlace ? 'on' : ''}`}>
-            ⇄ {mirrorPlace ? 'twin ON' : 'twin off'}
+          title="mirror: pick a plane to place mirrored pairs (blocks, parts, triangles) — click the lit plane again to stop; ⊘ = no mirror">
+          <span className="ksp-label text-[9px] uppercase tracking-wider text-ink-dim">mirror</span>
+          <button data-testid="mirw-off" title="mirroring OFF — no mirror plane, edits touch ONLY the selected item"
+            aria-pressed={mirAxis === 'off'}
+            onClick={() => onMirrorAxis('off')}
+            className={`ksp-btn grid h-6 w-6 place-items-center px-0 py-[3px] leading-none ${
+              mirAxis === 'off' ? 'on font-semibold' : 'text-ink-dim'}`}>
+            <MirrorGlyph strike size={14} />
           </button>
-          {(['off', 'x', 'y', 'z'] as const).map(a => (
-            <button key={a} data-testid={`mirw-${a}`} title={`mirror plane ${a === 'off' ? '— OFF (no session mirror)' : `${a} = 0`}`}
-              aria-pressed={mirAxis === a}
-              onClick={() => onMirrorAxis(a)}
-              className={`ksp-btn grid h-6 w-6 place-items-center px-0 py-[3px] text-[11px] leading-none ${
-                mirAxis === a ? 'on font-semibold' : 'text-ink-dim'}`}>
-              {a === 'off' ? '⊘' : a}
+          {(['x', 'y', 'z'] as const).map(a => (
+            <button key={a} data-testid={`mirw-${a}`}
+              title={`mirror across ${a.toUpperCase()} = 0 — placements land mirrored pairs; click the lit plane again to stop`}
+              aria-pressed={mirAxis === a && twinNow}
+              onClick={() => {
+                if (mirAxis !== a) onMirrorAxisArm(a);
+                else setMirrorPlace(twinNow ? 'off' : 'on');
+              }}
+              className={`ksp-btn grid h-6 w-7 place-items-center px-0 py-[3px] leading-none ${
+                mirAxis === a && twinNow ? 'on font-semibold' : mirAxis === a ? 'text-ink' : 'text-ink-dim'}`}>
+              <span className="relative grid h-5 w-5 place-items-center">
+                <span className="absolute grid place-items-center opacity-45"><MirrorGlyph size={15} /></span>
+                <span className="relative text-[10px] leading-none">{a}</span>
+              </span>
             </button>
           ))}
+          {mirrorPlace === 'auto' && twinNow && (
+            <span className="text-[9px] text-ink-dim" title="this craft's own twin pairs light the mirror automatically">auto</span>
+          )}
         </span>
         <span data-testid="flavor-hint" className="ml-auto pr-2 text-[10px] text-ink-dim">
-          {tool === 'place' ? (
+          {ws === 'blocks' ? (
             <>
-              <span className="hidden md:inline">PLACE — click a surface lands a block · the widget then moves ✥ / turns ⟳ / stretches ⤢ it · ⇧ continues · Esc cancels</span>
-              <span className="md:hidden">PLACE — TAP a surface to land a block, the widget then moves/turns/stretches it</span>
+              <span className="hidden md:inline">BLOCKS — click lands a 1×1×1 cell (brush paint below) · ⇧ continues a block · ✎ Edit transforms</span>
+              <span className="md:hidden">BLOCKS — TAP a surface to land a cell</span>
+            </>
+          ) : ws === 'tris' ? (
+            <>
+              <span className="hidden md:inline">TRIANGLES — clicks drop PINS · 3 pins = prism · drag a pin (⇧ = axis lock, orbit = depth)</span>
+              <span className="md:hidden">TRIANGLES — TAP to drop pins, 3 make a prism</span>
             </>
           ) : (
             <>
-              <span className="hidden md:inline">EDIT — a click selects · ✥ move · ⟳ turn · ⤢ stretch · ✕ deletes (Undo returns)</span>
-              <span className="md:hidden">EDIT — TAP a part or block, the rows below edit it</span>
+              <span className="hidden md:inline">MODIFY — a click selects ANYTHING (part · block · prism) · ✥ move · ⟳ turn · ⤢ stretch · prisms get pins</span>
+              <span className="md:hidden">MODIFY — TAP a part, block or prism, the rows below edit it</span>
             </>
           )}
         </span>
       </div>
-      {blockSub === 'tris' ? triPanel : (
-        <BlockPanel engine={engine} ctx={ctxRef.current} bp={bp!} blockSel={blockSel}
-          brush={brush} tab={tool} legacy={legacy} mirrorAxis={mirAxis}
-          onBrush={setBrush} onSelectBlock={setBlockSel} onApplied={sceneChanged}
-          onPaint={paintBlock}
-          rev={rev} onHoverBlock={setBlockHover}
-          onDeleteBlock={bi => ctxRef.current && deleteBlock(ctxRef.current, bi)}
-          custom={{ addColor: addPaletteColor, onPickSlot: slot => setBrush(b => ({ ...b, slot })) }} />
-      )}
+      {ws === 'tris' ? triPanel
+        : ws === 'blocks' ? blockPanel
+        : ws === 'parts' ? partsPanel
+        : blockSel >= 0 ? blockPanel
+        : triSel >= 0 ? triPanel
+        : (
+          /* v1.11 (we: "Main modify should not do anything until you select
+             your block or triangle (or part, which moves you into the Parts
+             category instantly)"): Modify opens EMPTY — the dock shows the
+             editor of the kind you picked, nothing before that */
+          <div className="px-3 py-3 text-[11px] leading-snug text-ink-dim" data-testid="modify-hint">
+            ✎ Modify starts empty — click a block, prism, or part on the vessel:
+            the editor for the kind you pick appears here (a part opens + Parts
+            instantly). The canvas gizmo works the same everywhere.
+          </div>)}
     </>
   );
-  const modePanel = mode === 'flight' ? (
-    <FlightPanel engine={engine} rev={rev} />
-  ) : mode === 'aero' ? (
-    <div className="overflow-y-auto"><WindPanel engine={engine} rev={rev} /></div>
-  ) : undefined;
 
   return (
     <div className="flex h-dvh w-full flex-col"
@@ -1149,10 +1492,6 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
           className={`ksp-btn shrink-0 px-2.5 py-1 text-[12px] ${dirty ? 'on font-semibold' : 'text-ink-dim'}`}>
           {dirty ? '● Save' : 'Save'}
         </button>
-        <button data-testid="toggle-panels" title="toggle the parts panel" onClick={() => setPanelOpen(o => !o)}
-          className="ksp-btn shrink-0 px-2.5 py-1 text-[12px] hover:text-accent">
-          ▤
-        </button>
         <button data-testid="toggle-options" title="View" aria-pressed={optsOpen}
           onClick={() => setOptsOpen(o => !o)}
           className={`ksp-btn shrink-0 px-2.5 py-1 text-[12px] hover:text-accent ${optsOpen ? 'on' : ''}`}>
@@ -1163,81 +1502,16 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         data-testid="file-input"
         onChange={e => { const f = e.target.files?.[0]; if (f) readFile(f); e.target.value = ''; }} />
       <div className="relative flex min-h-0 flex-1">
-        {/* KSP layout: the parts list lives on the LEFT (mobile: drawer —
-            tap the dimmed viewport to dismiss, ✕ in the drawer header).
-            Collapsible to a BOOKMARK TAB (user 2026-10-19: "make the tab
-            collapsible instead, with a > and < icon … only the expander
-            visible like a little bookmark tab on the side, so it's mostly
-            unobscuring to the view"): open state carries a ‹ tab clipped to
-            the panel's right edge, collapsed state leaves only a slim › tab
-            at the viewport edge — one toggle (testid panel-tab) both ways,
-            and the ▤ button / re-clicking the active View tile do the same. */}
-        {panelOpen && (
-          <>
-            <div data-testid="panel-backdrop" onClick={() => setPanelOpen(false)}
-              className="absolute inset-0 z-[5] bg-black/40 md:hidden" />
-            <aside data-testid="panel-aside"
-              className="absolute inset-y-0 left-0 z-10 flex w-[68vw] max-w-[300px] flex-col border-r border-white/10
-                         shadow-2xl md:relative md:z-auto md:w-[300px] md:shadow-none">
-              <button data-testid="panel-tab" title="collapse the parts panel"
-                aria-label="collapse the parts panel" onClick={() => setPanelOpen(false)}
-                className="absolute -right-5 top-1/2 z-20 flex h-16 w-5 -translate-y-1/2 items-center
-                           justify-center rounded-r-md border border-l-0 border-white/15 bg-panel2
-                           text-[12px] text-ink-dim shadow-lg hover:text-accent">
-                &lt;
-              </button>
-              <div className="flex h-9 shrink-0 items-center justify-between border-b border-white/10 px-3
-                              md:hidden">
-                <button data-testid="panel-close" onClick={() => setPanelOpen(false)}
-                  aria-label="close panel"
-                  className="ksp-btn rounded px-2.5 py-1 text-[13px] text-ink hover:text-accent">
-                  ✕
-                </button>
-                <span className="ksp-label text-[11px] text-ink-dim">Parts</span>
-              </div>
-              <div className="flex min-h-0 flex-1 flex-col">
-                {bp && ctxRef.current && (
-                  <Panel
-                    engine={engine} ctx={ctxRef.current} bp={bp} sel={sel} rev={rev}
-                    legacy={legacy}
-                    opts={opts} hullOpacity={hullOpacity} onHullOpacity={setHullOp}
-                    gizmoOn={gizmoOn && mode === 'edit'} onGizmo={setGizmo}
-                    hiDef={hiDef} onHiDef={onHiDef}
-                    staticInfo={staticInfo} onStaticInfo={setStaticInfo}
-                    onOpt={toggleOpt}
-                    onSelect={(ci, fly) => { engineRef.current?.select(ci); if (fly) engineRef.current?.flyTo(ci); }}
-                    onSelectSub={bi => engineRef.current?.selectSub(bi)}
-                    edits={edits} inspKey={inspKey} markDirty={markDirty}
-                    readOnly={mode === 'view'}
-                    bottom={modePanel}
-                    selOverBottom={mode === 'edit'}
-                    manifest={manifest}
-                    placingType={placing}
-                    onPlaceType={(t) => { setPlacing(t); if (t && mode === 'view') setMode('edit'); }}
-                    tool={mode === 'edit' ? tool : undefined}
-                    onTool={setTool}
-                    statsOnly={mode === 'view'}
-                  />
-                )}
-              </div>
-            </aside>
-          </>
-        )}
-        {!panelOpen && (
-          <button data-testid="panel-tab" title="show the parts panel" aria-label="show the parts panel"
-            onClick={() => setPanelOpen(true)}
-            className="absolute left-0 top-1/2 z-20 flex h-16 w-5 -translate-y-1/2 items-center
-                       justify-center rounded-r-md border border-l-0 border-white/15 bg-panel2
-                       text-[12px] text-ink-dim shadow-lg hover:text-accent">
-            &gt;
-          </button>
-        )}
+        {/* v1.11 NO SIDE PANEL (we: "no more side panel"): catalog, parts list,
+            inspector, vessel INFO and the mode workspaces ALL live in the
+            bottom dock — the thumb zone mobile wants. */}
         <main className="flex min-w-0 flex-1 flex-col">
           <div className="relative min-h-0 flex-1">
             <Viewport bp={bp} onPick={setHit} onEngine={onEngine}
-              mode={mode} tool={tool} onBlockPick={onBlockPick} onBlockHover={computeGhost}
+              mode={mode === 'clean' ? 'view' : mode} tool={tool} onBlockPick={onBlockPick} onBlockHover={computeGhost}
               placing={mode === 'edit' ? placing : null} onPlace={onPlacePoint}
               onPaintOpen={() => setPaintOpen(o => !o)}
+              onBlockToTris={blockToTriangles}
               onPlaceCancel={onPlaceCancel} onPlaceBuild={onPlaceBuild}
               onPlaceRotate={onPlaceRotate} onPlaceBack={onPlaceBack}
               keepView={bpKeepView}
@@ -1255,7 +1529,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
                   Paint —{' '}
                   {mode === 'edit' && blockSel >= 0 ? `Block[${blockSel}]${bp.data.blocks[blockSel] && blockMirrorTwin(bp, blockSel, mirAxis) >= 0 ? ' + twin' : ''}`
                     : sel.ci >= 0 ? `${bp.data.components[sel.ci]?.type ?? 'part'}[${sel.ci}]`
-                      : 'brush'}
+                      : triSel >= 0 ? `Triangle[${triSel}]`
+                        : 'brush'}
                   <button data-testid="palette-close" onClick={() => setPaintOpen(false)}
                     className="ksp-btn rounded px-1.5 text-[11px] text-ink-dim hover:text-accent">✕</button>
                 </div>
@@ -1266,6 +1541,14 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
                   <CompPaint bp={bp} legacy={legacy} comp={bp.data.components[sel.ci]!}
                     onApply={(which, c) => paintComp(sel.ci, which, c)}
                     custom={{ addColor: addPaletteColor, onPickSlot: () => undefined }} />
+                ) : triSel >= 0 ? (
+                  // a selected PRISM paints through the funnel (was: the 🎨
+                  // window silently painted the brush — "WHEN I PICK A COLOR
+                  // FOR A TRIANGLE IT DOES NOT APPLY")
+                  <SwatchGrid bp={bp} legacy={legacy}
+                    current={bp.data.triangles?.[triSel] ? (bp.data.triangles[triSel] as unknown as { colors?: number[] }).colors?.[0] ?? 51 : 51}
+                    onPick={paintTri}
+                    custom={{ addColor: addPaletteColor, onPickSlot: slot => paintTri(slot) }} />
                 ) : (
                   <SwatchGrid bp={bp} legacy={legacy} current={brush.slot}
                     onPick={slot => setBrush(b => ({ ...b, slot }))}
@@ -1293,20 +1576,10 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
                 <ViewOpts opts={opts} onOpt={toggleOpt} hullOpacity={hullOpacity} onHullOpacity={setHullOp}
                                     gizmoOn={gizmoOn} onGizmo={setGizmo} hiDef={hiDef} onHiDef={onHiDef}
                                     staticInfo={staticInfo} onStaticInfo={setStaticInfo}
-                                    mirrorAxis={mirAxis} onMirrorAxis={onMirrorAxis}
+                                    mirrorAxis={mirAxis} onMirrorAxis={onMirrorAxisArm}
                                     backdrop={backdrop} onBackdrop={onBackdrop}
                                     ortho={ortho} onOrtho={onOrtho} />
               </div>
-            )}
-            {/* TOOLS ▸ the definition-driven modal dialog (v1.7): opens over
-                the viewport, OK-and-run or Cancel. */}
-            {toolOpen && bp && ctxRef.current && (
-              <ToolDialog key={toolOpen}
-                tool={TOOLS.find(t => t.id === toolOpen)!} bp={bp} ctx={ctxRef.current}
-                initialForm={placeStage?.toolId === toolOpen ? placeStage.form : undefined}
-                onClose={() => setToolOpen(null)}
-                onPlaced={(t, f, p) => onPlaced(t, f, p)}
-                onApplied={msg => { sceneChanged(); setToolMsg(msg); }} />
             )}
             {toolMsg && (
               <div data-testid="tool-toast"
@@ -1327,6 +1600,18 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
             {/* KSP bottom-right: the camera cluster over the viewport */}
             <CameraCluster engine={engine} />
           </div>
+          {/* v1.11 THE BOTTOM DOCK IS THE PANEL (we: "no more side panel"):
+              ⌖ Info shows the vessel's amounts here (renamed from View),
+              the workspace modes show their dock, flight/aero show theirs. */}
+          {mode === 'view' && bp && (
+            <div data-testid="build-dock"
+              className="h-[38%] max-h-[46%] min-h-[200px] shrink-0 overflow-y-auto border-t
+                         border-[rgba(217,212,189,.22)] bg-panel">
+              <div className="ksp-label px-3 pt-2 text-[11px] font-semibold text-ink-dim">
+                Info — the vessel&apos;s amounts</div>
+              <VesselStats engine={engine} bp={bp} rev={rev} />
+            </div>
+          )}
           {mode === 'edit' && bp && (
             <div data-testid="build-dock"
               className="h-[38%] max-h-[46%] min-h-[200px] shrink-0 overflow-y-auto border-t
@@ -1341,8 +1626,32 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
               {wirePanel}
             </div>
           )}
+          {mode === 'flight' && bp && (
+            <div data-testid="build-dock"
+              className="h-[38%] max-h-[46%] min-h-[200px] shrink-0 overflow-y-auto border-t
+                         border-[rgba(217,212,189,.22)] bg-panel">
+              <FlightPanel engine={engine} rev={rev} />
+            </div>
+          )}
+          {mode === 'aero' && bp && (
+            <div data-testid="build-dock"
+              className="h-[38%] max-h-[46%] min-h-[200px] shrink-0 overflow-y-auto border-t
+                         border-[rgba(217,212,189,.22)] bg-panel">
+              <div className="overflow-y-auto"><WindPanel engine={engine} rev={rev} /></div>
+            </div>
+          )}
         </main>
-        {(dl || dlErr) && (
+
+        {/* TOOLS ▸ the definition-driven modal dialog (v1.7): opens over
+            the viewport, OK-and-run or Cancel. */}
+        {toolOpen && bp && ctxRef.current && (
+          <ToolDialog key={toolOpen}
+            tool={TOOLS.find(t => t.id === toolOpen)!} bp={bp} ctx={ctxRef.current}
+            initialForm={placeStage?.toolId === toolOpen ? placeStage.form : undefined}
+            onClose={() => setToolOpen(null)}
+            onPlaced={(t, f, p) => onPlaced(t, f, p)}
+            onApplied={msg => { sceneChanged(); setToolMsg(msg); }} />
+        )}        {(dl || dlErr) && (
           <DownloadOverlay name={name} dl={dl} err={dlErr}
             onRetry={() => { forceRef.current = true; setRetrySeq(s => s + 1); }}
             onBack={onBack} />

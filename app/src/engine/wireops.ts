@@ -43,6 +43,57 @@ export { portRole, portHint, compGroup, hubInputIndex, incompatReason, compatibl
 
 export const WIRE_KINDS: WireKind[] = ['data', 'lowvoltage', 'highvoltage', 'fluid', 'item'];
 
+/** v1.11 SHORT WIRE LABELS (we: "labels on the wires are too long
+ *  lowvoltage => lv, similarly hv, and ports should be short name. fl for
+ *  fluid and it for items. we cant have names that are too long."). The
+ *  kind words as the UI speaks them. */
+export const KIND_SHORT: Record<WireKind, string> = {
+  data: 'data', lowvoltage: 'lv', highvoltage: 'hv', fluid: 'fl', item: 'it',
+};
+
+/** v1.11 SHORT TYPE LABELS (we: "hifhvoltagebattery is not a good name for
+ *  label"): the wire UI's component names abbreviate — High/Low/Medium
+ *  Voltage collapse to HV/LV/MV and long tails shorten; a name the rules
+ *  do not shorten STAYS (PilotSeat beats Pilot-Seat). The inspector keeps
+ *  the full type — this is the label voice, not the identity. */
+const TYPE_TAIL: Record<string, string> = {
+  Battery: 'Batt', Junction: 'Junc', Converter: 'Conv', Controller: 'Ctrl',
+  Computer: 'Comp', Connector: 'Conn', Regulator: 'Reg', Antenna: 'Ant',
+  Generator: 'Gen', Distribution: 'Dist', Sensor: 'Sens', Detector: 'Det',
+  Repository: 'Repo', Transceiver: 'Txrx', Activation: 'Act',
+};
+export function shortType(type: string): string {
+  const words: string[] = [];
+  let rest = type;
+  for (const [pre, sub] of [['HighVoltage', 'HV'], ['LowVoltage', 'LV'],
+    ['MediumVoltage', 'MV']] as const)
+    if (rest.startsWith(pre)) { words.push(sub); rest = rest.slice(pre.length); break; }
+  for (const w of rest.match(/[A-Z][a-z]*/g) ?? (rest ? [rest] : []))
+    words.push(TYPE_TAIL[w] ?? w);
+  const out = words.join('-');
+  return out.length < type.length ? out : type;
+}
+
+/** Short label for a data-driven [ADAPTER] port name: tokens split on
+ *  [-_. /], the game's recurring words abbreviated (lowvoltage→lv,
+ *  highvoltage→hv, input→in, output→out, fluid→fl, item(s)→it), the filler
+ *  'port' dropped, zero-padded numbers compacted (001→1), rejoined with
+ *  '-'. Purely cosmetic — the FILE keeps the verbatim name everywhere. */
+export function shortPort(name: string): string {
+  const toks = name.toLowerCase().split(/[-_.\s/]+/).filter(Boolean).map(t =>
+    t === 'lowvoltage' ? 'lv'
+      : t === 'highvoltage' ? 'hv'
+        : t === 'input' ? 'in'
+          : t === 'output' ? 'out'
+            : t === 'fluid' ? 'fl'
+              : t === 'item' || t === 'items' ? 'it'
+                : t === 'port' ? ''
+                  : /^0\d*$/.test(t) ? String(Number(t))
+                    : t)
+    .filter(Boolean);
+  return toks.join('-') || name.toLowerCase();
+}
+
 export interface PortInfo extends WirePort {}
 
 /** FILE-world socket position of an adapter port (built pose): the v1.8.1
@@ -294,10 +345,11 @@ export function pipeLabel(bp: Blueprint, pi: number,
   const p = bp.data.pipes?.[pi];
   if (!p) return null;
   const side = (fi: number, port: string) => {
-    const e = flat[fi];
-    if (!e) return `#${fi}.${port}`;
-    return e.top >= 0 ? `${e.comp.type}[${e.top}].${port}`
-      : `${e.comp.type}[B${e.path[2]}].${port}`;
+    const sp = shortPort(port);          // v1.11: labels are SHORT (the file
+    const e = flat[fi];                  // keeps the verbatim name)
+    if (!e) return `#${fi}.${sp}`;
+    return e.top >= 0 ? `${shortType(e.comp.type)}[${e.top}].${sp}`
+      : `${shortType(e.comp.type)}[B${e.path[2]}].${sp}`;
   };
   return `${side(p.a_component, p.a_port)} ↔ ${side(p.b_component, p.b_port)}`;
 }

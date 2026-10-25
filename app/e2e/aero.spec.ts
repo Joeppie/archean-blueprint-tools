@@ -22,14 +22,10 @@ async function waitConverged(page: Page, timeout = 40_000) {
   }).toPass({ timeout, intervals: [250, 500] });
 }
 
-/** the parts panel is a drawer under md: open/close it on phones only */
-async function setDrawer(page: Page, want: boolean) {
-  if (await page.evaluate(() => window.innerWidth >= 768)) return;
-  const aside = page.getByTestId('panel-aside');
-  const vis = await aside.isVisible().catch(() => false);
-  if (vis !== want) await page.getByTestId('toggle-panels').click();
-  if (want) await expect(aside).toBeVisible();
-}
+/** v1.11: there is NO side drawer anymore (we: "no more side panel") —
+ *  everything the drawer held (catalog, parts list, inspector, Info, the
+ *  flight/wind panels) lives in the always-visible bottom dock. */
+async function setDrawer(_page: Page, _want = true) { /* no-op */ }
 
 test.describe('wind tunnel @aero @slow', () => {
   test('Wind mode solves the field and draws streamlines', async ({ page }) => {

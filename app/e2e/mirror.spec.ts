@@ -5,6 +5,15 @@
 // twin index pairs, so later edits propagate through the established path.
 import { expect, test, type Page } from '@playwright/test';
 
+/** v1.11 ONE LINGO: the mirror widget's axis chips ARE the toggle — arm
+ *  mirrored placement across x deterministically (lit = pairs land). */
+async function armMirror(page: Page, want = true) {
+  const chip = page.getByTestId('mirw-x');
+  const lit = (await chip.getAttribute('aria-pressed')) === 'true';
+  if (lit !== want) await chip.click();
+  await expect(chip).toHaveAttribute('aria-pressed', want ? 'true' : 'false');
+}
+
 type Blk = { frame_x?: number; pos_x: number; size_x: number; type: number };
 const blocksOf = (page: Page) => page.evaluate(() => {
   const w = window as unknown as { __ARCHEAN__?: { engine: { blueprint: {
@@ -18,14 +27,10 @@ const compsOf = (page: Page) => page.evaluate(() => {
 });
 const cellX = (b: Blk) => (b.frame_x ?? 0) * 12 + b.pos_x;
 
-/** the parts panel is a drawer under md: open/close it on phones only */
-async function setDrawer(page: Page, want: boolean) {
-  if (await page.evaluate(() => window.innerWidth >= 768)) return;
-  const aside = page.getByTestId('panel-aside');
-  const vis = await aside.isVisible().catch(() => false);
-  if (vis !== want) await page.getByTestId('toggle-panels').click();
-  if (want) await expect(aside).toBeVisible();
-}
+/** v1.11: there is NO side drawer anymore (we: "no more side panel") —
+ *  everything the drawer held (catalog, parts list, inspector, Info, the
+ *  flight/wind panels) lives in the always-visible bottom dock. */
+async function setDrawer(_page: Page, _want = true) { /* no-op */ }
 
 test.describe('⇄ mirrored placement @place', () => {
   test('blocks: one click lands the block + its mirrored twin', async ({ page }) => {
@@ -37,10 +42,9 @@ test.describe('⇄ mirrored placement @place', () => {
     // build-dock header now (the phone drawer no longer hosts any of it) —
     // the drawer's backdrop covers the dock while open, so every dock tap
     // happens with the drawer CLOSED.
-    await page.getByTestId('tooltab-place').click();          // the PLACE flavor (dock header)
-    await expect(page.getByTestId('mirror-twin')).toBeVisible();
-    await page.getByTestId('mirror-twin').click();          // twin ON (persisted)
-    await expect(page.getByTestId('mirror-twin')).toContainText('twin ON');
+    await page.getByTestId('ws-blocks').click();          // the PLACE flavor (dock header)
+    await expect(page.getByTestId('mirw-x')).toBeVisible();
+    await armMirror(page, true);
 
     const before = (await blocksOf(page)).length;
     const canvas = page.getByTestId('canvas');
@@ -80,7 +84,7 @@ test.describe('⇄ mirrored placement @place', () => {
     expect(twin!.size_x).toBe(self!.size_x);
     expect(twin!.type).not.toBe(255);
     // mirror is a closed involution on the placed type
-    await page.getByTestId('tooltab-edit').click();      // the EDIT flavor (dock header)
+    await page.getByTestId('ws-edit').click();      // the EDIT flavor (dock header)
     await expect(page.getByTestId('block-edit')).toBeVisible();
   });
 
@@ -92,14 +96,13 @@ test.describe('⇄ mirrored placement @place', () => {
     // v1.10.7: PLACE flavor from the dock header (drawer closed), then the
     // drawer hosts ONLY the catalog (the parts catalogue is the panel's
     // PLACE flavor content — that is where the drawer stays useful).
-    await page.getByTestId('tooltab-place').click();       // PLACE flavor = catalog
+    await page.getByTestId('ws-parts').click();         // v1.11: the catalog lives in + Parts
     await setDrawer(page, true);
-    await page.getByTestId('filter').fill('smallwheel');
+    await page.getByTestId('catalog-dock').getByTestId('filter').fill('smallwheel');
     await page.getByTestId('catalog-item').first().click();
     await expect(page.getByTestId('place-hint')).toContainText('SmallWheel');
     await setDrawer(page, false);
-    await page.getByTestId('mirror-twin').click();        // shared twin switch (dock)
-    await expect(page.getByTestId('mirror-twin')).toContainText('twin ON');
+    await armMirror(page, true);
 
     const before = (await compsOf(page)).length;
     const canvas = page.getByTestId('canvas');

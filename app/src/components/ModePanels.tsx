@@ -16,7 +16,8 @@ import { MATERIALS, MATERIAL_HINT, materialName } from '../engine/tools';
 import { cssColor, resolveColor } from '../engine/palette';
 import { SwatchGrid, BlockPaint, type CustomPaint } from './ColorPanel';
 import { autoWire, portCensus, connectedPorts, unconnectedPorts, WIRE_KINDS,
-  hubInputIndex, candidatesFor, pipeLabel, wireNets } from '../engine/wireops';
+  hubInputIndex, candidatesFor, pipeLabel, wireNets, KIND_SHORT, shortPort, shortType } from '../engine/wireops';
+import type { WireKind } from '../engine/wiremodel';
 import { flattenComponents } from '../engine/subgrid';
 import { triCentroid, triCorners, triSpan, setTriCorner, shiftTriCells } from '../engine/tris';
 import { hullVertex } from '../engine/hullfit';
@@ -573,7 +574,7 @@ export function WirePanel(p: {
   /** list-hover gold-lights ONE CABLE in the viewport (null clears) */
   onHoverPipe?: (pi: number | null) => void;
 }) {
-  const [draft, setDraft] = useState<{ ci: number; name: string; kind: string; at: readonly [number, number, number] } | null>(null);
+  const [draft, setDraft] = useState<{ ci: number; name: string; kind: WireKind; at: readonly [number, number, number] } | null>(null);
   // two-step manual wiring: candidate COMPONENT first, then explicitly one
   // of ITS free ports (the user: "let me select target ports on compatible
   // elements manually, so that this can be evaluated")
@@ -623,7 +624,7 @@ export function WirePanel(p: {
     const oi = q[`${other}_component` as 'a_component' | 'b_component'];
     const op = q[`${other}_port` as 'a_port' | 'b_port'];
     const e = flat[oi];
-    const label = e ? (e.top >= 0 ? `${e.comp.type}[${e.top}].${op}` : `${e.comp.type}[B${e.path[2]}].${op}`)
+    const label = e ? (e.top >= 0 ? `${shortType(e.comp.type)}[${e.top}].${op}` : `${shortType(e.comp.type)}[B${e.path[2]}].${op}`)
       : `#${oi}.${op}`;
     return { pi, label };
   };
@@ -662,7 +663,7 @@ export function WirePanel(p: {
         <Sec title="Ports" testid="wire-census">
           {perKind.map(k => (
             <div key={k.kind} className="flex justify-between text-[11px]">
-              <span className="text-ink">{k.kind}</span>
+              <span className="text-ink">{KIND_SHORT[k.kind]}</span>
               <span className={k.wired < k.total ? 'text-gold' : 'text-emerald-400'}>
                 {k.wired}/{k.total} connected
               </span>
@@ -687,7 +688,7 @@ export function WirePanel(p: {
           <div className="max-h-64 space-y-1 overflow-y-auto">
             {nets.map((n, i) => {
               const by = { source: [] as string[], hub: [] as string[], device: [] as string[] };
-              for (const m of n.members) by[m.group].push(`${m.type}[${m.ci}]`);
+              for (const m of n.members) by[m.group].push(`${shortType(m.type)}[${m.ci}]`);
               const chain = (arr: string[], cap = 5) =>
                 arr.length <= cap ? arr.join(', ') : `${arr.slice(0, cap).join(', ')} +${arr.length - cap}`;
               const segs = [by.source, by.hub, by.device].filter(a => a.length)
@@ -695,7 +696,7 @@ export function WirePanel(p: {
               return (
                 <div key={i} data-testid="wire-net" className="rounded bg-panel2 px-2 py-[3px]">
                   <div className="flex justify-between text-[10px] uppercase tracking-wide text-ink-dim">
-                    <span>{n.kind}</span><span>{n.pipes.length} cables · {n.members.length} parts</span>
+                    <span>{KIND_SHORT[n.kind]}</span><span>{n.pipes.length} cables · {n.members.length} parts</span>
                   </div>
                   <div className="text-[11px] text-ink">{segs.join(' → ')}</div>
                   <div className="flex flex-wrap gap-1 pt-[2px]">
@@ -704,7 +705,7 @@ export function WirePanel(p: {
                         className="rounded bg-black/25 px-1 text-[10px] text-ink hover:text-accent"
                         onMouseEnter={() => p.onHoverComp(m.ci)} onMouseLeave={() => p.onHoverComp(null)}
                         onClick={() => p.onSelectComp(m.ci)}>
-                        {m.type}[{m.ci}]
+                        {shortType(m.type)}[{m.ci}]
                       </button>
                     ))}
                   </div>
@@ -743,13 +744,13 @@ export function WirePanel(p: {
         </div>
       </Sec>
       <div className="space-y-3">
-        <Sec title={p.sel >= 0 ? `This part — ${p.bp.data.components[p.sel]?.type}[${p.sel}]` : 'Manual wiring'}
+        <Sec title={p.sel >= 0 ? `This part — ${shortType(p.bp.data.components[p.sel]?.type ?? '')}[${p.sel}]` : 'Manual wiring'}
           testid="wire-manual">
           {p.sel < 0 && <div className="text-[11px] text-ink-dim">Select a component (list or viewport) to see its ports.</div>}
           {p.sel >= 0 && (
             <>
               <div className="pb-1 text-[11px] text-ink">
-                {p.bp.data.components[p.sel]?.type}[{p.sel}] ports:
+                {shortType(p.bp.data.components[p.sel]?.type ?? '')}[{p.sel}] ports:
               </div>
               {census.filter(c => c.ci === p.sel).map(c => {
                 const part = partnerOf(p.sel, c.name);
@@ -759,10 +760,10 @@ export function WirePanel(p: {
                       className={`min-w-0 flex-1 truncate rounded px-2 py-[2px] text-left text-[11px] ${
                         draft?.name === c.name && draft?.ci === c.ci ? 'bg-accent/30 text-accent'
                           : part ? 'text-ink-dim' : 'bg-panel2 text-ink hover:bg-white/10'}`}
-                      title={`${roleTip(c.role)} · ${c.kind}${part ? ` — on: ${part.label}` : ' — click to wire'}`}
+                      title={`${c.name} · ${KIND_SHORT[c.kind]} · ${roleTip(c.role)}${part ? ` — on: ${part.label}` : ' — click to wire'}`}
                       onClick={() => setDraft({ ci: c.ci, name: c.name, kind: c.kind, at: c.at })}>
-                      {part ? '⇄' : '○'} {c.name}{' '}
-                      <span className="ml-1 text-[9px] uppercase text-ink-dim">{c.kind}</span>
+                      {part ? '⇄' : '○'} {shortPort(c.name)}{' '}
+                      <span className="ml-1 text-[9px] uppercase text-ink-dim">{KIND_SHORT[c.kind]}</span>
                       <span className="ml-1 text-[9px] text-ink-dim" title={roleTip(c.role)}>{roleBadge(c.role)}</span>
                       {part && <span className="ml-1 text-[10px] text-ink-dim">↔ {part.label}</span>}
                     </button>
@@ -781,7 +782,7 @@ export function WirePanel(p: {
                 <div className="pt-2">
                   <div className="flex items-center justify-between pb-1">
                     <span className="text-[10px] uppercase tracking-wide text-ink-dim">
-                      {draft.kind} from {draft.name} →
+                      {KIND_SHORT[draft.kind]} from {shortPort(draft.name)} →
                     </span>
                     <button className="text-[10px] text-ink-dim hover:text-ink"
                       onClick={() => { setDraft(null); setTPart(null); p.onHoverComp(null); }}>cancel</button>
@@ -790,14 +791,14 @@ export function WirePanel(p: {
                     onHover={id => p.onHoverComp(id ? +id.split('/')[0]! : null)}
                     entries={candParts.map(([ci, v]) => ({
                       id: `${ci}/0`,
-                      label: `${v.type}[${ci}]${tPart === ci ? '  ◂' : ''}`,
+                      label: `${shortType(v.type)}[${ci}]${tPart === ci ? '  ◂' : ''}`,
                       sub: `${v.n} free · ${v.why} · ${v.d.toFixed(1)} m`,
                     }))}
                     onPick={id => { setTPart(+id.split('/')[0]!); setConnectMsg(''); }} />
                   {tPart !== null && (
                     <div className="pt-2">
                       <div className="pb-1 text-[10px] uppercase tracking-wide text-ink-dim">
-                        free {draft.kind} ports on {p.bp.data.components[tPart]?.type}[{tPart}]:
+                        free {KIND_SHORT[draft.kind]} ports on {p.bp.data.components[tPart]?.type}[{tPart}]:
                       </div>
                       {candidatesFor(
                         (open.find(q => q.ci === draft.ci && q.name === draft.name) ?? draft) as never,
@@ -808,12 +809,12 @@ export function WirePanel(p: {
                             onMouseEnter={() => p.onHoverComp(tPart)}
                             onClick={() => {
                               const ok = p.onConnect(draft.ci, draft.name, tPart, c.port.name);
-                              setConnectMsg(ok ? `wired ${draft.name} → ${p.bp.data.components[tPart]?.type}[${tPart}]/${c.port.name}`
+                              setConnectMsg(ok ? `wired ${shortPort(draft.name)} → ${shortType(p.bp.data.components[tPart]?.type ?? '')}[${tPart}]/${shortPort(c.port.name)}`
                                 : 'invalid pairing (port busy or incompatible)');
                               if (ok) { setDraft(null); setTPart(null); }
                               p.onHoverComp(null);
                             }}>
-                            ○ {c.port.name}{' '}
+                            ○ {shortPort(c.port.name)}{' '}
                             <span className="text-[10px] text-ink-dim">{c.why} · {c.dist.toFixed(1)} m</span>
                           </button>
                         ))}
@@ -833,9 +834,9 @@ export function WirePanel(p: {
                 className="block w-full truncate rounded bg-panel2 px-2 py-[3px] text-left text-[11px] text-ink hover:bg-white/10"
                 onMouseEnter={() => p.onHoverComp(w.ci)}
                 onClick={() => p.onSelectComp(w.ci)}
-                title={`${w.type} ${w.name} — ${w.kind} ${roleTip(w.role)} (${w.group}${
+                title={`${w.type} ${w.name} — ${KIND_SHORT[w.kind]} ${roleTip(w.role)} (${w.group}${
                   w.group === 'hub' ? (hubIn.has(`${w.ci}/${w.kind}`) ? ', has inputs: this side is downstream' : '') : ''})`}>
-                <span className="text-gold">⚠</span> {w.type}[{w.ci}] {w.name} — {w.kind} {roleBadge(w.role)}
+                <span className="text-gold">⚠</span> {shortType(w.type)}[{w.ci}] {shortPort(w.name)} — {KIND_SHORT[w.kind]} {roleBadge(w.role)}
               </button>
             ))}
           </div>
@@ -1003,7 +1004,21 @@ export function TriPanel(p: {
   /** v1.11: index of the triangle whose PINS ride the viewport (drag them
    *  to move corners — before AND after the commit) */
   pinTi?: number;
-  onSlot: (i: number, v: number) => void; brush: number[];
+  /** the mode: 'place' = canvas clicks drop pins; 'edit' = pins ride the
+   *  SELECTED triangle (the card text tells the story, v1.11) */
+  tab?: 'place' | 'edit';
+  /** v1.11 the SHARED brush: the picker visible IN TRIANGLES MODE — new
+   *  triangles inherit its slot + material (we: "WHEN I PICK A COLOR FOR A
+   *  TRIANGLE IT DOES NOT APPLY") */
+  brush?: Brush;
+  onBrush?: (b: Brush) => void;
+  legacy?: boolean;
+  /** v1.11 ⇄ flip: reverse the winding (the normal/front faces the other
+   *  way — outward ⇄ inward, the game's triangle direction control) */
+  onFlip?: () => void;
+  /** v1.11 face-colour write routed through the Editor (uniform twin rule) */
+  onFaceSlot?: (i: number, v: number) => void;
+  custom?: CustomPaint;
   onUndo: () => void; onDeleted: () => void; onClearSel: () => void;
   /** v1.10.6: rev re-keys the census memo (bp mutates in place) */
   rev?: number;
@@ -1059,9 +1074,31 @@ export function TriPanel(p: {
   return (
     <div className="grid grid-cols-1 items-start gap-x-4 px-1 pb-2 md:grid-cols-3">
       <div className="space-y-3">
+        {p.brush && p.onBrush && (
+          <Sec title="Triangles — brush paint" testid="tri-brush">
+            <div className="text-[10px] leading-snug text-ink-dim pb-1">
+              new triangles <b>inherit</b> this slot + material · painting a
+              SELECTED prism (🎨 or the face rows below) overrides per face
+            </div>
+            <div className="flex items-center gap-2 pb-1">
+              <Num label="slot" value={p.brush.slot} min={0} max={255}
+                onCommit={v => p.onBrush!({ ...p.brush!, slot: v })} />
+              <span data-testid="tri-swatch" title={`brush slot ${p.brush.slot}`}
+                className="inline-block h-5 w-5 rounded-[3px] border border-white/25"
+                style={{ background: cssColor(resolveColor(p.bp.data.colors ?? null, p.brush.slot, !!p.legacy)) }} />
+            </div>
+            <div className="flex items-center gap-2 pb-1 pt-1">
+              <span className="w-[62px] shrink-0 text-[11px] text-ink-dim">material</span>
+              <MaterialChips testid="tri-material" value={p.brush.material ?? 0}
+                onPick={m => p.onBrush!({ ...p.brush!, material: m })} />
+            </div>
+            <SwatchGrid bp={p.bp} legacy={!!p.legacy} current={p.brush.slot}
+              onPick={slot => p.onBrush!({ ...p.brush!, slot })} custom={p.custom} />
+          </Sec>
+        )}
         <Sec title={p.pinTi != null && p.pinTi >= 0
-          ? `Triangles — pins on Triangle[${p.pinTi}]`
-          : `Triangles — pins ${p.draft.length}/3 placed`} testid="tri-draft">
+          ? `Triangles — pins ${p.tab === 'edit' ? `on Triangle[${p.pinTi}]` : `${p.draft.length}/3 placed`}`
+          : `Triangles — pins ${p.tab === 'edit' ? 'ride the selected prism' : `${p.draft.length}/3 placed`}`} testid="tri-draft">
           {/* v1.11 PIN PLACEMENT (we: "putting down three points, which you
               can move around before and after placing all three of them, it
               should look like a pin, and an arrow should point down/up for
@@ -1071,7 +1108,14 @@ export function TriPanel(p: {
               commits the prism and the pins STAY on it — the gold arrow at
               the centroid is the winding normal (which way the face looks). */}
           <div className="text-[10px] leading-snug text-ink-dim">
-            {p.pinTi != null && p.pinTi >= 0 ? (
+            {p.tab === 'edit' && !(p.pinTi != null && p.pinTi >= 0) ? (
+              <>
+                Click a prism in the vessel (or a row beside) to <b>select</b>
+                it — its pins + the <b>centroid widget</b> (✥ move · ⟳ turn)
+                land on it. Dropping new pins lives in the{' '}
+                <b>▵ Triangles</b> mode.
+              </>
+            ) : p.pinTi != null && p.pinTi >= 0 ? (
               <>
                 The three pins ride <b>Triangle[{p.pinTi}]</b> — <b>drag</b> one to
                 move that corner (it re-drops on the surface under the cursor, snapped
@@ -1095,11 +1139,10 @@ export function TriPanel(p: {
               ↩ undo pin ({p.draft.length}/3)
             </button>
           )}
-          <div className="pt-1 text-[10px] text-ink-dim">brush colours (palette slots):</div>
-          {TRI_SLOTS.map((label, i) => (
-            <Num key={i} label={label.slice(0, 9)} value={p.brush[i] ?? 51} min={0} max={255}
-              onCommit={v => p.onSlot(i, v)} />
-          ))}
+          <div className="pt-1 text-[10px] leading-snug text-ink-dim">
+            new triangles inherit the <b>brush paint</b> (slot + material) —
+            per-face colours are on the triangle&apos;s own editor.
+          </div>
         </Sec>
         <Sec title={`Skin census — ${census.n} triangles`} testid="tri-census">
           <div className="space-y-[2px] text-[11px] text-ink-dim">
@@ -1196,6 +1239,18 @@ export function TriPanel(p: {
                 </span>
               ))}
             </div>
+            {/* v1.11 DIRECTION (we: "it should be possible to flip it just
+                like the in game triangles, determining whether it goes
+                outside or inside"): the gold arrow on the pins shows the
+                FRONT (colours[0]) normal; flip reverses the winding */}
+            <div className="mt-1 flex items-center gap-2">
+              <span className="text-[10px] uppercase tracking-wide text-ink-dim">Direction</span>
+              <button data-testid="tri-flip"
+                title="⇄ flip: the normal (the gold arrow, the FRONT colour side) points the other way — outward ⇄ inward; the geometry stays, front/back colours swap"
+                className="ksp-btn px-2 py-[2px] text-[10px]" onClick={() => p.onFlip?.()}>
+                ⇄ flip
+              </button>
+            </div>
             {/* SHADE: the game's smooth bit (v1.5.9 FORMAT finding) — flat
                 (no key / 0) shows the faceted prism, 1 welds the shading */}
             <div className="mt-1 flex items-center gap-2">
@@ -1216,6 +1271,7 @@ export function TriPanel(p: {
             {TRI_SLOTS.map((label, i) => (
               <Num key={i} label={label.slice(0, 9)} value={tn((o.colors as number[] | undefined)?.[i])} min={0} max={255}
                 onCommit={v => {
+                  if (p.onFaceSlot) { p.onFaceSlot(i, v); return; }   // twin-aware funnel
                   const arr = [...(((t as unknown as { colors?: number[] }).colors) ?? [])]; arr[i] = v;
                   (t as unknown as { colors: number[] }).colors = arr;
                   if (p.ctx) docSetNumber(p.ctx.doc, ['data', 'triangles', p.triSel, 'colors', i], v);

@@ -22,7 +22,7 @@ button opens it; the canvas stays usable beside it):
 
 * **Parts list** — two tabs: *by type* and *by subgrid*; one search filters
   both; groups start collapsed and a click on a row expands and reveals it.
-  Double-click flies the camera to the part. In the **✚ Place** flavour the
+  Double-click flies the camera to the part. In the **▤ Blocks** mode the
   list becomes the parts **catalog** — tap a part to hold it, then tap a
   surface on the craft.
 * **Inspector** — the selection's position/orientation sliders, `data` rows,
@@ -36,27 +36,35 @@ button opens it; the canvas stays usable beside it):
 
 ## The build dock (Edit mode)
 
-The **✎ Edit | ✚ Place** flavour switch lives in this WIDE bottom dock (not
-the sidebar): it sets what a canvas click / tap DOES. Beside it: the
-▤ Blocks | ▵ Triangles sub-tabs and the **mirror widget** — the **⇄ twin**
-arm plus the **⊘ x y z** chips: the lit chip IS the mirror plane (⊘ = no
-session mirror). The dock is three columns — the **brush + census**, a
+ONE mode control leads this WIDE bottom dock (v1.11, not the sidebar —
+one tri-state, no nested flips):
+
+| Mode | A canvas click… | The dock shows |
+|---|---|---|
+| **▤ Blocks** | lands a 1×1×1 block (brush paint/material) | the brush, census, block list, block editor |
+| **▵ Triangles** | drops a PIN (3 pins = prism) | the pin card, skin census, triangle list, triangle editor |
+| **✎ Edit** | SELECTS anything (part · block · prism) | BOTH workspaces stacked — lists + editors |
+
+Beside it: the **Mirror widget** — `⊘ x y z` glyph chips: click a plane to
+place mirrored pairs (auto-lit on mirrored crafts), click the lit plane
+again to stop, ⊘ for none. The dock is three columns — the **brush + census**, a
 **searchable list** of every block/triangle (hover a row to light it gold
 in the 3D view, click to select, ✕ deletes it and its twin — Undo brings
 them back), and the **editor of the selected item**.
 
-* **Placing (v1.11: no size to choose)**: pick ✚ Place and **click / tap a
-  surface** — one 1×1×1 block lands, is selected, and the mode widget pops
-  at it: **✥ move · ⟳ turn · ⤢ stretch**. Stretch drags a face — that face
-  moves and the opposite face stays anchored, in whole cells; the dock's
-  size rows do the same by number. The brush carries shape, paint and
-  material only.
+* **Placing (v1.11: no size to choose)**: pick **▤ Blocks** and **click /
+  tap a surface** — one 1×1×1 block lands, is selected, and the mode widget
+  pops at it: **✥ move · ⟳ turn · ⤢ stretch**. Stretch drags a face — that
+  face moves and the opposite face stays anchored, in whole cells; the
+  dock's size rows do the same by number. The brush carries shape, paint
+  and material only.
 * **Triangles**: pick **▵ Triangles**, then click three spots — each lands
   a **pin** on the lattice, draggable before the third lands; the third
   click commits the prism and the pins + a direction **arrow** stay on it
-  (drag a pin to reshape the triangle; a list row puts its pins AND the
-  ✥/⟳ centroid widget on any committed triangle — ✥ moves all three corners,
-  ⟳ turns it, lattice-quantised; Esc leaves).
+  (drag a pin to reshape it; new triangles inherit the BRUSH paint). In
+  **✎ Edit** a click on a prism selects it and lands its pins + the
+  ✥/⟳ centroid widget (✥ moves all three corners, ⟳ turns it,
+  lattice-quantised; Esc leaves).
 * **Editing**: pick ✎ Edit and tap a part (the inspector opens) or a block
   face (the block editor + the BLOCK widget open).
 

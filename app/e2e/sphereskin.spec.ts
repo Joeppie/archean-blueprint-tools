@@ -235,8 +235,9 @@ test.describe('generate balloon tool: dialog → movable ghost → cancel/build 
     // envelope — the collapsible row now reads its volume and the vacuum
     // lift at sea level, and the opened body lists all three gases.
     // (On a PHONE the side panel opens collapsed: ‹ tab first.)
+    // v1.11: the lift widget rides the ⌖ INFO dock (the sidebar is gone)
     if (await page.getByTestId('lift-widget').count() === 0)
-      await page.getByTestId('panel-tab').click();
+      await page.getByTestId('mode-view').click();
     await expect(page.getByTestId('lift-widget')).toBeVisible();
     await expect(page.getByTestId('lift-toggle')).toContainText(/vacuum \d+/);
     await page.getByTestId('lift-toggle').click();

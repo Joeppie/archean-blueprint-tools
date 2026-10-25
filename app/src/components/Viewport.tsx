@@ -106,7 +106,7 @@ declare global {
 let atlasP: Promise<ModelAtlas | null> | null = null;
 const getAtlas = (): Promise<ModelAtlas | null> => (atlasP ??= openAtlas());
 
-export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, onBlockPick, onBlockHover, placing = null, onPlace, onPaintOpen, onPlaceCancel, onPlaceBuild, onPlaceRotate, onPlaceBack, onManifest, keepView = false }: {
+export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, onBlockPick, onBlockHover, placing = null, onPlace, onPaintOpen, onBlockToTris, onPlaceCancel, onPlaceBuild, onPlaceRotate, onPlaceBack, onManifest, keepView = false }: {
   bp: Blueprint | null;
   onPick: (h: PickHit) => void;
   onEngine?: (e: Engine | null) => void;
@@ -140,6 +140,10 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
   /** 🎨 PALETTE button in the mode widget (v1.6): toggles the Editor's paint
    *  window — the colour alternative to the move/rotate gizmo modes */
   onPaintOpen?: () => void;
+  /** v1.11 ▵ button (we: "Button should exist to turn block to triangle when
+   *  selecting a block, on its widget"): convert the selected BLOCK into its
+   *  hull-triangle skin (the scoped hullify law); block-owned widget only */
+  onBlockToTris?: () => void;
   /** v1.6 TOOLS ▸ placement (Spheroid): the confirmed tool's movable ghost
    *  carries a label with ✕ Cancel / ✔ Build — both owned by the Editor */
   onPlaceCancel?: () => void;
@@ -292,6 +296,15 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
   // v1.8.0 FAUX-MIRROR ⚠ popup: poll the engine's conflict state (selection-
   // scoped, cheap) and re-anchor it every ~250 ms so it rides camera motion.
   const [warn, setWarn] = useState<{ text: string; info: boolean; x: number; y: number } | null>(null);
+  // v1.11 (we: "on mobile, the warning popups for mirroring shouldn't be on
+  // top of interface"): phones dock the popup at the viewport's bottom edge
+  // (above the build dock) as a compact strip instead of the 3-D anchor
+  const [mobile, setMobile] = useState(() => window.innerWidth < 768);
+  useEffect(() => {
+    const h = () => setMobile(window.innerWidth < 768);
+    addEventListener('resize', h);
+    return () => removeEventListener('resize', h);
+  }, []);
   useEffect(() => {
     const h = setInterval(() => {
       const e = engineRef.current, box = hostRef.current?.getBoundingClientRect();
@@ -384,15 +397,58 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
   // below the coord chip and the engine gold-lights the cable itself.
   const wireChipRef = useRef<HTMLDivElement>(null);
   const wireInfo = useRef<{ pi: number; label: string } | null>(null);
-  const showWire = (info: { pi: number; label: string } | null, cx: number, cy: number) => {
+  // v1.11 (we: "moving the cursor causes labels for the wires to show up,
+  // I guess that's fine if after 100 Ms"): the chip DWELLS — a cable must
+  // hold the cursor ~120 ms before its label appears (sweeps stay quiet);
+  // and 2 s of SOLID highlight opens the X-ray: the geometry between the
+  // camera and the cable's two parts thins out (engine.beginWireXray),
+  // restored the moment the hover ends.
+  const wireDwell = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wireShown = useRef(false);
+  const wirePos = useRef({ cx: 0, cy: 0 });
+  const xrayTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const xrayPi = useRef(-1);
+  const renderWireChip = (label: string, cx: number, cy: number) => {
     const chip = wireChipRef.current, host = hostRef.current;
     if (!chip || !host) return;
-    if (!info || !info.label) { chip.style.display = 'none'; return; }
     const hr = host.getBoundingClientRect();
-    chip.textContent = info.label;
+    chip.textContent = label;
     chip.style.display = 'block';
-    chip.style.left = `${Math.min(Math.max(4, cx - hr.left + 14), hr.width - 260)}px`;
-    chip.style.top = `${Math.max(4, cy - hr.top + 38)}px`;
+    // v1.11: clamp by the MEASURED chip (a long label wraps, never clips —
+    // the fixed 260 px clamp cut the tail off)
+    const w = chip.offsetWidth, h = chip.offsetHeight;
+    chip.style.left = `${Math.min(Math.max(4, cx - hr.left + 14), hr.width - w - 8)}px`;
+    chip.style.top = `${Math.max(4, Math.min(cy - hr.top + 38, hr.height - h - 6))}px`;
+  };
+  const showWire = (info: { pi: number; label: string } | null, cx: number, cy: number) => {
+    const chip = wireChipRef.current;
+    if (!chip) return;
+    if (!info || !info.label) {
+      if (wireDwell.current) { clearTimeout(wireDwell.current); wireDwell.current = null; }
+      if (xrayTimer.current) { clearTimeout(xrayTimer.current); xrayTimer.current = null; }
+      if (xrayPi.current >= 0) { xrayPi.current = -1; engineRef.current?.endWireXray(); }
+      wireShown.current = false;
+      chip.style.display = 'none';
+      return;
+    }
+    wirePos.current = { cx, cy };
+    if (!wireShown.current && !wireDwell.current) {
+      wireDwell.current = setTimeout(() => {
+        wireDwell.current = null;
+        const w = engineRef.current?.pipeHoverState();
+        if (w?.label) { wireShown.current = true; renderWireChip(w.label, wirePos.current.cx, wirePos.current.cy); }
+      }, 120);
+    } else if (wireShown.current) renderWireChip(info.label, cx, cy);
+    if (info.pi !== xrayPi.current) {
+      xrayPi.current = info.pi;
+      engineRef.current?.endWireXray();
+      if (xrayTimer.current) clearTimeout(xrayTimer.current);
+      xrayTimer.current = setTimeout(() => {
+        xrayTimer.current = null;
+        const w = engineRef.current?.pipeHoverState();
+        if (w && w.pi === info.pi) engineRef.current?.beginWireXray(info.pi);
+      }, 2000);
+    }
   };
   /** one throttled raycast + chip repaint */
   const coordRun = (x: number, y: number) => {
@@ -489,7 +545,7 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
           coordInfo.current = null;
           wireInfo.current = null;
           if (chipRef.current) chipRef.current.style.display = 'none';
-          if (wireChipRef.current) wireChipRef.current.style.display = 'none';
+          showWire(null, 0, 0);              // resets dwell + xray timers
           // the ghost dies with the pointer (the game's ghost too)
           lastHover.current = null;
           if (placeDrag.current) { engineRef.current?.placeDragEnd(); placeDrag.current = null; }
@@ -531,6 +587,17 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
               ⤢
             </button>
           )}
+          {/* v1.11 ▵ (we: "Button should exist to turn block to triangle when
+              selecting a block, on its widget"): the block's free faces
+              become its hull-triangle skin (scoped hullify law, game
+              outward+flat convention); the block is removed, Undo restores */}
+          {wBlock && (
+            <button title="▵ turn this block into hull triangles (its free faces become the skin; the block is removed — Undo returns it)"
+              data-testid="mode-tris" onClick={() => onBlockToTris?.()}
+              className="ksp-btn grid h-8 w-9 place-items-center text-[15px] leading-none">
+              ▵
+            </button>
+          )}
           {/* ⇄ mirror-twin BADGE (v1.8.0 uniform rule): a selection's twin always
               rides EVERY edit (position, rotation, shape, colour, material, delete)
               — this is an indicator: lit = a live twin pair, struck = none or the
@@ -554,10 +621,12 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
         // BLUE ℹ popup (the twin overlay stays gold — user: "just its popup")
         <div data-testid="twin-warn" role={warn.info ? 'status' : 'alert'}
           title={warn.info ? 'mirror twin differs in appearance only' : 'mirror-conflicting faux-mirror'}
-          className={`ksp-win absolute z-30 flex max-w-[240px] -translate-x-1/2 items-start gap-1.5
+          className={`ksp-win absolute z-30 flex items-start gap-1.5
                       rounded px-2 py-1 text-[10px] leading-snug ${
-                        warn.info ? 'text-[#9cc8ff]' : 'text-[#ff9c9c]'}`}
-          style={{ left: warn.x, top: Math.max(8, warn.y + 14) }}>
+                        warn.info ? 'text-[#9cc8ff]' : 'text-[#ff9c9c]'} ${
+                        mobile ? 'inset-x-2 bottom-[calc(38%+10px)]'
+                          : 'max-w-[240px] -translate-x-1/2'}`}
+          style={mobile ? undefined : { left: warn.x, top: Math.max(8, warn.y + 14) }}>
           <span className={`text-[13px] leading-none ${warn.info ? 'text-[#4da3ff]' : 'text-[#ff4d4d]'}`}>
             {warn.info ? 'ℹ' : '⚠'}</span>
           <span>{warn.text}</span>
@@ -607,8 +676,8 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
                    font-mono text-[11px] tracking-tight text-[#e8e8e8]" />
       {/* v1.10.1 the GOLD cable label: "Propeller[9].lowvoltage ↔ Computer[0].data_port.001" */}
       <div ref={wireChipRef} data-testid="wire-chip" style={{ display: 'none' }}
-        className="pointer-events-none absolute z-30 max-w-[280px] truncate rounded-sm
-                   bg-[#241c05]/90 px-1.5 py-[1px] font-mono text-[11px] tracking-tight
+        className="pointer-events-none absolute z-30 max-w-[min(92%,420px)] rounded-sm
+                   bg-[#241c05]/90 px-1.5 py-[1px] font-mono text-[11px] leading-snug tracking-tight
                    text-[#ffd479] ring-1 ring-[#ffd479]/40" />
     </div>
   );

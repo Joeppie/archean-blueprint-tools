@@ -73,7 +73,8 @@ test.describe('live data edits re-render the part (no reload) @live', () => {
     await watchLive(page);
     const b0 = await boxOf(page, ci);
     await page.getByTestId('mode-edit').click();                // data rows are Edit-mode only
-    await page.getByTestId('filter').fill('propeller');
+    await page.getByTestId('ws-parts').click();                 // v1.11: parts list = + Parts
+    await page.getByTestId('parts-list').getByTestId('filter').fill('propeller');
     await page.locator('[data-idx]').first().click();         // select → inspector
     const twistRow = page.locator('section', { hasText: 'Component data' }).getByTestId('row-n-twist');
     await twistRow.scrollIntoViewIfNeeded();
@@ -92,7 +93,7 @@ test.describe('live data edits re-render the part (no reload) @live', () => {
     await watchLive(page);
     const b0 = await boxOf(page, ci);                          // flat plate: thin y
     await page.getByTestId('mode-edit').click();                // data rows are Edit-mode only
-    await page.getByTestId('filter').fill('aileron');
+    await page.getByTestId('parts-list').getByTestId('filter').fill('aileron');
     await page.locator('[data-idx]').first().click();
     await scrub(page, 'angle', 120);                           // 120 px ≈ +6° (0.05/px)
     const { live, reload } = await counters(page);

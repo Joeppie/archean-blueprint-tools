@@ -151,6 +151,80 @@ export function setTriCornersAll(t: Triangle, ng: [Corner, Corner, Corner]):
   return d ? applyTriDelta(t, d) : null;
 }
 
+/** The ⇄ MIRROR TWIN of a triangle (v1.11, we: "mirror for triangle is not
+ *  placed"): corners g reflect across the session plane's cell-coord 6
+ *  (g → 12 − g, the same law as mirrorBlockCell on the corner lattice), and
+ *  v1↔v2 SWAP — an axis reflection flips the winding normal's mirror image
+ *  (det = −1), so the swap restores colours[0] FRONT = the mirrored front
+ *  direction, exactly like MIRROR_TYPES does for block shapes. The side
+ *  wall colours follow the edge relabelling: colours[2] (v0-v1) ↔
+ *  colours[4] (v2-v0), colours[3] (v1-v2) stays. */
+export function mirroredTriangle(t: Triangle, axis: 'x' | 'y' | 'z'): Triangle | null {
+  const a = axis === 'x' ? 0 : axis === 'y' ? 1 : 2;
+  const c = triCorners(t).map(g => {
+    const m: Corner = [g[0]!, g[1]!, g[2]!];
+    m[a] = 12 - m[a]!;
+    return m;
+  }) as [Corner, Corner, Corner];
+  const cols = ((t as unknown as { colors?: number[] }).colors ?? [51, 51, 51, 51, 51]).slice(0, 5);
+  const twin = triangleFromCorners(c[0]!, c[2]!, c[1]!,   // winding flipped
+    [cols[0]!, cols[1]!, cols[4]!, cols[3]!, cols[2]!]);
+  if (twin) {
+    const mat = (t as unknown as { material?: number }).material;
+    if (mat != null) (twin as unknown as { material: number }).material = mat;
+    const sm = (t as unknown as { smooth?: number }).smooth;
+    if (sm === 1) (twin as unknown as { smooth: number }).smooth = 1;
+  }
+  return twin;
+}
+
+/** v1.11 the twin INDEX of a triangle (the uniform mirror rule's identifier,
+ *  we: "when I moved a triangle, it didn't see it as mirrored"): the twin is
+ *  the other record whose corner SET is the x/y/z-reflection (g → 12 − g) of
+ *  this one's. Winding-agnostic (a sorted-set key), so the pair survives
+ *  flips; a drifted pair simply stops matching (faux-mirror semantics). */
+export function triTwinIndex(bp: Blueprint, ti: number, axis: 'x' | 'y' | 'z'): number {
+  const arr = bp.data.triangles ?? [];
+  const t = arr[ti];
+  if (!t) return -1;
+  const a = axis === 'x' ? 0 : axis === 'y' ? 1 : 2;
+  const key = (cs: readonly Corner[]): string =>
+    cs.map(g => [g[0]!, g[1]!, g[2]!]).sort((p, q) => p[0]! - q[0]! || p[1]! - q[1]! || p[2]! - q[2]!)
+      .map(g => g.join(',')).join(';');
+  const want = key(triCorners(t).map(g => {
+    const m: Corner = [g[0]!, g[1]!, g[2]!];
+    m[a] = 12 - m[a]!;
+    return m;
+  }));
+  for (let i = 0; i < arr.length; i++) {
+    if (i === ti) continue;
+    if (key(triCorners(arr[i]!)) === want) return i;
+  }
+  return -1;
+}
+
+/** v1.11 rotate a corner triple about its CENTROID by the quaternion q and
+ *  re-snap every corner to the lattice (the mirrored twin's rotate uses
+ *  qM = the mirror conjugate: qM[i] = (i === mirrorAxis ? q[i] : −q[i]) with
+ *  w kept — the engine's ⟳ commit pairs the two writes in one step). */
+export function rotateCornersQ(base: readonly [Corner, Corner, Corner],
+  q: { w: number; x: number; y: number; z: number }): [Corner, Corner, Corner] {
+  const f = base.map(g => [(g[0]! - 6) * CELL, (g[1]! - 6) * CELL, (g[2]! - 6) * CELL]);
+  const cen = [0, 1, 2].map(i => (f[0]![i]! + f[1]![i]! + f[2]![i]!) / 3);
+  const out = base.map((_, k) => {
+    const v = [f[k]![0]! - cen[0]!, f[k]![1]! - cen[1]!, f[k]![2]! - cen[2]!];
+    const { w, x, y, z } = q;
+    const tx = 2 * (y * v[2]! - z * v[1]!);
+    const ty = 2 * (z * v[0]! - x * v[2]!);
+    const tz = 2 * (x * v[1]! - y * v[0]!);
+    const rx = v[0]! + w * tx + (y * tz - z * ty);
+    const ry = v[1]! + w * ty + (z * tx - x * tz);
+    const rz = v[2]! + w * tz + (x * ty - y * tx);
+    return cornerOf([rx + cen[0]!, ry + cen[1]!, rz + cen[2]!]);
+  });
+  return out as [Corner, Corner, Corner];
+}
+
 /** Shift the WHOLE triangle by integer cells (the dock's ± rows). Same
  *  contract as setTriCorner. */
 export function shiftTriCells(t: Triangle, d: readonly [number, number, number]):

@@ -7,6 +7,23 @@
 // cable list with its per-row disconnect (through bp AND doc AND undo), the
 // viewport hover label, the panel-hover 3D highlight and the networks list.
 import { expect, test, type Page } from '@playwright/test';
+/** Mirror of engine/wireops shortPort (the e2e tsconfig is nodenext and
+ *  cannot import app modules) — the pure function is vitest-pinned in
+ *  wiremodel.test.ts; this copy only formats the UI assertions. */
+function shortPort(name: string): string {
+  const toks = name.toLowerCase().split(/[-_.\s/]+/).filter(Boolean).map(t =>
+    t === 'lowvoltage' ? 'lv'
+      : t === 'highvoltage' ? 'hv'
+        : t === 'input' ? 'in'
+          : t === 'output' ? 'out'
+            : t === 'fluid' ? 'fl'
+              : t === 'item' || t === 'items' ? 'it'
+                : t === 'port' ? ''
+                  : /^0\d*$/.test(t) ? String(Number(t))
+                    : t)
+    .filter(Boolean);
+  return toks.join('-') || name.toLowerCase();
+}
 
 const ISW = '3812927875';                    // fluid + data + lv + hv cables
 
@@ -129,7 +146,7 @@ test.describe('wire overview, hover labels, disconnect / reconnect @ui', () => {
         __ARCHEAN__?: { engine: { select: (i: number) => void } };
       }).__ARCHEAN__!.engine.select(ci), c0.a_component);
       const portBtn = page.locator('[data-testid="wire-port"]',
-        { hasText: new RegExp(`(^|\\s)${c0.a_port.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$)`) }).first();
+        { hasText: new RegExp(`(^|\\s)${shortPort(c0.a_port).replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$)`) }).first();
       await expect(portBtn).toBeEnabled();
       await portBtn.click();
       const bType = await page.evaluate((ci) => (window as unknown as {
@@ -139,13 +156,13 @@ test.describe('wire overview, hover labels, disconnect / reconnect @ui', () => {
       const target = page.locator('[data-testid="wire-target-item"]', { hasText: `[${c0.b_component}]` }).first();
       await target.click();                                 // STEP 1: the part
       const port = page.locator('[data-testid="wire-target-port"]',
-        { hasText: new RegExp(`(^|\\s)${c0.b_port.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$)`) }).first();
+        { hasText: new RegExp(`(^|\\s)${shortPort(c0.b_port).replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$)`) }).first();
       await expect(port, 'the exact freed port is listed (with its logical reason)')
         .toBeVisible();
       await port.click();                                   // STEP 2: the port
       await expect.poll(() => pipes(page), { timeout: 10_000 }).toBe(before + 1);
       await expect(page.getByTestId('wire-cables'), 'the re-dropped cable reads like the original')
-        .toContainText(new RegExp(`${c0.a_port.replaceAll('.', '\\.')} ↔`));
+        .toContainText(new RegExp(`${shortPort(c0.a_port).replaceAll('.', '\\.')} ↔`));
     });
 
   test('auto-wire (logical) answers and is idempotent', async ({ page }) => {

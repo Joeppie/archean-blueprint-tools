@@ -11,6 +11,7 @@
 import { describe, expect, test } from 'vitest';
 import {
   ALT_CEILING, GASES, envelopeVolume, equilibrium, gasRho, isaAt, liftKg, maxFloatMassKg,
+  sealedEnvelopeVolume,
 } from '../atmo';
 import { triangleFromCorners, type Corner } from '../tris';
 import { encodeSkinTri, spherePlan } from '../latsphere';
@@ -186,5 +187,52 @@ describe('envelopeVolume — divergence sum over the exact lattice', () => {
   test('empty/open meshes are never NaN', () => {
     expect(envelopeVolume([]).m3).toBe(0);
     expect(Number.isFinite(envelopeVolume([tri([6, 6, 6], [10, 6, 6], [6, 10, 6])]).m3)).toBe(true);
+  });
+});
+
+describe('v1.11 sealed envelope (we: "lift should calculate from a volume block. we only look at enclosed blocks/triangles")', () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const blk = (x: number, y: number, z: number): any => ({
+    colors: [0, 0, 0, 0, 0, 0, 0],
+    frame_x: 0, pos_x: x, frame_y: 0, pos_y: y, frame_z: 0, pos_z: z,
+    material: 0, size_x: 0, size_y: 0, size_z: 0, type: 0,
+  }) as never;
+  const P3 = 0.25 ** 3;
+
+  test('a 3×3×3 block shell encloses its core: envelope = the full cube', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const blocks: any[] = [];
+    for (let x = 0; x < 3; x++)
+      for (let y = 0; y < 3; y++)
+        for (let z = 0; z < 3; z++)
+          if (!(x === 1 && y === 1 && z === 1)) blocks.push(blk(x, y, z));
+    const r = sealedEnvelopeVolume([], blocks);
+    expect(r.cells).toBe(27);                    // interior + shell
+    expect(r.m3).toBeCloseTo(27 * P3, 9);
+  });
+
+  test('an OPEN box (top removed) encloses NOTHING', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const blocks: any[] = [];
+    for (let x = 0; x < 3; x++)
+      for (let y = 0; y < 3; y++)
+        for (let z = 0; z < 3; z++)
+          if (!(x === 1 && y === 1 && z === 1) && !(y === 2)) blocks.push(blk(x, y, z));
+    expect(sealedEnvelopeVolume([], blocks).cells).toBe(0);
+  });
+
+  test('a closed TRIANGLE tetrahedron seals its interior', () => {
+    // a 2.5 m edge tetrahedron — big enough that the 1-cell wall thickening
+    // leaves a real sealed core
+    const faces: [number, number, number][][] = [
+      [[6, 6, 6], [16, 6, 6], [6, 16, 6]],
+      [[6, 6, 6], [16, 6, 6], [6, 6, 16]],
+      [[6, 6, 6], [6, 16, 6], [6, 6, 16]],
+      [[16, 6, 6], [6, 16, 6], [6, 6, 16]],
+    ];
+    const tris = faces.map(f => triangleFromCorners(f[0] as never, f[1] as never, f[2] as never,
+      [51, 51, 51, 51, 51])).filter(Boolean) as never[];
+    const r = sealedEnvelopeVolume(tris, []);
+    expect(r.cells).toBeGreaterThan(0);          // (7,7,7) is sealed
   });
 });

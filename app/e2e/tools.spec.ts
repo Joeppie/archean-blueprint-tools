@@ -159,7 +159,7 @@ test.describe('materials + RGB picker @ui', () => {
     test.skip(test.info().project.name !== 'chromium', 'the side panel is a drawer on phones');
     await openNew(page);
     await page.getByTestId('mode-edit').click();
-    await page.getByTestId('tooltab-edit').click();
+    await page.getByTestId('ws-edit').click();
     const px = await blockPixel(page);
     await page.mouse.click(px.x, px.y);
     await expect(page.getByTestId('block-edit')).toContainText(/Block\[\d+\]/, { timeout: 10_000 });
@@ -194,7 +194,7 @@ test.describe('materials + RGB picker @ui', () => {
     test.skip(test.info().project.name !== 'chromium', 'the side panel is a drawer on phones');
     await openNew(page);
     await page.getByTestId('mode-edit').click();
-    await page.getByTestId('tooltab-place').click();
+    await page.getByTestId('ws-blocks').click();
     await page.getByTestId('rgb-hex').fill('#ff3300');
     const l0 = await loads(page);
     await page.getByTestId('rgb-new-slot').click();
@@ -213,7 +213,7 @@ test.describe('materials + RGB picker @ui', () => {
     test.skip(test.info().project.name !== 'chromium', 'the side panel is a drawer on phones');
     await openNew(page);
     await page.getByTestId('mode-edit').click();
-    await page.getByTestId('tooltab-place').click();
+    await page.getByTestId('ws-blocks').click();
     await page.getByTestId('rgb-hex').fill('#ffffff');
     const before = await page.evaluate(() =>
       ((window as unknown as { __ARCHEAN__: { engine: { blueprint: { data: {

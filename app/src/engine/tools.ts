@@ -329,6 +329,9 @@ const triAreaCells = (g: G3[]): number => {
 
 export interface HullifyResult {
   ok: boolean;
+  /** v1.11: the GENERATED triangle records (preview and scoped use — the
+   *  widget ▵ path funnels them through appendTrianglesDoc for the doc) */
+  tris?: Triangle[];
   /** geometry blocks removed / occupancy mirrors kept */
   blocksRemoved: number;
   keptOcc: number;
@@ -391,12 +394,19 @@ export const HULLIFY_WIND_DEFAULT: HullifyWind = 'outward';
 export type HullifyShade = 'smooth' | 'flat';
 export const HULLIFY_SHADE_DEFAULT: HullifyShade = 'flat';
 
-export interface HullifyOptions { wind?: HullifyWind; shade?: HullifyShade }
+export interface HullifyOptions {
+  wind?: HullifyWind; shade?: HullifyShade;
+  /** v1.11 SINGLE-BLOCK scope (the widget's ▵ "turn this block into hull
+   *  triangles"): emit the skin of bp.data.blocks[only] ONLY (census +
+   *  adjacency culling still see the WHOLE hull, so faces glued to a
+   *  neighbour stay culled) and remove only that block. */
+  only?: number;
+}
 
 /** Preview the conversion without touching bp. */
 export function hullifyPreview(bp: Blueprint, opts: HullifyOptions = {}): HullifyResult {
   return hullifyCore(bp, false, opts.wind ?? HULLIFY_WIND_DEFAULT,
-    opts.shade ?? HULLIFY_SHADE_DEFAULT);
+    opts.shade ?? HULLIFY_SHADE_DEFAULT, opts.only);
 }
 
 /** Convert bp IN PLACE: remove every geometry block, append the covering
@@ -404,10 +414,19 @@ export function hullifyPreview(bp: Blueprint, opts: HullifyOptions = {}): Hullif
  *  (+reason) leaves bp untouched. */
 export function hullifyApply(bp: Blueprint, opts: HullifyOptions = {}): HullifyResult {
   return hullifyCore(bp, true, opts.wind ?? HULLIFY_WIND_DEFAULT,
-    opts.shade ?? HULLIFY_SHADE_DEFAULT);
+    opts.shade ?? HULLIFY_SHADE_DEFAULT, opts.only);
 }
 
-function hullifyCore(bp: Blueprint, apply: boolean, wind: HullifyWind, shade: HullifyShade): HullifyResult {
+/** v1.11: the PURE skin of ONE block (index into bp.data.blocks) — the
+ *  widget ▵ path feeds these through the appendTrianglesDoc funnel (bp AND
+ *  doc, v1.6.1). Empty = every face is an interior wall (nothing to skin). */
+export function blockSkinTris(bp: Blueprint, bi: number): Triangle[] {
+  const res = hullifyCore(bp, false, HULLIFY_WIND_DEFAULT, HULLIFY_SHADE_DEFAULT, bi);
+  return res.tris ?? [];
+}
+
+function hullifyCore(bp: Blueprint, apply: boolean, wind: HullifyWind, shade: HullifyShade,
+  only = -1): HullifyResult {
   const blocks = bp.data.blocks ?? [];
   const geometry = blocks.filter(b => b.type !== OCCUPANCY_TYPE);
   if (!geometry.length) return { ...EMPTY_HULL, reason: 'the craft has no blocks to convert' };
@@ -456,6 +475,7 @@ function hullifyCore(bp: Blueprint, apply: boolean, wind: HullifyWind, shade: Hu
 
   blocks.forEach((b, index) => {
     if (b.type === OCCUPANCY_TYPE) return;
+    if (only >= 0 && index !== only) return;   // v1.11 single-block scope
     const material = b.material ?? 0;
     const pts = ptsOf(b);
     const trisOf = getBlockFaces(b.type);
@@ -518,7 +538,7 @@ function hullifyCore(bp: Blueprint, apply: boolean, wind: HullifyWind, shade: Hu
 
   // mass estimate (FORMAT §Mass model)
   let massRemoved = 0;
-  for (const b of geometry) {
+  for (const b of (only >= 0 ? [blocks[only]!] : geometry)) {
     const rect = (b.size_x + 1) * (b.size_y + 1) * (b.size_z + 1);
     const dens = MATERIAL_DENSITY[b.material ?? 0] ?? 1;
     massRemoved += rect * dens * (b.type === 0 ? 1 : 0.5);
@@ -539,7 +559,8 @@ function hullifyCore(bp: Blueprint, apply: boolean, wind: HullifyWind, shade: Hu
 
   const res: HullifyResult = {
     ok: true,
-    blocksRemoved: geometry.length,
+    tris: newTris,
+    blocksRemoved: only >= 0 ? 1 : geometry.length,
     keptOcc: blocks.length - geometry.length,
     trisAdded: newTris.length,
     trisKept: (bp.data.triangles ?? []).length,
@@ -548,8 +569,10 @@ function hullifyCore(bp: Blueprint, apply: boolean, wind: HullifyWind, shade: Hu
   };
   if (!apply || !newTris.length) return apply ? { ...res, ok: newTris.length > 0 } : res;
 
-  // in-place bp rewrite: drop geometry blocks, append the triangles
-  bp.data.blocks = blocks.filter(b => b.type === OCCUPANCY_TYPE);
+  // in-place bp rewrite: drop geometry blocks (v1.11: only the scoped one
+  // when `only` is set), append the triangles
+  bp.data.blocks = blocks.filter((b, i) =>
+    b.type === OCCUPANCY_TYPE || (only >= 0 && i !== only));
   bp.data.triangles = [...(bp.data.triangles ?? []), ...newTris];
   return res;
 }

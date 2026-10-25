@@ -65,7 +65,8 @@ test.describe('symmetry twins @sym @slow', () => {
   test('slider move propagates the mirrored delta to the twin; drift auto-disables', async ({ page }) => {
     desktopOnly();
     await openCraft(page, ISW);
-    await page.getByTestId('filter').fill('aileron');
+    await page.getByTestId('ws-parts').click();   // v1.11: parts list = + Parts
+    await page.getByTestId('parts-list').getByTestId('filter').fill('aileron');
     const rows = page.locator('[data-idx]');
     const n = await rows.count();
     let ci = -1, twin = -1;
@@ -80,7 +81,10 @@ test.describe('symmetry twins @sym @slow', () => {
 
     const x0 = (await eng('posOf', { ci: twin })(page)) as { x: number };
     const selfPos = (await eng('pos', { ci })(page)) as { x: number };
-    await page.getByTestId('row-n-x').fill(String(selfPos.x + 0.5));
+    // v1.11: inspector pos rows are GONE (gizmo supersedes) — same engine seam
+    await page.evaluate((a) => (window as unknown as { __ARCHEAN__?: { engine: {
+      setFilePosAxis: (ci: number, ax: number, v: number) => void } } })
+      .__ARCHEAN__!.engine.setFilePosAxis(a.ci, 0, a.v), { ci, v: selfPos.x + 0.5 });
     await expect.poll(async () => ((await eng('posOf', { ci: twin })(page)) as { x: number }).x)
       .toBeCloseTo(x0.x - 0.5, 9);                       // mirrored: the twin moves -x
 

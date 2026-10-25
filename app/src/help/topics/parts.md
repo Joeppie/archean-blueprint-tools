@@ -6,7 +6,7 @@ wheels, propellers, cockpits, lamps, dashboards…
 
 ## Placing
 
-**✚ Place** → open the parts catalog (the rows show live 3D previews; hover
+In Edit mode, open the parts catalog (the rows show live 3D previews; hover
 spins them) → hold a part. A translucent real-model ghost docks on whatever
 surface you hover. Two ways to land it:
 

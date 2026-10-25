@@ -11,6 +11,15 @@
 // shape/size/material/drift stay RED conflicts.
 import { expect, test, type Page } from '@playwright/test';
 
+/** v1.11 ONE LINGO: the mirror widget's axis chips ARE the toggle — arm
+ *  mirrored placement across x deterministically (lit = pairs land). */
+async function armMirror(page: Page, want = true) {
+  const chip = page.getByTestId('mirw-x');
+  const lit = (await chip.getAttribute('aria-pressed')) === 'true';
+  if (lit !== want) await chip.click();
+  await expect(chip).toHaveAttribute('aria-pressed', want ? 'true' : 'false');
+}
+
 type Hl = { bi: number; twin: number; issues?: string[]; info?: boolean } | null;
 
 const highlight = (page: Page) => page.evaluate(() =>
@@ -25,13 +34,8 @@ const compsLen = (page: Page) => page.evaluate(() =>
   (window as unknown as { __ARCHEAN__?: { engine: { blueprint: {
     data: { components: unknown[] } } } } }).__ARCHEAN__!.engine.blueprint.data.components.length);
 
-async function setDrawer(page: Page, want: boolean) {
-  if (await page.evaluate(() => window.innerWidth >= 768)) return;
-  const aside = page.getByTestId('panel-aside');
-  const vis = await aside.isVisible().catch(() => false);
-  if (vis !== want) await page.getByTestId('toggle-panels').click();
-  if (want) await expect(aside).toBeVisible();
-}
+/** v1.11: no side drawer — the bottom dock is always visible. */
+async function setDrawer(_page: Page, _want = true) { /* no-op */ }
 
 test.describe('faux-mirror screen: mismatches are flagged, not silent @place', () => {
   test('block pair: a material-divergent twin flags ⚠ (popup + red panel row)', async ({ page }) => {
@@ -40,8 +44,8 @@ test.describe('faux-mirror screen: mismatches are flagged, not silent @place', (
     await page.getByTestId('gallery-new').click();
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
     await page.getByTestId('mode-edit').click();
-    await page.getByTestId('tooltab-place').click();
-    await page.getByTestId('mirror-twin').click();        // ⇄ twin ON: place the pair
+    await page.getByTestId('ws-blocks').click();
+    await armMirror(page, true);
     let click: { x: number; y: number } | null = null;
     for (let i = 0; i < 40 && !click; i++) {
       click = await page.evaluate(() => {
@@ -64,7 +68,7 @@ test.describe('faux-mirror screen: mismatches are flagged, not silent @place', (
     const px = box.x + box.width * click!.x, py = box.y + box.height * click!.y;
     await page.mouse.click(px, py);                        // place the mirrored pair
     await page.waitForTimeout(600);
-    await page.getByTestId('tooltab-edit').click();
+    await page.getByTestId('ws-edit').click();
     await page.mouse.click(px, py);                        // select the placed block
     let hl = await highlight(page);
     expect(hl, 'the placed block is selected').not.toBeNull();
@@ -122,10 +126,10 @@ test.describe('faux-mirror screen: mismatches are flagged, not silent @place', (
     await page.getByTestId('gallery-new').click();
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
     await page.getByTestId('mode-edit').click();
-    await page.getByTestId('mirror-twin').click();        // shared twin switch (dock header)
-    await page.getByTestId('tooltab-place').click();       // dock header (drawer closed)
+    await armMirror(page, true);
+    await page.getByTestId('ws-parts').click();         // v1.11: catalog in + Parts
     await setDrawer(page, true);
-    await page.getByTestId('filter').fill('smallwheel');
+    await page.getByTestId('catalog-dock').getByTestId('filter').fill('smallwheel');
     await page.getByTestId('catalog-item').first().click();
     await expect(page.getByTestId('place-hint')).toContainText('SmallWheel');
     await setDrawer(page, false);

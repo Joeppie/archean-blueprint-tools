@@ -356,7 +356,24 @@ export class Engine {
   private pinCorners: Corner[] = [];           // the 3 (or fewer) lattice corners
   private pinEditTi = -1;                       // committed triangle index (edit mode)
   private pinBrush = 51;                        // preview face colour slot
-  private pinDrag: { i: number } | null = null;
+  /** v1.11 FLAVOUR GATE (we: "nor does it respect my place/edit mode. This
+   *  is wrong."): the CENTROID widget is an EDIT-flavour tool (select →
+   *  gizmo, the v1.5 flavour law); the Editor flips this with the flavor.
+   *  Pins show in BOTH flavors (place-then-drag is the placement ritual). */
+  private pinWidgetOn = false;
+  setTriWidgetOn(on: boolean) {
+    if (this.pinWidgetOn === on) return;
+    this.pinWidgetOn = on;
+    this.syncGizmo();
+    this.invalidate();
+  }
+  /** the live pin drag: base = the pin's world point at pointerdown; the
+   *  drag rides a plane through it (camera-facing, or the axis-lock plane
+   *  on Shift) — v1.11 FREE 3D (we: "I cannot move the pins in 3 dimenensions"):
+   *  the old surface raycast could only slide a pin over geometry under the
+   *  cursor; the plane drag places in the screen plane (orbit to change the
+   *  depth), ⇧ locks to the world axis most facing the camera. */
+  private pinDrag: { i: number; base: Vector3 } | null = null;
   private pinCanvas: HTMLCanvasElement | null = null;
   /** engine→App: a pin drag landed a new corner on a COMMITTED triangle
    *  (index, corner 0..2, new global corner) — the Editor writes bp + doc */
@@ -368,7 +385,8 @@ export class Engine {
   /** engine→App: the centroid widget ROTATED the triangle — the corners are
    *  already lattice-quantised by the engine; written atomically
    *  (setTriCornersAll). Returns success (false = refused → snap back) */
-  onPinRotate: ((ti: number, c: [Corner, Corner, Corner]) => boolean) | null = null;
+  onPinRotate: ((ti: number, c: [Corner, Corner, Corner],
+    dq?: { w: number; x: number; y: number; z: number }) => boolean) | null = null;
   /** engine→App: the draft pins changed (the Editor mirrors into triDraft) */
   onPinDraft: ((pts: Corner[]) => void) | null = null;
   /** v1.11 CENTROID WIDGET (we: "the centroid should allow rotating the
@@ -1138,15 +1156,31 @@ void main() {
     const ray = new Raycaster();
     ray.setFromCamera(ndc, this.camera);
     const mo = this.moffV();
+    const camDist = this.controls
+      ? this.camera!.position.distanceTo(this.controls.target) : 20;
     const hit = pipeAt(this.pipeNet,
       [ray.ray.origin.x - mo.x, ray.ray.origin.y - mo.y, ray.ray.origin.z - mo.z],
-      [ray.ray.direction.x, ray.ray.direction.y, ray.ray.direction.z]);
+      [ray.ray.direction.x, ray.ray.direction.y, ray.ray.direction.z],
+      0.05 + camDist * 0.008);            // v1.11: pick scales with view depth
     if (!hit) { this.clearPipeHover(); return null; }
     const pi = this.pipeNet.piOf[hit.i] ?? -1;
     if (pi < 0 || !this.bp.data.pipes?.[pi]) { this.clearPipeHover(); return null; }
+    // remember the RAW point of the run nearest the cursor (the cable
+    // surge's origin — "from the point where you are highlighting it")
+    const poly = this.pipeNet.polys[hit.i];
+    if (poly) {
+      let bd = Infinity;
+      for (const v of poly) {
+        const pv = new Vector3(v[0]!, v[1]!, v[2]!);
+        const t = pv.clone().sub(ray.ray.origin).dot(ray.ray.direction);
+        const d = pv.clone().addScaledVector(ray.ray.direction, -t).distanceTo(pv);
+        if (d < bd) { bd = d; this.pipeHoverPt = pv; }
+      }
+    }
     if (pi !== this.pipeHoverPi) this.applyPipeHover(pi);
     return this.pipeHoverInfo;
   }
+  private pipeHoverPt: Vector3 | null = null;
 
   /** gold-light a cable from OUTSIDE the viewport (the WIRE panel's cable
    *  list hover): the same overlay, no raycast, no cursor chip. */
@@ -1162,6 +1196,9 @@ void main() {
     this.pipeHoverPi = -1;
     this.pipeHoverInfo = null;
     this.clearGroup(this.pipeHlGroup);
+    this.hoverHl.clearBoxes();
+    this.hoverHl.clearXray();
+    this.endWireXray();
     this.invalidate();
   }
 
@@ -1193,6 +1230,283 @@ void main() {
     }
     this.pipeHlGroup.traverse(o => { o.renderOrder = 18; o.raycast = () => {}; o.layers.set(1); });
     this.pipeHoverInfo = { pi, label: pipeLabel(this.bp, pi, this.flatMap) ?? '' };
+    // v1.11 (we: "highlight the cable and it's two components involved"):
+    // BOTH end parts ride the mint hover highlight with the cable — ONE
+    // combined call (the looped setBoxes kept only the last endpoint)
+    this.endWireXray();
+    const ends: Object3D[] = [];
+    for (const t of this.pipeEndpoints(pi)) {
+      const roots = (this.compRoots.get(t) ?? []).filter(o => o.visible);
+      ends.push(...(roots.length ? roots : (this.compRoots.get(t) ?? [])));
+    }
+    if (ends.length) { this.hoverHl.setBoxes(ends); this.hoverHl.setXray(ends, 0.22); }
+    this.invalidate();
+  }
+  /** top-level component indices at a cable's two ends */
+  private pipeEndpoints(pi: number): number[] {
+    const pipe = this.bp?.data.pipes?.[pi];
+    if (!pipe) return [];
+    const tops: number[] = [];
+    for (const fi of [pipe.a_component, pipe.b_component]) {
+      const top = this.flatMap[fi]?.top ?? -1;
+      if (top >= 0 && !tops.includes(top)) tops.push(top);
+    }
+    return tops;
+  }
+  /** v1.11 TEMPORARY X-RAY (we: "after 2 seconds of solid highlighting;
+   *  temporary wireframe mode, but ONLY for everything obstructing the
+   *  components in question in between camera"): every triangle whose
+   *  world surface crosses the camera→endpoint segments is CUT OUT of its
+   *  mesh and re-laid as a ghostly overlay — the occluders thin out, the
+   *  endpoints and their cable stay solid. Reversed on un-hover. */
+  private xraySaved: { mesh: Mesh; geom: BufferGeometry }[] = [];
+  private xrayOverlays: Mesh[] = [];
+  beginWireXray(pi: number) {
+    this.endWireXray();
+    this.cablePulse(pi);        // v1.11: the transition fires the surge
+    const cam = this.camera, renderer = this.renderer;
+    if (!cam || !renderer || !this.bp) return;
+    // v1.11 SCREEN-SPACE occlusion (we: "the making of wireframe doesn't
+    // properly find all elements in front of the camera … we know where
+    // the cable reaches closest to the camera, and what its extents in
+    // pixel space are; a cheap approximation"): the TARGETS are the two
+    // endpoint parts' projected boxes and every cable run segment's
+    // projected rect, each with a depth span. A triangle occludes when its
+    // projection lands in a target rect and its nearest depth is in front
+    // of that target's far side — this catches everything covering the
+    // PART, not just a ray at its centre.
+    this.scene.updateMatrixWorld(true);
+    const rectEl = renderer.domElement.getBoundingClientRect();
+    const W = rectEl.width, H = rectEl.height;
+    const camInv = new Matrix4().copy(cam.matrixWorldInverse);
+    const oc = cam as unknown as { isOrthographicCamera?: boolean; left: number; right: number;
+      top: number; bottom: number; zoom: number; fov?: number };
+    const ortho = oc.isOrthographicCamera === true;
+    const tanY = Math.tan(((oc.fov ?? 50) * Math.PI) / 360);
+    const tanX = tanY * (W / Math.max(1, H));
+    const proj = (v: Vector3): { x: number; y: number; z: number } | null => {
+      const c = v.clone().applyMatrix4(camInv);
+      const d = -c.z;
+      if (d <= 0.02) return null;
+      if (ortho) {
+        const sx = ((oc.right - oc.left) / 2) / (oc.zoom || 1);
+        const sy = ((oc.top - oc.bottom) / 2) / (oc.zoom || 1);
+        return { x: W / 2 + (c.x / sx) * (W / 2), y: H / 2 - (c.y / sy) * (H / 2), z: d };
+      }
+      return { x: W / 2 + (c.x / d / tanX) * (W / 2), y: H / 2 - (c.y / d / tanY) * (H / 2), z: d };
+    };
+    interface Tgt { x0: number; y0: number; x1: number; y1: number; near: number; far: number }
+    const tgts: Tgt[] = [];
+    for (const t of this.pipeEndpoints(pi)) {
+      const box = new Box3();
+      for (const r of this.compRoots.get(t) ?? []) box.expandByObject(r);
+      if (box.isEmpty()) continue;
+      box.expandByScalar(0.15);
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      let near = Infinity, far = -Infinity, ok = true;
+      for (let i = 0; i < 8; i++) {
+        const p = proj(new Vector3(i & 1 ? box.max.x : box.min.x,
+          i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z));
+        if (!p) { ok = false; break; }
+        x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x);
+        y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y);
+        near = Math.min(near, p.z); far = Math.max(far, p.z);
+      }
+      if (ok) tgts.push({ x0, y0, x1, y1, near, far });
+    }
+    const mo0 = this.moffV();
+    const netI = this.pipeNet.piOf.indexOf(pi);
+    const poly0 = netI >= 0 ? this.pipeNet.polys[netI] ?? null : null;
+    const ppts = (poly0 ?? []).map(v =>
+      proj(new Vector3(v[0]! + mo0.x, v[1]! + mo0.y, v[2]! + mo0.z)));
+    for (let k = 1; k < ppts.length; k++) {
+      const A = ppts[k - 1], B = ppts[k];
+      if (!A || !B) continue;
+      tgts.push({ x0: Math.min(A.x, B.x) - 3, y0: Math.min(A.y, B.y) - 3,
+        x1: Math.max(A.x, B.x) + 3, y1: Math.max(A.y, B.y) + 3,
+        near: Math.min(A.z, B.z), far: Math.max(A.z, B.z) + 0.02 });
+    }
+    if (!tgts.length) return;
+    let gx0 = Infinity, gy0 = Infinity, gx1 = -Infinity, gy1 = -Infinity, gFar = -Infinity;
+    for (const t of tgts) {
+      gx0 = Math.min(gx0, t.x0); gy0 = Math.min(gy0, t.y0);
+      gx1 = Math.max(gx1, t.x1); gy1 = Math.max(gy1, t.y1); gFar = Math.max(gFar, t.far);
+    }
+    const pInT = (px: number, py: number, ax: number, ay: number, bx: number, by: number,
+      cx: number, cy: number): boolean => {
+      const s1 = (bx - ax) * (py - ay) - (by - ay) * (px - ax);
+      const s2 = (cx - bx) * (py - by) - (cy - by) * (px - bx);
+      const s3 = (ax - cx) * (py - cy) - (ay - cy) * (px - cx);
+      return (s1 >= 0 && s2 >= 0 && s3 >= 0) || (s1 <= 0 && s2 <= 0 && s3 <= 0);
+    };
+    const segX = (ax: number, ay: number, bx: number, by: number,
+      cx: number, cy: number, dx: number, dy: number): boolean => {
+      const d1 = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+      const d2 = (bx - ax) * (dy - ay) - (by - ay) * (dx - ax);
+      const d3 = (dx - cx) * (ay - cy) - (dy - cy) * (ax - cx);
+      const d4 = (dx - cx) * (by - cy) - (dy - cy) * (bx - cx);
+      return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+    };
+    const triHitsRect = (ax: number, ay: number, bx: number, by: number, cx: number, cy: number,
+      t: Tgt): boolean => {
+      if (Math.max(ax, bx, cx) < t.x0 || Math.min(ax, bx, cx) > t.x1
+        || Math.max(ay, by, cy) < t.y0 || Math.min(ay, by, cy) > t.y1) return false;
+      if (pInT(t.x0, t.y0, ax, ay, bx, by, cx, cy) || pInT(t.x1, t.y0, ax, ay, bx, by, cx, cy)
+        || pInT(t.x0, t.y1, ax, ay, bx, by, cx, cy) || pInT(t.x1, t.y1, ax, ay, bx, by, cx, cy))
+        return true;
+      if ((ax >= t.x0 && ax <= t.x1 && ay >= t.y0 && ay <= t.y1)
+        || (bx >= t.x0 && bx <= t.x1 && by >= t.y0 && by <= t.y1)
+        || (cx >= t.x0 && cx <= t.x1 && cy >= t.y0 && cy <= t.y1)) return true;
+      const rx: [number, number][] = [[t.x0, t.y0], [t.x1, t.y0], [t.x1, t.y1], [t.x0, t.y1]];
+      const tv: [number, number][] = [[ax, ay], [bx, by], [cx, cy]];
+      for (let i = 0; i < 3; i++) {
+        const [p1x, p1y] = tv[i]!, [p2x, p2y] = tv[(i + 1) % 3]!;
+        for (let j = 0; j < 4; j++) {
+          const [q1x, q1y] = rx[j]!, [q2x, q2y] = rx[(j + 1) % 4]!;
+          if (segX(p1x, p1y, p2x, p2y, q1x, q1y, q2x, q2y)) return true;
+        }
+      }
+      return false;
+    };
+    const cand: Mesh[] = [...this.hullMeshes, ...this.occMeshes];
+    const tops = new Set(this.pipeEndpoints(pi));
+    this.compRoots.forEach((roots, ci) => {
+      if (!tops.has(ci)) for (const r of roots) r.traverse(o => { if ((o as Mesh).isMesh) cand.push(o as Mesh); });
+    });
+    this.subGroup.traverse(o => { if ((o as Mesh).isMesh && o.visible) cand.push(o as Mesh); });
+    const mb = new Box3();
+    const a = new Vector3(), b = new Vector3(), c = new Vector3();
+    for (const mesh of cand) {
+      if (!mesh.visible) continue;
+      const geo = mesh.geometry as BufferGeometry;
+      const pos = geo.getAttribute('position');
+      if (!pos) continue;
+      const idx = geo.getIndex();
+      const n = idx ? idx.count : pos.count;
+      const cut = new Set<number>();               // triangle STARTS cut out
+      // mesh-level cheap reject: projected depth vs the union far plane
+      mb.setFromObject(mesh);
+      {
+        let mNear = Infinity, mOk = false;
+        for (let i = 0; i < 8; i++) {
+          const p = proj(new Vector3(i & 1 ? mb.max.x : mb.min.x,
+            i & 2 ? mb.max.y : mb.min.y, i & 4 ? mb.max.z : mb.min.z));
+          if (!p) continue;
+          mOk = true; mNear = Math.min(mNear, p.z);
+        }
+        if (mOk && mNear > gFar) continue;         // fully behind every target
+      }
+      for (let k = 0; k < n; k += 3) {
+        const i0 = idx ? idx.getX(k) : k, i1 = idx ? idx.getX(k + 1) : k + 1, i2 = idx ? idx.getX(k + 2) : k + 2;
+        a.fromBufferAttribute(pos, i0).applyMatrix4(mesh.matrixWorld);
+        b.fromBufferAttribute(pos, i1).applyMatrix4(mesh.matrixWorld);
+        c.fromBufferAttribute(pos, i2).applyMatrix4(mesh.matrixWorld);
+        const pa = proj(a), pb = proj(b), pc = proj(c);
+        if (!pa || !pb || !pc) continue;
+        const dMin = Math.min(pa.z, pb.z, pc.z);
+        if (dMin > gFar) continue;
+        if (Math.max(pa.x, pb.x, pc.x) < gx0 || Math.min(pa.x, pb.x, pc.x) > gx1
+          || Math.max(pa.y, pb.y, pc.y) < gy0 || Math.min(pa.y, pb.y, pc.y) > gy1) continue;
+        for (const t of tgts) {
+          if (dMin > t.far) continue;              // behind this target
+          if (triHitsRect(pa.x, pa.y, pb.x, pb.y, pc.x, pc.y, t)) { cut.add(k); break; }
+        }
+      }
+      if (!cut.size) continue;
+      const keep: number[] = [];
+      const drop: number[] = [];
+      for (let k = 0; k < n; k += 3) {
+        const i0 = idx ? idx.getX(k) : k, i1 = idx ? idx.getX(k + 1) : k + 1, i2 = idx ? idx.getX(k + 2) : k + 2;
+        if (cut.has(k)) {
+          for (const i of [i0, i1, i2])
+            drop.push(pos.getX(i), pos.getY(i), pos.getZ(i));
+        } else keep.push(i0, i1, i2);
+      }
+      if (!keep.length) continue;                   // fully in the way: leave it
+      const kg = new BufferGeometry();
+      kg.setAttribute('position', pos.clone());
+      const nrm = geo.getAttribute('normal');
+      if (nrm) kg.setAttribute('normal', nrm.clone());
+      kg.setIndex(keep);
+      kg.boundingSphere = geo.boundingSphere?.clone() ?? null;
+      kg.boundingBox = geo.boundingBox?.clone() ?? null;
+      this.xraySaved.push({ mesh, geom: geo });
+      mesh.geometry = kg;
+      if (drop.length) {
+        const dg = new BufferGeometry();
+        dg.setAttribute('position', new BufferAttribute(new Float32Array(drop), 3));
+        dg.computeVertexNormals();
+        const overlay = new Mesh(dg, new MeshBasicMaterial({
+          color: 0xbfe8ff, transparent: true, opacity: 0.16, side: DoubleSide, depthWrite: false,
+        }));
+        overlay.matrixAutoUpdate = false;
+        overlay.matrix.copy(mesh.matrixWorld);
+        overlay.matrixWorldNeedsUpdate = true;
+        overlay.raycast = () => {};
+        overlay.layers.set(1);
+        this.scene.add(overlay);
+        this.xrayOverlays.push(overlay);
+      }
+    }
+    this.invalidate();
+  }
+  /** v1.11 (we: "when the wireframe transition happens, a power surge
+   *  should run through the cable tracing it between the two components
+   *  from the point where you are highlighting"): two additive pulses
+   *  depart the cursor's point on the run and race to BOTH ends, arrival
+   *  blips on the parts — the selection surge's idiom, split origin. */
+  cablePulse(pi: number) {
+    const netIdx = this.pipeNet.piOf.indexOf(pi);
+    const poly = netIdx >= 0 ? this.pipeNet.polys[netIdx] ?? null : null;
+    if (!poly || poly.length < 2) return;
+    const pts = poly.map(v => new Vector3(v[0]!, v[1]!, v[2]!));
+    let anchor = 0;
+    if (this.pipeHoverPt) {
+      let bd = Infinity;
+      pts.forEach((v, k) => {
+        const d = v.distanceTo(this.pipeHoverPt!);
+        if (d < bd) { bd = d; anchor = k; }
+      });
+    }
+    const tops = this.pipeEndpoints(pi);
+    const mk = (path: Vector3[], to: number) => {
+      if (path.length < 2) return;
+      const cum = [0];
+      for (let k = 1; k < path.length; k++)
+        cum.push(cum[k - 1]! + path[k]!.distanceTo(path[k - 1]!));
+      const total = cum[cum.length - 1]!;
+      const mesh = new Mesh(this.surgeGeo, new MeshBasicMaterial({
+        color: 0xaef3ff, transparent: true, opacity: 0.95,
+        blending: AdditiveBlending, depthTest: false, depthWrite: false }));
+      mesh.renderOrder = 17;
+      mesh.raycast = () => {};
+      mesh.position.copy(pts[anchor]!);
+      this.surgeGroup.add(mesh);
+      this.surges.push({ pts: path, cum, total, to, mesh,
+        t0: performance.now(), dur: Math.min(1600, Math.max(550, total * 300)) });
+    };
+    mk(pts.slice(anchor), tops[0] ?? -1);
+    mk(pts.slice(0, anchor + 1).reverse(), tops[1] ?? tops[0] ?? -1);
+    this.invalidate();
+  }
+
+  /** probe hook: is an X-ray episode live, and how much was cut? */
+  wireXrayActive(): { on: boolean; cuts: number; overlays: number } {
+    return {
+      on: this.xraySaved.length > 0 || this.xrayOverlays.length > 0,
+      cuts: this.xraySaved.length, overlays: this.xrayOverlays.length,
+    };
+  }
+  endWireXray() {
+    if (!this.xraySaved.length && !this.xrayOverlays.length) return;
+    for (const { mesh, geom } of this.xraySaved) mesh.geometry = geom;
+    this.xraySaved = [];
+    for (const o of this.xrayOverlays) {
+      this.scene.remove(o);
+      o.geometry.dispose();
+      (o.material as MeshBasicMaterial).dispose();
+    }
+    this.xrayOverlays = [];
     this.invalidate();
   }
 
@@ -2124,6 +2438,15 @@ void main() {
    *  placement and block twin identity. The game is not hardcoded x — the
    *  per-component `mirrorAxis` field and non-x twin pairs are additionally
    *  detected and sheeted by buildMirrorPlane. */
+  /** v1.11: the axes this craft's DATA is mirrored across — detected twin
+   *  pairs (sym.ts masks) ∪ declared mirrorAxis fields. Drives the AUTO
+   *  twin-placement state of the dock's mirror widget (a mirrored craft
+   *  places twins by default — the game's behaviour the user expects). */
+  craftMirrorAxes(): MirrorAxis[] {
+    if (!this.bp) return [];
+    const m = craftMirrorMask(this.bp.data.components, this.symIdx);
+    return ([0, 1, 2] as const).filter(a => m & (1 << a)).map(a => ('xyz'[a]) as MirrorAxis);
+  }
   setMirrorAxis(a: MirrorAxisOpt) {
     if (a === this.mirAxis) return;
     this.mirAxis = a;
@@ -2248,8 +2571,11 @@ void main() {
     }
     const bp = this.bp;
     if (!bp) return;
-    const mask = craftMirrorMask(bp.data.components, this.symIdx) |
-      (this.mirAxis === 'off' ? 0 : (1 << mirrorAxisIdx(this.mirAxis)));
+    // v1.11 (we: "the craft has two mirror axes visible. This isnt how the
+    // game should work, nor our editor"): ONE plane — the SESSION axis.
+    // The data-detected axes (craftMirrorMask) no longer draw sheets; they
+    // drive the AUTO twin-placement state (craftMirrorAxes()).
+    const mask = this.mirAxis === 'off' ? 0 : (1 << mirrorAxisIdx(this.mirAxis));
     const lo = [bp.box_min.x, bp.box_min.y, bp.box_min.z];
     const hi = [bp.box_max.x, bp.box_max.y, bp.box_max.z];
     for (const p of parts)
@@ -2264,7 +2590,7 @@ void main() {
     const g = new Group();
     for (let a = 0; a < 3; a++) {
       if (!(mask & (1 << a))) continue;
-      const session = a === mirrorAxisIdx(this.mirAxis);        // off ⇒ -1, no session sheet
+      const session = true;   // the single session sheet (mask is session-only)
       let rotX = 0, rotY = 0, w = 0, h = 0;
       if (a === 0) { rotY = Math.PI / 2; w = span(2); h = span(1); }      // normal x: width z, height y
       else if (a === 1) { rotX = -Math.PI / 2; w = span(0); h = span(2); } // normal y: width x, height z
@@ -3796,7 +4122,8 @@ void main() {
     }
     if (i < 0) return;
     ev.stopPropagation();                     // the pin claims the gesture
-    this.pinDrag = { i };
+    const g0 = this.pinCorners[i]!;
+    this.pinDrag = { i, base: this.pinWorld(g0) };
     this.pinGestureFlag = true;
     if (this.controls) this.controls.enabled = false;
     this.renderer?.domElement.setPointerCapture(ev.pointerId);
@@ -3807,11 +4134,48 @@ void main() {
   private onPinMove = (ev: PointerEvent) => {
     const dr = this.pinDrag;
     if (!dr) return;
-    // the pin RE-DROPS onto the first placeable surface under the cursor —
-    // the same surface lattice a fresh pin click uses (pickCell → cornerOf)
-    const r = this.pickCell(ev.clientX, ev.clientY);
-    if (!r) return;
-    const g = cornerOf(r.point);
+    // v1.11 FREE 3D DRAG (we: "I cannot move the pins in 3 dimenensions"):
+    // the pin rides a PLANE through its base point, not the surface under
+    // the cursor. Default = the camera-facing plane (drag = screen-plane
+    // placement in all three world axes; orbit to change the depth).
+    // ⇧ = AXIS LOCK: the world axis most facing the camera, dragged on the
+    // plane that CONTAINS that axis and faces the camera — a ⇧ drag moves
+    // the pin along exactly that axis (the vertical slide front views want).
+    const rc = this.pinRay(ev);
+    if (!rc) return;
+    const view = new Vector3();
+    this.camera!.getWorldDirection(view);
+    const p = new Vector3();
+    if (ev.shiftKey) {
+      const axes = [new Vector3(1, 0, 0), new Vector3(0, 1, 0), new Vector3(0, 0, 1)];
+      let ai = 0;
+      let best = -1;
+      axes.forEach((a, k) => {
+        const d = Math.abs(a.dot(view));
+        if (d > best) { best = d; ai = k; }
+      });
+      const A = axes[ai]!;
+      // the plane CONTAINS the lock axis and faces the camera BEST: its
+      // normal is the view direction's component PERPENDICULAR to the axis
+      // (A×view would contain the view direction — edge-on to every ray,
+      // the first-cut bug that made ⇧ drags dead).
+      const n = view.clone().addScaledVector(A, -view.dot(A));
+      if (n.lengthSq() < 1e-6) {
+        n.crossVectors(A, view);                          // view ∥ A: no good plane
+        if (n.lengthSq() < 1e-9) return;
+      }
+      const plane = new Plane().setFromNormalAndCoplanarPoint(n.normalize(), dr.base);
+      if (!rc.ray.intersectPlane(plane, p)) return;
+      // lock to the axis — compute the delta BEFORE overwriting p (the
+      // p.copy() aliasing made every ⇧ move read as zero, first cut)
+      const along = p.clone().sub(dr.base).dot(A);
+      p.copy(dr.base).addScaledVector(A, along);
+    } else {
+      const plane = new Plane().setFromNormalAndCoplanarPoint(view, dr.base);
+      if (!rc.ray.intersectPlane(plane, p)) return;
+    }
+    p.sub(this.moffV());
+    const g = cornerOf([p.x, p.y, p.z]);
     const cur = this.pinCorners[dr.i];
     if (!cur || (cur[0] === g[0] && cur[1] === g[1] && cur[2] === g[2])) return;
     this.pinCorners[dr.i] = g;
@@ -4541,6 +4905,12 @@ void main() {
     }
   }
   private commitClusterGesture() {
+    // v1.11 GUARD (the tri-widget bug): without a captured cluster gesture
+    // this is a NO-OP — its syncClusterGizmo used to re-run on EVERY drag
+    // end, re-centring the proxy under the TRIANGLE widget before
+    // commitTriGesture read the delta (every wholesale drag committed as a
+    // zero move)
+    if (!this.clusterBase) return;
     this.showHullWireframe(false);
     this.clusterBase = null;
     this.syncClusterGizmo();
@@ -4584,9 +4954,14 @@ void main() {
     if (!g) return;
     const ti = this.pinMode === 'edit' ? this.pinEditTi : -1;
     const t = ti >= 0 ? this.bp?.data.triangles?.[ti] : undefined;
-    const mode = this.gizmoMode;
-    if (!t || !this.gizmoEnabled || this.gizmoCi >= 0 || this.blockGizBi >= 0
-      || (mode !== 'translate' && mode !== 'rotate')
+    // v1.11: the widget is an EDIT-flavour tool (pinWidgetOn, the Editor's
+    // flavor gate) — and it NEVER hides for a 'scale' session mode (we:
+    // "nor do I have a gizmo for triangles" — a persisted ⤢ mode from block
+    // work used to swallow it): a triangle has no scale, so scale reads as
+    // ✥ translate on this widget.
+    const mode = this.gizmoMode === 'rotate' ? 'rotate' : 'translate';
+    if (!t || !this.pinWidgetOn || !this.gizmoEnabled || this.gizmoCi >= 0
+      || this.blockGizBi >= 0 || this.gizmoMode === 'off'
       || this.clusterBlocks.length || this.clusterTris.length) {
       this.triGizTi = -1;
       if ((g as unknown as { object?: unknown }).object === this.gizmoProxy
@@ -4659,8 +5034,10 @@ void main() {
     const noop = cs.every((g, i) =>
       g[0] === base.corners[i]![0] && g[1] === base.corners[i]![1] && g[2] === base.corners[i]![2]);
     if (noop) { this.syncTriGizmo(); this.invalidate(); return; }
+    const dq = this.gizmoProxy.quaternion.clone().multiply(base.quat.clone().invert());
     const ok = this.gizmoMode === 'rotate'
-      ? (this.onPinRotate?.(ti, cs as [Corner, Corner, Corner]) ?? false)
+      ? (this.onPinRotate?.(ti, cs as [Corner, Corner, Corner],
+        { w: dq.w, x: dq.x, y: dq.y, z: dq.z }) ?? false)
       : (this.onPinShift?.(ti, [
         cs[0]![0]! - base.corners[0]![0]!,
         cs[0]![1]! - base.corners[0]![1]!,

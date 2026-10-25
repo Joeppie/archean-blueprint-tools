@@ -10,6 +10,15 @@
 // the ⇄ toggle gates only twin PLACEMENT.
 import { expect, test, type Page } from '@playwright/test';
 
+/** v1.11 ONE LINGO: the mirror widget's axis chips ARE the toggle — arm
+ *  mirrored placement across x deterministically (lit = pairs land). */
+async function armMirror(page: Page, want = true) {
+  const chip = page.getByTestId('mirw-x');
+  const lit = (await chip.getAttribute('aria-pressed')) === 'true';
+  if (lit !== want) await chip.click();
+  await expect(chip).toHaveAttribute('aria-pressed', want ? 'true' : 'false');
+}
+
 type Blk = { pos_x: number; pos_y: number; pos_z: number; frame_x?: number; frame_y?: number;
   frame_z?: number; size_x: number; size_y: number; size_z: number; type: number };
 
@@ -114,7 +123,7 @@ test.describe('blocks EDIT: highlight, in-place rotate, snap, twin @place', () =
     await page.getByTestId('gallery-new').click();
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
     await page.getByTestId('mode-edit').click();
-    await page.getByTestId('tooltab-place').click();       // v1.5: the PLACE flavor
+    await page.getByTestId('ws-blocks').click();       // v1.5: the PLACE flavor
     let px: { x: number; y: number } | null = null;
     for (let i = 0; i < 40 && !px; i++) {
       px = await page.evaluate(() => {
@@ -149,7 +158,15 @@ test.describe('blocks EDIT: highlight, in-place rotate, snap, twin @place', () =
         .__ARCHEAN__!;
       return a.engine.compViewPos(a.engine.gizmoState().ci)!.x;
     });
-    await page.getByTestId('row-n-x').fill(String(x0 + 0.5));
+    // v1.11: the inspector pos/rot rows are GONE (the gizmo supersedes them) —
+    // drive the same engine seam the slider used to
+    await page.evaluate(() => {
+      const a = (window as unknown as { __ARCHEAN__?: { engine: {
+        setFilePosAxis: (ci: number, ax: number, v: number) => void;
+        gizmoState: () => { ci: number } } } }).__ARCHEAN__!;
+      a.engine.setFilePosAxis(a.engine.gizmoState().ci, 0, (a.engine as never as {
+        compViewPos: (ci: number) => { x: number } }).compViewPos(a.engine.gizmoState().ci).x + 0.5);
+    });
     await page.waitForTimeout(300);
     const x1 = await page.evaluate(() => {
       const a = (window as unknown as { __ARCHEAN__?: { engine: {
@@ -166,8 +183,8 @@ test.describe('blocks EDIT: highlight, in-place rotate, snap, twin @place', () =
     await page.getByTestId('gallery-new').click();
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
     await page.getByTestId('mode-edit').click();
-    await page.getByTestId('tooltab-place').click();       // v1.5: place with the brush
-    await page.getByTestId('mirror-twin').click();        // twin ON
+    await page.getByTestId('ws-blocks').click();       // v1.5: place with the brush
+    await armMirror(page, true);
     let click: { x: number; y: number } | null = null;
     for (let i = 0; i < 40 && !click; i++) {
       click = await page.evaluate(() => {
@@ -198,10 +215,10 @@ test.describe('blocks EDIT: highlight, in-place rotate, snap, twin @place', () =
     // v1.7.1 (user: "Selecting blocks does NOT SELECT MIRROR SYMMETRY"):
     // turn ⇄ OFF BEFORE selecting — the twin must still be identified as the
     // co-selection (⇄ gates only edit PROPAGATION, never identification).
-    await page.getByTestId('mirror-twin').click();        // twin OFF
+    await armMirror(page, false);
     // the placed block stays selected (place auto-selects) — re-pick it in
     // the EDIT tab: the TOP face now answers the owned block, not the deck
-    await page.getByTestId('tooltab-edit').click();
+    await page.getByTestId('ws-edit').click();
     await page.mouse.click(box.x + box.width * click!.x, box.y + box.height * click!.y);
     const hl = await highlight(page);
     expect(hl, 'the placed block is selected').not.toBeNull();
@@ -300,7 +317,7 @@ test.describe('blocks EDIT: highlight, in-place rotate, snap, twin @place', () =
     // the FLAVOR FLIP to PLACE KEEPS the block widget — the widget is the
     // workspace's move/turn/STRETCH tool, and a freshly placed block in the
     // PLACE flavor wears it the same way (the modebox ⤢ row is the tell).
-    await page.getByTestId('tooltab-place').click();
+    await page.getByTestId('ws-blocks').click();
     await page.waitForTimeout(100);
     const gz2 = await blockGizmo(page);
     expect(gz2, 'the PLACE flavor keeps the block widget (place-then-edit)').not.toBeNull();

@@ -66,7 +66,8 @@ async function openBlocksMode(page: Page) {
   await page.goto(`/?craft=${ISW}`);
   await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
   await page.getByTestId('mode-edit').click();
-  await page.getByTestId('tooltab-place').click();       // v1.5: brush lives in PLACE
+  await page.getByTestId('ws-blocks').click();       // v1.5: brush lives in PLACE
+  await page.getByTestId('mirw-off').click();               // v1.11: single-cell pins (no auto twin)
   await expect(page.getByTestId('block-brush')).toBeVisible();
 }
 

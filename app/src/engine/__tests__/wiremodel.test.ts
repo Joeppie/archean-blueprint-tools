@@ -13,7 +13,8 @@ import {
   candidatesFor, compGroup, compatible, hubInputIndex, incompatReason,
   portHint, portRole, type WirePort,
 } from '../wiremodel';
-import { autoWire, pipeLabel, portCensus, unconnectedPorts, wireNets } from '../wireops';
+import { autoWire, pipeLabel, portCensus, unconnectedPorts, wireNets,
+  KIND_SHORT, shortPort } from '../wireops';
 import type { Blueprint } from '../format';
 import type { ModelManifest } from '../models';
 
@@ -284,5 +285,28 @@ describe('cable labels and the networks overview', () => {
     expect(cs.filter(c => c.role === 'any' && c.group === 'hub').length, 'the four ports stay downstream-any')
       .toBe(4);
     expect(unconnectedPorts(bp, MANIFEST).length).toBe(cs.length);
+  });
+});
+
+describe('v1.11 short wire labels (we: "labels on the wires are too long")', () => {
+  test('KIND_SHORT abbreviates the kind words', () => {
+    expect(KIND_SHORT.lowvoltage).toBe('lv');
+    expect(KIND_SHORT.highvoltage).toBe('hv');
+    expect(KIND_SHORT.fluid).toBe('fl');
+    expect(KIND_SHORT.item).toBe('it');
+    expect(KIND_SHORT.data).toBe('data');
+  });
+
+  test('shortPort abbreviates the game\'s port-name tokens', () => {
+    expect(shortPort('lowvoltage-input')).toBe('lv-in');
+    expect(shortPort('lowvoltage-output')).toBe('lv-out');
+    expect(shortPort('highvoltage-input')).toBe('hv-in');
+    expect(shortPort('data_port.001')).toBe('data-1');
+    expect(shortPort('fluid-output')).toBe('fl-out');
+    expect(shortPort('item-in')).toBe('it-in');
+    expect(shortPort('items')).toBe('it');
+    expect(shortPort('data')).toBe('data');                 // already short
+    expect(shortPort('data-connector')).toBe('data-connector');   // kept
+    expect(shortPort('---')).toBe('---');                   // junk stays visible
   });
 });

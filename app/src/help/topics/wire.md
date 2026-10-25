@@ -4,8 +4,27 @@ Tags: wire pipes cables wiring auto-wire junction ports endpoints census disconn
 **Wire** (∿) is the cable workspace — the craft's `data.pipes` graph as a
 dock under the viewport, with a live **3-D hover label**: rest the cursor on
 any cable and a gold chip prints where it goes —
-`Propeller[9].lowvoltage ↔ Computer[0].data_port.001` — while the cable
-itself gold-lights through the hull.
+`Propeller[9].lv ↔ Computer[0].data-1` while the cable itself gold-lights
+through the hull. Labels are SHORT (v1.11, we: "we cant have names that are
+too long"): kinds read **lv · hv · fl · it · data**, and port names
+abbreviate their recurring words (`lowvoltage-input` → `lv-in`,
+`data_port.001` → `data-1`). The verbatim file name is always in the row's
+tooltip — the FILE keeps the full names everywhere.
+
+## Hovering a cable (v1.11)
+
+Rest the cursor on a cable (or its row in Cables): after a ~120 ms dwell
+the gold label chip prints the pair (`HV-Batt[288].hv3 ↔
+HV-Bridge[216].port2` — types and ports abbreviated, verbatim names in
+the tooltip), the cable gold-lights through the hull, and **both parts at
+its ends mint up**. Keep the cursor on it for **2 seconds**: a power surge
+departs the point under your cursor and races along the cable to both
+parts, and the geometry standing between the camera and those endpoints
+turns into a ghost — every occluding face is cut out of its mesh and
+re-laid at 16 % opacity, so you see exactly what the cable connects.
+Un-hover and everything restores. The X-ray is screen-precise: the two
+endpoint boxes and the cable's pixel extents (with depth) define what
+counts as "in the way".
 
 ## What is wired to what
 

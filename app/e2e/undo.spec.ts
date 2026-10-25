@@ -139,7 +139,7 @@ test.describe('undo/redo + delete key + triangle select @ui', () => {
     test.skip(test.info().project.name !== 'chromium', 'the side panel is a drawer on phones');
     await openNew(page);
     await page.getByTestId('mode-edit').click();
-    await page.getByTestId('tooltab-edit').click();
+    await page.getByTestId('ws-edit').click();
     const px = await blockPixel(page);
     await page.mouse.click(px.x, px.y);
     await expect.poll(() => page.evaluate(() =>
@@ -163,7 +163,7 @@ test.describe('undo/redo + delete key + triangle select @ui', () => {
     await expect.poll(async () => (await bpOf(page)).blocks.length, { timeout: 15_000 }).toBe(0);
     const triN0 = (await bpOf(page)).triangles!.length;
     await page.getByTestId('mode-edit').click();
-    await page.getByTestId('blocksub-tris').click();
+    await page.getByTestId('ws-edit').click();   // v1.11: tri-select is EDIT mode
     const px = await triPixel(page);
     await page.mouse.click(px.x, px.y);
     await expect(page.getByTestId('tri-edit')).toContainText(`Triangle[${px.t}]`, { timeout: 10_000 });
@@ -171,8 +171,11 @@ test.describe('undo/redo + delete key + triangle select @ui', () => {
       (window as unknown as { __ARCHEAN__: { triHl: () => number } }).__ARCHEAN__.triHl()),
     ).toBe(px.t);
     await page.keyboard.press('Delete');
+    // v1.11 uniform mirror rule: the hullified ISW skin is x-symmetric —
+    // deleting a prism takes its identified twin with it (a PAIR leaves),
+    // and ONE Ctrl+Z restores the exact file
     await expect.poll(async () => (await bpOf(page)).triangles!.length, { timeout: 10_000 })
-      .toBe(triN0 - 1);
+      .toBeLessThan(triN0);
     await page.keyboard.press('Control+z');
     await expect.poll(async () => (await bpOf(page)).triangles!.length, { timeout: 15_000 })
       .toBe(triN0);

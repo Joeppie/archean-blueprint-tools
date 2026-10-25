@@ -15,7 +15,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Blueprint } from '../engine/format';
 import type { Engine } from '../engine/scene';
-import { ALT_STEPS, ALT_CEILING, GASES, envelopeVolume, equilibrium, liftKg } from '../engine/atmo';
+import { ALT_STEPS, ALT_CEILING, GASES, envelopeVolume, equilibrium, liftKg, sealedEnvelopeVolume } from '../engine/atmo';
 
 const LS_KEY = 'archean-app-lift-open';
 
@@ -30,12 +30,26 @@ export function LiftWidget(p: { engine: Engine | null; bp: Blueprint; rev: numbe
 
   // the blueprint's triangle array is MUTATED in place on every edit — the
   // rev counter (bumped through the same funnel) is the real dependency
-  const env = useMemo(() => envelopeVolume(p.bp.data.triangles ?? []),
-    [p.bp, p.rev]);                                    // eslint-disable-line react-hooks/exhaustive-deps
+  // v1.11 (we: "lift should calculate from a volume block. Note we only
+  // look at enclosed blocks/triangles"): the ENVELOPE is the SEALED volume
+  // — block cells + voxelised skin triangles flood-checked from outside;
+  // what cannot be reached is the envelope. Markers are never trusted. A
+  // skin that seals nothing falls back to the divergence read (an open
+  // skin lifts nothing; the row just says so honestly).
+  const env = useMemo(() => {
+    const s = sealedEnvelopeVolume(p.bp.data.triangles ?? [], p.bp.data.blocks ?? []);
+    return s.cells > 0
+      ? { m3: s.m3, tris: (p.bp.data.triangles ?? []).length, sealed: true }
+      : { ...envelopeVolume(p.bp.data.triangles ?? []), sealed: false };
+  }, [p.bp, p.rev]);                                    // eslint-disable-line react-hooks/exhaustive-deps
   const mm = p.engine?.massReport();
 
   const mass = mm?.total ?? 0;
-  const rows = env.tris > 0
+  // v1.11: the rows key off the SEALED ENVELOPE, not a triangle count —
+  // a zeppelin built of BLOCKS seals the flood and gets its lift (we: "for
+  // the zeppelin in corpus, the lift is not calculated because its not
+  // made of triangles. We can still find the hull for it")
+  const rows = env.m3 > 0
     ? GASES.map(g => ({ g, sl: liftKg(g.id, env.m3, 0), eq: equilibrium(g.id, env.m3, mass) }))
     : [];
 
@@ -50,14 +64,14 @@ export function LiftWidget(p: { engine: Engine | null; bp: Blueprint; rev: numbe
           Lift &amp; altitude
         </span>
         <span data-testid="lift-head" className="shrink-0 text-[10px] tabular-nums text-ink-dim">
-          {env.tris === 0 ? 'no hull skin'
+          {env.m3 === 0 ? 'no sealed envelope'
             : `${fmt(env.m3)} m³ · vacuum ${kg(rows[0]!.sl)}`}
         </span>
       </button>
 
       {open && (
         <div className="px-3 pb-2 text-[11px] leading-snug">
-          {env.tris === 0 ? (
+          {env.m3 === 0 ? (
             <div className="text-ink-dim">
               no hull triangles yet — the gas envelope is measured from the
               closed hull SKIN (build one with Tools ▸ Sphere skin, or
@@ -68,6 +82,9 @@ export function LiftWidget(p: { engine: Engine | null; bp: Blueprint; rev: numbe
               <div className="flex justify-between gap-2 text-ink-dim">
                 <span>envelope (hull skin, {env.tris} triangles)</span>
                 <b data-testid="lift-volume" className="tabular-nums text-ink">{fmt(env.m3, 1)} m³</b>
+                {(env as { sealed?: boolean }).sealed &&
+                  <span data-testid="lift-sealed" className="ml-1 text-[9px] uppercase tracking-wide text-emerald-400"
+                    title="the volume the outside flood cannot reach — enclosed blocks and skin triangles, not markers">sealed hull</span>}
               </div>
               <div className="flex justify-between gap-2 text-ink-dim">
                 <span>craft mass (computed)</span>

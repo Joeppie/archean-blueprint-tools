@@ -8,7 +8,7 @@ Tags: keyboard shortcuts keys mouse controls orbit pan zoom delete escape shift 
 | Ctrl+S | save (download the blueprint) |
 | Ctrl+Z | undo (a slider/gizmo drag = one step) |
 | Ctrl+Shift+Z / Ctrl+Y | redo |
-| Delete / Backspace | delete the selection (Edit flavour): part ▸ triangle ▸ block, mirror twins included |
+| Delete / Backspace | delete the selection (✎ Edit mode): part ▸ triangle ▸ block, mirror twins included |
 | g | grid on/off |
 | o | occupancy boxes on/off |
 | h | hull solids ⇄ wireframe — in wireframe you CLICK THROUGH the hull to what is behind it ("click what you SEE") |
@@ -25,12 +25,13 @@ Tags: keyboard shortcuts keys mouse controls orbit pan zoom delete escape shift 
 | right drag | pan |
 | click a part (✎ Edit) | select + fly to it + gizmo |
 | click a block face (✎ Edit) | select the block + the BLOCK widget |
-| click (✚ Place) | place the brush ghost / held part on the hovered surface |
+| click (▤ Blocks / ▵ Triangles mode) | land a 1×1×1 cell / drop a pin (a held catalog part lands too) |
 | press-drag-release (holding a part) | SMEAR-place it, aimed along the drag |
 | double-click a list row | fly the camera to that part |
 | drag a gizmo ring | rotate (the ring you grab is the axis you turn) |
 | drag a gizmo ⤢ handle (block) | STRETCH that direction — the grabbed face moves, the opposite face stays anchored (whole cells) |
-| drag a triangle PIN | re-drop that corner onto the surface under the cursor (hull-lattice snap) |
+| drag a triangle PIN | place that corner in 3D — it rides the camera-facing plane through the pin (orbit = depth; ⇧ = lock to one axis), hull-lattice snap |
+| click the widget's ▵ (block) | turn the selected BLOCK into its hull-triangle skin (block removed; Undo returns it) |
 | hover the scene | a black label shows the full snapped x/y/z the ray lands on (y is UP; the pad's red line is x, the blue line z, both ±-labelled) |
 | drag a gizmo arrow | move (world axes, always axis-aligned) |
 

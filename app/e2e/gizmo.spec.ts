@@ -82,7 +82,8 @@ test.describe('gizmo writeback @gizmo @slow', () => {
   test('select attaches at the visible-geometry centre; a spin ORBITS the origin about it and saves an exact quat', async ({ page }) => {
     desktopOnly();
     await openCraft(page, ISW);
-    await page.getByTestId('filter').fill('aileron');
+    await page.getByTestId('ws-parts').click();   // v1.11: parts list = + Parts
+    await page.getByTestId('parts-list').getByTestId('filter').fill('aileron');
     const row = page.locator('[data-idx]').first();
     const ci = +(await row.getAttribute('data-idx'))!;
     await row.click();
@@ -124,7 +125,8 @@ test.describe('gizmo writeback @gizmo @slow', () => {
   test('translate rides the file position exactly', async ({ page }) => {
     desktopOnly();
     await openCraft(page, ISW);
-    await page.getByTestId('filter').fill('pilotseat');
+    await page.getByTestId('ws-parts').click();   // v1.11: parts list = + Parts
+    await page.getByTestId('parts-list').getByTestId('filter').fill('pilotseat');
     const row = page.locator('[data-idx]').first();
     const ci = +(await row.getAttribute('data-idx'))!;
     await row.click();
@@ -141,7 +143,8 @@ test.describe('gizmo writeback @gizmo @slow', () => {
   test('subgrid selection carries NO gizmo (v0.170: they ride their masters)', async ({ page }) => {
     desktopOnly();
     await openCraft(page, DOLPHIN);
-    await page.getByTestId('filter').fill('seat');
+    await page.getByTestId('ws-parts').click();   // v1.11: parts list = + Parts
+    await page.getByTestId('parts-list').getByTestId('filter').fill('seat');
     await page.locator('[data-idx]').first().click();
     expect(((await eng('state')(page)) as { ci: number }).ci).toBeGreaterThanOrEqual(0);
     await eng('selsub', { bi: 4 })(page);
@@ -155,7 +158,8 @@ test.describe('gizmo writeback @gizmo @slow', () => {
     // beyond the 30 s base under the suite's 3-worker contention.
     test.slow();
     await openCraft(page, ISW);
-    await page.getByTestId('filter').fill('aileron');
+    await page.getByTestId('ws-parts').click();   // v1.11: parts list = + Parts
+    await page.getByTestId('parts-list').getByTestId('filter').fill('aileron');
     const row = page.locator('[data-idx]').first();
     const ci = +(await row.getAttribute('data-idx'))!;
     await row.click();

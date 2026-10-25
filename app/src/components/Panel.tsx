@@ -15,6 +15,7 @@ import type { EditCtx } from '../engine/edit';
 import type { Blueprint, BlueprintComponent, LatticeObj } from '../engine/format';
 import { subMasterEntries } from '../engine/subgrid';
 import { CompPaint } from './ColorPanel';
+import { MirrorGlyph } from './ui';
 import { LiftWidget } from './LiftWidget';
 import { CostWidget } from './CostWidget';
 
@@ -31,7 +32,7 @@ export interface EditApi {
   deleteComp(ctx: EditCtx, ci: number): void;
 }
 
-interface Props {
+export interface PanelProps {
   engine: Engine | null;
   /** edit counter: re-renders the live readouts (mass/CoM) */
   rev: number;
@@ -211,17 +212,15 @@ export function VesselStats(p: { engine: Engine | null; bp: Blueprint; rev: numb
     ),
   });
   p.rev;                                        // re-render on every edit
+  // v1.11 (we: "info screen needs to be multiple tabs next to eachother to
+  // make sense, on desktop, below eachother on mobile"): the Info dock is a
+  // CARD GRID — Mass & CoM · Census · Heaviest classes · Lift · Build cost
+  // sit SIDE BY SIDE on desktop (md:grid-cols-3) and stack on phones.
   return (
-    <div data-testid="vessel-stats" className="divide-y divide-white/10">
-      {/* the builder's buoyancy planner (user 2026-10-22): a fresh craft
-          opens in VIEW, so the lift widget rides this side menu too — its
-          own collapsible row (localStorage-persisted), above the sections */}
-      <LiftWidget engine={p.engine} bp={p.bp} rev={p.rev} />
-      {/* raw-material cost of every part (user 2026-10-22): the shopping
-          list on top, each component's recipe chain on demand */}
-      <CostWidget bp={p.bp} rev={p.rev} />
+    <div data-testid="vessel-stats"
+      className="grid grid-cols-1 items-start gap-x-3 gap-y-2 px-2 pb-2 sm:grid-cols-2 md:grid-cols-3">
       {secs.map(s => (
-        <div key={s.id}>
+        <div key={s.id} className="rounded-md border border-white/10 bg-panel2/30">
           <button data-testid={`vsec-${s.id}`} onClick={() => toggle(s.id)}
             className="flex w-full items-center gap-1.5 px-3 py-2 text-left">
             <span className="w-3 text-[9px] text-ink-dim">{open.has(s.id) ? '▾' : '▸'}</span>
@@ -230,6 +229,14 @@ export function VesselStats(p: { engine: Engine | null; bp: Blueprint; rev: numb
           {open.has(s.id) && <div className="px-3 pb-2">{s.body}</div>}
         </div>
       ))}
+      {/* the builder's buoyancy planner (user 2026-10-22) — its own card */}
+      <div className="rounded-md border border-white/10 bg-panel2/30">
+        <LiftWidget engine={p.engine} bp={p.bp} rev={p.rev} />
+      </div>
+      {/* raw-material cost of every part (user 2026-10-22) — its own card */}
+      <div className="rounded-md border border-white/10 bg-panel2/30">
+        <CostWidget bp={p.bp} rev={p.rev} />
+      </div>
     </div>
   );
 }
@@ -338,7 +345,7 @@ const Check = (p: { label: string; checked: boolean; onChange: (v: boolean) => v
  *  in src/assets/backdrops/manifest.json — surface panoramas on a geometry
  *  dome; the solid green sheet is gone) and the
  *  ORTHOGRAPHIC projection toggle. */
-export function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHullOpacity' | 'gizmoOn' | 'onGizmo' | 'hiDef' | 'onHiDef' | 'staticInfo' | 'onStaticInfo'> & {
+export function ViewOpts(p: Pick<PanelProps, 'opts' | 'onOpt' | 'hullOpacity' | 'onHullOpacity' | 'gizmoOn' | 'onGizmo' | 'hiDef' | 'onHiDef' | 'staticInfo' | 'onStaticInfo'> & {
   /** v1.5.21 SETTABLE MIRROR AXIS (user: "mirror axes should be settable.
    *  Game is not hardcoded x"): the SESSION plane for ⇄ twin placement,
    *  block twin identity and the overlay's solid sheet. Detected mirror
@@ -393,19 +400,24 @@ export function ViewOpts(p: Pick<Props, 'opts' | 'onOpt' | 'hullOpacity' | 'onHu
         onChange={p.onOrtho} />
       {/* v1.5.21: the game stores a per-component mirrorAxis (0=none,
           1=x, 2=y, 3=z) and non-x twin pairs are indexed by sym.ts — the
-          editor's OWN plane (⇄ placement, block twins) is settable too */}
+          editor's OWN plane (⇄ placement, block twins) is settable too.
+          v1.11: the same MIRROR GLYPH language as the dock's widget (the
+          off chip wears the red strikethrough, axis chips the glyph). */}
       <div className="flex items-center gap-2 py-[2px] text-[12px] text-ink">
         <span className="flex-1">mirror axis</span>
         <button data-testid="mirror-axis-off" title="no mirror — edits touch ONLY the selected item (⊘)"
           onClick={() => p.onMirrorAxis('off')}
-          className={`ksp-btn px-2 py-[1px] text-[11px] ${p.mirrorAxis === 'off' ? 'on' : ''}`}>
-          ⊘
+          className={`ksp-btn grid h-6 w-6 place-items-center px-0 ${p.mirrorAxis === 'off' ? 'on' : ''}`}>
+          <MirrorGlyph strike size={14} />
         </button>
         {(['x', 'y', 'z'] as const).map(a => (
           <button key={a} data-testid={`mirror-axis-${a}`} title={`mirror plane ${a} = 0 (twins + ⇄ placement)`}
             onClick={() => p.onMirrorAxis(a)}
-            className={`ksp-btn px-2 py-[1px] text-[11px] uppercase ${p.mirrorAxis === a ? 'on' : ''}`}>
-            {a}
+            className={`ksp-btn grid h-6 w-7 place-items-center px-0 ${p.mirrorAxis === a ? 'on' : ''}`}>
+            <span className="relative grid h-5 w-5 place-items-center">
+              <span className="absolute grid place-items-center opacity-45"><MirrorGlyph size={15} /></span>
+              <span className="relative text-[10px] leading-none">{a}</span>
+            </span>
           </button>
         ))}
       </div>
@@ -469,21 +481,21 @@ function PartThumb({ type }: { type: string }) {
   }, [type]);
   return (
     <span
-      className="relative grid h-[22px] w-[22px] shrink-0 place-items-center overflow-hidden rounded-[3px] border"
+      className="relative grid h-[30px] w-[30px] shrink-0 place-items-center overflow-hidden rounded-[3px] border"
       style={{ background: `hsl(${tileHue(type)} 20% 22%)`, borderColor: `hsl(${tileHue(type)} 24% 44%)` }}
       onPointerEnter={() => ref.current && startSpin(ref.current, type)}
       onPointerLeave={() => ref.current && stopSpin(ref.current)}>
-      <span className="pointer-events-none absolute text-[8px] font-bold text-ink/70">{partCode(type)}</span>
+      <span className="pointer-events-none absolute text-[9px] font-bold text-ink/70">{partCode(type)}</span>
       <img ref={ref} alt="" data-testid={`thumb-${type}`}
-        className="pointer-events-none absolute inset-0 h-[22px] w-[22px]" />
+        className="pointer-events-none absolute inset-0 h-[30px] w-[30px]" />
     </span>
   );
 }
 
-function CompList(p: { bp: Blueprint; rev: number; sel: Props['sel'];
-  onSelect: Props['onSelect']; onSelectSub: Props['onSelectSub'];
-  manifest: Props['manifest']; placingType: Props['placingType'];
-  onPlaceType: Props['onPlaceType'];
+export function CompList(p: { bp: Blueprint; rev: number; sel: PanelProps['sel'];
+  onSelect: PanelProps['onSelect']; onSelectSub: PanelProps['onSelectSub'];
+  manifest: PanelProps['manifest']; placingType: PanelProps['placingType'];
+  onPlaceType: PanelProps['onPlaceType'];
   /** PLACE sub-tab: the catalog (hold a part, click the craft). EDIT: the
    *  ship's own parts (by type / by subgrid) — v1.4 sub-tab split */
   listMode: 'place' | 'edit' }) {
@@ -584,7 +596,7 @@ function CompList(p: { bp: Blueprint; rev: number; sel: Props['sel'];
   }, [p.sel, tab, sections]);
 
   const rowCls = (sel: boolean) =>
-    `flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded px-2 py-[1px] text-[12px] ${
+    `flex min-h-[30px] cursor-pointer items-center gap-2 whitespace-nowrap rounded px-2 py-[5px] text-[13px] ${
       sel ? 'bg-accent/20 text-accent shadow-[inset_0_0_0_1px_rgba(169,215,240,.5)]' : 'text-ink hover:bg-white/5'}`;
 
   return (
@@ -677,28 +689,12 @@ function CompList(p: { bp: Blueprint; rev: number; sel: Props['sel'];
 }
 
 // ----------------------------------------------------------------- inspector
-function Inspector(p: Props) {
+export function Inspector(p: PanelProps) {
   const { engine, ctx, bp, sel, edits, markDirty, readOnly } = p;
   const ci = sel.ci;
   const comp = ci >= 0 ? bp.data.components[ci] : null;
 
-  // rotation edit session (legacy q0 = live pose when the panel opens)
-  useEffect(() => { if (engine && ci >= 0) engine.beginRotEdit(ci); }, [engine, ci, p.inspKey]);
-  const [rot, setRot] = useState({ p: 0, y: 0, r: 0 });
-  useEffect(() => { setRot({ p: 0, y: 0, r: 0 }); }, [ci, p.inspKey]);
-
   if (!comp) return null;
-  const pos0 = comp.position;
-  const livePos = (ax: 'x' | 'y' | 'z', v: number) => {
-    if (ctx) edits.pos(ctx, ci, ax, v);
-    markDirty();
-  };
-  const liveRot = (kind: 'p' | 'y' | 'r', deg: number) => {
-    const next = { ...rot, [kind]: deg };
-    setRot(next);
-    if (ctx) edits.quatDelta(ctx, ci, next.p, next.y, next.r);
-    markDirty();
-  };
 
   return (
     <div className="overflow-y-auto" data-testid="inspector">
@@ -755,32 +751,9 @@ function Inspector(p: Props) {
           </div>
         ))}
       </Sec>
-      <Sec title="Position (m)">
-        <Row label="x" min={pos0.x - 2} max={pos0.x + 2} step={0.005} value={pos0.x} disabled={readOnly}
-          onInput={v => livePos('x', v)} />
-        <Row label="y" min={pos0.y - 1.5} max={pos0.y + 1.5} step={0.005} value={pos0.y} disabled={readOnly}
-          onInput={v => livePos('y', v)} />
-        <Row label="z" min={pos0.z - 2} max={pos0.z + 2} step={0.005} value={pos0.z} disabled={readOnly}
-          onInput={v => livePos('z', v)} />
-      </Sec>
-      <Sec title="Rotation (° deltas, world axes)">
-        <Row label="pitch" min={-180} max={180} step={0.1} value={0} disabled={readOnly} perPx={0.25}
-          title="world-axis pitch delta; orientation stays an exact file quaternion. Drag the LABEL to scrub: 4 px = 1° (Shift 5×)."
-          onInput={v => liveRot('p', v)} />
-        <Row label="yaw" min={-180} max={180} step={0.1} value={0} disabled={readOnly} perPx={0.25} onInput={v => liveRot('y', v)} />
-        <Row label="roll" min={-180} max={180} step={0.1} value={0} disabled={readOnly} perPx={0.25} onInput={v => liveRot('r', v)} />
-        {comp.type === 'PilotSeat' && (
-          <div className="mt-1 flex flex-wrap gap-1">
-            {([['lean fwd 12°', 12], ['20°', 20], ['30°', 30], ['45°', 45], ['upright', 0]] as const).map(([t, v]) => (
-              <button key={t} className="rounded bg-panel2 px-1.5 py-[2px] text-[10px] text-ink hover:bg-white/10"
-                onClick={() => { setRot(r => ({ ...r, p: -v })); if (ctx) edits.quatDelta(ctx, ci, -v, rot.y, rot.r); markDirty(); }}>
-                {t}
-              </button>
-            ))}
-            <div className="w-full text-[10px] text-ink-dim">negative pitch = lean toward nose (view +z)</div>
-          </div>
-        )}
-      </Sec>
+      {/* v1.11 (we: "the component Position/rotation shouldnt be visible
+        anymore on the bottom panel as widgets supercede it"): the canvas
+        gizmo owns move/turn — the slider rows are GONE */}
       <Sec title="Component data">
         <DataRows comp={comp} compPath={['data', 'components', ci]} edits={edits} ctx={ctx} markDirty={markDirty}
           liveEdit={() => engine?.liveDataEdit(Number(ci))}
@@ -865,7 +838,7 @@ function DataRows(p: {
 // ------------------------------------------------------------- subgrid panel
 const isOcc = (b: LatticeObj & { type?: number }) => (b.type ?? 0) === 255;
 
-function SubPanel(p: Props) {
+export function SubPanel(p: PanelProps) {
   const { engine, ctx, bp, sel, edits, markDirty } = p;
   const bi = sel.sub;
   const bc = bp.data.components[bi];
@@ -942,58 +915,5 @@ function SubPanel(p: Props) {
   );
 }
 
-// --------------------------------------------------------------------- shell
-export default function Panel(p: Props) {
-  // VIEW mode (v1.4 user rule): ONLY the overall vessel stats, collapsable.
-  if (p.statsOnly)
-    return (
-      <div className="flex h-full w-full flex-col overflow-y-auto bg-panel text-ink" data-testid="panels">
-        <VesselStats engine={p.engine} bp={p.bp} rev={p.rev} />
-      </div>
-    );
-  const place = p.tool === 'place';
-  return (
-    <div className="flex h-full w-full flex-col overflow-hidden bg-panel text-ink" data-testid="panels">
-      {/* v1.10.7 (we: "the side panel is still edit/place toggle, which makes
-          no sense. It's also far too wide on phone"): the ✎ Edit | ✚ Place
-          switch MOVED to the build-dock header — it sets what a canvas tap
-          DOES, so it belongs with the workspace, and the phone drawer must
-          not be the only place to find it. This panel is now purely the
-          parts catalogue (PLACE flavor) / parts list + inspector (EDIT). */}
-      {/* the buoyancy planner (user 2026-10-22): a collapsible widget PART OF
-          THE BUILDER — envelope volume from the hull skin, vacuum/helium/
-          hydrogen lift at sea level, the per-altitude weight limit and the
-          equilibrium ("floats at") altitude per gas. Collapsed = one row. */}
-      <LiftWidget engine={p.engine} bp={p.bp} rev={p.rev} />
-      {/* KSP order: the PARTS list leads, the context window follows, the
-          camera/view settings sit at the bottom. Min-heights are load-
-          bearing: when fixed content once exceeded the window the flex
-          engine silently crushed the list to 8 px (rows rendered clipped,
-          clicks intercepted) — caught by sym.spec at 1280×720. */}
-      <div className="flex min-h-[160px] flex-[3] flex-col border-t border-white/10">
-        <h3 className="ksp-label px-3 pt-2 text-[11px] font-semibold text-ink-dim">{place ? 'Catalog' : 'Parts'}</h3>
-        <CompList bp={p.bp} rev={p.rev} sel={p.sel} onSelect={p.onSelect} onSelectSub={p.onSelectSub}
-          manifest={p.manifest} placingType={p.placingType} onPlaceType={p.onPlaceType}
-          listMode={place ? 'place' : 'edit'} />
-      </div>
-      <div className="min-h-0 flex-[3] border-t border-white/10 overflow-y-auto">
-        {p.bottom !== undefined ? (
-          <>
-            {/* v2.0.0 merged editor: a selected SUBGRID stacks over the
-                workspace too (its SubPanel + joint sliders used to vanish
-                behind the blocks section — the panels.spec subgrid pin) */}
-            {p.selOverBottom && p.sel.sub >= 0
-              && <SubPanel {...p} key={`s${p.sel.sub}`} />}
-            {p.selOverBottom && p.sel.sub < 0 && p.sel.ci >= 0
-              && <Inspector {...p} key={`c${p.sel.ci}k${p.inspKey}`} />}
-            {p.bottom ?? null}
-          </>
-        ) : p.sel.sub >= 0
-          ? <SubPanel {...p} key={`s${p.sel.sub}`} />
-          : p.sel.ci >= 0
-            ? <Inspector {...p} key={`c${p.sel.ci}k${p.inspKey}`} />
-            : <div className="px-3 py-2 text-[12px] text-ink-dim">nothing selected — click a part</div>}
-      </div>
-    </div>
-  );
-}
+// (v1.11: the sidebar shell is GONE — the Editor composes CompList/
+// Inspector/SubPanel/VesselStats/mode panels directly in the bottom dock.)

@@ -5,7 +5,8 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 import { cornerOf, cornerWorld, triAt, triCentroid, triangleFromCorners,
-  triCorners, setTriCorner, setTriCornerAll, setTriCornersAll, shiftTriCells, triSpan } from '../tris';
+  triCorners, setTriCorner, setTriCornerAll, setTriCornersAll, shiftTriCells, triSpan,
+  mirroredTriangle, triTwinIndex, rotateCornersQ, type Corner } from '../tris';
 import type { Blueprint } from '../format';
 import { corpusDir } from '../../../tools/vite-corpus.ts';
 
@@ -156,6 +157,26 @@ describe('v1.10.6 panel vertex editing (setTriCorner / shiftTriCells)', () => {
     expect(JSON.stringify(t)).toBe(before);
   });
 
+  test('v1.11 mirroredTriangle — reflected corners, flipped winding, relabelled walls', () => {
+    const t = triangleFromCorners([8, 8, 8], [12, 8, 8], [8, 12, 8], [0, 1, 2, 3, 4])!;
+    (t as unknown as { material: number }).material = 2;
+    const m = mirroredTriangle(t, 'x')!;
+    // corners reflect g → 12 − g on x AND v1↔v2 swap (the winding flip that
+    // keeps the FRONT colour facing the mirrored way)
+    expect(triCorners(m)).toEqual([[4, 8, 8], [4, 12, 8], [0, 8, 8]]);
+    expect((m as unknown as { colors: number[] }).colors).toEqual([0, 1, 4, 3, 2]);
+    expect((m as unknown as { material: number }).material).toBe(2);
+    // the winding normal of the twin = the x-MIRROR of the original's
+    const nrm = (g: [number, number, number][]) => {
+      const u = [g[1]![0] - g[0]![0], g[1]![1] - g[0]![1], g[1]![2] - g[0]![2]];
+      const w = [g[2]![0] - g[0]![0], g[2]![1] - g[0]![1], g[2]![2] - g[0]![2]];
+      return [u[1]! * w[2]! - u[2]! * w[1]!, u[2]! * w[0]! - u[0]! * w[2]!, u[0]! * w[1]! - u[1]! * w[0]!];
+    };
+    const n0 = nrm(triCorners(t)), n1 = nrm(triCorners(m));
+    // mirrored normal, NOT negated (numeric: -0/+0 signs are not meaning)
+    for (let k = 0; k < 3; k++) expect(n1[k]!).toBeCloseTo((k === 0 ? -1 : 1) * n0[k]!, 9);
+  });
+
   test('v1.11 setTriCornerAll moves ONE corner on ALL 3 axes (the pin editor)', () => {
     const t = triangleFromCorners([8, 8, 8], [12, 8, 8], [8, 12, 8], [51, 51, 51, 51, 51])!;
     // a pin drag lands a full 3-vector (cornerOf of a surface point)
@@ -181,5 +202,37 @@ describe('v1.10.6 panel vertex editing (setTriCorner / shiftTriCells)', () => {
     expect(JSON.stringify(t)).toBe(before);
     expect(setTriCornerAll(t, 1, [8, 8, 60])).toBeNull();       // v1_z 60 > 31
     expect(JSON.stringify(t)).toBe(before);
+  });
+});
+
+describe('v1.11 prism twin identification + mirrored rotation', () => {
+  const bpOfTris = (ts: unknown[]) => ({
+    box_min: { x: -1, y: -1, z: -1 }, box_max: { x: 1, y: 1, z: 1 },
+    data: { version: 2, blocks: [], components: [], colors: [], triangles: ts },
+  }) as never;
+
+  test('triTwinIndex finds the mirrored pair, -1 once drifted', () => {
+    const t = triangleFromCorners([8, 6, 6], [10, 6, 6], [8, 6, 10], [51, 51, 51, 51, 51])!;
+    const mt = mirroredTriangle(t, 'x')!;
+    const bp = bpOfTris([t, mt]);
+    expect(triTwinIndex(bp, 0, 'x')).toBe(1);
+    expect(triTwinIndex(bp, 1, 'x')).toBe(0);
+    // drift the pair (the faux-mirror rule): identification stops
+    setTriCornerAll(mt, 0, [7, 6, 6]);
+    expect(triTwinIndex(bp, 0, 'x')).toBe(-1);
+  });
+
+  test('rotateCornersQ is mirror-equivariant (90° about y, x-mirror)', () => {
+    const c: [Corner, Corner, Corner] = [[6, 6, 6], [10, 6, 6], [6, 6, 10]];
+    const q = { w: Math.SQRT1_2, x: 0, y: Math.SQRT1_2, z: 0 };       // +90° about y
+    // x-mirror conjugate of a rotation: ω → −Mω  (mirror-axis component kept,
+    // the other two negated) — a +90° y-turn mirrors to −90° about y
+    const qM = { w: q.w, x: q.x, y: -q.y, z: q.z };
+    const mir = (cs: Corner[]) => cs.map(g => [12 - g[0], g[1], g[2]] as Corner);
+    const key = (cs: Corner[]) =>
+      JSON.stringify([...cs].map(g => [...g].sort((a, b) => a - b)).sort());
+    const a = key(mir(rotateCornersQ(c, q)));    // mirror of the self-rotation
+    const b = key(rotateCornersQ(mir(c) as [Corner, Corner, Corner], qM)); // twin path
+    expect(b).toEqual(a);
   });
 });

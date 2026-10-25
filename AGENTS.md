@@ -1409,6 +1409,165 @@ topic + FORMAT).
   (5) The BLOCK widget now attaches in BOTH flavors (a placed block wears it
   immediately — the old detach-on-flip pin re-cut). Hooks: `pins()`,
   `pinPoint(i)`, `blockScale(ext, signs?)`; `blockGizmo()` carries `ext`.
+  (6) SAME-BATCH FOLLOW-UPS (we: "I cannot move the pins in 3 dimenensions,
+  nor do I have a gizmo for triangles" + "nor does it respect my place/edit
+  mode. This is wrong" + "place/edit should be UNDER triangles… if place,
+  triangles under place… blocks and triangles so disparate; merged" + "the
+  mirror option is not understandable… add a mirror icon with a
+  strikethrough, and x y z with mirror behind it" + "mirror for triangle is
+  not placed. Button should exist to turn block to triangle… on its widget"):
+  PIN DRAGS are 3D plane drags — the pin rides the CAMERA-FACING plane
+  through its corner (screen drag = all three world axes, orbit = depth);
+  ⇧ = axis lock on the world axis most facing the camera, plane normal =
+  view−(v·A)A (A×view CONTAINS the view direction — edge-on to every ray,
+  dead drags; and compute the axis delta BEFORE p.copy() — the aliasing
+  zeroed every ⇧ move). THE FLAVOUR LAW in onBlockPick: ✚ PLACE clicks only
+  place (species = tool: ▤ brush · ▵ pins; a prism face is just a surface —
+  placement NEVER selects), ✎ Edit clicks select ANYTHING (comp ▸ prism ▸
+  block, merged pick, modebox pops; sky clears all). Dock header hierarchy:
+  flavour FIRST, species behind a ›, hint says "PLACE ▸ BLOCKS…". THE TRI
+  WIDGET: `setTriWidgetOn(flavour gate, Editor effect)` + `syncTriGizmo`
+  NEVER hides for a persisted 'scale' mode (reads as ✥; the user's stretched
+  blocks left localStorage scale = "no gizmo for triangles") — scale-mode
+  triangles attach as translate. MIRROR WIDGET = `MirrorGlyph` (ui.tsx SVG:
+  dashed plane + solid triangle + reflected ghost, currentColor-lit; red
+  strike line data-g="mirror-strike" on the OFF chip; axis chips wear the
+  glyph BEHIND the letter; ⚙ rows share the language; testids mirw-* kept —
+  text 'twin ON' assertions re-pinned to aria-pressed). TRIANGLE MIRROR
+  TWIN: `mirroredTriangle(t, axis)` — corners g→12−g, v1↔v2 winding flip
+  (det=−1 mirror flips the winding normal; the swap restores FRONT = the
+  mirrored front), colours[2]↔[4] relabel, material/smooth ride; the Place
+  commit batches [tri, twin] through appendTrianglesDoc. WIDGET ▵
+  (`mode-tris`, block-owned only): `blockSkinTris(bp, bi)` = the hullify
+  core with an `only` scope (census/culling global so glued walls stay
+  culled; game outward+flat authoring) + `HullifyResult.tris`; the Editor
+  appends via the funnel and splices the block (identified twin converts
+  too, v1.8.0 rule); fully-glued block → toast, no write. Pins: vitest
+  mirroredTriangle (corner-set mirror + numeric mirrored-normal check —
+  toEqual distinguishes −0/0!) + blockSkinTris (isolated 12 / glued 10 /
+  enclosed 0); e2e builddock (⇄ twin corners = 12−g set, widget ▵
+  blocks−1/tris+≥6/one Ctrl+Z, ⤢+▵ absent on parts, FREE-3D drag: screen-
+  vertical drag carries world Y, ⇧ moves EXACTLY the camera-facing axis,
+  flavour law: Place-click drafts a pin (triHl −1), same Edit-click
+  selects + widget). LESSON: e2e running WHILE editing = phantom failures;
+  re-run flakes on the final tree before believing them. (7) SHORT WIRE
+  LABELS (we: "labels on the wires are too long lowvoltage => lv, similarly
+  hv, and ports should be short name. fl for fluid and it for items"):
+  wireops `KIND_SHORT` (lv/hv/fl/it/data) + `shortPort(name)` (tokens on
+  [-_. /]: lowvoltage→lv, highvoltage→hv, input→in, output→out, fluid→fl,
+  item(s)→it, 'port' dropped, 001→1, joined '-'). `pipeLabel` shortens the
+  ports (the single funnel → CABLES rows, the 3-D hover chip, the
+  disconnect message); WirePanel prints KIND_SHORT/shortPort at its ~8
+  display spots (testids + tooltips keep the VERBATIM names — cosmetic
+  only, the file is untouched). e2e: wire.spec mirrors shortPort locally
+  (the e2e tsconfig is nodenext and cannot import app modules — the
+  allowImportingTsExtensions trick drags the whole app graph into node16
+  checking); wiremodel.test.ts pins the pure pair (v1.11 describe).
+  (8) AUTO-TWIN + ONE PLANE (we: "I created a triangle but it was not
+  mirrored, but the craft has two mirror axes visible. This isnt how the
+  game should work, nor our editor"): the twin arm is TRI-STATE
+  ('auto'|'on'|'off', localStorage archean-app-plsym unset = auto). Auto
+  arms mirrored placement (blocks, parts AND triangles) when the craft's
+  DATA mirrors across the lit axis — Engine.craftMirrorAxes() =
+  craftMirrorMask(components, symIdx) (gantry/airliner/badger: auto-lit;
+  testframe 9000005001 + fresh crafts: mask 0 = auto-off, single
+  placements). The widget lights `twin ·auto`, a click forces on/off
+  (persisted 1/0). buildMirrorPlane draws ONLY the session sheet (the
+  mask-union multi-sheet was the "two mirror axes visible" confusion —
+  detected axes drive AUTO, they don't draw). The PLACE flavor still
+  SELECTS direct component hits (v1.4 law — the pin-flow probe's
+  pendingReal gate is a full-tier trick: LITE-tier crafts (gantry) never
+  stream, pendingReal never drains → gate must go per-fixture). e2e: twin-
+  sensitive specs arm via aria-pressed checks (never blind clicks —
+  auto-lit fixtures flip blind-click semantics); twin-placement specs live
+  on the gantry (auto-lit, LITE tier, blocks at fx≈0.51 — full-range
+  probes only). (9b) PRISM TWIN PROPAGATION + FLIP + WHOLESALE-MOVE FIX
+  (we: "when I moved a triangle, it didn't see it as mirrored" + "it should
+  be possible to flip it just like the in game triangles, determining
+  whether it goes outside or inside"): (a) THE FLIP — tri-edit `tri-flip`
+  reverses the winding (v1↔v2 via setTriCornersAll) so the FRONT (colours[0])
+  normal points the other way (outward ⇄ inward, the gold pin arrow
+  negates); colours swap [c1,c0,c4,c3,c2] (front↔back, the v0-v1 ↔ v2-v0
+  walls follow the edge relabelling). (b) THE UNIFORM MIRROR RULE for
+  prisms: `triTwinIndex(bp, ti, axis)` (corner-SET reflection key, winding-
+  agnostic so flips keep the pair; a drifted pair stops matching = faux-
+  mirror) drives EVERY prism edit through `triTwinOf`: centroid shift (twin
+  gets the MIRRORED delta: dt[a] = −d[a]), ⟳ rotate (twin gets the MIRROR
+  CONJUGATE rotation qM = (w, −Mω): mirror-axis component kept, others
+  NEGATED — a +90° y-turn mirrors to −90°; twin corners via rotateCornersQ
+  about the twin's own centroid, lattice re-snap; vitest-pinned
+  mirror-equivariance), pin drag (twin corner σ(i), σ=[0,2,1] = the
+  mirroredTriangle winding swap, gets mirror(g)), flip (pair flips together)
+  and DELETE (the twin prism goes too, sorted splice). (c) WHOLESALE-MOVE
+  BUG: `commitClusterGesture` ran on EVERY drag end (unguarded) and its
+  syncClusterGizmo → syncTriGizmo re-centred the proxy BEFORE
+  commitTriGesture read the delta → every widget drag committed a ZERO move
+  (the pins animated, nothing stored). LESSON: shared TGC event chains
+  require EVERY commit to guard on its own captured base — one ungarded
+  commit in the chain silently resets the proxy for all later ones.
+  (9) SINGLE MODE CONTROL (we: "not 2 sets of 2 flips which
+  is insane" + "colors dont seem to apply to the triangles when picked" +
+  "the Triangle/block placement and edit should be fit together, I dont
+  like the pins X/3 placed, I want it simpler"): the dock's tool+species
+  FLAVOUR×SPECIES pair is GONE — ONE persisted tri-state `ws`
+  (archean-app-ws: 'blocks'|'tris'|'edit', default edit): the two species
+  buttons ARE the place modes, ✎ Edit is "neither". Derived `tool`/
+  `blockSub` shims keep every internal reading its old vocabulary (zero
+  churn in the routing code); testids ws-blocks/ws-tris/ws-edit replace
+  tooltab-*/blocksub-*. In ws-edit the dock STACKS both workspaces (one
+  merged scroll) and the canvas selects anything; tri SELECT (canvas or
+  list row) is EDIT-mode only (the centroid widget gate is ws==='edit'),
+  place-mode pin rituals stay in ws-tris. TRIANGLES INHERIT THE BRUSH:
+  commit colours = [brush.slot×5] + brush.material (the hidden 5-slot
+  triBrush was the "colours dont apply" trap — its rows in the pin card
+  are deleted; per-face colours stay on the triangle's own editor).
+  TriPanel takes tab for card voice (place = "click drops pins", edit =
+  "select a prism to get its pins + widget"). TRIANGLE PAINT (we: "WHEN I
+  PICK A COLOR FOR A TRIANGLE IT DOES NOT APPLY"): the 🎨 window had NO
+  prism case — it silently painted the BRUSH; a selected triangle now paints
+  through paintTri (all faces, bp + doc, the v1.6.1 funnel) and the
+  triangles dock shows the tri-brush paint card (SwatchGrid + material +
+  slot) new prisms inherit. ✎ Edit docks STACK selection-first (a selected
+  prism's editor leads the scroll; a selected block's leads when no prism
+  is picked); block-list rows clear the prism selection (exclusive, one
+  editor). Pins: builddock 'triangle PAINT' (tri-brush → slot 60 inherited
+  on all five faces, num-front → 70 face edit). LESSON: two orthogonal
+  binary controls encoding (mode × species) is a UX smell — one n-state
+  control beats 2×2 flips. (10) NAMING + ONE MIRROR LINGO (we: "name it
+  +Block and +Triangle, so its obvious its for adding" + "in the top menu
+  Make it Modify not Edit" + "the twin versus no mirroring is the issue,
+  thats duplicate lingo" + "I put on mirror X … no matching triangle was
+  made"): dock modes read **+ Blocks / + Triangles / ✎ Modify** (testids
+  ws-* unchanged), the TopBar mode tile is **Modify** (testid mode-edit);
+  the mirror widget is ONE control — `Mirror: ⊘ x y z` glyph chips where
+  picking a plane ARMS mirrored placement explicitly (an explicit axis on
+  an unmirrored craft must twin — the auto state is only the default),
+  clicking the LIT plane stops pairing, ⊘ kills the session mirror; the
+  separate twin arm (mirror-twin testid) is GONE (specs arm via the
+  armMirror helper reading mirw-* aria-pressed), an `auto` badge is
+  informational. LESSON: one concept = one word — 'twin' leaked into the
+  UI as a second name for mirroring and the user read them as two
+  features. (11) SEALED LIFT + VOLUME-BLOCK EVERYWHERE (we: "lift should
+  calculate from a volume block. Note we only look at enclosed
+  blocks/triangles. Implement that, then use it" + "let the ellipsoid hull
+  also have option for volume block; put it in the middle"):
+  `atmo.sealedEnvelopeVolume(tris, blocks)` — block cells (occupancy
+  mirrors included, a part's body walls the seal) + voxelised skin
+  triangles (quarter-cell sampling in the dominant projection plane + a
+  6-neighbour THICKENING so diagonal walls are 6-connected — the pairing
+  the 6-connected outside flood cannot cross; plain half-cell sampling
+  steps (1,0,1) and leaks), flood from the padded bbox rim, ENVELOPE =
+  sealed interior + enclosing shell (an open structure floods through and
+  yields NOTHING — walls alone displace no lift). LiftWidget uses it with
+  the skin-divergence sum as the fallback display; markers (the Volume
+  component) are NEVER trusted for the maths. The balloon tool's volume
+  toggle is `showIf: () => true` now — every body (ellipsoid included)
+  gets the choice; it rides the envelope CENTRE at the coupler facing up,
+  gated by the 1-cell-under-skin margin (volFit). Vitest: closed 3³ shell
+  = 27 cells, open box = 0, a 2.5 m triangle tetrahedron seals. LESSON
+  (voxel sealing): pick your connectivities as a PAIR — 6-connected flood
+  needs 6-connected walls; sampled surfaces are only chain-connected in
+  26, thicken to fix it.
   Pins: vitest tris `setTriCornerAll` (all-axis move, refusal keeps the
   record byte-intact) + e2e builddock (1×1×1 lands, ⤢ stretch + DIRECTIONAL
   anchors: cell invariant on +z, cell+ext invariant on −z; ⤢ never on a
@@ -1419,6 +1578,70 @@ topic + FORMAT).
   failures (the 3 pixel7 flakes re-ran green on the final tree); the pin
   commit + a following drag inside the 450 ms snapshot window coalesce into
   ONE undo group — pins that must undo SEPARATELY wait > 450 ms.
+## v1.11 session — KNOWN ISSUES & UNPINNED TODOS (documented at the user's
+## request 2026-10-25; the full green suite = the session's closing gate)
+
+KNOWN ISSUES (accepted behaviours, costs, sharp edges):
+1. sealedEnvelopeVolume recomputes on every `rev` (LiftWidget) — ≤24 M-cell
+   budget, ~50-150 ms on a giant per edit tick; over budget it honestly
+   yields 0 (widget shows the divergence caption; lift rows hide).
+2. Envelope = interior + enclosing shell ⇒ OVERcounts the true enclosed
+   volume by roughly one wall layer; sub-3-cell cavities seal to 0.
+3. SUBGRID nested blocks are NOT voxelised (bp.data.blocks is top-level) —
+   a cabin walled by subgrid hatches under-seals (lift reads low).
+4. Prism twin identification = corner-SET reflection match: duplicate
+   identical prisms can cross-pair (first index wins); the key is
+   winding-agnostic so a flipped twin keeps pairing (by design).
+5. The mirror plane is the WORLD x/y/z 0-plane (game convention): a craft
+   authored far off the 0-plane twins its placements far away — ⊘ for those.
+6. AUTO twin arms on ANY craft whose part graph carries twin masks (gantry,
+   airliner…): every block/part/prism lands as a PAIR until ⇄/⊘ says
+   otherwise — asymmetric additions to a symmetric craft need ⊘ first.
+7. X-ray ghosting rebuilds index-filtered clones per hover episode; the
+   per-mesh reject is the mesh AABB (merged hulls = big AABBs, so the
+   triangle test runs over the full mesh) — one-shot ~ms, accepted.
+8. X-ray overlays restore on hover-clear/change; a scene reload DURING an
+   active X-ray leaves restored geometry on stale mesh objects (the next
+   hover-clear cleans the overlays; no corruption observed).
+9. Lift/cost readouts live in ⌖ Info ONLY; the + Parts dock is 3 cards in
+   a 38 % shell (scrolls on phones).
+10. Modify-mode part clicks AUTO-JUMP to + Parts (user rule) — the dock
+    switches under the cursor by design; gizmo + modebox work identically.
+11. A wire sweep under 120 ms never shows the chip (intended dwell); every
+    fresh 2 s dwell re-fires the cursor-surge + X-ray (intended).
+
+UNPINNED TODOs (shipped this session, lacking e2e/vitest coverage):
+A. Sealed-lift UI: `lift-sealed` badge + Info-dock card grid (desktop
+   3-col / phone 1-col) — the MATHS is vitest-pinned, the UI is not.
+B. X-ray precision: `engine.wireXrayActive()` probe exists — no spec
+   asserts cuts>0 after a 2 s hover on a blocked truck cable, cuts==0 for
+   an exposed one, and full restore on un-hover.
+C. Surge-from-cursor: no spec asserts `surges().surges ≥ 2` at the X-ray
+   transition (select.spec pins only the selection surge).
+D. Prism-pair FLIP propagation and the twin's MIRRORED-SHIFT delta
+   (triShift asserts SELF corners only).
+E. Twin-aware prism PAINT (identity face mapping): the builddock
+   'triangle PAINT' test runs on a craft with auto-twin OFF — re-run the
+   flow on the gantry asserting the twin record's colours.
+F. Ellipsoid body + volume-block toggle (showIf: true) — sphereskin pins
+   the cylinder-tail volume path only.
+G. `modify-hint` (Modify opens empty) + per-kind editor reveal — unasserted.
+H. @slow suites (models/matrix/solo-pair, gizmo, sym, subgrid, aero): the
+   re-pin sweep touched their ws-parts gates — matrix/solo rituals are NOT
+   re-run.
+I. SKIPPED AT SESSION CLOSE (user decision 2026-10-25 — "document that we
+   skipped it, commit; I will fix this in a future session"): the final
+   full run (port 5222, stable tree) died mid-sweep under pkill-wave +
+   parallel contention, leaving FOUR UNADJUDICATED REDS — all 30 s-timeout
+   shapes on the chromium project: blockedit:90 (selecting a block
+   highlights it; snap; ⟲Y), blockedit:120 (component picked in blocks
+   mode), blockedit:246 (BLOCK widget shift/turn/stretch), builddock:79
+   (list row selects, ✕ deletes, Ctrl+Z). Each passed on earlier targeted
+   runs this session (5213 set green), so contention is the prime suspect
+   — NOT adjudicated. A quiet-machine `-j 2` re-run of blockedit+builddock
+   is the resumption point; if they stay red, suspect the ws-edit dock
+   composition (blockPanel reveals only after a block pick —
+   `modify-hint`-era change) interacting with the specs' fixed waits.
 - **v1.10.7 PHONE BUILD UX (we: "On phone I've no idea how to place and the
   side panel is still edit/place toggle, which makes no sense. It's also far
   too wide on phone")**: (1) the ✎ Edit | ✚ Place flavor switch MOVED from

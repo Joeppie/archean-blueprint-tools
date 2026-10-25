@@ -380,10 +380,13 @@ export const TOOLS: ToolDef[] = [
           { id: 'off', label: 'no volume' },
           { id: 'on', label: 'ONE volume' },
         ],
-        showIf: f => finsOn(f),
-        hint: 'exactly ONE Volume block facing UP out of the coupler '
-          + '(displacement, 1 kg) — ON only when it stays guaranteed '
-          + 'enclosed inside the envelope, OFF otherwise' },
+        // v1.11 (we: "let the ellipsoid hull also have option for volume
+        // block; put it in the middle"): every body gets the choice — the
+        // block rides the envelope CENTRE (at the coupler, facing up), not
+        // just cylinder bodies with fins.
+        hint: 'exactly ONE Volume block at the envelope CENTRE, facing UP '
+          + 'out of the coupler (displacement, 1 kg) — ON only when it stays '
+          + 'guaranteed enclosed inside the skin, OFF otherwise' },
       { key: 'shade', label: 'shading', kind: 'select',
         options: [
           { id: 'flat', label: 'flat (the game’s authored default)' },

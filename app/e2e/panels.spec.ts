@@ -43,7 +43,7 @@ test.describe('desktop panels @ui', () => {
   test('view options: hull/wire exclusive, keyboard g/o/h drive the checkboxes', async ({ page }) => {
     desktopOnly();
     await openCraft(page, ISW);
-    await expect(page.getByTestId('panel-aside')).toBeVisible();
+    await expect(page.getByTestId('build-dock')).toBeVisible();   // v1.11: Info dock, no sidebar
     await openOptions(page);
     const hull = page.getByTestId('opt-hull'), wire = page.getByTestId('opt-wire');
     await expect(hull).toBeChecked();
@@ -66,7 +66,8 @@ test.describe('desktop panels @ui', () => {
   test('label-scrub gives fine movement control (the tweaking complaint)', async ({ page }) => {
     desktopOnly();
     await openCraft(page, ISW);
-    await page.getByTestId('filter').fill('smallwheel');
+    await page.getByTestId('ws-parts').click();                 // v1.11: + Parts subpanel
+    await page.getByTestId('parts-list').getByTestId('filter').fill('smallwheel');
     const row = page.locator('[data-idx]').first();
     const ci = +(await row.getAttribute('data-idx'))!;
     await row.click();
@@ -90,14 +91,19 @@ test.describe('desktop panels @ui', () => {
     desktopOnly();
     await openCraft(page, ISW);
     const original = await (await page.request.get(`/corpus/${ISW}/blueprint.json`)).text();
-    await page.getByTestId('filter').fill('smallwheel');
+    await page.getByTestId('ws-parts').click();                 // v1.11: + Parts subpanel
+    await page.getByTestId('parts-list').getByTestId('filter').fill('smallwheel');
     const row = page.locator('[data-idx]').first();
     const ci = +(await row.getAttribute('data-idx'))!;
     await row.click();
     await expect(page.getByTestId('inspector')).toContainText(`SmallWheel[${ci}]`);
     const x0 = await partX(page, ci);
     const target = x0 + 0.5;                               // exactly 2 cells
-    await page.getByTestId('row-n-x').fill(String(target));
+    // v1.11: pos/rot slider rows are GONE from the inspector (the canvas
+    // gizmo supersedes them) — the test drives the same engine seam
+    await page.evaluate((a) => (window as unknown as { __ARCHEAN__?: { engine: {
+      setFilePosAxis: (ci: number, ax: number, v: number) => void } } })
+      .__ARCHEAN__!.engine.setFilePosAxis(a.ci, 0, a.v), { ci, v: target });
     await expect.poll(() => partX(page, ci)).toBeCloseTo(target, 6);
     await expect(page.getByTestId('save-btn')).toContainText('●');
 
@@ -124,6 +130,7 @@ test.describe('desktop panels @ui', () => {
   test('subgrid tab: SUBGRID row → panel with decoded master + joint slider rides the group', async ({ page }) => {
     desktopOnly();
     await openCraft(page, DOLPHIN);
+    await page.getByTestId('ws-parts').click();                 // v1.11: subgrid tabs ride + Parts
     await page.getByTestId('ltab-sub').click();
     const secs = page.locator('[data-testid^="sec-b"]');  // one section per Build
     const n = await secs.count();
@@ -225,24 +232,21 @@ test('mobile: no static-info box by default; ⚙ shows a compact card @ui', asyn
   await expect(page.getByTestId('mass-report')).toContainText('declared');
   await expect(page.getByTestId('mass-density'), 'the structural-detail row stays off phones').toBeHidden();
   await expect(page.getByTestId('mass-report')).toContainText('CoM');
+  // v1.11: the ⚙ popover (z-30) overlaps the compact box's ✕ on the phone
+  // (the Info dock makes the viewport shorter, the popover taller) — close
+  // it before the ✕ click
+  await page.getByTestId('toggle-options').click();
+  await expect(page.getByTestId('options-win')).toHaveCount(0);
   await page.getByTestId('static-close').click();
   await expect(page.getByTestId('massbox')).toHaveCount(0);
 });
 
-test('mobile: the panels are a drawer behind the ⚙ toggle', async ({ page }) => {
+test('mobile: the bottom dock is always visible (no drawer, v1.11)', async ({ page }) => {
   await openCraft(page, ISW);
-  const aside = page.getByTestId('panel-aside');
-  if (await aside.isVisible().catch(() => false)) {        // desktop keeps it open
-    await expect(aside).toBeVisible();
-    return;
-  }
-  await page.getByTestId('toggle-panels').click();
-  await expect(aside).toBeVisible();
-  await expect(aside.getByTestId('complist')).toBeVisible();     // the PARTS panel
-  await expect(aside.getByTestId('viewopts')).toHaveCount(0);    // options are NOT here anymore
-  await page.getByTestId('toggle-panels').click();
-  await expect(aside).toHaveCount(0);
-  // ...they open in their own ⚙ popover over the viewport
+  await page.getByTestId('mode-view').click();                    // ⌖ Info mode
+  await expect(page.getByTestId('build-dock')).toBeVisible();
+  await expect(page.getByTestId('vessel-stats')).toBeVisible();
+  await expect(page.getByTestId('toggle-panels')).toHaveCount(0); // the ▤ toggle is GONE
   await openOptions(page);
   await expect(page.getByTestId('opt-hull')).toBeVisible();
 });
@@ -276,7 +280,7 @@ test.describe('modes, new craft, file menu @ui', () => {
     await expect(page.getByTestId('vessel-stats')).toBeVisible();
     await expect(page.getByTestId('vessel-mass')).toBeVisible();
     await expect(page.getByTestId('filter')).toHaveCount(0);
-    await expect(page.getByTestId('tooltab-place')).toHaveCount(0);
+    await expect(page.getByTestId('ws-blocks')).toHaveCount(0);
     await page.getByTestId('vsec-census').click();                   // collapse…
     await expect(page.getByTestId('vessel-census')).toHaveCount(0);
     await page.getByTestId('vsec-census').click();                   // …and expand
@@ -324,11 +328,11 @@ test.describe('modes, new craft, file menu @ui', () => {
     await page.mouse.click(cbox.x + cbox.width * px!.x, cbox.y + cbox.height * px!.y);
     expect((await selState()).ci, 'the component surface selects in the Edit mode')
       .toBeGreaterThanOrEqual(0);
-    await expect(page.getByTestId('tooltab-place')).toBeVisible();
-    await expect(page.getByTestId('tooltab-edit')).toBeVisible();
-    await page.getByTestId('filter').fill('aileron');
+    await expect(page.getByTestId('ws-blocks')).toBeVisible();
+    await expect(page.getByTestId('ws-edit')).toBeVisible();
+    await page.getByTestId('parts-list').getByTestId('filter').fill('aileron');
     await page.locator('[data-idx]').first().click();
-    await expect(page.getByTestId('row-n-x')).toBeEnabled();
+    await expect(page.getByTestId('comp-alias')).toBeVisible();  // v1.11: meta fields (pos/rot = gizmo)
     await expect(page.getByTestId('comp-delete')).toBeVisible();     // selectable ⇒ deletable
   });
 
@@ -338,7 +342,7 @@ test.describe('modes, new craft, file menu @ui', () => {
     await page.getByTestId('gallery-new').click();
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
     await page.getByTestId('mode-edit').click();
-    await page.getByTestId('tooltab-place').click();       // v1.5: the PLACE flavor docks the brush
+    await page.getByTestId('ws-blocks').click();       // v1.5: the PLACE flavor docks the brush
     // v0.183: deterministic scene state — wait for the atlas fan-out (the
     // PilotSeat's REAL model shown, its stand-in retired), then PROBE the
     // canvas through engine.pickCell for a pixel that answers a block face.
@@ -373,7 +377,7 @@ test.describe('modes, new craft, file menu @ui', () => {
     expect(after, 'a block was placed on the deck').toBe(before + 1);
     // the brush + a selected block: the EDIT sub-tab shows the selected-block
     // editor (v1.4 sub-tab split — placement auto-selects, EDIT edits)
-    await page.getByTestId('tooltab-edit').click();
+    await page.getByTestId('ws-edit').click();
     await expect(page.getByTestId('block-edit')).toContainText(/Block\[\d+\]/);
   });
 
@@ -457,16 +461,40 @@ test.describe('manual wiring + triangles + component meta @ui', () => {
     await page.getByTestId('gallery-new').click();
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
     await page.getByTestId('mode-edit').click();
-    await page.getByTestId('blocksub-tris').click();
+    await page.getByTestId('ws-tris').click();
     const canvas = page.getByTestId('canvas');
     const box = (await canvas.boundingBox())!;
-    for (const [fx, fy] of [[0.42, 0.6], [0.58, 0.6], [0.5, 0.68]]) {
-      await canvas.click({ position: { x: box.width * fx, y: box.height * fy } });
+    // v1.11: PROBE three spread deck faces (fixed fractions land on ground /
+    // a part on the tiny starter craft — a part click selects, clearing the
+    // draft — the app is right, the fractions were not)
+    const spots = await page.evaluate(() => {
+      const c = document.querySelector('canvas')!, r = c.getBoundingClientRect();
+      const e = (window as unknown as { __ARCHEAN__?: { engine: {
+        pickCell: (x: number, y: number) => { bi: number; point: number[] } | null } } })
+        .__ARCHEAN__!.engine;
+      const pts: { x: number; y: number }[] = [];
+      for (let fy = 0.3; fy <= 0.9; fy += 0.04)
+        for (let fx = 0.2; fx <= 0.85; fx += 0.04) {
+          const h = e.pickCell(r.left + r.width * fx, r.top + r.height * fy);
+          if (h && h.bi >= 0) pts.push({ x: fx, y: fy });
+        }
+      const d = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+        Math.hypot(a.x - b.x, a.y - b.y);
+      const a1 = pts[0]!;
+      const a2 = pts.reduce((m, p) => (d(p, a1) > d(m, a1) ? p : m), a1);
+      const a3 = pts.reduce((m, p) => (Math.min(d(p, a1), d(p, a2)) >
+        Math.min(d(m, a1), d(m, a2)) ? p : m), a1);
+      return [a1, a2, a3];
+    });
+    for (const p of spots) {
+      await canvas.click({ position: { x: box.width * p.x, y: box.height * p.y } });
       await page.waitForTimeout(250);
     }
     await expect.poll(async () => page.evaluate(() => {
       const w = window as unknown as { __ARCHEAN__?: { engine: { blueprint: { data: { triangles?: unknown[] } } } } };
       return w.__ARCHEAN__!.engine.blueprint.data.triangles?.length ?? 0;
+    // the starter craft has NO twin masks (solo PilotSeat) → auto-mirroring
+    // stays OFF → exactly one prism lands (v1.11 semantics, pin 3-clicks)
     }), { timeout: 8000 }).toBe(1);
     await expect(page.getByTestId('tri-edit')).toContainText('Triangle[0]');
   });
@@ -476,7 +504,8 @@ test.describe('manual wiring + triangles + component meta @ui', () => {
     await page.goto('/?craft=' + ISW);
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
     await page.getByTestId('mode-edit').click();
-    await page.getByTestId('filter').fill('beacon');
+    await page.getByTestId('ws-parts').click();                 // v1.11: + Parts subpanel
+    await page.getByTestId('parts-list').getByTestId('filter').fill('beacon');
     await page.locator('[data-idx]').first().click();
     await page.getByTestId('comp-alias').fill('lighthouse');
     const opField = page.getByTestId('paint-color1-opacity');
@@ -501,7 +530,7 @@ test.describe('manual wiring + triangles + component meta @ui', () => {
 // "shouldnt tie to view incorrectly").
 test.describe('shipped UI (no debug flag) @ui', () => {
   test.use({ storageState: { cookies: [], origins: [] } });     // no archean-app-debug
-  test('clean title, no stats strip, panel toggles = ▤ + bookmark tab (never the View tile)', async ({ page }) => {
+  test('clean title, no stats strip, no sidebar toggles — every mode keeps its dock', async ({ page }) => {
     test.skip(test.info().project.name !== 'chromium', 'desktop-only');
     await page.goto('/?craft=' + ISW);
     await expect.poll(async () => (await page.evaluate(() =>
@@ -509,26 +538,17 @@ test.describe('shipped UI (no debug flag) @ui', () => {
       { timeout: 30_000 }).toBeGreaterThan(0);
     await expect(page).not.toHaveTitle(/SCENE PASS/);
     await expect(page.getByTestId('scene-stats')).toHaveCount(0);
-    const aside = page.getByTestId('panel-aside');
-    await expect(aside).toBeVisible();                          // desktop opens WITH the panel
-    // the View tile is a MODE, not a panel toggle (v1.5): re-clicking it
-    // while already in View changes NOTHING about the panel
+    // v1.11 NO SIDE PANEL: every mode keeps its bottom dock; the ▤ toggle
+    // and the bookmark tab are GONE; the Info tile is a MODE, not a toggle
+    const dock = page.getByTestId('build-dock');
+    await expect(dock).toBeVisible();                           // view opens WITH the Info dock
     await page.getByTestId('mode-view').click();
-    await expect(aside).toBeVisible();
-    // ▤ collapses…
-    await page.getByTestId('toggle-panels').click();
-    await expect(aside).toHaveCount(0);
-    const tab = page.getByTestId('panel-tab');                  // only the bookmark tab remains
-    await expect(tab).toBeVisible();
-    await expect(tab).toHaveText('>');
-    await tab.click();                                          // › re-expands
-    await expect(aside).toBeVisible();
-    // …and the ‹ tab on the panel's RIGHT EDGE (md:relative fix: it used to
-    // anchor to the viewport edge = the "missing expand-collapse" report)
-    await expect(aside.getByTestId('panel-tab')).toHaveText('<');
-    await aside.getByTestId('panel-tab').click();               // ‹ collapses again
-    await expect(aside).toHaveCount(0);
-    await page.getByTestId('toggle-panels').click();            // ▤ re-expands
-    await expect(aside).toBeVisible();
+    await expect(dock).toBeVisible();
+    await expect(page.getByTestId('toggle-panels')).toHaveCount(0);
+    await expect(page.getByTestId('panel-tab')).toHaveCount(0);
+    await page.getByTestId('mode-edit').click();
+    await expect(dock).toBeVisible();                           // edit keeps its workspace dock
+    await page.getByTestId('mode-wire').click();
+    await expect(page.getByTestId('wire-dock')).toBeVisible();  // wire keeps its own
   });
 });

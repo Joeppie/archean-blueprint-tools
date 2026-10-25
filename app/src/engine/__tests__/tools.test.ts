@@ -18,7 +18,7 @@ import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 import { corpusDir } from '../../../tools/vite-corpus.ts';
 import {
-  MATERIALS, allocateSlot, freePaletteSlots, hullifyApply, hullifyPreview,
+  MATERIALS, allocateSlot, blockSkinTris, freePaletteSlots, hullifyApply, hullifyPreview,
   nearestSlot, parseHexColor, replaceAll, replaceCensus, replaceSources,
 } from '../tools';
 import { culledBlocksSolids, blkCell, blkSpan, cellM } from '../cull';
@@ -577,4 +577,35 @@ describe('hullify — blocks ▸ hull triangles', () => {
     }
     expect(checked).toBeGreaterThan(10);
   }, 120_000);        // 25-craft convert+cull+containment census — slow on the iGPU box
+});
+
+describe('v1.11 blockSkinTris — the single-block skin (widget ▵)', () => {
+  test('an isolated unit cube skins 12 triangles (six free faces × 2), bp untouched', () => {
+    const bp = bpOf([block({ pos_x: 5, pos_y: 5, pos_z: 5, colors: all(51) })]);
+    const tris = blockSkinTris(bp, 0);
+    expect(tris).toHaveLength(12);
+    expect(bp.data.blocks).toHaveLength(1);          // PURE — the funnel appends
+    expect(bp.data.triangles ?? []).toHaveLength(0);
+  });
+
+  test('a face glued to a neighbour is culled: cube under a cap skins 10', () => {
+    const bp = bpOf([
+      block({ pos_x: 5, pos_y: 5, pos_z: 5 }),       // target
+      block({ pos_x: 5, pos_y: 6, pos_z: 5 }),       // glued on its +y face
+    ]);
+    expect(blockSkinTris(bp, 0)).toHaveLength(10);   // five free faces
+  });
+
+  test('a fully enclosed block: nothing to skin', () => {
+    const bp = bpOf([
+      block({ pos_x: 5, pos_y: 5, pos_z: 5 }),
+      block({ pos_x: 4, pos_y: 5, pos_z: 5 }),
+      block({ pos_x: 6, pos_y: 5, pos_z: 5 }),
+      block({ pos_x: 5, pos_y: 4, pos_z: 5 }),
+      block({ pos_x: 5, pos_y: 6, pos_z: 5 }),
+      block({ pos_x: 5, pos_y: 5, pos_z: 4 }),
+      block({ pos_x: 5, pos_y: 5, pos_z: 6 }),
+    ]);
+    expect(blockSkinTris(bp, 0)).toHaveLength(0);
+  });
 });

@@ -13,6 +13,15 @@
 //    as a ghost; and a SKY click deselects (the overlay dies with it).
 import { expect, test, type Page } from '@playwright/test';
 
+/** v1.11 ONE LINGO: the mirror widget's axis chips ARE the toggle — arm
+ *  mirrored placement across x deterministically (lit = pairs land). */
+async function armMirror(page: Page, want = true) {
+  const chip = page.getByTestId('mirw-x');
+  const lit = (await chip.getAttribute('aria-pressed')) === 'true';
+  if (lit !== want) await chip.click();
+  await expect(chip).toHaveAttribute('aria-pressed', want ? 'true' : 'false');
+}
+
 type Blk = { pos_x: number; pos_y: number; pos_z: number; frame_x?: number; frame_y?: number;
   frame_z?: number; size_x: number; size_y: number; size_z: number; type: number; colors: number[] };
 
@@ -109,7 +118,7 @@ test.describe('palette: census, block paint, ⇄ twin, widget 🎨 @place', () =
     test.skip(test.info().project.name !== 'chromium', 'desktop-only');
     await openNew(page);
     await toBlocks(page, 'place');
-    await page.getByTestId('mirror-twin').click();               // ⇄ twin ON (place + edits)
+    await armMirror(page, true);
     await page.getByTestId('num-slot').fill('0');
     const pt = await ghostPixel(page);
     await page.mouse.click(pt.x, pt.y);                           // mirrored PAIR placed
@@ -152,7 +161,7 @@ test.describe('palette: census, block paint, ⇄ twin, widget 🎨 @place', () =
     test.skip(test.info().project.name !== 'chromium', 'desktop-only');
     await openNew(page);
     await page.getByTestId('mode-edit').click();
-    await page.getByTestId('tooltab-edit').click();
+    await page.getByTestId('ws-edit').click();
     // find a pixel whose pickCell answers the PilotSeat (kind comp, ci 0)
     const seat = await page.evaluate(() => {
       const c = document.querySelector('canvas')!; const r = c.getBoundingClientRect();
