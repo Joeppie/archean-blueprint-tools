@@ -24,10 +24,12 @@ describe('pbr', () => {
     expect(pbr({ r: 0, g: 0, b: 0, opacity: 15 }).opacity).toBe(1);
   });
 
-  test('envMapIntensity: only metal (>0.5) reflects the env', () => {
-    expect(envIntensity(1)).toBe(1.25);
-    expect(envIntensity(0.5)).toBe(0);
-    expect(envIntensity(0)).toBe(0);
+  test('envMapIntensity: 1 for EVERY surface (v1.11.0 sky-env parity)', () => {
+    // XenonViewer's pbrMaterial (js/scene.js) never sets envMapIntensity —
+    // its PMREM'd day-sky environment reads on all materials at intensity 1.
+    expect(envIntensity(1)).toBe(1);
+    expect(envIntensity(0.5)).toBe(1);
+    expect(envIntensity(0)).toBe(1);
   });
 
   test('pbrKey merges equal specs and splits different metals', () => {
@@ -62,9 +64,10 @@ describe('componentPaint', () => {
     expect(s.rough).toBe(1);
   });
 
-  test('v1 array colours are [color1, color2] PALETTE SLOT pairs (legacy remap)', () => {
+  test('v1 array colours are [color1, color2] PALETTE SLOT pairs (identity law)', () => {
     // polished family row 0 = polished white (metallic 0, roughness 0):
-    // the v1 index is 80 (four below the v2 base 84) → legacySlot remaps +4
+    // the v1 index IS 80 — the built-in table carries the families at the
+    // v1 bases (XenonViewer js/palette.js; the +4/+8/+12 remap retired)
     const s = componentPaint([40, 80], 'color2', null, true);
     expect(s.color[0]).toBeCloseTo(1, 10);
     expect(s.metal).toBe(0);

@@ -1,5 +1,6 @@
 // normalize.ts pins: the v1 → v2 open-time migration (embedded palette at
-// the v2-base indices, slot remap, color-pair → entry dicts, orientations
+// the file's own indices — identity since the v1.11.0 table alignment,
+// slot remap seam, color-pair → entry dicts, orientations
 // VERBATIM [v1.5.11 — the conjugate rewrite broke the game round-trip],
 // version bump, recursion into subgrids, idempotence).
 import { describe, expect, test } from 'vitest';
@@ -37,11 +38,13 @@ describe('v1 → v2 open-time normalize', () => {
     expect(bp.data.version).toBe(2);
   });
 
-  test('matte slots ride their shared base; glass remaps +12; entries embedded', () => {
-    expect(bp.data.blocks[0]!.colors![0]).toBe(48);              // matte family: same base v1/v2
+  test('matte slots ride their base; glass embeds at its OWN index (identity law)', () => {
+    expect(bp.data.blocks[0]!.colors![0]).toBe(48);              // matte family index unchanged
     const embedded = bp.data.colors![48]!;
     expect([embedded.r, embedded.g, embedded.b]).toEqual([1, 8, 1]);     // matte dark green
-    expect(bp.data.colors![184]).toBeTruthy();                   // v1 glass 172 → v2 base 184
+    expect(bp.data.colors![172]).toBeTruthy();                   // v1 glass 172 embeds AT 172
+    // (the built-in table carries the families at the v1 bases — XenonViewer
+    // js/palette.js; the +12-to-184 shift retired with the v1.11.0 alignment)
   });
 
   test('comp color PAIRS become v2 entry dicts (matte green + glass)', () => {

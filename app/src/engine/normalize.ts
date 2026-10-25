@@ -5,10 +5,13 @@
 // (`__legacyQ`) for byte-faithful palette handling of v1 docs, but
 // everything downstream of normalize() is v2:
 //
-//  1. data.colors is embedded: every USED legacy slot is written at its
-//     v2-base index (legacySlot +4/+8/+12) with the built-in entry, so the
-//     file carries its own palette and the +4-shift class of bugs dies.
-//  2. block/triangle color slots are remapped through legacySlot() in place.
+//  1. data.colors is embedded: every USED slot is written at ITS OWN index
+//     with the built-in entry (v1.11.0: the built-in table sits at the v1
+//     bases, so the legacySlot() below is the identity and the embed is a
+//     plain copy), so the file carries its own palette and the +4-shift
+//     class of bugs dies.
+//  2. block/triangle color slots are remapped through legacySlot() in place
+//     (identity since v1.11.0 — kept as the GENERATION seam).
 //  3. components[].colors ARRAY pairs ([c1,c2] slot indices, v1 legacy
 //     editor) become v2 {color1:{...}, color2:{...}} entry objects.
 //  4. orientations: UNTOUCHED (v1.5.11). The earlier raw→conjugate rewrite

@@ -1642,6 +1642,61 @@ I. SKIPPED AT SESSION CLOSE (user decision 2026-10-25 — "document that we
    is the resumption point; if they stay red, suspect the ws-edit dock
    composition (blockPanel reveals only after a block pick —
    `modify-hint`-era change) interacting with the specs' fixed waits.
+- **v1.11.0 THE GAME-DAYLIGHT COLOR LAW (we: "the american truck doesn't
+  render red properly, it contains all manner of wrong colors. Must be a
+  palette issue: also affects Chip's badger doors in his latest version. Use
+  XenonViewer of dev to establish proper colors.")**: the XenonViewer sources
+  (js/palette.js, js/blueprint.js, js/scene.js, js/viewer.js — fetched
+  2026-10-25, NOTICE §2) pinned THREE laws, all landed in BOTH engines:
+  (1) **ONE built-in palette table** — the dev's (families 40 matte /
+  80 polished / 120 metal / 160 glass, 17 contiguous colours each, slots
+  0..10 engine-reserved, every other slot NULL, and
+  `resolvePaletteColor` (blueprint.js:85-100) applies NO remap to any
+  generation). Ours sat the families at 84/128/172 with the paired
+  +4/+8/+12 `legacySlot` (v1.5.11): the shift+shift composition made
+  palette-LESS v1 files read RIGHT (the truck's cab = polished 85 =
+  [16,1,1] candy red all along — 85→89→[16,1,1]), so the v1 renders were
+  never the bug, but every PALETTE-CARRYING file reading built-in slots
+  84..96/128..144/172..188 read the family SHIFTED (slot 92: we dark green
+  [1,8,1], the game polished yellow [255,255,16]) and our table carried
+  entries at 97..100/137..144/177..188 where the dev's is NULL (real
+  missing slots lost their marker). Table aligned verbatim;
+  `legacySlot()` = IDENTITY (kept as the GENERATION seam for normalize's
+  embed + the wheel-droop gate). (2) **PER-BUILD PALETTE SCOPING** — the
+  Badger's doors are NESTED Build skins whose OWN palette slot 12 = painted
+  deep red [32,2,2]; the app fed the TOP-level palette (slot 12 CLEARED)
+  into nested `buildSolids` → magenta doors in our viewer, red doors in
+  XenonViewer (`readPalette(buildData.colors)` per build, blueprint.js:172).
+  THE v1.10.2 RE-DIAGNOSIS (standing): "the file palette carries 0 at slot
+  12 while faces reference it" looked one palette UP — NO top-level face
+  references slot 12 (census), so the Oct-24 byte-repair whitened an
+  unreferenced slot, Chip's newest file (2026-10-25, in
+  workshop/content/2941660/3326372833) carries the same nested paints, and
+  the doors stayed pink for the real reason. A magenta face = cleared slot
+  IN THE PALETTE THAT FACE'S BUILD RESOLVES THROUGH — check the owning
+  build before repairing any file (no repo testdata bytes were touched
+  this time). (3) **THE RENDER LAW** — XenonViewer: `LinearToneMapping` @
+  exposure 0.9 ("ACES compressait et désaturait tout; un mappage linéaire
+  restitue les aplats"), PMREM'd DAY-SKY environment, full-day rig
+  hemisphere 0.35 / sun 1.0 / fill 0.12 / bounce 0.10 / build-sized
+  RectArea softbox 0.14, `envMapIntensity` 1 on EVERY material
+  (pbrMaterial sets none). Ours was a ~2.1× over-lit studio (hemi 1.1 +
+  sun 2.2, no tone map, RoomEnvironment env on metal only): the iso-framed
+  truck render read 31 % white pixels vs the dev's 1.7 %, deep-red class
+  mean (86,55,55) vs the dev's (66,36,26). Aligned: the re-shoot reads
+  (65,35,24) — dev-mean. LESSON: palette LINEARITY was pinned since v1,
+  the tone map + light intensities + environment were never transcribed —
+  a correct albedo table under the wrong rig still reads as "all manner of
+  wrong colors". XenonViewer caveat: it DROPS v1 `[slot,slot]` comp colours
+  (blueprint.js:322 array→{} → white/grey defaults) — NOT the law: the
+  game's own v1→v2 re-save (3812927875 spells ISW's `[51,3]` as color1
+  {1,1,12} = slot 51's matte navy verbatim) proves slot pairs are real
+  paint; normalize's dict-conversion stays. Pins re-cut: palette.test.ts
+  (truck/badger real slots, dev null-gaps, identity legacySlot, per-build
+  scoping), normalize.test.ts (embed lands at the file's OWN indices),
+  materials.test.ts (env 1), viewer/tests.js ok9. Targeted e2e
+  (viewmenu/paint) green — the viewmenu ortho-dome pin was ALREADY RED on
+  HEAD (pre-existing flake, verified by stash-baseline run).
 - **v1.10.7 PHONE BUILD UX (we: "On phone I've no idea how to place and the
   side panel is still edit/place toggle, which makes no sense. It's also far
   too wide on phone")**: (1) the ✎ Edit | ✚ Place flavor switch MOVED from
@@ -1764,6 +1819,15 @@ I. SKIPPED AT SESSION CLOSE (user decision 2026-10-25 — "document that we
   file; repair the data (the marker itself stays — it still catches the v1
   family-base class). IndexedDB revalidates the edit via the v1.9.4 stamp
   (chip goes stale → Download latest).
+  [v1.11.0 RE-DIAGNOSIS: the diagnosis looked one palette UP. NO top-level
+  face references slot 12 — the doors are NESTED Build skins resolving
+  through their OWN palette where slot 12 = deep red [32,2,2] all along;
+  the app was feeding the top-level palette (slot 12 cleared) into nested
+  buildSolids. The file repair whitened an unreferenced slot (harmless,
+  kept), and Chip's newest publication showed the pink doors unchanged.
+  The fix is per-build palette SCOPING in the engines (see the v1.11.0
+  GAME-DAYLIGHT bullet + FORMAT §Subgrids "PER-BUILD PALETTE SCOPING");
+  "magenta = cleared slot" still holds — in the OWNING build's palette.]
 - **v1.10.1 THE LOGICAL WIRING MODEL + WIRE workspace (we: "the wiring is very
  naive and stupid right now. The auto-wire observed patterns is wrong, and I
  want to be able to disconnect/reconnect wires and get a better overview …

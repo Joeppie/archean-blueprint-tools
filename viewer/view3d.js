@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 // surface crashes in the document title (visible to headless test dumps)
 addEventListener('error', (e) => { document.title = 'ERR ' + (e.message || 'load') + ' @' + e.lineno + ':' + e.colno; });
 addEventListener('unhandledrejection', (e) => {
@@ -107,7 +107,7 @@ const dashMat = (c, metallic, roughness) => {
       (c?.b ?? 255) / 255, THREE.LinearSRGBColorSpace),
     roughness: Math.max(rough, 0.02),
     metalness: ((metallic ?? 0) / 255) * (1 - rough),
-    envMapIntensity: (metallic ?? 0) > 127 ? 1.25 : 0,
+    envMapIntensity: 1,   // v1.11.0: the SKY env reads on every surface (dev parity)
   });
 };
 function dashTextTex(el) {
@@ -400,6 +400,11 @@ const viewQuat = (q) => LEGACY_Q ? new THREE.Quaternion(q.x, q.y, q.z, q.w)
 const view = document.getElementById('view');
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.max(1, Math.min(devicePixelRatio, 2.5)));  // floor 1: browser zoom-out pushes dpr <1 (canvas below CSS res = "zoomed in and grainy"); cap 2.5: Chrome SAVES per-site zoom, so HiDPI 150% zoom => dpr 3 — a 2.0 cap rendered 2/3 res = grainy (user's "stuck zoom after Ctrl-F5")
+// v1.11.0 GAME-DAYLIGHT LAW (XenonViewer js/viewer.js:207-213 transcribed
+// 2026-10-25, NOTICE §2): LinearToneMapping @ exposure 0.9 — "un mappage
+// linéaire restitue les aplats"; deep reds stay deep, blacks stay black.
+renderer.toneMapping = THREE.LinearToneMapping;
+renderer.toneMappingExposure = 0.9;
 view.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -408,15 +413,35 @@ scene.background = new THREE.Color(0x8fb4d8);
 // — it washed out the far side of large hulls, exactly the zeppelin-scale
 // shapes users build with the sphere tool). Sky colour + lighting unchanged.
 scene.fog = null;
-// PBR metal has NO diffuse term: lights-only, chrome renders near-black
-// (user: "metallic colours too dark, not enough reflection" — the game's
-// raytracer reflects the world). PMREM studio env, baked once at startup,
-// zero per-frame cost; only metal materials get envMapIntensity > 0, so
-// matte/painted surfaces stay exactly as before.
+// v1.11.0 SKY env — the dev viewer lights metals with a PMREM'd DAY SKY
+// (js/viewer.js skyEnvironmentTexture: blue zenith → warm sand, sun halo on
+// LIGHT_DIRECTION): "un métal ne s'éclaire pas, il réfléchit, et sans ciel
+// ni sol il rend noir quelle que soit sa couleur". The RoomEnvironment
+// studio (v0.144) reflected lamp panels; every PBR material reads the sky
+// at intensity 1 (the dev sets no envMapIntensity anywhere).
 {
+  const cv = document.createElement('canvas');
+  cv.width = 1024; cv.height = 512;
+  const ctx = cv.getContext('2d');
+  const sky = ctx.createLinearGradient(0, 0, 0, cv.height);
+  for (const [s, col] of [[0.0, '#2f6ea8'], [0.3, '#6ba3cf'], [0.47, '#b9d4e6'],
+    [0.5, '#d8cdb4'], [0.54, '#b39b74'], [0.75, '#8d7452'], [1.0, '#6b563c']])
+    sky.addColorStop(s, col);
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, cv.width, cv.height);
+  const d = new THREE.Vector3(0.5, 0.72, 0.36).normalize();
+  const phi = Math.acos(Math.min(1, Math.max(-1, d.y)));
+  const cx = cv.width * (((Math.atan2(d.z, -d.x) / (Math.PI * 2)) % 1 + 1) % 1);
+  const cy = cv.height * (phi / Math.PI);
+  const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, cv.height * 0.4);
+  glow.addColorStop(0, 'rgba(255,250,232,0.9)'); glow.addColorStop(1, 'rgba(255,250,232,0)');
+  ctx.fillStyle = glow; ctx.fillRect(0, 0, cv.width, cv.height);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.mapping = THREE.EquirectangularReflectionMapping;
   const pmrem = new THREE.PMREMGenerator(renderer);
-  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  scene.environment = pmrem.fromEquirectangular(tex).texture;
   pmrem.dispose();
+  tex.dispose();
 }
 
 const camera = new THREE.PerspectiveCamera(55, 1, 0.05, 300);
@@ -447,13 +472,35 @@ function fitCameraToModel() {
   camera.near = Math.max(0.05, r / 400);
   camera.far = Math.max(300, r * 10);
   camera.updateProjectionMatrix();
+  // v1.11.0 softbox rides the build (XenonViewer updateShadowFrustum:
+  // width = height = radius·4 on the (-0.35, 1, 0.5) elevation at 2.2r)
+  softbox.width = softbox.height = Math.max(4, r * 4);
+  softbox.position.copy(c).add(new THREE.Vector3(-0.35, 1, 0.5).setLength(r * 2.2));
+  softbox.lookAt(c);
   controls.update();
 }
 
-scene.add(new THREE.HemisphereLight(0xcfe8ff, 0x444422, 1.1));
-const sun = new THREE.DirectionalLight(0xfff2dd, 2.2);
-sun.position.set(-6, 10, -4);
+// v1.11.0 GAME-DAYLIGHT LAW — XenonViewer js/viewer.js TIMES_OF_DAY.day +
+// light rig (js/viewer.js:75-99, 254-281 — fetched 2026-10-25, NOTICE §2),
+// transcribed so painted colours "ressortent telles quelles" (dev scene.js
+// comment): sun 1.0 + cool fill + warm bounce + soft panel + sky hemisphere
+// 0.35 (was: cool hemisphere 1.1 + sun 2.2 studio — ≈2.1× over-lit, blacks
+// read grey, deep reds washed to brick — the truck report).
+scene.add(new THREE.HemisphereLight(0x9ec4e4, 0x8a7250, 0.35));
+const sun = new THREE.DirectionalLight(0xfff6e0, 1.0);
+sun.position.set(9, 12, 6);
 scene.add(sun);
+const fillLight = new THREE.DirectionalLight(0xbfd4e8, 0.12);
+fillLight.position.set(-8, 5, -10);
+scene.add(fillLight);
+const bounceLight = new THREE.DirectionalLight(0xc7a878, 0.10);
+bounceLight.position.set(2, -8, 4);
+scene.add(bounceLight);
+RectAreaLightUniformsLib.init();
+const softbox = new THREE.RectAreaLight(0xdbe8f6, 0.14, 10, 10);
+softbox.position.set(0, 22, 0);
+softbox.lookAt(0, 0, 0);
+scene.add(softbox);
 
 const ground = new THREE.Mesh(
   new THREE.PlaneGeometry(120, 120),
@@ -538,8 +585,15 @@ function pbr(c) {
   };
 }
 const matKey = (s) => s.color.getHex() + ',' + s.op.toFixed(3) + ',' + s.metal.toFixed(3) + ',' + s.rough.toFixed(3);
-function palColor(slot) {
-  return pbr(resolveColor(model?.data?.colors, slot, LEGACY_Q));
+// v1.11.0 PALETTE SCOPING (XenonViewer js/blueprint.js:172 — readPalette per
+// build): every geometry pass resolves slots through ITS OWN build's data.colors
+// with only the built-in table below, NEVER the parent's. Chip's Badger doors
+// (subgrid slot 12 = painted deep red [32,2,2]) hit the top-level CLEARED slot
+// 12 under the global palette and rendered as the magenta marker (the pink-door
+// report; the v1.10.2 "file palette carries 0 at slot 12" diagnosis looked one
+// palette up and repaired a top-level slot no face references).
+function palColor(slot, colors) {
+  return pbr(resolveColor(colors ?? model?.data?.colors, slot, LEGACY_Q));
 }
 // component colours: same format as palette entries; the game's painted-material
 // defaults stand in for missing fields (color1 = polished white, color2 = matte grey)
@@ -568,7 +622,7 @@ function compColor(comp, which, fallback) {
 function mat(spec, extra = {}) {
   return new THREE.MeshStandardMaterial({
     color: spec.color, metalness: spec.metal, roughness: spec.rough,
-    envMapIntensity: spec.metal > 0.5 ? 1.25 : 0,
+    envMapIntensity: 1,   // v1.11.0 sky-env parity (see mat())
     transparent: spec.op < 1, opacity: spec.op, ...extra });
 }
 const box = (w, h, d) => new THREE.BoxGeometry(w, h, d);
@@ -906,7 +960,7 @@ function cellQuad(cell, axis, dir, spanU = 1, spanV = 1) {
   const n = [e1[1]*e2[2]-e1[2]*e2[1], e1[2]*e2[0]-e1[0]*e2[2], e1[0]*e2[1]-e1[1]*e2[0]];
   return n[0]*dir[0] + n[1]*dir[1] + n[2]*dir[2] >= 0 ? quad : [quad[3], quad[2], quad[1], quad[0]];
 }
-function buildBlockGeometry(blocks, offset) {
+function buildBlockGeometry(blocks, offset, colors) {
   const faces = buildFaceGrid(blocks);
   const buckets = new Map();                 // matKey -> {pos:[], spec}
   const kept = [], footprints = new Map();
@@ -934,7 +988,7 @@ function buildBlockGeometry(blocks, offset) {
     const tris = getBlockFaces(b.type);
     const dirs = getBlockFaceDirections(b.type);
     for (let f = 0; f < tris.length; f++) {
-      const spec = palColor(b.colors?.[f] ?? b.colors?.[0] ?? 0);
+      const spec = palColor(b.colors?.[f] ?? b.colors?.[0] ?? 0, colors);
       const opaque = spec.op >= 1;
       const dir = dirs[f];
       if (dir && isFullFace(b.type, f)) {    // full face: per-cell cull + rectangle stitch
@@ -991,8 +1045,8 @@ function buildBlockGeometry(blocks, offset) {
   }
   return { meshes, edges: { pos: epos, col: ecol } };
 }
-function addBlockMeshes(group, blocks, offset) {
-  const { meshes, edges } = buildBlockGeometry(blocks, offset);
+function addBlockMeshes(group, blocks, offset, colors) {
+  const { meshes, edges } = buildBlockGeometry(blocks, offset, colors);
   for (const { geo, spec } of meshes)
     group.add(new THREE.Mesh(geo, mat(spec, {
       side: spec.op < 1 ? THREE.DoubleSide : THREE.FrontSide,
@@ -1035,7 +1089,7 @@ function buildSubgrids() {
     g.quaternion.identity();
     g.userData.base = { p: g.position.clone(), q: g.quaternion.clone() };   // attach-offset pose (v0.157 joints compose on top)
     subGroup.add(g);
-    addBlockMeshes(g, c.data.blocks, new THREE.Vector3());
+    addBlockMeshes(g, c.data.blocks, new THREE.Vector3(), c.data.colors ?? null);
     for (const sc of c.data.components || []) {
       if (sc.type === 'Build') continue;
       const m = MODEL.manifest?.[sc.type] ? colliderProxy(sc) : (PROXY[sc.type] || PROXY2[sc.type] || defaultProxy)(sc);
@@ -1527,7 +1581,7 @@ function buildHull() {
     const s = { ...spec, op: spec.op * hullOpacity };
     hullGroup.add(new THREE.Mesh(hg, new THREE.MeshStandardMaterial({
       color: s.color, metalness: s.metal, roughness: s.rough,
-      envMapIntensity: s.metal > 0.5 ? 1.25 : 0,
+      envMapIntensity: 1,   // v1.11.0 sky-env parity
       transparent: s.op < 1, opacity: s.op, depthWrite: s.op >= 1,
       side: THREE.DoubleSide, flatShading: true })));
   }

@@ -124,7 +124,7 @@ export function allocateSlot(palette: FilePalette | null | undefined): number | 
 export interface PaintShade { opacity: number; roughness: number; metallic: number }
 
 /** The four FINISHES, exactly the shading the game's palette families carry
- *  (palette.ts LEGACY_GROUPS: matte roughness 7, polished roughness 0,
+ *  (palette.ts FAMILY_ROWS: matte roughness 7, polished roughness 0,
  *  metal metallic 1, tinted glass opacity 2). The sphere tool's paint
  *  control writes a NEW slot — or snaps to a nearest slot — WITH this spec,
  *  so the picked finish is what the game's shaders see. */

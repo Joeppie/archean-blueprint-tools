@@ -34,38 +34,50 @@ export const DEFAULT_PALETTE: (PaletteEntry | null)[] = [
   { r: 255, g: 255, b: 255, opacity: 15, roughness: 0, metallic: 1 },
 ];
 
-// Legacy (v1-format) built-in colour groups. v1 blueprint files carry NO
-// data.colors palette — block faces and v1 component colours ([slot,slot]
-// index pairs) reference this built-in table directly. Four 17-colour
-// families, one per finish: rows [r,g,b,opacity,roughness,metallic].
-const LEGACY_GROUPS: Record<number, number[][]> = {
+// The built-in finish families. v1 blueprint files carry NO data.colors
+// palette — block faces and v1 component colours ([slot,slot] index pairs)
+// reference this built-in table directly. Four CONTIGUOUS 17-colour
+// families, one per finish: rows [r,g,b,opacity,roughness,metallic] at bases
+// 40 (matte), 80 (polished), 120 (metal), 160 (tinted glass); every other
+// slot beyond the engine-reserved 0..10 is empty (null ⇒ the magenta marker
+// when referenced). Bases + rows transcribed verbatim from the dev's
+// XenonViewer js/palette.js (fetched 2026-10-25, generated from
+// BlockShapes.hh; NOTICE §2) — its non-null ranges are exactly 0..10 +
+// 40..56 + 80..96 + 120..136 + 160..176. (This port once sat the families
+// at 40/84/128/172 with a "+4/+8/+12 legacySlot" remap (v1.5.11): the
+// composition resolved v1 files correctly, but palette-carrying files
+// reading built-in slots 84..96/128..144/172..188 fell into the family
+// SHIFTED (slot 92 read as dark green [1,8,1] where the game/dev read
+// polished yellow [255,255,16]). v1.11.0 aligns the table; the truck's cab
+// = polished slot 85 = [16,1,1] candy red.)
+const FAMILY_ROWS: Record<number, number[][]> = {
   40: [   // matte
     [255,255,255,15,7,0],[16,16,16,15,7,0],[0,0,0,15,7,0],[96,16,16,15,7,0],
     [32,2,2,15,7,0],[12,1,1,15,7,0],[16,96,16,15,7,0],[2,16,2,15,7,0],
     [1,8,1,15,7,0],[16,16,96,15,7,0],[2,2,32,15,7,0],[1,1,12,15,7,0],
     [255,255,16,15,7,0],[16,255,255,15,7,0],[255,64,16,15,7,0],[64,16,255,15,7,0],
     [255,16,255,15,7,0]],
-  84: [   // polished
+  80: [   // polished
     [255,255,255,15,0,0],[16,16,16,15,0,0],[0,0,0,15,0,0],[96,16,16,15,0,0],
     [48,4,4,15,0,0],[16,1,1,15,0,0],[16,96,16,15,0,0],[2,32,2,15,0,0],
     [1,8,1,15,0,0],[16,16,96,15,0,0],[4,4,48,15,0,0],[1,1,16,15,0,0],
     [255,255,16,15,0,0],[16,255,255,15,0,0],[255,64,16,15,0,0],[64,16,255,15,0,0],
     [255,16,255,15,0,0]],
-  128: [  // metal
+  120: [  // metal
     [255,255,255,15,0,1],[64,64,64,15,0,1],[4,4,4,15,0,1],[96,32,32,15,0,1],
     [64,8,8,15,0,1],[16,1,1,15,0,1],[32,96,32,15,0,1],[2,32,2,15,0,1],
     [1,8,1,15,0,1],[32,32,96,15,0,1],[8,8,64,15,0,1],[1,1,16,15,0,1],
     [255,160,16,15,0,1],[16,255,255,15,0,1],[255,64,16,15,0,1],[64,16,255,15,0,1],
     [255,16,255,15,0,1]],
-  172: [  // tinted glass (opacity 2 ⇒ alpha 3/16; entry 0 clear, entry 2 op 5)
+  160: [  // tinted glass (opacity 2 ⇒ alpha 3/16; entry 0 clear, entry 2 op 5)
     [255,255,255,0,0,0],[200,200,200,2,0,0],[128,128,128,5,0,0],[255,128,128,2,0,0],
     [255,16,16,2,0,0],[32,4,4,2,0,0],[128,255,128,2,0,0],[16,255,16,2,0,0],
     [4,32,4,2,0,0],[128,128,255,2,0,0],[16,16,255,2,0,0],[4,4,32,2,0,0],
     [255,255,16,2,0,0],[16,255,255,2,0,0],[255,64,16,2,0,0],[64,16,255,2,0,0],
     [255,16,255,2,0,0]],
 };
-for (const base of Object.keys(LEGACY_GROUPS)) {
-  const rows = LEGACY_GROUPS[+base];
+for (const base of Object.keys(FAMILY_ROWS)) {
+  const rows = FAMILY_ROWS[+base];
   if (!rows) continue;
   rows.forEach((v, k) => {
     DEFAULT_PALETTE[+base + k] = { r: v[0]!, g: v[1]!, b: v[2]!, opacity: v[3]!, roughness: v[4]!, metallic: v[5]! };
@@ -73,18 +85,17 @@ for (const base of Object.keys(LEGACY_GROUPS)) {
 }
 while (DEFAULT_PALETTE.length < 256) DEFAULT_PALETTE.push(null);
 
-// v1 (2024-25, palette-less) blueprints index the finish families FOUR slots
-// below the v2 (BlockShapes.hh) bases — v2 inserted 4 new head colours per
-// family. v1 polished = 80..96, metal = 120..136, glass = 160..176; unmapped,
-// those indices fall in the empty gaps below each family and render as the
-// magenta missing-slot marker (the 'purple blocks on old crafts' report).
-// Matte 40..56 is identical in both generations — it never went purple.
-export function legacySlot(i: number): number {
-  if (i >= 80 && i <= 96) return i + 4;      // -> polished 84..100
-  if (i >= 120 && i <= 136) return i + 8;    // -> metal 128..144
-  if (i >= 160 && i <= 176) return i + 12;   // -> glass 172..188
-  return i;
-}
+// v1.11.0: IDENTITY. The XenonViewer js/palette.js table (fetched 2026-10-25)
+// carries the families AT THE v1 BASES (polished 80..96, metal 120..136,
+// glass 160..176) — one built-in generation, and js/blueprint.js
+// resolvePaletteColor (lines 85-100) applies NO remap to any file. The old
+// +4/+8/+12 shift (v1.5.11) existed to plug a transcription offset in THIS
+// port's table (families at 84/128/172); it cancelled out for v1 files while
+// shifting every palette-carrying file's built-in reads. With the table
+// aligned, no remap is needed; the legacy flag now keys ONLY the wheel-droop
+// display gate (v1.5.11) — keep the export so call sites stay GENERATION-
+// honest (normalize embeds, paletteUsage census, viewer resolve sites).
+export function legacySlot(i: number): number { return i; }
 
 /** Fully-resolved albedo slot (LINEAR r/g/b 0-255 + shading params). */
 export interface ResolvedColor extends PaletteEntry {}
@@ -96,7 +107,9 @@ export const MISSING_SLOT: ResolvedColor =
 /**
  * Resolve a palette slot. Slots 0..10 always use the built-in entries (the
  * game's reader re-imposes them); file entries fall back to the built-in.
- * legacy=true applies the v1 family-base remap (see legacySlot).
+ * Mirrors the dev's resolvePaletteColor (XenonViewer js/blueprint.js:85-100):
+ * one law, no index remap. The legacy flag is a NO-OP for colour resolution
+ * since v1.11.0 (see legacySlot).
  */
 export function resolveColor(palette: FilePalette | null | undefined, index: number, legacy = false): ResolvedColor {
   const i = (legacy ? legacySlot(index) : index) | 0;

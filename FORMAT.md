@@ -244,7 +244,7 @@ colour shape:
 | `data.colors` | **absent/empty** → built-in palette | present, 256 entries |
 | `components[].orientation` | Unity LH quaternion **RAW** | **RAW too** (v1.5.11: one law; the old "conjugate" claim was a mirrored-chain artifact) |
 | `components[].colors` | `[slot, slot]` **index pair** | `{color1:{…}, color2:{…}}` dict |
-| finish-family bases | polished 80, metal 120, glass 160 (matte 40 shared) | polished 84, metal 128, glass 172 → `legacySlot()` +4/+8/+12 |
+| finish-family bases | polished 80, metal 120, glass 160 (matte 40 shared) | **identical table** — v1.11.0: XenonViewer `js/palette.js` (fetched 2026-10-25) carries the families at 40/80/120/160 for BOTH generations; the old "v2 bases 84/128/172 + `legacySlot()` +4/+8/+12" row was a transcription offset of THIS repo's table, RETIRED (identity) |
 | view-quat chain (v1.5.11) | stored quat **as-is** `(w,x,y,z)` | stored quat **as-is** `(w,x,y,z)` (pre-v1.5.11: conj `(w,−x,−y,−z)` — RETRACTED; pre-v0.180: `(w,−x,−y,z)` / `(w,x,y,−z)` mirrored view) |
 
 **Corpus census (111 files under testdata/, 2026-10-19):** all are
@@ -263,7 +263,9 @@ apart. ~~The palette↔quat coupling is verified on the two proof craft only
 (mosaic `3334698274` mural flushfrac 1.00 RAW; ISW `3812927875` pipes
 0.000 m CONJ)~~ — v1.5.11: the quat half of that coupling is VOID (one raw
 law, §Handedness); the palette + colours-SHAPE split above stands. The
-palette key now drives ONLY colour resolution (`legacySlot()`), never
+palette key now drives ONLY the wheel-droop display gate (colour
+resolution is generation-blind since v1.11.0 — one built-in table, no
+`legacySlot()` shift), never
 placement; every law probe craft (`9000004001`, `9000005001`) reads raw.
 
 **Mirror verdict for the "every scene seems MIRRORED" report (dev|ours
@@ -994,27 +996,65 @@ in the dev's XenonViewer + the shipped `.gltf`/`.ini` assets, Oct 5)
   - roughness = value/7; metallic ∈ {0,1} and the tracer lights every surface
     with diffuse when roughness>0 even for metallic=1 (rough steel sun-lit
     bright, chrome mirror-dark) ⇒ `metalness = metallic · (1 − roughness/7)`.
+  - **v1.11.0 GAME-DAYLIGHT rendering law (XenonViewer `js/viewer.js` +
+    `js/scene.js` transcribed 2026-10-25, NOTICE §2).** Reading slots as
+    linear is only HALF the law — the dev viewer's render rig is what makes
+    the colours READ right, and it is: `LinearToneMapping` @ exposure **0.9**
+    (`viewer.js:47 DEFAULT_EXPOSURE`; "ACES compressait et désaturait tout ;
+    un mappage linéaire restitue les aplats" — `viewer.js:209-213`), a
+    PMREM'd **DAY SKY** environment (blue zenith #2f6ea8 → warm sand
+    #6b563c with a sun halo on the LIGHT_DIRECTION; `skyEnvironmentTexture`),
+    a full-day light rig — hemisphere 0x9ec4e4/0x8a7250 @ **0.35**, sun
+    0xfff6e0 @ **1.0** at (9,12,6), cool fill 0.12, warm bounce 0.10, and a
+    build-sized RectArea **softbox** 0.14 (`TIMES_OF_DAY.day`,
+    `viewer.js:75-99,254-281`) — and `envMapIntensity` **1 on EVERY
+    material** (`pbrMaterial` in `scene.js` sets none; "un métal ne s'éclaire
+    pas, il réfléchit, et sans ciel ni sol il rend noir quelle que soit sa
+    couleur"). The app+viewer previously lit a ~2.1× brighter studio pair
+    (hemisphere 1.1 + sun 2.2, no tone map, RoomEnvironment env on metal
+    only at 1.25): blacks read grey, the truck's deep reds washed to
+    sky-blue-cast brick, chrome blew out. Measured (iso-framed truck
+    render, mean RGB): deepred class dev (66,36,26) vs old-ours (86,55,55)
+    → new-ours (65,35,24); black class dev (35,33,30) vs old-ours 3 % of
+    the craft → new-ours 11 %.
   - Slots **0..10 are engine-reserved** (the reader re-imposes the built-ins);
     full built-in table in `viewer/palette.js` (from the game's BlockShapes.hh,
     same source the dev's XenonViewer generates from).
 - **v1-format files (23 of the 24 corpus files!) carry NO `data.colors`
-  palette** — every slot references the BUILT-IN table. The legacy palette is
-  four 17-colour families (white, 3 greys, 3×red, 3×green, 3×blue, yellow,
-  cyan, orange, violet, magenta), one per finish: matte slots **40..56**
-  (rough 7 — the dashboard/mosaic crafts live here), polished **84..100**,
-  metal **128..144**, tinted glass **172..188** (opacity 2). Transcribed from
-  the dev's XenonViewer `js/palette.js` (BlockShapes.hh-generated, NOTICE §2).
+  palette** — every slot references the BUILT-IN table. The built-in palette
+  is FOUR CONTIGUOUS 17-colour families (white, 3 greys, 3×red, 3×green,
+  3×blue, yellow, cyan, orange, violet, magenta), one per finish: matte slots
+  **40..56** (rough 7 — the dashboard/mosaic crafts live here), polished
+  **80..96**, metal **120..136**, tinted glass **160..176** (opacity 2);
+  every slot 11..39, 57..79, 97..119, 137..159, 177..255 is EMPTY (the magenta
+  marker when referenced). Transcribed VERBATIM from the dev's XenonViewer
+  `js/palette.js` (BlockShapes.hh-generated, NOTICE §2; its non-null ranges
+  are exactly 0..10 + 40..56 + 80..96 + 120..136 + 160..176, and
+  `js/blueprint.js` `resolvePaletteColor` (lines 85-100) applies NO index
+  remap to ANY file — v1 and v2 read the SAME table).
   v1 `components[].colors` is a `[slot, slot]` **index pair** (color1, color2),
-  not a dict. Unresolvable slots render as a magenta marker — a craft "all in
-  purple" means the built-in groups are missing, not that the file is odd.
-  - **v1 family bases sit FOUR slots below the v2 bases** (v2 inserted 4 new
-    head colours per family): v1 polished = **80..96**, metal = **120..136**,
-    glass = **160..176**; matte 40..56 is identical in both generations. The
-    256-slot built-in table is the v2 one, so a v1 file's indices 80-83,
-    120-126, 160-171 land in the empty gaps below each family — that was the
-    purple blocks (26 of the 61 corpus files). Fix = `legacySlot(i)` in
-    `palette.js`: +4 / +8 / +12 into the matching v2 family, applied only for
-    palette-less (v1) files — a v2 file genuinely missing slot 81 stays magenta.
+  not a dict — the game's own migration resolves it through the built-in at
+  SAVE time (proof: the game's re-save 3812927875 spells ISW's v1 pair
+  `[51,3]` as `color1 {1,1,12}` = matte slot 51's colour verbatim; the app's
+  `normalize` mirrors that). Unresolvable slots render as a magenta marker —
+  a craft "all in purple" means the built-in groups are missing, not that
+  the file is odd.
+  - **v1.11.0 — the "+4/+8/+12 `legacySlot()`" remap is RETIRED (identity).**
+    v1.5.11 introduced it to plug v1 indices into this repo's built-in table,
+    which had TRANSCRIBED THE FAMILIES FOUR SLOTS HIGH (polished 84, metal
+    128, glass 172 — the fetched XenonViewer table says 80/120/160). The
+    shift + shifted table composed to the CORRECT colours for palette-less v1
+    files (slot 85 → 89 → [16,1,1] — the truck's candy red all along), so the
+    purple-block class stayed dead — but every PALETTE-CARRYING file reading a
+    built-in slot in 84..96 / 128..144 / 172..188 read the family SHIFTED
+    (slot 92 resolved [1,8,1] dark green where the game/dev read polished
+    yellow [255,255,16]), and slots 97..100/137..144/177..188 carried entries
+    the dev table leaves null (no magenta marker for genuinely-missing slots).
+    The table is now the dev's verbatim; `legacySlot()` = identity (kept as
+    the GENERATION seam for normalize's embed and the wheel-droop gate). The
+    v1.10.2 "magenta = EMPTY palette slot, repair the file" rule STANDS —
+    it just no longer mixes with a family-shift: a magenta face is ALWAYS a
+    cleared/absent slot (see the Badger door entry under §Subgrids).
 - Component painted materials: gltf materials named `color1`/`color2` take
   `components[].colors.color1/color2` (same entry format; per-component dict).
   Defaults when fields missing: color1 = white, op 15, rough 0, metal 0
@@ -1555,6 +1595,28 @@ Adventure = 3334698274).
   in-game look of a TRIANGLE panel on a hinge the user's in-game territory:
   the Generate-balloon fin panels ship on this law (their rotation follows
   the §Subgrids joint kinematics — panels-ride-pivot like every door).
+- **PER-BUILD PALETTE SCOPING (v1.11.0, the Badger's pink doors):** a nested
+  `data.colors` is THAT build's whole palette — XenonViewer `readPalette(
+  buildData.colors)` per build (`js/blueprint.js:172`), so a nested face slot
+  resolves through the BUILD's palette with ONLY the built-in table below it
+  — never the parent craft's. Resolving nested faces against the TOP-level
+  palette is the bug, and 3326372833 "Chip's Badger" is the proof craft: its
+  DOORS are nested Build skins whose own slot 12 = the painted deep red
+  [32,2,2,15,7,0], while the top-level palette carries slot 12 CLEARED (`0`).
+  The app fed the top-level palette into `buildSolids` for nested content
+  (`scene.ts`) → every door face hit the top-level cleared slot → the magenta
+  marker painted the doors PINK; XenonViewer (scoped) renders them deep red.
+  **RE-DIAGNOSIS of v1.10.2:** "the file palette carries 0 at custom slot 12
+  while 41 skin-triangle faces still reference it" looked one palette UP —
+  no TOP-level face references slot 12 (census: top-level faces use 0, 3, 4,
+  8, 11, 41, 42, 13 only), so the slot-12 file repair whitened a slot nothing
+  references at top level, and Chip's next publication (v4.5+,
+  2026-10-25: 1255 top-level triangles, nested doors unchanged) showed the
+  pink doors unchanged. The rule that stands: a magenta craft face means a
+  CLEARED/ABSENT slot IN THE PALETTE THAT FACE RESOLVES THROUGH — check which
+  build owns the face before repairing the file. Both engines scope the
+  palette per build now (`scene.ts buildSubgrids`, `view3d.js
+  addBlockMeshes(..., c.data.colors)`).
 - **Stored at grid coords, in the PARENT frame (v0.168 correction):** the nested
   `data.blocks`/`data.components` are authored in the PARENT craft's cell/
   metre coords (a CLOSED hatch seals the hull at its parent cell — see

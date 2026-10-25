@@ -9,17 +9,18 @@
 // invalidated or while controls move — plus the two live gestures we own:
 // the selection pulse and the fly-to glide.
 //
-// Lighting (legacy v0.144 rule): PBR metal has NO diffuse term — lights-only,
-// chrome renders near-black. A PMREM studio env (RoomEnvironment, baked once
-// at startup, zero per-frame cost) is set as scene.environment; only specs
-// with metal > 0.5 get envMapIntensity 1.25 (materials.ts envIntensity), so
-// matte/painted surfaces look exactly as before.
+// Lighting (v1.11.0 GAME-DAYLIGHT law, XenonViewer js/viewer.js transcribed):
+// full-day hemisphere (sky blue over warm sand) + sun + fill + bounce + a
+// build-sized RectArea softbox, LinearToneMapping @ exposure 0.9 — "Les
+// couleurs peintes ressortent alors telles quelles". scene.environment is a
+// PMREM'd DAY SKY (blue zenith, warm sand ground, sun halo); every PBR
+// material reads it at intensity 1 (materials.ts envIntensity).
 
 import {
   Box3, BoxGeometry, BufferAttribute, BufferGeometry, Color, ConeGeometry, CylinderGeometry, DirectionalLight,
-  DoubleSide, Group, HemisphereLight, InstancedMesh, Line, LineBasicMaterial, LineSegments, LinearSRGBColorSpace, Matrix3, Matrix4, Mesh,
+  DoubleSide, EquirectangularReflectionMapping, Group, HemisphereLight, InstancedMesh, Line, LineBasicMaterial, LineSegments, LinearSRGBColorSpace, Matrix3, Matrix4, Mesh,
   MeshBasicMaterial, MeshStandardMaterial, Object3D, OrthographicCamera, PerspectiveCamera,
-  AdditiveBlending, BackSide, Material, Plane, PlaneGeometry, PMREMGenerator, Quaternion, Raycaster,
+  AdditiveBlending, BackSide, LinearToneMapping, Material, Plane, PlaneGeometry, PMREMGenerator, Quaternion, Raycaster, RectAreaLight,
   RepeatWrapping, Scene, ShaderMaterial, SphereGeometry, Sprite, SpriteMaterial, Texture, TextureLoader,
   TorusGeometry, Vector2, Vector3, WebGLRenderer,
   type Camera, type MeshStandardMaterialParameters,
@@ -28,7 +29,7 @@ import backdropManifest from '../assets/backdrops/manifest.json';
 import { CanvasTexture, NearestFilter, SRGBColorSpace } from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { buildPartBoxes, displayQuat, fileToViewQuat, occStandLocal, qMul, standInBox, type PartBox } from './compparts';
 import type { FileQuat, Vec3D } from './format';
@@ -219,6 +220,9 @@ const HEAVY_COMPONENTS = 800;
 export class Engine {
   readonly scene = new Scene();
   private renderer: WebGLRenderer | null = null;
+  /** the game-daylight soft panel (v1.11.0, XenonViewer TIMES_OF_DAY.day
+   *  softbox): sized + centred on the build in fit(), facing the centre */
+  private softbox: RectAreaLight | null = null;
   /** v1.9.2 DUAL PROJECTION (user: "under view also add a mode for
    *  orthogonal"): TWO cameras, ONE orbit rig — setProjection swaps
    *  controls.object / gizmo.camera and hands the SAME framing over (the
@@ -560,6 +564,14 @@ export class Engine {
 
   attach(canvas: HTMLCanvasElement) {
     this.renderer = new WebGLRenderer({ canvas, antialias: true });
+    // v1.11.0 GAME-DAYLIGHT LAW (XenonViewer js/viewer.js:207-213 transcribed
+    // 2026-10-25, NOTICE §2): "ACES compressait et désaturait tout ; un
+    // mappage linéaire restitue les aplats" — LINEAR tone mapping at
+    // exposure 0.9 (the dev's DEFAULT_EXPOSURE); palette r/g/b stay raw
+    // linear albedo (unchanged rule), the tone map keeps the deep reds
+    // deep instead of clipping them to brick.
+    this.renderer.toneMapping = LinearToneMapping;
+    this.renderer.toneMappingExposure = 0.9;
     // devicePixelRatio floored at 1, capped 2.5 (legacy onResize rule)
     this.renderer.setPixelRatio(Math.min(Math.max(window.devicePixelRatio, 1), 2.5));
     this.controls = new OrbitControls(this.camera, canvas);
@@ -632,7 +644,37 @@ export class Engine {
       g.enabled = false;
       g.getHelper().visible = false;
     }
-    this.scene.add(new HemisphereLight(0xcfe8ff, 0x444422, 1.1));
+    // ─────────────────────────────────────────────────────────────────────────
+    // v1.11.0 THE GAME-DAYLIGHT LAW — the dev's XenonViewer lighting transcribed
+    // (js/viewer.js:75-99 TIMES_OF_DAY.day + :254-281, fetched 2026-10-25,
+    // NOTICE §2). The report: "the american truck doesn't render red properly,
+    // it contains all manner of wrong colors … Use XenonViewer of dev to
+    // establish proper colors." The dev scene renders FULL DAY: a sun, sky
+    // blue from above and warm sand bounce from below, a fill, and a big
+    // RectArea softbox — "Les couleurs peintes ressortent alors telles
+    // quelles" (painted colours come out exactly as painted). Our old studio
+    // pair (hemisphere 1.1 cool-blue + sun 2.2, no tone map) lit the scene
+    // ≈2.1× brighter: black read as grey, deep reds washed to brick with a
+    // sky-blue cast, chrome blew out — the dev census of the same truck
+    // render: 62 % black + 12 % deep red where ours read 31 % white.
+    this.scene.add(new HemisphereLight(0x9ec4e4, 0x8a7250, 0.35));
+    const sun = new DirectionalLight(0xfff6e0, 1.0);
+    sun.position.set(9, 12, 6);
+    this.scene.add(sun);
+    const fill = new DirectionalLight(0xbfd4e8, 0.12);
+    fill.position.set(-8, 5, -10);
+    this.scene.add(fill);
+    const bounce = new DirectionalLight(0xc7a878, 0.10);
+    bounce.position.set(2, -8, 4);
+    this.scene.add(bounce);
+    // extended source: a broad soft panel over the build, sized to it in
+    // fit() (dev updateShadowFrustum: width = height = radius*4, riding the
+    // (-0.35, 1, 0.5) elevation at 2.2·radius, facing the model centre).
+    RectAreaLightUniformsLib.init();
+    this.softbox = new RectAreaLight(0xdbe8f6, 0.14, 10, 10);
+    this.softbox.position.set(0, 22, 0);
+    this.softbox.lookAt(0, 0, 0);
+    this.scene.add(this.softbox);
     this.scene.add(this.hingeGroup);
     this.hingeGroup.visible = false;
     canvas.addEventListener('pointerdown', this.onHingeDown, { capture: true });
@@ -643,9 +685,6 @@ export class Engine {
     canvas.addEventListener('pointerdown', this.onRecordPointer, { capture: true });
     this.hingeCanvas = canvas;
     this.pinCanvas = canvas;
-    const sun = new DirectionalLight(0xfff2dd, 2.2);
-    sun.position.set(-6, 10, -4);
-    this.scene.add(sun);
     this.surgeGroup.raycast = () => {};
     this.scene.add(this.root);
     this.root.add(this.pipeHlGroup);             // cable hover overlay rides moff WITH the cables
@@ -707,19 +746,53 @@ export class Engine {
 
   invalidate() { this.needRender = true; }
 
-  /** PMREM studio env, baked once per GL context (legacy v0.144 rule): zero
-   *  per-frame cost; only metal reads it (materials.ts envIntensity). */
+  /** v1.11.0 SKY env (XenonViewer js/viewer.js skyEnvironmentTexture, day
+   *  stops, fetched 2026-10-25 — NOTICE §2): the dev viewer lights metals
+   *  with a PMREM'd DAY SKY (blue zenith → warm sand ground, sun halo on
+   *  the LIGHT_DIRECTION), "un métal ne s'éclaire pas, il réfléchit, et
+   *  sans ciel ni sol il rend noir quelle que soit sa couleur". The
+   *  RoomEnvironment studio stand-in (v0.144) reflected lamp panels —
+   *  chrome read studio-white, the truck's polished parts lost their sky.
+   *  Baked once per GL context; every PBR material reads it at intensity 1
+   *  (materials.ts envIntensity — the dev applies env to ALL materials). */
   private bakeEnv() {
     if (!this.renderer) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024; canvas.height = 512;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const sky = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    for (const [stop, col] of [[0.0, '#2f6ea8'], [0.3, '#6ba3cf'], [0.47, '#b9d4e6'],
+      [0.5, '#d8cdb4'], [0.54, '#b39b74'], [0.75, '#8d7452'], [1.0, '#6b563c']] as const)
+      sky.addColorStop(stop, col);
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // sun halo where the directional light comes from (dev LIGHT_DIRECTION
+    // (0.5, 0.72, 0.36) normalised, equirectangular placement)
+    const d = new Vector3(0.5, 0.72, 0.36).normalize();
+    const phi = Math.acos(Math.min(1, Math.max(-1, d.y)));
+    const theta = Math.atan2(d.z, -d.x);
+    const cx = canvas.width * (((theta / (Math.PI * 2)) % 1 + 1) % 1);
+    const cy = canvas.height * (phi / Math.PI);
+    const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, canvas.height * 0.4);
+    glow.addColorStop(0, 'rgba(255,250,232,0.9)');
+    glow.addColorStop(1, 'rgba(255,250,232,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const tex = new CanvasTexture(canvas);
+    tex.colorSpace = SRGBColorSpace;
+    tex.mapping = EquirectangularReflectionMapping;
     const pmrem = new PMREMGenerator(this.renderer);
-    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    this.scene.environment = pmrem.fromEquirectangular(tex).texture;
     pmrem.dispose();
+    tex.dispose();
   }
 
   private onRestore = () => { this.bakeEnv(); this.invalidate(); };
 
   /** one PbrSpec → MeshStandardMaterial (palette r/g/b are LINEAR albedo —
-   *  never sRGB-decode; only metal reflects the studio env) */
+   *  never sRGB-decode; every surface reads the SKY env at intensity 1,
+   *  v1.11.0 game-daylight law — materials.ts envIntensity) */
   private mat(spec: PbrSpec, extra?: Partial<MeshStandardMaterialParameters>): MeshStandardMaterial {
     return new MeshStandardMaterial({
       color: new Color().setRGB(spec.color[0], spec.color[1], spec.color[2], LinearSRGBColorSpace),
@@ -1722,7 +1795,7 @@ void main() {
       roughness: Math.max(rough, 0.02),
       metalness: ((metallic ?? 0) / 255) * (1 - rough),
     });
-    m.envMapIntensity = (metallic ?? 0) > 127 ? 1.25 : 0;
+    m.envMapIntensity = 1;
     return m;
   }
 
@@ -1888,9 +1961,21 @@ void main() {
       const blocks = (c.data?.['blocks'] as Blueprint['data']['blocks'] | undefined) ?? [];
       // blocks AND the nested hull skin through ONE colour-bucket pass
       // (buildSolids reads data.blocks + data.triangles + data.colors;
-      // the nested triangles are parent-frame ABSOLUTE like the blocks)
+      // the nested triangles are parent-frame ABSOLUTE like the blocks).
+      // v1.11.0 PALETTE SCOPING (the Badger's pink doors): a subgrid carries
+      // its OWN data.colors and its faces resolve through THAT palette with
+      // only the built-in table below it — XenonViewer readPalettes per
+      // build (js/blueprint.js:172 `const palette = readPalette(
+      // buildData.colors)`), never the parent's. Feeding the TOP-level
+      // palette to nested faces made Chip's doors (their build's slot 12 =
+      // the painted deep red [32,2,2]) hit the top-level cleared slot 12 =
+      // the magenta marker — the v1.10.2 "file palette carries 0 at slot
+      // 12" diagnosis looked one palette up and fixed a slot nothing
+      // references (the top level), which is why Chip's NEXT file (and
+      // every file all along) showed the pink doors unchanged.
+      const nestedPal = (c.data?.['colors'] as Blueprint['data']['colors'] | undefined) ?? null;
       const solids = buildSolids({
-        data: { blocks, triangles: nestedTris, colors: bp.data.colors ?? null },
+        data: { blocks, triangles: nestedTris, colors: nestedPal },
       } as unknown as Blueprint);
       for (const b of solids.buckets.values()) {
         const gg = new BufferGeometry();
@@ -2382,6 +2467,13 @@ void main() {
     this.persp.near = this.orthoCam.near = Math.max(0.05, r / 400);
     this.persp.far = this.orthoCam.far = Math.max(300, r * 10);
     this.frameC = c.clone(); this.frameD = d;      // presets ride this framing
+    // v1.11.0 game-daylight softbox rides the build (dev updateShadowFrustum:
+    // width = height = radius·4 on the (-0.35, 1, 0.5) elevation at 2.2·radius)
+    if (this.softbox) {
+      this.softbox.width = this.softbox.height = r * 4;
+      this.softbox.position.copy(c).add(new Vector3(-0.35, 1, 0.5).setLength(r * 2.2));
+      this.softbox.lookAt(c);
+    }
     this.camera.lookAt(c);
     // ORTHO FRAMING (v1.9.2): the same fit distance owns the view height —
     // the portrait aspect pullback rides d, so a phone-framed craft fits

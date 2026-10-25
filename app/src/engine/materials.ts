@@ -11,8 +11,9 @@
 //  • metal = metallic ? max(0, 1 − roughness/7) : 0  (the game's tracer
 //    lights everything roughness>0 diffusely, so painted metal stays paint);
 //  • roughness clamped to ≥0.03, glass alpha (opacity+1)/16 clamped ≥0.02;
-//  • envMapIntensity = metal > 0.5 ? 1.25 : 0 — only chrome reflects the
-//    studio env, matte/painted surfaces render lights-only exactly as before;
+//  • envMapIntensity = 1 for EVERY surface (v1.11.0 game-daylight law —
+//    XenonViewer applies its PMREM'd sky env to all materials; the old
+//    metal-only 1.25 rule was a studio-env artifact);
 //  • component paints: color1 default = polished white, color2 = matte grey;
 //    v1 files store [color1, color2] as PALETTE SLOT INDEX PAIRS.
 
@@ -38,8 +39,14 @@ export interface PbrSpec {
 export const clamp = (v: number, lo: number, hi: number): number =>
   Math.min(hi, Math.max(lo, v));
 
-/** The single env-reflection rule (legacy mat()/hull/dash all agree). */
-export const envIntensity = (metal: number): number => (metal > 0.5 ? 1.25 : 0);
+/** v1.11.0: env intensity 1.0 for EVERY PBR surface. XenonViewer's
+ *  pbrMaterial (js/scene.js:254-263) never sets envMapIntensity, so its
+ *  PMREM'd DAY-SKY environment (js/viewer.js skyEnvironmentTexture) reads
+ *  on ALL materials at full strength — "un métal ne s'éclaire pas, il
+ *  réfléchit" (viewer.js:235-238): chrome reflects the sky, and painted
+ *  surfaces get the same irradiance the game's tracer bounces off them.
+ *  The old metal-only 1.25/0 split was a v0.144 studio-env artifact. */
+export const envIntensity = (_metal: number): number => 1;
 
 /** Palette/slot-style entry (r/g/b linear 0..255 + the 0..15 / 0..7 / 0|1 scales). */
 export type PaintEntry = Pick<PaletteEntry, 'r' | 'g' | 'b'> & Partial<PaletteEntry>;

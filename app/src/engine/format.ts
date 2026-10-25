@@ -133,7 +133,8 @@ export interface Blueprint {
 /**
  * v1 detection: the file AS ON DISK carried no `data.colors` (2024-25
  * corpus). That generation decides colour resolution (the built-in legacy
- * table + `legacySlot()` remap) and the wheel-droop display gate — nothing
+ * table (the built-in families + the v1.11.0 identity legacySlot seam) and
+ * the wheel-droop display gate — nothing
  * else: since v1.5.11 BOTH generations place components with the raw stored
  * quaternion (see toViewQuat). normalize() embeds data.colors at open, so
  * the generation is stamped on the live bp (`__legacyQ`) by the Editor from

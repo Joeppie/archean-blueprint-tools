@@ -1807,13 +1807,15 @@ if (location.search.includes('selftest')) {
       // v1 component colours are [slot,slot] palette INDICES, not dicts
       const lc = resolveColor(null, 48), lc2 = resolveColor(null, 53);
       const v1c = H.compColor({ colors: [48, 42] }, 'color1');
-      // v1 family-base remap: v1 polished starts at 80 (v2: 84) — slot 81 must
-      // resolve to v2-85 [16,16,16] in v1 files (the purple-block fix), and
-      // stay the magenta marker for modern files (255,0,255)
+      // v1 family-base law (v1.11.0, XenonViewer js/palette.js): the built-in
+      // families sit AT the v1 bases (polished starts at 80), so slot 81
+      // resolves to [16,16,16] for BOTH generations — no remap, no gap
+      // (the +4 shift + 84-base pair retired; the purple-block class stays
+      // dead because the table itself now matches the game's).
       const l3 = resolveColor(null, 81, true), l4 = resolveColor(null, 81);
       const ok9 = lc.r === 1 && lc.g === 8 && lc.b === 1 && lc2.b === 255
         && Math.abs(v1c.color.r - 1 / 255) < 1e-3 && Math.abs(v1c.color.g - 8 / 255) < 1e-3
-        && l3.r === 16 && l3.g === 16 && l3.b === 16 && l4.r === 255 && l4.g === 0 && l4.b === 255;
+        && l3.r === 16 && l3.g === 16 && l3.b === 16 && l4.r === 16 && l4.g === 16 && l4.b === 16;
       // Beacon reads as a beacon: the game's red flash is procedural (no lens
       // material in the gltf), so the viewer adds an emissive red lens at the
       // mast tip of every real/low beacon model (user: "beacon no longer
