@@ -2639,10 +2639,19 @@ Rules:
   Rationale: every live worktree is another session (or another zombie dev
   server) that can fork the graph or squat the user's ports.
 
-## Test-load stratification (v1.11.7 user rule: "sparsify the full test
-suite a bit … we need to do a strat of some sort to reduce the load/
-flakiness and quantity of tests being run using e2e. It's too much of a
-load right now for a hobby project")
+## Test-load stratification (v1.11.7 user rule; strategy moved to docs/TEST-PYRAMID.md, v1.12.1)
+
+**The pyramid laws (docs/TEST-PYRAMID.md, 2026-10-26 — the plan to kill most
+e2e tests):** L1 every law lives at the SMALLEST tier that can state it
+(pure logic → vitest; scene-graph pose/pick/census → vitest once P7.1
+lands; DOM/state wiring → jsdom component tests; ONLY pixels, real pointer
+plumbing, IndexedDB/network, dev-pair stay e2e — every new e2e test carries
+a `// e2e-tier because:` line). L2 fixtures beat corpora. L3 a flake is a
+RE-TIER signal: migrate the pin down a tier in the same session, never heal
+it with a longer sleep/jiggle-poll. L4 the pixel7 matrix is OPT-IN
+(playwright.config `testIgnore` — a spec joins the phone matrix only when
+it carries a device law). L5 migrations, not holes: an e2e leg dies in the
+SAME commit as its lower-tier replacement reproducing the green values.
 
 The full Playwright matrix (~20 specs × 2 viewports, engine-heavy scene
 boots on software GL) is a machine-eater — the v1.11.7 session proved the
@@ -2674,11 +2683,12 @@ in full-suite runs. Standing rules:
   law, jiggle-poll the assertion — see wire.spec's re-anchor loop + the
   BLOCKED-test poll) or gets SPARSIFIED (fewer viewports, capped scans).
   Never "fix" flakes by raising sleeps/timeouts.
-- **Sparsify backlog (cut these the next time the suite is touched):**
-  views.spec + phoneux.spec viewport matrices overlap panels.spec pixel
-  pins; pipes.spec + wire.spec hover-pick pins test the SAME seam (keep
-  wire's, leave pipes' to render shape); the xrayCensus fixture-selection
-  scan is paid once per spec, not per test.
+- **Sparsify backlog (v1.12.1 Phase 0 LANDED: the 16 zero-device-assert
+  specs left the pixel7 matrix — 394 → 283 runs; the ladder continues in
+  docs/TEST-PYRAMID.md):** the xrayCensus fixture-selection scan is paid
+  once per spec, not per test; views.spec/phoneux.spec/panels.spec pixel
+  overlap retires at Phase 3–4 (jsdom + device harness), pipes.spec +
+  wire.spec hover-pick seam retires at Phase 1 (keep the node raycast).
 
 ## Checkin gate (mandatory — the hook is the enforcement)
 Every commit passes `tests/pre-commit` (install once: `bash

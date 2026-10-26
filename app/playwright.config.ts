@@ -29,7 +29,17 @@ export default defineConfig({
   },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
-    { name: 'pixel7', use: { ...devices['Pixel 7'] } },
+    {
+      name: 'pixel7',
+      use: { ...devices['Pixel 7'] },
+      // L4 (docs/TEST-PYRAMID.md): the device matrix is OPT-IN. These specs
+      // contain ZERO device-conditional asserts — their pixel7 leg re-runs
+      // identical desktop laws at a smaller canvas, which is not coverage,
+      // it is a canvas-resize flake generator. A spec that GAINS a phone
+      // law removes its name from this list (or tags the phone test).
+      testIgnore:
+        /(app|asset-space|blockedit|blockplace|download|gizmo|hinge|liveedit|paint|pipes|propeller|savefidelity|subride|sym|views|wheels)\.spec\.ts$/,
+    },
   ],
   webServer: {
     // 0.0.0.0: IPv4 loopback stays exact (AGENTS dev-server binding rule)

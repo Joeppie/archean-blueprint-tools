@@ -395,6 +395,11 @@ scene.ts split (above), BatchedMesh (open P4, unchanged scope).
 
 ## P7 — Test-pyramid migration (planned 2026-10-26, from the v1.11.8 session)
 
+> **v1.12.1: this plan became the executable ladder with the retirement map
+> and the pyramid laws L1–L5 — see docs/TEST-PYRAMID.md (Phase 0 = the
+> pixel7 matrix sparsify, LANDED). P7.1/P7.2/P7.3a below stay the technical
+> detail for Phases 1/2/4.**
+
 we asked: "why test the viewer? Are we not constructing geometry and locations
 in 3D? Can we not test that?" — yes, and the honest boundary is a COUPLING,
 not a necessity: ~660 vitest tests already pin every geometry/location LAW on
