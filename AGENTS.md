@@ -3697,6 +3697,20 @@ Corollaries, always:
   'worked' — every suite bound to the invisible twin).
 
 ## Backlog
+
+- **v1.12.0 BACKLOG (the release-critical work items)** — per
+  docs/RELEASE-PROCEDURE.md: (1) the app build's dev-asset 404s on the
+  pages branch (index.html ships ~180 ?v= references to /viewer/… and
+  /testdata/… — make_landing --webroot publishes sibling trees; the pages
+  deploy must mirror them or strip the refs at build); (2) the app.spec
+  legacy-link pin (retire the link or serve the legacy viewer under the
+  app origin); (3) the `release` branch version strings are pinned at
+  v1.9.11 (main = v1.12.0) — run tests/run_tests.sh on release and
+  reconcile before the next cut; (4) app @slow tiers (gizmo/models/subgrid
+  + the two @slow truck wire specs) run before the next Y/X; (5) P7
+  test-pyramid migration (REWRITE.md): SceneGraph/interaction clocks out of
+  WebGL/React → unit tier; the x-ray fixture spec (P7.3a, probe-validated)
+  lands and RETIRES the truck wire specs.
 - **WIRE-mode claims vs physical truth (user 2026-10-20, Jimmy incident):**
   the root cause of the scrambled wiring — deletes leaving STALE flattened
   pipe/join indices — is FIXED (v1.5.12 `pruneCompRefs`, see the app bullet;
