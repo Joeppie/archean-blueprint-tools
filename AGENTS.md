@@ -1346,6 +1346,48 @@ topic + FORMAT).
   re-stamped to silent fresh. Bonus rule learned: corpus identity — catalog
   and /corpus route resolve the SAME file (one `craftFile()`), so a staleness
   flag can never describe a different file than the download would fetch.
+- **v1.11.1 PHONE WIDGET LAW + FULLSCREEN HELP + THE w KEY (we: "Ui elements
+  are in the way on phone when placing blocks, and I see the picked block
+  popup and the widget for changing blocks over the block itself which
+  prevents effective use, when I tap these elements shouldn't be in the
+  middle but off to the side/bottom"; "Help should be fullscreen window on
+  phone"; "W should toggle wireframe"; "go through descriptions in the ui
+  that might be outdated like the one about lift only mentioning
+  triangles")**: (1) THE PHONE EDGE-DOCK LAW — on <768 px every viewport
+  popup leaves the tap zone: the modebox (⊘ ✥ ⟳ ⤢ ▵ ⇄ 🎨) docks centred at
+  the viewport's TOP edge (desktop keeps its 48-px-above-the-click anchor),
+  the TOOLS placement label docks at the bottom edge above the build dock
+  (the v1.11 twin-warn precedent), and the 3-D widget SHRINKS:
+  `Engine.setGizmoSize(0.6)` (a size-1 TGC gizmo spans ~¼ of a phone screen
+  = a shield over the block being edited; desktop stays 1). `ringScreenPoint`
+  multiplies by the LIVE `g.size` (TGC's handle scale is factor·size/4), so
+  the ring-aim pins follow the shrink. Hook `gizmoSize()`. (2) HELP IS
+  FULLSCREEN on phones: `fixed inset-0` backdrop, dialog `h-full w-full
+  rounded-none`, safe-area insets, the Brave 7.5rem clear-zone is GONE there
+  (✕ lives in the title bar); desktop keeps the 86 dvh cap. LESSON: the
+  backdrop grid had NO explicit column — the implicit auto track grew to the
+  article's max-content (the keys table measured 2572 px wide on a 412 px
+  phone); `grid-cols-[minmax(0,1fr)]` is what makes `w-full` mean the
+  viewport. A fullscreen dialog leaves no backdrop to click, so
+  help.spec's backdrop-close leg is desktop-only (phones close via ✕/Esc).
+  (3) THE w KEY joins `g/o/h/5`: map `w: 'wire'` — it obeys the legacy
+  hull⇄wireframe MUTUAL EXCLUSIVITY (lighting the wire darkens the solids,
+  selftest excl=true); the ⚙ View row label line and keys.md carry it.
+  (4) THE LIFT COPY CAUGHT UP with v1.11: the empty state no longer says
+  "no hull triangles yet … Sphere skin" (the tool is Generate balloon now)
+  — it speaks the sealed-flood law (enclosed BLOCKS and/or a skin; walls
+  alone displace no lift) and the envelope row says `sealed blocks + skin`
+  vs `open skin` by the mode it computed in. (5) THE HELP TOPICS CAUGHT UP
+  with v1.11: interface.md's "side panel" section is gone (ℹ Info dock +
+  the bottom-dock table; the TopBar row lists the real tiles ⌖ ℹ ✎ ∿ ➤ ≋),
+  start.md counts SIX tiles, display.md's Mobile section describes the
+  edge-dock law and fullscreen help, its Wireframe row names the w key.
+  Pins: `e2e/phoneux.spec.ts` (@ui, both viewports: modebox top-dock vs
+  desktop anchor through boundingBoxes, gizmoSize 0.6/1, help fullscreen
+  fill vs capped desktop box, the w key through the ⚙ popover rows + h's
+  law, the lift empty-state text); LESSONS: e2e reading the ⚙ rows must
+  OPEN the popover first (`toggle-options` — ViewOpts unmounts when closed),
+  and the pixel7 drawer of the v1.10 era is GONE (v1.11 dock-only layout).
 - **v1.11 PLACEMENT REWRITE — place-then-transform + TRIANGLE PINS (we:
   "I am unhappy with how placing blocks work. The same for triangles. Remove
   the existing functionality and do a total rewrite; the bottom bar should be

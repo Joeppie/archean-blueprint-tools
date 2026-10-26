@@ -10,29 +10,27 @@ Tags: interface ui panel topbar modes options settings widgets layout tabs cost 
 | Edit ▾ | Undo / Redo with their live enabled state; the vessel-information rows that are still TODO |
 | Tools ▾ | the generated batch tools: Replace all…, Blocks → hull triangles…, Generate balloon… (with the tail rudder + aileron section) |
 | Help ▾ | this manual |
-| Mode tiles | View · Edit · Wire · Flight · Wind — the workspace split |
+| Mode tiles | ⌖ View · ℹ Info · ✎ Modify · ∿ Wire · ➤ Flight · ≋ Wind |
 | ● Save | download the file; the gold ● means unsaved changes |
-| ▤ | collapse / expand the left parts panel (also the ‹ / › bookmark tab on its edge) |
-| ⚙ View | the view window: sky backdrop (⊘ none / desert / sky / hangar — everything in the backdrop manifest; **sky** boots by default), orthographic projection, hull, wireframe, labels, gizmo, real models, static info, mesh quality |
+| ⚙ View | the view window: sky backdrop (⊘ none / desert / sky / hangar — everything in the backdrop manifest; **sky** boots by default), orthographic projection, hull, wireframe (w), labels, gizmo, real models, static info, mesh quality |
 
-## The side panel
+## The Info dock (ℹ Info tile)
 
-The panel is the parts context column (on phones it is a drawer — the ▤
-button opens it; the canvas stays usable beside it):
+ℹ Info opens the vessel-info dock (⌖ View is the same ship with a clean
+canvas — clicks select NOTHING there):
 
-* **Parts list** — two tabs: *by type* and *by subgrid*; one search filters
-  both; groups start collapsed and a click on a row expands and reveals it.
-  Double-click flies the camera to the part. In the **+ Blocks** mode the
-  list becomes the parts **catalog** — tap a part to hold it, then tap a
-  surface on the craft.
-* **Inspector** — the selection's position/orientation sliders, `data` rows,
-  Paint section, Delete. Every field applies LIVE (one model rebuild per
-  frame, no scene reload).
-* **VesselStats** (View mode) — mass & CoM, census, heaviest classes, the
-  collapsible ⚖ Lift row and the **Build cost** row (every part, block, hull
-  triangle, cable, frame beam and strut unfolded through the game's crafter
-  recipes to raw ores/molecules — the craft-wide shopping list on top, then a
-  section per species, each line's own recipe chain one click down).
+* **VesselStats** — mass & CoM, census, heaviest classes, the collapsible
+  ⚖ Lift row (the SEALED envelope: enclosed blocks + skin flood-checked
+  from outside, per-gas lift, margin, equilibrium and the altitude ladder)
+  and the **Build cost** row (every part, block, hull triangle, cable,
+  frame beam and strut unfolded through the game's crafter recipes to raw
+  ores/molecules — the craft-wide shopping list on top, then a section per
+  species, each line's own recipe chain one click down).
+* The **parts list** (by type / by subgrid, one search, collapsed groups,
+  double-click flies the camera) and the **Inspector** (position/orientation
+  via the gizmo, `data` rows, Paint section, Delete — every field applies
+  LIVE, one model rebuild per frame, no scene reload) live in the
+  **+ Parts** workspace below.
 
 ## The build dock (Edit mode)
 
@@ -77,9 +75,11 @@ them back), and the **editor of the selected item**.
 ## Viewport furniture
 
 * **⊘ ✥ ⟳ ⤢ ⇄ 🎨** mode widget — pops at a clicked part or freshly placed
-  block: no gizmo / move / rotate / **stretch (blocks only)** / mirror
-  indicator / paint window.
+  block (desktop; on phones it docks at the viewport's TOP edge so it never
+  covers what you just tapped): no gizmo / move / rotate / **stretch (blocks
+  only)** / mirror indicator / paint window.
 * **Static info card** (bottom-left) — mass & CoM; toggle under ⚙, ✕ closes.
 * **Camera cluster** (bottom-right) — reframe the vessel / reset the view.
 * **Ghost hints** — placement states (held part, brush ghost, skin Build/
-  Cancel label) always print a caption at the top.
+  Cancel label) always caption beside the ghost on desktop, docked at the
+  viewport's bottom edge on phones.

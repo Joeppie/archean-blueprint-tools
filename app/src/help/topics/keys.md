@@ -12,6 +12,7 @@ Tags: keyboard shortcuts keys mouse controls orbit pan zoom delete escape shift 
 | g | grid on/off |
 | o | occupancy boxes on/off |
 | h | hull solids ⇄ wireframe — in wireframe you CLICK THROUGH the hull to what is behind it ("click what you SEE") |
+| w | wireframe OVERLAY on/off (the ⚙ View ▸ wireframe row; a lit wireframe darkens the hull solids — hull ⇄ wireframe stay mutually exclusive, the 'h' law) |
 | 5 | projection: perspective ⇄ ORTHOGRAPHIC (parallel) — the same toggle as ⚙ View ▸ orthographic |
 | Shift (held) | snaps: gizmo moves to 0.25 m cells, rotations to 15°, subgrid joint handles snap, block ghost = mirror continuation |
 | Esc | close the top window → cancel a placement drag/skin → drop a held part → leave the triangle PINS → deselect |

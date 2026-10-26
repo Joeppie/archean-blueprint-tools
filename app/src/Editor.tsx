@@ -861,7 +861,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       // axis, [ ] grow, s square) are GONE — every click lands a 1×1×1
       // block and the WIDGET scales it after (✥/⟳/⤢). Size lives in the
       // dock's THIS BLOCK rows and on the ⤢ gizmo, not on the brush.
-      const map: Record<string, keyof ViewOptions> = { g: 'grid', o: 'occ', h: 'hull' };
+      const map: Record<string, keyof ViewOptions> = { g: 'grid', o: 'occ', h: 'hull', w: 'wire' };
       if (map[e.key]) {
         const cur = engineRef.current?.getOptions();
         if (cur) toggleOpt(map[e.key]!, !cur[map[e.key]!]);

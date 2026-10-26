@@ -5,10 +5,11 @@
 //
 // The content is the markdown corpus in src/help/topics/ (registry + word
 // search: src/help/manual.ts); engine/markdown.ts renders a topic to HTML,
-// pipe tables included. The window reuses the tool-dialog ergonomics the
-// user already approved: capped at 86 dvh, draggable title bar, smooth
-// scrolling body, the phone-safe bottom clear zone, Esc/✕/backdrop to close.
-// Layout: topic rail (search-filtered, scored) + the article.
+// pipe tables included. On phones the window is FULLSCREEN (v1.11.1 user
+// rule); on desktop it reuses the tool-dialog ergonomics the user already
+// approved: capped at 86 dvh, draggable title bar, smooth scrolling body,
+// Esc/✕/backdrop to close. Layout: topic rail (search-filtered, scored) +
+// the article.
 // ---------------------------------------------------------------------------
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { renderMarkdown } from '../engine/markdown';
@@ -77,12 +78,19 @@ export default function HelpDialog(p: { onClose: () => void }) {
   const headUp = () => { dragRef.current = null; };
 
   return (
+    // v1.11.1 (we: "Help should be fullscreen window on phone"): below md
+    // the dialog FILLS the backdrop (rounded-none, no 86 dvh cap, no phone
+    // clear-zone reserve — the ✕ sits in the title bar, nothing hides behind
+    // a browser action row); ≥ md keeps the approved tool-dialog chrome
+    // exactly (86 dvh cap, p-3, draggable).
     <div data-testid="help-backdrop"
-      className="absolute inset-0 z-40 grid grid-rows-[minmax(0,1fr)] place-items-center bg-black/60 p-3
-                 pb-[max(0.75rem,calc(env(safe-area-inset-bottom)_+_7.5rem))] md:pb-3"
+      className="fixed inset-0 z-40 grid grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)]
+                 place-items-center bg-black/60
+                 p-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] md:p-3 md:pt-3 md:pb-3"
       onMouseDown={e => { if (e.target === e.currentTarget) p.onClose(); }}>
       <div ref={boxRef} data-testid="help-dialog" role="dialog" aria-label="Manual"
-        className="ksp-win flex max-h-[min(86dvh,100%)] w-[860px] max-w-[95vw] flex-col rounded-lg px-4 py-3"
+        className="ksp-win flex h-full w-full max-h-full max-w-none flex-col rounded-none px-3 py-2
+                   md:h-auto md:max-h-[min(86dvh,100%)] md:w-[860px] md:max-w-[95vw] md:rounded-lg md:px-4 md:py-3"
         style={drag ? { transform: `translate(${drag.x}px, ${drag.y}px)` } : undefined}>
         {/* title bar = the drag handle */}
         <div data-testid="help-drag"

@@ -1,5 +1,5 @@
 # Display and view options
-Tags: display options hull wireframe labels opacity real models quality static info fog adapters connectors ground coord coordinate readout cursor shift vertical plane measure height axes axis x y z up backdrop sky desert hangar goegap kloofendal hangar_interior attribution credit panorama equirectangular orthographic ortho projection parallel camera
+Tags: display options hull wireframe labels opacity real models quality static info fog adapters connectors ground coord coordinate readout cursor shift vertical plane measure height axes axis x y z up backdrop sky desert hangar goegap kloofendal hangar_interior attribution credit panorama equirectangular orthographic ortho projection parallel camera phone mobile fullscreen help manual popup dock compact gizmo widget
 
 The **⚙ View** window (top right) collects the display state; the same
 toggles have keys where it matters.
@@ -9,7 +9,7 @@ toggles have keys where it matters.
 | Sky backdrop | what you see THROUGH and BEYOND the build pad: **⊘** (the struck-through button = no panorama, the flat sky colour) plus every panorama the app enumerates (see credits below) — **desert** (Goegap's red sand under a big sky), **sky** (a bright partly-cloudy pure sky) and **hangar** (inside an aircraft hangar — roof overhead, floor below; **sky** is what a fresh session starts on) — surface panoramas, so it's SKY overhead and TERRAIN below with the horizon at eye level, drawn on a dome that follows the camera and looks right in both perspective and orthographic. The ground pad itself is see-through now; the grid lines and ±axis marks are all that render of it |
 | Orthographic (5) | parallel projection — no perspective shrink, parallel edges stay parallel: align, measure and square up blueprints like a CAD sheet. The framing survives the swap both ways; wheel zoom scales the ortho sheet |
 | Hull (h) | block + triangle solids on/off — OFF means WIREFRAME and click-through |
-| Wireframe | the lattice wire overlay (mutually exclusive with hull solids) |
+| Wireframe (w) | the lattice wire overlay (mutually exclusive with hull solids — lighting the wire darkens the solids) |
 | Hull opacity | fades blocks, skin AND wire together — see through the shell without hiding it |
 | World axes | in the file and the viewer: **x** lateral, **y = UP**, **z** longitudinal (the nose is −z) — the FLAT plane is x–z (Blender's own UI is z-up; this format is not). The pad shows it: the x = 0 grid line is RED, the z = 0 line BLUE, both labelled +/− at their ends |
 | Grid (g) | the ground grid — it FITS the build and its granularity rides zoom (0.25 m cells → 1.25 → 2.5 → 12.5 m as you pull back; majors every 5); the pad sits just under the craft's lowest geometry and is SEE-THROUGH (an invisible pick surface plus the drawn lines — the backdrop shows through) |
@@ -37,8 +37,12 @@ toggles have keys where it matters.
 
 Everything is touch-first: the mode bar wraps to its own row, menus and
 dialogs cap to the phone screen, tool dialogs sit clear of Brave's floating
-bottom bar, and the parts panel is a drawer (tap the dimmed viewport or ✕
-to dismiss).
+bottom bar. Since v1.11 the catalog, parts list, inspector and the mode
+workspaces ALL live in the wide bottom dock (no side drawer), and the tap
+popups stay OUT of the way (v1.11.1): the mode widget (⊘ ✥ ⟳ ⤢) docks at the
+viewport's TOP edge instead of over the part you just tapped, the placement
+label and the ⚠/ℹ twin popups dock at its bottom edge over the dock, the 3-D
+gizmo is drawn compact, and the Help manual is a FULLSCREEN window.
 
 ## Sky backdrop credits
 

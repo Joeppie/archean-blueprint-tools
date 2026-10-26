@@ -100,6 +100,9 @@ declare global {
     triGizmo: () => ReturnType<Engine['triGizmoState']>;
     triShift: (d: [number, number, number]) => boolean;
     triRotate: (axis: 'x' | 'y' | 'z', deg: number) => boolean;
+    /** v1.11.1 PHONE WIDGET FOOTPRINT: the live TGC gizmo size (phones run
+     *  0.6 — pins assert the shrink landed, ringScreenPoint follows it) */
+    gizmoSize: () => number;
   } }
 }
 
@@ -223,6 +226,7 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
       triGizmo: () => engine.triGizmoState(),
       triShift: (d) => engine.triGizmoShift(d),
       triRotate: (axis, deg) => engine.triGizmoRotate(axis, deg),
+      gizmoSize: () => engine.gizmoSizeNow(),
     };
     onEngine?.(engine);
     return () => {
@@ -305,6 +309,14 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
     addEventListener('resize', h);
     return () => removeEventListener('resize', h);
   }, []);
+  // v1.11.1 (we: "I see the picked block popup and the widget for changing
+  // blocks over the block itself which prevents effective use, when I tap
+  // these elements shouldn't be in the middle but off to the side/bottom"):
+  // phones shrink the 3-D widget (a size-1 TGC gizmo spans ~¼ of a phone
+  // screen = a shield over the block being edited); desktop keeps size 1.
+  useEffect(() => {
+    engineRef.current?.setGizmoSize(mobile ? 0.6 : 1);
+  }, [mobile]);
   useEffect(() => {
     const h = setInterval(() => {
       const e = engineRef.current, box = hostRef.current?.getBoundingClientRect();
@@ -566,9 +578,13 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
             pickClick(e);
         }} />
       {widget && (
+        // v1.11.1 PHONE: the popup docks at the viewport's TOP edge, centred
+        // (the twin-warn v1.11 precedent: popups go off to the side, not on
+        // top of what you just tapped). Desktop keeps the legacy anchor 48 px
+        // above the click.
         <div data-testid="modebox"
           className="ksp-win absolute z-20 flex -translate-x-1/2 gap-1 rounded p-1"
-          style={{ left: widget.x, top: Math.max(8, widget.y - 48) }}>
+          style={mobile ? { left: '50%', top: 8 } : { left: widget.x, top: Math.max(8, widget.y - 48) }}>
           {([['off', '⊘', 'hide gizmo'], ['translate', '✥', 'move'], ['rotate', '⟳', 'rotate']] as const).map(([m, ic, t]) => (
             <button key={m} title={t} data-testid={`mode-${m}`} onClick={() => setMode(m)}
               className={`ksp-btn grid h-8 w-9 place-items-center text-[15px] leading-none ${gmode === m ? 'on' : ''}`}>
@@ -639,11 +655,16 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
         // v1.7.2 adds ⟲x/⟲y/⟲z quarter-turns (the lattice only stores 90°
         // steps — quarter-snap BY LAW, not taste) and ↩ back to the tool
         // dialog with the form intact ("without starting from scratch").
+        // v1.11.1 PHONE: the label docks at the viewport's bottom edge (over
+        // the build dock, the twin-warn precedent) — mid-canvas it sat ON the
+        // ghost and swallowed taps on the ✕/✔ row (we: "when I tap these
+        // elements shouldn't be in the middle").
         <div data-testid="place-label"
           className={`ksp-win absolute z-30 flex max-w-[min(96vw,30rem)] -translate-x-1/2 flex-wrap
                       items-center gap-1.5 rounded
                       px-2 py-1 text-[10px] leading-none ${place.valid ? 'text-[#9cffd4]' : 'text-[#ff9c9c]'}`}
-          style={{ left: place.x, top: Math.max(8, place.y + 18) }}>
+          style={mobile ? { left: '50%', top: 'auto', bottom: 'calc(38% + 10px)' }
+            : { left: place.x, top: Math.max(8, place.y + 18) }}>
           <span>◍ {place.tris ? `${place.tris} triangles` : `${place.blocks} blocks`}{place.valid ? '' : ' — collides'}</span>
           {(['x', 'y', 'z'] as const).map(ax => (
             <button key={ax} data-testid={`place-rot-${ax}`} title={`turn 90° about world ${ax.toUpperCase()} (lattice quarter-turn)`}

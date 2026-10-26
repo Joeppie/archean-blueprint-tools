@@ -4,10 +4,14 @@
 // see performance/weight limit at altitudes/equilibrium. Archean uses real
 // world data for this").
 //
-// The envelope is the craft's OWN hull-triangle skin (engine/atmo
-// envelopeVolume — the exact FORMAT lattice, divergence-theorem volume),
-// the mass is the game's own mass model (engine/mass.ts — the same number
-// the StaticInfo card shows, hull SKIN included since v1.7.1), and the
+// The envelope is the SEALED volume (v1.11, engine/atmo sealedEnvelope-
+// Volume): the craft's block cells and voxelised skin triangles are flooded
+// from outside, and what the flood cannot reach is the envelope — a block
+// hull reports lift too. Only a skin the flood cannot close falls back to
+// the divergence sum (engine/atmo envelopeVolume — the exact FORMAT lattice,
+// divergence-theorem volume). The mass is the game's own mass model
+// (engine/mass.ts — the same number the StaticInfo card shows, hull SKIN
+// included since v1.7.1), and the
 // air is the real ISA table (the game floats craft on real-world numbers).
 // A collapsible row under the panel header: one glance shows which gas at
 // which altitude still carries the craft — open it for the per-altitude
@@ -73,14 +77,18 @@ export function LiftWidget(p: { engine: Engine | null; bp: Blueprint; rev: numbe
         <div className="px-3 pb-2 text-[11px] leading-snug">
           {env.m3 === 0 ? (
             <div className="text-ink-dim">
-              no hull triangles yet — the gas envelope is measured from the
-              closed hull SKIN (build one with Tools ▸ Sphere skin, or
-              convert blocks with Tools ▸ Blocks → hull triangles).
+              nothing sealed yet — the envelope is the volume the outside
+              cannot reach: <b>enclosed blocks</b> and/or a closed hull
+              SKIN (wall the volume in, build a skin with Tools ▸ Generate
+              balloon, or convert blocks with Tools ▸ Blocks → hull
+              triangles). Walls alone displace no lift.
             </div>
           ) : (
             <div data-testid="lift-body" className="space-y-1.5">
               <div className="flex justify-between gap-2 text-ink-dim">
-                <span>envelope (hull skin, {env.tris} triangles)</span>
+                <span>{(env as { sealed?: boolean }).sealed
+                  ? `envelope (sealed blocks + skin, ${env.tris} triangles)`
+                  : `envelope (open skin, ${env.tris} triangles)`}</span>
                 <b data-testid="lift-volume" className="tabular-nums text-ink">{fmt(env.m3, 1)} m³</b>
                 {(env as { sealed?: boolean }).sealed &&
                   <span data-testid="lift-sealed" className="ml-1 text-[9px] uppercase tracking-wide text-emerald-400"

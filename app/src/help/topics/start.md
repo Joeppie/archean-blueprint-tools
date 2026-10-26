@@ -3,15 +3,15 @@ Tags: start gallery open new craft place save first steps begin
 
 The Inspector opens on the **gallery** — every craft in the corpus as a card.
 Click a card to inspect it; **New craft** (gallery only) starts an empty one.
-Inside a craft, the top bar holds *File · Edit · Tools · Help* plus five mode
-tiles: **View · Edit · Wire · Flight · Wind**.
+Inside a craft, the top bar holds *File · Edit · Tools · Help* plus six mode
+tiles: **View · Info · Modify · Wire · Flight · Wind**.
 
 ## The thirty-second tour
 
 1. **View** (⌖) — inspect only. Orbit with the left mouse drag, zoom with the
-   wheel, pan with the right drag. The side panel shows the vessel's amounts:
-   mass, centre of mass, part census, the ⚖ Lift widget. Clicks select
-   *nothing* here — that is deliberate.
+   wheel, pan with the right drag. Clicks select *nothing* here — that is
+   deliberate. **Info** (ℹ) opens the vessel's amounts beside the same clean
+   canvas: mass, centre of mass, part census, the ⚖ Lift widget, Build cost.
 2. **Edit** (✎) — the editing mode, with ONE mode control in its bottom
    dock (v1.11 — one tri-state row, not nested flips):
    * **✎ Modify** — clicking the craft *selects anything*: a part gets the

@@ -3251,6 +3251,16 @@ void main() {
     g.setTranslationSnap(on ? 0.25 : null);
     g.setRotationSnap(on ? 15 * DEG : null);
   }
+  /** v1.11.1 PHONE WIDGET FOOTPRINT (we: "the widget for changing blocks
+   *  over the block itself … prevents effective use"): a size-1 TGC gizmo
+   *  spans ~¼ of the viewport — fine on a desktop screen, a shield over the
+   *  block on a phone. Phones shrink the widget; ringScreenPoint reads the
+   *  LIVE g.size, so the ring-aim math follows the shrink automatically. */
+  setGizmoSize(s: number) {
+    this.gizmo?.setSize(s);
+    this.invalidate();
+  }
+  gizmoSizeNow(): number { return this.gizmo?.size ?? 1; }
   gizmoState(): { mode: 'off' | 'translate' | 'rotate' | 'scale'; ci: number; shown: boolean } {
     const g = this.gizmo;
     return {
@@ -3798,7 +3808,9 @@ void main() {
     const factor = (cam as { isOrthographicCamera?: boolean }).isOrthographicCamera
       ? (oc.top - oc.bottom) / oc.zoom
       : dist * Math.min(1.9 * Math.tan(Math.PI * ((cam as { fov?: number }).fov ?? PERSP_FOV) / 360), 7);
-    const r = factor / 4 * 0.5;
+    // × the LIVE gizmo size (phones shrink the widget, v1.11.1 — TGC's
+    // handle scale is factor*size/4, so the DRAWN ring shrinks with it)
+    const r = factor / 4 * 0.5 * (g.size ?? 1);
     const t = deg * DEG;
     const p = this.gizmoProxy.getWorldPosition(new Vector3())
       .addScaledVector(u, Math.cos(t) * r).addScaledVector(v, Math.sin(t) * r);

@@ -86,6 +86,11 @@ test.describe('help manual @ui', () => {
     await openHelp(page);
     await page.getByTestId('help-close').click();
     await expect(page.getByTestId('help-dialog')).toHaveCount(0);
+    // v1.11.1: the PHONE manual is FULLSCREEN (we: "Help should be
+    // fullscreen window on phone") — a fullscreen dialog covers the
+    // backdrop, so closing there is ✕ and Esc; the backdrop-click path is
+    // the desktop window's.
+    test.skip(test.info().project.name === 'pixel7', 'fullscreen dialog leaves no backdrop to click');
     await openHelp(page);
     await page.getByTestId('help-backdrop').click({ position: { x: 4, y: 4 } });
     await expect(page.getByTestId('help-dialog')).toHaveCount(0);
