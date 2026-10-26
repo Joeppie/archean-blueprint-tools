@@ -26,6 +26,15 @@ export default defineConfig({
       cookies: [],
       origins: [{ origin: URL, localStorage: [{ name: 'archean-app-debug', value: '1' }] }],
     },
+    // v1.12.1 BOOT COST: render on the AMD iGPU via ANGLE-Vulkan — the
+    // same pin tests/run_tests.sh uses (VK_ICD_FILENAMES hides the NVIDIA
+    // ICD ENTIRELY, so the discrete GPU serving the AI models is never
+    // contended). Headless default = SwiftShader software GL: the scene's
+    // first frames cost hundreds of ms more per boot.
+    launchOptions: {
+      args: ['--use-gl=angle', '--use-angle=vulkan'],
+      env: { ...process.env, VK_ICD_FILENAMES: '/usr/share/vulkan/icd.d/radeon_icd.json' },
+    },
   },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
@@ -43,10 +52,20 @@ export default defineConfig({
   ],
   webServer: {
     // 0.0.0.0: IPv4 loopback stays exact (AGENTS dev-server binding rule)
-    // and the run is also browsable over Tailscale while it lasts
-    command: `npm run dev -- --host 0.0.0.0 --port ${PORT} --strictPort`,
+    // and the run is also browsable over Tailscale while it lasts.
+    // v1.12.1 BOOT COST: the suite drives the PRODUCTION build through
+    // `vite preview` — a handful of hashed chunks per boot instead of the
+    // dev server's 300-module transform waterfall. The corpus plugin's
+    // shared handler serves /corpus, /models, /atlas, /viewer and /testdata
+    // on preview too (the Pages layout recipe), so every route behaves as
+    // in dev. Build cost is paid ONCE per run; e2e also exercises the
+    // SHIPPED bundle. E2E_DEV=1 falls back to the dev server (fast
+    // iteration on a single spec while editing source).
+    command: process.env.E2E_DEV
+      ? `npm run dev -- --host 0.0.0.0 --port ${PORT} --strictPort`
+      : `npm run build && npm run preview -- --host 0.0.0.0 --port ${PORT} --strictPort`,
     url: URL,
     reuseExistingServer: !process.env.CI,
-    timeout: 60_000,
+    timeout: 180_000,
   },
 });
