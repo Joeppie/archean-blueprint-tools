@@ -2711,7 +2711,23 @@ in full-suite runs. Standing rules:
   && vite preview`, corpus routes via the plugin's preview hook,
   `E2E_DEV=1` escape hatch) + ANGLE-Vulkan on the iGPU (radeon_icd
   pinned, NVIDIA hidden — the tests/run_tests.sh trick); matrix
-  394 → **215 runs** (fusion waves + fixture-first).
+  394 → **215 runs** (fusion waves + fixture-first). workers 3 → 4
+  (the "3 keeps the run honest" number was SwiftShader-era; on the
+  preview+iGPU stack 4 measured −15 % wall, 5 a plateau, same green).
+- **WARM-BOOT FINDING (v1.12.1, we: "can we re-use and clean a headless
+  chrome to reduce the per-test ~400 ms?"): measured — context+page
+  creation is ~50 ms/test (not 400; +2 tests = +0.1 s), chromium launch
+  is once-per-worker ALREADY, so the per-test cost is the ~900 ms app
+  boot, which is Playwright's isolation model by design: the built-in
+  `page` fixture refuses worker-scope sharing (type-level), and
+  describe.serial shares the CONTEXT only — each test still gets a
+  fresh page (a warm-page pilot measured exactly zero: the "warm" path
+  silently never ran; the in-app card-swap only pays if the page truly
+  persists). The sanctioned amortizer is the CHAIN LAW: one boot per
+  compatible state group is how Playwright wants boots shared. The
+  in-app craft swap (back-to-gallery → card) stays available as the
+  scene-reload primitive INSIDE chains (no bundle re-parse within one
+  page's life).
 - **Sparsify backlog (v1.12.1 Phase 0 LANDED: the 16 zero-device-assert
   specs left the pixel7 matrix — 394 → 283 runs; the ladder continues in
   docs/TEST-PYRAMID.md):** the xrayCensus fixture-selection scan is paid

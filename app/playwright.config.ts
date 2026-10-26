@@ -14,8 +14,11 @@ export default defineConfig({
   // this box also serves the user's dev servers + AI models: the suite is
   // ENGINE-heavy (every test boots a three.js scene), and the lazy Editor
   // chunk makes cold opens burst-load. 6 parallel workers starved rAF and
-  // the 5 s default assertion (flake-fest); 3 keeps the run honest.
-  workers: 3,
+  // the 5 s default assertion (flake-fest) — that was the SWIFTSHADER era.
+  // v1.12.1: boots run the production bundle on iGPU GL (ANGLE-vulkan) —
+  // measured 3→4 workers cuts the wall ~15 %, 5 is a plateau (32 cores),
+  // no added flakes on the same slice.
+  workers: 4,
   use: {
     baseURL: URL,
     trace: 'retain-on-failure',
