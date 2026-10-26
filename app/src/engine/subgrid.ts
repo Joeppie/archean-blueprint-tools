@@ -103,8 +103,13 @@ export function subMasterEntries(bp: Blueprint): Map<number, SubMasterEntry[]> {
       top: m?.top ?? -1,
       mcPath: m?.path,
     };
-    const bi = bcEntry.top;
-    if (bi < 0) continue;                              // nested Build: unused host
+    // v1.11.6: a join whose slave is a NESTED Build rides the HOSTING
+    // top-level group's joint chain (path[2] = the top-level ancestor) —
+    // landing-gear subassemblies animate with their bay (the Dorito
+    // front wheels). Depth-1 entries keep their own key.
+    const bi = bcEntry.top >= 0 ? bcEntry.top
+      : bcEntry.path && bcEntry.path.length > 3 ? bcEntry.path[2] as number : -1;
+    if (bi < 0) continue;
     if (!byBuild.has(bi)) byBuild.set(bi, []);
     byBuild.get(bi)!.push(ent);
   }

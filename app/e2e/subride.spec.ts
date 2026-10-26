@@ -119,3 +119,40 @@ test.describe('subgrid rides its joint @subgrid @slow', () => {
     });
   }
 });
+
+test.describe('nested subgrid rendering @subgrid', () => {
+  test('a SUBGRID OF A SUBGRID renders (the Dorito SSTO front wheels)', async ({ page }) => {
+    // we: "there are wheels that do not seem to render where the front
+    // wheels of the doritos craft should be, is this because they are a
+    // subgrid of a subgrid?" — YES: the file nests Builds three deep and
+    // the renderer used to skip Build entries inside subgrid content.
+    await page.goto('/?craft=3308603448');
+    await page.waitForFunction(() => {
+      const eng = (window as never as { __ARCHEAN__?: { engine?: {
+        blueprint?: unknown; subStats?: () => { groups: number } } } }).__ARCHEAN__?.engine;
+      return !!eng?.blueprint && (eng.subStats?.().groups ?? 0) > 0;
+    }, null, { timeout: 120_000 });
+    const r = await page.evaluate(() => {
+      const eng = (window as never as { __ARCHEAN__: { engine: {
+        blueprint: { data: { components: Record<string, never>[] } };
+        subStats: () => { groups: number; parts: number } } } }).__ARCHEAN__.engine;
+      const comps = eng.blueprint.data.components as {
+        type?: string; data?: { blocks?: unknown[]; components?: never[]; triangles?: unknown[] } }[];
+      let parts = 0;
+      const walk = (list: { type?: string; data?: { components?: never[] } }[]) => {
+        for (const c of list) {
+          if (c.type === 'Build') walk((c.data?.components ?? []) as typeof list);
+          else parts++;
+        }
+      };
+      for (const c of comps) if (c.type === 'Build') walk((c.data?.components ?? []) as never[]);
+      const groups = comps.filter(c => c.type === 'Build'
+        && ((c.data?.blocks?.length ?? 0) + (c.data?.components?.length ?? 0) + (c.data?.triangles?.length ?? 0)) > 0).length;
+      return { parts, groups, stats: eng.subStats() };
+    });
+    expect(r.parts, 'the file nests deep content (wheels two Builds deep)')
+      .toBeGreaterThanOrEqual(30);
+    expect(r.stats.parts, 'EVERY nested part renders, at any depth').toBe(r.parts);
+    expect(r.stats.groups, 'one group per top-level Build with content').toBe(r.groups);
+  });
+});

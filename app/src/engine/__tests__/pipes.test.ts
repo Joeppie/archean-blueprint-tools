@@ -433,11 +433,15 @@ describe('THE DRAPE LAW (v1.11.3: cables hang by their rest length)', () => {
     // bars = the 2 axial leads + the 3 recorded route bars
     expect(net.segs.length).toBe(5);
     expect(checkLeads(net).bad, 'the plugs lead ALONG the stub axes').toBe(0);
-    // every recorded bar runs along a file axis — a hanging chain would not
-    for (const s of net.segs.slice(1, -1)) {
+    // the two recorded route bars run along file axes (a hanging chain
+    // would not); the ONE diagonal is the tail bar re-aimed at the moved
+    // plug's neck — the re-seat law, not a drape
+    for (const s of net.segs.slice(1, 3)) {
       const d = [Math.abs(s.b[0] - s.a[0]!), Math.abs(s.b[1] - s.a[1]!), Math.abs(s.b[2] - s.a[2]!)];
       expect(Math.max(...d) / (d[0]! + d[1]! + d[2]!), 'axis-aligned bar').toBeGreaterThan(0.999);
     }
+    const tail = net.segs[3]!;
+    vec(tail.b, [1.5, 0, 1.06]);                        // the b-neck (tip 1.15 + outward lead 0.09)
   });
   test('FLEXIBLE pairs hang by their length; a moved part re-hangs them', () => {
     const FLEX2: Pipe = {

@@ -444,3 +444,27 @@ describe('BENCH CENSUS — the game’s baked transforms obey the law on the who
     expect(exact + mirrored + drifted).toBe(baked);
   });
 });
+
+// v1.11.6 SUBGRID OF A SUBGRID: the Dorito SSTO nests Builds three deep
+// (front wheels two Builds inside a landing bay). Joins whose slave Build
+// is nested must key to the HOSTING top-level group (path[2]) — the gear
+// subassembly animates with its bay — and none may be dropped.
+test('v1.11.6: joins to NESTED Builds key to the hosting top-level group', () => {
+  const bp = JSON.parse(readFileSync(craftFile('3308603448'), 'utf8')) as Blueprint;
+  const joins = bp.data.composite_builds ?? [];
+  expect(joins.length).toBeGreaterThanOrEqual(20);
+  // expected = joins whose slave Build resolves in the flat list (deleted
+  // refs drop by design); under the v1.11.6 rule NESTED slaves key to the
+  // host and must NOT drop
+  const flat = flattenComponents(bp);
+  const expected = joins.filter(j => {
+    const e = flat[j.slaveBuildId];
+    return !!e && e.comp.type === 'Build'
+      && (e.top >= 0 || (Array.isArray(e.path) && e.path.length > 3));
+  }).length;
+  const byBuild = subMasterEntries(bp);
+  const total = [...byBuild.values()].reduce((n, v) => n + v.length, 0);
+  expect(expected, 'the fixture carries NESTED slave joins').toBeGreaterThan(0);
+  expect(total, 'every resolvable join keys to a group (nested ride the chain)')
+    .toBe(expected);
+});

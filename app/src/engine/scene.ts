@@ -438,6 +438,8 @@ export class Engine {
   private subGroups = new Map<number, Group>();
   private subJrefs = new Map<number, JRef[]>();
   private subCount = 0;
+  // v1.11.6: nested part stand-ins RENDERED (recursion counts nested Builds)
+  private subPartCount = 0;
 
   // ---------- symmetry twins (engine/sym.ts) ----------
   private symIdx = new Map<number, TwinPair[]>();
@@ -1187,6 +1189,13 @@ void main() {
   /** Re-run ONLY the cable pass (no scene reload): a moved part's cached
    *  pipe route re-anchors to its live socket. Cheap enough to run on the
    *  Editor's edit-debounce — merges ≤ a few thousand short bars. */
+  /** v1.11.6: subgrid render census (the nested-recursion pin): groups =
+   *  top-level Build groups, parts = nested part stand-ins RENDERED
+   *  (recursion through nested Builds counts at every depth). */
+  subStats() {
+    return { groups: this.subGroups.size, parts: this.subPartCount };
+  }
+
   rebuildPipes() {
     if (!this.bp) return;
     for (const m of this.pipeMeshes) {
@@ -1984,6 +1993,7 @@ void main() {
     const masters = subMasterEntries(bp);
     const manifest = this.atlasRef?.manifest ?? null;
     let sn = 0;
+    this.subPartCount = 0;
     bp.data.components.forEach((c, bi) => {
       const nested = (c.data?.['components'] as BlueprintComponent[] | undefined) ?? [];
       // v1.9 BALLOON fins: a triangle-only Build (the fin panels) renders
@@ -2013,17 +2023,36 @@ void main() {
       // references (the top level), which is why Chip's NEXT file (and
       // every file all along) showed the pink doors unchanged.
       const nestedPal = (c.data?.['colors'] as Blueprint['data']['colors'] | undefined) ?? null;
-      const solids = buildSolids({
-        data: { blocks, triangles: nestedTris, colors: nestedPal },
-      } as unknown as Blueprint);
-      for (const b of solids.buckets.values()) {
-        const gg = new BufferGeometry();
-        gg.setAttribute('position', new BufferAttribute(new Float32Array(b.positions), 3));
-        gg.setAttribute('normal', new BufferAttribute(new Float32Array(b.normals), 3));
-        gg.setIndex(b.indices);
-        const m = new Mesh(gg, this.mat(pbr(b.color), { side: DoubleSide }));
-        g.add(m);                                       // pick walks up to the sub group
-      }
+      const addSolids = (src: Blueprint) => {
+        const solids = buildSolids(src);
+        for (const b of solids.buckets.values()) {
+          const gg = new BufferGeometry();
+          gg.setAttribute('position', new BufferAttribute(new Float32Array(b.positions), 3));
+          gg.setAttribute('normal', new BufferAttribute(new Float32Array(b.normals), 3));
+          gg.setIndex(b.indices);
+          const m = new Mesh(gg, this.mat(pbr(b.color), { side: DoubleSide }));
+          g.add(m);                                     // pick walks up to the sub group
+        }
+      };
+      addSolids({ data: { blocks, triangles: nestedTris, colors: nestedPal } } as unknown as Blueprint);
+      // v1.11.6 SUBGRID OF A SUBGRID (we: the Dorito SSTO's front wheels —
+      // Wheels two Builds deep, never rendered): a Build inside subgrid
+      // CONTENT is an assembly node, not a construction ghost — its
+      // blocks/skin render too, through ITS OWN palette (v1.11.0 scoping
+      // per build at every depth), and the recursion continues. Only the
+      // top-level Build entry stays a geometry-less ghost.
+      const walkBuildSolids = (list: BlueprintComponent[], depth: number): void => {
+        for (const sc of list) {
+          if (sc.type !== 'Build' || depth >= 8) continue;
+          addSolids({ data: {
+            blocks: (sc.data?.['blocks'] as Blueprint['data']['blocks'] | undefined) ?? [],
+            triangles: (sc.data?.['triangles'] as Blueprint['data']['triangles'] | undefined) ?? [],
+            colors: (sc.data?.['colors'] as Blueprint['data']['colors'] | undefined) ?? null,
+          } } as unknown as Blueprint);
+          walkBuildSolids((sc.data?.['components'] as BlueprintComponent[] | undefined) ?? [], depth + 1);
+        }
+      };
+      walkBuildSolids(nested, 0);
       // heavy-craft tier: the nested parts are NOT selection targets anyway
       // (their proxies route clicks to the SUBGRID), so merge every stand-in
       // box into one mesh per paint colour — 659 individual boxes on the
@@ -2045,8 +2074,16 @@ void main() {
         const lst = merged.get(key);
         if (lst) lst.geos.push(bg); else merged.set(key, { spec, geos: [bg] });
       } : null;
-      for (const sc of nested) {
-        if (sc.type === 'Build') continue;
+      const renderSubParts = (list: BlueprintComponent[], depth: number): void => {
+      for (const sc of list) {
+        if (sc.type === 'Build') {
+          // v1.11.6: a nested assembly node's PARTS render inside the
+          // owning top-level group (content coords are parent-frame
+          // absolute — the group transform carries the whole chain)
+          if (depth < 8) renderSubParts((sc.data?.['components'] as BlueprintComponent[] | undefined) ?? [], depth + 1);
+          continue;
+        }
+        this.subPartCount++;
         if (mergeStands) { mergeStands(sc); continue; }   // heavy tier: merged paint
         const qFile = sc.orientation ?? Q_ID;
         const m = new Group();
@@ -2080,6 +2117,8 @@ void main() {
           });
         }
       }
+      };
+      renderSubParts(nested, 0);
       // flush the merged stand-in paints (heavy tier): one mesh per colour
       for (const { spec, geos } of merged.values()) {
         const gg = geos.length > 1 ? mergeGeometries(geos, false) : geos[0];
@@ -2088,7 +2127,15 @@ void main() {
         g.add(new Mesh(gg, this.sharedMat(spec)));
       }
       // build-captured joint lines (v0.173-177 rules live in subgrid.ts)
-      const bb: SubBBox | null = subBlockBBox(blocks);
+      const allBlocks = [...blocks];
+      const collectBlocks = (list: BlueprintComponent[], depth: number): void => {
+        for (const sc of list) if (sc.type === 'Build' && depth < 8) {
+          allBlocks.push(...((sc.data?.['blocks'] as Blueprint['data']['blocks'] | undefined) ?? []));
+          collectBlocks((sc.data?.['components'] as BlueprintComponent[] | undefined) ?? [], depth + 1);
+        }
+      };
+      collectBlocks(nested, 0);
+      const bb: SubBBox | null = subBlockBBox(allBlocks);
       this.subJrefs.set(bi, captureJrefs(masters.get(bi) ?? [], bb, manifest, c.orientation ?? null,
         [c.position.x, c.position.y, c.position.z]));
     });
