@@ -42,6 +42,14 @@ export interface FaceEntry { block: number; opaque: boolean }
  *  Exported for the Tools hullify (same interior-wall coverage rules). */
 export function buildFaceGrid(blocks: Block[], palette: FilePalette | null, legacy: boolean): Map<number, FaceEntry[]> {
   const faces = new Map<number, FaceEntry[]>();
+  // v1.11.2 PERF: a craft's thousands of faces wear a handful of slots —
+  // resolve each slot's opacity ONCE (the giant census, load.perf)
+  const opaqueCache = new Map<number, boolean>();
+  const opaqueOf = (slot: number) => {
+    let v = opaqueCache.get(slot);
+    if (v === undefined) { v = resolveColor(palette, slot, legacy).opacity >= 15; opaqueCache.set(slot, v); }
+    return v;
+  };
   blocks.forEach((b, index) => {
     if (b.type === OCCUPANCY_TYPE) return;
     const dirs = getBlockFaceDirections(b.type);
@@ -49,7 +57,7 @@ export function buildFaceGrid(blocks: Block[], palette: FilePalette | null, lega
       const dir = dirs[f];
       if (!dir || !isFullFace(b.type, f)) continue;
       const slot = b.colors?.[f] ?? b.colors?.[0] ?? 0;
-      const opaque = resolveColor(palette, slot, legacy).opacity >= 15;
+      const opaque = opaqueOf(slot);
       forEachFaceCell(b, dir, (cell, axis) => {
         const key = faceKey(cell[0]!, cell[1]!, cell[2]!, axis);
         const e = faces.get(key);
@@ -90,8 +98,14 @@ export function faceCovered(faces: Map<number, FaceEntry[]>, b: Block, index: nu
 }
 
 export const faceFootprint = (points: V3[], indices: readonly number[]): string => {
+  // v1.11.2 PERF: integer quantisation (Math.round(p·1e4), the same
+  // lattice-exact signature toFixed(4) produced) — float→string formatting
+  // per vertex was measurable on the giant's cull (load.perf)
   const uniq = new Set<string>();
-  for (const i of indices) { const p = points[i]!; uniq.add(`${p[0].toFixed(4)},${p[1].toFixed(4)},${p[2].toFixed(4)}`); }
+  for (const i of indices) {
+    const p = points[i]!;
+    uniq.add(`${Math.round(p[0] * 1e4)},${Math.round(p[1] * 1e4)},${Math.round(p[2] * 1e4)}`);
+  }
   return [...uniq].sort().join('|');
 };
 
@@ -135,6 +149,12 @@ export function culledBlocksSolids(blocks: Block[], palette: FilePalette | null,
   };
   const kept: { pts: V3[]; idx: readonly number[]; slot: number; fp: string; src: number }[] = [];
   const footprints = new Map<string, number>();
+  const opaqueCache = new Map<number, boolean>();
+  const opaqueOf = (slot: number) => {
+    let v = opaqueCache.get(slot);
+    if (v === undefined) { v = resolveColor(palette, slot, legacy).opacity >= 15; opaqueCache.set(slot, v); }
+    return v;
+  };
 
   blocks.forEach((b, index) => {
     if (b.type === OCCUPANCY_TYPE) return;
@@ -145,12 +165,15 @@ export function culledBlocksSolids(blocks: Block[], palette: FilePalette | null,
     ];
     // origin = cellM(blkCell): the cell BOUNDARY below the block's first cell
     const size: V3 = [(b.size_x + 1) * CELL, (b.size_y + 1) * CELL, (b.size_z + 1) * CELL];
-    const pts = getBlockPoints(b.type, origin, size) as V3[];
+    // v1.11.2 PERF: the vertex cloud is only needed by a KEPT partial face —
+    // fully culled blocks (the giant's interior deck mass) never build it
+    let ptsCache: V3[] | null = null;
+    const pts = () => (ptsCache ??= getBlockPoints(b.type, origin, size) as V3[]);
     const trisOf = getBlockFaces(b.type);
     const dirs = getBlockFaceDirections(b.type);
     for (let f = 0; f < trisOf.length; f++) {
       const slot = b.colors?.[f] ?? b.colors?.[0] ?? 0;
-      const opaque = resolveColor(palette, slot, legacy).opacity >= 15;
+      const opaque = opaqueOf(slot);
       const dir = dirs[f];
       if (dir && isFullFace(b.type, f)) {          // full face: per-cell cut + rect stitch
         const axis = dir[0] ? 0 : dir[1] ? 1 : 2, u = (axis + 1) % 3, v = (axis + 2) % 3;
@@ -185,9 +208,9 @@ export function culledBlocksSolids(blocks: Block[], palette: FilePalette | null,
         continue;
       }
       if (faceCovered(faces, b, index, dir, opaque)) continue;   // interior wall
-      const fp = faceFootprint(pts, trisOf[f]!);
+      const fp = faceFootprint(pts(), trisOf[f]!);
       footprints.set(fp, (footprints.get(fp) ?? 0) + 1);
-      kept.push({ pts, idx: trisOf[f]!, slot, fp, src: index });
+      kept.push({ pts: pts(), idx: trisOf[f]!, slot, fp, src: index });
     }
   });
 

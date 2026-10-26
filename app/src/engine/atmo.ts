@@ -23,6 +23,7 @@
 // ---------------------------------------------------------------------------
 import type { Block, Triangle } from './format';
 import { hullVertex } from './hullfit';
+import { sealedEnvelopeWasm } from './sealwasm';
 
 // ------------------------------------------------------- ISA layer table
 // base geopotential altitude m, base temperature K, lapse rate K/m, base
@@ -134,6 +135,17 @@ export interface Envelope { m3: number; tris: number }
  *  the volume. The flood cannot squeeze through the 6-disconnected
  *  staircase walls the sampling lays down, so a closed skin seals. */
 export function sealedEnvelopeVolume(
+  tris: readonly Triangle[], blocks: readonly Block[]): { m3: number; cells: number } {
+  // v1.11.2 WASM (wasm/seal.ts): the compiled flood answers when the module
+  // is loaded; the JS twin below stays the reference (pinned equal over the
+  // corpus, sealwasm.test.ts) and the fallback when it is not.
+  const w = sealedEnvelopeWasm(tris, blocks);
+  if (w) return w;
+  return sealedEnvelopeJS(tris, blocks);
+}
+
+/** The pure-JS reference twin (see the WASM wrapper above). */
+export function sealedEnvelopeJS(
   tris: readonly Triangle[], blocks: readonly Block[]): { m3: number; cells: number } {
   const P = 0.25;
   const toC = (v: number) => Math.floor(v / P + 6);

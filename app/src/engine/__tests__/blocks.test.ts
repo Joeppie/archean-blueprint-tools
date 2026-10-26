@@ -4,6 +4,7 @@
 // builder), the game's SHIFT CONTINUATION rules (complementBlock) and the
 // footprint overlap guard; plus the v1.4 block-EDITOR layer: in-place
 // rotate/flip, SIMILAR-TWIN identification and the ✧ snap-to-neighbours.
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import { blockAt, blockCells, blockFromCell, blockMirrorTwin, blockTwinIssues,
@@ -11,7 +12,7 @@ import { blockAt, blockCells, blockFromCell, blockMirrorTwin, blockTwinIssues,
   complementBlock, flippedBlock, mirroredBlock, mirrorBlockCell, MIRROR_TYPE,
   MIRROR_TYPES, mirrorAxisIdx, mirrorFaceOrder, mirroredFaceSlots, paintTwinPair,
   rotateType, rotateTypeAbout, rotatedBlock, snapBlockType,
-  setBlockField, BLOCK_SIZE_MAX } from '../blocks';
+  setBlockField, BLOCK_SIZE_MAX, twinConflictCensus, twinIssuesOf, twinIssuesAreInfoOnly } from '../blocks';
 import { getBlockPoints } from '../blockshapes';
 import type { Block, Blueprint } from '../format';
 
@@ -556,5 +557,71 @@ describe('v1.10.6 SQUARE-BLOCK FIX (size growth is not capped by the frame)', ()
     const b = blockFromCell([5, 5, 5], [99, 3, 3], 0, 0);
     expect(b.size_x).toBe(BLOCK_SIZE_MAX);
     expect(b.size_y).toBe(3);
+  });
+});
+
+describe('v1.11.2 twinConflictCensus (indexed twin-conflict sweep)', () => {
+  // The build dock's per-rev census switched from the naive
+  // blockTwinIssues-per-block scan (O(n²), 17 ms at the 800 cap — load.perf)
+  // to the O(n) indexed twinConflictCensus. The pin: on EVERY corpus
+  // fixture and EVERY axis the indexed count equals the naive sweep, so the
+  // dock card's ⇄ conflict number cannot drift from the per-block popup.
+  const REPO = new URL('../../../../', import.meta.url).pathname;
+  const bpOf = (id: string): Blueprint =>
+    JSON.parse(readFileSync(`${REPO}testdata/${id}/blueprint.json`, 'utf8')) as Blueprint;
+  const naive = (bp: Blueprint, axis: 'x' | 'y' | 'z' | 'off'): number => {
+    if (axis === 'off') return 0;
+    const bl = bp.data.blocks;
+    let conflicts = 0;
+    for (let i = 0; i < bl.length; i++) {
+      if (bl[i]!.type === 255) continue;
+      const t = blockTwinIssues(bp, i, axis);
+      if (t?.issues.length && !t.info) conflicts++;
+    }
+    return conflicts;
+  };
+  for (const id of ['3732302108', '3481322297', '3803780241', '3812927875', '9000005001']) {
+    it(`counts equal the naive sweep on ${id} (x/y/z)`, () => {
+      const bp = bpOf(id);
+      expect(bp.data.blocks.length, id).toBeGreaterThan(0);
+      for (const axis of ['x', 'y', 'z'] as const)
+        expect(twinConflictCensus(bp, axis), `${id} axis ${axis}`).toBe(naive(bp, axis));
+    });
+  }
+  it('⊘ off ⇒ 0 (no plane ⇒ no mirrored footprint to flag)', () => {
+    expect(twinConflictCensus(bpOf('3481322297'), 'off')).toBe(0);
+  });
+  it('a planted geometry conflict is counted (non-vacuous)', () => {
+    const bp = bpOf('3732302108');   // gantry: a real x-twin block pair
+    const bl = bp.data.blocks;
+    // find a twin pair; break the twin's material ⇒ gameplay conflict
+    const bi = bl.findIndex((_, i) => blockMirrorTwin(bp, i, 'x') >= 0);
+    expect(bi, 'fixture carries a twin pair').toBeGreaterThanOrEqual(0);
+    const base = twinConflictCensus(bp, 'x');
+    const twin = blockMirrorTwin(bp, bi, 'x');
+    const saved = bl[twin]!.material;
+    bl[twin]!.material = ((saved ?? 0) + 1) % 7;
+    // the sweep is PER-BLOCK: breaking a twin flags BOTH members of the
+    // pair (self sees twin's material, twin sees self's) — naive semantics
+    expect(twinConflictCensus(bp, 'x')).toBe(base + 2);
+    bl[twin]!.material = saved;
+    expect(twinConflictCensus(bp, 'x')).toBe(base);
+  });
+  it('an appearance-only paint drift is INFORMATIONAL — not counted', () => {
+    const bp = bpOf('3732302108');
+    const bl = bp.data.blocks;
+    const bi = bl.findIndex((_, i) => blockMirrorTwin(bp, i, 'x') >= 0);
+    const twin = blockMirrorTwin(bp, bi, 'x');
+    const base = twinConflictCensus(bp, 'x');
+    // repaint ONE face slot of the twin (face 0 = a full face; the v1.8.1
+    // severity law: appearance-only difference ⇒ blue ℹ, no red conflict)
+    const saved = bl[twin]!.colors?.[0];
+    bl[twin]!.colors = bl[twin]!.colors ?? [0, 0, 0, 0, 0, 0, 0];
+    bl[twin]!.colors[0] = (bl[twin]!.colors[0] ?? 0) + 3;
+    const issues = twinIssuesOf(bl[bi]!, bl[twin]!, 'x');
+    expect(issues.length, 'the drift is seen').toBeGreaterThan(0);
+    expect(twinIssuesAreInfoOnly(issues), 'paint-only ⇒ info').toBe(true);
+    expect(twinConflictCensus(bp, 'x'), 'info conflicts do not count').toBe(base);
+    if (saved === undefined) delete bl[twin]!.colors; else bl[twin]!.colors![0] = saved;
   });
 });

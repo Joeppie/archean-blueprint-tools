@@ -43,7 +43,7 @@ No third-party fork beats stock three.js for this workload (2026 survey):
 So: **keep stock three, adopt BatchedMesh; re-evaluate WebGPURenderer in
 Phase 4 with the ?perf port instrumenting draw counts.**
 
-## WASM candidates (identified; deliberately deferred)
+## WASM candidates (measured v1.11.2 — first module LANDED, verdicts below)
 Load profile (PERF.md): 60 fps is already met through 1.5 M tris; the giant
 takes 937 ms to load (JSON parse + build + seal). Nothing is frame-critical
 today — WASM is justified ONLY where a ported hot loop measures >2× again.
@@ -51,18 +51,29 @@ Ranked by expected payoff, all isolated behind pure typed-array APIs so a
 drop-in WASM module never touches React:
 1. **Hull build: interior-wall face culling + rectangle stitching + prism
    extrusion** (`buildHull`) — the largest O(blocks×faces) load-time loop;
-   clean f32/u32 in/out contract; AssemblyScript.
+   clean f32/u32 in/out contract; AssemblyScript. **VERDICT v1.11.2: JS
+   improvements shipped (162→154 ms giant), WASM DEFERRED** — the port must
+   re-implement the blockshapes clouds + face-grid maps for a load-time-only
+   loop; `engine/cull.ts` stays the pure seam (PERF.md §WASM verdict).
 2. **Wind step + streamline integration** (`stepFlow`/`sampleVel`, integer
    grid keys already) — 3–8 ms/frame; second candidate; later a better fit
-   for WebGPU compute than WASM.
-3. **sealStats flood fill + triangle raster** — load-time only, budget-
-   capped; low priority.
+   for WebGPU compute than WASM. **VERDICT v1.11.2: NO** (measured shape:
+   typed-array multigrid at V8 speed; expected delta under the 2× bar).
+3. **sealStats flood fill + triangle raster** — **LANDED v1.11.2** (promoted:
+   the app's `sealedEnvelopeVolume` runs per edit REV behind the LiftWidget,
+   219 ms on the giant). `app/wasm/seal.ts` (AssemblyScript, 4.4 kB,
+   `npm run build:wasm`), seam `engine/sealwasm.ts`, JS reference twin +
+   corpus parity pins `sealwasm.test.ts`; giant 219→~110 ms + LiftWidget
+   debounce 250 ms. AssemblyScript landing lessons: PERF.md.
 4. JSON parse stays JS (`JSON.parse` beats wasm json); the type-255 mirror
    index stays a Map (perf rule #10).
 Phase 2 writes these as pure modules (`engine/hull/build.ts`,
 `engine/sim/flow.ts`) with `*View` typed-array signatures — the WASM seam —
 and Phase 4 benchmarks before adding a toolchain (assemblyscript is the only
-new build dep, kept inside `app/`).
+new build dep, kept inside `app/`). **v1.11.2: the benchmark harness is
+`app/src/engine/__tests__/load.perf.test.ts` (npx vitest run load.perf —
+prints the table, loose anti-regression tripwires); assemblyscript is
+installed in `app/` and the module builds via `npm run build:wasm`.**
 
 ## Phases
 - **P0 — DONE**: pointable blueprint folder (`tools/config.py` + AGENTS rule).
@@ -320,8 +331,15 @@ new build dep, kept inside `app/`).
   streamline colours/wake, wing-vs-bluff scan) + e2e aero.spec (mode solve
   → converged, lines>20, retarget, teardown); gates vitest 152, tsc clean,
   iGPU shots ISW + dolphin.
-- **P4 — perf**: BatchedMesh proxies, ?perf port, wasm benchmark of
-  candidate 1, optional WebGPU flag.
+- **P4 — perf (PARTIAL, v1.11.2)**: benchmark harness LANDED
+  (`load.perf.test.ts` — the ?perf port for the pure loops, run in CI via
+  vitest with anti-regression tripwires); the per-rev loops indexed
+  (twin census 91×) and debounced (LiftWidget envelope); **WASM benchmark
+  of the candidates DONE with verdicts** (PERF.md §WASM verdict, REWRITE
+  §WASM candidates) and the SEALED-ENVELOPE module landed (candidate 3
+  promoted — it became the per-rev loop in v1.11). OPEN: BatchedMesh
+  proxies (the giant's 12 k-draw cliff — a scene.ts render-graph change),
+  optional WebGPU flag.
 - **P5 — parity gate + cutover**: Playwright suite mirrors the old suites
   (below), corpus fixture runner over the configured blueprint folder,
   landing/gallery in React, release.sh extended to build `app/dist`.
@@ -349,6 +367,31 @@ new build dep, kept inside `app/`).
   - `format.spec.ts` — open each corpus craft (folder from config),
     expect REGTEST-grade invariants through a debug endpoint.
 - Legacy suites keep running unchanged until P5.
+
+## v1.11.2 code analysis (perf & structure pass — findings + standing plan)
+
+**Measured per-rev / load loops** (numbers + verdicts in PERF.md): sealed
+envelope (WASM'd + debounced), twin census (indexed), cull (JS-diet, AS
+deferred), wind solve (typed-array multigrid — no WASM), twinSweep cap
+lifted. Everything else on the per-frame path already early-exits idle
+(v1.9.2 audit).
+
+**Structure — the split plan (deferred deliberately):** `engine/scene.ts`
+is 5.7 k lines — the last monolith (the legacy view3d.js pattern). Its
+cohesive seams, each with a natural pure/impure cut and existing test
+coverage that survives a move: (a) gizmo + mode-widget + ring math
+(ringScreenPoint, gestures), (b) placement/pick routing (pickNdc/pickCell/
+pinGroup), (c) live-edit + doc mirroring (liveDataEdit/flushLiveEdits),
+(d) overlays (x-ray, twin-warn, coord readout, grid sync). Every split is
+mechanical (module-scope extraction + Engine fields passed as a context
+bag) — the risk is not the code, it is the e2e hook surface
+(`window.__ARCHEAN__`) re-wiring; schedule it as its own session with the
+full suite as the gate, not inside a perf pass. `Editor.tsx` (1.8 k) and
+`ModePanels.tsx` (1.3 k) are the next-largest; both are component-local
+(React state pins cover them), lower urgency.
+**Deliberately NOT done this pass:** massReport caching (reads are O(n)
+sweeps over ≤ 2.5 k entities, sub-ms at every observed call site), the
+scene.ts split (above), BatchedMesh (open P4, unchanged scope).
 
 ## Non-negotiables carried over
 - AGENTS § Blueprint folder (paths via tools/config.py — the vite plugin

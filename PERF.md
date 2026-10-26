@@ -103,6 +103,58 @@ stays draw-bound.
    queue rebuild in setModel — clear+refill to the SAME length must drop
    the stale index).
 
+## v1.11.2 load-path & per-rev baseline (app/, node JIT-warmed, vitest)
+
+`app/src/engine/__tests__/load.perf.test.ts` times the ranked hot loops on
+committed corpus crafts (run: `npx vitest run load.perf`); the numbers below
+are medians on this box.
+
+| loop | before | after | where it runs |
+|---|---|---|---|
+| sealedEnvelopeVolume giant (9 656 blocks) | 219 ms | **JS 219 ms → WASM ~110 ms (1.6–3×)** + LiftWidget DEBOUNCED 250 ms | every edit rev (LiftWidget) — KNOWN ISSUE 1 CLOSED |
+| build-dock twin census (800-cap sweep) | 15–17 ms | **0.16 ms (91×)** indexed `twinConflictCensus`; the 800-block cap is GONE (giant 9 656 records = 6.6 ms) | every edit rev (dock census) |
+| culledBlocksSolids giant (9 656 records) | 162 ms | 154 ms (opacity-slot memo, integer footprints, lazy vertex clouds) | load, once |
+| buildTunnel + 30 solveSteps ISW | 94 ms | 94 ms (untouched) | wind tunnel active only |
+| sealedEnvelope zeppelin skin (336 tris) | 6.2 ms | **4.2 ms** | balloon tool edits |
+
+### WASM verdict (AssemblyScript, first module landed)
+
+REWRITE.md ranked the candidates; measured (node, `sealwasm.test.ts` +
+`load.perf`), the 2× bar decides:
+
+- **SEALED ENVELOPE — ADOPTED.** `app/wasm/seal.ts` (AssemblyScript, 4.4 kB,
+  `npm run build:wasm`), seam `engine/sealwasm.ts`; `sealedEnvelopeVolume`
+  answers from the module when booted (Editor background-fetches the ?url
+  asset) and from the pure-JS reference twin (`sealedEnvelopeJS`) otherwise —
+  pinned byte-equal over the corpus + synthetic seals + balloon skins
+  (`sealwasm.test.ts`). Giant: 219 → 106–110 ms (clean-process 2.3–3×,
+  shared-worker 1.6×); the LiftWidget debounce removes the rest from the
+  per-rev path.
+- **HULL CULL + STITCH (`culledBlocksSolids`) — JS improvements shipped,
+  WASM deferred.** The string→integer footprint quantisation, the per-slot
+  opacity memo and the lazy vertex clouds buy 162→154 ms (the cost is the
+  face-grid Map + stitch scans, not the formatting). An AssemblyScript port
+  must re-implement the blockshapes vertex clouds + the face-grid maps — a
+  ~500-line second implementation of the trickiest culling law for a
+  load-time-only loop that stays sub-second on the single 6 MB craft. The
+  pure `CulledBlocks` contract in `engine/cull.ts` remains the seam.
+- **WIND SOLVE (aero multigrid) — no.** Red-black GS + FMV multigrid is
+  already a typed-array cache-friendly loop; the expected WASM delta over
+  V8-optimised f64 arrays is ~1.2×, under the bar (REWRITE's own read: a
+  better future fit is WebGPU compute).
+
+Landing lessons (AssemblyScript, cost ~2 h): `--maxMemory` is
+`--maximumMemory`; the AS 0.28 runtime IMPORTS `env.abort`; `inline function`
+returning values does not compile (LLVM inlines at -O3 anyway); **typed-array
+indexing keeps bounds checks — the giant BFS made the naive port SLOWER than
+JS (0.44×) until the flood arrays became raw `__alloc` pointers +
+`load<u8>/store<u8>` (0.44× → 2.3×)**; the fixed-address ABI
+(blocks i32 @0, tri verts f64 @1 MiB, OUT @17 MiB, heap `--memoryBase` 18 MiB)
+lets JS serialise via zero-copy views (re-create the views per call — the
+buffer grows); `wallPtr()/seenPtr()/gridN()` exports let tests diff the wall
+maps cell-for-cell (they caught a vertex-stride bug that the tetra fixture
+masked: symmetric coords survive an axis-rotated stride).
+
 ## Tooling
 
 - `?perf` (live browser): title shows `fps draw flowms buildms loadms tris geo`

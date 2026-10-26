@@ -622,7 +622,18 @@ export function blockTwinIssues(
     other = best;
     if (other < 0) return null;
   }
-  const o = bl[other]!;
+  const issues = twinIssuesOf(b, bl[other]!, axis);
+  return { twin, issues, info: twinIssuesAreInfoOnly(issues) };
+}
+
+/** The v1.8.0 faux-mirror comparison of ONE block pair (b vs its twin /
+ *  best mirrored-span candidate) — the exact property list blockTwinIssues
+ *  reports, on plain blocks (no bp needed). v1.11.2 extraction: the build
+ *  dock's census sweep (twinConflictCensus) is indexed and shares this one
+ *  comparison, so the census count and the per-block popup can never drift.
+ *  info severity = every issue is appearance-only (face paint). */
+export function twinIssuesOf(b: Block, o: Block, axis: MirrorAxis = 'x'): string[] {
+  const a = mirrorAxisIdx(axis);
   const c = blockCells(b), cj = blockCells(o);
   const cv: [number, number, number] = [c.x, c.y, c.z];
   const ov: [number, number, number] = [cj.x, cj.y, cj.z];
@@ -640,7 +651,83 @@ export function blockTwinIssues(
   let diff = 0;
   for (let f = 0; f < 7; f++) if (expect[f] !== got[f]) diff++;
   if (diff) issues.push(`face paint on ${diff} of 7 faces`);
-  return { twin, issues, info: issues.length > 0 && issues.every(i => i.startsWith('face paint')) };
+  return issues;
+}
+
+export const twinIssuesAreInfoOnly = (issues: string[]): boolean =>
+  issues.length > 0 && issues.every(i => i.startsWith('face paint'));
+
+/** v1.11.2 PERF (load.perf: the naive census = blockTwinIssues per block =
+ *  O(n²) with a blockCells() object alloc per inner candidate — 17 ms per
+ *  rev on an 800-block sweep): the SAME conflict count in a single O(n)
+ *  index pass. Every live block is indexed by its two TRANSVERSE cells (the
+ *  axes the naive twin/faux scan requires equal); the per-block query list
+ *  keeps ascending order, so the rank picks and first-max overlaps of
+ *  blockMirrorTwin / the faux-mirror span scan reproduce EXACTLY (pinned
+ *  equal to the naive sweep per corpus fixture). `axis` is the session
+ *  mirror axis ('off' ⇒ no plane ⇒ 0, the naive census skips too). */
+export function twinConflictCensus(bp: Blueprint, axis: MirrorAxisOpt = 'x'): number {
+  if (axis === 'off') return 0;
+  const bl = bp.data.blocks;
+  const a = mirrorAxisIdx(axis);
+  const p1 = (a + 1) % 3, p2 = (a + 2) % 3;
+  const byPerp = new Map<number, number[]>();
+  const cells: ({ x: number; y: number; z: number } | undefined)[] = new Array(bl.length);
+  for (let i = 0; i < bl.length; i++) {
+    const b = bl[i]!;
+    if (b.type === 255) continue;
+    const c = blockCells(b);
+    cells[i] = c;
+    const key = (c[p1 === 0 ? 'x' : p1 === 1 ? 'y' : 'z']! + 8192) * 16384 +
+      (c[p2 === 0 ? 'x' : p2 === 1 ? 'y' : 'z']! + 8192);
+    const l = byPerp.get(key);
+    if (l) l.push(i); else byPerp.set(key, [i]);
+  }
+  const cellV = (c: { x: number; y: number; z: number }): [number, number, number] =>
+    [c.x, c.y, c.z];
+  let conflicts = 0;
+  for (let i = 0; i < bl.length; i++) {
+    const b = bl[i]!;
+    if (b.type === 255) continue;
+    const cv = cellV(cells[i]!);
+    const ext: [number, number, number] = [b.size_x, b.size_y, b.size_z];
+    const mc = [...cv] as [number, number, number];
+    mc[a] = mirrorBlockCell(cv[a]!, ext[a]!);
+    const want = MIRROR_TYPES[axis][b.type] ?? b.type;
+    const key = (cv[p1]! + 8192) * 16384 + (cv[p2]! + 8192);
+    const cand = byPerp.get(key);
+    if (!cand) continue;
+    // the naive blockMirrorTwin over the transverse-cell list only
+    let twin = -1, bestRank = -1;
+    for (const j of cand) {
+      if (j === i) continue;
+      const o = bl[j]!;
+      if (o.size_x !== b.size_x || o.size_y !== b.size_y || o.size_z !== b.size_z) continue;
+      const ov = cellV(cells[j]!);
+      if (ov[a]! !== mc[a]!) continue;
+      if (o.type !== b.type && o.type !== want) continue;
+      let rank = 2;
+      if ((o.colors?.[0] ?? -1) === (b.colors?.[0] ?? -2)) rank++;
+      if (rank > bestRank) { bestRank = rank; twin = j; }
+    }
+    let other = twin;
+    if (other < 0) {
+      // the naive faux-mirror CANDIDATE scan (max axis-span overlap, first max)
+      let bestOv = 0;
+      for (const j of cand) {
+        if (j === i) continue;
+        const o = bl[j]!;
+        const ov = cellV(cells[j]!);
+        const oe: [number, number, number] = [o.size_x, o.size_y, o.size_z];
+        const ovl = Math.min(ov[a]! + oe[a]!, mc[a]! + ext[a]!) - Math.max(ov[a]!, mc[a]!) + 1;
+        if (ovl > 0 && ovl > bestOv) { bestOv = ovl; other = j; }
+      }
+      if (other < 0) continue;                 // naive returns null
+    }
+    const issues = twinIssuesOf(b, bl[other]!, axis);
+    if (issues.length && !twinIssuesAreInfoOnly(issues)) conflicts++;
+  }
+  return conflicts;
 }
 
 // ------------------------------------------------------------ FACE PAINT

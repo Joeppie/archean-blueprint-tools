@@ -6,6 +6,13 @@
 // network; the KSP "receiving blueprint" overlay shows only on a real
 // download). Holds the raw-literal DOC + live bp; see App.tsx for the shell.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import sealWasmUrl from '../wasm/seal.wasm?url';
+import { initSealWasmFetch } from './engine/sealwasm';
+// v1.11.2 WASM: boot the sealed-envelope module in the background (a few
+// KB, off the render path). Every envelope compute BEFORE this resolves —
+// and forever in tests without a fetch — runs the pure-JS twin (atmo.ts),
+// so there is no boot race; sealwasm.test.ts pins the two answers equal.
+void initSealWasmFetch(sealWasmUrl);
 import { craftMeta, craftName } from './gallery-catalog';
 import { DEFAULT_OPTS, backdropDefault, backdropNames, type Backdrop, type Engine, type PickHit, type ViewOptions } from './engine/scene';
 import Viewport from './components/Viewport';

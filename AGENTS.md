@@ -1346,6 +1346,46 @@ topic + FORMAT).
   re-stamped to silent fresh. Bonus rule learned: corpus identity — catalog
   and /corpus route resolve the SAME file (one `craftFile()`), so a staleness
   flag can never describe a different file than the download would fetch.
+- **v1.11.2 PERF & CODE PASS + FIRST WASM MODULE (we: "Run an analysis on
+  performance and code and refactor. Also look at the possible use of WASM
+  … where that makes sense")**: the session's measurement harness is
+  `app/src/engine/__tests__/load.perf.test.ts` (`npx vitest run load.perf`
+  — times the ranked loops on committed corpus crafts, prints a PERF table,
+  carries loose anti-regression tripwires). Landed:
+  (1) **THE SEALED-ENVELOPE WASM MODULE** — `sealedEnvelopeVolume` measured
+  219 ms on the giant and ran SYNCHRONOUSLY on every edit rev (LiftWidget,
+  KNOWN ISSUE 1): the flood + voxelisation is now a 4.4 kB AssemblyScript
+  module `app/wasm/seal.ts` (`npm run build:wasm` — assemblyscript is the
+  only new devDep, inside app/; the binary is committed), seam
+  `engine/sealwasm.ts` (fixed-address ABI: blocks i32 @0, tri verts f64 @1
+  MiB, OUT @17 MiB, heap `--memoryBase` 18 MiB; JS serialises through
+  zero-copy views, RE-CREATED per call since the buffer grows).
+  `sealedEnvelopeVolume` = wasm when booted (Editor background-fetches the
+  `?url` asset — `src/vite-env.d.ts` added for the type), the pure-JS twin
+  `sealedEnvelopeJS` (the reference, verbatim reference status) otherwise.
+  Pins `sealwasm.test.ts`: corpus + synthetic seals + balloon skins answer
+  CELL-EXACT on both paths (the diff-debug exports `wallPtr/seenPtr/gridN`
+  diff wall maps cell-for-cell — they caught a vertex-stride bug the
+  symmetric tetra fixture masked), giant ≥1.5× (measured 1.6–3×).
+  (2) **LiftWidget DEBOUNCE 250 ms** — first compute synchronous, every
+  later rev recomputes once per edit BURST, the flood never blocks a frame.
+  (3) **INDEXED TWIN CENSUS** — the build dock's per-rev ⇄-conflict sweep
+  (blockTwinIssues per block = O(n²) + a blockCells alloc per inner
+  candidate, 17 ms at the 800 cap) became `blocks.ts twinConflictCensus`
+  (single O(n) pass, index keyed by the two TRANSVERSE cells, ascending
+  lists so the naive rank-picks/first-max overlaps reproduce EXACTLY —
+  pinned per fixture × axis; planted-conflict + info-only pins). **The
+  800-block cap is GONE** (giant 9 656 records = 6.6 ms; census.conflicts
+  is never −1 '—' again). `twinIssuesOf` is the shared pair-comparison of
+  the census and the per-block popup (the count and the popup cannot
+  drift). (4) **cull.ts string-diet** (candidate-1 JS half): integer
+  quantisation of the face footprints (toFixed(4) float formatting was the
+  cost driver), per-slot opacity memo in both passes, lazy vertex clouds
+  (fully culled interior blocks never build them) — 162→154 ms; the AS
+  port of the cull is DEFERRED with numbers (PERF.md §WASM verdict: it
+  must re-implement blockshapes + the face-grid for a load-only loop).
+  (5) AssemblyScript landing lessons → PERF.md (raw-pointer flood arrays:
+  typed-array bounds checks made the first port SLOWER than JS).
 - **v1.11.1 PHONE WIDGET LAW + FULLSCREEN HELP + THE w KEY (we: "Ui elements
   are in the way on phone when placing blocks, and I see the picked block
   popup and the widget for changing blocks over the block itself which
@@ -1661,9 +1701,10 @@ topic + FORMAT).
 ## request 2026-10-25; the full green suite = the session's closing gate)
 
 KNOWN ISSUES (accepted behaviours, costs, sharp edges):
-1. sealedEnvelopeVolume recomputes on every `rev` (LiftWidget) — ≤24 M-cell
-   budget, ~50-150 ms on a giant per edit tick; over budget it honestly
-   yields 0 (widget shows the divergence caption; lift rows hide).
+1. [CLOSED v1.11.2] sealedEnvelopeVolume: WASM module + LiftWidget debounce
+   (250 ms) — the giant's flood is ~110 ms once per edit BURST (was 219 ms
+   synchronously per rev); over the 24 M-cell budget both paths honestly
+   yield 0 (widget shows the divergence caption; lift rows hide).
 2. Envelope = interior + enclosing shell ⇒ OVERcounts the true enclosed
    volume by roughly one wall layer; sub-3-cell cavities seal to 0.
 3. SUBGRID nested blocks are NOT voxelised (bp.data.blocks is top-level) —
@@ -1872,8 +1913,9 @@ I. SKIPPED AT SESSION CLOSE (2026-10-25) → ADJUDICATED (v1.11.0 release
   setBlockField + blockFromCell, Num fields follow. (2) THE BUILD DOCK: the
   Blocks/Triangles workspace moved out of the 300 px sidebar into a WIDE
   BOTTOM DOCK (`build-dock`, the wire-dock twin) — 3 columns each: brush +
-  BLOCK CENSUS (families/materials/cells/⇄ conflicts, O(n²) sweep capped at
-  800 blocks) │ the searchable BLOCK LIST (hover = gold 3D preview via the
+  BLOCK CENSUS (families/materials/cells/⇄ conflicts — v1.11.2: the sweep
+  is the O(n) indexed twinConflictCensus, the 800-block cap is GONE) │ the
+  searchable BLOCK LIST (hover = gold 3D preview via the
   merged setBlockHighlight effect — a hovered row preempts the selection
   like wire previewHover; click = select; ✕ = the Editor DELETE path, one
   Ctrl+Z restores) │ THIS BLOCK (all edit rows + a shape-type chip row).
@@ -2313,6 +2355,13 @@ I. SKIPPED AT SESSION CLOSE (2026-10-25) → ADJUDICATED (v1.11.0 release
 ```bash
 cd app && npm install          # one-time
 npm test                       # vitest — pure engine core (no browser)
+npx vitest run load.perf       #   … the PERF harness: ranked load/per-rev loops
+                               #   on corpus crafts (prints the PERF table;
+                               #   numbers are transcribed into PERF.md)
+npm run build:wasm             # rebuild app/wasm/seal.wasm (AssemblyScript;
+                               #   run after editing app/wasm/seal.ts — the
+                               #   binary is committed, sealwasm.test.ts
+                               #   instantiates it and pins JS parity)
 npm run test:e2e               # Playwright chromium UI suite (app/e2e/) — FULL
 npm run test:e2e:fast          #   … minus the @slow suites (the pricey ones)
 npx playwright test --grep '@place|@ui'    # per-area subsets (user rule: an

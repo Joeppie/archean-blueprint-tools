@@ -16,7 +16,7 @@
 // A collapsible row under the panel header: one glance shows which gas at
 // which altitude still carries the craft — open it for the per-altitude
 // weight-limit table and the equilibrium (zero-net-lift) altitude per gas.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Blueprint } from '../engine/format';
 import type { Engine } from '../engine/scene';
 import { ALT_STEPS, ALT_CEILING, GASES, envelopeVolume, equilibrium, liftKg, sealedEnvelopeVolume } from '../engine/atmo';
@@ -40,12 +40,27 @@ export function LiftWidget(p: { engine: Engine | null; bp: Blueprint; rev: numbe
   // what cannot be reached is the envelope. Markers are never trusted. A
   // skin that seals nothing falls back to the divergence read (an open
   // skin lifts nothing; the row just says so honestly).
-  const env = useMemo(() => {
-    const s = sealedEnvelopeVolume(p.bp.data.triangles ?? [], p.bp.data.blocks ?? []);
+  // v1.11.2 PERF (load.perf: the sealed flood costs 219 ms on the giant and
+  // ran SYNCHRONOUSLY in a useMemo on EVERY rev — one long main-thread stall
+  // per gizmo-drag commit, KNOWN ISSUE 1): the first compute stays
+  // synchronous (mount), every later rev re-computes DEBOUNCED 250 ms — a
+  // drag burst is ONE recompute at the end, the readout rides one step
+  // behind (a readout, not a gate), and the flood never blocks a frame.
+  const envOf = (bp: Blueprint) => {
+    const s = sealedEnvelopeVolume(bp.data.triangles ?? [], bp.data.blocks ?? []);
     return s.cells > 0
-      ? { m3: s.m3, tris: (p.bp.data.triangles ?? []).length, sealed: true }
-      : { ...envelopeVolume(p.bp.data.triangles ?? []), sealed: false };
-  }, [p.bp, p.rev]);                                    // eslint-disable-line react-hooks/exhaustive-deps
+      ? { m3: s.m3, tris: (bp.data.triangles ?? []).length, sealed: true }
+      : { ...envelopeVolume(bp.data.triangles ?? []), sealed: false };
+  };
+  const [env, setEnv] = useState(() => envOf(p.bp));
+  const lastRev = useRef(p.rev);
+  useEffect(() => {
+    if (lastRev.current === p.rev) return;              // mount value is fresh
+    lastRev.current = p.rev;
+    const t = setTimeout(() => setEnv(envOf(p.bp)), 250);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.rev, p.bp]);
   const mm = p.engine?.massReport();
 
   const mass = mm?.total ?? 0;

@@ -9,6 +9,7 @@ import { FLOWS, type FlowKey } from '../engine/aero';
 import { writeBlockDoc, writeBlockMaterial, type EditCtx } from '../engine/edit';
 import { docArrayInsert, docFromValue, docSetNumber, docArrayRemoveAt } from '../engine/doc';
 import { blockCells, blockFromCell, blockInfo, blockTwinIssues, blockMirrorTwin, cellOverlapSkip, flippedBlock,
+  twinConflictCensus,
   mirroredBlock, mirrorAxisIdx, MIRROR_TYPES, mirrorBlockCell, rotateType, rotatedBlock, setBlockField, setBlockGeom,
   snapBlockType, BLOCK_SIZE_MAX, type MirrorAxis, type MirrorAxisOpt, type PlaceSpec } from '../engine/blocks';
 import { shapeName } from '../engine/blockshapes';
@@ -490,8 +491,11 @@ export function BlockPanel(p: {
 
 /** v1.10.6 dock census: counts by shape family + material, total cells,
  *  the occupancy-mirror count and the ⇄ geometry-conflict count (faux-
- *  mirrors, v1.8.0 law). Re-keyed on `rev` (bp mutates in place); the
- *  conflict sweep is O(n²) so it is SKIPPED (−1 = '—') above 800 blocks. */
+ *  mirrors, v1.8.0 law). Re-keyed on `rev` (bp mutates in place). v1.11.2
+ *  PERF: the conflict sweep runs through the O(n) indexed
+ *  twinConflictCensus (the naive per-block scan measured 17 ms per rev at
+ *  the 800-block cap — load.perf.test); the identical count (pinned) lets
+ *  the 800-block cap go — the census is honest on every craft. */
 function useBlockCensus(bp: Blueprint, rev: number, mAx: MirrorAxisOpt) {
   return useMemo(() => {
     const fam = new Map<string, number>();
@@ -506,15 +510,7 @@ function useBlockCensus(bp: Blueprint, rev: number, mAx: MirrorAxisOpt) {
       mat.set(b.material ?? 0, (mat.get(b.material ?? 0) ?? 0) + 1);
       cells += (b.size_x + 1) * (b.size_y + 1) * (b.size_z + 1);
     }
-    let conflicts = -1;
-    if (n <= 800 && mAx !== 'off') {
-      conflicts = 0;
-      for (let i = 0; i < bp.data.blocks.length; i++) {
-        if (bp.data.blocks[i]!.type === 255) continue;
-        const t = blockTwinIssues(bp, i, mAx);
-        if (t?.issues.length && !t.info) conflicts++;
-      }
-    }
+    const conflicts = twinConflictCensus(bp, mAx);
     return { n, occ, cells, fams: [...fam.entries()], mats: [...mat.entries()], conflicts };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bp, rev, mAx]);
