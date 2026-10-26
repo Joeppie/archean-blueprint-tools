@@ -1237,6 +1237,16 @@ Zero-build Three.js (WebGL) inspector: `python3 -m http.server 8650` (repo root)
     documented bug) is NOT an arbiter here. Pinned by
     `app/e2e/wheels.spec.ts` (@SmallWheel @BigWheel) and
     `compparts.test.ts` (arm→−y for modern, untouched for legacy).
+    **v1.11.8 scope narrowing (we: "the front-wheel of the F18 seems to be
+    rotated wrong"):** the roll is a CASTER rule — validated for the
+    ISW/3518436870 crawler casters, which are `SmallWheel`. It fired on the
+    F/A-18F 3521588534 nose gear's big `Wheel` pair (orientations w=±0.707,
+    y=∓0.707 = ±90°ŷ steering mounts) because its gate (horizontal axle,
+    arm reachable) passes on them, and yawed each wheel 90° about the
+    longitudinal axis — a blade-edge-forward wheel in the editor. The roll
+    is now **SmallWheel-only**; `Wheel`/`BigWheel` ride the plain view law
+    (the F/A-18F nose wheels pair with dev at 0.001 m, wheelpair; the
+    crawler hangs are unchanged).
   - *FluidJunction — game pose is the only layout where cables connect
     (v0.96 revert of the v0.95 flat pose):* the .ini port frame is local **±z**
     (inlet (0,0,−0.125); outlets (±0.375/±0.125, 0, +0.125)) and `data.pipes`
@@ -1640,14 +1650,47 @@ Adventure = 3334698274).
   Dorito SSTO front wheels — Wheels two Builds deep):** the ghost rule
   covers the ENTRY (a Build component renders no geometry of its own);
   the entry's own `data` (blocks/triangles/palette/components) renders
-  RECURSIVELY inside the owning TOP-LEVEL group — content coordinates are
-  parent-frame absolute at every depth, each Build's faces resolve through
-  ITS OWN `data.colors` (the v1.11.0 scoping per build, at every depth).
+  RECURSIVELY, each Build's faces resolve through ITS OWN `data.colors`
+  (the v1.11.0 scoping per build, at every depth).
   A `composite_builds` join whose `slaveBuildId` names a nested Build keys
   to the hosting top-level group (`path[2]`): the subassembly's joint
   line rides the host group's chain (gear swings inside its bay). Pins:
   `app/src/engine/__tests__/subgrid.test.ts` + `app/e2e/subride.spec.ts`
   (engine `subStats()` census === the file's nested census).
+- **THE RIG CHAIN (v1.11.8, the F/A-18F gear legs — we: "there are missing
+  cables, or not rendered and a hinge that seems to be in an incorrect
+  position"):** content nested inside a Build is NOT parent-frame absolute —
+  the Build carries a rigid transform for its content: raw `position` + RAW
+  `orientation` quaternion (v1.5.11 law), composed down the nesting. The
+  reference reader is literal (XenonViewer `blueprint.js` readBuild:
+  `world = parentWorld · compose(position, quaternion, 1)`, the top-level
+  readBuild starts at the identity matrix, and `scene.js` transforms blocks,
+  triangles, struts, frames, PIPES and components by `model.builds[b].matrix`).
+  The top-level rule is v0.168 re-derived (identity chain = content
+  parent-absolute; the top build's own pose is composed by the app's v1.10.2
+  JOINT pose, whose baked-bench rotation part equals the affine's — bench
+  census 157/166). Nested levels compose RAW: on identity-bench crafts
+  (XYQ doors, dolphin fins, Badger — every nested bench is (0,0,0)+identity)
+  the chain is the identity transform and nothing moves; on RIG crafts the
+  chain places the saved assembly pose — the F/A-18F stores its gear legs as
+  rigs 27°∘59.4°∘90°∘29.7° with telescoping translations, its steering
+  pivots + gear harness routers authored ONTO the rigs' invariant lines
+  (the chain leaves them EXACTLY in place; the legs/wheels swing up into the
+  bay = the retraction the file saved). v1.11.6's identity nesting stranded
+  the nested pivots mid-bay and buried the nested harness sockets (pipe ends
+  0/7/97/100/102/104/269/276) inside the hull — the "missing cables".
+  App: `subgrid.ts rigChainOfPath/rigPush/rigApply` + rig Groups in
+  `buildSubgrids` + chain∘group composition in the v1.11.5 harness attach
+  (`buildPipesMesh`), so nested sockets AND the recorded tips riding them
+  land on the rigged pose. `subBlockBBoxRigs` clamps captureJrefs' pivot onto
+  the CHAINED content bbox. Audit (all 13 rig crafts of 117,
+  `app/tools/gearpair.mjs` live app↔dev world boxes): 205 parts moved
+  TOWARD dev, 3 away (≤ 0.32 m), identity crafts byte-identical. The
+  F/A-18 gear-leg residual (~0.7 m) is the v1.10.2-class TOP composition
+  (joint pose about the master's clamped line vs dev's raw bay affine about
+  the builder's fold beam) — in-game pixels arbitrate; see GEAR-F-A18F.md.
+  Pins: `app/src/engine/__tests__/rigchain.test.ts` (dev-verified chain
+  literals, invariant-axis parts, identity-craft invariance).
 - **The nested data carries `triangles` (v1.9, transcribed from the dev
   reader `blueprint.js`):** `readBuild` is invoked recursively per `Build`
   component and iterates `buildData.triangles` (same frame-corner + CELL

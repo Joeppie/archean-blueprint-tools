@@ -393,6 +393,90 @@ full suite as the gate, not inside a perf pass. `Editor.tsx` (1.8 k) and
 sweeps over ≤ 2.5 k entities, sub-ms at every observed call site), the
 scene.ts split (above), BatchedMesh (open P4, unchanged scope).
 
+## P7 — Test-pyramid migration (planned 2026-10-26, from the v1.11.8 session)
+
+we asked: "why test the viewer? Are we not constructing geometry and locations
+in 3D? Can we not test that?" — yes, and the honest boundary is a COUPLING,
+not a necessity: ~660 vitest tests already pin every geometry/location LAW on
+plain node (rigchain, sockets, pipes, blocks, tris, cull, mass, sym, doc),
+but the scene-graph APPLICATION (composing THREE objects + raycast picking)
+lives inside `scene.ts`'s `Engine`, whose constructor creates a
+`WebGLRenderer`/canvas/DOM listeners — so it can't be imported headless, and
+every geometry assertion about the GRAPH (world boxes, pick hits, occlusion
+cuts) is trapped in a browser. The wire:279 flake is the tax: a sound raycast
+census welded to mouse plumbing, 40 Hz throttles, dwell timers and React
+layout timing (the truck's 750-row dock shifting the canvas rect mid-test).
+
+Goal: the graph is a pure function of the blueprint; the renderer is a shell.
+
+- **P7.1 `SceneGraph` split (the enabler).** Extract from `Engine` a module
+  that maps data → THREE graph with NO renderer/DOM: the builders
+  (`buildSolids`/`buildCompProxies`/`buildReal`/`buildPipesMesh`/
+  `buildSubgrids` rig nesting), the transform stack (moff, joint poses,
+  rig chains) and the pick/census math (ray setup, `pipePickAt`,
+  `xrayCutsFor`, `blockPick`, `pickCell` geometry). THREE's math/objects run
+  on plain node (Group/Matrix4/Box3/Raycaster need no GL). `Engine` keeps
+  renderer + camera + controls + events and DELEGATES construction. Pin
+  headless: world AABBs for the audit crafts (the gearpair numbers become
+  node tests — dev-side of the pair stays a browser capture), pick hits,
+  census cuts. This retires the browser for every "does it render in the
+  right place" class.
+- **P7.2 Interaction clocks out of React.** `Viewport.tsx` owns the wire
+  hover state machine (40 Hz throttle + trailing edge, 120 ms chip dwell,
+  2 s X-ray dwell, arming, restore) and the coord/ghost throttles. Extract
+  pure timestamp-driven clocks (`move(x,y,now)`, `leave(now)`, `tick(now)`
+  with injected pick) — the Viewport forwards events only. Vitest pins the
+  dwell/restore contracts (v1.11.7's "highlight starts immediately" etc.)
+  with a synthetic clock; e2e keeps ONE thin "pointermove reaches the seam"
+  test.
+- **P7.3 Spec re-tiers.** Geometry specs (subride/substats/occupancy/
+  plateprobe-style boxes) move to P7.1 headless tests; wire.spec's census
+  assertions become node raycasts; the e2e tier keeps pixels (daylight rig,
+  palette renders), input plumbing and dev-pair audits. Sparsify the
+  AGENTS-acknowledged overlap (pipes.spec + wire.spec hover-pick test the
+  SAME seam — keep the node one). Target: fast tier ≤ ~3 min today's CPU
+  (9.9m), failures named with their seam in seconds.
+- **P7.4 Device harness for the phone pins.** `staticInfo`, modebox dock
+  positions, gizmo size are pure functions of (mode, viewport w/h, dpr) —
+  extract + vitest; e2e keeps one pixel7 boot smoke per suite.
+
+Gate for each phase: the extracted test reproduces the CURRENT green values
+before any behaviour move; the removed e2e coverage must exist at the lower
+tier first (no coverage holes, only migrations).
+
+### P7.3a — the x-ray fixture spec (TO BE PICKED UP; fixture SHIPPED 2026-10-26)
+
+`tools/make_xray_test.py` → `testdata/9000007001` ("xray-test", 73 blocks,
+9 comps, 4 pipes, boot 0.6 s) replaces the two truck wire specs
+(`wire.spec.ts` 'BLOCKED truck cable' + 'ONE-WAY input pulses' — now
+@slow-tagged stopgaps; RETIRE them when this spec lands). The fixture is
+probe-validated (engine seams, live page):
+
+| pipe | topology                                    | cuts | flowDir | role in the spec |
+|------|---------------------------------------------|------|---------|------------------|
+| 0    | FJ out.001 ↔ FJ out.002, BEHIND the wall    | 8    | both    | POSITIVE: census pick (max cuts) → episode cuts>0, ≥2 cursor-surges (undirected + interior anchor), full restore |
+| 1    | Battery → LVJ lowvoltage-INPUT, behind wall | 6    | ab      | POSITIVE: one-way pulses (v1.11.7 law) |
+| 2    | FJ out.001 → FJ fluid-IN, x-clear, floating | 1    | ab      | NEGATIVE: census ranking (never picked while 0 exists); directed ⇒ single pulse |
+| 3    | Battery → LVJ port.002 (hub DOWNSTREAM)     | 5    | both    | NEGATIVE: broken-claim pairing lists as claimed, flow degrades sanely |
+
+Fixture negatives beyond pipes: the UNWIRED Beacon (comp 8): port census 0,
+hover yields NO cable (probe: null), dock shows exactly 4 rows.
+
+Spec pins to write (`app/e2e/wire-xray.spec.ts`, @ui, desktop only, budget
+≤ 30 s total):
+1. boot census determinism: cuts === [8,6,1,5], flowDirs ===
+   ['both','ab','ab','both'], dock rows 4 (the fixture IS the fixture —
+   pin its geometry so a future file edit can't silently move a law).
+2. BLOCKED law on pipe 0 (hover mid → dwell → `wireXrayActive().cuts>0`,
+   surge peak ≥ 2, un-hover restore {on:false,cuts:0,overlays:0}).
+3. ONE-WAY law on pipe 1 (pulse count/dir exactly 'ab' semantics as the
+   truck spec asserts today).
+4. Negative paths: hover pipe 2 → one-way (never both); pipe 3 claimed &
+   listed; beacon pixel → `pipeHoverState()` null; `wire-port` census for
+   the beacon = 0 rows.
+Then delete both @slow truck specs, and the wire suite drops from ~10 min
+to seconds.
+
 ## Non-negotiables carried over
 - AGENTS § Blueprint folder (paths via tools/config.py — the vite plugin
   reads it; no hardcoded paths in `app/` either).

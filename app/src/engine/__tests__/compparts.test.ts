@@ -118,6 +118,37 @@ describe('standInBox', () => {
   });
 });
 
+describe('displayQuat wheel gate (v1.11.8 — the F/A-18F nose gear, we: "the front-wheel of the F18 seems to be rotated wrong")', () => {
+  // the caster droop roll (arm→down) rides SmallWheel ONLY — the roll was
+  // validated in-game for the ISW/truck SmallWheel casters (v0.134/v0.139).
+  // The F/A-18F nose gear 'Wheel' pair [x=0, y=±.707, z=0, w=∓.707]
+  // (±90°ŷ steering-yaw mounts, axle file ẑ → world x̂) passed the old
+  // WHEEL_TYPES gate and the roll spun each wheel 90° about its rolling
+  // axis — a blade-edge-forward wheel in the editor. Big gear wheels ride
+  // the plain view law (v1.11.5).
+  const N90 = { w: -0.7071067811865476, x: 0, y: 0.7071067811865476, z: 0 };
+  test("'Wheel' (big gear) returns the plain view quaternion", () => {
+    const q = displayQuat('Wheel', N90, N90, false);
+    expect(q).toEqual(N90);
+  });
+  test("'BigWheel' returns the plain view quaternion", () => {
+    const q = displayQuat('BigWheel', N90, N90, false);
+    expect(q).toEqual(N90);
+  });
+  test("'SmallWheel' casters keep the droop roll (roll fires on a passing gate)", () => {
+    // a caster mount pair: arm file +ŷ ends up horizontal → the arm→down
+    // roll composes; the returned quat must DIFFER from the plain view quat
+    const q = displayQuat('SmallWheel', N90, N90, false);
+    const differs = Math.abs(q.w - N90.w) + Math.abs(q.x - N90.x)
+      + Math.abs(q.y - N90.y) + Math.abs(q.z - N90.z) > 1e-6;
+    expect(differs, 'the caster roll composes for SmallWheel').toBe(true);
+    // and the axle A = qView·x̂ survives the roll (rotation about the axle)
+    const A = qRot(N90, [1, 0, 0]);
+    const A2 = qRot(q, [1, 0, 0]);
+    A2.forEach((v, i) => expect(v).toBeCloseTo(A[i]!, 6));
+  });
+});
+
 describe('occStandLocal (initial box == menu occupancy box)', () => {
   // the painted per-part stand-in IS the translucent type-255 overlay box
   // (buildCompProxies), placed under the rotated part group: spinning the

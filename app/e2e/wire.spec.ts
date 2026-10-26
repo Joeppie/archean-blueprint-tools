@@ -42,7 +42,7 @@ const wireHover = (page: Page) => page.evaluate(() =>
 const cablePoint = (page: Page, pi: number) => page.evaluate((p) =>
   (window as unknown as {
     __ARCHEAN__?: { cablePoint: (i: number) => { x: number; y: number } | null };
-  }).__ARCHEAN__!.cablePoint(p), pi);
+  }).__ARCHEAN__?.cablePoint(p) ?? null, pi);
 
 async function openWire(page: Page, id = ISW) {
   await page.goto(`/?craft=${id}`);
@@ -276,9 +276,16 @@ test.describe('wire overview, hover labels, disconnect / reconnect @ui', () => {
     return null;
   }
 
-  test('a BLOCKED truck cable: 2 s dwell opens the X-ray (cuts>0) firing ≥2 cursor-surges; un-hover fully restores (TODO B+C)', async ({ page }) => {
+  test('a BLOCKED truck cable: 2 s dwell opens the X-ray (cuts>0) firing ≥2 cursor-surges; un-hover fully restores (TODO B+C) @slow', async ({ page }) => {
     desktopOnly();
-    test.setTimeout(120_000);
+    // v1.11.8 @slow (AGENTS § Test-size rule): this law is being MIGRATED to
+    // the x-ray fixture 9000007001 (one wall, four cables — boot 0.6 s vs
+    // 15 s, census milliseconds vs minutes; see REWRITE.md §P7.3 for the
+    // exact pin list + the probe that validated the fixture). The truck
+    // census (292 runs of occlusion raycasts) + dock layout on the shared
+    // iGPU eats multi-minute budgets: @slow lanes only until the fixture
+    // spec lands and RETIRES this one.
+    test.setTimeout(240_000);
     await openWire(page, TRUCK);
     // The pulses live only 550–1600 ms — a page-side sampler counts the
     // peak through the SAME engine seam the hook exposes (surgeState),
@@ -308,41 +315,54 @@ test.describe('wire overview, hover labels, disconnect / reconnect @ui', () => {
     let pt = pick!.pt;
     for (let k = 0; k < 5; k++) {
       await page.mouse.move(pt.x, pt.y);                   // (re-)arm the dwell
-      const hit = await page.evaluate((q) => (window as unknown as {
-        __ARCHEAN__: { engine: { pipePickAt: (x: number, y: number) => number } } }
-      ).__ARCHEAN__.engine.pipePickAt(q.x, q.y), pt);
+      const hit = await page.evaluate((q) => {
+        const e = (window as unknown as {
+          __ARCHEAN__?: { engine: { pipePickAt: (x: number, y: number) => number } } }
+        ).__ARCHEAN__?.engine;
+        return e ? e.pipePickAt(q.x, q.y) : -1;
+      }, pt);
       if (hit === pick!.pi) break;
       const fresh = await cablePoint(page, pick!.pi);
-      if (!fresh) break;
-      pt = fresh;
+      if (fresh) pt = fresh;
+      // v1.11.8: under parallel load the Viewport can be mid-RE-MOUNT
+      // (scene key change) — the hook is briefly absent; wait and re-jiggle
+      // rather than projecting against a canvas that is being rebuilt.
+      await page.waitForTimeout(300);
     }
-    // v1.11.7 (we: "The wire doesn't properly highlight when highlighting
-    // it; that should start immediately"): the GOLD HIGHLIGHT latches on
-    // the first pointermove hit — the hover state must exist within ~250 ms
-    // of a cursor move over the cable (only the TEXT chip keeps its
-    // 120 ms dwell). The poll JIGGLES 1 px (staying inside the run's pick
-    // tolerance, which the re-anchor loop just verified): a moving cursor
-    // IS the law being asserted, and under parallel-worker starvation the
-    // input-queue latency of a stationary mouse's last event can outrun a
-    // pure-read poll.
+    // v1.11.8 (wire:279 trace forensics): the parallel e2e lane reclaims
+    // WebGL contexts (SwiftShader + iGPU pressure) — three fires Context
+    // Lost, the app rebuilds, and mid-rebuild the hook is briefly ABSENT.
+    // An expect.poll over a frozen pixel then loses a 4 s race against a
+    // scene reload. The highlight law (first pointermove hit arms the
+    // hover, no dwell on the gold) is asserted against the LIVE projection
+    // each round: re-project the mid-point (cablePoint — the engine's own
+    // seam, so a rebuilt camera re-anchors the pixel), jiggle, read
+    // null-safe; a dead-engine round is a retry, not a throw.
+    let hoverOn = false;
     let lastSt: unknown = null;
-    await expect.poll(async () => {
+    let aliveNulls = 0;                       // live engine, hover absent
+    for (let k = 0; k < 12 && !hoverOn && aliveNulls < 4; k++) {
+      const fresh = await cablePoint(page, pick!.pi);
+      if (fresh) pt = fresh;
       await page.mouse.move(pt.x, pt.y + 1);
       await page.mouse.move(pt.x, pt.y);
-      await page.waitForTimeout(80);
+      await page.waitForTimeout(120);
       const st = await page.evaluate((q) => {
         const e = (window as unknown as { __ARCHEAN__?: { engine: {
           pipeHoverState: () => unknown; opts?: { pipes?: boolean };
-          pipePickAt: (x: number, y: number) => number } } }).__ARCHEAN__!.engine;
+          pipePickAt: (x: number, y: number) => number } } }).__ARCHEAN__?.engine;
+        if (!e) return { s: null, dead: true };
         return { s: e.pipeHoverState(), pipes: e.opts?.pipes,
-          pick: e.pipePickAt(q.x, q.y) };
+          pick: e.pipePickAt(q.x, q.y), dead: false };
       }, pt);
       lastSt = st;
-      return st.s !== null;
-    }, { timeout: 4000, intervals: [200] }).toBe(true).catch((e: Error) => {
-      throw new Error(`immediate-highlight: hover stayed null — last state ` +
-        JSON.stringify(lastSt) + ` (cause: ${e.message.slice(0, 80)})`);
-    });
+      hoverOn = st.s !== null;
+      // a LIVE engine answering null while its own pick law confirms the
+      // cable at this pixel = the real violation — fail fast, keep budget
+      if (!hoverOn && !st.dead && st.pick === pick!.pi) aliveNulls++;
+    }
+    expect(hoverOn, `immediate-highlight: hover stayed null — last state ` +
+      JSON.stringify(lastSt)).toBe(true);
     // 2 s dwell → beginWireXray: geometry in FRONT of the cable's parts is
     // cut away AND the transition fires the cursor-surge (cablePulse: one
     // travelling pulse EACH way from the interior anchor = ≥ 2).
@@ -374,12 +394,15 @@ test.describe('wire overview, hover labels, disconnect / reconnect @ui', () => {
       .toMatchObject({ on: false, cuts: 0, overlays: 0 });
   });
 
-  test('v1.11.7 a cable into a ONE-WAY input pulses ONE WAY (no bouncing off the junction)',
+  test('v1.11.7 a cable into a ONE-WAY input pulses ONE WAY (no bouncing off the junction) @slow',
     async ({ page }) => {
       // we: "If the input is towards a one-way (e.g. bridge/LV junction)
       // the flow shouldn't bounce between, but one way from in->out"
+      // v1.11.8 @slow: migrating to x-ray fixture 9000007001 (pipe 1 is the
+      // battery→lowvoltage-INPUT positive, pipes 2/3 the directed/undirected
+      // negatives — flowDirs verified ['both','ab','ab','both']; REWRITE §P7.3).
       desktopOnly();
-      test.setTimeout(120_000);
+      test.setTimeout(240_000);
       await openWire(page, TRUCK);
       const cands = await page.evaluate(() => {
         const e = (window as unknown as { __ARCHEAN__: { engine: {

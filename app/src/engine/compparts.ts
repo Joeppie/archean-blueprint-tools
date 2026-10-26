@@ -97,7 +97,6 @@ export function qAxisAngle(axis: V3, angle: number): FileQuat {
 export const fileToViewQuat = toViewQuat;
 
 const JUNCTION_TYPES: ReadonlySet<string> = new Set(['FluidJunction']);
-const WHEEL_TYPES: ReadonlySet<string> = new Set(['SmallWheel', 'Wheel', 'BigWheel']);
 
 /**
  * The DISPLAY quaternion (view space) for a component whose file quaternion
@@ -128,9 +127,15 @@ export function displayQuat(type: string, qView: FileQuat, qFile: FileQuat,
     // the byte-identical ISW modern junction still render identically flat)
   if (type === 'ToggleButton')
     return qMul(qView, { w: 0, x: 0, y: 1, z: 0 });                 // yaw-180 flush mount
-  if (WHEEL_TYPES.has(type) && !legacy) {
-    // wheel content rides the engine content basis C (x,z,−y): the suspension
-    // arm is file +ŷ → C → −ẑ; the axle file x̂ is C-invariant.
+  if (type === 'SmallWheel' && !legacy) {
+    // CASTER droop roll — validated in-game for the SmallWheel casters ONLY
+    // (ISW front casters, v0.134/v0.139; v1.11.5 kept the roll for that
+    // case). v1.11.8 (we: "the front-wheel of the F18 seems to be rotated
+    // wrong"): the F/A-18F nose gear 'Wheel' pair passed this gate and the
+    // arm→down roll spun the wheel ±90° about its axle — the big gear
+    // wheels are not drooping casters, they ride the plain view law
+    // (v1.11.5: "compparts.ts places wheels by the plain view law").
+    // The suspension arm is file +ŷ → C → −ẑ; the axle file x̂ is C-invariant.
     const A = qRot(qView, [1, 0, 0]);               // world axle direction
     const U = qRot(qView, [0, 0, -1]);              // world suspension-arm direction
     const c = -U[1]!;                               // cos/sin of the arm→down roll

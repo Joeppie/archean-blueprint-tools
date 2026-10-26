@@ -60,8 +60,9 @@ import { cornerOf, triCorners, type Corner } from './tris';
 import { gridPlan, pxPerMeter } from './grid';
 import {
   captureJrefs, eulerZYX, flattenComponents, jointNodeAxis, jointNodeSlide,
-  masterJointState, subBlockBBox, subJointPose, subMasterEntries,
-  type JRef, type SubBBox, type FlatEntry,
+  masterJointState, rigChainOfPath, rigPush, RIG_ID,
+  subBlockBBoxRigs, subJointPose, subMasterEntries,
+  type JRef, type RigChain, type SubBBox, type FlatEntry,
 } from './subgrid';
 import { pipeSockets } from './sockets';
 import {
@@ -780,11 +781,21 @@ export class Engine {
     canvas.width = 1024; canvas.height = 512;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    const sky = ctx.createLinearGradient(0, 0, 0, canvas.height);
-    for (const [stop, col] of [[0.0, '#2f6ea8'], [0.3, '#6ba3cf'], [0.47, '#b9d4e6'],
-      [0.5, '#d8cdb4'], [0.54, '#b39b74'], [0.75, '#8d7452'], [1.0, '#6b563c']] as const)
-      sky.addColorStop(stop, col);
-    ctx.fillStyle = sky;
+    // v1.11.8 hardening: under heavy parallel headload the offscreen 2-D
+    // context can hand back a gradient object whose addColorStop throws a
+    // DOMException (observed in the Chromium/SwiftShader e2e lane, on the
+    // context-RESTORE re-bake). Every stop is finite by construction, so a
+    // throw is context flake — degrade to the flat sky colour and retry on
+    // the next restore rather than killing the app (an uncaught throw here
+    // inside the restore/RAF path unmounts the Viewport: __ARCHEAN__ dies
+    // mid-spec, which is what the wire:279 trace showed).
+    try {
+      const sky = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      for (const [stop, col] of [[0.0, '#2f6ea8'], [0.3, '#6ba3cf'], [0.47, '#b9d4e6'],
+        [0.5, '#d8cdb4'], [0.54, '#b39b74'], [0.75, '#8d7452'], [1.0, '#6b563c']] as const)
+        sky.addColorStop(stop, col);
+      ctx.fillStyle = sky;
+    } catch { ctx.fillStyle = '#8fb4d8'; }
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     // sun halo where the directional light comes from (dev LIGHT_DIRECTION
     // (0.5, 0.72, 0.36) normalised, equirectangular placement)
@@ -793,11 +804,13 @@ export class Engine {
     const theta = Math.atan2(d.z, -d.x);
     const cx = canvas.width * (((theta / (Math.PI * 2)) % 1 + 1) % 1);
     const cy = canvas.height * (phi / Math.PI);
-    const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, canvas.height * 0.4);
-    glow.addColorStop(0, 'rgba(255,250,232,0.9)');
-    glow.addColorStop(1, 'rgba(255,250,232,0)');
-    ctx.fillStyle = glow;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    try {
+      const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, canvas.height * 0.4);
+      glow.addColorStop(0, 'rgba(255,250,232,0.9)');
+      glow.addColorStop(1, 'rgba(255,250,232,0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    } catch { /* halo is cosmetic — skip the pass on a flaked context */ }
     const tex = new CanvasTexture(canvas);
     tex.colorSpace = SRGBColorSpace;
     tex.mapping = EquirectangularReflectionMapping;
@@ -807,7 +820,22 @@ export class Engine {
     tex.dispose();
   }
 
-  private onRestore = () => { this.bakeEnv(); this.invalidate(); };
+    // v1.11.8: a WebGL context RESTORE (driver reclaim under parallel head
+    // load — every e2e lane shares the iGPU/SwiftShader) re-bakes the env.
+    // Debounced; the re-bake is self-healing (bakeEnv self-catches its 2-D
+    // flake), and one guarded retry runs after the context settles.
+  private restoreT: ReturnType<typeof setTimeout> | null = null;
+  private onRestore = () => {
+    if (this.restoreT) clearTimeout(this.restoreT);
+    this.restoreT = setTimeout(() => {
+      this.restoreT = null;
+      this.bakeEnv();
+      this.invalidate();
+    }, 250);
+    // one guarded retry: a restored renderer may need the PMREM rebuilt
+    // after the context settles (bakeEnv self-catches its own 2-D flake)
+    setTimeout(() => { this.bakeEnv(); this.invalidate(); }, 1500);
+  };
 
   /** one PbrSpec → MeshStandardMaterial (palette r/g/b are LINEAR albedo —
    *  never sRGB-decode; every surface reads the SKY env at intensity 1,
@@ -1080,23 +1108,34 @@ void main() {
       const topIdx = Array.isArray(p) && p.length > 3 ? p[2] as number : -1;
       const g = topIdx >= 0 ? this.subGroups.get(topIdx) : undefined;
       if (!g) return e;
+      // v1.11.8 THE RIG CHAIN: a part nested inside a nested Build rides
+      // that whole chain (subgrid.ts rigChainOfPath = dev readBuild's
+      // parentWorld · compose(position, orientation) over the nesting);
+      // the top-level group pose composes OUTSIDE it, so the harness
+      // sockets — and the recorded tips riding them — land on the rigged
+      // (e.g. retracted) pose, exactly where the part renders.
+      const chain = rigChainOfPath(bp, p);
+      const rigT = new Vector3(chain.t[0], chain.t[1], chain.t[2]);
+      const rigQ = new Quaternion(chain.q.x, chain.q.y, chain.q.z, chain.q.w);
       const v = new Vector3(e.comp.position.x, e.comp.position.y, e.comp.position.z)
+        .applyQuaternion(rigQ).add(rigT)
         .applyQuaternion(g.quaternion)
         .add(new Vector3(g.position.x - this.moff.x, g.position.y - this.moff.y,
           g.position.z - this.moff.z));
       const q = new Quaternion(e.comp.orientation.x, e.comp.orientation.y,
-        e.comp.orientation.z, e.comp.orientation.w).premultiply(g.quaternion);
-      // THE HARNESS ATTACH (sockets.ts): the group's rigid file▸display
+        e.comp.orientation.z, e.comp.orientation.w).premultiply(rigQ).premultiply(g.quaternion);
+      // THE HARNESS ATTACH (sockets.ts): the chain∘group rigid file▸display
       // transform — the recorded cable tip rides it, so the harness follows
-      // the door continuously instead of re-seating past 0.45 m
-      const t = new Vector3(g.position.x - this.moff.x, g.position.y - this.moff.y,
+      // the door/leg continuously instead of re-seating past 0.45 m
+      const gp = new Vector3(g.position.x - this.moff.x, g.position.y - this.moff.y,
         g.position.z - this.moff.z);
+      const t = rigT.clone().applyQuaternion(g.quaternion).add(gp);
+      const aq = g.quaternion.clone().multiply(rigQ);
       return { ...e, comp: { ...e.comp,
         position: { x: v.x, y: v.y, z: v.z },
         orientation: { w: q.w, x: q.x, y: q.y, z: q.z } },
       attach: { t: [t.x, t.y, t.z] as [number, number, number],
-        q: [g.quaternion.w, g.quaternion.x, g.quaternion.y, g.quaternion.z] as
-          [number, number, number, number] } };
+        q: [aq.w, aq.x, aq.y, aq.z] as [number, number, number, number] } };
     });
     const net = buildPipes(bp.data.pipes, pipeSockets(bp.data.pipes, sockFlat, this.atlasRef?.manifest ?? null));
     this.pipeNet = net;
@@ -1265,6 +1304,9 @@ void main() {
       // polylines (the sag pins measure the midpoint dip below the chord)
       reroute: net.reroute, draped: net.draped,
       polys: net.polys.map(pt => pt.map(v => [...v] as number[])),
+      // the net-index → data.pipes index map + drawn radii (census probes
+      // resolve a FILE pipe index through them; same law the flow picks use)
+      piOf: net.piOf, radii: net.radii,
       round: net.segs.filter(s => !s.box).length,
       square: net.segs.filter(s => s.box).length,
       metal: net.segs.filter(s => s.metal).length,
@@ -2159,6 +2201,10 @@ void main() {
   private buildSubgrids(bp: Blueprint) {
     const masters = subMasterEntries(bp);
     const manifest = this.atlasRef?.manifest ?? null;
+    // v1.11.8: component identity → flattened (dev readBuild) index for the
+    // nested proxy groups' userData.ci (rig-pair audit + pick parity)
+    const flatIndexOf = new Map<BlueprintComponent, number>();
+    flattenComponents(bp).forEach((e, k) => { if (!flatIndexOf.has(e.comp)) flatIndexOf.set(e.comp, k); });
     let sn = 0;
     this.subPartCount = 0;
     bp.data.components.forEach((c, bi) => {
@@ -2190,7 +2236,7 @@ void main() {
       // references (the top level), which is why Chip's NEXT file (and
       // every file all along) showed the pink doors unchanged.
       const nestedPal = (c.data?.['colors'] as Blueprint['data']['colors'] | undefined) ?? null;
-      const addSolids = (src: Blueprint) => {
+      const addSolids = (src: Blueprint, parent: Group) => {
         const solids = buildSolids(src);
         for (const b of solids.buckets.values()) {
           const gg = new BufferGeometry();
@@ -2198,34 +2244,51 @@ void main() {
           gg.setAttribute('normal', new BufferAttribute(new Float32Array(b.normals), 3));
           gg.setIndex(b.indices);
           const m = new Mesh(gg, this.mat(pbr(b.color), { side: DoubleSide }));
-          g.add(m);                                     // pick walks up to the sub group
+          parent.add(m);                                // pick walks up to the sub group
         }
       };
-      addSolids({ data: { blocks, triangles: nestedTris, colors: nestedPal } } as unknown as Blueprint);
+      addSolids({ data: { blocks, triangles: nestedTris, colors: nestedPal } } as unknown as Blueprint, g);
       // v1.11.6 SUBGRID OF A SUBGRID (we: the Dorito SSTO's front wheels —
       // Wheels two Builds deep, never rendered): a Build inside subgrid
       // CONTENT is an assembly node, not a construction ghost — its
       // blocks/skin render too, through ITS OWN palette (v1.11.0 scoping
       // per build at every depth), and the recursion continues. Only the
       // top-level Build entry stays a geometry-less ghost.
-      const walkBuildSolids = (list: BlueprintComponent[], depth: number): void => {
+      // v1.11.8 THE RIG CHAIN: the assembly node also carries the game's
+      // transform for its content — the nested Build's raw position + RAW
+      // quaternion, composed down the nesting (dev blueprint.js readBuild:
+      // world = parentWorld · compose(position, orientation); top-level
+      // build = identity = v0.168). Identity benches nest as identity
+      // groups (XYQ/dolphin/Badger byte-identical); rig benches (the
+      // F/A-18F's gear legs, subgrid.ts header) fold to the saved pose.
+      const rigGroup = (sc: BlueprintComponent): Group => {
+        const cg = new Group();
+        cg.position.set(sc.position.x, sc.position.y, sc.position.z);
+        const q = sc.orientation ?? { w: 1, x: 0, y: 0, z: 0 };
+        cg.quaternion.set(q.x, q.y, q.z, q.w);
+        cg.userData = { rig: true };
+        return cg;
+      };
+      const walkBuildSolids = (list: BlueprintComponent[], depth: number, parent: Group): void => {
         for (const sc of list) {
           if (sc.type !== 'Build' || depth >= 8) continue;
+          const cg = rigGroup(sc);
+          parent.add(cg);
           addSolids({ data: {
             blocks: (sc.data?.['blocks'] as Blueprint['data']['blocks'] | undefined) ?? [],
             triangles: (sc.data?.['triangles'] as Blueprint['data']['triangles'] | undefined) ?? [],
             colors: (sc.data?.['colors'] as Blueprint['data']['colors'] | undefined) ?? null,
-          } } as unknown as Blueprint);
-          walkBuildSolids((sc.data?.['components'] as BlueprintComponent[] | undefined) ?? [], depth + 1);
+          } } as unknown as Blueprint, cg);
+          walkBuildSolids((sc.data?.['components'] as BlueprintComponent[] | undefined) ?? [], depth + 1, cg);
         }
       };
-      walkBuildSolids(nested, 0);
+      walkBuildSolids(nested, 0, g);
       // heavy-craft tier: the nested parts are NOT selection targets anyway
       // (their proxies route clicks to the SUBGRID), so merge every stand-in
       // box into one mesh per paint colour — 659 individual boxes on the
       // Stratolaunch blew the phone draw budget the moment subgrids landed.
       const merged = new Map<string, { spec: PbrSpec; geos: BufferGeometry[] }>();
-      const mergeStands = this.heavy ? (sc: BlueprintComponent) => {
+      const mergeStands = this.heavy ? (sc: BlueprintComponent, chain: RigChain) => {
         const spec = nodeMaterialSpec(sc, 'color1', undefined, this.palette, this.legacy, STAND_IN_HEX);
         const key = JSON.stringify([spec.color, spec.metal, spec.rough, spec.opacity]);
         const box = standInBox(sc, manifest?.[sc.type]);
@@ -2238,20 +2301,39 @@ void main() {
           new Quaternion(q.x, q.y, q.z, q.w),
           new Vector3(1, 1, 1),
         ));   // no baked mirror since v0.180 — winding stays as authored
+        // v1.11.8: the heavy tier merges into g, so the rig chain of the
+        // part's nesting is BAKED into the geometry (the live-tier chain
+        // groups carry it for everyone else)
+        if (chain.t[0] || chain.t[1] || chain.t[2]
+          || chain.q.x || chain.q.y || chain.q.z || chain.q.w !== 1) {
+          bg.applyMatrix4(new Matrix4().compose(
+            new Vector3(chain.t[0], chain.t[1], chain.t[2]),
+            new Quaternion(chain.q.x, chain.q.y, chain.q.z, chain.q.w),
+            new Vector3(1, 1, 1),
+          ));
+        }
         const lst = merged.get(key);
         if (lst) lst.geos.push(bg); else merged.set(key, { spec, geos: [bg] });
       } : null;
-      const renderSubParts = (list: BlueprintComponent[], depth: number): void => {
+      const renderSubParts = (list: BlueprintComponent[], depth: number, parent: Group, chain: RigChain): void => {
       for (const sc of list) {
         if (sc.type === 'Build') {
           // v1.11.6: a nested assembly node's PARTS render inside the
-          // owning top-level group (content coords are parent-frame
-          // absolute — the group transform carries the whole chain)
-          if (depth < 8) renderSubParts((sc.data?.['components'] as BlueprintComponent[] | undefined) ?? [], depth + 1);
+          // nesting. v1.11.8 THE RIG CHAIN: they ride the nested Build's
+          // raw pose (rigGroup), recursively — dev readBuild's
+          // parentWorld · compose(position, orientation); an identity
+          // bench (XYQ harness, dolphin fin internals, Badger) nests as
+          // an identity group and renders exactly as before.
+          if (depth < 8) {
+            const cg = rigGroup(sc);
+            parent.add(cg);
+            renderSubParts((sc.data?.['components'] as BlueprintComponent[] | undefined) ?? [],
+              depth + 1, cg, rigPush(chain, sc.position, sc.orientation ?? Q_ID));
+          }
           continue;
         }
         this.subPartCount++;
-        if (mergeStands) { mergeStands(sc); continue; }   // heavy tier: merged paint
+        if (mergeStands) { mergeStands(sc, chain); continue; }   // heavy tier: merged paint
         const qFile = sc.orientation ?? Q_ID;
         const m = new Group();
         m.position.set(sc.position.x, sc.position.y, sc.position.z);
@@ -2267,25 +2349,33 @@ void main() {
         stand.position.set(box.center[0], box.center[1], box.center[2]);
         stand.scale.set(box.size[0], box.size[1], box.size[2]);
         basis.add(stand);
-        g.add(m);
+        // v1.11.8: the flat (dev readBuild) index rides the proxy group for
+        // the rig-pair audit (tools/gearpair.mjs). A NEUTRAL key: pickRay
+        // walks up to userData.kind — the part must keep routing to the
+        // SUBGRID (v0.169), so kind stays reserved for that walk-up.
+        m.userData = { subComp: flatIndexOf.get(sc) ?? -1 };
+        parent.add(m);
         const mp = manifest?.[sc.type] ? this.atlasRef : null;
         if (mp && this.atlasRef) {
           const seq = this.loadSeq;
           void this.atlasRef.geoFor(sc.type).then(model => {
-            if (seq !== this.loadSeq || !model || !g.children.includes(m)) return;
+            if (seq !== this.loadSeq || !model || !parent.children.includes(m)) return;
             this.liveGeo.set(sc.type, model);
             const real = this.buildReal(sc, model, true);
             real.position.copy(m.position);
             real.quaternion.copy(m.quaternion);
-            Object.assign(real.userData, { real: true, noRaycast: true });   // keep jrefs
+            // subRealCi: NEUTRAL flat-index marker for the rig-pair audit
+            // (userData.kind stays reserved for the SUBGRID pick walk-up)
+            Object.assign(real.userData, { real: true, noRaycast: true,
+              subRealCi: flatIndexOf.get(sc) ?? -1 });
             m.visible = false;
-            g.add(real);
+            parent.add(real);
             this.invalidate();
           });
         }
       }
       };
-      renderSubParts(nested, 0);
+      renderSubParts(nested, 0, g, RIG_ID);
       // flush the merged stand-in paints (heavy tier): one mesh per colour
       for (const { spec, geos } of merged.values()) {
         const gg = geos.length > 1 ? mergeGeometries(geos, false) : geos[0];
@@ -2294,15 +2384,19 @@ void main() {
         g.add(new Mesh(gg, this.sharedMat(spec)));
       }
       // build-captured joint lines (v0.173-177 rules live in subgrid.ts)
-      const allBlocks = [...blocks];
-      const collectBlocks = (list: BlueprintComponent[], depth: number): void => {
+      // v1.11.8: block sets carry their rig chain, so the pivot clamping
+      // clamps onto where the panel content RIGS to, not the built cells.
+      const blockParts: { blocks: Blueprint['data']['blocks']; chain: RigChain }[] =
+        [{ blocks, chain: RIG_ID }];
+      const collectBlocks = (list: BlueprintComponent[], depth: number, chain: RigChain): void => {
         for (const sc of list) if (sc.type === 'Build' && depth < 8) {
-          allBlocks.push(...((sc.data?.['blocks'] as Blueprint['data']['blocks'] | undefined) ?? []));
-          collectBlocks((sc.data?.['components'] as BlueprintComponent[] | undefined) ?? [], depth + 1);
+          const scChain = rigPush(chain, sc.position, sc.orientation ?? Q_ID);
+          blockParts.push({ blocks: (sc.data?.['blocks'] as Blueprint['data']['blocks'] | undefined) ?? [], chain: scChain });
+          collectBlocks((sc.data?.['components'] as BlueprintComponent[] | undefined) ?? [], depth + 1, scChain);
         }
       };
-      collectBlocks(nested, 0);
-      const bb: SubBBox | null = subBlockBBox(allBlocks);
+      collectBlocks(nested, 0, RIG_ID);
+      const bb: SubBBox | null = subBlockBBoxRigs(blockParts);
       this.subJrefs.set(bi, captureJrefs(masters.get(bi) ?? [], bb, manifest, c.orientation ?? null,
         [c.position.x, c.position.y, c.position.z]));
     });

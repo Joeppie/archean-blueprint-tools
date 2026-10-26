@@ -1445,6 +1445,51 @@ topic + FORMAT).
   detector must use the flat builder's NESTED POSITIONS, not `index ≥
   topCount` (flattening shifts the LAST top-level entries past it).
   FORMAT §pipes carries both laws.
+- **v1.11.8 THE RIG CHAIN — nested Builds carry their content's transform
+  (we: "there are missing cables, or not rendered and a hinge that seems to
+  be in an incorrect position" + "the front-wheel of the F18 seems to be
+  rotated wrong" — F/A-18F 3521588534 gear, 2026-10-26):** content nested
+  inside a Build is NOT parent-frame absolute (v1.11.6's assumption) — the
+  Build carries a rigid transform: raw `position` + RAW quaternion,
+  composed down the nesting (dev blueprint.js readBuild is literal:
+  `world = parentWorld · compose(position, quaternion, 1)`, the top-level
+  readBuild starts at identity = v0.168 re-derived, and scene.js transforms
+  blocks/triangles/PIPES/components by `model.builds[b].matrix`). Law:
+  `subgrid.ts rigChainOfPath/rigPush/rigApply`; scene.ts: rig Groups in
+  `buildSubgrids` (heavy tier bakes the chain into the merged stand-ins),
+  chain∘group in the v1.11.5 harness attach (nested sockets AND the
+  recorded tips riding them), `subBlockBBoxRigs` pivot clamping. The
+  F/A-18 stores its gear legs as rigs 27°∘59.4°∘90°∘29.7° (telescoping
+  translations = the saved RETRACTED pose); its steering pivots + gear
+  harness routers sit ON the rigs' invariant lines (the chain leaves them
+  EXACTLY in place). v1.11.6 identity nesting stranded the nested pivots
+  mid-bay and buried the nested harness sockets (pipes 0/7/97/100/102/104/
+  269/276) inside the hull — the "missing cables". 13/117 crafts have rigs;
+  the 104 identity-bench crafts (XYQ doors, dolphin, Badger, gantry, truck
+  …) render byte-identical. AUDIT `app/tools/gearpair.mjs` (live app↔dev
+  world AABB centres of the streamed REAL models, paired by flattened
+  index): F/A-18 100/100 nested parts ≤ 0.177 (most 0.000–0.07; gear
+  wheels 0.000), the other 12 rig crafts 0 mismatches at tol 0.2 (baseline
+  3445304576 alone: 172). Two accepted audit classes: the 3481737379
+  LinearTrack row = the app shows the catapult carriage at its SAVED
+  data.pos (v1.10.2 joint state, game-faithful) where dev renders the
+  static construction pose; the giant's 85 rows = heavy-merge tier has no
+  per-part boxes (its v1.11.6 census pins cover it). NO top-level law
+  change: the v1.10.2 joint pose (master `.ini` axle, clamped pivot,
+  baked-angle deltas) stands — dev's raw TOP affine differs (≤ ~1 m) only
+  where the master is a control hinge and the bench turns about a builder
+  fold beam; in-game pixels arbitrate (GEAR-F-A18F.md). THE NOSE-GEAR FIX:
+  `displayQuat`'s caster arm→down roll (v0.134) fired on the F/A-18's big
+  `Wheel` pair (w=±0.707, y=∓0.707 — ±90°ŷ steering mounts passed the
+  gate) and yawed each wheel 90° about the longitudinal axis — the roll is
+  now SmallWheel-ONLY (validated in-game for casters; 'Wheel'/'BigWheel'
+  ride the plain view law per v1.11.5); nose wheels then pair with dev at
+  0.001 m and wheels.spec's 8 caster pins stay green. Pins: vitest
+  `rigchain.test.ts` (8: dev-verified literals (±2.599,−0.938,18.001),
+  invariant-axis parts, direct-children identity, corpus rig-craft census
+  ≤ 15/117, bbox equivalence) + `compparts.test.ts` wheel-gate (3);
+  @subgrid 6/6, @sym 4/4, cables/wire/@gizmo green, wheels.spec 8/8, vitest
+  666; version strings v1.11.2.
 - **v1.11.6 A SUBGRID OF A SUBGRID RENDERS (we: "there are wheels that do
   not seem to render where the front wheels of the doritos craft should
   be, is this because they are a subgrid of a subgrid (of a subgrid?)" —
@@ -1457,8 +1502,7 @@ topic + FORMAT).
   content is an ASSEMBLY NODE: its blocks/skin render through ITS OWN
   palette (v1.11.0 scoping at every depth) and its parts render
   (stand-ins, heavy-merge, streaming, pick routing) inside the owning
-  TOP-LEVEL group (content coords are parent-frame absolute at every
-  depth — v0.168; depth guard 8); nested-slave joins key to the hosting
+  TOP-LEVEL group (depth guard 8); nested-slave joins key to the hosting
   group via `path[2]`, so a gear subassembly animates with its bay on the
   host's joint chain; the captureJrefs bbox is the union over all depths.
   The v1.11.5 harness attach already resolves deep-nested sockets through
@@ -1466,7 +1510,9 @@ topic + FORMAT).
   .test 'joins to NESTED Builds key to the hosting top-level group' + e2e
   subride 'a SUBGRID OF A SUBGRID renders' (file-computed nested census ===
   the rendered census). FORMAT §Subgrids + §Format facts carry the
-  ASSEMBLY-NODE nuance.
+  ASSEMBLY-NODE nuance. THE 'parent-frame absolute at every depth' clause
+  is SUPERSEDED by the v1.11.8 rig chain (identity benches make it a
+  no-op there; content under a posed nested Build is rig-LOCAL).
 - **v1.11.4 THE DRAPE LAW HANGS EVERY CABLE (we: "loading
   ?craft=3308603448, the cables dont seem to hang, the connections are
   mis-identified somehow")**: triage (`app/tools/cabledrape.mjs`,
@@ -3579,6 +3625,37 @@ release/functionality. but no user-unackowledged bumps."** Concretely:
    widget on subgrids).
 3. `fitHull` must stay **generic**: zero per-craft constants. The exact lattice
    (W=12, pitch=CELL, C=−FRAME/2) passes on all 24 corpus files, not just ISW-241.
+
+## Test-size rule — ALWAYS as small as possible (user rule 2026-10-26)
+
+**"Tests MUST ALWAYS BE AS SMALL AS POSSIBLE — unit tests or e2e tests."**
+Every test runs at the SMALLEST tier that can express the law, in this
+order:
+
+1. **Unit test (vitest, plain node, no I/O)** — the DEFAULT tier. Any law
+   about math, data, formats, transforms, state machines, parsing is unit
+   testable; if it isn't, the code is too coupled — SPLIT the code (the
+   REWRITE.md §P7 plan: SceneGraph/interaction clocks out of the renderer
+   and React so they become unit-testable). Unit tests are milliseconds,
+   deterministic, and their failures name the law instantly.
+2. **Integration test (node, one dependency)** — only when a real
+   collaborator is part of the law (fs round-trips, doc serialization).
+3. **E2E (browser)** — ONLY for laws that physically cannot exist at any
+   lower tier: rendered pixels, WebGL/shader behaviour, real input
+   plumbing, and dev-pair audits (the other viewer is an external browser
+   app). One e2e per such law, on the SMALLEST fixture that exhibits it.
+
+Corollaries, always:
+- **Fixtures beat corpora.** Synthesise the minimal artifact that exhibits
+  the law (`tools/make_*_test.py` → `testdata/90000000NN` — e.g. x-ray
+  fixture 9000007001: one wall + two cables replaced a 2 200-part truck
+  spec). Real data is for the corpus sweeps (regtest, dev-pair audits), not
+  for feature pins.
+- **Never put a big craft in a test** unless the law IS size/complexity
+  (LITE-tier merging, load budgets). Scene boot of the truck/giant costs
+  seconds; every per-part scan multiplies it.
+- A slow test is a DESIGN SMELL, not a budget problem: the fix is the
+  lower tier + the smaller fixture, never a longer timeout.
 
 ## Conventions
 - **Say "we / us", never "the user"** (2026-10-23) — in replies, commit messages,

@@ -1,4 +1,4 @@
-# Archean Blueprint Tools · v1.11.1
+# Archean Blueprint Tools · v1.11.2
 
 **Reverse-engineered file format + a browser editor for workshop craft of
 [Archean](https://store.steampowered.com/app/2941660/Archean/)** —
@@ -47,7 +47,7 @@ after the commit, and a centroid widget moves/turns the whole prism.
 a part opens **+ Parts** (inspector) by itself. The ⌖ Lift widget scores
 the **sealed** envelope: block cells and skin triangles are flood-checked
 from the outside, so only gas the world cannot reach counts. Colours
-follow the game's day-light rig 1:1 (v1.11.1): the built-in palette,
+follow the game's day-light rig 1:1 (v1.11.2): the built-in palette,
 tone map and environment are transcribed from the developer's own
 viewer, so what you paint is what the game draws.
 
@@ -226,7 +226,7 @@ say-so**: green tests or merged work never imply one.
 
 ## Ideas welcome — open an issue!
 
-This is v1.11.1: the format is decoded and the editor is useful, but the good
+This is v1.11.2: the format is decoded and the editor is useful, but the good
 ideas are not all in yet. Feature requests, format questions, and craft that
 render wrong (attach the `blueprint.json`) are all best filed as
 [issues](https://github.com/Joeppie/archean-blueprint-tools/issues) — that is

@@ -60,6 +60,71 @@ export interface FlatEntry {
   path: (string | number)[];
 }
 
+// ------------------------------------------------- THE RIG CHAIN (v1.11.8)
+// A Build nested inside subgrid content is not only an assembly node
+// (v1.11.6) — the game also carries a rigid transform for it: the reference
+// reader (XenonViewer blueprint.js readBuild) computes every component's
+// world matrix as parentWorld · compose(position, orientation) with the
+// TOP-level build starting at identity, and transforms blocks, triangles,
+// pipes and components by their build's matrix (scene.js). The top-level
+// rule is exactly v0.168 (content parent-absolute, Build pose = display
+// offset composed on top); at NESTING DEPTH the same composition is the
+// assembly's pose — the builder's rig: raw position + RAW quaternion
+// (v1.5.11 law) at every level, no conjugation, no re-rooting.
+//
+// v1.11.6 rendered nested assemblies at identity and the content at file
+// coords — invisible on the identity-rig crafts (XYQ doors, dolphin fins,
+// Badger: nested benches are all (0,0,0)+identity) and WRONG on the rig
+// crafts: F/A-18F 3521588534 stores its gear legs as nested rigs
+// (27°∘59.4°∘90°∘29.7° with telescoping translations); identity renders
+// the legs as-built (deployed) with the steering pivots stranded mid-air
+// and the nested harness sockets buried in the hull (we: "there are
+// missing cables … and a hinge that seems to be in an incorrect position",
+// 2026-10-26). Measured vs the dev viewer's live scene: the rig chain lands
+// the nested Wheel origin at (2.13, −0.94, 18.72) file — dev renders its
+// box centred (1.79, −0.94, 18.19) = the chain + the model-centre offset
+// through the wheel quaternion; identity lands it at the file (1.79, −2,
+// 17.31). FORMAT §Subgrids carries the normative write-up.
+export interface RigChain {
+  t: V3;
+  q: FileQuat;
+}
+export const RIG_ID: RigChain = { t: [0, 0, 0], q: { w: 1, x: 0, y: 0, z: 0 } };
+/** append one Build level: world = parent · compose(pos, quat) */
+export function rigPush(chain: RigChain, pos: { x: number; y: number; z: number }, quat: FileQuat): RigChain {
+  const r = qRot(chain.q, [pos.x, pos.y, pos.z] as V3);
+  return { t: [chain.t[0] + r[0], chain.t[1] + r[1], chain.t[2] + r[2]] as V3,
+    q: qMul(chain.q, quat) };
+}
+export function rigApply(chain: RigChain, v: V3): V3 {
+  const r = qRot(chain.q, v);
+  return [chain.t[0] + r[0], chain.t[1] + r[1], chain.t[2] + r[2]] as V3;
+}
+/** the rig chain of a nested entry from its doc path: ['data','components',
+ *  top, ('data','components',k)…] — every NESTED Build level between the
+ *  top-level component and the entry contributes its raw pose. The
+ *  top-level Build's own pose is NOT in it: in the app the entry's top
+ *  group already carries it (the v1.10.2 joint pose, which at load equals
+ *  the top build's baked bench affine), so composing it here would double
+ *  it. Direct children of the top build chain = identity (they ride g). */
+export function rigChainOfPath(bp: Blueprint, path: (string | number)[]): RigChain {
+  let chain: RigChain = RIG_ID;
+  let list: BlueprintComponent[] = bp.data.components;
+  for (let i = 2; i <= path.length - 4; i += 3) {
+    // path segments: 'data','components',idx — positions 2,5,…,len−4 are
+    // the BUILDS the entry nests in (the last triple is the entry itself).
+    // i=2 is the top-level component: its pose is the app's group
+    // transform (v1.10.2), so it is NOT pushed into the chain.
+    const c = list[path[i] as number];
+    if (!c) break;
+    const sub = c.data?.['components'] as BlueprintComponent[] | undefined;
+    if (!sub) break;
+    if (i > 2) chain = rigPush(chain, c.position, c.orientation ?? { w: 1, x: 0, y: 0, z: 0 });
+    list = sub;
+  }
+  return chain;
+}
+
 /** dev readBuild order: for every component, recurse into a Build's nested
  *  components FIRST, then push — nested content numbers before its Build. */
 export function flattenComponents(bp: Blueprint): FlatEntry[] {
@@ -243,6 +308,36 @@ export function subBlockBBox(blocks: Block[] | undefined): SubBBox | null {
   return min && max ? { min: min as V3, max: max as V3 } : null;
 }
 
+/** v1.11.8 THE RIG CHAIN variant: bbox over block sets each carried through
+ *  its own Build-nesting chain (all 8 corners — a rig rotation breaks the
+ *  axis-aligned 2-corner shortcut). Feeds captureJrefs' pivot clamping so
+ *  the joint line clamps onto where the panel content RIGS to, not where
+ *  the file's built-pose cells sit. */
+export function subBlockBBoxRigs(
+  parts: { blocks: Block[] | undefined; chain: RigChain }[],
+): SubBBox | null {
+  let min: V3 | null = null, max: V3 | null = null;
+  const grow = (p: V3) => {
+    if (!min || !max) { min = [p[0]!, p[1]!, p[2]!]; max = [p[0]!, p[1]!, p[2]!]; return; }
+    const m: V3 = min, x: V3 = max;
+    min = [Math.min(m[0]!, p[0]!), Math.min(m[1]!, p[1]!), Math.min(m[2]!, p[2]!)];
+    max = [Math.max(x[0]!, p[0]!), Math.max(x[1]!, p[1]!), Math.max(x[2]!, p[2]!)];
+  };
+  for (const { blocks, chain } of parts) {
+    for (const b of blocks ?? []) {
+      if ((b.type ?? 0) === 255) continue;
+      for (const sx of [0, b.size_x + 1]) for (const sy of [0, b.size_y + 1]) for (const sz of [0, b.size_z + 1]) {
+        grow(rigApply(chain, [
+          (b.pos_x + sx + (b.frame_x ?? 0) * CELLS_PER_FRAME - 5.5) * CELL,
+          (b.pos_y + sy + (b.frame_y ?? 0) * CELLS_PER_FRAME - 5.5) * CELL,
+          (b.pos_z + sz + (b.frame_z ?? 0) * CELLS_PER_FRAME - 5.5) * CELL,
+        ] as V3));
+      }
+    }
+  }
+  return min && max ? { min: min as V3, max: max as V3 } : null;
+}
+
 /** Build-captured joint line for ONE (subgrid, master) pair — captured once
  *  per load (legacy userData.jref), replayed by subJointPose as the master's
  *  angle/slide/pose change. */
@@ -327,6 +422,27 @@ export function captureJrefs(
     const authoredAngle = typeof mc.data?.['angle'] === 'number' ? (mc.data['angle'] as number) : 0;
     const authoredSlide = typeof mc.data?.['pos'] === 'number' ? (mc.data['pos'] as number) : 0;
     let pivot0 = j0.pivot;
+    // v1.11.8 LAW-COLLINEAR BENCH ANCHOR (the F/A-18F bay/wing audit,
+    // GEAR-F-A18F.md): where the bench's rotation axis is parallel to the
+    // joint's law axis (the v1.10.2 census-exact class, 157/166), the
+    // bench's fixed line IS the game's hinge line — the affine
+    // T(benchPos)·R(bench) equals a rotation about THAT line, which is what
+    // the reference reader composes for every part of the panel. Take the
+    // perpendicular anchor from the bench (the along-line coord is the
+    // master pivot's — free on the line, kept for stability). Construction-
+    // flip benches (XYQ's 90° ⟂ flip, dolphin's construction flips) fail
+    // the collinearity test and keep the clamped-axle line (v0.173) — the
+    // in-game-validated path.
+    const benchLawParallel = (() => {
+      if (!bench || !benchPos) return false;
+      let { w, x, y, z } = bench;
+      if (w < 0) { w = -w; x = -x; y = -y; z = -z; }
+      const s = Math.hypot(x, y, z);
+      if (s < 1e-6) return false;
+      void w;
+      const dot = Math.abs((x * j0.axis[0]! + y * j0.axis[1]! + z * j0.axis[2]!) / s);
+      return dot > 0.99;
+    })();
     if (bb) {                                          // panel: clamp the line onto the content
       const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
       pivot0 = [
@@ -334,6 +450,19 @@ export function captureJrefs(
         clamp(j0.pivot[1], bb.min[1], bb.max[1]),
         clamp(j0.pivot[2], bb.min[2], bb.max[2]),
       ];
+      if (benchLawParallel) {
+        const c = benchFixedPoint();
+        if (c) {
+          const a = j0.axis;
+          const wv = [pivot0[0]! - c[0]!, pivot0[1]! - c[1]!, pivot0[2]! - c[2]!];
+          const par = wv[0]! * a[0]! + wv[1]! * a[1]! + wv[2]! * a[2]!;
+          pivot0 = [
+            pivot0[0]! - (wv[0]! - par * a[0]!),
+            pivot0[1]! - (wv[1]! - par * a[1]!),
+            pivot0[2]! - (wv[2]! - par * a[2]!),
+          ];
+        }
+      }
     }
     // parts-only subgrids (no blocks) ride the UNCLAMPED axle — the Badger's
     // triangle skins proved the game's hinge line sits on the part's own
