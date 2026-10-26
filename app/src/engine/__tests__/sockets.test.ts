@@ -10,7 +10,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { adapterSocket, KIND_RADIUS, manifestAdapter, pipeSockets, plugAnchor, TAN_MAX,
-  TIP_MAX, type SocketAnchor } from '../sockets';
+  TIP_MAX, type SocketAnchor, type V3 } from '../sockets';
 import { flattenComponents } from '../subgrid';
 import type { Blueprint } from '../format';
 import type { ModelManifest } from '../models';
@@ -185,5 +185,37 @@ describe.skipIf(!MANIFEST)('the corpus sweep — 18k+ recorded tips prove the la
       socks.forEach(sk => { if (sk?.a?.kind === 'fluid' || sk?.b?.kind === 'fluid') fluidEnds++; });
     }
     expect(fluidEnds).toBeGreaterThan(10);
+  });
+});
+
+describe('THE HARNESS ATTACH (v1.11.5: subgrid tips ride the door)', () => {
+  // we: "it goes to the OLD position of that pivot, rather than its actual
+  // current one; cable positions do not seem to correctly update."
+  const rec: V3 = [1, 2, 3];                              // tip on a closed door
+  const R90Z: readonly [number, number, number, number] =
+    [Math.SQRT1_2, 0, 0, Math.SQRT1_2];                   // door swung 90° about z
+  const T: V3 = [0.5, 0, 0];                              // + group translation
+
+  test('an ATTACHED tip is transformed with the part (rides it, no snap)', () => {
+    // the display socket = the file socket moved by the SAME transform
+    // the file socket sits 0.05 m out ([1.05,2,3]); its DISPLAY position is
+    // Rz90 about the world z (x,y)→(−y,x) then + T: [−2,1.05,3] → [−1.5,1.05,3]
+    const dispSock: V3 = [-1.5, 1.05, 3];
+    const sock: SocketAnchor = {
+      at: dispSock, axis: [0, 1, 0], kind: 'data', attach: { t: T, q: R90Z },
+    };
+    const p = plugAnchor(rec, sock, 0.02);
+    expect(p.stale, 'the tip rides the door — NOT re-seated').toBe(false);
+    // tip = Rz90(rec) + T exactly (rotation about the world z through the
+    // origin here: [x,y] → [−y, x]; rec = [1,2,3] → [−2,1,3] + [0.5,0,0])
+    expect(p.tip[0]).toBeCloseTo(-1.5, 9);
+    expect(p.tip[1]).toBeCloseTo(1, 9);
+    expect(p.tip[2]).toBeCloseTo(3, 9);
+  });
+  test('without attach the top-level law is untouched (recorded kept)', () => {
+    const sock: SocketAnchor = { at: [1.05, 2, 3], axis: [0, 0, 1], kind: 'data' };
+    const p = plugAnchor(rec, sock, 0.02);
+    expect(p.tip).toEqual(rec);
+    expect(p.stale).toBe(false);
   });
 });

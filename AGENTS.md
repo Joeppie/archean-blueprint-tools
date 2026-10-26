@@ -1416,6 +1416,35 @@ topic + FORMAT).
   re-pin: the truck's round-vs-square bar AGGREGATE shifted with the
   draped item ducts, the species law is the per-kind majority rows
   (already pinned). FORMAT §pipes 'THE DRAPE LAW' is normative.
+- **v1.11.5 THE FLEX GATE + THE HARNESS ATTACH (we: "You drapped cables
+  that are NOT flexible, and the ones that should drape, do, but they
+  connect to the wrong spot" + "the cable to the small pivot goes to the
+  OLD position; it does to the OLD position of that pivot, rather than its
+  actual current one"):** (a) THE GATE IS THE FILE'S `flexible` FLAG —
+  appearance law (we: "they are either axis aligned pipes OR flexible
+  cables in appearance"): only `flexible` runs hang (the corpus law: the
+  flag occurs on EXACTLY the 2-segment pairs, 1126/1126); routed runs are
+  the rigid conduit — the recorded builder-cache route draws VERBATIM
+  (axis-aligned bars) with stale ends re-seated + axial leads. The
+  v1.11.4 drape-all is RETRACTED (net.draped = flex runs, net.reroute =
+  flex re-hangs; pins: routed runs emit axis-aligned bars only, flex
+  chains hang + reach the moved plug). (b) THE HARNESS ATTACH (sockets.ts
+  SocketAnchor.attach + plugAnchor): a SUBGRID part's adapter resolves
+  through the owning Build group's DISPLAY transform (file-space: pose
+  minus moff; buildPipesMesh builds `sockFlat` from subGroups), and the
+  anchor carries that rigid transform — plugAnchor transforms the RECORDED
+  TIP by it, so a door harness RIDES ITS DOOR continuously (measured
+  XYQ-615: the file caches tips at the BUILT pose — the tip sits at the
+  adapter offset from the FILE spot, 1.07 m from the display spot with
+  the door saved open 24.3° — the 0.45 m re-seat band is top-level cache
+  repair, not a harness law). The pipe mesh builds AFTER buildSubgrids
+  (load order) and rebuildPipes re-reads live group poses → hinge drags
+  follow through pipesSoon. Pins: sockets.test 'THE HARNESS ATTACH', e2e
+  pipes 'a DOOR HARNESS hangs from the door's LIVE pose' (XYQ: +40° swing
+  moves the end 1.7 m, restore 1e-6, leads clean) — the pin's nested
+  detector must use the flat builder's NESTED POSITIONS, not `index ≥
+  topCount` (flattening shifts the LAST top-level entries past it).
+  FORMAT §pipes carries both laws.
 - **v1.11.4 THE DRAPE LAW HANGS EVERY CABLE (we: "loading
   ?craft=3308603448, the cables dont seem to hang, the connections are
   mis-identified somehow")**: triage (`app/tools/cabledrape.mjs`,

@@ -49,15 +49,18 @@ The dock has three columns (they stack on a phone):
 
 ## How cables hang (v1.11)
 
-Cables behave like cables: every cable whose two plugs sit on resolvable
-connectors is drawn as a live rope — it follows its connectors, and hangs
-as a proper hanging-curve with sag set by how much cable there is for the
-gap (loose fit = deep sag; plugs farther apart than the cable = pulled
-straight and taut). Drag a part and its cables ride with it and re-hang.
-A cable always leaves and enters its connector along the connector's stub
-axis (a short straight lead in the cable's radius before any bend); a
-cable with an unresolvable far end keeps its authored route. The search
-words: sag, hang, drape, catenary, taut, physics.
+Cables come in two kinds, exactly as in the game, and the file says which
+is which: **rigid conduit** (axis-aligned pipes — the recorded route
+draws verbatim) and **flexible cables** (the file's `flexible` flag) —
+those are drawn as live ropes: they hang as a proper hanging-curve with
+sag set by how much cable there is for the gap (loose fit = deep sag;
+plugs farther apart than the cable = pulled straight and taut). Drag a
+part and its cables ride with it and re-hang; a cable bolted to a DOOR or
+hatch (a subgrid) follows the door as it swings — the harness plugs into
+the connector's LIVE position, not its closed-door spot. A cable always
+leaves and enters its connector along the connector's stub axis (a short
+straight lead in the cable's radius before any bend). The search words:
+sag, hang, drape, catenary, taut, physics, door harness.
 
 ## Logical candidates — the ranking, and why it never overrules you
 

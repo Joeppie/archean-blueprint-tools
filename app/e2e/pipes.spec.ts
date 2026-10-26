@@ -11,6 +11,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 const ISW = '3812927875';                    // fluid + data + lv + hv cables
 const TRUCK = '3481322297';                  // Classic American Semi: all five kinds
+const XYQ = '3803780241';                     // XYQ-615: door SUBGRIDS with flex harnesses
 
 interface PipeInfo {
   pipes: number; segs: number; joints: number; plugs: number; stale: number;
@@ -19,8 +20,10 @@ interface PipeInfo {
     radius: number; half: number }>;
   leads: { checked: number; bad: number };
   ends: { a: number[]; b: number[] }[];
-  /** v1.11.3 THE DRAPE LAW: runs re-draped + the drawn polylines */
+  /** THE DRAPE LAW: flex runs hung (draped), flex re-hangs after a move
+   *  (reroute), the drawn polylines */
   reroute: number;
+  draped: number;
   polys: number[][][];
 }
 const info = (page: Page) => page.evaluate(() => {
@@ -85,9 +88,9 @@ test.describe('cables render like the game and plug into their sockets', () => {
     expect(i.stale, 'but only a minority of the 750 ends').toBeLessThan(i.pipes);
     expect(i.leads.checked, 'plugs with an axial lead exist').toBeGreaterThan(0);
     expect(i.leads.bad, 'even the re-seated ones plug ALONG the connector axis').toBe(0);
-    // v1.11.3 THE DRAPE LAW: those stale runs are re-draped PHYSICALLY —
-    // the cable hangs by its rest length between the live sockets
-    expect(i.reroute, 'stale runs re-drape by the drape law').toBeGreaterThan(0);
+    // v1.11.5: the FLEXIBLE runs hang by their length (the routed
+    // axis-aligned pipes never do — the flexible flag gates the drape)
+    expect(i.draped, 'flex pairs hang on this craft').toBeGreaterThanOrEqual(40);
     const dips: number[] = [];
     for (const poly of i.polys as number[][][]) {
       if (poly.length < 4) continue;
@@ -109,7 +112,7 @@ test.describe('cables render like the game and plug into their sockets', () => {
     const r = await page.evaluate(() => {
       const eng = (window as unknown as { __ARCHEAN__?: { engine: {
         pipeInfo: () => { ends: { a: number[]; b: number[] }[];
-          leads: { checked: number; bad: number }; reroute: number };
+          leads: { checked: number; bad: number }; reroute: number; stale: number };
         blueprint: { data: { components: { position: { x: number; y: number; z: number } }[];
           pipes?: { type?: string; a_component: number }[] } };
         rebuildPipes: () => void;
@@ -124,23 +127,89 @@ test.describe('cables render like the game and plug into their sockets', () => {
       eng.rebuildPipes();
       const after = eng.pipeInfo().ends[pi]!.a;
       const leads = eng.pipeInfo().leads;
-      const rerouted = eng.pipeInfo().reroute;
+      const seated = eng.pipeInfo().stale;             // the moved end re-seated
       bp.data.components[ci]!.position.y -= 1.5;
       eng.rebuildPipes();
       const rest = eng.pipeInfo().ends[pi]!.a;
-      const back = eng.pipeInfo().reroute;
+      const back = eng.pipeInfo().stale;
       const d = (p: number[], q: readonly number[]) =>
         Math.hypot(p[0] - q[0]!, p[1] - q[1]!, p[2] - q[2]!);
       return { pi, moved: d([...before], after), restored: d([...before], rest),
-        leads, rerouted, back };
+        leads, seated, back };
     });
     expect(r.moved, 'the a-end rides the moved part (+1.5 m in y)').toBeGreaterThan(1.3);
     expect(r.moved, 'the a-end rides the moved part (+1.5 m in y)').toBeLessThan(1.7);
     expect(r.restored, 'restoring the part restores the cable end').toBeLessThan(1e-6);
     expect(r.leads.bad, 'the re-seated ends still connect ALONG the connector axis').toBe(0);
-    expect(r.rerouted, 'v1.11.3: the moved part re-drapes its cables (they FOLLOW the connection)')
+    expect(r.seated, 'the moved (rigid) cable end re-seats on the live socket')
       .toBeGreaterThan(0);
-    expect(r.back, 'restoring the part restores the recorded routes (no drape left behind)')
+    expect(r.back, 'restoring the part leaves nothing re-seated behind')
       .toBe(0);
   });
+
+  test('v1.11.5: a DOOR HARNESS hangs from the door\'s LIVE pose (the subgrid flex cables)',
+    async ({ page }) => {
+      // XYQ-615: the file's flexible cables run to parts INSIDE the door
+      // subgrids (flattened indices past the top-level count). The doors
+      // render at their hinge angle — the cable must plug into the moved
+      // connector and hang from it, not from the closed-door file spot.
+      await openCables(page, XYQ);
+      const r = await page.evaluate(() => {
+        const eng = (window as unknown as { __ARCHEAN__?: { engine: {
+          pipeInfo: () => { ends: { a: number[]; b: number[] }[];
+            leads: { checked: number; bad: number }; draped: number; reroute: number };
+          blueprint: { data: { alias?: string; components: Record<string, never>[];
+            pipes?: { a_component?: number; b_component?: number }[];
+            composite_builds?: { component: number; slaveBuildId: number }[] } };
+          rebuildPipes: () => void; syncSubJoints: () => void;
+        } } }).__ARCHEAN__!.engine;
+        const bp = eng.blueprint;
+        // the engine's flat order: nested content BEFORE its Build — the
+        // nested positions, NOT `index >= topCount` (flattening shifts the
+        // LAST top-level entries past it: a rigid top cable, the trap the
+        // first cut of this pin fell into)
+        const flat: { data?: { angle?: number }; type?: string }[] = [];
+        const isNested: boolean[] = [];
+        for (const c of bp.data.components) {
+          const inner = (c as { data?: { components?: Record<string, never>[] } }).data?.components;
+          if ((c as { type?: string }).type === 'Build' && inner)
+            for (const c2 of inner) { flat.push(c2); isNested.push(true); }
+          flat.push(c as { data?: { angle?: number }; type?: string }); isNested.push(false);
+        }
+        const pi = bp.data.pipes!.findIndex(p =>
+          isNested[p.a_component ?? -1] || isNested[p.b_component ?? -1])!;
+        const side = (isNested[bp.data.pipes![pi]!.a_component ?? -1] ? 'a' : 'b') as 'a' | 'b';
+        const end = () => eng.pipeInfo().ends[pi]![side];
+        const d = (p: number[], q: number[]) =>
+          Math.hypot(p[0]! - q[0]!, p[1]! - q[1]!, p[2]! - q[2]!);
+        const before = end();
+        let moved = 0, leadsBad = -1, restored = 1;
+        for (const j of bp.data.composite_builds ?? []) {
+          const m = flat[j.component] as { data?: { angle?: number } } | undefined;
+          if (typeof m?.data?.angle !== 'number') continue;
+          const a0 = m.data.angle;
+          m.data.angle = a0 + 40;                       // swing the door
+          eng.syncSubJoints();
+          eng.rebuildPipes();
+          const dd = d(before, end());
+          if (dd > 0.15) {
+            moved = dd;
+            leadsBad = eng.pipeInfo().leads.bad;
+            m.data.angle = a0;
+            eng.syncSubJoints();
+            eng.rebuildPipes();
+            restored = d(before, end());
+            break;
+          }
+          m.data.angle = a0;
+        }
+        const draped = eng.pipeInfo().draped;
+        return { pi, side, moved, leadsBad, restored, draped };
+      });
+      expect(r.pi, 'the craft has cables into its subgrid parts').toBeGreaterThanOrEqual(0);
+      expect(r.draped, 'the harness runs hang (flex pairs)').toBeGreaterThan(0);
+      expect(r.moved, 'the harness end rides the swung door').toBeGreaterThan(0.15);
+      expect(r.leadsBad, 'it plugs ALONG the moved connector axis').toBe(0);
+      expect(r.restored, 'closing the door restores the harness exactly').toBeLessThan(1e-6);
+    });
 });

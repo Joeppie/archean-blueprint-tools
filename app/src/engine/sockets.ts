@@ -38,6 +38,16 @@ export interface SocketAnchor {
   /** outward stub axis (unit, file frame): the direction a cable leaves the part */
   axis: V3;
   kind: WireKind;
+  /** v1.11.5 THE HARNESS ATTACH (we: "it goes to the OLD position of that
+   *  pivot, rather than its actual current one"): set when the port's part
+   *  lives in a SUBGRID and resolves at its DISPLAY pose — the rigid
+   *  file▸display transform of the owning group. The recorded cable tip is
+   *  RIGIDLY ATTACHED to the part: plugAnchor transforms the tip by the
+   *  same motion, so the cable rides the door CONTINUOUSLY (the 0.45 m
+   *  re-seat band is a cache-repair rule for top-level parts; a harness
+   *  that snapped only when the door swung far enough read as "connected
+   *  to the old spot"). */
+  attach?: { t: V3; q: readonly [number, number, number, number] };
 }
 
 /** the two sockets a pipe run plugs into (null = unresolvable: no manifest,
@@ -118,10 +128,16 @@ export function pipeSockets(
   if (!pipes?.length) return [];
   return pipes.map(p => {
     const side = (ci: number, port: string): SocketAnchor | null => {
-      const c = flat[ci]?.comp;
+      const e = flat[ci];
+      const c = e?.comp;
       if (!c) return null;
       const a = manifestAdapter(manifest, c.type, port);
-      return a ? adapterSocket(c.position, c.orientation, a) : null;
+      if (!a) return null;
+      const sock = adapterSocket(c.position, c.orientation, a);
+      // v1.11.5: a display-pose entry (subgrid part) carries the rigid
+      // attach transform for the recorded tip (see SocketAnchor.attach)
+      const att = (e as { attach?: { t: V3; q: readonly [number, number, number, number] } }).attach;
+      return att ? { ...sock, attach: att } : sock;
     };
     const a = side(p.a_component, p.a_port);
     const b = side(p.b_component, p.b_port);
@@ -159,13 +175,31 @@ export interface Plug {
   stale: boolean;
 }
 
+/** q · p · q⁻¹ (unit q as [w,x,y,z]) */
+function rotQ(q: readonly [number, number, number, number], p: V3): V3 {
+  const [w, x, y, z] = q;
+  // t = 2·(q_vec × p); p' = p + w·t + q_vec × t
+  const tx = 2 * (y * p[2] - z * p[1]), ty = 2 * (z * p[0] - x * p[2]), tz = 2 * (x * p[1] - y * p[0]);
+  return [
+    p[0] + w * tx + (y * tz - z * ty),
+    p[1] + w * ty + (z * tx - x * tz),
+    p[2] + w * tz + (x * ty - y * tx),
+  ];
+}
+
 export function plugAnchor(recorded: V3, s: SocketAnchor | null, radius: number): Plug {
   if (!s) return { tip: recorded, depth: 0, lead: 0, stale: false };
-  const dx = recorded[0] - s.at[0], dy = recorded[1] - s.at[1], dz = recorded[2] - s.at[2];
+  // v1.11.5: a subgrid part's tip rides the part (attach transform first)
+  let rec = recorded;
+  if (s.attach) {
+    const r = rotQ(s.attach.q, recorded);
+    rec = [r[0] + s.attach.t[0], r[1] + s.attach.t[1], r[2] + s.attach.t[2]];
+  }
+  const dx = rec[0] - s.at[0], dy = rec[1] - s.at[1], dz = rec[2] - s.at[2];
   const proj = dx * s.axis[0] + dy * s.axis[1] + dz * s.axis[2];
   const tan = Math.hypot(dx - proj * s.axis[0], dy - proj * s.axis[1], dz - proj * s.axis[2]);
   if (tan <= TAN_MAX && Math.hypot(dx, dy, dz) <= STALE_R) {
-    return { tip: recorded, depth: Math.max(proj, 0), lead: 2 * radius, stale: false };
+    return { tip: rec, depth: Math.max(proj, 0), lead: 2 * radius, stale: false };
   }
   const seat = proj > 0 && proj <= TIP_MAX ? proj : TIP_DEF;
   const depth = Math.max(seat, radius);

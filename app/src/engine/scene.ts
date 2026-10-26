@@ -974,7 +974,6 @@ void main() {
       this.root.add(m);
     }
 
-    this.buildPipesMesh(bp);
     // heavy-craft tier (PERF.md cliff, see HEAVY_COMPONENTS): above the
     // component budget the real-model fan-out takes the scene past what a
     // phone GPU survives, so the atlas never streams (this ALSO saves the
@@ -982,6 +981,10 @@ void main() {
     this.heavy = bp.data.components.reduce((n, c) => n + (c.type === 'Build' ? 0 : 1), 0) > HEAVY_COMPONENTS;
     this.buildComponents(bp, this.heavy ? null : atlas, new Map(proxies.map(b => [b.ci, b])));
     this.buildSubgrids(bp);
+    // v1.11.5: AFTER the subgrids — nested-part sockets resolve through the
+    // doors' LIVE joint poses (buildPipesMesh), which only exist once the
+    // groups exist and syncSubJoints has run
+    this.buildPipesMesh(bp);
 
     const parts = buildPartBoxes(bp, atlas?.manifest ?? null);
     this.updateCoM();
@@ -1044,7 +1047,39 @@ void main() {
    *  when the cached route drifted (sockets.ts). */
   private buildPipesMesh(bp: Blueprint) {
     const flat = flattenComponents(bp);
-    const net = buildPipes(bp.data.pipes, pipeSockets(bp.data.pipes, flat, this.atlasRef?.manifest ?? null));
+    // v1.11.5 THE DOOR HARNESS (we: "the ones that should drape, do, but
+    // they connect to the wrong spot" — 3308603448): nested subgrid parts
+    // are RENDERED at their joint pose (the door swings on its
+    // SmallPivot/SmallHinge), so their cables must plug into the LIVE
+    // DISPLAYED connectors, not the built-pose file coords. The owning
+    // Build group's transform (syncSubJoints: pose.p + moff, quaternion)
+    // maps file ▸ display; sockets.ts speaks raw FILE space, so the moff
+    // (the display anchor on the root) is taken back out. Top-level parts
+    // ride unchanged.
+    const sockFlat = flat.map(e => {
+      const p = e.path;
+      const topIdx = Array.isArray(p) && p.length > 3 ? p[2] as number : -1;
+      const g = topIdx >= 0 ? this.subGroups.get(topIdx) : undefined;
+      if (!g) return e;
+      const v = new Vector3(e.comp.position.x, e.comp.position.y, e.comp.position.z)
+        .applyQuaternion(g.quaternion)
+        .add(new Vector3(g.position.x - this.moff.x, g.position.y - this.moff.y,
+          g.position.z - this.moff.z));
+      const q = new Quaternion(e.comp.orientation.x, e.comp.orientation.y,
+        e.comp.orientation.z, e.comp.orientation.w).premultiply(g.quaternion);
+      // THE HARNESS ATTACH (sockets.ts): the group's rigid file▸display
+      // transform — the recorded cable tip rides it, so the harness follows
+      // the door continuously instead of re-seating past 0.45 m
+      const t = new Vector3(g.position.x - this.moff.x, g.position.y - this.moff.y,
+        g.position.z - this.moff.z);
+      return { ...e, comp: { ...e.comp,
+        position: { x: v.x, y: v.y, z: v.z },
+        orientation: { w: q.w, x: q.x, y: q.y, z: q.z } },
+      attach: { t: [t.x, t.y, t.z] as [number, number, number],
+        q: [g.quaternion.w, g.quaternion.x, g.quaternion.y, g.quaternion.z] as
+          [number, number, number, number] } };
+    });
+    const net = buildPipes(bp.data.pipes, pipeSockets(bp.data.pipes, sockFlat, this.atlasRef?.manifest ?? null));
     this.pipeNet = net;
     this.flatMap = flat;                          // cable labels resolve flat → top
     this.clearPipeHover();                        // net indices die with the rebuild

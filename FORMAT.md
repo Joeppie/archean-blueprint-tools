@@ -789,20 +789,34 @@ engine CONTENT frame; its FILE-frame socket pose is
   straight bar (an overstretched cable is pulled straight, as in game);
   sag grows monotonically with overstretch L/span; a VERTICAL span hangs
   STRAIGHT (no side-bow — the old XenonViewer chord-offset parabola bowed);
-  sampled arc length ≈ the rest length. v1.11.4 (we: "?craft=3308603448,
-  the cables dont seem to hang, the connections are mis-identified
-  somehow"): the law applies to EVERY run whose TWO sockets resolve, fresh
-  included — the file's waypoints are the BUILDER'S CACHE (axis-aligned
-  bars tiling the route; the game displays its cables as LIVE ROPES), so
-  the recorded corners are NOT a baked sag. The length that hangs is the
-  WALKED length: Σ segment lengths + the joint zigzag the drawn path walks
-  (the chained-start offsets are cable the segment lengths do not cover),
-  minus the two 2r leads, over the neck-to-neck span. A run with an
-  unresolvable end keeps the recorded polyline (a drape connects to where
-  the cable PHYSICALLY connects). (The v1.11.3 'fresh runs keep the
-  recorded route' clause is SUPERSEDED — the format stores the builder
-  cache; the viewport hangs the rope the game simulates.) The engine
-  re-drapes on every
+  sampled arc length ≈ the rest length. THE GATE IS THE FILE'S `flexible`
+  FLAG (v1.11.5, we: "You drapped cables that are NOT flexible … they are
+  either axis aligned pipes OR flexible cables in appearance" — superseding
+  the v1.11.4 overreach that draped every run): a run is drawn as a
+  hanging rope IFF its segments carry `flexible` (whole corpus: the flag
+  occurs on EXACTLY the 2-segment pairs, 1126/1126 — the flex branch IS
+  the flag). Routed runs are the game's RIGID conduit (axis-aligned
+  pipes): the recorded builder-cache route IS the shape and draws verbatim
+  (stale ends re-seat on the live sockets, v1.8.2 axial leads).
+• **THE HARNESS ATTACH** (v1.11.5, we: "the cable to the small pivot … goes
+  to the OLD position of that pivot, rather than its actual current one" +
+  the Dorito SSTO door-harness screenshot): cables on SUBGRID parts are
+  flexible by definition (door harnesses), and the doors render at their
+  joint pose (SmallPivot/SmallHinge data.angle) while the file's tips were
+  cached at the BUILT pose (measured on XYQ-615: recorded tip sits 0.165 m
+  from the part's FILE spot — the adapter offset — and 1.07 m from its
+  display spot with the door saved open 24.3°). So: pipeSockets resolves a
+  nested part's adapter through the owning Build group's DISPLAY transform
+  (file-space: pose minus the moff anchor), and the SocketAnchor carries
+  that rigid transform as `attach` — plugAnchor transforms the recorded tip
+  by it, so the harness RIDES THE DOOR continuously (the 0.45 m re-seat
+  band is a cache-repair rule for top-level parts; a harness snapping only
+  past it reads as "connected to the old spot"). The pipe mesh builds AFTER
+  the subgrid groups (load order) and rebuildPipes re-reads the live group
+  poses, so hinge drags make harnesses follow (pipesSoon throttle). Pin:
+  app/e2e/pipes.spec.ts 'a DOOR HARNESS hangs from the door's LIVE pose'
+  (XYQ: swinging the hinge moves the harness end 1.7 m, restores to 1e-6,
+  leads clean) + sockets.test 'THE HARNESS ATTACH'. The engine re-drapes on every
   rebuildPipes (Editor pipesSoon = 250 ms leading+trailing throttle, so a
   gizmo drag makes the cables FOLLOW the part at 4 Hz and settle after the
   release). Style: the rerouted run wears its LONGEST recorded segment's

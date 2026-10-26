@@ -409,9 +409,10 @@ describe('THE DRAPE LAW (v1.11.3: cables hang by their rest length)', () => {
   test('restLength = the Σ of the recorded segment lengths', () => {
     expect(restLength(P)).toBeCloseTo(1.0, 10);
   });
-  test('a stale run (both sockets live) re-drapes: sag + leads + plugs', () => {
-    // a slack fluid hose: 3 m of cable spanning ~1.8 m once the b-part
-    // (the recorded tip sits 1.2 m off its socket) has been moved up
+  test("v1.11.5: routed runs NEVER hang — the file's flexible flag gates the drape (we: 'You drapped cables that are NOT flexible')", () => {
+    // Routed runs are the game's RIGID conduit: the recorded builder-cache
+    // route IS the shape (axis-aligned bars). Stale ends re-seat on the
+    // live sockets, the v1.8.2 axial leads lay — the route stays recorded.
     const LOOSE: Pipe = {
       a_component: 0, a_port: 'pa', b_component: 1, b_port: 'pb',
       type: 'fluid', radius: 0.045,
@@ -426,63 +427,42 @@ describe('THE DRAPE LAW (v1.11.3: cables hang by their rest length)', () => {
       b: { at: [1.5, 0, 1.2], axis: [0, 0, -1], kind: 'fluid' },         // b-part MOVED up
     }];
     const net = buildPipes([LOOSE], sockets);
-    expect(net.reroute, 'the moved run is re-draped').toBe(1);
-    expect(checkLeads(net).bad, 'the plugs still lead along the stub axes').toBe(0);
-    const poly = net.polys[0]!;
-    expect(poly.length, 'a hung cable is a chain, not a butt-joint route').toBeGreaterThan(3);
-    // the b lead stands on the axis: neck is 2r OUT from the tip along −z?
-    // tip = socket + axis·depth; the LAST bar runs neckB→tipB along axis
-    const last = net.segs[net.segs.length - 1]!;
-    const d = [last.b[0] - last.a[0]!, last.b[1] - last.a[1]!, last.b[2] - last.a[2]!];
-    const dn = d.map(v => v / Math.hypot(...d));
-    expect(dn[0]! * 0 + dn[1]! * 0 + dn[2]! * -1, 'into the cap, AGAINST its outward axis')
-      .toBeCloseTo(-1, 6);
-    // the hung chain dips below the neck-to-neck chord
-    expect(dip(poly.map(v => [...v] as number[])), 'the slack hangs').toBeGreaterThan(0.2);
-    // a run with an UNRESOLVABLE end keeps the recorded polyline (a drape
-    // connects to where the cable PHYSICALLY connects)
-    const fresh = buildPipes([LOOSE]);
-    expect(fresh.reroute).toBe(0);
-    expect(fresh.draped).toBe(0);
-    expect(fresh.segs.length).toBe(3);
+    expect(net.draped, 'a routed run never enters the drape path').toBe(0);
+    expect(net.reroute, 'reroute counts flex re-hangs only').toBe(0);
+    expect(net.stale, 'the moved end re-seats on its live socket').toBe(1);
+    // bars = the 2 axial leads + the 3 recorded route bars
+    expect(net.segs.length).toBe(5);
+    expect(checkLeads(net).bad, 'the plugs lead ALONG the stub axes').toBe(0);
+    // every recorded bar runs along a file axis — a hanging chain would not
+    for (const s of net.segs.slice(1, -1)) {
+      const d = [Math.abs(s.b[0] - s.a[0]!), Math.abs(s.b[1] - s.a[1]!), Math.abs(s.b[2] - s.a[2]!)];
+      expect(Math.max(...d) / (d[0]! + d[1]! + d[2]!), 'axis-aligned bar').toBeGreaterThan(0.999);
+    }
   });
-  test('v1.11.4: FRESH runs hang too — the game draws live ropes; the file route is the builder cache', () => {
-    // we: "loading ?craft=3308603448, the cables dont seem to hang" — the
-    // builder-cache routes are axis-aligned bars; the game DISPLAYS the
-    // cable sagging by its length. Both sockets live + fresh tips ⇒ drape.
-    const LOOSE2: Pipe = {
+  test('FLEXIBLE pairs hang by their length; a moved part re-hangs them', () => {
+    const FLEX2: Pipe = {
       a_component: 0, a_port: 'pa', b_component: 1, b_port: 'pb',
-      type: 'fluid', radius: 0.045,
+      type: 'data', radius: 0.02,
       segments: [
-        { start: { x: 0, y: 0, z: 0 }, dir: 0, length: 1 },
-        { start: { x: 1.5, y: 0, z: 0 }, dir: 1, length: 1 },
-        { start: { x: 1.5, y: 1, z: 0 }, dir: 5, length: 1 },   // tip (1.5,0,0)
+        { start: { x: 0, y: 1, z: 0 }, dir: 4, length: 3.4, flexible: true },
+        { start: { x: 2, y: 1, z: 0 }, dir: 0, length: 0, flexible: true },
       ],
     };
-    const seated: PipeSockets[] = [{                       // tips ON the sockets
-      a: { at: [0, 0, 0.05], axis: [0, 0, 1], kind: 'fluid' },
-      b: { at: [1.5, 0, 0.05], axis: [0, 0, 1], kind: 'fluid' },
+    const fresh = buildPipes([FLEX2]);
+    expect(fresh.draped).toBe(1);
+    expect(Math.min(...fresh.segs.flatMap(s => [s.a[1], s.b[1]])), '3.4 m over a 2 m span hangs')
+      .toBeLessThan(1);
+    // a moved b-part: the flex run re-hangs onto the LIVE socket (reroute)
+    const moved: PipeSockets[] = [{
+      a: { at: [0, 1, 0], axis: [-1, 0, 0], kind: 'data' },
+      b: { at: [2, 1.6, 0], axis: [1, 0, 0], kind: 'data' },             // part moved up
     }];
-    const net = buildPipes([LOOSE2], seated);
-    expect(net.stale).toBe(0);                             // everything fresh
-    expect(net.reroute, 'nothing re-draped (no stale ends)').toBe(0);
-    expect(net.draped, 'the run still hangs').toBe(1);
-    const poly = net.polys[0]!;
-    expect(poly.length, 'a hung chain, not the cached zigzag').toBeGreaterThan(3);
-    // 3.32 m of walked cable over a 1.5 m span: the catenary dips ~0.17 m
-    expect(dip(poly.map(v => [...v] as number[])), 'it sags').toBeGreaterThan(0.1);
-    // taut case: 3 m of cable between plugs 4 m apart ⇒ one straight bar
-    const far: PipeSockets[] = [{
-      a: { at: [0, 0, 0.05], axis: [0, 0, 1], kind: 'fluid' },
-      b: { at: [4, 0, 0.05], axis: [0, 0, 1], kind: 'fluid' },
-    }];
-    const tautNet = buildPipes([{ ...LOOSE2, segments: [
-      { start: { x: 0, y: 0, z: 0 }, dir: 0, length: 1.5 },
-      { start: { x: 2.5, y: 0, z: 0 }, dir: 0, length: 1.5 },   // tip (4,0,0)
-    ] }], far);
-    expect(tautNet.draped).toBe(1);
-    const tp = tautNet.polys[0]!;
-    for (const pt of tp.slice(1, -1))
-      expect(pt[1], 'taut: nothing dips below the plugs').toBeCloseTo(0, 6);
+    const net = buildPipes([FLEX2], moved);
+    expect(net.draped).toBe(1);
+    expect(net.reroute, 'the moved run is a re-hang').toBe(1);
+    const eb = net.ends[0]!.b;
+    vec(eb, [2.05, 1.6, 0]);                                            // seated one radius out
+    expect(checkLeads(net).bad).toBe(0);
+    vec(net.segs[net.segs.length - 1]!.b, eb);                          // the chain reaches the NEW plug
   });
 });
