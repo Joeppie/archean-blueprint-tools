@@ -408,7 +408,7 @@ export class Engine {
   // blips. Pulses/blips render additive with depthTest OFF — they shine
   // THROUGH the hull — and the on-demand loop wakes only while alive.
   private pipeNet: PipeNetwork = { segs: [], joints: [], plugs: [], ends: [], links: [],
-    polys: [], radii: [], piOf: [], pipes: 0, stale: 0, reroute: 0 };
+    polys: [], radii: [], piOf: [], pipes: 0, stale: 0, reroute: 0, draped: 0 };
   // ---- cable HOVER (v1.10.1, user: "on mouse-over of a cable, it should
   // tell us where things are going … propeller[9].lv <-> Computer[0].lv"):
   // the file pipe index under the cursor + a gold overlay riding its drawn
@@ -1202,7 +1202,7 @@ void main() {
       plugs: net.plugs.length, stale: net.stale,
       // v1.11.3 THE DRAPE LAW: runs re-draped this pass + the drawn
       // polylines (the sag pins measure the midpoint dip below the chord)
-      reroute: net.reroute,
+      reroute: net.reroute, draped: net.draped,
       polys: net.polys.map(pt => pt.map(v => [...v] as number[])),
       round: net.segs.filter(s => !s.box).length,
       square: net.segs.filter(s => s.box).length,

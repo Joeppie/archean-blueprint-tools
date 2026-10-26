@@ -105,10 +105,12 @@ export interface PipeNetwork {
   pipes: number;
   /** ends the recorded cache left off its socket (re-anchored, sockets.ts) */
   stale: number;
-  /** v1.11.3: runs re-draped by THE DRAPE LAW (a stale end → the game's
-   *  save-time physical re-route previewed live); fresh runs keep their
-   *  recorded route — the game's own sag is baked into it */
+  /** v1.11.3: runs whose ends were STALE and re-draped (a part moved) */
   reroute: number;
+  /** v1.11.4: runs drawn by THE DRAPE LAW (catenary between the live
+   *  plugs) — every resolved run hangs as the game's live rope; runs with
+   *  an unresolvable end are drawn as the recorded polyline */
+  draped: number;
 }
 
 /** one straight segment's view-space length (V3s come from the SAME net) */
@@ -219,7 +221,7 @@ export function buildPipes(
   const polys: V3[][] = [];
   const radii: number[] = [];
   const piOf: number[] = [];
-  const net: PipeNetwork = { segs, joints, plugs, ends, links, polys, radii, piOf, pipes: 0, stale: 0, reroute: 0 };
+  const net: PipeNetwork = { segs, joints, plugs, ends, links, polys, radii, piOf, pipes: 0, stale: 0, reroute: 0, draped: 0 };
   if (!pipes?.length) return net;
   net.pipes = 0;
 
@@ -285,6 +287,7 @@ export function buildPipes(
 
     // ---- flexible pair: ONE hanging cable, not two segments --------------
     if (isFlex) {
+      net.draped++;
       const color = segColor(first);
       const metal = !!first.metal || !!first.chrome;
       const box = !!first.box || sec.box;
@@ -319,26 +322,35 @@ export function buildPipes(
 
     // ---- rigid routed cable ----------------------------------------------
     const s0 = p.segments[0]!, sn = p.segments[n - 1]!;
-    // v1.11.3 THE DRAPE LAW for STALE runs: when a part moved and the
-    // cached route no longer starts/ends on its sockets, the game re-routes
-    // the cable PHYSICALLY on save — we preview that live: the run's REST
-    // LENGTH (the file's Σ segment lengths) minus the two connector leads
-    // hangs as a catenary between the plug necks (taut-straight when the
-    // sockets sit farther apart than the cable reaches). GATE: BOTH sockets
-    // must resolve — a drape connects to where the cable PHYSICALLY
-    // connects, and an unresolvable end is a tip we only know from the
-    // cache. Fresh runs keep the recorded route: the game's sag is baked
-    // into it.
+    // v1.11.4 THE DRAPE LAW applies to EVERY cable with both sockets live
+    // (we: "the cables dont seem to hang" on 3308603448): in game, cables
+    // are live ropes — the file's waypoints are the BUILDER'S CACHE (axis-
+    // aligned bars tiling the route), and the game DISPLAYS them sagging by
+    // their length. The viewport therefore draws the physical curve for
+    // fresh runs too: rest length (Σ segment lengths + the joint zigzag
+    // the drawn path walks) hangs as a CATENARY between the plug necks
+    // (tips + 2r axial leads, socket law untouched); rest length ≤ span ⇒
+    // TAUT straight. Runs with an unresolvable end keep the recorded
+    // polyline (a drape connects to where the cable PHYSICALLY connects —
+    // an unresolvable end is a tip we only know from the cache).
     // Style = the LONGEST recorded segment's (a run's segment[0] is often
-    // the black sheath stub — the rerouted cable must not wear it).
-    if (sock?.a && sock?.b && (plugA.stale || plugB.stale)) {
+    // the black sheath stub — the hung cable must not wear it).
+    if (sock?.a && sock?.b) {
+      net.draped++;
+      if (plugA.stale || plugB.stale) net.reroute++;
+      // the drawn cable length is what the file's route WALKS: the segments
+      // plus the joint zigzag between chained starts — that total is the
+      // rope the game hangs (the Σ length alone under-counts the slack on
+      // multi-segment runs; a flexible pair's length field is exact).
+      let walked = restLength(p);
+      for (let si = 0; si < n - 1; si++) walked += segLen(raws[si]!, sts[si + 1]!);
+      const pts = drapeChain(neckA ?? tipA, neckB ?? tipB, walked - leadA - leadB,
+        radius);
       let big = s0;
       for (const s of p.segments) if (s.length > big.length) big = s;
       const color = segColor(big);
       const metal = !!big.metal || !!big.chrome;
       const box = !!big.box || sec.box;
-      const pts = drapeChain(neckA ?? tipA, neckB ?? tipB,
-        restLength(p) - leadA - leadB, radius);
       if (neckA) {
         segs.push({ a: tipA, b: neckA, radius, half, box, color, metal, kind });
         joints.push({ at: neckA, radius: half, color });
@@ -359,7 +371,7 @@ export function buildPipes(
         tipA, ...(neckA ? [neckA] : []), ...pts.slice(1, -1),
         ...(neckB ? [neckB] : []), tipB,
       ]);
-      radii.push(half); piOf.push(pi); net.reroute++;
+      radii.push(half); piOf.push(pi);
       plugs.push(
         { at: tipA, axis: axisA ?? unit(neckA ?? tipA, pts[1] ?? tipB), radius, half, box, led: !!neckA },
         { at: tipB, axis: axisB ?? unit(neckB ?? tipB, pts[pts.length - 2] ?? tipA), radius, half, box, led: !!neckB },

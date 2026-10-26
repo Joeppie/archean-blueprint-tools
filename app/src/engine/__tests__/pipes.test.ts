@@ -439,9 +439,50 @@ describe('THE DRAPE LAW (v1.11.3: cables hang by their rest length)', () => {
       .toBeCloseTo(-1, 6);
     // the hung chain dips below the neck-to-neck chord
     expect(dip(poly.map(v => [...v] as number[])), 'the slack hangs').toBeGreaterThan(0.2);
-    // a fresh cache keeps the RECORDED route (the game's own baked sag)
+    // a run with an UNRESOLVABLE end keeps the recorded polyline (a drape
+    // connects to where the cable PHYSICALLY connects)
     const fresh = buildPipes([LOOSE]);
     expect(fresh.reroute).toBe(0);
+    expect(fresh.draped).toBe(0);
     expect(fresh.segs.length).toBe(3);
+  });
+  test('v1.11.4: FRESH runs hang too — the game draws live ropes; the file route is the builder cache', () => {
+    // we: "loading ?craft=3308603448, the cables dont seem to hang" — the
+    // builder-cache routes are axis-aligned bars; the game DISPLAYS the
+    // cable sagging by its length. Both sockets live + fresh tips ⇒ drape.
+    const LOOSE2: Pipe = {
+      a_component: 0, a_port: 'pa', b_component: 1, b_port: 'pb',
+      type: 'fluid', radius: 0.045,
+      segments: [
+        { start: { x: 0, y: 0, z: 0 }, dir: 0, length: 1 },
+        { start: { x: 1.5, y: 0, z: 0 }, dir: 1, length: 1 },
+        { start: { x: 1.5, y: 1, z: 0 }, dir: 5, length: 1 },   // tip (1.5,0,0)
+      ],
+    };
+    const seated: PipeSockets[] = [{                       // tips ON the sockets
+      a: { at: [0, 0, 0.05], axis: [0, 0, 1], kind: 'fluid' },
+      b: { at: [1.5, 0, 0.05], axis: [0, 0, 1], kind: 'fluid' },
+    }];
+    const net = buildPipes([LOOSE2], seated);
+    expect(net.stale).toBe(0);                             // everything fresh
+    expect(net.reroute, 'nothing re-draped (no stale ends)').toBe(0);
+    expect(net.draped, 'the run still hangs').toBe(1);
+    const poly = net.polys[0]!;
+    expect(poly.length, 'a hung chain, not the cached zigzag').toBeGreaterThan(3);
+    // 3.32 m of walked cable over a 1.5 m span: the catenary dips ~0.17 m
+    expect(dip(poly.map(v => [...v] as number[])), 'it sags').toBeGreaterThan(0.1);
+    // taut case: 3 m of cable between plugs 4 m apart ⇒ one straight bar
+    const far: PipeSockets[] = [{
+      a: { at: [0, 0, 0.05], axis: [0, 0, 1], kind: 'fluid' },
+      b: { at: [4, 0, 0.05], axis: [0, 0, 1], kind: 'fluid' },
+    }];
+    const tautNet = buildPipes([{ ...LOOSE2, segments: [
+      { start: { x: 0, y: 0, z: 0 }, dir: 0, length: 1.5 },
+      { start: { x: 2.5, y: 0, z: 0 }, dir: 0, length: 1.5 },   // tip (4,0,0)
+    ] }], far);
+    expect(tautNet.draped).toBe(1);
+    const tp = tautNet.polys[0]!;
+    for (const pt of tp.slice(1, -1))
+      expect(pt[1], 'taut: nothing dips below the plugs').toBeCloseTo(0, 6);
   });
 });
