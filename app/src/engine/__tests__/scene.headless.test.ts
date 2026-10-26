@@ -119,6 +119,157 @@ describe('pick routing (was scene.spec + select.spec canvas legs)', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// THE CABLE RENDER LAW — ported from pipes.spec (whole spec was pipeInfo()
+// probes; the pure maths already lives in pipes.test.ts/sockets.test.ts).
+interface PipeInfo {
+  pipes: number; segs: number; joints: number; plugs: number; stale: number;
+  round: number; square: number; metal: number; kinds: string[];
+  style: Record<string, { r: number; g: number; b: number; box: boolean; metal: boolean;
+    radius: number; half: number } | undefined>;
+  leads: { checked: number; bad: number };
+  ends: { a: number[]; b: number[] }[];
+  reroute: number; draped: number; polys: number[][][];
+}
+type PipeEngine = {
+  pipeInfo(): PipeInfo;
+  blueprint: Blueprint;
+  rebuildPipes(): void;
+  syncSubJoints(): void;
+};
+const pipes = (id: string): PipeEngine =>
+  (openCraft(id, { atlas: manifestOnly() }) as unknown) as PipeEngine;
+
+describe('cables render like the game and plug into their sockets (was pipes.spec)', () => {
+  test('ISW: round hoses, per-kind colours, elbows, plugs — no item ducts', () => {
+    const i = pipes('3812927875').pipeInfo();
+    expect(i.pipes).toBeGreaterThanOrEqual(20);
+    expect(i.square, 'the data bus draws as the thin square species').toBeGreaterThan(0);
+    expect(i.round, 'fluid and HV stay round hoses').toBeGreaterThan(0);
+    expect(i.round + i.square, 'every bar has exactly one cross-section').toBe(i.segs);
+    expect(i.joints, 'elbow spheres close the direction changes').toBeGreaterThan(0);
+    expect(i.plugs, 'one black collar per cable end').toBe(2 * i.pipes);
+    expect(i.leads.checked, 'plugs with an axial lead exist').toBeGreaterThan(0);
+    expect(i.leads.bad, 'every leaded bar touches its connector ALONG the axis').toBe(0);
+    expect(i.kinds).toContain('fluid');
+    expect(i.style.fluid!.radius).toBeCloseTo(0.045, 4);
+    expect(i.style.fluid!.box, 'the fluid hose is ROUND').toBe(false);
+    expect(i.style.fluid!.metal, 'ISW fluid cables ride the file chrome flag').toBe(true);
+    expect(i.style.fluid!.r, 'the ISW (an older save) writes its hose nearly BLACK').toBeLessThan(0.1);
+    expect(i.style.data!.box, 'v1.8.3: data draws square').toBe(true);
+    expect(i.style.data!.half, 'v1.8.3: data draws THINNER').toBeLessThan(0.015);
+    expect(i.style.data!.b, 'data sheath: the blue channel leads (navy family)')
+      .toBeGreaterThan(i.style.data!.r);
+  });
+  test('truck: the item ducts are the ONLY square species; stale tips re-seat; flex hangs', () => {
+    const i = pipes('3481322297').pipeInfo();
+    expect(new Set(i.kinds), 'all five cable species on this craft')
+      .toEqual(new Set(['data', 'lowvoltage', 'highvoltage', 'fluid', 'item']));
+    expect(i.square, 'box-flagged item ducts stay square').toBeGreaterThan(0);
+    expect(i.round, 'HV and fluid hoses draw round').toBeGreaterThan(0);
+    expect(i.style.item!.box).toBe(true);
+    expect(i.style.item!.metal, 'item ducts ride the file metal flag').toBe(true);
+    expect(i.style.item!.radius).toBeCloseTo(0.08, 4);
+    expect(i.style.item!.half, 'item ducts keep their full section').toBeCloseTo(0.08, 4);
+    expect(i.style.data!.box, 'data: square').toBe(true);
+    expect(i.style.data!.half, 'data: thinner than its file radius').toBeLessThan(0.015);
+    expect(i.style.fluid!.r, 'this craft writes its fluid hoses WHITE').toBeGreaterThan(0.9);
+    expect(i.style.fluid!.metal, 'fluid hoses ride the chrome flag into the shiny pass').toBe(true);
+    expect(i.style.highvoltage!.box, 'HV cable is round').toBe(false);
+    expect(i.style.highvoltage!.r, 'file colour: orange HV cable').toBeGreaterThan(0.9);
+    expect(i.stale, 'off-socket cached tips get re-seated').toBeGreaterThan(0);
+    expect(i.stale, 'but only a minority of the ends').toBeLessThan(i.pipes);
+    expect(i.leads.checked).toBeGreaterThan(0);
+    expect(i.leads.bad, 'even the re-seated ones plug ALONG the connector axis').toBe(0);
+    expect(i.draped, 'flex pairs hang on this craft').toBeGreaterThanOrEqual(40);
+    const dips: number[] = [];
+    for (const poly of i.polys) {
+      if (poly.length < 4) continue;
+      const A = poly[0]!, B = poly[poly.length - 1]!;
+      const dx = B[0]! - A[0]!, dz = B[2]! - A[2]!;
+      let worst = 0;
+      for (let k = 1; k < poly.length - 1; k++) {
+        const t = ((poly[k]![0]! - A[0]!) * dx + (poly[k]![2]! - A[2]!) * dz) / (dx * dx + dz * dz || 1);
+        worst = Math.max(worst, A[1]! + t * (B[1]! - A[1]!) - poly[k]![1]!);
+      }
+      dips.push(worst);
+    }
+    expect(Math.max(...dips), 'a hung cable dips below its chord (sag)').toBeGreaterThan(0.02);
+  });
+  test('a moved part drags its cable ends back onto the sockets', () => {
+    const eng = pipes('3812927875');
+    const bp = eng.blueprint;
+    const pi = bp.data.pipes!.findIndex((p) => p.type === 'fluid')!;
+    const ci = bp.data.pipes![pi]!.a_component;
+    const before = eng.pipeInfo().ends[pi]!.a;
+    // the game RE-ROUTES at save; the display re-seats cached ends on the
+    // live sockets
+    bp.data.components[ci]!.position.y += 1.5;
+    eng.rebuildPipes();
+    const after = eng.pipeInfo().ends[pi]!.a;
+    const leads = eng.pipeInfo().leads;
+    const seated = eng.pipeInfo().stale;
+    bp.data.components[ci]!.position.y -= 1.5;
+    eng.rebuildPipes();
+    const rest = eng.pipeInfo().ends[pi]!.a;
+    const back = eng.pipeInfo().stale;
+    const d = (p: number[], q: number[]) => Math.hypot(p[0]! - q[0]!, p[1]! - q[1]!, p[2]! - q[2]!);
+    const moved = d([...before], after);
+    expect(moved, 'the a-end rides the moved part (+1.5 m in y)').toBeGreaterThan(1.3);
+    expect(moved, 'the a-end rides the moved part (+1.5 m in y)').toBeLessThan(1.7);
+    expect(d([...before], rest), 'restoring the part restores the cable end').toBeLessThan(1e-6);
+    expect(leads.bad, 'the re-seated ends still connect ALONG the connector axis').toBe(0);
+    expect(seated, 'the moved (rigid) cable end re-seats on the live socket').toBeGreaterThan(0);
+    expect(back, 'restoring the part leaves nothing re-seated behind').toBe(0);
+  });
+  test('a DOOR HARNESS hangs from the door\u2019s LIVE pose (v1.11.5)', () => {
+    const eng = pipes('3803780241');
+    const bp = eng.blueprint;
+    // the engine's flat order: nested content BEFORE its Build (the
+    // `index >= topCount` shortcut is the trap — a rigid top cable)
+    const flat: { data?: { angle?: number }; type?: string }[] = [];
+    const isNested: boolean[] = [];
+    for (const c of bp.data.components) {
+      const inner = (c as { data?: { components?: Record<string, never>[] } }).data?.components;
+      if (c.type === 'Build' && inner)
+        for (const c2 of inner) { flat.push(c2); isNested.push(true); }
+      flat.push(c as { data?: { angle?: number }; type?: string }); isNested.push(false);
+    }
+    const pi = bp.data.pipes!.findIndex((p) =>
+      isNested[p.a_component ?? -1] || isNested[p.b_component ?? -1])!;
+    const side = (isNested[bp.data.pipes![pi]!.a_component ?? -1] ? 'a' : 'b') as 'a' | 'b';
+    const end = () => eng.pipeInfo().ends[pi]![side];
+    const d = (p: number[], q: number[]) =>
+      Math.hypot(p[0]! - q[0]!, p[1]! - q[1]!, p[2]! - q[2]!);
+    const before = end();
+    let moved = 0, leadsBad = -1, restored = 1;
+    for (const j of bp.data.composite_builds ?? []) {
+      const m = flat[j.component] as { data?: { angle?: number } } | undefined;
+      if (typeof m?.data?.angle !== 'number') continue;
+      const a0 = m.data.angle;
+      m.data.angle = a0 + 40;                            // swing the door
+      eng.syncSubJoints();
+      eng.rebuildPipes();
+      const dd = d(before, end());
+      if (dd > 0.15) {
+        moved = dd;
+        leadsBad = eng.pipeInfo().leads.bad;
+        m.data.angle = a0;
+        eng.syncSubJoints();
+        eng.rebuildPipes();
+        restored = d(before, end());
+        break;
+      }
+      m.data.angle = a0;
+    }
+    expect(pi, 'the craft has cables into its subgrid parts').toBeGreaterThanOrEqual(0);
+    expect(eng.pipeInfo().draped, 'the harness runs hang (flex pairs)').toBeGreaterThan(0);
+    expect(moved, 'the harness end rides the swung door').toBeGreaterThan(0.15);
+    expect(leadsBad, 'it plugs ALONG the moved connector axis').toBe(0);
+    expect(restored, 'closing the door restores the harness exactly').toBeLessThan(1e-6);
+  });
+});
+
 describe('symmetry twins sit mirrored (was sym.spec geometry, @slow)', () => {
   test('ISW SmallWheel pair: world boxes mirror across x', async () => {
     const e = openCraft('3812927875');

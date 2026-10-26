@@ -16,15 +16,9 @@ test('scene loads, renders and self-reports SCENE PASS in the title', async ({ p
   await expect(stats).toContainText(/draws=[1-9]\d*/);   // renderer actually issued draws
 });
 
-test('camera pick hits the craft at the frame centre', async ({ page }) => {
-  await openFirstCraft(page);
-  const hit = await page.evaluate(() => {
-    const w = window as unknown as { __ARCHEAN__?: { pickProbe: () => { kind: string; point?: number[] } } };
-    return w.__ARCHEAN__!.pickProbe();
-  });
-  expect(['block', 'comp']).toContain(hit.kind);
-  expect(hit.point).toBeTruthy();
-});
+// RETIRED v1.12.1 (L1): the pick law is pinned headless verbatim
+// (scene.headless.test.ts 'pick routing': a part's projected pixel picks
+// THAT component; the gantry pickCell face answers comp/block/…).
 
 test('KSP camera cluster presets snap the eye to axis views and re-fit', async ({ page }) => {
   await openFirstCraft(page);

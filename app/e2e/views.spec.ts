@@ -117,21 +117,9 @@ test.describe('coord readout + adaptive grid + settable mirror axis @ui', () => 
     expect(g.cz + g.halfZ).toBeGreaterThanOrEqual(box.mx[2]);
   });
 
-  test('the grid cell adapts to zoom on the 1/5/10 ladder', async ({ page }) => {
-    desktopOnly();
-    await openCraft(page, ISW);
-    await expect.poll(() => gridOf(page), { timeout: 10_000 }).not.toBeNull();
-    const s0 = (await gridOf(page))!.step;
-    expect([0.05, 0.25, 1.25, 2.5, 12.5, 25]).toContain(s0);
-    const canvas = page.getByTestId('canvas');
-    await canvas.hover();
-    const dir = s0 < 25 ? 1 : -1;                  // zoom out ⇒ coarser rung
-    for (let i = 0; i < 8; i++) await page.mouse.wheel(0, dir * 400);
-    await expect.poll(() => gridOf(page).then(g => g?.step), { timeout: 15_000 }).not.toBe(s0);
-    const s = (await gridOf(page))!.step;
-    if (dir > 0) expect(s).toBeGreaterThan(s0);    // wheel-out: bigger cell
-    else expect(s).toBeLessThan(s0);               // wheel-in: finer cell
-  });
+  // RETIRED v1.12.1 (L1): the step LADDER (0.25·{1,5,10,50,100} ∪ 0.05,
+  // the 14-px flip) is fully pinned by grid.test.ts on plain node; the
+  // applied-to-the-scene half stays pinned by the footprint leg above.
 
   test('⚙ mirror axis is settable (X/Y/Z) and live on the engine', async ({ page }) => {
     await openCraft(page, ISW);

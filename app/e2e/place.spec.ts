@@ -21,31 +21,9 @@ const compsOf = (page: Page) => page.evaluate(() => {
 async function setDrawer(_page: Page, _want = true) { /* no-op */ }
 
 test.describe('KSP modes & catalog placement @place', () => {
-  test('mode tiles: blocks / wire / flight / edit each show their workspace', async ({ page }) => {
-    await page.goto(`/?craft=${ISW}`);
-    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
-    // v1.10.7: TopBar tiles + the dock header flavor switch are all clicked
-    // with the drawer CLOSED (its backdrop covers the dock on phones); the
-    // drawer opens only for the parts-list / inspector phase at the end.
-    await page.getByTestId('mode-edit').click();
-    await page.getByTestId('ws-blocks').click();       // the brush lives in PLACE (dock header)
-    await expect(page.getByTestId('block-brush')).toBeVisible();
-    await expect(page.getByTestId('ws-tris')).toBeVisible();   // + triangles submode
-    await page.getByTestId('mode-wire').click();
-    await expect(page.getByTestId('wire-census')).toBeVisible();
-    // FLIGHT/analysis panels live in the side panel = the drawer on phones
-    await setDrawer(page, true);
-    await page.getByTestId('mode-flight').click();
-    await expect(page.getByTestId('flight-prop')).toBeVisible();
-    await setDrawer(page, false);
-    await page.getByTestId('mode-edit').click();
-    await page.getByTestId('ws-parts').click();       // v1.11: + Parts (list + inspector)
-    await setDrawer(page, true);
-    await page.getByTestId('parts-list').getByTestId('filter').fill('smallwheel');
-    await page.locator('[data-idx]').first().click();
-    await expect(page.getByTestId('inspector')).toContainText('SmallWheel[');
-    await expect(page.getByTestId('comp-alias')).toBeVisible();      // v1.11: meta fields (pos/rot = gizmo)
-  });
+  // RETIRED v1.12.1 (L5, overlap): the mode-tiles-show-their-workspace law
+  // is canonical in panels.spec ('view tab shows ONLY vessel stats…' and
+  // the shipped-UI dock law).
 
   test('catalog: hold a SmallWheel, click the deck, the part lands and selects', async ({ page }) => {
     await page.goto('/');

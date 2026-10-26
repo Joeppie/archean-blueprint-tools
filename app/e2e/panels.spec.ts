@@ -4,7 +4,6 @@
 // the occupancy/type-255 mirror verified in the DOWNLOADED file, and the
 // subgrid tab + live joint slider riding the dolphin's panel group.
 import { expect, test, type Page } from '@playwright/test';
-import path from 'node:path';
 import { readFileSync } from 'node:fs';
 
 const ISW = '3812927875';
@@ -428,73 +427,15 @@ test.describe('modes, new craft, file menu @ui', () => {
     await expect(page.getByTestId('comp-delete')).toBeVisible();     // selectable ⇒ deletable
   });
 
-  test('blocks mode: click a deck face to place a block', async ({ page }) => {
-    desktopOnly();
-    await page.goto('/');
-    await page.getByTestId('gallery-new').click();
-    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
-    await page.getByTestId('mode-edit').click();
-    await page.getByTestId('ws-blocks').click();       // v1.5: the PLACE flavor docks the brush
-    // v0.183: deterministic scene state — wait for the atlas fan-out (the
-    // PilotSeat's REAL model shown, its stand-in retired), then PROBE the
-    // canvas through engine.pickCell for a pixel that answers a block face.
-    // The old seven hardcoded fractions only "passed" while the seat mesh
-    // was still loading — a timing lottery, not a pin.
-    const probeDeckFace = () => page.evaluate(() => {
-      const c = document.querySelector('canvas')!;
-      const r = c.getBoundingClientRect();
-      const e = (window as unknown as { __ARCHEAN__?: { engine: { pendingReal: number; pickCell: (x: number, y: number) => { bi: number } | null } } }).__ARCHEAN__!.engine;
-      if (e.pendingReal > 0) return null;
-      for (let fy = 0.5; fy <= 0.78; fy += 0.02)
-        for (let fx = 0.28; fx <= 0.72; fx += 0.02) {
-          const h = e.pickCell(r.left + r.width * fx, r.top + r.height * fy);
-          if (h && h.bi >= 0) return { x: fx, y: fy };
-        }
-      return null;
-    });
-    let click: { x: number; y: number } | null = null;
-    for (let i = 0; i < 40 && !click; i++) {
-      click = await probeDeckFace();
-      if (!click) await page.waitForTimeout(300);
-    }
-    expect(click, 'a deck block face is clickable once real models land').not.toBeNull();
-    const canvas = page.getByTestId('canvas');
-    const box = (await canvas.boundingBox())!;
-    const before = await page.evaluate(() =>
-      (window as unknown as { __ARCHEAN__?: { stats: () => { blocks: number } } }).__ARCHEAN__!.stats().blocks);
-    await canvas.click({ position: { x: box.width * click!.x, y: box.height * click!.y } });
-    await page.waitForTimeout(600);                       // debounced scene reload
-    const after = await page.evaluate(() =>
-      (window as unknown as { __ARCHEAN__?: { stats: () => { blocks: number } } }).__ARCHEAN__!.stats().blocks);
-    expect(after, 'a block was placed on the deck').toBe(before + 1);
-    // v1.11 dock law: the + Blocks workspace shows the brush, census, list
-    // AND the editor of the auto-selected placed block — all at once. (The
-    // ws-edit flip RETIRES the species selection — "Modify opens EMPTY" —
-    // so the 5213-era flip-to-edit assertion is stale.)
-    await expect(page.getByTestId('block-edit')).toContainText(/Block\[\d+\]/);
-  });
+  // RETIRED v1.12.1 (L5, overlap): deck-face click-to-place is canonical
+  // in builddock.spec ('a click lands a 1×1×1 block…') and blockplace.spec;
+  // the placement MATH is vitest-pinned (blocks.test.ts) and the pickCell
+  // face answers headless (scene.headless.test.ts 'pick routing').
 
-  test('wire mode: census + auto-wire answers, file menu opens a blueprint', async ({ page }) => {
-    desktopOnly();
-    await page.goto('/?craft=' + ISW);
-    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
-    await page.getByTestId('mode-wire').click();
-    await expect(page.getByTestId('wire-census')).toContainText('connected');
-    await page.getByTestId('auto-wire').click();
-    await expect(page.getByTestId('wire-census')).toContainText(/wired|nothing to pair/);
-    // File ▾ → Open file… loads a local blueprint (and normalizes v1 → v2)
-    await page.getByTestId('file-menu').click();
-    await page.getByTestId('file-open').click();
-    await page.getByTestId('file-input').setInputFiles(
-      path.resolve(process.cwd(), '..', 'testdata', DOLPHIN, 'blueprint.json'));
-    await expect(page.getByTestId('editor-title')).toContainText(/GNG-574|Dolphin|New craft|\S/, { timeout: 15_000 });
-    await expect(page).toHaveTitle(/SCENE PASS/);
-    const legacyChip = await page.evaluate(() => {
-      const w = window as unknown as { __ARCHEAN__?: { engine: { blueprint: { data: { colors?: unknown[] } } } } };
-      return Array.isArray(w.__ARCHEAN__!.engine.blueprint.data.colors);
-    });
-    expect(legacyChip, 'v1 file was NORMALIZED: it now carries a palette').toBe(true);
-  });
+  // RETIRED v1.12.1 (L1/L5, overlap): the wire-mode census + auto-wire +
+  // file-menu legs duplicate wire.spec (canonical: 'auto-wire (logical)
+  /// answers and is idempotent', the cable list) and app.spec (?craft= deep
+  // link). The auto-wire MODEL is vitest-pinned (wiremodel/wireops.test.ts).
 });
 
 test.describe('manual wiring + triangles + component meta @ui', () => {
