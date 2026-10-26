@@ -6,7 +6,7 @@
 // need; those legs retire in this commit (L5). Pixel laws (surge sprites,
 // overlay restore, day-light rig) stay e2e — this file never claims them.
 import { describe, expect, test } from 'vitest';
-import { openCraft, withRealModels } from './harness';
+import { openCraft, openCraftOpt, withRealModels } from './harness';
 import type { Engine } from '../scene';
 import type { Blueprint } from '../format';
 
@@ -133,5 +133,73 @@ describe('symmetry twins sit mirrored (was sym.spec geometry, @slow)', () => {
       }
     }
     expect(false, 'ISW carries at least one x-mirrored SmallWheel pair').toBe(true);
+  }, 120_000);
+});
+
+describe('generated propeller (was propeller.spec @models @slow @Propeller)', () => {
+  const propSpans = async (id: string): Promise<number[]> => {
+    const e = openCraft(id);
+    const ci = cIs(e.blueprint!, /^Propeller$/)[0]!;
+    await withRealModels(e, [ci]);
+    const b = e.compRealBox(ci)!;
+    return ([0, 1, 2] as const).map((a) => b.max[a] - b.min[a]).sort((x, y) => x - y);
+  };
+  test('rest twin: generated r = 1.2 m disc, flat (hub-thin smallest axis)', async () => {
+    const s = await propSpans('9000001024');
+    expect(s[1], `mid span ${s[1]} (template: 1.76)`).toBeGreaterThan(2.2);
+    expect(s[2], `max span ${s[2]} (2r = 2.4 + chord)`).toBeGreaterThan(2.2);
+    expect(s[0], `min span ${s[0]} (hub+tilt cone)`).toBeLessThan(1.4);
+    expect(s[0], `min span ${s[0]} (hub not lost)`).toBeGreaterThan(0.1);
+  }, 120_000);
+  test('deflected twin: twist/pitch spread the surface OUT OF PLANE beyond the rest twin', async () => {
+    const sR = await propSpans('9000001024');
+    const sD = await propSpans('9000002024');
+    expect(sD[2], 'deflected keeps the disc diameter').toBeGreaterThan(2.2);
+    expect(sD[2], 'deflected disc diameter ≈ rest').toBeLessThan(sR[2]! + 0.6);
+    expect(sD[0]! - sR[0]!,
+      'out-of-plane spread grew (twist/pitch → data drives geometry)').toBeGreaterThan(0.5);
+  }, 120_000);
+});
+
+// SOLO fixtures (one part per craft) live ONLY in the resolved blueprint
+// corpus (env ARCHEAN_BLUEPRINTS > blueprints.conf > testdata) — pins SKIP
+// cleanly where the corpus is absent, per the §Blueprint folder rule.
+describe('content basis C·chain·C⁻¹ on solo fixtures (was asset-space.spec @models @slow)', () => {
+  const spansOf = async (id: string, type: string): Promise<number[] | null> => {
+    const e = openCraftOpt(id);
+    if (!e) return null;
+    const ci = cIs(e.blueprint!, new RegExp(`^${type}$`))[0];
+    if (ci === undefined) throw new Error(`solo fixture ${id} has no ${type}`);
+    await withRealModels(e, [ci]);
+    const b = e.compRealBox(ci)!;
+    return [0, 1, 2].map((a) => b.max[a]! - b.min[a]!);
+  };
+  test('ActiveRadiator: slab spans X·Y, thin Z', async (ctx) => {
+    const s = await spansOf('9000003001', 'ActiveRadiator');
+    if (s === null) ctx.skip();
+    expect(s![0]!, `x ${s![0]}`).toBeGreaterThan(0.9);
+    expect(s![1]!, `y ${s![1]} (baked-file frame: 0.72 — slab tipped)`).toBeGreaterThan(0.9);
+    expect(s![2]!, `z ${s![2]} (raw-file frame: 0.72)`).toBeLessThan(0.55);
+  }, 120_000);
+  test('Aileron: wing plate spans X·Z, thin Y', async (ctx) => {
+    const s = await spansOf('9000003002', 'Aileron');
+    if (s === null) ctx.skip();
+    expect(s![0]!, `x ${s![0]}`).toBeGreaterThan(0.9);
+    expect(s![1]!, `y ${s![1]} (raw: 0.48 / baked-file: 1.01)`).toBeLessThan(0.4);
+    expect(s![2]!, `z ${s![2]} (raw 0.76 / baked 0.48)`).toBeGreaterThan(0.9);
+  }, 120_000);
+  test('TrashCan: drum along Y at identity mount', async (ctx) => {
+    const s = await spansOf('9000003102', 'TrashCan');
+    if (s === null) ctx.skip();
+    expect(s![1]!, `y ${s![1]} (baked-file: 0.5 tipped)`).toBeGreaterThan(0.65);
+    expect(s![2]!, `z ${s![2]} (baked-file: 0.72)`).toBeLessThan(0.6);
+  }, 120_000);
+  test('ToggleButton: lever stack thin X/Y, +0.37 along Z', async (ctx) => {
+    const s = await spansOf('9000003100', 'ToggleButton');
+    if (s === null) ctx.skip();
+    expect(s![0]!, `x ${s![0]}`).toBeLessThan(0.3);
+    expect(s![1]!, `y ${s![1]} (raw: 0.44)`).toBeLessThan(0.32);
+    expect(s![2]!, `z ${s![2]} (raw: 0.63)`).toBeGreaterThan(0.25);
+    expect(s![2]!, `z ${s![2]} (raw: 0.63)`).toBeLessThan(0.5);
   }, 120_000);
 });

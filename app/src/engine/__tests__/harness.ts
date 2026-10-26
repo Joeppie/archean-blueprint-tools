@@ -16,6 +16,30 @@ export const REPO = resolve(__dirname, '..', '..', '..', '..');
 export const testdataText = (id: string): string =>
   readFileSync(resolve(REPO, 'testdata', id, 'blueprint.json'), 'utf8');
 
+/** the machine-local BLUEPRINT FOLDER per the config tiers (env
+ *  ARCHEAN_BLUEPRINTS > gitignored blueprints.conf > repo testdata) —
+ *  the same resolution tools/config.py + app/tools/vite-corpus.ts apply.
+ *  Solo fixtures (90000030NN) live ONLY there; tests using this SKIP when
+ *  the corpus is absent (a fresh clone must stay green). */
+function corpusDirs(): string[] {
+  const dirs = [process.env.ARCHEAN_BLUEPRINTS];
+  try {
+    const conf = readFileSync(resolve(REPO, 'blueprints.conf'), 'utf8');
+    const m = /^blueprints\s*=\s*(.+)$/m.exec(conf);
+    if (m) dirs.push(m[1]!.trim());
+  } catch { /* no conf: env + testdata only */ }
+  dirs.push(resolve(REPO, 'testdata'));
+  return dirs.filter((d): d is string => !!d);
+}
+
+export function corpusText(id: string): string | null {
+  for (const d of corpusDirs()) {
+    const p = resolve(d, id, 'blueprint.json');
+    try { return readFileSync(p, 'utf8'); } catch { /* try next tier */ }
+  }
+  return null;
+}
+
 class MemStorage {
   private m = new Map<string, string>();
   getItem(k: string): string | null { return this.m.get(k) ?? null; }
@@ -89,7 +113,24 @@ export function openCraft(
   id: string, opts: { atlas?: ModelAtlas | null; w?: number; h?: number } = {},
 ): Engine {
   stubDom();
-  const { bp } = openFunnel(testdataText(id));
+  const text = corpusText(id);
+  if (text === null) throw new Error(`craft ${id}: not in testdata/ nor the resolved corpus`);
+  const { bp } = openFunnel(text);
+  const e = new Engine();
+  e.setVirtualViewport(opts.w ?? 800, opts.h ?? 600);
+  e.load(bp, opts.atlas === undefined ? diskAtlas() : opts.atlas);
+  return e;
+}
+
+/** openCraft for SOLO fixtures that live only in the machine-local corpus;
+ *  returns null when the corpus is absent (caller SKIPS the pin) */
+export function openCraftOpt(
+  id: string, opts: { atlas?: ModelAtlas | null; w?: number; h?: number } = {},
+): Engine | null {
+  stubDom();
+  const text = corpusText(id);
+  if (text === null) return null;
+  const { bp } = openFunnel(text);
   const e = new Engine();
   e.setVirtualViewport(opts.w ?? 800, opts.h ?? 600);
   e.load(bp, opts.atlas === undefined ? diskAtlas() : opts.atlas);
