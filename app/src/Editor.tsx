@@ -65,6 +65,17 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     return s === null ? window.innerWidth >= 768 : s === '1';
   });
   useEffect(() => { localStorage.setItem('archean-app-static-info', staticInfo ? '1' : '0'); }, [staticInfo]);
+  // v1.11.1 PHONE (we: "placing blocks on phone exclusively works on existing
+  // geometry, not on e.g. grid, preventing movement"): the phone canvas is a
+  // postage stamp, so a tap far from the tiny craft lands on the GRID PAD —
+  // the desktop rule 'ground stays unfurnishable' (v1.11 constructor law)
+  // made growth off the deck impossible there. Phones also furnish the pad.
+  const [narrow, setNarrow] = useState(() => window.innerWidth < 768);
+  useEffect(() => {
+    const h = () => setNarrow(window.innerWidth < 768);
+    addEventListener('resize', h);
+    return () => removeEventListener('resize', h);
+  }, []);
   const [rev, setRev] = useState(0);
   const [blockSel, setBlockSel] = useState(-1);
   // v1.11 PLACEMENT REWRITE (we: "Choosing a block size before placing it
@@ -916,7 +927,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     // brush ghost belongs to + Blocks ONLY — + Parts and + Triangles hover clean
     if (mode !== 'edit' || ws !== 'blocks') { e.setPlaceGhost(null); return; }
     const r = e.pickCell(clientX, clientY);
-    if (!r || r.kind === 'ground') { e.setPlaceGhost(null); return; }
+    if (!r || (r.kind === 'ground' && !narrow)) { e.setPlaceGhost(null); return; }
     const info = shift && r.bi >= 0 ? blockInfo(ctx.bp, r.bi) : null;
     // v1.11: the brush lands ONE CELL (size 0) — scale comes after the click
     // (widget ⤢ / dock rows); Shift keeps the game's logical continuation,
@@ -925,7 +936,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       ? complementBlock(info, [cellIndex(r.point[0]), cellIndex(r.point[1]), cellIndex(r.point[2])], r.nrm)
       : { cell: r.cell, ...brushSpec(brush) };
     e.setPlaceGhost({ ...spec, valid: !cellOverlap(ctx.bp, spec.cell, spec.size), complement: !!info });
-  }, [mode, ws, placing, mirrorPlace, twins, brush]);
+  }, [mode, ws, placing, mirrorPlace, twins, brush, narrow]);
 
   // ghost lifecycle: re-aim when the brush changes (live preview of the
   // panel), drop it when the flavor/mode leaves block-placement
@@ -1060,8 +1071,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       e.setPinEdit(at, brush.slot);   // pins STAY: drag them to fix
         sceneChanged();
       return;
-    }
-    // ── + PARTS: comp picks (above) inspect AND modify; a held part lands
+    }    // ── + PARTS: comp picks (above) inspect AND modify; a held part lands
     //    through the place flow; a bare surface click clears species picks
     if (ws === 'parts') {
       setBlockSel(-1); setTriSel(-1);
@@ -1069,7 +1079,12 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     }
     // ── ▤ BLOCKS: surface clicks dock a cell ─────────────────────────────
     if (ws === 'blocks') {
-      if (r.kind === 'ground') { setBlockSel(-1); return; }
+      // v1.11.1 PHONE: the GRID PAD is furnishable too (we: "placing blocks
+      // on phone exclusively works on existing geometry, not on e.g. grid,
+      // preventing movement") — the pickCell ground hit carries the pad
+      // point + the +y normal, so r.cell is the cell that STANDS ON the pad.
+      // Desktop keeps the v1.11 constructor law (ground refuses, sky clears).
+      if (r.kind === 'ground' && !narrow) { setBlockSel(-1); return; }
       const info = shift && r.bi >= 0 ? blockInfo(ctx.bp, r.bi) : null;
       const spec = info
         ? complementBlock(info, [cellIndex(r.point[0]), cellIndex(r.point[1]), cellIndex(r.point[2])], r.nrm)
@@ -1107,7 +1122,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     }
     // ground in EDIT clears the selection (nothing valid was clicked)
     setBlockSel(-1); e.select(-1);
-  }, [brush, mirrorPlace, twins, triDraft, pinTi, sceneChanged, computeGhost, ws, setWs]);
+  }, [brush, mirrorPlace, twins, triDraft, pinTi, sceneChanged, computeGhost, ws, setWs, narrow]);
 
   /** CATALOG placement (KSP part pickup): land the HELD type at the picked
    *  surface — bp + doc together, then the debounced scene reload; the part
@@ -1750,8 +1765,12 @@ function CameraCluster({ engine }: { engine: Engine | null }) {
 function PickChip({ hit, bp }: { hit: PickHit; bp: Blueprint }) {
   const comp = hit.kind === 'comp' && hit.ci != null ? bp.data.components[hit.ci] : null;
   return (
+    // v1.11.1 (we: "That still shows on top" — the picked-info chip sat
+    // 132 px above the canvas bottom = MID-canvas over the 38 % phone dock
+    // layout): phones dock it flush at the viewport's bottom edge (the
+    // edge-dock law); desktop keeps the top-right card.
     <div data-testid="pick-info"
-      className="ksp-win pointer-events-none absolute inset-x-2 bottom-[132px] rounded px-3 py-2 text-[12px]
+      className="ksp-win pointer-events-none absolute inset-x-2 bottom-2 rounded px-3 py-2 text-[12px]
                  text-ink md:inset-x-auto md:bottom-auto md:right-3 md:top-3 md:max-w-[320px]">
       <span className="ksp-label text-[10px] text-ink-dim">picked</span>{' '}
       <span className="text-gold">{hit.kind}</span>

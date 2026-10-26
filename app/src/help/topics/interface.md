@@ -58,7 +58,10 @@ them back), and the **editor of the selected item**.
 
 * **Placing (v1.11: no size to choose)**: pick **+ Blocks** and **click /
   tap a surface** — one 1×1×1 block lands, is selected, and the mode widget
-  pops at it: **✥ move · ⟳ turn · ⤢ stretch**. Stretch drags a face — that
+  pops at it (on phones the widget docks at the viewport's top edge and the
+  GRID PAD is furnishable too — tap the grid beside the craft and the block
+  stands on the pad; desktop keeps the pad unfurnishable): **✥ move · ⟳
+  turn · ⤢ stretch**. Stretch drags a face — that
   face moves and the opposite face stays anchored, in whole cells; the
   dock's size rows do the same by number. The brush carries shape, paint
   and material only.

@@ -136,4 +136,96 @@ test.describe('phone UI batch @ui', () => {
     await expect(widget).toContainText('Generate balloon');
     await expect(widget, 'the outdated triangles-only wording is gone').not.toContainText('no hull triangles yet');
   });
+
+  test('the picked-info chip docks at the viewport bottom edge on phones (desktop: top-right card)', async ({ page }) => {
+    await openNew(page);
+    await page.getByTestId('mode-wire').click();                // pickAt path (mode !== view)
+    let px: { x: number; y: number } | null = null;
+    for (let i = 0; i < 40 && !px; i++) {
+      px = await page.evaluate(() => {
+        const c = document.querySelector('canvas')!;
+        const r = c.getBoundingClientRect();
+        const e = (window as unknown as { __ARCHEAN__?: { engine: {
+          pendingReal: number;
+          pickCell: (x: number, y: number) => { kind: string } | null } } }).__ARCHEAN__!.engine;
+        if (e.pendingReal > 0) return null;
+        for (let fy = 0.3; fy <= 0.8; fy += 0.02)
+          for (let fx = 0.25; fx <= 0.8; fx += 0.02) {
+            const h = e.pickCell(r.left + r.width * fx, r.top + r.height * fy);
+            if (h && h.kind === 'comp') return { x: r.left + r.width * fx, y: r.top + r.height * fy };
+          }
+        return null;
+      });
+      if (!px) await page.waitForTimeout(300);
+    }
+    expect(px, 'a part surface answers pickCell').not.toBeNull();
+    await page.mouse.click(px!.x, px!.y);
+    const chip = page.getByTestId('pick-info');
+    await expect(chip).toBeVisible();
+    const box = (await chip.boundingBox())!;
+    const cv = (await page.getByTestId('canvas').boundingBox())!;
+    if (isPhone()) {
+      // flush at the canvas bottom edge, over the dock (bottom-2 = 8 px):
+      // the v1.11.0 fixed 132 px sat MID-canvas on the phone layout.
+      expect(cv.y + cv.height - (box.y + box.height), 'chip docked at the bottom edge (phone)')
+        .toBeLessThanOrEqual(14);
+    } else {
+      // desktop keeps the top-right card (top-3 = 12 px)
+      expect(box.y - cv.y, 'chip anchored top-right (desktop)').toBeLessThanOrEqual(14);
+      expect(cv.x + cv.width - (box.x + box.width)).toBeLessThanOrEqual(16);
+    }
+  });
+
+  test('phones furnish the GRID PAD; desktop keeps ground unfurnishable', async ({ page }) => {
+    await openNew(page);
+    await page.getByTestId('mode-edit').click();
+    await page.getByTestId('ws-blocks').click();
+    // arm ⊘ mirroring so one tap lands exactly ONE block (counting is exact)
+    const chip = page.getByTestId('mirw-off');
+    await chip.click();
+    await expect(chip).toHaveAttribute('aria-pressed', 'true');
+    let px: { x: number; y: number } | null = null;
+    for (let i = 0; i < 40 && !px; i++) {
+      px = await page.evaluate(() => {
+        const c = document.querySelector('canvas')!;
+        const r = c.getBoundingClientRect();
+        const e = (window as unknown as { __ARCHEAN__?: { engine: {
+          pendingReal: number;
+          pickCell: (x: number, y: number) => { kind: string; bi: number } | null } } }).__ARCHEAN__!.engine;
+        if (e.pendingReal > 0) return null;
+        for (let fy = 0.88; fy >= 0.5; fy -= 0.02)          // bottom-up: the PAD band
+          for (let fx = 0.25; fx <= 0.8; fx += 0.02) {
+            const h = e.pickCell(r.left + r.width * fx, r.top + r.height * fy);
+            if (h && h.kind === 'ground') return { x: r.left + r.width * fx, y: r.top + r.height * fy };
+          }
+        return null;
+      });
+      if (!px) await page.waitForTimeout(300);
+    }
+    expect(px, 'the grid pad answers pickCell as ground').not.toBeNull();
+    await page.mouse.move(px!.x, px!.y);                     // hover: the ghost aims
+    await page.waitForTimeout(200);
+    const ghost = () => page.evaluate(() =>
+      (window as unknown as { __ARCHEAN__?: { ghost: () => unknown } }).__ARCHEAN__!.ghost());
+    const blocks = () => page.evaluate(() => (window as unknown as {
+      __ARCHEAN__?: { engine: { blueprint: { data: { blocks: unknown[] } } } } }
+    ).__ARCHEAN__!.engine.blueprint.data.blocks.length);
+    if (!isPhone()) {
+      // the v1.11 constructor law STAYS on desktop: ground is unfurnishable
+      expect(await ghost(), 'desktop: no ghost over the pad').toBeNull();
+      const before = await blocks();
+      await page.mouse.click(px!.x, px!.y);
+      await page.waitForTimeout(400);
+      expect(await blocks(), 'desktop: the pad click lands nothing').toBe(before);
+      return;
+    }
+    // PHONE (we: "placing blocks on phone exclusively works on existing
+    // geometry, not on e.g. grid, preventing movement"): the brush ghost
+    // docks on the pad and the tap lands a cell STANDING ON it.
+    expect(await ghost(), 'phone: the brush ghost docks on the pad').not.toBeNull();
+    const before = await blocks();
+    await page.mouse.click(px!.x, px!.y);
+    for (let i = 0; i < 20 && (await blocks()) === before; i++) await page.waitForTimeout(250);
+    expect(await blocks(), 'phone: the pad tap lands a block').toBe(before + 1);
+  });
 });

@@ -1388,6 +1388,20 @@ topic + FORMAT).
   law, the lift empty-state text); LESSONS: e2e reading the ⚙ rows must
   OPEN the popover first (`toggle-options` — ViewOpts unmounts when closed),
   and the pixel7 drawer of the v1.10 era is GONE (v1.11 dock-only layout).
+  **SAME-DAY FOLLOW-UPS (we: "That still shows on top" — phone screenshot
+  of the PICKED chip; "placing blocks on phone exclusively works on existing
+  geometry, not on e.g. grid, preventing movement"):** (6) the PICKED-INFO
+  chip (PickChip) joined the edge-dock law — its phone `bottom-[132px]` sat
+  MID-canvas once the v1.11 dock took 38 % of the height; it is `bottom-2`
+  (flush over the dock) on phones, the desktop top-right card unchanged.
+  (7) PHONES FURNISH THE GRID PAD (Editor `narrow` state): in + Blocks,
+  a ground pickCell hit (pad plane, +y normal → r.cell STANDS ON the pad)
+  aims the brush ghost and lands a cell like any surface — the phone canvas
+  makes an existing-geometry-only rule un-usable; DESKTOP KEEPS the v1.11
+  constructor law (ground unfurnishable, the desktop legs of the pin
+  assert it). Pins: phoneux chip-edge + ground-pad legs (phone: ghost on
+  the pad, a pad tap lands exactly one block with mirroring ⊘; desktop:
+  ghost null, click lands nothing).
 - **v1.11 PLACEMENT REWRITE — place-then-transform + TRIANGLE PINS (we:
   "I am unhappy with how placing blocks work. The same for triangles. Remove
   the existing functionality and do a total rewrite; the bottom bar should be

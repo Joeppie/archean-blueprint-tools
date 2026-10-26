@@ -40,9 +40,13 @@ dialogs cap to the phone screen, tool dialogs sit clear of Brave's floating
 bottom bar. Since v1.11 the catalog, parts list, inspector and the mode
 workspaces ALL live in the wide bottom dock (no side drawer), and the tap
 popups stay OUT of the way (v1.11.1): the mode widget (⊘ ✥ ⟳ ⤢) docks at the
-viewport's TOP edge instead of over the part you just tapped, the placement
-label and the ⚠/ℹ twin popups dock at its bottom edge over the dock, the 3-D
-gizmo is drawn compact, and the Help manual is a FULLSCREEN window.
+viewport's TOP edge instead of over the part you just tapped, the picked-info
+chip, the placement label and the ⚠/ℹ twin popups dock at its bottom edge
+over the dock, the 3-D gizmo is drawn compact, and the Help manual is a
+FULLSCREEN window. Phones also furnish the GRID PAD: a + Blocks tap on the
+grid lands a block STANDING ON the pad (the phone canvas is a postage stamp
+— demanding an existing-geometry hit first made growing off the deck
+impossible); desktop keeps the pad unfurnishable.
 
 ## Sky backdrop credits
 
