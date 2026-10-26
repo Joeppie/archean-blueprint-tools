@@ -121,7 +121,7 @@ test.describe('coord readout + grid + axis markers + mirror axis @ui', () => {
   // The settings chain: one boot, the FULL x→z→x→y→⊘→x round-trip in
   // order (the two former legs shared exactly this sequence split across
   // two boots). localStorage + twin-pair dormancy ride every flip.
-  test('⚙ mirror axis: settable, twins live on the session axis, ⊘ OFF (one boot)', async ({ page }) => {
+  test('⚙ mirror axis: settable, twins live on the session axis, ⊘ OFF (warm boot)', async ({ page }) => {
     desktopOnly();
     await openCraft(page, ISW);
     expect(await mirAxis(page)).toBe('x');         // hard gate: corpus default
