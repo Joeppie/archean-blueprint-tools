@@ -99,6 +99,8 @@ export interface PipeNetwork {
   polys: V3[][];
   /** DRAWN half-extent per net run (hover-pick tolerance, v1.10.1) */
   radii: number[];
+  /** v1.11.7: the pipe KIND per net run (the flow icons' canonical looks) */
+  kindOf: string[];
   /** which data.pipes index each net run came from (degenerate entries are
    *  skipped by the builder, so polys index ≠ pipe index without this) */
   piOf: number[];
@@ -202,7 +204,9 @@ function unit(a: V3, b: V3): V3 {
 }
 
 /** one cable run to animate a power-surge along, walkable FROM ci */
-export interface SurgePath { pts: V3[]; cum: number[]; total: number; to: number }
+export interface SurgePath { pts: V3[]; cum: number[]; total: number; to: number;
+  /** v1.11.7: the run's pipe kind (canonical flow-icon look) */
+  kind: string }
 
 /**
  * Build the drawable network. `sockets` (sockets.ts pipeSockets) optionally
@@ -221,7 +225,7 @@ export function buildPipes(
   const polys: V3[][] = [];
   const radii: number[] = [];
   const piOf: number[] = [];
-  const net: PipeNetwork = { segs, joints, plugs, ends, links, polys, radii, piOf, pipes: 0, stale: 0, reroute: 0, draped: 0 };
+  const net: PipeNetwork = { segs, joints, plugs, ends, links, polys, radii, kindOf: [], piOf, pipes: 0, stale: 0, reroute: 0, draped: 0 };
   if (!pipes?.length) return net;
   net.pipes = 0;
 
@@ -313,7 +317,7 @@ export function buildPipes(
         tipA, ...(neckA ? [neckA] : []), ...pts.slice(1, -1),
         ...(neckB ? [neckB] : []), tipB,
       ]);
-      radii.push(half); piOf.push(pi);
+      radii.push(half); piOf.push(pi); net.kindOf.push(kind);
       plugs.push(
         { at: tipA, axis: axisA ?? unit(neckA ?? tipA, pts[1] ?? tipB), radius, half, box, led: !!neckA },
         { at: tipB, axis: axisB ?? unit(neckB ?? tipB, pts[pts.length - 2] ?? tipA), radius, half, box, led: !!neckB },
@@ -363,7 +367,7 @@ export function buildPipes(
     ends.push({ a: tipA, b: tipB });
     links.push({ a: p.a_component, b: p.b_component });
     polys.push(pts);
-    radii.push(half); piOf.push(pi);
+    radii.push(half); piOf.push(pi); net.kindOf.push(kind);
     const d0 = DIRS[s0.dir] ?? DIRS[0]!, dn = DIRS[sn.dir] ?? DIRS[0]!;
     plugs.push(
       { at: tipA, axis: axisA ?? [-d0[0], -d0[1], -d0[2]], radius, half,
@@ -374,6 +378,25 @@ export function buildPipes(
   });
   net.pipes = pipes.length;
   return net;
+}
+
+/** THE FLOW LAW (v1.11.7, we: "If the input is towards a one-way (e.g.
+ *  bridge/LV junction) the flow shouldn't bounce between, but one way from
+ *  in->out"): the pulse direction of a run, from the two endpoint PORT
+ *  ROLES (wiremodel.portRole). A cable that ends at an IN port carries
+ *  flow INTO it — one-way from the source side to the IN; an OUT port is
+ *  the source side of a one-way chain; a neutral 'any' pair (plain fluid/
+ *  item bus, unnamed data port) bounces — the idle line shimmer is
+ *  bidirectional. 'ab' = a-end → b-end, 'ba' = b-end → a-end. */
+export function runFlowDir(aRole: 'in' | 'out' | 'any',
+  bRole: 'in' | 'out' | 'any'): 'ab' | 'ba' | 'both' {
+  if (aRole === 'in' && bRole === 'out') return 'ba';      // b source → a IN
+  if (bRole === 'in' && aRole === 'out') return 'ab';      // a source → b IN
+  if (aRole === 'in') return 'ba';                         // into the a-end IN
+  if (bRole === 'in') return 'ab';                         // into the b-end IN
+  if (aRole === 'out' && bRole !== 'out') return 'ab';     // from the a-end OUT
+  if (bRole === 'out' && aRole !== 'out') return 'ba';     // from the b-end OUT
+  return 'both';                                           // neutral bus: bounce
 }
 
 /** distance from a ray (origin o, UNIT direction dd) to the segment a—b,
@@ -469,7 +492,7 @@ export function surgePaths(net: PipeNetwork, ci: number): SurgePath[] {
     for (let k = 1; k < pts.length; k++) cum.push(cum[k - 1]! + segLen(pts[k - 1]!, pts[k]!));
     const total = cum[cum.length - 1]!;
     if (total < 0.05) continue;
-    out.push({ pts, cum, total, to });
+    out.push({ pts, cum, total, to, kind: net.kindOf[i] ?? 'data' });
   }
   return out;
 }

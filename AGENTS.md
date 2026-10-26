@@ -2593,6 +2593,47 @@ Rules:
   Rationale: every live worktree is another session (or another zombie dev
   server) that can fork the graph or squat the user's ports.
 
+## Test-load stratification (v1.11.7 user rule: "sparsify the full test
+suite a bit … we need to do a strat of some sort to reduce the load/
+flakiness and quantity of tests being run using e2e. It's too much of a
+load right now for a hobby project")
+
+The full Playwright matrix (~20 specs × 2 viewports, engine-heavy scene
+boots on software GL) is a machine-eater — the v1.11.7 session proved the
+failure mode end-to-end: the truck X-ray census ran 24 FULL episodes
+(geometry mutation + pulses ≈ 30-60 s of blocked page thread per census)
+and a 60 fps bubble ticker saturated SwiftShader, so pins "flaked" only
+in full-suite runs. Standing rules:
+
+- **Gate ladder (what runs when):**
+  - Per change: `npm test` (vitest pure core) + `npx tsc -b` +
+    `npx playwright test --grep '<tags/areas touched>'` — the touched area
+    only (the per-area + per-component grep rules above stay).
+  - Per landing on main: the FAST tier `npm run test:e2e:fast` (all
+    @slow inverted) — the DEFAULT release gate (release.sh's legacy
+    selftest+regtest gate is separate and unchanged).
+  - @slow (@models/@gizmo/@sym/@subgrid/@aero — the multi-asset renders)
+    runs for the subsystems the change touches; a full @slow sweep only
+    at user-facing minor/major (Y/X) boundaries, and the release commit
+    notes the date of the last full sweep.
+- **New e2e probes must be DRY:** the engine seam for a test scan counts,
+  never applies (scene.ts `xrayCutsFor` replaced the census's
+  begin/end-episode loop; `pipePickAt`, `pipeFlowDir`, `subStats` follow
+  the same law). Census budget: < 5 s per page.
+- **Animations declare a tick budget:** the flow-bubble ticker runs at
+  ~20 Hz — a continuous 60 fps `needRender` during episodes is invisible
+  to users on a real GPU and ruinous in headless harnesses.
+- **Flake policy:** a pin that flakes under full-suite load gets a
+  SELF-HEALING probe (re-anchor the pick through the engine's own pick
+  law, jiggle-poll the assertion — see wire.spec's re-anchor loop + the
+  BLOCKED-test poll) or gets SPARSIFIED (fewer viewports, capped scans).
+  Never "fix" flakes by raising sleeps/timeouts.
+- **Sparsify backlog (cut these the next time the suite is touched):**
+  views.spec + phoneux.spec viewport matrices overlap panels.spec pixel
+  pins; pipes.spec + wire.spec hover-pick pins test the SAME seam (keep
+  wire's, leave pipes' to render shape); the xrayCensus fixture-selection
+  scan is paid once per spec, not per test.
+
 ## Checkin gate (mandatory — the hook is the enforcement)
 Every commit passes `tests/pre-commit` (install once: `bash
 tools/install-hooks.sh`): (1) `tools/security-scan.py --staged` — the staged

@@ -43,7 +43,8 @@ import { propellerSurface, type PropellerData } from './propeller';
  *  neutral NON-metallic grey — `ReverseGamma(vec3(0.5))` in the shader, i.e.
  *  written in sRGB (dev propellerGeometry agrees). */
 const PROP_GEN_SPEC: PbrSpec = { color: srgbHexToLinear(0x808080), metal: 0, rough: 0.65, opacity: 1 };
-import { buildPipes, checkLeads, pipeAt, surgePaths, type PipeNetwork } from './pipes';
+import { buildPipes, checkLeads, pipeAt, runFlowDir, surgePaths, type PipeNetwork } from './pipes';
+import { portRole } from './wiremodel';
 import { pipeLabel } from './wireops';
 import { buildCompProxies, buildSolids, type ProxyBox, type SolidBatch } from './build';
 import { hullVertex } from './hullfit';
@@ -408,7 +409,7 @@ export class Engine {
   // blips. Pulses/blips render additive with depthTest OFF — they shine
   // THROUGH the hull — and the on-demand loop wakes only while alive.
   private pipeNet: PipeNetwork = { segs: [], joints: [], plugs: [], ends: [], links: [],
-    polys: [], radii: [], piOf: [], pipes: 0, stale: 0, reroute: 0, draped: 0 };
+    polys: [], radii: [], kindOf: [], piOf: [], pipes: 0, stale: 0, reroute: 0, draped: 0 };
   // ---- cable HOVER (v1.10.1, user: "on mouse-over of a cable, it should
   // tell us where things are going … propeller[9].lv <-> Computer[0].lv"):
   // the file pipe index under the cursor + a gold overlay riding its drawn
@@ -419,8 +420,24 @@ export class Engine {
   private flatMap: FlatEntry[] = [];
   private surgeGroup = new Group();
   private surgeGeo = new SphereGeometry(0.055, 10, 8);
+  // v1.11.7 CANONICAL FLOW (we: "Once the see-through happens, the
+  // power-bubbles pulsing back and forth should continue doing so; with
+  // the canonical normal color for a cable; item:grey block, data:blue
+  // datagram, LV red power-symbol, HV yellow power symbol, fluid.. a
+  // drop. If the input is towards a one-way (e.g. bridge/LV junction) the
+  // flow shouldn't bounce between, but one way from in->out"): icon
+  // sprites ride the run's polyline for the whole X-ray episode.
+  private bubbleAnim: { pts: Vector3[]; cum: number[]; total: number;
+    dir: 'ab' | 'ba' | 'both'; period: number; t0: number; kind: string;
+    sprites: { mesh: Sprite; phase: number }[] } | null = null;
+  private iconTex = new Map<string, Texture>();
+  private lastBubbleT = 0;   // v1.11.7: bubbles tick at ~20 Hz (cable flow
+                             // reads smooth at 20 fps; a 60 fps needRender
+                             // during an episode saturates software-GL
+                             // harness pages — TEST-LOAD STRATIFICATION)
+  private hoverGraceUntil = 0;
   private surges: { pts: Vector3[]; cum: number[]; total: number; to: number;
-    mesh: Mesh; t0: number; dur: number }[] = [];
+    mesh: Mesh | Sprite; t0: number; dur: number }[] = [];
   private flashes: { grp: Group; mat: MeshBasicMaterial; color: number;
     t0: number; dur: number }[] = [];
   /** cumulative ARRIVAL blips (0x9fe0ff) since the current selection began —
@@ -1283,7 +1300,18 @@ void main() {
       [ray.ray.origin.x - mo.x, ray.ray.origin.y - mo.y, ray.ray.origin.z - mo.z],
       [ray.ray.direction.x, ray.ray.direction.y, ray.ray.direction.z],
       0.05 + camDist * 0.008);            // v1.11: pick scales with view depth
-    if (!hit) { this.clearPipeHover(); return null; }
+    if (!hit) {
+      // v1.11.7 HOVER GRACE (we: "The wire doesn't properly highlight when
+      // highlighting it; that should start immediately"): the highlight is
+      // LATCHED on the first hit and a brief ray miss (cursor between the
+      // polyline samples, a fast sweep) must not flicker it off — the gold
+      // overlay starts INSTANTLY and holds a 160 ms grace window
+      if (this.pipeHoverPi >= 0 && performance.now() < this.hoverGraceUntil)
+        return this.pipeHoverInfo;
+      this.clearPipeHover();
+      return null;
+    }
+    this.hoverGraceUntil = performance.now() + 160;
     const pi = this.pipeNet.piOf[hit.i] ?? -1;
     if (pi < 0 || !this.bp.data.pipes?.[pi]) { this.clearPipeHover(); return null; }
     // remember the RAW point of the run nearest the cursor (the cable
@@ -1385,8 +1413,45 @@ void main() {
   beginWireXray(pi: number) {
     this.endWireXray();
     this.cablePulse(pi);        // v1.11: the transition fires the surge
+    this.startBubbles(pi);      // v1.11.7: bubbles CONTINUE for the episode
+    for (const { mesh, keep, drop } of this.xrayPlan(pi)) {
+      const kg = new BufferGeometry();
+      kg.setAttribute('position', (mesh.geometry as BufferGeometry).getAttribute('position').clone());
+      const nrm = (mesh.geometry as BufferGeometry).getAttribute('normal');
+      if (nrm) kg.setAttribute('normal', nrm.clone());
+      kg.setIndex(keep);
+      kg.boundingSphere = mesh.geometry.boundingSphere?.clone() ?? null;
+      kg.boundingBox = mesh.geometry.boundingBox?.clone() ?? null;
+      this.xraySaved.push({ mesh, geom: mesh.geometry });
+      mesh.geometry = kg;
+      if (drop.length) {
+        const dg = new BufferGeometry();
+        dg.setAttribute('position', new BufferAttribute(new Float32Array(drop), 3));
+        dg.computeVertexNormals();
+        const overlay = new Mesh(dg, new MeshBasicMaterial({
+          color: 0xbfe8ff, transparent: true, opacity: 0.16, side: DoubleSide, depthWrite: false,
+        }));
+        overlay.matrixAutoUpdate = false;
+        overlay.matrix.copy(mesh.matrixWorld);
+        overlay.matrixWorldNeedsUpdate = true;
+        overlay.raycast = () => {};
+        overlay.layers.set(1);
+        this.scene.add(overlay);
+        this.xrayOverlays.push(overlay);
+      }
+    }
+    this.invalidate();
+  }
+  /** THE OCCLUSION PLAN (v1.11.7 TEST-LOAD STRATIFICATION): the screen-space
+   *  scan factored out of beginWireXray so a census can COUNT blocked cables
+   *  through xrayCutsFor WITHOUT mutating geometry, firing pulses, or
+   *  building overlays — the e2e census used to pay the full episode cost
+   *  per cable (24 × a few seconds under parallel-worker load = a 120 s
+   *  test timeout eating the page's JS thread). */
+  private xrayPlan(pi: number): { mesh: Mesh; keep: number[]; drop: number[] }[] {
+    const OUT: { mesh: Mesh; keep: number[]; drop: number[] }[] = [];
     const cam = this.camera, renderer = this.renderer;
-    if (!cam || !renderer || !this.bp) return;
+    if (!cam || !renderer || !this.bp) return OUT;
     // v1.11 SCREEN-SPACE occlusion (we: "the making of wireframe doesn't
     // properly find all elements in front of the camera … we know where
     // the cable reaches closest to the camera, and what its extents in
@@ -1447,7 +1512,7 @@ void main() {
         x1: Math.max(A.x, B.x) + 3, y1: Math.max(A.y, B.y) + 3,
         near: Math.min(A.z, B.z), far: Math.max(A.z, B.z) + 0.02 });
     }
-    if (!tgts.length) return;
+    if (!tgts.length) return OUT;
     let gx0 = Infinity, gy0 = Infinity, gx1 = -Infinity, gy1 = -Infinity, gFar = -Infinity;
     for (const t of tgts) {
       gx0 = Math.min(gx0, t.x0); gy0 = Math.min(gy0, t.y0);
@@ -1544,32 +1609,14 @@ void main() {
         } else keep.push(i0, i1, i2);
       }
       if (!keep.length) continue;                   // fully in the way: leave it
-      const kg = new BufferGeometry();
-      kg.setAttribute('position', pos.clone());
-      const nrm = geo.getAttribute('normal');
-      if (nrm) kg.setAttribute('normal', nrm.clone());
-      kg.setIndex(keep);
-      kg.boundingSphere = geo.boundingSphere?.clone() ?? null;
-      kg.boundingBox = geo.boundingBox?.clone() ?? null;
-      this.xraySaved.push({ mesh, geom: geo });
-      mesh.geometry = kg;
-      if (drop.length) {
-        const dg = new BufferGeometry();
-        dg.setAttribute('position', new BufferAttribute(new Float32Array(drop), 3));
-        dg.computeVertexNormals();
-        const overlay = new Mesh(dg, new MeshBasicMaterial({
-          color: 0xbfe8ff, transparent: true, opacity: 0.16, side: DoubleSide, depthWrite: false,
-        }));
-        overlay.matrixAutoUpdate = false;
-        overlay.matrix.copy(mesh.matrixWorld);
-        overlay.matrixWorldNeedsUpdate = true;
-        overlay.raycast = () => {};
-        overlay.layers.set(1);
-        this.scene.add(overlay);
-        this.xrayOverlays.push(overlay);
-      }
+      OUT.push({ mesh, keep, drop });
     }
-    this.invalidate();
+    return OUT;
+  }
+  /** census probe: how many meshes the X-ray of a cable WOULD cut (dry —
+   *  no scene mutation, no pulses; the e2e census budget, v1.11.7) */
+  xrayCutsFor(pi: number): number {
+    return this.xrayPlan(pi).length;
   }
   /** v1.11 (we: "when the wireframe transition happens, a power surge
    *  should run through the cable tracing it between the two components
@@ -1596,11 +1643,7 @@ void main() {
       for (let k = 1; k < path.length; k++)
         cum.push(cum[k - 1]! + path[k]!.distanceTo(path[k - 1]!));
       const total = cum[cum.length - 1]!;
-      const mesh = new Mesh(this.surgeGeo, new MeshBasicMaterial({
-        color: 0xaef3ff, transparent: true, opacity: 0.95,
-        blending: AdditiveBlending, depthTest: false, depthWrite: false }));
-      mesh.renderOrder = 17;
-      mesh.raycast = () => {};
+      const mesh = this.flowSprite(this.pipeNet.kindOf[netIdx] ?? 'data', 0.14);
       mesh.position.copy(pts[anchor]!);
       this.surgeGroup.add(mesh);
       this.surges.push({ pts: path, cum, total, to, mesh,
@@ -1611,14 +1654,138 @@ void main() {
     this.invalidate();
   }
 
+  /** v1.11.7: the CANONICAL flow icon per pipe kind, canvas-drawn once:
+   *  data = BLUE datagram (packet), lowvoltage = RED power bolt,
+   *  highvoltage = YELLOW power bolt, item = GREY block, fluid = grey
+   *  drop; unknown kinds fall back to a plain glowing dot. */
+  private pipeIcon(kind: string): Texture {
+    let t = this.iconTex.get(kind);
+    if (t) return t;
+    const cv = document.createElement('canvas');
+    cv.width = 96; cv.height = 96;
+    const c = cv.getContext('2d')!;
+    c.lineJoin = 'round';
+    const glow = (color: string) => { c.shadowColor = color; c.shadowBlur = 14; };
+    if (kind === 'data') {                                        // blue datagram
+      glow('#3f8cff'); c.fillStyle = '#3f8cff'; c.strokeStyle = '#bfe0ff'; c.lineWidth = 5;
+      c.beginPath(); c.roundRect(16, 26, 64, 44, 8); c.fill(); c.stroke();
+      c.beginPath(); c.moveTo(16, 32); c.lineTo(48, 56); c.lineTo(80, 32); c.stroke();
+    } else if (kind === 'lowvoltage' || kind === 'highvoltage') {  // power bolts
+      const col = kind === 'lowvoltage' ? '#ff3b30' : '#ffd60a';
+      glow(col); c.fillStyle = col; c.strokeStyle = '#ffffff'; c.lineWidth = 4;
+      c.beginPath(); c.moveTo(54, 8); c.lineTo(28, 52); c.lineTo(46, 52);
+      c.lineTo(40, 88); c.lineTo(70, 40); c.lineTo(50, 40); c.closePath();
+      c.fill(); c.stroke();
+    } else if (kind === 'item') {                                  // grey block
+      glow('#aab2bd'); c.lineWidth = 4; c.strokeStyle = '#e8edf4';
+      c.fillStyle = '#c9ced6'; c.beginPath(); c.moveTo(48, 14); c.lineTo(82, 32);
+      c.lineTo(48, 50); c.lineTo(14, 32); c.closePath(); c.fill(); c.stroke();
+      c.fillStyle = '#9aa1ab'; c.beginPath(); c.moveTo(14, 32); c.lineTo(48, 50);
+      c.lineTo(48, 86); c.lineTo(14, 66); c.closePath(); c.fill(); c.stroke();
+      c.fillStyle = '#6f7681'; c.beginPath(); c.moveTo(82, 32); c.lineTo(48, 50);
+      c.lineTo(48, 86); c.lineTo(82, 66); c.closePath(); c.fill(); c.stroke();
+    } else if (kind === 'fluid') {                                 // grey drop
+      glow('#c8ced8'); c.fillStyle = '#b8bec6'; c.strokeStyle = '#eef2f7'; c.lineWidth = 5;
+      c.beginPath(); c.moveTo(48, 10);
+      c.bezierCurveTo(78, 46, 76, 62, 62, 74);
+      c.bezierCurveTo(48, 86, 30, 80, 24, 66);
+      c.bezierCurveTo(18, 52, 26, 38, 48, 10);
+      c.closePath(); c.fill(); c.stroke();
+    } else {                                                       // plain dot
+      glow('#aef3ff'); c.fillStyle = '#aef3ff';
+      c.beginPath(); c.arc(48, 48, 26, 0, Math.PI * 2); c.fill();
+    }
+    t = new CanvasTexture(cv);
+    t.colorSpace = SRGBColorSpace;
+    this.iconTex.set(kind, t);
+    return t;
+  }
+
+  private flowSprite(kind: string, scale: number): Sprite {
+    const mesh = new Sprite(new SpriteMaterial({ map: this.pipeIcon(kind),
+      transparent: true, blending: AdditiveBlending, depthTest: false, depthWrite: false }));
+    mesh.scale.setScalar(scale);
+    mesh.renderOrder = 17;
+    mesh.raycast = () => {};
+    return mesh;
+  }
+
+  /** THE FLOW LAW in motion: the X-ray episode rides the run's polyline
+   *  with canonical icon bubbles — ONE-WAY toward an IN port (bridge/LV
+   *  junction inputs), bouncing on neutral runs — until the episode ends. */
+  private startBubbles(pi: number) {
+    this.clearBubbles();
+    const netIdx = this.pipeNet.piOf.indexOf(pi);
+    const poly = netIdx >= 0 ? this.pipeNet.polys[netIdx] : null;
+    const pipe = this.bp?.data.pipes?.[pi];
+    if (!poly || poly.length < 2 || !pipe) return;
+    const pts = poly.map(v => new Vector3(v[0]!, v[1]!, v[2]!));
+    const cum = [0];
+    for (let k = 1; k < pts.length; k++)
+      cum.push(cum[k - 1]! + pts[k - 1]!.distanceTo(pts[k]!));
+    const total = cum[cum.length - 1]!;
+    if (total < 0.05) return;
+    const dir = runFlowDir(portRole(pipe.a_port ?? ''), portRole(pipe.b_port ?? ''));
+    const kind = this.pipeNet.kindOf[netIdx] ?? pipe.type ?? 'data';
+    const period = Math.min(2.8, Math.max(1.1, total * 0.5));    // one traverse
+    const sprites: { mesh: Sprite; phase: number }[] = [];
+    const n = total > 2.6 ? 3 : 2;
+    for (let k = 0; k < n; k++) {
+      const mesh = this.flowSprite(kind, Math.min(0.24, 0.11 + total * 0.012));
+      this.surgeGroup.add(mesh);
+      sprites.push({ mesh, phase: k / n });
+    }
+    this.bubbleAnim = { pts, cum, total, dir, period, t0: performance.now(), kind, sprites };
+  }
+
+  private clearBubbles() {
+    if (!this.bubbleAnim) return;
+    for (const s of this.bubbleAnim.sprites) {
+      s.mesh.removeFromParent();
+      (s.mesh.material as SpriteMaterial).dispose();
+    }
+    this.bubbleAnim = null;
+  }
+
+  /** debug hook: which cable (file pi) owns a CLIENT pixel (the hover pick,
+   *  same law as pipeHoverMove) — triage for hover/label e2e flakes. */
+  pipePickAt(clientX: number, clientY: number): number {
+    if (!this.bp || !this.renderer || !this.pipeNet.polys.length) return -1;
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const ndc = new Vector2(((clientX - r.left) / r.width) * 2 - 1,
+      -((clientY - r.top) / r.height) * 2 + 1);
+    const ray = new Raycaster();
+    ray.setFromCamera(ndc, this.camera);
+    const mo = this.moffV();
+    const camDist = this.controls
+      ? this.camera!.position.distanceTo(this.controls.target) : 20;
+    const hit = pipeAt(this.pipeNet,
+      [ray.ray.origin.x - mo.x, ray.ray.origin.y - mo.y, ray.ray.origin.z - mo.z],
+      [ray.ray.direction.x, ray.ray.direction.y, ray.ray.direction.z],
+      0.05 + camDist * 0.008);
+    return hit ? (this.pipeNet.piOf[hit.i] ?? -1) : -1;
+  }
+
+  /** THE FLOW LAW probe (v1.11.7 e2e): the pulse direction of a run from
+   *  its endpoint port roles (wiremodel.portRole + pipes.runFlowDir). */
+  pipeFlowDir(pi: number): 'ab' | 'ba' | 'both' {
+    const p = this.bp?.data.pipes?.[pi];
+    return p ? runFlowDir(portRole(p.a_port ?? ''), portRole(p.b_port ?? '')) : 'both';
+  }
+
   /** probe hook: is an X-ray episode live, and how much was cut? */
-  wireXrayActive(): { on: boolean; cuts: number; overlays: number } {
+  wireXrayActive(): { on: boolean; cuts: number; overlays: number;
+    bubbles: number; dir: 'ab' | 'ba' | 'both'; kind: string; phase: number } {
+    const b = this.bubbleAnim;
     return {
       on: this.xraySaved.length > 0 || this.xrayOverlays.length > 0,
       cuts: this.xraySaved.length, overlays: this.xrayOverlays.length,
+      bubbles: b?.sprites.length ?? 0, dir: b?.dir ?? 'both', kind: b?.kind ?? '',
+      phase: b ? ((performance.now() - b.t0) / 1000 / b.period) % 1 : -1,
     };
   }
   endWireXray() {
+    this.clearBubbles();                          // v1.11.7: the episode ends
     if (!this.xraySaved.length && !this.xrayOverlays.length) return;
     for (const { mesh, geom } of this.xraySaved) mesh.geometry = geom;
     this.xraySaved = [];
@@ -2975,11 +3142,7 @@ void main() {
     this.buildFlash(ci, 0xffb347, 500);          // source blip: origin unmistakable
     for (const p of surgePaths(this.pipeNet, ci)) {
       const pts = p.pts.map(v => new Vector3(v[0]!, v[1]!, v[2]!));
-      const mesh = new Mesh(this.surgeGeo, new MeshBasicMaterial({
-        color: 0xaef3ff, transparent: true, opacity: 0.95,
-        blending: AdditiveBlending, depthTest: false, depthWrite: false }));
-      mesh.renderOrder = 17;
-      mesh.raycast = () => {};
+      const mesh = this.flowSprite(p.kind, 0.13);   // v1.11.7 canonical icon
       mesh.position.copy(pts[0]!);
       this.surgeGroup.add(mesh);
       this.surges.push({ pts, cum: p.cum, total: p.total, to: p.to, mesh,
@@ -2991,7 +3154,28 @@ void main() {
   /** the loop's surge ticker: lerp along the polyline, arrival blips, and the
    *  on-demand wake ONLY while an animation lives (perf rule) */
   private stepSurges(now: number) {
-    if (!this.surges.length && !this.flashes.length) return;
+    if (!this.surges.length && !this.flashes.length && !this.bubbleAnim) return;
+    // v1.11.7 THE FLOW LAW ticker: icons along the run; 'both' bounces as a
+    // triangle wave, one-way runs climb a-end→b-end (or b→a) and respawn at
+    // the source — the pulse never bounces off a one-way IN port
+    const b = this.bubbleAnim;
+    if (b && now - this.lastBubbleT >= 50) {
+      this.lastBubbleT = now;
+      const T = (now - b.t0) / 1000 / b.period;
+      for (const s of b.sprites) {
+        let u = (T + s.phase) % 1;
+        u = b.dir === 'both' ? (u < 0.5 ? u * 2 : (1 - u) * 2) : u;
+        if (b.dir === 'ba') u = 1 - u;
+        const d = u * b.total;
+        let k = 1;
+        while (k < b.cum.length - 1 && b.cum[k]! < d) k++;
+        const t = (d - b.cum[k - 1]!) / Math.max(1e-6, b.cum[k]! - b.cum[k - 1]!);
+        s.mesh.position.lerpVectors(b.pts[k - 1]!, b.pts[k]!, Math.min(1, Math.max(0, t)));
+        (s.mesh.material as SpriteMaterial).opacity =
+          0.45 + 0.55 * Math.sin(Math.PI * Math.min(1, Math.max(0, u)) * 0.9 + 0.16);
+      }
+      this.needRender = true;
+    }
     this.surges = this.surges.filter(s => {
       const u = (now - s.t0) / s.dur;
       if (u < 1) {
@@ -3002,7 +3186,7 @@ void main() {
         return true;
       }
       s.mesh.removeFromParent();
-      (s.mesh.material as MeshBasicMaterial).dispose();
+      (s.mesh.material as { dispose(): void }).dispose();
       this.buildFlash(s.to);
       return false;
     });
@@ -3015,13 +3199,13 @@ void main() {
       f.mat.dispose();
       return false;
     });
-    this.needRender = true;
+    if (this.surges.length || this.flashes.length) this.needRender = true;
   }
 
   private clearSurges() {
     for (const s of this.surges) {
       s.mesh.removeFromParent();
-      (s.mesh.material as MeshBasicMaterial).dispose();
+      (s.mesh.material as { dispose(): void }).dispose();
     }
     this.surges = [];
     for (const f of this.flashes) {

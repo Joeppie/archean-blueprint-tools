@@ -7,7 +7,7 @@
 // LAST segment stored reversed, and the flexible two-segment sag chain whose
 // `dir` means nothing.
 import { describe, expect, test } from 'vitest';
-import { buildPipes, checkLeads, drapeChain, pipeAt, restLength, surgePaths } from '../pipes';
+import { buildPipes, checkLeads, drapeChain, pipeAt, restLength, runFlowDir, surgePaths } from '../pipes';
 import type { Pipe } from '../format';
 import type { V3 } from '../sockets';
 import type { PipeSockets } from '../sockets';
@@ -468,5 +468,27 @@ describe('THE DRAPE LAW (v1.11.3: cables hang by their rest length)', () => {
     vec(eb, [2.05, 1.6, 0]);                                            // seated one radius out
     expect(checkLeads(net).bad).toBe(0);
     vec(net.segs[net.segs.length - 1]!.b, eb);                          // the chain reaches the NEW plug
+  });
+});
+
+describe('THE FLOW LAW (v1.11.7: pulse direction from the port roles)', () => {
+  test('a one-way IN port directs the flow; neutral pairs bounce', () => {
+    expect(runFlowDir('out', 'in')).toBe('ab');            // a source → b IN
+    expect(runFlowDir('in', 'out')).toBe('ba');            // b source → a IN
+    expect(runFlowDir('any', 'in')).toBe('ab');            // into the b-end IN
+    expect(runFlowDir('in', 'any')).toBe('ba');            // into the a-end IN
+    expect(runFlowDir('out', 'any')).toBe('ab');           // from the a-end OUT
+    expect(runFlowDir('any', 'out')).toBe('ba');           // from the b-end OUT
+    expect(runFlowDir('any', 'any')).toBe('both');         // neutral bus shimmer
+    expect(runFlowDir('out', 'out')).toBe('both');         // two sources: bounce
+    expect(runFlowDir('in', 'in')).toBe('ba');             // a-end IN carries it
+  });
+  test('the net carries the pipe KIND per run (the icon law input)', () => {
+    const net = buildPipes([P, {
+      a_component: 0, a_port: 'in', b_component: 1, b_port: 'lowvoltage-port.001',
+      type: 'lowvoltage', radius: 0.02,
+      segments: [{ start: { x: 0, y: 0, z: 0 }, dir: 0, length: 1 }],
+    }]);
+    expect(net.kindOf).toEqual(['data', 'lowvoltage']);
   });
 });
