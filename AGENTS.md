@@ -1498,7 +1498,17 @@ topic + FORMAT).
   about the twin's own centroid, lattice re-snap; vitest-pinned
   mirror-equivariance), pin drag (twin corner σ(i), σ=[0,2,1] = the
   mirroredTriangle winding swap, gets mirror(g)), flip (pair flips together)
-  and DELETE (the twin prism goes too, sorted splice). (c) WHOLESALE-MOVE
+  and DELETE (the twin prism goes too, sorted splice). **v1.11.0 FIX (the
+  law above shipped BROKEN): `onPinShift`/`onPinRotate` ran the twin lookup
+  AFTER mutating the self record — shifting the self first breaks the
+  corner-SET mirror relation, so `triTwinIndex` found no twin and the pair
+  silently de-paired (the D/E-era tests never pinned the twin half). The
+  lookup now PRECEDES the mutation, and the twin write is precomputed on a
+  CLONE — a 32-slot-window refusal on EITHER record refuses the WHOLE
+  gesture (no half-moved pair). Pinned by builddock 'twin prism pair …
+  (TODO D)' on a freshly PLACED mirror pair — the gantry's authored skin is
+  a WELDED lattice and shifting one of its records tears the shared slots:
+  welded skins are the wrong fixture for delta laws.** (c) WHOLESALE-MOVE
   BUG: `commitClusterGesture` ran on EVERY drag end (unguarded) and its
   syncClusterGizmo → syncTriGizmo re-centred the proxy BEFORE
   commitTriGesture read the delta → every widget drag committed a ZERO move
@@ -1609,39 +1619,95 @@ KNOWN ISSUES (accepted behaviours, costs, sharp edges):
     switches under the cursor by design; gizmo + modebox work identically.
 11. A wire sweep under 120 ms never shows the chip (intended dwell); every
     fresh 2 s dwell re-fires the cursor-surge + X-ray (intended).
+12. The MODEBOX floats over its part and SHIELDS the canvas: a block face
+    under a fresh placement's widget swallows pointermove (no brush ghost)
+    and clicks (mode-rotate gets the press, the block never selects).
+    Specs close it with a SKY click first (v1.11.0 lesson).
+13. Re-clicking the ACTIVE mode tile drops to ⌖ View (clean canvas-focus
+    mode, TopBar law) — helper `mode-edit` clicks must be conditional
+    (paint.spec toBlocks checks the `on` class first).
 
 UNPINNED TODOs (shipped this session, lacking e2e/vitest coverage):
+ALL SEVEN ANSWERED + THE SWEEP ADJUDICATED (v1.11.0 release session,
+2026-10-26 — the pins landed, the drifted 5213-era specs re-pinned to the
+shipped dock law, and the release-cut suite ran green; see the
+v1.11.0 THE GREEN GATE bullet at the top of the v1.11 bullets):
 A. Sealed-lift UI: `lift-sealed` badge + Info-dock card grid (desktop
-   3-col / phone 1-col) — the MATHS is vitest-pinned, the UI is not.
-B. X-ray precision: `engine.wireXrayActive()` probe exists — no spec
-   asserts cuts>0 after a 2 s hover on a blocked truck cable, cuts==0 for
-   an exposed one, and full restore on un-hover.
-C. Surge-from-cursor: no spec asserts `surges().surges ≥ 2` at the X-ray
-   transition (select.spec pins only the selection surge).
-D. Prism-pair FLIP propagation and the twin's MIRRORED-SHIFT delta
-   (triShift asserts SELF corners only).
-E. Twin-aware prism PAINT (identity face mapping): the builddock
-   'triangle PAINT' test runs on a craft with auto-twin OFF — re-run the
-   flow on the gantry asserting the twin record's colours.
-F. Ellipsoid body + volume-block toggle (showIf: true) — sphereskin pins
-   the cylinder-tail volume path only.
-G. `modify-hint` (Modify opens empty) + per-kind editor reveal — unasserted.
-H. @slow suites (models/matrix/solo-pair, gizmo, sym, subgrid, aero): the
-   re-pin sweep touched their ws-parts gates — matrix/solo rituals are NOT
-   re-run.
-I. SKIPPED AT SESSION CLOSE (user decision 2026-10-25 — "document that we
-   skipped it, commit; I will fix this in a future session"): the final
-   full run (port 5222, stable tree) died mid-sweep under pkill-wave +
-   parallel contention, leaving FOUR UNADJUDICATED REDS — all 30 s-timeout
-   shapes on the chromium project: blockedit:90 (selecting a block
-   highlights it; snap; ⟲Y), blockedit:120 (component picked in blocks
-   mode), blockedit:246 (BLOCK widget shift/turn/stretch), builddock:79
-   (list row selects, ✕ deletes, Ctrl+Z). Each passed on earlier targeted
-   runs this session (5213 set green), so contention is the prime suspect
-   — NOT adjudicated. A quiet-machine `-j 2` re-run of blockedit+builddock
-   is the resumption point; if they stay red, suspect the ws-edit dock
-   composition (blockPanel reveals only after a block pick —
-   `modify-hint`-era change) interacting with the specs' fixed waits.
+   3-col / phone 1-col) — pinned in sphereskin (sealed badge on a built
+   ellipsoid) + panels (vessel-stats grid columns per viewport).
+B. X-ray precision: pinned in wire.spec (truck 2 s dwell: blocked cable
+   cuts>0, exposed cuts==0, full restore on un-hover; the engine
+   begin/end seam pre-selects the fixture deterministically).
+C. Surge-from-cursor: pinned in wire.spec (≥2 surges at the X-ray
+   transition — one pulse each way from the cursor's anchor).
+D. Prism-pair FLIP propagation + twin MIRRORED-SHIFT delta: pinned in
+   builddock (gantry pair: shift sends the twin the x-negated delta, the
+   flip negates BOTH winding normals, one Ctrl+Z restores both).
+E. Twin-aware prism PAINT: pinned in builddock (gantry pair, num-front
+   70 → the twin record's colours[0] = 70, identity face mapping).
+F. Ellipsoid body + volume-block toggle: pinned in sphereskin (toggle
+   visible on the round hull + ONE Volume lands at the envelope centre —
+   the skin-only commit path now honours it, headroom-gated like the
+   tail batch).
+G. `modify-hint` + per-kind editor reveal: pinned in panels (Modify
+   opens EMPTY, block pick reveals the block editor, part pick
+   auto-jumps to + Parts with the inspector, sky pick returns the hint).
+H. @slow suites: gizmo/sym/subgrid/models gates re-run green on the
+   final tree; the matrix/solo DEV-SCRAPE rituals compare against
+   viewer.xenontools.dev and are NOT re-run per release (game-side
+   drift only — the v1.11.0 palette law came FROM the dev sources).
+I. SKIPPED AT SESSION CLOSE (2026-10-25) → ADJUDICATED (v1.11.0 release
+   session): the quiet `-j 2` re-run proved the FOUR reds were REAL
+   spec drift, not contention — the 5213-era specs predate the shipped
+   dock law (`tooltab-*` renamed to `ws-*`; ws-switches RETIRE the
+   species selection; block/tri LISTS live in their place-mode panel;
+   `row-s-x`/`row-x-x` inspector pos/rot rows are GONE — the gizmo
+   supersedes them; the re-click-active-mode-tile drops to ⌖ View).
+   Re-pinned across blockedit/builddock/paint/panels/mirror; the
+   blockedit:122 `x1−x0 = 0` red was a SPEC bug (`setFilePosAxis(ci, 0,
+   v)` with a NUMERIC axis — position is a closed {x,y,z} node, the
+   write added a stray "0" key = silent no-move + file corruption): the
+   engine now GUARDS it, and three specs pass `'x'`. Two timing laws
+   (AGENTS v1.11 (6) LESSON): edits inside the 450 ms snapshot window
+   coalesce into ONE undo group — spaced pins with 600 ms waits; and
+   tiny face targets need face-INTERIOR pixels (the ±2-px cross answers
+   the SAME block) + a SKY click to close the modebox before a pick
+   under it (it swallows pointer events).
+- **v1.11.0 THE GREEN GATE — 5213-era specs re-pinned to the shipped dock
+  law + the ellipsoid VOLUME wired (2026-10-26, the release session)**:
+  the release-cut full suite exposed the placement-rewrite drift the
+  session-end note suspected (see the UNPINNED list I above): (1) the
+  vocab: `tooltab-*` → `ws-*`, the mode row is `+ Blocks/+ Triangles/+
+  Parts/✎ Modify`; (2) SETWS RETIRES the species selection — every spec
+  that flipped ws-flavors expecting the selection (and its editor) to
+  ride now asserts IN the place-mode workspace (the auto-selected
+  placement wears the editor there); (3) the LISTS live in their panel —
+  ws-edit shows ONLY the picked kind's editor (the tri list rides
+  ws-tris/the revealed triPanel; the 241-row gantry list VIRTUALISES,
+  filter through `tri-list-search` before aiming at a row); (4) the
+  modebox shields the face under it (KNOWN ISSUE 12) and the active-mode
+  tile re-click drops to ⌖ View (13) — pick helpers close the widget
+  with a SKY click; (5) `setFilePosAxis` takes a STRING axis — three
+  specs passed `0`, the write landed as a stray `"0"` key in
+  `comp.position` (silent no-move + save corruption); the engine now
+  hard-guards it; (6) the label-scrub pin moved from the REMOVED
+  inspector pos rows to the block editor's `size x` Num (the scrub law
+  is a Num component, not an inspector row). LESSONS PINNED IN CODE:
+  face-INTERIOR pixels for tiny targets (±2-px cross answers the SAME
+  block — the blockplace law, now in paint.spec's pixelOfBlock), 600 ms
+  spacing where each step must undo SEPARATELY (the 450 ms snapshot
+  window), the ghost-VALID walk before a brush click (a face exactly on
+  a lattice plane degenerates the ghost cell INTO the block — the red
+  ghost refuses the click), and the triPick probe for selecting a
+  SPECIFIC prism. **THE ELLIPSOID VOLUME (we: "let the ellipsoid hull
+  also have option for volume block; put it in the middle")**: the
+  toggle's `showIf: () => true` was SHIPPED showing it on every body,
+  but the SKIN-ONLY commit path (fins off) silently ignored it — the
+  volume block NEVER landed on an ellipsoid. `commitBalloon`'s skin-only
+  branch now lands the ONE Volume at the envelope CENTRE (corner-mean of
+  the built skin, riding 0.187 m up, headroom-gated `ry/0.25 − 2.25 ≥ 1`
+  like the tail batch, through the v1.6.1 doc funnel) and says so in the
+  toast.
 - **v1.11.0 THE GAME-DAYLIGHT COLOR LAW (we: "the american truck doesn't
   render red properly, it contains all manner of wrong colors. Must be a
   palette issue: also affects Chip's badger doors in his latest version. Use

@@ -209,7 +209,11 @@ test.describe('view menu: see-through ground, sky backdrops, ortho @ui', () => {
       const h = (window as unknown as Win).__ARCHEAN__!;
       return [h.pixel(0.05, 0.05)!, h.pixel(0.5, 0.05)!, h.pixel(0.95, 0.05)!];
     });
-    expect(far(band[0], band[2])).toBeLessThan(60);
+    // v1.11.0 re-pin: the day-sky rig (LinearToneMapping + PMREM env, the
+    // GAME-DAYLIGHT law) lifted the pano's corner↔centre delta to ~68 —
+    // the law pinned here is dome-not-cube-wall, and a cube WALL is
+    // hundreds apart on the same scan; 60 was the old studio-rig number.
+    expect(far(band[0], band[2])).toBeLessThan(90);
     // and the sky is genuinely the panorama, not the flat fallback colour
     expect(far(band[1], [143, 180, 216])).toBeGreaterThan(30);
     await page.getByTestId('backdrop-none').click();

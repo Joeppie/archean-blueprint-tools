@@ -83,8 +83,10 @@ test.describe('⇄ mirrored placement @place', () => {
     expect(cellX(twin!)).toBe(11 - cellX(self!) - self!.size_x);
     expect(twin!.size_x).toBe(self!.size_x);
     expect(twin!.type).not.toBe(255);
-    // mirror is a closed involution on the placed type
-    await page.getByTestId('ws-edit').click();      // the EDIT flavor (dock header)
+    // mirror is a closed involution on the placed type. v1.11 dock law:
+    // the + Blocks workspace carries the editor of the auto-selected
+    // placement — ws-switches RETIRE the selection (Modify opens empty),
+    // so the block editor is asserted HERE, not behind a flip.
     await expect(page.getByTestId('block-edit')).toBeVisible();
   });
 

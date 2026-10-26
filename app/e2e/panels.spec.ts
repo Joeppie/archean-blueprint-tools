@@ -65,26 +65,43 @@ test.describe('desktop panels @ui', () => {
 
   test('label-scrub gives fine movement control (the tweaking complaint)', async ({ page }) => {
     desktopOnly();
-    await openCraft(page, ISW);
-    await page.getByTestId('ws-parts').click();                 // v1.11: + Parts subpanel
-    await page.getByTestId('parts-list').getByTestId('filter').fill('smallwheel');
-    const row = page.locator('[data-idx]').first();
-    const ci = +(await row.getAttribute('data-idx'))!;
-    await row.click();
-    const label = page.getByTestId('row-s-x');         // the scrub handle
+    test.setTimeout(90_000);
+    // v1.11.0 re-pin: the inspector pos/rot ROWS are GONE (the gizmo
+    // supersedes them) — the scrub law is the Row component's (fine
+    // per-pixel drag on the label, ⟲ restores), shipped on the
+    // COMPONENT-DATA rows. The Aileron triple's `angle` row is the seam.
+    // (the MATRIX fixture craft posts SCENE ok:false by design — sparse
+    // probe craft, liveedit.spec opens it the same way: poll the seam,
+    // never the title)
+    await page.goto('/?craft=9000001001');
+    await page.getByTestId('mode-edit').click();
+    await page.getByTestId('ws-parts').click();
+    const flt = page.getByTestId('parts-list').getByTestId('filter');
+    await flt.waitFor({ state: 'visible', timeout: 30_000 });
+    await flt.fill('aileron');
+    await page.locator('[data-idx]').first().waitFor({ timeout: 20_000 });
+    await page.locator('[data-idx]').first().click();
+    const label = page.locator('section', { hasText: 'Component data' })
+      .getByTestId('row-s-angle');                 // the scrub handle
     await label.scrollIntoViewIfNeeded();
-    await expect(label).toBeInViewport();              // (mouse.move does NOT scroll)
+    await expect(label).toBeInViewport();          // (mouse.move does NOT scroll)
     const bb = (await label.boundingBox())!;
-    const x0 = await partX(page, ci);
+    const angle = () => page.evaluate(() =>
+      (window as unknown as { __ARCHEAN__?: { engine: { blueprint: { data: {
+        components: { type: string; data?: { angle?: number } }[] } } } } }).__ARCHEAN__!.engine
+        .blueprint.data.components.find(c => c.type === 'Aileron')!.data!.angle!);
+    const a0 = await angle();
     await page.mouse.move(bb.x + bb.width / 2, bb.y + bb.height / 2);
     await page.mouse.down();
-    for (let i = 1; i <= 4; i++) await page.mouse.move(bb.x + bb.width / 2 + i * 10, bb.y + bb.height / 2);
+    // Row scrub law: perPx = range/400 (Aileron angle ⇒ 0.45°/px); 8 px is
+    // a FINE nudge — the assertion pins "not a slider jump", not a value.
+    for (let i = 1; i <= 4; i++) await page.mouse.move(bb.x + bb.width / 2 + i * 2, bb.y + bb.height / 2);
     await page.mouse.up();
-    const x1 = await partX(page, ci);
-    expect(x1 - x0).toBeGreaterThan(0.1);              // 40 px ≈ 0.4 m @ 0.01/px
-    expect(x1 - x0).toBeLessThan(0.8);                 // FINE — not a slider jump
-    await page.getByTestId('row-x-x').click();         // ⟲ restore
-    expect(await partX(page, ci)).toBeCloseTo(x0, 6);
+    const a1 = await angle();
+    expect(a1).not.toBe(a0);                       // the scrub moved it
+    expect(Math.abs(a1 - a0)).toBeLessThan(12);    // FINE — not a slider jump
+    await page.getByTestId('row-x-angle').click(); // ⟲ restore
+    await expect.poll(() => angle()).toBeCloseTo(a0, 6);
   });
 
   test('list search → select → inspector; move x; SAVE downloads a mirror-synced file', async ({ page }) => {
@@ -102,8 +119,8 @@ test.describe('desktop panels @ui', () => {
     // v1.11: pos/rot slider rows are GONE from the inspector (the canvas
     // gizmo supersedes them) — the test drives the same engine seam
     await page.evaluate((a) => (window as unknown as { __ARCHEAN__?: { engine: {
-      setFilePosAxis: (ci: number, ax: number, v: number) => void } } })
-      .__ARCHEAN__!.engine.setFilePosAxis(a.ci, 0, a.v), { ci, v: target });
+      setFilePosAxis: (ci: number, ax: 'x' | 'y' | 'z', v: number) => void } } })
+      .__ARCHEAN__!.engine.setFilePosAxis(a.ci, 'x', a.v), { ci, v: target });
     await expect.poll(() => partX(page, ci)).toBeCloseTo(target, 6);
     await expect(page.getByTestId('save-btn')).toContainText('●');
 
@@ -159,6 +176,78 @@ test.describe('desktop panels @ui', () => {
     // ⟲ restores the exact pose (the slider baseline IS the file value)
     await page.getByTestId('row-x-joint angle (°)').click();
     await expect.poll(() => subQuat(page, bi)).toEqual(pose0);
+  });
+
+  // v1.11 UNPINNED-TODO pins G + A (AGENTS): "`modify-hint` (Modify opens
+  // empty) + per-kind editor reveal — unasserted" and the Info-dock CARD
+  // GRID ("desktop 3-col / phone 1-col") the sealed-lift batch shipped.
+  test('✎ MODIFY opens EMPTY; a pick reveals the kind’s editor (TODO G)', async ({ page }) => {
+    desktopOnly();
+    await page.goto('/?craft=9000005001');
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
+    await page.getByTestId('mode-edit').click();
+    // a fresh profile is ✎ MODIFY (ws default 'edit'): the dock carries the
+    // hint and NO editor rows until you pick something (v1.11 dock law)
+    await expect(page.getByTestId('ws-edit')).toHaveAttribute('aria-pressed', 'true');
+    const hint = page.getByTestId('modify-hint');
+    await expect(hint).toBeVisible();
+    await expect(hint).toContainText(/starts empty/i);
+    await expect(page.getByTestId('block-edit')).toHaveCount(0);
+    await expect(page.getByTestId('tri-edit')).toHaveCount(0);
+    // a BLOCK pick → the block editor
+    const bpx = await page.evaluate(() => {
+      const c = document.querySelector('canvas')!;
+      const r = c.getBoundingClientRect();
+      const e = (window as unknown as { __ARCHEAN__?: { engine: {
+        pickCell: (x: number, y: number) => { kind: string; bi: number } | null } } }).__ARCHEAN__!.engine;
+      for (let fy = 0.5; fy <= 0.8; fy += 0.02)
+        for (let fx = 0.25; fx <= 0.75; fx += 0.02) {
+          const h = e.pickCell(r.left + r.width * fx, r.top + r.height * fy);
+          if (h && h.kind === 'block' && h.bi >= 0) return { x: r.left + r.width * fx, y: r.top + r.height * fy };
+        }
+      return null;
+    });
+    expect(bpx, 'a deck face answers the merged pick').not.toBeNull();
+    await page.mouse.click(bpx!.x, bpx!.y);
+    await expect(page.getByTestId('block-edit')).toBeVisible({ timeout: 5000 });
+    await expect(hint, 'the editor replaced the hint').toHaveCount(0);
+    // a sky pick deselects — the hint returns
+    const cbox = (await page.getByTestId('canvas').boundingBox())!;
+    await page.mouse.click(cbox.x + 8, cbox.y + 8);
+    await expect(page.getByTestId('block-edit')).toHaveCount(0);
+    await expect(hint).toBeVisible();
+    // a PART pick → the + Parts auto-jump (AGENTS KNOWN ISSUE 10) + inspector
+    const cpx = await page.evaluate(() => {
+      const c = document.querySelector('canvas')!;
+      const r = c.getBoundingClientRect();
+      const e = (window as unknown as { __ARCHEAN__?: { engine: {
+        pickCell: (x: number, y: number) => { kind: string; ci: number } | null } } }).__ARCHEAN__!.engine;
+      for (let fy = 0.3; fy <= 0.8; fy += 0.02)
+        for (let fx = 0.25; fx <= 0.75; fx += 0.02) {
+          const h = e.pickCell(r.left + r.width * fx, r.top + r.height * fy);
+          if (h && h.kind === 'comp' && h.ci >= 0) return { x: r.left + r.width * fx, y: r.top + r.height * fy };
+        }
+      return null;
+    });
+    expect(cpx, 'a part surface answers the merged pick').not.toBeNull();
+    await page.mouse.click(cpx!.x, cpx!.y);
+    await expect(page.getByTestId('ws-parts'),
+      'a Modify-mode part click auto-jumps to + Parts').toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('inspector')).toBeVisible();
+  });
+
+  test('the Info dock cards sit 3-across on desktop, stacked on phones (TODO A)', async ({ page }) => {
+    await page.goto(`/?craft=${ISW}`);
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
+    // a craft opens in ⌖ Info: the vessel amounts dock IS the card grid
+    const grid = page.getByTestId('vessel-stats');
+    await expect(grid).toBeVisible();
+    const cols = () => grid.evaluate(el =>
+      getComputedStyle(el).gridTemplateColumns.split(' ').length);
+    const w = (await page.viewportSize())!.width;
+    await expect.poll(cols, {
+      message: `grid columns at ${w}px viewport`,
+    }).toBe(w >= 768 ? 3 : 1);
   });
 });
 
@@ -328,8 +417,11 @@ test.describe('modes, new craft, file menu @ui', () => {
     await page.mouse.click(cbox.x + cbox.width * px!.x, cbox.y + cbox.height * px!.y);
     expect((await selState()).ci, 'the component surface selects in the Edit mode')
       .toBeGreaterThanOrEqual(0);
-    await expect(page.getByTestId('ws-blocks')).toBeVisible();
-    await expect(page.getByTestId('ws-edit')).toBeVisible();
+    // v1.11: the canvas part pick AUTO-JUMPS the dock to + Parts (KNOWN
+    // ISSUE 10) — the ws row is visible, no ws-blocks/ws-edit pair to check
+    // edit mode + the v1.11 dock law: a canvas part pick AUTO-JUMPS the
+    // dock to + Parts (KNOWN ISSUE 10) — the parts list rides there
+    await page.getByTestId('ws-parts').click();
     await page.getByTestId('parts-list').getByTestId('filter').fill('aileron');
     await page.locator('[data-idx]').first().click();
     await expect(page.getByTestId('comp-alias')).toBeVisible();  // v1.11: meta fields (pos/rot = gizmo)
@@ -375,9 +467,10 @@ test.describe('modes, new craft, file menu @ui', () => {
     const after = await page.evaluate(() =>
       (window as unknown as { __ARCHEAN__?: { stats: () => { blocks: number } } }).__ARCHEAN__!.stats().blocks);
     expect(after, 'a block was placed on the deck').toBe(before + 1);
-    // the brush + a selected block: the EDIT sub-tab shows the selected-block
-    // editor (v1.4 sub-tab split — placement auto-selects, EDIT edits)
-    await page.getByTestId('ws-edit').click();
+    // v1.11 dock law: the + Blocks workspace shows the brush, census, list
+    // AND the editor of the auto-selected placed block — all at once. (The
+    // ws-edit flip RETIRES the species selection — "Modify opens EMPTY" —
+    // so the 5213-era flip-to-edit assertion is stale.)
     await expect(page.getByTestId('block-edit')).toContainText(/Block\[\d+\]/);
   });
 
@@ -542,8 +635,8 @@ test.describe('shipped UI (no debug flag) @ui', () => {
     // and the bookmark tab are GONE; the Info tile is a MODE, not a toggle
     const dock = page.getByTestId('build-dock');
     await expect(dock).toBeVisible();                           // view opens WITH the Info dock
-    await page.getByTestId('mode-view').click();
-    await expect(dock).toBeVisible();
+    // v1.11 TopBar law: re-clicking the ACTIVE mode tile drops to ⌖ View
+    // (clean canvas-focus mode) — no redundant mode-view click here.
     await expect(page.getByTestId('toggle-panels')).toHaveCount(0);
     await expect(page.getByTestId('panel-tab')).toHaveCount(0);
     await page.getByTestId('mode-edit').click();

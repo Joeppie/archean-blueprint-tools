@@ -8,7 +8,7 @@ Tags: keyboard shortcuts keys mouse controls orbit pan zoom delete escape shift 
 | Ctrl+S | save (download the blueprint) |
 | Ctrl+Z | undo (a slider/gizmo drag = one step) |
 | Ctrl+Shift+Z / Ctrl+Y | redo |
-| Delete / Backspace | delete the selection (✎ Edit mode): part ▸ triangle ▸ block, mirror twins included |
+| Delete / Backspace | delete the selection (✎ Modify mode): part ▸ triangle ▸ block, mirror twins included |
 | g | grid on/off |
 | o | occupancy boxes on/off |
 | h | hull solids ⇄ wireframe — in wireframe you CLICK THROUGH the hull to what is behind it ("click what you SEE") |
@@ -23,9 +23,9 @@ Tags: keyboard shortcuts keys mouse controls orbit pan zoom delete escape shift 
 | left drag | orbit the camera |
 | wheel / pinch | zoom |
 | right drag | pan |
-| click a part (✎ Edit) | select + fly to it + gizmo |
-| click a block face (✎ Edit) | select the block + the BLOCK widget |
-| click (▤ Blocks / ▵ Triangles mode) | land a 1×1×1 cell / drop a pin (a held catalog part lands too) |
+| click a part (✎ Modify) | select + fly to it + gizmo |
+| click a block face (✎ Modify) | select the block + the BLOCK widget |
+| click (+ Blocks / + Triangles mode) | land a 1×1×1 cell / drop a pin (a held catalog part lands too) |
 | press-drag-release (holding a part) | SMEAR-place it, aimed along the drag |
 | double-click a list row | fly the camera to that part |
 | drag a gizmo ring | rotate (the ring you grab is the axis you turn) |

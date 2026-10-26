@@ -83,8 +83,8 @@ test.describe('symmetry twins @sym @slow', () => {
     const selfPos = (await eng('pos', { ci })(page)) as { x: number };
     // v1.11: inspector pos rows are GONE (gizmo supersedes) — same engine seam
     await page.evaluate((a) => (window as unknown as { __ARCHEAN__?: { engine: {
-      setFilePosAxis: (ci: number, ax: number, v: number) => void } } })
-      .__ARCHEAN__!.engine.setFilePosAxis(a.ci, 0, a.v), { ci, v: selfPos.x + 0.5 });
+      setFilePosAxis: (ci: number, ax: 'x' | 'y' | 'z', v: number) => void } } })
+      .__ARCHEAN__!.engine.setFilePosAxis(a.ci, 'x', a.v), { ci, v: selfPos.x + 0.5 });
     await expect.poll(async () => ((await eng('posOf', { ci: twin })(page)) as { x: number }).x)
       .toBeCloseTo(x0.x - 0.5, 9);                       // mirrored: the twin moves -x
 
@@ -107,6 +107,7 @@ test.describe('symmetry twins @sym @slow', () => {
   test('XYQ twin door hinges move in UNISON on one joint slider, ⟲ restores both', async ({ page }) => {
     desktopOnly();
     await openCraft(page, XYQ);
+    await page.getByTestId('ws-parts').click();   // v1.11: subgrid tabs ride + Parts
     await page.getByTestId('ltab-sub').click();
     const secs = page.locator('[data-testid^="sec-b"]');
     const n = await secs.count();

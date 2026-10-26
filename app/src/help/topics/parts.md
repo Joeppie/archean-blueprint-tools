@@ -18,7 +18,7 @@ With ⇄ on, a mirrored twin is placed too when the plane is on.
 
 ## Selecting and moving
 
-**✎ Edit** → click a part: it selects, the camera flies to it, the gizmo
+**✎ Modify** → click a part: it selects, the camera flies to it, the gizmo
 attaches at its VISIBLE centre (so off-origin geometry spins in place, not
 orbiting). Rings rotate (Shift = 15° snap), arrows translate (Shift = cell
 snap). The inspector carries x/y/z + orientation sliders and the part's own

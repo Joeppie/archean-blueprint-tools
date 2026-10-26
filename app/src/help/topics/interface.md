@@ -22,7 +22,7 @@ button opens it; the canvas stays usable beside it):
 
 * **Parts list** — two tabs: *by type* and *by subgrid*; one search filters
   both; groups start collapsed and a click on a row expands and reveals it.
-  Double-click flies the camera to the part. In the **▤ Blocks** mode the
+  Double-click flies the camera to the part. In the **+ Blocks** mode the
   list becomes the parts **catalog** — tap a part to hold it, then tap a
   surface on the craft.
 * **Inspector** — the selection's position/orientation sliders, `data` rows,
@@ -37,13 +37,19 @@ button opens it; the canvas stays usable beside it):
 ## The build dock (Edit mode)
 
 ONE mode control leads this WIDE bottom dock (v1.11, not the sidebar —
-one tri-state, no nested flips):
+one mode row, no nested flips):
 
 | Mode | A canvas click… | The dock shows |
 |---|---|---|
-| **▤ Blocks** | lands a 1×1×1 block (brush paint/material) | the brush, census, block list, block editor |
-| **▵ Triangles** | drops a PIN (3 pins = prism) | the pin card, skin census, triangle list, triangle editor |
-| **✎ Edit** | SELECTS anything (part · block · prism) | BOTH workspaces stacked — lists + editors |
+| **+ Blocks** | lands a 1×1×1 block (brush paint/material) | the brush, census, block list, block editor |
+| **+ Triangles** | drops a PIN (3 pins = prism) | the pin card, skin census, triangle list, triangle editor |
+| **+ Parts** | selects a part (a held catalog part lands) | the catalog, the vessel's parts list, the inspector |
+| **✎ Modify** | SELECTS anything (part · block · prism) | NOTHING until you pick — then that kind's editor |
+
+**✎ Modify starts empty on purpose**: click a block, prism, or part on the
+vessel and the editor for the kind you picked appears (a part click opens
+**+ Parts** by itself, where the inspector lives). Esc or a sky click
+clears the selection and the dock returns to its hint.
 
 Beside it: the **Mirror widget** — `⊘ x y z` glyph chips: click a plane to
 place mirrored pairs (auto-lit on mirrored crafts), click the lit plane
@@ -52,20 +58,20 @@ again to stop, ⊘ for none. The dock is three columns — the **brush + census*
 in the 3D view, click to select, ✕ deletes it and its twin — Undo brings
 them back), and the **editor of the selected item**.
 
-* **Placing (v1.11: no size to choose)**: pick **▤ Blocks** and **click /
+* **Placing (v1.11: no size to choose)**: pick **+ Blocks** and **click /
   tap a surface** — one 1×1×1 block lands, is selected, and the mode widget
   pops at it: **✥ move · ⟳ turn · ⤢ stretch**. Stretch drags a face — that
   face moves and the opposite face stays anchored, in whole cells; the
   dock's size rows do the same by number. The brush carries shape, paint
   and material only.
-* **Triangles**: pick **▵ Triangles**, then click three spots — each lands
+* **Triangles**: pick **+ Triangles**, then click three spots — each lands
   a **pin** on the lattice, draggable before the third lands; the third
   click commits the prism and the pins + a direction **arrow** stay on it
   (drag a pin to reshape it; new triangles inherit the BRUSH paint). In
-  **✎ Edit** a click on a prism selects it and lands its pins + the
+  **✎ Modify** a click on a prism selects it and lands its pins + the
   ✥/⟳ centroid widget (✥ moves all three corners, ⟳ turns it,
   lattice-quantised; Esc leaves).
-* **Editing**: pick ✎ Edit and tap a part (the inspector opens) or a block
+* **Editing**: pick **✎ Modify** and tap a part (the inspector opens) or a block
   face (the block editor + the BLOCK widget open).
 
 ## Viewport furniture

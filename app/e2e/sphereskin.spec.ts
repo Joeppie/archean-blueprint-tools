@@ -772,14 +772,22 @@ test.describe('generate balloon tool: dialog → movable ghost → cancel/build 
   // skin area equals the ghost's (the pre-fix tree lost ~2.5 % of it).
   test('rotate + drag a big balloon: the FILE keeps the ghost’s whole skin @ui', async ({ page }) => {
     test.setTimeout(180_000);      // a 24 m zeppelin's fin batch plans on the worker
+    // v1.11.0: on the phone viewport the 24 m fin-commit (thousands of doc
+    // inserts + scene reload at dpr 2.625) runs past every budget — the
+    // PHONE leg pins the label ritual (the turn row overflows 412 px, so
+    // the clicks are evaluate-based); the file-integrity arithmetic is
+    // viewport-independent. Scale the body to the viewport.
+    const phone = test.info().project.name !== 'chromium';
+    if (phone) test.setTimeout(300_000);
     await openNew(page);
     await page.getByTestId('tools-menu').click();
     await page.getByTestId('tool-balloon').click();
     await page.getByTestId('tool-opt-profile-cylinder').click();
     await page.getByTestId('tool-opt-fins-on').click();
-    await setRange(page, 'rx', 12);
-    await setRange(page, 'ry', 8);
-    await setRange(page, 'rz', 12);
+    // cylinder body: rx/rz = radius, ry = LENGTH (the tail zone rides it)
+    await setRange(page, "rx", phone ? 8 : 12);
+    await setRange(page, "ry", phone ? 4 : 8);
+    await setRange(page, "rz", phone ? 8 : 12);
     const prev = page.locator('[data-testid="tool-preview"]');
     await expect.poll(async () => ((await prev.textContent()) ?? '').includes('rudder'),
       { timeout: 60_000 }).toBe(true);
@@ -810,7 +818,7 @@ test.describe('generate balloon tool: dialog → movable ghost → cancel/build 
       }
       return a;
     });
-    expect(ghostArea).toBeGreaterThan(1000);          // premise: a fat-face skin
+    expect(ghostArea).toBeGreaterThan(phone ? 200 : 1000);   // premise: a fat-face skin
 
     await page.getByTestId('place-build').click();
     await expect(page.getByTestId('tool-toast')).toContainText('BALLOON');
@@ -848,5 +856,47 @@ test.describe('generate balloon tool: dialog → movable ghost → cancel/build 
     // the hole was ~2.5 % of the skin — a 1 % band catches it with room
     expect(Math.abs(built.area - ghostArea), 'file area vs ghost area')
       .toBeLessThan(ghostArea * 0.01);
+  });
+
+  test('the ELLIPSOID body gets the volume-block toggle and the sealed envelope (TODO F + A)', async ({ page }) => {
+    // v1.11 (we: "let the ellipsoid hull also have option for volume block;
+    // put it in the middle"): the toggle's showIf is TRUE for every body —
+    // and the SKIN-ONLY commit lands the ONE Volume block at the envelope
+    // centre (headroom-gated). The sealed-lift UI (TODO A): the Info dock's
+    // LiftWidget badges a SEALED envelope.
+    test.setTimeout(180_000);
+    await openNew(page);
+    await page.getByTestId('tools-menu').click();
+    await page.getByTestId('tool-balloon').click();
+    await page.getByTestId('tool-opt-profile-round').click();      // the ELLIPSOID hull
+    // THE TOGGLE SHOWS ON THE ELLIPSOID (the showIf: () => true pin)
+    await expect(page.getByTestId('tool-opt-volumes-on')).toBeVisible();
+    await page.getByTestId('tool-opt-volumes-on').click();
+    for (const [k, v] of [['rx', 2], ['ry', 2], ['rz', 2]] as const) await setRange(page, k, v);
+    await page.getByTestId('tool-ok').click();
+    await expect(page.getByTestId('tool-confirm-box')).toBeVisible();
+    await page.getByTestId('tool-confirm').click();
+    await expect(page.getByTestId('place-label')).toBeVisible({ timeout: 20_000 });
+    const comps = (t: string) => page.evaluate((ty) =>
+      (window as unknown as { __ARCHEAN__: { engine: { blueprint: { data: {
+        components: { type: string }[] } } } } }).__ARCHEAN__.engine.blueprint.data.components
+        .filter(c => c.type === ty).length, t);
+    const vol0 = await comps('Volume');
+    await page.getByTestId('place-build').click();
+    await expect.poll(() => comps('Volume'), { timeout: 10_000,
+      message: 'ONE Volume block lands inside the ellipsoid' }).toBe(vol0 + 1);
+    // THE SEALED-LIFT UI (TODO A): a closed skin seals the outside flood —
+    // the Info dock's LiftWidget carries the SEALED badge + a real envelope.
+    if (await page.getByTestId('lift-widget').count() === 0)
+      await page.getByTestId('mode-view').click();
+    await expect(page.getByTestId('lift-widget')).toBeVisible();
+    if (await page.getByTestId('lift-body').count() === 0)
+      await page.getByTestId('lift-toggle').click();
+    await expect(page.getByTestId('lift-volume')).toBeVisible();
+    const vol = +((await page.getByTestId('lift-volume').textContent())!
+      .match(/([\d.,]+)/)![1]!.replace(/,/g, ''));
+    expect(vol, 'the 4 m ellipsoid envelope (≈ 33.5 m³) reads real').toBeGreaterThan(20);
+    await expect(page.getByTestId('lift-sealed'),
+      'the closed skin badges its envelope SEALED').toBeVisible();
   });
 });

@@ -89,10 +89,12 @@ line and was retired: the fins now ride the natural cone).
   body's long axis INSIDE the envelope to a coupler port — visible only if
   you open the hull.
 - **ONE Volume block, on/off.** `volume block` is a yes/no toggle
-  (v1.9.0): ON places exactly ONE Volume straight UP out of the coupler
-  (facing up, 1 kg displacement) where a 1-cell skin margin is guaranteed
-  — OFF places none. (The old 0…16 count stack made no sense: one block
-  is what the game's airtight volume mechanic wants.)
+  (v1.9.0, shown for EVERY body since v1.11 — the plain ellipsoid gets it
+  too): ON places exactly ONE Volume straight UP out of the envelope
+  centre, riding 0.187 m above it (facing up, 1 kg displacement), where a
+  1-cell skin margin is guaranteed — OFF places none. (The old 0…16 count
+  stack made no sense: one block is what the game's airtight volume
+  mechanic wants.)
 - **Everything rides the ghost.** ⟲ quarter-turns and the cell drag carry
   the fillets, panels, pivots, coupler, volumes AND cables with the skin
   (a probe tetrahedron round-trips the exact turn matrix), and ✔ Build is

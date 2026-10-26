@@ -62,7 +62,9 @@ async function openDeck(page: Page, tab: 'place' | 'edit') {
   await page.getByTestId('gallery-new').click();
   await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
   await page.getByTestId('mode-edit').click();
-  await page.getByTestId(`tooltab-${tab}`).click();
+  // v1.11 SINGLE MODE CONTROL: the tooltab-* pair became the ws-* row
+  // (AGENTS v1.11 (9)) — the EDIT flavor is ✎ Modify, the PLACE flavor + Blocks
+  await page.getByTestId(tab === 'edit' ? 'ws-edit' : 'ws-blocks').click();
   let click: { x: number; y: number } | null = null;
   for (let i = 0; i < 40 && !click; i++) {
     click = await page.evaluate((t) => {
@@ -149,7 +151,30 @@ test.describe('blocks EDIT: highlight, in-place rotate, snap, twin @place', () =
       ).__ARCHEAN__!.engine.gizmoState());
     expect(st.ci, 'the gizmo attaches in blocks mode too').toBeGreaterThanOrEqual(0);
     await expect(page.getByTestId('block-brush'), 'the brush workspace stays').toBeVisible();
-    await expect(page.getByTestId('inspector'), 'the inspector stacks above it').toBeVisible();
+    // v1.11 dock law re-pin (we: "the dock switches under the cursor by
+    // design" — AGENTS KNOWN ISSUE 10): a + Blocks pick selects the part
+    // (v1.4 law) but the dock KEEPS the brush workspace — the part's
+    // INSPECTOR lives in + Parts, which a MODIFY-mode part click opens by
+    // itself. Pick the same pixel in ✎ Modify: the auto-jump lands ws-parts
+    // and the inspector appears there.
+    await page.getByTestId('ws-edit').click();
+    const px2 = await page.evaluate(() => {
+      const c = document.querySelector('canvas')!;
+      const r = c.getBoundingClientRect();
+      const e = (window as unknown as { __ARCHEAN__?: { engine: { pendingReal: number;
+        pickCell: (x: number, y: number) => { kind: string } | null } } }).__ARCHEAN__!.engine;
+      for (let fy = 0.3; fy <= 0.8; fy += 0.02)
+        for (let fx = 0.25; fx <= 0.8; fx += 0.02) {
+          const h = e.pickCell(r.left + r.width * fx, r.top + r.height * fy);
+          if (h && h.kind === 'comp') return { x: r.left + r.width * fx, y: r.top + r.height * fy };
+        }
+      return null;
+    });
+    expect(px2, 'a component pixel answers in Modify too').not.toBeNull();
+    await page.mouse.click(px2!.x, px2!.y);
+    await expect(page.getByTestId('ws-parts'),
+      'a Modify-mode part click auto-jumps to + Parts').toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('inspector'), 'the inspector lives in + Parts').toBeVisible();
     // and the part MOVES from there (inspector slider — the gizmo path is
     // pinned mode-independently by gizmo.spec)
     const x0 = await page.evaluate(() => {
@@ -162,9 +187,9 @@ test.describe('blocks EDIT: highlight, in-place rotate, snap, twin @place', () =
     // drive the same engine seam the slider used to
     await page.evaluate(() => {
       const a = (window as unknown as { __ARCHEAN__?: { engine: {
-        setFilePosAxis: (ci: number, ax: number, v: number) => void;
+        setFilePosAxis: (ci: number, ax: 'x' | 'y' | 'z', v: number) => void;
         gizmoState: () => { ci: number } } } }).__ARCHEAN__!;
-      a.engine.setFilePosAxis(a.engine.gizmoState().ci, 0, (a.engine as never as {
+      a.engine.setFilePosAxis(a.engine.gizmoState().ci, 'x', (a.engine as never as {
         compViewPos: (ci: number) => { x: number } }).compViewPos(a.engine.gizmoState().ci).x + 0.5);
     });
     await page.waitForTimeout(300);
@@ -245,6 +270,7 @@ test.describe('blocks EDIT: highlight, in-place rotate, snap, twin @place', () =
 
   test('BLOCK widget (v1.5/1.11): attach, refuse a colliding shift, cell-move, 90° turn, ⤢ STRETCH mode', async ({ page }) => {
     test.skip(test.info().project.name !== 'chromium', 'desktop-only');
+    test.setTimeout(90_000);              // the + Blocks ghost hover-walk is a grid sweep
     const px = await openDeck(page, 'edit');
     const bi = await selectDeckBlock(page, px);
 
@@ -313,32 +339,69 @@ test.describe('blocks EDIT: highlight, in-place rotate, snap, twin @place', () =
       message: 'the 90° turn rebuilt the merged hull (mesh repaints)' })
       .toBeGreaterThan(l1);
 
-    // v1.11 PLACEMENT REWRITE (we: "you can choose to move/rotate/scale it"):
-    // the FLAVOR FLIP to PLACE KEEPS the block widget — the widget is the
-    // workspace's move/turn/STRETCH tool, and a freshly placed block in the
-    // PLACE flavor wears it the same way (the modebox ⤢ row is the tell).
+    // v1.11 PLACEMENT REWRITE (we: "you can choose to move/rotate/scale it")
+    // + the modify-hint law: setWs RETIRES the species selection on every
+    // mode switch ("✎ Modify opens EMPTY — the editor appears on pick"), so
+    // the widget rides a PICK, not the flip. What the + Blocks flavor keeps
+    // is the place-then-transform ritual: a cell PLACED there wears the
+    // widget (with move/turn/⤢ stretch) at once.
     await page.getByTestId('ws-blocks').click();
-    await page.waitForTimeout(100);
+    expect(await blockGizmo(page), 'a mode switch retires the previous selection')
+      .toBeNull();
+    // the modebox from the Modify-mode pick floats over the deck — it
+    // shields the canvas from pointermove (no ghost hover gets through)
+    // AND swallows clicks. A SKY click picks nothing and closes it.
+    {
+      const cbox = (await page.getByTestId('canvas').boundingBox())!;
+      await page.mouse.click(cbox.x + 8, cbox.y + 8);
+      await page.waitForTimeout(150);
+    }
+    // The brush ghost must be VALID at the click pixel: a face exactly on a
+    // lattice plane degenerates the ghost cell INTO the block (cellOverlap
+    // refuses, red ghost), so hover-walk until a docked VALID ghost answers
+    // (the paint.spec ghostPixel idiom).
+    let gpt: { x: number; y: number } | null = null;
+    const cbox = (await page.getByTestId('canvas').boundingBox())!;
+    for (let fy = 0.45; fy <= 0.8 && !gpt; fy += 0.02)
+      for (let fx = 0.25; fx <= 0.75 && !gpt; fx += 0.02) {
+        const x = cbox.x + cbox.width * fx;
+        const y = cbox.y + cbox.height * fy;
+        await page.mouse.move(x, y);
+        await page.waitForTimeout(45);
+        const g = await page.evaluate(([px, py]) => {
+          const w = window as unknown as { __ARCHEAN__?: { ghost: () =>
+            { valid: boolean } | null; engine: {
+              pickCell: (x: number, y: number) => { kind: string; bi: number } | null } } };
+          const r = w.__ARCHEAN__!.engine.pickCell(px, py);
+          const gh = w.__ARCHEAN__!.ghost();
+          return !!r && (r.kind === 'block' || r.kind === 'tri') && r.bi >= 0 && !!gh && gh.valid;
+        }, [x, y]);
+        if (g) gpt = { x, y };
+      }
+    expect(gpt, 'a surface docks a VALID brush ghost').not.toBeNull();
+    await page.mouse.click(gpt!.x, gpt!.y);                 // ONE cell lands
+    await page.waitForTimeout(600);                         // debounced rebuild
     const gz2 = await blockGizmo(page);
-    expect(gz2, 'the PLACE flavor keeps the block widget (place-then-edit)').not.toBeNull();
-    expect(gz2!.bi).toBe(bi);
+    expect(gz2, 'a placed cell wears the widget (place-then-transform)').not.toBeNull();
+    expect(gz2!.shown, 'the widget is ACTUALLY on-screen on the placed cell').toBe(true);
     // the STRETCH mode is a first-class widget mode (uniform with ✥/⟳)
     const scaled = await page.evaluate(() => {
       const w = window as unknown as { __ARCHEAN__?: {
         engine: { setGizmoMode: (m: string) => void; blockGizmoScale:
           (e: [number, number, number]) => boolean };
-        blockGizmo: () => { mode: string; ext: [number, number, number] } | null } };
+        blockGizmo: () => { mode: string; ext: [number, number, number]; bi: number } | null } };
       w.__ARCHEAN__!.engine.setGizmoMode('scale');
       const gz = w.__ARCHEAN__!.blockGizmo()!;
-      // the deck bar is 1×1×9 cells after the z-spin — scale to its OWN ext
-      // is the no-op (the engine commits centre-frozen stretches)
-      return { mode: gz.mode, same: w.__ARCHEAN__!.engine.blockGizmoScale(gz.ext) };
+      // the placed cell is 1×1×1 — scale to its OWN ext is the no-op
+      // (the engine commits centre-frozen stretches)
+      return { mode: gz.mode, bi: gz.bi,
+        same: w.__ARCHEAN__!.engine.blockGizmoScale(gz.ext) };
     });
     expect(scaled.mode, 'the widget answers the ⤢ STRETCH mode').toBe('scale');
     expect(scaled.same, 'a no-op stretch is accepted').toBe(true);
-    const b3 = await blockAt(page, bi);
-    expect([b3.cx, b3.cy, b3.cz], 'the no-op stretch moved nothing')
-      .toEqual([b2.cx, b2.cy, b2.cz]);
+    const b3 = await blockAt(page, scaled.bi);
+    expect([b3.sx, b3.sy, b3.sz], 'the no-op stretch changed no extents (size_* are 0-based)')
+      .toEqual([0, 0, 0]);
     await page.evaluate(() => (window as unknown as {
       __ARCHEAN__?: { engine: { setGizmoMode: (m: string) => void } } })
       .__ARCHEAN__!.engine.setGizmoMode('rotate'));

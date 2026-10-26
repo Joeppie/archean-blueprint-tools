@@ -525,22 +525,30 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         const ctx = ctxRef.current;
         const t = ctx?.bp.data.triangles?.[ti];
         if (!ctx || !t) return false;
+        // THE TWIN LOOKUP MUST RUN BEFORE THE SELF MUTATION: the pair is
+        // identified as a corner-SET mirror (triTwinIndex), and shifting
+        // the self first breaks the mirror relation — the lookup then
+        // finds no twin and the pair silently de-pairs (v1.11.0 fix).
+        const { tw, a } = triTwinOf(ti);
+        // v1.11 uniform rule: the twin shifts by the MIRRORED delta.
+        // v1.11.0 ATOMIC: the twin write is precomputed on a CLONE — a
+        // twin the 32-slot window REFUSES (its vertices sit at the window
+        // edge) refuses the WHOLE gesture, so a half-moved pair never
+        // reaches bp/doc.
+        const tt = tw >= 0 ? ctx.bp.data.triangles?.[tw] : undefined;
+        const td: [number, number, number] = [d[0], d[1], d[2]];
+        td[a] = -td[a]!;
+        if (tt && !shiftTriCells(JSON.parse(JSON.stringify(tt)) as typeof tt, td))
+          return false;
         const changed = shiftTriCells(t, d);
         if (!changed) return false;
         for (const [k, v] of Object.entries(changed))
           docSetNumber(ctx.doc, ['data', 'triangles', ti, k], v);
-        // v1.11 uniform rule: the twin shifts by the MIRRORED delta
-        const { tw, a } = triTwinOf(ti);
-        if (tw >= 0) {
-          const tt = ctx.bp.data.triangles?.[tw];
-          if (tt) {
-            const td: [number, number, number] = [d[0], d[1], d[2]];
-            td[a] = -td[a]!;
-            const chT = shiftTriCells(tt, td);
-            if (chT)
-              for (const [k, v] of Object.entries(chT))
-                docSetNumber(ctx.doc, ['data', 'triangles', tw, k], v);
-          }
+        if (tt) {
+          const chT = shiftTriCells(tt, td);
+          if (chT)
+            for (const [k, v] of Object.entries(chT))
+              docSetNumber(ctx.doc, ['data', 'triangles', tw, k], v);
         }
         sceneChanged();
         return true;
@@ -549,24 +557,30 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         const ctx = ctxRef.current;
         const t = ctx?.bp.data.triangles?.[ti];
         if (!ctx || !t) return false;
+        // twin lookup BEFORE the self mutation (see onPinShift, v1.11.0)
+        const { tw, a } = triTwinOf(ti);
+        const tt = tw >= 0 ? ctx.bp.data.triangles?.[tw] : undefined;
+        // v1.11 uniform rule: the twin rides the MIRRORED rotation — the
+        // conjugate qM keeps the mirror-axis component, negates the other
+        // two. ATOMIC (v1.11.0): the twin write is precomputed on a CLONE
+        // so a window refusal moves neither record.
+        let cT: ReturnType<typeof rotateCornersQ> | null = null;
+        if (tt && dq) {
+          const qM = { w: dq.w,
+            x: a === 0 ? dq.x : -dq.x, y: a === 1 ? dq.y : -dq.y, z: a === 2 ? dq.z : -dq.z };
+          cT = rotateCornersQ(triCorners(tt), qM);
+          if (!setTriCornersAll(JSON.parse(JSON.stringify(tt)) as typeof tt, cT))
+            return false;
+        }
         const changed = setTriCornersAll(t, c as [Corner, Corner, Corner]);
         if (!changed) return false;
         for (const [k, v] of Object.entries(changed))
           docSetNumber(ctx.doc, ['data', 'triangles', ti, k], v);
-        // v1.11 uniform rule: the twin rides the MIRRORED rotation — the
-        // conjugate qM keeps the mirror-axis component, negates the other two
-        const { tw, a } = triTwinOf(ti);
-        if (tw >= 0 && dq) {
-          const tt = ctx.bp.data.triangles?.[tw];
-          if (tt) {
-            const qM = { w: dq.w,
-              x: a === 0 ? dq.x : -dq.x, y: a === 1 ? dq.y : -dq.y, z: a === 2 ? dq.z : -dq.z };
-            const cT = rotateCornersQ(triCorners(tt), qM);
-            const chT = setTriCornersAll(tt, cT);
-            if (chT)
-              for (const [k, v] of Object.entries(chT))
-                docSetNumber(ctx.doc, ['data', 'triangles', tw, k], v);
-          }
+        if (tt && cT) {
+          const chT = setTriCornersAll(tt, cT);
+          if (chT)
+            for (const [k, v] of Object.entries(chT))
+              docSetNumber(ctx.doc, ['data', 'triangles', tw, k], v);
         }
         sceneChanged();
         return true;

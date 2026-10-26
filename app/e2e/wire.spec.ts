@@ -79,7 +79,9 @@ test.describe('wire overview, hover labels, disconnect / reconnect @ui', () => {
       await expect.poll(() => wireHover(page), { timeout: 6000, intervals: [120] })
         .not.toBeNull();
       const h = (await wireHover(page))!;
-      expect(h.label).toMatch(/^[A-Za-z0-9_]+\[-?\d+\]\.\S+ ↔ [A-Za-z0-9_]+\[-?\d+\]\.\S+$/);
+      // v1.11 short-port labels allow hyphens ('Mini-Comp[14].data-7 ↔
+      // LV-Batt[2].data'): the shape law is Type[idx].port ↔ Type[idx].port
+      expect(h.label).toMatch(/^[A-Za-z0-9_-]+\[-?\d+\]\.\S+ ↔ [A-Za-z0-9_-]+\[-?\d+\]\.\S+$/);
       const chip = page.getByTestId('wire-chip');
       await expect(chip).toBeVisible();
       expect(await chip.textContent()).toBe(h.label);
@@ -152,7 +154,10 @@ test.describe('wire overview, hover labels, disconnect / reconnect @ui', () => {
       const bType = await page.evaluate((ci) => (window as unknown as {
         __ARCHEAN__?: { engine: { blueprint: { data: { components: { type: string }[] } } } };
       }).__ARCHEAN__!.engine.blueprint.data.components[ci]!.type, c0.b_component);
-      await page.getByTestId('wire-target-search').fill(bType);
+      // v1.11: the candidate rows print the SHORTENED type ('Mini-Comp[14]')
+      // — filter by the [idx] the label always carries.
+      void bType;
+      await page.getByTestId('wire-target-search').fill(`[${c0.b_component}]`);
       const target = page.locator('[data-testid="wire-target-item"]', { hasText: `[${c0.b_component}]` }).first();
       await target.click();                                 // STEP 1: the part
       const port = page.locator('[data-testid="wire-target-port"]',
@@ -179,6 +184,152 @@ test.describe('wire overview, hover labels, disconnect / reconnect @ui', () => {
     // cables on the second click)
     await page.getByTestId('auto-wire').click();
     await expect.poll(() => pipes(page), { timeout: 10_000 }).toBe(after);
+  });
+
+  // v1.11 TODO pins (B + C, we: "X-ray precision: engine.wireXrayActive()
+  // probe exists — no spec asserts cuts>0 after a 2 s hover on a blocked
+  // truck cable, cuts==0 for an exposed one, and full restore on un-hover"
+  // + "no spec asserts surges().surges ≥ 2 at the X-ray transition").
+  // The truck (3481322297, 375 cables routed THROUGH cab/deck/box) is the
+  // BLOCKED fixture; the XYQ-615 (3803780241, door harnesses riding OUTSIDE
+  // the panels) supplies the EXPOSED one — measured census: every truck
+  // cable has occluders in front, XYQ cable 0 has none.
+  const TRUCK = '3481322297';
+  const XYQ = '3803780241';
+
+  /** engine-side probe of the X-ray law over the first `cap` cables:
+   *  begin/end an episode programmatically (the same seam the 2 s dwell
+   *  timer calls) and read the cut counts. Deterministic fixture
+   *  selection so the UI hover pins below aim at KNOWN cables. */
+  const xrayCensus = (page: Page, cap = 120) => page.evaluate((CAP) => {
+    const e = (window as unknown as {
+      __ARCHEAN__?: { engine: { blueprint: { data: { pipes?: unknown[] } };
+        pipeNet: { piOf: number[]; polys: { length: number }[] };
+        beginWireXray: (pi: number) => void; endWireXray: () => void;
+        wireXrayActive: () => { on: boolean; cuts: number; overlays: number } } };
+    }).__ARCHEAN__!.engine;
+    const n = Math.min(e.blueprint.data.pipes?.length ?? 0, CAP);
+    const out: { cuts: number; len: number }[] = [];
+    for (let pi = 0; pi < n; pi++) {
+      e.beginWireXray(pi);
+      const cuts = e.wireXrayActive().cuts;
+      e.endWireXray();
+      // the cable's drawn polyline length: the cursor-surge fires ≥2 only
+      // when the hover anchor is STRICTLY INSIDE the run (a 2-point run
+      // splits into one ≥2 path + one 1-point path = a single pulse)
+      const net = e.pipeNet.piOf.indexOf(pi);
+      const poly = net >= 0 ? e.pipeNet.polys[net] : null;
+      out.push({ cuts, len: poly?.length ?? 0 });
+    }
+    return out;
+  }, cap);
+
+  const xray = (page: Page) => page.evaluate(() =>
+    (window as unknown as {
+      __ARCHEAN__?: { engine: { wireXrayActive: () => { on: boolean; cuts: number; overlays: number } } };
+    }).__ARCHEAN__!.engine.wireXrayActive());
+
+  /** ONE evaluate: the episode's state AND the live surge count — read in
+   *  the same tick, so the ≤1.6 s pulse of the transition can't expire
+   *  between two round-trips (the race the first cut of this pin hit). */
+  const xrayAndSurges = (page: Page) => page.evaluate(() => {
+    const w = window as unknown as {
+      __ARCHEAN__?: { engine: { wireXrayActive: () => { on: boolean; cuts: number; overlays: number } };
+        surges: () => { surges: unknown[] } };
+    };
+    const x = w.__ARCHEAN__!.engine.wireXrayActive();
+    return { ...x, surges: w.__ARCHEAN__!.surges().surges.length };
+  });
+
+  /** park the cursor on a cable's mid-point: one pointermove arms the chip
+   *  dwell (120 ms) and the X-ray timer (2 s); the hover state survives a
+   *  still mouse, so no jiggling is needed. */
+  async function hoverCable(page: Page, pi: number) {
+    const pt = await cablePoint(page, pi);
+    expect(pt, `cable ${pi} has a visible mid-point`).not.toBeNull();
+    await page.mouse.move(pt!.x, pt!.y);
+  }
+
+  /** A cable whose OWN mid-point pixel hovers back to it (dense crafts
+   *  cross: cablePoint(pi) projects pi's mid, but a CLOSER cable can own
+   *  that pixel's ray — the hover winner then X-rays and pulses with ITS
+   *  geometry). Returns the first candidate that answers the hover and
+   *  occludes, so the dwell pins aim at a KNOWN cable with an INTERIOR
+   *  anchor (the mid-point hover anchors the pulse strictly inside the
+   *  run = the game's both-ways pair). */
+  async function pickHoverable(page: Page, census: { cuts: number; len: number }[]) {
+    const cand = census
+      .map((c, pi) => ({ ...c, pi }))
+      .filter(c => c.cuts > 0 && c.len >= 4)
+      .slice(0, 14);
+    for (const c of cand) {
+      const pt = await cablePoint(page, c.pi);
+      if (!pt) continue;
+      await page.mouse.move(pt.x, pt.y);
+      await page.waitForTimeout(90);
+      const h = await wireHover(page);
+      if (h && h.pi === c.pi) return { pi: c.pi, cuts: c.cuts, pt };
+    }
+    return null;
+  }
+
+  test('a BLOCKED truck cable: 2 s dwell opens the X-ray (cuts>0) firing ≥2 cursor-surges; un-hover fully restores (TODO B+C)', async ({ page }) => {
+    desktopOnly();
+    test.setTimeout(120_000);
+    await openWire(page, TRUCK);
+    // The pulses live only 550–1600 ms — a page-side sampler counts the
+    // peak through the SAME engine seam the hook exposes (surgeState),
+    // ticked every animation frame; the poll round-trips alone (≈150 ms
+    // each) can miss the transition window.
+    await page.evaluate(() => {
+      const w = window as unknown as { __maxSurges?: number; __ARCHEAN__: { engine: { surgeState: () => { surges: unknown[] } } } };
+      w.__maxSurges = 0;
+      const e = w.__ARCHEAN__.engine;
+      const tick = () => {
+        const n = e.surgeState().surges.length;
+        if (n > (w.__maxSurges ?? 0)) w.__maxSurges = n;
+        requestAnimationFrame(tick);
+      };
+      tick();
+    });
+    const census = await xrayCensus(page);
+    const pick = await pickHoverable(page, census);
+    expect(pick, 'the truck has an occluded cable that owns its mid-point hover').not.toBeNull();
+    await page.mouse.move(pick!.pt.x, pick!.pt.y);         // (re-)arm the dwell
+    // 2 s dwell → beginWireXray: geometry in FRONT of the cable's parts is
+    // cut away AND the transition fires the cursor-surge (cablePulse: one
+    // travelling pulse EACH way from the interior anchor = ≥ 2).
+    await page.waitForTimeout(2_600);
+    const at = await xrayAndSurges(page);
+    expect(at.on && at.cuts, `cable ${pick!.pi} opened the episode (census ${pick!.cuts})`)
+      .toBeTruthy();
+    expect(at.cuts, `cable ${pick!.pi} is blocked (census ${pick!.cuts})`)
+      .toBeGreaterThan(0);
+    const peak = await page.evaluate(() => (window as unknown as { __maxSurges?: number }).__maxSurges ?? 0);
+    expect(peak, 'the X-ray transition fired the cursor-surge both ways')
+      .toBeGreaterThanOrEqual(2);
+    // un-hover: EVERY cut mesh gets its geometry back, overlays gone
+    await page.mouse.move(20, 20);
+    await expect.poll(() => xray(page), { timeout: 6_000, intervals: [120] })
+      .toMatchObject({ on: false, cuts: 0, overlays: 0 });
+  });
+
+  test('an EXPOSED cable (XYQ door harness): the 2 s dwell opens an episode that cuts nothing (TODO B)', async ({ page }) => {
+    desktopOnly();
+    test.setTimeout(120_000);
+    await openWire(page, XYQ);
+    const census = await xrayCensus(page, 40);
+    const exposed = census.findIndex(c => c.cuts === 0);
+    expect(exposed, 'the XYQ has a cable with nothing in front').toBeGreaterThanOrEqual(0);
+    await hoverCable(page, exposed);
+    await page.waitForTimeout(2_200);
+    // the dwell fired (chip + highlight live) — nothing occludes, so ZERO
+    // geometry is cut and no overlays exist
+    await expect.poll(() => xray(page), { timeout: 4_000, intervals: [100] })
+      .toMatchObject({ cuts: 0 });
+    await page.mouse.move(20, 20);
+    await expect.poll(() => xray(page), { timeout: 6_000, intervals: [120] })
+      .toMatchObject({ on: false, cuts: 0, overlays: 0 });
   });
 
   test('on a phone the cable list is reachable and the census fits', async ({ page }) => {

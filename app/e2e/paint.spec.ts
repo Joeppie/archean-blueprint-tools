@@ -57,8 +57,14 @@ async function openNew(page: Page) {
 }
 
 async function toBlocks(page: Page, tab: 'place' | 'edit') {
-  await page.getByTestId('mode-edit').click();
-  await page.getByTestId(`tooltab-${tab}`).click();
+  // v1.11 ONE-PLANE law (TopBar): re-clicking the ACTIVE mode tile drops
+  // into ⌖ View (clean mode — the dock steps aside). The old helper
+  // assumed mode-edit clicks are idempotent; the second call in a test
+  // unmounted the dock and every ws-* locator below hung.
+  const cls = await page.getByTestId('mode-edit').getAttribute('class');
+  if (!(cls ?? '').split(/\s+/).includes('on')) await page.getByTestId('mode-edit').click();
+  // v1.11 SINGLE MODE CONTROL: tooltab-* → ws-* (AGENTS v1.11 (9))
+  await page.getByTestId(tab === 'edit' ? 'ws-edit' : 'ws-blocks').click();
   await page.waitForTimeout(250);
 }
 
@@ -82,16 +88,34 @@ async function ghostPixel(page: Page): Promise<{ x: number; y: number }> {
   throw new Error('no block-face pixel found');
 }
 
-/** scan for a pixel whose pickCell answers block `bi`, and return it */
+/** Close the mode widget: it pops at a placement's anchor and shields the
+ *  block face under it (elementFromPoint there = the mode-rotate button).
+ *  A SKY click on the canvas picks nothing, and the pickClick path drops
+ *  the widget with it (the !opened ⇒ setWidget(null) leg). */
+async function closeWidget(page: Page) {
+  const box = (await page.getByTestId('canvas').boundingBox())!;
+  await page.mouse.click(box.x + 8, box.y + 8);
+  await page.waitForTimeout(150);
+}
+
+/** scan for a pixel whose pickCell answers block `bi`, and return it.
+ *  v1.11.0 re-pin: a placed 1×1×1 face is a ~20 px target — camera damping
+ *  between the scan and the click slid the ray off the block (the
+ *  blockplace lesson: probe face-INTERIOR pixels; the ±2-px cross must
+ *  answer the SAME block). */
 async function pixelOfBlock(page: Page, bi: number): Promise<{ x: number; y: number }> {
   const hit = await page.evaluate((i) => {
     const c = document.querySelector('canvas')!; const r = c.getBoundingClientRect();
-    const e = (window as unknown as { __ARCHEAN__: {
-      engine: { pickCell: (x: number, y: number) => { bi: number } | null } } }).__ARCHEAN__.engine;
+    const e = (window as unknown as {
+      __ARCHEAN__: { engine: { pickCell: (x: number, y: number) => { bi: number } | null } } }).__ARCHEAN__.engine;
+    const at = (x: number, y: number) => {
+      const h = e.pickCell(x, y); return !!h && h.bi === i;
+    };
     for (let fy = 0.4; fy <= 0.85; fy += 0.015)
       for (let fx = 0.2; fx <= 0.8; fx += 0.015) {
-        const h = e.pickCell(r.left + r.width * fx, r.top + r.height * fy);
-        if (h && h.bi === i) return { x: r.left + r.width * fx, y: r.top + r.height * fy };
+        const x = r.left + r.width * fx, y = r.top + r.height * fy;
+        if (at(x, y) && at(x + 2, y) && at(x - 2, y) && at(x, y + 2) && at(x, y - 2))
+          return { x, y };
       }
     return null;
   }, bi);
@@ -105,7 +129,10 @@ test.describe('palette: census, block paint, ⇄ twin, widget 🎨 @place', () =
   // default 30 s on the iGPU box (the two block-paint pins timed out in
   // toBlocks('edit') at the budget cliff — same on v1.5.12, not a
   // behaviour change; the paint assertions themselves never failed).
-  test.setTimeout(90_000);
+  // v1.11.0: the day-sky PMREM scene boots heavier — the two block-paint
+  // pins sit right on the 90 s cliff under suite load; budget raised, the
+  // AGENTS lesson stands (re-run flakes on a quiet tree before believing).
+  test.setTimeout(150_000);
   test('the swatch grid badges the deck with 35 uses (5 blocks × 7 faces)', async ({ page }) => {
     test.skip(test.info().project.name !== 'chromium', 'desktop-only');
     await openNew(page);
@@ -125,6 +152,7 @@ test.describe('palette: census, block paint, ⇄ twin, widget 🎨 @place', () =
     await page.waitForTimeout(500);
     expect((await blocks(page)).length).toBe(7);                  // deck 5 + pair
     await toBlocks(page, 'edit');
+    await closeWidget(page);                                // modebox off the deck
     const px = await pixelOfBlock(page, 5);
     await page.mouse.click(px.x, px.y);
     await expect(page.getByTestId('block-twin')).toContainText('twin: Block[6]');
@@ -147,6 +175,7 @@ test.describe('palette: census, block paint, ⇄ twin, widget 🎨 @place', () =
     await page.mouse.click(pt.x, pt.y);                           // one block (⇄ off)
     await page.waitForTimeout(500);
     await toBlocks(page, 'edit');
+    await closeWidget(page);                                // modebox off the deck
     const px = await pixelOfBlock(page, 5);
     await page.mouse.click(px.x, px.y);
     await page.getByTestId('mode-paint').click();

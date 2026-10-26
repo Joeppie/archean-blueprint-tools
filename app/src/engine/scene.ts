@@ -2564,7 +2564,10 @@ void main() {
   setFilePosAxis(ci: number, ax: 'x' | 'y' | 'z', v: number) {
     const comps = this.bp?.data.components;
     const comp = comps?.[ci];
-    if (!comp) return;
+    // hard guard (v1.11.0): position is a closed {x,y,z} node — a numeric
+    // axis index from a caller would ADD a stray "0" key the save writer
+    // then publishes into the blueprint (corruption, silent no-move)
+    if (!comp || (ax !== 'x' && ax !== 'y' && ax !== 'z')) return;
     const twins = this.twinPairsFor(ci);                 // evaluated PRE-move
     const old = { ...comp.position };
     comp.position[ax] = v;

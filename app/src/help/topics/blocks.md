@@ -7,7 +7,7 @@ One cell = 0.25 m; block positions are whole cells.
 
 ## The Blocks workspace (bottom dock)
 
-The **▤ Blocks** tile opens the blocks workspace as a wide dock under the
+The **+ Blocks** tile opens the blocks workspace as a wide dock under the
 viewport (like the WIRE dock): the brush on the left, the **block census**
 (counts per shape family, materials, total cells, ⇄ mirror-conflict count),
 a **searchable list of every block** (hover a row to light it gold in 3D,
@@ -18,7 +18,7 @@ the editor of the selected block on the right.
 
 v1.11 (we: *"choosing a block size before placing it shouldn't be a
 thing"*): the brush carries **shape, paint and material ONLY** — there is
-no size to pick first. Pick **▤ Blocks** and click (or tap) ANY surface —
+no size to pick first. Pick **+ Blocks** and click (or tap) ANY surface —
 a block face, a hull triangle, a part — and a **1×1×1 cell** lands, is
 auto-selected, and the mode widget pops at it so you can immediately:
 
@@ -43,7 +43,7 @@ Every one of those is ONE undo step. Other placement rules:
 
 ## Editing a block
 
-In **✎ Edit**, click a block face (or a row in the list): the block
+In **✎ Modify**, click a block face (or a row in the list): the block
 highlights gold and the SAME BLOCK widget (world space) attaches — **✥**
 arrows move it in **whole-cell snaps**, **⟳** rings turn it in **90°
 steps**, **⤢** handles stretch it in **whole cells** (grab a face, that
@@ -58,7 +58,7 @@ neighbours).
 
 ## Placing triangles — pins (v1.11)
 
-In **▵ Triangles mode**, a click drops a **pin** on the lattice corner
+In **+ Triangles mode**, a click drops a **pin** on the lattice corner
 of the surface you aim at. Three pins = one hull triangle: the third click
 commits the prism (brush colours, material 0). The pins are the point:
 
@@ -81,11 +81,11 @@ commits the prism (brush colours, material 0). The pins are the point:
   species). A SELECTED prism paints via the 🎨 window (all faces) or the
   five **face colour** rows (front / back / three side walls) on its own
   editor.
-* **The mode law**: in ▵ Triangles a canvas click ONLY places (a prism face
+* **The mode law**: in + Triangles a canvas click ONLY places (a prism face
   is just another placeable surface — placement never selects). In
-  **✎ Edit** a canvas click selects ANYTHING you aim at — part, block **or
+  **✎ Modify** a canvas click selects ANYTHING you aim at — part, block **or
   prism** — blocks and triangles are one merged workspace.
-* In **✎ Edit**, click a prism's middle (or a row in the triangle list) to
+* In **✎ Modify**, click a prism's middle (or a row in the triangle list) to
   put that triangle's pins on the surface — and its **centroid widget** on
   the gizmo: the SAME grab-onto widget a block wears. **✥** moves the WHOLE
   triangle (all three corners, whole-cell snaps), **⟳** turns it about its

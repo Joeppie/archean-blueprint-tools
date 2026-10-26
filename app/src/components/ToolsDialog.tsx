@@ -724,8 +724,36 @@ function commitBalloon(f: ToolForm, payload: PlacePayload,
     // dropped every triangle on block-only crafts, so the saved file and
     // the undo snapshots never held the skin (sphere gone after save).
     appendTrianglesDoc(ctx, shifted);
+    // v1.11 (we: "let the ellipsoid hull also have option for volume
+    // block; put it in the middle"): the toggle shows for EVERY body
+    // (showIf: () => true), so the SKIN-ONLY commit lands the ONE Volume
+    // block too — at the envelope CENTRE riding 0.187 m up (the tail
+    // batch's rule, engine/balloonfin: headroom rUp-cells − 2.25 ≥ 1).
+    let landedVolume = false;
+    if (f['volumes'] !== 'off' && shifted.length) {
+      const rUpCells = (+String(f['ry']) || 0) / 0.25;      // metres → cells
+      if (rUpCells - 2.25 >= 1) {
+        const mid = [0, 1, 2].map(ai => {
+          const n = 'xyz'[ai]!;
+          let s = 0;
+          for (const t of shifted)
+            for (let vi = 0; vi < 3; vi++)
+              s += (t as unknown as Record<string, number>)[`v${vi}_${n}`]!
+                + 12 * (t as unknown as Record<string, number>)[`frame_${n}`]!;
+          return (s / (shifted.length * 3)) * 0.25 - 1.5;   // FORMAT §Triangles
+        });
+        const rec = newComponent('Volume', 'ARCHEAN_build',
+          [mid[0]!, mid[1]! + 0.187, mid[2]!],
+          { w: 1, x: 0, y: 0, z: 0 });
+        const top = ctx.bp.data.components.length;
+        ctx.bp.data.components.push(rec as never);
+        docArrayInsert(ctx.doc, ['data', 'components'], top, docFromValue(rec));
+        landedVolume = true;
+      }
+    }
     return `built a ${f['rx']}×${f['ry']}×${f['rz']} m balloon SKIN: ${shifted.length} hull `
-      + `triangles at slot ${slot}, ${fin.label} paint`;
+      + `triangles at slot ${slot}, ${fin.label} paint`
+      + (landedVolume ? ' · ONE Volume block at the centre' : '');
   }
   // ---- the v1.9 TAIL batch: one Undo step writes skin + sleeve + panels
   // + coupler + pivots + volumes + joins + cables, ALL through the doc ----

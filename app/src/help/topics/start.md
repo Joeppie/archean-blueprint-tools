@@ -14,12 +14,12 @@ tiles: **View · Edit · Wire · Flight · Wind**.
    *nothing* here — that is deliberate.
 2. **Edit** (✎) — the editing mode, with ONE mode control in its bottom
    dock (v1.11 — one tri-state row, not nested flips):
-   * **✎ Edit** — clicking the craft *selects anything*: a part gets the
+   * **✎ Modify** — clicking the craft *selects anything*: a part gets the
      gizmo + inspector, a block face selects the block, a hull prism
      selects the triangle (pins + centroid widget). `Delete` removes.
-   * **▤ Blocks** — clicking a surface *places* a 1×1×1 block (the brush's
+   * **+ Blocks** — clicking a surface *places* a 1×1×1 block (the brush's
      paint + material; **⇧ Shift** continues the aimed block's shape).
-   * **▵ Triangles** — clicking *drops a pin*; three pins become a hull
+   * **+ Triangles** — clicking *drops a pin*; three pins become a hull
      triangle inheriting the brush paint.
 3. **Wire** (∿) — the cable graph: which `data.pipes` connect what, with
    warnings for references that point at nothing.
@@ -28,9 +28,9 @@ tiles: **View · Edit · Wire · Flight · Wind**.
 
 ## Edit something
 
-* Rotate a part: **✎ Edit** → click it → drag a gizmo ring (hold **Shift**
+* Rotate a part: **✎ Modify** → click it → drag a gizmo ring (hold **Shift**
   for 15° snaps). Move: drag an arrow (Shift snaps to the 0.25 m cells).
-* Place a block: mode row ▸ **▤ Blocks**, pick a shape and paint in the
+* Place a block: mode row ▸ **+ Blocks**, pick a shape and paint in the
   dock's brush, then click a surface — the block lands, the widget (✥ ⟳ ⤢)
   transforms it.
 * Everything is undoable: **Ctrl+Z** / **Ctrl+Y**, or Edit ▾ Undo/Redo. A

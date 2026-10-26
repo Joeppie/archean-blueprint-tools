@@ -1,4 +1,4 @@
-# Archean Blueprint Tools · v1.10.8
+# Archean Blueprint Tools · v1.11.0
 
 **Reverse-engineered file format + a browser editor for workshop craft of
 [Archean](https://store.steampowered.com/app/2941660/Archean/)** —
@@ -31,6 +31,25 @@ its own npm project; see [app/README.md](app/README.md)).
 A craft opens in **View** (inspect: mass & CoM, census, the ⚖ Lift widget, the
 **Build cost** readout). Five mode tiles split the workspaces —
 **⌖ View · ✎ Edit · ∿ Wire · ➤ Flight · ≋ Wind**.
+
+### The build dock — place, transform, modify (v1.11)
+
+Editing lives in a WIDE bottom dock with ONE mode row — **+ Blocks · +
+Triangles · + Parts · ✎ Modify** — plus a visible **Mirror widget**
+(`⊘ x y z` glyph chips, auto-lit on mirrored crafts). Placement is
+place-then-transform: a click lands a 1×1×1 cell (no size to pre-choose)
+that immediately wears the widget — **✥ move · ⟳ turn · ⤢ stretch** (a
+stretched face moves, its opposite stays anchored, in whole cells).
+Triangles are placed as **pins**: three clicks drop lattice-corner pins
+with a live preview face and a direction arrow; the pins stay draggable
+after the commit, and a centroid widget moves/turns the whole prism.
+**✎ Modify** starts empty and reveals the editor of whatever you pick —
+a part opens **+ Parts** (inspector) by itself. The ⌖ Lift widget scores
+the **sealed** envelope: block cells and skin triangles are flood-checked
+from the outside, so only gas the world cannot reach counts. Colours
+follow the game's day-light rig 1:1 (v1.11.0): the built-in palette,
+tone map and environment are transcribed from the developer's own
+viewer, so what you paint is what the game draws.
 
 ### The Wire workspace — every cable, where it goes
 
@@ -207,7 +226,7 @@ say-so**: green tests or merged work never imply one.
 
 ## Ideas welcome — open an issue!
 
-This is v1.10.8: the format is decoded and the editor is useful, but the good
+This is v1.11.0: the format is decoded and the editor is useful, but the good
 ideas are not all in yet. Feature requests, format questions, and craft that
 render wrong (attach the `blueprint.json`) are all best filed as
 [issues](https://github.com/Joeppie/archean-blueprint-tools/issues) — that is
