@@ -2643,7 +2643,7 @@ Rules:
 
 **The pyramid laws (docs/TEST-PYRAMID.md, 2026-10-26 — the plan to kill most
 e2e tests; STATUS v1.12.1: Phase 0 + 2 LANDED, Phase 1 slice 1 (xray) +
-Phase 3 jsdom tier SEEDED — vitest 717, matrix 275 runs):** L1 every law lives at the SMALLEST tier that can state it
+Phase 3 jsdom tier SEEDED — vitest 717, matrix 277 runs):** L1 every law lives at the SMALLEST tier that can state it
 (pure logic → vitest; scene-graph pose/pick/census → vitest once P7.1
 lands; DOM/state wiring → jsdom component tests; ONLY pixels, real pointer
 plumbing, IndexedDB/network, dev-pair stay e2e — every new e2e test carries
