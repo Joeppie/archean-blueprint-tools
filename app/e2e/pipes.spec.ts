@@ -19,6 +19,9 @@ interface PipeInfo {
     radius: number; half: number }>;
   leads: { checked: number; bad: number };
   ends: { a: number[]; b: number[] }[];
+  /** v1.11.3 THE DRAPE LAW: runs re-draped + the drawn polylines */
+  reroute: number;
+  polys: number[][][];
 }
 const info = (page: Page) => page.evaluate(() => {
   const h = (window as unknown as {
@@ -60,7 +63,11 @@ test.describe('cables render like the game and plug into their sockets', () => {
     expect(new Set(i.kinds), 'all five cable species on this craft')
       .toEqual(new Set(['data', 'lowvoltage', 'highvoltage', 'fluid', 'item']));
     expect(i.square, 'box-flagged item ducts stay square').toBeGreaterThan(0);
-    expect(i.round, 'HV and fluid are ROUND').toBeGreaterThan(i.square);
+    // v1.11.3: re-draped stale runs draw their hung chains per KIND, so
+    // the whole-craft round/square AGGREGATE shifts with the drape count —
+    // the species law is the per-kind majority style rows below (item
+    // square, HV/fluid round), not the raw bar count
+    expect(i.round, 'HV and fluid hoses draw round').toBeGreaterThan(0);
     expect(i.style.item!.box).toBe(true);
     expect(i.style.item!.metal, 'item ducts ride the file metal flag').toBe(true);
     expect(i.style.item!.radius).toBeCloseTo(0.08, 4);
@@ -78,6 +85,23 @@ test.describe('cables render like the game and plug into their sockets', () => {
     expect(i.stale, 'but only a minority of the 750 ends').toBeLessThan(i.pipes);
     expect(i.leads.checked, 'plugs with an axial lead exist').toBeGreaterThan(0);
     expect(i.leads.bad, 'even the re-seated ones plug ALONG the connector axis').toBe(0);
+    // v1.11.3 THE DRAPE LAW: those stale runs are re-draped PHYSICALLY —
+    // the cable hangs by its rest length between the live sockets
+    expect(i.reroute, 'stale runs re-drape by the drape law').toBeGreaterThan(0);
+    const dips: number[] = [];
+    for (const poly of i.polys as number[][][]) {
+      if (poly.length < 4) continue;
+      const A = poly[0]!, B = poly[poly.length - 1]!;
+      const dx = B[0]! - A[0]!, dz = B[2]! - A[2]!;
+      let worst = 0;
+      for (let k = 1; k < poly.length - 1; k++) {
+        const t = ((poly[k]![0]! - A[0]!) * dx + (poly[k]![2]! - A[2]!) * dz) / (dx * dx + dz * dz || 1);
+        worst = Math.max(worst, A[1]! + t * (B[1]! - A[1]!) - poly[k]![1]!);
+      }
+      dips.push(worst);
+    }
+    expect(Math.max(...dips), 'a hung cable dips below its chord (sag)')
+      .toBeGreaterThan(0.02);
   });
 
   test('a moved part drags its cable ends back onto the sockets', async ({ page }) => {
@@ -85,7 +109,7 @@ test.describe('cables render like the game and plug into their sockets', () => {
     const r = await page.evaluate(() => {
       const eng = (window as unknown as { __ARCHEAN__?: { engine: {
         pipeInfo: () => { ends: { a: number[]; b: number[] }[];
-          leads: { checked: number; bad: number } };
+          leads: { checked: number; bad: number }; reroute: number };
         blueprint: { data: { components: { position: { x: number; y: number; z: number } }[];
           pipes?: { type?: string; a_component: number }[] } };
         rebuildPipes: () => void;
@@ -100,16 +124,23 @@ test.describe('cables render like the game and plug into their sockets', () => {
       eng.rebuildPipes();
       const after = eng.pipeInfo().ends[pi]!.a;
       const leads = eng.pipeInfo().leads;
+      const rerouted = eng.pipeInfo().reroute;
       bp.data.components[ci]!.position.y -= 1.5;
       eng.rebuildPipes();
       const rest = eng.pipeInfo().ends[pi]!.a;
+      const back = eng.pipeInfo().reroute;
       const d = (p: number[], q: readonly number[]) =>
         Math.hypot(p[0] - q[0]!, p[1] - q[1]!, p[2] - q[2]!);
-      return { pi, moved: d([...before], after), restored: d([...before], rest), leads };
+      return { pi, moved: d([...before], after), restored: d([...before], rest),
+        leads, rerouted, back };
     });
     expect(r.moved, 'the a-end rides the moved part (+1.5 m in y)').toBeGreaterThan(1.3);
     expect(r.moved, 'the a-end rides the moved part (+1.5 m in y)').toBeLessThan(1.7);
     expect(r.restored, 'restoring the part restores the cable end').toBeLessThan(1e-6);
     expect(r.leads.bad, 'the re-seated ends still connect ALONG the connector axis').toBe(0);
+    expect(r.rerouted, 'v1.11.3: the moved part re-drapes its cables (they FOLLOW the connection)')
+      .toBeGreaterThan(0);
+    expect(r.back, 'restoring the part restores the recorded routes (no drape left behind)')
+      .toBe(0);
   });
 });

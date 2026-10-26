@@ -7,8 +7,9 @@
 // LAST segment stored reversed, and the flexible two-segment sag chain whose
 // `dir` means nothing.
 import { describe, expect, test } from 'vitest';
-import { buildPipes, checkLeads, pipeAt, surgePaths } from '../pipes';
+import { buildPipes, checkLeads, drapeChain, pipeAt, restLength, surgePaths } from '../pipes';
 import type { Pipe } from '../format';
+import type { V3 } from '../sockets';
 import type { PipeSockets } from '../sockets';
 
 const P: Pipe = {
@@ -342,5 +343,105 @@ describe('pipeAt — the v1.10.1 cable hover-pick', () => {
     expect(pipeAt(net, [1.25, 2.04, 5], [0, 0, -1]), 'just inside it').not.toBeNull();
     // the elbow knob region on a mid vertex is part of the polyline too
     expect(pipeAt(net, [1.6, 2.25, 5], [0, 0, -1]), 'the joint vertex still picks').not.toBeNull();
+  });
+});
+
+describe('THE DRAPE LAW (v1.11.3: cables hang by their rest length)', () => {
+  // we: "flexible cables should simulate physics … have a hang/sag
+  // depending on how tight they are … sag then depends on how
+  // overstretched they are for their actual length"
+  const dip = (pts: readonly (readonly number[])[]): number => {
+    // deepest point below the straight chord (ends excluded)
+    const A = pts[0]!, B = pts[pts.length - 1]!;
+    let worst = 0;
+    for (let i = 1; i < pts.length - 1; i++) {
+      const t = ((pts[i]![0]! - A[0]!) * (B[0]! - A[0]!) + (pts[i]![2]! - A[2]!) * (B[2]! - A[2]!))
+        / ((B[0]! - A[0]!) ** 2 + (B[2]! - A[2]!) ** 2 || 1);
+      const chordY = A[1]! + t * (B[1]! - A[1]!);
+      worst = Math.max(worst, chordY - pts[i]![1]!);
+    }
+    return worst;
+  };
+  const arc = (pts: readonly (readonly number[])[]): number => {
+    let L = 0;
+    for (let i = 1; i < pts.length; i++)
+      L += Math.hypot(pts[i]![0]! - pts[i - 1]![0]!, pts[i]![1]! - pts[i - 1]![1]!, pts[i]![2]! - pts[i - 1]![2]!);
+    return L;
+  };
+  const A: V3 = [0, 0, 0], B: V3 = [2, 0, 0];
+
+  test('taut (rest length ≤ span) draws a straight bar', () => {
+    const pts = drapeChain(A, B, 2, 0.02);
+    expect(pts.length).toBe(2);
+  });
+  test('slack hangs: the dip grows MONOTONICALLY with overstretch', () => {
+    const d1 = dip(drapeChain(A, B, 2.2, 0.02));
+    const d2 = dip(drapeChain(A, B, 2.6, 0.02));
+    const d3 = dip(drapeChain(A, B, 3.4, 0.02));
+    expect(d1).toBeGreaterThan(0);
+    expect(d2).toBeGreaterThan(d1);
+    expect(d3).toBeGreaterThan(d2);
+  });
+  test('the sampled chain approximates the cable: arc length ≈ rest length', () => {
+    for (const L of [2.2, 3.4, 6]) {
+      const pts = drapeChain(A, B, L, 0.02);
+      expect(arc(pts), `L=${L}`).toBeGreaterThan(L * 0.98);
+      expect(arc(pts), `L=${L}`).toBeLessThan(L * 1.03);
+    }
+  });
+  test('a VERTICAL cable hangs STRAIGHT (no side-bow) — the old parabola bowed', () => {
+    const pts = drapeChain([0, 0, 0] as V3, [0, -2, 0] as V3, 3, 0.02);
+    expect(pts.length).toBe(2);
+  });
+  test('ends land EXACTLY on the plugs; the chain stays in the vertical plane', () => {
+    const a: V3 = [1, 2, 3], b: V3 = [4, 2.5, 1];
+    const pts = drapeChain(a, b, 5, 0.02);
+    pts[0]!.forEach((v, i) => expect(v).toBeCloseTo(a[i] as number, 12));
+    pts[pts.length - 1]!.forEach((v, i) => expect(v).toBeCloseTo(b[i] as number, 12));
+    // every sample = from + u·x + (0,y,0): the projection on from→b (x/z) is collinear
+    const ux = b[0] - a[0], uz = b[2] - a[2];
+    for (const p of pts) {
+      const t = ((p[0] - a[0]) * ux + (p[2] - a[2]) * uz) / (ux * ux + uz * uz);
+      expect(p[0] - a[0] - t * ux).toBeCloseTo(0, 9);
+      expect(p[2] - a[2] - t * uz).toBeCloseTo(0, 9);
+    }
+  });
+  test('restLength = the Σ of the recorded segment lengths', () => {
+    expect(restLength(P)).toBeCloseTo(1.0, 10);
+  });
+  test('a stale run (both sockets live) re-drapes: sag + leads + plugs', () => {
+    // a slack fluid hose: 3 m of cable spanning ~1.8 m once the b-part
+    // (the recorded tip sits 1.2 m off its socket) has been moved up
+    const LOOSE: Pipe = {
+      a_component: 0, a_port: 'pa', b_component: 1, b_port: 'pb',
+      type: 'fluid', radius: 0.045,
+      segments: [
+        { start: { x: 0, y: 0, z: 0 }, dir: 0, length: 1 },              // +x
+        { start: { x: 1.5, y: 0, z: 0 }, dir: 1, length: 1 },            // +y
+        { start: { x: 1.5, y: 1, z: 0 }, dir: 5, length: 1 },            // reversed tail: tip (1.5,0,0)
+      ],
+    };
+    const sockets: PipeSockets[] = [{
+      a: { at: [0, 0, 0], axis: [1, 0, 0], kind: 'fluid' },
+      b: { at: [1.5, 0, 1.2], axis: [0, 0, -1], kind: 'fluid' },         // b-part MOVED up
+    }];
+    const net = buildPipes([LOOSE], sockets);
+    expect(net.reroute, 'the moved run is re-draped').toBe(1);
+    expect(checkLeads(net).bad, 'the plugs still lead along the stub axes').toBe(0);
+    const poly = net.polys[0]!;
+    expect(poly.length, 'a hung cable is a chain, not a butt-joint route').toBeGreaterThan(3);
+    // the b lead stands on the axis: neck is 2r OUT from the tip along −z?
+    // tip = socket + axis·depth; the LAST bar runs neckB→tipB along axis
+    const last = net.segs[net.segs.length - 1]!;
+    const d = [last.b[0] - last.a[0]!, last.b[1] - last.a[1]!, last.b[2] - last.a[2]!];
+    const dn = d.map(v => v / Math.hypot(...d));
+    expect(dn[0]! * 0 + dn[1]! * 0 + dn[2]! * -1, 'into the cap, AGAINST its outward axis')
+      .toBeCloseTo(-1, 6);
+    // the hung chain dips below the neck-to-neck chord
+    expect(dip(poly.map(v => [...v] as number[])), 'the slack hangs').toBeGreaterThan(0.2);
+    // a fresh cache keeps the RECORDED route (the game's own baked sag)
+    const fresh = buildPipes([LOOSE]);
+    expect(fresh.reroute).toBe(0);
+    expect(fresh.segs.length).toBe(3);
   });
 });

@@ -391,10 +391,29 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // ends onto the LIVE sockets (sockets.ts); this only pokes that cheap
   // cable-pass rebuild on the same drag-debounce rhythm as the reload.
   const pipesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pipesLast = useRef(0);
+  // v1.11.3 THE DRAPE LAW follow-through (we: "move toward/attach to where
+  // they physical connection it"): LEADING + TRAILING throttle at 250 ms —
+  // the pure trailing debounce RESET on every pointermove, so during a
+  // continuous gizmo drag the cables only snapped into place AFTER release.
+  // Now the first edit rebuilds at once and a drag re-drapes the cables at
+  // 4 Hz (the drape cost is the cheap cable pass — rebuildPipes merges a
+  // few thousand bars), with a trailing rebuild guaranteeing the final
+  // pose after the last event.
   const pipesSoon = useCallback(() => {
     if (!engineRef.current?.pipeInfo().pipes) return;   // craft without cables: no-op
-    if (pipesTimer.current) clearTimeout(pipesTimer.current);
-    pipesTimer.current = setTimeout(() => { pipesTimer.current = null; engineRef.current?.rebuildPipes(); }, 250);
+    const now = performance.now();
+    const since = now - pipesLast.current;
+    if (since >= 250) {
+      pipesLast.current = now;
+      engineRef.current?.rebuildPipes();
+    } else if (!pipesTimer.current) {
+      pipesTimer.current = setTimeout(() => {
+        pipesTimer.current = null;
+        pipesLast.current = performance.now();
+        engineRef.current?.rebuildPipes();
+      }, 250 - since);
+    }
   }, []);
 
   // ---- v1.6 TOOLS ▸ placement flow (Spheroid): dialog OK → movable ghost +

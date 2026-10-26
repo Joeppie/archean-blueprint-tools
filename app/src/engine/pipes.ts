@@ -105,14 +105,79 @@ export interface PipeNetwork {
   pipes: number;
   /** ends the recorded cache left off its socket (re-anchored, sockets.ts) */
   stale: number;
+  /** v1.11.3: runs re-draped by THE DRAPE LAW (a stale end → the game's
+   *  save-time physical re-route previewed live); fresh runs keep their
+   *  recorded route — the game's own sag is baked into it */
+  reroute: number;
 }
 
 /** one straight segment's view-space length (V3s come from the SAME net) */
 const segLen = (a: V3, b: V3) =>
   Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
 
-/** one cable run to animate a power-surge along, walkable FROM ci */
-export interface SurgePath { pts: V3[]; cum: number[]; total: number; to: number }
+/** THE DRAPE LAW (v1.11.3, we: "flexible cables should simulate physics
+ *  … hang/sag depending on how tight they are … sag then depends on how
+ *  overstretched they are for their actual length"): the run between two
+ *  plug necks is a CATENARY — the physical hanging-cable curve — solved on
+ *  the exact lattice the file speaks:
+ *   · `length` is the cable's REST length (the file's Σ segment lengths /
+ *     a flexible pair's length field). If the span between `from` and `to`
+ *     needs more than that, the cable is TAUT: one straight bar (an
+ *     overstretched run renders as straight as the game draws it).
+ *   · With slack S = L/dist − 1 the run hangs: the vertical plane through
+ *     the two points carries the classic y(x) = a·cosh((x−xm)/a)+c solved
+ *     for the arc constraint 2a·sinh(dh/2a) = √(L²−dv²) (bisection; dh =
+ *     horizontal separation, dv = height difference — a vertical cable has
+ *     dh 0 and hangs STRAIGHT, no side-bow, which the old chord-offset
+ *     parabola got wrong). Sag grows monotonically with overstretch; the
+ *     deepest point sits below the chord by a·(cosh … ) — measured.
+ *  Sampling density follows the slack-to-radius ratio (the XenonViewer
+ *  chunk law). Exported: the rerouted-cable drape uses it, the pins test
+ *  it (pipes.test 'THE DRAPE LAW'). */
+export function drapeChain(from: V3, to: V3, length: number, radius: number): V3[] {
+  const dist = segLen(from, to);
+  if (dist < 1e-4) return [from, to];
+  const L = length || 0;
+  const dv = to[1] - from[1];
+  if (L <= dist * (1 + 1e-9) || L <= Math.abs(dv)) return [from, to];   // taut
+  const dx = to[0] - from[0], dz = to[2] - from[2];
+  const dh = Math.hypot(dx, dz);
+  if (dh < 1e-6) return [from, to];                    // vertical: hangs straight
+  const target = Math.sqrt(L * L - dv * dv);           // arc constraint f(a)
+  const f = (a: number) => 2 * a * Math.sinh(dh / (2 * a)) - target;
+  let lo = dh / 700, hi = dh;                          // f(lo) > 0 ≥ f(hi·k)
+  for (let k = 0; k < 60 && f(hi) > 0; k++) hi *= 2;
+  if (f(hi) > 0) return [from, to];                    // numeric safety → taut
+  for (let k = 0; k < 60; k++) {
+    const mid = (lo + hi) / 2;
+    if (f(mid) > 0) lo = mid; else hi = mid;
+  }
+  const a = (lo + hi) / 2;
+  const u = Math.atanh(Math.max(-0.999999, Math.min(0.999999, dv / L)));
+  const xm = (dh - 2 * a * u) / 2;                     // catenary vertex offset
+  const c = -a * Math.cosh(xm / a);                    // y(0) = 0
+  const ux = dx / dh, uz = dz / dh;
+  const slack = L / dist - 1;
+  const count = Math.min(48, Math.max(4,
+    Math.round(4 * Math.sqrt((L / radius) / 12)) || 4, Math.round(8 * Math.sqrt(slack))));
+  const pts: V3[] = [];
+  for (let i = 0; i <= count; i++) {
+    const x = (i / count) * dh;
+    const y = a * Math.cosh((x - xm) / a) + c;         // ≤ 0 between the ends
+    pts.push([from[0] + ux * x, from[1] + y, from[2] + uz * x]);
+  }
+  pts[0] = [from[0], from[1], from[2]];
+  pts[pts.length - 1] = [to[0], to[1], to[2]];         // exact plug lands
+  return pts;
+}
+
+/** the cable's REST length from the file: a flexible pair carries it in
+ *  segment[0].length, a routed run is the sum of its segment lengths. */
+export function restLength(p: Pipe): number {
+  let L = 0;
+  for (const s of p.segments) L += s.length;
+  return L;
+}
 
 /** dir 0..5 → +x,+y,+z,−x,−y,−z, raw frame == view frame (v0.180) */
 const DIRS: readonly (V3 | undefined)[] = [
@@ -134,28 +199,8 @@ function unit(a: V3, b: V3): V3 {
   return [dx / n, dy / n, dz / n];
 }
 
-/** the game's own sag-chain sampling of a flexible cable (XenonViewer
- *  flexibleCable): parabola pinned at the ends, sag 0 when taut, chunk
- *  count from the slack-to-radius ratio. */
-function sagChain(from: V3, to: V3, length: number, radius: number): V3[] {
-  const dist = segLen(from, to);
-  if (dist < 1e-4) return [from, to];
-  const slack = Math.max(0, (length || 0) / dist - 1);
-  const sag = dist * Math.sqrt((3 * slack) / 8);
-  const count = sag < radius
-    ? 1
-    : Math.min(64, Math.max(2, Math.round(4 * Math.sqrt((length || 0) / radius / 12))));
-  const pts: V3[] = [];
-  for (let i = 0; i <= count; i++) {
-    const t = i / count;
-    pts.push([
-      from[0] + (to[0] - from[0]) * t,
-      from[1] + (to[1] - from[1]) * t - (sag > 0 ? 4 * sag * t * (1 - t) : 0),
-      from[2] + (to[2] - from[2]) * t,
-    ]);
-  }
-  return pts;
-}
+/** one cable run to animate a power-surge along, walkable FROM ci */
+export interface SurgePath { pts: V3[]; cum: number[]; total: number; to: number }
 
 /**
  * Build the drawable network. `sockets` (sockets.ts pipeSockets) optionally
@@ -174,7 +219,7 @@ export function buildPipes(
   const polys: V3[][] = [];
   const radii: number[] = [];
   const piOf: number[] = [];
-  const net: PipeNetwork = { segs, joints, plugs, ends, links, polys, radii, piOf, pipes: 0, stale: 0 };
+  const net: PipeNetwork = { segs, joints, plugs, ends, links, polys, radii, piOf, pipes: 0, stale: 0, reroute: 0 };
   if (!pipes?.length) return net;
   net.pipes = 0;
 
@@ -238,12 +283,12 @@ export function buildPipes(
     const neckA = axisA && leadA > 0 ? along(tipA, axisA, leadA) : null;
     const neckB = axisB && leadB > 0 ? along(tipB, axisB, leadB) : null;
 
-    // ---- flexible pair: ONE sagging cable, not two segments --------------
+    // ---- flexible pair: ONE hanging cable, not two segments --------------
     if (isFlex) {
       const color = segColor(first);
       const metal = !!first.metal || !!first.chrome;
       const box = !!first.box || sec.box;
-      const pts = sagChain(neckA ?? tipA, neckB ?? tipB, first.length, radius);
+      const pts = drapeChain(neckA ?? tipA, neckB ?? tipB, first.length, radius);
       if (neckA) {
         segs.push({ a: tipA, b: neckA, radius, half, box, color, metal, kind });
         joints.push({ at: neckA, radius: half, color });      // the bend leaves the axis here
@@ -274,6 +319,53 @@ export function buildPipes(
 
     // ---- rigid routed cable ----------------------------------------------
     const s0 = p.segments[0]!, sn = p.segments[n - 1]!;
+    // v1.11.3 THE DRAPE LAW for STALE runs: when a part moved and the
+    // cached route no longer starts/ends on its sockets, the game re-routes
+    // the cable PHYSICALLY on save — we preview that live: the run's REST
+    // LENGTH (the file's Σ segment lengths) minus the two connector leads
+    // hangs as a catenary between the plug necks (taut-straight when the
+    // sockets sit farther apart than the cable reaches). GATE: BOTH sockets
+    // must resolve — a drape connects to where the cable PHYSICALLY
+    // connects, and an unresolvable end is a tip we only know from the
+    // cache. Fresh runs keep the recorded route: the game's sag is baked
+    // into it.
+    // Style = the LONGEST recorded segment's (a run's segment[0] is often
+    // the black sheath stub — the rerouted cable must not wear it).
+    if (sock?.a && sock?.b && (plugA.stale || plugB.stale)) {
+      let big = s0;
+      for (const s of p.segments) if (s.length > big.length) big = s;
+      const color = segColor(big);
+      const metal = !!big.metal || !!big.chrome;
+      const box = !!big.box || sec.box;
+      const pts = drapeChain(neckA ?? tipA, neckB ?? tipB,
+        restLength(p) - leadA - leadB, radius);
+      if (neckA) {
+        segs.push({ a: tipA, b: neckA, radius, half, box, color, metal, kind });
+        joints.push({ at: neckA, radius: half, color });
+      }
+      let prev = pts[0]!;
+      for (let i = 1; i < pts.length; i++) {
+        segs.push({ a: prev, b: pts[i]!, radius, half, box, color, metal, kind });
+        if (i < pts.length - 1) joints.push({ at: pts[i]!, radius: half, color });
+        prev = pts[i]!;
+      }
+      if (neckB) {
+        segs.push({ a: neckB, b: tipB, radius, half, box, color, metal, kind });
+        joints.push({ at: neckB, radius: half, color });
+      }
+      ends.push({ a: tipA, b: tipB });
+      links.push({ a: p.a_component, b: p.b_component });
+      polys.push([
+        tipA, ...(neckA ? [neckA] : []), ...pts.slice(1, -1),
+        ...(neckB ? [neckB] : []), tipB,
+      ]);
+      radii.push(half); piOf.push(pi); net.reroute++;
+      plugs.push(
+        { at: tipA, axis: axisA ?? unit(neckA ?? tipA, pts[1] ?? tipB), radius, half, box, led: !!neckA },
+        { at: tipB, axis: axisB ?? unit(neckB ?? tipB, pts[pts.length - 2] ?? tipA), radius, half, box, led: !!neckB },
+      );
+      return;
+    }
     if (neckA) {
       segs.push({ a: tipA, b: neckA, radius, half, box: !!s0.box || sec.box,
         color: segColor(s0), metal: !!s0.metal || !!s0.chrome, kind });

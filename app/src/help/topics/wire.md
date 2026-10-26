@@ -47,6 +47,17 @@ The dock has three columns (they stack on a phone):
   ranked list, then pick the exact port. The pairing writes the blueprint
   AND the save text — the game sees the same cables the editor draws.
 
+## How cables hang (v1.11)
+
+Cables you move now behave like cables: when you drag a part, its cables
+follow its connectors and RE-HANG — a cable longer than the gap between
+its two plugs sags (a proper hanging-curve, deeper the looser the fit),
+a cable whose plugs sit farther apart than its length pulls straight and
+taut. Cables the game already routed (untouched parts) keep their
+authored curves. A cable always leaves and enters its connector along the
+connector's stub axis (a short straight lead in the cable's radius before
+any bend). The search words: sag, hang, drape, catenary, taut, physics.
+
 ## Logical candidates — the ranking, and why it never overrules you
 
 The game's own adapter names say what each port IS: `lowvoltage-input`

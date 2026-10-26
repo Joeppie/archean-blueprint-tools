@@ -1386,6 +1386,36 @@ topic + FORMAT).
   must re-implement blockshapes + the face-grid for a load-only loop).
   (5) AssemblyScript landing lessons → PERF.md (raw-pointer flood arrays:
   typed-array bounds checks made the first port SLOWER than JS).
+- **v1.11.3 THE DRAPE LAW — CABLE PHYSICS (we: "flexible cables should
+  simulate- to some degree- physics, and have a hang/sag depending on how
+  tight they are, like it is in game, and move toward/attach to where they
+  physical connection it; sag then depends on how overstretched they are
+  for their actual length")**: a cable run whose cached ends left their
+  sockets (a part moved) and whose BOTH sockets resolve is no longer drawn
+  as its stale waypoints — it is RE-DRAPED as the physical hanging curve
+  the game re-routes to on save (`pipes.ts drapeChain`: the CATENARY
+  y(x)=a·cosh((x−xm)/a)+c solved for the run's REST LENGTH (the file's Σ
+  segment lengths; flexible pairs carry theirs in segment[0]):
+  2a·sinh(dh/2a)=√(L²−dv²) in the vertical plane between the plug NECKS
+  (tips + the v1.8.2 2r axial leads — the connection law is untouched,
+  the drape hangs from the necks). Laws pinned (pipes.test 'THE DRAPE
+  LAW'): rest length ≤ span ⇒ TAUT straight bar (an overstretched cable
+  pulls straight); sag grows monotonically with overstretch L/span; a
+  VERTICAL span hangs STRAIGHT (the old XenonViewer chord-offset parabola
+  side-bowed — replaced); sampled arc ≈ rest length; the chain lands
+  EXACTLY on the plugs. FRESH runs keep the RECORDED polyline verbatim —
+  the game's sag is baked into its waypoints (drape there would double
+  it). Re-draped runs wear the LONGEST segment's style (segment[0] is
+  often the black sheath stub). LIVE FOLLOW: `pipesSoon` became a 250 ms
+  leading+trailing THROTTLE (the old pure-trailing debounce reset on every
+  pointermove — cables only snapped into place AFTER a drag release; now
+  they ride the drag at 4 Hz and settle on the trailing pass).
+  `pipeInfo()` gained `reroute` + `polys` (the sag pins measure the chord
+  dip); net gained `reroute`. Truck (file carries user-moved parts)
+  re-drapes on LOAD, ISW on the +1.5 m Dashboard move — e2e pins, one
+  re-pin: the truck's round-vs-square bar AGGREGATE shifted with the
+  draped item ducts, the species law is the per-kind majority rows
+  (already pinned). FORMAT §pipes 'THE DRAPE LAW' is normative.
 - **v1.11.1 PHONE WIDGET LAW + FULLSCREEN HELP + THE w KEY (we: "Ui elements
   are in the way on phone when placing blocks, and I see the picked block
   popup and the widget for changing blocks over the block itself which

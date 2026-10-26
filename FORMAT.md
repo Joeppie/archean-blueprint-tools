@@ -773,6 +773,33 @@ engine CONTENT frame; its FILE-frame socket pose is
   `checkLeads(net)` (exposed through `__ARCHEAN__.engine.pipeInfo().leads`). Pins: `app/src/engine/__tests__/sockets.test.ts` (law +
   corpus sweep), `pipes.test.ts` (drawing + re-anchoring), `app/e2e/pipes.spec.ts`
   (rendered net + a moved part drags its ends), triage: `app/tools/worsttangent.mjs`.
+• **THE DRAPE LAW** (v1.11.3, user: "flexible cables should simulate physics
+  … have a hang/sag depending on how tight they are, like it is in game, and
+  move toward/attach to where they physical connection it; sag then depends
+  on how overstretched they are for their actual length"): a cable run whose
+  cached ends no longer sit on their sockets (a part moved) and whose BOTH
+  sockets resolve is re-draped PHYSICALLY — the game re-routes such cables
+  on save; the viewport previews that live. The run's REST LENGTH is the
+  file's truth (Σ `segment.length`; a flexible pair carries its length in
+  segment[0] by convention). Between the plug necks (tips + 2r axial leads,
+  the DIRECTION RULE above) the cable is the CATENARY solved for that arc:
+  y(x) = a·cosh((x−xm)/a)+c with 2a·sinh(dh/2a) = √(L²−dv²) in the vertical
+  plane through the two anchors (dh = horizontal separation, dv = height
+  difference). Consequences the pins assert: REST LENGTH ≤ span ⇒ TAUT, one
+  straight bar (an overstretched cable is pulled straight, as in game);
+  sag grows monotonically with overstretch L/span; a VERTICAL span hangs
+  STRAIGHT (no side-bow — the old XenonViewer chord-offset parabola bowed);
+  sampled arc length ≈ the rest length. FRESH runs keep the RECORDED
+  polyline verbatim — the game's own sag is baked into its waypoints, so
+  applying the drape there would double it. The engine re-drapes on every
+  rebuildPipes (Editor pipesSoon = 250 ms leading+trailing throttle, so a
+  gizmo drag makes the cables FOLLOW the part at 4 Hz and settle after the
+  release). Style: the rerouted run wears its LONGEST recorded segment's
+  colour/material (segment[0] is often the black sheath stub). Pin:
+  `pipes.test.ts` THE DRAPE LAW (taut, monotonic sag, arc ≈ L, vertical
+  straight, exact plug lands, re-drape vs fresh-kept),
+  `app/e2e/pipes.spec.ts` (truck: stale runs re-drape + a hung chain dips;
+  ISW: moving a part re-drapes its cables, restoring leaves no drape).
 • **A pipe needs ≥ 2 segments IN THE FILE** — the dev reader warns
   (`blueprint.js`: "the game expects at least two"), and the balloon-tail
   generator honours it at write time (`balloonfin.pipeSegments` keeps only
