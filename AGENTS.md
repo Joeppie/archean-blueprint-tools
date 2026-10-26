@@ -2684,6 +2684,34 @@ in full-suite runs. Standing rules:
   law, jiggle-poll the assertion — see wire.spec's re-anchor loop + the
   BLOCKED-test poll) or gets SPARSIFIED (fewer viewports, capped scans).
   Never "fix" flakes by raising sleeps/timeouts.
+- **FIXTURE-FIRST BOOT LAW (v1.12.1, we: "can we make a stripped-down
+  truck version so it boots way quicker — as a default for any such
+  test?"):** every e2e law states its BOOT CLASS; if the law is about
+  GEOMETRY-LIKE-BEHAVIOUR (occlusion, sockets, joints, layout) and not
+  about THAT craft's data, it runs on a GENERATED law fixture
+  (tools/make_*_test.py → testdata/900000NNNN) exhibiting the law and
+  nothing else — first specimen: wire-xray.spec.ts on 9000007001
+  (4 cables, ~1 s boot) replacing the 375-cable truck @slow legs (15 s
+  boots, 292-scan censuses). Real-craft DATA laws (socket re-seat on
+  3481322297, rig chains) belong at the HEADLESS node tier, where the
+  full blueprint boots in ~0.3 s (scene.headless.test.ts). A corpus
+  craft in a browser test must defend why the fixture CANNOT exhibit
+  its law.
+- **CHAIN LAW (v1.12.1, we: "fuse tests in logical groups; one test
+  asserting many things, without cutting itself short"):** tests sharing
+  one boot + compatible state run as ONE test of named `test.step`s
+  with `expect.soft(.poll)` — violations accumulate and report, the
+  chain never short-circuits on a failed law; hard gates only for
+  premise state (boot, episode-open). Each step restores what it
+  mutated; the LAST step is the one allowed to leave pollution. Spec
+  surgery uses tools/spec_ops.mjs (TypeScript-AST spans — string
+  slicing broke twice on closing-indent assumptions).
+- **MEASURED (v1.12.1):** fast tier 9.9 min → **2.5 min** — preview
+  build boot 1823 → 900 ms (playwright.config webServer = `vite build
+  && vite preview`, corpus routes via the plugin's preview hook,
+  `E2E_DEV=1` escape hatch) + ANGLE-Vulkan on the iGPU (radeon_icd
+  pinned, NVIDIA hidden — the tests/run_tests.sh trick); matrix
+  394 → **215 runs** (fusion waves + fixture-first).
 - **Sparsify backlog (v1.12.1 Phase 0 LANDED: the 16 zero-device-assert
   specs left the pixel7 matrix — 394 → 283 runs; the ladder continues in
   docs/TEST-PYRAMID.md):** the xrayCensus fixture-selection scan is paid

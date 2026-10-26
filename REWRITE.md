@@ -449,7 +449,15 @@ Gate for each phase: the extracted test reproduces the CURRENT green values
 before any behaviour move; the removed e2e coverage must exist at the lower
 tier first (no coverage holes, only migrations).
 
-### P7.3a — the x-ray fixture spec (TO BE PICKED UP; fixture SHIPPED 2026-10-26)
+### P7.3a — the x-ray fixture spec — ✅ LANDED v1.12.1
+
+`app/e2e/wire-xray.spec.ts` runs the pin list on 9000007001 (census shape, the
+BLOCKED episode with the ≥2 cursor-surges and full restore, the ONE-WAY
+input flow, the dock/Beacon negatives); the truck legs (BLOCKED, ONE-WAY,
+and the fused truck chain) are RETIRED from `app/e2e/wire.spec.ts` with
+notes. Truck DATA laws live headless (scene.headless.test.ts).
+
+
 
 `tools/make_xray_test.py` → `testdata/9000007001` ("xray-test", 73 blocks,
 9 comps, 4 pipes, boot 0.6 s) replaces the two truck wire specs

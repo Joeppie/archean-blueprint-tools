@@ -131,3 +131,30 @@ Viewport-mock harness; the HEADLESS→ column (≈ 35 runs) needs only probes
 the headless Engine already answers. Target steady state: ~110 runs
 (pixel + pointer + integration + one smoke per boot class), vitest
 absorbing the rest.
+
+## CHAIN LAW wave (v1.12.1, same day) — 254 → 213 runs
+
+Tests that share ONE boot + compatible state now run as single chained
+tests: named `test.step`s, `expect.soft` for laws (violations accumulate,
+the chain NEVER short-circuits on a failed assert), hard gates only where
+the state premise breaks (boot, episode-open). Discipline: each step
+restores what it mutated; the LAST step is the one allowed to leave
+pollution. Boots saved: views 4, viewmenu 6, gizmo 6, wire 8 (the two
+@slow truck legs share the truck boot, the surge sampler AND the 375-cable
+census scan — it ran TWICE), panels 14 (shell chain, editors chain,
+starter-craft chain, mobile chain).
+
+## BOOT COST (v1.12.1) — 1823 ms → 900 ms per test boot
+
+- **Production preview**: Playwright now drives `vite build && vite
+  preview` (the corpus plugin's `configurePreviewServer` serves the same
+  /corpus, /models, /atlas, /viewer, /testdata routes as dev — the Pages
+  layout). The dev server's per-boot 300-module transform waterfall
+  collapses to a few hashed chunks; the suite also exercises the SHIPPED
+  bundle. `E2E_DEV=1` falls back to dev for single-spec iteration.
+- **iGPU GL**: launch args `--use-gl=angle --use-angle=vulkan` +
+  `VK_ICD_FILENAMES=radeon_icd.json` (the same pin tests/run_tests.sh
+  uses; the NVIDIA ICD stays hidden from chromium — the 5090 is never
+  contended). Headless SwiftShader was costing ~575 ms per boot in
+  software-rendered first frames; pixel-probe suites (viewmenu, scene)
+  verified green on real GL.
