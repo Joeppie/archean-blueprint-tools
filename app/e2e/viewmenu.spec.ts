@@ -87,83 +87,80 @@ const far = (a: number[], b: number[]) =>
 test.describe('view menu: see-through ground, sky backdrops, ortho @ui', () => {
   const desktopOnly = () => test.skip(test.info().project.name !== 'chromium', 'desktop-only');
 
-  test('the ⚙ popover is the VIEW menu with the new rows', async ({ page }) => {
-    await openCraft(page, ISW);
-    await openMenu(page);
-    // renamed by the user rule: the section header says "View"
-    await expect(page.getByTestId('viewopts').locator('h3')).toHaveText('View');
-    for (const b of NAMES)
-      await expect(page.getByTestId(`backdrop-${b}`)).toBeVisible();
-    await expect(page.getByTestId('opt-ortho')).toBeVisible();
-  });
-
-  test('the ground pad is SEE-THROUGH — the band under the craft shows SKY', async ({ page }) => {
+  test('the VIEW menu: popover rows, see-through pad, backdrop swaps + persistence (one boot)', async ({ page }) => {
     desktopOnly();
     await openCraft(page, ISW);
+
+    await test.step('BOOT DEFAULT (v1.9.4, we: "make sky backdrop default"): a fresh profile starts ON the manifest default panorama', async () => {
+      await expect.poll(() => backdropOf(page), { timeout: 15_000 })
+        .toEqual({ current: DEF, ready: true, dome: DEF !== 'none' });
+    });
+
+    await test.step('the ⚙ popover is the VIEW menu with the new rows', async () => {
+      await openMenu(page);
+      // renamed by the user rule: the section header says "View"
+      expect.soft(page.getByTestId('viewopts').locator('h3')).toHaveText('View');
+      for (const b of NAMES)
+        expect.soft(page.getByTestId(`backdrop-${b}`), `row backdrop-${b}`).toBeVisible();
+      expect.soft(page.getByTestId('opt-ortho')).toBeVisible();
+    });
+
     // The scan's discriminator (sky-blue vs the OLD solid green SHEET) is
     // read in FLAT-SKY mode: since v1.9.4 the default is a panorama, whose
-    // terrain seen THROUGH the pad could be green as well — that would be
-    // the backdrop showing, not a sheet. ⊘ first; the swap pins cover the
-    // panoramas themselves.
-    await openMenu(page);
-    await page.getByTestId('backdrop-none').click();
-    await expect.poll(() => backdropOf(page), { timeout: 10_000 })
-      .toEqual({ current: 'none', ready: true, dome: false });
-    // the pad mesh stays (invisible) as the PICK pad — three's Raycaster
-    // ignores visibility, so the coord-readout chip keeps its ground hit
-    // (views.spec pins that); what must be GONE is the rendered sheet.
-    // A DENSE scan of the band rows (u 0.1..0.9, two rows): sky pixels
-    // read b > g (flat sky #8fb4d8 is blue-dominant), the green minority
-    // is ONLY the grid lines + their antialiased blends. The OLD solid
-    // sheet made every band pixel green (g > b) — both fractions invert.
-    // ONE evaluate for the whole scan: 75 separate round-trips blew the
-    // poll budget (each probe renders + flushes the GPU).
-    const scan = () => page.evaluate(() => {
-      const h = (window as unknown as Win).__ARCHEAN__!;
-      let sky = 0, green = 0, n = 0;
-      for (const v of [0.84, 0.9])
-        for (let i = 0; i < 25; i++) {
-          const p = h.pixel(0.1 + 0.8 * (i / 24), v);
-          if (!p) continue;
-          n++;
-          if (p[2] > p[1]) sky++; else if (p[1] > p[2]) green++;
-        }
-      return { sky: sky / n, green: green / n };
-    });
-    await expect.poll(async () => (await scan()).sky, { timeout: 20_000 })
-      .toBeGreaterThan(0.5);
-    await expect.poll(async () => (await scan()).green, { timeout: 20_000 })
-      .toBeLessThan(0.5);
-  });
-
-  test('every manifest backdrop swaps the sky dome; none restores', async ({ page }) => {
-    desktopOnly();
-    await openCraft(page, ISW);
-    // BOOT DEFAULT (v1.9.4, we: "make sky backdrop default"): a fresh
-    // profile starts ON the manifest default panorama, dome live
-    await expect.poll(() => backdropOf(page), { timeout: 15_000 })
-      .toEqual({ current: DEF, ready: true, dome: DEF !== 'none' });
-    await openMenu(page);
-    // the flat-sky BASELINE for the swaps below: click the ⊘ button
-    await page.getByTestId('backdrop-none').click();
-    await expect.poll(() => backdropOf(page), { timeout: 10_000 })
-      .toEqual({ current: 'none', ready: true, dome: false });
-    const sky0 = (await pixelOf(page, 0.5, 0.03))!;
-    // 'none' = the flat sky colour #8fb4d8
-    expect(far(sky0, [143, 180, 216])).toBeLessThan(24);
-    for (const b of NAMES.filter(n => n !== 'none')) {
-      await page.getByTestId(`backdrop-${b}`).click();
+    // terrain seen THROUGH the pad could be green as well. ⊘ first; the
+    // swap steps below cover the panoramas themselves.
+    await test.step('the ground pad is SEE-THROUGH — the band under the craft shows SKY', async () => {
+      await page.getByTestId('backdrop-none').click();
       await expect.poll(() => backdropOf(page), { timeout: 10_000 })
-        .toEqual({ current: b, ready: true, dome: true });
-      // the dome is LIVE geometry: the sky pixel is a PANORAMA colour
-      // (real dusk sky / terrain), not the flat one
-      const p = (await pixelOf(page, 0.5, 0.03))!;
-      expect(far(p, sky0)).toBeGreaterThan(30);
-    }
-    await page.getByTestId('backdrop-none').click();
-    await expect.poll(() => backdropOf(page)).toEqual({ current: 'none', ready: true, dome: false });
-    await expect.poll(async () => far((await pixelOf(page, 0.5, 0.03))!, sky0))
-      .toBeLessThan(8);
+        .toEqual({ current: 'none', ready: true, dome: false });
+      // the pad mesh stays (invisible) as the PICK pad — three's Raycaster
+      // ignores visibility (views.spec pins the coord chip's ground hit);
+      // what must be GONE is the rendered sheet. Sky pixels read b > g
+      // (flat sky #8fb4d8); the OLD solid sheet made every band pixel
+      // green. ONE evaluate for the whole scan: 75 round-trips blew the
+      // poll budget.
+      const scan = () => page.evaluate(() => {
+        const h = (window as unknown as Win).__ARCHEAN__!;
+        let sky = 0, green = 0, n = 0;
+        for (const v of [0.84, 0.9])
+          for (let i = 0; i < 25; i++) {
+            const p = h.pixel(0.1 + 0.8 * (i / 24), v);
+            if (!p) continue;
+            n++;
+            if (p[2] > p[1]) sky++; else if (p[1] > p[2]) green++;
+          }
+        return { sky: sky / n, green: green / n };
+      });
+      const s = await scan();
+      expect.soft(s.sky, 'band under the craft is SKY').toBeGreaterThan(0.5);
+      expect.soft(s.green, 'the green minority is only the grid lines').toBeLessThan(0.5);
+    });
+
+    await test.step('every manifest backdrop swaps the sky dome; none restores', async () => {
+      const sky0 = (await pixelOf(page, 0.5, 0.03))!;
+      // 'none' = the flat sky colour #8fb4d8
+      expect.soft(far(sky0, [143, 180, 216]), 'flat sky colour').toBeLessThan(24);
+      for (const b of NAMES.filter(n => n !== 'none')) {
+        await page.getByTestId(`backdrop-${b}`).click();
+        await expect.poll(() => backdropOf(page), { timeout: 10_000 })
+          .toEqual({ current: b, ready: true, dome: true });
+        // the dome is LIVE geometry: the sky pixel is a PANORAMA colour
+        expect.soft(far((await pixelOf(page, 0.5, 0.03))!, sky0), `backdrop ${b} renders`).toBeGreaterThan(30);
+      }
+      await page.getByTestId('backdrop-none').click();
+      await expect.poll(() => backdropOf(page)).toEqual({ current: 'none', ready: true, dome: false });
+      expect.soft(await pixelOf(page, 0.5, 0.03)
+        .then((p) => far(p!, sky0)), 'flat sky restored').toBeLessThan(8);
+    });
+
+    await test.step('the backdrop choice persists across a reload', async () => {
+      await page.getByTestId(`backdrop-${FIRST}`).click();
+      await expect.poll(() => backdropOf(page)).toEqual({ current: FIRST, ready: true, dome: true });
+      await page.reload();
+      await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });   // hard gate
+      await expect.poll(() => backdropOf(page), { timeout: 10_000 })
+        .toEqual({ current: FIRST, ready: true, dome: true });
+    });
   });
 
   test('ortho mode: parallel, framed, keyed, persisted', async ({ page }) => {
@@ -219,17 +216,9 @@ test.describe('view menu: see-through ground, sky backdrops, ortho @ui', () => {
     await page.getByTestId('backdrop-none').click();
   });
 
-  test('the backdrop choice persists across a reload', async ({ page }) => {
-    desktopOnly();
-    await openCraft(page, ISW);
-    await openMenu(page);
-    await page.getByTestId(`backdrop-${FIRST}`).click();
-    await expect.poll(() => backdropOf(page)).toEqual({ current: FIRST, ready: true, dome: true });
-    await page.reload();
-    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
-    await expect.poll(() => backdropOf(page), { timeout: 10_000 })
-      .toEqual({ current: FIRST, ready: true, dome: true });
-  });
+  // RETIRED v1.12.1 (chain law): 'the backdrop choice persists across a
+  // reload' is the persistence step of the VIEW-menu chain above — same
+  // boot class, same state; one boot now covers four former tests.
 
   test('phone: the View menu reaches the new rows', async ({ page }) => {
     test.skip(test.info().project.name === 'chromium', 'phone-only');

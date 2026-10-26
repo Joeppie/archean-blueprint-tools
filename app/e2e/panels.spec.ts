@@ -39,28 +39,90 @@ const subQuat = (page: Page, bi: number) => page.evaluate(b => {
 test.describe('desktop panels @ui', () => {
   const desktopOnly = () => test.skip(test.info().project.name !== 'chromium', 'desktop-only');
 
-  test('view options: hull/wire exclusive, keyboard g/o/h drive the checkboxes', async ({ page }) => {
+  // v1.12.1 CHAIN LAW: four ISW-boot legs (static-info box, mass/CoM/
+  // fidelity, Info dock grid, view options keyboard) shared one boot
+  // class — ONE boot now runs them in restoration-disciplined order:
+  // every step restores the setting it touched; the LAST step is the one
+  // that ends polluted (hull OFF via the keyboard). expect.soft(.poll)
+  // per law: violations report, the chain continues.
+  test('the ISW shell chain: static box, mass + CoM + fidelity, Info grid, view options', async ({ page }) => {
     desktopOnly();
     await openCraft(page, ISW);
     await expect(page.getByTestId('build-dock')).toBeVisible();   // v1.11: Info dock, no sidebar
-    await openOptions(page);
-    const hull = page.getByTestId('opt-hull'), wire = page.getByTestId('opt-wire');
-    await expect(hull).toBeChecked();
-    await wire.check();                                    // wire ON forces hull OFF (legacy excl)
-    await expect(wire).toBeChecked();
-    await expect(hull).not.toBeChecked();
-    await hull.check();
-    await expect(wire).not.toBeChecked();
-    // 'o' flips occupancy THROUGH the same state as the checkbox (v0.147 rule)
-    await page.getByTestId('editor-title').click();       // focus off the inputs (legacy skip rule)
-    await page.keyboard.press('o');
-    await expect(page.getByTestId('opt-occ')).toBeChecked();
-    await page.keyboard.press('o');
-    await expect(page.getByTestId('opt-occ')).not.toBeChecked();
-    await page.keyboard.press('h');
-    await expect(page.getByTestId('opt-hull')).not.toBeChecked();
-    expect(await optsOf(page)).toMatchObject({ hull: false, occ: false, grid: true, pipes: true, subs: true });
+
+    await test.step('static info box: its ✕ dismisses it, the ⚙ row brings it back (v1.5 user rule)', async () => {
+      await expect(page.getByTestId('massbox'), 'desktop default: the box shows').toBeVisible();
+      await expect.soft(page.getByTestId('mass-density'), 'desktop keeps the structural detail').toBeVisible();
+      await page.getByTestId('static-close').click();
+      await expect.soft(page.getByTestId('massbox')).toHaveCount(0);
+      await openOptions(page);
+      await expect.soft(page.getByTestId('opt-static'), 'the ✕ flipped the setting off too').not.toBeChecked();
+      await page.getByTestId('opt-static').check();
+      await expect.soft(page.getByTestId('massbox'), 'the ⚙ row brings it back').toBeVisible();
+      await page.getByTestId('opt-static').uncheck();            // the setting hides it too
+      await expect.soft(page.getByTestId('massbox')).toHaveCount(0);
+      await page.getByTestId('opt-static').check();              // restore for the mass step
+      await page.getByTestId('toggle-options').click();          // close the popover
+      await expect(page.getByTestId('options-win')).toHaveCount(0);
+    });
+
+    await test.step('mass readout, CoM marker toggle, hi-def rebuild, workshop link', async () => {
+      const rep = page.getByTestId('mass-report');
+      await expect.soft(rep).toContainText('declared');
+      await expect.soft(rep).toContainText('CoM');
+      const comVisible = () => page.evaluate(() => {
+        const w = window as unknown as { __ARCHEAN__?: { engine: { massReport: () => { comVisible: boolean } | null } } };
+        return w.__ARCHEAN__!.engine.massReport()!.comVisible;
+      });
+      expect.soft(await comVisible(), 'CoM marker on by default').toBe(true);
+      await openOptions(page);
+      await page.getByTestId('opt-com').uncheck();
+      expect.soft(await comVisible(), 'the row hides the marker').toBe(false);
+      await page.getByTestId('opt-com').check();
+
+      // FULL game meshes are the DEFAULT (v0.182 user rule); the row offers
+      // the decimated twins as the opt-in — toggling rebuilds and draws
+      expect.soft(await page.getByTestId('opt-hidef').isChecked(), 'full meshes default').toBe(false);
+      await page.getByTestId('opt-hidef').check();         // → decimated twins
+      await expect.poll(() => page.evaluate(() =>
+        (window as unknown as { __ARCHEAN__?: { stats: () => { draws: number } } }).__ARCHEAN__!.stats().draws),
+        { timeout: 20_000 }).toBeGreaterThan(0);
+      await page.getByTestId('opt-hidef').uncheck();       // → full game meshes (restore)
+      const ws = page.getByTestId('wslink');
+      await expect.soft(ws).toHaveAttribute('href', new RegExp(`id=${ISW}$`));
+      await page.getByTestId('toggle-options').click();    // close the popover
+      await expect(page.getByTestId('options-win')).toHaveCount(0);
+    });
+
+    await test.step('the Info dock cards sit 3-across (TODO A; the phone column rides the mobile-dock leg)', async () => {
+      await page.getByTestId('mode-view').click();         // a craft's ⌖ Info IS the card grid
+      const grid = page.getByTestId('vessel-stats');
+      await expect.soft(grid).toBeVisible();
+      const cols = await grid.evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length);
+      expect.soft(cols, 'desktop card grid').toBe(3);
+    });
+
+    await test.step('view options: hull/wire exclusive, keyboard g/o/h drive the checkboxes (polluted-last: ends hull OFF)', async () => {
+      await openOptions(page);
+      const hull = page.getByTestId('opt-hull'), wire = page.getByTestId('opt-wire');
+      await expect.soft(hull, 'hull on by default (mode-view keeps the hull law)').toBeChecked();
+      await wire.check();                                  // wire ON forces hull OFF (legacy excl)
+      await expect.soft(wire).toBeChecked();
+      await expect.soft(hull).not.toBeChecked();
+      await hull.check();
+      await expect.soft(wire).not.toBeChecked();
+      // 'o' flips occupancy THROUGH the same state as the checkbox (v0.147)
+      await page.getByTestId('editor-title').click();      // focus off the inputs (legacy skip rule)
+      await page.keyboard.press('o');
+      await expect.soft(page.getByTestId('opt-occ')).toBeChecked();
+      await page.keyboard.press('o');
+      await expect.soft(page.getByTestId('opt-occ')).not.toBeChecked();
+      await page.keyboard.press('h');
+      await expect.soft(page.getByTestId('opt-hull')).not.toBeChecked();
+      expect.soft(await optsOf(page)).toMatchObject({ hull: false, occ: false, grid: true, pipes: true, subs: true });
+    });
   });
+
 
   test('label-scrub gives fine movement control (the tweaking complaint)', async ({ page }) => {
     desktopOnly();
@@ -235,116 +297,84 @@ test.describe('desktop panels @ui', () => {
     await expect(page.getByTestId('inspector')).toBeVisible();
   });
 
-  test('the Info dock cards sit 3-across on desktop, stacked on phones (TODO A)', async ({ page }) => {
-    await page.goto(`/?craft=${ISW}`);
-    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
-    // a craft opens in ⌖ Info: the vessel amounts dock IS the card grid
-    const grid = page.getByTestId('vessel-stats');
-    await expect(grid).toBeVisible();
-    const cols = () => grid.evaluate(el =>
-      getComputedStyle(el).gridTemplateColumns.split(' ').length);
-    const w = (await page.viewportSize())!.width;
-    await expect.poll(cols, {
-      message: `grid columns at ${w}px viewport`,
-    }).toBe(w >= 768 ? 3 : 1);
-  });
+  // RETIRED v1.12.1 (chain law): the Info dock card grid is a step of
+  // the ISW shell chain above; the phone column (1-across) rides the
+  // 'mobile: the bottom dock is always visible' leg.
 });
 
 test.describe('mass & CoM + fidelity toggles @ui', () => {
-  const desktopOnly = () => test.skip(test.info().project.name !== 'chromium', 'desktop-only');
-
   // User 2026-10-19: "Static info shouldn't necessarily show. It's too large
   // on mobile, hide it under settings, x to close panel itself." → the KSP
   // mass/CoM card is a SETTING (⚙ row), it dismisses itself with its own ✕,
   // and on phones it starts hidden and renders as a compact card.
-  test('static info box: its ✕ dismisses it, the ⚙ row brings it back', async ({ page }) => {
-    desktopOnly();
-    await openCraft(page, ISW);
-    await expect(page.getByTestId('massbox'), 'desktop default: the box shows').toBeVisible();
-    await expect(page.getByTestId('mass-density'), 'desktop keeps the structural detail').toBeVisible();
-    await page.getByTestId('static-close').click();
-    await expect(page.getByTestId('massbox')).toHaveCount(0);
-    await openOptions(page);
-    await expect(page.getByTestId('opt-static'), 'the ✕ flipped the setting off too').not.toBeChecked();
-    await page.getByTestId('opt-static').check();
-    await expect(page.getByTestId('massbox')).toBeVisible();
-    await page.getByTestId('opt-static').uncheck();            // the setting hides it too
-    await expect(page.getByTestId('massbox')).toHaveCount(0);
-  });
+  // RETIRED v1.12.1 (chain law): the static-info ✕/⚙ law runs as a step
+  // of the ISW shell chain above (one boot).
 
-  test('mass readout, CoM marker toggle, hi-def rebuild, workshop link', async ({ page }) => {
-    desktopOnly();
-    await openCraft(page, ISW);
-    const rep = page.getByTestId('mass-report');
-    await expect(rep).toContainText('declared');
-    await expect(rep).toContainText('CoM');
-    const comVisible = () => page.evaluate(() => {
-      const w = window as unknown as { __ARCHEAN__?: { engine: { massReport: () => { comVisible: boolean } | null } } };
-      return w.__ARCHEAN__!.engine.massReport()!.comVisible;
-    });
-    expect(await comVisible()).toBe(true);
-    await openOptions(page);
-    await page.getByTestId('opt-com').uncheck();
-    expect(await comVisible()).toBe(false);
-    await page.getByTestId('opt-com').check();
-
-    // FULL game meshes are the DEFAULT (v0.182 user rule); the row offers the
-    // decimated twins as the opt-in — toggling rebuilds and must still draw
-    expect(await page.getByTestId('opt-hidef').isChecked()).toBe(false);
-    await page.getByTestId('opt-hidef').check();         // → decimated twins
-    await expect.poll(() => page.evaluate(() =>
-      (window as unknown as { __ARCHEAN__?: { stats: () => { draws: number } } }).__ARCHEAN__!.stats().draws),
-      { timeout: 20_000 }).toBeGreaterThan(0);
-    await page.getByTestId('opt-hidef').uncheck();       // → full game meshes
-
-    const ws = page.getByTestId('wslink');
-    await expect(ws).toHaveAttribute('href', new RegExp(`id=${ISW}$`));
-  });
+  // RETIRED v1.12.1 (chain law): mass/CoM/hi-def/wslink run as a step of
+  // the ISW shell chain above (one boot).
 });
 
 /** Phones (the pixel7 project): no unsolicited overlay — the static-info card
  *  is OFF by default and, when switched on from ⚙, it is the COMPACT variant
  *  (no structural-detail lines, well under the desktop 250 px card). */
-test('mobile: no static-info box by default; ⚙ shows a compact card @ui', async ({ page }) => {
+// v1.12.1 CHAIN LAW: the two phone legs share one pixel7 boot: the
+// static-info compact-card laws, then the always-visible dock + 1-across
+// card grid.
+test('mobile chain: no unsolicited static card, compact ⚙ card, always-on dock (one boot)', async ({ page }) => {
   test.skip(test.info().project.name === 'chromium', 'phone project only');
   await page.goto('/?craft=' + ISW);
   await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
-  await expect(page.getByTestId('massbox'), 'phones start WITHOUT the box').toHaveCount(0);
-  await page.getByTestId('toggle-options').click();
-  await expect(page.getByTestId('options-win')).toBeVisible();
-  await page.getByTestId('opt-static').check();
-  const box = page.getByTestId('massbox');
-  await expect(box).toBeVisible();
-  const w = (await box.boundingBox())!.width;
-  expect(w, 'the phone card is compact, not the 250 px desktop box').toBeLessThan(200);
-  await expect(page.getByTestId('mass-report')).toContainText('declared');
-  await expect(page.getByTestId('mass-density'), 'the structural-detail row stays off phones').toBeHidden();
-  await expect(page.getByTestId('mass-report')).toContainText('CoM');
-  // v1.11: the ⚙ popover (z-30) overlaps the compact box's ✕ on the phone
-  // (the Info dock makes the viewport shorter, the popover taller) — close
-  // it before the ✕ click
-  await page.getByTestId('toggle-options').click();
-  await expect(page.getByTestId('options-win')).toHaveCount(0);
-  await page.getByTestId('static-close').click();
-  await expect(page.getByTestId('massbox')).toHaveCount(0);
+
+  await test.step('no static-info box by default; ⚙ shows a COMPACT card; ✕ closes', async () => {
+    await expect(page.getByTestId('massbox'), 'phones start WITHOUT the box').toHaveCount(0);
+    await page.getByTestId('toggle-options').click();
+    await expect(page.getByTestId('options-win')).toBeVisible();
+    await page.getByTestId('opt-static').check();
+    const box = page.getByTestId('massbox');
+    await expect(box).toBeVisible();
+    const w = (await box.boundingBox())!.width;
+    expect(w, 'the phone card is compact, not the 250 px desktop box').toBeLessThan(200);
+    await expect(page.getByTestId('mass-report')).toContainText('declared');
+    await expect(page.getByTestId('mass-density'), 'the structural-detail row stays off phones').toBeHidden();
+    await expect(page.getByTestId('mass-report')).toContainText('CoM');
+    // v1.11: the ⚙ popover (z-30) overlaps the compact box's ✕ on the phone
+    // (the Info dock makes the viewport shorter, the popover taller) — close
+    // it before the ✕ click
+    await page.getByTestId('toggle-options').click();
+    await expect(page.getByTestId('options-win')).toHaveCount(0);
+    await page.getByTestId('static-close').click();
+    await expect(page.getByTestId('massbox')).toHaveCount(0);
+  });
+
+  await test.step('the bottom dock is always visible (no drawer, v1.11) + 1-across card grid', async () => {
+    await page.getByTestId('mode-view').click();                    // ⌖ Info mode
+    await expect(page.getByTestId('build-dock')).toBeVisible();
+    await expect(page.getByTestId('vessel-stats')).toBeVisible();
+    await expect(page.getByTestId('toggle-panels')).toHaveCount(0); // the ▤ toggle is GONE
+    // v1.12.1 (chain law): the RETIRED Info-dock leg's phone column lives
+    // here — the vessel grid stacks 1-across on phones (TODO A)
+    const cols = await page.getByTestId('vessel-stats')
+    .evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length);
+    expect(cols, 'phone card grid stacks 1-across').toBe(1);
+    await openOptions(page);
+    await expect(page.getByTestId('opt-hull')).toBeVisible();
+  });
 });
 
-test('mobile: the bottom dock is always visible (no drawer, v1.11)', async ({ page }) => {
-  await openCraft(page, ISW);
-  await page.getByTestId('mode-view').click();                    // ⌖ Info mode
-  await expect(page.getByTestId('build-dock')).toBeVisible();
-  await expect(page.getByTestId('vessel-stats')).toBeVisible();
-  await expect(page.getByTestId('toggle-panels')).toHaveCount(0); // the ▤ toggle is GONE
-  await openOptions(page);
-  await expect(page.getByTestId('opt-hull')).toBeVisible();
-});
+
+// RETIRED v1.12.1 (chain law): a step of the mobile chain above.
 
 test.describe('modes, new craft, file menu @ui', () => {
   const desktopOnly = () => test.skip(test.info().project.name !== 'chromium', 'desktop-only');
 
-  test('gallery → New craft: untitled doc with the starter deck', async ({ page }) => {
+  // v1.12.1 CHAIN LAW: the New-craft leg and the triangles leg BOTH boot
+  // via the gallery → starter deck; one boot, asserted in order (the
+  // starter deck's 5 blocks ARE the surface the triangle picks probe).
+  test('the starter-craft chain: gallery → New craft deck, then triangles 3-click', async ({ page }) => {
     desktopOnly();
     await page.goto('/');
+
+    await test.step('New craft: untitled doc with the starter deck (v1.5.10: File-menu only, no toolbar button)', async () => {
     await page.getByTestId('gallery-new').click();
     await expect(page.getByTestId('editor-title')).toContainText('New craft');
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
@@ -357,12 +387,60 @@ test.describe('modes, new craft, file menu @ui', () => {
     // file. too dangerous"): the editor toolbar carries NO + New craft button
     // — the one cheap assertion; File ▸ New craft (dirty-guarded) is the only path.
     await expect(page.getByTestId('new-craft')).toHaveCount(0);
+    });
+
+    await test.step('triangles submode: three lattice clicks add a prism, panel edits it', async () => {
+    await page.getByTestId('mode-edit').click();
+    await page.getByTestId('ws-tris').click();
+    const canvas = page.getByTestId('canvas');
+    const box = (await canvas.boundingBox())!;
+    // v1.11: PROBE three spread deck faces (fixed fractions land on ground /
+    // a part on the tiny starter craft — a part click selects, clearing the
+    // draft — the app is right, the fractions were not)
+    const spots = await page.evaluate(() => {
+      const c = document.querySelector('canvas')!, r = c.getBoundingClientRect();
+      const e = (window as unknown as { __ARCHEAN__?: { engine: {
+        pickCell: (x: number, y: number) => { bi: number; point: number[] } | null } } })
+        .__ARCHEAN__!.engine;
+      const pts: { x: number; y: number }[] = [];
+      for (let fy = 0.3; fy <= 0.9; fy += 0.04)
+        for (let fx = 0.2; fx <= 0.85; fx += 0.04) {
+          const h = e.pickCell(r.left + r.width * fx, r.top + r.height * fy);
+          if (h && h.bi >= 0) pts.push({ x: fx, y: fy });
+        }
+      const d = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+        Math.hypot(a.x - b.x, a.y - b.y);
+      const a1 = pts[0]!;
+      const a2 = pts.reduce((m, p) => (d(p, a1) > d(m, a1) ? p : m), a1);
+      const a3 = pts.reduce((m, p) => (Math.min(d(p, a1), d(p, a2)) >
+        Math.min(d(m, a1), d(m, a2)) ? p : m), a1);
+      return [a1, a2, a3];
+    });
+    for (const p of spots) {
+      await canvas.click({ position: { x: box.width * p.x, y: box.height * p.y } });
+      await page.waitForTimeout(250);
+    }
+    await expect.poll(async () => page.evaluate(() => {
+      const w = window as unknown as { __ARCHEAN__?: { engine: { blueprint: { data: { triangles?: unknown[] } } } } };
+      return w.__ARCHEAN__!.engine.blueprint.data.triangles?.length ?? 0;
+    // the starter craft has NO twin masks (solo PilotSeat) → auto-mirroring
+    // stays OFF → exactly one prism lands (v1.11 semantics, pin 3-clicks)
+    }), { timeout: 8000 }).toBe(1);
+    await expect(page.getByTestId('tri-edit')).toContainText('Triangle[0]');
+    });
   });
 
-  test('view tab shows ONLY vessel stats; edit mode carries lists + inspector', async ({ page }) => {
+
+  // v1.12.1 CHAIN LAW: three ISW-boot legs share ONE boot. In-app mode
+  // switches cost ~nothing; boots cost ~1 s each. View-lock laws first
+  // (craft lands in View), then the Edit-mode meta write-through, then the
+  // wire-mode connect UI LAST (the only doc mutation).
+  test('the panel editors chain: view-lock, component meta, wire-mode connect (one boot)', async ({ page }) => {
     desktopOnly();
     await page.goto('/?craft=' + ISW);
-    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });   // lands in View
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });   // hard gate: lands in View
+
+    await test.step('view tab shows ONLY vessel stats; the VIEW LOCK; Edit carries lists + inspector', async () => {
     // v1.4 user rule: the view tab's side menu is ONLY the overall vessel
     // stats, in collapsable sections — no parts list, no inspector.
     await expect(page.getByTestId('vessel-stats')).toBeVisible();
@@ -425,31 +503,31 @@ test.describe('modes, new craft, file menu @ui', () => {
     await page.locator('[data-idx]').first().click();
     await expect(page.getByTestId('comp-alias')).toBeVisible();  // v1.11: meta fields (pos/rot = gizmo)
     await expect(page.getByTestId('comp-delete')).toBeVisible();     // selectable ⇒ deletable
-  });
-
-  // RETIRED v1.12.1 (L5, overlap): deck-face click-to-place is canonical
-  // in builddock.spec ('a click lands a 1×1×1 block…') and blockplace.spec;
-  // the placement MATH is vitest-pinned (blocks.test.ts) and the pickCell
-  // face answers headless (scene.headless.test.ts 'pick routing').
-
-  // RETIRED v1.12.1 (L1/L5, overlap): the wire-mode census + auto-wire +
-  // file-menu legs duplicate wire.spec (canonical: 'auto-wire (logical)
-  /// answers and is idempotent', the cable list) and app.spec (?craft= deep
-  // link). The auto-wire MODEL is vitest-pinned (wiremodel/wireops.test.ts).
-});
-
-test.describe('manual wiring + triangles + component meta @ui', () => {
-  const desktopOnly = () => test.skip(test.info().project.name !== 'chromium', 'desktop-only');
-
-  test('wire mode: select a part, pick a free port, connect via the search list', async ({ page }) => {
-    desktopOnly();
-    await page.goto('/?craft=' + ISW);
-    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
-    await page.getByTestId('mode-wire').click();
-    const pipesBefore = await page.evaluate(() => {
-      const w = window as unknown as { __ARCHEAN__?: { engine: { blueprint: { data: { pipes?: unknown[] } } } } };
-      return w.__ARCHEAN__!.engine.blueprint.data.pipes?.length ?? 0;
     });
+
+    await test.step('component meta: alias + paint fields write through to the doc', async () => {
+    await page.getByTestId('ws-parts').click();                 // v1.11: + Parts subpanel
+    await page.getByTestId('parts-list').getByTestId('filter').fill('beacon');
+    await page.locator('[data-idx]').first().click();
+    await page.getByTestId('comp-alias').fill('lighthouse');
+    const opField = page.getByTestId('paint-color1-opacity');
+    await opField.fill('9');
+    const vals = await page.evaluate(() => {
+      const w = window as unknown as { __ARCHEAN__?: { engine: { blueprint: { data: {
+        components: { alias?: string; colors?: Record<string, { opacity: number }> }[] } } } } };
+      const c = w.__ARCHEAN__!.engine.blueprint.data.components.find(x => x.alias === 'lighthouse');
+      return { alias: c?.alias, op: c?.colors?.color1?.opacity };
+    });
+    expect(vals.alias).toBe('lighthouse');
+    expect(vals.op).toBe(9);
+    });
+
+    await test.step('wire mode: select a part, pick a free port, connect via the search list', async () => {
+      await page.getByTestId('mode-wire').click();
+      const pipesBefore = await page.evaluate(() => {
+        const w = window as unknown as { __ARCHEAN__?: { engine: { blueprint: { data: { pipes?: unknown[] } } } } };
+        return w.__ARCHEAN__!.engine.blueprint.data.pipes?.length ?? 0;
+      });
     // pick an OPEN warning (guaranteed free port) -> that component is selected
     await page.getByTestId('wire-warning').first().click();
     await expect(page.getByTestId('wire-manual')).toContainText('ports:');
@@ -487,73 +565,24 @@ test.describe('manual wiring + triangles + component meta @ui', () => {
     await expect.poll(hoverState, { timeout: 4000 }).toBeGreaterThanOrEqual(0);
     await page.mouse.move(5, 5);            // onto the canvas, off the list
     await expect.poll(hoverState, { timeout: 4000 }).toBe(-1);
+    });
   });
 
-  test('triangles submode: three lattice clicks add a prism, panel edits it', async ({ page }) => {
-    desktopOnly();
-    await page.goto('/');
-    await page.getByTestId('gallery-new').click();
-    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
-    await page.getByTestId('mode-edit').click();
-    await page.getByTestId('ws-tris').click();
-    const canvas = page.getByTestId('canvas');
-    const box = (await canvas.boundingBox())!;
-    // v1.11: PROBE three spread deck faces (fixed fractions land on ground /
-    // a part on the tiny starter craft — a part click selects, clearing the
-    // draft — the app is right, the fractions were not)
-    const spots = await page.evaluate(() => {
-      const c = document.querySelector('canvas')!, r = c.getBoundingClientRect();
-      const e = (window as unknown as { __ARCHEAN__?: { engine: {
-        pickCell: (x: number, y: number) => { bi: number; point: number[] } | null } } })
-        .__ARCHEAN__!.engine;
-      const pts: { x: number; y: number }[] = [];
-      for (let fy = 0.3; fy <= 0.9; fy += 0.04)
-        for (let fx = 0.2; fx <= 0.85; fx += 0.04) {
-          const h = e.pickCell(r.left + r.width * fx, r.top + r.height * fy);
-          if (h && h.bi >= 0) pts.push({ x: fx, y: fy });
-        }
-      const d = (a: { x: number; y: number }, b: { x: number; y: number }) =>
-        Math.hypot(a.x - b.x, a.y - b.y);
-      const a1 = pts[0]!;
-      const a2 = pts.reduce((m, p) => (d(p, a1) > d(m, a1) ? p : m), a1);
-      const a3 = pts.reduce((m, p) => (Math.min(d(p, a1), d(p, a2)) >
-        Math.min(d(m, a1), d(m, a2)) ? p : m), a1);
-      return [a1, a2, a3];
-    });
-    for (const p of spots) {
-      await canvas.click({ position: { x: box.width * p.x, y: box.height * p.y } });
-      await page.waitForTimeout(250);
-    }
-    await expect.poll(async () => page.evaluate(() => {
-      const w = window as unknown as { __ARCHEAN__?: { engine: { blueprint: { data: { triangles?: unknown[] } } } } };
-      return w.__ARCHEAN__!.engine.blueprint.data.triangles?.length ?? 0;
-    // the starter craft has NO twin masks (solo PilotSeat) → auto-mirroring
-    // stays OFF → exactly one prism lands (v1.11 semantics, pin 3-clicks)
-    }), { timeout: 8000 }).toBe(1);
-    await expect(page.getByTestId('tri-edit')).toContainText('Triangle[0]');
-  });
 
-  test('component meta: alias + paint fields write through to the doc', async ({ page }) => {
-    desktopOnly();
-    await page.goto('/?craft=' + ISW);
-    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
-    await page.getByTestId('mode-edit').click();
-    await page.getByTestId('ws-parts').click();                 // v1.11: + Parts subpanel
-    await page.getByTestId('parts-list').getByTestId('filter').fill('beacon');
-    await page.locator('[data-idx]').first().click();
-    await page.getByTestId('comp-alias').fill('lighthouse');
-    const opField = page.getByTestId('paint-color1-opacity');
-    await opField.fill('9');
-    const vals = await page.evaluate(() => {
-      const w = window as unknown as { __ARCHEAN__?: { engine: { blueprint: { data: {
-        components: { alias?: string; colors?: Record<string, { opacity: number }> }[] } } } } };
-      const c = w.__ARCHEAN__!.engine.blueprint.data.components.find(x => x.alias === 'lighthouse');
-      return { alias: c?.alias, op: c?.colors?.color1?.opacity };
-    });
-    expect(vals.alias).toBe('lighthouse');
-    expect(vals.op).toBe(9);
-  });
+  // RETIRED v1.12.1 (L5, overlap): deck-face click-to-place is canonical
+  // in builddock.spec ('a click lands a 1×1×1 block…') and blockplace.spec;
+  // the placement MATH is vitest-pinned (blocks.test.ts) and the pickCell
+  // face answers headless (scene.headless.test.ts 'pick routing').
+
+  // RETIRED v1.12.1 (L1/L5, overlap): the wire-mode census + auto-wire +
+  // file-menu legs duplicate wire.spec (canonical: 'auto-wire (logical)
+  /// answers and is idempotent', the cable list) and app.spec (?craft= deep
+  // link). The auto-wire MODEL is vitest-pinned (wiremodel/wireops.test.ts).
 });
+
+// RETIRED v1.12.1 (chain law): manual wiring, triangles 3-click and
+// component meta now run as steps of the panel editors chain and the
+// starter-craft chain above (in-app mode switches; no extra boots).
 
 // The SHIPPED UI (no debug flag): the SCENE PASS tab-title and the stats
 // strip are a DEBUG channel only (user 2026-10-19: "the text in the top

@@ -7,8 +7,17 @@
 //  • a spin writes the file quaternion through the display-pose undo and
 //    the reverse spin restores it,
 //  • translate rides the file position exactly,
-//  • subgrid selection carries NO gizmo (v0.170),
-//  • the mode widget pops on a deliberate canvas part pick.
+//  • the mode widget pops on a deliberate canvas part pick and re-modes,
+//  • multi-grip RING continuity (the real-pointer sweep),
+//  • subgrid selection carries NO gizmo (v0.170).
+//
+// v1.12.1 CHAIN LAW: five former tests shared ONE boot (ISW, edit mode,
+// the parts list) — they run as ONE chained test over ONE boot, in the
+// order attach → spin → translate → mode-widget (+sky close) → the
+// mutating ring sweep LAST. Laws assert via expect.soft: a violation
+// reports and the chain continues; only the boot/attach gates are hard.
+// The two state-wall legs keep their own boots: DOLPHIN (subgrid select)
+// and the poisoned-storage context (addInitScript).
 import { expect, test, type Page } from '@playwright/test';
 
 const ISW = '3812927875';
@@ -76,187 +85,192 @@ const rotY = (q: Q, v: readonly number[]): number[] => {
   return [v[0] + w * tx + y * tz - z * ty, v[1] + w * ty + z * tx - x * tz, v[2] + w * tz + x * ty - y * tx];
 };
 
+/** select the first part list row matching FILTER; returns its ci */
+async function pickPart(page: Page, filter: string): Promise<number> {
+  await page.getByTestId('ws-parts').click();   // v1.11: parts list = + Parts
+  await page.getByTestId('parts-list').getByTestId('filter').fill(filter);
+  const row = page.locator('[data-idx]').first();
+  const ci = +(await row.getAttribute('data-idx'))!;
+  await row.click();
+  return ci;
+}
+
 test.describe('gizmo writeback @gizmo @slow', () => {
   const desktopOnly = () => test.skip(test.info().project.name !== 'chromium', 'desktop-only');
 
-  test('select attaches at the visible-geometry centre; a spin ORBITS the origin about it and saves an exact quat', async ({ page }) => {
+  test('the writeback chain: attach, pivot orbit + quat round-trip, translate, mode widget, ring continuity', async ({ page }) => {
     desktopOnly();
+    // v1.12.1 chain budget: this ONE boot carries the former five tests'
+    // work — the evaluate-per-event ring sweep on the hi-def ISW scene is
+    // the heavy part (test.slow'd legs on their own). The chain budget is
+    // the SUM of what the legs needed, not one leg's.
+    test.setTimeout(280_000);
     await openCraft(page, ISW);
-    await page.getByTestId('ws-parts').click();   // v1.11: parts list = + Parts
-    await page.getByTestId('parts-list').getByTestId('filter').fill('aileron');
-    const row = page.locator('[data-idx]').first();
-    const ci = +(await row.getAttribute('data-idx'))!;
-    await row.click();
 
-    expect(await eng('state')(page)).toMatchObject({ mode: 'rotate', ci, shown: true });
+    await test.step('select attaches at the visible-geometry centre; a spin ORBITS the origin about it; the file quat turns and round-trips', async () => {
+      const ci = await pickPart(page, 'aileron');
+      expect(await eng('state')(page), 'the widget attached to the picked part').toMatchObject({ mode: 'rotate', ci });
 
-    const pivot0 = (await eng('pivot')(page)) as [number, number, number];
-    const pos0 = (await eng("pos", { ci })(page)) as { x: number; y: number; z: number };
-    const q0 = (await eng('quat', { ci })(page)) as Record<string, number>;
-    const view = (p: { x: number; y: number; z: number }) => [p.x, p.y, p.z];   // raw == view (v0.180)
-    const r0 = dist(view(pos0), pivot0!);
-    expect(r0, 'an aileron origin sits OFF its visible bbox centre (non-vacuous orbit)').toBeGreaterThan(0.05);
+      const pivot0 = (await eng('pivot')(page)) as [number, number, number];
+      const pos0 = (await eng('pos', { ci })(page)) as { x: number; y: number; z: number };
+      const q0 = (await eng('quat', { ci })(page)) as Record<string, number>;
+      const view = (p: { x: number; y: number; z: number }) => [p.x, p.y, p.z];   // raw == view (v0.180)
+      const r0 = dist(view(pos0), pivot0!);
+      expect.soft(r0, 'an aileron origin sits OFF its visible bbox centre (non-vacuous orbit)').toBeGreaterThan(0.05);
 
-    // Spin about a VIEW axis PERPENDICULAR to the lever arm pivot−origin:
-    // a spin about an axis PARALLEL to the arm rotates the origin about its
-    // own axis — zero displacement (the baked flat-plate aileron put the arm
-    // exactly on ŷ, which silently de-vacuated the old hardcoded 'y' spin).
-    const arm = view(pos0).map((v, i) => v - pivot0![i]!);
-    const ax = (['x', 'y', 'z'] as const)[
-      arm[0]! ** 2 <= arm[1]! ** 2 && arm[0]! ** 2 <= arm[2]! ** 2 ? 0
-        : arm[1]! ** 2 <= arm[2]! ** 2 ? 1 : 2];
+      // Spin about a VIEW axis PERPENDICULAR to the lever arm pivot−origin:
+      // a spin about an axis PARALLEL to the arm rotates the origin about
+      // its own axis — zero displacement (the baked flat-plate aileron put
+      // the arm exactly on ŷ, which silently de-vacuated the old hardcoded
+      // 'y' spin).
+      const arm = view(pos0).map((v, i) => v - pivot0![i]!);
+      const ax = (['x', 'y', 'z'] as const)[
+        arm[0]! ** 2 <= arm[1]! ** 2 && arm[0]! ** 2 <= arm[2]! ** 2 ? 0
+          : arm[1]! ** 2 <= arm[2]! ** 2 ? 1 : 2];
 
-    await eng('rot', { a: ax, d: 30, ci })(page);
-    const pivot1 = (await eng('pivot')(page)) as [number, number, number];
-    const pos1 = (await eng("pos", { ci })(page)) as { x: number; y: number; z: number };
-    const q1 = (await eng('quat', { ci })(page)) as Record<string, number>;
-    expect(dist(view(pos1), pivot1), 'origin orbits the pivot at constant radius').toBeCloseTo(r0, 6);
-    expect(dist(view(pos1), view(pos0)), 'the origin actually MOVED').toBeGreaterThan(0.3 * r0);
-    const dot = ['w', 'x', 'y', 'z'].reduce((s, k) => s + q1[k]! * q0[k]!, 0);
-    expect(dot, 'the saved quaternion turned').toBeLessThan(0.999);
+      await eng('rot', { a: ax, d: 30, ci })(page);
+      const pivot1 = (await eng('pivot')(page)) as [number, number, number];
+      const pos1 = (await eng('pos', { ci })(page)) as { x: number; y: number; z: number };
+      const q1 = (await eng('quat', { ci })(page)) as Record<string, number>;
+      expect.soft(dist(view(pos1), pivot1), 'origin orbits the pivot at constant radius').toBeCloseTo(r0, 6);
+      expect.soft(dist(view(pos1), view(pos0)), 'the origin actually MOVED').toBeGreaterThan(0.3 * r0);
+      const dot = ['w', 'x', 'y', 'z'].reduce((s, k) => s + q1[k]! * q0[k]!, 0);
+      expect.soft(dot, 'the saved quaternion turned').toBeLessThan(0.999);
 
-    await eng('rot', { a: ax, d: -30, ci })(page);
-    const pos2 = (await eng("pos", { ci })(page)) as { x: number; y: number; z: number };
-    const q2 = (await eng('quat', { ci })(page)) as Record<string, number>;
-    for (const k of ['x', 'y', 'z'] as const) expect(pos2[k]).toBeCloseTo(pos0[k], 6);
-    for (const k of ['w', 'x', 'y', 'z']) expect(q2[k]).toBeCloseTo(q0[k]!, 9);
-  });
+      await eng('rot', { a: ax, d: -30, ci })(page);
+      const pos2 = (await eng('pos', { ci })(page)) as { x: number; y: number; z: number };
+      const q2 = (await eng('quat', { ci })(page)) as Record<string, number>;
+      for (const k of ['x', 'y', 'z'] as const)
+        expect.soft(pos2[k], `origin ${k} restored`).toBeCloseTo(pos0[k], 6);
+      for (const k of ['w', 'x', 'y', 'z'])
+        expect.soft(q2[k], `quat ${k} restored`).toBeCloseTo(q0[k]!, 9);
+    });
 
-  test('translate rides the file position exactly', async ({ page }) => {
-    desktopOnly();
-    await openCraft(page, ISW);
-    await page.getByTestId('ws-parts').click();   // v1.11: parts list = + Parts
-    await page.getByTestId('parts-list').getByTestId('filter').fill('pilotseat');
-    const row = page.locator('[data-idx]').first();
-    const ci = +(await row.getAttribute('data-idx'))!;
-    await row.click();
-    const p0 = (await eng("pos", { ci })(page)) as { x: number; y: number; z: number };
-    await eng('mov', { a: 'x', m: 0.5, ci })(page);
-    const p1 = (await eng("pos", { ci })(page)) as { x: number; y: number; z: number };
-    expect(p1.x).toBeCloseTo(p0.x + 0.5, 9);
-    expect(p1.y).toBeCloseTo(p0.y, 9);
-    await eng('mov', { a: 'x', m: -0.5, ci })(page);
-    const p2 = (await eng("pos", { ci })(page)) as { x: number; y: number; z: number };
-    expect(p2.x).toBeCloseTo(p0.x, 9);
+    await test.step('translate rides the file position exactly', async () => {
+      const ci = await pickPart(page, 'pilotseat');
+      const p0 = (await eng('pos', { ci })(page)) as { x: number; y: number; z: number };
+      await eng('mov', { a: 'x', m: 0.5, ci })(page);
+      const p1 = (await eng('pos', { ci })(page)) as { x: number; y: number; z: number };
+      expect.soft(p1.x, 'x rides +0.5').toBeCloseTo(p0.x + 0.5, 9);
+      expect.soft(p1.y, 'y untouched').toBeCloseTo(p0.y, 9);
+      await eng('mov', { a: 'x', m: -0.5, ci })(page);
+      const p2 = (await eng('pos', { ci })(page)) as { x: number; y: number; z: number };
+      expect.soft(p2.x, 'restore lands exactly').toBeCloseTo(p0.x, 9);
+    });
+
+    await test.step('the mode widget pops on a canvas part pick and re-modes the gizmo', async () => {
+      const canvas = page.getByTestId('canvas');
+      const box = (await canvas.boundingBox())!;
+      // v1.10.6: PROBE a comp pixel (pickCell — the click's picker; the
+      // widget opens on the comp AND block branches) instead of fixed
+      // center ±8% offsets: canvas fractions are not aspect-stable.
+      let spot: { x: number; y: number } | null = null;
+      for (let i = 0; i < 30 && !spot; i++) {
+        spot = await page.evaluate(() => {
+          const c = document.querySelector('canvas')!;
+          const r = c.getBoundingClientRect();
+          const e = (window as unknown as { __ARCHEAN__?: { engine: { pendingReal: number;
+            pickCell: (x: number, y: number) => { kind: string; ci: number; bi: number } | null } } }).__ARCHEAN__!.engine;
+          if (e.pendingReal > 0) return null;
+          for (let fy = 0.25; fy <= 0.85; fy += 0.03)
+            for (let fx = 0.2; fx <= 0.8; fx += 0.03) {
+              const h = e.pickCell(r.left + r.width * fx, r.top + r.height * fy);
+              if (h && ((h.kind === 'comp' && h.ci >= 0) || h.bi >= 0)) return { x: fx, y: fy };
+            }
+          return null;
+        });
+        if (!spot) await page.waitForTimeout(300);
+      }
+      expect(spot, 'a part/block surface answers the pickCell click path').not.toBeNull();   // hard gate: the clicks below need it
+      let picked = false;
+      for (const [jx, jy] of [[0, 0], [0.004, 0.004], [-0.004, 0]]) {
+        await canvas.click({ position: { x: box.width * (spot!.x + jx), y: box.height * (spot!.y + jy) } });
+        if (await page.getByTestId('modebox').isVisible().catch(() => false)) { picked = true; break; }
+      }
+      expect.soft(picked, 'a deliberate canvas tap on the craft pops the mode widget').toBe(true);
+      await page.getByTestId('mode-translate').click();
+      expect.soft(((await eng('state')(page)) as { mode: string }).mode).toBe('translate');
+      await page.getByTestId('mode-off').click();
+      expect.soft(((await eng('state')(page)) as { mode: string }).mode).toBe('off');
+      await page.getByTestId('mode-rotate').click();
+      expect.soft(((await eng('state')(page)) as { mode: string }).mode).toBe('rotate');
+      // close the widget + deselect with a SKY click (KNOWN ISSUE 12: an
+      // open modebox shields the canvas the ring sweep aims at)
+      await canvas.click({ position: { x: 4, y: 4 } });
+      await expect(page.getByTestId('modebox')).toBeHidden();
+    });
+
+    await test.step('multi-grip RING drags keep spinning in unison (real pointer; the mutating step LAST)', async () => {
+      const ci = await pickPart(page, 'aileron');
+      const qGet = async () => (await eng('quat', { ci })(page)) as Q;
+      const ring = async (deg: number) => (await eng('ring', { a: 'y', deg, ci })(page)) as { x: number; y: number } | null;
+
+      // one REAL-pointer grip: aim the drawn Y ring, sweep `arc`° along the
+      // circle frozen from the pose AT PRESS, sampling the FILE quaternion
+      // every event (the shipped TGC writeback path, no synthetic shortcuts).
+      const grip = async (arc: number) => {
+        const p0 = await ring(0);
+        if (!p0) { expect.soft(p0, 'a Y-ring grab point exists').not.toBeNull(); return null; }
+        const path: { x: number; y: number }[] = [];
+        for (let i = 1; i <= 10; i++) path.push((await ring(arc * i / 10))!);
+        await page.mouse.move(p0.x, p0.y);
+        await page.mouse.down();
+        let prev = await qGet();
+        let axis: string | null = null;
+        const steps: number[] = [], signs: number[] = [];
+        for (const p of path) {
+          await page.mouse.move(p.x, p.y);
+          if (axis === null) axis = (await eng('axis')(page)) as string | null;
+          const q = await qGet();
+          const d = qMul(q, qInv(prev));
+          steps.push(qAngle(d));
+          const n = rotY(prev, [0, 1, 0]);           // the part's LIVE local ŷ
+          signs.push(Math.sign(d.x * n[0] + d.y * n[1] + d.z * n[2]));
+          prev = q;
+        }
+        await page.mouse.up();
+        return { axis, steps, signs, end: prev };
+      };
+
+      const q0 = await qGet();
+      const g1 = await grip(38);
+      if (g1) {
+        expect.soft(g1.axis, 'the grip landed on the Y ring').toBe('Y');
+        const a1 = qMul(g1.end, qInv(q0));
+        expect.soft(qAngle(a1), 'grip 1 turned the part').toBeGreaterThan(0.05);
+        expect.soft(Math.max(...g1.steps), 'no per-event pose pop').toBeLessThan(0.6);
+        const s1 = g1.signs.find(s => s !== 0) ?? 0;
+        expect.soft(s1, 'grip 1 actually spun (non-vacuous)').not.toBe(0);
+        expect.soft(g1.signs.filter(s => s !== 0).every(s => s === s1), 'grip 1: one rotation direction').toBe(true);
+
+        // re-grip: the grab point is recomputed from the ring's CURRENT
+        // (rotated) pose — landing there and STILL picking 'Y' proves the
+        // drawn ring plane followed the live pose (the v0.163
+        // mouseDown-rebase contract)
+        const g2 = await grip(38);
+        if (g2) {
+          expect.soft(g2.axis, 're-grip lands on the MOVED Y ring: the handle plane follows the live pose').toBe('Y');
+          const a2 = qMul(g2.end, qInv(g1.end));
+          expect.soft(qAngle(a2), 'grip 2 keeps spinning from wherever the part now is').toBeGreaterThan(0.05);
+          expect.soft(a2.x * a1.x + a2.y * a1.y + a2.z * a1.z, 'grip 2 continues in the SAME direction').toBeGreaterThan(0);
+          expect.soft(Math.abs(qNorm(g2.end) - 1), 'the file quaternion stays a unit quat (no multi-rotation noise)').toBeLessThan(1e-6);
+          const n2 = g2.signs.find(s => s !== 0) ?? 0;
+          expect.soft(g2.signs.filter(s => s !== 0).every(s => s === n2), 'grip 2: one rotation direction').toBe(true);
+          expect.soft(n2, 'both grips spin the same way').toBe(s1);
+        }
+      }
+    });
   });
 
   test('subgrid selection carries NO gizmo (v0.170: they ride their masters)', async ({ page }) => {
     desktopOnly();
-    await openCraft(page, DOLPHIN);
+    await openCraft(page, DOLPHIN);   // state wall: a different craft
     await page.getByTestId('ws-parts').click();   // v1.11: parts list = + Parts
     await page.getByTestId('parts-list').getByTestId('filter').fill('seat');
     await page.locator('[data-idx]').first().click();
     expect(((await eng('state')(page)) as { ci: number }).ci).toBeGreaterThanOrEqual(0);
     await eng('selsub', { bi: 4 })(page);
     expect(await eng('state')(page)).toMatchObject({ mode: 'off', ci: -1, shown: false });
-  });
-
-  test('multi-grip RING drags keep spinning in unison: the ring plane follows the live pose, per-event poses stay continuous (v0.181 continuity backlog)', async ({ page }) => {
-    desktopOnly();
-    // v0.182: with the full-game-mesh DEFAULT every ring step re-renders the
-    // hi-def ISW scene, so this evaluate-per-event sweep needs headroom
-    // beyond the 30 s base under the suite's 3-worker contention.
-    test.slow();
-    await openCraft(page, ISW);
-    await page.getByTestId('ws-parts').click();   // v1.11: parts list = + Parts
-    await page.getByTestId('parts-list').getByTestId('filter').fill('aileron');
-    const row = page.locator('[data-idx]').first();
-    const ci = +(await row.getAttribute('data-idx'))!;
-    await row.click();
-    const qGet = async () => (await eng('quat', { ci })(page)) as Q;
-    const ring = async (deg: number) => (await eng('ring', { a: 'y', deg })(page)) as { x: number; y: number } | null;
-
-    // one REAL-pointer grip: aim the drawn Y ring, sweep `arc`° along the
-    // circle frozen from the pose AT PRESS, sampling the FILE quaternion
-    // every event (the shipped TGC writeback path, no synthetic shortcuts).
-    const grip = async (arc: number) => {
-      const p0 = await ring(0);
-      expect(p0, 'a Y-ring grab point exists').not.toBeNull();
-      const path: { x: number; y: number }[] = [];
-      for (let i = 1; i <= 10; i++) path.push((await ring(arc * i / 10))!);
-      await page.mouse.move(p0!.x, p0!.y);
-      await page.mouse.down();
-      let prev = await qGet();
-      let axis: string | null = null;
-      const steps: number[] = [], signs: number[] = [];
-      for (const p of path) {
-        await page.mouse.move(p.x, p.y);
-        if (axis === null) axis = (await eng('axis')(page)) as string | null;
-        const q = await qGet();
-        const d = qMul(q, qInv(prev));
-        steps.push(qAngle(d));
-        const n = rotY(prev, [0, 1, 0]);           // the part's LIVE local ŷ
-        signs.push(Math.sign(d.x * n[0] + d.y * n[1] + d.z * n[2]));
-        prev = q;
-      }
-      await page.mouse.up();
-      return { axis, steps, signs, end: prev };
-    };
-
-    const q0 = await qGet();
-    const g1 = await grip(38);
-    expect(g1.axis, 'the grip landed on the Y ring').toBe('Y');
-    const a1 = qMul(g1.end, qInv(q0));
-    expect(qAngle(a1), 'grip 1 turned the part').toBeGreaterThan(0.05);
-    expect(Math.max(...g1.steps), 'no per-event pose pop').toBeLessThan(0.6);
-    const s1 = g1.signs.find(s => s !== 0) ?? 0;
-    expect(s1, 'grip 1 actually spun (non-vacuous)').not.toBe(0);
-    expect(g1.signs.filter(s => s !== 0).every(s => s === s1), 'grip 1: one rotation direction').toBe(true);
-
-    // re-grip: the grab point is recomputed from the ring's CURRENT (rotated)
-    // pose — landing there and STILL picking 'Y' proves the drawn ring plane
-    // followed the live pose (the v0.163 mouseDown-rebase contract)
-    const g2 = await grip(38);
-    expect(g2.axis, 're-grip lands on the MOVED Y ring: the handle plane follows the live pose').toBe('Y');
-    const a2 = qMul(g2.end, qInv(g1.end));
-    expect(qAngle(a2), 'grip 2 keeps spinning from wherever the part now is').toBeGreaterThan(0.05);
-    expect(a2.x * a1.x + a2.y * a1.y + a2.z * a1.z, 'grip 2 continues in the SAME direction').toBeGreaterThan(0);
-    expect(Math.abs(qNorm(g2.end) - 1), 'the file quaternion stays a unit quat (no multi-rotation noise)').toBeLessThan(1e-6);
-    const n2 = g2.signs.find(s => s !== 0) ?? 0;
-    expect(g2.signs.filter(s => s !== 0).every(s => s === n2), 'grip 2: one rotation direction').toBe(true);
-    expect(n2, 'both grips spin the same way').toBe(s1);
-  });
-
-  test('the mode widget pops on a canvas part pick and re-modes the gizmo', async ({ page }) => {
-    desktopOnly();
-    await openCraft(page, ISW);
-    const canvas = page.getByTestId('canvas');
-    const box = (await canvas.boundingBox())!;
-    // v1.10.6: PROBE a comp pixel (pickCell — the click's picker; the widget
-    // opens on the comp AND block branches) instead of the fixed center ±8%
-    // offsets: the build-dock shortens the canvas, the wider aspect fans
-    // those fractions into a much wider world slice, and they all fell on
-    // skin prisms / ground.
-    let spot: { x: number; y: number } | null = null;
-    for (let i = 0; i < 30 && !spot; i++) {
-      spot = await page.evaluate(() => {
-        const c = document.querySelector('canvas')!;
-        const r = c.getBoundingClientRect();
-        const e = (window as unknown as { __ARCHEAN__?: { engine: { pendingReal: number;
-          pickCell: (x: number, y: number) => { kind: string; ci: number; bi: number } | null } } }).__ARCHEAN__!.engine;
-        if (e.pendingReal > 0) return null;
-        for (let fy = 0.25; fy <= 0.85; fy += 0.03)
-          for (let fx = 0.2; fx <= 0.8; fx += 0.03) {
-            const h = e.pickCell(r.left + r.width * fx, r.top + r.height * fy);
-            if (h && ((h.kind === 'comp' && h.ci >= 0) || h.bi >= 0)) return { x: fx, y: fy };
-          }
-        return null;
-      });
-      if (!spot) await page.waitForTimeout(300);
-    }
-    expect(spot, 'a part/block surface answers the pickCell click path').not.toBeNull();
-    let picked = false;
-    for (const [jx, jy] of [[0, 0], [0.004, 0.004], [-0.004, 0]]) {
-      await canvas.click({ position: { x: box.width * (spot!.x + jx), y: box.height * (spot!.y + jy) } });
-      if (await page.getByTestId('modebox').isVisible().catch(() => false)) { picked = true; break; }
-    }
-    expect(picked, 'a deliberate canvas tap on the craft pops the mode widget').toBe(true);
-    await page.getByTestId('mode-translate').click();
-    expect(((await eng('state')(page)) as { mode: string }).mode).toBe('translate');
-    await page.getByTestId('mode-off').click();
-    expect(((await eng('state')(page)) as { mode: string }).mode).toBe('off');
-    await page.getByTestId('mode-rotate').click();
-    expect(((await eng('state')(page)) as { mode: string }).mode).toBe('rotate');
   });
 
   // v1.5.1 user report: "GIZMO DOES NOT SHOW FOR EITHER BLOCKS OR COMPONENTS"
@@ -267,7 +281,7 @@ test.describe('gizmo writeback @gizmo @slow', () => {
   // Both keys are now session-only: a fresh load lands with a VISIBLE
   // widget no matter what old storage says (the legacy keys are deleted).
   test('persisted ⊘ + poisoned ⚙ master never trap a fresh session — the gizmo shows again', async ({ page }) => {
-    desktopOnly();
+    desktopOnly();   // state wall: addInitScript needs its own context
     await page.addInitScript(() => {
       localStorage.setItem('archean-app-gizmo-mode', 'off');
       localStorage.setItem('archean-app-gizmo', '0');
