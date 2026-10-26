@@ -216,10 +216,32 @@ wall clock):**
     law; interval-boundary leading edges) — the tier is a DESIGN TOOL,
     not just a speed win.
 
-- Phase 1 remaining slices: the transform stack + builders + pick census
+- **v1.12.1 Phase 1 keystone ✅ — THE HEADLESS ENGINE** (commits
+  `bbc1c6f`..subride): `Engine.setVirtualViewport` + the `viewRect()` seam
+  give EVERY pick/projection probe a canvas rect with no renderer
+  (attached = byte-identical browser behaviour). `__tests__/harness.ts` =
+  the real open funnel + corpus-tier resolution + diskAtlas (the real
+  game-model atlas, baked through the browser's own bakeGeo) +
+  manifestOnly(). Retired the same session (L5): **wheels.spec (whole
+  suite), asset-space.spec (whole suite), propeller.spec (whole suite),
+  subride truck audit (14 pairs), the nested-subgrid census, the x-ray
+  fixture census + flowDir, the pick-routing probes** — the @models tier
+  is now ENTIRELY node. scene.headless.test.ts: 16 pins over real
+  blueprints in seconds. Discovered by the tier (all documented):
+  stale-camera-matrix first probes, the census counting the graph
+  mid-stream, three's lazily-expanded geometry boxes, select() refusing
+  the gizmo attach without TGC (drive captureGesture→writeback directly),
+  and Jimmy's rig-chain pivot (P7.1 slice 2).
+- Session line: **394 → 267 matrix runs (−32 %), vitest 669 → 732,
+  @models = 0 specs, @slow shed 6 legs.** Next: P7.1 slice 2 (rig-aware
+  audit bbox — retires Jimmy's last @subgrid leg; then the builders),
+  Phase 3 panels (Viewport-mock harness), gizmo/builddock engine legs
+  onto the headless probes.
+
+- Phase 1 remaining slices: the transform stack + builders
   (subride/gizmo/wheels/asset-space classes). Phase 3: the dialogs are
-  cheap jsdom wins; the panels/dock need a mocked Viewport seam (Editor
-  mounts Engine → WebGL; one `vi.mock` seam unlocks panels/tools/cost).
+  cheap jsdom wins; the panels/dock/cost family needs the Viewport-mock
+  harness (Editor mounts the Engine → WebGL) — the next Phase 3 slice.
   Phase 4: device harness. Phase 5: hook-channel diet.
 - Phase 1 is the enabler: no e2e geometry leg retires before its node census
   reproduces the green values (L5).
