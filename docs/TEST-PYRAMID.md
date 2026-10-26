@@ -98,7 +98,11 @@ runs).
 - The L1–L5 laws land in AGENTS.md.
 - Nothing else changes: no assertion moves yet, so no coverage risk.
 
-### Phase 1 — P7.1 `SceneGraph` split (the enabler)
+### Phase 1 — P7.1 `SceneGraph` split (the enabler) — IN PROGRESS (slice 1 ✅)
+- **Slice 1 LANDED (v1.12.1, `engine/xray.ts`):** the screen-space
+  occlusion census lifted out of `Engine` (165 lines → a pure function +
+  a thin collector), 11 node pins the census law, wire.spec's EXPOSED leg
+  retired. The remaining slices follow below.
 - Extract `engine/graph.ts` from `Engine`: the builders
   (`buildSolids`/`buildCompProxies`/`buildReal`/`buildPipesMesh`/
   `buildSubgrids` + rig nesting), the transform stack (moff, joint poses,
@@ -115,8 +119,13 @@ runs).
 - Gate: the headless census reproduces the CURRENT green values (the
   committed gearpair/rigchain numbers) BEFORE `Engine` delegates anything.
 
-### Phase 2 — P7.2 clocks out of React
-- Pure timestamp-driven seams: `move(x,y,now) / leave(now) / tick(now)`
+### Phase 2 — P7.2 clocks out of React — LANDED ✅ (v1.12.1, commit 8373a7d)
+- `engine/clocks.ts` (RateCap + WireHover + coordChipText) + 14 synthetic-
+  clock pins; Viewport.tsx forwards events only. `engine/history.ts`
+  (HistoryStack) + 9 pins; Editor keeps applyHistory. e2e keeps the ONE
+  thin "pointermove reaches the seam" legs (wire.spec hover leg, views
+  chip legs) — the dwell/convergence/coalescing contracts are node laws.
+- (Original brief:) Pure timestamp-driven seams: `move(x,y,now) / leave(now) / tick(now)`
   with an INJECTED pick for the wire hover state machine, the coord
   throttle, the ghost re-aim, the pin-draft drag, the gizmo gesture clock.
   Viewport forwards events only.
@@ -124,7 +133,7 @@ runs).
   clock (this deletes every 120 ms/2 s/450 ms wall-clock law from e2e).
 - e2e keeps ONE thin "pointermove reaches the seam" test per input family.
 
-### Phase 3 — jsdom component tier (the tier that does not exist today)
+### Phase 3 — jsdom component tier (the tier that does not exist today) — SEEDED ✅
 - vitest + @testing-library/react: the panels, the build dock, ToolsDialog,
   HelpDialog, StaleDialog, CostWidget, LiftWidget, MirrorGlyph — testids,
   click → state → row repaint, dialog flows, the Escape-subscribe-once
@@ -132,6 +141,13 @@ runs).
   split is what makes this cheap — jsdom has no WebGL).
 - This retires the DOM half of panels/tools/help/cost/mirror-mismatch/
   builddock-list/phoneux-chip/undo-menu claims.
+- **LANDED (v1.12.1):** the env (`?vitest-environment jsdom` pragma +
+  @testing-library/react, tests colocated in `src/components/__tests__/*.
+  test.tsx`, `Element.prototype.scrollTo` stub) + HelpDialog (9 pins; the
+  search + close-trio browser legs retired) + StaleDialog (4 pins; the
+  IndexedDB chain stays the e2e integration tier). The panels/dock/cost
+  family needs the Viewport-mock harness (Editor mounts the Engine →
+  WebGL) — the next Phase 3 slice.
 
 ### Phase 4 — P7.4 device harness + the shrunken e2e tier
 - staticInfo/modebox dock position/gizmo size = pure functions of
@@ -172,13 +188,41 @@ Net: **≈ 394 runs today → ≈ 60** (fast tier ≈ 2–3 min), vitest from 66
 
 ## 6. Order of work + exit criteria
 
-- Land Phase 0 now (config + laws + this doc).
-- P7.1 is the enabler: no e2e geometry leg retires before its node census
+**PROGRESS LOG (each landing reports vitest ↑ / e2e runs ↓ / fast-tier
+wall clock):**
+
+- **v1.12.1 Phase 0 ✅** — matrix sparsify: 394 → 283 runs (−28 %).
+- **v1.12.1 Phase 2 ✅ + Phase 1 (slice 1) ✅ + Phase 3 (seeded) ✅**
+  (commit `8373a7d` + this landing):
+  - `engine/clocks.ts` + 14 pins — the coord ~40 Hz throttle (trailing
+    edge), the ghost cap, the cable 120 ms dwell + 2 s X-ray machine, the
+    chip text. Viewport.tsx forwards events only.
+  - `engine/history.ts` + 9 pins — the whole undo-stack design (coalescing
+    window with fire-time text read, dedup, redo-drop, flush-before-step,
+    openGesture) on a synthetic clock; Editor keeps applyHistory.
+  - `engine/xray.ts` `xrayPlanPure` — 165 lines of occlusion census out of
+    `Engine`; + 11 pins the BLOCKED/EXPOSED/depth/segment-target/fully-
+    in-the-way/ortho laws on synthetic THREE geometry. Retired the same
+    session (L5): wire.spec 'an EXPOSED cable (XYQ)' (−2 runs).
+  - **jsdom component tier EXISTS** (vitest `?vitest-environment jsdom` +
+    @testing-library/react): HelpDialog 9 pins (rail/article/tables/
+    search-rank-AND-empty/Esc-✕-backdrop), StaleDialog 4 pins. Retired
+    (L5): help.spec 'word search' + 'closes via Esc ✕ backdrop' (−6 runs,
+    the Esc law survives e2e as a one-line smoke in the menu leg).
+  - Numbers: vitest 669 → **717**; scene.ts −165 lines; e2e matrix
+    283 → **275**; verified: views+blockplace+undo+wire+phoneux+help green.
+  - LESSON: writing the node pins immediately caught THREE degenerate
+    fixtures of mine (fully-covering quads where 'LEFT, not cut' is the
+    law; interval-boundary leading edges) — the tier is a DESIGN TOOL,
+    not just a speed win.
+
+- Phase 1 remaining slices: the transform stack + builders + pick census
+  (subride/gizmo/wheels/asset-space classes). Phase 3: the dialogs are
+  cheap jsdom wins; the panels/dock need a mocked Viewport seam (Editor
+  mounts Engine → WebGL; one `vi.mock` seam unlocks panels/tools/cost).
+  Phase 4: device harness. Phase 5: hook-channel diet.
+- Phase 1 is the enabler: no e2e geometry leg retires before its node census
   reproduces the green values (L5).
-- Suggested session slices: P7.1 over 1–2 sessions (graph.ts first, then
-  builders by family: solids → comps/real → pipes → subgrids/rigs →
-  picking), Phase 2 one session, Phase 3 one session per panel family,
-  Phase 4–5 the cleanup pass.
 - Metrics per landing (report in the commit message): vitest count, e2e
   run count, fast-tier wall clock, specs retired. Success = the L3 flake
   budget: zero sleep-patches, every flake ends as a migration.

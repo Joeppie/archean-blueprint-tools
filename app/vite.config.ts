@@ -13,7 +13,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss(), corpus()],
   test: {
     // pure-logic engine layer runs on plain node — no DOM, no WebGL
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
     environment: 'node',
   },
 })
