@@ -1416,6 +1416,31 @@ topic + FORMAT).
   re-pin: the truck's round-vs-square bar AGGREGATE shifted with the
   draped item ducts, the species law is the per-kind majority rows
   (already pinned). FORMAT §pipes 'THE DRAPE LAW' is normative.
+- **v1.11.4 THE DRAPE LAW HANGS EVERY CABLE (we: "loading
+  ?craft=3308603448, the cables dont seem to hang, the connections are
+  mis-identified somehow")**: triage (`app/tools/cabledrape.mjs`,
+  committed) — on that craft ALL 276 runs resolve their sockets (median
+  tip→socket residual 0.040 m; the FLATTENED index law is right: pipe
+  indices reach 234 < flat 238 > top-level 198) and only 25 ends are
+  stale ⇒ the v1.11.3 stale-gate draped almost nothing. The file routes
+  are the BUILDER'S CACHE (axis-aligned bars tiling the route; cable
+  length Σ segment lengths, median 1.73 m, to 30.8 m) — drawn as recorded
+  they are STRAIGHT and the slack reads as kinked, mis-wired
+  connections. In game cables are LIVE ROPES ⇒ the drape applies to EVERY
+  run whose TWO sockets resolve, fresh included: walked length = Σ
+  segment lengths + the joint zigzag the drawn path walks (the chained
+  starts leave offsets the lengths do not cover — that slack IS cable),
+  hung between the plug necks by drapeChain; taut when over-stretched;
+  an unresolvable end keeps the recorded polyline. PipeNetwork/pipeInfo
+  gained `draped` beside `reroute`. 3308603448: 247 hung runs, 0 NO-DIP
+  (ISW 15/0, truck 281/6 — the 6 are vertical spans hanging straight).
+  The 12 ends cached 0.14–3.2 m off their sockets (parts rotated after
+  building) re-seat, then hang. Pins: pipes.test drape-all + taut +
+  unresolved-kept; e2e pipes/wire/select 20/20 (X-ray cut pins hold on
+  draped geometry). FORMAT §pipes retold — the v1.11.3 'fresh runs keep
+  the recorded route' clause is SUPERSEDED (the cache's corners were
+  never the game's sag; the FORMAT stores the cache, the viewport hangs
+  the rope).
 - **v1.11.1 PHONE WIDGET LAW + FULLSCREEN HELP + THE w KEY (we: "Ui elements
   are in the way on phone when placing blocks, and I see the picked block
   popup and the widget for changing blocks over the block itself which

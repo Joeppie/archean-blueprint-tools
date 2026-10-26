@@ -789,9 +789,20 @@ engine CONTENT frame; its FILE-frame socket pose is
   straight bar (an overstretched cable is pulled straight, as in game);
   sag grows monotonically with overstretch L/span; a VERTICAL span hangs
   STRAIGHT (no side-bow — the old XenonViewer chord-offset parabola bowed);
-  sampled arc length ≈ the rest length. FRESH runs keep the RECORDED
-  polyline verbatim — the game's own sag is baked into its waypoints, so
-  applying the drape there would double it. The engine re-drapes on every
+  sampled arc length ≈ the rest length. v1.11.4 (we: "?craft=3308603448,
+  the cables dont seem to hang, the connections are mis-identified
+  somehow"): the law applies to EVERY run whose TWO sockets resolve, fresh
+  included — the file's waypoints are the BUILDER'S CACHE (axis-aligned
+  bars tiling the route; the game displays its cables as LIVE ROPES), so
+  the recorded corners are NOT a baked sag. The length that hangs is the
+  WALKED length: Σ segment lengths + the joint zigzag the drawn path walks
+  (the chained-start offsets are cable the segment lengths do not cover),
+  minus the two 2r leads, over the neck-to-neck span. A run with an
+  unresolvable end keeps the recorded polyline (a drape connects to where
+  the cable PHYSICALLY connects). (The v1.11.3 'fresh runs keep the
+  recorded route' clause is SUPERSEDED — the format stores the builder
+  cache; the viewport hangs the rope the game simulates.) The engine
+  re-drapes on every
   rebuildPipes (Editor pipesSoon = 250 ms leading+trailing throttle, so a
   gizmo drag makes the cables FOLLOW the part at 4 Hz and settle after the
   release). Style: the rerouted run wears its LONGEST recorded segment's
