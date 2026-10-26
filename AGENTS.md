@@ -1445,6 +1445,28 @@ topic + FORMAT).
   detector must use the flat builder's NESTED POSITIONS, not `index ≥
   topCount` (flattening shifts the LAST top-level entries past it).
   FORMAT §pipes carries both laws.
+- **v1.11.6 A SUBGRID OF A SUBGRID RENDERS (we: "there are wheels that do
+  not seem to render where the front wheels of the doritos craft should
+  be, is this because they are a subgrid of a subgrid (of a subgrid?)" —
+  YES):** the Dorito SSTO nests Builds three deep (c[71].Build[0].Build[0]
+  = the two front Wheels; c[17]/c[81] chain to depth 3 too). Two gaps made
+  deep content invisible: (a) RENDER — buildSubgrids skipped Build entries
+  inside subgrid content (the top-level GHOST rule) and never walked their
+  content; (b) KINEMATICS — subMasterEntries DROPPED joins whose slave
+  Build is nested ('nested Build: unused host'). A Build inside subgrid
+  content is an ASSEMBLY NODE: its blocks/skin render through ITS OWN
+  palette (v1.11.0 scoping at every depth) and its parts render
+  (stand-ins, heavy-merge, streaming, pick routing) inside the owning
+  TOP-LEVEL group (content coords are parent-frame absolute at every
+  depth — v0.168; depth guard 8); nested-slave joins key to the hosting
+  group via `path[2]`, so a gear subassembly animates with its bay on the
+  host's joint chain; the captureJrefs bbox is the union over all depths.
+  The v1.11.5 harness attach already resolves deep-nested sockets through
+  the host group. Hook Engine.subStats() {groups, parts}; pins: subgrid
+  .test 'joins to NESTED Builds key to the hosting top-level group' + e2e
+  subride 'a SUBGRID OF A SUBGRID renders' (file-computed nested census ===
+  the rendered census). FORMAT §Subgrids + §Format facts carry the
+  ASSEMBLY-NODE nuance.
 - **v1.11.4 THE DRAPE LAW HANGS EVERY CABLE (we: "loading
   ?craft=3308603448, the cables dont seem to hang, the connections are
   mis-identified somehow")**: triage (`app/tools/cabledrape.mjs`,
@@ -2837,7 +2859,14 @@ release/functionality. but no user-unackowledged bumps."** Concretely:
   (mirror-conjugate file quat), which is why the comb lies flat along its
   pipes. See FORMAT.md.
 - `components[].type === 'Build'` = editor construction-site ghost, far outside
-  the bbox — never render it as geometry.
+  the bbox — never render it as geometry. THE NUANCE (v1.11.6): a Build
+  entry inside subgrid CONTENT is an ASSEMBLY node, not a ghost — the
+  entry itself renders nothing, but its blocks/skin/parts render
+  RECURSIVELY inside the owning top-level Build group (the Dorito SSTO's
+  front wheels are Wheels two Builds deep), and composite_builds joins
+  whose slave is a nested Build key to the HOSTING top-level group's
+  joint chain (`path[2]`). Pins: subgrid.test 'joins to NESTED Builds',
+  e2e subride 'a SUBGRID OF A SUBGRID renders' (engine.subStats() census).
 - **Subgrids** (v0.153, join decoded v0.154; placement model corrected v0.168):
   Build components carrying nested blueprints (doors/hatches) live as ONE
   Group per Build (`userData.sub`); the group BASE is the IDENTITY and nested

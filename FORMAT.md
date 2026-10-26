@@ -1636,6 +1636,18 @@ transcribed). Corpus: every craft with subgrids has exactly one
 `data.composite_builds` entry per Build component (5 in dolphin; 1 in Jimmy's
 Adventure = 3334698274).
 
+- **A Build inside subgrid content is an ASSEMBLY NODE (v1.11.6, we: the
+  Dorito SSTO front wheels — Wheels two Builds deep):** the ghost rule
+  covers the ENTRY (a Build component renders no geometry of its own);
+  the entry's own `data` (blocks/triangles/palette/components) renders
+  RECURSIVELY inside the owning TOP-LEVEL group — content coordinates are
+  parent-frame absolute at every depth, each Build's faces resolve through
+  ITS OWN `data.colors` (the v1.11.0 scoping per build, at every depth).
+  A `composite_builds` join whose `slaveBuildId` names a nested Build keys
+  to the hosting top-level group (`path[2]`): the subassembly's joint
+  line rides the host group's chain (gear swings inside its bay). Pins:
+  `app/src/engine/__tests__/subgrid.test.ts` + `app/e2e/subride.spec.ts`
+  (engine `subStats()` census === the file's nested census).
 - **The nested data carries `triangles` (v1.9, transcribed from the dev
   reader `blueprint.js`):** `readBuild` is invoked recursively per `Build`
   component and iterates `buildData.triangles` (same frame-corner + CELL
