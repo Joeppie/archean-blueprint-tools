@@ -24,6 +24,16 @@ NO session mirror — every edit touches only the selected item.
 **One plane, always (v1.11):** the 3-D view shows a single gold sheet —
 the session axis. The data-detected axes drive the auto-twin state; they
 no longer draw extra sheets (two ghost planes on one craft read as a bug).
+
+**ONE axis at a time (v1.11.1, we: "The x axis is visible in a craft, but
+this isn't synced with mirroring! For now limit to one axis at a time"):**
+the session plane is the ONLY axis twin pairs are LIVE on. A craft whose
+part pairs mirror across y (or z) propagates nothing while your plane is x
+— the sheet you SEE and the propagation behaviour are the same one axis;
+switch the plane to y/z and that pair wakes. Multi-axis (twist/point)
+pairs and ⊘ keep every pair dormant. Blocks, parts, triangles, ghost
+placement and the auto badge all ride this single axis.
+
 The rule is UNIFORM — it always applies while a live twin pair exists:
 
 > Every edit on a selected item drives its mirror twin in mirrored unison.

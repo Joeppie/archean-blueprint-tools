@@ -2544,6 +2544,10 @@ void main() {
     this.mirAxis = a;
     localStorage.setItem('archean-app-mirror-axis', a);
     this.buildMirrorPlane(this.lastPartBoxes);
+    // v1.11.1 ONE AXIS AT A TIME: pair LIVENESS rides this axis (twinPairs-
+    // For), so the selection glow, co-select boxes, ⇄ badge and any faux ⚠
+    // must repaint the moment the axis flips.
+    this.paintSelection();
     this.invalidate();
   }
   get mirrorAxis(): MirrorAxisOpt { return this.mirAxis; }
@@ -2551,9 +2555,19 @@ void main() {
    *  (drift > 5 cm auto-disables — a drifted pair is a FAUX-MIRROR: red ⚠,
    *  no propagation). v1.8.0 UNIFORM MIRROR RULE (user: the rule applies to
    *  components and to color/material/rotation too, ALWAYS): the ⇄ widget
-   *  toggle never gates propagation — symOn is indicator state only. */
+   *  toggle never gates propagation — symOn is indicator state only.
+   *  v1.11.1 ONE AXIS AT A TIME (we: "The x axis is visible in a craft,
+   *  but this isn't synced with mirroring! For now limit to one axis at a
+   *  time"): a pair is LIVE only while its mask is EXACTLY the session
+   *  axis bit — a y/z pair goes dormant while the sheet, the ⇄ placement
+   *  and the block/tri twin rules all run on x (switch the axis and that
+   *  pair wakes; ⊘ sleeps all of them). The sheet the user SEES and the
+   *  propagation behaviour are now the same one axis. */
   private twinPairsFor(ci: number): TwinPair[] {
-    return symAllowed(this.symIdx, true, this.bp?.data.components ?? [], ci);
+    if (this.mirAxis === 'off') return [];
+    const bit = 1 << mirrorAxisIdx(this.mirAxis);
+    return symAllowed(this.symIdx, true, this.bp?.data.components ?? [], ci)
+      .filter(p => p.mask === bit);
   }
   twinPairsOf(ci: number): TwinPair[] { return this.twinPairsFor(ci); }
 
@@ -2804,7 +2818,10 @@ void main() {
     if (this.selCi >= 0 && this.bp) {
       const comps = this.bp.data.components;
       const live = new Set(this.twinPairsFor(this.selCi).map(p => p.j));
-      for (const { j } of this.symIdx.get(this.selCi) ?? []) {
+      for (const { j, mask } of this.symIdx.get(this.selCi) ?? []) {
+        // v1.11.1 ONE AXIS AT A TIME: pairs on OTHER axes are DORMANT, not
+        // conflicts — only the session axis's pairs are screened for drift.
+        if (this.mirAxis === 'off' || mask !== (1 << mirrorAxisIdx(this.mirAxis))) continue;
         const issues: string[] = [];
         if (!live.has(j)) issues.push('drift: pair off the mirror plane');
         const paint = compPaintDiff(comps[this.selCi]?.colors, comps[j]?.colors);

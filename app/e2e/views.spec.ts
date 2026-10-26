@@ -136,10 +136,33 @@ test.describe('coord readout + adaptive grid + settable mirror axis @ui', () => 
   test('⚙ mirror axis is settable (X/Y/Z) and live on the engine', async ({ page }) => {
     await openCraft(page, ISW);
     expect(await mirAxis(page)).toBe('x');         // corpus default
+    // v1.11.1 ONE AXIS AT A TIME (we: "The x axis is visible in a craft,
+    // but this isn't synced with mirroring! For now limit to one axis at a
+    // time"): twin PAIRS are live only on the session axis — ISW's pairs
+    // (x) propagate under x and go DORMANT the moment the axis flips.
+    const pairCi = await page.evaluate(() => {
+      const e = (window as unknown as { __ARCHEAN__?: { engine: {
+        blueprint: { data: { components: unknown[] } };
+        twinPairsOf: (ci: number) => unknown[] } } }).__ARCHEAN__!.engine;
+      for (let i = 0; i < e.blueprint.data.components.length; i++)
+        if (e.twinPairsOf(i).length) return i;
+      return -1;
+    });
+    expect(pairCi, 'ISW carries a live twin pair under the default x axis').toBeGreaterThanOrEqual(0);
     await page.getByTestId('toggle-options').click();
     await page.getByTestId('mirror-axis-z').click();
     await expect.poll(() => mirAxis(page)).toBe('z');
     expect(await page.evaluate(() => localStorage.getItem('archean-app-mirror-axis'))).toBe('z');
+    const dormant = await page.evaluate((ci) => (window as unknown as {
+      __ARCHEAN__?: { engine: { twinPairsOf: (ci: number) => unknown[] } } }
+    ).__ARCHEAN__!.engine.twinPairsOf(ci).length, pairCi);
+    expect(dormant, 'the x pair is DORMANT under session z (one axis at a time)').toBe(0);
+    await page.getByTestId('mirror-axis-x').click();
+    await expect.poll(() => mirAxis(page)).toBe('x');
+    const awake = await page.evaluate((ci) => (window as unknown as {
+      __ARCHEAN__?: { engine: { twinPairsOf: (ci: number) => unknown[] } } }
+    ).__ARCHEAN__!.engine.twinPairsOf(ci).length, pairCi);
+    expect(awake, 'switching the axis back WAKES the pair').toBeGreaterThanOrEqual(1);
     await page.getByTestId('mirror-axis-y').click();
     await expect.poll(() => mirAxis(page)).toBe('y');
   });

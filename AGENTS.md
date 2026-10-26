@@ -1402,6 +1402,19 @@ topic + FORMAT).
   assert it). Pins: phoneux chip-edge + ground-pad legs (phone: ghost on
   the pad, a pad tap lands exactly one block with mirroring ⊘; desktop:
   ghost null, click lands nothing).
+  **MIRROR ONE AXIS AT A TIME (we: "The x axis is visible in a craft, but
+  this isn't synced with mirroring! For now limit to one axis at a time"):**
+  twin PAIR LIVENESS now keys off the SESSION axis alone — `twinPairsFor`
+  filters `symAllowed(...)` to pairs whose mask is EXACTLY the session-axis
+  bit (⊘ ⇒ none; multi-axis twist/point pairs are DORMANT). Every consumer
+  (position/rotation writeback, palette paint, joint unison, selection
+  glow, the ⇄ badge, the faux-mirror drift screen) follows automatically;
+  setMirrorAxis repaints the selection so the glow/badge flip with the
+  sheet. Placement auto-arms only when the craft's data mirrors across the
+  CURRENT axis (Editor twins() already `includes(axis)`). The gold sheet
+  the user sees and the propagation behaviour are ONE axis. Pin:
+  views.spec axis leg (ISW pair live under x, DORMANT under z, WAKES on
+  the return); mirror/sym/subride/gizmo gates green on the final tree.
 - **v1.11 PLACEMENT REWRITE — place-then-transform + TRIANGLE PINS (we:
   "I am unhappy with how placing blocks work. The same for triangles. Remove
   the existing functionality and do a total rewrite; the bottom bar should be
