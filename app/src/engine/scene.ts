@@ -583,6 +583,27 @@ export class Engine {
    *  the raw doc + dirty + the debounced merged-hull reload (it owns the doc) */
   onBlockEdit: ((bis: number[]) => void) | null = null;
 
+  /** v1.12.1 HEADLESS PINS (docs/TEST-PYRAMID.md Phase 1): the canvas rect
+   *  every pick/projection probe reads. Attached = the live canvas;
+   *  detached WITH setVirtualViewport = the virtual pad (node probe tier);
+   *  detached = null — every caller keeps its existing early-out, so the
+   *  browser behaviour is untouched. */
+  private vRect: { left: number; top: number; width: number; height: number } | null = null;
+  setVirtualViewport(w = 800, h = 600): void {
+    this.vRect = { left: 0, top: 0, width: w, height: h };
+    this.persp.aspect = w / h;
+    this.persp.updateProjectionMatrix();
+  }
+  private viewRect(): { left: number; top: number; width: number; height: number } | null {
+    // probes must read FRESH camera matrices: attached, the render loop
+    // updates them every frame; headless there is no loop, so sync here
+    // (idempotent, ~zero cost, byte-identical values in the browser)
+    this.camera.updateMatrixWorld(true);
+    this.camera.matrixWorldInverse.copy(this.camera.matrixWorld).invert();
+    const el = this.renderer?.domElement as HTMLCanvasElement | null;
+    return el ? el.getBoundingClientRect() : this.vRect;
+  }
+
   attach(canvas: HTMLCanvasElement) {
     this.renderer = new WebGLRenderer({ canvas, antialias: true });
     // v1.11.0 GAME-DAYLIGHT LAW (XenonViewer js/viewer.js:207-213 transcribed
@@ -1327,11 +1348,12 @@ void main() {
    *  ("Propeller[9].lowvoltage ↔ Computer[0].data_port.001") and gold-
    *  lights the cable; null (or a miss) clears it. */
   pipeHoverMove(clientX: number, clientY: number): { pi: number; label: string } | null {
-    if (!this.bp || !this.renderer || !this.opts.pipes || !this.pipeNet.polys.length) {
+    if (!this.bp || !this.opts.pipes || !this.pipeNet.polys.length) {
       this.clearPipeHover();
       return null;
     }
-    const r = this.renderer.domElement.getBoundingClientRect();
+    const r = this.viewRect();
+    if (!r) return null;
     const ndc = new Vector2(((clientX - r.left) / r.width) * 2 - 1,
       -((clientY - r.top) / r.height) * 2 + 1);
     const ray = new Raycaster();
@@ -1492,10 +1514,11 @@ void main() {
    *  per cable (24 × a few seconds under parallel-worker load = a 120 s
    *  test timeout eating the page's JS thread). */
   private xrayPlan(pi: number): { mesh: Mesh; keep: number[]; drop: number[] }[] {
-    const cam = this.camera, renderer = this.renderer;
-    if (!cam || !renderer || !this.bp) return [];
+    const cam = this.camera;
+    if (!cam || !this.bp) return [];
     this.scene.updateMatrixWorld(true);
-    const rectEl = renderer.domElement.getBoundingClientRect();
+    const rectEl = this.viewRect();
+    if (!rectEl) return [];
     const oc = cam as unknown as { isOrthographicCamera?: boolean; left: number; right: number;
       top: number; bottom: number; zoom: number; fov?: number };
     const xcam: XrayCam = {
@@ -1677,8 +1700,9 @@ void main() {
   /** debug hook: which cable (file pi) owns a CLIENT pixel (the hover pick,
    *  same law as pipeHoverMove) — triage for hover/label e2e flakes. */
   pipePickAt(clientX: number, clientY: number): number {
-    if (!this.bp || !this.renderer || !this.pipeNet.polys.length) return -1;
-    const r = this.renderer.domElement.getBoundingClientRect();
+    if (!this.bp || !this.pipeNet.polys.length) return -1;
+    const r = this.viewRect();
+    if (!r) return -1;
     const ndc = new Vector2(((clientX - r.left) / r.width) * 2 - 1,
       -((clientY - r.top) / r.height) * 2 + 1);
     const ray = new Raycaster();
@@ -1730,11 +1754,12 @@ void main() {
   pipeScreenPoint(pi: number): { x: number; y: number } | null {
     const netIdx = this.pipeNet.piOf.indexOf(pi);
     const poly = netIdx >= 0 ? this.pipeNet.polys[netIdx] : undefined;
-    if (!poly?.length || !this.renderer || !this.camera) return null;
+    if (!poly?.length || !this.camera) return null;
     const mo = this.moffV();
     const mid = poly[Math.max(0, Math.floor(poly.length / 2) - 1)] ?? poly[0]!;
     const v = new Vector3(mid[0] + mo.x, mid[1] + mo.y, mid[2] + mo.z).project(this.camera);
-    const r = this.renderer.domElement.getBoundingClientRect();
+    const r = this.viewRect();
+    if (!r) return null;
     return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height };
   }
 
@@ -2586,7 +2611,7 @@ void main() {
   coordHoverMove(clientX: number, clientY: number)
     : { x: number; y: number; z: number; step: number } | null {
     const g = this.gridBox;
-    if (!g || !this.renderer) { this.coordHoverClear(); return null; }
+    if (!g) { this.coordHoverClear(); return null; }
     const step = this.gridStepNow || 0.25;
     const snap = (v: number) => Math.round(v / step) * step;
     // RAYTRACE WHAT LANDS ON (user v1.5.24): pickCell answers the first
@@ -2598,7 +2623,8 @@ void main() {
     if (hit) {
       fx = hit.point[0]!; fy = hit.point[1]!; fz = hit.point[2]!;
     } else {
-      const r = this.renderer.domElement.getBoundingClientRect();
+      const r = this.viewRect();
+      if (!r) { this.coordHoverClear(); return null; }
       const ndc = new Vector2(((clientX - r.left) / r.width) * 2 - 1,
         -((clientY - r.top) / r.height) * 2 + 1);
       const ray = new Raycaster();
@@ -3377,9 +3403,8 @@ void main() {
   }
   /** world → client px (both projections) — the ortho parallelism pin */
   screenPoint(x: number, y: number, z: number): [number, number] | null {
-    const c = this.renderer?.domElement as HTMLCanvasElement | null;
-    if (!c) return null;
-    const r = c.getBoundingClientRect();
+    const r = this.viewRect();
+    if (!r) return null;
     const p = new Vector3(x + this.moff.x, y + this.moff.y, z + this.moff.z).project(this.camera);
     return [r.left + (p.x + 1) / 2 * r.width, r.top + (1 - p.y) / 2 * r.height];
   }
@@ -4105,8 +4130,9 @@ void main() {
   /** client-space grab point of handle i (test hook: where to press to turn it) */
   hingeScreenPoint(i: number): { x: number; y: number } | null {
     const h = this.hingeHandles[i];
-    if (!h || !this.renderer) return null;
-    const rect = this.renderer.domElement.getBoundingClientRect();
+    if (!h) return null;
+    const rect = this.viewRect();
+    if (!rect) return null;
     let p: Vector3;
     if (h.kind === 'angle') {
       const a = h.jref.axis0;
@@ -4358,11 +4384,12 @@ void main() {
   /** client px of pin i's head (e2e: where to press to drag it) */
   pinScreenPoint(i: number): { x: number; y: number } | null {
     const p = this.pinCorners[i];
-    if (!p || !this.renderer) return null;
+    if (!p) return null;
     const v = new Vector3((p[0] - 6) * CELL, (p[1] - 6) * CELL + 0.30, (p[2] - 6) * CELL)
       .add(this.moffV());
     v.project(this.camera!);
-    const rect = this.renderer.domElement.getBoundingClientRect();
+    const rect = this.viewRect();
+    if (!rect) return null;
     return { x: rect.left + (v.x * 0.5 + 0.5) * rect.width, y: rect.top + (-v.y * 0.5 + 0.5) * rect.height };
   }
   /** re-read the corners from the bp (edit mode) and repaint; drops the pins
@@ -4743,16 +4770,15 @@ void main() {
   // ------------------------------------------------------------------ pick
 
   pickAt(clientX: number, clientY: number): PickHit {
-    const c = this.renderer?.domElement as HTMLCanvasElement | null;
-    if (!c) return (this.lastPick = { kind: 'none' });
-    const rect = c.getBoundingClientRect();
+    const rect = this.viewRect();
+    if (!rect) return (this.lastPick = { kind: 'none' });
     const ndc = new Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
     return (this.lastPick = this.pickNdc(ndc));
   }
 
   /** headless-safe probe: cast at the centre + 4 offsets, first solid hit wins */
   pickProbe(): PickHit {
-    if (!this.renderer) return (this.lastPick = { kind: 'none' });
+    if (!this.viewRect()) return (this.lastPick = { kind: 'none' });
     const probes: readonly (readonly [number, number])[] =
       [[0, 0], [0.12, 0], [-0.12, 0], [0, 0.12], [0, -0.12]];
     for (const [dx, dy] of probes) {
@@ -4877,9 +4903,8 @@ void main() {
   pickCell(clientX: number, clientY: number):
     { bi: number; ci: number; point: [number, number, number]; cell: [number, number, number];
       nrm: [number, number, number]; kind: 'block' | 'tri' | 'comp' | 'sub' | 'ground' } | null {
-    const c = this.renderer?.domElement as HTMLCanvasElement | null;
-    if (!c || !this.bp) return null;
-    const rect = c.getBoundingClientRect();
+    const rect = this.viewRect();
+    if (!rect || !this.bp) return null;
     const ndc = new Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
     const ray = new Raycaster();
     ray.setFromCamera(ndc, this.camera);
@@ -5227,12 +5252,13 @@ void main() {
   }
   /** screen point of the cluster centre (CLIENT px) for the label */
   clusterGhostScreenPoint(): { x: number; y: number } | null {
-    const renderer = this.renderer, cam = this.camera;
+    const cam = this.camera;
     const c = this.clusterCentre();
-    if (!renderer || !cam || !c) return null;
+    if (!cam || !c) return null;
     c.project(cam);
     if (c.z > 1) return null;
-    const rect = renderer.domElement.getBoundingClientRect();
+    const rect = this.viewRect();
+    if (!rect) return null;
     return { x: rect.left + (c.x + 1) / 2 * rect.width, y: rect.top + (1 - c.y) / 2 * rect.height };
   }
   /** the BLOCK widget on the cluster: WORLD translate + CELL snap ALWAYS.
@@ -5605,8 +5631,8 @@ void main() {
    *  drifted / painted apart), returns the label text + a CLIENT-px anchor at
    *  the flagged twin; null = no conflict. The Viewport renders the ⚠ card. */
   twinWarnState(): { text: string; x: number; y: number; info: boolean } | null {
-    const renderer = this.renderer, cam = this.camera;
-    if (!renderer || !cam || !this.bp) return null;
+    const cam = this.camera;
+    if (!cam || !this.bp) return null;
     const p = new Vector3();
     let text = '';
     let info = false;
@@ -5631,7 +5657,8 @@ void main() {
     } else return null;
     p.project(cam);
     if (p.z > 1) return null;                       // behind the camera
-    const rect = renderer.domElement.getBoundingClientRect();
+    const rect = this.viewRect();
+    if (!rect) return null;
     return { text, info, x: rect.left + (p.x + 1) / 2 * rect.width,
       y: rect.top + (1 - p.y) / 2 * rect.height };
   }
@@ -5808,9 +5835,8 @@ void main() {
    *  subgrid/ground surface counts; the point rides the face normal by a
    *  hair so the new part sits ON the surface it was clicked on. */
   pickPlacePoint(clientX: number, clientY: number): [number, number, number] | null {
-    const c = this.renderer?.domElement as HTMLCanvasElement | null;
-    if (!c || !this.bp) return null;
-    const rect = c.getBoundingClientRect();
+    const rect = this.viewRect();
+    if (!rect || !this.bp) return null;
     const ndc = new Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
     const ray = new Raycaster();
     ray.setFromCamera(ndc, this.camera);

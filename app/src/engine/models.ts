@@ -266,7 +266,7 @@ export function unityBake(v: number[]): number[] {
 }
 
 /** bake every prim (full + decimated twin) of an atlas JSON at load */
-function bakeGeo(geo: ModelGeo): ModelGeo {
+export function bakeGeo(geo: ModelGeo): ModelGeo {
   const out: Record<string, NodeGeo> = {};
   for (const [name, nd] of Object.entries(geo))
     out[name] = { ...nd, prims: nd.prims.map(p => ({
