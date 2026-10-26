@@ -108,6 +108,13 @@ export function diskAtlas(): ModelAtlas {
   };
 }
 
+/** the manifest WITHOUT the model fan-out: .ini joint data (captureJrefs)
+ *  needs the manifest; proxy-tier geometry does not need the gltf files */
+export function manifestOnly(): ModelAtlas {
+  const a = diskAtlas();
+  return { manifest: a.manifest, async geoFor(): Promise<LoadedModel | null> { return null; } };
+}
+
 /** open a corpus craft through the real funnel into a virtual-pad Engine */
 export function openCraft(
   id: string, opts: { atlas?: ModelAtlas | null; w?: number; h?: number } = {},

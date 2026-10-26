@@ -18,9 +18,12 @@
 //    motion: (p,q) ↦ (pos + dq·(p−p0), dq·q). Zero miss = nothing tears away.
 import { expect, test, type Page } from '@playwright/test';
 
+// v1.12.1 (L1/L5): THE TRUCK's audit moved headless — 14 (subgrid, master)
+// pairs pinned verbatim in scene.headless.test.ts. Jimmy stays: its gantry
+// pivot clamps through the v1.11.8 rig chain (the audit's raw-file bbox
+// needs the graph-layer rig transform — P7.1 slice 2 retires this leg).
 const CRAFTS = [
   { id: '3334698274', name: "Jimmy's Adventure" },
-  { id: '3481322297', name: 'Classic American Semi Truck' },
 ];
 
 type Pair = {
