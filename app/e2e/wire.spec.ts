@@ -191,11 +191,10 @@ test.describe('wire overview, hover labels, disconnect / reconnect @ui', () => {
   // truck cable, cuts==0 for an exposed one, and full restore on un-hover"
   // + "no spec asserts surges().surges ≥ 2 at the X-ray transition").
   // The truck (3481322297, 375 cables routed THROUGH cab/deck/box) is the
-  // BLOCKED fixture; the XYQ-615 (3803780241, door harnesses riding OUTSIDE
-  // the panels) supplies the EXPOSED one — measured census: every truck
-  // cable has occluders in front, XYQ cable 0 has none.
+  // BLOCKED fixture (measured census: every truck cable has occluders in
+  // front). The EXPOSED half of this trio moved to the node tier in
+  // v1.12.1 — xray.test.ts (see the retirement note at the file bottom).
   const TRUCK = '3481322297';
-  const XYQ = '3803780241';
 
   /** engine-side probe of the X-ray law over the first `cap` cables: the
    *  DRY occlusion plan (engine.xrayCutsFor) — counts, never applies (the
@@ -243,15 +242,6 @@ test.describe('wire overview, hover labels, disconnect / reconnect @ui', () => {
     const x = w.__ARCHEAN__!.engine.wireXrayActive();
     return { ...x, surges: w.__ARCHEAN__!.surges().surges.length };
   });
-
-  /** park the cursor on a cable's mid-point: one pointermove arms the chip
-   *  dwell (120 ms) and the X-ray timer (2 s); the hover state survives a
-   *  still mouse, so no jiggling is needed. */
-  async function hoverCable(page: Page, pi: number) {
-    const pt = await cablePoint(page, pi);
-    expect(pt, `cable ${pi} has a visible mid-point`).not.toBeNull();
-    await page.mouse.move(pt!.x, pt!.y);
-  }
 
   /** A cable whose OWN mid-point pixel hovers back to it (dense crafts
    *  cross: cablePoint(pi) projects pi's mid, but a CLOSER cable can own
@@ -448,23 +438,13 @@ test.describe('wire overview, hover labels, disconnect / reconnect @ui', () => {
         .toMatchObject({ on: false, cuts: 0, overlays: 0, bubbles: 0 });
     });
 
-  test('an EXPOSED cable (XYQ door harness): the 2 s dwell opens an episode that cuts nothing (TODO B)', async ({ page }) => {
-    desktopOnly();
-    test.setTimeout(120_000);
-    await openWire(page, XYQ);
-    const census = await xrayCensus(page, 24);
-    const exposed = census.findIndex(c => c.cuts === 0);
-    expect(exposed, 'the XYQ has a cable with nothing in front').toBeGreaterThanOrEqual(0);
-    await hoverCable(page, exposed);
-    await page.waitForTimeout(2_200);
-    // the dwell fired (chip + highlight live) — nothing occludes, so ZERO
-    // geometry is cut and no overlays exist
-    await expect.poll(() => xray(page), { timeout: 4_000, intervals: [100] })
-      .toMatchObject({ cuts: 0 });
-    await page.mouse.move(20, 20);
-    await expect.poll(() => xray(page), { timeout: 6_000, intervals: [120] })
-      .toMatchObject({ on: false, cuts: 0, overlays: 0 });
-  });
+  // RETIRED v1.12.1 (docs/TEST-PYRAMID.md L1/L5): 'an EXPOSED cable (XYQ
+  // door harness) cuts nothing' — the census LAW (exposed geometry → 0
+  // cuts; partial/blocked/ortho/segment-target/fully-in-the-way regimes) is
+  // pinned headless in src/engine/__tests__/xray.test.ts on synthetic
+  // THREE geometry; the Engine collector delegating to xrayPlanPure ships
+  // the same code path. The remaining truck @slow leg keeps the PIXEL half
+  // (surge-from-cursor, overlay restore) that needs a real renderer.
 
   test('on a phone the cable list is reachable and the census fits', async ({ page }) => {
     await openWire(page);

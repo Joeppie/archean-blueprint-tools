@@ -7,6 +7,8 @@
 // download). Holds the raw-literal DOC + live bp; see App.tsx for the shell.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import sealWasmUrl from '../wasm/seal.wasm?url';
+import { HistoryStack } from './engine/history';
+import { realScheduler } from './engine/clocks';
 import { initSealWasmFetch } from './engine/sealwasm';
 // v1.11.2 WASM: boot the sealed-envelope module in the background (a few
 // KB, off the render path). Every envelope compute BEFORE this resolves —
@@ -263,36 +265,27 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // through the SAME open funnel (parse → normalize → makeCtx → setBp), so
   // engine, doc and ctx can never drift apart; Ctrl+Z / Ctrl+Shift+Z /
   // Ctrl+Y and the Edit ▾ menu both call these.
-  const histRef = useRef<{ states: string[]; p: number; timer: ReturnType<typeof setTimeout> | null }>({
-    states: [], p: 0, timer: null,
-  });
+  const histRef = useRef<HistoryStack | null>(null);
+  if (!histRef.current) histRef.current = new HistoryStack(realScheduler, 450);
+  const hist = histRef.current;
+  hist.onPush = () => setHistTick(t => t + 1);   // setState is stable; no re-render mid-drag
   const [histTick, setHistTick] = useState(0);
-  const commitSnapshot = useCallback(() => {
-    const ctx = ctxRef.current, h = histRef.current;
-    if (!ctx) return;
-    const text = emitDoc(ctx.doc);
-    if (text === h.states[h.p]) return;
-    h.states = h.states.slice(0, h.p + 1);          // a new edit drops REDO
-    h.states.push(text); h.p = h.states.length - 1;
-    setHistTick(t => t + 1);
-  }, []);
+  /** the doc's FULL literal text at CALL time; null while no doc is open */
+  const docText = useCallback((): string | null =>
+    ctxRef.current ? emitDoc(ctxRef.current.doc) : null, []);
   const snapshotSoon = useCallback(() => {
-    const h = histRef.current;
-    if (h.timer) clearTimeout(h.timer);             // extend the open gesture
-    h.timer = setTimeout(() => { h.timer = null; commitSnapshot(); }, 450);
-  }, [commitSnapshot]);
+    hist.snapshotSoon(() => docText() ?? hist.current);   // no doc = dedups, no-op
+  }, [hist, docText]);
   const flushSnapshot = useCallback(() => {
-    const h = histRef.current;
-    if (h.timer) { clearTimeout(h.timer); h.timer = null; }
-    commitSnapshot();
-  }, [commitSnapshot]);
+    hist.flush(() => docText() ?? hist.current);
+  }, [hist, docText]);
   const applyHistory = useCallback((state: string) => {
     const d = parseDoc(state);
     normalizeDoc(d);                                // idempotent on snapshots
     const bp = docValue(d) as Blueprint;
     bp.__legacyQ = legacyRef.current;               // the session's generation (the
     ctxRef.current = makeCtx(d, bp);                // snapshot text is post-migration)
-    const dirtyNow = state !== histRef.current.states[0];
+    const dirtyNow = state !== hist.origin;
     dirtyRef.current = dirtyNow; setDirty(dirtyNow);
     setSel({ ci: -1, sub: -1 }); setBlockSel(-1); setTriSel(-1); setTriDraft([]);
     setPinTi(-1); engineRef.current?.clearPins();     // v1.11: stale pins never haunt undo
@@ -304,19 +297,17 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     setBpKeepView(true);
     setBp(ctxRef.current.bp);                       // the Viewport reloads it
     setHistTick(t => t + 1);
-  }, []);
+  }, [hist]);
   const undo = useCallback(() => {
-    flushSnapshot();
-    const h = histRef.current;
-    if (h.p <= 0) return;
-    h.p -= 1; applyHistory(h.states[h.p]!);
-  }, [flushSnapshot, applyHistory]);
+    const s = hist.undo(() => docText() ?? hist.current);
+    if (s === null) return;
+    applyHistory(s);
+  }, [hist, docText, applyHistory]);
   const redo = useCallback(() => {
-    flushSnapshot();
-    const h = histRef.current;
-    if (h.p >= h.states.length - 1) return;
-    h.p += 1; applyHistory(h.states[h.p]!);
-  }, [flushSnapshot, applyHistory]);
+    const s = hist.redo(() => docText() ?? hist.current);
+    if (s === null) return;
+    applyHistory(s);
+  }, [hist, docText, applyHistory]);
 
   /** parse → v1→v2 NORMALIZE → doc+ctx → live bp. One funnel for download,
    *  file-open, drag-drop and New craft. */
@@ -326,13 +317,13 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     ctxRef.current = ctx;
     dirtyRef.current = false;
     setDirty(false); setSel({ ci: -1, sub: -1 }); setBlockSel(-1); setPlacing(null);
-    histRef.current = { states: [emitDoc(doc)], p: 0, timer: null };
+    hist.open(emitDoc(doc));
     setHistTick(t => t + 1);
     setBpKeepView(false);                           // a craft swap re-frames
     engineRef.current?.setClusterGhost(null);       // a pending tool placement dies with the craft
     setPlaceStage(null);
     setBp(ctxRef.current.bp);
-  }, []);
+  }, [hist]);
 
   useEffect(() => {
     setBp(null);
@@ -1290,8 +1281,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // Edit ▾ Undo/Redo enabled state (2026-10-20). histTick is the re-render trigger —
   // the stack itself lives in a ref (commits must never re-render mid-drag).
   void histTick;
-  const canUndo = histRef.current.timer !== null || histRef.current.p > 0;
-  const canRedo = histRef.current.p < histRef.current.states.length - 1;
+  const canUndo = hist.openGesture || hist.canUndo;
+  const canRedo = hist.canRedo;
   // v2.0.0 MERGED EDITOR (user: "Merge the block and component edit things,
   // I no longer see a good reason to seperate them. The UI is quite good."):
   // the old BLOCKS workspace is the EDIT mode's panel bottom — brush +

@@ -8,6 +8,7 @@ import { openAtlas, modelFailures, type ModelAtlas } from '../engine/models';
 import type { Blueprint } from '../engine/format';
 import { Engine, type PickHit, type SceneStats } from '../engine/scene';
 import { triAt } from '../engine/tris';
+import { RateCap, WireHover, coordChipText, realScheduler } from '../engine/clocks';
 
 declare global {
   interface Window { __ARCHEAN__?: {
@@ -269,14 +270,18 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
   // v1.5 flavor rule: the ghost only lives in the PLACE flavor.
   const hoverOn = mode === 'edit' && (tool === 'place' || !!placing);
   const lastHover = useRef<{ x: number; y: number; shift: boolean } | null>(null);
-  const hoverT = useRef(0);
+  const onHoverRef = useRef(onBlockHover);
+  onHoverRef.current = onBlockHover;                   // the cap is built once; read live
+  const ghostCap = useRef<RateCap | null>(null);
+  if (!ghostCap.current)
+    ghostCap.current = new RateCap(24, (x, y) =>       // ~40 Hz raycast cap (plain)
+      onHoverRef.current?.(x, y, lastHover.current?.shift ?? false),
+      () => performance.now(), realScheduler, false);
   const blockHover = (x: number, y: number, shift: boolean, force = false) => {
     if (!hoverOn || !onBlockHover) return;
     lastHover.current = { x, y, shift };
-    const now = performance.now();
-    if (!force && now - hoverT.current < 24) return;    // ~40 Hz raycast cap
-    hoverT.current = now;
-    onBlockHover(x, y, shift);
+    if (force) ghostCap.current!.force(x, y);          // Shift press/release re-aim
+    else ghostCap.current!.move(x, y);
   };
   const [widget, setWidget] = useState<{ x: number; y: number } | null>(null);
   // v1.11: does a BLOCK own the widget (→ the ⤢ stretch row shows)? The
@@ -384,10 +389,11 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
   // the throttle a TRAILING edge — the pointer's final position ALWAYS
   // gets its raycast (a hover that stops mid-window must still converge;
   // the views.spec "hovering the CRAFT" pin asserts exactly that)
-  const coordT = useRef(0);
   const coordInfo = useRef<{ x: number; y: number; z: number; step: number } | null>(null);
-  const coordTrail = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const coordLast = useRef({ x: 0, y: 0 });
+  const coordCap = useRef<RateCap | null>(null);
+  if (!coordCap.current)
+    coordCap.current = new RateCap(24, (x, y) => coordRun(x, y),
+      () => performance.now(), realScheduler);
   /** paint the black chip (imperative — a React state per move is waste) */
   const showCoord = (info: { x: number; y: number; z: number; step: number } | null,
     cx: number, cy: number) => {
@@ -395,9 +401,7 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
     if (!chip || !host) return;
     if (!info) { chip.style.display = 'none'; return; }
     const hr = host.getBoundingClientRect();
-    const dg = info.step < 0.25 ? 2 : 1;
-    const f = (v: number) => (Object.is(v, -0) ? 0 : v).toFixed(dg);
-    chip.textContent = `x ${f(info.x)}  y ${f(info.y)}  z ${f(info.z)}`;
+    chip.textContent = coordChipText(info);
     chip.style.display = 'block';
     chip.style.left = `${Math.min(Math.max(4, cx - hr.left + 14), hr.width - 170)}px`;
     chip.style.top = `${Math.max(4, cy - hr.top + 16)}px`;
@@ -415,11 +419,8 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
   // and 2 s of SOLID highlight opens the X-ray: the geometry between the
   // camera and the cable's two parts thins out (engine.beginWireXray),
   // restored the moment the hover ends.
-  const wireDwell = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const wireShown = useRef(false);
+  const wireHov = useRef<WireHover | null>(null);
   const wirePos = useRef({ cx: 0, cy: 0 });
-  const xrayTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const xrayPi = useRef(-1);
   const renderWireChip = (label: string, cx: number, cy: number) => {
     const chip = wireChipRef.current, host = hostRef.current;
     if (!chip || !host) return;
@@ -432,39 +433,24 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
     chip.style.left = `${Math.min(Math.max(4, cx - hr.left + 14), hr.width - w - 8)}px`;
     chip.style.top = `${Math.max(4, Math.min(cy - hr.top + 38, hr.height - h - 6))}px`;
   };
+  // the dwell + X-ray state machine (engine/clocks, P7.2) — created once;
+  // every side effect reads the LIVE engineRef at call time, so a scene
+  // reload under a live hover is safe.
+  if (!wireHov.current)
+    wireHov.current = new WireHover({
+      live: () => engineRef.current?.pipeHoverState() ?? null,
+      showChip: (label) => renderWireChip(label, wirePos.current.cx, wirePos.current.cy),
+      hideChip: () => { const c = wireChipRef.current; if (c) c.style.display = 'none'; },
+      beginXray: (pi) => engineRef.current?.beginWireXray(pi),
+      endXray: () => engineRef.current?.endWireXray(),
+    }, realScheduler);
   const showWire = (info: { pi: number; label: string } | null, cx: number, cy: number) => {
-    const chip = wireChipRef.current;
-    if (!chip) return;
-    if (!info || !info.label) {
-      if (wireDwell.current) { clearTimeout(wireDwell.current); wireDwell.current = null; }
-      if (xrayTimer.current) { clearTimeout(xrayTimer.current); xrayTimer.current = null; }
-      if (xrayPi.current >= 0) { xrayPi.current = -1; engineRef.current?.endWireXray(); }
-      wireShown.current = false;
-      chip.style.display = 'none';
-      return;
-    }
     wirePos.current = { cx, cy };
-    if (!wireShown.current && !wireDwell.current) {
-      wireDwell.current = setTimeout(() => {
-        wireDwell.current = null;
-        const w = engineRef.current?.pipeHoverState();
-        if (w?.label) { wireShown.current = true; renderWireChip(w.label, wirePos.current.cx, wirePos.current.cy); }
-      }, 120);
-    } else if (wireShown.current) renderWireChip(info.label, cx, cy);
-    if (info.pi !== xrayPi.current) {
-      xrayPi.current = info.pi;
-      engineRef.current?.endWireXray();
-      if (xrayTimer.current) clearTimeout(xrayTimer.current);
-      xrayTimer.current = setTimeout(() => {
-        xrayTimer.current = null;
-        const w = engineRef.current?.pipeHoverState();
-        if (w && w.pi === info.pi) engineRef.current?.beginWireXray(info.pi);
-      }, 2000);
-    }
+    if (info) wireHov.current!.hover(info);
+    else wireHov.current!.reset();
   };
   /** one throttled raycast + chip repaint */
   const coordRun = (x: number, y: number) => {
-    coordT.current = performance.now();
     coordInfo.current = engineRef.current?.coordHoverMove(x, y) ?? null;
     showCoord(coordInfo.current, x, y);
     wireInfo.current = engineRef.current?.pipeHoverMove(x, y) ?? null;
@@ -534,24 +520,12 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
           // pointermove event; high-poll mice fire ~120 Hz, so the readout
           // silently taxed every hover on a giant craft. With TRAILING EDGE:
           // the position the pointer STOPS at always gets raycast.
-          coordLast.current = { x: e.clientX, y: e.clientY };
-          const cnow = performance.now();
-          if (cnow - coordT.current >= 24) {
-            if (coordTrail.current) { clearTimeout(coordTrail.current); coordTrail.current = null; }
-            coordRun(e.clientX, e.clientY);
-          } else {
-            if (!coordTrail.current) {
-              coordTrail.current = setTimeout(() => {
-                coordTrail.current = null;
-                coordRun(coordLast.current.x, coordLast.current.y);
-              }, Math.max(1, 25 - (cnow - coordT.current)));
-            }
-            showCoord(coordInfo.current, e.clientX, e.clientY);   // follows live, cheap
-            showWire(wireInfo.current, e.clientX, e.clientY);     // idem the cable label
-          }
+          coordCap.current!.move(e.clientX, e.clientY);
+          showCoord(coordInfo.current, e.clientX, e.clientY);   // follows live, cheap
+          showWire(wireInfo.current, e.clientX, e.clientY);     // idem the cable label
         }}
         onPointerLeave={() => {
-          if (coordTrail.current) { clearTimeout(coordTrail.current); coordTrail.current = null; }
+          coordCap.current!.cancel();
           engineRef.current?.coordHoverClear();
           engineRef.current?.clearPipeHover();
           coordInfo.current = null;

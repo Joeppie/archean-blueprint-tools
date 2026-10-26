@@ -47,6 +47,7 @@ import { buildPipes, checkLeads, pipeAt, runFlowDir, surgePaths, type PipeNetwor
 import { portRole } from './wiremodel';
 import { pipeLabel } from './wireops';
 import { buildCompProxies, buildSolids, type ProxyBox, type SolidBatch } from './build';
+import { xrayPlanPure, type XrayCam, type XrayMesh } from './xray';
 import { hullVertex } from './hullfit';
 import type { FilePalette } from './palette';
 import type { Block, Blueprint, BlueprintComponent, Triangle } from './format';
@@ -1491,169 +1492,53 @@ void main() {
    *  per cable (24 × a few seconds under parallel-worker load = a 120 s
    *  test timeout eating the page's JS thread). */
   private xrayPlan(pi: number): { mesh: Mesh; keep: number[]; drop: number[] }[] {
-    const OUT: { mesh: Mesh; keep: number[]; drop: number[] }[] = [];
     const cam = this.camera, renderer = this.renderer;
-    if (!cam || !renderer || !this.bp) return OUT;
-    // v1.11 SCREEN-SPACE occlusion (we: "the making of wireframe doesn't
-    // properly find all elements in front of the camera … we know where
-    // the cable reaches closest to the camera, and what its extents in
-    // pixel space are; a cheap approximation"): the TARGETS are the two
-    // endpoint parts' projected boxes and every cable run segment's
-    // projected rect, each with a depth span. A triangle occludes when its
-    // projection lands in a target rect and its nearest depth is in front
-    // of that target's far side — this catches everything covering the
-    // PART, not just a ray at its centre.
+    if (!cam || !renderer || !this.bp) return [];
     this.scene.updateMatrixWorld(true);
     const rectEl = renderer.domElement.getBoundingClientRect();
-    const W = rectEl.width, H = rectEl.height;
-    const camInv = new Matrix4().copy(cam.matrixWorldInverse);
     const oc = cam as unknown as { isOrthographicCamera?: boolean; left: number; right: number;
       top: number; bottom: number; zoom: number; fov?: number };
-    const ortho = oc.isOrthographicCamera === true;
-    const tanY = Math.tan(((oc.fov ?? 50) * Math.PI) / 360);
-    const tanX = tanY * (W / Math.max(1, H));
-    const proj = (v: Vector3): { x: number; y: number; z: number } | null => {
-      const c = v.clone().applyMatrix4(camInv);
-      const d = -c.z;
-      if (d <= 0.02) return null;
-      if (ortho) {
-        const sx = ((oc.right - oc.left) / 2) / (oc.zoom || 1);
-        const sy = ((oc.top - oc.bottom) / 2) / (oc.zoom || 1);
-        return { x: W / 2 + (c.x / sx) * (W / 2), y: H / 2 - (c.y / sy) * (H / 2), z: d };
-      }
-      return { x: W / 2 + (c.x / d / tanX) * (W / 2), y: H / 2 - (c.y / d / tanY) * (H / 2), z: d };
+    const xcam: XrayCam = {
+      inv: new Matrix4().copy(cam.matrixWorldInverse),
+      W: rectEl.width, H: rectEl.height,
+      fovDeg: oc.fov ?? 50,
+      ortho: oc.isOrthographicCamera === true
+        ? { left: oc.left, right: oc.right, top: oc.top, bottom: oc.bottom, zoom: oc.zoom }
+        : undefined,
     };
-    interface Tgt { x0: number; y0: number; x1: number; y1: number; near: number; far: number }
-    const tgts: Tgt[] = [];
+    // the two endpoint parts' world boxes (v1.11 target law, verbatim)
+    const partBoxes: Box3[] = [];
     for (const t of this.pipeEndpoints(pi)) {
       const box = new Box3();
       for (const r of this.compRoots.get(t) ?? []) box.expandByObject(r);
       if (box.isEmpty()) continue;
       box.expandByScalar(0.15);
-      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-      let near = Infinity, far = -Infinity, ok = true;
-      for (let i = 0; i < 8; i++) {
-        const p = proj(new Vector3(i & 1 ? box.max.x : box.min.x,
-          i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z));
-        if (!p) { ok = false; break; }
-        x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x);
-        y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y);
-        near = Math.min(near, p.z); far = Math.max(far, p.z);
-      }
-      if (ok) tgts.push({ x0, y0, x1, y1, near, far });
+      partBoxes.push(box);
     }
+    // the run's polyline in world space (pipeNet stores raw-file coords)
     const mo0 = this.moffV();
     const netI = this.pipeNet.piOf.indexOf(pi);
     const poly0 = netI >= 0 ? this.pipeNet.polys[netI] ?? null : null;
-    const ppts = (poly0 ?? []).map(v =>
-      proj(new Vector3(v[0]! + mo0.x, v[1]! + mo0.y, v[2]! + mo0.z)));
-    for (let k = 1; k < ppts.length; k++) {
-      const A = ppts[k - 1], B = ppts[k];
-      if (!A || !B) continue;
-      tgts.push({ x0: Math.min(A.x, B.x) - 3, y0: Math.min(A.y, B.y) - 3,
-        x1: Math.max(A.x, B.x) + 3, y1: Math.max(A.y, B.y) + 3,
-        near: Math.min(A.z, B.z), far: Math.max(A.z, B.z) + 0.02 });
-    }
-    if (!tgts.length) return OUT;
-    let gx0 = Infinity, gy0 = Infinity, gx1 = -Infinity, gy1 = -Infinity, gFar = -Infinity;
-    for (const t of tgts) {
-      gx0 = Math.min(gx0, t.x0); gy0 = Math.min(gy0, t.y0);
-      gx1 = Math.max(gx1, t.x1); gy1 = Math.max(gy1, t.y1); gFar = Math.max(gFar, t.far);
-    }
-    const pInT = (px: number, py: number, ax: number, ay: number, bx: number, by: number,
-      cx: number, cy: number): boolean => {
-      const s1 = (bx - ax) * (py - ay) - (by - ay) * (px - ax);
-      const s2 = (cx - bx) * (py - by) - (cy - by) * (px - bx);
-      const s3 = (ax - cx) * (py - cy) - (ay - cy) * (px - cx);
-      return (s1 >= 0 && s2 >= 0 && s3 >= 0) || (s1 <= 0 && s2 <= 0 && s3 <= 0);
-    };
-    const segX = (ax: number, ay: number, bx: number, by: number,
-      cx: number, cy: number, dx: number, dy: number): boolean => {
-      const d1 = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
-      const d2 = (bx - ax) * (dy - ay) - (by - ay) * (dx - ax);
-      const d3 = (dx - cx) * (ay - cy) - (dy - cy) * (ax - cx);
-      const d4 = (dx - cx) * (by - cy) - (dy - cy) * (bx - cx);
-      return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
-    };
-    const triHitsRect = (ax: number, ay: number, bx: number, by: number, cx: number, cy: number,
-      t: Tgt): boolean => {
-      if (Math.max(ax, bx, cx) < t.x0 || Math.min(ax, bx, cx) > t.x1
-        || Math.max(ay, by, cy) < t.y0 || Math.min(ay, by, cy) > t.y1) return false;
-      if (pInT(t.x0, t.y0, ax, ay, bx, by, cx, cy) || pInT(t.x1, t.y0, ax, ay, bx, by, cx, cy)
-        || pInT(t.x0, t.y1, ax, ay, bx, by, cx, cy) || pInT(t.x1, t.y1, ax, ay, bx, by, cx, cy))
-        return true;
-      if ((ax >= t.x0 && ax <= t.x1 && ay >= t.y0 && ay <= t.y1)
-        || (bx >= t.x0 && bx <= t.x1 && by >= t.y0 && by <= t.y1)
-        || (cx >= t.x0 && cx <= t.x1 && cy >= t.y0 && cy <= t.y1)) return true;
-      const rx: [number, number][] = [[t.x0, t.y0], [t.x1, t.y0], [t.x1, t.y1], [t.x0, t.y1]];
-      const tv: [number, number][] = [[ax, ay], [bx, by], [cx, cy]];
-      for (let i = 0; i < 3; i++) {
-        const [p1x, p1y] = tv[i]!, [p2x, p2y] = tv[(i + 1) % 3]!;
-        for (let j = 0; j < 4; j++) {
-          const [q1x, q1y] = rx[j]!, [q2x, q2y] = rx[(j + 1) % 4]!;
-          if (segX(p1x, p1y, p2x, p2y, q1x, q1y, q2x, q2y)) return true;
-        }
-      }
-      return false;
-    };
-    const cand: Mesh[] = [...this.hullMeshes, ...this.occMeshes];
-    const tops = new Set(this.pipeEndpoints(pi));
-    this.compRoots.forEach((roots, ci) => {
-      if (!tops.has(ci)) for (const r of roots) r.traverse(o => { if ((o as Mesh).isMesh) cand.push(o as Mesh); });
-    });
-    this.subGroup.traverse(o => { if ((o as Mesh).isMesh && o.visible) cand.push(o as Mesh); });
-    const mb = new Box3();
-    const a = new Vector3(), b = new Vector3(), c = new Vector3();
-    for (const mesh of cand) {
-      if (!mesh.visible) continue;
+    const poly = (poly0 ?? []).map(v => new Vector3(v[0]! + mo0.x, v[1]! + mo0.y, v[2]! + mo0.z));
+    // occlusion candidates: hull + occupancy + every NON-endpoint component + subgrids
+    const cand: XrayMesh[] = [];
+    const addMesh = (mesh: Mesh) => {
+      if (!mesh.visible) return;
       const geo = mesh.geometry as BufferGeometry;
       const pos = geo.getAttribute('position');
-      if (!pos) continue;
+      if (!pos) return;
       const idx = geo.getIndex();
-      const n = idx ? idx.count : pos.count;
-      const cut = new Set<number>();               // triangle STARTS cut out
-      // mesh-level cheap reject: projected depth vs the union far plane
-      mb.setFromObject(mesh);
-      {
-        let mNear = Infinity, mOk = false;
-        for (let i = 0; i < 8; i++) {
-          const p = proj(new Vector3(i & 1 ? mb.max.x : mb.min.x,
-            i & 2 ? mb.max.y : mb.min.y, i & 4 ? mb.max.z : mb.min.z));
-          if (!p) continue;
-          mOk = true; mNear = Math.min(mNear, p.z);
-        }
-        if (mOk && mNear > gFar) continue;         // fully behind every target
-      }
-      for (let k = 0; k < n; k += 3) {
-        const i0 = idx ? idx.getX(k) : k, i1 = idx ? idx.getX(k + 1) : k + 1, i2 = idx ? idx.getX(k + 2) : k + 2;
-        a.fromBufferAttribute(pos, i0).applyMatrix4(mesh.matrixWorld);
-        b.fromBufferAttribute(pos, i1).applyMatrix4(mesh.matrixWorld);
-        c.fromBufferAttribute(pos, i2).applyMatrix4(mesh.matrixWorld);
-        const pa = proj(a), pb = proj(b), pc = proj(c);
-        if (!pa || !pb || !pc) continue;
-        const dMin = Math.min(pa.z, pb.z, pc.z);
-        if (dMin > gFar) continue;
-        if (Math.max(pa.x, pb.x, pc.x) < gx0 || Math.min(pa.x, pb.x, pc.x) > gx1
-          || Math.max(pa.y, pb.y, pc.y) < gy0 || Math.min(pa.y, pb.y, pc.y) > gy1) continue;
-        for (const t of tgts) {
-          if (dMin > t.far) continue;              // behind this target
-          if (triHitsRect(pa.x, pa.y, pb.x, pb.y, pc.x, pc.y, t)) { cut.add(k); break; }
-        }
-      }
-      if (!cut.size) continue;
-      const keep: number[] = [];
-      const drop: number[] = [];
-      for (let k = 0; k < n; k += 3) {
-        const i0 = idx ? idx.getX(k) : k, i1 = idx ? idx.getX(k + 1) : k + 1, i2 = idx ? idx.getX(k + 2) : k + 2;
-        if (cut.has(k)) {
-          for (const i of [i0, i1, i2])
-            drop.push(pos.getX(i), pos.getY(i), pos.getZ(i));
-        } else keep.push(i0, i1, i2);
-      }
-      if (!keep.length) continue;                   // fully in the way: leave it
-      OUT.push({ mesh, keep, drop });
-    }
-    return OUT;
+      cand.push({ ref: mesh, matrixWorld: mesh.matrixWorld, pos, idx,
+        count: idx ? idx.count : pos.count, box: new Box3().setFromObject(mesh) });
+    };
+    for (const mesh of [...this.hullMeshes, ...this.occMeshes]) addMesh(mesh);
+    const tops = new Set(this.pipeEndpoints(pi));
+    this.compRoots.forEach((roots, ci) => {
+      if (!tops.has(ci)) for (const r of roots) r.traverse(o => { if ((o as Mesh).isMesh) addMesh(o as Mesh); });
+    });
+    this.subGroup.traverse(o => { if ((o as Mesh).isMesh && o.visible) addMesh(o as Mesh); });
+    return xrayPlanPure(xcam, partBoxes, poly, cand)
+      .map(r => ({ mesh: r.mesh.ref, keep: r.keep, drop: r.drop }));
   }
   /** census probe: how many meshes the X-ray of a cable WOULD cut (dry —
    *  no scene mutation, no pulses; the e2e census budget, v1.11.7) */
