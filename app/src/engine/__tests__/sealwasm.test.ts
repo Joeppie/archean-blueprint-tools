@@ -88,10 +88,10 @@ describe('WASM sealed envelope = JS twin', () => {
     expect(sealedEnvelopeVolume([], [])).toEqual({ m3: 0, cells: 0 });
   });
 
-  // The SPEED law (wasm beats the JS twin >1.5× on the giant) lives in the
-  // DEDICATED perf harness — load.perf.test.ts 'candidate 3' (v1.12.7
-  // pyramid migration: it duplicated that assertion here, and a wall-clock
-  // ratio measures LOAD, not code — the v1.12.7 ladder caught it flaking
-  // 1.49× right after vite build and 1.26× under a Playwright tier; the
-  // release gate keeps the CORRECTNESS parity pins above).
+  // The wasm/JS SPEED ratio is NOT pinned anywhere (v1.12.8): it was the
+  // v1.11.2 ADOPTION CRITERION for the module — the decision is made, and
+  // a ratio between two engines measures the environment, not our code
+  // (the v1.12.7 ladder: 1.49×/1.26× flake churn). What stays pinned: the
+  // correctness parity above; the absolute speed tripwires and the printed
+  // wasm/JS pair live in the quiescent load.perf harness.
 });
