@@ -681,6 +681,15 @@ implementation `tools/xenoncode/xc_host.cpp` + `app/src/engine/xenoncode.ts`)
   the game's binary treats junk as data, the open library throws (the
   Badger's strict-off path on its own written storage is the repro,
   XC_REBOOT=1).
+- **Element surfaces are 6 PIXELS PER LATTICE UNIT** (`XenonDraw` scale):
+  pilot-screen's 50×50-unit element is a 300×300 px surface — the firmware's
+  own print `Screen dimensions: 300x300` is the proof, and firmware draws at
+  unit·6 coordinates (compositing via `screen_copy` from virtualscreen
+  atlases). Registering them at size+1 px clips every composite; the app's
+  `xenonScreens` uses `size*6`. A MiniComputer has NO integrated screen
+  (wiki) — no auto `main#0`. Behind-a-router components are addressed by
+  ALIAS (computer.md) — no router emulation is needed beyond the alias
+  resolution the shim already does.
 - **io numbers resolve to COMPONENTS, channels to GAME MEANINGS**
   (`tools/extract_channels.py` → `viewer/models/channels.json`, 52 types):
   each type's wiki page carries `### List of inputs/outputs` tables
