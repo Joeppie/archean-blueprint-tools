@@ -23,6 +23,13 @@
 //    raw u8/i32 load+store is checked and fast. Buffers are REUSED globals.
 //  · wallPtr()/seenPtr() exports hand the live grid to the parity test —
 //    the wall maps are diffed cell-for-cell when the counts disagree.
+// v1.12.8 (we: "is that source optimal?"): the per-cell stores became
+//  per-RUN memory.fill, the 27-iteration thickening scan an unrolled 7,
+//  the barycentric divisions one reciprocal, and the flood a PADDED-grid
+//  BFS (a 1-cell seen-ring makes every neighbour a plain ±offset — no
+//  div/mod, no bounds test in the hot loop): giant 104 → 57 ms, zeppelin
+//  4.3 → 1.6 ms, parity cell-exact. (The exports' wall/seen grids are
+//  PADDED since; the counts stay over the inner grid.)
 
 const BLOCKS = 0;
 const TRIS = 1048576;
@@ -102,20 +109,27 @@ export function sealed(nB: i32, nT: i32): i32 {
   const n64 = <i64>sx * <i64>sy * <i64>sz;
   if (n64 > 24000000) return 0;                         // honest give-up
   const n = <i32>n64;
-  ensureCap(n);
-  memory.fill(gWallP, 0, <usize>n);
+  // v1.12.8 PADDED FLOOD GRID: the grid gets a 1-cell ring on every side
+  // (the ring is pre-marked seen), so the BFS neighbour steps are plain
+  // i±1 / ±sxp / ±sxyp with NO division and NO bounds test in the hot
+  // loop. The budget and the COUNTS are the inner grid, exactly as JS.
+  const sxp = sx + 2, syp = sy + 2, szp = sz + 2;
+  const sxyp = sxp * syp;
+  const np = sxyp * szp;
+  ensureCap(np);
+  memory.fill(gWallP, 0, <usize>np);
   gN = n;
 
-  // ── block cells are walls
+  // ── block cells are walls (per-RUN memory.fill — the cx runs are
+  //    contiguous in the padded grid; indices carry the +1 ring offset)
   b = BLOCKS;
   for (let k = 0; k < nB; k++, b += 24) {
     const bx = i32.load(b), by = i32.load(b + 4), bz = i32.load(b + 8);
     const bsx = i32.load(b + 12), bsy = i32.load(b + 16), bsz = i32.load(b + 20);
     for (let cz = bz; cz <= bz + bsz; cz++)
-      for (let cy = by; cy <= by + bsy; cy++) {
-        let p = ((cz - z0) * sy + (cy - y0)) * sx + (bx - x0);
-        for (let cx = bx; cx <= bx + bsx; cx++, p++) store<u8>(gWallP + <usize>p, 1);
-      }
+      for (let cy = by; cy <= by + bsy; cy++)
+        memory.fill(gWallP + <usize>(((cz - z0 + 1) * syp + (cy - y0 + 1)) * sxp + (bx - x0 + 1)),
+          1, <usize>(bsx + 1));
   }
 
   // ── voxelize the skin triangles (dominant-plane QUARTER-cell sampling +
@@ -145,81 +159,99 @@ export function sealed(nB: i32, nT: i32): i32 {
     const dX2 = cuA - auA, dY2 = cvA - avA;
     const den = dX1 * dY2 - dY1 * dX2;
     if (Math.abs(den) < 1e-12) continue;                // degenerate sliver
+    const invDen = 1.0 / den;                           // v1.12.8: 1 reciprocal, not 2 divs per sample
     const iu0 = <i32>Math.floor(mnU * 16.0), iu1 = <i32>Math.ceil(mxU * 16.0);
     const iv0 = <i32>Math.floor(mnV * 16.0), iv1 = <i32>Math.ceil(mxV * 16.0);
     for (let iu = iu0; iu <= iu1; iu++) {
       const pu = <f64>iu * (P / 4.0);
+      const ccu = cellOf(pu);                           // v1.12.8: constant across the iv run
       for (let iv = iv0; iv <= iv1; iv++) {
         const pv = <f64>iv * (P / 4.0);
         if (!inTri(pu, pv, auA, avA, buA, bvA, cuA, cvA)) continue;
         const px = pu - auA, py = pv - avA;
-        const s = (px * dY2 - py * dX2) / den, q = (dX1 * py - dY1 * px) / den;
+        const s = (px * dY2 - py * dX2) * invDen, q = (dX1 * py - dY1 * px) * invDen;
         const pw = awA + s * (bwA - awA) + q * (cwA - awA);
-        // cell of the sample, axis-mapped (JS: cc[uAxis]=toC(pu),
-        // cc[vAxis]=toC(pv), cc[wAxis]=toC(pw) — cc is [x,y,z])
         let gx: i32, gy: i32, gz: i32;
-        const ccu = cellOf(pu), ccv = cellOf(pv), ccw = cellOf(pw);
+        const ccv = cellOf(pv), ccw = cellOf(pw);
         if (wAxis == 0) { gx = ccw; gy = ccu; gz = ccv; }
         else if (wAxis == 1) { gx = ccu; gy = ccw; gz = ccv; }
         else { gx = ccu; gy = ccv; gz = ccw; }
         gx -= x0; gy -= y0; gz -= z0;
         // mark the cell AND its six face neighbours (the 6-connectivity
-        // pairing the 6-connected flood cannot cross — JS comment carries it)
-        for (let dz = -1; dz <= 1; dz++)
-          for (let dy = -1; dy <= 1; dy++)
-            for (let dx = -1; dx <= 1; dx++) {
-              if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) > 1) continue;
-              const px2 = gx + dx, py2 = gy + dy, pz2 = gz + dz;
-              if (px2 < 0 || py2 < 0 || pz2 < 0 || px2 >= sx || py2 >= sy || pz2 >= sz) continue;
-              store<u8>(gWallP + <usize>((pz2 * sy + py2) * sx + px2), 1);
-            }
+        // pairing the 6-connected flood cannot cross — JS comment carries
+        // it). v1.12.8: unrolled, un-bounded — the +1 ring offset makes
+        // every neighbour a valid index into the PADDED grid.
+        const base = ((gz + 1) * syp + (gy + 1)) * sxp + (gx + 1);
+        store<u8>(gWallP + <usize>base, 1);
+        store<u8>(gWallP + <usize>(base - 1), 1);
+        store<u8>(gWallP + <usize>(base + 1), 1);
+        store<u8>(gWallP + <usize>(base - sxp), 1);
+        store<u8>(gWallP + <usize>(base + sxp), 1);
+        store<u8>(gWallP + <usize>(base - sxyp), 1);
+        store<u8>(gWallP + <usize>(base + sxyp), 1);
       }
     }
   }
 
-  // ── flood the outside from the padded rim (corner 0 is on the rim)
-  memory.fill(gSeenP, 0, <usize>n);
+  // ── flood the outside from the padded rim (v1.12.8 PADDED BFS): the
+  //    1-cell ring is pre-marked seen, the flood starts at the inner grid
+  //    corner (1,1,1), neighbour steps are plain ±1 / ±sxp / ±sxyp —
+  //    NO division, NO bounds test in the hot loop.
+  memory.fill(gSeenP, 0, <usize>np);
+  memory.fill(gSeenP, 1, <usize>sxyp);                             // z = 0 plane
+  memory.fill(gSeenP + <usize>((szp - 1) * sxyp), 1, <usize>sxyp); // z = max plane
+  for (let z = 1; z < szp - 1; z++) {
+    memory.fill(gSeenP + <usize>(z * sxyp), 1, <usize>sxp);                   // y = 0 row
+    memory.fill(gSeenP + <usize>(z * sxyp + (syp - 1) * sxp), 1, <usize>sxp); // y = max row
+    for (let y = 1; y < syp - 1; y++) {
+      const p = gSeenP + <usize>(z * sxyp + y * sxp);
+      store<u8>(p, 1); store<u8>(p + <usize>(sxp - 1), 1);                    // x = 0 / max cols
+    }
+  }
   let qh = 0, qt = 0;
-  store<u8>(gSeenP, 1);
-  i32.store(gQP, 0); qt = 1;
-  const sxy = sx * sy;
+  const start = sxyp + sxp + 1;
+  store<u8>(gSeenP + <usize>start, 1);
+  i32.store(gQP, start); qt = 1;
   while (qh < qt) {
     const i = i32.load(gQP + <usize>qh * 4); qh++;
-    const cx = i % sx;
-    const cy = ((i / sx) | 0) % sy;
-    const cz = (i / sxy) | 0;
-    let j = 0;
-    if (cx > 0) j = i - 1; else j = -1;
-    if (j >= 0 && load<u8>(gSeenP + <usize>j) == 0 && load<u8>(gWallP + <usize>j) == 0) {
+    let j = i - 1;
+    if (load<u8>(gSeenP + <usize>j) == 0 && load<u8>(gWallP + <usize>j) == 0) {
       store<u8>(gSeenP + <usize>j, 1); i32.store(gQP + <usize>qt * 4, j); qt++;
     }
-    if (cx < sx - 1) j = i + 1; else j = -1;
-    if (j >= 0 && load<u8>(gSeenP + <usize>j) == 0 && load<u8>(gWallP + <usize>j) == 0) {
+    j = i + 1;
+    if (load<u8>(gSeenP + <usize>j) == 0 && load<u8>(gWallP + <usize>j) == 0) {
       store<u8>(gSeenP + <usize>j, 1); i32.store(gQP + <usize>qt * 4, j); qt++;
     }
-    if (cy > 0) j = i - sx; else j = -1;
-    if (j >= 0 && load<u8>(gSeenP + <usize>j) == 0 && load<u8>(gWallP + <usize>j) == 0) {
+    j = i - sxp;
+    if (load<u8>(gSeenP + <usize>j) == 0 && load<u8>(gWallP + <usize>j) == 0) {
       store<u8>(gSeenP + <usize>j, 1); i32.store(gQP + <usize>qt * 4, j); qt++;
     }
-    if (cy < sy - 1) j = i + sx; else j = -1;
-    if (j >= 0 && load<u8>(gSeenP + <usize>j) == 0 && load<u8>(gWallP + <usize>j) == 0) {
+    j = i + sxp;
+    if (load<u8>(gSeenP + <usize>j) == 0 && load<u8>(gWallP + <usize>j) == 0) {
       store<u8>(gSeenP + <usize>j, 1); i32.store(gQP + <usize>qt * 4, j); qt++;
     }
-    if (cz > 0) j = i - sxy; else j = -1;
-    if (j >= 0 && load<u8>(gSeenP + <usize>j) == 0 && load<u8>(gWallP + <usize>j) == 0) {
+    j = i - sxyp;
+    if (load<u8>(gSeenP + <usize>j) == 0 && load<u8>(gWallP + <usize>j) == 0) {
       store<u8>(gSeenP + <usize>j, 1); i32.store(gQP + <usize>qt * 4, j); qt++;
     }
-    if (cz < sz - 1) j = i + sxy; else j = -1;
-    if (j >= 0 && load<u8>(gSeenP + <usize>j) == 0 && load<u8>(gWallP + <usize>j) == 0) {
+    j = i + sxyp;
+    if (load<u8>(gSeenP + <usize>j) == 0 && load<u8>(gWallP + <usize>j) == 0) {
       store<u8>(gSeenP + <usize>j, 1); i32.store(gQP + <usize>qt * 4, j); qt++;
     }
   }
 
-  // ENVELOPE = sealed interior + enclosing shell (JS law)
+  // ENVELOPE = sealed interior + enclosing shell (JS law) — COUNTS over
+  // the INNER grid (the ring is scaffolding, never counted).
   let insideFree = 0, wallc = 0;
-  for (let i = 0; i < n; i++) {
-    if (load<u8>(gWallP + <usize>i) != 0) wallc++;
-    else if (load<u8>(gSeenP + <usize>i) == 0) insideFree++;
+  for (let z = 1; z <= sz; z++) {
+    const pz = z * sxyp;
+    for (let y = 1; y <= sy; y++) {
+      const base = pz + y * sxp + 1;
+      for (let x = 0; x < sx; x++) {
+        if (load<u8>(gWallP + <usize>(base + x)) != 0) wallc++;
+        else if (load<u8>(gSeenP + <usize>(base + x)) == 0) insideFree++;
+      }
+    }
   }
   i32.store(OUT, insideFree);
   i32.store(OUT + 4, wallc);
