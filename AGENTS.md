@@ -2786,6 +2786,21 @@ in full-suite runs. Standing rules:
    DELETED (P7.1 slice 2: rig-aware audit bbox + the anchor-class law
    headless) — the **@models and @subgrid e2e tags are now EMPTY**.
    Session line 394 → 200 runs (−49 %).
+ - **MEASURED (v1.12.5):** THE VIEWPORT-MOCK HARNESS (jsdom: vi.mock the
+   Viewport — a props-recording stub + a Proxy fake engine fed through the
+   real onEngine — and crafts.ts — testdata through the real openFunnel):
+   the REAL Editor state machine mounts in jsdom. vitest 766 → **807**
+   (pinedit.test 12 + editor.dom 13 + balloonskin.dom 4 + scene.headless
+   20→29 camera/ghost/surge/label/exclusivity/mirror-axis/live-edit +
+   tooldoc/liftwidget +3); matrix 200 → **147 listed runs** (session
+   394 → 147, −63 %), fast tier 190 → 137 (wall 1.7 → 1.5 min — the
+   fixed vite-build share grows as the run count shrinks). select.spec + liveedit.spec
+   DELETED (whole files → headless + jsdom); builddock 34→16, sphereskin
+   24→10 (the two 120 s twin legs + the 180 s big-balloon leg retired to
+   pinedit/splitface/tooldoc pairs); engine/pinedit.ts = the prism
+   uniform-mirror-rule pure seam. The surviving e2e tier = pixels +
+   real-pointer rituals + integration + dev-pair (docs/TEST-PYRAMID.md
+   v1.12.5).
 - **WARM-BOOT FINDING (v1.12.1, we: "can we re-use and clean a headless
   chrome to reduce the per-test ~400 ms?"): measured — context+page
   creation is ~50 ms/test (not 400; +2 tests = +0.1 s), chromium launch

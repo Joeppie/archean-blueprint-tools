@@ -147,7 +147,7 @@ runs).
   clock (this deletes every 120 ms/2 s/450 ms wall-clock law from e2e).
 - e2e keeps ONE thin "pointermove reaches the seam" test per input family.
 
-### Phase 3 — jsdom component tier — SEEDED ✅ + dialogs/widgets LANDED ✅ (v1.12.4)
+### Phase 3 — jsdom component tier — SEEDED ✅ + dialogs/widgets LANDED ✅ (v1.12.4) + VIEWPORT-MOCK HARNESS / panels+dock LANDED ✅ (v1.12.5)
 - vitest + @testing-library/react: the panels, the build dock, ToolsDialog,
   HelpDialog, StaleDialog, CostWidget, LiftWidget, MirrorGlyph — testids,
   click → state → row repaint, dialog flows, the Escape-subscribe-once
@@ -305,11 +305,94 @@ wall clock):**
     fns — NO clean seam exists today; needs a refactor the phase must
     own), Phase 5 hook-channel diet.
 
+- **v1.12.5 THE VIEWPORT-MOCK HARNESS ✅ + pinedit/presets/keys/live-edit
+  migrations ✅** (four commits; the session's target — "there has to be a
+  lot of functionality that doesn't require an e2e test"):
+  - **Phase 3 enabler: `__tests__/harness.tsx`** — `vi.mock` the Viewport
+    module (a props-recording stub + a Proxy FAKE ENGINE handed through
+    the real `onEngine`; selection pushes back via `onSelection`; the
+    engine's hull⇄wire setOption EXCLUSIVITY mirrored so ⚙ rows read
+    truthfully) and `vi.mock` crafts.ts (testdata on disk through the
+    real `openFunnel`). THE REAL EDITOR MOUNTS in jsdom — ws modes, the
+    mirror widget, the build dock, panel editors, doc mirror, undo stack,
+    pick routing (driven through the shipped `onBlockPick` callback + a
+    settable `pickCell` answer). New tier file `editor.dom.test.tsx`
+    (13 pins): dock columns + SIZE-UI absence + row counts, list
+    select ▸ ✕ ▸ Ctrl+Z, SQUARE FIX [9,9,9], the MIRROR widget
+    axis/glyph/aria/plsym transitions, TRI LIST ±cell + honest 'refused',
+    the FLAVOUR law (triangles DRAFT / Modify SELECTS — triAt-owned
+    centroid), Modify-opens-EMPTY + pick reveal + part auto-jump
+    (TODO G), opt-labels row, w/h keys + exclusivity, MATERIALS row,
+    both RGB-picker legs, the twist-row ▸ liveDataEdit routing.
+    `balloonskin.dom.test.tsx` (4): the balloon preview laws (dev
+    −0.xx/+0.xx m + lift@SL, r=20 number box > 5000 tris, sub-cell
+    refusal + ⚖ Fix re-enabling OK, nose/tail tokens + ONE paint
+    control finish line). liftwidget (+1): the empty-state copy law.
+  - **THE HEADLESS ENGINE grew 20 → 29 pins**: KSP camera-cluster
+    eye-snaps + fit() = the load framing (new `virtualControls` harness
+    seam — a passive OrbitControls stand-in for attach()); load(keepView)
+    camera-carry (undo.spec's Ctrl+Z law); the placement-ghost lattice
+    law (⟲ span-swap + whole-cell drag); selection SURGES pumped to every
+    arrival with synthetic time (`stepSurges(now)` — no render pump, no
+    wall-clock race); label-chip census; setOption exclusivity; MIRROR
+    ONE AXIS twin liveness; the v1.12.5 live-edit pair (Propeller twist
+    grows the generated blades with the load counter standing still;
+    Aileron +27° deflects the flap, MW-NaN/GEO-NaN sweep empty — await
+    the `liveEdits` promise chain).
+  - **`engine/pinedit.ts`** — the v1.11 UNIFORM MIRROR RULE for prisms
+    extracted from the Editor's callbacks (behaviour-neutral): the
+    mirrored delta, the mirror-conjugate rotate, the pair-wide flip, the
+    identity face-slot paint, the v1.11.0 lookup-before-mutation +
+    ATOMIC-clone fixes. `pinedit.test.ts` (12) reproduces the builddock
+    TODO D/E values (self +2 x / twin −2 x, pair SURVIVES, normals
+    EXACTLY negate, twin wears the slot on the SAME index, refusals write
+    NOTHING to bp AND doc). tooldoc +2 (shading=smooth commit; the
+    commit writes the LIVE GHOST payload).
+  - **e2e retired (L5, same commits, −53 listed runs)**: builddock 9
+    (dock columns, list/✕/Ctrl+Z, SQUARE FIX, MIRROR widget, tri list
+    ±cell, mode law, TODO D, TODO E — the two 120 s legs; the
+    rotate+drag-big-balloon 180 s leg paired to splitface NEVER-DROPS +
+    tooldoc rotated-ghost mapping + the headless ghost pin), panels
+    TODO G, scene camera presets, undo Ctrl+Z-keeps-camera, sphereskin 7
+    (sliders/dev-line, number-box/needles, shading=smooth, ⟲
+    quarter-turns, BOTH-bodies-needle, paint-ONE-control), select.spec
+    **whole file**, liveedit.spec **whole file**, phoneux ×2 (w-key,
+    empty-Lift copy), tools ×3 (MATERIALS, RGB ×2), views ⚙ mirror axis.
+    Kept per § 5 everywhere: pixels (viewmenu model, paints, grids,
+    dialog fit), real-pointer rituals (pin 3-click + drags, brush click,
+    smear place, gizmo multi-grip, hinge drag, TAIL build-to-file, the
+    balloon OK ▸ ghost ▸ Build ritual), integration (download, staleness,
+    save byte-fidelity, zero-404 atlas, IndexedDB).
+  - Numbers: vitest 766 → **807**; matrix 200 → **147 listed runs**
+    (session 394 → 147, **−63 %**); fast tier 190 → 137 runs, wall clock
+    **1.7 min → 1.5 min** (91 s measured at the cut — the fixed
+    `vite build` + preview boot (~35 s) is now ~40 % of the tier; the
+    remaining lever is the pixel/ritual count, which § 5 protects);
+    @slow unchanged (10).
+  - LESSONS the tier exposed: (a) the Viewport-mock harness mounts the
+    FULL Editor for ~1 s in jsdom — the fake engine must be a Proxy that
+    RECORDS everything and answers only the read-backs (getOptions with
+    the exclusivity rule, mirrorAxis, craftMirrorAxes, pickCell,
+    onSelection push-back); a fake that drops a read-back (getOptions
+    before the setOption-stick fix) presents as a phantom UI bug —
+    the fake mirrors scene.ts, it does not invent; (b) the harness's
+    `vi.hoisted` config is the only legal per-test knob for vi.mock
+    factories (axes for craftMirrorAxes); (c) e2e scrub comments lie —
+    the Aileron scrub's "≈ +6° (0.05/px)" was range/400 (0.225°/px) =
+    +27°: port the LAW (the measured end state), not the comment;
+    (d) the perf tripwire (load.perf candidate 1) goes red under
+    CPU-contention with playwright --list — re-run ALONE before
+    believing it (measured: 964 ms vs 154 ms solo).
+
 - Phase 1 remaining slices: the transform stack + builders
-  (subride/gizmo/wheels/asset-space classes). Phase 3: the dialogs are
-  cheap jsdom wins; the panels/dock/cost family needs the Viewport-mock
-  harness (Editor mounts the Engine → WebGL) — the next Phase 3 slice.
-  Phase 4: device harness. Phase 5: hook-channel diet.
+  (subride/gizmo/wheels/asset-space classes). Phase 3: **the Viewport-mock
+  harness LANDED (v1.12.5)** — the panels/dock/keys/materials family is
+  now a standing jsdom tier (`__tests__/harness.tsx`); the remaining e2e
+  specs are the § 5 "keep" sets (pixels, real-pointer rituals,
+  integration, dev-pair). Phase 4: device harness (modebox/gizmoSize as
+  pure fns — the cheap half, keys + exclusivity + lift copy, landed with
+  v1.12.5; the gizmo-SEAM refactor stays OUT until owned). Phase 5:
+  hook-channel diet.
 - Phase 1 is the enabler: no e2e geometry leg retires before its node census
   reproduces the green values (L5).
 - Metrics per landing (report in the commit message): vitest count, e2e
