@@ -84,3 +84,18 @@ Read this file together with LICENSE (GNU GPL v3).
    copies used as a regression corpus (no preview images are included, by the
    repository author's decision). Workshop ids are listed in
    testdata/MANIFEST.md.
+
+6. XenonCode interpreter (tools/xenoncode/)
+   -----------------------------------------
+   `tools/xenoncode/` runs programs on the **dev's own XenonCode code** — the
+   parser/compiler/VM (`XenonCode.hpp`) and screen model (`XenonScreen.hpp`)
+   from https://github.com/batcholi/XenonCode (by batcholi / FloDKSM), pinned
+   to a recorded commit (see `tools/xenoncode/XENONCODE_UPSTREAM.md`).
+   `xenoncode.js`/`xenoncode.wasm` are compiled build products of that pinned
+   source, unmodified; only the device shim (`xc_host.*`, GPL v3) and the demo
+   program (`demo/hello/main.xc`, GPL v3, authored for this repo) are ours.
+   The upstream repository carries no LICENSE file; this use follows the good-
+   faith + attribution posture of section 4 above (the library is published
+   openly by the game's developer, who also runs it as WASM at
+   xenoncode.com), with the repository owner's ruling of 2026-10-27 that such
+   use is intended. Rights-holder objections are handled as in section 4.

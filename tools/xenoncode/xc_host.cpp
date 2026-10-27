@@ -1,13 +1,13 @@
-// xc_archean.cpp — native POC host: runs a real workshop craft's XenonCode
-// program on the DEV interpreter (batcholi/XenonCode) with a minimal Archean
-// computer device shim.
+// xc_host.cpp — the XenonCode host: runs real craft programs on the DEV
+// interpreter (batcholi/XenonCode) with a minimal Archean computer device shim.
 //
-// build: g++ -O2 -std=c++20 -I<XenonCode repo> xc_archean.cpp -o xc_archean
-// run:   ./xc_archean <program-dir-with-main.xc> [cycles]
+// native:  g++ -O2 -std=c++20 -I<upstream> xc_host.cpp -o run/xc_run
+//          ./run/xc_run <program-dir-with-main.xc> [cycles]   (XC_DIAL=… for hello)
+// browser: see build.sh -> xenoncode.js + xenoncode.wasm
 #define XENONCODE_IMPLEMENTATION
 #include "XenonCode.hpp"
 #include "XenonScreen.hpp"
-#include "xc_archean_host.h"
+#include "xc_host.h"
 
 #include <chrono>
 #include <cmath>
@@ -37,6 +37,9 @@ static string varToString(const Var& v) { return string(v); }
 static XenonCode::Var::Type screenType;
 
 static void archeanInit() {
+	static bool declared = false;   // re-boot reuses the declarations (the
+	if (declared) return;           // library asserts on duplicate names)
+	declared = true;
 	// language-level constants the programs use
 	XenonCode::DeclareGlobalConstant("pi", 3.141592653589793238462643);
 	XenonCode::DeclareGlobalConstant("2pi", 2 * 3.141592653589793238462643);
@@ -51,6 +54,15 @@ static void archeanInit() {
 	XenonCode::DeclareGlobalConstant("cyan", C(0, 255, 255));
 	XenonCode::DeclareGlobalConstant("magenta", C(255, 0, 255));
 	XenonCode::DeclareGlobalConstant("orange", C(255, 165, 0));
+	XenonCode::DeclareGlobalConstant("gray", C(128, 128, 128));
+	XenonCode::DeclareGlobalConstant("grey", C(128, 128, 128));
+	XenonCode::DeclareGlobalConstant("lime", C(0, 255, 128));
+	XenonCode::DeclareGlobalConstant("navy", C(0, 0, 128));
+	XenonCode::DeclareGlobalConstant("teal", C(0, 128, 128));
+	XenonCode::DeclareGlobalConstant("purple", C(160, 32, 240));
+	XenonCode::DeclareGlobalConstant("pink", C(255, 192, 203));
+	XenonCode::DeclareGlobalConstant("brown", C(150, 90, 40));
+	XenonCode::DeclareGlobalConstant("silver", C(192, 192, 192));
 
 	// entry points (computer.md): update runs every cycle after the timers
 	XenonCode::DeclareEntryPoint("update");
@@ -60,6 +72,14 @@ static void archeanInit() {
 	XenonCode::DeclareEntryPoint("scroll");
 
 	// the screen object (XenonScreen.hpp model)
+	//
+	// OVERLOADS: the library keys device functions by NAME, so a member may
+	// carry exactly ONE declared prototype (declaring write/blank twice
+	// throws "Cannot override a device object member"). The call sites are
+	// not arity-checked, so we declare the WIDEST form and dispatch on the
+	// runtime argument count inside one lambda — that is the variadic-member
+	// pattern a real integration needs (the game's compiler is a superset of
+	// the open library here).
 	screenType = XenonCode::DeclareObjectType("screen", {
 		{"char_h:number", [](Computer*, const Var& o, const vector<Var>&) -> Var {
 			return (double)screenOf(o)->GetCharHeight(); }},
@@ -70,12 +90,35 @@ static void archeanInit() {
 		{"size_y:number", [](Computer*, const Var& o, const vector<Var>&) -> Var {
 			return (double)screenOf(o)->GetHeight(); }},
 		{"text_size($n:number)", [](Computer*, const Var& o, const vector<Var>& a) -> Var {
-			screenOf(o)->SetTextSize((uint32_t)(int64_t)a[0]); return {}; }},
-		{"blank()", [](Computer*, const Var& o, const vector<Var>&) -> Var {
-			screenOf(o)->Blank(); return {}; }},
+			if (a.size() >= 1) screenOf(o)->SetTextSize((uint32_t)(int64_t)a[0]); return {}; }},
+		// blank() / blank(color) — one declaration, runtime arity dispatch
+		{"blank($c:number)", [](Computer*, const Var& o, const vector<Var>& a) -> Var {
+			if (a.size() >= 1) screenOf(o)->Blank(packedColor(a[0]));
+			else screenOf(o)->Blank();
+			return {}; }},
+		// color(c) — foreground
+		{"color($c:number)", [](Computer*, const Var& o, const vector<Var>& a) -> Var {
+			if (a.size() >= 1) screenOf(o)->SetFgColor(packedColor(a[0])); return {}; }},
+		// write(x,y,color,text) / write(x,y,text) / write(text)
 		{"write($x:number,$y:number,$c:number,$t:text)", [](Computer*, const Var& o, const vector<Var>& a) -> Var {
-			screenOf(o)->Write((uint32_t)(int64_t)a[0], (uint32_t)(int64_t)a[1],
-			                   packedColor(a[2]), varToString(a[3]));
+			XenonScreen* s = screenOf(o);
+			if (a.size() >= 4) s->Write((uint32_t)(int64_t)a[0], (uint32_t)(int64_t)a[1],
+			                            packedColor(a[2]), varToString(a[3]));
+			else if (a.size() == 3) s->Write((uint32_t)(int64_t)a[0], (uint32_t)(int64_t)a[1],
+			                              s->GetFgColor(), varToString(a[2]));
+			else if (a.size() == 1) s->Write(s->GetFgColor(), varToString(a[0]));
+			return {}; }},
+		// pixel(x, y, color) — one framebuffer pixel (emulated point write:
+		// XenonScreen exposes data(), the live RGBA-packed pixels, and the
+		// in-game screens do expose single-pixel drawing to programs)
+		{"pixel($x:number,$y:number,$c:number)", [](Computer*, const Var& o, const vector<Var>& a) -> Var {
+			XenonScreen* s = screenOf(o);
+			uint32_t x = (uint32_t)(int64_t)a[0], y = (uint32_t)(int64_t)a[1];
+			if (x < s->GetWidth() && y < s->GetHeight()) {
+				uint32_t p = packedColor(a[2]);
+				memcpy(s->data() + (size_t)(y * s->GetWidth() + x) * 4, &p, 4);
+				s->Dirty();
+			}
 			return {}; }},
 	});
 
@@ -186,7 +229,10 @@ int main(int argc, char** argv) {
 	computer.capability.ram = 65536;
 	computer.capability.storage = 32;
 	if (!computer.LoadProgram(dir)) { cerr << "[xc] load failed" << endl; return 3; }
+	computer.LoadStorage(dir + "/storage");
 	g_screen.Blank();
+	const double dial = getenv("XC_DIAL") ? atof(getenv("XC_DIAL")) : 0.0;
+	xc_inputs[1][7] = dial;   // the hello program's externally provided numer
 	bool realtime = getenv("XC_FAST") == nullptr;   // timers run on the real clock
 	try {
 		computer.RunInit();
@@ -202,6 +248,7 @@ int main(int argc, char** argv) {
 		cerr << "[xc] RUNTIME ERROR: " << e.what() << endl;
 		return 4;
 	}
+	computer.SaveStorage(dir + "/storage");
 	g_screen.Update();
 
 	// ---- report: events + screen dump (PPM) --------------------------------
@@ -268,6 +315,7 @@ EMSCRIPTEN_KEEPALIVE int xc_boot() {
 		g_computer->capability.ram = 65536;
 		g_computer->capability.storage = 32;
 		if (!g_computer->LoadProgram("/prog")) { g_err = "load failed"; return 1; }
+		g_computer->LoadStorage("/prog/storage");   // survives reboots in-session
 		g_screen.Blank();
 		g_computer->RunInit();
 		g_cycle = 0;
@@ -275,6 +323,8 @@ EMSCRIPTEN_KEEPALIVE int xc_boot() {
 	} catch (XenonCode::ParseError& e) { g_err = "parse: " + string(e.what()); return 1; }
 	  catch (XenonCode::CompileError& e) { g_err = "compile: " + string(e.what()); return 1; }
 	  catch (XenonCode::RuntimeError& e) { g_err = "runtime: " + string(e.what()); return 1; }
+	  catch (std::exception& e) { g_err = "error: " + string(e.what()); return 1; }
+	  catch (...) { g_err = "unknown compile error"; return 1; }
 }
 
 // run one computer cycle (timers/tick + the update entry point); returns 0 ok
@@ -291,6 +341,10 @@ EMSCRIPTEN_KEEPALIVE int xc_cycle() {
 		g_err = "runtime: " + string(e.what());
 		g_computer.reset();
 		return 1;
+	} catch (std::exception& e) {
+		g_err = "error: " + string(e.what());
+		g_computer.reset();
+		return 1;
 	}
 	g_screen.Update();
 	return 0;
@@ -300,6 +354,7 @@ EMSCRIPTEN_KEEPALIVE int xc_cycle() {
 EMSCRIPTEN_KEEPALIVE const char* xc_events() { g_evJson = xc_drainEvents(); return g_evJson.c_str(); }
 EMSCRIPTEN_KEEPALIVE const char* xc_error() { return g_err.c_str(); }
 EMSCRIPTEN_KEEPALIVE void xc_set_input(int io, int ch, double v) { xc_inputs[io][ch] = v; }
+EMSCRIPTEN_KEEPALIVE void xc_save_storage() { if (g_computer) g_computer->SaveStorage("/prog/storage"); }
 EMSCRIPTEN_KEEPALIVE void xc_pilot_script(int on) { g_pilotScripted = on; }
 EMSCRIPTEN_KEEPALIVE uint32_t xc_screen_w() { return g_screen.GetWidth(); }
 EMSCRIPTEN_KEEPALIVE uint32_t xc_screen_h() { return g_screen.GetHeight(); }

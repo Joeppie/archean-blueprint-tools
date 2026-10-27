@@ -1,7 +1,7 @@
 // xc_archean_host.h — POC device shim: the ARCHEAN_computer device side of
 // XenonCode, minimal enough to run a real workshop craft's program.
 //
-// XenonCode (github.com/batcholi/XenonCode, by the game's dev) ships the
+// See README.md + XENONCODE_UPSTREAM.md for provenance (pinned upstream,
 // LANGUAGE core (XenonCode.hpp: parser/compiler/VM) and the SCREEN model
 // (XenonScreen.hpp) as open source; the DEVICE functions (screen(), input_*,
 // output_*, colours, entry points) live in the game binary. This header is a

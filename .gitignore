@@ -9,6 +9,10 @@ reports/
 node_modules
 
 # POC build artifacts (WASM of the unlicensed dev XenonCode library + native binary)
-poc/xenoncode/xenoncode_poc.js
-poc/xenoncode/xenoncode_poc.wasm
-poc/xenoncode/run/
+tools/xenoncode/upstream/
+tools/xenoncode/events.json
+tools/xenoncode/run/
+tools/xenoncode/screen.ppm
+poc/
+tools/xenoncode/demo/**/storage/
+tools/xenoncode/demo/**/xc_program.bin

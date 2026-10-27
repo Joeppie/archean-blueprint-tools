@@ -46,6 +46,12 @@ app/tools/onebyone.mjs          per-COMPONENT matrix triage: our viewer, one par
                                 nothing selected + node bboxes / label ink / occupancy JSON
 tests/matrix.sh                 the whole matrix ritual (see MATRIX.md)
 tools/make_landing.py         regenerates the landing gallery + viewer/workshop.json
+tools/xenoncode/              XenonCode IN THE BROWSER: the dev's interpreter
+                              (batcholi/XenonCode, pinned + rebuilt by build.sh)
+                              compiled to WASM + our Archean device shim + the
+                              "simulated computer" standalone landing page
+                              (hello.xc / plane / cheap-exploration-plane);
+                              see tools/xenoncode/README.md + NOTICE §6
 tools/add_workshop.py <id>      ingest a locally-subscribed workshop craft
                                 (names: tools/ws-names.tsv, fetched slowly — Steam rate-limits)
 tools/extract_models.py         regenerates viewer/models/ from an installed game
