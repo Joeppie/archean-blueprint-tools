@@ -3,7 +3,7 @@
 // stay in the engine (the 60 fps path never runs through the reconciler).
 // Test hooks land on window.__ARCHEAN__ (same philosophy as the legacy
 // title/#out reporting): stats/pick/pose are assertable without pixels.
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { openAtlas, modelFailures, type ModelAtlas } from '../engine/models';
 import type { Blueprint } from '../engine/format';
 import { Engine, type PickHit, type SceneStats } from '../engine/scene';
@@ -110,6 +110,8 @@ declare global {
 let atlasP: Promise<ModelAtlas | null> | null = null;
 const getAtlas = (): Promise<ModelAtlas | null> => (atlasP ??= openAtlas());
 
+let __vpMarked = false;
+let __cMarked = false;   // v1.12.2 BOOT COST: first-render mark
 export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, onBlockPick, onBlockHover, placing = null, onPlace, onPaintOpen, onBlockToTris, onPlaceCancel, onPlaceBuild, onPlaceRotate, onPlaceBack, onManifest, keepView = false }: {
   bp: Blueprint | null;
   onPick: (h: PickHit) => void;
@@ -163,12 +165,34 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
    *  A craft swap (openText) never sets this, so it re-frames as ever. */
   keepView?: boolean;
 }) {
+  if (!__vpMarked) { __vpMarked = true; performance.mark('boot:vp-render'); }   // bootprobe
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const __cT0 = performance.now();
+  const __canvasCb = (el: HTMLCanvasElement | null) => {
+    // v1.12.2 BOOT COST: the canvas NODE landed in the DOM (commit-time
+    // ref callback) — the bootprobe bisection point between React render
+    // and layout effects.
+    if (el && !__cMarked) { __cMarked = true;
+      performance.mark('boot:canvas'); void __cT0; }
+    canvasRef.current = el;
+  };
   const engineRef = useRef<Engine | null>(null);
 
-  useEffect(() => {
+  // v1.12.2 BOOT COST: LAYOUT effect, not passive — the passive form sat
+  // behind the browser's ~250 ms first paint of the editor DOM (bootprobe
+  // profile: render1 69 ms → engine 324 ms of main-thread idle), so the
+  // WebGL context, lights and manifest fetch only started after paint. The
+  // layout form attaches the engine synchronously at commit: its ~40 ms
+  // overlaps the paint it used to queue behind.
+  useLayoutEffect(() => {
     const engine = new Engine();
+    performance.mark('boot:enginedone');                // Engine constructor returned
     engine.attach(canvasRef.current!);
+    performance.mark('boot:attach');                   // WebGL context + scene root
+    // v1.12.2 BOOT COST: kick the manifest fetch NOW (memoised promise the
+    // load effect awaits) — it ran serially BEHIND the blueprint download,
+    // costing the 6 MB giant ~380 ms of dead wire before scene build began.
+    void getAtlas().catch(() => { /* the load effect reports via modelFailures */ });
     engineRef.current = engine;
     const ro = new ResizeObserver(() => engine.resize());
     ro.observe(canvasRef.current!);
@@ -249,7 +273,11 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
     let dead = false;
     (async () => {
       const atlas = await getAtlas();
+      if (!dead) performance.mark('boot:atlas');       // bootprobe.mjs phase mark
       if (!dead) engineRef.current?.load(bp, atlas, keepViewRef.current);
+      // v1.12.2 BOOT COST: the scene-built mark bootprobe.mjs measures (and
+      // any future CI budget) — the number the e2e wall time multiplies.
+      if (!dead) performance.mark('boot:scene-load');
       if (!dead) onManifest?.(atlas?.manifest ?? null);
     })().catch(console.error);
     return () => { dead = true; };
@@ -499,7 +527,7 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
 
   return (
     <div ref={hostRef} className="relative h-full w-full" data-testid="viewport">
-      <canvas ref={canvasRef} data-testid="canvas" className="block h-full w-full touch-none"
+      <canvas ref={__canvasCb} data-testid="canvas" className="block h-full w-full touch-none"
         onPointerDown={e => {
           down.current = { x: e.clientX, y: e.clientY };
           if (placing && mode === 'edit' && e.button === 0 && !e.shiftKey &&

@@ -35,6 +35,58 @@ describe('mask classification', () => {
 });
 
 describe('pair index + auto-disable', () => {
+  test('v1.12.2 fuzz: the inlined per-type scan ≡ the symMaskAt reference (30 seeds)', () => {
+    // the rewrite (BOOT COST: allocation-free Float64 loop) must reproduce
+    // the reference scan EXACTLY — per direction, mask and push ORDER — on
+    // adversarial positions: exact mirrors, sub-eps jitter, on-plane coords,
+    // drift, eps-boundary values, shared positions, same-type crowds.
+    const naive = (comps: BlueprintComponent[]) => {
+      const out = new Map<number, { j: number; mask: number }[]>();
+      const byType = new Map<string, number[]>();
+      comps.forEach((c, i) => {
+        const l = byType.get(c.type); if (l) l.push(i); else byType.set(c.type, [i]);
+      });
+      for (const idxs of byType.values())
+        for (const i of idxs)
+          for (const j of idxs)
+            if (j !== i) {
+              const m = symMaskAt(comps[i]!.position, comps[j]!.position, 0.011);
+              if (m) {
+                const l = out.get(i);
+                if (l) l.push({ j, mask: m }); else out.set(i, [{ j, mask: m }]);
+              }
+            }
+      return out;
+    };
+    for (let seed = 1; seed <= 30; seed++) {
+      let t = seed * 2654435761 >>> 0;
+      const rnd = () => ((t = (t * 1664525 + 1013904223) >>> 0) / 4294967296);
+      const types = ['SmallWheel', 'Lamp', 'Aileron', 'Build'];
+      const kinds = [0, 1, 2, 3, 4, 5, 6, 7];
+      const comps: BlueprintComponent[] = [];
+      const n = 3 + Math.floor(rnd() * 25);
+      for (let i = 0; i < n; i++) {
+        const k = kinds[Math.floor(rnd() * 8)]!;
+        const q = (v: number) => Math.round(v / 0.25) * 0.25;
+        const x = q((rnd() - 0.5) * 8), y = q((rnd() - 0.5) * 4), z = q((rnd() - 0.5) * 8);
+        const jz = (v: number) => v + (rnd() - 0.5) * (k >= 4 ? 0.021 : 0.001); // jitter around eps
+        const pos: Vec3D =
+          k === 0 ? p(x, y, z) :                    // plain lattice
+          k === 1 ? p(-x + 0, y, z) :               // x-mirror twin
+          k === 2 ? p(x, -y, z) :                   // y-mirror twin
+          k === 3 ? p(-x, -y, -z) :                 // point twin
+          k === 4 ? p(jz(-x), y, z) :               // eps-boundary x mirror
+          k === 5 ? p(0, y, z) :                    // on-plane
+          k === 6 ? p(x + 0.05, y, z) :             // drifted twin
+          p(0, 0, 0);                               // shared centre
+        comps.push(comp(types[Math.floor(rnd() * 4)]!, pos));
+      }
+      expect(symTwinIndex(comps)).toEqual(naive(comps));
+    }
+  });
+});
+
+describe('pair index + auto-disable', () => {
   const comps = [comp('SmallWheel', p(3.125, 0, 1)), comp('SmallWheel', p(-3.125, 0, 1)),
                  comp('Lamp', p(3.125, 0, 1))];
   test('same-type pairs only, both directions', () => {

@@ -89,6 +89,14 @@ test.describe('view menu: see-through ground, sky backdrops, ortho @ui', () => {
 
   test('the VIEW menu: popover rows, see-through pad, backdrop swaps + persistence (one boot)', async ({ page }) => {
     desktopOnly();
+    // v1.12.2 BACKDROP-SKIP FIXTURE LAW: the Playwright storageState ships
+    // archean-app-backdrop='none' so every boot skips the panorama (the
+    // fresh-profile DEF panorama is ONLY this step's law — the swap/persist
+    // legs below click their backdrop explicitly). Pre-load the gallery
+    // root and remove the seeded key, so the craft boot below reads a
+    // FRESH profile and starts ON the manifest default.
+    await page.goto('/');
+    await page.evaluate(() => localStorage.removeItem('archean-app-backdrop'));
     await openCraft(page, ISW);
 
     await test.step('BOOT DEFAULT (v1.9.4, we: "make sky backdrop default"): a fresh profile starts ON the manifest default panorama', async () => {

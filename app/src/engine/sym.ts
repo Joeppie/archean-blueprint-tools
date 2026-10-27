@@ -32,7 +32,18 @@ export function symMaskAt(a: Vec3D, b: Vec3D, eps: number): number {
   return m;
 }
 
-/** compIdx → its twin pairs, from LOAD-TIME geometry (same type only). */
+/** compIdx → its twin pairs, from LOAD-TIME geometry (same type only).
+ *  v1.12.2 BOOT COST: the per-type pair scan is the giant craft's load hot
+ *  spot (~1 800 same-type structural parts = 3.2 M mask tests, 28 ms of the
+ *  load 'anchor' phase). The body is ARITHMETICALLY the old
+ *  symMaskAt(comps[i].position, comps[j].position, 0.011) call — inlined on
+ *  flat Float64 arrays (the old code allocated a 3-element array PAIR per
+ *  call = ~6 M allocations on the giant, which is most of the cost).
+ *  Directed pairs preserved exactly: the off-plane test reads |a| = the
+ *  FIRST position, so (i→j) and (j→i) can differ, and both directions are
+ *  emitted (the old double loop visited every ordered pair).
+ *  symMaskAt itself stays exported and untouched — the fuzz pin below runs
+ *  this scan against it per component pair. */
 export function symTwinIndex(comps: readonly BlueprintComponent[]): Map<number, TwinPair[]> {
   const out = new Map<number, TwinPair[]>();
   const byType = new Map<string, number[]>();
@@ -40,16 +51,44 @@ export function symTwinIndex(comps: readonly BlueprintComponent[]): Map<number, 
     const l = byType.get(c.type);
     if (l) l.push(i); else byType.set(c.type, [i]);
   });
-  for (const idxs of byType.values())
-    for (const i of idxs)
-      for (const j of idxs)
-        if (j !== i) {
-          const m = symMaskAt(comps[i]!.position, comps[j]!.position, 0.011);
-          if (m) {
-            const l = out.get(i);
-            if (l) l.push({ j, mask: m }); else out.set(i, [{ j, mask: m }]);
-          }
+  const EPS = 0.011;
+  for (const idxs of byType.values()) {
+    const n = idxs.length;
+    if (n < 2) continue;
+    const px = new Float64Array(n), py = new Float64Array(n), pz = new Float64Array(n);
+    for (let k = 0; k < n; k++) {
+      const p = comps[idxs[k]!]!.position;
+      px[k] = p.x; py[k] = p.y; pz[k] = p.z;
+    }
+    for (let i = 0; i < n; i++) {
+      const ax = px[i]!, ay = py[i]!, az = pz[i]!;
+      let l: TwinPair[] | undefined;
+      for (let k = 0; k < n; k++) {
+        if (k === i) continue;
+        let m = 0, s: number, d: number;
+        s = ax + px[k]!; if (s < 0) s = -s;
+        d = ax - px[k]!; if (d < 0) d = -d;
+        if (s < EPS && (ax > EPS || ax < -EPS)) m = 1;             // mirrored AND off-plane
+        else if (d > EPS) continue;                                // neither equal nor mirrored
+        s = ay + py[k]!; if (s < 0) s = -s;
+        d = ay - py[k]!; if (d < 0) d = -d;
+        if (s < EPS && (ay > EPS || ay < -EPS)) m |= 2;
+        else if (d > EPS) continue;
+        s = az + pz[k]!; if (s < 0) s = -s;
+        d = az - pz[k]!; if (d < 0) d = -d;
+        if (s < EPS && (az > EPS || az < -EPS)) m |= 4;
+        else if (d > EPS) continue;
+        if (!m) continue;
+        const ci = idxs[i]!;
+        if (l) l.push({ j: idxs[k]!, mask: m });
+        else {
+          const ex = out.get(ci);
+          if (ex) ex.push({ j: idxs[k]!, mask: m });
+          else out.set(ci, [{ j: idxs[k]!, mask: m }]);
         }
+      }
+    }
+  }
   return out;
 }
 

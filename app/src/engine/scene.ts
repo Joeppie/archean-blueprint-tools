@@ -101,7 +101,11 @@ export interface SceneStats { blocks: number; tris: number; hullTris: number; co
   tier: 'full' | 'lite';
   /** scene rebuilds so far — an e2e mutation pin asserts this bumps, i.e.
    *  the edit actually REPAINTED the merged mesh (not just wrote the data) */
-  loads: number }
+  loads: number,
+  /** v1.12.2 BOOT COST: per-pass ms of the LAST load() (see the lpStep map
+   *  in load()) — bootprobe.mjs / load.perf read it; absent before the
+   *  first load completes */
+  loadPhases?: Record<string, number> }
 
 /** renderer kinds carried in userData.kind (pick routes on these) */
 type Kind = 'block' | 'wire' | 'occ' | 'pipe' | 'pipe-end' | 'comp' | 'sub' | 'ground';
@@ -272,6 +276,7 @@ export class Engine {
   private loadSeq = 0;                  // async real-model loads die with their load()
   private loadCount = 0;                // scene rebuilds so far (stats().loads —
                                         //  e2e proof a mutation repainted the mesh)
+  private lastLoadPhases: Record<string, number> = {};   // v1.12.2 load profile
   private heavy = false;                // heavy-craft tier for the current load
   private legacy = false;
   private palette: FilePalette | null = null;
@@ -606,6 +611,7 @@ export class Engine {
 
   attach(canvas: HTMLCanvasElement) {
     this.renderer = new WebGLRenderer({ canvas, antialias: true });
+    performance.mark('boot:renderer');           // WebGL context + three init
     // v1.11.0 GAME-DAYLIGHT LAW (XenonViewer js/viewer.js:207-213 transcribed
     // 2026-10-25, NOTICE §2): "ACES compressait et désaturait tout ; un
     // mappage linéaire restitue les aplats" — LINEAR tone mapping at
@@ -639,6 +645,7 @@ export class Engine {
     // cache is engine-owned, so it survives every scene load (v1.9.2)
     if (this.backdropNow !== 'none') this.setBackdrop(this.backdropNow);
     this.bakeEnv();
+    performance.mark('boot:env');                // PMREM day-sky bake
     // Phones recycle GPU contexts constantly (tab switches, memory
     // pressure). three re-uploads buffers on webglcontextrestored but NOT
     // the PMREM texture baked here — rebake and repaint, or the restored
@@ -961,6 +968,17 @@ void main() {
 
   load(bp: Blueprint, atlas: ModelAtlas | null = null, keepView = false) {
     this.loadCount++;                   // stats().loads — mutation-repaint proof
+    // v1.12.2 BOOT COST: per-pass load profile, read through
+    // stats().loadPhases (bootprobe.mjs + load.perf print it). A handful of
+    // performance.now() calls — no gating needed.
+    const lpT = performance.now();
+    const loadPhases: Record<string, number> = {};
+    let lpPrev = lpT;
+    const lpStep = (name: string) => {
+      const t = performance.now();
+      loadPhases[name] = +(t - lpPrev).toFixed(1);
+      lpPrev = t;
+    };
     // A same-craft rebuild (⚙ decimated-twin swap, block edit) must keep the
     // camera + selection (user report v0.182: rebuilds "reset the view").
     // Only a craft swap re-frames. (The old "real models" toggle that forced
@@ -996,7 +1014,9 @@ void main() {
       this.pinGroup.position.set(this.moff.x, this.moff.y, this.moff.z);
     }
 
+    lpStep('anchor');
     this.batch = buildSolids(bp);
+    lpStep('cull+solids');
 
     // blocks + hull prisms: one merged mesh per distinct palette colour
     for (const b of this.batch.buckets.values()) {
@@ -1009,6 +1029,7 @@ void main() {
       this.hullMeshes.push(m);
       this.root.add(m);
     }
+    lpStep('blockMesh');
 
     if (this.batch.wire.length) {
       const g = new BufferGeometry();
@@ -1020,6 +1041,7 @@ void main() {
       this.wireLine = wire;
       this.root.add(wire);
     }
+    lpStep('wire');
 
     // occupancy (type-255) boxes: translucent, OFF, ONE shared unit box +
     // material scaled per mesh (a giant = 2 400 of these; see HEAVY comment).
@@ -1042,6 +1064,7 @@ void main() {
       this.occMeshes.push(m);
       this.root.add(m);
     }
+    lpStep('occ');
 
     // heavy-craft tier (PERF.md cliff, see HEAVY_COMPONENTS): above the
     // component budget the real-model fan-out takes the scene past what a
@@ -1049,18 +1072,23 @@ void main() {
     // giant's 26 MB of per-type model JSON on metered connections)
     this.heavy = bp.data.components.reduce((n, c) => n + (c.type === 'Build' ? 0 : 1), 0) > HEAVY_COMPONENTS;
     this.buildComponents(bp, this.heavy ? null : atlas, new Map(proxies.map(b => [b.ci, b])));
+    lpStep('components');
     this.buildSubgrids(bp);
+    lpStep('subgrids');
     // v1.11.5: AFTER the subgrids — nested-part sockets resolve through the
     // doors' LIVE joint poses (buildPipesMesh), which only exist once the
     // groups exist and syncSubJoints has run
     this.buildPipesMesh(bp);
+    lpStep('pipes');
 
     const parts = buildPartBoxes(bp, atlas?.manifest ?? null);
+    lpStep('partBoxes');
     this.updateCoM();
     this.addGround(bp, parts);
     this.buildMirrorPlane(parts);
     this.coordGroup.position.set(this.moff.x, this.moff.y, this.moff.z);
     this.coordHoverClear();      // readout re-arms on the next pointer move
+    lpStep('decor');
     this.applyViewOptions();
     if (camP && camT) {                    // same-craft rebuild: camera stays put
       this.camera!.position.copy(camP);
@@ -1070,8 +1098,11 @@ void main() {
     if (selCi >= 0) this.select(selCi);
     else if (selSub >= 0) this.selectSub(selSub);
     else this.select(-1);
+    lpStep('fit+select');
     if (this.windOn) this.startTunnel();          // rebuild the tunnel on the fresh bp
     this.refreshPins();     // v1.11: triangle pins ride every merged rebuild
+    loadPhases.total = +(performance.now() - lpT).toFixed(1);
+    this.lastLoadPhases = loadPhases;
     this.invalidate();
   }
 
@@ -1167,83 +1198,95 @@ void main() {
     if (!net.segs.length) return;
 
     // unit templates (dev scene.js): cable = cylinder, box duct = 2r×L×2r,
-    // elbow/plug caps = sphere/cylinder; one merged mesh per material pass
+    // elbow/plug caps = sphere/cylinder.
+    // v1.12.2 BOOT COST — CABLES AS INSTANCES: every bar/elbow/collar is
+    // ONE INSTANCE of a unit template (matrix = exactly the compose the old
+    // clones got, per-segment LINEAR colour via instanceColor). The old
+    // clone+mergeGeometries fan-out was THE load hot spot: the truck merged
+    // ~2 000 geometries per scene build (pipes phase 253 ms) and the giant
+    // 1 053 ms — and every reload() (block edit, twin write, cable re-drape
+    // rebuildPipes) re-paid it. The v1.8.1 RENDER LAW is untouched: round
+    // cylinders, box ducts under the segment flag, per-segment colours,
+    // metal pass shinier, elbow spheres, black collars, dev barGeometry's
+    // compose. Pipe meshes are layer-1 draw-only (never raycast, never
+    // X-ray targets): every pick / census / pin / surge speaks the PURE net
+    // (segs/polys/plugs), which buildPipes answers unchanged by this cut.
     const CYL = new CylinderGeometry(1, 1, 1, 14);
     const BOX = new BoxGeometry(2, 1, 2);
     const SPH = new SphereGeometry(1, 12, 8);
     const Y = new Vector3(0, 1, 0);
-    const paintGeo = (g: BufferGeometry, c: readonly [number, number, number]) => {
-      const n = g.attributes.position!.count;
-      const col = new Float32Array(n * 3);
-      for (let i = 0; i < n; i++) col.set(c, i * 3);
-      g.setAttribute('color', new BufferAttribute(col, 3));
-      return g;
-    };
+    const _q = new Quaternion(), _d = new Vector3(), _c = new Vector3(),
+      _s = new Vector3(), _m = new Matrix4(), _col = new Color();
     /** bar a→b of the unit template, dev barGeometry's compose exactly */
-    const barGeo = (unit: 'cyl' | 'box', a: readonly number[], b: readonly number[], r: number) => {
-      const dir = new Vector3(b[0]! - a[0]!, b[1]! - a[1]!, b[2]! - a[2]!);
-      const L = dir.length();
+    const barMatrix = (a: readonly number[], b: readonly number[], r: number): Matrix4 | null => {
+      _d.set(b[0]! - a[0]!, b[1]! - a[1]!, b[2]! - a[2]!);
+      const L = _d.length();
       if (L < 1e-6) return null;
-      const g = (unit === 'box' ? BOX : CYL).clone();
-      const q = new Quaternion().setFromUnitVectors(Y, dir.normalize());
-      g.applyMatrix4(new Matrix4().compose(
-        new Vector3((a[0]! + b[0]!) / 2, (a[1]! + b[1]!) / 2, (a[2]! + b[2]!) / 2), q,
-        new Vector3(r, L, r)));
-      return g;
+      _d.normalize();
+      _q.setFromUnitVectors(Y, _d);
+      return _m.compose(
+        _c.set((a[0]! + b[0]!) / 2, (a[1]! + b[1]!) / 2, (a[2]! + b[2]!) / 2),
+        _q, _s.set(r, L, r));
     };
-    const plain: BufferGeometry[] = [], metal: BufferGeometry[] = [];
+    interface Fill { m: Matrix4; c?: readonly [number, number, number] }
+    const addInstanced = (geo: BufferGeometry, mat: MeshStandardMaterial,
+      kind: Kind, fills: Fill[]) => {
+      if (!fills.length) return;
+      const im = new InstancedMesh(geo, mat, fills.length);
+      const colored = fills.some(f => f.c !== undefined);
+      fills.forEach((f, i) => {
+        im.setMatrixAt(i, f.m);
+        if (colored) im.setColorAt(i, _col.setRGB(f.c![0], f.c![1], f.c![2]));
+      });
+      im.instanceMatrix.needsUpdate = true;
+      if (im.instanceColor) im.instanceColor.needsUpdate = true;
+      im.computeBoundingSphere();
+      im.userData.kind = kind satisfies Kind;
+      im.layers.set(1);                       // draw-only, never raycast (see attach)
+      this.pipeMeshes.push(im);
+      this.root.add(im);
+    };
+    const cylPlain: Fill[] = [], cylMetal: Fill[] = [], boxPlain: Fill[] = [], boxMetal: Fill[] = [];
     for (const s of net.segs) {
-      const g = barGeo(s.box ? 'box' : 'cyl', s.a, s.b, s.half);
-      if (g) (s.metal ? metal : plain).push(paintGeo(g, s.color));
+      const m = barMatrix(s.a, s.b, s.half);
+      if (!m) continue;
+      const f = { m: m.clone(), c: s.color };
+      (s.box ? (s.metal ? boxMetal : boxPlain) : (s.metal ? cylMetal : cylPlain)).push(f);
     }
-    for (const j of net.joints) {
-      const g = SPH.clone();
-      g.applyMatrix4(new Matrix4().makeScale(j.radius, j.radius, j.radius));
-      g.translate(j.at[0], j.at[1], j.at[2]);
-      plain.push(paintGeo(g, j.color));
-    }
-    const addMesh = (geos: BufferGeometry[], mat: MeshStandardMaterial, kind: Kind) => {
-      if (!geos.length) return;
-      const merged = mergeGeometries(geos, false);
-      geos.forEach(g => g.dispose());
-      if (!merged) return;
-      merged.computeVertexNormals();               // dev: per-vertex normals
-      const m = new Mesh(merged, mat);
-      m.userData.kind = kind satisfies Kind;
-      m.layers.set(1);                       // draw-only, never raycast (see attach)
-      this.pipeMeshes.push(m);
-      this.root.add(m);
-    };
-    const matPlain = new MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.1 });
-    const matMetal = new MeshStandardMaterial({ vertexColors: true, roughness: 0.25, metalness: 1 });
-    addMesh(plain, matPlain, 'pipe');
-    addMesh(metal, matMetal, 'pipe');
+    // elbows: a direction change closes with a sphere of the cable radius
+    const jointFills: Fill[] = [];
+    for (const j of net.joints)
+      jointFills.push({ m: new Matrix4().compose(
+        new Vector3(j.at[0], j.at[1], j.at[2]), _q.identity(), _s.set(j.radius, j.radius, j.radius)),
+      c: j.color });
+    const matPlain = new MeshStandardMaterial({ roughness: 0.6, metalness: 0.1 });
+    const matMetal = new MeshStandardMaterial({ roughness: 0.25, metalness: 1 });
+    addInstanced(CYL, matPlain, 'pipe', cylPlain);
+    addInstanced(CYL, matMetal, 'pipe', cylMetal);
+    addInstanced(BOX, matPlain, 'pipe', boxPlain);
+    addInstanced(BOX, matMetal, 'pipe', boxMetal);
+    addInstanced(SPH, matPlain, 'pipe', jointFills);
 
     // the client's BLACK COLLARS at every cable end (not serialised in the
     // file — dev scene.js says so): short fat sleeves coaxial with the cable,
     // round like the hose, square for the box ducts
-    const collar: BufferGeometry[] = [];
+    const cylCollars: Fill[] = [], boxCollars: Fill[] = [];
     for (const p of net.plugs) {
       const r = p.half * 1.8, h = Math.max(0.03, p.half * 3);
-      const g = (p.box ? new BoxGeometry(2 * r, h, 2 * r) : new CylinderGeometry(r, r, h, 14)).clone();
-      const dir = new Vector3(p.axis[0], p.axis[1], p.axis[2]);
-      const q = new Quaternion().setFromUnitVectors(Y, dir);
+      _d.set(p.axis[0], p.axis[1], p.axis[2]);
+      if (_d.lengthSq() < 1e-12) continue;
+      _d.normalize();
+      _q.setFromUnitVectors(Y, _d);
       // hug the cable side: centre the collar INWARD from the tip
-      g.applyMatrix4(new Matrix4().compose(
-        new Vector3(p.at[0] - p.axis[0] * h * 0.35, p.at[1] - p.axis[1] * h * 0.35, p.at[2] - p.axis[2] * h * 0.35),
-        q, new Vector3(1, 1, 1)));
-      collar.push(g);
+      _m.compose(
+        _c.set(p.at[0] - p.axis[0] * h * 0.35, p.at[1] - p.axis[1] * h * 0.35,
+          p.at[2] - p.axis[2] * h * 0.35), _q, _s.set(r, h, r));
+      (p.box ? boxCollars : cylCollars).push({ m: _m.clone() });
     }
-    if (collar.length) {
-      const merged = mergeGeometries(collar, false);
-      collar.forEach(g => g.dispose());
-      if (merged) {
-        const m = new Mesh(merged, new MeshStandardMaterial({ color: 0x141419, roughness: 0.85, metalness: 0 }));
-        m.userData.kind = 'pipe' satisfies Kind;
-        m.layers.set(1);                     // draw-only, never raycast (see attach)
-        this.pipeMeshes.push(m);
-        this.root.add(m);
-      }
+    if (cylCollars.length + boxCollars.length) {
+      const matCollar = new MeshStandardMaterial({ color: 0x141419, roughness: 0.85, metalness: 0 });
+      addInstanced(CYL, matCollar, 'pipe', cylCollars);
+      addInstanced(BOX, matCollar, 'pipe', boxCollars);
     }
 
     const sph = new SphereGeometry(0.03, 8, 6);
@@ -4839,6 +4882,7 @@ void main() {
       ok: this.batch !== null && (this.batch.stats.blocks > 0 || this.batch.stats.hullTris > 0),
       tier: this.heavy ? 'lite' : 'full',
       loads: this.loadCount,
+      loadPhases: this.lastLoadPhases,
     };
   }
 

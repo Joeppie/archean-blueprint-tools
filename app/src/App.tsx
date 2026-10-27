@@ -20,7 +20,23 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 import { GALLERY } from './gallery-catalog';
 import { cacheSnapshot, craftStateOf, type CacheInfo, type CraftState } from './crafts';
 
-const Editor = lazy(() => import('./Editor'));
+const LazyEditor = lazy(async () => {
+  // v1.12.2 BOOT COST: fire the model-manifest fetch the MOMENT a craft open
+  // begins (the Viewport's getAtlas awaits this same promise). The card click
+  // then the chunk load + React mount + engine attach ran ~350 ms before the
+  // manifest request was even issued — on the live app that latency is paid
+  // on EVERY first craft open, on every origin.
+  void import('./engine/models').then(m => m.loadManifest());
+  return import('./Editor');
+});
+
+// v1.12.2 BOOT COST — DEEP-LINK FAST PATH (main.tsx bootEditor): on a fresh
+// `?craft=` load the chunk is ALREADY resolved (window.__EDITOR_MODULE__),
+// so App renders the editor in the root's INITIAL (synchronous) mount —
+// React's first render flushes in one burst; the lazy path above stays for
+// SPA navigations from the gallery (time-sliced reveal is right there —
+// it keeps the click responsive).
+const Editor = window.__EDITOR_MODULE__?.default ?? LazyEditor;
 
 export { craftName } from './gallery-catalog';
 

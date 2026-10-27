@@ -7,7 +7,7 @@
 // edit.ts) and the Engine (live scene ride) — the React tree only ever
 // reads file-space data. Mass & CoM moved out: the StaticInfo KSP black
 // box floats over the viewport (App).
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
 import { requestThumb, startSpin, stopSpin } from '../engine/thumbs';
 import { BACKDROPS } from '../engine/scene';
 import type { Backdrop, Engine, ViewOptions } from '../engine/scene';
@@ -16,8 +16,12 @@ import type { Blueprint, BlueprintComponent, LatticeObj } from '../engine/format
 import { subMasterEntries } from '../engine/subgrid';
 import { CompPaint } from './ColorPanel';
 import { MirrorGlyph } from './ui';
-import { LiftWidget } from './LiftWidget';
-import { CostWidget } from './CostWidget';
+// v1.12.2 BOOT COST — chunk diet: the Lift card (atmo/sealwasm) and the
+// Cost card (economy table) are the panel's HEAVIEST imports and are not
+// needed for the first paint; they land as one small chunk with the panel
+// body already visible.
+const LiftWidget = lazy(() => import('./LiftWidget').then(m => ({ default: m.LiftWidget })));
+const CostWidget = lazy(() => import('./CostWidget').then(m => ({ default: m.CostWidget })));
 
 export interface EditApi {
   compField(ctx: EditCtx, ci: number, key: 'alias' | 'module' | 'mirrorAxis', v: string | number): void;
@@ -231,11 +235,11 @@ export function VesselStats(p: { engine: Engine | null; bp: Blueprint; rev: numb
       ))}
       {/* the builder's buoyancy planner (user 2026-10-22) — its own card */}
       <div className="rounded-md border border-white/10 bg-panel2/30">
-        <LiftWidget engine={p.engine} bp={p.bp} rev={p.rev} />
+        <Suspense fallback={null}><LiftWidget engine={p.engine} bp={p.bp} rev={p.rev} /></Suspense>
       </div>
       {/* raw-material cost of every part (user 2026-10-22) — its own card */}
       <div className="rounded-md border border-white/10 bg-panel2/30">
-        <CostWidget bp={p.bp} rev={p.rev} />
+        <Suspense fallback={null}><CostWidget bp={p.bp} rev={p.rev} /></Suspense>
       </div>
     </div>
   );

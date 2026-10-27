@@ -6,6 +6,10 @@
 // network; the KSP "receiving blueprint" overlay shows only on a real
 // download). Holds the raw-literal DOC + live bp; see App.tsx for the shell.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+// v1.12.2 BOOT COST: the LAZY chunk's eval completed (bootprobe phase mark —
+// navStart → here = HTML + index chunk + three.js/engine parse+eval).
+performance.mark('boot:editor-eval');
+let __firstRenderMarked = false;   // one 'boot:render1' on the FIRST render call
 import sealWasmUrl from '../wasm/seal.wasm?url';
 import { HistoryStack } from './engine/history';
 import { realScheduler } from './engine/clocks';
@@ -26,8 +30,15 @@ import TopBar, { type Mode } from './components/TopBar';
 import { BlockPanel, FlightPanel, TriPanel, WirePanel, WindPanel, brushSpec, placeBlock, type Brush } from './components/ModePanels';
 import { MirrorGlyph } from './components/ui';
 import { BlockPaint, CompPaint, SwatchGrid } from './components/ColorPanel';
-import { TOOLS, ToolDialog, type PlacePayload, type ToolForm } from './components/ToolsDialog';
-import HelpDialog from './components/HelpDialog';
+// v1.12.2 BOOT COST — chunk diet: the tools desk (registry + dialog + the
+// latsphere/balloonfin planners it statically imports) and the help manual
+// (markdown renderer + every topic) leave the boot chunk; the Editor
+// fetches both module(s) right after mount (a few ms on a local server,
+// one small chunk on Pages), long before a menu click can need them.
+type ToolsModule = typeof import('./components/ToolsDialog');
+import type { PlacePayload, ToolForm } from './components/ToolsDialog';
+import { lazy, Suspense } from 'react';
+const HelpDialogLazy = lazy(() => import('./components/HelpDialog'));
 import { blockInfo, blockMirrorTwin, blockTwinIssues, cellIndex, cellOverlap,
   complementBlock, mirrorAxisIdx, paintTwinPair, type MirrorAxisOpt } from './engine/blocks';
 import { cornerOf, triAt, triangleFromCorners, setTriCornerAll, setTriCornersAll, shiftTriCells, mirroredTriangle, rotateCornersQ, triCorners, triTwinIndex, type Corner } from './engine/tris';
@@ -47,6 +58,8 @@ import { craftState, craftInfo, loadCraft, type CacheInfo, type CraftState } fro
 import StaleDialog from './components/StaleDialog';
 
 export default function Editor({ craft, onBack }: { craft: string | null; onBack: () => void }) {
+  // v1.12.2 BOOT COST: the first render pass began (React tree build).
+  if (!__firstRenderMarked) { __firstRenderMarked = true; performance.mark('boot:render1'); }
   const [bp, setBp] = useState<Blueprint | null>(null);
   /** the bp-swaps that are UNDO/REDO (same craft) keep the camera; see the
    *  Viewport keepView prop. openText (a craft swap) always clears it. */
@@ -98,8 +111,23 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   const [triHover, setTriHover] = useState(-1);
   // the TOOLS menu ▸ ToolDialog modal (v1.7): one open tool id at a time
   const [toolOpen, setToolOpen] = useState<string | null>(null);
+  // v1.12.2 chunk diet: the tools module (registry + dialog) lands right
+  // after mount; the Tools menu renders from it, the placement commit
+  // reads it through the ref. Menu/dialog actions are user-driven — the
+  // module is resolved long before any click.
+  const [toolsMod, setToolsMod] = useState<ToolsModule | null>(null);
+  const toolsModRef = useRef<ToolsModule | null>(null);
   // Help ▸ Manual… — the built-in markdown manual (v1.5.20)
   const [helpOpen, setHelpOpen] = useState(false);
+  useEffect(() => {
+    let dead = false;
+    import('./components/ToolsDialog').then(m => {
+      if (dead) return;
+      toolsModRef.current = m;
+      setToolsMod(m);
+    });
+    return () => { dead = true; };
+  }, []);
   // v1.6 PLACEMENT staging (Spheroid): the dialog confirmed, the engine
   // ghosts the cluster (movable, CELL-snapped) and the viewport label offers
   // ✕ Cancel / ✔ Build; the commit lands at the user's final cell offset.
@@ -449,7 +477,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     const stage = placeStage, ctx = ctxRef.current;
     if (!st || !stage || !ctx) return;
     if (!st.valid) { setToolMsg('the placement collides with existing blocks — move it first'); return; }
-    const tool = TOOLS.find(t => t.id === stage.toolId);
+    const tool = toolsModRef.current?.TOOLS.find(t => t.id === stage.toolId);
     if (!tool?.place) return;
     // the LIVE ghost data: ⟲ quarter-turns (and the drag) happened in the
     // engine — the commit must write what is GHOSTED, not a fresh un-rotated
@@ -1531,7 +1559,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         }}
         onOpen={openFile} onSave={save} onClose={onBack} onBack={onBack}
         onRefresh={craft ? () => { forceRef.current = true; setRetrySeq(s => s + 1); } : undefined}
-        tools={TOOLS.map(t => ({ id: t.id, label: t.label, icon: t.icon }))}
+        tools={(toolsMod?.TOOLS ?? []).map(t => ({ id: t.id, label: t.label, icon: t.icon }))}
         onTool={id => setToolOpen(id)}
         onHelp={() => setHelpOpen(true)}>
         <button data-testid="save-btn" onClick={() => save()}
@@ -1636,7 +1664,11 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
             )}
             {/* HELP ▸ the built-in manual (v1.5.20): markdown topics with a
                 word search; works with no craft open too */}
-            {helpOpen && <HelpDialog onClose={() => setHelpOpen(false)} />}
+{helpOpen && (
+              <Suspense fallback={null}>
+                <HelpDialogLazy onClose={() => setHelpOpen(false)} />
+              </Suspense>
+            )}
             {/* KSP bottom-left: the STATIC INFO black box (mass & CoM) */}
             {bp && staticInfo && (
               <div className="absolute bottom-2 left-3 z-[5]">
@@ -1690,9 +1722,9 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
 
         {/* TOOLS ▸ the definition-driven modal dialog (v1.7): opens over
             the viewport, OK-and-run or Cancel. */}
-        {toolOpen && bp && ctxRef.current && (
-          <ToolDialog key={toolOpen}
-            tool={TOOLS.find(t => t.id === toolOpen)!} bp={bp} ctx={ctxRef.current}
+        {toolOpen && toolsMod && bp && ctxRef.current && (
+          <toolsMod.ToolDialog key={toolOpen}
+            tool={toolsMod.TOOLS.find(t => t.id === toolOpen)!} bp={bp} ctx={ctxRef.current}
             initialForm={placeStage?.toolId === toolOpen ? placeStage.form : undefined}
             onClose={() => setToolOpen(null)}
             onPlaced={(t, f, p) => onPlaced(t, f, p)}

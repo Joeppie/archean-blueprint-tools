@@ -27,7 +27,21 @@ export default defineConfig({
     // 2026-10-19), so every context boots with the debug flag set
     storageState: {
       cookies: [],
-      origins: [{ origin: URL, localStorage: [{ name: 'archean-app-debug', value: '1' }] }],
+      origins: [{
+        origin: URL,
+        localStorage: [
+          { name: 'archean-app-debug', value: '1' },
+          // v1.12.2 BOOT COST — BACKDROP-SKIP FIXTURE LAW (we: "Make a
+          // backdrop Skip part of test fixture"): every boot loads the
+          // default panorama (~86–350 kB + decode + upload) that NO spec
+          // outside viewmenu asserts. The fixture ships ⊘ (none); the ONE
+          // fresh-profile DEF pin re-arms the default by removing the key
+          // in its own context (viewmenu.spec.ts). A spec that gains a
+          // panorama law clicks the row explicitly — as the swap pins
+          // already do.
+          { name: 'archean-app-backdrop', value: 'none' },
+        ],
+      }],
     },
     // v1.12.1 BOOT COST: render on the AMD iGPU via ANGLE-Vulkan — the
     // same pin tests/run_tests.sh uses (VK_ICD_FILENAMES hides the NVIDIA
