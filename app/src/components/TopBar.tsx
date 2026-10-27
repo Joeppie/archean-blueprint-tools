@@ -40,6 +40,10 @@ interface Props {
   onTool?: (id: string) => void;
   /** Help ▸ Manual… — the built-in markdown manual (HelpDialog.tsx) */
   onHelp?: () => void;
+  /** Xenon ▾ — the craft's programmable computers (XenonDialog.tsx);
+   *  the menu only appears when the open blueprint has MiniComputers */
+  xenonComps?: { ci: number; alias: string; program: string; files: number }[];
+  onXenon?: (ci: number) => void;
   children?: React.ReactNode;              // right side: panel toggle etc.
 }
 
@@ -147,6 +151,25 @@ export default function TopBar(p: Props) {
             ))}
             <Sep />
             <div className="px-3 py-1.5 text-[10px] text-ink-dim">more tools to follow</div>
+          </>)}
+        </Menu>
+      )}
+
+      {/* XENON ▾ (v1.13: "in the menu add Xenon, there, list all computers
+          and when we click a computer, we get a pop-up screen with its code
+          that looks like it does in-game") — the craft's MiniComputers,
+          opening the in-game-style IDE (XenonDialog.tsx) on the dev's
+          interpreter (engine/xenoncode.ts + public/xenoncode WASM) */}
+      {(p.xenonComps?.length ?? 0) > 0 && (
+        <Menu testid="xenon" label="Xenon ▾">
+          {close => (<>
+            <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-ink-dim">
+            Programmable computers</div>
+            {p.xenonComps!.map(c => (
+              <Item key={c.ci} testid={`xenon-comp-${c.ci}`}
+                label={`⌨ ${c.alias || c.program}`} hint={`${c.files} .xc`}
+                onClick={() => { close(); p.onXenon?.(c.ci); }} />
+            ))}
           </>)}
         </Menu>
       )}

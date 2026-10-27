@@ -64,7 +64,7 @@ export default defineConfig({
       // it is a canvas-resize flake generator. A spec that GAINS a phone
       // law removes its name from this list (or tags the phone test).
       testIgnore:
-        /(app|asset-space|blockedit|blockplace|download|gizmo|hinge|liveedit|paint|pipes|propeller|savefidelity|subride|sym|views|wheels)\.spec\.ts$/,
+        /(app|asset-space|blockedit|blockplace|download|gizmo|hinge|liveedit|paint|pipes|propeller|savefidelity|subride|sym|views|wheels|xenon)\.spec\.ts$/,
     },
   ],
   webServer: {

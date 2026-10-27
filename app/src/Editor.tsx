@@ -39,12 +39,14 @@ type ToolsModule = typeof import('./components/ToolsDialog');
 import type { PlacePayload, ToolForm } from './components/ToolsDialog';
 import { lazy, Suspense } from 'react';
 const HelpDialogLazy = lazy(() => import('./components/HelpDialog'));
+const XenonDialogLazy = lazy(() => import('./components/XenonDialog'));
 import { blockInfo, blockMirrorTwin, blockTwinIssues, cellIndex, cellOverlap,
   complementBlock, mirrorAxisIdx, paintTwinPair, type MirrorAxisOpt } from './engine/blocks';
 import { cornerOf, triAt, triangleFromCorners, mirroredTriangle, triTwinIndex, type Corner } from './engine/tris';
 import { applyPinEdit, applyPinRotate, applyPinShift, applyTriFlip, applyTriPaint } from './engine/pinedit';
 import type { Blueprint, Triangle } from './engine/format';
 import { isLegacyFile } from './engine/format';
+import { xenonComputers } from './engine/xenoncode';
 import type { ResolvedColor } from './engine/palette';
 import { docArrayInsert, docArrayRemoveAt, docEnsureArray, docFromValue, docValue, emitDoc, parseDoc } from './engine/doc';
 import { allocateSlot, blockSkinTris, paletteSlotNode, type Rgb255 } from './engine/tools';
@@ -120,6 +122,13 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   const toolsModRef = useRef<ToolsModule | null>(null);
   // Help ▸ Manual… — the built-in markdown manual (v1.5.20)
   const [helpOpen, setHelpOpen] = useState(false);
+  // XENON (v1.13): the Xenon IDE of one MiniComputer (XenonDialog.tsx); the
+  // descriptors re-derive from bp (the files live IN the blueprint)
+  const [xenonCi, setXenonCi] = useState<number | null>(null);
+  const xenonComps = useMemo(
+    () => (bp ? xenonComputers(bp) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [bp]);
   useEffect(() => {
     let dead = false;
     import('./components/ToolsDialog').then(m => {
@@ -1454,7 +1463,9 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         onRefresh={craft ? () => { forceRef.current = true; setRetrySeq(s => s + 1); } : undefined}
         tools={(toolsMod?.TOOLS ?? []).map(t => ({ id: t.id, label: t.label, icon: t.icon }))}
         onTool={id => setToolOpen(id)}
-        onHelp={() => setHelpOpen(true)}>
+        onHelp={() => setHelpOpen(true)}
+        xenonComps={xenonComps.length ? xenonComps.map(c => ({ ci: c.ci, alias: c.alias, program: c.program, files: c.files.length })) : undefined}
+        onXenon={ci => setXenonCi(ci)}>
         <button data-testid="save-btn" onClick={() => save()}
           className={`ksp-btn shrink-0 px-2.5 py-1 text-[12px] ${dirty ? 'on font-semibold' : 'text-ink-dim'}`}>
           {dirty ? '● Save' : 'Save'}
@@ -1562,6 +1573,15 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
                 <HelpDialogLazy onClose={() => setHelpOpen(false)} />
               </Suspense>
             )}
+            {/* XENON ▸ the in-game-style IDE of a MiniComputer (v1.13) */}
+            {xenonCi !== null && (() => {
+              const comp = xenonComps.find(c => c.ci === xenonCi);
+              return comp ? (
+                <Suspense fallback={null}>
+                  <XenonDialogLazy comp={comp} onClose={() => setXenonCi(null)} />
+                </Suspense>
+              ) : null;
+            })()}
             {/* KSP bottom-left: the STATIC INFO black box (mass & CoM) */}
             {bp && staticInfo && (
               <div className="absolute bottom-2 left-3 z-[5]">

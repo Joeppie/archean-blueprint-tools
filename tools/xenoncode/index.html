@@ -205,10 +205,15 @@ function pump() {
 		}
 		cycles++;
 		if (++frame % 5 === 0) {
-			const w = mod._xc_screen_w(), h = mod._xc_screen_h();
-			const p = mod._xc_screen_pixels();
-			const bytes = new Uint8ClampedArray(mod.HEAPU8.buffer.slice(p, p + w * h * 4));
-			ctx.putImageData(new ImageData(bytes, w, h), 0, 0);
+			const n = mod._xc_screen_count();
+			for (let i = 0; i < n; i++) {
+				const w = mod._xc_screen_w(i), h = mod._xc_screen_h(i);
+				const p = mod._xc_screen_pixels(i);
+				if (!w || !h || !p) continue;
+				const bytes = new Uint8ClampedArray(mod.HEAPU8.buffer.slice(p, p + w * h * 4));
+				ctx.putImageData(new ImageData(bytes, w, h), 0, 0);   // page shows screen 0
+				break;
+			}
 			busPaint();
 			$('#status').textContent = `cycles: ${cycles} @ ${HZ} Hz`;
 		}

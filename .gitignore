@@ -16,3 +16,4 @@ tools/xenoncode/screen.ppm
 poc/
 tools/xenoncode/demo/**/storage/
 tools/xenoncode/demo/**/xc_program.bin
+tools/xenoncode/screen-*.ppm

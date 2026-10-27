@@ -25,10 +25,14 @@ frames. `tick`/`update`/timers run at the game's 10 Hz cadence (the language
 times on the real clock); `storage` vars persist across the panel's re-boot
 button; `init` runs at boot.
 
-This is the seam for the next step: **bind a panel to a real craft** — take a
-`MiniComputer`'s `xc_files` from an open blueprint (the airplane fixture
-already does exactly that) and route its io channels to the app's wiring
-graph / HUD surfaces.
+This is the seam for the next step: **bind a panel to a real craft** — done
+since v1.12.11: the Inspector app has **Xenon ▾** (TopBar) opening the
+in-game-style IDE for the open craft's MiniComputers
+(`app/src/engine/xenoncode.ts` + `app/src/components/XenonDialog.tsx`; the
+interpreter ships as `app/public/xenoncode/` — `build.sh` refreshes that
+copy; screens = the Dashboard's Screen/HdScreen elements, `#NODES` graphs
+rendered, inputs as io/channel numerics; pins: engine/__tests__/xenoncode
+.test.ts + e2e/xenon.spec.ts).
 
 ## Building / running
 

@@ -36,6 +36,10 @@ if command -v em++ >/dev/null 2>&1 || [ -n "${EMSDK:-}" ]; then
 		-sEXPORTED_RUNTIME_METHODS=UTF8ToString,stringToUTF8,lengthBytesUTF8,HEAPU8 \
 		-sENVIRONMENT=web -sFILESYSTEM=1 -o xenoncode.js
 	echo "browser:  xenoncode.js + xenoncode.wasm"
+	# the app serves its own copy (Pages layout: app/public -> site base)
+	mkdir -p ../../app/public/xenoncode
+	cp xenoncode.js xenoncode.wasm ../../app/public/xenoncode/
+	echo "app:      ../../app/public/xenoncode/"
 else
 	echo "browser:  SKIPPED (no em++ — source ~/emsdk/emsdk_env.sh to build WASM)"
 fi

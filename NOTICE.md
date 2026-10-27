@@ -91,9 +91,12 @@ Read this file together with LICENSE (GNU GPL v3).
    parser/compiler/VM (`XenonCode.hpp`) and screen model (`XenonScreen.hpp`)
    from https://github.com/batcholi/XenonCode (by batcholi / FloDKSM), pinned
    to a recorded commit (see `tools/xenoncode/XENONCODE_UPSTREAM.md`).
-   `xenoncode.js`/`xenoncode.wasm` are compiled build products of that pinned
-   source, unmodified; only the device shim (`xc_host.*`, GPL v3) and the demo
-   program (`demo/hello/main.xc`, GPL v3, authored for this repo) are ours.
+   `xenoncode.js`/`xenoncode.wasm` (in `tools/xenoncode/` and, serving the
+   Inspector app since v1.12.11, `app/public/xenoncode/`) are compiled build
+   products of that pinned source, unmodified; only the device shim
+   (`xc_host.*`, GPL v3), the app integration (`app/src/engine/xenoncode.ts`,
+   `app/src/components/XenonDialog.tsx`, GPL v3) and the demo program
+   (`demo/hello/main.xc`, GPL v3, authored for this repo) are ours.
    The upstream repository carries no LICENSE file; this use follows the good-
    faith + attribution posture of section 4 above (the library is published
    openly by the game's developer, who also runs it as WASM at

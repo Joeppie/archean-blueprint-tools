@@ -1561,6 +1561,47 @@ topic + FORMAT).
   remaining 100 ms-class load phase, load-only, no interactive path).
   Suite: vitest 737, fast tier 204 runs **2.5→1.8 min** 0-red, @slow 11/11.
 
+- **v1.12.11 XENON ▾ — THE IN-GAME IDE FOR CRAFT COMPUTERS (we: "integrate it
+  with our normal tool … in the menu add Xenon, there, list all computers and
+  when we click a computer, we get a pop-up screen with its code that looks
+  like it does in-game … display using the screen and HD screen … code that
+  has nodes should also render")**: the XenonCode POC (tools/xenoncode) became
+  an app feature. The dev's interpreter ships as `app/public/xenoncode/`
+  (WASM build products of the pinned upstream — `tools/xenoncode/build.sh`
+  copies them; rebuild after any host change). Seam `engine/xenoncode.ts`:
+  `xenonComputers(bp)` (MiniComputer → files/screens/channels — screens are
+  the DASHBOARD's Screen/HdScreen ELEMENTS bound by `screen(alias, channel)`,
+  channel counts ALL elements, 1 px per element unit per the dev's XenonDraw),
+  `tokenize` (the dev's OWN mode: XenonCode repo www/xc_mode.js + tmLanguage —
+  types carry the colon INSIDE the keyword token), `parseNodes` (the
+  `;#NODES {json}` header of node-authored programs: cards + ports + wires),
+  `XenonRun` (boot/cycle/setInput/screenInfo/parseLine). TopBar `xenon` menu
+  (only on crafts with .xc-carrying MiniComputers, items `xenon-comp-<ci>`);
+  `components/XenonDialog.tsx` = the in-game-style IDE (title bar + ON,
+  File/Library/Computer menu row, file tabs, line-numbered highlighted code,
+  "Program 'x' loaded / is running…" status lines, Esc close): Screens panel
+  blits each XenonScreen framebuffer at 10 Hz; input_number channels are
+  auto-detected sliders feeding the externals-by-number contract; the io bus
+  table streams output_number; prints → console; Nodes tab renders the graph
+  (pan/zoom canvas); per-line validation runs the REAL compiler
+  (`xc_parse_line` — wasm needs -fexceptions -sDISABLE_EXCEPTION_CATCHING=0
+  for the VM's exception reporting; red line = the compiler's own message).
+  The device shim gained: a screen REGISTRY (`xc_add_screen(alias,ch,w,h)`,
+  auto-created default surfaces), the wiki's full draw API (draw_point/line/
+  rect/triangle/circle/poly, text_align + the top_left… constants,
+  newline_spacing, width/height) and `xc_parse_line`. Device-function
+  OVERLOADS = one declaration of the widest prototype + runtime
+  `args.size()` dispatch (the library keys by name; call sites are not
+  arity-checked) — draw_poly is variadic the same way. Pins: vitest
+  `xenoncode.test.ts` (12: extraction on 3294880085/3327182790/3281212435,
+  tokenizer shape incl. the lossless-file sweep, #NODES graph resolution,
+  channel detection) + e2e `xenon.spec.ts` (@ui @slow: menu→IDE chain — tabs,
+  code, zero validation errors on shipped programs, HdScreen canvas LIT
+  pixels, bus rows, the pitch slider as an EXTERNAL NUMERIC drives
+  PitchControlJunction ≤ −0.3 [React range needs the NATIVE value setter +
+  input event], Esc) + the CEP graph leg (lit canvas, `nodes (N)` tab).
+  Power/wiring NOT simulated (our ruling: "we can ignore the power
+  requirement"); io routing to the craft's real components = the next seam.
 - **v1.12.7 THE DRAW-ONLY SKIN STITCH (we: "when I convert stratalaunch to
   triangles as a whole, my framerate goes down the drain — do we have the
   bake for triangles that blocks have?")**: the bake (one merged mesh per
