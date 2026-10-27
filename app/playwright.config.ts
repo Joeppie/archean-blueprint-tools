@@ -40,7 +40,10 @@ export default defineConfig({
           // panorama law clicks the row explicitly — as the swap pins
           // already do.
           { name: 'archean-app-backdrop', value: 'none' },
-        ],
+          // v1.13.x: every context starts with a CLEAN world — the
+          // worldsim store is GLOBAL+persisted; tests author it (base/override/
+          // setworldsim), so the fixture ships it empty per context.
+          { name: 'archean-worldsim', value: '' },],
       }],
     },
     // v1.12.1 BOOT COST: render on the AMD iGPU via ANGLE-Vulkan — the

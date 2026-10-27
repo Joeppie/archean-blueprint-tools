@@ -209,7 +209,7 @@ test.describe('Xenon IDE @ui', () => {
     // the io-10 Dashboard surface is registered at the ELEMENT size (146×66)
     const scr = page.locator('[data-testid="xenon-screen-10#0"]');
     await expect(scr).toBeVisible();
-    expect(await scr.evaluate(el => (el as HTMLCanvasElement).width)).toBe(146);
+    expect(await scr.evaluate(el => (el as HTMLCanvasElement).width)).toBe(870)   // 145-unit element at the 6 px-per-unit screen scale;
     await page.waitForTimeout(1500);
     expect(await litPixels(page, '[data-testid="xenon-screen-10#0"]')).toBeGreaterThan(10);
     // THE FIX: clicking the top-left "disp" button flips $disp — the click
@@ -377,7 +377,7 @@ test.describe('Xenon IDE @ui', () => {
     await expect(page.getByTestId('xenon-ac-popup')).toContainText('$rollnum');
     await page.keyboard.press('Escape');
     // declared FUNCTION completion: '@' lists function @names declared on disk
-    await ta.type('\n@fir', { delay: 25 });
+    await ta.type('\n@sel', { delay: 25 });
     await expect(page.getByTestId('xenon-ac-popup')).toBeVisible();
     await page.keyboard.press('Escape');
     // discard the scratch edit (revert, no save)
@@ -415,17 +415,26 @@ test.describe('Xenon IDE @ui', () => {
     // the firmware reads the overridden channel: input_number(4, 2) = 2002
     await page.getByTestId('xenon-edit').click();
     const ta = page.getByTestId('xenon-code-edit');
-    await ta.click();
-    await ta.press('Control+Home');
-    await ta.type('print(text("alt: {}", input_number(4, 2)))\n', { delay: 6 });
+    await ta.waitFor();
+    {
+      const cur = await ta.inputValue();
+      const at = cur.indexOf('update');
+      await ta.fill(cur.slice(0, at + 6) + '\n\tprint(text("alt: {}", input_number(4, 2)))\n' + cur.slice(at + 6));
+    }
     await page.getByTestId('xenon-save').click();
     await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 90_000 });
     await page.getByTestId('xenon-side-console').click();
     await expect(page.getByTestId('xenon-log')).toContainText('alt: 2002', { timeout: 30_000 });
     // PROGRAM override via setworldsim wins over the expression
-    await ta.click();
-    await ta.press('Control+Home');
-    await ta.type('setworldsim("navinstrument.altitude_meters_from_sea_level", 3000)\n', { delay: 6 });
+    await page.getByTestId('xenon-edit').click();
+    await ta.waitFor();
+    {
+      const cur = await ta.inputValue();
+      const at = cur.indexOf('update');
+      await ta.fill(cur.slice(0, at + 6)
+        + '\n\tsetworldsim("navinstrument.altitude_meters_from_sea_level", 3000)\n'
+        + cur.slice(at + 6));
+    }
     await page.getByTestId('xenon-save').click();
     await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 90_000 });
     await page.getByTestId('xenon-side-world').click();

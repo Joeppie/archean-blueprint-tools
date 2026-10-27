@@ -181,7 +181,7 @@ export function xenonScreens(bp: Blueprint, files: XCFile[], ci = -1): XCScreen[
       const el: any[] = ((comp.data as any)?.elements ?? []) as any[];
       const e = el[r.channel];
       if (!e || (e.type !== 'Screen' && e.type !== 'HdScreen')) continue;  // Label: none
-      out.push({ alias: key, label, channel: r.channel, ci: idx, w: (e.size_x ?? 0) + 1, h: (e.size_y ?? 0) + 1 });
+      out.push({ alias: key, label, channel: r.channel, ci: idx, w: (e.size_x ?? 0) * 6, h: (e.size_y ?? 0) * 6 });
     } else {
       out.push({ alias: key, label, channel: r.channel, ci: idx, w: 128, h: 72 });  // screen override
     }
@@ -479,15 +479,29 @@ export class XenonRun {
 
   screenCount(): number { return this.mod._xc_screen_count(); }
 
-  screenInfo(max = 16): { key: string; w: number; h: number; pixels: Uint8ClampedArray }[] {
+  /** EVERY surface's key/size (cheap; the Badger carries 118 buffers). */
+  screenMeta(): { key: string; w: number; h: number }[] {
     const m = this.mod, out = [];
-    for (let i = 0; i < Math.min(m._xc_screen_count(), max); i++) {
-      const w = m._xc_screen_w(i), h = m._xc_screen_h(i), p = m._xc_screen_pixels(i);
-      if (!w || !h || !p) continue;
-      out.push({ key: m.UTF8ToString(m._xc_screen_key(i)), w, h,
-        pixels: new Uint8ClampedArray(m.HEAPU8.buffer.slice(p, p + w * h * 4)) });
+    for (let i = 0; i < m._xc_screen_count(); i++) {
+      const w = m._xc_screen_w(i), h = m._xc_screen_h(i);
+      if (!w || !h) continue;
+      out.push({ key: m.UTF8ToString(m._xc_screen_key(i)), w, h });
     }
     return out;
+  }
+
+  /** One surface's RGBA framebuffer (fetched on demand, by key). */
+  screenPixels(key: string): Uint8ClampedArray | null {
+    const m = this.mod;
+    const nb = new TextEncoder().encode(key).length + 1;
+    const p = m._malloc(nb);
+    m.stringToUTF8(key, p, nb);
+    const idx = typeof m._xc_screen_index === 'function' ? m._xc_screen_index(p) : -1;
+    m._free(p);
+    if (idx < 0) return null;
+    const w = m._xc_screen_w(idx), h = m._xc_screen_h(idx), d = m._xc_screen_pixels(idx);
+    if (!w || !h || !d) return null;
+    return new Uint8ClampedArray(m.HEAPU8.buffer.slice(d, d + w * h * 4));
   }
 
   parseLine(line: string, n: number): string {
@@ -509,7 +523,12 @@ export class XenonRun {
 // Game rule (ide.md): the in-game IDEs of several computers can be open at
 // once; ours re-boots the VM when you point at a different computer.
 
-export interface XenonSurface { key: string; w: number; h: number; pixels: Uint8ClampedArray }
+export interface XenonSurface {
+  key: string; w: number; h: number;
+  // pixels are fetched only for canvases on screen and 3-D dashboard feeds
+  // (the Badger paints 118 buffers; copying all every tick is pure memcpy)
+  pixels?: Uint8ClampedArray;
+}
 
 export class XenonPump {
   run: XenonRun | null = null;
@@ -541,6 +560,7 @@ export class XenonPump {
   log: XenonEvent[] = [];
   surfaces = new Map<string, XenonSurface>();        // screen key -> latest framebuffer
   private canvases = new Map<string, Set<HTMLCanvasElement>>();
+  private feedKeys = new Set<string>();   // 3-D dashboard face keys (Engine)
   private subs = new Set<() => void>();
   private raf = 0;
   private last = 0;
@@ -604,6 +624,20 @@ export class XenonPump {
    *  executed-line list, which mixes files — a break line pauses the cycle
    *  that ran it in ANY included file). */
   setBreaks(lines: Iterable<number>) { this.breakLines = new Set(lines); this.notify(); }
+
+  /** The Bus-tab sliders. A channel a worldsim row feeds flips that row to
+   *  MANUAL (last touch wins — the slider and the f(t) drive one binding). */
+  setInput(io: number | string, ch: number, v: number) {
+    for (const [name, b] of this.wsBindings)
+      if (b.io === io && b.ch === ch) {
+        const r = wsChans().get(name);
+        if (r && r.mode !== 'manual') { r.mode = 'manual'; wsSave(); }
+        if (r) { r.manual = v; r.value = v; }
+        this.notify();
+        return;
+      }
+    this.run?.setInput(io, ch, v);
+  }
 
   /** Name the running computer's input channels and give every one a
    *  time function (the game's channel meanings drive the defaults). */
@@ -701,9 +735,11 @@ export class XenonPump {
     else { this.status = 'error'; this.error = r.error; }
     this.notify();
   }
-  setInput(io: number | string, ch: number, v: number) { this.run?.setInput(io, ch, v); }
   screenClick(key: string, x: number, y: number) { this.run?.screenClick(key.toLowerCase(), x, y); }
   screenScroll(key: string, d: number) { this.run?.screenScroll(key.toLowerCase(), d); }
+
+  /** Which surface keys the 3-D scene is rendering on craft dashboards. */
+  setFeedKeys(keys: Iterable<string>) { this.feedKeys = new Set(keys); }
 
   registerCanvas(key: string, cv: HTMLCanvasElement): () => void {
     const k = key.toLowerCase();
@@ -711,7 +747,7 @@ export class XenonPump {
     if (!s) { s = new Set(); this.canvases.set(k, s); }
     s.add(cv);
     const surf = this.surfaces.get(k);
-    if (surf) this.blit(cv, surf);
+    if (surf?.pixels) this.blit(cv, surf);
     return () => { this.canvases.get(k)?.delete(cv); };
   }
   subscribe(cb: () => void): () => void {
@@ -778,12 +814,21 @@ export class XenonPump {
         this.notify();
         return;
       }
-      // surfaces: cap the per-tick pixel copies (the Badger carries 118
-      // buffers; the panel pages through them, the blit takes the first 24)
+      // surfaces: ALL keys each tick; pixels only for keys a canvas (this
+      // panel) or a 3-D dashboard feed actually shows
+      const want = new Set<string>([...this.canvases.keys(), ...this.feedKeys]);
       const next = new Map<string, XenonSurface>();
-      for (const s of run.screenInfo(24)) {
-        next.set(s.key, s);
-        for (const cv of this.canvases.get(s.key) ?? []) this.blit(cv, s);
+      for (const meta of run.screenMeta()) {
+        let pixels = this.surfaces.get(meta.key)?.pixels;
+        if (want.has(meta.key)) {
+          const got = run.screenPixels(meta.key);
+          if (got) {
+            pixels = got;
+            for (const cv of this.canvases.get(meta.key) ?? [])
+              this.blit(cv, { ...meta, pixels: got });
+          }
+        }
+        next.set(meta.key, { ...meta, pixels });
       }
       this.surfaces = next;
       this.notify();

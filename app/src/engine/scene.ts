@@ -3651,6 +3651,8 @@ void main() {
   screenFeedState(): { key: string; w: number; h: number }[] {
     return [...this.dashScreens.entries()].map(([key, e]) => ({ key, w: e.w, h: e.h }));
   }
+  /** The surface keys the 3-D scene feeds onto craft dashboard faces. */
+  screenFeedKeys(): string[] { return [...this.dashScreens.keys()]; }
 
 
   // -------------------------------------------------------------- gizmo ops

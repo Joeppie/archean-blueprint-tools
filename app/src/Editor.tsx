@@ -181,10 +181,14 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   }, [xenonCi, screensOpen]);
   // THE 3-D LAW: the pump's 10 Hz tick pushes each surface's framebuffer
   // onto its dashboard face ("dashboards display what is given to them").
+  // The pump fetches pixels for exactly the keys the scene feeds (plus the
+  // panels' visible canvases) - 118-buffer crafts stay memcpy-cheap.
   useEffect(() => xenonPump.subscribe(() => {
     const eng = engineRef.current;
     if (!eng || xenonPump.status !== 'running') return;
-    for (const [key, s] of xenonPump.surfaces) eng.pushScreen(key, s.w, s.h, s.pixels);
+    xenonPump.setFeedKeys(eng.screenFeedKeys());
+    for (const s of xenonPump.surfaces.values())
+      if (s.pixels) eng.pushScreen(s.key, s.w, s.h, s.pixels);
   }), []);
   useEffect(() => {
     let dead = false;

@@ -888,7 +888,6 @@ EMSCRIPTEN_KEEPALIVE int xc_boot() {
 		g_wsProgram.clear(); g_wsEffective.clear();
 		if (!g_computer->LoadProgram("/prog")) { g_err = "load failed"; return 1; }
 		g_computer->LoadStorage("/prog/storage");   // survives reboots in-session
-		xc_addScreen("main", 0, 640, 480);         // the integrated-screen target
 		for (auto& s : g_screens) { s.scr->Blank(); s.clicked = false; s.scroll = 0.0; }
 		g_reads.clear();
 		g_computer->RunInit();
