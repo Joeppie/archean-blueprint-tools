@@ -3818,19 +3818,17 @@ Corollaries, always:
 
 ## Backlog
 
-- **v1.12.0 BACKLOG (the release-critical work items)** — per
-  docs/RELEASE-PROCEDURE.md: (1) the app build's dev-asset 404s on the
-  pages branch (index.html ships ~180 ?v= references to /viewer/… and
-  /testdata/… — make_landing --webroot publishes sibling trees; the pages
-  deploy must mirror them or strip the refs at build); (2) the app.spec
-  legacy-link pin (retire the link or serve the legacy viewer under the
-  app origin); (3) the `release` branch version strings are pinned at
-  v1.9.11 (main = v1.12.0) — run tests/run_tests.sh on release and
-  reconcile before the next cut; (4) app @slow tiers (gizmo/models/subgrid
-  + the two @slow truck wire specs) run before the next Y/X; (5) P7
-  test-pyramid migration (REWRITE.md): SceneGraph/interaction clocks out of
-  WebGL/React → unit tier; the x-ray fixture spec (P7.3a, probe-validated)
-  lands and RETIRES the truck wire specs.
+- **v1.12.0 BACKLOG — CLOSED at the v1.12.2 cut (2026-10-27):**
+  (1) the pages dev-asset 404s — the deployed app index ships 4 asset refs,
+  0 `?v=` refs; live probes: root/viewer/testdata all 200 (the landing's
+  ?v= refs are gone). (2) the app.spec legacy-link pin passes (the link is
+  the gallery's LAST testid) and Pages serves /viewer/index.html (200).
+  (3) the release-branch strings rode the v1.12.0 cut (v1.9.11 drift is
+  dead). (4) the @slow tiers ran at this cut: 11/11 green (subride's
+  Jimmy leg fixed on the way — THE ANCHOR-CLASS LAW bullet). REMAINING:
+  (5) the P7 test-pyramid migration (REWRITE.md / docs/TEST-PYRAMID.md
+  phases — the ongoing plan, not release-critical).
+
 - **WIRE-mode claims vs physical truth (user 2026-10-20, Jimmy incident):**
   the root cause of the scrambled wiring — deletes leaving STALE flattened
   pipe/join indices — is FIXED (v1.5.12 `pruneCompRefs`, see the app bullet;
