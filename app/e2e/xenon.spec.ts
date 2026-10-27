@@ -677,14 +677,21 @@ test.describe('Xenon IDE @ui', () => {
     await expect(page.getByTestId('buzzer-row-game-bass')).toBeVisible();
     await expect(page.getByTestId('buzzer-sound')).toBeVisible();     // 🔊 (autoplay-safe)
     await expect(page.getByTestId('buzzer-wave-sawtooth')).toBeVisible();
-    // the game IS playing: at least one buzzer carries amplitude over time
-    // (the row's 2nd span = Amplitude — the 1st is the alias, NaN-trap)
-    await expect
-      .poll(async () => {
-        const t = await page.getByTestId('buzzer-row-game-melody').locator('span').nth(1).innerText();
-        return parseFloat(t) || 0;
-      }, { timeout: 30_000 })
-      .toBeGreaterThan(0);
+    // the game IS playing: the title DEMO is deliberately silent (main.xc
+    // sets musicgate=0) and inputs during the ~16 s sprite-cache phase are
+    // swallowed — MASH the jump key (the Bus tab arms the pilot keys too)
+    // until a game starts; the level theme then drives the melody buzzer.
+    let amp = 0;
+    for (let i = 0; i < 26 && amp <= 0; i++) {
+      await page.keyboard.down('f');
+      await page.waitForTimeout(90);
+      await page.keyboard.up('f');
+      await page.waitForTimeout(1600);
+      const t = await page.getByTestId('buzzer-row-game-melody').locator('span').nth(1)
+        .innerText().catch(() => '0');
+      amp = parseFloat(t) || 0;
+    }
+    expect(amp).toBeGreaterThan(0);
     await page.getByTestId('xenon-close').click();
   });
 });
