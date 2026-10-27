@@ -173,8 +173,7 @@ describe('pick routing — flavour law + Modify reveal (was builddock/panels e2e
       expect(screen.getByTestId('tri-edit').textContent).toContain('Triangle[0]'));
   });
 
-  test('✎ MODIFY opens EMPTY; a pick reveals the kind’s editor (TODO G)', async () => {
-    const h = await mountEditor('9000005001');
+  test('✎ MODIFY opens EMPTY; a pick reveals the kind’s editor (TODO G)', async () => {    const h = await mountEditor('9000005001');
     fireEvent.click(screen.getByTestId('mode-edit'));
     // a fresh profile is ✎ MODIFY (ws default 'edit'): the dock carries the
     // hint and NO editor rows until you pick something (v1.11 dock law)
@@ -200,6 +199,118 @@ describe('pick routing — flavour law + Modify reveal (was builddock/panels e2e
       'a Modify-mode part click auto-jumps to + Parts').toBe('true');
     expect(screen.getByTestId('inspector')).toBeTruthy();
     expect(h.engine.calls.select?.at(-1)?.[0]).toBe(0);   // the engine SELECTED it
+  });
+});
+
+describe('⚙ View rows drive the engine (was select.spec labels-row wiring)', () => {
+  test('the opt-labels checkbox forwards to engine.setOption', async () => {
+    const h = await mountEditor('3812927875');
+    fireEvent.click(screen.getByTestId('toggle-options'));
+    expect(screen.getByTestId('options-win')).toBeTruthy();
+    const box = screen.getByTestId('opt-labels') as HTMLInputElement;
+    expect(box.checked, 'labels OFF by default (legacy user rule)').toBe(false);
+    fireEvent.click(box);                                   // the REAL control
+    const calls = h.engine.calls.setOption ?? [];
+    expect(calls.at(-1), 'the row forwards to the engine').toEqual(['labels', true]);
+    fireEvent.click(box);
+    expect((h.engine.calls.setOption ?? []).at(-1)).toEqual(['labels', false]);
+  });
+
+  test('the w key toggles the wireframe (hull⇄wire exclusivity); h keeps the hull law', async () => {
+    // phoneux.spec's keys law: the Editor's window keydown (g/o/h/w map)
+    // drives the SAME toggleOpt the ⚙ rows use; the legacy MUTUAL
+    // EXCLUSIVITY rides the w key (a lit wireframe darkens the hull).
+    const h = await mountEditor(null);
+    fireEvent.click(screen.getByTestId('toggle-options'));
+    const wire = () => screen.getByTestId('opt-wire') as HTMLInputElement;
+    const hull = () => screen.getByTestId('opt-hull') as HTMLInputElement;
+    expect(wire().checked).toBe(false);
+    fireEvent.keyDown(window, { key: 'w' });                // wire ON…
+    expect(wire().checked, 'the w key lights wireframe').toBe(true);
+    expect(hull().checked, '…and the exclusivity darkens the hull').toBe(false);
+    fireEvent.keyDown(window, { key: 'w' });                // …and back
+    expect(wire().checked).toBe(false);
+    const h0 = hull().checked;
+    fireEvent.keyDown(window, { key: 'h' });                // h's hull law UNTOUCHED
+    expect(hull().checked).toBe(!h0);
+    fireEvent.keyDown(window, { key: 'h' });
+    expect(hull().checked).toBe(h0);
+    expect((h.engine.calls.setOption ?? []).length).toBeGreaterThanOrEqual(4);
+  });
+});
+
+describe('brush/materials/RGB desk (was tools.spec DOM legs)', () => {  test('the block MATERIALS row writes material without touching colours', async () => {
+    const h = await mountEditor('9000005001');
+    fireEvent.click(screen.getByTestId('mode-edit'));
+    fireEvent.click(screen.getByTestId('ws-edit'));
+    h.clickAt({ kind: 'block', bi: 0, ci: -1, point: [0, 0, 0] });
+    await tick(50);
+    expect(screen.getByTestId('block-edit').textContent).toContain('Block[0]');
+    // the BLOCK widget rides the selection (the e2e read blockGizmo().bi —
+    // here the engine call the Editor's widget effect makes)
+    expect((h.engine.calls.setBlockGizmo ?? []).at(-1)?.[0]).toBe(0);
+    const colorsBefore = [...(blocks(h)[0]!.colors ?? [])];
+    fireEvent.click(screen.getByTestId('block-material-m5'));          // Lead
+    await tick(50);
+    expect(blocks(h)[0]!.material, 'Lead').toBe(5);
+    expect([...blocks(h)[0]!.colors ?? []], 'colours untouched').toEqual(colorsBefore);
+    expect(screen.getByTestId('block-material-name').textContent).toContain('Lead');
+  });
+
+  test('RGB picker: a custom colour becomes a NEW palette slot + paints', async () => {
+    const h = await mountEditor(null);
+    fireEvent.click(screen.getByTestId('mode-edit'));
+    fireEvent.click(screen.getByTestId('ws-blocks'));
+    fireEvent.change(screen.getByTestId('rgb-hex'), { target: { value: '#ff3300' } });
+    fireEvent.click(screen.getByTestId('rgb-new-slot'));
+    await tick(300);                                  // sceneChanged's 180 ms reload debounce
+    const cols = (h.engine.blueprint as Blueprint).data.colors ?? [];
+    const idx = cols.findIndex(c => c && c.r === 255 && c.g === 51 && c.b === 0);
+    expect(idx, 'the picked RGB landed in a NEW slot (past the reserved 0..10)')
+      .toBeGreaterThan(10);
+    expect((h.engine.calls.reload ?? []).length, 'the dock repaint rides the reload').toBeGreaterThan(0);
+    expect(screen.getAllByTestId('palette-swatch').length,
+      'the swatch grid re-renders with the new slot').toBeGreaterThan(0);
+  });
+
+  test('RGB picker: nearest-slot never grows the palette', async () => {
+    const h = await mountEditor(null);
+    fireEvent.click(screen.getByTestId('mode-edit'));
+    fireEvent.click(screen.getByTestId('ws-blocks'));
+    const len = () => ((h.engine.blueprint as Blueprint).data.colors ?? []).length;
+    const before = len();
+    fireEvent.change(screen.getByTestId('rgb-hex'), { target: { value: '#ffffff' } });
+    fireEvent.click(screen.getByTestId('rgb-nearest'));
+    await tick(50);
+    expect(screen.getByTestId('rgb-note').textContent).toMatch(/painted ≈ slot/);
+    expect(len(), 'the palette NEVER grows on the nearest path').toBe(before);
+  });
+});
+
+describe('live data edits route through liveDataEdit (was liveedit.spec panel half)', () => {
+  test('a Propeller twist data-field write calls liveDataEdit, never reload', async () => {
+    // liveedit.spec's panel-routing law: the inspector DATA row writes bp
+    // AND pokes Engine.liveDataEdit (in-place real-model rebuild) — the
+    // full-scene reload() NEVER fires for a data edit. (The geometry law —
+    // the generated blade surface GROWS and the load counter stands still —
+    // is pinned on the real engine: scene.headless 'live data edits'.)
+    const h = await mountEditor('9000001024');
+    fireEvent.click(screen.getByTestId('mode-edit'));
+    fireEvent.click(screen.getByTestId('ws-parts'));
+    fireEvent.change(screen.getByTestId('parts-list').querySelector('[data-testid="filter"]')!,
+      { target: { value: 'propeller' } });
+    const row = document.querySelector('[data-idx]') as HTMLElement;
+    expect(row).toBeTruthy();
+    fireEvent.click(row);                                  // select → inspector
+    const twist = await screen.findByTestId('row-n-twist', {}, { timeout: 10_000 });
+    fireEvent.change(twist, { target: { value: '10' } });
+    await tick(50);
+    expect((h.engine.calls.liveDataEdit ?? []).length,
+      'the panel routed the edit to liveDataEdit').toBeGreaterThan(0);
+    expect(h.engine.calls.reload ?? [], 'NO full-scene reload for a data edit').toHaveLength(0);
+    const ci = +row.getAttribute('data-idx')!;
+    const comp = (h.engine.blueprint as Blueprint).data.components[ci]!;
+    expect((comp.data as Record<string, number>).twist, 'bp carries the data').toBe(10);
   });
 });
 

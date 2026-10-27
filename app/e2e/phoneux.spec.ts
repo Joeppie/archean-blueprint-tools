@@ -11,9 +11,8 @@
 //  • the 3-D widget's LIVE size is 0.6 on phones (a size-1 TGC gizmo spans
 //    ~¼ of a phone screen = a shield over the block) and 1 on desktop;
 //  • the Help manual FILLS the phone viewport (desktop keeps the 86 dvh cap);
-//  • the w key flips the wireframe option (the opt-wire row) — h keeps hull;
-//  • the empty Lift readout speaks enclosed BLOCKS + skin, not triangles
-//    alone (the sealed-envelope law of v1.11).
+// (v1.12.5 L5: the w/h key law → editor.dom.test.tsx + the engine
+//  exclusivity pin; the empty-Lift copy → liftwidget.test.tsx.)
 import { expect, test, type Page } from '@playwright/test';
 
 const isPhone = () => test.info().project.name === 'pixel7';
@@ -105,37 +104,15 @@ test.describe('phone UI batch @ui', () => {
     await expect(page.getByTestId('help-dialog')).toHaveCount(0);
   });
 
-  test('the w key toggles the wireframe option; h keeps toggling the hull', async ({ page }) => {
-    await openNew(page);
-    await page.getByTestId('toggle-options').click();          // the ⚙ View popover carries the rows
-    const wire = page.getByTestId('opt-wire');
-    const hull = page.getByTestId('opt-hull');
-    const w0 = await wire.isChecked();
-    await page.keyboard.press('w');
-    await expect(wire).toBeChecked({ checked: !w0 });
-    // the legacy EXCLUSIVITY law (selftest excl=true) rides the w key too:
-    // a lit wireframe darkens the hull solids (the 'h' hull ⇄ wire law).
-    if (!w0) await expect(hull).toBeChecked({ checked: false });
-    await page.keyboard.press('w');
-    await expect(wire).toBeChecked({ checked: w0 });
-    // h's hull law UNTOUCHED by the new key
-    const h1 = await hull.isChecked();
-    await page.keyboard.press('h');
-    await expect(hull).toBeChecked({ checked: !h1 });
-    await page.keyboard.press('h');
-    await expect(hull).toBeChecked({ checked: h1 });
-  });
+  // RETIRED v1.12.5 (L5): the Editor keydown map (g/o/h/w → toggleOpt) runs in
+  // editor.dom.test.tsx (w lights wireframe + the hull⇄wire exclusivity darkens
+  // the hull; h untouched); the exclusivity law itself is pinned on the real
+  // engine (scene.headless "view-option exclusivity", legacy selftest excl=true).
 
-  test('the empty Lift readout speaks enclosed blocks + skin, not triangles alone', async ({ page }) => {
-    await openNew(page);                                        // opens in VIEW (VesselStats)
-    const widget = page.getByTestId('lift-widget');
-    await expect(widget).toBeVisible();
-    await page.getByTestId('lift-toggle').click();
-    // the starter deck seals nothing, so the empty-state prose shows:
-    await expect(widget).toContainText('enclosed blocks');
-    await expect(widget).toContainText('Generate balloon');
-    await expect(widget, 'the outdated triangles-only wording is gone').not.toContainText('no hull triangles yet');
-  });
+  // RETIRED v1.12.5 (L5): the empty-state copy law is pinned in
+  // liftwidget.test.tsx ("the EMPTY readout speaks enclosed blocks + skin") —
+  // same strings, engine-null seam. The sphereskin lift leg (widget riding a
+  // BUILT balloon) stays: integration.
 
   test('the picked-info chip docks at the viewport bottom edge on phones (desktop: top-right card)', async ({ page }) => {
     await openNew(page);

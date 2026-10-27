@@ -37,6 +37,19 @@ beforeEach(() => localStorage.clear());
 afterEach(cleanup);
 
 describe('LiftWidget — fold + sealed envelope', () => {
+  test('the EMPTY readout speaks enclosed blocks + skin, not triangles alone (was phoneux e2e)', () => {
+    // v1.11.1 copy law: the empty state explains the sealed-flood rule
+    // (enclosed BLOCKS and/or a skin; walls alone displace no lift) and
+    // points at Generate balloon — the outdated triangles-only wording is
+    // GONE (the phoneux pin transcribed).
+    render(<LiftWidget engine={null} bp={empty()} rev={0} />);
+    fireEvent.click(screen.getByTestId('lift-toggle'));
+    const body = screen.getByTestId('lift-widget').textContent ?? '';
+    expect(body).toContain('enclosed blocks');
+    expect(body).toContain('Generate balloon');
+    expect(body, 'the outdated triangles-only wording is gone').not.toContain('no hull triangles yet');
+  });
+
   test('a sealed block shell reports its envelope, per-gas rows and the ladder', () => {
     render(<LiftWidget engine={null} bp={shell()} rev={0} />);
     // collapsed one-liner: 125 cells × 0.25³ = 1.953 m³, vacuum lift 2 kg

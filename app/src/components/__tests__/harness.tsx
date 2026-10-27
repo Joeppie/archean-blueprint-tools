@@ -66,7 +66,19 @@ export function makeFakeEngine(axes: string[]): FakeEngine {
       localStorage.setItem('archean-app-mirror-axis', a);
     },
     craftMirrorAxes: () => self.axes as string[],
-    getOptions: (): ViewOptions => ({ ...DEFAULT_OPTS }),
+    // the ⚙ rows are CHECKED from getOptions() — so setOption must STICK,
+    // and the REAL engine's hull⇄wire MUTUAL EXCLUSIVITY (scene.ts
+    // setOption, legacy selftest excl=true) applies identically here — the
+    // key/checkbox tests read the row state back through getOptions.
+    _opts: { ...DEFAULT_OPTS } as Record<string, boolean>,
+    setOption(k: string, on: boolean) {
+      ((self.calls as Record<string, unknown[][]>).setOption ??= []).push([k, on]);
+      const o = self._opts as Record<string, boolean>;
+      o[k] = on;
+      if ((k === 'hull' && on && o.wire) || (k === 'wire' && on && o.hull))
+        o[k === 'hull' ? 'wire' : 'hull'] = false;
+    },
+    getOptions: (): ViewOptions => ({ ...(self._opts as object) } as ViewOptions),
     // the REAL engine pushes selection changes back through onSelection
     // (the Editor's `sel` state rides it — the Inspector, the gizmo gate,
     // the twin glow all key off it), so the fake mirrors the call.

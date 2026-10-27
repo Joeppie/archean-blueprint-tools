@@ -12,19 +12,11 @@
 //  • the merged hull REPAINTS after a run (stats().loads strictly increases
 //    — the AGENTS "data assertions cannot pin a repaint" rule);
 //  • the dialog never fills the view; its body scrolls and the footer stays
-//    pinned (desktop + Pixel 7, the phone bottom clear zone — pixels);
-//  • the block MATERIALS row and the RGB picker drive the live engine + dock
-//    (selection, brush, the palette grid).
+//    pinned (desktop + Pixel 7, the phone bottom clear zone — pixels).
+// (v1.12.5 L5: the MATERIALS row + both RGB-picker legs migrated to
+//  editor.dom.test.tsx — DOM wiring on the real Editor; the write/persist
+//  laws were already vitest-pinned.)
 import { expect, test, type Page } from '@playwright/test';
-
-type Blk = { pos_x: number; pos_y: number; pos_z: number; type: number; material?: number;
-  colors?: number[] };
-type Tri = { frame_x: number; colors?: number[]; [k: string]: unknown };
-
-const bpOf = (page: Page) => page.evaluate(() =>
-  (window as unknown as { __ARCHEAN__: { engine: { blueprint: {
-    data: { blocks: Blk[]; triangles?: Tri[]; colors?: (Record<string, number> | null)[] } } } } })
-    .__ARCHEAN__.engine.blueprint.data);
 
 const loads = (page: Page) => page.evaluate(() =>
   (window as unknown as { __ARCHEAN__: { stats: () => { loads: number } } }).__ARCHEAN__.stats().loads);
@@ -34,33 +26,6 @@ async function openNew(page: Page) {
   await page.getByTestId('gallery-new').click();
   await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
 }
-
-/** walk the canvas with the ENGINE's own picker until a block face answers */
-async function blockPixel(page: Page): Promise<{ x: number; y: number }> {
-  for (let i = 0; i < 40; i++) {
-    const px = await page.evaluate(() => {
-      const c = document.querySelector('canvas')!;
-      const r = c.getBoundingClientRect();
-      const e = (window as unknown as { __ARCHEAN__?: { engine: {
-        pendingReal: number; pickCell: (x: number, y: number) => { kind: string; bi: number } | null } } })
-        .__ARCHEAN__!.engine;
-      if (e.pendingReal > 0) return null;
-      for (let fy = 0.3; fy <= 0.85; fy += 0.02)
-        for (let fx = 0.25; fx <= 0.8; fx += 0.02) {
-          const h = e.pickCell(r.left + r.width * fx, r.top + r.height * fy);
-          if (h && h.kind === 'block' && h.bi >= 0) return { x: r.left + r.width * fx, y: r.top + r.height * fy };
-        }
-      return null;
-    });
-    if (px) return px;
-    await page.waitForTimeout(300);
-  }
-  throw new Error('no block face answered pickCell');
-}
-
-/** the brush slot number field's current value */
-const brushSlot = (page: Page) => page.evaluate(() => Number(
-  (document.querySelector('[data-testid="num-slot"]') as HTMLInputElement | null)?.value ?? -1));
 
 async function openTool(page: Page, id: string) {
   await page.getByTestId('tools-menu').click();
@@ -116,63 +81,17 @@ test.describe('tools menu + dialogs @ui', () => {
 });
 
 test.describe('materials + RGB picker @ui', () => {
-  test('the block MATERIALS row writes material without touching colours', async ({ page }) => {
-    test.skip(test.info().project.name !== 'chromium', 'the side panel is a drawer on phones');
-    await openNew(page);
-    await page.getByTestId('mode-edit').click();
-    await page.getByTestId('ws-edit').click();
-    const px = await blockPixel(page);
-    await page.mouse.click(px.x, px.y);
-    await expect(page.getByTestId('block-edit')).toContainText(/Block\[\d+\]/, { timeout: 10_000 });
-    const before = await bpOf(page);
-    const sel = await page.evaluate(() => {
-      const w = window as unknown as { __ARCHEAN__: { blockGizmo: () => { bi: number } | null } };
-      return w.__ARCHEAN__.blockGizmo()?.bi ?? -1;
-    });
-    expect(sel).toBeGreaterThanOrEqual(0);                             // the widget rides it
-    await page.getByTestId('block-material-m5').click();                // Lead
-    await expect.poll(async () => (await bpOf(page)).blocks[sel]?.material,
-      { timeout: 10_000 }).toBe(5);
-    expect((await bpOf(page)).blocks[sel]!.colors).toEqual(before.blocks[sel]!.colors);
-    await expect(page.getByTestId('block-material-name')).toHaveText('Lead');
-  });
+  // RETIRED v1.12.5 (L5): the MATERIALS-row DOM law (write material, colours
+  // untouched, MATERIAL chip reads Lead, the block widget rides the selection)
+  // runs in editor.dom.test.tsx on the real Editor + the shipped writeBlockMaterial
+  // (its append-the-missing-key law stays in tooldoc).
 
-  test('RGB picker: a custom colour becomes a NEW palette slot + paints', async ({ page }) => {
-    test.skip(test.info().project.name !== 'chromium', 'the side panel is a drawer on phones');
-    await openNew(page);
-    await page.getByTestId('mode-edit').click();
-    await page.getByTestId('ws-blocks').click();
-    await page.getByTestId('rgb-hex').fill('#ff3300');
-    const l0 = await loads(page);
-    await page.getByTestId('rgb-new-slot').click();
-    await expect.poll(async () => {
-      const cols = (await bpOf(page)).colors ?? [];
-      return cols.findIndex(c => c && c.r === 255 && c.g === 51 && c.b === 0);
-    }, { timeout: 10_000 }).toBeGreaterThan(10);
-    await expect.poll(() => loads(page), { timeout: 15_000 }).toBeGreaterThan(l0);
-    // the brush now paints with that slot
-    expect(await brushSlot(page)).toBeGreaterThan(10);
-    // the swatch grid shows the new slot in the "on vessel" strip
-    await expect(page.getByTestId('palette-swatch').first()).toBeVisible();
-  });
+  // RETIRED v1.12.5 (L5): rgb-hex ▸ + new slot → #ff3300 lands a NEW palette
+  // slot past the reserved 0..10 + the dock reload fires — editor.dom.test.tsx
+  // (allocateSlot/nearestSlot/setPaletteSlot laws stay vitest-pinned in
+  // tools.test/edit.test).
 
-  test('RGB picker: nearest-slot never grows the palette', async ({ page }) => {
-    test.skip(test.info().project.name !== 'chromium', 'the side panel is a drawer on phones');
-    await openNew(page);
-    await page.getByTestId('mode-edit').click();
-    await page.getByTestId('ws-blocks').click();
-    await page.getByTestId('rgb-hex').fill('#ffffff');
-    const before = await page.evaluate(() =>
-      ((window as unknown as { __ARCHEAN__: { engine: { blueprint: { data: {
-        colors?: unknown[] } } } } }).__ARCHEAN__.engine.blueprint.data.colors ?? []).length);
-    await page.getByTestId('rgb-nearest').click();
-    await expect(page.getByTestId('rgb-note')).toContainText(/painted ≈ slot/);
-    const after = await page.evaluate(() =>
-      ((window as unknown as { __ARCHEAN__: { engine: { blueprint: { data: {
-        colors?: unknown[] } } } } }).__ARCHEAN__.engine.blueprint.data.colors ?? []).length);
-    expect(after).toBe(before);
-    // #ffffff IS built-in slot 0 (exact hit — the nearest search covers the
-    // engine-reserved slots too, they are paintable, just not redefinable)
-    await expect(page.getByTestId('rgb-note')).toContainText('painted ≈ slot 0');
-  });
+  // RETIRED v1.12.5 (L5): rgb-nearest "painted ≈ slot" + the palette never
+  // grows — editor.dom.test.tsx (the reserved-slots-are-paintable law is
+  // nearestSlot’s own vitest pin).
 });

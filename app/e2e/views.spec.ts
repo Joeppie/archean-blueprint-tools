@@ -40,8 +40,6 @@ type Win = { __ARCHEAN__?: {
 
 const gridOf = (page: Page) =>
   page.evaluate(() => (window as unknown as Win).__ARCHEAN__!.grid());
-const mirAxis = (page: Page) =>
-  page.evaluate(() => (window as unknown as Win).__ARCHEAN__!.mirAxis());
 const coordOf = (page: Page) =>
   page.evaluate(() => (window as unknown as Win).__ARCHEAN__!.coord());
 const onLadder = (v: number, step: number) =>
@@ -121,56 +119,11 @@ test.describe('coord readout + grid + axis markers + mirror axis @ui', () => {
   // The settings chain: one boot, the FULL x→z→x→y→⊘→x round-trip in
   // order (the two former legs shared exactly this sequence split across
   // two boots). localStorage + twin-pair dormancy ride every flip.
-  test('⚙ mirror axis: settable, twins live on the session axis, ⊘ OFF (warm boot)', async ({ page }) => {
-    desktopOnly();
-    await openCraft(page, ISW);
-    expect(await mirAxis(page)).toBe('x');         // hard gate: corpus default
-
-    // v1.11.1 ONE AXIS AT A TIME (we: "The x axis is visible in a craft,
-    // but this isn't synced with mirroring!"): twin PAIRS are live only on
-    // the session axis — ISW's pairs (x) propagate under x and go DORMANT
-    // the moment the axis flips.
-    const pairCi = await page.evaluate(() => {
-      const e = (window as unknown as { __ARCHEAN__?: { engine: {
-        blueprint: { data: { components: unknown[] } };
-        twinPairsOf: (ci: number) => unknown[] } } }).__ARCHEAN__!.engine;
-      for (let i = 0; i < e.blueprint.data.components.length; i++)
-        if (e.twinPairsOf(i).length) return i;
-      return -1;
-    });
-    expect(pairCi, 'ISW carries a live twin pair under the default x axis').toBeGreaterThanOrEqual(0);
-    const pairCount = (ci: number) =>
-      page.evaluate((c) => (window as unknown as Win).__ARCHEAN__!.engine.twinPairsOf(c).length, ci);
-
-    await page.getByTestId('toggle-options').click();
-
-    await test.step('z: pair DORMANT, storage follows', async () => {
-      await page.getByTestId('mirror-axis-z').click();
-      await expect.poll(() => mirAxis(page)).toBe('z');
-      expect.soft(await page.evaluate(() => localStorage.getItem('archean-app-mirror-axis'))).toBe('z');
-      expect.soft(await pairCount(pairCi), 'the x pair is DORMANT under session z').toBe(0);
-    });
-
-    await test.step('back to x: pair WAKES', async () => {
-      await page.getByTestId('mirror-axis-x').click();
-      await expect.poll(() => mirAxis(page)).toBe('x');
-      expect.soft(await pairCount(pairCi), 'switching the axis back WAKES the pair').toBeGreaterThanOrEqual(1);
-    });
-
-    await test.step('y is settable too', async () => {
-      await page.getByTestId('mirror-axis-y').click();
-      await expect.poll(() => mirAxis(page)).toBe('y');
-    });
-
-    await test.step('⊘ OFF disables the session plane (v1.10.5); x is the full round-trip home', async () => {
-      await page.getByTestId('mirror-axis-off').click();
-      await expect.poll(() => mirAxis(page)).toBe('off');
-      expect.soft(await page.evaluate(() => localStorage.getItem('archean-app-mirror-axis'))).toBe('off');
-      // and it goes back on: the session axis is a FULL round-trip, x/y/z ⊕ off
-      await page.getByTestId('mirror-axis-x').click();
-      await expect.poll(() => mirAxis(page)).toBe('x');   // hard: clean exit state
-    });
-  });
+  // RETIRED v1.12.5 (L5): the session-axis twin liveness (x live / z DORMANT /
+  // x WAKES / ⊘ OFF / full round-trip) is pinned headless on the real engine
+  // (scene.headless "MIRROR ONE AXIS AT A TIME"); the rows are plain
+  // setMirrorAxis wiring (the mirw-* chip transitions are pinned at the jsdom
+  // tier in editor.dom). The mask math itself: sym.test + blocks.test v1.5.21.
 
   // RETIRED v1.12.1 (L1): the step LADDER (0.25·{1,5,10,50,100} ∪ 0.05,
   // the 14-px flip) is fully pinned by grid.test.ts on plain node.

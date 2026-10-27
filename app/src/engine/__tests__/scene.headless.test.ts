@@ -8,7 +8,7 @@
 import { describe, expect, test } from 'vitest';
 import { Quaternion, Vector3 } from 'three';
 import { sphereSkinTris } from '../latsphere';
-import { manifestOnly, openCraft, openCraftOpt, virtualControls, withRealModels } from './harness';
+import { diskAtlas, manifestOnly, openCraft, openCraftOpt, virtualControls, withRealModels } from './harness';
 import type { Engine } from '../scene';
 import type { Blueprint } from '../format';
 
@@ -611,4 +611,184 @@ describe('placement ghost lattice law (was sphereskin ⟲ e2e, v1.12.5)', () => 
     expect(st2.offset).toEqual([0, 0, 5]);
     expect(spans(st2.bb)).toEqual(spans(st1!.bb).map((v, k) => v + ([0, 0, 0][k] as number)));
   });
+});
+
+describe('selection surges + label chips (was select.spec, v1.12.5)', () => {
+  test('a component selection fires ONE surge per connected pipe and every bolt lands', () => {
+    // select.spec's law verbatim (legacy selftest surges=true at the viewer
+    // tier): the MAX-DEGREE component of ISW's cable graph; one pulse per
+    // connected pipe, each with a real far end, riding only real (≥ 5 cm)
+    // runs, ≥ 550 ms, additive + depthTest OFF, a source blip; pumping
+    // stepSurges with synthetic time drives every pulse to its arrival
+    // (no render pump, no wall-clock race). Deselect clears the board.
+    const e = openCraft('3812927875', { atlas: manifestOnly() });
+    const pipes = e.blueprint!.data.pipes ?? [];
+    const cnt: Record<number, number> = {};
+    for (const p of pipes) {
+      cnt[p.a_component] = (cnt[p.a_component] ?? 0) + 1;
+      cnt[p.b_component] = (cnt[p.b_component] ?? 0) + 1;
+    }
+    let ci = -1; let deg = 0;
+    for (const [k, v] of Object.entries(cnt)) if (v > deg) { ci = +k; deg = v; }
+    expect(ci, 'the corpus craft must carry a cable graph').toBeGreaterThan(0);
+    e.select(ci);
+    const s = e.surgeState();
+    expect(s.links, 'the drawn cable graph exists').toBeGreaterThan(0);
+    expect(s.surges.length, 'one pulse per connected pipe').toBe(deg);
+    for (const p of s.surges) {
+      expect(p.to, 'every pulse has a real far component').toBeGreaterThanOrEqual(0);
+      expect(p.total, 'pulses only ride real (>= 5 cm) cable runs').toBeGreaterThan(0.05);
+      expect(p.dur).toBeGreaterThanOrEqual(550);
+    }
+    expect(s.additiveNoDepth, 'pulses render additive with depthTest off').toBe(true);
+    expect(s.sourceBlip, 'a source blip marks the picked part').toBe(true);
+    // pump the pulse clock: exactly one arrival blip per pulse
+    const step = (t: number) =>
+      (e as unknown as { stepSurges(now: number): void }).stepSurges(t);
+    const t0 = performance.now();
+    for (let k = 1; k <= 40; k++) step(t0 + k * 200);
+    const done = e.surgeState();
+    expect(done.surges.length).toBe(0);
+    expect(done.arrivals, 'every bolt landed on its far component').toBe(deg);
+    // deselect (Esc path = engine.select(-1)) clears everything
+    e.select(-1);
+    const cleared = e.surgeState();
+    expect(cleared.surges.length).toBe(0);
+    expect(cleared.flashes).toBe(0);
+    expect(cleared.arrivals).toBe(0);
+  }, 60_000);
+
+  test('label chips ride INTERACT/aliased parts — opt-in, OFF by default', () => {
+    // select.spec's labels law: the census (INTERACT types / aliases), the
+    // OFF default, the ⚙ option lighting every chip, chips stable (shown +
+    // aliased) while a labelled part moves, and the option off empties it.
+    // The checkbox ▸ setOption wiring is pinned at the jsdom tier.
+    const e = openCraft('3812927875', { atlas: manifestOnly() });
+    const off = e.labelState();
+    expect(off.total, 'INTERACT types (dash/button/seat/beacon…) exist').toBeGreaterThan(0);
+    expect(off.shown, 'labels OFF by default (legacy user rule)').toBe(0);
+    expect(off.on).toBe(false);
+    e.setOption('labels', true);
+    const on = e.labelState();
+    expect(on.on).toBe(true);
+    expect(on.shown, 'every label chip becomes visible').toBe(on.total);
+    const i = e.blueprint!.data.components.findIndex(c =>
+      (c.alias ?? '').trim() || ['PilotSeat', 'Beacon', 'Dashboard'].includes(c.type));
+    expect(i).toBeGreaterThanOrEqual(0);
+    const y0 = e.blueprint!.data.components[i]!.position.y;
+    e.setFilePosAxis(i, 'y', y0 + 1.0);
+    const moved = e.labelState();
+    expect(moved.shown, 'labels stay visible while the part moves').toBe(moved.total);
+    expect(moved.aliased, 'the alias-chip count is stable').toBe(off.aliased);
+    e.setFilePosAxis(i, 'y', y0);
+    e.setOption('labels', false);
+    expect(e.labelState().shown).toBe(0);
+  }, 60_000);
+});
+
+describe('view-option exclusivity + mirror-axis twin liveness (was views/phoneux, v1.12.5)', () => {
+  test('hull ⇄ wireframe stay mutually exclusive through setOption (legacy excl=true)', () => {
+    // the engine half of phoneux's 'w key' pin: the KEY wiring is pinned at
+    // the jsdom tier (editor.dom), the exclusivity law is right here —
+    // lighting the wireframe darkens the hull solids, and vice versa.
+    const e = openCraft('3812927875', { atlas: manifestOnly() });
+    expect(e.getOptions().hull).toBe(true);
+    e.setOption('wire', true);
+    expect(e.getOptions().wire).toBe(true);
+    expect(e.getOptions().hull, 'a lit wireframe forces the hull OFF').toBe(false);
+    e.setOption('hull', true);
+    expect(e.getOptions().hull).toBe(true);
+    expect(e.getOptions().wire, 'relighting the hull darkens the wireframe').toBe(false);
+  });
+
+  test('MIRROR ONE AXIS AT A TIME: twin pairs live on the SESSION axis only', () => {
+    // views.spec '⚙ mirror axis' engine law (v1.11.1): ISW's pair propagates
+    // under x, goes DORMANT under z, WAKES back on x, and ⊘ OFF disables the
+    // session plane entirely (the row wiring + localStorage are pinned at the
+    // jsdom tier / by the engine's own persistence).
+    const e = openCraft('3812927875', { atlas: manifestOnly() });
+    let pairCi = -1;
+    for (let i = 0; i < e.blueprint!.data.components.length; i++)
+      if (e.twinPairsOf(i).length) { pairCi = i; break; }
+    expect(pairCi, 'ISW carries a live twin pair under the default x axis')
+      .toBeGreaterThanOrEqual(0);
+    e.setMirrorAxis('z');
+    expect(e.twinPairsOf(pairCi).length, 'the x pair is DORMANT under session z').toBe(0);
+    e.setMirrorAxis('x');
+    expect(e.twinPairsOf(pairCi).length, 'switching the axis back WAKES the pair')
+      .toBeGreaterThanOrEqual(1);
+    e.setMirrorAxis('off');
+    expect(e.twinPairsOf(pairCi).length, '⊘ OFF disables the session mirror').toBe(0);
+    e.setMirrorAxis('x');
+    expect(e.twinPairsOf(pairCi).length, 'the axis is a FULL round-trip home').toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('live data edits re-render the part (was liveedit.spec @live, v1.12.5)', () => {
+  const spans = (b: Box) => [0, 1, 2].map(a => b.max[a]! - b.min[a]!);
+
+  test('Propeller twist edit grows the generated blade surface immediately (no reload)', async () => {
+    // liveedit.spec's law at the engine tier: the MATRIX rest twin
+    // (9000001024: 4 blades, r 1.2, twist 0) with its REAL streamed model;
+    // data.twist 0 ▸ 10 through liveDataEdit (the panel routes edits here —
+    // Inspector wiring pinned at the jsdom tier) rebuilds the generated
+    // blade geometry IN PLACE: the disc-normal (smallest) span grows > 0.15 m
+    // and the load counter (stats().loads = reload()) never moves.
+    const e = openCraft('9000001024', { atlas: diskAtlas() });
+    const ci = cIs(e.blueprint!, /^Propeller$/)[0]!;
+    await withRealModels(e, [ci]);
+    const l0 = (e as unknown as { loadCount: number }).loadCount;
+    const b0 = e.compRealBox(ci)!;
+    const comp = e.blueprint!.data.components[ci]!;
+    (comp.data as Record<string, number>).twist = 10;
+    e.liveDataEdit(ci);
+    // the live rebuild rides a promise chain the browser flushes in the
+    // render loop; headless, await it directly
+    await (e as unknown as { liveEdits: Map<number, Promise<void>> }).liveEdits.get(ci);
+    const b1 = e.compRealBox(ci)!;
+    const s0 = spans(b0).sort((x, y) => x - y);
+    const s1 = spans(b1).sort((x, y) => x - y);
+    expect(s1[0]! - s0[0]!, `out-of-plane spread grew ${(s1[0]! - s0[0]!).toFixed(2)} m`)
+      .toBeGreaterThan(0.15);
+    expect((e as unknown as { loadCount: number }).loadCount, 'NO full-scene reload for a data edit')
+      .toBe(l0);
+  }, 60_000);
+
+  test('Aileron joint-angle deflection rides the live model; transforms stay finite', async () => {
+    // the Aileron flap (9000001001 rest twin, flat plate thin in y): the
+    // joint-angle edit + liveDataEdit deflects the flap (y-span grows > 0.05)
+    // and no NaN matrix/geometry appears in the rebuilt tree (the v0.182
+    // quat-backing corruption guard).
+    const e = openCraft('9000001001', { atlas: diskAtlas() });
+    const ci = cIs(e.blueprint!, /^Aileron$/)[0]!;
+    await withRealModels(e, [ci]);
+    const l0 = (e as unknown as { loadCount: number }).loadCount;
+    const b0 = e.compRealBox(ci)!;
+    const comp = e.blueprint!.data.components[ci]!;
+    const d = (comp.data ??= {}) as Record<string, number>;
+    // the scrub's real end point: 120 px × range(±45°)/400 px ≈ +27°
+    d.angle = (d.angle ?? 0) + 27;
+    e.liveDataEdit(ci);
+    await (e as unknown as { liveEdits: Map<number, Promise<void>> }).liveEdits.get(ci);
+    const b1 = e.compRealBox(ci)!;
+    const y0 = b0.max[1] - b0.min[1];
+    const y1 = b1.max[1] - b1.min[1];
+    expect(y1, `flap deflected: y-span ${y1.toFixed(3)} > rest ${y0.toFixed(3)}`)
+      .toBeGreaterThan(y0 + 0.05);
+    expect((e as unknown as { loadCount: number }).loadCount).toBe(l0);
+    // NaN sweep over the part's real tree (the e2e's MW-NaN/GEO-NaN scan)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const roots: any[] = (e as unknown as { compRoots: Map<number, any[]> }).compRoots.get(ci) ?? [];
+    const bad: string[] = [];
+    for (const r of roots) r.traverse((o: any) => {
+      const mw = o.matrixWorld?.elements as number[] | undefined;
+      if (mw && !mw.every(Number.isFinite)) bad.push(`MW-NaN ${o.type ?? '?'}`);
+      const g = o.geometry as { computeBoundingBox?(): void; boundingBox?: { min?: { x?: number } } } | undefined;
+      if (g?.computeBoundingBox) {
+        g.computeBoundingBox();
+        if (!Number.isFinite(g.boundingBox?.min?.x ?? 0)) bad.push('GEO-NaN');
+      }
+    });
+    expect(bad, 'NaN transforms in the scene').toEqual([]);
+  }, 60_000);
 });
