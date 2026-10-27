@@ -609,7 +609,10 @@ unchanged.
 - `occupancies[]`: same shape as a block entry (frame/pos/size), grid footprint.
 - `position` / `orientation`: free transform (model pivot, rotation about it).
 - `data`: per-type payload — MiniComputer holds visual-program nodes + `.xc` source
-  (`xc_files`), Beacon holds frequency + last transmitted payload, PilotSeat holds
+  (`xc_files`; `plain_code` is the ONLY stored program form — no bytecode; the
+  language is the dev's own XenonCode, open source at
+  github.com/batcholi/XenonCode — we run it as WASM in `tools/xenoncode/`,
+  see NOTICE §6), Beacon holds frequency + last transmitted payload, PilotSeat holds
   `{emitPlayerToken, smoothControls}`, HudController holds HUD `.xc` source.
 
 ## Mass & build cost — the game's server/editor rules (transcribed 2026-10-19,
