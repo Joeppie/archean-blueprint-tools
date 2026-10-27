@@ -360,10 +360,14 @@ describe('content basis C·chain·C⁻¹ on solo fixtures (was asset-space.spec 
 // THE JOINT-RIDE AUDIT — verbatim port of subride.spec's page.evaluate body
 // (was @subgrid @slow, 2 crafts × 2 projects): the shipped TGC writeback
 // path is fully programmatic (gizmoProxy + gizmoWriteback), so the whole
-// (subgrid, master) pair audit runs on the headless Engine.
+// (subgrid, master) pair audit runs on the headless Engine. v1.12.4 (P7.1
+// slice 2): the panel bbox mirrors the ENGINE's blockParts collection —
+// every NESTED Build's blocks pushed through its v1.11.8 rig pose (the e2e
+// audit's rigApplyA/rigPushA maths) — and the JRef's `benchAnchored` flag
+// carries the v1.12.2 ANCHOR-CLASS LAW; Jimmy's last e2e leg retired (L5).
 type Pair = {
   bi: number; top: number; type: string;
-  lever: number; onPanel: number;
+  lever: number; onPanel: number; benchAnchored: boolean;
   rideP: number; rideQ: number; panelTravel: number; partTravel: number;
 };
 
@@ -375,7 +379,9 @@ function subrideAudit(e: Engine): Pair[] {
     gizmoProxy: { quaternion: import('three').Quaternion; position: import('three').Vector3 };
     captureGesture(ci: number): void;
     gizmoWriteback(): void;
-    subJrefs: Map<number, { top: number; pivot0: number[]; p0: number[]; mc: { type: string } }[]>;
+    subJrefs: Map<number, {
+      top: number; pivot0: number[]; p0: number[]; benchAnchored?: boolean; mc: { type: string };
+    }[]>;
     subGroups: Map<number, { position: { x: number; y: number; z: number }; quaternion: { w: number; x: number; y: number; z: number } }>;
     compRoots: Map<number, { visible: boolean; position: { x: number; y: number; z: number }; quaternion: { w: number; x: number; y: number; z: number } }[]>;
     select(ci: number): void;
@@ -399,19 +405,56 @@ function subrideAudit(e: Engine): Pair[] {
 
   const pairs: Pair[] = [];
   const moff = [eng.moffView.x, eng.moffView.y, eng.moffView.z];
+  // the rig maths of the engine's blockParts collection (subgrid.ts
+  // rigPush/rigApply — the e2e audit's rigApplyA/rigPushA, verbatim)
+  type Chain = { t: number[]; q: number[] };
+  const rigApply = (ch: Chain, v: number[]) => {
+    const r = qrot(ch.q, v);
+    return [ch.t[0]! + r[0]!, ch.t[1]! + r[1]!, ch.t[2]! + r[2]!];
+  };
+  const rigPush = (ch: Chain, pos: { x: number; y: number; z: number }, quat: number[]) => {
+    const r = qrot(ch.q, [pos.x, pos.y, pos.z]);
+    return { t: [ch.t[0]! + r[0]!, ch.t[1]! + r[1]!, ch.t[2]! + r[2]!], q: qmul(ch.q, quat) };
+  };
+  type Blk = { type?: number; pos_x: number; pos_y: number; pos_z: number;
+    size_x?: number; size_y?: number; size_z?: number;
+    frame_x?: number; frame_y?: number; frame_z?: number };
+  // The panel's block bbox (the clamp target) in the WORLD frame it renders
+  // in — the RIG-AWARE version (P7.1 slice 2): the subgrid's own blocks at
+  // identity PLUS every NESTED Build's blocks pushed through its rig pose
+  // (Jimmy's gantry content rides rigs; the raw-file bbox compares the BUILT
+  // cells, not where the content rigs to — the 1.50 m vs < 0.6 m false red
+  // the e2e leg's header documented). Mirrors subBlockBBoxRigs(blockParts).
+  const panelBBox = (bi: number) => {
+    const bb = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
+    const growBB = (p: number[]) => {
+      for (let k = 0; k < 3; k++) { bb.min[k] = Math.min(bb.min[k]!, p[k]!); bb.max[k] = Math.max(bb.max[k]!, p[k]!); }
+    };
+    const growBlocks = (bl: Blk[], chain: Chain) => {
+      for (const x of bl) for (const s of [[0, 0, 0], [(x.size_x ?? 0) + 1, (x.size_y ?? 0) + 1, (x.size_z ?? 0) + 1]])
+        growBB(rigApply(chain, [(x.pos_x + s[0]! + (x.frame_x ?? 0) * 12 - 5.5) * 0.25,
+          (x.pos_y + s[1]! + (x.frame_y ?? 0) * 12 - 5.5) * 0.25,
+          (x.pos_z + s[2]! + (x.frame_z ?? 0) * 12 - 5.5) * 0.25]).map((v, i) => v + moff[i]!));
+    };
+    const collectRigs = (list: Record<string, any>[], depth: number, chain: Chain) => {
+      for (const sc of list) if (sc.type === 'Build' && depth < 8) {
+        const scChain = rigPush(chain, sc.position,
+          [sc.orientation?.w ?? 1, sc.orientation?.x ?? 0, sc.orientation?.y ?? 0, sc.orientation?.z ?? 0]);
+        growBlocks((((sc.data?.blocks) ?? []).filter((x: Blk) => (x.type ?? 0) !== 255)), scChain);
+        collectRigs((sc.data?.components) ?? [], depth + 1, scChain);
+      }
+    };
+    const selfData = eng.bp.data.components[bi]?.data as
+      { blocks?: Blk[]; components?: Record<string, any>[] } | undefined;
+    growBlocks(((selfData?.blocks ?? []).filter((x) => (x.type ?? 0) !== 255)),
+      { t: [0, 0, 0], q: [1, 0, 0, 0] });
+    collectRigs(selfData?.components ?? [], 0, { t: [0, 0, 0], q: [1, 0, 0, 0] });
+    return bb;
+  };
   for (const [bi, jrefs] of eng.subJrefs) {
     for (const j of jrefs) {
       if (j.top < 0) continue;
-      // the panel's block bbox (the clamp target) in the WORLD frame it renders in
-      const bl = ((eng.bp.data.components[bi]?.data?.blocks as { type?: number; pos_x: number; pos_y: number; pos_z: number; size_x?: number; size_y?: number; size_z?: number; frame_x?: number; frame_y?: number; frame_z?: number }[] | undefined) ?? [])
-        .filter((x) => (x.type ?? 0) !== 255);
-      const bb = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
-      for (const x of bl) for (const s of [[0, 0, 0], [(x.size_x ?? 0) + 1, (x.size_y ?? 0) + 1, (x.size_z ?? 0) + 1]]) {
-        const p = [(x.pos_x + s[0]! + (x.frame_x ?? 0) * 12 - 5.5) * 0.25 + moff[0]!,
-          (x.pos_y + s[1]! + (x.frame_y ?? 0) * 12 - 5.5) * 0.25 + moff[1]!,
-          (x.pos_z + s[2]! + (x.frame_z ?? 0) * 12 - 5.5) * 0.25 + moff[2]!];
-        for (let k = 0; k < 3; k++) { bb.min[k] = Math.min(bb.min[k]!, p[k]!); bb.max[k] = Math.max(bb.max[k]!, p[k]!); }
-      }
+      const bb = panelBBox(bi);
       const g = eng.subGroups.get(bi)!;
       const roots = (eng.compRoots.get(j.top) ?? []).filter((o) => o.visible);
       const snap = () => ({
@@ -443,7 +486,7 @@ function subrideAudit(e: Engine): Pair[] {
       pairs.push({
         bi: bi as number, top: j.top, type: j.mc.type,
         lever: len(sub(j.pivot0.map((v, i) => v + moff[i]!) as number[], j.p0.map((v, i) => v + moff[i]!) as number[])),
-        onPanel,
+        onPanel, benchAnchored: !!j.benchAnchored,
         rideP: len(sub(predP, after.grpP)), rideQ: spinDeg(qmul(predQ, qconj(after.grpQ))),
         panelTravel: len(sub(after.grpP, before.grpP)), partTravel: len(sub(after.partP, before.partP)),
       });
@@ -453,13 +496,14 @@ function subrideAudit(e: Engine): Pair[] {
 }
 
 describe('subgrid rides its joint (was subride.spec @subgrid @slow)', () => {
-  // THE TRUCK audits fully headless (14 pairs). Jimmy's Adventure STAYS
-  // e2e for now: its gantry SmallPivot (sub#6 m#167) clamps pivot0 through
-  // the v1.11.8 RIG chain (subBlockBBoxRigs), and the audit's raw-file
-  // block bbox misses the rig transform → 1.50 m vs the <0.6 law. P7.1
-  // slice 2 (rig-aware audit bbox in the graph layer) retires that leg.
+  // THE TRUCK audits fully headless (14 pairs); Jimmy's Adventure joined at
+  // v1.12.4 (P7.1 slice 2: the rig-aware bbox above + the ANCHOR-CLASS LAW
+  // retire the last e2e leg — the gantry SmallPivot's line is the GAME's
+  // bench-fixed line, 1.5 m off the content box BY DESIGN, captured through
+  // the v1.11.8 rig chain).
   for (const { id, name } of [
     { id: '3481322297', name: 'Classic American Semi Truck' },
+    { id: '3334698274', name: "Jimmy's Adventure" },
   ]) {
     test(`${name} (${id}): every joint line is on its panel and the panel rides the part`, () => {
       const e = openCraft(id, { atlas: manifestOnly() });   // .ini joints, no gltf fan
@@ -467,10 +511,17 @@ describe('subgrid rides its joint (was subride.spec @subgrid @slow)', () => {
       const pairs = subrideAudit(e);
       expect(pairs.length, 'the craft has jointed subgrids to audit').toBeGreaterThan(0);
       for (const p of pairs) {
-        expect(p.onPanel, `sub#${p.bi} (${p.type} m#${p.top}): the joint line lies on its own panel content (a z-mirrored clamp line floats off it)`)
-          .toBeLessThan(0.6);
-        expect(p.lever, `sub#${p.bi} (${p.type} m#${p.top}): the joint line belongs to its part (no phantom lever)`)
-          .toBeLessThan(3);
+        // v1.12.2 ANCHOR-CLASS LAW (retired from the e2e verbatim): pairs
+        // captured through the v1.10.2/v1.11.8 BENCH ANCHOR ride the GAME's
+        // own hinge line; that line may sit off the content box BY
+        // CONSTRUCTION — the clamp contracts are for the clamp class, the
+        // KINEMATIC laws below are the guarantee for both.
+        if (!p.benchAnchored) {
+          expect(p.onPanel, `sub#${p.bi} (${p.type} m#${p.top}): the joint line lies on its own panel content (a z-mirrored clamp line floats off it)`)
+            .toBeLessThan(0.6);
+          expect(p.lever, `sub#${p.bi} (${p.type} m#${p.top}): the joint line belongs to its part (no phantom lever)`)
+            .toBeLessThan(3);
+        }
         expect(p.rideP, `sub#${p.bi} (${p.type} m#${p.top}): spinning the part keeps the panel rigidly attached (position)`)
           .toBeLessThan(0.02);
         expect(p.rideQ, `sub#${p.bi} (${p.type} m#${p.top}): … and (rotation)`)
