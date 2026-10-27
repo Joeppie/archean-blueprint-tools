@@ -88,17 +88,10 @@ describe('WASM sealed envelope = JS twin', () => {
     expect(sealedEnvelopeVolume([], [])).toEqual({ m3: 0, cells: 0 });
   });
 
-  it('the compiled flood beats the JS twin by >1.5× on the giant', () => {
-    const b = bp('3509975859');
-    const t = (fn: () => unknown): number => {
-      fn(); fn();
-      const t0 = performance.now();
-      for (let i = 0; i < 3; i++) fn();
-      return (performance.now() - t0) / 3;
-    };
-    const js = t(() => sealedEnvelopeJS(b.data.triangles ?? [], b.data.blocks ?? []));
-    const wasm = t(() => sealedEnvelopeVolume(b.data.triangles ?? [], b.data.blocks ?? []));
-    console.log(`PERF sealedEnvelope giant JS ${js.toFixed(1)} ms · wasm ${wasm.toFixed(1)} ms · ${(js / wasm).toFixed(2)}×`);
-    expect(wasm).toBeLessThan(js / 1.5);
-  });
+  // The SPEED law (wasm beats the JS twin >1.5× on the giant) lives in the
+  // DEDICATED perf harness — load.perf.test.ts 'candidate 3' (v1.12.7
+  // pyramid migration: it duplicated that assertion here, and a wall-clock
+  // ratio measures LOAD, not code — the v1.12.7 ladder caught it flaking
+  // 1.49× right after vite build and 1.26× under a Playwright tier; the
+  // release gate keeps the CORRECTNESS parity pins above).
 });
