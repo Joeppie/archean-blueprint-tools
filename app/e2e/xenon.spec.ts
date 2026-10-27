@@ -678,9 +678,10 @@ test.describe('Xenon IDE @ui', () => {
     await expect(page.getByTestId('buzzer-sound')).toBeVisible();     // 🔊 (autoplay-safe)
     await expect(page.getByTestId('buzzer-wave-sawtooth')).toBeVisible();
     // the game IS playing: at least one buzzer carries amplitude over time
+    // (the row's 2nd span = Amplitude — the 1st is the alias, NaN-trap)
     await expect
       .poll(async () => {
-        const t = await page.getByTestId('buzzer-row-game-melody').innerText();
+        const t = await page.getByTestId('buzzer-row-game-melody').locator('span').nth(1).innerText();
         return parseFloat(t) || 0;
       }, { timeout: 30_000 })
       .toBeGreaterThan(0);

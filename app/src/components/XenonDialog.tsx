@@ -108,6 +108,7 @@ export default function XenonDialog(p: {
         return r ? { name: r.name, mode: r.mode, manual: r.manual, value: r.value } : null;
       }).filter(Boolean),
       pilotKeys: pump.pilotKeysBound(),
+      cycleLines: pump.run?.cycleLines() ?? [],
     });
   }, [pump]);
 

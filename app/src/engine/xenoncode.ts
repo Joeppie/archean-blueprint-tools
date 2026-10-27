@@ -998,7 +998,13 @@ export class XenonPump {
       // and Frequency Hz (ch 1) on its data channel — the io bus rows above
       // carry exactly that; turn live ones into real WebAudio sound.
       buzzerAudio.sync(this);
-      this.notifyCoalesced(t);
+      // debugger-state transitions notify IMMEDIATELY: the coalesced notify
+      // runs on a 100 ms gate, and the iteration that SETS paused=true can
+      // land on a suppressed tick — after which every tick early-returns
+      // (PAUSED) and the UI freezes blind (the F9 pill / F10 cycles-text
+      // e2e reds). A paused loop notifies once here and then idles.
+      if (this.paused) this.notify();
+      else this.notifyCoalesced(t);
     };
     this.raf = requestAnimationFrame(step);
   }
