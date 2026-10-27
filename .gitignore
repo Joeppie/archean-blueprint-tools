@@ -17,3 +17,6 @@ poc/
 tools/xenoncode/demo/**/storage/
 tools/xenoncode/demo/**/xc_program.bin
 tools/xenoncode/screen-*.ppm
+app/dist/
+tools/xenoncode/lines.json
+tools/xenoncode/vars.json

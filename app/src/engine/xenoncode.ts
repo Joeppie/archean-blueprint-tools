@@ -10,6 +10,7 @@
 // needs a browser.
 import type { Blueprint, BlueprintComponent } from './format';
 import { atlasJsonPaths } from './models';
+import { CRAFTER_BUILTIN } from './crafterbuiltin';
 import {
   evalExpr, wsChans, wsEnsure, wsKind, wsLoad, wsName, wsSave, worldsimDefault,
   type WorldSimChan,
@@ -95,6 +96,7 @@ export interface XenonComputer {
   program: string;
   files: XCFile[];            // main.xc = the entry file, then includes
   entryName: string;          // the entry file's NAME in the file (Cede.main.xc)
+  builtin?: boolean;          // runs the device's PUBLISHED built-in program
   capacity: number;           // hdd capacity = the game's storage limit
   channels: XenonChannel[];
   screens: XCScreen[];
@@ -117,13 +119,40 @@ export function xcDiskFiles(comp: XenonComputer): XCFile[] {
 }
 
 /** Every MiniComputer with at least one .xc file, as an IDE descriptor. */
+// Devices that ARE computers: MiniComputer (programs live in its
+// data.hdd.xc_files) and the CRAFTER - whose integrated touchscreen runs a
+// published built-in program (wiki components/miscellaneous/Crafter.md,
+// "Built-in Program"). The program is NOT stored in the blueprint json (it
+// lives on the world's server HDD, ide.md Persistency), so a Crafter with no
+// own files gets the built-in synthesized (we: "the poor automatic crafter
+// doesn't have its computer nor built in screen recognized").
+const BUILTIN_PROGRAMS: Record<string, () => string> = {
+  Crafter: () => CRAFTER_BUILTIN,
+};
+
 export function xenonComputers(bp: Blueprint): XenonComputer[] {
   const out: XenonComputer[] = [];
   (bp.data.components as BlueprintComponent[]).forEach((c, ci) => {
-    if (c.type !== 'MiniComputer') return;
     const hdd = (c.data as any)?.hdd;
     const xf: { name: string; plain_code?: string }[] = hdd?.xc_files ?? [];
-    if (!xf.length) return;
+    const builtin = !xf.length && c.type !== 'MiniComputer' ? BUILTIN_PROGRAMS[c.type] : undefined;
+    if (!xf.length && !builtin) return;
+    if (builtin) {
+      // a built-in-program device: synthesize its one-file disk
+      const alias = c.alias || `${c.type.toLowerCase()}-${ci}`;
+      out.push({
+        ci, alias, program: c.type.toLowerCase(), entryName: 'crafter.main.xc',
+        capacity: 8192,
+        // the VM boots from main.xc (the run-side entry convention; the
+        // disk-side name rides entryName, exactly like the MiniComputer path)
+        files: [{ name: 'main.xc', code: builtin() }],
+        channels: detectChannels([{ name: 'main.xc', code: builtin() }]),
+        screens: [{ alias, label: `${c.type} · integrated touchscreen`, channel: 0, w: 128, h: 72, ci }],
+        devices: xenonDevices(bp, ci),
+        builtin: true,
+      });
+      return;
+    }
     const program = String((c.data as any)?.program ?? '');
     // entry file: <program>.main.xc; the Badger stores program='' with a
     // literal main.xc — fall back through any *.main.xc to the first file
@@ -388,6 +417,14 @@ export class XenonRun {
       mod.stringToUTF8(sc.alias, np, nb);
       mod._xc_add_screen(np, sc.channel, sc.w, sc.h);
       mod._free(np);
+      if (comp.builtin && sc.channel === 0) {
+        // the integrated touchscreen is the plain screen-function target
+        const mb = new TextEncoder().encode('main').length + 1;
+        const mp = mod._malloc(mb);
+        mod.stringToUTF8('main', mp, mb);
+        mod._xc_add_screen(mp, 0, sc.w, sc.h);
+        mod._free(mp);
+      }
     }
     for (const d of comp.devices) {
       const ab = new TextEncoder().encode(d.alias).length + 1;
@@ -740,6 +777,8 @@ export class XenonPump {
 
   /** Which surface keys the 3-D scene is rendering on craft dashboards. */
   setFeedKeys(keys: Iterable<string>) { this.feedKeys = new Set(keys); }
+  /** debug channel: the rAF handle (0 = the loop is not running) */
+  raf2(): number { return this.raf; }
 
   registerCanvas(key: string, cv: HTMLCanvasElement): () => void {
     const k = key.toLowerCase();

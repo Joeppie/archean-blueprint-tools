@@ -49,7 +49,7 @@ describe('blueprint extraction', () => {
     expect(c.capacity).toBeGreaterThan(0);
     expect(c.screens.length).toBeGreaterThan(5);       // dashboard + override screens
     expect(c.screens.some(s => s.alias === 'pilot-screen')).toBe(true);
-    expect(c.screens.some(s => s.alias === 'systems-dashboard' && s.w === 26)).toBe(true);
+    expect(c.screens.some(s => s.alias === 'systems-dashboard' && s.w === 150)).toBe(true);  // 25-unit at 6 px/unit
     expect(c.devices.some(d => d.alias === 'mining-drill')).toBe(true);
     expect(c.devices.some(d => d.alias === 'left-cargo')).toBe(true);
   });
@@ -60,7 +60,7 @@ describe('blueprint extraction', () => {
     expect(screens.length).toBe(1);                    // one HdScreen element
     // v1.13.x: the registration key is the program's LITERAL token (the shim
     // keys surfaces by it — this craft calls screen(0,0)); label is human.
-    expect(screens[0]).toMatchObject({ alias: '0', label: 'screen', channel: 0, w: 51, h: 51 });
+    expect(screens[0]).toMatchObject({ alias: '0', label: 'screen', channel: 0, w: 300, h: 300 });  // 50×50 units at 6 px/unit
     // an alias with no component on the craft -> not pre-registered; the
     // shim auto-creates its surface at boot (no crash, honest empty list)
     expect(xenonScreens(bp, [{ name: 'main.xc', code: 'var $s = screen("no-such", 0)' }])).toEqual([]);

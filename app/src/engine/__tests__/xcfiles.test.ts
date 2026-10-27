@@ -89,8 +89,8 @@ describe('craft 3381670618 (the reported craft) extracts for the IDE', () => {
     const s = comp.screens.find(x => x.alias === '10');
     expect(s).toBeDefined();
     expect(s!.label).toBe('dashboard-17');                 // io 10 = the Dashboard
-    expect(s!.w).toBe(146);                                // element 145×65 + 1
-    expect(s!.h).toBe(66);
+    expect(s!.w).toBe(870);   // 145-unit element at the 6 px-per-unit screen scale                                // element 145×65 + 1
+    expect(s!.h).toBe(390);
     expect(s!.ci).toBe(17);
   });
 

@@ -455,6 +455,77 @@ test.describe('Xenon IDE @ui', () => {
     await page.keyboard.press('Escape');
   });
 
+  test('IDE windows drag, resize, reopen on-screen; screens zoom; phones go fullscreen @slow', async ({ page, browser }) => {
+    // (we: "the computer and dashboard pop up windows should be things that
+    // we can freely move around and even resize… if moved off screen,
+    // re-opening fixes… I need to be able to zoom in on dashboard screens…
+    // screens that are too large for phone should full-screen entirely")
+    test.setTimeout(180_000);
+    await page.goto(`/?craft=${PLANE}`);
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 90_000 });
+    await page.getByTestId('screens-btn').click();
+    const dock = page.getByTestId('screens-dock');
+    await expect(dock).toBeVisible();
+    // DRAG by the title bar
+    const b0 = (await dock.boundingBox())!;
+    await page.mouse.move(b0.x + 120, b0.y + 14);
+    await page.mouse.down();
+    await page.mouse.move(b0.x + 260, b0.y - 120, { steps: 8 });
+    await page.mouse.up();
+    const b1 = (await dock.boundingBox())!;
+    expect(b1.x).toBeGreaterThan(b0.x + 100);
+    expect(b1.y).toBeLessThan(b0.y - 60);
+    // RESIZE by the SE corner
+    await page.mouse.move(b1.x + b1.width - 2, b1.y + b1.height - 2);
+    await page.mouse.down();
+    await page.mouse.move(b1.x + b1.width + 130, b1.y + b1.height + 70, { steps: 6 });
+    await page.mouse.up();
+    const b2 = (await dock.boundingBox())!;
+    expect(b2.width).toBeGreaterThan(b1.width + 80);
+    // close + REOPEN: the session position persists (and off-screen rects
+    // reopen at their initial spot - unit-pinned in bestRect)
+    await page.getByTestId('screens-close').click();
+    await page.getByTestId('screens-btn').click();
+    const b3 = (await dock.boundingBox())!;
+    expect(Math.abs(b3.x - b2.x)).toBeLessThan(4);
+    // ZOOM the trims surface: fullscreen, + / −, pan by scroll
+    const cell = page.getByTestId('screens-cell-trimsdash#0');
+    await expect(cell).toBeVisible();
+    await page.getByTestId('screens-cell-trimsdash#0-full').click();
+    await expect(page.getByTestId('screens-cell-trimsdash#0-overlay')).toBeVisible();
+    const zoom = page.getByTestId('screens-cell-trimsdash#0-zoom');
+    await expect(zoom).toHaveText('100%');
+    const cvFit = (await page.getByTestId('screens-cell-trimsdash#0-fullcanvas').boundingBox())!;
+    await page.getByTestId('screens-cell-trimsdash#0-zoomin').click();
+    await page.getByTestId('screens-cell-trimsdash#0-zoomin').click();
+    await expect(zoom).toHaveText('156%');
+    const cvZoom = (await page.getByTestId('screens-cell-trimsdash#0-fullcanvas').boundingBox())!;
+    expect(cvZoom.width).toBeGreaterThan(cvFit.width * 1.4);
+    await page.getByTestId('screens-cell-trimsdash#0-fullexit').click();
+    await page.getByTestId('screens-close').click();
+
+    // PHONE: the dock is FULLSCREEN and the zoom overlay carries big screens
+    const origin = new URL(page.url()).origin;
+    const ph = await browser.newContext({
+      viewport: { width: 412, height: 915 },
+      storageState: { cookies: [], origins: [{ origin, localStorage: [
+        { name: 'archean-app-debug', value: '1' },
+        { name: 'archean-app-backdrop', value: 'none' },
+        { name: 'archean-worldsim', value: '' },
+      ] }] },
+    });
+    const pp = await ph.newPage();
+    await pp.goto(`/?craft=${PLANE}`);
+    await pp.waitForFunction(() => /SCENE PASS/.test(document.title), null, { timeout: 120_000 });
+    await pp.getByTestId('screens-btn').click();
+    const pb = (await pp.getByTestId('screens-dock').boundingBox())!;
+    expect(pb.height).toBeGreaterThanOrEqual(900);
+    await pp.getByTestId('screens-cell-trimsdash#0-full').click();
+    await expect(pp.getByTestId('screens-cell-trimsdash#0-fullcanvas')).toBeVisible();
+    await pp.getByTestId('screens-cell-trimsdash#0-fullexit').click();
+    await ph.close();
+  });
+
   test('the ▣ Screens bottom tab shows dashboards + virtual surfaces @slow', async ({ page }) => {
     // (we: "open the screens in the bottom tab using a screen button on top
     // (only visible if the craft has dashboards) … a tab for normal and

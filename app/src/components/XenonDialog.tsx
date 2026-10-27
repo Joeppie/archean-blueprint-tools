@@ -21,13 +21,14 @@
 // (the shim's per-cycle input_number reports), OutputNodes the io-bus value.
 // ---------------------------------------------------------------------------
 import { useEffect, useMemo, useRef, useState } from 'react';
+import FloatingWindow from './FloatingWindow';
 import {
   chanInfo, loadChannelTable, parseKv, parseNodes, tokenize, varKind, xenonPump,
   xenonScreenBindings, xcDiskFiles,
   type ChannelTable, type XenonComputer, type XGraph, type XCFile,
 } from '../engine/xenoncode';
 import type { Engine } from '../engine/scene';
-import { ScreenCanvas } from './ScreensDock';
+import { ScreensCell } from './ScreensDock';
 
 const MAX_PARSE_LINES = 500;   // validation pass cap (over the VISIBLE window)
 const ROW = 18;                // px row height of the code view (12px @ 1.5)
@@ -92,6 +93,14 @@ export default function XenonDialog(p: {
   closeRef.current = p.onClose;
   const editRef = useRef<HTMLTextAreaElement>(null);
   const pump = xenonPump;
+  // debug channel (the __ARCHEAN__ pattern, DEBUG builds): pump internals
+  useEffect(() => {
+    (window as any).__XENON__ = () => ({
+      status: pump.status, cycles: pump.cycles, raf: pump.raf2(),
+      running: pump.run?.running ?? null, surfaces: pump.surfaces.size,
+      paused: pump.paused, error: pump.error,
+    });
+  }, [pump]);
 
   useEffect(() => pump.subscribe(() => setTick(t => t + 1)), [pump]);
 
@@ -230,12 +239,15 @@ export default function XenonDialog(p: {
   }, [lastLine, tab, onCode, bps]);
 
   return (
-    <div data-testid="xenon-dialog" className="fixed inset-0 z-40 grid place-items-center
-         bg-black/60 p-2" onMouseDown={e => { if (e.target === e.currentTarget) p.onClose(); }}>
-      <div className="flex max-h-[94dvh] w-[min(1400px,97vw)] flex-col overflow-hidden rounded-lg
-           border border-[#3a4a6a] bg-[#10141f]/[.97] text-[#d6dbe1] shadow-2xl"
-        style={{ fontFamily: 'ui-monospace, Menlo, Consolas, monospace' }}>
-        {/* title bar */}
+    <FloatingWindow
+      id="xenon" testid="xenon-dialog" minW={720} minH={400}
+      initial={(vw, vh) => {
+        const w = Math.min(1400, vw * 0.97), h = vh * 0.94;
+        return { x: (vw - w) / 2, y: (vh - h) / 2, w, h };
+      }}
+      className="font-mono"
+      header={
+        /* title bar - the drag handle (the ✕ is a button, excluded) */
         <div className="flex items-center justify-between bg-[#1a2436] px-3 py-1.5 text-[13px]">
           <span className="font-bold tracking-wide">XenonCode IDE ({comp.alias || comp.program})</span>
           <div className="flex items-center gap-3">
@@ -252,6 +264,7 @@ export default function XenonDialog(p: {
               onClick={p.onClose} aria-label="close">✕</button>
           </div>
         </div>
+      }>
         {/* menu bar — real IDE dropdowns (we: "should it even nest?
             computer is what we are in, keep it a good menu structure like
             an IDE"): File owns the disk, Run owns the execution (incl. the
@@ -446,13 +459,9 @@ export default function XenonDialog(p: {
               )}
               <div className="flex flex-wrap gap-2">
                 {surfList.map(s => (
-                  <label key={s.key} className="block text-[10px] text-[#5d6a7d]">
-                    <ScreenCanvas surfKey={s.key} w={s.w} h={s.h} maxH={340} fill
-                      testid={`xenon-screen-${s.key}`} />
-                    <div>{bindings.get(s.key) ?? s.key}
-                      {s.key.startsWith('virtual#') && <span className="ml-1 rounded bg-[#24304a] px-1 text-[9px] text-[#8fd4ff]">virtual</span>}
-                    </div>
-                  </label>
+                  <ScreensCell key={s.key} surfKey={s.key} w={s.w} h={s.h}
+                    canvasTestid={`xenon-screen-${s.key}`} testid={`xenon-cell-${s.key}`}
+                    label={`${bindings.get(s.key) ?? s.key}${s.key.startsWith('virtual#') ? ' ·virtual' : ''}`} />
                 ))}
               </div>
             </>)}
@@ -539,8 +548,7 @@ export default function XenonDialog(p: {
               : `Program '${comp.program}' loaded`}</div>
           {pump.status === 'running' && <div className="text-[#7ea6ff]">Program '{comp.program}' is running…</div>}
         </div>
-      </div>
-    </div>
+    </FloatingWindow>
   );
 }
 

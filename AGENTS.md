@@ -1561,6 +1561,38 @@ topic + FORMAT).
   remaining 100 ms-class load phase, load-only, no interactive path).
   Suite: vitest 737, fast tier 204 runs **2.5→1.8 min** 0-red, @slow 11/11.
 
+- **v1.13.x XENON batch 6: real screen geometry (6 px per unit)**: an
+ element's XenonScreen surface is size×6 px (the firmware's own
+ 'Screen dimensions: 300x300' print on a 50-unit pilot-screen is the proof);
+ registering size+1 clips every screen_copy composite (the 'empty main
+ screen' report on the Badger - his code DOES composite, our canvas
+ clipped). ALL surfaces list per tick (Badger: 118 buffers - the 24-cap hid
+ them), pixels fetched only for visible canvases + the 3-D feed keys
+ (Engine.screenFeedKeys → pump.setFeedKeys → pushScreen onto the craft's
+ dashboard faces). MiniComputers get NO auto main#0 (no integrated screen
+ in game). Router-backed devices need no emulation: alias addressing is the
+ game's own mechanism (computer.md).
+- **v1.13.x XENON batch 7: MOVABLE windows + screen ZOOM**:
+ components/FloatingWindow.tsx - shared frame (title-drag, E/S/SE resize,
+ session rect registry, off-screen rects REOPEN AT INITIAL via the
+ both-ends title probe, clamps keep the title reachable, phones <768px go
+ fullscreen). Xenon IDE + Screens dock use it. ScreensCell: ⛶ fullscreen
+ with zoom (fit / 1:1-px / ±/pinch, scroll pans) - an 870-px airliner dash
+ becomes inspectable. Pure geometry unit-pinned (floatingwindow.test).
+ Pin: the reachability probe tests BOTH title ends; the dialog's debug
+ useEffect must sit BELOW `const pump = xenonPump` (TDZ crashed the chunk -
+ the dev server's unminified stack named it in one line).
+- **v1.13.x XENON batch 8: THE CRAFTER IS A COMPUTER WITH A BUILT-IN
+ SCREEN**: blueprint json stores NO program for a Crafter (data {}) - it
+ lives on the world server HDD (ide.md); the game PUBLISHES the built-in
+ program in its wiki (Crafter.md, 247 lines) → engine/crafterbuiltin.ts
+ shipped verbatim (NOTICE §2). xenonComputers synthesizes its disk
+ (builtin: true; run-side file main.xc per the VM boot convention,
+ entryName = disk name), the integrated touchscreen = the plain-function
+ target main#0 (128×72, registered beside its alias key). Shim device fns:
+ progress, fluid_level, start_craft/cancel_craft (bus events),
+ enough_power. Menu: '⌨ crafter-N ·built-in'. Probe-verified live: cycles
+ tick, main#0 paints 'Initializing Crafter…' (lit pixels).
 - **v1.13.x XENON batch 5: WORLDSIM goes GLOBAL + $val overrides + ABI/LFS
  (we: "worldsim should be global, not tied to individual sensors… buttons
  should still be toggleable from worldsim, but grouped differently… sensors

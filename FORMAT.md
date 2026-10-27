@@ -681,6 +681,19 @@ implementation `tools/xenoncode/xc_host.cpp` + `app/src/engine/xenoncode.ts`)
   the game's binary treats junk as data, the open library throws (the
   Badger's strict-off path on its own written storage is the repro,
   XC_REBOOT=1).
+- **The CRAFTER is a computer with a BUILT-IN SCREEN** (wiki
+  components/miscellaneous/Crafter.md): its program is NOT stored in
+  `blueprint.json` (like MiniComputer storage, it lives on the world's
+  server HDD, ide.md Persistency) - the game PUBLISHES the full built-in
+  program in the wiki, we ship it (`app/src/engine/crafterbuiltin.ts`) and
+  synthesize the device's one-file disk (`xenonComputers`: builtin: true).
+  Its integrated touchscreen is the plain screen-function target (the shim's
+  lazily-created `main#0`, registered at the app's 128×72 screen-override
+  size). Device functions the built-in program needs, added to the shim:
+  `progress`, `fluid_level`, `start_craft(item, qty)` / `cancel_craft`
+  (recorded as bus events), `enough_power`. Run-side convention: the VM
+  always boots from `main.xc` - a synthesized disk names its file main.xc
+  and carries the disk-side name in entryName.
 - **Element surfaces are 6 PIXELS PER LATTICE UNIT** (`XenonDraw` scale):
   pilot-screen's 50×50-unit element is a 300×300 px surface — the firmware's
   own print `Screen dimensions: 300x300` is the proof, and firmware draws at

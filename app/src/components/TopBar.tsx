@@ -42,7 +42,7 @@ interface Props {
   onHelp?: () => void;
   /** Xenon ▾ — the craft's programmable computers (XenonDialog.tsx);
    *  the menu only appears when the open blueprint has MiniComputers */
-  xenonComps?: { ci: number; alias: string; program: string; files: number }[];
+  xenonComps?: { ci: number; alias: string; program: string; files: number; builtin?: boolean }[];
   onXenon?: (ci: number) => void;
   /** ▣ Screens bottom tab (v1.13.x) — visible only when the craft has
    *  dashboards (Dashboard components carrying Screen/HdScreen elements) */
@@ -187,7 +187,7 @@ export default function TopBar(p: Props) {
             Programmable computers</div>
             {p.xenonComps!.map(c => (
               <Item key={c.ci} testid={`xenon-comp-${c.ci}`}
-                label={`⌨ ${c.alias || c.program}`} hint={`${c.files} .xc`}
+                label={`⌨ ${c.alias || c.program}${c.builtin ? ' ·built-in' : ''}`} hint={`${c.files} .xc`}
                 onClick={() => { close(); p.onXenon?.(c.ci); }} />
             ))}
           </>)}

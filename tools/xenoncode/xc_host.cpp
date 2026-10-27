@@ -678,6 +678,21 @@ static void archeanInit() {
 		auto p = g_wsProgram.find(n);
 		return p != g_wsProgram.end() ? p->second : 0.0;
 	});
+	// device values the built-in programs read (crafter touchscreen logic):
+	// progress = current craft progress 0..1, fluid_level = connected tank
+	// level; the craft verbs are recorded as bus events (the game runs them
+	// on the craft, we simulate the io contract).
+	XenonCode::DeclareDeviceFunction("progress:number", [](Computer*, const vector<Var>&) -> Var { return 0.0; });
+	XenonCode::DeclareDeviceFunction("fluid_level:number", [](Computer*, const vector<Var>&) -> Var { return 0.0; });
+	XenonCode::DeclareDeviceFunction("cancel_craft", [](Computer*, const vector<Var>&) -> Var {
+		xc_eventLog.push_back("{\"e\":\"out\",\"io\":\"crafter\",\"port\":2,\"v\":0}");
+		return {};
+	});
+	XenonCode::DeclareDeviceFunction("start_craft", [](Computer*, const vector<Var>& a) -> Var {
+		xc_eventLog.push_back("{\"e\":\"out\",\"io\":\"crafter\",\"port\":0,\"v\":\"" + xc_jsonEscape(string(a[0])) + "\"}");
+		return {};
+	});
+	XenonCode::DeclareDeviceFunction("enough_power:number", [](Computer*, const vector<Var>&) -> Var { return 1.0; });
 	XenonCode::DeclareDeviceFunction("random:number", [](Computer*, const vector<Var>& a) -> Var {
 		if (a.size() == 0) return xc_random01();
 		double lo = a[0], hi = a[1];

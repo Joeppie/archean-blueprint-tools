@@ -1561,7 +1561,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         tools={(toolsMod?.TOOLS ?? []).map(t => ({ id: t.id, label: t.label, icon: t.icon }))}
         onTool={id => setToolOpen(id)}
         onHelp={() => setHelpOpen(true)}
-        xenonComps={xenonComps.length ? xenonComps.map(c => ({ ci: c.ci, alias: c.alias, program: c.program, files: c.files.length })) : undefined}
+        xenonComps={xenonComps.length ? xenonComps.map(c => ({ ci: c.ci, alias: c.alias, program: c.program, files: c.files.length, builtin: c.builtin })) : undefined}
         onXenon={ci => setXenonCi(ci)}
         hasScreens={hasScreens} screensOpen={screensOpen}
         onScreens={() => setScreensOpen(o => !o)}
@@ -1686,14 +1686,12 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
             {/* ▣ SCREENS bottom tab (v1.13.x): live dashboards + virtual
                 surfaces of the running computer (top-bar ▣ button) */}
             {screensOpen && (
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[15] flex justify-center">
-                <Suspense fallback={null}>
-                  <div className="pointer-events-auto w-[min(1100px,96%)]">
-                    <ScreensDockLazy comp={xenonPump.comp ?? xenonComps[0] ?? null}
-                      onClose={() => setScreensOpen(false)} />
-                  </div>
-                </Suspense>
-              </div>
+              /* the dock is a FloatingWindow: it positions, drags and
+                 resizes itself (phones get it fullscreen) */
+              <Suspense fallback={null}>
+                <ScreensDockLazy comp={xenonPump.comp ?? xenonComps[0] ?? null}
+                  onClose={() => setScreensOpen(false)} />
+              </Suspense>
             )}
             {/* File ▸ Autosaves: the shadow-copy list (v1.13.x) */}
             {autosavesOpen && (
