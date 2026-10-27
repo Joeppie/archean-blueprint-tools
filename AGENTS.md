@@ -1586,7 +1586,18 @@ topic + FORMAT).
  autosave.test.ts (4), xenon.spec legs 'the debugger…' (F9 pause at
  main.xc:17 which runs every cycle, F10 one-cycle step, F8 resume — cycle
  counts asserted) and 'autosaves…' (disk edit → visibilitychange shadow →
- reload → restore → the marker rides back into the IDE). Side-note: the
+ reload → restore → the marker rides back into the IDE — the code view is
+ VIRTUALIZED, so tail-line assertions must SCROLL the fold first). TWO real
+ bugs the autosave leg caught (keep as patterns): the visibilitychange
+ listener must live on DOCUMENT (the event targets document, bubbles:false —
+ a WINDOW listener NEVER fires), and the craft-open effect must not list
+ openText in its deps (the history churn made a RESTORE re-run the craft
+ open OVER the restored doc — the v1.5.10 latest-ref pattern applies to any
+ open/load effect). The Badger reboot crash class: reboot = fresh VM, RAM at
+ ZERO, surface registry SURVIVES — shim screen members + screen_copy
+ null-guard (unguarded segfault, gdb this=0x0); XENON-LENIENT-INDEX makes
+ OOB array/text indexing game-tolerant (reads 0/empty, indexed writes GROW,
+ OOB text-char writes skip; repro XC_REBOOT=1 native). Side-note: the
  dev-server tab must RELOAD after scene.ts fixes (no HMR accept → the old
  module kept throwing the fixed m.material array crash).
 - **v1.13.x XENON: the editable IDE, the shared pump, live dashboards (we:
