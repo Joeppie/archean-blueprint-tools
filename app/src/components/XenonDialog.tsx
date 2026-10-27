@@ -99,6 +99,7 @@ export default function XenonDialog(p: {
       status: pump.status, cycles: pump.cycles, raf: pump.raf2(),
       running: pump.run?.running ?? null, surfaces: pump.surfaces.size,
       paused: pump.paused, error: pump.error,
+      surfaceKeys: [...pump.surfaces.keys()],
     });
   }, [pump]);
 

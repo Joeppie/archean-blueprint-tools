@@ -12,7 +12,7 @@ import type { Blueprint, BlueprintComponent } from './format';
 import { atlasJsonPaths } from './models';
 import { CRAFTER_BUILTIN } from './crafterbuiltin';
 import {
-  evalExpr, wsChans, wsEnsure, wsKind, wsLoad, wsName, wsSave, worldsimDefault,
+  evalExpr, slug, wsChans, wsEnsure, wsKind, wsLoad, wsName, wsSave, worldsimDefault,
   type WorldSimChan,
 } from './worldsim';
 
@@ -23,6 +23,7 @@ export interface XCScreen {
   channel: number;
   w: number; h: number;
   ci?: number;      // component index of the display component (3-D feed key)
+  deviceScreen?: boolean;   // the machine's BUILT-IN screen (fed from main#0)
 }
 
 // ---------------------------------------------------------------------------
@@ -147,7 +148,7 @@ export function xenonComputers(bp: Blueprint): XenonComputer[] {
         // disk-side name rides entryName, exactly like the MiniComputer path)
         files: [{ name: 'main.xc', code: builtin() }],
         channels: detectChannels([{ name: 'main.xc', code: builtin() }]),
-        screens: [{ alias, label: `${c.type} · integrated touchscreen`, channel: 0, w: 128, h: 72, ci }],
+        screens: [{ alias, label: `${c.type} · integrated touchscreen`, channel: 0, w: 128, h: 72, ci, deviceScreen: true }],
         devices: xenonDevices(bp, ci),
         builtin: true,
       });
@@ -168,7 +169,15 @@ export function xenonComputers(bp: Blueprint): XenonComputer[] {
       entryName: String(main?.name ?? 'main.xc'),
       capacity: Number((c.data as any)?.hdd?.capacity) || 0,
       channels: detectChannels(files),
-      screens: xenonScreens(bp, files, ci),
+      screens: [
+        ...xenonScreens(bp, files, ci),
+        // the Computer's integrated screen: the plain screen-function
+        // target (main#0) mirrored onto the model's 'screen' material face
+        ...(c.type === 'Computer'
+          ? [{ alias: c.alias || `computer-${ci}`, label: 'Computer · integrated screen',
+              channel: 0, w: 128, h: 72, ci, deviceScreen: true }]
+          : []),
+      ],
       devices: xenonDevices(bp, ci),
     });
   });
@@ -506,6 +515,8 @@ export class XenonRun {
     this.mod._free(p);
   }
   saveStorage() { this.mod._xc_save_storage(); }
+  /** Legacy in-place re-boot (kept for the native triage runner; the app
+   *  reboots by re-opening - see XenonDialog.reboot). */
   reboot() {
     this.mod._xc_save_storage();
     if (this.mod._xc_boot()) { this.error = this.mod.UTF8ToString(this.mod._xc_error()); return false; }
@@ -869,6 +880,19 @@ export class XenonPump {
         }
         next.set(meta.key, { ...meta, pixels });
       }
+      // BUILT-IN SCREEN mirror: the integrated touchscreen is the plain
+      // screen-function target (main#0) - feed the model-face key with the
+      // same pixels (the scene registered it at wsDeviceSlug(c)#0)
+      const main0 = next.get('main#0');
+      if (main0 && this.comp)
+        for (const sc of this.comp.screens)
+          if (sc.deviceScreen) {
+            const mk = `${slug(sc.alias)}#${sc.channel}`;
+            const mir = { ...main0, key: mk };   // the KEY must travel with
+            next.set(mk, mir);                   // the pixels (push keys off it)
+            if (mir.pixels)
+              for (const cv of this.canvases.get(mk) ?? []) this.blit(cv, mir);
+          }
       this.surfaces = next;
       this.notify();
     };

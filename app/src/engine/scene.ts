@@ -38,10 +38,17 @@ import { droppedParts, unityBake } from './models';
 import { buildAtlasPreview } from './thumbs';
 import { envIntensity, nodeMaterialSpec, pbr, srgbHexToLinear, type PbrSpec } from './materials';
 import { propellerSurface, type PropellerData } from './propeller';
+import { wsDeviceSlug } from './worldsim';
 
 /** The generated propeller blade's material: the client raytraces it as a
  *  neutral NON-metallic grey — `ReverseGamma(vec3(0.5))` in the shader, i.e.
  *  written in sRGB (dev propellerGeometry agrees). */
+// BUILT-IN SCREEN devices: the game's gltf carries a 'screen' material on
+// the Computer and the Crafter (the MiniComputer has none - no integrated
+// screen, wiki). Its region is fed with the running computer's framebuffer.
+const BUILTIN_SCREEN_TYPES = new Set(['Computer', 'Crafter']);
+const WS_SCREEN_W = 128, WS_SCREEN_H = 72;
+
 const PROP_GEN_SPEC: PbrSpec = { color: srgbHexToLinear(0x808080), metal: 0, rough: 0.65, opacity: 1 };
 import { buildPipes, checkLeads, pipeAt, runFlowDir, surgePaths, type PipeNetwork } from './pipes';
 import { portRole } from './wiremodel';
@@ -265,6 +272,11 @@ export class Engine {
    *  and render what is given to them"). */
   private screenFeeds = new Map<string, string>();
   private dashScreens = new Map<string, { mat: MeshBasicMaterial; tex: DataTexture; w: number; h: number }>();
+  // BUILT-IN device faces (Computer/Crafter 'screen' material): registered
+  // when the model builds and PERSIST across IDE sessions - setScreenFeeds
+  // rebuilds only dashScreens, and clearing both is what left the model
+  // face un-fed when the IDE opened after scene load
+  private deviceScreens = new Map<string, { mat: MeshBasicMaterial; tex: DataTexture; w: number; h: number }>();
   /** per-type LoadedModel of every real root currently in the scene — the
    *  cache liveDataEdit rebuilds from (no async refetch mid-slider-drag) */
   private liveGeo = new Map<string, LoadedModel>();
@@ -1961,6 +1973,62 @@ void main() {
       for (const [mname, geos] of byMat) {
         const gg = geos.length > 1 ? mergeGeometries(geos, false) : geos[0];
         if (!gg) continue;
+        // BUILT-IN SCREEN (the game's own gltf material 'screen' on Computer
+        // & Crafter; MiniComputer has none - wiki): the model's rectangular
+        // screen region is fed with the running computer's framebuffer
+        // (we: "the text is NOT printed onto the rectangular part of the
+        // computer, as it should be"). Planar UVs are generated (the screen
+        // is a flat quad); NearestFilter keeps the pixel font crisp.
+        if (mname === 'screen' && ci >= 0 && BUILTIN_SCREEN_TYPES.has(c.type)) {
+          const pos = gg.getAttribute('position') as BufferAttribute;
+          const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+          for (let k = 0; k < pos.count; k++)
+            for (let a = 0; a < 3; a++) {
+              const p = pos.getComponent(k, a as 0 | 1 | 2);
+              mn[a] = Math.min(mn[a]!, p); mx[a] = Math.max(mx[a]!, p);
+            }
+          const ext: [number, number, number] = [mx[0]! - mn[0]!, mx[1]! - mn[1]!, mx[2]! - mn[2]!];
+          const nax = ext[0] < 1e-4 ? 0 : ext[1] < 1e-4 ? 1 : ext[2] < 1e-4 ? 2 : 2;
+          const rest = ([0, 1, 2] as const).filter(a => a !== nax) as [0 | 1 | 2, 0 | 1 | 2];
+          const wideFirst = ext[rest[0]]! >= ext[rest[1]]!;
+          const uax = wideFirst ? rest[0] : rest[1];
+          const vax = wideFirst ? rest[1] : rest[0];
+          const us = Math.max(1e-6, ext[uax]!), vs = Math.max(1e-6, ext[vax]!);
+          const uv = new Float32Array(pos.count * 2);
+          for (let k = 0; k < pos.count; k++) {
+            uv[k * 2] = (pos.getComponent(k, uax as 0 | 1 | 2) - mn[uax]!) / us;
+            // v up = image TOP (DataTexture is not flipped): world-Y is up;
+            // for an upward-facing panel the far edge (low-axis) is the top
+            uv[k * 2 + 1] = vax === 1
+              ? (pos.getComponent(k, vax as 0 | 1 | 2) - mn[vax]!) / vs
+              : 1 - (pos.getComponent(k, vax as 0 | 1 | 2) - mn[vax]!) / vs;
+          }
+          gg.setAttribute('uv', new BufferAttribute(uv, 2));
+          gg.computeVertexNormals();
+          // the DataTexture FITS the panel's aspect (the framebuffer paints
+          // into the top-left at native scale): a 16:9 texture on a 2.7:1
+          // panel stretched the text ~37% ('the text is NOT printed onto
+          // the rectangular part ... as it should be')
+          const su = Math.max(1e-4, ext[uax]), sv = Math.max(1e-4, ext[vax]);
+          const panelAsp = su / sv, texAsp = WS_SCREEN_W / WS_SCREEN_H;
+          const dw = panelAsp >= texAsp
+            ? Math.min(1024, Math.max(1, Math.round(WS_SCREEN_H * panelAsp))) : WS_SCREEN_W;
+          const dh = panelAsp >= texAsp
+            ? WS_SCREEN_H : Math.min(1024, Math.max(1, Math.round(WS_SCREEN_W / panelAsp)));
+          const data = new Uint8Array(dw * dh * 4);
+          for (let i = 3; i < data.length; i += 4) data[i] = 255;
+          const tex = new DataTexture(data, dw, dh, RGBAFormat);
+          tex.colorSpace = SRGBColorSpace;
+          tex.magFilter = NearestFilter; tex.minFilter = NearestFilter;
+          tex.generateMipmaps = false;
+          tex.needsUpdate = true;
+          const smat = new MeshBasicMaterial({ map: tex, toneMapped: false });
+          this.deviceScreens.set(`${wsDeviceSlug(c.alias, c.type.toLowerCase(), ci)}#0`,
+            { mat: smat, tex, w: dw, h: dh });
+          const sm = new Mesh(gg, smat);
+          rg.add(sm);
+          continue;
+        }
         // NO userData.kind on the child meshes: pick walks UP to the owning
         // group, whose userData carries {kind:'comp', ci}
         const spec = gen
@@ -3627,7 +3695,7 @@ void main() {
   /** Blit one surface's framebuffer onto its dashboard face (10 Hz, from the
    *  XenonPump). Row-flips into UV space; size change rebuilds the texture. */
   pushScreen(key: string, w: number, h: number, pixels: Uint8ClampedArray): void {
-    const e = this.dashScreens.get(key);
+    const e = this.dashScreens.get(key) ?? this.deviceScreens.get(key);
     if (!e) return;
     if (e.w !== w || e.h !== h) {
       e.tex.dispose();
@@ -3649,10 +3717,13 @@ void main() {
     this.invalidate();
   }
   screenFeedState(): { key: string; w: number; h: number }[] {
-    return [...this.dashScreens.entries()].map(([key, e]) => ({ key, w: e.w, h: e.h }));
+    return [...this.dashScreens.entries(), ...this.deviceScreens.entries()]
+      .map(([key, e]) => ({ key, w: e.w, h: e.h }));
   }
   /** The surface keys the 3-D scene feeds onto craft dashboard faces. */
-  screenFeedKeys(): string[] { return [...this.dashScreens.keys()]; }
+  screenFeedKeys(): string[] {
+    return [...this.dashScreens.keys(), ...this.deviceScreens.keys()];
+  }
 
 
   // -------------------------------------------------------------- gizmo ops
@@ -6045,6 +6116,8 @@ void main() {
     this.subCount = 0;
     this.compRoots.clear();
     this.dashScreens.clear();          // faces die with the scene (feeds survive)
+    for (const e of this.deviceScreens.values()) e.tex.dispose();
+    this.deviceScreens.clear();
     this.rotUndo.clear();
     this.rotBase.clear();
     this.symRotBases.clear();

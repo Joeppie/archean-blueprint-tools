@@ -44,7 +44,7 @@ if command -v em++ >/dev/null 2>&1 || [ -n "${EMSDK:-}" ]; then
 		-sMODULARIZE=1 -sEXPORT_NAME=createXenonCode \
 		-sEXPORTED_FUNCTIONS=_malloc,_free,_main \
 		-sEXPORTED_RUNTIME_METHODS=UTF8ToString,stringToUTF8,lengthBytesUTF8,HEAPU8 \
-		-sENVIRONMENT=web -sFILESYSTEM=1 -sINITIAL_MEMORY=64MB -sMAXIMUM_MEMORY=4096MB \
+		-sENVIRONMENT=web -sFILESYSTEM=1 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=64MB -sMAXIMUM_MEMORY=4096MB \
 		-o xenoncode.js
 	echo "browser:  xenoncode.js + xenoncode.wasm"
 	# the app serves its own copy (Pages layout: app/public -> site base)

@@ -124,6 +124,11 @@ static map<int, map<int, string>> xc_inputs_txt;
 // value — the pump streams every row's value back via xc_worldsim_sync.
 // In the game these are the firmware's own nop functions; in the editor
 // they are the API into the world sim.
+// virtualscreen() naming counter (file scope: the REBOOT law resets it -
+// it used to be a static INSIDE the device lambda, which lives once per
+// process, so every reboot named fresh virtual#N slots while the old ones
+// lingered forever - surfaces drifted and piled up per reboot)
+static int g_nextVirtual = 0;
 static map<string, double> g_wsProgram;    // name -> active program override
 static map<string, double> g_wsEffective;  // name -> last effective value
 static map<int, int> g_devByIo;        // computer io port → table index
@@ -447,10 +452,9 @@ static void archeanInit() {
 	// "Virtual Screen Function", cap 10000x10000 in game; we cap at 4096 and
 	// 96 buffers as the POC's memory guard). Shown like any other surface.
 	XenonCode::DeclareDeviceFunction("virtualscreen:screen", [](Computer*, const vector<Var>& a) -> Var {
-		static int nextVirtual = 0;
 		uint32_t w = (uint32_t)clamp((int64_t)a[0], (int64_t)1, (int64_t)4096);
 		uint32_t h = (uint32_t)clamp((int64_t)a[1], (int64_t)1, (int64_t)4096);
-		int i = xc_addScreen("virtual#" + to_string(nextVirtual++), 0, w, h);
+		int i = xc_addScreen("virtual#" + to_string(g_nextVirtual++), 0, w, h);
 		return Var(screenType, reinterpret_cast<uint64_t>(g_screens[i].scr.get()));
 	});
 	// screen_copy(src, dst, sx, sy, dx, dy, w, h [, tint, rotation, bilinear])
@@ -901,6 +905,23 @@ EMSCRIPTEN_KEEPALIVE int xc_boot() {
 		g_computer->capability.ram = xc_ramCap;
 		g_computer->capability.storage = xc_storageCap;
 		g_wsProgram.clear(); g_wsEffective.clear();
+		// THE REBOOT LAW (we: "it doesnt clear the virtual screens, that it
+		// needs to"): the VM's runtime world dies with the VM - VIRTUAL
+		// screens (virtualscreen() buffers) are destroyed and the naming
+		// counter restarts (the program re-creates them in vars_init, the
+		// game's behaviour); the PHYSICAL surfaces (the craft's registered
+		// dashboards/screens) are hardware: they persist, blanked. External
+		// io values and the per-cycle read reports are the VM's world too.
+		for (auto it = g_screens.begin(); it != g_screens.end();) {
+			if (it->key.rfind("virtual#", 0) == 0) {
+				g_slotByPtr.erase(it->scr.get());
+				it = g_screens.erase(it);
+			} else ++it;
+		}
+		g_nextVirtual = 0;
+		xc_inputs.clear();
+		xc_inputs_txt.clear();
+		xc_reads.clear();
 		if (!g_computer->LoadProgram("/prog")) { g_err = "load failed"; return 1; }
 		g_computer->LoadStorage("/prog/storage");   // survives reboots in-session
 		for (auto& s : g_screens) { s.scr->Blank(); s.clicked = false; s.scroll = 0.0; }
@@ -985,12 +1006,22 @@ EMSCRIPTEN_KEEPALIVE void xc_save_storage() { if (g_computer) g_computer->SaveSt
 EMSCRIPTEN_KEEPALIVE void xc_pilot_script(int on) { g_pilotScripted = on; }
 
 // ---- screen registry (the craft's Screen/HdScreen surfaces) ---------------
-EMSCRIPTEN_KEEPALIVE void xc_reset_screens() { g_screens.clear(); g_slotByPtr.clear(); }
+EMSCRIPTEN_KEEPALIVE void xc_reset_screens() {
+	g_screens.clear(); g_slotByPtr.clear(); g_nextVirtual = 0;
+}
 EMSCRIPTEN_KEEPALIVE int xc_add_screen(const char* alias, int ch, uint32_t w, uint32_t h) {
 	return xc_addScreen(alias, ch, w, h);
 }
 // component table (call after xc_reset_devices, before xc_boot)
-EMSCRIPTEN_KEEPALIVE void xc_reset_devices() { g_devs.clear(); g_devByIo.clear(); g_devByAlias.clear(); }
+EMSCRIPTEN_KEEPALIVE void xc_reset_devices() {
+	g_devs.clear(); g_devByIo.clear(); g_devByAlias.clear();
+	// a fresh open owns a fresh world: external io values, the seeded
+	// texts, the per-cycle read reports and the worldsim feeds are the
+	// device's runtime state - they reset with it (the re-open path leaves
+	// NOTHING of the previous session but the storage dir, the game's rule)
+	xc_inputs.clear(); xc_inputs_txt.clear(); xc_reads.clear();
+	g_wsProgram.clear(); g_wsEffective.clear();
+}
 // capability from the blueprint (hdd capacity = the game's storage limit);
 // RAM: the POC is generous (the game's XPU64 spec is not in the files)
 EMSCRIPTEN_KEEPALIVE void xc_set_capability(uint32_t ram, uint32_t storage) {

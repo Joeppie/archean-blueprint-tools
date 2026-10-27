@@ -115,6 +115,14 @@ export function slug(s: string): string {
 
 /** The worldsim NAME of a channel (predefined, program-addressable): the
  *  device's alias (or type) slugged + the channel function slugged. */
+/** The device-screen key of a BUILT-IN screen: `${slug}#0` with the SAME
+ *  slug formula the Xenon descriptors use (alias || `type-ci`) - the scene
+ *  registers its model face under this key and the pump mirrors the plain
+ *  screen-function target (main#0) into it. */
+export function wsDeviceSlug(alias: string | undefined, typeLower: string, ci: number): string {
+  return slug(alias || `${typeLower}-${ci}`);
+}
+
 export function wsName(aliasOrType: string, chanFn: string | null, ch: number): string {
   return `${slug(aliasOrType)}.${chanFn ? slug(chanFn) : 'ch' + ch}`;
 }
