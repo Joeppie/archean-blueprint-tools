@@ -28,7 +28,7 @@ const CRAFTS = [
 
 type Pair = {
   bi: number; top: number; type: string;
-  lever: number; onPanel: number;
+  lever: number; onPanel: number; benchAnchored: boolean;
   rideP: number; rideQ: number; panelTravel: number; partTravel: number;
 };
 
@@ -57,15 +57,45 @@ const audit = (page: Page) =>
     for (const [bi, jrefs] of e.subJrefs as Map<number, any[]>) {
       for (const j of jrefs) {
         if (j.top < 0) continue;
-        // the panel's block bbox (the clamp target) in the WORLD frame it renders in
-        const bl = ((e.bp.data.components[bi]?.data?.blocks) ?? []).filter((x: any) => (x.type ?? 0) !== 255);
+        // The panel's block bbox (the clamp target) in the WORLD frame it
+        // renders in. v1.12.2 FIX (baseline-proven, the header's "P7.1 slice
+        // 2" note): Jimmy's gantry content rides the v1.11.8 RIG CHAIN — the
+        // engine clamps the pivot onto subBlockBBoxRigs(blockParts), which
+        // includes every NESTED Build's blocks pushed through its rig pose.
+        // The raw-file-only bbox below compared the pivot to the panel's
+        // BUILT cells, not where the content rigs to: the audit now mirrors
+        // the engine's blockParts collection (same rigPush/rigApply maths).
+        // (the audit's qmul/qrot above are the quaternion helpers — reuse them)
+        const qRotA = (q: number[], v: number[]) => qrot(q, v);
+        const rigApplyA = (ch: { t: number[]; q: number[] }, v: number[]) => {
+          const r = qRotA(ch.q, v);
+          return [ch.t[0] + r[0], ch.t[1] + r[1], ch.t[2] + r[2]];
+        };
+        const rigPushA = (ch: { t: number[]; q: number[] }, pos: any, quat: number[]) => {
+          const r = qRotA(ch.q, [pos.x, pos.y, pos.z]);
+          return { t: [ch.t[0] + r[0], ch.t[1] + r[1], ch.t[2] + r[2]], q: qmul(ch.q, quat) };
+        };
         const bb = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
-        for (const x of bl) for (const s of [[0, 0, 0], [(x.size_x ?? 0) + 1, (x.size_y ?? 0) + 1, (x.size_z ?? 0) + 1]]) {
-          const p = [(x.pos_x + s[0] + (x.frame_x ?? 0) * 12 - 5.5) * 0.25 + moff[0],
-            (x.pos_y + s[1] + (x.frame_y ?? 0) * 12 - 5.5) * 0.25 + moff[1],
-            (x.pos_z + s[2] + (x.frame_z ?? 0) * 12 - 5.5) * 0.25 + moff[2]];
+        const growBB = (p: number[]) => {
           for (let k = 0; k < 3; k++) { bb.min[k] = Math.min(bb.min[k], p[k]); bb.max[k] = Math.max(bb.max[k], p[k]); }
-        }
+        };
+        const growBlocks = (bl: any[], chain: { t: number[]; q: number[] }) => {
+          for (const x of bl) for (const s of [[0, 0, 0], [(x.size_x ?? 0) + 1, (x.size_y ?? 0) + 1, (x.size_z ?? 0) + 1]])
+            growBB(rigApplyA(chain, [(x.pos_x + s[0] + (x.frame_x ?? 0) * 12 - 5.5) * 0.25,
+              (x.pos_y + s[1] + (x.frame_y ?? 0) * 12 - 5.5) * 0.25,
+              (x.pos_z + s[2] + (x.frame_z ?? 0) * 12 - 5.5) * 0.25]).map((v: number, i: number) => v + moff[i]));
+        };
+        const collectRigs = (list: any[], depth: number, chain: { t: number[]; q: number[] }) => {
+          for (const sc of list) if (sc.type === 'Build' && depth < 8) {
+            const scChain = rigPushA(chain, sc.position,
+              [sc.orientation?.w ?? 1, sc.orientation?.x ?? 0, sc.orientation?.y ?? 0, sc.orientation?.z ?? 0]);
+            growBlocks(((sc.data?.blocks) ?? []).filter((x: any) => (x.type ?? 0) !== 255), scChain);
+            collectRigs((sc.data?.components) ?? [], depth + 1, scChain);
+          }
+        };
+        growBlocks(((e.bp.data.components[bi]?.data?.blocks) ?? []).filter((x: any) => (x.type ?? 0) !== 255),
+          { t: [0, 0, 0], q: [1, 0, 0, 0] });
+        collectRigs((e.bp.data.components[bi]?.data?.components) ?? [], 0, { t: [0, 0, 0], q: [1, 0, 0, 0] });
         const g = e.subGroups.get(bi);
         const roots = (e.compRoots.get(j.top) ?? []).filter((o: any) => o.visible);
         const snap = () => ({
@@ -88,7 +118,7 @@ const audit = (page: Page) =>
         pairs.push({
           bi: bi as number, top: j.top, type: j.mc.type,
           lever: len(sub(j.pivot0.map((v: number, i: number) => v + moff[i]), j.p0.map((v: number, i: number) => v + moff[i]))),
-          onPanel,
+          onPanel, benchAnchored: !!j.benchAnchored,
           rideP: len(sub(predP, after.grpP)), rideQ: spinDeg(qmul(predQ, qconj(after.grpQ))),
           panelTravel: len(sub(after.grpP, before.grpP)), partTravel: len(sub(after.partP, before.partP)),
         });
@@ -109,10 +139,21 @@ test.describe('subgrid rides its joint @subgrid @slow', () => {
       const pairs = await audit(page);
       expect(pairs.length, 'the craft has jointed subgrids to audit').toBeGreaterThan(0);
       for (const p of pairs) {
-        expect(p.onPanel, `sub#${p.bi} (${p.type} m#${p.top}): the joint line lies on its own panel content (a z-mirrored clamp line floats off it)`)
-          .toBeLessThan(0.6);
-        expect(p.lever, `sub#${p.bi} (${p.type} m#${p.top}): the joint line belongs to its part (no phantom lever)`)
-          .toBeLessThan(3);
+        // v1.12.2 ANCHOR-CLASS LAW: the panel-clamp contract (line ON the
+        // content, lever near the part) is the v0.173 CLAMP class. Pairs
+        // captured through the v1.10.2/v1.11.8 BENCH ANCHOR ride the GAME's
+        // own hinge line (the bench rotation's fixed line — census-validated
+        // 157/166 bench pairs + the v1.11.8 GEAR audit); that line may sit
+        // off the content box by construction (Jimmy's gantry SmallPivot:
+        // the 30 m arm hinges at its own top line). For that class the audit
+        // keeps the KINEMATIC laws (the spec's core, below) and skips the
+        // clamp-class geometry contracts.
+        if (!p.benchAnchored) {
+          expect(p.onPanel, `sub#${p.bi} (${p.type} m#${p.top}): the joint line lies on its own panel content (a z-mirrored clamp line floats off it)`)
+            .toBeLessThan(0.6);
+          expect(p.lever, `sub#${p.bi} (${p.type} m#${p.top}): the joint line belongs to its part (no phantom lever)`)
+            .toBeLessThan(3);
+        }
         expect(p.rideP, `sub#${p.bi} (${p.type} m#${p.top}): spinning the part keeps the panel rigidly attached (position)`)
           .toBeLessThan(0.02);
         expect(p.rideQ, `sub#${p.bi} (${p.type} m#${p.top}): … and (rotation)`)

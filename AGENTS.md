@@ -1490,6 +1490,71 @@ topic + FORMAT).
   ≤ 15/117, bbox equivalence) + `compparts.test.ts` wheel-gate (3);
   @subgrid 6/6, @sym 4/4, cables/wire/@gizmo green, wheels.spec 8/8, vitest
   666; version strings v1.11.2.
+- **v1.12.2 BOOT COST & SNAPPINESS pass (we: "Boot times should be quicker…
+  what can be made quicker, parallelized? … algorithms with unnecessary
+  complexity … WASM?"):** the measurement harness is `app/tools/bootprobe.mjs`
+  (production-preview boots: phase marks `boot:main/eval/render1/vp/canvas/
+  enginedone/renderer/env/attach/atlas/scene-load`, resource routes, long
+  tasks) + the per-pass `lpStep` profile exposed through `stats().loadPhases`
+  — numbers transcribed into PERF.md §v1.12.2. Landed:
+  (1) **CABLES AS INSTANCED MESHES** — every bar/elbow/collar is ONE INSTANCE
+  of a unit template (the same `Quaternion.setFromUnitVectors` + `compose`
+  matrices the clones got, per-segment LINEAR colour via `instanceColor`,
+  one InstancedMesh per template×material); the old clone+mergeGeometries
+  fan-out was THE load hot spot: `pipes` phase truck 253→8.9 ms, giant
+  **1054→14.4 ms (73×)**, and every `reload()`/`rebuildPipes` re-pays it (the
+  interactive win: block edits on the giant ~1.3 s → ~270 ms total build).
+  The v1.8.1 RENDER LAW is untouched; the pick/xray/surge/pin paths all speak
+  the PURE net (segs/polys/plugs) which `buildPipes` answers unchanged — pipe
+  meshes stay layer-1 draw-only. (2) **`symTwinIndex` allocation-free inline
+  per-type scan** (the giant's 3.2 M mask tests no longer allocate an array
+  pair per call; directed pairs preserved — the off-plane test reads |a|;
+  30-seed fuzz pin `sym.test.ts` runs it against the `symMaskAt` reference).
+  (3) **Boot parallelization**: the atlas MANIFEST fetch fires with the
+  Editor chunk import (App.tsx `lazy` + Viewport attach kick) — it ran
+  serially BEHIND the blueprint download (the 6 MB giant lost ~380 ms);
+  deep-link boots pre-resolve the chunk (main.tsx `bootEditor` → the editor
+  renders in the root's SYNCHRONOUS initial mount, no time-sliced Suspense
+  reveal — bootprofile measured the reveal amortized over ~250 ms of slices).
+  (4) **Chunk diet**: vite `advancedChunks` three+vendor groups (stable Pages
+  cache identity: three 260 gz + vendor 68 gz survive releases) + lazy
+  ToolsDialog (registry + latsphere + balloonfin), HelpDialog (markdown +
+  topics), LiftWidget/CostWidget (atmo/economy) — Editor chunk 1 369→365 kB.
+  (5) **THE ANCHOR-CLASS LAW** (subride fix): a JRef records
+  `benchAnchored` — a joint line anchored on the BENCH's fixed line
+  (v1.10.2/v1.11.8 law-collinear class, the game's own hinge) is exempt from
+  the v0.173 panel-CLAMP contracts (`onPanel<0.6`, `lever<3`): Jimmy's
+  gantry SmallPivot hinges on its own 30 m arm's top line, 1.5 m off the
+  content box BY DESIGN; the audit keeps the KINEMATIC laws (rideP/rideQ/
+  travel — rigid attachment) for BOTH classes and the clamp contracts for
+  the clamp class. The audit bbox also mirrors the engine's `blockParts`
+  (nested-Build blocks through the v1.11.8 rig chain — the raw-file bbox is
+  the Jimmy leg's old P7.1 note). (6) **BACKDROP-SKIP FIXTURE LAW**
+  (we: "Make a backdrop Skip part of test fixture"): playwright storageState
+  ships `archean-app-backdrop=none` — every boot skips the 86–350 kB pano;
+  the fresh-profile DEF panorama pin re-arms it by removing the key in its
+  own context (viewmenu). A spec that GAINS a panorama law clicks the row
+  explicitly (the swap pins already do).
+  FIVE e2e re-pins (all reproduce on baseline b5f93e1 — main's pre-existing
+  reds from the v1.12.0 CLEAN-mode tile + the v1.12.1 preview-boot speed-up,
+  see the re-pin commit): panels pixel7 dock step transits via + Parts
+  (KNOWN ISSUE 13: re-clicking the ACTIVE tile drops to CLEAN); wire port
+  rows are HOVERED explicitly after the list re-lays; camera SETTLE = two
+  identical `camPos()` samples (damping decays in the render pump after
+  mouseup; fixed sleeps under-slept the fast boot); the auto-jump probes
+  require two identical probe answers (the part click flies the camera
+  380 ms — a mid-flight probe goes stale before the click, KNOWN ISSUE 12
+  family); the coplanar mirror-prism pair pins use the record the pick
+  ANSWERS as the selected prism (build-order tie, not a law — the delta/flip
+  /pair-paint laws are symmetric in (self, twin)).
+  NOT shipped (measured, documented): the e2e boot floor is the HEADLESS
+  environment (bare `getContext('webgl2')` = 2 ms; the ~330 ms `renderer`
+  mark = ANGLE/Vulkan init + ~26 compositor frame round-trips; `--use-angle=gl`
+  and shared shader caches change nothing); the hull-cull WASM port stays
+  deferred at its v1.11.2 verdict (cull+solids is now the giant's only
+  remaining 100 ms-class load phase, load-only, no interactive path).
+  Suite: vitest 737, fast tier 204 runs **2.5→1.8 min** 0-red, @slow 11/11.
+
 - **v1.11.6 A SUBGRID OF A SUBGRID RENDERS (we: "there are wheels that do
   not seem to render where the front wheels of the doritos craft should
   be, is this because they are a subgrid of a subgrid (of a subgrid?)" —

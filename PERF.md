@@ -155,6 +155,59 @@ buffer grows); `wallPtr()/seenPtr()/gridN()` exports let tests diff the wall
 maps cell-for-cell (they caught a vertex-stride bug that the tetra fixture
 masked: symmetric coords survive an axis-rotated stride).
 
+
+## v1.12.2 BOOT COST pass (app/, browser, `app/tools/bootprobe.mjs`)
+
+Measured on the PRODUCTION preview (the exact stack playwright drives: fresh
+context per boot, ANGLE-Vulkan on the iGPU, `?craft=` deep link, backdrop-skip
+fixture), medians of 3 boots. Phase marks: main → eval → render1 → canvas →
+engine → attach → atlas → scene-load (marks in main/App/Editor/Viewport/scene).
+
+| boot | SCENE-PASS before | after | scene-load mark before/after |
+|---|---|---|---|
+| ISW 3812927875 | 571 ms | **482 ms** | 456 / 386 |
+| x-ray fixture 9000007001 | 458 | **465** (flat) | 395 / 375 |
+| truck 3481322297 | 1047 | **720** | 781 / 517 |
+| giant 3509975859 | 2423 | **1144** | 2345 / 1025 |
+| testframe 9000005001 | 433 | **438** (flat) | 372 / 371 |
+
+What paid (per-load `stats().loadPhases`, lpStep marks in `load()`):
+
+- **CABLES AS INSTANCED MESHES** (the batch's headline): the clone +
+  mergeGeometries fan-out (one CylinderGeometry clone per bar, merged with
+  computeVertexNormals) was THE load hot spot — `pipes` phase: ISW 21.8 →
+  2.5 ms, truck **253 → 8.9 ms**, giant **1054 → 14.4 ms** (73×); total load
+  truck 291 → 56 ms, giant 1309 → 271 ms. Every reload() (block edit, twin
+  write, rebuildPipes cable re-drape) re-pays it — this is the interactive
+  snappier-app win on big crafts, and ~2 ms × every e2e boot.
+- **symTwinIndex allocation-free inline scan** (per-type O(n²) pair test):
+  the giant's anchor phase 28 → ~6 ms (3.2 M mask tests no longer allocate
+  a 3-element array PAIR each); directed-pair fuzz pin (30 seeds).
+- **Boot parallelization**: the model manifest (107 kB) fetch starts WITH the
+  Editor chunk import (App.tsx) instead of serially behind the blueprint
+  download (giant: atlas mark 751 → 665, the manifest lands @30 ms every
+  boot); deep-link boots pre-resolve the chunk (main.tsx `bootEditor`) so
+  the editor renders in the root's SYNCHRONOUS initial mount (no time-sliced
+  Suspense reveal — the bootprofile showed the reveal amortized over ~250 ms
+  of 5-ms slices).
+- **Chunk diet** (vite advancedChunks three/vendor groups + lazy ToolsDialog
+  / HelpDialog / LiftWidget / CostWidget): Editor chunk **1 369 → 365 kB**
+  (116 gz); three = 260 gz + vendor 68 gz are STABLE-CACHEable across
+  releases on Pages. Costs ~30 ms/boot on the local preview (9 chunks vs 2,
+  module compilation) — the trade is the real user on the real network.
+
+Measured, NOT shipped: the `renderer` mark (~330 ms) is headless ANGLE/Vulkan
+CONTEXT + compositor init — a bare `getContext('webgl2')` on the same stack
+costs 2 ms; the CPU profile of the boot window shows ~107 ms main-thread busy
+vs ~400 ms wall = ~26 headless compositor frames; `--use-angle=gl` (mesa EGL)
+and shared XDG_CACHE_HOME change nothing, default (SwiftShader) is 3× worse.
+The floor is the headless environment, not app code — the ANGLE-Vulkan pin
+stays (AGENTS § GPU). WebGL context creation is NOT the cost, and the app
+pays ~110 ms of real JS per boot.
+
+e2e wall: fast tier **2.5 → 1.8 min** (204 runs, 4 workers, preview+iGPU) —
+backdrop-skip fixture + boot costs; @slow 11/11.
+
 ## Tooling
 
 - `?perf` (live browser): title shows `fps draw flowms buildms loadms tris geo`

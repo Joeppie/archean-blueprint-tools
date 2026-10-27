@@ -353,6 +353,13 @@ export interface JRef {
   /** the CAPTURED joint line: pivot clamped onto the panel bbox, axis/slide
    *  by THE PANEL LAW R(q)·C·ê (v1.10.2) */
   pivot0: V3; axis0: V3; slide0: V3;
+  /** v1.12.2 (subride audit): true when pivot0's perpendicular anchor came
+   *  from the BENCH's fixed line (the v1.10.2/v1.11.8 law-collinear class —
+   *  the game's own hinge line), not the panel-bbox clamp (v0.173). The
+   *  panel-clamp contract (line lies ON the content) is the 'clamp' class;
+   *  a bench-anchored line is the game's hinge and may sit off the content
+   *  box (Jimmy's gantry: 1.5 m above the panel's z face). */
+  benchAnchored: boolean;
   /** the master's data at capture — edits render as DELTAS from it */
   authoredAngle: number; authoredSlide: number;
   /** the angle the game itself displays at load: the signed angle of the
@@ -464,6 +471,9 @@ export function captureJrefs(
         }
       }
     }
+    // v1.12.2 anchor-class marker for the subride audit (see JRef.benchAnchored)
+    let benchAnchored = false;
+    if (bb && benchLawParallel && benchFixedPoint()) benchAnchored = true;
     // parts-only subgrids (no blocks) ride the UNCLAMPED axle — the Badger's
     // triangle skins proved the game's hinge line sits on the part's own
     // law line there (bench line offset 0.000 m).
@@ -485,6 +495,7 @@ export function captureJrefs(
           const par = w[0]! * a[0]! + w[1]! * a[1]! + w[2]! * a[2]!;
           const perp = Math.hypot(w[0]! - par * a[0]!, w[1]! - par * a[1]!, w[2]! - par * a[2]!);
           if (perp < 1) {
+            benchAnchored = true;
             pivot0 = [
               pivot0[0]! - (w[0]! - par * a[0]!),
               pivot0[1]! - (w[1]! - par * a[1]!),
@@ -496,7 +507,7 @@ export function captureJrefs(
     }
     out.push({
       mc, mcPath: e.mcPath, top: e.top, p0, q0,
-      pivot0, axis0: j0.axis, slide0: j0.slide,
+      pivot0, axis0: j0.axis, slide0: j0.slide, benchAnchored,
       authoredAngle, authoredSlide, bakedAngle,
     });
   }

@@ -81,6 +81,20 @@ runs).
 - **L4 — The device matrix is opt-in.** `pixel7` runs only the specs whose
   laws are device laws. A new phone assert = a `@phone`-tagged test, not a
   matrix default.
+- **L6 — The fixture owns the boot environment (v1.12.2).** The
+  storageState ships the boot-cheap settings the device matrix does not
+  exercise: `archean-app-debug=1` (the assertion channel) AND
+  `archean-app-backdrop=none` (every boot skips the 86–350 kB panorama —
+  we: "Make a backdrop Skip part of test fixture"). A spec whose law IS the
+  panorama (viewmenu's swap pins) clicks the row explicitly; the ONE
+  fresh-profile DEF-panorama pin removes the seeded key in its own context.
+- **L7 — Settle, don't sleep (v1.12.2).** The preview-boot speed-up moved
+  interactions earlier relative to the app's own animations. Camera/probe
+  reads settle on EVIDENCE: two identical `camPos()` samples (damping decays
+  in the render pump after mouseup), two identical pick-probe answers (the
+  part click flies the camera for 380 ms — KNOWN ISSUE 12 family). Fixed
+  `waitForTimeout`s are premise gates only (boot, episode-open).
+
 - **L5 — Migrations, not holes.** An e2e leg is deleted in the SAME commit
   that lands its lower-tier replacement, which reproduces the CURRENT green
   values before any behaviour moves (the P7 gate, kept).
