@@ -3692,7 +3692,7 @@ void main() {
     });
     this.invalidate();
   }
-  /** Blit one surface's framebuffer onto its dashboard face (10 Hz, from the
+  /** Blit one surface's framebuffer onto its dashboard face (25 Hz, from the
    *  XenonPump). Row-flips into UV space; size change rebuilds the texture. */
   pushScreen(key: string, w: number, h: number, pixels: Uint8ClampedArray): void {
     const e = this.dashScreens.get(key) ?? this.deviceScreens.get(key);

@@ -15,6 +15,10 @@ if [ ! -d "$UP/.git" ]; then
 	git clone https://github.com/batcholi/XenonCode.git "$UP"
 fi
 git -C "$UP" fetch --quiet origin
+# the shim patches below edit the checkout IN PLACE and are not idempotent:
+# start from pristine pinned files every run (build artifacts live OUTSIDE
+# upstream/, nothing of ours is lost by this reset)
+git -C "$UP" reset --quiet --hard "$PIN"
 git -C "$UP" checkout --quiet --detach "$PIN"
 # ---- shim patches on the pinned checkout (documented, reproducible) -------
 # LENIENT TEXT->NUMBER: the game's binary treats a non-numeric text cast as 0;

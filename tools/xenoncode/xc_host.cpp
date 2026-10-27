@@ -449,11 +449,14 @@ static void archeanInit() {
 	XenonCode::DeclareDeviceFunction("screen_h:number", [ms](Computer*, const vector<Var>&) -> Var {
 		return (double)ms()->GetHeight(); });
 	// virtualscreen(w, h) — code-created off-screen buffer (computer.md
-	// "Virtual Screen Function", cap 10000x10000 in game; we cap at 4096 and
-	// 96 buffers as the POC's memory guard). Shown like any other surface.
+	// "Virtual Screen Function", cap 10000x10000 in game — WE MATCH THE GAME
+	// CAP NOW: Chip's Mario skins its whole sprite atlas through a
+	// virtualscreen(10000, 600); our old 4096 cap truncated the atlas and
+	// every sprite past x=4096 smeared on screen — "when we get far in a
+	// level, things get smeared"). 96 buffers as the POC's memory guard.
 	XenonCode::DeclareDeviceFunction("virtualscreen:screen", [](Computer*, const vector<Var>& a) -> Var {
-		uint32_t w = (uint32_t)clamp((int64_t)a[0], (int64_t)1, (int64_t)4096);
-		uint32_t h = (uint32_t)clamp((int64_t)a[1], (int64_t)1, (int64_t)4096);
+		uint32_t w = (uint32_t)clamp((int64_t)a[0], (int64_t)1, (int64_t)10000);
+		uint32_t h = (uint32_t)clamp((int64_t)a[1], (int64_t)1, (int64_t)10000);
 		int i = xc_addScreen("virtual#" + to_string(g_nextVirtual++), 0, w, h);
 		return Var(screenType, reinterpret_cast<uint64_t>(g_screens[i].scr.get()));
 	});
@@ -586,8 +589,8 @@ static void archeanInit() {
 		return (double)xc_tickCount;
 	});
 	XenonCode::DeclareDeviceFunction("system_frequency:number", [](Computer*, const vector<Var>&) -> Var {
-		return 10.0;                                // our pump cadence
-	});
+		return 1.0 / xc_dt;                         // our pump cadence (v1.13.2:
+	});                                           // follows xc_set_cycle_ms
 	XenonCode::DeclareDeviceFunction("system_ram:number", [](Computer*, const vector<Var>&) -> Var {
 		return 65536.0;
 	});
@@ -1084,7 +1087,13 @@ EMSCRIPTEN_KEEPALIVE void xc_worldsim_clear() { g_wsProgram.clear(); g_wsEffecti
 
 // ABI stamp: the app checks this at boot (XC_ABI in engine/xenoncode.ts) and
 // warns ONCE on drift — new device/shim exports must bump it.
-EMSCRIPTEN_KEEPALIVE int xc_abi() { return 4; }
+EMSCRIPTEN_KEEPALIVE int xc_abi() { return 5; }   // 5: xc_set_cycle_ms + dt-driven system_frequency
+EMSCRIPTEN_KEEPALIVE void xc_set_cycle_ms(int ms) {
+	// the app's pump cadence (CYCLE_MS): delta_time / system_frequency
+	// follow it, so dt-driven programs (Chip's Mario, physics on
+	// clamp(delta_time,0,0.12)) run in real time at 25 Hz.
+	if (ms > 0) xc_dt = ms / 1000.0;
+}
 EMSCRIPTEN_KEEPALIVE int xc_screen_count() { return (int)g_screens.size(); }
 EMSCRIPTEN_KEEPALIVE const char* xc_screen_key(int i) {
 	return (i >= 0 && i < (int)g_screens.size()) ? g_screens[i].key.c_str() : "";

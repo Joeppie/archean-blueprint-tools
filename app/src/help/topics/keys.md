@@ -1,5 +1,5 @@
 # Keyboard and mouse
-Tags: keyboard shortcuts keys mouse controls orbit pan zoom delete escape shift snap brush stretch widget pin
+Tags: keyboard shortcuts keys mouse controls orbit pan zoom delete escape shift snap brush stretch widget pin cockpit wasd dash mario
 
 ## Keys (ignored while a text field has focus)
 
@@ -14,6 +14,7 @@ Tags: keyboard shortcuts keys mouse controls orbit pan zoom delete escape shift 
 | h | hull solids ⇄ wireframe — in wireframe you CLICK THROUGH the hull to what is behind it ("click what you SEE") |
 | w | wireframe OVERLAY on/off (the ⚙ View ▸ wireframe row; a lit wireframe darkens the hull solids — hull ⇄ wireframe stay mutually exclusive, the 'h' law) |
 | 5 | projection: perspective ⇄ ORTHOGRAPHIC (parallel) — the same toggle as ⚙ View ▸ orthographic |
+| WASD ↑ ↓ F Space E (dash views only) | while the ▣ Screens dock or the IDE's Screens tab is open, these are the COCKPIT's inputs into the computer (PilotSeat channels: run/walk, move, jump/duck, jump — F and Space are the same action button, E is the fire key) — the g/o/h/w view shortcuts stand down (see Help ▸ Xenon) |
 | Shift (held) | snaps: gizmo moves to 0.25 m cells, rotations to 15°, subgrid joint handles snap, block ghost = mirror continuation |
 | Esc | close the top window → cancel a placement drag/skin → drop a held part → leave the triangle PINS → deselect |
 

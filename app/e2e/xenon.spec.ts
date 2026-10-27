@@ -16,6 +16,10 @@ import { expect, test } from '@playwright/test';
 const PLANE = '3294880085';
 const CEP = '3327182790';
 const BADGER = '3326372833';
+// Chip Patton's 'PKC-385' (workshop 3820116990): a XenonCode SUPER MARIO
+// BROS. game — PilotSeat 'gamer-chair' input, 8 Buzzer components for the
+// 8-bit music, six HdScreen surfaces. The playtest target of v1.13.2.
+const MARIO = '3820116990';
 
 async function litPixels(page: import('@playwright/test').Page, selector: string): Promise<number> {
   return page.evaluate(sel => {
@@ -62,7 +66,7 @@ test.describe('Xenon IDE @ui', () => {
     // running program paints its readout lines into the canvas
     const screen = page.locator('[data-testid="xenon-screen-trimsdash#0"]');
     await expect(screen).toBeVisible();
-    await page.waitForTimeout(2500);                       // a few 10 Hz cycles
+    await page.waitForTimeout(2500);                       // a few 25 Hz cycles
     expect(await litPixels(page, '[data-testid="xenon-screen-trimsdash#0"]')).toBeGreaterThan(50);
 
     // io bus: the program's output_number targets stream in (the side
@@ -212,9 +216,16 @@ test.describe('Xenon IDE @ui', () => {
     expect(await scr.evaluate(el => (el as HTMLCanvasElement).width)).toBe(870)   // 145-unit element at the 6 px-per-unit screen scale;
     await page.waitForTimeout(1500);
     expect(await litPixels(page, '[data-testid="xenon-screen-10#0"]')).toBeGreaterThan(10);
-    // THE FIX: clicking the top-left "disp" button flips $disp — the click
-    // lands while the SCREENS tab shows the surface; the vars tab reads back
-    await page.getByTestId('xenon-screen-10#0').click({ position: { x: 2, y: 2 } });
+    // THE FIX: clicking the top-left "disp" button flips $disp — v1.13.2:
+    // clicking the thumbnail opens its ZOOM WINDOW, and the button press
+    // lands on the 1:1 fullscreen canvas (the VM law lives there now); the
+    // vars tab reads the flip back
+    await page.getByTestId('xenon-screen-10#0').click();
+    const full = page.getByTestId('xenon-cell-10#0-fullcanvas');
+    await expect(full).toBeVisible();
+    const fb = (await full.boundingBox())!;
+    await full.click({ position: { x: fb.width * 4 / 870, y: fb.height * 4 / 396 } });
+    await page.getByTestId('xenon-cell-10#0-fullexit').click();
     await page.getByTestId('xenon-side-vars').click();
     const dispRow = page.getByTestId('xenon-var-disp');
     await expect(dispRow).toBeVisible();
@@ -232,7 +243,7 @@ test.describe('Xenon IDE @ui', () => {
   test('the debugger: F9 breakpoint pauses, F10 steps one cycle, F8 resumes @slow', async ({ page }) => {
     // (we: "we should be able to set breakpoints and move through it with
     // the same keys as typical in intelIbrains IDE, so f10, f11?") — a step
-    // is one 10 Hz computer cycle; a break pauses AT the cycle that touched
+    // is one 25 Hz computer cycle; a break pauses AT the cycle that touched
     // its line (XENON-DEBUG executed-line tracking).
     await page.goto(`/?craft=${CEP}`);
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 90_000 });
@@ -250,7 +261,7 @@ test.describe('Xenon IDE @ui', () => {
     await expect(pill).toBeVisible({ timeout: 15_000 });
     await expect(pill).toContainText('17');
     const cycles = async () => Number(
-      (await page.getByText(/cycles \d+ @ 10 Hz/).first().innerText()).match(/cycles (\d+)/)?.[1] ?? -1);
+      (await page.getByText(/cycles \d+ @ 25 Hz/).first().innerText()).match(/cycles (\d+)/)?.[1] ?? -1);
     const c0 = await cycles();
     await page.waitForTimeout(1200);
     expect(await cycles()).toBe(c0);                 // frozen while paused
@@ -466,22 +477,26 @@ test.describe('Xenon IDE @ui', () => {
     await page.getByTestId('screens-btn').click();
     const dock = page.getByTestId('screens-dock');
     await expect(dock).toBeVisible();
-    // DRAG by the title bar
+    // DRAG by the title bar — UP-LEFT, so the SE grips get viewport room:
+    // the dock's initial width sits AT the min(1100, 96 vw) cap on a
+    // 1280-px viewport, and a right-drag would push its SE corner OUTSIDE
+    // the window (the mouse events land on nothing — the v1.13.2 red)
     const b0 = (await dock.boundingBox())!;
     await page.mouse.move(b0.x + 120, b0.y + 14);
     await page.mouse.down();
-    await page.mouse.move(b0.x + 260, b0.y - 120, { steps: 8 });
+    await page.mouse.move(b0.x - 150, b0.y - 150, { steps: 8 });
     await page.mouse.up();
     const b1 = (await dock.boundingBox())!;
-    expect(b1.x).toBeGreaterThan(b0.x + 100);
-    expect(b1.y).toBeLessThan(b0.y - 60);
-    // RESIZE by the SE corner
+    expect(b1.x).toBeLessThan(b0.x - 100);
+    expect(b1.y).toBeLessThan(b0.y - 100);
+    // RESIZE by the SE corner: BOTH axes grow
     await page.mouse.move(b1.x + b1.width - 2, b1.y + b1.height - 2);
     await page.mouse.down();
-    await page.mouse.move(b1.x + b1.width + 130, b1.y + b1.height + 70, { steps: 6 });
+    await page.mouse.move(b1.x + b1.width + 148, b1.y + b1.height + 78, { steps: 6 });
     await page.mouse.up();
     const b2 = (await dock.boundingBox())!;
     expect(b2.width).toBeGreaterThan(b1.width + 80);
+    expect(b2.height).toBeGreaterThan(b1.height + 40);
     // close + REOPEN: the session position persists (and off-screen rects
     // reopen at their initial spot - unit-pinned in bestRect)
     await page.getByTestId('screens-close').click();
@@ -546,5 +561,125 @@ test.describe('Xenon IDE @ui', () => {
       .toBeVisible({ timeout: 30_000 });
     await page.getByTestId('screens-close').click();
     await expect(dock).toHaveCount(0);
+  });
+
+  test('dash focus + deep link + cockpit keys + buzzers: Mario plays @slow', async ({ page }) => {
+    // (we 2026-10-27: "dashboard … too small to read … No zooming … does not
+    // let you filter" + "WASD, up, down, and F … inputs into the computer
+    // for all cockpit connections it has" + "buzzers should be implemented"
+    // + "a deeplink ability to the specific dash as well as the super mario
+    // game by chip imported. That way, we can play super mario in our
+    // browser.") Deep-link straight to Mario's TV surface.
+    test.setTimeout(300_000);
+    await page.goto(`/?craft=${MARIO}&dash=screen%230`);
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 180_000 });
+
+    // the dock opened itself and the DEEP-LINKED surface raised its zoom
+    // window as soon as it painted (no clicking on a tiny canvas)
+    const overlay = page.getByTestId('screens-cell-screen#0-overlay');
+    await expect(overlay).toBeVisible({ timeout: 120_000 });
+    const full = page.getByTestId('screens-cell-screen#0-fullcanvas');
+    await expect(full).toBeVisible();
+    // zoom controls ride the window
+    await page.getByTestId('screens-cell-screen#0-zoomin').click();
+    await expect(page.getByTestId('screens-cell-screen#0-zoom')).toHaveText('125%');
+    // the GAME paints the TV (title screen pixels)
+    await expect
+      .poll(() => litPixels(page, '[data-testid="screens-cell-screen#0-fullcanvas"]'),
+        { timeout: 60_000 })
+      .toBeGreaterThan(200);
+    await page.getByTestId('screens-cell-screen#0-fullexit').click();
+
+    // the dock: every surface + the FILTER (we: "doesnt let you filter")
+    await expect(page.locator('[data-testid^="screens-cell-"]')).not.toHaveCount(0);
+    await page.getByTestId('screens-search').fill('zzz-no-surface');
+    await expect(page.locator('[data-testid^="screens-cell-"]')).toHaveCount(0);
+    await expect(page.getByText('no surface matches the filter')).toBeVisible();
+    await page.getByTestId('screens-search').fill('');
+    await expect(page.locator('[data-testid="screens-cell-screen#0"]')).toBeVisible();
+    // TILE MODE: gaps collapse to ZERO and the panels sit flush — Mario's
+    // six HdScreens read as one TV wall (we: "the spacing between
+    // dashboards should be collapsable to be zero, so they are super-smooth
+    // together, with a button")
+    await page.getByTestId('screens-tight').click();
+    const c0 = (await page.getByTestId('screens-canvas-screen#0').boundingBox())!;
+    const c1 = (await page.getByTestId('screens-canvas-screen#1').boundingBox())!;
+    expect(Math.abs(c1.x - (c0.x + c0.width))).toBeLessThanOrEqual(1.5);
+    await page.getByTestId('screens-tight').click();
+    // clicking the THUMBNAIL opens its zoom window (no more VM mis-clicks)
+    await page.getByTestId('screens-canvas-screen#0').click();
+    await expect(overlay).toBeVisible();
+    await page.getByTestId('screens-cell-screen#0-fullexit').click();
+    await page.getByTestId('screens-close').click();
+
+    // app-shortcut law: 'w' did NOT toggle wireframe while the dash was
+    // armed (checked NOW — the TopBar ⚙ is reachable while the dock, not
+    // the IDE, is the top window)
+    await page.getByTestId('toggle-options').click();
+    await expect(page.getByTestId('opt-wire')).not.toBeChecked();
+    await page.getByTestId('toggle-options').click();
+
+    // cockpit: open the IDE, the Screens tab arms the flight keys, all
+    // eight are bound to the gamer-chair PilotSeat
+    await page.getByTestId('xenon-menu').click();
+    await page.locator('[data-testid^="xenon-comp-"]').first().click();
+    await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 90_000 });
+    await page.getByTestId('xenon-side-screens').click();
+    const xen = () => page.evaluate(() => (window as any).__XENON__?.());
+    await expect
+      .poll(async () => (await xen())?.pilotKeys?.length ?? 0, { timeout: 30_000 })
+      .toBe(9);
+    const row = async (re: string) =>
+      ((await xen())?.world ?? []).find((r: any) => new RegExp(re).test(r.name));
+    // THE SPRITE-ATLAS LAW (we: "when we get far in a level, things get
+    // smeared ... not all of the graphics are being copied by our screen
+    // copy?"): Mario skins the whole atlas through virtualscreen(10000,600)
+    // — the shim must honour the GAME's 10000 cap, not the old 4096
+    // (a truncated atlas = every sprite past x=4096 is garbage).
+    await expect
+      .poll(async () => {
+        const metas = (await xen())?.surfaceMeta ?? [];
+        return metas.some((m: any) => /^virtual#/.test(m.key) && m.w >= 10000);
+      }, { timeout: 30_000 })
+      .toBe(true);
+    // W = Backward/Forward +1 (the game reads it as RUN, main.xc ch 1)
+    await page.keyboard.down('w');
+    await expect.poll(async () => (await row('backward_forward'))?.manual, { timeout: 8_000 }).toBe(1);
+    await page.keyboard.up('w');
+    await expect.poll(async () => (await row('backward_forward'))?.manual, { timeout: 8_000 }).toBe(0);
+    // F = Aux 1 (the game's JUMP, ch 8)
+    await page.keyboard.down('f');
+    await expect.poll(async () => (await row('aux_1'))?.manual, { timeout: 8_000 }).toBe(1);
+    await page.keyboard.up('f');
+    // SPACE = the same action button (the classic jump key, ch 8 too)
+    await page.keyboard.down('Space');
+    await expect.poll(async () => (await row('aux_1'))?.manual, { timeout: 8_000 }).toBe(1);
+    await page.keyboard.up('Space');
+    // E = Pitch (ch 5) — the game's FIRE key (we: "we should have forwarded
+    // the e key as well")
+    await page.keyboard.down('e');
+    await expect.poll(async () => (await row('pitch'))?.manual, { timeout: 8_000 }).toBe(1);
+    await page.keyboard.up('e');
+    // A/D = Left/Right (ch 2) — the MOVE
+    await page.keyboard.down('d');
+    await expect.poll(async () => (await row('left_right'))?.manual, { timeout: 8_000 }).toBe(1);
+    await page.keyboard.up('d');
+
+    // buzzers: the Bus tab lists the game's BUZZERS with live amp+Hz
+    // (audio.xc writes Amplitude ch0 / Frequency ch1 every cycle)
+    await page.getByTestId('xenon-side-bus').click();
+    await expect(page.getByTestId('xenon-buzzer-card')).toBeVisible();
+    await expect(page.getByTestId('buzzer-row-game-melody')).toBeVisible();
+    await expect(page.getByTestId('buzzer-row-game-bass')).toBeVisible();
+    await expect(page.getByTestId('buzzer-sound')).toBeVisible();     // 🔊 (autoplay-safe)
+    await expect(page.getByTestId('buzzer-wave-sawtooth')).toBeVisible();
+    // the game IS playing: at least one buzzer carries amplitude over time
+    await expect
+      .poll(async () => {
+        const t = await page.getByTestId('buzzer-row-game-melody').innerText();
+        return parseFloat(t) || 0;
+      }, { timeout: 30_000 })
+      .toBeGreaterThan(0);
+    await page.getByTestId('xenon-close').click();
   });
 });

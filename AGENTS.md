@@ -1561,6 +1561,108 @@ topic + FORMAT).
   remaining 100 ms-class load phase, load-only, no interactive path).
   Suite: vitest 737, fast tier 204 runs **2.5→1.8 min** 0-red, @slow 11/11.
 
+- **v1.13.2 THE 25 Hz CADENCE + THE COCKPIT + BUZZERS + DASH FOCUS + MARIO
+ (we: "dashboard that is 640*480 which is too small to read, when I click it
+ becomes worse. No zooming … doesnt let you filter"; "pressing WASD u, down,
+ and F should be given as inputs into the computer for all cockpit
+ connections it has. This will allow us to simulate that"; "buzzers should be
+ implement, with square/sawtooth, and the frequency"; "computers should run
+ at 25 hz update cycles, not 10 hz"; "a deeplink ability to the specific
+ dash as well as the super mario game by chip imported. That way, we can play
+ super mario in our browser")**:
+ - **25 Hz pump**: `CYCLE_MS = 40` (xenoncode.ts) is the single cadence; the
+   shim gained `xc_set_cycle_ms` (ABI **5**) called at boot, so `delta_time`
+   = 0.04 s and `system_frequency()` = 1/xc_dt (dt-driven programs — Chip's
+   Mario physics `clamp(delta_time,0,0.12)` — run in REAL time; the baked
+   0.1 s dt of the old wasm ran them 2.5× fast). tools/xenoncode/build.sh
+   gained `git reset --hard $PIN` before the patches (they edit the checkout
+   IN PLACE and are not idempotent — a second run asserted on its own
+   anchors). WASM rebuilt with emsdk 4.x (upstream pin unchanged). THE
+   CADENCE LAW: the VM cycles at 25 Hz, the REACT PANELS coalesce at ≤10 Hz
+   (`notifyCoalesced` in the pump loop) — the Badger's 118 surfaces + ~100
+   var rows re-rendered 25x/s starved the main thread (the suite caught it:
+   'no prints yet' at 180 s); canvases still blit EVERY cycle.
+ - **THE PILOT-KEY LAW** (engine/pilotkeys.ts + pump.pilotKey): while the ▣
+   Screens dock or the IDE Screens tab is open, WASD/↑/↓/F drive every
+   PilotSeat channel the running computer has, mapped by the GAME's channel
+   words (wiki PilotSeat.md): Backward/Forward (W+1 run/S−1), Left/Right
+   (D+1/A−1), Down/Up (↑+1 jump/↓−1 crouch) and Aux 1 (F = jump) — signs are
+   the stick's, press = ±1, release CENTERS to 0. Pilot bindings are built in
+   buildWorldSim (type PilotSeat × channels.json fn word, PILOT_KEYS). Keys
+   never leak while typing (input/textarea guards); window-blur releases all.
+   THE EDITOR-SHORTCUT YIELD: `pilotKeysActive()` gates the g/o/h/w/5 global
+   shortcut map (the 'w' run key is NOT a wireframe toggle in a dash view;
+   on a cockpit-less craft the keys pass through untouched). SPACE joins F
+   as the same action button (aux 1 = Mario's jump, we: "we need to emulate
+   space"). A BOUND cockpit channel RESTS AT ZERO at bind time (the
+   telemetry-alive stick defaults would make a game craft run on its own).
+   `detectChannels` now also captures **input_text** call sites — Chip's
+   Mario gates ALL input on `input_text("gamer-chair", 0)` (the seat USER
+   TOKEN); the shim stringifies a fed numeric, and the worldsim PilotSeat
+   'Using' default '1' makes the game read SEATED.
+ - **BUZZERS** (engine/buzzer.ts): the game's Buzzer (wiki
+   components/miscellaneous/Buzzer.md) takes Amplitude ch 0 (0..1) +
+   Frequency Hz ch 1 (0..20000, default 440) and plays sine/square/
+   triangle/sawtooth (the component's V-menu tone type — one app-level wave
+   choice, persisted); the io-bus rows the program writes
+   (`output_number(alias|io, ch, v)`, key = RAW target verbatim + ':ch') ARE
+   the drive values; one WebAudio oscillator per loud buzzer (the wiki's
+   multi-tone law = multiple buzzers → Mario's melody+harmony+bass+effects
+   chords work). Autoplay policy: sound starts MUTED, the 🔊 toggle in the
+   Bus-tab Buzzers card (buzzer-sound/buzzer-wave-*/buzzer-row-<alias>) is
+   the required gesture AND CREATES+RESUMES the AudioContext synchronously
+   in the click (a context lazily created in the pump loop starts SUSPENDED
+   and never resumes — "I dont hear the buzzers"). Pure law pinned vitest
+   (`buzzerReadings`): silent when unwritten, 440 default, 0..1/20000
+   clamps, alias AND io bus keys.
+ - **THE SHIM SCREEN CAP = THE GAME'S CAP** (xc_host.cpp): virtualscreen()
+   clamps at 10000×10000 like computer.md — our old 4096 cap TRUNCATED
+   Chip's Mario `virtualscreen(10000, 600)` sprite atlas and every sprite
+   past x=4096 smeared on screen (we: "when we get far in a level, things
+   get smeared … not all of the graphics are being copied by our screen
+   copy?"). Pinned: the Mario e2e asserts a virtual# ≥ 10000 wide is
+   registered (__XENON__().surfaceMeta). E key → Pitch (ch 5) = Mario's
+   FIRE key (we: "we should have forwarded the e key as well") — nine
+   bound keys total.
+ - **DASH FOCUS + DEEP LINK** (we's 640×480 report): dock cells are
+   ScreensCell — clicking a THUMBNAIL opens its OWN fullscreen ZOOM WINDOW
+   (fit / 1:1 px / ± / pinch, scroll-pan, pixelated) and no longer fires the
+   VM (a mis-click cannot press a button_rect under you; "when I click it
+   becomes worse"); VM clicks land in the zoom window at 1:1 pixels. The ▣
+   dock gained a FILTER box (screens-search, name+key). `?craft=<id>&dash=<
+   alias%23channel>` opens straight into the dock with that surface's zoom
+   window raised as soon as it paints (Editor dashFocus → ScreensDock focus
+   → ScreensCell autoFull) — ONE-SHOT: consumed on open (a filter round-trip
+   remounts cells; a re-armed autoFull raises the overlay and intercepts
+   clicks — the Mario leg caught it). **▦ TILE** (`screens-tight`,
+   localStorage archean-app-screens-tight): collapses gaps/padding/borders/
+   labels to ZERO so multi-panel TV walls tile flush (we: "the spacing
+   between dashboards should be collapsable to be zero, so they are
+   super-smooth together, with a button"). The IDE screens panel search
+   stayed.
+ - **MARIO IS IN THE CORPUS**: testdata/3820116990 = Chip Patton's PKC-385
+   "Super Mario Brothers [v1.1]" (workshop, imported committed like the
+   xray fixture; ws-names.tsv titled): a XenonCode game on a MiniComputer —
+   PilotSeat `gamer-chair` (ch1 run, ch2 move, ch3 jump/duck, ch8 jump, ch9
+   run, ch5 fire, ch10-13 pause/restart/mute/select), 8 BUZZER components
+   (game-melody/harmony/bass/effects/fx-*) driven by audio.xc, 6 HdScreen
+   surfaces (`screen("screen",0..5)` → `screen#0..5`), sprite atlas via
+   screen_copy + virtualscreen. PLAYTEST: `?craft=3820116990&dash=screen%230`
+   → click 🔊 → WASD/↑↓F. e2e: xenon.spec "dash focus + deep link + cockpit
+   keys + buzzers: Mario plays" (@slow) — deep-link overlay, >200 lit title
+   pixels, filter, 7 pilot keys bound, gamer_chair row manual 1/0 on press/
+   release, buzzer-row-game-melody amplitude > 0. Unit: xenoncode.test pins
+   the Mario fixture (seat channels 1/2/3/8 detected, >3 buzzers).
+   Re-pins: `cycles N @ 25 Hz` labels/regexes; the 3381670618 button-click
+   leg clicks THUMBNAIL → FULLCANVAS (VM clicks live in the zoom window).
+ - **NOT SHIPPED (deliberate, we: "do not yet implement all components")**:
+   the game ships BUILT-IN component firmware .xc files
+   (`Archean-game/modules/ARCHEAN_*/components/<Type>/main.xc`: Keyboard,
+   Numpad, Crafter, DockableDoor, Volume, ChemicalFurnace/Reactor,
+   FissionReactor, OwnerPad, Computer documentation.xc) — running each
+   component's own program on the pump (real switches/drills) is the NEXT
+   emulation step; the server-HDD `buzzers.xc` programs prove the
+   output_number law the buzzer engine already implements.
 - **v1.13.x XENON batch 6: real screen geometry (6 px per unit)**: an
  element's XenonScreen surface is size×6 px (the firmware's own
  'Screen dimensions: 300x300' print on a 50-unit pilot-screen is the proof);

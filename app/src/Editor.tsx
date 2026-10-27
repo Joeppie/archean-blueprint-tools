@@ -49,6 +49,7 @@ import { applyPinEdit, applyPinRotate, applyPinShift, applyTriFlip, applyTriPain
 import type { Blueprint, Triangle } from './engine/format';
 import { isLegacyFile } from './engine/format';
 import { hasDashboards, xenonComputers, xenonPump, type XCFile } from './engine/xenoncode';
+import { pilotKeysActive } from './engine/pilotkeys';
 import { autosave, countAutosaves, pruneAfterSave } from './engine/autosave';
 import type { ResolvedColor } from './engine/palette';
 import { docArrayInsert, docArrayRemoveAt, docEnsureArray, docFromValue, docValue, emitDoc, parseDoc } from './engine/doc';
@@ -136,7 +137,12 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // ▣ SCREENS bottom tab (v1.13.x): the dashboards' live rasters, normal +
   // virtual surfaces, on the SHARED pump (the IDE, the dock and the 3-D
   // dashboard faces all ride ONE running computer).
-  const [screensOpen, setScreensOpen] = useState(false);
+  const [screensOpen, setScreensOpen] = useState(
+    // v1.13.2 deep link (?craft=<id>&dash=<surfaceKey>, e.g. dash=screen%230):
+    // the ▣ Screens dock opens booted toward that surface, whose ZOOM WINDOW
+    // is raised as soon as it paints — `?craft=3820116990&dash=screen%230`
+    // is Mario's TV, directly (we: "a deeplink ability to the specific dash")
+    !!new URLSearchParams(window.location.search).get('dash'));
   const hasScreens = useMemo(() => (bp ? hasDashboards(bp) : false), [bp]);
   // v1.13.x AUTOSAVE shadow copies ("Forget to save? No problem"): the doc
   // text is shadowed every ~20 s while dirty + on every save; File ▸
@@ -179,7 +185,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   useEffect(() => {
     if (xenonCi === null && !screensOpen) xenonPump.close();
   }, [xenonCi, screensOpen]);
-  // THE 3-D LAW: the pump's 10 Hz tick pushes each surface's framebuffer
+  // THE 3-D LAW: the pump's 25 Hz tick pushes each surface's framebuffer
   // onto its dashboard face ("dashboards display what is given to them").
   // The pump fetches pixels for exactly the keys the scene feeds (plus the
   // panels' visible canvases) - 118-buffer crafts stay memcpy-cheap.
@@ -915,7 +921,9 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       // block and the WIDGET scales it after (✥/⟳/⤢). Size lives in the
       // dock's THIS BLOCK rows and on the ⤢ gizmo, not on the brush.
       const map: Record<string, keyof ViewOptions> = { g: 'grid', o: 'occ', h: 'hull', w: 'wire' };
-      if (map[e.key]) {
+      // v1.13.2: while a dash view is armed, WASD/↑↓F belong to the COCKPIT
+      // (the 'w' run key in Chip's Mario is NOT a wireframe toggle then)
+      if (map[e.key] && !pilotKeysActive()) {
         const cur = engineRef.current?.getOptions();
         if (cur) toggleOpt(map[e.key]!, !cur[map[e.key]!]);
       }
@@ -1690,6 +1698,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
                  resizes itself (phones get it fullscreen) */
               <Suspense fallback={null}>
                 <ScreensDockLazy comp={xenonPump.comp ?? xenonComps[0] ?? null}
+                  focus={new URLSearchParams(window.location.search).get('dash')?.toLowerCase() ?? undefined}
                   onClose={() => setScreensOpen(false)} />
               </Suspense>
             )}

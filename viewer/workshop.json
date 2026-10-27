@@ -207,6 +207,10 @@
   "name": "THOR X8 v:EN",
   "author": "FL3au"
  },
+ "3820116990": {
+  "name": "Super Mario Brothers [v1.1]",
+  "author": "Chip Patton"
+ },
  "9000001001": {
   "name": "C01 ActiveRadiator · Aileron · AltitudeSensor",
   "author": "matrix-test"
@@ -418,5 +422,9 @@
  "9000006001": {
   "name": "IAS-418",
   "author": "General Inaptitude"
+ },
+ "9000007001": {
+  "name": "xray-test",
+  "author": "xray-test"
  }
 }

@@ -11,6 +11,7 @@
 import type { Blueprint, BlueprintComponent } from './format';
 import { atlasJsonPaths } from './models';
 import { CRAFTER_BUILTIN } from './crafterbuiltin';
+import { buzzerAudio } from './buzzer';
 import {
   evalExpr, slug, wsChans, wsEnsure, wsKind, wsLoad, wsName, wsSave, worldsimDefault,
   type WorldSimChan,
@@ -45,6 +46,7 @@ type Mod = {
   _xc_worldsim_overrides(): number;
   _xc_worldsim_sync(name: number, v: number): void;
   _xc_abi(): number;
+  _xc_set_cycle_ms(ms: number): void;
   _xc_save_storage(): void;
   _xc_pilot_script(on: number): void;
   _xc_reset_screens(): void;
@@ -272,15 +274,18 @@ export function xenonDevices(bp: Blueprint, ci: number): XCDevice[] {
   return out;
 }
 
-/** input_number(io|"alias", ch) call sites — the external numerics the
- *  panel exposes. Aliased reads (computer.md: aliasOrIoNumber) ride too:
- *  `io` carries the alias STRING for those, and the pump/shim resolve it. */
+/** input_number(io|"alias", ch) AND input_text(...) call sites — the external
+ *  numerics the panel exposes. Aliased reads (computer.md: aliasOrIoNumber)
+ *  ride too: `io` carries the alias STRING for those, and the pump/shim
+ *  resolve it. input_text matters for the PilotSeat USER TOKEN channel —
+ *  Chip's Mario gates ALL input on `input_text("gamer-chair", 0)` being
+ *  seated, and the shim stringifies a fed numeric ("1") for text reads. */
 export interface XenonChannel { io: number | string; ch: number }
 export function detectChannels(files: XCFile[]): XenonChannel[] {
   const seen = new Set<string>();
   const out: XenonChannel[] = [];
   for (const f of files)
-    for (const m of f.code.matchAll(/input_number\(\s*(?:(\d+)|"([^"]+)"|'([^']+)')\s*,\s*(\d+)\s*\)/g)) {
+    for (const m of f.code.matchAll(/input_(?:number|text)\(\s*(?:(\d+)|"([^"]+)"|'([^']+)')\s*,\s*(\d+)\s*\)/g)) {
       const io: number | string = m[1] !== undefined ? +m[1] : (m[2] ?? m[3] ?? '');
       const k = `${io}:${m[4]}`;
       if (!seen.has(k)) { seen.add(k); out.push({ io, ch: +m[4]! }); }
@@ -445,6 +450,9 @@ export class XenonRun {
       mod._free(ap); mod._free(tp);
     }
     mod._xc_pilot_script(0);
+    // the shim follows OUR pump cadence (ABI 5; an older wasm keeps its
+    // baked 0.1 s dt — the abi() check below warns once, nothing crashes)
+    if (typeof mod._xc_set_cycle_ms === 'function') mod._xc_set_cycle_ms(CYCLE_MS);
     if (mod._xc_boot()) { run.error = mod.UTF8ToString(mod._xc_error()); return run; }
     run.running = true;
     return run;
@@ -566,10 +574,38 @@ export class XenonRun {
 // ---------------------------------------------------------------------------
 // XenonPump — THE single running computer (the wasm module holds ONE global
 // VM context, so exactly one MiniComputer runs at a time) and THE single
-// 10 Hz cycle pump. The IDE dialog, the bottom Screens dock and the 3-D
+// 25 Hz cycle pump. The IDE dialog, the bottom Screens dock and the 3-D
 // dashboard feeds all share it: they register canvases / subscribe to ticks.
 // Game rule (ide.md): the in-game IDEs of several computers can be open at
 // once; ours re-boots the VM when you point at a different computer.
+
+/** The pump cadence (v1.13.2, we: "computers should run at 25 hz update
+ *  cycles, not 10 hz"). The shipped xenoncode.wasm's system_frequency()
+ *  built-in reports the cadence its build was cut on (10.0); the shim source
+ *  (tools/xenoncode/xc_host.cpp) carries 25.0 for the next WASM rebuild —
+ *  a value-only change, ABI 4 unchanged, so nothing degrades meanwhile. */
+export const CYCLE_MS = 40;
+export const CYCLE_HZ = 25;
+
+/** PilotSeat channel-function word → the flight keys driving it (v1.13.2,
+ *  we: "pressing WASD, up, down, and F should be given as inputs into the
+ *  computer for all cockpit connections it has. This will allow us to
+ *  simulate that"). The channel meanings are the game's own (wiki
+ *  PilotSeat.md outputs): ch 1 Backward/Forward, ch 2 Left/Right and
+ *  ch 3 Down/Up form a -1..+1 translation stick, and Aux 1 (ch 8, 0|1)
+ *  takes F as the action button. Matching is by the FUNCTION WORD, so the
+ *  keys land on every PilotSeat channel with that meaning (a craft with
+ *  two seats drives both). */
+export type PilotKey = 'w' | 's' | 'a' | 'd' | 'up' | 'down' | 'f' | 'space' | 'e';
+export const PILOT_KEYS: Record<string, Partial<Record<PilotKey, number>>> = {
+  'backward/forward': { w: 1, s: -1 },
+  'left/right': { d: 1, a: -1 },
+  'down/up': { up: 1, down: -1 },
+  'pitch': { e: 1 },        // E = the FIRE key on Mario (pitch channel)
+  // F and SPACE are aliases of the same action button (Aux 1 = Mario's
+  // jump; we: "we need to emulate space" — the classic jump key)
+  'aux 1': { f: 1, space: 1 },
+};
 
 export interface XenonSurface {
   key: string; w: number; h: number;
@@ -588,13 +624,16 @@ export class XenonPump {
   reads = new Map<string, number>();                 // 'io:ch'  -> last input_number READ
   vars = new Map<string, XenonVar>();                // '$name'  -> live global variable
   // ── debugger (F9 break · F10/F11 step · F8 resume, VS-Code-style keys):
-  // a step is ONE 10 Hz computer cycle (line-granular suspend/resume does
+  // a step is ONE 25 Hz computer cycle (line-granular suspend/resume does
   // not exist in the library's VM architecture — cycle granularity is what
   // the interpreter honestly supports); a breakpoint PAUSES AT the cycle
   // that TOUCHED its line (executed-line tracking, tools/xenoncode).
   paused = false;
   pausedAt = 0;                                      // the bp line that paused
   breakLines = new Set<number>();                    // line numbers of the ACTIVE code tab
+  // ── pilot keys (v1.13.2): the flight keys bound to the RUNNING computer's
+  // PilotSeat worldsim rows — built in buildWorldSim, cleared on close.
+  private pilotBindings = new Map<PilotKey, { name: string; sign: number }[]>();
   // ── WORLDSIM (engine/worldsim.ts): every input channel of the running
   // computer is a function of t (elapsed seconds) evaluated each cycle —
   // headings sweep, altitude breathes around 2000 m, the stick oscillates.
@@ -606,6 +645,11 @@ export class XenonPump {
   private wsT0 = 0;
   private wsOverrides: Record<string, number> = {};
   log: XenonEvent[] = [];
+  // PRINTS get their OWN history (v1.13.2): at the 25 Hz cadence a chatty
+  // firmware (the Badger: hundreds of output_number events per cycle)
+  // buried every boot print out of the 180-event log window within ONE
+  // cycle — the Console tab's 'no prints yet' e2e red. Console reads this.
+  prints: XenonEvent[] = [];
   surfaces = new Map<string, XenonSurface>();        // screen key -> latest framebuffer
   private canvases = new Map<string, Set<HTMLCanvasElement>>();
   private feedKeys = new Set<string>();   // 3-D dashboard face keys (Engine)
@@ -632,6 +676,7 @@ export class XenonPump {
     this.reads = new Map();
     this.vars = new Map();
     this.log = [];
+    this.prints = [];
     this.surfaces = new Map();
     const run = await XenonRun.open(comp);
     if (seq !== this.openSeq) { run.stop(); return; }   // superseded by a newer open
@@ -663,6 +708,7 @@ export class XenonPump {
     this.surfaces = new Map();
     this.wsBindings = new Map();
     this.wsOverrides = {};
+    this.pilotBindings = new Map();
     this.paused = false; this.pausedAt = 0; this.stepWanted = 0; this.breakLines = new Set();
     this.notify();
   }
@@ -693,6 +739,7 @@ export class XenonPump {
     wsLoad();
     const table = await loadChannelTable();
     const bindings = new Map<string, { io: number | string; ch: number }>();
+    const pilot = new Map<PilotKey, { name: string; sign: number }[]>();
     for (const c of comp.channels) {
       const dev = comp.devices.find(d =>
         typeof c.io === 'number' ? d.io === c.io : d.alias === String(c.io));
@@ -703,10 +750,48 @@ export class XenonPump {
         wsKind(type.toLowerCase()),
         worldsimDefault(fn?.toLowerCase() ?? null, type.toLowerCase()));
       bindings.set(name, { io: c.io, ch: c.ch });
+      if (type === 'PilotSeat' && fn)
+        for (const [k, sign] of Object.entries(PILOT_KEYS[fn.toLowerCase()] ?? {}) as [PilotKey, number][])
+          (pilot.get(k) ?? pilot.set(k, []).get(k)!).push({ name, sign });
     }
     this.wsBindings = bindings;
+    this.pilotBindings = pilot;
+    // A bound cockpit channel RESTS AT ZERO: an oscillating stick (the
+    // telemetry-alive defaults) would make a game craft run on its own —
+    // in the game, an un-touched PilotSeat sends 0 (the seat's Using
+    // channel keeps its '1' = seated default).
+    for (const rows of pilot.values())
+      for (const b of rows) {
+        const r = wsChans().get(b.name);
+        if (r && r.mode === 'auto') { r.mode = 'manual'; r.manual = 0; r.value = 0; }
+      }
     wsSave();
     this.notify();
+  }
+
+  /** The flight keys the RUNNING computer's cockpit answers (empty when it
+   *  has no PilotSeat channels). */
+  pilotKeysBound(): PilotKey[] { return [...this.pilotBindings.keys()]; }
+
+  /** One flight-key press/release (v1.13.2): drives every matching PilotSeat
+   *  worldsim row MANUAL at the channel's signed value (press = ±1, release
+   *  centers to 0 — a stick, not a latch), exactly like the Bus-tab slider
+   *  touching the row. The program sees it through input_number on the
+   *  seat's channel next cycle. Returns false when no cockpit channel
+   *  answers this key (the caller may then let the key through). */
+  pilotKey(key: PilotKey, down: boolean): boolean {
+    const rows = this.pilotBindings.get(key);
+    if (!rows?.length) return false;
+    for (const b of rows) {
+      const r = wsChans().get(b.name);
+      if (!r) continue;
+      r.mode = 'manual';
+      r.manual = down ? b.sign : 0;
+      r.value = r.manual;
+    }
+    wsSave();
+    this.notify();
+    return true;
   }
 
   /** Each cycle: evaluate every auto row at t, honour program overrides,
@@ -779,7 +864,7 @@ export class XenonPump {
   reboot() {
     const r = this.run;
     if (!r) return;
-    if (r.reboot()) { this.status = 'running'; this.log = []; this.bus = new Map(); this.startLoop(); }
+    if (r.reboot()) { this.status = 'running'; this.log = []; this.prints = []; this.bus = new Map(); this.startLoop(); }
     else { this.status = 'error'; this.error = r.error; }
     this.notify();
   }
@@ -823,11 +908,23 @@ export class XenonPump {
   }
   private notify() { for (const cb of [...this.subs]) cb(); }
 
+  /** React-facing notify. THE CADENCE LAW (v1.13.2): the VM runs at 25 Hz,
+   *  the PANELS re-render at ≤10 Hz — a heavy firmware (the Badger's 118
+   *  surfaces, ~100 var rows) re-rendered 25x/s starves the main thread in
+   *  headless runs (the suite caught it); panel values lag ≤100 ms, the
+   *  canvases blit EVERY cycle. */
+  private lastNotify = 0;
+  private notifyCoalesced(t: number) {
+    if (t - this.lastNotify < 100) return;
+    this.lastNotify = t;
+    this.notify();
+  }
+
   private startLoop() {
     if (this.raf) return;
     const step = (t: number) => {
       this.raf = requestAnimationFrame(step);
-      if (t - this.last < 100) return;
+      if (t - this.last < CYCLE_MS) return;
       this.last = t;
       const run = this.run;
       if (!run || !run.running) return;
@@ -838,6 +935,8 @@ export class XenonPump {
       if (evs.length) {
         const prints = evs.filter(e => e.e !== 'cycle');
         if (prints.length) this.log = [...this.log.slice(-180), ...prints];
+        const prs = prints.filter(e => e.e === 'print');
+        if (prs.length) this.prints = [...this.prints.slice(-240), ...prs];
         for (const e of evs) {
           if (e.e === 'out') {
             // MOST-RECENTLY-ACTIVE order: re-insert so a per-cycle io stays
@@ -894,7 +993,11 @@ export class XenonPump {
               for (const cv of this.canvases.get(mk) ?? []) this.blit(cv, mir);
           }
       this.surfaces = next;
-      this.notify();
+      // BUZZERS (engine/buzzer.ts): the game's Buzzer takes Amplitude (ch 0)
+      // and Frequency Hz (ch 1) on its data channel — the io bus rows above
+      // carry exactly that; turn live ones into real WebAudio sound.
+      buzzerAudio.sync(this);
+      this.notifyCoalesced(t);
     };
     this.raf = requestAnimationFrame(step);
   }
@@ -905,7 +1008,7 @@ export class XenonPump {
 }
 
 /** The shim ABI the app expects (xc_host.cpp xc_abi()). Bump with the shim. */
-export const XC_ABI = 4;
+export const XC_ABI = 5;
 
 export const xenonPump = new XenonPump();
 

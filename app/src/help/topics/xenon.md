@@ -1,5 +1,5 @@
 # Xenon — run the craft's computer programs
-Tags: xenon worldsim world sim xenoncode window zoom drag resize fullscreen computer code program ide screen hd-screen virtual screen nodes canvas programing programming plomo firstflight badger wasm interpreter variables vars disk files edit breakpoint debugger step autosave shadow
+Tags: xenon worldsim world sim xenoncode window zoom drag resize fullscreen computer code program ide screen hd-screen virtual screen nodes canvas programing programming plomo firstflight badger mario wasm interpreter variables vars disk files edit breakpoint debugger step autosave shadow deep link dash filter search cockpit keyboard wasd jump run space buzzer sound sawtooth melody super mario gamer-chair 25 hz tile flush
 
 **Xenon ▾** (top bar, only on crafts that carry `MiniComputer` components with
 `.xc` programs) lists every programmable computer on the vessel. Clicking one
@@ -9,11 +9,15 @@ file, line-numbered code, and the `Program 'name' loaded / is running…`
 status lines at the bottom.
 
 > **Work in progress** — the programs genuinely run on the developer's own
-> interpreter, but the simulation around them is not complete and **not yet
-> correct**: no power, no live io routing to the craft's real components
-> (inputs are numerics you feed, not sensor values), and the world never
-> answers the program. Treat what you see as a faithful CODE view, not a
-> flight-ready simulation.
+> interpreter, and the io around them is REAL (worldsim channels feed every
+> `input_number`, cockpit keys feed the PilotSeat, Buzzer components make
+> sound, dashboards paint and are clickable). What is not simulated: power,
+> fuel, and the world answering the craft. Treat a game like Mario as fully
+> playable; treat autopilot code as honest CODE view.
+
+The computer runs at a **25 Hz** cycle cadence (25 program cycles per second,
+`delta_time` ≈ 0.04 s — dt-driven programs like Chip's Mario run in real
+time).
 
 ## What the IDE gives you
 
@@ -38,9 +42,77 @@ with the craft and travels in the file.
   panels, and the **▣ Screens** button (top bar, on crafts with dashboards)
   opens the bottom tab with **Dashboards** and **Virtual** sub-tabs — the
   virtual ones are the `virtualscreen(w,h)` buffers a program composes
-  (Chip's Badger builds its attitude display out of those). **The screens
-  are clickable**: a click lands on the program's `button_rect` buttons,
-  which evaluate true exactly as in game.
+  (Chip's Badger builds its attitude display out of those).
+
+## Dash windows — zoom, filter, deep link
+
+We: "640×480 dashboard too small to read, clicking makes it worse, no
+zooming, no filter". The dash windows are now the read/write surface:
+
+* **Click a dashboard cell to open it full-screen.** The tiny thumbnail in
+  the dock no longer sends its click to the program (so a mis-click cannot
+  press a `button_rect` and change the screen under you). A **click on the
+  thumbnail opens a dedicated zoom window** for that ONE surface: **fit /
+  1:1 px / + / −** buttons, pinch or **Ctrl+wheel** to zoom, scroll/drag to
+  pan. The pixels are sharp (`pixelated`), so a 640×480 panel is readable.
+* **Clicks in the zoom window ARE the program's** — they land on the
+  surface at its exact pixel coordinates, and the game's `button_rect`
+  buttons evaluate true exactly as in game. This is where you press the
+  dashboard buttons.
+* **A search box** (▣ Screens header, and the IDE's Screens tab) filters
+  the surfaces by name, so a 118-buffer craft (the Badger) is navigable.
+* **▦ Tile** (▣ Screens header): collapses the spacing between dashboards
+  to ZERO — gaps, padding, borders and labels off — so multi-panel walls
+  (Mario's six HdScreens, a craft's full dashboard row) tile flush and read
+  as one continuous surface. Click again to restore; persisted.
+* **Deep link** — `?craft=<id>&dash=<surfaceKey>` (e.g.
+  `?craft=3820116990&dash=screen%230`) opens the app straight into the ▣
+  Screens dock **with that one surface's zoom window already raised**, as
+  soon as it paints. `#` is `%23`; the surface key is the lowercase
+  `alias#channel` shown under each thumbnail.
+
+## Cockpit keys — fly the craft from the dash
+
+While you are looking at the ▣ Screens dock, the IDE's Screens tab, **or**
+a Mario-style deep link, the flight keys are the cockpit's inputs (WASD,
+↑, ↓, F):
+
+| Key | PilotSeat channel | In Chip's Mario |
+|---|---|---|
+| W / S | Backward / Forward (ch 1) | run / walk-back |
+| A / D | Left / Right (ch 2) | move |
+| ↑ / ↓ | Down / Up (ch 3) | jump / duck |
+| F / Space | Aux 1 (ch 8) — one action button | jump |
+| E | Pitch (ch 5) | fire |
+
+Every press drives **all** the PilotSeat channels the running computer has
+bound (a craft with two seats drives both), feeding `input_number` the
+signed value; release centers the stick to 0 (it's a stick, not a latch).
+A bound cockpit channel RESTS AT ZERO — an untouched PilotSeat sends 0,
+exactly like the game. The app's global `g`/`o`/`h`/`w`/`5` view shortcuts
+stand down while the dash is armed — the `w` key is Mario's run key, not
+the wireframe toggle. On a craft with no cockpit the keys pass through
+untouched.
+
+## Buzzers — the craft makes sound
+
+The game's **Buzzer** component produces tones of type `sine`, `square`,
+`triangle` or `sawtooth` (the component's config, the in-game `V` menu),
+with **Amplitude** (channel 0) and **Frequency** in Hz (channel 1, default
+440) on its data channel. Programs drive them with `output_number`. The
+Bus tab shows a Buzzers panel listing every Buzzer the craft carries
+(live amp + Hz), a wave picker sets the tone type, and a **🔊 / 🔇 toggle**
+turns sound on — the browser allows it only after a click, so the toggle
+starts muted. One oscillator per Buzzer, so a program using many buzzers
+(melody + harmony + bass + effects, as Chip's Mario does) plays chords.
+
+## Mario, in the browser
+
+`?craft=3820116990&dash=screen%230` — Chip Patton's **PKC-385 "Super Mario
+Brothers"**, a XenonCode game that reads the `gamer-chair` PilotSeat, drives
+eight Buzzer components for its 8-bit music and paints six HdScreen
+surfaces. Sit in the seat (worldsim default = occupied, so it reads seated),
+open the TV surface, click 🔊, and play with WASD/↑/↓/F.
 * **Side panel** (right of the code, tabbed):
   * **Vars** — every global variable of the running program, live: RAM and
     `storage` values, with `storage` tagged. Text values written in the
@@ -66,7 +138,8 @@ with the craft and travels in the file.
 
 ## Not simulated
 
-Power, fuel and the computer's in-world io wiring are deliberately ignored —
-this is the blueprint-side workbench, not a flight simulator. The standalone
-workbench page (with our own demo programs) lives at `tools/xenoncode/` in
-the repo.
+Power, fuel and the world's physics are deliberately ignored — this is the
+blueprint-side workbench, not a flight simulator: the craft never moves,
+sensors report what the World tab's functions say, and the PilotSeat reads
+your keyboard. The standalone workbench page (with our own demo programs)
+lives at `tools/xenoncode/` in the repo.

@@ -30,7 +30,10 @@ inline std::map<int, std::map<int, double>> xc_inputs;
 inline std::vector<std::string> xc_eventLog;
 inline double xc_simTime = 0.0;
 inline double xc_lastPrintTime = -1.0;
-inline double xc_dt = 0.1;
+inline double xc_dt = 0.04;   // seconds per cycle — the app pump cadence
+                              // (v1.13.2: 25 Hz; xc_set_cycle_ms overrides at
+                              // boot, the game's dt-driven programs (Mario)
+                              // read delta_time for REAL-TIME physics)
 inline uint64_t xc_rngState = 88172645463325252ULL;
 inline long xc_tickCount = 0;          // the tick built-in (per cycle)
 // capability caps: RAM generous for the POC (the game's XPU64 spec is not in

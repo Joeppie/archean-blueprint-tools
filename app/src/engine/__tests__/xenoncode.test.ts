@@ -152,4 +152,31 @@ describe('io → component + channel meanings (the game wiki table)', () => {
     ]);
     expect(chs).toEqual([{ io: 3, ch: 6 }, { io: 'mining-drill', ch: 3 }]);
   });
+  it('detectChannels sees input_text reads (the PilotSeat user-token channel)', () => {
+    // Chip's Mario gates ALL input on `input_text("gamer-chair", 0)` being
+    // seated; that channel must be a worldsim row (default '1') to play.
+    const chs = detectChannels([
+      { name: 'm.main.xc', code: 'input_text("gamer-chair", 0)\ninput_number("gamer-chair", 2)' },
+    ]);
+    expect(chs).toEqual([{ io: 'gamer-chair', ch: 0 }, { io: 'gamer-chair', ch: 2 }]);
+  });
+  it('the cockpit PilotSeat channels the pilot keys answer are all DETECTED on Mario', async () => {
+    // 3820116990 (PKC-385 'Super Mario Brothers'): gamer-chair is a PilotSeat;
+    // the game reads ch 1 (Backward/Forward), 2 (Left/Right), 3 (Down/Up),
+    // 8 (Aux 1) — the exact four PILOT_KEYS words. detectChannels must
+    // surface them, so pump.buildWorldSim can bind the flight keys.
+    const fs = await import('fs');
+    const bp = JSON.parse(fs.readFileSync(new URL(
+      '../../../../testdata/3820116990/blueprint.json', import.meta.url)).toString());
+    const { xenonComputers } = await import('../xenoncode');
+    const comp = xenonComputers(bp)[0];
+    if (!comp) throw new Error('the Mario craft must expose a computer');
+    expect(comp).toBeTruthy();
+    const seat = comp.devices.find(d => d.type === 'PilotSeat');
+    expect(seat?.alias).toBe('gamer-chair');
+    const seatChs = comp.channels.filter(c => c.io === 'gamer-chair').map(c => c.ch);
+    for (const ch of [1, 2, 3, 8]) expect(seatChs).toContain(ch);
+    // the game's music is BUZZER components driven by output_number
+    expect(comp.devices.filter(d => d.type === 'Buzzer').length).toBeGreaterThan(3);
+  });
 });

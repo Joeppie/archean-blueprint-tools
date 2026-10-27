@@ -24,9 +24,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import FloatingWindow from './FloatingWindow';
 import {
   chanInfo, loadChannelTable, parseKv, parseNodes, tokenize, varKind, xenonPump,
-  xenonScreenBindings, xcDiskFiles,
+  xenonScreenBindings, xcDiskFiles, CYCLE_HZ,
   type ChannelTable, type XenonComputer, type XGraph, type XCFile,
 } from '../engine/xenoncode';
+import { BUZZER_WAVES, buzzerAudio, buzzerReadings } from '../engine/buzzer';
+import { usePilotKeys } from '../engine/pilotkeys';
 import type { Engine } from '../engine/scene';
 import { ScreensCell } from './ScreensDock';
 
@@ -65,7 +67,7 @@ export default function XenonDialog(p: {
   const [varQ, setVarQ] = useState('');
   const [scrQ, setScrQ] = useState('');
   // ── debugger (VS-Code keys, our law): F9 breakpoint on the clicked line,
-  // F10/F11 step ONE 10 Hz computer cycle, F8 resume. Breakpoints are a
+  // F10/F11 step ONE 25 Hz computer cycle, F8 resume. Breakpoints are a
   // per-tab line set; a break PAUSES at the cycle that touched the line
   // (executed-line tracking, tools/xenoncode/patch_xenon_debug.py).
   const [bps, setBps] = useState<Record<number, Set<number>>>({});
@@ -100,10 +102,23 @@ export default function XenonDialog(p: {
       running: pump.run?.running ?? null, surfaces: pump.surfaces.size,
       paused: pump.paused, error: pump.error,
       surfaceKeys: [...pump.surfaces.keys()],
+      surfaceMeta: [...pump.surfaces.values()].map(({ key, w, h }) => ({ key, w, h })),
+      world: [...pump.wsBoundNames()].map(n => {
+        const r = pump.wsChannels().find(c => c.name === n);
+        return r ? { name: r.name, mode: r.mode, manual: r.manual, value: r.value } : null;
+      }).filter(Boolean),
+      pilotKeys: pump.pilotKeysBound(),
     });
   }, [pump]);
 
   useEffect(() => pump.subscribe(() => setTick(t => t + 1)), [pump]);
+
+  // WASD / ↑ / ↓ / F fly the craft's PilotSeat WHILE LOOKING AT THE SCREENS
+  // tab — the computer's dash window (v1.13.2: "for when you are looking at
+  // the dash window, or computer's dash window, pressing WASD, up, down, and
+  // F should be given as inputs into the computer for all cockpit
+  // connections it has")
+  usePilotKeys(side === 'screens');
 
   // Esc closes (subscribe ONCE through a ref — the v1.5.20 listener lesson);
   // Esc in the editor first COMMITS nothing — it reverts the draft.
@@ -224,7 +239,7 @@ export default function XenonDialog(p: {
 
   // F9 break · F10/F11 step (one computer cycle) · F8 resume — the IDE's
   // debugger keys (the user asked for the IDE-class set; F5-run is not
-  // feasible: the VM runs continuously at the game's 10 Hz cadence, so
+  // feasible: the VM runs continuously at the pump's 25 Hz cadence, so
   // RUN is the default state and PAUSE/STEP are the meaningful controls)
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -272,7 +287,7 @@ export default function XenonDialog(p: {
             debugger keys), Computer owns the machine (re-boot), Help the
             keys. The flat 'Options ▸ run' labels are gone. */}
         <MenuBar
-          right={`cycles ${pump.cycles} @ 10 Hz · CTRL+S save+reboot · screens clickable`}
+          right={`cycles ${pump.cycles} @ ${CYCLE_HZ} Hz · CTRL+S save+reboot · screens clickable · WASD↑↓F fly the seat on the Screens tab`}
           menus={[
             { label: 'File', testid: 'xmenu-file', entries: [
               { label: 'New file…', testid: 'file-new', on: () => { setNewProg(false); setNewOpen(true); } },
@@ -527,13 +542,61 @@ export default function XenonDialog(p: {
                   })}
                 </div>
               </div>
+              {/* BUZZERS (v1.13.2, we: "buzzers should be implemented, with
+                  square/sawtooth, and the frequency") — the game's Buzzer
+                  plays sine/square/triangle/sawtooth tones; Amplitude is
+                  ch 0 and Frequency (Hz) ch 1 of its data channel, so the
+                  io-bus rows above ARE the drive values. engine/buzzer.ts
+                  renders them as WebAudio (one oscillator per buzzer — the
+                  wiki's multi-tone law). */}
+              {comp.devices.some(d => d.type === 'Buzzer') && (
+                <div data-testid="xenon-buzzer-card"
+                  className="rounded border border-[#232c3d] bg-[#131a28] p-2 text-[11px]">
+                  <div className="mb-1 flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-widest text-[#5d6a7d]">
+                    Buzzers ({comp.devices.filter(d => d.type === 'Buzzer').length})
+                    <button data-testid="buzzer-sound"
+                      title="the browser allows sound only after a click — this toggle is that click"
+                      onClick={() => { buzzerAudio.toggleSound(); setTick(t => t + 1); }}
+                      className={`rounded px-2 py-0.5 text-[10px] normal-case tracking-normal ${
+                        buzzerAudio.soundOn ? 'bg-[#2b4a2b] text-[#8fd48f]' : 'bg-[#33202a] text-[#e6a07b]'}`}>
+                      {buzzerAudio.soundOn ? '🔊 sound on' : '🔇 muted'}
+                    </button>
+                    <span className="ml-auto flex gap-1 normal-case tracking-normal">
+                      {BUZZER_WAVES.map(w => (
+                        <button key={w} data-testid={`buzzer-wave-${w}`}
+                          title={`${w} wave — the game's tone type (the buzzer's V menu)`}
+                          onClick={() => { buzzerAudio.setWave(w); setTick(t => t + 1); }}
+                          className={`rounded px-1.5 py-0.5 text-[10px] ${
+                            buzzerAudio.wave === w ? 'bg-[#243a52] text-[#8fd4ff]' : 'bg-[#1a2233] text-[#7d8aa0]'}`}>
+                          {w}
+                        </button>
+                      ))}
+                    </span>
+                  </div>
+                  {buzzerReadings(pump).map(r => (
+                    <div key={r.name} data-testid={`buzzer-row-${r.name}`}
+                      className="grid grid-cols-[1fr_52px_64px] gap-x-2">
+                      <span className="truncate text-[#9fb0c8]" title={r.name}>{r.name}</span>
+                      <span className="text-right tabular-nums text-[#8fd48f]" title="Amplitude (ch 0)">{r.amp.toFixed(2)}</span>
+                      <span className="text-right tabular-nums text-[#d6dbe1]" title="Frequency (ch 1)">
+                        {Math.round(r.freq)} Hz</span>
+                    </div>
+                  ))}
+                  <div className="mt-1 text-[9px] leading-snug text-[#5d6a7d]">
+                    Amplitude = ch 0, Frequency = ch 1 (wiki Buzzer.md) — programs drive them
+                    with <span className="text-[#8fd48f]">output_number(alias, ch, v)</span>.
+                    The wave is the component's tone-type config (the game&apos;s V menu);
+                    one oscillator per buzzer = simultaneous tones.
+                  </div>
+                </div>
+              )}
             </>)}
             {side === 'console' && (
               <div data-testid="xenon-log" className="min-h-[70px] flex-1 overflow-y-auto rounded border border-[#232c3d] bg-[#0b0f18] p-2 text-[11px]">
-                {pump.log.filter(e => e.e === 'print').slice(-60).map((e, i) => (
+                {pump.prints.slice(-60).map((e, i) => (
                   <div key={i} className="text-[#d6dbe1]">print: {String(e.v)}</div>
                 ))}
-                {pump.log.filter(e => e.e === 'print').length === 0 && (
+                {pump.prints.length === 0 && (
                   <div className="text-[#5d6a7d]">no prints yet</div>
                 )}
               </div>
@@ -557,7 +620,7 @@ export default function XenonDialog(p: {
 // $var token with a LIVE hover readout: the tooltip shows the variable's
 // current value; when it changes, the OLD value appears above it and fades
 // out (the user's "watch it tick" ask). Values stream from pump.vars
-// (XENON-VARS), refreshed at the 10 Hz pump cadence.
+// (XENON-VARS), refreshed at the 25 Hz pump cadence.
 
 function VarToken(p: { name: string }) {
   const v = pumpVars().get(p.name);
