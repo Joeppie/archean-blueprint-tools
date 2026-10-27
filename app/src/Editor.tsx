@@ -41,11 +41,12 @@ import { lazy, Suspense } from 'react';
 const HelpDialogLazy = lazy(() => import('./components/HelpDialog'));
 import { blockInfo, blockMirrorTwin, blockTwinIssues, cellIndex, cellOverlap,
   complementBlock, mirrorAxisIdx, paintTwinPair, type MirrorAxisOpt } from './engine/blocks';
-import { cornerOf, triAt, triangleFromCorners, setTriCornerAll, setTriCornersAll, shiftTriCells, mirroredTriangle, rotateCornersQ, triCorners, triTwinIndex, type Corner } from './engine/tris';
+import { cornerOf, triAt, triangleFromCorners, mirroredTriangle, triTwinIndex, type Corner } from './engine/tris';
+import { applyPinEdit, applyPinRotate, applyPinShift, applyTriFlip, applyTriPaint } from './engine/pinedit';
 import type { Blueprint, Triangle } from './engine/format';
 import { isLegacyFile } from './engine/format';
 import type { ResolvedColor } from './engine/palette';
-import { docArrayInsert, docArrayRemoveAt, docEnsureArray, docFromValue, docSetNumber, docValue, emitDoc, parseDoc } from './engine/doc';
+import { docArrayInsert, docArrayRemoveAt, docEnsureArray, docFromValue, docValue, emitDoc, parseDoc } from './engine/doc';
 import { allocateSlot, blockSkinTris, paletteSlotNode, type Rgb255 } from './engine/tools';
 import { setPaletteSlot } from './engine/edit';
 import { appendTrianglesDoc, makeCtx, openFunnel, resetComponent, setDataField, setOrientation, setPos, setCompField,
@@ -540,30 +541,13 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       // repaint on the debounced merged-skin reload. A REFUSED move (32-slot
       // window / coincident corners) writes nothing: the reload's
       // refreshPins() re-reads the bp and snaps the pin back honestly.
+      // v1.12.5: the twin-pair laws (mirrored corner + σ winding swap,
+      // twin lookup BEFORE the self mutation, ATOMIC clone refusals) live in
+      // engine/pinedit.ts — pinned at the vitest tier (pinedit.test.ts).
       e.onPinEdit = (ti, i, g) => {
         const ctx = ctxRef.current;
-        const t = ctx?.bp.data.triangles?.[ti];
-        if (!ctx || !t) return;
-        const changed = setTriCornerAll(t, i, g as Corner);
-        if (!changed) return;
-        for (const [k, v] of Object.entries(changed))
-          docSetNumber(ctx.doc, ['data', 'triangles', ti, k], v);
-        // v1.11 uniform rule: the twin's MIRRORED corner rides the drag
-        // (mirroredTriangle swaps v1↔v2, so twin corner σ(i), σ = [0,2,1],
-        // mirrors self corner i; the corner-set twin key is winding-agnostic)
-        const { tw, a } = triTwinOf(ti);
-        if (tw >= 0) {
-          const tt = ctx.bp.data.triangles?.[tw];
-          if (tt) {
-            const gT: Corner = [g[0]!, g[1]!, g[2]!];
-            gT[a] = 12 - gT[a]!;
-            const chT = setTriCornerAll(tt, [0, 2, 1][i]!, gT);
-            if (chT)
-              for (const [k, v] of Object.entries(chT))
-                docSetNumber(ctx.doc, ['data', 'triangles', tw, k], v);
-          }
-        }
-        sceneChanged();
+        if (!ctx) return;
+        if (applyPinEdit(ctx, triTwinOf, ti, i, g as Corner)) sceneChanged();
       };
       // v1.11: a DRAFT-pin drag (before the third lands) moves the corner in
       // the engine — mirror it into React's triDraft so the COMMIT's third
@@ -576,70 +560,22 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       // doc fields (v1.6.1: the doc is the save and the history) and repaint
       // on the debounced merged reload; a refused record (window / coincident)
       // writes nothing → the engine snaps the pins + widget back. Returns
-      // success so the engine knows to snap back.
+      // success so the engine knows to snap back. v1.12.5: the twin laws
+      // (mirrored delta, mirror-conjugate rotation, lookup-before-mutation,
+      // ATOMIC clone refusals) live in engine/pinedit.ts.
       e.onPinShift = (ti, d) => {
         const ctx = ctxRef.current;
-        const t = ctx?.bp.data.triangles?.[ti];
-        if (!ctx || !t) return false;
-        // THE TWIN LOOKUP MUST RUN BEFORE THE SELF MUTATION: the pair is
-        // identified as a corner-SET mirror (triTwinIndex), and shifting
-        // the self first breaks the mirror relation — the lookup then
-        // finds no twin and the pair silently de-pairs (v1.11.0 fix).
-        const { tw, a } = triTwinOf(ti);
-        // v1.11 uniform rule: the twin shifts by the MIRRORED delta.
-        // v1.11.0 ATOMIC: the twin write is precomputed on a CLONE — a
-        // twin the 32-slot window REFUSES (its vertices sit at the window
-        // edge) refuses the WHOLE gesture, so a half-moved pair never
-        // reaches bp/doc.
-        const tt = tw >= 0 ? ctx.bp.data.triangles?.[tw] : undefined;
-        const td: [number, number, number] = [d[0], d[1], d[2]];
-        td[a] = -td[a]!;
-        if (tt && !shiftTriCells(JSON.parse(JSON.stringify(tt)) as typeof tt, td))
-          return false;
-        const changed = shiftTriCells(t, d);
-        if (!changed) return false;
-        for (const [k, v] of Object.entries(changed))
-          docSetNumber(ctx.doc, ['data', 'triangles', ti, k], v);
-        if (tt) {
-          const chT = shiftTriCells(tt, td);
-          if (chT)
-            for (const [k, v] of Object.entries(chT))
-              docSetNumber(ctx.doc, ['data', 'triangles', tw, k], v);
-        }
-        sceneChanged();
-        return true;
+        if (!ctx) return false;
+        const ok = applyPinShift(ctx, triTwinOf, ti, d);
+        if (ok) sceneChanged();
+        return ok;
       };
       e.onPinRotate = (ti, c, dq) => {
         const ctx = ctxRef.current;
-        const t = ctx?.bp.data.triangles?.[ti];
-        if (!ctx || !t) return false;
-        // twin lookup BEFORE the self mutation (see onPinShift, v1.11.0)
-        const { tw, a } = triTwinOf(ti);
-        const tt = tw >= 0 ? ctx.bp.data.triangles?.[tw] : undefined;
-        // v1.11 uniform rule: the twin rides the MIRRORED rotation — the
-        // conjugate qM keeps the mirror-axis component, negates the other
-        // two. ATOMIC (v1.11.0): the twin write is precomputed on a CLONE
-        // so a window refusal moves neither record.
-        let cT: ReturnType<typeof rotateCornersQ> | null = null;
-        if (tt && dq) {
-          const qM = { w: dq.w,
-            x: a === 0 ? dq.x : -dq.x, y: a === 1 ? dq.y : -dq.y, z: a === 2 ? dq.z : -dq.z };
-          cT = rotateCornersQ(triCorners(tt), qM);
-          if (!setTriCornersAll(JSON.parse(JSON.stringify(tt)) as typeof tt, cT))
-            return false;
-        }
-        const changed = setTriCornersAll(t, c as [Corner, Corner, Corner]);
-        if (!changed) return false;
-        for (const [k, v] of Object.entries(changed))
-          docSetNumber(ctx.doc, ['data', 'triangles', ti, k], v);
-        if (tt && cT) {
-          const chT = setTriCornersAll(tt, cT);
-          if (chT)
-            for (const [k, v] of Object.entries(chT))
-              docSetNumber(ctx.doc, ['data', 'triangles', tw, k], v);
-        }
-        sceneChanged();
-        return true;
+        if (!ctx) return false;
+        const ok = applyPinRotate(ctx, triTwinOf, ti, c, dq);
+        if (ok) sceneChanged();
+        return ok;
       };
     }
     setEngine(e);
@@ -735,28 +671,12 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
    *  v1.8.0 UNIFORM MIRROR RULE (we: "I modified color on a triangle, with
    *  mirroring on and it did not carry over to its twin"): the identified
    *  twin paints the SAME face slots — a mirrored prism's face f is its own
-   *  front/back/wall (the construction colour swap made it so), so the
-   *  paint mapping is the identity. */
+   *  front/back/wall (the construction colour swap made it so), so the paint
+   *  mapping is the identity. v1.12.5: engine/pinedit.ts applyTriPaint. */
   const paintTriFaces = useCallback((slot: number, faces: number[]) => {
     const ctx = ctxRef.current;
-    const t = ctx?.bp.data.triangles?.[triSel];
-    if (!ctx || !t) return;
-    const paintOne = (rec: object, idx: number) => {
-      const o = rec as { colors?: number[] };
-      const arr = [...(o.colors ?? [51, 51, 51, 51, 51])];
-      while (arr.length < 5) arr.push(51);
-      for (const f of faces) {
-        arr[f] = slot;
-        docSetNumber(ctx.doc, ['data', 'triangles', idx, 'colors', f], slot);
-      }
-      o.colors = arr;
-    };
-    paintOne(t, triSel);
-    const { tw } = triTwinOf(triSel);
-    if (tw >= 0) {
-      const tt = ctx.bp.data.triangles?.[tw];
-      if (tt) paintOne(tt as object, tw);
-    }
+    if (!ctx) return;
+    applyTriPaint(ctx, triTwinOf, triSel, slot, faces);
     sceneChanged();
   }, [triSel, sceneChanged, triTwinOf]);
   const paintTri = useCallback((slot: number) => paintTriFaces(slot, [0, 1, 2, 3, 4]),
@@ -766,39 +686,12 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
    *  game triangles, determining whether it goes outside or inside"): the
    *  winding reverses (v1↔v2) so the normal — the FRONT (colours[0]) side —
    *  points the other way; the geometry stays. The face colours follow the
-   *  edge relabelling (front↔back, the v0-v1 ↔ v2-v0 walls). */
+   *  edge relabelling (front↔back, the v0-v1 ↔ v2-v0 walls). The FLIP IS
+   *  PAIR-WIDE. v1.12.5: engine/pinedit.ts applyTriFlip. */
   const triFlip = useCallback(() => {
     const ctx = ctxRef.current;
-    const t = ctx?.bp.data.triangles?.[triSel];
-    if (!ctx || !t) return;
-    const c = triCorners(t);
-    const changed = setTriCornersAll(t, [c[0]!, c[2]!, c[1]!]);
-    if (!changed) return;
-    for (const [k, v] of Object.entries(changed))
-      docSetNumber(ctx.doc, ['data', 'triangles', triSel, k], v);
-    const o = t as unknown as { colors?: number[] };
-    const col = o.colors ?? [51, 51, 51, 51, 51];
-    o.colors = [col[1]!, col[0]!, col[4]!, col[3]!, col[2]!];
-    for (let i = 0; i < 5; i++)
-      docSetNumber(ctx.doc, ['data', 'triangles', triSel, 'colors', i], o.colors![i]!);
-    // v1.11 uniform rule: the twin flips with it (mirror keeps the pair's
-    // facing relation: both skins then face inward/outward together)
-    const { tw } = triTwinOf(triSel);
-    if (tw >= 0) {
-      const tt = ctx.bp.data.triangles?.[tw];
-      if (tt) {
-        const tc = triCorners(tt);
-        const chT = setTriCornersAll(tt, [tc[0]!, tc[2]!, tc[1]!]);
-        if (chT)
-          for (const [k, v] of Object.entries(chT))
-            docSetNumber(ctx.doc, ['data', 'triangles', tw, k], v);
-        const to = tt as unknown as { colors?: number[] };
-        const tcol = to.colors ?? [51, 51, 51, 51, 51];
-        to.colors = [tcol[1]!, tcol[0]!, tcol[4]!, tcol[3]!, tcol[2]!];
-        for (let i = 0; i < 5; i++)
-          docSetNumber(ctx.doc, ['data', 'triangles', tw, 'colors', i], to.colors![i]!);
-      }
-    }
+    if (!ctx) return;
+    applyTriFlip(ctx, triTwinOf, triSel);
     sceneChanged();
   }, [triSel, sceneChanged, triTwinOf]);
 

@@ -239,63 +239,14 @@ test.describe('desktop panels @ui', () => {
     await expect.poll(() => subQuat(page, bi)).toEqual(pose0);
   });
 
-  // v1.11 UNPINNED-TODO pins G + A (AGENTS): "`modify-hint` (Modify opens
-  // empty) + per-kind editor reveal — unasserted" and the Info-dock CARD
-  // GRID ("desktop 3-col / phone 1-col") the sealed-lift batch shipped.
-  test('✎ MODIFY opens EMPTY; a pick reveals the kind’s editor (TODO G)', async ({ page }) => {
-    desktopOnly();
-    await page.goto('/?craft=9000005001');
-    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
-    await page.getByTestId('mode-edit').click();
-    // a fresh profile is ✎ MODIFY (ws default 'edit'): the dock carries the
-    // hint and NO editor rows until you pick something (v1.11 dock law)
-    await expect(page.getByTestId('ws-edit')).toHaveAttribute('aria-pressed', 'true');
-    const hint = page.getByTestId('modify-hint');
-    await expect(hint).toBeVisible();
-    await expect(hint).toContainText(/starts empty/i);
-    await expect(page.getByTestId('block-edit')).toHaveCount(0);
-    await expect(page.getByTestId('tri-edit')).toHaveCount(0);
-    // a BLOCK pick → the block editor
-    const bpx = await page.evaluate(() => {
-      const c = document.querySelector('canvas')!;
-      const r = c.getBoundingClientRect();
-      const e = (window as unknown as { __ARCHEAN__?: { engine: {
-        pickCell: (x: number, y: number) => { kind: string; bi: number } | null } } }).__ARCHEAN__!.engine;
-      for (let fy = 0.5; fy <= 0.8; fy += 0.02)
-        for (let fx = 0.25; fx <= 0.75; fx += 0.02) {
-          const h = e.pickCell(r.left + r.width * fx, r.top + r.height * fy);
-          if (h && h.kind === 'block' && h.bi >= 0) return { x: r.left + r.width * fx, y: r.top + r.height * fy };
-        }
-      return null;
-    });
-    expect(bpx, 'a deck face answers the merged pick').not.toBeNull();
-    await page.mouse.click(bpx!.x, bpx!.y);
-    await expect(page.getByTestId('block-edit')).toBeVisible({ timeout: 5000 });
-    await expect(hint, 'the editor replaced the hint').toHaveCount(0);
-    // a sky pick deselects — the hint returns
-    const cbox = (await page.getByTestId('canvas').boundingBox())!;
-    await page.mouse.click(cbox.x + 8, cbox.y + 8);
-    await expect(page.getByTestId('block-edit')).toHaveCount(0);
-    await expect(hint).toBeVisible();
-    // a PART pick → the + Parts auto-jump (AGENTS KNOWN ISSUE 10) + inspector
-    const cpx = await page.evaluate(() => {
-      const c = document.querySelector('canvas')!;
-      const r = c.getBoundingClientRect();
-      const e = (window as unknown as { __ARCHEAN__?: { engine: {
-        pickCell: (x: number, y: number) => { kind: string; ci: number } | null } } }).__ARCHEAN__!.engine;
-      for (let fy = 0.3; fy <= 0.8; fy += 0.02)
-        for (let fx = 0.25; fx <= 0.75; fx += 0.02) {
-          const h = e.pickCell(r.left + r.width * fx, r.top + r.height * fy);
-          if (h && h.kind === 'comp' && h.ci >= 0) return { x: r.left + r.width * fx, y: r.top + r.height * fy };
-        }
-      return null;
-    });
-    expect(cpx, 'a part surface answers the merged pick').not.toBeNull();
-    await page.mouse.click(cpx!.x, cpx!.y);
-    await expect(page.getByTestId('ws-parts'),
-      'a Modify-mode part click auto-jumps to + Parts').toHaveAttribute('aria-pressed', 'true');
-    await expect(page.getByTestId('inspector')).toBeVisible();
-  });
+  // RETIRED v1.12.5 (L5): '✎ MODIFY opens EMPTY; a pick reveals the kind's
+  // editor (TODO G)' — the hint/selection-starts-empty law, the BLOCK pick
+  // revealing block-edit, the SKY pick returning the hint and the PART pick
+  // auto-jumping to + Parts (KNOWN ISSUE 10) run on the REAL Editor state
+  // machine in components/__tests__/editor.dom.test.tsx (Viewport-mock
+  // harness — the pick fed through the shipped onBlockPick callback). The
+  // real-canvas pick PROBE (pickCell finding a deck/part pixel under the
+  // live projection) stays covered by scene.headless pick routing.
 
   // RETIRED v1.12.1 (chain law): the Info dock card grid is a step of
   // the ISW shell chain above; the phone column (1-across) rides the

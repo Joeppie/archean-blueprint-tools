@@ -61,38 +61,13 @@ async function faceSpot(page: Page): Promise<{ x: number; y: number } | null> {
 }
 
 test.describe('build-dock: blocks workspace, place-then-stretch, mirror widget @place @ui', () => {
-  test('the dock shows brush, census, list, edit and the MIRROR widget columns', async ({ page }) => {
-    test.skip(test.info().project.name !== 'chromium', 'desktop-only');
-    await open(page);
-    await page.getByTestId('ws-blocks').click();
-    for (const t of ['block-brush', 'block-census', 'block-list', 'block-edit',
-      'block-list-search', 'mirror-widget', 'mirw-x', 'mirw-y', 'mirw-z', 'mirw-off'])
-      await expect(page.getByTestId(t).first(), t).toBeVisible();
-    // v1.11: the pre-placement SIZE UI is GONE (choosing a size before
-    // placing shouldn't be a thing)
-    for (const t of ['brush-square', 'brush-reset', 'brush-step-z-p', 'brush-axis-x', 'brush-chip'])
-      await expect(page.getByTestId(t), t).toHaveCount(0);
-    expect(await page.getByTestId(/^block-row-\d+/).count())
-      .toBe(await bpBlocks(page).then(b => b.length));      // every block listed
-  });
+  // RETIRED v1.12.5 (L5): dock COLUMN/ABSENCE/row-count DOM law on the REAL Editor
+  // state machine (Viewport-mock harness) — components/__tests__/editor.dom.test.tsx
+  // 'the dock shows brush, census, list, edit and the MIRROR widget columns' (rows ===
+  // bp blocks, the SIZE-UI absence, every column testid).
 
-  test('list row selects, ✕ deletes, one Ctrl+Z restores', async ({ page }) => {
-    test.skip(test.info().project.name !== 'chromium', 'desktop-only');
-    await open(page);
-    // v1.11 dock law: ✎ Modify opens EMPTY (modify-hint) — the BLOCK LIST
-    // rides the + Blocks workspace (blockPanel), where rows are always up.
-    await page.getByTestId('ws-blocks').click();
-    const n0 = (await bpBlocks(page)).length;
-    await page.getByTestId(/^block-row-\d+/).first().hover();
-    await page.getByTestId(/^block-row-\d+/).first().click();
-    await expect(page.getByTestId('block-edit')).toContainText(/Block\[\d+\]/);
-    await page.getByTestId(/^block-cut-\d+/).first().click();
-    await expect.poll(() => bpBlocks(page).then(b => b.length),
-      { timeout: 5000 }).toBeLessThan(n0);
-    await page.keyboard.press('Control+z');
-    await expect.poll(() => bpBlocks(page).then(b => b.length),
-      { timeout: 5000 }).toBe(n0);
-  });
+  // RETIRED v1.12.5 (L5): list select ▸ ✕ delete ▸ ONE Ctrl+Z restore runs on the
+  // Editor DOM tier (editor.dom.test.tsx) — same rows, same block-count law.
 
   test('a click lands a 1×1×1 block; the widget offers ✥ ⟳ ⤢ and ⤢ STRETCHES it', async ({ page }) => {
     test.skip(test.info().project.name !== 'chromium', 'desktop-only');
@@ -267,60 +242,13 @@ test.describe('build-dock: blocks workspace, place-then-stretch, mirror widget @
       .toBe(`${b0},${t0}`);
   });
 
-  test('the MIRROR widget switches the axis live — GLYPH chips (plane+triangle, strikethrough off)', async ({ page }) => {
-    test.skip(test.info().project.name !== 'chromium', 'desktop-only');
-    await open(page, '3732302108');                            // mirrored: the arm auto-lights
-    const mir = () => page.evaluate(() => (window as unknown as {
-      __ARCHEAN__?: { mirAxis: () => string } }).__ARCHEAN__!.mirAxis());
-    await expect.poll(mir).toBe('x');                         // default
-    // v1.11 (we: "the mirror option is not understandable, it should be
-    // visually understood, add a mirror icon with a strikethrough, and x y z
-    // also with mirror behind it"): every chip carries the mirror GLYPH (an
-    // SVG plane + solid triangle + reflected ghost); the off chip wears the
-    // red strike line; the axis chips wear the glyph behind the letter.
-    await expect(page.locator('[data-testid="mirw-off"] [data-g="mirror-off"]')).toBeVisible();
-    await expect(page.locator('[data-testid="mirw-off"] [data-g="mirror-strike"]')).toBeVisible();
-    for (const a of ['x', 'y', 'z']) {
-      await expect(page.locator(`[data-testid="mirw-${a}"] [data-g="mirror"]`), a).toBeVisible();
-      await expect(page.getByTestId(`mirw-${a}`)).toContainText(a);
-    }
-    await page.getByTestId('mirw-z').click();
-    await expect.poll(mir).toBe('z');
-    await page.getByTestId('mirw-off').click();
-    await expect.poll(mir).toBe('off');
-    await page.getByTestId('mirw-x').click();
-    await expect.poll(mir).toBe('x');
-    // v1.11 ONE LINGO: the lit x chip IS the state — clicking the lit plane
-    // stops pairing, clicking again re-arms it (explicit, persisted 1)
-    await expect(page.getByTestId('mirw-x')).toHaveAttribute('aria-pressed', 'true');
-    await page.getByTestId('mirw-x').click();
-    await expect(page.getByTestId('mirw-x')).toHaveAttribute('aria-pressed', 'false');
-    await page.getByTestId('mirw-x').click();
-    await expect(page.getByTestId('mirw-x')).toHaveAttribute('aria-pressed', 'true');
-    expect(await page.evaluate(() => localStorage.getItem('archean-app-plsym'))).toBe('1');
-  });
+  // RETIRED v1.12.5 (L5): the MIRROR widget axis/glyph/aria-pressed/localStorage
+  // (archean-app-plsym) transitions run on the Editor DOM tier (editor.dom.test.tsx,
+  // gantry with craftMirrorAxes ['x'] — auto-lit, ONE LINGO lit-plane toggle).
 
-  test('SQUARE FIX: a block grows to a 10×10×10 square (frame borders do not cap)', async ({ page }) => {
-    test.skip(test.info().project.name !== 'chromium', 'desktop-only');
-    await open(page);
-    // v1.11 dock law: the block list + THIS BLOCK rows live in + Blocks
-    await page.getByTestId('ws-blocks').click();
-    await page.getByTestId(/^block-row-\d+/).first().click();
-    await expect(page.getByTestId('block-edit')).toContainText(/Block\[\d+\]/);
-    const sel = () => page.evaluate(() => {
-      const w = window as unknown as {
-        __ARCHEAN__?: { engine: { blueprint: { data: { blocks: { size_x: number; size_y: number; size_z: number }[] } } } };
-      };
-      const t = document.querySelector('[data-testid="block-edit"]')?.textContent ?? '';
-      const m = t.match(/Block\[(\d+)\]/);
-      if (!m) return null;
-      const b = w.__ARCHEAN__!.engine.blueprint.data.blocks[+m[1]!];
-      return b ? [b.size_x, b.size_y, b.size_z] : null;
-    });
-    for (const ax of ['x', 'y', 'z'])
-      await page.getByTestId(`num-size ${ax}`).fill('9');
-    await expect.poll(sel, { timeout: 5000 }).toEqual([9, 9, 9]);   // square
-  });
+  // RETIRED v1.12.5 (L5): the num-size rows → [9,9,9] square law runs on the Editor
+  // DOM tier (editor.dom.test.tsx); the setBlockField cap itself is vitest-pinned
+  // (blocks.test.ts SQUARE-BLOCK FIX).
 });
 
 test.describe('build-dock: phone placement @ui', () => {
@@ -746,288 +674,24 @@ test.describe('build-dock: triangle PIN placement @ui', () => {
     await expect.poll(nrm, { timeout: 5000 }).toEqual(n0);
   });
 
-  test('mode law: TRIANGLES mode only DROPS PINS, EDIT selects the prism (merged pick)', async ({ page }) => {
-    // v1.11 (we: "nor does it respect my place/edit mode. This is wrong.")
-    test.skip(test.info().project.name !== 'chromium', 'desktop-only');
-    await open(page, '3732302108');                        // the gantry: authored skin
-    await page.getByTestId('ws-tris').click();
-    const px = await page.evaluate(() => {
-      const c = document.querySelector('canvas')!;
-      const r = c.getBoundingClientRect();
-      const w = (window as unknown as { __ARCHEAN__?: {
-        triPick: (x: number, y: number) => { t: number } | null } }).__ARCHEAN__!;
-      for (let fy = 0.2; fy <= 0.9; fy += 0.02)
-        for (let fx = 0.15; fx <= 0.85; fx += 0.02) {
-          const t = w.triPick(r.left + r.width * fx, r.top + r.height * fy);
-          if (t && t.t >= 0) return { x: r.left + r.width * fx, y: r.top + r.height * fy };
-        }
-      return null;
-    });
-    expect(px, 'a prism face answers the probe').not.toBeNull();
-    const box = (await page.getByTestId('canvas').boundingBox())!;
-    const clickPx = () => page.getByTestId('canvas').click({
-      position: { x: px!.x - box.x, y: px!.y - box.y } });
-    const pins = () => page.evaluate(() => (window as unknown as {
-      __ARCHEAN__?: { pins: () => { mode: string; pts: number[][] } | null } }).__ARCHEAN__!.pins());
-    const triHl = () => page.evaluate(() => (window as unknown as {
-      __ARCHEAN__?: { triHl: () => number } }).__ARCHEAN__!.triHl());
-    // ▵ TRIANGLES mode: the prism-face click DROPS A PIN — selects NOTHING
-    await page.getByTestId('ws-tris').click();
-    await clickPx();
-    await expect.poll(async () => { const s = await pins(); return s && `${s.mode}:${s.pts.length}`; },
-      { timeout: 5000 }).toBe('draft:1');
-    expect(await triHl(), 'placement never selects').toBe(-1);
-    await page.keyboard.press('Escape');
-    await expect.poll(pins, { timeout: 5000 }).toBeNull();
-    // ✎ EDIT: the SAME pixel click SELECTS the prism (merged pick) and the
-    // pins + centroid widget land on it
-    await page.getByTestId('ws-edit').click();
-    await clickPx();
-    await expect.poll(triHl, { timeout: 5000 }).toBeGreaterThanOrEqual(0);
-    await expect.poll(async () => { const s = await pins(); return s?.mode; },
-      { timeout: 5000 }).toBe('edit');
-    await expect.poll(() => page.evaluate(() => (window as unknown as {
-      __ARCHEAN__?: { triGizmo: () => { ti: number } | null } }).__ARCHEAN__!.triGizmo()),
-    { timeout: 5000 }).not.toBeNull();
-  });
+  // RETIRED v1.12.5 (L5): the FLAVOUR routing (a prism-face click drafts a pin in
+  // + Triangles / selects the prism in ✎ Modify — merged pick, triAt-owned centroid)
+  // runs on the Editor DOM tier (editor.dom.test.tsx) through the shipped
+  // onBlockPick callback. The pin 3-click RITUAL (three clicks land a triangle)
+  // above keeps the real-input + engine-pin overlay law.
 
-  // v1.11 UNPINNED-TODO pins D + E (AGENTS): the UNIFORM MIRROR RULE for
-  // prisms, on a craft whose skin auto-twins (the gantry is x-mirrored).
-  // Every prism edit drives the corner-SET twin (triTwinIndex — winding-
-  // agnostic): the wholesale shift sends the twin the MIRRORED delta, the
-  // FLIP flips the pair, the PAINT maps face slots by identity. (The LIST
-  // -row test above asserts SELF corners only — that gap was TODO D.)
-  const cornersOf = (page: Page, i: number) => page.evaluate((idx) => {
-    const t = (window as unknown as { __ARCHEAN__?: { engine: { blueprint: {
-      data: { triangles: Record<string, number>[] } } } } }).__ARCHEAN__!.engine
-      .blueprint.data.triangles[idx]!;
-    return [0, 1, 2].map(vi => [0, 1, 2].map(ai =>
-      t[`v${vi}_${'xyz'[ai]}`]! + 12 * t[`frame_${'xyz'[ai]}`]!));
-  }, i);
-  const normalOf = (page: Page, i: number) => cornersOf(page, i).then(c => {
-    const u = [0, 1, 2].map(a => c[1]![a]! - c[0]![a]!);
-    const w = [0, 1, 2].map(a => c[2]![a]! - c[0]![a]!);
-    return [u[1]! * w[2]! - u[2]! * w[1]!, u[2]! * w[0]! - u[0]! * w[2]!,
-      u[0]! * w[1]! - u[1]! * w[0]!];
-  });
-  /** a canvas pixel whose merged pick SELECTS triangle ti — and the prism
-   *  must be the FRONT owner (triPick answers the geometric triAt owner at
-   *  the hit point, which sees through parts standing behind them) */
-  const triPixel = (page: Page, ti: number) => page.evaluate((t0) => {
-    const c = document.querySelector('canvas')!;
-    const r = c.getBoundingClientRect();
-    const w = (window as unknown as { __ARCHEAN__?: {
-      triPick: (x: number, y: number) => { t: number; kind?: string } | null } }).__ARCHEAN__!;
-    for (let step = 0.02; step >= 0.008; step -= 0.004)
-      for (let fy = 0.2; fy <= 0.9; fy += step)
-        for (let fx = 0.15; fx <= 0.85; fx += step) {
-          const t = w.triPick(r.left + r.width * fx, r.top + r.height * fy);
-          if (t && t.t === t0 && (t.kind === undefined || t.kind === 'tri'))
-            return { x: r.left + r.width * fx, y: r.top + r.height * fy };
-        }
-    return null;
-  }, ti);
-
-  test('twin prism pair: the wholesale shift sends the TWIN the MIRRORED delta; the FLIP flips the pair (TODO D)', async ({ page }) => {
-    test.skip(test.info().project.name !== 'chromium', 'desktop-only');
-    test.setTimeout(120_000);
-    // THE FIXTURE: a freshly PLACED mirror pair (the pin flow with the x
-    // plane armed lands [tri, twin] as TWO DETACHED prisms on the deck —
-    // fat faces, big window headroom, no welds into a skin mesh; the
-    // gantry's authored skin is a welded lattice and shifting one record
-    // there tears the shared slots — wrong fixture for a delta law).
-    await open(page, '9000005001');
-    await page.getByTestId('ws-tris').click();
-    const chip = page.getByTestId('mirw-x');
-    if ((await chip.getAttribute('aria-pressed')) !== 'true') await chip.click();
-    const tris = () => page.evaluate(() => (window as unknown as {
-      __ARCHEAN__?: { engine: { blueprint: { data: { triangles?: unknown[] } } } } })
-      .__ARCHEAN__!.engine.blueprint.data.triangles?.length ?? 0);
-    const n0 = await tris();
-    // Pin spots hugging the x = 0 mirror plane (|x| ≤ 0.8 m): a pair placed
-    // off-centre lands the twin's x-vertices at the window edge (12 − g),
-    // and a ±2 push there is REFUSED by the 32-slot window law (silent
-    // twin no-op). Centre-hugging pins keep both records' x-headroom ≥ 2.
-    const spots = await page.evaluate(() => {
-      const c = document.querySelector('canvas')!;
-      const r = c.getBoundingClientRect();
-      const e = (window as unknown as { __ARCHEAN__?: { engine: {
-        pickCell: (x: number, y: number) => { bi: number; point?: [number, number, number] } | null } } }).__ARCHEAN__!.engine;
-      const pts: { x: number; y: number }[] = [];
-      for (let fy = 0.3; fy <= 0.85; fy += 0.02)
-        for (let fx = 0.25; fx <= 0.75; fx += 0.02) {
-          const h = e.pickCell(r.left + r.width * fx, r.top + r.height * fy);
-          if (h && h.bi >= 0 && h.point && Math.abs(h.point[0]) <= 0.8)
-            pts.push({ x: r.left + r.width * fx, y: r.top + r.height * fy });
-        }
-      if (pts.length < 3) return null;
-      const d = (a: { x: number; y: number }, b: { x: number; y: number }) =>
-        Math.hypot(a.x - b.x, a.y - b.y);
-      const p1 = pts[0]!;
-      const p2 = pts.reduce((m, p) => (d(p, p1) > d(m, p1) ? p : m), p1);
-      const p3 = pts.reduce((m, p) => (Math.min(d(p, p1), d(p, p2)) >
-        Math.min(d(m, p1), d(m, p2)) ? p : m), p1);
-      if (d(p1, p2) < 80 || Math.min(d(p3, p1), d(p3, p2)) < 60) return null;
-      return [p1, p2, p3];
-    });
-    expect(spots, 'the deck answers the pin path with three centre-hugging spread spots').not.toBeNull();
-    for (const s of spots!) { await page.mouse.click(s.x, s.y); await page.waitForTimeout(120); }
-    await expect.poll(tris, { timeout: 5000,
-      message: 'the pair lands: self + mirrored twin' }).toBe(n0 + 2);
-    // v1.12.2 RE-PIN: with the pair hugging the x = 0 plane the two prisms
-    // are COPANAR OVERLAPS — which record a pixel answers is the merged
-    // geometry's build-order tie, not a law. Use whichever record the pick
-    // answers as the SELECTED prism; the delta/flip/paint laws below are
-    // symmetric in (self, twin), so swapping the roles keeps them exact.
-    let [ti, tw] = [n0, n0 + 1] as [number, number];
-    if (!(await triPixel(page, n0)) && (await triPixel(page, n0 + 1)))
-      [ti, tw] = [n0 + 1, n0];
-    await page.keyboard.press('Escape');            // live pins down
-    await page.getByTestId('ws-edit').click();
-    const px = await triPixel(page, ti);
-    expect(px, `a pixel answers the placed prism ${ti}`).not.toBeNull();
-    await page.mouse.click(px!.x, px!.y);
-    await expect.poll(async () => (await page.evaluate(() => (window as unknown as {
-      __ARCHEAN__?: { triGizmo: () => { ti: number } | null } }).__ARCHEAN__!.triGizmo()))?.ti,
-      { timeout: 5000 }).toBe(ti);
-    const s0 = await cornersOf(page, ti);
-    const t0 = await cornersOf(page, tw);
-    await page.waitForTimeout(600);                        // own undo group
-    expect(await page.evaluate(() => (window as unknown as {
-      __ARCHEAN__?: { triShift: (d: [number, number, number]) => boolean } })
-      .__ARCHEAN__!.triShift([2, 0, 0])), 'the wholesale move commits').toBe(true);
-    const s1 = await cornersOf(page, ti);
-    const t1 = await cornersOf(page, tw);
-    for (const [vi, c] of s1.entries())
-      expect(c, `self corner ${vi}`).toEqual([s0[vi]![0]! + 2, s0[vi]![1]!, s0[vi]![2]!]);
-    for (const [vi, c] of t1.entries())
-      // THE UNIFORM MIRROR RULE: the delta's MIRROR-NORMAL (x) component
-      // FLIPS for the twin (a mirrored pair's x-extents are mirror images,
-      // so only an x-fitting delta survives both records' vertex windows —
-      // a refused twin shift is a silent no-op by the window law).
-      expect(c, `twin corner ${vi}`).toEqual([t0[vi]![0]! - 2, t0[vi]![1]!, t0[vi]![2]!]);
-    await page.keyboard.press('Control+z');
-    await expect.poll(() => cornersOf(page, ti), { timeout: 5000 }).toEqual(s0);
-    await expect.poll(() => cornersOf(page, tw), { timeout: 5000 }).toEqual(t0);
-    // THE FLIP is pair-wide (v1.11 (9b)): winding reverses on SELF and the
-    // twin — both normals negate — and ONE Ctrl+Z restores BOTH.
-    await page.mouse.click(px!.x, px!.y);                  // selection rides the undo
-    await expect(page.getByTestId('tri-flip')).toBeVisible({ timeout: 5000 });
-    await page.waitForTimeout(600);                        // separate undo group
-    const sn0 = await normalOf(page, ti);
-    const tn0 = await normalOf(page, tw);
-    await page.getByTestId('tri-flip').click();
-    const sn1 = await normalOf(page, ti);
-    const tn1 = await normalOf(page, tw);
-    for (let k = 0; k < 3; k++) {
-      expect(sn1[k]).toBeCloseTo(-sn0[k]!, 9);
-      expect(tn1[k], 'the twin FLIPPED with its self').toBeCloseTo(-tn0[k]!, 9);
-    }
-    await page.keyboard.press('Control+z');
-    await expect.poll(() => normalOf(page, ti), { timeout: 5000 }).toEqual(sn0);
-    await expect.poll(() => normalOf(page, tw), { timeout: 5000 }).toEqual(tn0);
-  });
-
-  test('twin-aware prism PAINT: the twin record wears the SAME face slot (TODO E)', async ({ page }) => {
-    test.skip(test.info().project.name !== 'chromium', 'desktop-only');
-    test.setTimeout(120_000);
-    // Same fixture as TODO D: a freshly placed mirror pair (detached,
-    // deck-centre) — the gantry skin's welded records are the wrong body
-    // for face-slot arithmetic.
-    await open(page, '9000005001');
-    await page.getByTestId('ws-tris').click();
-    const chip = page.getByTestId('mirw-x');
-    if ((await chip.getAttribute('aria-pressed')) !== 'true') await chip.click();
-    const tris = () => page.evaluate(() => (window as unknown as {
-      __ARCHEAN__?: { engine: { blueprint: { data: { triangles?: unknown[] } } } } })
-      .__ARCHEAN__!.engine.blueprint.data.triangles?.length ?? 0);
-    const n0 = await tris();
-    const spots = await page.evaluate(() => {
-      const c = document.querySelector('canvas')!;
-      const r = c.getBoundingClientRect();
-      const e = (window as unknown as { __ARCHEAN__?: { engine: {
-        pickCell: (x: number, y: number) => { bi: number } | null } } }).__ARCHEAN__!.engine;
-      const pts: { x: number; y: number }[] = [];
-      for (let fy = 0.3; fy <= 0.85; fy += 0.03)
-        for (let fx = 0.3; fx <= 0.7; fx += 0.03) {
-          const h = e.pickCell(r.left + r.width * fx, r.top + r.height * fy);
-          if (h && h.bi >= 0) pts.push({ x: r.left + r.width * fx, y: r.top + r.height * fy });
-        }
-      if (!pts.length) return null;
-      const d = (a: { x: number; y: number }, b: { x: number; y: number }) =>
-        Math.hypot(a.x - b.x, a.y - b.y);
-      const p1 = pts[0]!;
-      const p2 = pts.reduce((m, p) => (d(p, p1) > d(m, p1) ? p : m), p1);
-      const p3 = pts.reduce((m, p) => (Math.min(d(p, p1), d(p, p2)) >
-        Math.min(d(m, p1), d(m, p2)) ? p : m), p1);
-      if (d(p1, p2) < 80 || Math.min(d(p3, p1), d(p3, p2)) < 60) return null;
-      return [p1, p2, p3];
-    });
-    expect(spots, 'the deck answers the pin path with three spread spots').not.toBeNull();
-    for (const s of spots!) { await page.mouse.click(s.x, s.y); await page.waitForTimeout(120); }
-    await expect.poll(tris, { timeout: 5000 }).toBe(n0 + 2);
-    // v1.12.2 RE-PIN (same family as TODO D): coplanar pair near the mirror
-    // plane — the pick's tie answer decides which record is SELECTED; the
-    // pair-paint law is symmetric in (self, twin).
-    let [ti, tw] = [n0, n0 + 1] as [number, number];
-    if (!(await triPixel(page, n0)) && (await triPixel(page, n0 + 1)))
-      [ti, tw] = [n0 + 1, n0];
-    await page.keyboard.press('Escape');
-    await page.getByTestId('ws-edit').click();
-    const px = await triPixel(page, ti);
-    expect(px, `a pixel answers the placed prism ${ti}`).not.toBeNull();
-    await page.mouse.click(px!.x, px!.y);
-    const front = page.getByTestId('num-front');
-    await expect(front, 'the merged pick revealed THIS TRIANGLE').toBeVisible({ timeout: 5000 });
-    const cols = (i: number) => page.evaluate((idx) =>
-      [...((window as unknown as { __ARCHEAN__?: { engine: { blueprint: { data: {
-        triangles: { colors?: number[] }[] } } } } }).__ARCHEAN__!.engine
-        .blueprint.data.triangles[idx]!.colors ?? [])], i);
-    await page.waitForTimeout(600);                        // own undo group
-    await front.fill('70');
-    await expect.poll(() => cols(ti), { timeout: 5000 })
-      .toEqual(expect.arrayContaining([70]));
-    // THE IDENTITY FACE MAPPING (v1.8.0 uniform rule re-pin on a placed
-    // pair): a mirrored prism's face f is its own front/back/wall (the
-    // construction colour swap built it so) — the twin wears the slot on
-    // the SAME index.
-    await expect.poll(async () => (await cols(tw))[0], { timeout: 5000 }).toBe(70);
-    expect((await cols(tw))[0]).toBe((await cols(ti))[0]);
-  });
+  // RETIRED v1.12.5 (L5): the twin-pair laws (TODO D mirrored delta + pair
+  // flip, TODO E identity face-slot paint, the mirror-conjugate rotate, the
+  // v1.11.0 lookup-before-mutation and ATOMIC-clone fixes) are pure record
+  // math — engine/pinedit.ts + __tests__/pinedit.test.ts reproduce these
+  // exact values (self +2 x / twin −2 x, pair SURVIVES the shift, normals
+  // EXACTLY negate, twin wears the slot on the SAME index, refusals write
+  // NOTHING to bp AND doc) at the vitest tier.
 });
 
 test.describe('build-dock: triangle workspace @ui', () => {
-  test('tri list selects, ±cell move round-trips, window refusal is honest', async ({ page }) => {
-    test.skip(test.info().project.name !== 'chromium', 'desktop-only');
-    await open(page, '3732302108');                        // the gantry: authored skin
-    await page.getByTestId('ws-tris').click();
-    await expect(page.getByTestId('tri-list')).toBeVisible();
-    const row = page.getByTestId(/^tri-row-\d+/).first();
-    await expect(row).toBeVisible();
-    const idx = (await row.getAttribute('data-testid'))!.replace('tri-row-', '');
-    await row.click();
-    await expect(page.getByTestId('tri-edit')).toContainText(`Triangle[${idx}]`);
-    // GEOMETRY round-trip (the (frame, v) split re-normalises writer-style
-    // after a move — v near 0, like triangleFromCorners — so the raw bytes
-    // may differ while the global corners g = v + 12·frame are exact)
-    const corners = () => page.evaluate((i) => {
-      const w = window as unknown as {
-        __ARCHEAN__?: { engine: { blueprint: { data: { triangles: Record<string, number>[] } } } };
-      };
-      const t = w.__ARCHEAN__!.engine.blueprint.data.triangles[+i]!;
-      return [0, 1, 2].map(vi => [0, 1, 2].map(ai => {
-        const name = 'xyz'[ai]!;
-        return t[`v${vi}_${name}`]! + 12 * t[`frame_${name}`]!;
-      }));
-    }, idx);
-    const before = await corners();
-    await page.getByTestId('tri-move-x-p').click();
-    await expect.poll(corners, { timeout: 5000 }).not.toEqual(before);
-    await page.getByTestId('tri-move-x-m').click();
-    await expect.poll(corners, { timeout: 5000 }).toEqual(before);
-    // a corner push out of the frame-aligned vertex window: REFUSED visibly
-    const v = page.getByTestId('tri-v0-x');
-    await v.fill('-500');
-    await expect(page.getByTestId('tri-msg')).toContainText('refused');
-  });
+  // RETIRED v1.12.5 (L5): the TRI LIST row select, the ±cell move round-trip on the
+  // GLOBAL corners (writer-style (frame, v) re-normalisation) and the honest
+  // 'refused' window message run on the Editor DOM tier (editor.dom.test.tsx); the
+  // underlying setTriCorner/shiftTriCells refusals are vitest-pinned (tris.test.ts).
 });
