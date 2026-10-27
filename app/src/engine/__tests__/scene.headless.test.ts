@@ -7,7 +7,8 @@
 // overlay restore, day-light rig) stay e2e — this file never claims them.
 import { describe, expect, test } from 'vitest';
 import { Quaternion, Vector3 } from 'three';
-import { manifestOnly, openCraft, openCraftOpt, withRealModels } from './harness';
+import { sphereSkinTris } from '../latsphere';
+import { manifestOnly, openCraft, openCraftOpt, virtualControls, withRealModels } from './harness';
 import type { Engine } from '../scene';
 import type { Blueprint } from '../format';
 
@@ -530,4 +531,84 @@ describe('subgrid rides its joint (was subride.spec @subgrid @slow)', () => {
       }
     }, 120_000);
   }
+});
+
+describe('camera cluster + keepView (was scene.spec + undo.spec, v1.12.5)', () => {
+  const dist = (a: [number, number, number], b: [number, number, number]) =>
+    Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+
+  test('KSP cluster presets snap the eye to axis views; fit() = the load framing', () => {
+    // scene.spec's law verbatim: top/front/side each MOVE the eye > 1 m and
+    // cam-fit re-applies the EXACT load framing (the e2e's toEqual(p0)).
+    // The eye-snap formulas are Engine math; the passive virtualControls
+    // stands in for attach()'s OrbitControls (a target holder here).
+    const e = openCraft('3812927875', { atlas: manifestOnly() });
+    virtualControls(e);
+    const p0 = e.camPos();
+    e.viewPreset('top');
+    expect(dist(e.camPos(), p0), 'top view moved the eye').toBeGreaterThan(1);
+    e.viewPreset('front');
+    expect(dist(e.camPos(), p0), 'front view moved the eye').toBeGreaterThan(1);
+    e.viewPreset('side');
+    expect(dist(e.camPos(), p0), 'side view moved the eye').toBeGreaterThan(1);
+    e.viewPreset('fit');
+    const pf = e.camPos();
+    for (let k = 0; k < 3; k++) expect(pf[k]!).toBeCloseTo(p0[k]!, 6);
+  });
+
+  test('load(keepView=true) keeps the eye; a craft swap re-frames (undo v1.5.10 law)', () => {
+    // undo.spec 'Ctrl+Z keeps the camera' engine half: the Editor passes
+    // keepView=true for undo/redo bp-swaps (applyHistory) and false on a
+    // craft swap — the eye drift across an undo must stay < 0.05 m (the
+    // e2e bound), the swap re-frames to the exact load framing.
+    const e = openCraft('3812927875', { atlas: manifestOnly() });
+    virtualControls(e);
+    const p0 = e.camPos();
+    e.viewPreset('top');
+    const p1 = e.camPos();
+    expect(dist(p1, p0), 'the orbit-off must be non-vacuous').toBeGreaterThan(0.5);
+    const bp = e.blueprint!;
+    e.load(bp, null, true);
+    expect(dist(e.camPos(), p1), 'undo must not move the camera').toBeLessThan(0.05);
+    // a craft swap (keepView false) RE-FRAMES: the eye leaves the preset
+    // pose and lands on the load framing (the exact-fit equality is test
+    // 1's law; a re-load's fit may see a ~0.01 m settled bbox)
+    e.load(bp, null, false);
+    const pf = e.camPos();
+    expect(dist(pf, p1), 'the swap re-frames the view').toBeGreaterThan(1);
+    expect(dist(pf, p0), 'the re-frame is the load framing').toBeLessThan(0.05);
+  });
+});
+
+describe('placement ghost lattice law (was sphereskin ⟲ e2e, v1.12.5)', () => {
+  test('⟲ quarter-turn swaps the skin spans on the lattice; the data rides it', () => {
+    // Engine.clusterGhostRotate — the law the ghost label's ⟲ row drives:
+    // a +90° world-axis turn about the integer bbox pivot swaps the two
+    // perpendicular spans EXACTLY (the lattice stores quarter-turns); the
+    // ghost DATA (what ✔ Build writes — paired in tooldoc 'the commit
+    // writes the GHOST payload verbatim') carries the turned records.
+    const e = openCraft('9000005001', { atlas: manifestOnly() });
+    const plan = sphereSkinTris({ rx: 2, ry: 1, rz: 1, profile: 'ellipsoid' },
+      { slot: 51, material: 0, smooth: false });
+    e.setClusterGhost(null, 0x7dffcf, plan, null);
+    const st0 = e.clusterGhostState();
+    expect(st0).not.toBeNull();
+    expect(st0!.tris).toBe(plan.length);
+    const spans = (bb: NonNullable<ReturnType<typeof e.clusterGhostState>>['bb']) =>
+      bb![0].map((v, k) => bb![1][k]! - v!);
+    const s0 = spans(st0!.bb);
+    expect(s0[0], 'rx 2 m: long along x').toBeGreaterThan(s0[2]!);
+    expect(e.clusterGhostRotate('y')).toBe(true);
+    const st1 = e.clusterGhostState();
+    expect(st1!.turns).toBe(1);
+    expect(spans(st1!.bb)).toEqual([s0[2], s0[1], s0[0]]);   // exact x ↔ z swap
+    // the LIVE data (Build's source) is the turned skin — record count kept
+    expect(e.clusterGhostData().triangles.length).toBe(plan.length);
+    // a whole-cell drag rides the offset, the spans stay (the big-balloon
+    // drag half of the retired leg; area preservation: splitface NEVER-DROPS)
+    expect(e.clusterGhostShift([0, 0, 5])).toBe(true);
+    const st2 = e.clusterGhostState()!;
+    expect(st2.offset).toEqual([0, 0, 5]);
+    expect(spans(st2.bb)).toEqual(spans(st1!.bb).map((v, k) => v + ([0, 0, 0][k] as number)));
+  });
 });

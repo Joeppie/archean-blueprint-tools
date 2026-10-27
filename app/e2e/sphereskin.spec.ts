@@ -65,10 +65,7 @@ async function setRange(page: Page, key: string, v: number) {
   }, v);
 }
 
-/** type a size into the number box beside the slider (past-slider reach) */
-async function setNum(page: Page, key: string, v: number) {
-  await page.locator(`[data-testid="tool-num-${key}"]`).fill(String(v));
-}
+// setNum removed v1.12.5 with the number-box/needle legs (balloonskin.dom).
 
 /** open Tools ▸ Generate balloon, OK ▸ Confirm — the dialog closes and the
  *  ghost label appears (the dialog→ghost→label ORDER is the user's spec).
@@ -94,88 +91,17 @@ const toastCount = async (page: Page) =>
   +(await toastText(page))!.match(/: (\d+) /)![1]!;
 
 test.describe('generate balloon tool: dialog → movable ghost → cancel/build @ui', () => {
-  test('the sliders retune the plan (worker) and the preview prints the deviation line', async ({ page }) => {
-    await openNew(page);
-    await page.getByTestId('tools-menu').click();
-    await page.getByTestId('tool-balloon').click();
-    // v1.9.0 re-pin: the shipped default is now the CYLINDER
-    // whose loft sag is legitimately coarser; THIS suite pins the ELLIPSOID
-    // deviation lineage ("the sag stays round at zeppelin size"), so the
-    // round hull is selected EXPLICITLY.
-    await page.getByTestId('tool-opt-profile-round').click();
-    const prev = page.locator('[data-testid="tool-preview"]');
-    await expect(prev).toContainText(/triangles/);
-    // THE line the Spheroid attempts never had: deviation vs the ideal surface
-    await expect(prev).toContainText(/dev −0\.\d\d\/\+0\.\d\d m/);
-    // the gas readout (user 2026-10-22): vacuum / helium / hydrogen at SL
-    await expect(prev).toContainText(/lift@SL vacuum .* · He .* · H₂ /);
-    const small = +(await prev.textContent())!.match(/(\d+) triangles/)![1]!;
-    await setRange(page, 'rx', 8);
-    await setRange(page, 'ry', 8);
-    await setRange(page, 'rz', 8);
-    // the planner is ASYNC (worker + debounce): poll the readout, never a
-    // single shot — the stale line lags on purpose so the slider keeps sliding
-    await expect.poll(async () => {
-      const m = ((await prev.textContent()) ?? '').match(/(\d+) triangles/);
-      return m ? +m[1]! : 0;
-    }, { timeout: 15_000 }).toBeGreaterThan(small * 8);
-    // and the sag stays round at zeppelin size (the pin the old suites lacked)
-    await expect(prev).toContainText(/dev −0\.0\d\/\+0\.\d\d m/);
-    await page.getByTestId('tool-cancel').click();
-  });
+  // RETIRED v1.12.5 (L5): the deviation line (dev −0.xx/+0.xx m), the lift@SL
+  // trio and the box-driven plan scaling are PREVIEW laws of the SHIPPED ToolDef
+  // — components/__tests__/balloonskin.dom.test.tsx test 1 (jsdom ToolDialog,
+  // ELLIPSOID explicit; sync planner fallback answers in-tier). The worker
+  // round-trip + the ghost stay covered by the OK ▸ ghost ▸ Build ritual leg.
 
-  test('the number box reaches past the slider, and needles refuse honestly', async ({ page }) => {
-    test.setTimeout(120_000);   // a 20 m ellipsoid + a splitFace needle + a repair probe
-    await openNew(page);
-    await page.getByTestId('tools-menu').click();
-    await page.getByTestId('tool-balloon').click();
-    // v1.9.0 re-pin: the shipped DEFAULT body is now the
-    // cylinder (zeppelin); this suite pins the ELLIPSOID needle/refusal/repair
-    // lineage, so the round hull is selected EXPLICITLY.
-    await page.getByTestId('tool-opt-profile-round').click();
-    const prev = page.locator('[data-testid="tool-preview"]');
-    // a 20 m radius is over the slider-free planning range — the box takes it
-    await setNum(page, 'rx', 20);
-    await setNum(page, 'ry', 20);
-    await setNum(page, 'rz', 20);
-    await expect.poll(async () => {
-      const m = ((await prev.textContent()) ?? '').match(/(\d+) triangles/);
-      return m ? +m[1]! : 0;
-    }, { timeout: 30_000 }).toBeGreaterThan(5000);              // zeppelin-plus
-    await page.getByTestId('tool-cancel').click();
-    // v1.9 splitFace (user: "segment whatever is breaking"): an extreme
-    // needle whose convex-hull faces blow the 31-cell window no longer
-    // REFUSES — the faces subdivide and the spheroid stores smooth
-    await page.getByTestId('tools-menu').click();
-    await page.getByTestId('tool-balloon').click();
-    await setNum(page, 'rx', 0.5);
-    await setNum(page, 'ry', 1);
-    await setNum(page, 'rz', 12);
-    await expect.poll(async () => {
-      const t = (await prev.textContent()) ?? '';
-      return /\d+ triangles/.test(t) && !/nothing to place/.test(t);
-    }, { timeout: 20_000 }).toBe(true);
-    // an honest refusal still exists for the genuinely impossible: under a
-    // lattice cell there is NO hull to build → refused, OK DISABLED
-    await page.getByTestId('tool-cancel').click();
-    await page.getByTestId('tools-menu').click();
-    await page.getByTestId('tool-balloon').click();
-    await setNum(page, 'rx', 0.05);
-    await setNum(page, 'ry', 0.05);
-    await setNum(page, 'rz', 0.05);
-    await expect(prev).toContainText(/nothing to place/, { timeout: 15_000 });
-    await expect(page.getByTestId('tool-ok')).toBeDisabled();
-    // THE REPAIR (user 2026-10-22: "I also cannot place it, fix the error")
-    // still applies: ⚖ Fix probes a nearest placeable shape, OK enables.
-    await page.getByTestId('tool-fix').click();
-    await expect.poll(async () => {
-      const t = (await prev.textContent()) ?? '';
-      return /\d+ triangles/.test(t) && !/nothing to place/.test(t);
-    }, { timeout: 60_000 }).toBe(true);
-    await expect(prev).toContainText(/triangles/, { timeout: 60_000 });
-    await expect(page.getByTestId('tool-ok')).toBeEnabled();
-    await page.getByTestId('tool-cancel').click();
-  });
+  // RETIRED v1.12.5 (L5): the r=20 number-box reach (>5000 triangles), the
+  // 0.05³ honest refusal (OK disabled) and the ⚖ Fix repair (OK re-enables) run
+  // in balloonskin.dom.test.tsx tests 2 + 3; the needle STORE law itself is
+  // vitest-pinned (latsphere "the needle the ELLIPSOID refuses becomes a small
+  // storable skin" + splitface).
 
   /** the engine's LIVE mass report (the StaticInfo card's source) */
   const massReport = (page: Page) => page.evaluate(() =>
@@ -274,24 +200,9 @@ test.describe('generate balloon tool: dialog → movable ghost → cancel/build 
     await expect.poll(async () => (await massReport(page))!.families.skin).toBe(0);
   });
 
-  test('shading=smooth writes the game’s smooth:1 on every triangle', async ({ page }) => {
-    await openNew(page);
-    await page.getByTestId('tools-menu').click();
-    await page.getByTestId('tool-balloon').click();
-    await page.selectOption('[data-testid="tool-select-shade"]', 'smooth');
-    await page.getByTestId('tool-ok').click();
-    await expect(page.getByTestId('tool-confirm-box')).toContainText(/smooth:1/);
-    await page.getByTestId('tool-confirm').click();
-    await expect(page.getByTestId('place-label')).toBeVisible({ timeout: 15_000 });
-    await page.getByTestId('place-build').click();
-    const built = await toastCount(page);
-    const allSmooth = await page.evaluate((n) => {
-      const ts = (window as unknown as { __ARCHEAN__: { engine: { blueprint: { data: {
-        triangles?: { smooth?: number }[] } } } } }).__ARCHEAN__.engine.blueprint.data.triangles!;
-      return ts.slice(ts.length - n).every(t => t.smooth === 1);
-    }, built);
-    expect(allSmooth).toBe(true);
-  });
+  // RETIRED v1.12.5 (L5): tooldoc.test.ts "shading=SMOOTH: the commit writes
+  // smooth:1 on every stored record" runs the SHIPPED commit with shade:smooth
+  // (the flat default's no-key law stays pinned in the sibling test).
 
   test('Cancel (click AND Esc) drops the ghost with the file untouched', async ({ page }) => {
     await openNew(page);
@@ -319,119 +230,28 @@ test.describe('generate balloon tool: dialog → movable ghost → cancel/build 
   // button to go back to tool window where we can change parameters without
   // starting from scratch."
 
-  test('⟲ quarter-turns rotate the ghost (lattice law) and survive Build', async ({ page }) => {
-    await openNew(page);
-    await stage(page, { rx: 2, ry: 1, rz: 1 });
-    const s0 = await spans(page);
-    expect(s0[0]).toBeGreaterThan(s0[2]);                 // long along x
-    await page.getByTestId('place-rot-y').click();        // world-Y: x ↔ z
-    await expect.poll(() => spans(page), { timeout: 5_000 }).toEqual([s0[2], s0[1], s0[0]]);
-    expect((await ghost(page))!.turns).toBe(1);
-    // Build the ROTATED ghost: the file must carry what was ghosted (the
-    // commit writes the live ghost data, not a fresh un-rotated plan)
-    await page.getByTestId('place-build').click();
-    const built = await page.evaluate(() => {
-      const ts = (window as unknown as { __ARCHEAN__: { engine: { blueprint: { data: {
-        triangles?: Record<string, number>[] } } } } }).__ARCHEAN__.engine.blueprint.data.triangles!;
-      const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
-      for (const t of ts) for (let i = 0; i < 3; i++)
-        for (const ax of ['x', 'y', 'z'] as const) {
-          const g = (t[`v0_${ax}`.replace('0', String(i))] as number)
-            + 12 * ((t[`frame_${ax}`] as number) ?? 0);
-          const k = ax === 'x' ? 0 : ax === 'y' ? 1 : 2;
-          mn[k] = Math.min(mn[k]!, g); mx[k] = Math.max(mx[k]!, g);
-        }
-      return [mx[0]! - mn[0]!, mx[1]! - mn[1]!, mx[2]! - mn[2]!];
-    });
-    expect(built).toEqual([s0[2], s0[1], s0[0]]);
-  });
+  // RETIRED v1.12.5 (L5): the LATTICE law (exact span swap + turns counter on
+  // the Engine ghost) is pinned headless (scene.headless "placement ghost
+  // lattice law"); the SURVIVE-BUILD half (the commit writes the LIVE ghost
+  // payload, not a re-plan) is pinned in tooldoc "the commit writes the GHOST
+  // payload verbatim". The ghost label DOM (place-rot-y row) rides the ritual leg.
 
-  test('BOTH bodies store the needle — splitFace keeps the spheroid smooth', async ({ page }) => {
-    await openNew(page);
-    await page.getByTestId('tools-menu').click();
-    await page.getByTestId('tool-balloon').click();
-    // v1.9.0 re-pin: the shipped default is the cylinder now — this suite's
-    // FIRST phase is the ELLIPSOID (the round hull then the cylinder body).
-    await page.getByTestId('tool-opt-profile-round').click();
-    await setNum(page, 'rx', 0.5);
-    await setNum(page, 'ry', 1);
-    await setNum(page, 'rz', 12);
-    const prev = page.locator('[data-testid="tool-preview"]');
-    // v1.9 splitFace: the ellipsoid path stores this blend now (window
-    // faces SUBDIVIDE instead of refusing — "a completely smooth spheroid")
-    await expect.poll(async () => {
-      const t = (await prev.textContent()) ?? '';
-      return /\d+ triangles/.test(t) && !/nothing to place/.test(t);
-    }, { timeout: 20_000 }).toBe(true);
-    // the simple body takes it: flat cylinder flanks + tapered nose/tail
-    await page.getByTestId('tool-opt-profile-cylinder').click();
-    await expect.poll(async () => {
-      const t = (await prev.textContent()) ?? '';
-      return /triangles/.test(t) && !/nothing to place/.test(t);
-    }, { timeout: 20_000 }).toBe(true);
-    // v1.7.3: the two ends print SEPARATELY (nose = −axis, tail = +axis)
-    await expect(prev).toContainText(/cylinder \+ \d+% nose \/ \d+% tail/);
-    await expect(page.getByTestId('tool-ok')).toBeEnabled();
-    await expect(page.getByTestId('tool-field-nose')).toBeVisible();
-    await expect(page.getByTestId('tool-field-tail')).toBeVisible();
-    await expect(page.getByTestId('tool-field-facets')).toBeVisible();
-    // the nose slider reaches PAST the old 70 cap now (user: "pointiness
-    // isn't high enough") and the tail retunes INDEPENDENTLY — both still
-    // store (poll the async preview line, never a single shot)
-    await setRange(page, 'nose', 90);
-    await expect.poll(async () => {
-      const t = (await prev.textContent()) ?? '';
-      return /90% nose/.test(t) && /triangles/.test(t) && !/nothing to place/.test(t);
-    }, { timeout: 20_000 }).toBe(true);
-    await setRange(page, 'tail', 15);
-    await expect.poll(async () => {
-      const t = (await prev.textContent()) ?? '';
-      return /15% tail/.test(t) && /triangles/.test(t) && !/nothing to place/.test(t);
-    }, { timeout: 20_000 }).toBe(true);
-    await page.getByTestId('tool-cancel').click();
-  });
+  // RETIRED v1.12.5 (L5): STORE = latsphere.test (needle ellipsoid+cylinder
+  // store, nose/tail blends incl. a long-nose needle) + splitface.test (window
+  // faces SUBDIVIDE, never refuse). PREVIEW tokens ("cylinder + N% nose /
+  // N% tail", 90% nose, 15% tail, field visibility) run in balloonskin.dom
+  // test 4.
 
   // ------------------------------------------------------------ v1.7.3 ---
   // "Let me choose whether the paint is metallic/matte etc. as per the other
   // controls; ensure that is properly integrated into a single control."
 
-  test('paint is ONE control: the finish rides the committed palette slot', async ({ page }) => {
-    await openNew(page);
-    await page.getByTestId('tools-menu').click();
-    await page.getByTestId('tool-balloon').click();
-    const prev = page.locator('[data-testid="tool-preview"]');
-    // one row carries swatch + hex + FINISH chips + the slot mode (the old
-    // separate 'paint slot' select field is gone from the definition)
-    await expect(page.getByTestId('tool-field-color')).toBeVisible();
-    await expect(page.getByTestId('paint-finish-matte')).toBeVisible();
-    await expect(page.getByTestId('paint-finish-metal')).toBeVisible();
-    await expect(page.getByTestId('paint-finish-glass')).toBeVisible();
-    await expect(page.getByTestId('paint-how-new')).toBeVisible();
-    await expect(page.getByTestId('paint-how-nearest')).toBeVisible();
-    await expect(page.getByTestId('tool-opt-colorhow-new')).toHaveCount(0);
-    // the preview line reports the finish (matte is the default)
-    await expect(prev).toContainText(/matte paint/);
-    await page.getByTestId('paint-finish-metal').click();
-    await expect(prev).toContainText(/metal paint/);
-    // Build: the NEW slot must carry the METAL shading spec (metallic 1,
-    // roughness 0) together with the picked RGB — the finish is not cosmetic
-    await page.getByTestId('tool-ok').click();
-    await expect(page.getByTestId('tool-confirm-box')).toBeVisible();
-    await page.getByTestId('tool-confirm').click();
-    await expect(page.getByTestId('place-label')).toBeVisible({ timeout: 15_000 });
-    await page.getByTestId('place-build').click();
-    await expect(page.getByTestId('place-label')).toBeHidden();
-    const painted = await page.evaluate(() => {
-      const d = (window as unknown as { __ARCHEAN__: { engine: { blueprint: { data: {
-        triangles?: Record<string, unknown>[]; colors?: (Record<string, number> | null)[] } } } } })
-        .__ARCHEAN__.engine.blueprint.data;
-      const t = d.triangles![d.triangles!.length - 1]! as { colors?: number[] };
-      return (d.colors ?? [])[t.colors![0]!] ?? null;
-    });
-    expect(painted).toMatchObject({ r: 201, g: 201, b: 201, opacity: 15, roughness: 0, metallic: 1 });
-    // the toast names the finish too (the result the user gets after Build)
-    await expect(page.locator('[data-testid="tool-toast"]')).toContainText(/metal paint/);
-  });
+  // RETIRED v1.12.5 (L5): the ONE-control UI is pinned in tooldialog.test.tsx
+  // ("the paint control is one row…"), the preview finish line in balloonskin
+  // test 4 ("matte paint" → "metal paint"), and the COMMIT (#c9c9c9 = 201 ·
+  // metallic 1 · roughness 0 into the saved slot + "metal paint" toast message)
+  // in tooldoc "the shipped sphere commit writes the picked finish into the
+  // saved slot" — the exact e2e values.
 
   test('the label ↩ reopens the dialog with the parameters AND the dragged spot', async ({ page }) => {
     await openNew(page);
@@ -770,93 +590,15 @@ test.describe('generate balloon tool: dialog → movable ghost → cancel/build 
   // law: split, never drop. This pin ghosts the user's 12×8×12 cyl+nose
   // balloon WITH fins, ⟲Y + a 5-cell drag, ✔ Builds, and asserts the FILE's
   // skin area equals the ghost's (the pre-fix tree lost ~2.5 % of it).
-  test('rotate + drag a big balloon: the FILE keeps the ghost’s whole skin @ui', async ({ page }) => {
-    test.setTimeout(180_000);      // a 24 m zeppelin's fin batch plans on the worker
-    // v1.11.0: on the phone viewport the 24 m fin-commit (thousands of doc
-    // inserts + scene reload at dpr 2.625) runs past every budget — the
-    // PHONE leg pins the label ritual (the turn row overflows 412 px, so
-    // the clicks are evaluate-based); the file-integrity arithmetic is
-    // viewport-independent. Scale the body to the viewport.
-    const phone = test.info().project.name !== 'chromium';
-    if (phone) test.setTimeout(300_000);
-    await openNew(page);
-    await page.getByTestId('tools-menu').click();
-    await page.getByTestId('tool-balloon').click();
-    await page.getByTestId('tool-opt-profile-cylinder').click();
-    await page.getByTestId('tool-opt-fins-on').click();
-    // cylinder body: rx/rz = radius, ry = LENGTH (the tail zone rides it)
-    await setRange(page, "rx", phone ? 8 : 12);
-    await setRange(page, "ry", phone ? 4 : 8);
-    await setRange(page, "rz", phone ? 8 : 12);
-    const prev = page.locator('[data-testid="tool-preview"]');
-    await expect.poll(async () => ((await prev.textContent()) ?? '').includes('rudder'),
-      { timeout: 60_000 }).toBe(true);
-    await page.getByTestId('tool-ok').click();
-    await expect(page.getByTestId('tool-confirm-box')).toBeVisible();
-    await page.getByTestId('tool-confirm').click();
-    await expect(page.getByTestId('place-label')).toBeVisible({ timeout: 60_000 });
-
-    // the transforms that used to bite: ONE quarter-turn, ONE whole-cell drag
-    // (evaluate-click: on the 412 px viewport the label's turn row overflows
-    // the viewport, and a real pointer click waits for visibility forever)
-    await page.getByTestId('place-rot-y').evaluate(el => (el as HTMLElement).click());
-    expect((await ghost(page))!.turns).toBe(1);
-    expect(await shift(page, [0, 0, 5])).toBe(true);
-
-    const ghostArea = await page.evaluate(() => {
-      const d = (window as unknown as { __ARCHEAN__: { placeData: () => {
-        triangles: Record<string, number>[] } } }).__ARCHEAN__.placeData();
-      const g = (t: Record<string, number>, i: number, ax: string) =>
-        t[`v${i}_${ax}`]! + 12 * (t[`frame_${ax}`] ?? 0);
-      let a = 0;
-      for (const t of d.triangles) {
-        const u = [0, 1, 2].map(k => g(t, 1, ['x', 'y', 'z'][k]!) - g(t, 0, ['x', 'y', 'z'][k]!));
-        const w = [0, 1, 2].map(k => g(t, 2, ['x', 'y', 'z'][k]!) - g(t, 0, ['x', 'y', 'z'][k]!));
-        a += Math.hypot(u[1]! * w[2]! - u[2]! * w[1]!,
-          u[2]! * w[0]! - u[0]! * w[2]!,
-          u[0]! * w[1]! - u[1]! * w[0]!) / 2;
-      }
-      return a;
-    });
-    expect(ghostArea).toBeGreaterThan(phone ? 200 : 1000);   // premise: a fat-face skin
-
-    await page.getByTestId('place-build').click();
-    await expect(page.getByTestId('tool-toast')).toContainText('BALLOON');
-    const built = await page.evaluate(() => {
-      const ts0 = ((window as unknown as { __ARCHEAN__: { engine: { blueprint: { data: {
-        triangles?: Record<string, number>[] } } } } }).__ARCHEAN__.engine.blueprint.data.triangles) ?? [];
-      // the ghost payload is skin + fillets + the three PANELS; the commit
-      // nests the panels into their Build subgrids (data.triangles there),
-      // so the file-side total = the top skin PLUS every nested list
-      const comps = ((window as unknown as { __ARCHEAN__: { engine: { blueprint: { data: {
-        components?: { type: string; data?: Record<string, unknown> }[] } } } } })
-        .__ARCHEAN__.engine.blueprint.data.components) ?? [];
-      const ts = [...ts0];
-      for (const c of comps)
-        for (const t of ((c.data?.['triangles'] as Record<string, number>[] | undefined) ?? [])) ts.push(t);
-      const g = (t: Record<string, number>, i: number, ax: string) =>
-        t[`v${i}_${ax}`]! + 12 * (t[`frame_${ax}`] ?? 0);
-      let a = 0, bad = 0;
-      for (const t of ts) {
-        // every stored record must decode inside its own 32-slot window
-        for (const ax of ['x', 'y', 'z'])
-          for (let i = 0; i < 3; i++) {
-            const wv = t[`v${i}_${ax}`]!;
-            if (wv < 0 || wv > 31) bad++;
-          }
-        const u = [0, 1, 2].map(k => g(t, 1, ['x', 'y', 'z'][k]!) - g(t, 0, ['x', 'y', 'z'][k]!));
-        const w = [0, 1, 2].map(k => g(t, 2, ['x', 'y', 'z'][k]!) - g(t, 0, ['x', 'y', 'z'][k]!));
-        a += Math.hypot(u[1]! * w[2]! - u[2]! * w[1]!,
-          u[2]! * w[0]! - u[0]! * w[2]!,
-          u[0]! * w[1]! - u[1]! * w[0]!) / 2;
-      }
-      return { area: a, bad };
-    });
-    expect(built.bad, 'every stored record is window-legal').toBe(0);
-    // the hole was ~2.5 % of the skin — a 1 % band catches it with room
-    expect(Math.abs(built.area - ghostArea), 'file area vs ghost area')
-      .toBeLessThan(ghostArea * 0.01);
-  });
+  // RETIRED v1.12.5 (L5): the never-drop law (shifts/quarter-turns SPLIT fat
+  // faces, never holed) is splitface.test "transformSkinTris NEVER DROPS"
+  // (length ≥ base, summed signed AREA within 1 %, window-legal pieces); the
+  // group-local commit mapping (each GROUP through its own ghostMap, panels
+  // nesting intact, every record window-legal) is tooldoc "a rotated + moved
+  // ghost maps EVERY tail record with the skin"; the ghost-side transforms are
+  // pinned headless (scene.headless "placement ghost lattice law" incl. the
+  // whole-cell drag). The 24 m file-area ≡ ghost-area arithmetic was the
+  // integration shadow of exactly those pins.
 
   test('the ELLIPSOID body gets the volume-block toggle and the sealed envelope (TODO F + A)', async ({ page }) => {
     // v1.11 (we: "let the ellipsoid hull also have option for volume block;

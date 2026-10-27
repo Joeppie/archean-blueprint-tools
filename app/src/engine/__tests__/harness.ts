@@ -7,6 +7,7 @@
 // the "does it render in the right place" class leave the browser.
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
+import { Vector3 } from 'three';
 import { openFunnel } from '../edit';
 import { bakeGeo, type LoadedModel, type ModelAtlas, type ModelGeo, type ModelManifest } from '../models';
 import { Engine } from '../scene';
@@ -153,4 +154,16 @@ export async function withRealModels(e: Engine, cis: number[], ms = 20_000): Pro
     if (Date.now() - t0 > ms) throw new Error(`real models for [${cis}] did not stream within ${ms} ms`);
     await new Promise((r) => setTimeout(r, 25));
   }
+}
+
+/** v1.12.5 CAMERA PINS: a PASSIVE OrbitControls stand-in for the headless
+ *  Engine (the real one lives in attach() with a canvas). The camera laws
+ *  this unlocks — viewPreset's eye-snap formulas, load(keepView)'s
+ *  camera-carry — are Engine math that treats controls as a target holder
+ *  with a no-op update(); OrbitControls' damping behaviour is NOT pinned
+ *  here (the e2e settles that on camPos samples). */
+export function virtualControls(e: Engine): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const t = e as any;
+  t.controls = { target: new Vector3(), update() { /* passive */ }, dispose() { /* passive */ } };
 }

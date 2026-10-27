@@ -151,6 +151,56 @@ describe('v1.6.1 generated records persist into doc + save + history', () => {
     expect(out.data.triangles.every(t => !('smooth' in t))).toBe(true);
   });
 
+  // v1.12.5 (L5 pairing for the retired sphereskin e2e 'shading=smooth
+  // writes the game's smooth:1 on every triangle'): the shade select's
+  // form key lands smooth:1 on EVERY stored record through the SHIPPED
+  // commit (the game's own hullify-skin convention, FORMAT §Triangles).
+  test('shading=SMOOTH: the commit writes smooth:1 on every stored record', () => {
+    const { ctx } = openFunnel(SRC);
+    sphere.place!.commit({ ...sphere.initial, shade: 'smooth' }, { triangles: [] }, [0, 0, 0], ctx);
+    const out = JSON.parse(serializeSave(ctx)) as { data: { triangles: Record<string, unknown>[] } };
+    expect(out.data.triangles.length).toBeGreaterThan(0);
+    expect(out.data.triangles.every(t => t.smooth === 1)).toBe(true);
+  });
+
+  // v1.12.5 (L5 pairing for the retired sphereskin e2e '⟲ quarter-turns
+  // rotate the ghost (lattice law) and survive Build' — BUILD half): the
+  // commit writes the LIVE GHOST payload (Engine.clusterGhostData after
+  // clusterGhostRotate — the lattice quarter-turn law itself is pinned on
+  // the headless Engine, scene.headless 'placement ghost'), NOT a fresh
+  // un-rotated plan: the stored corners are the payload's corners.
+  test('the commit writes the GHOST payload verbatim (a rotated skin survives Build)', () => {
+    const plan = sphereSkinTris({ rx: 2, ry: 1, rz: 1, profile: 'ellipsoid' },
+      { slot: 51, material: 0, smooth: false });
+    // a lattice quarter-turn about world ŷ through the g=6 centre: x ↔ z
+    // (linear part x' = z, z' = −x — det +1, the Engine's clusterGhostRotate
+    // family); the spans must swap in the file.
+    const swapped = transformSkinTris(plan, (g) => [g[2], g[1], 12 - g[0]] as [number, number, number]);
+    const gOf = (t: Record<string, number>, i: number, ax: string) =>
+      t[`v${i}_${ax}`]! + 12 * (t[`frame_${ax}`] ?? 0);
+    const spans = (ts: Record<string, number>[]) => {
+      const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+      for (const t of ts) for (let i = 0; i < 3; i++)
+        (['x', 'y', 'z'] as const).forEach((ax, k) => {
+          const g = gOf(t, i, ax);
+          mn[k] = Math.min(mn[k]!, g); mx[k] = Math.max(mx[k]!, g);
+        });
+      return mx.map((v, k) => v - mn[k]!);
+    };
+    const base = spans(plan as unknown as Record<string, number>[]);
+    expect(base[0]).toBeGreaterThan(base[2]!);            // long along x (rx 2 > rz 1)
+    const { bp, ctx } = openFunnel(SRC);
+    sphere.place!.commit({ ...sphere.initial },
+      { triangles: swapped as Triangle[] }, [0, 0, 0], ctx);
+    const n = (bp.data.triangles ?? []).length;
+    expect(n).toBeGreaterThan(0);
+    const stored = spans((bp.data.triangles ?? []) as unknown as Record<string, number>[]);
+    // THE FILE carries what was ghosted: x ↔ z swapped spans (a fresh
+    // un-rotated plan would keep the ORIGINAL orientation)
+    expect(stored[0]).toBeLessThan(stored[2]!);
+    expect(stored).toEqual([base[2], base[1], base[0]]);
+  });
+
   test('commit APPENDS on a file that already has triangles (authored ones verbatim)', () => {
     const src = SRC.replace('"components":[],', '"components":[],'
       + '"triangles":[{"colors":[51,51,51,51,51,51,51],"frame_x":0,"frame_y":0,"frame_z":0,'

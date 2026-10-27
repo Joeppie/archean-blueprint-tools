@@ -99,53 +99,13 @@ test.describe('undo/redo + delete key + triangle select @ui', () => {
       { timeout: 15_000 }).toBe(true);
   });
 
-  test('Ctrl+Z keeps the camera (v1.5.10 user: "ctrl-z resets view")', async ({ page }) => {
-    await openNew(page);
-    const cam = () => page.evaluate(() =>
-      (window as unknown as { __ARCHEAN__: { engine: { camPos: () => number[] } } })
-        .__ARCHEAN__.engine.camPos());
-    // v1.12.2 RE-PIN: OrbitControls' damping decays in the render pump AFTER
-    // mouseup — a fixed sleep under-slept the fast preview boot, so the
-    // "before" sample rode the inertia tail and the drift compared moving
-    // poses. Settle = two IDENTICAL samples.
-    const settle = async () => {
-      let prev = await cam();
-      for (let i = 0; i < 40; i++) {
-        await page.waitForTimeout(120);
-        const now = await cam();
-        if (now.every((v, k) => Math.abs(v - prev[k]!) < 1e-9)) return now;
-        prev = now;
-      }
-      return prev;
-    };
-    const c0 = await cam();
-    // ORBIT the camera off the framing pose (a >4px canvas drag is an orbit,
-    // never a pick): the pin is only meaningful from a NON-default view.
-    const box = await page.locator('canvas').boundingBox();
-    await page.mouse.move(box!.x + box!.width * 0.5, box!.y + box!.height * 0.5);
-    await page.mouse.down();
-    for (let i = 1; i <= 8; i++)
-      await page.mouse.move(box!.x + box!.width * (0.5 + 0.02 * i),
-        box!.y + box!.height * (0.5 + 0.01 * i));
-    await page.mouse.up();
-    const c1 = await settle();                                 // damping settled
-    const moved = Math.hypot(c1[0]! - c0[0]!, c1[1]! - c0[1]!, c1[2]! - c0[2]!);
-    expect(moved, 'the orbit must actually move the camera (non-vacuous)')
-      .toBeGreaterThan(0.5);
-    // a tool run + an UNDO of it: the view must not be re-framed back
-    await openTool(page, 'replace-all');
-    await page.getByTestId('tool-ok').click();
-    await page.getByTestId('tool-confirm').click();
-    await expect.poll(async () => (await bpOf(page)).blocks.every(b => b.material === 3),
-      { timeout: 15_000 }).toBe(true);
-    const c2 = await settle();
-    await page.keyboard.press('Control+z');
-    await expect.poll(async () => (await bpOf(page)).blocks.every(b => (b.material ?? 0) === 0),
-      { timeout: 15_000 }).toBe(true);
-    const c3 = await settle();
-    const drift = Math.hypot(c3[0]! - c2[0]!, c3[1]! - c2[1]!, c3[2]! - c2[2]!);
-    expect(drift, 'undo must not move the camera').toBeLessThan(0.05);
-  });
+  // RETIRED v1.12.5 (L5): 'Ctrl+Z keeps the camera (v1.5.10)' — the engine
+  // half of the keepView law (load(keepView=true) carries the eye across a
+  // same-craft rebuild, drift < 0.05 m; keepView=false re-frames to the
+  // load framing) is pinned in scene.headless.test.ts. The Editor side is
+  // a one-line prop (applyHistory → setBpKeepView(true), the Viewport
+  // forwards it to load); the e2e's orbit-drag + damping-settle dance was
+  // measuring the SAME camPos seam the headless pin drives directly.
 
   test('Delete deletes the selected block; Ctrl+Z brings it back', async ({ page }) => {
     test.skip(test.info().project.name !== 'chromium', 'the side panel is a drawer on phones');
