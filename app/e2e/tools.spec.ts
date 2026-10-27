@@ -1,17 +1,20 @@
-// tools.spec.ts — the v1.7 TOOLS menu + MATERIALS editor + RGB picker.
-//  • Tools ▾ lists the registry (Replace all…, Blocks → hull triangles…)
-//    with the "more tools to follow" footer;
-//  • the modal is DEFINITION-GENERATED and opens centred: fields auto-laid,
-//    a live preview line, CANCEL (or Esc) changes nothing, OK RUNS;
-//  • Replace all swaps materials/appearance on the live blueprint and the
-//    merged hull repaints (stats().loads strictly increases — the AGENTS
-//    "data assertions cannot pin a repaint" rule);
-//  • Blocks → hull triangles is a DANGER tool: OK opens a CONFIRMATION BOX
-//    (live readout + warning), Confirm converts every geometry block into
-//    covering triangles and the dialog CLOSES (2026-10-20 — no inert second OK);
-//  • the block MATERIALS row writes the file's `material` (a gameplay
-//    identity) WITHOUT touching colours;
-//  • the RGB picker writes a NEW slot into the craft's own palette.
+// tools.spec.ts — the v1.7 TOOLS menu, BROWSER TIER only.
+// The definition-generated modal (field layout, preview-gates-OK, the
+// OK ▸ confirm-box ▸ run flow incl. the danger warning, Esc/✕/backdrop),
+// the registry menu listing, the Edit-menu history state and every
+// blueprint-DATA value of the replace-all/hullify runs live at lower tiers:
+//   src/components/__tests__/tooldialog.test.tsx  (jsdom; tools.spec's green
+//     values transcribed — 5 blocks change material, 35 faces on 5 blocks
+//     repaint, converted 5 blocks ▸ ≥12 triangles, materials 3 / colours
+//     [4×7]) and topbar.test.tsx (the menu DOM). The tool→toast→undo
+//     integration is undo.spec. (L5, docs/TEST-PYRAMID.md v1.12.4.)
+// What only a browser can state stays here:
+//  • the merged hull REPAINTS after a run (stats().loads strictly increases
+//    — the AGENTS "data assertions cannot pin a repaint" rule);
+//  • the dialog never fills the view; its body scrolls and the footer stays
+//    pinned (desktop + Pixel 7, the phone bottom clear zone — pixels);
+//  • the block MATERIALS row and the RGB picker drive the live engine + dock
+//    (selection, brush, the palette grid).
 import { expect, test, type Page } from '@playwright/test';
 
 type Blk = { pos_x: number; pos_y: number; pos_z: number; type: number; material?: number;
@@ -66,62 +69,20 @@ async function openTool(page: Page, id: string) {
 }
 
 test.describe('tools menu + dialogs @ui', () => {
-  test('the menu lists the registry; Cancel changes nothing', async ({ page }) => {
-    await openNew(page);
-    await page.getByTestId('tools-menu').click();
-    await expect(page.getByTestId('tool-replace-all')).toBeVisible();
-    await expect(page.getByTestId('tool-hullify')).toBeVisible();
-    await page.keyboard.press('Escape');
-    await page.getByTestId('edit-menu').click();
-    // 2026-10-20: Undo is WIRED but a fresh, untouched craft has no history yet.
-    await expect(page.getByTestId('edit-undo')).toBeDisabled();
-    await expect(page.getByTestId('edit-redo')).toBeDisabled();
-    await expect(page.getByTestId('edit-vessel-author')).toBeDisabled();
-    await expect(page.getByTestId('edit-vessel-code')).toBeDisabled();
-    await page.keyboard.press('Escape');
-    const before = await bpOf(page);
-    expect(before.blocks.length).toBe(5);                              // the deck plate
-    await openTool(page, 'replace-all');
-    await expect(page.getByTestId('tool-preview')).toContainText(/5 blocks change material/);
-    await page.getByTestId('tool-cancel').click();
-    await expect(page.getByTestId('tool-dialog-replace-all')).toBeHidden();
-    expect((await bpOf(page)).blocks).toEqual(before.blocks);
-  });
-
-  test('replace all MATERIALS: composite deck ▸ aluminium, hull repaints', async ({ page }) => {
+  test('replace all MATERIALS repaints the merged hull', async ({ page }) => {
+    // e2e-tier because: the merged hull rebuild (stats().loads strictly
+    // increases) is a repaint law no lower tier can state (AGENTS: data
+    // assertions cannot pin a repaint). The data values (all materials 3,
+    // colours [4×7] kept) and the full dialog flow are jsdom's
+    // tooldialog.test.tsx (L5-transcribed from this spec's retired leg).
     await openNew(page);
     await openTool(page, 'replace-all');
-    // the shipped default IS the user's example: composite ▸ aluminium
-    await expect(page.getByTestId('tool-preview')).toContainText(/5 blocks change material/);
     const l0 = await loads(page);
     await page.getByTestId('tool-ok').click();                          // ▸ confirm box
     await expect(page.getByTestId('tool-confirm-box')).toBeVisible();
-    await expect(page.getByTestId('tool-preview')).toContainText(/5 blocks change material/);
     await page.getByTestId('tool-confirm').click();                     // runs + CLOSES
     await expect(page.getByTestId('tool-dialog-replace-all')).toBeHidden();
-    await expect.poll(async () => (await bpOf(page)).blocks.every(b => b.material === 3),
-      { timeout: 15_000 }).toBe(true);
     await expect.poll(() => loads(page), { timeout: 15_000 }).toBeGreaterThan(l0);  // hull rebuilt
-    // colours untouched: the deck kept its slot-4 paint
-    expect((await bpOf(page)).blocks[0]!.colors).toEqual([4, 4, 4, 4, 4, 4, 4]);
-  });
-
-  test('blocks → hull triangles: OK opens the info confirm box, Confirm converts + closes', async ({ page }) => {
-    await openNew(page);
-    await openTool(page, 'hullify');
-    await expect(page.getByTestId('tool-preview')).toContainText(/5 blocks ▸ \d+ triangles/);
-    await expect(page.getByTestId('tool-preview')).toContainText(/shading flat/);
-    await page.getByTestId('tool-ok').click();                          // ▸ confirm box only
-    expect((await bpOf(page)).blocks.length).toBe(5);
-    await expect(page.getByTestId('tool-confirm-box')).toBeVisible();
-    await expect(page.getByTestId('tool-warning')).toContainText(/rewrites hull geometry/i);
-    await page.getByTestId('tool-confirm').click();                     // converts + closes
-    await expect(page.getByTestId('tool-dialog-hullify')).toBeHidden();
-    await expect.poll(async () => (await bpOf(page)).blocks.length, { timeout: 15_000 }).toBe(0);
-    const d = await bpOf(page);
-    expect((d.triangles ?? []).length).toBeGreaterThanOrEqual(12);
-    expect(d.triangles!.every(t => t.colors && (t.colors as number[]).length === 5)).toBe(true);
-    await expect(page.getByTestId('tool-toast')).toContainText(/converted 5 blocks/);
   });
 
   test('the dialog never fills the view; its body scrolls and the footer stays pinned', async ({ page }) => {
@@ -174,20 +135,6 @@ test.describe('materials + RGB picker @ui', () => {
       { timeout: 10_000 }).toBe(5);
     expect((await bpOf(page)).blocks[sel]!.colors).toEqual(before.blocks[sel]!.colors);
     await expect(page.getByTestId('block-material-name')).toHaveText('Lead');
-  });
-
-  test('a COLOUR replace-all runs through the native select', async ({ page }) => {
-    test.skip(test.info().project.name !== 'chromium', 'the side panel is a drawer on phones');
-    await openNew(page);
-    await openTool(page, 'replace-all');
-    await page.getByTestId('tool-select-target').selectOption('colors');
-    await page.getByTestId('tool-select-source').selectOption('all');
-    await page.getByTestId('tool-select-destColor').selectOption('hull');
-    await expect(page.getByTestId('tool-preview')).toContainText(/35 faces on 5 blocks repaint/);
-    await page.getByTestId('tool-ok').click();
-    await page.getByTestId('tool-confirm').click();
-    await expect.poll(async () => (await bpOf(page)).blocks.every(b => b.colors?.[0] === 51),
-      { timeout: 15_000 }).toBe(true);
   });
 
   test('RGB picker: a custom colour becomes a NEW palette slot + paints', async ({ page }) => {
