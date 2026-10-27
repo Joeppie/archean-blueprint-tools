@@ -874,7 +874,14 @@ test.describe('build-dock: triangle PIN placement @ui', () => {
     for (const s of spots!) { await page.mouse.click(s.x, s.y); await page.waitForTimeout(120); }
     await expect.poll(tris, { timeout: 5000,
       message: 'the pair lands: self + mirrored twin' }).toBe(n0 + 2);
-    const [ti, tw] = [n0, n0 + 1];                  // batch order [tri, twin]
+    // v1.12.2 RE-PIN: with the pair hugging the x = 0 plane the two prisms
+    // are COPANAR OVERLAPS — which record a pixel answers is the merged
+    // geometry's build-order tie, not a law. Use whichever record the pick
+    // answers as the SELECTED prism; the delta/flip/paint laws below are
+    // symmetric in (self, twin), so swapping the roles keeps them exact.
+    let [ti, tw] = [n0, n0 + 1] as [number, number];
+    if (!(await triPixel(page, n0)) && (await triPixel(page, n0 + 1)))
+      [ti, tw] = [n0 + 1, n0];
     await page.keyboard.press('Escape');            // live pins down
     await page.getByTestId('ws-edit').click();
     const px = await triPixel(page, ti);
@@ -959,7 +966,12 @@ test.describe('build-dock: triangle PIN placement @ui', () => {
     expect(spots, 'the deck answers the pin path with three spread spots').not.toBeNull();
     for (const s of spots!) { await page.mouse.click(s.x, s.y); await page.waitForTimeout(120); }
     await expect.poll(tris, { timeout: 5000 }).toBe(n0 + 2);
-    const [ti, tw] = [n0, n0 + 1];
+    // v1.12.2 RE-PIN (same family as TODO D): coplanar pair near the mirror
+    // plane — the pick's tie answer decides which record is SELECTED; the
+    // pair-paint law is symmetric in (self, twin).
+    let [ti, tw] = [n0, n0 + 1] as [number, number];
+    if (!(await triPixel(page, n0)) && (await triPixel(page, n0 + 1)))
+      [ti, tw] = [n0 + 1, n0];
     await page.keyboard.press('Escape');
     await page.getByTestId('ws-edit').click();
     const px = await triPixel(page, ti);

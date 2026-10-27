@@ -347,6 +347,10 @@ test('mobile chain: no unsolicited static card, compact ⚙ card, always-on dock
   });
 
   await test.step('the bottom dock is always visible (no drawer, v1.11) + 1-across card grid', async () => {
+    // KNOWN ISSUE 13 law: this boots IN ⌖ Info, and re-clicking the ACTIVE
+    // tile drops to the CLEAN canvas-focus mode (no dock by design). Take a
+    // TRANSIT through + Parts so this click is a real mode change into ⌖.
+    await page.getByTestId('mode-edit').click();                    // + Parts
     await page.getByTestId('mode-view').click();                    // ⌖ Info mode
     await expect(page.getByTestId('build-dock')).toBeVisible();
     await expect(page.getByTestId('vessel-stats')).toBeVisible();
@@ -551,6 +555,8 @@ test.describe('modes, new craft, file menu @ui', () => {
     await target.click();                                  // STEP 1: the part
     const port = page.getByTestId('wire-target-port').first();
     await expect(port).toBeVisible();                      // STEP 2: explicit port
+    await port.hover();   // v1.12.2: the list re-laid under a stationary mouse —
+                          // hover it, don't hope the old coords kept the boundary
     await expect.poll(hoverState).toBeGreaterThanOrEqual(0);
     await port.click();
     await expect.poll(async () => page.evaluate(() => {

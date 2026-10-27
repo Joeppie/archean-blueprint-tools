@@ -158,7 +158,12 @@ test.describe('blocks EDIT: highlight, in-place rotate, snap, twin @place', () =
     // itself. Pick the same pixel in ✎ Modify: the auto-jump lands ws-parts
     // and the inspector appears there.
     await page.getByTestId('ws-edit').click();
-    const px2 = await page.evaluate(() => {
+    // v1.12.2 RE-PIN: the first click FLEW the camera to the part (380 ms
+    // tween) — a probe taken mid-flight goes stale before the second click
+    // lands (the pick at that pixel is then sky, and the auto-jump law never
+    // fires; the fast preview boot exposed this, KNOWN ISSUE 12 family).
+    // Probe is valid only on a SETTLED view: two identical answers win.
+    const compPixel = () => page.evaluate(() => {
       const c = document.querySelector('canvas')!;
       const r = c.getBoundingClientRect();
       const e = (window as unknown as { __ARCHEAN__?: { engine: { pendingReal: number;
@@ -170,6 +175,13 @@ test.describe('blocks EDIT: highlight, in-place rotate, snap, twin @place', () =
         }
       return null;
     });
+    let px2 = await compPixel();
+    for (let i = 0; i < 30 && px2; i++) {
+      await page.waitForTimeout(250);
+      const again = await compPixel();
+      if (again && Math.hypot(again.x - px2.x, again.y - px2.y) < 6) { px2 = again; break; }
+      px2 = again;
+    }
     expect(px2, 'a component pixel answers in Modify too').not.toBeNull();
     await page.mouse.click(px2!.x, px2!.y);
     await expect(page.getByTestId('ws-parts'),
