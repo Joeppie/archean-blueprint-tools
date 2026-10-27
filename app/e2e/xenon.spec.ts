@@ -34,7 +34,9 @@ test.describe('Xenon IDE @ui', () => {
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 90_000 });
 
     // Xenon ▾ lists the MiniComputer (only menu tile for programmable crafts)
+    // — behind a WORK-IN-PROGRESS disclaimer (our rule 2026-10-27)
     await page.getByTestId('xenon-menu').click();
+    await expect(page.getByTestId('xenon-wip')).toContainText('Work in progress');
     const item = page.locator('[data-testid^="xenon-comp-"]').first();
     await expect(item).toBeVisible();
     await item.click();

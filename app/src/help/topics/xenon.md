@@ -2,7 +2,14 @@
 Tags: xenon xenoncode computer code program ide screen hd-screen nodes canvas programing programming plomo firstflight wasm interpreter
 
 **Xenon ▾** (top bar, only on crafts that carry `MiniComputer` components with
-`.xc` programs) lists every programmable computer on the vessel. Clicking one
+`.xc` programs) lists every programmable computer on the vessel.
+
+> **Work in progress** — the programs genuinely run on the developer's own
+> interpreter, but the simulation around them is not complete and **not yet
+> correct**: no power, no live io routing to the craft's real components,
+> screen pixel sizes are approximations, and the world never answers the
+> program (temperatures, fluid levels, sensor values are static). Treat what
+> you see as a faithful CODE view, not a flight-ready simulation. Clicking one
 opens the **XenonCode IDE** — the same look as the in-game window: title bar
 with the ON indicator, the File/Library/Computer menu row, one tab per `.xc`
 file, line-numbered code, and the `Program 'name' loaded / is running…`

@@ -163,6 +163,15 @@ export default function TopBar(p: Props) {
       {(p.xenonComps?.length ?? 0) > 0 && (
         <Menu testid="xenon" label="Xenon ▾">
           {close => (<>
+            {/* WIP disclaimer (our rule 2026-10-27): the interpreter is the
+                dev's and programs genuinely run, but the SIMULATION around
+                them is not complete/correct yet — say so where it's used */}
+            <div data-testid="xenon-wip"
+              className="mx-2 mt-1.5 rounded border border-amber-400/40 bg-amber-400/10
+                         px-2.5 py-1.5 text-[10px] leading-snug text-amber-200/90">
+              ⚠ Work in progress — programs run on the dev's interpreter,
+              but the simulation is not complete and not yet correct.
+            </div>
             <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-ink-dim">
             Programmable computers</div>
             {p.xenonComps!.map(c => (
