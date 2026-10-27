@@ -22,8 +22,9 @@
 // ---------------------------------------------------------------------------
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  parseKv, parseNodes, tokenize, varKind, xenonPump, xenonScreenBindings, xcDiskFiles,
-  type XenonComputer, type XGraph, type XCFile,
+  chanInfo, loadChannelTable, parseKv, parseNodes, tokenize, varKind, xenonPump,
+  xenonScreenBindings, xcDiskFiles,
+  type ChannelTable, type XenonComputer, type XGraph, type XCFile,
 } from '../engine/xenoncode';
 import type { Engine } from '../engine/scene';
 import { ScreenCanvas } from './ScreensDock';
@@ -59,7 +60,7 @@ export default function XenonDialog(p: {
   const [newProg, setNewProg] = useState(false);
   const [armedDel, setArmedDel] = useState(false);
   const [vals, setVals] = useState<Record<string, number>>({});
-  const [side, setSide] = useState<'vars' | 'screens' | 'bus' | 'console'>('screens');
+  const [side, setSide] = useState<'vars' | 'screens' | 'world' | 'bus' | 'console'>('screens');
   const [varQ, setVarQ] = useState('');
   const [scrQ, setScrQ] = useState('');
   // ── debugger (VS-Code keys, our law): F9 breakpoint on the clicked line,
@@ -68,6 +69,25 @@ export default function XenonDialog(p: {
   // (executed-line tracking, tools/xenoncode/patch_xenon_debug.py).
   const [bps, setBps] = useState<Record<number, Set<number>>>({});
   const [lastLine, setLastLine] = useState(-1);
+  // the game's OWN channel meanings (viewer/models/channels.json): an io
+  // resolves to its cabled/aliased component TYPE, the channel to its
+  // function — "io 4 · NavInstrument · ch 6 Heading", not a bare "ch 6"
+  // (we: "the computer STILL does not resolve the component type of the
+  // input, nor the meaning of the channels per input")
+  const [chans, setChans] = useState<ChannelTable | null | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    void loadChannelTable().then(c => { if (live) setChans(c); });
+    return () => { live = false; };
+  }, []);
+  const devOf = (io: number | string) => comp.devices.find(d =>
+    typeof io === 'number' ? d.io === io : d.alias === io);
+  const chanLabel = (io: number | string | undefined, ch: number | undefined,
+    dir: 'in' | 'out') => {
+    if (io === undefined || ch === undefined) return null;
+    const dev = devOf(io);
+    return dev ? chanInfo(chans, dev.type, dir, ch) : null;
+  };
   const closeRef = useRef(p.onClose);
   closeRef.current = p.onClose;
   const editRef = useRef<HTMLTextAreaElement>(null);
@@ -116,15 +136,15 @@ export default function XenonDialog(p: {
   }, [pump.surfaces, scrQ, bindings, pump.cycles]);
   const status = tab === 100 ? 'nodes' : 'code';
 
-  const save = (all: boolean) => {
-    const next = [...files];
-    if (!all && file) next[tab] = { ...file, code: draft };
-    setFiles(next);
+  const save = (_all: boolean) => {
+    // the draft is the EDITOR's buffer: it may only land in the file while
+    // editing (File ▸ Save while browsing must never blank the file)
+    const merged = [...files];
+    if (editing && tab < files.length) merged[tab] = { ...merged[tab]!, code: draft };
+    setFiles(merged);
     setDirty(new Set());
     setEditing(false);
-    p.onFiles(comp.ci, all
-      ? next.map((f, i) => (i === tab && editing ? { ...f, code: draft } : f))
-      : next);
+    p.onFiles(comp.ci, merged);
   };
 
   // Ctrl+S / Ctrl+Shift+S (behind typing: from the textarea the draft rides
@@ -232,25 +252,43 @@ export default function XenonDialog(p: {
               onClick={p.onClose} aria-label="close">✕</button>
           </div>
         </div>
-        {/* menu row — File is FUNCTIONAL (the virtual disk), in-game parity */}
-        <div className="flex flex-wrap items-center gap-4 border-b border-[#2b313b] bg-[#141b28] px-3 py-1 text-[12px] text-[#9fb0c8]">
-          <button data-testid="xenon-menu-file" className="hover:text-white"
-            onClick={() => setNewOpen(v => !v)}>File ▾</button>
-          <span className="text-[#3f4b5f]">Library</span>
-          <button data-testid="xenon-reboot" className="hover:text-white"
-            onClick={() => pump.reboot()}>Computer ▸ re-boot</button>
-          <button data-testid="xenon-run" className="hover:text-white"
-            onClick={() => (pump.status === 'running' ? pump.stopRunning() : pump.startRunning())}>
-            {pump.status === 'running' ? 'Options ▸ stop' : 'Options ▸ run'}
-          </button>
-          <span className="text-[#3f4b5f]">Help</span>
-          <span className="ml-auto text-[10px] text-[#5d6a7d]">cycles {pump.cycles} @ 10 Hz · CTRL+S save+reboot · screens clickable · F9 break · F10 step · F8 resume</span>
-        </div>
+        {/* menu bar — real IDE dropdowns (we: "should it even nest?
+            computer is what we are in, keep it a good menu structure like
+            an IDE"): File owns the disk, Run owns the execution (incl. the
+            debugger keys), Computer owns the machine (re-boot), Help the
+            keys. The flat 'Options ▸ run' labels are gone. */}
+        <MenuBar
+          right={`cycles ${pump.cycles} @ 10 Hz · CTRL+S save+reboot · screens clickable`}
+          menus={[
+            { label: 'File', testid: 'xmenu-file', entries: [
+              { label: 'New file…', testid: 'file-new', on: () => { setNewProg(false); setNewOpen(true); } },
+              { label: 'New program…', testid: 'file-new-prog', on: () => { setNewProg(true); setNewOpen(true); } },
+              { label: 'Save', hint: 'Ctrl+S', testid: 'file-save', on: () => save(false), disabled: !onCode },
+              { label: 'Save all', hint: 'Ctrl+Shift+S', testid: 'file-save-all', on: () => save(true), disabled: !onCode },
+              { label: 'Delete current tab', testid: 'file-delete-tab', on: () => delFile(), disabled: files.length <= 1 },
+            ] },
+            { label: 'Run', testid: 'xmenu-run', entries: [
+              { label: pump.status === 'running' ? 'Resume / continue' : 'Start', hint: 'F8', testid: 'run-resume', on: () => pump.startRunning() },
+              { label: 'Pause', hint: 'F8', testid: 'run-pause', on: () => pump.pause(), disabled: pump.status !== 'running' },
+              { label: 'Step one cycle', hint: 'F10', testid: 'run-step', on: () => pump.step() },
+              { label: 'Stop', testid: 'run-stop', on: () => pump.stopRunning() },
+              { label: 'Toggle breakpoint', hint: 'F9', testid: 'run-breakpoint', on: () => { if (onCode && lastLine >= 0) toggleBp(lastLine); }, disabled: !onCode || lastLine < 0 },
+            ] },
+            { label: 'Computer', testid: 'xmenu-computer', entries: [
+              { label: 'Re-boot (files from disk)', testid: 'computer-reboot', on: () => pump.reboot() },
+            ] },
+            { label: 'Help', testid: 'xmenu-help', entries: [
+              { label: 'F9 break · F10 step · F8 resume · Ctrl+S save', testid: 'help-keys', on: () => undefined },
+              { label: 'Type $ for variables, @ for declared functions', testid: 'help-complete', on: () => undefined },
+            ] },
+          ]}
+        />
+
         {/* the File dialog: virtual-disk operations (the files are BAKED INTO
             THE CRAFT json — add/remove them freely, they save with the craft) */}
         {newOpen && (
           <div data-testid="xenon-file-dialog"
-            className="flex flex-wrap items-center gap-2 border-b border-[#2b313b] bg-[#10182a] px-3 py-1.5 text-[11px]">
+            className="flex flex-nowrap items-center gap-2 overflow-x-auto border-b border-[#2b313b] bg-[#10182a] px-3 py-1.5 text-[11px] [scrollbar-width:thin]">
             <span className="text-[#9fb0c8]">Virtual disk — {files.length} file(s):</span>
             {files.map((f, i) => (
               <span key={f.name} data-testid={`xenon-disk-${i}`}
@@ -280,8 +318,10 @@ export default function XenonDialog(p: {
               (v1.13.x: "Variables/screens should be to the side of the
               enumerated files, and the window should be larger") */}
           <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-          {/* tabs — every HDD file, dirty-marked */}
-          <div className="flex flex-wrap items-center gap-1 rounded border border-[#2b313b] bg-[#121826] px-2 py-1 text-[12px]">
+          {/* tabs — every HDD file, dirty-marked; ONE row, scrollable
+              (we: "File shouldn't show more than one line at a time") */}
+          <div className="flex shrink-0 items-center gap-1.5">
+          <div data-testid="xenon-tabstrip" className="flex min-w-0 flex-1 flex-nowrap items-center gap-1 overflow-x-auto rounded border border-[#2b313b] bg-[#121826] px-2 py-1 text-[12px] [scrollbar-width:thin]">
           {files.map((f, i) => (
             <button key={f.name} data-testid={`xenon-tab-${i}`}
               onClick={() => { setTab(i); setEditing(false); setArmedDel(false); }}
@@ -295,18 +335,22 @@ export default function XenonDialog(p: {
               ⌗ nodes ({graph.nodes.length})
             </button>
           )}
+          </div>
+          {/* edit/save actions ride BESIDE the strip (never clipped by it) */}
+          <div className="flex shrink-0 items-center gap-1 text-[11px]">
           {onCode && !editing && (
-            <button data-testid="xenon-edit" className="ml-auto self-center rounded bg-[#1d2c46] px-2 py-0.5
-                   text-[11px] hover:bg-[#27395c]" onClick={startEdit}>✎ edit</button>
+            <button data-testid="xenon-edit" className="rounded bg-[#1d2c46] px-2 py-0.5
+                   hover:bg-[#27395c]" onClick={startEdit}>✎ edit</button>
           )}
           {onCode && editing && (<>
-            <button data-testid="xenon-save" className="ml-auto self-center rounded bg-[#2b4a2b] px-2 py-0.5
-                   text-[11px] hover:bg-[#38603a]" onClick={() => save(false)}>💾 save (Ctrl+S)</button>
-            <button data-testid="xenon-save-all" className="self-center rounded bg-[#243a52] px-2 py-0.5
-                   text-[11px] hover:bg-[#2f4c6b]" onClick={() => save(true)}>⇩ save all</button>
-            <button data-testid="xenon-edit-cancel" className="self-center rounded px-2 py-0.5
-                   text-[11px] text-[#8a93a0] hover:bg-[#27395c]" onClick={() => setEditing(false)}>↺ revert</button>
+            <button data-testid="xenon-save" className="rounded bg-[#2b4a2b] px-2 py-0.5
+                   hover:bg-[#38603a]" onClick={() => save(false)}>💾 save</button>
+            <button data-testid="xenon-save-all" className="rounded bg-[#243a52] px-2 py-0.5
+                   hover:bg-[#2f4c6b]" onClick={() => save(true)}>⇩ all</button>
+            <button data-testid="xenon-edit-cancel" className="px-1.5 py-0.5 text-[#8a93a0]
+                   hover:bg-[#27395c]" onClick={() => setEditing(false)}>↺ revert</button>
           </>)}
+          </div>
           </div>
 
           {/* code / nodes */}
@@ -318,13 +362,13 @@ export default function XenonDialog(p: {
                 onGutter={i => toggleBp(i)} onLine={i => setLastLine(i)} />
             )}
             {onCode && editing && (
-              <textarea ref={editRef} data-testid="xenon-code-edit" value={draft}
-                onChange={e => editChange(e.target.value)}
-                spellCheck={false} autoCapitalize="off" autoCorrect="off"
-                className="h-full w-full resize-none bg-[#0b0f18] p-2 text-[12px] leading-[18px]
-                       text-[#d6dbe1] caret-white outline-none" />
+              <AutocompleteEdit taRef={editRef} value={draft} onChange={editChange}
+                files={files} vars={[...pump.vars.keys()]} />
             )}
-            {tab === 100 && graph && <NodeGraph graph={graph} reads={pump.reads} bus={pump.bus} />}
+            {tab === 100 && graph && (
+              <NodeGraph graph={graph} reads={pump.reads} bus={pump.bus}
+                chanLabel={(io, ch) => chanLabel(io, ch, 'out')?.fn ?? null} />
+            )}
           </div>
 
           </div>
@@ -341,6 +385,7 @@ export default function XenonDialog(p: {
             <div className="flex w-7 shrink-0 flex-col gap-1">
               {([['vars', `Vars ${pump.vars.size ? `(${pump.vars.size})` : ''}`],
                 ['screens', `Screens ${pump.surfaces.size ? `(${pump.surfaces.size})` : ''}`],
+                ['world', `World ${pump.wsChannels().length ? `(${pump.wsChannels().length})` : ''}`],
                 ['bus', 'Bus'], ['console', 'Console']] as const).map(([k, label]) => (
                 <button key={k} data-testid={`xenon-side-${k}`} onClick={() => setSide(k)}
                   className="flex-1 rounded py-2 text-[10px] tracking-wide"
@@ -411,14 +456,33 @@ export default function XenonDialog(p: {
                 ))}
               </div>
             </>)}
+            {side === 'world' && (<>
+              {/* WORLDSIM (engine/worldsim.ts): every input channel is a
+                  function of t seconds, evaluated each cycle — defaults fly
+                  the craft at 2000 m / 80 m/s. setworldsim(name, v) from the
+                  program overrides a row; pow(10,40) releases it;
+                  getworldsim(name) answers the live value. */}
+              <div className="rounded border border-[#232c3d] bg-[#131a28] p-2 text-[10px] leading-snug text-[#5d6a7d]">
+                Worldsim — each input is a function of <span className="text-[#8fd48f]">t</span> (elapsed
+                seconds), fed to the computer every cycle. Defaults: level flight
+                2000 m, 80 m/s. From the program: <span className="text-[#8fd48f]">setworldsim(&quot;name&quot;, v)</span>
+                {' '}overrides a row (<span className="text-[#8fd48f]">pow(10,40)</span> releases),{' '}
+                <span className="text-[#8fd48f]">getworldsim(&quot;name&quot;)</span> reads it.
+              </div>
+              <WorldSimList pump={pump} /></>)}
             {side === 'bus' && (<>
               <div className="rounded border border-[#232c3d] bg-[#131a28] p-2 text-[11px]">
                 <div className="mb-1 text-[10px] uppercase tracking-widest text-[#5d6a7d]">
                   Inputs (io · channel → value)</div>
-                {comp.channels.map(c => (
-                  <label key={`${c.io}.${c.ch}`} className="grid grid-cols-[86px_1fr_44px] items-center gap-2">
-                    <span className="text-[#9fb0c8]" title={`io ${c.io}`}>
-                      {comp.devices.find(d => d.io === c.io)?.alias || c.io} · ch {c.ch}</span>
+                {comp.channels.map(c => {
+                  const dev = devOf(c.io);
+                  const ci = chanLabel(c.io, c.ch, 'out');     // what the device SENDS on ch
+                  return (
+                  <label key={`${c.io}.${c.ch}`} className="grid grid-cols-[124px_1fr_44px] items-center gap-2">
+                    <span className="truncate text-[#9fb0c8]"
+                      title={ci ? `${dev?.alias || dev?.type || c.io} ch ${c.ch} — ${ci.fn} (${ci.rng})`
+                        : `${dev?.alias || dev?.type || c.io} ch ${c.ch}`}>
+                      {dev?.alias || dev?.type || c.io} · ch {c.ch}{ci && <span className="text-[#8fd48f]"> {ci.fn}</span>}</span>
                     <input type="range" min={-1} max={1} step={0.05}
                       data-testid={`xenon-in-${c.io}-${c.ch}`}
                       value={vals[`${c.io}.${c.ch}`] ?? 0}
@@ -428,20 +492,24 @@ export default function XenonDialog(p: {
                         pump.setInput(c.io, c.ch, v);
                       }} />
                     <span className="text-right tabular-nums">{(vals[`${c.io}.${c.ch}`] ?? 0).toFixed(2)}</span>
-                  </label>
-                ))}
+                  </label>);
+                })}
                 {comp.channels.length === 0 && <span className="text-[#5d6a7d]">no input_number() channels detected</span>}
               </div>
               <div className="rounded border border-[#232c3d] bg-[#131a28] p-2 text-[11px]">
                 <div className="mb-1 text-[10px] uppercase tracking-widest text-[#5d6a7d]">io bus (output_number)</div>
                 <div className="grid grid-cols-[1fr_28px_64px] gap-x-2">
                   {[...pump.bus.entries()].slice(-24).map(([k, v]) => {
-                    const [io, port] = k.split(':');
-                    const dev = comp.devices.find(d => String(d.io) === io);
+                    const [io = '', port = '0'] = k.split(':');
+                    const ioKey = /^\d+$/.test(io) ? +io : io;
+                    const dev = devOf(ioKey);
+                    const ci = chanLabel(ioKey, +(port ?? '0'), 'in');   // meaning of ch port ON the device
                     return (
                       <div key={k} className="contents">
-                        <span className="truncate text-[#9fb0c8]" title={dev ? `io ${io} = ${dev.alias || dev.type}` : io}>
-                          {dev ? `${dev.alias || dev.type}` : io}</span>
+                        <span className="truncate text-[#9fb0c8]"
+                          title={dev && ci ? `${dev.alias || dev.type} ch ${port} — ${ci.fn} (${ci.rng})`
+                            : dev ? `io ${io} = ${dev.alias || dev.type}` : io}>
+                          {dev ? `${dev.alias || dev.type}` : io}{ci && <span className="text-[#8fd48f]"> {ci.fn}</span>}</span>
                         <span className="text-[#5d6a7d]">{port}</span>
                         <span className="text-right tabular-nums text-[#8fd48f]">{fmtVal(v)}</span>
                       </div>
@@ -608,7 +676,10 @@ function nodeColor(type: string): string {
   return '#37474f';
 }
 
-function NodeGraph(p: { graph: XGraph; reads: Map<string, number>; bus: Map<string, number | string> }) {
+function NodeGraph(p: {
+  graph: XGraph; reads: Map<string, number>; bus: Map<string, number | string>;
+  chanLabel?: (io: number | undefined, ch: number | undefined) => string | null;
+}) {
   const { graph } = p;
   const boxRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ x: 20, y: 20, k: 0.6 });
@@ -671,6 +742,11 @@ function NodeGraph(p: { graph: XGraph; reads: Map<string, number>; bus: Map<stri
               {(isInput || isOutput) && (
                 <div className="px-1 pt-0.5 text-[#c8d4e8]">
                   {isInput ? `io ${n.ioNumber ?? '?'}  ch ${n.channel ?? '?'}` : `io ${n.ioNumber ?? '?'}  (write)`}
+                  {isInput && p.chanLabel?.(n.ioNumber, n.channel) && (
+                    <span data-testid={`xenon-chan-${n.id}`} className="ml-1 text-[#e6c07b]">
+                      {p.chanLabel(n.ioNumber, n.channel)}
+                    </span>
+                  )}
                   {isInput && (
                     <span data-testid={`xenon-nodeval-${n.id}`} className="ml-1 font-bold text-[#8fd48f]">
                       = {inVal === undefined ? '·' : fmtVal(inVal)}
@@ -699,5 +775,277 @@ function NodeGraph(p: { graph: XGraph; reads: Map<string, number>; bus: Map<stri
         })}
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// MenuBar — the IDE's dropdown row (File / Run / Computer / Help). One
+// concept per menu: File owns the virtual disk, Run owns execution (the
+// debugger keys live here), Computer owns the machine.
+
+function MenuBar(p: {
+  right: string;
+  menus: {
+    label: string; testid: string;
+    entries: { label: string; testid: string; hint?: string; on: () => void; disabled?: boolean }[];
+  }[];
+}) {
+  const [open, setOpen] = useState<string | null>(null);
+  // Esc closes an OPEN menu (and stops there — the dialog's own Esc-close
+  // owns the key when no menu is up; the menus e2e leg caught the overlap)
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.stopPropagation(); setOpen(null); }
+    };
+    addEventListener('keydown', h, true);
+    return () => removeEventListener('keydown', h, true);
+  }, [open]);
+  return (
+    <div className="flex items-center gap-1 border-b border-[#2b313b] bg-[#141b28] px-3 py-1 text-[12px] text-[#9fb0c8]">
+      {p.menus.map(m => (
+        <div key={m.testid} className="relative">
+          <button data-testid={m.testid}
+            onClick={() => setOpen(o => (o === m.testid ? null : m.testid))}
+            className={`rounded px-2 py-0.5 hover:bg-[#1d2c46] ${open === m.testid ? 'bg-[#1d2c46] text-white' : ''}`}>
+            {m.label} ▾
+          </button>
+          {open === m.testid && (<>
+            <div className="fixed inset-0 z-30" onClick={() => setOpen(null)} />
+            <div data-testid={`${m.testid}-pop`}
+              className="absolute left-0 top-full z-40 min-w-[230px] rounded border border-[#3a4a6a] bg-[#10141f] py-1 shadow-2xl">
+              {m.entries.map(e => (
+                <button key={e.testid} data-testid={e.testid} disabled={e.disabled}
+                  onClick={() => { setOpen(null); e.on(); }}
+                  className="flex w-full items-center justify-between gap-4 px-3 py-1 text-left
+                         text-[12px] hover:bg-[#1d2c46] disabled:opacity-40">
+                  <span>{e.label}</span>
+                  {e.hint && <span className="text-[10px] text-[#5d6a7d]">{e.hint}</span>}
+                </button>
+              ))}
+            </div>
+          </>)}
+        </div>
+      ))}
+      <span className="ml-auto text-[10px] text-[#5d6a7d]">{p.right}</span>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// AutocompleteEdit — the code editor with completion: `$` completes variable
+// names (the running program's globals + every name DECLARED in the disk's
+// files, incl. function params), `@` completes declared functions,
+// a bare word completes the language/library functions + keywords, and after
+// a `.` the screen members. Popup at the caret, Tab/Enter accept, arrows
+// move, Esc closes.
+
+const XC_LIB_FNS = ['print', 'input_number', 'input_text', 'output_number', 'output_text',
+  'screen', 'virtualscreen', 'screen_copy', 'device', 'device_at', 'device_type', 'device_count',
+  'text', 'time', 'tick', 'delta_time', 'random', 'color', 'color_r', 'color_g', 'color_b', 'color_a',
+  'user', 'owner', 'username', 'system_frequency', 'system_ram', 'system_ipc', 'system_ram',
+  'programs_count', 'game_mode', 'load_program', 'reboot', 'program_name', 'get_recipe',
+  'get_recipes', 'get_recipe_label', 'get_item_value_unit', 'char_w', 'char_h',
+  'screen_w', 'screen_h', 'clicked', 'click_x', 'click_y', 'scroll',
+  'setworldsim', 'getworldsim'];
+const XC_KEYWORDS = ['if', 'else', 'elseif', 'foreach', 'while', 'repeat', 'for', 'break',
+  'continue', 'return', 'and', 'or', 'xor', 'var', 'const', 'storage', 'function', 'init',
+  'update', 'input', 'timer', 'frequency', 'interval', 'click', 'click_hold', 'shutdown',
+  'include', 'number', 'text'];
+const XC_SCREEN_MEMBERS = ['write', 'blank', 'text_size', 'text_align', 'newline_spacing',
+  'draw_point', 'draw_line', 'draw_rect', 'draw_triangle', 'draw_circle', 'draw_poly', 'draw',
+  'button', 'button_rect', 'pixel', 'width', 'height', 'char_w', 'char_h', 'clicked',
+  'click_x', 'click_y', 'scroll'];
+
+function caretMetrics(ta: HTMLTextAreaElement): { x: number; y: number } {
+  // mirror-div caret measurement (pre-wrap off: the editor wraps OFF)
+  const st = getComputedStyle(ta);
+  const div = document.createElement('div');
+  for (const k of ['fontFamily', 'fontSize', 'lineHeight', 'paddingTop', 'paddingLeft',
+    'paddingRight', 'paddingBottom', 'borderTopWidth', 'borderLeftWidth', 'tabSize'] as const)
+    (div.style as unknown as Record<string, string>)[k] = st[k];
+  div.style.position = 'absolute';
+  div.style.visibility = 'hidden';
+  div.style.whiteSpace = 'pre';
+  div.textContent = ta.value.slice(0, ta.selectionStart);
+  const span = document.createElement('span');
+  span.textContent = '\u200b';
+  div.appendChild(span);
+  document.body.appendChild(div);
+  const r = span.getBoundingClientRect();
+  const tr = ta.getBoundingClientRect();
+  const x = r.left - tr.left - ta.scrollLeft;
+  const y = r.bottom - tr.top - ta.scrollTop;
+  document.body.removeChild(div);
+  return { x: Math.max(0, Math.min(x, tr.width - 260)), y: Math.max(0, Math.min(y, tr.height - 180)) };
+}
+
+function AutocompleteEdit(p: {
+  taRef: React.MutableRefObject<HTMLTextAreaElement | null>;
+  value: string;
+  onChange: (v: string) => void;
+  files: XCFile[];
+  vars: string[];
+}) {
+  const [items, setItems] = useState<string[]>([]);
+  const [sel, setSel] = useState(0);
+  const [pos, setPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const tokRef = useRef('');
+
+  const pools = useMemo(() => {
+    const vars = new Set<string>(p.vars);
+    const fns = new Set<string>();
+    for (const f of p.files) {
+      for (const m of f.code.matchAll(/\$([A-Za-z_]\w*)/g)) vars.add(m[1]!);
+      for (const m of f.code.matchAll(/function\s+@([A-Za-z_]\w*)/g)) fns.add('@' + m[1]!);
+    }
+    return { vars: [...vars].map(v => '$' + v).sort(), fns: [...fns].sort() };
+  }, [p.files, p.vars]);
+
+  const refresh = (ta: HTMLTextAreaElement) => {
+    const upto = ta.value.slice(0, ta.selectionStart);
+    const mt = /(@[A-Za-z_]?\w*|\$[A-Za-z_]?\w*|([A-Za-z_]\w*)|\.\w*)$/.exec(upto);
+    if (!mt || !mt[0]) { setItems([]); return; }
+    const tok = mt[0];
+    let pool: string[];
+    if (tok.startsWith('$')) pool = pools.vars;
+    else if (tok.startsWith('@')) pool = pools.fns;
+    else if (tok.startsWith('.')) pool = XC_SCREEN_MEMBERS;
+    else if (/^[A-Za-z_]/.test(tok)) pool = [...XC_LIB_FNS, ...XC_KEYWORDS];
+    else pool = [];
+    const list = pool.filter(x => x.toLowerCase().startsWith(tok.toLowerCase()) && x !== tok)
+      .slice(0, 12);
+    tokRef.current = tok;
+    setItems(list);
+    setSel(0);
+    setPos(caretMetrics(ta));
+  };
+
+  const accept = (v: string) => {
+    const ta = p.taRef.current;
+    if (!ta) return;
+    const tok = tokRef.current;
+    const start = ta.selectionStart - tok.length;
+    const next = ta.value.slice(0, start) + v + ta.value.slice(ta.selectionStart);
+    p.onChange(next);
+    setItems([]);
+    requestAnimationFrame(() => {
+      ta.focus();
+      ta.setSelectionRange(start + v.length, start + v.length);
+    });
+  };
+
+  return (
+    <div className="relative h-full">
+      <textarea ref={p.taRef} data-testid="xenon-code-edit" value={p.value}
+        onChange={e => { p.onChange(e.target.value); refresh(e.target); }}
+        onKeyDown={e => {
+          if (items.length) {
+            if (e.key === 'ArrowDown') { e.preventDefault(); setSel(s => (s + 1) % items.length); return; }
+            if (e.key === 'ArrowUp') { e.preventDefault(); setSel(s => (s - 1 + items.length) % items.length); return; }
+            if (e.key === 'Tab' || e.key === 'Enter') {
+              e.preventDefault(); accept(items[sel]!); return;
+            }
+            if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setItems([]); return; }
+          }
+          if (e.key === ' ') return;
+        }}
+        onClick={e => refresh(e.currentTarget)}
+        onBlur={() => setTimeout(() => setItems([]), 150)}
+        spellCheck={false} autoCapitalize="off" autoCorrect="off" wrap="off"
+        className="h-full w-full resize-none bg-[#0b0f18] p-2 text-[12px] leading-[18px]
+               text-[#d6dbe1] caret-white outline-none" />
+      {items.length > 0 && (
+        <div data-testid="xenon-ac-popup"
+          className="absolute z-40 max-h-[220px] w-[260px] overflow-y-auto rounded border
+                 border-[#3a4a6a] bg-[#10141f] py-1 text-[12px] shadow-2xl"
+          style={{ left: pos.x + 8, top: pos.y + 26 }}>
+          {items.map((v, i) => (
+            <button key={v} data-testid={`xenon-ac-${i}`}
+              className={`block w-full px-2 py-0.5 text-left ${i === sel ? 'bg-[#1d2c46] text-[#8fd4ff]' : 'text-[#b8c2d0]'}`}
+              onMouseEnter={() => setSel(i)}
+              onClick={() => accept(v)}>{v}</button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// WorldSimList — the World tab (v1.13.x): the GLOBAL worldsim channels,
+// grouped SENSORS (observers of the world: get a base f(t) AND a $val
+// override — '$val + 2' tests an instrument reading high, an inverted craft)
+// and CONTROLS (the pilot's buttons/sticks/levers: toggleable, oscillating,
+// NO $val override — they don't observe anything). Rows bound to the running
+// computer ride first; every row edits the shared store (persisted).
+
+function WorldSimList(p: { pump: typeof xenonPump }) {
+  const bound = p.pump.wsBoundNames();
+  const all = p.pump.wsChannels();
+  const row = (r: (typeof all)[number]) => (
+    <div key={r.name} data-testid={`worldsim-row-${r.name}`}
+      className="rounded border border-[#232c3d] bg-[#131a28] p-2 text-[11px]">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="truncate text-[#9fb0c8]">{r.label}</span>
+        <span className="shrink-0 tabular-nums text-[#8fd48f]"
+          data-testid={`worldsim-val-${r.name}`}>{r.value.toFixed(3)}</span>
+      </div>
+      <div className="text-[9px] text-[#5d6a7d]" data-testid={`worldsim-name-${r.name}`}>
+        {r.name}{bound.has(r.name) ? '' : ' · other craft'}
+        {p.pump.wsOverrideNames().includes(r.name) &&
+          <span className="ml-1 rounded bg-[#332a1a] px-1 text-[#e6c07b]">program</span>}
+      </div>
+      <div className="mt-1 flex items-center gap-1.5">
+        <span className="text-[9px] text-[#5d6a7d]">f(t)=</span>
+        <input data-testid={`worldsim-base-${r.name}`} value={r.base}
+          onChange={e => p.pump.wsSetBase(r.name, e.target.value)}
+          className="min-w-0 flex-1 rounded border border-[#2b3a52] bg-[#0b0f18]
+                 px-1.5 py-0.5 text-[11px] text-[#d6dbe1] outline-none" />
+        <label className="flex items-center gap-0.5 text-[9px] text-[#9fb0c8]">
+          <input type="radio" checked={r.mode === 'auto'}
+            data-testid={`worldsim-auto-${r.name}`}
+            onChange={() => p.pump.wsSetMode(r.name, 'auto')} />auto
+        </label>
+        <label className="flex items-center gap-0.5 text-[9px] text-[#9fb0c8]">
+          <input type="radio" checked={r.mode === 'manual'}
+            data-testid={`worldsim-manual-${r.name}`}
+            onChange={() => p.pump.wsSetMode(r.name, 'manual')} />man
+        </label>
+      </div>
+      {r.kind === 'sensor' && (
+        <div className="mt-1 flex items-center gap-1.5">
+          <span className="text-[9px] text-[#5d6a7d]">$val=</span>
+          <input data-testid={`worldsim-ov-${r.name}`} value={r.override}
+            placeholder="(blank = none — e.g. $val + 2)"
+            onChange={e => p.pump.wsSetOverride(r.name, e.target.value)}
+            className="min-w-0 flex-1 rounded border border-[#2b3a52] bg-[#0b0f18]
+                   px-1.5 py-0.5 text-[11px] text-[#e6c07b] outline-none" />
+        </div>
+      )}
+      {r.mode === 'manual' && (
+        <input type="range" min={-1} max={1} step={0.01} value={r.manual}
+          data-testid={`worldsim-slider-${r.name}`}
+          onChange={e => p.pump.wsSetManual(r.name, +e.target.value)} className="mt-1 w-full" />
+      )}
+      {r.error && <div className="mt-1 text-[10px] text-[#ff5b5b]">{r.error}</div>}
+    </div>
+  );
+  const group = (title: string, list: typeof all) => list.length > 0 && (<>
+    <div className="mt-1 text-[10px] uppercase tracking-widest text-[#5d6a7d]">{title}</div>
+    {list.map(row)}
+  </>);
+  const inBound = (a: typeof all[number], b: typeof all[number]) =>
+    (bound.has(b.name) ? 1 : 0) - (bound.has(a.name) ? 1 : 0) || a.name.localeCompare(b.name);
+  return (
+    <>
+      {group('Sensors — observers of the world ($val overrides)',
+        all.filter(c => c.kind === 'sensor').sort(inBound))}
+      {group('Controls — the pilot\'s buttons and sticks (toggle / oscillate)',
+        all.filter(c => c.kind === 'control').sort(inBound))}
+      {all.length === 0 && (
+        <span className="text-[11px] text-[#5d6a7d]">no channels named yet — open a computer</span>
+      )}
+    </>
   );
 }

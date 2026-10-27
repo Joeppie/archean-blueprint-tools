@@ -110,8 +110,38 @@ struct DevInfo {
 	double x, y, z, sx, sy, sz, mass;
 };
 static vector<DevInfo> g_devs;
+// canned WORLD data for ALIAS-only devices (no cable ⇒ no live source):
+// the simulator supplies plausible instrument readings from the game's OWN
+// channel tables so firmware with presence gates boots — the Badger's
+// startup gate checks device_type("nav") + input_text("nav",13) (the
+// MiniNavInstrument 'Celestial' text channel). Panel sliders
+// (xc_set_input_a) override any channel.
+static map<int, map<int, string>> xc_inputs_txt;
+// PROGRAM-SIDE worldsim hooks (the WORLD tab's counterpart, v1.13.x):
+// setworldsim(name, v) overrides a worldsim channel FROM INSIDE the program
+// (the pump honours it every cycle until the program releases it with
+// v = 9e99); getworldsim(name) answers the channel's CURRENT effective
+// value — the pump streams every row's value back via xc_worldsim_sync.
+// In the game these are the firmware's own nop functions; in the editor
+// they are the API into the world sim.
+static map<string, double> g_wsProgram;    // name -> active program override
+static map<string, double> g_wsEffective;  // name -> last effective value
 static map<int, int> g_devByIo;        // computer io port → table index
 static map<string, int> g_devByAlias;  // lowercased alias → table index
+// computer.md: input_/output_ take an aliasOrIoNumber — resolve a TEXT arg
+// through the device table (a cabled device reads on its io port; an
+// ALIAS-only device — the Badger's 82 — reads on a synthetic 1000+id port
+// that xc_set_input_a wires the panel sliders to).
+static int xc_ioOf(const Var& a) {
+	if (a.type == Var::Text) {
+		auto i = g_devByAlias.find(xc_lower(string(a)));
+		if (i == g_devByAlias.end()) return -1;
+		const DevInfo& d = g_devs[i->second];
+		return d.port >= 0 ? d.port : 1000 + d.id;
+	}
+	return (int)(int64_t)a;
+}
+
 static inline uint32_t packedColor(const Var& v) {
 	return static_cast<uint32_t>(static_cast<uint64_t>(v));
 }
@@ -496,7 +526,8 @@ static void archeanInit() {
 		return {};
 	});
 	XenonCode::DeclareDeviceFunction("input_number:number", [](Computer*, const vector<Var>& a) -> Var {
-		int io = (int)(int64_t)a[0], ch = (int)(int64_t)a[1];
+		int io = xc_ioOf(a[0]), ch = (int)(int64_t)a[1];
+		if (io < 0) { g_reads[{0, ch}] = 0.0; return 0.0; }   // unknown alias: 0, game-quiet
 		auto i = xc_inputs.find(io);
 		double v = 0.0;
 		if (i != xc_inputs.end()) {
@@ -507,12 +538,19 @@ static void archeanInit() {
 		return v;
 	});
 	XenonCode::DeclareDeviceFunction("input_text:text", [](Computer*, const vector<Var>& a) -> Var {
-		int io = (int)(int64_t)a[0], ch = (int)(int64_t)a[1];
+		int io = xc_ioOf(a[0]), ch = (int)(int64_t)a[1];
+		if (io < 0) return string();
+		auto t = xc_inputs_txt.find(io);
+		if (t != xc_inputs_txt.end()) {
+			auto tc = t->second.find(ch);
+			if (tc != t->second.end()) return tc->second;          // seeded text channel
+		}
 		auto i = xc_inputs.find(io);
 		if (i == xc_inputs.end()) return string();
 		auto c = i->second.find(ch);
+		if (c == i->second.end()) return string();
 		ostringstream s; s << c->second;
-		return c == i->second.end() ? string() : s.str();
+		return s.str();
 	});
 	XenonCode::DeclareDeviceFunction("output_number", [](Computer*, const vector<Var>& a) -> Var {
 		ostringstream s; s << (double)a[2];
@@ -625,6 +663,20 @@ static void archeanInit() {
 		ostringstream out;
 		out << s << " " << (double)a[1];
 		return Var(out.str());
+	});
+	XenonCode::DeclareDeviceFunction("setworldsim:number", [](Computer*, const vector<Var>& a) -> Var {
+		string n = xc_lower(string(a[0]));
+		double v = a.size() >= 2 ? (double)a[1] : 0.0;
+		if (v >= 1e30) g_wsProgram.erase(n);   // release: the expression resumes
+		else g_wsProgram[n] = v;
+		return v;
+	});
+	XenonCode::DeclareDeviceFunction("getworldsim:number", [](Computer*, const vector<Var>& a) -> Var {
+		string n = xc_lower(string(a[0]));
+		auto i = g_wsEffective.find(n);
+		if (i != g_wsEffective.end()) return i->second;
+		auto p = g_wsProgram.find(n);
+		return p != g_wsProgram.end() ? p->second : 0.0;
 	});
 	XenonCode::DeclareDeviceFunction("random:number", [](Computer*, const vector<Var>& a) -> Var {
 		if (a.size() == 0) return xc_random01();
@@ -833,6 +885,7 @@ EMSCRIPTEN_KEEPALIVE int xc_boot() {
 		g_computer = make_unique<Computer>();
 		g_computer->capability.ram = xc_ramCap;
 		g_computer->capability.storage = xc_storageCap;
+		g_wsProgram.clear(); g_wsEffective.clear();
 		if (!g_computer->LoadProgram("/prog")) { g_err = "load failed"; return 1; }
 		g_computer->LoadStorage("/prog/storage");   // survives reboots in-session
 		xc_addScreen("main", 0, 640, 480);         // the integrated-screen target
@@ -895,6 +948,13 @@ EMSCRIPTEN_KEEPALIVE const char* xc_cycle_lines() {
 }
 EMSCRIPTEN_KEEPALIVE const char* xc_error() { return g_err.c_str(); }
 EMSCRIPTEN_KEEPALIVE void xc_set_input(int io, int ch, double v) { xc_inputs[io][ch] = v; }
+// the panel drives an ALIAS-addressed channel (same resolution as xc_ioOf)
+EMSCRIPTEN_KEEPALIVE void xc_set_input_a(const char* alias, int ch, double v) {
+	auto i = g_devByAlias.find(xc_lower(alias));
+	if (i == g_devByAlias.end()) return;
+	const DevInfo& d = g_devs[i->second];
+	xc_inputs[d.port >= 0 ? d.port : 1000 + d.id][ch] = v;
+}
 // The IDE's screen canvases route user interaction in (pixel coords of the
 // surface). The click is visible to button_rect/button and the clicked
 // built-ins for ONE cycle, then cleared by xc_endCycle.
@@ -923,6 +983,30 @@ EMSCRIPTEN_KEEPALIVE void xc_set_capability(uint32_t ram, uint32_t storage) {
 	if (ram) xc_ramCap = ram;
 	if (storage) xc_storageCap = storage;
 }
+static void xc_seedWorld(const DevInfo& d) {
+	if (d.port >= 0) return;              // cabled devices: the sliders are the source
+	int io = 1000 + d.id;
+	string t = xc_lower(d.type);
+	auto seed = [&](int ch, double v) { xc_inputs[io][ch] = v; };
+	auto seedT = [&](int ch, const char* v) { xc_inputs_txt[io][ch] = v; };
+	if (t == "mininavinstrument" || t == "navinstrument") {
+		seed(0, 12); seed(1, 0); seed(2, 1450); seed(3, 1450);       // airspd, vs, alt, terr
+		seed(6, 42); seed(7, 42);                                     // heading, course
+		seed(8, 51.5); seed(9, -0.1);                                 // lat, lon
+		seed(13, 1); seedT(13, "EARTH"); seedT(0, "EARTH");           // Celestial
+		seed(17, 6.6e6); seed(18, 6.7e6);                             // peri, apo
+	} else if (t == "dockingport" || t == "groundanchor") {
+		seed(0, 1);                                                   // present/latched
+	} else if (t == "angularvelocitysensor") {
+		seed(0, 0.01); seed(1, 0.01); seed(2, 0.01);
+	} else if (t == "densitysensor") { seed(0, 1.225); }
+	else if (t == "solarsensor") { seed(0, 0.9); }
+	else if (t == "temperaturesensor") { seed(0, 288); }
+	else if (t == "speedsensor") { seed(0, 0); }
+	else if (t == "vehiclephysicssensor") { seed(0, 0); }
+	else if (t == "lowvoltagebattery" || t == "highvoltagebattery") { seed(0, 0.8); }
+}
+
 EMSCRIPTEN_KEEPALIVE void xc_add_device(int id, int io, const char* alias, const char* type,
                                         int port, double x, double y, double z,
                                         double sx, double sy, double sz, double mass) {
@@ -931,7 +1015,31 @@ EMSCRIPTEN_KEEPALIVE void xc_add_device(int id, int io, const char* alias, const
 	if (io >= 0) g_devByIo[io] = i;
 	string a = xc_lower(alias);
 	if (!a.empty()) g_devByAlias[a] = i;
+	xc_seedWorld(g_devs.back());
 }
+// worldsim bridge: the pump READS the program overrides each cycle, pushes
+// the effective row values back, and clears the tables on a fresh boot.
+static string g_wsJson;
+EMSCRIPTEN_KEEPALIVE const char* xc_worldsim_overrides() {
+	string s = "{";
+	bool first = true;
+	for (auto& kv : g_wsProgram) {
+		if (!first) s += ",";
+		first = false;
+		s += "\"" + kv.first + "\":"; s += std::to_string(kv.second);
+	}
+	s += "}";
+	g_wsJson = s;
+	return g_wsJson.c_str();
+}
+EMSCRIPTEN_KEEPALIVE void xc_worldsim_sync(const char* name, double v) {
+	g_wsEffective[xc_lower(name)] = v;
+}
+EMSCRIPTEN_KEEPALIVE void xc_worldsim_clear() { g_wsProgram.clear(); g_wsEffective.clear(); }
+
+// ABI stamp: the app checks this at boot (XC_ABI in engine/xenoncode.ts) and
+// warns ONCE on drift — new device/shim exports must bump it.
+EMSCRIPTEN_KEEPALIVE int xc_abi() { return 4; }
 EMSCRIPTEN_KEEPALIVE int xc_screen_count() { return (int)g_screens.size(); }
 EMSCRIPTEN_KEEPALIVE const char* xc_screen_key(int i) {
 	return (i >= 0 && i < (int)g_screens.size()) ? g_screens[i].key.c_str() : "";

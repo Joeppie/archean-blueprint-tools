@@ -681,6 +681,38 @@ implementation `tools/xenoncode/xc_host.cpp` + `app/src/engine/xenoncode.ts`)
   the game's binary treats junk as data, the open library throws (the
   Badger's strict-off path on its own written storage is the repro,
   XC_REBOOT=1).
+- **io numbers resolve to COMPONENTS, channels to GAME MEANINGS**
+  (`tools/extract_channels.py` → `viewer/models/channels.json`, 52 types):
+  each type's wiki page carries `### List of inputs/outputs` tables
+  (`|Channel|Function|Range|` — 2- or 3-column). A type's **outputs** are
+  what it SENDS on its data port (the meaning of `input_number` on an io
+  cabled to it); its **inputs** are what `output_number` writes.
+  `input_number`/`output_number` take an **aliasOrIoNumber** (computer.md):
+  the shim resolves a TEXT argument through the device table — a cabled
+  device reads on its io port, an ALIAS-only device (the Badger's 82) on a
+  synthetic `1000+id` port that `xc_set_input_a` wires the panel sliders to.
+  Types whose wiki pages carry no table (ThrottleLever, SpeedSensor, …)
+  show a bare `ch N` — no invented meanings.
+- **WORLDSIM (v1.13.x, `app/src/engine/worldsim.ts` + `xc_host`)**: the
+  simulator's stand-in for the world — a GLOBAL, name-keyed, localStorage-
+  persisted store (every craft shares one world; the pump only binds names
+  to the running computer's io/ch). Channels are NAMED
+  `${device-slug}.${channel-slug}` from the game's own tables and driven by
+  an EXPRESSION IN `t` (elapsed seconds) the pump evaluates each cycle;
+  SENSOR rows (observers: *Sensor types, navinstruments, altimeters) also
+  carry a g($val, t) OVERRIDE — `$val + 2` makes an instrument read high;
+  controls/actuators group apart with f(t)+manual only. Defaults fly the
+  craft in level flight at 2000 m / 80 m/s
+  (altitude 2000+5·sin(t/20), airspeed 80+2·sin(t/13), heading (42+0.5t)%360,
+  ISA 281.5 K, battery 0.8 draining, the PilotSeat stick oscillating,
+  Celestial "EARTH"…). `xc_seedWorld` is only the pre-first-tick seed; the
+  live source is the expression. PROGRAM-SIDE API (declared device
+  functions, native fixture `demo/worldsim`): `setworldsim(name, v)`
+  OVERRIDES a row (the pump honours it every cycle; `pow(10,40)` releases —
+  XenonCode has no e-notation literals), `getworldsim(name)` answers the
+  row's CURRENT effective value (the pump streams every row back via
+  `xc_worldsim_sync`). The World tab edits f(t) per row, shows the live
+  value, marks program-override rows, and offers per-row manual sliders.
 - **Autosaves are app-side, not format** — shadow copies of the doc text
   live in IndexedDB `archean-autosaves` (`app/src/engine/autosave.ts`),
   keyed by craft id (unsaved docs `new:<title>`), newest-first with

@@ -5,8 +5,9 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
-  detectChannels, parseNodes, tokenize, xenonComputers, xenonScreens,
+  chanInfo, detectChannels, parseNodes, tokenize, xenonComputers, xenonScreens,
 } from '../xenoncode';
+import channelsJson from '../../../../viewer/models/channels.json';
 import type { Blueprint } from '../format';
 
 const REPO = new URL('../../../../', import.meta.url).pathname;   // mass.test.ts pattern
@@ -131,5 +132,24 @@ describe('#NODES graph', () => {
   });
   it('no marker → null', () => {
     expect(parseNodes([{ name: 'main.xc', code: 'tick\n\tprint("x")' }])).toBeNull();
+  });
+});
+
+describe('io → component + channel meanings (the game wiki table)', () => {
+  const CH = channelsJson as unknown as Record<string, Record<string, Record<string, { fn: string; rng: string }>>>;
+  it('resolves the shipped table for the classic channels', () => {
+    expect(chanInfo(CH, 'PilotSeat', 'out', 1)?.fn).toBe('Backward/Forward');
+    expect(chanInfo(CH, 'NavInstrument', 'out', 6)?.fn).toBe('Heading');
+    expect(chanInfo(CH, 'NavInstrument', 'out', 8)?.fn).toContain('Latitude');
+    expect(chanInfo(CH, 'MiningDrill', 'out', 3)?.fn).toBe('MiningRate');
+    expect(chanInfo(CH, 'SmallWheel', 'in', 1)?.fn).toBe('Steer');
+    expect(chanInfo(CH, 'NoComponent', 'out', 1)).toBeNull();
+    expect(chanInfo(CH, 'ThrottleLever', 'out', 1)).toBeNull();   // no table in the wiki
+  });
+  it('detectChannels sees alias-addressed reads (computer.md aliasOrIoNumber)', () => {
+    const chs = detectChannels([
+      { name: 'm.main.xc', code: 'input_number(3, 6)\ninput_number("mining-drill", 3)\ninput_number(3,6)' },
+    ]);
+    expect(chs).toEqual([{ io: 3, ch: 6 }, { io: 'mining-drill', ch: 3 }]);
   });
 });

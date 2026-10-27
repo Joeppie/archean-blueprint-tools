@@ -1,5 +1,5 @@
 # Xenon — run the craft's computer programs
-Tags: xenon xenoncode computer code program ide screen hd-screen virtual screen nodes canvas programing programming plomo firstflight badger wasm interpreter variables vars disk files edit breakpoint debugger step autosave shadow
+Tags: xenon worldsim world sim xenoncode computer code program ide screen hd-screen virtual screen nodes canvas programing programming plomo firstflight badger wasm interpreter variables vars disk files edit breakpoint debugger step autosave shadow
 
 **Xenon ▾** (top bar, only on crafts that carry `MiniComputer` components with
 `.xc` programs) lists every programmable computer on the vessel. Clicking one

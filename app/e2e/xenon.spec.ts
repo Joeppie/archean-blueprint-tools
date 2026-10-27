@@ -313,6 +313,139 @@ test.describe('Xenon IDE @ui', () => {
     await page.keyboard.press('Escape');
   });
 
+  test('the IDE resolves io to component TYPES and channels to game MEANINGS @slow', async ({ page }) => {
+    // (we: "the computer STILL does not resolve the component type of the
+    // input, nor the meaning of the channels per input") — the meanings are
+    // the game wiki's own tables (tools/extract_channels.py).
+    await page.goto(`/?craft=${CEP}`);
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 90_000 });
+    await page.getByTestId('xenon-menu').click();
+    await page.locator('[data-testid^="xenon-comp-"]').first().click();
+    await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 60_000 });
+    await page.getByTestId('xenon-side-bus').click();
+    // the stick channel row names the cabled device AND its game function
+    const seatRow = page.locator('label', { hasText: 'PilotSeat' }).filter({ hasText: 'Backward/Forward' });
+    await expect(seatRow.first()).toBeVisible();
+    await page.getByTestId('xenon-tab-nodes').click();
+    await expect(page.locator('[data-testid^="xenon-chan-"]').first()).toBeVisible();
+    await expect(
+      page.locator('[data-testid^="xenon-chan-"]', { hasText: 'Backward/Forward' }).first()
+    ).toBeVisible();
+
+    // the Cede plane's NavInstrument outputs: ch 6 is Heading (0..360)
+    await page.goto('/?craft=3381670618');
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 120_000 });
+    await page.getByTestId('xenon-menu').click();
+    await page.locator('[data-testid^="xenon-comp-"]').first().click();
+    await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 90_000 });
+    await page.getByTestId('xenon-side-bus').click();
+    const navRow = page.locator('label', { hasText: 'NavInstrument' }).filter({ hasText: 'Heading' });
+    await expect(navRow.first()).toBeVisible({ timeout: 20_000 });
+    await page.keyboard.press('Escape');
+  });
+
+  test('IDE menus, single-row tab strip, and $/@/word AUTOCOMPLETE @slow', async ({ page }) => {
+    await page.goto(`/?craft=${PLANE}`);
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 90_000 });
+    await page.getByTestId('xenon-menu').click();
+    await page.locator('[data-testid^="xenon-comp-"]').first().click();
+    await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 60_000 });
+    // the menu bar: File / Run / Computer dropdowns (no flat 'Options ▸ run')
+    await page.getByTestId('xmenu-run').click();
+    await expect(page.getByTestId('run-step')).toBeVisible();
+    await expect(page.getByTestId('run-pause')).toBeVisible();
+    await page.getByTestId('run-step').click();                  // F10 path via the menu
+    await page.getByTestId('xmenu-file').click();
+    await expect(page.getByTestId('file-save')).toBeVisible();
+    await page.keyboard.press('Escape');
+    // ONE scrollable tab row (no wrap, actions never clipped)
+    const strip = page.getByTestId('xenon-tabstrip');
+    const bb = await strip.boundingBox();
+    expect(bb!.height).toBeLessThan(46);
+    await expect(page.getByTestId('xenon-edit')).toBeVisible();
+    // autocomplete: '$' completes declared variables, words complete functions
+    await page.getByTestId('xenon-edit').click();
+    const ta = page.getByTestId('xenon-code-edit');
+    await ta.click();
+    await ta.press('Control+End');
+    await ta.type('\nvar $zz_pitch_marker = input_', { delay: 25 });
+    await expect(page.getByTestId('xenon-ac-popup')).toBeVisible();
+    await expect(page.getByTestId('xenon-ac-popup')).toContainText('input_number');
+    await page.keyboard.press('Enter');
+    await expect(ta).toContainText('input_number(');
+    await ta.type('  + $roll', { delay: 25 });
+    await expect(page.getByTestId('xenon-ac-popup')).toContainText('$rollnum');
+    await page.keyboard.press('Escape');
+    // declared FUNCTION completion: '@' lists function @names declared on disk
+    await ta.type('\n@fir', { delay: 25 });
+    await expect(page.getByTestId('xenon-ac-popup')).toBeVisible();
+    await page.keyboard.press('Escape');
+    // discard the scratch edit (revert, no save)
+    await page.getByTestId('xenon-edit-cancel').click();
+    await page.keyboard.press('Escape');
+  });
+
+  test('the WORLDSIM: sensors fly the craft, $val overrides, program setworldsim @slow', async ({ page }) => {
+    // (we: "worldsim should be global… sensors should have overrides, so
+    // you can add or remove from the value, referred to as $val — e.g.
+    // $val + 2 to an altitude sensor… at flight at 2000 metres, going 80
+    // metres per second forward")
+    test.setTimeout(240_000);
+    await page.goto('/?craft=3381670618');
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 120_000 });
+    await page.getByTestId('xenon-menu').click();
+    await page.locator('[data-testid^="xenon-comp-"]').first().click();
+    await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 90_000 });
+    await page.getByTestId('xenon-side-world').click();
+    const alt = page.getByTestId('worldsim-row-navinstrument.altitude_meters_from_sea_level');
+    await expect(alt).toBeVisible();
+    // deterministic: pin the base to 2000, override with $val + 2 → 2002
+    const base = page.getByTestId('worldsim-base-navinstrument.altitude_meters_from_sea_level');
+    await base.fill('2000');
+    const ov = page.getByTestId('worldsim-ov-navinstrument.altitude_meters_from_sea_level');
+    await expect(ov).toBeVisible();                     // SENSOR rows carry $val
+    await ov.fill('$val + 2');
+    await expect(page.getByTestId('worldsim-val-navinstrument.altitude_meters_from_sea_level'))
+      .toHaveText('2002.000', { timeout: 5_000 });
+    // CONTROLS are grouped apart and carry NO $val input
+    const seat = page.getByTestId('worldsim-row-pilotseat.backward_forward');
+    await expect(seat).toBeVisible();
+    await expect(seat.getByTestId('worldsim-ov-pilotseat.backward_forward'))
+      .toHaveCount(0);
+    // the firmware reads the overridden channel: input_number(4, 2) = 2002
+    await page.getByTestId('xenon-edit').click();
+    const ta = page.getByTestId('xenon-code-edit');
+    await ta.click();
+    await ta.press('Control+Home');
+    await ta.type('print(text("alt: {}", input_number(4, 2)))\n', { delay: 6 });
+    await page.getByTestId('xenon-save').click();
+    await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 90_000 });
+    await page.getByTestId('xenon-side-console').click();
+    await expect(page.getByTestId('xenon-log')).toContainText('alt: 2002', { timeout: 30_000 });
+    // PROGRAM override via setworldsim wins over the expression
+    await ta.click();
+    await ta.press('Control+Home');
+    await ta.type('setworldsim("navinstrument.altitude_meters_from_sea_level", 3000)\n', { delay: 6 });
+    await page.getByTestId('xenon-save').click();
+    await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 90_000 });
+    await page.getByTestId('xenon-side-world').click();
+    await expect(alt).toContainText('program');
+    await expect(page.getByTestId('worldsim-val-navinstrument.altitude_meters_from_sea_level'))
+      .toHaveText('3000.000', { timeout: 5_000 });
+    // the global store PERSISTS across crafts: the PLANE's World tab shows it
+    await page.keyboard.press('Escape');
+    await page.goto(`/?craft=${PLANE}`);
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 90_000 });
+    await page.getByTestId('xenon-menu').click();
+    await page.locator('[data-testid^="xenon-comp-"]').first().click();
+    await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 60_000 });
+    await page.getByTestId('xenon-side-world').click();
+    await expect(
+      page.getByTestId('worldsim-name-navinstrument.altitude_meters_from_sea_level')
+    ).toContainText('other craft');
+    await page.keyboard.press('Escape');
+  });
+
   test('the ▣ Screens bottom tab shows dashboards + virtual surfaces @slow', async ({ page }) => {
     // (we: "open the screens in the bottom tab using a screen button on top
     // (only visible if the craft has dashboards) … a tab for normal and

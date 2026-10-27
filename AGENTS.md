@@ -1561,6 +1561,90 @@ topic + FORMAT).
   remaining 100 ms-class load phase, load-only, no interactive path).
   Suite: vitest 737, fast tier 204 runs **2.5→1.8 min** 0-red, @slow 11/11.
 
+- **v1.13.x XENON batch 5: WORLDSIM goes GLOBAL + $val overrides + ABI/LFS
+ (we: "worldsim should be global, not tied to individual sensors… buttons
+ should still be toggleable from worldsim, but grouped differently… sensors
+ should have overrides, so you can add or remove from the value, referred to
+ as $val e.g. $val + 2 to an altitude sensor… Uncaught TypeError:
+ _xc_worldsim_sync is not a function spams; can the wasm move to a repo /
+ git LFS?")**: engine/worldsim.ts owns the GLOBAL channel store (keyed by
+ name, localStorage-persisted archean-worldsim, shared by every craft — a
+ PLANE's World tab shows the airliner's nav rows as 'other craft'); the pump
+ keeps only name→io/ch BINDINGS for the running computer. wsKind: SENSOR =
+ observers only (/sensor$/, navinstrument family, altimeter…) and ONLY they
+ get the g($val, t) override row ('$val + 2' → the instrument reads high —
+ inversion/offset tests); controls AND actuators (pilotseat, throttle,
+ wheels, relays…) are the CONTROL group — f(t) + manual toggles, no $val.
+ The World tab groups Sensors/Controls, bound-first. WASM/JS DRIFT GUARD:
+ every new device export is typeof-guarded (a stale wasm degrades features,
+ never spams — the _xc_worldsim_sync TypeError spam was this class) and the
+ shim stamps xc_abi()=4 vs the app's XC_ABI — a mismatch warns ONCE at boot;
+ bump both with the shim. COMPILED ARTIFACTS ON GIT LFS: git-lfs 3.6.1
+ installed per-user (~/.local/bin, no root), .gitattributes tracks
+ app/public/xenoncode|tools/xenoncode|app/wasm *.wasm — new blobs go LFS
+ (Pages serves the checked-out files; visitor traffic is Pages, not LFS
+ quota); history's ~1 MB blobs stay plain (git lfs migrate --everything is
+ the optional follow-up). A separate repo was REJECTED: the shim is our
+ device law (lenient-index, channels, worldsim API), evolving with the app —
+ the stable contained piece is upstream XenonCode, already pinned separately.
+ Pins: worldsim.test ($val, wsKind split, global-store identity), xenon
+ leg 'the WORLDSIM: sensors fly the craft…' (2000 + $val+2 → 2002.000 live,
+ firmware prints input_number(4,2)=2002, setworldsim(…,3000) badges program
+ + wins, persistence across crafts).
+- **v1.13.x XENON batch 4: WORLDSIM (we: "World should be under xenoncode,
+ be its own screen and we should have functions that we can put in that
+ define values over time, i.e. sin(t) … sensible defaults … flight at 2000
+ metres, going 80 metres per second forward … expose setworldsim(name,value)
+ / getworldsim(name) … Rename it to worldsim")**: engine/worldsim.ts is a
+ whitelisted expression-in-t engine (numbers, t, pi/e, sin..pow; anything
+ else THROWS — no eval surface; clamps ±1e9). Every input channel of the
+ running computer becomes a pump row (key io:ch — numbered AND alias-
+ addressed), NAMED `${device-slug}.${channel-slug}` from the game's channel
+ tables, driven by its f(t) each cycle; defaults = level flight 2000 m
+ /80 m/s with gentle oscillation EVERYWHERE (PilotSeat included). The World
+ side tab edits f(t), shows live values + program-override badges + per-row
+ manual sliders. Program API: device functions setworldsim(name,v) (override
+ until pow(10,40) — XenonCode has NO e-notation literals, 9e99 parses as a
+ NAME) and getworldsim(name) (pump streams effective values back via
+ xc_worldsim_sync) — in the game these are the firmware's own nops; native
+ fixture tools/xenoncode/demo/worldsim. xc_seedWorld stays as the pre-tick
+ seed only. Fix also landed: File ▸ Save while BROWSING no longer merges the
+ (empty) editor draft into the file. Pins: worldsim.test (7), native demo,
+ xenon leg 'worldsim'.
+- **v1.13.x XENON batch 3: real menus, ONE-row tab strip, autocomplete,
+ channel MEANINGS (we: "there is no working menu… should it even nest? No
+ man — computer is what we are in, keep it a good menu structure like an
+ IDE; File shouldn't show more than one line at a time; I cannot edit code;
+ add an autocomplete for variable names, known functions and declared
+ functions; the computer STILL does not resolve the component type of the
+ input, nor the meaning of the channels per input")**: (a) MenuBar component
+ — File (disk: new/save/delete) · Run (execution: start/resume, pause, step,
+ stop, F9-breakpoint) · Computer (re-boot) · Help; the flat 'Options ▸ run'
+ labels are GONE. (b) The tab strip is `xenon-tabstrip`: ONE row
+ flex-nowrap + overflow-x-auto (measured first: the Badger's 57 tabs WRAPPED
+ and the ✎ edit button rode BELOW the clip — "cannot edit" was LAYOUT, not
+ the editor), edit/save/revert pinned BESIDE the strip, never clipped.
+ (c) AutocompleteEdit: `$` completes variable names (running globals + every
+ name declared on disk), `@` declared functions, bare words the language/
+ library fns + keywords, `.` screen members; caret-mirror popup, Tab/Enter
+ accept, Esc closes (stopPropagation — the window's Esc-close owns the key
+ otherwise). (d) CHANNELS.json: tools/extract_channels.py packs the game
+ wiki's `### List of inputs/outputs` tables (52 types; 2- and 3-column
+ rows; types without tables show a bare ch N — NO invented meanings); the
+ IDE labels input rows 'PilotSeat · ch 1 Backward/Forward' (the device's
+ OUTPUTS are what input_number reads on an io cabled to it), bus rows show
+ the WRITE-side meaning, node cards carry the fn (xenon-chan-*). The shim
+ resolves ALIAS io args (xc_ioOf: alias → cabled io, alias-only devices →
+ synthetic 1000+id; xc_set_input_a wires the sliders); detectChannels
+ carries string io for alias-addressed reads. ALIAS-only devices get
+ CANNED WORLD SEEDS (xc_seedWorld, from the same tables; alias-only only —
+ cabled devices stay slider-driven; sliders override): the alias fix made
+ alias reads HONEST (0, not the io-0 leak) and the Badger's nav gate then
+ skipped boot — seeded (Celestial='EARTH', heading, lat/lon, dock/anchor
+ present, battery 0.8) the firmware reaches 'Smart Quad is ready' natively.
+ Pins: xenoncode.test (chan table + alias detect), xenon.spec 'resolves io
+ to component TYPES…' + 'IDE menus, single-row tab strip, and $/@/word
+ AUTOCOMPLETE'.
 - **v1.13.x XENON batch 2: side rail, debugger, autosaves (we: "Screens and
  vars should be to the side of the tabs, the computer screen should take more
  size; set breakpoints and move through with f10/f11; the viewer keeps a

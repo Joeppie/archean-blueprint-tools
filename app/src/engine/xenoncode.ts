@@ -9,6 +9,11 @@
 // dialog renders — the helpers run headless in vitest; only the wasm pump
 // needs a browser.
 import type { Blueprint, BlueprintComponent } from './format';
+import { atlasJsonPaths } from './models';
+import {
+  evalExpr, wsChans, wsEnsure, wsKind, wsLoad, wsName, wsSave, worldsimDefault,
+  type WorldSimChan,
+} from './worldsim';
 
 export interface XCFile { name: string; code: string }
 export interface XCScreen {
@@ -34,6 +39,10 @@ type Mod = {
   _xc_events(): number;
   _xc_error(): number;
   _xc_set_input(io: number, ch: number, v: number): void;
+  _xc_set_input_a(alias: number, ch: number, v: number): void;
+  _xc_worldsim_overrides(): number;
+  _xc_worldsim_sync(name: number, v: number): void;
+  _xc_abi(): number;
   _xc_save_storage(): void;
   _xc_pilot_script(on: number): void;
   _xc_reset_screens(): void;
@@ -87,7 +96,7 @@ export interface XenonComputer {
   files: XCFile[];            // main.xc = the entry file, then includes
   entryName: string;          // the entry file's NAME in the file (Cede.main.xc)
   capacity: number;           // hdd capacity = the game's storage limit
-  channels: { io: number; ch: number }[];
+  channels: XenonChannel[];
   screens: XCScreen[];
   devices: XCDevice[];
 }
@@ -225,16 +234,22 @@ export function xenonDevices(bp: Blueprint, ci: number): XCDevice[] {
   return out;
 }
 
-/** input_number(io, ch) call sites — the external numerics the panel exposes. */
-export function detectChannels(files: XCFile[]): { io: number; ch: number }[] {
+/** input_number(io|"alias", ch) call sites — the external numerics the
+ *  panel exposes. Aliased reads (computer.md: aliasOrIoNumber) ride too:
+ *  `io` carries the alias STRING for those, and the pump/shim resolve it. */
+export interface XenonChannel { io: number | string; ch: number }
+export function detectChannels(files: XCFile[]): XenonChannel[] {
   const seen = new Set<string>();
-  const out: { io: number; ch: number }[] = [];
+  const out: XenonChannel[] = [];
   for (const f of files)
-    for (const m of f.code.matchAll(/input_number\(\s*(\d+)\s*,\s*(\d+)\s*\)/g)) {
-      const k = `${m[1]}:${m[2]}`;
-      if (!seen.has(k)) { seen.add(k); out.push({ io: +m[1]!, ch: +m[2]! }); }
+    for (const m of f.code.matchAll(/input_number\(\s*(?:(\d+)|"([^"]+)"|'([^']+)')\s*,\s*(\d+)\s*\)/g)) {
+      const io: number | string = m[1] !== undefined ? +m[1] : (m[2] ?? m[3] ?? '');
+      const k = `${io}:${m[4]}`;
+      if (!seen.has(k)) { seen.add(k); out.push({ io, ch: +m[4]! }); }
     }
-  return out.sort((a, b) => a.io - b.io || a.ch - b.ch);
+  return out.sort((a, b) =>
+    (typeof a.io === 'number' ? a.io : 1e9) - (typeof b.io === 'number' ? b.io : 1e9)
+    || a.ch - b.ch);
 }
 
 // ---------------------------------------------------------------------------
@@ -396,7 +411,15 @@ export class XenonRun {
     return JSON.parse(m.UTF8ToString(m._xc_events()));
   }
 
-  setInput(io: number, ch: number, v: number) { this.mod._xc_set_input(io, ch, v); }
+  setInput(io: number | string, ch: number, v: number) {
+    if (typeof io === 'number') { this.mod._xc_set_input(io, ch, v); return; }
+    if (typeof this.mod._xc_set_input_a !== 'function') return;
+    const nb = new TextEncoder().encode(io).length + 1;
+    const p = this.mod._malloc(nb);
+    this.mod.stringToUTF8(io, p, nb);
+    this.mod._xc_set_input_a(p, ch, v);
+    this.mod._free(p);
+  }
   /** Route a canvas click on one surface (pixel coords of the surface).
    *  button_rect/button evaluate true for it THIS cycle (game law). */
   screenClick(key: string, x: number, y: number) {
@@ -419,10 +442,31 @@ export class XenonRun {
   vars(): XenonVar[] { return parseVarsJson(this.mod.UTF8ToString(this.mod._xc_vars())); }
   /** XENON-DEBUG: record the source lines the VM executes (the pump keeps
    *  this on — one branch per LINENUMBER opcode, gated in the library). */
-  debugTrack(on: boolean) { this.mod._xc_debug_track(on ? 1 : 0); }
+  debugTrack(on: boolean) {
+    if (typeof this.mod._xc_debug_track === 'function') this.mod._xc_debug_track(on ? 1 : 0);
+  }
   cycleLines(): number[] {
+    if (typeof this.mod._xc_cycle_lines !== 'function') return [];
     try { return JSON.parse(this.mod.UTF8ToString(this.mod._xc_cycle_lines())) as number[]; }
     catch { return []; }
+  }
+  abi(): number {
+    return typeof this.mod._xc_abi === 'function' ? this.mod._xc_abi() : 0;
+  }
+  /** Active program overrides from setworldsim(name, v), keyed by worldsim name. */
+  worldsimOverrides(): Record<string, number> {
+    if (typeof this.mod._xc_worldsim_overrides !== 'function') return {};
+    try { return JSON.parse(this.mod.UTF8ToString(this.mod._xc_worldsim_overrides())) as Record<string, number>; }
+    catch { return {}; }
+  }
+  /** Stream a channel's effective worldsim value back (getworldsim answers it). */
+  worldsimSync(name: string, v: number) {
+    if (typeof this.mod._xc_worldsim_sync !== 'function') return;
+    const nb = new TextEncoder().encode(name).length + 1;
+    const p = this.mod._malloc(nb);
+    this.mod.stringToUTF8(name, p, nb);
+    this.mod._xc_worldsim_sync(p, v);
+    this.mod._free(p);
   }
   saveStorage() { this.mod._xc_save_storage(); }
   reboot() {
@@ -484,6 +528,16 @@ export class XenonPump {
   paused = false;
   pausedAt = 0;                                      // the bp line that paused
   breakLines = new Set<number>();                    // line numbers of the ACTIVE code tab
+  // ── WORLDSIM (engine/worldsim.ts): every input channel of the running
+  // computer is a function of t (elapsed seconds) evaluated each cycle —
+  // headings sweep, altitude breathes around 2000 m, the stick oscillates.
+  // setworldsim(name, v) from the program overrides a row (shown · program,
+  // pow(10,40) releases); sliders are the MANUAL mode per row.
+  // name -> io/ch bindings of the CURRENT computer (the channels themselves
+  // are the GLOBAL store in engine/worldsim.ts — shared, persisted)
+  private wsBindings = new Map<string, { io: number | string; ch: number }>();
+  private wsT0 = 0;
+  private wsOverrides: Record<string, number> = {};
   log: XenonEvent[] = [];
   surfaces = new Map<string, XenonSurface>();        // screen key -> latest framebuffer
   private canvases = new Map<string, Set<HTMLCanvasElement>>();
@@ -520,6 +574,12 @@ export class XenonPump {
       this.status = 'running';
       for (const c of comp.channels) run.setInput(c.io, c.ch, 0);
       run.debugTrack(true);                          // XENON-DEBUG: lines feed the debugger
+      this.wsT0 = performance.now();
+      if (run.abi() !== XC_ABI)
+        console.warn(`[xenon] wasm ABI ${run.abi()} != app ${XC_ABI}: the shipped `
+          + 'xenoncode.wasm is older than the app - rebuild tools/xenoncode '
+          + '(worldsim/debugger features degrade gracefully until then)');
+      void this.buildWorldSim(comp);
     }
     this.notify();
     this.startLoop();
@@ -533,6 +593,8 @@ export class XenonPump {
     this.comp = null;
     this.status = 'idle';
     this.surfaces = new Map();
+    this.wsBindings = new Map();
+    this.wsOverrides = {};
     this.paused = false; this.pausedAt = 0; this.stepWanted = 0; this.breakLines = new Set();
     this.notify();
   }
@@ -542,6 +604,80 @@ export class XenonPump {
    *  executed-line list, which mixes files — a break line pauses the cycle
    *  that ran it in ANY included file). */
   setBreaks(lines: Iterable<number>) { this.breakLines = new Set(lines); this.notify(); }
+
+  /** Name the running computer's input channels and give every one a
+   *  time function (the game's channel meanings drive the defaults). */
+  private async buildWorldSim(comp: XenonComputer) {
+    wsLoad();
+    const table = await loadChannelTable();
+    const bindings = new Map<string, { io: number | string; ch: number }>();
+    for (const c of comp.channels) {
+      const dev = comp.devices.find(d =>
+        typeof c.io === 'number' ? d.io === c.io : d.alias === String(c.io));
+      const type = dev?.type ?? '';
+      const fn = dev ? chanInfo(table, type, 'out', c.ch)?.fn ?? null : null;
+      const name = wsName(dev?.alias || type || `io${c.io}`, fn, c.ch);
+      wsEnsure(name, `${dev?.alias || type || c.io} · ${fn ?? `ch ${c.ch}`}`,
+        wsKind(type.toLowerCase()),
+        worldsimDefault(fn?.toLowerCase() ?? null, type.toLowerCase()));
+      bindings.set(name, { io: c.io, ch: c.ch });
+    }
+    this.wsBindings = bindings;
+    wsSave();
+    this.notify();
+  }
+
+  /** Each cycle: evaluate every auto row at t, honour program overrides,
+   *  feed the VM, and stream effective values back for getworldsim. */
+  private stepWorldSim(run: XenonRun) {
+    if (!this.wsBindings.size) return;
+    const t = (performance.now() - this.wsT0) / 1000;
+    this.wsOverrides = run.worldsimOverrides();
+    for (const [name, bind] of this.wsBindings) {
+      const r = wsChans().get(name);
+      if (!r) continue;
+      let v: number;
+      if (r.mode === 'manual') v = r.manual;
+      else {
+        try {
+          v = evalExpr(r.base, t);
+          if (r.kind === 'sensor' && r.override.trim()) v = evalExpr(r.override, t, v);
+          r.error = undefined;
+        } catch (e) { v = 0; r.error = String((e as Error).message ?? e); }
+      }
+      const ov = this.wsOverrides[name];      // program setworldsim wins
+      if (ov !== undefined) v = ov;
+      r.value = v;
+      run.setInput(bind.io, bind.ch, v);
+      run.worldsimSync(name, v);
+    }
+  }
+
+  /** The GLOBAL worldsim channels (World tab renders them; labels cover
+   *  every craft seen this session). */
+  wsChannels(): WorldSimChan[] {
+    return [...wsChans().values()];
+  }
+  wsBoundNames(): Set<string> { return new Set(this.wsBindings.keys()); }
+
+  /** Names currently overridden by the program's setworldsim calls. */
+  wsOverrideNames(): string[] { return Object.keys(this.wsOverrides); }
+  wsSetBase(name: string, base: string) {
+    const r = wsChans().get(name);
+    if (r) { r.base = base; r.error = undefined; wsSave(); this.notify(); }
+  }
+  wsSetOverride(name: string, override: string) {
+    const r = wsChans().get(name);
+    if (r && r.kind === 'sensor') { r.override = override; r.error = undefined; wsSave(); this.notify(); }
+  }
+  wsSetMode(name: string, mode: 'auto' | 'manual') {
+    const r = wsChans().get(name);
+    if (r) { r.mode = mode; wsSave(); this.notify(); }
+  }
+  wsSetManual(name: string, v: number) {
+    const r = wsChans().get(name);
+    if (r) { r.manual = v; r.value = v; wsSave(); this.notify(); }
+  }
   pause() { if (this.status === 'running') { this.paused = true; this.notify(); } }
   resume() { this.paused = false; this.pausedAt = 0; this.stepWanted = 0; this.notify(); }
   /** F10/F11: run exactly one more cycle, then pause again. */
@@ -565,7 +701,7 @@ export class XenonPump {
     else { this.status = 'error'; this.error = r.error; }
     this.notify();
   }
-  setInput(io: number, ch: number, v: number) { this.run?.setInput(io, ch, v); }
+  setInput(io: number | string, ch: number, v: number) { this.run?.setInput(io, ch, v); }
   screenClick(key: string, x: number, y: number) { this.run?.screenClick(key.toLowerCase(), x, y); }
   screenScroll(key: string, d: number) { this.run?.screenScroll(key.toLowerCase(), d); }
 
@@ -611,6 +747,7 @@ export class XenonPump {
       if (!run || !run.running) return;
       // debugger gate: while PAUSED the pump runs cycles only for a step
       if (this.paused && this.stepWanted <= 0) return;
+      this.stepWorldSim(run);
       const evs = run.cycle();
       if (evs.length) {
         const prints = evs.filter(e => e.e !== 'cycle');
@@ -658,6 +795,9 @@ export class XenonPump {
     this.raf = 0;
   }
 }
+
+/** The shim ABI the app expects (xc_host.cpp xc_abi()). Bump with the shim. */
+export const XC_ABI = 4;
 
 export const xenonPump = new XenonPump();
 
@@ -716,4 +856,37 @@ export function parseVarsJson(json: string): XenonVar[] {
     const j = JSON.parse(json) as { name: string; t: number; v: string }[];
     return Array.isArray(j) ? j.map(e => ({ name: e.name, t: e.t | 0, v: String(e.v ?? '') })) : [];
   } catch { return []; }
+}
+
+// ---------------------------------------------------------------------------
+// Channel meanings — the game's OWN per-type io semantics (viewer/models/
+// channels.json, tools/extract_channels.py from the bundled wiki's
+// "List of inputs/outputs" tables). A type's `out` is what it SENDS on its
+// data port (the meaning of input_number on an io cabled to it); `in` is
+// what output_number writes to it. The IDE resolves io → component (the
+// xenonDevices table) → type → channel row, so a slider reads
+// "io 4 · NavInstrument — ch 6 Heading (0..360)" and not a bare "ch 6".
+export interface ChanInfo { fn: string; rng: string }
+export type ChannelTable = Record<string, { in?: Record<string, ChanInfo>; out?: Record<string, ChanInfo> }>;
+
+let chanP: Promise<ChannelTable | null> | null = null;
+export function loadChannelTable(): Promise<ChannelTable | null> {
+  chanP ??= (async () => {
+    for (const path of atlasJsonPaths('channels.json')) {
+      try {
+        const r = await fetch(path);
+        if (!r.ok) continue;
+        const j = await r.json() as ChannelTable;
+        if (j && Object.keys(j).length) return j;
+      } catch { /* next candidate */ }
+    }
+    return null;
+  })().then(c => { if (!c) chanP = null; return c; });
+  return chanP;
+}
+
+/** The channel row for (device type, direction, channel), if documented. */
+export function chanInfo(t: ChannelTable | null | undefined, type: string,
+  dir: 'in' | 'out', ch: number): ChanInfo | null {
+  return t?.[type]?.[dir]?.[String(ch)] ?? null;
 }
