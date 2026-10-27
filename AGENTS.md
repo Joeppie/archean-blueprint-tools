@@ -1561,6 +1561,58 @@ topic + FORMAT).
   remaining 100 ms-class load phase, load-only, no interactive path).
   Suite: vitest 737, fast tier 204 runs **2.5→1.8 min** 0-red, @slow 11/11.
 
+- **v1.12.12 XENON ON THE BADGER — hook + iterate (we: "Hook it to Chip's
+  Badger, iterate over issues that it encounters and try to fix them as they
+  crop up, also try to load in the virtual screens, and read components. Also
+  in my exploration plane; the nodes dont render with the information they
+  should have, specifically the inputs")**: the Xenon IDE pointed at the
+  hardest craft in the corpus (3326372833: MiniComputer ci133, 57 files,
+  1.8 MB of .xc, 36,232 lines) and the issue list fixed as it cropped up —
+  ① `program=''` → entry-file fallback `<prog>.main.xc` → `main.xc` →
+  `*.main.xc` → first file (the Badger stores a literal main.xc);
+  ② **virtual screens**: `virtualscreen(w,h)` (cap 4096/buffer) +
+  `screen_copy(src,dst,sx,sy,dx,dy,w,h[,tint,rotation,bilinear])` (rotation
+  + bilinear sampling in the shim — the Badger's attitude-display atlas uses
+  both); ③ **component reading**: the wiki's Component Inspection family
+  (`device_count/device/device_at/device_type` as KV-text records) over a
+  device table JS fills from the blueprint — cabled components via
+  `data_port.0NN` computer-side port names (verified: plane io11 = PilotSeat,
+  cep io8 = SmallWheel) PLUS every ALIASED component (computer.md: aliases
+  address components directly — the Badger drives `mining-drill`,
+  `left-cargo`, `nav` with zero data cables to them; io map = 1 cable + 82
+  aliases); ④ screen BINDING rewritten to scan the program's
+  `screen(aliasOrIo, ch)` calls (the binding law per xenoncode/dashboard.md +
+  computer.md Screen Override): alias→Dashboard → element #channel
+  (Screen/HdScreen, pixel size = units+1 per XenonDraw; Label = no surface),
+  alias→component = its 128×72 override surface, number→component cabled on
+  that io of THIS computer; the Badger boots 17 named surfaces
+  (pilot-screen#0..5, systems-dashboard#0..1, ore_screen#0,
+  left-inside-door-button#0…); ⑤ the Computer-context built-in VALUES
+  (`tick`, `system_frequency`, `system_ram/ipc`, `programs_count`,
+  `user/owner/username`) + the recipes family (`get_recipe*`/
+  `get_item_value_unit` honest empties) + colour extractors + `button/
+  button_rect` (draw, no click edge) + `load_program/reboot` no-ops;
+  ⑥ **lenient text→number PATCH** (build.sh, documented in
+  XENONCODE_UPSTREAM.md): the open library's `stoll` throws where the game
+  binary casts junk to 0 — the Badger's first settings read crashed the VM;
+  ⑦ Chrome wasm ceiling: `-sINITIAL_MEMORY=64MB -sMAXIMUM_MEMORY=4096MB`
+  (headless probe: default 2047MB cap aborts the Badger boot in-browser;
+  node peaks ~100 MB); ⑧ **node-graph inputs** (the reported bug):
+  InputNode/OutputNode cards now show `io <ioNumber> channel <channel>` /
+  `io <n> (write)` (the #NODES JSON carried them, we never drew them) and
+  unconnected ports label their constant (`= -40`); ⑨ Badger-scale UI:
+  code view + validation capped at 1500 lines (main.xc is 16k) with a
+  "view is capped" note, `#`-directive lines skip validation, tabs wrap
+  (57), screens panel caps 16 canvases + count, `screenInfo(max)` +
+  `screenCount()` stop copying 118 buffers per render, io bus + input rows
+  relabelled by DEVICE NAME (mining-drill, PilotSeat).
+  Verified: e2e Badger chain boots the firmware in-browser in 2.2 s
+  ("Booting Up Smart Quad v4.0T6aW Workshop firmware" → "Smart Quad is
+  ready" prints, mining-drill bus row, pilot-screen#0 canvas lit > 20 px,
+  57 tabs, capped view) + plane/cep legs stay green; vitest 13 xenoncode
+  pins (io-map law on 2 crafts, Badger extraction, binding incl. the
+  no-such-alias auto-surface rule); native runner: 150 cycles = 5,422
+  outputs + 118 painted surfaces on screen-*.ppm.
 - **v1.12.11 XENON ▾ — THE IN-GAME IDE FOR CRAFT COMPUTERS (we: "integrate it
   with our normal tool … in the menu add Xenon, there, list all computers and
   when we click a computer, we get a pop-up screen with its code that looks

@@ -32,6 +32,10 @@ type Mod = {
   _xc_pilot_script(on: number): void;
   _xc_reset_screens(): void;
   _xc_add_screen(a: number, ch: number, w: number, h: number): number;
+  _xc_reset_devices(): void;
+  _xc_add_device(id: number, io: number, a: number, t: number, port: number,
+    x: number, y: number, z: number, sx: number, sy: number, sz: number, mass: number): void;
+  _xc_set_capability(ram: number, storage: number): void;
   _xc_screen_count(): number;
   _xc_screen_key(i: number): number;
   _xc_screen_w(i: number): number;
@@ -69,8 +73,18 @@ export interface XenonComputer {
   alias: string;
   program: string;
   files: XCFile[];            // main.xc = the entry file, then includes
+  capacity: number;           // hdd capacity = the game's storage limit
   channels: { io: number; ch: number }[];
   screens: XCScreen[];
+  devices: XCDevice[];
+}
+
+export interface XCDevice {
+  io: number;               // the computer io port it is cabled to, -1 = by alias
+  id: number;               // stable table id (device_at order)
+  alias: string;
+  type: string;
+  x: number; y: number; z: number;
 }
 
 /** Every MiniComputer with at least one .xc file, as an IDE descriptor. */
@@ -81,37 +95,109 @@ export function xenonComputers(bp: Blueprint): XenonComputer[] {
     const hdd = (c.data as any)?.hdd;
     const xf: { name: string; plain_code?: string }[] = hdd?.xc_files ?? [];
     if (!xf.length) return;
-    const program = String((c.data as any)?.program ?? (xf[0]?.name ?? 'main').split('.')[0]);
-    const mainName = `${program}.main.xc`;
-    const files: XCFile[] = [];
-    const main = xf.find(f => f.name === mainName);
-    if (main) files.push({ name: 'main.xc', code: main.plain_code ?? '' });
+    const program = String((c.data as any)?.program ?? '');
+    // entry file: <program>.main.xc; the Badger stores program='' with a
+    // literal main.xc — fall back through any *.main.xc to the first file
+    const main = xf.find(f => f.name === `${program}.main.xc`)
+      ?? xf.find(f => f.name === 'main.xc')
+      ?? xf.find(f => f.name.endsWith('.main.xc')) ?? xf[0];
+    const files: XCFile[] = [{ name: 'main.xc', code: main?.plain_code ?? '' }];
     for (const f of xf)
-      if (f.name !== mainName) files.push({ name: f.name, code: f.plain_code ?? '' });
+      if (f !== main) files.push({ name: f.name, code: f.plain_code ?? '' });
+    const base = String(main?.name ?? 'main').split('.')[0] || 'main';
     out.push({
-      ci, alias: c.alias || program, program, files,
+      ci, alias: c.alias || program || base, program: program || base, files,
+      capacity: Number((c.data as any)?.hdd?.capacity) || 0,
       channels: detectChannels(files),
-      screens: xenonScreens(bp, c.alias ?? '')
+      screens: xenonScreens(bp, files, ci),
+      devices: xenonDevices(bp, ci),
     });
   });
   return out;
 }
 
-/** The Screen/HdScreen surfaces a screen("<alias>", ch) call binds to:
- *  a Dashboard with that alias; channelIndex counts ALL its elements in
- *  order (wiki xenoncode/dashboard.md), pixel size = 1 px per element unit
- *  (the XenonDraw convention). */
-export function xenonScreens(bp: Blueprint, alias: string): XCScreen[] {
+/**
+ * The surfaces a program's screen(aliasOrIo, channel) calls bind to, read
+ * OUT OF THE PROGRAM (the binding law is the wiki's xenoncode/dashboard.md +
+ * computer.md: alias = a Dashboard's name, channel counts ALL its elements
+ * in order; alias = any other component's name OVERRIDES its built-in
+ * screen; number = the io port of the component cabled to this computer).
+ * Unresolvable io references are left to the shim's auto-created surfaces.
+ */
+export function xenonScreens(bp: Blueprint, files: XCFile[], ci = -1): XCScreen[] {
+  const refs = new Map<string, { alias: string; io: number; channel: number }>();
+  for (const f of files)
+    for (const m of f.code.matchAll(/screen\(\s*(?:"([^"]+)"|(\d+))\s*,\s*(\d+)\s*\)/g)) {
+      const alias = m[1] ?? '', io = m[2] !== undefined ? +m[2] : -1, channel = +m[3]!;
+      refs.set(`${alias.toLowerCase()}#${io}#${channel}`, { alias, io, channel });
+    }
+  const comps = bp.data.components as BlueprintComponent[];
   const out: XCScreen[] = [];
-  if (!alias) return out;
-  for (const c of bp.data.components as BlueprintComponent[]) {
-    if (c.type !== 'Dashboard' || c.alias !== alias) continue;
-    const els: any[] = (c.data as any)?.elements ?? [];
-    els.forEach((e, i) => {
-      if (e.type === 'Screen' || e.type === 'HdScreen')
-        out.push({ alias, channel: i, w: e.size_x + 1, h: e.size_y + 1 });
-    });
+  const seen = new Set<string>();
+  for (const r of refs.values()) {
+    let comp: BlueprintComponent | undefined;
+    if (r.alias) comp = comps.find(c => (c.alias ?? '') === r.alias);
+    if (!comp && r.io >= 0) comp = compOnIo(bp, ci, r.io);
+    if (!comp) continue;
+    const idx = comps.indexOf(comp);
+    const label = r.alias || comp.alias || `${comp.type.toLowerCase()}-${idx}`;
+    const k = `${label}#${r.channel}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    if (comp.type === 'Dashboard') {
+      const el: any[] = ((comp.data as any)?.elements ?? []) as any[];
+      const e = el[r.channel];
+      if (!e || (e.type !== 'Screen' && e.type !== 'HdScreen')) continue;  // Label: none
+      out.push({ alias: label, channel: r.channel, w: (e.size_x ?? 0) + 1, h: (e.size_y ?? 0) + 1 });
+    } else {
+      out.push({ alias: label, channel: r.channel, w: 128, h: 72 });       // screen override
+    }
   }
+  return out.sort((a, b) => a.alias.localeCompare(b.alias) || a.channel - b.channel);
+}
+
+function compOnIo(bp: Blueprint, ci: number, io: number): BlueprintComponent | undefined {
+  const comps = bp.data.components as BlueprintComponent[];
+  if (ci < 0) return undefined;
+  const pipes: any[] = (bp.data as any).pipes ?? [];
+  for (const p of pipes) {
+    if (p.a_component !== ci && p.b_component !== ci) continue;
+    const mine = p.a_component === ci ? p.a_port : p.b_port;
+    const m = /^(?:data_port\.(\d+)|data)$/.exec(String(mine));
+    if (!m) continue;                     // power_connector etc
+    if ((m[1] ? +m[1] : 0) === io) return comps[p.a_component === ci ? p.b_component : p.a_component];
+  }
+  return undefined;
+}
+
+/** The component table for device()/device_type()/device_count(): the
+ *  components cabled to this computer's data_port.0NN ports, plus every
+ *  aliased component (computer.md: aliases address components directly,
+ *  no Router needed). */
+export function xenonDevices(bp: Blueprint, ci: number): XCDevice[] {
+  const comps = bp.data.components as BlueprintComponent[];
+  const out: XCDevice[] = [];
+  const byAlias = new Set<string>();
+  const pipes: any[] = (bp.data as any).pipes ?? [];
+  for (const p of pipes) {
+    if (p.a_component !== ci && p.b_component !== ci) continue;
+    const mine = p.a_component === ci ? p.a_port : p.b_port;
+    const m = /^(?:data_port\.(\d+)|data)$/.exec(String(mine));
+    if (!m) continue;
+    const other = comps[p.a_component === ci ? p.b_component : p.a_component];
+    if (!other) continue;
+    out.push({ io: m[1] ? +m[1] : 0, id: 0, alias: other.alias ?? '', type: other.type,
+      x: other.position?.x ?? 0, y: other.position?.y ?? 0, z: other.position?.z ?? 0 });
+    if (other.alias) byAlias.add(other.alias);
+  }
+  comps.forEach((c) => {
+    if (!c.alias || byAlias.has(c.alias)) return;
+    byAlias.add(c.alias);
+    out.push({ io: -1, id: 0, alias: c.alias, type: c.type,
+      x: c.position?.x ?? 0, y: c.position?.y ?? 0, z: c.position?.z ?? 0 });
+  });
+  out.sort((a, b) => a.alias.localeCompare(b.alias) || a.io - b.io);
+  out.forEach((d, i) => (d.id = i + 1));
   return out;
 }
 
@@ -255,12 +341,24 @@ export class XenonRun {
       mod._free(np); mod._free(cp);
     };
     mod._xc_reset_screens();
+    mod._xc_reset_devices();
+    mod._xc_set_capability(0, comp.capacity);
     for (const f of comp.files) put(f.name, f.code);
     for (const sc of comp.screens) {
-      const np = mod._malloc(sc.alias.length + 1);
-      mod.stringToUTF8(sc.alias, np, sc.alias.length + 1);
+      const nb = new TextEncoder().encode(sc.alias).length + 1;
+      const np = mod._malloc(nb);
+      mod.stringToUTF8(sc.alias, np, nb);
       mod._xc_add_screen(np, sc.channel, sc.w, sc.h);
       mod._free(np);
+    }
+    for (const d of comp.devices) {
+      const ab = new TextEncoder().encode(d.alias).length + 1;
+      const tb = new TextEncoder().encode(d.type).length + 1;
+      const ap = mod._malloc(ab), tp = mod._malloc(tb);
+      mod.stringToUTF8(d.alias, ap, ab);
+      mod.stringToUTF8(d.type, tp, tb);
+      mod._xc_add_device(d.id, d.io, ap, tp, d.io, d.x, d.y, d.z, 0, 0, 0, 0);
+      mod._free(ap); mod._free(tp);
     }
     mod._xc_pilot_script(0);
     if (mod._xc_boot()) { run.error = mod.UTF8ToString(mod._xc_error()); return run; }
@@ -285,9 +383,11 @@ export class XenonRun {
   }
   stop() { this.running = false; }
 
-  screenInfo(): { key: string; w: number; h: number; pixels: Uint8ClampedArray }[] {
+  screenCount(): number { return this.mod._xc_screen_count(); }
+
+  screenInfo(max = 16): { key: string; w: number; h: number; pixels: Uint8ClampedArray }[] {
     const m = this.mod, out = [];
-    for (let i = 0; i < m._xc_screen_count(); i++) {
+    for (let i = 0; i < Math.min(m._xc_screen_count(), max); i++) {
       const w = m._xc_screen_w(i), h = m._xc_screen_h(i), p = m._xc_screen_pixels(i);
       if (!w || !h || !p) continue;
       out.push({ key: m.UTF8ToString(m._xc_screen_key(i)), w, h,

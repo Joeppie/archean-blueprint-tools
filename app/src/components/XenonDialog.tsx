@@ -22,6 +22,8 @@ import {
   type XenonComputer, type XenonEvent, type XGraph,
 } from '../engine/xenoncode';
 
+const MAX_CODE_LINES = 1500;   // view + validation cap (Badger main.xc = 16k lines)
+
 const TOK_COLOR: Record<string, string> = {
   kw: '#7ea6ff', type: '#7ea6ff', num: '#e6c07b', com: '#6a9955',
   op: '#d4d4d4', var: '#8fd48f', fn: '#c586c0', str: '#ce9178',
@@ -85,7 +87,7 @@ export default function XenonDialog(p: { comp: XenonComputer; onClose: () => voi
       }
       setCycles(++n);
       if (run.error) { setStatus('error'); setMsg(`Program '${comp.program}' crashed: ${run.error}`); }
-      for (const s of run.screenInfo()) {
+      for (const s of run.screenInfo(16)) {
         const cv = canvasRefs.current.get(s.key);
         if (!cv) continue;
         if (cv.width !== s.w) cv.width = s.w;
@@ -101,10 +103,11 @@ export default function XenonDialog(p: { comp: XenonComputer; onClose: () => voi
   const lineErrs = useMemo(() => {
     const errs = new Map<number, string>();
     if (!run) return errs;
-    const lines = comp.files[tab]?.code.split('\n') ?? [];
+    const lines = (comp.files[tab]?.code.split('\n') ?? []).slice(0, MAX_CODE_LINES);
     lines.forEach((ln, i) => {
       const t = ln.trim();
-      if (!t || t.startsWith(';') || t.startsWith('//')) return;
+      // '#NODES' is a compiler directive line, not a statement
+      if (!t || t.startsWith(';') || t.startsWith('//') || t.startsWith('#')) return;
       const e = run.parseLine(ln, i + 1);
       if (e) errs.set(i, e);
     });
@@ -154,7 +157,7 @@ export default function XenonDialog(p: { comp: XenonComputer; onClose: () => voi
           <span className="ml-auto text-[10px] text-[#5d6a7d]">cycles {cycles} @ 10 Hz · inputs are external numerics</span>
         </div>
         {/* tabs */}
-        <div className="flex gap-1 border-b border-[#2b313b] bg-[#121826] px-2 pt-1.5 text-[12px]">
+        <div className="flex flex-wrap gap-1 border-b border-[#2b313b] bg-[#121826] px-2 pt-1.5 text-[12px]">
           {comp.files.map((f, i) => (
             <button key={f.name} data-testid={`xenon-tab-${i}`} onClick={() => setTab(i)}
               className={`rounded-t px-3 py-1 ${tab === i ? 'bg-[#10141f] text-[#8fd4ff]' : 'bg-[#1a2233] text-[#7d8aa0]'}`}>
@@ -172,18 +175,31 @@ export default function XenonDialog(p: { comp: XenonComputer; onClose: () => voi
         <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-hidden p-2 md:grid-cols-[minmax(0,1fr)_330px]">
           {/* code / nodes */}
           <div data-testid={`xenon-code-${tab}`} className="min-h-0 overflow-auto rounded border border-[#232c3d] bg-[#0b0f18] text-[12px] leading-[1.45]">
-            {onCode && file && (file.code.split('\n')).map((ln, i) => (
-              <div key={i} data-testid={lineErrs.has(i) ? `xenon-err-${i}` : undefined}
-                title={lineErrs.get(i)}
-                className={`flex ${lineErrs.has(i) ? 'bg-[#3a1420]' : ''}`}>
-                <span className="w-9 shrink-0 select-none pr-2 text-right text-[#3f4b5f]">{i + 1}</span>
-                <span className="whitespace-pre">
-                  {tokenize(ln).map((t, j) => (
-                    <span key={j} style={{ color: TOK_COLOR[t.t] }}>{t.s}</span>
-                  ))}
-                </span>
-              </div>
-            ))}
+            {onCode && file && (() => {
+              const lines = file.code.split('\n');
+              const shown = lines.slice(0, MAX_CODE_LINES);
+              return (<>
+                {shown.map((ln, i) => (
+                  <div key={i} data-testid={lineErrs.has(i) ? `xenon-err-${i}` : undefined}
+                    title={lineErrs.get(i)}
+                    className={`flex ${lineErrs.has(i) ? 'bg-[#3a1420]' : ''}`}>
+                    <span className="w-9 shrink-0 select-none pr-2 text-right text-[#3f4b5f]">{i + 1}</span>
+                    <span className="whitespace-pre">
+                      {tokenize(ln).map((t, j) => (
+                        <span key={j} style={{ color: TOK_COLOR[t.t] }}>{t.s}</span>
+                      ))}
+                    </span>
+                  </div>
+                ))}
+                {lines.length > MAX_CODE_LINES && (
+                  <div className="px-9 py-2 text-[11px] text-[#5d6a7d]">
+                    … {lines.length - MAX_CODE_LINES} more lines in this file
+                    ({lines.length.toLocaleString()} total — the view is capped at
+                    {MAX_CODE_LINES.toLocaleString()} for responsiveness)
+                  </div>
+                )}
+              </>);
+            })()}
             {tab === 100 && graph && <NodeGraph graph={graph} />}
           </div>
 
@@ -195,7 +211,7 @@ export default function XenonDialog(p: { comp: XenonComputer; onClose: () => voi
                 {(run?.screenInfo() ?? []).length === 0 && !run && (
                   <span className="text-[11px] text-[#5d6a7d]">booting…</span>
                 )}
-                {(run?.screenInfo() ?? []).map(s => (
+                {(run?.screenInfo(16) ?? []).map(s => (
                   <label key={s.key} className="block text-[10px] text-[#5d6a7d]">
                     <canvas key={s.key} width={s.w} height={s.h}
                       data-testid={`xenon-screen-${s.key}`}
@@ -205,6 +221,9 @@ export default function XenonDialog(p: { comp: XenonComputer; onClose: () => voi
                     <div>{s.key}</div>
                   </label>
                 ))}
+                {(run?.screenCount() ?? 0) > 16 && (
+                  <span className="text-[11px] text-[#5d6a7d]">+{(run?.screenCount() ?? 0) - 16} more surfaces (virtual buffers)</span>
+                )}
                 {comp.screens.length === 0 && run && (
                   <span className="text-[11px] text-[#5d6a7d]">no Screen elements bound — program auto-screens shown</span>
                 )}
@@ -215,8 +234,9 @@ export default function XenonDialog(p: { comp: XenonComputer; onClose: () => voi
               <div className="mb-1 text-[10px] uppercase tracking-widest text-[#5d6a7d]">
                 Inputs (io · channel → value)</div>
               {comp.channels.map(c => (
-                <label key={`${c.io}.${c.ch}`} className="grid grid-cols-[64px_1fr_44px] items-center gap-2">
-                  <span className="text-[#9fb0c8]">{c.io} · ch {c.ch}</span>
+                <label key={`${c.io}.${c.ch}`} className="grid grid-cols-[86px_1fr_44px] items-center gap-2">
+                  <span className="text-[#9fb0c8]" title={`io ${c.io}`}>
+                  {comp.devices.find(d => d.io === c.io)?.alias || c.io} · ch {c.ch}</span>
                   <input type="range" min={-1} max={1} step={0.05}
                     data-testid={`xenon-in-${c.io}-${c.ch}`}
                     value={vals[`${c.io}.${c.ch}`] ?? 0}
@@ -236,9 +256,11 @@ export default function XenonDialog(p: { comp: XenonComputer; onClose: () => voi
               <div className="grid grid-cols-[1fr_28px_64px] gap-x-2">
                 {[...bus.entries()].slice(-24).map(([k, v]) => {
                   const [io, port] = k.split(':');
+                  const dev = comp.devices.find(d => String(d.io) === io);
                   return (
                     <div key={k} className="contents">
-                      <span className="truncate text-[#9fb0c8]">{io}</span>
+                      <span className="truncate text-[#9fb0c8]" title={dev ? `io ${io} = ${dev.alias || dev.type}` : io}>
+                        {dev ? `${dev.alias || dev.type}` : io}</span>
                       <span className="text-[#5d6a7d]">{port}</span>
                       <span className="text-right tabular-nums text-[#8fd48f]">
                         {typeof v === 'number' ? v.toFixed(3) : String(v).slice(0, 12)}</span>
@@ -342,13 +364,26 @@ function NodeGraph(p: { graph: XGraph }) {
       ctx.fillText(n.title.slice(0, Math.floor(n.w / 6.5)), n.x + 3, n.y + 11);
       ctx.fillStyle = '#9fb0c8';
       ctx.font = '9px ui-monospace, monospace';
+      // io-addressed nodes carry their binding in the graph: show it (the
+      // in-game cards show input.<io> + channel; the POC had the info parsed
+      // but never drawn — the "inputs are empty" report)
+      const ioLine = n.type.startsWith('Input')
+        ? `io ${n.ioNumber ?? '?'}  channel ${n.channel ?? '?'}`
+        : n.type.startsWith('Output')
+          ? `io ${n.ioNumber ?? '?'}  (write)` : null;
+      if (ioLine) {
+        ctx.fillStyle = '#c8d4e8';
+        ctx.fillText(ioLine, n.x + 6, n.y + 24);
+      }
       n.inputs.forEach((src, i) => {
-        const py = n.y + 22 + (n.h - 20) * ((i + 0.5) / Math.max(n.inputs.length, 1));
+        const py = n.y + (ioLine ? 36 : 22) + (n.h - (ioLine ? 34 : 20)) * ((i + 0.5) / Math.max(n.inputs.length, 1));
         ctx.fillStyle = '#8899c8';
         ctx.beginPath();
         ctx.arc(n.x, py, 2.4 / k, 0, 7);
         ctx.fill();
-        const label = src ? (byId.get(src)?.title ?? '?') : (n.inputValues?.[i] || '·');
+        const v = n.inputValues?.[i];
+        const label = src ? (byId.get(src)?.title ?? '?')
+          : v !== undefined && v !== '' ? `= ${v}` : '·';
         ctx.fillStyle = '#9fb0c8';
         ctx.fillText(String(label).slice(0, Math.floor((n.w - 10) / 5.6)), n.x + 6, py + 3);
       });

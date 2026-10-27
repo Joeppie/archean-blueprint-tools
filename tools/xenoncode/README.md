@@ -49,6 +49,17 @@ dial→bus echo `1[0]=0.8`, 70-px pixel bar at dial 0.4),
 3327182790 — its node-generated flight-control program on the stick sliders).
 `?prog=hello|plane|cep` deep-links.
 
+The Badger torture test (v1.12.12, app side): craft 3326372833 — 57 files,
+1.8 MB of .xc — boots the dev VM in-browser in ~2 s and runs its workshop
+firmware end to end. The issues that cropped up and their fixes are the
+`build.sh` patch list (see XENONCODE_UPSTREAM.md) plus the device-shim
+families: `virtualscreen`/`screen_copy`, Component Inspection
+(`device*`) over the blueprint's io-port + alias device table, the
+`screen(alias, channel)` binding to Dashboard Screen/HdScreen elements and
+component screen overrides, the Computer-context built-in values, and the
+Chrome wasm-memory flags. Native 150-cycle run: 5,422 outputs, 118 painted
+surfaces, boot prints up to `Smart Quad is ready`.
+
 ## Interpreter notes (learned building this)
 
 - **Overloads**: the library keys device functions by NAME (one prototype per

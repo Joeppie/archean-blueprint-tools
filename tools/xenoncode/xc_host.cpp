@@ -9,6 +9,7 @@
 #include "XenonScreen.hpp"
 #include "xc_host.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -54,6 +55,15 @@ static int xc_addScreen(const std::string& alias, int ch, uint32_t w, uint32_t h
 static inline XenonScreen* screenOf(const Var& obj) {
 	return reinterpret_cast<XenonScreen*>(static_cast<uint64_t>(obj));
 }
+
+// ---- component inspection table (JS fills it from the blueprint) ----------
+struct DevInfo {
+	int id; string alias, type; int port;
+	double x, y, z, sx, sy, sz, mass;
+};
+static vector<DevInfo> g_devs;
+static map<int, int> g_devByIo;        // computer io port → table index
+static map<string, int> g_devByAlias;  // lowercased alias → table index
 static inline uint32_t packedColor(const Var& v) {
 	return static_cast<uint32_t>(static_cast<uint64_t>(v));
 }
@@ -184,6 +194,66 @@ static void archeanInit() {
 			for (size_t i = 1; i + 1 < a.size(); i += 2)
 				pts.push_back((int)(int64_t)a[i]), pts.push_back((int)(int64_t)a[i + 1]);
 			screenOf(o)->DrawPoly(packedColor(a[0]), pts); return {}; }},
+		// button_rect(x, y, w, h, color) — draws; the click edge is not wired
+		// in the POC, so it evaluates to "not clicked"
+		{"button_rect($x:number,$y:number,$w:number,$h:number,$c:number)", [](Computer*, const Var& o, const vector<Var>& a) -> Var {
+			screenOf(o)->DrawRect((int)(int64_t)a[0], (int)(int64_t)a[1],
+			                      (int)(int64_t)a[0] + (int)(int64_t)a[2],
+			                      (int)(int64_t)a[1] + (int)(int64_t)a[3], packedColor(a[4]));
+			return 0.0; }},
+		{"button($x:number,$y:number,$w:number,$h:number,$c:number)", [](Computer*, const Var& o, const vector<Var>& a) -> Var {
+			screenOf(o)->DrawRect((int)(int64_t)a[0], (int)(int64_t)a[1],
+			                      (int)(int64_t)a[0] + (int)(int64_t)a[2],
+			                      (int)(int64_t)a[1] + (int)(int64_t)a[3], packedColor(a[4]));
+			return 0.0; }},
+	});
+
+	// ---- component inspection (computer.md "Component Inspection") ---------
+	// The blueprint-side device table: JS fills it from the blueprint (io
+	// ports via data_port cables, graph-walked through routers) before boot.
+	XenonCode::DeclareDeviceFunction("device_count:number", [](Computer*, const vector<Var>&) -> Var {
+		return (double)g_devs.size();
+	});
+	auto devDescribe = [](const DevInfo& d) -> Var {
+		auto esc = [](string s) { string o; for (char c : s) if (c != '{' && c != '}') o += c; return o; };
+		ostringstream s;
+		s << ".id{" << d.id << "}.alias{" << esc(d.alias) << "}.port{" << d.port
+		  << "}.type{" << esc(d.type) << "}.temp{288}.damage{0}.broken{0}"
+		  << ".x{" << d.x << "}.y{" << d.y << "}.z{" << d.z << "}"
+		  << ".size_x{" << d.sx << "}.size_y{" << d.sy << "}.size_z{" << d.sz << "}"
+		  << ".mass{" << d.mass << "}";
+		return Var(s.str());
+	};
+	auto devFind = [](const Var& a, int& out) -> bool {
+		if (a.type == Var::Text) {
+			string key = xc_lower(string(a));
+			auto i = g_devByAlias.find(key);
+			if (i == g_devByAlias.end()) return false;
+			out = i->second;
+		} else {
+			int io = (int)(int64_t)a;
+			auto i = g_devByIo.find(io);
+			if (i == g_devByIo.end()) return false;
+			out = i->second;
+		}
+		return true;
+	};
+	// NOTE: lambdas capturing locals are fine — DeclareDeviceFunction takes
+	// std::function; devFind/devDescribe are copied in.
+	XenonCode::DeclareDeviceFunction("device:text", [devFind, devDescribe](Computer*, const vector<Var>& a) -> Var {
+		int i = -1;
+		if (!a.size() || !devFind(a[0], i)) return Var(string(""));
+		return devDescribe(g_devs[i]);
+	});
+	XenonCode::DeclareDeviceFunction("device_at:text", [devDescribe](Computer*, const vector<Var>& a) -> Var {
+		int i = (int)(int64_t)a[0];
+		if (i < 0 || i >= (int)g_devs.size()) return Var(string(""));
+		return devDescribe(g_devs[i]);
+	});
+	XenonCode::DeclareDeviceFunction("device_type:text", [devFind](Computer*, const vector<Var>& a) -> Var {
+		int i = -1;
+		if (!a.size() || !devFind(a[0], i)) return Var(string(""));
+		return g_devs[i].type;
 	});
 
 	// device functions (computer.md / archean.md)
@@ -195,6 +265,87 @@ static void archeanInit() {
 		int i = xc_findScreen(alias, ch);
 		if (i < 0) i = xc_addScreen(alias, ch, 640, 480);
 		return Var(screenType, reinterpret_cast<uint64_t>(g_screens[i].scr.get()));
+	});
+	// virtualscreen(w, h) — code-created off-screen buffer (computer.md
+	// "Virtual Screen Function", cap 10000x10000 in game; we cap at 4096 and
+	// 96 buffers as the POC's memory guard). Shown like any other surface.
+	XenonCode::DeclareDeviceFunction("virtualscreen:screen", [](Computer*, const vector<Var>& a) -> Var {
+		static int nextVirtual = 0;
+		uint32_t w = (uint32_t)clamp((int64_t)a[0], (int64_t)1, (int64_t)4096);
+		uint32_t h = (uint32_t)clamp((int64_t)a[1], (int64_t)1, (int64_t)4096);
+		int i = xc_addScreen("virtual#" + to_string(nextVirtual++), 0, w, h);
+		return Var(screenType, reinterpret_cast<uint64_t>(g_screens[i].scr.get()));
+	});
+	// screen_copy(src, dst, sx, sy, dx, dy, w, h [, tint, rotation, bilinear])
+	// — the sprite-copy fast path (the Badger's attitude-display atlas uses
+	// rotation + bilinear). Overload pattern: widest declaration, the three
+	// optional args are read by runtime arity.
+	XenonCode::DeclareDeviceFunction("screen_copy", [](Computer*, const vector<Var>& a) -> Var {
+		XenonScreen* s = screenOf(a[0]);
+		XenonScreen* d = screenOf(a[1]);
+		int sx = (int)(int64_t)a[2], sy = (int)(int64_t)a[3];
+		int dx = (int)(int64_t)a[4], dy = (int)(int64_t)a[5];
+		int w = (int)(int64_t)a[6], h = (int)(int64_t)a[7];
+		int64_t tint = a.size() >= 9 ? (int64_t)a[8] : -1;
+		double rot = a.size() >= 10 ? (double)a[9] : 0.0;
+		bool bil = a.size() >= 11 ? (double)a[10] != 0 : false;
+		auto get = [s](int x, int y) -> uint32_t {
+			if (x < 0 || y < 0 || x >= (int)s->GetWidth() || y >= (int)s->GetHeight()) return 0u;
+			const uint8_t* p = s->data() + ((size_t)y * s->GetWidth() + x) * 4;
+			uint32_t v; memcpy(&v, p, 4); return v;
+		};
+		double rad = rot * 3.14159265358979 / 180.0, cs = cos(rad), sn = sin(rad);
+		double cx = w / 2.0, cy = h / 2.0;
+		for (int j = 0; j < h; ++j) {
+			for (int i = 0; i < w; ++i) {
+				// rotate the destination pixel back into source space
+				double ox = i - cx, oy = j - cy;
+				int u, v2;
+				if (bil) {
+					// bilinear: sample 4 neighbours and blend
+					double fx = ox * cs + oy * sn + cx + sx;
+					double fy = -ox * sn + oy * cs + cy + sy;
+					int x0 = (int)floor(fx), y0 = (int)floor(fy);
+					double ax = fx - x0, ay = fy - y0;
+					uint32_t p00 = get(x0, y0), p10 = get(x0 + 1, y0),
+					           p01 = get(x0, y0 + 1), p11 = get(x0 + 1, y0 + 1);
+					auto ch = [](uint32_t p, int sh) { return double((p >> sh) & 255); };
+					uint32_t out = 0, sh = 0;
+					for (; sh < 32; sh += 8) {
+						double t = (ch(p00, sh) * (1 - ax) + ch(p10, sh) * ax) * (1 - ay)
+						         + (ch(p01, sh) * (1 - ax) + ch(p11, sh) * ax) * ay;
+						out |= uint32_t(t + 0.5) << sh;
+					}
+					u = dx + i; v2 = dy + j;
+					if (u < 0 || v2 < 0 || u >= (int)d->GetWidth() || v2 >= (int)d->GetHeight()) continue;
+					if (tint >= 0) {
+						uint32_t t = uint32_t(tint);
+						for (int sh2 = 0; sh2 < 24; sh2 += 8)
+							out = (out & ~(255u << sh2))
+							      | (((((out >> sh2) & 255) * ((t >> sh2) & 255)) >> 8) << sh2);
+					}
+					memcpy(d->data() + ((size_t)v2 * d->GetWidth() + u) * 4, &out, 4);
+					d->Dirty();
+					continue;
+				}
+				u = int(ox * cs + oy * sn + cx + sx);
+				v2 = int(-ox * sn + oy * cs + cy + sy);
+				uint32_t p = get(u, v2);
+				int ddx = dx + i, ddy = dy + j;
+				if (!p && tint < 0) continue;                       // transparent source pixel
+				if (d->GetPixel(ddx, ddy) && !p && tint < 0) continue;
+				if (tint >= 0) {
+					uint32_t t = uint32_t(tint);
+					for (int sh2 = 0; sh2 < 24; sh2 += 8)
+						p = (p & ~(255u << sh2))
+						    | (((((p >> sh2) & 255) * ((t >> sh2) & 255)) >> 8) << sh2);
+				}
+				if (ddx < 0 || ddy < 0 || ddx >= (int)d->GetWidth() || ddy >= (int)d->GetHeight()) continue;
+				memcpy(d->data() + ((size_t)ddy * d->GetWidth() + ddx) * 4, &p, 4);
+				d->Dirty();
+			}
+		}
+		return {};
 	});
 	XenonCode::DeclareDeviceFunction("input_number:number", [](Computer*, const vector<Var>& a) -> Var {
 		int io = (int)(int64_t)a[0], ch = (int)(int64_t)a[1];
@@ -236,11 +387,91 @@ static void archeanInit() {
 	XenonCode::DeclareDeviceFunction("time:number", [](Computer*, const vector<Var>&) -> Var {
 		return xc_simTime;
 	});
+	// computer.md built-in VALUES (value-position device functions)
+	XenonCode::DeclareDeviceFunction("tick:number", [](Computer*, const vector<Var>&) -> Var {
+		return (double)xc_tickCount;
+	});
+	XenonCode::DeclareDeviceFunction("system_frequency:number", [](Computer*, const vector<Var>&) -> Var {
+		return 10.0;                                // our pump cadence
+	});
+	XenonCode::DeclareDeviceFunction("system_ram:number", [](Computer*, const vector<Var>&) -> Var {
+		return 65536.0;
+	});
+	XenonCode::DeclareDeviceFunction("system_ipc:number", [](Computer*, const vector<Var>&) -> Var {
+		return 0.0;                                 // 0 = unlimited (POC)
+	});
+	XenonCode::DeclareDeviceFunction("ipc:number", [](Computer*, const vector<Var>&) -> Var {
+		return 0.0;
+	});
+	XenonCode::DeclareDeviceFunction("programs_count:number", [](Computer*, const vector<Var>&) -> Var {
+		return (double)g_programCount;
+	});
+	// "user" and "owner" (the board-button example: player usernames)
+	XenonCode::DeclareDeviceFunction("user:text", [](Computer*, const vector<Var>&) -> Var {
+		return Var(string("builder"));
+	});
+	XenonCode::DeclareDeviceFunction("owner:text", [](Computer*, const vector<Var>&) -> Var {
+		return Var(string("builder"));
+	});
+	XenonCode::DeclareDeviceFunction("username:text", [](Computer*, const vector<Var>&) -> Var {
+		return Var(string("builder"));
+	});
+	// colour channel extractors (the wiki's colour helpers)
+	XenonCode::DeclareDeviceFunction("color_r:number", [](Computer*, const vector<Var>& a) -> Var {
+		return (double)((uint32_t)(uint64_t)a[0] & 255);
+	});
+	XenonCode::DeclareDeviceFunction("color_g:number", [](Computer*, const vector<Var>& a) -> Var {
+		return (double)(((uint32_t)(uint64_t)a[0] >> 8) & 255);
+	});
+	XenonCode::DeclareDeviceFunction("color_b:number", [](Computer*, const vector<Var>& a) -> Var {
+		return (double)(((uint32_t)(uint64_t)a[0] >> 16) & 255);
+	});
+	XenonCode::DeclareDeviceFunction("color_a:number", [](Computer*, const vector<Var>& a) -> Var {
+		return (double)(((uint32_t)(uint64_t)a[0] >> 24) & 255);
+	});
+	// program control (POC: the loaded program IS the running one)
+	XenonCode::DeclareDeviceFunction("program_name:text", [](Computer*, const vector<Var>&) -> Var {
+		return Var(string("main"));
+	});
+	XenonCode::DeclareDeviceFunction("load_program", [](Computer*, const vector<Var>&) -> Var {
+		xc_eventLog.push_back("{\"e\":\"print\",\"v\":\"load_program: POC no-op\"}");
+		return {};
+	});
+	XenonCode::DeclareDeviceFunction("reboot", [](Computer*, const vector<Var>&) -> Var {
+		xc_eventLog.push_back("{\"e\":\"print\",\"v\":\"reboot: POC no-op\"}");
+		return {};
+	});
 	XenonCode::DeclareDeviceFunction("game_mode:number", [](Computer*, const vector<Var>&) -> Var {
 		return 0.0; // Creative
 	});
 	XenonCode::DeclareDeviceFunction("color:number", [](Computer*, const vector<Var>& a) -> Var {
 		return (double)XENONCODE_COLOR((int)(int64_t)a[0], (int)(int64_t)a[1], (int)(int64_t)a[2], 255);
+	});
+	// crafting/item table reads (archean.md "Crafting Recipes") — the POC has
+	// no world economy: honest empty/label answers (the app's economy.json is
+	// the real table if a future host wants it)
+	XenonCode::DeclareDeviceFunction("get_recipes_categories:text", [](Computer*, const vector<Var>&) -> Var {
+		return Var(string(""));
+	});
+	XenonCode::DeclareDeviceFunction("get_recipes:text", [](Computer*, const vector<Var>&) -> Var {
+		return Var(string(""));
+	});
+	XenonCode::DeclareDeviceFunction("get_recipe:text", [](Computer*, const vector<Var>&) -> Var {
+		return Var(string(""));
+	});
+	XenonCode::DeclareDeviceFunction("get_recipe_label:text", [](Computer*, const vector<Var>& a) -> Var {
+		string s = string(a[0]);
+		auto dot = s.find('.');
+		return Var(dot == string::npos ? s : s.substr(dot + 1));
+	});
+	XenonCode::DeclareDeviceFunction("get_item_value_unit:text", [](Computer*, const vector<Var>& a) -> Var {
+		string s = string(a[0]);
+		auto dot = s.find('.');
+		if (dot != string::npos) s = s.substr(dot + 1);
+		for (auto& c : s) if (c == '_') c = ' ';
+		ostringstream out;
+		out << s << " " << (double)a[1];
+		return Var(out.str());
 	});
 	XenonCode::DeclareDeviceFunction("random:number", [](Computer*, const vector<Var>& a) -> Var {
 		if (a.size() == 0) return xc_random01();
@@ -296,8 +527,8 @@ int main(int argc, char** argv) {
 	}
 
 	Computer computer;
-	computer.capability.ram = 65536;
-	computer.capability.storage = 32;
+	computer.capability.ram = xc_ramCap;
+	computer.capability.storage = xc_storageCap;
 	if (!computer.LoadProgram(dir)) { cerr << "[xc] load failed" << endl; return 3; }
 	computer.LoadStorage(dir + "/storage");
 	xc_addScreen("main", 0, 640, 480);
@@ -309,6 +540,7 @@ int main(int argc, char** argv) {
 		computer.RunInit();
 		for (int c = 0; c < cycles; ++c) {
 			xc_simTime += xc_dt;
+			xc_tickCount++;
 			pilotAtCycle(c);
 			xc_eventLog.push_back("{\"e\":\"cycle\",\"c\":" + to_string(c) + "}");
 			computer.RunCycle();                 // tick + timers
@@ -353,6 +585,7 @@ int main(int argc, char** argv) {
 // ---- browser (WASM) exports ------------------------------------------------
 #include <emscripten/emscripten.h>
 #include <filesystem>
+#include <iterator>
 #include <memory>
 
 static unique_ptr<Computer> g_computer;
@@ -381,12 +614,14 @@ EMSCRIPTEN_KEEPALIVE void xc_write_file(const char* name, const char* code) {
 EMSCRIPTEN_KEEPALIVE int xc_boot() {
 	archeanInit();
 	g_err.clear();
+	{ std::error_code ec; g_programCount = (int)std::distance(
+		std::filesystem::directory_iterator("/prog", ec), std::filesystem::directory_iterator()); }
 	try {
 		auto mainFile = XenonCode::GetParsedFile("/prog", "main.xc");
 		if (!Computer::CompileAssembly("/prog", mainFile.lines, false)) { g_err = "compile failed"; return 1; }
 		g_computer = make_unique<Computer>();
-		g_computer->capability.ram = 65536;
-		g_computer->capability.storage = 32;
+		g_computer->capability.ram = xc_ramCap;
+		g_computer->capability.storage = xc_storageCap;
 		if (!g_computer->LoadProgram("/prog")) { g_err = "load failed"; return 1; }
 		g_computer->LoadStorage("/prog/storage");   // survives reboots in-session
 		for (auto& s : g_screens) s.scr->Blank();
@@ -404,6 +639,7 @@ EMSCRIPTEN_KEEPALIVE int xc_boot() {
 EMSCRIPTEN_KEEPALIVE int xc_cycle() {
 	if (!g_computer) return 1;
 	xc_simTime += xc_dt;
+	xc_tickCount++;
 	if (g_pilotScripted) pilotAtCycle(g_cycle);
 	++g_cycle;
 	xc_eventLog.push_back("{\"e\":\"cycle\",\"c\":" + to_string(g_cycle - 1) + "}");
@@ -434,6 +670,23 @@ EMSCRIPTEN_KEEPALIVE void xc_pilot_script(int on) { g_pilotScripted = on; }
 EMSCRIPTEN_KEEPALIVE void xc_reset_screens() { g_screens.clear(); }
 EMSCRIPTEN_KEEPALIVE int xc_add_screen(const char* alias, int ch, uint32_t w, uint32_t h) {
 	return xc_addScreen(alias, ch, w, h);
+}
+// component table (call after xc_reset_devices, before xc_boot)
+EMSCRIPTEN_KEEPALIVE void xc_reset_devices() { g_devs.clear(); g_devByIo.clear(); g_devByAlias.clear(); }
+// capability from the blueprint (hdd capacity = the game's storage limit);
+// RAM: the POC is generous (the game's XPU64 spec is not in the files)
+EMSCRIPTEN_KEEPALIVE void xc_set_capability(uint32_t ram, uint32_t storage) {
+	if (ram) xc_ramCap = ram;
+	if (storage) xc_storageCap = storage;
+}
+EMSCRIPTEN_KEEPALIVE void xc_add_device(int id, int io, const char* alias, const char* type,
+                                        int port, double x, double y, double z,
+                                        double sx, double sy, double sz, double mass) {
+	int i = (int)g_devs.size();
+	g_devs.push_back({ id, alias, type, port, x, y, z, sx, sy, sz, mass });
+	if (io >= 0) g_devByIo[io] = i;
+	string a = xc_lower(alias);
+	if (!a.empty()) g_devByAlias[a] = i;
 }
 EMSCRIPTEN_KEEPALIVE int xc_screen_count() { return (int)g_screens.size(); }
 EMSCRIPTEN_KEEPALIVE const char* xc_screen_key(int i) {

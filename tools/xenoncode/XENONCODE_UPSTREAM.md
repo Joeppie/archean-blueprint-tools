@@ -8,10 +8,23 @@ write only the device shim (`xc_host.cpp`/`xc_host.h`) and the pages.
   links this repository and its `XenonCode.hpp` integration path)
 * **Pinned commit:** `e5d3167dad501ffbe3220a7e07436150a198c8e4` (library
   version 0.1.0, fetched 2026-10-27)
-* Files used (unmodified): `XenonCode.hpp` (parser + bytecode compiler + VM),
+* Files used: `XenonCode.hpp` (parser + bytecode compiler + VM),
   `XenonScreen.hpp` (screen model + bitmap font)
 * `build.sh` clones `upstream/` (gitignored), checks out the pinned commit,
-  and prints both files' SHA-256 so every build is traceable.
+  applies the patches below, and prints both files' SHA-256 so every build
+  is traceable.
+
+## Patches applied by build.sh (documented, reproducible)
+
+* **lenient text→number**: the game's binary treats a non-numeric text cast
+  as `0`; the open library's `stoll`/`stoul` conversions THROW
+  (`std::invalid_argument`), so real craft programs die mid-run ("stoll on
+  bytecode …" — the Badger's first settings read). `strtoll`/`strtoull`
+  with a 0-on-junk fallback matches the game's observable behaviour.
+* Browser build flags: `-sINITIAL_MEMORY=64MB -sMAXIMUM_MEMORY=4096MB` —
+  Chrome aborts the default-capped wasm heap during the Badger's 36k-line
+  boot (headless probe: `abortOnCannotGrowMemory` in `emscripten_resize_heap`
+  at the 2 GB default ceiling; node on the same code peaks ~100 MB).
 
 ## License posture
 

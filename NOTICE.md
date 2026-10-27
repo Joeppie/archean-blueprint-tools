@@ -93,7 +93,10 @@ Read this file together with LICENSE (GNU GPL v3).
    to a recorded commit (see `tools/xenoncode/XENONCODE_UPSTREAM.md`).
    `xenoncode.js`/`xenoncode.wasm` (in `tools/xenoncode/` and, serving the
    Inspector app since v1.12.11, `app/public/xenoncode/`) are compiled build
-   products of that pinned source, unmodified; only the device shim
+   products of that pinned source (plus the documented, reproducible
+   build.sh patches listed in tools/xenoncode/XENONCODE_UPSTREAM.md — a
+   lenient text→number conversion matching the game's observable behaviour,
+   and browser memory flags); only the device shim
    (`xc_host.*`, GPL v3), the app integration (`app/src/engine/xenoncode.ts`,
    `app/src/components/XenonDialog.tsx`, GPL v3) and the demo program
    (`demo/hello/main.xc`, GPL v3, authored for this repo) are ours.

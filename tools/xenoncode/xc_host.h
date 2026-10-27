@@ -32,6 +32,12 @@ inline double xc_simTime = 0.0;
 inline double xc_lastPrintTime = -1.0;
 inline double xc_dt = 0.1;
 inline uint64_t xc_rngState = 88172645463325252ULL;
+inline long xc_tickCount = 0;          // the tick built-in (per cycle)
+// capability caps: RAM generous for the POC (the game's XPU64 spec is not in
+// the game files); storage = the blueprint's hdd capacity (JS sets it)
+inline uint32_t xc_ramCap = 4000000;
+inline uint32_t xc_storageCap = 65536;
+inline int g_programCount = 1;         // programs_count built-in
 
 inline std::string xc_jsonEscape(const std::string& s) {
 	std::string o;

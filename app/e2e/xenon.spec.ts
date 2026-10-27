@@ -15,6 +15,7 @@ import { expect, test } from '@playwright/test';
 
 const PLANE = '3294880085';
 const CEP = '3327182790';
+const BADGER = '3326372833';
 
 async function litPixels(page: import('@playwright/test').Page, selector: string): Promise<number> {
   return page.evaluate(sel => {
@@ -86,6 +87,36 @@ test.describe('Xenon IDE @ui', () => {
     // Esc closes
     await page.keyboard.press('Escape');
     await expect(page.getByTestId('xenon-dialog')).toHaveCount(0);
+  });
+
+  test('the Badger boots: 57 files, named screens, alias io bus, capped view @slow', async ({ page }) => {
+    test.setTimeout(240_000);                                // 36k lines compile on wasm
+    const t0 = Date.now();
+    await page.goto(`/?craft=${BADGER}`);
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 180_000 });
+    await page.getByTestId('xenon-menu').click();
+    await page.locator('[data-testid^="xenon-comp-"]').first().click();
+    const dlg = page.getByTestId('xenon-dialog');
+    await expect(dlg).toBeVisible();
+    // the firmware boots on the dev VM — the prints prove the program RUNS
+    await expect(page.getByTestId('xenon-log')).toContainText('Smart Quad is ready', { timeout: 180_000 });
+    console.log(`badger boot+init: ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+    await expect(page.getByText(/is running…/)).toBeVisible();
+    // tabs: 57 files wrap across the tab row
+    await expect(page.getByTestId('xenon-tab-0')).toBeVisible();
+    await expect(page.getByTestId('xenon-tab-56')).toBeVisible();
+    // the io bus speaks component ALIASES (the device table): the drill is driven
+    await expect(page.locator('[data-testid="xenon-dialog"]').getByText('mining-drill').first())
+      .toBeVisible({ timeout: 30_000 });
+    // a NAMED screen from the blueprint (Dashboard 'pilot-screen' element 0,
+    // 51×51 px) paints — the virtual screens bind at boot, no auto-screens
+    const scr = page.locator('[data-testid="xenon-screen-pilot-screen#0"]');
+    await expect(scr).toBeVisible({ timeout: 30_000 });
+    await page.waitForTimeout(4000);
+    expect(await litPixels(page, '[data-testid="xenon-screen-pilot-screen#0"]')).toBeGreaterThan(20);
+    // the 16k-line main.xc renders capped, not frozen
+    await expect(page.getByText(/view is capped/)).toBeVisible();
+    await page.keyboard.press('Escape');
   });
 
   test('the node-authored program renders its #NODES graph @slow', async ({ page }) => {

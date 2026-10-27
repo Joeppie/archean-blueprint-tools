@@ -32,13 +32,35 @@ describe('blueprint extraction', () => {
     expect(c.files[0]!.code).toContain('#NODES');
     expect(c.channels).toEqual(expect.arrayContaining([{ io: 8, ch: 1 }]));
     expect(c.channels.every(ch => ch.io === 8 || ch.io === 11)).toBe(true);
+    // the io ports are the data_port.0NN cables: 11 = PilotSeat, 8 = wheel
+    const io = new Map(c.devices.filter(d => d.io >= 0).map(d => [d.io, d.type]));
+    expect(io.get(11)).toBe('PilotSeat');
+    expect(io.get(8)).toBe('SmallWheel');
+    expect(io.get(0)).toBe('Aileron');
+  });
+  it('the Badger: 57 files, program-less main.xc, alias-addressed devices', () => {
+    const comps = xenonComputers(data('3326372833'));
+    expect(comps).toHaveLength(1);
+    const c = comps[0]!;
+    expect(c.files.length).toBe(57);
+    expect(c.files[0]!.name).toBe('main.xc');          // program='' fallback law
+    expect(c.files[0]!.code).toContain('Smart Quad');
+    expect(c.capacity).toBeGreaterThan(0);
+    expect(c.screens.length).toBeGreaterThan(5);       // dashboard + override screens
+    expect(c.screens.some(s => s.alias === 'pilot-screen')).toBe(true);
+    expect(c.screens.some(s => s.alias === 'systems-dashboard' && s.w === 26)).toBe(true);
+    expect(c.devices.some(d => d.alias === 'mining-drill')).toBe(true);
+    expect(c.devices.some(d => d.alias === 'left-cargo')).toBe(true);
   });
   it('screen(alias, ch) binds to the Dashboard Screen/HdScreen elements', () => {
     const bp = data('3281212435');                     // Code Wizard tutorial
-    const screens = xenonScreens(bp, 'screen');
+    const files = xenonComputers(bp)[0]!.files;
+    const screens = xenonScreens(bp, files, xenonComputers(bp)[0]!.ci);
     expect(screens.length).toBe(1);                    // one HdScreen element
     expect(screens[0]).toMatchObject({ alias: 'screen', channel: 0, w: 51, h: 51 });
-    expect(xenonScreens(bp, 'no-such-dash')).toEqual([]);
+    // an alias with no component on the craft -> not pre-registered; the
+    // shim auto-creates its surface at boot (no crash, honest empty list)
+    expect(xenonScreens(bp, [{ name: 'main.xc', code: 'var $s = screen("no-such", 0)' }])).toEqual([]);
   });
   it('channels are unique and sorted', () => {
     const chs = detectChannels([
