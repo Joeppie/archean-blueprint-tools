@@ -1621,9 +1621,9 @@ topic + FORMAT).
    past x=4096 smeared on screen (we: "when we get far in a level, things
    get smeared … not all of the graphics are being copied by our screen
    copy?"). Pinned: the Mario e2e asserts a virtual# ≥ 10000 wide is
-   registered (__XENON__().surfaceMeta). E key → Pitch (ch 5) = Mario's
-   FIRE key (we: "we should have forwarded the e key as well") — nine
-   bound keys total.
+   registered (__XENON__().surfaceMeta). E key → Roll (ch 5) = Mario's
+   FIRE key (we: "we should have forwarded the e key as well" — the probe
+   proved Mario reads ch5 = Roll, not Pitch) — nine bound keys total.
  - **DASH FOCUS + DEEP LINK** (we's 640×480 report): dock cells are
    ScreensCell — clicking a THUMBNAIL opens its OWN fullscreen ZOOM WINDOW
    (fit / 1:1 px / ± / pinch, scroll-pan, pixelated) and no longer fires the

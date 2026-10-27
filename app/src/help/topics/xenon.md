@@ -83,7 +83,7 @@ a Mario-style deep link, the flight keys are the cockpit's inputs (WASD,
 | A / D | Left / Right (ch 2) | move |
 | ↑ / ↓ | Down / Up (ch 3) | jump / duck |
 | F / Space | Aux 1 (ch 8) — one action button | jump |
-| E | Pitch (ch 5) | fire |
+| E | Roll (ch 5) | fire |
 
 Every press drives **all** the PilotSeat channels the running computer has
 bound (a craft with two seats drives both), feeding `input_number` the

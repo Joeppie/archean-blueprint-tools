@@ -489,10 +489,14 @@ test.describe('Xenon IDE @ui', () => {
     const b1 = (await dock.boundingBox())!;
     expect(b1.x).toBeLessThan(b0.x - 100);
     expect(b1.y).toBeLessThan(b0.y - 100);
-    // RESIZE by the SE corner: BOTH axes grow
-    await page.mouse.move(b1.x + b1.width - 2, b1.y + b1.height - 2);
+    // RESIZE by the SE corner: BOTH axes grow. Aim at the GRIP CENTRE
+    // (8 px in): the dock is rounded-lg + overflow-hidden, and a 2-px-in
+    // point lies OUTSIDE the rounded clip — pointerdown then lands on the
+    // page, not the grip (the v1.13.2 red; this @slow leg had not run in
+    // CI since batch 7 added it at a 1440-px viewport)
+    await page.mouse.move(b1.x + b1.width - 8, b1.y + b1.height - 8);
     await page.mouse.down();
-    await page.mouse.move(b1.x + b1.width + 148, b1.y + b1.height + 78, { steps: 6 });
+    await page.mouse.move(b1.x + b1.width + 142, b1.y + b1.height + 72, { steps: 6 });
     await page.mouse.up();
     const b2 = (await dock.boundingBox())!;
     expect(b2.width).toBeGreaterThan(b1.width + 80);
@@ -655,10 +659,10 @@ test.describe('Xenon IDE @ui', () => {
     await page.keyboard.down('Space');
     await expect.poll(async () => (await row('aux_1'))?.manual, { timeout: 8_000 }).toBe(1);
     await page.keyboard.up('Space');
-    // E = Pitch (ch 5) — the game's FIRE key (we: "we should have forwarded
-    // the e key as well")
+    // E = Roll (ch 5) — the game's FIRE key (we: "we should have forwarded
+    // the e key as well"); the probe proved Mario's fire channel is Roll
     await page.keyboard.down('e');
-    await expect.poll(async () => (await row('pitch'))?.manual, { timeout: 8_000 }).toBe(1);
+    await expect.poll(async () => (await row('roll'))?.manual, { timeout: 8_000 }).toBe(1);
     await page.keyboard.up('e');
     // A/D = Left/Right (ch 2) — the MOVE
     await page.keyboard.down('d');

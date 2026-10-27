@@ -16,7 +16,7 @@ describe('THE PILOT-KEY LAW (WASD/↑↓/F → PilotSeat channels)', () => {
     expect(PILOT_KEYS['backward/forward']).toEqual({ w: 1, s: -1 });
     expect(PILOT_KEYS['left/right']).toEqual({ d: 1, a: -1 });
     expect(PILOT_KEYS['down/up']).toEqual({ up: 1, down: -1 });
-    expect(PILOT_KEYS['pitch']).toEqual({ e: 1 });              // E = Mario's FIRE key
+    expect(PILOT_KEYS['roll']).toEqual({ e: 1 });              // E = Mario's FIRE key (ch 5)
     expect(PILOT_KEYS['aux 1']).toEqual({ f: 1, space: 1 });   // F and SPACE, one action button
     expect(PILOT_KEYS['using']).toBeUndefined();          // seat occupancy: no key
     expect(PILOT_KEYS['main thrust']).toBeUndefined();    // W is the stick, not the throttle

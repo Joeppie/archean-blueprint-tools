@@ -601,7 +601,8 @@ export const PILOT_KEYS: Record<string, Partial<Record<PilotKey, number>>> = {
   'backward/forward': { w: 1, s: -1 },
   'left/right': { d: 1, a: -1 },
   'down/up': { up: 1, down: -1 },
-  'pitch': { e: 1 },        // E = the FIRE key on Mario (pitch channel)
+  'roll': { e: 1 },         // E = the FIRE key on Mario (Roll ch 5; the
+  //                          // world-rows probe proved ch5 is Roll, not Pitch)
   // F and SPACE are aliases of the same action button (Aux 1 = Mario's
   // jump; we: "we need to emulate space" — the classic jump key)
   'aux 1': { f: 1, space: 1 },
