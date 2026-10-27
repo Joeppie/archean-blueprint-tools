@@ -2605,6 +2605,10 @@ I. SKIPPED AT SESSION CLOSE (2026-10-25) → ADJUDICATED (v1.11.0 release
 cd app && npm install          # one-time
 npm test                       # vitest — pure engine core (no browser)
 npx vitest run load.perf       #   … the PERF harness: ranked load/per-rev loops
+                               #   (QUIESCENT-ONLY: run it as
+                               #   PERF_HARNESS=1 npx vitest run load.perf — v1.12.7
+                               #   wall-clock tripwires measure LOAD, not code, so
+                               #   the file SKIP-REPORTS inside the npm-test gate)
                                #   on corpus crafts (prints the PERF table;
                                #   numbers are transcribed into PERF.md)
 npm run build:wasm             # rebuild app/wasm/seal.wasm (AssemblyScript;
