@@ -2779,6 +2779,13 @@ in full-suite runs. Standing rules:
   394 → **215 runs** (fusion waves + fixture-first). workers 3 → 4
   (the "3 keeps the run honest" number was SwiftShader-era; on the
   preview+iGPU stack 4 measured −15 % wall, 5 a plateau, same green).
+ - **MEASURED (v1.12.4):** vitest 737 → **766** (jsdom tier 2 → 7 specs:
+   HelpDialog, StaleDialog, + ToolDialog, TopBar, CostWidget, LiftWidget,
+   MirrorGlyph); matrix 215 → **200 runs** — tools.spec/cost.spec dialog
+   + data legs retired to jsdom (L5-same-commit), subride.spec.ts
+   DELETED (P7.1 slice 2: rig-aware audit bbox + the anchor-class law
+   headless) — the **@models and @subgrid e2e tags are now EMPTY**.
+   Session line 394 → 200 runs (−49 %).
 - **WARM-BOOT FINDING (v1.12.1, we: "can we re-use and clean a headless
   chrome to reduce the per-test ~400 ms?"): measured — context+page
   creation is ~50 ms/test (not 400; +2 tests = +0.1 s), chromium launch

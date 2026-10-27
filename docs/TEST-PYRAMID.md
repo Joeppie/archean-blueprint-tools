@@ -112,7 +112,7 @@ runs).
 - The L1–L5 laws land in AGENTS.md.
 - Nothing else changes: no assertion moves yet, so no coverage risk.
 
-### Phase 1 — P7.1 `SceneGraph` split (the enabler) — IN PROGRESS (slice 1 ✅)
+### Phase 1 — P7.1 `SceneGraph` split (the enabler) — IN PROGRESS (slices 1–2 ✅)
 - **Slice 1 LANDED (v1.12.1, `engine/xray.ts`):** the screen-space
   occlusion census lifted out of `Engine` (165 lines → a pure function +
   a thin collector), 11 node pins the census law, wire.spec's EXPOSED leg
@@ -147,7 +147,7 @@ runs).
   clock (this deletes every 120 ms/2 s/450 ms wall-clock law from e2e).
 - e2e keeps ONE thin "pointermove reaches the seam" test per input family.
 
-### Phase 3 — jsdom component tier (the tier that does not exist today) — SEEDED ✅
+### Phase 3 — jsdom component tier — SEEDED ✅ + dialogs/widgets LANDED ✅ (v1.12.4)
 - vitest + @testing-library/react: the panels, the build dock, ToolsDialog,
   HelpDialog, StaleDialog, CostWidget, LiftWidget, MirrorGlyph — testids,
   click → state → row repaint, dialog flows, the Escape-subscribe-once
@@ -251,6 +251,59 @@ wall clock):**
   audit bbox — retires Jimmy's last @subgrid leg; then the builders),
   Phase 3 panels (Viewport-mock harness), gizmo/builddock engine legs
   onto the headless probes.
+
+- **v1.12.4 Phase 3 (dialogs + widgets) ✅ + Phase 1 (slice 2) ✅**
+  (commits `655d3f3` + `5f9c862`):
+  - **jsdom tier 2 → 7 specs (13 → 41 pins).** `tooldialog.test.tsx` —
+    the ToolDialog laws on the SHIPPED TOOLS registry through the REAL
+    open funnel over the gallery-new starter deck: field grid generated
+    from the ToolDef (showIf pair gating, optionsFor source switching,
+    range slider + number box, the ONE paint control), preview-gates-OK
+    (incl. the empty-craft refusal), Cancel/Esc/✕/backdrop (the
+    v1.5.20 subscribe-once law on real dispatched events), and the
+    OK ▸ confirm-box ▸ run flow with the danger warning — green values
+    transcribed from tools.spec BEFORE retiring (L5): 5 blocks change
+    material ▸ all material 3 with colours [4×7] + the doc mirror,
+    35 faces on 5 blocks repaint ▸ slot 51, hullify 5 blocks ▸ ≥12 tris,
+    confirm step mutates nothing, closes on Confirm. `topbar.test.tsx` —
+    Tools ▾ renders the registry, Edit ▾ Undo/Redo carry the history
+    state, the vessel TODO rows stay disabled, the mode-tile
+    re-click→⌖ contract (KNOWN ISSUE 13 at the component tier).
+    `costwidget.test.tsx` — all FOUR cost.spec desktop legs verbatim
+    (dolphin + gantry, shipped economy.json through the fetch seam):
+    ×4 subgrid · 4 kg Iron · Casing 1 kg Iron · Connector→Wire+Plastic ·
+    157 cells · 241 tris · 150.6 m · ×7,362 · 74.8 m · the fold law +
+    its reload persistence (fresh mount from localStorage). Seeds with
+    no leg retired: `liftwidget.test.tsx` (engine-null seam: the sealed
+    5³-shell envelope, per-gas rows, the ladder, the fold) and
+    `mirrorglyph.test.tsx` (the data-g glyph + strike contract).
+  - e2e retired (L5, same commits): tools.spec 'the menu lists the
+    registry' + 'blocks → hull triangles' + 'a COLOUR replace-all' and
+    the DATA half of 'replace all MATERIALS' (the leg keeps ONLY the
+    stats().loads repaint law — AGENTS: data asserts cannot pin a
+    repaint; the tool→toast→undo integration is undo.spec's);
+    cost.spec keeps ONLY the phone fit leg.
+  - **P7.1 slice 2:** the headless joint-ride audit mirrors the engine's
+    blockParts collection (nested Build blocks through their rig pose —
+    the e2e audit's rigApplyA/rigPushA verbatim) and carries the
+    benchAnchored ANCHOR-CLASS LAW; Jimmy's Adventure audits headless
+    and **subride.spec.ts is deleted** — after @models (v1.12.1) the
+    **@subgrid tag is now EMPTY** too.
+  - Numbers: vitest 737 → **766**; matrix 215 → **200 runs** (session
+    394 → 200, −49 %); fast tier wall clock (see the progress commit).
+  - LESSONS the tier exposed: (a) **jsdom `getByTestId` THROWS** — the
+    tier's first-red family was getBy + toBeFalsy absence probes
+    (queryBy/toBeNull only); (b) a **template-literal `new URL()`**
+    (`../testdata/${id}/…`) inside a vitest file is GLOBBED by vite and
+    fs-DENIED — node-tier file reads go through `resolve(__dirname, …)`
+    like harness.ts, never asset-URL templates; (c) React 18's
+    testing-library adapter exports NO `afterEach` — importing the
+    vitest hook from the adapter kills the suite at import time.
+  - Next: Phase 3 panels/build-dock (the Viewport-mock harness — Editor
+    mounts the Engine → WebGL), gizmo/builddock engine legs onto the
+    headless probes, Phase 4 device harness (modebox/gizmoSize as pure
+    fns — NO clean seam exists today; needs a refactor the phase must
+    own), Phase 5 hook-channel diet.
 
 - Phase 1 remaining slices: the transform stack + builders
   (subride/gizmo/wheels/asset-space classes). Phase 3: the dialogs are
