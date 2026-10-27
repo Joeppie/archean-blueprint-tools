@@ -921,7 +921,7 @@ EMSCRIPTEN_KEEPALIVE int xc_boot() {
 		g_nextVirtual = 0;
 		xc_inputs.clear();
 		xc_inputs_txt.clear();
-		xc_reads.clear();
+		g_reads.clear();
 		if (!g_computer->LoadProgram("/prog")) { g_err = "load failed"; return 1; }
 		g_computer->LoadStorage("/prog/storage");   // survives reboots in-session
 		for (auto& s : g_screens) { s.scr->Blank(); s.clicked = false; s.scroll = 0.0; }
@@ -1019,7 +1019,7 @@ EMSCRIPTEN_KEEPALIVE void xc_reset_devices() {
 	// texts, the per-cycle read reports and the worldsim feeds are the
 	// device's runtime state - they reset with it (the re-open path leaves
 	// NOTHING of the previous session but the storage dir, the game's rule)
-	xc_inputs.clear(); xc_inputs_txt.clear(); xc_reads.clear();
+	xc_inputs.clear(); xc_inputs_txt.clear(); g_reads.clear();
 	g_wsProgram.clear(); g_wsEffective.clear();
 }
 // capability from the blueprint (hdd capacity = the game's storage limit);
