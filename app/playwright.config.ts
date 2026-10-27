@@ -78,9 +78,17 @@ export default defineConfig({
     // in dev. Build cost is paid ONCE per run; e2e also exercises the
     // SHIPPED bundle. E2E_DEV=1 falls back to the dev server (fast
     // iteration on a single spec while editing source).
+    // v1.12.6 BUILD-COST MEASURED (we: "40 s for a build is very long —
+    // does it include unit tests? lint?"): No — and the build is not 40 s.
+    // `tsc -b` + rolldown measured 7 s; the ceremony around it (npm spawns,
+    // preview boot, readiness) is 23 s of the 91 s fast tier. The webServer
+    // therefore builds with `vite build` DIRECTLY: the typecheck is a
+    // mandatory gate per landing in the gate ladder (npm test + tsc -b +
+    // targeted playwright), so the suite loses no guarantee, and every
+    // targeted single-spec run stops paying the typechecker.
     command: process.env.E2E_DEV
       ? `npm run dev -- --host 0.0.0.0 --port ${PORT} --strictPort`
-      : `npm run build && npm run preview -- --host 0.0.0.0 --port ${PORT} --strictPort`,
+      : `npx vite build && npm run preview -- --host 0.0.0.0 --port ${PORT} --strictPort`,
     url: URL,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,

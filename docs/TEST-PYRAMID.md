@@ -365,9 +365,11 @@ wall clock):**
     save byte-fidelity, zero-404 atlas, IndexedDB).
   - Numbers: vitest 766 → **807**; matrix 200 → **147 listed runs**
     (session 394 → 147, **−63 %**); fast tier 190 → 137 runs, wall clock
-    **1.7 min → 1.5 min** (91 s measured at the cut — the fixed
-    `vite build` + preview boot (~35 s) is now ~40 % of the tier; the
-    remaining lever is the pixel/ritual count, which § 5 protects);
+    **1.7 min → 1.5 min** (91 s measured at the cut). (The "fixed ~35 s
+    vite-build ≈ 40 % of the tier" line stated here at the cut was an
+    INFERENCE; corrected by measurement in v1.12.6 below: the build is
+    7 s, the webServer ceremony 23 s, and the tier is dominated by the
+    surviving scene boots — exactly the count § 5 protects.)
     @slow unchanged (10).
   - LESSONS the tier exposed: (a) the Viewport-mock harness mounts the
     FULL Editor for ~1 s in jsdom — the fake engine must be a Proxy that
@@ -383,6 +385,24 @@ wall clock):**
     (d) the perf tripwire (load.perf candidate 1) goes red under
     CPU-contention with playwright --list — re-run ALONE before
     believing it (measured: 964 ms vs 154 ms solo).
+
+- **v1.12.6 BUILD-COST MEASURED + the webServer tsc-diet** (we: "40
+  seconds is very long for a build. Does that automatically include unit
+  tests or some advanced linting?" — No, and it was never 40 s):
+  `npm run build` = `tsc -b` **3 s** (incremental) + `vite build`
+  **0.2 s** (Vite 8 / rolldown, Rust — the app has been rolldown since
+  the scaffold commit `c862688`; there was never a slow rollup era) =
+  **7 s total**. Fast-tier decomposition, same-day: cold 91 s wall =
+  webServer ceremony (npm spawns + tsc + vite + preview + readiness)
+  **23 s** + browser work **68 s** (111 boots of ~2 s — the server-reuse
+  run). LESSON (stated three times before measuring): an inferred
+  wall-clock share is a hypothesis, not a metric — decompose by
+  measurement (standalone phase timings + a server-REUSED control run)
+  before quoting shares in docs. Landed with it: playwright
+  `webServer.command` now runs `vite build` DIRECTLY (no `tsc -b` —
+  the typecheck is a mandatory per-landing gate in the gate ladder, so
+  the suite loses no guarantee; saves 3–16 s per e2e invocation, most
+  visible on targeted single-spec runs).
 
 - Phase 1 remaining slices: the transform stack + builders
   (subride/gizmo/wheels/asset-space classes). Phase 3: **the Viewport-mock

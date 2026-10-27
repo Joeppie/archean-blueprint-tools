@@ -2793,8 +2793,11 @@ in full-suite runs. Standing rules:
    (pinedit.test 12 + editor.dom 13 + balloonskin.dom 4 + scene.headless
    20→29 camera/ghost/surge/label/exclusivity/mirror-axis/live-edit +
    tooldoc/liftwidget +3); matrix 200 → **147 listed runs** (session
-   394 → 147, −63 %), fast tier 190 → 137 (wall 1.7 → 1.5 min — the
-   fixed vite-build share grows as the run count shrinks). select.spec + liveedit.spec
+   394 → 147, −63 %), fast tier 190 → 137 (wall 1.7 → 1.5 min; the
+   "fixed ~40 s build share" first stated here was an INFERENCE —
+   v1.12.6 measured 91 s = 23 s webServer ceremony + 68 s browser work,
+   the build itself is 7 s, and the webServer now runs `vite build`
+   directly). select.spec + liveedit.spec
    DELETED (whole files → headless + jsdom); builddock 34→16, sphereskin
    24→10 (the two 120 s twin legs + the 180 s big-balloon leg retired to
    pinedit/splitface/tooldoc pairs); engine/pinedit.ts = the prism
