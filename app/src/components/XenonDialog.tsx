@@ -440,8 +440,9 @@ function VarToken(p: { name: string }) {
     <span className="relative" onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}>
       {`$${p.name}`}
       {hov && (
-        <span className="absolute bottom-full left-0 z-20 mb-0.5 flex flex-col items-start whitespace-pre rounded
-                       border border-[#3a4a6a] bg-[#0b0f18] px-1.5 py-0.5 text-[10px] text-[#8fd48f] shadow-lg">
+        <span data-testid={`xenon-var-tip-${p.name}`}
+          className="absolute bottom-full left-0 z-20 mb-0.5 flex flex-col items-start whitespace-pre rounded
+                     border border-[#3a4a6a] bg-[#0b0f18] px-1.5 py-0.5 text-[10px] text-[#8fd48f] shadow-lg">
           {hist && (
             <span key={hist.id} className="var-fade text-[#c586c0]" onAnimationEnd={() => setHist(null)}>
               {hist.v === '' ? '·' : hist.v} →

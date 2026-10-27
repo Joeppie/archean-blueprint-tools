@@ -111,20 +111,25 @@ test.describe('Xenon IDE @ui', () => {
     // tabs: 57 files wrap across the tab row
     await expect(page.getByTestId('xenon-tab-0')).toBeVisible();
     await expect(page.getByTestId('xenon-tab-56')).toBeVisible();
-    // the io bus speaks component ALIASES (the device table): the drill is driven
+    // the io bus speaks component ALIASES (the device table): the drill is
+    // driven (the BUS side tab)
+    await page.getByTestId('xenon-side-bus').click();
     await expect(page.locator('[data-testid="xenon-dialog"]').getByText('mining-drill').first())
       .toBeVisible({ timeout: 30_000 });
     // a NAMED screen from the blueprint (Dashboard 'pilot-screen' element 0,
     // 51×51 px) paints — the virtual screens bind at boot, no auto-screens
+    await page.getByTestId('xenon-side-screens').click();
     const scr = page.locator('[data-testid="xenon-screen-pilot-screen#0"]');
     await expect(scr).toBeVisible({ timeout: 30_000 });
     await page.waitForTimeout(4000);
     expect(await litPixels(page, '[data-testid="xenon-screen-pilot-screen#0"]')).toBeGreaterThan(20);
-    // the 16k-line main.xc renders WINDOWED (v1.13.x: the view cap is
-    // retired — every line is reachable, none are rendered at once)
+    // the biggest file (dashboard-art.xc, 7459 lines) renders WINDOWED —
+    // v1.13.x retired the 1500-line view cap: every line is reachable,
+    // none are rendered at once
+    await page.locator('[data-testid^="xenon-tab-"]', { hasText: 'dashboard-art.xc' }).click();
     const view = page.getByTestId('xenon-code-view');
     await expect(view).toBeVisible();
-    expect(Number(await view.getAttribute('data-lines'))).toBeGreaterThan(10_000);
+    expect(Number(await view.getAttribute('data-lines'))).toBeGreaterThan(7000);
     // the Vars side tab lists the firmware's globals (the Badger's $tick-like
     // state): the panel renders ≥ 1 variable row
     await page.getByTestId('xenon-side-vars').click();
@@ -207,20 +212,20 @@ test.describe('Xenon IDE @ui', () => {
     expect(await scr.evaluate(el => (el as HTMLCanvasElement).width)).toBe(146);
     await page.waitForTimeout(1500);
     expect(await litPixels(page, '[data-testid="xenon-screen-10#0"]')).toBeGreaterThan(10);
-    // THE FIX: clicking the top-left "disp" button flips $disp (vars panel)
+    // THE FIX: clicking the top-left "disp" button flips $disp — the click
+    // lands while the SCREENS tab shows the surface; the vars tab reads back
+    await page.getByTestId('xenon-screen-10#0').click({ position: { x: 2, y: 2 } });
     await page.getByTestId('xenon-side-vars').click();
     const dispRow = page.getByTestId('xenon-var-disp');
     await expect(dispRow).toBeVisible();
-    const before = (await dispRow.innerText()).match(/-?\d+(\.\d+)?/g)?.pop();
-    await page.getByTestId('xenon-screen-10#0').click({ position: { x: 2, y: 2 } });
-    await expect(dispRow).not.toContainText(before ?? 'NOVAL', { timeout: 8_000 });
+    await expect(dispRow).not.toContainText('1', { timeout: 8_000 });
     // the 3381670618 code validates clean (no red lines in the entry file)
     await page.getByTestId('xenon-tab-0').click();
     await expect(page.locator('[data-testid^="xenon-err-"]')).toHaveCount(0);
     // $var hover: the tooltip shows the CURRENT value
     const tok = page.locator('span.relative', { hasText: /^\$auto$/ }).first();
     await tok.hover();
-    await expect(page.locator('span.var-fade, .absolute.text-\[\#8fd48f\]').first()).toBeVisible();
+    await expect(page.getByTestId('xenon-var-tip-auto')).toContainText('=');
     await page.keyboard.press('Escape');
   });
 

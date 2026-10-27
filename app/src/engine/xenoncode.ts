@@ -577,7 +577,14 @@ export class XenonPump {
         const prints = evs.filter(e => e.e !== 'cycle');
         if (prints.length) this.log = [...this.log.slice(-180), ...prints];
         for (const e of evs) {
-          if (e.e === 'out') this.bus.set(`${e.io}:${e.port}`, e.v ?? '');
+          if (e.e === 'out') {
+            // MOST-RECENTLY-ACTIVE order: re-insert so a per-cycle io stays
+            // in the visible last-24 window (insertion-only Map order let
+            // busy rows get buried — the Badger's mining-drill pin raced)
+            const k = `${e.io}:${e.port}`;
+            this.bus.delete(k);
+            this.bus.set(k, e.v ?? '');
+          }
           else if (e.e === 'in') this.reads.set(`${e.io}:${e.port}`, Number(e.v) || 0);
         }
       }
