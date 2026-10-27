@@ -24,7 +24,9 @@ git -C "$UP" checkout --quiet --detach "$PIN"
 # observable behaviour.
 sed -i 's/return stoll(textValue);/return textValue.empty() ? 0 : strtoll(textValue.c_str(), nullptr, 10);/; s/return stoull(textValue);/return textValue.empty() ? 0 : strtoull(textValue.c_str(), nullptr, 10);/; s/return stoul(textValue);/return textValue.empty() ? 0 : (unsigned long)strtoull(textValue.c_str(), nullptr, 10);/g' "$UP/XenonCode.hpp"
 python3 patch_xenon_vars.py "$UP/XenonCode.hpp"   # XENON-VARS introspection (see the script)
-echo "upstream: $(git -C "$UP" rev-parse HEAD) (pinned $PIN, +lenient-numeric, +XENON-VARS)"
+python3 patch_xenon_debug.py "$UP/XenonCode.hpp"   # XENON-DEBUG line tracking (see the script)
+python3 patch_xenon_lenient_index.py "$UP/XenonCode.hpp"   # XENON-LENIENT-INDEX (game-tolerant OOB reads)
+echo "upstream: $(git -C "$UP" rev-parse HEAD) (pinned $PIN, +lenient-numeric, +XENON-VARS, +XENON-DEBUG, +XENON-LENIENT-INDEX)"
 
 mkdir -p run
 

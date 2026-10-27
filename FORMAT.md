@@ -662,6 +662,29 @@ implementation `tools/xenoncode/xc_host.cpp` + `app/src/engine/xenoncode.ts`)
 - **input_number reads** are reported per cycle as `{"e":"in","io":N,
   "port":C,"v":V}` events — the IDE's io-addressed node cards show the value
   the program ACTUALLY read from its component.
+- **The debugger** (F9 break · F10/F11 step · F8 resume): RunCode's
+  LINENUMBER case records the executed line per cycle behind a flag
+  (`tools/xenoncode/patch_xenon_debug.py`, `xc_cycle_lines()`); the host
+  pauses the pump at the cycle that TOUCHED a breakpoint line, and one step
+  = one 10 Hz computer cycle (line-granular suspend/resume does not exist in
+  the library's VM architecture). Break lines match the cycle's executed-line
+  list, which MIXES included files (v1 caveat).
+- **Reboot semantics (the law the Badger taught twice)**: rebooting a
+  computer = a FRESH VM whose RAM starts at ZERO while the host's surface
+  registry SURVIVES — the program's `var $screen = screen(...)` globals
+  re-run in `vars_init`, and any device call the VM makes before them sees a
+  NULL object var: every shim screen member and `screen_copy` must
+  null-guard (unguarded `screenOf(o)->Blank()` segfaulted the host, gdb
+  `this=0x0`). Storage round-trips are equally game-lenient:
+  `patch_xenon_lenient_index.py` makes out-of-range array/text indexing
+  return `0`/`""` (indexed array WRITES grow), OOB text-char writes skip —
+  the game's binary treats junk as data, the open library throws (the
+  Badger's strict-off path on its own written storage is the repro,
+  XC_REBOOT=1).
+- **Autosaves are app-side, not format** — shadow copies of the doc text
+  live in IndexedDB `archean-autosaves` (`app/src/engine/autosave.ts`),
+  keyed by craft id (unsaved docs `new:<title>`), newest-first with
+  timestamps; restoring opens through the normal open funnel.
 
 ## Mass & build cost — the game's server/editor rules (transcribed 2026-10-19,
 verified vs the installed build 136 + the dev viewer panels; implementation

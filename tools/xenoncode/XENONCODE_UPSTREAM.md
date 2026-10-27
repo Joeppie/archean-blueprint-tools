@@ -21,6 +21,29 @@ write only the device shim (`xc_host.cpp`/`xc_host.h`) and the pages.
   (`std::invalid_argument`), so real craft programs die mid-run ("stoll on
   bytecode …" — the Badger's first settings read). `strtoll`/`strtoull`
   with a 0-on-junk fallback matches the game's observable behaviour.
+* **XENON-VARS** (`patch_xenon_vars.py`): the compiler records
+  global-scope variable declarations (name/CODE_TYPE/slot) into
+  `Implementation::globalVarDecls`, and `Computer::DumpVarsJson()` dumps them
+  live (RAM + the storage cache) — the IDE's Vars panel and the `$var` hover
+  read this. (The library's own name→slot map is compile-time-only
+  "Temporary user-defined symbol maps"; the RAM getters are private.)
+* **XENON-DEBUG** (`patch_xenon_debug.py`): RunCode's LINENUMBER case
+  records the executed line per cycle behind a flag (one branch; off =
+  free), `DebugTakeLines()` drains it — the debugger pauses at the cycle
+  that touched a breakpoint and steps one computer cycle at a time.
+* **XENON-LENIENT-INDEX** (`patch_xenon_lenient_index.py`): the same law as
+  lenient text→number, one class deeper — the game binary treats an
+  OUT-OF-RANGE array/text index as junk (read → `0`/`""`, indexed array
+  writes GROW the array, OOB text-char writes are skipped), the open library
+  throws `Invalid array/text indexing`. Repro: the Badger rebooted on its
+  own written storage walks the strict-off path and reads
+  `$access_buffers.$side` on an unwritten (empty) text var — legal in game,
+  crashed the computer here (XC_REBOOT=1 native run).
+* Device-shim hardening (no upstream change, `xc_host.cpp`): every screen
+  member and `screen_copy` NULL-GUARDS its object target — on a REBOOT the
+  program's `$screen` globals start at 0 (fresh VM RAM) while the surface
+  registry survives; unguarded `screenOf(o)->…` segfaulted the host (gdb:
+  `XenonScreen::Blank this=0x0`).
 * Browser build flags: `-sINITIAL_MEMORY=64MB -sMAXIMUM_MEMORY=4096MB` —
   Chrome aborts the default-capped wasm heap during the Badger's 36k-line
   boot (headless probe: `abortOnCannotGrowMemory` in `emscripten_resize_heap`

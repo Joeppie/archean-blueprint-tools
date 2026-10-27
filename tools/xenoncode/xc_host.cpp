@@ -87,6 +87,13 @@ static int xc_addScreen(const std::string& alias, int ch, uint32_t w, uint32_t h
 static inline XenonScreen* screenOf(const Var& obj) {
 	return reinterpret_cast<XenonScreen*>(static_cast<uint64_t>(obj));
 }
+// null-guarded member target: a zero object var (fresh RAM mid-vars_init on a
+// REBOOT — the registry survives, the program's $screen globals restart at 0)
+// must never segfault the host; members on it are no-ops, getters 0.
+static inline XenonScreen* Scr(const Var& obj) {
+	uint64_t p = static_cast<uint64_t>(obj);
+	return p ? reinterpret_cast<XenonScreen*>(p) : nullptr;
+}
 static inline ScreenSlot* slotOf(const Var& obj) {
 	auto i = g_slotByPtr.find(screenOf(obj));
 	return i == g_slotByPtr.end() ? nullptr : &g_screens[i->second];
@@ -169,26 +176,25 @@ static void archeanInit() {
 	// the open library here).
 	screenType = XenonCode::DeclareObjectType("screen", {
 		{"char_h:number", [](Computer*, const Var& o, const vector<Var>&) -> Var {
-			return (double)screenOf(o)->GetCharHeight(); }},
+			return (double)(Scr(o) ? Scr(o)->GetCharHeight() : 0); }},
 		{"char_w:number", [](Computer*, const Var& o, const vector<Var>&) -> Var {
-			return (double)screenOf(o)->GetCharWidth(); }},
+			return (double)(Scr(o) ? Scr(o)->GetCharWidth() : 0); }},
 		{"size_x:number", [](Computer*, const Var& o, const vector<Var>&) -> Var {
-			return (double)screenOf(o)->GetWidth(); }},
+			return (double)(Scr(o) ? Scr(o)->GetWidth() : 0); }},
 		{"size_y:number", [](Computer*, const Var& o, const vector<Var>&) -> Var {
-			return (double)screenOf(o)->GetHeight(); }},
+			return (double)(Scr(o) ? Scr(o)->GetHeight() : 0); }},
 		{"text_size($n:number)", [](Computer*, const Var& o, const vector<Var>& a) -> Var {
-			if (a.size() >= 1) screenOf(o)->SetTextSize((uint32_t)(int64_t)a[0]); return {}; }},
+			if (auto* S = Scr(o)) if (a.size() >= 1) S->SetTextSize((uint32_t)(int64_t)a[0]); return {}; }},
 		// blank() / blank(color) — one declaration, runtime arity dispatch
 		{"blank($c:number)", [](Computer*, const Var& o, const vector<Var>& a) -> Var {
-			if (a.size() >= 1) screenOf(o)->Blank(packedColor(a[0]));
-			else screenOf(o)->Blank();
+			if (auto* S = Scr(o)) { if (a.size() >= 1) S->Blank(packedColor(a[0])); else S->Blank(); }
 			return {}; }},
 		// color(c) — foreground
 		{"color($c:number)", [](Computer*, const Var& o, const vector<Var>& a) -> Var {
-			if (a.size() >= 1) screenOf(o)->SetFgColor(packedColor(a[0])); return {}; }},
+			if (auto* S = Scr(o)) { if (a.size() >= 1) S->SetFgColor(packedColor(a[0])); } return {}; }},
 		// write(x,y,color,text) / write(x,y,text) / write(text)
 		{"write($x:number,$y:number,$c:number,$t:text)", [](Computer*, const Var& o, const vector<Var>& a) -> Var {
-			XenonScreen* s = screenOf(o);
+			XenonScreen* s = Scr(o); if (!s) return {};
 			if (a.size() >= 4) s->Write((uint32_t)(int64_t)a[0], (uint32_t)(int64_t)a[1],
 			                            packedColor(a[2]), varToString(a[3]));
 			else if (a.size() == 3) s->Write((uint32_t)(int64_t)a[0], (uint32_t)(int64_t)a[1],
@@ -200,36 +206,36 @@ static void archeanInit() {
 		// POC's (x,y,color) point-SETTER was a misread — drawing is
 		// draw_point, and programs use pixel() as a getter)
 		{"pixel($x:number,$y:number):number", [](Computer*, const Var& o, const vector<Var>& a) -> Var {
-			XenonScreen* s = screenOf(o);
+			XenonScreen* s = Scr(o); if (!s) return {};
 			int x = (int)(int64_t)a[0], y = (int)(int64_t)a[1];
 			if (x < 0 || y < 0 || x >= (int)s->GetWidth() || y >= (int)s->GetHeight()) return 0.0;
 			return (double)s->GetPixel(x, y); }},
 		// the wiki's screen rendering API (xenoncode/dashboard.md), 1:1 with
 		// the dev's XenonScreen.hpp primitives
 		{"width:number", [](Computer*, const Var& o, const vector<Var>&) -> Var {
-			return (double)screenOf(o)->GetWidth(); }},
+			return (double)(Scr(o) ? Scr(o)->GetWidth() : 0); }},
 		{"height:number", [](Computer*, const Var& o, const vector<Var>&) -> Var {
-			return (double)screenOf(o)->GetHeight(); }},
+			return (double)(Scr(o) ? Scr(o)->GetHeight() : 0); }},
 		{"text_align($a:number)", [](Computer*, const Var& o, const vector<Var>& a) -> Var {
-			if (a.size() >= 1) screenOf(o)->SetTextAlign((uint32_t)(int64_t)a[0]); return {}; }},
+			if (auto* S = Scr(o)) if (a.size() >= 1) S->SetTextAlign((uint32_t)(int64_t)a[0]); return {}; }},
 		{"newline_spacing($n:number)", [](Computer*, const Var& o, const vector<Var>& a) -> Var {
-			if (a.size() >= 1) screenOf(o)->SetNewlineSpacing((uint32_t)(int64_t)a[0]); return {}; }},
+			if (auto* S = Scr(o)) if (a.size() >= 1) S->SetNewlineSpacing((uint32_t)(int64_t)a[0]); return {}; }},
 		{"draw_point($x:number,$y:number,$c:number)", [](Computer*, const Var& o, const vector<Var>& a) -> Var {
-			screenOf(o)->DrawPoint((int)(int64_t)a[0], (int)(int64_t)a[1], packedColor(a[2])); return {}; }},
+			if (auto* _S = Scr(o)) _S->DrawPoint((int)(int64_t)a[0], (int)(int64_t)a[1], packedColor(a[2])); return {}; }},
 		{"draw_line($x1:number,$y1:number,$x2:number,$y2:number,$c:number)", [](Computer*, const Var& o, const vector<Var>& a) -> Var {
-			screenOf(o)->DrawLine((int)(int64_t)a[0], (int)(int64_t)a[1],
+			if (auto* _S = Scr(o)) _S->DrawLine((int)(int64_t)a[0], (int)(int64_t)a[1],
 			                      (int)(int64_t)a[2], (int)(int64_t)a[3], packedColor(a[4])); return {}; }},
 		// draw_rect(x1,y1,x2,y2,color[,fillcolor]) — the optional fill is the
 		// overload pattern again (one declaration, runtime arity)
 		{"draw_rect($x1:number,$y1:number,$x2:number,$y2:number,$c:number,$f:number)", [](Computer*, const Var& o, const vector<Var>& a) -> Var {
-			screenOf(o)->DrawRect((int)(int64_t)a[0], (int)(int64_t)a[1], (int)(int64_t)a[2], (int)(int64_t)a[3],
+			if (auto* _S = Scr(o)) _S->DrawRect((int)(int64_t)a[0], (int)(int64_t)a[1], (int)(int64_t)a[2], (int)(int64_t)a[3],
 			                      packedColor(a[4]), a.size() >= 6 ? packedColor(a[5]) : 0u); return {}; }},
 		{"draw_triangle($x1:number,$y1:number,$x2:number,$y2:number,$x3:number,$y3:number,$c:number,$f:number)", [](Computer*, const Var& o, const vector<Var>& a) -> Var {
-			screenOf(o)->DrawTriangle((int)(int64_t)a[0], (int)(int64_t)a[1], (int)(int64_t)a[2], (int)(int64_t)a[3],
+			if (auto* _S = Scr(o)) _S->DrawTriangle((int)(int64_t)a[0], (int)(int64_t)a[1], (int)(int64_t)a[2], (int)(int64_t)a[3],
 			                          (int)(int64_t)a[4], (int)(int64_t)a[5], packedColor(a[6]),
 			                          a.size() >= 8 ? packedColor(a[7]) : 0u); return {}; }},
 		{"draw_circle($x:number,$y:number,$r:number,$c:number,$f:number)", [](Computer*, const Var& o, const vector<Var>& a) -> Var {
-			screenOf(o)->DrawCircle((int)(int64_t)a[0], (int)(int64_t)a[1], (int)(int64_t)a[2], packedColor(a[3]),
+			if (auto* _S = Scr(o)) _S->DrawCircle((int)(int64_t)a[0], (int)(int64_t)a[1], (int)(int64_t)a[2], packedColor(a[3]),
 			                        a.size() >= 5 ? packedColor(a[4]) : 0u); return {}; }},
 		// draw_poly(color, x1, y1, x2, y2, ...) — variadic points: declare
 		// two, walk the rest at runtime
@@ -237,26 +243,26 @@ static void archeanInit() {
 			vector<int> pts;
 			for (size_t i = 1; i + 1 < a.size(); i += 2)
 				pts.push_back((int)(int64_t)a[i]), pts.push_back((int)(int64_t)a[i + 1]);
-			screenOf(o)->DrawPoly(packedColor(a[0]), pts); return {}; }},
+			if (auto* _S = Scr(o)) _S->DrawPoly(packedColor(a[0]), pts); return {}; }},
 		// button_rect(x, y, w, h, color):number — draws AND "evaluates to
 		// true if clicked" (wiki computer.md:143 + dashboard.md:84). The
 		// void declaration was craft 3381670618's compile error: `if
 		// $screen.button_rect(...)` needs a return value.
 		{"button_rect($x:number,$y:number,$w:number,$h:number,$c:number):number", [](Computer*, const Var& o, const vector<Var>& a) -> Var {
 			int x = (int)(int64_t)a[0], y = (int)(int64_t)a[1], w = (int)(int64_t)a[2], h = (int)(int64_t)a[3];
-			screenOf(o)->DrawRect(x, y, x + w, y + h, packedColor(a[4]));
+			if (auto* _S = Scr(o)) _S->DrawRect(x, y, x + w, y + h, packedColor(a[4]));
 			return xc_buttonHit(slotOf(o), x, y, w, h) ? 1.0 : 0.0; }},
 		// legacy button(x, y, color, width, height):number — the older
 		// width/height-parameter form (computer.md:156 — the COLOUR is the
 		// 3rd argument, unlike button_rect)
 		{"button($x:number,$y:number,$c:number,$w:number,$h:number):number", [](Computer*, const Var& o, const vector<Var>& a) -> Var {
 			int x = (int)(int64_t)a[0], y = (int)(int64_t)a[1], w = (int)(int64_t)a[3], h = (int)(int64_t)a[4];
-			screenOf(o)->DrawRect(x, y, x + w, y + h, packedColor(a[2]));
+			if (auto* _S = Scr(o)) _S->DrawRect(x, y, x + w, y + h, packedColor(a[2]));
 			return xc_buttonHit(slotOf(o), x, y, w, h) ? 1.0 : 0.0; }},
 		// legacy draw(x, y, color, width, height) — computer.md:155
 		{"draw($x:number,$y:number,$c:number,$w:number,$h:number)", [](Computer*, const Var& o, const vector<Var>& a) -> Var {
 			int x = (int)(int64_t)a[0], y = (int)(int64_t)a[1], w = (int)(int64_t)a[3], h = (int)(int64_t)a[4];
-			screenOf(o)->DrawRect(x, y, x + w, y + h, packedColor(a[2]));
+			if (auto* _S = Scr(o)) _S->DrawRect(x, y, x + w, y + h, packedColor(a[2]));
 			return {}; }},
 		// click state of THIS surface (dashboard.md "Built-in values")
 		{"clicked:number", [](Computer*, const Var& o, const vector<Var>&) -> Var {
@@ -422,8 +428,9 @@ static void archeanInit() {
 	// rotation + bilinear). Overload pattern: widest declaration, the three
 	// optional args are read by runtime arity.
 	XenonCode::DeclareDeviceFunction("screen_copy", [](Computer*, const vector<Var>& a) -> Var {
-		XenonScreen* s = screenOf(a[0]);
-		XenonScreen* d = screenOf(a[1]);
+		XenonScreen* s = Scr(a[0]);                 // PATCH-safety: a rebooted VM's
+		XenonScreen* d = Scr(a[1]);                 // $screens restart at 0 — no-op
+		if (!s || !d) return {};
 		int sx = (int)(int64_t)a[2], sy = (int)(int64_t)a[3];
 		int dx = (int)(int64_t)a[4], dy = (int)(int64_t)a[5];
 		int w = (int)(int64_t)a[6], h = (int)(int64_t)a[7];
@@ -711,34 +718,50 @@ int main(int argc, char** argv) {
 		return 2;
 	}
 
-	Computer computer;
-	computer.capability.ram = xc_ramCap;
-	computer.capability.storage = xc_storageCap;
-	if (!computer.LoadProgram(dir)) { cerr << "[xc] load failed" << endl; return 3; }
-	computer.LoadStorage(dir + "/storage");
+	auto computer = make_unique<Computer>();      // fresh object per boot, like xc_boot
+	computer->capability.ram = xc_ramCap;
+	computer->capability.storage = xc_storageCap;
+	if (!computer->LoadProgram(dir)) { cerr << "[xc] load failed" << endl; return 3; }
+	Computer::DebugTrack(true);   // native: lines.json snapshot at cycle 5 (debugger triage)
+	computer->LoadStorage(dir + "/storage");
 	xc_addScreen("main", 0, 640, 480);
 	for (auto& s : g_screens) s.scr->Blank();
 	const double dial = getenv("XC_DIAL") ? atof(getenv("XC_DIAL")) : 0.0;
 	xc_inputs[1][7] = dial;   // the hello program's externally provided numer
 	bool realtime = getenv("XC_FAST") == nullptr;   // timers run on the real clock
 	try {
-		computer.RunInit();
+		computer->RunInit();
 		for (int c = 0; c < cycles; ++c) {
 			xc_simTime += xc_dt;
 			xc_tickCount++;
 			pilotAtCycle(c);
 			xc_eventLog.push_back("{\"e\":\"cycle\",\"c\":" + to_string(c) + "}");
-			computer.RunCycle();                 // tick + timers
-			computer.RunEntryPoint("update");    // the computer device's cycle end
-			xc_endCycle(computer);               // click/scroll events + input reads
+			if (c == 10 && getenv("XC_REBOOT")) { // mid-run reboot (the Badger's strict-off state)
+				computer->SaveStorage(dir + "/storage");
+				computer = make_unique<Computer>();
+				computer->capability.ram = xc_ramCap;
+				computer->capability.storage = xc_storageCap;
+				if (!computer->LoadProgram(dir)) { cerr << "[xc] reboot reload failed" << endl; return 3; }
+				if (!getenv("XC_REBOOT_NOSTORE")) computer->LoadStorage(dir + "/storage");
+			}
+			computer->RunCycle();                // tick + timers
+			computer->RunEntryPoint("update");   // the computer device's cycle end
+			xc_endCycle(*computer);               // click/scroll events + input reads
+			if (c == 5) {
+				auto ls = Computer::DebugTakeLines();
+				ofstream lf("lines.json");
+				lf << "[";
+				for (size_t i = 0; i < ls.size(); ++i) { if (i) lf << ","; lf << ls[i]; }
+				lf << "]\n";
+			}
 			if (realtime) this_thread::sleep_for(chrono::milliseconds(100));
 		}
 	} catch (XenonCode::RuntimeError& e) {
 		cerr << "[xc] RUNTIME ERROR: " << e.what() << endl;
 		return 4;
 	}
-	computer.SaveStorage(dir + "/storage");
-	{ std::ofstream vf("vars.json"); vf << computer.DumpVarsJson(); }
+	computer->SaveStorage(dir + "/storage");
+	{ std::ofstream vf("vars.json"); vf << computer->DumpVarsJson(); }
 	cout << "[xc] vars.json written (XENON-VARS)" << endl;
 
 	// ---- report: events + a PPM per screen ---------------------------------
@@ -858,6 +881,17 @@ static string g_varsJson;
 EMSCRIPTEN_KEEPALIVE const char* xc_vars() {
 	g_varsJson = g_computer ? g_computer->DumpVarsJson() : "[]";
 	return g_varsJson.c_str();
+}
+// XENON-DEBUG: line-tracking switch + the lines executed since the last
+// drain (the pump pauses the cycle that TOUCHED a breakpoint line)
+EMSCRIPTEN_KEEPALIVE void xc_debug_track(int on) { Computer::DebugTrack(on); }
+static string g_linesJson;
+EMSCRIPTEN_KEEPALIVE const char* xc_cycle_lines() {
+	g_linesJson = "[";
+	auto v = Computer::DebugTakeLines();
+	for (size_t i = 0; i < v.size(); ++i) { if (i) g_linesJson += ","; g_linesJson += std::to_string(v[i]); }
+	g_linesJson += "]";
+	return g_linesJson.c_str();
 }
 EMSCRIPTEN_KEEPALIVE const char* xc_error() { return g_err.c_str(); }
 EMSCRIPTEN_KEEPALIVE void xc_set_input(int io, int ch, double v) { xc_inputs[io][ch] = v; }
