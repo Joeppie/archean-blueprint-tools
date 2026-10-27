@@ -229,6 +229,90 @@ test.describe('Xenon IDE @ui', () => {
     await page.keyboard.press('Escape');
   });
 
+  test('the debugger: F9 breakpoint pauses, F10 steps one cycle, F8 resumes @slow', async ({ page }) => {
+    // (we: "we should be able to set breakpoints and move through it with
+    // the same keys as typical in intelIbrains IDE, so f10, f11?") — a step
+    // is one 10 Hz computer cycle; a break pauses AT the cycle that touched
+    // its line (XENON-DEBUG executed-line tracking).
+    await page.goto(`/?craft=${CEP}`);
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 90_000 });
+    await page.getByTestId('xenon-menu').click();
+    await page.locator('[data-testid^="xenon-comp-"]').first().click();
+    await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 60_000 });
+    await page.getByTestId('xenon-tab-0').click();
+    // line 17 (output_number(8,0,...)) runs EVERY cycle — click its gutter
+    const gutter = page.locator('[data-line="17"] span').first();
+    await expect(gutter).toBeVisible();
+    await gutter.click();
+    await expect(page.getByTestId('xenon-bp-17')).toBeVisible();
+    // the pump pauses at the cycle that touches the line
+    const pill = page.getByTestId('xenon-paused');
+    await expect(pill).toBeVisible({ timeout: 15_000 });
+    await expect(pill).toContainText('17');
+    const cycles = async () => Number(
+      (await page.getByText(/cycles \d+ @ 10 Hz/).first().innerText()).match(/cycles (\d+)/)?.[1] ?? -1);
+    const c0 = await cycles();
+    await page.waitForTimeout(1200);
+    expect(await cycles()).toBe(c0);                 // frozen while paused
+    // F10 = exactly one computer cycle
+    await page.keyboard.press('F10');
+    await expect.poll(cycles, { timeout: 8_000 }).toBe(c0 + 1);
+    await page.keyboard.press('F10');
+    await expect.poll(cycles, { timeout: 8_000 }).toBe(c0 + 2);
+    await expect(pill).toBeVisible();
+    // F8 = resume: the break re-arms and cycles stream past the frozen step
+    await page.keyboard.press('F8');
+    await expect.poll(cycles, { timeout: 8_000 }).toBeGreaterThan(c0 + 2);
+    await page.keyboard.press('Escape');
+  });
+
+  test('autosaves: a disk edit is shadowed, a reload loses it, Restore brings it back @slow', async ({ page }) => {
+    // (we: "keep a shadow-copy of the current craft… Forget to save? No
+    // problem… in the file menu, autosaves should show… with timestamp")
+    test.setTimeout(180_000);
+    await page.goto(`/?craft=${PLANE}`);
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 90_000 });
+    await page.getByTestId('xenon-menu').click();
+    await page.locator('[data-testid^="xenon-comp-"]').first().click();
+    await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 60_000 });
+    // edit the disk (the marker rides the doc via the v1.6.1 mirror)
+    await page.getByTestId('xenon-edit').click();
+    const ta = page.getByTestId('xenon-code-edit');
+    await expect(ta).toBeVisible();
+    const src = await ta.inputValue();
+    await ta.fill(src + '\n; autosave-pin marker\n');
+    await page.getByTestId('xenon-save').click();
+    await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 60_000 });
+    await page.keyboard.press('Escape');
+    // tab-hiding fires the 20 s shadow immediately (visibilitychange hook)
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await page.waitForTimeout(800);
+    await page.getByTestId('file-menu').click();
+    await page.getByTestId('file-autosaves').click();
+    const rows = page.locator('[data-testid^="autosave-row-"]');
+    await expect(rows.first()).toBeVisible({ timeout: 10_000 });
+    // RELOAD: the in-memory doc is gone — the shadow survives (IndexedDB)
+    await page.reload();
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 90_000 });
+    await page.getByTestId('file-menu').click();
+    await page.getByTestId('file-autosaves').click();
+    await expect(rows.first()).toBeVisible({ timeout: 10_000 });
+    await page.locator('[data-testid^="autosave-restore-"]').first().click();
+    // the restored doc carries the marker: the IDE shows it again
+    await page.getByTestId('xenon-menu').click();
+    await page.locator('[data-testid^="xenon-comp-"]').first().click();
+    // the code view is VIRTUALIZED (windowed render) — scroll to the tail so
+    // the appended marker line enters the DOM before asserting
+    const codeBox = page.getByTestId('xenon-code-view');
+    await expect(codeBox).toBeVisible({ timeout: 60_000 });
+    await codeBox.evaluate(el => { el.scrollTop = el.scrollHeight; });
+    await expect(page.getByTestId('xenon-code-0')).toContainText('autosave-pin marker', { timeout: 15_000 });
+    await page.keyboard.press('Escape');
+  });
+
   test('the ▣ Screens bottom tab shows dashboards + virtual surfaces @slow', async ({ page }) => {
     // (we: "open the screens in the bottom tab using a screen button on top
     // (only visible if the craft has dashboards) … a tab for normal and

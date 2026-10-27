@@ -62,6 +62,12 @@ export default function XenonDialog(p: {
   const [side, setSide] = useState<'vars' | 'screens' | 'bus' | 'console'>('screens');
   const [varQ, setVarQ] = useState('');
   const [scrQ, setScrQ] = useState('');
+  // ── debugger (VS-Code keys, our law): F9 breakpoint on the clicked line,
+  // F10/F11 step ONE 10 Hz computer cycle, F8 resume. Breakpoints are a
+  // per-tab line set; a break PAUSES at the cycle that touched the line
+  // (executed-line tracking, tools/xenoncode/patch_xenon_debug.py).
+  const [bps, setBps] = useState<Record<number, Set<number>>>({});
+  const [lastLine, setLastLine] = useState(-1);
   const closeRef = useRef(p.onClose);
   closeRef.current = p.onClose;
   const editRef = useRef<HTMLTextAreaElement>(null);
@@ -167,13 +173,46 @@ export default function XenonDialog(p: {
     p.onFiles(comp.ci, next);
   };
 
+  const toggleBp = (line0: number) => {
+    setBps(m => {
+      const s = new Set(m[tab] ?? []);
+      const L = line0 + 1;                        // 1-based, VM line numbers
+      if (s.has(L)) s.delete(L); else s.add(L);
+      return { ...m, [tab]: s };
+    });
+    setLastLine(line0);
+  };
+
   const onCode = tab < files.length;
   const booting = pump.status === 'booting' || pump.status === 'idle';
+
+  // the pump breaks on the ACTIVE tab's lines (v1: the executed-line list
+  // mixes included files — a break line pauses the cycle that ran it)
+  useEffect(() => { pump.setBreaks(onCode ? (bps[tab] ?? []) : []); },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tab, bps, onCode, pump]);
+
+  // F9 break · F10/F11 step (one computer cycle) · F8 resume — the IDE's
+  // debugger keys (the user asked for the IDE-class set; F5-run is not
+  // feasible: the VM runs continuously at the game's 10 Hz cadence, so
+  // RUN is the default state and PAUSE/STEP are the meaningful controls)
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (e.key === 'F8') { e.preventDefault(); pump.resume(); }
+      else if (e.key === 'F9') {
+        e.preventDefault();
+        if (onCode && lastLine >= 0) toggleBp(lastLine);
+      } else if (e.key === 'F10' || e.key === 'F11') { e.preventDefault(); pump.step(); }
+    };
+    addEventListener('keydown', h);
+    return () => removeEventListener('keydown', h);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastLine, tab, onCode, bps]);
 
   return (
     <div data-testid="xenon-dialog" className="fixed inset-0 z-40 grid place-items-center
          bg-black/60 p-2" onMouseDown={e => { if (e.target === e.currentTarget) p.onClose(); }}>
-      <div className="flex max-h-[92dvh] w-[min(1150px,96vw)] flex-col overflow-hidden rounded-lg
+      <div className="flex max-h-[94dvh] w-[min(1400px,97vw)] flex-col overflow-hidden rounded-lg
            border border-[#3a4a6a] bg-[#10141f]/[.97] text-[#d6dbe1] shadow-2xl"
         style={{ fontFamily: 'ui-monospace, Menlo, Consolas, monospace' }}>
         {/* title bar */}
@@ -183,6 +222,12 @@ export default function XenonDialog(p: {
             <span data-testid="xenon-on" className={`text-[11px] font-bold ${pump.status === 'running' ? 'text-[#3ddc55]' : 'text-[#ff5b5b]'}`}>
               {pump.status === 'running' ? 'ON' : 'OFF'}
             </span>
+            {pump.paused && (
+              <span data-testid="xenon-paused" className="rounded bg-[#4a3d14] px-2 py-0.5
+                     text-[10px] font-bold text-[#e6c07b]">
+                PAUSED{pump.pausedAt ? ` · line ${pump.pausedAt}` : ' · step'}
+              </span>
+            )}
             <button data-testid="xenon-close" className="text-[#8a93a0] hover:text-white"
               onClick={p.onClose} aria-label="close">✕</button>
           </div>
@@ -199,7 +244,7 @@ export default function XenonDialog(p: {
             {pump.status === 'running' ? 'Options ▸ stop' : 'Options ▸ run'}
           </button>
           <span className="text-[#3f4b5f]">Help</span>
-          <span className="ml-auto text-[10px] text-[#5d6a7d]">cycles {pump.cycles} @ 10 Hz · CTRL+S save+reboot · screens clickable</span>
+          <span className="ml-auto text-[10px] text-[#5d6a7d]">cycles {pump.cycles} @ 10 Hz · CTRL+S save+reboot · screens clickable · F9 break · F10 step · F8 resume</span>
         </div>
         {/* the File dialog: virtual-disk operations (the files are BAKED INTO
             THE CRAFT json — add/remove them freely, they save with the craft) */}
@@ -229,8 +274,14 @@ export default function XenonDialog(p: {
               onClick={delFile}>{armedDel ? 'sure?' : '✕ delete tab'}</button>
           </div>
         )}
-        {/* tabs — every HDD file, dirty-marked */}
-        <div className="flex flex-wrap gap-1 border-b border-[#2b313b] bg-[#121826] px-2 pt-1.5 text-[12px]">
+        <div className="flex min-h-0 flex-1 gap-2 overflow-hidden p-2">
+          {/* LEFT COLUMN: the file-tab strip rides ABOVE the code; the
+              COMPUTER SIDE PANEL stands to its right, top to bottom
+              (v1.13.x: "Variables/screens should be to the side of the
+              enumerated files, and the window should be larger") */}
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+          {/* tabs — every HDD file, dirty-marked */}
+          <div className="flex flex-wrap items-center gap-1 rounded border border-[#2b313b] bg-[#121826] px-2 py-1 text-[12px]">
           {files.map((f, i) => (
             <button key={f.name} data-testid={`xenon-tab-${i}`}
               onClick={() => { setTab(i); setEditing(false); setArmedDel(false); }}
@@ -256,14 +307,15 @@ export default function XenonDialog(p: {
             <button data-testid="xenon-edit-cancel" className="self-center rounded px-2 py-0.5
                    text-[11px] text-[#8a93a0] hover:bg-[#27395c]" onClick={() => setEditing(false)}>↺ revert</button>
           </>)}
-        </div>
+          </div>
 
-        <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-hidden p-2 md:grid-cols-[minmax(0,1fr)_330px]">
           {/* code / nodes */}
           <div data-testid={`xenon-code-${tab}`} data-mode={status}
-            className="min-h-0 overflow-hidden rounded border border-[#232c3d] bg-[#0b0f18] text-[12px] leading-[1.45]">
+            className="min-h-0 flex-1 overflow-hidden rounded border border-[#232c3d] bg-[#0b0f18] text-[12px] leading-[1.45]">
             {onCode && !editing && file && (
-              <CodeView code={file.code} tabKey={`${comp.ci}:${tab}:${pump.status}`} />
+              <CodeView code={file.code} tabKey={`${comp.ci}:${tab}:${pump.status}`}
+                breaks={bps[tab] ?? new Set()} pausedAt={pump.pausedAt} lastLine={lastLine}
+                onGutter={i => toggleBp(i)} onLine={i => setLastLine(i)} />
             )}
             {onCode && editing && (
               <textarea ref={editRef} data-testid="xenon-code-edit" value={draft}
@@ -275,20 +327,26 @@ export default function XenonDialog(p: {
             {tab === 100 && graph && <NodeGraph graph={graph} reads={pump.reads} bus={pump.bus} />}
           </div>
 
+          </div>
+
           {/* right: THE COMPUTER SIDE PANEL — tabbed: Vars / Screens / Bus /
               Console (v1.13.x: "the computer should have a side-panel you can
               tab through, you should be able to see variables there, which
               automatically breaks open its KV structure … one of the side
               tabs to be the screens and virtual screens … search
               names/values in vars, and also names of screens") */}
-          <div className="flex min-h-0 flex-col gap-1.5">
-            <div className="flex gap-1 text-[11px]">
-              {([['vars', `Vars (${pump.vars.size})`],
-                ['screens', `Screens (${pump.surfaces.size})`],
+          <div className="flex min-h-0 flex-1 gap-1.5">
+            {/* the side RAIL: tabs sit BESIDE the panel (v1.13.x: "Screens
+                and vars should be to the side of the tabs") */}
+            <div className="flex w-7 shrink-0 flex-col gap-1">
+              {([['vars', `Vars ${pump.vars.size ? `(${pump.vars.size})` : ''}`],
+                ['screens', `Screens ${pump.surfaces.size ? `(${pump.surfaces.size})` : ''}`],
                 ['bus', 'Bus'], ['console', 'Console']] as const).map(([k, label]) => (
                 <button key={k} data-testid={`xenon-side-${k}`} onClick={() => setSide(k)}
-                  className={`rounded px-2 py-0.5 ${side === k ? 'bg-[#243a52] text-[#8fd4ff]' : 'bg-[#1a2233] text-[#7d8aa0] hover:text-white'}`}>
-                  {label}
+                  className="flex-1 rounded py-2 text-[10px] tracking-wide"
+                  style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
+                  title={label.trim()}>
+                  <span className={side === k ? 'text-[#8fd4ff]' : 'text-[#7d8aa0]'}>{label.trim()}</span>
                 </button>
               ))}
             </div>
@@ -344,7 +402,7 @@ export default function XenonDialog(p: {
               <div className="flex flex-wrap gap-2">
                 {surfList.map(s => (
                   <label key={s.key} className="block text-[10px] text-[#5d6a7d]">
-                    <ScreenCanvas surfKey={s.key} w={s.w} h={s.h} maxH={170}
+                    <ScreenCanvas surfKey={s.key} w={s.w} h={s.h} maxH={340} fill
                       testid={`xenon-screen-${s.key}`} />
                     <div>{bindings.get(s.key) ?? s.key}
                       {s.key.startsWith('virtual#') && <span className="ml-1 rounded bg-[#24304a] px-1 text-[9px] text-[#8fd4ff]">virtual</span>}
@@ -463,7 +521,14 @@ const pumpVars = () => xenonPump.vars;
 // Badger main.xc scrolls FULLY — the fixed 1500-line view cap is retired);
 // per-line validation runs the REAL compiler over the visible window.
 
-function CodeView(p: { code: string; tabKey: string }) {
+function CodeView(p: {
+  code: string; tabKey: string;
+  breaks: Set<number>;                 // 1-based line numbers with a breakpoint
+  pausedAt: number;                    // 1-based line the debugger paused on
+  lastLine: number;                    // 0-based last-clicked line (F9 target)
+  onGutter: (i: number) => void;       // click the line number = breakpoint
+  onLine: (i: number) => void;         // click the row = F9 target
+}) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [range, setRange] = useState({ a: 0, b: 150 });
   const lines = useMemo(() => p.code.split('\n'), [p.code]);
@@ -499,12 +564,23 @@ function CodeView(p: { code: string; tabKey: string }) {
       <div style={{ height: lines.length * ROW, position: 'relative' }}>
         {lines.slice(range.a, range.b).map((ln, k) => {
           const i = range.a + k;
+          const bp = p.breaks.has(i + 1);
           return (
             <div key={i} data-testid={errs.has(i) ? `xenon-err-${i}` : undefined}
+              data-line={i + 1}
               title={errs.get(i)}
-              className={`flex ${errs.has(i) ? 'bg-[#3a1420]' : ''}`}
+              onClick={() => p.onLine(i)}
+              className={`flex cursor-text ${p.pausedAt === i + 1 ? 'bg-[#4a3d14]'
+                : errs.has(i) ? 'bg-[#3a1420]' : bp ? 'bg-[#2a1520]'
+                : p.lastLine === i ? 'bg-[#131c2c]' : ''}`}
               style={{ position: 'absolute', top: i * ROW, left: 0, right: 0, height: ROW }}>
-              <span className="w-11 shrink-0 select-none pr-2 text-right text-[10px] leading-[18px] text-[#3f4b5f]">{i + 1}</span>
+              <span data-testid={bp ? `xenon-bp-${i + 1}` : undefined}
+                title="breakpoint (click / F9)"
+                onClick={e => { e.stopPropagation(); p.onGutter(i); }}
+                className="w-11 shrink-0 cursor-pointer select-none pr-2 text-right text-[10px]
+                       leading-[18px] text-[#3f4b5f] hover:text-[#ff5b5b]">
+                {bp && <span className="mr-0.5 text-[#ff5b5b]">●</span>}{i + 1}
+              </span>
               <span className="whitespace-pre text-[12px] leading-[18px]">
                 {tokenize(ln).map((t, j) => t.t === 'var' && t.s.startsWith('$')
                   ? <VarToken key={j} name={t.s.slice(1).toLowerCase()} />

@@ -49,6 +49,8 @@ type Mod = {
   _xc_screen_pixels(i: number): number;
   _xc_screen_index(key: number): number;
   _xc_vars(): number;
+  _xc_debug_track(on: number): void;
+  _xc_cycle_lines(): number;
   _xc_screen_click(idx: number, x: number, y: number): void;
   _xc_screen_scroll(idx: number, d: number): void;
   _xc_parse_line(p: number, n: number): number;
@@ -415,6 +417,13 @@ export class XenonRun {
   }
   /** The program's GLOBAL variables, live (XENON-VARS dump). */
   vars(): XenonVar[] { return parseVarsJson(this.mod.UTF8ToString(this.mod._xc_vars())); }
+  /** XENON-DEBUG: record the source lines the VM executes (the pump keeps
+   *  this on — one branch per LINENUMBER opcode, gated in the library). */
+  debugTrack(on: boolean) { this.mod._xc_debug_track(on ? 1 : 0); }
+  cycleLines(): number[] {
+    try { return JSON.parse(this.mod.UTF8ToString(this.mod._xc_cycle_lines())) as number[]; }
+    catch { return []; }
+  }
   saveStorage() { this.mod._xc_save_storage(); }
   reboot() {
     this.mod._xc_save_storage();
@@ -467,6 +476,14 @@ export class XenonPump {
   bus = new Map<string, number | string>();          // 'io:port' -> last output
   reads = new Map<string, number>();                 // 'io:ch'  -> last input_number READ
   vars = new Map<string, XenonVar>();                // '$name'  -> live global variable
+  // ── debugger (F9 break · F10/F11 step · F8 resume, VS-Code-style keys):
+  // a step is ONE 10 Hz computer cycle (line-granular suspend/resume does
+  // not exist in the library's VM architecture — cycle granularity is what
+  // the interpreter honestly supports); a breakpoint PAUSES AT the cycle
+  // that TOUCHED its line (executed-line tracking, tools/xenoncode).
+  paused = false;
+  pausedAt = 0;                                      // the bp line that paused
+  breakLines = new Set<number>();                    // line numbers of the ACTIVE code tab
   log: XenonEvent[] = [];
   surfaces = new Map<string, XenonSurface>();        // screen key -> latest framebuffer
   private canvases = new Map<string, Set<HTMLCanvasElement>>();
@@ -474,6 +491,7 @@ export class XenonPump {
   private raf = 0;
   private last = 0;
   private openSeq = 0;
+  private stepWanted = 0;
 
   /** Boot comp (closing any other computer's run). Resolves when the VM is
    *  up (status running/error). */
@@ -495,9 +513,14 @@ export class XenonPump {
     this.surfaces = new Map();
     const run = await XenonRun.open(comp);
     if (seq !== this.openSeq) { run.stop(); return; }   // superseded by a newer open
+    this.paused = false; this.pausedAt = 0; this.stepWanted = 0;
     this.run = run;
     if (run.error) { this.status = 'error'; this.error = run.error; }
-    else { this.status = 'running'; for (const c of comp.channels) run.setInput(c.io, c.ch, 0); }
+    else {
+      this.status = 'running';
+      for (const c of comp.channels) run.setInput(c.io, c.ch, 0);
+      run.debugTrack(true);                          // XENON-DEBUG: lines feed the debugger
+    }
     this.notify();
     this.startLoop();
   }
@@ -510,10 +533,24 @@ export class XenonPump {
     this.comp = null;
     this.status = 'idle';
     this.surfaces = new Map();
+    this.paused = false; this.pausedAt = 0; this.stepWanted = 0; this.breakLines = new Set();
     this.notify();
   }
 
   stopRunning() { this.run?.stop(); this.status = 'stopped'; this.notify(); }
+  /** Breakpoint set for the ACTIVE code tab (v1: line numbers match the
+   *  executed-line list, which mixes files — a break line pauses the cycle
+   *  that ran it in ANY included file). */
+  setBreaks(lines: Iterable<number>) { this.breakLines = new Set(lines); this.notify(); }
+  pause() { if (this.status === 'running') { this.paused = true; this.notify(); } }
+  resume() { this.paused = false; this.pausedAt = 0; this.stepWanted = 0; this.notify(); }
+  /** F10/F11: run exactly one more cycle, then pause again. */
+  step() {
+    if (this.status !== 'running' && this.status !== 'stopped') return;
+    this.stepWanted++;
+    this.paused = false;
+    this.startRunning();
+  }
   startRunning() {
     if (!this.run) return;
     this.run.running = true;
@@ -572,6 +609,8 @@ export class XenonPump {
       this.last = t;
       const run = this.run;
       if (!run || !run.running) return;
+      // debugger gate: while PAUSED the pump runs cycles only for a step
+      if (this.paused && this.stepWanted <= 0) return;
       const evs = run.cycle();
       if (evs.length) {
         const prints = evs.filter(e => e.e !== 'cycle');
@@ -589,6 +628,11 @@ export class XenonPump {
         }
       }
       this.cycles++;
+      if (this.stepWanted > 0) { this.stepWanted--; this.paused = true; }
+      if (this.breakLines.size) {
+        for (const l of run.cycleLines())
+          if (this.breakLines.has(l)) { this.paused = true; this.pausedAt = l; break; }
+      }
       const vs = run.vars();
       this.vars = new Map(vs.filter(varVisible).map(v => [v.name, v]));
       if (run.error) {

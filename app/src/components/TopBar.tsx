@@ -49,6 +49,9 @@ interface Props {
   hasScreens?: boolean;
   screensOpen?: boolean;
   onScreens?: () => void;
+  /** File ▸ Autosaves — the shadow-copy list (v1.13.x) */
+  autosaveCount?: number;
+  onAutosaves?: () => void;
   children?: React.ReactNode;              // right side: panel toggle etc.
 }
 
@@ -128,6 +131,9 @@ export default function TopBar(p: Props) {
           <Sep />
           {p.onRefresh && <Item testid="file-refresh" label="Refresh craft (redownload)"
             onClick={() => { close(); p.onRefresh?.(); }} />}
+          <Item testid="file-autosaves"
+            label={`Autosaves…${(p.autosaveCount ?? 0) > 0 ? ` (${p.autosaveCount})` : ''}`}
+            hint="shadow copies" onClick={() => { close(); p.onAutosaves?.(); }} />
           <Item testid="file-close" label="Close → gallery" onClick={() => { close(); p.onClose(); }} />
         </>)}
       </Menu>

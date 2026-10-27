@@ -21,7 +21,7 @@ import { xenonPump, xenonScreenBindings, type XenonComputer } from '../engine/xe
 /** One live surface canvas — registers with the pump (the pump blits), routes
  *  pointer clicks / wheel notches into the VM (computer.md: click entry
  *  point + button "evaluates to true if clicked"). */
-export function ScreenCanvas(p: { surfKey: string; w: number; h: number; testid?: string; maxH?: number }) {
+export function ScreenCanvas(p: { surfKey: string; w: number; h: number; testid?: string; maxH?: number; fill?: boolean }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const cv = ref.current;
@@ -37,7 +37,8 @@ export function ScreenCanvas(p: { surfKey: string; w: number; h: number; testid?
   };
   return <canvas ref={ref} data-testid={p.testid} width={p.w} height={p.h}
     className="rounded-sm border border-[#2b313b] bg-black"
-    style={{ imageRendering: 'pixelated', maxHeight: p.maxH ?? 220, width: 'auto', maxWidth: '100%', cursor: 'pointer' }}
+    style={{ imageRendering: 'pixelated', maxHeight: p.maxH ?? 220,
+             width: p.fill ? '100%' : 'auto', maxWidth: '100%', cursor: 'pointer' }}
     onClick={e => {
       const px = toPixels(e);
       if (px) xenonPump.screenClick(p.surfKey, px.x, px.y);

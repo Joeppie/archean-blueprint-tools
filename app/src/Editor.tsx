@@ -41,6 +41,7 @@ import { lazy, Suspense } from 'react';
 const HelpDialogLazy = lazy(() => import('./components/HelpDialog'));
 const XenonDialogLazy = lazy(() => import('./components/XenonDialog'));
 const ScreensDockLazy = lazy(() => import('./components/ScreensDock'));
+const AutosavesDialogLazy = lazy(() => import('./components/AutosavesDialog'));
 import { blockInfo, blockMirrorTwin, blockTwinIssues, cellIndex, cellOverlap,
   complementBlock, mirrorAxisIdx, paintTwinPair, type MirrorAxisOpt } from './engine/blocks';
 import { cornerOf, triAt, triangleFromCorners, mirroredTriangle, triTwinIndex, type Corner } from './engine/tris';
@@ -48,6 +49,7 @@ import { applyPinEdit, applyPinRotate, applyPinShift, applyTriFlip, applyTriPain
 import type { Blueprint, Triangle } from './engine/format';
 import { isLegacyFile } from './engine/format';
 import { hasDashboards, xenonComputers, xenonPump, type XCFile } from './engine/xenoncode';
+import { autosave, countAutosaves, pruneAfterSave } from './engine/autosave';
 import type { ResolvedColor } from './engine/palette';
 import { docArrayInsert, docArrayRemoveAt, docEnsureArray, docFromValue, docValue, emitDoc, parseDoc } from './engine/doc';
 import { allocateSlot, blockSkinTris, paletteSlotNode, type Rgb255 } from './engine/tools';
@@ -136,6 +138,32 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // dashboard faces all ride ONE running computer).
   const [screensOpen, setScreensOpen] = useState(false);
   const hasScreens = useMemo(() => (bp ? hasDashboards(bp) : false), [bp]);
+  // v1.13.x AUTOSAVE shadow copies ("Forget to save? No problem"): the doc
+  // text is shadowed every ~20 s while dirty + on every save; File ▸
+  // Autosaves lists them per craft with timestamps.
+  const [autosavesOpen, setAutosavesOpen] = useState(false);
+  const [autosaveCount, setAutosaveCount] = useState(0);
+  const autosaveKeyRef = useRef('new');
+  const autosaveLabelRef = useRef('Untitled craft');
+  const autosaveNow = useCallback(() => {
+    const ctx = ctxRef.current;
+    if (!ctx || !dirtyRef.current) return;
+    void autosave(autosaveKeyRef.current, autosaveLabelRef.current, emitDoc(ctx.doc))
+      .then(a => { if (a) void countAutosaves().then(setAutosaveCount); });
+  }, []);
+  useEffect(() => { void countAutosaves().then(setAutosaveCount); }, []);
+  useEffect(() => {
+    if (!dirty) return;
+    const t = setTimeout(autosaveNow, 20_000);      // ~20 s after the last edit
+    return () => clearTimeout(t);
+  }, [dirty, rev, autosaveNow]);
+  useEffect(() => {
+    // the event fires ON document with bubbles:false — a WINDOW listener
+    // never receives it (the shadow silently never ran; the e2e caught it)
+    const h = () => { if (document.visibilityState === 'hidden') autosaveNow(); };
+    document.addEventListener('visibilitychange', h);
+    return () => document.removeEventListener('visibilitychange', h);
+  }, [autosaveNow]);
   useEffect(() => {
     if (!screensOpen) return;
     const comp = xenonPump.comp ?? xenonComps[0];
@@ -391,11 +419,18 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     setPlaceStage(null);
     setBp(ctxRef.current.bp);
   }, [hist]);
+  // LATEST-REF (the v1.5.10 keepView lesson again): the craft-open effect
+  // below must fire on a CRAFT SWAP only — `openText`'s identity churns with
+  // the history state, and listing it in the deps made an autosave RESTORE
+  // re-run the craft open, silently replacing the restored doc with the
+  // cached original.
+  const openTextRef = useRef(openText);
+  openTextRef.current = openText;
 
   useEffect(() => {
     setBp(null);
     setStaleAsk(null);
-    if (!craft) { openText(emitNew()); return; }    // New craft (craft === null)
+    if (!craft) { openTextRef.current(emitNew()); return; }    // New craft (craft === null)
     let dead = false;
     const force = forceRef.current; forceRef.current = false;
     const choice = askChoice.current; askChoice.current = null;
@@ -419,10 +454,10 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       if (dead) return;
       setDl(null);
       if (!r) { setDlErr(true); return; }           // no cache + network failed
-      openText(r.text);                             // cache hit: no overlay, no network
+      openTextRef.current(r.text);                             // cache hit: no overlay, no network
     })().catch(console.error);
     return () => { dead = true; };
-  }, [craft, openText, retrySeq, askSeq]);
+  }, [craft, retrySeq, askSeq]);
 
   const emitNew = () => {
     // doc → text round trip through the SAME doc the editor then keeps
@@ -825,6 +860,11 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
     a.download = as ?? 'blueprint.json'; a.click(); URL.revokeObjectURL(a.href);
     dirtyRef.current = false; setDirty(false);
+    // a save is worth a shadow copy too; after one the older shadows matter
+    // less — keep the newest few (v1.13.x autosave)
+    void autosave(autosaveKeyRef.current, autosaveLabelRef.current, text)
+      .then(() => pruneAfterSave(autosaveKeyRef.current))
+      .then(() => countAutosaves().then(setAutosaveCount));
   }, [flushSnapshot]);
 
   const openFile = useCallback(() => fileRef.current?.click(), []);
@@ -1259,6 +1299,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   );
 
   const name = (bp?.data.alias?.trim()) || (craft ? craftName(craft) : 'Untitled craft');
+  autosaveKeyRef.current = craft ?? `new:${name}`;
+  autosaveLabelRef.current = name;
   // Edit ▾ Undo/Redo enabled state (2026-10-20). histTick is the re-render trigger —
   // the stack itself lives in a ref (commits must never re-render mid-drag).
   void histTick;
@@ -1518,7 +1560,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         xenonComps={xenonComps.length ? xenonComps.map(c => ({ ci: c.ci, alias: c.alias, program: c.program, files: c.files.length })) : undefined}
         onXenon={ci => setXenonCi(ci)}
         hasScreens={hasScreens} screensOpen={screensOpen}
-        onScreens={() => setScreensOpen(o => !o)}>
+        onScreens={() => setScreensOpen(o => !o)}
+        autosaveCount={autosaveCount} onAutosaves={() => setAutosavesOpen(true)}>
         <button data-testid="save-btn" onClick={() => save()}
           className={`ksp-btn shrink-0 px-2.5 py-1 text-[12px] ${dirty ? 'on font-semibold' : 'text-ink-dim'}`}>
           {dirty ? '● Save' : 'Save'}
@@ -1647,6 +1690,20 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
                   </div>
                 </Suspense>
               </div>
+            )}
+            {/* File ▸ Autosaves: the shadow-copy list (v1.13.x) */}
+            {autosavesOpen && (
+              <Suspense fallback={null}>
+                <AutosavesDialogLazy
+                  currentKey={craft ?? `new:${name}`}
+                  onRestore={a => {
+                    if (dirty && !window.confirm(
+                      'Restore an autosave? Unsaved changes in the open craft are lost (download it first with Save).')) return;
+                    setAutosavesOpen(false);
+                    openText(a.text);
+                  }}
+                  onClose={() => setAutosavesOpen(false)} />
+              </Suspense>
             )}
             {/* KSP bottom-left: the STATIC INFO black box (mass & CoM) */}
             {bp && staticInfo && (

@@ -1561,6 +1561,34 @@ topic + FORMAT).
   remaining 100 ms-class load phase, load-only, no interactive path).
   Suite: vitest 737, fast tier 204 runs **2.5→1.8 min** 0-red, @slow 11/11.
 
+- **v1.13.x XENON batch 2: side rail, debugger, autosaves (we: "Screens and
+ vars should be to the side of the tabs, the computer screen should take more
+ size; set breakpoints and move through with f10/f11; the viewer keeps a
+ shadow-copy of the current craft, autosaves show in the file menu with
+ timestamp")**: (a) the IDE's side panel is a VERTICAL RAIL (writing-mode
+ tab buttons) beside a wider panel; screen canvases render `fill` at maxH
+ 340. (b) THE DEBUGGER: `patch_xenon_debug.py` (build.sh applies) records
+ executed lines per cycle behind a flag (RunCode's LINENUMBER case — one
+ branch, off = free) + `xc_cycle_lines()`; the PUMP owns paused/step state —
+ gutter click / F9 toggles a breakpoint (per code tab), the cycle that
+ TOUCHED a line pauses (`xenon-paused` pill, amber line), F10/F11 step ONE
+ 10 Hz computer cycle (true line-stepping is impossible in the library's
+ run-to-completion VM — say so, don't promise IDE parity), F8 resumes; F5-run
+ is intentionally absent (the VM runs continuously; PAUSE/STEP are the
+ meaningful controls). Break lines mix included files' line numbers (v1
+ caveat, documented). (c) AUTOSAVES (`app/src/engine/autosave.ts` +
+ AutosavesDialog + File ▸ file-autosaves): shadow copies of `emitDoc(doc)`
+ (save-quality text) keyed by craft id (`new:<title>` unsaved), IndexedDB
+ `archean-autosaves` + the crafts.ts memory fallback; the Editor shadows on a
+ 20 s dirty-idle timer, on visibilitychange-hidden, and on save (then prunes
+ to 4; cap 12/craft); ordering key (ts, seq) — Date.now() ties within a ms
+ broke the first pin; Restore = window.confirm-then-openText. Pins:
+ autosave.test.ts (4), xenon.spec legs 'the debugger…' (F9 pause at
+ main.xc:17 which runs every cycle, F10 one-cycle step, F8 resume — cycle
+ counts asserted) and 'autosaves…' (disk edit → visibilitychange shadow →
+ reload → restore → the marker rides back into the IDE). Side-note: the
+ dev-server tab must RELOAD after scene.ts fixes (no HMR accept → the old
+ module kept throwing the fixed m.material array crash).
 - **v1.13.x XENON: the editable IDE, the shared pump, live dashboards (we:
  "fix the issue the 3381670618 craft has; make dashboards actually display
  what is given to them; make code editable; make the file dialog able to
