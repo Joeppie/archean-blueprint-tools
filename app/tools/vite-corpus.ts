@@ -307,12 +307,20 @@ function handler(req: IncomingMessage, res: ServerResponse, next: () => void) {
     }
     // /testdata/<id>/<file>: the STATIC Pages layout served in dev/preview
     // too, so the catalog's '../testdata/…' preview + blueprint routes hit
-    // the same files in every environment
+    // the same files in every environment. THE BLUEPRINT ITSELF resolves
+    // through craftFile()'s corpus-first floor (the v1.9.4 ONE-FILE rule:
+    // catalog stamp, headers and served bytes must describe the SAME file —
+    // v1.12.2: with the download routes reordered layout-exact-first, a
+    // literal repo-testdata read on a machine-corpus box served repo bytes
+    // under catalog corpus stamps ⇒ instant 'stale' dialog + SHA mismatch).
     if (url.startsWith('/testdata/')) {
       const mt = /^\/testdata\/(\d{6,})\/(.+)$/.exec(url);
-      const root0 = mt ? path.join(REPO, 'testdata', mt[1]!) : '';
-      const f = mt && root0 ? path.resolve(root0, mt[2]!) : '';
-      if (!f || !root0 || !f.startsWith(root0 + path.sep) || !fs.existsSync(f)) {
+      const f = mt ? (mt[2] === 'blueprint.json'
+        ? craftFile(mt[1]!, 'blueprint.json')
+        : path.resolve(path.join(REPO, 'testdata', mt[1]!), mt[2]!)) : '';
+      const root0 = mt && mt[2] !== 'blueprint.json'
+        ? path.join(REPO, 'testdata', mt[1]!) : '';
+      if (!f || !fs.existsSync(f) || (root0 && !f.startsWith(root0 + path.sep))) {
         res.statusCode = 404; res.end('not found'); return;
       }
       sendFile(req, res, f, f.endsWith('.json') ? 'application/json'

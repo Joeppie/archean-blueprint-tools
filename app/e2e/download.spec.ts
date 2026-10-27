@@ -11,7 +11,9 @@ const DOLPHIN = '3417786605';
 
 const bpReqCounter = (page: Page, id: string) => {
   const hits: string[] = [];
-  page.on('request', r => { if (r.url().includes(`/corpus/${id}/blueprint.json`)) hits.push(r.url()); });
+  // v1.12.2: count EVERY candidate route (the list is layout-exact-first
+  // now: testdata/ leads, /corpus/ last) — the law is ONE request per open.
+  page.on('request', r => { if (r.url().includes(`${id}/blueprint.json`)) hits.push(r.url()); });
   return hits;
 };
 
@@ -39,7 +41,7 @@ test('download once: first open fetches, reload + gallery reopen are pure cache'
 
 test('progress overlay streams while a slow blueprint downloads', async ({ page }) => {
   // hold the response a beat so the overlay is unambiguously observable
-  await page.route(`**/corpus/${DOLPHIN}/blueprint.json`, async route => {
+  await page.route(`**/${DOLPHIN}/blueprint.json`, async route => {
     const res = await route.fetch();
     const body = await res.text();
     await new Promise(r => setTimeout(r, 1200));

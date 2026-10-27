@@ -315,15 +315,20 @@ export function loadCraft(id: string, onProgress: ProgressFn,
       if (hit) return { text: hit.text, fromCache: true, bytes: hit.bytes ?? hit.text.length };  // no progress: nothing downloads
     }
     notify(null, 0);                                         // download STARTED: overlay appears
-    // candidate routes: /corpus/ = the dev/preview plugin server (tools/
-    // vite-corpus.ts); testdata/ = the STATIC GitHub Pages layout where the
-    // app IS the site root (tools/deploy_pages.py ships dist at the repo
-    // root); ../testdata/ = the same site served one level deeper (/app/).
-    // First hit wins.
+    // candidate routes, LAYOUT-EXACT-FIRST (the v1.5.6 atlas lesson, applied
+    // to the blueprint route in v1.12.2 — the live Pages audit caught a
+    // guaranteed 404 per fresh craft: /corpus/ leads, Pages 404s it, then
+    // the static route hits): testdata/ = the STATIC GitHub Pages layout
+    // where the app IS the site root (tools/deploy_pages.py ships dist at
+    // the repo root) and the dev/preview server serves the same page-
+    // relative /testdata route through the corpus plugin (X-Blueprint-Sha
+    // rides there too); ../testdata/ = the same site served one level
+    // deeper (/app/); /corpus/ = the dev/preview alias, kept LAST as the
+    // machine-local fallback. First hit wins.
     let text: string | null = null;
     const got = { hdr: null as Headers | null };   // holder: closure-assigned
-    for (const url of [`/corpus/${id}/blueprint.json`, `testdata/${id}/blueprint.json`,
-                       `../testdata/${id}/blueprint.json`]) {
+    for (const url of [`testdata/${id}/blueprint.json`, `../testdata/${id}/blueprint.json`,
+                       `/corpus/${id}/blueprint.json`]) {
       got.hdr = null;
       text = await fetchProgress(url, notify, fetchImpl, h => { got.hdr = h; });
       if (text != null) break;
