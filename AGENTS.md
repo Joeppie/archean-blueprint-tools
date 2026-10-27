@@ -1555,6 +1555,38 @@ topic + FORMAT).
   remaining 100 ms-class load phase, load-only, no interactive path).
   Suite: vitest 737, fast tier 204 runs **2.5→1.8 min** 0-red, @slow 11/11.
 
+- **v1.12.7 THE DRAW-ONLY SKIN STITCH (we: "when I convert stratalaunch to
+  triangles as a whole, my framerate goes down the drain — do we have the
+  bake for triangles that blocks have?")**: the bake (one merged mesh per
+  colour) always covered skins — the drain is GEOMETRY VOLUME: hullify
+  emits per-cell records and every record renders as a closed 8-face prism
+  with coincident seam walls (measured corpus: rendered tris blow up
+  15-116×), where blocks enjoy cull.ts's interior cut + rectangle stitch.
+  The fix is DISPLAY-ONLY (`hull.ts stitchHullSkin`, build.ts's seam):
+  welded coplanar cell-skin pairs (hullify's cellQuad pairs AND emitPoly's
+  N×M quad pairs — axis-aligned plane, all five colour slots equal,
+  axis-aligned right triangles) merge into MAXIMAL-RECTANGLE prisms; the
+  seams that vanish are exactly the zero-volume coincident pairs (and cap
+  diagonals); PATCH-BORDER/rim walls are kept verbatim (the v1.5.10 rim-cull
+  ban untouched — this removes no boundary rim). Everything ineligible
+  (per-face paint, slants, lone half-squares, authored big triangles —
+  ISW, the game's corner fixture, balloonfin strips, latsphere skins)
+  falls through to the verbatim prism: small authored corpus skins render
+  BYTE-IDENTICALLY (pinned). The FILE, the pick law (tris.triAt reads the
+  RECORDS, the hit point off a merged cap projects the same), pin/selection
+  visuals and the wire overlay are untouched. Engine session A/B seam
+  `setSkinStitch(on)` (audit `app/tools/hullifypair.mjs`). Measured:
+  hullified airliner faces 425 864 → 92 636 (4.6×), corpus 3.4×; LIVE
+  iGPU hover raycast 16.4 → 4.3 ms, frame 26.4 → 22.9 ms (airliner).
+  Deferred by our ruling (measured, not taste): the FrontSide split for
+  closed prisms, and the writer-side stitch (shrinks the file + in-game
+  cost, changes rim layout → in-game pixels must arbitrate).
+  Pins `__tests__/stitch.test.ts` (12: law/coverage/outward-winding/
+  determinism/corpus-identity; the coverage sweep keys on STRICT caps
+  |n|>0.999 — the 0.999 vs 0.9 lesson: a shallow 1:3 slope's prism wall
+  normal scores 0.949 on an axis, exactly the interior seam the stitch
+  must remove).
+
 - **v1.11.6 A SUBGRID OF A SUBGRID RENDERS (we: "there are wheels that do
   not seem to render where the front wheels of the doritos craft should
   be, is this because they are a subgrid of a subgrid (of a subgrid?)" —

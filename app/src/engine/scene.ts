@@ -47,6 +47,7 @@ import { buildPipes, checkLeads, pipeAt, runFlowDir, surgePaths, type PipeNetwor
 import { portRole } from './wiremodel';
 import { pipeLabel } from './wireops';
 import { buildCompProxies, buildSolids, type ProxyBox, type SolidBatch } from './build';
+import { setSkinStitch, skinStitchState } from './hull';
 import { xrayPlanPure, type XrayCam, type XrayMesh } from './xray';
 import { hullVertex } from './hullfit';
 import type { FilePalette } from './palette';
@@ -4933,6 +4934,12 @@ void main() {
   /** re-run the whole load with the CURRENT bp (block/wire edits mutate bp
    *  outside the engine; the merged geometry is rebuilt wholesale) */
   reload() { if (this.bp) this.load(this.bp, this.atlasRef, true); }
+
+  /** v1.12.7 skin-stitch A/B (audit app/tools/hullifypair.mjs): false = the
+   *  pre-stitch verbatim prisms; the FILE and picking are untouched either
+   *  way — this gauges frame cost only. */
+  setSkinStitch(on: boolean) { setSkinStitch(on); this.reload(); }
+  skinStitchState() { return skinStitchState(); }
 
   /** Edit workspace: raycast for the placement/select cell. The hit face's
    *  WORLD normal (view frame == raw file frame since the v0.180 de-mirror;

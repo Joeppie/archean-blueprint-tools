@@ -208,6 +208,41 @@ pays ~110 ms of real JS per boot.
 e2e wall: fast tier **2.5 → 1.8 min** (204 runs, 4 workers, preview+iGPU) —
 backdrop-skip fixture + boot costs; @slow 11/11.
 
+## v1.12.7 DRAW-ONLY SKIN STITCH (the hullify FPS drain)
+
+The drain measured (app `hullifyApply` → rendered triangles, corpus):
+the airliner 14 847 → 425 864 (**28.7×**), 3334698274 15 998-equivalent
+95 680, the truck 4 232 → 63 952 (15×) — every stored record is a closed
+0.05 m prism (8 faces), per-cell, with no cull/stitch pass — blocks get
+their economy from cull.ts's interior-wall cut + rectangle stitch.
+
+Fix (app/src/engine/hull.ts `stitchHullSkin`, DISPLAY only — the file, the
+pick law (tris.triAt reads records) and pins/highlights are untouched):
+welded coplanar cell-skin pairs merge into maximal rectangle prisms; only
+provably coincident interior seams vanish; authored/odd faces fall through
+verbatim (ISW/small authored skins render byte-identically — pinned).
+
+Rendered-face counts after the stitch (vitest sweep, hullified corpus):
+airliner 425 864 → 92 636 (**4.6×** fewer faces), 3334698274 95 680 →
+34 580, corpus total 577 640 → 169 544 (**3.4×**); the per-craft floor is
+0.75 (a 1-cell face is 16 → 12 faces, no interior seam to remove).
+
+LIVE gauge (`node app/tools/hullifypair.mjs`, iGPU-pinned ANGLE, 1280×720,
+stitch ON vs the Engine session A/B `setSkinStitch(false)`):
+
+| craft | frame OFF → ON | hover raycast OFF → ON |
+|---|---|---|
+| airliner 3309955432 | 26.44 → 22.89 ms (1.2×) | 16.40 → 4.30 ms (**3.8×**) |
+| 3334698274 | 6.88 → 5.88 ms (1.2×) | 3.90 → 1.40 ms (**2.8×**) |
+
+Draw calls are unchanged (the bake — one merged mesh per colour — already
+covered skins; the drain was geometry volume). The pointer hot path
+(coordHoverMove → pickCell raycast over the merged skin) is where the win
+lands first, and the frame win scales with the skin's share of the scene.
+Not shipped (documented options): the FrontSide split for closed prisms
+and the writer-side stitch (file shrinks, rim layout changes — in-game
+pixels must arbitrate; the v1.5.10 rim-cull ban stands for boundary rims).
+
 ## Tooling
 
 - `?perf` (live browser): title shows `fps draw flowms buildms loadms tris geo`

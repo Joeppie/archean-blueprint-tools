@@ -13,7 +13,7 @@ import { getBlockFaceDirections } from './blockshapes';
 import type { Block, Blueprint, Vec3D } from './format';
 import { CELL, isLegacyFile, worldCoord } from './format';
 import { culledBlocksSolids } from './cull';
-import { buildHullSkin } from './hull';
+import { stitchHullSkin } from './hull';
 import { resolveColor, type FilePalette, type ResolvedColor } from './palette';
 
 export interface GeomBucket {
@@ -105,7 +105,11 @@ export function buildSolids(bp: Blueprint): SolidBatch {
 
   // hull triangle skin: the game's closed 0.05 m prisms — colours[0] front,
   // [1] back, [2..4] side walls (hull.ts carries the exact winding).
-  const skin = buildHullSkin(bp.data.triangles ?? []);
+  // v1.12.7 DRAW-ONLY STITCH: welded coplanar cell skins (the hullify
+  // output) merge into rectangle prisms for the DISPLAY; the file and the
+  // per-record pick/select/pin geometry (tris.triAt reads the RECORDS) are
+  // untouched, and authored/odd faces fall through verbatim.
+  const skin = stitchHullSkin(bp.data.triangles ?? []);
   const tri3 = (b: GeomBucket, A: readonly number[], C: readonly number[], E: readonly number[]) => {
     const nrm = faceNormal(A as number[], C as number[], E as number[]);
     const base = b.positions.length / 3;
