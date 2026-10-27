@@ -1561,6 +1561,53 @@ topic + FORMAT).
   remaining 100 ms-class load phase, load-only, no interactive path).
   Suite: vitest 737, fast tier 204 runs **2.5→1.8 min** 0-red, @slow 11/11.
 
+- **v1.13.x XENON: the editable IDE, the shared pump, live dashboards (we:
+ "fix the issue the 3381670618 craft has; make dashboards actually display
+ what is given to them; make code editable; make the file dialog able to
+ open/save the files on the virtual disk; screens button on top → bottom tab
+ with normal + virtual tabs; nodes show the actual values read from their
+ components; a variables side-tab that breaks KV open, searchable; $var
+ hover shows the current value, old value above it fading out")**:
+ (1) THE CRAFT ISSUE was OUR shim, not the craft: `button_rect` was declared
+ VOID, and the program writes `if $screen.button_rect(...)` — the game's docs
+ (computer.md:143, dashboard.md:84) say it EVALUATES TRUE IF CLICKED. Shim
+ now: button_rect/button return the click (per-surface click state, cleared
+ per cycle), legacy `button(x,y,color,w,h)` colour-3rd order, `pixel(x,y)` is
+ a GETTER, click/scroll entry points run per-screen (ref = the surface Var —
+ EntryPointMatches keys on the object address) + plain. The screens registry
+ keys surfaces by the program's LITERAL token (`screen(10,0)` → `10#0`) — the
+ app registers the io-number key at the Dashboard element's pixel size
+ (size+1) AND the alias key (xenonScreens XCScreen {alias=key,label,ci}).
+ (2) THE SHARED PUMP: `xenonPump` (engine/xenoncode.ts) owns the ONE wasm VM
+ + the 10 Hz loop; the IDE dialog, the ▣ Screens bottom dock (TopBar button,
+ visible only when hasDashboards) and the 3-D feeds all subscribe/register
+ canvases — no second pump per dialog. (3) DASHBOARDS RENDER WHAT THEY ARE
+ GIVEN: scene buildDashboard gives bound Screen/HdScreen faces a DataTexture
+ (`Engine.setScreenFeeds({key,ci,channel})` rebuilds those Dashboards,
+ `pushScreen` blits rows flipped, 10 Hz from the pump's subscription in
+ Editor). (4) THE IDE EDITS THE VIRTUAL DISK: files are the blueprint's
+ `data.hdd.xc_files` — edit (full-file textarea; the read view is
+ VIRTUALIZED, the 1500-line cap is GONE, `data-lines` pinned), File dialog
+ creates (.xc / .main.xc) and deletes, CTRL+S save ⇒ writeback through
+ edit.ts setXcFileCode/insertXcFile/removeXcFile (bp+doc, v1.6.1) ⇒
+ AUTO-REBOOT the VM (the game's rule). (5) NODE LIVE VALUES: the shim reports
+ every input_number read per cycle (`{"e":"in"}`); the #NODES graph is DOM
+ cards now (SVG wires) — InputNode cards show `= the value read from the
+ component`, OutputNode the bus value per port. (6) THE COMPUTER SIDE PANEL:
+ Vars | Screens | Bus | Console tabs with search (names/values incl. KV
+ children; screen names); Vars reads the XENON-VARS patch
+ (tools/xenoncode/patch_xenon_vars.py — compiler records global decls,
+ `Computer::DumpVarsJson` = RAM live + storageCache; CODE_TYPE 50/51 storage,
+ 70/71 RAM, ≥128 objects, 40/41 constants filtered, `.`/`@` artifacts
+ filtered); KV text values (`.on{1}.red{255}`) break open
+ (`parseKv`); `$var` tokens in the code show a hover tooltip with the CURRENT
+ value and the OLD value fades out above it (`.var-fade`). Pins:
+ `xcfiles.test.ts` (doc-mirror disk writes, key order, entry-name mapping,
+ craft 3381670618 extraction, KV/kind), e2e xenon.spec (node live values,
+ the 3381670618 leg — boots + 146×66 element surface + disp-button click
+ flips $var + hover, the ▣ dock dashboards/virtual tabs on the Badger,
+ Badger windowed 16k view + Vars tab). Re-pin: xenonScreens alias = the
+ program's token (was the label). Version strings v1.13.1.
 - **v1.12.12 XENON ON THE BADGER — hook + iterate (we: "Hook it to Chip's
   Badger, iterate over issues that it encounters and try to fix them as they
   crop up, also try to load in the virtual screens, and read components. Also

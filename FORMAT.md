@@ -615,6 +615,54 @@ unchanged.
   see NOTICE §6), Beacon holds frequency + last transmitted payload, PilotSeat holds
   `{emitPlayerToken, smoothControls}`, HudController holds HUD `.xc` source.
 
+### The Xenon virtual disk + device-shim laws (transcribed 2026-10-27,
+game wiki `Archean-game/wiki/en/xenoncode/{computer,dashboard,ide}.md`,
+implementation `tools/xenoncode/xc_host.cpp` + `app/src/engine/xenoncode.ts`)
+
+- `data.hdd = {capacity, label, xc_files:[{name, plain_code}]}` is the
+  computer's **virtual disk** — the IDE edits these files IN the blueprint
+  (key order `{name, plain_code}`; app/ edit.ts `setXcFileCode` /
+  `insertXcFile` / `removeXcFile` mirror bp + doc, v1.6.1 rule; the game
+  auto-reboots the computer on save — ide.md "Running the code" — our
+  writeback re-boots the WASM VM the same way). A file named exactly
+  `main.xc` is the BIOS-like entry (runs first, `include`s the programs;
+  craft 3381670618 ships `main.xc` + `Cede.main.xc` + `screen.xc`); the
+  MiniComputer runs the FIRST program on the disk; programs end `.main.xc`
+  and their `#NODES` graph header lives in the FIRST LINE comment.
+- **Entry-file selection** (`xenonComputers`): `<program>.main.xc` →
+  literal `main.xc` → any `*.main.xc` → first file; `xcDiskFiles()` maps the
+  run-side `main.xc` back to the disk's true name for writeback.
+- **Screen surfaces** are keyed by the LITERAL token the program passes to
+  `screen(aliasOrIoNumber, channel)` (lowercased): `screen(10,0)` keys
+  `10#0` — the app registers the io NUMBER key (sized from the Dashboard's
+  Screen/HdScreen element, pixels = size+1) AND the alias key; a number
+  resolves through the computer's `data_port.NN` cables. `virtualscreen(w,h)`
+  keys `virtual#N`. The 3-D dashboards display what is given to them: the
+  pump's 10 Hz tick pushes each surface's RGBA framebuffer onto the bound
+  element's face (`Engine.setScreenFeeds` + `pushScreen`, DataTexture).
+- **Buttons** (computer.md:143, dashboard.md:84): `button_rect(x,y,w,h,color)`
+  draws AND **evaluates true if clicked** (a void declaration was craft
+  3381670618's compile error — `if $screen.button_rect(...)` needs the
+  return); legacy `button(x,y,color,w,h)` + `draw(x,y,color,w,h)` carry the
+  COLOUR 3rd. `pixel(x,y)` is a GETTER (the current packed colour), drawing
+  is `draw_point`. A host click is visible to the buttons and the
+  `clicked`/`click_x`/`click_y` built-ins for ONE cycle, then the
+  `click`/`click_hold`/`scroll` entry points run (per-screen with the
+  surface as ref = `click.$screen`, plain for the integrated `main#0`).
+- **Variables** are introspectable via `tools/xenoncode/patch_xenon_vars.py`
+  (documented patch on the pinned upstream): the compiler's global-scope
+  declarations (name, CODE_TYPE, slot) are recorded, `Computer::DumpVarsJson`
+  reads RAM live + the STORAGE rows from the storage cache (names in
+  `assembly.storageRefs`; values are STRINGS, `atof`-parsed by the VM).
+  CODE_TYPE: 50/51 storage, 70/71 RAM, 60/61+80/81 arrays, 128+ objects
+  (screen handles), 40/41 ROM constants; names containing `.` (e.g.
+  `disp.init` = a function) and `@` are compiler artifacts, hidden. Text
+  values in the language's KV serialization (`.on{1}.red{255}`, README:421 —
+  the `device()` records use the same shape) break open in the Vars panel.
+- **input_number reads** are reported per cycle as `{"e":"in","io":N,
+  "port":C,"v":V}` events — the IDE's io-addressed node cards show the value
+  the program ACTUALLY read from its component.
+
 ## Mass & build cost — the game's server/editor rules (transcribed 2026-10-19,
 verified vs the installed build 136 + the dev viewer panels; implementation
 `tools/game_data.py`, cross-check harness MATRIX.md)

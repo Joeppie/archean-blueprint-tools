@@ -23,7 +23,8 @@ git -C "$UP" checkout --quiet --detach "$PIN"
 # its first settings read). strtoll/ststrtoul return 0 for junk — the game's
 # observable behaviour.
 sed -i 's/return stoll(textValue);/return textValue.empty() ? 0 : strtoll(textValue.c_str(), nullptr, 10);/; s/return stoull(textValue);/return textValue.empty() ? 0 : strtoull(textValue.c_str(), nullptr, 10);/; s/return stoul(textValue);/return textValue.empty() ? 0 : (unsigned long)strtoull(textValue.c_str(), nullptr, 10);/g' "$UP/XenonCode.hpp"
-echo "upstream: $(git -C "$UP" rev-parse HEAD) (pinned $PIN, +lenient-numeric patch)"
+python3 patch_xenon_vars.py "$UP/XenonCode.hpp"   # XENON-VARS introspection (see the script)
+echo "upstream: $(git -C "$UP" rev-parse HEAD) (pinned $PIN, +lenient-numeric, +XENON-VARS)"
 
 mkdir -p run
 

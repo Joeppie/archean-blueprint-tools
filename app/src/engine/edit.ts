@@ -323,3 +323,51 @@ export function setCompColor(ctx: EditCtx, ci: number, which: 'color1' | 'color2
   ent[field] = v;
   return docSetNumber(ctx.doc, ['data', 'components', ci, 'colors', which, field], v);
 }
+
+// ------------------------------------------------- Xenon virtual disk (xc_files)
+// The v1.13.x Xenon IDE edits the files BAKED INTO THE CRAFT: components[ci]
+// .data.hdd.xc_files = [{name, plain_code}] (format.ts notes + the corpus).
+// Every write mirrors bp AND doc (the v1.6.1 class rule: the doc is the save
+// AND the undo history — a bp-only edit reads back as "the file dialog lied").
+
+export interface XcFileEntry { name: string; plain_code?: string; [k: string]: unknown }
+
+function xcFilesOf(bp: Blueprint, ci: number): XcFileEntry[] | null {
+  const d = bp.data.components[ci]?.data as Record<string, any> | undefined;
+  return (d?.hdd?.xc_files as XcFileEntry[] | undefined) ?? null;
+}
+
+/** Replace one disk file's SOURCE (plain_code). `fi` = the index inside the
+ *  file's xc_files array (NOT the IDE tab order — map through xcDiskFiles). */
+export function setXcFileCode(ctx: EditCtx, ci: number, fi: number, code: string): boolean {
+  const xf = xcFilesOf(ctx.bp, ci);
+  const ent = xf?.[fi];
+  if (!ent) return false;
+  ent.plain_code = code;
+  return docSet(ctx.doc, ['data', 'components', ci, 'data', 'hdd', 'xc_files', fi, 'plain_code'], code);
+}
+
+/** Add a file to the virtual disk (the IDE's File ▸ New — CTRL+N). Appends
+ *  {name, plain_code} in the game's key order; doc-guaranteed like every
+ *  generated record (v1.6.1: a file that never carried hdd gets its arrays). */
+export function insertXcFile(ctx: EditCtx, ci: number, name: string, code: string): boolean {
+  const comp = ctx.bp.data.components[ci] as Record<string, any> | undefined;
+  if (!comp) return false;
+  comp.data = comp.data ?? {};
+  comp.data.hdd = comp.data.hdd ?? { capacity: 0, label: '', xc_files: [] };
+  const xf: XcFileEntry[] = (comp.data.hdd.xc_files = comp.data.hdd.xc_files ?? []);
+  const path = ['data', 'components', ci, 'data', 'hdd', 'xc_files'];
+  docEnsureArray(ctx.doc, path);
+  const at = xf.length;
+  xf.push({ name, plain_code: code });
+  docArrayInsert(ctx.doc, path, at, docFromValue({ name, plain_code: code }));
+  return true;
+}
+
+/** Remove a file from the virtual disk (index in the file's xc_files). */
+export function removeXcFile(ctx: EditCtx, ci: number, fi: number): boolean {
+  const xf = xcFilesOf(ctx.bp, ci);
+  if (!xf?.[fi]) return false;
+  xf.splice(fi, 1);
+  return docArrayRemoveAt(ctx.doc, ['data', 'components', ci, 'data', 'hdd', 'xc_files'], fi);
+}

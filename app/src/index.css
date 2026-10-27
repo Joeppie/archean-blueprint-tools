@@ -85,3 +85,11 @@ body { background: #14160f; color: var(--color-ink); font: 13px/1.45 'Arial Narr
 .manual table.md-table tbody tr:nth-child(odd) { background: rgba(255,255,255,.025); }
 .manual table.md-table .al-center { text-align: center; }
 .manual table.md-table .al-right  { text-align: right; }
+
+/* Xenon IDE: the $var hover's OLD value fades out above the current one
+   (v1.13.x: "if it changes, the old value should show above it and fade out") */
+@keyframes xen-varfade {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(-6px); }
+}
+.var-fade { animation: xen-varfade 1.6s ease-out forwards; }

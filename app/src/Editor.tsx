@@ -40,19 +40,21 @@ import type { PlacePayload, ToolForm } from './components/ToolsDialog';
 import { lazy, Suspense } from 'react';
 const HelpDialogLazy = lazy(() => import('./components/HelpDialog'));
 const XenonDialogLazy = lazy(() => import('./components/XenonDialog'));
+const ScreensDockLazy = lazy(() => import('./components/ScreensDock'));
 import { blockInfo, blockMirrorTwin, blockTwinIssues, cellIndex, cellOverlap,
   complementBlock, mirrorAxisIdx, paintTwinPair, type MirrorAxisOpt } from './engine/blocks';
 import { cornerOf, triAt, triangleFromCorners, mirroredTriangle, triTwinIndex, type Corner } from './engine/tris';
 import { applyPinEdit, applyPinRotate, applyPinShift, applyTriFlip, applyTriPaint } from './engine/pinedit';
 import type { Blueprint, Triangle } from './engine/format';
 import { isLegacyFile } from './engine/format';
-import { xenonComputers } from './engine/xenoncode';
+import { hasDashboards, xenonComputers, xenonPump, type XCFile } from './engine/xenoncode';
 import type { ResolvedColor } from './engine/palette';
 import { docArrayInsert, docArrayRemoveAt, docEnsureArray, docFromValue, docValue, emitDoc, parseDoc } from './engine/doc';
 import { allocateSlot, blockSkinTris, paletteSlotNode, type Rgb255 } from './engine/tools';
 import { setPaletteSlot } from './engine/edit';
-import { appendTrianglesDoc, makeCtx, openFunnel, resetComponent, setDataField, setOrientation, setPos, setCompField,
-  pruneCompRefs, setCompColor, serializeSave, writeBlockDoc, type EditCtx } from './engine/edit';
+import { appendTrianglesDoc, insertXcFile, makeCtx, openFunnel, removeXcFile, resetComponent, setDataField,
+  setOrientation, setPos, setCompField, pruneCompRefs, setCompColor, setXcFileCode, serializeSave,
+  writeBlockDoc, type EditCtx } from './engine/edit';
 import { makePipe } from './engine/wireops';
 import { normalizeDoc } from './engine/normalize';
 import { qAxisAngle } from './engine/compparts';
@@ -129,6 +131,33 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     () => (bp ? xenonComputers(bp) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [bp]);
+  // ▣ SCREENS bottom tab (v1.13.x): the dashboards' live rasters, normal +
+  // virtual surfaces, on the SHARED pump (the IDE, the dock and the 3-D
+  // dashboard faces all ride ONE running computer).
+  const [screensOpen, setScreensOpen] = useState(false);
+  const hasScreens = useMemo(() => (bp ? hasDashboards(bp) : false), [bp]);
+  useEffect(() => {
+    if (!screensOpen) return;
+    const comp = xenonPump.comp ?? xenonComps[0];
+    if (!comp) return;
+    void xenonPump.open(comp);
+    engineRef.current?.setScreenFeeds(comp.screens
+      .filter(s => s.ci != null)
+      .map(s => ({ key: `${s.alias.toLowerCase()}#${s.channel}`, ci: s.ci!, channel: s.channel })));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screensOpen, xenonComps.length]);
+  // The pump owns the single WASM VM: release it when the IDE and the
+  // Screens tab are BOTH closed (a craft swap then boots clean).
+  useEffect(() => {
+    if (xenonCi === null && !screensOpen) xenonPump.close();
+  }, [xenonCi, screensOpen]);
+  // THE 3-D LAW: the pump's 10 Hz tick pushes each surface's framebuffer
+  // onto its dashboard face ("dashboards display what is given to them").
+  useEffect(() => xenonPump.subscribe(() => {
+    const eng = engineRef.current;
+    if (!eng || xenonPump.status !== 'running') return;
+    for (const [key, s] of xenonPump.surfaces) eng.pushScreen(key, s.w, s.h, s.pixels);
+  }), []);
   useEffect(() => {
     let dead = false;
     import('./components/ToolsDialog').then(m => {
@@ -414,6 +443,28 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     if (reloadTimer.current) clearTimeout(reloadTimer.current);
     reloadTimer.current = setTimeout(() => engineRef.current?.reload(), 180);
   }, [markDirty, bumpRev, snapshotSoon]);
+  /** The IDE's virtual-disk writeback: files live IN the blueprint
+   *  (data.hdd.xc_files), so edits go through bp + doc (v1.6.1 rule — the
+   *  doc is the save AND the history), and the computer auto-reboots on
+   *  save, the game's rule (ide.md "Running the code"). */
+  const xenonFiles = useCallback((ci: number, files: XCFile[]) => {
+    const ctx = ctxRef.current;
+    if (!ctx) return;
+    const list = () => (((ctx.bp.data.components[ci] as any)?.data?.hdd?.xc_files
+      ?? []) as { name: string; plain_code?: string }[]);
+    const want = new Map(files.map(f => [f.name, f.code]));
+    for (let i = list().length - 1; i >= 0; i--)
+      if (!want.has(list()[i]!.name)) removeXcFile(ctx, ci, i);
+    for (const f of files) {
+      const i = list().findIndex(e => e.name === f.name);
+      if (i >= 0) setXcFileCode(ctx, ci, i, f.code);
+      else insertXcFile(ctx, ci, f.name, f.code);
+    }
+    markDirty(); bumpRev();
+    const next = xenonComputers(ctx.bp).find(c => c.ci === ci);
+    if (next) xenonPump.reload(next);          // game rule: save ⇒ reboot
+  }, [markDirty, bumpRev]);
+
 
   // v1.8.1 CABLES FOLLOW THE PART: data.pipes is the game's cached route, so
   // a moved part leaves the recorded tips behind. The engine re-anchors the
@@ -1465,7 +1516,9 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         onTool={id => setToolOpen(id)}
         onHelp={() => setHelpOpen(true)}
         xenonComps={xenonComps.length ? xenonComps.map(c => ({ ci: c.ci, alias: c.alias, program: c.program, files: c.files.length })) : undefined}
-        onXenon={ci => setXenonCi(ci)}>
+        onXenon={ci => setXenonCi(ci)}
+        hasScreens={hasScreens} screensOpen={screensOpen}
+        onScreens={() => setScreensOpen(o => !o)}>
         <button data-testid="save-btn" onClick={() => save()}
           className={`ksp-btn shrink-0 px-2.5 py-1 text-[12px] ${dirty ? 'on font-semibold' : 'text-ink-dim'}`}>
           {dirty ? '● Save' : 'Save'}
@@ -1578,10 +1631,23 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
               const comp = xenonComps.find(c => c.ci === xenonCi);
               return comp ? (
                 <Suspense fallback={null}>
-                  <XenonDialogLazy comp={comp} onClose={() => setXenonCi(null)} />
+                  <XenonDialogLazy comp={comp} engine={engine}
+                    onClose={() => setXenonCi(null)} onFiles={xenonFiles} />
                 </Suspense>
               ) : null;
             })()}
+            {/* ▣ SCREENS bottom tab (v1.13.x): live dashboards + virtual
+                surfaces of the running computer (top-bar ▣ button) */}
+            {screensOpen && (
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[15] flex justify-center">
+                <Suspense fallback={null}>
+                  <div className="pointer-events-auto w-[min(1100px,96%)]">
+                    <ScreensDockLazy comp={xenonPump.comp ?? xenonComps[0] ?? null}
+                      onClose={() => setScreensOpen(false)} />
+                  </div>
+                </Suspense>
+              </div>
+            )}
             {/* KSP bottom-left: the STATIC INFO black box (mass & CoM) */}
             {bp && staticInfo && (
               <div className="absolute bottom-2 left-3 z-[5]">

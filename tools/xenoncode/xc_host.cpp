@@ -30,8 +30,39 @@ using XenonCode::Var;
 struct ScreenSlot {
 	std::string key;                        // lowercased alias#channel
 	std::unique_ptr<XenonScreen> scr;
+	// this cycle's input (wiki computer.md/dashboard.md): a click delivered
+	// by the host (xc_screen_click) is visible to button_rect/button and the
+	// clicked/click_x/click_y values DURING the cycle, then cleared.
+	bool clicked = false; int clickX = 0, clickY = 0;
+	double scroll = 0.0;
 };
 static std::vector<ScreenSlot> g_screens;
+static std::map<XenonScreen*, size_t> g_slotByPtr;  // object -> slot INDEX
+                                                  // (the vector reallocates —
+                                                  // pointers into it dangle)
+// the computer-integrated-screen click the built-in values read (the last
+// slot clicked this cycle — a Computer has ONE screen, MiniComputers route
+// their dashboards' clicks through the same shape)
+static bool g_anyClicked = false;
+static int g_anyClickX = 0, g_anyClickY = 0;
+static double g_anyScroll = 0.0;
+// input_number/input_text reads this cycle (the IDE's node cards show the
+// values a program ACTUALLY read: drained as {"e":"in"} events per cycle)
+static std::map<std::pair<int, int>, double> g_reads;
+
+static inline ScreenSlot* slotOf(const Var& obj);
+static inline bool xc_buttonHit(ScreenSlot* s, int x, int y, int w, int h) {
+	if (!s || !s->clicked) return false;
+	int xa = std::min(x, x + w), xb = std::max(x, x + w);
+	int ya = std::min(y, y + h), yb = std::max(y, y + h);
+	return s->clickX >= xa && s->clickX < xb && s->clickY >= ya && s->clickY < yb;
+}
+static void xc_clickAt(size_t idx, int x, int y) {
+	if (idx >= g_screens.size()) return;
+	auto& s = g_screens[idx];
+	s.clicked = true; s.clickX = x; s.clickY = y;
+	g_anyClicked = true; g_anyClickX = x; g_anyClickY = y;
+}
 
 static std::string xc_lower(std::string s) {
 	for (auto& c : s) c = (char)tolower((unsigned char)c);
@@ -49,11 +80,21 @@ static int xc_addScreen(const std::string& alias, int ch, uint32_t w, uint32_t h
 	g_screens.push_back({ xc_lower(alias) + "#" + std::to_string(ch),
 		std::make_unique<XenonScreen>(w, h, XENONCODE_COLOR(0, 0, 0, 255),
 		                              XENONCODE_COLOR(8, 255, 255, 255)) });
+	g_slotByPtr[g_screens.back().scr.get()] = g_screens.size() - 1;
 	return (int)g_screens.size() - 1;
 }
 
 static inline XenonScreen* screenOf(const Var& obj) {
 	return reinterpret_cast<XenonScreen*>(static_cast<uint64_t>(obj));
+}
+static inline ScreenSlot* slotOf(const Var& obj) {
+	auto i = g_slotByPtr.find(screenOf(obj));
+	return i == g_slotByPtr.end() ? nullptr : &g_screens[i->second];
+}
+static int xc_indexOf(const string& key) {
+	string k = xc_lower(key);
+	for (size_t i = 0; i < g_screens.size(); ++i) if (g_screens[i].key == k) return (int)i;
+	return -1;
 }
 
 // ---- component inspection table (JS fills it from the blueprint) ----------
@@ -154,12 +195,15 @@ static void archeanInit() {
 			                              s->GetFgColor(), varToString(a[2]));
 			else if (a.size() == 1) s->Write(s->GetFgColor(), varToString(a[0]));
 			return {}; }},
-		// pixel(x, y, color) — one framebuffer pixel (the wiki's draw_point;
-		// kept as `pixel` too — XenonDraw-era programs use both names)
-		{"pixel($x:number,$y:number,$c:number)", [](Computer*, const Var& o, const vector<Var>& a) -> Var {
+		// pixel(x, y) — GET the packed colour of one framebuffer pixel
+		// (wiki computer.md/dashboard.md: "returns the current color"; the
+		// POC's (x,y,color) point-SETTER was a misread — drawing is
+		// draw_point, and programs use pixel() as a getter)
+		{"pixel($x:number,$y:number):number", [](Computer*, const Var& o, const vector<Var>& a) -> Var {
 			XenonScreen* s = screenOf(o);
-			s->DrawPoint((int)(int64_t)a[0], (int)(int64_t)a[1], packedColor(a[2]));
-			return {}; }},
+			int x = (int)(int64_t)a[0], y = (int)(int64_t)a[1];
+			if (x < 0 || y < 0 || x >= (int)s->GetWidth() || y >= (int)s->GetHeight()) return 0.0;
+			return (double)s->GetPixel(x, y); }},
 		// the wiki's screen rendering API (xenoncode/dashboard.md), 1:1 with
 		// the dev's XenonScreen.hpp primitives
 		{"width:number", [](Computer*, const Var& o, const vector<Var>&) -> Var {
@@ -194,18 +238,35 @@ static void archeanInit() {
 			for (size_t i = 1; i + 1 < a.size(); i += 2)
 				pts.push_back((int)(int64_t)a[i]), pts.push_back((int)(int64_t)a[i + 1]);
 			screenOf(o)->DrawPoly(packedColor(a[0]), pts); return {}; }},
-		// button_rect(x, y, w, h, color) — draws; the click edge is not wired
-		// in the POC, so it evaluates to "not clicked"
-		{"button_rect($x:number,$y:number,$w:number,$h:number,$c:number)", [](Computer*, const Var& o, const vector<Var>& a) -> Var {
-			screenOf(o)->DrawRect((int)(int64_t)a[0], (int)(int64_t)a[1],
-			                      (int)(int64_t)a[0] + (int)(int64_t)a[2],
-			                      (int)(int64_t)a[1] + (int)(int64_t)a[3], packedColor(a[4]));
-			return 0.0; }},
-		{"button($x:number,$y:number,$w:number,$h:number,$c:number)", [](Computer*, const Var& o, const vector<Var>& a) -> Var {
-			screenOf(o)->DrawRect((int)(int64_t)a[0], (int)(int64_t)a[1],
-			                      (int)(int64_t)a[0] + (int)(int64_t)a[2],
-			                      (int)(int64_t)a[1] + (int)(int64_t)a[3], packedColor(a[4]));
-			return 0.0; }},
+		// button_rect(x, y, w, h, color):number — draws AND "evaluates to
+		// true if clicked" (wiki computer.md:143 + dashboard.md:84). The
+		// void declaration was craft 3381670618's compile error: `if
+		// $screen.button_rect(...)` needs a return value.
+		{"button_rect($x:number,$y:number,$w:number,$h:number,$c:number):number", [](Computer*, const Var& o, const vector<Var>& a) -> Var {
+			int x = (int)(int64_t)a[0], y = (int)(int64_t)a[1], w = (int)(int64_t)a[2], h = (int)(int64_t)a[3];
+			screenOf(o)->DrawRect(x, y, x + w, y + h, packedColor(a[4]));
+			return xc_buttonHit(slotOf(o), x, y, w, h) ? 1.0 : 0.0; }},
+		// legacy button(x, y, color, width, height):number — the older
+		// width/height-parameter form (computer.md:156 — the COLOUR is the
+		// 3rd argument, unlike button_rect)
+		{"button($x:number,$y:number,$c:number,$w:number,$h:number):number", [](Computer*, const Var& o, const vector<Var>& a) -> Var {
+			int x = (int)(int64_t)a[0], y = (int)(int64_t)a[1], w = (int)(int64_t)a[3], h = (int)(int64_t)a[4];
+			screenOf(o)->DrawRect(x, y, x + w, y + h, packedColor(a[2]));
+			return xc_buttonHit(slotOf(o), x, y, w, h) ? 1.0 : 0.0; }},
+		// legacy draw(x, y, color, width, height) — computer.md:155
+		{"draw($x:number,$y:number,$c:number,$w:number,$h:number)", [](Computer*, const Var& o, const vector<Var>& a) -> Var {
+			int x = (int)(int64_t)a[0], y = (int)(int64_t)a[1], w = (int)(int64_t)a[3], h = (int)(int64_t)a[4];
+			screenOf(o)->DrawRect(x, y, x + w, y + h, packedColor(a[2]));
+			return {}; }},
+		// click state of THIS surface (dashboard.md "Built-in values")
+		{"clicked:number", [](Computer*, const Var& o, const vector<Var>&) -> Var {
+			ScreenSlot* s = slotOf(o); return s && s->clicked ? 1.0 : 0.0; }},
+		{"click_x:number", [](Computer*, const Var& o, const vector<Var>&) -> Var {
+			ScreenSlot* s = slotOf(o); return s ? (double)s->clickX : 0.0; }},
+		{"click_y:number", [](Computer*, const Var& o, const vector<Var>&) -> Var {
+			ScreenSlot* s = slotOf(o); return s ? (double)s->clickY : 0.0; }},
+		{"scroll:number", [](Computer*, const Var& o, const vector<Var>&) -> Var {
+			ScreenSlot* s = slotOf(o); return s ? s->scroll : 0.0; }},
 	});
 
 	// ---- component inspection (computer.md "Component Inspection") ---------
@@ -266,6 +327,86 @@ static void archeanInit() {
 		if (i < 0) i = xc_addScreen(alias, ch, 640, 480);
 		return Var(screenType, reinterpret_cast<uint64_t>(g_screens[i].scr.get()));
 	});
+	// ---- the Computer's integrated screen (dashboard.md "First Use": plain
+	// blank(red) / write(0,0,white,"Hello") with no $screen variable). These
+	// global render functions target the "main" surface; the click built-ins
+	// read this cycle's click (computer.md "Built-in values").
+	auto ms = []() -> XenonScreen* {
+		int i = xc_findScreen("main", 0);
+		if (i < 0) i = xc_addScreen("main", 0, 640, 480);
+		return g_screens[i].scr.get();
+	};
+	auto msSlot = []() -> ScreenSlot* {
+		int i = xc_findScreen("main", 0);
+		return i < 0 ? nullptr : &g_screens[i];
+	};
+	XenonCode::DeclareDeviceFunction("blank($c:number)", [ms](Computer*, const vector<Var>& a) -> Var {
+		if (a.size() >= 1) ms()->Blank(packedColor(a[0])); else ms()->Blank();
+		return {}; });
+	XenonCode::DeclareDeviceFunction("write($x:number,$y:number,$c:number,$t:text)", [ms](Computer*, const vector<Var>& a) -> Var {
+		XenonScreen* s = ms();
+		if (a.size() >= 4) s->Write((uint32_t)(int64_t)a[0], (uint32_t)(int64_t)a[1], packedColor(a[2]), varToString(a[3]));
+		else if (a.size() == 3) s->Write((uint32_t)(int64_t)a[0], (uint32_t)(int64_t)a[1], s->GetFgColor(), varToString(a[2]));
+		else if (a.size() == 1) s->Write(s->GetFgColor(), varToString(a[0]));
+		return {}; });
+	XenonCode::DeclareDeviceFunction("text_size($n:number)", [ms](Computer*, const vector<Var>& a) -> Var {
+		ms()->SetTextSize((uint32_t)(int64_t)a[0]); return {}; });
+	XenonCode::DeclareDeviceFunction("text_align($a:number)", [ms](Computer*, const vector<Var>& a) -> Var {
+		ms()->SetTextAlign((uint32_t)(int64_t)a[0]); return {}; });
+	XenonCode::DeclareDeviceFunction("newline_spacing($n:number)", [ms](Computer*, const vector<Var>& a) -> Var {
+		ms()->SetNewlineSpacing((uint32_t)(int64_t)a[0]); return {}; });
+	XenonCode::DeclareDeviceFunction("draw_point($x:number,$y:number,$c:number)", [ms](Computer*, const vector<Var>& a) -> Var {
+		ms()->DrawPoint((int)(int64_t)a[0], (int)(int64_t)a[1], packedColor(a[2])); return {}; });
+	XenonCode::DeclareDeviceFunction("draw_line($x1:number,$y1:number,$x2:number,$y2:number,$c:number)", [ms](Computer*, const vector<Var>& a) -> Var {
+		ms()->DrawLine((int)(int64_t)a[0], (int)(int64_t)a[1], (int)(int64_t)a[2], (int)(int64_t)a[3], packedColor(a[4])); return {}; });
+	XenonCode::DeclareDeviceFunction("draw_rect($x1:number,$y1:number,$x2:number,$y2:number,$c:number,$f:number)", [ms](Computer*, const vector<Var>& a) -> Var {
+		ms()->DrawRect((int)(int64_t)a[0], (int)(int64_t)a[1], (int)(int64_t)a[2], (int)(int64_t)a[3],
+		               packedColor(a[4]), a.size() >= 6 ? packedColor(a[5]) : 0u); return {}; });
+	XenonCode::DeclareDeviceFunction("draw_triangle($x1:number,$y1:number,$x2:number,$y2:number,$x3:number,$y3:number,$c:number,$f:number)", [ms](Computer*, const vector<Var>& a) -> Var {
+		ms()->DrawTriangle((int)(int64_t)a[0], (int)(int64_t)a[1], (int)(int64_t)a[2], (int)(int64_t)a[3],
+		                   (int)(int64_t)a[4], (int)(int64_t)a[5], packedColor(a[6]),
+		                   a.size() >= 8 ? packedColor(a[7]) : 0u); return {}; });
+	XenonCode::DeclareDeviceFunction("draw_circle($x:number,$y:number,$r:number,$c:number,$f:number)", [ms](Computer*, const vector<Var>& a) -> Var {
+		ms()->DrawCircle((int)(int64_t)a[0], (int)(int64_t)a[1], (int)(int64_t)a[2], packedColor(a[3]),
+		                 a.size() >= 5 ? packedColor(a[4]) : 0u); return {}; });
+	XenonCode::DeclareDeviceFunction("draw_poly($c:number,$x:number,$y:number)", [ms](Computer*, const vector<Var>& a) -> Var {
+		vector<int> pts;
+		for (size_t i = 1; i + 1 < a.size(); i += 2)
+			pts.push_back((int)(int64_t)a[i]), pts.push_back((int)(int64_t)a[i + 1]);
+		ms()->DrawPoly(packedColor(a[0]), pts); return {}; });
+	XenonCode::DeclareDeviceFunction("pixel($x:number,$y:number):number", [ms](Computer*, const vector<Var>& a) -> Var {
+		int x = (int)(int64_t)a[0], y = (int)(int64_t)a[1];
+		XenonScreen* s = ms();
+		if (x < 0 || y < 0 || x >= (int)s->GetWidth() || y >= (int)s->GetHeight()) return 0.0;
+		return (double)s->GetPixel(x, y); });
+	XenonCode::DeclareDeviceFunction("button_rect($x:number,$y:number,$w:number,$h:number,$c:number):number",
+		[ms, msSlot](Computer*, const vector<Var>& a) -> Var {
+		int x = (int)(int64_t)a[0], y = (int)(int64_t)a[1], w = (int)(int64_t)a[2], h = (int)(int64_t)a[3];
+		ms()->DrawRect(x, y, x + w, y + h, packedColor(a[4]));
+		return xc_buttonHit(msSlot(), x, y, w, h) ? 1.0 : 0.0; });
+	XenonCode::DeclareDeviceFunction("button($x:number,$y:number,$c:number,$w:number,$h:number):number",
+		[ms, msSlot](Computer*, const vector<Var>& a) -> Var {
+		int x = (int)(int64_t)a[0], y = (int)(int64_t)a[1], w = (int)(int64_t)a[3], h = (int)(int64_t)a[4];
+		ms()->DrawRect(x, y, x + w, y + h, packedColor(a[2]));
+		return xc_buttonHit(msSlot(), x, y, w, h) ? 1.0 : 0.0; });
+	XenonCode::DeclareDeviceFunction("draw($x:number,$y:number,$c:number,$w:number,$h:number)", [ms](Computer*, const vector<Var>& a) -> Var {
+		int x = (int)(int64_t)a[0], y = (int)(int64_t)a[1], w = (int)(int64_t)a[3], h = (int)(int64_t)a[4];
+		ms()->DrawRect(x, y, x + w, y + h, packedColor(a[2]));
+		return {}; });
+	XenonCode::DeclareDeviceFunction("clicked:number", [](Computer*, const vector<Var>&) -> Var {
+		return g_anyClicked ? 1.0 : 0.0; });
+	XenonCode::DeclareDeviceFunction("click_x:number", [](Computer*, const vector<Var>&) -> Var {
+		return (double)g_anyClickX; });
+	XenonCode::DeclareDeviceFunction("click_y:number", [](Computer*, const vector<Var>&) -> Var {
+		return (double)g_anyClickY; });
+	XenonCode::DeclareDeviceFunction("char_w:number", [ms](Computer*, const vector<Var>&) -> Var {
+		return (double)ms()->GetCharWidth(); });
+	XenonCode::DeclareDeviceFunction("char_h:number", [ms](Computer*, const vector<Var>&) -> Var {
+		return (double)ms()->GetCharHeight(); });
+	XenonCode::DeclareDeviceFunction("screen_w:number", [ms](Computer*, const vector<Var>&) -> Var {
+		return (double)ms()->GetWidth(); });
+	XenonCode::DeclareDeviceFunction("screen_h:number", [ms](Computer*, const vector<Var>&) -> Var {
+		return (double)ms()->GetHeight(); });
 	// virtualscreen(w, h) — code-created off-screen buffer (computer.md
 	// "Virtual Screen Function", cap 10000x10000 in game; we cap at 4096 and
 	// 96 buffers as the POC's memory guard). Shown like any other surface.
@@ -350,9 +491,13 @@ static void archeanInit() {
 	XenonCode::DeclareDeviceFunction("input_number:number", [](Computer*, const vector<Var>& a) -> Var {
 		int io = (int)(int64_t)a[0], ch = (int)(int64_t)a[1];
 		auto i = xc_inputs.find(io);
-		if (i == xc_inputs.end()) return 0.0;
-		auto c = i->second.find(ch);
-		return c == i->second.end() ? 0.0 : c->second;
+		double v = 0.0;
+		if (i != xc_inputs.end()) {
+			auto c = i->second.find(ch);
+			if (c != i->second.end()) v = c->second;
+		}
+		g_reads[{io, ch}] = v;      // the IDE's node cards show REAL reads
+		return v;
 	});
 	XenonCode::DeclareDeviceFunction("input_text:text", [](Computer*, const vector<Var>& a) -> Var {
 		int io = (int)(int64_t)a[0], ch = (int)(int64_t)a[1];
@@ -445,7 +590,8 @@ static void archeanInit() {
 		return 0.0; // Creative
 	});
 	XenonCode::DeclareDeviceFunction("color:number", [](Computer*, const vector<Var>& a) -> Var {
-		return (double)XENONCODE_COLOR((int)(int64_t)a[0], (int)(int64_t)a[1], (int)(int64_t)a[2], 255);
+		int alpha = a.size() >= 4 ? (int)(int64_t)a[3] : 255;   // color(r,g,b,a) (screen.xc)
+		return (double)XENONCODE_COLOR((int)(int64_t)a[0], (int)(int64_t)a[1], (int)(int64_t)a[2], alpha);
 	});
 	// crafting/item table reads (archean.md "Crafting Recipes") — the POC has
 	// no world economy: honest empty/label answers (the app's economy.json is
@@ -499,6 +645,45 @@ static void pilotAtCycle(int cycle) {
 	if (cycle >= 50 && cycle < 52) set(12, 1);  // button: throttle reset
 }
 
+// End of one cycle (both runners): the program body has SEEN this cycle's
+// click (button_rect + the clicked/click_x/click_y built-ins), so deliver
+// the click/scroll entry points (computer.md: per-screen with the surface as
+// ref — `click.$screen`; plain for the integrated screen), report the
+// input_number reads this cycle as "in" events (the IDE's node cards show
+// the values a program ACTUALLY read), then clear the per-cycle input state.
+static void xc_endCycle(Computer& computer) {
+	for (auto& s : g_screens) {
+		if (!s.clicked) continue;
+		Var ref(screenType, reinterpret_cast<uint64_t>(s.scr.get()));
+		std::vector<Var> args{Var((double)s.clickX), Var((double)s.clickY)};
+		computer.RunEntryPoint("click", ref, args);
+		computer.RunEntryPoint("click_hold", ref, args);
+	}
+	if (g_anyClicked) {
+		std::vector<Var> args{Var((double)g_anyClickX), Var((double)g_anyClickY)};
+		computer.RunEntryPoint("click", {}, args);
+		computer.RunEntryPoint("click_hold", {}, args);
+	}
+	for (auto& s : g_screens) {
+		if (!s.scroll) continue;
+		Var ref(screenType, reinterpret_cast<uint64_t>(s.scr.get()));
+		std::vector<Var> args{Var(s.scroll)};
+		computer.RunEntryPoint("scroll", ref, args);
+	}
+	if (g_anyScroll) {
+		std::vector<Var> args{Var(g_anyScroll)};
+		computer.RunEntryPoint("scroll", {}, args);
+	}
+	for (auto&[k, v] : g_reads) {
+		ostringstream s; s << v;
+		xc_eventLog.push_back("{\"e\":\"in\",\"io\":" + to_string(k.first)
+		                    + ",\"port\":" + to_string(k.second) + ",\"v\":" + s.str() + "}");
+	}
+	g_reads.clear();
+	for (auto& s : g_screens) { s.clicked = false; s.scroll = 0.0; }
+	g_anyClicked = false; g_anyClickY = g_anyClickX = 0; g_anyScroll = 0.0;
+}
+
 #ifndef __EMSCRIPTEN__
 // ---- native runner --------------------------------------------------------
 int main(int argc, char** argv) {
@@ -545,6 +730,7 @@ int main(int argc, char** argv) {
 			xc_eventLog.push_back("{\"e\":\"cycle\",\"c\":" + to_string(c) + "}");
 			computer.RunCycle();                 // tick + timers
 			computer.RunEntryPoint("update");    // the computer device's cycle end
+			xc_endCycle(computer);               // click/scroll events + input reads
 			if (realtime) this_thread::sleep_for(chrono::milliseconds(100));
 		}
 	} catch (XenonCode::RuntimeError& e) {
@@ -552,6 +738,8 @@ int main(int argc, char** argv) {
 		return 4;
 	}
 	computer.SaveStorage(dir + "/storage");
+	{ std::ofstream vf("vars.json"); vf << computer.DumpVarsJson(); }
+	cout << "[xc] vars.json written (XENON-VARS)" << endl;
 
 	// ---- report: events + a PPM per screen ---------------------------------
 	ofstream ev("events.json");
@@ -624,7 +812,9 @@ EMSCRIPTEN_KEEPALIVE int xc_boot() {
 		g_computer->capability.storage = xc_storageCap;
 		if (!g_computer->LoadProgram("/prog")) { g_err = "load failed"; return 1; }
 		g_computer->LoadStorage("/prog/storage");   // survives reboots in-session
-		for (auto& s : g_screens) s.scr->Blank();
+		xc_addScreen("main", 0, 640, 480);         // the integrated-screen target
+		for (auto& s : g_screens) { s.scr->Blank(); s.clicked = false; s.scroll = 0.0; }
+		g_reads.clear();
 		g_computer->RunInit();
 		g_cycle = 0;
 		return 0;
@@ -646,6 +836,7 @@ EMSCRIPTEN_KEEPALIVE int xc_cycle() {
 	try {
 		g_computer->RunCycle();
 		g_computer->RunEntryPoint("update");
+		xc_endCycle(*g_computer);            // click/scroll entry points + reads
 	} catch (XenonCode::RuntimeError& e) {
 		g_err = "runtime: " + string(e.what());
 		g_computer.reset();
@@ -661,13 +852,32 @@ EMSCRIPTEN_KEEPALIVE int xc_cycle() {
 
 // drained JSON event array (outputs/prints/screens) since last call
 EMSCRIPTEN_KEEPALIVE const char* xc_events() { g_evJson = xc_drainEvents(); return g_evJson.c_str(); }
+// the IDE's VARIABLES panel: JSON of the program's global variables
+// [{name, t (CODE_TYPE), v (string)}] — live RAM + the storage cache
+static string g_varsJson;
+EMSCRIPTEN_KEEPALIVE const char* xc_vars() {
+	g_varsJson = g_computer ? g_computer->DumpVarsJson() : "[]";
+	return g_varsJson.c_str();
+}
 EMSCRIPTEN_KEEPALIVE const char* xc_error() { return g_err.c_str(); }
 EMSCRIPTEN_KEEPALIVE void xc_set_input(int io, int ch, double v) { xc_inputs[io][ch] = v; }
+// The IDE's screen canvases route user interaction in (pixel coords of the
+// surface). The click is visible to button_rect/button and the clicked
+// built-ins for ONE cycle, then cleared by xc_endCycle.
+EMSCRIPTEN_KEEPALIVE void xc_screen_click(int idx, double x, double y) {
+	xc_clickAt(idx < 0 ? SIZE_MAX : (size_t)idx, (int)x, (int)y);
+}
+EMSCRIPTEN_KEEPALIVE void xc_screen_scroll(int idx, double delta) {
+	if (idx < 0 || idx >= (int)g_screens.size()) return;
+	g_screens[idx].scroll += delta;
+	g_anyScroll += delta;
+}
+EMSCRIPTEN_KEEPALIVE int xc_screen_index(const char* key) { return xc_indexOf(key); }
 EMSCRIPTEN_KEEPALIVE void xc_save_storage() { if (g_computer) g_computer->SaveStorage("/prog/storage"); }
 EMSCRIPTEN_KEEPALIVE void xc_pilot_script(int on) { g_pilotScripted = on; }
 
 // ---- screen registry (the craft's Screen/HdScreen surfaces) ---------------
-EMSCRIPTEN_KEEPALIVE void xc_reset_screens() { g_screens.clear(); }
+EMSCRIPTEN_KEEPALIVE void xc_reset_screens() { g_screens.clear(); g_slotByPtr.clear(); }
 EMSCRIPTEN_KEEPALIVE int xc_add_screen(const char* alias, int ch, uint32_t w, uint32_t h) {
 	return xc_addScreen(alias, ch, w, h);
 }

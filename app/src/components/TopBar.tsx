@@ -44,6 +44,11 @@ interface Props {
    *  the menu only appears when the open blueprint has MiniComputers */
   xenonComps?: { ci: number; alias: string; program: string; files: number }[];
   onXenon?: (ci: number) => void;
+  /** ▣ Screens bottom tab (v1.13.x) — visible only when the craft has
+   *  dashboards (Dashboard components carrying Screen/HdScreen elements) */
+  hasScreens?: boolean;
+  screensOpen?: boolean;
+  onScreens?: () => void;
   children?: React.ReactNode;              // right side: panel toggle etc.
 }
 
@@ -181,6 +186,20 @@ export default function TopBar(p: Props) {
             ))}
           </>)}
         </Menu>
+      )}
+
+      {/* ▣ SCREENS (v1.13.x: "lets be able to open the screens in the bottom
+          tab using a screen button on top (only visible if the craft has
+          dashboards) which display the current (raster) graphics/values of
+          the dashboards") — the live surfaces of the running computer */}
+      {(p.hasScreens ?? false) && (
+        <button data-testid="screens-btn" aria-pressed={p.screensOpen ?? false}
+          title="Screens — the dashboards' live rasters (Dashboards + Virtual tabs)"
+          onClick={() => p.onScreens?.()}
+          className={`shrink-0 rounded border border-[#3a4a6a] px-2.5 py-1 text-[12px] transition-colors
+                     ${p.screensOpen ? 'bg-[#243a52] text-[#8fd4ff]' : 'bg-[#141b28] text-[#9fb0c8] hover:text-white'}`}>
+          ▣ Screens
+        </button>
       )}
 
       {/* HELP ▾ (v1.5.20 user request: "add documentation in a help menu …

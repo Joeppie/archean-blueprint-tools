@@ -11,7 +11,13 @@
 import type { Blueprint, BlueprintComponent } from './format';
 
 export interface XCFile { name: string; code: string }
-export interface XCScreen { alias: string; channel: number; w: number; h: number }
+export interface XCScreen {
+  alias: string;    // THE registration key = what the program's screen(aliasOrIo, ch) call passes
+  label: string;    // human name for the panel (component alias / type)
+  channel: number;
+  w: number; h: number;
+  ci?: number;      // component index of the display component (3-D feed key)
+}
 
 // ---------------------------------------------------------------------------
 // module loading (browser only; the editor fires this at boot, off the path)
@@ -41,6 +47,10 @@ type Mod = {
   _xc_screen_w(i: number): number;
   _xc_screen_h(i: number): number;
   _xc_screen_pixels(i: number): number;
+  _xc_screen_index(key: number): number;
+  _xc_vars(): number;
+  _xc_screen_click(idx: number, x: number, y: number): void;
+  _xc_screen_scroll(idx: number, d: number): void;
   _xc_parse_line(p: number, n: number): number;
 };
 
@@ -73,6 +83,7 @@ export interface XenonComputer {
   alias: string;
   program: string;
   files: XCFile[];            // main.xc = the entry file, then includes
+  entryName: string;          // the entry file's NAME in the file (Cede.main.xc)
   capacity: number;           // hdd capacity = the game's storage limit
   channels: { io: number; ch: number }[];
   screens: XCScreen[];
@@ -85,6 +96,13 @@ export interface XCDevice {
   alias: string;
   type: string;
   x: number; y: number; z: number;
+}
+
+/** The IDE's working list = the virtual disk's files in their ORIGINAL
+ *  names (files[0] carries the entry file, which the run-side shows as
+ *  main.xc; writeback needs the true name — the v1.13.x editor law). */
+export function xcDiskFiles(comp: XenonComputer): XCFile[] {
+  return comp.files.map((f, i) => ({ name: i === 0 ? comp.entryName : f.name, code: f.code }));
 }
 
 /** Every MiniComputer with at least one .xc file, as an IDE descriptor. */
@@ -107,6 +125,7 @@ export function xenonComputers(bp: Blueprint): XenonComputer[] {
     const base = String(main?.name ?? 'main').split('.')[0] || 'main';
     out.push({
       ci, alias: c.alias || program || base, program: program || base, files,
+      entryName: String(main?.name ?? 'main.xc'),
       capacity: Number((c.data as any)?.hdd?.capacity) || 0,
       channels: detectChannels(files),
       screens: xenonScreens(bp, files, ci),
@@ -141,16 +160,19 @@ export function xenonScreens(bp: Blueprint, files: XCFile[], ci = -1): XCScreen[
     if (!comp) continue;
     const idx = comps.indexOf(comp);
     const label = r.alias || comp.alias || `${comp.type.toLowerCase()}-${idx}`;
-    const k = `${label}#${r.channel}`;
+    // Registration key = the EXACT token the program passes to screen()
+    // (the shim keys surfaces by that literal lowercased); label is human.
+    const key = r.alias || (r.io >= 0 ? String(r.io) : label);
+    const k = `${key}#${r.channel}`;
     if (seen.has(k)) continue;
     seen.add(k);
     if (comp.type === 'Dashboard') {
       const el: any[] = ((comp.data as any)?.elements ?? []) as any[];
       const e = el[r.channel];
       if (!e || (e.type !== 'Screen' && e.type !== 'HdScreen')) continue;  // Label: none
-      out.push({ alias: label, channel: r.channel, w: (e.size_x ?? 0) + 1, h: (e.size_y ?? 0) + 1 });
+      out.push({ alias: key, label, channel: r.channel, ci: idx, w: (e.size_x ?? 0) + 1, h: (e.size_y ?? 0) + 1 });
     } else {
-      out.push({ alias: label, channel: r.channel, w: 128, h: 72 });       // screen override
+      out.push({ alias: key, label, channel: r.channel, ci: idx, w: 128, h: 72 });  // screen override
     }
   }
   return out.sort((a, b) => a.alias.localeCompare(b.alias) || a.channel - b.channel);
@@ -321,7 +343,6 @@ export function parseNodes(files: XCFile[]): XGraph | null {
 // read its screens.
 
 export interface XenonEvent { e: string; io?: string | number; port?: number; v?: number | string; c?: number }
-
 export class XenonRun {
   private mod: Mod;
   running = false;
@@ -374,6 +395,26 @@ export class XenonRun {
   }
 
   setInput(io: number, ch: number, v: number) { this.mod._xc_set_input(io, ch, v); }
+  /** Route a canvas click on one surface (pixel coords of the surface).
+   *  button_rect/button evaluate true for it THIS cycle (game law). */
+  screenClick(key: string, x: number, y: number) {
+    const m = this.mod;
+    const p = m._malloc(key.length + 1);
+    m.stringToUTF8(key, p, key.length + 1);
+    const idx = m._xc_screen_index(p);
+    m._free(p);
+    if (idx >= 0) m._xc_screen_click(idx, x, y);
+  }
+  screenScroll(key: string, d: number) {
+    const m = this.mod;
+    const p = m._malloc(key.length + 1);
+    m.stringToUTF8(key, p, key.length + 1);
+    const idx = m._xc_screen_index(p);
+    m._free(p);
+    if (idx >= 0) m._xc_screen_scroll(idx, d);
+  }
+  /** The program's GLOBAL variables, live (XENON-VARS dump). */
+  vars(): XenonVar[] { return parseVarsJson(this.mod.UTF8ToString(this.mod._xc_vars())); }
   saveStorage() { this.mod._xc_save_storage(); }
   reboot() {
     this.mod._xc_save_storage();
@@ -405,4 +446,223 @@ export class XenonRun {
     m._free(p);
     return err;
   }
+}
+
+// ---------------------------------------------------------------------------
+// XenonPump — THE single running computer (the wasm module holds ONE global
+// VM context, so exactly one MiniComputer runs at a time) and THE single
+// 10 Hz cycle pump. The IDE dialog, the bottom Screens dock and the 3-D
+// dashboard feeds all share it: they register canvases / subscribe to ticks.
+// Game rule (ide.md): the in-game IDEs of several computers can be open at
+// once; ours re-boots the VM when you point at a different computer.
+
+export interface XenonSurface { key: string; w: number; h: number; pixels: Uint8ClampedArray }
+
+export class XenonPump {
+  run: XenonRun | null = null;
+  comp: XenonComputer | null = null;
+  status: 'idle' | 'booting' | 'running' | 'stopped' | 'error' = 'idle';
+  error = '';
+  cycles = 0;
+  bus = new Map<string, number | string>();          // 'io:port' -> last output
+  reads = new Map<string, number>();                 // 'io:ch'  -> last input_number READ
+  vars = new Map<string, XenonVar>();                // '$name'  -> live global variable
+  log: XenonEvent[] = [];
+  surfaces = new Map<string, XenonSurface>();        // screen key -> latest framebuffer
+  private canvases = new Map<string, Set<HTMLCanvasElement>>();
+  private subs = new Set<() => void>();
+  private raf = 0;
+  private last = 0;
+  private openSeq = 0;
+
+  /** Boot comp (closing any other computer's run). Resolves when the VM is
+   *  up (status running/error). */
+  async open(comp: XenonComputer): Promise<void> {
+    if (this.run && this.comp?.ci === comp.ci
+        && (this.status === 'running' || this.status === 'booting')) return;
+    const seq = ++this.openSeq;
+    this.stopLoop();
+    this.run?.stop();
+    this.run = null;
+    this.comp = comp;
+    this.status = 'booting';
+    this.error = '';
+    this.cycles = 0;
+    this.bus = new Map();
+    this.reads = new Map();
+    this.vars = new Map();
+    this.log = [];
+    this.surfaces = new Map();
+    const run = await XenonRun.open(comp);
+    if (seq !== this.openSeq) { run.stop(); return; }   // superseded by a newer open
+    this.run = run;
+    if (run.error) { this.status = 'error'; this.error = run.error; }
+    else { this.status = 'running'; for (const c of comp.channels) run.setInput(c.io, c.ch, 0); }
+    this.notify();
+    this.startLoop();
+  }
+
+  close() {
+    this.openSeq++;
+    this.stopLoop();
+    this.run?.stop();
+    this.run = null;
+    this.comp = null;
+    this.status = 'idle';
+    this.surfaces = new Map();
+    this.notify();
+  }
+
+  stopRunning() { this.run?.stop(); this.status = 'stopped'; this.notify(); }
+  startRunning() {
+    if (!this.run) return;
+    this.run.running = true;
+    this.status = 'running';
+    this.startLoop();
+    this.notify();
+  }
+  reboot() {
+    const r = this.run;
+    if (!r) return;
+    if (r.reboot()) { this.status = 'running'; this.log = []; this.bus = new Map(); this.startLoop(); }
+    else { this.status = 'error'; this.error = r.error; }
+    this.notify();
+  }
+  setInput(io: number, ch: number, v: number) { this.run?.setInput(io, ch, v); }
+  screenClick(key: string, x: number, y: number) { this.run?.screenClick(key.toLowerCase(), x, y); }
+  screenScroll(key: string, d: number) { this.run?.screenScroll(key.toLowerCase(), d); }
+
+  registerCanvas(key: string, cv: HTMLCanvasElement): () => void {
+    const k = key.toLowerCase();
+    let s = this.canvases.get(k);
+    if (!s) { s = new Set(); this.canvases.set(k, s); }
+    s.add(cv);
+    const surf = this.surfaces.get(k);
+    if (surf) this.blit(cv, surf);
+    return () => { this.canvases.get(k)?.delete(cv); };
+  }
+  subscribe(cb: () => void): () => void {
+    this.subs.add(cb);
+    return () => { this.subs.delete(cb); };
+  }
+
+  /** Re-boot the SAME computer after its files changed (the game auto-reboots
+   *  on save — ide.md "Running the code"). */
+  reload(comp: XenonComputer) {
+    this.openSeq++;
+    this.stopLoop();
+    this.run?.stop();
+    this.run = null;
+    void this.open(comp);
+  }
+
+  private blit(cv: HTMLCanvasElement, s: XenonSurface) {
+    if (cv.width !== s.w) cv.width = s.w;
+    if (cv.height !== s.h) cv.height = s.h;
+    cv.getContext('2d')?.putImageData(
+      new ImageData(s.pixels as Uint8ClampedArray<ArrayBuffer>, s.w, s.h), 0, 0);
+  }
+  private notify() { for (const cb of [...this.subs]) cb(); }
+
+  private startLoop() {
+    if (this.raf) return;
+    const step = (t: number) => {
+      this.raf = requestAnimationFrame(step);
+      if (t - this.last < 100) return;
+      this.last = t;
+      const run = this.run;
+      if (!run || !run.running) return;
+      const evs = run.cycle();
+      if (evs.length) {
+        const prints = evs.filter(e => e.e !== 'cycle');
+        if (prints.length) this.log = [...this.log.slice(-180), ...prints];
+        for (const e of evs) {
+          if (e.e === 'out') this.bus.set(`${e.io}:${e.port}`, e.v ?? '');
+          else if (e.e === 'in') this.reads.set(`${e.io}:${e.port}`, Number(e.v) || 0);
+        }
+      }
+      this.cycles++;
+      const vs = run.vars();
+      this.vars = new Map(vs.filter(varVisible).map(v => [v.name, v]));
+      if (run.error) {
+        this.status = 'error';
+        this.error = run.error;
+        this.notify();
+        return;
+      }
+      // surfaces: cap the per-tick pixel copies (the Badger carries 118
+      // buffers; the panel pages through them, the blit takes the first 24)
+      const next = new Map<string, XenonSurface>();
+      for (const s of run.screenInfo(24)) {
+        next.set(s.key, s);
+        for (const cv of this.canvases.get(s.key) ?? []) this.blit(cv, s);
+      }
+      this.surfaces = next;
+      this.notify();
+    };
+    this.raf = requestAnimationFrame(step);
+  }
+  private stopLoop() {
+    if (this.raf) cancelAnimationFrame(this.raf);
+    this.raf = 0;
+  }
+}
+
+export const xenonPump = new XenonPump();
+
+/** A craft has PHYSICAL screens: a Dashboard carrying Screen/HdScreen
+ *  elements (the gate for the Screens button — "only visible if the craft
+ *  has dashboards"). */
+export function hasDashboards(bp: Blueprint): boolean {
+  return (bp.data.components as BlueprintComponent[]).some(c =>
+    c.type === 'Dashboard'
+    && ((c.data as any)?.elements ?? []).some(
+      (e: any) => e && (e.type === 'Screen' || e.type === 'HdScreen')));
+}
+
+/** surface key ('alias#channel') -> human label, for the screens panel. */
+export function xenonScreenBindings(comp: XenonComputer): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const s of comp.screens) m.set(`${s.alias.toLowerCase()}#${s.channel}`, s.label);
+  return m;
+}
+
+// ---------------------------------------------------------------------------
+// Variable introspection (the IDE's Vars panel + the $var hover). The wasm
+// DumpVarsJson (tools/xenoncode/patch_xenon_vars.py) reports the program's
+// GLOBAL-scope variables live: RAM slots and the storage cache. CODE_TYPE
+// (XenonCode.hpp enum): 50/51 storage, 70/71 RAM, 60/61+80/81 arrays,
+// 128+ objects, 40/41 ROM constants.
+export interface XenonVar { name: string; t: number; v: string }
+
+export function varKind(t: number): 'num' | 'text' | 'array' | 'object' | 'const' {
+  if (t === 70 || t === 50) return 'num';
+  if (t === 71 || t === 51) return 'text';
+  if (t === 60 || t === 61 || t === 80 || t === 81) return 'array';
+  if (t >= 128) return 'object';
+  return 'const';
+}
+/** Panel hygiene: function/argument/const artifacts (`.init`, `@fn.1`,
+ *  ROM constants) are not user variables. */
+export function varVisible(v: XenonVar): boolean {
+  return varKind(v.t) !== 'const' && !v.name.includes('.') && !v.name.startsWith('@');
+}
+
+/** The KV-serialization format the language uses for text objects
+ *  (README: `var $o = ".a{5}.b{8}"`, members read as `$o.a`): break a value
+ *  open into its members, null when it is plain text. Nested braces do not
+ *  exist in the format ({...} values are flat). */
+export function parseKv(v: string): { k: string; v: string }[] | null {
+  if (!v.startsWith('.')) return null;
+  const out: { k: string; v: string }[] = [];
+  for (const m of v.matchAll(/\.([^{}.]+)\{([^{}]*)\}/g)) out.push({ k: m[1]!, v: m[2]! });
+  const len = out.reduce((n, e) => n + e.k.length + e.v.length + 3, 0);
+  return out.length && len >= v.length - 2 ? out : null;   // not a KV string
+}
+
+export function parseVarsJson(json: string): XenonVar[] {
+  try {
+    const j = JSON.parse(json) as { name: string; t: number; v: string }[];
+    return Array.isArray(j) ? j.map(e => ({ name: e.name, t: e.t | 0, v: String(e.v ?? '') })) : [];
+  } catch { return []; }
 }

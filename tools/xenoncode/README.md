@@ -6,7 +6,8 @@ the game dev's own code (see `XENONCODE_UPSTREAM.md` — pinned upstream commit,
 
 | file | role |
 |---|---|
-| `xc_host.cpp` / `xc_host.h` | the **device shim** — the ARCHEAN_computer side (screen object, `input_number`/`output_number`, `print`, colours, `time`, entry points) per the game's bundled wiki, plus the CLI runner and the browser exports |
+| `xc_host.cpp` / `xc_host.h` | the **device shim** — the ARCHEAN_computer side (screen object, `input_number`/`output_number`, `print`, colours, `time`, entry points) per the game's bundled wiki, plus the CLI runner and the browser exports. v1.13.x: `button_rect`/`button` RETURN 1 when clicked (computer.md:143 — the void form made craft 3381670618 uncompilable), legacy `button(x,y,color,w,h)` + `draw` arg order, `pixel(x,y)` getter, per-surface CLICKS IN (`xc_screen_click` — visible to buttons + the `clicked`/`click_x`/`click_y` built-ins for one cycle, then the `click`/`click_hold`/`scroll` entry points run per-screen and plain), `input_number` reads reported as `{"e":"in"}` events (the IDE's node cards), the integrated `main#0` screen's plain render functions (`blank(red)` et al.) |
+| `patch_xenon_vars.py` | documented patch on the pinned checkout (build.sh applies): the compiler records GLOBAL-scope variable declarations (name/CODE_TYPE/slot) and `Computer::DumpVarsJson()` dumps them live (RAM + the storage cache) — the IDE's Vars panel + the `$var` hover read this |
 | `index.html` | **the standalone landing**: pick a program, drive its external numeric inputs, watch the io bus + the screen (open via the repo-root static server: `/tools/xenoncode/`) |
 | `demo/hello/main.xc` | **Hello World** (our authorship): `print`, an `input_number(1, 7)` channel fed PURELY as an external numerics by the simulated computer panel, `screen(...)` text + per-pixel drawing, a `storage` boot counter that survives reboot, an `output_number` echo |
 | `xenoncode.js` + `xenoncode.wasm` | committed build products of the pinned upstream (NOTICE §6) |
@@ -37,8 +38,10 @@ rendered, inputs as io/channel numerics; pins: engine/__tests__/xenoncode
 ## Building / running
 
 ```bash
-bash build.sh                 # native run/xc_run + xenoncode.js/.wasm (needs emsdk)
+bash build.sh                 # native run/xc_run + xenoncode.js/.wasm (needs emsdk;
+                              # applies the lenient-numeric + XENON-VARS patches)
 ./run/xc_run demo/hello 30    # native, real 10 Hz clock (XC_DIAL=0.5, XC_FAST=1)
+                              # each run writes events.json + vars.json + screen-*.ppm
 ./run/xc_run . 60             # the airplane program (main.xc = FirstFlight.main.xc)
 ```
 

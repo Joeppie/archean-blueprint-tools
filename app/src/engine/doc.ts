@@ -225,11 +225,12 @@ export function docArrayInsert(root: DocNode, path: (string | number)[],
  *  ALPHABETICAL position among the parent object's entries (the game writer
  *  sorts keys, so a tool that first uses a list a file never carried keeps
  *  the file's ordering tidy). True = the array exists afterwards. */
-export function docEnsureArray(root: DocNode, path: string[]): boolean {
+export function docEnsureArray(root: DocNode, path: (string | number)[]): boolean {
   if (path.length === 0) return false;
   const parent = docGet(root, path.slice(0, -1));
   if (!parent || parent.kind !== 'obj') return false;
   const key = path[path.length - 1]!;
+  if (typeof key !== 'string') return false;            // insert needs an obj key
   const found = parent.entries.find(([k]) => k === key);
   if (found) {
     if (found[1].kind !== 'arr') return false;

@@ -57,7 +57,9 @@ describe('blueprint extraction', () => {
     const files = xenonComputers(bp)[0]!.files;
     const screens = xenonScreens(bp, files, xenonComputers(bp)[0]!.ci);
     expect(screens.length).toBe(1);                    // one HdScreen element
-    expect(screens[0]).toMatchObject({ alias: 'screen', channel: 0, w: 51, h: 51 });
+    // v1.13.x: the registration key is the program's LITERAL token (the shim
+    // keys surfaces by it — this craft calls screen(0,0)); label is human.
+    expect(screens[0]).toMatchObject({ alias: '0', label: 'screen', channel: 0, w: 51, h: 51 });
     // an alias with no component on the craft -> not pre-registered; the
     // shim auto-creates its surface at boot (no crash, honest empty list)
     expect(xenonScreens(bp, [{ name: 'main.xc', code: 'var $s = screen("no-such", 0)' }])).toEqual([]);
