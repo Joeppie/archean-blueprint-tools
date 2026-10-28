@@ -55,6 +55,7 @@ test('?craft= deep link opens the editor directly', async ({ page }) => {
 });
 
 test('the PLAYABLE row: two in-craft arcade clips, click boots the game fullscreen @ui', async ({ page }) => {
+  test.slow();   // two full craft boots + a VM reboot chained in one test
   // v1.13.8 (we: "Add those to the library on top in a little segment of
   // their own" + webm clips): the gallery's own segment for the two crafts
   // that ARE games; clicking a card = the ?craft&dash deep link → the game
@@ -76,19 +77,22 @@ test('the PLAYABLE row: two in-craft arcade clips, click boots the game fullscre
   // DOESNT properly reset the entire sim, which it must if we can open
   // directly to a screen"): the pump (VM, surfaces, buzzers) must close on
   // unmount, so re-entering the deep link boots a FRESH title screen
-  await page.getByTestId('back-to-gallery').click();
+  await page.getByText('✕ close').first().click();   // the zoom overlay
+  await page.getByTestId('back-to-gallery').click(); // covers the top bar
   await expect
     .poll(() => page.evaluate(() => (window as any).__XENON__?.()?.status ?? 'gone'),
       { timeout: 10_000 })
     .toBe('idle');
-  // and the game reboots clean on a second entry (title state, mode 0)
+  // and the game reboots CLEAN on a second entry: a RESUMED session would
+  // carry the old title state; the fresh VM's program sits in its intro
+  // (Invaders' main_state = 0; the title-rise screen)
   await page.getByTestId('playable-3288012440').click();
   await expect(page.getByTestId('screens-cell-main#0-overlay')).toBeVisible({ timeout: 90_000 });
   await expect
     .poll(() => page.evaluate(() => {
       const x = (window as any).__XENON__?.();
-      return x && typeof x.vars === 'function' ? String(x.vars()?.mode ?? '') : '?';
-    }), { timeout: 30_000 })
+      return x && typeof x.vars === 'function' ? String(x.vars()?.main_state ?? '') : '?';
+    }), { timeout: 60_000 })
     .toBe('0');
 });
 
