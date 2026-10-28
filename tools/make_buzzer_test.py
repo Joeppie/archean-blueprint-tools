@@ -27,26 +27,23 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 TESTDATA = os.path.join(os.path.dirname(HERE), 'testdata')
 
 PROGRAM = """var $t = 0
+var $tv = virtualscreen(160, 120)
 
 update
-  $t += 1
-  var $aux = input_number("gamer", 8)
-  var $amp = 0.2 + $aux * 0.6
-  var $hz = 440
-  if ($t % 40) >= 20
-    $hz = 660
-  output_number("bench-horn", 0, $amp)
-  output_number("bench-horn", 1, $hz)
-  if $t == 1
-    $tv = virtualscreen(160, 120)
-    $tv.blank()
-  $tv = screen("virtual#0", 0)
-  if ($t % 4) < 2
-    $tv.draw_rect(20, 20, 140, 100, color(255, 80, 0))
-  else
-    $tv.draw_rect(20, 20, 140, 100, color(0, 120, 255))
+\t$t = $t + 1
+\tvar $aux = input_number("gamer", 8)
+\tvar $amp = 0.2 + $aux * 0.6
+\tvar $hz = 440
+\tif ($t % 40) >= 20
+\t\t$hz = 660
+\toutput_number("bench-horn", 0, $amp)
+\toutput_number("bench-horn", 1, $hz)
+\t$tv.blank()
+\tif ($t % 4) < 2
+\t\t$tv.draw_rect(20, 20, 140, 100, color(255, 80, 0))
+\telse
+\t\t$tv.draw_rect(20, 20, 140, 100, color(0, 120, 255))
 """
-
 def block(x, y, z, sx=0, sy=0, sz=0):
     return {"colors": [4] * 7, "frame_x": 0, "frame_y": 0, "frame_z": 0,
             "material": 0, "pos_x": x, "pos_y": y, "pos_z": z,
