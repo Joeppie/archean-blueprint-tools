@@ -299,6 +299,49 @@ export const XC_LIB_GROUPS: XCLibGroup[] = [
   { key: 'system', label: 'System', color: '#9fb0c8' },
   { key: 'recipe', label: 'Recipes', color: '#ffb3b3' },
   { key: 'worldsim', label: 'Worldsim', color: '#7dd8c0' },
+  { key: 'color', label: 'Colors', color: '#ff8fd0' },
+  { key: 'align', label: 'Alignment', color: '#ffd9a0' },
+  { key: 'math', label: 'Math', color: '#a0d9ff' },
+];
+
+/** ── GLOBAL CONSTANTS (v1.13.27, we: "red, green which seem to be built in
+ *  constants are not recognized. They are colors … I dont remember the
+ *  precise type"): THE TRUTH IS OUR SHIM (tools/xenoncode/xc_host.cpp
+ *  archeanInit) — the game declares these program globals; the interpreter
+ *  itself knows no colors. Colors are NUMBERS holding packed RGBA
+ *  (XENONCODE_COLOR(r,g,b,255)); alignments are the XENONCODE_* bit
+ *  constants; `hex` here is the swatch color the Library tab paints. */
+export interface XCConst { name: string; kind: 'color' | 'align' | 'math'; desc: string; hex?: string }
+export const XC_GLOBAL_CONSTS: XCConst[] = [
+  { name: 'white', kind: 'color', desc: 'packed RGBA color constant', hex: '#ffffff' },
+  { name: 'black', kind: 'color', desc: 'packed RGBA color constant', hex: '#000000' },
+  { name: 'red', kind: 'color', desc: 'packed RGBA color constant', hex: '#ff0000' },
+  { name: 'green', kind: 'color', desc: 'packed RGBA color constant', hex: '#00ff00' },
+  { name: 'blue', kind: 'color', desc: 'packed RGBA color constant', hex: '#0000ff' },
+  { name: 'yellow', kind: 'color', desc: 'packed RGBA color constant', hex: '#ffff00' },
+  { name: 'cyan', kind: 'color', desc: 'packed RGBA color constant', hex: '#00ffff' },
+  { name: 'magenta', kind: 'color', desc: 'packed RGBA color constant', hex: '#ff00ff' },
+  { name: 'orange', kind: 'color', desc: 'packed RGBA color constant', hex: '#ffa500' },
+  { name: 'gray', kind: 'color', desc: 'packed RGBA color constant', hex: '#808080' },
+  { name: 'grey', kind: 'color', desc: 'packed RGBA color constant (alias of gray)', hex: '#808080' },
+  { name: 'lime', kind: 'color', desc: 'packed RGBA color constant', hex: '#00ff80' },
+  { name: 'navy', kind: 'color', desc: 'packed RGBA color constant', hex: '#000080' },
+  { name: 'teal', kind: 'color', desc: 'packed RGBA color constant', hex: '#008080' },
+  { name: 'purple', kind: 'color', desc: 'packed RGBA color constant', hex: '#a020f0' },
+  { name: 'pink', kind: 'color', desc: 'packed RGBA color constant', hex: '#ffc0cb' },
+  { name: 'brown', kind: 'color', desc: 'packed RGBA color constant', hex: '#965a28' },
+  { name: 'silver', kind: 'color', desc: 'packed RGBA color constant', hex: '#c0c0c0' },
+  { name: 'top_left', kind: 'align', desc: 'text alignment bits (top|left)' },
+  { name: 'top', kind: 'align', desc: 'text alignment: top' },
+  { name: 'top_right', kind: 'align', desc: 'text alignment bits (top|right)' },
+  { name: 'left', kind: 'align', desc: 'text alignment: left' },
+  { name: 'center', kind: 'align', desc: 'text alignment: center' },
+  { name: 'right', kind: 'align', desc: 'text alignment: right' },
+  { name: 'bottom_left', kind: 'align', desc: 'text alignment bits (bottom|left)' },
+  { name: 'bottom', kind: 'align', desc: 'text alignment: bottom' },
+  { name: 'bottom_right', kind: 'align', desc: 'text alignment bits (bottom|right)' },
+  { name: 'pi', kind: 'math', desc: '3.14159…' },
+  { name: '2pi', kind: 'math', desc: '2 × pi' },
 ];
 
 /** ── BLOCK-OPEN lines (v1.13.26, we: "after hitting enter on an init,

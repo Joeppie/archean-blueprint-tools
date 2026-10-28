@@ -42,7 +42,7 @@ import { ScreensCell } from './ScreensDock';
 import { CodeEditor, type CodeEditorHandle } from './CodeEditor';
 import {
   functionAt, libIndex, projectDecls, projectFunctions,
-  XC_LIB_DOC, XC_LIB_GROUPS, XC_SCREEN_MEMBERS,
+  XC_LIB_DOC, XC_LIB_GROUPS, XC_SCREEN_MEMBERS, XC_GLOBAL_CONSTS,
 } from '../engine/xcproject';
 
 const MAX_PARSE_LINES = 500;   // validation pass cap (window around the caret)
@@ -59,8 +59,11 @@ export default function XenonDialog(p: {
   const { comp } = p;
   const [, setTick] = useState(0);
   const [tab, setTab] = useState(0);
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState('');
+  // v1.13.27 (we: "I dont want a distinguishment between edit and viewing
+  // of code, it should be in edit mode always, save should commit it and
+  // reload the code"): NO editing/draft split — files[] ARE the live
+  // buffers; the editor writes into them on every change; SAVE commits the
+  // buffers to the blueprint (p.onFiles ⇒ the pump re-boots on them).
   const [dirty, setDirty] = useState<Set<number>>(new Set());
   const [files, setFiles] = useState<XCFile[]>(() => xcDiskFiles(comp));
   const [newOpen, setNewOpen] = useState(false);
@@ -325,10 +328,51 @@ export default function XenonDialog(p: {
       fn: functionAt(funcs, f.name, line)?.name,
       code: (f.code.split('\n')[line - 1] ?? '').trim().slice(0, 42),
     }))), [bps, runtimeFiles, funcs]);
+  // ── NAV HISTORY (v1.13.27, we: "editing a file at a certain line or
+  // moving to a breakpoint like that should create a navpoint we can
+  // browse-history to; i.e. back and forth"): browser model — leaving a
+  // place records it (truncating any forward list); ◀ ▶ / Alt+←/→ walk.
+  const runtimeFilesRef = useRef(runtimeFiles);
+  runtimeFilesRef.current = runtimeFiles;
+  const navHist = useRef<{ file: string; line: number }[]>([]);
+  const navPos = useRef(-1);
+  const [, navTick] = useState(0);
+  const recNav = () => {
+    const at = navPos.current;
+    const now = { file: runtimeName(tab), line: lastLine || 1 };
+    const cur = navHist.current[at];
+    if (cur && cur.file === now.file && cur.line === now.line) return;
+    navHist.current = [...navHist.current.slice(0, at + 1), now];
+    navPos.current = navHist.current.length - 1;
+    navTick(t => t + 1);
+  };
+  const gotoNav = (delta: number) => {
+    const at = navPos.current + delta;
+    if (at < 0 || at >= navHist.current.length) return;
+    const pt = navHist.current[at]!;
+    navPos.current = at;
+    navTick(t => t + 1);
+    const idx = runtimeFilesRef.current.findIndex(f => f.name === pt.file);
+    if (idx >= 0) { setTab(idx); setPendingJump(pt.line); }
+  };
+  // Alt+←/→ CAPTURE (CM binds Alt+arrows to scope-select in the editor;
+  // capture runs first — the established window-capture law)
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (!e.altKey || (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      gotoNav(e.key === 'ArrowLeft' ? -1 : 1);
+    };
+    addEventListener('keydown', h, true);
+    return () => removeEventListener('keydown', h, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const jumpTo = (fileName: string, line1: number) => {
     const idx = runtimeFiles.findIndex(f => f.name === fileName);
     if (idx < 0) return;
-    setTab(idx); setEditing(false);
+    recNav();                       // the place we LEAVE becomes a navpoint
+    setTab(idx);
     setPendingJump(line1);
   };
   useEffect(() => {
@@ -337,6 +381,16 @@ export default function XenonDialog(p: {
     setPendingJump(0);
     return () => window.clearTimeout(h);
   }, [pendingJump]);
+  // BREAKPOINT-FOLLOW (v1.13.27, we: "when hitting a breakpoint in
+  // execution, the editor should move to the point just being hit"): a
+  // pause moves the IDE to the hit file:line (through jumpTo ⇒ recorded
+  // navpoint, so ◀ returns to where you were editing)
+  useEffect(() => {
+    if (!pump.paused || !pump.pausedFile) return;
+    if (runtimeFilesRef.current.some(f => f.name === pump.pausedFile))
+      jumpTo(pump.pausedFile, pump.pausedLine);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pump.paused, pump.pausedFile, pump.pausedLine]);
   // validation: the REAL compiler (xc_parse_line) over a window around the
   // caret (the v1 visible-window law, kept bounded for 16k Badger files)
   const [errors, setErrors] = useState<Map<number, string> | undefined>(undefined);
@@ -345,7 +399,7 @@ export default function XenonDialog(p: {
   const valSeqRef = useRef(0);
   useEffect(() => {
     const run = pump.run;
-    const code = (editing && tab === lastTabRef.current ? draft : file?.code) ?? '';
+    const code = file?.code ?? '';
     if (!run || !file) { setErrors(undefined); return; }
     const h = window.setTimeout(() => {
       const lines = code.split('\n');
@@ -369,7 +423,7 @@ export default function XenonDialog(p: {
     }, 300);
     return () => window.clearTimeout(h);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file?.name, draft, editing, pump.status, Math.max(0, Math.floor((lastLine || 1) / 200))]);
+  }, [file?.name, file?.code, pump.status, Math.max(0, Math.floor((lastLine || 1) / 200))]);
   const graph: XGraph | null = useMemo(() => parseNodes(files), [files]);
   const bindings = useMemo(() => xenonScreenBindings(comp), [comp]);
   const varList = useMemo(() => {
@@ -494,6 +548,14 @@ export default function XenonDialog(p: {
   const libDocs = useMemo(
     () => libIndex(libQ).filter(f => libG === 'all' || f.group === libG),
     [libQ, libG]);
+  // v1.13.27: the game's global constants — Colors/Alignment/Math chips
+  // filter them; a function-group chip hides the section, 'All' shows all
+  const libConsts = useMemo(() => {
+    const q = libQ.trim().toLowerCase();
+    return XC_GLOBAL_CONSTS.filter(c =>
+      (libG === 'all' || c.kind === libG)
+      && (!q || c.name.includes(q) || c.desc.toLowerCase().includes(q) || c.kind.includes(q)));
+  }, [libQ, libG]);
   const libMembers = useMemo(() => {
     const q = libQ.trim().toLowerCase();
     return q ? XC_SCREEN_MEMBERS.filter(m => m.includes(q)) : XC_SCREEN_MEMBERS;
@@ -501,14 +563,13 @@ export default function XenonDialog(p: {
   const status = tab === 100 ? 'nodes' : 'code';
 
   const save = (_all: boolean) => {
-    // the draft is the EDITOR's buffer: it may only land in the file while
-    // editing (File ▸ Save while browsing must never blank the file)
-    const merged = [...files];
-    if (editing && tab < files.length) merged[tab] = { ...merged[tab]!, code: draft };
-    setFiles(merged);
+    // v1.13.27: files[] are the live buffers (the editor writes into them
+    // continuously) — SAVE commits them to the blueprint; the write path
+    // re-boots the computer on the new files (the game's rule). Breakpoints
+    // SURVIVE: bps is this component's state (untouched by save) and the
+    // pump keeps its break map across reload→open (only close() clears it)
     setDirty(new Set());
-    setEditing(false);
-    p.onFiles(comp.ci, merged);
+    p.onFiles(comp.ci, files);
   };
 
   // Ctrl+S / Ctrl+Shift+S (behind typing: from the textarea the draft rides
@@ -522,7 +583,7 @@ export default function XenonDialog(p: {
     addEventListener('keydown', h);
     return () => removeEventListener('keydown', h);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [files, tab, draft, editing]);
+  }, [files]);
 
   // Ctrl+F opens the editor's FIND panel from any focus in the IDE
   // (v1.13.25, we: "I want to be able to ctrl-f text within a computer
@@ -550,13 +611,16 @@ export default function XenonDialog(p: {
   // FloatingWindow fills the viewport while set and restores the stored rect
   const [max, setMax] = useState(false);
 
-  const startEdit = () => {
-    setDraft(file?.code ?? '');
-    setEditing(true);
-  };
+  // the editor is ALWAYS live (v1.13.27): every change writes the file's
+  // buffer in place and marks it dirty (the ● on the tab)
   const editChange = (v: string) => {
-    setDraft(v);
-    setDirty(m => new Set(m).add(tab));
+    setFiles(m => {
+      if (tab >= m.length) return m;
+      const n = [...m];
+      n[tab] = { ...n[tab]!, code: v };
+      return n;
+    });
+    setDirty(mm => new Set(mm).add(tab));
   };
 
   const addFile = () => {
@@ -578,7 +642,6 @@ export default function XenonDialog(p: {
     const next = files.filter((_, i) => i !== tab);
     setFiles(next);
     setDirty(new Set());
-    setEditing(false);
     setTab(0);
     p.onFiles(comp.ci, next);
   };
@@ -612,18 +675,17 @@ export default function XenonDialog(p: {
   }, [bps, runtimeFiles, pump]);
 
   // F9 break · F10/F11 step (one computer cycle) · F8 resume · F5 RUN — the
-  // IDE's debugger keys (the user asked for the IDE-class set). The VM runs
-  // continuously at the pump cadence, so F5-run means THE GAME'S run: the
-  // draft is SAVED (save ⇒ disk write ⇒ auto-reboot, the CTRL+S rule) and
-  // without a draft the computer re-boots from disk (we: "F5 should run the
-  // code, so long as a computer or screen window is open, otherwise it does
-  // a refresh" — inside this window it never refreshes the page)
+  // IDE's debugger keys (the user asked for the IDE-class set). F5-RUN is
+  // SAVE (⇒ disk write ⇒ auto-reboot on the buffers, the CTRL+S rule —
+  // v1.13.27 made the editor always live, so "run" = "commit what's on
+  // screen") (we: "F5 should run the code, so long as a computer or screen
+  // window is open, otherwise it does a refresh" — inside this window it
+  // never refreshes the page)
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if (e.key === 'F5') {
         e.preventDefault();
-        if (onCode && editing) save(false);
-        else pump.reboot();
+        save(false);
       }
       else if (e.key === 'F8') { e.preventDefault(); pump.resume(); }
       else if (e.key === 'F9') {
@@ -635,7 +697,7 @@ export default function XenonDialog(p: {
     addEventListener('keydown', h);
     return () => removeEventListener('keydown', h);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lastLine, tab, onCode, bps, editing]);
+  }, [lastLine, tab, onCode, bps, files]);
 
   return (
     <FloatingWindow
@@ -690,7 +752,6 @@ export default function XenonDialog(p: {
               { label: 'New file…', testid: 'file-new', on: () => { setNewProg(false); setNewOpen(true); } },
               { label: 'New program…', testid: 'file-new-prog', on: () => { setNewProg(true); setNewOpen(true); } },
               { label: 'Save', hint: 'Ctrl+S', testid: 'file-save', on: () => save(false), disabled: !onCode },
-              { label: 'Save all', hint: 'Ctrl+Shift+S', testid: 'file-save-all', on: () => save(true), disabled: !onCode },
               { label: 'Delete current tab', testid: 'file-delete-tab', on: () => delFile(), disabled: files.length <= 1 },
             ] },
             { label: 'Run', testid: 'xmenu-run', entries: [
@@ -715,7 +776,8 @@ export default function XenonDialog(p: {
             ] },
             { label: 'Help', testid: 'xmenu-help', entries: [
               { label: 'F9 break · F10 over · F11 into · F8 resume · Ctrl+S save', testid: 'help-keys', on: () => undefined },
-              { label: 'F5 run (save + re-boot) · Ctrl+F find in file · ⛶ maximise', testid: 'help-run', on: () => undefined },
+              { label: 'F5 run (commit + re-boot) · Ctrl+F find · Ctrl+G goto · ⛶ maximise', testid: 'help-run', on: () => undefined },
+              { label: 'Alt+← / Alt+→ walk nav history · a breakpoint hit moves the editor', testid: 'help-nav', on: () => undefined },
               { label: 'Right-click: definition · run-to-cursor · breakpoints', testid: 'help-ctx', on: () => undefined },
               { label: 'Type $ for variables, @ for declared functions', testid: 'help-complete', on: () => undefined },
             ] },
@@ -762,7 +824,7 @@ export default function XenonDialog(p: {
           <div data-testid="xenon-tabstrip" className="flex min-w-0 flex-1 flex-nowrap items-center gap-1 overflow-x-auto rounded border border-[#2b313b] bg-[#121826] px-2 py-1 text-[12px] [scrollbar-width:thin]">
           {files.map((f, i) => (
             <button key={f.name} data-testid={`xenon-tab-${i}`}
-              onClick={() => { setTab(i); setEditing(false); setArmedDel(false); }}
+              onClick={() => { recNav(); setTab(i); setArmedDel(false); }}
               className={`rounded-t px-3 py-1 ${tab === i ? 'bg-[#10141f] text-[#8fd4ff]' : 'bg-[#1a2233] text-[#7d8aa0]'}`}>
               {i === 0 ? `${comp.program}.main.xc` : f.name}{dirty.has(i) ? ' ●' : ''}
             </button>
@@ -774,33 +836,41 @@ export default function XenonDialog(p: {
             </button>
           )}
           </div>
-          {/* edit/save actions ride BESIDE the strip (never clipped by it) */}
+          {/* actions ride BESIDE the strip (never clipped): SAVE commits
+              the live buffers (⇒ re-boot, breakpoints kept); ◀ ▶ walk the
+              NAV HISTORY (v1.13.27 — the editor is always live, no edit
+              button, no revert: saving is the commit, closing discards) */}
           <div className="flex shrink-0 items-center gap-1 text-[11px]">
-          {onCode && !editing && (
-            <button data-testid="xenon-edit" className="rounded bg-[#1d2c46] px-2 py-0.5
-                   hover:bg-[#27395c]" onClick={startEdit}>✎ edit</button>
-          )}
-          {onCode && editing && (<>
+          {onCode && (<>
             <button data-testid="xenon-save" className="rounded bg-[#2b4a2b] px-2 py-0.5
-                   hover:bg-[#38603a]" onClick={() => save(false)}>💾 save</button>
-            <button data-testid="xenon-save-all" className="rounded bg-[#243a52] px-2 py-0.5
-                   hover:bg-[#2f4c6b]" onClick={() => save(true)}>⇩ all</button>
-            <button data-testid="xenon-edit-cancel" className="px-1.5 py-0.5 text-[#8a93a0]
-                   hover:bg-[#27395c]" onClick={() => setEditing(false)}>↺ revert</button>
+                   hover:bg-[#38603a]" onClick={() => save(false)}
+              title="commit all files to the craft (Ctrl+S) — the computer re-boots, breakpoints survive">
+              💾 save{dirty.size ? ` (${dirty.size})` : ''}
+            </button>
+            <button data-testid="xenon-nav-back" disabled={navPos.current <= 0}
+              className="rounded bg-[#1d2c46] px-1.5 py-0.5 text-[#cfe1ff] hover:bg-[#27395c] disabled:opacity-30"
+              title="back to the previous navpoint (Alt+←)"
+              onClick={() => gotoNav(-1)}>◀</button>
+            <button data-testid="xenon-nav-forward"
+              disabled={navPos.current >= navHist.current.length - 1}
+              className="rounded bg-[#1d2c46] px-1.5 py-0.5 text-[#cfe1ff] hover:bg-[#27395c] disabled:opacity-30"
+              title="forward to the next navpoint (Alt+→)"
+              onClick={() => gotoNav(1)}>▶</button>
           </>)}
           </div>
           </div>
 
           {/* code / nodes */}
           <div data-testid={`xenon-code-${tab}`} data-mode={status}
+            data-paused-jump={pump.paused && pump.pausedFile ? `${pump.pausedFile}:${pump.pausedLine}` : ''}
             className="min-h-0 flex-1 overflow-hidden rounded border border-[#232c3d] bg-[#0b0f18] text-[12px] leading-[1.45]">
             {onCode && file && (
               <CodeEditor ref={editorRef}
                 file={runtimeFiles[tab] ?? file} tabKey={`${comp.ci}:${tab}`}
-                editable={editing} onChange={editChange} onSave={() => save(false)}
+                editable={onCode} onChange={editChange} onSave={() => save(false)}
                 breaks={bps[tab] ?? new Set()}
                 pausedLine={pump.pausedFile === runtimeName(tab) ? pump.pausedLine : 0}
-                errors={editing ? undefined : errors}
+                errors={errors}
                 funcs={funcs} decls={decls}
                 varList={[...pump.vars.values()].map(v => ({ ...v, name: '$' + v.name.replace(/^\$/, '') }))}
                 devices={comp.devices.filter(d => d.alias).map(d => ({ alias: d.alias!, type: d.type }))}
@@ -1039,7 +1109,29 @@ export default function XenonDialog(p: {
                   <div className="text-[10px] leading-snug text-[#9fb0c8]">{f.desc}</div>
                 </div>
               ))}
-              {libDocs.length === 0 && <span className="text-[11px] text-[#5d6a7d]">no library function matches</span>}
+              {libDocs.length === 0 && libConsts.length === 0 && libMembers.length === 0
+                && <span className="text-[11px] text-[#5d6a7d]">no library function matches</span>}
+              {/* GLOBAL CONSTANTS (v1.13.27, we: "red, green which seem to
+                  be built in constants are not recognized. They are
+                  colors"): declared by the game shim (xc_host.cpp), all
+                  NUMBERS — colors hold packed RGBA, swatched here */}
+              {libConsts.length > 0 && (<>
+                <div className="text-[10px] uppercase tracking-widest text-[#5d6a7d]">
+                  Global constants · {libConsts.length}
+                </div>
+                {libConsts.map(c => (
+                  <div key={c.name} data-testid={`xenon-const-${c.name}`} title={`${c.desc} (type: number)`}
+                    className="flex items-center gap-2 rounded border border-l-2 border-[#232c3d] bg-[#131a28] px-2 py-1 text-[11px]"
+                    style={{ borderLeftColor: c.hex ?? (c.kind === 'align' ? '#ffd9a0' : '#a0d9ff') }}>
+                    {c.hex && <span className="inline-block h-3 w-3 shrink-0 rounded-sm border border-[#3a4a6a]"
+                      style={{ background: c.hex }} />}
+                    <span className="text-[#8fd4ff]">{c.name}</span>
+                    <span className="ml-auto shrink-0 text-[9px] uppercase tracking-wide text-[#5d6a7d]">
+                      {c.kind === 'align' ? 'alignment' : c.kind === 'color' ? 'color · number' : 'number'}
+                    </span>
+                  </div>
+                ))}
+              </>)}
               <div className="text-[10px] uppercase tracking-widest text-[#5d6a7d]">
                 Screen members · {libMembers.length}
               </div>

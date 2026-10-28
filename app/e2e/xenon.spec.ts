@@ -192,7 +192,6 @@ test.describe('Xenon IDE @ui', () => {
     await page.getByTestId('xenon-menu').click();
     await page.locator('[data-testid^="xenon-comp-"]').first().click();
     await expect(page.getByTestId('xenon-dialog')).toBeVisible();
-    await page.getByTestId('xenon-edit').click();
     const cm = page.locator('.cm-content');
     await cm.click();
     await page.keyboard.press('Control+End');
@@ -278,8 +277,8 @@ test.describe('Xenon IDE @ui', () => {
         { timeout: 10_000, intervals: [250] })
       .toBe(true);
 
-    // discard the scratch edit (revert, no save)
-    await page.getByTestId('xenon-edit-cancel').click();
+    // closing the IDE DISCARDS the unsaved buffers (v1.13.27: SAVE is the
+    // only commit; the scratch edit never reaches the disk)
     await page.keyboard.press('Escape');
   });
 
@@ -596,6 +595,71 @@ test.describe('Xenon IDE @ui', () => {
     await page.keyboard.press('Escape');
   });
 
+  // v1.13.27 (we: "when hitting a breakpoint in execution, the editor
+  // should move to the point just being hit … create a navpoint we can
+  // browser-history to … save should commit it and reload … keep
+  // breakpoints … red, green … are colors"). E2E-TIER: pump pause timing,
+  // DOM focus geometry, the commit/re-boot loop.
+  test('nav history + breakpoint follow + save keeps breaks @slow @codeditor', async ({ page }) => {
+    await page.goto(`/?craft=${PLANE}`);
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 90_000 });
+    await page.getByTestId('xenon-menu').click();
+    await page.locator('[data-testid^="xenon-comp-"]').first().click();
+    await expect(page.getByTestId('xenon-dialog')).toBeVisible();
+
+    // BREAKPOINT on the every-cycle line 17 (same gutter the debugger leg
+    // uses): the PAUSE makes the pane report the hit (breakpoint-follow)
+    const gutter = page.locator('.xc-break-gutter .cm-gutterElement').nth(16);
+    await expect(gutter).toBeVisible();
+    await gutter.click();
+    await expect(page.locator('.xc-bp')).toHaveCount(1);
+    const pane = page.getByTestId('xenon-code-0');
+    await expect(pane).toHaveAttribute('data-paused-jump', /main\.xc:17$/, { timeout: 20_000 });
+    await page.keyboard.press('F8');
+
+    // SAVE commits + re-boots, the BREAKPOINT SURVIVES (marker + hit)
+    const cm = page.locator('.cm-content');
+    await cm.click();
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type('\n; nav-pin');
+    await page.getByTestId('xenon-save').click();
+    await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 60_000 });
+    await expect(page.locator('.xc-bp')).toHaveCount(1);
+    // the break fires again after the commit (line 18 now — the '; nav-pin'
+    // comment rode in front of nothing, the break line shifted by one)
+    await expect(pane).toHaveAttribute('data-paused-jump', /main\.xc:1[78]$/, { timeout: 20_000 });
+    // disarm the breakpoint, resume — the nav steps run unparked
+    await gutter.click();
+    await expect(page.locator('.xc-bp')).toHaveCount(0);
+    await page.keyboard.press('F8');
+
+    // NAV: the Library jump records the pause spot; Alt+← walks back,
+    // Alt+→ forward
+    await page.getByTestId('xenon-side-library').click();
+    await page.getByTestId('xenon-lib-fn-selectcase').click();
+    await expect(page.getByTestId('xenon-code-1')).toContainText('function @selectcase');
+    await expect(page.getByTestId('xenon-nav-back')).toBeEnabled();
+    await page.keyboard.press('Alt+ArrowLeft');
+    await expect(page.getByTestId('xenon-nav-forward')).toBeEnabled({ timeout: 10_000 });
+    await page.keyboard.press('Alt+ArrowRight');
+
+    // COLORS are first-class: the Colors chip shows swatched constants,
+    // and typing 'r' completes `red` as a constant
+    await page.getByTestId('xenon-lib-g-color').click();
+    await expect(page.getByTestId('xenon-const-red')).toContainText('red');
+    await expect(page.getByTestId('xenon-const-white')).toBeVisible();
+    await page.getByTestId('xenon-tab-1').click();
+    await cm.click();
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type('\nvar $zzc = whi', { delay: 30 });
+    const ac = page.locator('.cm-tooltip-autocomplete');
+    await expect(ac).toBeVisible({ timeout: 8_000 });
+    await expect(ac).toContainText('white');
+    // closing the IDE discards the unsaved buffers (save is the commit)
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Escape');
+  });
+
   test('the editor: syntax colors, right-click menu, go-to-definition, hover @slow @codeditor', async ({ page }) => {
     test.setTimeout(120_000);
     // (we: "there should be a context menu when I right click… I should have
@@ -648,8 +712,7 @@ test.describe('Xenon IDE @ui', () => {
     await page.getByTestId('xenon-menu').click();
     await page.locator('[data-testid^="xenon-comp-"]').first().click();
     await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 60_000 });
-    // edit the disk (the marker rides the doc via the v1.6.1 mirror)
-    await page.getByTestId('xenon-edit').click();
+    // the editor is ALWAYS live (v1.13.27): type, then SAVE commits
     const cm = page.locator('.cm-content');
     await expect(cm).toBeVisible();
     await cm.click();
@@ -736,10 +799,9 @@ test.describe('Xenon IDE @ui', () => {
     const strip = page.getByTestId('xenon-tabstrip');
     const bb = await strip.boundingBox();
     expect(bb!.height).toBeLessThan(46);
-    await expect(page.getByTestId('xenon-edit')).toBeVisible();
+    await expect(page.getByTestId('xenon-save')).toBeVisible();
     // autocomplete (real-time, CodeMirror): bare words complete the library,
     // '$' completes declared/live variables, '@' lists declared functions
-    await page.getByTestId('xenon-edit').click();
     const cm = page.locator('.cm-content');
     await cm.click();
     await page.keyboard.press('Control+End');
@@ -757,8 +819,8 @@ test.describe('Xenon IDE @ui', () => {
     await page.keyboard.type('\n@sel', { delay: 30 });
     await expect(ac).toBeVisible();
     await page.keyboard.press('Escape');
-    // discard the scratch edit (revert, no save)
-    await page.getByTestId('xenon-edit-cancel').click();
+    // closing the IDE DISCARDS the unsaved buffers (v1.13.27: SAVE is the
+    // only commit; the scratch edit never reaches the disk)
     await page.keyboard.press('Escape');
   });
 
@@ -790,7 +852,6 @@ test.describe('Xenon IDE @ui', () => {
     await expect(seat.getByTestId('worldsim-ov-pilotseat.backward_forward'))
       .toHaveCount(0);
     // the firmware reads the overridden channel: input_number(4, 2) = 2002
-    await page.getByTestId('xenon-edit').click();
     const cm = page.locator('.cm-content');
     await expect(cm).toBeVisible();
     // insert INSIDE the update body: anchor on a tab-indented body line and
@@ -814,7 +875,6 @@ test.describe('Xenon IDE @ui', () => {
     // (auto-indent lands the body's tab), type the statement. The old
     // insert-at-Home + mid-line-Enter trick left the split `print` at
     // column 0 = global scope = boot error (measured twice)
-    await page.getByTestId('xenon-edit').click();
     const upd2 = page.locator('.cm-line', { hasText: /^update$/ }).first();
     await expect(upd2).toBeVisible();
     await upd2.click();

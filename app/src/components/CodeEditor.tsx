@@ -35,13 +35,17 @@ import { requestThumb } from '../engine/thumbs';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { tags as t } from '@lezer/highlight';
 import {
-  XC_KEYWORDS, XC_LIB_DOC, XC_LIB_FNS, XC_SCREEN_MEMBERS, definitionOf,
+  XC_KEYWORDS, XC_LIB_DOC, XC_LIB_FNS, XC_SCREEN_MEMBERS, XC_GLOBAL_CONSTS, definitionOf,
   functionTokenAt, ioCallAt, opensBlockLine, type XCDecl, type XCFile, type XCFunction,
 } from '../engine/xcproject';
 
 // ── XenonCode language ────────────────────────────────────────────────
 const KEYWORDS = new Set(XC_KEYWORDS);
 const LIB = new Set(XC_LIB_FNS);
+// v1.13.27: the game's global constants (colors/alignment/pi — declared by
+// the shim, see tools/xenoncode/xc_host.cpp archeanInit); highlighted with
+// the library family and completed with their value/meaning
+const CONSTS = new Set(XC_GLOBAL_CONSTS.map(c => c.name));
 const TYPES = new Set(['number', 'text', 'bool', 'array', 'storage']);
 
 const xcLanguage = StreamLanguage.define({
@@ -57,7 +61,7 @@ const xcLanguage = StreamLanguage.define({
     const s = w && w !== true ? w[0] : null;
     if (s) {
       if (KEYWORDS.has(s)) return 'keyword';
-      if (LIB.has(s)) return 'stdFn';
+      if (LIB.has(s) || CONSTS.has(s)) return 'stdFn';
       if (TYPES.has(s)) return 'type';
       return 'name';
     }
@@ -270,6 +274,12 @@ function CodeEditorInner(p: CodeEditorProps, ref: React.Ref<CodeEditorHandle>) {
           ...XC_LIB_DOC.filter(f => f.name.startsWith(w.text))
             .map(f => ({ label: f.name, type: 'keyword', detail: 'library',
               info: `${f.sig} — ${f.desc}` })),
+          // the game's global constants (v1.13.27, we: "red, green which
+          // seem to be built in constants are not recognized")
+          ...XC_GLOBAL_CONSTS.filter(c => c.name.startsWith(w.text))
+            .map(c => ({ label: c.name, type: 'constant',
+              detail: c.kind === 'color' ? 'color' : c.kind === 'align' ? 'alignment' : 'number',
+              info: c.hex ? `${c.hex} — packed RGBA color constant` : c.desc })),
           ...XC_KEYWORDS.filter(k => k.startsWith(w.text))
             .map(k => ({ label: k, type: 'keyword' })),
           ...s.funcs.filter(f => f.name.startsWith(w.text))

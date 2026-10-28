@@ -236,12 +236,18 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
 - THE CADENCE LAW: the VM cycles at 25 Hz (`CYCLE_MS = 40`, shim
   `xc_set_cycle_ms`); React panels coalesce ≤ 10 Hz; canvases blit EVERY
   cycle.
-- IDE RUN/FIND/GOTO/MAXIMIZE KEYS: F5 = RUN (a draft save ⇒ disk write ⇒
-  auto-reboot; no draft ⇒ `pump.reboot()`) ONLY while a computer or
-  Screens window is open — else F5 stays the browser refresh. Ctrl+F =
-  CM find panel, Ctrl+G = go-to-line box (Esc closes them, NEVER the IDE —
-  popup stopPropagation law). ⛶ / title double-click maximizes
+- IDE RUN/FIND/GOTO/MAXIMIZE KEYS: F5 = RUN (COMMITS the live buffers ⇒
+  disk write ⇒ auto-reboot on them, breakpoints surviving; v1.13.27: NO
+  edit/view mode — files[] are live buffers, save is the only commit,
+  closing discards; autosave shadow-copies the doc as always) ONLY while a
+  computer or Screens window is open — else F5 stays the browser refresh.
+  Ctrl+F = CM find panel, Ctrl+G = go-to-line box (Esc closes them, NEVER
+  the IDE — popup stopPropagation law). ⛶ / title double-click maximizes
   (FloatingWindow `maximized`).
+- NAV + BREAKPOINT-FOLLOW (v1.13.27): every jump (library/def/goto/tab/
+  bp-hit) records a navpoint; ◀ ▶ + Alt+←/→ (CAPTURE — CM binds
+  Alt+arrows) walk the history. A pump pause at a breakpoint jumps the
+  editor to the hit (data-paused-jump = `file:line` is the observable).
 - EDITOR KEY LAWS (v1.13.26): defaultKeymap + `indentWithTab` are REQUIRED
   (CM keeps Tab = focus-move by default; without them Tab leaves the
   editor via the browser); Enter auto-indents one unit — a TAB, the game

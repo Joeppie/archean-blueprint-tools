@@ -2798,6 +2798,50 @@ topic + FORMAT).
   Tab-focus law, goto land, hover device+write, camera-move poll); the
   extras leg gained the category-chip filter steps.
 
+- **v1.13.27 ALWAYS-LIVE EDITOR + NAV HISTORY + BREAKPOINT-FOLLOW + GAME
+  CONSTANTS (we: "I dont want a distinguishment between edit and viewing
+  of code, it should be in edit mode always, save should commit it and
+  reload the code. That should reset the computers state, but keep
+  breakpoints. When hitting a breakpoint in execution, the editor should
+  move to the point just being hit. Also, editing a file at a certain
+  line or moving to a breakpoint like that should create a navpoint we
+  can browser-history to … red, green which seem to be built in constants
+  are not recognized. They are colors … I dont remember the precise
+  type"):** (1) NO edit/view split — `files[]` ARE the live buffers (the
+  CodeMirror onChange writes the tab's buffer + marks ● dirty); `✎ edit`,
+  the draft, `↺ revert` and 'Save all' are GONE; SAVE/F5/Ctrl+S all mean
+  COMMIT (`p.onFiles` ⇒ the write path re-boots the pump on the files);
+  closing the IDE discards unsaved buffers. BREAKPOINTS SURVIVE the
+  re-boot — and the leg PROVED the hole: pump.setBreaksMap mirrors the
+  break set into the worker's SHARED SAB table, and a save-triggered
+  reload builds a NEW worker whose table is empty (the dialog's re-push
+  races the async open and lands on the dead run). THE LAW: pump.open()
+  itself re-mirrors (new `applyBreaks()`, fileTable freshly mapped, called
+  before startLoop) — keep-breakpoints is engine-guaranteed, not
+  UI-luck. `bps` is dialog state untouched by save; `pump.open()` never
+  clears `breaks` (only `close()` does). (2) BREAKPOINT
+  FOLLOW — an effect on [paused, pausedFile, pausedLine] calls jumpTo at
+  the hit (the code pane's `data-paused-jump="file:line"` is the
+  observable the pin reads). (3) NAV HISTORY — browser model: jumpTo
+  records the spot you LEAVE (truncating forward), ◀ ▶ buttons beside the
+  tab strip and Alt+← / Alt+→ (CAPTURE — CM binds Alt+arrows to scope
+  select in the editor; the window capture outranks it) walk the list;
+  breakpoint hits jump THROUGH jumpTo so ◀ returns to the edit.
+  (4) GAME CONSTANTS — the ground truth is OUR SHIM (`xc_host.cpp
+  archeanInit` declares them; the interpreter itself knows no colors):
+  18 colors (white…silver incl. gray/grey), 9 text alignments, pi/2pi —
+  ALL are NUMBERS (colors hold packed RGBA `XENONCODE_COLOR(r,g,b,255)`);
+  `XC_GLOBAL_CONSTS` (vitest-pinned against the shim source: name set
+  equality), completed with kind + hex/meaning, highlighted like the
+  library, and shown in the Library tab under Colors/Alignment/Math chips
+  with swatch dots (XC_LIB_GROUPS gained the three constant-kind keys,
+  pin updated to groups ∪ kinds). e2e: new 'nav history + breakpoint
+  follow + save keeps breaks' leg (@slow @codeditor, PLANE: gutter break
+  → data-paused-jump, save ⇒ ON + .xc-bp count kept, lib-jump ⇒ ◀ enabled
+  ⇒ Alt+← ⇒ ▶ enabled, const-red swatch row, `whi` completes white); all
+  legs author code in the always-live editor (xenon-edit/edit-cancel/
+  save-all testids retired).
+
 ## 2. v1.11 session — KNOWN ISSUES & UNPINNED TODOS (2026-10-25/26 session block)
 
 KNOWN ISSUES (accepted behaviours, costs, sharp edges):

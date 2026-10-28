@@ -172,9 +172,10 @@ describe('library index (XC_LIB_DOC ⇄ XC_LIB_FNS lockstep)', () => {
 import { ioCallAt, opensBlockLine, XC_LIB_GROUPS } from '../xcproject';
 
 describe('library group tabs', () => {
-  it('group keys cover exactly the groups the table uses', () => {
+  it('group keys cover the function groups PLUS the three constant kinds', () => {
     const groups = new Set(XC_LIB_DOC.map(f => f.group));
-    expect(new Set(XC_LIB_GROUPS.map(g => g.key))).toEqual(groups);
+    expect(new Set(XC_LIB_GROUPS.map(g => g.key)))
+      .toEqual(new Set([...groups, 'color', 'align', 'math']));
     for (const g of XC_LIB_GROUPS) expect(g.color).toMatch(/^#[0-9a-f]{6}$/);
   });
 });
@@ -211,5 +212,28 @@ describe('ioCallAt (io hover hit test)', () => {
     const two = 'print(text(input_number("a", 1)))';
     expect(ioCallAt(two, 2)).toBeNull();          // print is NOT an io call
     expect(ioCallAt(two, 20)?.fn).toBe('input_number');
+  });
+});
+
+// ── v1.13.27 global constants: lockstep with THE SHIM (the ground truth)
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { XC_GLOBAL_CONSTS } from '../xcproject';
+
+describe('XC_GLOBAL_CONSTS ⇄ xc_host.cpp lockstep', () => {
+  it('names every DeclareGlobalConstant the shim makes, and no others', () => {
+    const src = readFileSync(
+      fileURLToPath(new URL('../../../../tools/xenoncode/xc_host.cpp', import.meta.url)),
+      'utf8');
+    const shim = [...src.matchAll(/DeclareGlobalConstant\("([\w.]+)"/g)].map(m => m[1]!);
+    expect([...XC_GLOBAL_CONSTS.map(c => c.name)].sort())
+      .toEqual([...new Set(shim)].sort());
+  });
+  it('every color has a #rrggbb swatch; align/math have none', () => {
+    for (const c of XC_GLOBAL_CONSTS) {
+      if (c.kind === 'color') expect(c.hex, c.name).toMatch(/^#[0-9a-f]{6}$/);
+      else expect(c.hex, c.name).toBeUndefined();
+      expect(c.desc.length, c.name).toBeGreaterThan(3);
+    }
   });
 });

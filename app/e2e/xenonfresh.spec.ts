@@ -40,7 +40,7 @@ test.describe('a fresh MiniComputer is programmable @ui', () => {
     await expect.poll(cycles, { timeout: 15_000 }).toBeGreaterThan(0);
 
     // AUTHOR the first program — the in-game ritual: type, save ⇒ reboot
-    await page.getByTestId('xenon-edit').click();
+    // v1.13.27: the editor is ALWAYS live — type straight into the boot
     const cm = page.locator('.cm-content');
     await expect(cm).toBeVisible();
     await cm.click();

@@ -1132,6 +1132,7 @@ export class XenonPump {
       // strip and the breakpoint state key files by.
       if (sf.length) this.fileTable = sf.map(n => n === 'main.xc' ? comp.entryName : n);
     }
+    this.applyBreaks();   // the fresh worker's bp table starts empty (v1.13.27)
     if (run.error) { this.status = 'error'; this.error = run.error; }
     else {
       this.status = 'running';
@@ -1180,8 +1181,17 @@ export class XenonPump {
     this.breaks = new Map(Object.entries(map)
       .map(([f, s]) => [f, s instanceof Set ? s : new Set(s)] as const)
       .filter(([, s]) => s.size > 0));
-    // worker mode: mirror the set into the shared bp table (file idx, line
-    // pairs at i32[12+], count at i32[11]) — the hook checks it per line
+    this.applyBreaks();
+    this.notify();
+  }
+  /** Mirror the break set into the worker's shared bp table (file idx,
+   *  line pairs at i32[12+], count at i32[11]) — the hook checks it per
+   *  line. MUST run after every open(): a re-boot (save ⇒ reload ⇒ open)
+   *  builds a NEW worker whose table starts empty, and the game rule is
+   *  that the re-boot resets the computer's state but KEEPS the
+   *  breakpoints (v1.13.27, we: "That should reset the computers state,
+   *  but keep breakpoints" — the leg caught the empty-table hole) */
+  private applyBreaks() {
     const i = this.i32;
     if (i) {
       let n = 0;
@@ -1196,7 +1206,6 @@ export class XenonPump {
       }
       Atomics.store(i, 11, n);
     }
-    this.notify();
   }
   breaksOf(file: string): Set<number> { return this.breaks.get(file) ?? new Set(); }
 

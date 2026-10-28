@@ -11,9 +11,9 @@ mid-cycle at the breakpoint: the pause pill shows `file:line`, the Vars
 panel's top section shows the **Locals** of the frame you stopped in (its
 arguments and block variables, with types), the globals tick below. Step
 with **F10** (over) / **F11** (into), resume with **F8** or the Run menu.
-**F5** runs the program fresh: it saves the file you are editing (a save
-re-boots the computer, the game's rule) — with nothing to save it re-boots
-from disk.
+**F5** runs the program fresh: it COMMITS the files (a commit re-boots the
+computer on them, breakpoints included — the editor is always live, saving
+is the commit).
 
 A frame exists for `function @name` bodies **and** for the global-scope
 blocks: `update`, `init`, `tick`, `timer frequency N`, `input N` — they

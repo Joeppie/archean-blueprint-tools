@@ -29,16 +29,23 @@ computer does at power-on. The files live **in the craft** — the virtual
 disk is the blueprint's `data.hdd.xc_files`, so everything you do here saves
 with the craft and travels in the file.
 
-* **Editing + the virtual disk** — `✎ edit` opens the file as a text editor
-  (every line, no cap — huge 16k-line firmware files scroll fine). `💾 save`
-  (or `CTRL+S`) writes the file back into the craft and the computer
-  **auto-reboots on the new code**, the game's rule; `save all` is
-  `CTRL+SHIFT+S`. **F5 runs the code**: it saves what you are editing (and
-  so re-boots on it) — with no draft it just re-boots the computer from
-  disk. The page only refreshes on F5 when NO computer or Screens window is
-  open. The `File ▾` row shows the disk and **creates** files
+* **Always editing + the virtual disk** — the code pane is a live text
+  editor from the first glance (every line, no cap — huge 16k-line firmware
+  files scroll fine); there is NO edit/view switch. `💾 save` (or `CTRL+S`,
+  or **F5**) COMMITS the files to the craft — the tab shows a ● per changed
+  file — and the computer **re-boots on the new code** (the game's rule),
+  **breakpoints included**: your red dots survive the re-boot and stop it
+  again. Closing the IDE without saving discards the unsaved buffers. The
+  craft's routine autosave keeps shadow-copying the blueprint as always.
+  The `File ▾` row shows the disk and **creates** files
   (plain `.xc` includes, or `program` → `name.main.xc`) and **deletes** the
   open tab. Files you create are in the saved blueprint and in the game.
+* **Nav history** — every jump (library click, go-to-definition, Ctrl+G,
+  a breakpoint hit, tab switch) records a navpoint: `◀ ▶` beside the tabs
+  (and `ALT+←` / `ALT+→`) walk back and forth through where you'd been.
+* **Breakpoint follow** — when the run stops on your breakpoint, the
+  editor moves to the hit (file + line), so you land exactly where the
+  program parked; `◀` takes you back to what you were editing.
 * **Find, goto, indent** — `CTRL+F` opens the editor's find panel from
   anywhere in the IDE (it never triggers the browser's own search).
   `CTRL+G` jumps to a line number. `TAB` always indents inside the code
