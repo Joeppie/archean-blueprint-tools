@@ -131,6 +131,10 @@ Brothers"**, a XenonCode game that reads the `gamer-chair` PilotSeat, drives
 eight Buzzer components for its 8-bit music and paints six HdScreen
 surfaces. Sit in the seat (worldsim default = occupied, so it reads seated),
 open the TV surface, click 🔊, and play with WASD/↑/↓/F.
+
+On a phone the interpreter runs the game at ~14 updates/s; the computer is
+fed the REAL time between updates, so Mario moves at true speed (a choppy
+14 fps, not slow motion) and the buzzer tunes play at their proper tempo.
 * **Side panel** (right of the code, tabbed):
   * **Vars** — every global variable of the running program, live: RAM and
     `storage` values, with `storage` tagged. Text values written in the

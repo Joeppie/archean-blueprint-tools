@@ -479,7 +479,44 @@ static void archeanInit() {
 			const uint8_t* p = s->data() + ((size_t)y * s->GetWidth() + x) * 4;
 			uint32_t v; memcpy(&v, p, 4); return v;
 		};
-		double rad = rot * 3.14159265358979 / 180.0, cs = cos(rad), sn = sin(rad);
+		double rad = rot * 3.14159265358979 / 180.0;
+		// INTEGER-BLIT FAST PATH (v1.13.4 perf, we: "Mario runs quite slow
+		// on the pixel phone"): with rot == 0 the bilinear sample grid is
+		// the integer grid — the 4-sample float blend collapses to a plain
+		// row copy. Mario blits thousands of sprite pixels per cycle; the
+		// per-pixel float blend dominated the VM cycle (20 cycles/s on
+		// desktop, 11 on a throttled ≈ phone CPU).
+		if (rot == 0.0) {
+			const uint32_t* sdat = reinterpret_cast<const uint32_t*>(s->data());
+			uint32_t* ddat = reinterpret_cast<uint32_t*>(d->data());
+			for (int j = 0; j < h; ++j) {
+				int yy = sy + j; if (yy < 0 || yy >= (int)s->GetHeight()) continue;
+				int dyY = dy + j; if (dyY < 0 || dyY >= (int)d->GetHeight()) continue;
+				const uint32_t* srow = sdat + (size_t)yy * s->GetWidth();
+				uint32_t* drow = ddat + (size_t)dyY * d->GetWidth();
+				int i0 = 0, i1 = w;
+				if (dx + i0 < 0) i0 = -(dx + i0);
+				if (dx + i1 > (int)d->GetWidth()) i1 = (int)d->GetWidth() - dx;
+				int j0 = 0, j1 = h;   // clamp source x too
+				(void)j0; (void)j1;
+				for (int i = i0; i < i1; ++i) {
+					int xx = sx + i; if (xx < 0 || xx >= (int)s->GetWidth()) continue;
+					uint32_t p = srow[xx];
+					if (tint >= 0) {
+						uint32_t t = uint32_t(tint);
+						for (int sh2 = 0; sh2 < 24; sh2 += 8)
+							p = (p & ~(255u << sh2))
+							    | (((((p >> sh2) & 255) * ((t >> sh2) & 255)) >> 8) << sh2);
+					} else if (!p) {
+						continue;                      // transparent source pixel
+					}
+					drow[dx + i] = p;
+				}
+			}
+			d->Dirty();
+			return {};
+		}
+		double cs = cos(rad), sn = sin(rad);
 		double cx = w / 2.0, cy = h / 2.0;
 		for (int j = 0; j < h; ++j) {
 			for (int i = 0; i < w; ++i) {
@@ -942,6 +979,23 @@ EMSCRIPTEN_KEEPALIVE int xc_boot() {
 // run one computer cycle (timers/tick + the update entry point); returns 0 ok
 EMSCRIPTEN_KEEPALIVE int xc_cycle() {
 	if (!g_computer) return 1;
+	// REAL-TIME dt (v1.13.4, we: "Mario runs quite slow on the pixel
+	// phone"): a slow CPU drops the cycles/s BELOW the pump's 25 Hz —
+	// with a fixed dt the game then advances in SLOW MOTION. Feed the
+	// interpreter the real interval between cycles instead (clamped to
+	// the game's own clamp so a stalled tab cannot teleport sprites);
+	// a 25 Hz pump keeps the fixed 40 ms cadence anyway.
+	{
+		static double lastNow = -1.0;
+		const double now = emscripten_get_now();
+		if (lastNow > 0) {
+			double d = (now - lastNow) / 1000.0;
+			if (d > 0.12) d = 0.12;
+			if (d < 0.001) d = 0.001;
+			xc_dt = d;
+		}
+		lastNow = now;
+	}
 	xc_simTime += xc_dt;
 	xc_tickCount++;
 	if (g_pilotScripted) pilotAtCycle(g_cycle);

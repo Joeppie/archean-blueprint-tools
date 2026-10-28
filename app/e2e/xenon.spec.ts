@@ -630,6 +630,19 @@ test.describe('Xenon IDE @ui', () => {
     await page.getByTestId('screens-canvas-screen#0').click();
     await expect(page.getByTestId('screens-cell-screen#0-overlay')).toBeVisible();
     await page.getByTestId('screens-cell-screen#0-fullexit').click();
+
+    // THE TOPBAR SOUND ICON (we: "place a mute icon/sound icon near the
+    // 'view' buttons … which animates whenever any buzzer is making
+    // sound"): visible beside ⚙ View while the dock keeps the computer
+    // running (closing the dock without the IDE closes the pump, and the
+    // icon stands down with it), starts muted; the click is the
+    // autoplay-safe gesture. Checked NOW — once the IDE opens it covers
+    // the TopBar.
+    const snd = page.getByTestId('buzzer-toggle');
+    await expect(snd).toBeVisible();
+    await expect(snd).toHaveAttribute('aria-pressed', 'false');
+    await snd.click();
+    await expect(snd).toHaveAttribute('aria-pressed', 'true');
     await page.getByTestId('screens-close').click();
 
     // app-shortcut law: 'w' did NOT toggle wireframe while the dash was
@@ -693,15 +706,6 @@ test.describe('Xenon IDE @ui', () => {
     await expect(page.getByTestId('buzzer-row-game-bass')).toBeVisible();
     await expect(page.getByTestId('buzzer-sound')).toBeVisible();     // 🔊 (autoplay-safe)
     await expect(page.getByTestId('buzzer-wave-sawtooth')).toBeVisible();
-    // THE TOPBAR SOUND ICON (we: "place a mute icon/sound icon near the
-    // 'view' buttons … which animates whenever any buzzer is making sound
-    // so its evident that is the reason there is sound"): visible beside
-    // ⚙ View, starts muted; the click is the autoplay-safe gesture.
-    const snd = page.getByTestId('buzzer-toggle');
-    await expect(snd).toBeVisible();
-    await expect(snd).toHaveAttribute('aria-pressed', 'false');
-    await snd.click();
-    await expect(snd).toHaveAttribute('aria-pressed', 'true');
     // the game IS playing: the title DEMO is deliberately silent (main.xc
     // sets musicgate=0) and inputs during the ~16 s sprite-cache phase are
     // swallowed — MASH the jump key (the Bus tab arms the pilot keys too)

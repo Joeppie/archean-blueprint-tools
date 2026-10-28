@@ -1645,7 +1645,19 @@ topic + FORMAT).
    gesture, and it THROBS (.buzzer-anim CSS pulse) while buzzerAudio.level
    > 0 — the engine tracks `level` = the loudest live Amplitude EVERY
    sync, even on devices with no audio; `data-playing` mirrors it for the
-   pins. No XenonCode emulation of the Buzzer component (deliberate:
+   pins. (e) PHONE SPEED (we: "Mario also runs quite slow on the pixel
+   phone … xenoncode might be slow, … might be the draw operations"):
+   MEASURED with app/tools/marioperf.mjs (CDP CPU-throttle): the VM cycle
+   dominates (20 cycles/s desktop, 11.2 at 6× throttle, canvases closed —
+   the JS blit is NOT the bottleneck). Two shim fixes: screen_copy gained
+   an INTEGER-BLIT FAST PATH for rot==0 (the bilinear float blend collapses
+   to a row copy — 6×-throttled 11.2 → 13.9 cycles/s, +24%) and xc_cycle()
+   feeds the interpreter the REAL ms between cycles (clamped to the game's
+   own 0.12 s) — at 14 cycles/s the game now runs at 1.0× real time (a
+   choppy 14 fps) instead of 0.45× slow motion. Real perf left on the
+   table (measured, deferred): the XenonCode interpreter itself is the
+   floor; a wasm build of the interpreter with SIMD blits is the next
+   lever. No XenonCode emulation of the Buzzer component (deliberate:
    "We dont need to emulate their precise xenoncode for now").
  - **v1.13.3 THE TOUCH COCKPIT (we: "for mobile phone, overlay all keyboard
    binds as buttons that do keydown when pressing and up when letting go,

@@ -116,7 +116,11 @@ export function ScreenCanvas(p: {
   };
   return <canvas ref={ref} data-testid={p.testid} width={p.w} height={p.h}
     className={p.tight ? 'block bg-black' : 'rounded-sm border border-[#2b313b] bg-black'}
-    style={{ imageRendering: 'pixelated', maxHeight: p.maxH ?? 220,
+    style={{ imageRendering: 'pixelated',
+             // fill mode (the zoom window) is WIDTH-driven — a maxHeight
+             // would clamp the height while the width keeps zooming and
+             // re-introduce the sideways squash
+             maxHeight: p.fill ? undefined : p.maxH ?? 220,
              width: p.fill ? '100%' : 'auto', maxWidth: '100%', cursor: 'pointer',
              // fill mode scales the canvas to its container WIDTH; the
              // height must follow the intrinsic ratio — leaving it at the
