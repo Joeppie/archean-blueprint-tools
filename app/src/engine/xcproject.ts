@@ -28,7 +28,7 @@ export interface XCDecl { name: string; file: string; line: number }  // '$name'
 
 const FN_RE = /^\s*(?:recursive\s+)?function\s+@([\w.]+)\s*\(([^)]*)\)/;
 const INCLUDE_RE = /^\s*include\s+"([^"]+)"/;
-const DECL_RE = /^\s*(?:var|const|storage|init|array|param|text|number)\s+(@?\$?[\w.]+)/;
+const DECL_RE = /^\s*(?:(?:storage|global|local)\s+)?(?:var|const|storage|array|init|param|global|local)\s+(@?\$?[\w.]+)\s*(?::\s*\w+|=(?!=))?/;
 
 /** Every function declaration across the disk, in (file, line) order. */
 export function projectFunctions(files: XCFile[]): XCFunction[] {

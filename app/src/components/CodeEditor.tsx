@@ -19,14 +19,14 @@
 import {
   forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState,
 } from 'react';
-import { Compartment, EditorState, RangeSetBuilder, type Extension } from '@codemirror/state';
+import { Compartment, Prec, EditorState, RangeSetBuilder, type Extension } from '@codemirror/state';
 import {
   Decoration, EditorView, GutterMarker, ViewPlugin, hoverTooltip, keymap, lineNumbers,
   gutter, type BlockInfo, type DecorationSet, type ViewUpdate,
 } from '@codemirror/view';
 import { StreamLanguage } from '@codemirror/language';
 import {
-  autocompletion, startCompletion,
+  autocompletion, closeCompletion, completionStatus, startCompletion,
   type Completion, type CompletionContext, type CompletionResult,
 } from '@codemirror/autocomplete';
 import { searchKeymap } from '@codemirror/search';
@@ -312,12 +312,30 @@ function CodeEditorInner(p: CodeEditorProps, ref: React.Ref<CodeEditorHandle>) {
         xcLanguage,
         roC.of([EditorState.readOnly.of(!p.editable), EditorView.editable.of(p.editable)]),
         decoC.of(lineDecoExt(p.breaks, p.pausedLine, p.errors)),
+        // Escape over an OPEN completion popup closes the popup and STOPS
+        // there (v1's popup stopPropagation law). CM's completion keymap
+        // consumes Escape WITHOUT stopping propagation, so the window's
+        // Esc-closes-the-IDE handler eats the same keystroke — a
+        // Prec.high binding ahead of it is the only clean stop.
+        Prec.high(keymap.of([{ key: 'Escape', stopPropagation: true, run: (view) => {
+          if (!completionStatus(view.state)) return false;
+          closeCompletion(view);
+          return true;
+        } }])),
         autocompletion({ override: [completionSource] }),
         hover,
         keymap.of([
           { key: 'Ctrl-s', run: () => { propsRef.current.onSave?.(); return true; } },
           { key: '$', run: trigger('$') },
           { key: '@', run: trigger('@') },
+          // Escape over an OPEN completion popup closes the popup and stops
+          // there (v1's popup stopPropagation law: without it the window
+          // handler eats the same Escape and the whole IDE closes)
+          { key: 'Escape', run: (view) => {
+            if (!completionStatus(view.state)) return false;
+            closeCompletion(view);
+            return true;
+          } },
           ...searchKeymap,
         ]),
 

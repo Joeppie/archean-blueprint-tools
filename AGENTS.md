@@ -1921,6 +1921,51 @@ topic + FORMAT).
   P2 (worker + Atomics true line-stepping, approved) adds the mid-line stop
   hook to the XENON-DEBUG commit. `XENONCODE_UPSTREAM.md` documents every
   commit; NOTICE §6 + .gitattributes follow.
+- **v1.13.16 THE REAL DEBUGGER + CODEMIRROR 6 EDITOR (we: "f10 should mean
+  step one line and f11 step into, there should be a context menu when I
+  right click. And when I edit code, I need syntax highlighting, I should
+  have go to definition as a right click menu and hovering over a function
+  should tell me its signature and where it lives")**: XENON-DEBUG **v2**
+  (fork commit `0516ccb`, shim ABI 6): the interpreter streams
+  EXECUTION-ORDER `(file * 1000000 + line)` pairs (SOURCEFILE tracks the
+  file per LINENUMBER) + a weak-extern `xc_debug_hook(file,line)` stop-hook
+  seam (the future worker+Atomics host sleeps there mid-cycle; the
+  interpreter needs no further change). Pump (xenoncode.ts): F10 = STOP AT
+  THE NEXT EXECUTED LINE (step-over leaves the enclosing function's body
+  via the project index), F11 = next pair anywhere, `runTo(file,line)`,
+  breakpoints keyed BY FILE (inactive tabs fire too), pause AT the first
+  executed pair, `pausedFile/pausedLine`, `fileTable` = includeOrder(entry
+  BFS); XenonTest gate cycles never touch the debugger.
+  `engine/xcproject.ts` = the PURE project model (function index with body
+  ends, include BFS, declarations, token hit-test) + vitest pins on corpus
+  syntax (`function @name($a:type)`, `include "f.xc"`).
+  `components/CodeEditor.tsx` replaces the virtualized read-view +
+  textarea: CodeMirror 6 + XenonCode StreamLanguage, breakpoint gutter
+  (click toggles, ●/▶), right-click menu (Go to Definition · Run to
+  Cursor · breakpoints · clipboard · Save), hover (`@name` → 'defined in
+  game.xc:83', `$var` → live value), Ctrl+Click go-to-def, completion on
+  typing + `$`/`@` triggers (device aliases complete inside
+  output_number("...")), oneDark, viewport-virtualized. Dialog: WHERE-AM-I
+  pill (`file:line @fn`, data-file/data-line), BREAKPOINTS overview strip
+  (jump + ✕), stepping chip, Run-menu F10/F11 items.
+  LANDINGS (the installed @codemirror/view is the block-syntax rewrite):
+  GutterMarker paints via `elementClass` + `toDOM` (the old `toElement` is
+  NOT in the protocol — markers silently vanished);
+  `EditorView.domEventHandlers` AND plugin `eventHandlers` bind contentDOM
+  ONLY — gutter events need plain listeners on `view.dom`; CM's
+  completion-Escape consumes the key WITHOUT stopping propagation, so a
+  `Prec.high` binding with `stopPropagation: true` guards the
+  Esc-closes-IDE law; Home is column 0 and **XenonCode section bodies are
+  TAB-indented (indent-significant)** — e2e code edits type their own
+  `\t` and anchor INSIDE visible lines (`/input_number\(4, 2\)/` regex:
+  `$`-text locators match raw, hasText ignores the model).
+  `pump.vars` keys are '$'-LESS (hover/complete normalize). CEP's disk
+  declares ZERO functions (the v1.13.3 '@sel' popup assertion was a latent
+  @slow red — the leg now runs on PLANE, and `storage var $x` lines
+  parse their NAME, not 'var'). e2e: xenon.spec 15/15 (new debugger leg:
+  overview + pause AT plomo.main.xc:17 + F10 data-line ADVANCE + F11 + F8
+  + ✕; new editor leg on PLANE: colors, context menu, hover 'defined
+  in'). vitest 891, tsc clean.
 - **v1.13.x XENON batch 4: WORLDSIM (we: "World should be under xenoncode,
  be its own screen and we should have functions that we can put in that
  define values over time, i.e. sin(t) … sensible defaults … flight at 2000

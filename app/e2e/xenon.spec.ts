@@ -231,11 +231,12 @@ test.describe('Xenon IDE @ui', () => {
     await expect(dispRow).not.toContainText('1', { timeout: 8_000 });
     // the 3381670618 code validates clean (no red lines in the entry file)
     await page.getByTestId('xenon-tab-0').click();
-    await expect(page.locator('[data-testid^="xenon-err-"]')).toHaveCount(0);
-    // $var hover: the tooltip shows the CURRENT value
-    const tok = page.locator('span.relative', { hasText: /^\$auto$/ }).first();
+    await expect(page.locator('.cm-line.xc-line-error')).toHaveCount(0, { timeout: 15_000 });
+    // $var hover (CM): the tooltip shows the CURRENT live value
+    const tok = page.locator('.cm-content span').filter({ hasText: /^\$auto\b/ }).first();
+    await expect(tok).toBeVisible({ timeout: 15_000 });
     await tok.hover();
-    await expect(page.getByTestId('xenon-var-tip-auto')).toContainText('=');
+    await expect(page.locator('.cm-tooltip .xc-hover').first()).toContainText('=', { timeout: 8_000 });
     await page.keyboard.press('Escape');
   });
 
@@ -298,8 +299,9 @@ test.describe('Xenon IDE @ui', () => {
     // (we: "there should be a context menu when I right click… I should have
     // go to definition as a right click menu and hovering over a function
     // should tell me its signature and where it lives… I need syntax
-    // highlighting")
-    await page.goto(`/?craft=${CEP}`);
+    // highlighting") — PLANE: its functions.xc declares @to/@call/@selectcase
+    // tokens to hover and jump to
+    await page.goto(`/?craft=${PLANE}`);
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 90_000 });
     await page.getByTestId('xenon-menu').click();
     await page.locator('[data-testid^="xenon-comp-"]').first().click();
@@ -332,7 +334,7 @@ test.describe('Xenon IDE @ui', () => {
     await fnTok.hover();
     await expect(page.locator('.cm-tooltip span.xc-hover, .cm-tooltip .xc-hover').first())
       .toContainText('defined in', { timeout: 8_000 });
-    page.keyboard.press('Escape');
+    await page.keyboard.press('Escape');
   });
 
   test('autosaves: a disk edit is shadowed, a reload loses it, Restore brings it back @slow', async ({ page }) => {
@@ -446,7 +448,7 @@ test.describe('Xenon IDE @ui', () => {
     await page.keyboard.press('Enter');
     await expect(cm).toContainText('input_number');
     await page.keyboard.type('  + $roll', { delay: 30 });
-    await expect(ac).toBeVisible();
+    await expect(ac).toBeVisible({ timeout: 8_000 });
     await expect(ac).toContainText('$rollnum');
     await page.keyboard.press('Escape');
     // declared FUNCTION completion: '@' lists function @names declared on disk
@@ -489,25 +491,30 @@ test.describe('Xenon IDE @ui', () => {
     await page.getByTestId('xenon-edit').click();
     const cm = page.locator('.cm-content');
     await expect(cm).toBeVisible();
-    // caret into the update body: the 'update' section header line, End, Enter
-    const up = page.locator('.cm-line', { hasText: /^update/ }).first();
-    await expect(up).toBeVisible({ timeout: 15_000 });
-    await up.click();
+    // insert INSIDE the update body: anchor on a tab-indented body line and
+    // type before it — CM copies that line's indent, so the new line lands
+    // in the section (XenonCode section bodies are indent-significant)
+    // the print goes at the TOP of the update body (right after the
+    // section header) — XenonCode section bodies are TAB-indented
+    // (indent-significant), the typed line carries its own tab
+    const upd = page.locator('.cm-line', { hasText: /^update$/ }).first();
+    await expect(upd).toBeVisible({ timeout: 15_000 });
+    await upd.click();
     await page.keyboard.press('End');
     await page.keyboard.press('Enter');
-    await page.keyboard.type('print(text("alt: {}", input_number(4, 2)))');
+    await page.keyboard.type('	print(text("alt: {}", input_number(4, 2)))');
     await page.getByTestId('xenon-save').click();
     await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 90_000 });
     await page.getByTestId('xenon-side-console').click();
     await expect(page.getByTestId('xenon-log')).toContainText('alt: 2002', { timeout: 30_000 });
     // PROGRAM override via setworldsim wins over the expression
     await page.getByTestId('xenon-edit').click();
-    const up2 = page.locator('.cm-line', { hasText: /^update/ }).first();
-    await expect(up2).toBeVisible();
-    await up2.click();
-    await page.keyboard.press('End');
+    const body2 = page.locator('.cm-line', { hasText: /input_number\(4, 2\)/ }).first();
+    await expect(body2).toBeVisible();
+    await body2.click();
+    await page.keyboard.press('Home');
+    await page.keyboard.type('\tsetworldsim("navinstrument.altitude_meters_from_sea_level", 3000)');
     await page.keyboard.press('Enter');
-    await page.keyboard.type('setworldsim("navinstrument.altitude_meters_from_sea_level", 3000)');
     await page.getByTestId('xenon-save').click();
     await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 90_000 });
     await page.getByTestId('xenon-side-world').click();

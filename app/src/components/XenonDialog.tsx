@@ -535,9 +535,9 @@ export default function XenonDialog(p: {
                 pausedLine={pump.pausedFile === runtimeName(tab) ? pump.pausedLine : 0}
                 errors={editing ? undefined : errors}
                 funcs={funcs} decls={decls}
-                varList={[...pump.vars.values()]}
+                varList={[...pump.vars.values()].map(v => ({ ...v, name: '$' + v.name.replace(/^\$/, '') }))}
                 devices={comp.devices.filter(d => d.alias).map(d => ({ alias: d.alias!, type: d.type }))}
-                getVar={(n) => { const v = pump.vars.get(n); return v ? { v: v.v, type: varKind(v.t) } : undefined; }}
+                getVar={(n) => { const k = n.replace(/^\$/, ''); const v = pump.vars.get(k) ?? pump.vars.get(n); return v ? { v: v.v, type: varKind(v.t) } : undefined; }}
                 debugActive={pump.status === 'running' || pump.status === 'stopped'}
                 onToggleBreak={(l) => toggleBp(l)}
                 onRunTo={(l) => pump.runTo(runtimeName(tab), l)}
