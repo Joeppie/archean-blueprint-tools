@@ -243,6 +243,66 @@ export function docEnsureArray(root: DocNode, path: (string | number)[]): boolea
   return true;
 }
 
+/** Guarantee an OBJECT node at a path: every missing key ALONG THE WAY is
+ *  created as an empty object in its ALPHABETICAL position — the
+ *  docEnsureArray rule extended to intermediate parents (a freshly placed
+ *  component carries `data: {}` with NO `hdd` key; without this the whole
+ *  xc_files write silently misses the doc = the v1.6.1 class, v1.13.20).
+ *  Existing nodes that are not objects REFUSE the write, and the refusal
+ *  lands before anything mutates (no half-built path toward a corrupted
+ *  node). True = the object exists at the path afterwards. */
+export function docEnsureObject(root: DocNode, path: (string | number)[]): boolean {
+  if (path.length === 0) return root.kind === 'obj';
+  // pre-pass: every EXISTING node on the way must be the right container;
+  // array indices (component slots) must exist — refuse BEFORE mutating
+  let n: DocNode | undefined = root;
+  for (const p of path) {
+    if (n === undefined) break;
+    if (n.kind === 'obj' && typeof p === 'string') n = n.entries.find(([k]) => k === p)?.[1];
+    else if (n.kind === 'arr' && typeof p === 'number')
+      n = p >= 0 && p < n.items.length ? n.items[p] : undefined;
+    else return false;
+  }
+  if (n !== undefined) return n.kind === 'obj';
+  // build the missing tail as empty objects
+  let cur: DocNode = root;
+  for (const p of path) {
+    if (cur.kind === 'obj' && typeof p === 'string') {
+      const f = cur.entries.find(([k]) => k === p);
+      if (f) { cur = f[1]; continue; }
+      let at = cur.entries.length;
+      for (let i = 0; i < cur.entries.length; i++)
+        if (cur.entries[i]![0] > p) { at = i; break; }
+      const next: DocNode = { kind: 'obj', entries: [] };
+      cur.entries.splice(at, 0, [p, next]);
+      cur = next;
+    } else if (cur.kind === 'arr' && typeof p === 'number' && p >= 0 && p < cur.items.length) {
+      cur = cur.items[p]!;
+    } else return false;
+  }
+  return cur.kind === 'obj';
+}
+
+/** Replace the NODE at a path wholesale (the key must exist — the pair of
+ *  docEnsureObject, which creates it empty). True = applied. */
+export function docReplace(root: DocNode, path: (string | number)[], node: DocNode): boolean {
+  if (path.length === 0) return false;
+  const parent = docGet(root, path.slice(0, -1));
+  if (!parent) return false;
+  const key = path[path.length - 1]!;
+  if (parent.kind === 'obj' && typeof key === 'string') {
+    const e = parent.entries.find(([k]) => k === key);
+    if (!e) return false;
+    e[1] = node;
+    return true;
+  }
+  if (parent.kind === 'arr' && typeof key === 'number' && key >= 0 && key < parent.items.length) {
+    parent.items[key] = node;
+    return true;
+  }
+  return false;
+}
+
 export function docArrayRemoveAt(root: DocNode, path: (string | number)[],
   index: number): boolean {
   const arr = docGet(root, path);

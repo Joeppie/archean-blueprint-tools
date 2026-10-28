@@ -1,8 +1,9 @@
 # Xenon — run the craft's computer programs
 Tags: xenon worldsim world sim xenoncode window zoom drag resize fullscreen computer code program ide screen hd-screen virtual screen nodes canvas programing programming plomo firstflight badger mario wasm interpreter variables vars disk files edit breakpoint debugger step autosave shadow deep link dash filter search cockpit keyboard wasd jump run space buzzer sound sawtooth melody super mario gamer-chair 25 hz tile flush mobile phone touch buttons pad
 
-**Xenon ▾** (top bar, only on crafts that carry `MiniComputer` components with
-`.xc` programs) lists every programmable computer on the vessel. Clicking one
+**Xenon ▾** (top bar, on any craft that carries a `MiniComputer` or
+`Computer` — a freshly placed one included, its first program authored
+right in the IDE) lists every programmable computer on the vessel. Clicking one
 opens the **XenonCode IDE** — the same look as the in-game window: title bar
 with the ON indicator, the File/Library/Computer menu row, one tab per `.xc`
 file, line-numbered code, and the `Program 'name' loaded / is running…`

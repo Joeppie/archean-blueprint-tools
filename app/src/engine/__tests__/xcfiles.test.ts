@@ -70,6 +70,30 @@ describe('the Xenon virtual disk (xc_files) write paths', () => {
     expect(xf).toEqual([{ name: 'main.xc', plain_code: 'print(9)\n' }]);
   });
 
+  test('THE FRESH-COMPUTER AUTHORING ROUND-TRIP (v1.13.20): data {} → '
+    + 'listed blank tab → save → the code is IN THE FILE and reloads', () => {
+      // a placed MiniComputer (newcraft.ts gives data {}): xenonComputers
+      // synthesizes the blank main.xc (the listing pin in xenoncode.test);
+      // the IDE's save (Editor.xenonFiles) matches by name, finds no disk
+      // entry, and inserts — the v1.6.1 funnel. The SAVE must carry the
+      // code (the doc is the save AND the history), and a reopen must show
+      // it as the entry file.
+      const src = '{"author":"jo","data":{"blocks":[],"components":['
+        + '{"alias":"","colors":{"color1":{"r":1,"g":1,"b":12,"opacity":15,"roughness":4,"metallic":0}},'
+        + '"data":{},"module":"computers","occupancies":[],'
+        + '"orientation":{"w":1,"x":0,"y":0,"z":0},"position":{"x":1,"y":2,"z":3},"type":"MiniComputer"}'
+        + '],"pipes":[],"triangles":[],"version":2}}';
+      const { ctx } = openFunnel(src);
+      const blank = xenonComputers(ctx.bp);
+      expect(blank[0]!.files).toEqual([{ name: 'main.xc', code: '' }]);
+      expect(insertXcFile(ctx, 0, xcDiskFiles(blank[0]!)[0]!.name, 'print(42)\n')).toBe(true);
+      const saved = serializeSave(ctx);
+      expect(saved).toContain('"plain_code":"print(42)\\n"');       // in the SAVE
+      const comp = xenonComputers(openFunnel(saved).bp)[0]!;
+      expect(comp.entryName).toBe('main.xc');
+      expect(comp.files[0]!.code).toBe('print(42)\n');              // reloads
+    });
+
   test('xcDiskFiles maps the run-side main.xc back to the TRUE names', () => {
     const comp = xenonComputers(data('3381670618'))[0]!;
     // the craft ships a literal main.xc (the game runs it first — it IS the

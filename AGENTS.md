@@ -1921,6 +1921,40 @@ topic + FORMAT).
   P2 (worker + Atomics true line-stepping, approved) adds the mid-line stop
   hook to the XENON-DEBUG commit. `XENONCODE_UPSTREAM.md` documents every
   commit; NOTICE §6 + .gitattributes follow.
+- **v1.13.20 THE FRESH COMPUTER IS PROGRAMMABLE (we: "When I place a new
+  minicomputer, I dont get a xenoncode menu for the computer, and I cannot
+  write code for it as a consequence!")**: two gates hid a placed
+  MiniComputer (newcraft.ts record = `data: {}`, NO hdd key): `xenonComputers`
+  listed only disks WITH at least one `.xc` file, and TopBar renders
+  Xenon ▾ only over a non-empty list — so an empty-disk computer had no
+  menu AND no path to write its first file. `xenonComputers` now lists
+  every `PROGRAMMABLE = /^(MiniComputer|Computer)$/` part (the Computer
+  joins: it is the same device class, integrated screen included, its
+  deviceScreen entry already existed for files-carrying ones) + the Crafter
+  via built-ins; the existing entry-fallback chain synthesizes the blank
+  `main.xc` tab for an empty disk (the Badger stores program='' + a
+  literal main.xc = corpus-proven game-valid). Diskless siblings are
+  labelled by the inspector's `type-N` law (two fresh computers read
+  `minicomputer-0/-1`, not two 'main's). **THE DEEPER DEFECT the new
+  round-trip pin caught: `insertXcFile`'s `docEnsureArray` requires the
+  PARENT object, and a fresh component's doc has no `hdd` key — the array
+  write silently missed the doc = the v1.6.1 class (code lives in bp, the
+  SAVE loses it). New doc.ts primitives `docEnsureObject` (creates the
+  missing parents alphabetically, refuses BEFORE mutating on a type
+  conflict) + `docReplace`; insertXcFile guarantees the parents first, and
+  when the DOC never carried a disk it mirrors bp's whole defaulted hdd
+  object {capacity,label,xc_files} so the save carries what the IDE sees.**
+  IDE save → `xenonFiles` matches by name → insert creates hdd → pump
+  reload runs it (the game's save⇒reboot). Pins: vitest xenoncode.test
+  "THE FRESH-COMPUTER LISTING GATE" (data {}, empty xc_files, Computer +
+  deviceScreen, type-N labels, PilotSeat/Lamp unlisted, Crafter built-in
+  unchanged) + xcfiles.test "THE FRESH-COMPUTER AUTHORING ROUND-TRIP"
+  (blank tab → insert → code IN THE SAVE → reloads as the entry); fixture
+  tools/make_freshcomputer_test.py → testdata/9000009001 (data {}
+  verbatim) + e2e xenonfresh.spec.ts @ui (menu lists it, blank main.xc
+  BOOTS cycles, authored code saves, the print proves the blueprint-side
+  file ran, hint '1 .xc'). Help topic xenon.md retold.
+
 - **v1.13.17 TRUE MID-CYCLE STEPPING — THE VM ON A WORKER (we: "Implement the
   capacity to actually step through lines. Do what needs done.")**:
   the interpreter's XENON-DEBUG hook (fork `0516ccb`) is LIVE: the shim

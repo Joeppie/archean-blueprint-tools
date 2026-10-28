@@ -128,14 +128,27 @@ export function xcDiskFiles(comp: XenonComputer): XCFile[] {
   return comp.files.map((f, i) => ({ name: i === 0 ? comp.entryName : f.name, code: f.code }));
 }
 
-/** Every MiniComputer with at least one .xc file, as an IDE descriptor. */
-// Devices that ARE computers: MiniComputer (programs live in its
-// data.hdd.xc_files) and the CRAFTER - whose integrated touchscreen runs a
-// published built-in program (wiki components/miscellaneous/Crafter.md,
-// "Built-in Program"). The program is NOT stored in the blueprint json (it
-// lives on the world's server HDD, ide.md Persistency), so a Crafter with no
-// own files gets the built-in synthesized (we: "the poor automatic crafter
-// doesn't have its computer nor built in screen recognized").
+/** Every programmable computer on the craft, as an IDE descriptor. */
+// Devices that ARE computers: MiniComputer + Computer (programs live in
+// their data.hdd.xc_files; the Computer adds an integrated screen) and the
+// CRAFTER - whose integrated touchscreen runs a published built-in program
+// (wiki components/miscellaneous/Crafter.md, "Built-in Program"). The
+// program is NOT stored in the blueprint json (it lives on the world's
+// server HDD, ide.md Persistency), so a Crafter with no own files gets the
+// built-in synthesized (we: "the poor automatic crafter doesn't have its
+// computer nor built in screen recognized").
+// A FRESH MiniComputer/Computer (no hdd key, empty xc_files) is listed
+// TOO: it is programmable the day it is placed — the game's IDE boots on
+// an empty disk and authors the first program there. Requiring a file
+// before listing hid the Xenon ▾ menu on every newly placed computer, and
+// with it the only way to WRITE that first file (we: "when I place a new
+// minicomputer, I dont get a xenoncode menu for the computer, and I cannot
+// write code for it as a consequence"). The entry-fallback chain below
+// synthesizes the blank main.xc tab for an empty disk (the Badger stores
+// program='' + a literal main.xc, so the name is corpus-proven); the IDE's
+// save routes the tab through insertXcFile, which CREATES the hdd arrays
+// in bp AND doc (the v1.6.1 doc-mirror class — xcfiles.test pins it).
+const PROGRAMMABLE = /^(MiniComputer|Computer)$/;
 const BUILTIN_PROGRAMS: Record<string, () => string> = {
   Crafter: () => CRAFTER_BUILTIN,
 };
@@ -145,8 +158,8 @@ export function xenonComputers(bp: Blueprint): XenonComputer[] {
   (bp.data.components as BlueprintComponent[]).forEach((c, ci) => {
     const hdd = (c.data as any)?.hdd;
     const xf: { name: string; plain_code?: string }[] = hdd?.xc_files ?? [];
-    const builtin = !xf.length && c.type !== 'MiniComputer' ? BUILTIN_PROGRAMS[c.type] : undefined;
-    if (!xf.length && !builtin) return;
+    const builtin = !xf.length && !PROGRAMMABLE.test(c.type) ? BUILTIN_PROGRAMS[c.type] : undefined;
+    if (!xf.length && !builtin && !PROGRAMMABLE.test(c.type)) return;
     if (builtin) {
       // a built-in-program device: synthesize its one-file disk
       const alias = c.alias || `${c.type.toLowerCase()}-${ci}`;
@@ -174,7 +187,13 @@ export function xenonComputers(bp: Blueprint): XenonComputer[] {
       if (f !== main) files.push({ name: f.name, code: f.plain_code ?? '' });
     const base = String(main?.name ?? 'main').split('.')[0] || 'main';
     out.push({
-      ci, alias: c.alias || program || base, program: program || base, files,
+      ci,
+      // A diskless device has no program name to borrow — label it with the
+      // inspector's type-N convention so TWO fresh computers are distinct
+      // menu items (both would otherwise read 'main'); with files, the
+      // program name rides on exactly as before.
+      alias: c.alias || (xf.length ? program || base : `${c.type.toLowerCase()}-${ci}`),
+      program: program || base, files,
       entryName: String(main?.name ?? 'main.xc'),
       capacity: Number((c.data as any)?.hdd?.capacity) || 0,
       channels: detectChannels(files),

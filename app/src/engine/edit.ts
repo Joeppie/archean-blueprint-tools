@@ -13,7 +13,7 @@
 //   save source) accumulates the shift once, never re-applied.
 
 import type { DocNode } from './doc';
-import { docArrayInsert, docArrayRemoveAt, docEnsureArray, docFromValue, docGet, docSet, docSetArrayItem, docSetNumber, docValue, emitDoc, parseDoc } from './doc';
+import { docArrayInsert, docArrayRemoveAt, docEnsureArray, docEnsureObject, docFromValue, docGet, docReplace, docSet, docSetArrayItem, docSetNumber, docValue, emitDoc, parseDoc } from './doc';
 import type { Blueprint, BlueprintComponent, FileQuat, LatticeObj, Triangle, Vec3D } from './format';
 import { CELL } from './format';
 import { docLegacyGeneration, normalizeDoc } from './normalize';
@@ -349,18 +349,35 @@ export function setXcFileCode(ctx: EditCtx, ci: number, fi: number, code: string
 
 /** Add a file to the virtual disk (the IDE's File ▸ New — CTRL+N). Appends
  *  {name, plain_code} in the game's key order; doc-guaranteed like every
- *  generated record (v1.6.1: a file that never carried hdd gets its arrays). */
+ *  generated record (v1.6.1: a file that never carried hdd gets its arrays).
+ *  v1.13.20: a FRESH component's data {} carries NO hdd key at all — the
+ *  doc mirror guarantees the parent objects first (docEnsureObject) and,
+ *  when the doc never carried a disk, writes the whole defaulted hdd object
+ *  {capacity,label,xc_files} so the SAVE mirrors bp exactly (the old
+ *  docEnsureArray-on-missing-parent silently missed the doc: the authored
+ *  code lived in bp only and vanished from the save). */
 export function insertXcFile(ctx: EditCtx, ci: number, name: string, code: string): boolean {
   const comp = ctx.bp.data.components[ci] as Record<string, any> | undefined;
   if (!comp) return false;
+  const pathHdd = ['data', 'components', ci, 'data', 'hdd'];
+  if (!docEnsureObject(ctx.doc, pathHdd)) return false;   // refuse BEFORE mutating bp
   comp.data = comp.data ?? {};
   comp.data.hdd = comp.data.hdd ?? { capacity: 0, label: '', xc_files: [] };
   const xf: XcFileEntry[] = (comp.data.hdd.xc_files = comp.data.hdd.xc_files ?? []);
-  const path = ['data', 'components', ci, 'data', 'hdd', 'xc_files'];
-  docEnsureArray(ctx.doc, path);
+  const path = [...pathHdd, 'xc_files'];
   const at = xf.length;
   xf.push({ name, plain_code: code });
-  docArrayInsert(ctx.doc, path, at, docFromValue({ name, plain_code: code }));
+  const hddNode = docGet(ctx.doc, pathHdd);
+  const hasDisk = hddNode?.kind === 'obj' && hddNode.entries.some(([k]) => k === 'xc_files');
+  if (!hasDisk) {
+    // the file never carried a disk: mirror bp's whole hdd object (the
+    // game's alphabetical key order capacity,label,xc_files is its literal
+    // insertion order) — capacity/label ride into the save as authored
+    docReplace(ctx.doc, pathHdd, docFromValue(comp.data.hdd));
+  } else {
+    docEnsureArray(ctx.doc, path);
+    docArrayInsert(ctx.doc, path, at, docFromValue({ name, plain_code: code }));
+  }
   return true;
 }
 

@@ -16,6 +16,63 @@ const data = (id: string): Blueprint =>
   JSON.parse(readFileSync(`${REPO}testdata/${id}/blueprint.json`, 'utf8')) as Blueprint;
 const xc = (f: string) => readFileSync(`${REPO}tools/xenoncode/${f}`, 'utf8');
 
+describe('THE FRESH-COMPUTER LISTING GATE (v1.13.20)', () => {
+  // we: "When I place a new minicomputer, I dont get a xenoncode menu for
+  // the computer, and I cannot write code for it as a consequence!" — a
+  // placed component carries data {} (newcraft.ts); requiring an .xc file
+  // before listing hid the menu AND the only path to write the first file.
+  const fresh = (type: string, dataJson = '{}'): Blueprint => JSON.parse(
+    '{"author":"jo","data":{"blocks":[],"components":['
+    + `{"alias":"","colors":{"color1":{"r":1,"g":1,"b":12,"opacity":15,"roughness":4,"metallic":0}},`
+    + `"data":${dataJson},"module":"computers","occupancies":[],`
+    + '"orientation":{"w":1,"x":0,"y":0,"z":0},"position":{"x":1,"y":2,"z":3},"type":"' + type + '"}'
+    + '],"pipes":[],"triangles":[],"version":2}}') as Blueprint;
+
+  it('a placed MiniComputer (data {}, no hdd at all) IS listed', () => {
+    const comps = xenonComputers(fresh('MiniComputer'));
+    expect(comps).toHaveLength(1);
+    const c = comps[0]!;
+    expect(c.entryName).toBe('main.xc');                    // the blank tab
+    expect(c.files).toEqual([{ name: 'main.xc', code: '' }]);
+    expect(c.program).toBe('main');
+    expect(c.alias).toBe('minicomputer-0');                 // inspector N law
+    expect(c.builtin).toBeUndefined();                      // authored, not built-in
+  });
+
+  it('an EMPTY xc_files array lists the same (hdd present, disk blank)', () => {
+    const comps = xenonComputers(fresh('MiniComputer',
+      '{"hdd":{"capacity":1024,"label":"","xc_files":[]},"program":"","version":2}'));
+    expect(comps).toHaveLength(1);
+    expect(comps[0]!.files).toEqual([{ name: 'main.xc', code: '' }]);
+    expect(comps[0]!.capacity).toBe(1024);
+  });
+
+  it('a placed Computer is listed too, with its integrated-screen entry', () => {
+    const comps = xenonComputers(fresh('Computer'));
+    expect(comps).toHaveLength(1);
+    expect(comps[0]!.alias).toBe('computer-0');
+    expect(comps[0]!.screens.some(s => s.deviceScreen)).toBe(true);
+  });
+
+  it('the label distinguishes TWO fresh computers (both alias-less)', () => {
+    const bp = fresh('MiniComputer');
+    (bp.data.components as any[]).push((bp.data.components as any[])[0]);
+    const aliases = xenonComputers(bp).map(c => c.alias);
+    expect(aliases).toEqual(['minicomputer-0', 'minicomputer-1']);
+  });
+
+  it('a non-computer part is NOT listed (the gate is not gone)', () => {
+    expect(xenonComputers(fresh('PilotSeat', '{}'))).toHaveLength(0);
+    expect(xenonComputers(fresh('Lamp', '{}'))).toHaveLength(0);
+  });
+
+  it('a Crafter with an empty disk keeps its synthesized built-in (unchanged)', () => {
+    const comps = xenonComputers(fresh('Crafter', '{}'));
+    expect(comps).toHaveLength(1);
+    expect(comps[0]!.builtin).toBe(true);
+  });
+});
+
 describe('blueprint extraction', () => {
   it('finds the MiniComputer of Just-Plane-Easy with its program files', () => {
     const comps = xenonComputers(data('3294880085'));
