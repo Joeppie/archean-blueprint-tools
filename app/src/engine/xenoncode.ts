@@ -661,8 +661,7 @@ export class XenonPump {
   private canvases = new Map<string, Set<HTMLCanvasElement>>();
   private feedKeys = new Set<string>();   // 3-D dashboard face keys (Engine)
   private subs = new Set<() => void>();
-  private raf = 0;
-  private last = 0;
+  private timer = 0;
   private openSeq = 0;
   private stepWanted = 0;
 
@@ -881,7 +880,7 @@ export class XenonPump {
   /** Which surface keys the 3-D scene is rendering on craft dashboards. */
   setFeedKeys(keys: Iterable<string>) { this.feedKeys = new Set(keys); }
   /** debug channel: the rAF handle (0 = the loop is not running) */
-  raf2(): number { return this.raf; }
+  raf2(): number { return this.timer; }
 
   registerCanvas(key: string, cv: HTMLCanvasElement): () => void {
     const k = key.toLowerCase();
@@ -940,23 +939,26 @@ export class XenonPump {
   }
 
   private startLoop() {
-    if (this.raf) return;
-    const step = (t: number) => {
-      this.raf = requestAnimationFrame(step);
-      if (t - this.last < CYCLE_MS) return;
-      this.last = t;
-      this.cycleOnce(t);
-    };
-    this.raf = requestAnimationFrame(step);
+    if (this.timer) return;
+    // setInterval, NOT requestAnimationFrame (the Buzzer Bench probe
+    // exposed why): rAF only fires while the compositor produces frames —
+    // an on-demand scene with nothing animating STOPS producing them,
+    // and the VM stalls at cycle ~1 (the same stall hits a real tab
+    // idling toward background). A timer keeps the cadence honest;
+    // blits/screens ride the cycles.
+    this.timer = window.setInterval(() => {
+      this.cycleOnce(typeof performance !== 'undefined' ? performance.now() : Date.now());
+    }, CYCLE_MS);
   }
 
   /** ONE computer cycle: worldsim → VM → events → surfaces → hooks → audio.
    *  Shared by the rAF loop and XenonTest's deterministic runCycles. */
-  private cycleOnce(t: number): void {
+  private cycleOnce(t: number, force = false): void {
     const run = this.run;
     if (!run || !run.running) return;
     // XenonTest gate: runCycles() owns the VM while a test advances it
-    if (this.testGate) return;
+    // (force = the test's OWN cycles get through their own gate)
+    if (this.testGate && !force) return;
     // debugger gate: while PAUSED the pump runs cycles only for a step
     if (this.paused && this.stepWanted <= 0) return;
     this.stepWorldSim(run);
@@ -1048,7 +1050,7 @@ export class XenonPump {
     try {
       for (let i = 0; i < n; i++) {
         if (!this.run?.running) break;
-        this.cycleOnce(typeof performance !== 'undefined' ? performance.now() : 0);
+        this.cycleOnce(typeof performance !== "undefined" ? performance.now() : 0, true);
       }
     } finally {
       this.testGate = false;
@@ -1074,8 +1076,8 @@ export class XenonPump {
     return { cycles: this.cycles, prints: this.prints.filter(e => e.e === 'print').length, bus, devices };
   }
   private stopLoop() {
-    if (this.raf) cancelAnimationFrame(this.raf);
-    this.raf = 0;
+    if (this.timer) clearInterval(this.timer);
+    this.timer = 0;
   }
 }
 

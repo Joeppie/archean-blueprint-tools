@@ -165,12 +165,13 @@ export default function XenonDialog(p: {
 
   useEffect(() => pump.subscribe(() => setTick(t => t + 1)), [pump]);
 
-  // WASD / ↑ / ↓ / F / Space / E fly the craft's PilotSeat WHILE LOOKING AT
-  // THE COMPUTER'S WINDOWS — the Screens tab (its dash) or the Bus tab (its
-  // io instruments) (v1.13.2: "for when you are looking at the dash window,
-  // or computer's dash window, pressing WASD, up, down, and F should be
-  // given as inputs into the computer for all cockpit connections it has")
-  usePilotKeys(side === 'screens' || side === 'bus');
+  // WASD / ↑ / ↓ / F / Space / E fly the craft's PilotSeat WHILE THE
+  // COMPUTER'S WINDOW IS OPEN — any tab (the Auto-test reads the seat too;
+  // typing in fields is guarded by isTyping) (v1.13.2: "for when you are
+  // looking at the dash window, or computer's dash window, pressing WASD,
+  // up, down, and F should be given as inputs into the computer for all
+  // cockpit connections it has")
+  usePilotKeys(true);
 
   // Esc closes (subscribe ONCE through a ref — the v1.5.20 listener lesson);
   // Esc in the editor first COMMITS nothing — it reverts the draft.
