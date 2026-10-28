@@ -195,6 +195,13 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   useEffect(() => {
     if (xenonCi === null && !screensOpen) xenonPump.close();
   }, [xenonCi, screensOpen]);
+  // LEAVING THE EDITOR (back to the gallery, craft swap, unmount) closes the
+  // pump TOO (we: "going back to the gallery DOESNT properly reset the
+  // entire sim, which it must if we can open directly to a screen"): the
+  // deep-link UX promises a FRESH game on every entry — without this the VM
+  // keeps cycling behind the gallery (audio on!) and open()'s same-ci early
+  // return RESUMES the old session, so the arcade never shows its title.
+  useEffect(() => () => xenonPump.close(), []);
   // Debug channel base (the __XENON__ pattern): readable on ANY page — the
   // IDE dialog enriches it further while mounted (surfaceMeta, bus, ...)
   useEffect(() => {
@@ -211,6 +218,9 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         return s?.pixels ? { w: s.w, h: s.h, data: [...s.pixels!] } : null;
       },
       reads: () => Object.fromEntries(xenonPump.reads),
+      // live program globals (the XENON-VARS patch): the clip recorder gates
+      // Mario's SPACE press on the sprite cache completing ($mode/$demo)
+      vars: () => Object.fromEntries([...xenonPump.vars.entries()].map(([k, v]) => [k, v.v])),
       buzzer: {
         soundOn: buzzerAudio.soundOn, wave: buzzerAudio.wave, level: buzzerAudio.level,
         outputLevel: buzzerAudio.outputLevel(), voices: buzzerAudio.voiceCount(),

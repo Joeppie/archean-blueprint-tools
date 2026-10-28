@@ -23,26 +23,67 @@ import { join } from 'node:path';
 const NAME = process.argv[2];
 const URL = process.argv[3] ?? 'http://127.0.0.1:5175';
 const SPECS = {
-  // invaders: the Computer's built-in display at (0,-0.15,-1.12). The first
-  // take sat ~70° off the panel normal — the cabinet bezel swallowed the
-  // screen ("the screen is totally obstructed", we). New eye: ~25° oblique
-  // at 2.3 m, so the display reads AND the PilotSeat (0,-0.78,+0.13) peeks
-  // past the cabinet's right edge. Pan: the eye dollies toward centred.
+  // invaders: the readable side of the built-in display faces the PILOT
+  // (+z) — every earlier take stood on the cabinet's NOSE side (-z), looking
+  // at the panel through the bezel ("the screen is totally obstructed", then
+  // "WRONG angle", we). The right shot is the player's own: OVER THE PILOT
+  // SEAT's shoulder (seat at 0,-0.78,+0.13 in the foreground, the panel on
+  // the cabinet's +z face nothing occludes) — and the double mirror (u-flip
+  // × the +z viewing side) cancels, so the text reads true. Pan: slow dolly
+  // left.
   invaders: {
     craft: '3288012440', dash: 'main#0',
-    eye0: [1.05, 0.25, -2.35], eye1: [0.35, 0.15, -2.55], target: [0, -0.18, -1.05],
+    // A — front, low (we's pick), camtune-scored winner: the panel fills the
+    // frame with real game ink and the seat in view — the player standing at
+    // the cabinet. Slow lateral drift keeps the parallax alive.
+    eye0: [0.25, 0.02, -1.62], eye1: [0.05, 0.02, -1.72], target: [0, -0.15, -1.12],
     captureSec: 26, winStart: 2, winLen: 11,   // intro: title rising → arrival → sprites
+    gateCycles: 60,
   },
   // mario: the six-Screen wall at x=-1.5 (boards face -x), the PilotSeat at
-  // x=-2.88 BETWEEN camera and wall. First take: eye 3.1 m out (tiny screens,
-  // "too far away") and the window opened before the title rendered ("main
-  // screen not yet loaded"). New: 1.9 m eye, the seat fills the lower
-  // foreground, window 8→22 s — title fully up, the attract-mode handover
-  // (titleclock > 8) lands mid-clip.
+  // x=-2.88 in front. THE GAME DOES NOT SELF-START (we: "supermario is not
+  // started with spacebar, which it can only do after its done writing its
+  // sprite cache"): the gate waits for the pump to be 10 s in with the
+  // program's live vars present (cache written), then the clip PRESSES
+  // SPACE ON THE SEAT — and plays: run right (D), jump (Space), run, jump.
   mario: {
     craft: '3820116990', dash: 'first-virtual',
-    eye0: [-3.35, 0.35, 0.75], eye1: [-2.75, 0.3, 1.25], target: [-1.55, -0.45, -0.55],
-    captureSec: 42, winStart: 8, winLen: 14,
+    // we's pick: "extremely close to the title screen and then zooming out
+    // and rotatin/rolling" — the camera starts 0.28 m off the six-screen
+    // wall (the title fills the frame), holds with a life-drift while the
+    // seat presses START, and from the PLAYING moment dollies out to the
+    // wall+seat wide shot with a ±14° dutch-roll that settles level.
+    playCam: {
+      // eyeNear = camtune's wall-close winner (0.22 m off the six-screen
+      // wall). The wall is attract-off DARK through the title/menu/build
+      // presses — it IGNITES into the level at the PLAYING moment, and the
+      // camera pulls out to the wall+seat wide shot with the dutch roll.
+      eyeNear: [-1.72, -0.4, -0.75], eyeFar: [-2.9, 0.0, 0.9],
+      target: [-1.52, -0.42, -0.72], rollMax: 0.24, rampSec: 8,
+    },
+    eye0: [-1.72, -0.4, -0.75], eye1: [-2.9, 0.0, 0.9], target: [-1.52, -0.42, -0.72],
+    captureSec: 90, winStart: 0, winLen: 999,   // the take self-ends 10 s into play
+    gateCycles: 60, gateVar: 'assetsready', gateEq: '1',  // the sprite cache is written
+    // the seat's presses: JUMP(Space) on the title (mode 0→1 menu), JUMP on
+    // the menu (→ new_game, mode 2 BUILDING CACHED LEVEL), then once mode 3
+    // (PLAYING) is live, run+jump. playKeys fire at an OFFSET from the
+    // observed mode-3 moment (dynamic — the cached-level build varies).
+    keys: [
+      { t: 1.0, code: 'Space', mode: 'tap' },
+      { t: 3.0, code: 'Space', mode: 'tap' },
+    ],
+    pollVar: 'mode',
+    playKeys: [
+      { t: 1.5, code: 'KeyD', mode: 'down' },
+      { t: 2.8, code: 'Space', mode: 'tap' },   // JUMP running right
+      { t: 3.6, code: 'KeyD', mode: 'up' },
+      { t: 4.6, code: 'KeyD', mode: 'down' },
+      { t: 5.6, code: 'Space', mode: 'tap' },   // JUMP 2
+      { t: 6.4, code: 'KeyA', mode: 'down' },
+      { t: 7.2, code: 'KeyD', mode: 'up' },
+      { t: 7.6, code: 'Space', mode: 'tap' },   // JUMP back
+      { t: 8.4, code: 'KeyA', mode: 'up' },
+    ],
   },
 };
 const spec = SPECS[NAME];
@@ -91,17 +132,103 @@ await page.evaluate(() => {
 });
 await page.waitForTimeout(800);
 
+// GATE: the pump is in deep (cycles) AND, for mario, the program's live
+// vars exist — the sprite cache is written, so the SEAT's Space press lands
+// on a game that can start (we: "it can only do [start] after its done
+// writing its sprite cache").
+const gateT0 = Date.now();
+for (;;) {
+  const st = await page.evaluate(() => {
+    const x = window.__XENON__?.() ?? {};
+    return { cycles: x.cycles ?? 0, vars: typeof x.vars === 'function' ? x.vars() : {} };
+  });
+  const varOk = !spec.gateVar
+    || (spec.gateEq !== undefined ? String(st.vars[spec.gateVar]) === spec.gateEq
+                                  : st.vars[spec.gateVar] !== undefined);
+  if (st.cycles >= (spec.gateCycles ?? 60) && varOk) {
+    console.log(`[clip:${NAME}] gate open at ${((Date.now() - gateT0) / 1000).toFixed(1)}s `
+      + `(cycles ${st.cycles}${spec.gateVar ? ` ${spec.gateVar}=${st.vars[spec.gateVar]}` : ''})`);
+    break;
+  }
+  if (Date.now() - gateT0 > 120_000) { console.log('[clip] gate timeout — capturing anyway'); break; }
+  await new Promise(r => setTimeout(r, 1000));
+}
+
 const N = spec.captureSec * 5;
 const t0 = Date.now();
-console.log(`[clip:${NAME}] capturing ${N} frames (${spec.captureSec}s)`);
+const keys = [...(spec.keys ?? [])];
+let ki = 0;
+let playT = null;              // the observed mode-3 (PLAYING) moment
+let modeSeen = '';
+let clipEnd = spec.captureSec; // playCam takes self-end after the ramp
+let target = spec.target;
+console.log(`[clip:${NAME}] capturing ${N} frames (${spec.captureSec}s)` +
+  (keys.length ? ` + ${keys.length} scripted seat presses` : ''));
 for (let i = 0; i < N; i++) {
-  const k = i / (N - 1);
-  const eye = spec.eye0.map((v, a) => v + (spec.eye1[a] - v) * k);
-  await page.evaluate(([e, c]) => window.__ARCHEAN__.engine.auditLookAt(e, c), [eye, spec.target]);
+  const elapsed = (Date.now() - t0) / 1000;
+  // live-var poll: when the program reports PLAYING, arm the play moves at
+  // offsets from that moment and schedule the clip's end after them
+  if (spec.pollVar && playT === null) {
+    const v = await page.evaluate((pv) => {
+      const x = window.__XENON__?.() ?? {};
+      return typeof x.vars === 'function' ? String(x.vars()[pv] ?? '') : '';
+    }, spec.pollVar);
+    if (v !== modeSeen) { modeSeen = v; console.log(`[clip:${NAME}] mode=${v} @${elapsed.toFixed(1)}s`); }
+    if (v === (spec.playEq ?? '3')) {
+      playT = elapsed;
+      console.log(`[clip:${NAME}] ${spec.pollVar}=3 (PLAYING) at +${playT.toFixed(1)}s — arming play moves`);
+      for (const pk of spec.playKeys ?? []) keys.push({ t: playT + pk.t, code: pk.code, mode: pk.mode });
+      keys.sort((a, b) => a.t - b.t);
+      clipEnd = playT + 10;                       // end the take 10 s into play
+    }
+  }
+  if (playT !== null && elapsed > clipEnd) break;
+  while (ki < keys.length && keys[ki].t <= elapsed) {
+    const k = keys[ki++];
+    console.log(`[clip:${NAME}] +${k.t.toFixed(1)}s ${k.code} ${k.mode}`);
+    if (k.mode === 'tap') {
+      // a real press: the VM samples inputs on its 25 Hz cycle — a
+      // keyboard.press (sub-frame) lands BETWEEN cycles and the program
+      // never sees the edge (learned the hard way: mode never moved)
+      await page.keyboard.down(k.code);
+      await new Promise(r => setTimeout(r, 150));
+      await page.keyboard.up(k.code);
+    } else if (k.mode === 'down') {
+      await page.keyboard.down(k.code);
+    } else {
+      await page.keyboard.up(k.code);
+    }
+  }
+  // camera: playCam (title close-up → dolly-out + dutch roll from the
+  // PLAYING moment) when the spec has one, else a linear eye0→eye1 pan
+  let eye, roll = 0;
+  if (spec.playCam) {
+    const pc = spec.playCam;
+    if (playT === null) {
+      eye = pc.eyeNear.map((v, a) => v + Math.sin(elapsed * 0.55 + a * 2.1) * 0.012);
+    } else {
+      const s = Math.min(1, (elapsed - playT) / pc.rampSec);
+      const ez = s * s * (3 - 2 * s);
+      eye = pc.eyeNear.map((v, a) => v + (pc.eyeFar[a] - v) * ez);
+      roll = pc.rollMax * Math.sin(Math.PI * s);
+    }
+    target = spec.playCam.target;
+  } else {
+    const k = i / (N - 1);
+    eye = spec.eye0.map((v, a) => v + (spec.eye1[a] - v) * k);
+  }
+  await page.evaluate(([e, c, r]) => window.__ARCHEAN__.engine.auditLookAt(e, c, r), [eye, target, roll]);
   const due = t0 + i * 200 - Date.now();
   if (due > 0) await new Promise(r => setTimeout(r, due));
   await page.screenshot({ path: `${DIR}/frames/f${String(i).padStart(3, '0')}.png` });
 }
+// after the take: report the program vars (did the SEAT press start it?)
+const endVars = await page.evaluate((gv) => {
+  const x = window.__XENON__?.() ?? {};
+  const vars = typeof x.vars === 'function' ? x.vars() : {};
+  return gv ? { k: gv, v: vars[gv] } : { cycles: x.cycles };
+}, spec.gateVar ?? null);
+console.log(`[clip:${NAME}] end state: ${JSON.stringify(endVars)}`);
 await ctx.close();
 
 const frames = readdirSync(`${DIR}/frames`).filter(f => f.endsWith('.png')).sort();

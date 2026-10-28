@@ -72,6 +72,24 @@ test('the PLAYABLE row: two in-craft arcade clips, click boots the game fullscre
   await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 60_000 });
   await expect(page).toHaveURL(/craft=3288012440&dash=main%230/);
   await expect(page.getByTestId('screens-cell-main#0-overlay')).toBeVisible({ timeout: 60_000 });
+  // BACK TO THE GALLERY RESETS THE SIM (we: "going back to the gallery
+  // DOESNT properly reset the entire sim, which it must if we can open
+  // directly to a screen"): the pump (VM, surfaces, buzzers) must close on
+  // unmount, so re-entering the deep link boots a FRESH title screen
+  await page.getByTestId('back-to-gallery').click();
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__XENON__?.()?.status ?? 'gone'),
+      { timeout: 10_000 })
+    .toBe('idle');
+  // and the game reboots clean on a second entry (title state, mode 0)
+  await page.getByTestId('playable-3288012440').click();
+  await expect(page.getByTestId('screens-cell-main#0-overlay')).toBeVisible({ timeout: 90_000 });
+  await expect
+    .poll(() => page.evaluate(() => {
+      const x = (window as any).__XENON__?.();
+      return x && typeof x.vars === 'function' ? String(x.vars()?.mode ?? '') : '?';
+    }), { timeout: 30_000 })
+    .toBe('0');
 });
 
 test('corpus endpoint serves the blueprint of a selected craft', async ({ request }) => {

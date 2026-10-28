@@ -3801,10 +3801,13 @@ void main() {
   /** AUDIT SEAM (v1.13.8): aim the orbit rig (eye + pivot) at a point — the
    *  invaders audit squares the camera onto a built-in screen face along its
    *  front normal. Test-only; never a user-facing path. */
-  auditLookAt(eye: [number, number, number], center: [number, number, number]) {
+  auditLookAt(eye: [number, number, number], center: [number, number, number], roll = 0) {
     if (!this.controls) return;
     this.camera.position.set(eye[0], eye[1], eye[2]);
     this.controls.target.set(center[0], center[1], center[2]);
+    // roll: tilt the camera's up vector about the sight axis (cinematic
+    // dutch-angle for the mario zoom-out; 0 = level)
+    this.camera.up.set(Math.sin(roll), Math.cos(roll), 0);
     if (this.camera instanceof OrthographicCamera) this.camera.zoom = 1;
     this.controls.update();
     this.invalidate();
