@@ -143,7 +143,48 @@ export class BuzzerAudio {
   private master: GainNode | null = null;
   private analyser: AnalyserNode | null = null;
   private analyBuf: Float32Array | null = null;
-  private voices = new Map<string, { osc: OscillatorNode; gain: GainNode; kind: string; hold: number }>();
+  private voices = new Map<string, { osc: OscillatorNode; gain: GainNode; kind: string; hold: number; beepUntil: number }>();
+
+  /** WRITE-TIME SCHEDULING (v1.13.14, we: "THAT DOES NOT PLAY AUDIO UNTIL I
+   *  MINIMIZE THE in-editor SCREEN YOU MAXIIMZE"): every sound is scheduled
+   *  on the AUDIO clock the instant the game writes its amplitude — a
+   *  sample-accurate envelope the audio thread plays fully no matter how
+   *  starved the main thread's heartbeat becomes (a maximized zoom window
+   *  loads the pump with canvas blits, and a beep that ends before the next
+   *  bus SAMPLE was never voiced at all). This is the sound path; sync()'s
+   *  per-cycle steering only keeps long-held tones in tune. */
+  beep(name: string, amp: number, freq: number, wave: BuzzerWave): void {
+    if (!this.soundOn || typeof AudioContext === 'undefined') return;
+    try {
+      const ctx = this.ensureCtx();
+      void ctx.resume();
+      const now = ctx.currentTime;
+      const kind = (this.wave === 'auto' ? wave : this.wave) as BuzzerWave;
+      let v = this.voices.get(name);
+      if (!v) {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.setPeriodicWave(this.waveFor(kind, ctx));
+        gain.gain.value = 0;
+        osc.connect(gain);
+        gain.connect(this.master!);
+        osc.start();
+        v = { osc, gain, kind, hold: 0, beepUntil: 0 };
+        this.voices.set(name, v);
+      }
+      if (v.kind !== kind) { v.osc.setPeriodicWave(this.waveFor(kind, ctx)); v.kind = kind; }
+      const g = voiceGain(amp);
+      const p = v.gain.gain;
+      p.cancelScheduledValues(now);
+      p.setValueAtTime(Math.max(0, p.value), now);
+      p.linearRampToValueAtTime(g, now + 0.005);          // 5 ms attack
+      p.setValueAtTime(g, now + 0.10);                    // tone body
+      p.linearRampToValueAtTime(0, now + 0.14);           // 40 ms release
+      v.osc.frequency.setValueAtTime(Math.min(20000, Math.max(1, freq)), now);
+      v.beepUntil = now + 0.15;
+      v.hold = now + 0.15;
+    } catch { /* no audio device: the pump must never break */ }
+  }
   /** PEAK-HOLD (v1.13.11, we: "space invaders doesnt play sound unless I
    *  minimize its screen"): a short beep written between two samples of a
    *  canvas-load-starved pump (~11 Hz with the Invaders zoom open) was
@@ -319,7 +360,7 @@ export class BuzzerAudio {
           osc.connect(gain);
           gain.connect(this.master!);
           osc.start();
-          v = { osc, gain, kind: wantKind, hold: 0 };
+          v = { osc, gain, kind: wantKind, hold: 0, beepUntil: 0 };
           this.voices.set(r.name, v);
         }
         const now = this.ctx!.currentTime;
@@ -331,8 +372,11 @@ export class BuzzerAudio {
           v.kind = wantKind;
         }
         v.osc.frequency.setTargetAtTime(r.freq, now, 0.01);
-        v.gain.gain.setTargetAtTime(voiceGain(r.amp), now, 0.02);
-        v.hold = now + BuzzerAudio.HOLD;   // peak-hold the last loud sample
+        if (now >= v.beepUntil) {
+          // gain steering only while no write-time envelope owns the voice
+          v.gain.gain.setTargetAtTime(voiceGain(r.amp), now, 0.02);
+          v.hold = now + BuzzerAudio.HOLD;   // peak-hold the last loud sample
+        }
       } catch {
         // no audio device / context refused: stay silent, never break the pump
         this.stopAll();

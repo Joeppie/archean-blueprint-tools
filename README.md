@@ -1,4 +1,4 @@
-# Archean Blueprint Tools · v1.13.13
+# Archean Blueprint Tools · v1.13.14
 
 **Reverse-engineered file format + a browser editor for workshop craft of
 [Archean](https://store.steampowered.com/app/2941660/Archean/)** —
@@ -259,7 +259,7 @@ say-so**: green tests or merged work never imply one.
 
 ## Ideas welcome — open an issue!
 
-This is v1.13.13: the format is decoded and the editor is useful, but the good
+This is v1.13.14: the format is decoded and the editor is useful, but the good
 ideas are not all in yet. Feature requests, format questions, and craft that
 render wrong (attach the `blueprint.json`) are all best filed as
 [issues](https://github.com/Joeppie/archean-blueprint-tools/issues) — that is

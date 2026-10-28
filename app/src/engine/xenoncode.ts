@@ -954,6 +954,25 @@ export class XenonPump {
       this.blit(cv, s);
     }
   }
+  /** WRITE-TIME BUZZER TRIGGER (v1.13.14, we: "THAT DOES NOT PLAY AUDIO
+   *  UNTIL I MINIMIZE THE in-editor SCREEN YOU MAXIIMZE"): the instant the
+   *  VM writes a Buzzer's Amplitude (ch 0), schedule the beep on the audio
+   *  clock (buzzerAudio.beep). Sound then depends on the WRITE — which the
+   *  VM produces every cycle no matter how starved the main-thread sample
+   *  loop is — not on a SAMPLE catching the amp while it is still up. The
+   *  maximized zoom window's canvas load starved exactly that sampling. */
+  private buzzerWrite(io: string | number, port: number | undefined, v: number | string | undefined): void {
+    const amp = Number(v) || 0;
+    if (amp <= 0 || Number(port) !== 0) return;
+    const dev = this.comp?.devices.find(d => d.type === 'Buzzer'
+      && (String(d.io) === String(io) || (!!d.alias && d.alias === String(io))));
+    if (!dev) return;
+    const fr = Number(this.bus.get(`${io}:1`)) || 0;
+    buzzerAudio.beep(dev.alias || `io ${dev.io}`, amp,
+      fr > 0 ? Math.min(20000, fr) : 440,
+      modeToWave(typeof dev.mode === 'number' ? dev.mode : 1));
+  }
+
   subscribe(cb: () => void): () => void {
     this.subs.add(cb);
     return () => { this.subs.delete(cb); };
@@ -1040,6 +1059,7 @@ export class XenonPump {
           const k = `${e.io}:${e.port}`;
           this.bus.delete(k);
           this.bus.set(k, e.v ?? '');
+          this.buzzerWrite(e.io ?? '', e.port, e.v);
         }
         else if (e.e === 'in') this.reads.set(`${e.io}:${e.port}`, Number(e.v) || 0);
       }
