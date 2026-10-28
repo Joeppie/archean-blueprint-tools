@@ -74,22 +74,23 @@ type Mod = {
 
 let modPromise: Promise<Mod> | null = null;
 
+// v1.13.17 L4 (we: "Why is xenoncode.js so modular and separate … rather
+// than modular but integrated into our code?"): the separation stays
+// DELIBERATE (ABI/license/provenance/build-cadence — XENONCODE_UPSTREAM.md)
+// but the FORM was accidental: a classic script in app/public/ injected
+// into document.head + a createXenonCode GLOBAL. The glue is now an ESM
+// build product (build.sh -sEXPORT_ES6=1) imported through the vite module
+// graph via ?url (the seal.wasm precedent): fingerprinted with the app,
+// and the emitted URL carries the Pages project base for free.
+import xcGlueUrl from './xenoncode/xenoncode.js?url';
+import xcWasmUrl from './xenoncode/xenoncode.wasm?url';
+
 export function xenonReady(): Promise<Mod> {
   if (modPromise) return modPromise;
-  modPromise = new Promise<Mod>((resolve, reject) => {
-    const base = (import.meta as any).env?.BASE_URL ?? '/';
-    const w = window as any;
-    const start = () => w.createXenonCode({
-      locateFile: (f: string) => `${base}xenoncode/${f}`,
-    }).then((m: Mod) => resolve(m)).catch(reject);
-    if (w.createXenonCode) return start();
-    const s = document.createElement('script');
-    s.src = `${base}xenoncode/xenoncode.js`;
-    s.onload = start;
-    s.onerror = () => reject(new Error('xenoncode.js failed to load'));
-    document.head.appendChild(s);
-  });
-  modPromise = modPromise.catch(e => { modPromise = null; throw e; });
+  modPromise = import(/* @vite-ignore */ xcGlueUrl)
+    .then((m: { default: (o: Record<string, unknown>) => Promise<Mod> }) =>
+      m.default({ locateFile: () => xcWasmUrl }))
+    .catch(e => { modPromise = null; throw e; });
   return modPromise;
 }
 
@@ -714,11 +715,15 @@ export class XenonWorkerRun {
       const sab = new SharedArrayBuffer(1024);
       const worker = new Worker(new URL('./xenonworker.ts', import.meta.url), { type: 'module' });
       const r = new XenonWorkerRun(worker, sab);
-      // ABSOLUTE URL: the worker resolves a RELATIVE dynamic import against
-      // its OWN chunk dir (dist/assets/) — resolve against the PAGE here
-      const base = (import.meta as { env?: { BASE_URL?: string } }).env?.BASE_URL ?? '/';
-      const xcUrl = new URL(`${base}xenoncode/xenoncode.js`, location.href).href;
-      worker.postMessage({ t: 'open', xcUrl, sab, comp });
+      // ABSOLUTE URLs: a module worker resolves a RELATIVE dynamic import
+      // against its OWN chunk dir — hand it the page-absolute form of the
+      // ?url assets (v1.13.17 L4: the assets ride the module graph now)
+      worker.postMessage({
+        t: 'open',
+        xcUrl: new URL(xcGlueUrl, location.href).href,
+        xcWasmUrl: new URL(xcWasmUrl, location.href).href,
+        sab, comp,
+      });
       const d = await Promise.race([
         r.opened,
         new Promise<{ abi: number; error: string }>(res =>

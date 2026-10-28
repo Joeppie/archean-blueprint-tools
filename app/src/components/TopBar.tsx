@@ -170,7 +170,7 @@ export default function TopBar(p: Props) {
           and when we click a computer, we get a pop-up screen with its code
           that looks like it does in-game") — the craft's MiniComputers,
           opening the in-game-style IDE (XenonDialog.tsx) on the dev's
-          interpreter (engine/xenoncode.ts + public/xenoncode WASM) */}
+          interpreter (engine/xenoncode.ts + the ESM glue + wasm under engine/xenoncode/) */}
       {(p.xenonComps?.length ?? 0) > 0 && (
         <Menu testid="xenon" label="Xenon ▾">
           {close => (<>

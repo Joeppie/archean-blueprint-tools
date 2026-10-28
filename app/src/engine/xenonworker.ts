@@ -17,7 +17,10 @@
 
 type Msg = {
   t: string;
+  /** the ESM glue's module URL (the app's ?url asset — main thread resolves it) */
   xcUrl?: string;
+  /** the wasm's asset URL (the glue's locateFile target) */
+  xcWasmUrl?: string;
   sab?: SharedArrayBuffer;
   comp?: {
     capacity: number; builtin: boolean;
@@ -125,28 +128,23 @@ ctx.onmessage = (e: MessageEvent<Msg>) => {
   const m = e.data;
   try {
     if (m.t === 'open') {
-      // xenoncode.js is a CLASSIC script (var createXenonCode, no ESM
-      // export — the page loads it via <script>). In this module worker:
-      // fetch the source, append an export, import the blob URL.
-      const create = fetch(m.xcUrl as string)
-        .then(r => {
-          if (!r.ok) throw new Error(`xenoncode.js ${r.status}`);
-          return r.text();
-        })
-        .then(src =>
-          import(/* @vite-ignore */ URL.createObjectURL(
-            new Blob([src + '\nexport default createXenonCode;'], { type: 'text/javascript' }))),
-        )
-        .then(x => x.default);
-      return create.then(factory => factory({
-        locateFile: (f: string) => (m.xcUrl as string).replace(/xenoncode\.js$/, f),
-        XC_SAB: m.sab,
-      })).then(m2 => {
-        mod = m2;
-        openRun(m);
-        const d = { t: 'open', abi: typeof mod._xc_abi === 'function' ? mod._xc_abi() : 0, error: err } as Record<string, unknown>;
-        ctx.postMessage(d);
-      }).catch((ex: unknown) => ctx.postMessage({ t: 'open', abi: 0, error: `${String(ex)} :: ${(ex as { stack?: string })?.stack?.slice(0, 300) ?? ''}` }));
+      // v1.13.17 L4: the glue is an ESM build product (build.sh
+      // -sEXPORT_ES6=1) served from the app's own asset graph — the module
+      // worker imports the URL the main thread resolved through ?url (the
+      // seal.wasm precedent). The classic-script fetch + blob export-shim
+      // is GONE (and with it the wasm's public/ copy).
+      return import(/* @vite-ignore */ m.xcUrl as string)
+        .then(x => (x as { default: (o: Record<string, unknown>) => Promise<any> })
+          .default({
+            locateFile: (f: string) => (m.xcWasmUrl as string) ?? f,
+            XC_SAB: m.sab,
+          }))
+        .then(m2 => {
+          mod = m2;
+          openRun(m);
+          const d = { t: 'open', abi: typeof mod._xc_abi === 'function' ? mod._xc_abi() : 0, error: err } as Record<string, unknown>;
+          ctx.postMessage(d);
+        }).catch((ex: unknown) => ctx.postMessage({ t: 'open', abi: 0, error: `${String(ex)} :: ${(ex as { stack?: string })?.stack?.slice(0, 300) ?? ''}` }));
     }
     if (!mod) return;
     if (m.t === 'keys') { wantKeys = m.keys ?? []; return; }

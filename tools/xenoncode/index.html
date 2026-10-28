@@ -68,8 +68,11 @@ button.on { background: #2f5d3a; border-color: #438452; }
 		<div class="note">print → white · output_number → green · system → grey</div>
 	</div>
 </main>
-<script src="xenoncode.js"></script>
-<script>
+<script type="module">
+// v1.13.17 L4: the glue is an ESM build product (-sEXPORT_ES6=1) — imported
+// through the module graph, no classic <script> global (tools copy; the app
+// imports its own ?url fingerprinted copy)
+const { default: createXenonCode } = await import('./xenoncode.js');
 const HZ = 10;                                    // game computer cadence
 const $ = (s) => document.querySelector(s);
 const log = (cls, msg) => {

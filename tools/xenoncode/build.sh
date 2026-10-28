@@ -54,6 +54,7 @@ if command -v em++ >/dev/null 2>&1 || [ -n "${EMSDK:-}" ]; then
 	em++ xc_host.cpp -O2 -std=c++20 -I"$UP" -fexceptions \
 		-sDISABLE_EXCEPTION_CATCHING=0 \
 		-sMODULARIZE=1 -sEXPORT_NAME=createXenonCode \
+		-sEXPORT_ES6=1 \
 		-sEXPORTED_FUNCTIONS=_malloc,_free,_main \
 		-sEXPORTED_RUNTIME_METHODS=UTF8ToString,stringToUTF8,lengthBytesUTF8,HEAPU8 \
 		-sENVIRONMENT=web -sFILESYSTEM=1 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=64MB -sMAXIMUM_MEMORY=4096MB \
