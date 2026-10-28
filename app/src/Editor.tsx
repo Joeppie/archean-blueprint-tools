@@ -193,6 +193,10 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       cycles: xenonPump.cycles, status: xenonPump.status,
       pilotKeys: xenonPump.pilotKeysBound(),
       surfaceMeta: [...xenonPump.surfaces.values()].map(({ key, w, h }) => ({ key, w, h })),
+      buzzer: {
+        soundOn: buzzerAudio.soundOn, wave: buzzerAudio.wave, level: buzzerAudio.level,
+        outputLevel: buzzerAudio.outputLevel(), voices: buzzerAudio.voiceCount(),
+      },
       world: [...xenonPump.wsBoundNames()].map(n => {
         const r = xenonPump.wsChannels().find(c => c.name === n);
         return r ? { name: r.name, mode: r.mode, manual: r.manual, value: r.value } : null;

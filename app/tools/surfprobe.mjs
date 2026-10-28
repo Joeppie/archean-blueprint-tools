@@ -18,6 +18,7 @@ await page.waitForFunction(() => /SCENE PASS/.test(document.title), null, { time
 await page.getByTestId('xenon-menu').click();
 await page.locator('[data-testid^="xenon-comp-"]').first().click();
 await page.getByTestId('xenon-side-bus').click();
+await page.getByTestId('buzzer-sound').click();   // 🔊 enable (user gesture)
 // mash jump so the game boots (title demo is silent, pre-assetsready swallows input)
 for (let i = 0; i < 40; i++) {
   await page.keyboard.down('f');
@@ -26,9 +27,10 @@ for (let i = 0; i < 40; i++) {
   await page.waitForTimeout(1040);
   const s = await page.evaluate(() => window.__XENON__?.());
   if (i === 2) for (const m of s?.surfaceMeta ?? []) console.log('SURFACE', m.key, `${m.w}x${m.h}`);
+  if (i % 5 === 4) console.log(`i=${i} buzzer=${JSON.stringify(s?.buzzer)}`);
   const g = (s?.bus ?? []).filter(([k]) => /game-melody|game-bass/.test(k));
-  if (g.some(([, v]) => Number(v) > 1)) {
-    console.log(`music live @i=${i}: ${JSON.stringify(g)}`);
+  if ((s?.buzzer?.outputLevel ?? 0) > 0.003) {
+    console.log(`AUDIO LIVE @i=${i}: ${JSON.stringify(s?.buzzer)} bus=${JSON.stringify(g)}`);
     break;
   }
 }

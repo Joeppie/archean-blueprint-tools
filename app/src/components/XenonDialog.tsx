@@ -110,6 +110,10 @@ export default function XenonDialog(p: {
       pilotKeys: pump.pilotKeysBound(),
       cycleLines: pump.run?.cycleLines() ?? [],
       bus: [...pump.bus.entries()].slice(-40),
+      buzzer: {
+        soundOn: buzzerAudio.soundOn, wave: buzzerAudio.wave, level: buzzerAudio.level,
+        outputLevel: buzzerAudio.outputLevel(), voices: buzzerAudio.voiceCount(),
+      },
     });
   }, [pump]);
 

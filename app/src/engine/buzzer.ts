@@ -85,7 +85,46 @@ export class BuzzerAudio {
    *  making sound so its evident that is the reason there is sound"). */
   level = 0;
   private ctx: AudioContext | null = null;
+  // master chain (v1.13.4): voice gains -> master gain -> compressor ->
+  // destination, with an AnalyserNode TAP on the compressor output. The
+  // compressor keeps 8-voice square-wave chords from clipping; the
+  // analyser answers "do they make sound?" objectively — outputLevel()
+  // reads the RMS of the samples actually flowing to the speakers, even
+  // in a muted/headless browser.
+  private master: GainNode | null = null;
+  private analyser: AnalyserNode | null = null;
+  private analyBuf: Float32Array | null = null;
   private voices = new Map<string, { osc: OscillatorNode; gain: GainNode }>();
+
+  private ensureCtx(): AudioContext {
+    if (this.ctx) return this.ctx;
+    const ctx = new AudioContext();
+    const master = ctx.createGain();
+    master.gain.value = 1;
+    const comp = ctx.createDynamicsCompressor();
+    const an = ctx.createAnalyser();
+    an.fftSize = 2048;
+    master.connect(comp);
+    comp.connect(ctx.destination);
+    comp.connect(an);
+    an.connect(ctx.destination);
+    this.ctx = ctx; this.master = master; this.analyser = an;
+    this.analyBuf = new Float32Array(an.fftSize);
+    return ctx;
+  }
+
+  /** RMS (0..~1) of the audio actually flowing to the speakers right now.
+   *  > 0.003 with soundOn == TRUE is objective proof the buzzers are
+   *  generating audible samples. */
+  outputLevel(): number {
+    const a = this.analyser, b = this.analyBuf;
+    if (!a || !b) return 0;
+    a.getFloatTimeDomainData(b as Float32Array<ArrayBuffer>);
+    let s = 0;
+    for (let i = 0; i < b.length; i++) { const v = b[i] ?? 0; s += v * v; }
+    return Math.sqrt(s / b.length);
+  }
+  voiceCount(): number { return this.voices.size; }
 
   constructor() {
     try {
@@ -110,8 +149,7 @@ export class BuzzerAudio {
     try { localStorage.setItem(LS_ON, this.soundOn ? '1' : '0'); } catch { /* private mode */ }
     if (this.soundOn) {
       try {
-        this.ctx ??= new AudioContext();
-        void this.ctx.resume();
+        void this.ensureCtx().resume();
       } catch { /* no audio device: stays silent, never crashes */ }
     } else this.stopAll();
     return this.soundOn;
@@ -132,14 +170,14 @@ export class BuzzerAudio {
       let v = this.voices.get(r.name);
       try {
         if (!v) {
-          this.ctx ??= new AudioContext();
-          void this.ctx.resume();
-          const osc = this.ctx.createOscillator();
-          const gain = this.ctx.createGain();
+          const ctx = this.ensureCtx();
+          void ctx.resume();
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
           osc.type = this.wave;
           gain.gain.value = 0;
           osc.connect(gain);
-          gain.connect(this.ctx.destination);
+          gain.connect(this.master!);
           osc.start();
           v = { osc, gain };
           this.voices.set(r.name, v);

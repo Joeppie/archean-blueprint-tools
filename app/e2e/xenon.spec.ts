@@ -726,6 +726,12 @@ test.describe('Xenon IDE @ui', () => {
     await expect
       .poll(async () => snd.getAttribute('data-playing'), { timeout: 10_000 })
       .toBe('1');
+    // OBJECTIVE AUDIO PROOF (we: "do they make sound?"): the AnalyserNode
+    // on the master chain measures the samples flowing to the speakers —
+    // a muted headless browser reads them too. outputLevel > 0 = audible.
+    await expect
+      .poll(async () => (await xen())?.buzzer?.outputLevel ?? 0, { timeout: 15_000 })
+      .toBeGreaterThan(0.003);
 
     // PHONE: the touch cockpit rides THE SCREEN itself — deep-link to
     // Mario's game canvas (first virtualscreen), the pad shows W A S D /
