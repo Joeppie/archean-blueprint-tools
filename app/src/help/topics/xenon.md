@@ -1,5 +1,5 @@
 # Xenon — run the craft's computer programs
-Tags: xenon worldsim world sim xenoncode window zoom drag resize fullscreen computer code program ide screen hd-screen virtual screen nodes canvas programing programming plomo firstflight badger mario wasm interpreter variables vars disk files edit breakpoint debugger step autosave shadow deep link dash filter search cockpit keyboard wasd jump run space buzzer sound sawtooth melody super mario gamer-chair 25 hz tile flush
+Tags: xenon worldsim world sim xenoncode window zoom drag resize fullscreen computer code program ide screen hd-screen virtual screen nodes canvas programing programming plomo firstflight badger mario wasm interpreter variables vars disk files edit breakpoint debugger step autosave shadow deep link dash filter search cockpit keyboard wasd jump run space buzzer sound sawtooth melody super mario gamer-chair 25 hz tile flush mobile phone touch buttons pad
 
 **Xenon ▾** (top bar, only on crafts that carry `MiniComputer` components with
 `.xc` programs) lists every programmable computer on the vessel. Clicking one
@@ -65,6 +65,14 @@ zooming, no filter". The dash windows are now the read/write surface:
   to ZERO — gaps, padding, borders and labels off — so multi-panel walls
   (Mario's six HdScreens, a craft's full dashboard row) tile flush and read
   as one continuous surface. Click again to restore; persisted.
+* **Play on your phone** — on touch devices the screen itself carries a
+  TRANSLUCENT COCKPIT PAD: a W/A/S/D cross at the bottom-left, ▲ ▼ E F ␣
+  at the bottom-right. Pressing a button is the key-DOWN (the seat channel
+  goes to ±1), letting go is the key-UP (the stick centers); sliding a
+  finger off a button releases it too. The pad rides the fullscreen zoom
+  window and every tile in ▦ Tile mode — a phone + a deep link is a
+  handheld console. Tap a plain thumbnail (no pad in the browse grid) to
+  open its zoom window, and the pad is there.
 * **Deep link** — `?craft=<id>&dash=<surfaceKey>` (e.g.
   `?craft=3820116990&dash=screen%230`) opens the app straight into the ▣
   Screens dock **with that one surface's zoom window already raised**, as

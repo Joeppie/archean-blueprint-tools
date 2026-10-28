@@ -1624,6 +1624,23 @@ topic + FORMAT).
    registered (__XENON__().surfaceMeta). E key → Roll (ch 5) = Mario's
    FIRE key (we: "we should have forwarded the e key as well" — the probe
    proved Mario reads ch5 = Roll, not Pitch) — nine bound keys total.
+ - **v1.13.3 THE TOUCH COCKPIT (we: "for mobile phone, overlay all keyboard
+   binds as buttons that do keydown when pressing and up when letting go,
+   so we can play on mobile, also on virtual screens. Make that overlay the
+   screen itself, also when fullscreening a screen")**: PilotTouchPad
+   (ScreensDock.tsx) — on `(pointer: coarse)` devices and only while the
+   running computer has cockpit channels bound, every dash view rides a
+   translucent pad: W/A/S/D cross bottom-left, ▲▼ E F ␣ bottom-right;
+   onPointerDown = pump.pilotKey(k,true) (the keydown), pointerup/cancel/
+   LEAVE = keyup (a finger sliding off releases — no stuck throttle). The
+   pad rides the SCREEN: the fullscreen zoom window and every ▦ Tile-mode
+   tile (plain thumbnails stay tappable to open the zoom, where the pad
+   rides); virtual screens are ScreensCells → same law. useCoarsePointer()
+   gates; desktop shows nothing. Editor gained the __XENON__ BASE debug
+   hook (cycles/status/pilotKeys/world on ANY page; the IDE enriches it).
+   Pinned: the Mario leg's phone context (412×915, hasTouch) — deep link →
+   overlay pad, all nine buttons, pointerdown → gamer_chair row manual 1,
+   pointerup → 0.
  - **DASH FOCUS + DEEP LINK** (we's 640×480 report): dock cells are
    ScreensCell — clicking a THUMBNAIL opens its OWN fullscreen ZOOM WINDOW
    (fit / 1:1 px / ± / pinch, scroll-pan, pixelated) and no longer fires the

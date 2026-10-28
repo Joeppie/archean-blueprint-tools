@@ -24,8 +24,73 @@
 // ---------------------------------------------------------------------------
 import { useEffect, useMemo, useRef, useState } from 'react';
 import FloatingWindow from './FloatingWindow';
-import { xenonPump, xenonScreenBindings, CYCLE_HZ, type XenonComputer } from '../engine/xenoncode';
+import {
+  xenonPump, xenonScreenBindings, CYCLE_HZ, type PilotKey, type XenonComputer,
+} from '../engine/xenoncode';
 import { usePilotKeys } from '../engine/pilotkeys';
+
+/** True on touch-first devices (phones/tablets). The pilot touch pad and
+ *  other touch affordances gate on this (we 2026-10-28: "for mobile phone,
+ *  overlay all keyboard binds as buttons"). */
+export function useCoarsePointer(): boolean {
+  const [coarse, setCoarse] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches);
+  useEffect(() => {
+    const mq = window.matchMedia('(pointer: coarse)');
+    const h = () => setCoarse(mq.matches);
+    mq.addEventListener('change', h);
+    return () => mq.removeEventListener('change', h);
+  }, []);
+  return coarse;
+}
+
+const PAD_LEFT: { k: PilotKey; label: string }[] = [
+  { k: 'w', label: 'W' }, { k: 'a', label: 'A' }, { k: 's', label: 'S' }, { k: 'd', label: 'D' },
+];
+const PAD_RIGHT: { k: PilotKey; label: string }[] = [
+  { k: 'up', label: '▲' }, { k: 'down', label: '▼' }, { k: 'e', label: 'E' },
+  { k: 'f', label: 'F' }, { k: 'space', label: '␣' },
+];
+
+/** THE TOUCH COCKPIT (v1.13.3, we: "overlay all keyboard binds as buttons
+ *  that do keydown when pressing and up when letting go, so we can play on
+ *  mobile, also on virtual screens. Make that overlay the screen itself,
+ *  also when fullscreening a screen"): every dash view rides a translucent
+ *  pad — W/A/S/D cross at the left, ▲▼ E F ␣ at the right. pointerdown
+ *  feeds pump.pilotKey(k,true) (= the keydown), pointerup/cancel/leave
+ *  feeds the keyup; the canvas itself stays clickable between the keys.
+ *  Renders nothing when the running computer has no cockpit bound. */
+export function PilotTouchPad(p: { className?: string }) {
+  if (!xenonPump.pilotKeysBound().length) return null;
+  const btn = (k: PilotKey, label: string) => (
+    <button key={k} data-testid={`pilot-touch-${k}`}
+      className="h-12 w-12 touch-none select-none rounded-full border border-[#3a4a6a]/70
+                 bg-black/45 text-[14px] leading-none text-[#9fb0c8]
+                 active:border-[#8fd4ff] active:bg-[#243a52]/85 active:text-white"
+      onPointerDown={e => { e.preventDefault(); e.stopPropagation(); xenonPump.pilotKey(k, true); }}
+      onPointerUp={e => { e.preventDefault(); e.stopPropagation(); xenonPump.pilotKey(k, false); }}
+      onPointerCancel={() => xenonPump.pilotKey(k, false)}
+      onPointerLeave={() => xenonPump.pilotKey(k, false)}
+      onContextMenu={e => e.preventDefault()}
+    >{label}</button>
+  );
+  return (
+    <div data-testid="pilot-touchpad" aria-hidden
+      className={`pointer-events-none absolute inset-0 z-20 flex items-end justify-between p-2 ${p.className ?? ''}`}
+      onClick={e => e.stopPropagation()}
+      onPointerDown={e => e.stopPropagation()}>
+      <div className="pointer-events-auto flex flex-col items-center gap-1">
+        {PAD_LEFT.filter(x => x.k === 'w').map(x => btn(x.k, x.label))}
+        <div className="flex gap-1">{PAD_LEFT.filter(x => x.k !== 'w').map(x => btn(x.k, x.label))}</div>
+      </div>
+      <div className="pointer-events-auto flex flex-col items-end gap-1">
+        <div className="flex gap-1">{PAD_RIGHT.filter(x => ['e', 'up'].includes(x.k)).map(x => btn(x.k, x.label))}</div>
+        <div className="flex gap-1">{PAD_RIGHT.filter(x => ['f', 'down'].includes(x.k)).map(x => btn(x.k, x.label))}</div>
+        {PAD_RIGHT.filter(x => x.k === 'space').map(x => btn(x.k, x.label))}
+      </div>
+    </div>
+  );
+}
 
 /** One live surface canvas — registers with the pump (the pump blits), routes
  *  pointer clicks / wheel notches into the VM (computer.md: click entry
@@ -73,6 +138,7 @@ export function ScreensCell(p: {
   tight?: boolean;                  // tile mode: flush canvases, labels hidden
 }) {
   const [full, setFull] = useState(!!p.autoFull);
+  const coarse = useCoarsePointer();
   useEffect(() => { if (p.autoFull) p.onAutoOpened?.(); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
   // zoom (we: "I need to be able to zoom in on dashboard screens -
   // dolphin/cede have screens that are too large for me to properly see"):
@@ -100,6 +166,11 @@ export function ScreensCell(p: {
         {!p.tight && (
           <div className="max-w-[170px] truncate text-[10px] text-[#5d6a7d]">{p.label} · {p.w}×{p.h}</div>
         )}
+        {/* the touch cockpit rides THE SCREEN itself (we: "make that overlay
+            the screen itself") — in tile mode every tile is a play
+            surface; plain thumbnails stay tappable (tap opens the zoom
+            window, where the pad rides too) */}
+        {coarse && p.tight && <PilotTouchPad />}
       </div>
       {full && (
         <div data-testid={`${p.testid}-overlay`}
@@ -132,6 +203,9 @@ export function ScreensCell(p: {
             <ScreenCanvas surfKey={p.surfKey} w={p.w} h={p.h} fill
               testid={`${p.testid}-fullcanvas`} />
           </div>
+          {/* ...and the fullscreen zoom window carries it too (we: "also
+              when fullscreening a screen") */}
+          {coarse && <PilotTouchPad />}
         </div>
       )}
     </>

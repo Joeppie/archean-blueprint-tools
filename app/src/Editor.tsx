@@ -185,6 +185,18 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   useEffect(() => {
     if (xenonCi === null && !screensOpen) xenonPump.close();
   }, [xenonCi, screensOpen]);
+  // Debug channel base (the __XENON__ pattern): readable on ANY page — the
+  // IDE dialog enriches it further while mounted (surfaceMeta, bus, ...)
+  useEffect(() => {
+    (window as any).__XENON__ ??= () => ({
+      cycles: xenonPump.cycles, status: xenonPump.status,
+      pilotKeys: xenonPump.pilotKeysBound(),
+      world: [...xenonPump.wsBoundNames()].map(n => {
+        const r = xenonPump.wsChannels().find(c => c.name === n);
+        return r ? { name: r.name, mode: r.mode, manual: r.manual, value: r.value } : null;
+      }).filter(Boolean),
+    });
+  }, []);
   // THE 3-D LAW: the pump's 25 Hz tick pushes each surface's framebuffer
   // onto its dashboard face ("dashboards display what is given to them").
   // The pump fetches pixels for exactly the keys the scene feeds (plus the

@@ -567,7 +567,7 @@ test.describe('Xenon IDE @ui', () => {
     await expect(dock).toHaveCount(0);
   });
 
-  test('dash focus + deep link + cockpit keys + buzzers: Mario plays @slow', async ({ page }) => {
+  test('dash focus + deep link + cockpit keys + buzzers: Mario plays @slow', async ({ page, browser }) => {
     // (we 2026-10-27: "dashboard … too small to read … No zooming … does not
     // let you filter" + "WASD, up, down, and F … inputs into the computer
     // for all cockpit connections it has" + "buzzers should be implemented"
@@ -692,6 +692,38 @@ test.describe('Xenon IDE @ui', () => {
       amp = parseFloat(t) || 0;
     }
     expect(amp).toBeGreaterThan(0);
+
+    // PHONE: the touch cockpit rides THE SCREEN itself — deep-link to
+    // Mario's TV, the pad shows W A S D / ▲ ▼ E F ␣; press = keydown,
+    // release = keyup (we: "overlay all keyboard binds as buttons that do
+    // keydown when pressing and up when letting go, so we can play on
+    // mobile, also on virtual screens … also when fullscreening a screen")
+    const origin = new URL(page.url()).origin;
+    const ph = await browser.newContext({
+      viewport: { width: 412, height: 915 }, hasTouch: true,
+      storageState: { cookies: [], origins: [{ origin, localStorage: [
+        { name: 'archean-app-debug', value: '1' },
+        { name: 'archean-app-backdrop', value: 'none' },
+      ] }] },
+    });
+    const pp = await ph.newPage();
+    await pp.goto(`/?craft=${MARIO}&dash=screen%230`);
+    await pp.waitForFunction(() => /SCENE PASS/.test(document.title), null, { timeout: 180_000 });
+    // the deep-linked fullscreen zoom window carries the pad
+    const pad = pp.getByTestId('screens-cell-screen#0-overlay').getByTestId('pilot-touchpad');
+    await expect(pad).toBeVisible({ timeout: 120_000 });
+    for (const k of ['w', 'a', 's', 'd', 'up', 'down', 'f', 'e', 'space'])
+      await expect(pp.locator(
+        `[data-testid="screens-cell-screen#0-overlay"] [data-testid="pilot-touch-${k}"]`)).toBeVisible();
+    // press = keydown: the W button lands on the seat's Backward/Forward
+    const wManual = async () => pp.evaluate(() =>
+      (((window as any).__XENON__?.()?.world ?? []).find((r: any) => /backward/.test(r.name))?.manual) ?? null);
+    await pp.locator('[data-testid="screens-cell-screen#0-overlay"] [data-testid="pilot-touch-w"]').dispatchEvent('pointerdown');
+    await expect.poll(wManual, { timeout: 15_000 }).toBe(1);
+    // release = keyup: the stick centers
+    await pp.locator('[data-testid="screens-cell-screen#0-overlay"] [data-testid="pilot-touch-w"]').dispatchEvent('pointerup');
+    await expect.poll(wManual, { timeout: 15_000 }).toBe(0);
+    await ph.close();
     await page.getByTestId('xenon-close').click();
   });
 });
