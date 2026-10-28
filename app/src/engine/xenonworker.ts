@@ -106,7 +106,7 @@ function pixelsFor(keys: string[]): Record<string, ArrayBuffer> {
   return out;
 }
 function pixelKeys(): string[] {
-  return [...new Set(wantKeys.map(k => k.split('#')[0] + '#' + (k.split('#')[1] ?? 0)))];
+  return [...new Set(wantKeys)];
 }
 
 function cycleData(evsJson: string): Record<string, unknown> {
@@ -183,6 +183,11 @@ ctx.onmessage = (e: MessageEvent<Msg>) => {
       return ctx.postMessage({ t: 'reboot', ok, error: err });
     }
     if (m.t === 'cycle' || m.t === 'runCycles') {
+      // the keys ride EVERY cycle message (XenonWorkerRun.setKeys piggybacks
+      // them) — WITHOUT this read the pixel fetch ran on a permanently-empty
+      // wantKeys: worker mode shipped with ZERO screen pixels delivered
+      // (the four litPixels e2e reds, v1.13.17)
+      if (m.keys) wantKeys = m.keys;
       for (const [io, ch, v] of m.inputs ?? []) {
         if (typeof io === 'number') mod._xc_set_input(io, ch, v);
         else if (typeof mod._xc_set_input_a === 'function') {
