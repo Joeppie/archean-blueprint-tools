@@ -721,7 +721,10 @@ test.describe('Xenon IDE @ui', () => {
     // swallowed — MASH the jump key (the Bus tab arms the pilot keys too)
     // until a game starts; the level theme then drives the melody buzzer.
     let amp = 0;
-    for (let i = 0; i < 26 && amp <= 0; i++) {
+    // 40 mashes ≈ 70 s: sprite caching (one sprite per cycle) ends at
+    // ~cycle 600, and on a loaded box the pump runs ~14 cycles/s — the
+    // 26-press window was tight enough to expire just before the theme.
+    for (let i = 0; i < 40 && amp <= 0; i++) {
       await page.keyboard.down('f');
       await page.waitForTimeout(90);
       await page.keyboard.up('f');
