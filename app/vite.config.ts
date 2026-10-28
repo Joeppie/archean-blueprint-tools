@@ -10,6 +10,28 @@ export default defineConfig({
   // AGENTS § Blueprint folder spirit); the dev/preview servers serve the app
   // at '/' and resolve the same './assets/…' + '../testdata/…' routes.
   base: './',
+  // v1.13.17 TRUE LINE STEPPING: SharedArrayBuffer (the worker-debugger's
+  // pause/resume channel) needs a SECURE CONTEXT + cross-origin isolation.
+  // The dev/preview servers answer COOP/COEP so http://localhost:PORT (and
+  // the tailscale-serve HTTPS origin) boot with window.crossOriginIsolated
+  // = true; plain-http LAN origins stay non-isolated and the app falls back
+  // to the v1.13.16 cycle-accurate stepper (engine/xenoncode.ts sabOk()).
+  // allowedHosts: this is a LAN dev box (Tailscale browsing, AGENTS § One
+  // server); vite 6's Host check would reject the tailscale FQDN.
+  server: {
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'require-corp',
+    },
+    allowedHosts: true,
+  },
+  preview: {
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'require-corp',
+    },
+    allowedHosts: true,
+  },
   plugins: [react(), tailwindcss(), corpus()],
   build: {
     // v1.12.2 BOOT COST — chunk diet. THREE (three.js + its addons) is a

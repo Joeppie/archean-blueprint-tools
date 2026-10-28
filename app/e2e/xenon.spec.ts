@@ -271,22 +271,33 @@ test.describe('Xenon IDE @ui', () => {
     const c0 = await cycles();
     await page.waitForTimeout(1200);
     expect(await cycles()).toBe(c0);                 // frozen while paused
-    // F10 = the NEXT EXECUTED LINE (on this fixture: the rest of THIS
-    // cycle's stream, so exactly one pump cycle runs per step here)
+    // F10 = the NEXT EXECUTED LINE. THE MODE LAW (v1.13.17): in WORKER
+    // mode the VM stops MID-CYCLE inside xc_cycle — the pump's cycle
+    // counter is FROZEN through every step (the cycle completes only on
+    // resume); the main-thread stepper (Pages / non-isolated origins)
+    // consumes one pump cycle per step instead.
+    const workerMode = await page.evaluate(
+      () => (window as any).__XENON__?.()?.worker === true);
     await page.keyboard.press('F10');
-    await expect.poll(cycles, { timeout: 8_000 }).toBe(c0 + 1);
-    await expect(pill).toBeVisible();
     await expect.poll(async () => Number(await pill.getAttribute('data-line')),
-      { timeout: 5_000 }).not.toBe(17);              // the line ADVANCED
+      { timeout: 8_000 }).not.toBe(17);              // the line ADVANCED
+    await expect(pill).toBeVisible();
+    expect(await cycles()).toBe(workerMode ? c0 : c0 + 1);
     const l1 = Number(await pill.getAttribute('data-line'));
     await page.keyboard.press('F11');                // step into: next pair
-    await expect.poll(cycles, { timeout: 8_000 }).toBe(c0 + 2);
     await expect.poll(async () => Number(await pill.getAttribute('data-line')),
-      { timeout: 5_000 }).not.toBe(l1);
+      { timeout: 8_000 }).not.toBe(l1);
     await expect(pill).toBeVisible();
-    // F8 = resume: the break re-arms and cycles stream past the frozen step
+    expect(await cycles()).toBe(workerMode ? c0 : c0 + 2);
+    if (workerMode) {
+      // THE MID-CYCLE PROOF: two steps, ZERO cycles — the VM never
+      // finished the update it stepped into
+      expect(await page.evaluate(() => (window as any).__XENON__().cycles)).toBe(c0);
+    }
+    // F8 = resume: the cycle COMPLETES (worker: the first cycle lands
+    // now), the break re-arms and cycles stream past
     await page.keyboard.press('F8');
-    await expect.poll(cycles, { timeout: 8_000 }).toBeGreaterThan(c0 + 2);
+    await expect.poll(cycles, { timeout: 8_000 }).toBeGreaterThan(c0);
     // the overview ✕ removes the break (strip disappears)
     await page.locator('[data-testid^="bp-row-"]').first().hover();
     await page.locator('[data-testid^="bp-row-"] span[role="button"]').first().click();

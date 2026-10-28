@@ -31,7 +31,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import FloatingWindow from './FloatingWindow';
 import {
   chanInfo, loadChannelTable, parseKv, parseNodes, varKind, xenonPump,
-  xenonScreenBindings, xcDiskFiles, CYCLE_HZ,
+  xenonScreenBindings, xcDiskFiles, CYCLE_HZ, sabSupported,
   type ChannelTable, type XenonComputer, type XGraph, type XCFile,
 } from '../engine/xenoncode';
 import { BUZZER_MODES, buzzerAudio, buzzerReadings, type BuzzerWave } from '../engine/buzzer';
@@ -97,7 +97,7 @@ export default function XenonDialog(p: {
           await new Promise(r => setTimeout(r, 100));
         await new Promise(r => setTimeout(r, 300));
       }
-      xenonPump.runCycles(Math.max(0, Math.min(20000, t.cycles | 0)));
+      await xenonPump.runCycles(Math.max(0, Math.min(20000, t.cycles | 0)));
       const snap = xenonPump.snapshot();
       const res = t.asserts.map(a => evalAssert(a, snap));
       setTestRes(res);
@@ -150,6 +150,7 @@ export default function XenonDialog(p: {
       status: pump.status, cycles: pump.cycles, raf: pump.raf2(),
       running: pump.run?.running ?? null, surfaces: pump.surfaces.size,
       paused: pump.paused, error: pump.error,
+      worker: !!pump.wrun, isolated: sabSupported(),
       surfaceKeys: [...pump.surfaces.keys()],
       surfaceMeta: [...pump.surfaces.values()].map(({ key, w, h }) => ({ key, w, h })),
       world: [...pump.wsBoundNames()].map(n => {
@@ -244,6 +245,7 @@ export default function XenonDialog(p: {
   const [errors, setErrors] = useState<Map<number, string> | undefined>(undefined);
   const lastTabRef = useRef(tab);
   lastTabRef.current = tab;
+  const valSeqRef = useRef(0);
   useEffect(() => {
     const run = pump.run;
     const code = (editing && tab === lastTabRef.current ? draft : file?.code) ?? '';
@@ -252,14 +254,21 @@ export default function XenonDialog(p: {
       const lines = code.split('\n');
       const a = Math.max(0, Math.min(lastLine || 1, lines.length) - 250);
       const b = Math.min(lines.length, a + MAX_PARSE_LINES);
-      const m = new Map<number, string>();
+      // BATCH validation (v1.13.17: one parse round-trip per window — the
+      // worker mode answers it asynchronously; XenonRun resolves sync)
+      const req: [string, number][] = [];
       for (let i = a; i < b; i++) {
         const s = lines[i]?.trim() ?? '';
         if (!s || s.startsWith(';') || s.startsWith('//') || s.startsWith('#')) continue;
-        const e = run.parseLine(lines[i]!, i + 1);
-        if (e) m.set(i + 1, e);
+        req.push([lines[i]!, i + 1]);
       }
-      setErrors(m);
+      const seq = ++valSeqRef.current;
+      void run.parseLines(req).then(errs => {
+        if (seq !== valSeqRef.current) return;   // a newer window won the race
+        const m = new Map<number, string>();
+        errs.forEach((e, k) => { if (e) m.set(req[k]![1], e); });
+        setErrors(m);
+      });
     }, 300);
     return () => window.clearTimeout(h);
     // eslint-disable-next-line react-hooks/exhaustive-deps

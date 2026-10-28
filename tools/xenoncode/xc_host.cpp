@@ -1049,12 +1049,75 @@ EMSCRIPTEN_KEEPALIVE const char* xc_cycle_pairs() {
 	g_pairsJson += "]";
 	return g_pairsJson.c_str();
 }
-// XENON-DEBUG v2 stop-hook seam (the interpreter calls this weak extern at
-// each executed line when tracking). Today a recorder no-op: the pair
-// stream IS the channel. The worker+Atomics debugger host runs the VM on a
-// worker and implements the blocking mid-cycle PAUSE in this same seam, so
-// the interpreter needs no further change.
-extern "C" void xc_debug_hook(int /*file*/, int /*line*/) {}
+// XENON-DEBUG v2 stop-hook seam (the interpreter calls this at each
+// executed line when tracking). v1.13.17 TRUE LINE STEPPING: under
+// Emscripten the hook is an EM_JS — the STEP LAW below runs in JS and on a
+// stop SLEEPS IN PLACE (Atomics.wait on the SharedArrayBuffer handed in as
+// Module.XC_SAB by the worker host). The worker thread freezes mid-update
+// with the interpreter's C++ stack intact (function locals, nested @call
+// frames survive); the MAIN thread stays fully alive: UI paints, keys
+// respond, and the next F10/F8 lands as an Atomics.notify that wakes the
+// exact line. Native runner + main-thread page hosts: Module.XC_SAB is
+// absent and the hook is inert — the pair stream remains the channel.
+//
+// i32 layout on the SharedArrayBuffer (the app's XenonWorkerRun is the
+// other end; library_xc.js documents the protocol):
+//   0 cmd main->worker: 0 none 1 over 2 into 3 runTo 4 resume 5 pause
+//   1 state worker->main: 0 running 1 PAUSED
+//   2 paused file idx  3 paused line  4 reason 1 bp 2 step 3 cursor 4 pause
+//   5/6 ref pair (over/into)   7/8 over body range (lo>hi = top level)
+//   9/10 runTo target          11 bp count, 12.. (file,line) pairs (max 64)
+#ifdef __EMSCRIPTEN__
+EM_JS(void, xc_hook_js, (int file, int line), {
+  var M = (typeof Module !== 'undefined') ? Module : null;
+  if (!M) return;
+  var H = M.__xcHook;
+  if (!H) {
+    if (!M.XC_SAB) return;                       // main-thread host: inert
+    H = M.__xcHook = { i32: new Int32Array(M.XC_SAB) };
+  }
+  var i = H.i32;
+  var cmd = Atomics.load(i, 0);
+  if (cmd === 4) { Atomics.store(i, 0, 0); Atomics.store(i, 1, 0); }
+  var reason = 0;
+  if (cmd === 5) reason = 4;
+  else if (cmd === 1) {                          // step OVER
+    if (!(file === i[5] && line === i[6])) {
+      var inScope = file === i[5] && i[7] <= i[8] && line >= i[7] && line <= i[8];
+      if (!inScope) reason = 2;
+    }
+  } else if (cmd === 2) {                        // step INTO
+    if (!(file === i[5] && line === i[6])) reason = 2;
+  } else if (cmd === 3) {                        // run to cursor
+    if (file === i[9] && line === i[10]) reason = 3;
+  }
+  if (!reason) {                                 // breakpoints
+    var n = Math.min(64, i[11] | 0);
+    for (var k = 0; k < n; k++)
+      if (i[12 + 2 * k] === file && i[13 + 2 * k] === line) { reason = 1; break; }
+  }
+  if (!reason) return;
+  Atomics.store(i, 0, 0);                        // consume the command
+  i[2] = file; i[3] = line; i[4] = reason;
+  Atomics.store(i, 1, 1);                        // PAUSED —
+  Atomics.notify(i, 1);
+  for (;;) {
+    Atomics.wait(i, 0, 0, 100000000);            // sleep IN PLACE: the whole
+    if (Atomics.load(i, 0) !== 0) break;         // interpreter stack parks
+  }                                             // right here
+  var c = Atomics.load(i, 0);
+  Atomics.store(i, 1, 0);
+  if (c === 4) Atomics.store(i, 0, 0);           // resume consumed; a step
+  Atomics.notify(i, 1);                          // command stays PENDING
+});
+#endif
+extern "C" void xc_debug_hook(int file, int line) {
+#ifdef __EMSCRIPTEN__
+  xc_hook_js(file, line);
+#else
+  (void)file; (void)line;
+#endif
+}
 EMSCRIPTEN_KEEPALIVE const char* xc_error() { return g_err.c_str(); }
 EMSCRIPTEN_KEEPALIVE void xc_set_input(int io, int ch, double v) { xc_inputs[io][ch] = v; }
 // the panel drives an ALIAS-addressed channel (same resolution as xc_ioOf)
@@ -1158,7 +1221,7 @@ EMSCRIPTEN_KEEPALIVE void xc_worldsim_clear() { g_wsProgram.clear(); g_wsEffecti
 
 // ABI stamp: the app checks this at boot (XC_ABI in engine/xenoncode.ts) and
 // warns ONCE on drift — new device/shim exports must bump it.
-EMSCRIPTEN_KEEPALIVE int xc_abi() { return 6; }   // 6: xc_cycle_pairs + xc_debug_hook seam (XENON-DEBUG v2); 5: xc_set_cycle_ms + dt-driven system_frequency
+EMSCRIPTEN_KEEPALIVE int xc_abi() { return 7; }   // 7: the stop-hook is LIVE (library_xc.js + Module.XC_SAB worker stepping); 6: xc_cycle_pairs + hook seam; 5: xc_set_cycle_ms
 EMSCRIPTEN_KEEPALIVE void xc_set_cycle_ms(int ms) {
 	// the app's pump cadence (CYCLE_MS): delta_time / system_frequency
 	// follow it, so dt-driven programs (Chip's Mario, physics on
