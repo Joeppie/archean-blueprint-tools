@@ -143,7 +143,14 @@ export class BuzzerAudio {
   private master: GainNode | null = null;
   private analyser: AnalyserNode | null = null;
   private analyBuf: Float32Array | null = null;
-  private voices = new Map<string, { osc: OscillatorNode; gain: GainNode; kind: string }>();
+  private voices = new Map<string, { osc: OscillatorNode; gain: GainNode; kind: string; hold: number }>();
+  /** PEAK-HOLD (v1.13.11, we: "space invaders doesnt play sound unless I
+   *  minimize its screen"): a short beep written between two samples of a
+   *  canvas-load-starved pump (~11 Hz with the Invaders zoom open) was
+   *  already silent when sync ran, so the oscillator never ramped up. Keep
+   *  a voice at its last loud level for this long after it is last seen
+   *  loud, so a beep that lands in a sampling gap still SOUNDS. */
+  private static readonly HOLD = 0.12;
 
   private ensureCtx(): AudioContext {
     if (this.ctx) return this.ctx;
@@ -274,7 +281,7 @@ export class BuzzerAudio {
     if (typeof AudioContext === 'undefined') return;
     const live = new Set<string>();
     for (const r of rows) {
-      if (r.amp <= 0) continue;
+      if (r.amp <= 0) continue;      // silent readings never enter `live`
       live.add(r.name);
       let v = this.voices.get(r.name);
       try {
@@ -289,7 +296,7 @@ export class BuzzerAudio {
           osc.connect(gain);
           gain.connect(this.master!);
           osc.start();
-          v = { osc, gain, kind: wantKind };
+          v = { osc, gain, kind: wantKind, hold: 0 };
           this.voices.set(r.name, v);
         }
         const now = this.ctx!.currentTime;
@@ -302,14 +309,16 @@ export class BuzzerAudio {
         }
         v.osc.frequency.setTargetAtTime(r.freq, now, 0.01);
         v.gain.gain.setTargetAtTime(voiceGain(r.amp), now, 0.02);
+        v.hold = now + BuzzerAudio.HOLD;   // peak-hold the last loud sample
       } catch {
         // no audio device / context refused: stay silent, never break the pump
         this.stopAll();
         return;
       }
     }
+    const stopNow = this.ctx?.currentTime ?? 0;
     for (const [name, v] of [...this.voices])
-      if (!live.has(name)) {
+      if (!live.has(name) && stopNow >= v.hold) {
         try { v.osc.stop(); v.osc.disconnect(); v.gain.disconnect(); } catch { /* already gone */ }
         this.voices.delete(name);
       }

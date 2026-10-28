@@ -930,14 +930,29 @@ export class XenonPump {
   /** debug channel: the rAF handle (0 = the loop is not running) */
   raf2(): number { return this.timer; }
 
-  registerCanvas(key: string, cv: HTMLCanvasElement): () => void {
+  private cycleN = 0;
+  registerCanvas(key: string, cv: HTMLCanvasElement, fill = false): () => void {
     const k = key.toLowerCase();
     let s = this.canvases.get(k);
     if (!s) { s = new Set(); this.canvases.set(k, s); }
     s.add(cv);
+    (cv as { __fill?: boolean }).__fill = fill;   // fill = a zoom window: full cadence
     const surf = this.surfaces.get(k);
     if (surf?.pixels) this.blit(cv, surf);
     return () => { this.canvases.get(k)?.delete(cv); };
+  }
+  /** BLIT GATE (v1.13.11): a fullscreen zoom window + every dock thumbnail
+   *  blitting 640×480 EVERY 25 Hz cycle saturated the main thread; the pump
+   *  timer (which also drives the buzzer mixer) got starved, and Space
+   *  Invaders' short beeps fell between the late samples ("doesnt always
+   *  play sound unless I minimize its screen"). Hidden canvases are skipped
+   *  outright; thumbnails blit at ~8 Hz; a fill (zoom) canvas keeps 25 Hz. */
+  private blitTo(key: string, s: XenonSurface): void {
+    for (const cv of this.canvases.get(key) ?? []) {
+      if (!cv.isConnected || !cv.getClientRects().length) continue;
+      if (!(cv as { __fill?: boolean }).__fill && this.cycleN % 3) continue;
+      this.blit(cv, s);
+    }
   }
   subscribe(cb: () => void): () => void {
     this.subs.add(cb);
@@ -1004,6 +1019,7 @@ export class XenonPump {
   private cycleOnce(t: number, force = false): void {
     const run = this.run;
     if (!run || !run.running) return;
+    this.cycleN++;
     // XenonTest gate: runCycles() owns the VM while a test advances it
     // (force = the test's OWN cycles get through their own gate)
     if (this.testGate && !force) return;
@@ -1052,8 +1068,7 @@ export class XenonPump {
         const got = run.screenPixels(meta.key);
         if (got) {
           pixels = got;
-          for (const cv of this.canvases.get(meta.key) ?? [])
-            this.blit(cv, { ...meta, pixels: got });
+          this.blitTo(meta.key, { ...meta, pixels: got });
         }
       }
       next.set(meta.key, { ...meta, pixels });
@@ -1068,8 +1083,7 @@ export class XenonPump {
           const mk = `${slug(sc.alias)}#${sc.channel}`;
           const mir = { ...main0, key: mk };   // the KEY must travel with
           next.set(mk, mir);                   // the pixels (push keys off it)
-          if (mir.pixels)
-            for (const cv of this.canvases.get(mk) ?? []) this.blit(cv, mir);
+          if (mir.pixels) this.blitTo(mk, mir);
         }
     this.surfaces = next;
     for (const h of [...this.cycleHooks]) {

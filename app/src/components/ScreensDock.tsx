@@ -29,6 +29,7 @@ import {
   xenonPump, xenonScreenBindings, CYCLE_HZ, type PilotKey, type XenonComputer,
 } from '../engine/xenoncode';
 import { usePilotKeys } from '../engine/pilotkeys';
+import { slug } from '../engine/worldsim';
 
 /** True on touch-first devices (phones/tablets). The pilot touch pad and
  *  other touch affordances gate on this (we 2026-10-28: "for mobile phone,
@@ -105,8 +106,8 @@ export function ScreenCanvas(p: {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const cv = ref.current;
-    return cv ? xenonPump.registerCanvas(p.surfKey, cv) : undefined;
-  }, [p.surfKey]);
+    return cv ? xenonPump.registerCanvas(p.surfKey, cv, !!p.fill) : undefined;
+  }, [p.surfKey, p.fill]);
   const toPixels = (e: React.MouseEvent) => {
     const cv = ref.current;
     if (!cv) return null;
@@ -271,8 +272,15 @@ export default function ScreensDock(p: {
 
   const bindings = p.comp ? xenonScreenBindings(p.comp) : new Map<string, string>();
   const all = [...xenonPump.surfaces.values()];
+  // The 3-D model-face MIRRORS (the Computer's built-in screen fed from
+  // main#0) are the 3-D scene's business — a dock cell for each duplicate
+  // blits a full 640×480 canvas every cycle for pixels the user already
+  // sees under the real key, and that blit load is what starved the audio
+  // pump (v1.13.11). Cells show the real surfaces only.
+  const mirrors = new Set((p.comp?.screens ?? [])
+    .filter(s => s.deviceScreen).map(s => `${slug(s.alias)}#${s.channel}`.toLowerCase()));
   const virt = all.filter(s => s.key.startsWith('virtual#'));
-  const dash = all.filter(s => !s.key.startsWith('virtual#'));
+  const dash = all.filter(s => !s.key.startsWith('virtual#') && !mirrors.has(s.key));
   const list = useMemo(() => {
     const base = tab === 'virtual' ? virt : dash;
     const s = q.trim().toLowerCase();
