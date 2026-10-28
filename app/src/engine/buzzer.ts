@@ -152,6 +152,28 @@ export class BuzzerAudio {
    *  loud, so a beep that lands in a sampling gap still SOUNDS. */
   private static readonly HOLD = 0.12;
 
+  /** SILENT KEEP-ALIVE (v1.13.12, we: "did not play any sound until I made
+   *  the screen smaller"): Chrome throttles an OCCLUDED/hidden tab's timers
+   *  (the 25 Hz pump -> ~1 Hz), and a silent game tab is "audible" by
+   *  definition never — so the heartbeat starves and every short beep is
+   *  sampled after it already ended. A gain-0 oscillator pinned to the
+   *  destination marks the tab media-active: audible tabs are EXEMPT from
+   *  background throttling, the heartbeat keeps its cadence, and the tone
+   *  is mathematically inaudible (gain 0). */
+  private keepAlive: OscillatorNode | null = null;
+  private startKeepAlive(ctx: AudioContext, dest: AudioNode): void {
+    if (this.keepAlive) return;   // one per context (outlives mute: throttling doesn't care)
+    try {
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      g.gain.value = 0;
+      osc.connect(g);
+      g.connect(dest);
+      osc.start();
+      this.keepAlive = osc;
+    } catch { /* no audio device: no keepalive, nothing breaks */ }
+  }
+
   private ensureCtx(): AudioContext {
     if (this.ctx) return this.ctx;
     const ctx = new AudioContext();
@@ -174,6 +196,7 @@ export class BuzzerAudio {
     an.connect(ctx.destination);
     this.ctx = ctx; this.master = master; this.analyser = an;
     this.analyBuf = new Float32Array(an.fftSize);
+    this.startKeepAlive(ctx, ctx.destination);   // media-active: no tab throttling
     return ctx;
   }
 

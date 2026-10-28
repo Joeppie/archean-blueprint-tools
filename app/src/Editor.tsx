@@ -202,6 +202,36 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // keeps cycling behind the gallery (audio on!) and open()'s same-ci early
   // return RESUMES the old session, so the arcade never shows its title.
   useEffect(() => () => xenonPump.close(), []);
+  // SCREEN WAKE LOCK while a game screen is up (v1.13.12, we: "did not play
+  // any sound until I made the screen smaller"): Chrome throttles an
+  // occluded tab's timers (the 25 Hz pump starves, short beeps fall through
+  // the sampling gaps). A page holding the screen wake lock is treated as
+  // NEVER occluded (Chrome 125+) — the heartbeat keeps its cadence. Denied
+  // /unsupported: the silent audio keep-alive (buzzer.ts) still marks the
+  // tab media-active, which is the second exemption.
+  useEffect(() => {
+    if (!(screensOpen || xenonCi !== null)) return;
+    const wl = (navigator as unknown as {
+      wakeLock?: { request: (t: 'screen') => Promise<{ release: () => void; addEventListener: (e: string, f: () => void) => void }> };
+    }).wakeLock;
+    if (!wl) return;
+    let live = true;
+    let sentinel: { release: () => void } | null = null;
+    const req = () => {
+      if (!live) return;
+      void wl.request('screen')
+        .then(s => { sentinel = s; s.addEventListener('release', () => { sentinel = null; }); })
+        .catch(() => { /* denied: the audio keep-alive is the fallback */ });
+    };
+    req();
+    const vis = () => { if (document.visibilityState === 'visible') req(); };
+    document.addEventListener('visibilitychange', vis);
+    return () => {
+      live = false;
+      document.removeEventListener('visibilitychange', vis);
+      sentinel?.release();
+    };
+  }, [screensOpen, xenonCi]);
   // Debug channel base (the __XENON__ pattern): readable on ANY page — the
   // IDE dialog enriches it further while mounted (surfaceMeta, bus, ...)
   useEffect(() => {
