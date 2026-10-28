@@ -4,11 +4,14 @@
 // cockpit connections it has. This will allow us to simulate that").
 //
 // The hook is armed ONLY while a dash view has your attention: the ▣ Screens
-// dock and the IDE's Screens side tab. It maps the seven flight keys onto
+// dock and the IDE's Screens side tab. It maps the cockpit keys onto
 // the RUNNING computer's PilotSeat worldsim rows (pump.pilotKey — the
 // mapping law lives in engine/xenoncode.ts PILOT_KEYS) and feeds presses
-// for EVERY pilot channel the computer has. Keys never leak while you type
-// (the IDE editor, search boxes) and all sticks CENTER on release, key-up,
+// for EVERY pilot channel the computer has — the stick (WASD, arrows,
+// SPACE), Roll Q/E, Pitch I/K, Yaw J/L, Main Thrust R and the Aux ladder
+// 1-9/0 (we: "keyboard binds available also for the other keys cockpits
+// can give"). Keys never leak while you type (the IDE editor, search boxes)
+// and all sticks CENTER on release, key-up,
 // view-change and window-blur — a lost keyup must not run the throttle away.
 
 import { useEffect } from 'react';
@@ -17,6 +20,14 @@ import { xenonPump, type PilotKey } from './xenoncode';
 const KEYMAP: Record<string, PilotKey> = {
   KeyW: 'w', KeyA: 'a', KeyS: 's', KeyD: 'd',
   ArrowUp: 'up', ArrowDown: 'down', KeyF: 'f', Space: 'space', KeyE: 'e',
+  // v1.13.8 FULL COCKPIT (we: "keyboard binds available also for the other
+  // keys cockpits can give"): Q/E roll, I/K pitch, J/L yaw, R main thrust,
+  // digit row = Aux 1..9/0. The global g/o/h/w/5 shortcut map yields while
+  // pilotKeysActive() (the cockpit owns its keys, like 'w' since v1.13.2).
+  KeyQ: 'q', KeyI: 'i', KeyK: 'k', KeyJ: 'j', KeyL: 'l', KeyR: 'r',
+  Digit1: 'digit1', Digit2: 'digit2', Digit3: 'digit3', Digit4: 'digit4',
+  Digit5: 'digit5', Digit6: 'digit6', Digit7: 'digit7', Digit8: 'digit8',
+  Digit9: 'digit9', Digit0: 'digit0',
 };
 
 const isTyping = (t: EventTarget | null) => {

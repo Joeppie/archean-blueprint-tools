@@ -144,7 +144,16 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     // is raised as soon as it paints — `?craft=3820116990&dash=screen%230`
     // is Mario's TV, directly (we: "a deeplink ability to the specific dash")
     !!new URLSearchParams(window.location.search).get('dash'));
-  const hasScreens = useMemo(() => (bp ? hasDashboards(bp) : false), [bp]);
+  const hasScreens = useMemo(() => (bp
+    ? hasDashboards(bp) || xenonComps.some(c => c.screens.some(s => s.deviceScreen))
+    : false),
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [bp, xenonComps]);
+  // v1.13.8 (we: "it doesnt register the built-in screen", craft 3288012440):
+  // a Computer's / Crafter's INTEGRATED screen is a physical screen too —
+  // the ▣ dock gate must not stop at Dashboard components. The dock's
+  // cells list the pump's live surfaces (main#0 + the model-face mirror),
+  // and opening the dock arms the pilot keys exactly like the IDE.
   // v1.13.x AUTOSAVE shadow copies ("Forget to save? No problem"): the doc
   // text is shadowed every ~20 s while dirty + on every save; File ▸
   // Autosaves lists them per craft with timestamps.
@@ -194,6 +203,14 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       cycles: xenonPump.cycles, status: xenonPump.status,
       pilotKeys: xenonPump.pilotKeysBound(),
       surfaceMeta: [...xenonPump.surfaces.values()].map(({ key, w, h }) => ({ key, w, h })),
+      // v1.13.8 audit door: a surface's live framebuffer (the invadersaudit
+      // orientation probe compares the RENDERED 3-D face against it) and the
+      // last input_number READS per io:ch (the input-path probes).
+      pixels: (key: string) => {
+        const s = xenonPump.surfaces.get(key);
+        return s?.pixels ? { w: s.w, h: s.h, data: [...s.pixels!] } : null;
+      },
+      reads: () => Object.fromEntries(xenonPump.reads),
       buzzer: {
         soundOn: buzzerAudio.soundOn, wave: buzzerAudio.wave, level: buzzerAudio.level,
         outputLevel: buzzerAudio.outputLevel(), voices: buzzerAudio.voiceCount(),
@@ -949,8 +966,10 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         if (cur) toggleOpt(map[e.key]!, !cur[map[e.key]!]);
       }
       // v1.9.2: '5' flips the PROJECTION (Blender's numpad-5 habit — the
-      // user's ortho mode lives in the View menu; the key is the fast path)
-      if (e.key === '5' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      // user's ortho mode lives in the View menu; the key is the fast path).
+      // v1.13.8: the digit row is the cockpit's Aux ladder — the cockpit
+      // claims '5' too while pilot keys are bound (same law as 'w').
+      if (e.key === '5' && !e.ctrlKey && !e.metaKey && !e.altKey && !pilotKeysActive()) {
         const on = engineRef.current?.projection() !== 'orthographic';
         setOrtho(!!on);
         engineRef.current?.setProjection(!!on);

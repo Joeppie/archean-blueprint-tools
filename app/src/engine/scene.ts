@@ -276,7 +276,7 @@ export class Engine {
   // when the model builds and PERSIST across IDE sessions - setScreenFeeds
   // rebuilds only dashScreens, and clearing both is what left the model
   // face un-fed when the IDE opened after scene load
-  private deviceScreens = new Map<string, { mat: MeshBasicMaterial; tex: DataTexture; w: number; h: number }>();
+  private deviceScreens = new Map<string, { mat: MeshBasicMaterial; tex: DataTexture; w: number; h: number; mesh: Mesh }>();
   /** per-type LoadedModel of every real root currently in the scene — the
    *  cache liveDataEdit rebuilds from (no async refetch mid-slider-drag) */
   private liveGeo = new Map<string, LoadedModel>();
@@ -1997,11 +1997,24 @@ void main() {
           const uv = new Float32Array(pos.count * 2);
           for (let k = 0; k < pos.count; k++) {
             uv[k * 2] = (pos.getComponent(k, uax as 0 | 1 | 2) - mn[uax]!) / us;
-            // v up = image TOP (DataTexture is not flipped): world-Y is up;
-            // for an upward-facing panel the far edge (low-axis) is the top
-            uv[k * 2 + 1] = vax === 1
-              ? (pos.getComponent(k, vax as 0 | 1 | 2) - mn[vax]!) / vs
-              : 1 - (pos.getComponent(k, vax as 0 | 1 | 2) - mn[vax]!) / vs;
+            // v = 1 ↔ the framebuffer TOP (the pushScreen row-flip puts the
+            // image's row 0 at v = 1, DataTexture flipY=false), and v = 1
+            // must sit on the panel's AUTHORED top edge.
+            //
+            // The prims arrive unityBake(C⁻¹)-baked, C⁻¹=(x,−z,y): the baked
+            // y is the NEGATED authored z, the baked z is the authored y.
+            //  · an UPRIGHT quad (the Computer's screen: authored normal ±z,
+            //    top +y → baked-z tall, vax=2): the authored top = MAX baked
+            //    z → v runs WITH the axis.
+            //  · a FLAT/up-facing quad (the Crafter's touchscreen: authored
+            //    normal ±y, top +z → baked-y tall, vax=1): the readable top
+            //    (far edge, max authored z) = MIN baked y → v runs 1-minus.
+            // The original table had BOTH branches inverted — 'the built-in
+            // computer screen display is upside down' (we, craft 3288012440,
+            // in-browser verdict 2026-10-28; the same law keeps the Crafter
+            // branch matching its v1.13.x probe).
+            const vv = (pos.getComponent(k, vax as 0 | 1 | 2) - mn[vax]!) / vs;
+            uv[k * 2 + 1] = vax === 1 ? 1 - vv : vv;
           }
           gg.setAttribute('uv', new BufferAttribute(uv, 2));
           gg.computeVertexNormals();
@@ -2023,9 +2036,22 @@ void main() {
           tex.generateMipmaps = false;
           tex.needsUpdate = true;
           const smat = new MeshBasicMaterial({ map: tex, toneMapped: false });
-          this.deviceScreens.set(`${wsDeviceSlug(c.alias, c.type.toLowerCase(), ci)}#0`,
-            { mat: smat, tex, w: dw, h: dh });
           const sm = new Mesh(gg, smat);
+          // THE SCREEN-QUAD SEAM (v1.13.8 audit): the 4 face corners in
+          // (u,v) order — u along uax, v = the uv-Y axis — stored LOCAL, so
+          // tools/invadersaudit.mjs can project the live face and measure
+          // the RENDERED image against the live framebuffer (pixels, not
+          // intent — the 'the screen display is upside down' report).
+          Object.assign(sm.userData, {
+            quad: ([[0, 0], [1, 0], [1, 1], [0, 1]] as const).map(([du, dv]) => {
+              const p: [number, number, number] = [mn[0]!, mn[1]!, mn[2]!];
+              p[uax] = mn[uax]! + du * ext[uax]!;
+              p[vax] = mn[vax]! + dv * ext[vax]!;
+              return p;
+            }),
+          });
+          this.deviceScreens.set(`${wsDeviceSlug(c.alias, c.type.toLowerCase(), ci)}#0`,
+            { mat: smat, tex, w: dw, h: dh, mesh: sm });
           rg.add(sm);
           continue;
         }
@@ -3723,6 +3749,81 @@ void main() {
   /** The surface keys the 3-D scene feeds onto craft dashboard faces. */
   screenFeedKeys(): string[] {
     return [...this.dashScreens.keys(), ...this.deviceScreens.keys()];
+  }
+  /** AUDIT SEAM (v1.13.8, tools/invadersaudit.mjs): the WORLD corners of
+   *  each built-in screen face, in the stored (u,v) order — v is the UV-Y
+   *  axis, so (u=0,v=0) is the face's uv (0,0) corner = the frame-buffer
+   *  image's BOTTOM-LEFT under the pushScreen convention. Counts, never
+   *  applies. */
+  screenFeedQuads(): {
+    key: string; corners: [number, number, number][];
+    center: [number, number, number]; normal: [number, number, number]; width: number;
+  }[] {
+    const out: {
+      key: string; corners: [number, number, number][];
+      center: [number, number, number]; normal: [number, number, number]; width: number;
+    }[] = [];
+    for (const [key, e] of this.deviceScreens) {
+      const quad = e.mesh.userData.quad as [number, number, number][] | undefined;
+      if (!quad) continue;
+      e.mesh.updateWorldMatrix(true, false);
+      const ws = quad.map(c => {
+        const v = new Vector3(c[0], c[1], c[2]).applyMatrix4(e.mesh.matrixWorld);
+        return [v.x, v.y, v.z] as [number, number, number];
+      });
+      const center = ws.reduce((s, c) => [s[0] + c[0] / 4, s[1] + c[1] / 4, s[2] + c[2] / 4],
+        [0, 0, 0] as [number, number, number]);
+      // front normal from the WORLD corner winding (cross of the face's own
+      // u/v edges — already world-space; NO normal-matrix on top, that was a
+      // double transform pointing the audit camera at the panel's BACK)
+      const u = new Vector3(...(ws[1] as [number, number, number])).sub(new Vector3(...ws[0]!));
+      const v = new Vector3(...(ws[3] as [number, number, number])).sub(new Vector3(...ws[0]!));
+      const normal = u.clone().cross(v).normalize();
+      out.push({ key, corners: ws, center,
+        normal: [normal.x, normal.y, normal.z],
+        width: new Vector3(...(ws[1] as [number, number, number])).distanceTo(new Vector3(...ws[0]!)) });
+    }
+    return out;
+  }
+  /** AUDIT SEAM (v1.13.8): aim the orbit rig (eye + pivot) at a point — the
+   *  invaders audit squares the camera onto a built-in screen face along its
+   *  front normal. Test-only; never a user-facing path. */
+  auditLookAt(eye: [number, number, number], center: [number, number, number]) {
+    if (!this.controls) return;
+    this.camera.position.set(eye[0], eye[1], eye[2]);
+    this.controls.target.set(center[0], center[1], center[2]);
+    if (this.camera instanceof OrthographicCamera) this.camera.zoom = 1;
+    this.controls.update();
+    this.invalidate();
+  }
+  /** AUDIT SEAM: project a world point onto the canvas — {u 0..1 left→right,
+   *  v 0..1 TOP→bottom} (the probePixel convention), + behind = off-screen
+   *  back side. */
+  projectCanvas(x: number, y: number, z: number): { u: number; v: number; behind: boolean } | null {
+    if (!this.renderer) return null;
+    const v = new Vector3(x, y, z).project(this.camera);
+    return { u: (v.x + 1) / 2, v: (1 - v.y) / 2, behind: v.z > 1 };
+  }
+  /** AUDIT SEAM: one fresh render + a raw gl.readPixels RECTANGLE (probePixel
+   *  at scale; the same-task read of the v1.9.2 lesson). u/v = canvas NDC
+   *  space with v TOP→bottom; the returned rows are GL order (row 0 = the
+   *  rect's BOTTOM edge = canvas v+h). */
+  probeRect(u: number, v: number, w: number, h: number):
+    { w: number; h: number; rgba: Uint8Array } | null {
+    const r = this.renderer;
+    if (!r) return null;
+    r.render(this.scene, this.camera);
+    const cw = r.domElement.width, ch = r.domElement.height;
+    const x0 = Math.max(0, Math.min(cw - 1, Math.floor(u * cw)));
+    const y0 = Math.max(0, Math.min(ch - 1, Math.floor((1 - v - h) * ch)));
+    const rw = Math.max(1, Math.min(cw - x0, Math.round(w * cw)));
+    const rh = Math.max(1, Math.min(ch - y0, Math.round(h * ch)));
+    const buf = new Uint8Array(rw * rh * 4);
+    try {
+      const gl = r.getContext();
+      gl.readPixels(x0, y0, rw, rh, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+    } catch { return null; }
+    return { w: rw, h: rh, rgba: buf };
   }
 
 

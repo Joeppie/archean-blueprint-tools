@@ -20,7 +20,8 @@
 // a mis-click cannot press a button_rect and change the screen under you.
 // VM clicks (the game's button law) land in the zoom window, where the
 // pixels are 1:1. A SEARCH box filters the cells by name; while the dock is
-// open WASD/↑/↓/F fly the craft's PilotSeat (engine/pilotkeys.ts).
+// open WASD/↑/↓/F/SPACE + Q/E/I/K/J/L/R + the 1-9,0 Aux ladder fly the
+// craft's PilotSeat (engine/pilotkeys.ts).
 // ---------------------------------------------------------------------------
 import { useEffect, useMemo, useRef, useState } from 'react';
 import FloatingWindow from './FloatingWindow';

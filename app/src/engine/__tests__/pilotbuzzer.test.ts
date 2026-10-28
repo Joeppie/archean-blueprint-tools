@@ -15,11 +15,18 @@ describe('THE PILOT-KEY LAW (WASD/↑↓/F → PilotSeat channels)', () => {
   it('maps the game\'s own PilotSeat channel words, stick-signed', () => {
     expect(PILOT_KEYS['backward/forward']).toEqual({ w: 1, s: -1 });
     expect(PILOT_KEYS['left/right']).toEqual({ d: 1, a: -1 });
-    expect(PILOT_KEYS['down/up']).toEqual({ up: 1, down: -1 });
-    expect(PILOT_KEYS['roll']).toEqual({ e: 1 });              // E = Mario's FIRE key (ch 5)
-    expect(PILOT_KEYS['aux 1']).toEqual({ f: 1, space: 1 });   // F and SPACE, one action button
+    // v1.13.8: SPACE also feeds Down/Up (the arcade "Press SPACE" reads the
+    // stick's Up channel — we: "I can't give input via its computer"); F and
+    // SPACE stay the Aux 1 action button (Mario's jump keeps working).
+    expect(PILOT_KEYS['down/up']).toEqual({ up: 1, down: -1, space: 1 });
+    expect(PILOT_KEYS['roll']).toEqual({ e: 1, q: -1 });       // E = Mario's FIRE key (ch 5), Q counter-roll
+    expect(PILOT_KEYS['aux 1']).toMatchObject({ f: 1, space: 1 });   // F and SPACE, one action button
     expect(PILOT_KEYS['using']).toBeUndefined();          // seat occupancy: no key
-    expect(PILOT_KEYS['main thrust']).toBeUndefined();    // W is the stick, not the throttle
+    // v1.13.8 FULL COCKPIT: Main Thrust / Pitch / Yaw now answer a key
+    // (R / I·K / J·L) — the seat rows exist, the keys reach them.
+    expect(PILOT_KEYS['main thrust']).toEqual({ r: 1 });
+    expect(PILOT_KEYS['pitch']).toEqual({ i: 1, k: -1 });
+    expect(PILOT_KEYS['yaw']).toEqual({ l: 1, j: -1 });
   });
 
   it('pilotKey drives EVERY bound row (all cockpit connections), press ±1, release centers 0', () => {

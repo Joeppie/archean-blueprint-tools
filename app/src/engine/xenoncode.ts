@@ -602,17 +602,43 @@ export const CYCLE_HZ = 25;
  *  takes F as the action button. Matching is by the FUNCTION WORD, so the
  *  keys land on every PilotSeat channel with that meaning (a craft with
  *  two seats drives both). */
-export type PilotKey = 'w' | 's' | 'a' | 'd' | 'up' | 'down' | 'f' | 'space' | 'e';
+export type PilotKey = 'w' | 's' | 'a' | 'd' | 'up' | 'down' | 'f' | 'space' | 'e'
+  | 'q' | 'i' | 'k' | 'j' | 'l' | 'r'
+  | 'digit1' | 'digit2' | 'digit3' | 'digit4' | 'digit5'
+  | 'digit6' | 'digit7' | 'digit8' | 'digit9' | 'digit0';
 export const PILOT_KEYS: Record<string, Partial<Record<PilotKey, number>>> = {
   'backward/forward': { w: 1, s: -1 },
   'left/right': { d: 1, a: -1 },
-  'down/up': { up: 1, down: -1 },
-  'roll': { e: 1 },         // E = the FIRE key on Mario (Roll ch 5; the
-  //                          // world-rows probe proved ch5 is Roll, not Pitch)
+  // SPACE joins Down/Up (the seat's +1): arcade crafts prompt "Press SPACE
+  // to play" on the stick's Up channel (Space Invaders 3288012440 reads
+  // input_number(10,3)) — the pure Aux-1 mapping made Space do nothing
+  // there (we: "I can't give input via its computer"; the stick mapping
+  // keeps Mario's jump, whose seat reads ch3 AND Aux 1).
+  'down/up': { up: 1, down: -1, space: 1 },
+  'pitch': { i: 1, k: -1 },
+  'roll': { e: 1, q: -1 },   // E = Mario's FIRE (Roll ch 5); Q the counter-roll
+  'yaw': { l: 1, j: -1 },
+  'main thrust': { r: 1 },
   // F and SPACE are aliases of the same action button (Aux 1 = Mario's
-  // jump; we: "we need to emulate space" — the classic jump key)
-  'aux 1': { f: 1, space: 1 },
+  // jump; we: "we need to emulate space"); the digit row mirrors the Aux
+  // ladder (Aux 1..9, 0 = Aux 10) so every cockpit channel is reachable
+  // (we: "we need keyboard binds available also for the other keys
+  // cockpits can give").
+  'aux 1': { f: 1, space: 1, digit1: 1 },
+  'aux 2': { digit2: 1 },
+  'aux 3': { digit3: 1 },
+  'aux 4': { digit4: 1 },
+  'aux 5': { digit5: 1 },
+  'aux 6': { digit6: 1 },
+  'aux 7': { digit7: 1 },
+  'aux 8': { digit8: 1 },
+  'aux 9': { digit9: 1 },
+  'aux 0': { digit0: 1 },
 };
+
+/** Every PILOT_KEYS function word the table defines (worldsim binding
+ *  filter; pure, vitest-pinned). */
+export const pilotKeyWords = (): string[] => Object.keys(PILOT_KEYS);
 
 export interface XenonSurface {
   key: string; w: number; h: number;
@@ -759,6 +785,28 @@ export class XenonPump {
       if (type === 'PilotSeat' && fn)
         for (const [k, sign] of Object.entries(PILOT_KEYS[fn.toLowerCase()] ?? {}) as [PilotKey, number][])
           (pilot.get(k) ?? pilot.set(k, []).get(k)!).push({ name, sign });
+    }
+    // FULL COCKPIT SURFACE (v1.13.8, we: "we need keyboard binds available
+    // also for the other keys cockpits can give"): every documented PilotSeat
+    // output channel gets a worldsim row + key binding, not just the ones
+    // the program happens to call input_number on — Pitch/Yaw/Main Thrust/
+    // Aux 2..0 had NO row at all, so their keys (I/K, J/L, R, 2..9, 0) had
+    // nothing to drive on crafts like the Space Invaders arcade.
+    for (const dev of comp.devices.filter(d => d.type === 'PilotSeat')) {
+      for (const chS of Object.keys(table?.['PilotSeat']?.out ?? {})) {
+        const ch = +chS;
+        if ([...bindings.values()].some(b => b.ch === ch
+            && (b.io === dev.io || (dev.io < 0 && String(b.io) === dev.alias)))) continue;
+        const fn = chanInfo(table, 'PilotSeat', 'out', ch)?.fn ?? null;
+        const name = wsName(dev.alias || 'PilotSeat', fn, ch);
+        if (bindings.has(name)) continue;
+        wsEnsure(name, `${dev.alias || 'PilotSeat'} · ${fn ?? `ch ${ch}`}`,
+          wsKind('pilotseat'), worldsimDefault(fn?.toLowerCase() ?? null, 'pilotseat'));
+        bindings.set(name, { io: dev.io, ch });
+        if (fn)
+          for (const [k, sign] of Object.entries(PILOT_KEYS[fn.toLowerCase()] ?? {}) as [PilotKey, number][])
+            (pilot.get(k) ?? pilot.set(k, []).get(k)!).push({ name, sign });
+      }
     }
     this.wsBindings = bindings;
     this.pilotBindings = pilot;

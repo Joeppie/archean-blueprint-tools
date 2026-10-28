@@ -5,7 +5,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
-  chanInfo, detectChannels, parseNodes, tokenize, xenonComputers, xenonScreens,
+  chanInfo, detectChannels, parseNodes, PILOT_KEYS, tokenize, xenonComputers, xenonScreens,
 } from '../xenoncode';
 import channelsJson from '../../../../viewer/models/channels.json';
 import type { Blueprint } from '../format';
@@ -178,5 +178,38 @@ describe('io → component + channel meanings (the game wiki table)', () => {
     for (const ch of [1, 2, 3, 8]) expect(seatChs).toContain(ch);
     // the game's music is BUZZER components driven by output_number
     expect(comp.devices.filter(d => d.type === 'Buzzer').length).toBeGreaterThan(3);
+  });
+});
+
+describe('THE FULL COCKPIT KEY LAW (v1.13.8)', () => {
+  // we: "we need keyboard binds available also for the other keys cockpits
+  // can give" — every documented PilotSeat output word (wiki PilotSeat.md,
+  // packed into channels.json) must answer a keyboard key, so a seat row
+  // exists for the key to drive (engine/xenoncode.ts PILOT_KEYS).
+  const seat = (channelsJson as any).PilotSeat?.out ?? {};
+  it('every PilotSeat channel word maps to at least one key', () => {
+    const unmapped = Object.entries(seat)
+      .map(([ch, v]) => [ch, String((v as any).fn ?? '').toLowerCase()] as const)
+      .filter(([, fn]) => fn !== 'using' && !PILOT_KEYS[fn]);
+    expect(unmapped).toEqual([]);
+  });
+  it('SPACE feeds the Down/Up stick channel (arcade "Press SPACE" reads ch 3)', () => {
+    // 3288012440 (Space Invaders arcade) gates its whole game on
+    // input_number(10,3)==1 — Space must reach the seat's Up, not just Aux 1.
+    expect(PILOT_KEYS['down/up']).toMatchObject({ up: 1, down: -1, space: 1 });
+    expect(PILOT_KEYS['aux 1']).toMatchObject({ f: 1, space: 1 });   // Mario keeps it
+  });
+  it('the stick signs are the game\'s (press = ±1 about the channel centre)', () => {
+    expect(PILOT_KEYS['backward/forward']).toMatchObject({ w: 1, s: -1 });
+    expect(PILOT_KEYS['left/right']).toMatchObject({ d: 1, a: -1 });
+    expect(PILOT_KEYS['pitch']).toMatchObject({ i: 1, k: -1 });
+    expect(PILOT_KEYS['roll']).toMatchObject({ e: 1, q: -1 });
+    expect(PILOT_KEYS['yaw']).toMatchObject({ l: 1, j: -1 });
+  });
+  it('the Aux ladder: digits 1-9 then 0 for Aux 1..9 and Aux 0', () => {
+    for (const [word, key] of [['aux 1', 'digit1'], ['aux 2', 'digit2'], ['aux 3', 'digit3'],
+      ['aux 4', 'digit4'], ['aux 5', 'digit5'], ['aux 6', 'digit6'], ['aux 7', 'digit7'],
+      ['aux 8', 'digit8'], ['aux 9', 'digit9'], ['aux 0', 'digit0']] as const)
+      expect(PILOT_KEYS[word]).toMatchObject({ [key]: 1 });
   });
 });

@@ -156,6 +156,13 @@ export default function XenonDialog(p: {
       pilotKeys: pump.pilotKeysBound(),
       cycleLines: pump.run?.cycleLines() ?? [],
       bus: [...pump.bus.entries()].slice(-40),
+      // v1.13.8 audit door (mirrors the __XENON__ base hook in Editor.tsx):
+      // a surface's live framebuffer + the last input_number READS per io:ch.
+      pixels: (key: string) => {
+        const s = pump.surfaces.get(key);
+        return s?.pixels ? { w: s.w, h: s.h, data: [...s.pixels!] } : null;
+      },
+      reads: () => Object.fromEntries(pump.reads),
       buzzer: {
         soundOn: buzzerAudio.soundOn, wave: buzzerAudio.wave, level: buzzerAudio.level,
         outputLevel: buzzerAudio.outputLevel(), voices: buzzerAudio.voiceCount(),
@@ -165,7 +172,8 @@ export default function XenonDialog(p: {
 
   useEffect(() => pump.subscribe(() => setTick(t => t + 1)), [pump]);
 
-  // WASD / ↑ / ↓ / F / Space / E fly the craft's PilotSeat WHILE THE
+  // WASD / ↑ / ↓ / F / Space / E (+ Q/I/K/J/L/R + the 1-9,0 Aux ladder) fly
+  // the craft's PilotSeat WHILE THE
   // COMPUTER'S WINDOW IS OPEN — any tab (the Auto-test reads the seat too;
   // typing in fields is guarded by isTyping) (v1.13.2: "for when you are
   // looking at the dash window, or computer's dash window, pressing WASD,
@@ -340,7 +348,7 @@ export default function XenonDialog(p: {
             debugger keys), Computer owns the machine (re-boot), Help the
             keys. The flat 'Options ▸ run' labels are gone. */}
         <MenuBar
-          right={`cycles ${pump.cycles} @ ${CYCLE_HZ} Hz · CTRL+S save+reboot · screens clickable · WASD↑↓F fly the seat on the Screens tab`}
+          right={`cycles ${pump.cycles} @ ${CYCLE_HZ} Hz · CTRL+S save+reboot · screens clickable · WASD↑↓ space fly · QE roll · IK pitch · JL yaw · R thrust · 1-9/0 aux`}
           menus={[
             { label: 'File', testid: 'xmenu-file', entries: [
               { label: 'New file…', testid: 'file-new', on: () => { setNewProg(false); setNewOpen(true); } },
