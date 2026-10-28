@@ -5,7 +5,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
-  chanInfo, detectChannels, parseNodes, PILOT_KEYS, tokenize, xenonComputers, xenonScreens,
+  chanInfo, detectChannels, parseNodes, PILOT_KEYS, sabSupported, stepperLaw, tokenize,
+  xenonComputers, xenonScreens, XenonWorkerRun,
 } from '../xenoncode';
 import channelsJson from '../../../../viewer/models/channels.json';
 import type { Blueprint } from '../format';
@@ -211,5 +212,92 @@ describe('THE FULL COCKPIT KEY LAW (v1.13.8)', () => {
       ['aux 4', 'digit4'], ['aux 5', 'digit5'], ['aux 6', 'digit6'], ['aux 7', 'digit7'],
       ['aux 8', 'digit8'], ['aux 9', 'digit9'], ['aux 0', 'digit0']] as const)
       expect(PILOT_KEYS[word]).toMatchObject({ [key]: 1 });
+  });
+});
+
+// v1.13.17 P2b (L5): THE STEPPER LAW — the pair-stream walk the main-thread
+// pump applies per cycle; xc_host.cpp's EM_JS hook evaluates the SAME law
+// mid-cycle in worker mode (SAB protocol). Pinned here so a drift in either
+// reading of the LAW (over = outside the body · into = any fresh pair ·
+// to = exact pair · breaks = exact, keep the step mode) fails at unit tier.
+describe('THE STEPPER LAW (dual-site: applyCycle walk ⇄ EM_JS hook)', () => {
+  const FT = ['main.xc', 'game.xc'];
+  const pair = (f: number, l: number) => f * 1_000_000 + l;
+  const S = (o: Partial<Parameters<typeof stepperLaw>[3]> = {}) => ({
+    stepMode: 'off', pausedFile: 'main.xc', pausedLine: 0,
+    toFile: '', toLine: 0, scope: null, ...o,
+  } as Parameters<typeof stepperLaw>[3]);
+
+  it('idle: no pairs, or no step mode and no breakpoints ⇒ no stop', () => {
+    expect(stepperLaw([], FT, new Map(), S({ stepMode: 'into' }))).toBeNull();
+    expect(stepperLaw([pair(0, 5)], FT, new Map(), S())).toBeNull();
+  });
+  it('a breakpoint stops AT the exact pair and KEEPS an armed step mode', () => {
+    const breaks = new Map([['game.xc', new Set([42])]]);
+    const h = stepperLaw([pair(0, 7), pair(1, 42), pair(0, 8)], FT, breaks,
+      S({ stepMode: 'into', pausedFile: 'main.xc', pausedLine: 7 }));
+    expect(h).toEqual({ file: 'game.xc', line: 42, stepMode: 'into' });
+  });
+  it('runTo stops on the EXACT (file,line) and disarms', () => {
+    const st = S({ stepMode: 'to', toFile: 'game.xc', toLine: 20 });
+    expect(stepperLaw([pair(0, 3), pair(1, 19)], FT, new Map(), st)).toBeNull();
+    expect(stepperLaw([pair(1, 20)], FT, new Map(), st))
+      .toEqual({ file: 'game.xc', line: 20, stepMode: 'off' });
+  });
+  it('into (F11): the FIRST fresh pair anywhere — the re-stop on the same pair (loop line) is not fresh', () => {
+    const st = S({ stepMode: 'into', pausedFile: 'main.xc', pausedLine: 10 });
+    expect(stepperLaw([pair(0, 10), pair(0, 10)], FT, new Map(), st)).toBeNull();
+    expect(stepperLaw([pair(0, 10), pair(1, 2)], FT, new Map(), st))
+      .toEqual({ file: 'game.xc', line: 2, stepMode: 'off' });   // steps INTO the @call file
+  });
+  it('over (F10): fresh pairs INSIDE the enclosing body continue; the first one OUTSIDE stops', () => {
+    const st = S({
+      stepMode: 'over', pausedFile: 'main.xc', pausedLine: 83,
+      scope: { file: 'main.xc', line: 83, end: 120 },
+    });
+    expect(stepperLaw([pair(0, 90), pair(0, 120)], FT, new Map(), st)).toBeNull();
+    expect(stepperLaw([pair(0, 121)], FT, new Map(), st))
+      .toEqual({ file: 'main.xc', line: 121, stepMode: 'off' });
+    // a call into ANOTHER file's body is outside the scope (the body range
+    // is per-file) — the pair-stream law, worker mode mirrors it
+    expect(stepperLaw([pair(1, 5)], FT, new Map(), st))
+      .toEqual({ file: 'game.xc', line: 5, stepMode: 'off' });
+  });
+  it('over at TOP LEVEL (scope null ⇒ the SAB lo>hi encoding): ANY fresh pair stops', () => {
+    const st = S({ stepMode: 'over', pausedFile: 'main.xc', pausedLine: 17, scope: null });
+    expect(stepperLaw([pair(0, 17)], FT, new Map(), st)).toBeNull();
+    expect(stepperLaw([pair(0, 18)], FT, new Map(), st))
+      .toEqual({ file: 'main.xc', line: 18, stepMode: 'off' });
+  });
+});
+
+// v1.13.17 P2b (L5): THE SAB GATE. Worker mode exists ONLY in a secure,
+// cross-origin-isolated context; every other origin (Pages, plain-http
+// Tailscale, node here) must fall back to the byte-identical main-thread
+// stepper — and a silent worker must never wedge the pump (open resolves
+// null, never hangs: the 15 s open-timeout races the 'open' answer).
+describe('THE SAB GATE (worker mode ⇄ main-thread fallback)', () => {
+  it('node (no crossOriginIsolated): sabSupported() false ⇒ XenonWorkerRun.open resolves null', async () => {
+    expect(sabSupported()).toBe(false);
+    await expect(XenonWorkerRun.open({
+      ci: 0, program: 'p', alias: 'p', entryName: 'p.main.xc', builtin: false,
+      files: [], screens: [], devices: [], channels: [], capacity: 0,
+    })).resolves.toBeNull();
+  });
+  it('the gate opens ONLY with SharedArrayBuffer AND crossOriginIsolated', () => {
+    const g = globalThis as { self?: unknown };
+    const hadSelf = 'self' in g;
+    const selfBackup = g.self;
+    try {
+      const sab = typeof SharedArrayBuffer;
+      (g as { self: Record<string, unknown> }).self = { crossOriginIsolated: true };
+      expect(sabSupported()).toBe(sab !== 'undefined');
+      (g as { self: Record<string, unknown> }).self = { crossOriginIsolated: false };
+      expect(sabSupported()).toBe(false);
+      (g as { self: Record<string, unknown> }).self = {};
+      expect(sabSupported()).toBe(false);
+    } finally {
+      if (hadSelf) g.self = selfBackup; else delete g.self;
+    }
   });
 });

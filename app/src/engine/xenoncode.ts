@@ -701,7 +701,13 @@ export class XenonWorkerRun {
 
   /** Spawn the worker + boot the VM there. Null = NOT supported (no SAB,
    *  no module, older shim ABI < 7) → the pump keeps the VM on the main
-   *  thread (v1.13.16 behaviour, byte-identical). */
+   *  thread (v1.13.16 behaviour, byte-identical).
+   *  OPEN-TIMEOUT LAW (v1.13.17 L5, workpackage): a worker that never
+   *  answers its 'open' (blocked fetch, wedged wasm compile, a CSP that
+   *  silently kills module workers) must NEVER wedge the pump in 'booting'
+   *  — the race loses at 15 s, the worker is disposed and the byte-identical
+   *  main-thread stepper takes over. (The Badger's 36k-line compile boots
+   *  its VM in ~3 s, so 15 s is pure dead-air detection.) */
   static async open(comp: XenonComputer): Promise<XenonWorkerRun | null> {
     if (!sabSupported()) return null;
     try {
@@ -713,7 +719,12 @@ export class XenonWorkerRun {
       const base = (import.meta as { env?: { BASE_URL?: string } }).env?.BASE_URL ?? '/';
       const xcUrl = new URL(`${base}xenoncode/xenoncode.js`, location.href).href;
       worker.postMessage({ t: 'open', xcUrl, sab, comp });
-      const d = await r.opened;
+      const d = await Promise.race([
+        r.opened,
+        new Promise<{ abi: number; error: string }>(res =>
+          setTimeout(() => res({ abi: 0, error: 'worker open timeout — the VM worker never answered' }),
+            XenonWorkerRun.OPEN_TIMEOUT_MS)),
+      ]);
       if (d.abi < 7) {
         console.warn(`[xenon] worker shim ABI ${d.abi} < 7 — main-thread mode: ${d.error}`);
         r.dispose();
@@ -726,6 +737,7 @@ export class XenonWorkerRun {
       return null;
     }
   }
+  private static readonly OPEN_TIMEOUT_MS = 15_000;
 
   abi() { return this.abi_; }
   setKeys(keys: Iterable<string>) { this.keys = [...keys]; }
@@ -836,6 +848,52 @@ export interface XenonSurface {
   // pixels are fetched only for canvases on screen and 3-D dashboard feeds
   // (the Badger paints 118 buffers; copying all every tick is pure memcpy)
   pixels?: Uint8ClampedArray;
+}
+
+// ── THE STEPPER LAW (v1.13.17 L5): the ONE place the v1.13.16 pair-stream
+// walk is expressed as a pure function, vitest-pinned
+// (__tests__/xenoncode.test.ts 'THE STEPPER LAW'). THE SAME LAW LIVES IN
+// TWO PLACES and must stay in lockstep:
+//   • HERE — main-thread mode: applyCycle feeds the per-cycle (file·1e6+
+//     line) pair stream through it after every completed cycle.
+//   • tools/xenoncode/xc_host.cpp (the EM_JS xc_debug_hook) — worker mode:
+//     evaluated AT EVERY EXECUTED LINE inside xc_cycle, over the SAB
+//     protocol (ref pair at [5,6], over body-range at [7,8] with lo>hi
+//     = top level = ANY new pair, runTo target at [9,10], bps at [11..]).
+// Any change to the stop conditions MUST be made in BOTH and re-pinned.
+export interface StepperState {
+  stepMode: 'off' | 'over' | 'into' | 'to';
+  /** where the debugger last stopped (a 'fresh' pair is any pair ≠ it) */
+  pausedFile: string; pausedLine: number;
+  /** runTo target (stepMode 'to') */
+  toFile: string; toLine: number;
+  /** the enclosing function body (stepMode 'over' keeps stopping OUTSIDE
+   *  it); null = top level ⇒ stop at ANY fresh pair */
+  scope: { file: string; line: number; end: number } | null;
+}
+export interface StepperHit { file: string; line: number; stepMode: StepperState['stepMode'] }
+
+export function stepperLaw(pairs: number[], fileTable: string[],
+  breaks: Map<string, Set<number>>, st: StepperState): StepperHit | null {
+  if (!pairs.length || (st.stepMode === 'off' && !breaks.size)) return null;
+  for (const p of pairs) {
+    const idx = Math.floor(p / 1000000);
+    const file = fileTable[idx] ?? `#${idx}`;
+    const line = p % 1000000;
+    // breakpoints pause WITHOUT clearing the step mode (an armed F10
+    // survives a breakpoint stop — the v1.13.16 stream walk)
+    if (breaks.get(file)?.has(line)) return { file, line, stepMode: st.stepMode };
+    if (st.stepMode === 'to' && file === st.toFile && line === st.toLine)
+      return { file, line, stepMode: 'off' };
+    const fresh = !(file === st.pausedFile && line === st.pausedLine);
+    if (st.stepMode === 'into' && fresh) return { file, line, stepMode: 'off' };
+    if (st.stepMode === 'over' && fresh) {
+      const inside = st.scope !== null
+        && file === st.scope.file && line >= st.scope.line && line <= st.scope.end;
+      if (!inside) return { file, line, stepMode: 'off' };
+    }
+  }
+  return null;
 }
 
 export class XenonPump {
@@ -1245,10 +1303,6 @@ export class XenonPump {
     this.paused = false;
     this.startRunning();
   }
-  private fileOf(pair: number): string {
-    const idx = Math.floor(pair / 1000000);
-    return this.fileTable[idx] ?? `#${idx}`;
-  }
   private pauseAt(file: string, line: number) {
     this.paused = true; this.pausedFile = file; this.pausedLine = line;
   }
@@ -1468,30 +1522,19 @@ export class XenonPump {
       }
     }
     this.cycles++;
-    // XENON-DEBUG v2: walk the EXECUTION-ORDER (file,line) stream. XenonTest
-    // gate cycles never touch the debugger (deterministic asserts).
+    // XENON-DEBUG v2: walk the EXECUTION-ORDER (file,line) stream through
+    // THE STEPPER LAW (see the law's cross-reference note at stepperLaw).
+    // XenonTest gate cycles never touch the debugger (deterministic asserts).
     if (!this.testGate && pairs) {
-      if (pairs.length && (this.stepMode !== 'off' || this.breaks.size)) {
-        const scope = this.stepMode === 'over'
-          ? functionAt(this.projectFuncs, this.pausedFile, this.pausedLine) : null;
-        for (const p of pairs) {
-          const file = this.fileOf(p);
-          const line = p % 1000000;
-          if (this.breaks.get(file)?.has(line)) { this.pauseAt(file, line); break; }
-          if (this.stepMode === 'to' && file === this.toFile && line === this.toLine) {
-            this.stepMode = 'off'; this.pauseAt(file, line); break;
-          }
-          const fresh = !(file === this.pausedFile && line === this.pausedLine);
-          if (this.stepMode === 'into' && fresh) {
-            this.stepMode = 'off'; this.pauseAt(file, line); break;
-          }
-          if (this.stepMode === 'over' && fresh) {
-            const insideScope = scope !== null
-              && file === scope.file && line >= scope.line && line <= scope.end;
-            if (!insideScope) { this.stepMode = 'off'; this.pauseAt(file, line); break; }
-          }
-        }
-      }
+      const scope = this.stepMode === 'over'
+        ? functionAt(this.projectFuncs, this.pausedFile, this.pausedLine) : null;
+      const hit = stepperLaw(pairs, this.fileTable, this.breaks, {
+        stepMode: this.stepMode,
+        pausedFile: this.pausedFile, pausedLine: this.pausedLine,
+        toFile: this.toFile, toLine: this.toLine,
+        scope: scope ? { file: scope.file, line: scope.line, end: scope.end } : null,
+      });
+      if (hit) { this.stepMode = hit.stepMode; this.pauseAt(hit.file, hit.line); }
     }
     this.vars = new Map(varsArr.filter(varVisible).map(v => [v.name, v]));
     if (runError) {
