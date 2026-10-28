@@ -633,4 +633,67 @@ test.describe('Xenon IDE @ui', () => {
     expect(bz.voices).toBeGreaterThanOrEqual(1);
     expect(bz.level).toBeGreaterThanOrEqual(0.2);
   });
+
+  // THE SPACE INVADERS arcade laws (craft 3288012440) — e2e tier: the live
+  // pump + seat rows + the Screens gate on the booted app (the pure key
+  // LAW is vitest-pinned in xenoncode.test.ts).
+  test('the Space Invaders arcade: built-in screen gate, FULL COCKPIT keys, Space → the stick @ui', async ({ page }) => {
+    // craft 3288012440 (Shadoh's arcade cabinet: Computer ci13 + PilotSeat
+    // on data_port.010). e2e-tier because the laws are the live pump + seat
+    // rows + the Screens gate on the booted app (the pure key LAW is vitest).
+    await page.goto('/?craft=3288012440');
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 90_000 });
+
+    // #2 the ▣ Screens gate counts a Computer's INTEGRATED screen (we:
+    // "it doesnt register the built-in screen" — the button was absent)
+    await expect(page.getByTestId('screens-btn')).toBeVisible();
+
+    // boot the pump through the IDE (arms the pilot keys)
+    await page.getByTestId('xenon-menu').click();
+    await page.getByTestId('xenon-comp-13').click();
+    await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 90_000 });
+    await page.getByTestId('xenon-side-screens').click();
+
+    // #4 FULL COCKPIT: every seat channel has a row + a bound key, not just
+    // the ch 1/2/3 the game reads (we: "keyboard binds available also for
+    // the other keys cockpits can give")
+    await expect
+      .poll(async () => {
+        const x = await page.evaluate(() => (window as any).__XENON__?.() ?? { pilotKeys: [], world: [] });
+        const keys: string[] = x.pilotKeys;
+        const need = ['w', 'a', 's', 'd', 'up', 'down', 'f', 'space', 'e', 'q',
+          'i', 'k', 'j', 'l', 'r', 'digit1', 'digit5', 'digit9', 'digit0'];
+        return need.filter((k) => keys.includes(k)).length;
+      }, { timeout: 30_000 })
+      .toBe(19);
+    const rows: string[] = await page.evaluate(
+      () => ((window as any).__XENON__?.() ?? { world: [] }).world.map((r: any) => r.name));
+    for (const n of ['pilotseat.pitch', 'pilotseat.yaw', 'pilotseat.main_thrust',
+      'pilotseat.aux_2', 'pilotseat.aux_0'])
+      expect(rows).toContain(n);
+
+    // #1/#3 SPACE feeds the seat's Up channel (the game's 'Press SPACE'
+    // reads ch 3; Space was wired only to Aux 1, which the game ignores)
+    await page.keyboard.down(' ');
+    await expect
+      .poll(async () => (await page.evaluate(() => (window as any).__XENON__?.() ?? { world: [] }))
+        .world.find((r: any) => r.name === 'pilotseat.down_up')?.manual ?? 0,
+        { timeout: 10_000 })
+      .toBe(1);
+    await page.keyboard.up(' ');
+    await expect
+      .poll(async () => (await page.evaluate(() => (window as any).__XENON__?.() ?? { world: [] }))
+        .world.find((r: any) => r.name === 'pilotseat.down_up')?.manual ?? -1,
+        { timeout: 10_000 })
+      .toBe(0);
+
+    // R = Main Thrust (a padded channel): the key reaches the row
+    await page.keyboard.down('r');
+    await expect
+      .poll(async () => (await page.evaluate(() => (window as any).__XENON__?.() ?? { world: [] }))
+        .world.find((r: any) => r.name === 'pilotseat.main_thrust')?.manual ?? 0,
+        { timeout: 10_000 })
+      .toBe(1);
+    await page.keyboard.up('r');
+  });
 });

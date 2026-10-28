@@ -14,7 +14,7 @@ Tags: keyboard shortcuts keys mouse controls orbit pan zoom delete escape shift 
 | h | hull solids ⇄ wireframe — in wireframe you CLICK THROUGH the hull to what is behind it ("click what you SEE") |
 | w | wireframe OVERLAY on/off (the ⚙ View ▸ wireframe row; a lit wireframe darkens the hull solids — hull ⇄ wireframe stay mutually exclusive, the 'h' law) |
 | 5 | projection: perspective ⇄ ORTHOGRAPHIC (parallel) — the same toggle as ⚙ View ▸ orthographic |
-| WASD ↑ ↓ F Space E (dash views only) | while the ▣ Screens dock or the IDE's Screens tab is open, these are the COCKPIT's inputs into the computer (PilotSeat channels: run/walk, move, jump/duck, jump — F and Space are the same action button, E is the fire key) — the g/o/h/w view shortcuts stand down (see Help ▸ Xenon) |
+| Cockpit keys (dash views only) | while the ▣ Screens dock or the IDE's Screens tab is open, the keys are the COCKPIT's inputs into the PilotSeat: **WASD** = the stick (forward/back, left/right), **↑/↓** = up/down, **Space** = up (the arcade "press SPACE" stick-push) **and** the Aux 1 action button, **F** = Aux 1, **E/Q** = roll, **I/K** = pitch, **J/L** = yaw, **R** = main thrust, **1-9, 0** = Aux 1-9 and Aux 0. Every documented seat channel has a worldsim row, so every key reaches the computer. The g/o/h/w/5 view shortcuts stand down (see Help ▸ Xenon) |
 | Shift (held) | snaps: gizmo moves to 0.25 m cells, rotations to 15°, subgrid joint handles snap, block ghost = mirror continuation |
 | Esc | close the top window → cancel a placement drag/skin → drop a held part → leave the triangle PINS → deselect |
 

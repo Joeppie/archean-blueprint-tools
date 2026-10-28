@@ -84,16 +84,23 @@ zooming, no filter". The dash windows are now the read/write surface:
 ## Cockpit keys — fly the craft from the dash
 
 While you are looking at the ▣ Screens dock, the IDE's Screens tab, **or**
-a Mario-style deep link, the flight keys are the cockpit's inputs (WASD,
-↑, ↓, F):
+a Mario-style deep link, the keys are the cockpit's inputs. Every documented
+PilotSeat output channel has a worldsim row, so every key reaches the
+computer — the seat is padded to the full 18-channel table, not just the
+channels a program happens to read:
 
-| Key | PilotSeat channel | In Chip's Mario |
-|---|---|---|
-| W / S | Backward / Forward (ch 1) | run / walk-back |
-| A / D | Left / Right (ch 2) | move |
-| ↑ / ↓ | Down / Up (ch 3) | jump / duck |
-| F / Space | Aux 1 (ch 8) — one action button | jump |
-| E | Roll (ch 5) | fire |
+| Key | PilotSeat channel | In Chip's Mario | In the Space Invaders arcade |
+|---|---|---|---|
+| W / S | Backward / Forward (ch 1) | run / walk-back | (name entry) |
+| A / D | Left / Right (ch 2) | move | move the cannon |
+| ↑ / ↓ | Down / Up (ch 3) | jump / duck | fire / start |
+| Space | **Down / Up (ch 3)** + Aux 1 (ch 8) | jump | press-SPACE-to-play |
+| F | Aux 1 (ch 8) | jump | — |
+| E / Q | Roll (ch 5) | fire | — |
+| I / K | Pitch (ch 4) | — | — |
+| J / L | Yaw (ch 6) | — | — |
+| R | Main Thrust (ch 7) | — | — |
+| 1 2 3 … 9 0 | Aux 1 2 3 … 9, Aux 0 (ch 8-17) | — | — |
 
 Every press drives **all** the PilotSeat channels the running computer has
 bound (a craft with two seats drives both), feeding `input_number` the
