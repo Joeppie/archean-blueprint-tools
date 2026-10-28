@@ -96,15 +96,16 @@ v1.13.17 L4: the glue builds with `-sEXPORT_ES6=1` — an **ES module**
 via `?url` (the seal.wasm precedent); the old classic-script/global form
 and the worker's fetch+blob export-shim are retired.
 
-## The shim's debugger law (ABI 8, v1.13.17 + v1.13.21)
+## The shim's debugger law (ABI 9, v1.13.17 + v1.13.21 + v1.13.23)
 
 `xc_host.cpp` is OURS, and since v1.13.17 it carries debugger law of its
 own — flag it in any upstream PR batch:
 
-* **ABI 8** (`xc_abi()` = 8): `xc_locals_json(fileIdx, line)` + the hook's
-   SAB locals handoff (the Locals panel); ABI 7 stamped the LIVE stop hook;
-   the app refuses worker mode below ABI 7 (falls back to the main-thread
-   stepper), so old artifacts degrade, never corrupt.
+* **ABI 9** (`xc_abi()` = 9): `xc_write_var` + the hook's cmd-6 write
+   handoff (editable debug values); ABI 8 added `xc_locals_json` + the
+   locals SAB handoff; ABI 7 stamped the LIVE stop hook; the app refuses
+   worker mode below ABI 7 (falls back to the main-thread stepper), so old
+   artifacts degrade, never corrupt.
 * **The LIVE line hook**: the interpreter (fork `0516ccb`, XENON-DEBUG v2)
   calls the weak extern `xc_debug_hook(file, line)` from `RunCode`'s
   LINENUMBER case at EVERY executed line; the shim (not the interpreter)

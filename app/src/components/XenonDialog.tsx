@@ -30,7 +30,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import FloatingWindow from './FloatingWindow';
 import {
-  chanInfo, loadChannelTable, parseKv, parseNodes, varKind, xenonPump,
+  chanInfo, loadChannelTable, parseKv, parseNodes, validNumInput, varKind, xenonPump,
   xenonScreenBindings, xcDiskFiles, CYCLE_HZ, sabSupported,
   type ChannelTable, type XenonComputer, type XGraph, type XCFile,
 } from '../engine/xenoncode';
@@ -173,6 +173,18 @@ export default function XenonDialog(p: {
           head: n > 0 && n <= w.bytes.length - 80
             ? new TextDecoder().decode(new Uint8Array(w.bytes.slice(80, 80 + Math.min(n, 240)))) : '' };
       })(),
+      // XENON-WRITEBACK audit: the cmd-6 slots + the raw decoded answer
+      writes: (() => {
+        const w = pump.wrun;
+        if (!w) return null;
+        const n = Atomics.load(w.i32, 18) | 0;
+        let ack = '';
+        try {
+          ack = n > 0 && n <= w.bytes.length - 128
+            ? new TextDecoder().decode(new Uint8Array(w.bytes.slice(128, 128 + Math.min(n, 240)))) : '';
+        } catch { ack = '<decode failed>'; }
+        return { cmd: Atomics.load(w.i32, 0), len18: n, flag20: Atomics.load(w.i32, 20), ack: ack.slice(0, 240) };
+      })(),
       project: { funcs: funcs.map(f => ({ name: f.name, file: f.file, line: f.line })),
         fileTable: pump.fileTable },
       bus: [...pump.bus.entries()].slice(-40),
@@ -307,6 +319,86 @@ export default function XenonDialog(p: {
     for (const v of pump.locals) m.set(v.name, (m.get(v.name) ?? 0) + 1);
     return m;
   }, [pump.locals]);
+  // ── XENON-WRITEBACK (v1.13.23, we: "I want the capacity to edit a
+  //    variable's current value - it must be valid for its type, the type
+  //    shown beside the name, reject invalid values, inject them back into
+  //    xenoncode"): one inline editor at a time; the type law lives in
+  //    Computer::WriteVarAt (ABI 9), validNumInput is the UI's mirror.
+  const [vedit, setVedit] = useState<{ key: string; scope: 'locals' | 'globals';
+    name: string; t: number; val: string } | null>(null);
+  const [verr, setVerr] = useState<{ key: string; msg: string } | null>(null);
+  const [vbusy, setVbusy] = useState(false);
+  const typeLabel = (t: number): string =>
+    t === 70 ? 'number' : t === 71 ? 'text'
+    : t === 80 ? 'number array' : t === 81 ? 'text array'
+    : t === 50 || t === 60 ? 'number' : t === 51 || t === 61 ? 'text'
+    : t >= 128 ? 'object' : varKind(t);
+  const refuseMsg = (t: number): string =>
+    t >= 128 ? 'objects are label-only - not editable'
+    : t === 80 || t === 81 ? 'arrays are label-only - not editable'
+    : (t >= 50 && t <= 61) ? 'storage lives in the world save - not editable here'
+    : 'not editable';
+  /** worker mode: the parked VM has exactly one writable moment - PAUSED
+   *  (the write rides the hook, cmd 6); main-thread mode: direct, anytime */
+  const canWrite = (t: number): boolean =>
+    (t === 70 || t === 71)
+    && (pump.wrun ? pump.paused : pump.status === 'running' || pump.status === 'stopped');
+  const applyWrite = async () => {
+    if (!vedit) return;
+    if (vedit.t === 70 && !validNumInput(vedit.val)) {
+      setVerr({ key: vedit.key, msg: 'not a finite number - try 42, -1.5, 1e3, true' });
+      return;
+    }
+    setVbusy(true);
+    const r = await pump.writeVar(vedit.name, vedit.t, vedit.val, vedit.scope);
+    setVbusy(false);
+    if (!r.ok) { setVerr({ key: vedit.key, msg: r.error ?? 'refused' }); return; }
+    setVedit(null);
+    setVerr(null);
+  };
+  /** The value cell: a dotted-underline button opens the inline editor
+   *  (Enter writes, Esc cancels); refused writes answer inline. */
+  const renderValue = (scope: 'locals' | 'globals', name: string, t: number, v: string,
+    kv: { k: string; v: string }[] | null) => {
+    const key = `${scope}:${name}`;
+    const shown = kv ? `{${kv.length}}` : v === '' ? '·' : v.length > 28 ? v.slice(0, 28) + '…' : v;
+    const editing = vedit?.key === key ? vedit : null;
+    return (
+      <span className="min-w-0 text-right">
+        {editing ? (
+          <span className="inline-flex items-center gap-1">
+            <input autoFocus data-testid={`xenon-edit-${name}`} value={editing.val}
+              disabled={vbusy}
+              onChange={e => setVedit({ ...editing, val: e.target.value })}
+              onKeyDown={e => {
+                if (e.key === 'Enter') { e.stopPropagation(); void applyWrite(); }
+                else if (e.key === 'Escape') { e.stopPropagation(); setVedit(null); setVerr(null); }
+              }}
+              className="w-28 rounded border border-[#3a5a82] bg-[#0b0f18] px-1 py-0.5 text-right text-[11px] tabular-nums outline-none" />
+            <button data-testid="xenon-edit-apply" disabled={vbusy} title="write into the program (Enter)"
+              className="text-[11px] text-[#8fd48f] hover:text-[#b7ecb7]" onClick={() => void applyWrite()}>✓</button>
+            <button data-testid="xenon-edit-cancel" title="cancel (Esc)"
+              className="text-[11px] text-[#8a93a0] hover:text-[#c8d0da]"
+              onClick={() => { setVedit(null); setVerr(null); }}>✕</button>
+          </span>
+        ) : canWrite(t) ? (
+          <button data-testid={`xenon-val-${name}`} title="click to edit - the value is written into the running program"
+            className="max-w-[180px] truncate rounded px-1 tabular-nums text-[#d6dbe1] underline decoration-dotted decoration-[#3a5a82] underline-offset-2 hover:bg-[#1d2b42]"
+            onClick={() => { setVedit({ key, scope, name, t, val: v }); setVerr(null); }}>
+            {shown}
+          </button>
+        ) : (
+          <span className="truncate text-[#d6dbe1]"
+            title={(t === 70 || t === 71) ? 'pause the debugger (F9 break) to edit' : refuseMsg(t)}>
+            {shown}
+          </span>
+        )}
+        {verr?.key === key && (
+          <span data-testid="xenon-edit-error" className="block text-[10px] leading-snug text-[#ff8585]">{verr.msg}</span>
+        )}
+      </span>
+    );
+  };
   const surfList = useMemo(() => {
     const q = scrQ.trim().toLowerCase();
     const all = [...pump.surfaces.values()];
@@ -673,20 +765,16 @@ export default function XenonDialog(p: {
               </div>
               {locList.map(v => {
                 const kv = parseKv(v.v);
-                const kind = varKind(v.t);
                 return (
                   <div key={`${v.name}#${v.s}`} data-testid={`xenon-loc-${v.name}`}
                     className="rounded border border-[#2b3a52] bg-[#152036] px-2 py-1 text-[11px]">
                     <div className="flex items-baseline justify-between gap-2">
                       <span className="text-[#8fd48f]">${v.name}
-                        {kind === 'array' && <span className="ml-1 text-[9px] text-[#5d6a7d]">array</span>}
-                        {kind === 'object' && <span className="ml-1 text-[9px] text-[#5d6a7d]">object</span>}
+                        <span className="ml-1 text-[9px] text-[#5d6a7d]">{typeLabel(v.t)}</span>
                         {(locCopies.get(v.name) ?? 0) > 1 &&
                           <span className="ml-1 rounded bg-[#1d2b42] px-1 text-[9px] text-[#8fd4ff]">#{v.s}</span>}
                       </span>
-                      <span className="truncate text-right tabular-nums text-[#d6dbe1]" title={v.v}>
-                        {kv ? `{${kv.length}}` : v.v === '' ? '·' : v.v.length > 28 ? v.v.slice(0, 28) + '…' : v.v}
-                      </span>
+                      {renderValue('locals', v.name, v.t, v.v, kv)}
                     </div>
                     {kv && (
                       <div className="ml-3 border-l border-[#2b3a52] pl-2">
@@ -713,19 +801,16 @@ export default function XenonDialog(p: {
               </div>
               {varList.map(v => {
                 const kv = parseKv(v.v);
-                const kind = varKind(v.t);
                 const storage = v.t === 50 || v.t === 51 || v.t === 60 || v.t === 61;
                 return (
                   <div key={v.name} data-testid={`xenon-var-${v.name}`}
                     className="rounded border border-[#232c3d] bg-[#131a28] px-2 py-1 text-[11px]">
                     <div className="flex items-baseline justify-between gap-2">
                       <span className="text-[#8fd48f]">${v.name}
+                        <span className="ml-1 text-[9px] text-[#5d6a7d]">{typeLabel(v.t)}</span>
                         {storage && <span className="ml-1 rounded bg-[#332a1a] px-1 text-[9px] text-[#e6c07b]">storage</span>}
-                        {kind === 'object' && <span className="ml-1 text-[9px] text-[#5d6a7d]">screen obj</span>}
                       </span>
-                      <span className="truncate text-right tabular-nums text-[#d6dbe1]" title={v.v}>
-                        {kv ? `{${kv.length}}` : v.v === '' ? '·' : v.v.length > 28 ? v.v.slice(0, 28) + '…' : v.v}
-                      </span>
+                      {renderValue('globals', v.name, v.t, v.v, kv)}
                     </div>
                     {kv && (
                       <div className="ml-3 border-l border-[#2b3a52] pl-2">

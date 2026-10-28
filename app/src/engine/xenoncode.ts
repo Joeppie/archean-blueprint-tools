@@ -66,6 +66,7 @@ type Mod = {
   _xc_vars(): number;
   _xc_locals_json(file: number, line: number): number;
   _xc_source_files(): number;
+  _xc_write_var(file: number, line: number, name: number, type: number, value: number): number;
   _xc_debug_track(on: number): void;
   _xc_cycle_lines(): number;
   _xc_cycle_pairs(): number;
@@ -544,6 +545,22 @@ export class XenonRun {
         .map(f => f.split(/[\\/]/).pop() ?? f);
     } catch { return []; }
   }
+  /** XENON-WRITEBACK (ABI 8→9): type-validated write of one variable
+   *  visible at (fileIdx, line) straight into the VM's RAM slot. On the
+   *  main thread the pump calls this directly (same thread = safe moment). */
+  writeVar(fileIdx: number, line: number, name: string, t: number, v: string): WriteAck {
+    if (typeof this.mod._xc_write_var !== 'function')
+      return { ok: false, error: 'the shipped wasm lacks the writer - rebuild tools/xenoncode' };
+    const ne = new TextEncoder().encode(name), ve = new TextEncoder().encode(v);
+    const np = this.mod._malloc(ne.length + 1), vp = this.mod._malloc(ve.length + 1);
+    this.mod.stringToUTF8(name, np, ne.length + 1);
+    this.mod.stringToUTF8(v, vp, ve.length + 1);
+    try {
+      return parseWriteAck(this.mod.UTF8ToString(this.mod._xc_write_var(fileIdx, line, np, t, vp)));
+    } finally {
+      this.mod._free(np); this.mod._free(vp);
+    }
+  }
   /** XENON-DEBUG: record the source lines the VM executes (the pump keeps
    *  this on — one branch per LINENUMBER opcode, gated in the library). */
   debugTrack(on: boolean) {
@@ -660,6 +677,13 @@ export class XenonRun {
 // reads them after its acquire load). That needs the 8192-byte SAB below;
 // the v1.13.17-era 1024-byte array degrades honestly to [] (slot 19 stays
 // 0, the hook's i.length > 20 guard keeps writing 0).
+//
+// XENON-WRITEBACK (ABI 9): editable debug values ride the same SAB —
+// slot 18 = payload length, slot 20 = ack flag, and the JSON window lives
+// at BYTE 128 (slot 32). THE 128 LAW: slot n owns bytes 4n..4n+4, so a
+// payload window must start ABOVE every slot — the first cut shared byte
+// 80 with slot 20's bytes and store(i,20,0) zeroed the payload's head
+// (the audit probe showed NULs over `{"fi`; the writer answered 'refused').
 //
 // Gated by sabSupported(): SharedArrayBuffer needs a secure context +
 // COOP/COEP (vite.config). Pages and plain-http LAN origins get
@@ -1441,6 +1465,83 @@ export class XenonPump {
     }
     return this.vars.get(k) ?? this.vars.get(name);
   }
+  /** XENON-WRITEBACK: edit one variable's value and INJECT it into the
+   *  running program's RAM. Locals resolve through the paused frame (a
+   *  local shadows a global, the language's own lookup); globals through
+   *  the globals table. WORKER MODE: only while PAUSED — a parked VM
+   *  accepts writes through the hook thread alone, so the write rides the
+   *  SAB as cmd 6 and the ack comes back the same way (the VM stays
+   *  parked). Main-thread mode: a direct call (same thread = safe).
+   *  Validation is Computer::WriteVarAt's (numbers: finite decimal,
+   *  true/false; text: everything; storage/array/object refuse). On
+   *  success the displayed row updates at once. */
+  async writeVar(name: string, t: number, v: string,
+    scope: 'locals' | 'globals'): Promise<WriteAck> {
+    if (!this.run) return { ok: false, error: 'no running program' };
+    const loc = scope === 'locals';
+    const file = loc || this.wrun ? this.pausedFile : '';
+    const line = loc || this.wrun ? this.pausedLine : 0;
+    const fi = this.fileIdx(file);
+    let r: WriteAck;
+    if (this.wrun) {
+      if (!this.paused)
+        return { ok: false, error: 'pause the debugger first (F9 break / ⏸) — a RUNNING worker has no writable moment' };
+      r = await this.sabWrite(fi, line, name, t, v);
+    } else {
+      r = this.run instanceof XenonRun
+        ? this.run.writeVar(fi, line, name, t, v)
+        : { ok: false, error: 'writer unavailable' };
+    }
+    if (r.ok) {
+      if (loc) {
+        const row = this.locals.find(x => x.name === name);
+        if (row) row.v = v;
+      } else {
+        const g = this.vars.get(name);
+        if (g) g.v = v;
+      }
+      this.notify();
+    }
+    return r;
+  }
+  /** The cmd-6 round-trip (see writeVar): payload at BYTE 128 (slot 18 =
+   *  length), cmd 6 + notify, ack flag slot 20, ack JSON at byte 128.
+   *  THE 128 LAW: slot 20 owns bytes 80..83 — a payload window must start
+   *  above every slot (the first version queued at byte 80 and the
+   *  store(i,20,0) zeroed the payload's head: JSON.parse refused it, the
+   *  probe showed NULs over '{"fi'). Byte 128 = slot 32: clean. */
+  private sabWrite(fi: number, line: number, name: string, t: number, v: string): Promise<WriteAck> {
+    const w = this.wrun;
+    if (!w) return Promise.resolve({ ok: false, error: 'no worker' });
+    const enc = new TextEncoder().encode(JSON.stringify({ file: fi, line, name, t, v }));
+    const i = w.i32, b = w.bytes;
+    if (enc.length > b.length - 128) return Promise.resolve({ ok: false, error: 'payload too large' });
+    b.set(enc, 128);
+    Atomics.store(i, 20, 0);
+    Atomics.store(i, 18, enc.length);
+    Atomics.store(i, 0, 6);
+    Atomics.notify(i, 0);
+    return new Promise(res => {
+      const t0 = performance.now();
+      const poll = () => {
+        if (Atomics.load(i, 20) === 1) {
+          const n = Atomics.load(i, 18) | 0;
+          let ack: WriteAck = { ok: false, error: 'empty writer answer' };
+          if (n > 0 && n <= b.length - 128) {
+            try {
+              ack = parseWriteAck(new TextDecoder().decode(new Uint8Array(b.slice(128, 128 + n))));
+            } catch { ack = { ok: false, error: 'bad writer answer' }; }
+          }
+          Atomics.store(i, 20, 0);
+          return res(ack);
+        }
+        if (performance.now() - t0 > 4000)
+          return res({ ok: false, error: 'writer timeout — the worker did not answer' });
+        setTimeout(poll, 15);
+      };
+      poll();
+    });
+  }
   startRunning() {
     if (!this.run) return;
     this.run.running = true;
@@ -1785,7 +1886,7 @@ export class XenonPump {
 }
 
 /** The shim ABI the app expects (xc_host.cpp xc_abi()). Bump with the shim. */
-export const XC_ABI = 8;
+export const XC_ABI = 9;
 
 export const xenonPump = new XenonPump();
 
@@ -1827,6 +1928,22 @@ export function parseLocalsJson(json: string): XenonLocal[] {
       ? j.map(e => ({ name: e.name, t: e.t | 0, v: String(e.v ?? ''), s: (e.s ?? 0) | 0 }))
       : [];
   } catch { return []; }
+}
+
+/** XENON-WRITEBACK (ABI 9): Computer::WriteVarAt's one-line answer. */
+export interface WriteAck { ok: boolean; error?: string }
+export function parseWriteAck(json: string): WriteAck {
+  try {
+    const j = JSON.parse(json) as { ok?: boolean; error?: string };
+    return j && j.ok ? { ok: true } : { ok: false, error: String(j?.error ?? 'writer refused') };
+  } catch { return { ok: false, error: 'bad writer answer' }; }
+}
+/** The UI's gate for number cells — mirrors WriteVarAt's law (a finite
+ *  decimal, plus the language's true/false words); the C++ side is the
+ *  authority, this is the instant feedback in front of it. */
+export function validNumInput(s: string): boolean {
+  if (s === 'true' || s === 'false') return true;
+  return /^[-+]?(\d+(\.\d*)?|\.\d+)([eE][-+]?\d+)?$/.test(s.trim());
 }
 
 export function varKind(t: number): 'num' | 'text' | 'array' | 'object' | 'const' {

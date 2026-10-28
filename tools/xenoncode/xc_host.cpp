@@ -892,6 +892,22 @@ int main(int argc, char** argv) {
 		std::ofstream lf("locals.json"); lf << js;
 		cout << "[xc] locals.json written (XENON-LOCALS): " << js << endl;
 	}
+	// XENON-WRITEBACK native probe: XC_WRITE="<fileIdx>:<line>:<name>:<type>:<value>"
+	// writes one variable and re-dumps the frame (validates C++ side-by-side)
+	if (const char* w = getenv("XC_WRITE")) {
+		int fi = atoi(w);
+		string s = w;
+		size_t p1 = s.find(':'), p2 = s.find(':', p1 + 1), p3 = s.find(':', p2 + 1), p4 = s.find(':', p3 + 1);
+		if (p1 != string::npos && p2 != string::npos && p3 != string::npos && p4 != string::npos) {
+			int ln = stoi(s.substr(p1 + 1, p2 - p1 - 1));
+			string nm = s.substr(p2 + 1, p3 - p2 - 1);
+			int ty = stoi(s.substr(p3 + 1, p4 - p3 - 1));
+			string val = s.substr(p4 + 1);
+			cout << "[xc] WRITE " << fi << ":" << ln << " $" << nm << " (t=" << ty << ") = " << val
+			     << " -> " << computer->WriteVarAt(fi, ln, nm, ty, val) << endl;
+			cout << "[xc] frame after: " << computer->DumpLocalsAt(fi, ln) << endl;
+		}
+	}
 	if (getenv("XC_DUMP_TABLES")) {
 		cout << "[xc] localVarDecls:" << endl;
 		for (const auto& v : XenonCode::Implementation::localVarDecls)
@@ -1110,10 +1126,19 @@ EMSCRIPTEN_KEEPALIVE const char* xc_cycle_pairs() {
 // i32 layout on the SharedArrayBuffer (the app's XenonWorkerRun is the
 // other end; library_xc.js documents the protocol):
 //   0 cmd main->worker: 0 none 1 over 2 into 3 runTo 4 resume 5 pause
+//     6 write (XENON-WRITEBACK — apply the queued variable write, stay parked)
 //   1 state worker->main: 0 running 1 PAUSED
 //   2 paused file idx  3 paused line  4 reason 1 bp 2 step 3 cursor 4 pause
 //   5/6 ref pair (over/into)   7/8 over body range (lo>hi = top level)
 //   9/10 runTo target          11 bp count, 12.. (file,line) pairs (max 64)
+//   18 XENON-WRITEBACK payload byte length (JSON both ways),
+//   20 write-ack ready (1) — cmd 6 queues {file,line,name,t,v} at BYTE 128
+//   (slot 20 owns bytes 80..83 — the write window MUST start above every
+//   slot: 128 = slot 32), the parked hook applies it through its own thread
+//   (the parked VM's only voice), answers the JSON ack at byte 128, and
+//   stays PARKED. Layout rule: a slot n owns bytes 4n..4n+4 — payload
+//   windows start at byte 88+; the locals window sits at byte 80 (slot 19
+//   owns 76..80, adjacent, clean).
 //   19 locals-JSON length (bytes); UTF-8 JSON at BYTE offset 80.. —
 //   XENON-LOCALS: the hook dumps the paused line's frame and encodes it on
 //   the SAB BEFORE signalling PAUSED (a parked worker answers no messages —
@@ -1169,8 +1194,34 @@ EM_JS(void, xc_hook_js, (int file, int line), {
   Atomics.notify(i, 1);
   for (;;) {
     Atomics.wait(i, 0, 0, 100000000);            // sleep IN PLACE: the whole
-    if (Atomics.load(i, 0) !== 0) break;         // interpreter stack parks
-  }                                             // right here
+    var c0 = Atomics.load(i, 0);                 // interpreter stack parks
+    if (c0 === 6) {                              // XENON-WRITEBACK: cmd 6 =
+      // apply the pending variable write queued at byte 80 (JSON
+      // {file,line,name,t,v}, slot 18 = byte length). A PARKED VM accepts
+      // writes through THIS thread only — the hook is the parked VM's sole
+      // voice; the ack rides back at byte 80 (slot 20 = 1 ready).
+      var ack = "{\"error\":\"no writer\"}";
+      try {
+        var B = H.bytes || (H.bytes = new Uint8Array(M.XC_SAB));
+        var n = Atomics.load(i, 18) | 0;
+        if (n > 0 && n <= B.length - 128 && M._xc_write_var) {
+          var o = JSON.parse(new TextDecoder().decode(B.slice(128, 128 + n)));
+          var nv = String(o.name ?? ""), vv = String(o.v ?? "");
+          var np = M._malloc(nv.length * 4 + 1); M.stringToUTF8(nv, np, nv.length * 4 + 1);
+          var vp = M._malloc(vv.length * 4 + 1); M.stringToUTF8(vv, vp, vv.length * 4 + 1);
+          ack = UTF8ToString(M._xc_write_var(o.file | 0, o.line | 0, np, o.t | 0, vp));
+          M._free(np); M._free(vp);
+        }
+      } catch (e) { ack = "{\"error\":\"writer refused\"}"; }
+      var ab = new TextEncoder().encode(ack);
+      B.set(ab, 128);
+      Atomics.store(i, 18, ab.length);
+      Atomics.store(i, 0, 0);                    // consume; STAY PARKED
+      Atomics.store(i, 20, 1);                   // ack ready
+      continue;
+    }
+    if (c0 !== 0) break;                         // step/resume commands wake
+  }
   var c = Atomics.load(i, 0);
   Atomics.store(i, 1, 0);
   if (c === 4) Atomics.store(i, 0, 0);           // resume consumed; a step
@@ -1285,9 +1336,21 @@ EMSCRIPTEN_KEEPALIVE void xc_worldsim_sync(const char* name, double v) {
 }
 EMSCRIPTEN_KEEPALIVE void xc_worldsim_clear() { g_wsProgram.clear(); g_wsEffective.clear(); }
 
+// XENON-WRITEBACK (ABI 9): type-validated writeback of ONE variable visible
+// at (fileIdx, line) - the debugger's editable rows inject value into the
+// paused VM's RAM slot (Computer::WriteVarAt: the frame's local shadows the
+// global, numbers demand a finite decimal, text accepts all, storage/array/
+// object refuse). Answers a JSON ack: {"ok":true} | {"error":"..."}.
+EMSCRIPTEN_KEEPALIVE const char* xc_write_var(int fileIdx, int line, const char* name, int type, const char* value) {
+	static string ack;
+	ack = g_computer ? g_computer->WriteVarAt(fileIdx, line, name ? name : "", type, value ? value : "")
+	               : "{\"error\":\"no computer\"}";
+	return ack.c_str();
+}
+
 // ABI stamp: the app checks this at boot (XC_ABI in engine/xenoncode.ts) and
 // warns ONCE on drift — new device/shim exports must bump it.
-EMSCRIPTEN_KEEPALIVE int xc_abi() { return 8; }   // 8: xc_locals_json + the hook's SAB locals handoff (the Locals panel); 7: the stop-hook is LIVE (library_xc.js + Module.XC_SAB worker stepping); 6: xc_cycle_pairs + hook seam; 5: xc_set_cycle_ms
+EMSCRIPTEN_KEEPALIVE int xc_abi() { return 9; }   // 9: xc_write_var + the hook's cmd-6 write handoff (editable debug values); 8: xc_locals_json + the hook's SAB locals handoff (the Locals panel); 7: the stop-hook is LIVE (library_xc.js + Module.XC_SAB worker stepping); 6: xc_cycle_pairs + hook seam; 5: xc_set_cycle_ms
 EMSCRIPTEN_KEEPALIVE void xc_set_cycle_ms(int ms) {
 	// the app's pump cadence (CYCLE_MS): delta_time / system_frequency
 	// follow it, so dt-driven programs (Chip's Mario, physics on

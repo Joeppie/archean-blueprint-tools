@@ -382,11 +382,30 @@ test.describe('Xenon IDE @ui', () => {
     await page.getByTestId('xenon-var-search').fill('increment');
     await expect(page.locator('[data-testid^="xenon-loc-"]')).toHaveCount(1);
     await page.getByTestId('xenon-var-search').fill('');
-    // F8 resumes: the frame stays listed as the LAST STOP (labeled stale —
-    // a debugger keeps the last frame visible while running, like every IDE)
+    // XENON-WRITEBACK (we: "the capacity to edit its current value, valid
+    // for its type, type shown beside the name, reject invalid values,
+    // inject those back into xenoncode"): the paused frame's $result is
+    // editable — 'abc' is refused inline (the editor stays open), 42 is
+    // accepted and lands in the row (the ack ok + the RAM slot is written)
+    await expect(page.getByTestId('xenon-loc-result')).toContainText('number');
+    await page.getByTestId('xenon-val-result').click();
+    const inp = page.getByTestId('xenon-edit-result');
+    await expect(inp).toBeVisible();
+    await inp.fill('abc');
+    await inp.press('Enter');
+    await expect(page.getByTestId('xenon-edit-error')).toContainText('not a finite number');
+    await inp.fill('42');
+    await inp.press('Enter');
+    await expect(page.getByTestId('xenon-loc-result')).toContainText('42');
+    await expect(page.getByTestId('xenon-edit-error')).toHaveCount(0);
+    // F8 resumes: the frame stays listed as the LAST STOP (labeled stale)
+    // and the VM runs on with the injected value
     await page.keyboard.press('F8');
     await expect(pill).toHaveCount(0);
     await expect(page.getByTestId('xenon-locals-frame')).toContainText('last stop');
+    // THE WRITABLE-MOMENT LAW: a RUNNING worker has no writable moment —
+    // the globals' values are plain text, no edit affordance
+    expect(await page.locator('[data-testid="xenon-val-numset"]').count()).toBe(0);
     await page.keyboard.press('Escape');
   });
 

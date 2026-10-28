@@ -168,6 +168,15 @@ fed the REAL time between updates, so Mario moves at true speed (a choppy
       their members.
   * The type rides beside every name (`number`, `text`, `storage`,
     `array`, `object`). Search filters names AND values in both sections.
+  * **Editable values** — while the debugger is PAUSED, number and text
+    values are click-to-edit (locals of the frame, and globals): type the
+    new value, Enter writes it INTO the running program's memory (Esc
+    cancels). A number cell refuses anything but a finite decimal
+    (`42`, `-1.5`, `1e3`, `true`/`false`) with an inline message; text
+    accepts anything; `storage` (world-save), arrays and objects refuse.
+    While a worker RUNS there is no writable moment — break first
+    (gutter click / F9). Main-thread mode (non-isolated origin) writes
+    anytime — the VM shares the page thread.
   * **Screens** — the same live surfaces, searchable by name.
   * **Bus** — the `input_number` sliders (every io/channel the program
     reads) and the `output_number` stream (target · port · latest value).

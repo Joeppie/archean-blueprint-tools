@@ -1921,6 +1921,34 @@ topic + FORMAT).
   P2 (worker + Atomics true line-stepping, approved) adds the mid-line stop
   hook to the XENON-DEBUG commit. `XENONCODE_UPSTREAM.md` documents every
   commit; NOTICE §6 + .gitattributes follow.
+- **v1.13.23 THE WRITEBACK LAW — EDITABLE DEBUG VALUES (we: "When debugging
+ a variable, I want the capacity to edit its current value (it must be valid
+ for its type, type must be shown besides variable name) - it should reject
+ invalid values if trying to edit those, and be able to inject those back
+ into xenoncode")**: `Computer::WriteVarAt(file,line,name,type,value)`
+ (fork `399d852`, shim ABI 9, export `xc_write_var`) resolves the name
+ through the paused frame's locals (a local shadows a global, the
+ language's lookup) then the globals, validates, and writes the RAM SLOT
+ DIRECTLY — the paused program resumes with the injected value. The law:
+ numbers demand a fully-parsed finite decimal (+ the language's true/false
+ words); text accepts every string; storage/array/object REFUSE (world-save
+ persistence / label-only views); answers `{"ok":true}|{"error":…}`. THE
+ WRITABLE MOMENT: a worker VM has exactly one — PAUSED (the write rides the
+ SAB as cmd 6: payload window at BYTE 128, slot 18 length, slot 20 ack
+ flag; the parked hook applies it through its own thread — the parked VM's
+ only voice — and stays parked); main-thread mode writes directly anytime.
+ THE 128 LAW (the bug the probe caught): a slot n owns bytes 4n..4n+4, so
+ payload windows must start ABOVE every slot — the first cut shared byte 80
+ with slot 20 and `store(i,20,0)` zeroed the payload head → the writer
+ refused; layout rule now documented in shim + engine header. UI: every
+ var row shows a type chip beside the name (`number`/`text`/`storage
+ number`/…), number+text values become click-to-edit buttons at a pause
+ (inline input, Enter writes, Esc cancels — stopPropagation keeps the IDE
+ open), refusals answer inline under the row and the editor stays open;
+ `validNumInput` mirrors the C++ gate for instant feedback. Pins: vitest
+ THE WRITEBACK LAW (ack parse + numeric law), e2e THE LOCALS TAB (edit
+ $result: 'abc' inline-refused, 42 lands + row updates, running worker
+ shows no edit affordance).
 - **v1.13.21 THE LOCALS TAB + THE SOURCEFILE TRUTH LAW (we: "When debugging
  local variables, I cannot see their value. But that is vital when debugging
  locals; add this as a tab, also put the tabs currently vertically labeled as

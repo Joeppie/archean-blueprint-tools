@@ -422,3 +422,26 @@ describe('THE LOCALS LAW (v1.13.21 XENON-LOCALS)', () => {
     expect(pump.varValue('$num')?.v).toBe('10');     // paused, not in frame -> global
   });
 });
+
+describe('THE WRITEBACK LAW (v1.13.23 XENON-WRITEBACK)', () => {
+  // we: "I want the capacity to edit a variable's current value (it must
+  // be valid for its type … reject invalid values … inject those back into
+  // xenoncode)" — the law lives in Computer::WriteVarAt (native-probed);
+  // these pins cover the pure JS half the UI gates on.
+  it('parses the writer ack', async () => {
+    const { parseWriteAck } = await import('../xenoncode');
+    expect(parseWriteAck('{"ok":true}')).toEqual({ ok: true });
+    expect(parseWriteAck('{"error":"not a finite number"}'))
+      .toEqual({ ok: false, error: 'not a finite number' });
+    expect(parseWriteAck('garbage').ok).toBe(false);
+    expect(parseWriteAck('{}').ok).toBe(false);          // no ok, no error -> refused
+  });
+
+  it('validNumInput mirrors WriteVarAt\'s numeric law', async () => {
+    const { validNumInput } = await import('../xenoncode');
+    for (const ok of ['42', '-1.5', '+7', ' 7 ', '1e3', '1E-2', '.5', '0.0', 'true', 'false'])
+      expect(validNumInput(ok), ok).toBe(true);
+    for (const no of ['', '  ', 'abc', '1,5', '5;', 'nan', 'inf', '0x10', '1 2', '42abc', '--3'])
+      expect(validNumInput(no), no).toBe(false);
+  });
+});
