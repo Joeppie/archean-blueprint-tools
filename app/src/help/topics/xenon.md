@@ -46,13 +46,25 @@ with the craft and travels in the file.
 * **Breakpoint follow** — when the run stops on your breakpoint, the
   editor moves to the hit (file + line), so you land exactly where the
   program parked; `◀` takes you back to what you were editing.
+* **Debugger** — click a line's gutter for a red breakpoint; **F10** steps
+  ONE executed line at the current level (a call is stepped over),
+  **F11** steps into the call, **F8** resumes. The run toolbar beside the
+  tabs carries the same as classic buttons: **▶ run/resume, ⏸ pause,
+  ⟳ re-boot, ⏹ stop, ⇥ step-over, ↓ step-into**. When a break (or a step)
+  stops the program, the editor jumps to the line that just executed —
+  `Alt+←` walks the nav history back to where you were.
+* **$ knows your frame** — typing `$` completes globals AND, while the
+  debugger is paused, the live LOCALS of the frame you stopped in (marked
+  `· frame`). A file with unsaved changes wears a **red dot** on its tab.
 * **Find, goto, indent** — `CTRL+F` opens the editor's find panel from
   anywhere in the IDE (it never triggers the browser's own search).
   `CTRL+G` jumps to a line number. `TAB` always indents inside the code
   (the cursor never escapes to the page). Pressing **Enter** after
-  `init`/`update`/`tick`/`timer`/`input`/`screen(...)` or a
-  `function @name(…)` line lands **one indent deeper**; plain lines keep
-  their indent. `Esc` closes find/goto and leaves the IDE open.
+  `init`/`update`/`tick`/`timer`/`input`/`screen(...)`, a
+  `function @name(…)` line, or a control-flow line (`if`, `elseif`,
+  `else`, `while`, `repeat`, `for`, `foreach`) lands **one indent
+  deeper**; plain lines keep their indent. `Esc` closes find/goto and
+  leaves the IDE open.
 * **Library tab** — the side panel's `Library` index lists every **declared
   function on this computer** (click = jump straight to the declaration,
   across files) and the whole **built-in XenonCode library** with a

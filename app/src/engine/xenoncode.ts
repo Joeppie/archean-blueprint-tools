@@ -995,9 +995,19 @@ export function stepperLaw(pairs: number[], fileTable: string[],
     const fresh = !(file === st.pausedFile && line === st.pausedLine);
     if (st.stepMode === 'into' && fresh) return { file, line, stepMode: 'off' };
     if (st.stepMode === 'over' && fresh) {
-      const inside = st.scope !== null
-        && file === st.scope.file && line >= st.scope.line && line <= st.scope.end;
-      if (!inside) return { file, line, stepMode: 'off' };
+      // v1.13.28 CLASSIC STEP-OVER (we: "Sometimes when I press f10 it
+      // doesnt seem to properly move to where I am executing code"): the
+      // OLD law paused at the first pair OUTSIDE the function scope —
+      // stepping over a call from inside a function body ran the REST of
+      // the body away (gdb 'next' semantics), which reads as "it skipped
+      // where I am". The classic IDE law: stop at the first fresh pair of
+      // the SAME file = the next executed line at the CURRENT frame
+      // (callees live in other files and are skipped over; the frame's
+      // return resumes in the caller file, also a stop). In-file callees
+      // (rare corpus pattern) land like step-INTO — a pair stream carries
+      // no call depth to do better. xc_host.cpp's EM_JS hook carries the
+      // TWIN (THE STEP LAW LIVES IN TWO PLACES).
+      if (file === st.pausedFile) return { file, line, stepMode: 'off' };
     }
   }
   return null;

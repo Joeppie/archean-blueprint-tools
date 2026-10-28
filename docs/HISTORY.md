@@ -2842,6 +2842,35 @@ topic + FORMAT).
   legs author code in the always-live editor (xenon-edit/edit-cancel/
   save-all testids retired).
 
+- **v1.13.28 CLASSIC STEP-OVER + IDE FURNITURE (we: "Sometimes when I
+  press f10 it doesnt seem to properly move to where I am executing code.
+  After if statements the indent should be one deeper. when I type $
+  suggestions for locals should show up. If a file is not yet saved …
+  red asterisk … Running the code/resetting/stopping should have classical
+  style buttons"):** (1) THE STEP LAW CHANGED IN BOTH TWINS (stepperLaw +
+  the xc_host.cpp EM_JS hook cmd 1, wasm rebuilt via
+  `EMSDK=~/emsdk build.sh wasm-only`): F10 'over' stops at the first fresh
+  pair OF THE PAUSED FILE (next executed line at the current frame;
+  other-file calls stepped over). The old scope-window law (stop outside
+  the enclosing function) is gdb-`next` semantics: from inside a function
+  it RAN THE REST OF THE BODY AWAY — a probe walk of PLANE showed the
+  linear case was fine (17→18→19→21→24, comments skipped) so the "never
+  moves" complaint was frame stepping (functions.xc:6's F10 landed at ~49,
+  out of the function). In-file callees land like step-INTO (the pair
+  stream carries no call depth; rare corpus pattern, documented).
+  (2) CONTROL-FLOW INDENT: opensBlockLine += CONTROL_RE
+  (if/elseif/else/while/repeat/for/foreach, `\b`-anchored so `form=` and
+  `verified=` stay plain). (3) `$` COMPLETION carries the PAUSED FRAME's
+  locals first (pump.locals, detail '· frame'), then globals. (4) DIRTY
+  MARKER: the tab ● is RED (#ff5b5b) — VS Code's dot, the most standard.
+  (5) CLASSIC RUN TOOLBAR beside the tabs (testids ide-run/pause/restart/
+  stop/step-over/step-into): ▶ green (resume-aware), ⏸, ⟳ re-boot (keeps
+  breaks), ⏹ red, ⇥/↓. Pins: stepperLaw over-tests rewritten (frame
+  continuity, callee-skip, loop-wrap), opensBlockLine control cases +
+  `form`/`verified` traps, e2e 'F10 steps line-by-line in the current
+  frame' + 'run toolbar + if-indent + dirty dot + frame locals'
+  (@slow @codeditor, PLANE).
+
 ## 2. v1.11 session — KNOWN ISSUES & UNPINNED TODOS (2026-10-25/26 session block)
 
 KNOWN ISSUES (accepted behaviours, costs, sharp edges):

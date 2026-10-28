@@ -346,11 +346,15 @@ export const XC_GLOBAL_CONSTS: XCConst[] = [
 
 /** ── BLOCK-OPEN lines (v1.13.26, we: "after hitting enter on an init,
  *  update etc. block, the next line should automatically indent, same with
- *  a function"): the editor's Enter handler indents ONE unit after a
- *  global-scope block keyword line (BLOCK_RE's set) or a `function @name`
- *  declaration. Pure so the law is vitest-pinned. */
+ *  a function"; v1.13.28, we: "After if statements the indent should be
+ *  one deeper (same for similar constructs)"): the editor's Enter handler
+ *  indents ONE unit (a tab) after a global-scope block keyword line
+ *  (BLOCK_RE's set), a `function @name` declaration, or a CONTROL-flow
+ *  opener (if/elseif/else/while/repeat/for/foreach). Pure so the law is
+ *  vitest-pinned. */
+const CONTROL_RE = /^\s*(if|elseif|else|while|repeat|for|foreach)\b/;
 export function opensBlockLine(line: string): boolean {
-  return BLOCK_RE.test(line) || FN_RE.test(line);
+  return BLOCK_RE.test(line) || FN_RE.test(line) || CONTROL_RE.test(line);
 }
 
 /** ── io-CALL hit test (v1.13.26, we: "when mouseovering a io write/read

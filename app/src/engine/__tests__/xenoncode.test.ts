@@ -307,22 +307,26 @@ describe('THE STEPPER LAW (dual-site: applyCycle walk ⇄ EM_JS hook)', () => {
     expect(stepperLaw([pair(0, 10), pair(1, 2)], FT, new Map(), st))
       .toEqual({ file: 'game.xc', line: 2, stepMode: 'off' });   // steps INTO the @call file
   });
-  it('over (F10): fresh pairs INSIDE the enclosing body continue; the first one OUTSIDE stops', () => {
+  it('over (F10, v1.13.28 CLASSIC law): stops at the first FRESH pair of the SAME file — the next line at the current frame; other-file calls are stepped OVER', () => {
     const st = S({
       stepMode: 'over', pausedFile: 'main.xc', pausedLine: 83,
       scope: { file: 'main.xc', line: 83, end: 120 },
     });
-    expect(stepperLaw([pair(0, 90), pair(0, 120)], FT, new Map(), st)).toBeNull();
-    expect(stepperLaw([pair(0, 121)], FT, new Map(), st))
-      .toEqual({ file: 'main.xc', line: 121, stepMode: 'off' });
-    // a call into ANOTHER file's body is outside the scope (the body range
-    // is per-file) — the pair-stream law, worker mode mirrors it
-    expect(stepperLaw([pair(1, 5)], FT, new Map(), st))
-      .toEqual({ file: 'game.xc', line: 5, stepMode: 'off' });
+    // a call into ANOTHER file's body is stepped over (no stop in there)
+    expect(stepperLaw([pair(1, 5), pair(1, 60)], FT, new Map(), st)).toBeNull();
+    // the frame returns to OUR file: stop at the caller's next line
+    expect(stepperLaw([pair(1, 5), pair(0, 84)], FT, new Map(), st))
+      .toEqual({ file: 'main.xc', line: 84, stepMode: 'off' });
+    // the re-stop on the SAME pair (a loop line executing again) is not fresh
+    expect(stepperLaw([pair(0, 83)], FT, new Map(), st)).toBeNull();
+    // a loop wrapping to an EARLIER line of our file is a fresh stop
+    expect(stepperLaw([pair(0, 40)], FT, new Map(), st))
+      .toEqual({ file: 'main.xc', line: 40, stepMode: 'off' });
   });
-  it('over at TOP LEVEL (scope null ⇒ the SAB lo>hi encoding): ANY fresh pair stops', () => {
+  it('over at TOP LEVEL (scope null ⇒ the SAB lo>hi encoding): same-file fresh pairs stop, callee files step over', () => {
     const st = S({ stepMode: 'over', pausedFile: 'main.xc', pausedLine: 17, scope: null });
     expect(stepperLaw([pair(0, 17)], FT, new Map(), st)).toBeNull();
+    expect(stepperLaw([pair(1, 4)], FT, new Map(), st)).toBeNull();
     expect(stepperLaw([pair(0, 18)], FT, new Map(), st))
       .toEqual({ file: 'main.xc', line: 18, stepMode: 'off' });
   });

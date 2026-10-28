@@ -181,15 +181,18 @@ describe('library group tabs', () => {
 });
 
 describe('opensBlockLine (Enter auto-indent law)', () => {
-  it('opens on block keywords and function declarations', () => {
+  it('opens on block keywords, function declarations and control flow', () => {
     for (const l of ['init', 'update', '  tick', 'timer frequency 4', 'input 11',
       'screen("TrimsDash", 0)', 'function @helper($a:number)',
-      'recursive function @fib($n:number):number'])
+      'recursive function @fib($n:number):number',
+      'if input_number(11,17) == 1', '\tif $x > 2', 'elseif $y', 'else',
+      'while $run', 'repeat', 'for $i = 1 to 5', 'foreach $e in $enemies'])
       expect(opensBlockLine(l), l).toBe(true);
   });
-  it('does not open on bodies, calls, blank or indented lines', () => {
+  it('does not open on bodies, calls, blank or indented statements', () => {
     for (const l of ['', '  $x = 1', 'output_number("Engine", 0)', 'const $a = 1',
-      '@helper(1)', 'var $v = 0', '; init note'])
+      '@helper(1)', 'var $v = 0', '; init note', '  endif', 'endfor',
+      'verified = true', 'form = 1', 'important = 2'])
       expect(opensBlockLine(l), l).toBe(false);
   });
 });

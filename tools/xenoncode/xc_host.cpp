@@ -1160,10 +1160,11 @@ EM_JS(void, xc_hook_js, (int file, int line), {
   var reason = 0;
   if (cmd === 5) reason = 4;
   else if (cmd === 1) {                          // step OVER
-    if (!(file === i[5] && line === i[6])) {
-      var inScope = file === i[5] && i[7] <= i[8] && line >= i[7] && line <= i[8];
-      if (!inScope) reason = 2;
-    }
+    // v1.13.28 CLASSIC STEP-OVER twin (see stepperLaw in the app): stop
+    // at the first fresh pair of the PAUSED FILE (the next line at the
+    // current frame); callees (other files) are stepped over. The old
+    // scope-window rule ran the rest of a function body away.
+    if (!(file === i[5] && line === i[6]) && file === i[5]) reason = 2;
   } else if (cmd === 2) {                        // step INTO
     if (!(file === i[5] && line === i[6])) reason = 2;
   } else if (cmd === 3) {                        // run to cursor

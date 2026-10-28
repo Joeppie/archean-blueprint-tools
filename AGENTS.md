@@ -263,7 +263,11 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   CodeEditor.tsx/xcproject.ts/CodeMirror touch.
 - THE STEP LAW LIVES IN TWO PLACES: `stepperLaw()` (xenoncode.ts, pure,
   main-thread) ⇄ the EM_JS hook in `xc_host.cpp` (worker). ANY change lands
-  in BOTH + re-pins. SAB payload windows start ABOVE every slot byte (slot n
+  in BOTH + re-pins (+ rebuilt wasm: `EMSDK=~/emsdk tools/xenoncode/build.sh
+  wasm-only`). v1.13.28 CLASSIC STEP-OVER: F10 stops at the first fresh
+  pair OF THE PAUSED FILE (the next executed line at the current frame;
+  other-file calls are stepped over) — the old scope-window law ran the
+  rest of a function body away and read as "F10 skipped where I am". SAB payload windows start ABOVE every slot byte (slot n
   owns 4n..4n+4); SAB views decode through `bytes.slice()` copies (TextDecoder
   refuses shared views).
 - The interpreter is a FORK SUBMODULE (`tools/xenoncode/upstream`, branch

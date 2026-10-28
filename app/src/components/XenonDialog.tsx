@@ -825,13 +825,14 @@ export default function XenonDialog(p: {
           {files.map((f, i) => (
             <button key={f.name} data-testid={`xenon-tab-${i}`}
               onClick={() => { recNav(); setTab(i); setArmedDel(false); }}
-              className={`rounded-t px-3 py-1 ${tab === i ? 'bg-[#10141f] text-[#8fd4ff]' : 'bg-[#1a2233] text-[#7d8aa0]'}`}>
-              {i === 0 ? `${comp.program}.main.xc` : f.name}{dirty.has(i) ? ' ●' : ''}
+              className={`shrink-0 whitespace-nowrap rounded-t px-3 py-1 ${tab === i ? 'bg-[#10141f] text-[#8fd4ff]' : 'bg-[#1a2233] text-[#7d8aa0]'}`}>
+              {i === 0 ? `${comp.program}.main.xc` : f.name}
+              {dirty.has(i) && <span className="text-[#ff5b5b]" title="unsaved changes"> ●</span>}
             </button>
           ))}
           {graph && (
             <button data-testid="xenon-tab-nodes" onClick={() => setTab(100)}
-              className={`rounded-t px-3 py-1 ${tab === 100 ? 'bg-[#10141f] text-[#8fd4ff]' : 'bg-[#1a2233] text-[#7d8aa0]'}`}>
+              className={`shrink-0 whitespace-nowrap rounded-t px-3 py-1 ${tab === 100 ? 'bg-[#10141f] text-[#8fd4ff]' : 'bg-[#1a2233] text-[#7d8aa0]'}`}>
               ⌗ nodes ({graph.nodes.length})
             </button>
           )}
@@ -840,7 +841,7 @@ export default function XenonDialog(p: {
               the live buffers (⇒ re-boot, breakpoints kept); ◀ ▶ walk the
               NAV HISTORY (v1.13.27 — the editor is always live, no edit
               button, no revert: saving is the commit, closing discards) */}
-          <div className="flex shrink-0 items-center gap-1 text-[11px]">
+          <div className="flex shrink-0 items-center gap-1 text-[11px] [overflow-x:auto] [scrollbar-width:thin]">
           {onCode && (<>
             <button data-testid="xenon-save" className="rounded bg-[#2b4a2b] px-2 py-0.5
                    hover:bg-[#38603a]" onClick={() => save(false)}
@@ -856,6 +857,38 @@ export default function XenonDialog(p: {
               className="rounded bg-[#1d2c46] px-1.5 py-0.5 text-[#cfe1ff] hover:bg-[#27395c] disabled:opacity-30"
               title="forward to the next navpoint (Alt+→)"
               onClick={() => gotoNav(1)}>▶</button>
+            {/* CLASSIC RUN TOOLBAR (v1.13.28, we: "Running the code /
+                resetting / stopping should have classical style buttons
+                that we're used to in IDEs"): ▶ run·resume, ⏸ pause,
+                ⟳ re-boot, ⏹ stop, ⇥/↓ step over/into */}
+            <span className="mx-1 h-4 w-px bg-[#2b313b]" aria-hidden />
+            <button data-testid="ide-run"
+              className={`rounded px-2 py-0.5 ${pump.paused ? 'bg-[#2b4a2b] text-[#b7ecb7] hover:bg-[#38603a]'
+                : pump.status === 'running' ? 'bg-[#1d2b42] text-[#5d6a7d]'
+                  : 'bg-[#2b4a2b] text-[#b7ecb7] hover:bg-[#38603a]'}`}
+              title="run / resume (F8)"
+              onClick={() => { if (pump.paused) pump.resume(); else pump.startRunning(); }}>▶</button>
+            <button data-testid="ide-pause"
+              disabled={pump.status !== 'running' || pump.paused}
+              className="rounded bg-[#243a52] px-2 py-0.5 text-[#e6c07b] hover:bg-[#2f4c6b] disabled:opacity-30"
+              title="pause the run"
+              onClick={() => pump.pause()}>⏸</button>
+            <button data-testid="ide-restart"
+              className="rounded bg-[#243a52] px-2 py-0.5 text-[#8fd4ff] hover:bg-[#2f4c6b]"
+              title="re-boot the computer from disk (breakpoints kept)"
+              onClick={() => pump.reboot()}>⟳</button>
+            <button data-testid="ide-stop"
+              className="rounded bg-[#5a2222] px-2 py-0.5 text-[#ffb3b3] hover:bg-[#7a2e2e]"
+              title="stop the run"
+              onClick={() => pump.stopRunning()}>⏹</button>
+            <button data-testid="ide-step-over"
+              className="rounded bg-[#1d2c46] px-1.5 py-0.5 text-[#cfe1ff] hover:bg-[#27395c]"
+              title="step over one executed line (F10)"
+              onClick={() => pump.stepOver()}>⇥</button>
+            <button data-testid="ide-step-into"
+              className="rounded bg-[#1d2c46] px-1.5 py-0.5 text-[#cfe1ff] hover:bg-[#27395c]"
+              title="step into the called function (F11)"
+              onClick={() => pump.stepInto()}>↓</button>
           </>)}
           </div>
           </div>
@@ -872,7 +905,15 @@ export default function XenonDialog(p: {
                 pausedLine={pump.pausedFile === runtimeName(tab) ? pump.pausedLine : 0}
                 errors={errors}
                 funcs={funcs} decls={decls}
-                varList={[...pump.vars.values()].map(v => ({ ...v, name: '$' + v.name.replace(/^\$/, '') }))}
+                varList={[
+                  // v1.13.28 (we: "when I type $ suggestions for locals
+                  // should show up"): the paused frame's locals first,
+                  // values live; then the globals
+                  ...pump.locals.map(v => ({
+                    name: '$' + v.name.replace(/^\$/, ''), v: v.v, type: 'local',
+                  })),
+                  ...[...pump.vars.values()].map(v => ({ ...v, name: '$' + v.name.replace(/^\$/, '') })),
+                ]}
                 devices={comp.devices.filter(d => d.alias).map(d => ({ alias: d.alias!, type: d.type }))}
                 getVar={(n) => { const v = pump.varValue(n); return v ? { v: v.v, type: varKind(v.t) } : undefined; }}
                 debugActive={pump.status === 'running' || pump.status === 'stopped'}

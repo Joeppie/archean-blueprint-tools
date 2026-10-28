@@ -256,7 +256,7 @@ function CodeEditorInner(p: CodeEditorProps, ref: React.Ref<CodeEditorHandle>) {
           if (v.name.startsWith(w) && !seen.has(v.name)) {
             seen.add(v.name);
             opts.push({ label: v.name, type: 'variable',
-              detail: `= ${v.v.slice(0, 24)}` });
+              detail: `= ${v.v.slice(0, 24)}${v.type === 'local' ? ' · frame' : ''}` });
           }
         for (const d of s.decls)
           if (d.name.startsWith(w) && !seen.has(d.name)) {

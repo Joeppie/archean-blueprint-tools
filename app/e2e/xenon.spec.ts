@@ -584,8 +584,12 @@ test.describe('Xenon IDE @ui', () => {
     await inp.press('Enter');
     await expect(page.getByTestId('xenon-loc-result')).toContainText('42');
     await expect(page.getByTestId('xenon-edit-error')).toHaveCount(0);
-    // F8 resumes: the frame stays listed as the LAST STOP (labeled stale)
-    // and the VM runs on with the injected value
+    // F8 resumes — FIRST disarm the break (the throttle-fed
+    // `@selectcase` runs every cycle; a live break re-parks the VM at
+    // ~25 Hz and races the writable-moment check below — the wasm rebuild
+    // shifted that coin-flip and exposed the latent race)
+    await gutter.click();
+    await expect(page.locator('.xc-bp')).toHaveCount(0);
     await page.keyboard.press('F8');
     await expect(pill).toHaveCount(0);
     await expect(page.getByTestId('xenon-locals-frame')).toContainText('last stop');
@@ -658,6 +662,103 @@ test.describe('Xenon IDE @ui', () => {
     // closing the IDE discards the unsaved buffers (save is the commit)
     await page.keyboard.press('Escape');
     await page.keyboard.press('Escape');
+  });
+
+  // v1.13.28 (we: "Sometimes when I press f10 it doesnt seem to properly
+  // move to where I am executing code"): the CLASSIC step-over law — F10
+  // advances ONE executed line at the CURRENT frame; a call into another
+  // file is stepped OVER. In-file frame stepping (functions.xc calls
+  // @selectcase from its own body): the OLD scope-window law jumped out of
+  // the function and skipped ahead to line ~49; the frame law lands on the
+  // NEXT BODY LINE.
+  test('F10 steps line-by-line in the current frame @slow @codeditor', async ({ page }) => {
+    await page.goto(`/?craft=${PLANE}`);
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 90_000 });
+    await page.getByTestId('xenon-menu').click();
+    await page.locator('[data-testid^="xenon-comp-"]').first().click();
+    await expect(page.getByTestId('xenon-dialog')).toBeVisible();
+
+    // top level: consecutive executed lines
+    await page.locator('.xc-break-gutter .cm-gutterElement').nth(16).click();
+    const pane0 = page.getByTestId('xenon-code-0');
+    await expect(pane0).toHaveAttribute('data-paused-jump', /main\.xc:17$/, { timeout: 20_000 });
+    await page.keyboard.press('F10');
+    await expect(pane0).toHaveAttribute('data-paused-jump', /main\.xc:18$/, { timeout: 10_000 });
+    await page.keyboard.press('F10');
+    await expect(pane0).toHaveAttribute('data-paused-jump', /main\.xc:19$/, { timeout: 10_000 });
+    await page.keyboard.press('F8');
+    await page.waitForTimeout(600);
+    // DISARM main's break (measured: with it live, every cycle parks at
+    // 17 BEFORE the function runs, so the functions.xc break is
+    // unreachable — the pump sits parked, not stepping)
+    await page.locator('.xc-break-gutter .cm-gutterElement').nth(16).click();
+    await expect(page.locator('.xc-bp')).toHaveCount(0);
+    await page.keyboard.press('F8');   // the removal parked AT 17 — resume
+
+    // inside the function (functions.xc:6, the @selectcase `if`): the
+    // throttle-key channel must be FED (the leg feeds io 11 ch 3) or
+    // @selectcase is never called; the pause is in the frame; F10 stays
+    // IN THE BODY (line < 45 = the body range [5..44]) — the old law
+    // landed at 49+ (out of the function)
+    await page.getByTestId('xenon-side-bus').click();
+    await page.getByTestId('xenon-in-11-3').evaluate((el: HTMLInputElement) => {
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+      set.call(el, '1');
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await page.getByTestId('xenon-tab-1').click();
+    await page.locator('.xc-break-gutter .cm-gutterElement').nth(5).click();
+    const pane1 = page.getByTestId('xenon-code-1');
+    await expect(pane1).toHaveAttribute('data-paused-jump', /functions\.xc:6$/, { timeout: 20_000 });
+    await page.keyboard.press('F10');
+    // auto-retrying: the wake→park→notify→render cycle takes ~1 frame
+    await expect(pane1).toHaveAttribute('data-paused-jump',
+      /functions\.xc:(?:[1-3]?\d|4[0-4])$/, { timeout: 10_000 });
+    await page.keyboard.press('F8');
+    await page.keyboard.press('Escape');
+  });
+
+  // v1.13.28 (we: "Running the code/resetting/stopping should have
+  // classical style buttons"; "After if statements the indent should be
+  // one deeper"; "a red asterisk… for modified"; "when I type $
+  // suggestions for locals should show up")
+  test('run toolbar + if-indent + dirty dot + frame locals @slow @codeditor', async ({ page }) => {
+    await page.goto(`/?craft=${PLANE}`);
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 90_000 });
+    await page.getByTestId('xenon-menu').click();
+    await page.locator('[data-testid^="xenon-comp-"]').first().click();
+    await expect(page.getByTestId('xenon-dialog')).toBeVisible();
+
+    // CLASSIC TOOLBAR: ⏹ stops (ON→OFF), ▶ runs again
+    await expect(page.getByTestId('ide-stop')).toBeVisible();
+    await page.getByTestId('ide-stop').click();
+    await expect(page.getByTestId('xenon-on')).toHaveText('OFF', { timeout: 10_000 });
+    await page.getByTestId('ide-run').click();
+    await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 30_000 });
+
+    // IF auto-indents one unit (a tab) on Enter; the tab gets the RED dot
+    const cm = page.locator('.cm-content');
+    await cm.click();
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type('\nif $x > 2');
+    await page.keyboard.press('Enter');
+    const txt = await cm.evaluate((el: HTMLElement) => el.innerText);
+    expect(txt, 'TAIL: ' + JSON.stringify(txt.slice(-60))).toMatch(/if \$x > 2\n\t$/);
+    await expect(page.getByTestId('xenon-tab-0')).toContainText('●');
+
+    // $ COMPLETION carries the PAUSED FRAME's locals ($Pilot_WS is
+    // declared inside update — visible only while the frame is live)
+    await page.locator('.xc-break-gutter .cm-gutterElement').nth(16).click();
+    await expect(page.getByTestId('xenon-code-0'))
+      .toHaveAttribute('data-paused-jump', /main\.xc:17$/, { timeout: 20_000 });
+    await cm.click();
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type('\nvar $zz = $Pilo', { delay: 30 });
+    const ac = page.locator('.cm-tooltip-autocomplete');
+    await expect(ac).toBeVisible({ timeout: 8_000 });
+    await expect(ac).toContainText('Pilot_WS');
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Escape');   // close the IDE, discard buffers
   });
 
   test('the editor: syntax colors, right-click menu, go-to-definition, hover @slow @codeditor', async ({ page }) => {
