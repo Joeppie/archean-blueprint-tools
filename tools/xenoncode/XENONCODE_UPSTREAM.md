@@ -61,10 +61,43 @@ above + fix anchors that moved). `build.sh` no longer runs them.
 
 `build.sh` records the SHA-256 of the two headers it builds against, so
 every compiled artifact is traceable to a branch commit. The app's copy of
-the built interpreter is `app/public/xenoncode/` (git LFS — compiled
-artifacts are tracked by the repo-root `.gitattributes`); rebuild with
-`tools/xenoncode/build.sh` (emsdk 4.x; `source $EMSDK/emsdk_env.sh`) and
-commit the rebuilt js/wasm in the same commit as the gitlink bump.
+the built interpreter is `app/src/engine/xenoncode/` (git LFS for the wasm —
+compiled artifacts are tracked by the repo-root `.gitattributes`); rebuild
+with `tools/xenoncode/build.sh` (emsdk 6.x: `source $EMSDK/emsdk_env.sh`)
+and commit the rebuilt js/wasm in the same commit as the gitlink bump.
+v1.13.17 L4: the glue builds with `-sEXPORT_ES6=1` — an **ES module**
+(`export default createXenonCode`) imported through the app's module graph
+via `?url` (the seal.wasm precedent); the old classic-script/global form
+and the worker's fetch+blob export-shim are retired.
+
+## The shim's debugger law (ABI 7, v1.13.17)
+
+`xc_host.cpp` is OURS, and since v1.13.17 it carries debugger law of its
+own — flag it in any upstream PR batch:
+
+* **ABI 7** (`xc_abi()` = 7): the shim stamps the app↔wasm feature contract;
+  the app refuses worker mode below ABI 7 (falls back to the main-thread
+  stepper), so old artifacts degrade, never corrupt.
+* **The LIVE line hook**: the interpreter (fork `0516ccb`, XENON-DEBUG v2)
+  calls the weak extern `xc_debug_hook(file, line)` from `RunCode`'s
+  LINENUMBER case at EVERY executed line; the shim (not the interpreter)
+  defines it as an **EM_JS** that evaluates the STEP LAW in JS and, on a
+  stop, parks the worker thread IN PLACE with `Atomics.wait` — the C++
+  stack (function locals, nested `@call` frames) stays intact mid-cycle.
+* **The SAB protocol** (Int32Array over a SharedArrayBuffer) is documented
+  VERBATIM at the hook: `[0]` cmd main→worker (0 none · 1 over · 2 into ·
+  3 runTo · 4 resume · 5 pause-at-next-line) · `[1]` worker→main state ·
+  `[2..4]` paused fileIdx/line/reason · `[5,6]` ref pair · `[7,8]` over
+  body-range (lo>hi ⇒ top-level) · `[9,10]` runTo target · `[11]` bp count
+  · `[12..]` bp (fileIdx,line) pairs (max 64).
+* **The step law lives in TWO places and must stay in lockstep**: this
+  EM_JS ⇄ `app/src/engine/xenoncode.ts` `stepperLaw()` (the main-thread
+  pair-stream walk, vitest-pinned; its header carries the cross-reference).
+  Any change to the stop conditions lands in BOTH + re-pins.
+* **`--js-library` is a dead end (measured 2026-10-28):** emscripten
+  6.0.13 JS-lib symbols do NOT satisfy undefined C symbols at link — the
+  hook must be EM_JS inside the emitted glue, not a JS library file. Do
+  not resurrect `library_xc.js`.
 
 ## Upstream PR policy
 

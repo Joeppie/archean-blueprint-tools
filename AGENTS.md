@@ -1921,6 +1921,50 @@ topic + FORMAT).
   P2 (worker + Atomics true line-stepping, approved) adds the mid-line stop
   hook to the XENON-DEBUG commit. `XENONCODE_UPSTREAM.md` documents every
   commit; NOTICE §6 + .gitattributes follow.
+- **v1.13.17 TRUE MID-CYCLE STEPPING — THE VM ON A WORKER (we: "Implement the
+  capacity to actually step through lines. Do what needs done.")**:
+  the interpreter's XENON-DEBUG hook (fork `0516ccb`) is LIVE: the shim
+  (`xc_host.cpp`) defines `xc_debug_hook(file,line)` as an EM_JS that runs
+  the STEP LAW at every executed line and on a stop SLEEPS IN PLACE
+  (`Atomics.wait`) — the worker parks INSIDE `xc_cycle()` with the C++
+  stack intact while the main thread paints; F10/F11/F8/runTo/breakpoints
+  are Atomics writes (the SAB Int32Array protocol is documented VERBATIM at
+  the hook + XENONCODE_UPSTREAM.md; `XC_ABI` = 7, gate = SAB +
+  `crossOriginIsolated`, vite sets COOP/COEP on dev+preview). PROVEN:
+  a breakpoint pauses MID-CYCLE (cycles counter frozen) and F10 advances
+  the LINE, not the cycle. **THE STEP LAW LIVES IN TWO PLACES**:
+  `xenoncode.ts stepperLaw()` (pure, vitest-pinned — the main-thread
+  pair-stream walk, the Pages/plain-http fallback) ⇄ the EM_JS in
+  `xc_host.cpp` (worker mode, evaluated per line) — ANY change lands in
+  BOTH + re-pins; the SAB slots mirror the same law (ref pair [5,6], over
+  body-range [7,8] with lo>hi = top-level, runTo [9,10], bps [11..]).
+  **MODE SPLIT E2E LAW**: localhost = worker mode (isolated); Pages/plain
+  http = main-thread fallback — the fallback is pinned at unit tier only
+  (vitest SAB-GATE + THE STEPPER LAW describes; the live path verified by
+  probe with COOP/COEP stripped). THE LANDINGS: (1) **worker pixel keys** —
+  `XenonWorkerRun.setKeys` piggybacks the wanted surface keys on EVERY
+  cycle message and the worker's cycle branch MUST `if (m.keys)
+  wantKeys = m.keys;` — the first cut only read a standalone 'keys' message
+  that is never posted, so worker mode delivered ZERO screen pixels (four
+  `litPixels == 0` e2e reds: metas flow, pixels absent = the exact
+  signature; a live probe reading `__XENON__().pixels(key) === null` with
+  `cyc` ticking nailed it in minutes). (2) `XenonWorkerRun.open` RACES the
+  'open' answer against a 15 s timeout → dispose → main-thread mode: a
+  silent worker can never wedge the pump 'booting'. (3) sabResume before
+  dispose/terminate is an INVARIANT (a parked Atomics.wait worker cannot
+  die). (4) **L4 ESM INTEGRATION** (we: "why is xenoncode.js so modular
+  and separate … rather than modular but integrated into our code?" — the
+  separation stays deliberate, the FORM was accidental): build.sh gains
+  `-sEXPORT_ES6=1`; the glue + wasm moved `app/public/xenoncode/` →
+  `app/src/engine/xenoncode/` and load through the module graph via `?url`
+  (the seal.wasm precedent, LFS pattern follows); the worker `import(xcUrl)`
+  directly (fetch+blob export-shim + the location.href dance GONE — the
+  worker gets page-absolute asset URLs, the one kept dance, commented);
+  the standalone POC page became a module import. `--js-library` for the
+  hook is a MEASURED dead end (emscripten 6.0.13: JS-lib symbols do not
+  satisfy undefined C symbols) — EM_JS in the glue is the only form.
+  Gates: xenon.spec 15/15 on worker mode, vitest 899 (+8 pins: THE STEPPER
+  LAW ×6, SAB GATE ×2), tsc clean; main-thread fallback probed live.
 - **v1.13.16 THE REAL DEBUGGER + CODEMIRROR 6 EDITOR (we: "f10 should mean
   step one line and f11 step into, there should be a context menu when I
   right click. And when I edit code, I need syntax highlighting, I should
