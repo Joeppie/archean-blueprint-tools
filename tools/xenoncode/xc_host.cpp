@@ -864,6 +864,12 @@ int main(int argc, char** argv) {
 				lf << "[";
 				for (size_t i = 0; i < ls.size(); ++i) { if (i) lf << ","; lf << ls[i]; }
 				lf << "]\n";
+				if (getenv("XC_DEBUG_PAIRS")) {   // debug: (file*1e6+line) stream
+					auto ps = Computer::DebugTakePairs();
+					cout << "[xc] pairs: ";
+					for (auto p : ps) cout << p << " ";
+					cout << endl;
+				}
 			}
 			if (realtime) this_thread::sleep_for(chrono::milliseconds(100));
 		}
@@ -874,6 +880,27 @@ int main(int argc, char** argv) {
 	computer->SaveStorage(dir + "/storage");
 	{ std::ofstream vf("vars.json"); vf << computer->DumpVarsJson(); }
 	cout << "[xc] vars.json written (XENON-VARS)" << endl;
+	{ std::ofstream sf("sourcefiles.json"); sf << computer->SourceFilesJson(); }
+	cout << "[xc] sourcefiles.json: " << computer->SourceFilesJson() << endl;
+	// XENON-LOCALS native probe: XC_LOCALS="<sourceFileIdx>:<line>" writes the
+	// locals of the body owning that line (the e2e's functions.xc @selectcase)
+	if (const char* loc = getenv("XC_LOCALS")) {
+		int fi = atoi(loc);
+		const char* colon = strchr(loc, ':');
+		int ln = colon ? atoi(colon + 1) : 0;
+		string js = computer->DumpLocalsAt(fi, ln);
+		std::ofstream lf("locals.json"); lf << js;
+		cout << "[xc] locals.json written (XENON-LOCALS): " << js << endl;
+	}
+	if (getenv("XC_DUMP_TABLES")) {
+		cout << "[xc] localVarDecls:" << endl;
+		for (const auto& v : XenonCode::Implementation::localVarDecls)
+			cout << "  func='" << v.func << "' s=" << v.stackId << " " << v.name
+			     << " t=" << (int)v.type << " slot=" << v.value << endl;
+		cout << "[xc] globalVarDecls:" << endl;
+		for (const auto& v : XenonCode::Implementation::globalVarDecls)
+			cout << "  " << v.name << " t=" << (int)v.type << " slot=" << v.value << endl;
+	}
 
 	// ---- report: events + a PPM per screen ---------------------------------
 	ofstream ev("events.json");
@@ -1027,6 +1054,26 @@ EMSCRIPTEN_KEEPALIVE const char* xc_vars() {
 	g_varsJson = g_computer ? g_computer->DumpVarsJson() : "[]";
 	return g_varsJson.c_str();
 }
+// XENON-LOCALS: the Locals panel's answer for a debug stop — the locals of
+// the body owning (fileIdx, line), RAM read LIVE at the call moment. Safe to
+// call from the EM_JS hook (worker paused mid-cycle inside xc_cycle: the
+// interpreter's C++ stack is intact and this re-enters the wasm normally).
+static string g_localsJson;
+EMSCRIPTEN_KEEPALIVE const char* xc_locals_json(int fileIdx, int line) {
+	g_localsJson = g_computer ? g_computer->DumpLocalsAt(fileIdx, line) : "[]";
+	return g_localsJson.c_str();
+}
+// XENON-LOCALS: the compiler's runtime SOURCEFILE table (JSON array, EMIT
+// order — a file can sit at several indices, one per stream). The app uses
+// THIS as its fileTable: the pair stream, the hook's breakpoints and
+// DumpLocalsAt all speak these indices — a name-based include-order guess
+// breaks every multi-file breakpoint (the PLANE's functions.xc is index 1
+// for its declarations and 2 for its bodies; only the VM knows).
+static string g_sfilesJson;
+EMSCRIPTEN_KEEPALIVE const char* xc_source_files() {
+	g_sfilesJson = g_computer ? g_computer->SourceFilesJson() : "[]";
+	return g_sfilesJson.c_str();
+}
 // XENON-DEBUG: line-tracking switch + the lines executed since the last
 // drain (the pump pauses the cycle that TOUCHED a breakpoint line)
 EMSCRIPTEN_KEEPALIVE void xc_debug_track(int on) { Computer::DebugTrack(on); }
@@ -1067,6 +1114,12 @@ EMSCRIPTEN_KEEPALIVE const char* xc_cycle_pairs() {
 //   2 paused file idx  3 paused line  4 reason 1 bp 2 step 3 cursor 4 pause
 //   5/6 ref pair (over/into)   7/8 over body range (lo>hi = top level)
 //   9/10 runTo target          11 bp count, 12.. (file,line) pairs (max 64)
+//   19 locals-JSON length (bytes); UTF-8 JSON at BYTE offset 80.. —
+//   XENON-LOCALS: the hook dumps the paused line's frame and encodes it on
+//   the SAB BEFORE signalling PAUSED (a parked worker answers no messages —
+//   the SAB is its mailbox; the main thread reads it after its acquire load
+//   of slot 1 sees 1). Needs the 8192-byte SAB the app allocates (the
+//   v1.13.17-era 1024-byte array degrades: the slot-19 length stays 0).
 #ifdef __EMSCRIPTEN__
 EM_JS(void, xc_hook_js, (int file, int line), {
   var M = (typeof Module !== 'undefined') ? Module : null;
@@ -1099,6 +1152,19 @@ EM_JS(void, xc_hook_js, (int file, int line), {
   if (!reason) return;
   Atomics.store(i, 0, 0);                        // consume the command
   i[2] = file; i[3] = line; i[4] = reason;
+  // XENON-LOCALS: hand the paused line's frame to the main thread — the
+  // parked worker thread answers no postMessages, so the JSON rides the SAB:
+  // UTF-8 bytes at byte offset 80, length in slot 19 (plain writes before
+  // the release store on slot 1; the reader acquires through slot 1).
+  var lv = 0;
+  if (M._xc_locals_json && i.length > 20) {
+    try {
+      var B = H.bytes || (H.bytes = new Uint8Array(M.XC_SAB));
+      var jb = new TextEncoder().encode(UTF8ToString(M._xc_locals_json(file, line)));
+      if (jb.length <= B.length - 80) { B.set(jb, 80); lv = jb.length; }
+    } catch (e) { lv = 0; }
+  }
+  Atomics.store(i, 19, lv);
   Atomics.store(i, 1, 1);                        // PAUSED —
   Atomics.notify(i, 1);
   for (;;) {
@@ -1221,7 +1287,7 @@ EMSCRIPTEN_KEEPALIVE void xc_worldsim_clear() { g_wsProgram.clear(); g_wsEffecti
 
 // ABI stamp: the app checks this at boot (XC_ABI in engine/xenoncode.ts) and
 // warns ONCE on drift — new device/shim exports must bump it.
-EMSCRIPTEN_KEEPALIVE int xc_abi() { return 7; }   // 7: the stop-hook is LIVE (library_xc.js + Module.XC_SAB worker stepping); 6: xc_cycle_pairs + hook seam; 5: xc_set_cycle_ms
+EMSCRIPTEN_KEEPALIVE int xc_abi() { return 8; }   // 8: xc_locals_json + the hook's SAB locals handoff (the Locals panel); 7: the stop-hook is LIVE (library_xc.js + Module.XC_SAB worker stepping); 6: xc_cycle_pairs + hook seam; 5: xc_set_cycle_ms
 EMSCRIPTEN_KEEPALIVE void xc_set_cycle_ms(int ms) {
 	// the app's pump cadence (CYCLE_MS): delta_time / system_frequency
 	// follow it, so dt-driven programs (Chip's Mario, physics on

@@ -358,3 +358,67 @@ describe('THE SAB GATE (worker mode ⇄ main-thread fallback)', () => {
     }
   });
 });
+
+describe('THE LOCALS LAW (v1.13.21 XENON-LOCALS)', () => {
+  // we: "When debugging local variables, I cannot see their value. But that
+  // is vital when debugging locals" — the Locals tab. The dump shape is the
+  // fork's DumpLocalsAt JSON (names WITHOUT '$', recursion copy id 's');
+  // the handoff rides the SAB (slot 19 = UTF-8 length, bytes at offset 80)
+  // because a parked worker answers no messages.
+  it('parses the DumpLocalsAt JSON', async () => {
+    const { parseLocalsJson } = await import('../xenoncode');
+    const j = '[{"name":"inputsource","t":70,"s":0,"v":"1"},'
+      + '{"name":"result","t":70,"s":1,"v":"6"},'
+      + '{"name":"label","t":71,"v":".on{1}"}]';
+    expect(parseLocalsJson(j)).toEqual([
+      { name: 'inputsource', t: 70, v: '1', s: 0 },
+      { name: 'result', t: 70, v: '6', s: 1 },
+      { name: 'label', t: 71, v: '.on{1}', s: 0 },   // s absent => copy 0
+    ]);
+    expect(parseLocalsJson('not json')).toEqual([]);
+    expect(parseLocalsJson('{"name":"x"}')).toEqual([]);   // an object is not a frame
+  });
+
+  it('the SAB handoff reader: slot 19 + byte 80, honest [] on garbage', async () => {
+    const { XenonWorkerRun } = await import('../xenoncode');
+    const read = XenonWorkerRun.prototype['locals'] as () => unknown[];
+    const sab = new SharedArrayBuffer(8192);
+    const i32 = new Int32Array(sab);
+    const bytes = new Uint8Array(sab);
+    const fake = { i32, bytes };
+    const json = '[{"name":"src","t":70,"s":0,"v":"4"}]';
+    const enc = new TextEncoder().encode(json);
+    bytes.set(enc, 80);
+    Atomics.store(i32, 19, enc.length);
+    expect(read.call(fake)).toEqual([{ name: 'src', t: 70, v: '4', s: 0 }]);
+    // no handoff (a v1.13.17-era 1024-byte SAB never writes slot 19)…
+    Atomics.store(i32, 19, 0);
+    expect(read.call(fake)).toEqual([]);
+    // …and a length that cannot fit the payload window refuses, never reads
+    // past the encode guard
+    Atomics.store(i32, 19, 1 << 20);
+    expect(read.call(fake)).toEqual([]);
+  });
+
+  it('the varVisible filter keeps artifact rows out of the frame', async () => {
+    const { varVisible } = await import('../xenoncode');
+    expect(varVisible({ name: '@selectcase:', t: 70, v: '6' })).toBe(false); // return slot
+    expect(varVisible({ name: 'sys.clock', t: 70, v: '1' })).toBe(false);    // dotted artifact
+    expect(varVisible({ name: 'inputsource', t: 70, v: '1' })).toBe(true);
+  });
+
+  it('varValue: a paused local shadows the global; running reads globals', async () => {
+    const { XenonPump } = await import('../xenoncode');
+    const pump = new XenonPump();
+    pump.vars = new Map([['num', { name: 'num', t: 70, v: '10' }]]);
+    pump.locals = [{ name: 'num', t: 70, v: '3', s: 0 }];
+    pump.paused = true;
+    expect(pump.varValue('$num')?.v).toBe('3');      // the frame shadows
+    expect(pump.varValue('num')?.v).toBe('3');
+    pump.paused = false;
+    expect(pump.varValue('$num')?.v).toBe('10');     // running: the global
+    pump.locals = [{ name: 'other', t: 70, v: '1', s: 0 }];
+    pump.paused = true;
+    expect(pump.varValue('$num')?.v).toBe('10');     // paused, not in frame -> global
+  });
+});

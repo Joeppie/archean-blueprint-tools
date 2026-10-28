@@ -60,10 +60,11 @@ if command -v em++ >/dev/null 2>&1 || [ -n "${EMSDK:-}" ]; then
 		-sENVIRONMENT=web -sFILESYSTEM=1 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=64MB -sMAXIMUM_MEMORY=4096MB \
 		-o xenoncode.js
 	echo "browser:  xenoncode.js + xenoncode.wasm"
-	# the app serves its own copy (Pages layout: app/public -> site base)
-	mkdir -p ../../app/public/xenoncode
-	cp xenoncode.js xenoncode.wasm ../../app/public/xenoncode/
-	echo "app:      ../../app/public/xenoncode/"
+	# the app serves its own copy through the module graph (v1.13.17 L4:
+	# src/engine/xenoncode/ imported via ?url — fingerprinted with the app)
+	mkdir -p ../../app/src/engine/xenoncode
+	cp xenoncode.js xenoncode.wasm ../../app/src/engine/xenoncode/
+	echo "app:      ../../app/src/engine/xenoncode/"
 else
 	echo "browser:  SKIPPED (no em++ — source ~/emsdk/emsdk_env.sh to build WASM)"
 fi

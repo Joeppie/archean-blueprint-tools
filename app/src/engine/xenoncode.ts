@@ -64,6 +64,8 @@ type Mod = {
   _xc_screen_pixels(i: number): number;
   _xc_screen_index(key: number): number;
   _xc_vars(): number;
+  _xc_locals_json(file: number, line: number): number;
+  _xc_source_files(): number;
   _xc_debug_track(on: number): void;
   _xc_cycle_lines(): number;
   _xc_cycle_pairs(): number;
@@ -522,6 +524,26 @@ export class XenonRun {
   }
   /** The program's GLOBAL variables, live (XENON-VARS dump). */
   vars(): XenonVar[] { return parseVarsJson(this.mod.UTF8ToString(this.mod._xc_vars())); }
+  /** XENON-LOCALS: the locals of the body owning (fileIdx, line) — RAM read
+   *  LIVE at the call moment (main-thread mode calls this AT the pause).
+   *  typeof-guarded: an older shim answers [] (drift guard, never spams). */
+  locals(fileIdx: number, line: number): XenonLocal[] {
+    return typeof this.mod._xc_locals_json === 'function'
+      ? parseLocalsJson(this.mod.UTF8ToString(this.mod._xc_locals_json(fileIdx, line)))
+      : [];
+  }
+  /** XENON-LOCALS (ABI 8): the compiler's runtime SOURCEFILE table. THE
+   *  fileTable of record (XENON-SOURCEPATHS made it one index per name, in
+   *  the VM's own registration order) — pair streams, hook breakpoints and
+   *  DumpLocalsAt all speak these indices. Basenames for the UI; [] on an
+   *  older shim (the pump keeps the includeOrder guess). */
+  sourceFiles(): string[] {
+    if (typeof this.mod._xc_source_files !== 'function') return [];
+    try {
+      return (JSON.parse(this.mod.UTF8ToString(this.mod._xc_source_files())) as string[])
+        .map(f => f.split(/[\\/]/).pop() ?? f);
+    } catch { return []; }
+  }
   /** XENON-DEBUG: record the source lines the VM executes (the pump keeps
    *  this on — one branch per LINENUMBER opcode, gated in the library). */
   debugTrack(on: boolean) {
@@ -631,6 +653,14 @@ export class XenonRun {
 // side effect is `output_number(2,0,...)` pauses with the io 2 bus row
 // ABSENT — the line has not run.
 //
+// XENON-LOCALS handoff (ABI 8): the PARKED worker answers no messages, so
+// the hook writes the paused line's locals JSON into the SAB itself before
+// signalling PAUSED — slot 19 = UTF-8 length, the bytes at offset 80..
+// (plain writes, released by the slot-1 store; XenonWorkerRun.locals()
+// reads them after its acquire load). That needs the 8192-byte SAB below;
+// the v1.13.17-era 1024-byte array degrades honestly to [] (slot 19 stays
+// 0, the hook's i.length > 20 guard keeps writing 0).
+//
 // Gated by sabSupported(): SharedArrayBuffer needs a secure context +
 // COOP/COEP (vite.config). Pages and plain-http LAN origins get
 // crossOriginIsolated = false and run the v1.13.16 main-thread stepper
@@ -657,12 +687,16 @@ export class XenonWorkerRun {
   error = '';
   /** The debugger protocol array (xc_host.cpp's EM_JS hook is the other end) */
   readonly i32: Int32Array;
+  /** Byte view over the same SAB (XENON-LOCALS: hook writes the paused
+   *  frame's JSON at byte offset 80, length in i32 slot 19) */
+  readonly bytes: Uint8Array;
   private worker: Worker;
   private abi_ = 0;
   private keys: string[] = [];
   private inputs: [number | string, number, number][] = [];
   private syncQ: [string, number][] = [];
   private lastVars: XenonVar[] = [];
+  private lastSourceFiles: string[] = [];
   private lastPairs: number[] = [];
   private lastOverrides: Record<string, number> = {};
   private lastMetas: { key: string; w: number; h: number }[] = [];
@@ -676,14 +710,16 @@ export class XenonWorkerRun {
   private constructor(worker: Worker, sab: SharedArrayBuffer) {
     this.worker = worker;
     this.i32 = new Int32Array(sab);
+    this.bytes = new Uint8Array(sab);
     this.opened = new Promise(res => { this.openSet = res; });
     worker.onmessage = (e: MessageEvent) => {
       const d = e.data as CycleData & {
-        t: string; abi?: number; ok?: boolean; errs?: string[];
+        t: string; abi?: number; ok?: boolean; errs?: string[]; sfiles?: string[];
       };
       if (d.t === 'open') {
         this.abi_ = d.abi ?? 0;
         this.error = d.error ?? '';
+        this.lastSourceFiles = (d.sfiles ?? []) as string[];
         this.openSet({ abi: this.abi_, error: this.error });
         return;
       }
@@ -731,7 +767,10 @@ export class XenonWorkerRun {
   static async open(comp: XenonComputer): Promise<XenonWorkerRun | null> {
     if (!sabSupported()) return null;
     try {
-      const sab = new SharedArrayBuffer(1024);
+      // 8192 B (v1.13.21 XENON-LOCALS): slots 0..139 are the v1.13.17 step
+      // protocol (12.. + 2×64 breakpoint pairs), byte 80.. carries the hook's
+      // locals-JSON handoff (~8 KB of payload room)
+      const sab = new SharedArrayBuffer(8192);
       const worker = new Worker(new URL('./xenonworker.ts', import.meta.url), { type: 'module' });
       const r = new XenonWorkerRun(worker, sab);
       // ABSOLUTE URLs: a module worker resolves a RELATIVE dynamic import
@@ -780,6 +819,20 @@ export class XenonWorkerRun {
   screenClick(key: string, x: number, y: number) { this.worker.postMessage({ t: 'click', key, x, y }); }
   screenScroll(key: string, d: number) { this.worker.postMessage({ t: 'scroll', key, d }); }
   vars() { return this.lastVars; }
+  sourceFiles(): string[] { return this.lastSourceFiles; }
+  /** XENON-LOCALS: the paused frame the parked hook encoded on the SAB
+   *  (see the handoff law at the top of XenonWorkerRun). Valid while
+   *  PAUSED; read it from pollSab's paused-transition edge. */
+  locals(): XenonLocal[] {
+    const n = Atomics.load(this.i32, 19);
+    if (n <= 0 || n > this.bytes.length - 80) return [];
+    try {
+      // TextDecoder refuses shared views ("must not be shared") — slice()
+      // copies the payload into a PLAIN Uint8Array first
+      return parseLocalsJson(new TextDecoder().decode(
+        new Uint8Array(this.bytes.slice(80, 80 + n))));
+    } catch { return []; }
+  }
   cyclePairs() { return this.lastPairs; }
   cycleLines(): number[] { return []; }
   screenMeta() { return this.lastMetas; }
@@ -883,7 +936,8 @@ export interface XenonSurface {
 //   • tools/xenoncode/xc_host.cpp (the EM_JS xc_debug_hook) — worker mode:
 //     evaluated AT EVERY EXECUTED LINE inside xc_cycle, over the SAB
 //     protocol (ref pair at [5,6], over body-range at [7,8] with lo>hi
-//     = top level = ANY new pair, runTo target at [9,10], bps at [11..]).
+//     = top level = ANY new pair, runTo target at [9,10], bps at [11..];
+//     slot 19 = the XENON-LOCALS handoff length, JSON bytes at offset 80).
 // Any change to the stop conditions MUST be made in BOTH and re-pinned.
 export interface StepperState {
   stepMode: 'off' | 'over' | 'into' | 'to';
@@ -933,6 +987,14 @@ export class XenonPump {
   bus = new Map<string, number | string>();          // 'io:port' -> last output
   reads = new Map<string, number>();                 // 'io:ch'  -> last input_number READ
   vars = new Map<string, XenonVar>();                // '$name'  -> live global variable
+  // XENON-LOCALS: the locals of the function owning the PAUSED line (the
+  // Locals tab). Set at every pause: worker mode reads the hook's SAB
+  // handoff in pollSab (the parked VM answers no messages — the hook is the
+  // ONLY voice of a parked worker, and its read is truly mid-cycle); the
+  // main-thread stepper reads the VM directly at pauseAt (cycle-granular,
+  // the same honest limit its pair-stream walk has). Kept through resume —
+  // the UI labels it 'last stop' while RUNNING.
+  locals: XenonLocal[] = [];
   // ── debugger (XENON-DEBUG v2, ABI 6): F9 break · F10 step over · F11 step
   // into · F8 continue, plus Run-to-cursor. The interpreter streams
   // EXECUTION-ORDER (file,line) pairs; the pump walks that stream: a
@@ -996,6 +1058,7 @@ export class XenonPump {
     this.bus = new Map();
     this.reads = new Map();
     this.vars = new Map();
+    this.locals = [];
     this.log = [];
     this.prints = [];
     this.surfaces = new Map();
@@ -1025,6 +1088,19 @@ export class XenonPump {
       this.projectFuncs = projectFunctions(runFiles);
     }
     this.run = run;
+    // XENON-SOURCEPATHS (ABI 8): the VM's own SOURCEFILE table is the file
+    // table of record — one index per (basename) name, in registration
+    // order, the ONLY indices the pair stream / hook breakpoints /
+    // DumpLocalsAt speak. The includeOrder name-list is a v1.13.16-era
+    // GUESS and breaks every multi-file breakpoint (the PLANE proof:
+    // functions.xc streams under the include, not under its name's guess).
+    {
+      const sf = run.sourceFiles();
+      // The shim compiles the entry as /prog/main.xc (the XC convention),
+      // so map that tag back to the disk's entry name — the map the tab
+      // strip and the breakpoint state key files by.
+      if (sf.length) this.fileTable = sf.map(n => n === 'main.xc' ? comp.entryName : n);
+    }
     if (run.error) { this.status = 'error'; this.error = run.error; }
     else {
       this.status = 'running';
@@ -1058,6 +1134,7 @@ export class XenonPump {
     this.pilotBindings = new Map();
     this.paused = false; this.pausedLine = 0; this.pausedFile = ''; this.stepMode = 'off';
     this.breaks = new Map();
+    this.locals = [];
     this.notify();
   }
 
@@ -1267,6 +1344,9 @@ export class XenonPump {
       this.pausedFile = this.fileTable[f] ?? `#${f}`;
       this.pausedLine = Atomics.load(i, 3);
       this.stepMode = 'off';
+      // XENON-LOCALS: the hook encoded the paused frame BEFORE it signalled
+      // PAUSED, so reading AFTER the acquire load of slot 1 sees it complete
+      this.locals = this.wrun ? this.wrun.locals().filter(varVisible) : [];
     }
     this.notify();
   }
@@ -1338,6 +1418,28 @@ export class XenonPump {
   }
   private pauseAt(file: string, line: number) {
     this.paused = true; this.pausedFile = file; this.pausedLine = line;
+    // XENON-LOCALS (main-thread mode): the VM lives on this thread, read it
+    // directly — cycle-granular like the pair-stream walk (the worker hook
+    // above is the mid-cycle truth)
+    this.locals = this.run instanceof XenonRun
+      ? this.run.locals(this.fileIdx(file), line).filter(varVisible) : [];
+  }
+  /** The function whose body owns the paused line (the SAME project-model
+   *  functionAt the step-over scope uses — one frame law for the debugger);
+   *  null = a top-level line (its variables are globals: the Vars tab). */
+  localsFrame(): string | null {
+    const fn = functionAt(this.projectFuncs, this.pausedFile, this.pausedLine);
+    return fn ? `@${fn.name}` : null;
+  }
+  /** '$name' hover value: a LOCAL wins while paused (the frame shadows the
+   *  global, the debugger's lookup), globals serve while running. */
+  varValue(name: string): XenonVar | XenonLocal | undefined {
+    const k = name.replace(/^\$/, '');
+    if (this.paused) {
+      const l = this.locals.find(v => v.name === k);
+      if (l) return l;
+    }
+    return this.vars.get(k) ?? this.vars.get(name);
   }
   startRunning() {
     if (!this.run) return;
@@ -1683,7 +1785,7 @@ export class XenonPump {
 }
 
 /** The shim ABI the app expects (xc_host.cpp xc_abi()). Bump with the shim. */
-export const XC_ABI = 7;
+export const XC_ABI = 8;
 
 export const xenonPump = new XenonPump();
 
@@ -1711,6 +1813,21 @@ export function xenonScreenBindings(comp: XenonComputer): Map<string, string> {
 // (XenonCode.hpp enum): 50/51 storage, 70/71 RAM, 60/61+80/81 arrays,
 // 128+ objects, 40/41 ROM constants.
 export interface XenonVar { name: string; t: number; v: string }
+
+/** XENON-LOCALS: a function-local variable; `s` = the compiler's recursion
+ *  copy id (a function compiled for N recursion depths has N slot copies —
+ *  rows of the same name with different s are the copies, labelled #s). */
+export interface XenonLocal extends XenonVar { s: number }
+
+/** The DumpLocalsAt JSON (names carry NO '$' — the UI prints '$'+name). */
+export function parseLocalsJson(json: string): XenonLocal[] {
+  try {
+    const j = JSON.parse(json) as { name: string; t: number; v: string; s?: number }[];
+    return Array.isArray(j)
+      ? j.map(e => ({ name: e.name, t: e.t | 0, v: String(e.v ?? ''), s: (e.s ?? 0) | 0 }))
+      : [];
+  } catch { return []; }
+}
 
 export function varKind(t: number): 'num' | 'text' | 'array' | 'object' | 'const' {
   if (t === 70 || t === 50) return 'num';

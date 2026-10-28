@@ -142,7 +142,15 @@ ctx.onmessage = (e: MessageEvent<Msg>) => {
         .then(m2 => {
           mod = m2;
           openRun(m);
-          const d = { t: 'open', abi: typeof mod._xc_abi === 'function' ? mod._xc_abi() : 0, error: err } as Record<string, unknown>;
+          const d = {
+            t: 'open', abi: typeof mod._xc_abi === 'function' ? mod._xc_abi() : 0, error: err,
+            // XENON-LOCALS (ABI 8): the VM's SOURCEFILE table — the pump's
+            // fileTable of record (pair streams/breakpoints/locals indices)
+            sfiles: typeof mod._xc_source_files === 'function'
+              ? (JSON.parse(mod.UTF8ToString(mod._xc_source_files())) as string[])
+                .map((f: string) => f.split(/[\\/]/).pop() ?? f)
+              : [],
+          } as Record<string, unknown>;
           ctx.postMessage(d);
         }).catch((ex: unknown) => ctx.postMessage({ t: 'open', abi: 0, error: `${String(ex)} :: ${(ex as { stack?: string })?.stack?.slice(0, 300) ?? ''}` }));
     }

@@ -49,6 +49,32 @@ with the description in its message, PR-able upstream:
    panics; real craft programs (3381670618 settings reads, the Badger
    reboot with a fresh VM) hit exactly these paths. Anchors prefixed
    `xli::`.
+5. **XENON-LOCALS** (fork `972b99f`, v1.13.21) — function-local
+   introspection for the debugger's Locals tab: the compiler records
+   EVERY named declaration made inside a named body (function,
+   `system.init`/`system.tick`/`system.timer`/`system.input`, `entrypoint.*`)
+   in `Implementation::localVarDecls` with its function name, recursion
+   copy (stackId) and RAM slot; `Computer::DumpLocalsAt(file, line)` finds
+   the program position executing that line (SOURCEFILE/LINENUMBER walk),
+   resolves the owning body by [start, CODE_RETURN) containment (plain
+   top-level positions sit in the gaps → `[]`, their variables are the
+   XENON-VARS globals) and reads the slot values LIVE — called from the
+   debug stop, it answers the paused line's frame mid-cycle.
+   `Computer::SourceFilesJson()` exports the compiler's SOURCEFILE table
+   so the IDE's file table is VM-authoritative.
+6. **XENON-SOURCEPATHS** (fork `8dfaa58`, v1.13.21) — truthful per-file
+   (file,line) streams: the include-end FileInfo marker returned to
+   `filedir + "/" + filename` (unnormalized — `./main.xc` ≠ `main.xc`),
+   registration was a blind `push_back` (one name, several indices), and a
+   body region is ENTERED BY JMP, which skips the linearly-emitted
+   SOURCEFILE record entirely. Net effect on the pair stream: every body
+   declared after an include ran under a third, misnamed registration —
+   the PLANE's `functions.xc` bodies reported as `./main.xc`, so
+   per-file breakpoints by NAME never fired (the Locals e2e caught it).
+   Fix: the marker uses the normalized `src.filepath`; FileInfo
+   registration dedups by name; `openFunction` self-tags every body region
+   at its start. (The game's binary compiles its own programs — this
+   changes only the debugger-facing stream, never semantics.)
 
 `patch_xenon_vars.py` / `patch_xenon_debug.py` / `patch_xenon_lenient_index.py`
 stay in this directory **for provenance** — they are how the branch commits
@@ -70,26 +96,33 @@ v1.13.17 L4: the glue builds with `-sEXPORT_ES6=1` — an **ES module**
 via `?url` (the seal.wasm precedent); the old classic-script/global form
 and the worker's fetch+blob export-shim are retired.
 
-## The shim's debugger law (ABI 7, v1.13.17)
+## The shim's debugger law (ABI 8, v1.13.17 + v1.13.21)
 
 `xc_host.cpp` is OURS, and since v1.13.17 it carries debugger law of its
 own — flag it in any upstream PR batch:
 
-* **ABI 7** (`xc_abi()` = 7): the shim stamps the app↔wasm feature contract;
-  the app refuses worker mode below ABI 7 (falls back to the main-thread
-  stepper), so old artifacts degrade, never corrupt.
+* **ABI 8** (`xc_abi()` = 8): `xc_locals_json(fileIdx, line)` + the hook's
+   SAB locals handoff (the Locals panel); ABI 7 stamped the LIVE stop hook;
+   the app refuses worker mode below ABI 7 (falls back to the main-thread
+   stepper), so old artifacts degrade, never corrupt.
 * **The LIVE line hook**: the interpreter (fork `0516ccb`, XENON-DEBUG v2)
   calls the weak extern `xc_debug_hook(file, line)` from `RunCode`'s
   LINENUMBER case at EVERY executed line; the shim (not the interpreter)
   defines it as an **EM_JS** that evaluates the STEP LAW in JS and, on a
   stop, parks the worker thread IN PLACE with `Atomics.wait` — the C++
   stack (function locals, nested `@call` frames) stays intact mid-cycle.
-* **The SAB protocol** (Int32Array over a SharedArrayBuffer) is documented
-  VERBATIM at the hook: `[0]` cmd main→worker (0 none · 1 over · 2 into ·
-  3 runTo · 4 resume · 5 pause-at-next-line) · `[1]` worker→main state ·
-  `[2..4]` paused fileIdx/line/reason · `[5,6]` ref pair · `[7,8]` over
-  body-range (lo>hi ⇒ top-level) · `[9,10]` runTo target · `[11]` bp count
-  · `[12..]` bp (fileIdx,line) pairs (max 64).
+* **The SAB protocol** (Int32Array over a SharedArrayBuffer, 8192 bytes
+  since v1.13.21) is documented VERBATIM at the hook: `[0]` cmd main→worker
+  (0 none · 1 over · 2 into · 3 runTo · 4 resume · 5 pause-at-next-line) ·
+  `[1]` worker→main state · `[2..4]` paused fileIdx/line/reason · `[5,6]`
+  ref pair · `[7,8]` over body-range (lo>hi ⇒ top-level) · `[9,10]` runTo
+  target · `[11]` bp count · `[12..]` bp (fileIdx,line) pairs (max 64) ·
+  `[19]` locals-JSON byte length, UTF-8 JSON at BYTE offset 80.. —
+  **XENON-LOCALS**: a PARKED worker answers no messages, so the hook itself
+  calls `xc_locals_json` at the stop and encodes the frame onto the SAB
+  before its release store on `[1]` (the reader acquires through `[1]`).
+  The v1.13.17-era 1024-byte SAB degrades honestly: the hook's `i.length`
+  guard keeps `[19]` at 0 → the panel says "no locals", never garbage.
 * **The step law lives in TWO places and must stay in lockstep**: this
   EM_JS ⇄ `app/src/engine/xenoncode.ts` `stepperLaw()` (the main-thread
   pair-stream walk, vitest-pinned; its header carries the cross-reference).

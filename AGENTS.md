@@ -1921,6 +1921,53 @@ topic + FORMAT).
   P2 (worker + Atomics true line-stepping, approved) adds the mid-line stop
   hook to the XENON-DEBUG commit. `XENONCODE_UPSTREAM.md` documents every
   commit; NOTICE §6 + .gitattributes follow.
+- **v1.13.21 THE LOCALS TAB + THE SOURCEFILE TRUTH LAW (we: "When debugging
+ local variables, I cannot see their value. But that is vital when debugging
+ locals; add this as a tab, also put the tabs currently vertically labeled as
+ top-tabs at the same level as the search names/values")**:
+ (a) **XENON-LOCALS (fork `972b99f`, shim ABI 8)**: the compiler exports
+ `localVarDecls` (every named declaration inside a named body: function,
+ system.init/tick/timer/input, entrypoint.* — with function name, recursion
+ copy stackId, RAM slot) and `Computer::DumpLocalsAt(file,line)` resolves
+ the owning body by [start, CODE_RETURN) containment (top-level positions
+ have no frame — their variables are the Vars globals) and reads the slots
+ LIVE, so a debug stop answers the paused line's frame MID-CYCLE. The
+ parked worker's handoff: it answers no postMessages, so the EM_JS hook
+ dumps the frame at the stop and encodes the JSON onto the SAB (slot 19 =
+ UTF-8 length, bytes at offset 80; plain writes released by the slot-1
+ store) — the SAB grew 1024→8192 B; an old 1024 B SAB degrades honestly to
+ "no locals". THE UI (XenonDialog): the vertical rail is GONE — the side
+ tabs are a horizontal row with the tab's search box AT THE SAME LEVEL
+ (the Locals tab shares the Vars search law: one query, filter names AND
+ values); the Locals panel shows the frame chip (`paused at f:10
+ @selectcase · live frame`, `last stop … · stale (running)` after resume),
+ recursion copies badge `#s`, KV text breaks open, and `pump.varValue`
+ makes the code's `$var` hover read the paused frame first. Pins: vitest
+ "THE LOCALS LAW" (JSON shape, SAB reader law, varVisible filter,
+ varValue shadowing) + e2e xenon.spec "THE LOCALS TAB" (PLANE: break
+ inside functions.xc @selectcase, pause, live frame rows = the ARGUMENTS
+ the call passed + tab-row level law).
+ (b) **THE SOURCEFILE TRUTH LAW (fork `8dfaa58` XENON-SOURCEPATHS — found
+ by THIS e2e, it is the reason the leg first went red)**: the pair stream
+ never lied for single-file programs, so v1.13.16-20 shipped blind. Three
+ library bugs made per-file (file,line) streams untruthful for EVERY
+ multi-file craft: the include-end FileInfo marker returned
+ `filedir + "/" + filename` (`./main.xc` ≠ the ctor's normalized
+ `main.xc`), registration was a blind push_back (one name, several
+ indices), and a body region is ENTERED BY JMP, which skips the
+ linearly-emitted SOURCEFILE record — so the PLANE's functions.xc bodies
+ streamed under a third, misnamed registration and per-file breakpoints
+ by NAME never fired. Fix: normalized marker, dedup-by-name registration,
+ openFunction self-tags every body at its start. **The app's fileTable of
+ record is now the VM's table** (`xc_source_files()`, basenames, the
+ entry's canonical `main.xc` tag mapped back to comp.entryName) —
+ `includeOrder` is only a pre-ABI-8 fallback. LESSON: a name→index model
+ the VM owns must be READ from the VM, never re-derived.
+ (c) **TextDecoder CANNOT decode SharedArrayBuffer views** ("The provided
+ ArrayBufferView value must not be shared" — spec). Inside the pump that
+ throw killed the locals assignment in pollSab (paused=true, locals=[],
+ silent) — the __XENON__ audit handoff probe surfaced it. SAB payloads
+ decode through a `bytes.slice()` copy into a plain Uint8Array first.
 - **v1.13.20 THE FRESH COMPUTER IS PROGRAMMABLE (we: "When I place a new
   minicomputer, I dont get a xenoncode menu for the computer, and I cannot
   write code for it as a consequence!")**: two gates hid a placed

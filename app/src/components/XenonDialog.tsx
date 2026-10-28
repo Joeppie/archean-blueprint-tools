@@ -65,7 +65,7 @@ export default function XenonDialog(p: {
   const [newProg, setNewProg] = useState(false);
   const [armedDel, setArmedDel] = useState(false);
   const [vals, setVals] = useState<Record<string, number>>({});
-  const [side, setSide] = useState<'vars' | 'screens' | 'world' | 'bus' | 'console' | 'autotest'>('screens');
+  const [side, setSide] = useState<'vars' | 'locals' | 'screens' | 'world' | 'bus' | 'console' | 'autotest'>('screens');
   const [varQ, setVarQ] = useState('');
   const [scrQ, setScrQ] = useState('');
   // ── AUTOTEST (v1.13.7, we: "a simple interface for automating that in
@@ -162,6 +162,17 @@ export default function XenonDialog(p: {
       cyclePairs: pump.run?.cyclePairs() ?? [],
       debug: { paused: pump.paused, file: pump.pausedFile, line: pump.pausedLine,
         stepMode: pump.stepMode, breaks: [...pump.breaks.entries()].map(([f, s]) => [f, [...s]]) },
+      // XENON-LOCALS audit: the panel's frame + the raw SAB handoff (slot 19
+      // length + the JSON head the parked hook encoded)
+      locals: pump.locals,
+      handoff: (() => {
+        const w = pump.wrun;
+        if (!w) return null;
+        const n = Atomics.load(w.i32, 19);
+        return { len: n,
+          head: n > 0 && n <= w.bytes.length - 80
+            ? new TextDecoder().decode(new Uint8Array(w.bytes.slice(80, 80 + Math.min(n, 240)))) : '' };
+      })(),
       project: { funcs: funcs.map(f => ({ name: f.name, file: f.file, line: f.line })),
         fileTable: pump.fileTable },
       bus: [...pump.bus.entries()].slice(-40),
@@ -282,6 +293,20 @@ export default function XenonDialog(p: {
     return all.filter(v => v.name.includes(q) || v.v.toLowerCase().includes(q)
       || (parseKv(v.v) ?? []).some(e => e.k.toLowerCase().includes(q) || e.v.toLowerCase().includes(q)));
   }, [pump.vars, varQ, pump.cycles]);
+  // XENON-LOCALS: the paused frame (pump.locals), searched with the SAME
+  // query the Vars tab uses (the search row is shared at the tab level)
+  const locList = useMemo(() => {
+    const q = varQ.trim().toLowerCase();
+    const all = pump.locals;
+    if (!q) return all;
+    return all.filter(v => v.name.includes(q) || v.v.toLowerCase().includes(q));
+  }, [pump.locals, varQ]);
+  // recursion copies (same name, several stackIds) get a #s badge
+  const locCopies = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const v of pump.locals) m.set(v.name, (m.get(v.name) ?? 0) + 1);
+    return m;
+  }, [pump.locals]);
   const surfList = useMemo(() => {
     const q = scrQ.trim().toLowerCase();
     const all = [...pump.surfaces.values()];
@@ -555,7 +580,7 @@ export default function XenonDialog(p: {
                 funcs={funcs} decls={decls}
                 varList={[...pump.vars.values()].map(v => ({ ...v, name: '$' + v.name.replace(/^\$/, '') }))}
                 devices={comp.devices.filter(d => d.alias).map(d => ({ alias: d.alias!, type: d.type }))}
-                getVar={(n) => { const k = n.replace(/^\$/, ''); const v = pump.vars.get(k) ?? pump.vars.get(n); return v ? { v: v.v, type: varKind(v.t) } : undefined; }}
+                getVar={(n) => { const v = pump.varValue(n); return v ? { v: v.v, type: varKind(v.t) } : undefined; }}
                 debugActive={pump.status === 'running' || pump.status === 'stopped'}
                 onToggleBreak={(l) => toggleBp(l)}
                 onRunTo={(l) => pump.runTo(runtimeName(tab), l)}
@@ -597,27 +622,38 @@ export default function XenonDialog(p: {
               automatically breaks open its KV structure … one of the side
               tabs to be the screens and virtual screens … search
               names/values in vars, and also names of screens") */}
-          <div className="flex min-h-0 flex-1 gap-1.5">
-            {/* the side RAIL: tabs sit BESIDE the panel (v1.13.x: "Screens
-                and vars should be to the side of the tabs") */}
-            <div className="flex w-7 shrink-0 flex-col gap-1">
+          <div className="flex min-h-0 flex-1 flex-col gap-1.5">
+            {/* TOP TAB ROW (v1.13.21, we: "put the tabs currently vertically
+                labeled as top-tabs at the same level as the 'search
+                names/values'"): the rail becomes a horizontal row and the
+                tab's search box rides that SAME row */}
+            <div className="flex shrink-0 flex-wrap items-center gap-1">
               {([['vars', `Vars ${pump.vars.size ? `(${pump.vars.size})` : ''}`],
+                ['locals', `Locals ${pump.locals.length ? `(${pump.locals.length})` : ''}`],
                 ['screens', `Screens ${pump.surfaces.size ? `(${pump.surfaces.size})` : ''}`],
                 ['world', `World ${pump.wsChannels().length ? `(${pump.wsChannels().length})` : ''}`],
                 ['bus', 'Bus'], ['autotest', 'Auto'], ['console', 'Console']] as const).map(([k, label]) => (
                 <button key={k} data-testid={`xenon-side-${k}`} onClick={() => setSide(k)}
-                  className="flex-1 rounded py-2 text-[10px] tracking-wide"
-                  style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
+                  className="shrink-0 rounded px-2 py-1 text-[10px] tracking-wide hover:bg-[#182236]"
                   title={label.trim()}>
-                  <span className={side === k ? 'text-[#8fd4ff]' : 'text-[#7d8aa0]'}>{label.trim()}</span>
+                  <span className={side === k ? 'rounded bg-[#1d2b42] px-1 py-0.5 text-[#8fd4ff]' : 'text-[#7d8aa0]'}>{label.trim()}</span>
                 </button>
               ))}
+              <div className="min-w-0 flex-1">
+                {(side === 'vars' || side === 'locals') && (
+                  <input data-testid="xenon-var-search" value={varQ} placeholder="search names / values…"
+                    onChange={e => setVarQ(e.target.value)}
+                    className="w-full rounded border border-[#2b3a52] bg-[#0b0f18] px-2 py-1 text-[11px] outline-none" />
+                )}
+                {side === 'screens' && (
+                  <input data-testid="xenon-screen-search" value={scrQ} placeholder="search screen names…"
+                    onChange={e => setScrQ(e.target.value)}
+                    className="w-full rounded border border-[#2b3a52] bg-[#0b0f18] px-2 py-1 text-[11px] outline-none" />
+                )}
+              </div>
             </div>
             <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto">
             {side === 'vars' && (<>
-              <input data-testid="xenon-var-search" value={varQ} placeholder="search names / values…"
-                onChange={e => setVarQ(e.target.value)}
-                className="rounded border border-[#2b3a52] bg-[#0b0f18] px-2 py-1 text-[11px] outline-none" />
               {varList.map(v => {
                 const kv = parseKv(v.v);
                 const kind = varKind(v.t);
@@ -654,10 +690,64 @@ export default function XenonDialog(p: {
                 </span>
               )}
             </>)}
+            {side === 'locals' && (<>
+              {/* XENON-LOCALS (v1.13.21, we: "When debugging local variables,
+                  I cannot see their value. But that is vital when debugging
+                  locals"): the paused line's frame — the interpreter's RAM
+                  slots read LIVE at the stop. Worker mode = true mid-cycle
+                  (the parked VM's own voice over the SAB handoff); the
+                  main-thread stepper reads at cycle boundaries. */}
+              <div className="flex items-baseline justify-between gap-2 text-[10px]">
+                <span data-testid="xenon-locals-frame" className="truncate text-[#e6c07b]">
+                  {pump.paused
+                    ? `paused at ${pump.pausedFile}:${pump.pausedLine}${pump.localsFrame() ? ` ${pump.localsFrame()}` : ' (top level)'}`
+                    : pump.locals.length > 0
+                      ? `last stop ${pump.pausedFile}:${pump.pausedLine}${pump.localsFrame() ? ` ${pump.localsFrame()}` : ''} · stale (running)`
+                      : 'not paused'}
+                </span>
+                {pump.paused && <span className="shrink-0 text-[#8fd48f]">live frame</span>}
+              </div>
+              {locList.map(v => {
+                const kv = parseKv(v.v);
+                const kind = varKind(v.t);
+                return (
+                  <div key={`${v.name}#${v.s}`} data-testid={`xenon-loc-${v.name}`}
+                    className="rounded border border-[#232c3d] bg-[#131a28] px-2 py-1 text-[11px]">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="text-[#8fd48f]">${v.name}
+                        {kind === 'array' && <span className="ml-1 text-[9px] text-[#5d6a7d]">array</span>}
+                        {kind === 'object' && <span className="ml-1 text-[9px] text-[#5d6a7d]">object</span>}
+                        {(locCopies.get(v.name) ?? 0) > 1 &&
+                          <span className="ml-1 rounded bg-[#1d2b42] px-1 text-[9px] text-[#8fd4ff]">#{v.s}</span>}
+                      </span>
+                      <span className="truncate text-right tabular-nums text-[#d6dbe1]" title={v.v}>
+                        {kv ? `{${kv.length}}` : v.v === '' ? '·' : v.v.length > 28 ? v.v.slice(0, 28) + '…' : v.v}
+                      </span>
+                    </div>
+                    {kv && (
+                      <div className="ml-3 border-l border-[#2b3a52] pl-2">
+                        {kv.map(e => (
+                          <div key={e.k} className="flex justify-between gap-2 text-[10px]">
+                            <span className="text-[#7ea6ff]">.{e.k}</span>
+                            <span className="truncate tabular-nums text-[#9fb0c8]">{e.v === '' ? '·' : e.v}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {locList.length === 0 && (
+                <span className="text-[11px] text-[#5d6a7d]">
+                  {pump.paused
+                    ? (pump.localsFrame()
+                      ? 'no locals recorded for this body'
+                      : 'top-level frame — these variables are globals, see the Vars tab')
+                    : 'Locals show the paused function\u2019s variables: click a line\u2019s gutter to break, then F10/F11 to step'}
+                </span>
+              )}
+            </>)}
             {side === 'screens' && (<>
-              <input data-testid="xenon-screen-search" value={scrQ} placeholder="search screen names…"
-                onChange={e => setScrQ(e.target.value)}
-                className="rounded border border-[#2b3a52] bg-[#0b0f18] px-2 py-1 text-[11px] outline-none" />
               {booting && <span className="text-[11px] text-[#5d6a7d]">booting…</span>}
               {!booting && surfList.length === 0 && (
                 <span className="text-[11px] text-[#5d6a7d]">no surfaces match</span>

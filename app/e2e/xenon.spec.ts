@@ -313,6 +313,73 @@ test.describe('Xenon IDE @ui', () => {
     await page.keyboard.press('Escape');
   });
 
+  test('THE LOCALS TAB: break inside a function, read its live frame @slow', async ({ page }) => {
+    // (we: "When debugging local variables, I cannot see their value. But
+    // that is vital when debugging locals; add this as a tab, also put the
+    // tabs currently vertically labeled as top-tabs at the same level as
+    // the search names/values") — XENON-LOCALS: the parked worker's hook
+    // reads its own function's RAM frame and hands it over on the SAB; the
+    // tab rides the row that carries the search box. Runs on PLANE, whose
+    // functions.xc @selectcase takes its >0 branch every cycle once the
+    // throttle-key channel (io 11 ch 3) is fed.
+    // e2e-tier because: the frame under test is the REAL worker VM parked
+    // mid-cycle inside xc_cycle — the SAB handoff, the hook's dumper call
+    // and the layout law (search at the tab level) are browser laws; the
+    // JSON/reader/filter/shadowing half is vitest-pinned (THE LOCALS LAW).
+    await page.goto(`/?craft=${PLANE}`);
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 90_000 });
+    await page.getByTestId('xenon-menu').click();
+    await page.locator('[data-testid^="xenon-comp-"]').first().click();
+    await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 60_000 });
+    // this pin is the worker-mode proof: the frame the hook dumps is the
+    // MID-CYCLE truth (the parked VM's own voice), not a cycle-end echo
+    await expect(page.getByTestId('xenon-mode')).toContainText('worker · true line-stepping');
+    await page.getByTestId('xenon-side-bus').click();
+    const key = page.getByTestId('xenon-in-11-3');
+    await key.evaluate((el: HTMLInputElement) => {
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+      set.call(el, '1');
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    // functions.xc tab: break on line 10 — `$result += $increment`, inside
+    // the `if $inputsource>0` branch (line 10 as authored: 4 header lines,
+    // the declaration, the $result init, a comment, the if, a comment)
+    await page.getByTestId('xenon-tab-1').click();
+    const gutter = page.locator('.xc-break-gutter .cm-gutterElement').nth(9);
+    await expect(gutter).toBeVisible();
+    await gutter.click();
+    await expect(page.locator('.xc-bp')).toHaveCount(1);
+    const pill = page.getByTestId('xenon-paused');
+    await expect(pill).toBeVisible({ timeout: 15_000 });
+    await expect(pill).toHaveAttribute('data-line', '10');
+    // THE LOCALS TAB: the frame chip names the owning function; the rows
+    // carry the ARGUMENTS the pause-carrying call passed (increment 5,
+    // limits 0..100 = the throttle call) and $result
+    await page.getByTestId('xenon-side-locals').click();
+    await expect(page.getByTestId('xenon-locals-frame')).toContainText('@selectcase');
+    await expect(page.getByTestId('xenon-loc-inputsource')).toBeVisible();
+    await expect(page.getByTestId('xenon-loc-increment')).toContainText('5');
+    await expect(page.getByTestId('xenon-loc-lowerlimit')).toContainText('0');
+    await expect(page.getByTestId('xenon-loc-upperlimit')).toContainText('100');
+    await expect(page.getByTestId('xenon-loc-result')).toBeVisible();
+    // THE ROW LAW (the layout half of the ask): the search box sits AT THE
+    // SAME LEVEL as the tab row — the old vertical rail is gone (boxes
+    // overlap vertically)
+    const tab = await page.getByTestId('xenon-side-locals').boundingBox();
+    const box = await page.getByTestId('xenon-var-search').boundingBox();
+    expect(!!tab && !!box && tab.y < box.y + box.height && box.y < tab.y + tab.height).toBe(true);
+    // the shared search filters the frame
+    await page.getByTestId('xenon-var-search').fill('increment');
+    await expect(page.locator('[data-testid^="xenon-loc-"]')).toHaveCount(1);
+    await page.getByTestId('xenon-var-search').fill('');
+    // F8 resumes: the frame stays listed as the LAST STOP (labeled stale —
+    // a debugger keeps the last frame visible while running, like every IDE)
+    await page.keyboard.press('F8');
+    await expect(pill).toHaveCount(0);
+    await expect(page.getByTestId('xenon-locals-frame')).toContainText('last stop');
+    await page.keyboard.press('Escape');
+  });
+
   test('the editor: syntax colors, right-click menu, go-to-definition, hover @slow', async ({ page }) => {
     test.setTimeout(120_000);
     // (we: "there should be a context menu when I right click… I should have
