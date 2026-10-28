@@ -112,6 +112,9 @@ export interface XCDevice {
   alias: string;
   type: string;
   x: number; y: number; z: number;
+  /** Buzzer: the component's authored tone (data.mode 0..3, wiki
+   *  Buzzer.md) — engine/buzzer.ts plays each buzzer ITS tone in auto. */
+  mode?: number;
 }
 
 /** The IDE's working list = the virtual disk's files in their ORIGINAL
@@ -260,14 +263,16 @@ export function xenonDevices(bp: Blueprint, ci: number): XCDevice[] {
     const other = comps[p.a_component === ci ? p.b_component : p.a_component];
     if (!other) continue;
     out.push({ io: m[1] ? +m[1] : 0, id: 0, alias: other.alias ?? '', type: other.type,
-      x: other.position?.x ?? 0, y: other.position?.y ?? 0, z: other.position?.z ?? 0 });
+      x: other.position?.x ?? 0, y: other.position?.y ?? 0, z: other.position?.z ?? 0,
+      mode: typeof (other.data as any)?.mode === 'number' ? (other.data as any).mode : undefined });
     if (other.alias) byAlias.add(other.alias);
   }
   comps.forEach((c) => {
     if (!c.alias || byAlias.has(c.alias)) return;
     byAlias.add(c.alias);
     out.push({ io: -1, id: 0, alias: c.alias, type: c.type,
-      x: c.position?.x ?? 0, y: c.position?.y ?? 0, z: c.position?.z ?? 0 });
+      x: c.position?.x ?? 0, y: c.position?.y ?? 0, z: c.position?.z ?? 0,
+      mode: typeof (c.data as any)?.mode === 'number' ? (c.data as any).mode : undefined });
   });
   out.sort((a, b) => a.alias.localeCompare(b.alias) || a.io - b.io);
   out.forEach((d, i) => (d.id = i + 1));
@@ -909,6 +914,18 @@ export class XenonPump {
   }
   private notify() { for (const cb of [...this.subs]) cb(); }
 
+  /** Cycle hooks run SYNCHRONOUSLY every pump cycle, right after the
+   *  surfaces update (v1.13.5, we: "the display of visuals in the screens
+   *  of the craft feels a bit delayed compared to actual screen
+   *  visibility"): the 3-D dashboard faces rode pump.subscribe — the
+   *  ≤10 Hz React notify — while the dock canvases blit every cycle, so
+   *  the craft's screens lagged the dock's by ~150 ms. */
+  private cycleHooks = new Set<() => void>();
+  addCycleHook(cb: () => void): () => void {
+    this.cycleHooks.add(cb);
+    return () => { this.cycleHooks.delete(cb); };
+  }
+
   /** React-facing notify. THE CADENCE LAW (v1.13.2): the VM runs at 25 Hz,
    *  the PANELS re-render at ≤10 Hz — a heavy firmware (the Badger's 118
    *  surfaces, ~100 var rows) re-rendered 25x/s starves the main thread in
@@ -994,6 +1011,9 @@ export class XenonPump {
               for (const cv of this.canvases.get(mk) ?? []) this.blit(cv, mir);
           }
       this.surfaces = next;
+      for (const h of [...this.cycleHooks]) {
+        try { h(); } catch { /* a hook never breaks the pump */ }
+      }
       // BUZZERS (engine/buzzer.ts): the game's Buzzer takes Amplitude (ch 0)
       // and Frequency Hz (ch 1) on its data channel — the io bus rows above
       // carry exactly that; turn live ones into real WebAudio sound.

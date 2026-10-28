@@ -203,11 +203,13 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       }).filter(Boolean),
     });
   }, []);
-  // THE 3-D LAW: the pump's 25 Hz tick pushes each surface's framebuffer
-  // onto its dashboard face ("dashboards display what is given to them").
+  // THE 3-D LAW: the pump's tick pushes each surface's framebuffer onto its
+  // dashboard face EVERY CYCLE via a cycle hook (v1.13.5: it rode the
+  // ≤10 Hz notify before — the craft's screens visibly lagged the dock's
+  // canvases, "delayed compared to actual screen visibility").
   // The pump fetches pixels for exactly the keys the scene feeds (plus the
   // panels' visible canvases) - 118-buffer crafts stay memcpy-cheap.
-  useEffect(() => xenonPump.subscribe(() => {
+  useEffect(() => xenonPump.addCycleHook(() => {
     const eng = engineRef.current;
     if (!eng || xenonPump.status !== 'running') return;
     xenonPump.setFeedKeys(eng.screenFeedKeys());

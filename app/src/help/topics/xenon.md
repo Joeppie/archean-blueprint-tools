@@ -115,10 +115,18 @@ oscillator per Buzzer, so a program using many buzzers (melody + harmony
 
 **Hearing it**: the **🔊 icon in the top bar, beside ⚙ View**, is the
 sound switch — click it (the browser requires a real click before any
-page may make sound). **While any buzzer is playing, the icon throbs**,
-so you can SEE the sound is live; muted is a static 🔇. The IDE's Bus
-panel lists every Buzzer with its live amplitude + frequency (and a
-wave picker), and its own 🔊 row does the same as the top-bar icon.
+page may make sound; Firefox additionally gets a silent unlock buffer
+played inside the click and a self-healing resume on later gestures).
+**While any buzzer is playing, the icon throbs**, so you can SEE the
+sound is live; muted is a static 🔇.
+
+**The tone each buzzer plays is its own**: the game stores it in the
+component's `mode` setting (the in-game `V` menu) — the inspector now
+shows it as **named modes** (0 · sine, 1 · square, 2 · triangle,
+3 · sawtooth). In **auto** (the default wave chip) every buzzer plays
+the tone its component authored — Chip's Mario: melody and harmony
+square, **bass triangle**, **effects sawtooth**; forcing one wave on
+all eight is the override, and was the "sound is funky" report.
 
 For a game like Mario: the title screen is Chip's own SILENT attract demo
 (his `musicgate=0`); the level themes start when a game does — jump

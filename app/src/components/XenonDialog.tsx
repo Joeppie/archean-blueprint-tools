@@ -27,7 +27,7 @@ import {
   xenonScreenBindings, xcDiskFiles, CYCLE_HZ,
   type ChannelTable, type XenonComputer, type XGraph, type XCFile,
 } from '../engine/xenoncode';
-import { BUZZER_WAVES, buzzerAudio, buzzerReadings } from '../engine/buzzer';
+import { BUZZER_MODES, buzzerAudio, buzzerReadings, type BuzzerWave } from '../engine/buzzer';
 import { usePilotKeys } from '../engine/pilotkeys';
 import type { Engine } from '../engine/scene';
 import { ScreensCell } from './ScreensDock';
@@ -568,10 +568,12 @@ export default function XenonDialog(p: {
                       {buzzerAudio.soundOn ? '🔊 sound on' : '🔇 muted'}
                     </button>
                     <span className="ml-auto flex gap-1 normal-case tracking-normal">
-                      {BUZZER_WAVES.map(w => (
+                      {(['auto', ...BUZZER_MODES] as const).map(w => (
                         <button key={w} data-testid={`buzzer-wave-${w}`}
-                          title={`${w} wave — the game's tone type (the buzzer's V menu)`}
-                          onClick={() => { buzzerAudio.setWave(w); setTick(t => t + 1); }}
+                          title={w === 'auto'
+                            ? 'each buzzer plays the tone its COMPONENT authored (data.mode) — the game law'
+                            : `force ${w} on every buzzer (override)`}
+                          onClick={() => { buzzerAudio.setWave(w as BuzzerWave | 'auto'); setTick(t => t + 1); }}
                           className={`rounded px-1.5 py-0.5 text-[10px] ${
                             buzzerAudio.wave === w ? 'bg-[#243a52] text-[#8fd4ff]' : 'bg-[#1a2233] text-[#7d8aa0]'}`}>
                           {w}
@@ -581,11 +583,14 @@ export default function XenonDialog(p: {
                   </div>
                   {buzzerReadings(pump).map(r => (
                     <div key={r.name} data-testid={`buzzer-row-${r.name}`}
-                      className="grid grid-cols-[1fr_52px_64px] gap-x-2">
+                      className="grid grid-cols-[1fr_58px_46px_64px] gap-x-2">
                       <span className="truncate text-[#9fb0c8]" title={r.name}>{r.name}</span>
                       <span className="text-right tabular-nums text-[#8fd48f]" title="Amplitude (ch 0)">{r.amp.toFixed(2)}</span>
                       <span className="text-right tabular-nums text-[#d6dbe1]" title="Frequency (ch 1)">
                         {Math.round(r.freq)} Hz</span>
+                      <span className="truncate text-[9px] text-[#5d6a7d]"
+                        title="the tone its component authored (data.mode) — auto mode plays it"
+                        data-testid={`buzzer-tone-${r.name}`}>{r.wave}</span>
                     </div>
                   ))}
                   <div className="mt-1 text-[9px] leading-snug text-[#5d6a7d]">

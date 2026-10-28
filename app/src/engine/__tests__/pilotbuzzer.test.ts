@@ -64,7 +64,7 @@ describe('THE BUZZER LAW (Amplitude ch 0 · Frequency Hz ch 1)', () => {
 
   it('reads alias and io bus keys (the program\'s RAW target verbatim)', () => {
     const alias = buzzerReadings(fakePump({ 'b1:0': 0.5, 'b1:1': 880 }, [b1]));
-    expect(alias).toEqual([{ name: 'b1', io: 8, amp: 0.5, freq: 880 }]);
+    expect(alias).toMatchObject([{ name: 'b1', io: 8, amp: 0.5, freq: 880, wave: 'square' }]);
     const io = buzzerReadings(fakePump({ '8:0': 1, '8:1': 220 }, [b1]));
     expect(io[0]!.amp).toBe(1);
     expect(io[0]!.freq).toBe(220);
@@ -94,7 +94,7 @@ describe('THE BUZZER LAW (Amplitude ch 0 · Frequency Hz ch 1)', () => {
   it('alias-only devices (io -1) read on their alias key alone', () => {
     const aliasOnly = { type: 'Buzzer', alias: 'horn', io: -1 };
     const rows = buzzerReadings(fakePump({ 'horn:0': 0.4, 'horn:1': 100 }, [aliasOnly]));
-    expect(rows[0]).toEqual({ name: 'horn', io: -1, amp: 0.4, freq: 100 });
+    expect(rows[0]).toMatchObject({ name: 'horn', io: -1, amp: 0.4, freq: 100 });
   });
 
   void wsLoad;   // (localStorage guard exercised by worldsim.test — silence unused)
@@ -128,5 +128,40 @@ describe('THE BUZZER AUDIO LAWS (v1.13.4)', () => {
     audio.level = 0.5;
     audio.sync(pump);
     expect(audio.level).toBe(0);                      // muted: level 0
+  });
+});
+
+describe('THE AUTHORED-MODE LAW (v1.13.5)', () => {
+  it('modeToWave maps data.mode in the V-menu order', async () => {
+    const { modeToWave, BUZZER_MODES } = await import('../buzzer');
+    expect(BUZZER_MODES).toEqual(['sine', 'square', 'triangle', 'sawtooth']);
+    expect(modeToWave(0)).toBe('sine');
+    expect(modeToWave(1)).toBe('square');
+    expect(modeToWave(2)).toBe('triangle');
+    expect(modeToWave(3)).toBe('sawtooth');
+    expect(modeToWave(9)).toBe('sawtooth');           // clamps
+    expect(modeToWave(-2)).toBe('sine');
+  });
+  it('buzzerReadings carry each component’s authored tone (Mario’s mix)', async () => {
+    const { buzzerReadings } = await import('../buzzer');
+    // Mario's authored table: melody square (1), bass TRIANGLE (2),
+    // effects SAWTOOTH (3) — the "sound is funky" fix: one wave for all
+    // eight is NOT the game's law.
+    const pump: any = {
+      comp: { devices: [
+        { type: 'Buzzer', alias: 'game-melody', io: -1, mode: 1 },
+        { type: 'Buzzer', alias: 'game-bass', io: -1, mode: 2 },
+        { type: 'Buzzer', alias: 'game-effects', io: -1, mode: 3 },
+        { type: 'Buzzer', alias: 'no-mode', io: -1 },
+      ] },
+      bus: new Map<string, number | string>([
+        ['game-melody:0', 0.09], ['game-bass:0', 0.09], ['game-effects:0', 0.2],
+      ]),
+    };
+    const rows = buzzerReadings(pump);
+    expect(rows.find(r => r.name === 'game-melody')!.wave).toBe('square');
+    expect(rows.find(r => r.name === 'game-bass')!.wave).toBe('triangle');
+    expect(rows.find(r => r.name === 'game-effects')!.wave).toBe('sawtooth');
+    expect(rows.find(r => r.name === 'no-mode')!.wave).toBe('square');  // game default
   });
 });

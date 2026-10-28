@@ -1624,7 +1624,28 @@ topic + FORMAT).
    registered (__XENON__().surfaceMeta). E key → Roll (ch 5) = Mario's
    FIRE key (we: "we should have forwarded the e key as well" — the probe
    proved Mario reads ch5 = Roll, not Pitch) — nine bound keys total.
- - **v1.13.4 MARIO PLAYS RIGHT (we: "for supermario, it should actually
+ - **v1.13.5 AUTHORED BUZZER MODES + FIREFOX + 3-D SCREEN CADENCE (we:
+   "the sound won't turn on in Firefox … the display of visuals in the
+   screens of the craft feels a bit delayed compared to actual screen
+   visibility … do the buzzers correctly do the saw tooth as the game
+   expects? The sound is funky … component buzzer should have a better
+   setting for its 'mode' so its named modes not just numerical
+   values")**: (a) THE AUTHORED-MODE LAW: the component's data.mode
+   (0 sine, 1 square, 2 triangle, 3 sawtooth — wiki Buzzer.md; Mario
+   authors melody/harmony/fx square, bass TRIANGLE, effects SAWTOOTH)
+   flows xenonDevices → XCDevice.mode → BuzzerReading.wave; buzzerAudio
+   wave defaults to **'auto'** = per-buzzer authored tone (a named wave
+   chip = global override); the inspector's Buzzer `mode` row is a
+   NAMED-MODES select (data-mode, jsdom-pinned; the FILE stays numeric).
+   (b) FIREFOX: the toggle plays a 1-frame silent buffer inside the
+   gesture (Firefox arms a context only when audio actually plays in it)
+   + a once-pointerdown/keydown resume + per-cycle suspended self-heal.
+   (c) 3-D SCREEN CADENCE: the dashboard faces rode pump.subscribe (the
+   ≤10 Hz notify) while canvases blit every cycle — visibly laggy; the
+   pump gained addCycleHook (runs synchronously per cycle after surfaces
+   update) and the Editor's 3-D LAW rides it. (d) Mario leg pins the
+   tone table (buzzer-tone-game-bass triangle, -game-effects sawtooth,
+   auto chip lit). - **v1.13.4 MARIO PLAYS RIGHT (we: "for supermario, it should actually
    focus on the first virtualscreen, also, that doesnt properly scale, it
    stretches it sideways when trying to maximise … I dont hear the buzzers
    … place a mute icon/sound icon near the 'view' buttons … which animates

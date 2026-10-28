@@ -704,6 +704,13 @@ test.describe('Xenon IDE @ui', () => {
     await expect(page.getByTestId('xenon-buzzer-card')).toBeVisible();
     await expect(page.getByTestId('buzzer-row-game-melody')).toBeVisible();
     await expect(page.getByTestId('buzzer-row-game-bass')).toBeVisible();
+    // THE GAME'S OWN TONE TABLE (data.mode, wiki Buzzer.md V-menu): Chip
+    // authored bass = TRIANGLE and effects = SAWTOOTH; one forced square
+    // for all eight buzzers was the "sound is funky" report. In 'auto'
+    // (the default chip) each buzzer plays ITS authored tone.
+    await expect(page.getByTestId('buzzer-tone-game-bass')).toHaveText('triangle');
+    await expect(page.getByTestId('buzzer-tone-game-effects')).toHaveText('sawtooth');
+    await expect(page.getByTestId('buzzer-wave-auto')).toHaveClass(/bg-\[#243a52\]/);
     await expect(page.getByTestId('buzzer-sound')).toBeVisible();     // 🔊 (autoplay-safe)
     await expect(page.getByTestId('buzzer-wave-sawtooth')).toBeVisible();
     // the game IS playing: the title DEMO is deliberately silent (main.xc

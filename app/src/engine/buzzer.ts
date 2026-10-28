@@ -19,8 +19,18 @@
 
 import type { XenonPump } from './xenoncode';
 
-export type BuzzerWave = 'sine' | 'square' | 'triangle' | 'sawtooth';
-export const BUZZER_WAVES: BuzzerWave[] = ['sine', 'square', 'triangle', 'sawtooth'];
+/** The game's four buzzer tone types, in the V-menu's order — the component
+ *  stores its choice as data.mode 0..3 (we: "component buzzer should have
+ *  a better setting for its 'mode' so its named modes not just numerical
+ *  values"). */
+export const BUZZER_MODES = ['sine', 'square', 'triangle', 'sawtooth'] as const;
+export type BuzzerWave = (typeof BUZZER_MODES)[number];
+
+/** data.mode (as authored in the blueprint) -> wave; out-of-range clamps. */
+export function modeToWave(mode: number): BuzzerWave {
+  const i = Math.max(0, Math.min(BUZZER_MODES.length - 1, Math.trunc(mode) || 0));
+  return BUZZER_MODES[i] ?? 'square';
+}
 
 const LS_WAVE = 'archean-…wave';
 const LS_ON = 'archean-xenon-buzzer-sound';
@@ -34,6 +44,10 @@ export interface BuzzerReading {
   /** ch 1 Frequency in Hz; the game's 440 default when the channel is
    *  unset/zero, clamped to the wiki's 20000 ceiling. */
   freq: number;
+  /** the component's authored tone (data.mode) — the wave this buzzer
+   *  SOUNDS as in auto mode (Mario: melody square, bass TRIANGLE,
+   *  effects SAWTOOTH — one global wave made the music "funky"). */
+  wave: BuzzerWave;
 }
 
 /** Every Buzzer device of the running computer with its live bus reading.
@@ -54,11 +68,13 @@ export function buzzerReadings(pump: Pick<XenonPump, 'comp' | 'bus'>): BuzzerRea
       return 0;
     };
     const freq = get(1);
+    const wave = typeof d.mode === 'number' ? modeToWave(d.mode) : 'square';
     out.push({
       name: d.alias || `io ${d.io}`,
       io: d.io,
       amp: Math.max(0, Math.min(1, get(0))),
       freq: freq > 0 ? Math.min(20000, freq) : 440,
+      wave,
     });
   }
   return out;
@@ -78,7 +94,9 @@ export function voiceGain(amp: number): number {
  *  The wave type is the SHARED config choice (the game menus each buzzer
  *  separately; we expose one app-level choice, persisted). */
 export class BuzzerAudio {
-  wave: BuzzerWave = 'square';
+  /** 'auto' = each buzzer plays the tone its COMPONENT authored
+   *  (data.mode) — the game's own law; a named wave here overrides all. */
+  wave: BuzzerWave | 'auto' = 'auto';
   soundOn = false;
   /** Loudest Amplitude seen in the latest sync (0 = all silent) — drives
    *  the TopBar 🔊 activity animation ("animates whenever any buzzer is
@@ -129,12 +147,12 @@ export class BuzzerAudio {
   constructor() {
     try {
       const w = localStorage.getItem(LS_WAVE);
-      if (w && (BUZZER_WAVES as string[]).includes(w)) this.wave = w as BuzzerWave;
+      if (w && (w === 'auto' || (BUZZER_MODES as readonly string[]).includes(w))) this.wave = w as BuzzerWave | 'auto';
       this.soundOn = localStorage.getItem(LS_ON) === '1';
     } catch { /* fresh profile */ }
   }
 
-  setWave(w: BuzzerWave) {
+  setWave(w: BuzzerWave | 'auto') {
     this.wave = w;
     try { localStorage.setItem(LS_WAVE, w); } catch { /* private mode */ }
   }
@@ -149,7 +167,20 @@ export class BuzzerAudio {
     try { localStorage.setItem(LS_ON, this.soundOn ? '1' : '0'); } catch { /* private mode */ }
     if (this.soundOn) {
       try {
-        void this.ensureCtx().resume();
+        const ctx = this.ensureCtx();
+        void ctx.resume();
+        // FIREFOX UNLOCK (we: "the sound won't turn on in Firefox"):
+        // Firefox arms a context from a gesture only when audio ACTUALLY
+        // plays in it — play a 1-frame silent buffer inside the click, and
+        // self-heal on any later pointer/key gesture.
+        const b = ctx.createBuffer(1, 1, ctx.sampleRate);
+        const src = ctx.createBufferSource();
+        src.buffer = b;
+        src.connect(ctx.destination);
+        src.start(0);
+        const unlock = () => { if (this.ctx && this.ctx.state === 'suspended') void this.ctx.resume(); };
+        addEventListener('pointerdown', unlock, { capture: true, once: true });
+        addEventListener('keydown', unlock, { capture: true, once: true });
       } catch { /* no audio device: stays silent, never crashes */ }
     } else this.stopAll();
     return this.soundOn;
@@ -158,6 +189,7 @@ export class BuzzerAudio {
   /** Called once per pump cycle. */
   sync(pump: XenonPump) {
     if (!this.soundOn || !pump.run?.running) { this.level = 0; this.stopAll(); return; }
+    if (this.ctx && this.ctx.state === 'suspended') void this.ctx.resume();  // self-heal (Firefox)
     const rows = buzzerReadings(pump);
     // activity level: even with audio unavailable (headless, no audio
     // device) the TopBar animation reflects what the program is SENDING
@@ -174,7 +206,7 @@ export class BuzzerAudio {
           void ctx.resume();
           const osc = ctx.createOscillator();
           const gain = ctx.createGain();
-          osc.type = this.wave;
+          osc.type = (this.wave === 'auto' ? r.wave : this.wave) as OscillatorType;
           gain.gain.value = 0;
           osc.connect(gain);
           gain.connect(this.master!);
@@ -183,7 +215,10 @@ export class BuzzerAudio {
           this.voices.set(r.name, v);
         }
         const now = this.ctx!.currentTime;
-        v.osc.type = this.wave;
+        // per-voice tone: the component's authored mode in 'auto', the
+        // picked wave as an override (we: "do the buzzers correctly do the
+        // saw tooth as the game expects? The sound is funky")
+        v.osc.type = (this.wave === 'auto' ? r.wave : this.wave) as OscillatorType;
         v.osc.frequency.setTargetAtTime(r.freq, now, 0.01);
         v.gain.gain.setTargetAtTime(voiceGain(r.amp), now, 0.02);
       } catch {

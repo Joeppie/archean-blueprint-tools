@@ -16,6 +16,7 @@ import type { Blueprint, BlueprintComponent, LatticeObj } from '../engine/format
 import { subMasterEntries } from '../engine/subgrid';
 import { CompPaint } from './ColorPanel';
 import { MirrorGlyph } from './ui';
+import { BUZZER_MODES } from '../engine/buzzer';
 // v1.12.2 BOOT COST — chunk diet: the Lift card (atmo/sealwasm) and the
 // Cost card (economy table) are the panel's HEAVIEST imports and are not
 // needed for the first paint; they land as one small chunk with the panel
@@ -787,7 +788,7 @@ export function Inspector(p: PanelProps) {
   );
 }
 
-function DataRows(p: {
+export function DataRows(p: {
   comp: BlueprintComponent; compPath: (string | number)[];
   edits: EditApi; ctx: EditCtx | null; markDirty: () => void;
   /** ci into data.components — every write re-renders the part's live model
@@ -807,6 +808,22 @@ function DataRows(p: {
         if (typeof v === 'boolean')
           return <Check key={k} testid={`data-${k}`} label={k} checked={v}
             onChange={nv => { p.edits.dataField(p.ctx!, p.compPath, k, nv); p.markDirty(); p.liveEdit?.(); }} />;
+        if (typeof v === 'number' && p.comp.type === 'Buzzer' && k === 'mode')
+          // NAMED MODES (we: "component buzzer should have a better setting
+          // for its 'mode' so its named modes not just numerical values"):
+          // the V-menu tone types (wiki Buzzer.md); engine/buzzer.ts plays
+          // each buzzer ITS tone in auto mode.
+          return (
+            <label key={k} className="flex items-center gap-2 py-[2px]">
+              <span className="w-[74px] shrink-0 truncate font-mono text-[10px] text-ink-dim">mode</span>
+              <select data-testid="data-mode" value={String(Math.max(0, Math.min(3, Math.trunc(v))))}
+                disabled={p.readOnly}
+                onChange={e => { p.edits.dataField(p.ctx!, p.compPath, k, +e.target.value); p.markDirty(); p.liveEdit?.(); }}
+                className="min-w-0 flex-1 rounded border border-white/10 bg-panel2 px-1 py-[1px] text-[11px] text-ink">
+                {BUZZER_MODES.map((m, i) => <option key={m} value={i}>{i} · {m}</option>)}
+              </select>
+            </label>
+          );
         if (typeof v === 'number')
           return <Row key={k} label={k} min={Math.min(v - 10, -100)} max={Math.max(v + 10, 100)}
             step={0.1} value={v} disabled={p.readOnly}
