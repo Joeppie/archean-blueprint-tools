@@ -136,3 +136,34 @@ describe('BLOCK frames (v1.13.24 - update/tick/timer bodies are frames)', () => 
     expect(blockAt(blocks, 'main.xc', 11)).toBeNull();   // a function body is not a block
   });
 });
+
+// ── LIBRARY INDEX (v1.13.25): the table the IDE's Library tab renders.
+// The lockstep pin is the law: every completion-pool name has exactly one
+// doc row, and the table never invents a function the pool does not offer.
+import { libIndex, XC_LIB_DOC, XC_LIB_FNS, XC_SCREEN_MEMBERS } from '../xcproject';
+
+describe('library index (XC_LIB_DOC ⇄ XC_LIB_FNS lockstep)', () => {
+  it('covers every library function exactly once', () => {
+    const names = XC_LIB_DOC.map(f => f.name);
+    expect(names.length).toBe(new Set(names).size);          // no duplicates
+    expect([...names].sort()).toEqual([...XC_LIB_FNS].sort());
+  });
+  it('every row has a signature starting with its name and a summary', () => {
+    for (const f of XC_LIB_DOC) {
+      expect(f.sig.startsWith(f.name), f.name).toBe(true);
+      expect(f.desc.trim().length, f.name).toBeGreaterThan(8);
+      expect(f.group.trim().length, f.name).toBeGreaterThan(0);
+    }
+  });
+  it('libIndex filters over name, signature, description and group', () => {
+    expect(libIndex('').length).toBe(XC_LIB_DOC.length);
+    expect(libIndex('PRINT').map(f => f.name)).toEqual(['print']);
+    expect(libIndex('worldsim').every(f => f.group === 'worldsim')).toBe(true);
+    expect(libIndex('cable').length).toBeGreaterThan(0);     // description match
+    expect(libIndex('zzzz')).toEqual([]);
+  });
+  it('screen members are unique and non-empty', () => {
+    expect(new Set(XC_SCREEN_MEMBERS).size).toBe(XC_SCREEN_MEMBERS.length);
+    expect(XC_SCREEN_MEMBERS).toContain('write');
+  });
+});

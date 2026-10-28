@@ -984,6 +984,16 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); save(); return; }
+      // F5 RUN (v1.13.25, we: "F5 should run the code, so long as a computer
+      // or screen window is open, otherwise it does a refresh"): with the ▣
+      // Screens dock up and no IDE window, the pump re-boots its computer
+      // from disk; with the IDE open its OWN F5 handler owns the key (it can
+      // save a draft first); with NEITHER window open the key stays the
+      // browser's (page refresh).
+      if (e.key === 'F5') {
+        if (screensOpen && xenonCi === null) { e.preventDefault(); xenonPump.reboot(); }
+        return;
+      }
       const el = e.target as HTMLElement | null;
       const tag = el?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el?.isContentEditable) return;
@@ -1042,7 +1052,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     addEventListener('keydown', h);
     return () => removeEventListener('keydown', h);
   }, [save, toggleOpt, placing, mode, ws, sel, blockSel, triSel,
-    triDraft, pinTi, brush, undo, redo, deleteComp, deleteBlock, deleteTri]);
+    triDraft, pinTi, brush, undo, redo, deleteComp, deleteBlock, deleteTri,
+    screensOpen, xenonCi]);
 
   // blocks-mode canvas handling: place (brush/logical continuation) or
   // select, via engine.pickCell.

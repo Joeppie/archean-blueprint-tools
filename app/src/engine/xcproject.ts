@@ -207,3 +207,80 @@ export const XC_SCREEN_MEMBERS = ['write', 'blank', 'text_size', 'text_align', '
   'draw_point', 'draw_line', 'draw_rect', 'draw_triangle', 'draw_circle', 'draw_poly', 'draw',
   'button', 'button_rect', 'pixel', 'width', 'height', 'char_w', 'char_h', 'clicked',
   'click_x', 'click_y', 'scroll'];
+
+/** ── LIBRARY INDEX (v1.13.25, we: "an index of all known library and
+ *  custom-defined functions as a library of definitions, so I can find it
+ *  inside the computer"): the built-in callables as DATA — the IDE's Library
+ *  side-tab renders and filters this table. One entry per XC_LIB_FNS name
+ *  (a vitest pin keeps name sets in lockstep — the table may never grow a
+ *  doc for a function the completion pool does not offer, nor go silent on
+ *  one it does). `desc` is OUR summary for the panel; FORMAT.md stays the
+ *  format truth. */
+export interface XCLibFn { name: string; sig: string; desc: string; group: string }
+
+export const XC_LIB_DOC: XCLibFn[] = [
+  // — component io
+  { name: 'print', sig: 'print(text)', desc: 'write a line to the computer console', group: 'io' },
+  { name: 'input_number', sig: 'input_number(aliasOrIo, channel)', desc: 'read a number from a cabled component (alias, io, or "io:channel")', group: 'io' },
+  { name: 'input_text', sig: 'input_text(aliasOrIo, channel)', desc: 'read a text value from a cabled component', group: 'io' },
+  { name: 'output_number', sig: 'output_number(aliasOrIo, channel, value)', desc: 'send a number to a cabled component', group: 'io' },
+  { name: 'output_text', sig: 'output_text(aliasOrIo, channel, text)', desc: 'send a text value to a cabled component', group: 'io' },
+  // — screens
+  { name: 'screen', sig: 'screen(alias)', desc: 'the screen object of a cabled screen ("alias")', group: 'screen' },
+  { name: 'virtualscreen', sig: 'virtualscreen(name, w, h)', desc: 'an off-screen surface (keyed name#N, shows in the Screens tabs)', group: 'screen' },
+  { name: 'screen_copy', sig: 'screen_copy(src, dst)', desc: 'copy the pixels of one surface onto another', group: 'screen' },
+  { name: 'char_w', sig: 'char_w', desc: 'character cell width (px) on the current screen', group: 'screen' },
+  { name: 'char_h', sig: 'char_h', desc: 'character cell height (px) on the current screen', group: 'screen' },
+  { name: 'screen_w', sig: 'screen_w', desc: 'width (px) of the current screen', group: 'screen' },
+  { name: 'screen_h', sig: 'screen_h', desc: 'height (px) of the current screen', group: 'screen' },
+  { name: 'clicked', sig: 'clicked([x, y, w, h])', desc: 'mouse click on the current screen (optionally in a rect)', group: 'screen' },
+  { name: 'click_x', sig: 'click_x', desc: 'last click X (px) on the current screen', group: 'screen' },
+  { name: 'click_y', sig: 'click_y', desc: 'last click Y (px) on the current screen', group: 'screen' },
+  { name: 'scroll', sig: 'scroll', desc: 'scroll-wheel delta on the current screen', group: 'screen' },
+  // — devices
+  { name: 'device', sig: 'device(alias)', desc: 'the device object with this alias', group: 'device' },
+  { name: 'device_at', sig: 'device_at(io)', desc: 'the device cabled to this io port', group: 'device' },
+  { name: 'device_type', sig: 'device_type(alias)', desc: 'the component TYPE name of a device', group: 'device' },
+  { name: 'device_count', sig: 'device_count(type)', desc: 'how many cabled devices have this type', group: 'device' },
+  // — values
+  { name: 'text', sig: 'text(value)', desc: 'convert a value to its text form', group: 'value' },
+  { name: 'random', sig: 'random()', desc: 'a pseudo-random number in [0, 1)', group: 'value' },
+  { name: 'color', sig: 'color(r, g, b, a)', desc: 'pack channels into a color value', group: 'value' },
+  { name: 'color_r', sig: 'color_r(color)', desc: 'extract the red channel of a color', group: 'value' },
+  { name: 'color_g', sig: 'color_g(color)', desc: 'extract the green channel of a color', group: 'value' },
+  { name: 'color_b', sig: 'color_b(color)', desc: 'extract the blue channel of a color', group: 'value' },
+  { name: 'color_a', sig: 'color_a(color)', desc: 'extract the alpha channel of a color', group: 'value' },
+  // — system
+  { name: 'time', sig: 'time()', desc: 'seconds since this computer booted', group: 'system' },
+  { name: 'tick', sig: 'tick()', desc: 'the running tick counter', group: 'system' },
+  { name: 'delta_time', sig: 'delta_time()', desc: 'seconds elapsed in the last cycle', group: 'system' },
+  { name: 'user', sig: 'user()', desc: 'the player name (in-game identity)', group: 'system' },
+  { name: 'owner', sig: 'owner()', desc: 'the craft owner\'s name', group: 'system' },
+  { name: 'username', sig: 'username()', desc: 'the player name (alias of user)', group: 'system' },
+  { name: 'system_frequency', sig: 'system_frequency()', desc: 'this computer\'s rated frequency (Hz)', group: 'system' },
+  { name: 'system_ram', sig: 'system_ram()', desc: 'this computer\'s RAM size', group: 'system' },
+  { name: 'system_ipc', sig: 'system_ipc()', desc: 'inter-program communication state', group: 'system' },
+  { name: 'programs_count', sig: 'programs_count()', desc: 'programs on this computer\'s disk', group: 'system' },
+  { name: 'game_mode', sig: 'game_mode()', desc: 'the game mode the server runs', group: 'system' },
+  { name: 'load_program', sig: 'load_program(name)', desc: 'load a disk program as the running one', group: 'system' },
+  { name: 'reboot', sig: 'reboot()', desc: 'reboot this computer (files from disk)', group: 'system' },
+  { name: 'program_name', sig: 'program_name()', desc: 'the running program\'s name', group: 'system' },
+  // — recipes
+  { name: 'get_recipe', sig: 'get_recipe(...)', desc: 'look up a crafting recipe', group: 'recipe' },
+  { name: 'get_recipes', sig: 'get_recipes(...)', desc: 'the crafting recipes available here', group: 'recipe' },
+  { name: 'get_recipe_label', sig: 'get_recipe_label(...)', desc: 'a recipe\'s display label', group: 'recipe' },
+  { name: 'get_item_value_unit', sig: 'get_item_value_unit(...)', desc: 'an item\'s value unit for crafting maths', group: 'recipe' },
+  // — world sim
+  { name: 'setworldsim', sig: 'setworldsim(name, value)', desc: 'override a world-sim sensor channel', group: 'worldsim' },
+  { name: 'getworldsim', sig: 'getworldsim(name)', desc: 'read a world-sim channel (pitch, altitude, …)', group: 'worldsim' },
+];
+
+/** Library docs filtered by a free-text query (name, signature, description
+ *  and group all match; empty query = the whole table, in table order). */
+export function libIndex(q: string): XCLibFn[] {
+  const t = q.trim().toLowerCase();
+  if (!t) return XC_LIB_DOC;
+  return XC_LIB_DOC.filter(f =>
+    f.name.includes(t) || f.sig.toLowerCase().includes(t)
+    || f.desc.toLowerCase().includes(t) || f.group.includes(t));
+}

@@ -236,6 +236,11 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
 - THE CADENCE LAW: the VM cycles at 25 Hz (`CYCLE_MS = 40`, shim
   `xc_set_cycle_ms`); React panels coalesce ≤ 10 Hz; canvases blit EVERY
   cycle.
+- IDE RUN/FIND/MAXIMIZE KEYS: F5 = RUN (a draft save ⇒ disk write ⇒
+  auto-reboot; no draft ⇒ `pump.reboot()`) ONLY while a computer or
+  Screens window is open — else F5 stays the browser refresh. Ctrl+F =
+  CM find panel (Esc closes find, NEVER the IDE — popup stopPropagation
+  law). ⛶ / title double-click maximizes (FloatingWindow `maximized`).
 - THE STEP LAW LIVES IN TWO PLACES: `stepperLaw()` (xenoncode.ts, pure,
   main-thread) ⇄ the EM_JS hook in `xc_host.cpp` (worker). ANY change lands
   in BOTH + re-pins. SAB payload windows start ABOVE every slot byte (slot n

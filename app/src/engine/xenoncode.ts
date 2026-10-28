@@ -1154,6 +1154,10 @@ export class XenonPump {
     this.run = null;
     this.comp = null;
     this.status = 'idle';
+    this.cycles = 0;           // v1.13.25: cycles count the CURRENT boot —
+                               // a CLOSED pump shows 0, not a frozen ghost
+                               // (the F5-run probes read the counter across
+                               // sessions and a stale value lies)
     this.surfaces = new Map();
     this.wsBindings = new Map();
     this.wsOverrides = {};
@@ -1568,6 +1572,9 @@ export class XenonPump {
         if (this.wrun !== w) return;                 // superseded by a new open
         if (ok) {
           this.status = 'running'; this.log = []; this.prints = []; this.bus = new Map();
+          this.cycles = 0;      // v1.13.25: cycles count THIS boot (the game's
+                                // menu-bar counter restarts on a re-boot — the
+                                // F5-RUN law makes the rewind user-visible)
           this.paused = false; this.pausedLine = 0; this.pausedFile = ''; this.stepMode = 'off';
           this.startLoop();
         } else { this.status = 'error'; this.error = w.error; }
@@ -1578,6 +1585,7 @@ export class XenonPump {
     }
     if (r.reboot()) {
       this.status = 'running'; this.log = []; this.prints = []; this.bus = new Map();
+      this.cycles = 0;          // cycles count THIS boot (see the worker branch)
       this.paused = false; this.pausedLine = 0; this.pausedFile = ''; this.stepMode = 'off';
       this.startLoop();
     }

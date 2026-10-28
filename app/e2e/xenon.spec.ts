@@ -96,6 +96,83 @@ test.describe('Xenon IDE @ui', () => {
     await expect(page.getByTestId('xenon-dialog')).toHaveCount(0);
   });
 
+  // v1.13.25 (we: "an index of all known library and custom-defined
+  // functions … ctrl-f text … easily maximise the IDE … F5 should run the
+  // code, so long as a computer or screen window is open"). E2E-TIER
+  // because the laws are key routing (Ctrl+F/F5/Escape between the CM
+  // panel, the IDE window and the browser) + viewport geometry.
+  test('IDE extras: Library index+jump, Ctrl-F find, ⛶ maximise, F5 re-boot @slow', async ({ page }) => {
+    await page.goto(`/?craft=${PLANE}`);
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 90_000 });
+    await page.getByTestId('xenon-menu').click();
+    await page.locator('[data-testid^="xenon-comp-"]').first().click();
+    const dlg = page.getByTestId('xenon-dialog');
+    await expect(dlg).toBeVisible();
+
+    // LIBRARY TAB: the built-in docs render and filter; a declared function
+    // JUMPS — opening its file with the caret on the declaration
+    await page.getByTestId('xenon-side-library').click();
+    await expect(page.getByTestId('xenon-lib-doc-print')).toContainText('console');
+    await page.getByTestId('xenon-lib-search').fill('worldsim');
+    await expect(page.getByTestId('xenon-lib-doc-setworldsim')).toBeVisible();
+    await expect(page.getByTestId('xenon-lib-doc-print')).toHaveCount(0);
+    await page.getByTestId('xenon-lib-search').fill('selectcase');
+    await expect(page.getByTestId('xenon-lib-fn-selectcase')).toBeVisible();
+    await page.getByTestId('xenon-lib-fn-selectcase').click();
+    await expect(page.getByTestId('xenon-code-1')).toContainText('function @selectcase');
+
+    // CTRL+F from a dead zone (the tab strip) opens the FIND panel; Escape
+    // closes ONLY the panel — the popup stopPropagation law (the window's
+    // Esc-closes-the-IDE handler must not eat the same keystroke)
+    await page.getByTestId('xenon-tab-1').click();
+    await page.keyboard.press('Control+f');
+    const panel = page.locator('.cm-panel.cm-search');
+    await expect(panel).toBeVisible();
+    await panel.locator('input').first().fill('output_number');
+    await page.keyboard.press('Escape');
+    await expect(panel).toHaveCount(0);
+    await expect(dlg).toBeVisible();
+
+    // MAXIMIZE: ⛶ fills the viewport; a title-bar double-click restores
+    const vp = page.viewportSize()!;
+    const box0 = (await dlg.boundingBox())!;
+    await page.getByTestId('xenon-max').click();
+    await expect(dlg).toHaveAttribute('data-maximized', '1');
+    const box1 = (await dlg.boundingBox())!;
+    expect(box1.width).toBeGreaterThanOrEqual(vp.width - 1);
+    expect(box1.height).toBeGreaterThanOrEqual(vp.height - 1);
+    expect(box1.width).toBeGreaterThan(box0.width);
+    await dlg.locator('> div').first().dblclick();
+    await expect(dlg).not.toHaveAttribute('data-maximized');
+    expect(((await dlg.boundingBox())!).width).toBeLessThan(vp.width - 1);
+
+    // F5 RUN inside the IDE: the cycle counter rewinds (re-boot), the page
+    // never reloads (no browser refresh while a computer window is open).
+    // Gate on a SETTLED counter (>30 ≈ 1.2 s of running) so the rewind
+    // cannot race the poll on a freshly booted pump.
+    const cycles = () => page.evaluate(() => (window as any).__XENON__().cycles as number);
+    await expect.poll(async () => (await cycles()) > 30, { timeout: 30_000 }).toBe(true);
+    const c0 = await cycles();
+    await page.keyboard.press('F5');
+    await expect
+      .poll(async () => (await cycles()) < c0 / 2, { timeout: 15_000, intervals: [200] })
+      .toBe(true);
+    await expect(dlg).toBeVisible();
+
+    // F5 with ONLY the ▣ Screens dock open: run (re-boot), not refresh
+    // (close() zeroes the counter, so the gate sees the NEW boot counting)
+    await page.keyboard.press('Escape');
+    await expect(dlg).toHaveCount(0);
+    await page.getByTestId('screens-btn').click();
+    await expect.poll(async () => (await cycles()) > 30, { timeout: 30_000 }).toBe(true);
+    const c1 = await cycles();
+    await page.keyboard.press('F5');
+    await expect
+      .poll(async () => (await cycles()) < c1 / 2, { timeout: 15_000, intervals: [200] })
+      .toBe(true);
+    await expect(page.getByTestId('screens-btn')).toBeVisible();
+  });
+
   test('the Badger boots: 57 files, named screens, alias io bus, capped view @slow', async ({ page }) => {
     test.setTimeout(240_000);                                // 36k lines compile on wasm
     const t0 = Date.now();

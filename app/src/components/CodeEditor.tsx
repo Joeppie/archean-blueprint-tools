@@ -29,7 +29,7 @@ import {
   autocompletion, closeCompletion, completionStatus, startCompletion,
   type Completion, type CompletionContext, type CompletionResult,
 } from '@codemirror/autocomplete';
-import { searchKeymap } from '@codemirror/search';
+import { closeSearchPanel, openSearchPanel, searchKeymap, searchPanelOpen } from '@codemirror/search';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { tags as t } from '@lezer/highlight';
 import {
@@ -115,6 +115,10 @@ export interface CodeEditorHandle {
   jumpTo(line1: number): void;
   cursorLine(): number;           // 1-based
   focus(): void;
+  /** Open CodeMirror's find panel (the IDE's Ctrl+F, from any focus). */
+  openSearch(): void;
+  /** Close an open find panel; true = a panel was open and got closed. */
+  closeSearch(): boolean;
 }
 
 export interface CodeEditorProps {
@@ -316,8 +320,10 @@ function CodeEditorInner(p: CodeEditorProps, ref: React.Ref<CodeEditorHandle>) {
         // there (v1's popup stopPropagation law). CM's completion keymap
         // consumes Escape WITHOUT stopping propagation, so the window's
         // Esc-closes-the-IDE handler eats the same keystroke — a
-        // Prec.high binding ahead of it is the only clean stop.
+        // Prec.high binding ahead of it is the only clean stop. The v1.13.25
+        // FIND panel gets the SAME guard: Esc closes find, never the IDE.
         Prec.high(keymap.of([{ key: 'Escape', stopPropagation: true, run: (view) => {
+          if (searchPanelOpen(view.state)) { closeSearchPanel(view); view.focus(); return true; }
           if (!completionStatus(view.state)) return false;
           closeCompletion(view);
           return true;
@@ -421,6 +427,24 @@ function CodeEditorInner(p: CodeEditorProps, ref: React.Ref<CodeEditorHandle>) {
       return view ? view.state.doc.lineAt(view.state.selection.main.head).number : 1;
     },
     focus() { viewRef.current?.focus(); },
+    openSearch() {
+      const view = viewRef.current;
+      if (!view) return;
+      openSearchPanel(view);      // opens the panel + focuses its input
+    },
+    /** Esc over an OPEN find panel: close it, report true (the IDE's window
+     *  Esc handler must then NOT close the window — popup stopPropagation
+     *  law). True only when a panel actually closed. The panel's input
+     *  keydown never reaches the editor-content keymap (the panel lives
+     *  outside view.dom), so this window-side check is the real guard;
+     *  the Prec.high binding covers Esc from the editor content. */
+    closeSearch(): boolean {
+      const view = viewRef.current;
+      if (!view || !searchPanelOpen(view.state)) return false;
+      closeSearchPanel(view);
+      view.focus();
+      return true;
+    },
   }), []);
 
   // ── right-click menu ──

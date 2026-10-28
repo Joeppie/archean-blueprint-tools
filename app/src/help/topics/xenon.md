@@ -33,9 +33,23 @@ with the craft and travels in the file.
   (every line, no cap — huge 16k-line firmware files scroll fine). `💾 save`
   (or `CTRL+S`) writes the file back into the craft and the computer
   **auto-reboots on the new code**, the game's rule; `save all` is
-  `CTRL+SHIFT+S`. The `File ▾` row shows the disk and **creates** files
+  `CTRL+SHIFT+S`. **F5 runs the code**: it saves what you are editing (and
+  so re-boots on it) — with no draft it just re-boots the computer from
+  disk. The page only refreshes on F5 when NO computer or Screens window is
+  open. The `File ▾` row shows the disk and **creates** files
   (plain `.xc` includes, or `program` → `name.main.xc`) and **deletes** the
   open tab. Files you create are in the saved blueprint and in the game.
+* **Find in file** — `CTRL+F` opens the editor's find panel from anywhere in
+  the IDE (it never triggers the browser's own search). `Esc` closes find
+  and leaves the IDE open.
+* **Library tab** — the side panel's `Library` index lists every **declared
+  function on this computer** (click = jump straight to its declaration,
+  across files) and the whole **built-in XenonCode library** with a
+  signature and a one-line meaning each, plus the `screen.` drawing
+  members. The search row filters all three groups at once.
+* **Maximise** — the `⛶` button in the title bar (or a **double-click on
+  the title bar**) fills the screen; the same control restores the window
+  to its old size and place.
 * **Screens** — programs call `screen(alias, channel)`: `alias` is a
   Dashboard's name (or its io port number) and `channel` counts its
   elements. The bound `Screen`/`HdScreen` surfaces paint live at their real

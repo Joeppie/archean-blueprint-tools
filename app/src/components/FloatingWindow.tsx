@@ -60,6 +60,13 @@ export default function FloatingWindow(p: {
   fullNarrow?: boolean;
   className?: string;
   header: ReactNode;          // the drag handle (buttons inside are excluded)
+  /** MAXIMIZE (v1.13.25, we: "I want to be able to easily maximise the IDE
+   *  itself"): controlled by the owner (its title bar carries the ⛶ button);
+   *  while maximized the window fills the viewport, the grips hide and the
+   *  title bar stops dragging — the ⛶ (or a title double-click) restores
+   *  the stored rect. */
+  maximized?: boolean;
+  onToggleMaximize?: () => void;
   children: ReactNode;
 }) {
   const minW = p.minW ?? 360;
@@ -82,6 +89,7 @@ export default function FloatingWindow(p: {
   }, [minW, minH]);
 
   const start = (mode: 'move' | 'ew' | 'ns' | 'se') => (e: RPointerEvent) => {
+    if (p.maximized) return;               // a maximized window does not drag/resize
     if (mode === 'move' && (e.target as HTMLElement).closest('button,input,select,textarea,[data-nodrag]'))
       return;
     e.preventDefault();
@@ -125,22 +133,26 @@ export default function FloatingWindow(p: {
   const handle = 'absolute z-10 touch-none';
   return (
     <div data-testid={p.testid} ref={rootRef}
-      className={`fixed z-40 flex flex-col overflow-hidden rounded-lg border border-[#3a4a6a]
+      data-maximized={p.maximized ? '1' : undefined}
+      className={`fixed z-40 flex flex-col overflow-hidden ${p.maximized ? '' : 'rounded-lg'} border border-[#3a4a6a]
              bg-[#10141f]/[.97] text-[#d6dbe1] shadow-2xl ${p.className ?? ''}`}
-      style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }}>
+      style={p.maximized
+        ? { left: 0, top: 0, width: '100vw', height: '100vh' }
+        : { left: rect.x, top: rect.y, width: rect.w, height: rect.h }}>
       <div className="shrink-0 cursor-move touch-none select-none"
         onPointerDown={start('move')} onPointerMove={move} onPointerUp={end}
-        title="drag to move">
+        onDoubleClick={p.onToggleMaximize}
+        title={p.onToggleMaximize ? 'drag to move · double-click to maximise' : 'drag to move'}>
         {p.header}
       </div>
       {p.children}
-      {/* resize grips: east, south, corner */}
-      <div className={`${handle} right-0 top-8 bottom-4 w-1.5 cursor-ew-resize`}
-        onPointerDown={start('ew')} onPointerMove={move} onPointerUp={end} />
-      <div className={`${handle} left-8 right-4 bottom-0 h-1.5 cursor-ns-resize`}
-        onPointerDown={start('ns')} onPointerMove={move} onPointerUp={end} />
-      <div className={`${handle} right-0 bottom-0 h-4 w-4 cursor-nwse-resize`}
-        onPointerDown={start('se')} onPointerMove={move} onPointerUp={end} />
+      {/* resize grips: east, south, corner (hidden while maximized) */}
+      {!p.maximized && <div className={`${handle} right-0 top-8 bottom-4 w-1.5 cursor-ew-resize`}
+        onPointerDown={start('ew')} onPointerMove={move} onPointerUp={end} />}
+      {!p.maximized && <div className={`${handle} left-8 right-4 bottom-0 h-1.5 cursor-ns-resize`}
+        onPointerDown={start('ns')} onPointerMove={move} onPointerUp={end} />}
+      {!p.maximized && <div className={`${handle} right-0 bottom-0 h-4 w-4 cursor-nwse-resize`}
+        onPointerDown={start('se')} onPointerMove={move} onPointerUp={end} />}
     </div>
   );
 }

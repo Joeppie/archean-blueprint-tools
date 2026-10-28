@@ -2670,6 +2670,70 @@ topic + FORMAT).
   commit + a following drag inside the 450 ms snapshot window coalesce into
   ONE undo group — pins that must undo SEPARATELY wait > 450 ms.
 
+- **v1.13.25 THE IDE LIBRARY + FIND + MAXIMIZE + F5-RUN (we: "an index of
+  all known library and custom-defined functions as a library of
+  definitions, so I can find it inside the computer. I also want to be able
+  to ctrl-f text within a computer XenonCode IDE. Also, I want to be able
+  to easily maximise the IDE itself. also F5 should run the code, so long
+  as a computer or screen window is open, otherwise it does a refresh"):**
+  (1) LIBRARY TAB — `engine/xcproject.ts` gains `XC_LIB_DOC` (one
+  `{name,sig,desc,group}` row per `XC_LIB_FNS` name — the vitest lockstep
+  pin forbids a doc the completion pool does not offer and silence on one
+  it does) + `libIndex(q)`; the IDE side panel gains a `Library` tab: the
+  disk's declared `@functions` (click = `jumpTo` the declaration across
+  files) above the built-in table above the `screen.` members, one search
+  row filtering all three. (2) CTRL+F — `CodeEditorHandle.openSearch()` +
+  a window relay in XenonDialog (dead zones only: text fields keep native
+  behaviour, CM's own searchKeymap owns the content). THE FIND-PANEL ESCAPE
+  (measured twice before it was right): CM's panel keymap consumes Escape
+  WITHOUT stopping propagation AND the panel's input lives outside
+  `view.dom`, so the editor-content keymap never sees the key — a
+  bubble-phase window guard closes the IDE with the panel JUST closed (the
+  state mutates synchronously, so a `searchPanelOpen` check there reads
+  "closed"). The law: the dialog's Escape handler is CAPTURE-phase, stops
+  the key over `.cm-panel` and closes the find itself; the Prec.high
+  binding in CodeEditor (searchPanelOpen → closeSearchPanel,
+  stopPropagation) covers Escape from the editor content. LESSON: for
+  popup-key ownership the CAPTURE phase is the only vantage that sees a
+  keystroke before CM consumes it. TWO SWEEP CATCHES (both red on the full
+  run): (a) the menus leg — window CAPTURE listeners run in REGISTRATION
+  order, so the dialog's Escape (registered at MOUNT) beat the menu row's
+  Escape (registered at OPEN); (b) the ac leg — a capture-phase IDE-close
+  fires before EVERY editor keymap (capture precedes bubble; Prec.high is
+  a bubble-phase ordering), so Escape over an open COMPLETION popup closed
+  the dialog and the completion typing landed on a dead page. THE FINAL
+  LAW: the capture listener owns ONLY the find-panel case (stop over
+  `.cm-panel`, close find); the IDE-close stays a BUBBLE listener — behind
+  the menu row's capture, behind `closeSearch()`, behind CM's Prec.high
+  stopPropagation. LESSON: capture is not "earlier everywhere" — a window
+  capture listener outranks every bubble-phase owner of the key, so move
+  ONE routing to capture, never the whole handler. (3) MAXIMIZE —
+  FloatingWindow gains controlled `maximized`/`onToggleMaximize`: viewport
+  fill, grips hidden, title drag stopped, title DOUBLE-CLICK toggles; the
+  IDE's title bar carries ⛶/🗗 (testids xenon-max). (4) F5 — retires the
+  v1.13-era "F5-run not feasible" note: the VM runs continuously, so RUN
+  = THE GAME'S run — inside the IDE F5 saves the draft (save ⇒ disk ⇒
+  auto-reboot) else `pump.reboot()`s from disk; with ONLY the ▣ Screens
+  dock open the Editor's F5 branch re-boots the pump; with NEITHER window
+  open F5 stays the browser's refresh. pilotkeys already stand down for
+  modifier chords (the ctrl/meta guard), F5 is not a cockpit word. RUN
+  rewind made HONEST: `pump.reboot()` cleared log/prints/bus but had
+  kept `cycles` counting (it reset only in `open()`), so the menu-bar
+  "cycles N" lied about which boot it counted — reboot() zeroes it in
+  both branches (worker + main) and close() zeroes it too (a CLOSED
+  pump shows 0, not a frozen ghost — the probe showed the ghost letting
+  a readiness gate pass on a DEAD session while the new boot sat at
+  cycles=1, making every rewind assertion unsatisfiable); the counter
+  means cycles of THIS boot (the game's menu-bar semantics; the
+  debugger legs read cycles inside one boot only, unaffected). Pin
+  lesson: gate F5-rewind on a SETTLED counter (>30 cycles) and compare
+  with `< c/2` — on a fresh boot the counter races the poll at 25 Hz.
+  Pins:
+  vitest xcproject lockstep×4, e2e xenon.spec.ts 'IDE extras' (@slow):
+  library filter + @selectcase jump, Ctrl-F panel open + Escape-keeps-IDE,
+  ⛶ viewport fill + dbl-click restore, F5 cycles-rewind in the IDE and in
+  the dock with no page reload.
+
 ## 2. v1.11 session — KNOWN ISSUES & UNPINNED TODOS (2026-10-25/26 session block)
 
 KNOWN ISSUES (accepted behaviours, costs, sharp edges):

@@ -40,7 +40,9 @@ import { usePilotKeys } from '../engine/pilotkeys';
 import type { Engine } from '../engine/scene';
 import { ScreensCell } from './ScreensDock';
 import { CodeEditor, type CodeEditorHandle } from './CodeEditor';
-import { functionAt, projectDecls, projectFunctions } from '../engine/xcproject';
+import {
+  functionAt, libIndex, projectDecls, projectFunctions, XC_LIB_DOC, XC_SCREEN_MEMBERS,
+} from '../engine/xcproject';
 
 const MAX_PARSE_LINES = 500;   // validation pass cap (window around the caret)
 const fmtVal = (v: number | string) =>
@@ -65,9 +67,13 @@ export default function XenonDialog(p: {
   const [newProg, setNewProg] = useState(false);
   const [armedDel, setArmedDel] = useState(false);
   const [vals, setVals] = useState<Record<string, number>>({});
-  const [side, setSide] = useState<'vars' | 'screens' | 'world' | 'bus' | 'console' | 'autotest'>('screens');
+  const [side, setSide] = useState<'vars' | 'screens' | 'library' | 'world' | 'bus' | 'console' | 'autotest'>('screens');
   const [varQ, setVarQ] = useState('');
   const [scrQ, setScrQ] = useState('');
+  // LIBRARY side tab (v1.13.25, we: "an index of all known library and
+  // custom-defined functions as a library of definitions, so I can find it
+  // inside the computer") — its own filter text
+  const [libQ, setLibQ] = useState('');
   // ── AUTOTEST (v1.13.7, we: "a simple interface for automating that in
   // the editor, almost like a scripting language, so we can have an
   // interface for AI agents … so a craft can be diagnosed using that"):
@@ -213,12 +219,40 @@ export default function XenonDialog(p: {
   // cockpit connections it has")
   usePilotKeys(true);
 
-  // Esc closes (subscribe ONCE through a ref — the v1.5.20 listener lesson);
-  // Esc in the editor first COMMITS nothing — it reverts the draft.
+  // Esc closes (subscribe ONCE through a ref — the v1.5.20 listener lesson).
+  // TWO listeners, two phases — each owns one key routing:
+  //  · CAPTURE: THE FIND PANEL ONLY (v1.13.25). CM's panel keymap consumes
+  //    Escape WITHOUT stopping propagation, and the panel's input lives
+  //    outside view.dom — the bubble handler below would close the IDE the
+  //    moment the panel closed. Stop the key over .cm-panel and close find.
+  //    (A capture listener runs BEFORE every editor/panel keymap — used
+  //    here ONLY for that panel case: the menus ac leg proved a capture
+  //    IDE-close steals Escape from CM's own popup guards, Prec.high is a
+  //    BUBBLE-phase ordering and capture beats it.)
+  //  · BUBBLE (the HEAD shape): plain Escape closes the IDE — behind the
+  //    menu row's capture (an open dropdown owns the key, the v1.13 menus
+  //    law), behind an open find panel (closeSearch), and behind CM's
+  //    Prec.high stopPropagation (an open completion popup owns it).
   useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') closeRef.current(); };
-    addEventListener('keydown', h);
-    return () => removeEventListener('keydown', h);
+    const cap = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const el = e.target as HTMLElement | null;
+      if (!el?.closest?.('.cm-panel')) return;
+      e.stopPropagation();
+      editorRef.current?.closeSearch();
+    };
+    const bub = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (document.querySelector('[data-testid^="xmenu-"][data-testid$="-pop"]')) return;
+      if (editorRef.current?.closeSearch()) return;
+      closeRef.current();
+    };
+    addEventListener('keydown', cap, true);
+    addEventListener('keydown', bub);
+    return () => {
+      removeEventListener('keydown', cap, true);
+      removeEventListener('keydown', bub);
+    };
   }, []);
 
   // boot this computer on the pump (the pump is the single VM context: the
@@ -405,6 +439,19 @@ export default function XenonDialog(p: {
     if (!q) return all;
     return all.filter(s => s.key.includes(q) || (bindings.get(s.key) ?? '').toLowerCase().includes(q));
   }, [pump.surfaces, scrQ, bindings, pump.cycles]);
+  // LIBRARY tab lists (v1.13.25): the disk's declared functions + the
+  // built-in library table, both filtered by the tab's one search row
+  const libFuncs = useMemo(() => {
+    const q = libQ.trim().toLowerCase();
+    return q
+      ? funcs.filter(f => f.display.toLowerCase().includes(q) || f.file.toLowerCase().includes(q))
+      : funcs;
+  }, [funcs, libQ]);
+  const libDocs = useMemo(() => libIndex(libQ), [libQ]);
+  const libMembers = useMemo(() => {
+    const q = libQ.trim().toLowerCase();
+    return q ? XC_SCREEN_MEMBERS.filter(m => m.includes(q)) : XC_SCREEN_MEMBERS;
+  }, [libQ]);
   const status = tab === 100 ? 'nodes' : 'code';
 
   const save = (_all: boolean) => {
@@ -430,6 +477,29 @@ export default function XenonDialog(p: {
     return () => removeEventListener('keydown', h);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [files, tab, draft, editing]);
+
+  // Ctrl+F opens the editor's FIND panel from any focus in the IDE
+  // (v1.13.25, we: "I want to be able to ctrl-f text within a computer
+  // XenonCode IDE"). Text fields keep native behaviour (a search box gets
+  // Ctrl+F for its own use); the CodeMirror content is contentEditable and
+  // its own searchKeymap owns Ctrl+F there, so only the dead zones — tab
+  // strip, side panel, menus — need this relay to the active editor.
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'f') return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT'
+        || el.isContentEditable === true)) return;
+      e.preventDefault();                 // never the browser's native find
+      editorRef.current?.openSearch();
+    };
+    addEventListener('keydown', h);
+    return () => removeEventListener('keydown', h);
+  }, []);
+
+  // MAXIMIZE (v1.13.25): the ⛶ title-bar button + a title double-click;
+  // FloatingWindow fills the viewport while set and restores the stored rect
+  const [max, setMax] = useState(false);
 
   const startEdit = () => {
     setDraft(file?.code ?? '');
@@ -492,13 +562,21 @@ export default function XenonDialog(p: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bps, runtimeFiles, pump]);
 
-  // F9 break · F10/F11 step (one computer cycle) · F8 resume — the IDE's
-  // debugger keys (the user asked for the IDE-class set; F5-run is not
-  // feasible: the VM runs continuously at the pump's 25 Hz cadence, so
-  // RUN is the default state and PAUSE/STEP are the meaningful controls)
+  // F9 break · F10/F11 step (one computer cycle) · F8 resume · F5 RUN — the
+  // IDE's debugger keys (the user asked for the IDE-class set). The VM runs
+  // continuously at the pump cadence, so F5-run means THE GAME'S run: the
+  // draft is SAVED (save ⇒ disk write ⇒ auto-reboot, the CTRL+S rule) and
+  // without a draft the computer re-boots from disk (we: "F5 should run the
+  // code, so long as a computer or screen window is open, otherwise it does
+  // a refresh" — inside this window it never refreshes the page)
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
-      if (e.key === 'F8') { e.preventDefault(); pump.resume(); }
+      if (e.key === 'F5') {
+        e.preventDefault();
+        if (onCode && editing) save(false);
+        else pump.reboot();
+      }
+      else if (e.key === 'F8') { e.preventDefault(); pump.resume(); }
       else if (e.key === 'F9') {
         e.preventDefault();
         if (onCode && lastLine > 0) toggleBp(lastLine);
@@ -508,11 +586,12 @@ export default function XenonDialog(p: {
     addEventListener('keydown', h);
     return () => removeEventListener('keydown', h);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lastLine, tab, onCode, bps]);
+  }, [lastLine, tab, onCode, bps, editing]);
 
   return (
     <FloatingWindow
       id="xenon" testid="xenon-dialog" minW={720} minH={400}
+      maximized={max} onToggleMaximize={() => setMax(m => !m)}
       initial={(vw, vh) => {
         const w = Math.min(1400, vw * 0.97), h = vh * 0.94;
         return { x: (vw - w) / 2, y: (vh - h) / 2, w, h };
@@ -542,6 +621,9 @@ export default function XenonDialog(p: {
                   : pump.stepMode === 'into' ? 'stepping → next pair' : 'running to cursor'}
               </span>
             )}
+            <button data-testid="xenon-max" className="text-[#8a93a0] hover:text-white"
+              title={max ? 'restore (⛶ / double-click title bar)' : 'maximise (⛶ / double-click title bar)'}
+              onClick={() => setMax(m => !m)} aria-label="maximise">{max ? '🗗' : '⛶'}</button>
             <button data-testid="xenon-close" className="text-[#8a93a0] hover:text-white"
               onClick={p.onClose} aria-label="close">✕</button>
           </div>
@@ -584,6 +666,7 @@ export default function XenonDialog(p: {
             ] },
             { label: 'Help', testid: 'xmenu-help', entries: [
               { label: 'F9 break · F10 over · F11 into · F8 resume · Ctrl+S save', testid: 'help-keys', on: () => undefined },
+              { label: 'F5 run (save + re-boot) · Ctrl+F find in file · ⛶ maximise', testid: 'help-run', on: () => undefined },
               { label: 'Right-click: definition · run-to-cursor · breakpoints', testid: 'help-ctx', on: () => undefined },
               { label: 'Type $ for variables, @ for declared functions', testid: 'help-complete', on: () => undefined },
             ] },
@@ -722,6 +805,7 @@ export default function XenonDialog(p: {
             <div className="flex shrink-0 flex-wrap items-center gap-1">
               {([['vars', `Vars ${pump.vars.size ? `(${pump.vars.size})` : ''}${pump.locals.length ? ` + frame ${pump.locals.length}` : ''}`],
                 ['screens', `Screens ${pump.surfaces.size ? `(${pump.surfaces.size})` : ''}`],
+                ['library', `Library ${funcs.length + XC_LIB_DOC.length ? `(${funcs.length} + ${XC_LIB_DOC.length})` : ''}`],
                 ['world', `World ${pump.wsChannels().length ? `(${pump.wsChannels().length})` : ''}`],
                 ['bus', 'Bus'], ['autotest', 'Auto'], ['console', 'Console']] as const).map(([k, label]) => (
                 <button key={k} data-testid={`xenon-side-${k}`} onClick={() => setSide(k)}
@@ -739,6 +823,11 @@ export default function XenonDialog(p: {
                 {side === 'screens' && (
                   <input data-testid="xenon-screen-search" value={scrQ} placeholder="search screen names…"
                     onChange={e => setScrQ(e.target.value)}
+                    className="w-full rounded border border-[#2b3a52] bg-[#0b0f18] px-2 py-1 text-[11px] outline-none" />
+                )}
+                {side === 'library' && (
+                  <input data-testid="xenon-lib-search" value={libQ} placeholder="search functions…"
+                    onChange={e => setLibQ(e.target.value)}
                     className="w-full rounded border border-[#2b3a52] bg-[#0b0f18] px-2 py-1 text-[11px] outline-none" />
                 )}
               </div>
@@ -843,6 +932,51 @@ export default function XenonDialog(p: {
                     canvasTestid={`xenon-screen-${s.key}`} testid={`xenon-cell-${s.key}`}
                     label={`${bindings.get(s.key) ?? s.key}${s.key.startsWith('virtual#') ? ' ·virtual' : ''}`} />
                 ))}
+              </div>
+            </>)}
+            {side === 'library' && (<>
+              {/* THE LIBRARY OF DEFINITIONS (v1.13.25, we: "an index of all
+                  known library and custom-defined functions … so I can find
+                  it inside the computer"): the disk's declared @functions
+                  (click = jump to the declaration) + the built-in callables
+                  (the xcproject table, our one-line summaries) + the screen
+                  members. One search row filters all three groups. */}
+              <div className="text-[10px] uppercase tracking-widest text-[#5d6a7d]">
+                On this computer · {libFuncs.length}
+              </div>
+              {libFuncs.map(f => (
+                <button key={`${f.file}:${f.line}:${f.name}`} data-testid={`xenon-lib-fn-${f.name}`}
+                  onClick={() => jumpTo(f.file, f.line)}
+                  title={`${f.file}:${f.line} — jump to the declaration`}
+                  className="block w-full rounded border border-[#2b3a52] bg-[#152036] px-2 py-1 text-left text-[11px] hover:bg-[#1d2b42]">
+                  <span className="text-[#8fd4ff]">{f.display}</span>
+                  <span className="float-right text-[9px] text-[#5d6a7d]">{f.file}:{f.line}</span>
+                </button>
+              ))}
+              {libFuncs.length === 0 && (
+                <span className="text-[11px] text-[#5d6a7d]">
+                  {funcs.length === 0 ? 'no function @declarations on this disk' : 'no declared function matches'}
+                </span>
+              )}
+              <div className="text-[10px] uppercase tracking-widest text-[#5d6a7d]">
+                XenonCode library · {libDocs.length}
+              </div>
+              {libDocs.map(f => (
+                <div key={f.name} data-testid={`xenon-lib-doc-${f.name}`}
+                  className="rounded border border-[#232c3d] bg-[#131a28] px-2 py-1 text-[11px]">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-[#c3e88d]">{f.sig}</span>
+                    <span className="shrink-0 text-[9px] uppercase tracking-wide text-[#5d6a7d]">{f.group}</span>
+                  </div>
+                  <div className="text-[10px] leading-snug text-[#9fb0c8]">{f.desc}</div>
+                </div>
+              ))}
+              {libDocs.length === 0 && <span className="text-[11px] text-[#5d6a7d]">no library function matches</span>}
+              <div className="text-[10px] uppercase tracking-widest text-[#5d6a7d]">
+                Screen members · {libMembers.length}
+              </div>
+              <div className="text-[10px] leading-relaxed text-[#9fb0c8]">
+                {libMembers.join(' · ') || 'no screen member matches'}
               </div>
             </>)}
             {side === 'world' && (<>
