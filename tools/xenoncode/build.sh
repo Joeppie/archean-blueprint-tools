@@ -27,10 +27,17 @@ if [ "$PIN" != "$HEAD_SHA" ]; then
 	echo "Record the bump (git add $UP) or restore it (git submodule update)." >&2
 	exit 1
 fi
-if ! git -C "$UP" log --format=%s | grep -q "XENON-LENIENT-INDEX"; then
-	echo "upstream/ HEAD is not the archean branch (our patches missing)" >&2
-	exit 1
-fi
+# the SUBMODULE ALWAYS SITS DETACHED at the gitlink (that is how submodules
+# work) - so inspect history FROM THE RECORD, not the checkout. Capture into
+# a variable FIRST: piping git log|rev-list into `grep -q` under set -o
+# pipefail fires SIGPIPE (git exits 141) and the guard always refuses.
+SUBJ=$(git -C "$UP" rev-list --format=%s --max-count=40 "$HEAD_SHA")
+for TAGK in XENON-VARS XENON-DEBUG XENON-LENIENT-INDEX; do
+	if ! grep -q "$TAGK" <<<"$SUBJ"; then
+		echo "upstream/ gitlink is not on the archean branch (missing $TAGK)" >&2
+		exit 1
+	fi
+done
 echo "upstream: $HEAD_SHA (archean gitlink: base $(sed -n 's/^\* \*\*Pinned commit:\*\* `\([0-9a-f]*\)`.*/\1/p' XENONCODE_UPSTREAM.md) + lenient-numeric + XENON-VARS + XENON-DEBUG + XENON-LENIENT-INDEX)"
 
 mkdir -p run
