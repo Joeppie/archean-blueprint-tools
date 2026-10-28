@@ -1,36 +1,37 @@
 #!/usr/bin/env bash
 # build.sh — build the XenonCode host (native + browser WASM) FROM THE DEV'S
-# OWN CODE (github.com/batcholi/XenonCode), pinned to the provenance recorded
-# in XENONCODE_UPSTREAM.md. The upstream clone lives in a gitignored
-# upstream/ dir; the compiled artifacts (xenoncode.js/.wasm, run/xc_run) are
-# (re)built here so the repo always carries interpreters traceable to the pin.
+# OWN CODE. upstream/ is a GIT SUBMODULE: the public fork
+# github.com/Joeppie/XenonCode, branch archean = batcholi/XenonCode at the
+# commit recorded in XENONCODE_UPSTREAM.md + our patches as real commits
+# (lenient text→number, XENON-VARS, XENON-DEBUG, XENON-LENIENT-INDEX).
+# The build NEVER clones, resets or patches the checkout — the submodule
+# gitlink IS the pin, and every change to the interpreter is a commit on
+# the fork, PR-able upstream.
 set -euo pipefail
 cd "$(dirname "$0")"
 
-# pinned upstream commit (see XENONCODE_UPSTREAM.md)
-PIN=$(sed -n 's/^\* \*\*Pinned commit:\*\* `\([0-9a-f]*\)`.*/\1/p' XENONCODE_UPSTREAM.md)
 UP=upstream
 
-if [ ! -d "$UP/.git" ]; then
-	git clone https://github.com/batcholi/XenonCode.git "$UP"
+# ---- the pinned sources = the submodule's recorded gitlink ----------------
+if [ ! -d "$UP/.git" ] && [ ! -f "$UP/.git" ]; then
+	echo "upstream/ not initialised — run: git submodule update --init tools/xenoncode/upstream" >&2
+	exit 1
 fi
-git -C "$UP" fetch --quiet origin
-# the shim patches below edit the checkout IN PLACE and are not idempotent:
-# start from pristine pinned files every run (build artifacts live OUTSIDE
-# upstream/, nothing of ours is lost by this reset)
-git -C "$UP" reset --quiet --hard "$PIN"
-git -C "$UP" checkout --quiet --detach "$PIN"
-# ---- shim patches on the pinned checkout (documented, reproducible) -------
-# LENIENT TEXT->NUMBER: the game's binary treats a non-numeric text cast as 0;
-# the open library's stoll/stoul THROW (std::invalid_argument) and the VM
-# dies mid-program ("stoll on bytecode …" virtual crash the Badger hits on
-# its first settings read). strtoll/ststrtoul return 0 for junk — the game's
-# observable behaviour.
-sed -i 's/return stoll(textValue);/return textValue.empty() ? 0 : strtoll(textValue.c_str(), nullptr, 10);/; s/return stoull(textValue);/return textValue.empty() ? 0 : strtoull(textValue.c_str(), nullptr, 10);/; s/return stoul(textValue);/return textValue.empty() ? 0 : (unsigned long)strtoull(textValue.c_str(), nullptr, 10);/g' "$UP/XenonCode.hpp"
-python3 patch_xenon_vars.py "$UP/XenonCode.hpp"   # XENON-VARS introspection (see the script)
-python3 patch_xenon_debug.py "$UP/XenonCode.hpp"   # XENON-DEBUG line tracking (see the script)
-python3 patch_xenon_lenient_index.py "$UP/XenonCode.hpp"   # XENON-LENIENT-INDEX (game-tolerant OOB reads)
-echo "upstream: $(git -C "$UP" rev-parse HEAD) (pinned $PIN, +lenient-numeric, +XENON-VARS, +XENON-DEBUG, +XENON-LENIENT-INDEX)"
+# the recorded gitlink (index) must equal the checkout: never build an
+# unrecorded interpreter (a detached HEAD from an experiment, stale
+# worktrees). Update the gitlink in the same commit as an intentional bump.
+PIN=$(git ls-files -s "$UP" | awk '{print $2}')
+HEAD_SHA=$(git -C "$UP" rev-parse HEAD)
+if [ "$PIN" != "$HEAD_SHA" ]; then
+	echo "upstream/ HEAD ($HEAD_SHA) != the pinned gitlink ($PIN)." >&2
+	echo "Record the bump (git add $UP) or restore it (git submodule update)." >&2
+	exit 1
+fi
+if ! git -C "$UP" log --format=%s | grep -q "XENON-LENIENT-INDEX"; then
+	echo "upstream/ HEAD is not the archean branch (our patches missing)" >&2
+	exit 1
+fi
+echo "upstream: $HEAD_SHA (archean gitlink: base $(sed -n 's/^\* \*\*Pinned commit:\*\* `\([0-9a-f]*\)`.*/\1/p' XENONCODE_UPSTREAM.md) + lenient-numeric + XENON-VARS + XENON-DEBUG + XENON-LENIENT-INDEX)"
 
 mkdir -p run
 

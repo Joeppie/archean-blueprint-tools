@@ -89,14 +89,16 @@ Read this file together with LICENSE (GNU GPL v3).
    -----------------------------------------
    `tools/xenoncode/` runs programs on the **dev's own XenonCode code** — the
    parser/compiler/VM (`XenonCode.hpp`) and screen model (`XenonScreen.hpp`)
-   from https://github.com/batcholi/XenonCode (by batcholi / FloDKSM), pinned
-   to a recorded commit (see `tools/xenoncode/XENONCODE_UPSTREAM.md`).
+   from https://github.com/batcholi/XenonCode (by batcholi / FloDKSM),
+   consumed as a **git submodule**: our public fork
+   https://github.com/Joeppie/XenonCode, branch `archean` = the base commit
+   recorded in `tools/xenoncode/XENONCODE_UPSTREAM.md` plus that document's
+   patches **as real commits** (a lenient text→number conversion and
+   game-tolerant indexing — both matching the game's observable behaviour —
+   plus the XENON-VARS/XENON-DEBUG introspection hooks the IDE uses).
    `xenoncode.js`/`xenoncode.wasm` (in `tools/xenoncode/` and, serving the
    Inspector app since v1.12.11, `app/public/xenoncode/`) are compiled build
-   products of that pinned source (plus the documented, reproducible
-   build.sh patches listed in tools/xenoncode/XENONCODE_UPSTREAM.md — a
-   lenient text→number conversion matching the game's observable behaviour,
-   and browser memory flags); only the device shim
+   products of exactly that pinned branch commit; only the device shim
    (`xc_host.*`, GPL v3), the app integration (`app/src/engine/xenoncode.ts`,
    `app/src/components/XenonDialog.tsx`, GPL v3) and the demo program
    (`demo/hello/main.xc`, GPL v3, authored for this repo) are ours.

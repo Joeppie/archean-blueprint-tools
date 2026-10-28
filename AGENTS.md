@@ -1902,6 +1902,25 @@ topic + FORMAT).
  leg 'the WORLDSIM: sensors fly the craft…' (2000 + $val+2 → 2002.000 live,
  firmware prints input_number(4,2)=2002, setworldsim(…,3000) badges program
  + wins, persistence across crafts).
+ - **v1.13.x XENONCODE-P1: the interpreter is a FORK SUBMODULE (we approved
+  "Yes, public fork", 2026-10-28)**: `tools/xenoncode/upstream` is the public
+  fork https://github.com/Joeppie/XenonCode as a **git submodule**, branch
+  `archean` = upstream base `e5d3167…` + our four patches as REAL commits
+  (lenient text→number, XENON-VARS, XENON-DEBUG, XENON-LENIENT-INDEX). The
+  old flow — clone + `git reset --hard $PIN` + regex-patch the checkout in
+  place on every build (non-idempotent patchers that asserted on their own
+  anchors) — is retired; `build.sh` builds ONLY the recorded gitlink and
+  REFUSES a diverged checkout, so the interpreter can never be built from
+  unrecorded sources. The patch scripts stay in `tools/xenoncode/` for
+  provenance (they re-derive the commits onto a newer upstream when
+  `archean` rebases). Interpreter bump = work in the submodule (branch
+  `archean`, push to the fork) + `git add tools/xenoncode/upstream` + the
+  rebuilt js/wasm (`tools/xenoncode/build.sh` with emsdk) in the SAME
+  commit; upstream PRs = one commit per PR from that branch (the device
+  shim stays OURS in this repo, it is Archean law, not interpreter).
+  P2 (worker + Atomics true line-stepping, approved) adds the mid-line stop
+  hook to the XENON-DEBUG commit. `XENONCODE_UPSTREAM.md` documents every
+  commit; NOTICE §6 + .gitattributes follow.
 - **v1.13.x XENON batch 4: WORLDSIM (we: "World should be under xenoncode,
  be its own screen and we should have functions that we can put in that
  define values over time, i.e. sin(t) … sensible defaults … flight at 2000
