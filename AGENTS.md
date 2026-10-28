@@ -12,6 +12,23 @@ history and version story moved to **`docs/HISTORY.md`** (2026-10-28): read a
 history section for provenance when you touch its subsystem; never for
 orientation. `git log` of AGENTS.md is the other backstop.
 
+## Keeping this file clean (mandatory)
+- AGENTS.md is LIVING RULES ONLY. Dated narratives, session reports, closed
+  todos, superseded rulings and pin histories go in **docs/HISTORY.md**
+  (APPEND there in the same commit) — never inline here. If a rule needs a
+  story to justify it, the story is history; the bullet stays one line.
+- SATELLITES OWN THEIR DOMAIN; AGENTS.md links, never copies:
+  FORMAT.md (the format knowledge base), docs/HISTORY.md (dated provenance),
+  docs/TEST-PYRAMID.md (test strategy + measured baselines),
+  docs/E2E-INVENTORY.md (spec inventory), PERF.md (perf baseline + harmful
+  candidates), LOCATIONS.md (installs/paths/URLs), MATRIX.md (matrix
+  ritual), GEAR-F-A18F.md (rig-chain audit method), REWRITE.md (pending
+  plans, § P8), NOTICE.md (licensing). Every rule with deeper detail lives
+  in one of these, POINTS there; a new subsystem with detail outside this
+  file gets a satellite created/updated and linked IN THE SAME COMMIT.
+- Budget: this file is ~20k tokens. Growing past it: triage history OUT
+  first, never shrink a law to make room.
+
 ## Layout
 ```
 viewer/index.html + view3d.js   the inspector (Three.js core module)
@@ -971,6 +988,15 @@ behind a small link at the END of the gallery. Pages serves the GENERATED
   z-sign ambiguity, needs an asymmetric probe craft — FORMAT.md).
 
 ## Conventions
+- **NO CO-AUTHORING IN COMMITS** (2026-10-28): no `Co-Authored-By`,
+  "Generated with" or any AI/tool trailer on commits — not the model's
+  initiative, not a tool's default — UNLESS we asked for co-authorship
+  explicitly. (A local model emitted a Claude-Code-style
+  `Co-Authored-By: Claude` trailer from pure training habit on two commits;
+  GitHub counted "Claude" as a contributor and history had to be
+  rewritten.) A tool that appends trailers by default (Claude Code:
+  `includeCoAuthoredBy`) gets its default OFF before committing here;
+  commit as the repo identity only.
 - **Say "we / us", never "the user"** (2026-10-23) — in replies, commit
   messages, comments and docs alike; quoted history that already reads
   `user:` stays as written.
