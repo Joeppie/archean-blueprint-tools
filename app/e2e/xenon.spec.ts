@@ -352,20 +352,30 @@ test.describe('Xenon IDE @ui', () => {
     const pill = page.getByTestId('xenon-paused');
     await expect(pill).toBeVisible({ timeout: 15_000 });
     await expect(pill).toHaveAttribute('data-line', '10');
-    // THE LOCALS TAB: the frame chip names the owning function; the rows
-    // carry the ARGUMENTS the pause-carrying call passed (increment 5,
-    // limits 0..100 = the throttle call) and $result
-    await page.getByTestId('xenon-side-locals').click();
+    // THE LOCALS PANEL (v1.13.22: co-habits the Vars tab, ALWAYS ON TOP):
+    // the frame chip names the owning function; the rows carry the
+    // ARGUMENTS the pause-carrying call passed (increment 5, limits
+    // 0..100 = the throttle call) and $result — ABOVE the globals section
+    await page.getByTestId('xenon-side-vars').click();
     await expect(page.getByTestId('xenon-locals-frame')).toContainText('@selectcase');
     await expect(page.getByTestId('xenon-loc-inputsource')).toBeVisible();
     await expect(page.getByTestId('xenon-loc-increment')).toContainText('5');
     await expect(page.getByTestId('xenon-loc-lowerlimit')).toContainText('0');
     await expect(page.getByTestId('xenon-loc-upperlimit')).toContainText('100');
     await expect(page.getByTestId('xenon-loc-result')).toBeVisible();
+    // THE CO-HABITATION LAW (we: "vars and locals should co-habit the same
+    // tab, with locals always on top"): one panel, the frame rows above
+    // the globals head and its rows
+    const locBox = await page.getByTestId('xenon-loc-result').boundingBox();
+    const ghBox = await page.getByTestId('xenon-globals-head').boundingBox();
+    expect(!!locBox && !!ghBox && locBox.y + locBox.height <= ghBox.y).toBe(true);
+    const anyVar = page.locator('[data-testid^="xenon-var-"]:not([data-testid="xenon-var-search"])').first();
+    const varBox = await anyVar.boundingBox();
+    expect(!!ghBox && !!varBox && ghBox.y <= varBox.y).toBe(true);
     // THE ROW LAW (the layout half of the ask): the search box sits AT THE
     // SAME LEVEL as the tab row — the old vertical rail is gone (boxes
     // overlap vertically)
-    const tab = await page.getByTestId('xenon-side-locals').boundingBox();
+    const tab = await page.getByTestId('xenon-side-vars').boundingBox();
     const box = await page.getByTestId('xenon-var-search').boundingBox();
     expect(!!tab && !!box && tab.y < box.y + box.height && box.y < tab.y + tab.height).toBe(true);
     // the shared search filters the frame

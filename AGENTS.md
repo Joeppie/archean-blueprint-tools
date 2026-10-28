@@ -1968,6 +1968,12 @@ topic + FORMAT).
  throw killed the locals assignment in pollSab (paused=true, locals=[],
  silent) — the __XENON__ audit handoff probe surfaced it. SAB payloads
  decode through a `bytes.slice()` copy into a plain Uint8Array first.
+ **v1.13.22 follow-up (we: "vars and locals should co-habit the same tab,
+ with locals always on top")**: the standalone Locals tab is GONE — the
+ Vars panel is ONE list with the Locals section (frame chip + rows) ALWAYS
+ ABOVE the `Globals · n live` head; the tab badge folds the frame count in
+ (`Vars (6) + frame 4`); e2e co-habitation law (loc rows above the globals
+ head above the var rows) re-pinned the leg.
 - **v1.13.20 THE FRESH COMPUTER IS PROGRAMMABLE (we: "When I place a new
   minicomputer, I dont get a xenoncode menu for the computer, and I cannot
   write code for it as a consequence!")**: two gates hid a placed

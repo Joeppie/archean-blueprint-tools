@@ -153,18 +153,21 @@ fed the REAL time between updates, so Mario moves at true speed (a choppy
 14 fps, not slow motion) and the buzzer tunes play at their proper tempo.
 * **Side panel** (tabbed, with the tab row on top at the SAME level as the
   tab's search box):
-  * **Vars** — every global variable of the running program, live: RAM and
-    `storage` values, with `storage` tagged. Text values written in the
-    language's key-value form (`.on{1}.red{255}`) break open into their
-    members. Search filters names AND values (including KV children).
-  * **Locals** — the LOCAL variables of the function owning the PAUSED
-    line: its arguments and body variables, read LIVE from the interpreter
-    at the stop. Click a line's gutter to break (or F10/F11 to step) and
-    the frame chip above the rows names the function you are inside; the
-    rows carry the values the call passed. Recursion copies badge `#1`,
-    `#2`…; the shared search filters the frame; a `$var` hover in the code
-    reads the paused frame first, globals while running. Top-level lines
-    have no locals — those variables are the Vars tab's globals.
+  * **Vars** — ONE panel, two sections, LOCALS ALWAYS ON TOP:
+    * **Locals** (top) — the LOCAL variables of the function owning the
+      PAUSED line: its arguments and body variables, read LIVE from the
+      interpreter at the stop. A frame is born at a debugger STOP (click a
+      line's gutter, step with F10/F11) and stays listed as `last stop ·
+      stale (running)` after resume — while the program RUNS there is no
+      parked frame to read, so only globals tick. Recursion copies badge
+      `#1`, `#2`…; a `$var` hover in the code reads the paused frame
+      first, globals while running. Top-level lines have no locals.
+    * **Globals** (below) — every global variable of the running program,
+      live: RAM and `storage` values, with `storage` tagged. Text values
+      in the language's key-value form (`.on{1}.red{255}`) break open into
+      their members.
+  * The type rides beside every name (`number`, `text`, `storage`,
+    `array`, `object`). Search filters names AND values in both sections.
   * **Screens** — the same live surfaces, searchable by name.
   * **Bus** — the `input_number` sliders (every io/channel the program
     reads) and the `output_number` stream (target · port · latest value).

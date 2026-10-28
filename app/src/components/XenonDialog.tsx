@@ -65,7 +65,7 @@ export default function XenonDialog(p: {
   const [newProg, setNewProg] = useState(false);
   const [armedDel, setArmedDel] = useState(false);
   const [vals, setVals] = useState<Record<string, number>>({});
-  const [side, setSide] = useState<'vars' | 'locals' | 'screens' | 'world' | 'bus' | 'console' | 'autotest'>('screens');
+  const [side, setSide] = useState<'vars' | 'screens' | 'world' | 'bus' | 'console' | 'autotest'>('screens');
   const [varQ, setVarQ] = useState('');
   const [scrQ, setScrQ] = useState('');
   // ── AUTOTEST (v1.13.7, we: "a simple interface for automating that in
@@ -628,8 +628,7 @@ export default function XenonDialog(p: {
                 names/values'"): the rail becomes a horizontal row and the
                 tab's search box rides that SAME row */}
             <div className="flex shrink-0 flex-wrap items-center gap-1">
-              {([['vars', `Vars ${pump.vars.size ? `(${pump.vars.size})` : ''}`],
-                ['locals', `Locals ${pump.locals.length ? `(${pump.locals.length})` : ''}`],
+              {([['vars', `Vars ${pump.vars.size ? `(${pump.vars.size})` : ''}${pump.locals.length ? ` + frame ${pump.locals.length}` : ''}`],
                 ['screens', `Screens ${pump.surfaces.size ? `(${pump.surfaces.size})` : ''}`],
                 ['world', `World ${pump.wsChannels().length ? `(${pump.wsChannels().length})` : ''}`],
                 ['bus', 'Bus'], ['autotest', 'Auto'], ['console', 'Console']] as const).map(([k, label]) => (
@@ -640,7 +639,7 @@ export default function XenonDialog(p: {
                 </button>
               ))}
               <div className="min-w-0 flex-1">
-                {(side === 'vars' || side === 'locals') && (
+                {side === 'vars' && (
                   <input data-testid="xenon-var-search" value={varQ} placeholder="search names / values…"
                     onChange={e => setVarQ(e.target.value)}
                     className="w-full rounded border border-[#2b3a52] bg-[#0b0f18] px-2 py-1 text-[11px] outline-none" />
@@ -654,6 +653,64 @@ export default function XenonDialog(p: {
             </div>
             <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto">
             {side === 'vars' && (<>
+              {/* VARS AND LOCALS CO-HABIT, LOCALS ALWAYS ON TOP (v1.13.22,
+                  we: "vars and locals should co-habit the same tab, with
+                  locals always on top"): the paused frame first — a frame
+                  is born at a debugger STOP and dies at resume (it only
+                  exists while the VM is parked mid-update), which is why
+                  running programs show only globals below — then the
+                  globals, live every cycle. One search filters both. */}
+              <div className="flex items-baseline justify-between gap-2 text-[10px]">
+                <span data-testid="xenon-locals-frame" className="truncate text-[#e6c07b]">
+                  <span className="uppercase tracking-widest text-[#5d6a7d]">Locals</span>
+                  {pump.paused
+                    ? ` · paused at ${pump.pausedFile}:${pump.pausedLine}${pump.localsFrame() ? ` ${pump.localsFrame()}` : ' (top level)'}`
+                    : pump.locals.length > 0
+                      ? ` · last stop ${pump.pausedFile}:${pump.pausedLine}${pump.localsFrame() ? ` ${pump.localsFrame()}` : ''} · stale (running)`
+                      : ' · appear at a debugger stop — click a line\u2019s gutter, step with F10/F11'}
+                </span>
+                {pump.paused && <span className="shrink-0 text-[#8fd48f]">live frame</span>}
+              </div>
+              {locList.map(v => {
+                const kv = parseKv(v.v);
+                const kind = varKind(v.t);
+                return (
+                  <div key={`${v.name}#${v.s}`} data-testid={`xenon-loc-${v.name}`}
+                    className="rounded border border-[#2b3a52] bg-[#152036] px-2 py-1 text-[11px]">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="text-[#8fd48f]">${v.name}
+                        {kind === 'array' && <span className="ml-1 text-[9px] text-[#5d6a7d]">array</span>}
+                        {kind === 'object' && <span className="ml-1 text-[9px] text-[#5d6a7d]">object</span>}
+                        {(locCopies.get(v.name) ?? 0) > 1 &&
+                          <span className="ml-1 rounded bg-[#1d2b42] px-1 text-[9px] text-[#8fd4ff]">#{v.s}</span>}
+                      </span>
+                      <span className="truncate text-right tabular-nums text-[#d6dbe1]" title={v.v}>
+                        {kv ? `{${kv.length}}` : v.v === '' ? '·' : v.v.length > 28 ? v.v.slice(0, 28) + '…' : v.v}
+                      </span>
+                    </div>
+                    {kv && (
+                      <div className="ml-3 border-l border-[#2b3a52] pl-2">
+                        {kv.map(e => (
+                          <div key={e.k} className="flex justify-between gap-2 text-[10px]">
+                            <span className="text-[#7ea6ff]">.{e.k}</span>
+                            <span className="truncate tabular-nums text-[#9fb0c8]">{e.v === '' ? '·' : e.v}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {locList.length === 0 && pump.paused && (
+                <span className="text-[11px] text-[#5d6a7d]">
+                  {pump.localsFrame()
+                    ? 'no locals recorded for this body'
+                    : 'top-level frame — these variables are globals (below)'}
+                </span>
+              )}
+              <div data-testid="xenon-globals-head" className="text-[10px] uppercase tracking-widest text-[#5d6a7d]">
+                Globals {pump.vars.size ? `· ${pump.vars.size} live` : ''}
+              </div>
               {varList.map(v => {
                 const kv = parseKv(v.v);
                 const kind = varKind(v.t);
@@ -687,63 +744,6 @@ export default function XenonDialog(p: {
               {varList.length === 0 && (
                 <span className="text-[11px] text-[#5d6a7d]">
                   {pump.vars.size === 0 ? 'no variables yet (booting?)' : 'no variable matches'}
-                </span>
-              )}
-            </>)}
-            {side === 'locals' && (<>
-              {/* XENON-LOCALS (v1.13.21, we: "When debugging local variables,
-                  I cannot see their value. But that is vital when debugging
-                  locals"): the paused line's frame — the interpreter's RAM
-                  slots read LIVE at the stop. Worker mode = true mid-cycle
-                  (the parked VM's own voice over the SAB handoff); the
-                  main-thread stepper reads at cycle boundaries. */}
-              <div className="flex items-baseline justify-between gap-2 text-[10px]">
-                <span data-testid="xenon-locals-frame" className="truncate text-[#e6c07b]">
-                  {pump.paused
-                    ? `paused at ${pump.pausedFile}:${pump.pausedLine}${pump.localsFrame() ? ` ${pump.localsFrame()}` : ' (top level)'}`
-                    : pump.locals.length > 0
-                      ? `last stop ${pump.pausedFile}:${pump.pausedLine}${pump.localsFrame() ? ` ${pump.localsFrame()}` : ''} · stale (running)`
-                      : 'not paused'}
-                </span>
-                {pump.paused && <span className="shrink-0 text-[#8fd48f]">live frame</span>}
-              </div>
-              {locList.map(v => {
-                const kv = parseKv(v.v);
-                const kind = varKind(v.t);
-                return (
-                  <div key={`${v.name}#${v.s}`} data-testid={`xenon-loc-${v.name}`}
-                    className="rounded border border-[#232c3d] bg-[#131a28] px-2 py-1 text-[11px]">
-                    <div className="flex items-baseline justify-between gap-2">
-                      <span className="text-[#8fd48f]">${v.name}
-                        {kind === 'array' && <span className="ml-1 text-[9px] text-[#5d6a7d]">array</span>}
-                        {kind === 'object' && <span className="ml-1 text-[9px] text-[#5d6a7d]">object</span>}
-                        {(locCopies.get(v.name) ?? 0) > 1 &&
-                          <span className="ml-1 rounded bg-[#1d2b42] px-1 text-[9px] text-[#8fd4ff]">#{v.s}</span>}
-                      </span>
-                      <span className="truncate text-right tabular-nums text-[#d6dbe1]" title={v.v}>
-                        {kv ? `{${kv.length}}` : v.v === '' ? '·' : v.v.length > 28 ? v.v.slice(0, 28) + '…' : v.v}
-                      </span>
-                    </div>
-                    {kv && (
-                      <div className="ml-3 border-l border-[#2b3a52] pl-2">
-                        {kv.map(e => (
-                          <div key={e.k} className="flex justify-between gap-2 text-[10px]">
-                            <span className="text-[#7ea6ff]">.{e.k}</span>
-                            <span className="truncate tabular-nums text-[#9fb0c8]">{e.v === '' ? '·' : e.v}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-              {locList.length === 0 && (
-                <span className="text-[11px] text-[#5d6a7d]">
-                  {pump.paused
-                    ? (pump.localsFrame()
-                      ? 'no locals recorded for this body'
-                      : 'top-level frame — these variables are globals, see the Vars tab')
-                    : 'Locals show the paused function\u2019s variables: click a line\u2019s gutter to break, then F10/F11 to step'}
                 </span>
               )}
             </>)}
