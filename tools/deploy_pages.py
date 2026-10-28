@@ -117,6 +117,30 @@ def main():
                 shutil.copy2(src, dst)
         n_app = sum(len(f) for _, _, f in os.walk(keep))
 
+        # Append-only ASSETS (2026-10-28 law): a redeploy that REPLACES
+        # assets/ breaks every tab opened from the previous deploy — their
+        # baked module graph names the OLD content-hashed chunks, the
+        # missing file 404s as text/html and the MIME check kills the lazy
+        # import (real report: XenonDialog-CAal9seJ.js blocked on a live
+        # tab). Materialize the CURRENT pages tip's assets/ that this build
+        # does not carry, so every tab ever served keeps lazy-loading.
+        # Chunk names are content-hashed -> old and new coexist; index.html
+        # references only THIS build's hashes.
+        try:
+            run('git', '-C', wt, 'fetch', 'origin', 'pages', capture=True)
+            listing = run('git', '-C', wt, 'ls-tree', '-r', '--name-only',
+                          'FETCH_HEAD', '--', 'assets/', capture=True)
+            keep_old = [p for p in listing.splitlines()
+                        if p.startswith('assets/')
+                        and not os.path.exists(os.path.join(wt, p))]
+            for i in range(0, len(keep_old), 200):
+                run('git', '-C', wt, 'checkout', 'FETCH_HEAD', '--',
+                    *keep_old[i:i + 200])
+            print(f'deploy: kept {len(keep_old)} prior-deploy asset(s) '
+                  f'(append-only assets)')
+        except Exception as e:                                # first deploy
+            print(f'deploy: asset keep skipped ({e}) — no pages tip yet?')
+
         # Plumbing, NOT `switch --orphan`: the build legitimately rewrites
         # app/index.html (bundle tags injected), so a checkout would fight
         # "local changes". add -A stages the ASSEMBLED tree, write-tree +
