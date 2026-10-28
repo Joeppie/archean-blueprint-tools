@@ -293,7 +293,20 @@ export default function ScreensDock(p: {
   useEffect(() => {
     if (focusLeft === 'first-virtual' && virt0) setTab('virtual');
   }, [focusLeft, virt0?.key]);
-  const focusKey = focusLeft === 'first-virtual' ? virt0?.key ?? null : focusLeft;
+  // TOLERANT deep-link matching: browsers (and chat-app linkifiers) decode
+  // `%23` back to `#` in the address bar, so a copied `dash=main%230` can
+  // arrive as dash='main' + a '#0' FRAGMENT. Match the exact key, the key
+  // minus its '#0' channel suffix, and the channel-prefix form — the
+  // Invaders deep link must work however the URL survives the trip.
+  const resolveFocus = (f: string): string | null => {
+    let s = f; try { s = decodeURIComponent(f); } catch { /* raw */ }
+    const keys = [...xenonPump.surfaces.keys()];
+    return keys.includes(s) ? s
+      : keys.includes(`${s}#0`) ? `${s}#0`
+      : keys.find(k => k.split('#')[0] === s) ?? null;
+  };
+  const focusKey = focusLeft === 'first-virtual' ? virt0?.key ?? null
+    : focusLeft ? resolveFocus(focusLeft) : null;
 
   const pilot = xenonPump.pilotKeysBound();
 

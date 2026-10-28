@@ -23,20 +23,26 @@ import { join } from 'node:path';
 const NAME = process.argv[2];
 const URL = process.argv[3] ?? 'http://127.0.0.1:5175';
 const SPECS = {
-  // invaders: the Computer's built-in display at (0,-0.15,-1.12) (front
-  // normal -z), the PilotSeat behind it at (0,-0.78,+0.13): the camera sits
-  // front-left-above, the seat peeks past the cabinet = depth. Pan: +x drift.
+  // invaders: the Computer's built-in display at (0,-0.15,-1.12). The first
+  // take sat ~70° off the panel normal — the cabinet bezel swallowed the
+  // screen ("the screen is totally obstructed", we). New eye: ~25° oblique
+  // at 2.3 m, so the display reads AND the PilotSeat (0,-0.78,+0.13) peeks
+  // past the cabinet's right edge. Pan: the eye dollies toward centred.
   invaders: {
     craft: '3288012440', dash: 'main#0',
-    eye0: [-1.25, 0.5, -2.55], eye1: [-0.55, 0.5, -2.85], target: [0, -0.34, -0.55],
+    eye0: [1.05, 0.25, -2.35], eye1: [0.35, 0.15, -2.55], target: [0, -0.18, -1.05],
     captureSec: 26, winStart: 2, winLen: 11,   // intro: title rising → arrival → sprites
   },
-  // mario: the six-Screen wall at x=-1.5, the PilotSeat at x=-2.88 in front
-  // of it: the camera looks over the seat's shoulder at the wall. Pan: +x/+z.
+  // mario: the six-Screen wall at x=-1.5 (boards face -x), the PilotSeat at
+  // x=-2.88 BETWEEN camera and wall. First take: eye 3.1 m out (tiny screens,
+  // "too far away") and the window opened before the title rendered ("main
+  // screen not yet loaded"). New: 1.9 m eye, the seat fills the lower
+  // foreground, window 8→22 s — title fully up, the attract-mode handover
+  // (titleclock > 8) lands mid-clip.
   mario: {
     craft: '3820116990', dash: 'first-virtual',
-    eye0: [-4.75, 0.85, 1.75], eye1: [-4.05, 0.85, 2.35], target: [-2.0, -0.55, -0.15],
-    captureSec: 30, winStart: 3, winLen: 13,   // title → the demo takes over
+    eye0: [-3.35, 0.35, 0.75], eye1: [-2.75, 0.3, 1.25], target: [-1.55, -0.45, -0.55],
+    captureSec: 42, winStart: 8, winLen: 14,
   },
 };
 const spec = SPECS[NAME];
