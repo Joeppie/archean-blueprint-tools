@@ -1994,27 +1994,35 @@ void main() {
           const uax = wideFirst ? rest[0] : rest[1];
           const vax = wideFirst ? rest[1] : rest[0];
           const us = Math.max(1e-6, ext[uax]!), vs = Math.max(1e-6, ext[vax]!);
+          // BUILT-IN screen UV orientation, per baked-frame quad class (the
+          // two device screens bake differently — C⁻¹=(x,−z,y) maps the
+          // authored z/y into the baked axes). v = 1 ↔ the framebuffer TOP
+          // (pushScreen's row-flip + DataTexture flipY=false put image row 0
+          // at v = 1), so v = 1 must land on the panel's readable top edge
+          // and u = 0 (text start) on its readable left, read from the
+          // panel's front.
+          //
+          // The Computer (craft 3288012440) quad classifies vax===1 in the
+          // baked frame. We's in-browser verdicts 2026-10-28: v1.13.7
+          // rendered it UPSIDE DOWN; flipping only V made it "upright but
+          // MIRRORED" → a full 180° rotation from the shipped table. So the
+          // Computer branch runs BOTH axes 1-minus. The Crafter keeps its
+          // v1.13.x-verified mapping UNTOUCHED (its quad takes the other
+          // branch; lit-pixel probe, orientation never re-judged — do not
+          // rotate it blind).
           const uv = new Float32Array(pos.count * 2);
+          const computerPanel = c.type === 'Computer';
           for (let k = 0; k < pos.count; k++) {
-            uv[k * 2] = (pos.getComponent(k, uax as 0 | 1 | 2) - mn[uax]!) / us;
-            // v = 1 ↔ the framebuffer TOP (the pushScreen row-flip puts the
-            // image's row 0 at v = 1, DataTexture flipY=false), and v = 1
-            // must sit on the panel's AUTHORED top edge.
-            //
-            // The prims arrive unityBake(C⁻¹)-baked, C⁻¹=(x,−z,y): the baked
-            // y is the NEGATED authored z, the baked z is the authored y.
-            //  · an UPRIGHT quad (the Computer's screen: authored normal ±z,
-            //    top +y → baked-z tall, vax=2): the authored top = MAX baked
-            //    z → v runs WITH the axis.
-            //  · a FLAT/up-facing quad (the Crafter's touchscreen: authored
-            //    normal ±y, top +z → baked-y tall, vax=1): the readable top
-            //    (far edge, max authored z) = MIN baked y → v runs 1-minus.
-            // The original table had BOTH branches inverted — 'the built-in
-            // computer screen display is upside down' (we, craft 3288012440,
-            // in-browser verdict 2026-10-28; the same law keeps the Crafter
-            // branch matching its v1.13.x probe).
+            const uu = (pos.getComponent(k, uax as 0 | 1 | 2) - mn[uax]!) / us;
             const vv = (pos.getComponent(k, vax as 0 | 1 | 2) - mn[vax]!) / vs;
-            uv[k * 2 + 1] = vax === 1 ? 1 - vv : vv;
+            // v = 1 (framebuffer TOP) on the readable top edge: the shipped
+            // table ran this WITH the v-axis for vax===1 (the Computer) and
+            // 1-MINUS for the flat panels — inverting the Computer's V fixed
+            // 'upside down', and flipping its U too ('mirrored, so it needs a
+            // flip' → 180°) completes the upright image. Both classes now run
+            // v 1-minus; the Crafter keeps its shipped u (unrotated).
+            uv[k * 2] = computerPanel ? 1 - uu : uu;
+            uv[k * 2 + 1] = 1 - vv;
           }
           gg.setAttribute('uv', new BufferAttribute(uv, 2));
           gg.computeVertexNormals();
