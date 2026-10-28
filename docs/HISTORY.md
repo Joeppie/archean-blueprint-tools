@@ -2906,6 +2906,11 @@ topic + FORMAT).
   @while-publish leg pinned Pages main-thread mode, nothing to re-pin).
   Verified live after deploy: first visit installs + reloads, the IDE
   chip states worker mode on joeppie.github.io.
+- **v1.13.30 HOTFIX (tsc -b):** the isolation spec's widened chip assert
+  used `expect(locator, {timeout})` — this Playwright's matcher options
+  type carries no `timeout` (vite's webServer build typechecks nothing,
+  so only the deploy's `npm run build` caught it). Matcher-level
+  `{ timeout }` form; behavior unchanged.
 
 ## 2. v1.11 session — KNOWN ISSUES & UNPINNED TODOS (2026-10-25/26 session block)
 

@@ -118,8 +118,8 @@ test.describe('Isolation SW @ui', () => {
       // on this plain static server (no warm HTTP cache, fresh profile) the
       // open can outlast the 5 s default; a FALLBACK to main-thread would
       // flip the text and fail this same assert.
-      await expect(page.getByTestId('xenon-mode'), { timeout: 60_000 })
-        .toContainText('worker · true line-stepping');
+      await expect(page.getByTestId('xenon-mode'))
+        .toContainText('worker · true line-stepping', { timeout: 60_000 });
     });
 
     await test.step('/viewer/ is header-free: NOT isolated, Three.js CDN loads', async () => {
