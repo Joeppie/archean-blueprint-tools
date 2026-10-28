@@ -11,6 +11,7 @@
 import type { Blueprint, BlueprintComponent } from './format';
 import { atlasJsonPaths } from './models';
 import { CRAFTER_BUILTIN } from './crafterbuiltin';
+import { functionAt, includeOrder, projectFunctions } from './xcproject';
 import { buzzerAudio, modeToWave } from './buzzer';
 import type { XenonSnap } from './xenontest';
 import {
@@ -65,6 +66,7 @@ type Mod = {
   _xc_vars(): number;
   _xc_debug_track(on: number): void;
   _xc_cycle_lines(): number;
+  _xc_cycle_pairs(): number;
   _xc_screen_click(idx: number, x: number, y: number): void;
   _xc_screen_scroll(idx: number, d: number): void;
   _xc_parse_line(p: number, n: number): number;
@@ -510,6 +512,14 @@ export class XenonRun {
     try { return JSON.parse(this.mod.UTF8ToString(this.mod._xc_cycle_lines())) as number[]; }
     catch { return []; }
   }
+  /** XENON-DEBUG v2 (ABI 6): EXECUTION-ORDER (file * 1000000 + line) pairs —
+   *  the debugger steps lines by walking this stream. Empty on older wasm
+   *  (the pump then falls back to v1 cycle-lines semantics). */
+  cyclePairs(): number[] {
+    if (typeof this.mod._xc_cycle_pairs !== 'function') return [];
+    try { return JSON.parse(this.mod.UTF8ToString(this.mod._xc_cycle_pairs())) as number[]; }
+    catch { return []; }
+  }
   abi(): number {
     return typeof this.mod._xc_abi === 'function' ? this.mod._xc_abi() : 0;
   }
@@ -656,14 +666,23 @@ export class XenonPump {
   bus = new Map<string, number | string>();          // 'io:port' -> last output
   reads = new Map<string, number>();                 // 'io:ch'  -> last input_number READ
   vars = new Map<string, XenonVar>();                // '$name'  -> live global variable
-  // ── debugger (F9 break · F10/F11 step · F8 resume, VS-Code-style keys):
-  // a step is ONE 25 Hz computer cycle (line-granular suspend/resume does
-  // not exist in the library's VM architecture — cycle granularity is what
-  // the interpreter honestly supports); a breakpoint PAUSES AT the cycle
-  // that TOUCHED its line (executed-line tracking, tools/xenoncode).
+  // ── debugger (XENON-DEBUG v2, ABI 6): F9 break · F10 step over · F11 step
+  // into · F8 continue, plus Run-to-cursor. The interpreter streams
+  // EXECUTION-ORDER (file,line) pairs; the pump walks that stream: a
+  // breakpoint pauses AT the first executed pair (not "the cycle that
+  // touched it"), F10 stops at the next executed LINE (leaving the current
+  // function's body), F11 at the next pair anywhere. Cycle-granular stream
+  // advance is the honest limit of the run-to-completion VM; the mid-cycle
+  // worker+Atomics host shares the same interpreter seam (xc_debug_hook).
   paused = false;
-  pausedAt = 0;                                      // the bp line that paused
-  breakLines = new Set<number>();                    // line numbers of the ACTIVE code tab
+  pausedLine = 0;                                    // where the debugger stopped
+  pausedFile = '';
+  breaks = new Map<string, Set<number>>();           // file name -> 1-based lines
+  stepMode: 'off' | 'over' | 'into' | 'to' = 'off';
+  fileTable: string[] = [];                          // SOURCEFILE index -> name
+  private projectFuncs: ReturnType<typeof projectFunctions> = [];
+  private toFile = '';
+  private toLine = 0;
   // ── pilot keys (v1.13.2): the flight keys bound to the RUNNING computer's
   // PilotSeat worldsim rows — built in buildWorldSim, cleared on close.
   private pilotBindings = new Map<PilotKey, { name: string; sign: number }[]>();
@@ -689,7 +708,6 @@ export class XenonPump {
   private subs = new Set<() => void>();
   private timer = 0;
   private openSeq = 0;
-  private stepWanted = 0;
 
   /** Boot comp (closing any other computer's run). Resolves when the VM is
    *  up (status running/error). */
@@ -712,7 +730,13 @@ export class XenonPump {
     this.surfaces = new Map();
     const run = await XenonRun.open(comp);
     if (seq !== this.openSeq) { run.stop(); return; }   // superseded by a newer open
-    this.paused = false; this.pausedAt = 0; this.stepWanted = 0;
+    this.paused = false; this.pausedLine = 0; this.pausedFile = ''; this.stepMode = 'off';
+    {
+      const runFiles = comp.files.map((f, i) =>
+        ({ name: i === 0 ? comp.entryName : f.name, code: f.code }));
+      this.fileTable = includeOrder(runFiles, comp.entryName);
+      this.projectFuncs = projectFunctions(runFiles);
+    }
     this.run = run;
     if (run.error) { this.status = 'error'; this.error = run.error; }
     else {
@@ -741,15 +765,21 @@ export class XenonPump {
     this.wsBindings = new Map();
     this.wsOverrides = {};
     this.pilotBindings = new Map();
-    this.paused = false; this.pausedAt = 0; this.stepWanted = 0; this.breakLines = new Set();
+    this.paused = false; this.pausedLine = 0; this.pausedFile = ''; this.stepMode = 'off';
+    this.breaks = new Map();
     this.notify();
   }
 
   stopRunning() { this.run?.stop(); this.status = 'stopped'; this.notify(); }
-  /** Breakpoint set for the ACTIVE code tab (v1: line numbers match the
-   *  executed-line list, which mixes files — a break line pauses the cycle
-   *  that ran it in ANY included file). */
-  setBreaks(lines: Iterable<number>) { this.breakLines = new Set(lines); this.notify(); }
+  /** Breakpoints keyed BY FILE (XENON-DEBUG v2): breaks in inactive tabs
+   *  fire too — the pair stream is file-qualified. */
+  setBreaksMap(map: Record<string, Iterable<number>>) {
+    this.breaks = new Map(Object.entries(map)
+      .map(([f, s]) => [f, s instanceof Set ? s : new Set(s)] as const)
+      .filter(([, s]) => s.size > 0));
+    this.notify();
+  }
+  breaksOf(file: string): Set<number> { return this.breaks.get(file) ?? new Set(); }
 
   /** The Bus-tab sliders. A channel a worldsim row feeds flips that row to
    *  MANUAL (last touch wins — the slider and the f(t) drive one binding). */
@@ -900,13 +930,29 @@ export class XenonPump {
     if (r) { r.manual = v; r.value = v; wsSave(); this.notify(); }
   }
   pause() { if (this.status === 'running') { this.paused = true; this.notify(); } }
-  resume() { this.paused = false; this.pausedAt = 0; this.stepWanted = 0; this.notify(); }
-  /** F10/F11: run exactly one more cycle, then pause again. */
-  step() {
-    if (this.status !== 'running' && this.status !== 'stopped') return;
-    this.stepWanted++;
+  resume() { this.paused = false; this.stepMode = 'off'; this.notify(); }
+  /** F10: stop at the next executed LINE in the current file (a stop inside
+   *  a function body continues until control leaves that body). */
+  stepOver() { this.beginStep('over'); }
+  /** F11: stop at the next executed pair anywhere — steps INTO @calls. */
+  stepInto() { this.beginStep('into'); }
+  /** Context menu ▸ Run to Cursor: pause when (file,line) executes. */
+  runTo(file: string, line: number) {
+    this.toFile = file; this.toLine = line;
+    this.beginStep('to');
+  }
+  private beginStep(mode: 'over' | 'into' | 'to') {
+    if (!this.run || (this.status !== 'running' && this.status !== 'stopped')) return;
+    this.stepMode = mode;
     this.paused = false;
     this.startRunning();
+  }
+  private fileOf(pair: number): string {
+    const idx = Math.floor(pair / 1000000);
+    return this.fileTable[idx] ?? `#${idx}`;
+  }
+  private pauseAt(file: string, line: number) {
+    this.paused = true; this.pausedFile = file; this.pausedLine = line;
   }
   startRunning() {
     if (!this.run) return;
@@ -918,7 +964,11 @@ export class XenonPump {
   reboot() {
     const r = this.run;
     if (!r) return;
-    if (r.reboot()) { this.status = 'running'; this.log = []; this.prints = []; this.bus = new Map(); this.startLoop(); }
+    if (r.reboot()) {
+      this.status = 'running'; this.log = []; this.prints = []; this.bus = new Map();
+      this.paused = false; this.pausedLine = 0; this.pausedFile = ''; this.stepMode = 'off';
+      this.startLoop();
+    }
     else { this.status = 'error'; this.error = r.error; }
     this.notify();
   }
@@ -1043,7 +1093,7 @@ export class XenonPump {
     // (force = the test's OWN cycles get through their own gate)
     if (this.testGate && !force) return;
     // debugger gate: while PAUSED the pump runs cycles only for a step
-    if (this.paused && this.stepWanted <= 0) return;
+    if (this.paused) return;
     this.stepWorldSim(run);
     const evs = run.cycle();
     if (evs.length) {
@@ -1065,10 +1115,31 @@ export class XenonPump {
       }
     }
     this.cycles++;
-    if (this.stepWanted > 0) { this.stepWanted--; this.paused = true; }
-    if (this.breakLines.size) {
-      for (const l of run.cycleLines())
-        if (this.breakLines.has(l)) { this.paused = true; this.pausedAt = l; break; }
+    // XENON-DEBUG v2: walk the EXECUTION-ORDER (file,line) stream. XenonTest
+    // gate cycles never touch the debugger (deterministic asserts).
+    if (!this.testGate) {
+      const pairs = run.cyclePairs();
+      if (pairs.length && (this.stepMode !== 'off' || this.breaks.size)) {
+        const scope = this.stepMode === 'over'
+          ? functionAt(this.projectFuncs, this.pausedFile, this.pausedLine) : null;
+        for (const p of pairs) {
+          const file = this.fileOf(p);
+          const line = p % 1000000;
+          if (this.breaks.get(file)?.has(line)) { this.pauseAt(file, line); break; }
+          if (this.stepMode === 'to' && file === this.toFile && line === this.toLine) {
+            this.stepMode = 'off'; this.pauseAt(file, line); break;
+          }
+          const fresh = !(file === this.pausedFile && line === this.pausedLine);
+          if (this.stepMode === 'into' && fresh) {
+            this.stepMode = 'off'; this.pauseAt(file, line); break;
+          }
+          if (this.stepMode === 'over' && fresh) {
+            const insideScope = scope !== null
+              && file === scope.file && line >= scope.line && line <= scope.end;
+            if (!insideScope) { this.stepMode = 'off'; this.pauseAt(file, line); break; }
+          }
+        }
+      }
     }
     const vs = run.vars();
     this.vars = new Map(vs.filter(varVisible).map(v => [v.name, v]));
@@ -1164,7 +1235,7 @@ export class XenonPump {
 }
 
 /** The shim ABI the app expects (xc_host.cpp xc_abi()). Bump with the shim. */
-export const XC_ABI = 5;
+export const XC_ABI = 6;
 
 export const xenonPump = new XenonPump();
 

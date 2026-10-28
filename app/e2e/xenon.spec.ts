@@ -130,7 +130,7 @@ test.describe('Xenon IDE @ui', () => {
     // v1.13.x retired the 1500-line view cap: every line is reachable,
     // none are rendered at once
     await page.locator('[data-testid^="xenon-tab-"]', { hasText: 'dashboard-art.xc' }).click();
-    const view = page.getByTestId('xenon-code-view');
+    const view = page.getByTestId('xc-editor');
     await expect(view).toBeVisible();
     expect(Number(await view.getAttribute('data-lines'))).toBeGreaterThan(7000);
     // the Vars side tab lists the firmware's globals (the Badger's $tick-like
@@ -239,11 +239,13 @@ test.describe('Xenon IDE @ui', () => {
     await page.keyboard.press('Escape');
   });
 
-  test('the debugger: F9 breakpoint pauses, F10 steps one cycle, F8 resumes @slow', async ({ page }) => {
-    // (we: "we should be able to set breakpoints and move through it with
-    // the same keys as typical in intelIbrains IDE, so f10, f11?") — a step
-    // is one 25 Hz computer cycle; a break pauses AT the cycle that touched
-    // its line (XENON-DEBUG executed-line tracking).
+  test('the debugger: breakpoint pauses, F10 steps LINES, F11 steps in, F8 resumes @slow', async ({ page }) => {
+    // (we: "f10 should mean step one line and f11 step into" + "we dont have
+    // an overview window for breakpoints" + "I need to know where we are
+    // debugging") — XENON-DEBUG v2: the interpreter streams (file,line)
+    // pairs in execution order; a break pauses AT its first executed pair,
+    // F10 stops at the next executed LINE, the pill says WHERE
+    // (file:line), the BREAKPOINTS strip lists every break.
     await page.goto(`/?craft=${CEP}`);
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 90_000 });
     await page.getByTestId('xenon-menu').click();
@@ -251,29 +253,81 @@ test.describe('Xenon IDE @ui', () => {
     await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 60_000 });
     await page.getByTestId('xenon-tab-0').click();
     // line 17 (output_number(8,0,...)) runs EVERY cycle — click its gutter
-    const gutter = page.locator('[data-line="17"] span').first();
+    const gutter = page.locator('.xc-break-gutter .cm-gutterElement').nth(16);
     await expect(gutter).toBeVisible();
     await gutter.click();
-    await expect(page.getByTestId('xenon-bp-17')).toBeVisible();
-    // the pump pauses at the cycle that touches the line
+    await expect(page.locator('.xc-bp')).toHaveCount(1);
+    // the overview strip lists the break (file:line + code excerpt)
+    const ov = page.getByTestId('bp-overview');
+    await expect(ov).toBeVisible();
+    await expect(ov).toContainText(':17');
+    // the pump pauses AT the pair
     const pill = page.getByTestId('xenon-paused');
     await expect(pill).toBeVisible({ timeout: 15_000 });
-    await expect(pill).toContainText('17');
+    await expect(pill).toHaveAttribute('data-line', '17');
     const cycles = async () => Number(
       (await page.getByText(/cycles \d+ @ 25 Hz/).first().innerText()).match(/cycles (\d+)/)?.[1] ?? -1);
     const c0 = await cycles();
     await page.waitForTimeout(1200);
     expect(await cycles()).toBe(c0);                 // frozen while paused
-    // F10 = exactly one computer cycle
+    // F10 = the NEXT EXECUTED LINE (on this fixture: the rest of THIS
+    // cycle's stream, so exactly one pump cycle runs per step here)
     await page.keyboard.press('F10');
     await expect.poll(cycles, { timeout: 8_000 }).toBe(c0 + 1);
-    await page.keyboard.press('F10');
+    await expect(pill).toBeVisible();
+    await expect.poll(async () => Number(await pill.getAttribute('data-line')),
+      { timeout: 5_000 }).not.toBe(17);              // the line ADVANCED
+    const l1 = Number(await pill.getAttribute('data-line'));
+    await page.keyboard.press('F11');                // step into: next pair
     await expect.poll(cycles, { timeout: 8_000 }).toBe(c0 + 2);
+    await expect.poll(async () => Number(await pill.getAttribute('data-line')),
+      { timeout: 5_000 }).not.toBe(l1);
     await expect(pill).toBeVisible();
     // F8 = resume: the break re-arms and cycles stream past the frozen step
     await page.keyboard.press('F8');
     await expect.poll(cycles, { timeout: 8_000 }).toBeGreaterThan(c0 + 2);
+    // the overview ✕ removes the break (strip disappears)
+    await page.locator('[data-testid^="bp-row-"]').first().hover();
+    await page.locator('[data-testid^="bp-row-"] span[role="button"]').first().click();
+    await expect(page.getByTestId('bp-overview')).toHaveCount(0);
     await page.keyboard.press('Escape');
+  });
+
+  test('the editor: syntax colors, right-click menu, go-to-definition, hover @slow', async ({ page }) => {
+    // (we: "there should be a context menu when I right click… I should have
+    // go to definition as a right click menu and hovering over a function
+    // should tell me its signature and where it lives… I need syntax
+    // highlighting")
+    await page.goto(`/?craft=${CEP}`);
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 90_000 });
+    await page.getByTestId('xenon-menu').click();
+    await page.locator('[data-testid^="xenon-comp-"]').first().click();
+    await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 60_000 });
+    // syntax highlighting: the CM token classes are in the DOM
+    await expect(page.locator('.cm-content .cm-line').first()).toBeVisible();
+    const kw = page.locator('.cm-content span[class*="cm-keyword"], .cm-content span[class*="cm-variableName"], .cm-content span[class*="cm-functionName"]');
+    await expect(kw.first()).toBeVisible({ timeout: 10_000 });
+    // RIGHT-CLICK a $var token → menu with Go to Definition / Run to
+    // Cursor / Add Breakpoint
+    const varTok = page.locator('.cm-content span[class*="cm-variableName"]').first();
+    await expect(varTok).toBeVisible();
+    await varTok.click({ button: 'right' });
+    const menu = page.getByTestId('xc-ctxmenu');
+    await expect(menu).toBeVisible();
+    await expect(menu.getByTestId('ctx-runtocursor')).toBeVisible();
+    await menu.getByTestId('ctx-breakpoint').click();
+    await expect(page.locator('.xc-bp')).toHaveCount(1);
+    // remove it again through the same menu
+    await varTok.click({ button: 'right' });
+    await page.getByTestId('ctx-breakpoint').click();
+    await expect(page.locator('.xc-bp')).toHaveCount(0);
+    // HOVER a @function call → signature + declaring file
+    const fnTok = page.locator('.cm-content span[class*="cm-functionName"]').first();
+    await expect(fnTok).toBeVisible();
+    await fnTok.hover();
+    await expect(page.locator('.cm-tooltip span.xc-hover, .cm-tooltip .xc-hover').first())
+      .toContainText('defined in', { timeout: 8_000 });
+    page.keyboard.press('Escape');
   });
 
   test('autosaves: a disk edit is shadowed, a reload loses it, Restore brings it back @slow', async ({ page }) => {
@@ -287,10 +341,11 @@ test.describe('Xenon IDE @ui', () => {
     await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 60_000 });
     // edit the disk (the marker rides the doc via the v1.6.1 mirror)
     await page.getByTestId('xenon-edit').click();
-    const ta = page.getByTestId('xenon-code-edit');
-    await expect(ta).toBeVisible();
-    const src = await ta.inputValue();
-    await ta.fill(src + '\n; autosave-pin marker\n');
+    const cm = page.locator('.cm-content');
+    await expect(cm).toBeVisible();
+    await cm.click();
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type('\n; autosave-pin marker');
     await page.getByTestId('xenon-save').click();
     await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 60_000 });
     await page.keyboard.press('Escape');
@@ -314,9 +369,9 @@ test.describe('Xenon IDE @ui', () => {
     // the restored doc carries the marker: the IDE shows it again
     await page.getByTestId('xenon-menu').click();
     await page.locator('[data-testid^="xenon-comp-"]').first().click();
-    // the code view is VIRTUALIZED (windowed render) — scroll to the tail so
-    // the appended marker line enters the DOM before asserting
-    const codeBox = page.getByTestId('xenon-code-view');
+    // CodeMirror virtualizes too — scroll the scroller to the tail so the
+    // appended marker line enters the DOM before asserting
+    const codeBox = page.locator('.cm-scroller');
     await expect(codeBox).toBeVisible({ timeout: 60_000 });
     await codeBox.evaluate(el => { el.scrollTop = el.scrollHeight; });
     await expect(page.getByTestId('xenon-code-0')).toContainText('autosave-pin marker', { timeout: 15_000 });
@@ -373,22 +428,25 @@ test.describe('Xenon IDE @ui', () => {
     const bb = await strip.boundingBox();
     expect(bb!.height).toBeLessThan(46);
     await expect(page.getByTestId('xenon-edit')).toBeVisible();
-    // autocomplete: '$' completes declared variables, words complete functions
+    // autocomplete (real-time, CodeMirror): bare words complete the library,
+    // '$' completes declared/live variables, '@' lists declared functions
     await page.getByTestId('xenon-edit').click();
-    const ta = page.getByTestId('xenon-code-edit');
-    await ta.click();
-    await ta.press('Control+End');
-    await ta.type('\nvar $zz_pitch_marker = input_', { delay: 25 });
-    await expect(page.getByTestId('xenon-ac-popup')).toBeVisible();
-    await expect(page.getByTestId('xenon-ac-popup')).toContainText('input_number');
+    const cm = page.locator('.cm-content');
+    await cm.click();
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type('\nvar $zz_pitch_marker = input_', { delay: 30 });
+    const ac = page.locator('.cm-tooltip-autocomplete');
+    await expect(ac).toBeVisible({ timeout: 8_000 });
+    await expect(ac).toContainText('input_number');
     await page.keyboard.press('Enter');
-    await expect(ta).toContainText('input_number(');
-    await ta.type('  + $roll', { delay: 25 });
-    await expect(page.getByTestId('xenon-ac-popup')).toContainText('$rollnum');
+    await expect(cm).toContainText('input_number');
+    await page.keyboard.type('  + $roll', { delay: 30 });
+    await expect(ac).toBeVisible();
+    await expect(ac).toContainText('$rollnum');
     await page.keyboard.press('Escape');
     // declared FUNCTION completion: '@' lists function @names declared on disk
-    await ta.type('\n@sel', { delay: 25 });
-    await expect(page.getByTestId('xenon-ac-popup')).toBeVisible();
+    await page.keyboard.type('\n@sel', { delay: 30 });
+    await expect(ac).toBeVisible();
     await page.keyboard.press('Escape');
     // discard the scratch edit (revert, no save)
     await page.getByTestId('xenon-edit-cancel').click();
@@ -424,27 +482,27 @@ test.describe('Xenon IDE @ui', () => {
       .toHaveCount(0);
     // the firmware reads the overridden channel: input_number(4, 2) = 2002
     await page.getByTestId('xenon-edit').click();
-    const ta = page.getByTestId('xenon-code-edit');
-    await ta.waitFor();
-    {
-      const cur = await ta.inputValue();
-      const at = cur.indexOf('update');
-      await ta.fill(cur.slice(0, at + 6) + '\n\tprint(text("alt: {}", input_number(4, 2)))\n' + cur.slice(at + 6));
-    }
+    const cm = page.locator('.cm-content');
+    await expect(cm).toBeVisible();
+    // caret into the update body: the 'update' section header line, End, Enter
+    const up = page.locator('.cm-line', { hasText: /^update/ }).first();
+    await expect(up).toBeVisible({ timeout: 15_000 });
+    await up.click();
+    await page.keyboard.press('End');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('print(text("alt: {}", input_number(4, 2)))');
     await page.getByTestId('xenon-save').click();
     await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 90_000 });
     await page.getByTestId('xenon-side-console').click();
     await expect(page.getByTestId('xenon-log')).toContainText('alt: 2002', { timeout: 30_000 });
     // PROGRAM override via setworldsim wins over the expression
     await page.getByTestId('xenon-edit').click();
-    await ta.waitFor();
-    {
-      const cur = await ta.inputValue();
-      const at = cur.indexOf('update');
-      await ta.fill(cur.slice(0, at + 6)
-        + '\n\tsetworldsim("navinstrument.altitude_meters_from_sea_level", 3000)\n'
-        + cur.slice(at + 6));
-    }
+    const up2 = page.locator('.cm-line', { hasText: /^update/ }).first();
+    await expect(up2).toBeVisible();
+    await up2.click();
+    await page.keyboard.press('End');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('setworldsim("navinstrument.altitude_meters_from_sea_level", 3000)');
     await page.getByTestId('xenon-save').click();
     await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 90_000 });
     await page.getByTestId('xenon-side-world').click();

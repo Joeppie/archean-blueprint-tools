@@ -1038,6 +1038,23 @@ EMSCRIPTEN_KEEPALIVE const char* xc_cycle_lines() {
 	g_linesJson += "]";
 	return g_linesJson.c_str();
 }
+// XENON-DEBUG v2 (ABI 6): the EXECUTION-ORDER (file * 1000000 + line) pair
+// stream — the debugger steps lines by walking this list, breakpoints stop
+// AT the first executed pair. Order preserved (no sort, no unique).
+static string g_pairsJson;
+EMSCRIPTEN_KEEPALIVE const char* xc_cycle_pairs() {
+	g_pairsJson = "[";
+	auto v = Computer::DebugTakePairs();
+	for (size_t i = 0; i < v.size(); ++i) { if (i) g_pairsJson += ","; g_pairsJson += std::to_string(v[i]); }
+	g_pairsJson += "]";
+	return g_pairsJson.c_str();
+}
+// XENON-DEBUG v2 stop-hook seam (the interpreter calls this weak extern at
+// each executed line when tracking). Today a recorder no-op: the pair
+// stream IS the channel. The worker+Atomics debugger host runs the VM on a
+// worker and implements the blocking mid-cycle PAUSE in this same seam, so
+// the interpreter needs no further change.
+extern "C" void xc_debug_hook(int /*file*/, int /*line*/) {}
 EMSCRIPTEN_KEEPALIVE const char* xc_error() { return g_err.c_str(); }
 EMSCRIPTEN_KEEPALIVE void xc_set_input(int io, int ch, double v) { xc_inputs[io][ch] = v; }
 // the panel drives an ALIAS-addressed channel (same resolution as xc_ioOf)
@@ -1141,7 +1158,7 @@ EMSCRIPTEN_KEEPALIVE void xc_worldsim_clear() { g_wsProgram.clear(); g_wsEffecti
 
 // ABI stamp: the app checks this at boot (XC_ABI in engine/xenoncode.ts) and
 // warns ONCE on drift — new device/shim exports must bump it.
-EMSCRIPTEN_KEEPALIVE int xc_abi() { return 5; }   // 5: xc_set_cycle_ms + dt-driven system_frequency
+EMSCRIPTEN_KEEPALIVE int xc_abi() { return 6; }   // 6: xc_cycle_pairs + xc_debug_hook seam (XENON-DEBUG v2); 5: xc_set_cycle_ms + dt-driven system_frequency
 EMSCRIPTEN_KEEPALIVE void xc_set_cycle_ms(int ms) {
 	// the app's pump cadence (CYCLE_MS): delta_time / system_frequency
 	// follow it, so dt-driven programs (Chip's Mario, physics on

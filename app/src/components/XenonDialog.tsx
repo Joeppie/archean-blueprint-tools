@@ -10,10 +10,17 @@
 // the green ON indicator. CTRL+S saves the current file and the computer
 // AUTO-REBOOTS (the game's rule); CTRL+SHIFT+S saves all.
 //
-// Code view is VIRTUALIZED (windowed render + parse) — a 16k-line Badger
-// file scrolls fully, no view cap. The file dialog creates/removes files on
-// the craft's virtual disk (data.hdd.xc_files — baked into the blueprint
-// json, so they persist through our save and travel with the craft).
+// Code EDITING is a real CodeMirror 6 editor (components/CodeEditor.tsx):
+// syntax highlighting, breakpoint gutter, right-click menu (Go to
+// Definition · Run to Cursor · breakpoints · clipboard · Save), hover
+// signatures + live $var values, go-to-definition, completion on typing —
+// we: "when I edit code, I need syntax highlighting, I should have go to
+// definition as a right click menu and hovering over a function should tell
+// me its signature and where it lives". Debugger (XENON-DEBUG v2): F10/F11
+// step LINES (file-qualified executed-pair stream), a BREAKPOINT OVERVIEW,
+// and a "where am I" pill (file:line @function). The file dialog
+// creates/removes files on the craft's virtual disk (data.hdd.xc_files —
+// baked into the blueprint json, saved with the craft).
 //
 // Node graphs: programs authored in the visual editor carry a
 // `;#NODES {json}` header; the DOM cards show the LIVE values — io-addressed
@@ -23,7 +30,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import FloatingWindow from './FloatingWindow';
 import {
-  chanInfo, loadChannelTable, parseKv, parseNodes, tokenize, varKind, xenonPump,
+  chanInfo, loadChannelTable, parseKv, parseNodes, varKind, xenonPump,
   xenonScreenBindings, xcDiskFiles, CYCLE_HZ,
   type ChannelTable, type XenonComputer, type XGraph, type XCFile,
 } from '../engine/xenoncode';
@@ -32,16 +39,10 @@ import { parseXenonTest, evalAssert, type XenonAssertResult } from '../engine/xe
 import { usePilotKeys } from '../engine/pilotkeys';
 import type { Engine } from '../engine/scene';
 import { ScreensCell } from './ScreensDock';
+import { CodeEditor, type CodeEditorHandle } from './CodeEditor';
+import { functionAt, projectDecls, projectFunctions } from '../engine/xcproject';
 
-const MAX_PARSE_LINES = 500;   // validation pass cap (over the VISIBLE window)
-const ROW = 18;                // px row height of the code view (12px @ 1.5)
-
-const TOK_COLOR: Record<string, string> = {
-  kw: '#7ea6ff', type: '#7ea6ff', num: '#e6c07b', com: '#6a9955',
-  op: '#d4d4d4', var: '#8fd48f', fn: '#c586c0', str: '#ce9178',
-  fmt: '#d7ba7d', txt: '#d6dbe1',
-};
-
+const MAX_PARSE_LINES = 500;   // validation pass cap (window around the caret)
 const fmtVal = (v: number | string) =>
   typeof v === 'number' ? (Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(3)) : String(v).slice(0, 12);
 
@@ -112,12 +113,15 @@ export default function XenonDialog(p: {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [comp.ci]);
-  // ── debugger (VS-Code keys, our law): F9 breakpoint on the clicked line,
-  // F10/F11 step ONE 25 Hz computer cycle, F8 resume. Breakpoints are a
-  // per-tab line set; a break PAUSES at the cycle that touched the line
-  // (executed-line tracking, tools/xenoncode/patch_xenon_debug.py).
+  // ── debugger (XENON-DEBUG v2, VS-Code keys): F9 breakpoint on the cursor
+  // line, F10 STEP OVER (next executed line), F11 STEP INTO, F8 resume,
+  // right-click ▸ Run to Cursor. Breakpoints are per-file line sets — the
+  // pair stream is file-qualified, so breaks in ANY tab fire. The pill shows
+  // WHERE: file:line @function (the project index names the function).
   const [bps, setBps] = useState<Record<number, Set<number>>>({});
-  const [lastLine, setLastLine] = useState(-1);
+  const [lastLine, setLastLine] = useState(0);          // 1-based caret (F9 target)
+  const editorRef = useRef<CodeEditorHandle>(null);
+  const [pendingJump, setPendingJump] = useState(0);
   // the game's OWN channel meanings (viewer/models/channels.json): an io
   // resolves to its cabled/aliased component TYPE, the channel to its
   // function — "io 4 · NavInstrument · ch 6 Heading", not a bare "ch 6"
@@ -139,7 +143,6 @@ export default function XenonDialog(p: {
   };
   const closeRef = useRef(p.onClose);
   closeRef.current = p.onClose;
-  const editRef = useRef<HTMLTextAreaElement>(null);
   const pump = xenonPump;
   // debug channel (the __ARCHEAN__ pattern, DEBUG builds): pump internals
   useEffect(() => {
@@ -155,6 +158,11 @@ export default function XenonDialog(p: {
       }).filter(Boolean),
       pilotKeys: pump.pilotKeysBound(),
       cycleLines: pump.run?.cycleLines() ?? [],
+      cyclePairs: pump.run?.cyclePairs() ?? [],
+      debug: { paused: pump.paused, file: pump.pausedFile, line: pump.pausedLine,
+        stepMode: pump.stepMode, breaks: [...pump.breaks.entries()].map(([f, s]) => [f, [...s]]) },
+      project: { funcs: funcs.map(f => ({ name: f.name, file: f.file, line: f.line })),
+        fileTable: pump.fileTable },
       bus: [...pump.bus.entries()].slice(-40),
       // v1.13.8 audit door (mirrors the __XENON__ base hook in Editor.tsx):
       // a surface's live framebuffer + the last input_number READS per io:ch.
@@ -205,6 +213,57 @@ export default function XenonDialog(p: {
   }, [comp, p.engine]);
 
   const file = files[tab];
+  // the RUN-side file names (the pump renames index 0 to entryName — the
+  // debugger's file names, the go-to-definition targets, the project index
+  // all key off THESE)
+  const runtimeFiles = useMemo(() => files.map((f, i) => (
+    { name: i === 0 ? comp.entryName : f.name, code: f.code })), [files, comp.entryName]);
+  const runtimeName = (i: number) => runtimeFiles[i]?.name ?? files[i]?.name ?? '';
+  const funcs = useMemo(() => projectFunctions(runtimeFiles), [runtimeFiles]);
+  const decls = useMemo(() => projectDecls(runtimeFiles), [runtimeFiles]);
+  const bpRows = useMemo(() => runtimeFiles.flatMap((f, i) =>
+    [...(bps[i] ?? [])].sort((x, y) => x - y).map(line => ({
+      file: f.name, line,
+      fn: functionAt(funcs, f.name, line)?.name,
+      code: (f.code.split('\n')[line - 1] ?? '').trim().slice(0, 42),
+    }))), [bps, runtimeFiles, funcs]);
+  const jumpTo = (fileName: string, line1: number) => {
+    const idx = runtimeFiles.findIndex(f => f.name === fileName);
+    if (idx < 0) return;
+    setTab(idx); setEditing(false);
+    setPendingJump(line1);
+  };
+  useEffect(() => {
+    if (!pendingJump) return;
+    const h = window.setTimeout(() => editorRef.current?.jumpTo(pendingJump), 60);
+    setPendingJump(0);
+    return () => window.clearTimeout(h);
+  }, [pendingJump]);
+  // validation: the REAL compiler (xc_parse_line) over a window around the
+  // caret (the v1 visible-window law, kept bounded for 16k Badger files)
+  const [errors, setErrors] = useState<Map<number, string> | undefined>(undefined);
+  const lastTabRef = useRef(tab);
+  lastTabRef.current = tab;
+  useEffect(() => {
+    const run = pump.run;
+    const code = (editing && tab === lastTabRef.current ? draft : file?.code) ?? '';
+    if (!run || !file) { setErrors(undefined); return; }
+    const h = window.setTimeout(() => {
+      const lines = code.split('\n');
+      const a = Math.max(0, Math.min(lastLine || 1, lines.length) - 250);
+      const b = Math.min(lines.length, a + MAX_PARSE_LINES);
+      const m = new Map<number, string>();
+      for (let i = a; i < b; i++) {
+        const s = lines[i]?.trim() ?? '';
+        if (!s || s.startsWith(';') || s.startsWith('//') || s.startsWith('#')) continue;
+        const e = run.parseLine(lines[i]!, i + 1);
+        if (e) m.set(i + 1, e);
+      }
+      setErrors(m);
+    }, 300);
+    return () => window.clearTimeout(h);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [file?.name, draft, editing, pump.status, Math.max(0, Math.floor((lastLine || 1) / 200))]);
   const graph: XGraph | null = useMemo(() => parseNodes(files), [files]);
   const bindings = useMemo(() => xenonScreenBindings(comp), [comp]);
   const varList = useMemo(() => {
@@ -279,24 +338,33 @@ export default function XenonDialog(p: {
     p.onFiles(comp.ci, next);
   };
 
-  const toggleBp = (line0: number) => {
+  const toggleBp = (line1: number) => {
     setBps(m => {
       const s = new Set(m[tab] ?? []);
-      const L = line0 + 1;                        // 1-based, VM line numbers
-      if (s.has(L)) s.delete(L); else s.add(L);
+      if (s.has(line1)) s.delete(line1); else s.add(line1);
       return { ...m, [tab]: s };
     });
-    setLastLine(line0);
+  };
+  const toggleBpFile = (fileName: string, line1: number) => {
+    const idx = runtimeFiles.findIndex(f => f.name === fileName);
+    if (idx < 0) return;
+    setBps(m => {
+      const s = new Set(m[idx] ?? []);
+      if (s.has(line1)) s.delete(line1); else s.add(line1);
+      return { ...m, [idx]: s };
+    });
   };
 
   const onCode = tab < files.length;
   const booting = pump.status === 'booting' || pump.status === 'idle';
 
-  // the pump breaks on the ACTIVE tab's lines (v1: the executed-line list
-  // mixes included files — a break line pauses the cycle that ran it)
-  useEffect(() => { pump.setBreaks(onCode ? (bps[tab] ?? []) : []); },
+  // XENON-DEBUG v2: breakpoints keyed by RUN-side file name — breaks in
+  // inactive tabs fire too (the pair stream is file-qualified)
+  useEffect(() => {
+    pump.setBreaksMap(Object.fromEntries(
+      runtimeFiles.map((f, i) => [f.name, bps[i] ?? new Set<number>()])));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [tab, bps, onCode, pump]);
+  }, [bps, runtimeFiles, pump]);
 
   // F9 break · F10/F11 step (one computer cycle) · F8 resume — the IDE's
   // debugger keys (the user asked for the IDE-class set; F5-run is not
@@ -307,8 +375,9 @@ export default function XenonDialog(p: {
       if (e.key === 'F8') { e.preventDefault(); pump.resume(); }
       else if (e.key === 'F9') {
         e.preventDefault();
-        if (onCode && lastLine >= 0) toggleBp(lastLine);
-      } else if (e.key === 'F10' || e.key === 'F11') { e.preventDefault(); pump.step(); }
+        if (onCode && lastLine > 0) toggleBp(lastLine);
+      } else if (e.key === 'F10') { e.preventDefault(); pump.stepOver(); }
+      else if (e.key === 'F11') { e.preventDefault(); pump.stepInto(); }
     };
     addEventListener('keydown', h);
     return () => removeEventListener('keydown', h);
@@ -332,9 +401,19 @@ export default function XenonDialog(p: {
               {pump.status === 'running' ? 'ON' : 'OFF'}
             </span>
             {pump.paused && (
-              <span data-testid="xenon-paused" className="rounded bg-[#4a3d14] px-2 py-0.5
-                     text-[10px] font-bold text-[#e6c07b]">
-                PAUSED{pump.pausedAt ? ` · line ${pump.pausedAt}` : ' · step'}
+              <span data-testid="xenon-paused" data-file={pump.pausedFile}
+                data-line={pump.pausedLine} title="where the debugger stopped"
+                className="rounded bg-[#4a3d14] px-2 py-0.5 text-[10px] font-bold text-[#e6c07b]">
+                ⏸ {pump.pausedFile ? `${pump.pausedFile}:${pump.pausedLine}` : 'paused'}
+                {functionAt(funcs, pump.pausedFile, pump.pausedLine)
+                  ? ` @${functionAt(funcs, pump.pausedFile, pump.pausedLine)!.name}` : ''}
+              </span>
+            )}
+            {pump.stepMode !== 'off' && !pump.paused && (
+              <span data-testid="xenon-stepping" className="rounded bg-[#14304a] px-2 py-0.5
+                     text-[10px] font-bold text-[#8fd4ff]">
+                {pump.stepMode === 'over' ? 'stepping → next line'
+                  : pump.stepMode === 'into' ? 'stepping → next pair' : 'running to cursor'}
               </span>
             )}
             <button data-testid="xenon-close" className="text-[#8a93a0] hover:text-white"
@@ -360,15 +439,17 @@ export default function XenonDialog(p: {
             { label: 'Run', testid: 'xmenu-run', entries: [
               { label: pump.status === 'running' ? 'Resume / continue' : 'Start', hint: 'F8', testid: 'run-resume', on: () => pump.startRunning() },
               { label: 'Pause', hint: 'F8', testid: 'run-pause', on: () => pump.pause(), disabled: pump.status !== 'running' },
-              { label: 'Step one cycle', hint: 'F10', testid: 'run-step', on: () => pump.step() },
+              { label: 'Step next line', hint: 'F10', testid: 'run-step', on: () => pump.stepOver() },
+              { label: 'Step into @call', hint: 'F11', testid: 'run-step-into', on: () => pump.stepInto() },
               { label: 'Stop', testid: 'run-stop', on: () => pump.stopRunning() },
-              { label: 'Toggle breakpoint', hint: 'F9', testid: 'run-breakpoint', on: () => { if (onCode && lastLine >= 0) toggleBp(lastLine); }, disabled: !onCode || lastLine < 0 },
+              { label: 'Toggle breakpoint', hint: 'F9', testid: 'run-breakpoint', on: () => { if (onCode && lastLine > 0) toggleBp(lastLine); }, disabled: !onCode || lastLine <= 0 },
             ] },
             { label: 'Computer', testid: 'xmenu-computer', entries: [
               { label: 'Re-boot (files from disk)', testid: 'computer-reboot', on: () => pump.reboot() },
             ] },
             { label: 'Help', testid: 'xmenu-help', entries: [
-              { label: 'F9 break · F10 step · F8 resume · Ctrl+S save', testid: 'help-keys', on: () => undefined },
+              { label: 'F9 break · F10 over · F11 into · F8 resume · Ctrl+S save', testid: 'help-keys', on: () => undefined },
+              { label: 'Right-click: definition · run-to-cursor · breakpoints', testid: 'help-ctx', on: () => undefined },
               { label: 'Type $ for variables, @ for declared functions', testid: 'help-complete', on: () => undefined },
             ] },
           ]}
@@ -446,20 +527,49 @@ export default function XenonDialog(p: {
           {/* code / nodes */}
           <div data-testid={`xenon-code-${tab}`} data-mode={status}
             className="min-h-0 flex-1 overflow-hidden rounded border border-[#232c3d] bg-[#0b0f18] text-[12px] leading-[1.45]">
-            {onCode && !editing && file && (
-              <CodeView code={file.code} tabKey={`${comp.ci}:${tab}:${pump.status}`}
-                breaks={bps[tab] ?? new Set()} pausedAt={pump.pausedAt} lastLine={lastLine}
-                onGutter={i => toggleBp(i)} onLine={i => setLastLine(i)} />
-            )}
-            {onCode && editing && (
-              <AutocompleteEdit taRef={editRef} value={draft} onChange={editChange}
-                files={files} vars={[...pump.vars.keys()]} />
+            {onCode && file && (
+              <CodeEditor ref={editorRef}
+                file={runtimeFiles[tab] ?? file} tabKey={`${comp.ci}:${tab}`}
+                editable={editing} onChange={editChange} onSave={() => save(false)}
+                breaks={bps[tab] ?? new Set()}
+                pausedLine={pump.pausedFile === runtimeName(tab) ? pump.pausedLine : 0}
+                errors={editing ? undefined : errors}
+                funcs={funcs} decls={decls}
+                varList={[...pump.vars.values()]}
+                devices={comp.devices.filter(d => d.alias).map(d => ({ alias: d.alias!, type: d.type }))}
+                getVar={(n) => { const v = pump.vars.get(n); return v ? { v: v.v, type: varKind(v.t) } : undefined; }}
+                debugActive={pump.status === 'running' || pump.status === 'stopped'}
+                onToggleBreak={(l) => toggleBp(l)}
+                onRunTo={(l) => pump.runTo(runtimeName(tab), l)}
+                onGoDef={(f, l) => jumpTo(f, l)}
+                onLine={(l) => setLastLine(l)} />
             )}
             {tab === 100 && graph && (
               <NodeGraph graph={graph} reads={pump.reads} bus={pump.bus}
                 chanLabel={(io, ch) => chanLabel(io, ch, 'out')?.fn ?? null} />
             )}
           </div>
+
+          {/* BREAKPOINT OVERVIEW (we: "we dont have an overview window for
+              breakpoints"): every break, in every file, with its enclosing
+              function and code excerpt; click jumps, ✕ removes */}
+          {bpRows.length > 0 && (
+            <div data-testid="bp-overview"
+              className="flex max-h-24 shrink-0 flex-wrap items-start gap-1 overflow-y-auto rounded border border-[#2b313b] bg-[#121826] px-2 py-1 text-[10px] [scrollbar-width:thin]">
+              <span className="pt-0.5 text-[#9fb0c8]">BREAKPOINTS {bpRows.length}:</span>
+              {bpRows.map((r, i) => (
+                <button key={`${r.file}:${r.line}`} data-testid={`bp-row-${i}`}
+                  onClick={() => jumpTo(r.file, r.line)}
+                  title={`${r.file}:${r.line}${r.fn ? ' @' + r.fn : ''} — ${r.code}`}
+                  className="rounded bg-[#2a1520] px-1.5 py-0.5 text-[#ffb3b3] hover:bg-[#3a1d2a]">
+                  {r.file}:{r.line}{r.fn ? ` @${r.fn}` : ''}
+                  <span role="button" aria-label="remove breakpoint"
+                    className="ml-1 text-[#8a93a0] hover:text-[#ff5b5b]"
+                    onClick={(e) => { e.stopPropagation(); toggleBpFile(r.file, r.line); }}>✕</span>
+                </button>
+              ))}
+            </div>
+          )}
 
           </div>
 
@@ -722,124 +832,6 @@ export default function XenonDialog(p: {
 }
 
 // ---------------------------------------------------------------------------
-// $var token with a LIVE hover readout: the tooltip shows the variable's
-// current value; when it changes, the OLD value appears above it and fades
-// out (the user's "watch it tick" ask). Values stream from pump.vars
-// (XENON-VARS), refreshed at the 25 Hz pump cadence.
-
-function VarToken(p: { name: string }) {
-  const v = pumpVars().get(p.name);
-  const cur = v?.v;
-  const [hist, setHist] = useState<{ v: string; id: number } | null>(null);
-  const last = useRef<string | undefined>(undefined);
-  useEffect(() => {
-    if (cur !== undefined && last.current !== undefined && cur !== last.current)
-      setHist({ v: last.current, id: ++histSeq });
-    last.current = cur;
-  }, [cur]);
-  const [hov, setHov] = useState(false);
-  const kv = cur ? parseKv(cur) : null;
-  return (
-    <span className="relative" onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}>
-      {`$${p.name}`}
-      {hov && (
-        <span data-testid={`xenon-var-tip-${p.name}`}
-          className="absolute bottom-full left-0 z-20 mb-0.5 flex flex-col items-start whitespace-pre rounded
-                     border border-[#3a4a6a] bg-[#0b0f18] px-1.5 py-0.5 text-[10px] text-[#8fd48f] shadow-lg">
-          {hist && (
-            <span key={hist.id} className="var-fade text-[#c586c0]" onAnimationEnd={() => setHist(null)}>
-              {hist.v === '' ? '·' : hist.v} →
-            </span>
-          )}
-          <span>= {cur === undefined ? '·' : cur.length > 48 ? cur.slice(0, 48) + '…' : cur}
-            {kv ? ` · {${kv.length} kv}` : ''}</span>
-        </span>
-      )}
-    </span>
-  );
-}
-let histSeq = 0;
-const pumpVars = () => xenonPump.vars;
-
-// ---------------------------------------------------------------------------
-// The virtualized code view: windowed render of a file's lines (a 16k-line
-// Badger main.xc scrolls FULLY — the fixed 1500-line view cap is retired);
-// per-line validation runs the REAL compiler over the visible window.
-
-function CodeView(p: {
-  code: string; tabKey: string;
-  breaks: Set<number>;                 // 1-based line numbers with a breakpoint
-  pausedAt: number;                    // 1-based line the debugger paused on
-  lastLine: number;                    // 0-based last-clicked line (F9 target)
-  onGutter: (i: number) => void;       // click the line number = breakpoint
-  onLine: (i: number) => void;         // click the row = F9 target
-}) {
-  const boxRef = useRef<HTMLDivElement>(null);
-  const [range, setRange] = useState({ a: 0, b: 150 });
-  const lines = useMemo(() => p.code.split('\n'), [p.code]);
-
-  const reRange = () => {
-    const el = boxRef.current;
-    if (!el) return;
-    const a = Math.max(0, Math.floor(el.scrollTop / ROW) - 12);
-    const b = Math.min(lines.length, Math.ceil((el.scrollTop + el.clientHeight) / ROW) + 12);
-    setRange(r => (r.a === a && r.b === b ? r : { a, b }));
-  };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(reRange, [lines.length, p.tabKey]);
-
-  const run = xenonPump.run;
-  const errs = useMemo(() => {
-    const errs = new Map<number, string>();
-    if (!run) return errs;
-    const a = range.a, b = Math.min(range.b, a + MAX_PARSE_LINES);
-    for (let i = a; i < b; i++) {
-      const t = lines[i]?.trim() ?? '';
-      if (!t || t.startsWith(';') || t.startsWith('//') || t.startsWith('#')) continue;
-      const e = run.parseLine(lines[i]!, i + 1);
-      if (e) errs.set(i, e);
-    }
-    return errs;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [run, p.tabKey, lines, range.a, range.b]);
-
-  return (
-    <div ref={boxRef} data-testid="xenon-code-view" data-lines={lines.length}
-      className="h-full overflow-auto" onScroll={reRange}>
-      <div style={{ height: lines.length * ROW, position: 'relative' }}>
-        {lines.slice(range.a, range.b).map((ln, k) => {
-          const i = range.a + k;
-          const bp = p.breaks.has(i + 1);
-          return (
-            <div key={i} data-testid={errs.has(i) ? `xenon-err-${i}` : undefined}
-              data-line={i + 1}
-              title={errs.get(i)}
-              onClick={() => p.onLine(i)}
-              className={`flex cursor-text ${p.pausedAt === i + 1 ? 'bg-[#4a3d14]'
-                : errs.has(i) ? 'bg-[#3a1420]' : bp ? 'bg-[#2a1520]'
-                : p.lastLine === i ? 'bg-[#131c2c]' : ''}`}
-              style={{ position: 'absolute', top: i * ROW, left: 0, right: 0, height: ROW }}>
-              <span data-testid={bp ? `xenon-bp-${i + 1}` : undefined}
-                title="breakpoint (click / F9)"
-                onClick={e => { e.stopPropagation(); p.onGutter(i); }}
-                className="w-11 shrink-0 cursor-pointer select-none pr-2 text-right text-[10px]
-                       leading-[18px] text-[#3f4b5f] hover:text-[#ff5b5b]">
-                {bp && <span className="mr-0.5 text-[#ff5b5b]">●</span>}{i + 1}
-              </span>
-              <span className="whitespace-pre text-[12px] leading-[18px]">
-                {tokenize(ln).map((t, j) => t.t === 'var' && t.s.startsWith('$')
-                  ? <VarToken key={j} name={t.s.slice(1).toLowerCase()} />
-                  : <span key={j} style={{ color: TOK_COLOR[t.t] }}>{t.s}</span>)}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // The visual-program graph (#NODES): DOM cards + SVG wires, pan + zoom.
 // Colours follow the in-game node editor (green inputs, purple outputs, blue
 // math, orange utility); the LIVE values: InputNode = the value last READ
@@ -1005,146 +997,6 @@ function MenuBar(p: {
         </div>
       ))}
       <span className="ml-auto text-[10px] text-[#5d6a7d]">{p.right}</span>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// AutocompleteEdit — the code editor with completion: `$` completes variable
-// names (the running program's globals + every name DECLARED in the disk's
-// files, incl. function params), `@` completes declared functions,
-// a bare word completes the language/library functions + keywords, and after
-// a `.` the screen members. Popup at the caret, Tab/Enter accept, arrows
-// move, Esc closes.
-
-const XC_LIB_FNS = ['print', 'input_number', 'input_text', 'output_number', 'output_text',
-  'screen', 'virtualscreen', 'screen_copy', 'device', 'device_at', 'device_type', 'device_count',
-  'text', 'time', 'tick', 'delta_time', 'random', 'color', 'color_r', 'color_g', 'color_b', 'color_a',
-  'user', 'owner', 'username', 'system_frequency', 'system_ram', 'system_ipc', 'system_ram',
-  'programs_count', 'game_mode', 'load_program', 'reboot', 'program_name', 'get_recipe',
-  'get_recipes', 'get_recipe_label', 'get_item_value_unit', 'char_w', 'char_h',
-  'screen_w', 'screen_h', 'clicked', 'click_x', 'click_y', 'scroll',
-  'setworldsim', 'getworldsim'];
-const XC_KEYWORDS = ['if', 'else', 'elseif', 'foreach', 'while', 'repeat', 'for', 'break',
-  'continue', 'return', 'and', 'or', 'xor', 'var', 'const', 'storage', 'function', 'init',
-  'update', 'input', 'timer', 'frequency', 'interval', 'click', 'click_hold', 'shutdown',
-  'include', 'number', 'text'];
-const XC_SCREEN_MEMBERS = ['write', 'blank', 'text_size', 'text_align', 'newline_spacing',
-  'draw_point', 'draw_line', 'draw_rect', 'draw_triangle', 'draw_circle', 'draw_poly', 'draw',
-  'button', 'button_rect', 'pixel', 'width', 'height', 'char_w', 'char_h', 'clicked',
-  'click_x', 'click_y', 'scroll'];
-
-function caretMetrics(ta: HTMLTextAreaElement): { x: number; y: number } {
-  // mirror-div caret measurement (pre-wrap off: the editor wraps OFF)
-  const st = getComputedStyle(ta);
-  const div = document.createElement('div');
-  for (const k of ['fontFamily', 'fontSize', 'lineHeight', 'paddingTop', 'paddingLeft',
-    'paddingRight', 'paddingBottom', 'borderTopWidth', 'borderLeftWidth', 'tabSize'] as const)
-    (div.style as unknown as Record<string, string>)[k] = st[k];
-  div.style.position = 'absolute';
-  div.style.visibility = 'hidden';
-  div.style.whiteSpace = 'pre';
-  div.textContent = ta.value.slice(0, ta.selectionStart);
-  const span = document.createElement('span');
-  span.textContent = '\u200b';
-  div.appendChild(span);
-  document.body.appendChild(div);
-  const r = span.getBoundingClientRect();
-  const tr = ta.getBoundingClientRect();
-  const x = r.left - tr.left - ta.scrollLeft;
-  const y = r.bottom - tr.top - ta.scrollTop;
-  document.body.removeChild(div);
-  return { x: Math.max(0, Math.min(x, tr.width - 260)), y: Math.max(0, Math.min(y, tr.height - 180)) };
-}
-
-function AutocompleteEdit(p: {
-  taRef: React.MutableRefObject<HTMLTextAreaElement | null>;
-  value: string;
-  onChange: (v: string) => void;
-  files: XCFile[];
-  vars: string[];
-}) {
-  const [items, setItems] = useState<string[]>([]);
-  const [sel, setSel] = useState(0);
-  const [pos, setPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const tokRef = useRef('');
-
-  const pools = useMemo(() => {
-    const vars = new Set<string>(p.vars);
-    const fns = new Set<string>();
-    for (const f of p.files) {
-      for (const m of f.code.matchAll(/\$([A-Za-z_]\w*)/g)) vars.add(m[1]!);
-      for (const m of f.code.matchAll(/function\s+@([A-Za-z_]\w*)/g)) fns.add('@' + m[1]!);
-    }
-    return { vars: [...vars].map(v => '$' + v).sort(), fns: [...fns].sort() };
-  }, [p.files, p.vars]);
-
-  const refresh = (ta: HTMLTextAreaElement) => {
-    const upto = ta.value.slice(0, ta.selectionStart);
-    const mt = /(@[A-Za-z_]?\w*|\$[A-Za-z_]?\w*|([A-Za-z_]\w*)|\.\w*)$/.exec(upto);
-    if (!mt || !mt[0]) { setItems([]); return; }
-    const tok = mt[0];
-    let pool: string[];
-    if (tok.startsWith('$')) pool = pools.vars;
-    else if (tok.startsWith('@')) pool = pools.fns;
-    else if (tok.startsWith('.')) pool = XC_SCREEN_MEMBERS;
-    else if (/^[A-Za-z_]/.test(tok)) pool = [...XC_LIB_FNS, ...XC_KEYWORDS];
-    else pool = [];
-    const list = pool.filter(x => x.toLowerCase().startsWith(tok.toLowerCase()) && x !== tok)
-      .slice(0, 12);
-    tokRef.current = tok;
-    setItems(list);
-    setSel(0);
-    setPos(caretMetrics(ta));
-  };
-
-  const accept = (v: string) => {
-    const ta = p.taRef.current;
-    if (!ta) return;
-    const tok = tokRef.current;
-    const start = ta.selectionStart - tok.length;
-    const next = ta.value.slice(0, start) + v + ta.value.slice(ta.selectionStart);
-    p.onChange(next);
-    setItems([]);
-    requestAnimationFrame(() => {
-      ta.focus();
-      ta.setSelectionRange(start + v.length, start + v.length);
-    });
-  };
-
-  return (
-    <div className="relative h-full">
-      <textarea ref={p.taRef} data-testid="xenon-code-edit" value={p.value}
-        onChange={e => { p.onChange(e.target.value); refresh(e.target); }}
-        onKeyDown={e => {
-          if (items.length) {
-            if (e.key === 'ArrowDown') { e.preventDefault(); setSel(s => (s + 1) % items.length); return; }
-            if (e.key === 'ArrowUp') { e.preventDefault(); setSel(s => (s - 1 + items.length) % items.length); return; }
-            if (e.key === 'Tab' || e.key === 'Enter') {
-              e.preventDefault(); accept(items[sel]!); return;
-            }
-            if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setItems([]); return; }
-          }
-          if (e.key === ' ') return;
-        }}
-        onClick={e => refresh(e.currentTarget)}
-        onBlur={() => setTimeout(() => setItems([]), 150)}
-        spellCheck={false} autoCapitalize="off" autoCorrect="off" wrap="off"
-        className="h-full w-full resize-none bg-[#0b0f18] p-2 text-[12px] leading-[18px]
-               text-[#d6dbe1] caret-white outline-none" />
-      {items.length > 0 && (
-        <div data-testid="xenon-ac-popup"
-          className="absolute z-40 max-h-[220px] w-[260px] overflow-y-auto rounded border
-                 border-[#3a4a6a] bg-[#10141f] py-1 text-[12px] shadow-2xl"
-          style={{ left: pos.x + 8, top: pos.y + 26 }}>
-          {items.map((v, i) => (
-            <button key={v} data-testid={`xenon-ac-${i}`}
-              className={`block w-full px-2 py-0.5 text-left ${i === sel ? 'bg-[#1d2c46] text-[#8fd4ff]' : 'text-[#b8c2d0]'}`}
-              onMouseEnter={() => setSel(i)}
-              onClick={() => accept(v)}>{v}</button>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
