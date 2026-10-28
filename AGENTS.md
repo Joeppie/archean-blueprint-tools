@@ -1654,15 +1654,19 @@ topic + FORMAT).
    planar UV was a 180° rotation off for the Computer's baked quad class —
    the shipped `vax===1 ? vv : 1-vv` sat the framebuffer top on the panel's
    BOTTOM edge (upside down) and the plane-u mirrored it (in-browser
-   verdicts, the arbiter: "upside down" → flip V → "upright, mirrored,
-   needs a flip" = 180°). The Computer branch (keyed `c.type === 'Computer'`,
-   NOT vax — the two device screens bake to different vax classes) runs
-   u AND v 1-minus; the Crafter keeps its shipped mapping untouched (its
-   orientation was lit-pixel-probed, never re-judged — do NOT rotate it
+   verdicts, the arbiter, uniquely fix the law: shipped (u=uu,v=vv) →
+   'upside down'; (u=uu,v=vv with V run WITH) → 'upright, MIRRORED' ⇒ V
+   runs WITH its axis (vv) = upright, U runs 1-minus (1-uu) kills the
+   mirror. A push that ALSO flipped V (`1-vv`) reproduced 'upside down
+   (+mirrored, to the eye)' — the law is **u 1-minus, v WITH the axis**,
+   keyed `c.type === 'Computer'` (NOT vax — the two device screens bake to
+   different vax classes). The Crafter keeps its shipped mapping untouched
+   (lit-pixel-probed only, orientation never judged — do NOT rotate it
    blind). LESSON: the built-in screen orientation is an in-browser pixels
-   law — no headless metric (band-energy, ink-lum, canvas colour-split)
-   resolved it cleanly through the three-basis bake; the human eye arbitrated
-   in two steps. Audit seam + probe kept: tools/invadersaudit.mjs +
+   law — every headless metric (band-energy, ink-lum, canvas colour-split,
+   pattern probe) was inconclusive through the three-basis bake; the human
+   eye arbitrated. Flip ONE axis per round-trip: a two-axis build made the
+   verdicts ambiguous and cost three extra cycles. Audit seam + probe kept: tools/invadersaudit.mjs +
    Engine.screenFeedQuads/projectCanvas/probeRect/screenFeedPixels/
    auditLookAt (counts/aims, never applies).
    PLAYTEST: `?craft=3288012440` → ▣ Screens (upright arcade screen) → WASD
