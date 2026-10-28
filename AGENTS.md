@@ -1624,6 +1624,50 @@ topic + FORMAT).
    registered (__XENON__().surfaceMeta). E key → Roll (ch 5) = Mario's
    FIRE key (we: "we should have forwarded the e key as well" — the probe
    proved Mario reads ch5 = Roll, not Pitch) — nine bound keys total.
+ - **v1.13.8 THE SPACE INVADERS ARCADE — a SECOND playable browser game
+ (craft 3288012440, Shadoh's cabinet: Computer ci13 + PilotSeat on
+ data_port.010 + 3 Buzzer + Lamp; we filed five issues: "can't give input
+ via its computer", "it doesnt register the built-in screen", "can't give
+ it input", "keyboard binds available also for the other keys cockpits can
+ give", "the screen display is upside down")**:
+   ① THE FULL-COCKPIT KEY LAW (engine/xenoncode.ts PILOT_KEYS +
+   buildWorldSim): a cabled/aliased PilotSeat is now padded to ALL 18
+   documented output channels (not just the ones the program calls
+   input_number on — the Invaders game reads only ch 1/2/3, so Pitch/Yaw/
+   Main Thrust/Aux 2..0 had NO row and their keys reached nothing). Binds:
+   WASD stick, ↑/↓ up-down, **SPACE feeds Down/Up(ch 3) AND Aux 1** (the
+   arcade "Press SPACE to play" is `input_number(10,3)==1`; Space was wired
+   only to Aux 1 which the game never read → the reported dead input; Mario
+   keeps F/Space on Aux 1 AND gets Space on ch 3 = jump), F Aux 1, E/Q roll,
+   I/K pitch, J/L yaw, R main thrust, digits 1-9/0 = Aux 1..9/0. The global
+   `5` ortho shortcut yields to the cockpit (pilotKeysActive, the 'w' law).
+   Pure pins: xenoncode.test "THE FULL COCKPIT KEY LAW" (word coverage vs
+   channels.json, Space→down/up, stick signs, the Aux ladder) + pilotbuzzer
+   re-pin. e2e pin: xenon.spec "the Space Invaders arcade" (@ui: the ▣
+   gate, all 19 keys bound, seat rows present, Space→down_up=1→0 on
+   press/release, R→main_thrust).
+   ② THE BUILT-IN SCREEN GATE (Editor.tsx): `hasScreens` = hasDashboards ||
+   a Computer/Crafter deviceScreen — the ▣ Screens dock was ABSENT on this
+   craft (the gate only knew Dashboard components; the ▣ dock is also what
+   arms the cockpit keys). e2e-pinned (screens-btn visible).
+   ③ THE SCREEN-QUAD UV LAW (scene.ts, BUILTIN_SCREEN_TYPES): v1.13.7's
+   planar UV was a 180° rotation off for the Computer's baked quad class —
+   the shipped `vax===1 ? vv : 1-vv` sat the framebuffer top on the panel's
+   BOTTOM edge (upside down) and the plane-u mirrored it (in-browser
+   verdicts, the arbiter: "upside down" → flip V → "upright, mirrored,
+   needs a flip" = 180°). The Computer branch (keyed `c.type === 'Computer'`,
+   NOT vax — the two device screens bake to different vax classes) runs
+   u AND v 1-minus; the Crafter keeps its shipped mapping untouched (its
+   orientation was lit-pixel-probed, never re-judged — do NOT rotate it
+   blind). LESSON: the built-in screen orientation is an in-browser pixels
+   law — no headless metric (band-energy, ink-lum, canvas colour-split)
+   resolved it cleanly through the three-basis bake; the human eye arbitrated
+   in two steps. Audit seam + probe kept: tools/invadersaudit.mjs +
+   Engine.screenFeedQuads/projectCanvas/probeRect/screenFeedPixels/
+   auditLookAt (counts/aims, never applies).
+   PLAYTEST: `?craft=3288012440` → ▣ Screens (upright arcade screen) → WASD
+   move the cannon, SPACE start/fire. Two playable browser games now (Mario
+   3820116990 + Space Invaders 3288012440).
  - **v1.13.7 THE BUZZER BENCH + AUTOTEST PANEL (we: "I DO NOT WANT an
    integration test that runs the full mario game; instead just write a
    computer that outputs a signal to a single buzzer, and see if it does
