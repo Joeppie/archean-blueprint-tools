@@ -1645,7 +1645,8 @@ topic + FORMAT).
    pump gained addCycleHook (runs synchronously per cycle after surfaces
    update) and the Editor's 3-D LAW rides it. (d) Mario leg pins the
    tone table (buzzer-tone-game-bass triangle, -game-effects sawtooth,
-   auto chip lit). - **v1.13.4 MARIO PLAYS RIGHT (we: "for supermario, it should actually
+   auto chip lit).
+ - **v1.13.4 MARIO PLAYS RIGHT (we: "for supermario, it should actually
    focus on the first virtualscreen, also, that doesnt properly scale, it
    stretches it sideways when trying to maximise … I dont hear the buzzers
    … place a mute icon/sound icon near the 'view' buttons … which animates
