@@ -11,7 +11,8 @@
 import type { Blueprint, BlueprintComponent } from './format';
 import { atlasJsonPaths } from './models';
 import { CRAFTER_BUILTIN } from './crafterbuiltin';
-import { buzzerAudio } from './buzzer';
+import { buzzerAudio, modeToWave } from './buzzer';
+import type { XenonSnap } from './xenontest';
 import {
   evalExpr, slug, wsChans, wsEnsure, wsKind, wsLoad, wsName, wsSave, worldsimDefault,
   type WorldSimChan,
@@ -944,89 +945,133 @@ export class XenonPump {
       this.raf = requestAnimationFrame(step);
       if (t - this.last < CYCLE_MS) return;
       this.last = t;
-      const run = this.run;
-      if (!run || !run.running) return;
-      // debugger gate: while PAUSED the pump runs cycles only for a step
-      if (this.paused && this.stepWanted <= 0) return;
-      this.stepWorldSim(run);
-      const evs = run.cycle();
-      if (evs.length) {
-        const prints = evs.filter(e => e.e !== 'cycle');
-        if (prints.length) this.log = [...this.log.slice(-180), ...prints];
-        const prs = prints.filter(e => e.e === 'print');
-        if (prs.length) this.prints = [...this.prints.slice(-240), ...prs];
-        for (const e of evs) {
-          if (e.e === 'out') {
-            // MOST-RECENTLY-ACTIVE order: re-insert so a per-cycle io stays
-            // in the visible last-24 window (insertion-only Map order let
-            // busy rows get buried — the Badger's mining-drill pin raced)
-            const k = `${e.io}:${e.port}`;
-            this.bus.delete(k);
-            this.bus.set(k, e.v ?? '');
-          }
-          else if (e.e === 'in') this.reads.set(`${e.io}:${e.port}`, Number(e.v) || 0);
-        }
-      }
-      this.cycles++;
-      if (this.stepWanted > 0) { this.stepWanted--; this.paused = true; }
-      if (this.breakLines.size) {
-        for (const l of run.cycleLines())
-          if (this.breakLines.has(l)) { this.paused = true; this.pausedAt = l; break; }
-      }
-      const vs = run.vars();
-      this.vars = new Map(vs.filter(varVisible).map(v => [v.name, v]));
-      if (run.error) {
-        this.status = 'error';
-        this.error = run.error;
-        this.notify();
-        return;
-      }
-      // surfaces: ALL keys each tick; pixels only for keys a canvas (this
-      // panel) or a 3-D dashboard feed actually shows
-      const want = new Set<string>([...this.canvases.keys(), ...this.feedKeys]);
-      const next = new Map<string, XenonSurface>();
-      for (const meta of run.screenMeta()) {
-        let pixels = this.surfaces.get(meta.key)?.pixels;
-        if (want.has(meta.key)) {
-          const got = run.screenPixels(meta.key);
-          if (got) {
-            pixels = got;
-            for (const cv of this.canvases.get(meta.key) ?? [])
-              this.blit(cv, { ...meta, pixels: got });
-          }
-        }
-        next.set(meta.key, { ...meta, pixels });
-      }
-      // BUILT-IN SCREEN mirror: the integrated touchscreen is the plain
-      // screen-function target (main#0) - feed the model-face key with the
-      // same pixels (the scene registered it at wsDeviceSlug(c)#0)
-      const main0 = next.get('main#0');
-      if (main0 && this.comp)
-        for (const sc of this.comp.screens)
-          if (sc.deviceScreen) {
-            const mk = `${slug(sc.alias)}#${sc.channel}`;
-            const mir = { ...main0, key: mk };   // the KEY must travel with
-            next.set(mk, mir);                   // the pixels (push keys off it)
-            if (mir.pixels)
-              for (const cv of this.canvases.get(mk) ?? []) this.blit(cv, mir);
-          }
-      this.surfaces = next;
-      for (const h of [...this.cycleHooks]) {
-        try { h(); } catch { /* a hook never breaks the pump */ }
-      }
-      // BUZZERS (engine/buzzer.ts): the game's Buzzer takes Amplitude (ch 0)
-      // and Frequency Hz (ch 1) on its data channel — the io bus rows above
-      // carry exactly that; turn live ones into real WebAudio sound.
-      buzzerAudio.sync(this);
-      // debugger-state transitions notify IMMEDIATELY: the coalesced notify
-      // runs on a 100 ms gate, and the iteration that SETS paused=true can
-      // land on a suppressed tick — after which every tick early-returns
-      // (PAUSED) and the UI freezes blind (the F9 pill / F10 cycles-text
-      // e2e reds). A paused loop notifies once here and then idles.
-      if (this.paused) this.notify();
-      else this.notifyCoalesced(t);
+      this.cycleOnce(t);
     };
     this.raf = requestAnimationFrame(step);
+  }
+
+  /** ONE computer cycle: worldsim → VM → events → surfaces → hooks → audio.
+   *  Shared by the rAF loop and XenonTest's deterministic runCycles. */
+  private cycleOnce(t: number): void {
+    const run = this.run;
+    if (!run || !run.running) return;
+    // XenonTest gate: runCycles() owns the VM while a test advances it
+    if (this.testGate) return;
+    // debugger gate: while PAUSED the pump runs cycles only for a step
+    if (this.paused && this.stepWanted <= 0) return;
+    this.stepWorldSim(run);
+    const evs = run.cycle();
+    if (evs.length) {
+      const prints = evs.filter(e => e.e !== 'cycle');
+      if (prints.length) this.log = [...this.log.slice(-180), ...prints];
+      const prs = prints.filter(e => e.e === 'print');
+      if (prs.length) this.prints = [...this.prints.slice(-240), ...prs];
+      for (const e of evs) {
+        if (e.e === 'out') {
+          // MOST-RECENTLY-ACTIVE order: re-insert so a per-cycle io stays
+          // in the visible last-24 window (insertion-only Map order let
+          // busy rows get buried — the Badger's mining-drill pin raced)
+          const k = `${e.io}:${e.port}`;
+          this.bus.delete(k);
+          this.bus.set(k, e.v ?? '');
+        }
+        else if (e.e === 'in') this.reads.set(`${e.io}:${e.port}`, Number(e.v) || 0);
+      }
+    }
+    this.cycles++;
+    if (this.stepWanted > 0) { this.stepWanted--; this.paused = true; }
+    if (this.breakLines.size) {
+      for (const l of run.cycleLines())
+        if (this.breakLines.has(l)) { this.paused = true; this.pausedAt = l; break; }
+    }
+    const vs = run.vars();
+    this.vars = new Map(vs.filter(varVisible).map(v => [v.name, v]));
+    if (run.error) {
+      this.status = 'error';
+      this.error = run.error;
+      this.notify();
+      return;
+    }
+    // surfaces: ALL keys each tick; pixels only for keys a canvas (this
+    // panel) or a 3-D dashboard feed actually shows
+    const want = new Set<string>([...this.canvases.keys(), ...this.feedKeys]);
+    const next = new Map<string, XenonSurface>();
+    for (const meta of run.screenMeta()) {
+      let pixels = this.surfaces.get(meta.key)?.pixels;
+      if (want.has(meta.key)) {
+        const got = run.screenPixels(meta.key);
+        if (got) {
+          pixels = got;
+          for (const cv of this.canvases.get(meta.key) ?? [])
+            this.blit(cv, { ...meta, pixels: got });
+        }
+      }
+      next.set(meta.key, { ...meta, pixels });
+    }
+    // BUILT-IN SCREEN mirror: the integrated touchscreen is the plain
+    // screen-function target (main#0) - feed the model-face key with the
+    // same pixels (the scene registered it at wsDeviceSlug(c)#0)
+    const main0 = next.get('main#0');
+    if (main0 && this.comp)
+      for (const sc of this.comp.screens)
+        if (sc.deviceScreen) {
+          const mk = `${slug(sc.alias)}#${sc.channel}`;
+          const mir = { ...main0, key: mk };   // the KEY must travel with
+          next.set(mk, mir);                   // the pixels (push keys off it)
+          if (mir.pixels)
+            for (const cv of this.canvases.get(mk) ?? []) this.blit(cv, mir);
+        }
+    this.surfaces = next;
+    for (const h of [...this.cycleHooks]) {
+      try { h(); } catch { /* a hook never breaks the pump */ }
+    }
+    // BUZZERS (engine/buzzer.ts): the game's Buzzer takes Amplitude (ch 0)
+    // and Frequency Hz (ch 1) on its data channel — the io bus rows above
+    // carry exactly that; turn live ones into real WebAudio sound.
+    buzzerAudio.sync(this);
+    // debugger-state transitions notify IMMEDIATELY: the coalesced notify
+    // runs on a 100 ms gate, and the iteration that SETS paused=true can
+    // land on a suppressed tick — after which every tick early-returns
+    // (PAUSED) and the UI freezes blind (the F9 pill / F10 cycles-text
+    // e2e reds). A paused loop notifies once here and then idles.
+    if (this.paused) this.notify();
+    else this.notifyCoalesced(t);
+  }
+
+  /** XenonTest (engine/xenontest.ts): advance the VM EXACTLY n cycles,
+   *  synchronously, with the rAF loop gated out — the deterministic phase
+   *  every assert evaluates against. */
+  private testGate = false;
+  runCycles(n: number): void {
+    if (!this.run?.running) return;
+    this.testGate = true;
+    try {
+      for (let i = 0; i < n; i++) {
+        if (!this.run?.running) break;
+        this.cycleOnce(typeof performance !== 'undefined' ? performance.now() : 0);
+      }
+    } finally {
+      this.testGate = false;
+      this.notify();
+    }
+  }
+
+  /** The snapshot XenonTest asserts evaluate against. */
+  snapshot(): XenonSnap {
+    const bus: Record<string, number | string> = {};
+    for (const [k, v] of this.bus) bus[k] = v;
+    const devices = (this.comp?.devices ?? []).map(d => {
+      const g = (ch: number) => {
+        const v = this.bus.get(`${d.alias}:${ch}`) ?? (d.io >= 0 ? this.bus.get(`${d.io}:${ch}`) : undefined);
+        return Number(v) || 0;
+      };
+      return {
+        alias: d.alias, type: d.type, mode: d.mode,
+        amp: g(0), freq: g(1),
+        wave: typeof d.mode === 'number' ? modeToWave(d.mode) : 'square',
+      };
+    });
+    return { cycles: this.cycles, prints: this.prints.filter(e => e.e === 'print').length, bus, devices };
   }
   private stopLoop() {
     if (this.raf) cancelAnimationFrame(this.raf);

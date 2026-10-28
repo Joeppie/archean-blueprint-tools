@@ -1,4 +1,4 @@
-# Archean Blueprint Tools · v1.13.6
+# Archean Blueprint Tools · v1.13.7
 
 **Reverse-engineered file format + a browser editor for workshop craft of
 [Archean](https://store.steampowered.com/app/2941660/Archean/)** —
@@ -129,6 +129,11 @@ snapped `x y z` (file law: x lateral, **y is UP**, nose −z).
   the card and gated by a dialog (redownload or use the cached copy — never
   silently replaced).
 * **A searchable in-app manual** — Help ▸ Manual, every panel, key and tool.
+* **Testing & automating XenonCode** — the IDE's Auto-test panel: a tiny
+  script format (boot a probe program, run exactly N cycles, assert on the
+  io bus), a `window.__XENONTEST__` door for AI agents and headless probes,
+  and a Buzzer Bench fixture that proves a computer→bus→sound chain in
+  seconds. See Help ▸ Manual ▸ “Testing & Automating XenonCode”.
 
 ## The legacy viewer (frozen port reference)
 
@@ -226,7 +231,7 @@ say-so**: green tests or merged work never imply one.
 
 ## Ideas welcome — open an issue!
 
-This is v1.13.6: the format is decoded and the editor is useful, but the good
+This is v1.13.7: the format is decoded and the editor is useful, but the good
 ideas are not all in yet. Feature requests, format questions, and craft that
 render wrong (attach the `blueprint.json`) are all best filed as
 [issues](https://github.com/Joeppie/archean-blueprint-tools/issues) — that is

@@ -1624,6 +1624,35 @@ topic + FORMAT).
    registered (__XENON__().surfaceMeta). E key → Roll (ch 5) = Mario's
    FIRE key (we: "we should have forwarded the e key as well" — the probe
    proved Mario reads ch5 = Roll, not Pitch) — nine bound keys total.
+ - **v1.13.7 THE BUZZER BENCH + AUTOTEST PANEL (we: "I DO NOT WANT an
+   integration test that runs the full mario game; instead just write a
+   computer that outputs a signal to a single buzzer, and see if it does
+   its thing … Future todo to document: a simple interface for automating
+   that in the editor, almost like a scripting language … an interface for
+   AI agents … Make a decent implementation for that too … so a craft can
+   be diagnosed using that. Then document that on the github page")**:
+   (a) the Mario full-game e2e leg is GONE — replaced by fixture
+   9000008001 'Buzzer Bench' (tools/make_buzzer_test.py: one MiniComputer,
+   one Buzzer data.mode 3 = sawtooth, one PilotSeat 'gamer' whose Aux 1
+   the program mirrors into the horn amplitude; a virtualscreen(160,120)
+   blinks so the first-virtual deep link + aspect law have a canvas;
+   phase-free asserts, boots in seconds). (b) THE AUTOTEST: engine/
+   xenontest.ts parses the script format (name / program: | / cycles /
+   assert: bus("a",0) | amp | freq | wave | cycles | prints with the six
+   comparison ops); pump.runCycles(n) advances EXACTLY n cycles with the
+   rAF loop gated out (testGate — deterministic phase); pump.snapshot()
+   = {cycles, prints, bus, devices[{alias,type,mode,amp,freq,wave}]};
+   XenonDialog side tab 'Auto' (xenon-test-src/run/summary/result-i,
+   preset for the bench) with program: booting through the SAME disk
+   writeback (onFiles → VM auto-reboot); window.__XENONTEST__ =
+   {run(text), snapshot()} — the AI-agent/headless door. Pinned: vitest
+   xenontest.test.ts (parse + eval x7) + e2e 'buzzer bench' (@ui fast
+   tier: deep-link focus, aspect, canvas paint, 5/5 PASS panel,
+   programmatic run, cockpit mirror amp==0.8 via F, analyser
+   outputLevel > 0.03 audio truth). (c) HELP topic xenontest.md
+   ("Testing & Automating XenonCode — the Auto-test panel", SEO tags
+   incl. AI-agent/CI/diagnostics, __XENONTEST__ contract) + README
+   feature bullet — the GitHub-pages-facing docs.
  - **v1.13.6 SOUND ON BY DEFAULT (we: "it seems sound was off by default
    - at least in firefox, please make it on by default")**: BuzzerAudio
    defaults soundOn TRUE (localStorage 'archean-xenon-buzzer-sound'

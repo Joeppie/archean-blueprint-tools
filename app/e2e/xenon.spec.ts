@@ -16,10 +16,9 @@ import { expect, test } from '@playwright/test';
 const PLANE = '3294880085';
 const CEP = '3327182790';
 const BADGER = '3326372833';
-// Chip Patton's 'PKC-385' (workshop 3820116990): a XenonCode SUPER MARIO
-// BROS. game — PilotSeat 'gamer-chair' input, 8 Buzzer components for the
-// 8-bit music, six HdScreen surfaces. The playtest target of v1.13.2.
-const MARIO = '3820116990';
+// (The v1.13.2-era Mario full-game leg was REPLACED in v1.13.7 by the
+// BUZZER BENCH fixture 9000008001 below — the same laws, deterministic,
+// seconds; the game stays a manual playtest, not a CI test.)
 
 async function litPixels(page: import('@playwright/test').Page, selector: string): Promise<number> {
   return page.evaluate(sel => {
@@ -567,215 +566,71 @@ test.describe('Xenon IDE @ui', () => {
     await expect(dock).toHaveCount(0);
   });
 
-  test('dash focus + deep link + cockpit keys + buzzers: Mario plays @slow', async ({ page, browser }) => {
-    // (we 2026-10-27: "dashboard … too small to read … No zooming … does not
-    // let you filter" + "WASD, up, down, and F … inputs into the computer
-    // for all cockpit connections it has" + "buzzers should be implemented"
-    // + "a deeplink ability to the specific dash as well as the super mario
-    // game by chip imported. That way, we can play super mario in our
-    // browser.") Deep-link straight to Mario's GAME canvas: the FIRST
-    // virtualscreen (we 2026-10-28: "it should actually focus on the first
-    // virtualscreen" — the game composes on virtual#0#0 900×600; the
-    // dashboard panels are its physical mounts).
-    test.setTimeout(300_000);
-    const OV = 'screens-cell-virtual#0#0';
-    await page.goto(`/?craft=${MARIO}&dash=first-virtual`);
+  // THE BUZZER BENCH (we 2026-10-28: "I DO NOT WANT an integration test
+  // that runs the full mario game; instead just write a computer that
+  // outputs a signal to a single buzzer, and see if it does its thing").
+  // Fixture 9000008001: one MiniComputer, one Buzzer (authored mode 3 =
+  // sawtooth), one PilotSeat whose Aux 1 the program mirrors into the
+  // horn's amplitude. Pins end to end: the deep link (first-virtual,
+  // aspect), the XenonTest panel (the AI-agent-facing automation door),
+  // the cockpit law, and the AUDIO TRUTH via the analyser. Boots in
+  // seconds; deterministic phase — no game, no sprite caching, no mash.
+  test('buzzer bench: deep link, XenonTest panel, cockpit, audio chain @ui', async ({ page }) => {
+    test.setTimeout(180_000);
+    await page.goto('/?craft=9000008001&dash=first-virtual');
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 180_000 });
 
-    // the dock opened itself (on the Virtual tab), the canvas raised its
-    // zoom window as soon as it painted (no clicking on a tiny canvas)
-    const overlay = page.getByTestId(`${OV}-overlay`);
-    await expect(overlay).toBeVisible({ timeout: 120_000 });
-    const full = page.getByTestId(`${OV}-fullcanvas`);
-    await expect(full).toBeVisible();
-    // zoom controls ride the window
-    await page.getByTestId(`${OV}-zoomin`).click();
-    await expect(page.getByTestId(`${OV}-zoom`)).toHaveText('125%');
-    // THE ASPECT LAW (we: "it doesnt properly scale, it stretches it
-    // sideways when trying to maximise"): the fullscreen canvas keeps the
-    // surface's 900:600 ratio, at any zoom
+    // deep link: the program's own virtualscreen(160,120) opens fullscreen
+    const full = page.getByTestId('screens-cell-virtual#0#0-fullcanvas');
+    await expect(full).toBeVisible({ timeout: 120_000 });
     {
       const fb = (await full.boundingBox())!;
-      expect(Math.abs(fb.width / fb.height - 1.5)).toBeLessThan(0.1);
-      await page.getByTestId(`${OV}-zoomin`).click();
-      await page.getByTestId(`${OV}-zoomin`).click();
-      const fb2 = (await full.boundingBox())!;
-      expect(Math.abs(fb2.width / fb2.height - 1.5)).toBeLessThan(0.1);
+      expect(Math.abs(fb.width / fb.height - 160 / 120)).toBeLessThan(0.15);   // aspect law
     }
-    // the GAME paints the canvas (title screen pixels)
     await expect
-      .poll(() => litPixels(page, `[data-testid="${OV}-fullcanvas"]`),
-        { timeout: 60_000 })
-      .toBeGreaterThan(200);
-    await page.getByTestId(`${OV}-fullexit`).click();
-
-    // the dock: every surface + the FILTER (we: "doesnt let you filter")
-    await expect(page.locator('[data-testid^="screens-cell-"]')).not.toHaveCount(0);
-    await page.getByTestId('screens-search').fill('zzz-no-surface');
-    await expect(page.locator('[data-testid^="screens-cell-"]')).toHaveCount(0);
-    await expect(page.getByText('no surface matches the filter')).toBeVisible();
-    await page.getByTestId('screens-search').fill('');
-    await expect(page.locator(`[data-testid="${OV}"]`)).toBeVisible();
-    // TILE MODE: gaps collapse to ZERO and the panels sit flush — Mario's
-    // six HdScreens read as one TV wall (we: "the spacing between
-    // dashboards should be collapsable to be zero, so they are super-smooth
-    // together, with a button") — on the Dashboards tab
-    await page.getByTestId('screens-tab-dash').click();
-    await page.getByTestId('screens-tight').click();
-    const c0 = (await page.getByTestId('screens-canvas-screen#0').boundingBox())!;
-    const c1 = (await page.getByTestId('screens-canvas-screen#1').boundingBox())!;
-    expect(Math.abs(c1.x - (c0.x + c0.width))).toBeLessThanOrEqual(1.5);
-    await page.getByTestId('screens-tight').click();
-    // clicking the THUMBNAIL opens its zoom window (no more VM mis-clicks)
-    await page.getByTestId('screens-canvas-screen#0').click();
-    await expect(page.getByTestId('screens-cell-screen#0-overlay')).toBeVisible();
-    await page.getByTestId('screens-cell-screen#0-fullexit').click();
-
-    // THE TOPBAR SOUND ICON (we: "place a mute icon/sound icon near the
-    // 'view' buttons … which animates whenever any buzzer is making
-    // sound"): visible beside ⚙ View while the dock keeps the computer
-    // running (closing the dock without the IDE closes the pump, and the
-    // icon stands down with it), starts muted; the click is the
-    // autoplay-safe gesture. Checked NOW — once the IDE opens it covers
-    // the TopBar.
-    const snd = page.getByTestId('buzzer-toggle');
-    await expect(snd).toBeVisible();
-    // SOUND IS ON BY DEFAULT (we: "sound was off by default - at least in
-    // firefox, please make it on by default"): the icon starts enabled;
-    // the browser unlocks the AudioContext at the player's FIRST key/tap
-    // — the jump mashes below ARE that gesture, and the outputLevel
-    // assertion further down proves the audio really flows.
-    await expect(snd).toHaveAttribute('aria-pressed', 'true');
+      .poll(() => litPixels(page, '[data-testid="screens-cell-virtual#0#0-fullcanvas"]'),
+        { timeout: 30_000 })
+      .toBeGreaterThan(100);                                                    // canvas paints
+    await page.getByTestId('screens-cell-virtual#0#0-fullexit').click();
     await page.getByTestId('screens-close').click();
 
-    // app-shortcut law: 'w' did NOT toggle wireframe while the dash was
-    // armed (checked NOW — the TopBar ⚙ is reachable while the dock, not
-    // the IDE, is the top window)
-    await page.getByTestId('toggle-options').click();
-    await expect(page.getByTestId('opt-wire')).not.toBeChecked();
-    await page.getByTestId('toggle-options').click();
-
-    // cockpit: open the IDE, the Screens tab arms the flight keys, all
-    // nine are bound to the gamer-chair PilotSeat
+    // the Autotest panel, preset for the bench
     await page.getByTestId('xenon-menu').click();
     await page.locator('[data-testid^="xenon-comp-"]').first().click();
     await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 90_000 });
-    await page.getByTestId('xenon-side-screens').click();
-    const xen = () => page.evaluate(() => (window as any).__XENON__?.());
-    await expect
-      .poll(async () => (await xen())?.pilotKeys?.length ?? 0, { timeout: 30_000 })
-      .toBe(9);
-    const row = async (re: string) =>
-      ((await xen())?.world ?? []).find((r: any) => new RegExp(re).test(r.name));
-    // THE SPRITE-ATLAS LAW (we: "when we get far in a level, things get
-    // smeared ... not all of the graphics are being copied by our screen
-    // copy?"): Mario skins the whole atlas through virtualscreen(10000,600)
-    // — the shim must honour the GAME's 10000 cap, not the old 4096
-    // (a truncated atlas = every sprite past x=4096 is garbage).
-    await expect
-      .poll(async () => {
-        const metas = (await xen())?.surfaceMeta ?? [];
-        return metas.some((m: any) => /^virtual#/.test(m.key) && m.w >= 10000);
-      }, { timeout: 30_000 })
-      .toBe(true);
-    // W = Backward/Forward +1 (the game reads it as RUN, main.xc ch 1)
-    await page.keyboard.down('w');
-    await expect.poll(async () => (await row('backward_forward'))?.manual, { timeout: 8_000 }).toBe(1);
-    await page.keyboard.up('w');
-    await expect.poll(async () => (await row('backward_forward'))?.manual, { timeout: 8_000 }).toBe(0);
-    // F = Aux 1 (the game's JUMP, ch 8)
+    await page.getByTestId('xenon-side-autotest').click();
+    await expect(page.getByTestId('xenon-test-src')).toContainText('buzzer-bench');
+    await page.getByTestId('xenon-test-run').click();
+    await expect(page.getByTestId('xenon-test-summary')).toContainText('5/5 PASS', { timeout: 30_000 });
+    await expect(page.getByTestId('xenon-test-result-2')).toHaveAttribute('data-ok', '1');  // sawtooth law
+
+    // the PROGRAMMATIC door — the interface for AI agents / headless
+    // probes: evaluate a script straight off the window
+    const res = await page.evaluate(() => (window as any).__XENONTEST__.run(
+      'name: t\ncycles: 5\nassert:\n  - cycles >= 5\n  - wave("bench-horn") == "sawtooth"'));
+    expect(res.length).toBe(2);
+    expect(res.every((r: any) => r.ok)).toBe(true);
+
+    // the COCKPIT law: F arms the seat (the dash/IDE armed the keys);
+    // the program mirrors Aux 1 into the horn amplitude -> amp == 0.8
     await page.keyboard.down('f');
-    await expect.poll(async () => (await row('aux_1'))?.manual, { timeout: 8_000 }).toBe(1);
+    const aux = async () => ((await page.evaluate(() => (window as any).__XENON__?.()))?.world ?? [])
+      .find((r: any) => /aux_1/.test(r.name))?.manual ?? 0;
+    await expect.poll(aux, { timeout: 10_000 }).toBe(1);
+    const mirror = await page.evaluate(() => (window as any).__XENONTEST__.run(
+      'name: cockpit\ncycles: 6\nassert:\n  - amp("bench-horn") == 0.8'));
+    expect(mirror[0].ok).toBe(true);
     await page.keyboard.up('f');
-    // SPACE = the same action button (the classic jump key, ch 8 too)
-    await page.keyboard.down('Space');
-    await expect.poll(async () => (await row('aux_1'))?.manual, { timeout: 8_000 }).toBe(1);
-    await page.keyboard.up('Space');
-    // E = Roll (ch 5) — the game's FIRE key (we: "we should have forwarded
-    // the e key as well"); the probe proved Mario's fire channel is Roll
-    await page.keyboard.down('e');
-    await expect.poll(async () => (await row('roll'))?.manual, { timeout: 8_000 }).toBe(1);
-    await page.keyboard.up('e');
-    // A/D = Left/Right (ch 2) — the MOVE
-    await page.keyboard.down('d');
-    await expect.poll(async () => (await row('left_right'))?.manual, { timeout: 8_000 }).toBe(1);
-    await page.keyboard.up('d');
 
-    // buzzers: the Bus tab lists the game's BUZZERS with live amp+Hz
-    // (audio.xc writes Amplitude ch0 / Frequency ch1 every cycle)
-    await page.getByTestId('xenon-side-bus').click();
-    await expect(page.getByTestId('xenon-buzzer-card')).toBeVisible();
-    await expect(page.getByTestId('buzzer-row-game-melody')).toBeVisible();
-    await expect(page.getByTestId('buzzer-row-game-bass')).toBeVisible();
-    // THE GAME'S OWN TONE TABLE (data.mode, wiki Buzzer.md V-menu): Chip
-    // authored bass = TRIANGLE and effects = SAWTOOTH; one forced square
-    // for all eight buzzers was the "sound is funky" report. In 'auto'
-    // (the default chip) each buzzer plays ITS authored tone.
-    await expect(page.getByTestId('buzzer-tone-game-bass')).toHaveText('triangle');
-    await expect(page.getByTestId('buzzer-tone-game-effects')).toHaveText('sawtooth');
-    await expect(page.getByTestId('buzzer-wave-auto')).toHaveClass(/bg-\[#243a52\]/);
-    await expect(page.getByTestId('buzzer-sound')).toBeVisible();     // 🔊 (autoplay-safe)
-    await expect(page.getByTestId('buzzer-wave-sawtooth')).toBeVisible();
-    // the game IS playing: the title DEMO is deliberately silent (main.xc
-    // sets musicgate=0) and inputs during the ~16 s sprite-cache phase are
-    // swallowed — MASH the jump key (the Bus tab arms the pilot keys too)
-    // until a game starts; the level theme then drives the melody buzzer.
-    let amp = 0;
-    // 40 mashes ≈ 70 s: sprite caching (one sprite per cycle) ends at
-    // ~cycle 600, and on a loaded box the pump runs ~14 cycles/s — the
-    // 26-press window was tight enough to expire just before the theme.
-    for (let i = 0; i < 40 && amp <= 0; i++) {
-      await page.keyboard.down('f');
-      await page.waitForTimeout(90);
-      await page.keyboard.up('f');
-      await page.waitForTimeout(1600);
-      const t = await page.getByTestId('buzzer-row-game-melody').locator('span').nth(1)
-        .innerText().catch(() => '0');
-      amp = parseFloat(t) || 0;
-    }
-    expect(amp).toBeGreaterThan(0);
-    // …and the icon THROBBES while the buzzer sings (data-playing = the
-    // live buzzerAudio.level > 0 law)
+    // AUDIO TRUTH: the AnalyserNode reads the samples flowing to the
+    // speakers (sound is ON by default; the clicks above were the unlock
+    // gestures) — "do they make sound?" answered by the graph
     await expect
-      .poll(async () => snd.getAttribute('data-playing'), { timeout: 10_000 })
-      .toBe('1');
-    // OBJECTIVE AUDIO PROOF (we: "do they make sound?"): the AnalyserNode
-    // on the master chain measures the samples flowing to the speakers —
-    // a muted headless browser reads them too. outputLevel > 0 = audible.
-    await expect
-      .poll(async () => (await xen())?.buzzer?.outputLevel ?? 0, { timeout: 15_000 })
-      .toBeGreaterThan(0.003);
-
-    // PHONE: the touch cockpit rides THE SCREEN itself — deep-link to
-    // Mario's game canvas (first virtualscreen), the pad shows W A S D /
-    // ▲ ▼ E F ␣; press = keydown, release = keyup (we: "overlay all
-    // keyboard binds as buttons … on virtual screens … fullscreening")
-    const origin = new URL(page.url()).origin;
-    const ph = await browser.newContext({
-      viewport: { width: 412, height: 915 }, hasTouch: true,
-      storageState: { cookies: [], origins: [{ origin, localStorage: [
-        { name: 'archean-app-debug', value: '1' },
-        { name: 'archean-app-backdrop', value: 'none' },
-      ] }] },
-    });
-    const pp = await ph.newPage();
-    await pp.goto(`/?craft=${MARIO}&dash=first-virtual`);
-    await pp.waitForFunction(() => /SCENE PASS/.test(document.title), null, { timeout: 180_000 });
-    // the deep-linked fullscreen zoom window carries the pad
-    const pad = pp.getByTestId(`${OV}-overlay`).getByTestId('pilot-touchpad');
-    await expect(pad).toBeVisible({ timeout: 120_000 });
-    for (const k of ['w', 'a', 's', 'd', 'up', 'down', 'f', 'e', 'space'])
-      await expect(pp.locator(
-        `[data-testid="${OV}-overlay"] [data-testid="pilot-touch-${k}"]`)).toBeVisible();
-    // press = keydown: the W button lands on the seat's Backward/Forward
-    const wManual = async () => pp.evaluate(() =>
-      (((window as any).__XENON__?.()?.world ?? []).find((r: any) => /backward/.test(r.name))?.manual) ?? null);
-    await pp.locator(`[data-testid="${OV}-overlay"] [data-testid="pilot-touch-w"]`).dispatchEvent('pointerdown');
-    await expect.poll(wManual, { timeout: 15_000 }).toBe(1);
-    // release = keyup: the stick centers
-    await pp.locator(`[data-testid="${OV}-overlay"] [data-testid="pilot-touch-w"]`).dispatchEvent('pointerup');
-    await expect.poll(wManual, { timeout: 15_000 }).toBe(0);
-    await ph.close();
-    await page.getByTestId('xenon-close').click();
+      .poll(async () => (await page.evaluate(() => (window as any).__XENON__?.()))?.buzzer?.outputLevel ?? 0,
+        { timeout: 30_000 })
+      .toBeGreaterThan(0.03);
+    const bz = await page.evaluate(() => (window as any).__XENON__?.()?.buzzer);
+    expect(bz.voices).toBeGreaterThanOrEqual(1);
+    expect(bz.level).toBeGreaterThanOrEqual(0.2);
   });
 });

@@ -74,7 +74,7 @@ describe('HelpDialog — word search (ranked, AND, honest empty)', () => {
     // gibberish: an honest note, the rail empties, count says 0
     fireEvent.change(search, { target: { value: 'zzqxwordnever' } });
     expect(screen.getByTestId('help-noresults')).toBeTruthy();
-    expect(screen.getByTestId('help-matchcount').textContent).toBe('0/16');
+    expect(screen.getByTestId('help-matchcount').textContent).toBe(`0/${TOPICS.length}`);  // dynamic — new topics never break this
     // clearing the search restores the full rail
     fireEvent.change(search, { target: { value: '' } });
     expect(screen.getByTestId('help-topic-start')).toBeTruthy();

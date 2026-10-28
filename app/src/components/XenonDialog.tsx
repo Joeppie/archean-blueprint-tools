@@ -28,6 +28,7 @@ import {
   type ChannelTable, type XenonComputer, type XGraph, type XCFile,
 } from '../engine/xenoncode';
 import { BUZZER_MODES, buzzerAudio, buzzerReadings, type BuzzerWave } from '../engine/buzzer';
+import { parseXenonTest, evalAssert, type XenonAssertResult } from '../engine/xenontest';
 import { usePilotKeys } from '../engine/pilotkeys';
 import type { Engine } from '../engine/scene';
 import { ScreensCell } from './ScreensDock';
@@ -63,9 +64,54 @@ export default function XenonDialog(p: {
   const [newProg, setNewProg] = useState(false);
   const [armedDel, setArmedDel] = useState(false);
   const [vals, setVals] = useState<Record<string, number>>({});
-  const [side, setSide] = useState<'vars' | 'screens' | 'world' | 'bus' | 'console'>('screens');
+  const [side, setSide] = useState<'vars' | 'screens' | 'world' | 'bus' | 'console' | 'autotest'>('screens');
   const [varQ, setVarQ] = useState('');
   const [scrQ, setScrQ] = useState('');
+  // ── AUTOTEST (v1.13.7, we: "a simple interface for automating that in
+  // the editor, almost like a scripting language, so we can have an
+  // interface for AI agents … so a craft can be diagnosed using that"):
+  // a XenonTest script (engine/xenontest.ts) loads a probe program onto
+  // THIS computer, advances it EXACTLY N cycles (deterministic — the rAF
+  // loop is gated out), and evaluates asserts against the snapshot.
+  // window.__XENONTEST__ is the programmatic door for automation.
+  const [testSrc, setTestSrc] = useState(() =>
+    comp.devices.some(d => d.alias === 'bench-horn')
+      ? `# Buzzer Bench — the audio law end to end (XenonCode -> bus ->\n# WebAudio), plus the cockpit mirror: the program feeds the horn's\n# amplitude from the gamer-chair's Aux 1 (press F, re-run, watch amp).\nname: buzzer-bench\ncycles: 20\nassert:\n  - bus("bench-horn", 1) >= 440\n  - amp("bench-horn") >= 0.2\n  - wave("bench-horn") == "sawtooth"\n  - prints == 0\n  - cycles >= 20\n`
+      : `# Craft diagnosis — asserts read the computer's live snapshot.\n# Optional "program: |" section boots a probe program onto this computer.\nname: ${comp.alias || comp.program}-check\ncycles: 20\nassert:\n  - cycles >= 20\n  - prints == 0\n`);
+  const [testRes, setTestRes] = useState<XenonAssertResult[] | null>(null);
+  const [testName, setTestName] = useState('');
+  const [testBusy, setTestBusy] = useState(false);
+  const runTest = async (text: string): Promise<XenonAssertResult[]> => {
+    const t = parseXenonTest(text);
+    setTestName(t.name);
+    if (t.error) return [{ expr: '(script)', ok: false, actual: t.error }];
+    setTestBusy(true);
+    try {
+      if (t.program) {
+        // boot the probe program onto this computer (the SAME writeback
+        // the disk editor uses: file + doc mirror, VM auto-reboots)
+        const base = xcDiskFiles(comp);
+        p.onFiles(comp.ci, base.map((f, i) => (i === 0 ? { ...f, code: t.program! } : f)));
+        for (let i = 0; i < 100 && xenonPump.status !== 'running'; i++)
+          await new Promise(r => setTimeout(r, 100));
+        await new Promise(r => setTimeout(r, 300));
+      }
+      xenonPump.runCycles(Math.max(0, Math.min(20000, t.cycles | 0)));
+      const snap = xenonPump.snapshot();
+      const res = t.asserts.map(a => evalAssert(a, snap));
+      setTestRes(res);
+      return res;
+    } finally {
+      setTestBusy(false);
+    }
+  };
+  useEffect(() => {
+    (window as any).__XENONTEST__ = {
+      run: (text: string) => runTest(text),
+      snapshot: () => xenonPump.snapshot(),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [comp.ci]);
   // ── debugger (VS-Code keys, our law): F9 breakpoint on the clicked line,
   // F10/F11 step ONE 25 Hz computer cycle, F8 resume. Breakpoints are a
   // per-tab line set; a break PAUSES at the cycle that touched the line
@@ -421,7 +467,7 @@ export default function XenonDialog(p: {
               {([['vars', `Vars ${pump.vars.size ? `(${pump.vars.size})` : ''}`],
                 ['screens', `Screens ${pump.surfaces.size ? `(${pump.surfaces.size})` : ''}`],
                 ['world', `World ${pump.wsChannels().length ? `(${pump.wsChannels().length})` : ''}`],
-                ['bus', 'Bus'], ['console', 'Console']] as const).map(([k, label]) => (
+                ['bus', 'Bus'], ['autotest', 'Auto'], ['console', 'Console']] as const).map(([k, label]) => (
                 <button key={k} data-testid={`xenon-side-${k}`} onClick={() => setSide(k)}
                   className="flex-1 rounded py-2 text-[10px] tracking-wide"
                   style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
@@ -601,6 +647,45 @@ export default function XenonDialog(p: {
                   </div>
                 </div>
               )}
+            </>)}
+            {side === 'autotest' && (<>
+              {/* THE AUTOTEST PANEL (v1.13.7): a XenonTest script runs on
+                  THIS computer — optional probe program, exactly N
+                  deterministic cycles, asserts over the live snapshot.
+                  window.__XENONTEST__.run(text) is the same door for AI
+                  agents and headless probes. */}
+              <textarea
+                data-testid="xenon-test-src" value={testSrc} spellCheck={false}
+                onChange={e => setTestSrc(e.target.value)}
+                className="min-h-[120px] w-full resize-y rounded border border-[#2b3a52] bg-[#0b0f18] px-2 py-1 font-mono text-[11px] leading-snug text-[#d6dbe1] outline-none" />
+              <div className="flex items-center gap-2">
+                <button data-testid="xenon-test-run" disabled={testBusy}
+                  onClick={() => void runTest(testSrc)}
+                  className="rounded bg-[#2b4a2b] px-3 py-1 text-[11px] hover:bg-[#38603a] disabled:opacity-50">
+                  {testBusy ? 'running…' : '▶ run test'}
+                </button>
+                <span data-testid="xenon-test-summary" className="text-[11px] tabular-nums">
+                  {testRes && (() => {
+                    const pass = testRes.filter(r => r.ok).length;
+                    return `${testName}: ${pass}/${testRes.length} ${pass === testRes.length ? 'PASS' : 'FAIL'}`;
+                  })()}
+                </span>
+              </div>
+              <div className="flex flex-col gap-0.5">
+                {(testRes ?? []).map((r, i) => (
+                  <div key={i} data-testid={`xenon-test-result-${i}`} data-ok={r.ok ? '1' : '0'}
+                    className={`flex justify-between gap-2 rounded px-2 py-0.5 font-mono text-[11px] ${
+                      r.ok ? 'bg-[#12281a] text-[#8fd48f]' : 'bg-[#2a1520] text-[#ff9a9a]'}`}>
+                    <span className="truncate">{r.expr}</span>
+                    <span className="shrink-0 tabular-nums">{r.ok ? '✓' : `= ${r.actual}`}</span>
+                  </div>
+                ))}
+                {testRes === null && (
+                  <span className="text-[11px] text-ink-dim">
+                    asserts: bus("alias", ch) · amp("alias") · freq("alias") · wave("alias") · cycles · prints — with == != &gt;= &lt;= &gt; &lt;
+                  </span>
+                )}
+              </div>
             </>)}
             {side === 'console' && (
               <div data-testid="xenon-log" className="min-h-[70px] flex-1 overflow-y-auto rounded border border-[#232c3d] bg-[#0b0f18] p-2 text-[11px]">
