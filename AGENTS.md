@@ -1965,6 +1965,17 @@ topic + FORMAT).
   satisfy undefined C symbols) — EM_JS in the glue is the only form.
   Gates: xenon.spec 15/15 on worker mode, vitest 899 (+8 pins: THE STEPPER
   LAW ×6, SAB GATE ×2), tsc clean; main-thread fallback probed live.
+  (5) **staleness.spec re-pinned to the v1.13.11 SHA-ONLY LAW** (found by
+  this session's fast tier; RED ON MAIN d0879d6 — pre-existing, xenon-only
+  test rounds stayed blind to it): the spec sealed staleness with a FAKE
+  `x-blueprint-rev` + correct digest, which the current identity law
+  (content sha decides, rev is display metadata) correctly classifies as
+  FRESH — the gate never fires, four pins silently dead. The wire seal is
+  now a CONTENT swap (body + trailing newline — JSON.parse tolerates it —
+  served with the honest sha OF THE SWAPPED BODY so download-verify + the
+  store self-check pass), making the catalog sha genuinely differ: 4/4
+  green in 11.7s. LESSON: when an identity law changes, re-audit every pin
+  that SEALED its old trigger through the wire.
 - **v1.13.16 THE REAL DEBUGGER + CODEMIRROR 6 EDITOR (we: "f10 should mean
   step one line and f11 step into, there should be a context menu when I
   right click. And when I edit code, I need syntax highlighting, I should
