@@ -86,19 +86,22 @@ const xcLanguage = StreamLanguage.define({
 });
 
 // ── gutter markers ────────────────────────────────────────────────────
+// This @codemirror/view paints markers via elementClass (on the gutter
+// cell) + toDOM (the cell's node) — the old toElement() is not in the
+// protocol (verified on the installed dist).
 class BreakMarker extends GutterMarker {
-  toElement() {
+  elementClass = 'xc-bp';
+  toDOM() {
     const e = document.createElement('span');
-    e.className = 'xc-bp';
     e.textContent = '●';
     return e;
   }
   eq() { return true; }
 }
 class PausedMarker extends GutterMarker {
-  toElement() {
+  elementClass = 'xc-paused-mark';
+  toDOM() {
     const e = document.createElement('span');
-    e.className = 'xc-paused-mark';
     e.textContent = '▶';
     return e;
   }
@@ -281,6 +284,9 @@ function CodeEditorInner(p: CodeEditorProps, ref: React.Ref<CodeEditorHandle>) {
 
     const bpGutter = gutter({
       class: 'xc-break-gutter',
+      // EVERY line renders a clickable cell (empty lines too — the click
+      // target IS the feature: click-to-toggle a breakpoint anywhere)
+      renderEmptyElements: true,
       lineMarker: (view: EditorView, line: BlockInfo) => {
         const s = propsRef.current;
         const ln = view.state.doc.lineAt(line.from).number;
@@ -314,29 +320,7 @@ function CodeEditorInner(p: CodeEditorProps, ref: React.Ref<CodeEditorHandle>) {
           { key: '@', run: trigger('@') },
           ...searchKeymap,
         ]),
-        EditorView.domEventHandlers({
-          mousedown: (e, view) => {
-            const el = (e.target as HTMLElement)?.closest?.('.xc-break-gutter .cm-gutterElement');
-            if (el) {
-              const pos = view.posAtCoords({ x: e.clientX, y: e.clientY });
-              if (pos != null) {
-                propsRef.current.onToggleBreak(view.state.doc.lineAt(pos).number);
-                return true;
-              }
-            }
-            return false;
-          },
-          click: (e, view) => {
-            if (!(e.ctrlKey || e.metaKey)) return false;
-            const pos = view.posAtCoords({ x: e.clientX, y: e.clientY });
-            if (pos == null) return false;
-            const line = view.state.doc.lineAt(pos);
-            const tok = functionTokenAt(line.text, pos - line.from);
-            const def = tok ? definitionOf(propsRef.current.funcs, tok) : null;
-            if (def) { propsRef.current.onGoDef(def.file, def.line); return true; }
-            return false;
-          },
-        }),
+
         EditorView.updateListener.of(u => {
           if (u.docChanged && propsRef.current.editable)
             propsRef.current.onChange?.(u.state.doc.toString());
@@ -347,7 +331,37 @@ function CodeEditorInner(p: CodeEditorProps, ref: React.Ref<CodeEditorHandle>) {
     });
     const view = new EditorView({ state, parent: hostRef.current });
     viewRef.current = view;
-    return () => { view.destroy(); viewRef.current = null; };
+    // gutter breakpoint toggles + Ctrl+Click go-to-definition ride PLAIN
+    // listeners on view.dom: @codemirror/view binds both EditorView^
+    // domEventHandlers and plugin eventHandlers to the CONTENT node, and
+    // the gutters live outside it (verified on the installed 6.3x)
+    const onMD = (e: Event) => {
+      const me = e as MouseEvent;
+      const el = (me.target as HTMLElement)?.closest?.('.xc-break-gutter .cm-gutterElement');
+      if (!el) return;
+      const pos = view.posAtCoords({ x: me.clientX, y: me.clientY });
+      if (pos == null) return;
+      propsRef.current.onToggleBreak(view.state.doc.lineAt(pos).number);
+      me.preventDefault();
+    };
+    const onClick = (e: Event) => {
+      const me = e as MouseEvent;
+      if (!(me.ctrlKey || me.metaKey)) return;
+      const pos = view.posAtCoords({ x: me.clientX, y: me.clientY });
+      if (pos == null) return;
+      const line = view.state.doc.lineAt(pos);
+      const tok = functionTokenAt(line.text, pos - line.from);
+      const def = tok ? definitionOf(propsRef.current.funcs, tok) : null;
+      if (def) propsRef.current.onGoDef(def.file, def.line);
+    };
+    view.dom.addEventListener('mousedown', onMD);
+    view.dom.addEventListener('click', onClick);
+    return () => {
+      view.dom.removeEventListener('mousedown', onMD);
+      view.dom.removeEventListener('click', onClick);
+      view.destroy();
+      viewRef.current = null;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p.tabKey, p.file.name]);
 

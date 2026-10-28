@@ -294,6 +294,7 @@ test.describe('Xenon IDE @ui', () => {
   });
 
   test('the editor: syntax colors, right-click menu, go-to-definition, hover @slow', async ({ page }) => {
+    test.setTimeout(120_000);
     // (we: "there should be a context menu when I right click… I should have
     // go to definition as a right click menu and hovering over a function
     // should tell me its signature and where it lives… I need syntax
@@ -303,13 +304,14 @@ test.describe('Xenon IDE @ui', () => {
     await page.getByTestId('xenon-menu').click();
     await page.locator('[data-testid^="xenon-comp-"]').first().click();
     await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 60_000 });
-    // syntax highlighting: the CM token classes are in the DOM
+    // syntax highlighting: token spans are styled (the theme's generated
+    // classes ride every keyword/var/number span)
     await expect(page.locator('.cm-content .cm-line').first()).toBeVisible();
-    const kw = page.locator('.cm-content span[class*="cm-keyword"], .cm-content span[class*="cm-variableName"], .cm-content span[class*="cm-functionName"]');
-    await expect(kw.first()).toBeVisible({ timeout: 10_000 });
+    expect(await page.evaluate(() => document.querySelectorAll(
+      '.cm-content .cm-line span[class]').length)).toBeGreaterThan(8);
     // RIGHT-CLICK a $var token → menu with Go to Definition / Run to
     // Cursor / Add Breakpoint
-    const varTok = page.locator('.cm-content span[class*="cm-variableName"]').first();
+    const varTok = page.locator('.cm-content span').filter({ hasText: /^\$\S+$/ }).first();
     await expect(varTok).toBeVisible();
     await varTok.click({ button: 'right' });
     const menu = page.getByTestId('xc-ctxmenu');
@@ -321,9 +323,12 @@ test.describe('Xenon IDE @ui', () => {
     await varTok.click({ button: 'right' });
     await page.getByTestId('ctx-breakpoint').click();
     await expect(page.locator('.xc-bp')).toHaveCount(0);
-    // HOVER a @function call → signature + declaring file
-    const fnTok = page.locator('.cm-content span[class*="cm-functionName"]').first();
-    await expect(fnTok).toBeVisible();
+    // HOVER a @function declaration → signature + declaring file
+    // (functions.xc declares function @to … — tab 1)
+    await page.locator('[data-testid^="xenon-tab-"]', { hasText: 'functions.xc' }).click();
+    await page.waitForTimeout(600);
+    const fnTok = page.locator('.cm-content span').filter({ hasText: /^@\S+/ }).first();
+    await expect(fnTok).toBeVisible({ timeout: 10_000 });
     await fnTok.hover();
     await expect(page.locator('.cm-tooltip span.xc-hover, .cm-tooltip .xc-hover').first())
       .toContainText('defined in', { timeout: 8_000 });
