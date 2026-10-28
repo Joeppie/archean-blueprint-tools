@@ -64,7 +64,15 @@ export function buzzerReadings(pump: Pick<XenonPump, 'comp' | 'bus'>): BuzzerRea
   return out;
 }
 
-const MASTER_GAIN = 0.25;   // a full-amplitude buzzer stays a pleasant level
+const MASTER_GAIN = 0.4;    // a full-amplitude buzzer is a solid, not a blast
+
+/** Game buzzers run quiet amplitudes (Chip's Mario writes ~0.05..0.3), so
+ *  a linear ·0.25 gain sat at ≈ −33 dB — the "I dont hear the buzzers"
+ *  report. Lift the low end (×1.8, capped) and scale to 0.4. Pure —
+ *  vitest-pinned. */
+export function voiceGain(amp: number): number {
+  return Math.min(1, Math.max(0, amp) * 1.8) * MASTER_GAIN;
+}
 
 /** WebAudio mixer: one square-wave-capable oscillator per loud Buzzer.
  *  The wave type is the SHARED config choice (the game menus each buzzer
@@ -72,6 +80,10 @@ const MASTER_GAIN = 0.25;   // a full-amplitude buzzer stays a pleasant level
 export class BuzzerAudio {
   wave: BuzzerWave = 'square';
   soundOn = false;
+  /** Loudest Amplitude seen in the latest sync (0 = all silent) — drives
+   *  the TopBar 🔊 activity animation ("animates whenever any buzzer is
+   *  making sound so its evident that is the reason there is sound"). */
+  level = 0;
   private ctx: AudioContext | null = null;
   private voices = new Map<string, { osc: OscillatorNode; gain: GainNode }>();
 
@@ -107,8 +119,12 @@ export class BuzzerAudio {
 
   /** Called once per pump cycle. */
   sync(pump: XenonPump) {
-    if (!this.soundOn || !pump.run?.running) { this.stopAll(); return; }
+    if (!this.soundOn || !pump.run?.running) { this.level = 0; this.stopAll(); return; }
     const rows = buzzerReadings(pump);
+    // activity level: even with audio unavailable (headless, no audio
+    // device) the TopBar animation reflects what the program is SENDING
+    this.level = rows.reduce((m, r) => Math.max(m, r.amp), 0);
+    if (typeof AudioContext === 'undefined') return;
     const live = new Set<string>();
     for (const r of rows) {
       if (r.amp <= 0) continue;
@@ -131,7 +147,7 @@ export class BuzzerAudio {
         const now = this.ctx!.currentTime;
         v.osc.type = this.wave;
         v.osc.frequency.setTargetAtTime(r.freq, now, 0.01);
-        v.gain.gain.setTargetAtTime(r.amp * MASTER_GAIN, now, 0.02);
+        v.gain.gain.setTargetAtTime(voiceGain(r.amp), now, 0.02);
       } catch {
         // no audio device / context refused: stay silent, never break the pump
         this.stopAll();

@@ -573,26 +573,41 @@ test.describe('Xenon IDE @ui', () => {
     // for all cockpit connections it has" + "buzzers should be implemented"
     // + "a deeplink ability to the specific dash as well as the super mario
     // game by chip imported. That way, we can play super mario in our
-    // browser.") Deep-link straight to Mario's TV surface.
+    // browser.") Deep-link straight to Mario's GAME canvas: the FIRST
+    // virtualscreen (we 2026-10-28: "it should actually focus on the first
+    // virtualscreen" — the game composes on virtual#0#0 900×600; the
+    // dashboard panels are its physical mounts).
     test.setTimeout(300_000);
-    await page.goto(`/?craft=${MARIO}&dash=screen%230`);
+    const OV = 'screens-cell-virtual#0#0';
+    await page.goto(`/?craft=${MARIO}&dash=first-virtual`);
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 180_000 });
 
-    // the dock opened itself and the DEEP-LINKED surface raised its zoom
-    // window as soon as it painted (no clicking on a tiny canvas)
-    const overlay = page.getByTestId('screens-cell-screen#0-overlay');
+    // the dock opened itself (on the Virtual tab), the canvas raised its
+    // zoom window as soon as it painted (no clicking on a tiny canvas)
+    const overlay = page.getByTestId(`${OV}-overlay`);
     await expect(overlay).toBeVisible({ timeout: 120_000 });
-    const full = page.getByTestId('screens-cell-screen#0-fullcanvas');
+    const full = page.getByTestId(`${OV}-fullcanvas`);
     await expect(full).toBeVisible();
     // zoom controls ride the window
-    await page.getByTestId('screens-cell-screen#0-zoomin').click();
-    await expect(page.getByTestId('screens-cell-screen#0-zoom')).toHaveText('125%');
-    // the GAME paints the TV (title screen pixels)
+    await page.getByTestId(`${OV}-zoomin`).click();
+    await expect(page.getByTestId(`${OV}-zoom`)).toHaveText('125%');
+    // THE ASPECT LAW (we: "it doesnt properly scale, it stretches it
+    // sideways when trying to maximise"): the fullscreen canvas keeps the
+    // surface's 900:600 ratio, at any zoom
+    {
+      const fb = (await full.boundingBox())!;
+      expect(Math.abs(fb.width / fb.height - 1.5)).toBeLessThan(0.1);
+      await page.getByTestId(`${OV}-zoomin`).click();
+      await page.getByTestId(`${OV}-zoomin`).click();
+      const fb2 = (await full.boundingBox())!;
+      expect(Math.abs(fb2.width / fb2.height - 1.5)).toBeLessThan(0.1);
+    }
+    // the GAME paints the canvas (title screen pixels)
     await expect
-      .poll(() => litPixels(page, '[data-testid="screens-cell-screen#0-fullcanvas"]'),
+      .poll(() => litPixels(page, `[data-testid="${OV}-fullcanvas"]`),
         { timeout: 60_000 })
       .toBeGreaterThan(200);
-    await page.getByTestId('screens-cell-screen#0-fullexit').click();
+    await page.getByTestId(`${OV}-fullexit`).click();
 
     // the dock: every surface + the FILTER (we: "doesnt let you filter")
     await expect(page.locator('[data-testid^="screens-cell-"]')).not.toHaveCount(0);
@@ -600,11 +615,12 @@ test.describe('Xenon IDE @ui', () => {
     await expect(page.locator('[data-testid^="screens-cell-"]')).toHaveCount(0);
     await expect(page.getByText('no surface matches the filter')).toBeVisible();
     await page.getByTestId('screens-search').fill('');
-    await expect(page.locator('[data-testid="screens-cell-screen#0"]')).toBeVisible();
+    await expect(page.locator(`[data-testid="${OV}"]`)).toBeVisible();
     // TILE MODE: gaps collapse to ZERO and the panels sit flush — Mario's
     // six HdScreens read as one TV wall (we: "the spacing between
     // dashboards should be collapsable to be zero, so they are super-smooth
-    // together, with a button")
+    // together, with a button") — on the Dashboards tab
+    await page.getByTestId('screens-tab-dash').click();
     await page.getByTestId('screens-tight').click();
     const c0 = (await page.getByTestId('screens-canvas-screen#0').boundingBox())!;
     const c1 = (await page.getByTestId('screens-canvas-screen#1').boundingBox())!;
@@ -612,7 +628,7 @@ test.describe('Xenon IDE @ui', () => {
     await page.getByTestId('screens-tight').click();
     // clicking the THUMBNAIL opens its zoom window (no more VM mis-clicks)
     await page.getByTestId('screens-canvas-screen#0').click();
-    await expect(overlay).toBeVisible();
+    await expect(page.getByTestId('screens-cell-screen#0-overlay')).toBeVisible();
     await page.getByTestId('screens-cell-screen#0-fullexit').click();
     await page.getByTestId('screens-close').click();
 
@@ -624,7 +640,7 @@ test.describe('Xenon IDE @ui', () => {
     await page.getByTestId('toggle-options').click();
 
     // cockpit: open the IDE, the Screens tab arms the flight keys, all
-    // eight are bound to the gamer-chair PilotSeat
+    // nine are bound to the gamer-chair PilotSeat
     await page.getByTestId('xenon-menu').click();
     await page.locator('[data-testid^="xenon-comp-"]').first().click();
     await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 90_000 });
@@ -677,6 +693,15 @@ test.describe('Xenon IDE @ui', () => {
     await expect(page.getByTestId('buzzer-row-game-bass')).toBeVisible();
     await expect(page.getByTestId('buzzer-sound')).toBeVisible();     // 🔊 (autoplay-safe)
     await expect(page.getByTestId('buzzer-wave-sawtooth')).toBeVisible();
+    // THE TOPBAR SOUND ICON (we: "place a mute icon/sound icon near the
+    // 'view' buttons … which animates whenever any buzzer is making sound
+    // so its evident that is the reason there is sound"): visible beside
+    // ⚙ View, starts muted; the click is the autoplay-safe gesture.
+    const snd = page.getByTestId('buzzer-toggle');
+    await expect(snd).toBeVisible();
+    await expect(snd).toHaveAttribute('aria-pressed', 'false');
+    await snd.click();
+    await expect(snd).toHaveAttribute('aria-pressed', 'true');
     // the game IS playing: the title DEMO is deliberately silent (main.xc
     // sets musicgate=0) and inputs during the ~16 s sprite-cache phase are
     // swallowed — MASH the jump key (the Bus tab arms the pilot keys too)
@@ -692,12 +717,16 @@ test.describe('Xenon IDE @ui', () => {
       amp = parseFloat(t) || 0;
     }
     expect(amp).toBeGreaterThan(0);
+    // …and the icon THROBBES while the buzzer sings (data-playing = the
+    // live buzzerAudio.level > 0 law)
+    await expect
+      .poll(async () => snd.getAttribute('data-playing'), { timeout: 10_000 })
+      .toBe('1');
 
     // PHONE: the touch cockpit rides THE SCREEN itself — deep-link to
-    // Mario's TV, the pad shows W A S D / ▲ ▼ E F ␣; press = keydown,
-    // release = keyup (we: "overlay all keyboard binds as buttons that do
-    // keydown when pressing and up when letting go, so we can play on
-    // mobile, also on virtual screens … also when fullscreening a screen")
+    // Mario's game canvas (first virtualscreen), the pad shows W A S D /
+    // ▲ ▼ E F ␣; press = keydown, release = keyup (we: "overlay all
+    // keyboard binds as buttons … on virtual screens … fullscreening")
     const origin = new URL(page.url()).origin;
     const ph = await browser.newContext({
       viewport: { width: 412, height: 915 }, hasTouch: true,
@@ -707,21 +736,21 @@ test.describe('Xenon IDE @ui', () => {
       ] }] },
     });
     const pp = await ph.newPage();
-    await pp.goto(`/?craft=${MARIO}&dash=screen%230`);
+    await pp.goto(`/?craft=${MARIO}&dash=first-virtual`);
     await pp.waitForFunction(() => /SCENE PASS/.test(document.title), null, { timeout: 180_000 });
     // the deep-linked fullscreen zoom window carries the pad
-    const pad = pp.getByTestId('screens-cell-screen#0-overlay').getByTestId('pilot-touchpad');
+    const pad = pp.getByTestId(`${OV}-overlay`).getByTestId('pilot-touchpad');
     await expect(pad).toBeVisible({ timeout: 120_000 });
     for (const k of ['w', 'a', 's', 'd', 'up', 'down', 'f', 'e', 'space'])
       await expect(pp.locator(
-        `[data-testid="screens-cell-screen#0-overlay"] [data-testid="pilot-touch-${k}"]`)).toBeVisible();
+        `[data-testid="${OV}-overlay"] [data-testid="pilot-touch-${k}"]`)).toBeVisible();
     // press = keydown: the W button lands on the seat's Backward/Forward
     const wManual = async () => pp.evaluate(() =>
       (((window as any).__XENON__?.()?.world ?? []).find((r: any) => /backward/.test(r.name))?.manual) ?? null);
-    await pp.locator('[data-testid="screens-cell-screen#0-overlay"] [data-testid="pilot-touch-w"]').dispatchEvent('pointerdown');
+    await pp.locator(`[data-testid="${OV}-overlay"] [data-testid="pilot-touch-w"]`).dispatchEvent('pointerdown');
     await expect.poll(wManual, { timeout: 15_000 }).toBe(1);
     // release = keyup: the stick centers
-    await pp.locator('[data-testid="screens-cell-screen#0-overlay"] [data-testid="pilot-touch-w"]').dispatchEvent('pointerup');
+    await pp.locator(`[data-testid="${OV}-overlay"] [data-testid="pilot-touch-w"]`).dispatchEvent('pointerup');
     await expect.poll(wManual, { timeout: 15_000 }).toBe(0);
     await ph.close();
     await page.getByTestId('xenon-close').click();

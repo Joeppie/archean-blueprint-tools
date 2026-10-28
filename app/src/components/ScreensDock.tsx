@@ -117,7 +117,12 @@ export function ScreenCanvas(p: {
   return <canvas ref={ref} data-testid={p.testid} width={p.w} height={p.h}
     className={p.tight ? 'block bg-black' : 'rounded-sm border border-[#2b313b] bg-black'}
     style={{ imageRendering: 'pixelated', maxHeight: p.maxH ?? 220,
-             width: p.fill ? '100%' : 'auto', maxWidth: '100%', cursor: 'pointer' }}
+             width: p.fill ? '100%' : 'auto', maxWidth: '100%', cursor: 'pointer',
+             // fill mode scales the canvas to its container WIDTH; the
+             // height must follow the intrinsic ratio — leaving it at the
+             // attribute px STRETCHED tall surfaces sideways (we: "it
+             // stretches it sideways when trying to maximise")
+             height: p.fill ? 'auto' : undefined }}
     onClick={e => {
       if (p.onTap) { p.onTap(); return; }
       const px = toPixels(e);
@@ -254,8 +259,17 @@ export default function ScreensDock(p: {
 
   // deep-link focus is ONE-SHOT: consumed the moment the zoom window opens
   // (a filter round-trip remounts cells; a re-armed autoFull would raise
-  // the overlay again and intercept the next click — the suite caught it)
+  // the overlay again and intercept the next click — the suite caught it).
+  // `dash=first-virtual` focuses the FIRST virtualscreen — Mario composes
+  // its game on virtual#0#0 (900×600); the dashboard panels are only its
+  // physical mounts (we: "it should actually focus on the first
+  // virtualscreen").
   const [focusLeft, setFocusLeft] = useState(p.focus ?? null);
+  const virt0 = [...xenonPump.surfaces.values()].find(s => s.key.startsWith('virtual#'));
+  useEffect(() => {
+    if (focusLeft === 'first-virtual' && virt0) setTab('virtual');
+  }, [focusLeft, virt0?.key]);
+  const focusKey = focusLeft === 'first-virtual' ? virt0?.key ?? null : focusLeft;
 
   const pilot = xenonPump.pilotKeysBound();
 
@@ -321,7 +335,7 @@ export default function ScreensDock(p: {
           <ScreensCell key={s.key} surfKey={s.key} w={s.w} h={s.h} maxH={260}
             testid={`screens-cell-${s.key}`}
             canvasTestid={`screens-canvas-${s.key}`}
-            autoFull={focusLeft === s.key}
+            autoFull={focusKey === s.key}
             onAutoOpened={() => setFocusLeft(null)}
             tight={tight}
             label={bindings.get(s.key) ?? s.key} />

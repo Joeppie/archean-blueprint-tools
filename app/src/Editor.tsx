@@ -49,6 +49,7 @@ import { applyPinEdit, applyPinRotate, applyPinShift, applyTriFlip, applyTriPain
 import type { Blueprint, Triangle } from './engine/format';
 import { isLegacyFile } from './engine/format';
 import { hasDashboards, xenonComputers, xenonPump, type XCFile } from './engine/xenoncode';
+import { buzzerAudio } from './engine/buzzer';
 import { pilotKeysActive } from './engine/pilotkeys';
 import { autosave, countAutosaves, pruneAfterSave } from './engine/autosave';
 import type { ResolvedColor } from './engine/palette';
@@ -191,6 +192,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     (window as any).__XENON__ ??= () => ({
       cycles: xenonPump.cycles, status: xenonPump.status,
       pilotKeys: xenonPump.pilotKeysBound(),
+      surfaceMeta: [...xenonPump.surfaces.values()].map(({ key, w, h }) => ({ key, w, h })),
       world: [...xenonPump.wsBoundNames()].map(n => {
         const r = xenonPump.wsChannels().find(c => c.name === n);
         return r ? { name: r.name, mode: r.mode, manual: r.manual, value: r.value } : null;
@@ -1595,6 +1597,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
           className={`ksp-btn shrink-0 px-2.5 py-1 text-[12px] hover:text-accent ${optsOpen ? 'on' : ''}`}>
           ⚙<span className="hidden sm:inline"> View</span>
         </button>
+        <BuzzerButton />
       </TopBar>
       <input ref={fileRef} type="file" accept=".json,application/json" className="hidden"
         data-testid="file-input"
@@ -1886,5 +1889,33 @@ function PickChip({ hit, bp }: { hit: PickHit; bp: Blueprint }) {
         {typeof comp.name === 'string' && comp.name ? <span className="text-ink-dim"> "{comp.name}"</span> : null}</>}
       {hit.point && <div className="tabular-nums text-[10px] text-ink-dim">@ {hit.point.map(n => n.toFixed(2)).join(', ')}</div>}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// BuzzerButton — the sound icon beside ⚙ View (we 2026-10-28: "place a mute
+// icon/sound icon near the 'view' buttons … which animates whenever any
+// buzzer is making sound so its evident that is the reason there is
+// sound"). Shows only while the RUNNING computer carries Buzzer components;
+// the click is the autoplay-safe gesture that starts/resumes the AudioContext
+// (engine/buzzer.ts); while any buzzer's Amplitude is live the icon pulses
+// (.buzzer-anim), so "sound on + buzzing" is visible, and muted/silent is
+// static. data-playing mirrors the live state for the pins.
+function BuzzerButton() {
+  const [, setTick] = useState(0);
+  useEffect(() => xenonPump.subscribe(() => setTick(t => t + 1)), []);
+  if (!(xenonPump.comp?.devices ?? []).some(d => d.type === 'Buzzer')) return null;
+  const playing = buzzerAudio.soundOn && buzzerAudio.level > 0.001;
+  return (
+    <button data-testid="buzzer-toggle" aria-pressed={buzzerAudio.soundOn}
+      data-playing={playing ? '1' : '0'}
+      title={buzzerAudio.soundOn
+        ? 'Buzzer sound ON — the icon pulses while a buzzer is playing'
+        : 'Buzzer sound OFF — click to enable (the browser requires this click)'}
+      onClick={() => buzzerAudio.toggleSound()}
+      className={`ksp-btn shrink-0 px-2.5 py-1 text-[12px] hover:text-accent ${
+        buzzerAudio.soundOn ? 'text-accent' : 'text-ink-dim'} ${playing ? 'buzzer-anim' : ''}`}>
+      {buzzerAudio.soundOn ? '🔊' : '🔇'}
+    </button>
   );
 }

@@ -1624,6 +1624,29 @@ topic + FORMAT).
    registered (__XENON__().surfaceMeta). E key → Roll (ch 5) = Mario's
    FIRE key (we: "we should have forwarded the e key as well" — the probe
    proved Mario reads ch5 = Roll, not Pitch) — nine bound keys total.
+ - **v1.13.4 MARIO PLAYS RIGHT (we: "for supermario, it should actually
+   focus on the first virtualscreen, also, that doesnt properly scale, it
+   stretches it sideways when trying to maximise … I dont hear the buzzers
+   … place a mute icon/sound icon near the 'view' buttons … which animates
+   whenever any buzzer is making sound")**: (a) `?dash=first-virtual`
+   sentinel — the dock switches to the Virtual tab and raises the FIRST
+   virtualscreen's zoom window (Mario composes on virtual#0#0 900×600; the
+   HdScreen panels are its physical mounts). (b) THE ASPECT LAW:
+   ScreenCanvas fill mode sets height:'auto' — CSS width 100% with the
+   height left at the canvas ATTRIBUTE stretched surfaces SIDEWAYS in the
+   zoom window; pinned: the Mario leg measures the fullscreen canvas ratio
+   == 900/600 at two zooms. (c) BUZZER AUDIBILITY: the probes proved the
+   bus CARRIES the signal (game-melody 0.0675 @ 522 Hz during the level
+   theme) — the silence was the old linear ·0.25 gain (Mario's ~0.09
+   amplitudes ≈ −33 dB) + a toggle buried in the Bus tab; voiceGain()
+   = min(1, amp·1.8)·0.4 (vitest-pinned). (d) THE BUZZERBUTTON (Editor,
+   beside ⚙ View, `buzzer-toggle`): 🔇/🔊, shows only while the running
+   computer has Buzzers, the click is the autoplay-safe AudioContext
+   gesture, and it THROBS (.buzzer-anim CSS pulse) while buzzerAudio.level
+   > 0 — the engine tracks `level` = the loudest live Amplitude EVERY
+   sync, even on devices with no audio; `data-playing` mirrors it for the
+   pins. No XenonCode emulation of the Buzzer component (deliberate:
+   "We dont need to emulate their precise xenoncode for now").
  - **v1.13.3 THE TOUCH COCKPIT (we: "for mobile phone, overlay all keyboard
    binds as buttons that do keydown when pressing and up when letting go,
    so we can play on mobile, also on virtual screens. Make that overlay the
@@ -1664,8 +1687,8 @@ topic + FORMAT).
    run, ch5 fire, ch10-13 pause/restart/mute/select), 8 BUZZER components
    (game-melody/harmony/bass/effects/fx-*) driven by audio.xc, 6 HdScreen
    surfaces (`screen("screen",0..5)` → `screen#0..5`), sprite atlas via
-   screen_copy + virtualscreen. PLAYTEST: `?craft=3820116990&dash=screen%230`
-   → click 🔊 → WASD/↑↓F. e2e: xenon.spec "dash focus + deep link + cockpit
+   screen_copy + virtualscreen. PLAYTEST: `?craft=3820116990&dash=first-virtual`
+   (the game canvas) → 🔊 → WASD/↑↓F. e2e: xenon.spec "dash focus + deep link + cockpit
    keys + buzzers: Mario plays" (@slow) — deep-link overlay, >200 lit title
    pixels, filter, 7 pilot keys bound, gamer_chair row manual 1/0 on press/
    release, buzzer-row-game-melody amplitude > 0. Unit: xenoncode.test pins

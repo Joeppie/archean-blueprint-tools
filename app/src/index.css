@@ -93,3 +93,12 @@ body { background: #14160f; color: var(--color-ink); font: 13px/1.45 'Arial Narr
   to   { opacity: 0; transform: translateY(-6px); }
 }
 .var-fade { animation: xen-varfade 1.6s ease-out forwards; }
+
+/* BuzzerButton activity pulse (v1.13.4): the TopBar 🔊 throbs while any
+   buzzer's Amplitude is live — "so its evident that is the reason there
+   is sound" */
+.buzzer-anim { display: inline-block; animation: xen-buzzer 0.5s ease-in-out infinite; }
+@keyframes xen-buzzer {
+  0%, 100% { transform: scale(1); filter: none; }
+  50% { transform: scale(1.25); filter: drop-shadow(0 0 6px #7dffcf); }
+}

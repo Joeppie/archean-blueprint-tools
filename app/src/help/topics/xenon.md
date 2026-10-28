@@ -74,10 +74,12 @@ zooming, no filter". The dash windows are now the read/write surface:
   handheld console. Tap a plain thumbnail (no pad in the browse grid) to
   open its zoom window, and the pad is there.
 * **Deep link** — `?craft=<id>&dash=<surfaceKey>` (e.g.
-  `?craft=3820116990&dash=screen%230`) opens the app straight into the ▣
+  `?craft=3820116990&dash=first-virtual`) opens the app straight into the ▣
   Screens dock **with that one surface's zoom window already raised**, as
   soon as it paints. `#` is `%23`; the surface key is the lowercase
-  `alias#channel` shown under each thumbnail.
+  `alias#channel` shown under each thumbnail — and `first-virtual` focuses
+  the FIRST virtualscreen (a game's composition canvas, e.g. Mario's
+  900×600, which is where the game actually renders).
 
 ## Cockpit keys — fly the craft from the dash
 
@@ -107,16 +109,24 @@ untouched.
 The game's **Buzzer** component produces tones of type `sine`, `square`,
 `triangle` or `sawtooth` (the component's config, the in-game `V` menu),
 with **Amplitude** (channel 0) and **Frequency** in Hz (channel 1, default
-440) on its data channel. Programs drive them with `output_number`. The
-Bus tab shows a Buzzers panel listing every Buzzer the craft carries
-(live amp + Hz), a wave picker sets the tone type, and a **🔊 / 🔇 toggle**
-turns sound on — the browser allows it only after a click, so the toggle
-starts muted. One oscillator per Buzzer, so a program using many buzzers
-(melody + harmony + bass + effects, as Chip's Mario does) plays chords.
+440) on its data channel. Programs drive them with `output_number`. One
+oscillator per Buzzer, so a program using many buzzers (melody + harmony
++ bass + effects, as Chip's Mario does) plays chords.
+
+**Hearing it**: the **🔊 icon in the top bar, beside ⚙ View**, is the
+sound switch — click it (the browser requires a real click before any
+page may make sound). **While any buzzer is playing, the icon throbs**,
+so you can SEE the sound is live; muted is a static 🔇. The IDE's Bus
+panel lists every Buzzer with its live amplitude + frequency (and a
+wave picker), and its own 🔊 row does the same as the top-bar icon.
+
+For a game like Mario: the title screen is Chip's own SILENT attract demo
+(his `musicgate=0`); the level themes start when a game does — jump
+(␣/F/▲) to start, and the melody/harmony/bass buzzers carry the tune.
 
 ## Mario, in the browser
 
-`?craft=3820116990&dash=screen%230` — Chip Patton's **PKC-385 "Super Mario
+`?craft=3820116990&dash=first-virtual` — Chip Patton's **PKC-385 "Super Mario
 Brothers"**, a XenonCode game that reads the `gamer-chair` PilotSeat, drives
 eight Buzzer components for its 8-bit music and paints six HdScreen
 surfaces. Sit in the seat (worldsim default = occupied, so it reads seated),
