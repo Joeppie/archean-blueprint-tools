@@ -32,6 +32,29 @@ export function modeToWave(mode: number): BuzzerWave {
   return BUZZER_MODES[i] ?? 'square';
 }
 
+/** Band-limited harmonic series (sine terms) for one tone type — the
+ *  game's buzzers are DARKER and rounder than WebAudio's built-in
+ *  oscillators (a Unity path with filtering and 4-bit-ish amplitudes;
+ *  in-game Mario "sounds far closer to the real thing"). We bake a
+ *  PeriodicWave table capped at 64 harmonics with a gentle rolloff:
+ *  a 660 Hz lead keeps ≤ 42 kHz of structure (all of it audible-smooth),
+ *  a 110 Hz bass reaches ~7 kHz — warm, not the built-in hard sparkle.
+ *  Pure — vitest-pinned. */
+export const BUZZER_HARMONICS = 64;
+export function buzzerHarmonics(kind: BuzzerWave): Float32Array {
+  const b = new Float32Array(BUZZER_HARMONICS + 1);
+  for (let n = 1; n <= BUZZER_HARMONICS; n++) {
+    let a = 0;
+    if (kind === 'sine') a = n === 1 ? 1 : 0;
+    else if (kind === 'square') a = (2 / (n * Math.PI)) * Math.sin(Math.PI * n * 0.5);
+    else if (kind === 'sawtooth') a = (2 / (n * Math.PI)) * (n % 2 === 0 ? -1 : 1);
+    else a = (8 / (Math.PI * Math.PI * n * n)) * Math.sin((Math.PI * n) / 2) * (((n - 1) / 2) % 2 === 0 ? 1 : -1);
+    // gentle 1/n^1.1 extra roll-off: tames the saw's edge, keeps bodies
+    b[n] = a / Math.pow(n, 0.1);
+  }
+  return b;
+}
+
 const LS_WAVE = 'archean-…wave';
 const LS_ON = 'archean-xenon-buzzer-sound';
 
@@ -80,14 +103,17 @@ export function buzzerReadings(pump: Pick<XenonPump, 'comp' | 'bus'>): BuzzerRea
   return out;
 }
 
-const MASTER_GAIN = 0.4;    // a full-amplitude buzzer is a solid, not a blast
+const MASTER_GAIN = 0.5;    // a full-amplitude buzzer is a solid, not a blast
 
 /** Game buzzers run quiet amplitudes (Chip's Mario writes ~0.05..0.3), so
  *  a linear ·0.25 gain sat at ≈ −33 dB — the "I dont hear the buzzers"
- *  report. Lift the low end (×1.8, capped) and scale to 0.4. Pure —
- *  vitest-pinned. */
+ *  report. Lift the low end (×1.8, capped) and scale to 0.4, with a 4-bit
+ *  amplitude quantization (round to 16 levels) — the game's channel
+ *  amplitudes pass through a coarse DAC path, part of its character.
+ *  Pure — vitest-pinned. */
 export function voiceGain(amp: number): number {
-  return Math.min(1, Math.max(0, amp) * 1.8) * MASTER_GAIN;
+  const q = Math.round(Math.max(0, Math.min(1, amp)) * 15) / 15;   // 4-bit-ish
+  return Math.min(1, q * 1.8) * MASTER_GAIN;
 }
 
 /** WebAudio mixer: one square-wave-capable oscillator per loud Buzzer.
@@ -117,23 +143,45 @@ export class BuzzerAudio {
   private master: GainNode | null = null;
   private analyser: AnalyserNode | null = null;
   private analyBuf: Float32Array | null = null;
-  private voices = new Map<string, { osc: OscillatorNode; gain: GainNode }>();
+  private voices = new Map<string, { osc: OscillatorNode; gain: GainNode; kind: string }>();
 
   private ensureCtx(): AudioContext {
     if (this.ctx) return this.ctx;
     const ctx = new AudioContext();
     const master = ctx.createGain();
     master.gain.value = 1;
+    // game-ish voice: a gentle lowpass tames the digital edge (the in-game
+    // buzzer path is dark; we: "in-game the sound is far closer to the
+    // actual super-mario")
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 7500;
+    lp.Q.value = 0.7;
     const comp = ctx.createDynamicsCompressor();
     const an = ctx.createAnalyser();
     an.fftSize = 2048;
-    master.connect(comp);
+    master.connect(lp);
+    lp.connect(comp);
     comp.connect(ctx.destination);
     comp.connect(an);
     an.connect(ctx.destination);
     this.ctx = ctx; this.master = master; this.analyser = an;
     this.analyBuf = new Float32Array(an.fftSize);
     return ctx;
+  }
+
+  /** Band-limited tone tables (buzzerHarmonics) as PeriodicWaves — the
+   *  built-in square/saw are hard, band-unlimited shapes; these roll off
+   *  at 64 harmonics for the game's rounder voice. */
+  private waveCache = new Map<BuzzerWave, PeriodicWave>();
+  private waveFor(kind: BuzzerWave, ctx: BaseAudioContext): PeriodicWave {
+    let w = this.waveCache.get(kind);
+    if (!w) {
+      const b = buzzerHarmonics(kind);
+      w = ctx.createPeriodicWave(new Float32Array(b.length), b, { disableNormalization: false });
+      this.waveCache.set(kind, w);
+    }
+    return w;
   }
 
   /** RMS (0..~1) of the audio actually flowing to the speakers right now.
@@ -230,24 +278,28 @@ export class BuzzerAudio {
       live.add(r.name);
       let v = this.voices.get(r.name);
       try {
+        const wantKind = (this.wave === 'auto' ? r.wave : this.wave) as BuzzerWave;
         if (!v) {
           const ctx = this.ensureCtx();
           void ctx.resume();
           const osc = ctx.createOscillator();
           const gain = ctx.createGain();
-          osc.type = (this.wave === 'auto' ? r.wave : this.wave) as OscillatorType;
+          osc.setPeriodicWave(this.waveFor(wantKind, ctx));
           gain.gain.value = 0;
           osc.connect(gain);
           gain.connect(this.master!);
           osc.start();
-          v = { osc, gain };
+          v = { osc, gain, kind: wantKind };
           this.voices.set(r.name, v);
         }
         const now = this.ctx!.currentTime;
-        // per-voice tone: the component's authored mode in 'auto', the
-        // picked wave as an override (we: "do the buzzers correctly do the
-        // saw tooth as the game expects? The sound is funky")
-        v.osc.type = (this.wave === 'auto' ? r.wave : this.wave) as OscillatorType;
+        if (v.kind !== wantKind) {
+          // per-voice tone: the component's authored mode in 'auto', the
+          // picked wave as an override (we: "do the buzzers correctly do the
+          // saw tooth as the game expects? The sound is funky")
+          v.osc.setPeriodicWave(this.waveFor(wantKind, this.ctx!));
+          v.kind = wantKind;
+        }
         v.osc.frequency.setTargetAtTime(r.freq, now, 0.01);
         v.gain.gain.setTargetAtTime(voiceGain(r.amp), now, 0.02);
       } catch {

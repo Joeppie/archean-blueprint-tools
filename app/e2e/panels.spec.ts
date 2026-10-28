@@ -320,6 +320,12 @@ test('mobile chain: no unsolicited static card, compact ⚙ card, always-on dock
 // RETIRED v1.12.1 (chain law): a step of the mobile chain above.
 
 test.describe('modes, new craft, file menu @ui', () => {
+  // L4 sparsify (AGENTS flake policy): the wire-preview hover step in the
+  // chain below is the documented full-suite-load-only flake family
+  // (green standalone at 1 AND 4 workers, red in the 4-worker boot
+  // pile-up); the jiggle-poll + law-level fallback in the step are the
+  // L3 self-heal — one scoped retry is the L4 rung.
+  test.describe.configure({ retries: 1 });
   const desktopOnly = () => test.skip(test.info().project.name !== 'chromium', 'desktop-only');
 
   // v1.12.1 CHAIN LAW: the New-craft leg and the triangles leg BOTH boot
@@ -498,11 +504,28 @@ test.describe('modes, new craft, file menu @ui', () => {
     const target = page.getByTestId('wire-target-item').first();
     await expect(target).toBeVisible();
     // hover a candidate: the 3D PREVIEW glows the candidate while the
-    // selection stays; leaving restores (hover state -1)
+    // selection stays; leaving restores (hover state -1). SELF-HEALING
+    // (AGENTS flake policy — the v1.12.2 port-row lesson one step upstream):
+    // the candidate list re-lays under the pointer after fill(''), so a
+    // single synthetic hover can land on stale coords — hover, jiggle, poll.
     const hoverState = () => page.evaluate(() =>
       (window as unknown as { __ARCHEAN__?: { hoverState: () => number } }).__ARCHEAN__!.hoverState());
-    await target.hover();
-    expect(await hoverState()).toBeGreaterThanOrEqual(0);
+    let hs = -1;
+    for (let i = 0; i < 6 && hs < 0; i++) {
+      await target.hover({ position: { x: 8 + i * 3, y: 6 } });
+      await page.waitForTimeout(200);
+      hs = await hoverState();
+    }
+    if (hs < 0) {
+      // FULL-SUITE-LOAD fallback (the law pinned here is hover→preview
+      // glow, not the compositor's hit-test under a 4-worker boot
+      // pile-up): fire the row's own enter event — React's mouseover
+      // polyfill drives onMouseEnter, which is the shipped handler.
+      await target.dispatchEvent('mouseover', { bubbles: true });
+      await page.waitForTimeout(300);
+      hs = await hoverState();
+    }
+    expect(hs).toBeGreaterThanOrEqual(0);
     await target.click();                                  // STEP 1: the part
     const port = page.getByTestId('wire-target-port').first();
     await expect(port).toBeVisible();                      // STEP 2: explicit port

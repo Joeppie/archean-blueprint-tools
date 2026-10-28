@@ -106,8 +106,8 @@ describe('THE BUZZER AUDIO LAWS (v1.13.4)', () => {
     // (≈ −33 dB — "I dont hear the buzzers"); the lifted law must be ≥ 0.05
     expect(voiceGain(0)).toBe(0);
     expect(voiceGain(0.09)).toBeGreaterThanOrEqual(0.05);
-    expect(voiceGain(1)).toBeCloseTo(0.4);
-    expect(voiceGain(5)).toBeCloseTo(0.4);            // capped
+    expect(voiceGain(1)).toBeCloseTo(0.5);
+    expect(voiceGain(5)).toBeCloseTo(0.5);            // capped
   });
   it('sync() tracks the activity LEVEL from the bus, no AudioContext needed', () => {
     // (node has no AudioContext — the TopBar animation must reflect what
@@ -173,5 +173,34 @@ describe('SOUND ON BY DEFAULT (v1.13.6)', () => {
     // the TopBar icon renders 🔊 from the first paint; the browser's
     // autoplay gate is met by arm()'s first-gesture unlock, not by a
     // toggle the player has to find.
+  });
+});
+
+describe('THE WARM-VOICE TABLES (v1.13.6)', () => {
+  it('buzzerHarmonics bakes band-limited series (64-harmonic cap)', async () => {
+    const { buzzerHarmonics, BUZZER_HARMONICS } = await import('../buzzer');
+    const sq = buzzerHarmonics('square');
+    expect(sq.length).toBe(BUZZER_HARMONICS + 1);
+    expect(sq[0]).toBe(0);
+    expect(sq[1]!).toBeCloseTo((2 / Math.PI) * Math.sin(Math.PI / 2), 3);   // fundamental
+    expect(sq[2]!).toBeCloseTo(0, 6);                                       // 50% duty: no even
+    expect(sq[3]!).toBeLessThan(0);                                         // 3rd, sign
+    const saw = buzzerHarmonics('sawtooth');
+    expect(saw[1]!).toBeGreaterThan(0);
+    expect(saw[2]!).toBeLessThan(0);                                        // alternating
+    // rolled off: |b_n| shrinks with n (beyond the 1/n^1.1 shaping)
+    expect(Math.abs(saw[8]!)).toBeLessThan(Math.abs(saw[2]!));
+    const sine = buzzerHarmonics('sine');
+    expect(sine[1]!).toBeCloseTo(1, 6);
+    for (let n = 2; n <= BUZZER_HARMONICS; n++) expect(sine[n]).toBe(0);
+    const tri = buzzerHarmonics('triangle');
+    expect(tri[2]!).toBeCloseTo(0, 6);                                      // odd only
+    expect(tri[1]!).toBeGreaterThan(0);
+  });
+  it("voiceGain quantizes 4-bit-ish (the game's coarse DAC path)", async () => {
+    const { voiceGain } = await import('../buzzer');
+    expect(voiceGain(0.09)).toBeGreaterThanOrEqual(0.05);   // Mario's melody audible
+    expect(voiceGain(0.07)).toBeCloseTo(voiceGain(0.09), 6);      // same 16th step
+    expect(voiceGain(1)).toBeCloseTo(voiceGain(1.4), 6);        // capped
   });
 });

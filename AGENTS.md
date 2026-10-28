@@ -1635,6 +1635,21 @@ topic + FORMAT).
    🔊 starts lit; the Mario leg pins aria-pressed 'true' on load and
    the outputLevel assertion proves the audio flows through the
    first-gesture unlock. Docs: xenon.md "Hearing it".
+ - **v1.13.6 THE WARM VOICE (we: "something isn't right with the
+   sawtooth/square sound ... in-game the sound is far closer to the actual
+   super-mario")**: WebAudio's built-in square/saw are hard, band-unlimited
+   shapes — the in-game buzzer path is dark and coarse (Unity synth,
+   4-bit-ish amplitudes; the client binary is il2cpp-stripped, no enum to
+   copy, so the fix is physical). buzzerHarmonics() bakes PERIODICWAVE
+   tables (sine-series harmonics, 64-harmonic cap, gentle 1/n^1.1 roll-off)
+   per tone, set per voice via osc.setPeriodicWave (switching live on
+   wave/auto change); the master chain gains a 7.5 kHz lowpass
+   (Q 0.7) before the compressor, and voiceGain quantizes amplitudes to
+   16 levels (the game's coarse DAC path; MASTER_GAIN 0.4 → 0.5, the
+   compressor absorbs chords). Pinned: harmonic-table laws + quantization
+   (vitest x2). Also: panels 'panel editors chain' flake family HEALED at
+   law level (hover → jiggle-poll → React mouseover fallback; L4
+   describe-scoped retries:1) — the full fast tier green again.
  - **v1.13.5 AUTHORED BUZZER MODES + FIREFOX + 3-D SCREEN CADENCE (we:
    "the sound won't turn on in Firefox … the display of visuals in the
    screens of the craft feels a bit delayed compared to actual screen
