@@ -4,8 +4,9 @@ we asked for the analysis behind one sentence: **unit tests are quick and
 specific; e2e tests are slow, flaky and hypersensitive — and they carry far
 too much of our guarantee. unit tests should capture virtually everything.**
 This document is the measurement, the diagnosis, the laws, and the phased
-fix. It supersedes the `Test-load stratification` section in AGENTS.md as
-the strategy text (AGENTS keeps the operational short form and points here),
+fix. It supersedes the old `Test-load stratification` section of AGENTS.md
+(now archived in docs/HISTORY.md §4; AGENTS.md keeps the operational laws in
+§ The app → Testing and § Test strategy, pointing here),
 and it turns the planned §P7 in REWRITE.md into an executable ladder.
 
 ## 1. The measured state (2026-10-26, this tree)
