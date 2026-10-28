@@ -1,15 +1,19 @@
 // staleness.spec.ts — the VERSIONED CACHE UI (v1.10.0): the gallery status
 // chip + the [Download latest] / [Open cached copy] open gate.
 //
-// The staleness is SEALED IN THROUGH THE WIRE, not a debug backdoor: the
-// first download's response is intercepted and re-fulfilled with the REAL
-// body but a FAKE X-Blueprint-Rev header. The copy therefore caches at a
-// rev the compiled catalog has never published, so the client's validator
-// (cached rev ≠ catalog rev) reports 'edited since cached' exactly as it
-// does for a genuine workshop edit — while the corpus files on disk stay
-// untouched. The digest is kept CORRECT (hashed from the body in the test
-// process), so only the version disagrees, and the sha-mismatch path has
-// its own vitest pin.
+// The staleness is SEALED IN THROUGH THE WIRE, not a debug backdoor. Under
+// the v1.13.11 SHA-ONLY LAW (we: "it always thinks it changed when I made a
+// new release; this should check whether the actual SHA of the file itself
+// is different! not the release") identity is the CONTENT digest: the old
+// fake-REV seal (real body, fake X-Blueprint-Rev) classifies as FRESH —
+// provably the same bytes is exactly what a matching sha means, and the
+// rev is display metadata only. So the wire seal swaps the CONTENT: the
+// response body gains a trailing newline (JSON.parse tolerates it — the
+// cached copy parses and opens), the digest is the honest SHA-256 OF THE
+// SWAPPED BODY (the app's download-verify passes, the store self-check
+// passes), and the catalog sha of the REAL file therefore differs —
+// 'edited since cached' with both dates, exactly as for a genuine
+// workshop edit, while the corpus files on disk stay untouched.
 import { expect, test } from '@playwright/test';
 import { createHash } from 'node:crypto';
 
@@ -17,22 +21,23 @@ const ID = '3803780241';                       // XYQ-615 — a cataloged craft 
 //                                               hidden craft has no gallery card,
 //                                               so it can't carry the chip the test asserts)
 
-const fakeRevRoute = async (route: import('@playwright/test').Route) => {
+const fakeContentRoute = async (route: import('@playwright/test').Route) => {
   const res = await route.fetch();
   const body = await res.text();
+  const swapped = body + '\n';                 // content edit (parses identically)
   await route.fulfill({
-    status: 200, body,
+    status: 200, body: swapped,
     headers: {
       'content-type': 'application/json',
-      'x-blueprint-rev': '1-19700101',         // a rev the catalog never had
-      'x-blueprint-sha': createHash('sha256').update(body).digest('hex'),
+      'x-blueprint-rev': res.headers()['x-blueprint-rev'] ?? '',
+      'x-blueprint-sha': createHash('sha256').update(swapped).digest('hex'),
     },
   });
 };
 
 test.describe('@ui versioned cache staleness', () => {
   test('stale copy: open gate asks with both doors; [Open cached copy] is zero-network; gallery chip warns', async ({ page }) => {
-    await page.route(`**/${ID}/blueprint.json`, fakeRevRoute);
+    await page.route(`**/${ID}/blueprint.json`, fakeContentRoute);
     let reqs = 0;
     page.on('request', r => { if (r.url().includes(`/${ID}/blueprint.json`)) reqs++; });
 
@@ -64,7 +69,7 @@ test.describe('@ui versioned cache staleness', () => {
   });
 
   test('[Download latest] re-stamps the copy → fresh opens silently with zero network again', async ({ page }) => {
-    await page.route(`**/${ID}/blueprint.json`, fakeRevRoute);
+    await page.route(`**/${ID}/blueprint.json`, fakeContentRoute);
     await page.goto(`/?craft=${ID}`);
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
 
