@@ -448,8 +448,17 @@ export default function XenonDialog(p: {
             { label: 'Run', testid: 'xmenu-run', entries: [
               { label: pump.status === 'running' ? 'Resume / continue' : 'Start', hint: 'F8', testid: 'run-resume', on: () => pump.startRunning() },
               { label: 'Pause', hint: 'F8', testid: 'run-pause', on: () => pump.pause(), disabled: pump.status !== 'running' },
-              { label: 'Step next line', hint: 'F10', testid: 'run-step', on: () => pump.stepOver() },
-              { label: 'Step into @call', hint: 'F11', testid: 'run-step-into', on: () => pump.stepInto() },
+              { label: pump.wrun ? 'Step next line' : 'Step next CYCLE (cycle-stepping ⚠)', hint: 'F10', testid: 'run-step', on: () => pump.stepOver() },
+              { label: pump.wrun ? 'Step into @call' : 'Step into next CYCLE (cycle-stepping ⚠)', hint: 'F11', testid: 'run-step-into', on: () => pump.stepInto() },
+              // the capability that is ABSENT on this origin, as a disabled
+              // item (v1.13.18, we: "disable the relevant menu items AND show
+              // a warning label") — never silently hidden
+              ...(pump.wrun ? [] : [{
+                label: sabSupported()
+                  ? 'True line-stepping — worker starting…'
+                  : 'True line-stepping — needs http://localhost:PORT (unavailable here)',
+                testid: 'run-lines-exact', on: () => undefined, disabled: true,
+              }]),
               { label: 'Stop', testid: 'run-stop', on: () => pump.stopRunning() },
               { label: 'Toggle breakpoint', hint: 'F9', testid: 'run-breakpoint', on: () => { if (onCode && lastLine > 0) toggleBp(lastLine); }, disabled: !onCode || lastLine <= 0 },
             ] },
@@ -835,6 +844,23 @@ export default function XenonDialog(p: {
             {pump.status === 'error' ? `Program '${comp.program}' crashed: ${pump.error}`
               : `Program '${comp.program}' loaded`}</div>
           {pump.status === 'running' && <div className="text-[#7ea6ff]">Program '{comp.program}' is running…</div>}
+          {/* DEBUGGER MODE CHIP (v1.13.18, we: "the application MUST CLEARLY
+              announce this degradation in capabilities"): which stepper is
+              LIVE (pump.wrun, not the gate) — a booting/absent worker on a
+              gated origin reads honestly, never a silent lie. */}
+          <div data-testid="xenon-mode"
+            title={pump.wrun
+              ? 'The VM runs on a worker: breakpoints + F10/F11 freeze it MID-CYCLE'
+              : sabSupported()
+                ? 'Worker debugger starting on this origin'
+                : 'This origin is not a secure, cross-origin-isolated context (use http://localhost:PORT or https): the browser withholds SharedArrayBuffer, so stepping advances one full 25 Hz cycle per F10/F11 and breakpoints fire at cycle boundaries'}
+            className={pump.wrun ? 'text-emerald-400/90' : 'text-amber-400/90'}>
+            {pump.wrun
+              ? <>debugger: <b>worker · true line-stepping</b></>
+              : sabSupported()
+                ? <>debugger: worker starting…</>
+                : <>⚠ debugger: <b>main-thread · cycle-granular</b> — each step advances a full cycle (true line-stepping needs http://localhost:PORT)</>}
+          </div>
         </div>
     </FloatingWindow>
   );

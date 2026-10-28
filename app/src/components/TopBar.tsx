@@ -14,6 +14,7 @@
 // vessel-information TODO (author / name / abbreviation) — listed DISABLED
 // so the roadmap is visible in the UI.
 import { useEffect, useRef, useState } from 'react';
+import { sabSupported } from '../engine/xenoncode';
 
 export type Mode = 'clean' | 'view' | 'edit' | 'wire' | 'flight' | 'aero';
 
@@ -182,6 +183,24 @@ export default function TopBar(p: Props) {
                          px-2.5 py-1.5 text-[10px] leading-snug text-amber-200/90">
               ⚠ Work in progress — programs run on the dev's interpreter,
               but the simulation is not complete and not yet correct.
+            </div>
+            {/* DEBUGGER MODE ANNOUNCEMENT (v1.13.18, we: "the application
+                MUST CLEARLY announce this degradation in capabilities … show
+                a warning label inside the Computer menu"): the worker
+                debugger (true mid-cycle line-stepping) exists only on a
+                cross-origin-isolated SECURE origin — http://localhost (or
+                https with COOP/COEP). Plain-http LAN/Tailscale addresses are
+                NOT secure contexts: the browser withholds SharedArrayBuffer
+                and the debugger runs the v1.13.16 cycle-granular stepper —
+                say so HERE, where the user picks the computer. */}
+            <div data-testid="xenon-sab-warn"
+              className={`mx-2 mt-1.5 rounded border px-2.5 py-1.5 text-[10px] leading-snug ${
+                sabSupported()
+                  ? 'border-emerald-400/30 bg-emerald-400/5 text-emerald-200/80'
+                  : 'border-amber-400/40 bg-amber-400/10 text-amber-200/90'}`}>
+              {sabSupported()
+                ? <>Debugger: <b>worker · true line-stepping</b> — this origin is cross-origin-isolated; the VM freezes mid-cycle at breaks and on F10/F11.</>
+                : <>⚠ Debugger degraded: <b>main-thread · cycle-granular</b> on this origin — every step advances one full 25 Hz cycle. True line-stepping needs <b>http://localhost:PORT</b> (https works too); plain-http LAN addresses are not secure contexts, so the browser withholds SharedArrayBuffer.</>}
             </div>
             <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-ink-dim">
             Programmable computers</div>

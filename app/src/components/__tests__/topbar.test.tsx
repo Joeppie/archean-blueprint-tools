@@ -72,6 +72,38 @@ describe('TopBar — Edit ▾ carries the history + TODO state', () => {
   });
 });
 
+// THE DEBUGGER-MODE ANNOUNCEMENT (v1.13.18, we: "the application MUST
+// CLEARLY announce this degradation in capabilities to the user … show a
+// warning label inside the Computer menu"): the Xenon ▾ menu states WHICH
+// stepper the debugger will run, driven by sabSupported() at render time.
+describe('TopBar — Xenon ▾ debugger-mode banner (v1.13.18)', () => {
+  const xenon = {
+    xenonComps: [{ ci: 11, alias: 'plomo', program: 'plomo', files: 1 }],
+    onXenon: () => undefined,
+  };
+  test('non-isolated origin (jsdom: no crossOriginIsolated) ⇒ the amber CYCLE-GRANULAR warning', () => {
+    renderBar(xenon);
+    fireEvent.click(screen.getByTestId('xenon-menu'));
+    expect(screen.getByTestId('xenon-sab-warn').textContent)
+      .toMatch(/cycle-granular/);
+    expect(screen.getByTestId('xenon-sab-warn').textContent)
+      .toMatch(/http:\/\/localhost/);
+  });
+  test('isolated origin ⇒ the green worker · true line-stepping state', () => {
+    const w = globalThis as unknown as { crossOriginIsolated?: boolean };
+    const had = w.crossOriginIsolated;
+    w.crossOriginIsolated = true;
+    try {
+      renderBar(xenon);
+      fireEvent.click(screen.getByTestId('xenon-menu'));
+      expect(screen.getByTestId('xenon-sab-warn').textContent)
+        .toMatch(/true line-stepping/);
+    } finally {
+      w.crossOriginIsolated = had;
+    }
+  });
+});
+
 describe('TopBar — mode tiles (the KNOWN ISSUE 13 contract)', () => {
   test('a tile arms its mode; RE-CLICKING the ACTIVE tile drops to ⌖ clean', () => {
     const { calls } = renderBar();

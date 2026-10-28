@@ -987,8 +987,17 @@ export class XenonPump {
     let run: XenonRun | XenonWorkerRun;
     if (wr) run = wr;
     else { run = await XenonRun.open(comp); wr = null; }
+    // SUPERSEDED-STALE-OPEN LAW (v1.13.18): a losing open (React StrictMode
+    // fires the dialog's boot effect TWICE in dev → two workers boot
+    // concurrently; the cold one answers LAST) must dispose its OWN run and
+    // touch NOTHING shared. The old `this.wrun = wr` before the seq check
+    // made the stale continuation null the WINNER's wrun: the pump kept the
+    // VM running on the live worker while pump.wrun read null — the
+    // debugger silently degraded to cycle-granular stepping (F10 = +1
+    // cycle/step) and the UI lied about the mode (prod previews never
+    // double-fire effects, so the e2e never saw it).
+    if (seq !== this.openSeq) { run.stop(); wr?.dispose(); return; }
     this.wrun = wr;
-    if (seq !== this.openSeq) { run.stop(); wr?.dispose(); this.wrun = null; return; }
     this.paused = false; this.pausedLine = 0; this.pausedFile = ''; this.stepMode = 'off';
     {
       const runFiles = comp.files.map((f, i) =>

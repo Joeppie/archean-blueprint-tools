@@ -250,8 +250,16 @@ test.describe('Xenon IDE @ui', () => {
     await page.goto(`/?craft=${CEP}`);
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 90_000 });
     await page.getByTestId('xenon-menu').click();
+    // THE MODE ANNOUNCEMENT (v1.13.18, we: "MUST CLEARLY announce this
+    // degradation … warning label inside the Computer menu"): this suite
+    // runs on an isolated origin — the banner must state the WORKER state.
+    await expect(page.getByTestId('xenon-sab-warn')).toContainText('true line-stepping');
     await page.locator('[data-testid^="xenon-comp-"]').first().click();
     await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 60_000 });
+    // the IDE chip states the LIVE stepper (pump.wrun — the dev-only
+    // StrictMode stale-open race nulled it while the VM ran on the worker;
+    // the chip + this pin make any such silent degradation visible)
+    await expect(page.getByTestId('xenon-mode')).toContainText('worker · true line-stepping');
     await page.getByTestId('xenon-tab-0').click();
     // line 17 (output_number(8,0,...)) runs EVERY cycle — click its gutter
     const gutter = page.locator('.xc-break-gutter .cm-gutterElement').nth(16);
