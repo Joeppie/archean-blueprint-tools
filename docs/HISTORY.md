@@ -2734,6 +2734,70 @@ topic + FORMAT).
   ⛶ viewport fill + dbl-click restore, F5 cycles-rewind in the IDE and in
   the dock with no page reload.
 
+- **v1.13.26 THE EDITOR-ERGONOMICS BATCH (we: "ctrl-g needs to go to a
+  certain line, library function should be in tabs, screen, system, IO
+  should all have their own coloured category, clicking a function should
+  go to its definition, autocomplete should suggest them when typing. Tab
+  needs to not move the cursor out of the editor… enter on an init,update
+  etc. block should automatically indent, same with a function… e2e tests
+  have a @codeditor flag… mouseovering a io write/read to a specific port
+  should resolve what kind of device it is and what its current values
+  are… display the 3d view and the current relevant value")**:
+  (1) CTRL+G — a tiny in-editor go-to-line box (`xc-goto`, this CM vintage
+  ships no go-to-line; relay from the dialog like Ctrl+F).
+  (2) LIBRARY CATEGORY TABS — `XC_LIB_GROUPS` in xcproject (seven groups,
+  one colour each; vitest: the keys == the set of groups XC_LIB_DOC uses,
+  colours are #rrggbb); the Library tab's chip row filters, chip dot and
+  the doc row's left border carry the colour.
+  (3) AUTOCOMPLETE — bare-word completion serves XC_LIB_DOC entries with
+  `sig — desc` as info; declared functions carry `@sig — declared in
+  file:line`. Click-to-definition: Library rows jump (v1.13.25); library
+  builtins have NO source (hover/completion carries the doc).
+  (4) TAB — THE BUG WAS REAL, THE FIX HAS A TWIST: the editor had NO
+  defaultKeymap, so Tab fell through to the BROWSER and focus left the
+  editor. Adding defaultKeymap ALONE does NOT fix Tab — CM keeps
+  Tab = focus-move by DEFAULT (accessibility) and ships the indent Tab as
+  the SEPARATE `indentWithTab` binding; both landed (ours first in the
+  keymap list). e2e asserts activeElement stays in .cm-editor after Tab.
+  (5) ENTER AUTO-INDENT — an explicit Enter binding (this CM vintage's
+  stream `indent(state, textAfter, {unit})` cannot see the PREVIOUS line,
+  so the stream indent API is unusable for the law): at the caret's line
+  end, `opensBlockLine` (xcproject pure = BLOCK_RE ∪ FN_RE) ⇒ newline at
+  indent + one unit, THE UNIT BEING A TAB — XenonCode's compiler scopes
+  block bodies by TABS (a 2-space body parses as GLOBAL scope — the fresh
+  leg's 'Invalid first word c' boot error, found by probing the pump, not
+  the UI); else the line's indent is carried; mid-line Enter is
+  a plain newline. CM6 normalizes a TYPED '\n' to the Enter keymap, so
+  programs AUTHORED via keyboard.type auto-indent too — the legs that
+  typed corpus-style tabs after newlines went 'Invalid scope' (tab +
+  auto-indent mix) and now type tab-free, the editor owning the indent;
+  bare `dispatch({changes})` keeps the caret at the insert START (the
+  next word landed on the previous line) — the binding sets the selection
+  to the insert end explicitly (both measured via temp probes). (6) IO HOVER + PREVIEW + FLY — `ioCallAt(line,col)` (pure) hits
+  the whole `input_number/output_number/input_text/output_text(…)` call;
+  the dialog resolves alias/io → XCDevice, ch → the game's channel table
+  (`chanInfo` name + range) and the LIVE value — reads = `pump.reads`
+  (what the device SENT the program), writes = `pump.bus` (what the
+  program SENT the device) — and the tooltip carries the part's CATALOG
+  PREVIEW (we clarified: "I didnt mean a 3d navigation, I meant a view of
+  the component's normal appearance like in the menu where its placed
+  from"): an `<img>` fed by `requestThumb` from engine/thumbs.ts — the
+  placement menu's own live-model renderer, shared GL context and all.
+  Ctrl+Click flies the 3-D view via `engine.flyTo(dev.ci)` (kept as the
+  bonus it turned out to be) — XCDevice now carries `ci` (the COMPONENT
+  index; `id` is the device-table order, flyTo wants the component). The
+  `__XENON__` debug hook gained `cam()` (Engine.camPos) so the fly is
+  measurable — and the DIALOG's enriched hook must carry it too (it
+  REPLACES the base hook while open; the probe read null through the
+  shadow until both had it). (7) @codeditor — the CodeEditor legs (extras,
+  syntax-colors/def/hover, menus/autocomplete, the new keys/hover leg)
+  carry the tag; full runs only when the editor's files touch. Pins:
+  vitest xcproject (group-tab lockstep, opensBlockLine ×2, ioCallAt ×3);
+  e2e xenon 'editor keys: Tab stays, block auto-indent, Ctrl+G, io hover
+  + 3-D fly' (@slow @codeditor, PLANE fixture: innerText indent geometry,
+  Tab-focus law, goto land, hover device+write, camera-move poll); the
+  extras leg gained the category-chip filter steps.
+
 ## 2. v1.11 session — KNOWN ISSUES & UNPINNED TODOS (2026-10-25/26 session block)
 
 KNOWN ISSUES (accepted behaviours, costs, sharp edges):

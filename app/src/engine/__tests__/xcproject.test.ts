@@ -167,3 +167,49 @@ describe('library index (XC_LIB_DOC ⇄ XC_LIB_FNS lockstep)', () => {
     expect(XC_SCREEN_MEMBERS).toContain('write');
   });
 });
+
+// ── v1.13.26 helpers: group tabs, block-open lines, io-call hit test
+import { ioCallAt, opensBlockLine, XC_LIB_GROUPS } from '../xcproject';
+
+describe('library group tabs', () => {
+  it('group keys cover exactly the groups the table uses', () => {
+    const groups = new Set(XC_LIB_DOC.map(f => f.group));
+    expect(new Set(XC_LIB_GROUPS.map(g => g.key))).toEqual(groups);
+    for (const g of XC_LIB_GROUPS) expect(g.color).toMatch(/^#[0-9a-f]{6}$/);
+  });
+});
+
+describe('opensBlockLine (Enter auto-indent law)', () => {
+  it('opens on block keywords and function declarations', () => {
+    for (const l of ['init', 'update', '  tick', 'timer frequency 4', 'input 11',
+      'screen("TrimsDash", 0)', 'function @helper($a:number)',
+      'recursive function @fib($n:number):number'])
+      expect(opensBlockLine(l), l).toBe(true);
+  });
+  it('does not open on bodies, calls, blank or indented lines', () => {
+    for (const l of ['', '  $x = 1', 'output_number("Engine", 0)', 'const $a = 1',
+      '@helper(1)', 'var $v = 0', '; init note'])
+      expect(opensBlockLine(l), l).toBe(false);
+  });
+});
+
+describe('ioCallAt (io hover hit test)', () => {
+  const line = '  output_number("PitchControlJunction", 1, -$pitch)';
+  it('fires on the function name, not past the args', () => {
+    expect(ioCallAt(line, 4)?.fn).toBe('output_number');
+    expect(ioCallAt(line, 22)?.fn).toBe('output_number');   // alias string too
+    expect(ioCallAt(line, line.length + 3)).toBeNull();
+    expect(ioCallAt('  $x = 1 + 2', 4)).toBeNull();
+  });
+  it('parses alias-text and io-number first args + the channel', () => {
+    expect(ioCallAt(line, 4)).toEqual({ fn: 'output_number', arg: 'PitchControlJunction', channel: 1 });
+    expect(ioCallAt('input_number(11, 3)', 2))
+      .toEqual({ fn: 'input_number', arg: '11', channel: 3 });
+    expect(ioCallAt('input_text("ui")', 2)).toBeNull();      // no channel arg
+  });
+  it('spans of TWO calls on one line resolve independently', () => {
+    const two = 'print(text(input_number("a", 1)))';
+    expect(ioCallAt(two, 2)).toBeNull();          // print is NOT an io call
+    expect(ioCallAt(two, 20)?.fn).toBe('input_number');
+  });
+});

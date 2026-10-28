@@ -245,6 +245,9 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     (window as any).__XCDBG__ ??= makeXcdbg(xenonPump);
     (window as any).__XENON__ ??= () => ({
       cycles: xenonPump.cycles, status: xenonPump.status,
+      // v1.13.26: the camera (the io-hover fly-to pin measures the 3-D
+      // view actually moved; null until a scene exists)
+      cam: () => engineRef.current?.camPos() ?? null,
       pilotKeys: xenonPump.pilotKeysBound(),
       surfaceMeta: [...xenonPump.surfaces.values()].map(({ key, w, h }) => ({ key, w, h })),
       // v1.13.8 audit door: a surface's live framebuffer (the invadersaudit

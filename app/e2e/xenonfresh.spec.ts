@@ -44,7 +44,10 @@ test.describe('a fresh MiniComputer is programmable @ui', () => {
     const cm = page.locator('.cm-content');
     await expect(cm).toBeVisible();
     await cm.click();
-    await page.keyboard.type('var $c = 0\nupdate\n\t$c = $c + 1\n\tprint(text("fresh-boots {}", $c))');
+    // v1.13.26 law: '\n' auto-indents (update ⇒ body one unit in), so the
+    // typing carries NO manual tabs — the editor owns the indent (typed
+    // tabs stacked onto it = mixed indent = 'Invalid scope' at boot)
+    await page.keyboard.type('var $c = 0\nupdate\n$c = $c + 1\nprint(text("fresh-boots {}", $c))');
     await page.getByTestId('xenon-save').click();
 
     // THE WRITE PATH ran: the save REBOOTED the VM off the blueprint's

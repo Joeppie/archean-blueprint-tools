@@ -101,7 +101,7 @@ test.describe('Xenon IDE @ui', () => {
   // code, so long as a computer or screen window is open"). E2E-TIER
   // because the laws are key routing (Ctrl+F/F5/Escape between the CM
   // panel, the IDE window and the browser) + viewport geometry.
-  test('IDE extras: Library index+jump, Ctrl-F find, ⛶ maximise, F5 re-boot @slow', async ({ page }) => {
+  test('IDE extras: Library index+jump, Ctrl-F find, ⛶ maximise, F5 re-boot @slow @codeditor', async ({ page }) => {
     await page.goto(`/?craft=${PLANE}`);
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 90_000 });
     await page.getByTestId('xenon-menu').click();
@@ -116,6 +116,13 @@ test.describe('Xenon IDE @ui', () => {
     await page.getByTestId('xenon-lib-search').fill('worldsim');
     await expect(page.getByTestId('xenon-lib-doc-setworldsim')).toBeVisible();
     await expect(page.getByTestId('xenon-lib-doc-print')).toHaveCount(0);
+    // CATEGORY TABS (v1.13.26): a group chip shows only its coloured rows
+    await page.getByTestId('xenon-lib-search').fill('');
+    await page.getByTestId('xenon-lib-g-screen').click();
+    await expect(page.getByTestId('xenon-lib-doc-screen')).toBeVisible();
+    await expect(page.getByTestId('xenon-lib-doc-print')).toHaveCount(0);
+    await page.getByTestId('xenon-lib-g-all').click();
+    await expect(page.getByTestId('xenon-lib-doc-print')).toBeVisible();
     await page.getByTestId('xenon-lib-search').fill('selectcase');
     await expect(page.getByTestId('xenon-lib-fn-selectcase')).toBeVisible();
     await page.getByTestId('xenon-lib-fn-selectcase').click();
@@ -171,6 +178,109 @@ test.describe('Xenon IDE @ui', () => {
       .poll(async () => (await cycles()) < c1 / 2, { timeout: 15_000, intervals: [200] })
       .toBe(true);
     await expect(page.getByTestId('screens-btn')).toBeVisible();
+  });
+
+  // v1.13.26 (we: "ctrl-g needs to go to a certain line … Tab needs to not
+  // move the cursor out of the editor … after hitting enter on an init,
+  // update etc. block, the next line should automatically indent, same
+  // with a function … mouseovering a io write/read … resolve what kind of
+  // device it is … display the 3d view"). E2E-TIER because these are real
+  // key routing + caret geometry + the hover tooltip + the camera.
+  test('editor keys: Tab stays, block auto-indent, Ctrl+G, io hover + 3-D fly @slow @codeditor', async ({ page }) => {
+    await page.goto(`/?craft=${PLANE}`);
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 90_000 });
+    await page.getByTestId('xenon-menu').click();
+    await page.locator('[data-testid^="xenon-comp-"]').first().click();
+    await expect(page.getByTestId('xenon-dialog')).toBeVisible();
+    await page.getByTestId('xenon-edit').click();
+    const cm = page.locator('.cm-content');
+    await cm.click();
+    await page.keyboard.press('Control+End');
+
+    // Enter after a block opener indents one unit; after a nested opener
+    // TWO units; Tab lands inside the editor, focus NEVER leaves
+    await page.keyboard.type('update');
+    await page.keyboard.press('Escape');          // dismiss the completion popup
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('init');
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Enter');
+    // assert the auto-indent BEFORE Tab rides on top of it: Enter after a
+    // block opener lands one TAB deeper (the game's scope grammar)
+    const txt = await cm.evaluate((el: HTMLElement) => el.innerText);
+    expect(txt, 'TAIL: ' + JSON.stringify(txt.slice(-100))).toMatch(/update\n\tinit\n\t\t/);
+    // Tab lands INSIDE the code (focus law) and adds indent — its exact
+    // stop-fill is CM's business, the two laws are ours
+    await page.keyboard.press('Tab');
+    const txtTab = await cm.evaluate((el: HTMLElement) => el.innerText);
+    expect(txtTab).not.toBe(txt);
+    expect(await page.evaluate(() =>
+      (document.activeElement as HTMLElement | null)?.closest('.cm-editor') !== null)).toBe(true);
+
+    // Ctrl+G jumps the caret to a line (jump to 1 → typed text lands at
+    // the very top of the file)
+    await page.keyboard.press('Control+g');
+    const goto = page.getByTestId('xc-goto-input');
+    await expect(goto).toBeVisible();
+    await goto.fill('1');
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId('xc-goto')).toHaveCount(0);
+    await page.keyboard.type(';;G');
+    const txt2 = await cm.evaluate((el: HTMLElement) => el.innerText);
+    // CM's innerText may lead with blank-line newlines — anchor on the
+    // first NON-EMPTY rendered line
+    expect(txt2.replace(/^\n+/, '').startsWith(';;G')).toBe(true);
+
+    // io HOVER: over an output_number("alias", ch, …) the tooltip names
+    // the DEVICE (type), the channel MEANING and the live write value
+    const ioLine = page.locator('.cm-line', { hasText: 'output_number(' }).first();
+    const t = await ioLine.innerText();
+    const alias = /output_number\(\s*"([^"]+)"/.exec(t)?.[1];
+    expect(alias).toBeTruthy();
+    const box = (await ioLine.boundingBox())!;
+    const x = await ioLine.evaluate((el, idx) => {
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      let n: Text | null; let acc = 0;
+      while ((n = walker.nextNode() as Text | null)) {
+        if (idx <= acc + n.length) {
+          const r = document.createRange();
+          r.setStart(n, idx - acc); r.setEnd(n, Math.min(n.length, idx - acc + 1));
+          return r.getBoundingClientRect().left;
+        }
+        acc += n.length;
+      }
+      return el.getBoundingClientRect().left;
+    }, t.indexOf('output_number') + 4);
+    await page.mouse.move(x, box.y + box.height / 2);
+    const tip = page.locator('.cm-tooltip').first();
+    await expect(tip).toBeVisible({ timeout: 8_000 });
+    await expect(tip).toContainText(alias!);
+    await expect(tip).toContainText('write');
+    // the tooltip carries the device's CATALOG PREVIEW (the placement
+    // menu's own live-model renderer fills the img, async) — we: "a view
+    // of the component's normal appearance like in the menu where its
+    // placed from"
+    const thumb = tip.locator('img[data-testid="xc-io-thumb"]');
+    await expect(thumb).toBeVisible();
+    await expect
+      .poll(async () => ((await thumb.getAttribute('src')) ?? '').length > 100,
+        { timeout: 20_000, intervals: [300] })
+      .toBe(true);
+
+    // Ctrl+Click on the call → the 3-D view FLEYS to the device
+    const cam = () => page.evaluate(() => (window as any).__XENON__().cam?.() ?? null);
+    const cam0 = await cam();
+    await page.keyboard.down('Control');
+    await page.mouse.click(x, box.y + box.height / 2);
+    await page.keyboard.up('Control');
+    await expect
+      .poll(async () => JSON.stringify(await cam()) !== JSON.stringify(cam0),
+        { timeout: 10_000, intervals: [250] })
+      .toBe(true);
+
+    // discard the scratch edit (revert, no save)
+    await page.getByTestId('xenon-edit-cancel').click();
+    await page.keyboard.press('Escape');
   });
 
   test('the Badger boots: 57 files, named screens, alias io bus, capped view @slow', async ({ page }) => {
@@ -486,7 +596,7 @@ test.describe('Xenon IDE @ui', () => {
     await page.keyboard.press('Escape');
   });
 
-  test('the editor: syntax colors, right-click menu, go-to-definition, hover @slow', async ({ page }) => {
+  test('the editor: syntax colors, right-click menu, go-to-definition, hover @slow @codeditor', async ({ page }) => {
     test.setTimeout(120_000);
     // (we: "there should be a context menu when I right click… I should have
     // go to definition as a right click menu and hovering over a function
@@ -608,7 +718,7 @@ test.describe('Xenon IDE @ui', () => {
     await page.keyboard.press('Escape');
   });
 
-  test('IDE menus, single-row tab strip, and $/@/word AUTOCOMPLETE @slow', async ({ page }) => {
+  test('IDE menus, single-row tab strip, and $/@/word AUTOCOMPLETE @slow @codeditor', async ({ page }) => {
     await page.goto(`/?craft=${PLANE}`);
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 90_000 });
     await page.getByTestId('xenon-menu').click();
@@ -694,19 +804,23 @@ test.describe('Xenon IDE @ui', () => {
     await upd.click();
     await page.keyboard.press('End');
     await page.keyboard.press('Enter');
-    await page.keyboard.type('	print(text("alt: {}", input_number(4, 2)))');
+    await page.keyboard.type('print(text("alt: {}", input_number(4, 2)))');
     await page.getByTestId('xenon-save').click();
     await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 90_000 });
     await page.getByTestId('xenon-side-console').click();
     await expect(page.getByTestId('xenon-log')).toContainText('alt: 2002', { timeout: 30_000 });
-    // PROGRAM override via setworldsim wins over the expression
+    // PROGRAM override via setworldsim wins over the expression — authored
+    // the user's own way (v1.13.26): click the update line, End, ENTER
+    // (auto-indent lands the body's tab), type the statement. The old
+    // insert-at-Home + mid-line-Enter trick left the split `print` at
+    // column 0 = global scope = boot error (measured twice)
     await page.getByTestId('xenon-edit').click();
-    const body2 = page.locator('.cm-line', { hasText: /input_number\(4, 2\)/ }).first();
-    await expect(body2).toBeVisible();
-    await body2.click();
-    await page.keyboard.press('Home');
-    await page.keyboard.type('\tsetworldsim("navinstrument.altitude_meters_from_sea_level", 3000)');
+    const upd2 = page.locator('.cm-line', { hasText: /^update$/ }).first();
+    await expect(upd2).toBeVisible();
+    await upd2.click();
+    await page.keyboard.press('End');
     await page.keyboard.press('Enter');
+    await page.keyboard.type('setworldsim("navinstrument.altitude_meters_from_sea_level", 3000)');
     await page.getByTestId('xenon-save').click();
     await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 90_000 });
     await page.getByTestId('xenon-side-world').click();

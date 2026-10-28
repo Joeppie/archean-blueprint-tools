@@ -236,11 +236,25 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
 - THE CADENCE LAW: the VM cycles at 25 Hz (`CYCLE_MS = 40`, shim
   `xc_set_cycle_ms`); React panels coalesce ≤ 10 Hz; canvases blit EVERY
   cycle.
-- IDE RUN/FIND/MAXIMIZE KEYS: F5 = RUN (a draft save ⇒ disk write ⇒
+- IDE RUN/FIND/GOTO/MAXIMIZE KEYS: F5 = RUN (a draft save ⇒ disk write ⇒
   auto-reboot; no draft ⇒ `pump.reboot()`) ONLY while a computer or
   Screens window is open — else F5 stays the browser refresh. Ctrl+F =
-  CM find panel (Esc closes find, NEVER the IDE — popup stopPropagation
-  law). ⛶ / title double-click maximizes (FloatingWindow `maximized`).
+  CM find panel, Ctrl+G = go-to-line box (Esc closes them, NEVER the IDE —
+  popup stopPropagation law). ⛶ / title double-click maximizes
+  (FloatingWindow `maximized`).
+- EDITOR KEY LAWS (v1.13.26): defaultKeymap + `indentWithTab` are REQUIRED
+  (CM keeps Tab = focus-move by default; without them Tab leaves the
+  editor via the browser); Enter auto-indents one unit — a TAB, the game
+  scopes block bodies by tabs (a 2-space body parses as global scope) —
+  after `opensBlockLine` lines (blocks + function decls), carrying the
+  current indent elsewhere; a TYPED '\n' rides the same Enter keymap, so
+  keyboard-authored code must not carry manual tabs on top of it;
+  io calls (`input_number`/`output_number`/…) hover
+  DEVICE + channel MEANING + live reads/bus value + the part's CATALOG
+  PREVIEW (engine/thumbs.ts, the placement-menu renderer), Ctrl+Click =
+  `engine.flyTo(device.ci)` (XCDevice carries the component index).
+  Editor e2e legs carry @codeditor — full @codeditor runs only when
+  CodeEditor.tsx/xcproject.ts/CodeMirror touch.
 - THE STEP LAW LIVES IN TWO PLACES: `stepperLaw()` (xenoncode.ts, pure,
   main-thread) ⇄ the EM_JS hook in `xc_host.cpp` (worker). ANY change lands
   in BOTH + re-pins. SAB payload windows start ABOVE every slot byte (slot n

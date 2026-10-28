@@ -284,3 +284,54 @@ export function libIndex(q: string): XCLibFn[] {
     f.name.includes(t) || f.sig.toLowerCase().includes(t)
     || f.desc.toLowerCase().includes(t) || f.group.includes(t));
 }
+
+/** The Library tab's CATEGORY tabs (v1.13.26, we: "library function should
+ *  be in tabs, screen, system, IO should all have their own coloured
+ *  category"): one chip per XC_LIB_DOC group, colours ride the chip dot
+ *  AND the doc row's left border. A vitest pin keeps the keys == the set
+ *  of groups the table uses. */
+export interface XCLibGroup { key: string; label: string; color: string }
+export const XC_LIB_GROUPS: XCLibGroup[] = [
+  { key: 'io', label: 'I/O', color: '#8fd4ff' },
+  { key: 'screen', label: 'Screens', color: '#c3e88d' },
+  { key: 'device', label: 'Devices', color: '#e6c07b' },
+  { key: 'value', label: 'Values', color: '#d6a8ff' },
+  { key: 'system', label: 'System', color: '#9fb0c8' },
+  { key: 'recipe', label: 'Recipes', color: '#ffb3b3' },
+  { key: 'worldsim', label: 'Worldsim', color: '#7dd8c0' },
+];
+
+/** ── BLOCK-OPEN lines (v1.13.26, we: "after hitting enter on an init,
+ *  update etc. block, the next line should automatically indent, same with
+ *  a function"): the editor's Enter handler indents ONE unit after a
+ *  global-scope block keyword line (BLOCK_RE's set) or a `function @name`
+ *  declaration. Pure so the law is vitest-pinned. */
+export function opensBlockLine(line: string): boolean {
+  return BLOCK_RE.test(line) || FN_RE.test(line);
+}
+
+/** ── io-CALL hit test (v1.13.26, we: "when mouseovering a io write/read
+ *  to a specific port … resolve what kind of device it is and what its
+ *  current values are … what that means, read from the device itself"):
+ *  caret at `col` sits ON an input_number/output_number/input_text/
+ *  output_text call name → the call's function, its first argument
+ *  (alias text WITHOUT quotes, or the io number as text) and its channel
+ *  (second number); null off any such call. */
+export interface XCIoCall { fn: string; arg: string; channel: number }
+const IO_CALL_RE = /(input_number|output_number|input_text|output_text)\s*\(([^)]*)\)/g;
+export function ioCallAt(line: string, col: number): XCIoCall | null {
+  IO_CALL_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = IO_CALL_RE.exec(line))) {
+    // the WHOLE call is the target: hovering the alias string ("Engine")
+    // is the natural gesture — that string IS the port being read/written
+    if (col >= m.index && col <= m.index + m[0].length) {
+      const args = m[2] ?? '';
+      const a = /"([^"]*)"|(-?\d+)/.exec(args);
+      const c = /,\s*(-?\d+)/.exec(args);
+      if (!a || !c) return null;
+      return { fn: m[1]!, arg: a[1] ?? a[2]!, channel: +c[1]! };
+    }
+  }
+  return null;
+}

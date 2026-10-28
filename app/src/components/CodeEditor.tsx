@@ -24,17 +24,19 @@ import {
   Decoration, EditorView, GutterMarker, ViewPlugin, hoverTooltip, keymap, lineNumbers,
   gutter, type BlockInfo, type DecorationSet, type ViewUpdate,
 } from '@codemirror/view';
+import { defaultKeymap, indentWithTab } from '@codemirror/commands';
 import { StreamLanguage } from '@codemirror/language';
 import {
   autocompletion, closeCompletion, completionStatus, startCompletion,
   type Completion, type CompletionContext, type CompletionResult,
 } from '@codemirror/autocomplete';
 import { closeSearchPanel, openSearchPanel, searchKeymap, searchPanelOpen } from '@codemirror/search';
+import { requestThumb } from '../engine/thumbs';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { tags as t } from '@lezer/highlight';
 import {
-  XC_KEYWORDS, XC_LIB_FNS, XC_SCREEN_MEMBERS, definitionOf,
-  functionTokenAt, type XCDecl, type XCFile, type XCFunction,
+  XC_KEYWORDS, XC_LIB_DOC, XC_LIB_FNS, XC_SCREEN_MEMBERS, definitionOf,
+  functionTokenAt, ioCallAt, opensBlockLine, type XCDecl, type XCFile, type XCFunction,
 } from '../engine/xcproject';
 
 // ── XenonCode language ────────────────────────────────────────────────
@@ -82,6 +84,9 @@ const xcLanguage = StreamLanguage.define({
   languageData: {
     commentTokens: { line: ';' },
     closeBrackets: { brackets: ['(', '[', '{', '"'] },
+    // the indent unit is a TAB everywhere (the game's scope grammar):
+    // Tab/indentMore and our Enter agree with the corpus style
+    indentUnit: '\t',
   },
 });
 
@@ -119,6 +124,8 @@ export interface CodeEditorHandle {
   openSearch(): void;
   /** Close an open find panel; true = a panel was open and got closed. */
   closeSearch(): boolean;
+  /** Open the Ctrl+G go-to-line box (the IDE's relay from a dead zone). */
+  openGoto(): void;
 }
 
 export interface CodeEditorProps {
@@ -140,6 +147,18 @@ export interface CodeEditorProps {
   onRunTo: (line1: number) => void;
   onGoDef: (file: string, line1: number) => void;
   onLine: (line1: number) => void;   // caret moved (F9's target)
+  /** io-CALL hover (v1.13.26): caret on input_number/output_number/… —
+   *  the dialog resolves the DEVICE (alias/io), the channel's game
+   *  MEANING and the live value; the tooltip paints `lines` and, when a
+   *  component `type` comes back, its catalog-preview thumbnail (the SAME
+   *  engine/thumbs.ts renderer the placement menu rows use — we: "a view
+   *  of the component's normal appearance like in the menu where it's
+   *  placed from"). null = nothing to say. */
+  ioInfo?: (fn: string, arg: string, channel: number) =>
+    { type: string; lines: string[] } | null;
+  /** Ctrl+Click on an io call — the dialog flies the 3-D view to the
+   *  device (we: "…and display the 3d view…"). */
+  onIoClick?: (fn: string, arg: string, channel: number) => void;
 }
 
 function lineDecoExt(breaks: Set<number>, pausedLine: number,
@@ -179,6 +198,9 @@ function CodeEditorInner(p: CodeEditorProps, ref: React.Ref<CodeEditorHandle>) {
   propsRef.current = p;
   const [menu, setMenu] = useState<{ x: number; y: number; line1: number;
     token: string | null } | null>(null);
+  // Ctrl+G go-to-line (v1.13.26, we: "ctrl-g needs to go to a certain
+  // line") — a tiny in-editor box (this CM vintage ships no go-to-line)
+  const [gotoLn, setGotoLn] = useState<string | null>(null);
   const roC = useMemo(() => new Compartment(), []);
   const decoC = useMemo(() => new Compartment(), []);
 
@@ -239,16 +261,20 @@ function CodeEditorInner(p: CodeEditorProps, ref: React.Ref<CodeEditorHandle>) {
           }
         if (opts.length) return { from: context.pos - w.length, options: opts };
       }
-      // bare word → library + keywords + declared functions
+      // bare word → library + keywords + declared functions (v1.13.26:
+      // library entries complete WITH their signature and meaning — we:
+      // "autocomplete should suggest them when typing")
       const w = context.matchBefore(/[\w]+$/);
       if (w && w.text.length >= 1) {
         const opts = [
-          ...XC_LIB_FNS.filter(f => f.startsWith(w.text))
-            .map(f => ({ label: f, type: 'keyword', detail: 'library' })),
+          ...XC_LIB_DOC.filter(f => f.name.startsWith(w.text))
+            .map(f => ({ label: f.name, type: 'keyword', detail: 'library',
+              info: `${f.sig} — ${f.desc}` })),
           ...XC_KEYWORDS.filter(k => k.startsWith(w.text))
             .map(k => ({ label: k, type: 'keyword' })),
           ...s.funcs.filter(f => f.name.startsWith(w.text))
-            .map(f => ({ label: f.name, type: 'function', detail: f.file })),
+            .map(f => ({ label: f.name, type: 'function', detail: f.file,
+              info: `${f.display} — declared in ${f.file}:${f.line}` })),
         ];
         if (opts.length) return { from: w.from, options: opts };
       }
@@ -270,6 +296,41 @@ function CodeEditorInner(p: CodeEditorProps, ref: React.Ref<CodeEditorHandle>) {
           : `<b>@${tok}</b><div>not declared on this disk</div>`;
         return { pos: line.from + idx, end: line.from + idx + tok.length + 1,
           create: () => ({ dom }) };
+      }
+      // io CALL (v1.13.26, we: "when mouseovering a io write/read to a
+      // specific port … resolve what kind of device it is and what its
+      // current values are … read from the device itself"): the dialog
+      // owns the resolution (it has the device table + channel table +
+      // live reads/bus); we only paint.
+      const ioc = ioCallAt(line.text, col);
+      if (ioc && s.ioInfo) {
+        const info = s.ioInfo(ioc.fn, ioc.arg, ioc.channel);
+        if (info && info.lines.length) {
+          const dom = document.createElement('div');
+          dom.className = 'xc-hover xc-io-tip';
+          const row = document.createElement('div');
+          row.className = 'xc-io-row';
+          if (info.type) {
+            // the part's catalog thumbnail — the placement menu's own
+            // live-model renderer (engine/thumbs.ts, one shared GL
+            // context, async fill), the part as it looks when placed
+            const img = document.createElement('img');
+            img.width = 30;
+            img.height = 30;
+            img.className = 'xc-io-thumb';
+            img.setAttribute('data-testid', 'xc-io-thumb');
+            row.appendChild(img);
+            requestThumb(img, info.type);
+          }
+          const txt = document.createElement('div');
+          txt.innerHTML = `<b>${info.lines[0]}</b>`
+            + info.lines.slice(1).map(l => `<div>${l}</div>`).join('');
+          row.appendChild(txt);
+          dom.appendChild(row);
+          const idx = Math.max(0, line.text.indexOf(ioc.fn, Math.max(0, col - ioc.fn.length)));
+          return { pos: line.from + idx, end: line.from + idx + ioc.fn.length,
+            create: () => ({ dom }) };
+        }
       }
       const around = line.text.slice(Math.max(0, col - 24), col + 24);
       const m = /\$[\w.]+/.exec(around);
@@ -332,6 +393,40 @@ function CodeEditorInner(p: CodeEditorProps, ref: React.Ref<CodeEditorHandle>) {
         hover,
         keymap.of([
           { key: 'Ctrl-s', run: () => { propsRef.current.onSave?.(); return true; } },
+          // ENTER auto-indent (v1.13.26, we: "after hitting enter on an
+          // init,update etc. block, the next line should automatically
+          // indent, same with a function"): at the end of an OPENING line
+          // (xcproject.opensBlockLine) land one unit deeper; anywhere
+          // else the current line's indent is carried. Handled HERE (not
+          // defaultKeymap's newlineAndIndent — this CM vintage's stream
+          // indent() cannot see the previous line). NOTE: CM6 normalizes a
+          // TYPED '\n' (keyboard.type) to the Enter keymap too — code
+          // AUTHORED through the keyboard must rely on this indent, not
+          // carry manual tabs (tab + auto-indent = mixed indent = the
+          // compiler's 'Invalid scope'; the xenonfresh/worldsim legs
+          // learned this the red way).
+          { key: 'Enter', run: (view) => {
+            if (!propsRef.current.editable) return false;
+            const st = view.state;
+            const pos = st.selection.main.head;
+            const line = st.doc.lineAt(pos);
+            const atEnd = pos - line.from >= line.text.trimEnd().length;
+            const indent = /^\s*/.exec(line.text)?.[0] ?? '';
+            // ONE UNIT = a TAB: XenonCode's compiler scopes block bodies by
+            // TAB indent (a 2-space body parses as GLOBAL scope — measured
+            // 'Invalid first word' on the fresh leg)
+            const text = atEnd
+              ? (opensBlockLine(line.text) ? `\n${indent}\t` : `\n${indent}`)
+              : '\n';
+            // selection EXPLICITLY at the insert's end: a bare changes-only
+            // dispatch maps the cursor BEFORE the inserted text (measured:
+            // the next typed word landed on the PREVIOUS line)
+            view.dispatch({ changes: { from: pos, insert: text },
+              selection: { anchor: pos + text.length }, scrollIntoView: true });
+            return true;
+          } },
+          // Ctrl+G go-to-line (v1.13.26)
+          { key: 'Ctrl-g', run: () => { setGotoLn(''); return true; } },
           { key: '$', run: trigger('$') },
           { key: '@', run: trigger('@') },
           // Escape over an OPEN completion popup closes the popup and stops
@@ -342,6 +437,14 @@ function CodeEditorInner(p: CodeEditorProps, ref: React.Ref<CodeEditorHandle>) {
             closeCompletion(view);
             return true;
           } },
+          // v1.13.26: defaultKeymap (we: "Tab needs to not move the cursor
+          // out of the editor when editing xenoncode"). CM deliberately
+          // keeps Tab = focus-move by DEFAULT (accessibility) — the indent
+          // Tab is the separate indentWithTab binding; defaultKeymap also
+          // brings arrows/Home/End/Ctrl-A/Ctrl-End/Enter-newline. Ours
+          // ABOVE them, the find keys below keep their scope.
+          ...defaultKeymap,
+          indentWithTab,
           ...searchKeymap,
         ]),
 
@@ -374,6 +477,12 @@ function CodeEditorInner(p: CodeEditorProps, ref: React.Ref<CodeEditorHandle>) {
       const pos = view.posAtCoords({ x: me.clientX, y: me.clientY });
       if (pos == null) return;
       const line = view.state.doc.lineAt(pos);
+      // io CALL (v1.13.26): Ctrl+Click flies the 3-D view to the device
+      const ioc = ioCallAt(line.text, pos - line.from);
+      if (ioc && propsRef.current.onIoClick) {
+        propsRef.current.onIoClick(ioc.fn, ioc.arg, ioc.channel);
+        return;
+      }
       const tok = functionTokenAt(line.text, pos - line.from);
       const def = tok ? definitionOf(propsRef.current.funcs, tok) : null;
       if (def) propsRef.current.onGoDef(def.file, def.line);
@@ -445,6 +554,7 @@ function CodeEditorInner(p: CodeEditorProps, ref: React.Ref<CodeEditorHandle>) {
       view.focus();
       return true;
     },
+    openGoto() { setGotoLn(''); },
   }), []);
 
   // ── right-click menu ──
@@ -470,6 +580,36 @@ function CodeEditorInner(p: CodeEditorProps, ref: React.Ref<CodeEditorHandle>) {
     <div style={{ height: '100%', position: 'relative' }} onContextMenu={openMenu}>
       <div ref={hostRef} data-testid="xc-editor" data-lines={p.file.code.split('\n').length}
         style={{ height: '100%', overflow: 'hidden' }} />
+      {gotoLn !== null && (
+        <div data-testid="xc-goto"
+          className="absolute right-2 top-2 z-50 flex items-center gap-1.5 rounded border border-[#2b3a52] bg-[#141b2b] px-2 py-1 shadow-xl">
+          <span className="text-[10px] text-[#9fb0c8]">go to line</span>
+          <input data-testid="xc-goto-input" autoFocus value={gotoLn} placeholder="N"
+            onChange={e => setGotoLn(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                const n = parseInt(gotoLn, 10);
+                const view = viewRef.current;
+                if (view && Number.isFinite(n)) {
+                  const ln = Math.max(1, Math.min(n, view.state.doc.lines));
+                  view.dispatch({ selection: { anchor: view.state.doc.line(ln).from },
+                    scrollIntoView: true });
+                }
+                // focus the editor SYNCHRONOUSLY (the input is then not
+                // focused, so the state-update unmount below cannot drop
+                // focus to <body>); a setTimeout(0) re-focus raced the
+                // next keystroke and made the jump flaky (measured)
+                viewRef.current?.focus();
+                setGotoLn(null);
+              } else if (e.key === 'Escape') {
+                e.stopPropagation();               // popup stopPropagation law
+                viewRef.current?.focus();
+                setGotoLn(null);
+              }
+            }}
+            className="w-16 rounded border border-[#3a5a82] bg-[#0b0f18] px-1 py-0.5 text-[11px] tabular-nums outline-none" />
+        </div>
+      )}
       {menu && (
         <div data-testid="xc-ctxmenu" role="menu"
           className="fixed z-50 min-w-44 rounded border border-[#2b3a52] bg-[#141b2b] py-1 font-mono shadow-xl"
@@ -520,6 +660,9 @@ if (typeof document !== 'undefined' && !document.querySelector('#xc-editor-css')
 .xc-hover { font-family: ui-monospace, monospace; font-size: 11px; padding: 4px 6px;
   max-width: 340px; color: #cfe1ff; }
 .xc-hover b { color: #8fd4ff; }
+.xc-io-row { display: flex; gap: 8px; align-items: center; }
+.xc-io-thumb { flex: none; border-radius: 3px; background: #1d2b42;
+  border: 1px solid #3a4a6a; }
 .cm-editor { height: 100%; }
 .cm-editor .cm-scroller { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px; line-height: 1.45; }

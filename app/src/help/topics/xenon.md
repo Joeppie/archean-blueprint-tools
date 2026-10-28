@@ -39,14 +39,27 @@ with the craft and travels in the file.
   open. The `File ▾` row shows the disk and **creates** files
   (plain `.xc` includes, or `program` → `name.main.xc`) and **deletes** the
   open tab. Files you create are in the saved blueprint and in the game.
-* **Find in file** — `CTRL+F` opens the editor's find panel from anywhere in
-  the IDE (it never triggers the browser's own search). `Esc` closes find
-  and leaves the IDE open.
+* **Find, goto, indent** — `CTRL+F` opens the editor's find panel from
+  anywhere in the IDE (it never triggers the browser's own search).
+  `CTRL+G` jumps to a line number. `TAB` always indents inside the code
+  (the cursor never escapes to the page). Pressing **Enter** after
+  `init`/`update`/`tick`/`timer`/`input`/`screen(...)` or a
+  `function @name(…)` line lands **one indent deeper**; plain lines keep
+  their indent. `Esc` closes find/goto and leaves the IDE open.
 * **Library tab** — the side panel's `Library` index lists every **declared
-  function on this computer** (click = jump straight to its declaration,
+  function on this computer** (click = jump straight to the declaration,
   across files) and the whole **built-in XenonCode library** with a
-  signature and a one-line meaning each, plus the `screen.` drawing
-  members. The search row filters all three groups at once.
+  signature and a one-line meaning each, split into **coloured category
+  tabs** (I/O, Screens, Devices, Values, System, Recipes, Worldsim — the
+  tab colour is the row colour). The search row filters all groups.
+  Typing completes library functions WITH their signature and meaning.
+* **io ports know their device** — hover an `input_number("Engine", 0)`
+  (or `output_number`/`input_text`/`output_text`) and the tooltip shows
+  the part's **live 3-D preview** (the same animated model render the
+  placement menu uses), names the DEVICE (alias, type), what that io's
+  channel MEANS in the game (with its range) and the LIVE value — reads
+  show what the device sent the program, writes what the program sent
+  it. **Ctrl+Click** flies the 3-D view to that device.
 * **Maximise** — the `⛶` button in the title bar (or a **double-click on
   the title bar**) fills the screen; the same control restores the window
   to its old size and place.

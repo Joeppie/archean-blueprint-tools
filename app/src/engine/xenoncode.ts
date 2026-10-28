@@ -116,6 +116,10 @@ export interface XenonComputer {
 export interface XCDevice {
   io: number;               // the computer io port it is cabled to, -1 = by alias
   id: number;               // stable table id (device_at order)
+  /** the device's COMPONENT index in data.components (v1.13.26 — the IDE's
+   *  io-hover Ctrl+Click flies the 3-D view to the device: Engine.flyTo
+   *  wants the component index, `id` is the device TABLE order). */
+  ci?: number;
   alias: string;
   type: string;
   x: number; y: number; z: number;
@@ -289,14 +293,15 @@ export function xenonDevices(bp: Blueprint, ci: number): XCDevice[] {
     const other = comps[p.a_component === ci ? p.b_component : p.a_component];
     if (!other) continue;
     out.push({ io: m[1] ? +m[1] : 0, id: 0, alias: other.alias ?? '', type: other.type,
+      ci: p.a_component === ci ? p.b_component : p.a_component,
       x: other.position?.x ?? 0, y: other.position?.y ?? 0, z: other.position?.z ?? 0,
       mode: typeof (other.data as any)?.mode === 'number' ? (other.data as any).mode : undefined });
     if (other.alias) byAlias.add(other.alias);
   }
-  comps.forEach((c) => {
+  comps.forEach((c, idx) => {
     if (!c.alias || byAlias.has(c.alias)) return;
     byAlias.add(c.alias);
-    out.push({ io: -1, id: 0, alias: c.alias, type: c.type,
+    out.push({ io: -1, id: 0, alias: c.alias, type: c.type, ci: idx,
       x: c.position?.x ?? 0, y: c.position?.y ?? 0, z: c.position?.z ?? 0,
       mode: typeof (c.data as any)?.mode === 'number' ? (c.data as any).mode : undefined });
   });

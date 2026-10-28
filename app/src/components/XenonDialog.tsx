@@ -41,7 +41,8 @@ import type { Engine } from '../engine/scene';
 import { ScreensCell } from './ScreensDock';
 import { CodeEditor, type CodeEditorHandle } from './CodeEditor';
 import {
-  functionAt, libIndex, projectDecls, projectFunctions, XC_LIB_DOC, XC_SCREEN_MEMBERS,
+  functionAt, libIndex, projectDecls, projectFunctions,
+  XC_LIB_DOC, XC_LIB_GROUPS, XC_SCREEN_MEMBERS,
 } from '../engine/xcproject';
 
 const MAX_PARSE_LINES = 500;   // validation pass cap (window around the caret)
@@ -147,6 +148,42 @@ export default function XenonDialog(p: {
     const dev = devOf(io);
     return dev ? chanInfo(chans, dev.type, dir, ch) : null;
   };
+  // io-CALL HOVER resolution (v1.13.26, we: "when mouseovering a io
+  // write/read to a specific port, … resolve what kind of device it is
+  // and what its current values are … what that means, read from the
+  // device itself"): alias/io → XCDevice, channel → the game's channel
+  // table (name + range), value → the LIVE wires: pump.reads (the last
+  // input_number READ the shim reported for io:ch — what the device
+  // SENT) for reads, pump.bus (what the program WROTE) for writes.
+  const ioDevice = (arg: string) => comp.devices.find(d =>
+    (d.alias && d.alias === arg) || (d.io >= 0 && String(d.io) === arg));
+  const ioInfo = (fn: string, arg: string, ch: number):
+    { type: string; lines: string[] } | null => {
+    const dev = ioDevice(arg);
+    if (!dev) return null;
+    const dir = fn.startsWith('input') ? 'in' : 'out';
+    const ci = chanLabel(dev.io, ch, dir);
+    const raw = dir === 'in'
+      ? pump.reads.get(`${dev.io}:${ch}`)
+      : pump.bus.get(`${dev.io}:${ch}`);
+    const val = raw === undefined ? 'no read yet' : typeof raw === 'number' ? fmtVal(raw) : String(raw).slice(0, 14);
+    return {
+      // the type feeds the tooltip's catalog-preview thumbnail (the
+      // placement menu's live-model renderer, engine/thumbs.ts)
+      type: dev.type,
+      lines: [
+        `${dev.alias || dev.type} — ${dev.type}`,
+        `io ${dev.io} · ch ${ch}${ci ? ` · ${ci.fn} (${ci.rng})` : ' · channel meaning unknown'}`,
+        `${dir === 'in' ? 'device → program (read)' : 'program → device (write)'} = ${val}`,
+        dev.ci != null ? 'Ctrl+Click — show the device in the 3-D view' : '',
+      ].filter(Boolean),
+    };
+  };
+  const ioFly = (fn: string, arg: string, ch: number) => {
+    void fn; void ch;
+    const dev = ioDevice(arg);
+    if (dev?.ci != null) { p.engine?.flyTo(dev.ci); p.engine?.select(dev.ci); }
+  };
   const closeRef = useRef(p.onClose);
   closeRef.current = p.onClose;
   const pump = xenonPump;
@@ -157,6 +194,9 @@ export default function XenonDialog(p: {
       running: pump.run?.running ?? null, surfaces: pump.surfaces.size,
       paused: pump.paused, error: pump.error,
       worker: !!pump.wrun, isolated: sabSupported(),
+      // the camera (io-hover fly-to pin; the dialog REPLACES the base hook
+      // while open, so cam lives in BOTH — v1.13.26)
+      cam: () => p.engine?.camPos() ?? null,
       surfaceKeys: [...pump.surfaces.keys()],
       surfaceMeta: [...pump.surfaces.values()].map(({ key, w, h }) => ({ key, w, h })),
       world: [...pump.wsBoundNames()].map(n => {
@@ -441,13 +481,19 @@ export default function XenonDialog(p: {
   }, [pump.surfaces, scrQ, bindings, pump.cycles]);
   // LIBRARY tab lists (v1.13.25): the disk's declared functions + the
   // built-in library table, both filtered by the tab's one search row
+  // LIBRARY group tabs (v1.13.26, we: "library function should be in tabs,
+  // screen, system, IO should all have their own coloured category")
+  const [libG, setLibG] = useState('all');
+  const libColor = (k: string) => XC_LIB_GROUPS.find(g => g.key === k)?.color ?? '#5d6a7d';
   const libFuncs = useMemo(() => {
     const q = libQ.trim().toLowerCase();
     return q
       ? funcs.filter(f => f.display.toLowerCase().includes(q) || f.file.toLowerCase().includes(q))
       : funcs;
   }, [funcs, libQ]);
-  const libDocs = useMemo(() => libIndex(libQ), [libQ]);
+  const libDocs = useMemo(
+    () => libIndex(libQ).filter(f => libG === 'all' || f.group === libG),
+    [libQ, libG]);
   const libMembers = useMemo(() => {
     const q = libQ.trim().toLowerCase();
     return q ? XC_SCREEN_MEMBERS.filter(m => m.includes(q)) : XC_SCREEN_MEMBERS;
@@ -486,12 +532,15 @@ export default function XenonDialog(p: {
   // strip, side panel, menus — need this relay to the active editor.
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'f') return;
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const k = e.key.toLowerCase();
+      if (k !== 'f' && k !== 'g') return;
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT'
         || el.isContentEditable === true)) return;
       e.preventDefault();                 // never the browser's native find
-      editorRef.current?.openSearch();
+      if (k === 'f') editorRef.current?.openSearch();
+      else editorRef.current?.openGoto();
     };
     addEventListener('keydown', h);
     return () => removeEventListener('keydown', h);
@@ -760,6 +809,7 @@ export default function XenonDialog(p: {
                 onToggleBreak={(l) => toggleBp(l)}
                 onRunTo={(l) => pump.runTo(runtimeName(tab), l)}
                 onGoDef={(f, l) => jumpTo(f, l)}
+                ioInfo={ioInfo} onIoClick={ioFly}
                 onLine={(l) => setLastLine(l)} />
             )}
             {tab === 100 && graph && (
@@ -958,14 +1008,32 @@ export default function XenonDialog(p: {
                   {funcs.length === 0 ? 'no function @declarations on this disk' : 'no declared function matches'}
                 </span>
               )}
+              {/* CATEGORY TABS (v1.13.26): one coloured chip per library
+                  group; the chip dot AND the doc row's left border carry
+                  the group colour (ONE visual, no legend needed) */}
+              <div className="flex flex-wrap items-center gap-1" data-testid="xenon-lib-groups">
+                <button data-testid="xenon-lib-g-all" onClick={() => setLibG('all')}
+                  className={`rounded px-1.5 py-0.5 text-[10px] ${libG === 'all' ? 'bg-[#1d2b42] text-white' : 'text-[#7d8aa0] hover:bg-[#182236]'}`}>
+                  All {XC_LIB_DOC.length}
+                </button>
+                {XC_LIB_GROUPS.map(g => (
+                  <button key={g.key} data-testid={`xenon-lib-g-${g.key}`} onClick={() => setLibG(g.key)}
+                    className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] hover:bg-[#182236] ${libG === g.key ? 'bg-[#1d2b42]' : 'text-[#7d8aa0]'}`}
+                    style={libG === g.key ? { color: g.color } : undefined}>
+                    <span className="inline-block h-2 w-2 rounded-full" style={{ background: g.color }} />
+                    {g.label} {XC_LIB_DOC.filter(f => f.group === g.key).length}
+                  </button>
+                ))}
+              </div>
               <div className="text-[10px] uppercase tracking-widest text-[#5d6a7d]">
                 XenonCode library · {libDocs.length}
               </div>
               {libDocs.map(f => (
                 <div key={f.name} data-testid={`xenon-lib-doc-${f.name}`}
-                  className="rounded border border-[#232c3d] bg-[#131a28] px-2 py-1 text-[11px]">
+                  className="rounded border border-[#232c3d] border-l-2 bg-[#131a28] px-2 py-1 text-[11px]"
+                  style={{ borderLeftColor: libColor(f.group) }}>
                   <div className="flex items-baseline justify-between gap-2">
-                    <span className="text-[#c3e88d]">{f.sig}</span>
+                    <span style={{ color: libColor(f.group) }}>{f.sig}</span>
                     <span className="shrink-0 text-[9px] uppercase tracking-wide text-[#5d6a7d]">{f.group}</span>
                   </div>
                   <div className="text-[10px] leading-snug text-[#9fb0c8]">{f.desc}</div>
