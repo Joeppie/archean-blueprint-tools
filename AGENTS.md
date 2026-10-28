@@ -494,6 +494,14 @@ behind a small link at the END of the gallery. Pages serves the GENERATED
 - App data routes are page-relative and LAYOUT-EXACT (`testdata/…`,
   `viewer/models…` at root; `../` fallbacks; legacy link root-exact; vite
   `base './'`) — the repo URL path is never hardcoded.
+- Pages cannot send response headers: `app/public/sw.js` (THE ISOLATION
+  FORGER, ships at the site root via dist) forges COOP+COEP on navigation
+  responses so Pages is cross-origin-isolated and the Xenon SAB gate
+  unlocks worker mode (v1.13.29). `/viewer/` stays header-free (the frozen
+  inspector's CDN Three.js + require-corp don't mix); registration =
+  `app/src/main.tsx` + `engine/isolation.ts`, ONE reload per tab, pure SW
+  passthrough (no caching, no cache-bust interplay). Insecure origins
+  (plain-http LAN) refuse registration → the main-thread pump unchanged.
 
 ## Test strategy (plan in docs/TEST-PYRAMID.md)
 - Every law at the SMALLEST tier that can state it: pure logic → vitest;

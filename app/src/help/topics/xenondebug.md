@@ -60,8 +60,14 @@ await __XCDBG__.goto('functions.xc', 31)    // frame: 'timer frequency 4', local
 __XCDBG__.clear(); await __XCDBG__.run({ cycles: 30 })   // stream freely
 ```
 
-Notes: on a localhost (isolated) origin the VM runs on a worker thread, so
-pauses are **mid-cycle** — locals and writes are the parked VM's own state;
-writes are accepted only while PAUSED there. `break()` answers an
+Notes: on an ISOLATED origin the VM runs on a worker thread, so pauses are
+**mid-cycle** — locals and writes are the parked VM's own state; writes are
+accepted only while PAUSED there. Isolated origins: `http://localhost` and
+any https site that sends (or forges) the cross-origin-isolation headers —
+the public Pages site self-forges them with a service worker, so its FIRST
+visit installs it and reloads the tab ONCE. Plain-http LAN addresses are
+not secure contexts: there the debugger runs the main-thread stepper —
+same laws, one full 25 Hz cycle per step; the IDE's mode chip always
+states which stepper is live. `break()` answers an
 `{error}` when the file is not on the disk (the answer lists the names).
 The cycle budget bounds every call: a run never hangs a caller forever.

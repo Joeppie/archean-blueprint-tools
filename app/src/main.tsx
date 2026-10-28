@@ -1,6 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
+import { shouldRegisterIsolationSw } from './engine/isolation'
 import App from './App.tsx'
 
 // v1.12.2 BOOT COST: phase marks for tools/bootprobe.mjs (performance.mark is
@@ -25,6 +26,41 @@ performance.mark('boot:main');
     sessionStorage.setItem(heal, '1');
     location.reload();
   });
+}
+
+// ISOLATION SW (v1.13.29): GitHub Pages can't send COOP/COEP response
+// headers, so there crossOriginIsolated is false and the Xenon debugger's
+// SAB gate (engine/xenoncode.ts sabSupported()) degrades to the main-thread
+// cycle-granular pump. The ISOLATION FORGER (public/sw.js, ships at the
+// site root via vite's public/ copy) forges the two headers on navigation
+// responses — the documented self-isolation recipe (web.dev/coop-coep).
+// The first non-isolated load of a tab registers it and reloads ONCE
+// (sessionStorage one-shot: a SW that never activates cannot loop the tab);
+// the second load is isolated and the EXISTING SAB gate unlocks worker
+// mode with zero changes to the gate's fallback path. Every failure
+// (insecure origin, CSP, offline) lands in .catch() — today's pump.
+{
+  const isoFlag = 'archean-isolation-sw';
+  if (shouldRegisterIsolationSw({
+    isolated: (self as unknown as { crossOriginIsolated?: boolean }).crossOriginIsolated === true,
+    flagged: sessionStorage.getItem(isoFlag) !== null,
+    hasSW: 'serviceWorker' in navigator,
+  })) {
+    navigator.serviceWorker
+      .register(
+        new URL('sw.js', document.baseURI).href,
+        // page-relative law (AGENTS § Publishing): scope = the app's own
+        // directory, never a hardcoded repo URL path
+        { scope: new URL('.', document.baseURI).href },
+      )
+      .then(() => navigator.serviceWorker.ready)
+      .then(() => {
+        sessionStorage.setItem(isoFlag, '1');   // flag BEFORE the reload
+        location.reload();
+      })
+      .catch(() => { /* refused (e.g. plain-http LAN = insecure context):
+                        the main-thread pump stays exactly as it is */ });
+  }
 }
 
 declare global {

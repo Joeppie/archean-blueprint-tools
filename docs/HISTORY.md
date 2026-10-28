@@ -2870,6 +2870,42 @@ topic + FORMAT).
   `form`/`verified` traps, e2e 'F10 steps line-by-line in the current
   frame' + 'run toolbar + if-indent + dirty dot + frame locals'
   (@slow @codeditor, PLANE).
+- **v1.13.29 PAGES WORKER MODE — THE ISOLATION FORGER (we: "make the Xenon
+  debugger's WORKER mode (true line-stepping) work on the GitHub Pages
+  site"):** Pages cannot send response headers, so there
+  crossOriginIsolated is false and the SAB gate (engine/xenoncode.ts
+  sabSupported(), pinned in xenoncode.test.ts) degraded Pages to the
+  main-thread pump with cycle-granular stepping. THE WHY OF THE GATE:
+  shared memory is gated behind cross-origin isolation because Spectre-
+  style timing attacks read across co-resident cross-origin documents —
+  HTTPS authenticates BYTES, not CO-RESIDENCE; the isolation flags, not
+  TLS, are what makes SharedArrayBuffer safe to hand out. The cure is the
+  documented self-isolation recipe (web.dev/coop-coep): a service worker
+  CAN add headers to navigation responses. `app/public/sw.js` (ships at
+  the site root — vite copies public/ into dist, deploy_pages puts dist at
+  the root) answers GET navigations with fetch + a re-wrapped Response
+  wearing COOP: same-origin + COEP: require-corp; `/viewer/` is
+  header-free (the frozen inspector loads Three.js from a CDN —
+  require-corp would block it); ZERO caching, pure passthrough, so the
+  append-only assets law is untouched. app/src/main.tsx registers it ONLY
+  per the pure decision engine/isolation.ts shouldRegisterIsolationSw
+  ({isolated, flagged, hasSW}) — vitest-pinned — and reloads ONCE
+  (sessionStorage one-shot: a SW that never activates cannot loop the
+  tab); the second load is isolated and the EXISTING SAB gate unlocks
+  worker mode with zero gate changes — the fallback path is untouched,
+  every failure (insecure origin, CSP, offline) degrades to today's pump.
+  Pins: isolation.test.ts (the decision), e2e/isolation.spec.ts
+  (@slow @ui, the whole Pages-style layout: app/dist + repo testdata/
+  viewer/ served plain-header under a /archean-blueprint-tools/-style
+  subpath by a spec-local node http server — the suite's vite-preview
+  origin always sends the headers, so no existing spec can reach the SW
+  path; asserts one-reload via the session flag, crossOriginIsolated,
+  SW scope, xenon-mode chip 'worker · true line-stepping', /viewer/ NOT
+  isolated + canvas paints). Playwright preview suite unaffected (its
+  origin is isolated from load one → the decision never fires; no
+  @while-publish leg pinned Pages main-thread mode, nothing to re-pin).
+  Verified live after deploy: first visit installs + reloads, the IDE
+  chip states worker mode on joeppie.github.io.
 
 ## 2. v1.11 session — KNOWN ISSUES & UNPINNED TODOS (2026-10-25/26 session block)
 
