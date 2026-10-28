@@ -70,6 +70,14 @@ type Mod = {
   _xc_debug_track(on: number): void;
   _xc_cycle_lines(): number;
   _xc_cycle_pairs(): number;
+  // XENON-DEBUG v3 (ABI 10): call-depth stream (index-aligned with the pair
+  // stream), the host-armed hook gate, and the exact-line pause seam
+  _xc_cycle_depths?(): number;
+  _xc_hook_live?(on: number): void;
+  _xc_pause_request?(): void;
+  _xc_pause_cancel?(): void;
+  _xc_pause_file?(): number;
+  _xc_pause_line?(): number;
   _xc_screen_click(idx: number, x: number, y: number): void;
   _xc_screen_scroll(idx: number, d: number): void;
   _xc_parse_line(p: number, n: number): number;
@@ -489,16 +497,38 @@ export class XenonRun {
     // the shim follows OUR pump cadence (ABI 5; an older wasm keeps its
     // baked 0.1 s dt — the abi() check below warns once, nothing crashes)
     if (typeof mod._xc_set_cycle_ms === 'function') mod._xc_set_cycle_ms(CYCLE_MS);
+    // XENON-DEBUG v3 (ABI 10): the MAIN-THREAD host keeps the per-line stop
+    // hook DISARMED — its debugger is the pair+depth stream, the EM_JS
+    // boundary crossing at every executed line is pure cost here.
+    if (typeof mod._xc_hook_live === 'function') mod._xc_hook_live(0);
     if (mod._xc_boot()) { run.error = mod.UTF8ToString(mod._xc_error()); return run; }
     run.running = true;
     return run;
   }
 
-  cycle(): XenonEvent[] {
-    if (!this.running) return [];
+  /** ONE pump cycle. XENON-DEBUG v3 (ABI 10): the VM answers 0 ok / 1 error
+   *  / 2 PAUSED — an armed exact-line pause (requestPause) unwinds the
+   *  interpreter at the EXECUTING line and the Computer survives; the park
+   *  site rides on pausedAt (SOURCEFILE idx + line, mapped via the pump's
+   *  fileTable). The events of the truncated cycle are drained as usual. */
+  cycle(): { evs: XenonEvent[]; pausedAt: { idx: number; line: number } | null } {
+    if (!this.running) return { evs: [], pausedAt: null };
     const m = this.mod;
-    if (m._xc_cycle()) { this.error = m.UTF8ToString(m._xc_error()); this.running = false; return []; }
-    return JSON.parse(m.UTF8ToString(m._xc_events()));
+    const rc = m._xc_cycle();
+    if (rc === 1) { this.error = m.UTF8ToString(m._xc_error()); this.running = false; return { evs: [], pausedAt: null }; }
+    const evs = JSON.parse(m.UTF8ToString(m._xc_events()));
+    if (rc === 2 && typeof m._xc_pause_file === 'function' && typeof m._xc_pause_line === 'function')
+      return { evs, pausedAt: { idx: m._xc_pause_file(), line: m._xc_pause_line() } };
+    return { evs, pausedAt: null };
+  }
+  /** XENON-DEBUG v3: arm the exact-line PAUSE (main-thread mode's ⏸/⏹ —
+   *  the next executed line throws DebugPause; xc_cycle answers 2). */
+  requestPause() {
+    if (typeof this.mod._xc_pause_request === 'function') this.mod._xc_pause_request();
+  }
+  /** Cancel an armed park (▶/F8/re-boot — Start outranks a pending ⏸). */
+  pauseCancel() {
+    if (typeof this.mod._xc_pause_cancel === 'function') this.mod._xc_pause_cancel();
   }
 
   setInput(io: number | string, ch: number, v: number) {
@@ -566,8 +596,11 @@ export class XenonRun {
       this.mod._free(np); this.mod._free(vp);
     }
   }
-  /** XENON-DEBUG: record the source lines the VM executes (the pump keeps
-   *  this on — one branch per LINENUMBER opcode, gated in the library). */
+  /** XENON-DEBUG: record the source lines the VM executes. XENON-DEBUG v3
+   *  TRACKING GATE (workpackages WP6): the pump keeps this OFF while no
+   *  breakpoints, no armed step and no park request exist — an open IDE
+   *  with an idle debugger then runs the VM UNTRACKED (no per-line
+   *  recording, no pair JSON): debugging costs nothing when unused. */
   debugTrack(on: boolean) {
     if (typeof this.mod._xc_debug_track === 'function') this.mod._xc_debug_track(on ? 1 : 0);
   }
@@ -582,6 +615,14 @@ export class XenonRun {
   cyclePairs(): number[] {
     if (typeof this.mod._xc_cycle_pairs !== 'function') return [];
     try { return JSON.parse(this.mod.UTF8ToString(this.mod._xc_cycle_pairs())) as number[]; }
+    catch { return []; }
+  }
+  /** XENON-DEBUG v3 (ABI 10): the CALL-DEPTH stream, index-aligned with
+   *  cyclePairs (drain both per cycle) — the step-over law stops at
+   *  depth <= the paused depth, so in-file callees step OVER. */
+  cycleDepths(): number[] {
+    if (typeof this.mod._xc_cycle_depths !== 'function') return [];
+    try { return JSON.parse(this.mod.UTF8ToString(this.mod._xc_cycle_depths!())) as number[]; }
     catch { return []; }
   }
   abi(): number {
@@ -701,6 +742,9 @@ export interface CycleData {
   vars: string;
   overrides: string;
   pairs: string;
+  /** XENON-DEBUG v3: the call-depth stream (audit door only — the worker's
+   *  debugger is the hook, which reads the depth natively per line) */
+  depths?: string;
   pixels: Record<string, ArrayBuffer>;
   error: string;
 }
@@ -866,13 +910,18 @@ export class XenonWorkerRun {
   cycleLines(): number[] { return []; }
   screenMeta() { return this.lastMetas; }
   screenPixels(key: string) { return this.lastPixels.get(key) ?? null; }
-  debugTrack(on: boolean) { if (on) this.worker.postMessage({ t: 'track' }); }
   parseLines(lines: [string, number][]): Promise<string[]> {
     return new Promise(res => {
       this.parseSet = res;
       this.worker.postMessage({ t: 'parse', lines });
     });
   }
+  /** XENON-DEBUG v3 TRACKING GATE (workpackages WP6): the worker toggles the
+   *  interpreter's per-line tracking; while OFF it also skips the pair +
+   *  depth JSON entirely (the worker debugger is the hook — an untracked
+   *  VM ships a bare '[]' per cycle, so an open IDE with no breakpoints
+   *  costs the program NOTHING). */
+  debugTrack(on: boolean) { this.worker.postMessage({ t: 'track', on }); }
   reboot(): Promise<boolean> {
     return new Promise(res => {
       this.rebootSet = res;
@@ -961,53 +1010,63 @@ export interface XenonSurface {
 // (__tests__/xenoncode.test.ts 'THE STEPPER LAW'). THE SAME LAW LIVES IN
 // TWO PLACES and must stay in lockstep:
 //   • HERE — main-thread mode: applyCycle feeds the per-cycle (file·1e6+
-//     line) pair stream through it after every completed cycle.
+//     line) pair stream (plus the parallel CALL-DEPTH stream, XENON-DEBUG
+//     v3) through it after every completed cycle.
 //   • tools/xenoncode/xc_host.cpp (the EM_JS xc_debug_hook) — worker mode:
 //     evaluated AT EVERY EXECUTED LINE inside xc_cycle, over the SAB
-//     protocol (ref pair at [5,6], over body-range at [7,8] with lo>hi
-//     = top level = ANY new pair, runTo target at [9,10], bps at [11..];
-//     slot 19 = the XENON-LOCALS handoff length, JSON bytes at offset 80).
+//     protocol (ref pair at [5,6], runTo target at [9,10], bps at [11..],
+//     the hook-internal paused-depth twin of st.pausedDepth); slot 19 =
+//     the XENON-LOCALS handoff length, JSON bytes at offset 80.
 // Any change to the stop conditions MUST be made in BOTH and re-pinned.
 export interface StepperState {
   stepMode: 'off' | 'over' | 'into' | 'to';
   /** where the debugger last stopped (a 'fresh' pair is any pair ≠ it) */
   pausedFile: string; pausedLine: number;
+  /** XENON-DEBUG v3: the CALL DEPTH at the pause — step-over stops at the
+   *  first fresh pair of the paused file at depth <= this (a callee body
+   *  sits at depth+1 and is stepped OVER; the return stops) */
+  pausedDepth: number;
   /** runTo target (stepMode 'to') */
   toFile: string; toLine: number;
-  /** the enclosing function body (stepMode 'over' keeps stopping OUTSIDE
-   *  it); null = top level ⇒ stop at ANY fresh pair */
+  /** the enclosing function body (legacy v1.13.16 scope-window law; the
+   *  v1.13.28 classic law stopped using it — kept for the SAB slot 7/8
+   *  protocol documentation) */
   scope: { file: string; line: number; end: number } | null;
 }
-export interface StepperHit { file: string; line: number; stepMode: StepperState['stepMode'] }
+export interface StepperHit {
+  file: string; line: number; stepMode: StepperState['stepMode'];
+  /** XENON-DEBUG v3: the pair's call depth (the next pause's reference) */
+  depth: number;
+}
 
-export function stepperLaw(pairs: number[], fileTable: string[],
-  breaks: Map<string, Set<number>>, st: StepperState): StepperHit | null {
+export function stepperLaw(pairs: number[], depths: number[] | undefined,
+  fileTable: string[], breaks: Map<string, Set<number>>, st: StepperState): StepperHit | null {
   if (!pairs.length || (st.stepMode === 'off' && !breaks.size)) return null;
-  for (const p of pairs) {
+  const dep = depths && depths.length === pairs.length ? depths : null;
+  for (let k = 0; k < pairs.length; k++) {
+    const p = pairs[k]!;
     const idx = Math.floor(p / 1000000);
     const file = fileTable[idx] ?? `#${idx}`;
     const line = p % 1000000;
+    const depth = dep ? dep[k]! : 0;
     // breakpoints pause WITHOUT clearing the step mode (an armed F10
     // survives a breakpoint stop — the v1.13.16 stream walk)
-    if (breaks.get(file)?.has(line)) return { file, line, stepMode: st.stepMode };
+    if (breaks.get(file)?.has(line)) return { file, line, stepMode: st.stepMode, depth };
     if (st.stepMode === 'to' && file === st.toFile && line === st.toLine)
-      return { file, line, stepMode: 'off' };
+      return { file, line, stepMode: 'off', depth };
     const fresh = !(file === st.pausedFile && line === st.pausedLine);
-    if (st.stepMode === 'into' && fresh) return { file, line, stepMode: 'off' };
-    if (st.stepMode === 'over' && fresh) {
-      // v1.13.28 CLASSIC STEP-OVER (we: "Sometimes when I press f10 it
-      // doesnt seem to properly move to where I am executing code"): the
-      // OLD law paused at the first pair OUTSIDE the function scope —
-      // stepping over a call from inside a function body ran the REST of
-      // the body away (gdb 'next' semantics), which reads as "it skipped
-      // where I am". The classic IDE law: stop at the first fresh pair of
-      // the SAME file = the next executed line at the CURRENT frame
-      // (callees live in other files and are skipped over; the frame's
-      // return resumes in the caller file, also a stop). In-file callees
-      // (rare corpus pattern) land like step-INTO — a pair stream carries
-      // no call depth to do better. xc_host.cpp's EM_JS hook carries the
+    if (st.stepMode === 'into' && fresh) return { file, line, stepMode: 'off', depth };
+    if (st.stepMode === 'over' && fresh && file === st.pausedFile
+        && depth <= (st.pausedDepth | 0)) {
+      // v1.13.31 CLASSIC STEP-OVER DEEPENED (we: "When I press f10, it
+      // steps into, not over a function"): the v1.13.28 file-only rule
+      // landed inside SAME-FILE callees (the pair stream had no call
+      // depth). XENON-DEBUG v3 carries the depth: stop at the first fresh
+      // pair of the paused file at depth <= the paused depth — a callee
+      // (depth+1) is stepped over, the frame's return (depth-1, same
+      // file) resumes as a stop. xc_host.cpp's EM_JS hook carries the
       // TWIN (THE STEP LAW LIVES IN TWO PLACES).
-      if (file === st.pausedFile) return { file, line, stepMode: 'off' };
+      return { file, line, stepMode: 'off', depth };
     }
   }
   return null;
@@ -1045,8 +1104,20 @@ export class XenonPump {
   paused = false;
   pausedLine = 0;                                    // where the debugger stopped
   pausedFile = '';
+  /** XENON-DEBUG v3: the CALL DEPTH at the pause — the step-over twin
+   *  (stepperLaw's pausedDepth); 0 while never paused in this boot */
+  pausedDepth = 0;
   breaks = new Map<string, Set<number>>();           // file name -> 1-based lines
   stepMode: 'off' | 'over' | 'into' | 'to' = 'off';
+  /** XENON-DEBUG v3 PARK ARM (workpackages WP7): the user has requested
+   *  debugger control (⏸/⏹/F10/F11/run-to) — parks the VM at the EXACT
+   *  executing line in BOTH pump modes (worker: the hook sleeps mid-cycle;
+   *  main-thread: xc_pause_request + the DebugPause unwind). Sticky until
+   *  resume/reboot/open; it is one of the inputs of the TRACKING GATE
+   *  (syncDebugTrack), so a park request is always serviced. */
+  parkArmed = false;
+  /** the last debugTrack state sent to the VM (the gate posts on change) */
+  private tracked: boolean | null = null;
   fileTable: string[] = [];                          // SOURCEFILE index -> name
   private projectFuncs: ReturnType<typeof projectFunctions> = [];
   private projectBlk: XCBlock[] = [];
@@ -1121,6 +1192,7 @@ export class XenonPump {
     if (seq !== this.openSeq) { run.stop(); wr?.dispose(); return; }
     this.wrun = wr;
     this.paused = false; this.pausedLine = 0; this.pausedFile = ''; this.stepMode = 'off';
+    this.parkArmed = false; this.pausedDepth = 0; this.tracked = null;
     {
       const runFiles = comp.files.map((f, i) =>
         ({ name: i === 0 ? comp.entryName : f.name, code: f.code }));
@@ -1147,7 +1219,13 @@ export class XenonPump {
     else {
       this.status = 'running';
       for (const c of comp.channels) run.setInput(c.io, c.ch, 0);
-      run.debugTrack(true);                          // XENON-DEBUG: lines feed the debugger
+      // XENON-DEBUG v3 TRACKING GATE (workpackages WP6): the debugger's
+      // per-line feed is armed ONLY while it has work (breakpoints, an
+      // armed step, an armed park). An open IDE with none of those runs
+      // the VM UNTRACKED — zero per-line cost, zero pair JSON (we: "if
+      // the computer is not open and no breakpoints exist, this impact
+      // shouldnt be there at all").
+      this.syncDebugTrack();
       this.wsT0 = performance.now();
       if (run.abi() !== XC_ABI)
         console.warn(`[xenon] wasm ABI ${run.abi()} != app ${XC_ABI}: the shipped `
@@ -1179,12 +1257,33 @@ export class XenonPump {
     this.wsOverrides = {};
     this.pilotBindings = new Map();
     this.paused = false; this.pausedLine = 0; this.pausedFile = ''; this.stepMode = 'off';
+    this.parkArmed = false; this.pausedDepth = 0; this.tracked = null;
     this.breaks = new Map();
     this.locals = [];
     this.notify();
   }
 
-  stopRunning() { this.sabResume(); this.run?.stop(); this.status = 'stopped'; this.notify(); }
+  /** XENON-DEBUG v3 TRACKING GATE (workpackages WP6): the interpreter's
+   *  per-line tracking runs ONLY while the debugger has work — a break
+   *  table, an armed step mode, or an armed park. Posted on change. */
+  private syncDebugTrack() {
+    const want = this.breaks.size > 0 || this.stepMode !== 'off' || this.parkArmed;
+    if (want === this.tracked) return;
+    this.tracked = want;
+    this.run?.debugTrack(want);
+  }
+
+  stopRunning() {
+    // XENON-DEBUG v3 STOP = PARK (workpackages WP7, we: "When I press f6
+    // it should mean stop … I want the code to stop on the precise line
+    // being executed … and I want to then be able to edit values"): arm
+    // the exact-line park (both modes), THEN mark the run stopped. The
+    // pump parks at the park site (paused ⇒ the writeback moment); the
+    // ON indicator flips OFF with the status. ▶/F8 resumes.
+    if (this.status === 'running') this.pause();
+    this.status = 'stopped';
+    this.notify();
+  }
   /** Breakpoints keyed BY FILE (XENON-DEBUG v2): breaks in inactive tabs
    *  fire too — the pair stream is file-qualified. */
   setBreaksMap(map: Record<string, Iterable<number>>) {
@@ -1192,6 +1291,7 @@ export class XenonPump {
       .map(([f, s]) => [f, s instanceof Set ? s : new Set(s)] as const)
       .filter(([, s]) => s.size > 0));
     this.applyBreaks();
+    this.syncDebugTrack();          // XENON-DEBUG v3: breaks arm tracking
     this.notify();
   }
   /** Mirror the break set into the worker's shared bp table (file idx,
@@ -1404,20 +1504,32 @@ export class XenonPump {
     }
     this.notify();
   }
+  /** ⏸ PAUSE (workpackages WP7): park on the EXACT executing line, no
+   *  breakpoint needed. Worker mode: cmd 5 — the hook sleeps mid-cycle at
+   *  the next executed line, the C++ stack intact. Main-thread mode: the
+   *  v3 xc_pause_request seam — the next executed LINENUMBER unwinds
+   *  xc_cycle (exact line, Computer alive, values editable). The pump
+   *  mirrors the park site (pausedFile/pausedLine) + reads the frame. */
   pause() {
     if (this.status !== 'running') return;
+    this.parkArmed = true;
+    this.syncDebugTrack();          // a park request arms the tracking gate
     if (this.wrun) { this.sabCmd(5); return; }   // stop at the NEXT line
-    this.paused = true;
+    if (this.run instanceof XenonRun) this.run.requestPause();
     this.notify();
   }
   resume() {
     if (this.wrun) this.sabResume();
+    if (this.run instanceof XenonRun) this.run.pauseCancel();
     this.paused = false;
     this.stepMode = 'off';
+    this.parkArmed = false;
+    if (this.status === 'stopped') this.status = 'running';   // ▶/F8 from ⏹
+    this.syncDebugTrack();
     this.notify();
   }
-  /** F10: stop at the next executed LINE in the current file (a stop inside
-   *  a function body continues until control leaves that body). */
+  /** F10: stop at the next executed LINE at the CURRENT call depth — a
+   *  call (in-file or not) is stepped OVER (XENON-DEBUG v3 depth twin). */
   stepOver() {
     if (this.wrun) {
       const i = this.i32;
@@ -1427,6 +1539,9 @@ export class XenonPump {
       if (fn) { i[7] = fn.line; i[8] = fn.end === Infinity ? 1e9 : fn.end; }
       else { i[7] = 1; i[8] = 0; }                    // top level: ANY new line
       this.paused = false;
+      this.parkArmed = true;
+      this.status = 'running';
+      this.syncDebugTrack();
       Atomics.store(i, 0, 1);
       Atomics.notify(i, 0);
       this.notify();
@@ -1441,6 +1556,9 @@ export class XenonPump {
       if (!i) return;
       i[5] = this.fileIdx(this.pausedFile); i[6] = this.pausedLine;
       this.paused = false;
+      this.parkArmed = true;
+      this.status = 'running';
+      this.syncDebugTrack();
       Atomics.store(i, 0, 2);
       Atomics.notify(i, 0);
       this.notify();
@@ -1457,6 +1575,9 @@ export class XenonPump {
       if (!i) return;
       i[9] = this.fileIdx(file); i[10] = line;
       this.paused = false;
+      this.parkArmed = true;
+      this.status = 'running';
+      this.syncDebugTrack();
       Atomics.store(i, 0, 3);
       Atomics.notify(i, 0);
       this.notify();
@@ -1468,10 +1589,13 @@ export class XenonPump {
     if (!this.run || (this.status !== 'running' && this.status !== 'stopped')) return;
     this.stepMode = mode;
     this.paused = false;
+    this.parkArmed = true;
+    this.syncDebugTrack();          // an armed step keeps tracking on
     this.startRunning();
   }
-  private pauseAt(file: string, line: number) {
+  private pauseAt(file: string, line: number, depth = 0) {
     this.paused = true; this.pausedFile = file; this.pausedLine = line;
+    this.pausedDepth = depth;
     // XENON-LOCALS (main-thread mode): the VM lives on this thread, read it
     // directly — cycle-granular like the pair-stream walk (the worker hook
     // above is the mid-cycle truth)
@@ -1579,9 +1703,28 @@ export class XenonPump {
   }
   startRunning() {
     if (!this.run) return;
+    // v1.13.31 (workpackages WP7): START cancels a park IN FLIGHT. The
+    // toolbar's ▶ reads pump.paused — while a ⏸/⏹ park request is armed
+    // but the worker has not reached its stop line yet, paused is still
+    // false; without the cancel the park lands AFTER the start and the
+    // breakpoint-follow yanks the editor tab mid-typing. Same law in
+    // main-thread mode: the xc_pause_request latch is cancelled.
+    // v1.13.31 fix2: the worker SAB cancel is CONDITIONAL — an armed
+    // run-to/step command (cmd 1/2/3, set by pump.runTo before a
+    // startRunning, the debug console's goto) is a deliberate stop and
+    // survives the start; only the park request (cmd 5) is cancelled.
+    {
+      const i = this.i32;
+      const cmd = i ? Atomics.load(i, 0) : 0;
+      if (!i || cmd === 5 || cmd === 4 || cmd === 0) this.sabResume();
+    }
+    if (this.run instanceof XenonRun) this.run.pauseCancel();
+    this.paused = false;
     this.run.running = true;
     this.status = 'running';
+    this.parkArmed = false;
     this.startLoop();
+    this.syncDebugTrack();
     this.notify();
   }
   reboot() {
@@ -1600,6 +1743,8 @@ export class XenonPump {
                                 // menu-bar counter restarts on a re-boot — the
                                 // F5-RUN law makes the rewind user-visible)
           this.paused = false; this.pausedLine = 0; this.pausedFile = ''; this.stepMode = 'off';
+          this.parkArmed = false; this.pausedDepth = 0; this.tracked = null;
+          this.syncDebugTrack();   // v3: a boot clears the recorder — re-arm the gate
           this.startLoop();
         } else { this.status = 'error'; this.error = w.error; }
         this.notify();
@@ -1611,6 +1756,8 @@ export class XenonPump {
       this.status = 'running'; this.log = []; this.prints = []; this.bus = new Map();
       this.cycles = 0;          // cycles count THIS boot (see the worker branch)
       this.paused = false; this.pausedLine = 0; this.pausedFile = ''; this.stepMode = 'off';
+      this.parkArmed = false; this.pausedDepth = 0; this.tracked = null;
+      this.syncDebugTrack();    // v3: a boot clears the recorder — re-arm the gate
       this.startLoop();
     }
     else { this.status = 'error'; this.error = r.error; }
@@ -1764,9 +1911,17 @@ export class XenonPump {
     if (this.paused) return;
     const r = run as XenonRun;                  // main-thread mode (wrun null)
     this.stepWorldSim(r);
-    const evs = r.cycle();
-    this.applyCycle(t, evs, r.vars(), r.screenMeta(),
-      k => r.screenPixels(k), r.cyclePairs(), r.error);
+    const step = r.cycle();
+    this.applyCycle(t, step.evs, r.vars(), r.screenMeta(),
+      k => r.screenPixels(k), r.cyclePairs(), r.error, r.cycleDepths());
+    // XENON-DEBUG v3 EXACT-LINE PARK (workpackages WP7): the armed pause
+    // unwound this cycle at its executing line — mirror the park site
+    // (beats a stepper bp-hit earlier in the stream: the VM STATE is HERE)
+    if (step.pausedAt) {
+      const idx = step.pausedAt.idx;
+      this.pauseAt(this.fileTable[idx] ?? `#${idx}`, step.pausedAt.line);
+      this.notify();
+    }
   }
 
   /** Consume ONE finished update: events → io bus/buzzers → the
@@ -1777,7 +1932,7 @@ export class XenonPump {
   private applyCycle(t: number, evs: XenonEvent[], varsArr: XenonVar[],
     metas: { key: string; w: number; h: number }[],
     pixelsFor: (key: string) => Uint8ClampedArray | null,
-    pairs?: number[], runError?: string): void {
+    pairs?: number[], runError?: string, depths?: number[]): void {
     if (evs.length) {
       const prints = evs.filter(e => e.e !== 'cycle');
       if (prints.length) this.log = [...this.log.slice(-180), ...prints];
@@ -1803,13 +1958,14 @@ export class XenonPump {
     if (!this.testGate && pairs) {
       const scope = this.stepMode === 'over'
         ? functionAt(this.projectFuncs, this.pausedFile, this.pausedLine) : null;
-      const hit = stepperLaw(pairs, this.fileTable, this.breaks, {
+      const hit = stepperLaw(pairs, depths, this.fileTable, this.breaks, {
         stepMode: this.stepMode,
         pausedFile: this.pausedFile, pausedLine: this.pausedLine,
+        pausedDepth: this.pausedDepth,
         toFile: this.toFile, toLine: this.toLine,
         scope: scope ? { file: scope.file, line: scope.line, end: scope.end } : null,
       });
-      if (hit) { this.stepMode = hit.stepMode; this.pauseAt(hit.file, hit.line); }
+      if (hit) { this.stepMode = hit.stepMode; this.pauseAt(hit.file, hit.line, hit.depth); }
     }
     this.vars = new Map(varsArr.filter(varVisible).map(v => [v.name, v]));
     if (runError) {
@@ -1925,7 +2081,7 @@ export class XenonPump {
 }
 
 /** The shim ABI the app expects (xc_host.cpp xc_abi()). Bump with the shim. */
-export const XC_ABI = 9;
+export const XC_ABI = 10;
 
 export const xenonPump = new XenonPump();
 

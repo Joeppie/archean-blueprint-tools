@@ -241,6 +241,8 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   edit/view mode — files[] are live buffers, save is the only commit,
   closing discards; autosave shadow-copies the doc as always) ONLY while a
   computer or Screens window is open — else F5 stays the browser refresh.
+  F6 = STOP (v1.13.31, same window law): parks the VM on the EXACT
+  executing line (PARK LAW below) and marks the run stopped.
   Ctrl+F = CM find panel, Ctrl+G = go-to-line box (Esc closes them, NEVER
   the IDE — popup stopPropagation law). ⛶ / title double-click maximizes
   (FloatingWindow `maximized`).
@@ -264,12 +266,33 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
 - THE STEP LAW LIVES IN TWO PLACES: `stepperLaw()` (xenoncode.ts, pure,
   main-thread) ⇄ the EM_JS hook in `xc_host.cpp` (worker). ANY change lands
   in BOTH + re-pins (+ rebuilt wasm: `EMSDK=~/emsdk tools/xenoncode/build.sh
-  wasm-only`). v1.13.28 CLASSIC STEP-OVER: F10 stops at the first fresh
-  pair OF THE PAUSED FILE (the next executed line at the current frame;
-  other-file calls are stepped over) — the old scope-window law ran the
-  rest of a function body away and read as "F10 skipped where I am". SAB payload windows start ABOVE every slot byte (slot n
-  owns 4n..4n+4); SAB views decode through `bytes.slice()` copies (TextDecoder
-  refuses shared views).
+  wasm-only`). v1.13.31 XENON-DEBUG v3 CLASSIC STEP-OVER DEEPENED (ABI 10):
+  the interpreter records a CALL-DEPTH stream parallel to the pair stream
+  (fork: `cycleDepth`; hook seam `xc_debug_hook(file,line,depth)`), and F10
+  stops at the first fresh pair OF THE PAUSED FILE at depth ≤ the paused
+  depth — in-file callees are stepped OVER (the file-only law read as "F10
+  steps into, not over"); the hook keeps the paused depth hook-internal
+  (H.pd — NOT a SAB slot: payload windows reach across the slot area, the
+  slot law above). `stepperLaw(pairs, depths, …)` degrades to the v1.13.28
+  file-only law when the depth stream is absent (older wasm). SAB payload
+  windows start ABOVE every slot byte (slot n owns 4n..4n+4); SAB views
+  decode through `bytes.slice()` copies (TextDecoder refuses shared views).
+- THE TRACKING GATE + PARK LAW (v1.13.31, workpackages.md): the
+  interpreter's per-line tracking runs ONLY while the debugger has work —
+  a break table, an armed step, an armed park (`pump.syncDebugTrack`; the
+  worker also skips the per-cycle pair/depth JSON; `xc_hook_live(on)` gates
+  the C++→JS hook CALL — the main-thread pump keeps it disarmed, its
+  debugger is the pair+depth stream). An IDE open with none of those costs
+  the program NOTHING (pump closed ⇒ the VM is gone: zero impact rule).
+  ⏸/⏹/F6 PARK on the EXACT executing line with NO breakpoint: worker mode
+  via the hook (cmd 5, mid-cycle, frozen cycle counter); main-thread mode
+  via the v3 `xc_pause_request` seam (`xc_cycle` returns 2,
+  `xc_pause_file/line` report the site, the Computer survives — the
+  interrupted cycle's remainder is discarded, cycle-granular honesty, the
+  mode chip says so). At a park the editor's wash + the pill derive from
+  `pump.paused` (RESUME CLEARS them), THE WRITEBACK LAW is satisfiable in
+  both modes, and a value cell clicked while the worker runs ARMS the park
+  and opens the editor on arrival (park-to-edit).
 - The interpreter is a FORK SUBMODULE (`tools/xenoncode/upstream`, branch
   `archean`). `build.sh` builds ONLY the recorded gitlink and REFUSES a
   diverged checkout. A bump = submodule commit + rebuilt js/wasm in the SAME

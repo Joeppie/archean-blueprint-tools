@@ -36,6 +36,14 @@ for (let i = 0; i < 40; i++) {
   const music = (s?.bus ?? []).some(([k, v]) => /melody:1/.test(k) && Number(v) > 10);
   if (music) break;
 }
+if (process.env.BREAK) {
+  // v1.13.31 (workpackages WP6): arm a NEVER-FIRING breakpoint so the
+  // TRACKING GATE is fully open (per-line record + pair/depth JSON every
+  // cycle) — the measured cps is then the debugger's true per-cycle cost.
+  const files = await page.evaluate(() => window.__XCDBG__.files());
+  await page.evaluate((n) => window.__XCDBG__.break(n, [999999]), files[0].name);
+  console.log('armed: never-firing breakpoint (tracking gate fully open)');
+}
 const c0 = await page.evaluate(() => window.__XENON__?.()?.cycles ?? 0);
 await page.waitForTimeout(15000);
 const c1 = await page.evaluate(() => window.__XENON__?.()?.cycles ?? 0);

@@ -840,6 +840,10 @@ int main(int argc, char** argv) {
 	const double dial = getenv("XC_DIAL") ? atof(getenv("XC_DIAL")) : 0.0;
 	xc_inputs[1][7] = dial;   // the hello program's externally provided numer
 	bool realtime = getenv("XC_FAST") == nullptr;   // timers run on the real clock
+	// XENON-DEBUG v3 native probe: XC_PAUSE_AT="<cycle>" arms the exact-line
+	// pause seam at that cycle — the loop unwinds at the EXECUTING line, the
+	// Computer survives, and XC_LOCALS/XC_WRITE below validate the park.
+	const int pauseAt = getenv("XC_PAUSE_AT") ? atoi(getenv("XC_PAUSE_AT")) : -1;
 	try {
 		computer->RunInit();
 		for (int c = 0; c < cycles; ++c) {
@@ -847,6 +851,7 @@ int main(int argc, char** argv) {
 			xc_tickCount++;
 			pilotAtCycle(c);
 			xc_eventLog.push_back("{\"e\":\"cycle\",\"c\":" + to_string(c) + "}");
+			if (c == pauseAt) Computer::DebugPauseRequest();
 			if (c == 10 && getenv("XC_REBOOT")) { // mid-run reboot (the Badger's strict-off state)
 				computer->SaveStorage(dir + "/storage");
 				computer = make_unique<Computer>();
@@ -873,6 +878,17 @@ int main(int argc, char** argv) {
 			}
 			if (realtime) this_thread::sleep_for(chrono::milliseconds(100));
 		}
+	} catch (XenonCode::Implementation::DebugPause&) {
+		// XENON-DEBUG v3 native probe: the park lands at the EXECUTING line
+		// (the interpreter unwound, the Computer is alive). Report the site,
+		// then fall through to the XC_LOCALS/XC_WRITE probes below — they
+		// validate that the parked VM answers frames + writebacks.
+		cout << "[xc] PAUSED at " << Computer::DebugPauseFile()
+		     << ":" << Computer::DebugPauseLine()
+		     << " (XC_PAUSE_AT seam, XENON-DEBUG v3)" << endl;
+		auto ps = Computer::DebugTakePairs();
+		cout << "[xc] pairs before the park: " << ps.size() << endl;
+		if (!ps.empty()) cout << "[xc] last executed pair: " << ps.back() << endl;
 	} catch (XenonCode::RuntimeError& e) {
 		cerr << "[xc] RUNTIME ERROR: " << e.what() << endl;
 		return 4;
@@ -1048,6 +1064,12 @@ EMSCRIPTEN_KEEPALIVE int xc_cycle() {
 		g_computer->RunCycle();
 		g_computer->RunEntryPoint("update");
 		xc_endCycle(*g_computer);            // click/scroll entry points + reads
+	} catch (XenonCode::Implementation::DebugPause&) {
+		// XENON-DEBUG v3 (ABI 10): the exact-line PAUSE REQUEST fired at the
+		// executing LINENUMBER — the interpreter's frame unwound, the
+		// Computer SURVIVES (locals live in RAM slots: xc_locals_json and
+		// xc_write_var serve the park). 2 = "paused", NOT an error.
+		return 2;
 	} catch (XenonCode::RuntimeError& e) {
 		g_err = "runtime: " + string(e.what());
 		g_computer.reset();
@@ -1112,6 +1134,30 @@ EMSCRIPTEN_KEEPALIVE const char* xc_cycle_pairs() {
 	g_pairsJson += "]";
 	return g_pairsJson.c_str();
 }
+// XENON-DEBUG v3 (ABI 10): the CALL-DEPTH stream — index-aligned with the
+// pair stream (drain both per cycle). The step-over law stops at the first
+// fresh pair of the paused file at depth <= the paused depth.
+static string g_depthsJson;
+EMSCRIPTEN_KEEPALIVE const char* xc_cycle_depths() {
+	g_depthsJson = "[";
+	auto v = Computer::DebugTakeDepths();
+	for (size_t i = 0; i < v.size(); ++i) { if (i) g_depthsJson += ","; g_depthsJson += std::to_string(v[i]); }
+	g_depthsJson += "]";
+	return g_depthsJson.c_str();
+}
+// XENON-DEBUG v3: arm/disarm the per-line stop-hook CALL (worker hosts arm
+// it; the main-thread pump keeps it disarmed — its debugger is the pair +
+// depth stream, the EM_JS crossing per executed line is pure cost).
+EMSCRIPTEN_KEEPALIVE void xc_hook_live(int on) { Computer::HookLive(on != 0); }
+// XENON-DEBUG v3: exact-line pause seam for hosts that cannot sleep the
+// interpreter (the main-thread pump): the next executed LINENUMBER records
+// its site and throws; xc_cycle catches and returns 2, these report the site.
+EMSCRIPTEN_KEEPALIVE void xc_pause_request() { Computer::DebugPauseRequest(); }
+// v3: cancel an armed park — START (▶/F8/re-boot) outranks a pending ⏸:
+// a park request that lands AFTER the start yanks the editor tab mid-run.
+EMSCRIPTEN_KEEPALIVE void xc_pause_cancel() { Computer::DebugPauseCancel(); }
+EMSCRIPTEN_KEEPALIVE int xc_pause_file() { return Computer::DebugPauseFile(); }
+EMSCRIPTEN_KEEPALIVE int xc_pause_line() { return Computer::DebugPauseLine(); }
 // XENON-DEBUG v2 stop-hook seam (the interpreter calls this at each
 // executed line when tracking). v1.13.17 TRUE LINE STEPPING: under
 // Emscripten the hook is an EM_JS — the STEP LAW below runs in JS and on a
@@ -1123,13 +1169,31 @@ EMSCRIPTEN_KEEPALIVE const char* xc_cycle_pairs() {
 // exact line. Native runner + main-thread page hosts: Module.XC_SAB is
 // absent and the hook is inert — the pair stream remains the channel.
 //
+// XENON-DEBUG v3 (ABI 10): the hook seam gains the CALL DEPTH
+// (xc_debug_hook(file,line,depth) — the interpreter's recursion_depth at
+// the executed line). Step-over becomes classic 'next': the first fresh
+// pair of the PAUSED FILE at depth <= the depth at the pause — an in-file
+// callee (depth+1) is stepped OVER, the return into the caller stops
+// (app twin: stepperLaw's depths + pausedDepth). The paused depth is
+// hook-internal state (H.pd) — the SAME worker thread is its only reader,
+// it needs no SAB slot (and must not share one: the locals payload window
+// at byte 80 reaches across the slot area for big frames).
+// The hook CALL is armed by the host (xc_hook_live → Implementation::
+// hookLive): worker hosts arm it, main-thread hosts stay inert (their
+// debugger is the pair+depth stream, the per-line EM_JS crossing is cost).
+// The exact-line PAUSE REQUEST seam (xc_pause_request) throws
+// Implementation::DebugPause from the LINENUMBER opcode — xc_cycle catches
+// it and returns 2 (the Computer survives: xc_pause_file/line +
+// xc_locals_json + xc_write_var serve the park).
+//
 // i32 layout on the SharedArrayBuffer (the app's XenonWorkerRun is the
 // other end; library_xc.js documents the protocol):
 //   0 cmd main->worker: 0 none 1 over 2 into 3 runTo 4 resume 5 pause
 //     6 write (XENON-WRITEBACK — apply the queued variable write, stay parked)
 //   1 state worker->main: 0 running 1 PAUSED
 //   2 paused file idx  3 paused line  4 reason 1 bp 2 step 3 cursor 4 pause
-//   5/6 ref pair (over/into)   7/8 over body range (lo>hi = top level)
+//   5/6 ref pair (over/into)   7/8 over body range (v3: unused — the
+//     CLASSIC law needs only the ref pair + the hook-internal depth)
 //   9/10 runTo target          11 bp count, 12.. (file,line) pairs (max 64)
 //   18 XENON-WRITEBACK payload byte length (JSON both ways),
 //   20 write-ack ready (1) — cmd 6 queues {file,line,name,t,v} at BYTE 128
@@ -1146,13 +1210,13 @@ EMSCRIPTEN_KEEPALIVE const char* xc_cycle_pairs() {
 //   of slot 1 sees 1). Needs the 8192-byte SAB the app allocates (the
 //   v1.13.17-era 1024-byte array degrades: the slot-19 length stays 0).
 #ifdef __EMSCRIPTEN__
-EM_JS(void, xc_hook_js, (int file, int line), {
+EM_JS(void, xc_hook_js, (int file, int line, int depth), {
   var M = (typeof Module !== 'undefined') ? Module : null;
   if (!M) return;
   var H = M.__xcHook;
   if (!H) {
     if (!M.XC_SAB) return;                       // main-thread host: inert
-    H = M.__xcHook = { i32: new Int32Array(M.XC_SAB) };
+    H = M.__xcHook = { i32: new Int32Array(M.XC_SAB), pd: 0 };
   }
   var i = H.i32;
   var cmd = Atomics.load(i, 0);
@@ -1160,11 +1224,13 @@ EM_JS(void, xc_hook_js, (int file, int line), {
   var reason = 0;
   if (cmd === 5) reason = 4;
   else if (cmd === 1) {                          // step OVER
-    // v1.13.28 CLASSIC STEP-OVER twin (see stepperLaw in the app): stop
-    // at the first fresh pair of the PAUSED FILE (the next line at the
-    // current frame); callees (other files) are stepped over. The old
-    // scope-window rule ran the rest of a function body away.
-    if (!(file === i[5] && line === i[6]) && file === i[5]) reason = 2;
+    // v1.13.31 CLASSIC STEP-OVER twin (see stepperLaw in the app): stop
+    // at the first fresh pair of the PAUSED FILE at depth <= the depth at
+    // the pause — an in-file callee (depth+1) is stepped OVER, the return
+    // into the caller stops. XENON-DEBUG v3 (the old file-only rule
+    // landed inside in-file callees = "F10 steps into, not over").
+    if (!(file === i[5] && line === i[6]) && file === i[5]
+        && depth <= (H.pd | 0)) reason = 2;
   } else if (cmd === 2) {                        // step INTO
     if (!(file === i[5] && line === i[6])) reason = 2;
   } else if (cmd === 3) {                        // run to cursor
@@ -1178,6 +1244,8 @@ EM_JS(void, xc_hook_js, (int file, int line), {
   if (!reason) return;
   Atomics.store(i, 0, 0);                        // consume the command
   i[2] = file; i[3] = line; i[4] = reason;
+  H.pd = depth;                                  // the depth AT THE PAUSE
+                                                 // (step-over twin, above)
   // XENON-LOCALS: hand the paused line's frame to the main thread — the
   // parked worker thread answers no postMessages, so the JSON rides the SAB:
   // UTF-8 bytes at byte offset 80, length in slot 19 (plain writes before
@@ -1229,11 +1297,11 @@ EM_JS(void, xc_hook_js, (int file, int line), {
   Atomics.notify(i, 1);                          // command stays PENDING
 });
 #endif
-extern "C" void xc_debug_hook(int file, int line) {
+extern "C" void xc_debug_hook(int file, int line, int depth) {
 #ifdef __EMSCRIPTEN__
-  xc_hook_js(file, line);
+  xc_hook_js(file, line, depth);
 #else
-  (void)file; (void)line;
+  (void)file; (void)line; (void)depth;
 #endif
 }
 EMSCRIPTEN_KEEPALIVE const char* xc_error() { return g_err.c_str(); }
@@ -1351,7 +1419,7 @@ EMSCRIPTEN_KEEPALIVE const char* xc_write_var(int fileIdx, int line, const char*
 
 // ABI stamp: the app checks this at boot (XC_ABI in engine/xenoncode.ts) and
 // warns ONCE on drift — new device/shim exports must bump it.
-EMSCRIPTEN_KEEPALIVE int xc_abi() { return 9; }   // 9: xc_write_var + the hook's cmd-6 write handoff (editable debug values); 8: xc_locals_json + the hook's SAB locals handoff (the Locals panel); 7: the stop-hook is LIVE (library_xc.js + Module.XC_SAB worker stepping); 6: xc_cycle_pairs + hook seam; 5: xc_set_cycle_ms
+EMSCRIPTEN_KEEPALIVE int xc_abi() { return 10; }  // 10: depth stream + hookLive gate + exact-line pause seam (XENON-DEBUG v3); 9: xc_write_var + the hook's cmd-6 write handoff (editable debug values); 8: xc_locals_json + the hook's SAB locals handoff (the Locals panel); 7: the stop-hook is LIVE (library_xc.js + Module.XC_SAB worker stepping); 6: xc_cycle_pairs + hook seam; 5: xc_set_cycle_ms
 EMSCRIPTEN_KEEPALIVE void xc_set_cycle_ms(int ms) {
 	// the app's pump cadence (CYCLE_MS): delta_time / system_frequency
 	// follow it, so dt-driven programs (Chip's Mario, physics on

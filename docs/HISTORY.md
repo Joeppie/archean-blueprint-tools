@@ -2912,6 +2912,41 @@ topic + FORMAT).
   so only the deploy's `npm run build` caught it). Matcher-level
   `{ timeout }` form; behavior unchanged.
 
+- **v1.13.31 XENON-DEBUG v3 — THE DEBUGGER WORKPACKAGES (we, 2026-10-28,
+  the Mario session: "When I have given input to a screen, my breakpoints
+  are not hit … I must be moved there … the yellow highlight … not cleared
+  … f10 steps into, not over … cannot change variable values … debugging
+  mario feels sluggish … f5 should mean run, f6 should mean stop … I want
+  the code to stop on the precise line being executed, EVEN IF we do not
+  have a breakpoint there! And I want to then be able to edit values"):**
+  the session plan is workpackages.md; the shipped laws are AGENTS.md
+  §Xenon (STEP LAW v3, TRACKING GATE + PARK LAW, F6 key). The build:
+  XENON-DEBUG v3 lands as a FORK commit (cycleDepth stream, per-stream
+  caps, the DebugPause seam, hookLive gate) + the xc_host.cpp twin (hook
+  depth + H.pd, the new exports, ABI 10) + rebuilt js/wasm in the SAME
+  commit. WP1 root cause (main-thread only): the pair recorder shared the
+  cycleLines 200k cap and lines are never drained there — Mario's game
+  loop (screen input starts the render loop, thousands of lines/cycle)
+  pushed the vector over the cap and pair recording DIED GLOBALLY, so
+  breakpoints never fired again; per-stream caps fix it (the native probe
+  XC_PAUSE_AT + the dbgaudit streamed-cycle pin). WP4: the v1.13.28 law's
+  documented "in-file callees land like step-INTO" limit was THE report —
+  the depth stream makes classic 'next' real in both modes. WP5 root
+  cause: on the user's Tailscale origin (http LAN = not a secure context
+  = MAIN-THREAD pump, no SAB) ⏸/⏹ never parked the VM, so the WRITEBACK
+  LAW's writable moment was unreachable; the v3 pause seam parks main-mode
+  exactly, ⏹ parks + stops, and the value rows park-to-edit. WP6: the
+  tracking gate (breaks/step/park only) + worker pair-JSON skip +
+  xc_hook_live kill the debug cost when the debugger is idle; the pump
+  already closes (VM gone) when both the IDE and the Screens dock close.
+  WP3: the editor's wash/pill derived from pausedFile/pausedLine WITHOUT
+  pump.paused — resume left the yellow row behind. WP2: jumpTo centers the
+  line (EditorView.scrollIntoView y:'center'). Verification tiers: native
+  xc_run probes (pause seam exact line + writeback into the parked frame),
+  vitest STEPPER LAW depth pins, and the SPARING Playwright budget spent
+  ONLY on the debugger legs of xenon.spec.ts/xenondbg.spec.ts + the
+  app/tools/dbgaudit.mjs audit run on BOTH origins (localhost = worker,
+  Tailscale IP = main-thread — the user's real mode).
 ## 2. v1.11 session — KNOWN ISSUES & UNPINNED TODOS (2026-10-25/26 session block)
 
 KNOWN ISSUES (accepted behaviours, costs, sharp edges):

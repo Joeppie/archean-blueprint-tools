@@ -997,6 +997,15 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         if (screensOpen && xenonCi === null) { e.preventDefault(); xenonPump.reboot(); }
         return;
       }
+      // F6 STOP (v1.13.31, we: "f6 should mean stop"): the twin of the F5
+      // law — with the ▣ Screens dock up and no IDE window, F6 parks the
+      // pump's computer at its EXECUTING line (status stopped, values
+      // editable); with the IDE open its OWN F6 handler owns the key;
+      // with NEITHER window open the key stays the browser's.
+      if (e.key === 'F6') {
+        if (screensOpen && xenonCi === null) { e.preventDefault(); xenonPump.stopRunning(); }
+        return;
+      }
       const el = e.target as HTMLElement | null;
       const tag = el?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el?.isContentEditable) return;

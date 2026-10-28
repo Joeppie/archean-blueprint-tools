@@ -131,7 +131,7 @@ export default function XenonDialog(p: {
   const [bps, setBps] = useState<Record<number, Set<number>>>({});
   const [lastLine, setLastLine] = useState(0);          // 1-based caret (F9 target)
   const editorRef = useRef<CodeEditorHandle>(null);
-  const [pendingJump, setPendingJump] = useState(0);
+  const [pendingJump, setPendingJump] = useState<{ line: number; focus: boolean } | null>(null);
   // the game's OWN channel meanings (viewer/models/channels.json): an io
   // resolves to its cabled/aliased component TYPE, the channel to its
   // function — "io 4 · NavInstrument · ch 6 Heading", not a bare "ch 6"
@@ -210,7 +210,10 @@ export default function XenonDialog(p: {
       cycleLines: pump.run?.cycleLines() ?? [],
       cyclePairs: pump.run?.cyclePairs() ?? [],
       debug: { paused: pump.paused, file: pump.pausedFile, line: pump.pausedLine,
-        stepMode: pump.stepMode, breaks: [...pump.breaks.entries()].map(([f, s]) => [f, [...s]]) },
+        stepMode: pump.stepMode, breaks: [...pump.breaks.entries()].map(([f, s]) => [f, [...s]]),
+        // XENON-DEBUG v3 audit: the TRACKING GATE + park state
+        parkArmed: pump.parkArmed, pausedDepth: pump.pausedDepth,
+        tracked: (pump as unknown as { tracked: boolean | null }).tracked },
       // XENON-LOCALS audit: the panel's frame + the raw SAB handoff (slot 19
       // length + the JSON head the parked hook encoded)
       locals: pump.locals,
@@ -353,7 +356,7 @@ export default function XenonDialog(p: {
     navPos.current = at;
     navTick(t => t + 1);
     const idx = runtimeFilesRef.current.findIndex(f => f.name === pt.file);
-    if (idx >= 0) { setTab(idx); setPendingJump(pt.line); }
+    if (idx >= 0) { setTab(idx); setPendingJump({ line: pt.line, focus: true }); }
   };
   // Alt+←/→ CAPTURE (CM binds Alt+arrows to scope-select in the editor;
   // capture runs first — the established window-capture law)
@@ -368,27 +371,30 @@ export default function XenonDialog(p: {
     return () => removeEventListener('keydown', h, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const jumpTo = (fileName: string, line1: number) => {
+  const jumpTo = (fileName: string, line1: number, focus = true) => {
     const idx = runtimeFiles.findIndex(f => f.name === fileName);
     if (idx < 0) return;
     recNav();                       // the place we LEAVE becomes a navpoint
     setTab(idx);
-    setPendingJump(line1);
+    setPendingJump({ line: line1, focus });
   };
   useEffect(() => {
     if (!pendingJump) return;
-    const h = window.setTimeout(() => editorRef.current?.jumpTo(pendingJump), 60);
-    setPendingJump(0);
+    const h = window.setTimeout(
+      () => editorRef.current?.jumpTo(pendingJump.line, pendingJump.focus), 60);
+    setPendingJump(null);
     return () => window.clearTimeout(h);
   }, [pendingJump]);
   // BREAKPOINT-FOLLOW (v1.13.27, we: "when hitting a breakpoint in
   // execution, the editor should move to the point just being hit"): a
   // pause moves the IDE to the hit file:line (through jumpTo ⇒ recorded
-  // navpoint, so ◀ returns to where you were editing)
+  // navpoint, so ◀ returns to where you were editing). focus=FALSE (v1.13.31):
+  // the caret/view moves, the KEYBOARD does not get yanked — a debugger
+  // pause mid-typing scrolls the hit into view without stealing focus
   useEffect(() => {
     if (!pump.paused || !pump.pausedFile) return;
     if (runtimeFilesRef.current.some(f => f.name === pump.pausedFile))
-      jumpTo(pump.pausedFile, pump.pausedLine);
+      jumpTo(pump.pausedFile, pump.pausedLine, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pump.paused, pump.pausedFile, pump.pausedLine]);
   // validation: the REAL compiler (xc_parse_line) over a window around the
@@ -456,6 +462,34 @@ export default function XenonDialog(p: {
     name: string; t: number; val: string } | null>(null);
   const [verr, setVerr] = useState<{ key: string; msg: string } | null>(null);
   const [vbusy, setVbusy] = useState(false);
+  // ── PARK-TO-EDIT (v1.13.31, workpackages WP5, we: "I cannot change
+  //    variable values from the variables value list"): on the worker a
+  //    write is legal at a PAUSED moment only (THE WRITEBACK LAW). Clicking
+  //    a running value PRESSES ⏸ for you — the VM parks at the exact
+  //    executing line (WP7) and this pending row opens its editor the
+  //    moment the park lands, so the edit is ONE click away from live.
+  const parkEdit = useRef<{ key: string; scope: 'locals' | 'globals';
+    name: string; t: number; val: string } | null>(null);
+  const prevPaused = useRef(false);
+  useEffect(() => {
+    if (pump.paused && !prevPaused.current && parkEdit.current) {
+      let pe = parkEdit.current;
+      parkEdit.current = null;
+      // The park replaced pump.locals with the NEW frame's rows — a press
+      // on a stale-frame local's row must re-target: the same name in the
+      // new frame, else the global of that name (WriteVarAt's own lookup
+      // order), else an honest inline refusal.
+      if (pe.scope === 'locals' && !pump.locals.some(v => v.name === pe.name)) {
+        const g = pump.vars.get(pe.name);
+        if (g) pe = { ...pe, scope: 'globals', key: `globals:${pe.name}`, t: g.t };
+        else { setVerr({ key: pe.key, msg: `the park frame has no $${pe.name} (top-level stop)` }); return; }
+      }
+      setVedit(pe);
+      setVerr(null);
+    }
+    prevPaused.current = pump.paused;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pump.paused]);
   const typeLabel = (t: number): string =>
     t === 70 ? 'number' : t === 71 ? 'text'
     : t === 80 ? 'number array' : t === 81 ? 'text array'
@@ -515,9 +549,17 @@ export default function XenonDialog(p: {
             onClick={() => { setVedit({ key, scope, name, t, val: v }); setVerr(null); }}>
             {shown}
           </button>
+        ) : (pump.wrun && pump.status === 'running' && scope === 'globals'
+             && (t === 70 || t === 71)) ? (
+          <button data-testid={`xenon-valpress-${name}`}
+            title="running — click parks the VM at the executing line, then this value is editable"
+            className="max-w-[180px] truncate rounded px-1 tabular-nums text-[#9fb0c8] underline decoration-dotted decoration-[#2b3a52] underline-offset-2 hover:bg-[#1d2b42]"
+            onClick={() => { parkEdit.current = { key, scope, name, t, val: v }; setVerr(null); pump.pause(); }}>
+            {shown}
+          </button>
         ) : (
           <span className="truncate text-[#d6dbe1]"
-            title={(t === 70 || t === 71) ? 'pause the debugger (F9 break) to edit' : refuseMsg(t)}>
+            title={(t === 70 || t === 71) ? 'press F6 (stop) or ⏸ to park on the executing line, then click to edit' : refuseMsg(t)}>
             {shown}
           </span>
         )}
@@ -680,13 +722,17 @@ export default function XenonDialog(p: {
   // v1.13.27 made the editor always live, so "run" = "commit what's on
   // screen") (we: "F5 should run the code, so long as a computer or screen
   // window is open, otherwise it does a refresh" — inside this window it
-  // never refreshes the page)
+  // never refreshes the page). F6 STOP (v1.13.31, we: "f6 should mean
+  // stop"): parks the VM at the EXACT executing line and marks the run
+  // stopped — the yellow line lands where the program stands and the
+  // variables become editable (workpackages WP7).
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if (e.key === 'F5') {
         e.preventDefault();
         save(false);
       }
+      else if (e.key === 'F6') { e.preventDefault(); pump.stopRunning(); }
       else if (e.key === 'F8') { e.preventDefault(); pump.resume(); }
       else if (e.key === 'F9') {
         e.preventDefault();
@@ -755,9 +801,10 @@ export default function XenonDialog(p: {
               { label: 'Delete current tab', testid: 'file-delete-tab', on: () => delFile(), disabled: files.length <= 1 },
             ] },
             { label: 'Run', testid: 'xmenu-run', entries: [
-              { label: pump.status === 'running' ? 'Resume / continue' : 'Start', hint: 'F8', testid: 'run-resume', on: () => pump.startRunning() },
-              { label: 'Pause', hint: 'F8', testid: 'run-pause', on: () => pump.pause(), disabled: pump.status !== 'running' },
-              { label: pump.wrun ? 'Step next line' : 'Step next CYCLE (cycle-stepping ⚠)', hint: 'F10', testid: 'run-step', on: () => pump.stepOver() },
+              { label: pump.status === 'running' ? 'Resume / continue' : pump.paused ? 'Resume' : 'Start', hint: 'F8', testid: 'run-resume',
+                on: () => { if (pump.paused) pump.resume(); else pump.startRunning(); } },
+              { label: 'Pause (park at the executing line)', hint: '⏸', testid: 'run-pause', on: () => pump.pause(), disabled: pump.status !== 'running' },
+              { label: pump.wrun ? 'Step next line (over calls)' : 'Step next CYCLE (cycle-stepping ⚠)', hint: 'F10', testid: 'run-step', on: () => pump.stepOver() },
               { label: pump.wrun ? 'Step into @call' : 'Step into next CYCLE (cycle-stepping ⚠)', hint: 'F11', testid: 'run-step-into', on: () => pump.stepInto() },
               // the capability that is ABSENT on this origin, as a disabled
               // item (v1.13.18, we: "disable the relevant menu items AND show
@@ -768,7 +815,7 @@ export default function XenonDialog(p: {
                   : 'True line-stepping — needs http://localhost:PORT (unavailable here)',
                 testid: 'run-lines-exact', on: () => undefined, disabled: true,
               }]),
-              { label: 'Stop', testid: 'run-stop', on: () => pump.stopRunning() },
+              { label: 'Stop (park at the line · values editable)', hint: 'F6', testid: 'run-stop', on: () => pump.stopRunning() },
               { label: 'Toggle breakpoint', hint: 'F9', testid: 'run-breakpoint', on: () => { if (onCode && lastLine > 0) toggleBp(lastLine); }, disabled: !onCode || lastLine <= 0 },
             ] },
             { label: 'Computer', testid: 'xmenu-computer', entries: [
@@ -776,7 +823,8 @@ export default function XenonDialog(p: {
             ] },
             { label: 'Help', testid: 'xmenu-help', entries: [
               { label: 'F9 break · F10 over · F11 into · F8 resume · Ctrl+S save', testid: 'help-keys', on: () => undefined },
-              { label: 'F5 run (commit + re-boot) · Ctrl+F find · Ctrl+G goto · ⛶ maximise', testid: 'help-run', on: () => undefined },
+              { label: 'F5 run (commit + re-boot) · F6 stop (park at the line) · Ctrl+F find · Ctrl+G goto · ⛶ maximise', testid: 'help-run', on: () => undefined },
+              { label: 'F6/⏹/⏸ park on the EXECUTING line — then click a variable value to edit it', testid: 'help-park', on: () => undefined },
               { label: 'Alt+← / Alt+→ walk nav history · a breakpoint hit moves the editor', testid: 'help-nav', on: () => undefined },
               { label: 'Right-click: definition · run-to-cursor · breakpoints', testid: 'help-ctx', on: () => undefined },
               { label: 'Type $ for variables, @ for declared functions', testid: 'help-complete', on: () => undefined },
@@ -871,7 +919,7 @@ export default function XenonDialog(p: {
             <button data-testid="ide-pause"
               disabled={pump.status !== 'running' || pump.paused}
               className="rounded bg-[#243a52] px-2 py-0.5 text-[#e6c07b] hover:bg-[#2f4c6b] disabled:opacity-30"
-              title="pause the run"
+              title="pause — park on the executing line (values become editable)"
               onClick={() => pump.pause()}>⏸</button>
             <button data-testid="ide-restart"
               className="rounded bg-[#243a52] px-2 py-0.5 text-[#8fd4ff] hover:bg-[#2f4c6b]"
@@ -879,11 +927,11 @@ export default function XenonDialog(p: {
               onClick={() => pump.reboot()}>⟳</button>
             <button data-testid="ide-stop"
               className="rounded bg-[#5a2222] px-2 py-0.5 text-[#ffb3b3] hover:bg-[#7a2e2e]"
-              title="stop the run"
+              title="stop (F6) — park on the executing line, values editable"
               onClick={() => pump.stopRunning()}>⏹</button>
             <button data-testid="ide-step-over"
               className="rounded bg-[#1d2c46] px-1.5 py-0.5 text-[#cfe1ff] hover:bg-[#27395c]"
-              title="step over one executed line (F10)"
+              title="step over one executed line — calls are stepped over (F10)"
               onClick={() => pump.stepOver()}>⇥</button>
             <button data-testid="ide-step-into"
               className="rounded bg-[#1d2c46] px-1.5 py-0.5 text-[#cfe1ff] hover:bg-[#27395c]"
@@ -902,7 +950,7 @@ export default function XenonDialog(p: {
                 file={runtimeFiles[tab] ?? file} tabKey={`${comp.ci}:${tab}`}
                 editable={onCode} onChange={editChange} onSave={() => save(false)}
                 breaks={bps[tab] ?? new Set()}
-                pausedLine={pump.pausedFile === runtimeName(tab) ? pump.pausedLine : 0}
+                pausedLine={pump.paused && pump.pausedFile === runtimeName(tab) ? pump.pausedLine : 0}
                 errors={errors}
                 funcs={funcs} decls={decls}
                 varList={[

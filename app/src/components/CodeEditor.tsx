@@ -120,8 +120,12 @@ const BP_M = new BreakMarker();
 const PAUSED_M = new PausedMarker();
 
 export interface CodeEditorHandle {
-  /** Reveal + center a 1-based line and put the caret on it. */
-  jumpTo(line1: number): void;
+  /** Reveal + center a 1-based line and put the caret on it. focus=false
+   *  moves the caret/view WITHOUT stealing keyboard focus (the debugger's
+   *  breakpoint-follow: a pause must not yank the keys out of your hands —
+   *  under load the focus-steal raced the IDE leg's typing and lost the
+   *  dirty-dot pin). */
+  jumpTo(line1: number, focus?: boolean): void;
   cursorLine(): number;           // 1-based
   focus(): void;
   /** Open CodeMirror's find panel (the IDE's Ctrl+F, from any focus). */
@@ -533,13 +537,21 @@ function CodeEditorInner(p: CodeEditorProps, ref: React.Ref<CodeEditorHandle>) {
   }, [p.file.code, p.editable, p.tabKey]);
 
   useImperativeHandle(ref, () => ({
-    jumpTo(line1: number) {
+    jumpTo(line1: number, focus = true) {
       const view = viewRef.current;
       if (!view) return;
       const ln = Math.max(1, Math.min(line1, view.state.doc.lines));
-      view.dispatch({ selection: { anchor: view.state.doc.line(ln).from },
-        scrollIntoView: true });
-      view.focus();
+      const from = view.state.doc.line(ln).from;
+      // v1.13.31 (workpackages WP2, we: "I must be moved there, so my
+      // caret/view is on that text"): CENTER the target line, not merely
+      // scroll it to the viewport edge — every jump (breakpoint-follow,
+      // step, nav history, Library, goto-line) lands under the eyes.
+      view.dispatch({
+        selection: { anchor: from },
+        effects: EditorView.scrollIntoView(from, { y: 'center', yMargin: 24 }),
+        scrollIntoView: true,
+      });
+      if (focus) view.focus();
     },
     cursorLine() {
       const view = viewRef.current;

@@ -735,6 +735,11 @@ test.describe('Xenon IDE @ui', () => {
     await expect(page.getByTestId('xenon-on')).toHaveText('OFF', { timeout: 10_000 });
     await page.getByTestId('ide-run').click();
     await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 30_000 });
+    // v1.13.31 (workpackages WP7): ⏹ now PARKS on the EXECUTING line, so
+    // the breakpoint-follow may have moved the editor to that file (the
+    // timer block lives in functions.xc) — return to the main tab, the
+    // dirty-dot pin below is about the tab we type into
+    await page.getByTestId('xenon-tab-0').click();
 
     // IF auto-indents one unit (a tab) on Enter; the tab gets the RED dot
     const cm = page.locator('.cm-content');

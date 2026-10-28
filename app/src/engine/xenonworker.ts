@@ -34,6 +34,8 @@ type Msg = {
   key?: string; x?: number; y?: number; d?: number;
   lines?: [string, number][];
   n?: number;
+  /** XENON-DEBUG v3: on = tracking gate (record + ship pair/depth streams) */
+  on?: boolean;
 };
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -45,6 +47,11 @@ const ctx = self as unknown as {
 let mod: any = null;
 let err = '';
 let wantKeys: string[] = [];
+// XENON-DEBUG v3 (workpackages WP6): the pump's TRACKING GATE — while the
+// interpreter records no lines (no breaks, no armed step, no armed park)
+// the cycle response skips the pair + depth JSON entirely (no
+// UTF8ToString, no JSON.stringify, no postMessage payload).
+let tracked = false;
 
 const enc = new TextEncoder();
 function putStr(s: string): number {
@@ -81,6 +88,10 @@ function openRun(m: Msg): void {
   }
   mod._xc_pilot_script(0);
   if (typeof mod._xc_set_cycle_ms === 'function') mod._xc_set_cycle_ms(40);
+  // XENON-DEBUG v3 (ABI 10): the WORKER host arms the per-line stop-hook
+  // CALL (the hook IS this host's debugger); the tracking itself stays
+  // gated (the pump's 'track' messages) — an untracked VM records nothing.
+  if (typeof mod._xc_hook_live === 'function') mod._xc_hook_live(1);
   err = mod._xc_boot() ? mod.UTF8ToString(mod._xc_error()) : '';
 }
 
@@ -118,7 +129,11 @@ function cycleData(evsJson: string): Record<string, unknown> {
     metas: metas(),
     vars: mod.UTF8ToString(mod._xc_vars()),
     overrides: typeof mod._xc_worldsim_overrides === 'function' ? mod.UTF8ToString(mod._xc_worldsim_overrides()) : '{}',
-    pairs: typeof mod._xc_cycle_pairs === 'function' ? mod.UTF8ToString(mod._xc_cycle_pairs()) : '[]',
+    // v3 gate: pair + depth streams ship ONLY while tracked (the worker's
+    // debugger is the SAB hook — the stream is audit payload, and a busy
+    // program's per-cycle stream is megabytes of pure cost untracked)
+    pairs: tracked && typeof mod._xc_cycle_pairs === 'function' ? mod.UTF8ToString(mod._xc_cycle_pairs()) : '[]',
+    depths: tracked && typeof mod._xc_cycle_depths === 'function' ? mod.UTF8ToString(mod._xc_cycle_depths()) : '[]',
     pixels: pixelsFor(pixelKeys()),
     error: err,
   };
@@ -157,7 +172,10 @@ ctx.onmessage = (e: MessageEvent<Msg>) => {
     if (!mod) return;
     if (m.t === 'keys') { wantKeys = m.keys ?? []; return; }
     if (m.t === 'track') {
-      if (typeof mod._xc_debug_track === 'function') mod._xc_debug_track(1);
+      // XENON-DEBUG v3 TRACKING GATE: on = record lines/pairs/depths +
+      // ship them; off = the VM runs with the recorder fully idle
+      tracked = !!m.on;
+      if (typeof mod._xc_debug_track === 'function') mod._xc_debug_track(m.on ? 1 : 0);
       return;
     }
     if (m.t === 'click') {
@@ -208,7 +226,12 @@ ctx.onmessage = (e: MessageEvent<Msg>) => {
       // xc_events DRAINS per fetch (XenonRun law) — merge the n cycles'
       const evs: unknown[] = [];
       for (let i = 0; i < n; i++) {
-        if (mod._xc_cycle()) { err = mod.UTF8ToString(mod._xc_error()); break; }
+        // 2 = XENON-DEBUG v3 exact-line park (the hook parks mid-cycle;
+        // the pause-request seam is the main-thread pump's path — a park
+        // that reaches HERE is honest: events drained, cycle truncated)
+        const rc = mod._xc_cycle();
+        if (rc === 2) break;
+        if (rc) { err = mod.UTF8ToString(mod._xc_error()); break; }
         try { evs.push(...JSON.parse(mod.UTF8ToString(mod._xc_events()))); } catch { /* drain */ }
       }
       const evsJson = JSON.stringify(evs);
