@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "test:e2e:fast": "playwright test --grep-invert @slow",
+    "test:e2e:fast": "playwright test --grep-invert '@slow|@while-publish'",
     "serve": "vite build && vite preview --host 0.0.0.0 --port 5175 --strictPort",
     "build:wasm": "asc wasm/seal.ts -o wasm/seal.wasm -O3 --noAssert --memoryBase 18874368 --initialMemory 320 --maximumMemory 4096"
   },

@@ -3315,7 +3315,7 @@ npm run build:wasm             # rebuild app/wasm/seal.wasm (AssemblyScript;
                                #   binary is committed, sealwasm.test.ts
                                #   instantiates it and pins JS parity)
 npm run test:e2e               # Playwright chromium UI suite (app/e2e/) — FULL
-npm run test:e2e:fast          #   … minus the @slow suites (the pricey ones)
+npm run test:e2e:fast          #   … minus @slow AND @while-publish (the publish-queue law L8)
 npx playwright test --grep '@place|@ui'    # per-area subsets (user rule: an
                                # unrelated change does NOT necessiate a full
                                # run — pick the tags it touches; @slow = the
@@ -3472,6 +3472,20 @@ in full-suite runs. Standing rules:
     runs for the subsystems the change touches; a full @slow sweep only
     at user-facing minor/major (Y/X) boundaries, and the release commit
     notes the date of the last full sweep.
+  - **`@while-publish` — the PUBLISH QUEUE (L8, user 2026-10-28: "tests
+    like this; remarking a situation that is already wrong, make them
+    lowprio-while-publish … I don't want to pay the price in every
+    release").** Pins whose subject is a KNOWN-IMPERFECT state (degraded-mode
+    announcements, staleness-gate wire seals, warnings documenting a platform
+    gate) are NOT per-release gates: `test:e2e:fast` inverts
+    `@slow|@while-publish`, and they run OPPORTUNISTICALLY — in the Pages
+    Actions wait of the publish ritual (`npx playwright test --grep
+    '@while-publish'` backgrounded while deploy_pages builds), at session
+    end, and always before a release TAG cut. Membership needs BOTH: the
+    law asserts behaviour/wording around a by-design-imperfect state, AND
+    its red costs no shipped function this slice. Core feature laws (a
+    boot, a pixel, the stepping law) never qualify; zero-cost asserts
+    riding an existing leg stay with it. Members: staleness.spec.
 - **New e2e probes must be DRY:** the engine seam for a test scan counts,
   never applies (scene.ts `xrayCutsFor` replaced the census's
   begin/end-episode loop; `pipePickAt`, `pipeFlowDir`, `subStats` follow
@@ -4578,6 +4592,15 @@ Corollaries, always:
 
 ## Backlog
 
+- **P8 — The Xenon workspace (debugging / computer / screens) as a
+  STANDALONE, lower-coupling module (user direction 2026-10-28: "I am
+  starting to think that the debugging/computer/screenview thing should be
+  a modular and standalone app that integrates with a lower coupling than
+  it does right now").** Full shape + coupling inventory + the four seams
+  (write-path, screen-feed, key-bus, shell-descriptors) in
+  **REWRITE.md § P8**; P3 (project tree) + P4 (upstream PRs) land inside
+  the module boundary. Until scheduled: NO new cross-import from the core
+  editor into Xenon internals — new surface goes through the contract.
 - **v1.12.0 BACKLOG — CLOSED at the v1.12.2 cut (2026-10-27):**
   (1) the pages dev-asset 404s — the deployed app index ships 4 asset refs,
   0 `?v=` refs; live probes: root/viewer/testdata all 200 (the landing's

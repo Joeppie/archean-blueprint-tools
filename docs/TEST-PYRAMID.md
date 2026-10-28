@@ -94,6 +94,28 @@ runs).
   in the render pump after mouseup), two identical pick-probe answers (the
   part click flies the camera for 380 ms — KNOWN ISSUE 12 family). Fixed
   `waitForTimeout`s are premise gates only (boot, episode-open).
+- **L8 — The publish queue (`@while-publish`) (v1.13.19, we: "tests like
+  this; remarking a situation that is already wrong, make them
+  lowprio-while-publish … run them while waiting for github pages, or after
+  most work is done, cause I don't want to pay the price for that in every
+  release").** Pins whose subject is a KNOWN-IMPERFECT state — degraded-mode
+  announcements, the staleness gate's wire seals, warnings that document a
+  platform gate — do not gate every release: re-asserting a state we
+  deliberately keep is a tax, not a guarantee. Tag the describe title with
+  `@while-publish`; `npm run test:e2e:fast` inverts `@slow|@while-publish`
+  (they leave every per-landing gate), the pixel7 matrix opt-outs cover
+  them, and they RUN OPPORTUNISTICALLY: in the Pages-Actions wait of the
+  publish ritual (`npx playwright test --grep '@while-publish' >
+  /tmp/opencode/publish-queue.log 2>&1 &` while `deploy_pages.py` builds),
+  at session end, and always before a release TAG cut. Membership test
+  (both required): (a) the law asserts behaviour/wording AROUND a state
+  that is by-design imperfect (degradation, staleness, unversioned cache),
+  AND (b) its red costs no shipped function this slice. Core feature laws
+  never qualify — a boot, a pixel, a stepping law stays in the gate;
+  zero-cost asserts riding an existing leg (the mode chip in the debugger
+  leg) stay with their leg. Members (v1.13.19): `staleness.spec` (was 4
+  matrix runs / 11.7 s per release).
+
 
 - **L5 — Migrations, not holes.** An e2e leg is deleted in the SAME commit
   that lands its lower-tier replacement, which reproduces the CURRENT green

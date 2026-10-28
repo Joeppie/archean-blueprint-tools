@@ -35,7 +35,7 @@ const fakeContentRoute = async (route: import('@playwright/test').Route) => {
   });
 };
 
-test.describe('@ui versioned cache staleness', () => {
+test.describe('@ui versioned cache staleness @while-publish', () => {
   test('stale copy: open gate asks with both doors; [Open cached copy] is zero-network; gallery chip warns', async ({ page }) => {
     await page.route(`**/${ID}/blueprint.json`, fakeContentRoute);
     let reqs = 0;

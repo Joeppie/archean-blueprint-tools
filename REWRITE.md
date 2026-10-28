@@ -490,6 +490,69 @@ Spec pins to write (`app/e2e/wire-xray.spec.ts`, @ui, desktop only, budget
 Then delete both @slow truck specs, and the wire suite drops from ~10 min
 to seconds.
 
+## P8 — The Xenon workspace as a standalone module (DIRECTION recorded 2026-10-28, shape open)
+
+We: "I am starting to think that the debugging/computer/screenview thing
+should be a modular and standalone app that integrates with a lower coupling
+than it does right now." Recorded as the direction for the next structural
+pass on this family; P3 (project tree) and P4 (upstream PRs) land INSIDE
+the module boundary this section draws. Not scheduled — the rule until then:
+**no new cross-import from the core editor into Xenon internals** (new
+surface goes through the contract below).
+
+**The family** (today's `app/src` spread): `engine/xenoncode.ts` (extraction,
+XenonRun, XenonWorkerRun + `xenonworker.ts`, XenonPump singleton,
+`stepperLaw`), `engine/worldsim.ts`, `engine/buzzer.ts`,
+`components/XenonDialog.tsx` (IDE + debugger + Auto-test),
+`components/ScreensDock.tsx` (+ PilotTouchPad, zoom windows),
+`components/AutosavesDialog.tsx` (File ▸ autosaves is Xenon-coupled), the
+pilot-key plumbing, the `__XENON__`/`__XENONTEST__` debug doors, and the
+`tools/xenoncode` build chain + `src/engine/xenoncode/` assets.
+
+**Current coupling inventory** (what a lower-coupling boundary must absorb):
+1. **Blueprint write path** — the IDE saves programs through the core edit
+   funnel (`edit.ts setXcFileCode/insertXcFile/removeXcFile`, bp + doc,
+   v1.13.16-style doc-mirror law). KEEP as a callback: the module must not
+   own a doc writer; the core supplies `saveXcFile(ci, file, code)`.
+2. **3-D screens** — `scene.ts buildDashboard` DataTexture faces +
+   `Engine.setScreenFeeds`/`screenFeedKeys` + the BUILTIN_SCREEN_TYPES UV
+   law; the pump pushes pixels by key. Replace with a tiny PORT interface
+   the core implements (`registerScreenFeed(key, onFrame)` +
+   `feedKeysChanged(keys)`), module-side opaque.
+3. **Shell gates** — TopBar `xenonComps` menu (calls `xenonComputers(bp)`),
+   Editor `hasScreens`, `?dash=` deep links, the `?craft=` open funnel.
+   Contract: the core passes a `computers` DESCRIPTOR list + a deep-link
+   param object; it must stop importing engine/xenoncode itself.
+4. **Keyboard** — pilot keys ride the window key events and `pilotKeysActive()`
+   gates the core g/o/h/w/5 shortcut map. Contract: a key-bus with
+   claim/release (the module claims WASD/arrows/F/E/Q/I/K/J/L/R/digits while
+   a dash view is live; the core asks the bus, not the module).
+5. **Audio + stores** — `buzzerAudio` (WebAudio, TopBar toggle, Editor-boot
+   `arm()`), `localStorage` keys (`archean-worldsim`,
+   `archean-xenon-buzzer-sound`, `archean-app-screens-tight`) — all move
+   fully inside the module; the core only mounts it.
+6. **Pump lifecycle** — today the pump boots on IDE open (and the
+   StrictMode double-open race, v1.13.18, lived exactly at this seam).
+   Module-owned: single `mountXenonWorkspace(host, contract)` /
+   `unmount()` with the pump + worker + SAB inside.
+
+**Shape options (open; same repo either way)**: (a) a vite route/bundle
+split (`/xenon` as its own entry, core = host shell, postMessage-ish
+contract), (b) a Web Component host slot the editor mounts, (c) a fully
+separate small app consuming the blueprint via the download/open API (the
+standalone POC at `tools/xenoncode/index.html` is the precedent — it
+already boots the identical glue+wasm with ZERO app imports). The ABI
+(`XC_ABI`) + the SAB protocol + `stepperLaw` ⇄ EM_JS pairing already give
+the module a versioned internal contract; the remaining work is the four
+seams (write-path, screen-feed, key-bus, shell-descriptors) above.
+
+**Why it pays**: the family is the app's only wasm+worker+audio+keyboard
+grabber; isolating it bounds the flake surface (the v1.13.17/v1.13.18
+incidents were all AT this seam), lets the workspace boot standalone for
+dev/e2e (seconds, no scene), and keeps the core editor's bundle free of
+the 76 kB glue + 1.0 MB wasm assets (`?url` imports today sit in the
+Editor chunk graph).
+
 ## Non-negotiables carried over
 - AGENTS § Blueprint folder (paths via tools/config.py — the vite plugin
   reads it; no hardcoded paths in `app/` either).
