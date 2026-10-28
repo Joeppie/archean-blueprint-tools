@@ -1739,6 +1739,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
                  resizes itself (phones get it fullscreen) */
               <Suspense fallback={null}>
                 <ScreensDockLazy comp={xenonPump.comp ?? xenonComps[0] ?? null}
+                  craftId={craft ?? undefined}
                   focus={new URLSearchParams(window.location.search).get('dash')?.toLowerCase() ?? undefined}
                   onClose={() => setScreensOpen(false)} />
               </Suspense>

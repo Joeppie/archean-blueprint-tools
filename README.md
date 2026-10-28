@@ -26,6 +26,34 @@ Everything outside the React app in `app/` is static — plain ES modules +
 Three.js from a CDN. No build step, no npm, no server-side code (`app/` has
 its own npm project; see [app/README.md](app/README.md)).
 
+## 🕹 Two arcade cabinets you can PLAY in the browser
+
+Some workshop crafts *are* games — XenonCode programs driving the game's
+PilotSeat + Buzzer components, rendered on the craft's own screens. The
+gallery's **▶ Playable** row boots them straight into the fullscreen game;
+the clips below are captured INSIDE the craft (the pilot seat is in the
+frame — the screen is simulated on the ship, 5 fps, 480 px).
+
+<table>
+<tr>
+<th>Super Mario Brothers — Chip Patton<br>
+<a href="https://joeppie.github.io/archean-blueprint-tools/?craft=3820116990&dash=first-virtual">▶ play in the browser</a>
+· WASD run · SPACE jump · E fire — the title's attract mode autoplays itself</th>
+<th>Space Invaders — Shadoh<br>
+<a href="https://joeppie.github.io/archean-blueprint-tools/?craft=3288012440&dash=main%230">▶ play in the browser</a>
+· WASD cannon · SPACE start & fire — a working Computer-driven arcade cabinet</th>
+</tr>
+<tr>
+<td><video src="app/public/games/mario.webm" controls autoplay muted loop playsinline width="420"></video></td>
+<td><video src="app/public/games/invaders.webm" controls autoplay muted loop playsinline width="420"></video></td>
+</tr>
+</table>
+
+The full cockpit key set reaches the PilotSeat: WASD stick, ↑/↓, Space
+(stick-up + action), F, Q/E roll, I/K pitch, J/L yaw, R thrust, 1–9/0 =
+Aux 1–9/0. Opening a screen's fullscreen zoom updates the URL into exactly
+the shareable deep link above.
+
 ## What the editor does
 
 A craft opens in **View** (inspect: mass & CoM, census, the ⚖ Lift widget, the

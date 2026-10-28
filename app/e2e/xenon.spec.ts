@@ -511,6 +511,10 @@ test.describe('Xenon IDE @ui', () => {
     await expect(cell).toBeVisible();
     await page.getByTestId('screens-cell-trimsdash#0-full').click();
     await expect(page.getByTestId('screens-cell-trimsdash#0-overlay')).toBeVisible();
+    // the zoom window writes the ?craft&dash DEEP LINK into the URL bar
+    // (we: "when you open a screen fullscreen, update the URL to be a
+    // deeplink") — this exact URL must boot straight into this view
+    await expect(page).toHaveURL(/craft=3294880085&dash=trimsdash%230/);
     const zoom = page.getByTestId('screens-cell-trimsdash#0-zoom');
     await expect(zoom).toHaveText('100%');
     const cvFit = (await page.getByTestId('screens-cell-trimsdash#0-fullcanvas').boundingBox())!;
@@ -520,6 +524,8 @@ test.describe('Xenon IDE @ui', () => {
     const cvZoom = (await page.getByTestId('screens-cell-trimsdash#0-fullcanvas').boundingBox())!;
     expect(cvZoom.width).toBeGreaterThan(cvFit.width * 1.4);
     await page.getByTestId('screens-cell-trimsdash#0-fullexit').click();
+    // closing the zoom strips the dash param back out of the URL
+    await expect(page).toHaveURL(/\?craft=3294880085$/);
     await page.getByTestId('screens-close').click();
 
     // PHONE: the dock is FULLSCREEN and the zoom overlay carries big screens

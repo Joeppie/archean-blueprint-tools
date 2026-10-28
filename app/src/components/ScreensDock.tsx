@@ -146,8 +146,23 @@ export function ScreensCell(p: {
   autoFull?: boolean;               // deep link: raise the zoom window at once
   onAutoOpened?: () => void;        // one-shot: fired when the auto window opens
   tight?: boolean;                  // tile mode: flush canvases, labels hidden
+  craftId?: string;                 // set → opening the zoom window writes the
+                                    // ?craft&dash DEEP LINK into the URL bar
+                                    // (we 2026-10-28: "when you open a screen
+                                    // fullscreen, update the URL to be a
+                                    // deeplink") so the view is shareable
 }) {
   const [full, setFull] = useState(!!p.autoFull);
+  const syncUrl = (key: string | null) => {
+    if (!p.craftId) return;
+    try {
+      const u = new URL(window.location.href);
+      u.searchParams.set('craft', p.craftId);
+      if (key) u.searchParams.set('dash', key);
+      else u.searchParams.delete('dash');
+      window.history.replaceState(null, '', u.toString());
+    } catch { /* file:// origins: the URL is decorative there */ }
+  };
   const coarse = useCoarsePointer();
   useEffect(() => { if (p.autoFull) p.onAutoOpened?.(); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
   // zoom (we: "I need to be able to zoom in on dashboard screens -
@@ -161,7 +176,7 @@ export function ScreensCell(p: {
     const s = Math.min((vw * 0.96) / p.w, ((vh - 120) * 0.96) / p.h);
     return Math.max(1, Math.floor(Math.min(s, 12) * p.w));
   })();
-  const openFull = () => { setZ(1); setFull(true); };
+  const openFull = () => { setZ(1); setFull(true); syncUrl(p.surfKey); };
   return (
     <>
       <div data-testid={p.testid} className="relative">
@@ -189,7 +204,8 @@ export function ScreensCell(p: {
             e.preventDefault();
             setZ(v => Math.max(0.25, Math.min(16, v * (e.deltaY < 0 ? 1.2 : 1 / 1.2))));
           }}
-          className="fixed inset-0 z-50 overflow-auto bg-black" onClick={() => setFull(false)}>
+          className="fixed inset-0 z-50 overflow-auto bg-black"
+          onClick={() => { setFull(false); syncUrl(null); }}>
           <div className="sticky top-0 z-10 flex items-center gap-2 bg-black/80 px-3 py-1.5"
             data-nodrag onClick={e => e.stopPropagation()}>
             <button data-testid={`${p.testid}-zoomout`} className="rounded bg-[#243a52] px-2 py-0.5 text-[13px]"
@@ -206,7 +222,7 @@ export function ScreensCell(p: {
             <span className="hidden text-[10px] text-[#5d6a7d] md:inline">clicks press the screen · scroll/drag to pan · pinch or Ctrl+wheel to zoom</span>
             <button data-testid={`${p.testid}-fullexit`}
               className="ml-auto rounded bg-[#243a52] px-3 py-1 text-[11px]"
-              onClick={() => setFull(false)}>✕ close</button>
+              onClick={() => { setFull(false); syncUrl(null); }}>✕ close</button>
           </div>
           <div className="pt-2 text-center" style={{ width: Math.round(fit * z), maxWidth: 'none', margin: '0 auto' }}
             onClick={e => e.stopPropagation()}>
@@ -226,6 +242,9 @@ export default function ScreensDock(p: {
   comp: XenonComputer | null; onClose: () => void;
   /** deep link (Editor `?dash=`): this surface's zoom window opens by itself */
   focus?: string;
+  /** set → opening a zoom window writes the ?craft&dash deep link into the
+   *  URL (shareable "play this game" links — the gallery's PLAYABLE row) */
+  craftId?: string;
 }) {
   const [, setTick] = useState(0);
   const [tab, setTab] = useState<'dash' | 'virtual'>('dash');
@@ -338,6 +357,7 @@ export default function ScreensDock(p: {
         )}
         {list.map(s => (
           <ScreensCell key={s.key} surfKey={s.key} w={s.w} h={s.h} maxH={260}
+            craftId={p.craftId}
             testid={`screens-cell-${s.key}`}
             canvasTestid={`screens-canvas-${s.key}`}
             autoFull={focusKey === s.key}

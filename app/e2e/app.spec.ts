@@ -54,6 +54,26 @@ test('?craft= deep link opens the editor directly', async ({ page }) => {
   await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
 });
 
+test('the PLAYABLE row: two in-craft arcade clips, click boots the game fullscreen @ui', async ({ page }) => {
+  // v1.13.8 (we: "Add those to the library on top in a little segment of
+  // their own" + webm clips): the gallery's own segment for the two crafts
+  // that ARE games; clicking a card = the ?craft&dash deep link → the game
+  // screen opens FULLSCREEN in the editor.
+  await page.goto('/');
+  const row = page.getByTestId('playable');
+  await expect(row).toBeVisible();
+  await expect(row.getByTestId('playable-3820116990')).toBeVisible();
+  await expect(row.getByTestId('playable-3288012440')).toBeVisible();
+  // the cards carry the in-craft webm clips (autoplay loop, < 250 KiB)
+  await expect(row.locator('video[src*="invaders.webm"]')).toHaveCount(1);
+  await expect(row.locator('video[src*="mario.webm"]')).toHaveCount(1);
+  // click the arcade card → editor + the game screen's zoom window opens
+  await page.getByTestId('playable-3288012440').click();
+  await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 60_000 });
+  await expect(page).toHaveURL(/craft=3288012440&dash=main%230/);
+  await expect(page.getByTestId('screens-cell-main#0-overlay')).toBeVisible({ timeout: 60_000 });
+});
+
 test('corpus endpoint serves the blueprint of a selected craft', async ({ request }) => {
   const listing = await (await request.get('/corpus/')).text();
   const ids = [...listing.matchAll(/href="(\d{6,})\/"/g)].map(m => m[1]!);

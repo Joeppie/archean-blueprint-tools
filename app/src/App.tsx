@@ -17,7 +17,7 @@
 // the edited fields. Blueprints DOWNLOAD only on demand and cache in
 // IndexedDB (crafts.ts) — a cached craft opens with zero network.
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { GALLERY } from './gallery-catalog';
+import { GALLERY, craftName } from './gallery-catalog';
 import { cacheSnapshot, craftStateOf, type CacheInfo, type CraftState } from './crafts';
 
 const LazyEditor = lazy(async () => {
@@ -40,17 +40,34 @@ const Editor = window.__EDITOR_MODULE__?.default ?? LazyEditor;
 
 export { craftName } from './gallery-catalog';
 
+/** PLAYABLE-IN-THE-BROWSER crafts (v1.13.8, we: "add those to the library
+ *  on top in a little segment of their own"): the two arcade builds whose
+ *  screens run a GAME. The card loops a small webm (< 250 KiB, 5 fps) — a
+ *  cinematic capture recorded INSIDE the craft (an oblique view catching
+ *  the pilot seat — proof the screen is simulated in the ship;
+ *  tools/makeclip.mjs). Clicking the card opens the craft AND the
+ *  fullscreen game screen at once via the ?craft&dash deep link — the same
+ *  URL is shareable/fresh-loadable. */
+const PLAYABLE = [
+  { id: '3820116990', clip: 'mario.webm', dash: 'first-virtual',
+    keys: 'WASD run · SPACE jump · E fire' },
+  { id: '3288012440', clip: 'invaders.webm', dash: 'main#0',
+    keys: 'WASD cannon · SPACE start & fire' },
+];
+
 export default function App() {
   const [params, setParams] = useState(() => new URLSearchParams(location.search));
   const craft = params.get('craft');
   const [newSeq, setNewSeq] = useState(0);
   const [isNew, setIsNew] = useState(false);
-  const navigate = (to: string | null) => {
+  const navigate = (to: string | null, dash?: string) => {
     // RELATIVE query-only pushState: absolute '/' would eject the SPA from
     // its Pages subdirectory (/archean-blueprint-tools/app/) and break the
-    // ../testdata + ../viewer asset routes on reload.
-    history.pushState({}, '', to ? `?craft=${to}` : location.pathname);
-    setParams(new URLSearchParams(to ? { craft: to } : {}));
+    // ../testdata + ../viewer asset routes on reload. A `dash` (PLAYABLE
+    // deep link) opens the fullscreen game screen on the fresh Editor mount.
+    const qs = to ? (dash ? `?craft=${to}&dash=${encodeURIComponent(dash)}` : `?craft=${to}`) : '';
+    history.pushState({}, '', to ? qs : location.pathname);
+    setParams(new URLSearchParams(to ? (dash ? { craft: to, dash } : { craft: to }) : {}));
     setIsNew(false);
   };
   useEffect(() => {
@@ -74,7 +91,7 @@ export default function App() {
 }
 
 // ---------------------------------------------------------------- gallery
-function Gallery({ onOpen, onNew }: { onOpen: (id: string) => void; onNew: () => void }) {
+function Gallery({ onOpen, onNew }: { onOpen: (id: string, dash?: string) => void; onNew: () => void }) {
   // v1.9.5 VERSIONED CACHE chip: ONE pass over the IndexedDB cache paints a
   // status badge on every CACHED card (never on uncached ones). The state
   // comes from craftStateOf(cache record, catalog stamp) — the SAME rule the
@@ -105,6 +122,40 @@ function Gallery({ onOpen, onNew }: { onOpen: (id: string) => void; onNew: () =>
           + New craft
         </button>
       </header>
+      {/* PLAYABLE-IN-THE-BROWSER row (v1.13.8): the two arcade crafts, in
+          their own little segment on TOP — webm cards (in-craft captures),
+          click = boot the game fullscreen via the ?craft&dash deep link.
+          Rendered only for crafts the corpus actually has. */}
+      {PLAYABLE.some(p => GALLERY.some(g => g.id === p.id)) && (
+        <section data-testid="playable" className="mx-auto mt-6 max-w-5xl">
+          <h2 className="text-[12px] font-semibold uppercase tracking-[0.14em] text-accent">
+            ▶ Playable in the browser
+          </h2>
+          <p className="mt-1 text-[12px] text-ink-dim">
+            These crafts ARE arcade cabinets — the screen is simulated IN the
+            craft (the seat is in the frame). Click one: it boots straight
+            into the game, fullscreen; the URL is a shareable deep link.
+          </p>
+          <div className="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+            {PLAYABLE.filter(p => GALLERY.some(g => g.id === p.id)).map(p => (
+              <button key={p.id} data-testid={`playable-${p.id}`}
+                onClick={() => onOpen(p.id, p.dash)}
+                className="group text-left">
+                <div className="relative aspect-square overflow-hidden rounded-lg border border-accent/30 bg-black
+                                transition group-hover:border-accent">
+                  <GameClip clip={p.clip} />
+                  <span className="absolute right-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px]
+                                   font-semibold text-accent">▶ play</span>
+                </div>
+                <div className="mt-1.5 truncate text-[13px] font-semibold text-ink group-hover:text-accent">
+                  {craftName(p.id)}
+                </div>
+                <div className="truncate text-[11px] text-ink-dim">{p.keys}</div>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
       <main data-testid="gallery"
         className="mx-auto mt-6 grid max-w-5xl grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
         {GALLERY.map(g => (
@@ -154,6 +205,16 @@ function CardPreview({ preview }: { preview: string }) {
     : src.startsWith('../testdata/') ? src.slice(3) : null;
   return <img src={src} alt="" loading="lazy" decoding="async"
     onError={() => { if (alt && src !== alt) setSrc(alt); }}
+    className="h-full w-full object-cover" />;
+}
+
+/** PLAYABLE clip (public/games/…): a 5 fps in-craft capture, autoplaying
+ *  muted loop (webm, < 250 KiB). Layout-exact like CardPreview — the Pages
+ *  root serves '/games/', the '/app/' copy needs '../games/'. */
+function GameClip({ clip }: { clip: string }) {
+  const [src, setSrc] = useState(`games/${clip}`);
+  return <video src={src} autoPlay muted loop playsInline preload="metadata"
+    onError={() => setSrc(s => (s.startsWith('games/') ? `../${s}` : s))}
     className="h-full w-full object-cover" />;
 }
 
