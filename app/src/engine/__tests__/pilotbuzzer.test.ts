@@ -165,3 +165,13 @@ describe('THE AUTHORED-MODE LAW (v1.13.5)', () => {
     expect(rows.find(r => r.name === 'no-mode')!.wave).toBe('square');  // game default
   });
 });
+
+describe('SOUND ON BY DEFAULT (v1.13.6)', () => {
+  it('a fresh profile starts with sound ON (Firefox "sound was off" fix)', async () => {
+    const { BuzzerAudio } = await import('../buzzer');
+    expect(new BuzzerAudio().soundOn).toBe(true);
+    // the TopBar icon renders 🔊 from the first paint; the browser's
+    // autoplay gate is met by arm()'s first-gesture unlock, not by a
+    // toggle the player has to find.
+  });
+});

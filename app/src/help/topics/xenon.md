@@ -113,12 +113,12 @@ with **Amplitude** (channel 0) and **Frequency** in Hz (channel 1, default
 oscillator per Buzzer, so a program using many buzzers (melody + harmony
 + bass + effects, as Chip's Mario does) plays chords.
 
-**Hearing it**: the **🔊 icon in the top bar, beside ⚙ View**, is the
-sound switch — click it (the browser requires a real click before any
-page may make sound; Firefox additionally gets a silent unlock buffer
-played inside the click and a self-healing resume on later gestures).
-**While any buzzer is playing, the icon throbs**, so you can SEE the
-sound is live; muted is a static 🔇.
+**Hearing it**: **the sound is ON by default** — the top-bar 🔊 icon
+beside ⚙ View starts enabled. Browsers forbid audio before you touch
+anything (Firefox the strictest of all), so the game unlocks its audio
+by itself at your **first keypress or tap** — for Mario, the very first
+jump press starts the music, no settings hunt. **While any buzzer is
+playing, the icon throbs**; click it any time to mute (a static 🔇).
 
 **The tone each buzzer plays is its own**: the game stores it in the
 component's `mode` setting (the in-game `V` menu) — the inspector now

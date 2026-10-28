@@ -97,7 +97,12 @@ export class BuzzerAudio {
   /** 'auto' = each buzzer plays the tone its COMPONENT authored
    *  (data.mode) — the game's own law; a named wave here overrides all. */
   wave: BuzzerWave | 'auto' = 'auto';
-  soundOn = false;
+  /** SOUND IS ON BY DEFAULT (we: "sound was off by default - at least in
+   *  firefox, please make it on by default"). Browsers only allow audio
+   *  after a user gesture, so "on" is armed at startup and the AudioContext
+   *  unlocks itself at the first real pointer/key interaction (arm) — for
+   *  Mario that is the very first jump press. */
+  soundOn = true;
   /** Loudest Amplitude seen in the latest sync (0 = all silent) — drives
    *  the TopBar 🔊 activity animation ("animates whenever any buzzer is
    *  making sound so its evident that is the reason there is sound"). */
@@ -148,8 +153,32 @@ export class BuzzerAudio {
     try {
       const w = localStorage.getItem(LS_WAVE);
       if (w && (w === 'auto' || (BUZZER_MODES as readonly string[]).includes(w))) this.wave = w as BuzzerWave | 'auto';
-      this.soundOn = localStorage.getItem(LS_ON) === '1';
-    } catch { /* fresh profile */ }
+      this.soundOn = localStorage.getItem(LS_ON) !== '0';   // on unless explicitly muted
+    } catch { /* fresh profile / no storage: ON, auto */ }
+  }
+
+  /** Arm the autoplay unlock (call once at app start): the first real
+   *  pointer/key gesture creates + resumes the context and plays a silent
+   *  buffer — Firefox arms a context only when audio actually plays in it.
+   *  Keeps the listeners: a later unmute is then gesture-armed too. */
+  private armed = false;
+  arm(): void {
+    if (this.armed || typeof addEventListener === 'undefined') return;
+    this.armed = true;
+    const unlock = () => {
+      if (!this.soundOn) return;
+      try {
+        const ctx = this.ensureCtx();
+        void ctx.resume();
+        const b = ctx.createBuffer(1, 1, ctx.sampleRate);
+        const src = ctx.createBufferSource();
+        src.buffer = b;
+        src.connect(ctx.destination);
+        src.start(0);
+      } catch { /* no audio device: silent game, never crashes */ }
+    };
+    addEventListener('pointerdown', unlock, { capture: true });
+    addEventListener('keydown', unlock, { capture: true });
   }
 
   setWave(w: BuzzerWave | 'auto') {

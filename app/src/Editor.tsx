@@ -189,6 +189,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // Debug channel base (the __XENON__ pattern): readable on ANY page — the
   // IDE dialog enriches it further while mounted (surfaceMeta, bus, ...)
   useEffect(() => {
+    buzzerAudio.arm();   // sound ON by default; unlocks at the first gesture
     (window as any).__XENON__ ??= () => ({
       cycles: xenonPump.cycles, status: xenonPump.status,
       pilotKeys: xenonPump.pilotKeysBound(),
@@ -1916,8 +1917,8 @@ function BuzzerButton() {
     <button data-testid="buzzer-toggle" aria-pressed={buzzerAudio.soundOn}
       data-playing={playing ? '1' : '0'}
       title={buzzerAudio.soundOn
-        ? 'Buzzer sound ON — the icon pulses while a buzzer is playing'
-        : 'Buzzer sound OFF — click to enable (the browser requires this click)'}
+        ? 'Buzzer sound ON (the browser unlocks it at your first key/tap) — click to mute'
+        : 'Buzzer sound MUTED — click to enable'}
       onClick={() => buzzerAudio.toggleSound()}
       className={`ksp-btn shrink-0 px-2.5 py-1 text-[12px] hover:text-accent ${
         buzzerAudio.soundOn ? 'text-accent' : 'text-ink-dim'} ${playing ? 'buzzer-anim' : ''}`}>

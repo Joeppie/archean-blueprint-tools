@@ -640,8 +640,11 @@ test.describe('Xenon IDE @ui', () => {
     // the TopBar.
     const snd = page.getByTestId('buzzer-toggle');
     await expect(snd).toBeVisible();
-    await expect(snd).toHaveAttribute('aria-pressed', 'false');
-    await snd.click();
+    // SOUND IS ON BY DEFAULT (we: "sound was off by default - at least in
+    // firefox, please make it on by default"): the icon starts enabled;
+    // the browser unlocks the AudioContext at the player's FIRST key/tap
+    // — the jump mashes below ARE that gesture, and the outputLevel
+    // assertion further down proves the audio really flows.
     await expect(snd).toHaveAttribute('aria-pressed', 'true');
     await page.getByTestId('screens-close').click();
 

@@ -1624,6 +1624,17 @@ topic + FORMAT).
    registered (__XENON__().surfaceMeta). E key → Roll (ch 5) = Mario's
    FIRE key (we: "we should have forwarded the e key as well" — the probe
    proved Mario reads ch5 = Roll, not Pitch) — nine bound keys total.
+ - **v1.13.6 SOUND ON BY DEFAULT (we: "it seems sound was off by default
+   - at least in firefox, please make it on by default")**: BuzzerAudio
+   defaults soundOn TRUE (localStorage 'archean-xenon-buzzer-sound'
+   mutes only when explicitly '0'); buzzerAudio.arm() (Editor boot)
+   installs capture pointerdown/keydown listeners that, at the FIRST
+   real gesture, create + resume the AudioContext and play a 1-frame
+   silent buffer (Firefox arms a context only when audio plays in it) —
+   Mario's first jump press IS the unlock, no toggle hunt. The TopBar
+   🔊 starts lit; the Mario leg pins aria-pressed 'true' on load and
+   the outputLevel assertion proves the audio flows through the
+   first-gesture unlock. Docs: xenon.md "Hearing it".
  - **v1.13.5 AUTHORED BUZZER MODES + FIREFOX + 3-D SCREEN CADENCE (we:
    "the sound won't turn on in Firefox … the display of visuals in the
    screens of the craft feels a bit delayed compared to actual screen
