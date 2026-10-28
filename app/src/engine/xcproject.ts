@@ -77,6 +77,51 @@ export function definitionOf(funcs: XCFunction[], name: string): XCFunction | nu
   return funcs.find(f => f.name === n) ?? null;
 }
 
+/** ── BLOCK frames (v1.13.24, from a real report: a break inside an
+ *  `update` block said "top level"): the global-scope blocks the compiler
+ *  compiles as named bodies - init/tick (system.init/system.tick),
+ *  `timer frequency N` (system.timer), `input N` (system.input),
+ *  `screen("alias", ch)` (an entry point) and the declared entry points
+ *  (update, shutdown, click, click_hold, scroll). A break inside one of
+ *  these has a FRAME with locals - the panel labels it by the block. */
+export interface XCBlock {
+  label: string;   // 'update', 'tick', 'timer 4', 'screen "TrimsDash"'…
+  file: string;
+  line: number;    // the block's keyword line (1-based)
+  end: number;     // last line of the body (next global-scope line - 1)
+}
+
+const BLOCK_RE = /^\s*(init|tick|update|shutdown|click_hold|click|scroll|timer\s+frequency\s+\d+(\.\d+)?|input\s+\d+|screen\s*\([^)]*\))\s*$/;
+
+/** Every block body across the disk, in (file, line) order. */
+export function projectBlocks(files: XCFile[]): XCBlock[] {
+  const out: XCBlock[] = [];
+  for (const f of files) {
+    const lines = f.code.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const m = BLOCK_RE.exec(lines[i] ?? '');
+      if (!m) continue;
+      let end = lines.length;
+      for (let j = i + 1; j < lines.length; j++) {
+        const l = lines[j] ?? '';
+        if (l.length > 0 && !/^\s/.test(l) && !l.startsWith(';')) { end = j; break; }
+      }
+      out.push({ label: (lines[i] ?? '').trim(), file: f.name, line: i + 1, end });
+    }
+  }
+  return out;
+}
+
+/** The block whose body encloses (file, line) - the debugger's frame label
+ *  when no `function @name` does (innermost wins). */
+export function blockAt(blocks: XCBlock[], file: string, line: number): XCBlock | null {
+  let best: XCBlock | null = null;
+  for (const b of blocks)
+    if (b.file === file && line >= b.line && line <= b.end)
+      if (!best || b.line >= best.line) best = b;
+  return best;
+}
+
 /** The interpreter's file table: entry first, then every include BFS (in
  *  statement order, deduped, only files that exist on the disk). Index i is
  *  what a SOURCEFILE opcode's `code.value === i` refers to. Names missing

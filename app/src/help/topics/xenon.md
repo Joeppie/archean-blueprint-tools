@@ -202,3 +202,11 @@ blueprint-side workbench, not a flight simulator: the craft never moves,
 sensors report what the World tab's functions say, and the PilotSeat reads
 your keyboard. The standalone workbench page (with our own demo programs)
 lives at `tools/xenoncode/` in the repo.
+
+## Scripting the debugger
+
+The Help manual topic **“Debugging XenonCode”** (`xenondebug`) documents
+the breakpoints/frames/stepping law and the `window.__XCDBG__` console —
+a plain-JSON JS API (`break` / `run` / `step` / `frame` / `write` / `io` /
+`bus` / `prints`) designed so scripts and AI agents can analyze a program
+headlessly.

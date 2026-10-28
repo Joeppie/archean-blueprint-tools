@@ -49,6 +49,7 @@ import { applyPinEdit, applyPinRotate, applyPinShift, applyTriFlip, applyTriPain
 import type { Blueprint, Triangle } from './engine/format';
 import { isLegacyFile } from './engine/format';
 import { hasDashboards, xenonComputers, xenonPump, type XCFile } from './engine/xenoncode';
+import { makeXcdbg } from './engine/xcdbg';
 import { buzzerAudio } from './engine/buzzer';
 import { pilotKeysActive } from './engine/pilotkeys';
 import { autosave, countAutosaves, pruneAfterSave } from './engine/autosave';
@@ -236,6 +237,12 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // IDE dialog enriches it further while mounted (surfaceMeta, bus, ...)
   useEffect(() => {
     buzzerAudio.arm();   // sound ON by default; unlocks at the first gesture
+    // THE DEBUG CONSOLE (v1.13.24, we: "create a JS interface where we can
+    // define breakpoints and then run stuff - an interface that makes using
+    // it for AI agents to analyze xenoncode easier"): window.__XCDBG__
+    // drives the REAL pump - break(file,lines) / run / step / frame /
+    // globals / write(name,value) / bus / prints, all JSON-plain.
+    (window as any).__XCDBG__ ??= makeXcdbg(xenonPump);
     (window as any).__XENON__ ??= () => ({
       cycles: xenonPump.cycles, status: xenonPump.status,
       pilotKeys: xenonPump.pilotKeysBound(),

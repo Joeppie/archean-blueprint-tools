@@ -3,7 +3,7 @@
 // `include "file.xc"`, calls `@name(`).
 import { describe, expect, it } from 'vitest';
 import {
-  definitionOf, functionAt, functionTokenAt, includeOrder, projectDecls, projectFunctions,
+  blockAt, definitionOf, functionAt, functionTokenAt, includeOrder, projectBlocks, projectDecls, projectFunctions,
   type XCFile,
 } from '../xcproject';
 
@@ -99,5 +99,40 @@ describe('declaration scan (completion pool)', () => {
     expect(names).toContain('$main_state');
     expect(names).toContain('$enemy');        // param of @_draw_enemy
     expect(names).toContain('$h');            // param of @hsv_to_color
+  });
+});
+
+describe('BLOCK frames (v1.13.24 - update/tick/timer bodies are frames)', () => {
+  // a real report: a break inside an `update` block said "top level" - the
+  // block compiles as a named body WITH locals, the project model must see it
+  const files: XCFile[] = [{
+    name: 'main.xc',
+    code: [
+      'var $_plomo_counter1 : number',
+      '',
+      'update',
+      '\tvar $_input_number_11_3 = input_number(11, 3)',
+      '\t$_plomo_counter1 += 1',
+      '',
+      'timer frequency 4',
+      '\tvar $change = input_number(11, 3)',
+      '',
+      'function @f($a:number):number',
+      '\tvar $r = $a',
+      '\treturn $r',
+    ].join('\n'),
+  }];
+  it('finds block bodies with spans', () => {
+    const blocks = projectBlocks(files);
+    expect(blocks.map(b => b.label)).toEqual(['update', 'timer frequency 4']);
+    expect(blocks[0]!.line).toBe(3);
+    expect(blocks[0]!.end).toBe(6);          // next global-scope line - 1
+  });
+  it('blockAt resolves inside, not outside; innermost wins', () => {
+    const blocks = projectBlocks(files);
+    expect(blockAt(blocks, 'main.xc', 5)?.label).toBe('update');
+    expect(blockAt(blocks, 'main.xc', 8)?.label).toBe('timer frequency 4');
+    expect(blockAt(blocks, 'main.xc', 1)).toBeNull();    // top level
+    expect(blockAt(blocks, 'main.xc', 11)).toBeNull();   // a function body is not a block
   });
 });

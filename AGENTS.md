@@ -1921,6 +1921,36 @@ topic + FORMAT).
   P2 (worker + Atomics true line-stepping, approved) adds the mid-line stop
   hook to the XENON-DEBUG commit. `XENONCODE_UPSTREAM.md` documents every
   commit; NOTICE §6 + .gitattributes follow.
+- **v1.13.24 THE ENTRYPOINT-FRAME FIX + THE `__XCDBG__` DEBUG CONSOLE (we:
+ "in my autosave ... I cannot see the local variable. It'll say its in top
+ level" + "create a text-based/lower level/JS interface where we can define
+ breakpoints and then run stuff - a nice interface that makes using it for
+ AI agents to analyze xenoncode easier")**: (a) the report's `update` block
+ compiles as an ENTRY POINT — the compiler tags its body
+ `"entrypoint." + vector-index` while `EntryPoint.name` keeps the human
+ word; our frame resolvers claimed `'entrypoint.' + name` → NO frame →
+ "top level" with no locals (fork `69802bf` XENON-ENTRYPOINT-FRAME: claim
+ by index; native-probed: the reported `$_input_number_11_3` row appears +
+ writeback lands in the update frame). App side: `projectBlocks/blockAt`
+ (xcproject) label frames for the global-scope blocks (`update`, `init`,
+ `tick`, `timer frequency N`, `input N`) — localsFrame(): `@fn` for
+ functions, the block label for blocks, null for true top level.
+ (b) `window.__XCDBG__` (engine/xcdbg.ts, installed by Editor on any page):
+ a plain-JSON async console over the REAL pump — `files/source`,
+ `break(file,lines)`, `clear/breakpoints`, `run({cycles})` (resumes from a
+ pause, resolves at the next stop/budget), `step('over'|'into')`,
+ `goto(file,line)`, `frame/locals/globals` (typed rows: name/type/value/
+ copy), `write(name,value,scope)` (XENON-WRITEBACK's validated law — the
+ same the row editors use), `io(io,ch,v)` (feed channels so io-guarded
+ branches run), `bus/prints`. Design law: every answer is
+ JSON-serialisable, every call bounded (cycle budget, timeouts) — an agent
+ drives via page.evaluate, no DOM. Pins: vitest xcdgb.test (8, fake-pump
+ semantics incl. the goto bug it caught — the first cut never called
+ pump.runTo), xcproject BLOCK frames, e2e xenondbg.spec.ts (headless agent
+ demo on the worker pump: break @selectcase:10, frame rows, write 42 ok /
+ abc refused, step, goto the `timer frequency 4` body → frame label +
+ $change, clear+run budget, bus). Docs: help topic xenondebug.md (API
+ table + agent session transcript), xenon.md pointer.
 - **v1.13.23 THE WRITEBACK LAW — EDITABLE DEBUG VALUES (we: "When debugging
  a variable, I want the capacity to edit its current value (it must be valid
  for its type, type must be shown besides variable name) - it should reject

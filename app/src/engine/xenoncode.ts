@@ -11,7 +11,7 @@
 import type { Blueprint, BlueprintComponent } from './format';
 import { atlasJsonPaths } from './models';
 import { CRAFTER_BUILTIN } from './crafterbuiltin';
-import { functionAt, includeOrder, projectFunctions } from './xcproject';
+import { blockAt, functionAt, includeOrder, projectBlocks, projectFunctions, type XCBlock } from './xcproject';
 import { buzzerAudio, modeToWave } from './buzzer';
 import type { XenonSnap } from './xenontest';
 import {
@@ -1034,6 +1034,7 @@ export class XenonPump {
   stepMode: 'off' | 'over' | 'into' | 'to' = 'off';
   fileTable: string[] = [];                          // SOURCEFILE index -> name
   private projectFuncs: ReturnType<typeof projectFunctions> = [];
+  private projectBlk: XCBlock[] = [];
   private toFile = '';
   private toLine = 0;
   // ── pilot keys (v1.13.2): the flight keys bound to the RUNNING computer's
@@ -1110,6 +1111,7 @@ export class XenonPump {
         ({ name: i === 0 ? comp.entryName : f.name, code: f.code }));
       this.fileTable = includeOrder(runFiles, comp.entryName);
       this.projectFuncs = projectFunctions(runFiles);
+      this.projectBlk = projectBlocks(runFiles);
     }
     this.run = run;
     // XENON-SOURCEPATHS (ABI 8): the VM's own SOURCEFILE table is the file
@@ -1450,10 +1452,15 @@ export class XenonPump {
   }
   /** The function whose body owns the paused line (the SAME project-model
    *  functionAt the step-over scope uses — one frame law for the debugger);
-   *  null = a top-level line (its variables are globals: the Vars tab). */
+   *  a global-scope block (update/tick/timer/input) labels by its keyword
+   *  (v1.13.24: a break in an `update` body IS a frame with locals — the
+   *  VM compiles it as a named entry-point body);
+   *  null = a plain top-level line (its variables are globals: Vars). */
   localsFrame(): string | null {
     const fn = functionAt(this.projectFuncs, this.pausedFile, this.pausedLine);
-    return fn ? `@${fn.name}` : null;
+    if (fn) return `@${fn.name}`;
+    const b = blockAt(this.projectBlk, this.pausedFile, this.pausedLine);
+    return b ? b.label : null;
   }
   /** '$name' hover value: a LOCAL wins while paused (the frame shadows the
    *  global, the debugger's lookup), globals serve while running. */

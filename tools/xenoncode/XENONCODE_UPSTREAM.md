@@ -75,6 +75,25 @@ with the description in its message, PR-able upstream:
    registration dedups by name; `openFunction` self-tags every body region
    at its start. (The game's binary compiles its own programs — this
    changes only the debugger-facing stream, never semantics.)
+7. **XENON-WRITEBACK** (fork `399d852`, v1.13.23) —
+   `Computer::WriteVarAt(file, line, name, type, value)`: type-validated
+   writeback of one variable visible at a debug stop. The frame of the
+   paused line resolves through the XENON-LOCALS table (a local shadows a
+   global, the language's own lookup), the globals through XENON-VARS; the
+   value lands DIRECTLY in the RAM slot, so the paused program RESUMES
+   WITH the injected value. Numbers demand a fully-parsed finite decimal
+   (plus the language's `true`/`false` words), text accepts every string,
+   storage/array/object refuse (world-save persistence, label-only views).
+   Answers `{"ok":true} | {"error":"…"}` for the UI's inline editor.
+   (Native-probed: `XC_WRITE=<file>:<line>:<name>:<type>:<value>`.)
+8. **XENON-ENTRYPOINT-FRAME** (fork `69802bf`, v1.13.24) — the compiler
+   registers an entry point with its human name (`EntryPoint.name =
+   'update'`) but opens its body under `"entrypoint." + the vector INDEX`;
+   the debugger's frame resolvers (DumpLocalsAt / WriteVarAt) claimed
+   `'entrypoint.' + name`, which never equals the recorded function name —
+   a break inside an `update`/`shutdown`/`click` block resolved to NO
+   frame (the Locals panel said "top level" — a real report on the plane's
+   `update` body). Claim by index.
 
 `patch_xenon_vars.py` / `patch_xenon_debug.py` / `patch_xenon_lenient_index.py`
 stay in this directory **for provenance** — they are how the branch commits
