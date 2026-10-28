@@ -33,10 +33,11 @@ const SPECS = {
   // left.
   invaders: {
     craft: '3288012440', dash: 'main#0',
-    // A — front, low (we's pick), camtune-scored winner: the panel fills the
-    // frame with real game ink and the seat in view — the player standing at
-    // the cabinet. Slow lateral drift keeps the parallax alive.
-    eye0: [0.25, 0.02, -1.62], eye1: [0.05, 0.02, -1.72], target: [0, -0.15, -1.12],
+    // v1.13.11 (we: "you should be between the chair and computer, it faces
+    // the computer"): between the PilotSeat (z +0.13) and the cabinet,
+    // facing the screen's +z front — camtune's chair-side ink winner,
+    // drifting gently right across the take.
+    eye0: [-0.15, -0.1, -0.2], eye1: [0.25, 0.05, -0.2], target: [0, -0.152, -1.118],
     captureSec: 26, winStart: 2, winLen: 11,   // intro: title rising → arrival → sprites
     gateCycles: 60,
   },
@@ -205,7 +206,13 @@ for (let i = 0; i < N; i++) {
   if (spec.playCam) {
     const pc = spec.playCam;
     if (playT === null) {
-      eye = pc.eyeNear.map((v, a) => v + Math.sin(elapsed * 0.55 + a * 2.1) * 0.012);
+      // life-drift SCALED by stand-off distance, starting AT ZERO (v1.13.11:
+      // at 0.22 m the old fixed ±12 mm swing was ±66 % of the view and its
+      // phase began mid-swing — "the zoom away starts at the left bottom
+      // edge, rather than middle")
+      const dd = Math.hypot(...pc.eyeNear.map((v, a) => v - pc.target[a]));
+      eye = pc.eyeNear.map((v, a) =>
+        v + (Math.sin(elapsed * 0.55 + a * 2.1) - Math.sin(a * 2.1)) * 0.05 * dd);
     } else {
       const s = Math.min(1, (elapsed - playT) / pc.rampSec);
       const ez = s * s * (3 - 2 * s);

@@ -397,6 +397,15 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
     addEventListener('keydown', dn); addEventListener('keyup', up);
     return () => { removeEventListener('keydown', dn); removeEventListener('keyup', up); };
   }, [mode, tool, onBlockHover, onPlaceCancel]);
+  // v1.13.11: entering VIEW wipes any coord readout painted by an earlier
+  // mode (the 3-D node + chip must not survive into screenshots of the craft)
+  useEffect(() => {
+    if (mode === 'view') {
+      engineRef.current?.coordHoverClear();
+      coordInfo.current = null;
+      showCoord(null, 0, 0);
+    }
+  }, [mode]);
   const setMode = (m: 'off' | 'translate' | 'rotate' | 'scale') => {
     setGmode(m);
     engineRef.current?.setGizmoMode(m);
@@ -418,6 +427,7 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
   // gets its raycast (a hover that stops mid-window must still converge;
   // the views.spec "hovering the CRAFT" pin asserts exactly that)
   const coordInfo = useRef<{ x: number; y: number; z: number; step: number } | null>(null);
+  const modeRef = useRef(mode); modeRef.current = mode;   // live mode for the RateCap closure
   const coordCap = useRef<RateCap | null>(null);
   if (!coordCap.current)
     coordCap.current = new RateCap(24, (x, y) => coordRun(x, y),
@@ -479,8 +489,17 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
   };
   /** one throttled raycast + chip repaint */
   const coordRun = (x: number, y: number) => {
-    coordInfo.current = engineRef.current?.coordHoverMove(x, y) ?? null;
-    showCoord(coordInfo.current, x, y);
+    // v1.13.11 (we: "the center location node shows in the screenshows and
+    // is awkwardly in every craft — should be there when placing blocks,
+    // not when in view mode"): the coord readout (3-D node + black chip)
+    // is a BUILDING aid — VIEW mode is inspect-only: no raycast, no node.
+    // mode via REF: the RateCap callback captured the FIRST render's
+    // coordRun, whose `mode` binding would stay 'view' forever.
+    if (modeRef.current === 'view') coordInfo.current = null;
+    else {
+      coordInfo.current = engineRef.current?.coordHoverMove(x, y) ?? null;
+      showCoord(coordInfo.current, x, y);
+    }
     wireInfo.current = engineRef.current?.pipeHoverMove(x, y) ?? null;
     showWire(wireInfo.current, x, y);
   };
@@ -549,7 +568,7 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
           // silently taxed every hover on a giant craft. With TRAILING EDGE:
           // the position the pointer STOPS at always gets raycast.
           coordCap.current!.move(e.clientX, e.clientY);
-          showCoord(coordInfo.current, e.clientX, e.clientY);   // follows live, cheap
+          if (mode !== 'view') showCoord(coordInfo.current, e.clientX, e.clientY);   // follows live, cheap
           showWire(wireInfo.current, e.clientX, e.clientY);     // idem the cable label
         }}
         onPointerLeave={() => {

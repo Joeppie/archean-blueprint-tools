@@ -63,6 +63,10 @@ test.describe('coord readout + grid + axis markers + mirror axis @ui', () => {
   test('the pad readout, the surface raytrace, the axis markers and the grid footprint (one boot)', async ({ page }) => {
     desktopOnly();
     await openCraft(page, ISW);
+    // v1.13.11 (we: the coord node "should be there when placing blocks, not
+    // when in view mode"): the readout is gated to BUILDING modes — this
+    // leg runs in Modify/edit.
+    await page.getByTestId('mode-edit').click();
 
     await test.step('pad chip: full SNAPPED x/y/z on the visible ladder, y = ground', async () => {
       const p = await padPixel(page);

@@ -223,12 +223,19 @@ export async function cacheSnapshot(): Promise<Map<string, CacheInfo>> {
 // ---------------------------------------------------------------- states
 /** PURE classification of one cache record against the catalog meta (the
  *  gallery runs this over its whole cacheSnapshot; craftState adds the async
- *  sha-vs-stored-text self-check on top). */
+ *  sha-vs-stored-text self-check on top).
+ *  v1.13.11 LAW (we: "it always thinks it changed when I made a new release;
+ *  this should check whether the actual SHA of the file itself is different!
+ *  not the release"): identity is the CONTENT SHA only. The old rev
+ *  (bytes-mtime) verdicts made every release re-stamp every card — the
+ *  Pages build checks the tree out fresh, so git hands every file a new
+ *  mtime and rev churns while the bytes are identical. mtime/bytes stay as
+ *  DISPLAY metadata (the tooltip dates), never as the trust decision. */
 export function craftStateOf(e: CacheInfo | null | undefined, meta?: CraftMeta): CraftState {
   if (!e) return 'absent';
-  if (!e.rev) return 'unknown';              // legacy v1 entry / unverified download
-  if (!meta?.rev) return 'unknown';          // nothing to validate against — never silently trust
-  return e.rev === meta.rev ? 'fresh' : 'stale';
+  if (!e.sha) return 'unknown';              // legacy v1 entry / unverified download
+  if (!meta?.sha) return 'unknown';          // nothing to validate against — never silently trust
+  return e.sha === meta.sha ? 'fresh' : 'stale';
 }
 
 /** the state the UI gates on: absent → download; fresh → open (zero network);

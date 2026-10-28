@@ -13,12 +13,17 @@ const URL = process.argv[3] ?? 'http://127.0.0.1:5175';
 const CFG = {
   invaders: {
     craft: '3288012440', dash: 'main#0',
-    target: [0, -0.15, -1.12],
+    // v1.13.11: pilot side (+z). Second ring: ~1.0-1.2 m out so the WHOLE
+    // 0.78 m panel (title, invader rows, scores, prompt) fits the 45° frame
+    // — the first chair-side ring stood 0.45 m out and framed the empty
+    // middle band (ink 0.1 %). Seat volume starts z ≈ -0.12: the camera
+    // rides its front edge = the "between chair and computer" drama.
+    target: [0, -0.152, -1.118],
     eyes: [
-      [0.12, -0.18, -2.55], [0.3, -0.05, -1.9], [0.42, 0.05, -1.7],
-      [0.55, 0.1, -1.85], [0.7, 0.15, -2.0], [0.5, -0.1, -2.3],
-      [0.9, 0.2, -2.3], [0.25, 0.02, -1.62], [0.35, 0.0, -1.5],
-      [1.0, 0.3, -2.6], [0.6, 0.25, -1.55], [0.8, 0.05, -2.9],
+      [0.0, -0.15, -0.05], [0.2, -0.05, -0.1], [-0.2, -0.05, -0.1],
+      [0.0, 0.05, -0.05], [0.25, -0.25, 0.0], [-0.25, -0.25, 0.0],
+      [0.0, -0.3, -0.05], [0.15, -0.1, -0.2], [-0.15, -0.1, -0.2],
+      [0.0, 0.15, -0.05], [0.3, 0.05, -0.2], [0.0, -0.05, 0.05],
     ],
   },
   mario: {
@@ -140,9 +145,9 @@ await b.close();
 // score: for invaders, a real game image (ink+dark) at a decent size with
 // the seat; for mario the title close-up is BRIGHT (sky-blue title screen).
 const best = scores.reduce((a, s) => {
-  const v = NAME === 'mario'
-    ? (s.ink + s.dark) * Math.min(1, s.area * 2)          // title ink on screen
-    : (s.ink + s.dark) * s.area + 0.4 * s.seat + 0.5 * Math.min(s.dark, 0.5);
+  // invaders (chair side, v1.13.11): the seat is BEHIND the camera there —
+  // score the game image itself (ink + dark game background at area)
+  const v = (s.ink + s.dark) * s.area + 0.5 * Math.min(s.dark, 0.5);
   return v > a.v ? { v, s } : a;
 }, { v: -1, s: scores[0] });
 console.log(`BEST ${NAME}: eye ${JSON.stringify(best.s.eye)} score ${best.v.toFixed(2)}`);

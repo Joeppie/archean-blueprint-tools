@@ -2026,7 +2026,14 @@ void main() {
           for (let k = 0; k < pos.count; k++) {
             const uu = (pos.getComponent(k, uax as 0 | 1 | 2) - mn[uax]!) / us;
             const vv = (pos.getComponent(k, vax as 0 | 1 | 2) - mn[vax]!) / vs;
-            uv[k * 2] = computerPanel ? 1 - uu : uu;
+            // v1.13.11 (we: "you should be between the chair and computer,
+            // it faces the computer"): the panel's FRONT is the PILOT side
+            // (+z) — the game's own display material reads from the chair.
+            // The u law is the shipped uu (the v1.13.8 flip made the NOSE
+            // side readable = mirrored from the chair = anti-game); a
+            // DoubleSide screen seen from the back mirrors, exactly like the
+            // game's — that is format truth, not a bug.
+            uv[k * 2] = uu;
             uv[k * 2 + 1] = computerPanel ? vv : vax === 1 ? vv : 1 - vv;
           }
           gg.setAttribute('uv', new BufferAttribute(uv, 2));
@@ -2048,7 +2055,10 @@ void main() {
           tex.magFilter = NearestFilter; tex.minFilter = NearestFilter;
           tex.generateMipmaps = false;
           tex.needsUpdate = true;
-          const smat = new MeshBasicMaterial({ map: tex, toneMapped: false });
+          // DoubleSide (v1.13.11): the pilot (and the clip camera between
+          // the chair and the cabinet) must SEE the display — FrontSide
+          // culled it from the chair side into the white console body.
+          const smat = new MeshBasicMaterial({ map: tex, toneMapped: false, side: DoubleSide });
           const sm = new Mesh(gg, smat);
           // THE SCREEN-QUAD SEAM (v1.13.8 audit): the 4 face corners in
           // (u,v) order — u along uax, v = the uv-Y axis — stored LOCAL, so

@@ -90,7 +90,7 @@ describe('corpus-vs-workshop staleness (temp fixture, real machinery)', () => {
     // ④ the copy stored at revision A is provably STALE now
     expect(await craftState(ID, metaB)).toBe('stale');
     // (and the pure gallery-chip classifier agrees)
-    expect(craftStateOf({ saved: Date.now(), rev: metaA.rev }, metaB)).toBe('stale');
+    expect(craftStateOf({ saved: Date.now(), sha: metaA.sha, rev: metaA.rev }, metaB)).toBe('stale');
 
     // [Download latest] → force redownload re-stamps → fresh at B again
     const rB = await loadCraft(ID, noop, true,

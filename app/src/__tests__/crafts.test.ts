@@ -216,11 +216,17 @@ describe('versioned cache — rev + SHA-256 validation (v1.9.5)', () => {
   });
 
   it('craftStateOf — the pure classifier for every state (gallery chips run this)', () => {
-    expect(craftStateOf(undefined, { rev: 'x' })).toBe('absent');
-    expect(craftStateOf({ saved: 1 }, { rev: 'x' })).toBe('unknown');        // legacy: no rev
-    expect(craftStateOf({ saved: 1, rev: 'x' }, undefined)).toBe('unknown'); // nothing to check against
-    expect(craftStateOf({ saved: 1, rev: 'x' }, { rev: 'x' })).toBe('fresh');
-    expect(craftStateOf({ saved: 1, rev: 'x' }, { rev: 'y' })).toBe('stale');
+    // v1.13.11 LAW (we: "check whether the actual SHA of the file itself is
+    // different! not the release"): identity is the CONTENT SHA; rev
+    // (bytes-mtime) is display metadata only.
+    expect(craftStateOf(undefined, { sha: 'a' })).toBe('absent');
+    expect(craftStateOf({ saved: 1 }, { sha: 'a' })).toBe('unknown');         // legacy: no sha
+    expect(craftStateOf({ saved: 1, sha: 'a' }, undefined)).toBe('unknown');  // nothing to check against
+    expect(craftStateOf({ saved: 1, sha: 'a' }, { sha: 'a' })).toBe('fresh');
+    expect(craftStateOf({ saved: 1, sha: 'a' }, { sha: 'b' })).toBe('stale'); // content changed
+    // a NEW RELEASE re-stamps mtime/rev for every file (fresh git checkout)
+    // while the bytes are identical — that must NOT read as edited:
+    expect(craftStateOf({ saved: 1, sha: 'a', rev: '900-2026' }, { sha: 'a', rev: '900-2027' })).toBe('fresh');
   });
 
   it('cacheSnapshot covers every cached craft with its metadata (gallery ONE pass)', async () => {
