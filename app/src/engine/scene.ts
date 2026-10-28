@@ -2010,19 +2010,24 @@ void main() {
           // v1.13.x-verified mapping UNTOUCHED (its quad takes the other
           // branch; lit-pixel probe, orientation never re-judged — do not
           // rotate it blind).
+          // BUILT-IN screen UV orientation (v = 1 ↔ the framebuffer TOP:
+          // pushScreen's row-flip + DataTexture flipY=false put image row 0
+          // at v = 1), keyed by TYPE — not vax — because the two device
+          // screens bake into different axis classes and only the Computer
+          // has in-browser verdicts:
+          //   · shipped v1.13.7 (v = 1-vv, u = uu): 'upside down'
+          //   · v = vv, u = uu:                        'upright, mirrored'
+          //   · v = 1-vv, u = 1-uu (a brief misstep):  'upside down' again
+          // ⇒ the Computer's readable law is v WITH its v-axis, u 1-minus.
+          // The Crafter keeps the shipped mapping verbatim (lit-pixel probe
+          // only, orientation never judged by eye — never rotate it blind).
           const uv = new Float32Array(pos.count * 2);
           const computerPanel = c.type === 'Computer';
           for (let k = 0; k < pos.count; k++) {
             const uu = (pos.getComponent(k, uax as 0 | 1 | 2) - mn[uax]!) / us;
             const vv = (pos.getComponent(k, vax as 0 | 1 | 2) - mn[vax]!) / vs;
-            // v = 1 (framebuffer TOP) on the readable top edge: the shipped
-            // table ran this WITH the v-axis for vax===1 (the Computer) and
-            // 1-MINUS for the flat panels — inverting the Computer's V fixed
-            // 'upside down', and flipping its U too ('mirrored, so it needs a
-            // flip' → 180°) completes the upright image. Both classes now run
-            // v 1-minus; the Crafter keeps its shipped u (unrotated).
             uv[k * 2] = computerPanel ? 1 - uu : uu;
-            uv[k * 2 + 1] = 1 - vv;
+            uv[k * 2 + 1] = computerPanel ? vv : vax === 1 ? vv : 1 - vv;
           }
           gg.setAttribute('uv', new BufferAttribute(uv, 2));
           gg.computeVertexNormals();
