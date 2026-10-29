@@ -213,7 +213,12 @@ export function xenonComputers(bp: Blueprint): XenonComputer[] {
         // disk-side name rides entryName, exactly like the MiniComputer path)
         files: [{ name: 'main.xc', code: builtin() }],
         channels: detectChannels([{ name: 'main.xc', code: builtin() }]),
-        screens: [{ alias, label: `${c.type} · integrated touchscreen`, channel: 0, w: 128, h: 72, ci, deviceScreen: true }],
+        // THE CRAFTER TOUCHSCREEN IS 200×200 (v1.15.3, game-file proof): the
+        // shipped modules/ARCHEAN_machines/components/Crafter/main.xc draws
+        // its how-to popup at draw_rect(4,5,196,195) and its scroll bar at
+        // (screen_w-16, 0, 15, screen_h/2) — coords that only fit a 200×200
+        // panel. (The old 128×72 was a Crafter-era guess.)
+        screens: [{ alias, label: `${c.type} · integrated touchscreen`, channel: 0, w: 200, h: 200, ci, deviceScreen: true }],
         devices: xenonDevices(bp, ci),
         builtin: true,
       });
@@ -244,9 +249,18 @@ export function xenonComputers(bp: Blueprint): XenonComputer[] {
         ...xenonScreens(bp, files, ci),
         // the Computer's integrated screen: the plain screen-function
         // target (main#0) mirrored onto the model's 'screen' material face
+        // THE COMPUTER'S INTEGRATED SCREEN IS 200×160 (v1.15.3, we: "that is
+        // the size it should have, you made it smaller" — YES, documented
+        // online: wiki.archean.space/en/components/computers/Computer.html:
+        // "The resolution of the integrated screen is 200x160 pixels",
+        // confirmed by the game's own BIOS script Computer/main.xc drawing
+        // 200-px-wide rows). The MiniComputer has NO built-in screen (wiki:
+        // "does not have a built-in screen") — it registers none and its
+        // plain screen() calls land on the shim's dev-tool seed, never on a
+        // 3-D face. (The old 128×72 was a Crafter-era guess.)
         ...(c.type === 'Computer'
           ? [{ alias: c.alias || `computer-${ci}`, label: 'Computer · integrated screen',
-              channel: 0, w: 128, h: 72, ci, deviceScreen: true }]
+              channel: 0, w: 200, h: 160, ci, deviceScreen: true }]
           : []),
       ],
       devices: xenonDevices(bp, ci),
@@ -317,6 +331,12 @@ export function xenonScreens(bp: Blueprint, files: XCFile[], ci = -1): XCScreen[
       if (!e || (e.type !== 'Screen' && e.type !== 'HdScreen')) continue;  // Label: none
       out.push({ alias: key, label, channel: r.channel, ci: idx, w: (e.size_x ?? 0) * 6, h: (e.size_y ?? 0) * 6 });
     } else {
+      // v1.15.3: component OVERRIDE screens (Computer V ▸ Override Screen)
+      // are AUTHORED PER COMPONENT in the game's own scripts
+      // (modules/<mod>/components/<Type>/main.xc — the FissionReactor draws
+      // 400-px-wide rows). 128×72 is the dev-tool stand-in for components
+      // the census below hasn't covered; add per-type sizes from the game
+      // files as crafts demand (backlog: the script census).
       out.push({ alias: key, label, channel: r.channel, ci: idx, w: 128, h: 72 });  // screen override
     }
   }

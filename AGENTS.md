@@ -281,6 +281,8 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   every computer registers its `deviceScreen` channel-0 at the AUTHORED
   panel size as `main` BEFORE boot (first-wins vs the shim's 640×480 seed)
   — the dock cell, the 3-D face and the program's screen_w are the panel.
+  Sizes from the WIKI/game scripts, never guessed: Computer 200×160,
+  Crafter 200×200, MiniComputer has NO screen (FORMAT §Computer).
 - THE COMPUTER FARM (v1.15.0 P9 slice C): MULTIPLE MiniComputers co-run —
   every XenonRun carries its OWN wasm instance (`xenonInstantiate`), the
   `xenonFarm` registry (keyed by comp.ci, `MAX_VM` evicts the oldest)

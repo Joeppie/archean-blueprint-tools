@@ -3232,6 +3232,25 @@ topic + FORMAT).
   IDE carries the Beacons tab' [pixel7] — the phone rail hides
   `xenon-side-beacons`; chromium green.
 
+- **v1.15.3 — THE PANEL SIZES ARE DOCUMENTED ONLINE (2026-10-29).** We (with
+  an in-game screenshot of the arcade mid-game): "That is the size it should
+  have, you made it smaller. I am not sure of the exact pixel size. this
+  SHOULD be documented online? No?" — YES. The v1.15.2 fix registered the
+  built-in panel at the app's own 128×72 CONSTANT (a Crafter-era guess);
+  the wiki states the law outright: components/computers/Computer.html —
+  "The resolution of the integrated screen is 200x160 pixels", and
+  MiniComputer.html: the MiniComputer "does not have a built-in screen".
+  Game-file confirmation: Computer/main.xc (the BIOS) draws 200-px-wide
+  rows; the Crafter's published main.xc popup `draw_rect(4,5,196,195)` fits
+  200×200; the FissionReactor script draws 400-px-wide rows (component
+  OVERRIDE screens are authored per component — census backlog, 128×72
+  stand-in stays for uncensused types). Constants fixed: Computer 200×160,
+  Crafter 200×200; MiniComputer registers none (it never did — shim seed
+  only). Invaders' squadron now spans the panel edge-to-edge like the
+  in-game screenshot (screen_w=200: 11 columns). LESSON: a component
+  dimension guess is a format bug — the wiki/game `.xc` scripts are the
+  source, transcribe to FORMAT the same commit (NOTICE §2 spirit).
+
 ## 2. v1.11 session — KNOWN ISSUES & UNPINNED TODOS (2026-10-25/26 session block)
 
 KNOWN ISSUES (accepted behaviours, costs, sharp edges):

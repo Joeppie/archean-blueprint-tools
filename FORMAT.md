@@ -688,8 +688,29 @@ implementation `tools/xenoncode/xc_host.cpp` + `app/src/engine/xenoncode.ts`)
   program in the wiki, we ship it (`app/src/engine/crafterbuiltin.ts`) and
   synthesize the device's one-file disk (`xenonComputers`: builtin: true).
   Its integrated touchscreen is the plain screen-function target (the shim's
-  lazily-created `main#0`, registered at the app's 128×72 screen-override
-  size). Device functions the built-in program needs, added to the shim:
+  `main#0`) and is **200×200 px** (v1.15.3: the shipped
+  `modules/ARCHEAN_machines/components/Crafter/main.xc` draws its how-to
+  popup at `draw_rect(4,5,196,195)` — coords that only fit 200×200; the
+  app's old 128×72 was a guess).
+- **THE COMPUTER'S INTEGRATED SCREEN IS 200×160 px** (v1.15.3, we: "that is
+  the size it should have… this SHOULD be documented online? No?" — YES):
+  wiki components/computers/Computer.html states "The resolution of the
+  integrated screen is 200x160 pixels"; the game's BIOS script
+  `modules/ARCHEAN_computer/components/Computer/main.xc` draws 200-px-wide
+  rows. The **MiniComputer has NO built-in screen** (wiki: "does not have a
+  built-in screen and therefore cannot display a BIOS") — it registers no
+  `deviceScreen`, so its plain `screen()` draws land on the shim's dev-tool
+  `main#0` seed and never on a 3-D face. The app registers the Computer's
+  panel at its AUTHORED 200×160 as `main` before boot (first-wins over the
+  shim's 640×480 seed) — the dock cell, the 3-D face texture and the
+  program's `screen_w/screen_h` are all the panel; Space Invaders'
+  squadron spans it edge-to-edge exactly as in-game (inception fix).
+- **Component OVERRIDE screens are AUTHORED PER COMPONENT** (Computer
+  V ▸ Override Screen): the game's own `modules/<mod>/components/<Type>/
+  main.xc` scripts size them (the FissionReactor draws 400-px-wide rows;
+  the modding tutorial example creates an 80×40 from material `screen1`).
+  The app keeps a 128×72 stand-in for uncensused types (backlog: the
+  per-component script census). Device functions the built-in program needs, added to the shim:
   `progress`, `fluid_level`, `start_craft(item, qty)` / `cancel_craft`
   (recorded as bus events), `enough_power`. Run-side convention: the VM
   always boots from `main.xc` - a synthesized disk names its file main.xc
