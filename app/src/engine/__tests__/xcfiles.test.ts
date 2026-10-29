@@ -158,3 +158,40 @@ describe('the Vars panel helpers (XENON-VARS feed)', () => {
     expect(varVisible({ name: '@fn.1', t: 70, v: '' })).toBe(false);
   });
 });
+
+// v1.14.0 P9 slice A: a HudController's program files sit at data.xc_files
+// (NO hdd wrapper — FORMAT §HUD). The SAME doc funnels with the ''
+// container must land in the SAVE byte-safely.
+const HUD_SRC = '{"author":"jo","data":{"blocks":[],"components":['
+  + '{"alias":"pilot-guide","colors":{},"data":{"version":1,'
+  + '"xc_files":[{"name":"main.xc","plain_code":"init\\n"}]},'
+  + '"module":"ARCHEAN_hud","occupancies":[],'
+  + '"orientation":{"w":1,"x":0,"y":0,"z":0},"position":{"x":1,"y":2,"z":3},'
+  + '"type":"HudController"}'
+  + '],"pipes":[],"triangles":[],"version":2}}';
+
+describe('the HUD block xc_files write paths (container "")', () => {
+  test('an untouched HUD craft re-emits byte-identically', () => {
+    expect(emitDoc(parseDoc(HUD_SRC))).toBe(HUD_SRC);
+  });
+  test('setXcFileCode with the "" container lands in data.xc_files', () => {
+    const { ctx } = openFunnel(HUD_SRC);
+    expect(setXcFileCode(ctx, 0, 0, 'init\nvar $x:number\n', '')).toBe(true);
+    const saved = serializeSave(ctx);
+    const xf = ((openFunnel(saved).bp.data.components[0] as any).data.xc_files) as any[];
+    expect(xf[0].plain_code).toBe('init\nvar $x:number\n');
+    expect(xf[0].name).toBe('main.xc');
+    expect(saved).not.toContain('"hdd"');              // NO hdd wrapper introduced
+  });
+  test('insertXcFile appends to the direct list; removeXcFile shifts exact', () => {
+    const { ctx } = openFunnel(HUD_SRC);
+    expect(insertXcFile(ctx, 0, 'parse.xc', 'function @p\n', '')).toBe(true);
+    let saved = serializeSave(ctx);
+    let xf = ((openFunnel(saved).bp.data.components[0] as any).data.xc_files) as any[];
+    expect(xf.map(f => f.name)).toEqual(['main.xc', 'parse.xc']);
+    expect(removeXcFile(ctx, 0, 0, '')).toBe(true);
+    saved = serializeSave(ctx);
+    xf = ((openFunnel(saved).bp.data.components[0] as any).data.xc_files) as any[];
+    expect(xf.map(f => f.name)).toEqual(['parse.xc']);
+  });
+});

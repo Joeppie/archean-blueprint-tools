@@ -45,6 +45,12 @@ interface Props {
    *  the menu only appears when the open blueprint has MiniComputers */
   xenonComps?: { ci: number; alias: string; program: string; files: number; builtin?: boolean }[];
   onXenon?: (ci: number) => void;
+  /** v1.14.0 P9 slice A: the craft's HUD blocks (HudController .xc files) */
+  xenonHuds?: { ci: number; alias: string; files: number }[];
+  onHud?: (ci: number) => void;
+  /** 📡 Beacon radio — the global scope window */
+  onBeacons?: () => void;
+  beaconsOpen?: boolean;
   /** ▣ Screens bottom tab (v1.13.x) — visible only when the craft has
    *  dashboards (Dashboard components carrying Screen/HdScreen elements) */
   hasScreens?: boolean;
@@ -172,7 +178,7 @@ export default function TopBar(p: Props) {
           that looks like it does in-game") — the craft's MiniComputers,
           opening the in-game-style IDE (XenonDialog.tsx) on the dev's
           interpreter (engine/xenoncode.ts + the ESM glue + wasm under engine/xenoncode/) */}
-      {(p.xenonComps?.length ?? 0) > 0 && (
+      {(((p.xenonComps?.length ?? 0) + (p.xenonHuds?.length ?? 0)) > 0) && (
         <Menu testid="xenon" label="Xenon ▾">
           {close => (<>
             {/* WIP disclaimer (our rule 2026-10-27): the interpreter is the
@@ -209,6 +215,22 @@ export default function TopBar(p: Props) {
                 label={`⌨ ${c.alias || c.program}${c.builtin ? ' ·built-in' : ''}`} hint={`${c.files} .xc`}
                 onClick={() => { close(); p.onXenon?.(c.ci); }} />
             ))}
+            {/* HUD BLOCKS (v1.14.0, we: "allow us to edit the code for at
+                least HUDs that are contained within a HUD block") */}
+            {(p.xenonHuds?.length ?? 0) > 0 && (<>
+              <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-ink-dim">
+              HUD programs</div>
+              {p.xenonHuds!.map(h => (
+                <Item key={h.ci} testid={`xenon-hud-${h.ci}`}
+                  label={`🖥 ${h.alias}`} hint={`${h.files} .xc`}
+                  onClick={() => { close(); p.onHud?.(h.ci); }} />
+              ))}
+            </>)}
+            <Sep />
+            <Item testid="xenon-beacons"
+              label={`📡 Beacons — radio scope${p.beaconsOpen ? ' ·open' : ''}`}
+              hint="freq + traffic"
+              onClick={() => { close(); p.onBeacons?.(); }} />
           </>)}
         </Menu>
       )}

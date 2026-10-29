@@ -555,6 +555,19 @@ Editor chunk graph).
 
 ## P9 — Multi-computer sim + HUD/beacon radio (planned 2026-10-29; unlocks ChipOS testing)
 
+**SLICE A LANDED v1.14.0 (2026-10-29): the beaconNet registry (engine/
+beaconnet.ts — frequencies, participants seeded from Beacon components +
+every beacon() literal, exact-match routing, per-save log survival), the
+BEACONS side tab in the computer AND HUD IDEs, the 📡 Beacon dock
+(XenonCode menu), the HUD-block IDE (HudDialog — edits data.xc_files
+through the '' -container doc funnels; pins in xcfiles.test), and the
+AVATARSIM sensor rows (avatar_sensor_* worldsim channels). REMAINING:
+slice B = the HUD VM runtime (HUD builtin set on the device shim:
+panel()/draw_*/text*/beacon()/get → the xc_host twin + canvas renderer);
+slice C = ComputerFarm + shared IoBus; slice D = Beacon-as-io-device.
+Below is the original plan; the registry semantics in (3) shipped as
+described.**
+
 We (2026-10-29): "we need to have the capacity to have multiple systems
 communicating with each other, vis-a-vis multiple computers running at the
 same time, and then they should be able to communicate over their

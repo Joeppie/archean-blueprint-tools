@@ -40,6 +40,7 @@ import { usePilotKeys } from '../engine/pilotkeys';
 import type { Engine } from '../engine/scene';
 import { ScreensCell } from './ScreensDock';
 import { CodeEditor, type CodeEditorHandle } from './CodeEditor';
+import BeaconPanel from './BeaconPanel';
 import {
   functionAt, libIndex, projectDecls, projectFunctions,
   XC_LIB_DOC, XC_LIB_GROUPS, XC_SCREEN_MEMBERS, XC_GLOBAL_CONSTS,
@@ -71,7 +72,7 @@ export default function XenonDialog(p: {
   const [newProg, setNewProg] = useState(false);
   const [armedDel, setArmedDel] = useState(false);
   const [vals, setVals] = useState<Record<string, number>>({});
-  const [side, setSide] = useState<'vars' | 'screens' | 'library' | 'world' | 'bus' | 'console' | 'autotest'>('screens');
+  const [side, setSide] = useState<'vars' | 'screens' | 'library' | 'world' | 'bus' | 'console' | 'autotest' | 'beacons'>('screens');
   const [varQ, setVarQ] = useState('');
   const [scrQ, setScrQ] = useState('');
   // LIBRARY side tab (v1.13.25, we: "an index of all known library and
@@ -1088,7 +1089,7 @@ export default function XenonDialog(p: {
             ? (sideOpen
               ? 'fixed inset-y-2 left-14 right-2 z-50 flex flex-col gap-1.5 overflow-y-auto rounded-lg border border-[#3a4a6a] bg-[#10141f]/[.98] p-2 shadow-2xl'
               : 'hidden')
-            : 'flex min-h-0 flex-1 flex-col gap-1.5'}>
+            : 'flex min-h-0 min-w-0 flex-1 flex-col gap-1.5'}>
             {narrow && sideOpen && (
               <div className="flex shrink-0 items-center justify-between">
                 <span className="text-[10px] uppercase tracking-widest text-[#5d6a7d]">Computer</span>
@@ -1106,7 +1107,8 @@ export default function XenonDialog(p: {
                 ['screens', `Screens ${pump.surfaces.size ? `(${pump.surfaces.size})` : ''}`],
                 ['library', `Library ${funcs.length + XC_LIB_DOC.length ? `(${funcs.length} + ${XC_LIB_DOC.length})` : ''}`],
                 ['world', `World ${pump.wsChannels().length ? `(${pump.wsChannels().length})` : ''}`],
-                ['bus', 'Bus'], ['autotest', 'Auto'], ['console', 'Console']] as const).map(([k, label]) => (
+                ['bus', 'Bus'], ['autotest', 'Auto'], ['console', 'Console'],
+                ['beacons', 'Beacons']] as const).map(([k, label]) => (
                 <button key={k} data-testid={`xenon-side-${k}`} onClick={() => setSide(k)}
                   className="shrink-0 rounded px-2 py-1 text-[10px] tracking-wide hover:bg-[#182236]"
                   title={label.trim()}>
@@ -1484,6 +1486,7 @@ export default function XenonDialog(p: {
                 )}
               </div>
             </>)}
+            {side === 'beacons' && <BeaconPanel />}
             {side === 'console' && (
               <div data-testid="xenon-log" className="min-h-[70px] flex-1 overflow-y-auto rounded border border-[#232c3d] bg-[#0b0f18] p-2 text-[11px]">
                 {pump.prints.slice(-60).map((e, i) => (
@@ -1504,7 +1507,8 @@ export default function XenonDialog(p: {
           {narrow && !sideOpen && (
             <div data-testid="xenon-side-rail" className="fixed right-0 top-1/4 z-40 flex flex-col gap-1">
               {([['vars', 'Vars'], ['screens', 'Screens'], ['library', 'Library'], ['world', 'World'],
-                ['bus', 'Bus'], ['autotest', 'Auto'], ['console', 'Console']] as const).map(([k, label]) => (
+                ['bus', 'Bus'], ['autotest', 'Auto'], ['console', 'Console'],
+                ['beacons', 'Beacons']] as const).map(([k, label]) => (
                 <button key={k} data-testid={`xenon-rail-${k}`}
                   className="rotate-180 rounded-l border border-r-0 border-[#3a4a6a] bg-[#1d2b42] px-[3px] py-2
                          text-[9px] tracking-wide text-[#8fd4ff] [writing-mode:vertical-rl] hover:bg-[#27395c]"

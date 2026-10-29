@@ -332,19 +332,31 @@ export function setCompColor(ctx: EditCtx, ci: number, which: 'color1' | 'color2
 
 export interface XcFileEntry { name: string; plain_code?: string; [k: string]: unknown }
 
-function xcFilesOf(bp: Blueprint, ci: number): XcFileEntry[] | null {
+/** v1.14.0 (P9 slice A): the xc file list of a device — MiniComputer kinds
+ *  carry it under data.hdd.xc_files; a HudController carries it DIRECTLY at
+ *  data.xc_files (game layout, FORMAT §HUD). container = 'hdd' (default,
+ *  every prior caller) | '' (the HUD list). */
+export type XcContainer = 'hdd' | '';
+function xcFilesOf(bp: Blueprint, ci: number, container: XcContainer = 'hdd'): XcFileEntry[] | null {
   const d = bp.data.components[ci]?.data as Record<string, any> | undefined;
-  return (d?.hdd?.xc_files as XcFileEntry[] | undefined) ?? null;
+  const src = container ? d?.[container] : d;
+  return (src?.xc_files as XcFileEntry[] | undefined) ?? null;
+}
+function xcFilesPath(ci: number, container: XcContainer): (string | number)[] {
+  return container === 'hdd'
+    ? ['data', 'components', ci, 'data', 'hdd', 'xc_files']
+    : ['data', 'components', ci, 'data', 'xc_files'];
 }
 
 /** Replace one disk file's SOURCE (plain_code). `fi` = the index inside the
  *  file's xc_files array (NOT the IDE tab order — map through xcDiskFiles). */
-export function setXcFileCode(ctx: EditCtx, ci: number, fi: number, code: string): boolean {
-  const xf = xcFilesOf(ctx.bp, ci);
+export function setXcFileCode(
+  ctx: EditCtx, ci: number, fi: number, code: string, container: XcContainer = 'hdd'): boolean {
+  const xf = xcFilesOf(ctx.bp, ci, container);
   const ent = xf?.[fi];
   if (!ent) return false;
   ent.plain_code = code;
-  return docSet(ctx.doc, ['data', 'components', ci, 'data', 'hdd', 'xc_files', fi, 'plain_code'], code);
+  return docSet(ctx.doc, [...xcFilesPath(ci, container), fi, 'plain_code'], code);
 }
 
 /** Add a file to the virtual disk (the IDE's File ▸ New — CTRL+N). Appends
@@ -356,9 +368,22 @@ export function setXcFileCode(ctx: EditCtx, ci: number, fi: number, code: string
  *  {capacity,label,xc_files} so the SAVE mirrors bp exactly (the old
  *  docEnsureArray-on-missing-parent silently missed the doc: the authored
  *  code lived in bp only and vanished from the save). */
-export function insertXcFile(ctx: EditCtx, ci: number, name: string, code: string): boolean {
+export function insertXcFile(
+  ctx: EditCtx, ci: number, name: string, code: string, container: XcContainer = 'hdd'): boolean {
   const comp = ctx.bp.data.components[ci] as Record<string, any> | undefined;
   if (!comp) return false;
+  if (container === '') {
+    // the HudController's DIRECT data.xc_files list (no hdd wrapper)
+    const path = xcFilesPath(ci, '');
+    if (!docEnsureObject(ctx.doc, ['data', 'components', ci, 'data'])) return false;
+    comp.data = comp.data ?? {};
+    const xf: XcFileEntry[] = (comp.data.xc_files = comp.data.xc_files ?? []);
+    const at = xf.length;
+    xf.push({ name, plain_code: code });
+    docEnsureArray(ctx.doc, path);
+    docArrayInsert(ctx.doc, path, at, docFromValue({ name, plain_code: code }));
+    return true;
+  }
   const pathHdd = ['data', 'components', ci, 'data', 'hdd'];
   if (!docEnsureObject(ctx.doc, pathHdd)) return false;   // refuse BEFORE mutating bp
   comp.data = comp.data ?? {};
@@ -382,9 +407,10 @@ export function insertXcFile(ctx: EditCtx, ci: number, name: string, code: strin
 }
 
 /** Remove a file from the virtual disk (index in the file's xc_files). */
-export function removeXcFile(ctx: EditCtx, ci: number, fi: number): boolean {
-  const xf = xcFilesOf(ctx.bp, ci);
+export function removeXcFile(
+  ctx: EditCtx, ci: number, fi: number, container: XcContainer = 'hdd'): boolean {
+  const xf = xcFilesOf(ctx.bp, ci, container);
   if (!xf?.[fi]) return false;
   xf.splice(fi, 1);
-  return docArrayRemoveAt(ctx.doc, ['data', 'components', ci, 'data', 'hdd', 'xc_files'], fi);
+  return docArrayRemoveAt(ctx.doc, xcFilesPath(ci, container), fi);
 }

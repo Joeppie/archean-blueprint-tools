@@ -255,6 +255,17 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   the code owns the width (`.cm-scroller` `touch-action: pan-x pan-y`);
   a changed variable row remounts with the `.var-flash` wash (keyed on
   the last value per name).
+- HUD BLOCKS + BEACON RADIO (v1.14.0 P9 slice A): HudController components
+  list under the XenonCode menu (HUD IDE — the shared CodeEditor editing
+  `data.xc_files` through the xc-file doc funnels with the `''` container;
+  save = the doc, F5 = save). The BEACONS side tab (computer IDE + HUD IDE)
+  and the 📡 Beacon dock render THE global registry
+  (`engine/beaconnet.ts`: the craft's Beacon components' tx/rx frequencies +
+  every `beacon()` literal in every computer/HUD program + the user's send
+  form; routing = EXACT text match on frequencies; re-seed per save keeps
+  the logs by id). AVATARSIM = the `avatar_sensor_*` worldsim channels (a
+  HUD's `get()` pool; sea datum 6 203 000 m). The HUD VM runtime
+  (panel/draw/beacon builtins → canvas) is slice B (REWRITE § P9).
 - NAV + DEBUGGER-FOLLOW (v1.13.27; STEP KEYS v1.13.33): every jump
   (library/def/goto/tab) records a navpoint; ◀ ▶ + Alt+←/→ (CAPTURE — CM
   binds Alt+arrows) walk the history. EVERY debugger stop — breakpoint hit
@@ -365,7 +376,12 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
 - LESSONS: probe face-INTERIOR pixels through the engine's own pick law
   (canvas fractions are NOT aspect-stable); camera SETTLE = two identical
   `camPos()` samples; when an identity law changes, RE-AUDIT every pin that
-  sealed its old trigger.
+  sealed its old trigger; a CodeMirror `toContainText` rides the VIEWPORT
+  only (docs are windowed — assert head text, prove deep literals through a
+  registry/chip observable); long game strings (beacon frequencies!) need
+  `break-all`/`truncate` + `min-w-0` flex columns — min-content from an
+  unbreakable 40-char token makes a side panel OVERLAP the editor (the
+  v1.14.0 Badger catch).
 - PER-COMPONENT PINS: solo-fixture tests carry `@<ComponentName>` tags; run
   the tags you touched; a full @slow sweep only when a SHARED render-pipeline
   file changed.
@@ -764,12 +780,14 @@ behind a small link at the END of the gallery. Pages serves the GENERATED
 
 ## Backlog (live items)
 - **P9 — Multi-computer farm + HUD/beacon radio** (REWRITE.md § P9,
-  decoded model in FORMAT §HUD & the Beacon radio): `ComputerFarm` of
-  pumps + a SHARED per-craft io bus (inter-computer
-  input/output operability — ChipOS-critical), Beacon-as-io-device
-  with frequency-channel radio, then the HUD workspace (HudController
-  `.xc` on a canvas + `beacon()` pair against the bus — RCS500 demo
-  is the fixture). Y-bump candidate — propose, get assent.
+  decoded model in FORMAT §HUD & the Beacon radio): SLICE A LANDED
+  (v1.14.0: beaconNet registry + Beacons tab/dock + HUD-block IDE +
+  avatarsim). REMAINING: (B) the HUD VM runtime (panel/draw/beacon
+  builtins on the wasm shim → canvas; the shim's twin law applies),
+  (C) the ComputerFarm of pumps + SHARED per-craft io bus
+  (inter-computer input/output operability — ChipOS-critical),
+  (D) Beacon-as-io-device radio inside the sim (post/deliver ride
+  beaconNet).
 - **P8 — Xenon workspace as a STANDALONE, low-coupling module**: shape,
   coupling inventory and the four seams (write-path, screen-feed, key-bus,
   shell-descriptors) in REWRITE.md § P8; P3 (project tree) + P4 (upstream

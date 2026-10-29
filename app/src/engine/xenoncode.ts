@@ -227,6 +227,31 @@ export function xenonComputers(bp: Blueprint): XenonComputer[] {
   return out;
 }
 
+/** v1.14.0 P9 slice A (we: "allow us to edit the code for at least HUDs
+ *  that are contained within a HUD block"): every HudController on the
+ *  craft, with its program files (data.xc_files — the game layout,
+ *  FORMAT §HUD). The IDE edits them through the same doc-guaranteed
+ *  xc-file writeback the MiniComputer disks use. */
+export interface XenonHud {
+  ci: number;
+  alias: string;
+  files: XCFile[];
+}
+
+export function xenonHudControllers(bp: Blueprint): XenonHud[] {
+  const out: XenonHud[] = [];
+  (bp.data.components as BlueprintComponent[]).forEach((c, ci) => {
+    if (c.type !== 'HudController') return;
+    const xf = ((c.data as any)?.xc_files ?? []) as { name: string; plain_code?: string }[];
+    out.push({
+      ci,
+      alias: c.alias || `hud-${ci}`,
+      files: xf.map(f => ({ name: f.name || 'main.xc', code: f.plain_code ?? '' })),
+    });
+  });
+  return out;
+}
+
 /**
  * The surfaces a program's screen(aliasOrIo, channel) calls bind to, read
  * OUT OF THE PROGRAM (the binding law is the wiki's xenoncode/dashboard.md +

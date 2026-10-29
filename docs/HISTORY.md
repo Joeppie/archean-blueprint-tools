@@ -3029,6 +3029,42 @@ topic + FORMAT).
   `default_huds/`, `client/hud/HudControllers/ENTT…/` = the per-craft-
   entity deploy cache). P9's HUD workspace covers BOTH sources (craft
   component + installed .xc).
+- **v1.14.0 P9 SLICE A — HUD IDE, BEACON RADIO SCOPE, AVATARSIM (we,
+  2026-10-29: "Initiate this work, allow us to edit the code for at least
+  HUDs that are contained within a HUD block, and establish a familiar
+  environment, including the concept of screens and buttons, and worldsim,
+  call that avatarsim in the case of the avatar (player). There should also
+  be a beacons menu, under xenoncode … make beacons into a seperate tab for
+  computers/hud as well, so the globally known scope can be understood when
+  we have 'intercomputer' operations; be they HUDs or minicomputers or
+  computers"):** the Y-bump of REWRITE § P9's first slice. THE REGISTRY
+  (`engine/beaconnet.ts`, pure, vitest-pinned): participants = the craft's
+  Beacon components (transmit/receiveFrequency + the authored transmitData
+  as last tx) + every `beacon(<tx>,<rx>)` literal scanned out of computer
+  hdd AND HudController xc_files (text AND numeric frequencies, FORMAT
+  §Player-installed HUDs) + the USER; routing = EXACT text frequency match
+  (deliver posts to every listener's ring, cap 50); every save re-seeds and
+  the radio history RE-ATTACHES by participant id (the logs are the point
+  of the tab). THE SURFACES: a BEACONS side tab in the computer IDE (side
+  union + phone rail) and in the new HUD IDE; a 📡 Beacons item in the
+  XenonCode menu opening the BeaconDock window; the send form (known-
+  frequency chips + datalist + payload) posts as 'you' and keeps YOUR
+  TRANSMISSIONS; the AVATARSIM rows = avatar_sensor_speed/altitude/
+  altitude_absolute as worldsim sensor channels (evalExpr f(t), sea datum
+  6 203 000 m) — the HUD `get()` pool for slice B. THE HUD IDE
+  (`components/HudDialog.tsx`): the XenonCode menu lists HUD blocks
+  (xenon-hud-<ci>); the SHARED CodeEditor on the HUD files (funcs/decls
+  completion pools, find/goto, F5=save); the writeback reuses the xc-file
+  doc funnels with a new '' CONTAINER (a HudController carries data
+  .xc_files, NO hdd wrapper — xcfiles.test: byte-safe save, no "hdd" key
+  introduced, append/remove index-exact); an honest note states the HUD VM
+  runtime (panel/draw/beacon builtins → canvas) rides slice B (the device-
+  shim twin law applies). The xenonHuds descriptors memo + beaconNet seed
+  re-derive on rev (every save) — reopen reads the disk, the pins assert
+  it. Pins: beaconnet.test (8), xcfiles HUD trio, xenonhud.spec (2,
+  Badger: its 999-line guide HUD + the BGR-D60167… listener receive our
+  send). The computer-IDE first-comp leg uses the Badger: 57 files boot
+  ~2.5 s — inside budget.
 
 ## 2. v1.11 session — KNOWN ISSUES & UNPINNED TODOS (2026-10-25/26 session block)
 

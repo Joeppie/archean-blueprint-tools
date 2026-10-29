@@ -42,13 +42,16 @@ const HelpDialogLazy = lazy(() => import('./components/HelpDialog'));
 const XenonDialogLazy = lazy(() => import('./components/XenonDialog'));
 const ScreensDockLazy = lazy(() => import('./components/ScreensDock'));
 const AutosavesDialogLazy = lazy(() => import('./components/AutosavesDialog'));
+const HudDialogLazy = lazy(() => import('./components/HudDialog'));
+const BeaconDockLazy = lazy(() => import('./components/BeaconDock'));
 import { blockInfo, blockMirrorTwin, blockTwinIssues, cellIndex, cellOverlap,
   complementBlock, mirrorAxisIdx, paintTwinPair, type MirrorAxisOpt } from './engine/blocks';
 import { cornerOf, triAt, triangleFromCorners, mirroredTriangle, triTwinIndex, type Corner } from './engine/tris';
 import { applyPinEdit, applyPinRotate, applyPinShift, applyTriFlip, applyTriPaint } from './engine/pinedit';
 import type { Blueprint, Triangle } from './engine/format';
 import { isLegacyFile } from './engine/format';
-import { hasDashboards, xenonComputers, xenonPump, type XCFile } from './engine/xenoncode';
+import { hasDashboards, xenonComputers, xenonHudControllers, xenonPump, type XCFile } from './engine/xenoncode';
+import { beaconNet } from './engine/beaconnet';
 import { makeXcdbg } from './engine/xcdbg';
 import { buzzerAudio } from './engine/buzzer';
 import { pilotKeysActive } from './engine/pilotkeys';
@@ -136,6 +139,21 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     () => (bp ? xenonComputers(bp) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [bp]);
+  // ── v1.14.0 P9 slice A (we: "allow us to edit the code for at least HUDs
+  //    that are contained within a HUD block … make beacons into a seperate
+  //    tab for computers/huds … a beacons menu, under xenoncode"): the HUD
+  //    blocks (HudController .xc programs), the 📡 Beacon dock, and the
+  //    beaconNet registry seeded from every Beacon component + every
+  //    beacon() literal in every computer AND HUD program on the craft.
+  const xenonHuds = useMemo(
+    () => (bp ? xenonHudControllers(bp) : []),
+    // re-derive on every save (rev): the HUD IDE's files come FRESH from
+    // bp on reopen — the disk is the truth (same law as the menu counts)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [bp, rev]);
+  const [hudCi, setHudCi] = useState<number | null>(null);
+  const [beaconsOpen, setBeaconsOpen] = useState(false);
+  useEffect(() => { if (bp) beaconNet.seed(bp); }, [bp, rev]);
   // ▣ SCREENS bottom tab (v1.13.x): the dashboards' live rasters, normal +
   // virtual surfaces, on the SHARED pump (the IDE, the dock and the 3-D
   // dashboard faces all ride ONE running computer).
@@ -596,6 +614,26 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     markDirty(); bumpRev();
     const next = xenonComputers(ctx.bp).find(c => c.ci === ci);
     if (next) xenonPump.reload(next);          // game rule: save ⇒ reboot
+  }, [markDirty, bumpRev]);
+
+  /** The HUD IDE's writeback (v1.14.0): a HudController's files live at
+   *  data.xc_files (NO hdd wrapper — FORMAT §HUD); same doc funnels with
+   *  the '' container, same markDirty/bumpRev save law. No pump re-boot:
+   *  the HUD VM runtime is slice B (the note rides HudDialog). */
+  const hudFiles = useCallback((ci: number, files: XCFile[]) => {
+    const ctx = ctxRef.current;
+    if (!ctx) return;
+    const list = () => (((ctx.bp.data.components[ci] as any)?.data?.xc_files
+      ?? []) as { name: string; plain_code?: string }[]);
+    const want = new Map(files.map(f => [f.name, f.code]));
+    for (let i = list().length - 1; i >= 0; i--)
+      if (!want.has(list()[i]!.name)) removeXcFile(ctx, ci, i, '');
+    for (const f of files) {
+      const i = list().findIndex(e => e.name === f.name);
+      if (i >= 0) setXcFileCode(ctx, ci, i, f.code, '');
+      else insertXcFile(ctx, ci, f.name, f.code, '');
+    }
+    markDirty(); bumpRev();
   }, [markDirty, bumpRev]);
 
 
@@ -1680,6 +1718,9 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         onTool={id => setToolOpen(id)}
         onHelp={() => setHelpOpen(true)}
         xenonComps={xenonComps.length ? xenonComps.map(c => ({ ci: c.ci, alias: c.alias, program: c.program, files: c.files.length, builtin: c.builtin })) : undefined}
+        xenonHuds={xenonHuds.map(h => ({ ci: h.ci, alias: h.alias, files: h.files.length }))}
+        onHud={ci => setHudCi(ci)}
+        onBeacons={() => setBeaconsOpen(o => !o)} beaconsOpen={beaconsOpen}
         onXenon={ci => setXenonCi(ci)}
         hasScreens={hasScreens} screensOpen={screensOpen}
         onScreens={() => setScreensOpen(o => !o)}
@@ -1802,6 +1843,21 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
                 </Suspense>
               ) : null;
             })()}
+            {/* 🖥 HUD IDE (v1.14.0 P9 slice A): the code of a HUD block */}
+            {hudCi !== null && (() => {
+              const hud = xenonHuds.find(h => h.ci === hudCi);
+              return hud ? (
+                <Suspense fallback={null}>
+                  <HudDialogLazy hud={hud} onClose={() => setHudCi(null)} onFiles={hudFiles} />
+                </Suspense>
+              ) : null;
+            })()}
+            {/* 📡 BEACONS dock (v1.14.0): the global radio scope */}
+            {beaconsOpen && (
+              <Suspense fallback={null}>
+                <BeaconDockLazy onClose={() => setBeaconsOpen(false)} />
+              </Suspense>
+            )}
             {/* ▣ SCREENS bottom tab (v1.13.x): live dashboards + virtual
                 surfaces of the running computer (top-bar ▣ button) */}
             {screensOpen && (
