@@ -453,6 +453,38 @@ export default function XenonDialog(p: {
     for (const v of pump.locals) m.set(v.name, (m.get(v.name) ?? 0) + 1);
     return m;
   }, [pump.locals]);
+  // FLASH-ON-CHANGE (v1.13.32, we: "Modified variables should flash a green
+  // background as an updated highlight, both locals and globals"): the panel
+  // re-renders with the pump's tick — a row whose VALUE string differs from
+  // the previous commit gets a seq bump: its React key changes, the row
+  // remounts and the .var-flash wash plays from the start. Repeat writes
+  // keep the green alive; a quiet VM lets it fade out. Locals key on the
+  // NAME (a step replaces the frame — the same-named local changing IS the
+  // update we point at), globals on their unique name.
+  const prevFlashVals = useRef(new Map<string, string>());
+  const [flashSeq, setFlashSeq] = useState<Record<string, number>>({});
+  useEffect(() => {
+    const changed: string[] = [];
+    const seen = new Set<string>();
+    for (const [k, v] of [
+      ...locList.map(v => [`locals:${v.name}`, v.v] as const),
+      ...varList.map(v => [`globals:${v.name}`, v.v] as const),
+    ]) {
+      seen.add(k);
+      const p = prevFlashVals.current.get(k);
+      if (p !== undefined && p !== v) changed.push(k);
+      prevFlashVals.current.set(k, v);
+    }
+    for (const k of [...prevFlashVals.current.keys()])
+      if (!seen.has(k)) prevFlashVals.current.delete(k);
+    if (changed.length) {
+      setFlashSeq(m => {
+        const n = { ...m };
+        for (const k of changed) n[k] = (m[k] ?? 0) + 1;
+        return n;
+      });
+    }
+  });
   // ── XENON-WRITEBACK (v1.13.23, we: "I want the capacity to edit a
   //    variable's current value - it must be valid for its type, the type
   //    shown beside the name, reject invalid values, inject them back into
@@ -653,6 +685,20 @@ export default function XenonDialog(p: {
   // FloatingWindow fills the viewport while set and restores the stored rect
   const [max, setMax] = useState(false);
 
+  // PHONE PASS (v1.13.32, we: "On mobile, opening code I can't read it,
+  // scroll through it, the bars and such should be collapsible sideways to
+  // make room, also scrolling should be possible to make it possible to use
+  // the coder"): below 768 px the COMPUTER SIDE PANEL collapses to a slim
+  // RIGHT-EDGE RAIL — the code owns the full width, and the panel opens as
+  // an overlay drawer (phone edge-dock law).
+  const [narrow, setNarrow] = useState(() => window.innerWidth < 768);
+  const [sideOpen, setSideOpen] = useState(false);
+  useEffect(() => {
+    const h = () => setNarrow(window.innerWidth < 768);
+    addEventListener('resize', h);
+    return () => removeEventListener('resize', h);
+  }, []);
+
   // the editor is ALWAYS live (v1.13.27): every change writes the file's
   // buffer in place and marks it dirty (the ● on the tab)
   const editChange = (v: string) => {
@@ -753,29 +799,66 @@ export default function XenonDialog(p: {
         const w = Math.min(1400, vw * 0.97), h = vh * 0.94;
         return { x: (vw - w) / 2, y: (vh - h) / 2, w, h };
       }}
-      className="font-mono"
+      className="font-mono xenon-ide"
       header={
         /* title bar - the drag handle (the ✕ is a button, excluded) */
-        <div className="flex items-center justify-between bg-[#1a2436] px-3 py-1.5 text-[13px]">
-          <span className="font-bold tracking-wide">XenonCode IDE ({comp.alias || comp.program})</span>
-          <div className="flex items-center gap-3">
+        <div className="flex items-center justify-between gap-2 bg-[#1a2436] px-3 py-1.5 text-[13px]">
+          <span className="min-w-0 flex-1 truncate font-bold tracking-wide">XenonCode IDE ({comp.alias || comp.program})</span>
+          <div className="flex shrink-0 items-center gap-3">
             <span data-testid="xenon-on" className={`text-[11px] font-bold ${pump.status === 'running' ? 'text-[#3ddc55]' : 'text-[#ff5b5b]'}`}>
               {pump.status === 'running' ? 'ON' : 'OFF'}
             </span>
             {pump.paused && (
               <span data-testid="xenon-paused" data-file={pump.pausedFile}
                 data-line={pump.pausedLine} title="where the debugger stopped"
-                className="rounded bg-[#4a3d14] px-2 py-0.5 text-[10px] font-bold text-[#e6c07b]">
+                className="hidden rounded bg-[#4a3d14] px-2 py-0.5 text-[10px] font-bold text-[#e6c07b] md:inline">
                 ⏸ {pump.pausedFile ? `${pump.pausedFile}:${pump.pausedLine}` : 'paused'}
                 {functionAt(funcs, pump.pausedFile, pump.pausedLine)
                   ? ` @${functionAt(funcs, pump.pausedFile, pump.pausedLine)!.name}` : ''}
               </span>
             )}
             {pump.stepMode !== 'off' && !pump.paused && (
-              <span data-testid="xenon-stepping" className="rounded bg-[#14304a] px-2 py-0.5
-                     text-[10px] font-bold text-[#8fd4ff]">
+              <span data-testid="xenon-stepping" className="hidden rounded bg-[#14304a] px-2 py-0.5
+                     text-[10px] font-bold text-[#8fd4ff] md:inline">
                 {pump.stepMode === 'over' ? 'stepping → next line'
                   : pump.stepMode === 'into' ? 'stepping → next pair' : 'running to cursor'}
+              </span>
+            )}
+            {/* DEBUG BUTTONS IN THE TITLE (v1.13.32, we: "debug buttons as
+                part of the title to save space"): the classic run toolbar
+                rides the title bar (the FloatingWindow drag law excludes
+                buttons), freeing the row beside the tab strip — on phones
+                (no F-keys) this row IS the debugger */}
+            {onCode && (
+              <span data-testid="xenon-title-debug" className="flex items-center gap-1 text-[11px]">
+                <span className="hidden h-4 w-px bg-[#2b313b] sm:block" aria-hidden />
+                <button data-testid="ide-run"
+                  className={`rounded px-2 py-0.5 ${pump.paused ? 'bg-[#2b4a2b] text-[#b7ecb7] hover:bg-[#38603a]'
+                    : pump.status === 'running' ? 'bg-[#1d2b42] text-[#5d6a7d]'
+                      : 'bg-[#2b4a2b] text-[#b7ecb7] hover:bg-[#38603a]'}`}
+                  title="run / resume (F8)"
+                  onClick={() => { if (pump.paused) pump.resume(); else pump.startRunning(); }}>▶</button>
+                <button data-testid="ide-pause"
+                  disabled={pump.status !== 'running' || pump.paused}
+                  className="rounded bg-[#243a52] px-2 py-0.5 text-[#e6c07b] hover:bg-[#2f4c6b] disabled:opacity-30"
+                  title="pause — park on the executing line (values become editable)"
+                  onClick={() => pump.pause()}>⏸</button>
+                <button data-testid="ide-restart"
+                  className="rounded bg-[#243a52] px-2 py-0.5 text-[#8fd4ff] hover:bg-[#2f4c6b]"
+                  title="re-boot the computer from disk (breakpoints kept)"
+                  onClick={() => pump.reboot()}>⟳</button>
+                <button data-testid="ide-stop"
+                  className="rounded bg-[#5a2222] px-2 py-0.5 text-[#ffb3b3] hover:bg-[#7a2e2e]"
+                  title="stop (F6) — park on the executing line, values editable"
+                  onClick={() => pump.stopRunning()}>⏹</button>
+                <button data-testid="ide-step-over"
+                  className="rounded bg-[#1d2c46] px-1.5 py-0.5 text-[#cfe1ff] hover:bg-[#27395c]"
+                  title="step over one executed line — calls are stepped over (F10)"
+                  onClick={() => pump.stepOver()}>⇥</button>
+                <button data-testid="ide-step-into"
+                  className="rounded bg-[#1d2c46] px-1.5 py-0.5 text-[#cfe1ff] hover:bg-[#27395c]"
+                  title="step into the called function (F11)"
+                  onClick={() => pump.stepInto()}>↓</button>
               </span>
             )}
             <button data-testid="xenon-max" className="text-[#8a93a0] hover:text-white"
@@ -860,16 +943,25 @@ export default function XenonDialog(p: {
               onClick={delFile}>{armedDel ? 'sure?' : '✕ delete tab'}</button>
           </div>
         )}
-        <div className="flex min-h-0 flex-1 gap-2 overflow-hidden p-2">
+        <div className={`flex min-h-0 flex-1 gap-2 overflow-hidden p-2${narrow && !sideOpen ? ' pr-5' : ''}`}>
           {/* LEFT COLUMN: the file-tab strip rides ABOVE the code; the
               COMPUTER SIDE PANEL stands to its right, top to bottom
               (v1.13.x: "Variables/screens should be to the side of the
               enumerated files, and the window should be larger") */}
           <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-          {/* tabs — every HDD file, dirty-marked; ONE row, scrollable
-              (we: "File shouldn't show more than one line at a time") */}
+          {/* tabs — every HDD file, dirty-marked; ONE scrollable row that
+              EXPANDS TO MULTIPLE LINES on hover (v1.13.32, we: "We can't see
+              all files in code, expand the list of file tabs to multiple
+              lines when mouse over") */}
           <div className="flex shrink-0 items-center gap-1.5">
-          <div data-testid="xenon-tabstrip" className="flex min-w-0 flex-1 flex-nowrap items-center gap-1 overflow-x-auto rounded border border-[#2b313b] bg-[#121826] px-2 py-1 text-[12px] [scrollbar-width:thin]">
+          {/* the strip's EXPANSION ON HOVER is an OVERLAY (absolute over the
+              code), never a push — pushing shrank the code pane under a
+              hovered 57-tab strip and hid the editor (v1.13.32 Badger
+              catch): the wrapper keeps ONE row of height in flow */}
+          <div className="relative min-w-0 flex-1">
+          <div data-testid="xenon-tabstrip" title="hover to wrap the tabs over several lines"
+            className="flex min-w-0 flex-nowrap items-center gap-1 overflow-x-auto rounded border border-[#2b313b] bg-[#121826] px-2 py-1 text-[12px] [scrollbar-width:thin]
+                   hover:absolute hover:inset-x-0 hover:top-0 hover:z-20 hover:flex-wrap hover:overflow-visible hover:shadow-2xl">
           {files.map((f, i) => (
             <button key={f.name} data-testid={`xenon-tab-${i}`}
               onClick={() => { recNav(); setTab(i); setArmedDel(false); }}
@@ -884,6 +976,7 @@ export default function XenonDialog(p: {
               ⌗ nodes ({graph.nodes.length})
             </button>
           )}
+          </div>
           </div>
           {/* actions ride BESIDE the strip (never clipped): SAVE commits
               the live buffers (⇒ re-boot, breakpoints kept); ◀ ▶ walk the
@@ -905,38 +998,8 @@ export default function XenonDialog(p: {
               className="rounded bg-[#1d2c46] px-1.5 py-0.5 text-[#cfe1ff] hover:bg-[#27395c] disabled:opacity-30"
               title="forward to the next navpoint (Alt+→)"
               onClick={() => gotoNav(1)}>▶</button>
-            {/* CLASSIC RUN TOOLBAR (v1.13.28, we: "Running the code /
-                resetting / stopping should have classical style buttons
-                that we're used to in IDEs"): ▶ run·resume, ⏸ pause,
-                ⟳ re-boot, ⏹ stop, ⇥/↓ step over/into */}
-            <span className="mx-1 h-4 w-px bg-[#2b313b]" aria-hidden />
-            <button data-testid="ide-run"
-              className={`rounded px-2 py-0.5 ${pump.paused ? 'bg-[#2b4a2b] text-[#b7ecb7] hover:bg-[#38603a]'
-                : pump.status === 'running' ? 'bg-[#1d2b42] text-[#5d6a7d]'
-                  : 'bg-[#2b4a2b] text-[#b7ecb7] hover:bg-[#38603a]'}`}
-              title="run / resume (F8)"
-              onClick={() => { if (pump.paused) pump.resume(); else pump.startRunning(); }}>▶</button>
-            <button data-testid="ide-pause"
-              disabled={pump.status !== 'running' || pump.paused}
-              className="rounded bg-[#243a52] px-2 py-0.5 text-[#e6c07b] hover:bg-[#2f4c6b] disabled:opacity-30"
-              title="pause — park on the executing line (values become editable)"
-              onClick={() => pump.pause()}>⏸</button>
-            <button data-testid="ide-restart"
-              className="rounded bg-[#243a52] px-2 py-0.5 text-[#8fd4ff] hover:bg-[#2f4c6b]"
-              title="re-boot the computer from disk (breakpoints kept)"
-              onClick={() => pump.reboot()}>⟳</button>
-            <button data-testid="ide-stop"
-              className="rounded bg-[#5a2222] px-2 py-0.5 text-[#ffb3b3] hover:bg-[#7a2e2e]"
-              title="stop (F6) — park on the executing line, values editable"
-              onClick={() => pump.stopRunning()}>⏹</button>
-            <button data-testid="ide-step-over"
-              className="rounded bg-[#1d2c46] px-1.5 py-0.5 text-[#cfe1ff] hover:bg-[#27395c]"
-              title="step over one executed line — calls are stepped over (F10)"
-              onClick={() => pump.stepOver()}>⇥</button>
-            <button data-testid="ide-step-into"
-              className="rounded bg-[#1d2c46] px-1.5 py-0.5 text-[#cfe1ff] hover:bg-[#27395c]"
-              title="step into the called function (F11)"
-              onClick={() => pump.stepInto()}>↓</button>
+            {/* the CLASSIC RUN TOOLBAR moved INTO THE TITLE BAR in v1.13.32
+                (we: "debug buttons as part of the title to save space") */}
           </>)}
           </div>
           </div>
@@ -1006,7 +1069,22 @@ export default function XenonDialog(p: {
               automatically breaks open its KV structure … one of the side
               tabs to be the screens and virtual screens … search
               names/values in vars, and also names of screens") */}
-          <div className="flex min-h-0 flex-1 flex-col gap-1.5">
+          {/* ON PHONES (v1.13.32) the panel COLLAPSES to the edge rail and
+              opens as an OVERLAY DRAWER — the code owns the full width;
+              on desktop it stands beside the code, top to bottom */}
+          <div className={narrow
+            ? (sideOpen
+              ? 'fixed inset-y-2 left-14 right-2 z-50 flex flex-col gap-1.5 overflow-y-auto rounded-lg border border-[#3a4a6a] bg-[#10141f]/[.98] p-2 shadow-2xl'
+              : 'hidden')
+            : 'flex min-h-0 flex-1 flex-col gap-1.5'}>
+            {narrow && sideOpen && (
+              <div className="flex shrink-0 items-center justify-between">
+                <span className="text-[10px] uppercase tracking-widest text-[#5d6a7d]">Computer</span>
+                <button data-testid="xenon-side-close" aria-label="collapse the panel"
+                  className="rounded bg-[#33202a] px-2 py-0.5 text-[#ffb3b3] hover:bg-[#4a2836]"
+                  onClick={() => setSideOpen(false)}>✕</button>
+              </div>
+            )}
             {/* TOP TAB ROW (v1.13.21, we: "put the tabs currently vertically
                 labeled as top-tabs at the same level as the 'search
                 names/values'"): the rail becomes a horizontal row and the
@@ -1063,9 +1141,11 @@ export default function XenonDialog(p: {
               </div>
               {locList.map(v => {
                 const kv = parseKv(v.v);
+                const fk = `locals:${v.name}`;
                 return (
-                  <div key={`${v.name}#${v.s}`} data-testid={`xenon-loc-${v.name}`}
-                    className="rounded border border-[#2b3a52] bg-[#152036] px-2 py-1 text-[11px]">
+                  <div key={`${v.name}#${v.s}#${flashSeq[fk] ?? 0}`} data-testid={`xenon-loc-${v.name}`}
+                    className={`rounded border border-[#2b3a52] bg-[#152036] px-2 py-1 text-[11px]
+                      ${flashSeq[fk] ? 'var-flash' : ''}`}>
                     <div className="flex items-baseline justify-between gap-2">
                       <span className="text-[#8fd48f]">${v.name}
                         <span className="ml-1 text-[9px] text-[#5d6a7d]">{typeLabel(v.t)}</span>
@@ -1100,9 +1180,11 @@ export default function XenonDialog(p: {
               {varList.map(v => {
                 const kv = parseKv(v.v);
                 const storage = v.t === 50 || v.t === 51 || v.t === 60 || v.t === 61;
+                const fk = `globals:${v.name}`;
                 return (
-                  <div key={v.name} data-testid={`xenon-var-${v.name}`}
-                    className="rounded border border-[#232c3d] bg-[#131a28] px-2 py-1 text-[11px]">
+                  <div key={`${v.name}#${flashSeq[fk] ?? 0}`} data-testid={`xenon-var-${v.name}`}
+                    className={`rounded border border-[#232c3d] bg-[#131a28] px-2 py-1 text-[11px]
+                      ${flashSeq[fk] ? 'var-flash' : ''}`}>
                     <div className="flex items-baseline justify-between gap-2">
                       <span className="text-[#8fd48f]">${v.name}
                         <span className="ml-1 text-[9px] text-[#5d6a7d]">{typeLabel(v.t)}</span>
@@ -1394,6 +1476,24 @@ export default function XenonDialog(p: {
             )}
             </div>
           </div>
+
+          {/* THE PHONE EDGE RAIL (v1.13.32, we: "the bars and such should be
+              collapsible sideways to make room"): the collapsed side panel —
+              one vertical chip per tab riding the viewport's right edge;
+              a tap opens the drawer on that tab */}
+          {narrow && !sideOpen && (
+            <div data-testid="xenon-side-rail" className="fixed right-0 top-1/4 z-40 flex flex-col gap-1">
+              {([['vars', 'Vars'], ['screens', 'Screens'], ['library', 'Library'], ['world', 'World'],
+                ['bus', 'Bus'], ['autotest', 'Auto'], ['console', 'Console']] as const).map(([k, label]) => (
+                <button key={k} data-testid={`xenon-rail-${k}`}
+                  className="rotate-180 rounded-l border border-r-0 border-[#3a4a6a] bg-[#1d2b42] px-[3px] py-2
+                         text-[9px] tracking-wide text-[#8fd4ff] [writing-mode:vertical-rl] hover:bg-[#27395c]"
+                  onClick={() => { setSide(k); setSideOpen(true); }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* status lines (in-game parity) */}
@@ -1589,7 +1689,7 @@ function MenuBar(p: {
           </>)}
         </div>
       ))}
-      <span className="ml-auto text-[10px] text-[#5d6a7d]">{p.right}</span>
+      <span className="ml-auto hidden text-[10px] text-[#5d6a7d] md:inline">{p.right}</span>
     </div>
   );
 }

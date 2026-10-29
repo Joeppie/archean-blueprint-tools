@@ -2947,6 +2947,42 @@ topic + FORMAT).
   ONLY on the debugger legs of xenon.spec.ts/xenondbg.spec.ts + the
   app/tools/dbgaudit.mjs audit run on BOTH origins (localhost = worker,
   Tailscale IP = main-thread — the user's real mode).
+- **v1.13.32 IDE CHROME — TITLE-BAR DEBUGGER, WRAPPING TABS, FLASH ROWS,
+  PHONE IDE (we, 2026-10-29, batch: "We can't see all files in code,
+  perhaps expand the list of file tabs to multiple lines when mouse over,
+  debug buttons as part of the title to save space. Modified variables
+  should flash a green background as an updated highlight, both locals and
+  globals." + "On mobile, opening code I can't read it, scroll through it,
+  the bars and such should be collapsible sideways to make room, also
+  scrolling should be possible to make it possible to use the coder"):**
+  XenonDialog — the CLASSIC RUN TOOLBAR (▶⏸⟳⏹⇥↓) moved from beside the
+  tab strip INTO the FloatingWindow title bar (the drag law already
+  excludes buttons; on phones, no F-keys, it is the whole debugger); the
+  file-tab strip is one scrollable row at rest; the HOVER EXPANSION
+  (`hover:flex-wrap`) is an OVERLAY (absolute over the code, z-20 +
+  shadow) — a PUSHING expansion hid the editor under a hovered 57-tab
+  strip (the Badger catch); the v1.13.24
+  single-row pin `bb.height < 46` measures the REST box; the Vars panel
+  diffed each row's value string across pump ticks (a ref map of the last
+  value per `locals:$name` / `globals:$name` key, an effect per commit)
+  and bumped a per-key seq — the row's React key carries the seq, the
+  remount restarts the `.var-flash` CSS wash (inset green shadow so the
+  row's own dark bg survives). PHONES (<768 px, `narrow` state): the
+  COMPUTER SIDE PANEL collapses to a vertical RAIL on the viewport's
+  right edge (one chip per tab, writing-mode text); tapping a chip opens
+  the panel as an OVERLAY DRAWER (✕ collapses), so the code pane owns
+  ≥85 % of the width; the menu-bar status text hides; `.cm-scroller`
+  gets `touch-action: pan-x pan-y` + `overscroll-behavior: contain`
+  (index.css). Pins: xenon.spec.ts (hover flex-wrap via computed style,
+  ide-* inside `div.cursor-move`, .var-flash after F10 in the frame-locals
+  leg) + THE NEW e2e/xenonphone.spec.ts (L4 OPT-IN to the pixel7 project:
+  fullscreen window, rail→drawer→✕, code-pane width, wheel scroll,
+  touch-action, title-bar ⏹/▶ power cycle). Corpus-drift note: a fresh
+  worktree has no blueprints.conf, so the corpus-scan vitest files run on
+  repo testdata and TIME OUT at the 5 s default (four files, cold cache)
+  — copy the machine-local config in and extend --testTimeout before
+  believing reds there.
+
 ## 2. v1.11 session — KNOWN ISSUES & UNPINNED TODOS (2026-10-25/26 session block)
 
 KNOWN ISSUES (accepted behaviours, costs, sharp edges):

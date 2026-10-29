@@ -246,6 +246,15 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   Ctrl+F = CM find panel, Ctrl+G = go-to-line box (Esc closes them, NEVER
   the IDE — popup stopPropagation law). ⛶ / title double-click maximizes
   (FloatingWindow `maximized`).
+- IDE CHROME (v1.13.32): the debugger toolbar (▶⏸⟳⏹⇥↓) rides the TITLE
+  BAR (the drag law excludes buttons; on phones it IS the debugger — no
+  F-keys); the file-tab strip is ONE row at rest and its hover wrap
+  OVERLAYS the code (absolute, never a push — a pushed 57-tab strip hid
+  the editor; the single-row pin measures the REST box); phones
+  (<768 px) get the side panel as a RIGHT-EDGE RAIL + overlay DRAWER so
+  the code owns the width (`.cm-scroller` `touch-action: pan-x pan-y`);
+  a changed variable row remounts with the `.var-flash` wash (keyed on
+  the last value per name).
 - NAV + BREAKPOINT-FOLLOW (v1.13.27): every jump (library/def/goto/tab/
   bp-hit) records a navpoint; ◀ ▶ + Alt+←/→ (CAPTURE — CM binds
   Alt+arrows) walk the history. A pump pause at a breakpoint jumps the

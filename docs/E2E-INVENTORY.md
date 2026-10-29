@@ -108,6 +108,7 @@ tooldoc.test.ts) → **JSDOM→** en masse; KEEP 1 desktop pixel leg (dialog
 ### blockplace.spec (2, @place) — ghost aims (pickCell HEADLESS→), Shift continuation (PORTED blocks.test), click lands KEEP-POINTER (1)
 ### aero.spec (2, @slow) KEEP-PIXEL (live tunnel; physics PORTED aero.test)
 ### subride.spec (1, @slow) — Jimmy rig-chain pivot → P7.1 slice 2 retires (truck audit PORTED headless)
+### xenonphone.spec (1, @slow, pixel7 OPT-IN, v1.13.32) KEEP-POINTER (phone IDE: rail→drawer, code-pane width, code scroll, title-bar ⏹/▶; chromium leg skips via isMobile) — the v1.13 xenon/xenondbg/xenonfresh IDE batches predate this census; their v1.13.32 legs (tab-strip hover-wrap, ide-* in the title bar, .var-flash) ride xenon.spec's tiers.
 
 ## Overlap groups (the audit this pass resolved)
 

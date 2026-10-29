@@ -731,6 +731,9 @@ test.describe('Xenon IDE @ui', () => {
 
     // CLASSIC TOOLBAR: ⏹ stops (ON→OFF), ▶ runs again
     await expect(page.getByTestId('ide-stop')).toBeVisible();
+    // v1.13.32 (we: "debug buttons as part of the title to save space"):
+    // the toolbar rides the TITLE BAR (the FloatingWindow drag handle)
+    await expect(page.locator('div.cursor-move [data-testid="ide-stop"]')).toBeVisible();
     await page.getByTestId('ide-stop').click();
     await expect(page.getByTestId('xenon-on')).toHaveText('OFF', { timeout: 10_000 });
     await page.getByTestId('ide-run').click();
@@ -763,6 +766,24 @@ test.describe('Xenon IDE @ui', () => {
     await expect(ac).toBeVisible({ timeout: 8_000 });
     await expect(ac).toContainText('Pilot_WS');
     await page.keyboard.press('Escape');
+    // FLASH-ON-CHANGE (v1.13.32, we: "Modified variables should flash a
+    // green background as an updated highlight, both locals and globals"):
+    // the deterministic trigger is THE WRITEBACK LAW — write a global at
+    // the park (first writable value cell) and its row remounts with the
+    // .var-flash wash. e2e-tier because: the wash fires through the
+    // panel's per-commit value diffing (notify → key remount → CSS anim).
+    await page.getByTestId('xenon-side-vars').click();
+    await expect(page.getByTestId('xenon-locals-frame')).toContainText(/main\.xc:17/);
+    const cell = page.locator('[data-testid^="xenon-var-"] [data-testid^="xenon-val-"]').first();
+    await expect(cell).toBeVisible({ timeout: 10_000 });
+    const gname = (await cell.getAttribute('data-testid'))!.replace('xenon-val-', '');
+    const gRow = page.getByTestId(`xenon-var-${gname}`);
+    await cell.click();                                   // park-to-edit cell
+    const gInput = page.getByTestId(`xenon-edit-${gname}`);
+    await gInput.fill('42');
+    await gInput.press('Enter');
+    await expect(gRow).toContainText('42', { timeout: 10_000 });
+    await expect(page.locator('.var-flash').first()).toBeVisible({ timeout: 5_000 });
     await page.keyboard.press('Escape');   // close the IDE, discard buffers
   });
 
@@ -906,6 +927,22 @@ test.describe('Xenon IDE @ui', () => {
     const bb = await strip.boundingBox();
     expect(bb!.height).toBeLessThan(46);
     await expect(page.getByTestId('xenon-save')).toBeVisible();
+    // v1.13.32 (we: "We can't see all files in code … expand the list of
+    // file tabs to multiple lines when mouse over"): the strip is ONE row
+    // at rest and WRAPS on hover. e2e-tier because: CSS :hover + computed
+    // flex layout — no state seam exists.
+    expect(await strip.evaluate(el => getComputedStyle(el).flexWrap)).toBe('nowrap');
+    await strip.hover();
+    await expect
+      .poll(() => strip.evaluate(el => getComputedStyle(el).flexWrap),
+        { message: 'the tab strip expands to multiple lines on hover' })
+      .toBe('wrap');
+    // DEBUG BUTTONS IN THE TITLE (v1.13.32, we: "debug buttons as part of
+    // the title to save space"). e2e-tier because: the title bar IS the
+    // FloatingWindow drag handle — the toolbar living inside it (drag
+    // excluded on buttons) is DOM plumbing.
+    await expect(page.locator('div.cursor-move [data-testid="ide-stop"]')).toBeVisible();
+    await expect(page.locator('div.cursor-move [data-testid="ide-step-over"]')).toBeVisible();
     // autocomplete (real-time, CodeMirror): bare words complete the library,
     // '$' completes declared/live variables, '@' lists declared functions
     const cm = page.locator('.cm-content');

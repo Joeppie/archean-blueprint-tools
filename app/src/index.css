@@ -94,6 +94,25 @@ body { background: #14160f; color: var(--color-ink); font: 13px/1.45 'Arial Narr
 }
 .var-fade { animation: xen-varfade 1.6s ease-out forwards; }
 
+/* Xenon IDE Vars panel (v1.13.32, we: "Modified variables should flash a
+   green background as an updated highlight, both locals and globals"): the
+   row's key remounts on a value change (see XenonDialog's flashSeq), so the
+   wash replays from the start on every write. The end state is fully
+   transparent so the row's own dark bg shows through unchanged. */
+.var-flash { animation: xen-varflash 1.2s ease-out forwards; }
+@keyframes xen-varflash {
+  from { background-color: rgba(64, 178, 102, .55);
+         box-shadow: inset 0 0 14px 2px rgba(94, 224, 130, .55); }
+  to   { background-color: rgba(64, 178, 102, 0);
+         box-shadow: inset 0 0 0 0 rgba(94, 224, 130, 0); }
+}
+
+/* Xenon IDE phone pass (v1.13.32, we: "scrolling should be possible to make
+   it possible to use the coder"): the CodeMirror scroller pans with a
+   finger and never chains its overscroll to the window behind it. */
+.xenon-ide .cm-scroller { touch-action: pan-x pan-y; overscroll-behavior: contain; }
+.xenon-ide .cm-content { touch-action: pan-x pan-y pinch-zoom; }
+
 /* BuzzerButton activity pulse (v1.13.4): the TopBar 🔊 throbs while any
    buzzer's Amplitude is live — "so its evident that is the reason there
    is sound" */
