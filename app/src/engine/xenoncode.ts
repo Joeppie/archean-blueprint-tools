@@ -53,6 +53,7 @@ type Mod = {
   _xc_set_world?: (key: number, value: number) => void;
   _xc_set_view?: (w: number, h: number, mx: number, my: number, fov: number, look: number) => void;
   _xc_screen_anchor?: (idx: number) => number;
+  _xc_hud_mode?: (on: number) => void;
   _xc_worldsim_overrides(): number;
   _xc_worldsim_sync(name: number, v: number): void;
   _xc_abi(): number;
@@ -135,6 +136,13 @@ export interface XenonComputer {
   files: XCFile[];            // main.xc = the entry file, then includes
   entryName: string;          // the entry file's NAME in the file (Cede.main.xc)
   builtin?: boolean;          // runs the device's PUBLISHED built-in program
+  /** v1.15.2 ABI 12: the HUD RUNTIME kind — ONLY hudpump.ts sets this (the
+   *  XenonRun twin stamps xc_hud_mode). NOT the component type: a craft's
+   *  HudController component carries type 'hud' and its VM is a COMPUTER
+   *  (the Badger's get(key) worldsim law) — stamping by type made the shim's
+   *  two-arg HUD get() override it ("not enough arguments: avatar_sensor_
+   *  speed", the v1.15.2 Badger catch). */
+  hudRuntime?: boolean;
   capacity: number;           // hdd capacity = the game's storage limit
   channels: XenonChannel[];
   screens: XCScreen[];
@@ -525,8 +533,18 @@ export class XenonRun {
       mod.stringToUTF8(sc.alias, np, nb);
       mod._xc_add_screen(np, sc.channel, sc.w, sc.h);
       mod._free(np);
-      if (comp.builtin && sc.channel === 0) {
-        // the integrated touchscreen is the plain screen-function target
+      if ((comp.builtin || sc.deviceScreen) && sc.channel === 0) {
+        // THE BUILT-IN PLAIN TARGET (v1.15.2, we: "the size had been wrong
+        // from the inception in our editor"): in the game a MiniComputer's
+        // plain screen() draws onto its OWN integrated touchscreen — for
+        // EVERY computer, not just built-in programs. Registering the
+        // authored panel size (128×72 on the RCS500) BEFORE boot makes it
+        // the plain target (xc_addScreen is first-wins over the boot's
+        // 640×480 default): the dock cell, the 3-D face texture and the
+        // program's screen_w/screen_h all become the panel — the game's
+        // layout lands pixel-for-pixel as the in-game screenshot shows it
+        // (the Invaders' squadron spans the panel; our 640×480 default
+        // made it 40% wide on a 4:3 canvas — the inception size error).
         const mb = new TextEncoder().encode('main').length + 1;
         const mp = mod._malloc(mb);
         mod.stringToUTF8('main', mp, mb);
@@ -542,7 +560,18 @@ export class XenonRun {
       mod.stringToUTF8(d.type, tp, tb);
       mod._xc_add_device(d.id, d.io, ap, tp, d.io, d.x, d.y, d.z, 0, 0, 0, 0);
       mod._free(ap); mod._free(tp);
+      // alias→port mirror of the shim's g_devByAlias (xc_lower key, LAST
+      // alias wins, negative io rides 1000+id like xc_set_input_a): lets
+      // setInput feed an aliased channel through the NUMERIC fast path —
+      // no TextEncoder/malloc/free per write (v1.15.2 clicky-audio fix)
+      if (d.alias) run.aliasIo.set(d.alias.toLowerCase(), d.io >= 0 ? d.io : 1000 + d.id);
     }
+    // ABI 12 (v1.15.2): stamp the RUNTIME KIND before boot — the HUD pump's
+    // programs read screen_w/screen_h as the PLAYER VIEWPORT (xc_set_view
+    // feeds them); a computer keeps its plain-screen size. One binary,
+    // per-instance stamp (the farm's ONE-VM-PER-INSTANCE makes this safe).
+    if (comp.hudRuntime && typeof mod._xc_hud_mode === 'function')
+      mod._xc_hud_mode(1);
     mod._xc_pilot_script(0);
     // the shim follows OUR pump cadence (ABI 5; an older wasm keeps its
     // baked 0.1 s dt — the abi() check below warns once, nothing crashes)
@@ -583,6 +612,13 @@ export class XenonRun {
 
   setInput(io: number | string, ch: number, v: number) {
     if (typeof io === 'number') { this.mod._xc_set_input(io, ch, v); return; }
+    // alias→port: the shim's OWN resolution (g_devByAlias, lowercase, last
+    // alias wins; negative io = 1000+id) — once resolved the write rides
+    // _xc_set_input, skipping the per-write UTF-8/malloc/free marshal. The
+    // farm's Cable Law loopback fires this on EVERY 'out' event, so the
+    // marshal was the hot-path cost behind the v1.15.0 clicky-audio report.
+    const port = this.aliasIo.get(io.toLowerCase());
+    if (port !== undefined) { this.mod._xc_set_input(port, ch, v); return; }
     if (typeof this.mod._xc_set_input_a !== 'function') return;
     const nb = new TextEncoder().encode(io).length + 1;
     const p = this.mod._malloc(nb);
@@ -590,6 +626,8 @@ export class XenonRun {
     this.mod._xc_set_input_a(p, ch, v);
     this.mod._free(p);
   }
+  /** alias(lower)→shim port, built in open() (see setInput). */
+  private aliasIo = new Map<string, number>();
   // ── ABI 11 (v1.14.1 slices B+D) — every one typeof-guarded: a stale wasm
   // degrades the feature, never spams.
   private putStr(s: string): number {
@@ -1194,6 +1232,16 @@ export class XenonPump {
   private progBeacons = new Set<number>();
   // per-participant READ CURSORS into the beaconNet queues (slice C)
   private radioSeq = new Map<string, number>();
+    // COALESCED BUS FAN-IN (v1.15.2, we: "the sound is slightly clickier in
+  // super mario"): the slice-C loopback ran the alias→malloc→scan→free
+  // marshal on EVERY 'out' event (the Cable Law feeds EVERY pump, the
+  // writer included). Between cycles only the LAST value per channel can
+  // reach the VM, so acceptBusWrite now records into this map (one Map.set)
+  // and flushBus() injects it once per (channel, ch) at the next cycle
+  // boundary — same values, same timing, ~1 wasm call per DEVICE CHANNEL
+  // per cycle instead of per WRITE (the alias→port fast path lives in
+  // XenonRun.aliasIo, mirroring the shim's g_devByAlias).
+  private busPending = new Map<string, { alias: string | number; ch: number; v: number }>();
   vars = new Map<string, XenonVar>();                // '$name'  -> live global variable
   // XENON-LOCALS: the locals of the function owning the PAUSED line (the
   // Locals tab). Set at every pause: worker mode reads the hook's SAB
@@ -1458,7 +1506,23 @@ export class XenonPump {
    *  the same value). Alias-keyed writes resolve in the shim; devices
    *  this computer is not wired to are ignored there. */
   acceptBusWrite(alias: string | number, ch: number, v: number): void {
-    this.run?.setInput(alias, ch, v);
+    // COALESCED v1.15.2 (we: "the sound is slightly clickier in super
+    // mario"): between cycles the VM samples inputs ONCE, so only the LAST
+    // value per channel is observable — record (one Map.set) and let
+    // flushBus() inject it at the next cycle boundary. The slice-C per-
+    // event marshal (alias→TextEncoder→malloc→scan→free on EVERY 'out'
+    // event, the writer's loopback included) was the farm hot-loop cost.
+    this.busPending.set(`${String(alias).toLowerCase()}:${ch}`, { alias, ch, v });
+  }
+  /** Inject the coalesced bus fan-in into the VM, one setInput per
+   *  (channel, ch) — called at every cycle boundary, both pump modes. */
+  private flushBus(): void {
+    if (!this.busPending.size) return;
+    const run = this.run;
+    const pend = [...this.busPending.values()];
+    this.busPending.clear();
+    if (!run) return;
+    for (const w of pend) run.setInput(w.alias, w.ch, w.v);
   }
 
   /** Name the running computer's input channels and give every one a
@@ -2049,6 +2113,7 @@ export class XenonPump {
       this.pollSab();
       if (this.inFlight || this.paused) return;
       this.inFlight = true;
+      this.flushBus();          // coalesced Cable Law fan-in (v1.15.2)
       wr.setKeys([...this.canvases.keys(), ...this.feedKeys]);
       const t0 = typeof performance !== 'undefined' ? performance.now() : t;
       this.stepWorldSim(wr);
@@ -2067,6 +2132,7 @@ export class XenonPump {
     // debugger gate: while PAUSED the pump runs cycles only for a step
     if (this.paused) return;
     const r = run as XenonRun;                  // main-thread mode (wrun null)
+    this.flushBus();          // coalesced Cable Law fan-in (v1.15.2)
     this.stepWorldSim(r);
     this.stepRadio(r);
     const step = r.cycle();
@@ -2212,7 +2278,7 @@ export class XenonPump {
       const seq = this.openSeq;
       const step = (i: number): Promise<void> =>
         i >= n || this.openSeq !== seq ? Promise.resolve()
-          : (this.stepWorldSim(wr), this.stepRadio(wr),
+          : (this.flushBus(), this.stepWorldSim(wr), this.stepRadio(wr),
              wr.cycle().then(d => {
                if (this.wrun === wr && this.openSeq === seq) {
                  try { this.wsOverrides = JSON.parse(d.overrides); } catch { /* keep */ }
@@ -2260,7 +2326,10 @@ export class XenonPump {
 }
 
 /** The shim ABI the app expects (xc_host.cpp xc_abi()). Bump with the shim. */
-export const XC_ABI = 11;
+/** The shim ABI the app expects (xc_host.cpp xc_abi()). Bump with the shim.
+ *  12 = xc_hud_mode + the ONE screen_w/screen_h declaration (the v1.14.1
+ *  duplicate OVERRODE the computer law — Space Invaders layout clobber). */
+export const XC_ABI = 12;
 
 // ---------------------------------------------------------------------------
 // COMPUTERFARM — the craft's co-running pumps + the SHARED io bus

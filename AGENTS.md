@@ -269,7 +269,18 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   side tab (computer IDE + HUD IDE + 📡 dock) renders the registry
   (seeded from components + scanned `beacon()` literals, runtime-merged
   by id; EXACT text-frequency routing; logs survive re-seeds). The shim
-  twin: `xc_host.cpp` ABI 11 ↔ `XC_ABI`; demo `tools/xenoncode/demo/hudradio`.
+  twin: `xc_host.cpp` ABI 12 ↔ `XC_ABI`; demo `tools/xenoncode/demo/hudradio`.
+- THE ONE-BUILT-IN-DECLARATION LAW (v1.15.2, we: "space invaders doesnt show
+  its main graphic when loading … the enemy squadron is almost the size of
+  the screen"): `DeclareDeviceFunction` OVERRIDES by name — every device
+  built-in name gets EXACTLY ONE declaration. The v1.14.1 HUD block's second
+  `screen_w`/`screen_h` (player-viewport globals) silently replaced the
+  Computer's plain-screen law and laid every computer program out on
+  1920×1080. HUD-only builtins gate on `xc_hud_mode` (the HUD pump stamps
+  its own instance; computers never call it). THE BUILT-IN PLAIN TARGET:
+  every computer registers its `deviceScreen` channel-0 at the AUTHORED
+  panel size as `main` BEFORE boot (first-wins vs the shim's 640×480 seed)
+  — the dock cell, the 3-D face and the program's screen_w are the panel.
 - THE COMPUTER FARM (v1.15.0 P9 slice C): MULTIPLE MiniComputers co-run —
   every XenonRun carries its OWN wasm instance (`xenonInstantiate`), the
   `xenonFarm` registry (keyed by comp.ci, `MAX_VM` evicts the oldest)

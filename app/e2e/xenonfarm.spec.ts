@@ -51,4 +51,26 @@ test.describe('Xenon computer farm @ui', () => {
     await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 30_000 });
     await page.keyboard.press('Escape');
   });
+
+  test('a dock-only deep-link load feeds the 3-D faces (FARM-MOUNT LAW) @slow', async ({ page }) => {
+    // e2e-tier because: the law is a REAL scene texture fed by a REAL farm
+    // pump booted by the dock's own effect AFTER the 3-D hook effect
+    // mounted on an EMPTY farm — the v1.15.0 Space-Invaders regression
+    // (the gallery PLAYABLE card path: no Xenon IDE window is ever opened,
+    // the craft's physical screens stayed gray while the dock painted).
+    test.setTimeout(240_000);
+    await page.goto('/?craft=3294880085&dash=trimsdash%230');
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 120_000 });
+    // the dock's zoom window opens by itself (the deep link) — the pump
+    // runs and its canvases blit (that half never broke)
+    await expect(page.getByTestId('screens-cell-trimsdash#0-fullcanvas'))
+      .toBeVisible({ timeout: 120_000 });
+    // THE LAW: the pump created after the effect mounted carries the
+    // cycle hook → the scene's face texture is pushed EVERY cycle
+    await expect
+      .poll(() => page.evaluate(() =>
+        (window as any).__ARCHEAN__.engine.pushCounts.get('trimsdash#0') ?? 0),
+        { message: 'the dock-booted farm pump pushes the 3-D face', timeout: 60_000 })
+      .toBeGreaterThan(20);
+  });
 });

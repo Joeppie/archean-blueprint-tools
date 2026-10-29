@@ -25,7 +25,7 @@ type Msg = {
   comp?: {
     capacity: number; builtin: boolean;
     files: { name: string; code: string }[];
-    screens: { alias: string; channel: number; w: number; h: number }[];
+    screens: { alias: string; channel: number; w: number; h: number; deviceScreen?: boolean }[];
     devices: { id: number; io: number; alias: string; type: string; x: number; y: number; z: number }[];
   };
   inputs?: [number | string, number, number | string][];
@@ -76,7 +76,10 @@ function openRun(m: Msg): void {
     const np = putStr(sc.alias);
     mod._xc_add_screen(np, sc.channel, sc.w, sc.h);
     mod._free(np);
-    if (comp.builtin && sc.channel === 0) {
+    if ((comp.builtin || sc.deviceScreen) && sc.channel === 0) {
+      // v1.15.1: the integrated touchscreen is EVERY computer's plain
+      // screen() target (the XenonRun.open twin — the panel size registered
+      // BEFORE boot wins the first-wins race against the 640×480 default)
       const np2 = putStr('main');
       mod._xc_add_screen(np2, 0, sc.w, sc.h);
       mod._free(np2);

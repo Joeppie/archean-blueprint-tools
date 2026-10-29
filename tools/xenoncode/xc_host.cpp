@@ -158,6 +158,15 @@ static std::vector<std::unique_ptr<BeaconSlot>> g_beacons;
 static std::map<std::string, std::string> g_worldTxt;
 // HUD built-in values: the player viewport + pointer (the app feeds them)
 static double xc_vw = 1920, xc_vh = 1080, xc_mx = 0, xc_my = 0, xc_fov = 1, xc_ml = 0;
+// ABI 12 (v1.15.2, we: "space invaders doesnt show its main graphic"):
+// the ONE interpreter shares one binary, and DeclareDeviceFunction OVERRIDES
+// by name — the v1.14.1 HUD block's second screen_w/screen_h declaration
+// clobbered the Computer's plain-screen law, so every computer program laid
+// its graphics out on the 1920×1080 player viewport (the Invaders' whole
+// render scaled ~3x, title and scores off-canvas). ONE declaration now
+// serves both: the HUD runtime (g_hudMode, stamped by xc_hud_mode) reads
+// the viewport globals, a Computer keeps the main-screen size.
+static bool g_hudMode = false;
 static map<string, double> g_wsProgram;    // name -> active program override
 static map<string, double> g_wsEffective;  // name -> last effective value
 static map<int, int> g_devByIo;        // computer io port → table index
@@ -531,8 +540,13 @@ static void archeanInit() {
 	XenonCode::DeclareDeviceFunction("char_h:number", [ms](Computer*, const vector<Var>&) -> Var {
 		return (double)ms()->GetCharHeight(); });
 	XenonCode::DeclareDeviceFunction("screen_w:number", [ms](Computer*, const vector<Var>&) -> Var {
+		// ABI 12: the HUD runtime's "screen" is the PLAYER VIEWPORT the app
+		// feeds via xc_set_view; a Computer's is its plain main screen
+		// (computer.md). ONE declaration serves both (see g_hudMode).
+		if (g_hudMode) return xc_vw;
 		return (double)ms()->GetWidth(); });
 	XenonCode::DeclareDeviceFunction("screen_h:number", [ms](Computer*, const vector<Var>&) -> Var {
+		if (g_hudMode) return xc_vh;
 		return (double)ms()->GetHeight(); });
 	// virtualscreen(w, h) — code-created off-screen buffer (computer.md
 	// "Virtual Screen Function", cap 10000x10000 in game — WE MATCH THE GAME
@@ -606,8 +620,12 @@ static void archeanInit() {
 	XenonCode::DeclareDeviceFunction("set_resolution_scale", [](Computer*, const vector<Var>&) -> Var { return {}; });
 	// HUD built-in values (FORMAT §Player-installed HUDs): the player
 	// viewport + pointer; the app feeds them every cycle (xc_set_view).
-	XenonCode::DeclareDeviceFunction("screen_w:number", [](Computer*, const vector<Var>&) -> Var { return xc_vw; });
-	XenonCode::DeclareDeviceFunction("screen_h:number", [](Computer*, const vector<Var>&) -> Var { return xc_vh; });
+	// ABI 12: screen_w/screen_h are NOT declared here — the ONE canonical
+	// declaration (the Computer built-ins above) answers xc_vw/xc_vh when
+	// g_hudMode is stamped; the v1.14.1 duplicate declaration OVERRODE the
+	// Computer's law (DeclareDeviceFunction overrides by name), scaling
+	// every computer program's layout by the 1920×1080 viewport (the Space
+	// Invaders main-graphic loss, v1.15.2).
 	XenonCode::DeclareDeviceFunction("mouse_x:number", [](Computer*, const vector<Var>&) -> Var { return xc_mx; });
 	XenonCode::DeclareDeviceFunction("mouse_y:number", [](Computer*, const vector<Var>&) -> Var { return xc_my; });
 	XenonCode::DeclareDeviceFunction("mouse_look:number", [](Computer*, const vector<Var>&) -> Var { return xc_ml; });
@@ -1504,6 +1522,10 @@ EMSCRIPTEN_KEEPALIVE void xc_set_view(double w, double h, double mx, double my,
                                       double fov, double look) {
 	xc_vw = w; xc_vh = h; xc_mx = mx; xc_my = my; xc_fov = fov; xc_ml = look;
 }
+// ABI 12 (v1.15.2): stamp the RUNTIME KIND before xc_boot — the HUD pump
+// (program 'hud') runs in its own module instance and calls this; computer
+// pumps never do, so they keep the plain-screen screen_w/screen_h law.
+EMSCRIPTEN_KEEPALIVE void xc_hud_mode(int on) { g_hudMode = on != 0; }
 EMSCRIPTEN_KEEPALIVE double xc_screen_anchor(int idx) {
 	return (idx >= 0 && idx < (int)g_screens.size()) ? g_screens[idx].anchor : 16.0;
 }
@@ -1619,7 +1641,7 @@ EMSCRIPTEN_KEEPALIVE const char* xc_write_var(int fileIdx, int line, const char*
 
 // ABI stamp: the app checks this at boot (XC_ABI in engine/xenoncode.ts) and
 // warns ONCE on drift — new device/shim exports must bump it.
-EMSCRIPTEN_KEEPALIVE int xc_abi() { return 11; }  // 11: panel()/beacon() object + beaconpair/beacontx events + get()/xc_set_world + xc_beacon_put + xc_set_input_t + xc_set_view + xc_screen_anchor (HUD runtime + beacon radio); 10: depth stream + hookLive gate + exact-line pause seam (XENON-DEBUG v3); 9: xc_write_var + the hook's cmd-6 write handoff (editable debug values); 8: xc_locals_json + the hook's SAB locals handoff (the Locals panel); 7: the stop-hook is LIVE (library_xc.js + Module.XC_SAB worker stepping); 6: xc_cycle_pairs + hook seam; 5: xc_set_cycle_ms
+EMSCRIPTEN_KEEPALIVE int xc_abi() { return 12; }  // 12: xc_hud_mode + ONE screen_w/screen_h declaration serving computer AND HUD (the v1.14.1 duplicate OVERRODE the computer law — DeclareDeviceFunction replaces by name — scaling every computer layout by the 1920x1080 viewport: the Space Invaders main-graphic loss); 11: panel()/beacon() object + beaconpair/beacontx events + get()/xc_set_world + xc_beacon_put + xc_set_input_t + xc_set_view + xc_screen_anchor (HUD runtime + beacon radio); 10: depth stream + hookLive gate + exact-line pause seam (XENON-DEBUG v3); 9: xc_write_var + the hook's cmd-6 write handoff (editable debug values); 8: xc_locals_json + the hook's SAB locals handoff (the Locals panel); 7: the stop-hook is LIVE (library_xc.js + Module.XC_SAB worker stepping); 6: xc_cycle_pairs + hook seam; 5: xc_set_cycle_ms
 EMSCRIPTEN_KEEPALIVE void xc_set_cycle_ms(int ms) {
 	// the app's pump cadence (CYCLE_MS): delta_time / system_frequency
 	// follow it, so dt-driven programs (Chip's Mario, physics on

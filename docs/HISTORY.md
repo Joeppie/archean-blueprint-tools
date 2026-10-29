@@ -3170,6 +3170,68 @@ topic + FORMAT).
    `toHaveCount(0)` on the isolated origin and keep the chip's
    'worker · true line-stepping' assertions as the isolation proof.
 
+- **v1.15.2 — THE ONE screen_w LAW, the BUILT-IN PLAIN TARGET, the FARM-MOUNT
+  LAW and the COALESCED fan-in (2026-10-29).** We: "space invaders doesnt show
+  its main graphic when loading; something is different in how the xenoncode
+  runs/is run.. but this didnt affect super mario… the sound is slightly
+  clickier in super mario… l suspect something to do with inter-computer
+  capacities" (+ "the enemy squadron is almost the size of the screen with all
+  of them together… in my emulator, the screen is massively higher than it is
+  in game" + "the size had been wrong from the inception in our editor").
+  THREE causes, one bisect kit (`app/tools/farmfeedprobe|drawtimeline|
+  jitterprobe|envelopeprobe.mjs`):
+  1. MAIN GRAPHIC (the farm-era regression): v1.14.1's HUD builtins block
+     declared `screen_w`/`screen_h` a SECOND time returning the player-viewport
+     globals (`xc_vw` 1920×1080, fed only by `xc_set_view` = only by hudpump).
+     `DeclareDeviceFunction` OVERRIDES by name (XenonCode.hpp
+     `deviceFunctionsById[existingRef.id] = func`), so EVERY computer program
+     laid out on 1920×1080: the Invaders' squadron ~3x (fills 640, clipped),
+     title+credits off-canvas, canvas BLACK by cycle 1300. Proof: same app,
+     baseline v1.13.33 wasm → 2918 lit px at cycle 200; HEAD wasm → 576;
+     drawtimeline curve 2918→2814 stable. Mario draws to named/virtual screens
+     at fixed coords → untouched. Fix: ABI 12 — ONE declaration answers
+     `xc_vw/xc_vh` iff `xc_hud_mode` stamped (the HUD pump's own module
+     instance; farm ONE-VM-PER-INSTANCE makes per-instance stamps safe);
+     `_xc_hud_mode` call in `XenonRun.open` (`comp.hudRuntime` — hudpump
+     STAMPS it; the first cut keyed on `comp.program === 'hud'`, which is the
+     COMPONENT TYPE: the Badger's HudController component booted as a
+     computer then got HUD mode, and the shim's two-arg HUD `get(key,def)`
+     overrode the computer's one-arg worldsim `get` — "not enough arguments:
+     avatar_sensor_speed" at pilot-guide.xc:337, the v1.15.2 Badger-boot
+     self-catch; explicit `hudRuntime?: boolean` on XenonComputer now).
+  2. THE SIZE (from inception, v1.13.8): the built-in panel registration fired
+     only for `comp.builtin` programs, so a workshop computer's plain
+     `screen()` target was the shim boot's 640×480 seed, not the authored
+     128×72 RCS500 panel (`xc_addScreen` first-wins: registering BEFORE boot
+     wins). Now XenonRun.open AND xenonworker register every `deviceScreen`
+     channel-0 as `main` at its panel size → the dock cell, the 3-D face
+     texture and the program's screen_w are the panel; the title renders
+     pixel-faithful to the in-game screenshot (squadron spans the panel).
+  3. CLICKY AUDIO (farm-era): the slice-C Cable-Law loopback ran
+     alias→TextEncoder→malloc→scan→free on EVERY 'out' event inside applyCycle
+     (Mario = the heaviest per-cycle io writer; main-thread mode = the plain-
+     http Tailscale browse mode; worker mode pushes a fat inputs array).
+     The fan-out law stays (farm.test stubs intact); pump-side injection now
+     COALESCES per (channel, ch) at the cycle boundary (`acceptBusWrite` →
+     `busPending`, `flushBus()` in cycleOnce/runCycles both modes) and
+     `XenonRun.setInput` takes a numeric `_xc_set_input` fast path via an
+     `aliasIo` mirror of the shim's `g_devByAlias` (lowercase, LAST alias wins,
+     negative io → 1000+id — shim-verified). Pump cadence measured healthy
+     headless (26.3 Hz median, 0 starved windows) — the fix removes the per-
+     event allocations feeding real-browser GC jitter into the v1.13.14
+     write-time beep scheduling.
+  BONUS farm-era bug found en route — THE FARM-MOUNT LAW: v1.15.0's 3-D cycle-
+  hook + BuzzerButton effects mapped `xenonFarm.pumps` AT MOUNT with
+  `[xenonCis]`/`[]` deps; the dock-only deep-link load boots its pump from the
+  screensOpen effect AFTER mount, so the hook never reached it — the craft's
+  PHYSICAL screens stayed unlit gray while dock canvases painted (the farm
+  e2e opens IDE windows, which re-runs the effect — that's why the suite was
+  green). Deps ride the farm LINEUP version; new Viewport `pushCounts` seam +
+  xenonfarm.spec 'a dock-only deep-link load feeds the 3-D faces' pin it.
+  Known red (PRE-EXISTING, fails identically on main): xenonhud 'the computer
+  IDE carries the Beacons tab' [pixel7] — the phone rail hides
+  `xenon-side-beacons`; chromium green.
+
 ## 2. v1.11 session — KNOWN ISSUES & UNPINNED TODOS (2026-10-25/26 session block)
 
 KNOWN ISSUES (accepted behaviours, costs, sharp edges):

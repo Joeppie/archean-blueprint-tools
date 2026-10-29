@@ -3743,9 +3743,17 @@ void main() {
   }
   /** Blit one surface's framebuffer onto its dashboard face (25 Hz, from the
    *  XenonPump). Row-flips into UV space; size change rebuilds the texture. */
+  /** PIN SEAM (v1.15.1, THE FARM-MOUNT LAW): pushScreen calls per feed key.
+   *  The deep-link pin polls it to prove the 3-D cycle hook reached a pump
+   *  the dock's OWN effect booted (the Space-Invaders gray-face regression:
+   *  the farm was empty when the hook effect mounted, and a pump created
+   *  after it never got the hook, so the craft's physical screens stayed
+   *  unlit gray while the dock's canvases painted fine). */
+  pushCounts = new Map<string, number>();
   pushScreen(key: string, w: number, h: number, pixels: Uint8ClampedArray): void {
     const e = this.dashScreens.get(key) ?? this.deviceScreens.get(key);
     if (!e) return;
+    this.pushCounts.set(key, (this.pushCounts.get(key) ?? 0) + 1);
     if (e.w !== w || e.h !== h) {
       e.tex.dispose();
       const data = new Uint8Array(w * h * 4);

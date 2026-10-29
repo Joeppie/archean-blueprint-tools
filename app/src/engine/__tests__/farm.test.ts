@@ -4,7 +4,7 @@
 // loopback included. The bus records the channel and fans the value into
 // EVERY attached pump (acceptBusWrite → the VM's input table).
 import { describe, expect, test } from 'vitest';
-import { IoBus, type XenonPump } from '../xenoncode';
+import { IoBus, XenonPump } from '../xenoncode';
 
 interface Rec { writes: [string, number, number][] }
 const stub = (recs: Rec) =>
@@ -47,5 +47,51 @@ describe('IoBus — the cable law', () => {
     const bus = new IoBus();
     bus.write('Router', 3, 7, stub({ writes: [] }));
     expect(bus.snapshot()['router:3']).toBe(7);
+  });
+});
+
+// v1.15.2 (we: "the sound is slightly clickier in super mario"): the pump-
+// side fan-in is COALESCED — the Cable Law's per-event delivery reaches the
+// VM as one setInput per (channel, ch) at the next cycle boundary (between
+// cycles the VM samples inputs once, so only the last value per channel is
+// observable; the per-event alias marshal was the farm hot-loop cost).
+describe('XenonPump — the coalesced fan-in (v1.15.1)', () => {
+  const pumpWithSpy = () => {
+    const p = new XenonPump();
+    const writes: [string | number, number, number][] = [];
+    (p as unknown as { run: unknown }).run = {
+      setInput: (io: string | number, ch: number, v: number) => writes.push([io, ch, v]),
+    };
+    return { p, writes };
+  };
+  const flush = (p: XenonPump) =>
+    (p as unknown as { flushBus: () => void }).flushBus();
+
+  test('last value per channel wins; one VM write per (channel, ch)', () => {
+    const { p, writes } = pumpWithSpy();
+    p.acceptBusWrite('Lamp', 0, 1);
+    p.acceptBusWrite('lamp', 0, 2);
+    p.acceptBusWrite('lamp', 1, 500);
+    p.acceptBusWrite(7, 0, 3);
+    flush(p);
+    expect(writes).toEqual([['lamp', 0, 2], ['lamp', 1, 500], [7, 0, 3]]);
+  });
+
+  test('flush drains the pending map — the next cycle starts clean', () => {
+    const { p, writes } = pumpWithSpy();
+    p.acceptBusWrite('lamp', 0, 1);
+    flush(p);
+    flush(p);
+    expect(writes.length).toBe(1);
+  });
+
+  test('IoBus fan-out per write is UNCHANGED (coalescing lives pump-side)', () => {
+    const bus = new IoBus();
+    const recs: Rec = { writes: [] };
+    const a = stub(recs);
+    bus.attach(a);
+    bus.write('lamp', 0, 1, a);
+    bus.write('lamp', 0, 2, a);
+    expect(recs.writes.length).toBe(2);   // per-event law intact
   });
 });

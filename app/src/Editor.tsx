@@ -322,7 +322,14 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     }));
     return () => removers.forEach(r => r());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [xenonCis]);
+  }, [xenonCis, farmV]);
+  // THE FARM-MOUNT LAW (v1.15.2 fix, we: "space invaders doesnt show its
+  // main graphic when loading"): the dock-only deep-link load boots its
+  // pump from the screensOpen effect AFTER this effect mounted on an EMPTY
+  // farm — with [xenonCis] alone the hook NEVER reached that pump and the
+  // craft's physical screens stayed gray. farmV (the farm LINEUP version)
+  // re-runs this effect on every attach/detach, so every pump gets the
+  // 3-D feed hook the moment it exists.
   useEffect(() => {
     let dead = false;
     import('./components/ToolsDialog').then(m => {
@@ -2081,12 +2088,17 @@ function PickChip({ hit, bp }: { hit: PickHit; bp: Blueprint }) {
 // static. data-playing mirrors the live state for the pins.
 function BuzzerButton() {
   const [, setTick] = useState(0);
-  // FARM (slice C): watch EVERY pump (any co-running computer may buzz)
+  // FARM (slice C): watch EVERY pump (any co-running computer may buzz).
+  // FARM-MOUNT LAW (v1.15.2): the lineup is EMPTY at gallery boot — the
+  // farm version in the deps re-attaches the subs to pumps booted later,
+  // exactly like the 3-D cycle-hook effect.
+  const [farmV, setFarmV] = useState(0);
+  useEffect(() => xenonFarm.subscribe(() => setFarmV(v => v + 1)), []);
   useEffect(() => {
     const unsubs = xenonFarm.pumps.map(p => p.subscribe(() => setTick(t => t + 1)));
     return () => unsubs.forEach(u => u());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [farmV]);
   if (!(xenonFarm.pumps.some(p => (p.comp?.devices ?? []).some(d => d.type === 'Buzzer')))) return null;
   const playing = buzzerAudio.soundOn && buzzerAudio.level > 0.001;
   return (
