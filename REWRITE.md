@@ -553,6 +553,59 @@ dev/e2e (seconds, no scene), and keeps the core editor's bundle free of
 the 76 kB glue + 1.0 MB wasm assets (`?url` imports today sit in the
 Editor chunk graph).
 
+## P9 — Multi-computer sim + HUD/beacon radio (planned 2026-10-29; unlocks ChipOS testing)
+
+We (2026-10-29): "we need to have the capacity to have multiple systems
+communicating with each other, vis-a-vis multiple computers running at the
+same time, and then they should be able to communicate over their
+inputs/outputs, this will be vital to test Chip's ChipOS in the future,
+which hinges on inter-computer operability" + the HUD/beacon research
+(FORMAT §HUD & the Beacon radio).
+
+**Today's limits:** `xenonPump` is a module SINGLETON (`xenoncode.ts:2086`) —
+one computer boots; the IDE opens it per `comp.ci`. The io bus is pump-local
+(device shim + worldsim overrides). HudController data is untouched by the
+sim; the Beacon component is not an io DEVICE at all.
+
+**Shape (lands inside the P8 module, per the four-seam contract):**
+1. `ComputerFarm` — a registry keyed by `comp.ci` of `XenonPump`s
+   (one per MiniComputer), booted from a per-craft toggle (▶ in a new
+   COMPUTERS side tab lists every MiniComputer: boot/kill/boot-all).
+   Each pump keeps its own IDE dialog (already per-`comp.ci` DOM).
+   Budget guard: the farm shares the 25 Hz CADENCE — one rAF driver
+   advances all pumps per tick; N computers ⇒ N× VM cost (cap + warn).
+2. **SHARED io bus per craft** — `IoBus{portWriters: Map<alias, per
+   pump>, channels}`: `output_number/text(port, ch, v)` from pump A
+   lands on the bus; pump B's `input_number(port, ch)` READS the
+   device's bus state (device state is per-DEVICE, not per-computer —
+   the game law: ports index the craft's device table; two computers
+   wired to the same Beacon see the same channels); `input.N` entry
+   points fire on every pump whose device table includes the writer.
+   The device shim moves from pump-scoped to bus-scoped (XenonRun +
+   xc_host.cpp twin — THE STEP LAW discipline applies: two places).
+3. **Beacon as a device** — Beacon components join the device table
+   (alias, channels: ch0 text = received payload / transmit payload
+   path per FORMAT §HUD). In-sim radio = a channel-name registry in
+   the bus: writing a beacon's transmitData ENQUEUES the text on its
+   `transmitFrequency`; every beacon whose `receiveFrequency` matches
+   gets the payload for its next read (loopback included — same-craft
+   beacons hear each other, as in the RCS500↔HUD demo).
+4. **HUD workspace (later slice)** — HudController's `xc_files` get the
+   IDE editor; the HUD program runs against a DOM canvas panel
+   implementing the .so API list (panel/draw_*/text*/screen_copy/
+   set_resolution_scale + the `beacon()` pair against the bus). The
+   HUD canvas docks like a Screens surface; `click` entry points fire
+   from real pointer events (the ScreensCell rig is the base).
+   ChipOS playtest = boot a computer + a HUD, watch both directions.
+5. Pins: farm boot/kill (node tier via __XCDBG__-style seam), bus
+   cross-talk vitest (two XenonRuns, one IoBus — the pure shim
+   interleaves), beacon loopback node pin (RCS500 protocol as the
+   fixture: write the dot-kv text, hear it on the paired frequency),
+   e2e: two IDE windows live at once + the HUD canvas paints pixels.
+
+Order: (1)+(2) FIRST (ChipOS-critical, no new UI surface), (3) with the
+device-table change, (4) rides P8's shell-descriptor seam.
+
 ## Non-negotiables carried over
 - AGENTS § Blueprint folder (paths via tools/config.py — the vite plugin
   reads it; no hardcoded paths in `app/` either).

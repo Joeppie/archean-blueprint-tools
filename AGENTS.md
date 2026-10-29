@@ -255,10 +255,13 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   the code owns the width (`.cm-scroller` `touch-action: pan-x pan-y`);
   a changed variable row remounts with the `.var-flash` wash (keyed on
   the last value per name).
-- NAV + BREAKPOINT-FOLLOW (v1.13.27): every jump (library/def/goto/tab/
-  bp-hit) records a navpoint; ◀ ▶ + Alt+←/→ (CAPTURE — CM binds
-  Alt+arrows) walk the history. A pump pause at a breakpoint jumps the
-  editor to the hit (data-paused-jump = `file:line` is the observable).
+- NAV + DEBUGGER-FOLLOW (v1.13.27; STEP KEYS v1.13.33): every jump
+  (library/def/goto/tab) records a navpoint; ◀ ▶ + Alt+←/→ (CAPTURE — CM
+  binds Alt+arrows) walk the history. EVERY debugger stop — breakpoint hit
+  AND F10/F11 step — moves the editor to the stop site (we: "the
+  scroll/focus doesn't change position when I used f11 … not acceptable");
+  `data-editor-jump` is the follow observable (asserting only
+  `data-paused-jump` proves the pump, not the follow).
 - EDITOR KEY LAWS (v1.13.26): defaultKeymap + `indentWithTab` are REQUIRED
   (CM keeps Tab = focus-move by default; without them Tab leaves the
   editor via the browser); Enter auto-indents one unit — a TAB, the game
@@ -760,6 +763,13 @@ behind a small link at the END of the gallery. Pages serves the GENERATED
   config.py), byte-identical saves, no releases without the user asking.
 
 ## Backlog (live items)
+- **P9 — Multi-computer farm + HUD/beacon radio** (REWRITE.md § P9,
+  decoded model in FORMAT §HUD & the Beacon radio): `ComputerFarm` of
+  pumps + a SHARED per-craft io bus (inter-computer
+  input/output operability — ChipOS-critical), Beacon-as-io-device
+  with frequency-channel radio, then the HUD workspace (HudController
+  `.xc` on a canvas + `beacon()` pair against the bus — RCS500 demo
+  is the fixture). Y-bump candidate — propose, get assent.
 - **P8 — Xenon workspace as a STANDALONE, low-coupling module**: shape,
   coupling inventory and the four seams (write-path, screen-feed, key-bus,
   shell-descriptors) in REWRITE.md § P8; P3 (project tree) + P4 (upstream

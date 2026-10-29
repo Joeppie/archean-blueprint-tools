@@ -132,6 +132,11 @@ export default function XenonDialog(p: {
   const [lastLine, setLastLine] = useState(0);          // 1-based caret (F9 target)
   const editorRef = useRef<CodeEditorHandle>(null);
   const [pendingJump, setPendingJump] = useState<{ line: number; focus: boolean } | null>(null);
+  // last FOLLOW target handed to the editor (data-editor-jump on the code
+  // pane — the pins assert it lands on every stop: v1.13.33 the step keys
+  // must follow the stop site, we: "the scroll/focus doesn't change
+  // position when I used f11, necessitating me to find it manually")
+  const [jumped, setJumped] = useState('');
   // the game's OWN channel meanings (viewer/models/channels.json): an io
   // resolves to its cabled/aliased component TYPE, the channel to its
   // function — "io 4 · NavInstrument · ch 6 Heading", not a bare "ch 6"
@@ -377,6 +382,11 @@ export default function XenonDialog(p: {
     recNav();                       // the place we LEAVE becomes a navpoint
     setTab(idx);
     setPendingJump({ line: line1, focus });
+    // observable of the FOLLOW law: what the editor was last told to show
+    // (data-editor-jump rides the code pane; the pins assert it equals the
+    // stop site — v1.13.33: the step keys must follow, we: "the
+    // scroll/focus doesn't change position when I used f11")
+    setJumped(`${fileName}:${line1}`);
   };
   useEffect(() => {
     if (!pendingJump) return;
@@ -875,7 +885,8 @@ export default function XenonDialog(p: {
             debugger keys), Computer owns the machine (re-boot), Help the
             keys. The flat 'Options ▸ run' labels are gone. */}
         <MenuBar
-          right={`cycles ${pump.cycles} @ ${CYCLE_HZ} Hz · CTRL+S save+reboot · screens clickable · WASD↑↓ space fly · QE roll · IK pitch · JL yaw · R thrust · 1-9/0 aux`}
+          right={`cycles ${pump.cycles} @ ${CYCLE_HZ} Hz · CTRL+S save+reboot`}
+          rightNarrow={`${pump.cycles} cyc @ ${CYCLE_HZ}Hz`}
           menus={[
             { label: 'File', testid: 'xmenu-file', entries: [
               { label: 'New file…', testid: 'file-new', on: () => { setNewProg(false); setNewOpen(true); } },
@@ -1007,6 +1018,7 @@ export default function XenonDialog(p: {
           {/* code / nodes */}
           <div data-testid={`xenon-code-${tab}`} data-mode={status}
             data-paused-jump={pump.paused && pump.pausedFile ? `${pump.pausedFile}:${pump.pausedLine}` : ''}
+            data-editor-jump={jumped}
             className="min-h-0 flex-1 overflow-hidden rounded border border-[#232c3d] bg-[#0b0f18] text-[12px] leading-[1.45]">
             {onCode && file && (
               <CodeEditor ref={editorRef}
@@ -1213,6 +1225,14 @@ export default function XenonDialog(p: {
               )}
             </>)}
             {side === 'screens' && (<>
+              {/* the pilot-key + screen-control explanation LIVES HERE
+                  (v1.13.33, we: "the explanation of screen controls in
+                  title of computer should live under the screens
+                  explanation, not there") */}
+              <div data-testid="xenon-screens-note"
+                className="shrink-0 text-[10px] leading-snug text-[#5d6a7d]">
+                screens clickable · WASD↑↓ space fly · QE roll · IK pitch · JL yaw · R thrust · 1-9/0 aux
+              </div>
               {booting && <span className="text-[11px] text-[#5d6a7d]">booting…</span>}
               {!booting && surfList.length === 0 && (
                 <span className="text-[11px] text-[#5d6a7d]">no surfaces match</span>
@@ -1647,6 +1667,9 @@ function NodeGraph(p: {
 
 function MenuBar(p: {
   right: string;
+  /** phone variant (v1.13.33, we: "text about cycles is too big for phone
+   *  display; make it much smaller there") — tiny text, no md:inline gate */
+  rightNarrow?: string;
   menus: {
     label: string; testid: string;
     entries: { label: string; testid: string; hint?: string; on: () => void; disabled?: boolean }[];
@@ -1690,6 +1713,10 @@ function MenuBar(p: {
         </div>
       ))}
       <span className="ml-auto hidden text-[10px] text-[#5d6a7d] md:inline">{p.right}</span>
+      {p.rightNarrow && (
+        <span data-testid="menubar-right-narrow"
+          className="ml-auto shrink-0 text-[8px] leading-none text-[#5d6a7d] md:hidden">{p.rightNarrow}</span>
+      )}
     </div>
   );
 }

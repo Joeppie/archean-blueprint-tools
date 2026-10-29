@@ -1041,6 +1041,51 @@ x∈[5,6], y∈[8,13], z∈[6..8 cells] + 3 m (frame_z=1), i.e. centered ≈ (�
 rotating `orientation` pitches the rider. Mirrored occupancy: `blocks[12]` (type 255,
 identical frame/pos/size).
 
+## HUD & the Beacon radio — craft ↔ HUD ↔ craft channels (transcribed 2026-10-29)
+
+Sources: `strings` over `ARCHEAN_hud.GAME_Mod.so` / `ARCHEAN_beacon.SERVER_Mod.so`
+(API signature strings), the workshop craft **3518436870 "RCS Infinity"** (the
+user's "RCS500" — its beacon frequencies are literally `RCS-500-HUD-SEND` /
+`RCS-500-HUD-RECEIVE`), the client save **3326372833** (Badger fleet tutorial HUD,
+999 lines, ships as fixtures 9000001015/9000003044), game doc
+`modules/ARCHEAN_computer/components/Computer/documentation.xc`.
+
+- **Beacon component** (`ARCHEAN_beacon/Beacon`, mass 2, adapters `data`+`lowvoltage`)
+  carries `data: {transmitFrequency, receiveFrequency, transmitData}` — all TEXT.
+  Frequencies are channel-name strings (any text; `RCS-500-HUD-SEND` style). Two
+  components on matching frequencies exchange `transmitData` payloads (text).
+- **Craft-side access is plain io**: the beacon is a DEVICE on an io port —
+  `input_text(port, 0)` READS the payload RECEIVED on receiveFrequency,
+  `output_text(port, 0, $t)` writes what TRANSMITS on transmitFrequency
+  (RCS500 `main.xc`: `$in = input_text(8,0)` / `output_text(8,0,$in)` — the
+  structured text object round-trips; `$in.use = …` mutates fields in place).
+- **HUD side (PLAYER CLIENT)**: `HudController` (`ARCHEAN_hud`, mass 1, adapter
+  `data`) carries `data: {version:1, xc_files:[{name, plain_code}]}` — the HUD's
+  own XenonCode program, run CLIENT-SIDE when the pilot is aboard. Its builtins
+  (from the .so, arg-typed): `beacon($transmitFreq:text, $receiveFreq:text):beacon`
+  (init-phase/global-scope only) with `.data` (received text) and
+  `.transmit($data:text)`; drawing: `panel($anchor,$w,$h):panel`,
+  `virtualscreen($w,$h):panel`, `screen_copy($src,$dst,…,$color,$rotation,$bilinear)`,
+  `draw_line/rect/triangle/circle`, `text*`, `button*`, `color(r,g,b)/color_a/g/b/r`,
+  `set_position`, `set_resolution_scale(n)`, `pixel`, `display`. The craft's
+  `beacon()` twin exists in the beacon module's .so too (inter-craft radio from
+  programs — NOT confirmed callable from a MiniComputer; the computer-side
+  builtin list lacks it: craft↔craft goes through Beacon components on io ports).
+- **The payload "structured object" format** is the game's dot-kv TEXT:
+  `.use{-40.076}.fl{0}.bat{0.999984}…` — XenonCode kv objects serialize/parse
+  1:1 (the app's `parseKv` is the same shape). The Badger FLEET protocol nests
+  them: `.schema{badger.secure}.version{2}.kind{join}.from{…}.to{FLEET}.nonce{…}
+  .public{.schema{badger.fleet.join}…snapshot{…frequency{badger123}…}}.data{hex}
+  .tag{hex}` — data/tag = encrypted+authenticated (key derived from the
+  `frequency{badger123}` passphrase string; NOT reverse-engineered — treat as
+  opaque). HUD is INFORMATIONAL client-side only ("never tutorial actions" per
+  the Badger header: the computer relays pilot subscription only).
+- Status: API list = binary strings (authoritative for names/arity), semantics =
+  the two craft programs (RCS500 = minimal tx/rx loop; Badger = full drawing
+  HUD + 3-resolution panel sets + camera-projection calibration). In-game RUN
+  behavior (rates, payload size caps, range) NOT measured — the app today models
+  neither HudController programs nor beacon radio in the sim.
+
 ## Empirical findings (from the 12° lean experiment, Oct 4)
 
 - Editing `PilotSeat.position` (and its occupancy + type-255 mirror) **persisted**

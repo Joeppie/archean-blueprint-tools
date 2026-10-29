@@ -2982,6 +2982,41 @@ topic + FORMAT).
   repo testdata and TIME OUT at the 5 s default (four files, cold cache)
   — copy the machine-local config in and extend --testTimeout before
   believing reds there.
+- **v1.13.33 STEP-FOLLOW + HUD/BEACON RESEARCH (we, 2026-10-29, batch:
+  "the scroll/focus doesn't change position when I used f11, necessitating
+  me to find it manually. That is not acceptable … we need the capacity to
+  have multiple systems communicating … vital to test Chip's ChipOS …
+  look into coding HUDS for the game … beacons … I have a 'homo' HUD
+  inside archean and the RCS500 craft has craft-HUD interoperation … the
+  explanation of screen controls in title of computer should live under
+  the screens explanation … text about cycles is too big for phone
+  display"):** (1) Debugger-follow pinned for the STEP keys: the
+  `data-editor-jump` observable records the target jumpTo handed the
+  editor; the F11 pin asserts it equals the stop site after every step
+  (the v1.13.27 pin only asserted `data-paused-jump` — the pump's truth,
+  not the follow). Worker-origin leg green; run on the LAN origin too
+  (the user's main-thread mode — the pw.lan runner pattern: a config
+  with baseURL on the Tailscale IP). (2) Screen-control/pilot-key text
+  moved out of the IDE menu-bar status into the SCREENS tab head
+  (`xenon-screens-note`); the menu bar keeps `cycles N @ 25 Hz · CTRL+S
+  save+reboot`; phones get a tiny `N cyc @ 25Hz` chip (`rightNarrow`,
+  text-[8px] — we: "too big for phone display"). (3) RESEARCH, fully
+  transcribed the same commit: FORMAT §HUD & the Beacon radio — Beacon
+  component {transmitFrequency, receiveFrequency, transmitData} text
+  channels, craft-side access is plain io (`input_text(port,0)` /
+  `output_text(port,0)` — the RCS-500 beacon is io port 8), the HUD's
+  client-side `beacon($txFreq,$rxFreq)` object (`.data`,
+  `.transmit(text)`), the HudController `data.xc_files` HUD programs +
+  the drawing builtin set (panel/virtualscreen/screen_copy/draw_*/
+  button*/text*/set_resolution_scale — `strings` off
+  ARCHEAN_hud.GAME_Mod.so), the dot-kv structured-payload text, and the
+  Badger fleet `.schema{…}.nonce{…}.data{hex}.tag{hex}` protocol
+  (encrypted — opaque). The user's "RCS500" = workshop 3518436870
+  "RCS Infinity" (frequencies `RCS-500-HUD-SEND/RECEIVE`); the "homo"
+  HUD craft was NOT found in the corpus (asked). (4) PLAN: REWRITE § P9
+  — ComputerFarm (N pumps per craft) + SHARED per-craft io bus +
+  Beacon-as-io-device with a frequency-channel registry + HUD
+  workspace; ChipOS-critical first (Y-bump candidate, needs assent).
 
 ## 2. v1.11 session — KNOWN ISSUES & UNPINNED TODOS (2026-10-25/26 session block)
 

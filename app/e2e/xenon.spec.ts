@@ -678,14 +678,38 @@ test.describe('Xenon IDE @ui', () => {
     await page.locator('[data-testid^="xenon-comp-"]').first().click();
     await expect(page.getByTestId('xenon-dialog')).toBeVisible();
 
-    // top level: consecutive executed lines
+    // top level: consecutive executed lines. The exact-line law is the
+    // WORKER stepper; on a LAN origin (main-thread pump, no SAB) every
+    // step advances a FULL cycle — the mode chip's announced degradation.
+    // The chip flips LIVE (worker boot races the booting status), so the
+    // gate is read LAZILY. The FOLLOW law (v1.13.33, we: "the
+    // scroll/focus doesn't change position when I used f11 … not
+    // acceptable") must hold on BOTH.
+    const isWorker = () => page.getByTestId('xenon-mode')
+      .innerText().then(t => t.includes('worker · true line-stepping'));
+    const lineExp = async (n: number) => (await isWorker())
+      ? new RegExp(`main\\.xc:${n}$`) : /main\.xc:\d+$/;
+    // the FOLLOW observable: data-editor-jump (jumpTo's target) must equal
+    // the stop site — asserting data-paused-jump alone proves the pump,
+    // not the editor follow.
+    const followTo = async (pane: import('@playwright/test').Locator) => {
+      const site = await pane.getAttribute('data-paused-jump');
+      expect(site, 'a stop site exists').toBeTruthy();
+      await expect
+        .poll(() => pane.getAttribute('data-editor-jump'),
+          { message: `the editor follows the stop site ${site}`, timeout: 5_000 })
+        .toBe(site);
+    };
     await page.locator('.xc-break-gutter .cm-gutterElement').nth(16).click();
     const pane0 = page.getByTestId('xenon-code-0');
     await expect(pane0).toHaveAttribute('data-paused-jump', /main\.xc:17$/, { timeout: 20_000 });
+    await followTo(pane0);
     await page.keyboard.press('F10');
-    await expect(pane0).toHaveAttribute('data-paused-jump', /main\.xc:18$/, { timeout: 10_000 });
+    await expect(pane0).toHaveAttribute('data-paused-jump', await lineExp(18), { timeout: 10_000 });
+    await followTo(pane0);
     await page.keyboard.press('F10');
-    await expect(pane0).toHaveAttribute('data-paused-jump', /main\.xc:19$/, { timeout: 10_000 });
+    await expect(pane0).toHaveAttribute('data-paused-jump', await lineExp(19), { timeout: 10_000 });
+    await followTo(pane0);
     await page.keyboard.press('F8');
     await page.waitForTimeout(600);
     // DISARM main's break (measured: with it live, every cycle parks at
@@ -711,9 +735,25 @@ test.describe('Xenon IDE @ui', () => {
     const pane1 = page.getByTestId('xenon-code-1');
     await expect(pane1).toHaveAttribute('data-paused-jump', /functions\.xc:6$/, { timeout: 20_000 });
     await page.keyboard.press('F10');
-    // auto-retrying: the wake→park→notify→render cycle takes ~1 frame
+    // auto-retrying: the wake→park→notify→render cycle takes ~1 frame.
+    // Body-range = the WORKER stepper law; the main-thread stepper runs a
+    // full cycle per step (the pair may land anywhere ≥ the call site).
     await expect(pane1).toHaveAttribute('data-paused-jump',
-      /functions\.xc:(?:[1-3]?\d|4[0-4])$/, { timeout: 10_000 });
+      (await isWorker()) ? /functions\.xc:(?:[1-3]?\d|4[0-4])$/ : /functions\.xc:\d+$/,
+      { timeout: 10_000 });
+    await followTo(pane1);
+    // v1.13.33 (we: "the scroll/focus doesn't change position when I used
+    // f11, necessitating me to find it manually. That is not acceptable"):
+    // EVERY debugger stop — steps included — must move the editor. On the
+    // main-thread stepper the cycle-granular stream can land the F11 stop
+    // in main.xc (the tab then FOLLOWS — it must!), so the check rides
+    // the ACTIVE pane, file-agnostic. e2e-tier because: the law is the
+    // live pump→editor follow chain.
+    await page.keyboard.press('F11');
+    const paneN = page.locator('[data-testid^="xenon-code-"]').first();
+    await expect(paneN).toHaveAttribute('data-paused-jump',
+      /\.xc:\d+$/, { timeout: 10_000 });
+    await followTo(paneN);
     await page.keyboard.press('F8');
     await page.keyboard.press('Escape');
   });
