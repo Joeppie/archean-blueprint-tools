@@ -92,6 +92,37 @@ describe('beaconNet — the global scope', () => {
     const b0 = beaconNet.participants().find(p => p.id === 'beacon:0')!;
     expect(b0.rxLog[0]!.data).toBe('before-save');
   });
+
+  test('deliveries QUEUE per participant for the runtime to drain (slice D)', () => {
+    beaconNet.seed(bp);
+    beaconNet.clearLogs();
+    beaconNet.sendTo('F-RX', 'q1');
+    beaconNet.sendTo('F-RX', 'q2');
+    expect(beaconNet.takePending('beacon:0')).toEqual(['q1', 'q2']);
+    expect(beaconNet.takePending('beacon:0')).toEqual([]);   // drained
+    expect(beaconNet.takePending('beacon:1')).toEqual([]);   // not a listener
+  });
+
+  test('postDevice routes a component beacon transmission', () => {
+    beaconNet.seed(bp);
+    beaconNet.clearLogs();
+    const n = beaconNet.postDevice(0, '.pos{1}');           // beacon 0 tx = F-TX
+    expect(n).toBe(1);                                      // beacon:1 rx = F-TX
+    const b1 = beaconNet.participants().find(p => p.id === 'beacon:1')!;
+    expect(b1.rxLog[0]!.data).toBe('.pos{1}');
+    const b0 = beaconNet.participants().find(p => p.id === 'beacon:0')!;
+    expect(b0.lastTx).toBe('.pos{1}');
+  });
+
+  test('registerPair adds runtime-announced radios and MERGES by id', () => {
+    beaconNet.seed(bp);
+    beaconNet.registerPair('hud:2#0', 'HUD pilot-guide · beacon', 'hud', 2,
+      'NEW-TX', 'NEW-RX');
+    const h = beaconNet.participants().find(p => p.id === 'hud:2#0')!;
+    expect([h.tx, h.rx]).toEqual(['NEW-TX', 'NEW-RX']);     // runtime wins
+    beaconNet.registerPair('hud:2#0', 'HUD pilot-guide · beacon', 'hud', 2, '', '');
+    expect(h.tx).toBe('NEW-TX');                            // blanks never wipe
+  });
 });
 
 describe('xenonHudControllers — the HUD blocks', () => {

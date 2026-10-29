@@ -12,6 +12,8 @@ import type { Blueprint, BlueprintComponent } from './format';
 import { atlasJsonPaths } from './models';
 import { CRAFTER_BUILTIN } from './crafterbuiltin';
 import { blockAt, functionAt, includeOrder, projectBlocks, projectFunctions, type XCBlock } from './xcproject';
+import { beaconNet } from './beaconnet';
+import { claimRuntime, releaseRuntime } from './runtimemgr';
 import { buzzerAudio, modeToWave } from './buzzer';
 import type { XenonSnap } from './xenontest';
 import {
@@ -45,6 +47,13 @@ type Mod = {
   _xc_error(): number;
   _xc_set_input(io: number, ch: number, v: number): void;
   _xc_set_input_a(alias: number, ch: number, v: number): void;
+  // ABI 11 (v1.14.1 slices B+D): typed as OPTIONAL — every caller
+  // typeof-guards (a stale wasm degrades features, never spams)
+  _xc_set_input_t?: (alias: number, ch: number, text: number) => void;
+  _xc_beacon_put?: (i: number, payload: number) => void;
+  _xc_set_world?: (key: number, value: number) => void;
+  _xc_set_view?: (w: number, h: number, mx: number, my: number, fov: number, look: number) => void;
+  _xc_screen_anchor?: (idx: number) => number;
   _xc_worldsim_overrides(): number;
   _xc_worldsim_sync(name: number, v: number): void;
   _xc_abi(): number;
@@ -471,7 +480,12 @@ export function parseNodes(files: XCFile[]): XGraph | null {
 // one running computer (browser): boot a computer's program, pump cycles,
 // read its screens.
 
-export interface XenonEvent { e: string; io?: string | number; port?: number; v?: number | string; c?: number }
+export interface XenonEvent {
+  e: string; io?: string | number; port?: number; v?: number | string; c?: number;
+  /** ABI 11 beaconpair: the VM announces a program beacon() (i = creation
+   *  order, tx/rx frequencies); beacontx: its transmit(payload). */
+  i?: number; tx?: string; rx?: string; d?: string;
+}
 export class XenonRun {
   private mod: Mod;
   running = false;
@@ -564,6 +578,53 @@ export class XenonRun {
     this.mod.stringToUTF8(io, p, nb);
     this.mod._xc_set_input_a(p, ch, v);
     this.mod._free(p);
+  }
+  // ── ABI 11 (v1.14.1 slices B+D) — every one typeof-guarded: a stale wasm
+  // degrades the feature, never spams.
+  private putStr(s: string): number {
+    const nb = new TextEncoder().encode(s).length + 1;
+    const p = this.mod._malloc(nb);
+    this.mod.stringToUTF8(s, p, nb);
+    return p;
+  }
+  /** TEXT channel feed (slice D): a beaconNet delivery into a Beacon
+   *  component's ch0 (input_text(port,0) reads it). */
+  setInputT(alias: string, ch: number, text: string) {
+    const m = this.mod;
+    if (typeof m._xc_set_input_t !== 'function') return;
+    const a = this.putStr(alias), t = this.putStr(text);
+    m._xc_set_input_t(a, ch, t);
+    m._free(a); m._free(t);
+  }
+  /** Deliver a received payload to the program's beacon() object #i (.data). */
+  beaconPut(i: number, payload: string) {
+    const m = this.mod;
+    if (typeof m._xc_beacon_put !== 'function') return;
+    const p = this.putStr(payload);
+    m._xc_beacon_put(i, p);
+    m._free(p);
+  }
+  /** One AVATARSIM/world text for the program's get(key). */
+  setWorld(key: string, value: string) {
+    const m = this.mod;
+    if (typeof m._xc_set_world !== 'function') return;
+    const k = this.putStr(key), v = this.putStr(value);
+    m._xc_set_world(k, v);
+    m._free(k); m._free(v);
+  }
+  /** The player viewport + pointer for the HUD built-in values. */
+  setView(w: number, h: number, mx: number, my: number, fov: number, look: number) {
+    if (typeof this.mod._xc_set_view === 'function')
+      this.mod._xc_set_view(w, h, mx, my, fov, look);
+  }
+  /** A surface's panel(anchor,w,h) anchor word-constant (16 = center). */
+  screenAnchor(key: string): number {
+    const m = this.mod;
+    if (typeof m._xc_screen_anchor !== 'function') return 16;
+    const p = this.putStr(key);
+    const idx = m._xc_screen_index(p);
+    m._free(p);
+    return idx >= 0 ? m._xc_screen_anchor(idx) : 16;
   }
   /** Route a canvas click on one surface (pixel coords of the surface).
    *  button_rect/button evaluate true for it THIS cycle (game law). */
@@ -791,7 +852,8 @@ export class XenonWorkerRun {
   private worker: Worker;
   private abi_ = 0;
   private keys: string[] = [];
-  private inputs: [number | string, number, number][] = [];
+  private inputs: [number | string, number, number | string][] = [];
+  private bputs: [number, string][] = [];
   private syncQ: [string, number][] = [];
   private lastVars: XenonVar[] = [];
   private lastSourceFiles: string[] = [];
@@ -906,12 +968,15 @@ export class XenonWorkerRun {
   cycle(): Promise<CycleData> {
     return new Promise(res => {
       this.cycleSet = res;
-      this.worker.postMessage({ t: 'cycle', keys: this.keys, inputs: this.inputs, sync: this.syncQ });
+      this.worker.postMessage({ t: 'cycle', keys: this.keys, inputs: this.inputs, sync: this.syncQ, bputs: this.bputs });
       this.inputs = [];
       this.syncQ = [];
+      this.bputs = [];
     });
   }
   setInput(io: number | string, ch: number, v: number) { this.inputs.push([io, ch, v]); }
+  setInputT(alias: string, ch: number, text: string) { this.inputs.push([alias, ch, text]); }
+  beaconPut(i: number, payload: string) { this.bputs.push([i, payload]); }
   worldsimSync(name: string, v: number) { this.syncQ.push([name, v]); }
   worldsimOverrides() { return this.lastOverrides; }
   screenClick(key: string, x: number, y: number) { this.worker.postMessage({ t: 'click', key, x, y }); }
@@ -1109,6 +1174,13 @@ export class XenonPump {
   cycles = 0;
   bus = new Map<string, number | string>();          // 'io:port' -> last output
   reads = new Map<string, number>();                 // 'io:ch'  -> last input_number READ
+  // ── BEACON RADIO (v1.14.1 slice D, FORMAT §HUD): the craft's Beacon
+  // components by alias (an 'out' event onto one transmits) and the
+  // program-side beacon() indices (beaconpair events). Deliveries from
+  // beaconNet ride ch0 (input_text(port,0)) / beaconPut every cycle.
+  private beaconDev = new Map<string, number>();
+  private beaconCi = new Map<number, string>();
+  private progBeacons = new Set<number>();
   vars = new Map<string, XenonVar>();                // '$name'  -> live global variable
   // XENON-LOCALS: the locals of the function owning the PAUSED line (the
   // Locals tab). Set at every pause: worker mode reads the hook's SAB
@@ -1188,6 +1260,15 @@ export class XenonPump {
     this.run?.stop();
     this.run = null;
     this.comp = comp;
+    // ONE RUNTIME OWNER (slice B/D): booting a computer takes the module
+    // from a running HUD runtime (runtimemgr; the farm lifts this in C)
+    claimRuntime({ name: 'computer', kill: () => this.close() });
+    this.beaconDev = new Map(); this.beaconCi = new Map(); this.progBeacons = new Set();
+    for (const d of comp.devices)
+      if (d.type === 'Beacon' && d.alias && d.ci !== undefined) {
+        this.beaconDev.set(d.alias.toLowerCase(), d.ci);
+        this.beaconCi.set(d.ci, d.alias);
+      }
     this.status = 'booting';
     this.error = '';
     this.cycles = 0;
@@ -1265,6 +1346,7 @@ export class XenonPump {
   close() {
     this.openSeq++;
     this.stopLoop();
+    releaseRuntime('computer');
     this.sabResume();          // a hooked worker must wake before it dies
     this.wrun?.dispose();
     this.wrun = null;
@@ -1464,6 +1546,26 @@ export class XenonPump {
       r.value = v;
       run.setInput(bind.io, bind.ch, v);
       run.worldsimSync(name, v);
+    }
+  }
+
+  /** BEACON RADIO feed (v1.14.1 slice D): drain beaconNet deliveries and
+   *  push them into the VM before the cycle — component beacons get the
+   *  payload on ch0 (input_text(port,0) — the RCS500's read law), program
+   *  beacon() objects get it as .data. Latest delivery wins per cycle. */
+  private stepRadio(run: XenonRun | XenonWorkerRun) {
+    if (this.beaconCi.size || this.progBeacons.size) {
+      for (const [ci, alias] of this.beaconCi) {
+        const q = beaconNet.takePending(`beacon:${ci}`);
+        const last = q[q.length - 1];
+        if (last !== undefined) run.setInputT(alias, 0, last);
+      }
+      const pci = this.comp?.ci ?? -1;
+      for (const i of this.progBeacons) {
+        const q = beaconNet.takePending(`computer:${pci}#${i}`);
+        const last = q[q.length - 1];
+        if (last !== undefined) run.beaconPut(i, last);
+      }
     }
   }
 
@@ -1921,6 +2023,7 @@ export class XenonPump {
       wr.setKeys([...this.canvases.keys(), ...this.feedKeys]);
       const t0 = typeof performance !== 'undefined' ? performance.now() : t;
       this.stepWorldSim(wr);
+      this.stepRadio(wr);
       wr.cycle().then(d => {
         this.inFlight = false;
         if (this.wrun !== wr) return;              // superseded by a newer open
@@ -1936,6 +2039,7 @@ export class XenonPump {
     if (this.paused) return;
     const r = run as XenonRun;                  // main-thread mode (wrun null)
     this.stepWorldSim(r);
+    this.stepRadio(r);
     const step = r.cycle();
     this.applyCycle(t, step.evs, r.vars(), r.screenMeta(),
       k => r.screenPixels(k), r.cyclePairs(), r.error, r.cycleDepths());
@@ -1972,8 +2076,24 @@ export class XenonPump {
           this.bus.delete(k);
           this.bus.set(k, e.v ?? '');
           this.buzzerWrite(e.io ?? '', e.port, e.v);
+          // BEACON RADIO (slice D): output_text onto a Beacon component is
+          // a TRANSMISSION on its frequency (FORMAT §HUD)
+          const bei = this.beaconDev.get(String(e.io ?? '').toLowerCase());
+          if (bei !== undefined) beaconNet.postDevice(bei, String(e.v ?? ''));
         }
         else if (e.e === 'in') this.reads.set(`${e.io}:${e.port}`, Number(e.v) || 0);
+        // ABI 11: the VM announces a program beacon() and its transmits —
+        // the global BEACONS tab sees the program's radio LIVE (id-merged
+        // with the source-scan seed), and its tx reaches every listener.
+        else if (e.e === 'beaconpair' && typeof e.i === 'number') {
+          const ci = this.comp?.ci ?? -1;
+          this.progBeacons.add(e.i);
+          beaconNet.registerPair(`computer:${ci}#${e.i}`,
+            `Program ${this.comp?.alias || 'computer'} · beacon`, 'computer',
+            ci, String(e.tx ?? ''), String(e.rx ?? ''));
+        }
+        else if (e.e === 'beacontx' && typeof e.i === 'number')
+          beaconNet.post(`computer:${this.comp?.ci ?? -1}#${e.i}`, String(e.d ?? ''));
       }
     }
     this.cycles++;
@@ -2058,7 +2178,7 @@ export class XenonPump {
       const seq = this.openSeq;
       const step = (i: number): Promise<void> =>
         i >= n || this.openSeq !== seq ? Promise.resolve()
-          : (this.stepWorldSim(wr),
+          : (this.stepWorldSim(wr), this.stepRadio(wr),
              wr.cycle().then(d => {
                if (this.wrun === wr && this.openSeq === seq) {
                  try { this.wsOverrides = JSON.parse(d.overrides); } catch { /* keep */ }
@@ -2106,7 +2226,7 @@ export class XenonPump {
 }
 
 /** The shim ABI the app expects (xc_host.cpp xc_abi()). Bump with the shim. */
-export const XC_ABI = 10;
+export const XC_ABI = 11;
 
 export const xenonPump = new XenonPump();
 

@@ -31,6 +31,7 @@ export interface BeaconParticipant {
 }
 
 const RX_CAP = 50;
+const PENDING_CAP = 32;
 
 export const freqNorm = (v: unknown): string => String(v ?? '').trim();
 
@@ -56,6 +57,10 @@ const codeOf = (c: BlueprintComponent): string[] => {
 
 class BeaconNet {
   private parts = new Map<string, BeaconParticipant>();
+  /** slice B/D transport: deliveries queued per participant, drained by
+   *  the owning runtime (a Beacon component's io channel via
+   *  xc_set_input_t, a program's beacon object via xc_beacon_put). */
+  private pending = new Map<string, string[]>();
   private listeners = new Set<() => void>();
   /** the user's own transcript (dock sends), newest first */
   outbox: BeaconRx[] = [];
@@ -137,27 +142,59 @@ class BeaconNet {
 
   /** Deliver `data` to every participant (except the sender) listening on
    *  `freq`. Returns the receivers. */
-  private deliver(freq: string, from: string, data: string): number {
+  private deliver(freq: string, from: string, data: string, fromId: string): number {
     if (!freq) return 0;
     let n = 0;
     for (const p of this.parts.values()) {
-      if (p.id === from || p.rx !== freq) continue;
+      if (p.id === fromId || p.rx !== freq) continue;
       p.rxLog.unshift({ at: Date.now(), from, data });
       if (p.rxLog.length > RX_CAP) p.rxLog.length = RX_CAP;
+      const q = this.pending.get(p.id) ?? [];
+      q.push(data);
+      if (q.length > PENDING_CAP) q.splice(0, q.length - PENDING_CAP);
+      this.pending.set(p.id, q);
       n++;
     }
     return n;
   }
 
-  /** Send FROM a participant's tx frequency (the slice-B shim's seam). */
+  /** Drain what the runtime has not fed into the VM yet (latest wins). */
+  takePending(id: string): string[] {
+    const q = this.pending.get(id) ?? [];
+    this.pending.delete(id);
+    return q;
+  }
+
+  /** Send FROM a participant's tx frequency (the shim's seam). */
   post(fromId: string, data: string): number {
     const p = this.parts.get(fromId);
     if (!p) return 0;
     p.lastTx = data;
     p.lastTxAt = Date.now();
-    const n = this.deliver(p.tx, p.label, data);
+    const n = this.deliver(p.tx, p.label, data, p.id);
     this.notify();
     return n;
+  }
+
+  /** A Beacon COMPONENT transmitted (output_text on its io port, ABI 11 —
+   *  FORMAT §HUD: the craft-side radio is plain io). */
+  postDevice(ci: number, data: string): number {
+    return this.post(`beacon:${ci}`, data);
+  }
+
+  /** Register/merge a RUNTIME-reported beacon pair (a beaconpair event from
+   *  the VM): the source-scan seeds the same ids, so this ANNOTATES the
+   *  scanned participant (it proves the radio is LIVE) and adds pairs the
+   *  scan could not see (computed frequencies). */
+  registerPair(id: string, label: string, kind: BeaconParticipant['kind'],
+    ci: number, tx: string, rx: string): void {
+    const p = this.parts.get(id);
+    if (p) { p.tx = tx || p.tx; p.rx = rx || p.rx; p.label = label; return; }
+    this.parts.set(id, {
+      id, kind, label, ci, tx: freqNorm(tx), rx: freqNorm(rx),
+      lastTx: '', lastTxAt: 0, rxLog: [],
+    });
+    this.notify();
   }
 
   /** Send from the Beacon dock (the user) onto a known/typed frequency. */
@@ -169,13 +206,14 @@ class BeaconNet {
     me.lastTxAt = Date.now();
     this.outbox.unshift({ at: Date.now(), from: f, data });
     if (this.outbox.length > RX_CAP) this.outbox.length = RX_CAP;
-    const n = this.deliver(f, 'you', data);
+    const n = this.deliver(f, 'you', data, 'user');
     this.notify();
     return n;
   }
 
   clearLogs(): void {
     for (const p of this.parts.values()) p.rxLog = [];
+    this.pending.clear();
     this.outbox = [];
     this.notify();
   }

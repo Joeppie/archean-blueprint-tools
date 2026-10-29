@@ -1,25 +1,27 @@
-// HudDialog.tsx — the IDE of a HUD block (v1.14.0 P9 slice A; we: "Initiate
-// this work, allow us to edit the code for at least HUDs that are contained
-// within a HUD block, and establish a familiar environment, including the
-// concept of screens and buttons, and worldsim, call that avatarsim in the
-// case of the avatar (player). There should also be a beacons menu…").
+// HudDialog.tsx — the IDE of a HUD block (v1.14.0 P9 slice A; runtime in
+// slice B; we: "allow us to edit the code for at least HUDs that are
+// contained within a HUD block, and establish a familiar environment,
+// including the concept of screens and buttons").
 //
 // A HudController component (data.xc_files, FORMAT §HUD) opens a familiar
-// IDE: the SAME CodeEditor (tabs, syntax, completion pool, find/goto), the
-// SAME save law (files live IN the blueprint; save = doc write; the menu
-// rows and layout mirror the computer IDE), and THE SAME Beacons tab — the
-// global radio scope every HUD talks through. The HUD RUNTIME (panel/
-// draw/beacon builtins executing on the VM → canvas) is slice B; this slice
-// makes the programs editable, real-data-safe, and radio-visible.
-import { useEffect, useMemo, useRef, useState } from 'react';
+// IDE: the SAME CodeEditor (tabs, syntax, completion, find/goto), the
+// SAME save law (files live IN the blueprint; save = doc write; F5), a
+// RUN ▶ / STOP ⏹ pair on the title bar driving the HUD runtime
+// (engine/hudpump.ts: panel() surfaces → live canvases under PANELS,
+// beacon() radios → the BEACONS tab, the AVATARSIM as the get() pool),
+// and THE SAME Beacons tab — the global radio scope every HUD talks
+// through. Saving while the runtime runs re-boots it on the fresh files
+// (the F5 law).
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import FloatingWindow from './FloatingWindow';
 import { CodeEditor, type CodeEditorHandle } from './CodeEditor';
 import BeaconPanel from './BeaconPanel';
+import { hudPump, ANCHOR_LABELS, type HudSurface } from '../engine/hudpump';
 import type { XCFile } from '../engine/xenoncode';
 import { projectFunctions, projectDecls } from '../engine/xcproject';
 import type { XenonHud } from '../engine/xenoncode';
 
-const MENU_HINT = 'F5 run = save the buffers to the HUD block · Ctrl+F find · Ctrl+G goto · ⛶ maximise';
+const MENU_HINT = 'F5 run = save (re-boots the HUD runtime on them) · Ctrl+F find · Ctrl+G goto · ⛶ maximise';
 
 export default function HudDialog(p: {
   hud: XenonHud;
@@ -31,19 +33,26 @@ export default function HudDialog(p: {
   const [dirty, setDirty] = useState<Set<number>>(new Set());
   const [tab, setTab] = useState(0);
   const [max, setMax] = useState(false);
-  const [side, setSide] = useState<'beacons'>('beacons');
+  const [side, setSide] = useState<'beacons' | 'panels'>('panels');
   const [pendingJump, setPendingJump] = useState<{ line: number; focus: boolean } | null>(null);
   const editorRef = useRef<CodeEditorHandle | null>(null);
   const [armedDel, setArmedDel] = useState(false);
 
   const funcs = useMemo(() => projectFunctions(files), [files]);
   const decls = useMemo(() => projectDecls(files), [files]);
+  // the HUD runtime view (one subscription; hudPump.version drives rerender)
+  const hudVersion = useSyncExternalStore(cb => hudPump.subscribe(cb), () => hudPump.version);
+  const hudPumpRunning = hudPump.running && hudPump.hud?.ci === hud.ci;
+  const hudPumpVersion = { cycles: hudPump.cycles, error: hudPump.error, v: hudVersion };
   const onCode = tab < files.length;
   const file = files[tab];
 
   const save = () => {
     p.onFiles(hud.ci, files);
     setDirty(new Set());
+    // F5 law for a RUNNING HUD: the runtime re-boots on the saved files
+    if (hudPump.running && hudPump.hud?.ci === hud.ci)
+      void hudPump.open({ ci: hud.ci, alias: hud.alias, files: files.map(f => ({ ...f })) });
   };
   const editChange = (v: string) => {
     setFiles(m => {
@@ -110,11 +119,27 @@ export default function HudDialog(p: {
         return { x: (vw - w) / 2 + 30, y: (vh - h) / 2 + 20, w, h };
       }}
       className="font-mono xenon-ide"
-      header={
-        <div className="flex items-center justify-between gap-2 bg-[#1a2436] px-3 py-1.5 text-[13px]">
+      header={        <div className="flex items-center justify-between gap-2 bg-[#1a2436] px-3 py-1.5 text-[13px]">
           <span className="min-w-0 flex-1 truncate font-bold tracking-wide">
             HUD IDE ({hud.alias})</span>
           <div className="flex shrink-0 items-center gap-3">
+            {/* HUD runtime (slice B): ▶ boots the program on the VM —
+                panel() surfaces appear under PANELS, beacon() radios join
+                the BEACONS scope. The runtime owns the ONE interpreter:
+                booting it closes any running computer IDE pump. */}
+            <button data-testid="hud-run"
+              className={`rounded px-2 py-0.5 text-[11px] ${hudPumpRunning ? 'bg-[#1d2b42] text-[#5d6a7d]' : 'bg-[#2b4a2b] text-[#b7ecb7] hover:bg-[#38603a]'}`}
+              title="run this HUD program (the HUD runtime takes the VM — a running computer IDE pump is closed)"
+              onClick={() => void hudPump.open({ ci: hud.ci, alias: hud.alias, files: files.map(f => ({ ...f })) })}
+              disabled={hudPumpRunning}>▶</button>
+            <button data-testid="hud-stop"
+              className={`rounded px-2 py-0.5 text-[11px] ${hudPumpRunning ? 'bg-[#5a2222] text-[#ffb3b3] hover:bg-[#7a2e2e]' : 'bg-[#1d2b42] text-[#5d6a7d]'}`}
+              title="stop the HUD runtime"
+              onClick={() => hudPump.close()} disabled={!hudPumpRunning}>⏹</button>
+            <span data-testid="hud-run-status"
+              className={`text-[10px] font-bold tabular-nums ${hudPumpRunning ? 'text-[#3ddc55]' : 'text-[#5d6a7d]'}`}>
+              {hudPumpRunning ? `ON ${hudPumpVersion.cycles} cyc` : hudPumpVersion.error ? 'CRASH' : 'off'}
+            </span>
             <span data-testid="hud-dirty" className={`text-[10px] font-bold ${dirty.size ? 'text-[#ff5b5b]' : 'text-[#5d6a7d]'}`}>
               {dirty.size ? `● ${dirty.size} unsaved` : 'saved'}
             </span>
@@ -122,7 +147,7 @@ export default function HudDialog(p: {
               title={max ? 'restore' : 'maximise'}
               onClick={() => setMax(m => !m)} aria-label="maximise">{max ? '🗗' : '⛶'}</button>
             <button data-testid="hud-close" className="text-[#8a93a0] hover:text-white"
-              onClick={p.onClose} aria-label="close">✕</button>
+              onClick={() => { hudPump.close(); p.onClose(); }} aria-label="close">✕</button>
           </div>
         </div>
       }>
@@ -182,6 +207,11 @@ export default function HudDialog(p: {
             the computer IDE shows; beacons + HUD programs + your sends) */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-1.5">
           <div className="flex shrink-0 flex-wrap items-center gap-1">
+            <button data-testid="hud-side-panels" onClick={() => setSide('panels')}
+              className="shrink-0 rounded px-2 py-1 text-[10px] tracking-wide hover:bg-[#182236]">
+              <span className={`rounded px-1 py-0.5 ${side === 'panels' ? 'bg-[#1d2b42] text-[#8fd4ff]' : 'text-[#7d8aa0]'}`}>
+                Panels {hudPumpRunning && hudPump.surfaces.length ? `(${hudPump.surfaces.length})` : ''}</span>
+            </button>
             <button data-testid="hud-side-beacons" onClick={() => setSide('beacons')}
               className="shrink-0 rounded px-2 py-1 text-[10px] tracking-wide hover:bg-[#182236]">
               <span className={`rounded px-1 py-0.5 ${side === 'beacons' ? 'bg-[#1d2b42] text-[#8fd4ff]' : 'text-[#7d8aa0]'}`}>
@@ -189,16 +219,94 @@ export default function HudDialog(p: {
             </button>
           </div>
           <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto">
-            <div data-testid="hud-runtime-note"
-              className="rounded border border-[#2b313b] bg-[#10182a] px-2 py-1 text-[10px] leading-snug text-[#5d6a7d]">
-              panel()/draw_*/button*/text() + beacon()/get("avatar_sensor_*") RUN on the HUD VM —
-              the runtime (this program → canvas panels, live beacon traffic) lands in the next
-              v1.14.x slice; saving here writes the HUD block&apos;s real data.xc_files.
-            </div>
+            {hudPumpVersion.error && (
+              <div data-testid="hud-run-error"
+                className="rounded border border-[#6a1b1b] bg-[#33202a] px-2 py-1 text-[10px] text-[#ffb3b3]">
+                {hudPumpVersion.error}
+              </div>
+            )}
+            {side === 'panels' && <HudPanels />}
             {side === 'beacons' && <BeaconPanel />}
           </div>
         </div>
       </div>
     </FloatingWindow>
+  );
+}
+
+// ── HUD PANELS (slice B): every panel() surface the running program owns,
+// blitted from the VM's framebuffers every cycle (canvas blits EVERY cycle
+// — the CADENCE law). Clicks route in (button_rect evaluates them THIS
+// cycle); pointer moves feed the program's mouse_x/mouse_y.
+function HudPanels() {
+  useSyncExternalStore(cb => hudPump.subscribe(cb), () => hudPump.version);
+  if (!hudPump.running)
+    return (
+      <div data-testid="hud-panels-idle"
+        className="rounded border border-[#2b313b] bg-[#10182a] px-2 py-1 text-[10px] leading-snug text-[#5d6a7d]">
+        Press ▶ to run this HUD: its panel() surfaces appear here live —
+        buttons clickable, beacons wired into the global BEACONS scope.
+        The runtime takes the VM from the computer IDE (one interpreter —
+        the farm lifts this in the next slice).
+      </div>
+    );
+  if (!hudPump.surfaces.length)
+    return (
+      <div data-testid="hud-panels-empty" className="px-2 py-1 text-[10px] text-[#5d6a7d]">
+        running ({hudPump.cycles} cycles) — the program has not created a
+        panel() yet
+      </div>
+    );
+  const order = [5, 4, 6, 1, 16, 2, 9, 8, 10];   // top row … bottom row
+  const surfs = [...hudPump.surfaces].sort(
+    (a, b) => (order.indexOf(a.anchor) + 1 || 99) - (order.indexOf(b.anchor) + 1 || 99));
+  return (
+    <div className="flex flex-wrap gap-2">
+      {surfs.map(s => <HudCanvas key={s.key} s={s} n={surfs.indexOf(s)} />)}
+    </div>
+  );
+}
+
+function HudCanvas(p: { s: HudSurface; n: number }) {
+  const ref = useRef<HTMLCanvasElement | null>(null);
+  useEffect(() => {
+    let raf = 0;
+    const draw = () => {
+      raf = requestAnimationFrame(draw);
+      const cv = ref.current;
+      if (!cv) return;
+      const px = hudPump.pixels(p.s.key);
+      if (!px) return;
+      if (cv.width !== p.s.w || cv.height !== p.s.h) { cv.width = p.s.w; cv.height = p.s.h; }
+      // the pixel view may ride a SharedArrayBuffer (worker law) — copy
+      // into a plain array before ImageData will accept it
+      cv.getContext('2d')?.putImageData(
+        new ImageData(new Uint8ClampedArray(px), p.s.w, p.s.h), 0, 0);
+    };
+    raf = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(raf);
+  }, [p.s.key, p.s.w, p.s.h]);
+  return (
+    <figure className="m-0">
+      <canvas ref={ref} data-testid={`hud-panel-canvas-${p.n}`}
+        title={`${p.s.key} · ${ANCHOR_LABELS[p.s.anchor] ?? `anchor ${p.s.anchor}`} · click routes in`}
+        className="max-w-full rounded border border-[#2b313b] bg-black [image-rendering:pixelated]"
+        style={{ width: Math.min(p.s.w, 520) }}
+        onClick={e => {
+          const r = (e.target as HTMLCanvasElement).getBoundingClientRect();
+          hudPump.click(p.s.key,
+            Math.round((e.clientX - r.left) * p.s.w / r.width),
+            Math.round((e.clientY - r.top) * p.s.h / r.height));
+        }}
+        onPointerMove={e => {
+          const r = (e.target as HTMLCanvasElement).getBoundingClientRect();
+          hudPump.setMouse(
+            Math.round((e.clientX - r.left) * p.s.w / r.width),
+            Math.round((e.clientY - r.top) * p.s.h / r.height));
+        }} />
+      <figcaption className="mt-0.5 text-[9px] text-[#5d6a7d]">
+        {p.s.key} · {ANCHOR_LABELS[p.s.anchor] ?? p.s.anchor} · {p.s.w}×{p.s.h}
+      </figcaption>
+    </figure>
   );
 }

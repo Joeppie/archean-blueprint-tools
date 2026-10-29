@@ -255,17 +255,23 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   the code owns the width (`.cm-scroller` `touch-action: pan-x pan-y`);
   a changed variable row remounts with the `.var-flash` wash (keyed on
   the last value per name).
-- HUD BLOCKS + BEACON RADIO (v1.14.0 P9 slice A): HudController components
-  list under the XenonCode menu (HUD IDE — the shared CodeEditor editing
-  `data.xc_files` through the xc-file doc funnels with the `''` container;
-  save = the doc, F5 = save). The BEACONS side tab (computer IDE + HUD IDE)
-  and the 📡 Beacon dock render THE global registry
-  (`engine/beaconnet.ts`: the craft's Beacon components' tx/rx frequencies +
-  every `beacon()` literal in every computer/HUD program + the user's send
-  form; routing = EXACT text match on frequencies; re-seed per save keeps
-  the logs by id). AVATARSIM = the `avatar_sensor_*` worldsim channels (a
-  HUD's `get()` pool; sea datum 6 203 000 m). The HUD VM runtime
-  (panel/draw/beacon builtins → canvas) is slice B (REWRITE § P9).
+- HUD BLOCKS + BEACON RADIO (v1.14.0 slice A, runtime v1.14.1 slices B+D):
+  HudController components list under the XenonCode menu (HUD IDE — the
+  shared CodeEditor editing `data.xc_files` through the xc-file doc
+  funnels with the `''` container; save = the doc, F5 = save + re-boot the
+  runtime). ▶/⏹ run the HUD program on the ABI-11 shim: `panel(anchor,w,h)`
+  surfaces BLIT live under PANELS (clicks route in — `button_rect` evaluates
+  THIS cycle), `beacon($tx,$rx)` + `.data`/`.transmit(t)` join the GLOBAL
+  beaconNet scope (beaconpair/beacontx events), `get("avatar_sensor_*")`
+  reads the AVATARSIM rows. Beacon COMPONENTS are io devices: `output_text`
+  on the port TRANSMITS (postDevice), beaconNet deliveries feed ch0
+  (`input_text(port,0)` — the RCS500 read law) every cycle. The BEACONS
+  side tab (computer IDE + HUD IDE + 📡 dock) renders the registry
+  (seeded from components + scanned `beacon()` literals, runtime-merged
+  by id; EXACT text-frequency routing; logs survive re-seeds). ONE
+  INTERPRETER: `engine/runtimemgr.ts` — a HUD boot CLOSES the computer
+  pump and vice versa (the farm in slice C lifts this). The shim twin:
+  `xc_host.cpp` ABI 11 ↔ `XC_ABI`; demo `tools/xenoncode/demo/hudradio`.
 - NAV + DEBUGGER-FOLLOW (v1.13.27; STEP KEYS v1.13.33): every jump
   (library/def/goto/tab) records a navpoint; ◀ ▶ + Alt+←/→ (CAPTURE — CM
   binds Alt+arrows) walk the history. EVERY debugger stop — breakpoint hit
@@ -381,7 +387,11 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   registry/chip observable); long game strings (beacon frequencies!) need
   `break-all`/`truncate` + `min-w-0` flex columns — min-content from an
   unbreakable 40-char token makes a side panel OVERLAP the editor (the
-  v1.14.0 Badger catch).
+  v1.14.0 Badger catch); after a SHIM edit, verify the built wasm binary
+  carries the new exports/decl-strings (`grep -ac <name> xenoncode.wasm`)
+  before trusting an e2e red — a build that copied a stale wasm cost a
+  debug cycle (the v1.14.1 build7 catch; a prod page fetches the CHUNK
+  glue, not the raw asset, so probe the wasm bytes, not the loaded URL).
 - PER-COMPONENT PINS: solo-fixture tests carry `@<ComponentName>` tags; run
   the tags you touched; a full @slow sweep only when a SHARED render-pipeline
   file changed.
@@ -780,14 +790,13 @@ behind a small link at the END of the gallery. Pages serves the GENERATED
 
 ## Backlog (live items)
 - **P9 — Multi-computer farm + HUD/beacon radio** (REWRITE.md § P9,
-  decoded model in FORMAT §HUD & the Beacon radio): SLICE A LANDED
-  (v1.14.0: beaconNet registry + Beacons tab/dock + HUD-block IDE +
-  avatarsim). REMAINING: (B) the HUD VM runtime (panel/draw/beacon
-  builtins on the wasm shim → canvas; the shim's twin law applies),
-  (C) the ComputerFarm of pumps + SHARED per-craft io bus
-  (inter-computer input/output operability — ChipOS-critical),
-  (D) Beacon-as-io-device radio inside the sim (post/deliver ride
-  beaconNet).
+  decoded model in FORMAT §HUD & the Beacon radio): SLICES A+B+D LANDED
+  (v1.14.0 registry/tabs/HUD-IDE/avatarsim; v1.14.1 HUD VM runtime +
+  Beacon-as-io-device radio + runtimemgr one-interpreter guard).
+  REMAINING: (C) the ComputerFarm of pumps + SHARED per-craft io bus
+  (inter-computer input/output operability — ChipOS-critical; replaces
+  runtimemgr's mutual kill with co-owners over an IoBus — the beaconNet
+  pending-queues are the transport prototype).
 - **P8 — Xenon workspace as a STANDALONE, low-coupling module**: shape,
   coupling inventory and the four seams (write-path, screen-feed, key-bus,
   shell-descriptors) in REWRITE.md § P8; P3 (project tree) + P4 (upstream

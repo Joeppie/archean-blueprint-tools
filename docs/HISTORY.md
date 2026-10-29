@@ -3065,6 +3065,56 @@ topic + FORMAT).
   Badger: its 999-line guide HUD + the BGR-D60167… listener receive our
   send). The computer-IDE first-comp leg uses the Badger: 57 files boot
   ~2.5 s — inside budget.
+- **v1.14.1 P9 SLICES B+D — THE HUD VM RUNTIME + BEACON-AS-IO-DEVICE
+  (we, 2026-10-29: "I guess B and D which are tightly related, and the
+  part of C which naturally comes with that/groundwork for it"):** THE
+  SHIM (xc_host.cpp, ABI 10→11, rebuilt js+wasm, `XC_ABI = 11`): the
+  `panel(anchor,w,h)` object — a "panel#N" screen with the FULL screen
+  member set plus x/y properties and `set_position` (the readme HUD's
+  help-button park), anchor recorded per slot (`xc_screen_anchor`);
+  the `beacon($tx,$rx):beacon` object — `.data/.tx/.rx`,
+  `.transmit(text)` → a beacontx EVENT, `.is_receiving` (a delivery
+  within 50 cycles) and `.distance` (xc_beacon_dist; same-craft pairs
+  are 0) — creation announces a beaconpair EVENT so the BEACONS tab sees
+  every program radio LIVE; `get(key)` fed by `xc_set_world` (the
+  AVATARSIM rows, homo's avatar_sensor_speed) + the player-local `set`
+  KV (the guide's prefs); `set_cps`/`set_resolution_scale` no-ops (the
+  CADENCE law owns refresh; CSS scale owns DPI); `xc_set_input_t` — a
+  TEXT channel feed, the beacon ch0 delivery lane; the REBOOT law
+  destroys panel#/virtual# + clears g_beacons together. THE PUMPS —
+  `engine/hudpump.ts`: a 25 Hz loop (avatarsim→setWorld, viewport→
+  setView, beaconNet takePending→beaconPut, events→registerPair/post,
+  panel# meta→live canvases with clicks routed in, pointer→mouse_x/y);
+  `engine/runtimemgr.ts` — THE ONE-INTERPRETER GUARD (the shim is one
+  global Computer/g_screens: a HUD boot CLOSES the computer pump and
+  vice versa — slice C's IoBus replaces the mutual kill with co-owners;
+  4 vitest pins on the claim/release semantics). THE PUMP RADIO (slice
+  D): `stepRadio` per cycle feeds component-beacon deliveries to ch0
+  (input_text(port,0) — the RCS500 read law, both modes: worker inputs
+  carry text + bputs), and applyCycle routes `output_text` on a Beacon
+  port to `beaconNet.postDevice` + beaconpair/beacontx events to
+  `computer:ci#i` participants; Beacon components seedWorld ch0 "".
+  THE HUD IDE — ▶/⏹ on the title bar (status chip ON n cyc/CRASH/off),
+  PANELS tab = every panel() surface blitted from the VM framebuffers
+  (rAF putImageData, pixelated, click→xc_screen_click, pointer→
+  mouse_x/y), save re-boots a RUNNING runtime (F5 law). THE GUIDE
+  GAUNTLET: the Badger's real 999-line guide HUD compiles and RUNS on
+  the open-library VM (native probe: 14 panels + 3 virtuals + the
+  beaconpair event) — the four missing builtins it exposed (set/get-
+  KV, is_receiving/distance, set_resolution_scale, panel set_position)
+  are the game's HUD API superset made whole. Pins: runtimemgr.test
+  (4), beaconnet queue/registerPair/postDevice (4), demo/hudradio
+  (native XC_BEACON_PUT echo), xenonhud runtime leg (canvas pixels
+  lit + the guide's transmits land in Beacon ci 114's rx log after a
+  dock send opens the is_receiving window — the full
+  user→HUD→component radio loop in a browser). THE BUILD7 TRAP (found by
+  page-side wasm forensics): the shipped wasm LACKED the new decl-strings
+  (a stale em++ output got copied while edits landed) — native + node
+  boots passed while the browser failed at guide line 211; law added to
+  AGENTS LESSONS: grep the built wasm for the new decl-strings before
+  trusting an e2e red. The guide renders its ACTIVE scale-set (1× at
+  e2e viewports, the 0×/2× sets parked empty — its own scaling law), so
+  the pixel pin sums all panel canvases.
 
 ## 2. v1.11 session — KNOWN ISSUES & UNPINNED TODOS (2026-10-25/26 session block)
 

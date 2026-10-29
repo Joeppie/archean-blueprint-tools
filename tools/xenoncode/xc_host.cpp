@@ -35,6 +35,13 @@ struct ScreenSlot {
 	// clicked/click_x/click_y values DURING the cycle, then cleared.
 	bool clicked = false; int clickX = 0, clickY = 0;
 	double scroll = 0.0;
+	// HUD panel anchor (v1.14.1 slice B): the panel(anchor,w,h) word-constant
+	// (top_left..bottom_right, center default) — the app's HUD layout reads
+	// it back through xc_screen_anchor.
+	double anchor = 16.0;
+	// set_position(x,y) (slice B): the panel's player-screen pixel position
+	// (the readme HUD parks its help button screen-right with it)
+	double px = 0, py = 0;
 };
 static std::vector<ScreenSlot> g_screens;
 static std::map<XenonScreen*, size_t> g_slotByPtr;  // object -> slot INDEX
@@ -129,6 +136,28 @@ static map<int, map<int, string>> xc_inputs_txt;
 // process, so every reboot named fresh virtual#N slots while the old ones
 // lingered forever - surfaces drifted and piled up per reboot)
 static int g_nextVirtual = 0;
+// ---- HUD + beacon-radio state (v1.14.1 P9 slices B+D, ABI 11) ------------
+// panel(anchor,w,h): the HUD's screen-anchored surface (FORMAT §Player-
+// installed HUDs) — a "panel#N" ScreenSlot carrying its anchor; the HUD
+// canvas in the app lays panels out by anchor. Reset by the REBOOT law.
+static int g_nextPanel = 0;
+// beacon($txFreq,$rxFreq):beacon — a program's radio. transmit(t) logs a
+// beacontx EVENT (the app posts it to the beaconNet); the app feeds what
+// the paired frequency RECEIVES back in via xc_beacon_put → the .data
+// property. The registry announces every pair with a beaconpair event at
+// creation so the app's global BEACONS tab sees the craft's full radio map.
+struct BeaconSlot {
+	std::string tx, rx, last;
+	int lastRxAt = -100000;      // cycle of the newest delivery (is_receiving)
+	double dist = 0.0;           // metres to the paired transmitter (the app
+	                             // feeds it; same-craft pairs are 0)
+};
+static std::vector<std::unique_ptr<BeaconSlot>> g_beacons;
+// get(key) — the HUD's world text (avatar_sensor_speed/altitude/…, fed by
+// the app's AVATARSIM every cycle through xc_set_world; keys lowercase).
+static std::map<std::string, std::string> g_worldTxt;
+// HUD built-in values: the player viewport + pointer (the app feeds them)
+static double xc_vw = 1920, xc_vh = 1080, xc_mx = 0, xc_my = 0, xc_fov = 1, xc_ml = 0;
 static map<string, double> g_wsProgram;    // name -> active program override
 static map<string, double> g_wsEffective;  // name -> last effective value
 static map<int, int> g_devByIo;        // computer io port → table index
@@ -154,6 +183,8 @@ static string varToString(const Var& v) { return string(v); }
 
 // ---- device declaration (order = compile-time indices: stable) -----------
 static XenonCode::Var::Type screenType;
+static XenonCode::Var::Type panelType;
+static XenonCode::Var::Type beaconType;
 
 static void archeanInit() {
 	static bool declared = false;   // re-boot reuses the declarations (the
@@ -209,7 +240,7 @@ static void archeanInit() {
 	// runtime argument count inside one lambda — that is the variadic-member
 	// pattern a real integration needs (the game's compiler is a superset of
 	// the open library here).
-	screenType = XenonCode::DeclareObjectType("screen", {
+	std::map<std::string, XenonCode::DeviceObjectMember> screenMembers = {
 		{"char_h:number", [](Computer*, const Var& o, const vector<Var>&) -> Var {
 			return (double)(Scr(o) ? Scr(o)->GetCharHeight() : 0); }},
 		{"char_w:number", [](Computer*, const Var& o, const vector<Var>&) -> Var {
@@ -308,6 +339,61 @@ static void archeanInit() {
 			ScreenSlot* s = slotOf(o); return s ? (double)s->clickY : 0.0; }},
 		{"scroll:number", [](Computer*, const Var& o, const vector<Var>&) -> Var {
 			ScreenSlot* s = slotOf(o); return s ? s->scroll : 0.0; }},
+	};
+	screenType = XenonCode::DeclareObjectType("screen", screenMembers);
+	// the panel object (v1.14.1 slice B): the FULL screen member set plus
+	// the panel's player-screen identity — x/y properties and
+	// set_position(x,y) (readme HUD: $helpButton.set_position(screen_w -
+	// $helpButton.width, 0); the app's HUD canvas honours px/py in layout).
+	auto panelMembers = screenMembers;
+	panelMembers["x:number"] = [](Computer*, const Var& o, const vector<Var>&) -> Var {
+		auto* s = slotOf(o); return s ? s->px : 0.0; };
+	panelMembers["y:number"] = [](Computer*, const Var& o, const vector<Var>&) -> Var {
+		auto* s = slotOf(o); return s ? s->py : 0.0; };
+	panelMembers["set_position($x:number,$y:number)"] = [](Computer*, const Var& o, const vector<Var>& a) -> Var {
+		if (auto* s = slotOf(o)) { s->px = a[0]; s->py = a[1]; }
+		return {}; };
+	panelType = XenonCode::DeclareObjectType("panel", panelMembers);
+
+	// ---- the beacon object (v1.14.1 P9 slice B, FORMAT §HUD & the Beacon
+	// radio): $b = beacon($txFreq,$rxFreq); $b.transmit($text) posts on the
+	// tx frequency (a beacontx EVENT — the app's beaconNet routes it to
+	// every listener of that frequency, component beacons included);
+	// $b.data reads the newest payload RECEIVED on the rx frequency (the
+	// app feeds it with xc_beacon_put between cycles). Creation announces
+	// the pair with a beaconpair event — the app's BEACONS tab then shows
+	// the program's radio in the global scope.
+	beaconType = XenonCode::DeclareObjectType("beacon", {
+		{"data:text", [](Computer*, const Var& o, const vector<Var>&) -> Var {
+			auto* b = reinterpret_cast<BeaconSlot*>(static_cast<uint64_t>(o));
+			return b ? b->last : string(); }},
+		{"tx:text", [](Computer*, const Var& o, const vector<Var>&) -> Var {
+			auto* b = reinterpret_cast<BeaconSlot*>(static_cast<uint64_t>(o));
+			return b ? b->tx : string(); }},
+		{"rx:text", [](Computer*, const Var& o, const vector<Var>&) -> Var {
+			auto* b = reinterpret_cast<BeaconSlot*>(static_cast<uint64_t>(o));
+			return b ? b->rx : string(); }},
+		{"transmit($t:text)", [](Computer*, const Var& o, const vector<Var>& a) -> Var {
+			auto* b = reinterpret_cast<BeaconSlot*>(static_cast<uint64_t>(o));
+			if (!b || a.empty()) return {};
+			b->last = string(a[0]);                    // what WE last said
+			for (size_t i = 0; i < g_beacons.size(); ++i)
+				if (g_beacons[i].get() == b) {
+					xc_eventLog.push_back("{\"e\":\"beacontx\",\"i\":" + std::to_string(i)
+						+ ",\"d\":\"" + xc_jsonEscape(string(a[0])) + "\"}");
+					break;
+				}
+			return {}; }},
+		// is_receiving — a delivery arrived within the last 2 s (50 cycles):
+		// the guide's gate for a LIVE paired station (the app's beaconNet
+		// delivers via xc_beacon_put). distance — metres to the paired
+		// transmitter (xc_beacon_dist; same-craft pairs sit at 0).
+		{"is_receiving:number", [](Computer*, const Var& o, const vector<Var>&) -> Var {
+			auto* b = reinterpret_cast<BeaconSlot*>(static_cast<uint64_t>(o));
+			return (b && xc_tickCount - b->lastRxAt <= 50) ? 1.0 : 0.0; }},
+		{"distance:number", [](Computer*, const Var& o, const vector<Var>&) -> Var {
+			auto* b = reinterpret_cast<BeaconSlot*>(static_cast<uint64_t>(o));
+			return b ? b->dist : -1.0; }},
 	});
 
 	// ---- component inspection (computer.md "Component Inspection") ---------
@@ -460,6 +546,72 @@ static void archeanInit() {
 		int i = xc_addScreen("virtual#" + to_string(g_nextVirtual++), 0, w, h);
 		return Var(screenType, reinterpret_cast<uint64_t>(g_screens[i].scr.get()));
 	});
+	// panel([anchor,] w, h):panel — the HUD's anchored surface
+	// (v1.14.1 slice B, FORMAT §Player-installed HUDs: panel(bottom,120,60),
+	// panel(center,screen_w,screen_h)). OVERLOAD pattern: one declaration of
+	// the 3-arg form; a 2-arg call is (w,h) with anchor=center. The panel is
+	// a SCREEN object ("panel#N" key) — the full screen member set applies;
+	// the app's HUD canvas lays the surfaces out by ANCHOR
+	// (xc_screen_anchor). Reboot law: panels are program-world surfaces —
+	// destroyed with the virtuals, the counter restarts.
+	XenonCode::DeclareDeviceFunction("panel($a:number,$w:number,$h:number):panel", [](Computer*, const vector<Var>& a) -> Var {
+		double anchor = 16.0;                          // center
+		uint32_t w = 280, h = 270;
+		if (a.size() >= 3) { anchor = a[0]; w = (uint32_t)a[1]; h = (uint32_t)a[2]; }
+		else if (a.size() == 2) { w = (uint32_t)a[0]; h = (uint32_t)a[1]; }
+		w = (uint32_t)clamp((int64_t)w, (int64_t)1, (int64_t)10000);
+		h = (uint32_t)clamp((int64_t)h, (int64_t)1, (int64_t)10000);
+		int i = xc_addScreen("panel#" + to_string(g_nextPanel++), 0, w, h);
+		g_screens[i].anchor = anchor;
+		return Var(panelType, reinterpret_cast<uint64_t>(g_screens[i].scr.get()));
+	});
+	// beacon($txFreq,$rxFreq):beacon — the program's radio (slice B; the
+	// object members live with the screenType declaration). Numbers and
+	// quoted text are both legal frequencies (FORMAT §Player-installed HUDs:
+	// beacon(5,5664) and beacon("RCS-500-HUD-RECEIVE",…)) — the numeric form
+	// arrives as a number arg (Var's string cast renders it verbatim).
+	XenonCode::DeclareDeviceFunction("beacon($tx:text,$rx:text):beacon", [](Computer*, const vector<Var>& a) -> Var {
+		string tx = string(a[0]), rx = string(a[1]);
+		auto b = make_unique<BeaconSlot>();
+		b->tx = tx; b->rx = rx;
+		int idx = (int)g_beacons.size();
+		g_beacons.push_back(std::move(b));
+		xc_eventLog.push_back("{\"e\":\"beaconpair\",\"i\":" + to_string(idx)
+			+ ",\"tx\":\"" + xc_jsonEscape(tx) + "\",\"rx\":\"" + xc_jsonEscape(rx) + "\"}");
+		return Var(beaconType, reinterpret_cast<uint64_t>(g_beacons[idx].get()));
+	});
+	// get($key):text — the HUD's world feed (avatar_sensor_speed,
+	// avatar_sensor_altitude, avatar_sensor_altitude_absolute, …): the app's
+	// AVATARSIM pushes every cycle via xc_set_world; unknown keys answer "".
+	XenonCode::DeclareDeviceFunction("get:text", [](Computer*, const vector<Var>& a) -> Var {
+		auto it = g_worldTxt.find(xc_lower(string(a[0])));
+		return it == g_worldTxt.end() ? string() : it->second;
+	});
+	// set($key,$value) — the HUD's player-local KV (the Badger guide stores
+	// its page/hidden/arrows prefs: set("badger_guide_v1_page", …) and
+	// reads them back with get). Player-local = this VM's lifetime (the
+	// game persists per-player; the editor's scope is the running HUD —
+	// the AVATARSIM feed's map doubles as the KV store, writes visible
+	// to get like the game).
+	XenonCode::DeclareDeviceFunction("set", [](Computer*, const vector<Var>& a) -> Var {
+		if (a.size() < 2) return {};
+		g_worldTxt[xc_lower(string(a[0]))] = string(a[1]);
+		return {};
+	});
+	// set_cps(n) — the HUD panel refresh-rate hint: accepted, no-op (the
+	// app's canvas blits every cycle; the CADENCE law caps the pump anyway).
+	XenonCode::DeclareDeviceFunction("set_cps", [](Computer*, const vector<Var>&) -> Var { return {}; });
+	// set_resolution_scale(n) — the HUD's DPI hint (readme/homo): accepted,
+	// no-op — the app renders the panel canvases at CSS scale (pixelated).
+	XenonCode::DeclareDeviceFunction("set_resolution_scale", [](Computer*, const vector<Var>&) -> Var { return {}; });
+	// HUD built-in values (FORMAT §Player-installed HUDs): the player
+	// viewport + pointer; the app feeds them every cycle (xc_set_view).
+	XenonCode::DeclareDeviceFunction("screen_w:number", [](Computer*, const vector<Var>&) -> Var { return xc_vw; });
+	XenonCode::DeclareDeviceFunction("screen_h:number", [](Computer*, const vector<Var>&) -> Var { return xc_vh; });
+	XenonCode::DeclareDeviceFunction("mouse_x:number", [](Computer*, const vector<Var>&) -> Var { return xc_mx; });
+	XenonCode::DeclareDeviceFunction("mouse_y:number", [](Computer*, const vector<Var>&) -> Var { return xc_my; });
+	XenonCode::DeclareDeviceFunction("mouse_look:number", [](Computer*, const vector<Var>&) -> Var { return xc_ml; });
+	XenonCode::DeclareDeviceFunction("fov:number", [](Computer*, const vector<Var>&) -> Var { return xc_fov; });
 	// screen_copy(src, dst, sx, sy, dx, dy, w, h [, tint, rotation, bilinear])
 	// — the sprite-copy fast path (the Badger's attitude-display atlas uses
 	// rotation + bilinear). Overload pattern: widest declaration, the three
@@ -863,9 +1015,15 @@ int main(int argc, char** argv) {
 			computer->RunCycle();                // tick + timers
 			computer->RunEntryPoint("update");   // the computer device's cycle end
 			xc_endCycle(*computer);               // click/scroll events + input reads
+			// XC_BEACON_PUT probe (v1.14.1): simulate a delivery on the
+			// beacon's rx frequency (the app does this via xc_beacon_put);
+			// the demo program echoes it with transmit() -> beacontx event.
+			if (c == 3 && getenv("XC_BEACON_PUT") && !g_beacons.empty()) {
+				g_beacons[0]->last = "ping";
+				g_beacons[0]->lastRxAt = xc_tickCount;
+			}
 			if (c == 5) {
-				auto ls = Computer::DebugTakeLines();
-				ofstream lf("lines.json");
+				auto ls = Computer::DebugTakeLines();				ofstream lf("lines.json");
 				lf << "[";
 				for (size_t i = 0; i < ls.size(); ++i) { if (i) lf << ","; lf << ls[i]; }
 				lf << "]\n";
@@ -1012,12 +1170,16 @@ EMSCRIPTEN_KEEPALIVE int xc_boot() {
 		// dashboards/screens) are hardware: they persist, blanked. External
 		// io values and the per-cycle read reports are the VM's world too.
 		for (auto it = g_screens.begin(); it != g_screens.end();) {
-			if (it->key.rfind("virtual#", 0) == 0) {
+			if (it->key.rfind("virtual#", 0) == 0 || it->key.rfind("panel#", 0) == 0) {
 				g_slotByPtr.erase(it->scr.get());
 				it = g_screens.erase(it);
 			} else ++it;
 		}
 		g_nextVirtual = 0;
+		// the beacon radios are program-world too: a rebooted program
+		// re-creates its beacon()s (the app's HUD pump re-pairs by index)
+		g_nextPanel = 0;
+		g_beacons.clear();
 		xc_inputs.clear();
 		xc_inputs_txt.clear();
 		g_reads.clear();
@@ -1313,6 +1475,38 @@ EMSCRIPTEN_KEEPALIVE void xc_set_input_a(const char* alias, int ch, double v) {
 	const DevInfo& d = g_devs[i->second];
 	xc_inputs[d.port >= 0 ? d.port : 1000 + d.id][ch] = v;
 }
+// TEXT channel feed (v1.14.1 slice D): the beaconNet delivers a received
+// payload to a Beacon component's ch0 for input_text(port,0).
+EMSCRIPTEN_KEEPALIVE void xc_set_input_t(const char* alias, int ch, const char* text) {
+	auto i = g_devByAlias.find(xc_lower(alias));
+	if (i == g_devByAlias.end()) return;
+	const DevInfo& d = g_devs[i->second];
+	xc_inputs_txt[d.port >= 0 ? d.port : 1000 + d.id][ch] = text;
+}
+// ---- HUD radio + world feed (v1.14.1 P9 slices B+D, ABI 11) --------------
+// xc_beacon_put: deliver a received payload to the program's beacon object
+// (.data). xc_set_world: one AVATARSIM/world text for get(key). xc_set_view:
+// the player viewport + pointer for the HUD built-in values.
+// xc_screen_anchor: a panel#'s anchor word-constant for the HUD canvas.
+EMSCRIPTEN_KEEPALIVE void xc_beacon_put(int i, const char* payload) {
+	if (i >= 0 && i < (int)g_beacons.size()) {
+		g_beacons[i]->last = payload;
+		g_beacons[i]->lastRxAt = xc_tickCount;   // opens is_receiving (2 s)
+	}
+}
+EMSCRIPTEN_KEEPALIVE void xc_beacon_dist(int i, double d) {
+	if (i >= 0 && i < (int)g_beacons.size()) g_beacons[i]->dist = d;
+}
+EMSCRIPTEN_KEEPALIVE void xc_set_world(const char* key, const char* value) {
+	g_worldTxt[xc_lower(key)] = value;
+}
+EMSCRIPTEN_KEEPALIVE void xc_set_view(double w, double h, double mx, double my,
+                                      double fov, double look) {
+	xc_vw = w; xc_vh = h; xc_mx = mx; xc_my = my; xc_fov = fov; xc_ml = look;
+}
+EMSCRIPTEN_KEEPALIVE double xc_screen_anchor(int idx) {
+	return (idx >= 0 && idx < (int)g_screens.size()) ? g_screens[idx].anchor : 16.0;
+}
 // The IDE's screen canvases route user interaction in (pixel coords of the
 // surface). The click is visible to button_rect/button and the clicked
 // built-ins for ONE cycle, then cleared by xc_endCycle.
@@ -1331,6 +1525,7 @@ EMSCRIPTEN_KEEPALIVE void xc_pilot_script(int on) { g_pilotScripted = on; }
 // ---- screen registry (the craft's Screen/HdScreen surfaces) ---------------
 EMSCRIPTEN_KEEPALIVE void xc_reset_screens() {
 	g_screens.clear(); g_slotByPtr.clear(); g_nextVirtual = 0;
+	g_nextPanel = 0; g_beacons.clear();
 }
 EMSCRIPTEN_KEEPALIVE int xc_add_screen(const char* alias, int ch, uint32_t w, uint32_t h) {
 	return xc_addScreen(alias, ch, w, h);
@@ -1373,6 +1568,11 @@ static void xc_seedWorld(const DevInfo& d) {
 	else if (t == "speedsensor") { seed(0, 0); }
 	else if (t == "vehiclephysicssensor") { seed(0, 0); }
 	else if (t == "lowvoltagebattery" || t == "highvoltagebattery") { seed(0, 0.8); }
+	// Beacon (v1.14.1 slice D, FORMAT §HUD): ch0 = the RECEIVED payload text
+	// (input_text(port,0)); the app feeds every beaconNet delivery with
+	// xc_set_input_t. output_text(port,0,txt) transmits (an 'out' event the
+	// app posts to the radio).
+	else if (t == "beacon") { seedT(0, ""); }
 }
 
 EMSCRIPTEN_KEEPALIVE void xc_add_device(int id, int io, const char* alias, const char* type,
@@ -1419,7 +1619,7 @@ EMSCRIPTEN_KEEPALIVE const char* xc_write_var(int fileIdx, int line, const char*
 
 // ABI stamp: the app checks this at boot (XC_ABI in engine/xenoncode.ts) and
 // warns ONCE on drift — new device/shim exports must bump it.
-EMSCRIPTEN_KEEPALIVE int xc_abi() { return 10; }  // 10: depth stream + hookLive gate + exact-line pause seam (XENON-DEBUG v3); 9: xc_write_var + the hook's cmd-6 write handoff (editable debug values); 8: xc_locals_json + the hook's SAB locals handoff (the Locals panel); 7: the stop-hook is LIVE (library_xc.js + Module.XC_SAB worker stepping); 6: xc_cycle_pairs + hook seam; 5: xc_set_cycle_ms
+EMSCRIPTEN_KEEPALIVE int xc_abi() { return 11; }  // 11: panel()/beacon() object + beaconpair/beacontx events + get()/xc_set_world + xc_beacon_put + xc_set_input_t + xc_set_view + xc_screen_anchor (HUD runtime + beacon radio); 10: depth stream + hookLive gate + exact-line pause seam (XENON-DEBUG v3); 9: xc_write_var + the hook's cmd-6 write handoff (editable debug values); 8: xc_locals_json + the hook's SAB locals handoff (the Locals panel); 7: the stop-hook is LIVE (library_xc.js + Module.XC_SAB worker stepping); 6: xc_cycle_pairs + hook seam; 5: xc_set_cycle_ms
 EMSCRIPTEN_KEEPALIVE void xc_set_cycle_ms(int ms) {
 	// the app's pump cadence (CYCLE_MS): delta_time / system_frequency
 	// follow it, so dt-driven programs (Chip's Mario, physics on

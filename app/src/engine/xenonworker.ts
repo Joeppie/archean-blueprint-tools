@@ -28,7 +28,8 @@ type Msg = {
     screens: { alias: string; channel: number; w: number; h: number }[];
     devices: { id: number; io: number; alias: string; type: string; x: number; y: number; z: number }[];
   };
-  inputs?: [number | string, number, number][];
+  inputs?: [number | string, number, number | string][];
+  bputs?: [number, string][];
   sync?: [string, number][];
   keys?: string[];
   key?: string; x?: number; y?: number; d?: number;
@@ -213,11 +214,22 @@ ctx.onmessage = (e: MessageEvent<Msg>) => {
       // (the four litPixels e2e reds, v1.13.17)
       if (m.keys) wantKeys = m.keys;
       for (const [io, ch, v] of m.inputs ?? []) {
-        if (typeof io === 'number') mod._xc_set_input(io, ch, v);
+        if (typeof v === 'string' && typeof io === 'string'
+            && typeof mod._xc_set_input_t === 'function') {
+          // ABI 11 text channel feed (beaconNet delivery -> Beacon ch0)
+          const a = putStr(io), t = putStr(v);
+          mod._xc_set_input_t(a, ch, t); mod._free(a); mod._free(t);
+        }
+        else if (typeof io === 'number') mod._xc_set_input(io, ch, v as number);
         else if (typeof mod._xc_set_input_a === 'function') {
-          const p = putStr(io); mod._xc_set_input_a(p, ch, v); mod._free(p);
+          const p = putStr(io); mod._xc_set_input_a(p, ch, v as number); mod._free(p);
         }
       }
+      // ABI 11: deliver to the worker's program beacon() objects (.data)
+      if (typeof mod._xc_beacon_put === 'function')
+        for (const [i, payload] of m.bputs ?? []) {
+          const p = putStr(payload); mod._xc_beacon_put(i, p); mod._free(p);
+        }
       if (typeof mod._xc_worldsim_sync === 'function')
         for (const [name, v] of m.sync ?? []) {
           const p = putStr(name); mod._xc_worldsim_sync(p, v); mod._free(p);

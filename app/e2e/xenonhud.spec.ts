@@ -38,6 +38,7 @@ test.describe('HUD blocks + beacon radio @ui', () => {
     await expect(page.getByTestId('hud-dirty')).toContainText('saved');
 
     // the beacon scope inside the HUD IDE: the craft's real radio map
+    await page.getByTestId('hud-side-beacons').click();
     await expect(page.getByTestId('beacon-freq-BGR-D60167AC42520437045ED627')).toBeVisible();
     await expect(page.getByTestId('beacon-freq-BADGER-GUIDE-UI-IN')).toBeVisible();
     // send onto a frequency a Beacon component LISTENS on → its log
@@ -80,5 +81,65 @@ test.describe('HUD blocks + beacon radio @ui', () => {
     // the HUD program is a LISTENER in the global scope (intercomputer view)
     await expect(page.getByTestId('beacon-part-hud-9-0')).toContainText('pilot-guide');
     await page.keyboard.press('Escape');
+  });
+
+  // v1.14.1 P9 slice B/D — the HUD RUNTIME: ▶ boots the guide program on
+  // the ABI-11 VM, its panel() surfaces BLIT live, its beacon() joins the
+  // global scope and its per-cycle transmit lands in the relay Beacon
+  // component's rx log (ci 114 listens on BADGER-GUIDE-UI-IN); the dock's
+  // send form reaches the HUD's .data on BADGER-GUIDE-UI-OUT.
+  // e2e-tier because: the law is VM → canvas pixels + cross-runtime radio
+  // delivery — nothing below the browser can see it.
+  test('the HUD runtime: live panels + the beacon loop into a component @slow', async ({ page }) => {
+    test.setTimeout(240_000);
+    await page.goto(`/?craft=${BADGER}`);
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 120_000 });
+    await page.getByTestId('xenon-menu').click();
+    await page.getByTestId('xenon-hud-9').click();
+    await expect(page.getByTestId('hud-dialog')).toBeVisible();
+    await page.getByTestId('hud-run').click();
+    await expect(page.getByTestId('hud-run-status')).toContainText('ON', { timeout: 30_000 });
+    // the guide renders its ACTIVE scale-set (1× at this viewport — the
+    // 0×/2× sets sit parked empty, the guide's own scaling law): sum the
+    // lit pixels across every panel canvas.
+    const canvas = page.getByTestId('hud-panel-canvas-1');
+    await expect(canvas).toBeVisible({ timeout: 30_000 });
+    await expect
+      .poll(async () => page.evaluate(() => {
+        let all = 0;
+        for (const c of Array.from(document.querySelectorAll(
+          '[data-testid^="hud-panel-canvas-"]'))) {
+          const cv = c as HTMLCanvasElement;
+          if (!cv.width) continue;
+          const d = cv.getContext('2d')!.getImageData(0, 0, cv.width, cv.height).data;
+          for (let i = 0; i < d.length; i += 4) if (d[i] + d[i + 1] + d[i + 2] > 90) all++;
+        }
+        return all;
+      }), { message: 'the HUD panel canvases paint', timeout: 30_000 })
+      .toBeGreaterThan(1000);
+    // the radio loop: the guide transmits on BADGER-GUIDE-UI-IN while it
+    // is RECEIVING (the game's gate) — send to its rx first, the RELAY
+    // Beacon component (ci 114, rx = BADGER-GUIDE-UI-IN) then logs echoes
+    await page.getByTestId('hud-side-beacons').click();
+    await expect(page.getByTestId('beacon-freq-BADGER-GUIDE-UI-OUT')).toBeVisible({ timeout: 20_000 });
+    await page.getByTestId('beacon-freq-BADGER-GUIDE-UI-OUT').click();
+    await page.getByTestId('beacon-data-form').fill('.g{1}.s{E2E}');
+    await page.getByTestId('beacon-send').click();
+    // delivery opens the guide's is_receiving window (2 s); a g{1}-packet
+    // with a session passes its radio gate → it transmits its page packet
+    // → the relay's log fills
+    await expect(page.getByTestId('beacon-rx-count-beacon-114'))
+      .toContainText(/([1-9]\d*) rx/, { timeout: 30_000 });
+    // and the HUD's own radio is LIVE in the global scope (runtime-merged)
+    await expect(page.getByTestId('beacon-part-hud-9-0')).toContainText('BADGER-GUIDE-UI-IN');
+    // a fresh session key makes the guide answer immediately again
+    await page.getByTestId('beacon-freq-BADGER-GUIDE-UI-OUT').click();
+    await page.getByTestId('beacon-data-form').fill('.g{1}.s{E2E2}');
+    await page.getByTestId('beacon-send').click();
+    await expect(page.getByTestId('beacon-rx-count-beacon-114'))
+      .toContainText(/([2-9]|\d\d) rx/, { timeout: 30_000 });
+    await page.getByTestId('hud-stop').click();
+    await expect(page.getByTestId('hud-run-status')).toContainText('off');
+    await page.getByTestId('hud-close').click();
   });
 });

@@ -11,14 +11,9 @@
 import { useRef, useSyncExternalStore } from 'react';
 import { beaconNet, freqNorm, type BeaconParticipant } from '../engine/beaconnet';
 import { wsEnsure, wsSave, evalExpr } from '../engine/worldsim';
+import { AVATARSIM_ROWS } from '../engine/hudpump';
 
 const testidKey = (s: string): string => s.replace(/[^a-zA-Z0-9-]/g, '-');
-
-const AVATARSIM: { key: string; label: string; def: string }[] = [
-  { key: 'avatar_sensor_speed', label: 'Avatar · speed (m/s)', def: '80' },
-  { key: 'avatar_sensor_altitude', label: 'Avatar · terrain altitude (m)', def: '2000' },
-  { key: 'avatar_sensor_altitude_absolute', label: 'Avatar · absolute altitude (m)', def: '6205000' },
-];
 
 const fmtAt = (ms: number): string =>
   ms ? new Date(ms).toLocaleTimeString([], { hour12: false }) : '—';
@@ -106,7 +101,7 @@ export default function BeaconPanel(p: { wide?: boolean }) {
       <div className="mt-1 border-t border-[#232c3d] pt-1.5">
         <div data-testid="avatarsim-head" className="text-[10px] uppercase tracking-widest text-[#5d6a7d]">
           Avatarsim · the player&apos;s world (a HUD&apos;s get("avatar_sensor_*"))</div>
-        {AVATARSIM.map(a => {
+        {AVATARSIM_ROWS.map(a => {
           const c = wsEnsure(a.key, a.label, 'sensor', a.def);
           let v = c.value;
           let err = c.error;

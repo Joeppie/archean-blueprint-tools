@@ -1102,7 +1102,7 @@ export default function XenonDialog(p: {
                 labeled as top-tabs at the same level as the 'search
                 names/values'"): the rail becomes a horizontal row and the
                 tab's search box rides that SAME row */}
-            <div className="flex shrink-0 flex-wrap items-center gap-1">
+            <div className="flex shrink-0 flex-nowrap items-center gap-1 overflow-x-auto [scrollbar-width:thin]">
               {([['vars', `Vars ${pump.vars.size ? `(${pump.vars.size})` : ''}${pump.locals.length ? ` + frame ${pump.locals.length}` : ''}`],
                 ['screens', `Screens ${pump.surfaces.size ? `(${pump.surfaces.size})` : ''}`],
                 ['library', `Library ${funcs.length + XC_LIB_DOC.length ? `(${funcs.length} + ${XC_LIB_DOC.length})` : ''}`],
