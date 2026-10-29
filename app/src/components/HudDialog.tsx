@@ -12,16 +12,25 @@
 // and THE SAME Beacons tab — the global radio scope every HUD talks
 // through. Saving while the runtime runs re-boots it on the fresh files
 // (the F5 law).
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import FloatingWindow from './FloatingWindow';
 import { CodeEditor, type CodeEditorHandle } from './CodeEditor';
 import BeaconPanel from './BeaconPanel';
-import { hudPump, ANCHOR_LABELS, type HudSurface } from '../engine/hudpump';
+import { hudPump, ANCHOR_LABELS, HUD_VIEW_PRESETS, type HudSurface } from '../engine/hudpump';
+import XenonLibrary from './XenonLibrary';
 import type { XCFile } from '../engine/xenoncode';
 import { projectFunctions, projectDecls } from '../engine/xcproject';
 import type { XenonHud } from '../engine/xenoncode';
 
 const MENU_HINT = 'F5 run = save (re-boots the HUD runtime on them) · Ctrl+F find · Ctrl+G goto · ⛶ maximise';
+
+/** HUD-flavoured members appended to the Library's member chips (v1.15.5):
+ *  the panel object's own API (ABI 13/14, wiki xenoncode/hud.md) and the
+ *  beacon object's — the screen members come from XC_SCREEN_MEMBERS. */
+const HUD_MEMBERS = [
+  'set_size(w,h)', 'set_position(x,y)', 'width', 'height', 'x', 'y', 'scroll',
+  'set_cps(n)', 'set_resolution_scale(n)', '$beacon.data', '$beacon.transmit(t)',
+];
 
 export default function HudDialog(p: {
   hud: XenonHud;
@@ -33,7 +42,7 @@ export default function HudDialog(p: {
   const [dirty, setDirty] = useState<Set<number>>(new Set());
   const [tab, setTab] = useState(0);
   const [max, setMax] = useState(false);
-  const [side, setSide] = useState<'beacons' | 'panels'>('panels');
+  const [side, setSide] = useState<'beacons' | 'panels' | 'screen' | 'library'>('panels');
   const [pendingJump, setPendingJump] = useState<{ line: number; focus: boolean } | null>(null);
   const editorRef = useRef<CodeEditorHandle | null>(null);
   const [armedDel, setArmedDel] = useState(false);
@@ -212,6 +221,16 @@ export default function HudDialog(p: {
               <span className={`rounded px-1 py-0.5 ${side === 'panels' ? 'bg-[#1d2b42] text-[#8fd4ff]' : 'text-[#7d8aa0]'}`}>
                 Panels {hudPumpRunning && hudPump.surfaces.length ? `(${hudPump.surfaces.length})` : ''}</span>
             </button>
+            <button data-testid="hud-side-screen" onClick={() => setSide('screen')}
+              className="shrink-0 rounded px-2 py-1 text-[10px] tracking-wide hover:bg-[#182236]">
+              <span className={`rounded px-1 py-0.5 ${side === 'screen' ? 'bg-[#1d2b42] text-[#8fd4ff]' : 'text-[#7d8aa0]'}`}>
+                Screen</span>
+            </button>
+            <button data-testid="hud-side-library" onClick={() => setSide('library')}
+              className="shrink-0 rounded px-2 py-1 text-[10px] tracking-wide hover:bg-[#182236]">
+              <span className={`rounded px-1 py-0.5 ${side === 'library' ? 'bg-[#1d2b42] text-[#8fd4ff]' : 'text-[#7d8aa0]'}`}>
+                Library</span>
+            </button>
             <button data-testid="hud-side-beacons" onClick={() => setSide('beacons')}
               className="shrink-0 rounded px-2 py-1 text-[10px] tracking-wide hover:bg-[#182236]">
               <span className={`rounded px-1 py-0.5 ${side === 'beacons' ? 'bg-[#1d2b42] text-[#8fd4ff]' : 'text-[#7d8aa0]'}`}>
@@ -226,6 +245,16 @@ export default function HudDialog(p: {
               </div>
             )}
             {side === 'panels' && <HudPanels />}
+            {side === 'screen' && <HudScreenView />}
+            {side === 'library' && (
+              // v1.15.5 (we: "library of functions is missing like it is
+              // for the computer in our HUD screen"): the SAME Library of
+              // definitions the computer IDE carries, with the panel/beacon
+              // members added to the member chips.
+              <XenonLibrary funcs={funcs} onJump={jumpTo}
+                ownerLabel="On this HUD ·" testId="hud"
+                extraMembers={HUD_MEMBERS} />
+            )}
             {side === 'beacons' && <BeaconPanel />}
           </div>
         </div>
@@ -268,6 +297,64 @@ function HudPanels() {
 }
 
 function HudCanvas(p: { s: HudSurface; n: number }) {
+  // THE PANEL ZOOM WINDOW (v1.15.5, we: "Niether can I properly zoom into
+  // panels themselves, like with screens"): ⛶ opens the same zoom UX the
+  // ▣ dock's screens carry — −/+ / fit / 1:1px, wheel zooms, drag scrolls.
+  const [full, setFull] = useState(false);
+  const [z, setZ] = useState(0);   // 0 = FIT; >0 = explicit scale %
+  const boxRef = useRef<HTMLDivElement | null>(null);
+  const fitScale = Math.min(1, 820 / Math.max(1, p.s.w), 720 / Math.max(1, p.s.h));
+  const scale = z > 0 ? z / 100 : fitScale;
+  const zoomBy = (f: number) => setZ(Math.round(Math.min(3200, Math.max(10,
+    (z > 0 ? z : fitScale * 100) * f))));
+  return (
+    <>
+      <figure className="m-0">
+        <HudCanvasDraw s={p.s} n={p.n} />
+        <figcaption className="mt-0.5 flex items-center gap-1.5 text-[9px] text-[#5d6a7d]">
+          <span>{p.s.key} · {ANCHOR_LABELS[p.s.anchor] ?? p.s.anchor} · {p.s.w}×{p.s.h}</span>
+          <button data-testid={`hud-panel-full-${p.n}`} title="open the zoomable panel window"
+            onClick={() => { setFull(true); setZ(0); }}
+            className="rounded bg-[#1a2233] px-1.5 py-0.5 text-[9px] text-[#8fd4ff] hover:bg-[#24365a]">⛶</button>
+        </figcaption>
+      </figure>
+      {full && (
+        <div data-testid={`hud-panel-overlay-${p.n}`} className="fixed inset-0 z-[70] flex flex-col bg-black/85"
+          onClick={() => setFull(false)}>
+          <div className="flex shrink-0 flex-wrap items-center gap-2 px-3 py-2 text-[11px] text-[#cfe0ff]"
+            onClick={e => e.stopPropagation()}>
+            <span className="font-bold">{p.s.key}</span>
+            <span className="text-[#5d6a7d]">{p.s.w}×{p.s.h} · {ANCHOR_LABELS[p.s.anchor] ?? p.s.anchor}</span>
+            <button data-testid={`hud-panel-zoom-out-${p.n}`} title="zoom out"
+              onClick={() => zoomBy(0.8)} className="rounded bg-[#1a2233] px-2 py-0.5 hover:bg-[#24365a]">−</button>
+            <span data-testid={`hud-panel-zoom-${p.n}`} className="w-12 text-center tabular-nums">{Math.round(scale * 100)}%</span>
+            <button data-testid={`hud-panel-zoom-in-${p.n}`} title="zoom in"
+              onClick={() => zoomBy(1.25)} className="rounded bg-[#1a2233] px-2 py-0.5 hover:bg-[#24365a]">+</button>
+            <button data-testid={`hud-panel-zoom-fit-${p.n}`} title="fit to window"
+              onClick={() => setZ(0)} className="rounded bg-[#1a2233] px-2 py-0.5 hover:bg-[#24365a]">fit</button>
+            <button data-testid={`hud-panel-zoom-px-${p.n}`} title="1:1 pixels"
+              onClick={() => setZ(100)} className="rounded bg-[#1a2233] px-2 py-0.5 hover:bg-[#24365a]">1:1 px</button>
+            <button data-testid={`hud-panel-zoom-exit-${p.n}`} title="close (Esc)"
+              onClick={() => setFull(false)} className="ml-auto rounded bg-[#1a2233] px-2 py-0.5 hover:bg-[#24365a]">✕</button>
+          </div>
+          <div ref={boxRef} className="min-h-0 flex-1 overflow-auto p-4"
+            onWheel={e => zoomBy(e.deltaY < 0 ? 1.25 : 0.8)}>
+            <HudCanvasDraw s={p.s} n={p.n} zoom
+              style={{ width: Math.round(p.s.w * scale), maxWidth: 'none' }} />
+          </div>
+          <div className="shrink-0 px-3 py-1.5 text-[9px] text-[#5d6a7d]">
+            wheel zooms · scrollbars pan · clicks route in (button_rect evaluates THIS cycle)
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function HudCanvasDraw(p: {
+  s: HudSurface; n: number; zoom?: boolean;
+  style?: CSSProperties;
+}) {
   const ref = useRef<HTMLCanvasElement | null>(null);
   useEffect(() => {
     let raf = 0;
@@ -287,26 +374,152 @@ function HudCanvas(p: { s: HudSurface; n: number }) {
     return () => cancelAnimationFrame(raf);
   }, [p.s.key, p.s.w, p.s.h]);
   return (
-    <figure className="m-0">
-      <canvas ref={ref} data-testid={`hud-panel-canvas-${p.n}`}
-        title={`${p.s.key} · ${ANCHOR_LABELS[p.s.anchor] ?? `anchor ${p.s.anchor}`} · click routes in`}
-        className="max-w-full rounded border border-[#2b313b] bg-black [image-rendering:pixelated]"
-        style={{ width: Math.min(p.s.w, 520) }}
+    <canvas ref={ref} data-testid={`hud-panel-canvas-${p.n}${p.zoom ? '-zoom' : ''}`}
+      title={`${p.s.key} · ${ANCHOR_LABELS[p.s.anchor] ?? `anchor ${p.s.anchor}`} · click routes in`}
+      className={`m-0 block rounded border border-[#2b313b] bg-black [image-rendering:pixelated] ${p.zoom ? 'mx-auto' : ''}`}
+      style={{ width: p.zoom ? undefined : Math.min(p.s.w, 520), ...p.style }}
+      onClick={e => {
+        const r = (e.target as HTMLCanvasElement).getBoundingClientRect();
+        hudPump.click(p.s.key,
+          Math.round((e.clientX - r.left) * p.s.w / r.width),
+          Math.round((e.clientY - r.top) * p.s.h / r.height));
+      }}
+      onPointerMove={e => {
+        const r = (e.target as HTMLCanvasElement).getBoundingClientRect();
+        hudPump.setMouse(
+          Math.round((e.clientX - r.left) * p.s.w / r.width),
+          Math.round((e.clientY - r.top) * p.s.h / r.height));
+      }} />
+  );
+}
+
+// ── THE HUD SCREEN WINDOW (v1.15.5, we: "Panels in Huds are rendered
+// independently.. not how they normally work. They should be composed
+// together on a normal screen as per the rules of the game. Now, that
+// does mean scaling the screen a bit, and we should be able to choose
+// screen resolution and restart/start. So it should have a Panels and
+// Screen window, which composes together the panels (respecting of
+// course alpha, like the real thing.)"): ONE canvas at the simulated
+// PLAYER SCREEN size; every panel#N composited at its set_position, or
+// anchored to the screen edge until set (the game's anchor law); panel
+// pixel alpha blends through drawImage, the world behind is a dark sky.
+// The size feeds the program's screen_w/screen_h (xc_set_view) and
+// APPLYING a new size RESTARTS the runtime — the game's resolution law.
+function anchorLayout(s: HudSurface, sw: number, sh: number): [number, number] {
+  const a = s.anchor;
+  const leftCol = a === 5 || a === 1 || a === 9;
+  const rightCol = a === 6 || a === 2 || a === 10;
+  const topRow = a === 5 || a === 4 || a === 6;
+  const botRow = a === 9 || a === 8 || a === 10;
+  const x = leftCol ? 0 : rightCol ? sw - s.w : (sw - s.w) / 2;
+  const y = topRow ? 0 : botRow ? sh - s.h : (sh - s.h) / 2;
+  return [x, y];
+}
+
+function HudScreenView() {
+  useSyncExternalStore(cb => hudPump.subscribe(cb), () => hudPump.version);
+  const ref = useRef<HTMLCanvasElement | null>(null);
+  const [w, setW] = useState(hudPump.view.w);
+  const [h, setH] = useState(hudPump.view.h);
+  useEffect(() => { setW(hudPump.view.w); setH(hudPump.view.h); }, [hudPump.version]);
+  useEffect(() => {
+    const tmp = document.createElement('canvas');
+    let raf = 0;
+    const draw = () => {
+      raf = requestAnimationFrame(draw);
+      const cv = ref.current;
+      if (!cv) return;
+      const { w: sw, h: sh } = hudPump.view;
+      if (cv.width !== sw || cv.height !== sh) { cv.width = sw; cv.height = sh; }
+      const ctx = cv.getContext('2d');
+      if (!ctx) return;
+      ctx.fillStyle = '#06080f';                       // the world behind the HUD
+      ctx.fillRect(0, 0, sw, sh);
+      for (const s of hudPump.surfaces) {
+        const px = hudPump.pixels(s.key);
+        if (!px) continue;
+        if (tmp.width !== s.w || tmp.height !== s.h) { tmp.width = s.w; tmp.height = s.h; }
+        // the pixel view may ride a SharedArrayBuffer — copy before ImageData
+        tmp.getContext('2d')?.putImageData(
+          new ImageData(new Uint8ClampedArray(px), s.w, s.h), 0, 0);
+        const [x, y] = s.pos ? [s.px, s.py] : anchorLayout(s, sw, sh);
+        ctx.drawImage(tmp, Math.round(x), Math.round(y));   // alpha blends
+      }
+    };
+    raf = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  if (!hudPump.running)
+    return (
+      <div data-testid="hud-screen-idle"
+        className="rounded border border-[#2b313b] bg-[#10182a] px-2 py-1 text-[10px] leading-snug text-[#5d6a7d]">
+        Press ▶ to run this HUD: its panels composite HERE on the simulated
+        player screen — anchors, set_position and pixel alpha, like the game.
+      </div>
+    );
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex shrink-0 flex-wrap items-center gap-1.5 text-[10px] text-[#7d8aa0]">
+        <label className="pl-1" htmlFor="hud-screen-preset">player screen</label>
+        <select id="hud-screen-preset" data-testid="hud-screen-preset"
+          className="rounded bg-[#141b2a] px-1.5 py-1 text-[10px] text-[#cfe0ff]"
+          value={HUD_VIEW_PRESETS.some(v => v.w === w && v.h === h) ? `${w}x${h}` : 'custom'}
+          onChange={e => {
+            if (e.target.value === 'custom') return;
+            const [pw, ph] = e.target.value.split('x').map(Number) as [number, number];
+            setW(pw); setH(ph);
+          }}>
+          {HUD_VIEW_PRESETS.map(v => <option key={`${v.w}x${v.h}`} value={`${v.w}x${v.h}`}>{v.w}×{v.h}</option>)}
+          <option value="custom">custom</option>
+        </select>
+        <input data-testid="hud-screen-w" type="number" min={320} max={7680} value={w} aria-label="screen width"
+          className="w-16 rounded bg-[#141b2a] px-1.5 py-1 text-[10px] text-[#cfe0ff]"
+          onChange={e => setW(+e.target.value || 0)} />
+        <span>×</span>
+        <input data-testid="hud-screen-h" type="number" min={240} max={4320} value={h} aria-label="screen height"
+          className="w-16 rounded bg-[#141b2a] px-1.5 py-1 text-[10px] text-[#cfe0ff]"
+          onChange={e => setH(+e.target.value || 0)} />
+        <button data-testid="hud-screen-apply"
+          className="rounded bg-[#1d2b42] px-2 py-1 text-[10px] text-[#8fd4ff] hover:bg-[#24365a]"
+          onClick={() => hudPump.setViewSize(w, h)}>apply &amp; restart</button>
+      </div>
+      <canvas ref={ref} data-testid="hud-screen-canvas"
+        title="the composited HUD — panels on the simulated player screen; clicks route into the panel under the cursor"
+        className="w-full max-w-[680px] self-center rounded border border-[#2b313b] bg-black [image-rendering:pixelated]"
         onClick={e => {
-          const r = (e.target as HTMLCanvasElement).getBoundingClientRect();
-          hudPump.click(p.s.key,
-            Math.round((e.clientX - r.left) * p.s.w / r.width),
-            Math.round((e.clientY - r.top) * p.s.h / r.height));
+          // SCREEN hit-test (v1.15.5, we: "mouseover in the composed screen
+          // and buttons dont seem to work"): the panel under the cursor
+          // gets the click in ITS pixel coords — button_rect evaluates it
+          // THIS cycle (the game law), same routing as the per-panel tiles.
+          const cv = e.currentTarget;
+          const r = cv.getBoundingClientRect();
+          const sx = (e.clientX - r.left) * cv.width / r.width;
+          const sy = (e.clientY - r.top) * cv.height / r.height;
+          const lay = hudPump.surfaces.map(s => ({
+            s,
+            xy: (s.pos ? [s.px, s.py] : anchorLayout(s, hudPump.view.w, hudPump.view.h)) as [number, number],
+          }));
+          for (let i = lay.length - 1; i >= 0; i--) {
+            const { s, xy: [x, y] } = lay[i]!;
+            if (sx >= x && sx < x + s.w && sy >= y && sy < y + s.h) {
+              hudPump.click(s.key, Math.round(sx - x), Math.round(sy - y));
+              return;
+            }
+          }
         }}
         onPointerMove={e => {
-          const r = (e.target as HTMLCanvasElement).getBoundingClientRect();
+          const cv = e.currentTarget;
+          const r = cv.getBoundingClientRect();
           hudPump.setMouse(
-            Math.round((e.clientX - r.left) * p.s.w / r.width),
-            Math.round((e.clientY - r.top) * p.s.h / r.height));
+            Math.round((e.clientX - r.left) * cv.width / r.width),
+            Math.round((e.clientY - r.top) * cv.height / r.height));
         }} />
-      <figcaption className="mt-0.5 text-[9px] text-[#5d6a7d]">
-        {p.s.key} · {ANCHOR_LABELS[p.s.anchor] ?? p.s.anchor} · {p.s.w}×{p.s.h}
-      </figcaption>
-    </figure>
+      <div className="px-1 text-[9px] leading-snug text-[#5d6a7d]">
+        composited like the game: every panel rides its anchor / set_position on
+        the simulated {hudPump.view.w}×{hudPump.view.h} player screen, pixel alpha
+        blended; the program's screen_w/screen_h follow the chosen size — applying
+        a new one restarts the HUD (the game's resolution law).
+      </div>
+    </div>
   );
 }

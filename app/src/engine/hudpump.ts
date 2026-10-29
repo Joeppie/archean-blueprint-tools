@@ -31,7 +31,28 @@ export const AVATARSIM_ROWS = [
   { key: 'avatar_sensor_altitude_absolute', label: 'Avatar · absolute altitude (m)', def: '6205000' },
 ] as const;
 
-export interface HudSurface { key: string; w: number; h: number; anchor: number }
+export interface HudSurface {
+  key: string; w: number; h: number; anchor: number;
+  /** ABI 14: set_position px/py + the flag (until set, the panel rides
+   *  its ANCHOR layout on the composited SCREEN window). */
+  px: number; py: number; pos: boolean;
+}
+
+/** THE HUD SCREEN (v1.15.5, we: "Panels in Huds are rendered
+ *  independently.. not how they normally work. They should be composed
+ *  together on a normal screen as per the rules of the game… a Panels and
+ *  Screen window, which composes together the panels (respecting alpha,
+ *  like the real thing)"): the game renders the HUD as ONE overlay on the
+ *  PLAYER SCREEN — panels ride their anchor/set_position in screen pixels,
+ *  alpha-composited; the player's screen resolution (and the UI-Scaling
+ *  setting, wiki hud.md) feeds the program's screen_w/screen_h. We
+ *  simulate that screen: a chosen W×H, fed through xc_set_view every
+ *  cycle; applying a new size REBOOTS the runtime (the game's restart on
+ *  resolution change) so anchor-driven layouts recompute. */
+export const HUD_VIEW_PRESETS = [
+  { w: 1280, h: 720 }, { w: 1366, h: 768 }, { w: 1920, h: 1080 }, { w: 2560, h: 1440 },
+];
+const LS_HUD_VIEW = 'archean-…view';
 
 /** The panel(anchor,..) word constants (xc_host alignment bits) → labels. */
 export const ANCHOR_LABELS: Record<number, string> = {
@@ -52,6 +73,26 @@ class HudPump {
   private t0 = 0;
   private beaconIdx: number[] = [];
   private mouse = { x: 0, y: 0, look: 0 };
+  /** THE HUD SCREEN size (the simulated player screen; localStorage
+   *  persisted, 1920×1080 default — see HUD_VIEW_PRESETS doc). */
+  view = (() => {
+    try {
+      const v = JSON.parse(localStorage.getItem(LS_HUD_VIEW) || 'null');
+      if (v && v.w >= 320 && v.h >= 240) return { w: v.w | 0, h: v.h | 0 };
+    } catch { /* default */ }
+    return { w: 1920, h: 1080 };
+  })();
+  /** Apply a new player-screen size. While running this REBOOTS the HUD
+   *  (the game restarts the HUD on resolution change — programs lay out
+   *  on screen_w/screen_h at boot, the wiki's guide/HUDs do). */
+  setViewSize(w: number, h: number): void {
+    w = Math.max(320, Math.min(7680, w | 0)); h = Math.max(240, Math.min(4320, h | 0));
+    if (w === this.view.w && h === this.view.h) return;
+    this.view = { w, h };
+    try { localStorage.setItem(LS_HUD_VIEW, JSON.stringify(this.view)); } catch { /* private */ }
+    if (this.running && this.hud) void this.open(this.hud);   // restart law
+    else this.notify();
+  }
   private listeners = new Set<() => void>();
 
   subscribe(cb: () => void): () => void {
@@ -95,8 +136,10 @@ class HudPump {
       const c = wsEnsure(r.key, r.label, 'sensor', r.def);
       try { run.setWorld(r.key, String(evalExpr(c.base, t))); } catch { /* keep last */ }
     }
-    // the player viewport + pointer (homo: `if fov < 1`, mouse_y)
-    run.setView(window.innerWidth, window.innerHeight, this.mouse.x, this.mouse.y, 1, this.mouse.look);
+    // the player viewport + pointer (homo: `if fov < 1`, mouse_y) — THE
+    // HUD SCREEN size (see HUD_VIEW_PRESETS): the program's screen_w/
+    // screen_h are the chosen simulated player screen, not the browser.
+    run.setView(this.view.w, this.view.h, this.mouse.x, this.mouse.y, 1, this.mouse.look);
     // beacon deliveries: what the paired frequencies RECEIVED → .data
     for (const i of this.beaconIdx) {
       const q = beaconNet.takePending(`hud:${hud.ci}#${i}`);
@@ -116,10 +159,12 @@ class HudPump {
         this.prints = [...this.prints.slice(-60), String(e.v ?? '')];
       }
     }
-    // HUD panels: the panel#N surfaces, with anchors for the canvas layout
-    this.surfaces = run.screenMeta()
-      .filter(m => m.key.startsWith('panel#'))
-      .map(m => ({ key: m.key, w: m.w, h: m.h, anchor: run.screenAnchor(m.key) }));
+    // HUD panels: the panel#N surfaces, with anchors + set_position for
+    // the canvas layout AND the composited SCREEN window
+    this.surfaces = run.screenMeta().filter(m => m.key.startsWith('panel#')).map(m => {
+      const [px, py, pos] = run.screenPos(m.key);
+      return { key: m.key, w: m.w, h: m.h, anchor: run.screenAnchor(m.key), px, py, pos };
+    });
     if (run.error) { this.error = run.error; this.stop(); }
     this.cycles++;
     this.notify();

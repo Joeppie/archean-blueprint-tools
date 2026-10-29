@@ -234,7 +234,7 @@ export default function TopBar(p: Props) {
             )}
             <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-ink-dim">
             Programmable computers</div>
-            {p.xenonComps!.map(c => (
+            {(p.xenonComps ?? []).map(c => (
               <Item key={c.ci} testid={`xenon-comp-${c.ci}`}
                 label={`⌨ ${c.alias || c.program}${c.builtin ? ' ·built-in' : ''}`} hint={`${c.files} .xc`}
                 onClick={() => { close(); p.onXenon?.(c.ci); }} />
@@ -244,7 +244,7 @@ export default function TopBar(p: Props) {
             {(p.xenonHuds?.length ?? 0) > 0 && (<>
               <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-ink-dim">
               HUD programs</div>
-              {p.xenonHuds!.map(h => (
+              {(p.xenonHuds ?? []).map(h => (
                 <Item key={h.ci} testid={`xenon-hud-${h.ci}`}
                   label={`🖥 ${h.alias}`} hint={`${h.files} .xc`}
                   onClick={() => { close(); p.onHud?.(h.ci); }} />

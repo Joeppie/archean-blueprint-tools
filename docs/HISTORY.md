@@ -3283,6 +3283,47 @@ topic + FORMAT).
   INVADERS / Top Scores / By Shadoh" like the in-game screenshot;
   faceorient green on chromium + pixel7; tsc clean.
 
+- **v1.15.5 — THE HUD SCREEN WINDOW + set_size + the HUD LIBRARY
+  (2026-10-29).** Three reports: (a) "in rcs infinity, the HUD wont
+  run/compile, it doesnt know set_size lives in panel? … its in the HUD
+  documentation, can we get it from somewhere in the game files or
+  official documentation?" — the game SHIPS its wiki in-app
+  (`wiki/en/xenoncode/hud.md`): "$myPanel.set_size($width, $height) ;
+  resizes the panel" + the `.width/.height` getters; RCS Infinity
+  (testdata/3518436870) calls set_size LIVE, so the shim's parse refused
+  a legal program. ABI 13: `set_size` + getters on the panel object;
+  upstream fork XENON-PANEL-RESIZE (XenonScreen `_width/_height`
+  non-const + `Resize(w,h)` keeping the pointer identity). (b) "Panels
+  in Huds are rendered independently.. not how they normally work. They
+  should be composed together on a normal screen as per the rules of the
+  game… choose screen resolution and restart/start… composes together
+  the panels (respecting alpha, like the real thing.)" + (c) "mouseover
+  in the composed screen and buttons dont seem to work. Niether can I
+  properly zoom into panels themselves, like with screens. Also library
+  of functions is missing like it is for the computer in our HUD
+  screen." → the HUD IDE side tabs are now Panels | SCREEN | Library |
+  Beacons: the SCREEN window composites every panel#N onto a SIMULATED
+  PLAYER SCREEN (preset/custom W×H → xc_set_view → screen_w/screen_h;
+  APPLY RESTARTS the runtime, the game's resolution law), panels ride
+  set_position px/py (ABI 14 xc_screen_px/py/haspos, ScreenSlot.hasPos)
+  or their ANCHOR layout until set, alpha blends via drawImage; clicks
+  hit-test the panel under the cursor and route in at panel coords
+  (button_rect evaluates THIS cycle); tiles gained ⛶ Screens-style zoom
+  (−/+/fit/1:1px, wheel, scrollbars); the Library tab is the computer
+  IDE's, extracted to components/XenonLibrary.tsx (hud-lib-* testids,
+  panel/beacon member chips appended). FOUND EN ROUTE: TopBar crashed
+  the Xenon menu on a HUD-only craft (`p.xenonComps!.map` with the
+  Editor passing `undefined` when no computers) — the Panel Bench is the
+  first HUD-only fixture; `(p.xenonComps ?? [])`. Pinned: xenonhud
+  Panel Bench (set_size parse+resize) + SCREEN-window legs (anchor
+  composition, set_position, resolution restart, composited click→button
+  'HIT') on fixture 9000009030 (tools/make_hudsize_test.py); LESSON:
+  ink centroids need FULL-scan sampling — 2-px strides alias out 1-px
+  text strokes and faked a q-only centroid for a round. RCS Infinity
+  probe: HUD runs (ON 126 cyc, 4 panels, 21 359 ink composited), Library
+  47 docs, zoom 156%. Gates: tsc clean, vitest 968, xenonhud legs green
+  on chromium + pixel7.
+
 ## 2. v1.11 session — KNOWN ISSUES & UNPINNED TODOS (2026-10-25/26 session block)
 
 KNOWN ISSUES (accepted behaviours, costs, sharp edges):

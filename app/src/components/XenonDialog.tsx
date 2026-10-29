@@ -42,9 +42,9 @@ import { ScreensCell } from './ScreensDock';
 import { CodeEditor, type CodeEditorHandle } from './CodeEditor';
 import BeaconPanel from './BeaconPanel';
 import {
-  functionAt, libIndex, projectDecls, projectFunctions,
-  XC_LIB_DOC, XC_LIB_GROUPS, XC_SCREEN_MEMBERS, XC_GLOBAL_CONSTS,
+  functionAt, projectDecls, projectFunctions, XC_LIB_DOC,
 } from '../engine/xcproject';
+import XenonLibrary from './XenonLibrary';
 
 const MAX_PARSE_LINES = 500;   // validation pass cap (window around the caret)
 const fmtVal = (v: number | string) =>
@@ -79,9 +79,7 @@ export default function XenonDialog(p: {
   const [varQ, setVarQ] = useState('');
   const [scrQ, setScrQ] = useState('');
   // LIBRARY side tab (v1.13.25, we: "an index of all known library and
-  // custom-defined functions as a library of definitions, so I can find it
-  // inside the computer") — its own filter text
-  const [libQ, setLibQ] = useState('');
+  // LIBRARY search text lives inside components/XenonLibrary (v1.15.5)
   // ── AUTOTEST (v1.13.7, we: "a simple interface for automating that in
   // the editor, almost like a scripting language, so we can have an
   // interface for AI agents … so a craft can be diagnosed using that"):
@@ -633,31 +631,8 @@ export default function XenonDialog(p: {
   }, [pump.surfaces, scrQ, bindings, pump.cycles]);
   // LIBRARY tab lists (v1.13.25): the disk's declared functions + the
   // built-in library table, both filtered by the tab's one search row
-  // LIBRARY group tabs (v1.13.26, we: "library function should be in tabs,
-  // screen, system, IO should all have their own coloured category")
-  const [libG, setLibG] = useState('all');
-  const libColor = (k: string) => XC_LIB_GROUPS.find(g => g.key === k)?.color ?? '#5d6a7d';
-  const libFuncs = useMemo(() => {
-    const q = libQ.trim().toLowerCase();
-    return q
-      ? funcs.filter(f => f.display.toLowerCase().includes(q) || f.file.toLowerCase().includes(q))
-      : funcs;
-  }, [funcs, libQ]);
-  const libDocs = useMemo(
-    () => libIndex(libQ).filter(f => libG === 'all' || f.group === libG),
-    [libQ, libG]);
-  // v1.13.27: the game's global constants — Colors/Alignment/Math chips
-  // filter them; a function-group chip hides the section, 'All' shows all
-  const libConsts = useMemo(() => {
-    const q = libQ.trim().toLowerCase();
-    return XC_GLOBAL_CONSTS.filter(c =>
-      (libG === 'all' || c.kind === libG)
-      && (!q || c.name.includes(q) || c.desc.toLowerCase().includes(q) || c.kind.includes(q)));
-  }, [libQ, libG]);
-  const libMembers = useMemo(() => {
-    const q = libQ.trim().toLowerCase();
-    return q ? XC_SCREEN_MEMBERS.filter(m => m.includes(q)) : XC_SCREEN_MEMBERS;
-  }, [libQ]);
+  // LIBRARY (v1.15.5): the side-tab body moved to components/XenonLibrary
+  // (shared with the HUD IDE); the tab label still counts the disk decls.
   const status = tab === 100 ? 'nodes' : 'code';
 
   const save = (_all: boolean) => {
@@ -1145,9 +1120,7 @@ export default function XenonDialog(p: {
                     className="w-full rounded border border-[#2b3a52] bg-[#0b0f18] px-2 py-1 text-[11px] outline-none" />
                 )}
                 {side === 'library' && (
-                  <input data-testid="xenon-lib-search" value={libQ} placeholder="search functions…"
-                    onChange={e => setLibQ(e.target.value)}
-                    className="w-full rounded border border-[#2b3a52] bg-[#0b0f18] px-2 py-1 text-[11px] outline-none" />
+                  <span className="shrink-0 text-[9px] text-[#5d6a7d]">search inside the Library tab</span>
                 )}
               </div>
             </div>
@@ -1266,89 +1239,12 @@ export default function XenonDialog(p: {
               </div>
             </>)}
             {side === 'library' && (<>
-              {/* THE LIBRARY OF DEFINITIONS (v1.13.25, we: "an index of all
-                  known library and custom-defined functions … so I can find
-                  it inside the computer"): the disk's declared @functions
-                  (click = jump to the declaration) + the built-in callables
-                  (the xcproject table, our one-line summaries) + the screen
-                  members. One search row filters all three groups. */}
-              <div className="text-[10px] uppercase tracking-widest text-[#5d6a7d]">
-                On this computer · {libFuncs.length}
-              </div>
-              {libFuncs.map(f => (
-                <button key={`${f.file}:${f.line}:${f.name}`} data-testid={`xenon-lib-fn-${f.name}`}
-                  onClick={() => jumpTo(f.file, f.line)}
-                  title={`${f.file}:${f.line} — jump to the declaration`}
-                  className="block w-full rounded border border-[#2b3a52] bg-[#152036] px-2 py-1 text-left text-[11px] hover:bg-[#1d2b42]">
-                  <span className="text-[#8fd4ff]">{f.display}</span>
-                  <span className="float-right text-[9px] text-[#5d6a7d]">{f.file}:{f.line}</span>
-                </button>
-              ))}
-              {libFuncs.length === 0 && (
-                <span className="text-[11px] text-[#5d6a7d]">
-                  {funcs.length === 0 ? 'no function @declarations on this disk' : 'no declared function matches'}
-                </span>
-              )}
-              {/* CATEGORY TABS (v1.13.26): one coloured chip per library
-                  group; the chip dot AND the doc row's left border carry
-                  the group colour (ONE visual, no legend needed) */}
-              <div className="flex flex-wrap items-center gap-1" data-testid="xenon-lib-groups">
-                <button data-testid="xenon-lib-g-all" onClick={() => setLibG('all')}
-                  className={`rounded px-1.5 py-0.5 text-[10px] ${libG === 'all' ? 'bg-[#1d2b42] text-white' : 'text-[#7d8aa0] hover:bg-[#182236]'}`}>
-                  All {XC_LIB_DOC.length}
-                </button>
-                {XC_LIB_GROUPS.map(g => (
-                  <button key={g.key} data-testid={`xenon-lib-g-${g.key}`} onClick={() => setLibG(g.key)}
-                    className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] hover:bg-[#182236] ${libG === g.key ? 'bg-[#1d2b42]' : 'text-[#7d8aa0]'}`}
-                    style={libG === g.key ? { color: g.color } : undefined}>
-                    <span className="inline-block h-2 w-2 rounded-full" style={{ background: g.color }} />
-                    {g.label} {XC_LIB_DOC.filter(f => f.group === g.key).length}
-                  </button>
-                ))}
-              </div>
-              <div className="text-[10px] uppercase tracking-widest text-[#5d6a7d]">
-                XenonCode library · {libDocs.length}
-              </div>
-              {libDocs.map(f => (
-                <div key={f.name} data-testid={`xenon-lib-doc-${f.name}`}
-                  className="rounded border border-[#232c3d] border-l-2 bg-[#131a28] px-2 py-1 text-[11px]"
-                  style={{ borderLeftColor: libColor(f.group) }}>
-                  <div className="flex items-baseline justify-between gap-2">
-                    <span style={{ color: libColor(f.group) }}>{f.sig}</span>
-                    <span className="shrink-0 text-[9px] uppercase tracking-wide text-[#5d6a7d]">{f.group}</span>
-                  </div>
-                  <div className="text-[10px] leading-snug text-[#9fb0c8]">{f.desc}</div>
-                </div>
-              ))}
-              {libDocs.length === 0 && libConsts.length === 0 && libMembers.length === 0
-                && <span className="text-[11px] text-[#5d6a7d]">no library function matches</span>}
-              {/* GLOBAL CONSTANTS (v1.13.27, we: "red, green which seem to
-                  be built in constants are not recognized. They are
-                  colors"): declared by the game shim (xc_host.cpp), all
-                  NUMBERS — colors hold packed RGBA, swatched here */}
-              {libConsts.length > 0 && (<>
-                <div className="text-[10px] uppercase tracking-widest text-[#5d6a7d]">
-                  Global constants · {libConsts.length}
-                </div>
-                {libConsts.map(c => (
-                  <div key={c.name} data-testid={`xenon-const-${c.name}`} title={`${c.desc} (type: number)`}
-                    className="flex items-center gap-2 rounded border border-l-2 border-[#232c3d] bg-[#131a28] px-2 py-1 text-[11px]"
-                    style={{ borderLeftColor: c.hex ?? (c.kind === 'align' ? '#ffd9a0' : '#a0d9ff') }}>
-                    {c.hex && <span className="inline-block h-3 w-3 shrink-0 rounded-sm border border-[#3a4a6a]"
-                      style={{ background: c.hex }} />}
-                    <span className="text-[#8fd4ff]">{c.name}</span>
-                    <span className="ml-auto shrink-0 text-[9px] uppercase tracking-wide text-[#5d6a7d]">
-                      {c.kind === 'align' ? 'alignment' : c.kind === 'color' ? 'color · number' : 'number'}
-                    </span>
-                  </div>
-                ))}
-              </>)}
-              <div className="text-[10px] uppercase tracking-widest text-[#5d6a7d]">
-                Screen members · {libMembers.length}
-              </div>
-              <div className="text-[10px] leading-relaxed text-[#9fb0c8]">
-                {libMembers.join(' · ') || 'no screen member matches'}
-              </div>
+              {/* THE LIBRARY OF DEFINITIONS (v1.13.25; v1.15.5 extracted to
+                  components/XenonLibrary.tsx so the HUD IDE carries the
+                  same index): declared @functions + built-in callables +
+                  constants + screen members; chips + search filter all. */}
+              <XenonLibrary funcs={funcs} onJump={(f, l) => jumpTo(f, l)}
+                ownerLabel="On this computer ·" testId="xenon" />
             </>)}
             {side === 'world' && (<>
               {/* WORLDSIM (engine/worldsim.ts): every input channel is a

@@ -269,7 +269,30 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   side tab (computer IDE + HUD IDE + 📡 dock) renders the registry
   (seeded from components + scanned `beacon()` literals, runtime-merged
   by id; EXACT text-frequency routing; logs survive re-seeds). The shim
-  twin: `xc_host.cpp` ABI 12 ↔ `XC_ABI`; demo `tools/xenoncode/demo/hudradio`.
+  twin: `xc_host.cpp` ABI 14 ↔ `XC_ABI`; demo `tools/xenoncode/demo/hudradio`.
+- THE HUD SCREEN WINDOW (v1.15.5, we: "Panels in Huds are rendered
+  independently.. not how they normally work. They should be composed
+  together on a normal screen as per the rules of the game… choose screen
+  resolution and restart/start… composes together the panels (respecting
+  alpha, like the real thing)"): the HUD IDE side tabs are Panels |
+  **Screen** | **Library** | Beacons. SCREEN = ONE canvas at a simulated
+  PLAYER SCREEN (presets + custom w/h, localStorage `archean-hud-view`,
+  fed to the VM's `screen_w/screen_h` via `xc_set_view`; APPLY RESTARTS
+  the runtime — the game's resolution law); every panel#N composites at
+  its `set_position` px/py (ABI 14 `xc_screen_px/py/haspos` — until set,
+  the panel rides its ANCHOR layout: `anchorLayout()` edge maths), pixel
+  alpha blended. CLICKS on the composite hit-test the panel under the
+  cursor and route in at panel coords (buttons work there, not only on
+  the tiles); panel tiles gained ⛶ Screens-style ZOOM windows (−/+/fit/
+  1:1px, wheel zoom, scrollbars pan). The HUD IDE carries the SAME
+  `XenonLibrary` side tab as the computer IDE (extracted; `hud-lib-*`
+  testids, panel/beacon members appended). `set_size` + `.width/.height`
+  are shim panel members (ABI 13; the wiki hud.md law — shipped HUDs like
+  RCS Infinity call them LIVE; a program that can't PARSE is a shim bug,
+  check the wiki + the game's wiki/ folder FIRST). Pins: xenonhud Panel
+  Bench + SCREEN-window legs (fixture `tools/make_hudsize_test.py` →
+  9000009030; FULL-scan ink centroids — 2-px strides alias out 1-px text
+  strokes).
 - THE ONE-BUILT-IN-DECLARATION LAW (v1.15.2, we: "space invaders doesnt show
   its main graphic when loading … the enemy squadron is almost the size of
   the screen"): `DeclareDeviceFunction` OVERRIDES by name — every device

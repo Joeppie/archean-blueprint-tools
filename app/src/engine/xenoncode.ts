@@ -53,6 +53,9 @@ type Mod = {
   _xc_set_world?: (key: number, value: number) => void;
   _xc_set_view?: (w: number, h: number, mx: number, my: number, fov: number, look: number) => void;
   _xc_screen_anchor?: (idx: number) => number;
+  _xc_screen_px?: (idx: number) => number;
+  _xc_screen_py?: (idx: number) => number;
+  _xc_screen_haspos?: (idx: number) => number;
   _xc_hud_mode?: (on: number) => void;
   _xc_worldsim_overrides(): number;
   _xc_worldsim_sync(name: number, v: number): void;
@@ -694,6 +697,19 @@ export class XenonRun {
     const idx = m._xc_screen_index(p);
     m._free(p);
     return idx >= 0 ? m._xc_screen_anchor(idx) : 16;
+  }
+  /** ABI 14: a panel's set_position px/py and whether it was ever set
+   *  (until then the panel rides its anchor layout — the SCREEN window). */
+  screenPos(key: string): [number, number, boolean] {
+    const m = this.mod;
+    if (typeof m._xc_screen_px !== 'function' || typeof m._xc_screen_py !== 'function'
+        || typeof m._xc_screen_haspos !== 'function') return [0, 0, false];
+    const p = this.putStr(key);
+    const idx = m._xc_screen_index(p);
+    m._free(p);
+    return idx >= 0
+      ? [m._xc_screen_px(idx), m._xc_screen_py(idx), m._xc_screen_haspos(idx) > 0]
+      : [0, 0, false];
   }
   /** Route a canvas click on one surface (pixel coords of the surface).
    *  button_rect/button evaluate true for it THIS cycle (game law). */
@@ -2349,7 +2365,9 @@ export class XenonPump {
 /** The shim ABI the app expects (xc_host.cpp xc_abi()). Bump with the shim.
  *  12 = xc_hud_mode + the ONE screen_w/screen_h declaration (the v1.14.1
  *  duplicate OVERRODE the computer law — Space Invaders layout clobber). */
-export const XC_ABI = 12;
+/** 14 = xc_screen_px/py/haspos (the composited HUD SCREEN window);
+ *  13 = $panel.set_size(w,h) + width/height getters (ABI 13; wiki hud.md law). */
+export const XC_ABI = 14;
 
 // ---------------------------------------------------------------------------
 // COMPUTERFARM — the craft's co-running pumps + the SHARED io bus

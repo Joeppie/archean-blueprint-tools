@@ -42,6 +42,10 @@ struct ScreenSlot {
 	// set_position(x,y) (slice B): the panel's player-screen pixel position
 	// (the readme HUD parks its help button screen-right with it)
 	double px = 0, py = 0;
+	// ABI 14 (v1.15.5 SCREEN window): set_position was called at least once
+	// — until then the panel rides its ANCHOR layout (the game's law), the
+	// app's composited HUD screen reads this through xc_screen_haspos.
+	bool hasPos = false;
 };
 static std::vector<ScreenSlot> g_screens;
 static std::map<XenonScreen*, size_t> g_slotByPtr;  // object -> slot INDEX
@@ -360,8 +364,27 @@ static void archeanInit() {
 	panelMembers["y:number"] = [](Computer*, const Var& o, const vector<Var>&) -> Var {
 		auto* s = slotOf(o); return s ? s->py : 0.0; };
 	panelMembers["set_position($x:number,$y:number)"] = [](Computer*, const Var& o, const vector<Var>& a) -> Var {
-		if (auto* s = slotOf(o)) { s->px = a[0]; s->py = a[1]; }
+		if (auto* s = slotOf(o)) { s->px = a[0]; s->py = a[1]; s->hasPos = true; }
 		return {}; };
+	// ABI 13 (v1.15.5, we: "in rcs infinity, the HUD wont run/compile, it
+	// doesnt know set_size… its in the HUD documentation"): the game's own
+	// wiki (wiki/en/xenoncode/hud.md — the shipped in-game help) documents
+	// "$myPanel.set_size($width, $height) ; resizes the panel" (and the
+	// .width/.height getters) — RCS Infinity's guide HUD calls it LIVE, so
+	// the shim's parse refused a 100% legal program. XenonScreen::Resize
+	// (XENON-PANEL-RESIZE) keeps the panel pointer identity; the fresh
+	// w/h rides the per-cycle screen metas → the app's panel canvas
+	// resizes with it.
+	panelMembers["set_size($w:number,$h:number)"] = [](Computer*, const Var& o, const vector<Var>& a) -> Var {
+		double w = a[0], h = a[1];
+		if (auto* s = Scr(o))
+			s->Resize((uint32_t)std::max(1.0, std::min(10000.0, w)),
+			          (uint32_t)std::max(1.0, std::min(10000.0, h)));
+		return {}; };
+	panelMembers["width:number"] = [](Computer*, const Var& o, const vector<Var>&) -> Var {
+		auto* _S = Scr(o); return _S ? (double)_S->GetWidth() : 0.0; };
+	panelMembers["height:number"] = [](Computer*, const Var& o, const vector<Var>&) -> Var {
+		auto* _S = Scr(o); return _S ? (double)_S->GetHeight() : 0.0; };
 	panelType = XenonCode::DeclareObjectType("panel", panelMembers);
 
 	// ---- the beacon object (v1.14.1 P9 slice B, FORMAT §HUD & the Beacon
@@ -1529,6 +1552,18 @@ EMSCRIPTEN_KEEPALIVE void xc_hud_mode(int on) { g_hudMode = on != 0; }
 EMSCRIPTEN_KEEPALIVE double xc_screen_anchor(int idx) {
 	return (idx >= 0 && idx < (int)g_screens.size()) ? g_screens[idx].anchor : 16.0;
 }
+// ABI 14 (v1.15.5): the app's composited HUD SCREEN reads a panel's
+// set_position px/py (and whether it was ever set — until then the panel
+// rides its anchor layout, the game's law).
+EMSCRIPTEN_KEEPALIVE double xc_screen_px(int idx) {
+	return (idx >= 0 && idx < (int)g_screens.size()) ? g_screens[idx].px : 0.0;
+}
+EMSCRIPTEN_KEEPALIVE double xc_screen_py(int idx) {
+	return (idx >= 0 && idx < (int)g_screens.size()) ? g_screens[idx].py : 0.0;
+}
+EMSCRIPTEN_KEEPALIVE double xc_screen_haspos(int idx) {
+	return (idx >= 0 && idx < (int)g_screens.size() && g_screens[idx].hasPos) ? 1.0 : 0.0;
+}
 // The IDE's screen canvases route user interaction in (pixel coords of the
 // surface). The click is visible to button_rect/button and the clicked
 // built-ins for ONE cycle, then cleared by xc_endCycle.
@@ -1641,7 +1676,7 @@ EMSCRIPTEN_KEEPALIVE const char* xc_write_var(int fileIdx, int line, const char*
 
 // ABI stamp: the app checks this at boot (XC_ABI in engine/xenoncode.ts) and
 // warns ONCE on drift — new device/shim exports must bump it.
-EMSCRIPTEN_KEEPALIVE int xc_abi() { return 12; }  // 12: xc_hud_mode + ONE screen_w/screen_h declaration serving computer AND HUD (the v1.14.1 duplicate OVERRODE the computer law — DeclareDeviceFunction replaces by name — scaling every computer layout by the 1920x1080 viewport: the Space Invaders main-graphic loss); 11: panel()/beacon() object + beaconpair/beacontx events + get()/xc_set_world + xc_beacon_put + xc_set_input_t + xc_set_view + xc_screen_anchor (HUD runtime + beacon radio); 10: depth stream + hookLive gate + exact-line pause seam (XENON-DEBUG v3); 9: xc_write_var + the hook's cmd-6 write handoff (editable debug values); 8: xc_locals_json + the hook's SAB locals handoff (the Locals panel); 7: the stop-hook is LIVE (library_xc.js + Module.XC_SAB worker stepping); 6: xc_cycle_pairs + hook seam; 5: xc_set_cycle_ms
+EMSCRIPTEN_KEEPALIVE int xc_abi() { return 14; }  // 14: xc_screen_px/xc_screen_py/xc_screen_haspos (the app's composited HUD SCREEN window — panels ride anchor until set_position); 13: $panel.set_size(w,h) + $panel.width/.height (HUD law from the shipped wiki hud.md — XENON-PANEL-RESIZE; RCS Infinity's guide HUD calls it live); 12: xc_hud_mode + ONE screen_w/screen_h declaration serving computer AND HUD (the v1.14.1 duplicate OVERRODE the computer law — DeclareDeviceFunction replaces by name — scaling every computer layout by the 1920x1080 viewport: the Space Invaders main-graphic loss); 11: panel()/beacon() object + beaconpair/beacontx events + get()/xc_set_world + xc_beacon_put + xc_set_input_t + xc_set_view + xc_screen_anchor (HUD runtime + beacon radio); 10: depth stream + hookLive gate + exact-line pause seam (XENON-DEBUG v3); 9: xc_write_var + the hook's cmd-6 write handoff (editable debug values); 8: xc_locals_json + the hook's SAB locals handoff (the Locals panel); 7: the stop-hook is LIVE (library_xc.js + Module.XC_SAB worker stepping); 6: xc_cycle_pairs + hook seam; 5: xc_set_cycle_ms
 EMSCRIPTEN_KEEPALIVE void xc_set_cycle_ms(int ms) {
 	// the app's pump cadence (CYCLE_MS): delta_time / system_frequency
 	// follow it, so dt-driven programs (Chip's Mario, physics on

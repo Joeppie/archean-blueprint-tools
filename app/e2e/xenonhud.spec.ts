@@ -90,6 +90,103 @@ test.describe('HUD blocks + beacon radio @ui', () => {
   // send form reaches the HUD's .data on BADGER-GUIDE-UI-OUT.
   // e2e-tier because: the law is VM → canvas pixels + cross-runtime radio
   // delivery — nothing below the browser can see it.
+  test('the Panel Bench: $panel.set_size COMPILES and resizes @slow', async ({ page }) => {
+    // v1.15.5 (we: "in rcs infinity, the HUD wont run/compile, it doesnt
+    // know set_size lives in panel? … its in the HUD documentation, can we
+    // get it from somewhere in the game files or official documentation?"
+    // — YES: the shipped wiki/en/xenoncode/hud.md documents
+    // "$myPanel.set_size($width, $height)" and RCS Infinity (3518436870)
+    // calls it LIVE). Fixture 9000009030 (tools/make_hudsize_test.py): a
+    // HUD program that PARSES set_size (the compile gate — the shim parse
+    // refused a 100% legal program before ABI 13) and resizes
+    // panel(top,100,40) to 160x60 at tick 30. e2e-tier because: the gate
+    // is the real shim PARSE plus the live canvas geometry.
+    test.setTimeout(240_000);
+    await page.goto('/?craft=9000009030');
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 120_000 });
+    await page.getByTestId('xenon-menu').click();
+    await page.getByTestId('xenon-hud-0').click();
+    await expect(page.getByTestId('hud-dialog')).toBeVisible();
+    await page.getByTestId('hud-run').click();
+    await expect(page.getByTestId('hud-run-status'))
+      .toContainText('ON', { timeout: 30_000 });   // the PARSE gate
+    const canvas = page.getByTestId('hud-panel-canvas-0');
+    await expect(canvas).toBeVisible({ timeout: 30_000 });
+    // tick 30 (~1.2 s at 25 Hz) resizes the panel; the canvas follows the
+    // per-cycle screen metas (XenonScreen::Resize keeps panel identity)
+    await expect
+      .poll(() => canvas.evaluate((c: HTMLCanvasElement) => `${c.width}x${c.height}`),
+        { message: 'set_size(160, 60) resizes the panel surface', timeout: 30_000 })
+      .toBe('160x60');
+  });
+
+  test('the SCREEN window composites panels by anchor + set_position @slow', async ({ page }) => {
+    // v1.15.5 (we: "Panels in Huds are rendered independently.. not how
+    // they normally work. They should be composed together on a normal
+    // screen as per the rules of the game… choose screen resolution and
+    // restart/start… composes together the panels (respecting alpha, like
+    // the real thing.)"): fixture 9000009030 paints $p (set_size 160x60,
+    // set_position(400,200) at tick 60) and an always-anchored $q
+    // (panel(top,200,40)). On the simulated 1920×1080 player screen the
+    // ink centroid x ≈ (480 + 960)/2 = 720; applying 800×600 (restart)
+    // re-centres the anchored q at x 400 → centroid ≈ 440. e2e-tier
+    // because: the law is composited canvas geometry in the real app.
+    test.setTimeout(240_000);
+    await page.goto('/?craft=9000009030');
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 120_000 });
+    await page.getByTestId('xenon-menu').click();
+    await page.getByTestId('xenon-hud-0').click();
+    await page.getByTestId('hud-run').click();
+    await expect(page.getByTestId('hud-run-status')).toContainText('ON', { timeout: 30_000 });
+    await page.getByTestId('hud-side-screen').click();
+    const screen = page.getByTestId('hud-screen-canvas');
+    await expect(screen).toBeVisible({ timeout: 30_000 });
+    const centroid = () => screen.evaluate((c: HTMLCanvasElement) => {
+      const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+      let s = 0, n = 0;
+      // FULL scan: 1-px text strokes alias out on a stride (v1.15.5 lesson)
+      for (let py = 0; py < c.height; py++)
+        for (let px = 0; px < c.width; px++) {
+          const i = (py * c.width + px) * 4;
+          if (d[i] + d[i + 1] + d[i + 2] > 90) { s += px; n++; }
+        }
+      return n > 40 ? s / n : -1;
+    });
+    // 1920×1080: p at 400..560 (cx 480), anchored q at 860..1060 (cx 960)
+    await expect
+      .poll(async () => (await screen.evaluate((c: HTMLCanvasElement) => c.width)) === 1920
+        ? await centroid() : -1,
+        { message: 'panels composited at anchor + set_position (1920)', timeout: 40_000 })
+      .toBeGreaterThan(600);
+    const c1920 = await centroid();
+    expect(c1920).toBeLessThan(900);
+    // apply 800×600 → restart → anchored q re-centres at x 400 (the game's
+    // resolution law: the layout recomputes against the fresh screen_w)
+    await page.getByTestId('hud-screen-w').fill('800');
+    await page.getByTestId('hud-screen-h').fill('600');
+    await page.getByTestId('hud-screen-apply').click();
+    await expect
+      .poll(async () => (await screen.evaluate((c: HTMLCanvasElement) => c.width)) === 800
+        ? await centroid() : -1,
+        { message: 'anchored panel re-centres on the new player screen', timeout: 40_000 })
+      .toBeLessThan(620);
+    // THE SCREEN-CANVAS CLICK ROUTES INTO THE PANEL UNDER THE CURSOR
+    // (we: "mouseover in the composed screen and buttons dont seem to
+    // work"): p (now 160x60 AT 400,200) carries a button_rect at panel
+    // (110,40,44,16) → screen rect (510,240)-(554,256); clicking its
+    // centre must make the program draw 'HIT' (ink mass jumps).
+    const box = (await screen.boundingBox())!;
+    await page.mouse.click(box.x + box.width * 532 / 800, box.y + box.height * 248 / 600);
+    await expect
+      .poll(() => screen.evaluate((c: HTMLCanvasElement) => {
+        const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+        let n = 0;
+        for (let i = 0; i < d.length; i += 4) if (d[i] + d[i + 1] + d[i + 2] > 90) n++;
+        return n;
+      }), { message: 'the composited-screen click reached the panel button', timeout: 15_000 })
+      .toBeGreaterThan(150);
+  });
+
   test('the HUD runtime: live panels + the beacon loop into a component @slow', async ({ page }) => {
     test.setTimeout(240_000);
     await page.goto(`/?craft=${BADGER}`);
