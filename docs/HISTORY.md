@@ -3017,6 +3017,18 @@ topic + FORMAT).
   — ComputerFarm (N pumps per craft) + SHARED per-craft io bus +
   Beacon-as-io-device with a frequency-channel registry + HUD
   workspace; ChipOS-critical first (Y-bump candidate, needs assent).
+  Follow-up same day — the "homo" HUD FOUND: it is a PLAYER-INSTALLED
+  HUD at `Archean-data/client/hud/homo/` (main.xc + parse.xc + the
+  client-compiled xc_program.bin + an `active` flag), NOT a craft
+  blueprint — transcribed into FORMAT §Player-installed HUDs (numeric
+  beacon freqs `beacon(5,5664)`, avatar-sensor `get()`s + the 6 203 000
+  m sea-level datum, word anchors + centre-relative panel coords, the
+  panel method set, `set_cps`; siblings: `omfg` = the RCS-500 installed
+  companion whose header documents the PRESSURE→flight-power HUD→craft
+  CONTROL path, `readme` = the game-shipped welcome UI in
+  `default_huds/`, `client/hud/HudControllers/ENTT…/` = the per-craft-
+  entity deploy cache). P9's HUD workspace covers BOTH sources (craft
+  component + installed .xc).
 
 ## 2. v1.11 session — KNOWN ISSUES & UNPINNED TODOS (2026-10-25/26 session block)
 

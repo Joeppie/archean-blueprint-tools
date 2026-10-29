@@ -597,6 +597,12 @@ sim; the Beacon component is not an io DEVICE at all.
    HUD canvas docks like a Screens surface; `click` entry points fire
    from real pointer events (the ScreensCell rig is the base).
    ChipOS playtest = boot a computer + a HUD, watch both directions.
+   SOURCES (v1.13.33 addendum, FORMAT §Player-installed HUDs): BOTH the
+   craft's HudController component AND a plain "installed HUD" `.xc`
+   (the `client/hud/<name>/main.xc` shape — the user's "homo" HUD) run
+   in the workspace; avatar-sensor feeds (`get("avatar_sensor_*")`)
+   come from worldsim; the omfg PRESSURE→flight-power relay proves
+   HUD→craft commands are a control path the bus must route.
 5. Pins: farm boot/kill (node tier via __XCDBG__-style seam), bus
    cross-talk vitest (two XenonRuns, one IoBus — the pure shim
    interleaves), beacon loopback node pin (RCS500 protocol as the

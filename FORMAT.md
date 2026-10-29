@@ -1086,6 +1086,44 @@ user's "RCS500" — its beacon frequencies are literally `RCS-500-HUD-SEND` /
   behavior (rates, payload size caps, range) NOT measured — the app today models
   neither HudController programs nor beacon radio in the sim.
 
+### Player-installed HUDs — `Archean-data/client/hud/` (verified 2026-10-29)
+
+The SAME program format also runs as a **player-side installed HUD**, outside
+any craft — the user's "homo" HUD lives here:
+`client/hud/<name>/main.xc` (+ `include"parse.xc"` shared helpers + the
+client-compiled `xc_program.bin` + an `active` flag file); the game ships
+`default_huds/readme/` (the in-game welcome UI — written entirely in this
+API); F1 settings ▸ HUD tab toggles them. `client/hud/HudControllers/ENTT…/`
+(dirs keyed by craft ENTITY id, same `ENTT…` form as the beacon
+`from{ENTT…}` field) = the CACHE where a craft's HudController program is
+DEPLOYED when launched to the player client (observed empty = transient).
+
+Demonstrated semantics (homo / omfg / readme + the two craft HUDs):
+- Frequencies are numbers OR text: `beacon(5,5664)` and
+  `beacon("RCS-500-HUD-RECEIVE","RCS-500-HUD-SEND")` both legal.
+- **Avatar sensors** (player-side world data): `get("avatar_sensor_speed")`
+  (m/s), `get("avatar_sensor_altitude")` (terrain),
+  `get("avatar_sensor_altitude_absolute")` — returned TEXT, parsed with a
+  numeric parse helper; sea-level datum = absolute − 6 203 000 m.
+- Fullscreen layer: `panel(center, screen_w, screen_h)`; anchors are WORDS
+  (`top` `bottom` `center` `top_right`); panel coordinates are CENTRE-relative
+  (negative offsets land up/left).
+- Panel object API: `.blank([color]) .write(x,y,color,text)` (`\n` +
+  `text("Page:{}",$n)` format strings) `.text_size(n) .text_align(…)`
+  `.draw(color,x,y[,w,h]) .draw_rect/line/circle/triangle(...,color[,fill])
+  .button_rect(...)/.button_circle(...)` (return 1 on click) `.set_position`
+  `.newline_spacing(n)`; properties `.width .height .x .y .char_w`.
+- Builtins/vars seen: `mouse_x mouse_y fov time screen_w set_cps(n)` (redraw
+  rate), color words (`white black brown cyan`), `color(r,g,b[,a])` (alpha
+  0-255), `size() pow round find sin abs`, string `&` concat, `$text.$i`
+  indexing, `$v:number` cast, `for A, B ($x)` loops, `storage var` persists.
+- **HUD→craft commands are a real control path**: the omfg header states the
+  HUD relays PRESSURE to the vessel, which auto-reduces flight power —
+  bidirectional craft↔HUD operability, "without using too many inputs on the
+  computer". The installed-HUD mode is thus a THIRD actor the sim should be
+  able to model (P9 HUD workspace covers both sources: craft HudController
+  component AND an installed `.xc`).
+
 ## Empirical findings (from the 12° lean experiment, Oct 4)
 
 - Editing `PilotSeat.position` (and its occupancy + type-255 mirror) **persisted**
