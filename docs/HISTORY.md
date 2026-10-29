@@ -3156,6 +3156,19 @@ topic + FORMAT).
   and the farm gained a subscribe (attach/detach notify) so the Editor
   re-renders when a boot started from the dock's own effect changes the
   pump lineup (the screens pins).
+ - **v1.15.1 THE XENON ▾ MODE ANNOUNCEMENT RETIRED — warning only (we,
+   2026-10-29, "remove the notification that says its possible to debug;
+   that is mostly superfluous; just the warning"):** the Computer menu's
+   debugger-mode banner (v1.13.18) had a GREEN state announcing "worker ·
+   true line-stepping" on a cross-origin-isolated origin — a notification
+   of a capability that works, i.e. noise; it now renders ONLY on the
+   degraded (non-isolated) origin, where the ⚠ cycle-granular warning is
+   the point. The dialog's `xenon-mode` chip stays untouched — it is the
+   live-stepper observable the pins prove (worker boot, no silent
+   fallback), not an announcement. Pins re-derived: topbar.test (isolated
+   origin ⇒ NO banner), xenon.spec + isolation.spec legs assert
+   `toHaveCount(0)` on the isolated origin and keep the chip's
+   'worker · true line-stepping' assertions as the isolation proof.
 
 ## 2. v1.11 session — KNOWN ISSUES & UNPINNED TODOS (2026-10-25/26 session block)
 

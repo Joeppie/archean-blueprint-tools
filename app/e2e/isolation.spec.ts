@@ -110,8 +110,10 @@ test.describe('Isolation SW @ui', () => {
       const menu = page.getByTestId('xenon-menu');
       await expect(menu).toBeVisible({ timeout: 90_000 });
       await menu.click();
-      // the Computer-menu banner: isolated origin ⇒ the emerald WORKER line
-      await expect(page.getByTestId('xenon-sab-warn')).toContainText('true line-stepping');
+      // the Computer-menu banner (v1.15.1): an isolated origin says
+      // NOTHING — the positive announcement is retired; only the degraded
+      // origin warns. Isolation itself is proven by the chip below.
+      await expect(page.getByTestId('xenon-sab-warn')).toHaveCount(0);
       await page.locator('[data-testid^="xenon-comp-"]').first().click();
       await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 90_000 });
       // the chip settles on worker mode once the wasm boots on the worker —

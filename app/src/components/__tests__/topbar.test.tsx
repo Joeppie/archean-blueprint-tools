@@ -72,11 +72,13 @@ describe('TopBar — Edit ▾ carries the history + TODO state', () => {
   });
 });
 
-// THE DEBUGGER-MODE ANNOUNCEMENT (v1.13.18, we: "the application MUST
-// CLEARLY announce this degradation in capabilities to the user … show a
-// warning label inside the Computer menu"): the Xenon ▾ menu states WHICH
-// stepper the debugger will run, driven by sabSupported() at render time.
-describe('TopBar — Xenon ▾ debugger-mode banner (v1.13.18)', () => {
+// THE DEBUGGER-MODE WARNING (v1.13.18, we: "the application MUST CLEARLY
+// announce this degradation in capabilities to the user … show a
+// warning label inside the Computer menu"; v1.15.1, we: "remove the
+// notification that says its possible to debug; that is mostly
+// superfluous; just the warning"): the Xenon ▾ menu says NOTHING on a
+// full-capability origin; only the degraded (non-isolated) one warns.
+describe('TopBar — Xenon ▾ debugger-mode warning (v1.13.18)', () => {
   const xenon = {
     xenonComps: [{ ci: 11, alias: 'plomo', program: 'plomo', files: 1 }],
     onXenon: () => undefined,
@@ -89,15 +91,14 @@ describe('TopBar — Xenon ▾ debugger-mode banner (v1.13.18)', () => {
     expect(screen.getByTestId('xenon-sab-warn').textContent)
       .toMatch(/http:\/\/localhost/);
   });
-  test('isolated origin ⇒ the green worker · true line-stepping state', () => {
+  test('isolated origin ⇒ NO banner (the positive announcement is retired)', () => {
     const w = globalThis as unknown as { crossOriginIsolated?: boolean };
     const had = w.crossOriginIsolated;
     w.crossOriginIsolated = true;
     try {
       renderBar(xenon);
       fireEvent.click(screen.getByTestId('xenon-menu'));
-      expect(screen.getByTestId('xenon-sab-warn').textContent)
-        .toMatch(/true line-stepping/);
+      expect(screen.queryByTestId('xenon-sab-warn')).toBeNull();
     } finally {
       w.crossOriginIsolated = had;
     }
