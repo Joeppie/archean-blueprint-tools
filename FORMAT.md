@@ -705,6 +705,17 @@ implementation `tools/xenoncode/xc_host.cpp` + `app/src/engine/xenoncode.ts`)
   shim's 640×480 seed) — the dock cell, the 3-D face texture and the
   program's `screen_w/screen_h` are all the panel; Space Invaders'
   squadron spans it edge-to-edge exactly as in-game (inception fix).
+  **Facing (v1.15.4, we: "THE 3D SCREEN OF COMPUTER IS MIRRORED"):** the
+  lid's BACK is a plain panel; the DISPLAY + deck (CODE/REBOOT) face the
+  PILOT and in-game the text READS from that deck side. Scene law: the
+  built-in panel UV is v WITH its v-axis, u 1-MINUS (the v1.13.8 ruling,
+  restored — v1.13.11's u-revert rendered the pilot side mirrored for
+  three eras; its chair-side visibility report was solved by DoubleSide,
+  the u law never had to move). The scene quad's winding-normal points
+  at the BACK panel; readable from the OPPOSITE side. Pinned:
+  `app/e2e/faceorient.spec.ts` + fixture `tools/make_face_test.py`
+  (testdata/9000009020: a yellow 'L' painted RIGHT on the panel must
+  project RIGHT from the pilot side).
 - **Component OVERRIDE screens are AUTHORED PER COMPONENT** (Computer
   V ▸ Override Screen): the game's own `modules/<mod>/components/<Type>/
   main.xc` scripts size them (the FissionReactor draws 400-px-wide rows;

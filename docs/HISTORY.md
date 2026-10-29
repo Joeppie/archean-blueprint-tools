@@ -3257,6 +3257,32 @@ topic + FORMAT).
   rail hides xenon-side-beacons under load; passes solo idle). Both pass
   on chromium; AGENTS Backlog carries the phone farm-window item.
 
+- **v1.15.4 — THE BUILT-IN FACE READS FROM THE PILOT SIDE (2026-10-29).**
+  We, with an editor screenshot of the arcade face reading "ƎƆAԀƧ ƧƎ∀ᗡ∀NI"
+  and the in-game screenshot reading fine: "THE 3D SCREEN OF COMPUTER IS
+  MIRRORED. The normal display we have is OK but the screen itself is
+  MIRRORED on the component itself!" Measured on the arcade craft: the
+  lid's BACK (plain gray panel, hides the quad) is one side; the DISPLAY
+  + deck buttons face the pilot, and the in-game screenshots read from
+  the deck side. The scene UV at the time (`u = uu`) rendered that side
+  mirrored. History: the v1.13.8 in-browser ruling (verdicts 'upside
+  down' → 'upright, mirrored' →) prescribed exactly v WITH its v-axis,
+  u 1-MINUS; v1.13.11 reverted u to `uu` reasoning the pilot-side mirror
+  was "format truth" — but its chair-side report was a FrontSide-CULL
+  visibility complaint, solved by DoubleSide; the u law never needed to
+  move, and the revert made the readable side mirrored. Fix: `uv.u =
+  1 - uu` for Computer panels (Crafter untouched — lit-pixel-verified
+  mapping, never rotate blind). Pin NEW: e2e/faceorient.spec.ts +
+  fixture tools/make_face_test.py (testdata/9000009020 Face Bench: a
+  Computer whose program paints a yellow 'L' into the RIGHT half of the
+  200×160 panel — the projected ink centroid must sit right of centre
+  from the PILOT side, camera at center−normal: the winding normal
+  points at the plain back panel). Fixture-first: the law is a glyph
+  side on a Computer model — a 1-component bench proves it, no workshop
+  craft needed. Verified: pilot-side shot of 3288012440 reads "SPACE
+  INVADERS / Top Scores / By Shadoh" like the in-game screenshot;
+  faceorient green on chromium + pixel7; tsc clean.
+
 ## 2. v1.11 session — KNOWN ISSUES & UNPINNED TODOS (2026-10-25/26 session block)
 
 KNOWN ISSUES (accepted behaviours, costs, sharp edges):

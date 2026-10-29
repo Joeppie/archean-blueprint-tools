@@ -2026,14 +2026,22 @@ void main() {
           for (let k = 0; k < pos.count; k++) {
             const uu = (pos.getComponent(k, uax as 0 | 1 | 2) - mn[uax]!) / us;
             const vv = (pos.getComponent(k, vax as 0 | 1 | 2) - mn[vax]!) / vs;
-            // v1.13.11 (we: "you should be between the chair and computer,
-            // it faces the computer"): the panel's FRONT is the PILOT side
-            // (+z) — the game's own display material reads from the chair.
-            // The u law is the shipped uu (the v1.13.8 flip made the NOSE
-            // side readable = mirrored from the chair = anti-game); a
-            // DoubleSide screen seen from the back mirrors, exactly like the
-            // game's — that is format truth, not a bug.
-            uv[k * 2] = uu;
+            // v1.15.4 (we: "THE 3D SCREEN OF COMPUTER IS MIRRORED. The
+            // normal display we have is OK but the screen itself is
+            // MIRRORED on the component itself!" + in-game screenshot of
+            // the readable front): THE V1.13.8 RULING RESTORED — u is
+            // 1-MINUS for the Computer. The v1.13.11 revert to `uu`
+            // reasoned the pilot-side mirror was "format truth" from a
+            // chair-side VISIBILITY report (the FrontSide cull — fixed by
+            // DoubleSide, the u law never needed to move). Measured on the
+            // arcade: the lid's BACK panel faces -z (plain gray), the
+            // DISPLAY faces +z = the deck/pilot side = the side the
+            // in-game screenshot reads from; `uu` renders THAT side
+            // mirrored (we: 'upright, mirrored' — the v1.13.8 verdict,
+            // which the ruling block above already prescribes: v WITH its
+            // v-axis, u 1-minus). A DoubleSide back view mirrors — format
+            // truth — and the back panel hides the quad there anyway.
+            uv[k * 2] = computerPanel ? 1 - uu : uu;
             uv[k * 2 + 1] = computerPanel ? vv : vax === 1 ? vv : 1 - vv;
           }
           gg.setAttribute('uv', new BufferAttribute(uv, 2));
