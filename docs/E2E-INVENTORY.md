@@ -110,6 +110,7 @@ tooldoc.test.ts) → **JSDOM→** en masse; KEEP 1 desktop pixel leg (dialog
 ### subride.spec (1, @slow) — Jimmy rig-chain pivot → P7.1 slice 2 retires (truck audit PORTED headless)
 ### xenonphone.spec (1, @slow, pixel7 OPT-IN, v1.13.32) KEEP-POINTER (phone IDE: rail→drawer, code-pane width, code scroll, title-bar ⏹/▶; chromium leg skips via isMobile) — the v1.13 xenon/xenondbg/xenonfresh IDE batches predate this census; their v1.13.32 legs (tab-strip hover-wrap, ide-* in the title bar, .var-flash) ride xenon.spec's tiers.
 ### xenonhud.spec (3, @slow, v1.14.0+v1.14.1) KEEP-INT + KEEP-PIXEL (the HUD IDE saves into the blueprint-baked data.xc_files; the beacon scope lists the craft's REAL frequencies, a send lands in a listener's log; the RUNTIME leg: guide HUD ▶ → panel canvas pixels lit + the guide's beacon transmits land in Beacon ci 114's rx log) — registry + owner semantics PORTED (beaconnet/runtimemgr tests); the pixel/loop legs stay e2e.
+### xenonfarm.spec (1, @slow, v1.15.0) KEEP-INT (TWO real VMs co-running on one page: the INTERCOM bench's radio-led + mirror bus rows appear only via the cross-computer beacon/io paths; closing one window leaves the sister ON) — IoBus cable law PORTED (farm.test); the two-VM leg stays e2e.
 
 ## Overlap groups (the audit this pass resolved)
 

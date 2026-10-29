@@ -272,6 +272,26 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   INTERPRETER: `engine/runtimemgr.ts` — a HUD boot CLOSES the computer
   pump and vice versa (the farm in slice C lifts this). The shim twin:
   `xc_host.cpp` ABI 11 ↔ `XC_ABI`; demo `tools/xenoncode/demo/hudradio`.
+- THE COMPUTER FARM (v1.15.0 P9 slice C): MULTIPLE MiniComputers co-run —
+  every XenonRun carries its OWN wasm instance (`xenonInstantiate`), the
+  `xenonFarm` registry (keyed by comp.ci, `MAX_VM` evicts the oldest)
+  hosts one pump per open IDE window. THE CABLE LAW: an io channel
+  belongs to the DEVICE — `IoBus` records every `output_*` write and
+  drives it into EVERY attached pump's inputs (the writer's loopback
+  included); `beaconNet` queues carry a global seq and each pump reads
+  with its own cursor, so a component beacon wired to two computers
+  feeds BOTH. The farm retires runtimemgr's one-interpreter mutual kill
+  (the HUD co-runs too). Pilot keys press every pump with the seat
+  bound; the dock + `__XCDBG__` + F5-target the ACTIVE pump (last
+  window opened); per-window FloatingWindow ids `xenon-<ci>`; the header
+  rises to z-[60] ONLY while a menu is open (TRANSITION-only reporting —
+  a permanent raise kills maximised title-bar double-clicks, a
+  mount-time `false` report sinks the counter); the dialog's `__XENON__`
+  override RESTORES the base hook on unmount; `xenonFarm.subscribe`
+  drives Editor re-renders on lineup changes. Fixture:
+  `tools/make_farm_test.py` → 9000009010 (radio `INTERCOM` + shared
+  lamp); pins: farm.test (bus law), beaconnet cursor, xenonfarm.spec
+  (two VMs, radio + bus cross, close-one-sister-lives).
 - NAV + DEBUGGER-FOLLOW (v1.13.27; STEP KEYS v1.13.33): every jump
   (library/def/goto/tab) records a navpoint; ◀ ▶ + Alt+←/→ (CAPTURE — CM
   binds Alt+arrows) walk the history. EVERY debugger stop — breakpoint hit
@@ -789,14 +809,9 @@ behind a small link at the END of the gallery. Pages serves the GENERATED
   config.py), byte-identical saves, no releases without the user asking.
 
 ## Backlog (live items)
-- **P9 — Multi-computer farm + HUD/beacon radio** (REWRITE.md § P9,
-  decoded model in FORMAT §HUD & the Beacon radio): SLICES A+B+D LANDED
-  (v1.14.0 registry/tabs/HUD-IDE/avatarsim; v1.14.1 HUD VM runtime +
-  Beacon-as-io-device radio + runtimemgr one-interpreter guard).
-  REMAINING: (C) the ComputerFarm of pumps + SHARED per-craft io bus
-  (inter-computer input/output operability — ChipOS-critical; replaces
-  runtimemgr's mutual kill with co-owners over an IoBus — the beaconNet
-  pending-queues are the transport prototype).
+- **P9 — CLOSED (v1.15.0):** multi-computer farm + HUD/beacon radio all
+  landed (REWRITE.md § P9; laws in § Xenon above; narrative
+  docs/HISTORY.md). ChipOS groundwork = the farm + IoBus + beaconNet.
 - **P8 — Xenon workspace as a STANDALONE, low-coupling module**: shape,
   coupling inventory and the four seams (write-path, screen-feed, key-bus,
   shell-descriptors) in REWRITE.md § P8; P3 (project tree) + P4 (upstream

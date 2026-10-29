@@ -114,6 +114,20 @@ describe('beaconNet — the global scope', () => {
     expect(b0.lastTx).toBe('.pos{1}');
   });
 
+  test('pendingSince feeds every pump its own cursor (slice C: a beacon wired to two computers)', () => {
+    beaconNet.seed(bp);
+    beaconNet.clearLogs();
+    beaconNet.sendTo('F-RX', 'a');                      // beacon:0 listens on F-RX
+    const r1 = beaconNet.pendingSince('beacon:0', 0);
+    expect(r1.items).toEqual(['a']);
+    beaconNet.sendTo('F-RX', 'b');
+    const r2 = beaconNet.pendingSince('beacon:0', r1.seq);   // this pump: new only
+    expect(r2.items).toEqual(['b']);
+    const r3 = beaconNet.pendingSince('beacon:0', 0);        // a SISTER pump: all
+    expect(r3.items).toEqual(['a', 'b']);
+    expect(beaconNet.pendingSince('beacon:99', 0).items).toEqual([]);
+  });
+
   test('registerPair adds runtime-announced radios and MERGES by id', () => {
     beaconNet.seed(bp);
     beaconNet.registerPair('hud:2#0', 'HUD pilot-guide · beacon', 'hud', 2,

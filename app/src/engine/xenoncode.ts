@@ -13,7 +13,6 @@ import { atlasJsonPaths } from './models';
 import { CRAFTER_BUILTIN } from './crafterbuiltin';
 import { blockAt, functionAt, includeOrder, projectBlocks, projectFunctions, type XCBlock } from './xcproject';
 import { beaconNet } from './beaconnet';
-import { claimRuntime, releaseRuntime } from './runtimemgr';
 import { buzzerAudio, modeToWave } from './buzzer';
 import type { XenonSnap } from './xenontest';
 import {
@@ -112,6 +111,18 @@ export function xenonReady(): Promise<Mod> {
       m.default({ locateFile: () => xcWasmUrl }))
     .catch(e => { modPromise = null; throw e; });
   return modPromise;
+}
+
+/** v1.15.0 P9 slice C (COMPUTERFARM): ONE MODULE INSTANCE PER VM. The
+ *  shim keeps its whole world (screens, devices, inputs, beacons, events)
+ *  in module globals, so co-running computers = co-running emscripten
+ *  instances (the glue factory called again; code shared, heap separate).
+ *  This replaces the ONE-INTERPRETER mutual-kill of runtimemgr (deleted).
+ *  xenonReady() above stays for parse-only use (never booted). */
+export function xenonInstantiate(): Promise<Mod> {
+  return import(/* @vite-ignore */ xcGlueUrl)
+    .then((m: { default: (o: Record<string, unknown>) => Promise<Mod> }) =>
+      m.default({ locateFile: () => xcWasmUrl }));
 }
 
 // ---------------------------------------------------------------------------
@@ -493,7 +504,7 @@ export class XenonRun {
   private constructor(mod: Mod) { this.mod = mod; }
 
   static async open(comp: XenonComputer): Promise<XenonRun> {
-    const mod = await xenonReady();
+    const mod = await xenonInstantiate();   // ONE VM PER INSTANCE (slice C)
     const run = new XenonRun(mod);
     // allocate by UTF-8 BYTE length, not string length (non-ASCII comments
     // truncate the program tail if you use .length — learned the hard way)
@@ -1181,6 +1192,8 @@ export class XenonPump {
   private beaconDev = new Map<string, number>();
   private beaconCi = new Map<number, string>();
   private progBeacons = new Set<number>();
+  // per-participant READ CURSORS into the beaconNet queues (slice C)
+  private radioSeq = new Map<string, number>();
   vars = new Map<string, XenonVar>();                // '$name'  -> live global variable
   // XENON-LOCALS: the locals of the function owning the PAUSED line (the
   // Locals tab). Set at every pause: worker mode reads the hook's SAB
@@ -1260,9 +1273,9 @@ export class XenonPump {
     this.run?.stop();
     this.run = null;
     this.comp = comp;
-    // ONE RUNTIME OWNER (slice B/D): booting a computer takes the module
-    // from a running HUD runtime (runtimemgr; the farm lifts this in C)
-    claimRuntime({ name: 'computer', kill: () => this.close() });
+    // FARM (slice C): co-running pumps share the craft io bus (the HUD
+    // runtime co-runs too — every VM is its own module instance now)
+    xenonFarm.attach(this);
     this.beaconDev = new Map(); this.beaconCi = new Map(); this.progBeacons = new Set();
     for (const d of comp.devices)
       if (d.type === 'Beacon' && d.alias && d.ci !== undefined) {
@@ -1346,7 +1359,7 @@ export class XenonPump {
   close() {
     this.openSeq++;
     this.stopLoop();
-    releaseRuntime('computer');
+    xenonFarm.detach(this);   // FARM (slice C): off the shared bus
     this.sabResume();          // a hooked worker must wake before it dies
     this.wrun?.dispose();
     this.wrun = null;
@@ -1438,6 +1451,14 @@ export class XenonPump {
         return;
       }
     this.run?.setInput(io, ch, v);
+  }
+  /** THE SHARED BUS FAN-IN (v1.15.0 slice C): a SISTER computer wrote
+   *  this device's channel — drive it straight into my VM (the game law:
+   *  the channel is the device's, and every computer wired to it reads
+   *  the same value). Alias-keyed writes resolve in the shim; devices
+   *  this computer is not wired to are ignored there. */
+  acceptBusWrite(alias: string | number, ch: number, v: number): void {
+    this.run?.setInput(alias, ch, v);
   }
 
   /** Name the running computer's input channels and give every one a
@@ -1556,15 +1577,23 @@ export class XenonPump {
   private stepRadio(run: XenonRun | XenonWorkerRun) {
     if (this.beaconCi.size || this.progBeacons.size) {
       for (const [ci, alias] of this.beaconCi) {
-        const q = beaconNet.takePending(`beacon:${ci}`);
-        const last = q[q.length - 1];
-        if (last !== undefined) run.setInputT(alias, 0, last);
+        const id = `beacon:${ci}`;
+        // CURSOR READ (slice C): a beacon wired to several computers
+        // feeds each pump independently — every computer hears it.
+        const { items, seq } = beaconNet.pendingSince(id, this.radioSeq.get(id) ?? 0);
+        if (items.length) {
+          this.radioSeq.set(id, seq);
+          run.setInputT(alias, 0, items[items.length - 1]!);
+        }
       }
       const pci = this.comp?.ci ?? -1;
       for (const i of this.progBeacons) {
-        const q = beaconNet.takePending(`computer:${pci}#${i}`);
-        const last = q[q.length - 1];
-        if (last !== undefined) run.beaconPut(i, last);
+        const id = `computer:${pci}#${i}`;
+        const { items, seq } = beaconNet.pendingSince(id, this.radioSeq.get(id) ?? 0);
+        if (items.length) {
+          this.radioSeq.set(id, seq);
+          run.beaconPut(i, items[items.length - 1]!);
+        }
       }
     }
   }
@@ -2080,6 +2109,11 @@ export class XenonPump {
           // a TRANSMISSION on its frequency (FORMAT §HUD)
           const bei = this.beaconDev.get(String(e.io ?? '').toLowerCase());
           if (bei !== undefined) beaconNet.postDevice(bei, String(e.v ?? ''));
+          // THE SHARED IO BUS (slice C): the channel value is the DEVICE's
+          // — drive the same channel into every OTHER pump wired to this
+          // device, so sibling computers' input_number sees my output.
+          xenonFarm.bus.write(String(e.io ?? ''), Number(e.port ?? 0),
+            typeof e.v === 'string' ? e.v : Number(e.v ?? 0), this);
         }
         else if (e.e === 'in') this.reads.set(`${e.io}:${e.port}`, Number(e.v) || 0);
         // ABI 11: the VM announces a program beacon() and its transmits —
@@ -2228,7 +2262,86 @@ export class XenonPump {
 /** The shim ABI the app expects (xc_host.cpp xc_abi()). Bump with the shim. */
 export const XC_ABI = 11;
 
-export const xenonPump = new XenonPump();
+// ---------------------------------------------------------------------------
+// COMPUTERFARM — the craft's co-running pumps + the SHARED io bus
+// (v1.15.0 P9 slice C; the ChipOS ground).
+// THE GAME LAW: io belongs to the DEVICE, not to the computer — every
+// computer wired to the same device shares its channel values. The IoBus
+// holds that channel state and fans one pump's 'out' writes into every
+// other attached pump (acceptBusWrite). Since slice C every XenonRun
+// carries its OWN wasm instance (xenonInstantiate), so pumps co-run —
+// replacing runtimemgr's one-interpreter mutual kill (retired). beaconNet
+// is global already: a component beacon's per-ci participant feeds EVERY
+// wired pump independently (per-pump radioSeq cursors), which is the
+// intercomputer radio the RCS500 demo runs on.
+export class IoBus {
+  private values = new Map<string, number | string>();
+  private pumps = new Set<XenonPump>();
+  private key(alias: string | number, ch: number): string {
+    return `${String(alias).toLowerCase()}:${ch}`;
+  }
+  attach(p: XenonPump): void { this.pumps.add(p); }
+  detach(p: XenonPump): void { this.pumps.delete(p); }
+  /** A pump's 'out' event: record the channel, drive it into the SISTERS.
+   *  THE CABLE LAW: the device feeds EVERY wire on the channel — the
+   *  writing computer's own port included (game loopback: a program reads
+   *  back what it just wrote). */
+  write(alias: string | number, ch: number, v: number | string, from: XenonPump): void {
+    this.values.set(this.key(alias, ch), v);
+    if (typeof v === 'number')
+      for (const p of this.pumps) { void from; p.acceptBusWrite(alias, ch, v); }
+  }
+  get(alias: string | number, ch: number): number | string | undefined {
+    return this.values.get(this.key(alias, ch));
+  }
+  snapshot(): Record<string, number | string> { return Object.fromEntries(this.values); }
+}
+
+class Farm {
+  pumps: XenonPump[] = [];
+  bus = new IoBus();
+  /** VM budget: each pump is its own wasm instance (~64 MB heap); the
+   *  OLDEST is evicted when one more computer wants the floor. */
+  static readonly MAX_VM = 8;
+  private subs = new Set<() => void>();
+  /** Editor/dock re-render when the pump lineup changes (attach/detach). */
+  subscribe(cb: () => void): () => void { this.subs.add(cb); return () => { this.subs.delete(cb); }; }
+  private notify(): void { for (const cb of this.subs) cb(); }
+  attach(p: XenonPump): void {
+    if (!this.pumps.includes(p)) {
+      while (this.pumps.length >= Farm.MAX_VM) this.pumps.shift()!.close();
+      this.pumps.push(p);
+      this.notify();
+    }
+    this.bus.attach(p);
+  }
+  detach(p: XenonPump): void {
+    const had = this.pumps.length;
+    this.pumps = this.pumps.filter(q => q !== p);
+    this.bus.detach(p);
+    if (this.pumps.length !== had) this.notify();
+  }
+  /** The pump running (or owning) this computer's VM — created on demand. */
+  pumpFor(comp: XenonComputer): XenonPump {
+    let p = this.pumps.find(q => q.comp?.ci === comp.ci);
+    if (!p) this.attach(p = new XenonPump());
+    return p;
+  }
+  pumpForCi(ci: number): XenonPump | null {
+    return this.pumps.find(p => p.comp?.ci === ci) ?? null;
+  }
+  /** The most recently attached pump with a live VM (the dock's target). */
+  active(): XenonPump | null {
+    for (let i = this.pumps.length - 1; i >= 0; i--) {
+      const p = this.pumps[i]!;
+      if (p.comp) return p;
+    }
+    return null;
+  }
+  closeAll(): void { for (const p of [...this.pumps]) p.close(); }
+}
+
+export const xenonFarm = new Farm();
 
 /** A craft has PHYSICAL screens: a Dashboard carrying Screen/HdScreen
  *  elements (the gate for the Screens button — "only visible if the craft

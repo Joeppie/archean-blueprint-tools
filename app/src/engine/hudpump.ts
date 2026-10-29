@@ -14,12 +14,11 @@
 // HUD transmit reaches a Beacon COMPONENT's io channel (slice D) and any
 // other listener of that frequency, the RCS500 demo end to end.
 //
-// THE RUNTIME OWNER: the shim is ONE interpreter (see runtimemgr.ts) — the
-// HUD pump and the computer pump take turns on the module; opening one
-// closes the other. The farm (slice C) lifts this.
+// THE RUNTIME (slice C): every VM is its own wasm instance (co-run) — the
+// HUD pump and the computer farm share the craft's beaconNet/io state,
+// not an interpreter.
 import { XenonRun, CYCLE_MS, type XenonComputer, type XenonHud } from './xenoncode';
 import { beaconNet } from './beaconnet';
-import { claimRuntime, releaseRuntime } from './runtimemgr';
 import { wsEnsure, evalExpr } from './worldsim';
 
 /** The a HUD's get() reads of the PLAYER (homo HUD): speed m/s, terrain
@@ -67,7 +66,6 @@ class HudPump {
   /** Boot (or re-boot after a save — the F5 law, same as a computer). */
   async open(hud: XenonHud): Promise<void> {
     this.stop();
-    claimRuntime({ name: 'hud', kill: () => this.close() });
     const comp: XenonComputer = {
       ci: hud.ci, alias: hud.alias, program: 'hud',
       files: hud.files.map(f => ({ ...f })),
@@ -148,7 +146,6 @@ class HudPump {
   }
   close(): void {
     this.stop();
-    releaseRuntime('hud');
     this.error = '';
     this.cycles = 0;
     this.prints = [];

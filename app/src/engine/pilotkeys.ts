@@ -15,7 +15,12 @@
 // view-change and window-blur — a lost keyup must not run the throttle away.
 
 import { useEffect } from 'react';
-import { xenonPump, type PilotKey } from './xenoncode';
+import { xenonFarm, type PilotKey } from './xenoncode';
+
+// FARM (v1.15.0 slice C): the cockpit keys press EVERY pump with the
+// seat bound — one pilot, all co-running computers.
+const anyCockpit = () => xenonFarm.pumps.some(p => p.pilotKeysBound().length);
+const pressAll = (k: PilotKey, down: boolean) => { for (const p of xenonFarm.pumps) p.pilotKey(k, down); }
 
 const KEYMAP: Record<string, PilotKey> = {
   KeyW: 'w', KeyA: 'a', KeyS: 's', KeyD: 'd',
@@ -43,7 +48,7 @@ const isTyping = (t: EventTarget | null) => {
 // keys pass through untouched.
 let activeCount = 0;
 export function pilotKeysActive(): boolean {
-  return activeCount > 0 && xenonPump.pilotKeysBound().length > 0;
+  return activeCount > 0 && anyCockpit();
 }
 
 /** Feed WASD / ↑ / ↓ / F into the running computer's cockpit while active. */
@@ -53,7 +58,7 @@ export function usePilotKeys(active: boolean) {
     activeCount++;
     const pressed = new Set<string>();
     const releaseAll = () => {
-      for (const code of pressed) xenonPump.pilotKey(KEYMAP[code]!, false);
+      for (const code of pressed) pressAll(KEYMAP[code]!, false);
       pressed.clear();
     };
     const down = (e: KeyboardEvent) => {
@@ -61,16 +66,16 @@ export function usePilotKeys(active: boolean) {
       if (isTyping(e.target)) return;
       const key = KEYMAP[e.code];
       if (!key) return;
-      if (!xenonPump.pilotKeysBound().length) return;   // no cockpit: keys pass through
+      if (!anyCockpit()) return;                            // no cockpit: keys pass through
       e.preventDefault();                       // arrows scroll the page; F feeds Aux 1
       if (pressed.has(e.code)) return;
       pressed.add(e.code);
-      xenonPump.pilotKey(key, true);
+      pressAll(key, true);
     };
     const up = (e: KeyboardEvent) => {
       const key = KEYMAP[e.code];
       if (!key || !pressed.delete(e.code)) return;
-      xenonPump.pilotKey(key, false);
+      pressAll(key, false);
     };
     addEventListener('keydown', down);
     addEventListener('keyup', up);

@@ -3115,6 +3115,47 @@ topic + FORMAT).
   trusting an e2e red. The guide renders its ACTIVE scale-set (1× at
   e2e viewports, the 0×/2× sets parked empty — its own scaling law), so
   the pixel pin sums all panel canvases.
+- **v1.15.0 P9 SLICE C — THE COMPUTER FARM (we, 2026-10-29, "Continue" on
+  the plan: "multiple systems communicating … multiple computers running
+  at the same time … over their inputs/outputs … vital for Chip's
+  ChipOS"):** THE KEY MOVE: ONE WASM MODULE INSTANCE PER VM —
+  `xenonInstantiate()` calls the emscripten factory per XenonRun (code
+  shared, heap separate), so the ONE-INTERPRETER constraint that forced
+  runtimemgr's mutual kill dissolves (runtimemgr.ts + its test deleted;
+  the HUD co-runs too). `xenonFarm` (in xenoncode.ts — no import cycle)
+  keeps one pump per computer ci, MAX_VM=8 evicting the oldest; the
+  Editor's `xenonCi` became `xenonCis[]` — every open IDE window renders
+  its own dialog with its own pump (per-id FloatingWindow rects CASCADE
+  below the top bar so a SISTER window can be opened and every title
+  bar stays grabbable). THE CABLE LAW: `IoBus` holds channel state
+  ('alias:ch', case-folded like the shim's resolver) and every pump's
+  'out' event writes through it, fanning the value into EVERY attached
+  pump's VM inputs (the writer's own loopback included — the device
+  feeds all its wires); beaconNet queues gained a global seq and
+  `pendingSince(id, cursor)` so a component beacon wired to two
+  computers feeds BOTH pumps with independent cursors. Pilot keys press
+  every pump with the seat bound; dock/__XCDBG__/__XENON__/F5 target
+  the ACTIVE pump (last window opened); __XENON__ grew a `farm` audit
+  row (per-computer cycles/status). Fixture: tools/make_farm_test.py →
+  testdata/9000009010 "Intercom Bench" (post transmits ".k{42}" on
+  beacon frequency INTERCOM + pulses a shared lamp; listen reads
+  input_text("recv-bee",0) → radio-led and mirrors input_number("lamp",0)
+  → mirror). Pins: farm.test (4: fan-out+loopback, text rows record-only,
+  detach, snapshot keys), beaconnet pendingSince cursors, xenonfarm.spec
+  (two REAL VMs cycling together; the radio-led AND mirror bus rows
+  appear only via the cross-computer paths; closing one window leaves
+  the sister ON). xcdbg gained a pump-GETTER (the console follows the
+  active VM; IDLE null-pump keeps every method callable). THREE TRAPS
+  the pins caught: (1) the raised menu header (z-[60] so the Xenon
+  dropdown can open a SISTER window) must apply ONLY while a menu is
+  open — a permanent z-60 stole the maximised window's title-bar
+  double-click (the extras pin); (2) Menu's open-state reporter must
+  fire on TRANSITIONS ONLY — reporting `false` at mount drove the
+  open-counter negative, so the menu never rose (the farm pin); (3) the
+  dialog's __XENON__ override must RESTORE the base hook on unmount,
+  and the farm gained a subscribe (attach/detach notify) so the Editor
+  re-renders when a boot started from the dock's own effect changes the
+  pump lineup (the screens pins).
 
 ## 2. v1.11 session — KNOWN ISSUES & UNPINNED TODOS (2026-10-25/26 session block)
 

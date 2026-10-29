@@ -30,9 +30,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import FloatingWindow from './FloatingWindow';
 import {
-  chanInfo, loadChannelTable, parseKv, parseNodes, validNumInput, varKind, xenonPump,
-  xenonScreenBindings, xcDiskFiles, CYCLE_HZ, sabSupported,
-  type ChannelTable, type XenonComputer, type XGraph, type XCFile,
+  chanInfo, loadChannelTable, parseKv, parseNodes, validNumInput, varKind,
+  xenonFarm, xenonScreenBindings, xcDiskFiles, CYCLE_HZ, sabSupported,
+  type ChannelTable, type XenonComputer, type XGraph, type XCFile, type XenonPump,
 } from '../engine/xenoncode';
 import { BUZZER_MODES, buzzerAudio, buzzerReadings, type BuzzerWave } from '../engine/buzzer';
 import { parseXenonTest, evalAssert, type XenonAssertResult } from '../engine/xenontest';
@@ -52,6 +52,9 @@ const fmtVal = (v: number | string) =>
 
 export default function XenonDialog(p: {
   comp: XenonComputer;
+  /** FARM (v1.15.0 slice C): THIS computer's pump — one per open IDE
+   *  window; the windows co-run on the craft's shared io bus. */
+  pump: XenonPump;
   engine?: Engine | null;
   onClose: () => void;
   /** the virtual disk changed — the Editor writes bp + doc and re-boots */
@@ -104,12 +107,12 @@ export default function XenonDialog(p: {
         // the disk editor uses: file + doc mirror, VM auto-reboots)
         const base = xcDiskFiles(comp);
         p.onFiles(comp.ci, base.map((f, i) => (i === 0 ? { ...f, code: t.program! } : f)));
-        for (let i = 0; i < 100 && xenonPump.status !== 'running'; i++)
+        for (let i = 0; i < 100 && p.pump.status !== 'running'; i++)
           await new Promise(r => setTimeout(r, 100));
         await new Promise(r => setTimeout(r, 300));
       }
-      await xenonPump.runCycles(Math.max(0, Math.min(20000, t.cycles | 0)));
-      const snap = xenonPump.snapshot();
+      await p.pump.runCycles(Math.max(0, Math.min(20000, t.cycles | 0)));
+      const snap = p.pump.snapshot();
       const res = t.asserts.map(a => evalAssert(a, snap));
       setTestRes(res);
       return res;
@@ -120,7 +123,7 @@ export default function XenonDialog(p: {
   useEffect(() => {
     (window as any).__XENONTEST__ = {
       run: (text: string) => runTest(text),
-      snapshot: () => xenonPump.snapshot(),
+      snapshot: () => p.pump.snapshot(),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [comp.ci]);
@@ -195,12 +198,21 @@ export default function XenonDialog(p: {
   };
   const closeRef = useRef(p.onClose);
   closeRef.current = p.onClose;
-  const pump = xenonPump;
+  const pump = p.pump;
   // debug channel (the __ARCHEAN__ pattern, DEBUG builds): pump internals
   useEffect(() => {
+    // the dialog REPLACES the base hook while open — RESTORE it on
+    // unmount (the F5-re-boot pin reads cycles() from the dock, where the
+    // base hook's ACTIVE-pump view is the live one — v1.15.0)
+    const prevXenon = (window as any).__XENON__;
     (window as any).__XENON__ = () => ({
       status: pump.status, cycles: pump.cycles, raf: pump.raf2(),
       running: pump.run?.running ?? null, surfaces: pump.surfaces.size,
+      // FARM (v1.15.0 slice C): every co-running VM (the dialog REPLACES
+      // the base hook while open — the farm audit lives in BOTH)
+      farm: xenonFarm.pumps.filter(q => q.comp).map(q => ({
+        comp: q.comp?.alias ?? '', cycles: q.cycles, status: q.status,
+      })),
       paused: pump.paused, error: pump.error,
       worker: !!pump.wrun, isolated: sabSupported(),
       // the camera (io-hover fly-to pin; the dialog REPLACES the base hook
@@ -258,6 +270,7 @@ export default function XenonDialog(p: {
         outputLevel: buzzerAudio.outputLevel(), voices: buzzerAudio.voiceCount(),
       },
     });
+    return () => { (window as any).__XENON__ = prevXenon; };
   }, [pump]);
 
   useEffect(() => pump.subscribe(() => setTick(t => t + 1)), [pump]);
@@ -804,11 +817,16 @@ export default function XenonDialog(p: {
 
   return (
     <FloatingWindow
-      id="xenon" testid="xenon-dialog" minW={720} minH={400}
+      id={`xenon-${comp.ci}`} testid="xenon-dialog" minW={720} minH={400}
       maximized={max} onToggleMaximize={() => setMax(m => !m)}
       initial={(vw, vh) => {
-        const w = Math.min(1400, vw * 0.97), h = vh * 0.94;
-        return { x: (vw - w) / 2, y: (vh - h) / 2, w, h };
+        // FARM (slice C): cascade the windows BELOW the top bar (so the
+        // Xenon menu stays reachable to open a SISTER) and offset per
+        // computer — every title bar stays grabbable.
+        const k = Math.abs(comp.ci) % 4;
+        const w = Math.min(1360, vw * 0.95) - k * 16;
+        const h = vh - 52 - k * 26;
+        return { x: (vw - w) / 2 + k * 12, y: 48 + k * 26, w, h };
       }}
       className="font-mono xenon-ide"
       header={
@@ -1241,7 +1259,7 @@ export default function XenonDialog(p: {
               )}
               <div className="flex flex-wrap gap-2">
                 {surfList.map(s => (
-                  <ScreensCell key={s.key} surfKey={s.key} w={s.w} h={s.h}
+                  <ScreensCell key={s.key} surfKey={s.key} w={s.w} h={s.h} pump={pump}
                     canvasTestid={`xenon-screen-${s.key}`} testid={`xenon-cell-${s.key}`}
                     label={`${bindings.get(s.key) ?? s.key}${s.key.startsWith('virtual#') ? ' ·virtual' : ''}`} />
                 ))}
@@ -1382,7 +1400,8 @@ export default function XenonDialog(p: {
                     const ci = chanLabel(ioKey, +(port ?? '0'), 'in');   // meaning of ch port ON the device
                     return (
                       <div key={k} className="contents">
-                        <span className="truncate text-[#9fb0c8]"
+                        <span data-testid={`xenon-bus-${io}=${port}`}
+                          className="truncate text-[#9fb0c8]"
                           title={dev && ci ? `${dev.alias || dev.type} ch ${port} — ${ci.fn} (${ci.rng})`
                             : dev ? `io ${io} = ${dev.alias || dev.type}` : io}>
                           {dev ? `${dev.alias || dev.type}` : io}{ci && <span className="text-[#8fd48f]"> {ci.fn}</span>}</span>
@@ -1733,7 +1752,7 @@ function MenuBar(p: {
 // NO $val override — they don't observe anything). Rows bound to the running
 // computer ride first; every row edits the shared store (persisted).
 
-function WorldSimList(p: { pump: typeof xenonPump }) {
+function WorldSimList(p: { pump: XenonPump }) {
   const bound = p.pump.wsBoundNames();
   const all = p.pump.wsChannels();
   const row = (r: (typeof all)[number]) => (

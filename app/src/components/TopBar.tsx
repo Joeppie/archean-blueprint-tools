@@ -69,9 +69,20 @@ const MODES: [Mode, string, string][] = [
 
 /** One top menu: the button + a dropdown, closed by an outside mousedown. */
 function Menu(p: { testid: string; label: string; width?: string;
+  onOpen?: (open: boolean) => void;
   children: (close: () => void) => React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  // FARM (v1.15.0 slice C): report open state so the HEADER rises above
+  // the floating IDE windows WHILE a menu is up (the Xenon menu must be
+  // clickable to open a SISTER window; at rest the header stays BELOW
+  // maximised windows so their title bars keep their double-clicks).
+  // TRANSITIONS ONLY — the mount-time `false` report would drive the
+  // TopBar's open-counter negative (every menu closed = z-30 forever).
+  const prevOpen = useRef(false);
+  useEffect(() => {
+    if (open !== prevOpen.current) { prevOpen.current = open; p.onOpen?.(open); }
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!open) return;
     const off = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
@@ -115,19 +126,25 @@ const Item = (p: { testid: string; label: string; hint?: string; disabled?: bool
 const Sep = () => <div className="my-1 border-t border-white/10" />;
 
 export default function TopBar(p: Props) {
+  // FARM (v1.15.0 slice C): count open menus — while ANY menu is up the
+  // header rises to z-[60] (desktop) so its dropdowns float above the
+  // IDE windows; at rest the header sits below them (maximised title
+  // bars keep their double-clicks — the v1.15.0 extras-pin catch).
+  const [menusOpen, setMenusOpen] = useState(0);
+  const reportOpen = (o: boolean) => setMenusOpen(m => m + (o ? 1 : -1));
   return (
     // mobile: the mode bar cannot share one row with File/Edit/Tools/Save/⚙
     // (it gets crushed to a sliver by the shrink-0 siblings), so it wraps onto
     // a full-width second row; desktop keeps the single-row KSP chrome
-    <header className="relative z-30 flex min-h-11 shrink-0 flex-wrap items-center gap-x-2 gap-y-1
+    <header className={`relative z-30 ${menusOpen > 0 ? 'md:z-[60]' : ''} flex min-h-11 shrink-0 flex-wrap items-center gap-x-2 gap-y-1
                        border-b border-[rgba(217,212,189,.22)] bg-gradient-to-b from-panel to-panel2
-                       px-2 py-1 md:flex-nowrap md:py-0">
+                       px-2 py-1 md:flex-nowrap md:py-0`}>
       <button data-testid="back-to-gallery" onClick={p.onBack} title="back to space center (gallery)"
         className="ksp-btn shrink-0 px-2.5 py-1 text-[12px] hover:text-accent">
         ←
       </button>
 
-      <Menu testid="file" label="File ▾">
+      <Menu testid="file" label="File ▾" onOpen={reportOpen}>
         {close => (<>
           <Item testid="file-new" label="New craft" onClick={() => { close(); p.onNew(); }} />
           <Item testid="file-open" label="Open file…" onClick={() => { close(); p.onOpen(); }} />
@@ -145,7 +162,7 @@ export default function TopBar(p: Props) {
         </>)}
       </Menu>
 
-      <Menu testid="edit" label="Edit ▾">
+      <Menu testid="edit" label="Edit ▾" onOpen={reportOpen}>
         {close => (<>
           <Item testid="edit-undo" label="Undo" hint="Ctrl+Z" disabled={!p.canUndo}
             onClick={() => { close(); p.onUndo?.(); }} />
@@ -161,7 +178,7 @@ export default function TopBar(p: Props) {
       </Menu>
 
       {(p.tools?.length ?? 0) > 0 && (
-        <Menu testid="tools" label="Tools ▾">
+        <Menu testid="tools" label="Tools ▾" onOpen={reportOpen}>
           {close => (<>
             {p.tools!.map(t => (
               <Item key={t.id} testid={`tool-${t.id}`} label={`${t.icon}  ${t.label}`}
@@ -179,7 +196,7 @@ export default function TopBar(p: Props) {
           opening the in-game-style IDE (XenonDialog.tsx) on the dev's
           interpreter (engine/xenoncode.ts + the ESM glue + wasm under engine/xenoncode/) */}
       {(((p.xenonComps?.length ?? 0) + (p.xenonHuds?.length ?? 0)) > 0) && (
-        <Menu testid="xenon" label="Xenon ▾">
+        <Menu testid="xenon" label="Xenon ▾" onOpen={reportOpen}>
           {close => (<>
             {/* WIP disclaimer (our rule 2026-10-27): the interpreter is the
                 dev's and programs genuinely run, but the SIMULATION around
@@ -253,7 +270,7 @@ export default function TopBar(p: Props) {
           make it a manual so people can learn how to use it effectively"):
           the built-in markdown manual with word search over the topics */}
       {p.onHelp && (
-        <Menu testid="help" label="Help ▾">
+        <Menu testid="help" label="Help ▾" onOpen={reportOpen}>
           {close => (<>
             <Item testid="help-manual" label="ⓘ  Manual & topics…" hint="search"
               onClick={() => { close(); p.onHelp?.(); }} />

@@ -553,25 +553,30 @@ dev/e2e (seconds, no scene), and keeps the core editor's bundle free of
 the 76 kB glue + 1.0 MB wasm assets (`?url` imports today sit in the
 Editor chunk graph).
 
-**SLICES A+B+D LANDED (v1.14.0 + v1.14.1, 2026-10-29): slice A = the
-beaconNet registry + BEACONS tabs + 📡 dock + HUD-block IDE + avatarsim.
-Slice B (v1.14.1) = the HUD VM runtime: the ABI-11 shim (`xc_host.cpp`:
-`panel(anchor,w,h)` → anchored "panel#N" surfaces with the full screen
-member set, `beacon($tx,$rx):beacon` object (.data/.tx/.rx/.transmit)
-with beaconpair/beacontx events, `get(key)` fed by xc_set_world,
-screen_w/mouse_*/fov values, xc_beacon_put/xc_set_input_t/xc_set_view/
-xc_screen_anchor exports; demo+native probe `tools/xenoncode/demo/
-hudradio` via XC_BEACON_PUT), `engine/hudpump.ts` (25 Hz loop: avatarsim
-feed → setWorld, viewport → setView, deliveries → beaconPut, events →
-registerPair/post, panel# surfaces → live canvases with clicks routed
-in), the HudDialog ▶/⏹ + PANELS tab. Slice D = Beacon components as io
-devices: output_text on the port posts to beaconNet, deliveries feed
-ch0 (input_text(port,0)) every cycle, worker inputs carry text +
-beaconPut messages. THE ONE-INTERPRETER GUARD: `engine/runtimemgr.ts`
-— a HUD boot closes the computer pump and vice versa (XenonPump.open/
-close claim/release); THE FARM (slice C, REMAINING) replaces the mutual
-kill with co-owners over a shared per-craft IoBus — the beaconNet
-pending-queues are the transport prototype.**
+**SLICES A+B+C+D LANDED — P9 COMPLETE (v1.14.0 + v1.14.1 + v1.15.0,
+2026-10-29): slice A = the beaconNet registry + BEACONS tabs + 📡 dock +
+HUD-block IDE + avatarsim. Slice B (v1.14.1) = the HUD VM runtime: the
+ABI-11 shim (`xc_host.cpp`: `panel(anchor,w,h)` → anchored "panel#N"
+surfaces with the full screen member set, `beacon($tx,$rx):beacon`
+object (.data/.tx/.rx/.transmit) with beaconpair/beacontx events,
+`get(key)` fed by xc_set_world, screen_w/mouse_*/fov values,
+xc_beacon_put/xc_set_input_t/xc_set_view/xc_screen_anchor exports;
+demo+native probe `tools/xenoncode/demo/hudradio` via XC_BEACON_PUT),
+`engine/hudpump.ts` (25 Hz loop: avatarsim feed → setWorld, viewport →
+setView, deliveries → beaconPut, events → registerPair/post, panel#
+surfaces → live canvases with clicks routed in), the HudDialog ▶/⏹ +
+PANELS tab. Slice D = Beacon components as io devices: output_text on
+the port posts to beaconNet, deliveries feed ch0 (input_text(port,0))
+every cycle, worker inputs carry text + beaconPut messages. Slice C
+(v1.15.0) = THE COMPUTER FARM: one wasm module instance per VM
+(xenonInstantiate) dissolves the one-interpreter constraint, runtimemgr
+retired; `xenonFarm` hosts one pump per open IDE window (xenonCis[],
+cascade rects, MAX_VM), `IoBus` enforces the game's cable law (a channel
+belongs to its device — every write fans into every attached pump's
+inputs, writer loopback included) and beaconNet cursors feed a shared
+beacon to all its wired computers. The INTERCOM BENCH fixture
+(tools/make_farm_test.py → 9000009010) pins both crossing paths with
+two REAL VMs running side by side.**
 
 ## P9 — Multi-computer sim + HUD/beacon radio (planned 2026-10-29; unlocks ChipOS testing)
 

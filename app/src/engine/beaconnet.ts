@@ -59,8 +59,14 @@ class BeaconNet {
   private parts = new Map<string, BeaconParticipant>();
   /** slice B/D transport: deliveries queued per participant, drained by
    *  the owning runtime (a Beacon component's io channel via
-   *  xc_set_input_t, a program's beacon object via xc_beacon_put). */
-  private pending = new Map<string, string[]>();
+   *  xc_set_input_t, a program's beacon object via xc_beacon_put).
+   *  v1.15.0 slice C: entries carry a GLOBAL sequence — a component
+   *  beacon cabled to SEVERAL computers is read by each pump with its
+   *  own cursor (pendingSince), so one computer's beacon delivery is
+   *  seen by EVERY computer wired to it (takePending drains, for the
+   *  single-owner HUD ids). */
+  private pending = new Map<string, { seq: number; data: string }[]>();
+  private qseq = 0;
   private listeners = new Set<() => void>();
   /** the user's own transcript (dock sends), newest first */
   outbox: BeaconRx[] = [];
@@ -150,7 +156,7 @@ class BeaconNet {
       p.rxLog.unshift({ at: Date.now(), from, data });
       if (p.rxLog.length > RX_CAP) p.rxLog.length = RX_CAP;
       const q = this.pending.get(p.id) ?? [];
-      q.push(data);
+      q.push({ seq: ++this.qseq, data });
       if (q.length > PENDING_CAP) q.splice(0, q.length - PENDING_CAP);
       this.pending.set(p.id, q);
       n++;
@@ -162,7 +168,15 @@ class BeaconNet {
   takePending(id: string): string[] {
     const q = this.pending.get(id) ?? [];
     this.pending.delete(id);
-    return q;
+    return q.map(e => e.data);
+  }
+
+  /** READ-PAST-CURSOR view (slice C): everything delivered after `since`
+   *  — each pump keeps its own cursor, so a beacon shared by several
+   *  computers feeds them ALL. Returns [items, lastSeq]. */
+  pendingSince(id: string, since: number): { items: string[]; seq: number } {
+    const q = (this.pending.get(id) ?? []).filter(e => e.seq > since);
+    return { items: q.map(e => e.data), seq: q.length ? q[q.length - 1]!.seq : since };
   }
 
   /** Send FROM a participant's tx frequency (the shim's seam). */

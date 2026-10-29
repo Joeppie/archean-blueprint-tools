@@ -26,7 +26,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import FloatingWindow from './FloatingWindow';
 import {
-  xenonPump, xenonScreenBindings, CYCLE_HZ, type PilotKey, type XenonComputer,
+  xenonFarm, xenonScreenBindings, CYCLE_HZ, type PilotKey, type XenonComputer,
+  type XenonPump,
 } from '../engine/xenoncode';
 import { usePilotKeys } from '../engine/pilotkeys';
 import { slug } from '../engine/worldsim';
@@ -63,16 +64,21 @@ const PAD_RIGHT: { k: PilotKey; label: string }[] = [
  *  feeds the keyup; the canvas itself stays clickable between the keys.
  *  Renders nothing when the running computer has no cockpit bound. */
 export function PilotTouchPad(p: { className?: string }) {
-  if (!xenonPump.pilotKeysBound().length) return null;
+  // FARM (slice C): press the channel on EVERY pump with the seat bound —
+  // one cockpit serves all co-running computers.
+  if (!xenonFarm.pumps.some(q => q.pilotKeysBound().length)) return null;
+  const press = (k: PilotKey, down: boolean) => {
+    for (const q of xenonFarm.pumps) q.pilotKey(k, down);
+  };
   const btn = (k: PilotKey, label: string) => (
     <button key={k} data-testid={`pilot-touch-${k}`}
       className="h-12 w-12 touch-none select-none rounded-full border border-[#3a4a6a]/70
                  bg-black/45 text-[14px] leading-none text-[#9fb0c8]
                  active:border-[#8fd4ff] active:bg-[#243a52]/85 active:text-white"
-      onPointerDown={e => { e.preventDefault(); e.stopPropagation(); xenonPump.pilotKey(k, true); }}
-      onPointerUp={e => { e.preventDefault(); e.stopPropagation(); xenonPump.pilotKey(k, false); }}
-      onPointerCancel={() => xenonPump.pilotKey(k, false)}
-      onPointerLeave={() => xenonPump.pilotKey(k, false)}
+      onPointerDown={e => { e.preventDefault(); e.stopPropagation(); press(k, true); }}
+      onPointerUp={e => { e.preventDefault(); e.stopPropagation(); press(k, false); }}
+      onPointerCancel={() => press(k, false)}
+      onPointerLeave={() => press(k, false)}
       onContextMenu={e => e.preventDefault()}
     >{label}</button>
   );
@@ -102,12 +108,15 @@ export function ScreenCanvas(p: {
   surfKey: string; w: number; h: number; testid?: string;
   maxH?: number; maxW?: number; fill?: boolean; onTap?: () => void;
   tight?: boolean;                  // tile mode: no border/radius, flush edges
+  /** FARM (slice C): the pump that OWNS this surface (registers the
+   *  canvas, presses the VM's buttons). */
+  pump: XenonPump;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const cv = ref.current;
-    return cv ? xenonPump.registerCanvas(p.surfKey, cv, !!p.fill) : undefined;
-  }, [p.surfKey, p.fill]);
+    return cv ? p.pump.registerCanvas(p.surfKey, cv, !!p.fill) : undefined;
+  }, [p.surfKey, p.fill, p.pump]);
   const toPixels = (e: React.MouseEvent) => {
     const cv = ref.current;
     if (!cv) return null;
@@ -132,9 +141,9 @@ export function ScreenCanvas(p: {
     onClick={e => {
       if (p.onTap) { p.onTap(); return; }
       const px = toPixels(e);
-      if (px) xenonPump.screenClick(p.surfKey, px.x, px.y);
+      if (px) p.pump.screenClick(p.surfKey, px.x, px.y);
     }}
-    onWheel={e => xenonPump.screenScroll(p.surfKey, e.deltaY < 0 ? 1 : -1)} />;
+    onWheel={e => p.pump.screenScroll(p.surfKey, e.deltaY < 0 ? 1 : -1)} />;
 }
 
 /** One cell: the live thumbnail, its name, and ⛶ — and the thumbnail CLICK
@@ -152,6 +161,7 @@ export function ScreensCell(p: {
                                     // (we 2026-10-28: "when you open a screen
                                     // fullscreen, update the URL to be a
                                     // deeplink") so the view is shareable
+  pump: XenonPump;                  // FARM (slice C): the surface's owner
 }) {
   const [full, setFull] = useState(!!p.autoFull);
   const syncUrl = (key: string | null) => {
@@ -182,7 +192,7 @@ export function ScreensCell(p: {
     <>
       <div data-testid={p.testid} className="relative">
         <ScreenCanvas surfKey={p.surfKey} w={p.w} h={p.h} maxH={p.maxH ?? 160}
-          testid={p.canvasTestid} onTap={openFull} tight={p.tight} />
+          testid={p.canvasTestid} onTap={openFull} tight={p.tight} pump={p.pump} />
         {!p.tight && (
           <button data-testid={`${p.testid}-full`} title="open the zoomable window (click the screen works too)"
             onClick={openFull}
@@ -228,7 +238,7 @@ export function ScreensCell(p: {
           <div className="pt-2 text-center" style={{ width: Math.round(fit * z), maxWidth: 'none', margin: '0 auto' }}
             onClick={e => e.stopPropagation()}>
             <ScreenCanvas surfKey={p.surfKey} w={p.w} h={p.h} fill
-              testid={`${p.testid}-fullcanvas`} />
+              testid={`${p.testid}-fullcanvas`} pump={p.pump} />
           </div>
           {/* ...and the fullscreen zoom window carries it too (we: "also
               when fullscreening a screen") */}
@@ -241,12 +251,16 @@ export function ScreensCell(p: {
 
 export default function ScreensDock(p: {
   comp: XenonComputer | null; onClose: () => void;
+  /** FARM (slice C): the pump whose surfaces the dock shows (the active
+   *  computer's); null = no VM booted yet. */
+  pump: XenonPump | null;
   /** deep link (Editor `?dash=`): this surface's zoom window opens by itself */
   focus?: string;
   /** set → opening a zoom window writes the ?craft&dash deep link into the
    *  URL (shareable "play this game" links — the gallery's PLAYABLE row) */
   craftId?: string;
 }) {
+  const pump = p.pump;
   const [, setTick] = useState(0);
   const [tab, setTab] = useState<'dash' | 'virtual'>('dash');
   const [q, setQ] = useState('');
@@ -264,14 +278,14 @@ export default function ScreensDock(p: {
     catch { /* private mode */ }
     return !v;
   });
-  useEffect(() => xenonPump.subscribe(() => setTick(t => t + 1)), []);
+  useEffect(() => pump?.subscribe(() => setTick(t => t + 1)), [pump]);
   // WASD / ↑ / ↓ / F → the cockpit (we: "when you are looking at the dash
   // window … pressing WASD, up, down, and F should be given as inputs into
   // the computer for all cockpit connections it has")
   usePilotKeys(true);
 
   const bindings = p.comp ? xenonScreenBindings(p.comp) : new Map<string, string>();
-  const all = [...xenonPump.surfaces.values()];
+  const all = [...(pump ? pump.surfaces.values() : [])];
   // The 3-D model-face MIRRORS (the Computer's built-in screen fed from
   // main#0) are the 3-D scene's business — a dock cell for each duplicate
   // blits a full 640×480 canvas every cycle for pixels the user already
@@ -287,7 +301,7 @@ export default function ScreensDock(p: {
     if (!s) return base;
     return base.filter(x => x.key.includes(s) || (bindings.get(x.key) ?? '').toLowerCase().includes(s));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, q, xenonPump.cycles, bindings]);
+  }, [tab, q, pump?.cycles, bindings]);
 
   // deep-link focus is ONE-SHOT: consumed the moment the zoom window opens
   // (a filter round-trip remounts cells; a re-armed autoFull would raise
@@ -297,7 +311,7 @@ export default function ScreensDock(p: {
   // physical mounts (we: "it should actually focus on the first
   // virtualscreen").
   const [focusLeft, setFocusLeft] = useState(p.focus ?? null);
-  const virt0 = [...xenonPump.surfaces.values()].find(s => s.key.startsWith('virtual#'));
+  const virt0 = [...(pump ? pump.surfaces.values() : [])].find(s => s.key.startsWith('virtual#'));
   useEffect(() => {
     if (focusLeft === 'first-virtual' && virt0) setTab('virtual');
   }, [focusLeft, virt0?.key]);
@@ -308,7 +322,7 @@ export default function ScreensDock(p: {
   // Invaders deep link must work however the URL survives the trip.
   const resolveFocus = (f: string): string | null => {
     let s = f; try { s = decodeURIComponent(f); } catch { /* raw */ }
-    const keys = [...xenonPump.surfaces.keys()];
+    const keys = [...(pump ? pump.surfaces.keys() : [])];
     return keys.includes(s) ? s
       : keys.includes(`${s}#0`) ? `${s}#0`
       : keys.find(k => k.split('#')[0] === s) ?? null;
@@ -316,7 +330,7 @@ export default function ScreensDock(p: {
   const focusKey = focusLeft === 'first-virtual' ? virt0?.key ?? null
     : focusLeft ? resolveFocus(focusLeft) : null;
 
-  const pilot = xenonPump.pilotKeysBound();
+  const pilot = pump?.pilotKeysBound() ?? [];
 
   return (
     <FloatingWindow
@@ -332,10 +346,10 @@ export default function ScreensDock(p: {
           {p.comp && <span className="ml-2 font-normal text-[#9fb0c8]">— {p.comp.alias || p.comp.program}</span>}
         </span>
         <span data-testid="screens-status"
-          className={`text-[10px] font-bold ${xenonPump.status === 'running' ? 'text-[#3ddc55]' : 'text-[#ff5b5b]'}`}>
-          {xenonPump.status === 'running' ? 'ON' : xenonPump.status.toUpperCase()}
+          className={`text-[10px] font-bold ${pump?.status === 'running' ? 'text-[#3ddc55]' : 'text-[#ff5b5b]'}`}>
+          {pump ? (pump.status === 'running' ? 'ON' : pump.status.toUpperCase()) : 'OFF'}
         </span>
-        <span className="text-[10px] text-[#5d6a7d]">cycles {xenonPump.cycles} @ {CYCLE_HZ} Hz</span>
+        <span className="text-[10px] text-[#5d6a7d]">cycles {pump?.cycles ?? 0} @ {CYCLE_HZ} Hz</span>
         {pilot.length > 0 && (
           <span data-testid="screens-pilot-hint" className="hidden text-[10px] text-[#5d6a7d] lg:inline"
             title={`bound cockpit channels: ${pilot.join(', ')}`}>
@@ -373,12 +387,12 @@ export default function ScreensDock(p: {
         )}
         {p.comp && !all.length && (
           <span className="text-[12px] text-[#5d6a7d]">
-            {xenonPump.status === 'booting' ? 'booting the computer…' : 'no surfaces painted yet'}
+            {pump?.status === 'booting' ? 'booting the computer…' : 'no surfaces painted yet'}
           </span>
         )}
-        {list.map(s => (
+        {pump && list.map(s => (
           <ScreensCell key={s.key} surfKey={s.key} w={s.w} h={s.h} maxH={260}
-            craftId={p.craftId}
+            craftId={p.craftId} pump={pump}
             testid={`screens-cell-${s.key}`}
             canvasTestid={`screens-canvas-${s.key}`}
             autoFull={focusKey === s.key}

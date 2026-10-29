@@ -50,7 +50,7 @@ import { cornerOf, triAt, triangleFromCorners, mirroredTriangle, triTwinIndex, t
 import { applyPinEdit, applyPinRotate, applyPinShift, applyTriFlip, applyTriPaint } from './engine/pinedit';
 import type { Blueprint, Triangle } from './engine/format';
 import { isLegacyFile } from './engine/format';
-import { hasDashboards, xenonComputers, xenonHudControllers, xenonPump, type XCFile } from './engine/xenoncode';
+import { hasDashboards, xenonComputers, xenonHudControllers, xenonFarm, type XCFile } from './engine/xenoncode';
 import { beaconNet } from './engine/beaconnet';
 import { makeXcdbg } from './engine/xcdbg';
 import { buzzerAudio } from './engine/buzzer';
@@ -132,9 +132,18 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   const toolsModRef = useRef<ToolsModule | null>(null);
   // Help ▸ Manual… — the built-in markdown manual (v1.5.20)
   const [helpOpen, setHelpOpen] = useState(false);
-  // XENON (v1.13): the Xenon IDE of one MiniComputer (XenonDialog.tsx); the
-  // descriptors re-derive from bp (the files live IN the blueprint)
-  const [xenonCi, setXenonCi] = useState<number | null>(null);
+  // XENON (v1.13): the Xenon IDE of a MiniComputer (XenonDialog.tsx); the
+  // descriptors re-derive from bp (the files live IN the blueprint).
+  // FARM (v1.15.0 slice C): MULTIPLE IDE windows co-run — one per ci, the
+  // last one is the ACTIVE pump (dock/debug-console/▶-F5 target).
+  const [xenonCis, setXenonCis] = useState<number[]>([]);
+  const activePump = () =>
+    xenonFarm.pumpForCi(xenonCis[xenonCis.length - 1] ?? -1) ?? xenonFarm.active();
+  // FARM (slice C): re-render when the pump LINEUP changes (the dock's
+  // pump prop follows a boot started from its own effect)
+  const [farmV, setFarmV] = useState(0);
+  useEffect(() => xenonFarm.subscribe(() => setFarmV(v => v + 1)), []);
+  void farmV;
   const xenonComps = useMemo(
     () => (bp ? xenonComputers(bp) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -201,26 +210,26 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   }, [autosaveNow]);
   useEffect(() => {
     if (!screensOpen) return;
-    const comp = xenonPump.comp ?? xenonComps[0];
+    const comp = xenonFarm.active()?.comp ?? xenonComps[0];
     if (!comp) return;
-    void xenonPump.open(comp);
+    void xenonFarm.pumpFor(comp).open(comp);
     engineRef.current?.setScreenFeeds(comp.screens
       .filter(s => s.ci != null)
       .map(s => ({ key: `${s.alias.toLowerCase()}#${s.channel}`, ci: s.ci!, channel: s.channel })));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screensOpen, xenonComps.length]);
-  // The pump owns the single WASM VM: release it when the IDE and the
-  // Screens tab are BOTH closed (a craft swap then boots clean).
+  // FARM (slice C): release the VMs when the LAST IDE window and the
+  // Screens tab are all closed (a craft swap then boots clean).
   useEffect(() => {
-    if (xenonCi === null && !screensOpen) xenonPump.close();
-  }, [xenonCi, screensOpen]);
-  // LEAVING THE EDITOR (back to the gallery, craft swap, unmount) closes the
-  // pump TOO (we: "going back to the gallery DOESNT properly reset the
+    if (xenonCis.length === 0 && !screensOpen) xenonFarm.closeAll();
+  }, [xenonCis, screensOpen]);
+  // LEAVING THE EDITOR (back to the gallery, craft swap, unmount) closes
+  // the FARM TOO (we: "going back to the gallery DOESNT properly reset the
   // entire sim, which it must if we can open directly to a screen"): the
-  // deep-link UX promises a FRESH game on every entry — without this the VM
-  // keeps cycling behind the gallery (audio on!) and open()'s same-ci early
-  // return RESUMES the old session, so the arcade never shows its title.
-  useEffect(() => () => xenonPump.close(), []);
+  // deep-link UX promises a FRESH game on every entry — without this the
+  // VMs keep cycling behind the gallery (audio on!) and open()'s same-ci
+  // early return RESUMES the old session, so the arcade never shows its title.
+  useEffect(() => () => xenonFarm.closeAll(), []);
   // SCREEN WAKE LOCK while a game screen is up (v1.13.12, we: "did not play
   // any sound until I made the screen smaller"): Chrome throttles an
   // occluded tab's timers (the 25 Hz pump starves, short beeps fall through
@@ -229,7 +238,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // /unsupported: the silent audio keep-alive (buzzer.ts) still marks the
   // tab media-active, which is the second exemption.
   useEffect(() => {
-    if (!(screensOpen || xenonCi !== null)) return;
+    if (!(screensOpen || xenonCis.length > 0)) return;
     const wl = (navigator as unknown as {
       wakeLock?: { request: (t: 'screen') => Promise<{ release: () => void; addEventListener: (e: string, f: () => void) => void }> };
     }).wakeLock;
@@ -250,7 +259,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       document.removeEventListener('visibilitychange', vis);
       sentinel?.release();
     };
-  }, [screensOpen, xenonCi]);
+  }, [screensOpen, xenonCis]);
   // Debug channel base (the __XENON__ pattern): readable on ANY page — the
   // IDE dialog enriches it further while mounted (surfaceMeta, bus, ...)
   useEffect(() => {
@@ -258,50 +267,62 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     // THE DEBUG CONSOLE (v1.13.24, we: "create a JS interface where we can
     // define breakpoints and then run stuff - an interface that makes using
     // it for AI agents to analyze xenoncode easier"): window.__XCDBG__
-    // drives the REAL pump - break(file,lines) / run / step / frame /
-    // globals / write(name,value) / bus / prints, all JSON-plain.
-    (window as any).__XCDBG__ ??= makeXcdbg(xenonPump);
-    (window as any).__XENON__ ??= () => ({
-      cycles: xenonPump.cycles, status: xenonPump.status,
-      // v1.13.26: the camera (the io-hover fly-to pin measures the 3-D
-      // view actually moved; null until a scene exists)
-      cam: () => engineRef.current?.camPos() ?? null,
-      pilotKeys: xenonPump.pilotKeysBound(),
-      surfaceMeta: [...xenonPump.surfaces.values()].map(({ key, w, h }) => ({ key, w, h })),
-      // v1.13.8 audit door: a surface's live framebuffer (the invadersaudit
-      // orientation probe compares the RENDERED 3-D face against it) and the
-      // last input_number READS per io:ch (the input-path probes).
-      pixels: (key: string) => {
-        const s = xenonPump.surfaces.get(key);
-        return s?.pixels ? { w: s.w, h: s.h, data: [...s.pixels!] } : null;
-      },
-      reads: () => Object.fromEntries(xenonPump.reads),
-      // live program globals (the XENON-VARS patch): the clip recorder gates
-      // Mario's SPACE press on the sprite cache completing ($mode/$demo)
-      vars: () => Object.fromEntries([...xenonPump.vars.entries()].map(([k, v]) => [k, v.v])),
-      buzzer: {
-        soundOn: buzzerAudio.soundOn, wave: buzzerAudio.wave, level: buzzerAudio.level,
-        outputLevel: buzzerAudio.outputLevel(), voices: buzzerAudio.voiceCount(),
-      },
-      world: [...xenonPump.wsBoundNames()].map(n => {
-        const r = xenonPump.wsChannels().find(c => c.name === n);
-        return r ? { name: r.name, mode: r.mode, manual: r.manual, value: r.value } : null;
-      }).filter(Boolean),
-    });
+    // drives the REAL FARM's ACTIVE pump (slice C resolves it per call) —
+    // break(file,lines) / run / step / frame / globals / write(name,value)
+    // / bus / prints, all JSON-plain.
+    (window as any).__XCDBG__ ??= makeXcdbg(() => xenonFarm.active());
+    (window as any).__XENON__ ??= () => {
+      const P = xenonFarm.active();
+      return {
+        cycles: P?.cycles ?? 0, status: P?.status ?? 'idle',
+        // FARM (slice C): every VM on the floor, by computer alias
+        farm: xenonFarm.pumps.filter(p => p.comp).map(p => ({
+          comp: p.comp?.alias ?? '', cycles: p.cycles, status: p.status,
+        })),
+        // v1.13.26: the camera (the io-hover fly-to pin measures the 3-D
+        // view actually moved; null until a scene exists)
+        cam: () => engineRef.current?.camPos() ?? null,
+        pilotKeys: P?.pilotKeysBound() ?? [],
+        surfaceMeta: [...(P?.surfaces.values() ?? [])].map(({ key, w, h }) => ({ key, w, h })),
+        // v1.13.8 audit door: a surface's live framebuffer (the invadersaudit
+        // orientation probe compares the RENDERED 3-D face against it) and the
+        // last input_number READS per io:ch (the input-path probes).
+        pixels: (key: string) => {
+          const s = P?.surfaces.get(key);
+          return s?.pixels ? { w: s.w, h: s.h, data: [...s.pixels!] } : null;
+        },
+        reads: () => Object.fromEntries(P?.reads ?? []),
+        // live program globals (the XENON-VARS patch): the clip recorder gates
+        // Mario's SPACE press on the sprite cache completing ($mode/$demo)
+        vars: () => Object.fromEntries([...(P?.vars.entries() ?? [])].map(([k, v]) => [k, v.v])),
+        buzzer: {
+          soundOn: buzzerAudio.soundOn, wave: buzzerAudio.wave, level: buzzerAudio.level,
+          outputLevel: buzzerAudio.outputLevel(), voices: buzzerAudio.voiceCount(),
+        },
+        world: [...(P?.wsBoundNames() ?? [])].map(n => {
+          const r = P?.wsChannels().find(c => c.name === n);
+          return r ? { name: r.name, mode: r.mode, manual: r.manual, value: r.value } : null;
+        }).filter(Boolean),
+      };
+    };
   }, []);
-  // THE 3-D LAW: the pump's tick pushes each surface's framebuffer onto its
-  // dashboard face EVERY CYCLE via a cycle hook (v1.13.5: it rode the
+  // THE 3-D LAW: EVERY pump's tick pushes each of its surfaces'
+  // framebuffers onto their dashboard faces (v1.13.5: it rode the
   // ≤10 Hz notify before — the craft's screens visibly lagged the dock's
   // canvases, "delayed compared to actual screen visibility").
   // The pump fetches pixels for exactly the keys the scene feeds (plus the
   // panels' visible canvases) - 118-buffer crafts stay memcpy-cheap.
-  useEffect(() => xenonPump.addCycleHook(() => {
-    const eng = engineRef.current;
-    if (!eng || xenonPump.status !== 'running') return;
-    xenonPump.setFeedKeys(eng.screenFeedKeys());
-    for (const s of xenonPump.surfaces.values())
-      if (s.pixels) eng.pushScreen(s.key, s.w, s.h, s.pixels);
-  }), []);
+  useEffect(() => {
+    const removers = xenonFarm.pumps.map(p => p.addCycleHook(() => {
+      const eng = engineRef.current;
+      if (!eng || p.status !== 'running') return;
+      p.setFeedKeys(eng.screenFeedKeys());
+      for (const s of p.surfaces.values())
+        if (s.pixels) eng.pushScreen(s.key, s.w, s.h, s.pixels);
+    }));
+    return () => removers.forEach(r => r());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [xenonCis]);
   useEffect(() => {
     let dead = false;
     import('./components/ToolsDialog').then(m => {
@@ -613,7 +634,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     }
     markDirty(); bumpRev();
     const next = xenonComputers(ctx.bp).find(c => c.ci === ci);
-    if (next) xenonPump.reload(next);          // game rule: save ⇒ reboot
+    if (next) xenonFarm.pumpForCi(ci)?.reload(next);   // game rule: save ⇒ reboot
   }, [markDirty, bumpRev]);
 
   /** The HUD IDE's writeback (v1.14.0): a HudController's files live at
@@ -1032,7 +1053,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       // save a draft first); with NEITHER window open the key stays the
       // browser's (page refresh).
       if (e.key === 'F5') {
-        if (screensOpen && xenonCi === null) { e.preventDefault(); xenonPump.reboot(); }
+        if (screensOpen && xenonCis.length === 0) { e.preventDefault(); xenonFarm.active()?.reboot(); }
         return;
       }
       // F6 STOP (v1.13.31, we: "f6 should mean stop"): the twin of the F5
@@ -1041,7 +1062,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       // editable); with the IDE open its OWN F6 handler owns the key;
       // with NEITHER window open the key stays the browser's.
       if (e.key === 'F6') {
-        if (screensOpen && xenonCi === null) { e.preventDefault(); xenonPump.stopRunning(); }
+        if (screensOpen && xenonCis.length === 0) { e.preventDefault(); xenonFarm.active()?.stopRunning(); }
         return;
       }
       const el = e.target as HTMLElement | null;
@@ -1103,7 +1124,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     return () => removeEventListener('keydown', h);
   }, [save, toggleOpt, placing, mode, ws, sel, blockSel, triSel,
     triDraft, pinTi, brush, undo, redo, deleteComp, deleteBlock, deleteTri,
-    screensOpen, xenonCi]);
+    screensOpen, xenonCis]);
 
   // blocks-mode canvas handling: place (brush/logical continuation) or
   // select, via engine.pickCell.
@@ -1721,7 +1742,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         xenonHuds={xenonHuds.map(h => ({ ci: h.ci, alias: h.alias, files: h.files.length }))}
         onHud={ci => setHudCi(ci)}
         onBeacons={() => setBeaconsOpen(o => !o)} beaconsOpen={beaconsOpen}
-        onXenon={ci => setXenonCi(ci)}
+        onXenon={ci => { setXenonCis(c => (c.includes(ci) ? c : [...c, ci])); const kc = xenonComps.find(c => c.ci === ci); if (kc) void xenonFarm.pumpFor(kc).open(kc); }}
         hasScreens={hasScreens} screensOpen={screensOpen}
         onScreens={() => setScreensOpen(o => !o)}
         autosaveCount={autosaveCount} onAutosaves={() => setAutosavesOpen(true)}>
@@ -1834,15 +1855,18 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
               </Suspense>
             )}
             {/* XENON ▸ the in-game-style IDE of a MiniComputer (v1.13) */}
-            {xenonCi !== null && (() => {
-              const comp = xenonComps.find(c => c.ci === xenonCi);
-              return comp ? (
-                <Suspense fallback={null}>
-                  <XenonDialogLazy comp={comp} engine={engine}
-                    onClose={() => setXenonCi(null)} onFiles={xenonFiles} />
+            {/* FARM (v1.15.0 slice C): one IDE window per computer — all
+                co-running, sharing the craft's io bus (cascade offsets
+                live in FloatingWindow's per-id rects) */}
+            {xenonCis.flatMap(ci => {
+              const comp = xenonComps.find(c => c.ci === ci);
+              return comp ? [(
+                <Suspense key={`xenon-${ci}`} fallback={null}>
+                  <XenonDialogLazy comp={comp} pump={xenonFarm.pumpFor(comp)} engine={engine}
+                    onClose={() => setXenonCis(c => c.filter(x => x !== ci))} onFiles={xenonFiles} />
                 </Suspense>
-              ) : null;
-            })()}
+              )] : [];
+            })}
             {/* 🖥 HUD IDE (v1.14.0 P9 slice A): the code of a HUD block */}
             {hudCi !== null && (() => {
               const hud = xenonHuds.find(h => h.ci === hudCi);
@@ -1864,7 +1888,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
               /* the dock is a FloatingWindow: it positions, drags and
                  resizes itself (phones get it fullscreen) */
               <Suspense fallback={null}>
-                <ScreensDockLazy comp={xenonPump.comp ?? xenonComps[0] ?? null}
+                <ScreensDockLazy comp={activePump()?.comp ?? xenonComps[0] ?? null}
+                  pump={activePump()}
                   craftId={craft ?? undefined}
                   focus={new URLSearchParams(window.location.search).get('dash')?.toLowerCase() ?? undefined}
                   onClose={() => setScreensOpen(false)} />
@@ -2056,8 +2081,13 @@ function PickChip({ hit, bp }: { hit: PickHit; bp: Blueprint }) {
 // static. data-playing mirrors the live state for the pins.
 function BuzzerButton() {
   const [, setTick] = useState(0);
-  useEffect(() => xenonPump.subscribe(() => setTick(t => t + 1)), []);
-  if (!(xenonPump.comp?.devices ?? []).some(d => d.type === 'Buzzer')) return null;
+  // FARM (slice C): watch EVERY pump (any co-running computer may buzz)
+  useEffect(() => {
+    const unsubs = xenonFarm.pumps.map(p => p.subscribe(() => setTick(t => t + 1)));
+    return () => unsubs.forEach(u => u());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  if (!(xenonFarm.pumps.some(p => (p.comp?.devices ?? []).some(d => d.type === 'Buzzer')))) return null;
   const playing = buzzerAudio.soundOn && buzzerAudio.level > 0.001;
   return (
     <button data-testid="buzzer-toggle" aria-pressed={buzzerAudio.soundOn}

@@ -51,7 +51,7 @@ function fakePump() {
   return p;
 }
 
-const dbg = (p: ReturnType<typeof fakePump>) => makeXcdbg(p as unknown as XenonPump);
+const dbg = (p: ReturnType<typeof fakePump>) => makeXcdbg(() => p as unknown as XenonPump);
 
 describe('THE DEBUG CONSOLE (window.__XCDBG__)', () => {
   it('break/list/clear push by-file maps onto the pump', () => {
