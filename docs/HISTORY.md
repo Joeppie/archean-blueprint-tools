@@ -3250,6 +3250,12 @@ topic + FORMAT).
   in-game screenshot (screen_w=200: 11 columns). LESSON: a component
   dimension guess is a format bug — the wiki/game `.xc` scripts are the
   source, transcribe to FORMAT the same commit (NOTICE §2 spirit).
+  KNOWN REDS (bisected PRE-EXISTING — fail on v1.15.1 too, phone-IDE era):
+  [pixel7] xenonfarm 'two computers co-run' (two cascading IDE windows
+  don't fit the 412-px viewport — the farm UX predates phones) and
+  [pixel7] xenonhud 'the computer IDE carries the Beacons tab' (the phone
+  rail hides xenon-side-beacons under load; passes solo idle). Both pass
+  on chromium; AGENTS Backlog carries the phone farm-window item.
 
 ## 2. v1.11 session — KNOWN ISSUES & UNPINNED TODOS (2026-10-25/26 session block)
 

@@ -824,6 +824,11 @@ behind a small link at the END of the gallery. Pages serves the GENERATED
   config.py), byte-identical saves, no releases without the user asking.
 
 ## Backlog (live items)
+- **Phone farm windows (v1.15.3 known red)**: two cascading Xenon IDE
+  windows don't fit the 412-px viewport — [pixel7] xenonfarm co-run leg
+  reds at the click; the v1.13.32 phone IDE (rail + drawer) predates the
+  multi-window farm. Design the phone multi-window UX (tab-switch?
+  fullscreen swap) before re-tabling the leg.
 - **P8 — Xenon workspace as a STANDALONE, low-coupling module**: shape,
   coupling inventory and the four seams (write-path, screen-feed, key-bus,
   shell-descriptors) in REWRITE.md § P8; P3 (project tree) + P4 (upstream
