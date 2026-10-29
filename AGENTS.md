@@ -411,7 +411,11 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   carries the new exports/decl-strings (`grep -ac <name> xenoncode.wasm`)
   before trusting an e2e red — a build that copied a stale wasm cost a
   debug cycle (the v1.14.1 build7 catch; a prod page fetches the CHUNK
-  glue, not the raw asset, so probe the wasm bytes, not the loaded URL).
+  glue, not the raw asset, so probe the wasm bytes, not the loaded URL);
+  isolation.spec serves `app/dist`, NOT the webServer tree — a reused live
+  dev vite makes Playwright SKIP its build, so a stale dist fakes a red
+  (the v1.15.1 catch: `npx vite build` before trusting a banner/chip
+  assertion there).
 - PER-COMPONENT PINS: solo-fixture tests carry `@<ComponentName>` tags; run
   the tags you touched; a full @slow sweep only when a SHARED render-pipeline
   file changed.
