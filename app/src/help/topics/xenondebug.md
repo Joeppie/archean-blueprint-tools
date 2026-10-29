@@ -11,9 +11,8 @@ mid-cycle at the breakpoint: the pause pill shows `file:line`, the Vars
 panel's top section shows the **Locals** of the frame you stopped in (its
 arguments and block variables, with types), the globals tick below. Step
 with **F10** (over) / **F11** (into), resume with **F8** or the Run menu.
-**F5** runs the program fresh: it COMMITS the files (a commit re-boots the
-computer on them, breakpoints included — the editor is always live, saving
-is the commit).
+**F5** commits the files and runs the program fresh on them (breakpoints
+included).
 
 A frame exists for `function @name` bodies **and** for the global-scope
 blocks: `update`, `init`, `tick`, `timer frequency N`, `input N` — they
@@ -62,12 +61,11 @@ __XCDBG__.clear(); await __XCDBG__.run({ cycles: 30 })   // stream freely
 
 Notes: on an ISOLATED origin the VM runs on a worker thread, so pauses are
 **mid-cycle** — locals and writes are the parked VM's own state; writes are
-accepted only while PAUSED there. Isolated origins: `http://localhost` and
-any https site that sends (or forges) the cross-origin-isolation headers —
-the public Pages site self-forges them with a service worker, so its FIRST
-visit installs it and reloads the tab ONCE. Plain-http LAN addresses are
-not secure contexts: there the debugger runs the main-thread stepper —
-same laws, one full 25 Hz cycle per step; the IDE's mode chip always
-states which stepper is live. `break()` answers an
-`{error}` when the file is not on the disk (the answer lists the names).
-The cycle budget bounds every call: a run never hangs a caller forever.
+accepted only while PAUSED there. Isolated origins are `http://localhost`
+and https (the public Pages site forges the headers with a service worker,
+so its FIRST visit reloads the tab ONCE). Plain-http LAN addresses are not
+secure contexts: there the debugger runs the main-thread stepper — same
+laws, one full 25 Hz cycle per step; the IDE's mode chip always states
+which stepper is live. `break()` answers an `{error}` when the file is not
+on the disk (the answer lists the names). The cycle budget bounds every
+call: a run never hangs a caller forever.

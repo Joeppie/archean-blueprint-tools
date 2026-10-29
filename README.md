@@ -128,6 +128,25 @@ snapped `x y z` (file law: x lateral, **y is UP**, nose −z).
 
 ![Chip Patton's Falcon under the desert (Goegap) panorama backdrop — see-through pad, adaptive grid](assets/falcon-desert.png)
 
+### XenonCode IDE — programs that run, and a real debugger
+
+Craft with MiniComputers open an in-game-style IDE: the XenonCode programs run
+on the dev's own interpreter compiled to WebAssembly, cycling at the game's
+25 Hz cadence and wired into the craft's io bus — and the debugger is the
+classical one: click a line's gutter for a breakpoint, **F10** steps lines,
+**F11** steps in, **F8** resumes; the ⏸ pill names the stop site
+(`plomo.main.xc:17` below), the BREAKPOINTS strip lists every break with its
+code excerpt, the paused line rides a wash, and the VARS tab shows the live
+locals of the frame you stopped in — editable values while paused. On
+`http://localhost:PORT` (and https) the VM runs on a worker and freezes
+**mid-cycle** at every stop — true line-stepping; the menu then says nothing
+about it, and only warns where the browser withholds that capability
+(cycle-granular stepping on plain-http LAN addresses).
+
+![The XenonCode IDE paused at a real breakpoint — title-bar debugger buttons, ⏸ plomo.main.xc:17 pill, gutter break + BREAKPOINTS strip, paused-line wash, VARS locals, “debugger: worker · true line-stepping” chip](assets/xenon-debug-paused.png)
+
+![The Xenon ▾ menu: the ⚠ WIP disclaimer and the computer list — the only banner is the degradation warning, a full-capability origin says nothing](assets/xenon-menu.png)
+
 ### And the rest of the bench
 
 * **Real game components** — the game's own dense meshes with your painted

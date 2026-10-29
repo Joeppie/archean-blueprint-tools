@@ -43,16 +43,13 @@ with the craft and travels in the file.
 * **Nav history** — every jump (library click, go-to-definition, Ctrl+G,
   a breakpoint hit, tab switch) records a navpoint: `◀ ▶` beside the tabs
   (and `ALT+←` / `ALT+→`) walk back and forth through where you'd been.
-* **Breakpoint follow** — when the run stops on your breakpoint, the
-  editor moves to the hit (file + line), so you land exactly where the
-  program parked; `◀` takes you back to what you were editing.
 * **Debugger** — click a line's gutter for a red breakpoint; **F10** steps
   ONE executed line at the current level (a call is stepped over),
   **F11** steps into the call, **F8** resumes. The run toolbar beside the
   tabs carries the same as classic buttons: **▶ run/resume, ⏸ pause,
-  ⟳ re-boot, ⏹ stop, ⇥ step-over, ↓ step-into**. When a break (or a step)
-  stops the program, the editor jumps to the line that just executed —
-  `Alt+←` walks the nav history back to where you were.
+  ⟳ re-boot, ⏹ stop, ⇥ step-over, ↓ step-into**. Every stop — breakpoint
+  hit or step — moves the editor to the stop site, and `◀` / `Alt+←`
+  walks the nav history back to what you were editing.
 * **$ knows your frame** — typing `$` completes globals AND, while the
   debugger is paused, the live LOCALS of the frame you stopped in (marked
   `· frame`). A file with unsaved changes wears a **red dot** on its tab.
@@ -201,13 +198,13 @@ fed the REAL time between updates, so Mario moves at true speed (a choppy
   tab's search box):
   * **Vars** — ONE panel, two sections, LOCALS ALWAYS ON TOP:
     * **Locals** (top) — the LOCAL variables of the function owning the
-      PAUSED line: its arguments and body variables, read LIVE from the
-      interpreter at the stop. A frame is born at a debugger STOP (click a
-      line's gutter, step with F10/F11) and stays listed as `last stop ·
-      stale (running)` after resume — while the program RUNS there is no
-      parked frame to read, so only globals tick. Recursion copies badge
-      `#1`, `#2`…; a `$var` hover in the code reads the paused frame
-      first, globals while running. Top-level lines have no locals.
+      PAUSED line: arguments and body variables with types, read LIVE from
+      the interpreter at the stop. A frame exists only at a debugger STOP
+      (gutter click, F10/F11); after resume it stays listed as `last stop ·
+      stale (running)` — while the program RUNS there is no parked frame,
+      so only globals tick. Recursion copies badge `#1`, `#2`…; a `$var`
+      hover in the code reads the paused frame first, globals while
+      running. Top-level lines have no locals.
     * **Globals** (below) — every global variable of the running program,
       live: RAM and `storage` values, with `storage` tagged. Text values
       in the language's key-value form (`.on{1}.red{255}`) break open into
@@ -215,14 +212,13 @@ fed the REAL time between updates, so Mario moves at true speed (a choppy
   * The type rides beside every name (`number`, `text`, `storage`,
     `array`, `object`). Search filters names AND values in both sections.
   * **Editable values** — while the debugger is PAUSED, number and text
-    values are click-to-edit (locals of the frame, and globals): type the
-    new value, Enter writes it INTO the running program's memory (Esc
-    cancels). A number cell refuses anything but a finite decimal
-    (`42`, `-1.5`, `1e3`, `true`/`false`) with an inline message; text
-    accepts anything; `storage` (world-save), arrays and objects refuse.
-    While a worker RUNS there is no writable moment — break first
-    (gutter click / F9). Main-thread mode (non-isolated origin) writes
-    anytime — the VM shares the page thread.
+    values (the frame's locals and the globals) are click-to-edit: Enter
+    writes the value INTO the running program's memory, Esc cancels. A
+    number cell accepts only a finite decimal (`42`, `-1.5`, `1e3`,
+    `true`/`false`); text accepts anything; `storage` (world-save), arrays
+    and objects refuse. While a worker RUNS there is no writable moment —
+    break first (gutter click / F9). Main-thread mode (non-isolated
+    origin) writes anytime — the VM shares the page thread.
   * **Screens** — the same live surfaces, searchable by name.
   * **Bus** — the `input_number` sliders (every io/channel the program
     reads) and the `output_number` stream (target · port · latest value).

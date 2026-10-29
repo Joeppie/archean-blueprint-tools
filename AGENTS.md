@@ -268,10 +268,8 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   (`input_text(port,0)` — the RCS500 read law) every cycle. The BEACONS
   side tab (computer IDE + HUD IDE + 📡 dock) renders the registry
   (seeded from components + scanned `beacon()` literals, runtime-merged
-  by id; EXACT text-frequency routing; logs survive re-seeds). ONE
-  INTERPRETER: `engine/runtimemgr.ts` — a HUD boot CLOSES the computer
-  pump and vice versa (the farm in slice C lifts this). The shim twin:
-  `xc_host.cpp` ABI 11 ↔ `XC_ABI`; demo `tools/xenoncode/demo/hudradio`.
+  by id; EXACT text-frequency routing; logs survive re-seeds). The shim
+  twin: `xc_host.cpp` ABI 11 ↔ `XC_ABI`; demo `tools/xenoncode/demo/hudradio`.
 - THE COMPUTER FARM (v1.15.0 P9 slice C): MULTIPLE MiniComputers co-run —
   every XenonRun carries its OWN wasm instance (`xenonInstantiate`), the
   `xenonFarm` registry (keyed by comp.ci, `MAX_VM` evicts the oldest)
@@ -280,10 +278,10 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   drives it into EVERY attached pump's inputs (the writer's loopback
   included); `beaconNet` queues carry a global seq and each pump reads
   with its own cursor, so a component beacon wired to two computers
-  feeds BOTH. The farm retires runtimemgr's one-interpreter mutual kill
-  (the HUD co-runs too). Pilot keys press every pump with the seat
-  bound; the dock + `__XCDBG__` + F5-target the ACTIVE pump (last
-  window opened); per-window FloatingWindow ids `xenon-<ci>`; the header
+  feeds BOTH. HUD programs co-run with computers too. Pilot keys press
+  every pump with the seat bound; the dock + `__XCDBG__` + F5-target the
+  ACTIVE pump (last window opened); per-window FloatingWindow ids
+  `xenon-<ci>`; the header
   rises to z-[60] ONLY while a menu is open (TRANSITION-only reporting —
   a permanent raise kills maximised title-bar double-clicks, a
   mount-time `false` report sinks the counter); the dialog's `__XENON__`
@@ -813,9 +811,6 @@ behind a small link at the END of the gallery. Pages serves the GENERATED
   config.py), byte-identical saves, no releases without the user asking.
 
 ## Backlog (live items)
-- **P9 — CLOSED (v1.15.0):** multi-computer farm + HUD/beacon radio all
-  landed (REWRITE.md § P9; laws in § Xenon above; narrative
-  docs/HISTORY.md). ChipOS groundwork = the farm + IoBus + beaconNet.
 - **P8 — Xenon workspace as a STANDALONE, low-coupling module**: shape,
   coupling inventory and the four seams (write-path, screen-feed, key-bus,
   shell-descriptors) in REWRITE.md § P8; P3 (project tree) + P4 (upstream

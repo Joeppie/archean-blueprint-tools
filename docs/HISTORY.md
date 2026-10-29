@@ -4442,6 +4442,11 @@ in full-suite runs. Standing rules:
 
 ## 5. Retired backlog entries (DONE/CLOSED at the time of the move)
 
+- **P9 — CLOSED (v1.15.0, moved out of the Backlog 2026-10-29):**
+  multi-computer farm + HUD/beacon radio all landed (REWRITE.md § P9;
+  laws in AGENTS § Xenon; narrative §1). ChipOS groundwork = the farm +
+  IoBus + beaconNet.
+
 - **v1.12.0 BACKLOG — CLOSED at the v1.12.2 cut (2026-10-27):**
   (1) the pages dev-asset 404s — the deployed app index ships 4 asset refs,
   0 `?v=` refs; live probes: root/viewer/testdata all 200 (the landing's
