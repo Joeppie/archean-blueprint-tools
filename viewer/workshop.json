@@ -211,6 +211,18 @@
   "name": "Super Mario Brothers [v1.1]",
   "author": "Chip Patton"
  },
+ "3828546114": {
+  "name": "ChipOS v0.10 HDD",
+  "author": "Chip Patton"
+ },
+ "3828773626": {
+  "name": "ChipOS Developer's Kit v0.41b",
+  "author": "Chip Patton"
+ },
+ "3828827922": {
+  "name": "EarthNAV v1.0",
+  "author": "Chip Patton"
+ },
  "9000001001": {
   "name": "C01 ActiveRadiator · Aileron · AltitudeSensor",
   "author": "matrix-test"
@@ -426,5 +438,29 @@
  "9000007001": {
   "name": "xray-test",
   "author": "xray-test"
+ },
+ "9000008001": {
+  "name": "Buzzer Bench",
+  "author": "bench"
+ },
+ "9000009001": {
+  "name": "Fresh Computer",
+  "author": "fixture"
+ },
+ "9000009010": {
+  "name": "Intercom Bench",
+  "author": "intercom"
+ },
+ "9000009020": {
+  "name": "Face Bench",
+  "author": "facebench"
+ },
+ "9000009030": {
+  "name": "Panel Bench",
+  "author": "panelbench"
+ },
+ "9000009040": {
+  "name": "Live Bench",
+  "author": "living"
  }
 }
