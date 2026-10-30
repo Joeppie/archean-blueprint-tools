@@ -59,6 +59,7 @@ import { DeviceSim, dataNeighbours } from './engine/devicesim';
 import { craftPowerNet, computerPowered } from './engine/power';
 import { EnergySim, type EnergyStatus } from './engine/energy';
 import { ItemSim, type ItemSimCensus } from './engine/itemsim';
+import { soundscape } from './engine/soundscape';
 import { chanSites, rectSites, rectsAt, type ChanSite, type RectSite } from './engine/xcsites';
 import { loadManifest, peekManifest } from './engine/models';
 import { beaconNet } from './engine/beaconnet';
@@ -79,6 +80,30 @@ import { qAxisAngle } from './engine/compparts';
 import { newCraftDoc, newComponent } from './engine/newcraft';
 import { craftState, craftInfo, loadCraft, type CacheInfo, type CraftState } from './crafts';
 import StaleDialog from './components/StaleDialog';
+
+
+/** WP4 loop census for the soundscape: which part-loops run right now
+ *  (channel law: the drill/belt authored-ON defaults, the pump/prop by
+ *  their speed channel — the soundscape remembers every bus write). */
+function loopWanted(bp: import('./engine/format').Blueprint | null) {
+  if (!bp) return [];
+  const out: { ci: number; kind: 'drill' | 'belt' | 'pump' | 'prop'; gain: number }[] = [];
+  (bp.data.components as { type: string }[]).forEach((c, ci) => {
+    const ch0 = soundscape.chan(ci, 0);
+    switch (c.type) {
+      case 'MiningDrill': out.push({ ci, kind: 'drill', gain: (ch0 ?? 1) > 0 ? 0.09 : 0 }); break;
+      case 'ItemConveyor': out.push({ ci, kind: 'belt', gain: (ch0 ?? 1) > 0 ? 0.05 : 0 }); break;
+      case 'SmallTurboPump': case 'TurboPump':
+        out.push({ ci, kind: 'pump', gain: (ch0 ?? 0) > 0 ? 0.05 : 0 }); break;
+      case 'Propeller': {
+        const v = soundscape.chan(ci, 0) ?? 0;
+        out.push({ ci, kind: 'prop', gain: Math.min(0.14, Math.abs(v) * 0.14) }); break;
+      }
+      default: break;
+    }
+  });
+  return out;
+}
 
 export default function Editor({ craft, onBack }: { craft: string | null; onBack: () => void }) {
   // v1.12.2 BOOT COST: the first render pass began (React tree build).
@@ -179,6 +204,11 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // wiki's data-port KV law) so programs READ the inventory.
   const itemRef = useRef(new ItemSim());
   const [items, setItems] = useState<ItemSimCensus | null>(null);
+  // v1.16.10 THE SOUND OF THE CRAFT (engine/soundscape.ts): the 🔊 chip
+  // is the browser gesture that arms the AudioContext (buzzer law).
+  const [soundOn, setSoundOn] = useState(soundscape.soundOn);
+  const powerStatusRef = useRef('ok');
+  const bpRef = useRef(bp); bpRef.current = bp;
   const latchedRef = useRef(new Map<string, boolean>());
   const sitesRef = useRef(new Map<number, { chan: ChanSite[]; rect: RectSite[] }>());
   /** LIVE CRAFT: the farm auto-boots the craft's programmed, POWERED
@@ -207,6 +237,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     setEnergy(energyRef.current.state());
     itemRef.current.load(bp, powerNet?.hasPower ? powerNet.powered : null);
     setItems(itemRef.current.census());
+    soundscape.load(bp);
     latchedRef.current.clear();
     sitesRef.current.clear();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -218,6 +249,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     simRef.current.write(ci, ch, v);
     energyRef.current.write(ci, ch, v);   // gates: lamps, belts, generators
     itemRef.current.write(ci, ch, v);     // gates: drill, belts
+    soundscape.write(ci, ch, v);          // THE SOUND OF THE CRAFT (WP4)
     if (type === 'Dashboard') simRef.current.setLed(ci, ch, v > 1 ? v / 255 : v);
   }), []);
   // AUTO-BOOT (we: "computers should start when a craft is loaded in"):
@@ -497,8 +529,16 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       });
       engineRef.current?.applyItemFlow(itemRef.current.snapshot());
       if (++beats % 15 === 0) {
-        setEnergy(energyRef.current.state());
-        setItems(itemRef.current.census());
+        const es = energyRef.current.state();
+        setEnergy(es);
+        if (es.status !== powerStatusRef.current) {
+          if (es.status === 'low' || es.status === 'deficit') soundscape.powerStatus(es.status);
+          powerStatusRef.current = es.status;
+        }
+        const ic = itemRef.current.census();
+        setItems(ic);
+        soundscape.craftTick(ic.crafted);
+        soundscape.syncLoops(loopWanted(bpRef.current));
       }
     }, 40);
     return () => window.clearInterval(t);
@@ -2054,6 +2094,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         live={live} liveN={xenonFarm.pumps.filter(p => p.comp).length}
         energy={energy}
         items={items}
+        soundOn={soundOn}
+        onToggleSound={() => setSoundOn(soundscape.toggleSound())}
         onToggleLive={xenonComps.length ? () => {
           if (live) { xenonFarm.closeAll(); setLive(false); }
           else {

@@ -77,6 +77,10 @@ interface Props {
   /** v1.16.10 ITEMS ON BELTS (engine/itemsim.ts): the live inventory of
    *  the conveyor chains (drill → belts → containers/crafter). */
   items?: ItemSimCensus | null;
+  /** v1.16.10 THE SOUND OF THE CRAFT (engine/soundscape.ts): the 🔊 chip
+   *  is the gesture that arms the AudioContext (buzzer law). */
+  soundOn?: boolean;
+  onToggleSound?: () => void;
   liveN?: number;
   onToggleLive?: () => void;
   children?: React.ReactNode;              // right side: panel toggle etc.
@@ -491,6 +495,19 @@ export default function TopBar(p: Props) {
             </div>
           )}
         </div>
+      )}
+      {/* v1.16.10 THE SOUND OF THE CRAFT chip — the toggle IS the browser
+          gesture that arms the WebAudio context (the buzzer law). */}
+      {p.onToggleSound && (
+        <button data-testid="sound-chip"
+          title={p.soundOn
+            ? 'the craft is audible — switches click, relays clack, drills drill (click to mute)'
+            : 'the craft is muted — click to hear switches, relays, drills, anchors and alarms'}
+          onClick={p.onToggleSound}
+          className={`ksp-btn px-2 py-1 text-[11px] leading-none ${
+            p.soundOn ? 'text-[#ffd479] border-[#ffd479]/40' : 'text-[#8b93a1]'}`}>
+          {p.soundOn ? '🔊' : '🔇'}
+        </button>
       )}
       {p.children}
     </header>
