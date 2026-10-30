@@ -3324,6 +3324,65 @@ topic + FORMAT).
   47 docs, zoom 156%. Gates: tsc clean, vitest 968, xenonhud legs green
   on chromium + pixel7.
 
+- **v1.15.6 — THE LIVING CRAFT: AUTO-BOOT, ACTUATORS, THE 3-D PRESS, THE
+  POWER LAW (2026-10-30).** We: "probably computers should start when a
+  craft is loaded in, and probably parts need to respond to signals … the
+  Io bus understands the actual domain better. I.e. meaning of channels,
+  and that components actually visually respond. I.e. hinges and buttons
+  and pivots and ailerons actually move. And if a pivot or hinge moves, so
+  does its subgrid. Also, button presses onto dashboards and screens should
+  actually work on the 3d model and propagate. In that case we should have
+  a hand with finger cursor to indicate it's press able, and it should tell
+  us what channel/ui element or which xenoncode line the specific e.gm
+  button_rect and line number and computer this corresponds to as a popup
+  label … if a computer is unpowered, according to craft design, show a
+  warning when we interact with it." FOUR LAWS, ONE SPINE (the io bus):
+  ① `engine/devicesim.ts` — the ACTUATOR SIM maps channels to motion by
+  the game's own wiki laws (SmallHinge ch0 −1..+1 → ∓90° servo; SmallPivot
+  ±360° servo / velocity; LinearTrack absolute metres clamped; Lamp/
+  SpotLight/SlopeLight on + RGB; Propeller/Wheel spin + ±30° steer;
+  Toggle/Push/Arrow lever; Aileron/Elevator/Rudder ride the PilotSeat
+  Roll/Pitch/Yaw channels). SIM IS A VIEW: `applyDevicePoses` renders an
+  OVERLAY keyed by manifest joint name — `data.angle` stays verbatim
+  (byte-identical saves, no undo noise) — and `syncSubJoints` reads the
+  SAME overlay, so a program-driven hinge swings its SUBGRID panel (THE
+  PANEL RIDES ITS MASTER). ② The bus LEARNS ITS DOMAIN: `IoBus.write`
+  carries the writer-resolved `XCDevice` (ci+type) to the actuator tap
+  (`observeDevices`); `Farm.pressDevice` drives a human press into every
+  owning pump's OWN io number (a numeric io is a per-computer port — never
+  a shared alias key); `Farm.autoboot` boots the programmed computers.
+  ③ `engine/power.ts` — power REACHABILITY over data.pipes with the
+  wiremodel's source→hub→device physics, per voltage kind; a craft WITH a
+  grid makes an unconnected computer UNPOWERED (a grid-less craft is
+  power-unaware — the dev-bench convention). The LIVE chip (▶/⏸ TopBar,
+  `archean-app-live`) auto-boots powered computers with the craft; VMs
+  OUTLIVE the IDE windows; a craft swap re-boots fresh; every interaction
+  with an unpowered computer WARNS (IDE ⚠ chip, F5 toast, popup ⚠ suffix).
+  ④ THE 3-D PRESS: dashboard element boxes + standalone button parts carry
+  userData; `Engine.pressPick` → the Viewport's ~40 Hz hover pass paints
+  the FINGER CURSOR + a mono PRESS CHIP (element, channel, owning
+  computer, io, and the LITERAL PROGRAM LINE via `engine/xcsites.ts` —
+  chanSites for a channel, rectsAt for a screen pixel, the LAST containing
+  button_rect wins = draw order); pointerdown/up own the gesture (orbit
+  captured off — a press is a CLICK, never a camera drag), the element
+  SINKS, a Toggle latches, a screen-face press routes a `screenClick`
+  (the game's click-cycle law: button_rect/click evaluate the click).
+  Fixture `tools/make_live_test.py` → 9000009040 (battery→junction→cpu
+  powered, bare 'ghost', hinge masters a panel, dashboard w/ literal
+  button_rect(20,20,80,24)). Pins: power/devicesim/xcsites vitest (24),
+  scene.headless (plate swings + panel rides + data verbatim, pressable
+  census, lamp glow), `living.spec.ts` chain leg (auto-boot cadence,
+  hinge+panel ~90° in the live scene, cursor+chip, press → the program
+  READS 1, screen chip names `button_rect(20, 20, 80, 24) @ main.xc:18`,
+  click → print lands, ghost IDE ⚠ chip). Satellite LIVING-CRAFT.md (the
+  actuator table + boundaries: shim `enough_power` stays a stub — wiring
+  the VM needs a wasm rebuild, the v1.15.6 law is the UI warning; device
+  power per-part not modelled). The e2e fixture ships
+  `archean-app-live=off` (every other spec keeps the manual-boot world;
+  the spec re-arms live in its own context — the BACKDROP-SKIP law);
+  living excluded from the pixel7 matrix (pointer laws). Bumps strings
+  v1.15.6.
+
 ## 2. v1.11 session — KNOWN ISSUES & UNPINNED TODOS (2026-10-25/26 session block)
 
 KNOWN ISSUES (accepted behaviours, costs, sharp edges):

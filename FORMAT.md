@@ -1029,6 +1029,11 @@ outright:
   upstream (sources/hubs, never a device); a junction output never points
   back at a source; power never runs device-to-device; neutral fluid/item
   ports never pair directly (a pump→tank direct edge needs BOTH sides named).
+  - The app's `engine/power.ts` reuses these source/hub/device groups as a
+    POWER-REACHABILITY net (source → hub → device per voltage kind): a
+    computer whose `power_connector` no source reaches is UNPOWERED — the
+    auto-boot leaves it off and the editor warns on interaction. Laws in
+    LIVING-CRAFT.md § 3.
 - **`candidatesFor(draft, free)`** — the manual picker's ranking: tier 0 =
   the game's naming/topology says so (device→hub, source→hub input, hub
   output→device, the named `data-computer` side), tier 1 = legitimate

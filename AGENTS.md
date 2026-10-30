@@ -20,9 +20,10 @@ imperatives; put the WHY in a satellite, link it.
   docs/TEST-PYRAMID.md (test strategy + baselines), docs/E2E-INVENTORY.md,
   PERF.md (perf baseline + harmful candidates), LOCATIONS.md (installs,
   paths, URLs), MATRIX.md, GEAR-F-A18F.md (rig-chain audit method),
-  REWRITE.md (pending plans, § P8), NOTICE.md (licensing). A new subsystem
-  with detail outside this file gets a satellite created/updated and linked
-  IN THE SAME COMMIT.
+  LIVING-CRAFT.md (the self-running craft: actuator sim laws, power net,
+  3-D press + popup), REWRITE.md (pending plans, § P8), NOTICE.md
+  (licensing). A new subsystem with detail outside this file gets a
+  satellite created/updated and linked IN THE SAME COMMIT.
 - Budget ~20k tokens: triage history OUT first; never shrink a law to fit.
 
 ## Layout
@@ -403,6 +404,35 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   = Down/Up AND Aux 1); press = ±1, release CENTERS; global editor shortcuts
   yield while cockpit keys are active; keys never leak while typing; a bound
   channel RESTS AT ZERO at bind time.
+- THE LIVING CRAFT (v1.15.6, we: "computers should start when a craft is
+  loaded in, and parts need to respond to signals … hinges and buttons and
+  pivots and ailerons actually move … if a pivot or hinge moves, so does
+  its subgrid … button presses onto dashboards and screens should work on
+  the 3d model and propagate … a hand with finger cursor … tell us what
+  channel/element/which xenoncode line … as a popup label … an unpowered
+  computer, show a warning when we interact"): the io bus is the SPINE —
+  `engine/devicesim.ts` animates the actuator channels by the game's own
+  wiki laws (SIM IS A VIEW: a render overlay, nothing writes the blueprint,
+  saves byte-identical; a program-driven hinge turns its plate AND its
+  SUBGRID panel via `syncSubJoints`), `IoBus.write` carries the
+  writer-resolved `XCDevice` to the actuator tap (`observeDevices`),
+  `Farm.pressDevice` drives a human press into every owning pump's OWN io
+  number, `engine/power.ts` source→hub→device reachability (a craft WITH a
+  grid makes an unconnected computer UNPOWERED; a grid-less craft is
+  power-unaware = every computer on) gates the LIVE-chip AUTO-BOOT
+  (`▶/⏸` TopBar, persisted `archean-app-live` default on: computers boot
+  with the craft, the farm auto-boot skips unpowered ones, VMs OUTLIVE the
+  IDE windows, a craft swap re-boots fresh) and warns on interaction (IDE
+  ⚠ chip, F5 toast, popup ⚠ suffix). Scene press law: `buildDashboard`
+  tags every element box; `Engine.pressPick` → finger cursor + press-chip
+  (element + computer + io + the literal program LINE, `engine/xcsites.ts`
+  — LAST containing `button_rect` wins, draw order); press SINKS the
+  element, a Toggle latches, a screen-face press routes a `screenClick`
+  (the game's click-cycle law); presses work in EVERY mode (press ≠
+  select). Laws + actuator table: LIVING-CRAFT.md. Fixture
+  `tools/make_live_test.py` → 9000009040; pins power/devicesim/xcsites
+  vitest, scene.headless (plate+panel swing, `data.angle` verbatim),
+  `living.spec.ts` chain (excluded from the pixel7 matrix).
 - `window.__XCDBG__` = the plain-JSON async debug console over the real pump
   (every answer JSON-serialisable, every call bounded) — the agent seam;
   `__XENONTEST__` the headless autotest seam (fixture 9000008001).
@@ -847,6 +877,14 @@ behind a small link at the END of the gallery. Pages serves the GENERATED
   config.py), byte-identical saves, no releases without the user asking.
 
 ## Backlog (live items)
+- **`enough_power` in the shim**: the device function is a stub returning 1
+  (v1.15.6 boundary) — wiring the power net into the VM (an unpowered
+  computer's `enough_power` reads 0, the Crafter's own "Not enough power"
+  overlay then fires in-game-style) needs a shim + wasm rebuild
+  (`EMSDK=~/emsdk tools/xenoncode/build.sh wasm-only`, ABI bump). The
+  v1.15.6 law is the UI warning (engine/power.ts, LIVING-CRAFT.md § 3).
+- **Device power**: reachability gates COMPUTERS only; a hinge/lamp's own
+  LV supply (the wiki's per-part power) is not modelled.
 - **Phone farm windows (v1.15.3 known red)**: two cascading Xenon IDE
   windows don't fit the 412-px viewport — [pixel7] xenonfarm co-run leg
   reds at the click; the v1.13.32 phone IDE (rail + drawer) predates the
