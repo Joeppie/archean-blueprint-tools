@@ -2432,6 +2432,12 @@ export class IoBus {
     for (const w of this.watchers)
       { try { w(dev.ci, dev.type, ch, v); } catch { /* a tap never breaks the cable */ } }
   }
+  /** Record a value WITHOUT the pump fan-out — the HUMAN PRESS lands here
+   *  (Farm.pressDevice drives the pumps itself, per-computer io numbers);
+   *  the bus-tab rows and the probes see the pressed channel like any other. */
+  record(alias: string | number, ch: number, v: number): void {
+    this.values.set(this.key(alias, ch), v);
+  }
   get(alias: string | number, ch: number): number | string | undefined {
     return this.values.get(this.key(alias, ch));
   }

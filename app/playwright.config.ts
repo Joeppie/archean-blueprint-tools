@@ -43,7 +43,12 @@ export default defineConfig({
           // v1.13.x: every context starts with a CLEAN world — the
           // worldsim store is GLOBAL+persisted; tests author it (base/override/
           // setworldsim), so the fixture ships it empty per context.
-          { name: 'archean-worldsim', value: '' },],
+          { name: 'archean-worldsim', value: '' },
+          // v1.15.6 THE LIVING CRAFT: every spec keeps the MANUAL-boot world
+          // (no farm auto-boot, VMs die with the windows — the v1.15.0 law).
+          // living.spec.ts re-arms the live farm for its own context (the
+          // BACKDROP-SKIP fixture law).
+          { name: 'archean-app-live', value: 'off' },],
       }],
     },
     // v1.12.1 BOOT COST: render on the AMD iGPU via ANGLE-Vulkan — the
@@ -67,7 +72,7 @@ export default defineConfig({
       // it is a canvas-resize flake generator. A spec that GAINS a phone
       // law removes its name from this list (or tags the phone test).
       testIgnore:
-        /(app|asset-space|blockedit|blockplace|download|gizmo|hinge|isolation|liveedit|paint|pipes|propeller|savefidelity|staleness|subride|sym|views|wheels|xenon|xenondbg|xenonfresh)\.spec\.ts$/,
+        /(app|asset-space|blockedit|blockplace|download|gizmo|hinge|isolation|liveedit|paint|pipes|propeller|savefidelity|staleness|subride|sym|views|wheels|xenon|xenondbg|xenonfresh|living)\.spec\.ts$/,
     },
   ],
   webServer: {

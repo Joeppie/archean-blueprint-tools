@@ -43,16 +43,21 @@ update
 \toutput_number("lamp", 0, 1)
 \toutput_number("lamp", 1, 255)
 \toutput_number("pivot", 0, 0.5)
+\tvar $tg = input_number(3, 0)
 \tif $t > 10
 \t\toutput_number("hinge", 0, 1)
 \telse
 \t\toutput_number("hinge", 0, -1)
-
-init
+\tif $tg > 0
+\t\toutput_number("hinge", 0, -1)
 \tvar $s = screen(3, 2)
 \t$s.blank(black)
+\t$s.write(4, 4, white, "ARM")
 \tif $s.button_rect(20, 20, 80, 24, gray)
-\t\tprint("arm")
+\t\tprint("rect")
+
+click
+\tprint("arm")
 """
 
 GHOST = """update

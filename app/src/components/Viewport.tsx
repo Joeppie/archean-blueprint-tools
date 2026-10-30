@@ -25,6 +25,9 @@ declare global {
     /** v1.15.6 pressable registry counts + the SIM pose seam (the living-
      *  craft pins drive actuator frames headless, assert meshes/subgrids) */
     press: () => { dash: number; faces: number; comps: number };
+    pressPick: (x: number, y: number) => import('../engine/scene').PressTarget | null;
+    jointPoseQ: (ci: number, name: string) => [number, number, number, number] | null;
+    subGroupQ: (bi: number) => [number, number, number, number] | null;
     applyDevicePoses: (poses: Map<number, import('../engine/devicesim').DevicePose>) => void;
     /** blocks-place ghost preview state (null = no ghost) */
     ghost: () => Engine['placeGhostState'];
@@ -220,6 +223,9 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
       /** v1.15.6 pressable registry counts (the living-craft pins assert the
        *  scene found the buttons/screens/lamps to drive) */
       press: () => engine.pressTargets(),
+      pressPick: (x: number, y: number) => engine.pressPick(x, y),
+      jointPoseQ: (ci: number, name: string) => engine.jointPoseQ(ci, name),
+      subGroupQ: (bi: number) => engine.subGroupQ(bi),
       applyDevicePoses: (poses: Parameters<Engine['applyDevicePoses']>[0]) =>
         engine.applyDevicePoses(poses),
       ghost: () => engine.placeGhostState,
