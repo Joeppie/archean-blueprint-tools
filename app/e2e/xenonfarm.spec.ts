@@ -11,7 +11,13 @@ import { expect, test } from '@playwright/test';
 const FARM = '9000009010';
 
 test.describe('Xenon computer farm @ui', () => {
-  test('two computers co-run; the beacon radio and the io bus cross them @slow', async ({ page }) => {
+  // [pixel7] opted out (AGENTS Backlog "Phone farm windows", v1.15.3 known
+  // red): two cascading IDE windows do not fit the 412-px viewport — the
+  // v1.13.32 phone IDE predates the multi-window farm; the backlog's phone
+  // multi-window UX design re-tabs this leg. The law is not a device law:
+  // the chromium leg owns it (matrix opt-out per L4, not a sleep-patch).
+  test('two computers co-run; the beacon radio and the io bus cross them @slow', async ({ page, isMobile }) => {
+    test.skip(isMobile, 'phone multi-window backlog family (v1.15.3 known red)');
     test.setTimeout(240_000);
     await page.goto(`/?craft=${FARM}`);
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 120_000 });
