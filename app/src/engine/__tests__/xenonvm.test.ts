@@ -16,7 +16,7 @@
 //   INVADERS 3288012440 main#0 + computer-13#0 registered at 200×160 (v1.15.2
 //                      BUILT-IN PLAIN TARGET: the authored panel, not 640×480)
 import { describe, expect, it } from 'vitest';
-import { bootVm } from './vmharness';
+import { bootSynthetic, bootVm } from './vmharness';
 
 describe('Just-Plane-Easy FirstFlight — boot, paint, bus, stick (was xenon.spec leg 1)', () => {
   it('the shipped program compiles, runs and paints TrimsDash', async () => {
@@ -82,6 +82,50 @@ describe('the Badger — the 36k-line firmware (was the 240 s @slow boot leg)', 
     // the firmware's globals list (the e2e Vars tab ≥1 row)
     expect(vm.run.vars().length).toBeGreaterThan(0);
   }, 180_000);
+});
+
+describe('THE SCREEN-VERSION law (ABI 15, v1.16.8 blit-skip foundation)', () => {
+  it('idle cycles keep the counter; a write moves it; writes stay counted', async () => {
+    // blank fires EXACTLY once (at $n == 3): the counter must move once.
+    const vm = await bootSynthetic([
+      'var $s = screen("bench", 0)',
+      'var $n = 0',
+      'update',
+      '\tif $n == 3',
+      '\t\t$s.blank(color(9,9,9,255))',
+      '\t$n += 1',
+    ].join('\n'), 200, 160);
+    const v0 = vm.run.screenVersion('bench#0');
+    expect(v0, 'the export exists (ABI 15)').toBeGreaterThanOrEqual(0);
+    vm.step(2);
+    const vIdle = vm.run.screenVersion('bench#0');
+    expect(vIdle, 'pure-arithmetic cycles never move it').toBe(v0);
+    vm.step(2);                                     // crosses the $n == 3 write
+    const vWrote = vm.run.screenVersion('bench#0');
+    expect(vWrote, 'the blank() write moved it').toBeGreaterThan(vIdle);
+    vm.step(3);
+    expect(vm.run.screenVersion('bench#0'), 'quiet again: stable').toBe(vWrote);
+  }, 60_000);
+
+  it('screen_copy counts as a write ON THE DESTINATION', async () => {
+    // The blit lives in INIT (runs exactly once): a fresh virtualscreen
+    // starts at counter 0, so dst>0 after boot IS the blit's count; quiet
+    // update cycles must then keep it stable.
+    const vm = await bootSynthetic([
+      'var $a = virtualscreen(64, 64)',
+      'var $b = virtualscreen(64, 64)',
+      'init',
+      '\t$a.blank(color(5,200,5,255))',
+      '\tscreen_copy($a, $b, 0, 0, 0, 0, 64, 64)',
+      'update',
+      '\tvar $n = 0',
+      '\t$n += 1',
+    ].join('\n'), 200, 160);
+    expect(vm.run.screenVersion('virtual#1#0'), 'the blit counted on dst').toBeGreaterThanOrEqual(1);
+    const b1 = vm.run.screenVersion('virtual#1#0');
+    vm.step(3);
+    expect(vm.run.screenVersion('virtual#1#0'), 'no re-blit: stable').toBe(b1);
+  }, 60_000);
 });
 
 describe('Space Invaders 3288012440 — the built-in screen gate (VM side)', () => {

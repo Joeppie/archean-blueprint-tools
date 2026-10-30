@@ -278,7 +278,7 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   side tab (computer IDE + HUD IDE + 📡 dock) renders the registry
   (seeded from components + scanned `beacon()` literals, runtime-merged
   by id; EXACT text-frequency routing; logs survive re-seeds). The shim
-  twin: `xc_host.cpp` ABI 14 ↔ `XC_ABI`; demo `tools/xenoncode/demo/hudradio`.
+  twin: `xc_host.cpp` ABI 15 ↔ `XC_ABI`; demo `tools/xenoncode/demo/hudradio`.
 - PLAYER HUDs (v1.17.0): the game's `client/hud/<name>/` folders
   (main.xc + includes; FORMAT § HUD). Xenon ▸ Player HUDs lists the machine's installed +
   subscribed HUDs (the `/hud` route, `hud_dir` config key — tools/config.py;
@@ -481,7 +481,12 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   pixels, alias bus, button presses, the built-in panel size — live THERE;
   the browser tier keeps the IDE DOM, CodeMirror and real-pointer→1:1-px
   plumbing. A wasm LOAD failure is pump status 'error', never a floating
-  rejection (`XenonPump.open`).
+  rejection (`XenonPump.open`). THE BLIT LAW (v1.16.8, ABI 15
+  `xc_screen_version`): a pump fetches + blits a surface ONLY when its
+  write counter moved (census: 0.2 of 117 Badger surfaces change per
+  cycle); the blit reuses one ImageData per canvas; no export = fetch
+  every cycle (the degradation rule). The write-op census lives in
+  `xenonvm.perf.test.ts` + PERF.md.
 - FIXTURES BEAT CORPORA (`tools/make_*_test.py` → `testdata/900000NNNN`). A
   big craft in a test must defend why the fixture CANNOT exhibit the law.
   FIXTURE-FIRST BOOT LAW: geometry-behaviour laws run on generated law

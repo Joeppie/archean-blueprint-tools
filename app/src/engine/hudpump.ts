@@ -170,8 +170,21 @@ class HudPump {
     this.notify();
   }
 
+  /** ABI 15 XENON-SCREEN-VERSION (HUD twin): a panel whose write counter is
+   *  unchanged returns the CACHED array — the canvas blit skips the heap
+   *  copy; -1 (older wasm) fetches every cycle (the pre-v1.16.8 law). */
+  private surfVer = new Map<string, { v: number; px: Uint8ClampedArray }>();
   pixels(key: string): Uint8ClampedArray | null {
-    return this.run?.screenPixels(key) ?? null;
+    const r = this.run;
+    if (!r) return null;
+    const v = r.screenVersion(key);
+    if (v >= 0) {
+      const c = this.surfVer.get(key);
+      if (c && c.v === v) return c.px;
+    }
+    const px = r.screenPixels(key);
+    if (px && v >= 0) this.surfVer.set(key, { v, px });
+    return px;
   }
   setMouse(x: number, y: number, look?: number): void {
     this.mouse = { x, y, look: look ?? this.mouse.look };
@@ -185,6 +198,7 @@ class HudPump {
     this.timer = null;
     this.run?.stop();
     this.run = null;
+    this.surfVer.clear();
     this.running = false;
     this.hud = null;
     this.surfaces = [];

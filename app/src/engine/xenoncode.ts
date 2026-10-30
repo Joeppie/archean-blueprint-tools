@@ -75,6 +75,7 @@ type Mod = {
   _xc_screen_h(i: number): number;
   _xc_screen_pixels(i: number): number;
   _xc_screen_index(key: number): number;
+  _xc_screen_version?(i: number): number;
   _xc_vars(): number;
   _xc_locals_json(file: number, line: number): number;
   _xc_source_files(): number;
@@ -815,6 +816,21 @@ export class XenonRun {
   }
   stop() { this.running = false; }
 
+  /** ABI 15 (XENON-SCREEN-VERSION): the surface's write counter, -1 = the
+   *  shipped wasm lacks the export (the pump then fetches every cycle — the
+   *  pre-v1.16.8 law). The pump blits a surface only when this moves. */
+  screenVersion(key: string): number {
+    const m = this.mod;
+    if (typeof m._xc_screen_version !== 'function' || typeof m._xc_screen_index !== 'function')
+      return -1;
+    const nb = new TextEncoder().encode(key).length + 1;
+    const p = m._malloc(nb);
+    m.stringToUTF8(key, p, nb);
+    const idx = m._xc_screen_index(p);
+    m._free(p);
+    return idx >= 0 ? m._xc_screen_version(idx) : -1;
+  }
+
   screenCount(): number { return this.mod._xc_screen_count(); }
 
   /** EVERY surface's key/size (cheap; the Badger carries 118 buffers). */
@@ -1366,6 +1382,7 @@ export class XenonPump {
     this.log = [];
     this.prints = [];
     this.surfaces = new Map();
+    this.surfVer.clear();
     // v1.13.17: worker mode when SAB-isolated AND the shim carries the live
     // hook (abi >= 7); XenonWorkerRun.open returns null otherwise → the
     // v1.13.16 main-thread pump, byte-identical.
@@ -1456,6 +1473,7 @@ export class XenonPump {
                                // (the F5-run probes read the counter across
                                // sessions and a stale value lies)
     this.surfaces = new Map();
+    this.surfVer.clear();
     this.wsBindings = new Map();
     this.wsOverrides = {};
     this.pilotBindings = new Map();
@@ -2038,6 +2056,23 @@ export class XenonPump {
   /** debug channel: the rAF handle (0 = the loop is not running) */
   raf2(): number { return this.timer; }
 
+  /** ABI 15 XENON-SCREEN-VERSION: the last write-counter fetched per surface
+   *  key. A surface whose counter has NOT moved keeps its cached pixels
+   *  (applyCycle keeps the previous array when the fetch hands it null) —
+   *  no heap copy, no ImageData, no canvas upload. The Badger census
+   *  (xenonvm.perf.test.ts): 0.2 of 117 surfaces change per cycle. Version
+   *  -1 (older wasm, no export) fetches EVERY cycle — the pre-v1.16.8 law,
+   *  the typeof-guard degradation rule. Cleared on every open (a new VM's
+   *  counters restart at 0; the cache must die with the old one). */
+  private surfVer = new Map<string, number>();
+  private fetchVersioned(key: string, r: XenonRun): Uint8ClampedArray | null {
+    const v = r.screenVersion(key);
+    if (v >= 0 && this.surfVer.get(key) === v && this.surfaces.get(key)?.pixels) return null;
+    const px = r.screenPixels(key);
+    if (px) this.surfVer.set(key, v);
+    return px;
+  }
+
   private cycleN = 0;
   registerCanvas(key: string, cv: HTMLCanvasElement, fill = false): () => void {
     const k = key.toLowerCase();
@@ -2099,9 +2134,21 @@ export class XenonPump {
   private blit(cv: HTMLCanvasElement, s: XenonSurface) {
     if (cv.width !== s.w) cv.width = s.w;
     if (cv.height !== s.h) cv.height = s.h;
-    cv.getContext('2d')?.putImageData(
-      new ImageData(s.pixels as Uint8ClampedArray<ArrayBuffer>, s.w, s.h), 0, 0);
+    const ctx = cv.getContext('2d');
+    if (!ctx) return;
+    // the ImageData is REUSED per canvas while the size holds (v1.16.8):
+    // the 25 Hz blit path allocated a fresh 1.4 MB ImageData per surface
+    // per cycle; putImageData only READS the array, so one per canvas is
+    // the whole law. (Blits now arrive only for CHANGED surfaces, ABI 15.)
+    let e = this.blitCache.get(cv);
+    if (!e || e.img.width !== s.w || e.img.height !== s.h) {
+      e = { img: ctx.createImageData(s.w, s.h) };
+      this.blitCache.set(cv, e);
+    }
+    e.img.data.set(s.pixels as Uint8ClampedArray<ArrayBuffer>);
+    ctx.putImageData(e.img, 0, 0);
   }
+  private blitCache = new WeakMap<HTMLCanvasElement, { img: ImageData }>();
   private notify() { for (const cb of [...this.subs]) cb(); }
 
   /** Cycle hooks run SYNCHRONOUSLY every pump cycle, right after the
@@ -2184,7 +2231,7 @@ export class XenonPump {
     this.stepRadio(r);
     const step = r.cycle();
     this.applyCycle(t, step.evs, r.vars(), r.screenMeta(),
-      k => r.screenPixels(k), r.cyclePairs(), r.error, r.cycleDepths());
+      k => this.fetchVersioned(k, r), r.cyclePairs(), r.error, r.cycleDepths());
     // XENON-DEBUG v3 EXACT-LINE PARK (workpackages WP7): the armed pause
     // unwound this cycle at its executing line — mirror the park site
     // (beats a stepper bp-hit earlier in the stream: the VM STATE is HERE)
@@ -2274,12 +2321,14 @@ export class XenonPump {
     // panel) or a 3-D dashboard feed actually shows
     const want = new Set<string>([...this.canvases.keys(), ...this.feedKeys]);
     const next = new Map<string, XenonSurface>();
+    const fetched = new Set<string>();        // surfaces FETCHED this cycle
     for (const meta of metas) {
       let pixels = this.surfaces.get(meta.key)?.pixels;
       if (want.has(meta.key)) {
         const got = pixelsFor(meta.key);
         if (got) {
           pixels = got;
+          fetched.add(meta.key);
           this.blitTo(meta.key, { ...meta, pixels: got });
         }
       }
@@ -2295,7 +2344,10 @@ export class XenonPump {
           const mk = `${slug(sc.alias)}#${sc.channel}`;
           const mir = { ...main0, key: mk };   // the KEY must travel with
           next.set(mk, mir);                   // the pixels (push keys off it)
-          if (mir.pixels) this.blitTo(mk, mir);
+          // ABI 15: the mirror rides main#0's pixels — upload only when
+          // main#0 was FETCHED this cycle (unchanged = the canvas already
+          // shows exactly these bytes)
+          if (mir.pixels && fetched.has('main#0')) this.blitTo(mk, mir);
         }
     this.surfaces = next;
     for (const h of [...this.cycleHooks]) {
@@ -2380,9 +2432,12 @@ export class XenonPump {
 /** The shim ABI the app expects (xc_host.cpp xc_abi()). Bump with the shim.
  *  12 = xc_hud_mode + the ONE screen_w/screen_h declaration (the v1.14.1
  *  duplicate OVERRODE the computer law — Space Invaders layout clobber). */
-/** 14 = xc_screen_px/py/haspos (the composited HUD SCREEN window);
+/** 15 = xc_screen_version (XENON-SCREEN-VERSION write counter — the pump
+ *  fetches + blits a surface only when its pixels MOVED; the Badger census
+ *  measures 0.2 changing surfaces per cycle of 117);
+ *  14 = xc_screen_px/py/haspos (the composited HUD SCREEN window);
  *  13 = $panel.set_size(w,h) + width/height getters (ABI 13; wiki hud.md law). */
-export const XC_ABI = 14;
+export const XC_ABI = 15;
 
 // ---------------------------------------------------------------------------
 // COMPUTERFARM — the craft's co-running pumps + the SHARED io bus

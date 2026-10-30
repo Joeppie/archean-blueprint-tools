@@ -96,6 +96,7 @@ function openRun(m: Msg): void {
   // CALL (the hook IS this host's debugger); the tracking itself stays
   // gated (the pump's 'track' messages) — an untracked VM records nothing.
   if (typeof mod._xc_hook_live === 'function') mod._xc_hook_live(1);
+  sentVer.clear();
   err = mod._xc_boot() ? mod.UTF8ToString(mod._xc_error()) : '';
 }
 
@@ -108,6 +109,11 @@ function metas(): { key: string; w: number; h: number }[] {
   }
   return out;
 }
+// ABI 15 XENON-SCREEN-VERSION (worker twin of XenonPump.fetchVersioned): a
+// surface whose write counter is unchanged since its LAST delivery ships NO
+// pixels — the main-thread pump keeps the previous array (applyCycle keeps
+// cached pixels for a null fetch). -1 (older wasm) = ship every cycle.
+const sentVer = new Map<string, number>();
 function pixelsFor(keys: string[]): Record<string, ArrayBuffer> {
   const out: Record<string, ArrayBuffer> = {};
   for (const key of keys) {
@@ -115,11 +121,14 @@ function pixelsFor(keys: string[]): Record<string, ArrayBuffer> {
     const idx = typeof mod._xc_screen_index === 'function' ? mod._xc_screen_index(p) : -1;
     mod._free(p);
     if (idx < 0) continue;
+    const v = typeof mod._xc_screen_version === 'function' ? mod._xc_screen_version(idx) : -1;
+    if (v >= 0 && sentVer.get(key) === v) continue;
     const w = mod._xc_screen_w(idx), h = mod._xc_screen_h(idx), d = mod._xc_screen_pixels(idx);
     if (!w || !h || !d) continue;
     const ab = new ArrayBuffer(w * h * 4);
     new Uint8Array(ab).set(new Uint8Array(mod.HEAPU8.buffer, d, w * h * 4));
     out[key] = ab;
+    sentVer.set(key, v);
   }
   return out;
 }
@@ -206,6 +215,7 @@ ctx.onmessage = (e: MessageEvent<Msg>) => {
       // XenonRun.reboot law: flush the storage cache, then re-boot.
       err = '';
       mod._xc_save_storage();
+      sentVer.clear();
       const ok = !mod._xc_boot();
       if (!ok) err = mod.UTF8ToString(mod._xc_error());
       return ctx.postMessage({ t: 'reboot', ok, error: err });

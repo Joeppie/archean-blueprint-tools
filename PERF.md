@@ -243,6 +243,44 @@ Not shipped (documented options): the FrontSide split for closed prisms
 and the writer-side stitch (file shrinks, rim layout changes — in-game
 pixels must arbitrate; the v1.5.10 rim-cull ban stands for boundary rims).
 
+## v1.16.8 SCREEN-WRITE pass (XenonCode → canvases; `xenonvm.perf.test.ts`)
+
+Bench first (`PERF_HARNESS=1 npx vitest run xenonvm.perf`, real wasm on node,
+medians): the VM's WRITE OPS are cheap — idle cycle 0.003 ms, blank 200x160
+0.014, text x20 0.062, draw_rect-fill x100 0.244, blank 870x390 0.111,
+the BADGER'S WHOLE FIRMWARE 0.061 ms/cycle (2.5 % of the 40 ms budget).
+The expensive half was the APP: the render pump copies every VISIBLE
+surface's full RGBA buffer every 25 Hz cycle (screenPixels = heap slice,
+then a fresh ImageData, then putImageData) — and the change census measured
+**0.2 of 117 Badger surfaces change per cycle**: ~99.8 % of the copies
+re-upload pixels nobody wrote.
+
+**SHIPPED: XENON-SCREEN-VERSION (fork `64d647d`, ABI 15)** — `Dirty()` (the
+choke point every pixel write already funnels through, methods + the shim's
+screen_copy blits) now counts into a per-surface monotonic sequence
+exported as `xc_screen_version(i)`. All three pump twins (XenonPump main
+thread, xenonworker delivery, hudpump HUD fetch) fetch + blit a surface
+ONLY when its version moved; the built-in-screen mirror blits only when
+main#0 moved; the blit REUSES one ImageData per canvas (WeakMap) instead of
+allocating a 1.4 MB one per surface per cycle. Older wasm (no export)
+returns -1 = fetch every cycle — the typeof-guard degradation rule, the
+pre-v1.16.8 law unchanged. Measured: the 17-surface Badger dock fetch loop
+**30.5 ms → 7.2 ms per 100 cycles (4.2×)**; the browser additionally skips
+the ImageData + putImageData uploads for static surfaces (dominant on the
+iGPU). Pins: xenonvm 'THE SCREEN-VERSION law' (idle stable / write bumps /
+screen_copy counts on DESTINATION); behavior net: xenonhud + playerhud +
+living + xenonfarm + phoneux + app specs green.
+
+Page-load census (bootprobe medians, this tree): gallery dcl 38 ms /
+SCENE-PASS 73 ms; deep-link boots 456-733 ms (giant 1119) — the v1.12.2
+pass's layout is unchanged: chunks (522 kB gz, parallel), manifest @36 ms,
+the ~300 ms render1→canvas span = ANGLE/Vulkan context + commit (the
+documented hardware floor), scene phases 5-49 ms. NOT shipped (measured,
+documented): deferring the per-type model fan-out (6.7 MB plane / 24 MB
+truck) — it fires AFTER the SCENE PASS by design (holo stand-ins, LITE
+tier gates the giant) and moving it earlier competes with the boot;
+changing WHEN real models land is a behavior change, not an optimization.
+
 ## Tooling
 
 - `?perf` (live browser): title shows `fps draw flowms buildms loadms tris geo`

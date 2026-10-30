@@ -95,6 +95,28 @@ with the description in its message, PR-able upstream:
    frame (the Locals panel said "top level" — a real report on the plane's
    `update` body). Claim by index.
 
+9. **XENON-PANEL-RESIZE** (fork `830f10f`, RECORDED RETROACTIVELY v1.16.8) —
+   `XenonScreen::Resize(w,h)`: `$panel.set_size(w,h)` (ABI 13, v1.14.1)
+   resizes the pixel + staging vectors in place, filled with bgColor;
+   `_width/_height` lose const so the panel keeps its OBJECT IDENTITY (the
+   program's `$panel` stays valid; the host's per-cycle metas carry w/h).
+   The shipped wasm carried this behavior since v1.14.1 but the header
+   patch was never committed — recorded now (the Panel-Bench pin in
+   xenonhud.spec is the behavior-parity gate) so the tree builds from the
+   pin again.
+
+10. **XENON-SCREEN-VERSION** (fork `64d647d`, v1.16.8) — per-surface WRITE
+   counter: every pixel write already funnels through `Dirty()` (the
+   XenonScreen draw methods + the host's screen_copy blits), so the flag
+   now cumulates into a monotonic sequence the host exports
+   (`xc_screen_version`, ABI 15). The app's render pump fetched + blitted
+   EVERY visible surface every 25 Hz cycle; the Badger census measures 0.2
+   changing surfaces per cycle of 117 — the counter lets the pump (and the
+   worker + HUD pump twins) fetch a surface exactly when its pixels moved
+   (measured 4.2× on the fetch loop; the browser also skips the ImageData
+   + canvas upload). `Update()`/`_dirty` semantics untouched — reads
+   unchanged, behavior unchanged.
+
 `patch_xenon_vars.py` / `patch_xenon_debug.py` / `patch_xenon_lenient_index.py`
 stay in this directory **for provenance** — they are how the branch commits
 were authored (the exact edits + anchors documented), and they can

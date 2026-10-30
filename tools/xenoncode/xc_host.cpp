@@ -1676,7 +1676,7 @@ EMSCRIPTEN_KEEPALIVE const char* xc_write_var(int fileIdx, int line, const char*
 
 // ABI stamp: the app checks this at boot (XC_ABI in engine/xenoncode.ts) and
 // warns ONCE on drift — new device/shim exports must bump it.
-EMSCRIPTEN_KEEPALIVE int xc_abi() { return 14; }  // 14: xc_screen_px/xc_screen_py/xc_screen_haspos (the app's composited HUD SCREEN window — panels ride anchor until set_position); 13: $panel.set_size(w,h) + $panel.width/.height (HUD law from the shipped wiki hud.md — XENON-PANEL-RESIZE; RCS Infinity's guide HUD calls it live); 12: xc_hud_mode + ONE screen_w/screen_h declaration serving computer AND HUD (the v1.14.1 duplicate OVERRODE the computer law — DeclareDeviceFunction replaces by name — scaling every computer layout by the 1920x1080 viewport: the Space Invaders main-graphic loss); 11: panel()/beacon() object + beaconpair/beacontx events + get()/xc_set_world + xc_beacon_put + xc_set_input_t + xc_set_view + xc_screen_anchor (HUD runtime + beacon radio); 10: depth stream + hookLive gate + exact-line pause seam (XENON-DEBUG v3); 9: xc_write_var + the hook's cmd-6 write handoff (editable debug values); 8: xc_locals_json + the hook's SAB locals handoff (the Locals panel); 7: the stop-hook is LIVE (library_xc.js + Module.XC_SAB worker stepping); 6: xc_cycle_pairs + hook seam; 5: xc_set_cycle_ms
+EMSCRIPTEN_KEEPALIVE int xc_abi() { return 15; }  // 15: xc_screen_version (XENON-SCREEN-VERSION write counter — the pump blits only changed surfaces); 14: xc_screen_px/xc_screen_py/xc_screen_haspos (the app's composited HUD SCREEN window — panels ride anchor until set_position); 13: $panel.set_size(w,h) + $panel.width/.height (HUD law from the shipped wiki hud.md — XENON-PANEL-RESIZE; RCS Infinity's guide HUD calls it live); 12: xc_hud_mode + ONE screen_w/screen_h declaration serving computer AND HUD (the v1.14.1 duplicate OVERRODE the computer law — DeclareDeviceFunction replaces by name — scaling every computer layout by the 1920x1080 viewport: the Space Invaders main-graphic loss); 11: panel()/beacon() object + beaconpair/beacontx events + get()/xc_set_world + xc_beacon_put + xc_set_input_t + xc_set_view + xc_screen_anchor (HUD runtime + beacon radio); 10: depth stream + hookLive gate + exact-line pause seam (XENON-DEBUG v3); 9: xc_write_var + the hook's cmd-6 write handoff (editable debug values); 8: xc_locals_json + the hook's SAB locals handoff (the Locals panel); 7: the stop-hook is LIVE (library_xc.js + Module.XC_SAB worker stepping); 6: xc_cycle_pairs + hook seam; 5: xc_set_cycle_ms
 EMSCRIPTEN_KEEPALIVE void xc_set_cycle_ms(int ms) {
 	// the app's pump cadence (CYCLE_MS): delta_time / system_frequency
 	// follow it, so dt-driven programs (Chip's Mario, physics on
@@ -1698,6 +1698,16 @@ EMSCRIPTEN_KEEPALIVE const uint8_t* xc_screen_pixels(int i) {
 	if (i < 0 || i >= (int)g_screens.size()) return nullptr;
 	g_screens[i].scr->Update();
 	return g_screens[i].scr->data();
+}
+// XENON-SCREEN-VERSION (ABI 15, v1.16.8 perf): the surface's WRITE counter.
+// Every pixel write (the XenonScreen methods AND the shim's screen_copy blit
+// via Dirty()) increments it; the app's pump fetches + blits a surface only
+// when its version moved since the last cycle — the game redraws on intent,
+// and the Badger census measures 0.2 surfaces changing per cycle of 117
+// (app/src/engine/__tests__/xenonvm.perf.test.ts). -1 = no such surface.
+EMSCRIPTEN_KEEPALIVE double xc_screen_version(int i) {
+	return (i >= 0 && i < (int)g_screens.size())
+		? (double)g_screens[i].scr->WriteSeq() : -1.0;
 }
 
 // the IDE's live parse (the wiki's Editor section: parse the current line on

@@ -68,8 +68,26 @@ export async function bootVm(id: string, pick?: (comps: XenonComputer[]) => Xeno
   const { comps } = xenonCorpus(id);
   const comp = pick ? pick(comps) : comps[0];
   if (!comp) throw new Error(`craft ${id} has no programmable computer`);
+  return openVm(comp);
+}
+
+/** THE SYNTHETIC BOOT (the write-path bench): a named screen at an exact
+ *  size, an empty device table, the program from strings. */
+export async function bootSynthetic(
+  code: string, w: number, h: number, alias = 'bench',
+): Promise<Vm> {
+  provideVmWasm();
+  return openVm({
+    ci: -9, alias: 'bench-program', program: 'main', entryName: 'main.xc',
+    files: [{ name: 'main.xc', code }], capacity: 8192, channels: [],
+    screens: [{ alias, label: alias, channel: 0, w, h, ci: -9 }],
+    devices: [],
+  });
+}
+
+async function openVm(comp: XenonComputer): Promise<Vm> {
   const run = await XenonRun.open(comp);
-  if (run.error) throw new Error(`craft ${id} program boot error: ${run.error}`);
+  if (run.error) throw new Error(`program boot error: ${run.error}`);
   const vm: Vm = {
     run, comp, events: [], cycles: 0,
     step(n: number) {

@@ -4929,3 +4929,36 @@ playerhud.spec.ts (2 legs: menu→IDE→Library-jump→▶→panel PIXELS; POST
 round-trip). The suite's hud writes point at a scratch dir
 (playwright.config webServer env ARCHEAN_HUD) — the real game folder is
 never touched by tests.
+
+## v1.16.8 — THE BLIT LAW: surfaces upload only when their pixels moved (2026-10-30)
+
+we: "do a bench and figure out if we can optimize the screen writing done
+from xenoncode without impacting behavior … Profile performance and try to
+minimize page load". The bench first: xenonvm.perf.test.ts (QUIESCENT
+pattern, real wasm on node) times every screen-write op — the VM side is
+NOT the problem (idle cycle 0.003 ms, full-surface blank fills 0.01-0.24,
+the Badger's entire 36k-line firmware 0.061 ms/cycle = 2.5 % of the 25 Hz
+budget). The app's render pump was: every VISIBLE surface's full RGBA
+buffer copied + ImageData'd + putImageData'd EVERY cycle, and the change
+census measures 0.2 of 117 Badger surfaces changing per cycle — 99.8 % of
+the uploads re-paint pixels nobody wrote. The fix needed the interpreter
+to SAY when a surface moved: the shim's every pixel write (the XenonScreen
+methods AND the screen_copy blits) already funnels through Dirty() — the
+fork now counts those into a per-surface monotonic sequence (XENON-
+SCREEN-VERSION, fork 64d647d, xc_screen_version, ABI 15) and all three
+pump twins fetch+blit only on movement (the mirror gate rides main#0's
+counter; the blit reuses one ImageData per canvas). No export (older wasm)
+= -1 = every-cycle fetch, the typeof-guard degradation rule. Measured: the
+dock fetch loop 30.5 ms → 7.2 ms per 100 cycles (4.2×) + the browser skips
+the canvas uploads. THE CENSUS ALSO EXPOSED THE DRIFT: building the pin
+failed — xc_host's set_size calls XenonScreen::Resize, which lived in NO
+fork commit (the v1.14.1 wasm was built against an unrecorded local header
+patch). XENON-PANEL-RESIZE (fork 830f10f) now RECORDS it (reconstructed to
+the artifact's contract; the v1.14.1 Panel-Bench pin is the parity gate) —
+the tree builds from the pin again. Page-load census (bootprobe): gallery
+73 ms; deep-link boots 456-1119 ms — the ~300 ms render1→canvas span is
+the documented ANGLE/Vulkan context init (v1.12.2, hardware), the 24 MB
+model fan-out is progressive-BY-DESIGN after the pass (holo stand-ins,
+LITE tier); moving it is a behavior change, kept. Pins: THE SCREEN-VERSION
+law (idle stable / write bumps / screen_copy counts on DESTINATION);
+behavior net xenonhud+playerhud+living+xenonfarm+phoneux+app green.
