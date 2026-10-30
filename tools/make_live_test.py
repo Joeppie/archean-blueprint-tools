@@ -146,10 +146,9 @@ def main():
         #    with NO cables at all + a pivot no program touches. Pressing
         #    the toggle must latch it AND broadcast to the craft's servo
         #    actuators — the untouched pivot is the observable target.
-        comp("ARCHEAN_machines", "SmallPivot", "gimbals", -1.5, 0.1, 0.0,
-             {"angle": 0.0, "inputValue": 0.0, "maxSpeed": 1.0, "acceleration": 2.0,
-              "servoMode": True}),
-        comp("ARCHEAN_hid", "ToggleButton", "doorbtn", 1.5, 0.1, -0.9,
+        comp("ARCHEAN_machines", "SmallHinge", "gimbals", -1.5, 0.1, 0.0,
+             {"angle": 0.0, "inputValue": 0.0, "maxSpeed": 1.0, "acceleration": 2.0}),
+        comp("ARCHEAN_hid", "ToggleButton", "doorbtn", 1.75, 1.9, -0.85,
              {"state": False, "onValue": 1.0, "offValue": 0.0}),
     ]
     hinge_ci = next(i for i, c in enumerate(components) if c["type"] == "SmallHinge")

@@ -2702,24 +2702,42 @@ void main() {
     const ray = new Raycaster();
     ray.setFromCamera(ndc, this.camera);
     this.scene.updateMatrixWorld(true);        // headless-safe (probe law)
-    const targets: Object3D[] = [];
-    for (const e of this.dashElements.values()) targets.push(e.mesh);
-    for (const e of this.deviceScreens.values()) targets.push(e.mesh);
-    for (const g of this.pressCompRoots.values()) targets.push(g);
-    const hits = ray.intersectObjects(targets, true);
+    // THE OCCLUSION RULE: a press needs the FIRST solid hit to BE the
+    // pressable — a ray that grazes a part and lands on a dashboard behind
+    // it is a click on the PART, never a press through it.
+    const hits = ray.intersectObjects([this.root, this.subGroup], true);
     for (const h of hits) {
       const uv = h.uv;
       // walk UP: element boxes carry userData.dash, pressable part roots
-      // carry userData.pressComp (meshes are children of the roots)
+      // carry userData.pressComp; a part's STAND-IN BOX (userData.kind
+      // 'comp', no model underneath yet / beside it) IS the part — at
+      // 12 k-draw lite crafts it is literally all there is.
       let o: Object3D | null = h.object;
-      while (o && !(o.userData as { dash?: unknown }).dash
-        && !(o.userData as { pressComp?: unknown }).pressComp) o = o.parent;
+      let standCi: number | undefined;
+      while (o) {
+        const u = o.userData as { dash?: unknown; pressComp?: unknown; kind?: string; ci?: number };
+        if (u.dash || u.pressComp) break;
+        if (u.kind === 'comp' && typeof u.ci === 'number' && this.pressCompRoots.has(u.ci)) {
+          standCi = u.ci;
+          break;
+        }
+        o = o.parent;
+      }
+      if (standCi !== undefined) {
+        const c = this.bp?.data.components[standCi];
+        return { kind: 'comp', ci: standCi, ch: 0, elType: c?.type ?? '' };
+      }
       const ud = o?.userData as {
         dash?: { ci: number; ch: number; type: string; surfaceKey?: string };
         pressComp?: string;
       } | undefined;
       if (ud?.dash) {
         const dash = ud.dash;
+        // PRESSABLE LAW (wiki DashboardTool.md): buttons, LEDs (they click
+        // like push buttons) and Screen faces — a LABEL is print, never a
+        // control: it occludes, it does not press.
+        if (!/^(ToggleButton|PushButton|ArrowButton|Led|Screen|HdScreen)$/.test(dash.type))
+          return null;
         const out: { kind: 'dash'; ci: number; ch: number; elType: string; surfaceKey?: string; px?: number; py?: number } =
           { kind: 'dash', ci: dash.ci, ch: dash.ch, elType: dash.type };
         if (dash.surfaceKey) {
@@ -2746,6 +2764,7 @@ void main() {
       if (ud?.pressComp)
         for (const [ci, g] of this.pressCompRoots) if (g === o)
           return { kind: 'comp', ci, ch: 0, elType: ud.pressComp };
+      // the first solid hit is NOT a pressable (it occludes): no press here
       return null;
     }
     return null;
@@ -3998,7 +4017,11 @@ void main() {
       const parent = g0.parent;
       const pos = g0.position.clone();
       const quat = g0.quaternion.clone();
-      for (const o of roots) {
+      // iterate a COPY: the loop splices `roots` as it goes — the live
+      // array's iterator SKIPS the shifted element (with stand-in + real
+      // both present, the real dashboard — the one with the dash-tagged
+      // boxes — stayed parented and shadowed the fed rebuild's pixels)
+      for (const o of [...roots]) {
         o.traverse(o2 => {
           const m = o2 as Mesh;
           if (!m.isMesh) return;
@@ -4009,6 +4032,11 @@ void main() {
           const mats = Array.isArray(m.material) ? m.material : [m.material];
           for (const mt of mats) if (mt && !this.shared.has(mt)) mt.dispose();
         });
+        // DETACH from the scene graph (v1.15.6 fix): disposing and splicing
+        // compRoots left the OLD boxes parented in the scene — raycasts hit
+        // them (geometry attributes live on in JS), so the pre-feed element
+        // (no surfaceKey) shadowed the live fed rebuild at the same pixels.
+        o.parent?.remove(o);
         const k = roots.indexOf(o);
         if (k >= 0) roots.splice(k, 1);
       }

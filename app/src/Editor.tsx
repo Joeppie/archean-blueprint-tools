@@ -456,14 +456,26 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // with NOTHING running it and nothing cabled broadcasts the toggled
   // state to the craft's servo actuators (hinge/pivot/track) — a spare
   // door button works its own craft.
-  const driveFromPress = useCallback((t: PressTarget, elType: string, v: number,
-    deviceOwners: XenonComputer[]) => {
+  const chanReaders = useCallback((t: PressTarget): XenonComputer[] =>
+    xenonCompsRef.current.filter(c => {
+      const dev = c.devices.find(d => d.ci === t.ci);
+      if (!dev) return false;
+      let s = sitesRef.current.get(c.ci);
+      if (!s) { s = { chan: chanSites(c.files), rect: rectSites(c.files) }; sitesRef.current.set(c.ci, s); }
+      const ch = t.ch ?? 0;
+      return s.chan.some(x => x.ch === ch && (x.io === dev.io || (!!dev.alias && x.io === dev.alias)));
+    }), []);
+  const driveFromPress = useCallback((t: PressTarget, elType: string, v: number) => {
     if (!bp) return;
     const nbrs = dataNeighbours(bp, t.ci);
     if (nbrs.length) { for (const d of nbrs) simRef.current.write(d.ci, t.ch ?? 0, v); return; }
-    if (v > 0 && /Button/.test(elType) && deviceOwners.length === 0)
+    // broadcast the PRESSED STATE (both directions — a latched toggle's
+    // OFF press is the closing command) when NO PROGRAM reads the channel;
+    // an alias-registration alone (every named part is alias-addressable)
+    // is not a reader
+    if (/Button/.test(elType) && chanReaders(t).length === 0)
       for (const a of simRef.current.actuators()) simRef.current.write(a.ci, 0, v);
-  }, [bp]);
+  }, [bp, chanReaders]);
   const onDashPress = useCallback((t: PressTarget, phase: 'down' | 'up') => {
     const eng = engineRef.current;
     const comps = xenonCompsRef.current;
@@ -493,16 +505,14 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       latchedRef.current.set(k, on);
       xenonFarm.pressDevice(t.ci, t.ch ?? 0, on ? 1 : 0, 'ToggleButton');
       simRef.current.setElement(t.ci, t.ch ?? 0, on);
-      driveFromPress(t, 'ToggleButton', on ? 1 : 0,
-        comps.filter(c => c.devices.some(d => d.ci === t.ci)));
+      driveFromPress(t, 'ToggleButton', on ? 1 : 0);
       eng?.pressVisual(t.ci, t.ch ?? 0, on);
       return;
     }
     // momentary: Push/Arrow/Led elements + standalone Push/Arrow parts
     xenonFarm.pressDevice(t.ci, t.ch ?? 0, phase === 'down' ? 1 : 0, elType);
     simRef.current.setElement(t.ci, t.ch ?? 0, phase === 'down');
-    driveFromPress(t, elType, phase === 'down' ? 1 : 0,
-      comps.filter(c => c.devices.some(d => d.ci === t.ci)));
+    driveFromPress(t, elType, phase === 'down' ? 1 : 0);
   }, [unpowered, warnUnpowered, driveFromPress]);
   /** THE POPUP LABEL (we: "it should tell us what channel/ui element … which
    *  xenoncode line … the computer this corresponds to"): the element, the
@@ -551,19 +561,23 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         + (s ? ` · ${s.fn}(…, ${t.ch ?? 0}) @ ${s.file}:${s.line}` : ''));
     }
     if (owners.length && owners.every(c => unpowered(c.ci))) parts.push('⚠ unpowered');
-    if (!owners.length && t.kind === 'comp') {
+    if (t.kind === 'comp') {
       // the popup names what a bare part ACTUALLY drives: its data-cable
-      // neighbours, or the craft's actuators (the SPARE-BUTTON LAW)
+      // neighbours, or the craft's actuators (the SPARE-BUTTON LAW —
+      // broadcast when NO PROGRAM reads this channel)
       const nbrs = bp ? dataNeighbours(bp, t.ci) : [];
       const acts = simRef.current.actuators().length;
       if (nbrs.length)
         parts.push(`→ drives ${nbrs.map(d => `'${d.alias || `${d.type.toLowerCase()}-${d.ci}`}'`).join(', ')}`);
-      else if (acts && /Button/.test(t.elType ?? ''))
-        parts.push(`→ toggles the craft's ${acts} actuator${acts === 1 ? '' : 's'} (no computer attached)`);
-      else parts.push('no computer reads it');
+      else if (!owners.length)
+        parts.push(acts && /Button/.test(t.elType ?? '')
+          ? `→ toggles the craft's ${acts} actuator${acts === 1 ? '' : 's'} (no computer attached)`
+          : 'no computer reads it');
+      else if (acts && /Button/.test(t.elType ?? '') && chanReaders(t).length === 0)
+        parts.push(`→ toggles the craft's ${acts} actuator${acts === 1 ? '' : 's'} — no program reads it`);
     }
     return parts.join(' — ');
-  }, [unpowered, bp]);
+  }, [unpowered, bp, chanReaders]);
   // v1.13.8 (we: "it doesnt register the built-in screen", craft 3288012440):
   // a Computer's / Crafter's INTEGRATED screen is a physical screen too —
   // the ▣ dock gate must not stop at Dashboard components. The dock's
