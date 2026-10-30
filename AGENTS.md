@@ -10,9 +10,12 @@ rulings, version narratives live in `docs/HISTORY.md`. Write rules as
 imperatives; put the WHY in a satellite, link it.
 
 ## Keeping this file clean (mandatory)
-- Living rules only. Dated narratives, session reports, closed todos,
-  superseded rulings, pin histories → APPEND to docs/HISTORY.md in the same
-  commit, never inline here.
+- Living rules only. **HISTORY IS BANNED HERE** — dated narratives, origin
+  stories, `we:` quotes, session reports, closed todos, superseded rulings,
+  pin histories have exactly ONE home: docs/HISTORY.md (APPEND in the same
+  commit). State a rule AS a rule; when it needs its story, link the
+  satellite — never retell the story inline. (Explicit standing instruction
+  2026-10-30: "that aint the plan, we got history for that".)
 - Every bullet must read without its origin story. If a rule needs a story,
   the story is history and the bullet stays one line.
 - Satellites own their domain; AGENTS.md links, never copies: FORMAT.md
@@ -276,6 +279,15 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   (seeded from components + scanned `beacon()` literals, runtime-merged
   by id; EXACT text-frequency routing; logs survive re-seeds). The shim
   twin: `xc_host.cpp` ABI 14 ↔ `XC_ABI`; demo `tools/xenoncode/demo/hudradio`.
+- PLAYER HUDs (v1.17.0): the game's `client/hud/<name>/` folders
+  (main.xc + includes; FORMAT § HUD). Xenon ▸ Player HUDs lists the machine's installed +
+  subscribed HUDs (the `/hud` route, `hud_dir` config key — tools/config.py;
+  fixture floor `testdata/hud`, `tools/make_hud_test.py`) plus a folder
+  PICKER (works on Pages). A loaded HUD opens the SAME HudDialog with the
+  synthetic `PLAYER_HUD_CI` (the Library tab, hudPump runtime and F5 law
+  ride it UNCHANGED); the save writes the `.xc` files back (installed IN
+  PLACE, workshop/fixture as a hud_dir COPY; `xc_program.bin` is the game's
+  to recompile, NEVER ours). Machine hud folders are NEVER committed.
 - THE HUD SCREEN WINDOW (v1.15.5, we: "Panels in Huds are rendered
   independently.. not how they normally work. They should be composed
   together on a normal screen as per the rules of the game… choose screen

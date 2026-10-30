@@ -53,6 +53,8 @@ import type { Blueprint, Triangle } from './engine/format';
 import { isLegacyFile } from './engine/format';
 import { hasDashboards, xenonComputers, xenonHudControllers, xenonFarm, type XCFile,
   type XenonComputer } from './engine/xenoncode';
+import { fetchPlayerHuds, fetchPlayerHud, savePlayerHud, playerHudFromFiles,
+  PLAYER_HUD_CI, type PlayerHudEntry, type PlayerHudProgram } from './engine/playerhud';
 import { DeviceSim, dataNeighbours } from './engine/devicesim';
 import { craftPowerNet, computerPowered } from './engine/power';
 import { chanSites, rectSites, rectsAt, type ChanSite, type RectSite } from './engine/xcsites';
@@ -226,6 +228,33 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [bp, rev]);
   const [hudCi, setHudCi] = useState<number | null>(null);
+  // PLAYER HUDs (v1.17.0, we: "make it possible to load a player HUD file"):
+  // the game's hud/<name>/ folders (dev/preview /hud listing; machine-wide,
+  // not craft-scoped) + the file-picker path that works in EVERY build.
+  // A loaded program opens the SAME HUD IDE with the SYNTHETIC ci — the
+  // Library tab, the runtime and the F5 law ride it unchanged; only the
+  // save target differs (the route writes the .xc files, never the .bin).
+  const [playerHuds, setPlayerHuds] = useState<PlayerHudEntry[]>([]);
+  const [playerHud, setPlayerHud] = useState<PlayerHudProgram | null>(null);
+  const hudFileRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => { void fetchPlayerHuds().then(setPlayerHuds); }, []);
+  const openPlayerHud = useCallback((name: string) => {
+    void fetchPlayerHud(name)
+      .then(p => { setPlayerHud(p); setHudCi(PLAYER_HUD_CI); })
+      .catch(e => setToolMsg(`⚠ player HUD '${name}': ${String(e)}`));
+  }, []);
+  const loadPlayerHudFiles = useCallback(() => hudFileRef.current?.click(), []);
+  const onHudFilesPicked = useCallback(async (fl: FileList) => {
+    const list = await Promise.all([...fl].map(async f => ({
+      name: f.name, rel: (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name,
+      text: await f.text(),
+    })));
+    try {
+      const p = playerHudFromFiles(list);
+      setPlayerHud(p); setHudCi(PLAYER_HUD_CI);
+      setToolMsg(`player HUD '${p.name}' loaded (${p.files.length} files) — edits are in memory until 💾 save`);
+    } catch (e) { setToolMsg(`⚠ ${String(e)}`); }
+  }, []);
   const [beaconsOpen, setBeaconsOpen] = useState(false);
   useEffect(() => { if (bp) beaconNet.seed(bp); }, [bp, rev]);
   // ▣ SCREENS bottom tab (v1.13.x): the dashboards' live rasters, normal +
@@ -2016,6 +2045,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         xenonComps={xenonComps.length ? xenonComps.map(c => ({ ci: c.ci, alias: c.alias, program: c.program, files: c.files.length, builtin: c.builtin })) : undefined}
         xenonHuds={xenonHuds.map(h => ({ ci: h.ci, alias: h.alias, files: h.files.length }))}
         onHud={ci => setHudCi(ci)}
+        xenonPlayerHuds={playerHuds.map(h => ({ name: h.name, kind: h.kind, files: h.files.length }))}
+        onPlayerHud={openPlayerHud} onPlayerHudFiles={loadPlayerHudFiles}
         onBeacons={() => setBeaconsOpen(o => !o)} beaconsOpen={beaconsOpen}
         onXenon={openCodeFor}
         hasScreens={hasScreens} screensOpen={screensOpen}
@@ -2035,6 +2066,15 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       <input ref={fileRef} type="file" accept=".json,application/json" className="hidden"
         data-testid="file-input"
         onChange={e => { const f = e.target.files?.[0]; if (f) readFile(f); e.target.value = ''; }} />
+      {/* PLAYER HUD folder picker (v1.17.0): pick the hud/<name>/ folder; the
+          browser hands every file, playerHudFromFiles keeps the .xc ones and
+          the main.xc-first order. webkitdirectory is nonstandard in TS DOM
+          types — set via the attribute (Chromium + Firefox honour it). */}
+      <input ref={hudFileRef} type="file" multiple className="hidden"
+        data-testid="playerhud-input"
+        {...{ webkitdirectory: '', directory: '' } as Record<string, string>}
+        onChange={e => { const fl = e.target.files; if (fl?.length) void onHudFilesPicked(fl);
+          e.target.value = ''; }} />
       <div className="relative flex min-h-0 flex-1">
         {/* v1.11 NO SIDE PANEL (we: "no more side panel"): catalog, parts list,
             inspector, vessel INFO and the mode workspaces ALL live in the
@@ -2145,12 +2185,25 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
                 </Suspense>
               )] : [];
             })}
-            {/* 🖥 HUD IDE (v1.14.0 P9 slice A): the code of a HUD block */}
+            {/* 🖥 HUD IDE (v1.14.0 P9 slice A): the code of a HUD block;
+                v1.17.0: the SAME dialog for a loaded PLAYER HUD (the
+                synthetic ci) — detached save writes the .xc files back */}
             {hudCi !== null && (() => {
-              const hud = xenonHuds.find(h => h.ci === hudCi);
+              const hud = hudCi === PLAYER_HUD_CI
+                ? (playerHud
+                  ? { ci: PLAYER_HUD_CI, alias: `${playerHud.name} · player HUD`, files: playerHud.files }
+                  : null)
+                : xenonHuds.find(h => h.ci === hudCi) ?? null;
               return hud ? (
                 <Suspense fallback={null}>
-                  <HudDialogLazy hud={hud} onClose={() => setHudCi(null)} onFiles={hudFiles} />
+                  <HudDialogLazy hud={hud} onClose={() => setHudCi(null)} onFiles={hudFiles}
+                    saveHud={hudCi === PLAYER_HUD_CI && playerHud
+                      ? async files => {
+                        const dir = await savePlayerHud(playerHud.name, files);
+                        setPlayerHud(p => (p ? { ...p, files } : p));
+                        return dir;
+                      }
+                      : undefined} />
                 </Suspense>
               ) : null;
             })()}

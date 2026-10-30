@@ -1080,6 +1080,19 @@ identical frame/pos/size).
 
 ## HUD & the Beacon radio — craft ↔ HUD ↔ craft channels (transcribed 2026-10-29)
 
+**PLAYER HUDs live OUTSIDE blueprints** (v1.17.0 census): the client folder
+`Archean-data/client/hud/<name>/` holds one dir per installed player HUD —
+`main.xc` + its `include` files as PLAIN TEXT (the same `plain_code` body
+dialect), the game's compiled `xc_program.bin`, a `storage/` sidecar and an
+`active` marker; a subscribed Workshop HUD item is the SAME folder shape in
+`workshop/content/2941660/<id>/` (a bare `main.xc` with a `#workshop_id`
+header line — e.g. 3798785211, the speed readout). The programs run with
+the HUD builtin set (panel()/beacon()/`get("avatar_sensor_speed")`/…) —
+the app's Xenon ▸ Player HUDs loads them into the HUD IDE; saves write the
+`.xc` files back (`xc_program.bin` is the game's to recompile, never ours).
+Installed HUDs under `client/hud/` are machine-local — NEVER committed;
+the law fixture is `testdata/hud/hudbench` (`tools/make_hud_test.py`).
+
 Sources: `strings` over `ARCHEAN_hud.GAME_Mod.so` / `ARCHEAN_beacon.SERVER_Mod.so`
 (API signature strings), the workshop craft **3518436870 "RCS Infinity"** (the
 user's "RCS500" — its beacon frequencies are literally `RCS-500-HUD-SEND` /

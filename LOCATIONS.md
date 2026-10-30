@@ -5,6 +5,7 @@ The tools in this repo need three machine-local paths:
 | key (`blueprints.conf` / env var)          | what it is                                             |
 |---|---|
 | `game_dir` / `ARCHEAN_GAME`                | the **game install** (`Archean-game/modules/…` = asset ground truth for `tools/extract_models.py`) |
+| `hud_dir` / `ARCHEAN_HUD`                  | the client's **PLAYER HUD folder** (`Archean-data/client/hud`) — one subfolder per installed player HUD (main.xc + includes); the app's `/hud` route + `Xenon ▸ Player HUDs` read/write it (v1.17.0). Default: the `hud` folder beside the blueprints dir — no gate, a machine without one simply lists no HUDs (the repo `testdata/hud` fixture floor stays) |
 | `blueprints` / `ARCHEAN_BLUEPRINTS`        | a **blueprint corpus** — a folder of `<workshop-id>/blueprint.json` dirs (regtest/tools read it; the repo default is `testdata/`) |
 | `workshop_content` / `ARCHEAN_WORKSHOP`    | the **Steam Workshop download dir** for Archean (input of `tools/add_workshop.py`) |
 

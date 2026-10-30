@@ -267,9 +267,156 @@ function repoFile(req: IncomingMessage, res: ServerResponse, rel: string, type: 
   sendFile(req, res, path.join(REPO, rel), type);
 }
 
+// ---------- PLAYER HUDS (v1.17.0, we: "make it possible to load a player
+// HUD file") — the game keeps each installed player HUD as a folder of raw
+// XenonCode: <hud_dir>/<name>/main.xc + its includes (client/hud/homo =
+// the 'Homo Hud' speed readout). THREE sources, first hit wins (the config
+// tiers of tools/config.py hud_dir: env ARCHEAN_HUD > blueprints.conf
+// hud_dir > the `hud` folder beside the corpus = the install layout):
+//   hud_dir (the client's installed HUDs — READ + WRITE, saves land there),
+//   workshop_content (subscribed HUD items — a folder whose top level has a
+//   main.xc, e.g. 3798785211 — READ ONLY, saving COPIES into hud_dir),
+//   <repo>/testdata/hud (the fixture floor — a fresh clone serves hudbench).
+function confValue(key: string): string | undefined {
+  const conf = path.join(REPO, 'blueprints.conf');
+  if (!fs.existsSync(conf)) return undefined;
+  for (const line of fs.readFileSync(conf, 'utf8').split('\n')) {
+    const s = line.split('#')[0]!;
+    const eq = s.indexOf('=');
+    if (eq < 0) continue;
+    if (s.slice(0, eq).trim().toLowerCase() === key)
+      return s.slice(eq + 1).trim().replace(/^["']|["']$/g, '') || undefined;
+  }
+  return undefined;
+}
+
+export function hudDir(): string {
+  const raw = process.env.ARCHEAN_HUD ?? confValue('hud_dir')
+    ?? path.join(path.dirname(corpusDir()), 'hud');
+  return path.resolve(REPO, expandUser(raw));
+}
+
+interface HudSource { root: string; kind: 'hud' | 'workshop' | 'fixture' }
+function hudSources(): HudSource[] {
+  const out: HudSource[] = [{ root: hudDir(), kind: 'hud' }];
+  const ws = process.env.ARCHEAN_WORKSHOP ?? confValue('workshop_content');
+  if (ws) out.push({ root: path.resolve(REPO, expandUser(ws)), kind: 'workshop' });
+  out.push({ root: path.join(REPO, 'testdata', 'hud'), kind: 'fixture' });
+  return out;
+}
+
+const HUD_NAME = /^[A-Za-z0-9][A-Za-z0-9 ._-]*$/;         // 'homo', 'Homo Hud'
+const XC_FILE = /^[A-Za-z0-9][A-Za-z0-9_.-]*\.xc$/;
+
+/** every installed player HUD: name + the .xc file names, main.xc first.
+ *  A workshop item qualifies when its TOP level carries main.xc directly
+ *  (crafts keep blueprint.json and are skipped). First source wins by name. */
+export function listPlayerHuds(): { name: string; kind: string; files: string[] }[] {
+  const seen = new Set<string>();
+  const out: { name: string; kind: string; files: string[] }[] = [];
+  for (const src of hudSources()) {
+    let dirs: string[];
+    try { dirs = fs.readdirSync(src.root); } catch { continue; }
+    for (const d of dirs.sort()) {
+      if (!HUD_NAME.test(d) || seen.has(d)) continue;
+      const dir = path.join(src.root, d);
+      let files: string[];
+      try { files = fs.readdirSync(dir); } catch { continue; }
+      if (!files.includes('main.xc')) continue;
+      seen.add(d);
+      const xc = files.filter(f => XC_FILE.test(f));
+      out.push({ name: d, kind: src.kind,
+        files: ['main.xc', ...xc.filter(f => f !== 'main.xc').sort()] });
+    }
+  }
+  return out;
+}
+
+/** the directory of one HUD by name (source order). null = not installed. */
+function hudByName(name: string): { dir: string; kind: string } | null {
+  if (!HUD_NAME.test(name)) return null;
+  for (const src of hudSources()) {
+    const dir = path.join(src.root, name);
+    if (fs.existsSync(path.join(dir, 'main.xc'))) return { dir, kind: src.kind };
+  }
+  return null;
+}
+
+/** read one HUD's program: the .xc files, main.xc FIRST. null = absent. */
+export function readPlayerHudProgram(name: string):
+  { name: string; kind: string; files: { name: string; code: string }[] } | null {
+  const hit = hudByName(name);
+  if (!hit) return null;
+  const files = fs.readdirSync(hit.dir).filter(f => XC_FILE.test(f));
+  const names = ['main.xc', ...files.filter(f => f !== 'main.xc').sort()];
+  return { name, kind: hit.kind,
+    files: names.map(n => ({ name: n, code: fs.readFileSync(path.join(hit.dir, n), 'utf8') })) };
+}
+
+/** write .xc buffers into a HUD dir (validated names; xc_program.bin is the
+ *  game's to recompile, we NEVER write it). Exported for the node tier. */
+export function writeHudFiles(dir: string, files: { name: string; code: string }[]): void {
+  for (const f of files) {
+    if (typeof f?.name !== 'string' || !XC_FILE.test(f.name)
+        || typeof f.code !== 'string') throw new Error(`bad hud file name '${f?.name}'`);
+  }
+  fs.mkdirSync(dir, { recursive: true });
+  for (const f of files) fs.writeFileSync(path.join(dir, f.name), f.code);
+}
+
+/** the dir a SAVE of <name> lands in: installed HUDs IN PLACE; workshop /
+ *  fixture items as a hud_dir/<name> copy (the game's override). null = no
+ *  such HUD. Exported for the node tier. */
+export function hudSaveTarget(name: string): string | null {
+  const hit = hudByName(name);
+  if (!hit) return null;
+  return hit.kind === 'hud' ? hit.dir : path.join(hudDir(), name);
+}
+
+function hudSave(name: string, req: IncomingMessage, res: ServerResponse) {
+  let body = '';
+  req.on('data', c => { body += c; if (body.length > 4e6) req.destroy(); });
+  req.on('end', () => {
+    let files: { name: string; code: string }[];
+    try {
+      const j = JSON.parse(body) as { files?: unknown };
+      if (!Array.isArray(j.files)) throw new Error('files[] required');
+      files = j.files as { name: string; code: string }[];
+    }
+    catch (e) { res.statusCode = 400; res.end(String(e)); return; }
+    const dir = hudSaveTarget(name);
+    if (!dir) { res.statusCode = 404; res.end('no such player HUD'); return; }
+    try { writeHudFiles(dir, files); }
+    catch (e) { res.statusCode = 400; res.end(String(e)); return; }
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ ok: true, dir }));
+  });
+}
+
 function handler(req: IncomingMessage, res: ServerResponse, next: () => void) {
   const url = decodeURIComponent((req.url ?? '').split('?')[0]!);
   if (url === '/workshop.json') return repoFile(req, res, 'viewer/workshop.json', 'application/json');
+  // /hud/ listing + /hud/<name> program read (+ POST save) — see above
+  if (url === '/hud/') {
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ huds: listPlayerHuds() }));
+    return;
+  }
+  if (url.startsWith('/hud/')) {
+    const name = url.slice('/hud/'.length);
+    if (req.method === 'POST') return hudSave(name, req, res);
+    if (req.method === 'GET') {
+      const prog = readPlayerHudProgram(name);
+      if (!prog) { res.statusCode = 404; res.end('no such player HUD'); return; }
+      res.statusCode = 200;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify(prog));
+      return;
+    }
+    res.statusCode = 405; res.end(); return;
+  }
   if (url.startsWith('/models/') || url.startsWith('/atlas/')) {
     // INDEXED form /atlas/<n>.json: n = position of the type name in the
     // SORTED manifest keys. Why: EasyPrivacy's generic substring rule

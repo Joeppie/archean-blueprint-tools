@@ -36,6 +36,12 @@ export default function HudDialog(p: {
   hud: XenonHud;
   onClose: () => void;
   onFiles: (ci: number, files: XCFile[]) => void;
+  /** PLAYER HUD detached mode (v1.17.0, we: "make it possible to load a
+   *  player HUD file"): set → the SAVE law writes the .xc FILES BACK to the
+   *  game's hud folder (engine/playerhud.savePlayerHud), NOT into a
+   *  blueprint — the IDE, the Library tab, the runtime and the F5 law are
+   *  the SAME. */
+  saveHud?: (files: XCFile[]) => Promise<string>;
 }) {
   const { hud } = p;
   const [files, setFiles] = useState<XCFile[]>(hud.files.map(f => ({ ...f })));
@@ -46,6 +52,8 @@ export default function HudDialog(p: {
   const [pendingJump, setPendingJump] = useState<{ line: number; focus: boolean } | null>(null);
   const editorRef = useRef<CodeEditorHandle | null>(null);
   const [armedDel, setArmedDel] = useState(false);
+  // the detached (player HUD) save echo: where the bytes landed
+  const [saved, setSaved] = useState('');
 
   const funcs = useMemo(() => projectFunctions(files), [files]);
   const decls = useMemo(() => projectDecls(files), [files]);
@@ -57,7 +65,16 @@ export default function HudDialog(p: {
   const file = files[tab];
 
   const save = () => {
-    p.onFiles(hud.ci, files);
+    // THE SAVE LAW, two targets: a HUD BLOCK saves into data.xc_files (the
+    // doc path); a PLAYER HUD writes its .xc files back to disk (the route
+    // owns the write; xc_program.bin stays the game's to recompile).
+    if (p.saveHud) {
+      void p.saveHud(files.map(f => ({ ...f })))
+        .then(dir => setSaved(`saved → ${dir}`))
+        .catch(e => setSaved(`save FAILED: ${String(e)}`));
+    } else {
+      p.onFiles(hud.ci, files);
+    }
     setDirty(new Set());
     // F5 law for a RUNNING HUD: the runtime re-boots on the saved files
     if (hudPump.running && hudPump.hud?.ci === hud.ci)
@@ -171,6 +188,12 @@ export default function HudDialog(p: {
         <button data-testid="hud-del-file"
           className={`rounded px-2 py-0.5 ${armedDel ? 'bg-[#6a1b1b] text-[#ffd7d7] hover:bg-[#8a2424]' : 'bg-[#33202a] text-[#ffb3b3] hover:bg-[#4a2836]'}`}
           onClick={delFile}>{armedDel ? 'sure?' : '✕ delete tab'}</button>
+        {saved && (
+          <span data-testid="hud-saved"
+            className={`min-w-0 truncate text-[10px] ${saved.includes('FAILED') ? 'text-[#ff5b5b]' : 'text-[#3ddc55]'}`}>
+            {saved}
+          </span>
+        )}
         <span className="ml-auto hidden text-[10px] text-[#5d6a7d] md:inline">{MENU_HINT}</span>
       </div>
 

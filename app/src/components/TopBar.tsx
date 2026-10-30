@@ -47,6 +47,12 @@ interface Props {
   onXenon?: (ci: number) => void;
   /** v1.14.0 P9 slice A: the craft's HUD blocks (HudController .xc files) */
   xenonHuds?: { ci: number; alias: string; files: number }[];
+  /** PLAYER HUDs (v1.17.0, we: "make it possible to load a player HUD
+   *  file"): the game's installed hud folder (dev/preview /hud route) +
+   *  the file-picker path that works in EVERY build (Pages included). */
+  xenonPlayerHuds?: { name: string; kind: string; files: number }[];
+  onPlayerHud?: (name: string) => void;
+  onPlayerHudFiles?: () => void;
   onHud?: (ci: number) => void;
   /** 📡 Beacon radio — the global scope window */
   onBeacons?: () => void;
@@ -201,7 +207,8 @@ export default function TopBar(p: Props) {
           that looks like it does in-game") — the craft's MiniComputers,
           opening the in-game-style IDE (XenonDialog.tsx) on the dev's
           interpreter (engine/xenoncode.ts + the ESM glue + wasm under engine/xenoncode/) */}
-      {(((p.xenonComps?.length ?? 0) + (p.xenonHuds?.length ?? 0)) > 0) && (
+      {(((p.xenonComps?.length ?? 0) + (p.xenonHuds?.length ?? 0)
+        + (p.xenonPlayerHuds?.length ?? 0)) > 0) && (
         <Menu testid="xenon" label="Xenon ▾" onOpen={reportOpen}>
           {close => (<>
             {/* WIP disclaimer (our rule 2026-10-27): the interpreter is the
@@ -256,6 +263,25 @@ export default function TopBar(p: Props) {
                   onClick={() => { close(); p.onHud?.(h.ci); }} />
               ))}
             </>)}
+            {/* PLAYER HUDS (v1.17.0, we: "Player huds should also be able to
+                be loaded in and edited … the Homo Hud also can do this"):
+                the game's hud/<name>/ folders (installed + subscribed),
+                machine-wide — the SAME XenonCode, the SAME IDE + Library */}
+            {(p.xenonPlayerHuds?.length ?? 0) > 0 && (<>
+              <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-ink-dim">
+              Player HUDs</div>
+              {(p.xenonPlayerHuds ?? []).map((h, i) => (
+                <Item key={h.name} testid={`xenon-playerhud-${i}`}
+                  label={`🎮 ${h.name}${h.kind === 'workshop' ? ' ·subscribed' : ''}`}
+                  hint={`${h.files} .xc`}
+                  onClick={() => { close(); p.onPlayerHud?.(h.name); }} />
+              ))}
+            </>)}
+            {p.onPlayerHudFiles && (
+              <Item testid="xenon-playerhud-load"
+                label="📂 Load player HUD files…" hint="pick the folder"
+                onClick={() => { close(); p.onPlayerHudFiles?.(); }} />
+            )}
             <Sep />
             <Item testid="xenon-beacons"
               label={`📡 Beacons — radio scope${p.beaconsOpen ? ' ·open' : ''}`}

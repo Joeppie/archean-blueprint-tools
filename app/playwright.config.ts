@@ -72,7 +72,7 @@ export default defineConfig({
       // it is a canvas-resize flake generator. A spec that GAINS a phone
       // law removes its name from this list (or tags the phone test).
       testIgnore:
-        /(app|asset-space|blockedit|blockplace|download|gizmo|hinge|isolation|liveedit|paint|pipes|propeller|savefidelity|staleness|subride|sym|views|wheels|xenon|xenondbg|xenonfresh|living)\.spec\.ts$/,
+        /(app|asset-space|blockedit|blockplace|download|gizmo|hinge|isolation|liveedit|paint|pipes|playerhud|propeller|savefidelity|staleness|subride|sym|views|wheels|xenon|xenondbg|xenonfresh|living)\.spec\.ts$/,
     },
   ],
   webServer: {
@@ -100,5 +100,10 @@ export default defineConfig({
     url: URL,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
+    // PLAYER HUD isolation (v1.17.0): the /hud route's WRITE layer points at
+    // a scratch hud dir — the suite's POSTs (playerhud.spec save round-trip)
+    // never touch the machine's real client/hud folder; the listing keeps
+    // the repo testdata/hud fixture floor, so hudbench serves everywhere.
+    env: { ...process.env, ARCHEAN_HUD: process.env.E2E_HUD ?? '/tmp/opencode/e2e-hud' },
   },
 });

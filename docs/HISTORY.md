@@ -4888,11 +4888,44 @@ PitchControlJunction EXACTLY −0.8 (output = −(stick+trim); the e2e polled a
 <−0.3 band — the tier is a design tool again); 3381670618 $disp 1→0 at
 press(4,4); the Badger's 36k-line firmware boots to 'Smart Quad is ready'
 in 0.8 s on node (the e2e leg carried a 240 s budget); INVADERS registers
-main#0 at the authored 200×160 (the v1.15.2 BUILT-IN PLAIN TARGET). Six
-pins in xenonvm.test.ts; the three xenon.spec legs keep their DOM halves
+main#0 at the authored 200×160 (the v1.15.2 BUILT-IN PLAIN TARGET). Eight pins in xenonvm.test.ts (plus the debugger-stream
+gate: unarmed = zero recording, pair/depth alignment, the exact-line PARK); the three xenon.spec legs keep their DOM halves
 (tabs, CodeMirror windowing, the zoom-window real-pointer press, side tabs)
 and shed the pixel censuses, bus rows, stick slider, var polls and the
 sleep-and-lit rituals (the trio runs 14 s). The same census caught the
 phone-side law: XenonPump.open degrades a wasm-LOAD failure to status
 'error' — a fire-and-forget `void pump.open()` in jsdom left the fetch
 rejection unhandled (the `npm test` ERROR line, gone). vitest 1019 → 1025.
+
+## v1.17.0 — PLAYER HUDs load, edit, run (2026-10-30)
+
+we: "Player huds should also be able to be loaded in and edited; make it
+possible to load a player HUD file. You will find that I subbed a workshop
+item that displays player speed, but the Homo Hud also can do this. Ensure
+that the Library function from computesr also works there please." The
+format census: a player HUD is a CLIENT folder (Archean-data/client/hud/
+<name>/ = main.xc + includes + the game's compiled xc_program.bin + an
+active marker); the subscribed speed item is workshop 3798785211 (a bare
+main.xc with '#workshop_id', panel(top_right,…) writing
+get("avatar_sensor_speed")·3.6 km/h), the Homo Hud is client/hud/homo (its
+parse.xc carries the hand-rolled @round/@parse text helpers). Landing:
+tools/config.py gains the hud_dir key (env > conf > the `hud` folder beside
+the corpus); vite-corpus serves GET /hud/ (the listing: hud_dir installed +
+workshop subscribed + the repo fixture floor) and GET/POST /hud/<name>
+(read / save — installed saves land IN PLACE, workshop/fixture as a hud_dir
+COPY, .xc only, xc_program.bin NEVER ours to write); tools/make_hud_test.py
+crafts testdata/hud/hudbench (the speed-readout law: @speed_kph in the
+include, panel(bottom,…) painting avatar_sensor_speed + altitude). The app
+side is the SMALLEST possible slice: playerhud.ts (fetch/save/picker
+helpers, PLAYER_HUD_CI = -7) + a saveHud seam on HudDialog — a loaded HUD
+IS a XenonHud, so the tabs, the CodeEditor, THE LIBRARY TAB (the ask: the
+loaded files' declared @functions indexed, click = jump; built-in docs +
+HUD members included), hudPump (AVATARSIM answers avatar_sensor_speed) and
+the F5 law ride it unchanged. Xenon ▸ gains the Player HUDs section +
+📂 Load player HUD files… (a webkitdirectory folder pick — the path that
+works on Pages too). Pins: playerhud.test.ts (9: listing order, fixture
+floor, save-target law, traversal guard, picker extraction),
+playerhud.spec.ts (2 legs: menu→IDE→Library-jump→▶→panel PIXELS; POST
+round-trip). The suite's hud writes point at a scratch dir
+(playwright.config webServer env ARCHEAN_HUD) — the real game folder is
+never touched by tests.

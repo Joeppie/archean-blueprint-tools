@@ -16,3 +16,10 @@
 # Archean-game install with modules/ (tools/extract_models.py source).
 # Default: ~/.local/share/Steam/steamapps/common/Archean/Archean-game
 #game_dir = /mnt/games/Archean/Archean-game
+
+# The client's PLAYER HUD folder: every subfolder is one installed player
+# HUD (main.xc + its includes + the game's compiled xc_program.bin).
+# The app's /hud route lists/edits them (Xenon ▸ Player HUDs).
+# Default: the `hud` folder beside the blueprints dir (= the install's
+# Archean-data/client/hud). Env: ARCHEAN_HUD.
+#hud_dir = /home/you/.steam/.../Archean-data/client/hud
