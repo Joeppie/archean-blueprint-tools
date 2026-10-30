@@ -1,0 +1,1 @@
+var e=.25;12*e;function t(t,n){return(t[`pos_${n}`]-5.5)*e+(t[`frame_${n}`]??0)*3}function n(e){return{w:e.w,x:e.x,y:e.y,z:e.z}}function r(e){return e.__legacyQ??e.data.colors==null}export{t as i,r as n,n as r,e as t};

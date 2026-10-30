@@ -1,0 +1,21 @@
+__pycache__/
+*.pyc
+server.log
+.DS_Store
+blueprints.conf
+reports/
+# per AGENTS: gitignored so tool caches/installs can never be committed
+# (vite/vitest caches land in node_modules/ when run from the repo root)
+node_modules
+
+# POC build artifacts (WASM of the unlicensed dev XenonCode library + native binary)
+tools/xenoncode/events.json
+tools/xenoncode/run/
+tools/xenoncode/screen.ppm
+poc/
+tools/xenoncode/demo/**/storage/
+tools/xenoncode/demo/**/xc_program.bin
+tools/xenoncode/screen-*.ppm
+app/dist/
+tools/xenoncode/lines.json
+tools/xenoncode/vars.json

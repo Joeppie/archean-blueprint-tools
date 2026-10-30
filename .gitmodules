@@ -1,0 +1,4 @@
+[submodule "tools/xenoncode/upstream"]
+	path = tools/xenoncode/upstream
+	url = https://github.com/Joeppie/XenonCode.git
+	branch = archean

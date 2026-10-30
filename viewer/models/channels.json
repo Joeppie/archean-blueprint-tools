@@ -1,0 +1,1408 @@
+{
+ "ActiveRadiator": {
+  "out": {
+   "0": {
+    "fn": "Temperature (K)",
+    "rng": "number"
+   }
+  }
+ },
+ "AltitudeSensor": {
+  "out": {
+   "0": {
+    "fn": "Absolute Altitude",
+    "rng": ""
+   },
+   "1": {
+    "fn": "Above Terrain",
+    "rng": ""
+   }
+  }
+ },
+ "AngularVelocitySensor": {
+  "out": {
+   "0": {
+    "fn": "Angular velocity X",
+    "rng": "rot/s"
+   },
+   "1": {
+    "fn": "Angular velocity Y",
+    "rng": "rot/s"
+   },
+   "2": {
+    "fn": "Angular velocity Z",
+    "rng": "rot/s"
+   }
+  }
+ },
+ "Beacon": {
+  "in": {
+   "0": {
+    "fn": "Transmit Data",
+    "rng": "number or text"
+   },
+   "1": {
+    "fn": "Transmit Frequency",
+    "rng": "number or text"
+   },
+   "2": {
+    "fn": "Receive Frequency",
+    "rng": "number or text"
+   }
+  },
+  "out": {
+   "0": {
+    "fn": "Data",
+    "rng": "number or text"
+   },
+   "1": {
+    "fn": "Distance",
+    "rng": "number (meters)"
+   },
+   "2": {
+    "fn": "Direction X",
+    "rng": "-1.0 to +1.0"
+   },
+   "3": {
+    "fn": "Direction Y",
+    "rng": "-1.0 to +1.0"
+   },
+   "4": {
+    "fn": "Direction Z",
+    "rng": "-1.0 to +1.0"
+   },
+   "5": {
+    "fn": "Is Receiving",
+    "rng": "0 or 1"
+   }
+  }
+ },
+ "BigThruster": {
+  "in": {
+   "0": {
+    "fn": "Ignition",
+    "rng": "0 or 1"
+   },
+   "1": {
+    "fn": "Gimbal X",
+    "rng": "-1.0 to +1.0"
+   },
+   "2": {
+    "fn": "Gimbal Z",
+    "rng": "-1.0 to +1.0"
+   }
+  },
+  "out": {
+   "0": {
+    "fn": "Thrust",
+    "rng": "Newtons"
+   },
+   "1": {
+    "fn": "Burned flow",
+    "rng": "kg/s"
+   },
+   "2": {
+    "fn": "Unburned flow",
+    "rng": "kg/s"
+   }
+  }
+ },
+ "BigWheel": {
+  "in": {
+   "0": {
+    "fn": "Accelerate",
+    "rng": "-1.0 to +1.0"
+   },
+   "1": {
+    "fn": "Steer",
+    "rng": "-1.0 to +1.0"
+   },
+   "2": {
+    "fn": "Regen",
+    "rng": "0 or 1"
+   },
+   "3": {
+    "fn": "Brake",
+    "rng": "0.0 to 1.0"
+   },
+   "4": {
+    "fn": "Gearbox",
+    "rng": "-1.0 to +1.0"
+   }
+  },
+  "out": {
+   "0": {
+    "fn": "Wheel Rotation Speed",
+    "rng": "rot/s"
+   },
+   "1": {
+    "fn": "Ground Friction",
+    "rng": "0 to 1"
+   }
+  }
+ },
+ "Buzzer": {
+  "in": {
+   "0": {
+    "fn": "Amplitude",
+    "rng": "0 to 1"
+   },
+   "1": {
+    "fn": "Frequency (Hz)",
+    "rng": "0 to 20000 (default: 440Hz)"
+   }
+  }
+ },
+ "ChemicalFurnace": {
+  "in": {
+   "0": {
+    "fn": "Target Temperature (K)",
+    "rng": "number"
+   },
+   "1": {
+    "fn": "Purge",
+    "rng": "0 or 1"
+   }
+  },
+  "out": {
+   "0": {
+    "fn": "Current Temperature (K)",
+    "rng": "number"
+   }
+  }
+ },
+ "Crafter": {
+  "in": {
+   "0": {
+    "fn": "Continuous Crafting OR Container data",
+    "rng": "`0` or `1` OR key-value from Container"
+   },
+   "1": {
+    "fn": "Override Craft Selection",
+    "rng": "text"
+   },
+   "2": {
+    "fn": "Container output for auto-craft",
+    "rng": "key-value from Container"
+   }
+  },
+  "out": {
+   "0": {
+    "fn": "Progress",
+    "rng": "-1 or 0 to 1"
+   },
+   "1": {
+    "fn": "Craft Selection",
+    "rng": "text"
+   },
+   "2": {
+    "fn": "Fluid Levels",
+    "rng": "text"
+   }
+  }
+ },
+ "DensitySensor": {
+  "out": {
+   "0": {
+    "fn": "Density (kg/m³)",
+    "rng": "number"
+   },
+   "1": {
+    "fn": "Composition",
+    "rng": "text"
+   }
+  }
+ },
+ "DieselGenerator": {
+  "in": {
+   "0": {
+    "fn": "Run",
+    "rng": "0 or 1"
+   }
+  },
+  "out": {
+   "0": {
+    "fn": "Load",
+    "rng": "0.0 to 1.0"
+   },
+   "1": {
+    "fn": "RPM",
+    "rng": "rpm"
+   },
+   "2": {
+    "fn": "Fuel flow",
+    "rng": "kg/s"
+   },
+   "3": {
+    "fn": "Running",
+    "rng": "0 or 1"
+   },
+   "4": {
+    "fn": "State",
+    "rng": "\"Off\", \"Starting\", \"Running\", \"Stalled\", \"Destroyed\""
+   }
+  }
+ },
+ "DistanceSensor": {
+  "in": {
+   "0": {
+    "fn": "On/Off",
+    "rng": "number (≠ 0 = on)"
+   },
+   "1": {
+    "fn": "Show Laser",
+    "rng": "number (≠ 0 = on)"
+   },
+   "2": {
+    "fn": "Max Range",
+    "rng": "number (meters, 1000-25000, default 1000)"
+   }
+  },
+  "out": {
+   "0": {
+    "fn": "Distance",
+    "rng": "number (meters, -1 if out of range)"
+   }
+  }
+ },
+ "DockableDoor": {
+  "in": {
+   "0": {
+    "fn": "Close/Open Door",
+    "rng": ""
+   },
+   "1": {
+    "fn": "Arm/Disarm Dock",
+    "rng": ""
+   }
+  },
+  "out": {
+   "0": {
+    "fn": "Door State",
+    "rng": ""
+   },
+   "1": {
+    "fn": "Dock State",
+    "rng": ""
+   }
+  }
+ },
+ "DockingPort": {
+  "in": {
+   "0": {
+    "fn": "Arm/Disarm Docking",
+    "rng": ""
+   }
+  },
+  "out": {
+   "0": {
+    "fn": "Is Docked",
+    "rng": ""
+   }
+  }
+ },
+ "Electrolyser": {
+  "in": {
+   "0": {
+    "fn": "Power throttle, fraction of the rated 16 MW (0 = off, 1 = everything the supply offers)",
+    "rng": "0.0 to 1.0"
+   }
+  },
+  "out": {
+   "0": {
+    "fn": "Consumed power (Watts)",
+    "rng": ""
+   },
+   "1": {
+    "fn": "Water processed (kg/s)",
+    "rng": ""
+   },
+   "2": {
+    "fn": "Hydrogen produced (kg/s)",
+    "rng": ""
+   },
+   "3": {
+    "fn": "Oxygen produced (kg/s)",
+    "rng": ""
+   }
+  }
+ },
+ "FissionReactor": {
+  "in": {
+   "0": {
+    "fn": "Control Rod Zone 1",
+    "rng": "0.0 to 1.0"
+   },
+   "1": {
+    "fn": "Control Rod Zone 2",
+    "rng": "0.0 to 1.0"
+   },
+   "2": {
+    "fn": "Control Rod Zone 3",
+    "rng": "0.0 to 1.0"
+   },
+   "3": {
+    "fn": "Control Rod Zone 4",
+    "rng": "0.0 to 1.0"
+   },
+   "4": {
+    "fn": "Neutrons Injection",
+    "rng": "0 to 1000"
+   },
+   "5": {
+    "fn": "SCRAM (Emergency Shutdown)",
+    "rng": "0 or 1"
+   }
+  },
+  "out": {
+   "0": {
+    "fn": "Zone 1 Temperature (Kelvin)",
+    "rng": "Number"
+   },
+   "1": {
+    "fn": "Zone 2 Temperature (Kelvin)",
+    "rng": "Number"
+   },
+   "2": {
+    "fn": "Zone 3 Temperature (Kelvin)",
+    "rng": "Number"
+   },
+   "3": {
+    "fn": "Zone 4 Temperature (Kelvin)",
+    "rng": "Number"
+   },
+   "4": {
+    "fn": "Control Rod Position Zone 1",
+    "rng": "0.0 to 1.0"
+   },
+   "5": {
+    "fn": "Control Rod Position Zone 2",
+    "rng": "0.0 to 1.0"
+   },
+   "6": {
+    "fn": "Control Rod Position Zone 3",
+    "rng": "0.0 to 1.0"
+   },
+   "7": {
+    "fn": "Control Rod Position Zone 4",
+    "rng": "0.0 to 1.0"
+   },
+   "8": {
+    "fn": "Neutron Flux Zone 1",
+    "rng": "Number"
+   },
+   "9": {
+    "fn": "Neutron Flux Zone 2",
+    "rng": "Number"
+   },
+   "10": {
+    "fn": "Neutron Flux Zone 3",
+    "rng": "Number"
+   },
+   "11": {
+    "fn": "Neutron Flux Zone 4",
+    "rng": "Number"
+   },
+   "12": {
+    "fn": "Input Water Temperature (Kelvin)",
+    "rng": "Number"
+   },
+   "13": {
+    "fn": "Output Water Temperature (Kelvin)",
+    "rng": "Number"
+   },
+   "14": {
+    "fn": "Water Flow Rate (kg/s)",
+    "rng": "Number"
+   },
+   "15": {
+    "fn": "Reactor Status",
+    "rng": "\"IDLE\", \"STARTING\", \"ACTIVE\", \"COOLDOWN\", \"HOT\", \"SCRAM\", \"CRITICAL\", \"MELTDOWN\""
+   },
+   "16": {
+    "fn": "Lifetime",
+    "rng": "Estimated remaining time in seconds"
+   }
+  }
+ },
+ "GeothermalExchanger": {
+  "out": {
+   "0": {
+    "fn": "Depth",
+    "rng": "meters"
+   },
+   "1": {
+    "fn": "Temperature",
+    "rng": "Kelvin"
+   }
+  }
+ },
+ "Gyroscope": {
+  "in": {
+   "0": {
+    "fn": "Speed",
+    "rng": "0.0 to 1.0"
+   },
+   "1": {
+    "fn": "Control",
+    "rng": "-1.0 to +1.0"
+   }
+  }
+ },
+ "HighVoltageBattery": {
+  "out": {
+   "0": {
+    "fn": "Voltage",
+    "rng": ""
+   },
+   "1": {
+    "fn": "Max Capacity (Wh)",
+    "rng": ""
+   },
+   "2": {
+    "fn": "State of charge",
+    "rng": ""
+   },
+   "3": {
+    "fn": "Throughputs (watts)",
+    "rng": ""
+   }
+  }
+ },
+ "Hitch": {
+  "in": {
+   "0": {
+    "fn": "Arm/Disarm Docking",
+    "rng": "0 or 1"
+   }
+  },
+  "out": {
+   "0": {
+    "fn": "Is Docked",
+    "rng": "0 or 1"
+   }
+  }
+ },
+ "ItemConveyor": {
+  "in": {
+   "0": {
+    "fn": "ON",
+    "rng": "0 or 1"
+   },
+   "1": {
+    "fn": "Pull n items/second",
+    "rng": "1 to 1000"
+   },
+   "2": {
+    "fn": "Filter",
+    "rng": "text"
+   },
+   "3": {
+    "fn": "Pull x kg/second",
+    "rng": "0 to 1000"
+   }
+  }
+ },
+ "Lamp": {
+  "in": {
+   "0": {
+    "fn": "Off/On",
+    "rng": "0 or 1"
+   },
+   "1": {
+    "fn": "Red",
+    "rng": "0 to 255"
+   },
+   "2": {
+    "fn": "Green",
+    "rng": "0 to 255"
+   },
+   "3": {
+    "fn": "Blue",
+    "rng": "0 to 255"
+   }
+  }
+ },
+ "LinearTrack": {
+  "out": {
+   "0": {
+    "fn": "Position",
+    "rng": "meters"
+   },
+   "1": {
+    "fn": "Speed",
+    "rng": "m/s"
+   },
+   "2": {
+    "fn": "Minimum Position",
+    "rng": "meters"
+   },
+   "3": {
+    "fn": "Maximum Position",
+    "rng": "meters"
+   }
+  }
+ },
+ "LinearVelocitySensor": {
+  "out": {
+   "0": {
+    "fn": "Linear Velocity X",
+    "rng": "m/s"
+   },
+   "1": {
+    "fn": "Linear Velocity Y",
+    "rng": "m/s"
+   },
+   "2": {
+    "fn": "Linear Velocity Z",
+    "rng": "m/s"
+   }
+  }
+ },
+ "LowVoltageBattery": {
+  "out": {
+   "0": {
+    "fn": "Voltage",
+    "rng": ""
+   },
+   "1": {
+    "fn": "Max Capacity (Wh)",
+    "rng": ""
+   },
+   "2": {
+    "fn": "State of charge",
+    "rng": ""
+   },
+   "3": {
+    "fn": "Throughputs (watts)",
+    "rng": ""
+   }
+  }
+ },
+ "MiniNavInstrument": {
+  "in": {
+   "0": {
+    "fn": "Locate Celestial",
+    "rng": "text"
+   },
+   "1": {
+    "fn": "Locate Distance",
+    "rng": "number"
+   },
+   "2": {
+    "fn": "Locate Direction X",
+    "rng": "number"
+   },
+   "3": {
+    "fn": "Locate Direction Y",
+    "rng": "number"
+   },
+   "4": {
+    "fn": "Locate Direction Z",
+    "rng": "number"
+   },
+   "5": {
+    "fn": "Forward vector config",
+    "rng": "0 = forward, +1 = up, -1 = down"
+   },
+   "6": {
+    "fn": "Set mode",
+    "rng": "1 = Flight, 2 = Orbit, 3 = Locator"
+   }
+  },
+  "out": {
+   "0": {
+    "fn": "Forward Airspeed (m/s)",
+    "rng": "number"
+   },
+   "1": {
+    "fn": "Vertical Speed (m/s)",
+    "rng": "number"
+   },
+   "2": {
+    "fn": "Altitude (meters from sea level)",
+    "rng": "number"
+   },
+   "3": {
+    "fn": "Above terrain (meters)",
+    "rng": "number"
+   },
+   "4": {
+    "fn": "Horizon Pitch",
+    "rng": "-1.0 to +1.0"
+   },
+   "5": {
+    "fn": "Horizon Roll",
+    "rng": "-1.0 to +1.0"
+   },
+   "6": {
+    "fn": "Heading",
+    "rng": "0.0 to 360"
+   },
+   "7": {
+    "fn": "Course",
+    "rng": "0.0 to 360"
+   },
+   "8": {
+    "fn": "Latitude (degrees from -90 to +90)",
+    "rng": "-90 to +90"
+   },
+   "9": {
+    "fn": "Longitude",
+    "rng": "-180 to +180"
+   },
+   "10": {
+    "fn": "Ground Speed (m/s)",
+    "rng": "number"
+   },
+   "11": {
+    "fn": "Ground Speed forward (m/s)",
+    "rng": "number"
+   },
+   "12": {
+    "fn": "Ground Speed right (m/s)",
+    "rng": "number"
+   },
+   "13": {
+    "fn": "Celestial",
+    "rng": "text"
+   },
+   "14": {
+    "fn": "Celestial inner radius",
+    "rng": "number"
+   },
+   "15": {
+    "fn": "Celestial outer radius",
+    "rng": "number"
+   },
+   "16": {
+    "fn": "Orbital Speed (m/s)",
+    "rng": "number"
+   },
+   "17": {
+    "fn": "Periapsis (meters)",
+    "rng": "number"
+   },
+   "18": {
+    "fn": "Apoapsis (meters)",
+    "rng": "number"
+   },
+   "19": {
+    "fn": "Prograde Pitch",
+    "rng": "-1.0 to +1.0"
+   },
+   "20": {
+    "fn": "Prograde Yaw",
+    "rng": "-1.0 to +1.0"
+   },
+   "21": {
+    "fn": "Retrograde Pitch",
+    "rng": "-1.0 to +1.0"
+   },
+   "22": {
+    "fn": "Retrograde Yaw",
+    "rng": "-1.0 to +1.0"
+   },
+   "23": {
+    "fn": "Locator Distance (meters)",
+    "rng": "number"
+   },
+   "24": {
+    "fn": "Locator Pitch",
+    "rng": "-1.0 to +1.0"
+   },
+   "25": {
+    "fn": "Locator Yaw",
+    "rng": "-1.0 to +1.0"
+   },
+   "26": {
+    "fn": "Orbital Inclination",
+    "rng": "-180 to +180"
+   },
+   "27": {
+    "fn": "Orbit target Speed (m/s)",
+    "rng": "number"
+   },
+   "28": {
+    "fn": "Orbit target altitude (meters from sea level)",
+    "rng": "number"
+   }
+  }
+ },
+ "MiniThruster": {
+  "in": {
+   "0": {
+    "fn": "Ignition",
+    "rng": "0 or 1"
+   }
+  },
+  "out": {
+   "0": {
+    "fn": "Thrust",
+    "rng": "Newtons"
+   },
+   "1": {
+    "fn": "Burned flow",
+    "rng": "kg/s"
+   },
+   "2": {
+    "fn": "Unburned flow",
+    "rng": "kg/s"
+   }
+  }
+ },
+ "MiningDrill": {
+  "out": {
+   "0": {
+    "fn": "Composition",
+    "rng": ""
+   },
+   "1": {
+    "fn": "Depth",
+    "rng": ""
+   },
+   "2": {
+    "fn": "Efficiency",
+    "rng": ""
+   },
+   "3": {
+    "fn": "MiningRate",
+    "rng": ""
+   },
+   "4": {
+    "fn": "DrillingRate",
+    "rng": ""
+   }
+  }
+ },
+ "NavInstrument": {
+  "in": {
+   "0": {
+    "fn": "Locate Celestial",
+    "rng": "text"
+   },
+   "1": {
+    "fn": "Locate Distance",
+    "rng": "number"
+   },
+   "2": {
+    "fn": "Locate Direction X",
+    "rng": "number"
+   },
+   "3": {
+    "fn": "Locate Direction Y",
+    "rng": "number"
+   },
+   "4": {
+    "fn": "Locate Direction Z",
+    "rng": "number"
+   },
+   "5": {
+    "fn": "Forward vector config",
+    "rng": "0 = forward, +1 = up, -1 = down"
+   },
+   "6": {
+    "fn": "Set mode",
+    "rng": "0 = Off, 1 = Flight, 2 = Orbit, 3 = Locator"
+   }
+  },
+  "out": {
+   "0": {
+    "fn": "Forward Airspeed (m/s)",
+    "rng": "number"
+   },
+   "1": {
+    "fn": "Vertical Speed (m/s)",
+    "rng": "number"
+   },
+   "2": {
+    "fn": "Altitude (meters from sea level)",
+    "rng": "number"
+   },
+   "3": {
+    "fn": "Above terrain (meters)",
+    "rng": "number"
+   },
+   "4": {
+    "fn": "Horizon Pitch",
+    "rng": "-1.0 to +1.0"
+   },
+   "5": {
+    "fn": "Horizon Roll",
+    "rng": "-1.0 to +1.0"
+   },
+   "6": {
+    "fn": "Heading",
+    "rng": "0.0 to 360"
+   },
+   "7": {
+    "fn": "Course",
+    "rng": "0.0 to 360"
+   },
+   "8": {
+    "fn": "Latitude (degrees from -90 to +90)",
+    "rng": "-90 to +90"
+   },
+   "9": {
+    "fn": "Longitude",
+    "rng": "-180 to +180"
+   },
+   "10": {
+    "fn": "Ground Speed (m/s)",
+    "rng": "number"
+   },
+   "11": {
+    "fn": "Ground Speed forward (m/s)",
+    "rng": "number"
+   },
+   "12": {
+    "fn": "Ground Speed right (m/s)",
+    "rng": "number"
+   },
+   "13": {
+    "fn": "Celestial",
+    "rng": "text"
+   },
+   "14": {
+    "fn": "Celestial inner radius",
+    "rng": "number"
+   },
+   "15": {
+    "fn": "Celestial outer radius",
+    "rng": "number"
+   },
+   "16": {
+    "fn": "Orbital Speed (m/s)",
+    "rng": "number"
+   },
+   "17": {
+    "fn": "Periapsis (meters)",
+    "rng": "number"
+   },
+   "18": {
+    "fn": "Apoapsis (meters)",
+    "rng": "number"
+   },
+   "19": {
+    "fn": "Prograde Pitch",
+    "rng": "-1.0 to +1.0"
+   },
+   "20": {
+    "fn": "Prograde Yaw",
+    "rng": "-1.0 to +1.0"
+   },
+   "21": {
+    "fn": "Retrograde Pitch",
+    "rng": "-1.0 to +1.0"
+   },
+   "22": {
+    "fn": "Retrograde Yaw",
+    "rng": "-1.0 to +1.0"
+   },
+   "23": {
+    "fn": "Locator Distance (meters)",
+    "rng": "number"
+   },
+   "24": {
+    "fn": "Locator Pitch",
+    "rng": "-1.0 to +1.0"
+   },
+   "25": {
+    "fn": "Locator Yaw",
+    "rng": "-1.0 to +1.0"
+   },
+   "26": {
+    "fn": "Orbital Inclination",
+    "rng": "-180 to +180"
+   },
+   "27": {
+    "fn": "Orbit target Speed (m/s)",
+    "rng": "number"
+   },
+   "28": {
+    "fn": "Orbit target altitude (meters from sea level)",
+    "rng": "number"
+   }
+  }
+ },
+ "PassiveRadiator": {
+  "out": {
+   "0": {
+    "fn": "Temperature (K)",
+    "rng": "number"
+   }
+  }
+ },
+ "PilotSeat": {
+  "out": {
+   "0": {
+    "fn": "Using",
+    "rng": "1 or the token of the user seated in the Pilot Seat, otherwise 0"
+   },
+   "1": {
+    "fn": "Backward/Forward",
+    "rng": "-1.0 to +1.0"
+   },
+   "2": {
+    "fn": "Left/Right",
+    "rng": "-1.0 to +1.0"
+   },
+   "3": {
+    "fn": "Down/Up",
+    "rng": "-1.0 to +1.0"
+   },
+   "4": {
+    "fn": "Pitch",
+    "rng": "-1.0 to +1.0"
+   },
+   "5": {
+    "fn": "Roll",
+    "rng": "-1.0 to +1.0"
+   },
+   "6": {
+    "fn": "Yaw",
+    "rng": "-1.0 to +1.0"
+   },
+   "7": {
+    "fn": "Main Thrust",
+    "rng": "0.0 to 1.0"
+   },
+   "8": {
+    "fn": "Aux 1",
+    "rng": "0 or 1"
+   },
+   "9": {
+    "fn": "Aux 2",
+    "rng": "0 or 1"
+   },
+   "10": {
+    "fn": "Aux 3",
+    "rng": "0 or 1"
+   },
+   "11": {
+    "fn": "Aux 4",
+    "rng": "0 or 1"
+   },
+   "12": {
+    "fn": "Aux 5",
+    "rng": "0 or 1"
+   },
+   "13": {
+    "fn": "Aux 6",
+    "rng": "0 or 1"
+   },
+   "14": {
+    "fn": "Aux 7",
+    "rng": "0 or 1"
+   },
+   "15": {
+    "fn": "Aux 8",
+    "rng": "0 or 1"
+   },
+   "16": {
+    "fn": "Aux 9",
+    "rng": "0 or 1"
+   },
+   "17": {
+    "fn": "Aux 0",
+    "rng": "0 or 1"
+   }
+  }
+ },
+ "PlayerSensor": {
+  "out": {
+   "0": {
+    "fn": "Detected players",
+    "rng": "key-value text"
+   }
+  }
+ },
+ "Propeller": {
+  "in": {
+   "0": {
+    "fn": "Speed",
+    "rng": "-1.0 to +1.0"
+   },
+   "1": {
+    "fn": "Pitch",
+    "rng": "-1.0 to +1.0"
+   }
+  },
+  "out": {
+   "0": {
+    "fn": "Rotation Speed",
+    "rng": "rot/s"
+   },
+   "1": {
+    "fn": "Thrust",
+    "rng": "Newtons"
+   }
+  }
+ },
+ "RCS": {
+  "in": {
+   "0": {
+    "fn": "Nozzle 0 (Center)",
+    "rng": "0.0 to 1.0"
+   },
+   "1": {
+    "fn": "Nozzle 1",
+    "rng": "0.0 to 1.0"
+   },
+   "2": {
+    "fn": "Nozzle 2",
+    "rng": "0.0 to 1.0"
+   },
+   "3": {
+    "fn": "Nozzle 3",
+    "rng": "0.0 to 1.0"
+   },
+   "4": {
+    "fn": "Nozzle 4",
+    "rng": "0.0 to 1.0"
+   }
+  }
+ },
+ "RTG": {
+  "out": {
+   "0": {
+    "fn": "Generated Power (Watts)",
+    "rng": ""
+   },
+   "1": {
+    "fn": "Output Power (Watts)",
+    "rng": ""
+   }
+  }
+ },
+ "SlopeLight": {
+  "in": {
+   "0": {
+    "fn": "Off/On",
+    "rng": "0 or 1"
+   },
+   "1": {
+    "fn": "Red",
+    "rng": "0 to 255"
+   },
+   "2": {
+    "fn": "Green",
+    "rng": "0 to 255"
+   },
+   "3": {
+    "fn": "Blue",
+    "rng": "0 to 255"
+   }
+  }
+ },
+ "SmallGyroscope": {
+  "in": {
+   "0": {
+    "fn": "Speed",
+    "rng": "0.0 to 1.0"
+   },
+   "1": {
+    "fn": "Control",
+    "rng": "-1.0 to +1.0"
+   }
+  }
+ },
+ "SmallHinge": {
+  "out": {
+   "0": {
+    "fn": "Angle",
+    "rng": "-1.0 to +1.0"
+   },
+   "1": {
+    "fn": "Speed",
+    "rng": "rot/s"
+   }
+  }
+ },
+ "SmallPivot": {
+  "out": {
+   "0": {
+    "fn": "Angle",
+    "rng": "-1.0 to +1.0"
+   },
+   "1": {
+    "fn": "Speed",
+    "rng": "rot/s"
+   }
+  }
+ },
+ "SmallSteamTurbine": {
+  "out": {
+   "0": {
+    "fn": "Potential Energy output (watts)",
+    "rng": "number"
+   }
+  }
+ },
+ "SmallThruster": {
+  "in": {
+   "0": {
+    "fn": "Ignition",
+    "rng": "0 or 1"
+   },
+   "1": {
+    "fn": "Gimbal X",
+    "rng": "-1.0 to +1.0"
+   },
+   "2": {
+    "fn": "Gimbal Z",
+    "rng": "-1.0 to +1.0"
+   }
+  },
+  "out": {
+   "0": {
+    "fn": "Thrust",
+    "rng": "Newtons"
+   },
+   "1": {
+    "fn": "Burned flow",
+    "rng": "kg/s"
+   },
+   "2": {
+    "fn": "Unburned flow",
+    "rng": "kg/s"
+   }
+  }
+ },
+ "SmallWheel": {
+  "in": {
+   "0": {
+    "fn": "Brake",
+    "rng": "0.0 to 1.0"
+   },
+   "1": {
+    "fn": "Steer",
+    "rng": "-1.0 to +1.0"
+   }
+  }
+ },
+ "SolarPanel": {
+  "out": {
+   "0": {
+    "fn": "Generated Power (Watts)",
+    "rng": ""
+   },
+   "1": {
+    "fn": "Output Power (Watts)",
+    "rng": ""
+   }
+  }
+ },
+ "SolarSensor": {
+  "out": {
+   "0": {
+    "fn": "Normalized Angle",
+    "rng": "-1.0 to +1.0"
+   },
+   "1": {
+    "fn": "Solar Power",
+    "rng": "W/m²"
+   }
+  }
+ },
+ "SpotLight": {
+  "in": {
+   "0": {
+    "fn": "Off/On",
+    "rng": "0 or 1"
+   },
+   "1": {
+    "fn": "Red",
+    "rng": "0 to 255"
+   },
+   "2": {
+    "fn": "Green",
+    "rng": "0 to 255"
+   },
+   "3": {
+    "fn": "Blue",
+    "rng": "0 to 255"
+   }
+  }
+ },
+ "SteamTurbine": {
+  "out": {
+   "0": {
+    "fn": "Potential Energy output (watts)",
+    "rng": "number"
+   }
+  }
+ },
+ "TemperatureProbe": {
+  "out": {
+   "0": {
+    "fn": "Temperature",
+    "rng": "Kelvin"
+   }
+  }
+ },
+ "TemperatureSensor": {
+  "out": {
+   "0": {
+    "fn": "Temperature (K)",
+    "rng": "number"
+   }
+  }
+ },
+ "Turbojet": {
+  "in": {
+   "0": {
+    "fn": "Starter",
+    "rng": "0 or 1"
+   },
+   "1": {
+    "fn": "Igniters",
+    "rng": "0 or 1"
+   },
+   "2": {
+    "fn": "Throttle",
+    "rng": "0.0 to 1.0"
+   }
+  },
+  "out": {
+   "0": {
+    "fn": "N1",
+    "rng": "%"
+   },
+   "1": {
+    "fn": "Thrust",
+    "rng": "Newtons"
+   },
+   "2": {
+    "fn": "EGT",
+    "rng": "Kelvin"
+   },
+   "3": {
+    "fn": "Running",
+    "rng": "0 or 1"
+   },
+   "4": {
+    "fn": "Burned fuel flow",
+    "rng": "kg/s"
+   },
+   "5": {
+    "fn": "Unburned fuel flow",
+    "rng": "kg/s"
+   },
+   "6": {
+    "fn": "State",
+    "rng": "\"Off\", \"Cranking\", \"Running\", \"Surge\", \"Destroyed\""
+   }
+  }
+ },
+ "VehiclePhysicsSensor": {
+  "out": {
+   "0": {
+    "fn": "Active Physics",
+    "rng": "0 or 1"
+   },
+   "1": {
+    "fn": "Mass",
+    "rng": "kg"
+   },
+   "2": {
+    "fn": "Size X",
+    "rng": "meters"
+   },
+   "3": {
+    "fn": "Size Y",
+    "rng": "meters"
+   },
+   "4": {
+    "fn": "Size Z",
+    "rng": "meters"
+   },
+   "5": {
+    "fn": "Center of Mass X",
+    "rng": "meters"
+   },
+   "6": {
+    "fn": "Center of Mass Y",
+    "rng": "meters"
+   },
+   "7": {
+    "fn": "Center of Mass Z",
+    "rng": "meters"
+   },
+   "8": {
+    "fn": "G-force X",
+    "rng": "G"
+   },
+   "9": {
+    "fn": "G-force Y",
+    "rng": "G"
+   },
+   "10": {
+    "fn": "G-force Z",
+    "rng": "G"
+   }
+  }
+ },
+ "Volume": {
+  "out": {
+   "0": {
+    "fn": "Level",
+    "rng": "0 to 1"
+   },
+   "1": {
+    "fn": "Volume (m³)",
+    "rng": "number"
+   },
+   "2": {
+    "fn": "State",
+    "rng": "text"
+   },
+   "3": {
+    "fn": "Composition (mass)",
+    "rng": "text"
+   },
+   "4": {
+    "fn": "Pressure (Pa)",
+    "rng": "number"
+   },
+   "5": {
+    "fn": "Temperature (K)",
+    "rng": "number"
+   }
+  }
+ },
+ "Wheel": {
+  "in": {
+   "0": {
+    "fn": "Accelerate",
+    "rng": "-1.0 to +1.0"
+   },
+   "1": {
+    "fn": "Steer",
+    "rng": "-1.0 to +1.0"
+   },
+   "2": {
+    "fn": "Regen",
+    "rng": "0 or 1"
+   },
+   "3": {
+    "fn": "Brake",
+    "rng": "0.0 to 1.0"
+   },
+   "4": {
+    "fn": "Gearbox",
+    "rng": "-1.0 to +1.0"
+   }
+  },
+  "out": {
+   "0": {
+    "fn": "Wheel Rotation Speed",
+    "rng": "rot/s"
+   },
+   "1": {
+    "fn": "Ground Friction",
+    "rng": "0 to 1"
+   }
+  }
+ }
+}
