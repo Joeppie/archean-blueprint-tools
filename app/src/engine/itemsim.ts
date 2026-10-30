@@ -206,8 +206,13 @@ export class ItemSim {
     if (!m) this.chans.set(devCi, m = new Map());
     m.set(ch, v);
   }
+  /** reboot fresh: counts zero, the container NODES stay (the React
+   *  auto-boot effect calls this right after load — emptying the map
+   *  there silently dropped every arrival; the browser probe caught it). */
   clear(): void {
-    this.flying = []; this.containers = new Map(); this.mined = 0; this.crafted = 0;
+    this.flying = [];
+    for (const c of this.containers.values()) c.counts = new Map();
+    this.mined = 0; this.crafted = 0;
     this.chans = new Map(); this.nextSpawn = new Map();
   }
 
