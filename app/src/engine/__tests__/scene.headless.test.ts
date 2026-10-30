@@ -810,7 +810,7 @@ describe('THE LIVING CRAFT (v1.15.6, fixture 9000009040 — tools/make_live_test
     expect(ang(s1!), 'THE PANEL RIDES ITS MASTER: the group turned ~90° too')
       .toBeGreaterThan((80 * Math.PI) / 180);
     // SIM IS A VIEW: the file data stayed untouched (no write, no doc)
-    const d = (e.blueprint!.data.components[4].data ?? {}) as Record<string, unknown>;
+    const d = (e.blueprint!.data.components[4]!.data ?? {}) as Record<string, unknown>;
     expect(d.angle, 'the blueprint data.angle stayed verbatim').toBe(0);
   }, 60_000);
 
