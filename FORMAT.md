@@ -1069,6 +1069,41 @@ disconnect → undo → reconnect, phone).
 Note: `components` may contain a `Build` type — the editor's construction-site ghost
 (e.g. y −24.75, far outside the craft). It is not physical geometry; the viewer skips it.
 
+## The `item` cable + the App Kit protocol (transcribed 2026-10-31, v1.16.10)
+
+**Item cables.** `pipes[]` carry a fourth kind next to `data`/
+`lowvoltage`/`highvoltage`: **`type: "item"`** — the game's explicit
+conveyor wiring (Jimmy's Adventure carries seven). The endpoint PORT
+names give the flow DIRECTION: an `item_output`/`item-out*` end PUSHES
+into the far part; an `item-in*` end RECEIVES; item hubs (ItemJunction)
+expose one `item-in` plus numbered `item-out.000…003` cable slots.
+Components involved: MiningDrill (`item_output`), Container (`item1`,
+`item2` — accepts push/pull, never initiates), ItemConveyor (`item-in`
+pull-side, `item-out` push-side), ItemJunction/ItemBridge (routing),
+Crusher/Crafter (both ends), TrashCan. Endpoints index the FLATTENED
+component array like every other pipe (engine/flat.ts).
+
+**The ChipOS App Kit (third-party program protocol, testdata/3828773626
+`chipos-appkit.xc` header = the law).** An APP is any computer (usually
+aliased `app-*`) on the same router net as the OS computer (aliased
+`chipos`). All traffic is `output_text` on io channels:
+- app→chipos ch0: the MANIFEST `.kit{3}.name{TETRIS}.color{#rrggbb}
+  .glyph{T}.hb{N}` — republished as a heartbeat every 2 s (ChipOS marks
+  the app online while `hb` changes: a pulled disk goes stale, honest);
+- app→chipos ch1: the FRAME `T~x~y~size~colour~text|B~x~y~w~h~id~label|
+  M~x~y~w~h~cols~rows~cells|R~…|G~…|P~…` (positions are % of the app
+  area 0-100); ch2: keyboard requests; ch3: beep requests; ch4+n:
+  HOME-SCREEN WIDGET frames (up to 4, declared in `.widgets{}`);
+- chipos→app: text frames onto the app's router PORT (the app's
+  `input.0..15` handlers fire): `.seq{N}.clock{HH:MM}.day{D}.units{U}
+  .mins{M}.ev{open|close|tap|tick|uninstall|clear|wtap|input}.id{…}`.
+ChipOS discovers apps by scanning the data network every 3 s
+(`device_at(i)` census) and polling `input_text(appAlias, 0)` — the app's
+transmission is readable under the APP's OWN alias. The registry
+(`xa_alias` storage arrays) survives reboots. Simulation law in the app:
+`app/src/engine/xenoncode.ts` §appkit (text fan-out + writer-publish +
+ABI 16 per-device channels / RunInput); pins `chipos.test.ts`.
+
 ## The PilotSeat (this craft)
 
 `components[13]`: occupancy `frame(0,0,1) pos(5,8,5) size(1,5,2)` → world cell span

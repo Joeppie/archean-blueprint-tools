@@ -4983,3 +4983,68 @@ max=255 game sprites after the fix. The law: a deviceScreen key in the
 want-set PULLS main#0 into it (ABI-15 version-gated, so the fetch runs
 only when the game repaints). vitest 1039 + the xenon*/phoneux/living/app
 specs green.
+
+## 12. v1.16.10 session — THE LIVING CRAFT II: the appkit bus, power flow, items, sound (2026-10-30/31, overnight autonomous batch)
+
+We (before sleeping): "Look at all the devices in Jimmy's adventure, and in
+the new ChipOS and chip OS dev kit, and its tetris component. Recreate
+situation where ChipOS's Tetris is offered to a ChipOS main installation;
+that is just a computer coupled by dataport to another, it should be able
+to read the appkit widget, and the tetris application should consequently
+become available in the computer. Inserting a ChipOS harddisk into a
+computer should run its code … Devices should work and animate/work
+correctly including lights (light should just show as being on, not
+actually cast a light, that is too performance heavy for an editor) … see
+if things can make the sound that normally they do, including anchors,
+drills, switches … powerflow simulation (warnings only for low power —
+batteries always actually still feed power, but can drain and go
+negative) … solar panels/generators produce power … flow items through a
+conveyor and simulate the mining of Rock … Jimmy's adventure … including
+its crafter installation … wiki.archean.space/en/components … the wiki is
+the documentation for the devices … place a workpackge instruction for us,
+and mark when things are done … I am sleeping so work autonomously."
+
+The night, in order: the ChipOS Dev Kit + EarthNAV ingested
+(3828773626/3828546114/3828827922); the appkit protocol decoded from the
+real `chipos-appkit.xc` header (workshop files carry the FULL ChipOS
+source — 52 files, ~600 KB); fixture 9000009050 embeds the real disks;
+shim ABI 16 (XENON-DEVCHANS per-device channels, RunInput firing
+input.N, xc_set_input_ti, xc_set_virtual_dt); the IoBus learns TEXT
+fan-out + THE PUBLISHED-DEVICE LAW (a computer's transmission reads
+under its own alias — ChipOS polls the APP's channel; a computer's alias
+row is what IT transmits, so its relay asserts share that row
+game-faithfully); xenonDevices walks the router chain (local ports).
+The 8 chipos VM pins green on first light after two discoveries: the
+dump of a RUNTIME array renders "" in DumpVarsJson (storage renders
+element 0 — the registry evidence is xa_alias), and headless cycles
+advance `time` by real dt (xc_set_virtual_dt for deterministic sim
+clocks).
+
+THE JIMMY CATCH (the night's biggest bug, found by the new
+app/tools/jimmyprobe.mjs): `data.pipes` endpoints index the FLATTENED
+component array (nested content BEFORE its Build). Every top-level
+reader (power.ts, xenonDevices, devicesim, energy, itemsim) had used
+them as top-level indices — fine for the Build-less corpus majority,
+off-by-4 on Jimmy: his GIANTPLANE computer read UNPOWERED (farm stayed
+off, FARM [] in the probe) and his HV-cabled drill read LV. engine/flat.ts
+(flatToTopMap/flatEndpointTop) is now the single map; post-fix the probe
+reads FARM [crafter-28, GIANTPLANE] co-running, ENERGY +637 kW (744 kW
+of RTGs, the 100 kW drill, 600 kWh full), ITEMS ⛏194/📦194, zero console
+errors. Second probe catch: `ItemSim.clear()` emptied the containers
+MAP in the React auto-boot path (right after load) so arrivals vanished
+in the browser only — the fix zeroes counts, keeps the nodes.
+
+The e2e chipos legs went red on honest details: `fmtVal` truncates bus
+values at 12 chars (the manifest shows `.kit{3}.name` — identity is the
+signature, the full name is a VM-tier pin), and the first energy-panel
+assert asked for RTGs on the CHIPOS bench (the RTG bench is 9000009060 —
+the panel was right, the test was wrong).
+
+The power flow (engine/energy.ts), items (engine/itemsim.ts — the game's
+`item`-type cables with port-name directions, discovered on Jimmy:
+`23=MiningDrill[item_output] -> 31=Container[item1]`), the soundscape
+(procedural WebAudio — the game's audio assets stay untouched, NOTICE),
+the GLOW LAW pin (lamps are faces, castLightCount stays 0) and
+flat.test round out 1078 vitest tests. docs/workpackages.md carries the
+night's plan with the done-marks and the questions-resolved log (the
+user asked: "save up all questions and do not get blocked").

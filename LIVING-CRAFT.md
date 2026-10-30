@@ -1,4 +1,5 @@
-# LIVING-CRAFT.md — the craft runs itself (v1.15.6)
+# LIVING-CRAFT.md — the craft runs itself (v1.15.6; appkit bus, power flow,
+# items and sound v1.16.10)
 
 Satellite of AGENTS § Xenon workspace + § Interaction. Provenance:
 docs/HISTORY.md §1 (v1.15.6). We: "computers should start when a craft is
@@ -135,10 +136,100 @@ computer not on the net is UNPOWERED — the game would never boot it
   unpowered IDE carries the ⚠ chip.
 - `app/tools/livingprobe.mjs` — the node probe that drove the geometry.
 
-## Boundaries (accepted, v1.15.6)
+## 5. THE APPKIT BUS (v1.16.10, WP1 — the third-party ecosystem runs)
+Chip Patton's ChipOS + App Kit apps are REAL programs (fixture 9000009050
+embeds the OS + Tetris + HELLO + EarthNAV verbatim). The farm's law:
+- THE ROUTER NET: xenonDevices walks Router/MiniRouter/DataBridge/
+  DataJunction chains — every net device carries the computer's LOCAL
+  port (device_at().port, alias→io, input.N routing). Direct plugs keep
+  their own ports.
+- SHIM ABI 16 (XENON-DEVCHANS): alias-addressed io is PER-DEVICE (a
+  router net hangs many devices on ONE wire; the appkit channels must
+  not alias each other); alias writes mirror onto the port's wire; every
+  port whose channels receive a value FIRES its input.N handler
+  (RunInput — the appkit's event delivery). xc_set_input_ti feeds text
+  by device key; xc_set_virtual_dt(ms) fixes dt for deterministic
+  headless cycles (the browser pump never sets it — the real-dt law
+  stands).
+- IoBus fans TEXT (the manifest/frame/event transport) and publishes
+  every computer's transmission UNDER ITS OWN ALIAS (ChipOS polls
+  input_text(appAlias,0); a computer's alias row is what IT transmits —
+  game-faithful, no one reads a computer's alias row as an input).
+- Pins: chipos.test (8, real wasm): the device tables, the boot census
+  print, the relay assert, the TETRIS/HELLO/EarthNAV manifests, THE
+  REGISTRY (xa_alias joins the apps), the synthetic appkit pair
+  (full-duplex RunInput). e2e chipos.spec: the manifests cross pumps on
+  one page and the IDE bus rows show them.
+
+## 6. THE FLATTENED-ENDPOINT LAW (v1.16.10, the Jimmy catch)
+`data.pipes` endpoints index the FLATTENED component array (nested
+content numbers BEFORE their Build). EVERY top-level reader maps through
+engine/flat.ts (flatToTopMap/flatEndpointTop): power.ts, xenonDevices,
+devicesim, energy, itemsim. Off-by-nested-count wiring read Jimmy's
+computer as UNPOWERED (the farm stayed off) and his HV drill as LV.
+
+## 7. THE POWER FLOW (v1.16.10, WP5 — engine/energy.ts)
+Sources PRODUCE (wiki watts: solar 2700, RTG 12 kW, diesel 150 kW data-
+gated, steam turbines gated on a heat source riding the craft);
+consumers DRAW (lamps at authored maxPower gated by ch0, belts 100 W,
+the drill 10 kW LV / 100 kW HV by the cable it rides, motion classes by
+their live channel). Batteries STORE (LV 10 kWh, HV 120 kWh, authored-
+charged start FULL); the balance integrates shared by capacity; charge
+MAY GO NEGATIVE (deep discharge, floored at −capacity) and the grid
+ALWAYS KEEPS FEEDING — power.ts reachability is untouched: the deficit
+is a WARNING (the ⚡/🔋 TopBar chip: ok/charging/low⚠/deficit⚠ + the
+census panel). Pins energy.test (10) incl. the Jimmy census.
+
+## 8. ITEMS ON BELTS (v1.16.10, WP6 — engine/itemsim.ts)
+SIM IS A VIEW. Links: ① the game's own `item`-type CABLES — port names
+give the direction (item_output/item-out push, item-in receives, hub
+pairs bidirectional); ② touching occupancy AABBs (gap ≤ 0.8 m) as the
+cable-less fallback. The drill mines while ANCHORED + powered +
+data-gated-open (10/s LV, 100/s HV); items hop links at belt cadence;
+the Crusher processes Rock→CrushedRock; Containers store (50-slot
+stacks) and PUBLISH their content as the wiki data-port KV text ONTO
+THE IO BUS (input_text('container',0) reads '.Rock{12}…' — the Crafter
+built-in and ChipOS's mining page READ the inventory); the stylised
+Crafter cycle consumes a payable economy.json recipe and produces back.
+scene.ts: ONE InstancedMesh of tumbling cubes; TopBar ⛏📦🔨 chip.
+Pins items.test (8) + the Jimmy cable census. clear() zeroes counts and
+KEEPS the container nodes (the React reboot path calls it right after
+load — the browser probe caught the emptied-map variant).
+
+## 9. THE SOUND OF THE CRAFT (v1.16.10, WP4 — engine/soundscape.ts)
+All cues SYNTHESIZED (the game's audio assets stay untouched — NOTICE).
+The bus tap fires edges: switch CLICK, relay CLACK, lamp blip, anchor
+CHAIN RATTLE, servo whine; the loop census runs the drill WHIR, belt
+rumble, pump burble, propeller hum; the grid alarm is a 20 s-spaced
+two-tone on entering low/deficit; the crafter DINGS. The 🔊 chip is the
+gesture that arms the AudioContext (the buzzer law: create+resume inside
+the click, Firefox 1-frame unlock); `archean-app-sound` default on.
+
+## 10. THE GLOW LAW (v1.16.10, WP3)
+A sim-lit lamp is a LIT FACE (MeshBasic lens / emissive LED), NEVER a
+THREE PointLight/SpotLight: casting per lamp is too heavy for an editor
+(we, 2026-10-31: "light should just show as being on, not actually cast
+a light"). Pinned by the scene GLOW LAW test (castLightCount stays 0).
+
+## THE JIMMY PROBE (app/tools/jimmyprobe.mjs — WP7)
+The living-craft census over 3334698274: FARM (crafter-28 + GIANTPLANE
+co-run), ENERGY (744 kW of RTGs vs a 107 kW load, the drill at 100 kW,
+600 kWh full), ITEMS (drill→cables→container, mined/in-transit counters),
+PRESS registry, ZERO console errors. Re-run it after ANY engine change
+that touches power/devices/items/the bus.
+
+## Boundaries (accepted; v1.15.6 base)
 - A device's OWN power draw is not modelled (a hinge consumes LV in-game);
   reachability gates COMPUTERS only.
 - `enough_power` in the shim stays a stub (returns 1) — wiring it per
   computer needs a shim/wasm rebuild; the UI warning is the v1.15.6 law.
 - Relay gate state, per-joint acceleration shaping, and a standalone
   part's power: follow-ups.
+- v1.16.10: `enough_power` in the shim stays a stub (the UI/energy warning
+  is the law); steam turbines gate on a heat source PRESENT, not on the
+  fluid loop; the Crafter cycle is stylised (economy.json recipes, the
+  built-in program rides the farm and reads the container KV); nested
+  (subgrid) parts stay outside the top-level sim's registered space.
+- ChipOS's wizard: the e2e/VM tiers read the registry via the storage
+  row + the bus; the click-through wizard + app-tile pixels are the
+  Pages-tier UX journey (the wizard gates the home screen).

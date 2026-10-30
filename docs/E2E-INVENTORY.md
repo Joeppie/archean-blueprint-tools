@@ -193,3 +193,19 @@ zoom-window ✕ too); the fix is the flex-wrap/min-w-0 family.
 Verdicts updated: xenon leg 1/3381670618/Badger rows are now
 **HEADLESS→ (done)** for their VM halves; the phoneux @Screens leg is
 KEEP-PIXEL (layout clipping needs a layout engine).
+
+## THE APPKIT/POWER e2e wave (v1.16.10) — one spec, law-tier splits
+
+`chipos.spec.ts` (2 legs, @ChipOS, @slow): the CHIPOS BENCH (9000009050)
+loads, the four appkit computers AUTO-BOOT with the craft, the manifest
+`.kit{3}` crosses pumps and shows in the app's IDE bus rows, the OS's
+relay assert shows in chipos's, the farm co-runs; leg 2 reads the power-
+flow chip + battery census panel. E2E-TIER because: four REAL VMs on one
+page over the shared bus, DOM bus rows — nothing below the browser has
+the IDE. The protocol laws themselves (registry join, full-duplex
+RunInput, the 100 kW drill, deep discharge) are pinned at the vitest
+tiers (chipos.test / energy.test / items.test / flat.test) — the e2e
+keeps only what needs the live page. Device-table laws never leave
+vitest (pure). Opt-outs: the manifest value shows truncated (fmtVal 12
+chars) — identity is the `.kit{3}` signature; the full registry string
+is a VM-tier assertion.
