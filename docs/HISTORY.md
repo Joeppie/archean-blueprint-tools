@@ -4750,3 +4750,34 @@ in full-suite runs. Standing rules:
   chooses redownload-or-not, gallery chips show the state. Manual paths: File ▸
   'Refresh craft (redownload)' (file-refresh) or any fresh storage partition.
   stats().loads staying 1 with old data = served from IndexedDB, not the network.
+- **v1.16.2 — THE CODE BUTTON + THE SPARE-BUTTON LAW (2026-10-30).** We:
+  "when I press the code button for a HUD or computer, or minicomputer, I
+  guess I want of course to open its xenoncode. Also, in the dolphin it
+  claims the togglebuttons for the doors have no computers attached. That
+  is true. However, they should still be able to toggle and they toggle
+  the hinges that are in that craft. :)" The dolphin's own wiring shows
+  why the app claimed it: its door toggles are cabled to a NESTED computer
+  (pipe endpoint index 62 — FLATTENED, inside a Build) the top-level farm
+  cannot run. So: ① a pressed button's channel drives the actuator CABLED
+  on its data port (`dataNeighbours`, pure; nested endpoints skipped);
+  ② a button NO PROGRAM reads (alias registration alone is not a reader —
+  the popup says so: "no program reads it") with nothing cabled BROADCASTS
+  the latched state to the craft's hinge/pivot/track — OFF is the closing
+  press; ③ a programmable part's mode widget gained ⌨ (`openCodeFor` —
+  one path shared with the XenonCode ▾ menu): Computer/MiniComputer/
+  Crafter → its IDE, HudController → the HUD IDE. The fix campaign (probes
+  gridprobe/anatomy/chipprobe) surfaced four scene laws, pinned: the
+  pressPick OCCLUSION LAW (scene-wide raycast, first solid hit must BE the
+  pressable — it found the dolphin buttons occluding nothing and the
+  living-bench toggle hiding behind the dash), a part's STAND-IN BOX IS
+  the part for presses, LABELS are print not controls (wiki
+  DashboardTool.md), and the setScreenFeeds rebuild loop SPLICED compRoots
+  WHILE ITERATING (the live iterator skipped the shifted element — the
+  real dashboard stayed parented; its disposed-but-raycastable boxes
+  shadowed the fed rebuild's pixels and cost the screen popup its surface
+  key). Fixture 9000009040 +gimbals (untouched hinge) +doorbtn (bare
+  toggle, raised to project clear of the dock); living.spec.ts now SIX
+  legs: +spare-toggle chip/broadcast/swing-90°/return, +⌨ opens the cpu's
+  IDE. The spec also caught a strict-mode tsc slip v1.16.0's Pages build
+  refused (fixed in v1.16.1) and the canvas-clamp law for aim grid-searches
+  (ndc extrapolation hits pixels the real mouse can't reach).

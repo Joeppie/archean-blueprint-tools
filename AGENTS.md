@@ -429,7 +429,19 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   — LAST containing `button_rect` wins, draw order); press SINKS the
   element, a Toggle latches, a screen-face press routes a `screenClick`
   (the game's click-cycle law); presses work in EVERY mode (press ≠
-  select). Laws + actuator table: LIVING-CRAFT.md. Fixture
+  select). THE OCCLUSION LAW: the press raycast is scene-wide and the
+  FIRST solid hit must BE the pressable (a part occludes its own
+  dashboard); a part's STAND-IN BOX IS the part; LABELS are print, never
+  pressable. THE SPARE-BUTTON LAW (we, the dolphin's door toggles: "they
+  should still be able to toggle and they toggle the hinges that are in
+  that craft"): the pressed channel drives the actuator CABLED across its
+  data port (`dataNeighbours`, FLATTENED indices — nested endpoints are
+  outside the sim); a button NO PROGRAM reads (alias registration is not
+  a reader) with nothing cabled BROADCASTS the latched state to the
+  craft's hinge/pivot/track (OFF closes too). THE CODE BUTTON: a
+  programmable part's widget carries ⌨ → `openCodeFor(ci)` opens ITS IDE
+  (HudController → the HUD IDE) — the XenonCode ▾ menu shares that path.
+  Laws + actuator table: LIVING-CRAFT.md. Fixture
   `tools/make_live_test.py` → 9000009040; pins power/devicesim/xcsites
   vitest, scene.headless (plate+panel swing, `data.angle` verbatim),
   `living.spec.ts` chain (excluded from the pixel7 matrix).

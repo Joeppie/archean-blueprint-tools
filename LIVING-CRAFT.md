@@ -71,10 +71,17 @@ computer not on the net is UNPOWERED — the game would never boot it
 ## 4. THE 3-D PRESS LAW (`engine/scene.ts` + Viewport + Editor)
 - `buildDashboard` tags every element box `userData.dash = {ci, ch, type,
   surfaceKey?}`; `buildReal` tags standalone Toggle/Push/Arrow parts.
-- `Engine.pressPick(x, y)` raycasts the pressable set → `{kind:'dash'|
+- `Engine.pressPick(x, y)` raycasts the WHOLE scene → `{kind:'dash'|
   'face'|'comp', ci, ch?, elType?, surfaceKey?, px?, py?}` where px/py are
   the SURFACE's framebuffer pixels (x right, **y DOWN** — the button_rect
-  law, wiki dashboard.md).
+  law, wiki dashboard.md). Three laws ride the pick:
+  **OCCLUSION** — the FIRST solid hit must BE the pressable (a ray that
+  grazes a part and lands on the dashboard behind it is a click on the
+  part, never a press through it); a part's **STAND-IN BOX** (userData
+  kind 'comp') IS the part (lite crafts have nothing else); **LABELS are
+  print, not controls** (wiki DashboardTool.md: Toggle/Push/Arrow/Led/
+  Screen/HdScreen press, a Label occludes — the finger cursor is a
+  promise, not a decoration).
 - Viewport rides the 40 Hz hover cap: a **pointer cursor** on a pressable
   + a mono **press-chip** (`[data-testid="press-chip"]`) carrying the
   label; pointerdown/up own the gesture (`setPressCapture` disables orbit
@@ -85,7 +92,24 @@ computer not on the net is UNPOWERED — the game would never boot it
   `pressDevice` (every owning computer's pump, its own io) + latches a
   Toggle (wiki ToggleButton.md), momentary for Push/Arrow/Led; a screen
   press is a `screenClick` (the game's `button_rect`/`click` evaluate the
-  click cycle). `pressLabel` names: element + channel + the owning
+  click cycle).
+- THE SPARE-BUTTON LAW (we, on the dolphin's door toggles: "they should
+  still be able to toggle and they toggle the hinges that are in that
+  craft"): the pressed channel drives the actuator CABLED on the other
+  end of its data port (`dataNeighbours`, pure — FLATTENED pipe indices
+  skip nested parts, which the top-level sim cannot run); with nothing
+  running the button (NO PROGRAM reads its channel — alias registration
+  alone is not a reader) and nothing cabled, the latched state
+  BROADCASTS to the craft's servo actuators (hinge/pivot/track, both
+  directions — OFF is the closing press). The popup names what a bare
+  part drives: `→ drives <neighbour>` / `→ toggles the craft's N
+  actuators (no computer attached)`; `no computer reads it` only for a
+  truly dead part.
+- THE CODE BUTTON (we: "when I press the code button for a HUD or
+  computer, or minicomputer … I want of course to open its xenoncode"):
+  a programmable part's mode widget carries ⌨ — `openCodeFor(ci)` opens
+  THAT computer's XenonCode IDE (HudController → the HUD IDE); the
+  XenonCode ▾ menu routes through the same one path. `pressLabel` names: element + channel + the owning
   computer + io + the literal PROGRAM LINE (`xcsites.ts`: `chanSites` for
   a channel, `rectsAt` for a screen pixel — the LAST containing
   button_rect wins, draw order).
