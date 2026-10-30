@@ -1379,10 +1379,19 @@ export class XenonPump {
     // v1.13.17: worker mode when SAB-isolated AND the shim carries the live
     // hook (abi >= 7); XenonWorkerRun.open returns null otherwise → the
     // v1.13.16 main-thread pump, byte-identical.
-    let wr: XenonWorkerRun | null = await XenonWorkerRun.open(comp);
-    let run: XenonRun | XenonWorkerRun;
-    if (wr) run = wr;
-    else { run = await XenonRun.open(comp); wr = null; }
+    // THE WASM-LOAD-FAILURE LAW (v1.16.5): a headless jsdom mount has no
+    // wasm fetch path — the pump answers status 'error' (the IDE shows the
+    // chip), it never leaves the boot's rejection unhandled.
+    let wr: XenonWorkerRun | null; let run: XenonRun | XenonWorkerRun;
+    try {
+      wr = await XenonWorkerRun.open(comp);
+      run = wr ?? await XenonRun.open(comp);
+    }
+    catch (e) {
+      this.status = 'error'; this.error = String(e);
+      xenonFarm.detach(this); return;
+    }
+    if (!wr) run = run as XenonRun;
     // SUPERSEDED-STALE-OPEN LAW (v1.13.18): a losing open (React StrictMode
     // fires the dialog's boot effect TWICE in dev → two workers boot
     // concurrently; the cold one answers LAST) must dispose its OWN run and

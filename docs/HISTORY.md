@@ -4868,3 +4868,31 @@ sm. Pin: phoneux.spec 'the Screens dock keeps its ✕ close reachable on
 phones @Screens' — walks the exact user path (deep link → raised zoom →
 ✕ close → dock ✕ → dock gone) on both projects, asserting every close box
 ends inside the viewport.
+
+## v1.16.6 — THE HEADLESS VM (2026-10-30)
+
+we: "Go through code and tech debt and make a cleanup and rework unnecessary
+e2e tests to be lower level, e.g. if they test appearance that can be tested
+at lower level (e.g. screens, most tests can do checks on drawn pixels)".
+The Xenon twin of the v1.12.1 headless Engine: `vmharness.ts` boots the REAL
+gitlink wasm in vitest. The emscripten glue is built -sENVIRONMENT=web (no
+node fs path, no wasmBinary option — the v1.16.5 unhandled-rejection trace
+proved both), so the harness SERVES the shipped bytes at the exact `?url`
+the app's import resolves to: same glue, same wasm, no rebuild. `bootVm(id)`
+opens the craft's real XenonComputer (xenonComputers on corpus JSON), pumps
+`_xc_cycle()` by hand, reads screen PIXELS from the shim's RAM buffers, the
+io bus from the raw `out` events (the clocks RAW-target law: the PLANE
+addresses devices by ALIAS verbatim), vars/presses through the same exports
+the pump uses. The spikes wrote the L5 transcriptions: PLANE stick 0.8 →
+PitchControlJunction EXACTLY −0.8 (output = −(stick+trim); the e2e polled a
+<−0.3 band — the tier is a design tool again); 3381670618 $disp 1→0 at
+press(4,4); the Badger's 36k-line firmware boots to 'Smart Quad is ready'
+in 0.8 s on node (the e2e leg carried a 240 s budget); INVADERS registers
+main#0 at the authored 200×160 (the v1.15.2 BUILT-IN PLAIN TARGET). Six
+pins in xenonvm.test.ts; the three xenon.spec legs keep their DOM halves
+(tabs, CodeMirror windowing, the zoom-window real-pointer press, side tabs)
+and shed the pixel censuses, bus rows, stick slider, var polls and the
+sleep-and-lit rituals (the trio runs 14 s). The same census caught the
+phone-side law: XenonPump.open degrades a wasm-LOAD failure to status
+'error' — a fire-and-forget `void pump.open()` in jsdom left the fetch
+rejection unhandled (the `npm test` ERROR line, gone). vitest 1019 → 1025.

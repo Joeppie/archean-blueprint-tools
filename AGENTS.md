@@ -462,6 +462,14 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   (vitest pure → node integration → e2e ONLY for pixels / real pointer
   plumbing / IndexedDB / dev-pair). Each new e2e carries a
   `// e2e-tier because:` line.
+- THE HEADLESS VM (v1.16.6, `__tests__/vmharness.ts` + `xenonvm.test.ts`):
+  the REAL gitlink wasm boots a corpus craft's actual program in vitest
+  (cycles by hand, screen PIXELS from the shim's RAM buffers, the raw `out`
+  event bus, presses via `screenClick`). VM laws — boot/compile, drawn
+  pixels, alias bus, button presses, the built-in panel size — live THERE;
+  the browser tier keeps the IDE DOM, CodeMirror and real-pointer→1:1-px
+  plumbing. A wasm LOAD failure is pump status 'error', never a floating
+  rejection (`XenonPump.open`).
 - FIXTURES BEAT CORPORA (`tools/make_*_test.py` → `testdata/900000NNNN`). A
   big craft in a test must defend why the fixture CANNOT exhibit the law.
   FIXTURE-FIRST BOOT LAW: geometry-behaviour laws run on generated law

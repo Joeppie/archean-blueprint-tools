@@ -162,3 +162,29 @@ starter-craft chain, mobile chain).
   contended). Headless SwiftShader was costing ~575 ms per boot in
   software-rendered first frames; pixel-probe suites (viewmenu, scene)
   verified green on real GL.
+
+## THE HEADLESS VM wave (v1.16.6) — the xenon pixel class drops to vitest
+
+`app/src/engine/__tests__/vmharness.ts` boots the REAL gitlink wasm in
+vitest (the glue served its shipped bytes at the `?url` path — no rebuild,
+no fork of the boot path). The laws below are now `xenonvm.test.ts` (6
+pins, drawn-PIXEL censuses on the shim's screen buffers, exact values);
+the browser legs keep only what the VM cannot state (IDE DOM, CodeMirror,
+real pointer → 1:1 canvas px, side-tab rendering):
+
+| xenon.spec leg | VM half (vitest) | browser half kept |
+|---|---|---|
+| dev-WASM boot (PLANE) | lit census trimsdash#0, alias bus targets, STICK 0.8 → −0.8 exact | menu/tabs/code/validator, surface tile visible, Esc |
+| craft 3381670618 | 10#0 870×390 census, lit, $disp 1→0 on press(4,4) | zoom-window real-pointer press, vars row, CM hover, clean validator |
+| the Badger | 57 files, print 'Smart Quad is ready', mining-drill bus, pilot-screen lit, globals (0.8 s) | 57 tabs, console tab, windowed 7459-line file |
+| Space Invaders | main#0 + computer-13#0 at the authored 200×160 (v1.15.2 plain target) | screens-btn gate, 19 cockpit keys, Space → the stick |
+
+Also v1.16.6: `XenonPump.open` degrades a wasm-LOAD failure to status
+'error' (IDE chip) — no unhandled rejection through fire-and-forget boots
+(the jsdom auto-boot catch). phoneux.spec gained the `@Screens` phone leg
+(Screens dock ✕ close inside the viewport via the invaders deep link —
+zoom-window ✕ too); the fix is the flex-wrap/min-w-0 family.
+
+Verdicts updated: xenon leg 1/3381670618/Badger rows are now
+**HEADLESS→ (done)** for their VM halves; the phoneux @Screens leg is
+KEEP-PIXEL (layout clipping needs a layout engine).

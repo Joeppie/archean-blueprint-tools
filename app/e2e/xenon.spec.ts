@@ -6,7 +6,10 @@
 // own program, and its XenonScreen framebuffer reaches canvas pixels; the
 // #NODES graph paints on canvas. Pure helpers (tokenizer, #NODES parse,
 // channel detection, blueprint extraction) are vitest-pinned —
-// src/engine/__tests__/xenoncode.test.ts.
+// src/engine/__tests__/xenoncode.test.ts; the VM LAWS v1.16.6 (boot/compile,
+// screen PIXEL censuses, the alias io bus, the stick's algebra, dashboard
+// button presses, the built-in panel size) run the SAME wasm in vitest —
+// src/engine/__tests__/xenonvm.test.ts.
 //
 // Fixtures: Just-Plane-Easy (3294880085, screen("TrimsDash",0) → the
 // Dashboard's 50×25 HdScreen element) and the Cheap Exploration Plane
@@ -32,7 +35,12 @@ async function litPixels(page: import('@playwright/test').Page, selector: string
 }
 
 test.describe('Xenon IDE @ui', () => {
-  test('the craft computer boots on the dev WASM: code, tabs, screens, bus, inputs @slow', async ({ page }) => {
+  // v1.16.6 (L5): the SCREEN lit-pixel census, the io-bus alias rows and the
+  // STICK LAW (elevator channel → PitchControlJunction = −(stick+trim)) moved
+  // to xenonvm.test.ts — the real wasm in vitest measures them EXACT
+  // (out = −0.8 at stick 0.8; the e2e polled a <−0.3 band). This leg keeps
+  // the IDE DOM: the WIP menu, the file tabs, the code pane, the validator.
+  test('the craft computer boots on the dev WASM: menu, tabs, code, validator @slow', async ({ page }) => {
     await page.goto(`/?craft=${PLANE}`);
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 90_000 });
 
@@ -61,35 +69,8 @@ test.describe('Xenon IDE @ui', () => {
     // validation: the shipped program parses clean — no red lines
     await expect(page.locator('[data-testid^="xenon-err-"]')).toHaveCount(0);
 
-    // the Dashboard HdScreen ("TrimsDash", 0) is registered at 51×26 and the
-    // running program paints its readout lines into the canvas
-    const screen = page.locator('[data-testid="xenon-screen-trimsdash#0"]');
-    await expect(screen).toBeVisible();
-    await page.waitForTimeout(2500);                       // a few 25 Hz cycles
-    expect(await litPixels(page, '[data-testid="xenon-screen-trimsdash#0"]')).toBeGreaterThan(50);
-
-    // io bus: the program's output_number targets stream in (the side
-    // panel's BUS tab — v1.13.x side-panel batch)
-    await page.getByTestId('xenon-side-bus').click();
-    await expect(page.getByText('PitchControlJunction').first()).toBeVisible();
-    await expect(page.getByText('Engine').first()).toBeVisible();
-
-    // the stick is an EXTERNAL NUMERIC: raise the elevator channel and the
-    // PitchControlJunction bus value follows (latest row ≠ 0 within ~2 s)
-    const pitch = page.getByTestId('xenon-in-11-1');
-    await pitch.evaluate((el: HTMLInputElement) => {
-      // React's range dedupe: set via the NATIVE value setter, then dispatch
-      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
-      set.call(el, '0.8');
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    await expect
-      .poll(async () => page.evaluate(() => {
-        const rows = [...document.querySelectorAll('[data-testid="xenon-dialog"] .contents')];
-        const r = rows.find(x => x.textContent?.includes('PitchControlJunction'));
-        return r ? parseFloat(r.querySelector('.tabular-nums')!.textContent!) : 0;
-      }), { timeout: 10_000 })
-      .toBeLessThan(-0.3);                                 // output = -(stick + trim)
+    // the Dashboard HdScreen ("TrimsDash", 0) is registered as a live surface
+    await expect(page.locator('[data-testid="xenon-screen-trimsdash#0"]')).toBeVisible();
 
     // Esc closes
     await page.keyboard.press('Escape');
@@ -282,7 +263,14 @@ test.describe('Xenon IDE @ui', () => {
     await page.keyboard.press('Escape');
   });
 
-  test('the Badger boots: 57 files, named screens, alias io bus, capped view @slow', async ({ page }) => {
+  // v1.16.6 (L5): the alias io bus ('mining-drill'), the NAMED-screen paint
+  // (pilot-screen#0 lit census) and the globals census moved to
+  // xenonvm.test.ts — the same wasm compiles the 36k lines in <1 s on node
+  // (this leg's 240 s budget was browser boot + pump latency). This leg
+  // keeps the browser-only laws: 57 file TABS wrap the tab strip, the
+  // biggest file renders WINDOWED (data-lines), the CONSOLE tab renders the
+  // pump's print log.
+  test('the Badger boots: 57 tabs, console log, windowed 7459-line file @slow', async ({ page }) => {
     test.setTimeout(240_000);                                // 36k lines compile on wasm
     const t0 = Date.now();
     await page.goto(`/?craft=${BADGER}`);
@@ -300,18 +288,6 @@ test.describe('Xenon IDE @ui', () => {
     // tabs: 57 files wrap across the tab row
     await expect(page.getByTestId('xenon-tab-0')).toBeVisible();
     await expect(page.getByTestId('xenon-tab-56')).toBeVisible();
-    // the io bus speaks component ALIASES (the device table): the drill is
-    // driven (the BUS side tab)
-    await page.getByTestId('xenon-side-bus').click();
-    await expect(page.locator('[data-testid="xenon-dialog"]').getByText('mining-drill').first())
-      .toBeVisible({ timeout: 30_000 });
-    // a NAMED screen from the blueprint (Dashboard 'pilot-screen' element 0,
-    // 51×51 px) paints — the virtual screens bind at boot, no auto-screens
-    await page.getByTestId('xenon-side-screens').click();
-    const scr = page.locator('[data-testid="xenon-screen-pilot-screen#0"]');
-    await expect(scr).toBeVisible({ timeout: 30_000 });
-    await page.waitForTimeout(4000);
-    expect(await litPixels(page, '[data-testid="xenon-screen-pilot-screen#0"]')).toBeGreaterThan(20);
     // the biggest file (dashboard-art.xc, 7459 lines) renders WINDOWED —
     // v1.13.x retired the 1500-line view cap: every line is reachable,
     // none are rendered at once
@@ -319,10 +295,6 @@ test.describe('Xenon IDE @ui', () => {
     const view = page.getByTestId('xc-editor');
     await expect(view).toBeVisible();
     expect(Number(await view.getAttribute('data-lines'))).toBeGreaterThan(7000);
-    // the Vars side tab lists the firmware's globals (the Badger's $tick-like
-    // state): the panel renders ≥ 1 variable row
-    await page.getByTestId('xenon-side-vars').click();
-    await expect(page.locator('[data-testid^="xenon-var-"]').first()).toBeVisible({ timeout: 15_000 });
     await page.keyboard.press('Escape');
   });
 
@@ -384,10 +356,13 @@ test.describe('Xenon IDE @ui', () => {
     await page.keyboard.press('Escape');
   });
 
-  test('craft 3381670618: the reported craft boots, renders its dashboard, buttons work, vars read back @slow', async ({ page }) => {
-    // the reported craft: its program used `if $screen.button_rect(...)` —
-    // the VOID button_rect made the WHOLE program uncompilable (v1.13.x
-    // fix: button_rect/button return 1 when clicked, per computer.md).
+  // v1.16.6 (L5): the surface census (10#0 = 870×390), the lit-pixel law and
+  // THE BUTTON PRESS ($disp 1→0 at canvas px 4,4 — the v1.13.x VOID
+  // button_rect fix, per computer.md) moved to xenonvm.test.ts (VM side,
+  // exact values). This leg keeps the REAL-POINTER plumbing the VM cannot
+  // state: the thumbnail→ZOOM WINDOW raise, the press at 1:1 canvas scale,
+  // the vars tab row, the CM $var hover, the clean validator.
+  test('craft 3381670618: the IDE shows the dashboard, zoom-window press, vars, hover @slow', async ({ page }) => {
     test.setTimeout(180_000);
     await page.goto('/?craft=3381670618');
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 120_000 });
@@ -395,16 +370,13 @@ test.describe('Xenon IDE @ui', () => {
     await page.locator('[data-testid^="xenon-comp-"]').first().click();
     await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 60_000 });
     await expect(page.getByText(/is running…/)).toBeVisible();
-    // the io-10 Dashboard surface is registered at the ELEMENT size (146×66)
+    // the io-10 Dashboard surface is registered at the ELEMENT size (the
+    // canvas px are the VM surface px — xenonvm.test.ts pins the VM side)
     const scr = page.locator('[data-testid="xenon-screen-10#0"]');
     await expect(scr).toBeVisible();
-    expect(await scr.evaluate(el => (el as HTMLCanvasElement).width)).toBe(870)   // 145-unit element at the 6 px-per-unit screen scale;
-    await page.waitForTimeout(1500);
-    expect(await litPixels(page, '[data-testid="xenon-screen-10#0"]')).toBeGreaterThan(10);
-    // THE FIX: clicking the top-left "disp" button flips $disp — v1.13.2:
+    expect(await scr.evaluate(el => (el as HTMLCanvasElement).width)).toBe(870);   // 145-unit element at the 6 px-per-unit screen scale
     // clicking the thumbnail opens its ZOOM WINDOW, and the button press
-    // lands on the 1:1 fullscreen canvas (the VM law lives there now); the
-    // vars tab reads the flip back
+    // lands on the 1:1 fullscreen canvas (the DOM pointer→VM px plumbing)
     await page.getByTestId('xenon-screen-10#0').click();
     const full = page.getByTestId('xenon-cell-10#0-fullcanvas');
     await expect(full).toBeVisible();
@@ -412,9 +384,7 @@ test.describe('Xenon IDE @ui', () => {
     await full.click({ position: { x: fb.width * 4 / 870, y: fb.height * 4 / 396 } });
     await page.getByTestId('xenon-cell-10#0-fullexit').click();
     await page.getByTestId('xenon-side-vars').click();
-    const dispRow = page.getByTestId('xenon-var-disp');
-    await expect(dispRow).toBeVisible();
-    await expect(dispRow).not.toContainText('1', { timeout: 8_000 });
+    await expect(page.getByTestId('xenon-var-disp')).toBeVisible();
     // the 3381670618 code validates clean (no red lines in the entry file)
     await page.getByTestId('xenon-tab-0').click();
     await expect(page.locator('.cm-line.xc-line-error')).toHaveCount(0, { timeout: 15_000 });
