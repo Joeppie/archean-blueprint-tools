@@ -441,3 +441,11 @@ wall clock):**
 - Metrics per landing (report in the commit message): vitest count, e2e
   run count, fast-tier wall clock, specs retired. Success = the L3 flake
   budget: zero sleep-patches, every flake ends as a migration.
+- v1.15.6 THE LIVING CRAFT session line: vitest **998** (added power 9,
+  devicesim 11, xcsites 4, scene.headless 3, +fixture), fast tier **112
+  passed / 26 skipped / 0 failed** (≈1.8 m), +1 e2e spec (`living.spec`
+  chain, chromium-only — pointer/hover laws, pixel7-excluded). Four new
+  engine modules at the SMALLEST tier (power/devicesim/xcsites pure; the
+  subgrid-riding law at scene.headless), one browser leg for the
+  real-pointer-press-into-the-VM + auto-boot cadence no lower tier can
+  state.
