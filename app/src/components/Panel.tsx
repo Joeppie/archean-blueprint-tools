@@ -333,8 +333,8 @@ const Sec = (p: { title: string; children?: React.ReactNode; testid?: string }) 
   </section>
 );
 
-const Check = (p: { label: string; checked: boolean; onChange: (v: boolean) => void; testid: string }) => (
-  <label className="flex items-center gap-2 py-[2px] text-[12px] text-ink">
+const Check = (p: { label: string; checked: boolean; onChange: (v: boolean) => void; testid: string; title?: string }) => (
+  <label className="flex items-center gap-2 py-[2px] text-[12px] text-ink" title={p.title}>
     <input type="checkbox" checked={p.checked} data-testid={p.testid}
       onChange={e => p.onChange(e.target.checked)} className="accent-accent" />
     {p.label}
@@ -351,6 +351,10 @@ const Check = (p: { label: string; checked: boolean; onChange: (v: boolean) => v
  *  dome; the solid green sheet is gone) and the
  *  ORTHOGRAPHIC projection toggle. */
 export function ViewOpts(p: Pick<PanelProps, 'opts' | 'onOpt' | 'hullOpacity' | 'onHullOpacity' | 'gizmoOn' | 'onGizmo' | 'hiDef' | 'onHiDef' | 'staticInfo' | 'onStaticInfo'> & {
+  /** v1.16.3 FLAT-SHEET skin display (we: "render triangles as a flat
+   *  surface, 2 sided but flat … toggle option on display") */
+  flatSkin: boolean;
+  onFlatSkin: (v: boolean) => void;
   /** v1.5.21 SETTABLE MIRROR AXIS (user: "mirror axes should be settable.
    *  Game is not hardcoded x"): the SESSION plane for ⇄ twin placement,
    *  block twin identity and the overlay's solid sheet. Detected mirror
@@ -372,6 +376,15 @@ export function ViewOpts(p: Pick<PanelProps, 'opts' | 'onOpt' | 'hullOpacity' | 
       <Check testid="opt-grid" label="ground grid (zoom-adaptive)" checked={p.opts.grid} onChange={v => p.onOpt('grid', v)} />
       <Check testid="opt-occ" label="occupancy boxes (type-255)" checked={p.opts.occ} onChange={v => p.onOpt('occ', v)} />
       <Check testid="opt-hull" label="hull (blocks + triangles)" checked={p.opts.hull} onChange={v => p.onOpt('hull', v)} />
+      {/* v1.16.3 FLAT-SHEET skin (we: "render triangles as a flat surface, 2
+          sided but flat, so less problems with protruding edges and
+          dashboards"): the 0.05 m prisms are the faithful game draw, the
+          sheets are the clean display — zero thickness, so a skin record
+          never buries a coplanar dashboard. Display-only; the file, picks
+          and selection visuals stay prism law. */}
+      <Check testid="opt-flatskin" label="flat hull skin (2-sided sheets)" checked={p.flatSkin}
+        onChange={p.onFlatSkin}
+        title="draw hull triangles as zero-thickness 2-sided sheets in their recorded plane — no prism rims, no dashboard burial (display-only: saves and picks are untouched)" />
       <Check testid="opt-wire" label="wireframe (hull)" checked={p.opts.wire} onChange={v => p.onOpt('wire', v)} />
       <Check testid="opt-pipes" label="pipes (cables)" checked={p.opts.pipes} onChange={v => p.onOpt('pipes', v)} />
       <Check testid="opt-subs" label="subgrids (doors/hatches)" checked={p.opts.subs} onChange={v => p.onOpt('subs', v)} />

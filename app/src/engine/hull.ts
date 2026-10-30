@@ -92,6 +92,54 @@ export function buildHullSkin(triangles: readonly Triangle[] | undefined): HullS
 }
 
 // ---------------------------------------------------------------------------
+// v1.16.3 FLAT-SHEET DISPLAY MODE (session A/B toggle; we: "triangles are so
+// problematic to render properly… render them as a flat surface, 2 sided but
+// flat, so less problems with protruding edges and dashboards, toggle option
+// on display as 3d — they occlude dashboards where blocks wouldnt and in
+// game they dont"). DISPLAY-ONLY like the stitch below: the FILE, the pick
+// law (tris.triAt reads the records) and the selection visuals stay prism
+// law; the prism stays the DEFAULT. Each record renders as a sheet IN THE
+// RECORDED PLANE (no ±HULL_T caps, no rim walls — the rims are the
+// protruding edges, the ±0.025 m slab is what buries a coplanar dashboard):
+//   colours[0] = the face at the authored winding (front normal),
+//   colours[1] = the back at the reversed winding.
+// Slots 2..4 (the rim paints) draw nothing — a sheet has no rim.
+// ---------------------------------------------------------------------------
+
+/** flat 2-sided sheet for one triangle file record — vertices EXACTLY at the
+ *  recorded lattice positions (zero thickness), front = colours[0] verbatim
+ *  winding, back = colours[1] reversed winding. */
+export function hullSheet(t: Triangle): HullFace[] {
+  const p: [V3, V3, V3] = ([0, 1, 2] as const).map(i => {
+    const v = hullVertex(t, i);
+    return [v.x, v.y, v.z] as V3;
+  }) as [V3, V3, V3];
+  const slot = (i: number): number => t.colors?.[i] ?? 0;
+  return [
+    { slot: slot(0), tri: [p[0]!, p[1]!, p[2]!] },        // front (+normal)
+    { slot: slot(1), tri: [p[2]!, p[1]!, p[0]!] },        // back (reversed)
+  ];
+}
+
+/** whole skin as flat sheets — same wire + record count as buildHullSkin. */
+export function flatHullSkin(triangles: readonly Triangle[] | undefined): HullSkin {
+  const faces: HullFace[] = [];
+  const wire: number[] = [];
+  for (const t of triangles ?? []) {
+    faces.push(...hullSheet(t));
+    const p: V3[] = ([0, 1, 2] as const).map(i => {
+      const v = hullVertex(t, i);
+      return [v.x, v.y, v.z];
+    });
+    for (let i = 0; i < 3; i++) {
+      const a = p[i]!, b = p[(i + 1) % 3]!;
+      wire.push(a[0]!, a[1]!, a[2]!, b[0]!, b[1]!, b[2]!);
+    }
+  }
+  return { faces, wire, tris: (triangles ?? []).length };
+}
+
+// ---------------------------------------------------------------------------
 // v1.12.7 DRAW-ONLY SKIN STITCH — the fix for the hullify FPS drain (blocks
 // converted to triangles multiply rendered geometry 15-116x: every stored
 // record becomes an 8-face closed prism, per-cell, with no stitch pass — the
@@ -283,7 +331,15 @@ let skinStitchOn = true;
 export function setSkinStitch(on: boolean): void { skinStitchOn = on; }
 export function skinStitchState(): boolean { return skinStitchOn; }
 
+/** v1.16.3 flat-sheet A/B (Engine seam + ⚙ View row): true = flatHullSkin —
+ *  the stitch pass is a VOLUME optimisation, sheets have no volume, so flat
+ *  mode renders per-record sheets directly (flat beats stitch). */
+let skinFlatOn = false;
+export function setSkinFlat(on: boolean): void { skinFlatOn = on; }
+export function skinFlatState(): boolean { return skinFlatOn; }
+
 export function stitchHullSkin(triangles: readonly Triangle[] | undefined): HullSkin {
+  if (skinFlatOn) return flatHullSkin(triangles);
   if (!skinStitchOn) return buildHullSkin(triangles);
   const faces: HullFace[] = [];
   const wire: number[] = [];

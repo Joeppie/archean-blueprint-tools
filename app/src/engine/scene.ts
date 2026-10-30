@@ -54,7 +54,7 @@ import { buildPipes, checkLeads, pipeAt, runFlowDir, surgePaths, type PipeNetwor
 import { portRole } from './wiremodel';
 import { pipeLabel } from './wireops';
 import { buildCompProxies, buildSolids, type ProxyBox, type SolidBatch } from './build';
-import { setSkinStitch, skinStitchState } from './hull';
+import { setSkinStitch, skinStitchState, setSkinFlat, skinFlatState } from './hull';
 import { xrayPlanPure, type XrayCam, type XrayMesh } from './xray';
 import { hullVertex } from './hullfit';
 import type { FilePalette } from './palette';
@@ -182,6 +182,10 @@ const backdropUrl = (b: string): string | null => {
 };
 const BACKDROP_KEY = 'archean-app-backdrop';
 const ORTHO_KEY = 'archean-app-ortho';
+/** v1.16.3 flat-sheet skin display mode (⚙ View row) — hull.ts owns the
+ *  live flag; attach() restores the persisted choice (browser-only path:
+ *  the node probe tier never attaches, the seam below persists on toggle). */
+const SKIN_FLAT_KEY = 'archean-app-skin-flat';
 const SKY_HEX = 0x8fb4d8;
 /** the perspective vertical FOV — ONE constant, so the ortho ↔ persp
  *  framing swap (setProjection) round-trips exactly */
@@ -668,6 +672,9 @@ export class Engine {
   }
 
   attach(canvas: HTMLCanvasElement) {
+    // v1.16.3 restore the persisted flat-sheet skin mode BEFORE any load
+    // (hull.ts owns the flag; the ⚙ View seam persists on toggle)
+    setSkinFlat(localStorage.getItem(SKIN_FLAT_KEY) === '1');
     this.renderer = new WebGLRenderer({ canvas, antialias: true });
     performance.mark('boot:renderer');           // WebGL context + three init
     // v1.11.0 GAME-DAYLIGHT LAW (XenonViewer js/viewer.js:207-213 transcribed
@@ -5554,6 +5561,17 @@ void main() {
    *  way — this gauges frame cost only. */
   setSkinStitch(on: boolean) { setSkinStitch(on); this.reload(); }
   skinStitchState() { return skinStitchState(); }
+
+  /** v1.16.3 FLAT-SHEET display A/B (we: "render them as a flat surface, 2
+   *  sided but flat, so less problems with protruding edges and dashboards,
+   *  toggle option on display"): true = the hull skin draws 2-sided sheets
+   *  IN the recorded plane (no rim walls, no ±0.025 m slab), so skin records
+   *  stop protruding off the lattice and burying coplanar dashboards — in
+   *  game they do not occlude them. DISPLAY-ONLY like the stitch seam above:
+   *  the FILE, the pick law and the selection visuals stay prism law.
+   *  Persisted (⚙ View row, `archean-app-skin-flat`). */
+  setSkinFlat(on: boolean) { localStorage.setItem(SKIN_FLAT_KEY, on ? '1' : '0'); setSkinFlat(on); this.reload(); }
+  skinFlatState() { return skinFlatState(); }
 
   /** Edit workspace: raycast for the placement/select cell. The hit face's
    *  WORLD normal (view frame == raw file frame since the v0.180 de-mirror;

@@ -654,6 +654,15 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     setOrtho(v);
     engineRef.current?.setProjection(v);
   }, []);
+  // v1.16.3 FLAT-SHEET skin display (we: "render triangles as a flat surface,
+  // 2 sided but flat … toggle option on display"): the engine owns the live
+  // hull.ts flag + persistence (ortho precedent); the React twin re-renders
+  // the ⚙ View row.
+  const [flatSkin, setFlatSkin] = useState(() => localStorage.getItem('archean-app-skin-flat') === '1');
+  const onFlatSkin = useCallback((v: boolean) => {
+    setFlatSkin(v);
+    engineRef.current?.setSkinFlat(v);
+  }, []);
   /** the axis for callbacks that run outside React render (engine is truth);
    *  v1.10.5: 'off' = the session mirror is disabled entirely */
   const mirAx = useCallback((): MirrorAxisOpt => engineRef.current?.mirrorAxis ?? 'x', []);
@@ -2102,6 +2111,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
                 <ViewOpts opts={opts} onOpt={toggleOpt} hullOpacity={hullOpacity} onHullOpacity={setHullOp}
                                     gizmoOn={gizmoOn} onGizmo={setGizmo} hiDef={hiDef} onHiDef={onHiDef}
                                     staticInfo={staticInfo} onStaticInfo={setStaticInfo}
+                                    flatSkin={flatSkin} onFlatSkin={onFlatSkin}
                                     mirrorAxis={mirAxis} onMirrorAxis={onMirrorAxisArm}
                                     backdrop={backdrop} onBackdrop={onBackdrop}
                                     ortho={ortho} onOrtho={onOrtho} />

@@ -4781,3 +4781,36 @@ in full-suite runs. Standing rules:
   IDE. The spec also caught a strict-mode tsc slip v1.16.0's Pages build
   refused (fixed in v1.16.1) and the canvas-clamp law for aim grid-searches
   (ndc extrapolation hits pixels the real mouse can't reach).
+
+## 8. v1.16.3 session — FLAT-SHEET hull skin display mode (2026-10-30)
+
+We: "triangles are so problematic to render properly.. what if we render
+them as a flat surface, 2 sided but flat, so less problems with protruding
+edges and dashboards, toggle option on display — there are major problems
+where they occlude e.g. dashboards where blocks wouldnt and in game they
+dont either." The coplanar-dashboard burial was the known, accepted open
+problem with the standing rule "attack the RENDER pass if ever, NEVER the
+extrusion direction" — this is that render-pass attack, as an A/B:
+`hull.ts hullSheet` draws a record as exactly two faces IN the recorded
+lattice plane — front colours[0] at the authored winding, back colours[1]
+reversed, zero thickness (the rim walls ARE the protruding edges, the
+±0.025 m slab is what buries the dashboards; slots 2..4 draw nothing).
+`flatHullSkin` + the `setSkinFlat` module flag; `stitchHullSkin` routes
+through the flag (flat beats stitch — the stitch is a VOLUME optimisation,
+sheets have no volume). Engine seam `setSkinFlat/skinFlatState` persists
+`archean-app-skin-flat` and reloads; the restore runs in attach() (the
+node probe tier never attaches — a module-scope localStorage read broke
+the scene.headless import in this session's first cut, caught by the suite
+before commit). ⚙ View row `opt-flatskin` under the hull row, Editor
+React twin on the ortho precedent. Display-only law kept: the FILE, the
+pick law (tris.triAt reads the records) and the selection visuals stay
+prism law; the prism stays the DEFAULT (it is the faithful game draw).
+Pins: flatskin.test.ts (2 faces/record vs 8, exact-plane vertices, two-
+sided winding pair, slot-0 defaults, wire+count byte-identity with the
+prism skin, the A/B seam both ways). Session caught: the opencode worktree
+is a SEPARATE CLONE (its main was stale — fetch the primary checkout), and
+a fresh clone without the gitignored blueprints.conf resolves the corpus
+to repo testdata, where 3816936540 is the OLD hullify copy — the two
+stitch corpus reds were data-source drift (AGENTS first-check), green on
+the machine corpus. The jsdom xenoncode.wasm unhandled rejection is the
+pre-existing baseline (present on clean main).
