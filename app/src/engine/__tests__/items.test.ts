@@ -17,15 +17,17 @@ describe('the ITEM BENCH link graph — @Items', () => {
   test('the chains wire by touching AABBs (the 0.75 m conduit gap included)', () => {
     const sim = new ItemSim();
     sim.load(bench(), null);
-    const pairs = sim.links.map(l =>
-      [sim.nodes[l.a]!.alias, sim.nodes[l.b]!.alias].sort().join('|'));
-    expect(pairs).toContain('drill|jx');            // the Jimmy-shaped 0.75 gap
-    expect(pairs).toContain('crush|jx');
-    expect(pairs).toContain('crush|ore-A');
-    expect(pairs).toContain('belt-1|belt-2');
-    expect(pairs).toContain('belt-2|ore-B');
+    const pair = (a: string, b: string) => sim.links.find(l => {
+      const x = sim.nodes[l.a]!.alias, y = sim.nodes[l.b]!.alias;
+      return (x === a && y === b) || (x === b && y === a);
+    });
+    expect(pair('drill', 'jx'), 'the Jimmy-shaped 0.75 gap').toBeTruthy();
+    expect(pair('crush', 'jx')).toBeTruthy();
+    expect(pair('crush', 'ore-A')).toBeTruthy();
+    expect(pair('belt-1', 'belt-2')).toBeTruthy();
+    expect(pair('belt-2', 'ore-B')).toBeTruthy();
     // the bare belt row has NO path to a source: nothing flows in B
-    expect(pairs).not.toContain('drill|belt-1');
+    expect(pair('drill', 'belt-1')).toBeFalsy();
   });
 });
 
@@ -83,28 +85,44 @@ describe('the ITEM BENCH flow — @Items', () => {
 });
 
 describe("Jimmy's crafter installation — the real chain", () => {
-  test('the crawl: drill, junction, crusher, containers and the crafter link', () => {
-    const bp = JSON.parse(testdataText('3334698274')!) as Blueprint;
-    const sim = new ItemSim();
-    sim.load(bp, null);
-    const pairs = sim.links.map(l => {
-      const a = sim.nodes[l.a]!, b = sim.nodes[l.b]!;
-      return [`${a.type}#${a.ci}`, `${b.type}#${b.ci}`].sort().join('|');
+  // Jimmy's item network is authored with `item`-type CABLES (port names
+  // item_output/item1/item-in/item-out.NNN): the drill pushes into
+  // Container#27, 27 feeds ItemJunction#25, the junction fans out to the
+  // Crusher#55, the Crafter#28 and ItemConveyor#54 (→ the crusher too).
+  const linkOf = (sim: ItemSim, a: string, b: string) =>
+    sim.links.find(l => {
+      const x = `${sim.nodes[l.a]!.ci}:${sim.nodes[l.a]!.ci === 0 ? '' : ''}`;
+      void x;
+      const ai = sim.nodes[l.a]!, bi = sim.nodes[l.b]!;
+      return (a === `${ai.type}#${ai.ci}` && b === `${bi.type}#${bi.ci}`)
+        || (b === `${ai.type}#${ai.ci}` && a === `${bi.type}#${bi.ci}`);
     });
-    // the crafter touches container 27; 27 touches the junction
-    expect(pairs).toContain('Container#27|Crafter#28');
-    expect(pairs).toContain('Container#27|ItemJunction#25');
-    expect(pairs).toContain('ItemJunction#25|MiningDrill#19');
+  test('the item cables wire the chain, directions from the port names', () => {
+    const sim = new ItemSim();
+    sim.load(JSON.parse(testdataText('3334698274')!) as Blueprint, null);
+    const drill = linkOf(sim, 'MiningDrill#19', 'Container#27');
+    expect(drill, 'drill --item_output--> container 27').toBeTruthy();
+    expect(drill!.pipe).toBe(true);
+    // the cable a:drill item_output -> b:container item1 = a pushes
+    const aIsDrill = sim.nodes[drill!.a]!.type === 'MiningDrill';
+    expect(aIsDrill ? drill!.dir === 'ab' : drill!.dir === 'ba').toBe(true);
+    expect(linkOf(sim, 'Container#27', 'ItemJunction#25')?.pipe).toBe(true);
+    expect(linkOf(sim, 'ItemJunction#25', 'Crafter#28')?.pipe).toBe(true);
+    expect(linkOf(sim, 'ItemJunction#25', 'Crusher#55')?.pipe).toBe(true);
+    expect(linkOf(sim, 'ItemJunction#25', 'ItemConveyor#54')?.pipe).toBe(true);
+    expect(linkOf(sim, 'ItemConveyor#54', 'Crusher#55')?.pipe).toBe(true);
     expect(sim.census().sources).toBe(1);
   });
-  test('Jimmy mines: the drill runs (anchored craft, powered census on)', () => {
+  test('Jimmy mines: the drill is HV-cabled, anchored — it RUNS', () => {
     const bp = JSON.parse(testdataText('3334698274')!) as Blueprint;
     const sim = new ItemSim();
     sim.load(bp, null);
     for (let i = 0; i < 25 * 20; i++) sim.step(0.04);
     const c = sim.census();
-    expect(c.mined).toBeGreaterThan(50);             // 10/s LV drill
-    const withItems = c.containers.filter(x => Object.keys(x.counts).length);
-    expect(withItems.length).toBeGreaterThan(0);     // the mosaic fills
+    expect(c.mined).toBeGreaterThan(100);            // 100/s HV drill (20 s)
+    const ore = c.containers.find(x => x.alias === '' && x.ci === 27)
+      ?? c.containers.find(x => x.ci === 27);
+    expect(ore, 'rocks pile into container 27').toBeTruthy();
+    expect(ore!.counts.Rock ?? 0).toBeGreaterThan(0);
   });
 });

@@ -28,6 +28,7 @@
 
 import type { Blueprint, BlueprintComponent } from './format';
 import type { PowerNet } from './power';
+import { flatToTopMap, flatEndpointTop } from './flat';
 
 const num = (d: Record<string, unknown> | undefined, k: string, def = 0): number =>
   typeof d?.[k] === 'number' ? (d[k] as number) : def;
@@ -130,7 +131,7 @@ export class EnergySim {
   load(bp: Blueprint, net: PowerNet | null): void {
     const comps = bp.data.components as BlueprintComponent[];
     this.sources = []; this.consumers = []; this.batteries = [];
-    this.anchored = false; this.hasHeat = false;
+    this.anchored = false; this.hasHeat = false; this.drillMap = null;
     for (const c of comps) {
       if (c.type === 'GroundAnchor') this.anchored = true;
       if (HEAT_SOURCES.has(c.type)) this.hasHeat = true;
@@ -156,9 +157,13 @@ export class EnergySim {
         watts = num(c.data as Record<string, unknown>, 'maxPower', watts);
       if (c.type === 'MiningDrill') {
         // the net VOLTAGE rates the drill: 10 kW on LV, 100 kW on HV
+        // (pipe endpoints are FLATTENED — engine/flat.ts)
+        const fmap = this.drillMap ?? (this.drillMap = flatToTopMap(bp));
         const hv = ((bp.data as Record<string, unknown>).pipes as { a_component: number;
-          b_component: number; type?: string }[] ?? []).some(p =>
-          (p.a_component === ci || p.b_component === ci) && p.type === 'highvoltage');
+          b_component: number; type?: string }[] ?? []).some(p => {
+          const a = flatEndpointTop(fmap, p.a_component), b = flatEndpointTop(fmap, p.b_component);
+          return (a === ci || b === ci) && p.type === 'highvoltage';
+        });
         watts = hv ? 100_000 : 10_000;
       }
       this.consumers.push({ ci, type: c.type, watts });
@@ -166,6 +171,7 @@ export class EnergySim {
     });
     this.hasGrid = this.sources.length > 0 || this.batteries.length > 0;
   }
+  private drillMap: (number | null)[] | null = null;
 
   /** the actuator/bus tap (the Editor wires observeDevices here). */
   write(devCi: number, ch: number, v: number): void {

@@ -29,6 +29,7 @@
 // PURE: no THREE, no DOM.
 
 import type { Blueprint, BlueprintComponent } from './format';
+import { flatToTopMap, flatEndpointTop } from './flat';
 
 const CELL = 0.25;
 const LINK_GAP = 0.8;          // metres: conduits span, parts "touch"
@@ -55,7 +56,13 @@ export interface ItemNode {
   box: [number, number][];                            // [[lo,hi] × 3]
   hv: boolean;                                         // drill: HV net licence
 }
-export interface ItemLink { a: number; b: number; dist: number; ax: number; ay: number; az: number }
+export interface ItemLink {
+  a: number; b: number; dist: number;
+  /** 'ab': a pushes into b; 'ba': b pushes into a; 'both': a hub pair */
+  dir: 'ab' | 'ba' | 'both';
+  /** true for the game's own `item` cable, false for the touching AABBs */
+  pipe: boolean;
+}
 export interface FlyingItem { item: string; from: number; to: number; t: number }
 
 /** the census chip/panel read (Editor heartbeat, 1.6 Hz) */
@@ -124,6 +131,10 @@ export class ItemSim {
    *  `recipes` (engine/economy.ts census) enable the Crafter cycle. */
   load(bp: Blueprint, powered: Set<number> | null, recipes: RecipeLite[] = []): void {
     const comps = bp.data.components as BlueprintComponent[];
+    const pipes = ((bp.data as Record<string, unknown>).pipes ?? []) as
+      { type?: string; a_component: number; a_port: string; b_component: number; b_port: string }[];
+    const fmap = flatToTopMap(bp);
+    const topOf = (f: number) => flatEndpointTop(fmap, f);
     this.nodes = [];
     comps.forEach((c, ci) => {
       const role = ROLE[c.type];
@@ -134,20 +145,48 @@ export class ItemSim {
         box,
         x: (box[0]![0] + box[0]![1]) / 2, y: (box[1]![0] + box[1]![1]) / 2,
         z: (box[2]![0] + box[2]![1]) / 2,
-        hv: c.type === 'MiningDrill' && ((bp.data as Record<string, unknown>).pipes as
-          { a_component: number; b_component: number; type?: string }[] ?? [])
-          .some(p => (p.a_component === ci || p.b_component === ci) && p.type === 'highvoltage'),
+        hv: c.type === 'MiningDrill' && pipes
+          .some(p => (topOf(p.a_component) === ci || topOf(p.b_component) === ci)
+            && p.type === 'highvoltage'),
       });
     });
+    const nodeIdx = new Map(this.nodes.map((n, i) => [n.ci, i]));
     this.links = [];
+    const linkKey = (a: number, b: number) => a < b ? `${a}|${b}` : `${b}|${a}`;
+    const has = new Set<string>();
+    // ① THE GAME'S OWN WIRING: `item`-type cables, port names give the
+    //    direction (an *_out / item-out end PUSHES, an *_in / item-in end
+    //    RECEIVES; two out-ends (a hub cable) push both ways).
+    for (const p of pipes) {
+      if (p.type !== 'item') continue;
+      const a = nodeIdx.get(topOf(p.a_component) ?? -1);
+      const b = nodeIdx.get(topOf(p.b_component) ?? -1);
+      if (a === undefined || b === undefined) continue;
+      const ao = /out/i.test(p.a_port), bo = /out/i.test(p.b_port);
+      const ai = /in|item[-_]in/i.test(p.a_port), bi = /in|item[-_]in/i.test(p.b_port);
+      const dir: ItemLink['dir'] =
+        ao && !bo ? 'ab' : bo && !ao ? 'ba' : ai && !bi ? 'ba' : bi && !ai ? 'ab' : 'both';
+      const na = this.nodes[a]!, nb = this.nodes[b]!;
+      const key = linkKey(a, b);
+      if (has.has(key)) continue;
+      has.add(key);
+      this.links.push({ a, b, dir, pipe: true,
+        dist: Math.max(0.25, Math.hypot(na.x - nb.x, na.y - nb.y, na.z - nb.z)) });
+    }
+    // ② adjacency fallback: touching AABBs (the Push/Pull handshake the
+    //    wiki describes, for parts the author left cable-less) — only where
+    //    no item cable already links the pair.
     for (let i = 0; i < this.nodes.length; i++) {
       for (let j = i + 1; j < this.nodes.length; j++) {
         const a = this.nodes[i]!, b = this.nodes[j]!;
         const g = Math.max(gapOf(a.box[0]!, b.box[0]!), gapOf(a.box[1]!, b.box[1]!),
           gapOf(a.box[2]!, b.box[2]!));
         if (g > LINK_GAP) continue;
-        const dist = Math.max(0.25, Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z));
-        this.links.push({ a: i, b: j, dist, ax: 0, ay: 0, az: 0 });
+        const key = linkKey(i, j);
+        if (has.has(key)) continue;
+        has.add(key);
+        this.links.push({ a: i, b: j, dir: 'both', pipe: false,
+          dist: Math.max(0.25, Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z)) });
       }
     }
     this.containers = new Map();
@@ -199,7 +238,11 @@ export class ItemSim {
       if (curNode.type === 'ItemConveyor' && (this.chan(curNode.ci, 0) ?? 1) <= 0
         && cur !== from) continue;
       for (const l of this.links) {
-        const other = l.a === cur ? l.b : l.b === cur ? l.a : -1;
+        // THE GAME'S OWN WIRING: an item cable is DIRECTIONAL (the port
+        // names pushed it at load); adjacency fallback pairs flow both ways
+        const other =
+          (l.a === cur && l.dir !== 'ba') ? l.b
+            : (l.b === cur && l.dir !== 'ab') ? l.a : -1;
         if (other < 0 || prev.has(other)) continue;
         prev.set(other, cur);
         q.push(other);
@@ -235,9 +278,11 @@ export class ItemSim {
     this.flying = this.flying.filter(f => {
       const a = this.nodeOf(f.from), b = this.nodeOf(f.to);
       if (!a || !b) return false;
+      const ai = this.nodes.indexOf(a), bi = this.nodes.indexOf(b);
       const link = this.links.find(l =>
-        (l.a === this.nodes.indexOf(a) && l.b === this.nodes.indexOf(b))
-        || (l.b === this.nodes.indexOf(a) && l.a === this.nodes.indexOf(b)));
+        (l.a === ai && l.b === bi && l.dir !== 'ba')
+        || (l.b === ai && l.a === bi && l.dir !== 'ab'));
+      if (!link) return false;                           // the cable was removed
       f.t += (dt * HOP_SPEED) / Math.max(0.25, link?.dist ?? 1);
       if (f.t < 1) return true;
       if (b.role === 'process') { f.item = f.item === 'Rock' ? 'CrushedRock' : f.item; }
@@ -245,7 +290,7 @@ export class ItemSim {
       // relay: push to the next hop
       const path = this.route(b.ci);
       const nxt = path?.find(ci => ci !== b.ci && ci !== a.ci);
-      if (!nxt && nxt !== 0) return false;               // dead end: item gone
+      if (nxt === undefined) return false;               // dead end: item gone
       f.from = b.ci; f.to = nxt; f.t = 0;
       return true;
     });

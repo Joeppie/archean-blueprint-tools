@@ -9,6 +9,7 @@
 // dialog renders — the helpers run headless in vitest; only the wasm pump
 // needs a browser.
 import type { Blueprint, BlueprintComponent } from './format';
+import { flatToTopMap, flatEndpointTop } from './flat';
 import { atlasJsonPaths } from './models';
 import { CRAFTER_BUILTIN } from './crafterbuiltin';
 import { blockAt, functionAt, includeOrder, projectBlocks, projectFunctions, type XCBlock } from './xcproject';
@@ -365,10 +366,17 @@ function compOnIo(bp: Blueprint, ci: number, io: number): BlueprintComponent | u
  *  carries the computer's LOCAL port (device_at(i).port, alias→io, and
  *  ABI 16's input.N firing all route through it). */
 const ROUTER_RE = /^(Mini)?Router$|DataBridge$|DataJunction$/;
-const dataPeer = (p: any, idx: number): { other: number; mine: string; theirs: string } | null => {
+const dataPeer = (p: any, idx: number, top?: (flat: number) => number | undefined
+): { other: number; mine: string; theirs: string } | null => {
+  // THE FLATTENED-ENDPOINT LAW (engine/flat.ts): pipe endpoints index the
+  // FLATTENED array; `top` translates them to top-level ci (nested
+  // content is undefined -> not in this computer's device space).
   if ((p.type ?? 'data') !== 'data') return null;
-  if (p.a_component === idx) return { other: p.b_component, mine: String(p.a_port), theirs: String(p.b_port) };
-  if (p.b_component === idx) return { other: p.a_component, mine: String(p.b_port), theirs: String(p.a_port) };
+  const a = top ? top(p.a_component) : p.a_component;
+  const b = top ? top(p.b_component) : p.b_component;
+  if (a === undefined || b === undefined) return null;
+  if (a === idx) return { other: b, mine: String(p.a_port), theirs: String(p.b_port) };
+  if (b === idx) return { other: a, mine: String(p.b_port), theirs: String(p.a_port) };
   return null;
 };
 const dataPort = (port: string): number | null => {
@@ -382,13 +390,15 @@ export function xenonDevices(bp: Blueprint, ci: number): XCDevice[] {
   const byCi = new Map<number, number>();        // component idx -> io (first path wins)
   const byAlias = new Set<string>();
   const pipes: any[] = (bp.data as any).pipes ?? [];
+  const fmap = flatToTopMap(bp);
+  const top = (flat: number) => flatEndpointTop(fmap, flat);
   const add = (idx: number, io: number) => {
     if (idx === ci || byCi.has(idx)) return;
     byCi.set(idx, io);
   };
   // ① devices plugged straight into a data port of this computer
   for (const p of pipes) {
-    const dp = dataPeer(p, ci);
+    const dp = dataPeer(p, ci, top);
     if (!dp) continue;
     const io = dataPort(dp.mine);
     const peer = comps[dp.other];
@@ -405,7 +415,7 @@ export function xenonDevices(bp: Blueprint, ci: number): XCDevice[] {
   while (queue.length) {
     const { dev, io } = queue.shift()!;
     for (const p of pipes) {
-      const dp = dataPeer(p, dev);
+      const dp = dataPeer(p, dev, top);
       if (!dp) continue;
       if (dataPort(dp.theirs) === null && dataPort(dp.mine) === null) continue;
       const other = comps[dp.other];

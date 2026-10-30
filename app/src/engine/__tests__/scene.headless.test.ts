@@ -821,13 +821,20 @@ describe('THE LIVING CRAFT (v1.15.6, fixture 9000009040 — tools/make_live_test
     expect(t.dash, 'ToggleButton + PushButton + Screen element boxes').toBe(3);
   });
 
-  test('a lamp lens rides the io-bus glow channels', async () => {
+  test('THE GLOW LAW (WP3): the lamp lens rides the glow channels — lit, casting NOTHING', async () => {
     const e = openCraft('9000009040');
     await withRealModels(e, [6]);
     // the lens material starts dark (unlit); a full-white glow lights it
+    expect(e.castLightCount(), 'the scene casts ZERO point/spot lights').toBe(0);
+    const dark = e.lampGlow(6);
+    expect(dark, 'the fixture lamp built its lens').toBeTruthy();
+    expect(dark!.r, 'an unlit lamp lens is near-black').toBeLessThan(0.2);
     e.applyDevicePoses(new Map([[6, { glow: { r: 1, g: 1, b: 1 } }]]));
+    const lit = e.lampGlow(6)!;
+    expect(lit.r, 'the lamp SHOWS as being on (bright face)…').toBeGreaterThan(0.9);
+    expect(e.castLightCount(), '…and a lit lamp STILL casts no light (editor perf law)')
+      .toBe(0);
     // no throw + a second identical frame is a cheap no-op (diff-only apply)
     e.applyDevicePoses(new Map([[6, { glow: { r: 1, g: 1, b: 1 } }]]));
-    expect(e.pressTargets().dash).toBeGreaterThanOrEqual(0);
   }, 60_000);
 });

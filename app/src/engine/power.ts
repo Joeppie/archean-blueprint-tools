@@ -28,6 +28,7 @@
 import type { Blueprint, BlueprintComponent } from './format';
 import type { ModelManifest } from './models';
 import { compGroup, portRole, type PortRole } from './wiremodel';
+import { flatToTopMap, flatEndpointTop } from './flat';
 
 export type PowerKind = 'lowvoltage' | 'highvoltage';
 
@@ -78,15 +79,20 @@ export function craftPowerNet(bp: Blueprint, manifest: ModelManifest | null): Po
   if (!net.hasPower) return net;
 
   const edges: Edge[] = [];
+  // THE FLATTENED-ENDPOINT LAW (engine/flat.ts): pipe endpoints index the
+  // FLATTENED array (nested content before its Build) — map to top-level
+  // ci, nested content is outside the top-level grid.
+  const fmap = flatToTopMap(bp);
   for (const p of (bp.data.pipes ?? []) as { type?: string; a_component: number; a_port: string;
     b_component: number; b_port: string }[]) {
+    const a = flatEndpointTop(fmap, p.a_component), b = flatEndpointTop(fmap, p.b_component);
+    if (a === undefined || b === undefined) continue;
     const kind = pipeKind(p,
-      { type: comps[p.a_component]?.type ?? '', port: p.a_port },
-      { type: comps[p.b_component]?.type ?? '', port: p.b_port }, manifest);
+      { type: comps[a]?.type ?? '', port: p.a_port },
+      { type: comps[b]?.type ?? '', port: p.b_port }, manifest);
     if (!isPowerKind(kind)) continue;
-    if (p.a_component === p.b_component) continue;
-    if (!comps[p.a_component] || !comps[p.b_component]) continue;
-    const ga = groupOf(p.a_component, kind), gb = groupOf(p.b_component, kind);
+    if (a === b) continue;
+    const ga = groupOf(a, kind), gb = groupOf(b, kind);
     const aRole = portRole(p.a_port), bRole = portRole(p.b_port);
     // the wiremodel's physics: power never runs device↔device, never into a
     // hub's INPUT from downstream, never OUT↔OUT / IN↔IN
@@ -95,7 +101,7 @@ export function craftPowerNet(bp: Blueprint, manifest: ModelManifest | null): Po
     if (aRole === 'out' && bRole === 'out') continue;
     if ((ga === 'hub' && aRole === 'in' && gb === 'device')
       || (gb === 'hub' && bRole === 'in' && ga === 'device')) continue;
-    edges.push({ a: p.a_component, b: p.b_component, kind, aRole, bRole });
+    edges.push({ a, b, kind, aRole, bRole });
   }
 
   // BFS: a source energises its net; a hub conducts to every edge on its

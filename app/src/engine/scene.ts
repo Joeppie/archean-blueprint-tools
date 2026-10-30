@@ -864,6 +864,26 @@ export class Engine {
 
   invalidate() { this.needRender = true; }
 
+  /** test seam (WP3): the lamp lens' live glow colour at ci */
+  lampGlow(ci: number): { r: number; g: number; b: number } | null {
+    const l = this.lampLenses.get(ci);
+    if (!l) return null;
+    const c = (l.material as MeshBasicMaterial).color;
+    return { r: c.r, g: c.g, b: c.b };
+  }
+  /** test seam (WP3 THE GLOW LAW): the scene casts light with the FIXED
+   *  render rig only — the sim lamp law (LIVING-CRAFT.md § 1) is a lit
+   *  FACE (MeshBasic lens / emissive), NEVER a THREE PointLight/SpotLight:
+   *  casting lights per lamp is too heavy for an editor (we, 2026-10-31). */
+  castLightCount(): number {
+    let n = 0;
+    this.scene.traverse(o => {
+      const x = o as { isPointLight?: boolean; isSpotLight?: boolean };
+      if (x.isPointLight || x.isSpotLight) n++;
+    });
+    return n;
+  }
+
   /** v1.16.10 ITEMS ON BELTS (engine/itemsim.ts): the riding items render
    *  as small tumbling cubes on the belt chain. SIM IS A VIEW — an overlay
    *  in the model root, ONE instanced mesh, nothing touches the blueprint. */

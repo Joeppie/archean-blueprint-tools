@@ -34,6 +34,7 @@
 // answers what the scene renders. vitest pins the laws.
 
 import type { Blueprint, BlueprintComponent } from './format';
+import { flatToTopMap, flatEndpointTop } from './flat';
 
 export interface JointDrive { angle?: number; slide?: number }
 
@@ -85,10 +86,15 @@ export function drivesType(type: string): boolean {
 export function dataNeighbours(bp: Blueprint, ci: number): { ci: number; type: string; alias: string }[] {
   const comps = bp.data.components as BlueprintComponent[];
   const out: { ci: number; type: string; alias: string }[] = [];
+  // THE FLATTENED-ENDPOINT LAW (engine/flat.ts): translate pipe endpoints
+  // to top-level ci; nested content (null) stays outside the sim.
+  const fmap = flatToTopMap(bp);
   for (const p of (bp.data.pipes ?? []) as { type?: string; a_component: number; b_component: number }[]) {
     if ((p.type ?? 'data') !== 'data') continue;
-    const other = p.a_component === ci ? p.b_component : p.b_component === ci ? p.a_component : -1;
-    if (other < 0 || other >= comps.length) continue;      // nested: not simulated
+    const flatOther = p.a_component === ci ? p.b_component : p.b_component === ci ? p.a_component : -1;
+    if (flatOther < 0) continue;
+    const other = flatEndpointTop(fmap, flatOther);
+    if (other === undefined) continue;                     // nested: not simulated
     const oc = comps[other];
     if (oc && drivesType(oc.type) && !out.some(d => d.ci === other))
       out.push({ ci: other, type: oc.type, alias: typeof oc.alias === 'string' ? oc.alias : '' });
