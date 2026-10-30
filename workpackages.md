@@ -261,8 +261,12 @@ Gap census found three hard gaps between the farm and the appkit protocol
 - [x] pins: vmharness boots the REAL dev kit — the TETRIS manifest reaches
       the chipos VM, ChipOS's os_log announces it, the HELLO app joins too;
       events route BACK (open/tap fire the app's input.N → $kit_rx).
-- [ ] EarthNAV (3828827922) joins the same registry as a module (alias
-      app-* convention) — census + pin.
+- [x] EarthNAV (3828827922) joins the same registry as a module (alias
+      app-earthnav; the 9 MB world-data disk compiles and publishes its
+      manifest; registry pin at the VM tier, @slow).
+- [x] e2e chipos.spec (2 legs): auto-boot of the four, the manifest
+      crossing pumps into the IDE bus rows, the relay assert, the power
+      chip + battery panel.
 
 ## WP2 — HDD INSERT = BOOT (DONE at the law level)
 The game: a Computer's hdd bay holds the disk whose code runs; our model is
@@ -299,15 +303,69 @@ game-rate tick, items ride belt→belt→container/crafter as a VIEW overlay
 consumes recipe inputs from linked containers (crafterbuiltin law, sim-view
 only). Nothing writes the blueprint.
 
-## WP7 — JIMMY'S ADVENTURE RIDES IT (DONE)
+## WP7 — JIMMY'S ADVENTURE RIDES IT (DONE — probe verdict below)
 app/tools/jimmyprobe.mjs: node census over 3334698274 — every programmable
 computer booted (power-gated), devicesim stepped, energy census, crafter
 installation identified; report = crash list + device table. This is the
 driving audit for "as much of the game as we can simulate".
 
-## WP8 — GATES + TRiage (DONE)
+## WP8 — GATES + TRIAGE (IN PROGRESS — final full runs at the end)
 npm test + tsc + touched e2e tags + test:e2e:fast. NEW e2e kept minimal (one
 chipos end-to-end leg; the sound/item laws stay at vitest/scene tiers).
 docs: LIVING-CRAFT.md §§ extend, docs/HISTORY.md provenance, FORMAT.md
 appkit-protocol section. NO Pages deploy (standing: deploy only on the
 user's explicit ask).
+
+
+## Probe verdicts (the audit, post-fixes)
+- jimmyprobe on 3334698274: FARM [crafter-28:41, GIANTPLANE:41] (the
+  flat-endpoint fix boots Jimmy's computer + the Crafter built-in);
+  ENERGY +637 kW net (744 kW RTG, the HV drill at 100 kW, 600 kWh at
+  100%); ITEMS ⛏ 194 mined / 📦 194 (53 riding the item cables, 141 in
+  container 27); PRESS 27 dashboard pressables; ZERO console errors,
+  45 ms loads. "Jimmy's crafter installation works": the item cables
+  wire drill→container27→junction25→{crusher55, crafter28, conveyor54},
+  the built-in program cycles on the farm, the containers publish their
+  KV content onto the bus where programs READ it.
+- jimmyprobe BEFORE the flat fix: FARM [] + ITEMS 0 — both root-caused
+  to the flattened endpoints (see docs/HISTORY.md §12, engine/flat.ts).
+
+## QUESTIONS RESOLVED autonomously (the standing ask: "save up all
+## questions and do not get blocked" — none blocked; decisions + grounds)
+- Q: does "lights show as being on, not cast" need a new setting? A: no
+  setting — the scene lamp lens is MeshBasic (a lit FACE) by
+  construction; pinned so (GLOW LAW test, castLightCount = 0). DONE.
+- Q: the game's drill rate in the EDITOR (no terrain to drill)? A: the
+  wiki's rates stand (10/s LV, 100/s HV) with the wiki's own licence
+  (GroundAnchor + power + ch0 gate); the rocks are the sim's 'Rock'
+  item. DONE (stylised mining, documented).
+- Q: batteries "go negative" — floor where? A: one full capacity below
+  zero (deep-discharge floor), chip shows deficit; ALWAYS feeds (power
+  reachability untouched — the standing rule). DONE.
+- Q: the Crafter: run the game's real automation? A: the built-in
+  PROGRAM rides the farm (it boots and cycles — observable); the ITEM
+  crafting is a stylised cycle (economy.json recipes, container KV
+  feed). Grounds: the game's crafting UI state is server-side, not in
+  the blueprint. DONE (documented boundary in LIVING-CRAFT.md § 10).
+- Q: SteamTurbine 27 MW with no fluid loop? A: gated on a heat source
+  PRESENT (reactor/geothermal), else 0 W — honest seat, documented.
+  DONE.
+- Q: item links: adjacency or cables? A: discovered on Jimmy — the
+  game WIRES items with `type: "item"` pipes (port names = direction);
+  cables primary, touching-AABBs fallback. DONE (FORMAT §item cable).
+- Q: nested (subgrid) parts in the sim? A: stay outside the top-level
+  sim space (flat endpoints → null), matching the existing
+  dataNeighbours law. DONE (documented).
+- Q: ChipOS's wizard gates the home screen — click through in e2e? A:
+  the registry law is pinned at the VM tier (xa_alias) + the bus rows
+  at the e2e tier; the click-through wizard + app-tile pixel journey is
+  a Pages-tier UX follow-up (kept OUT of the pinned laws, documented).
+  OPEN (documented, not blocking).
+- Q: ship the ChipOS/EarthNAV workshop files in the repo (3rd-party
+  code by Chip Patton)? A: yes — testdata corpus precedent (NOTICE §2:
+  CC-attribution spirit, rights-holder issues handled amicably; the
+  files are published workshop data, unmodified). DONE (NOTICE covers).
+- Q: game AUDIO assets for the sounds? A: NO asset copies (NOTICE: game
+  data belongs to the developer) — procedural WebAudio twins of the
+  LAWS (switch click, relay clack, drill whir, anchor chain, alarms).
+  DONE.
