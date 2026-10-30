@@ -324,6 +324,14 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   — the dock cell, the 3-D face and the program's screen_w are the panel.
   Sizes from the WIKI/game scripts, never guessed: Computer 200×160,
   Crafter 200×200, MiniComputer has NO screen (FORMAT §Computer).
+  THE PLAIN TARGET FEEDS ITS DEVICE SCREEN (v1.16.9, we: "the computer's
+  screen never updates unless I open the xenoncode screens at least once
+  before"): a program draws on `main#0` while the canvas/3-D face asks
+  under the deviceScreen key — the pump's want-set PULLS `main#0` in when
+  a mirror key is demanded (the mirror can only share what was FETCHED);
+  the face's own VM twin is never painted by the program. Pin:
+  `xenonpump.test.ts` (real XenonPump, scene feed key only); probe
+  `app/tools/invadersfaceprobe.mjs`.
 - THE COMPUTER FARM (v1.15.0 P9 slice C): MULTIPLE MiniComputers co-run —
   every XenonRun carries its OWN wasm instance (`xenonInstantiate`), the
   `xenonFarm` registry (keyed by comp.ci, `MAX_VM` evicts the oldest)

@@ -4962,3 +4962,24 @@ model fan-out is progressive-BY-DESIGN after the pass (holo stand-ins,
 LITE tier); moving it is a behavior change, kept. Pins: THE SCREEN-VERSION
 law (idle stable / write bumps / screen_copy counts on DESTINATION);
 behavior net xenonhud+playerhud+living+xenonfarm+phoneux+app green.
+
+## v1.16.9 — THE PLAIN TARGET FEEDS ITS DEVICE SCREEN (2026-10-30)
+
+we: "when I open space invaders, the computer's screen never updates unless
+I open the xenoncode screens at least once before". Census: a Computer's
+program draws on the PLAIN TARGET (main#0), while the 3-D face asks pixels
+under the deviceScreen key (wsDeviceSlug computer_13#0) — the pump's
+mirror shares main#0's pixels under the face key, but the mirror can only
+share what was FETCHED, and the want-set carried main#0 only while a
+Screens-tab/dock canvas demanded it. The face's own want entry was the VM
+surface with the face's NAME — a surface the program never writes (black
+forever). So the arcade monitor lived only while an IDE screens tab (or a
+dock zoom) kept main#0 in the want-set — the user's "open the screens at
+least once" workaround was supplying the fetch. Reproduced red at the
+pump's own tier (xenonpump.test.ts, jsdom, the real XenonPump with ONLY
+the scene feed key — 60 s of polling, lum 0) — the probe
+(app/tools/invadersfaceprobe.mjs, farmfeedprobe's face-lum pattern) shows
+max=255 game sprites after the fix. The law: a deviceScreen key in the
+want-set PULLS main#0 into it (ABI-15 version-gated, so the fetch runs
+only when the game repaints). vitest 1039 + the xenon*/phoneux/living/app
+specs green.

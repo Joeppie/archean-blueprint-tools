@@ -2320,6 +2320,15 @@ export class XenonPump {
     // surfaces: ALL keys each tick; pixels only for keys a canvas (this
     // panel) or a 3-D dashboard feed actually shows
     const want = new Set<string>([...this.canvases.keys(), ...this.feedKeys]);
+    // THE PLAIN TARGET FEEDS ITS DEVICE SCREEN (v1.16.9, we: "when I open
+    // space invaders, the computer's screen never updates unless I open the
+    // xenoncode screens at least once before"): a Computer's program draws
+    // on the plain target (main#0), while the canvas/3-D face asks under
+    // the deviceScreen key — the mirror below can only share what was
+    // FETCHED, so the mirror key's demand pulls main#0 into the want-set
+    // (ABI-15 version-gated: fetched only when the game repaints).
+    for (const sc of this.comp?.screens ?? [])
+      if (sc.deviceScreen && want.has(`${slug(sc.alias)}#${sc.channel}`)) want.add('main#0');
     const next = new Map<string, XenonSurface>();
     const fetched = new Set<string>();        // surfaces FETCHED this cycle
     for (const meta of metas) {
