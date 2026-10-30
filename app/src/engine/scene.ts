@@ -187,6 +187,9 @@ const ORTHO_KEY = 'archean-app-ortho';
  *  the node probe tier never attaches, the seam below persists on toggle). */
 const SKIN_FLAT_KEY = 'archean-app-skin-flat';
 const SKY_HEX = 0x8fb4d8;
+const ITEM_ROCK = new Color().setRGB(0.42, 0.38, 0.33, LinearSRGBColorSpace);
+const ITEM_CRUSHED = new Color().setRGB(0.60, 0.46, 0.25, LinearSRGBColorSpace);
+const ITEM_METAL = new Color().setRGB(0.72, 0.74, 0.78, LinearSRGBColorSpace);
 /** the perspective vertical FOV — ONE constant, so the ortho ↔ persp
  *  framing swap (setProjection) round-trips exactly */
 const PERSP_FOV = 55;
@@ -349,6 +352,7 @@ export class Engine {
    *  cached stand-in materials (disposeScene must never dispose these) */
   private shared = new WeakSet<object>();
   private unitBox = new BoxGeometry(1, 1, 1);
+  private itemMesh: InstancedMesh | null = null;
   private matCache = new Map<string, MeshStandardMaterial>();
   private occ: MeshStandardMaterial | null = null;   // shared occ-box material
   /** ONE load-time hologram material + the count of real models still
@@ -859,6 +863,41 @@ export class Engine {
   }
 
   invalidate() { this.needRender = true; }
+
+  /** v1.16.10 ITEMS ON BELTS (engine/itemsim.ts): the riding items render
+   *  as small tumbling cubes on the belt chain. SIM IS A VIEW — an overlay
+   *  in the model root, ONE instanced mesh, nothing touches the blueprint. */
+  applyItemFlow(items: { item: string; x: number; y: number; z: number }[]): void {
+    if (!items.length) {
+      if (this.itemMesh?.visible) { this.itemMesh.visible = false; this.invalidate(); }
+      return;
+    }
+    if (!this.itemMesh) {
+      const mat = new MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, metalness: 0 });
+      this.itemMesh = new InstancedMesh(this.unitBox, mat, 240);
+      this.itemMesh.frustumCulled = false;
+      this.itemMesh.name = 'itemflow';
+      this.root.add(this.itemMesh);
+    }
+    const m = this.itemMesh;
+    m.visible = true;
+    const dummy = new Object3D();
+    const n = Math.min(items.length, 240);
+    for (let i = 0; i < n; i++) {
+      const it = items[i]!;
+      dummy.position.set(it.x, it.y, it.z);
+      dummy.rotation.set(it.x * 3.7, it.y * 2.9, it.z * 4.1);
+      dummy.scale.setScalar(0.075);
+      dummy.updateMatrix();
+      m.setMatrixAt(i, dummy.matrix);
+      m.setColorAt(i, it.item === 'Rock'
+        ? ITEM_ROCK : it.item === 'CrushedRock' ? ITEM_CRUSHED : ITEM_METAL);
+    }
+    m.count = n;
+    m.instanceMatrix.needsUpdate = true;
+    if (m.instanceColor) m.instanceColor.needsUpdate = true;
+    this.invalidate();
+  }
 
   /** v1.11.0 SKY env (XenonViewer js/viewer.js skyEnvironmentTexture, day
    *  stops, fetched 2026-10-25 — NOTICE §2): the dev viewer lights metals

@@ -16,6 +16,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { sabSupported } from '../engine/xenoncode';
 import { fmtW, type EnergyStatus } from '../engine/energy';
+import type { ItemSimCensus } from '../engine/itemsim';
 
 export type Mode = 'clean' | 'view' | 'edit' | 'wire' | 'flight' | 'aero';
 
@@ -73,6 +74,9 @@ interface Props {
   /** v1.16.10 THE POWER FLOW (engine/energy.ts): the live grid balance —
    *  the chip warns (low/deep-discharge), the grid never blacks out. */
   energy?: EnergyStatus | null;
+  /** v1.16.10 ITEMS ON BELTS (engine/itemsim.ts): the live inventory of
+   *  the conveyor chains (drill → belts → containers/crafter). */
+  items?: ItemSimCensus | null;
   liveN?: number;
   onToggleLive?: () => void;
   children?: React.ReactNode;              // right side: panel toggle etc.
@@ -148,6 +152,7 @@ export default function TopBar(p: Props) {
   // bars keep their double-clicks — the v1.15.0 extras-pin catch).
   const [menusOpen, setMenusOpen] = useState(0);
   const [energyOpen, setEnergyOpen] = useState(false);
+  const [itemsOpen, setItemsOpen] = useState(false);
   const reportOpen = (o: boolean) => setMenusOpen(m => m + (o ? 1 : -1));
   return (
     // mobile: the mode bar cannot share one row with File/Edit/Tools/Save/⚙
@@ -441,6 +446,48 @@ export default function TopBar(p: Props) {
                   </div>
                 </div>
               )}
+            </div>
+          )}
+        </div>
+      )}
+      {/* v1.16.10 THE ITEM FLOW chip: rocks mined, items riding belts,
+          the crafter's output — click for the container census. */}
+      {p.items && (p.items.mined > 0 || p.items.flying > 0 || p.items.crafted > 0) && (
+        <div className="relative">
+          <button data-testid="items-chip"
+            title={`item flow — ${p.items.mined} mined, ${p.items.flying} riding belts, ${p.items.crafted} crafted (click for the containers)`}
+            onClick={() => setItemsOpen(v => !v)}
+            className="ksp-btn flex items-center gap-1 px-2 py-1 text-[11px] leading-none tabular-nums text-[#e8c39a] border-[#e8c39a]/40">
+            ⛏ <span>{p.items.mined}</span>
+            <span className="opacity-90">📦{p.items.flying + p.items.containers.reduce(
+              (a, c) => a + Object.values(c.counts).reduce((x, y) => x + y, 0), 0)}</span>
+            {p.items.crafted > 0 && <span className="text-[#9cffb4]">🔨{p.items.crafted}</span>}
+          </button>
+          {itemsOpen && (
+            <div data-testid="items-panel"
+              className="absolute right-0 top-full z-[70] mt-1 w-64 rounded-lg border border-[#2c333d] bg-[#161a20]/95 p-3 text-[11px] text-[#c8ced8] shadow-xl">
+              <div className="mb-1 font-semibold text-[#e8edf4]">
+                ⛏ mined {p.items.mined} · 📦 in transit {p.items.flying} · 🔨 crafted {p.items.crafted}
+              </div>
+              {p.items.containers.length === 0 && (
+                <div className="text-[#8b93a1]">the chains are linked — items ride</div>
+              )}
+              {p.items.containers.map(c => (
+                <div key={c.ci} className="border-b border-[#22262e] py-1">
+                  <div className="font-medium text-[#e8edf4]">
+                    {c.alias || `container ${c.ci}`}
+                  </div>
+                  {Object.entries(c.counts).map(([item, n]) => (
+                    <div key={item} className="flex justify-between pl-2">
+                      <span>{item}</span><span className="tabular-nums">{n}</span>
+                    </div>
+                  ))}
+                </div>
+              ))}
+              <div className="mt-1 text-[10px] text-[#8b93a1]">
+                {p.items.linked} item links, {p.items.sources} mining source
+                {p.items.sources === 1 ? '' : 's'} (sim view — the blueprint stays untouched)
+              </div>
             </div>
           )}
         </div>

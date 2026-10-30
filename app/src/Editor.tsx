@@ -58,6 +58,7 @@ import { fetchPlayerHuds, fetchPlayerHud, savePlayerHud, playerHudFromFiles,
 import { DeviceSim, dataNeighbours } from './engine/devicesim';
 import { craftPowerNet, computerPowered } from './engine/power';
 import { EnergySim, type EnergyStatus } from './engine/energy';
+import { ItemSim, type ItemSimCensus } from './engine/itemsim';
 import { chanSites, rectSites, rectsAt, type ChanSite, type RectSite } from './engine/xcsites';
 import { loadManifest, peekManifest } from './engine/models';
 import { beaconNet } from './engine/beaconnet';
@@ -173,6 +174,11 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // heartbeat as the actuator sim; the TopBar chip warns (never blackouts).
   const energyRef = useRef(new EnergySim());
   const [energy, setEnergy] = useState<EnergyStatus | null>(null);
+  // v1.16.10 ITEMS ON BELTS (WP6): the drill→belt→container chain rides
+  // the same heartbeat; container contents publish on the io bus (the
+  // wiki's data-port KV law) so programs READ the inventory.
+  const itemRef = useRef(new ItemSim());
+  const [items, setItems] = useState<ItemSimCensus | null>(null);
   const latchedRef = useRef(new Map<string, boolean>());
   const sitesRef = useRef(new Map<number, { chan: ChanSite[]; rect: RectSite[] }>());
   /** LIVE CRAFT: the farm auto-boots the craft's programmed, POWERED
@@ -199,6 +205,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       name: j.name, limits: j.limits as [number, number, number] | undefined })));
     energyRef.current.load(bp, powerNet);
     setEnergy(energyRef.current.state());
+    itemRef.current.load(bp, powerNet?.hasPower ? powerNet.powered : null);
+    setItems(itemRef.current.census());
     latchedRef.current.clear();
     sitesRef.current.clear();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -209,6 +217,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   useEffect(() => xenonFarm.observeDevices((ci, type, ch, v) => {
     simRef.current.write(ci, ch, v);
     energyRef.current.write(ci, ch, v);   // gates: lamps, belts, generators
+    itemRef.current.write(ci, ch, v);     // gates: drill, belts
     if (type === 'Dashboard') simRef.current.setLed(ci, ch, v > 1 ? v / 255 : v);
   }), []);
   // AUTO-BOOT (we: "computers should start when a craft is loaded in"):
@@ -223,6 +232,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     xenonFarm.autoboot(xenonComps.filter(c => !net?.hasPower || computerPowered(net, c.ci)));
     energyRef.current.clear();
     setEnergy(energyRef.current.state());
+    itemRef.current.clear();
+    setItems(itemRef.current.census());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bp, live, powerNet]);
   // ── v1.14.0 P9 slice A (we: "allow us to edit the code for at least HUDs
@@ -480,7 +491,15 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       simRef.current.step(0.04);
       engineRef.current?.applyDevicePoses(simRef.current.snapshot());
       energyRef.current.step(0.04);
-      if (++beats % 15 === 0) setEnergy(energyRef.current.state());   // ~1.6 Hz
+      itemRef.current.step(0.04, (alias, ch, text) => {
+        // the container's content as the data-port KV text, into the bus
+        xenonFarm.bus.write(alias, ch, text, {} as never, null);
+      });
+      engineRef.current?.applyItemFlow(itemRef.current.snapshot());
+      if (++beats % 15 === 0) {
+        setEnergy(energyRef.current.state());
+        setItems(itemRef.current.census());
+      }
     }, 40);
     return () => window.clearInterval(t);
   }, []);
@@ -2034,6 +2053,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       <TopBar mode={mode} onMode={setMode} dirty={dirty} title={name} craftId={craft}
         live={live} liveN={xenonFarm.pumps.filter(p => p.comp).length}
         energy={energy}
+        items={items}
         onToggleLive={xenonComps.length ? () => {
           if (live) { xenonFarm.closeAll(); setLive(false); }
           else {
