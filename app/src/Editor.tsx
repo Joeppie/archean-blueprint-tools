@@ -382,17 +382,14 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       p.setFeedKeys(eng.screenFeedKeys());
       for (const s of p.surfaces.values())
         if (s.pixels) eng.pushScreen(s.key, s.w, s.h, s.pixels);
-      // v1.15.6 THE LIVING CRAFT tick (rides THE 3-D LAW cadence — every
-      // pump cycle): the PilotSeat flight channels feed the control
-      // surfaces, the sim servos advance one 40 ms step, and the scene
-      // overlays the poses — plates, PANELS (syncSubJoints), lamps, levers.
+      // v1.15.6 THE LIVING CRAFT: the PilotSeat flight channels feed the
+      // control surfaces (the sim STEP itself is on the global heartbeat —
+      // it must run on crafts with NO top-level computer, the dolphin).
       for (const r of p.wsChannels()) {
         const fn = r.label.split(' · ').pop();
         if (fn === 'Roll' || fn === 'Pitch' || fn === 'Yaw')
           simRef.current.writePilot(fn, r.value);
       }
-      simRef.current.step(0.04);
-      eng.applyDevicePoses(simRef.current.snapshot());
     }));
     return () => removers.forEach(r => r());
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -433,6 +430,17 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   //    pump (button_rect evaluates THIS cycle). An UNPOWERED owner warns.
   const warnUnpowered = useCallback((c: XenonComputer) => {
     setToolMsg(`⚠ ${c.alias} has no power — its power port is wired to no source; in-game it stays off`);
+  }, []);
+  // THE SIM HEARTBEAT (v1.16.2, the dolphin catch): the actuator sim steps
+  // on its OWN 25 Hz clock — a craft whose only computers are NESTED (the
+  // dolphin) has NO pump, and a pump-cycle-hook sim never ticks there.
+  // applyDevicePoses is diff-only: an idle sim costs a map swap.
+  useEffect(() => {
+    const t = window.setInterval(() => {
+      simRef.current.step(0.04);
+      engineRef.current?.applyDevicePoses(simRef.current.snapshot());
+    }, 40);
+    return () => window.clearInterval(t);
   }, []);
   // THE CODE BUTTON LAW (we: "when I press the code button for a HUD or
   // computer, or minicomputer … I want of course to open its xenoncode"):
