@@ -1541,6 +1541,18 @@ export class XenonPump {
    *  the channel is the device's, and every computer wired to it reads
    *  the same value). Alias-keyed writes resolve in the shim; devices
    *  this computer is not wired to are ignored there. */
+  /** v1.15.6: resolve a program-side io token (number port or alias string)
+   *  to THIS computer's device table — the component the channel belongs
+   *  to. null = no device (a plain screen channel, an unwired port). */
+  deviceFor(io: string | number | undefined): { ci: number; type: string } | null {
+    if (io === undefined || !this.comp) return null;
+    const s = String(io);
+    const n = Number(s);
+    for (const d of this.comp.devices)
+      if ((Number.isFinite(n) && d.io === n) || (d.alias && d.alias === s))
+        return d.ci !== undefined ? { ci: d.ci, type: d.type } : null;
+    return null;
+  }
   acceptBusWrite(alias: string | number, ch: number, v: number): void {
     // COALESCED v1.15.2 (we: "the sound is slightly clickier in super
     // mario"): between cycles the VM samples inputs ONCE, so only the LAST
@@ -2214,8 +2226,12 @@ export class XenonPump {
           // THE SHARED IO BUS (slice C): the channel value is the DEVICE's
           // — drive the same channel into every OTHER pump wired to this
           // device, so sibling computers' input_number sees my output.
+          // v1.15.6: resolve the writer's io/alias to its XCDevice — the
+          // resolved component identity rides to the actuator tap (the
+          // scene animates the actual part this channel belongs to).
           xenonFarm.bus.write(String(e.io ?? ''), Number(e.port ?? 0),
-            typeof e.v === 'string' ? e.v : Number(e.v ?? 0), this);
+            typeof e.v === 'string' ? e.v : Number(e.v ?? 0), this,
+            this.deviceFor(e.io));
         }
         else if (e.e === 'in') this.reads.set(`${e.io}:${e.port}`, Number(e.v) || 0);
         // ABI 11: the VM announces a program beacon() and its transmits —
@@ -2384,6 +2400,14 @@ export const XC_ABI = 14;
 export class IoBus {
   private values = new Map<string, number | string>();
   private pumps = new Set<XenonPump>();
+  /** v1.15.6 THE ACTUATOR TAP: (device ci, type, ch, value) of every bus
+   *  write, for the craft sim (engine/devicesim.ts) — the io bus finally
+   *  knows WHICH part a channel belongs to, not just its alias string. */
+  private watchers = new Set<(ci: number, type: string, ch: number, v: number) => void>();
+  observeDevices(cb: (ci: number, type: string, ch: number, v: number) => void): () => void {
+    this.watchers.add(cb);
+    return () => { this.watchers.delete(cb); };
+  }
   private key(alias: string | number, ch: number): string {
     return `${String(alias).toLowerCase()}:${ch}`;
   }
@@ -2392,11 +2416,21 @@ export class IoBus {
   /** A pump's 'out' event: record the channel, drive it into the SISTERS.
    *  THE CABLE LAW: the device feeds EVERY wire on the channel — the
    *  writing computer's own port included (game loopback: a program reads
-   *  back what it just wrote). */
-  write(alias: string | number, ch: number, v: number | string, from: XenonPump): void {
+   *  back what it just wrote).
+   *  v1.15.6: when the writer's pump resolved its io/alias to a component
+   *  (XCDevice.ci), the resolved DEVICE identity rides along — the actuator
+   *  tap gets (ci, type, ch, v) and the scene can animate the part. */
+  write(alias: string | number, ch: number, v: number | string, from: XenonPump,
+    dev?: { ci: number; type: string } | null): void {
     this.values.set(this.key(alias, ch), v);
+    if (dev) this.notifyDevice(dev, ch, typeof v === 'number' ? v : Number(v) || 0);
     if (typeof v === 'number')
       for (const p of this.pumps) { void from; p.acceptBusWrite(alias, ch, v); }
+  }
+  /** Fire the actuator tap for one (device, channel, value) (v1.15.6). */
+  notifyDevice(dev: { ci: number; type: string }, ch: number, v: number): void {
+    for (const w of this.watchers)
+      { try { w(dev.ci, dev.type, ch, v); } catch { /* a tap never breaks the cable */ } }
   }
   get(alias: string | number, ch: number): number | string | undefined {
     return this.values.get(this.key(alias, ch));
@@ -2444,6 +2478,44 @@ class Farm {
       if (p.comp) return p;
     }
     return null;
+  }
+  /** v1.15.6 THE ACTUATOR TAP: every bus write, resolved to the device
+   *  component (engine/devicesim.ts drives the physical parts from it). */
+  observeDevices(cb: (ci: number, type: string, ch: number, v: number) => void): () => void {
+    return this.bus.observeDevices(cb);
+  }
+  /** v1.15.6 A HUMAN PRESS on a device (a dashboard element, a 3-D
+   *  button): drive the channel into EVERY pump that has the device on a
+   *  data port — each pump's OWN io number for it (a numeric io is a
+   *  per-computer port, so the write goes through pump.setInput, never a
+   *  shared alias key that would land on the wrong port of a sister).
+   *  The actuator tap fires once for the sim visuals. Returns how many
+   *  computers heard the press. */
+  pressDevice(devCi: number, ch: number, v: number, type = ''): number {
+    let n = 0;
+    for (const p of this.pumps) {
+      const dev = p.comp?.devices.find(d => d.ci === devCi);
+      if (!dev) continue;
+      p.setInput(dev.io, ch, v);
+      n++;
+    }
+    this.bus.notifyDevice({ ci: devCi, type }, ch, v);
+    return n;
+  }
+  /** v1.15.6 AUTO-BOOT (we: "computers should start when a craft is loaded
+   *  in"): boot every computer that has a program — the game boots a
+   *  computer the moment the craft exists (power permitting; the caller
+   *  gates on engine/power.ts). Bounded by MAX_VM (the farm evicts the
+   *  oldest, and an IDE-opened pump re-attaches at the back). */
+  autoboot(comps: XenonComputer[]): XenonComputer[] {
+    const booted: XenonComputer[] = [];
+    for (const comp of comps) {
+      if (this.pumps.some(p => p.comp?.ci === comp.ci)) continue;
+      if (!comp.files.some(f => f.code.trim())) continue;
+      void this.pumpFor(comp).open(comp);
+      booted.push(comp);
+    }
+    return booted;
   }
   closeAll(): void { for (const p of [...this.pumps]) p.close(); }
 }
