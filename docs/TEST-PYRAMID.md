@@ -460,21 +460,23 @@ wall clock):**
   `bootVm(id)` pumps cycles by hand; screen PIXELS come from the shim's RAM
   buffers (`_xc_screen_pixels`), the io bus from the raw `out` events (the
   clocks.test RAW-target law), vars/presses through the same exports the
-  pump uses. xenonvm.test.ts (6 pins, L5 transcriptions of the e2e green
+  pump uses. xenonvm.test.ts (8 pins, L5 transcriptions of the e2e green
   values): PLANE trimsdash census + the stick algebra EXACT (0.8 → −0.8,
   the e2e polled a <−0.3 band); 3381670618 10#0 census + the $disp button
   press (1→0 at px 4,4); the BADGER 36k-line firmware (57 files, the
   'Smart Quad is ready' print, mining-drill alias bus, pilot-screen census,
   globals census — **0.8 s on node**); INVADERS main#0 = the authored
-  200×160 panel (v1.15.2 BUILT-IN PLAIN TARGET, VM side). e2e trimmed
-  (same commits, DOM halves kept): xenon.spec leg 1 → menu/tabs/code/
+  200×160 panel (v1.15.2 BUILT-IN PLAIN TARGET, VM side); THE DEBUGGER
+  STREAMS (tracking gate unarmed = zero recording, pair/depth index
+  alignment + SOURCEFILE-TRUTH bounds, the exact-line PARK site + Start
+  outranks a pending park). xenon.spec legs keep their DOM halves and shed
   validator (lit-pixels + bus rows + stick slider + 2.5 s sleep GONE);
   3381670618 leg → zoom-window real-pointer plumbing + CM hover (litPixels
   + var-flip poll GONE); Badger leg → tabs + console + windowed file (bus
   tab + screens tab + 4 s paint sleep GONE — the leg runs 2.2 s).
   XenonPump.open LAW: a wasm-LOAD failure answers status 'error' (the IDE
   chip) — never an unhandled rejection (the v1.16.5 vitest-catch: jsdom
-  auto-boot fire-and-forget). Numbers: vitest 1019 → **1025**; the
+  auto-boot fire-and-forget). Numbers: vitest 1019 → **1027**; the
   unhandled-rejection ERROR in `npm test` is GONE; e2e matrix runs
   unchanged (trims, not retires — the legs keep their DOM laws, cheaper).
   LESSON: the tier is a DESIGN TOOL again — the stick law's exact −0.8

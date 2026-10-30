@@ -178,6 +178,11 @@ real pointer → 1:1 canvas px, side-tab rendering):
 | craft 3381670618 | 10#0 870×390 census, lit, $disp 1→0 on press(4,4) | zoom-window real-pointer press, vars row, CM hover, clean validator |
 | the Badger | 57 files, print 'Smart Quad is ready', mining-drill bus, pilot-screen lit, globals (0.8 s) | 57 tabs, console tab, windowed 7459-line file |
 | Space Invaders | main#0 + computer-13#0 at the authored 200×160 (v1.15.2 plain target) | screens-btn gate, 19 cockpit keys, Space → the stick |
+| debugger (F10/F11/breakpoints) | tracking gate (unarmed = zero recording), pair/depth alignment + SOURCEFILE-TRUTH bounds, exact-line PARK + Start-outranks-park | F-key routing, break-table UI, CM follow (xenondbg's __XCDBG__ legs stay: real pump) |
+
+The wave also CLEARED dead surface (Phase 5 diet, early): the
+`xenonReady()` shared-singleton boot (no callers since the v1.15.0 farm)
+is deleted with its `modPromise`.
 
 Also v1.16.6: `XenonPump.open` degrades a wasm-LOAD failure to status
 'error' (IDE chip) — no unhandled rejection through fire-and-forget boots

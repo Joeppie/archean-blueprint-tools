@@ -96,3 +96,36 @@ describe('Space Invaders 3288012440 — the built-in screen gate (VM side)', () 
     expect(vm.surface('computer-13#0')).toEqual({ key: 'computer-13#0', w: 200, h: 160 });
   }, 120_000);
 });
+
+describe('THE DEBUGGER STREAMS on the real VM (v1.13.31 contract, VM side)', () => {
+  it('the tracking gate records NOTHING unarmed; armed, pairs + depths align', async () => {
+    const vm = await bootVm('3294880085');
+    vm.step(5);
+    expect(vm.run.cyclePairs(), 'unarmed: zero per-line recording').toEqual([]);
+    vm.run.debugTrack(true);
+    vm.step(2);
+    const pairs = vm.run.cyclePairs();
+    expect(pairs.length, 'armed: the pair stream executes').toBeGreaterThan(0);
+    const depths = vm.run.cycleDepths();
+    expect(depths.length, 'v3: the depth stream is index-aligned with pairs')
+      .toBe(pairs.length);
+    const files = vm.run.sourceFiles();
+    expect(files.length, 'THE SOURCEFILE TRUTH LAW: the VM owns the table').toBeGreaterThan(0);
+    for (const p of pairs)
+      expect(Math.floor(p / 1000000), `pair ${p} file idx in the VM's table`).toBeLessThan(files.length);
+  }, 60_000);
+
+  it('the PARK LAW: requestPause stops the cycle at the EXACT executing line', async () => {
+    const vm = await bootVm('3294880085');
+    vm.run.requestPause();
+    const { pausedAt } = vm.run.cycle();
+    expect(pausedAt, 'xc_cycle answers 2 with a site').not.toBeNull();
+    const files = vm.run.sourceFiles();
+    expect(files[pausedAt!.idx], 'the park site is a VM sourcefile + line')
+      .toBeTruthy();
+    expect(pausedAt!.line).toBeGreaterThan(0);
+    vm.run.pauseCancel();
+    vm.step(5);
+    expect(vm.run.running, 'Start outranks a pending park').toBe(true);
+  }, 60_000);
+});

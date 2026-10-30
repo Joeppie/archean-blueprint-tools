@@ -396,6 +396,10 @@ test.describe('Xenon IDE @ui', () => {
     await page.keyboard.press('Escape');
   });
 
+  // v1.16.6 (L5): the VM-side streams are pinned in xenonvm.test.ts — the
+  // TRACKING GATE (unarmed = zero recording), the pair/depth index alignment
+  // + SOURCEFILE-TRUTH bounds, the exact-line PARK site. This leg keeps the
+  // browser laws: F-key routing, the break-table UI and the CM follow.
   test('the debugger: breakpoint pauses, F10 steps LINES, F11 steps in, F8 resumes @slow', async ({ page }) => {
     // (we: "f10 should mean step one line and f11 step into" + "we dont have
     // an overview window for breakpoints" + "I need to know where we are

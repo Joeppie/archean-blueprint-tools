@@ -95,8 +95,6 @@ type Mod = {
   _xc_parse_line(p: number, n: number): number;
 };
 
-let modPromise: Promise<Mod> | null = null;
-
 // v1.13.17 L4 (we: "Why is xenoncode.js so modular and separate … rather
 // than modular but integrated into our code?"): the separation stays
 // DELIBERATE (ABI/license/provenance/build-cadence — XENONCODE_UPSTREAM.md)
@@ -108,21 +106,13 @@ let modPromise: Promise<Mod> | null = null;
 import xcGlueUrl from './xenoncode/xenoncode.js?url';
 import xcWasmUrl from './xenoncode/xenoncode.wasm?url';
 
-export function xenonReady(): Promise<Mod> {
-  if (modPromise) return modPromise;
-  modPromise = import(/* @vite-ignore */ xcGlueUrl)
-    .then((m: { default: (o: Record<string, unknown>) => Promise<Mod> }) =>
-      m.default({ locateFile: () => xcWasmUrl }))
-    .catch(e => { modPromise = null; throw e; });
-  return modPromise;
-}
-
 /** v1.15.0 P9 slice C (COMPUTERFARM): ONE MODULE INSTANCE PER VM. The
  *  shim keeps its whole world (screens, devices, inputs, beacons, events)
  *  in module globals, so co-running computers = co-running emscripten
  *  instances (the glue factory called again; code shared, heap separate).
- *  This replaces the ONE-INTERPRETER mutual-kill of runtimemgr (deleted).
- *  xenonReady() above stays for parse-only use (never booted). */
+ *  This replaces the ONE-INTERPRETER mutual-kill of runtimemgr (deleted) —
+ *  and the v1.16.6 cleanup the shared xenonReady() singleton with it: the
+ *  parse-only helpers (tokenize/#NODES/channels) never touch the module. */
 export function xenonInstantiate(): Promise<Mod> {
   return import(/* @vite-ignore */ xcGlueUrl)
     .then((m: { default: (o: Record<string, unknown>) => Promise<Mod> }) =>
