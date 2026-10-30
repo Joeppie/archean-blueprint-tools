@@ -1279,6 +1279,21 @@ Evidence (ISW-241, 21 triangles):
   direction alone — the next attempt must target the RENDER pass (flush
   components never occluded by coplanar skin) while keeping the prism
   enclosing block faces where blocks and skin coexist.
+- **v1.16.4 LANDED — FLUSH CAP CULL (`app/src/engine/build.ts`
+  `dashPlanes`/`coplanarOverDash`, pins `flushcap.test.ts`, census
+  `app/tools/flatdash.mjs`):** the render-pass attack above is law. A prism
+  cap (or v1.16.3 flat sheet) that lies IN a Dashboard board plane, OVERLAPS
+  the board rect (corner/edge-mid/centroid samples) and FACES THE CONTENT
+  SIDE (parallel normals, cap plane 0..HULL_T proud of the board plane) is
+  DROPPED for the DISPLAY pass only. Back cap + all rim walls verbatim, every
+  non-matching face verbatim, the file untouched — NOTHING moves, so the
+  v1.5.14/15 poke-through failure mode cannot occur (caps over block faces
+  are never culled; blocks own their faces). Measured: Chip's Badger
+  (3326372833) from a seated eye above the chair buried 9/13 dashboards
+  under the +0.025 m cap; after the cull 11/13 are visible in BOTH modes
+  (the 2 `tri` hits are dashboards mounted OUTSIDE a wall panel — the wall
+  occludes them exactly as the blocks did). Viewed from ABOVE a top deck,
+  under-deck dashboards stay occluded — real geometry, identical for blocks.
 - Render symmetry (viewer heuristic, not the game): shared slots weld (0.025 m),
   near-mirror vertex pairs average |x|, near-axis points snap to x = 0.
 

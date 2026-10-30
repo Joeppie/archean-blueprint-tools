@@ -13,7 +13,7 @@ import { getBlockFaceDirections } from './blockshapes';
 import type { Block, Blueprint, Vec3D } from './format';
 import { CELL, isLegacyFile, worldCoord } from './format';
 import { culledBlocksSolids } from './cull';
-import { stitchHullSkin } from './hull';
+import { stitchHullSkin, HULL_T, type V3, type HullFace } from './hull';
 import { resolveColor, type FilePalette, type ResolvedColor } from './palette';
 
 export interface GeomBucket {
@@ -110,6 +110,11 @@ export function buildSolids(bp: Blueprint): SolidBatch {
   // per-record pick/select/pin geometry (tris.triAt reads the RECORDS) are
   // untouched, and authored/odd faces fall through verbatim.
   const skin = stitchHullSkin(bp.data.triangles ?? []);
+  // v1.16.4 FLUSH CAP CULL (see above): caps lying IN a Dashboard board
+  // plane over its rect, facing the content, are dropped — a coplanar skin
+  // never buries a flush dashboard, as in game. Nested Build dashboards are
+  // out of scope (the subgrid addSolids supplies no components).
+  const dplanes = dashPlanes(bp);
   const tri3 = (b: GeomBucket, A: readonly number[], C: readonly number[], E: readonly number[]) => {
     const nrm = faceNormal(A as number[], C as number[], E as number[]);
     const base = b.positions.length / 3;
@@ -118,6 +123,7 @@ export function buildSolids(bp: Blueprint): SolidBatch {
     tris++;
   };
   for (const f of skin.faces) {
+    if (dplanes.length && coplanarOverDash(f, dplanes)) continue;
     const b = bucketForIn(buckets, f.slot, legacy, palette);
     tri3(b, f.tri[0], f.tri[1], f.tri[2]);
   }
@@ -139,6 +145,89 @@ function bucketForIn(buckets: Map<string, GeomBucket>, slot: number, legacy: boo
   let b = buckets.get(key);
   if (!b) buckets.set(key, b = { color, positions: [], normals: [], indices: [] });
   return b;
+}
+
+// ---------------------------------------------------------------------------
+// v1.16.4 FLUSH CAP CULL — the render-pass attack on coplanar-dashboard
+// burial (FORMAT §hull skin measured facts: flush Dashboard content is
+// 0..0.02 m proud of its mount; the game skins triangles EXACTLY coplanar
+// over dashboards and keeps them visible IN GAME; the prism's +0.025 m cap
+// is what buries them). The law we render: A FLUSH COMPONENT IS NEVER
+// OCCLUDED BY COPLANAR SKIN — a prism face whose plane is a Dashboard board
+// plane and whose geometry overlaps the board is dropped WHEN IT FACES THE
+// CONTENT SIDE; the back cap and all rim walls stay, so skin and block faces
+// behind stay enclosed (the v1.5.14/15 poke-through failure mode cannot
+// occur: NOTHING moves, one cap face is culled over the board only).
+// This is NOT the retracted seam-render rule (that keyed on triangle-triangle
+// adjacency; this keys on coplanar component mounts). Sheets (flat mode)
+// have no caps — the cull is a prism-mode law.
+// ---------------------------------------------------------------------------
+
+interface DashPlane {
+  n: V3;            // board normal = R(q)·ẑ, RAW quat (the placement law)
+  u: V3; v: V3;     // board in-plane axes = R(q)·x̂, R(q)·ŷ
+  o: V3;            // board origin (component position)
+  w: number; h: number;   // board extent, m (size_*/100)
+}
+
+export function dashPlanes(bp: Blueprint): DashPlane[] {
+  const out: DashPlane[] = [];
+  for (const c of bp.data.components ?? []) {
+    if (c.type !== 'Dashboard') continue;
+    const w = Number(c.data?.['size_x']) / 100, h = Number(c.data?.['size_y']) / 100;
+    if (!(w > 0) || !(h > 0)) continue;
+    const { w: q, x: i, y: j, z: k } = c.orientation;
+    // R(q) columns (raw quaternion law — AGENTS §ONE RAW QUATERNION LAW)
+    const R: V3[] = [
+      [1 - 2 * (j * j + k * k), 2 * (i * j + k * q), 2 * (i * k - j * q)],      // x̂
+      [2 * (i * j - k * q), 1 - 2 * (i * i + k * k), 2 * (j * k + i * q)],      // ŷ
+      [2 * (i * k + j * q), 2 * (j * k - i * q), 1 - 2 * (i * i + j * j)],      // ẑ
+    ];
+    out.push({
+      n: R[2]!, u: R[0]!, v: R[1]!,
+      o: [c.position.x, c.position.y, c.position.z], w, h,
+    });
+  }
+  return out;
+}
+
+const d3 = (a: V3, b: V3): number => a[0]! * b[0]! + a[1]! * b[1]! + a[2]! * b[2]!;
+
+/** True when face f is a cap lying IN a Dashboard board plane, overlapping
+ *  the board rect, and facing the content side (content sits proud of the
+ *  board along its +normal). Sample-tested (corners, edge midpoints,
+ *  centroid) — a triangle whose samples all miss the rect keeps its cap. */
+export function coplanarOverDash(f: HullFace, planes: DashPlane[]): boolean {
+  if (!planes.length) return false;
+  const [a, b, c] = f.tri;
+  const ux = b[0]! - a[0]!, uy = b[1]! - a[1]!, uz = b[2]! - a[2]!;
+  const wx = c[0]! - a[0]!, wy = c[1]! - a[1]!, wz = c[2]! - a[2]!;
+  const cr: V3 = [uy * wz - uz * wy, uz * wx - ux * wz, ux * wy - uy * wx];
+  const l = Math.hypot(cr[0]!, cr[1]!, cr[2]!) || 1;
+  const nf: V3 = [cr[0]! / l, cr[1]! / l, cr[2]! / l];
+  const cen: V3 = [(a[0]! + b[0]! + c[0]!) / 3, (a[1]! + b[1]! + c[1]!) / 3, (a[2]! + b[2]! + c[2]!) / 3];
+  const samples: V3[] = [a, b, c,
+    [(a[0]! + b[0]!) / 2, (a[1]! + b[1]!) / 2, (a[2]! + b[2]!) / 2],
+    [(b[0]! + c[0]!) / 2, (b[1]! + c[1]!) / 2, (b[2]! + c[2]!) / 2],
+    [(c[0]! + a[0]!) / 2, (c[1]! + a[1]!) / 2, (c[2]! + a[2]!) / 2],
+    cen];
+  for (const p of planes) {
+    if (Math.abs(d3(nf, p.n)) < 0.999) continue;                    // not parallel
+    if (d3(nf, p.n) <= 0) continue;                                 // faces AWAY from content
+    // THE CONTENT-SIDE CAP window: the cap plane sits at +HULL_T FROM the
+    // recorded surface toward the content (a prism cap) or AT the surface
+    // (a v1.16.3 sheet). The board plane IS the recorded surface, so the
+    // content-facing cap measures 0..HULL_T proud of it. A cap BEHIND the
+    // board plane (the back cap, −HULL_T) is never a burial risk: keep it.
+    const proud = d3(nf, cen) - d3(nf, p.o);
+    if (proud < -1e-4 || proud > HULL_T + 1e-4) continue;           // not the content-side cap
+    for (const s of samples) {
+      const q: V3 = [s[0]! - p.o[0]!, s[1]! - p.o[1]!, s[2]! - p.o[2]!];
+      const uu = d3(q, p.u), vv = d3(q, p.v);
+      if (uu >= -1e-6 && uu <= p.w + 1e-6 && vv >= -1e-6 && vv <= p.h + 1e-6) return true;
+    }
+  }
+  return false;
 }
 
 /** Component occupancy proxy boxes (file world → view boxes). */

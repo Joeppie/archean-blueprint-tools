@@ -160,9 +160,14 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   palette — check the owning build before repairing any file.
 - Hull triangles render as closed 0.05 m prisms (all five colours, centred
   caps). DO NOT reintroduce cap-normal welding or shared-edge rim culling —
-  the rims make a prism read solid. Coplanar-dashboard burial is a KNOWN,
-  ACCEPTED open problem: attack the RENDER pass if ever, NEVER the extrusion
-  direction.
+  the rims make a prism read solid. Coplanar-dashboard burial is SOLVED by
+  the FLUSH CAP CULL (`build.ts dashPlanes/coplanarOverDash`): a display cap
+  coplanar over a Dashboard rect facing the content is dropped; extrusion
+  direction stays untouched (v1.5.14/15 ban stands).
+- Hull-skin DISPLAY A/Bs are display-only (file, pick law, selection visuals
+  stay prism law): ⚙ flat sheets (`hull.ts setSkinFlat`, persisted, sheets
+  2-sided zero-thickness) and the v1.12.7 stitch; occlusion questions go to
+  `app/tools/flatdash.mjs` (board-centre pick census, engine's own pick law).
 - `hull.ts stitchHullSkin` is DISPLAY-ONLY (welded coplanar cell-skin pairs
   → maximal rectangles); the FILE, pick law and selection visuals are
   untouched; boundary rims stay verbatim.

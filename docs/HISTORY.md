@@ -4814,3 +4814,39 @@ to repo testdata, where 3816936540 is the OLD hullify copy — the two
 stitch corpus reds were data-source drift (AGENTS first-check), green on
 the machine corpus. The jsdom xenoncode.wasm unhandled rejection is the
 pre-existing baseline (present on clean main).
+
+## 9. v1.16.4 session — FLUSH CAP CULL: the dashboards come back (2026-10-30)
+
+We (after v1.16.3's flat-sheet preview): "it DOES NOT work … I should see
+the dashboards, the craft certainly was not designed for them to be
+obscured, and the blocks the triangles replaced never obscured them … the
+triangles must render exactly where the blocks they replaced … exactly as
+good as the blocks." The coordinates were never the problem: a live census
+(NEW app/tools/flatdash.mjs — projects every Dashboard board centre to
+screen and runs the engine's OWN pick law from a seated eye above the
+chair) on Chip's Badger (3326372833) measured prism mode burying 9/13
+dashboards, each hit 0.006..0.02 m before the board centre = the prism's
++0.025 cap standing in front of flush content that sits 0..0.02 proud
+(FORMAT §hull skin measured facts), where a coplanar BLOCK face contains
+the mount and occludes nothing. Flat sheets fixed 7 of the 9 (11/13). The
+user also flagged the earlier screenshot: its camera sat ABOVE the y=2.5
+top deck — deck occlusion is real geometry, identical under blocks.
+Fix per the FORMAT direction ("target the RENDER pass — flush components
+never occluded by coplanar skin"): build.ts dashPlanes (board plane =
+position + R(q)·ẑ RAW law, rect = size/100) + coplanarOverDash (parallel
+normals, cap plane 0..HULL_T PROUD of the board plane — covers the centred
+prism cap AND the zero-thickness sheet, and boards up to HULL_T proud;
+sample-overlap vs the rect; content-side only). The matching cap face is
+dropped for the display pass; rim walls + back cap verbatim; the file,
+pick law and selection visuals untouched; nested Build dashboards out of
+scope (the subgrid addSolids carries no components). Caps over block faces
+are NEVER culled, so the v1.5.14/15 poke-through failure mode cannot
+recur. Pins flushcap.test.ts (9 laws: cull, winding-independence, rect
+miss, yawed board, +0.01-proud cull, +0.05-float keep, flat-sheet cull,
+plane surface, away-facing keep). Post-fix census: prism 11/13 = flat
+11/13, the two wall-mounted-outside panels unchanged — the skin now
+occludes EXACTLY what the blocks occluded. Session notes: the
+__ARCHEAN__ screen()/pickCell seams answer occlusion questions with the
+engine's own law (no eyeballing); the ⚙ rows live behind toggle-options
+(probes must open the popover first); screenPoint returns CLIENT px and
+applies the display anchor (moff) — probes add moff to raw file coords.

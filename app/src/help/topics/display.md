@@ -33,6 +33,9 @@ toggles have keys where it matters.
   diffuse, exactly like the game's tracer lights.
 * Interior block walls and coplanar faces are culled; merged hull faces
   stitch into big quads, so a 3 m deck draws as 2 quads, not 192.
+* A skin never buries a dashboard glued to its plane: the prism cap lying
+  coplanar over a dashboard board is dropped for display — the skin
+  occludes exactly what the blocks it replaced occluded.
 
 ## Mobile
 
