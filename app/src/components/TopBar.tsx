@@ -59,6 +59,12 @@ interface Props {
   /** File ▸ Autosaves — the shadow-copy list (v1.13.x) */
   autosaveCount?: number;
   onAutosaves?: () => void;
+  /** v1.15.6 THE LIVE CRAFT chip (we: "computers should start when a craft
+   *  is loaded in"): the craft's self-running farm — ▶ n = n VMs live;
+   *  the click stops them all (⏸), clicking again re-boots the farm. */
+  live?: boolean;
+  liveN?: number;
+  onToggleLive?: () => void;
   children?: React.ReactNode;              // right side: panel toggle etc.
 }
 
@@ -320,6 +326,22 @@ export default function TopBar(p: Props) {
           href={`https://steamcommunity.com/sharedfiles/filedetails/?id=${p.craftId}`}
           target="_blank" rel="noopener"
           className="ksp-btn hidden shrink-0 px-2 py-1 text-[11px] text-ink-dim md:block">workshop ↗</a>
+      )}
+      {/* v1.15.6 THE LIVE CRAFT chip (we: "computers should start when a
+          craft is loaded in … bring the craft to life"): ▶ n = n computer
+          VMs are running with the craft (screens paint, servos swing, the
+          io bus drives the parts). Click ⏸ to stop the whole farm; ▶
+          re-boots it (auto-boot law, engine/power.ts gated). */}
+      {p.onToggleLive && ((p.liveN ?? 0) > 0 || p.live === false) && (
+        <button data-testid="live-chip"
+          title={p.live
+            ? `live craft — ${p.liveN} computer${p.liveN === 1 ? '' : 's'} running with the craft (click to stop)`
+            : 'the farm is stopped — click to boot every programmed computer'}
+          onClick={p.onToggleLive}
+          className={`ksp-btn flex items-center gap-1 px-2 py-1 text-[11px] leading-none ${
+            p.live ? 'text-[#9cffb4] border-[#9cffb4]/40' : 'text-[#8b93a1]'}`}>
+          {p.live ? '▶' : '⏸'} <span className="tabular-nums">{p.liveN}</span>
+        </button>
       )}
       {p.children}
     </header>

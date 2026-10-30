@@ -56,6 +56,12 @@ export default function XenonDialog(p: {
    *  window; the windows co-run on the craft's shared io bus. */
   pump: XenonPump;
   engine?: Engine | null;
+  /** v1.15.6 THE POWER LAW (we: "if a computer is unpowered, according to
+   *  craft design, show a warning when we interact with it"): no power
+   *  source reaches this computer's power port (engine/power.ts) — in the
+   *  game it never boots. The ⚠ chip rides the title bar; the dev may
+   *  still run it (we are a dev tool, the farm is a dev bench). */
+  unpowered?: boolean;
   onClose: () => void;
   /** the virtual disk changed — the Editor writes bp + doc and re-boots */
   onFiles: (ci: number, files: XCFile[]) => void;
@@ -833,6 +839,16 @@ export default function XenonDialog(p: {
                 rides the title bar (the FloatingWindow drag law excludes
                 buttons), freeing the row beside the tab strip — on phones
                 (no F-keys) this row IS the debugger */}
+            {p.unpowered && (
+              // v1.15.6 THE POWER LAW: the craft HAS a power grid and no
+              // source reaches this computer's power port — in-game it is
+              // dead metal. Warn on the window we opened (the run itself
+              // stays the dev's call).
+              <span data-testid="xenon-unpowered" title="no power source reaches this computer's power port — in-game it stays off (wire a battery/generator to its power connector)"
+                className="rounded bg-[#4a2020] px-1.5 py-0.5 text-[10px] font-semibold text-[#ff9c9c]">
+                ⚠ unpowered
+              </span>
+            )}
             {onCode && (
               <span data-testid="xenon-title-debug" className="flex items-center gap-1 text-[11px]">
                 <span className="hidden h-4 w-px bg-[#2b313b] sm:block" aria-hidden />

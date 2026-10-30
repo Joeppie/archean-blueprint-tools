@@ -6,7 +6,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { openAtlas, modelFailures, type ModelAtlas } from '../engine/models';
 import type { Blueprint } from '../engine/format';
-import { Engine, type PickHit, type SceneStats } from '../engine/scene';
+import { Engine, type PickHit, type PressTarget, type SceneStats } from '../engine/scene';
 import { triAt } from '../engine/tris';
 import { RateCap, WireHover, coordChipText, realScheduler } from '../engine/clocks';
 
@@ -22,6 +22,10 @@ declare global {
     /** wire-mode list-hover 3D preview (accent glow beside the selection) */
     hover: (ci: number) => void;
     hoverState: () => number;
+    /** v1.15.6 pressable registry counts + the SIM pose seam (the living-
+     *  craft pins drive actuator frames headless, assert meshes/subgrids) */
+    press: () => { dash: number; faces: number; comps: number };
+    applyDevicePoses: (poses: Map<number, import('../engine/devicesim').DevicePose>) => void;
     /** blocks-place ghost preview state (null = no ghost) */
     ghost: () => Engine['placeGhostState'];
     /** BLOCKS-edit selection highlight state ({bi, twin} | null, v1.4) */
@@ -112,7 +116,7 @@ const getAtlas = (): Promise<ModelAtlas | null> => (atlasP ??= openAtlas());
 
 let __vpMarked = false;
 let __cMarked = false;   // v1.12.2 BOOT COST: first-render mark
-export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, onBlockPick, onBlockHover, placing = null, onPlace, onPaintOpen, onBlockToTris, onPlaceCancel, onPlaceBuild, onPlaceRotate, onPlaceBack, onManifest, keepView = false }: {
+export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, onBlockPick, onBlockHover, placing = null, onPlace, onPaintOpen, onBlockToTris, onPlaceCancel, onPlaceBuild, onPlaceRotate, onPlaceBack, onManifest, keepView = false, onPress, pressLabel }: {
   bp: Blueprint | null;
   onPick: (h: PickHit) => void;
   onEngine?: (e: Engine | null) => void;
@@ -164,6 +168,14 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
   /** UNDO/REDO swaps bp for the SAME craft — keep the camera (do NOT re-frame).
    *  A craft swap (openText) never sets this, so it re-frames as ever. */
   keepView?: boolean;
+  /** v1.15.6 THE 3-D PRESS LAW (we: "button presses onto dashboards and
+   *  screens should actually work on the 3d model and propagate"): a press
+   *  on a pressable target — the Editor owns the semantics (channel writes,
+   *  screen clicks, power warnings); the Viewport owns cursor, chip, gesture */
+  onPress?: (t: PressTarget, phase: 'down' | 'up') => void;
+  /** the popup label for the hover chip (we: "it should tell us what
+   *  channel/ui element … which xenoncode line … as a popup label") */
+  pressLabel?: (t: PressTarget) => string | null;
 }) {
   if (!__vpMarked) { __vpMarked = true; performance.mark('boot:vp-render'); }   // bootprobe
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -205,6 +217,11 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
       labels: () => engine.labelState(),
       hover: (ci: number) => engine.previewHover(ci),
       hoverState: () => engine.hoverActive,
+      /** v1.15.6 pressable registry counts (the living-craft pins assert the
+       *  scene found the buttons/screens/lamps to drive) */
+      press: () => engine.pressTargets(),
+      applyDevicePoses: (poses: Parameters<Engine['applyDevicePoses']>[0]) =>
+        engine.applyDevicePoses(poses),
       ghost: () => engine.placeGhostState,
       blockHighlight: () => engine.blockHighlightState,
       blockHlBoxes: () => engine.blockHlBoxes(),
@@ -459,6 +476,31 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
   // restored the moment the hover ends.
   const wireHov = useRef<WireHover | null>(null);
   const wirePos = useRef({ cx: 0, cy: 0 });
+  // v1.15.6 THE 3-D PRESS LAW (we: "button presses onto dashboards and
+  // screens should actually work on the 3d model and propagate … a hand with
+  // finger cursor to indicate it's press able … tell us what channel/ui
+  // element/which xenoncode line this corresponds to as a popup label"):
+  // the press target rides the SAME throttled raycast as the coord + cable
+  // chips; the canvas gains a pointer cursor and a mono chip follows.
+  const pressInfo = useRef<PressTarget | null>(null);
+  const pressChipRef = useRef<HTMLDivElement>(null);
+  const pressDrag = useRef<PressTarget | null>(null);
+  // the coordRun closure is the FIRST render's (RateCap law, see the modeRef
+  // note above) — the label builder rides a REF
+  const pressLabelRef = useRef(pressLabel); pressLabelRef.current = pressLabel;
+  const showPress = (info: PressTarget | null, cx: number, cy: number) => {
+    const chip = pressChipRef.current, host = hostRef.current, cv = canvasRef.current;
+    if (cv) cv.style.cursor = info ? 'pointer' : '';      // the hand/finger cursor
+    if (!chip || !host) return;
+    const label = info ? pressLabelRef.current?.(info) ?? null : null;
+    if (!info || !label) { chip.style.display = 'none'; return; }
+    const hr = host.getBoundingClientRect();
+    chip.textContent = label;
+    chip.style.display = 'block';
+    const w = chip.offsetWidth, h = chip.offsetHeight;
+    chip.style.left = `${Math.min(Math.max(4, cx - hr.left + 14), hr.width - w - 8)}px`;
+    chip.style.top = `${Math.max(4, Math.min(cy - hr.top + 16, hr.height - h - 6))}px`;
+  };
   const renderWireChip = (label: string, cx: number, cy: number) => {
     const chip = wireChipRef.current, host = hostRef.current;
     if (!chip || !host) return;
@@ -502,6 +544,12 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
     }
     wireInfo.current = engineRef.current?.pipeHoverMove(x, y) ?? null;
     showWire(wireInfo.current, x, y);
+    // v1.15.6 THE PRESSABLE HOVER: the press raycast rides this same ~40 Hz
+    // cap (a dedicated target list, cheap); the finger cursor + popup chip
+    // follow. Presses work in EVERY mode — a press is an INTERACTION, never
+    // a selection (the VIEW-is-inspect law stays whole).
+    pressInfo.current = engineRef.current?.pressPick(x, y) ?? null;
+    showPress(pressInfo.current, x, y);
   };
   const pickClick = (e: React.PointerEvent) => {
     const engine = engineRef.current;
@@ -549,6 +597,20 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
       <canvas ref={__canvasCb} data-testid="canvas" className="block h-full w-full touch-none"
         onPointerDown={e => {
           down.current = { x: e.clientX, y: e.clientY };
+          // v1.15.6 THE PRESS IS A CLICK, NEVER A CAMERA DRAG: a press
+          // begins on a pressable target (element/face/standalone button) —
+          // orbit is captured OFF for the gesture, the sink visual lands.
+          if (e.button === 0 && !placing && !placeDrag.current) {
+            const t = engineRef.current?.pressPick(e.clientX, e.clientY) ?? null;
+            if (t) {
+              pressDrag.current = t;
+              engineRef.current?.setPressCapture(true);
+              if (t.kind === 'dash' && /Button|Led/.test(t.elType ?? ''))
+                engineRef.current?.pressVisual(t.ci, t.ch ?? 0, true);
+              onPress?.(t, 'down');
+              return;
+            }
+          }
           if (placing && mode === 'edit' && e.button === 0 && !e.shiftKey &&
             engineRef.current?.placeDragStart(e.clientX, e.clientY))
             placeDrag.current = { yaw: engineRef.current.compGhostState?.yaw ?? 0 };
@@ -579,12 +641,27 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
           wireInfo.current = null;
           if (chipRef.current) chipRef.current.style.display = 'none';
           showWire(null, 0, 0);              // resets dwell + xray timers
+          pressInfo.current = null;
+          showPress(null, 0, 0);             // chip off, cursor back
           // the ghost dies with the pointer (the game's ghost too)
           lastHover.current = null;
           if (placeDrag.current) { engineRef.current?.placeDragEnd(); placeDrag.current = null; }
           if (hoverOn) onBlockHover?.(-1e5, -1e5, false);
         }}
         onPointerUp={e => {
+          if (pressDrag.current) {
+            // the press gesture completes on the canvas it started on (the
+            // pickClick suppression is the early return)
+            const t = pressDrag.current;
+            pressDrag.current = null;
+            engineRef.current?.setPressCapture(false);
+            // MOMENTARY elements rise again (Push/Arrow/Led); a Toggle stays
+            // latched — the Editor owns the release of that one
+            if (t.kind === 'dash' && /^(PushButton|ArrowButton|Led)$/.test(t.elType ?? ''))
+              engineRef.current?.pressVisual(t.ci, t.ch ?? 0, false);
+            onPress?.(t, 'up');
+            return;
+          }
           if (placeDrag.current) {
             // the RELEASE places (the press only pins — "should not just
             // place immediately"; a zero-motion release = the old click,
@@ -721,6 +798,14 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
         className="pointer-events-none absolute z-30 max-w-[min(92%,420px)] rounded-sm
                    bg-[#241c05]/90 px-1.5 py-[1px] font-mono text-[11px] leading-snug tracking-tight
                    text-[#ffd479] ring-1 ring-[#ffd479]/40" />
+      {/* v1.15.6 THE PRESS CHIP (we: "it should tell us what channel/ui element
+          … which xenoncode line … as a popup label"): rides the pressable
+          hover; green = live craft, the mono text names the element, its
+          computer and the program line behind it */}
+      <div ref={pressChipRef} data-testid="press-chip" style={{ display: 'none' }}
+        className="pointer-events-none absolute z-30 max-w-[min(92%,460px)] rounded-sm
+                   bg-[#04240f]/90 px-1.5 py-[1px] font-mono text-[11px] leading-snug tracking-tight
+                   text-[#9cffb4] ring-1 ring-[#9cffb4]/40" />
     </div>
   );
 }

@@ -61,6 +61,10 @@ interface Servo {
 
 /** the actuator types this sim drives */
 const SERVO_TYPES = new Set(['SmallHinge', 'SmallPivot', 'LinearTrack']);
+/** Standalone button parts (wiki controllers/ToggleButton.md): their .ini
+ *  axle lever (limits [18,18,−18]) tips to −18° while the channel reads a
+ *  truthy state, rests at +18° — the 3-D press animates the lever. */
+const BUTTON_TYPES = new Set(['ToggleButton', 'PushButton', 'ArrowButton']);
 const GLOW_TYPES = new Set(['Lamp', 'SpotLight', 'SlopeLight']);
 const SPIN_TYPES = new Set(['Propeller', 'Wheel', 'BigWheel', 'SmallWheel']);
 const FLIGHT_TYPES = new Set(['Aileron', 'Elevator', 'Rudder']);
@@ -68,7 +72,7 @@ const FLIGHT_TYPES = new Set(['Aileron', 'Elevator', 'Rudder']);
 /** every joint-state field the sim can produce per type (bus write gates) */
 export function drivesType(type: string): boolean {
   return SERVO_TYPES.has(type) || GLOW_TYPES.has(type)
-    || SPIN_TYPES.has(type) || FLIGHT_TYPES.has(type);
+    || SPIN_TYPES.has(type) || FLIGHT_TYPES.has(type) || BUTTON_TYPES.has(type);
 }
 
 /** Wiki-exact servo mapping: SmallHinge −1.0..+1.0 → −90°..+90°; SmallPivot
@@ -115,7 +119,8 @@ export class DeviceSim {
         this.data.set(ci, (c.data ?? {}) as Record<string, unknown>);
         this.jointNames.set(ci, jn.map(j => j.name));
         this.limits.set(ci, jn[0]?.limits);
-      } else if (GLOW_TYPES.has(c.type) || SPIN_TYPES.has(c.type) || FLIGHT_TYPES.has(c.type)) {
+      } else if (GLOW_TYPES.has(c.type) || SPIN_TYPES.has(c.type) || FLIGHT_TYPES.has(c.type)
+        || BUTTON_TYPES.has(c.type)) {
         this.types.set(ci, c.type);
         this.data.set(ci, (c.data ?? {}) as Record<string, unknown>);
         this.jointNames.set(ci, jn.map(j => j.name));
@@ -210,6 +215,12 @@ export class DeviceSim {
           else if (n === 'axle') pose.joints[n] = { angle: spin };
         }
         if (!Object.keys(pose.joints).length) delete pose.joints;
+      } else if (BUTTON_TYPES.has(type) && names[0]) {
+        // the .ini axle lever (limits [18,18,−18]): pressed tips to the
+        // lower limit, resting state stands at the upper one
+        const lim = this.limits.get(ci);
+        const on = (this.chans.get(ci)?.get(0) ?? 0) > 0;
+        pose.joints = { [names[0]]: { angle: on ? (lim?.[2] ?? -18) : (lim?.[0] ?? 18) } };
       } else if (GLOW_TYPES.has(type)) {
         const ch = this.chans.get(ci);
         if (ch) {

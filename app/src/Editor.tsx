@@ -20,7 +20,8 @@ import { initSealWasmFetch } from './engine/sealwasm';
 // so there is no boot race; sealwasm.test.ts pins the two answers equal.
 void initSealWasmFetch(sealWasmUrl);
 import { craftMeta, craftName } from './gallery-catalog';
-import { DEFAULT_OPTS, backdropDefault, backdropNames, type Backdrop, type Engine, type PickHit, type ViewOptions } from './engine/scene';
+import { DEFAULT_OPTS, backdropDefault, backdropNames, type Backdrop, type Engine, type PickHit,
+  type PressTarget, type ViewOptions } from './engine/scene';
 import Viewport from './components/Viewport';
 import {
   StaticInfo, ViewOpts, VesselStats, CompList, Inspector, SubPanel,
@@ -50,7 +51,12 @@ import { cornerOf, triAt, triangleFromCorners, mirroredTriangle, triTwinIndex, t
 import { applyPinEdit, applyPinRotate, applyPinShift, applyTriFlip, applyTriPaint } from './engine/pinedit';
 import type { Blueprint, Triangle } from './engine/format';
 import { isLegacyFile } from './engine/format';
-import { hasDashboards, xenonComputers, xenonHudControllers, xenonFarm, type XCFile } from './engine/xenoncode';
+import { hasDashboards, xenonComputers, xenonHudControllers, xenonFarm, type XCFile,
+  type XenonComputer } from './engine/xenoncode';
+import { DeviceSim } from './engine/devicesim';
+import { craftPowerNet, computerPowered } from './engine/power';
+import { chanSites, rectSites, rectsAt, type ChanSite, type RectSite } from './engine/xcsites';
+import { loadManifest, peekManifest } from './engine/models';
 import { beaconNet } from './engine/beaconnet';
 import { makeXcdbg } from './engine/xcdbg';
 import { buzzerAudio } from './engine/buzzer';
@@ -148,6 +154,65 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     () => (bp ? xenonComputers(bp) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [bp]);
+  // ── v1.15.6 THE LIVING CRAFT (we: "computers should start when a craft is
+  //    loaded in, and parts need to respond to signals … hinges and buttons
+  //    and pivots and ailerons actually move … if a pivot or hinge moves, so
+  //    does its subgrid … button presses onto dashboards and screens should
+  //    work on the 3d model and propagate … a hand with finger cursor … tell
+  //    us what channel/ui element/which xenoncode line … as a popup label …
+  //    if a computer is unpowered, show a warning when we interact with it").
+  //    engine/devicesim.ts animates the actuator channels (SIM IS A VIEW —
+  //    nothing writes the blueprint, saves stay byte-identical),
+  //    engine/power.ts gates the auto-boot and the warnings,
+  //    engine/xcsites.ts names the program line behind a press.
+  const simRef = useRef(new DeviceSim());
+  const latchedRef = useRef(new Map<string, boolean>());
+  const sitesRef = useRef(new Map<number, { chan: ChanSite[]; rect: RectSite[] }>());
+  /** LIVE CRAFT: the farm auto-boots the craft's programmed, POWERED
+   *  computers on load and the VMs keep running when the IDE windows close
+   *  (the craft runs while you look at it, like the game). Persisted ⚙. */
+  const [live, setLive] = useState(() => localStorage.getItem('archean-app-live') !== 'off');
+  useEffect(() => { localStorage.setItem('archean-app-live', live ? 'on' : 'off'); }, [live]);
+  // the manifest (joint limits for the sim, adapter kinds for power) lands
+  // async — powerNet/sim re-derive once it is here
+  const [manifestV, setManifestV] = useState(0);
+  useEffect(() => { void loadManifest().then(() => setManifestV(v => v + 1)); }, []);
+  const powerNet = useMemo(
+    () => (bp ? craftPowerNet(bp, peekManifest()) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [bp, manifestV]);
+  const unpowered = useCallback((ci: number) =>
+    !!powerNet?.hasPower && !computerPowered(powerNet, ci), [powerNet]);
+  const xenonCompsRef = useRef(xenonComps); xenonCompsRef.current = xenonComps;
+  // the actuator table from the fresh blueprint + manifest joint geometry
+  useEffect(() => {
+    if (!bp) return;
+    const man = peekManifest();
+    simRef.current.load(bp, t => (man?.[t]?.joints ?? []).map(j => ({
+      name: j.name, limits: j.limits as [number, number, number] | undefined })));
+    latchedRef.current.clear();
+    sitesRef.current.clear();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bp, manifestV]);
+  // THE ACTUATOR TAP: every bus write, resolved to its device (v1.15.6,
+  // IoBus), feeds the sim; a Dashboard's element channels light its LED
+  // faces (dashboard.md: one port, channel = element index).
+  useEffect(() => xenonFarm.observeDevices((ci, type, ch, v) => {
+    simRef.current.write(ci, ch, v);
+    if (type === 'Dashboard') simRef.current.setLed(ci, ch, v > 1 ? v / 255 : v);
+  }), []);
+  // AUTO-BOOT (we: "computers should start when a craft is loaded in"):
+  // every programmed computer boots with the craft — POWER-GATED: a craft
+  // with a power grid leaves its unconnected computers OFF (in-game they
+  // are dead metal; interacting with one warns, engine/power.ts). The
+  // craft swap re-boots fresh (the v1.13.12 fresh-game law).
+  useEffect(() => {
+    if (!live || !bp) return;
+    xenonFarm.closeAll();
+    const net = powerNet;
+    xenonFarm.autoboot(xenonComps.filter(c => !net?.hasPower || computerPowered(net, c.ci)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bp, live, powerNet]);
   // ── v1.14.0 P9 slice A (we: "allow us to edit the code for at least HUDs
   //    that are contained within a HUD block … make beacons into a seperate
   //    tab for computers/huds … a beacons menu, under xenoncode"): the HUD
@@ -177,11 +242,6 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     : false),
   // eslint-disable-next-line react-hooks/exhaustive-deps
   [bp, xenonComps]);
-  // v1.13.8 (we: "it doesnt register the built-in screen", craft 3288012440):
-  // a Computer's / Crafter's INTEGRATED screen is a physical screen too —
-  // the ▣ dock gate must not stop at Dashboard components. The dock's
-  // cells list the pump's live surfaces (main#0 + the model-face mirror),
-  // and opening the dock arms the pilot keys exactly like the IDE.
   // v1.13.x AUTOSAVE shadow copies ("Forget to save? No problem"): the doc
   // text is shadowed every ~20 s while dirty + on every save; File ▸
   // Autosaves lists them per craft with timestamps.
@@ -219,10 +279,13 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screensOpen, xenonComps.length]);
   // FARM (slice C): release the VMs when the LAST IDE window and the
-  // Screens tab are all closed (a craft swap then boots clean).
+  // Screens tab are all closed (a craft swap then boots clean). v1.15.6
+  // LIVE CRAFT: with the farm auto-booted the VMs OUTLIVE the windows —
+  // the craft keeps running (closing the IDE never stops a running craft;
+  // the ⚙ Live toggle off is the opt-out that restores the old law).
   useEffect(() => {
-    if (xenonCis.length === 0 && !screensOpen) xenonFarm.closeAll();
-  }, [xenonCis, screensOpen]);
+    if (!live && xenonCis.length === 0 && !screensOpen) xenonFarm.closeAll();
+  }, [xenonCis, screensOpen, live]);
   // LEAVING THE EDITOR (back to the gallery, craft swap, unmount) closes
   // the FARM TOO (we: "going back to the gallery DOESNT properly reset the
   // entire sim, which it must if we can open directly to a screen"): the
@@ -319,6 +382,17 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       p.setFeedKeys(eng.screenFeedKeys());
       for (const s of p.surfaces.values())
         if (s.pixels) eng.pushScreen(s.key, s.w, s.h, s.pixels);
+      // v1.15.6 THE LIVING CRAFT tick (rides THE 3-D LAW cadence — every
+      // pump cycle): the PilotSeat flight channels feed the control
+      // surfaces, the sim servos advance one 40 ms step, and the scene
+      // overlays the poses — plates, PANELS (syncSubJoints), lamps, levers.
+      for (const r of p.wsChannels()) {
+        const fn = r.label.split(' · ').pop();
+        if (fn === 'Roll' || fn === 'Pitch' || fn === 'Yaw')
+          simRef.current.writePilot(fn, r.value);
+      }
+      simRef.current.step(0.04);
+      eng.applyDevicePoses(simRef.current.snapshot());
     }));
     return () => removers.forEach(r => r());
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -349,6 +423,108 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   const pendingPlaceOffset = useRef<[number, number, number] | null>(null);
   // the toast line a finished tool printed under the menu (auto-clears below)
   const [toolMsg, setToolMsg] = useState('');
+  // ── v1.15.6 THE 3-D PRESS LAW (we: "button presses onto dashboards and
+  //    screens should actually work on the 3d model and propagate"). The
+  //    Viewport raycasts and captures the gesture; the SEMANTICS live here:
+  //    a button press writes the DEVICE's channel into every computer that
+  //    owns it on a data port (xenonFarm.pressDevice routes each pump's OWN
+  //    io number), the sim latches/animates it, and the program reads it
+  //    next cycle. A screen press is a screenClick on the owning computer's
+  //    pump (button_rect evaluates THIS cycle). An UNPOWERED owner warns.
+  const warnUnpowered = useCallback((c: XenonComputer) => {
+    setToolMsg(`⚠ ${c.alias} has no power — its power port is wired to no source; in-game it stays off`);
+  }, []);
+  const onDashPress = useCallback((t: PressTarget, phase: 'down' | 'up') => {
+    const eng = engineRef.current;
+    const comps = xenonCompsRef.current;
+    const owns = (c: XenonComputer) =>
+      c.devices.some(d => d.ci === t.ci)
+      || (!!t.surfaceKey && c.screens.some(s => `${s.alias.toLowerCase()}#${s.channel}` === t.surfaceKey))
+      || (t.kind === 'face' && c.ci === t.ci);
+    const owners = comps.filter(owns);
+    const owner = owners[0] ?? (t.kind === 'face' ? comps.find(c => c.ci === t.ci) : undefined);
+    if (owner && unpowered(owner.ci)) { warnUnpowered(owner); return; }
+    if ((t.kind === 'face' || t.surfaceKey) && t.px !== undefined && t.py !== undefined
+      && phase === 'down') {
+      for (const c of owners) {
+        const p = xenonFarm.pumpForCi(c.ci);
+        if (t.kind === 'face' && c.ci === t.ci && t.surfaceKey) p?.screenClick(t.surfaceKey, t.px, t.py);
+        else if (t.surfaceKey
+          && c.screens.some(s => `${s.alias.toLowerCase()}#${s.channel}` === t.surfaceKey))
+          p?.screenClick(t.surfaceKey, t.px, t.py);
+      }
+      return;
+    }
+    const elType = t.elType ?? '';
+    const k = `${t.ci}:${t.ch ?? 0}`;
+    if (elType === 'ToggleButton') {           // latch (wiki ToggleButton.md)
+      if (phase !== 'down') return;
+      const on = !(latchedRef.current.get(k) ?? false);
+      latchedRef.current.set(k, on);
+      xenonFarm.pressDevice(t.ci, t.ch ?? 0, on ? 1 : 0, 'ToggleButton');
+      simRef.current.setElement(t.ci, t.ch ?? 0, on);
+      eng?.pressVisual(t.ci, t.ch ?? 0, on);
+      return;
+    }
+    // momentary: Push/Arrow/Led elements + standalone Push/Arrow parts
+    xenonFarm.pressDevice(t.ci, t.ch ?? 0, phase === 'down' ? 1 : 0, elType);
+    simRef.current.setElement(t.ci, t.ch ?? 0, phase === 'down');
+  }, [unpowered, warnUnpowered]);
+  /** THE POPUP LABEL (we: "it should tell us what channel/ui element … which
+   *  xenoncode line … the computer this corresponds to"): the element, the
+   *  owning computer + io, and the literal program site (chanSites for a
+   *  channel element, rectsAt for a screen pixel — the LAST containing
+   *  button_rect, the game's draw-order law). */
+  const pressLabel = useCallback((t: PressTarget): string | null => {
+    const comps = xenonCompsRef.current;
+    const scan = (c: XenonComputer) => {
+      let s = sitesRef.current.get(c.ci);
+      if (!s) { s = { chan: chanSites(c.files), rect: rectSites(c.files) }; sitesRef.current.set(c.ci, s); }
+      return s;
+    };
+    const parts: string[] = [];
+    if (t.kind === 'face') {
+      const c = comps.find(k => k.ci === t.ci);
+      if (!c) return null;
+      parts.push(`${c.alias} · integrated panel`);
+      const hits = rectsAt(scan(c).rect, 'main#0', t.px ?? 0, t.py ?? 0);
+      const h = hits[hits.length - 1];
+      if (h) parts.push(`${h.kind}(${h.x}, ${h.y}, ${h.w}, ${h.h}) @ ${h.file}:${h.line}`);
+      if (unpowered(c.ci)) parts.push('⚠ unpowered');
+      return parts.join(' — ');
+    }
+    if (t.surfaceKey) {
+      parts.push(`Screen · ${t.surfaceKey}`);
+      const c = comps.find(k => k.screens.some(
+        s => `${s.alias.toLowerCase()}#${s.channel}` === t.surfaceKey));
+      if (c) {
+        const hits = rectsAt(scan(c).rect, t.surfaceKey, t.px ?? 0, t.py ?? 0);
+        const h = hits[hits.length - 1];
+        parts.push(h
+          ? `'${c.alias}' · ${h.kind}(${h.x}, ${h.y}, ${h.w}, ${h.h}) @ ${h.file}:${h.line}`
+          : `'${c.alias}'`);
+        if (unpowered(c.ci)) parts.push('⚠ unpowered');
+      }
+      return parts.join(' — ');
+    }
+    const owners = comps.filter(c => c.devices.some(d => d.ci === t.ci));
+    parts.push(`${t.elType ?? 'Element'} · ch ${t.ch ?? 0}`);
+    for (const c of owners.slice(0, 2)) {
+      const dev = c.devices.find(d => d.ci === t.ci)!;
+      const s = scan(c).chan.find(s => s.ch === (t.ch ?? 0)
+        && (s.io === dev.io || (!!dev.alias && s.io === dev.alias)));
+      parts.push(`'${c.alias}'${dev.io >= 0 ? ` io ${dev.io}` : ` "${dev.alias}"`}`
+        + (s ? ` · ${s.fn}(…, ${t.ch ?? 0}) @ ${s.file}:${s.line}` : ''));
+    }
+    if (owners.length && owners.every(c => unpowered(c.ci))) parts.push('⚠ unpowered');
+    if (!owners.length && t.kind === 'comp') parts.push('no computer reads it');
+    return parts.join(' — ');
+  }, [unpowered]);
+  // v1.13.8 (we: "it doesnt register the built-in screen", craft 3288012440):
+  // a Computer's / Crafter's INTEGRATED screen is a physical screen too —
+  // the ▣ dock gate must not stop at Dashboard components. The dock's
+  // cells list the pump's live surfaces (main#0 + the model-face mirror),
+  // and opening the dock arms the pilot keys exactly like the IDE.
   // 🎨 PALETTE window over the viewport (v1.6): the paint alternative to the
   // move/rotate gizmo, opened from the canvas mode widget for the CURRENT
   // selection (block ▸ per-face, component ▸ color1/color2, else the brush).
@@ -1060,7 +1236,15 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       // save a draft first); with NEITHER window open the key stays the
       // browser's (page refresh).
       if (e.key === 'F5') {
-        if (screensOpen && xenonCis.length === 0) { e.preventDefault(); xenonFarm.active()?.reboot(); }
+        if (screensOpen && xenonCis.length === 0) {
+          e.preventDefault();
+          // v1.15.6 POWER LAW: F5-RUN on an UNPOWERED computer warns first
+          // (in-game it cannot run); the dev may still boot it (we are a
+          // dev tool) — the warning stays visible while it runs.
+          const ac = xenonFarm.active()?.comp;
+          if (ac && unpowered(ac.ci)) warnUnpowered(ac);
+          xenonFarm.active()?.reboot();
+        }
         return;
       }
       // F6 STOP (v1.13.31, we: "f6 should mean stop"): the twin of the F5
@@ -1131,7 +1315,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     return () => removeEventListener('keydown', h);
   }, [save, toggleOpt, placing, mode, ws, sel, blockSel, triSel,
     triDraft, pinTi, brush, undo, redo, deleteComp, deleteBlock, deleteTri,
-    screensOpen, xenonCis]);
+    screensOpen, xenonCis, unpowered, warnUnpowered]);
 
   // blocks-mode canvas handling: place (brush/logical continuation) or
   // select, via engine.pickCell.
@@ -1731,6 +1915,15 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         if (f) readFile(f);
       }}>
       <TopBar mode={mode} onMode={setMode} dirty={dirty} title={name} craftId={craft}
+        live={live} liveN={xenonFarm.pumps.filter(p => p.comp).length}
+        onToggleLive={xenonComps.length ? () => {
+          if (live) { xenonFarm.closeAll(); setLive(false); }
+          else {
+            setLive(true);
+            const net = powerNet;
+            xenonFarm.autoboot(xenonComps.filter(c => !net?.hasPower || computerPowered(net, c.ci)));
+          }
+        } : undefined}
         canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo}
         onNew={() => {
           // v1.5.10 (user: "new craft should not be a button, but only under
@@ -1781,6 +1974,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
               onPlaceCancel={onPlaceCancel} onPlaceBuild={onPlaceBuild}
               onPlaceRotate={onPlaceRotate} onPlaceBack={onPlaceBack}
               keepView={bpKeepView}
+              onPress={onDashPress} pressLabel={pressLabel}
               onManifest={setManifest} />
             {/* 🎨 PALETTE window (v1.6): the paint alternative to the gizmo
                 modes, opened from the mode widget — targets the CURRENT
@@ -1870,6 +2064,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
               return comp ? [(
                 <Suspense key={`xenon-${ci}`} fallback={null}>
                   <XenonDialogLazy comp={comp} pump={xenonFarm.pumpFor(comp)} engine={engine}
+                    unpowered={unpowered(ci)}
                     onClose={() => setXenonCis(c => c.filter(x => x !== ci))} onFiles={xenonFiles} />
                 </Suspense>
               )] : [];

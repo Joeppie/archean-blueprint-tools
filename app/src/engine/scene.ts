@@ -74,6 +74,7 @@ import {
   type JRef, type RigChain, type SubBBox, type FlatEntry,
 } from './subgrid';
 import { pipeSockets } from './sockets';
+import type { DevicePose } from './devicesim';
 import {
   compPaintDiff, craftMirrorMask, hasMirrorX, mirrorDelta, mirrorQuat, symAllowed,
   symTwinIndex, type TwinPair,
@@ -103,6 +104,19 @@ const INTERACT: Record<string, string> = {
 export interface PickHit {
   kind: 'block' | 'comp' | 'sub' | 'none';
   ci?: number; sub?: number; point?: [number, number, number];
+}
+/** v1.15.6 THE 3-D PRESS LAW: what the press raycast answers — a dashboard
+ *  element (ci + element channel), a built-in device screen face (surface
+ *  key + pixel) or a standalone button component. px/py are the SURFACE's
+ *  framebuffer pixels (x right, y DOWN — the button_rect law). */
+export interface PressTarget {
+  kind: 'dash' | 'face' | 'comp';
+  ci: number;
+  ch?: number;
+  elType?: string;
+  surfaceKey?: string;
+  px?: number;
+  py?: number;
 }
 export interface SceneStats { blocks: number; tris: number; hullTris: number; comps: number; subs: number; draws: number; ok: boolean;
   /** 'lite' = the heavy-craft tier (painted stand-ins, no real-model fan-out) */
@@ -182,6 +196,8 @@ const Q_ID: FileQuat = { w: 1, x: 0, y: 0, z: 0 };
  *  chain), so the data-driven joint pose re-applies from base on every edit */
 interface JointPose {
   node: Group;
+  /** the manifest joint NAME (devicesim's per-node overlay key, v1.15.6) */
+  name: string;
   /** .ini angular_x/y/z key (undefined = no angular joint) */
   axis?: 'x' | 'y' | 'z';
   /** .ini linear_x/y/z key (undefined = no slide) */
@@ -203,14 +219,22 @@ interface JointPose {
  *  PLATE-LAW vectors (JointPose.axisV/slideV) so the part's plate turns
  *  about the SAME world line as its subgrid panel — v1.9.0 THE PLATE LAW.
  *  Types without the field (Lamp/SpotLight whose angle = the light aim) are
- *  skipped. */
-function applyJointPoses(jrefs: JointPose[], c: BlueprintComponent) {
+ *  skipped.
+ *  v1.15.6 THE SIM OVERLAY: `sim` (engine/devicesim.ts, keyed by manifest
+ *  joint NAME) is the io-bus pose — where a joint has one, the sim value
+ *  renders; the FILE data stays untouched (SIM IS A VIEW: saves remain
+ *  byte-identical, the undo stack never sees a simulation frame). */
+function applyJointPoses(jrefs: JointPose[], c: BlueprintComponent,
+  sim?: Record<string, { angle?: number; slide?: number }>) {
   const d = c.data ?? {};
-  const angle = typeof d['angle'] === 'number' ? (d['angle'] as number) : null;
-  const pos = typeof d['pos'] === 'number' ? (d['pos'] as number) : null;
+  const fAngle = typeof d['angle'] === 'number' ? (d['angle'] as number) : null;
+  const fPos = typeof d['pos'] === 'number' ? (d['pos'] as number) : null;
   for (const j of jrefs) {
     j.node.position.copy(j.baseP);
     j.node.quaternion.copy(j.baseQ);
+    const js = sim?.[j.name];
+    const angle = js?.angle ?? fAngle;
+    const pos = js?.slide ?? fPos;
     if (angle !== null && j.axisV)
       j.node.quaternion.multiply(new Quaternion().setFromAxisAngle(j.axisV, angle * DEG));
     if (pos !== null && j.slideV)
@@ -271,12 +295,27 @@ export class Engine {
    *  those elements' faces a live DataTexture ("dashboards actually display
    *  and render what is given to them"). */
   private screenFeeds = new Map<string, string>();
-  private dashScreens = new Map<string, { mat: MeshBasicMaterial; tex: DataTexture; w: number; h: number }>();
-  // BUILT-IN device faces (Computer/Crafter 'screen' material): registered
+  private dashScreens = new Map<string, { mat: MeshBasicMaterial; tex: DataTexture; w: number; h: number }>();  // BUILT-IN device faces (Computer/Crafter 'screen' material): registered
   // when the model builds and PERSIST across IDE sessions - setScreenFeeds
   // rebuilds only dashScreens, and clearing both is what left the model
   // face un-fed when the IDE opened after scene load
   private deviceScreens = new Map<string, { mat: MeshBasicMaterial; tex: DataTexture; w: number; h: number; mesh: Mesh }>();
+  // ── v1.15.6 THE LIVING-CRAFT LAYER (engine/devicesim.ts + engine/power.ts)
+  /** PRESSABLE dashboard element boxes (we: "button presses onto dashboards
+   *  and screens should actually work on the 3d model"): key `ci:ch` → the
+   *  element mesh (baseZ restores/holds the press; faceMat = an LED face,
+   *  emissive-painted by the bus value). userData.dash carries the same. */
+  private dashElements = new Map<string, { mesh: Mesh; type: string; baseZ: number;
+    faceMat?: MeshStandardMaterial }>();
+  /** the SIM OVERLAY poses (the io bus's actuator values) — RENDERED,
+   *  never written: saves stay byte-identical, undo never sees a frame. */
+  private simPoses = new Map<number, DevicePose>();
+  /** procedural lamp lens per Lamp/SpotLight/SlopeLight ci (the game draws
+   *  no lens; a small emissive tip reads as the lamp, the beacon law). */
+  private lampLenses = new Map<number, Mesh>();
+  /** standalone pressable parts (ToggleButton/PushButton/ArrowButton):
+   *  the 3-D press routes their state onto channel 0, the game's F-key law */
+  private pressCompRoots = new Map<number, Group>();
   /** per-type LoadedModel of every real root currently in the scene — the
    *  cache liveDataEdit rebuilds from (no async refetch mid-slider-drag) */
   private liveGeo = new Map<string, LoadedModel>();
@@ -2074,6 +2113,7 @@ void main() {
           // the RENDERED image against the live framebuffer (pixels, not
           // intent — the 'the screen display is upside down' report).
           Object.assign(sm.userData, {
+            compCi: ci,
             quad: ([[0, 0], [1, 0], [1, 1], [0, 1]] as const).map(([du, dv]) => {
               const p: [number, number, number] = [mn[0]!, mn[1]!, mn[2]!];
               p[uax] = mn[uax]! + du * ext[uax]!;
@@ -2113,7 +2153,7 @@ void main() {
       const rot = j.rotation ?? [0, 0, 0];
       const bq = eulerZYX(rot[0]!, rot[1]!, rot[2]!);
       jrefs.push({
-        node, axis: j.axis, slide: j.slide,
+        node, name: j.name, axis: j.axis, slide: j.slide,
         axisV: j.axis ? new Vector3(...jointNodeAxis(bq, j.axis)) : null,
         slideV: j.slide ? new Vector3(...jointNodeSlide(bq, j.slide)) : null,
         baseP: node.position.clone(), baseQ: node.quaternion.clone(),
@@ -2121,6 +2161,19 @@ void main() {
     }
     if (jrefs.length) applyJointPoses(jrefs, c);
     if (jrefs.length) (root.userData as { jrefs?: JointPose[] }).jrefs = jrefs;
+    // v1.15.6 STANDALONE PRESSABLES (we: "buttons … should actually work on
+    // the 3d model and propagate"): the game's cockpits place physical
+    // Toggle/Push/Arrow button COMPONENTS — the same 3-D press law as a
+    // dashboard element, their own data port's channel 0.
+    if (c.type === 'ToggleButton' || c.type === 'PushButton' || c.type === 'ArrowButton') {
+      (root.userData as { pressComp?: string }).pressComp = c.type;
+      this.pressCompRoots.set(ci, root);
+    }
+    // v1.15.6 LAMP FAMILY lens: the game draws the lens procedurally (the
+    // gltf carries none — the beacon law); a small emissive tip the io bus
+    // lights with the Off/On + RED/GREEN/BLUE channels.
+    if (c.type === 'Lamp' || c.type === 'SpotLight' || c.type === 'SlopeLight')
+      this.addLampLens(info, geo, nodes, root, ci);
     // Beacon: the game's flashing red lens is procedural (the gltf carries no
     // lens material); a static emissive tip keeps the part readable.
     if (c.type === 'Beacon') this.addBeaconLenses(info, geo, nodes, root);
@@ -2244,6 +2297,17 @@ void main() {
       const m = new Mesh(new BoxGeometry(ew, eh, 0.01),
         [body, body, body, body, face, body]);          // +Z carries the text
       m.position.set(ex + ew / 2, ey + eh / 2, 0.015);
+      // v1.15.6 THE PRESSABLE LAW (we: "button presses onto dashboards and
+      // screens should actually work on the 3d model and propagate … we
+      // should have a hand with finger cursor to indicate it's press able"):
+      // every element box carries its dashboard ci + element channel; the
+      // Viewport's press raycast, the pointer hand and the popup chip read
+      // this. Screen faces additionally carry the xenon surface key.
+      m.userData.dash = { ci, ch, type: el.type,
+        surfaceKey: feedKey && (el.type === 'Screen' || el.type === 'HdScreen')
+          ? feedKey : undefined };
+      this.dashElements.set(`${ci}:${ch}`, { mesh: m, type: el.type, baseZ: m.position.z,
+        faceMat: (el.type === 'Led' ? face as MeshStandardMaterial : undefined) });
       g.add(m);
     });
     if (noRaycast) g.traverse(o => { o.raycast = () => {}; });
@@ -2290,6 +2354,39 @@ void main() {
       lens.position.setComponent(ax as 0 | 1 | 2, top[ax]! + 0.012);   // flush on the tip
       (nodes.get(r.name) ?? root).add(lens);
     }
+  }
+
+  /** v1.15.6: the lamp family (Lamp/SpotLight/SlopeLight) carries no lens
+   *  material (the game draws it procedurally) — a small self-lit tip at the
+   *  model's DOMINANT-spread extreme (the beacon law), which
+   *  engine/devicesim.ts lights through the Off/On + RGB input channels. */
+  private addLampLens(info: LoadedModel['info'], geo: LoadedModel['geo'],
+    _nodes: Map<string, Group>, root: Group, ci: number) {
+    let mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+    let n = 0;
+    for (const r of info.renderables) {
+      const nd = geo[r.name];
+      if (!nd) continue;
+      for (const prim of nd.prims) {
+        const v = prim.v;
+        for (let k = 0; k + 2 < v.length; k += 3) {
+          for (let a = 0; a < 3; a++) {
+            mn[a] = Math.min(mn[a]!, v[k + a]!); mx[a] = Math.max(mx[a]!, v[k + a]!);
+          }
+          n++;
+        }
+      }
+    }
+    if (!n) return;
+    const ax = [0, 1, 2].reduce((b, a) => (mx[a]! - mn[a]!) > (mx[b]! - mn[b]!) ? a : b, 0);
+    const span = Math.max(1e-3, mx[ax]! - mn[ax]!);
+    const lens = new Mesh(new SphereGeometry(Math.min(0.06, span * 0.22), 12, 10),
+      new MeshBasicMaterial({ color: 0x141414, toneMapped: false }));
+    lens.position.set((mn[0]! + mx[0]!) / 2, (mn[1]! + mx[1]!) / 2, (mn[2]! + mx[2]!) / 2);
+    lens.position.setComponent(ax as 0 | 1 | 2, mx[ax]! + span * 0.02);
+    lens.raycast = () => { };                       // never a pick target
+    root.add(lens);
+    this.lampLenses.set(ci, lens);
   }
 
   // --------------------------------------------------------------- subgrids
@@ -2515,11 +2612,164 @@ void main() {
     for (const [bi, g] of this.subGroups) {
       const jrefs = this.subJrefs.get(bi) ?? [];
       const pose = subJointPose({ p: [0, 0, 0], q: Q_ID }, jrefs,
-        jrefs.map(r => masterJointState(r.mc)));
+        jrefs.map(r => this.simMasterState(r)));
       g.position.set(pose.p[0] + this.moff.x, pose.p[1] + this.moff.y, pose.p[2] + this.moff.z);
       g.quaternion.set(pose.q.x, pose.q.y, pose.q.z, pose.q.w);
     }
     this.invalidate();
+  }
+
+  /** v1.15.6 THE PANEL RIDES ITS MASTER (we: "if a pivot or hinge moves, so
+   *  does its subgrid"): the master's live joint state — the io-bus SIM
+   *  overlay where it drives this top-level master, else the file data
+   *  (masterJointState). The sim that turns the part's own plate feeds the
+   *  SAME values into the panel chain; the file stays untouched. */
+  private simMasterState(r: JRef) {
+    const base = masterJointState(r.mc);
+    const joints = r.top >= 0 ? this.simPoses.get(r.top)?.joints : undefined;
+    if (!joints) return base;
+    const j = Object.values(joints)[0];
+    return j ? { ...base, angle: j.angle ?? base.angle, slide: j.slide ?? base.slide } : base;
+  }
+
+  /** v1.15.6 APPLY THE SIM (the pump cycle hook calls this every VM cycle,
+   *  v1.13.5 THE 3-D LAW cadence): render the io-bus actuator poses — the
+   *  part's own joint nodes (applyJointPoses overlay), its lamp lens, its
+   *  LED faces — and re-replay every subgrid chain the changed masters own
+   *  (THE PANEL RIDES ITS MASTER). Diff-only: a 25 Hz hook that changes
+   *  nothing costs one map swap. SIM IS A VIEW: bp.data is not touched. */
+  applyDevicePoses(poses: Map<number, DevicePose>): void {
+    const prev = this.simPoses;
+    const changed: number[] = [];
+    for (const [ci, p] of poses) {
+      const o = prev.get(ci);
+      if (!o || o.glow?.r !== p.glow?.r || o.glow?.g !== p.glow?.g || o.glow?.b !== p.glow?.b
+        || o.led !== p.led || o.pressed !== p.pressed
+        || JSON.stringify(o.joints) !== JSON.stringify(p.joints)) changed.push(ci);
+    }
+    for (const ci of prev.keys()) if (!poses.has(ci)) changed.push(ci);
+    this.simPoses = poses;
+    if (!changed.length) return;
+    let jointTouched = false;
+    for (const ci of changed) {
+      const p = poses.get(ci);
+      const c = this.bp?.data.components[ci];
+      if (p?.joints && c) {
+        jointTouched = true;
+        for (const o of this.compRoots.get(ci) ?? []) {
+          const jrefs = (o.userData as { jrefs?: JointPose[] }).jrefs;
+          if (jrefs) applyJointPoses(jrefs, c, p.joints);
+        }
+      } else if (c) {
+        for (const o of this.compRoots.get(ci) ?? []) {
+          const jrefs = (o.userData as { jrefs?: JointPose[] }).jrefs;
+          if (jrefs) applyJointPoses(jrefs, c);
+        }
+      }
+      const lens = this.lampLenses.get(ci);
+      if (lens) {
+        const g = p?.glow;
+        (lens.material as MeshBasicMaterial).color.setRGB(
+          g ? 0.15 + g.r * 0.85 : 0.08, g ? 0.15 + g.g * 0.85 : 0.08, g ? 0.15 + g.b * 0.85 : 0.08);
+      }
+      // LED faces: emissive = face colour × the bus value (dashboard.md law)
+      for (const [k, e] of this.dashElements) {
+        if (!k.startsWith(`${ci}:`) || !e.faceMat) continue;
+        const v = p?.led ?? 0;
+        const col = e.faceMat.color;
+        e.faceMat.emissive.setRGB(col.r * v, col.g * v, col.b * v);
+      }
+    }
+    if (jointTouched) this.syncSubJoints();
+    this.invalidate();
+  }
+
+  // -------------------------------------------------- THE 3-D PRESS LAW
+  // (v1.15.6, we: "button presses onto dashboards and screens should
+  // actually work on the 3d model and propagate … a hand with finger cursor
+  // to indicate it's press able … tell us what channel/ui element/which
+  // xenoncode line this corresponds to as a popup label")
+  /** What a press raycast answered: a dashboard element (ci + element
+   *  channel), a built-in device screen face (surfaceKey + pixel), or a
+   *  standalone button component. px/py are the SURFACE's pixel coords
+   *  (framebuffer space: x right, y DOWN from the top — the button_rect
+   *  law, wiki dashboard.md). */
+  pressPick(clientX: number, clientY: number): PressTarget | null {
+    const rect = this.viewRect();
+    if (!rect) return null;
+    const ndc = new Vector2(((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1);
+    const ray = new Raycaster();
+    ray.setFromCamera(ndc, this.camera);
+    const targets: Object3D[] = [];
+    for (const e of this.dashElements.values()) targets.push(e.mesh);
+    for (const e of this.deviceScreens.values()) targets.push(e.mesh);
+    for (const g of this.pressCompRoots.values()) targets.push(g);
+    const hits = ray.intersectObjects(targets, true);
+    for (const h of hits) {
+      const uv = h.uv;
+      // walk UP: element boxes carry userData.dash, pressable part roots
+      // carry userData.pressComp (meshes are children of the roots)
+      let o: Object3D | null = h.object;
+      while (o && !(o.userData as { dash?: unknown }).dash
+        && !(o.userData as { pressComp?: unknown }).pressComp) o = o.parent;
+      const ud = o?.userData as {
+        dash?: { ci: number; ch: number; type: string; surfaceKey?: string };
+        pressComp?: string;
+      } | undefined;
+      if (ud?.dash) {
+        const dash = ud.dash;
+        const out: { kind: 'dash'; ci: number; ch: number; elType: string; surfaceKey?: string; px?: number; py?: number } =
+          { kind: 'dash', ci: dash.ci, ch: dash.ch, elType: dash.type };
+        if (dash.surfaceKey) {
+          const s = this.dashScreens.get(dash.surfaceKey);
+          if (s && uv) {
+            out.surfaceKey = dash.surfaceKey;
+            out.px = Math.min(s.w - 1, Math.max(0, Math.floor(uv.x * s.w)));
+            out.py = Math.min(s.h - 1, Math.max(0, Math.floor((1 - uv.y) * s.h)));
+          }
+        }
+        return out;
+      }
+      // built-in device screen face (Computer / Crafter panel)
+      for (const [key, e] of this.deviceScreens) {
+        if (e.mesh !== h.object) continue;
+        if (!uv) return null;
+        return {
+          kind: 'face', ci: (e.mesh.userData as { compCi?: number }).compCi ?? -1,
+          surfaceKey: key,
+          px: Math.min(e.w - 1, Math.max(0, Math.floor(uv.x * e.w))),
+          py: Math.min(e.h - 1, Math.max(0, Math.floor((1 - uv.y) * e.h))),
+        };
+      }
+      if (ud?.pressComp)
+        for (const [ci, g] of this.pressCompRoots) if (g === o)
+          return { kind: 'comp', ci, ch: 0, elType: ud.pressComp };
+      return null;
+    }
+    return null;
+  }
+
+  /** The press SINK (we: "it should tell us it's press able"): the element
+   *  box rides 4 mm into the board while pressed; a latched Toggle keeps
+   *  the sink (state is visible at a glance). */
+  pressVisual(dashCi: number, ch: number, pressed: boolean): void {
+    const e = this.dashElements.get(`${dashCi}:${ch}`);
+    if (!e) return;
+    e.mesh.position.z = e.baseZ - (pressed ? 0.004 : 0);
+    this.invalidate();
+  }
+
+  /** The press gesture owns the canvas: orbit OFF while a press is held
+   *  (a press is a CLICK, never a camera drag). */
+  setPressCapture(on: boolean): void {
+    if (this.controls) this.controls.enabled = !on;
+  }
+
+  /** The pressable count (audit seam for the suite). */
+  pressTargets(): { dash: number; faces: number; comps: number } {
+    return { dash: this.dashElements.size, faces: this.deviceScreens.size,
+      comps: this.pressCompRoots.size };
   }
 
   /** green ground + grid just under the lowest rendered geometry (ground=true:
@@ -6261,6 +6511,12 @@ void main() {
     this.dashScreens.clear();          // faces die with the scene (feeds survive)
     for (const e of this.deviceScreens.values()) e.tex.dispose();
     this.deviceScreens.clear();
+    // v1.15.6 the living-craft layer dies with the scene (the SIM survives —
+    // engine/devicesim.ts is Editor-owned; its poses are re-applied on the
+    // next pump cycle against the fresh meshes)
+    this.dashElements.clear();
+    this.lampLenses.clear();
+    this.pressCompRoots.clear();
     this.rotUndo.clear();
     this.rotBase.clear();
     this.symRotBases.clear();
