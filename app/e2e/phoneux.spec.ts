@@ -109,6 +109,33 @@ test.describe('phone UI batch @ui', () => {
   // the hull; h untouched); the exclusivity law itself is pinned on the real
   // engine (scene.headless "view-option exclusivity", legacy selftest excl=true).
 
+  test('the Screens dock keeps its ✕ close reachable on phones @Screens', async ({ page }) => {
+    // e2e-tier because: viewport GEOMETRY clipping — the dock header is a flex
+    // row whose min-content (title + tabs + w-32 search + tile) exceeded the
+    // 412-px phone width, pushing the ml-auto ✕ off the overflow-hidden window:
+    // maximized on a phone there was NO way to close it (we: "I got no way to
+    // close screens tab on phone if maxed, like in space invaders start").
+    // The deep link rides the shipped PLAYABLE row's exact URL: the dock opens
+    // booted and the zoom window raises itself on the first painted frame.
+    await page.goto('/?craft=3288012440&dash=main%230');
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 90_000 });
+    const vp = page.viewportSize()!;
+    // the zoom window's bar: ✕ close inside the viewport, and it closes
+    const exit = page.locator('[data-testid$="-fullexit"]').first();
+    await expect(exit).toBeVisible({ timeout: 90_000 });
+    const eb = (await exit.boundingBox())!;
+    expect(eb.x + eb.width, 'zoom-bar ✕ never clipped off the viewport').toBeLessThanOrEqual(vp.width);
+    await exit.click();
+    await expect(page.locator('[data-testid$="-fullexit"]')).toHaveCount(0);
+    // the dock itself: the header ✕ is on-screen and closes it
+    const close = page.getByTestId('screens-close');
+    await expect(close).toBeVisible();
+    const cb = (await close.boundingBox())!;
+    expect(cb.x + cb.width, 'dock-header ✕ never clipped off the viewport').toBeLessThanOrEqual(vp.width);
+    await close.click();
+    await expect(page.getByTestId('screens-dock')).toHaveCount(0);
+  });
+
   // RETIRED v1.12.5 (L5): the empty-state copy law is pinned in
   // liftwidget.test.tsx ("the EMPTY readout speaks enclosed blocks + skin") —
   // same strings, engine-null seam. The sphereskin lift leg (widget riding a

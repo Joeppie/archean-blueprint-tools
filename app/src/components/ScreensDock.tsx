@@ -217,22 +217,22 @@ export function ScreensCell(p: {
           }}
           className="fixed inset-0 z-50 overflow-auto bg-black"
           onClick={() => { setFull(false); syncUrl(null); }}>
-          <div className="sticky top-0 z-10 flex items-center gap-2 bg-black/80 px-3 py-1.5"
+          <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 bg-black/80 px-3 py-1.5"
             data-nodrag onClick={e => e.stopPropagation()}>
-            <button data-testid={`${p.testid}-zoomout`} className="rounded bg-[#243a52] px-2 py-0.5 text-[13px]"
+            <button data-testid={`${p.testid}-zoomout`} className="shrink-0 rounded bg-[#243a52] px-2 py-0.5 text-[13px]"
               onClick={() => setZ(v => Math.max(0.25, v / 1.25))}>−</button>
-            <span data-testid={`${p.testid}-zoom`} className="w-12 text-center text-[11px] tabular-nums text-[#9fb0c8]">
+            <span data-testid={`${p.testid}-zoom`} className="w-12 shrink-0 text-center text-[11px] tabular-nums text-[#9fb0c8]">
               {Math.round(z * 100)}%</span>
-            <button data-testid={`${p.testid}-zoomin`} className="rounded bg-[#243a52] px-2 py-0.5 text-[13px]"
+            <button data-testid={`${p.testid}-zoomin`} className="shrink-0 rounded bg-[#243a52] px-2 py-0.5 text-[13px]"
               onClick={() => setZ(v => Math.min(16, v * 1.25))}>+</button>
-            <button className="rounded bg-[#1a2436] px-2 py-0.5 text-[10px] text-[#9fb0c8]"
+            <button className="shrink-0 rounded bg-[#1a2436] px-2 py-0.5 text-[10px] text-[#9fb0c8]"
               onClick={() => setZ(1)}>fit</button>
-            <button className="rounded bg-[#1a2436] px-2 py-0.5 text-[10px] text-[#9fb0c8]"
+            <button className="shrink-0 rounded bg-[#1a2436] px-2 py-0.5 text-[10px] text-[#9fb0c8]"
               onClick={() => setZ(Math.min(16, (window.innerWidth * 0.9) / p.w))}>1:1 px</button>
-            <span className="truncate text-[11px] text-[#9fb0c8]">{p.label} · {p.w}×{p.h}</span>
+            <span className="min-w-0 flex-1 basis-24 truncate text-[11px] text-[#9fb0c8]">{p.label} · {p.w}×{p.h}</span>
             <span className="hidden text-[10px] text-[#5d6a7d] md:inline">clicks press the screen · scroll/drag to pan · pinch or Ctrl+wheel to zoom</span>
             <button data-testid={`${p.testid}-fullexit`}
-              className="ml-auto rounded bg-[#243a52] px-3 py-1 text-[11px]"
+              className="shrink-0 rounded bg-[#243a52] px-3 py-1 text-[11px]"
               onClick={() => { setFull(false); syncUrl(null); }}>✕ close</button>
           </div>
           <div className="pt-2 text-center" style={{ width: Math.round(fit * z), maxWidth: 'none', margin: '0 auto' }}
@@ -341,15 +341,15 @@ export default function ScreensDock(p: {
       }}
       className="font-mono"
       header={
-      <div className="flex items-center gap-3 bg-[#1a2436] px-3 py-1.5 text-[12px]">
-        <span className="font-bold tracking-wide">▣ Screens
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 bg-[#1a2436] px-3 py-1.5 text-[12px]">
+        <span className="min-w-0 truncate font-bold tracking-wide">▣ Screens
           {p.comp && <span className="ml-2 font-normal text-[#9fb0c8]">— {p.comp.alias || p.comp.program}</span>}
         </span>
         <span data-testid="screens-status"
           className={`text-[10px] font-bold ${pump?.status === 'running' ? 'text-[#3ddc55]' : 'text-[#ff5b5b]'}`}>
           {pump ? (pump.status === 'running' ? 'ON' : pump.status.toUpperCase()) : 'OFF'}
         </span>
-        <span className="text-[10px] text-[#5d6a7d]">cycles {pump?.cycles ?? 0} @ {CYCLE_HZ} Hz</span>
+        <span className="hidden text-[10px] text-[#5d6a7d] sm:inline">cycles {pump?.cycles ?? 0} @ {CYCLE_HZ} Hz</span>
         {pilot.length > 0 && (
           <span data-testid="screens-pilot-hint" className="hidden text-[10px] text-[#5d6a7d] lg:inline"
             title={`bound cockpit channels: ${pilot.join(', ')}`}>

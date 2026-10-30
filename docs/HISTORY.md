@@ -4850,3 +4850,21 @@ __ARCHEAN__ screen()/pickCell seams answer occlusion questions with the
 engine's own law (no eyeballing); the ⚙ rows live behind toggle-options
 (probes must open the popover first); screenPoint returns CLIENT px and
 applies the display anchor (moff) — probes add moff to raw file coords.
+
+## v1.16.5 — THE SCREENS DOCK KEEPS ITS ✕ (2026-10-30)
+
+we: "I got no way to close screens tab on phone if maxed, like in space
+invaders start". A phone-width census (412-px Playwright context, the shipped
+invaders deep link /?craft=3288012440&dash=main%230) measured the ▣ Screens
+header's min-content (title+alias, status, cycles text, two tab buttons, the
+w-32 search, ▦ tile) at ~520 px — the ml-auto ✕ sat at x=511 on a 412-px
+window that is ALWAYS fullscreen on phones (FloatingWindow fullNarrow) and
+clips with overflow-hidden: the close button existed, it just lived off
+screen. The zoom window's sticky bar carried the same class (the truncate
+label lacks min-w-0, so a long surface name pushes ✕ close out — the v1.14.0
+Badger min-content family). Fix: flex-wrap on both bars, min-w-0 truncate on
+the title/label, shrink-0 on the controls, the cycles readout hides under
+sm. Pin: phoneux.spec 'the Screens dock keeps its ✕ close reachable on
+phones @Screens' — walks the exact user path (deep link → raised zoom →
+✕ close → dock ✕ → dock gone) on both projects, asserting every close box
+ends inside the viewport.
