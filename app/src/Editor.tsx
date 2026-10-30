@@ -57,6 +57,7 @@ import { fetchPlayerHuds, fetchPlayerHud, savePlayerHud, playerHudFromFiles,
   PLAYER_HUD_CI, type PlayerHudEntry, type PlayerHudProgram } from './engine/playerhud';
 import { DeviceSim, dataNeighbours } from './engine/devicesim';
 import { craftPowerNet, computerPowered } from './engine/power';
+import { EnergySim, type EnergyStatus } from './engine/energy';
 import { chanSites, rectSites, rectsAt, type ChanSite, type RectSite } from './engine/xcsites';
 import { loadManifest, peekManifest } from './engine/models';
 import { beaconNet } from './engine/beaconnet';
@@ -168,6 +169,10 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   //    engine/power.ts gates the auto-boot and the warnings,
   //    engine/xcsites.ts names the program line behind a press.
   const simRef = useRef(new DeviceSim());
+  // v1.16.10 THE POWER FLOW (WP5): the grid balance rides the same 25 Hz
+  // heartbeat as the actuator sim; the TopBar chip warns (never blackouts).
+  const energyRef = useRef(new EnergySim());
+  const [energy, setEnergy] = useState<EnergyStatus | null>(null);
   const latchedRef = useRef(new Map<string, boolean>());
   const sitesRef = useRef(new Map<number, { chan: ChanSite[]; rect: RectSite[] }>());
   /** LIVE CRAFT: the farm auto-boots the craft's programmed, POWERED
@@ -192,6 +197,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     const man = peekManifest();
     simRef.current.load(bp, t => (man?.[t]?.joints ?? []).map(j => ({
       name: j.name, limits: j.limits as [number, number, number] | undefined })));
+    energyRef.current.load(bp, powerNet);
+    setEnergy(energyRef.current.state());
     latchedRef.current.clear();
     sitesRef.current.clear();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -201,6 +208,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // faces (dashboard.md: one port, channel = element index).
   useEffect(() => xenonFarm.observeDevices((ci, type, ch, v) => {
     simRef.current.write(ci, ch, v);
+    energyRef.current.write(ci, ch, v);   // gates: lamps, belts, generators
     if (type === 'Dashboard') simRef.current.setLed(ci, ch, v > 1 ? v / 255 : v);
   }), []);
   // AUTO-BOOT (we: "computers should start when a craft is loaded in"):
@@ -213,6 +221,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     xenonFarm.closeAll();
     const net = powerNet;
     xenonFarm.autoboot(xenonComps.filter(c => !net?.hasPower || computerPowered(net, c.ci)));
+    energyRef.current.clear();
+    setEnergy(energyRef.current.state());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bp, live, powerNet]);
   // ── v1.14.0 P9 slice A (we: "allow us to edit the code for at least HUDs
@@ -465,9 +475,12 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // dolphin) has NO pump, and a pump-cycle-hook sim never ticks there.
   // applyDevicePoses is diff-only: an idle sim costs a map swap.
   useEffect(() => {
+    let beats = 0;
     const t = window.setInterval(() => {
       simRef.current.step(0.04);
       engineRef.current?.applyDevicePoses(simRef.current.snapshot());
+      energyRef.current.step(0.04);
+      if (++beats % 15 === 0) setEnergy(energyRef.current.state());   // ~1.6 Hz
     }, 40);
     return () => window.clearInterval(t);
   }, []);
@@ -2020,6 +2033,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       }}>
       <TopBar mode={mode} onMode={setMode} dirty={dirty} title={name} craftId={craft}
         live={live} liveN={xenonFarm.pumps.filter(p => p.comp).length}
+        energy={energy}
         onToggleLive={xenonComps.length ? () => {
           if (live) { xenonFarm.closeAll(); setLive(false); }
           else {

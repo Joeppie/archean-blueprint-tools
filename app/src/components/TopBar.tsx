@@ -15,6 +15,7 @@
 // so the roadmap is visible in the UI.
 import { useEffect, useRef, useState } from 'react';
 import { sabSupported } from '../engine/xenoncode';
+import { fmtW, type EnergyStatus } from '../engine/energy';
 
 export type Mode = 'clean' | 'view' | 'edit' | 'wire' | 'flight' | 'aero';
 
@@ -69,6 +70,9 @@ interface Props {
    *  is loaded in"): the craft's self-running farm — ▶ n = n VMs live;
    *  the click stops them all (⏸), clicking again re-boots the farm. */
   live?: boolean;
+  /** v1.16.10 THE POWER FLOW (engine/energy.ts): the live grid balance —
+   *  the chip warns (low/deep-discharge), the grid never blacks out. */
+  energy?: EnergyStatus | null;
   liveN?: number;
   onToggleLive?: () => void;
   children?: React.ReactNode;              // right side: panel toggle etc.
@@ -143,6 +147,7 @@ export default function TopBar(p: Props) {
   // IDE windows; at rest the header sits below them (maximised title
   // bars keep their double-clicks — the v1.15.0 extras-pin catch).
   const [menusOpen, setMenusOpen] = useState(0);
+  const [energyOpen, setEnergyOpen] = useState(false);
   const reportOpen = (o: boolean) => setMenusOpen(m => m + (o ? 1 : -1));
   return (
     // mobile: the mode bar cannot share one row with File/Edit/Tools/Save/⚙
@@ -368,6 +373,77 @@ export default function TopBar(p: Props) {
             p.live ? 'text-[#9cffb4] border-[#9cffb4]/40' : 'text-[#8b93a1]'}`}>
           {p.live ? '▶' : '⏸'} <span className="tabular-nums">{p.liveN}</span>
         </button>
+      )}
+      {/* v1.16.10 THE POWER FLOW chip (WP5, engine/energy.ts): the grid's
+          live balance — ⚡ production−demand, 🔋 the battery pack. A
+          battery that drains (even NEGATIVE) keeps FEEDING: the chip is
+          the warning, never a blackout. Click = the census panel. */}
+      {p.energy?.hasGrid && (
+        <div className="relative">
+          <button data-testid="energy-chip"
+            title={`power flow — ${fmtW(p.energy.productionW)} producing, ${fmtW(p.energy.demandW)} drawn, battery ${Math.round(p.energy.batteryWh / Math.max(1, p.energy.batteryCapacityWh) * 100)}% (click for the census)`}
+            onClick={() => setEnergyOpen(v => !v)}
+            className={`ksp-btn flex items-center gap-1 px-2 py-1 text-[11px] leading-none tabular-nums ${
+              p.energy.status === 'deficit' ? 'text-[#ff9d94] border-[#ff9d94]/50'
+                : p.energy.status === 'low' ? 'text-[#ffd479] border-[#ffd479]/50'
+                  : p.energy.status === 'charging' ? 'text-[#8bd0ff] border-[#8bd0ff]/40'
+                    : 'text-[#9cffb4] border-[#9cffb4]/40'}`}>
+            {p.energy.status === 'deficit' ? '⚠' : p.energy.status === 'low' ? '⚠' : '⚡'}
+            <span>{p.energy.surplusW >= 0 ? '+' : '−'}{fmtW(Math.abs(p.energy.surplusW))}</span>
+            {p.energy.batteryCapacityWh > 0 && (
+              <span className="opacity-90">🔋{Math.max(0, Math.round(
+                p.energy.batteryWh / p.energy.batteryCapacityWh * 100))}%</span>
+            )}
+          </button>
+          {energyOpen && (
+            <div data-testid="energy-panel"
+              className="absolute right-0 top-full z-[70] mt-1 w-72 rounded-lg border border-[#2c333d] bg-[#161a20]/95 p-3 text-[11px] text-[#c8ced8] shadow-xl">
+              <div className="mb-1 flex justify-between font-semibold text-[#e8edf4]">
+                <span>⚡ production {fmtW(p.energy.productionW)}</span>
+                <span>🔌 draw {fmtW(p.energy.demandW)}</span>
+              </div>
+              {p.energy.drained > 0 && (
+                <div className="mb-1 rounded bg-[#3a1d16] px-2 py-1 text-[#ffb1a4]">
+                  ⚠ {p.energy.drained} battery cell{p.energy.drained > 1 ? 's' : ''} deep-discharged
+                  (charge below zero) — the grid keeps feeding; relocate near fuel/sun
+                </div>
+              )}
+              {p.energy.status === 'low' && (
+                <div className="mb-1 rounded bg-[#3a2e14] px-2 py-1 text-[#ffd479]">
+                  ⚠ battery low — devices keep running (editor warning)
+                </div>
+              )}
+              <div className="max-h-40 overflow-y-auto">
+                {p.energy.sources.map(s => (
+                  <div key={s.type} className="flex justify-between border-b border-[#22262e] py-0.5">
+                    <span>{s.type} ×{s.count}</span><span className="text-[#9cffb4]">{fmtW(s.watts)}</span>
+                  </div>
+                ))}
+                {p.energy.consumers.map(s => (
+                  <div key={s.type} className="flex justify-between border-b border-[#22262e] py-0.5">
+                    <span>{s.type} ×{s.count}</span><span className="text-[#ffd479]">{fmtW(s.watts)}</span>
+                  </div>
+                ))}
+              </div>
+              {p.energy.batteryCapacityWh > 0 && (
+                <div className="mt-2">
+                  <div className="mb-0.5 flex justify-between">
+                    <span>batteries</span>
+                    <span className="tabular-nums">
+                      {Math.round(p.energy.batteryWh)} Wh / {Math.round(p.energy.batteryCapacityWh)} Wh
+                    </span>
+                  </div>
+                  <div className="h-1.5 overflow-hidden rounded bg-[#22262e]">
+                    <div className={`h-full ${p.energy.batteryMinPct <= 0 ? 'bg-[#ff9d94]'
+                      : p.energy.batteryMinPct < 10 ? 'bg-[#ffd479]' : 'bg-[#9cffb4]'}`}
+                    style={{ width: `${Math.max(0, Math.min(100,
+                      p.energy.batteryWh / p.energy.batteryCapacityWh * 100))}%` }} />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       )}
       {p.children}
     </header>
