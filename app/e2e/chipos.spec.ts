@@ -32,18 +32,22 @@ test.describe('ChipOS appkit ecosystem @ChipOS', () => {
     await expect(dialogs).toHaveCount(2);
     await expect(page.getByTestId('xenon-on')).toHaveText(['ON', 'ON'], { timeout: 120_000 });
     await page.getByTestId('xenon-side-bus').nth(1).click();
-    const busRows = page.locator('[data-testid^="xenon-bus-"]');
-    // the bus row shows the value truncated (fmtVal 12 chars): the
-    // manifest's leading .kit{3} signature is the identity (the full
-    // TETRIS/HELLO/EarthNAV registry join is pinned at the VM tier)
-    await expect(busRows.filter({ hasText: '.kit{3}' }).first())
-      .toBeVisible({ timeout: 60_000 });
+    // the bus row: the data-testid is the name cell, the manifest rides
+    // the row's value cell (fmtVal truncates to 12 chars — the leading
+    // .kit{3} signature is the identity; the full TETRIS/HELLO/EarthNAV
+    // registry join is pinned at the VM tier).
+    const busRow = (text: string) => page.locator('div')
+      .filter({ has: page.locator('[data-testid^="xenon-bus-"]') })
+      .filter({ hasText: text });
+    await expect(busRow('.kit{3}').first()).toBeVisible({ timeout: 60_000 });
 
     // chipos's bus tab: the OS answers the net — its relay assert lands
-    // (db_assert drives "LV Switch" ON after the 3 s scan)
+    // (db_assert drives "LV Switch" ON after the 3 s scan). The chipos
+    // window opened first → the cascaded app-1 window SHIELDS its side
+    // tab (modebox-shield family): raise it with a click first.
+    await page.getByTestId('xenon-dialog').first().click({ position: { x: 8, y: 8 } });
     await page.getByTestId('xenon-side-bus').nth(0).click();
-    await expect(busRows.filter({ hasText: 'LV Switch' }).first())
-      .toBeVisible({ timeout: 60_000 });
+    await expect(busRow('LV Switch').first()).toBeVisible({ timeout: 60_000 });
 
     // THE REGISTRY's engine room: the OS VM keeps cycling beside the
     // app VM (the appkit scan/heartbeat law runs on the 25 Hz clock)
