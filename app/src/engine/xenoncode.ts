@@ -49,6 +49,8 @@ type Mod = {
   // ABI 11 (v1.14.1 slices B+D): typed as OPTIONAL — every caller
   // typeof-guards (a stale wasm degrades features, never spams)
   _xc_set_input_t?: (alias: number, ch: number, text: number) => void;
+  _xc_set_input_ti?: (io: number, ch: number, text: number) => void;
+  _xc_set_virtual_dt?: (ms: number) => void;
   _xc_beacon_put?: (i: number, payload: number) => void;
   _xc_set_world?: (key: number, value: number) => void;
   _xc_set_view?: (w: number, h: number, mx: number, my: number, fov: number, look: number) => void;
@@ -355,21 +357,72 @@ function compOnIo(bp: Blueprint, ci: number, io: number): BlueprintComponent | u
  *  components cabled to this computer's data_port.0NN ports, plus every
  *  aliased component (computer.md: aliases address components directly,
  *  no Router needed). */
+/** THE ROUTER NET (Router.md / MiniRouter.md): routers chain over data
+ *  ports and every component plugged into the chain joins ONE network per
+ *  computer — the computer addresses every device on it, and a frame
+ *  arriving from it fires the computer's input.N on the port its router
+ *  plugs into. v1.16.10: xenonDevices WALKS the chain, so every net device
+ *  carries the computer's LOCAL port (device_at(i).port, alias→io, and
+ *  ABI 16's input.N firing all route through it). */
+const ROUTER_RE = /^(Mini)?Router$|DataBridge$|DataJunction$/;
+const dataPeer = (p: any, idx: number): { other: number; mine: string; theirs: string } | null => {
+  if ((p.type ?? 'data') !== 'data') return null;
+  if (p.a_component === idx) return { other: p.b_component, mine: String(p.a_port), theirs: String(p.b_port) };
+  if (p.b_component === idx) return { other: p.a_component, mine: String(p.b_port), theirs: String(p.a_port) };
+  return null;
+};
+const dataPort = (port: string): number | null => {
+  const m = /^(?:data[-_]?port\.?(\d+)|data[-_]?port|data|connector\.0*)$/i.exec(port);
+  return m ? (m[1] !== undefined ? +m[1] : 0) : null;
+};
+
 export function xenonDevices(bp: Blueprint, ci: number): XCDevice[] {
   const comps = bp.data.components as BlueprintComponent[];
   const out: XCDevice[] = [];
+  const byCi = new Map<number, number>();        // component idx -> io (first path wins)
   const byAlias = new Set<string>();
   const pipes: any[] = (bp.data as any).pipes ?? [];
+  const add = (idx: number, io: number) => {
+    if (idx === ci || byCi.has(idx)) return;
+    byCi.set(idx, io);
+  };
+  // ① devices plugged straight into a data port of this computer
   for (const p of pipes) {
-    if (p.a_component !== ci && p.b_component !== ci) continue;
-    const mine = p.a_component === ci ? p.a_port : p.b_port;
-    const m = /^(?:data_port\.(\d+)|data)$/.exec(String(mine));
-    if (!m) continue;
-    const other = comps[p.a_component === ci ? p.b_component : p.a_component];
+    const dp = dataPeer(p, ci);
+    if (!dp) continue;
+    const io = dataPort(dp.mine);
+    const peer = comps[dp.other];
+    if (io === null || !peer) continue;
+    if (ROUTER_RE.test(peer.type)) { add(dp.other, io); continue; }   // ② roots below
+    add(dp.other, io);
+  }
+  // ② router-chain BFS: every device hanging off a router plugged into
+  // data port K joins the table AT port K (chained routers included)
+  const queue: { dev: number; io: number }[] = [...byCi]
+    .filter(([idx]) => ROUTER_RE.test(comps[idx]?.type ?? ''))
+    .map(([idx, io]) => ({ dev: idx, io }));
+  const seen = new Set(queue.map(q => q.dev));
+  while (queue.length) {
+    const { dev, io } = queue.shift()!;
+    for (const p of pipes) {
+      const dp = dataPeer(p, dev);
+      if (!dp) continue;
+      if (dataPort(dp.theirs) === null && dataPort(dp.mine) === null) continue;
+      const other = comps[dp.other];
+      if (!other) continue;
+      if (ROUTER_RE.test(other.type)) {
+        if (!seen.has(dp.other)) { seen.add(dp.other); add(dp.other, io); queue.push({ dev: dp.other, io }); }
+        continue;
+      }
+      add(dp.other, io);
+    }
+  }
+  const pos = (c: BlueprintComponent) => c.position;
+  for (const [idx, io] of byCi) {
+    const other = comps[idx];
     if (!other) continue;
-    out.push({ io: m[1] ? +m[1] : 0, id: 0, alias: other.alias ?? '', type: other.type,
-      ci: p.a_component === ci ? p.b_component : p.a_component,
-      x: other.position?.x ?? 0, y: other.position?.y ?? 0, z: other.position?.z ?? 0,
+    out.push({ io, id: 0, alias: other.alias ?? '', type: other.type, ci: idx,
+      x: pos(other)?.x ?? 0, y: pos(other)?.y ?? 0, z: pos(other)?.z ?? 0,
       mode: typeof (other.data as any)?.mode === 'number' ? (other.data as any).mode : undefined });
     if (other.alias) byAlias.add(other.alias);
   }
@@ -377,7 +430,7 @@ export function xenonDevices(bp: Blueprint, ci: number): XCDevice[] {
     if (!c.alias || byAlias.has(c.alias)) return;
     byAlias.add(c.alias);
     out.push({ io: -1, id: 0, alias: c.alias, type: c.type, ci: idx,
-      x: c.position?.x ?? 0, y: c.position?.y ?? 0, z: c.position?.z ?? 0,
+      x: pos(c)?.x ?? 0, y: pos(c)?.y ?? 0, z: pos(c)?.z ?? 0,
       mode: typeof (c.data as any)?.mode === 'number' ? (c.data as any).mode : undefined });
   });
   out.sort((a, b) => a.alias.localeCompare(b.alias) || a.io - b.io);
@@ -566,7 +619,7 @@ export class XenonRun {
         mod._free(mp);
       }
     }
-    for (const d of comp.devices) {
+    comp.devices.forEach((d, i) => {
       const ab = new TextEncoder().encode(d.alias).length + 1;
       const tb = new TextEncoder().encode(d.type).length + 1;
       const ap = mod._malloc(ab), tp = mod._malloc(tb);
@@ -574,12 +627,13 @@ export class XenonRun {
       mod.stringToUTF8(d.type, tp, tb);
       mod._xc_add_device(d.id, d.io, ap, tp, d.io, d.x, d.y, d.z, 0, 0, 0, 0);
       mod._free(ap); mod._free(tp);
-      // alias→port mirror of the shim's g_devByAlias (xc_lower key, LAST
-      // alias wins, negative io rides 1000+id like xc_set_input_a): lets
-      // setInput feed an aliased channel through the NUMERIC fast path —
-      // no TextEncoder/malloc/free per write (v1.15.2 clicky-audio fix)
-      if (d.alias) run.aliasIo.set(d.alias.toLowerCase(), d.io >= 0 ? d.io : 1000 + d.id);
-    }
+      // ABI 16 (XENON-DEVCHANS): an alias addresses the DEVICE — the fast
+      // path resolves alias -> the shim's per-device channel key (10000 +
+      // the device-table index, the g_devs append order = this loop's
+      // order). A raw numeric port token stays the WIRE (the shim fans a
+      // wire write out to every device on the port).
+      if (d.alias) run.aliasIo.set(d.alias.toLowerCase(), 10000 + i);
+    });
     // ABI 12 (v1.15.2): stamp the RUNTIME KIND before boot — the HUD pump's
     // programs read screen_w/screen_h as the PLAYER VIEWPORT (xc_set_view
     // feeds them); a computer keeps its plain-screen size. One binary,
@@ -623,16 +677,23 @@ export class XenonRun {
   pauseCancel() {
     if (typeof this.mod._xc_pause_cancel === 'function') this.mod._xc_pause_cancel();
   }
+  /** ABI 16 virtual time: fix dt per cycle for deterministic headless
+   *  loops (the vmharness law) — a tight test loop advances sim time
+   *  exactly n·ms so time-gated scans (ChipOS's 3 s sweep, the appkit's
+   *  2 s heartbeat) run their real law. The browser pump never calls it
+   *  (v1.13.4 real-dt law stands). */
+  setVirtualDt(ms: number) {
+    if (typeof this.mod._xc_set_virtual_dt === 'function') this.mod._xc_set_virtual_dt(ms);
+  }
 
   setInput(io: number | string, ch: number, v: number) {
     if (typeof io === 'number') { this.mod._xc_set_input(io, ch, v); return; }
-    // alias→port: the shim's OWN resolution (g_devByAlias, lowercase, last
-    // alias wins; negative io = 1000+id) — once resolved the write rides
-    // _xc_set_input, skipping the per-write UTF-8/malloc/free marshal. The
-    // farm's Cable Law loopback fires this on EVERY 'out' event, so the
-    // marshal was the hot-path cost behind the v1.15.0 clicky-audio report.
-    const port = this.aliasIo.get(io.toLowerCase());
-    if (port !== undefined) { this.mod._xc_set_input(port, ch, v); return; }
+    // alias→DEVICE KEY: the shim's per-device channel store (ABI 16, see
+    // open()); the write mirrors onto the device's port wire and fires the
+    // input.N event there. A NUMERIC token is a raw port — the WIRE (the
+    // shim fans it out to every device on the port).
+    const key = /^\d+$/.test(io) ? +io : this.aliasIo.get(io.toLowerCase());
+    if (key !== undefined) { this.mod._xc_set_input(key, ch, v); return; }
     if (typeof this.mod._xc_set_input_a !== 'function') return;
     const nb = new TextEncoder().encode(io).length + 1;
     const p = this.mod._malloc(nb);
@@ -640,7 +701,8 @@ export class XenonRun {
     this.mod._xc_set_input_a(p, ch, v);
     this.mod._free(p);
   }
-  /** alias(lower)→shim port, built in open() (see setInput). */
+  /** alias(lower)→shim DEVICE KEY (ABI 16: 10000 + device-table index),
+   *  built in open() (see setInput). */
   private aliasIo = new Map<string, number>();
   // ── ABI 11 (v1.14.1 slices B+D) — every one typeof-guarded: a stale wasm
   // degrades the feature, never spams.
@@ -651,9 +713,18 @@ export class XenonRun {
     return p;
   }
   /** TEXT channel feed (slice D): a beaconNet delivery into a Beacon
-   *  component's ch0 (input_text(port,0) reads it). */
+   *  component's ch0, and (ABI 16) the farm's bus fan-out — ChipOS's
+   *  appkit manifests/frames/events are ALL text channels. Resolves the
+   *  alias to the shim's device key for the numeric fast path. */
   setInputT(alias: string, ch: number, text: string) {
     const m = this.mod;
+    const key = /^\d+$/.test(alias) ? +alias : this.aliasIo.get(alias.toLowerCase());
+    if (key !== undefined && typeof m._xc_set_input_ti === 'function') {
+      const t = this.putStr(text);
+      m._xc_set_input_ti(key, ch, t);
+      m._free(t);
+      return;
+    }
     if (typeof m._xc_set_input_t !== 'function') return;
     const a = this.putStr(alias), t = this.putStr(text);
     m._xc_set_input_t(a, ch, t);
@@ -1283,7 +1354,7 @@ export class XenonPump {
   // boundary — same values, same timing, ~1 wasm call per DEVICE CHANNEL
   // per cycle instead of per WRITE (the alias→port fast path lives in
   // XenonRun.aliasIo, mirroring the shim's g_devByAlias).
-  private busPending = new Map<string, { alias: string | number; ch: number; v: number }>();
+  private busPending = new Map<string, { alias: string | number; ch: number; v: number | string }>();
   vars = new Map<string, XenonVar>();                // '$name'  -> live global variable
   // XENON-LOCALS: the locals of the function owning the PAUSED line (the
   // Locals tab). Set at every pause: worker mode reads the hook's SAB
@@ -1570,7 +1641,7 @@ export class XenonPump {
         return d.ci !== undefined ? { ci: d.ci, type: d.type } : null;
     return null;
   }
-  acceptBusWrite(alias: string | number, ch: number, v: number): void {
+  acceptBusWrite(alias: string | number, ch: number, v: number | string): void {
     // COALESCED v1.15.2 (we: "the sound is slightly clickier in super
     // mario"): between cycles the VM samples inputs ONCE, so only the LAST
     // value per channel is observable — record (one Map.set) and let
@@ -1580,14 +1651,19 @@ export class XenonPump {
     this.busPending.set(`${String(alias).toLowerCase()}:${ch}`, { alias, ch, v });
   }
   /** Inject the coalesced bus fan-in into the VM, one setInput per
-   *  (channel, ch) — called at every cycle boundary, both pump modes. */
+   *  (channel, ch) — called at every cycle boundary, both pump modes.
+   *  ABI 16: TEXT values ride setInputT (the appkit protocol's manifest/
+   *  frame/event channels); the shim mirrors them onto the device's port
+   *  and fires the input.N event handler there. */
   private flushBus(): void {
     if (!this.busPending.size) return;
     const run = this.run;
     const pend = [...this.busPending.values()];
     this.busPending.clear();
     if (!run) return;
-    for (const w of pend) run.setInput(w.alias, w.ch, w.v);
+    for (const w of pend)
+      if (typeof w.v === 'string') run.setInputT(String(w.alias), w.ch, w.v);
+      else run.setInput(w.alias, w.ch, w.v);
   }
 
   /** Name the running computer's input channels and give every one a
@@ -2446,7 +2522,7 @@ export class XenonPump {
  *  measures 0.2 changing surfaces per cycle of 117);
  *  14 = xc_screen_px/py/haspos (the composited HUD SCREEN window);
  *  13 = $panel.set_size(w,h) + width/height getters (ABI 13; wiki hud.md law). */
-export const XC_ABI = 15;
+export const XC_ABI = 16;
 
 // ---------------------------------------------------------------------------
 // COMPUTERFARM — the craft's co-running pumps + the SHARED io bus
@@ -2487,8 +2563,19 @@ export class IoBus {
     dev?: { ci: number; type: string } | null): void {
     this.values.set(this.key(alias, ch), v);
     if (dev) this.notifyDevice(dev, ch, typeof v === 'number' ? v : Number(v) || 0);
-    if (typeof v === 'number')
-      for (const p of this.pumps) { void from; p.acceptBusWrite(alias, ch, v); }
+    // ABI 16: TEXT rides the fan-out too — the ChipOS App Kit's manifests,
+    // frames and events are ALL output_text channels.
+    for (const p of this.pumps) { void from; p.acceptBusWrite(alias, ch, v); }
+    // THE PUBLISHED-DEVICE LAW (v1.16.10, ChipOS): a COMPUTER's transmission
+    // is readable on the net UNDER ITS OWN ALIAS — ChipOS polls
+    // input_text("app-1", 0) for the appkit manifest, it never opens a
+    // listen port. The same value therefore also lands on the writing
+    // computer's device channel for every pump that knows that alias.
+    const wAlias = from.comp?.alias;
+    if (wAlias && wAlias.toLowerCase() !== String(alias).toLowerCase()) {
+      this.values.set(this.key(wAlias, ch), v);
+      for (const p of this.pumps) p.acceptBusWrite(wAlias, ch, v);
+    }
   }
   /** Fire the actuator tap for one (device, channel, value) (v1.15.6). */
   notifyDevice(dev: { ci: number; type: string }, ch: number, v: number): void {

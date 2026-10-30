@@ -227,13 +227,25 @@ ctx.onmessage = (e: MessageEvent<Msg>) => {
       // (the four litPixels e2e reds, v1.13.17)
       if (m.keys) wantKeys = m.keys;
       for (const [io, ch, v] of m.inputs ?? []) {
-        if (typeof v === 'string' && typeof io === 'string'
+        if (typeof v === 'string' && typeof io === 'string' && /^\d+$/.test(io)
+            && typeof mod._xc_set_input_ti === 'function') {
+          const t = putStr(v);
+          mod._xc_set_input_ti(+io, ch, t); mod._free(t);
+        }
+        else if (typeof v === 'string' && typeof io === 'string'
             && typeof mod._xc_set_input_t === 'function') {
           // ABI 11 text channel feed (beaconNet delivery -> Beacon ch0)
           const a = putStr(io), t = putStr(v);
           mod._xc_set_input_t(a, ch, t); mod._free(a); mod._free(t);
         }
+        // ABI 16: text onto a DEVICE KEY / raw port (the appkit bus fan-out)
+        else if (typeof v === 'string' && typeof io === 'number'
+            && typeof mod._xc_set_input_ti === 'function') {
+          const t = putStr(v);
+          mod._xc_set_input_ti(io, ch, t); mod._free(t);
+        }
         else if (typeof io === 'number') mod._xc_set_input(io, ch, v as number);
+        else if (/^\d+$/.test(io)) mod._xc_set_input(+io, ch, v as number);
         else if (typeof mod._xc_set_input_a === 'function') {
           const p = putStr(io); mod._xc_set_input_a(p, ch, v as number); mod._free(p);
         }

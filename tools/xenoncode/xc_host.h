@@ -31,6 +31,10 @@ inline std::vector<std::string> xc_eventLog;
 inline double xc_simTime = 0.0;
 inline double xc_lastPrintTime = -1.0;
 inline double xc_dt = 0.04;   // seconds per cycle — the app pump cadence
+// ABI 16 virtual time (headless tests): >0 fixes every cycle's dt to this
+// many ms, so a tight test loop advances sim time exactly n*ms (the browser
+// pump never sets it — the v1.13.4 real-dt law stands there).
+inline int xc_vdtMs = 0;
                               // (v1.13.2: 25 Hz; xc_set_cycle_ms overrides at
                               // boot, the game's dt-driven programs (Mario)
                               // read delta_time for REAL-TIME physics)

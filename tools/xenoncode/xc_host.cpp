@@ -16,6 +16,7 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <set>
 #include <thread>
 
 using namespace std;
@@ -128,6 +129,22 @@ static vector<DevInfo> g_devs;
 // MiniNavInstrument 'Celestial' text channel). Panel sliders
 // (xc_set_input_a) override any channel.
 static map<int, map<int, string>> xc_inputs_txt;
+// XENON-DEVCHANS (ABI 16): a router net hangs MANY devices on ONE io port,
+// and the game's channel belongs to the DEVICE — input_text("app-1",0) and
+// input_number("light1",0) are separate stores even when app-1 and light1
+// ride the same router port. ALIAS-addressed io therefore resolves to a
+// per-device key (XC_DEVKEY + device-table index); the old port-keyed
+// xc_inputs/xc_inputs_txt stay the raw-WIRE store (panel sliders, pilot
+// keys, numeric io reads). Every alias write mirrors onto the wire of its
+// device's port so numeric readers of that port keep seeing the traffic.
+static const int XC_DEVKEY = 10000;
+static map<int, map<int, double>> xc_devNum;   // device index -> ch -> value
+static map<int, map<int, string>> xc_devTxt;   // device index -> ch -> text
+// ports whose channels received a value since the last cycle — the
+// interpreter's input.N handlers FIRE for these (the game server delivers
+// every arriving frame as an input event; the appkit's input.0..15 blocks
+// are how ChipOS events reach an app program)
+static set<int> xc_inputsDirty;
 // PROGRAM-SIDE worldsim hooks (the WORLD tab's counterpart, v1.13.x):
 // setworldsim(name, v) overrides a worldsim channel FROM INSIDE the program
 // (the pump honours it every cycle until the program releases it with
@@ -183,8 +200,9 @@ static int xc_ioOf(const Var& a) {
 	if (a.type == Var::Text) {
 		auto i = g_devByAlias.find(xc_lower(string(a)));
 		if (i == g_devByAlias.end()) return -1;
-		const DevInfo& d = g_devs[i->second];
-		return d.port >= 0 ? d.port : 1000 + d.id;
+		// ABI 16: an alias addresses the DEVICE, not the wire — the store
+		// key is the per-device channel space (see XENON-DEVCHANS).
+		return XC_DEVKEY + i->second;
 	}
 	return (int)(int64_t)a;
 }
@@ -765,11 +783,28 @@ static void archeanInit() {
 	XenonCode::DeclareDeviceFunction("input_number:number", [](Computer*, const vector<Var>& a) -> Var {
 		int io = xc_ioOf(a[0]), ch = (int)(int64_t)a[1];
 		if (io < 0) { g_reads[{0, ch}] = 0.0; return 0.0; }   // unknown alias: 0, game-quiet
-		auto i = xc_inputs.find(io);
 		double v = 0.0;
-		if (i != xc_inputs.end()) {
-			auto c = i->second.find(ch);
-			if (c != i->second.end()) v = c->second;
+		if (io >= XC_DEVKEY) {
+			// ABI 16 device channel: numeric store first, a seeded TEXT
+			// channel parses (the game's text channels read as numbers).
+			auto i = xc_devNum.find(io - XC_DEVKEY);
+			if (i != xc_devNum.end()) {
+				auto c = i->second.find(ch);
+				if (c != i->second.end()) v = c->second;
+			}
+			if (v == 0.0) {
+				auto t = xc_devTxt.find(io - XC_DEVKEY);
+				if (t != xc_devTxt.end()) {
+					auto tc = t->second.find(ch);
+					if (tc != t->second.end()) { try { v = stod(tc->second); } catch (...) {} }
+				}
+			}
+		} else {
+			auto i = xc_inputs.find(io);
+			if (i != xc_inputs.end()) {
+				auto c = i->second.find(ch);
+				if (c != i->second.end()) v = c->second;
+			}
 		}
 		g_reads[{io, ch}] = v;      // the IDE's node cards show REAL reads
 		return v;
@@ -777,6 +812,19 @@ static void archeanInit() {
 	XenonCode::DeclareDeviceFunction("input_text:text", [](Computer*, const vector<Var>& a) -> Var {
 		int io = xc_ioOf(a[0]), ch = (int)(int64_t)a[1];
 		if (io < 0) return string();
+		if (io >= XC_DEVKEY) {
+			auto t = xc_devTxt.find(io - XC_DEVKEY);
+			if (t != xc_devTxt.end()) {
+				auto tc = t->second.find(ch);
+				if (tc != t->second.end()) return tc->second;   // device text channel
+			}
+			auto i = xc_devNum.find(io - XC_DEVKEY);
+			if (i == xc_devNum.end()) return string();
+			auto c = i->second.find(ch);
+			if (c == i->second.end()) return string();
+			ostringstream s; s << c->second;
+			return s.str();
+		}
 		auto t = xc_inputs_txt.find(io);
 		if (t != xc_inputs_txt.end()) {
 			auto tc = t->second.find(ch);
@@ -1250,7 +1298,8 @@ EMSCRIPTEN_KEEPALIVE int xc_cycle() {
 	{
 		static double lastNow = -1.0;
 		const double now = emscripten_get_now();
-		if (lastNow > 0) {
+		if (xc_vdtMs > 0) xc_dt = xc_vdtMs / 1000.0;      // ABI 16 virtual time
+		else if (lastNow > 0) {
 			double d = (now - lastNow) / 1000.0;
 			if (d > 0.12) d = 0.12;
 			if (d < 0.001) d = 0.001;
@@ -1266,6 +1315,26 @@ EMSCRIPTEN_KEEPALIVE int xc_cycle() {
 	try {
 		g_computer->RunCycle();
 		g_computer->RunEntryPoint("update");
+		// XENON-DEVCHANS (ABI 16): every port that RECEIVED a value since
+		// the last cycle fires its input.N handler (the game server's input
+		// event law). Args = the port's four channel values: text where a
+		// text frame arrived (the appkit's `input.0 ($c0: text, ...)` read
+		// law), numeric where the feed was numeric (pilot keys).
+		if (!xc_inputsDirty.empty()) {
+			vector<int> ports(xc_inputsDirty.begin(), xc_inputsDirty.end());
+			xc_inputsDirty.clear();
+			for (int port : ports) {
+				vector<Var> args;
+				auto* tt = port >= 0 ? &xc_inputs_txt[port] : nullptr;
+				auto* nn = port >= 0 ? &xc_inputs[port] : nullptr;
+				for (int ch = 0; ch < 4; ch++) {
+					if (tt) { auto t = tt->find(ch); if (t != tt->end()) { args.emplace_back(t->second); continue; } }
+					if (nn) { auto n = nn->find(ch); if (n != nn->end()) { args.emplace_back(n->second); continue; } }
+					args.emplace_back();   // Void: RunInput writes ""
+				}
+				g_computer->RunInput((uint32_t)port, args);
+			}
+		}
 		xc_endCycle(*g_computer);            // click/scroll entry points + reads
 	} catch (XenonCode::Implementation::DebugPause&) {
 		// XENON-DEBUG v3 (ABI 10): the exact-line PAUSE REQUEST fired at the
@@ -1508,21 +1577,64 @@ extern "C" void xc_debug_hook(int file, int line, int depth) {
 #endif
 }
 EMSCRIPTEN_KEEPALIVE const char* xc_error() { return g_err.c_str(); }
-EMSCRIPTEN_KEEPALIVE void xc_set_input(int io, int ch, double v) { xc_inputs[io][ch] = v; }
+EMSCRIPTEN_KEEPALIVE void xc_set_input(int io, int ch, double v) {
+	// ABI 16: io >= XC_DEVKEY addresses a DEVICE channel store (the pump's
+	// alias fast path resolves alias -> device key app-side); a plain io is
+	// the raw wire (panel sliders, pilot keys).
+	if (io >= XC_DEVKEY) {
+		xc_devNum[io - XC_DEVKEY][ch] = v;
+		if (io - XC_DEVKEY < (int)g_devs.size()) {
+			const DevInfo& d = g_devs[io - XC_DEVKEY];
+			if (d.port >= 0) { xc_inputs[d.port][ch] = v; xc_inputsDirty.insert(d.port); }
+			else xc_inputs[1000 + d.id][ch] = v;
+		}
+		return;
+	}
+	xc_inputs[io][ch] = v;
+	xc_inputsDirty.insert(io);
+	// a wire write lands on every device cabled to that port (alias reads)
+	for (size_t di = 0; di < g_devs.size(); di++)
+		if (g_devs[di].port == io) xc_devNum[(int)di][ch] = v;
+}
 // the panel drives an ALIAS-addressed channel (same resolution as xc_ioOf)
 EMSCRIPTEN_KEEPALIVE void xc_set_input_a(const char* alias, int ch, double v) {
 	auto i = g_devByAlias.find(xc_lower(alias));
 	if (i == g_devByAlias.end()) return;
 	const DevInfo& d = g_devs[i->second];
-	xc_inputs[d.port >= 0 ? d.port : 1000 + d.id][ch] = v;
+	xc_devNum[i->second][ch] = v;
+	if (d.port >= 0) { xc_inputs[d.port][ch] = v; xc_inputsDirty.insert(d.port); }
+	else xc_inputs[1000 + d.id][ch] = v;
 }
 // TEXT channel feed (v1.14.1 slice D): the beaconNet delivers a received
 // payload to a Beacon component's ch0 for input_text(port,0).
+// ABI 16: fills the DEVICE text store (alias reads), mirrors to the wire of
+// the device's port, and marks the port for the input.N event handlers —
+// the ChipOS App Kit lives on exactly this: output_text frames arriving at
+// an app computer fire its input.0..15 handlers.
 EMSCRIPTEN_KEEPALIVE void xc_set_input_t(const char* alias, int ch, const char* text) {
 	auto i = g_devByAlias.find(xc_lower(alias));
 	if (i == g_devByAlias.end()) return;
 	const DevInfo& d = g_devs[i->second];
-	xc_inputs_txt[d.port >= 0 ? d.port : 1000 + d.id][ch] = text;
+	xc_devTxt[i->second][ch] = text;
+	if (d.port >= 0) { xc_inputs_txt[d.port][ch] = text; xc_inputsDirty.insert(d.port); }
+	else xc_inputs_txt[1000 + d.id][ch] = text;
+}
+// ABI 16: the numeric twin — io is a device key (XC_DEVKEY + index, the
+// pump's alias→device resolution) or a raw wire port.
+EMSCRIPTEN_KEEPALIVE void xc_set_input_ti(int io, int ch, const char* text) {
+	if (io >= XC_DEVKEY) {
+		xc_devTxt[io - XC_DEVKEY][ch] = text;
+		if (io - XC_DEVKEY < (int)g_devs.size()) {
+			const DevInfo& d = g_devs[io - XC_DEVKEY];
+			if (d.port >= 0) { xc_inputs_txt[d.port][ch] = text; xc_inputsDirty.insert(d.port); }
+			else xc_inputs_txt[1000 + d.id][ch] = text;
+		}
+		return;
+	}
+	xc_inputs_txt[io][ch] = text;
+	xc_inputsDirty.insert(io);
+	for (size_t di = 0; di < g_devs.size(); di++)
+		if (g_devs[di].port == io) xc_devTxt[(int)di][ch] = text;
 }
 // ---- HUD radio + world feed (v1.14.1 P9 slices B+D, ABI 11) --------------
 // xc_beacon_put: deliver a received payload to the program's beacon object
@@ -1595,6 +1707,7 @@ EMSCRIPTEN_KEEPALIVE void xc_reset_devices() {
 	// device's runtime state - they reset with it (the re-open path leaves
 	// NOTHING of the previous session but the storage dir, the game's rule)
 	xc_inputs.clear(); xc_inputs_txt.clear(); g_reads.clear();
+	xc_devNum.clear(); xc_devTxt.clear(); xc_inputsDirty.clear();
 	g_wsProgram.clear(); g_wsEffective.clear();
 }
 // capability from the blueprint (hdd capacity = the game's storage limit);
@@ -1603,12 +1716,14 @@ EMSCRIPTEN_KEEPALIVE void xc_set_capability(uint32_t ram, uint32_t storage) {
 	if (ram) xc_ramCap = ram;
 	if (storage) xc_storageCap = storage;
 }
-static void xc_seedWorld(const DevInfo& d) {
+static void xc_seedWorld(const DevInfo& d, int devIdx) {
 	if (d.port >= 0) return;              // cabled devices: the sliders are the source
 	int io = 1000 + d.id;
 	string t = xc_lower(d.type);
-	auto seed = [&](int ch, double v) { xc_inputs[io][ch] = v; };
-	auto seedT = [&](int ch, const char* v) { xc_inputs_txt[io][ch] = v; };
+	// ABI 16: the canned values fill the DEVICE store (alias reads) and the
+	// legacy wire key (numeric reads of 1000+id keep working).
+	auto seed = [&](int ch, double v) { xc_inputs[io][ch] = v; xc_devNum[devIdx][ch] = v; };
+	auto seedT = [&](int ch, const char* v) { xc_inputs_txt[io][ch] = v; xc_devTxt[devIdx][ch] = v; };
 	if (t == "mininavinstrument" || t == "navinstrument") {
 		seed(0, 12); seed(1, 0); seed(2, 1450); seed(3, 1450);       // airspd, vs, alt, terr
 		seed(6, 42); seed(7, 42);                                     // heading, course
@@ -1640,7 +1755,7 @@ EMSCRIPTEN_KEEPALIVE void xc_add_device(int id, int io, const char* alias, const
 	if (io >= 0) g_devByIo[io] = i;
 	string a = xc_lower(alias);
 	if (!a.empty()) g_devByAlias[a] = i;
-	xc_seedWorld(g_devs.back());
+	xc_seedWorld(g_devs.back(), i);
 }
 // worldsim bridge: the pump READS the program overrides each cycle, pushes
 // the effective row values back, and clears the tables on a fresh boot.
@@ -1676,7 +1791,7 @@ EMSCRIPTEN_KEEPALIVE const char* xc_write_var(int fileIdx, int line, const char*
 
 // ABI stamp: the app checks this at boot (XC_ABI in engine/xenoncode.ts) and
 // warns ONCE on drift — new device/shim exports must bump it.
-EMSCRIPTEN_KEEPALIVE int xc_abi() { return 15; }  // 15: xc_screen_version (XENON-SCREEN-VERSION write counter — the pump blits only changed surfaces); 14: xc_screen_px/xc_screen_py/xc_screen_haspos (the app's composited HUD SCREEN window — panels ride anchor until set_position); 13: $panel.set_size(w,h) + $panel.width/.height (HUD law from the shipped wiki hud.md — XENON-PANEL-RESIZE; RCS Infinity's guide HUD calls it live); 12: xc_hud_mode + ONE screen_w/screen_h declaration serving computer AND HUD (the v1.14.1 duplicate OVERRODE the computer law — DeclareDeviceFunction replaces by name — scaling every computer layout by the 1920x1080 viewport: the Space Invaders main-graphic loss); 11: panel()/beacon() object + beaconpair/beacontx events + get()/xc_set_world + xc_beacon_put + xc_set_input_t + xc_set_view + xc_screen_anchor (HUD runtime + beacon radio); 10: depth stream + hookLive gate + exact-line pause seam (XENON-DEBUG v3); 9: xc_write_var + the hook's cmd-6 write handoff (editable debug values); 8: xc_locals_json + the hook's SAB locals handoff (the Locals panel); 7: the stop-hook is LIVE (library_xc.js + Module.XC_SAB worker stepping); 6: xc_cycle_pairs + hook seam; 5: xc_set_cycle_ms
+EMSCRIPTEN_KEEPALIVE int xc_abi() { return 16; }  // 16: XENON-DEVCHANS — alias-addressed io is PER-DEVICE (a router net hangs many devices on one port; input_text("app-1",0) must not read light1's channel), alias writes mirror onto their port's wire, and every port whose channels received a value fires its input.N handler (RunInput — the ChipOS App Kit's event law); 15: xc_screen_version (XENON-SCREEN-VERSION write counter — the pump blits only changed surfaces); 14: xc_screen_px/xc_screen_py/xc_screen_haspos (the app's composited HUD SCREEN window — panels ride anchor until set_position); 13: $panel.set_size(w,h) + $panel.width/.height (HUD law from the shipped wiki hud.md — XENON-PANEL-RESIZE; RCS Infinity's guide HUD calls it live); 12: xc_hud_mode + ONE screen_w/screen_h declaration serving computer AND HUD (the v1.14.1 duplicate OVERRODE the computer law — DeclareDeviceFunction replaces by name — scaling every computer layout by the 1920x1080 viewport: the Space Invaders main-graphic loss); 11: panel()/beacon() object + beaconpair/beacontx events + get()/xc_set_world + xc_beacon_put + xc_set_input_t + xc_set_view + xc_screen_anchor (HUD runtime + beacon radio); 10: depth stream + hookLive gate + exact-line pause seam (XENON-DEBUG v3); 9: xc_write_var + the hook's cmd-6 write handoff (editable debug values); 8: xc_locals_json + the hook's SAB locals handoff (the Locals panel); 7: the stop-hook is LIVE (library_xc.js + Module.XC_SAB worker stepping); 6: xc_cycle_pairs + hook seam; 5: xc_set_cycle_ms
 EMSCRIPTEN_KEEPALIVE void xc_set_cycle_ms(int ms) {
 	// the app's pump cadence (CYCLE_MS): delta_time / system_frequency
 	// follow it, so dt-driven programs (Chip's Mario, physics on
@@ -1684,6 +1799,9 @@ EMSCRIPTEN_KEEPALIVE void xc_set_cycle_ms(int ms) {
 	if (ms > 0) xc_dt = ms / 1000.0;
 }
 EMSCRIPTEN_KEEPALIVE int xc_screen_count() { return (int)g_screens.size(); }
+// ABI 16: stamp VIRTUAL time (ms per cycle) for deterministic headless
+// cycles (the vmharness law); 0 restores the real-dt pump.
+EMSCRIPTEN_KEEPALIVE void xc_set_virtual_dt(int ms) { xc_vdtMs = ms; }
 EMSCRIPTEN_KEEPALIVE const char* xc_screen_key(int i) {
 	return (i >= 0 && i < (int)g_screens.size()) ? g_screens[i].key.c_str() : "";
 }

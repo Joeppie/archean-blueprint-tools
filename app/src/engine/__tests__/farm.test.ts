@@ -24,13 +24,40 @@ describe('IoBus — the cable law', () => {
     expect(bus.get('LAMP', 0)).toBe(1);        // the shim resolves case-insensitively
   });
 
-  test('numbers fan out; text rows record only (beacon text rides beaconNet)', () => {
+  test('text fan-out rides the cable too (ABI 16 — the ChipOS appkit law)', () => {
+    // v1.16.10: text channels are the appkit's transport (manifests,
+    // frames, events) — IoBus used to record-only, which left every
+    // output_text invisible to the sister pump.
     const bus = new IoBus();
     const recs: Rec = { writes: [] };
     bus.attach(stub(recs));
-    bus.write('lamp', 0, 'hello', stub({ writes: [] }));
-    expect(recs.writes).toEqual([]);
-    expect(bus.get('lamp', 0)).toBe('hello');  // visible to the bus tab
+    bus.write('chipos', 0, '.kit{3}.name{TETRIS}', stub({ writes: [] }));
+    expect(recs.writes).toEqual([['chipos:0', 0, '.kit{3}.name{TETRIS}']]);
+    expect(bus.get('chipos', 0)).toBe('.kit{3}.name{TETRIS}');  // visible to the bus tab
+  });
+
+  test("THE PUBLISHED-DEVICE LAW: a computer's transmission lands under ITS alias", () => {
+    // ChipOS polls input_text("app-1", 0) for the appkit manifest — the
+    // app's write targets "chipos", and the SAME value must be readable
+    // under the WRITER's alias on every pump that knows it.
+    const bus = new IoBus();
+    const recs: Rec = { writes: [] };
+    const app = {
+      acceptBusWrite: (alias: string | number, ch: number, v: number) =>
+        recs.writes.push([`${String(alias).toLowerCase()}:${ch}`, ch, v]),
+      comp: { alias: 'app-1' },
+    } as unknown as XenonPump;
+    bus.attach(stub(recs));
+    bus.write('chipos', 0, '.kit{3}', app);
+    expect(recs.writes).toEqual([
+      ['chipos:0', 0, '.kit{3}'],   // the target channel
+      ['app-1:0', 0, '.kit{3}'],    // the writer's published device channel
+    ]);
+    expect(bus.get('app-1', 0)).toBe('.kit{3}');
+    // a self-targeted write publishes ONCE (writer alias == target alias)
+    recs.writes.length = 0;
+    bus.write('app-1', 0, '.kit{4}', app);
+    expect(recs.writes).toEqual([['app-1:0', 0, '.kit{4}']]);
   });
 
   test('detach takes a pump off the cable', () => {
