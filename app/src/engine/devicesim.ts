@@ -75,6 +75,27 @@ export function drivesType(type: string): boolean {
     || SPIN_TYPES.has(type) || FLIGHT_TYPES.has(type) || BUTTON_TYPES.has(type);
 }
 
+/** THE DATA-CABLE LAW (pure): the top-level components a pressed device's
+ *  data port is cabled to, filtered to the types the sim drives. A button
+ *  cabled straight to a hinge (no computer) drives it — the game wires HID
+ *  parts to actuator data ports directly. Pipe endpoints index the
+ *  FLATTENED component array (nested content numbers BEFORE their Build),
+ *  so an index past the top-level array is a SUBGRID part — outside the
+ *  sim's registered space — and is skipped. */
+export function dataNeighbours(bp: Blueprint, ci: number): { ci: number; type: string; alias: string }[] {
+  const comps = bp.data.components as BlueprintComponent[];
+  const out: { ci: number; type: string; alias: string }[] = [];
+  for (const p of (bp.data.pipes ?? []) as { type?: string; a_component: number; b_component: number }[]) {
+    if ((p.type ?? 'data') !== 'data') continue;
+    const other = p.a_component === ci ? p.b_component : p.b_component === ci ? p.a_component : -1;
+    if (other < 0 || other >= comps.length) continue;      // nested: not simulated
+    const oc = comps[other];
+    if (oc && drivesType(oc.type) && !out.some(d => d.ci === other))
+      out.push({ ci: other, type: oc.type, alias: typeof oc.alias === 'string' ? oc.alias : '' });
+  }
+  return out;
+}
+
 /** Wiki-exact servo mapping: SmallHinge −1.0..+1.0 → −90°..+90°; SmallPivot
  *  −1.0..+1.0 → −360°..+360° (0, −1 and +1 land on the same pose — one
  *  full turn of the .ini limits [−360,·,+360]). */
@@ -249,6 +270,16 @@ export class DeviceSim {
     this.servos = new Map(); this.chans = new Map(); this.pilot = new Map();
     this.spins = new Map(); this.ledVal = new Map();
     this.pressedEl = new Set();
+  }
+
+  /** The registered SERVO actuator components (hinge/pivot/track) — the
+   *  SPARE-BUTTON BROADCAST targets (we: the dolphin's door toggles have no
+   *  computer, "they should still be able to toggle and they toggle the
+   *  hinges that are in that craft"). */
+  actuators(): { ci: number; type: string }[] {
+    const out: { ci: number; type: string }[] = [];
+    for (const [ci, type] of this.types) if (SERVO_TYPES.has(type)) out.push({ ci, type });
+    return out;
   }
 
   /** the io channel record for one device (the popup chip's "value" line) */

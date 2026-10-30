@@ -53,7 +53,7 @@ import type { Blueprint, Triangle } from './engine/format';
 import { isLegacyFile } from './engine/format';
 import { hasDashboards, xenonComputers, xenonHudControllers, xenonFarm, type XCFile,
   type XenonComputer } from './engine/xenoncode';
-import { DeviceSim } from './engine/devicesim';
+import { DeviceSim, dataNeighbours } from './engine/devicesim';
 import { craftPowerNet, computerPowered } from './engine/power';
 import { chanSites, rectSites, rectsAt, type ChanSite, type RectSite } from './engine/xcsites';
 import { loadManifest, peekManifest } from './engine/models';
@@ -434,6 +434,36 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   const warnUnpowered = useCallback((c: XenonComputer) => {
     setToolMsg(`⚠ ${c.alias} has no power — its power port is wired to no source; in-game it stays off`);
   }, []);
+  // THE CODE BUTTON LAW (we: "when I press the code button for a HUD or
+  // computer, or minicomputer … I want of course to open its xenoncode"):
+  // ONE path opens a part's IDE — the XenonCode ▾ menu and the part widget's
+  // ⌨ both route here. Computers boot their pump (auto-boot law: an
+  // unpowered one opens WARNED, never silently dead); HUD blocks open the
+  // HUD IDE.
+  const openCodeFor = useCallback((ci: number) => {
+    const comp = xenonCompsRef.current.find(c => c.ci === ci);
+    if (comp) {
+      setXenonCis(c => (c.includes(ci) ? c : [...c, ci]));
+      void xenonFarm.pumpFor(comp).open(comp);
+      return;
+    }
+    if (xenonHuds.some(h => h.ci === ci)) setHudCi(ci);
+  }, [xenonHuds]);
+  // THE SPARE-BUTTON LAW (we, on the dolphin: the door toggles have no
+  // computer attached — "they should still be able to toggle and they
+  // toggle the hinges that are in that craft"): a pressed button's channel
+  // drives the actuator cabled on the other end of its data port; a button
+  // with NOTHING running it and nothing cabled broadcasts the toggled
+  // state to the craft's servo actuators (hinge/pivot/track) — a spare
+  // door button works its own craft.
+  const driveFromPress = useCallback((t: PressTarget, elType: string, v: number,
+    deviceOwners: XenonComputer[]) => {
+    if (!bp) return;
+    const nbrs = dataNeighbours(bp, t.ci);
+    if (nbrs.length) { for (const d of nbrs) simRef.current.write(d.ci, t.ch ?? 0, v); return; }
+    if (v > 0 && /Button/.test(elType) && deviceOwners.length === 0)
+      for (const a of simRef.current.actuators()) simRef.current.write(a.ci, 0, v);
+  }, [bp]);
   const onDashPress = useCallback((t: PressTarget, phase: 'down' | 'up') => {
     const eng = engineRef.current;
     const comps = xenonCompsRef.current;
@@ -463,13 +493,17 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       latchedRef.current.set(k, on);
       xenonFarm.pressDevice(t.ci, t.ch ?? 0, on ? 1 : 0, 'ToggleButton');
       simRef.current.setElement(t.ci, t.ch ?? 0, on);
+      driveFromPress(t, 'ToggleButton', on ? 1 : 0,
+        comps.filter(c => c.devices.some(d => d.ci === t.ci)));
       eng?.pressVisual(t.ci, t.ch ?? 0, on);
       return;
     }
     // momentary: Push/Arrow/Led elements + standalone Push/Arrow parts
     xenonFarm.pressDevice(t.ci, t.ch ?? 0, phase === 'down' ? 1 : 0, elType);
     simRef.current.setElement(t.ci, t.ch ?? 0, phase === 'down');
-  }, [unpowered, warnUnpowered]);
+    driveFromPress(t, elType, phase === 'down' ? 1 : 0,
+      comps.filter(c => c.devices.some(d => d.ci === t.ci)));
+  }, [unpowered, warnUnpowered, driveFromPress]);
   /** THE POPUP LABEL (we: "it should tell us what channel/ui element … which
    *  xenoncode line … the computer this corresponds to"): the element, the
    *  owning computer + io, and the literal program site (chanSites for a
@@ -517,9 +551,19 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         + (s ? ` · ${s.fn}(…, ${t.ch ?? 0}) @ ${s.file}:${s.line}` : ''));
     }
     if (owners.length && owners.every(c => unpowered(c.ci))) parts.push('⚠ unpowered');
-    if (!owners.length && t.kind === 'comp') parts.push('no computer reads it');
+    if (!owners.length && t.kind === 'comp') {
+      // the popup names what a bare part ACTUALLY drives: its data-cable
+      // neighbours, or the craft's actuators (the SPARE-BUTTON LAW)
+      const nbrs = bp ? dataNeighbours(bp, t.ci) : [];
+      const acts = simRef.current.actuators().length;
+      if (nbrs.length)
+        parts.push(`→ drives ${nbrs.map(d => `'${d.alias || `${d.type.toLowerCase()}-${d.ci}`}'`).join(', ')}`);
+      else if (acts && /Button/.test(t.elType ?? ''))
+        parts.push(`→ toggles the craft's ${acts} actuator${acts === 1 ? '' : 's'} (no computer attached)`);
+      else parts.push('no computer reads it');
+    }
     return parts.join(' — ');
-  }, [unpowered]);
+  }, [unpowered, bp]);
   // v1.13.8 (we: "it doesnt register the built-in screen", craft 3288012440):
   // a Computer's / Crafter's INTEGRATED screen is a physical screen too —
   // the ▣ dock gate must not stop at Dashboard components. The dock's
@@ -1942,7 +1986,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         xenonHuds={xenonHuds.map(h => ({ ci: h.ci, alias: h.alias, files: h.files.length }))}
         onHud={ci => setHudCi(ci)}
         onBeacons={() => setBeaconsOpen(o => !o)} beaconsOpen={beaconsOpen}
-        onXenon={ci => { setXenonCis(c => (c.includes(ci) ? c : [...c, ci])); const kc = xenonComps.find(c => c.ci === ci); if (kc) void xenonFarm.pumpFor(kc).open(kc); }}
+        onXenon={openCodeFor}
         hasScreens={hasScreens} screensOpen={screensOpen}
         onScreens={() => setScreensOpen(o => !o)}
         autosaveCount={autosaveCount} onAutosaves={() => setAutosavesOpen(true)}>
@@ -1974,7 +2018,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
               onPlaceCancel={onPlaceCancel} onPlaceBuild={onPlaceBuild}
               onPlaceRotate={onPlaceRotate} onPlaceBack={onPlaceBack}
               keepView={bpKeepView}
-              onPress={onDashPress} pressLabel={pressLabel}
+              onPress={onDashPress} pressLabel={pressLabel} onCode={openCodeFor}
               onManifest={setManifest} />
             {/* 🎨 PALETTE window (v1.6): the paint alternative to the gizmo
                 modes, opened from the mode widget — targets the CURRENT

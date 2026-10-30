@@ -119,7 +119,7 @@ const getAtlas = (): Promise<ModelAtlas | null> => (atlasP ??= openAtlas());
 
 let __vpMarked = false;
 let __cMarked = false;   // v1.12.2 BOOT COST: first-render mark
-export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, onBlockPick, onBlockHover, placing = null, onPlace, onPaintOpen, onBlockToTris, onPlaceCancel, onPlaceBuild, onPlaceRotate, onPlaceBack, onManifest, keepView = false, onPress, pressLabel }: {
+export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, onBlockPick, onBlockHover, placing = null, onPlace, onPaintOpen, onBlockToTris, onPlaceCancel, onPlaceBuild, onPlaceRotate, onPlaceBack, onManifest, keepView = false, onPress, pressLabel, onCode }: {
   bp: Blueprint | null;
   onPick: (h: PickHit) => void;
   onEngine?: (e: Engine | null) => void;
@@ -179,6 +179,10 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
   /** the popup label for the hover chip (we: "it should tell us what
    *  channel/ui element … which xenoncode line … as a popup label") */
   pressLabel?: (t: PressTarget) => string | null;
+  /** v1.16.2 THE CODE BUTTON: open the XenonCode IDE (computer) / HUD IDE
+   *  for the part owning the widget (we: "I want of course to open its
+   *  xenoncode") */
+  onCode?: (ci: number) => void;
 }) {
   if (!__vpMarked) { __vpMarked = true; performance.mark('boot:vp-render'); }   // bootprobe
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -734,6 +738,25 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
             className="ksp-btn grid h-8 w-9 place-items-center text-[15px] leading-none">
             🎨
           </button>
+          {/* v1.16.2 THE CODE BUTTON (we: "when I press the code button for
+              a HUD or computer, or minicomputer, I guess I want of course
+              to open its xenoncode"): a programmable part's widget opens
+              ITS IDE — the same owners the XenonCode ▾ menu uses */}
+          {(() => {
+            const sel = engineRef.current?.selectionState();
+            const c = sel && sel.ci >= 0
+              ? engineRef.current?.blueprint?.data.components[sel.ci] : null;
+            const codeable = !!c && (/^(Computer|MiniComputer|Crafter)$/.test(c.type)
+              || c.type === 'HudController');
+            return codeable ? (
+              <button title={c!.type === 'HudController'
+                ? 'edit this HUD\u2019s XenonCode' : 'edit this computer\u2019s XenonCode'}
+                data-testid="mode-code" onClick={() => onCode?.(sel!.ci)}
+                className="ksp-btn grid h-8 w-9 place-items-center text-[15px] leading-none">
+                ⌨
+              </button>
+            ) : null;
+          })()}
         </div>
       )}
       {warn && (

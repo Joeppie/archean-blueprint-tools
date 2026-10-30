@@ -140,9 +140,20 @@ def main():
              {"blocks": panel, "components": [], "triangles": [],
               "doors": [], "frames": [], "labels": [], "pipes": [],
               "struts": [], "alias": "ramp-panel"}),
+        # ── the SPARE-BUTTON law (we: the dolphin's door toggles have no
+        #    computer, "they should still be able to toggle and they toggle
+        #    the hinges that are in that craft"): a standalone ToggleButton
+        #    with NO cables at all + a pivot no program touches. Pressing
+        #    the toggle must latch it AND broadcast to the craft's servo
+        #    actuators — the untouched pivot is the observable target.
+        comp("ARCHEAN_machines", "SmallPivot", "gimbals", -1.5, 0.1, 0.0,
+             {"angle": 0.0, "inputValue": 0.0, "maxSpeed": 1.0, "acceleration": 2.0,
+              "servoMode": True}),
+        comp("ARCHEAN_hid", "ToggleButton", "doorbtn", 1.5, 0.1, -0.9,
+             {"state": False, "onValue": 1.0, "offValue": 0.0}),
     ]
     hinge_ci = next(i for i, c in enumerate(components) if c["type"] == "SmallHinge")
-    build_ci = len(components) - 1
+    build_ci = next(i for i, c in enumerate(components) if c["type"] == "Build")
     # pipes: power net + cpu data ports (.000 hinge, .001 lamp, .002 pivot,
     # .003 dash)
     pipes = [

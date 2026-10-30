@@ -85,6 +85,27 @@ test.describe('@living @xenon THE LIVING CRAFT', () => {
       return r['3:0'] ?? 0;
     }), { timeout: 15_000 }).toBe(1);
 
+    // ── ③b THE SPARE-BUTTON LAW (we, on the dolphin: door toggles with no
+    //    computer — "they should still be able to toggle and they toggle
+    //    the hinges that are in that craft"): 'doorbtn' (no cables, no
+    //    owner) latches AND broadcasts to the craft's servo actuators —
+    //    the untouched pivot 'gimbals' is the observable target.
+    const bpt = await page.evaluate(() =>
+      (window as any).__ARCHEAN__.screen(1.5, 0.1, -0.9));      // doorbtn centre
+    expect(bpt, 'the spare toggle projects into the viewport').not.toBeNull();
+    await page.mouse.move((bpt as [number, number])[0], (bpt as [number, number])[1]);
+    await expect.poll(async () => page.evaluate(() =>
+      document.querySelector('[data-testid="press-chip"]')?.textContent ?? ''),
+    { timeout: 15_000 }).toContain("toggles the craft's");
+    await page.mouse.down();
+    await page.mouse.up();
+    await expect.poll(() => poseAngle('joint', 9), { timeout: 30_000 }).toBeGreaterThan(80);
+    // latch OFF: the pivot slews back home
+    await page.mouse.move((bpt as [number, number])[0], (bpt as [number, number])[1]);
+    await page.mouse.down();
+    await page.mouse.up();
+    await expect.poll(() => poseAngle('joint', 9), { timeout: 30_000 }).toBeLessThan(20);
+
     // ── ④ THE SCREEN PRESS names the XenonCode line: the 3-D feed must be
     //    LIVE first (open the ▣ Screens dock → setScreenFeeds registers the
     //    face), then hover the literal button_rect(20, 20, 80, 24) centre.
@@ -126,5 +147,25 @@ test.describe('@living @xenon THE LIVING CRAFT', () => {
     await page.getByTestId('xenon-menu').click();
     await page.getByTestId('xenon-comp-3').click();   // 'ghost'
     await expect(page.getByTestId('xenon-unpowered')).toBeVisible();
+    await page.getByTestId('xenon-close').click();
+
+    // ── ⑥ THE CODE BUTTON (we: "when I press the code button for a HUD or
+    //    computer, or minicomputer … I want of course to open its
+    //    xenoncode"): select 'cpu' on the model — its widget carries ⌨ and
+    //    it opens THAT computer's IDE (powered: no ⚠ chip).
+    await page.evaluate(() => (window as any).__ARCHEAN__.engine.flyTo(2));
+    await expect.poll(async () => page.evaluate(async () => {
+      const A = (window as any).__ARCHEAN__.engine.camPos();
+      await new Promise(r => setTimeout(r, 250));
+      const B = (window as any).__ARCHEAN__.engine.camPos();
+      return JSON.stringify(A) === JSON.stringify(B);
+    })).toBe(true);
+    const cp = await page.evaluate(() => (window as any).__ARCHEAN__.screen(-0.5, 0.1, 0.5));
+    expect(cp).not.toBeNull();
+    await page.mouse.click((cp as [number, number])[0], (cp as [number, number])[1]);
+    await expect(page.getByTestId('mode-code')).toBeVisible({ timeout: 10_000 });
+    await page.getByTestId('mode-code').click();
+    await expect(page.getByTestId('xenon-dialog')).toBeVisible();
+    await expect(page.getByTestId('xenon-unpowered')).toHaveCount(0);
   });
 });

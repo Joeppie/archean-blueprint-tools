@@ -4,7 +4,7 @@
 // (no blueprint writes), and a moving master IS a moving panel (the pose
 // the scene feeds to syncSubJoints is the one the subgrid rides).
 import { describe, expect, test } from 'vitest';
-import { DeviceSim, servoLimits, trackTarget } from '../devicesim';
+import { DeviceSim, dataNeighbours, servoLimits, trackTarget } from '../devicesim';
 import type { Blueprint } from '../format';
 
 const comp = (type: string, data: Record<string, unknown> = {}) => ({
@@ -110,5 +110,27 @@ describe('DeviceSim — channel → pose', () => {
     sim.write(0, 0, 1);
     settle(sim);
     expect(sim.snapshot().size).toBe(0);
+  });
+});
+
+describe('THE SPARE-BUTTON LAW (we: the dolphin — door toggles, no computer)', () => {
+  const wire = (a: number, b: number, type = 'data') =>
+    ({ type, a_component: a, b_component: b, a_port: 'data', b_port: 'data' });
+  test('dataNeighbours finds the top-level driven part across a data cable', () => {
+    const b = { data: { components: [
+      comp('ToggleButton', {}), comp('SmallHinge', {}), comp('Lamp', {}),
+    ], pipes: [wire(0, 1), { type: 'lowvoltage', a_component: 0, b_component: 2 }] } } as never;
+    expect(dataNeighbours(b, 0)).toEqual([{ ci: 1, type: 'SmallHinge', alias: '' }]);
+  });
+  test('FLATTENED nested endpoints (index past the top-level array) skip', () => {
+    const b = { data: { components: [comp('ToggleButton', {}), comp('SmallHinge', {})],
+      pipes: [wire(0, 62)] } } as never;                        // the dolphin: [8]→[62] nested
+    expect(dataNeighbours(b, 0)).toEqual([]);
+  });
+  test('actuators() lists the servo parts the broadcast drives', () => {
+    const sim = new DeviceSim();
+    sim.load(bp([comp('SmallHinge', {}), comp('Lamp', {}), comp('SmallPivot', { servoMode: true }),
+      comp('LinearTrack', {})]), jointNames);
+    expect(sim.actuators().map(a => a.type)).toEqual(['SmallHinge', 'SmallPivot', 'LinearTrack']);
   });
 });
