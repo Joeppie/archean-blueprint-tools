@@ -222,3 +222,92 @@ clicks back to the main tab before typing (comment in the spec).
   `components/CodeEditor.tsx` (centered jump), `Editor.tsx` (F6 w/ dock)
 - docs: AGENTS.md (IDE KEYS + STEP LAW bullets), docs/HISTORY.md, version
   strings (security-scan --versions lockstep)
+
+# Batch 2026-10-30/31 — THE LIVING CRAFT II (ChipOS appkit, power flow, sound, items)
+
+Session plan for "get to a more feature complete simulation": the game's OWN
+third-party ecosystem (Chip Patton's ChipOS + App Kit apps + EarthNAV) must
+run on the farm, devices must animate with lights that GLOW (never cast),
+parts must SOUND, the power grid must FLOW (batteries drain, go negative,
+sources produce — warnings only), items must ride CONVEYORS (drill → Rock →
+container), and Jimmy's Adventure (+ its crafter installation) must ride it.
+Version: tree carries the next Z (v1.16.10); the batch is a FEATURE —
+PROPOSE v1.17.0 (merging with the standing HUD Y-proposal 98a0405) at the end.
+
+## Sources (all on disk — wiki.archean.space/en/components is the shipped wiki)
+- game wiki: `Archean-game/wiki/en/components/**` (energy, items, mining,
+  computers/Router.md alias law, processing/Crafter.md).
+- wiki user notes (Chip Patton's appkit protocol docs): the user points at
+  wiki.archean.space/en/components + the appkit header in
+  testdata/3828773626 (chipos-appkit.xc) — that file's header IS the law.
+- workshop corpus: 3828773626 (ChipOS Dev Kit: chipos + app-1 TETRIS +
+  app-2 HELLO + MiniRouters + LV grid + 2 dashboards), 3828546114 (ChipOS
+  HDD = MiniComputer with the OS disk), 3828827922 (EarthNAV), 3334698274
+  (Jimmy's Adventure).
+
+## WP1 — THE APPKIT BUS (DONE) — ChipOS's Tetris becomes available on the
+ChipOS install
+Gap census found three hard gaps between the farm and the appkit protocol
+(output_text alias fan-out, input.N event handlers, router-net device tables):
+- [x] shim ABI 16: per-DEVICE channel stores (alias reads stop aliasing one
+      router-port wire), input.N handlers FIRE (RunInput on input arrival).
+- [x] IoBus TEXT fan-out: output_text lands in every sister pump (the
+      manifest/frame/event protocol is text).
+- [x] writer-publish: a computer's transmissions are readable UNDER ITS OWN
+      alias (ChipOS polls input_text("app-1",0) for the manifest).
+- [x] router-net device tables: xenonDevices walks data_port↔Router/
+      MiniRouter chains so every net device carries the computer's LOCAL
+      port (device_at(i).port, alias→io, input.N routing).
+- [x] pins: vmharness boots the REAL dev kit — the TETRIS manifest reaches
+      the chipos VM, ChipOS's os_log announces it, the HELLO app joins too;
+      events route BACK (open/tap fire the app's input.N → $kit_rx).
+- [ ] EarthNAV (3828827922) joins the same registry as a module (alias
+      app-* convention) — census + pin.
+
+## WP2 — HDD INSERT = BOOT (DONE at the law level)
+The game: a Computer's hdd bay holds the disk whose code runs; our model is
+data.hdd.xc_files + the LIVE auto-boot. Pin: the ChipOS v0.10 HDD craft
+boots its disk verbatim (vmharness).
+
+## WP3 — LIGHTS GLOW, NEVER CAST (DONE)
+The sim lamp law: channel on ⇒ the model's emissive face lights up (the
+palette colour); NO THREE light source is ever added (editor perf law).
+
+## WP4 — THE SOUND OF THE CRAFT (DONE)
+Procedural WebAudio (NOTICE-safe: synthesized, no game assets): the devicesim
+snapshot edges drive cues — switch CLICK (toggle latch / push momentary),
+relay CLACK, drill WHIR while ch0 is on, anchor CHAIN rattle, track/servo
+WHINE while moving, conveyor BELT rumble while items ride it, power alarm on
+the low-battery warning. Toggle persisted `archean-app-sound` (default on),
+gated behind a real gesture like the buzzers.
+
+## WP5 — THE POWER FLOW (DONE)
+engine/power.ts stays the reachability gate; NEW engine/energy.ts: per-kind
+watts from the wiki/.ini files (sources PRODUCE: solar × sunlight, RTG flat,
+diesel × fuel, wind × wind, reactor flat; consumers DRAW: lamps, routers,
+computers, actuators, conveyors; batteries STORE (Wh capacity), ALWAYS feed
+— charge integrates, may go NEGATIVE (deep discharge) and keeps feeding —
+the deficit is a WARNING, never a blackout). The energy panel: per-source
+production, draw, battery state bars, the low-battery ⚠. `enough_power`
+stays the shim stub (ABI law unchanged).
+
+## WP6 — ITEMS ON BELTS (DONE)
+engine/itemsim.ts: ItemConveyor links a chain (adjacency graph over the
+belt parts), MiningDrill with ch0 on at terrain MINES a Rock item per
+game-rate tick, items ride belt→belt→container/crafter as a VIEW overlay
+(small palette cubes + a container count chip); Crafter installation
+consumes recipe inputs from linked containers (crafterbuiltin law, sim-view
+only). Nothing writes the blueprint.
+
+## WP7 — JIMMY'S ADVENTURE RIDES IT (DONE)
+app/tools/jimmyprobe.mjs: node census over 3334698274 — every programmable
+computer booted (power-gated), devicesim stepped, energy census, crafter
+installation identified; report = crash list + device table. This is the
+driving audit for "as much of the game as we can simulate".
+
+## WP8 — GATES + TRiage (DONE)
+npm test + tsc + touched e2e tags + test:e2e:fast. NEW e2e kept minimal (one
+chipos end-to-end leg; the sound/item laws stay at vitest/scene tiers).
+docs: LIVING-CRAFT.md §§ extend, docs/HISTORY.md provenance, FORMAT.md
+appkit-protocol section. NO Pages deploy (standing: deploy only on the
+user's explicit ask).
