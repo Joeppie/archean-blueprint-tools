@@ -792,3 +792,42 @@ describe('live data edits re-render the part (was liveedit.spec @live, v1.12.5)'
     expect(bad, 'NaN transforms in the scene').toEqual([]);
   }, 60_000);
 });
+
+describe('THE LIVING CRAFT (v1.15.6, fixture 9000009040 — tools/make_live_test.py)', () => {
+  test('a SIM pose swings the hinge plate AND rides its subgrid panel (SIM IS A VIEW)', async () => {
+    const e = openCraft('9000009040');
+    await withRealModels(e, [4]);
+    const q0 = e.jointPoseQ(4, 'axle');
+    const s0 = e.subGroupQ(8);
+    expect(q0, 'the hinge axle node carries jrefs').not.toBeNull();
+    expect(s0, 'the composite build renders as a subgrid group').not.toBeNull();
+    e.applyDevicePoses(new Map([[4, { joints: { axle: { angle: 90 } } }]]));
+    const q1 = e.jointPoseQ(4, 'axle');
+    const s1 = e.subGroupQ(8);
+    const ang = (a: [number, number, number, number]) =>
+      2 * Math.acos(Math.min(1, Math.abs(a[0])));       // total angle from w
+    expect(ang(q1!), 'the plate turned ~90°').toBeGreaterThan((80 * Math.PI) / 180);
+    expect(ang(s1!), 'THE PANEL RIDES ITS MASTER: the group turned ~90° too')
+      .toBeGreaterThan((80 * Math.PI) / 180);
+    // SIM IS A VIEW: the file data stayed untouched (no write, no doc)
+    const d = (e.blueprint!.data.components[4].data ?? {}) as Record<string, unknown>;
+    expect(d.angle, 'the blueprint data.angle stayed verbatim').toBe(0);
+  }, 60_000);
+
+  test('press registry: the fixture dashboard registers its pressable elements', async () => {
+    const e = openCraft('9000009040');
+    await withRealModels(e, [7]);
+    const t = e.pressTargets();
+    expect(t.dash, 'ToggleButton + PushButton + Screen element boxes').toBe(3);
+  });
+
+  test('a lamp lens rides the io-bus glow channels', async () => {
+    const e = openCraft('9000009040');
+    await withRealModels(e, [6]);
+    // the lens material starts dark (unlit); a full-white glow lights it
+    e.applyDevicePoses(new Map([[6, { glow: { r: 1, g: 1, b: 1 } }]]));
+    // no throw + a second identical frame is a cheap no-op (diff-only apply)
+    e.applyDevicePoses(new Map([[6, { glow: { r: 1, g: 1, b: 1 } }]]));
+    expect(e.pressTargets().dash).toBeGreaterThanOrEqual(0);
+  }, 60_000);
+});

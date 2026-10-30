@@ -3,6 +3,8 @@
 // a computer boots in the game only while its power port rides an energised
 // net: SOURCE → (hub)* → DEVICE, per voltage kind. A craft with NO source
 // carries no grid — the dev-craft convention leaves every computer powered.
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
 import { craftPowerNet, computerPowered } from '../power';
 import type { Blueprint } from '../format';
@@ -85,5 +87,20 @@ describe('craftPowerNet — source → hub → device', () => {
       [comp('LowVoltageBattery'), comp('MiniComputer')],
       [pipe(0, 'connector.000', 1, 'power_connector', '')]), null);
     expect(computerPowered(net, 1)).toBe(true);
+  });
+});
+
+// THE LIVE BENCH fixture (tools/make_live_test.py): battery → junction →
+// cpu's power_connector; 'ghost' carries a program and NO power cable.
+describe('LIVE BENCH fixture (testdata/9000009040)', () => {
+  const bp = JSON.parse(readFileSync(fileURLToPath(
+    new URL('../../../../testdata/9000009040/blueprint.json', import.meta.url)),
+    'utf8')) as Blueprint;
+  const net = craftPowerNet(bp, null);   // port-name kinds (power_connector)
+  test('the grid is real: cpu is on the net, the bare ghost is not', () => {
+    expect(net.hasPower).toBe(true);
+    expect(net.sources).toEqual([0]);                       // the battery
+    expect(computerPowered(net, 2)).toBe(true);             // cpu
+    expect(computerPowered(net, 3)).toBe(false);            // ghost ⚠
   });
 });

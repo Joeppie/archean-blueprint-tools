@@ -2701,6 +2701,7 @@ void main() {
       -((clientY - rect.top) / rect.height) * 2 + 1);
     const ray = new Raycaster();
     ray.setFromCamera(ndc, this.camera);
+    this.scene.updateMatrixWorld(true);        // headless-safe (probe law)
     const targets: Object3D[] = [];
     for (const e of this.dashElements.values()) targets.push(e.mesh);
     for (const e of this.deviceScreens.values()) targets.push(e.mesh);
@@ -2770,6 +2771,26 @@ void main() {
   pressTargets(): { dash: number; faces: number; comps: number } {
     return { dash: this.dashElements.size, faces: this.deviceScreens.size,
       comps: this.pressCompRoots.size };
+  }
+
+  /** AUDIT SEAM (v1.15.6, living-craft pins): the live quaternion of one
+   *  joint node of a component's real model — proves a SIM pose reached
+   *  the part's own plate. */
+  jointPoseQ(ci: number, name: string): [number, number, number, number] | null {
+    for (const o of this.compRoots.get(ci) ?? []) {
+      const jrefs = (o.userData as { jrefs?: JointPose[] }).jrefs;
+      const j = jrefs?.find(r => r.name === name);
+      if (j) return [j.node.quaternion.w, j.node.quaternion.x,
+        j.node.quaternion.y, j.node.quaternion.z];
+    }
+    return null;
+  }
+
+  /** AUDIT SEAM (v1.15.6, living-craft pins): a subgrid group's live pose
+   *  (THE PANEL RIDES ITS MASTER asserts on this quaternion). */
+  subGroupQ(bi: number): [number, number, number, number] | null {
+    const g = this.subGroups.get(bi);
+    return g ? [g.quaternion.w, g.quaternion.x, g.quaternion.y, g.quaternion.z] : null;
   }
 
   /** green ground + grid just under the lowest rendered geometry (ground=true:
