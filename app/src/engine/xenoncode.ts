@@ -2299,7 +2299,11 @@ export class XenonPump {
    *  maximized zoom window's canvas load starved exactly that sampling. */
   private buzzerWrite(io: string | number, port: number | undefined, v: number | string | undefined): void {
     const amp = Number(v) || 0;
-    if (amp <= 0 || Number(port) !== 0) return;
+    // THE DAC-HOLD LAW (v1.16.25): a 0-amp write is the NOTE-OFF event — it
+    // must reach the audio path (beep releases in 40 ms). Before, amp<=0
+    // writes were dropped here, so every held tone relied on the write-time
+    // envelope falling on its own: the sharp-cut tell.
+    if (Number(port) !== 0) return;
     const dev = this.comp?.devices.find(d => d.type === 'Buzzer'
       && (String(d.io) === String(io) || (!!d.alias && d.alias === String(io))));
     if (!dev) return;

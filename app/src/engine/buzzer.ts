@@ -170,6 +170,10 @@ export class BuzzerAudio {
    *  per-cycle steering only keeps long-held tones in tune. */
   beep(name: string, amp: number, freq: number, wave: BuzzerWave): void {
     if (!this.soundOn || typeof AudioContext === 'undefined') return;
+    // a note-off for a voice that never sounded is a no-op: rest cycles
+    // (amp 0 every tick) must not populate the voice table (or the event
+    // queues) for buzzers that never sang.
+    if (amp <= 0 && !this.voices.has(name)) return;
     try {
       const ctx = this.ensureCtx();
       void ctx.resume();
@@ -192,12 +196,29 @@ export class BuzzerAudio {
       const p = v.gain.gain;
       p.cancelScheduledValues(now);
       p.setValueAtTime(Math.max(0, p.value), now);
-      p.linearRampToValueAtTime(g, now + 0.005);          // 5 ms attack
-      p.setValueAtTime(g, now + 0.10);                    // tone body
-      p.linearRampToValueAtTime(0, now + 0.14);           // 40 ms release
+      if (g > 0) {
+        // THE DAC-HOLD LAW (v1.16.25, we: "sound cuts off too sharply
+        // sometimes … in game it doesnt … earlier iterations didnt"): the
+        // game holds the written Amplitude FLAT until the next write — a
+        // channel value, not a one-shot sample. The v1.13.14 per-write
+        // envelope (body to +100 ms, release by +140 ms) re-armed fine at
+        // 25 Hz, but one ~100 ms pump hiccup (Mario's blit load) let the
+        // envelope dive and the next write slam back up = the audible cut.
+        // So: 5 ms attack, then HOLD — no future events, nothing to fall
+        // into. sync()'s setTargetAtTime steering (also a hold) keeps the
+        // voice at level once the attack window passes.
+        p.linearRampToValueAtTime(g, now + 0.005);
+        v.beepUntil = now + 0.06;               // sync resumes steering here
+        v.hold = now + 0.15;                    // (renewed by every write)
+      } else {
+        // a REAL note-off: an explicit amp-0 write. 40 ms release — the
+        // game's DAC cuts hard, but a sample-accurate zero ramp is what
+        // keeps our cut click-free.
+        p.linearRampToValueAtTime(0, now + 0.04);
+        v.beepUntil = now + 0.05;
+        v.hold = now + 0.05;
+      }
       v.osc.frequency.setValueAtTime(Math.min(20000, Math.max(1, freq)), now);
-      v.beepUntil = now + 0.15;
-      v.hold = now + 0.15;
     } catch { /* no audio device: the pump must never break */ }
   }
   /** PEAK-HOLD (v1.13.11, we: "space invaders doesnt play sound unless I

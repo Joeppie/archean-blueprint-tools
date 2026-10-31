@@ -5575,3 +5575,24 @@ loop kind is deleted, propellers are silent (the spin stays visible), and
 the TopBar MUTE chip (archean-app-mute) drives BOTH master gains to zero —
 a context born later is born silent. Pins: scannersim.test (7), the farm
 deviceReply pair; the sound law + § 15 scanner law in LIVING-CRAFT.
+
+## 25. v1.16.25 — THE DAC-HOLD LAW for buzzers (we: "Sound in the super
+## mario game is … cutting off too sharply … that doesnt happen in game and
+## not in earlier iterations"; 2026-11-01)
+Root cause was v1.13.14's write-time envelope: EVERY amplitude write
+scheduled attack 5 ms → body to +100 ms → release by +140 ms. At the game's
+25 Hz write cadence the chain re-arms seamlessly, but one late write (Mario
+is exactly the craft whose 25 Hz canvas blits jitter the pump) let the
+envelope DIVE toward zero and the next write slam back up — the sharp cut.
+The earlier (v1.13.12) sync()-sampling era steered with setTargetAtTime +
+120 ms peak-hold: a hiccup only held the value, never dived — hence
+"earlier iterations" were innocent. The game has no auto-release AT ALL:
+its buzzer amplitude is a channel value, sample-and-HOLD until overwritten.
+Fix: a write ramps in 5 ms and HOLDS (no future events); release rides
+explicit amp-0 writes only (a 40 ms anti-click ramp — buzzerWrite previously
+DROPPED those, so note-offs existed only as the envelope's fall); sync()'s
+steering (which also holds) resumes after the 60 ms attack window. Amp-0
+writes for never-sounded voices stay no-ops (rest cycles cost nothing).
+Keeps every starvation defence intact (writes are still the event; the
+sync/hold/wake-lock trio unchanged). Gate: buzzer-bench e2e audio-truth
+PASS through the new path, vitest 1087, tsc clean; the law is in AGENTS.

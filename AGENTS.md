@@ -493,7 +493,15 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   baked PERIODICWAVEs (PURE band-limited 1/n spectra — v1.16.15: an
   extra n^0.1 rolloff softened square/saw until they read as sine; the game's
   enum is Sine/Square/Triangle/Sawtooth = 0..3, verified from
-  ARCHEAN_beep.GAME_Mod.so) + 7.5 kHz lowpass + 16-level quantization. Sound
+  ARCHEAN_beep.GAME_Mod.so) + 7.5 kHz lowpass + 16-level quantization. THE
+  DAC-HOLD LAW (v1.16.25, we: mario "sound cuts off too sharply … earlier
+  iterations" did not): an amplitude write HOLDS the voice flat — the game's
+  law is sample-and-hold, there is NO timed auto-release; a per-write
+  release envelope dives toward zero the moment one write lands late
+  (Mario's blit jitter past ~100 ms) and the next write slams back = the
+  audible cut. Release rides EXPLICIT amp-0 writes ONLY (40 ms anti-click
+  ramp; buzzerWrite forwards them); sync()'s steering is hold-only too.
+  Sound
   defaults ON; the AudioContext is created+resumed inside a REAL gesture
   playing a 1-frame silent buffer (a context created in the pump loop starts
   suspended and never resumes).
