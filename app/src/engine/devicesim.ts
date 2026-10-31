@@ -269,12 +269,20 @@ export class DeviceSim {
         const v = this.servos.get(ci)!.pos;
         if (names[0]) pose.joints = { [names[0]]: { [key]: v } };
       } else if (FLIGHT_TYPES.has(type)) {
+        // THE SURFACE INPUT LAW (v1.16.23, we: the exploration plane's
+        // "sending outputs to ailerons doesnt make them react"): an io
+        // channel-0 write DEFLECTS the surface — the program's
+        // output_number(port, 0, v), a seat cable relay and a writeback all
+        // land in chans, and until now only the PILOT metaphor was ever
+        // read there (the v1.16.15 RCS catch never reached the surfaces).
+        // The pilot Roll/Pitch/Yaw rides only while nothing drives the part.
+        // Values clamp to ±1 of the .ini span, like the game's inputValue.
         const fn = type === 'Aileron' ? 'Roll' : type === 'Elevator' ? 'Pitch' : 'Yaw';
-        const v = this.pilot.get(fn);
-        if (v !== undefined && names[0]) {
+        const raw = this.chans.get(ci)?.get(0) ?? this.pilot.get(fn);
+        if (raw !== undefined && names[0]) {
           const lim = this.limits.get(ci);
           const span = lim ? Math.max(Math.abs(lim[0]), Math.abs(lim[2])) : 45;
-          pose.joints = { [names[0]]: { angle: v * span } };
+          pose.joints = { [names[0]]: { angle: Math.max(-1, Math.min(1, raw)) * span } };
         }
       } else if (type === 'Propeller' && names[0]) {
         pose.joints = { [names[0]]: { angle: this.spins.get(ci) ?? 0 } };

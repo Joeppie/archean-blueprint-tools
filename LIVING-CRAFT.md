@@ -29,7 +29,7 @@ with the GAME's own semantics (wiki `en/components/joints/*.md`,
 | Propeller | 0 | speed −1..1 (visual spin) |
 | Wheel/BigWheel/SmallWheel | 0,1 | Accelerate (axle spin) / Steer ±30° |
 | ToggleButton/PushButton/ArrowButton | 0 | the `.ini` axle lever tips (limits [18,18,−18]) |
-| Aileron/Elevator/Rudder | pilot | deflection = PilotSeat Roll/Pitch/Yaw channel · joint limits |
+| Aileron/Elevator/Rudder | chans ch0, pilot fallback | THE SURFACE INPUT LAW (v1.16.23): an io channel-0 write deflects (clamp ±1 × .ini span) — program output, seat cable or writeback; the pilot Roll/Pitch/Yaw rides only while nothing drives the part |
 
 - Rate limits: hinge/pivot `maxSpeed` rot/s ·360; track `maxSpeed` m/s;
   `acceleration` fields are stored for shaping (v1.15.6 first-order).

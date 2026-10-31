@@ -94,6 +94,25 @@ describe('DeviceSim — channel → pose', () => {
     sim.writePilot('Roll', -1);
     expect(sim.snapshot().get(0)!.joints!.joint!.angle).toBeCloseTo(-45);
   });
+  test('THE SURFACE INPUT LAW: an io channel-0 write deflects the surface', () => {
+    // v1.16.23 — the exploration plane: a program's output_number(port, 0, v)
+    // resolves to the Aileron's (ci, ch 0) write; the pose must FOLLOW it.
+    const sim = new DeviceSim();
+    sim.load(bp([comp('Aileron', { angle: 0 })]), jointNames);
+    sim.write(0, 0, 0.5);
+    expect(sim.snapshot().get(0)!.joints!.joint!.angle).toBeCloseTo(22.5);
+    sim.write(0, 0, -1);
+    expect(sim.snapshot().get(0)!.joints!.joint!.angle).toBeCloseTo(-45);
+  });
+  test('the channel write WINS over the pilot metaphor · clamps to ±span', () => {
+    const sim = new DeviceSim();
+    sim.load(bp([comp('Aileron', { angle: 0 })]), jointNames);
+    sim.writePilot('Roll', 1);
+    sim.write(0, 0, -40);           // the plomo program's ±40 counter style
+    expect(sim.snapshot().get(0)!.joints!.joint!.angle).toBeCloseTo(-45);
+    sim.write(0, 0, 0);
+    expect(sim.snapshot().get(0)!.joints!.joint!.angle).toBeCloseTo(0);
+  });
   test('wheel: ch1 steers ±30°, ch0 spins the axle', () => {
     const sim = new DeviceSim();
     sim.load(bp([comp('Wheel')]), jointNames);

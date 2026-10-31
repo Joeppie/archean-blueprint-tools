@@ -5530,3 +5530,22 @@ event. The user's decomposed craft got a launch.json (app-2 HELLO /
 app-1 TETRIS / the 54-file ChipOS) — F5 on the fly-craft's programs
 works in VSCodium today. v1 boundary: no devices (io reads 0), one
 frame, no screens pane (T6).
+
+## 23. v1.16.23 — THE SURFACE INPUT LAW (we: "cheapo exploration plane …
+## sending outputs to ailerons doesnt make them react"; 2026-11-01)
+Craft 3327182790 (the workshop exploration plane): a visual-node program
+writes output_number(port, 0, v) to five cabled Ailerons — every write
+reached IoBus and DeviceSim.write, yet the surfaces never moved. Root cause:
+snapshot()'s FLIGHT_TYPES branch read ONLY the pilot Roll/Pitch/Yaw metaphor
+map — the chans record (program outputs, seat-cable relays, writebacks) was
+written but never read there; the v1.16.15 RCS catch fixed the same gap for
+thrusters only. Both old pins hid it: the unit test asserted the pilot path,
+and the cockpit seat-cable leg presses Q — whose metaphor swings EVERY
+aileron — so the dead cable branch could never fail. Fix: a channel-0 write
+deflects the surface (clamp ±1 × .ini span, like the game's inputValue); the
+pilot metaphor rides only while nothing drives the part. Two new unit pins +
+a live probe over the real craft (pressDevice → running program →
+jointPoseQ 45.0°/release 0.0°). The probe's FIRST run "failed" honestly: a
+raw static bus write is overwritten by the 25 Hz program with its legitimate
+neutral value — a rest-state lesson for future probes (drive the INPUT, not
+the output, on live-program crafts).
