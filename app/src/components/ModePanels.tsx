@@ -6,6 +6,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { Sec, Num, SearchList } from './ui';
 import type { Engine } from '../engine/scene';
 import { FLOWS, type FlowKey } from '../engine/aero';
+import { flightLab, type FlightLabReport } from '../engine/flightlab';
 import { writeBlockDoc, writeBlockMaterial, type EditCtx } from '../engine/edit';
 import { docArrayInsert, docFromValue, docSetNumber, docArrayRemoveAt } from '../engine/doc';
 import { blockCells, blockFromCell, blockInfo, blockTwinIssues, blockMirrorTwin, cellOverlapSkip, flippedBlock,
@@ -905,6 +906,17 @@ export function WindPanel(p: { engine: Engine | null; rev: number }) {
   const [now, setNow] = useState(0);
   p.rev;
   const st = p.engine?.windState();
+  // v1.16.11 THE FLIGHT LAB (engine/flightlab.ts): the force census runs
+  // on the blueprint directly (no wind solve needed) — memoised per rev
+  const [fSpeed, setFSpeed] = useState(80);
+  const [fAlt, setFAlt] = useState(0);
+  const lab = useMemo(() => {
+    const bp = p.engine?.blueprint;
+    if (!bp) return null;
+    try { return flightLab(bp, p.engine!.manifest, { speed: fSpeed, altitude: fAlt }); }
+    catch { return null; }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.rev, fSpeed, fAlt, p.engine]);
   // keep the status live: poll while mounted (the solve usually lands in
   // the first second — a running-gated interval could clear before the
   // final state ever rendered)
@@ -962,7 +974,109 @@ export function WindPanel(p: { engine: Engine | null; rev: number }) {
           </div>
         </Sec>
       )}
+      <FlightSec lab={lab} speed={fSpeed} alt={fAlt}
+        setSpeed={setFSpeed} setAlt={setFAlt} />
     </>
+  );
+}
+
+// ------------------------------------------------------- FLIGHT ANALYSIS
+/** Lift-curve sparkline: Cl(α) 0..25° with the 15° stall knee and the
+ *  trim point marked. Inline SVG, zero deps. */
+function LiftCurve(p: { lab: FlightLabReport }) {
+  const { curve, clMax, trimAlphaDeg } = p.lab;
+  const W = 224, H = 92, PAD = 18;
+  const clHi = Math.max(0.5, clMax * 1.25);
+  const X = (a: number) => PAD + (a / 25) * (W - PAD - 4);
+  const Y = (cl: number) => H - PAD - (cl / clHi) * (H - PAD - 6);
+  const pts = curve.map(c => `${X(c.alphaDeg).toFixed(1)},${Y(c.cl).toFixed(1)}`).join(' ');
+  const trim = curve.find(c => c.alphaDeg === Math.round(trimAlphaDeg));
+  return (
+    <svg width={W} height={H} data-testid="flight-curve" className="pt-1">
+      <line x1={X(0)} y1={Y(0)} x2={X(25)} y2={Y(0)} stroke="#3a4150" strokeWidth={1} />
+      <line x1={X(15)} y1={Y(0)} x2={X(15)} y2={H - PAD} stroke="#b58900" strokeDasharray="3 2" strokeWidth={1} />
+      <text x={X(15) + 2} y={H - PAD + 10} fill="#b58900" fontSize={8}>stall 15°</text>
+      <text x={2} y={Y(clHi * 0.9)} fill="#8895a8" fontSize={8}>Cl</text>
+      <polyline points={pts} fill="none" stroke="#7dffcf" strokeWidth={1.5} />
+      {trim && <circle cx={X(trim.alphaDeg)} cy={Y(trim.cl)} r={2.5} fill="#ffb454" />}
+      {trim && <text x={X(trim.alphaDeg) + 4} y={Y(trim.cl) - 3} fill="#ffb454" fontSize={8}>trim</text>}
+    </svg>
+  );
+}
+
+/** THE FLIGHT LAB panel section (engine/flightlab.ts): the wiki's shape-
+ *  field forces on this craft — stall speed, trim, the CG-vs-lift-centre
+ *  stability verdict and the control-authority census (with the buried-
+ *  aileron catch). Stylised closed-form aerodynamics (label keeps). */
+function FlightSec(p: {
+  lab: FlightLabReport | null; speed: number; alt: number;
+  setSpeed: (v: number) => void; setAlt: (v: number) => void;
+}) {
+  const r = p.lab;
+  return (
+    <Sec title="Flight analysis — forces on the shape field" testid="flight-sec">
+      <div className="flex items-center gap-2 pb-1 text-[11px] text-ink-dim">
+        <Num label="speed" value={p.speed} min={5} max={600}
+          testid="flight-speed" onCommit={p.setSpeed} />
+        <Num label="alt m" value={p.alt} min={0} max={40000}
+          testid="flight-alt" onCommit={p.setAlt} />
+        <span>ρ {(r?.rho ?? 0).toFixed(3)} kg/m³</span>
+      </div>
+      {!!r && (
+        <>
+          <div className="flex flex-wrap gap-1 pb-1 text-[11px]">
+            <span data-testid="flight-verdict"
+              className={`ksp-btn px-1.5 py-[3px] ${r.pitchVerdict === 'stable'
+                ? 'text-emerald-400' : r.pitchVerdict === 'neutral' ? 'text-gold' : 'text-red-400'}`}>
+              pitch {r.pitchVerdict}
+            </span>
+            <span className="ksp-btn px-1.5 py-[3px] text-ink-dim">
+              yaw <span className={r.yawVerdict === 'stable' ? 'text-emerald-400' : 'text-gold'}>{r.yawVerdict}</span>
+            </span>
+          </div>
+          <div className="space-y-[2px] text-[11px] text-ink-dim">
+            <div data-testid="flight-margin">static margin{' '}
+              <span className={r.staticMarginPct > 5 ? 'text-emerald-400' : r.staticMarginPct > 0 ? 'text-gold' : 'text-red-400'}>
+                {r.staticMarginPct.toFixed(1)} % MAC
+              </span>
+            </div>
+            <div data-testid="flight-stall">stall speed{' '}
+              <span className="text-ink">{Number.isFinite(r.stallSpeed) ? `${r.stallSpeed.toFixed(1)} m/s` : '— (no wing)'}</span>
+              {Number.isFinite(r.stallSpeedSL) && Number.isFinite(r.stallSpeed)
+                && Math.abs(r.stallSpeedSL - r.stallSpeed) > 0.5 &&
+                <span className="text-ink-dim"> · {r.stallSpeedSL.toFixed(1)} SL</span>}
+            </div>
+            <div>wing <span className="text-ink">{r.planform.S.toFixed(1)} m²</span>
+              <span className="text-ink-dim"> · span {r.planform.span.toFixed(1)} m · chord {r.planform.chord.toFixed(2)} m · AR {r.planform.AR.toFixed(1)}</span>
+            </div>
+            <div>mass <span className="text-ink">{Math.round(r.mass).toLocaleString()} kg</span>
+              <span className="text-ink-dim"> · frontal {r.frontal.toFixed(2)} m² · Cd0 {r.cd0.toFixed(2)}</span>
+            </div>
+            <div>trim <span className="text-ink">{Number.isFinite(r.trimAlphaDeg) ? `${r.trimAlphaDeg.toFixed(1)}° AoA` : '—'}</span>
+              <span className="text-ink-dim">
+                {r.trimElevatorDeg !== null && ` · elevator ${r.trimElevatorDeg.toFixed(1)}°`}
+                {Number.isFinite(r.ldMax) && r.ldMax > 0 && ` · L/D ${r.ldMax.toFixed(1)}`}</span>
+            </div>
+            <div data-testid="flight-authority">
+              control authority{' '}
+              <span className="text-ink">{Math.round(r.authority.pitch).toLocaleString()} N·m pitch</span>
+              <span className="text-ink-dim"> · {Math.round(r.authority.roll).toLocaleString()} roll</span>
+              {r.authority.rows.length > 0 && (
+                <span className="text-ink-dim"> · {r.authority.rows.filter(x => x.buried).length}/{r.authority.rows.length} plates buried
+                  <span title="Buried control plates sit inside the structure: the game's shape field EXCLUDES Ailerons and computes their force from deflection × area × lever only — a hidden, short-lever plate carries ≈ nothing (the Chips Falcon catch)."> ≈inert</span>
+                </span>
+              )}
+            </div>
+          </div>
+          {r.curve.length > 0 && <LiftCurve lab={r} />}
+          <div className="pt-1 text-[10px] leading-snug text-ink-dim">
+            Wiki shape-field laws: thin broad sections lift (stall ≈ 15°),
+            form drag by fineness, stability is EMERGENT — the mass model's
+            CG against the lift centre. Stylised closed-form model, not CFD.
+          </div>
+        </>
+      )}
+    </Sec>
   );
 }
 

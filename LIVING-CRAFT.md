@@ -218,6 +218,44 @@ co-run), ENERGY (744 kW of RTGs vs a 107 kW load, the drill at 100 kW,
 PRESS registry, ZERO console errors. Re-run it after ANY engine change
 that touches power/devices/items/the bus.
 
+## 11. THE NET-SCREEN LAW (v1.16.11 — the 3828773626 blank screens)
+ChipOS's display.xc binds dashboards to surfaces with RUNTIME variables
+(`screen($dd_a,$dd_c)` for an aliased board, `screen($dd_p,$dd_c)` for a
+bare one) — NO static scan of the program sees them. `xenonNetScreens`
+pre-registers every Screen/HdScreen element of every Dashboard on the
+computer's ROUTER NET, keyed by the lowercased alias (aliased) or the
+io-number token (bare) at the 6 px/unit element size, registered before
+boot (xc_addScreen first-wins beats the 640×480 seed). `setScreenFeeds`
+binds ALL keys of a board to ONE DataTexture; the LIVE farm's auto-boot
+feeds the 3-D boards with NO IDE open. Pins: xenoncode.test (net-screen
+law, alias + io tokens), e2e netscreens.spec (auto-boot → ink on the
+faces). The dev kit 3828773626 is the standing audit; netscreenprobe.mjs
+reports the feed registry + push counts + ink.
+
+## 12. ROUTER POWER GATING (v1.16.11 — the deferred v1.16.10 design)
+Mini/Router carry a `[ADAPTER lowvoltage]` and ARE the alias resolvers, so
+an UNPOWERED router drops its whole subtree from every computer's
+device/screen/bus space (walk it gated AND ungated; a component whose only
+net path crosses a dead router loses its alias entry too).
+DataJunction/DataBridge carry NO power port — passive conductors, never
+gated (Jimmy's DataJunction nets are untouched). The Editor feeds
+`computerPowered(powerNet, ci)` (a grid-less craft answers true, the
+power-unaware convention). Pins: xenoncode.test (dev-kit census: router 6
+fed keeps the boards, router 11 unfed drops its sensors; cutting router 6's
+feed drops the net-screen registry).
+
+## 13. THE FLIGHT LAB (v1.16.11 — forces on the shape field)
+`engine/flightlab.ts` turns the aero shape census into the game's forces:
+thin-broad planform (broad-planform filter per thickness-axis scan),
+Diederich lift curve, STALL ≈ 15° with a flat-plate shed, fineness form-drag
++ Re skin-friction + induced, the EMERGENT pitch static margin (mass CG vs
+neutral point, % MAC) and a fin yaw margin, and control authority per
+Aileron (q·A·lever) with a buried-plate census. The WindPanel FLIGHT
+ANALYSIS section renders verdicts + a lift curve; the fixture pair 9000009080
+(stable: CG ahead) vs 9000009081 (identical airframe, ballast moved aft →
+divergent) pins that stability lives in the CG, and 9000009082 the flying
+brick. Stylised closed-form, not CFD (AGENTS). See FORMAT §Aerodynamics.
+
 ## Boundaries (accepted; v1.15.6 base)
 - A device's OWN power draw is not modelled (a hinge consumes LV in-game);
   reachability gates COMPUTERS only.

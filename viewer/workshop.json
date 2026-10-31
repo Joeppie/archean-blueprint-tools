@@ -462,5 +462,29 @@
  "9000009040": {
   "name": "Live Bench",
   "author": "living"
+ },
+ "9000009050": {
+  "name": "CHIPOS BENCH",
+  "author": "ChipOS bench"
+ },
+ "9000009060": {
+  "name": "ENERGY BENCH",
+  "author": "energy bench"
+ },
+ "9000009070": {
+  "name": "ITEM BENCH",
+  "author": "items bench"
+ },
+ "9000009080": {
+  "name": "Flight Bench",
+  "author": "flightlab"
+ },
+ "9000009081": {
+  "name": "Tail-Heavy Bench",
+  "author": "flightlab"
+ },
+ "9000009082": {
+  "name": "Brick Bench",
+  "author": "flightlab"
  }
 }

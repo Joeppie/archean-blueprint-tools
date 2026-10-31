@@ -9,7 +9,7 @@ import { describe, expect, test } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { adapterSocket, KIND_RADIUS, manifestAdapter, pipeSockets, plugAnchor, TAN_MAX,
+import { adapterSocket, dashboardAdapter, KIND_RADIUS, manifestAdapter, pipeSockets, plugAnchor, TAN_MAX,
   TIP_MAX, type SocketAnchor, type V3 } from '../sockets';
 import { flattenComponents } from '../subgrid';
 import type { Blueprint } from '../format';
@@ -217,5 +217,85 @@ describe('THE HARNESS ATTACH (v1.11.5: subgrid tips ride the door)', () => {
     const p = plugAnchor(rec, sock, 0.02);
     expect(p.tip).toEqual(rec);
     expect(p.stale).toBe(false);
+  });
+});
+
+describe('THE DATA-GENERATED DASHBOARD PORT (v1.16.11: mid-back, not the .ini corner)', () => {
+  const bp16 = load('3828773626');
+
+  test('the synthesized adapter centres the .ini back-plane on the DATA board', () => {
+    const c = { type: 'Dashboard', data: { size_x: 200, size_y: 100 } };
+    const a = dashboardAdapter(c, 'data-connector')!;
+    expect(a).not.toBeNull();
+    // content (W/2, 0.018, H/2): the SAME 0.018 back-plane offset as the
+    // .ini template, centred on the data-generated board
+    expect(a.position).toEqual([1, 0.018, 0.5]);
+    // contentToFile(1, 0.018, 0.5) = (1, 0.5, −0.018): the measured socket
+    // plane at the board centre, 0.018 behind it
+    const s = adapterSocket({ x: 1, y: 2, z: 3 }, undefined, a);
+    expect(s.at[0]).toBeCloseTo(2, 10); expect(s.at[1]).toBeCloseTo(2.5, 10);
+    expect(s.at[2]).toBeCloseTo(2.982, 10);
+    s.axis.forEach((v, i) => expect(v).toBeCloseTo([0, 0, -1][i]!, 10));
+    expect(s.kind).toBe('data');
+  });
+
+  test('null for other types, other ports, dataless boards', () => {
+    expect(dashboardAdapter({ type: 'Screen' }, 'data-connector')).toBeNull();
+    expect(dashboardAdapter({ type: 'Dashboard', data: {} }, 'data-port')).toBeNull();
+    expect(dashboardAdapter({ type: 'Dashboard', data: { size_x: 0, size_y: 50 } },
+      'data-connector')).toBeNull();
+  });
+
+  test('corpus 3828773626: every fresh data-connector tip is FRESH on the ' +
+    'mid-back socket (residual 0.02 = the cable radius) — the .ini corner ' +
+    'would re-seat it (the bug the user caught)', () => {
+    if (!bp16) return;                                    // corpus absent
+    const pipes = bp16.data.pipes!;
+    const flat = flattenComponents(bp16);
+    const socks = pipeSockets(pipes, flat, MANIFEST);
+    let checked = 0;
+    pipes.forEach((p, pi) => {
+      for (const side of ['a', 'b'] as const) {
+        const ci = side === 'a' ? p.a_component : p.b_component;
+        const port = side === 'a' ? p.a_port : p.b_port;
+        if (port !== 'data-connector' || bp16.data.components[ci]?.type !== 'Dashboard') continue;
+        const sock = socks[pi]?.[side];
+        expect(sock).not.toBeNull();
+        const rec = recorded(p, side)!;
+        const plug = plugAnchor([rec[0], rec[1], rec[2]], sock!, 0.02);
+        expect(plug.stale).toBe(false);                   // tip kept verbatim
+        expect(plug.depth).toBeCloseTo(0.02, 3);          // one radius out
+        // the tip sits ON the mid-back stub axis: the socket IS the board
+        // centre's back plane — tip distance = the seating depth, tan 0
+        expect(Math.hypot(rec[0] - sock!.at[0], rec[1] - sock!.at[1],
+          rec[2] - sock!.at[2])).toBeCloseTo(0.02, 3);
+        checked++;
+      }
+    });
+    expect(checked).toBe(2);                              // dashboards 14 + 16
+  });
+
+  test('the .ini corner (manifest adapter) is NOT what the tips sit on — ' +
+    'regression guard for the mid-back law', () => {
+    if (!bp16) return;
+    const pipes = bp16.data.pipes!;
+    const corner = MANIFEST?.Dashboard?.adapters?.find(a => a.name === 'data-connector');
+    expect(corner).toBeTruthy();                          // .ini carries (0, .018, 0)
+    expect(corner!.position).toEqual([0, 0.018, 0]);
+    pipes.forEach(p => {
+      for (const side of ['a', 'b'] as const) {
+        const ci = side === 'a' ? p.a_component : p.b_component;
+        const port = side === 'a' ? p.a_port : p.b_port;
+        const comp = bp16.data.components[ci];
+        if (port !== 'data-connector' || comp?.type !== 'Dashboard') continue;
+        const cs = adapterSocket(comp.position, comp.orientation, corner!);
+        const rec = recorded(p, side)!;
+        // on the .ini corner the fresh tip FAILS the freshness gate (lateral
+        // drift ≥ TAN_MAX) → the cable visibly re-seats to the corner —
+        // the exact bug the user caught on 3828773626
+        const plug = plugAnchor([rec[0], rec[1], rec[2]], cs, 0.02);
+        expect(plug.stale).toBe(true);                    // ⇒ corner = STALE
+      }
+    });
   });
 });

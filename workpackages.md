@@ -424,3 +424,107 @@ user's explicit ask).
   the standing HUD Y-proposal 98a0405 with this feature batch) — per §
   Versioning a Y is proposed, never self-awarded.
 - No Pages deploy (the standing rule: deploy only on the explicit ask).
+
+---
+
+# Batch 3 (session of 2026-10-31) — SCREENS + FLIGHT LAB. Label v1.16.11 (Z;
+# the v1.17.0 Y-proposal stays open awaiting assent).
+
+Standing brief (user, verbatim): "http://100.117.137.1:5175/?craft=3828773626
+doesn't show anything on its screens. Connections to screens aren't in the
+middle of the back of them, dataports, they should be. Check wiki and
+documentation and go through our code. It simulated aspects and document all.
+[If] not yet implemented, then make a subagent that looks at previous session.
+I'm still sleeping, gather relevant instructions as per previous session and
+then form the subagent summary, continue and implement all gathered
+unimplemented aspects insofar possible. Also, investigate the precise
+implementation for the windtunnel, identify how the game would simulate or
+emulate physics realistically, like for calculating lift and drag, and help
+find actual lift. RCS infinity can't fly stable, neither can Jimmy's
+adventure. Also Chips Falcon was made for old physics system and has hidden
+ailerons, these don't do anything anymore now. Physics may be a tough nut to
+crack, but attempt it like the other tasks and if possible reimplement the
+wind streamlines functionality and display better stats, so we can figure out
+if a craft will fly stable, and what its stall speed is, before we even fly
+it in game. Work autonomously and use the subagent findings."
+
+Subagent findings (prev session ses_e71032c38ff…, carry-over list): v1.17.0
+assent pending (NEVER self-awarded — skipped); ChipOS wizard pixel journey
+needs in-game ground-truth pixels (skipped — a guessed pin is banned);
+enough_power shim stub + router power gating + wire-integrity census =
+this batch's carry-over slots.
+
+## WP-A — THE SCREENS OF 3828773626 (DONE)
+Facts found: the ChipOS Dev Kit's screens are TWO DASHBOARDS (16 'main-screen'
+8×HdScreen 50×50, 14 'secondary-screen' 1×HdScreen) cabled to the chipos
+MiniComputer ONLY THROUGH MiniRouters (data-connector ↔ data_port.1/.8;
+computers hang on data_port.7/.9/.006, router chains 6↔11). ChipOS resolves
+screens at RUNTIME — display.xc scans device() rows and calls
+screen($dd_a,$dd_c)/screen($dd_p,$dd_c) with VARIABLES; the app's xenonScreens
+regex sees only LITERAL screen("x",N)/screen(N,ch) calls → registers ZERO
+surfaces → no shim size, no 3-D feed → every screen blank.
+THE NET-SCREEN LAW (wiki: a number resolves through the computer's
+data_port.NN cables AND the router net; an alias addresses ANY component on
+it — computer.md, MiniRouter.md): a computer's screen registry =
+literal scan ∪ EVERY Screen/HdScreen element of EVERY Dashboard on the
+computer's ROUTER NET, keyed by BOTH the io-number token and the alias token
+(shim keys = the literal token lowercased), sized size×6 px (6 px/lattice-
+unit law), registered BEFORE boot (xc_addScreen first-wins vs the 640×480
+seed). The 3-D face binds ALL its keys (setScreenFeeds accepts key[] per
+ci:channel; pushScreen by ANY key lands on the shared DataTexture) — the
+program chooses alias- or number-addressing at runtime, we feed both.
+
+## WP-B — THE DASHBOARD DATA PORT IS MID-BACK (DONE)
+We measured every fresh Dashboard `data-connector` tip in the corpus
+(8 endpoints, dist 0.020 m, all 6 crafts incl. 3828773626 both sides): the
+plug sits at LOCAL FILE (W/2, H/2, −0.038) — CENTRE of the board's BACK,
+0.02 m out along the −normal stub. The .ini [ADAPTER data-connector]
+(0, 0.018, 0) is the gltf TEMPLATE's corner — the board is DATA-GENERATED,
+so the socket rides the DATA: at = pos + R(q)·(W/2, H/2, −0.018) (file),
+axis = −board normal. Our socket was the .ini corner → cables re-seated to
+the CORNER (user: "connections … aren't in the middle of the back").
+The generic anchor law stands for every OTHER type (18 407 endpoints,
+tangent 0.000); Dashboard data-connector is its data-generated exception.
+
+## WP-C — FLIGHT LAB: FORCES ON THE SHAPE FIELD (DONE)
+The named next step (REWRITE: "forces (lift curve/stall/AoA) on the SAME
+field"). engine/flightlab.ts implements the wiki's shape-field laws:
+planform census (THIN voxel columns = the wiki's wing criterion → spanwise
+lift distribution), finite-wing lift curve (Diederich), wiki stall ≈ 15°
+with the flat-plate post-stall tail, two-sided lift (buried sections half),
+fineness-weighted Cd0 + induced drag, CG (mass model) vs lift centre →
+static margin + neutral point per axis (pitch from z-distribution, yaw from
+the side-scan fin census), trim AoA, stall speed (isaAt density), control
+AUTHORITY per Aileron part (area·lever·½ρv², the wiki's own scaling) —
+which QUANTIFIES the Chips Falcon complaint: ailerons buried in the body
+carry a lever ≈ 0 → authority ≈ 0 N·m = "don't do anything anymore".
+UI: WindPanel gains the FLIGHT ANALYSIS section (speed/altitude rows,
+verdicts, lift-curve sparkline) — streamlines stay the visual layer.
+
+## WP-D — CARRY-OVERS INSO FAR AS POSSIBLE
+- Router POWER GATING: routers resolve aliases only when powered
+  (power.ts reachability × the xenonDevices net walk) — an unpowered router
+  drops its subtree from every computer's device/screen/bus space.
+- enOUGH_POWER: shim ABI bump (xc_set_enough_power) — the power net drives
+  the VM's enough_power() so the Crafter's built-in overlay fires; needs
+  build.sh wasm-only + dual-side pins. Land only if A–C green with margin.
+NOT taken this batch (reasons): v1.17.0 assent (needs the user), ChipOS
+wizard pixel pins (needs in-game ground truth), P8 module (unscheduled),
+phone farm UX (design task), full wire-integrity REPAIR (check ships,
+re-drop needs a design pass).
+
+## Gate ladder
+tsc + vitest per WP; e2e tags @Aero @Xenon + the new netscreens legs; the
+jimmyprobe audit for WP-A (power/bus-adjacent); FULL suite before any
+release label. Fixtures: make_flight_test.py → 9000009080 FLIGHT BENCH
+(thin wing + tail boom + nose ballast vs a flying brick + a tail-heavy twin).
+
+## Session end state (batch 3, 2026-10-31)
+- WP-A/B/C/D1 all DONE (marks above). WP-D2 (`enough_power` shim +
+  wasm ABI bump) NOT taken — first in the next queue.
+- Census logged in docs/HISTORY.md §13: Jimmy margin −2.9% (unstable),
+  Falcon 132/150 ailerons buried, Flight Bench pair stable +124% /
+  tail-heavy −34%.
+- Gates: vitest 1090 (+23, stitch data-drift red = baseline), tsc clean,
+  targeted e2e 33/0/3, probes clean. RCS Infinity: not subscribed here —
+  bench ready on ingest.

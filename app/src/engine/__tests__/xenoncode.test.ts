@@ -5,10 +5,12 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
+  xenonDevices,
   chanInfo, detectChannels, parseNodes, PILOT_KEYS, sabSupported, stepperLaw, tokenize,
   xenonComputers, xenonScreens, XenonWorkerRun,
 } from '../xenoncode';
 import channelsJson from '../../../../viewer/models/channels.json';
+import { craftPowerNet, computerPowered } from '../power';
 import type { Blueprint } from '../format';
 
 const REPO = new URL('../../../../', import.meta.url).pathname;   // mass.test.ts pattern
@@ -482,5 +484,90 @@ describe('THE WRITEBACK LAW (v1.13.23 XENON-WRITEBACK)', () => {
       expect(validNumInput(ok), ok).toBe(true);
     for (const no of ['', '  ', 'abc', '1,5', '5;', 'nan', 'inf', '0x10', '1 2', '42abc', '--3'])
       expect(validNumInput(no), no).toBe(false);
+  });
+});
+
+describe('THE NET-SCREEN LAW (v1.16.11: the 3828773626 blank screens)', () => {
+  it('router-coupled dashboards register their surfaces for ALL channels, ' +
+    'at the 6 px/unit element size, keyed by the LOWERCASED alias', () => {
+    const bp = data('3828773626');
+    const chipos = xenonComputers(bp).find(c => c.ci === 4)!;
+    // the literal scan alone finds NOTHING (display.xc passes $variables) —
+    // this is the root cause the net law fixes
+    expect(xenonScreens(bp, chipos.files, 4).length).toBe(0);
+    const keys = new Set(chipos.screens.map(s => `${s.alias}#${s.channel}`));
+    expect(keys.has('main-screen#0')).toBe(true);
+    expect(keys.has('main-screen#7')).toBe(true);      // 8 HdScreens
+    expect(keys.has('secondary-screen#0')).toBe(true);
+    const ms = chipos.screens.find(s => s.alias === 'main-screen' && s.channel === 0)!;
+    expect(ms).toMatchObject({ ci: 16, w: 300, h: 300 });   // 50×50 units × 6
+    const sec = chipos.screens.find(s => s.alias === 'secondary-screen')!;
+    expect(sec).toMatchObject({ ci: 14, w: 300, h: 300 });
+    // an ALIASED dashboard answers the alias token (display.xc prefers
+    // screen($dd_a, …) for $dd_a != "") — no io-number twin
+    expect(chipos.screens.some(s => /^\d+$/.test(s.alias))).toBe(false);
+  });
+
+  it('a BARE dashboard (no alias) registers by io-number token — the ' +
+    'screen($dd_p, …) path, resolved through the ROUTER NET', () => {
+    const bp = JSON.parse(JSON.stringify(data('3828773626')));
+    for (const c of bp.data.components)
+      if (c.type === 'Dashboard') c.alias = '';
+    const chipos = xenonComputers(bp).find((c: any) => c.ci === 4)!;
+    const keys = new Set(chipos.screens.map((s: any) => `${s.alias}#${s.channel}`));
+    // chipos' data_port.006 carries MiniRouter 6 → dashboards sit at io 6
+    expect(keys.has('6#0')).toBe(true);
+    expect(keys.has('6#7')).toBe(true);
+    const s0 = chipos.screens.find((s: any) => s.alias === '6' && s.channel === 0)!;
+    expect(s0.w).toBe(300);
+  });
+
+  it('virtualscreen(w,h) is NOT a screen(io,ch) reference', () => {
+    // (the ChipOS Dev Kit's virtualscreen(860, 860) registered a phantom
+    // io-860→channel-860 binding before the guard)
+    const bp = data('3828773626');
+    const chipos = xenonComputers(bp).find(c => c.ci === 4)!;
+    expect(chipos.screens.some(s => s.alias === '860')).toBe(false);
+    expect(xenonScreens(bp, [{ name: 'm.xc', code: 'var $v = virtualscreen(860, 860)' }], 4))
+      .toEqual([]);
+    // the real two-arg call still matches when glued to a token boundary
+    expect(xenonScreens(bp, [{ name: 'm.xc', code: 'if(screen(5,1)){}}' }], -1).length).toBe(0);
+    // (io 5 unresolvable on this craft — resolution gates registration)
+    expect(xenonScreens(bp, [{ name: 'm.xc', code: '$s = screen(6, 0)' }], 4)
+      .some(s => s.alias === '6' && s.channel === 0)).toBe(true);
+  });
+});
+
+describe('ROUTER POWER GATING (v1.16.11: routers resolve addresses only when fed)', () => {
+  it('3828773626: MiniRouter 6 is fed (LV grid), MiniRouter 11 is NOT — ' +
+    'the gated census drops router 11’s sensors and keeps the boards', () => {
+    const bp = data('3828773626');
+    const net = craftPowerNet(bp, null);
+    expect(net.hasPower).toBe(true);
+    expect(computerPowered(net, 6)).toBe(true);
+    expect(computerPowered(net, 11)).toBe(false);
+    const gated = xenonDevices(bp, 4, { routerPowered: ci => computerPowered(net, ci) });
+    const open = xenonDevices(bp, 4);
+    expect(gated.some(d => d.ci === 16)).toBe(true);     // main-screen board (router 6)
+    expect(gated.some(d => d.ci === 15)).toBe(false);    // DensitySensor behind router 11
+    expect(open.some(d => d.ci === 15)).toBe(true);      // ungated = the old census
+  });
+  it('cut router 6’s LV feed = the net-screen registry loses the boards ' +
+    '(the net-screen law rides the gated device walk)', () => {
+    const bp = JSON.parse(JSON.stringify(data('3828773626')));
+    bp.data.pipes = bp.data.pipes.filter((p: any) =>
+      !(p.a_component === 5 && p.b_component === 6 && p.b_port === 'lowvoltage'));
+    const net = craftPowerNet(bp, null);
+    expect(computerPowered(net, 6)).toBe(false);
+    const chipos = xenonComputers(bp, { routerPowered: (ci: number) => computerPowered(net, ci) })
+      .find(c => c.ci === 4)!;
+    expect(chipos.screens.some(s => s.alias === 'main-screen')).toBe(false);
+    expect(chipos.devices.some(d => d.ci === 16)).toBe(false);
+  });
+  it('passive conductors are NEVER gated: a DataJunction net works with ' +
+    'no power census at all (grid-less craft convention: no opts = open)', () => {
+    const bp = data('9000009050');                     // CHIPOS BENCH (junction net)
+    const dev = xenonDevices(bp, bp.data.components.findIndex(c => c.type === 'MiniComputer'));
+    expect(dev.length).toBeGreaterThan(0);
   });
 });

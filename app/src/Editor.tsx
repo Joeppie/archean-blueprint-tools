@@ -179,10 +179,23 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   const [farmV, setFarmV] = useState(0);
   useEffect(() => xenonFarm.subscribe(() => setFarmV(v => v + 1)), []);
   void farmV;
-  const xenonComps = useMemo(
-    () => (bp ? xenonComputers(bp) : []),
+  // v1.15.6 THE LIVING CRAFT: the manifest rides a boot-time fetch (the
+  // power net + actuator tables re-derive when it lands)
+  const [manifestV, setManifestV] = useState(0);
+  useEffect(() => { void loadManifest().then(() => setManifestV(v => v + 1)); }, []);
+  const powerNet = useMemo(
+    () => (bp ? craftPowerNet(bp, peekManifest()) : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [bp]);
+    [bp, manifestV]);
+  const xenonComps = useMemo(
+    () => (bp ? xenonComputers(bp, {
+      // v1.16.11 ROUTER POWER GATING: an unpowered Mini/Router drops its
+      // subtree from the device/screen space (engine/power.ts reachability;
+      // a grid-less craft answers true = the power-unaware convention)
+      routerPowered: ci => !powerNet?.hasPower || computerPowered(powerNet, ci),
+    }) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [bp, powerNet]);
   // ── v1.15.6 THE LIVING CRAFT (we: "computers should start when a craft is
   //    loaded in, and parts need to respond to signals … hinges and buttons
   //    and pivots and ailerons actually move … if a pivot or hinge moves, so
@@ -220,12 +233,6 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   useEffect(() => { localStorage.setItem('archean-app-live', live ? 'on' : 'off'); }, [live]);
   // the manifest (joint limits for the sim, adapter kinds for power) lands
   // async — powerNet/sim re-derive once it is here
-  const [manifestV, setManifestV] = useState(0);
-  useEffect(() => { void loadManifest().then(() => setManifestV(v => v + 1)); }, []);
-  const powerNet = useMemo(
-    () => (bp ? craftPowerNet(bp, peekManifest()) : null),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [bp, manifestV]);
   const unpowered = useCallback((ci: number) =>
     !!powerNet?.hasPower && !computerPowered(powerNet, ci), [powerNet]);
   const xenonCompsRef = useRef(xenonComps); xenonCompsRef.current = xenonComps;
@@ -263,7 +270,20 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     if (!live || !bp) return;
     xenonFarm.closeAll();
     const net = powerNet;
-    xenonFarm.autoboot(xenonComps.filter(c => !net?.hasPower || computerPowered(net, c.ci)));
+    const booted = xenonComps.filter(c => !net?.hasPower || computerPowered(net, c.ci));
+    xenonFarm.autoboot(booted);
+    // v1.16.11 THE 3-D LAW RIDES THE LIVE FARM (the 3828773626 blank
+    // screens, second half): a LIVE craft's screens must light the boards
+    // with NO IDE window — feed the engine the booted lineup's
+    // screen↔dashboard bindings (literal scan + THE NET-SCREEN LAW) so the
+    // dashboard faces gain their DataTextures and the pumps' tick hooks
+    // have somewhere to push. (Opening an IDE later re-binds to THAT
+    // computer — the established XenonDialog law.)
+    const seen = new Set<string>();
+    engineRef.current?.setScreenFeeds(booted.flatMap(c => c.screens
+      .filter(s => s.ci != null)
+      .map(s => ({ key: `${s.alias.toLowerCase()}#${s.channel}`, ci: s.ci!, channel: s.channel }))
+      .filter(f => !seen.has(`${f.ci}:${f.channel}#${f.key}`) && seen.add(`${f.ci}:${f.channel}#${f.key}`))));
     energyRef.current.clear();
     setEnergy(energyRef.current.state());
     itemRef.current.clear();
@@ -439,6 +459,17 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
           return s?.pixels ? { w: s.w, h: s.h, data: [...s.pixels!] } : null;
         },
         reads: () => Object.fromEntries(P?.reads ?? []),
+        // v1.16.11 audit seam (tools/netscreenprobe.mjs): a pump BY COMPUTER
+        // ALIAS — surfaces + pixels for any farm member, not just the active
+        pumpPixels: (alias: string, key: string) => {
+          const q = xenonFarm.pumps.find(p => p.comp?.alias === alias);
+          const s = q?.surfaces.get(key.toLowerCase());
+          return s?.pixels ? { w: s.w, h: s.h, data: [...s.pixels!] } : null;
+        },
+        pumpSurfaces: (alias: string) => {
+          const q = xenonFarm.pumps.find(p => p.comp?.alias === alias);
+          return [...(q?.surfaces.values() ?? [])].map(({ key, w, h }) => ({ key, w, h }));
+        },
         // live program globals (the XENON-VARS patch): the clip recorder gates
         // Mario's SPACE press on the sprite cache completing ($mode/$demo)
         vars: () => Object.fromEntries([...(P?.vars.entries() ?? [])].map(([k, v]) => [k, v.v])),

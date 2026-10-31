@@ -27,7 +27,7 @@
 //  • Existing cables are never touched: user decisions take precedence.
 //  • routes are axis-aligned L-runs in x→y→z order, like the game writes.
 
-import { adapterSocket, KIND_RADIUS } from './sockets';
+import { adapterSocket, dashboardAdapter, KIND_RADIUS } from './sockets';
 import { flattenComponents } from './subgrid';
 import type { Blueprint } from './format';
 import type { ModelManifest } from './models';
@@ -108,7 +108,11 @@ export function portCensus(bp: Blueprint, manifest: ModelManifest | null): PortI
   const out: PortInfo[] = [];
   bp.data.components.forEach((c, ci) => {
     if (c.type === 'Build') return;
-    for (const a of manifest?.[c.type]?.adapters ?? []) {
+    // v1.16.11: the Dashboard data-connector rides the DATA-generated board
+    // (sockets.dashboardAdapter — mid-back), not the .ini template corner
+    const ads = (manifest?.[c.type]?.adapters ?? []).map(a =>
+      dashboardAdapter(c, a.name) ?? a);
+    for (const a of ads) {
       const kind = a.type as WireKind;
       out.push({
         ci, type: c.type, name: a.name, kind,

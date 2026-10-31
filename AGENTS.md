@@ -185,7 +185,10 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   drapes; routed runs draw their cached polyline verbatim), THE DRAPE LAW
   (catenary at rest length between plug necks, taut when overstretched),
   THE HARNESS ATTACH (nested parts' sockets + recorded tips ride the rig
-  chain). `pipesSoon` is a 250 ms leading+trailing throttle.
+  chain). `pipesSoon` is a 250 ms leading+trailing throttle. THE
+  DATA-GENERATED DASHBOARD PORT: the Dashboard `data-connector` socket is
+  the CENTRE of the board's BACK (rides the data board, not the .ini
+  template corner — FORMAT §pipes), `sockets.dashboardAdapter`.
 - Data cables draw thin+square (`KIND_SECTION`); the file's `radius` stays
   physical truth, `half` is the drawn extent.
 - Mass model = the TS twin of the game's server model (`engine/mass.ts` ⇄
@@ -201,6 +204,14 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   adding one = a 2:1 JPG + one manifest line, ZERO code; tests are
   manifest-driven. The dome is a BackSide sphere on layer 1, never
   `scene.background` (it cube-walls panoramas under ortho).
+- THE FLIGHT LAB (`engine/flightlab.ts`, v1.16.11): the WIND panel's FLIGHT
+  ANALYSIS section = closed-form shape-field forces (planform from a
+  thin-BROAD thickness-axis census, lift curve + stall ≈ 15°, fineness/Re/
+  induced drag, the mass model's CG vs the neutral point = the EMERGENT
+  static margin, stall speed, trim, per-Aileron authority + a BURIED-plate
+  census). Stylized, NOT CFD; laws + boundaries: FORMAT §Aerodynamics +
+  LIVING-CRAFT § 13. Fixtures 9000009080/81/82 (the CG-discriminating pair
+  + the flying brick).
 
 ### Interaction and UI
 - NO unsolicited viewport overlays: info cards are persisted ⚙ settings with
@@ -497,6 +508,16 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   gesture arming the AudioContext, the buzzer law). THE GLOW LAW: a
   sim-lit lamp is a LIT FACE, never a cast THREE light (pinned
   castLightCount=0).
+- THE LIVING CRAFT III (v1.16.11, §§ 11-13 of LIVING-CRAFT.md): THE
+  NET-SCREEN LAW (a program's `screen($var,ch)` needs no literal —
+  `xenonNetScreens` pre-registers every router-net Dashboard element keyed
+  by alias/io token at 6 px/unit, first-wins before boot; the LIVE farm
+  auto-boot feeds the 3-D boards with NO IDE open, multi-key
+  `setScreenFeeds`); ROUTER POWER GATING (Mini/Router resolve aliases only
+  when fed — an unpowered one drops its subtree + aliases from
+  device/screen/bus space; DataJunction/DataBridge passive, never gated);
+  THE FLIGHT LAB (below). Pins: xenoncode net-screen/gating tests + e2e
+  netscreens.spec; audit `app/tools/netscreenprobe.mjs`.
 - `window.__XCDBG__` = the plain-JSON async debug console over the real pump
   (every answer JSON-serialisable, every call bounded) — the agent seam;
   `__XENONTEST__` the headless autotest seam (fixture 9000008001).
@@ -991,12 +1012,18 @@ behind a small link at the END of the gallery. Pages serves the GENERATED
 - Dashboard BUTTON elements (Toggle/Push/Arrow/Led) as real glTF models
   with the game's base transform + state animation (dev-viewer parity;
   FORMAT §Handedness); today plate+text approximations.
-- Better flight-characteristics / stability analysis (full 360° velocity
-  vector, stable-flight search at low/high speed + ambiguity warning,
-  trim/drag polar). User-requested, deliberately deferred.
-- Aero model is stylized thin-plate (Cn = 2π·sinα·cosα), not CFD — the
-  label keeps. Joint animation is static (in-game deflection state is not
-  stored in the blueprint file).
+- Aero flight-characteristics: the FLIGHT LAB (`engine/flightlab.ts`,
+  v1.16.11) computes closed-form lift/drag/stability/stall-speed/control-
+  authority from the shape census (wiki §Aerodynamics; FORMAT
+  §Aerodynamics) — STYLIZED closed-form, NOT CFD; the label keeps.
+  Remaining: full 360° velocity vector + stable-flight SEARCH at low/high
+  speed (the report gives a stall speed + static margin + trim, not a
+  time-marching stable-flight search).
+- Aero model is stylized thin-plate (Cn = 2π·sinα·cosα) only in the frozen
+  viewer's legacy flow; the app's WIND TUNNEL (aero.ts) + FLIGHT LAB
+  (flightlab.ts) supersede it (the thin-plate wind model was BOGUS per the
+  user 2026-10-19). Joint animation is static (in-game deflection state is
+  not stored in the blueprint file).
 - Legacy viewer PORT decisions (viewer frozen; needs the user's call + its
   pins re-derived): content-basis sub-part placement, propeller
   data-generated geometry, the app's raw-quat gizmo look.

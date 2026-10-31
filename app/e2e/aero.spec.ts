@@ -65,4 +65,27 @@ test.describe('wind tunnel @aero @slow', () => {
     await page.getByTestId('mode-view').click();
     await expect.poll(() => wind(page).then(x => x.on)).toBe(false);
   });
+
+  test('FLIGHT ANALYSIS: the shape-field forces section renders verdicts ' +
+    'on a real craft (v1.16.11, engine/flightlab.ts)', async ({ page }) => {
+    test.setTimeout(120_000);
+    // the dolphin — a known-good glider shape in the corpus
+    await page.goto(`/?craft=${ISW}`);
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
+    await page.getByTestId('mode-aero').click();
+    await expect(page.getByTestId('flight-sec')).toBeVisible({ timeout: 30_000 });
+    // the analysis runs on the blueprint directly (no solve gate): a
+    // verdict chip, a finite mass and a frontal area appear
+    await expect(page.getByTestId('flight-verdict')).toBeVisible({ timeout: 60_000 });
+    const verdict = (await page.getByTestId('flight-verdict').innerText())
+      .trim().toLowerCase();          // ksp-btn renders upper-case
+    expect(['pitch stable', 'pitch neutral', 'pitch unstable']).toContain(verdict);
+    await expect(page.getByTestId('flight-margin')).toContainText('MAC');
+    await expect(page.getByTestId('flight-stall')).toContainText(/m\/s|no wing/);
+    await expect(page.getByTestId('flight-curve')).toBeVisible();
+    // the speed field re-runs the census live (ρ + authority scale with it)
+    await page.getByTestId('flight-speed').fill('200');
+    await page.getByTestId('flight-speed').press('Enter');
+    await expect(page.getByTestId('flight-authority')).toBeVisible();
+  });
 });

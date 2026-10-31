@@ -193,7 +193,7 @@ const BUILTIN_PROGRAMS: Record<string, () => string> = {
   Crafter: () => CRAFTER_BUILTIN,
 };
 
-export function xenonComputers(bp: Blueprint): XenonComputer[] {
+export function xenonComputers(bp: Blueprint, opts?: XenonOpts): XenonComputer[] {
   const out: XenonComputer[] = [];
   (bp.data.components as BlueprintComponent[]).forEach((c, ci) => {
     const hdd = (c.data as any)?.hdd;
@@ -216,7 +216,7 @@ export function xenonComputers(bp: Blueprint): XenonComputer[] {
         // (screen_w-16, 0, 15, screen_h/2) — coords that only fit a 200×200
         // panel. (The old 128×72 was a Crafter-era guess.)
         screens: [{ alias, label: `${c.type} · integrated touchscreen`, channel: 0, w: 200, h: 200, ci, deviceScreen: true }],
-        devices: xenonDevices(bp, ci),
+        devices: xenonDevices(bp, ci, opts),
         builtin: true,
       });
       return;
@@ -231,6 +231,7 @@ export function xenonComputers(bp: Blueprint): XenonComputer[] {
     for (const f of xf)
       if (f !== main) files.push({ name: f.name, code: f.plain_code ?? '' });
     const base = String(main?.name ?? 'main').split('.')[0] || 'main';
+    const literal = xenonScreens(bp, files, ci);
     out.push({
       ci,
       // A diskless device has no program name to borrow — label it with the
@@ -243,7 +244,13 @@ export function xenonComputers(bp: Blueprint): XenonComputer[] {
       capacity: Number((c.data as any)?.hdd?.capacity) || 0,
       channels: detectChannels(files),
       screens: [
-        ...xenonScreens(bp, files, ci),
+        ...literal,
+        // THE NET-SCREEN LAW (v1.16.11, the 3828773626 blank screens):
+        // dashboards on the router net the program addresses with runtime
+        // VARIABLES — pre-register their surfaces at the 6 px/unit element
+        // size, keyed by the token the program passes (alias / io number)
+        ...xenonNetScreens(bp, ci,
+          new Set(literal.map(s => `${s.alias.toLowerCase()}#${s.channel}`)), opts),
         // the Computer's integrated screen: the plain screen-function
         // target (main#0) mirrored onto the model's 'screen' material face
         // THE COMPUTER'S INTEGRATED SCREEN IS 200×160 (v1.15.3, we: "that is
@@ -260,7 +267,7 @@ export function xenonComputers(bp: Blueprint): XenonComputer[] {
               channel: 0, w: 200, h: 160, ci, deviceScreen: true }]
           : []),
       ],
-      devices: xenonDevices(bp, ci),
+      devices: xenonDevices(bp, ci, opts),
     });
   });
   return out;
@@ -302,7 +309,10 @@ export function xenonHudControllers(bp: Blueprint): XenonHud[] {
 export function xenonScreens(bp: Blueprint, files: XCFile[], ci = -1): XCScreen[] {
   const refs = new Map<string, { alias: string; io: number; channel: number }>();
   for (const f of files)
-    for (const m of f.code.matchAll(/screen\(\s*(?:"([^"]+)"|(\d+))\s*,\s*(\d+)\s*\)/g)) {
+    // v1.16.11 guard: `screen(` must not be the tail of a LONGER call —
+    // `virtualscreen(860, 860)` is a w×h virtual surface, not the
+    // alias/io overload (un-guarded it registered a phantom io-860 screen)
+    for (const m of f.code.matchAll(/(?:^|[^A-Za-z0-9_$])screen\(\s*(?:"([^"]+)"|(\d+))\s*,\s*(\d+)\s*\)/g)) {
       const alias = m[1] ?? '', io = m[2] !== undefined ? +m[2] : -1, channel = +m[3]!;
       refs.set(`${alias.toLowerCase()}#${io}#${channel}`, { alias, io, channel });
     }
@@ -340,6 +350,49 @@ export function xenonScreens(bp: Blueprint, files: XCFile[], ci = -1): XCScreen[
   return out.sort((a, b) => a.alias.localeCompare(b.alias) || a.channel - b.channel);
 }
 
+/** v1.16.11 THE NET-SCREEN LAW (we: "3828773626 doesn't show anything on
+ *  its screens"; the ChipOS Dev Kit proof): a program's screen(aliasOrIo,
+ *  ch) references need not be LITERALS — ChipOS's display.xc scans the
+ *  device() rows and passes VARIABLES (screen($dd_a,$dd_c) for an aliased
+ *  dashboard, screen($dd_p,$dd_c) for a bare one), so NO static scan can
+ *  register its surfaces. The binding law (wiki computer.md +
+ *  MiniRouter.md) is purely topological: an alias addresses the aliased
+ *  component ANYWHERE on the router net; a number resolves through the
+ *  computer's data_port.NN cables (and the router chain plugged into
+ *  them). So the computer's screen registry = literal scan ∪ EVERY
+ *  Screen/HdScreen element of EVERY Dashboard on the computer's router
+ *  net (the xenonDevices walk), keyed by the token a program will pass:
+ *  the LOWERCASED alias for an aliased dashboard, the io-number token for
+ *  a bare one (exactly the addressing display.xc itself picks), sized at
+ *  the 6 px/lattice-unit element law — registered BEFORE boot, where
+ *  xc_addScreen's first-wins beats the shim's 640×480 dev-tool seed.
+ *  `skip` = keys the literal scan already registered (its sizes win). */
+export function xenonNetScreens(bp: Blueprint, ci: number, skip: Set<string>,
+  opts?: XenonOpts): XCScreen[] {
+  const comps = bp.data.components as BlueprintComponent[];
+  const out: XCScreen[] = [];
+  const seen = new Set<string>();
+  for (const d of xenonDevices(bp, ci, opts)) {
+    const dash = d.ci === undefined ? undefined : comps[d.ci];
+    if (!dash || dash.type !== 'Dashboard') continue;
+    const els = ((dash.data as any)?.elements ?? []) as any[];
+    els.forEach((e, ch) => {
+      if (!e || (e.type !== 'Screen' && e.type !== 'HdScreen')) return;
+      const token = d.alias ? d.alias.toLowerCase() : String(d.io);
+      const k = `${token}#${ch}`;
+      if (skip.has(k) || seen.has(k)) return;
+      seen.add(k);
+      out.push({
+        alias: token,
+        label: `${d.alias || dash.alias || 'dashboard'} · element ${ch}`,
+        channel: ch, ci: d.ci,
+        w: Math.max(1, (e.size_x ?? 0) * 6), h: Math.max(1, (e.size_y ?? 0) * 6),
+      });
+    });
+  }
+  return out;
+}
+
 function compOnIo(bp: Blueprint, ci: number, io: number): BlueprintComponent | undefined {
   const comps = bp.data.components as BlueprintComponent[];
   if (ci < 0) return undefined;
@@ -366,6 +419,19 @@ function compOnIo(bp: Blueprint, ci: number, io: number): BlueprintComponent | u
  *  carries the computer's LOCAL port (device_at(i).port, alias→io, and
  *  ABI 16's input.N firing all route through it). */
 const ROUTER_RE = /^(Mini)?Router$|DataBridge$|DataJunction$/;
+/** v1.16.11 ROUTER POWER GATING (the deferred v1.16.10 design, wiki
+ *  Router.md/MiniRouter.md — both carry a [ADAPTER lowvoltage] and resolve
+ *  addresses only when powered): an UNPOWERED router drops its subtree
+ *  from every computer's device/screen/bus space. DataJunction and
+ *  DataBridge have NO power port in the game files — passive conductors,
+ *  never gated. */
+const POWERED_ROUTER = /^(Mini)?Router$/;
+export interface XenonOpts {
+  /** power.ts reachability for a ROUTER-family component (the Editor
+   *  passes computerPowered(net, ci): a grid-less craft answers true —
+   *  the power-unaware convention stands) */
+  routerPowered?: (ci: number) => boolean;
+}
 const dataPeer = (p: any, idx: number, top?: (flat: number) => number | undefined
 ): { other: number; mine: string; theirs: string } | null => {
   // THE FLATTENED-ENDPOINT LAW (engine/flat.ts): pipe endpoints index the
@@ -384,49 +450,74 @@ const dataPort = (port: string): number | null => {
   return m ? (m[1] !== undefined ? +m[1] : 0) : null;
 };
 
-export function xenonDevices(bp: Blueprint, ci: number): XCDevice[] {
+export function xenonDevices(bp: Blueprint, ci: number, opts?: XenonOpts): XCDevice[] {
   const comps = bp.data.components as BlueprintComponent[];
   const out: XCDevice[] = [];
-  const byCi = new Map<number, number>();        // component idx -> io (first path wins)
   const byAlias = new Set<string>();
   const pipes: any[] = (bp.data as any).pipes ?? [];
   const fmap = flatToTopMap(bp);
   const top = (flat: number) => flatEndpointTop(fmap, flat);
-  const add = (idx: number, io: number) => {
-    if (idx === ci || byCi.has(idx)) return;
-    byCi.set(idx, io);
+  // ROUTER POWER GATING (v1.16.11, the v1.16.10 deferred design: routers
+  // ARE the alias resolvers — the game feeds their lowvoltage port): an
+  // UNPOWERED Mini/Router makes its net DEAD to every computer — the
+  // subtree drops from the device table AND from alias addressing.
+  // Passive DataJunction/DataBridge carry no power port, never gated.
+  const routerLive = (idx: number, gated: boolean): boolean => {
+    if (!gated) return true;
+    if (!POWERED_ROUTER.test(comps[idx]?.type ?? '')) return true;
+    return opts?.routerPowered ? opts.routerPowered(idx) : true;
   };
-  // ① devices plugged straight into a data port of this computer
-  for (const p of pipes) {
-    const dp = dataPeer(p, ci, top);
-    if (!dp) continue;
-    const io = dataPort(dp.mine);
-    const peer = comps[dp.other];
-    if (io === null || !peer) continue;
-    if (ROUTER_RE.test(peer.type)) { add(dp.other, io); continue; }   // ② roots below
-    add(dp.other, io);
-  }
-  // ② router-chain BFS: every device hanging off a router plugged into
-  // data port K joins the table AT port K (chained routers included)
-  const queue: { dev: number; io: number }[] = [...byCi]
-    .filter(([idx]) => ROUTER_RE.test(comps[idx]?.type ?? ''))
-    .map(([idx, io]) => ({ dev: idx, io }));
-  const seen = new Set(queue.map(q => q.dev));
-  while (queue.length) {
-    const { dev, io } = queue.shift()!;
+  // the ①+② walk, gated (live space) and ungated (reachability census)
+  const walk = (gated: boolean): Map<number, number> => {
+    const byCi = new Map<number, number>();      // component idx -> io (first path wins)
+    const add = (idx: number, io: number) => {
+      if (idx === ci || byCi.has(idx)) return;
+      byCi.set(idx, io);
+    };
+    // ① devices plugged straight into a data port of this computer
     for (const p of pipes) {
-      const dp = dataPeer(p, dev, top);
+      const dp = dataPeer(p, ci, top);
       if (!dp) continue;
-      if (dataPort(dp.theirs) === null && dataPort(dp.mine) === null) continue;
-      const other = comps[dp.other];
-      if (!other) continue;
-      if (ROUTER_RE.test(other.type)) {
-        if (!seen.has(dp.other)) { seen.add(dp.other); add(dp.other, io); queue.push({ dev: dp.other, io }); }
+      const io = dataPort(dp.mine);
+      const peer = comps[dp.other];
+      if (io === null || !peer) continue;
+      if (ROUTER_RE.test(peer.type)) {
+        if (routerLive(dp.other, gated)) add(dp.other, io);        // ② roots below
         continue;
       }
       add(dp.other, io);
     }
-  }
+    // ② router-chain BFS: every device hanging off a router plugged into
+    // data port K joins the table AT port K (chained routers included)
+    const queue: { dev: number; io: number }[] = [...byCi]
+      .filter(([idx]) => ROUTER_RE.test(comps[idx]?.type ?? ''))
+      .map(([idx, io]) => ({ dev: idx, io }));
+    const seen = new Set(queue.map(q => q.dev));
+    while (queue.length) {
+      const { dev, io } = queue.shift()!;
+      for (const p of pipes) {
+        const dp = dataPeer(p, dev, top);
+        if (!dp) continue;
+        if (dataPort(dp.theirs) === null && dataPort(dp.mine) === null) continue;
+        const other = comps[dp.other];
+        if (!other) continue;
+        if (ROUTER_RE.test(other.type)) {
+          if (!seen.has(dp.other) && routerLive(dp.other, gated)) {
+            seen.add(dp.other); add(dp.other, io); queue.push({ dev: dp.other, io });
+          }
+          continue;
+        }
+        add(dp.other, io);
+      }
+    }
+    return byCi;
+  };
+  const byCi = walk(true);
+  // alias reachability through the UNGATED walk: a component whose only
+  // net path crosses an unpowered router loses its alias too (the router
+  // resolves aliases); components with NO net path (a direct cable, a
+  // routerless craft) keep the computer.md direct-alias convention.
+  const open = opts?.routerPowered ? walk(false) : null;
   const pos = (c: BlueprintComponent) => c.position;
   for (const [idx, io] of byCi) {
     const other = comps[idx];
@@ -438,6 +529,11 @@ export function xenonDevices(bp: Blueprint, ci: number): XCDevice[] {
   }
   comps.forEach((c, idx) => {
     if (!c.alias || byAlias.has(c.alias)) return;
+    // v1.16.11: alias addressing ROUTES THROUGH THE ROUTERS — a component
+    // whose only net path crosses an UNPOWERED Mini/Router is addressed by
+    // nobody (its alias joins neither the live table nor the resolver);
+    // components outside every router net keep the direct-alias convention
+    if (open && !byCi.has(idx) && open.has(idx)) return;
     byAlias.add(c.alias);
     out.push({ io: -1, id: 0, alias: c.alias, type: c.type, ci: idx,
       x: pos(c)?.x ?? 0, y: pos(c)?.y ?? 0, z: pos(c)?.z ?? 0,

@@ -5048,3 +5048,87 @@ the GLOW LAW pin (lamps are faces, castLightCount stays 0) and
 flat.test round out 1078 vitest tests. docs/workpackages.md carries the
 night's plan with the done-marks and the questions-resolved log (the
 user asked: "save up all questions and do not get blocked").
+
+## 13. v1.16.11 session — THE NET-SCREENS, the mid-back port, the FLIGHT LAB (2026-10-31, autonomous morning)
+
+We woke to a report: "http://…:5175/?craft=3828773626 doesn't show
+anything on its screens. Connections to screens aren't in the middle of
+the back of them, dataports, they should be." + the standing ask to mine
+the previous session (subagent extraction of ses_e71032c38ff: the carry-
+over list) and to "attempt the physics … figure out if a craft will fly
+stable, and what its stall speed is, before we even fly it in game."
+
+**The screens (WP-A).** The ChipOS Dev Kit's two screens are DASHBOARDS
+(16 'main-screen' 8×HdScreen, 14 'secondary-screen') cabled to the chipos
+MiniComputer ONLY through MiniRouters, and ChipOS binds surfaces with
+RUNTIME VARIABLES (display.xc scans device() rows →
+screen($dd_a,$dd_c)/screen($dd_p,$dd_c)) — the literal screen() scan sees
+nothing, so NO surfaces registered and every board stayed pitch-black
+(plus: the live auto-boot never set the 3-D feeds without an IDE window —
+pushScreen had nowhere to push). THE NET-SCREEN LAW (FORMAT §Xenoncode +
+LIVING-CRAFT § 11): the screen registry = literal scan ∪ every router-net
+Dashboard element, keyed by the alias (aliased boards) / io token (bare
+ones) at 6 px/unit, registered BEFORE boot (xc_addScreen first-wins); the
+3-D face binds ALL its keys (setScreenFeeds multi-key, shared
+DataTexture); the LIVE farm auto-boot feeds the boards with no IDE open.
+Probe: `netscreenprobe.mjs` — nine surfaces at 300×300, 472 pushes, ink
+1.0 on the eight painted boards; the screenshot census reads 47% vivid
+blue (the lit ChipOS UI). Pins: xenoncode net-screen (3) + e2e
+netscreens.spec. Side catch found on the way: `virtualscreen(860, 860)`
+was registering a PHANTOM io-860 screen (the regex matched inside
+`virtualscreen(`) — now guarded.
+
+**The mid-back port (WP-B).** The corpus says we were right: every FRESH
+Dashboard `data-connector` tip (8 endpoints incl. both sides of
+3828773626) sits at LOCAL FILE (W/2, H/2, −0.038) — CENTRE of the
+board's BACK, residual 0.020 m — while the `.ini` [ADAPTER] is the gltf
+TEMPLATE's corner (the board is DATA-GENERATED). Our sockets resolved to
+the corner → cables visibly plugged into the CORNER; the user caught it.
+`sockets.dashboardAdapter` synthesizes the data board's centre socket
+(content (W/2, 0.018, H/2), rotation (−90,0,0)); the generic corner law
+stands for every other type (18 407 endpoints, tangent 0.000). Pins:
+sockets.test (4, incl. the discriminating guard: on the .ini corner the
+fresh tip FAILS the freshness gate ⇒ re-seats; on the data centre it is
+FRESH at depth = the cable radius).
+
+**The FLIGHT LAB (WP-C).** engine/flightlab.ts implements the wiki's
+shape-field forces on the tunnel census: the wing criterion is GEOMETRIC
+per THICKNESS axis ("a wing is thin top-to-bottom but broad in span and
+chord" ⇒ vertical scan for wings, side scan for fins; runs ≤ 2 voxels
+whose CONNECTED planform component spans ≥ 3×3 voxels — rejects fuselage
+corners; cavity seams merged; one-face-buried sections at 0.6), Diederich
+Clα, stall ≈ 15° knee + flat-plate shed, fineness form-drag + Re skin
+friction + induced, the EMERGENT pitch static margin (mass CG vs neutral
+point, % MAC) + yaw fin margin, ISA stall speed, trim α + elevator,
+per-Aileron authority q·A·2sin45cos45·lever with a BURIED-plate census.
+UI: the WindPanel's FLIGHT ANALYSIS section (verdict chips, rows, lift-
+curve sparkline, speed/alt inputs; streamlines stay the visual layer).
+The fixtures tell the wiki's stability story as a DISCRIMINATING PAIR:
+9000009080 (ballast at the nose: 'stable', margin +124% MAC) vs
+9000009081 (identical airframe, ballast at the tail: 'unstable',
+margin −34%) + 9000009082 the flying brick (S=0, stall ∞). The user's
+crafts, QUANTIFIED at the node tier: Jimmy's Adventure = 2.8 t slab
+(591 m², AR 0.9), static margin −2.9% = UNSTABLE ("can't fly stable" —
+the CG is behind the neutral point, the wiki's exact failure); Chip
+Patton's Falcon (3348745601, ingested) = 27.6 t, 30 m wing, margin
++1.2% 'neutral', and the smoking gun: **132 of its 150 aileron plates
+are BURIED in the structure** — the new field excludes Ailerons from the
+shape census and pays only deflection×area×lever, which is why the old-
+physics hidden plates "don't do anything anymore". RCS Infinity is NOT
+subscribed on this machine — the bench is ready the moment it is.
+
+**Carry-overs (WP-D).** ROUTER POWER GATING landed as designed last
+session (MiniRouter/Router carry [ADAPTER lowvoltage] and ARE the alias
+resolvers: unpowered ⇒ subtree + aliases drop from device/screen/bus
+space; DataJunction/DataBridge are passive conductors, never gated —
+Jimmy's nets untouched, his audit byte-identical). `enough_power` shim
+wiring (ABI bump + wasm rebuild) NOT taken this batch — the gates stayed
+green and the session's contract was screens + physics; it stands first
+in the next queue with the ChipOS wizard pixels and the full wire
+RE-DROP repair.
+
+Gates: vitest 1090 passed (+23; the single red is the pre-existing
+stitch data-drift baseline), tsc clean, targeted e2e (chipos,
+xenonfarm, netscreens, aero incl. the FLIGHT leg, living, xenon) 33/0/3,
+the netscreen + jimmy probes identical-or-better. Tree label v1.17.0
+stays PROPOSED (the Y awaits assent); no Pages deploy (standing rule).

@@ -297,11 +297,15 @@ export class Engine {
   private root = new Group();
   /** placed components (stand-in group + real-model sibling), keyed by ci */
   private compRoots = new Map<number, Object3D[]>();
-  /** v1.13.x XENON 3-D feed: `ci:channel` → surface key, set by setScreenFeeds
-   *  (the running computer's screen↔dashboard bindings). buildDashboard gives
-   *  those elements' faces a live DataTexture ("dashboards actually display
-   *  and render what is given to them"). */
-  private screenFeeds = new Map<string, string>();
+  /** v1.13.x XENON 3-D feed: `ci:channel` → the surface keys that drive it,
+   *  set by setScreenFeeds (the running computer's screen↔dashboard
+   *  bindings). buildDashboard gives those elements' faces a live
+   *  DataTexture ("dashboards actually display and render what is given to
+   *  them"). v1.16.11 THE NET-SCREEN LAW: a list, not one key — a dashboard
+   *  element answers BOTH its alias token and its io-number token (the
+   *  program picks the addressing at runtime); every key shares the ONE
+   *  DataTexture entry. */
+  private screenFeeds = new Map<string, string[]>();
   private dashScreens = new Map<string, { mat: MeshBasicMaterial; tex: DataTexture; w: number; h: number }>();  // BUILT-IN device faces (Computer/Crafter 'screen' material): registered
   // when the model builds and PERSIST across IDE sessions - setScreenFeeds
   // rebuilds only dashScreens, and clearing both is what left the model
@@ -2346,9 +2350,10 @@ void main() {
       // v1.13.x XENON 3-D feed: a Screen/HdScreen this computer drives gets a
       // live DataTexture face — the board displays what the program draws
       // (MeshBasic = self-lit, no env; black until the first pushScreen).
-      const feedKey = this.screenFeeds.get(`${ci}:${ch}`);
-      if (feedKey && (el.type === 'Screen' || el.type === 'HdScreen')
-          && !this.dashScreens.has(feedKey)) {
+      // v1.16.11: ALL the feed keys (alias + io tokens) share this ONE entry.
+      const feedKeys = this.screenFeeds.get(`${ci}:${ch}`) ?? [];
+      if (feedKeys.length && (el.type === 'Screen' || el.type === 'HdScreen')
+          && !this.dashScreens.has(feedKeys[0]!)) {
         const w = Math.max(1, (el.size_x | 0) + 1), h = Math.max(1, (el.size_y | 0) + 1);
         const data = new Uint8Array(w * h * 4);
         for (let i = 3; i < data.length; i += 4) data[i] = 255;   // opaque black
@@ -2357,7 +2362,8 @@ void main() {
         dt.magFilter = NearestFilter; dt.minFilter = NearestFilter;
         dt.needsUpdate = true;
         const bm = new MeshBasicMaterial({ map: dt });
-        this.dashScreens.set(feedKey, { mat: bm, tex: dt, w, h });
+        const entry = { mat: bm, tex: dt, w, h };
+        for (const fk of feedKeys) this.dashScreens.set(fk, entry);
         face = bm;
       }
       const m = new Mesh(new BoxGeometry(ew, eh, 0.01),
@@ -2370,8 +2376,8 @@ void main() {
       // Viewport's press raycast, the pointer hand and the popup chip read
       // this. Screen faces additionally carry the xenon surface key.
       m.userData.dash = { ci, ch, type: el.type,
-        surfaceKey: feedKey && (el.type === 'Screen' || el.type === 'HdScreen')
-          ? feedKey : undefined };
+        surfaceKey: feedKeys.length && (el.type === 'Screen' || el.type === 'HdScreen')
+          ? feedKeys[0] : undefined };
       this.dashElements.set(`${ci}:${ch}`, { mesh: m, type: el.type, baseZ: m.position.z,
         faceMat: (el.type === 'Led' ? face as MeshStandardMaterial : undefined) });
       g.add(m);
@@ -4067,7 +4073,16 @@ void main() {
    *  Rebuilds the Dashboard components' real models so the Screen/HdScreen
    *  faces gain their DataTextures; feeds survive scene reloads. */
   setScreenFeeds(feeds: { key: string; ci: number; channel: number }[]): void {
-    this.screenFeeds = new Map(feeds.map(f => [`${f.ci}:${f.channel}`, f.key]));
+    // v1.16.11 THE NET-SCREEN LAW: MULTIPLE keys per element (alias + io
+    // tokens) — the program picks alias- or number-addressing at runtime;
+    // pushScreen by ANY of the element's keys lands on its shared texture.
+    this.screenFeeds = new Map();
+    for (const f of feeds) {
+      const k = `${f.ci}:${f.channel}`;
+      const arr = this.screenFeeds.get(k) ?? [];
+      if (!arr.includes(f.key)) arr.push(f.key);
+      this.screenFeeds.set(k, arr);
+    }
     for (const e of this.dashScreens.values()) e.tex.dispose();
     this.dashScreens.clear();
     const atlas = this.atlasRef;
@@ -4149,6 +4164,25 @@ void main() {
   screenFeedState(): { key: string; w: number; h: number }[] {
     return [...this.dashScreens.entries(), ...this.deviceScreens.entries()]
       .map(([key, e]) => ({ key, w: e.w, h: e.h }));
+  }
+  /** AUDIT SEAM (v1.16.11, tools/netscreenprobe.mjs + the netscreens e2e):
+   *  the fraction (0..1) of a fed face's pixels that are NOT the opaque
+   *  black initial state — "the screen shows something". Counts, never
+   *  applies. */
+  screenFeedInk(key: string): number {
+    const e = this.dashScreens.get(key) ?? this.deviceScreens.get(key);
+    if (!e) return -1;
+    const d = e.tex.image.data as Uint8Array;
+    const n = d.length / 4;
+    let ink = 0;
+    const stride = Math.max(1, Math.floor(n / 20000));   // bounded census
+    let seen = 0;
+    for (let i = 0; i < n; i += stride) {
+      seen++;
+      const r = d[i * 4]!, g = d[i * 4 + 1]!, b = d[i * 4 + 2]!;
+      if (r > 8 || g > 8 || b > 8) ink++;
+    }
+    return seen > 0 ? ink / seen : 0;
   }
   /** The surface keys the 3-D scene feeds onto craft dashboard faces. */
   screenFeedKeys(): string[] {

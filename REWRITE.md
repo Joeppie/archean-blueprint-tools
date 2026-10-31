@@ -331,6 +331,26 @@ installed in `app/` and the module builds via `npm run build:wasm`.**
   streamline colours/wake, wing-vs-bluff scan) + e2e aero.spec (mode solve
   → converged, lines>20, retarget, teardown); gates vitest 152, tsc clean,
   iGPU shots ISW + dolphin.
+- **FLIGHT LAB + SCREEN WIRING — landed** (v1.16.11, the user: "doesn't
+  show anything on its screens. Connections to screens aren't in the middle
+  of the back of them, dataports, they should be … attempt the physics …
+  figure out if a craft will fly stable, and what its stall speed is"):
+  THE NET-SCREEN LAW (router-coupled dashboards pre-registered for runtime-
+  variable `screen($var,ch)` addressing; the live farm feeds the 3-D boards
+  with no IDE open), THE DATA-GENERATED DASHBOARD PORT (mid-back socket,
+  corpus-pinned residual 0.020 m) and THE FLIGHT LAB — the wiki shape-field
+  force coefficients on the tunnel census: planform (thin-BROAD sections per
+  thickness-axis scan), lift curve + stall ≈ 15°, fineness/Re/induced drag,
+  EMERGENT pitch static margin (mass CG vs neutral point) + yaw fin margin,
+  stall speed at ISA altitude, trim α + elevator, control authority per
+  Aileron with the BURIED-PLATE census (quantifies "hidden ailerons don't
+  do anything" and "Jimmy's adventure can't fly stable" — static margin
+  −2.9%, 132/150 plates buried on the Falcon). WindPanel gains the FLIGHT
+  ANALYSIS section (verdicts, lift-curve sparkline, speed/altitude inputs);
+  streamlines stay the visual layer. Fixtures 9000009080/81/82; pins
+  flightlab.test (8) + sockets (4) + xenoncode (net-screen 3 + gating 3) +
+  e2e netscreens.spec + the aero FLIGHT leg. Full write-ups: FORMAT
+  §Aerodynamics/§pipes/§Xenoncode + LIVING-CRAFT §§ 11-13.
 - **P4 — perf (PARTIAL, v1.11.2)**: benchmark harness LANDED
   (`load.perf.test.ts` — the ?perf port for the pure loops, run in CI via
   vitest with anti-regression tripwires); the per-rev loops indexed

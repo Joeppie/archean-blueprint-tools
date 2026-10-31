@@ -106,7 +106,8 @@ tooldoc.test.ts) → **JSDOM→** en masse; KEEP 1 desktop pixel leg (dialog
 ### liveedit.spec (2, @live) — data→geometry live: HEADLESS→ (liveDataEdit + compRealBox); panel scrub KEEP-POINTER (1)
 ### hinge.spec (2, @slow) KEEP-POINTER (canvas hinge drag); hinge math PORTED (subgrid.test)
 ### blockplace.spec (2, @place) — ghost aims (pickCell HEADLESS→), Shift continuation (PORTED blocks.test), click lands KEEP-POINTER (1)
-### aero.spec (2, @slow) KEEP-PIXEL (live tunnel; physics PORTED aero.test)
+### aero.spec (3, @slow) KEEP-PIXEL (live tunnel; physics PORTED aero.test; the v1.16.11 FLIGHT ANALYSIS leg = the WindPanel verdict chips + lift-curve + live speed re-run on the dolphin — the force LAWS are PORTED flightlab.test)
+### netscreens.spec (1, @netscreens @xenon @slow, v1.16.11) KEEP-INT (THE NET-SCREEN LAW on the real dev kit 3828773626: live auto-boot → the nine router-net boards register at 300×300 (the 6 px/unit first-wins size proof), the pump's 25 Hz pushes land, the ink census lights main-screen — the registration/token/size laws PORTED xenoncode.test)
 ### subride.spec (1, @slow) — Jimmy rig-chain pivot → P7.1 slice 2 retires (truck audit PORTED headless)
 ### xenonphone.spec (1, @slow, pixel7 OPT-IN, v1.13.32) KEEP-POINTER (phone IDE: rail→drawer, code-pane width, code scroll, title-bar ⏹/▶; chromium leg skips via isMobile) — the v1.13 xenon/xenondbg/xenonfresh IDE batches predate this census; their v1.13.32 legs (tab-strip hover-wrap, ide-* in the title bar, .var-flash) ride xenon.spec's tiers.
 ### xenonhud.spec (3, @slow, v1.14.0+v1.14.1) KEEP-INT + KEEP-PIXEL (the HUD IDE saves into the blueprint-baked data.xc_files; the beacon scope lists the craft's REAL frequencies, a send lands in a listener's log; the RUNTIME leg: guide HUD ▶ → panel canvas pixels lit + the guide's beacon transmits land in Beacon ci 114's rx log) — registry + owner semantics PORTED (beaconnet/runtimemgr tests); the pixel/loop legs stay e2e.

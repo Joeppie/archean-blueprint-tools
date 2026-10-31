@@ -640,6 +640,27 @@ implementation `tools/xenoncode/xc_host.cpp` + `app/src/engine/xenoncode.ts`)
   keys `virtual#N`. The 3-D dashboards display what is given to them: the
   pump's 10 Hz tick pushes each surface's RGBA framebuffer onto the bound
   element's face (`Engine.setScreenFeeds` + `pushScreen`, DataTexture).
+- **THE NET-SCREEN LAW (v1.16.11, the 3828773626 blank screens)**: a
+  program's references are NOT always literals — ChipOS's display.xc scans
+  the device() rows and passes VARIABLES (`screen($dd_a,$dd_c)` for an
+  aliased dashboard, `screen($dd_p,$dd_c)` for a bare one), so NO static
+  scan registers its surfaces. The binding law is purely topological
+  (computer.md + MiniRouter.md): every **Dashboard on the computer's
+  ROUTER NET** pre-registers every Screen/HdScreen element's surface at the
+  6 px/unit size — keyed by the LOWERCASED alias for an aliased board, by
+  the io-NUMBER token for a bare one (exactly the addressing display.xc
+  itself picks) — registered BEFORE boot where `xc_addScreen`'s first-wins
+  beats the shim's 640×480 dev-tool seed (`xenonNetScreens`). The 3-D face
+  binds ALL of its keys (setScreenFeeds keeps a key LIST per ci:channel;
+  pushScreen by any key lands on the shared DataTexture) and the LIVE
+  farm's auto-boot feeds the boards with NO IDE window open.
+- **ROUTER POWER GATING (v1.16.11, the deferred v1.16.10 design)**:
+  MiniRouter and Router carry a `[ADAPTER lowvoltage]` — they ARE the
+  alias resolvers, so an UNPOWERED Mini/Router makes its whole net subtree
+  invisible to every computer (device table, io tokens AND alias
+  addressing drop). DataJunction and DataBridge carry NO power port —
+  passive conductors, never gated. Grid-less crafts stay power-unaware
+  (every router live), the engine/power.ts convention unchanged.
 - **Buttons** (computer.md:143, dashboard.md:84): `button_rect(x,y,w,h,color)`
   draws AND **evaluates true if clicked** (a void declaration was craft
   3381670618's compile error — `if $screen.button_rect(...)` needs the
@@ -908,6 +929,17 @@ engine CONTENT frame; its FILE-frame socket pose is
   e.g. FluidPort's `fluid-connector` flange is model material `fluid-connector`, grey
   0.5, on the socket face). Exemptions as in comptest: PilotSeat (user-moved) and
   Beacon (connector-frame tips).
+• **THE DATA-GENERATED DASHBOARD PORT (v1.16.11)**: the Dashboard board is
+  GENERATED from `data` (size_x/size_y centimetres), so its `.ini`
+  `[ADAPTER data-connector]` at content (0, 0.018, 0) is the **gltf
+  template's corner** and sits OFF the real board. Measured law (every FRESH
+  `data-connector` tip in the corpus — 8 endpoints incl. both sides of
+  3828773626, residual **0.020 m** = one cable radius): the plug sits at
+  LOCAL FILE **(W/2, H/2, −0.038)** = the CENTRE of the board's BACK,
+  on the −normal stub from the socket plane −0.018. In the `.ini` content
+  frame: position (W/2, 0.018, H/2), rotation (−90,0,0) — the same back-
+  plane offset as the template, centred on the DATA. `sockets.dashboardAdapter`
+  synthesizes it; the generic corner law applies to every OTHER type.
 • **The cached route goes stale** when a part moves after wiring (the game re-routes
   at save; a file is a snapshot). An end is FRESH iff it is within 0.45 m of its
   socket AND within 0.15 m of its stub axis; otherwise it re-anchors onto the live
@@ -2367,3 +2399,25 @@ from the build's SHAPE via a **shape field (cross-section model)**:
   streamlines, and the thin-cross-section wing classification readout. The
   legacy viewer's "aero plates" thin-plate wind model was BOGUS (per the user,
   2026-10-19) and was NOT ported; the frozen viewer keeps it only as history.
+- **THE FLIGHT LAB (`app/src/engine/flightlab.ts`, v1.16.11) — the forces on
+  the SAME field.** THE WING CENSION IS GEOMETRIC and per-thickness-axis:
+  "a wing is thin top-to-bottom but broad in span and chord, so it lifts;
+  a fuselage is deep in every direction, so it only drags" ⇒ a horizontal
+  wing is THIN ALONG Y, so the planform census scans along the THICKNESS
+  axis (vertical scan for wings, side scan for fins), keeps runs ≤ 2 voxels
+  whose CONNECTED COMPONENT spans ≥ 3 voxels on BOTH planform axes (the
+  "broad planform" filter that rejects a fuselage corner), with single-cell
+  air seams merged (the sealed-cavity rule) and one-face-buried sections at
+  0.6 strength (two-sided lift). Forces: Diederich finite-wing slope
+  Clα = 2πAR/(AR+2); the lift curve peaks at STALL ≈ 15° then sheds to a
+  flat-plate residual; form drag = the tunnel's fineness-weighted frontal
+  area on S, skin friction turbulent-flat-plate Cf(Re), induced Cl²/πeAR.
+  STABILITY IS EMERGENT: the pitch static margin is the mass model's CG
+  against the neutral point (wing AC + tail with 2.19/√(AR+1) downwash),
+  expressed as % MAC (> ~5% stable, 0..5% neutral, < 0 divergent); a yaw
+  margin from the fin census. Control AUTHORITY = q·A·(2 sin45 cos45)·lever
+  per Aileron part (the game EXCLUDES Ailerons from the shape field, so
+  only deflection×area×lever counts) — a plate BURIED in the collider mass
+  with a short lever reads ≈ inert, which is the game-side "hidden ailerons
+  don't do anything anymore". Stylised closed-form on the shape census —
+  the "not CFD" label keeps (AGENTS §Known sharp edges).

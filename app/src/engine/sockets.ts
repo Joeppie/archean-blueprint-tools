@@ -117,6 +117,33 @@ export function manifestAdapter(manifest: ModelManifest | null, type: string, po
   return ads.find(a => a.name === port) ?? null;
 }
 
+/** v1.16.11 THE DATA-GENERATED DASHBOARD PORT (we: "Connections to screens
+ *  aren't in the middle of the back of them, dataports, they should be" —
+ *  and the fresh corpus proves us right): the Dashboard board is GENERATED
+ *  from `data` (AGENTS §Dashboard geometry), so the `.ini`
+ *  [ADAPTER data-connector] at content (0, 0.018, 0) — the gltf TEMPLATE's
+ *  corner — sits off the REAL board. Measured law (every FRESH
+ *  `data-connector` tip in the corpus, 8 endpoints incl. both sides of
+ *  3828773626, residual 0.020 m): the plug sits at LOCAL FILE
+ *  (W/2, H/2, −0.038) = CENTRE of the board's BACK, one cable radius
+ *  (0.02) out along the −normal stub from the socket plane −0.018. In the
+ *  `.ini` content frame (x, z, −y) that is position (W/2, 0.018, H/2),
+ *  rotation (−90, 0, 0) — the same 0.018 back-plane offset as the template,
+ *  just centred on the DATA. Returns the synthesized adapter for a
+ *  Dashboard's `data-connector` (null for any other type/port; null for a
+ *  dataless board, which renders no geometry and owns no socket). */
+export function dashboardAdapter(c: { type: string; data?: unknown }, port: string) {
+  if (c.type !== 'Dashboard' || port !== 'data-connector') return null;
+  const d = c.data as { size_x?: number; size_y?: number } | undefined;
+  const W = (d?.size_x ?? 0) / 100, H = (d?.size_y ?? 0) / 100;
+  if (!(W > 0) || !(H > 0)) return null;
+  return {
+    name: port, type: 'data',
+    position: [W / 2, 0.018, H / 2] as [number, number, number],
+    rotation: [-90, 0, 0] as [number, number, number],
+  };
+}
+
 /** Resolve both ends of every pipe to their sockets. Index-aligned with the
  *  pipe list; an entry is null when nothing is resolvable at all. Endpoints
  *  resolve through the FLATTENED component list (data.pipes keys, AGENTS
@@ -131,7 +158,7 @@ export function pipeSockets(
       const e = flat[ci];
       const c = e?.comp;
       if (!c) return null;
-      const a = manifestAdapter(manifest, c.type, port);
+      const a = dashboardAdapter(c, port) ?? manifestAdapter(manifest, c.type, port);
       if (!a) return null;
       const sock = adapterSocket(c.position, c.orientation, a);
       // v1.11.5: a display-pose entry (subgrid part) carries the rigid
