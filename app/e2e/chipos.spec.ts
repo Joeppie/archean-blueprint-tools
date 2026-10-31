@@ -15,6 +15,9 @@ test.describe('ChipOS appkit ecosystem @ChipOS', () => {
   test('the apps auto-boot and their manifests cross the bus to ChipOS @slow', async ({ page, isMobile }) => {
     test.skip(isMobile, 'desktop farm windows (xenonfarm family)');
     test.setTimeout(300_000);
+    // the farm determinism law (living.spec): the fixture ships
+    // archean-app-live=off — this spec's LAW is the AUTO-BOOT, opt in.
+    await page.addInitScript(() => localStorage.setItem('archean-app-live', 'on'));
     await page.goto(`/?craft=${BENCH}`);
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 180_000 });
 
@@ -43,25 +46,32 @@ test.describe('ChipOS appkit ecosystem @ChipOS', () => {
 
     // chipos's bus tab: the OS answers the net — its relay assert lands
     // (db_assert drives "LV Switch" ON after the 3 s scan). The chipos
-    // window opened first → the cascaded app-1 window SHIELDS its side
-    // tab (modebox-shield family): raise it with a click first.
-    await page.getByTestId('xenon-dialog').first().click({ position: { x: 8, y: 8 } });
+    // window opened first → the cascaded app-1 window ON TOP SHIELDS its
+    // side tab (modebox-shield family) and FloatingWindow has no raise —
+    // DRAG THE TOP WINDOW (app-1, fully visible) away (its title bar is
+    // the drag law), exposing chipos's tab strip.
+    const top = await page.getByTestId('xenon-dialog').nth(1).boundingBox();
+    expect(top).toBeTruthy();
+    await page.mouse.move(top!.x + 10, top!.y + 10);
+    await page.mouse.down();
+    await page.mouse.move(Math.max(40, top!.x - 160), Math.min(860, top!.y + 420),
+      { steps: 8 });
+    await page.mouse.up();
     await page.getByTestId('xenon-side-bus').nth(0).click();
     await expect(busRow('LV Switch').first()).toBeVisible({ timeout: 60_000 });
 
-    // THE REGISTRY's engine room: the OS VM keeps cycling beside the
-    // app VM (the appkit scan/heartbeat law runs on the 25 Hz clock)
-    const reg: string[] = await page.evaluate(() => {
-      const farm = (window as any).__XENON__().farm;
-      return farm.map((f: { comp: string; cycles: number }) => `${f.comp}:${f.cycles}`);
-    });
-    expect(reg.length, 'chipos + tetris (+ hello, + earthnav) co-run').toBeGreaterThanOrEqual(2);
-    expect(reg.some(r => /^chipos:\d{20,}$/.test(r)), `farm cycles: ${reg}`).toBeTruthy();
+    // THE REGISTRY's engine room: the whole farm co-runs with the craft —
+    // the LIVE chip counts the pumps with a computer (⚠ the per-dialog
+    // __XENON__ override reports only ITS pump — the chip is the census).
+    // The cycling law is already proven: the manifest row RE-PUBLISHES on
+    // the 2 s heartbeat and the relay assert rides the OS's 3 s scan.
+    await expect(page.getByTestId('live-chip')).toContainText('4', { timeout: 30_000 });
   });
 
   test('the power flow chip reads the bench grid @ui', async ({ page, isMobile }) => {
     test.skip(isMobile, 'TopBar chip strip density (xenonfarm family)');
     test.setTimeout(240_000);
+    await page.addInitScript(() => localStorage.setItem('archean-app-live', 'on'));
     await page.goto(`/?craft=${BENCH}`);
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 180_000 });
     // the bench grid = the LV battery (10 kWh) feeding four computers:

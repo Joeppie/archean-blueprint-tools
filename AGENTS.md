@@ -351,7 +351,10 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   drives Editor re-renders on lineup changes. Fixture:
   `tools/make_farm_test.py` → 9000009010 (radio `INTERCOM` + shared
   lamp); pins: farm.test (bus law), beaconnet cursor, xenonfarm.spec
-  (two VMs, radio + bus cross, close-one-sister-lives).
+  (two VMs, radio + bus cross, close-one-sister-lives). v1.16.10 bench
+  siblings: `make_chipos_test.py` → 9000009050 CHIPOS BENCH,
+  `make_energy_test.py` → 9000009060 ENERGY BENCH, `make_items_test.py`
+  → 9000009070 ITEM BENCH.
 - NAV + DEBUGGER-FOLLOW (v1.13.27; STEP KEYS v1.13.33): every jump
   (library/def/goto/tab) records a navpoint; ◀ ▶ + Alt+←/→ (CAPTURE — CM
   binds Alt+arrows) walk the history. EVERY debugger stop — breakpoint hit
@@ -470,6 +473,30 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   `tools/make_live_test.py` → 9000009040; pins power/devicesim/xcsites
   vitest, scene.headless (plate+panel swing, `data.angle` verbatim),
   `living.spec.ts` chain (excluded from the pixel7 matrix).
+- THE LIVING CRAFT II (v1.16.10, §§ 5-10 of LIVING-CRAFT.md): THE APPKIT
+  BUS (ChipOS + App Kit apps run REAL: shim ABI 16 per-device channels +
+  RunInput fires input.N; IoBus fans TEXT and publishes each computer's
+  transmission UNDER ITS OWN alias; xenonDevices walks the ROUTER NET so
+  every net device carries the computer's local port; fixtures
+  `make_chipos_test.py` → 9000009050 embed the real ChipOS/Tetris/HELLO/
+  EarthNAV disks; pins chipos.test + e2e chipos.spec). THE
+  FLATTENED-ENDPOINT LAW: `data.pipes` endpoints index the FLATTENED
+  array — EVERY top-level reader maps through `engine/flat.ts` (the
+  Jimmy catch: un-mapped, his computer read UNPOWERED). THE POWER FLOW
+  (`engine/energy.ts`: wiki watts, batteries drain NEGATIVE and ALWAYS
+  feed — the deficit is the ⚡-chip WARNING, never a blackout; fixture
+  9000009060). ITEMS ON BELTS (`engine/itemsim.ts`: the game's
+  `item`-type CABLES are the primary links (port names = direction),
+  touching AABBs the fallback; the drill mines while anchored+powered
+  (10/s LV, 100/s HV), Containers publish their content as the
+  data-port KV text ONTO THE IO BUS; fixture 9000009070; the
+  `app/tools/jimmyprobe.mjs` census over 3334698274 is the standing
+  audit — re-run it after ANY power/devices/items/bus change). THE
+  SOUND OF THE CRAFT (`engine/soundscape.ts`: procedural WebAudio
+  cues — game audio assets stay untouched (NOTICE); the 🔊 chip is the
+  gesture arming the AudioContext, the buzzer law). THE GLOW LAW: a
+  sim-lit lamp is a LIT FACE, never a cast THREE light (pinned
+  castLightCount=0).
 - `window.__XCDBG__` = the plain-JSON async debug console over the real pump
   (every answer JSON-serialisable, every call bounded) — the agent seam;
   `__XENONTEST__` the headless autotest seam (fixture 9000008001).
