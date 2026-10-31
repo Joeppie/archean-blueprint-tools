@@ -23,7 +23,8 @@ time).
 ## What the IDE gives you
 
 **It really runs.** The interpreter is the game developer's own XenonCode
-code, compiled to WASM (pinned upstream, see `tools/xenoncode/` in the repo);
+code, compiled to WASM (pinned upstream — the build chain lives in
+[github.com/Joeppie/xenoncore](https://github.com/Joeppie/xenoncore));
 the program from the blueprint is compiled at open, exactly as the game's
 computer does at power-on. The files live **in the craft** — the virtual
 disk is the blueprint's `data.hdd.xc_files`, so everything you do here saves
@@ -243,7 +244,8 @@ Power, fuel and the world's physics are deliberately ignored — this is the
 blueprint-side workbench, not a flight simulator: the craft never moves,
 sensors report what the World tab's functions say, and the PilotSeat reads
 your keyboard. The standalone workbench page (with our own demo programs)
-lives at `tools/xenoncode/` in the repo.
+lives in the [xenoncore repo](https://github.com/Joeppie/xenoncore/tree/main/tools/xenoncode)
+(its `index.html` boots the whole workbench in a browser tab).
 
 ## Scripting the debugger
 

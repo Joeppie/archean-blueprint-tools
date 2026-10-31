@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Archean Blueprint Tools v1.16.15</title>
+<title>Archean Blueprint Tools v1.16.19</title>
 <style>
   body{background:#14161a;color:#cfe3ee;font:15px/1.6 system-ui,sans-serif;max-width:720px;margin:6vh auto;padding:0 18px}
   a{color:#7dffcf} h1{font-size:26px;color:#fff} pre{background:#1d2026;padding:10px 14px;border-radius:6px;overflow-x:auto}
@@ -15,14 +15,14 @@
 </style>
 </head>
 <body>
-<h1>Archean Blueprint Tools <span style="color:#7dffcf;font-size:18px">v1.16.15</span></h1>
+<h1>Archean Blueprint Tools <span style="color:#7dffcf;font-size:18px">v1.16.19</span></h1>
 <p>Reverse-engineered craft format + live 3D inspector for
 <a href="https://store.steampowered.com/app/2941660/Archean/">Archean</a> workshop blueprints.</p>
 <ul>
   <li><a href="app/index.html">★ Open the NEW Blueprint Inspector app (v1.9.2)</a> — the React/TypeScript editor: craft gallery, 3D editor with measurement grid + coordinate readout, live editing, undo, tools, save</li>
   <li><a href="viewer/index.html">▶ Open the 3D viewer/inspector</a> (loads the ISW-241 craft from testdata)</li>
   <li><a href="regtest/regtest.html">Run the regression suite</a> (26 blueprints, format invariants)</li>
-  <li><a href="tools/xenoncode/">🖥 XenonCode — the simulated computer</a> — run craft programs on the dev interpreter (WASM): Hello World, Just-Plane-Easy, Cheap Exploration Plane</li>
+  <li>🖥 <a href="https://github.com/Joeppie/xenoncore">XenonCode — the language core (xenoncore repo)</a> — the XenonCode analyzer, craft decompose/pack codec and the wasm build chain, its own repo; the <a href="https://joeppie.github.io/xenoncore/playground/index.html">browser playground</a> runs craft programs on the dev interpreter (WASM)</li>
   <li><a href="FORMAT.md">FORMAT.md</a> · <a href="AGENTS.md">AGENTS.md</a> · <a href="NOTICE.md">NOTICE.md</a> · <a href="LICENSE">LICENSE (GPL-3.0)</a></li>
 </ul>
 <pre>python3 -m http.server 8650   # serve repo root

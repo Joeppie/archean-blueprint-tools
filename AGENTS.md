@@ -67,8 +67,10 @@ tools/release.sh                THE release ritual (see § Publishing)
 tools/deploy_pages.py           builds+force-pushes the `pages` artefact
 tools/install-hooks.sh          ONE-PER-CLONE: installs tests/pre-commit
 tools/perfprobe.py URL [s]      real-clock headless perf probe
-tools/xenoncode/                XenonCode fork submodule + build.sh +
-                                patches + demo programs (NOTICE §6)
+(The XenonCode BUILD CHAIN lives in its own repo — github.com/Joeppie/
+xenoncore: interpreter fork submodule + xc_host shim + build.sh +
+playground POC; consumed as the npm dep `xenoncore`, with the built
+js/wasm shipping as the app/src/engine/xenoncode/ asset copy — NOTICE §6)
 tools/add_workshop.py <id>      ingest a subscribed workshop craft
 tools/extract_models.py         regenerates viewer/models/ from a game dir
 tools/extract_economy.py        regenerates viewer/models/economy.json
@@ -84,11 +86,11 @@ docs/TEST-PYRAMID.md            test strategy + measured baselines
 docs/E2E-INVENTORY.md           e2e spec inventory (tiers, fixtures)
 REWRITE.md                      rewrite plan (landed phases marked; P8 live)
 ```
-app/: components/ (React), engine/ (pure logic + scene.ts + xenoncode/),
-packages/xenoncore/ (P10-S1 seed: XenonCode project model, analyzer, docs,
-sites + the craft decompose/pack codec — pure, imported as `xenoncore`;
-analysis LAWS live there, the app is a consumer),
-e2e/ (Playwright), tools/ (node audit drivers — *.mjs, real-browser pairs).
+app/: components/ (React), engine/ (pure logic + scene.ts + xenoncode/
+= the shipped built js/wasm assets), e2e/ (Playwright), tools/ (node
+audit drivers — *.mjs, real-browser pairs). The `xenoncore` npm dep
+(github:Joeppie/xenoncore — REWRITE § P10-S0) is the XenonCode analysis
++ codec layer: those LAWS live THERE, the app is a consumer.
 
 ## Blueprint folder (rule — machine-local paths are configurable)
 The repo may be cloned ANYWHERE. NEVER hardcode a machine-local absolute path
@@ -292,7 +294,7 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   side tab (computer IDE + HUD IDE + 📡 dock) renders the registry
   (seeded from components + scanned `beacon()` literals, runtime-merged
   by id; EXACT text-frequency routing; logs survive re-seeds). The shim
-  twin: `xc_host.cpp` ABI 15 ↔ `XC_ABI`; demo `tools/xenoncode/demo/hudradio`.
+  twin: `xc_host.cpp` ABI 15 ↔ `XC_ABI`; demo `xenoncore: tools/xenoncode/demo/hudradio`.
 - PLAYER HUDs (v1.17.0): the game's `client/hud/<name>/` folders
   (main.xc + includes; FORMAT § HUD). Xenon ▸ Player HUDs lists the machine's installed +
   subscribed HUDs (the `/hud` route, `hud_dir` config key — tools/config.py;
@@ -438,8 +440,9 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   e2e turbo.spec (data-cycles rate observable).
 - THE STEP LAW LIVES IN TWO PLACES: `stepperLaw()` (xenoncode.ts, pure,
   main-thread) ⇄ the EM_JS hook in `xc_host.cpp` (worker). ANY change lands
-  in BOTH + re-pins (+ rebuilt wasm: `EMSDK=~/emsdk tools/xenoncode/build.sh
-  wasm-only`). v1.13.31 XENON-DEBUG v3 CLASSIC STEP-OVER DEEPENED (ABI 10):
+  in BOTH + re-pins (+ rebuilt wasm: in the xenoncore repo
+  `EMSDK=~/emsdk tools/xenoncode/build.sh wasm-only`,
+  `APP_ASSETS=…/app/src/engine/xenoncode`). v1.13.31 XENON-DEBUG v3 CLASSIC STEP-OVER DEEPENED (ABI 10):
   the interpreter records a CALL-DEPTH stream parallel to the pair stream
   (fork: `cycleDepth`; hook seam `xc_debug_hook(file,line,depth)`), and F10
   stops at the first fresh pair OF THE PAUSED FILE at depth ≤ the paused
@@ -466,11 +469,15 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   `pump.paused` (RESUME CLEARS them), THE WRITEBACK LAW is satisfiable in
   both modes, and a value cell clicked while the worker runs ARMS the park
   and opens the editor on arrival (park-to-edit).
-- The interpreter is a FORK SUBMODULE (`tools/xenoncode/upstream`, branch
-  `archean`). `build.sh` builds ONLY the recorded gitlink and REFUSES a
-  diverged checkout. A bump = submodule commit + rebuilt js/wasm in the SAME
-  commit; upstream PRs = one commit per PR from that branch. The device shim
-  is OURS (Archean law, not interpreter).
+- The interpreter is a FORK SUBMODULE in the **xenoncore repo**
+  (github.com/Joeppie/xenoncore, `tools/xenoncode/upstream`, branch
+  `archean`). `build.sh` (in THAT repo) builds ONLY the recorded gitlink
+  and REFUSES a diverged checkout. A bump = submodule commit + rebuilt
+  js/wasm in the SAME xenoncore commit + tag; in THIS repo the same breath
+  means: rebuild with `APP_ASSETS=…/app/src/engine/xenoncode`, bump the
+  `xenoncore` dep tag, and land the asset copy + dep bump in ONE commit.
+  Upstream PRs = one commit per PR from that branch. The device shim
+  (`xc_host.cpp`) is OURS (Archean law, not interpreter).
 - THE SOURCEFILE TRUTH LAW: name→index tables the VM owns are READ from the
   VM (`xc_source_files()`), never re-derived app-side.
 - THE WRITEBACK LAW: value injection is legal only at a PAUSED moment,
@@ -1067,7 +1074,8 @@ behind a small link at the END of the gallery. Pages serves the GENERATED
   (v1.15.6 boundary) — wiring the power net into the VM (an unpowered
   computer's `enough_power` reads 0, the Crafter's own "Not enough power"
   overlay then fires in-game-style) needs a shim + wasm rebuild
-  (`EMSDK=~/emsdk tools/xenoncode/build.sh wasm-only`, ABI bump). The
+  (xenoncore repo: `EMSDK=~/emsdk tools/xenoncode/build.sh wasm-only`,
+  ABI bump, `APP_ASSETS=` into this app). The
   v1.15.6 law is the UI warning (engine/power.ts, LIVING-CRAFT.md § 3).
 - **Device power**: reachability gates COMPUTERS only; a hinge/lamp's own
   LV supply (the wiki's per-part power) is not modelled.
@@ -1084,12 +1092,14 @@ behind a small link at the END of the gallery. Pages serves the GENERATED
   repos**: `xenoncore` (analysis+VM+sim+blueprint codec as a published
   package) + `xenoncode-vscode` (LSP, DAP, craft decompose/pack, webview
   sim) + an MCP bin for AI checks; the move inventory and S0–S6 slices
-  live in § P10. **SEEDS LANDED v1.16.18**: `app/packages/xenoncore/` —
-  the analysis cluster (project model/analyzer/docs/sites) at its own
-  vitest tier + the pure `codec.ts` (decompose/pack, `#NODES` preservation,
-  content-hash world bridge; 528-file corpus byte-identity pin). Open:
-  the repo split (S0), VM/sim moves (S2/S3), the codec's fs/CLI +
-  doc-funnel writeback (S4), LSP/DAP (S5), MCP (S6).
+  live in § P10. **S0 LANDED v1.16.19**: `github.com/Joeppie/xenoncore`
+  exists — the analysis cluster + codec at its own package tier (vitest,
+  tsc, CI, Pages playground) + the whole build chain (fork submodule,
+  xc_host shim, build.sh with `APP_ASSETS=`); this app consumes the
+  tag-pinned git dep, the corpus legs of the codec pins stay HERE
+  (`codec.corpus.test.ts`). Open: VM/sim moves (S2/S3), the codec's
+  fs/CLI + doc-funnel writeback (S4), LSP/DAP (S5), MCP (S6), and
+  `xenoncode-vscode` itself.
 - **WIRE integrity check + repair**: files written by older builds carry
   pipe endpoints referencing components that do not own the named port, and
   the census reports those as real connections. Wanted: flag a pipe whose

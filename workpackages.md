@@ -205,7 +205,7 @@ clicks back to the main tab before typing (comment in the spec).
 - `npm test` (vitest: STEPPER LAW re-pinned + depth pins + gate pins) and
   `npx tsc -b`.
 - Native runner probes (xc_run): depth stream, pause seam, writeback.
-- WASM rebuild: `EMSDK=~/emsdk tools/xenoncode/build.sh wasm-only` (fork
+- WASM rebuild: xenoncore repo, `EMSDK=~/emsdk tools/xenoncode/build.sh wasm-only` (fork
   commit + rebuilt js/wasm in the SAME commit; gitlink recorded).
 - Playwright, SPARINGLY (user law): the debugger legs of `xenon.spec.ts`
   + `xenondbg.spec.ts` on dedicated E2E_PORTS — one targeted run; the
@@ -214,8 +214,8 @@ clicks back to the main tab before typing (comment in the spec).
 - Perf: marioperf before/after.
 
 ## Files (map)
-- fork: `tools/xenoncode/upstream` (commit on `archean`: XENON-DEBUG v3)
-- shim: `tools/xenoncode/xc_host.cpp` + rebuilt `xenoncode.{js,wasm}` (ABI 10)
+- fork: xenoncore repo `tools/xenoncode/upstream` (commit on `archean`: XENON-DEBUG v3)
+- shim: xenoncore repo `tools/xenoncode/xc_host.cpp` + rebuilt `xenoncode.{js,wasm}` (ABI 10)
 - app: `engine/xenoncode.ts` (stepperLaw, pump, XenonRun/WorkerRun),
   `engine/xenonworker.ts`, `engine/xcdbg.ts` (audit verbs),
   `components/XenonDialog.tsx` (paused wash, F5/F6, value park-edit),

@@ -85,20 +85,22 @@ Read this file together with LICENSE (GNU GPL v3).
    repository author's decision). Workshop ids are listed in
    testdata/MANIFEST.md.
 
-6. XenonCode interpreter (tools/xenoncode/)
-   -----------------------------------------
-   `tools/xenoncode/` runs programs on the **dev's own XenonCode code** — the
+6. XenonCode interpreter (the xenoncore repo — github.com/Joeppie/xenoncore)
+   -------------------------------------------------------------------------
+   The XenonCode stack runs the **dev's own XenonCode code** — the
    parser/compiler/VM (`XenonCode.hpp`) and screen model (`XenonScreen.hpp`)
    from https://github.com/batcholi/XenonCode (by batcholi / FloDKSM),
-   consumed as a **git submodule**: our public fork
+   consumed as a **git submodule** in the xenoncore repo
+   (`tools/xenoncode/upstream`): our public fork
    https://github.com/Joeppie/XenonCode, branch `archean` = the base commit
-   recorded in `tools/xenoncode/XENONCODE_UPSTREAM.md` plus that document's
+   recorded in `XENONCODE_UPSTREAM.md` plus that document's
    patches **as real commits** (a lenient text→number conversion and
    game-tolerant indexing — both matching the game's observable behaviour —
    plus the XENON-VARS/XENON-DEBUG introspection hooks the IDE uses).
-   `xenoncode.js`/`xenoncode.wasm` (in `tools/xenoncode/` and, serving the
-   Inspector app since v1.12.11, `app/public/xenoncode/`) are compiled build
-   products of exactly that pinned branch commit; only the device shim
+   `xenoncode.js`/`xenoncode.wasm` (built by that repo's `build.sh` from
+   exactly the pinned gitlink; shipped to this app's
+   `app/src/engine/xenoncode/` asset copy) are compiled build
+   products of that commit; only the device shim
    (`xc_host.*`, GPL v3), the app integration (`app/src/engine/xenoncode.ts`,
    `app/src/components/XenonDialog.tsx`, GPL v3) and the demo program
    (`demo/hello/main.xc`, GPL v3, authored for this repo) are ours.

@@ -5414,3 +5414,30 @@ fixture: 528 disk files roundtrip decompose→compose byte-identically.
 deprecated). Not yet in scope (logged in § P10): the repo split itself (S0),
 VM/sim moves (S2/S3), doc-funnel writeback of composed files (S4 fs layer),
 the LSP/DAP bins (S5), MCP (S6).
+
+## 19. v1.16.19 — S0: the xenoncore repo splits off (2026-11-01)
+
+The user: "Continue" on the P10 plan, then "Make logical choices, imo
+subrepo is OK" — the standing Open items closed themselves: names as
+planned (`xenoncore`; `xenoncode-vscode` pending), tag-pinned git dep as
+documented. github.com/Joeppie/xenoncore (public, GPL-3.0 + NOTICE) now
+holds: `src/` = the analysis cluster + codec moved out of
+`app/packages/xenoncore` (package tier vitest 68 + tsc strict clean, CI
+workflow, pinned interpreter submodule at the SAME gitlink 64d647d);
+`tools/xenoncode/` = the WHOLE build chain (shim, patches, playground POC,
+wasm artifacts via LFS) — `build.sh` grew `APP_ASSETS=<dir>` so the copy
+into a consumer is one flag; the Pages workflow deploys the playground +
+three bench-fixture crafts (CI checks out this repo for them). The codec's
+CORPUS legs stayed HERE as `codec.corpus.test.ts` (L1: the corpus lives in
+this repo — the package never imports the blueprint reader), and
+`xenoncode.test` reads the demo `.xc` programs from the installed package
+(shipped in `files` via v0.1.1). This repo: the build chain +
+`.gitmodules` removed, the dep at `github:Joeppie/xenoncore#v0.1.1`, the
+wasm assets local (git-dep clones see the LFS POINTER bytes — the README
+says so; npm-registry publishes will ship real bytes), docs swept
+(AGENTS layout + the interpreter-bump ritual is now cross-repo: rebuild
+with APP_ASSETS + dep-tag bump + asset copy in ONE commit; NOTICE §6,
+FORMAT §Xenon disk, help topic, landing row → the public playground).
+Version strings 9× v1.16.15 → v1.16.19 (no release tags past v1.16.9 —
+all dev labels). Gates: tsc clean on the dep, vitest 1149→(recount below),
+e2e fast tier green, xenoncore CI green on v0.1.1.

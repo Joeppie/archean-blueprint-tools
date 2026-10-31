@@ -781,10 +781,21 @@ Cursor) speaks MCP, so the AI check needs no fourth repo.
   (the app build is `web`-only today) — S0 build-chain item.
 
 **Slices (each lands green; the app gates unchanged):**
-- **S0** — scaffold `xenoncore`, move the build chain (submodule +
-  `xc_host.cpp` + patches + `build.sh`) + prebuilt artifacts; the app
-  consumes by dep. Gates: `build.sh` from the new repo, wasm export probe
-  (AGENTS § LESSONS), full app suite green on the dep.
+- **S0 — LANDED v1.16.19 (2026-11-01)**: `github.com/Joeppie/xenoncore`
+  (public, GPL-3.0, NOTICE; CI + Pages workflows; playground live at
+  joeppie.github.io/xenoncore, bench-fixture corpus pinned into its
+  `/testdata/`). Contents: `src/` = the analysis cluster + codec (package
+  tier vitest 68 + tsc strict), `tools/xenoncode/` = the whole build chain
+  (fork submodule at the SAME gitlink, shim, patches, playground POC;
+  `build.sh` grew `APP_ASSETS=<dir>` to install artifacts into a
+  consumer). THIS repo: the build chain left (`git rm` + submodule
+  deinit), the dep is the tag-pinned git ref
+  (`xenoncore@github:Joeppie/xenoncore#vX.Y.Z` — the documented default;
+  npm-scope publish stays an upgrade path), the app keeps its
+  `src/engine/xenoncode/` wasm asset copy (git-dep clones see the LFS
+  pointer — noted in the xenoncore README), and the codec's CORPUS legs
+  stay app-side (`codec.corpus.test.ts` — L1: only this tier can state a
+  law over the corpus).
 - **S1** — analysis layer + its vitest suites move; app imports. Pure,
   pinned, lowest risk. **SEED LANDED v1.16.18 (pre-S0)**:
   `app/packages/xenoncore/` — the four modules git-moved VERBATIM with
@@ -921,9 +932,10 @@ untouched blueprint bytes; no machine-local paths (config tiers travel);
 GPL-3.0 on our code (NOTICE splits: game data stays HERE, the interpreter
 fork's provenance note travels); compiled wasm ships via git LFS.
 
-**Open (needs the user's call):** repo names; npm-publish vs git-dep for
-`xenoncore`; S3-vs-S5 order (sim-first feeds the VS Code webview, LSP-first
-front-loads the low-risk wins).
+**Open (needs the user's call):** ~~repo names~~ DECIDED (xenoncore +
+xenoncode-vscode), ~~npm-publish vs git-dep~~ DECIDED (tag-pinned git dep,
+npm-scope later); S3-vs-S5 order (sim-first feeds the VS Code webview,
+LSP-first front-loads the low-risk wins) stays open.
 
 ## Non-negotiables carried over
 - AGENTS § Blueprint folder (paths via tools/config.py — the vite plugin

@@ -16,7 +16,8 @@ import type { Blueprint } from '../format';
 const REPO = new URL('../../../../', import.meta.url).pathname;   // mass.test.ts pattern
 const data = (id: string): Blueprint =>
   JSON.parse(readFileSync(`${REPO}testdata/${id}/blueprint.json`, 'utf8')) as Blueprint;
-const xc = (f: string) => readFileSync(`${REPO}tools/xenoncode/${f}`, 'utf8');
+const xc = (f: string) =>
+  readFileSync(new URL(`../../../node_modules/xenoncore/tools/xenoncode/${f}`, import.meta.url), 'utf8');
 
 describe('THE FRESH-COMPUTER LISTING GATE (v1.13.20)', () => {
   // we: "When I place a new minicomputer, I dont get a xenoncode menu for

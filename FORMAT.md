@@ -611,13 +611,13 @@ unchanged.
 - `data`: per-type payload — MiniComputer holds visual-program nodes + `.xc` source
   (`xc_files`; `plain_code` is the ONLY stored program form — no bytecode; the
   language is the dev's own XenonCode, open source at
-  github.com/batcholi/XenonCode — we run it as WASM in `tools/xenoncode/`,
-  see NOTICE §6), Beacon holds frequency + last transmitted payload, PilotSeat holds
+  github.com/batcholi/XenonCode — we run it as WASM from the **xenoncore
+  repo** (github.com/Joeppie/xenoncore, our npm dep; built chain per NOTICE §6), Beacon holds frequency + last transmitted payload, PilotSeat holds
   `{emitPlayerToken, smoothControls}`, HudController holds HUD `.xc` source.
 
 ### The Xenon virtual disk + device-shim laws (transcribed 2026-10-27,
 game wiki `Archean-game/wiki/en/xenoncode/{computer,dashboard,ide}.md`,
-implementation `tools/xenoncode/xc_host.cpp` + `app/src/engine/xenoncode.ts`)
+implementation `xenoncore: tools/xenoncode/xc_host.cpp` + `app/src/engine/xenoncode.ts`)
 
 - `data.hdd = {capacity, label, xc_files:[{name, plain_code}]}` is the
   computer's **virtual disk** — the IDE edits these files IN the blueprint
@@ -705,7 +705,7 @@ implementation `tools/xenoncode/xc_host.cpp` + `app/src/engine/xenoncode.ts`)
   `clicked`/`click_x`/`click_y` built-ins for ONE cycle, then the
   `click`/`click_hold`/`scroll` entry points run (per-screen with the
   surface as ref = `click.$screen`, plain for the integrated `main#0`).
-- **Variables** are introspectable via `tools/xenoncode/patch_xenon_vars.py`
+- **Variables** are introspectable via `xenoncore: tools/xenoncode/patch_xenon_vars.py`
   (documented patch on the pinned upstream): the compiler's global-scope
   declarations (name, CODE_TYPE, slot) are recorded, `Computer::DumpVarsJson`
   reads RAM live + the STORAGE rows from the storage cache (names in
@@ -720,7 +720,7 @@ implementation `tools/xenoncode/xc_host.cpp` + `app/src/engine/xenoncode.ts`)
   the program ACTUALLY read from its component.
 - **The debugger** (F9 break · F10/F11 step · F8 resume): RunCode's
   LINENUMBER case records the executed line per cycle behind a flag
-  (`tools/xenoncode/patch_xenon_debug.py`, `xc_cycle_lines()`); the host
+  (`xenoncore: tools/xenoncode/patch_xenon_debug.py`, `xc_cycle_lines()`); the host
   pauses the pump at the cycle that TOUCHED a breakpoint line, and one step
   = one 10 Hz computer cycle (line-granular suspend/resume does not exist in
   the library's VM architecture). Break lines match the cycle's executed-line
