@@ -1101,8 +1101,10 @@ behind a small link at the END of the gallery. Pages serves the GENERATED
   v0.1.0 (LSP + COMPILE-function commands, VSIX CI); the `xenon-mcp`
   AI-check server. **S2a LANDED**: THE STEPPER LAW is package code now
   (`stepper.ts` + 10 pins; the app pump imports it — the DAP core is
-  ready). Open: S2b+ (run/pump/farm + SAB, worker), S3 (CraftSpec), the
-  extension's T1-T6 (TESTING.md), marketplace publish.
+  ready). **T5 LANDED (extension v0.3.0)**: the VS Code DAP debugger runs
+  the shipped wasm (breakpoints/steps/vars/writeback; smoke on real DAP +
+  real wasm). Open: S2b+ (run/pump/farm + SAB, worker), S3 (CraftSpec),
+  the extension's T6 webview + T4 real-parser leg, marketplace publish.
 - **WIRE integrity check + repair**: files written by older builds carry
   pipe endpoints referencing components that do not own the named port, and
   the census reports those as real connections. Wanted: flag a pipe whose

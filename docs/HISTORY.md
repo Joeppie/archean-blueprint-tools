@@ -5504,3 +5504,29 @@ debugger's whole stepping model + pair-stream encoding) moved to
 it; debugger e2e green on the seam (4/4), suite 1076. The law's "lives
 in two places" note in AGENTS now names the package as site one — the
 DAP adapter can be written against the package alone.
+
+## 22. v1.16.22 — the VS Code debugger lives (extension v0.3.0, DAP on
+## real wasm; 2026-11-01)
+
+"Land the DAP adapter then" — done the same-day full loop: `server/xcrun.ts`
+boots the glue+wasm SHIPPED IN the xenoncore package in node (the
+vmharness law: the ENVIRONMENT=web glue fetches its wasm by URL — a fetch
+shim serves the shipped bytes; XenonRun.open's boot sequence mirrored:
+write files, screens first-wins incl the plain `main` target, 40 ms
+cadence stamp, hook disarmed, boot) and `server/dap.ts` speaks the Debug
+Adapter Protocol: breakpoints, F10/F11 stepping on the pinned
+`xenoncore/stepper.ts` law (S2a paid off the day it landed), THE PARK LAW
+pause (requestPause → rc=2 at the exact line), Globals+Locals scopes,
+THE WRITEBACK LAW on setVariable, and stepping-off-a-breakpoint
+suppression (a hot tick line must not re-fire the moment you step). The
+smoke test SPAWNS THE BUILT adapter and debugs a real program on real
+wasm over real DAP — breakpoint → Stopped(breakpoint) → F10 →
+Stopped(step) → stack line 8 → `$t` in Globals → clean disconnect. Four
+lessons cost a debug cycle each: npm git-deps get git-LFS POINTER bytes
+(the shipped wasm left LFS in xenoncore v0.3.2 — consumer artifacts ride
+git raw); clients must send pathFormat:'path'; the VM's vars are BARE
+names (the sigil is display); a DAP `disconnect` needs no Terminated
+event. The user's decomposed craft got a launch.json (app-2 HELLO /
+app-1 TETRIS / the 54-file ChipOS) — F5 on the fly-craft's programs
+works in VSCodium today. v1 boundary: no devices (io reads 0), one
+frame, no screens pane (T6).
