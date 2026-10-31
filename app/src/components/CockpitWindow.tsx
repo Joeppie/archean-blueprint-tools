@@ -27,6 +27,7 @@
 //    (pump.pilotPulse).
 import { useEffect, useRef, useState } from 'react';
 import FloatingWindow from './FloatingWindow';
+import { usePilotKeys } from '../engine/pilotkeys';
 import {
   xenonFarm, pilotLocked, setPilotLock, type PilotKey,
 } from '../engine/xenoncode';
@@ -41,6 +42,10 @@ type Cell = PilotKey | 'gap' | 'inert' | 'left' | 'right';
 interface Row { fn: string; value: number }
 
 export default function CockpitWindow(p: { ci: number; alias: string; onClose: () => void }) {
+  // SITTING = the keys are live: the cockpit window mounts the pilot-key
+  // law (we: keyboard sends did nothing with only a cockpit window open —
+  // usePilotKeys rode just the IDE and the Screens dock)
+  usePilotKeys(true);
   const [tick, setTick] = useState(0);
   const [lock, setLock] = useState(pilotLocked());
   const [repeat, setRepeat] = useState(false);

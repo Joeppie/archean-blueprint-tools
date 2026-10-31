@@ -128,7 +128,10 @@ test.describe('@cockpit @ui THE COCKPIT WINDOW', () => {
       expect(await rollVal.evaluate(el => (el as HTMLElement).style.width)).toBe('0%');
       await page.keyboard.up('e');
       // …and sends the stick (down = +1, up = centers) when unlocked
+      // (uncheck() leaves focus in the checkbox — the typing guard would
+      // swallow the key; re-focus the canvas first)
       await page.getByTestId(`cockpit-lock-${seatCi}`).uncheck();
+      await canvas.click({ position: { x: 6, y: 6 } });
       await page.keyboard.down('e');
       await expect
         .poll(() => rollVal.evaluate(el => (el as HTMLElement).style.width),
