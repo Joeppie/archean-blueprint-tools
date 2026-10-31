@@ -632,6 +632,30 @@ implementation `tools/xenoncode/xc_host.cpp` + `app/src/engine/xenoncode.ts`)
 - **Entry-file selection** (`xenonComputers`): `<program>.main.xc` →
   literal `main.xc` → any `*.main.xc` → first file; `xcDiskFiles()` maps the
   run-side `main.xc` back to the disk's true name for writeback.
+- **Runtime pack-out (measured on disk 2026-10-31)** — the game's server
+  world save DECOMPOSES a flown craft's disks into folders itself:
+  `Archean-data/server/worlds/<world>/ARCHEAN_computer/HDD-<24hex>/`, one
+  dir per live computer, the disk's files loose as `.xc` verbatim-by-name
+  (measured: `flight.main.xc` 374 kB, `main.xc`, includes, loose `.xc`;
+  mtimes follow the world save). Every `.main.xc` carries the first-line
+  `#NODES` graph header (JSON, measured 18 kB) ABOVE the source — the
+  in-game visual editor's document riding inside the text file; a text
+  edit must keep that line byte-identical (generate = never).
+  `storage/` = the computer's persistent storage, one scalar-text file per
+  key (measured keys h/q/t/v = `0.010417`/`n`/`0.93`/`-0.02691`; the key
+  law is un-REd). Entities ride at `entities/ENTT<24hex>.entitystate` +
+  `.checkpoint` = opaque binary (magic `ARCHEAN!ENTITY`) embedding the
+  entity↔HDD-id link — RE of that binary is BANNED for tooling; runtime
+  pack-outs are bridged by CONTENT HASH (match a disk file's `plain_code`
+  against the world's `.xc` bytes to map alias↔HDD).
+- **Design-time pack-out** = the blueprints-dir law (LOCATIONS §4): an
+  in-game SAVE rewrites `client/blueprints/<wsid>/blueprint.json`
+  (measured 3828773626, saved 2026-10-30: three MiniComputer `hdd` disks,
+  747 kB source total, every `capacity` = 256 ⇒ the capacity unit is NOT
+  source bytes — carry it verbatim, never synthesize). Compiled
+  `xc_program.bin` appears ONLY in player-HUD installs
+  (`client/hud/<name>/xc_program.bin` + `active` stamp; game-owned,
+  v1.17.0 law) — a craft blueprint NEVER carries bytecode (612).
 - **Screen surfaces** are keyed by the LITERAL token the program passes to
   `screen(aliasOrIoNumber, channel)` (lowercased): `screen(10,0)` keys
   `10#0` — the app registers the io NUMBER key (sized from the Dashboard's

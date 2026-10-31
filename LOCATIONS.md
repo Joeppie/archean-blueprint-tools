@@ -63,7 +63,13 @@ procedure for you (`--conf` prints ready-to-paste `blueprints.conf` lines).
    — each holds exactly `blueprint.json` + `preview.png`. (Subscribing
    downloads there; the file id is the `workshop_item_id` stored *inside* the
    blueprint, so ingested names match.)
-6. **Fallback probe** if manifests are missing/mislead (multi-library, moved
+6. **Server world saves** (runtime pack-out of flown crafts) live at
+   `Archean-data/server/worlds/<world>/` — per-computer source + storage at
+   `ARCHEAN_computer/HDD-<24hex>/`, entity state (opaque binary) at
+   `entities/`. Format facts: FORMAT.md § Xenon virtual disk (runtime
+   pack-out bullet). Read-only source for the P10 codec — never pack INTO
+   a world save.
+7. **Fallback probe** if manifests are missing/mislead (multi-library, moved
    folders):
    ```bash
    # game assets + local saves anywhere under a library's common/:

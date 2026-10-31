@@ -803,6 +803,105 @@ Cursor) speaks MCP, so the AI check needs no fourth repo.
 - **S6** — the MCP bin (`xenoncore/bin/mcp.ts`) + a demo prompt session
   designing a door-toggle program against a decomposed fixture.
 
+**S4 refinement — the pack-out ground truth (research on disk 2026-10-31;
+FORMAT § Xenon disk runtime/design pack-out bullets).** The game already
+decomposes disks into folders at runtime (`ARCHEAN_computer/HDD-<24hex>/`),
+so the codec mirrors the GAME's layout, not an invention:
+- **Source modes**: `blueprint.json` (design; full CraftSpec) and
+  **world-HDD folder** (runtime; source + `storage/` keys, READ-ONLY — the
+  game owns world state). alias↔HDD mapping = plain_code content-hash
+  (the entitystate binary is NOT parsed).
+- **Layout**: a decomposed craft = `craft.json` (alias, `ProgramKind`,
+  entry per the xcproject entry-selection law, file order verbatim,
+  `label` + `capacity` carried verbatim — the 256/747 kB measurement proves
+  capacity is not source bytes) + `src/<disk>` with the disk's `.xc` files
+  verbatim-by-name.
+- **`#NODES` preservation law**: the first-line graph header rides
+  untouched through decompose→pack; text edits touch the body only;
+  GENERATING node graphs is out of scope (the game's visual editor is
+  game space).
+- **The live-craft loop** (measured on 3828773626): save in-game rewrites
+  `client/blueprints/<wsid>/blueprint.json` (mtime-verified) → the
+  blueprints dir IS `tools/config.py`'s corpus, so `decompose` resolves
+  the flown craft with zero new path config (the extension's TS twin
+  locator follows vite-corpus.ts, no machine paths in code) → edit +
+  kind-gated diagnostics → `pack` writes ONLY the `plain_code` strings
+  back in place → in-game load recompiles. A file watcher on the
+  blueprints dir prompts a re-diff when the game rewrites a file under a
+  dirty editor buffer.
+- Multi-program disks (one entry per `<prog>.main.xc`; the newtest world
+  shows `flight.main.xc` 374 kB beside `doors.main.xc`) ride the existing
+  entry-selection law; multi-program CO-BOOT on one VM is open.
+
+**Testing `xenoncode-vscode` (the pyramid laws carry over):**
+- **Tier 0 (vitest, plain node)** — the LAWS live in `xenoncore`; the
+  extension tier-0 tests are WIRING only: codec roundtrip identity over
+  every testdata craft with xc_files (decompose→pack == byte identity;
+  + the multi-program fixture 3381670618, the ChipOS disk 9000009050, and
+  a `#NODES`-preservation pin), CraftSpec→`craft.json` generation, LSP
+  handlers as pure functions (document→diagnostics == the xcanalyze codes;
+  position→completions/hover), DAP request mapping as a pure stepperLaw
+  adapter. Tier-0 files import NOTHING from `vscode` (an import-boundary
+  test enforces it — the same trick that keeps the app's engine pure).
+- **Tier 1 (node, protocol)**: the LSP server driven over an in-memory
+  vscode-jsonrpc pair (initialize → didOpen fixture → diagnostics; kind-
+  gated completion); the DAP adapter driven by a raw DAP client over a
+  stream: configure → setBreakPoints → continue → stepIn/Over on the
+  XENON-DEBUG v3 pair+depth stream → variables = `listVariables(live)` →
+  the WRITEBACK LAW (array/object refusal). Real fixture programs via the
+  vmharness twin — NO editor involved (this tier carries ~all debugger
+  law, per the HEADLESS VM precedent).
+- **Tier 2 (@vscode/test-electron, `xvfb-run` on Actions, nightly not
+  per-push)**: real extension host smoke — activation, grammar tokenize
+  snapshot (fixture source → scopes), decompose via the command palette
+  into a temp dir, a red squiggle asserted as a Diagnostics-collection
+  entry, an F5 debug-session smoke (breakpoint hit → stack frame). ≤ 6
+  legs, e2e-tier budgets; `// e2e-tier because:` comments carry over.
+- **Tier 3 (manual)**: the webview sim panel (screens + pads) —
+  Playwright does not drive webviews; the compositor is a small React app
+  in the extension repo whose laws live at vitest+jsdom, the webview keeps
+  the pixel surface + a per-release manual checklist.
+- Flake = re-tier signal; the wasm export-probe lesson carries (probe the
+  bytes before believing a red).
+
+**CI + Pages integration (same rituals as § Publishing, per repo):**
+- Every new repo gets its own GitHub Pages site from a generated `pages`
+  ORPHAN branch (port of `deploy_pages.py`); `main` = dev, `release` =
+  stable, tag = release, explicit-say-so rule — unchanged.
+- `xenoncore` Pages = the PLAYGROUND (the relocated `tools/xenoncode/
+  index.html` POC + the vocabulary/ABI tables): open a fixture craft,
+  edit, run in-browser. It doubles as the extension's demo surface and the
+  main site's link target — one gallery-footer row on our Pages (the
+  legacy-inspector link rule). The extension itself NEVER rides the Pages
+  bundle.
+- `xenoncore` CI: push = wasm build from the pinned gitlink (em++ cache),
+  vitest node tier, `npm pack` smoke; tag `vX.Y.Z` = package release
+  (semver § Versioning carries; `xc_abi()` stamped into package metadata —
+  the stale-wasm-degrades rule extended to stale packages).
+- `xenoncode-vscode` CI: tiers 0/1 per push (headless, no display); tier 2
+  nightly; release ritual = build VSIX → publish OpenVSX (`ovsx`) + MS
+  Marketplace (PAT-gated action) on a tag.
+- THIS repo consumes `xenoncore` as a **tag-pinned git dep**
+  (`npm i github:Joeppie/xenoncore#vX.Y.Z`; npm-scope publish = the open
+  upgrade) — lockfile-pinned, `npm ci` on Pages; the pre-commit
+  `--versions` gate is untouched.
+
+**Out of scope (recorded 2026-10-31 so a later session picks it up):**
+- The `entitystate`/`.checkpoint` binary format (the HDD-id↔entity link) —
+  content-hash bridge instead; RE only if an id-level feature needs it.
+- The computer storage API (`storage/<key>` scalar law) + sim-side
+  storage emulation (the sim currently ignores persistence).
+- `#NODES` graph GENERATION (preservation-only; the visual editor is the
+  game's).
+- Packing INTO world saves / runtime HDD dirs (runtime dirs are
+  read-only sources; the game owns world state).
+- Multi-program co-boot on one VM (the sim runs the entry-selection law's
+  one program; the game's multi-program disks are measured, not simulated).
+- Player-HUD installs in the extension (`xc_program.bin` is the game's to
+  recompile — the v1.17.0 law; a HUD-mode extension lane rides S5+).
+- Scheduling decisions open: repo names, npm-publish vs git-dep, S3-first
+  vs S5-first, the app-side S2 surgery, the MCP bin's tool list.
+
 **Non-negotiables carried into the new repos:** the pinned-gitlink build
 discipline; `xc_abi()` ⇄ `XC_ABI` as the package's version contract (a
 stale wasm degrades features, never spams); byte-identical re-emit of
