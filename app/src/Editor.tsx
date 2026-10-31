@@ -53,8 +53,7 @@ import type { Blueprint, Triangle } from './engine/format';
 import { isLegacyFile } from './engine/format';
 import { hasDashboards, xenonComputers, xenonHudControllers, xenonFarm, type XCFile,
   type XenonComputer } from './engine/xenoncode';
-import { fetchPlayerHuds, fetchPlayerHud, savePlayerHud, playerHudFromFiles,
-  PLAYER_HUD_CI, type PlayerHudEntry, type PlayerHudProgram } from './engine/playerhud';
+import {PLAYER_HUD_CI, fetchPlayerHud, fetchPlayerHuds, playerHudDisplayName, playerHudFromFiles, savePlayerHud, type PlayerHudEntry, type PlayerHudProgram} from './engine/playerhud';
 import { DeviceSim, dataNeighbours } from './engine/devicesim';
 import { craftPowerNet, computerPowered } from './engine/power';
 import { EnergySim, type EnergyStatus } from './engine/energy';
@@ -2313,7 +2312,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
             {hudCi !== null && (() => {
               const hud = hudCi === PLAYER_HUD_CI
                 ? (playerHud
-                  ? { ci: PLAYER_HUD_CI, alias: `${playerHud.name} · player HUD`, files: playerHud.files }
+                  ? { ci: PLAYER_HUD_CI, alias: `${playerHudDisplayName(playerHud.name)} · player HUD`, files: playerHud.files }
                   : null)
                 : xenonHuds.find(h => h.ci === hudCi) ?? null;
               return hud ? (

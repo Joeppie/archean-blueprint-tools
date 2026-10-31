@@ -54,6 +54,14 @@ test.describe('player HUD: load, edit, Library, run @ui @playerhud', () => {
     await expect(page.getByTestId('hud-code-1'), 'the jump lands in parse.xc')
       .toContainText('function @speed_kph');
 
+    // THE ANALYZER RUNS ON HUD DISKS (v1.16.13, the user's button_circle
+    // report: "there is no squiggle, this is in the readme player HUD") —
+    // the Problems tab proves the wiring; the fixture floor analyzes clean.
+    await page.getByTestId('hud-side-problems').click();
+    await expect(page.getByTestId('hud-problems-list')).toBeVisible();
+    await expect(page.getByTestId('hud-problems-counts'))
+      .toContainText(/0 errors[\s\S]*0 warnings/);
+
     // ▶ runs it: hudPump boots the program (AVATARSIM answers
     // avatar_sensor_speed), the panel(bottom, 240, 90) surface blits live
     await page.getByTestId('hud-run').click();

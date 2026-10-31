@@ -64,6 +64,7 @@ type Mod = {
   _xc_worldsim_sync(name: number, v: number): void;
   _xc_abi(): number;
   _xc_set_cycle_ms(ms: number): void;
+  _xc_hud_cps?(): number;   // ABI 17: the HUD program's set_cps(n) cadence
   _xc_save_storage(): void;
   _xc_pilot_script(on: number): void;
   _xc_reset_screens(): void;
@@ -996,6 +997,15 @@ export class XenonRun {
   /** ABI 15 (XENON-SCREEN-VERSION): the surface's write counter, -1 = the
    *  shipped wasm lacks the export (the pump then fetches every cycle — the
    *  pre-v1.16.8 law). The pump blits a surface only when this moves. */
+  /** ABI 17 (v1.16.13): the HUD program's set_cps(n) — its OWN cadence
+   *  (wiki hud.md), called from init and read after every cycle by the
+   *  HUD pump. 0 = unset (the pump keeps the 25 Hz law); older wasm
+   *  (no export) = 0, the pre-v1.16.13 behavior (the degradation rule). */
+  hudCps(): number {
+    const m = this.mod as Mod;
+    return typeof m._xc_hud_cps === 'function' ? m._xc_hud_cps() : 0;
+  }
+
   screenVersion(key: string): number {
     const m = this.mod;
     if (typeof m._xc_screen_version !== 'function' || typeof m._xc_screen_index !== 'function')
@@ -1307,6 +1317,8 @@ export class XenonWorkerRun {
  *  (tools/xenoncode/xc_host.cpp) carries 25.0 for the next WASM rebuild —
  *  a value-only change, ABI 4 unchanged, so nothing degrades meanwhile. */
 export const CYCLE_MS = 40;
+/** the TURBO multiplier (v1.16.13): pump cadence 25 Hz → 100 Hz */
+export const TURBO_X = 4;
 export const CYCLE_HZ = 25;
 
 /** PilotSeat channel-function word → the flight keys driving it (v1.13.2,
@@ -2376,7 +2388,24 @@ export class XenonPump {
     // blits/screens ride the cycles.
     this.timer = window.setInterval(() => {
       this.cycleOnce(typeof performance !== 'undefined' ? performance.now() : Date.now());
-    }, CYCLE_MS);
+    }, CYCLE_MS / (this.turbo ? TURBO_X : 1));
+  }
+
+  /** v1.16.13 TURBO (the user: "we need a turbo button for xenoncode so it
+   *  runs at 4x speed temporarily; this makes debugging easier and even our
+   *  tests could run faster"): the PUMP CADENCE only — the shim's virtual
+   *  dt (xc_set_cycle_ms, frozen at boot) stays 40 ms, so the PROGRAM's
+   *  clock (time/tick/timer sections, animations, buzzer writes) advances
+   *  4× per wall second: an emulator turbo, not a finer dt. Session-only
+   *  (a fresh pump runs 1×); works in both pump modes (worker mode is
+   *  rate-limited by its inFlight gate, so it lands ≈ 4×, never less). */
+  turbo = false;
+  setTurbo(on: boolean) {
+    if (this.turbo === on) return;
+    this.turbo = on;
+    if (this.timer) { clearInterval(this.timer); this.timer = 0; }
+    if (this.status === 'running') this.startLoop();
+    this.notify();
   }
 
   /** ONE computer cycle: worldsim → VM → events → surfaces → hooks → audio.
@@ -2637,7 +2666,7 @@ export class XenonPump {
  *  measures 0.2 changing surfaces per cycle of 117);
  *  14 = xc_screen_px/py/haspos (the composited HUD SCREEN window);
  *  13 = $panel.set_size(w,h) + width/height getters (ABI 13; wiki hud.md law). */
-export const XC_ABI = 16;
+export const XC_ABI = 18;
 
 // ---------------------------------------------------------------------------
 // COMPUTERFARM — the craft's co-running pumps + the SHARED io bus

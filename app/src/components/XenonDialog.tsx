@@ -44,6 +44,7 @@ import BeaconPanel from './BeaconPanel';
 import {
   functionAt, projectDecls, projectFunctions, XC_LIB_DOC,
 } from '../engine/xcproject';
+import { analyzeProject, type XCDiagnostic } from '../engine/xcanalyze';
 import XenonLibrary from './XenonLibrary';
 
 const MAX_PARSE_LINES = 500;   // validation pass cap (window around the caret)
@@ -81,7 +82,7 @@ export default function XenonDialog(p: {
   const [newProg, setNewProg] = useState(false);
   const [armedDel, setArmedDel] = useState(false);
   const [vals, setVals] = useState<Record<string, number>>({});
-  const [side, setSide] = useState<'vars' | 'screens' | 'library' | 'world' | 'bus' | 'console' | 'autotest' | 'beacons'>('screens');
+  const [side, setSide] = useState<'vars' | 'screens' | 'library' | 'world' | 'bus' | 'console' | 'autotest' | 'beacons' | 'problems'>('screens');
   const [varQ, setVarQ] = useState('');
   const [scrQ, setScrQ] = useState('');
   // LIBRARY side tab (v1.13.25, we: "an index of all known library and
@@ -360,6 +361,35 @@ export default function XenonDialog(p: {
   // place records it (truncating any forward list); ◀ ▶ / Alt+←/→ walk.
   const runtimeFilesRef = useRef(runtimeFiles);
   runtimeFilesRef.current = runtimeFiles;
+  // ── v1.16.13 THE ANALYSIS (engine/xcanalyze, the user: "report missing
+  // functions, definitions, missing return statements in functions where a
+  // result is used … mark them like VS would"): project diagnostics ride
+  // the editor's lint renderer (squiggles + hover + gutter dots) and the
+  // Problems side tab. Debounced — a keystroke on a 52-file disk re-scans
+  // ~50-200 ms; typing stays snappy. Alias checks ride the computer's
+  // DEVICE table (a component the craft does not have is a real defect).
+  const [analysis, setAnalysis] = useState<XCDiagnostic[]>([]);
+  const filesKey = runtimeFiles.map(f => `${f.name}\u0000${f.code}`).join('\u0001');
+  useEffect(() => {
+    const t = setTimeout(() => setAnalysis(analyzeProject(runtimeFilesRef.current, {
+      aliases: comp.devices.map(d => d.alias?.toLowerCase() ?? '').filter(Boolean),
+    })), 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filesKey, comp]);
+  const analysisByFile = useMemo(() => {
+    const m = new Map<string, XCDiagnostic[]>();
+    for (const d of analysis) {
+      const a = m.get(d.file);
+      if (a) a.push(d); else m.set(d.file, [d]);
+    }
+    return m;
+  }, [analysis]);
+  const sevCounts = useMemo(() => ({
+    error: analysis.filter(d => d.severity === 'error').length,
+    warning: analysis.filter(d => d.severity === 'warning').length,
+    hint: analysis.filter(d => d.severity === 'hint').length,
+  }), [analysis]);
   const navHist = useRef<{ file: string; line: number }[]>([]);
   const navPos = useRef(-1);
   const [, navTick] = useState(0);
@@ -410,7 +440,17 @@ export default function XenonDialog(p: {
     if (!pendingJump) return;
     const h = window.setTimeout(
       () => editorRef.current?.jumpTo(pendingJump.line, pendingJump.focus), 60);
-    setPendingJump(null);
+    // v1.16.13 THE FOLLOW-SCROLL FIX (we: "when I debug and step into, my
+    // scroll does NOT move to where the currently being executed line now
+    // is"): the setPendingJump(null) that used to sit HERE re-triggered
+    // this effect, and the re-run's cleanup CLEARed the 60 ms timer before
+    // it fired — every follow (F10/F11/breakpoint/Library) scheduled its
+    // scroll and then cancelled it. The data-editor-jump attribute is set
+    // by the dialog's jumpTo BEFORE this effect, so the v1.13.33 follow
+    // pins proved the dialog fired, not that the VIEW moved. The pending
+    // state self-clears by key: the timer survives; a newer jump replaces
+    // it. The e2e followTo now asserts the ACTIVE line sits inside the
+    // code pane's box — the scroll itself is the observable.
     return () => window.clearTimeout(h);
   }, [pendingJump]);
   // BREAKPOINT-FOLLOW (v1.13.27, we: "when hitting a breakpoint in
@@ -871,6 +911,21 @@ export default function XenonDialog(p: {
                   className="rounded bg-[#5a2222] px-2 py-0.5 text-[#ffb3b3] hover:bg-[#7a2e2e]"
                   title="stop (F6) — park on the executing line, values editable"
                   onClick={() => pump.stopRunning()}>⏹</button>
+                {/* TURBO (v1.16.13, the user: "a turbo button for xenoncode
+                    so it runs at 4x speed temporarily; this makes debugging
+                    easier and even our tests could run faster"): pump
+                    cadence 100 Hz, the program's virtual dt stays 40 ms —
+                    the craft's clock advances 4× per real second. Session
+                    only: a re-booted pump runs 1×. */}
+                <button data-testid="ide-turbo"
+                  aria-pressed={pump.turbo}
+                  className={`rounded px-2 py-0.5 ${pump.turbo
+                    ? 'bg-[#4a3d1d] text-[#ffd76b] hover:bg-[#5d4d26]'
+                    : 'bg-[#243a52] text-[#8fd4ff] hover:bg-[#2f4c6b]'}`}
+                  title={pump.turbo
+                    ? 'turbo ×4 RUNNING — this computer advances 4× real time (click to return to ×1)'
+                    : 'turbo ×4 — run this computer at 4× real time (debug waits/timers/animations faster; the program’s own dt stays 40 ms)'}
+                  onClick={() => pump.setTurbo(!pump.turbo)}>⚡</button>
                 <button data-testid="ide-step-over"
                   className="rounded bg-[#1d2c46] px-1.5 py-0.5 text-[#cfe1ff] hover:bg-[#27395c]"
                   title="step over one executed line — calls are stepped over (F10)"
@@ -1037,6 +1092,7 @@ export default function XenonDialog(p: {
                 breaks={bps[tab] ?? new Set()}
                 pausedLine={pump.paused && pump.pausedFile === runtimeName(tab) ? pump.pausedLine : 0}
                 errors={errors}
+                diagnostics={analysisByFile.get(runtimeName(tab)) ?? []}
                 funcs={funcs} decls={decls}
                 varList={[
                   // v1.13.28 (we: "when I type $ suggestions for locals
@@ -1117,7 +1173,8 @@ export default function XenonDialog(p: {
                 ['library', `Library ${funcs.length + XC_LIB_DOC.length ? `(${funcs.length} + ${XC_LIB_DOC.length})` : ''}`],
                 ['world', `World ${pump.wsChannels().length ? `(${pump.wsChannels().length})` : ''}`],
                 ['bus', 'Bus'], ['autotest', 'Auto'], ['console', 'Console'],
-                ['beacons', 'Beacons']] as const).map(([k, label]) => (
+                ['beacons', 'Beacons'],
+                ['problems', `Problems ${analysis.length ? `(${analysis.length})` : ''}`]] as const).map(([k, label]) => (
                 <button key={k} data-testid={`xenon-side-${k}`} onClick={() => setSide(k)}
                   className="shrink-0 rounded px-2 py-1 text-[10px] tracking-wide hover:bg-[#182236]"
                   title={label.trim()}>
@@ -1417,6 +1474,36 @@ export default function XenonDialog(p: {
                 )}
               </div>
             </>)}
+            {side === 'problems' && (
+              <div data-testid="xc-problems-list"
+                className="flex min-h-0 flex-1 flex-col gap-[1px] overflow-y-auto pt-1 text-[11px]">
+                <div className="flex shrink-0 gap-3 px-1 pb-1 text-[10px]" data-testid="xc-problems-counts">
+                  <span className="text-[#ff6b6b]">{sevCounts.error} errors</span>
+                  <span className="text-[#e6c07b]">{sevCounts.warning} warnings</span>
+                  <span className="text-[#8a93a0]">{sevCounts.hint} hints</span>
+                </div>
+                {!analysis.length && (
+                  <div className="px-1 py-2 text-[11px] text-[#5d6a7d]">
+                    no problems — this disk analyzes clean.
+                  </div>
+                )}
+                {analysis.map((d, i) => (
+                  <button key={i} data-testid={`xc-problem-${i}`}
+                    onClick={() => jumpTo(d.file, d.line)}
+                    className="flex w-full items-start gap-1.5 rounded px-1 py-[3px] text-left hover:bg-[#182236]">
+                    <span aria-label={d.severity}
+                      className={`shrink-0 ${d.severity === 'error' ? 'text-[#ff6b6b]'
+                        : d.severity === 'warning' ? 'text-[#e6c07b]' : 'text-[#8a93a0]'}`}>
+                      {d.severity === 'error' ? '●' : d.severity === 'warning' ? '▲' : '○'}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-[#c7d3e3]" title={d.message}>
+                      {d.message}
+                    </span>
+                    <span className="shrink-0 text-[#5d6a7d]">{d.file}:{d.line}</span>
+                  </button>
+                ))}
+              </div>
+            )}
             {side === 'beacons' && <BeaconPanel />}
             {side === 'console' && (
               <div data-testid="xenon-log" className="min-h-[70px] flex-1 overflow-y-auto rounded border border-[#232c3d] bg-[#0b0f18] p-2 text-[11px]">
@@ -1439,7 +1526,7 @@ export default function XenonDialog(p: {
             <div data-testid="xenon-side-rail" className="fixed right-0 top-1/4 z-40 flex flex-col gap-1">
               {([['vars', 'Vars'], ['screens', 'Screens'], ['library', 'Library'], ['world', 'World'],
                 ['bus', 'Bus'], ['autotest', 'Auto'], ['console', 'Console'],
-                ['beacons', 'Beacons']] as const).map(([k, label]) => (
+                ['beacons', 'Beacons'], ['problems', `Problems ${analysis.length || ''}`]] as const).map(([k, label]) => (
                 <button key={k} data-testid={`xenon-rail-${k}`}
                   className="rotate-180 rounded-l border border-r-0 border-[#3a4a6a] bg-[#1d2b42] px-[3px] py-2
                          text-[9px] tracking-wide text-[#8fd4ff] [writing-mode:vertical-rl] hover:bg-[#27395c]"
@@ -1462,6 +1549,8 @@ export default function XenonDialog(p: {
               LIVE (pump.wrun, not the gate) — a booting/absent worker on a
               gated origin reads honestly, never a silent lie. */}
           <div data-testid="xenon-mode"
+            data-cycles={pump.cycles}
+            data-turbo={pump.turbo ? '1' : '0'}
             title={pump.wrun
               ? 'The VM runs on a worker: breakpoints + F10/F11 freeze it MID-CYCLE'
               : sabSupported()

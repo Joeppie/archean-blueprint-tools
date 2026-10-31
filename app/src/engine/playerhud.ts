@@ -55,6 +55,15 @@ export async function savePlayerHud(name: string, files: XCFile[]): Promise<stri
  *  hands .xc files (a folder pick carries webkitRelativePath); entry =
  *  main.xc FIRST, the folder name becomes the HUD name. Non-.xc siblings
  *  (xc_program.bin, storage/) are the game's — dropped. */
+/** THE DISPLAY-NAME LAW (v1.16.13, we: "the Homo Hud shouldnt be shown,
+ *  rename it to human rather than Homo.. that name might be a bit offensive
+ *  to some"): the game's hud/<name> folder keys stay EXACT for fetch/save
+ *  (byte-safe round trips, the game's own directories are never touched) —
+ *  only our UI labels soften. 'homo' (Latin for human) reads as Human HUD. */
+export function playerHudDisplayName(name: string): string {
+  return /^homo(\s*hud)?$/i.test(name.trim()) ? 'Human HUD' : name;
+}
+
 export function playerHudFromFiles(
   list: { name: string; rel?: string; text: string }[],
 ): PlayerHudProgram {

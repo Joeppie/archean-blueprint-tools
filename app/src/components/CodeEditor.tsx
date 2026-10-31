@@ -31,7 +31,9 @@ import {
   type Completion, type CompletionContext, type CompletionResult,
 } from '@codemirror/autocomplete';
 import { closeSearchPanel, openSearchPanel, searchKeymap, searchPanelOpen } from '@codemirror/search';
+import { lintGutter, setDiagnostics, type Diagnostic } from '@codemirror/lint';
 import { requestThumb } from '../engine/thumbs';
+import type { XCDiagnostic } from '../engine/xcanalyze';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { tags as t } from '@lezer/highlight';
 import {
@@ -145,6 +147,10 @@ export interface CodeEditorProps {
   breaks: Set<number>;            // 1-based, THIS file
   pausedLine: number;             // 1-based, 0 = not paused here
   errors?: Map<number, string>;   // 1-based line -> compiler message (red rows)
+  /** v1.16.13 THE ANALYSIS (engine/xcanalyze): project diagnostics for
+   *  THIS file — VS-style squiggles + hover (CodeMirror's lint renderer)
+   *  and the severity gutter marks. */
+  diagnostics?: XCDiagnostic[];
   funcs: XCFunction[];            // the project function index
   decls: XCDecl[];                // declared variables (completion pool)
   varList: { name: string; v: string; type?: string }[];  // live globals
@@ -388,6 +394,7 @@ function CodeEditorInner(p: CodeEditorProps, ref: React.Ref<CodeEditorHandle>) {
         oneDark,
         lineNumbers(),
         bpGutter,
+        lintGutter(),               // v1.16.13: severity dots beside breakpoints (VS's gutter marks)
         xcLanguage,
         roC.of([EditorState.readOnly.of(!p.editable), EditorView.editable.of(p.editable)]),
         decoC.of(lineDecoExt(p.breaks, p.pausedLine, p.errors)),
@@ -520,6 +527,29 @@ function CodeEditorInner(p: CodeEditorProps, ref: React.Ref<CodeEditorHandle>) {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [decoTag]);
+
+  // v1.16.13 THE ANALYSIS: project diagnostics (this file) ride CodeMirror's
+  // lint renderer — squiggles + hover + the gutter dots. (line, col) → doc pos.
+  const diagTag = (p.diagnostics ?? [])
+    .map(d => `${d.line}:${d.from}:${d.code}`).join(',');
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    const doc = view.state.doc;
+    const diags: Diagnostic[] = [];
+    for (const d of p.diagnostics ?? []) {
+      if (d.line < 1 || d.line > doc.lines) continue;
+      const ln = doc.line(d.line);
+      diags.push({
+        from: Math.min(ln.from + d.from, ln.to),
+        to: Math.min(ln.from + d.to, ln.to),
+        severity: d.severity,
+        message: `${d.message}  (${d.code.replace(/^xc-/, '')})`,
+      });
+    }
+    view.dispatch(setDiagnostics(view.state, diags));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [diagTag, p.tabKey]);
 
   // read-only ⇄ edit
   useEffect(() => {

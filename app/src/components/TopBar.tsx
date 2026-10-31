@@ -14,7 +14,8 @@
 // vessel-information TODO (author / name / abbreviation) — listed DISABLED
 // so the roadmap is visible in the UI.
 import { useEffect, useRef, useState } from 'react';
-import { sabSupported } from '../engine/xenoncode';
+import { sabSupported, xenonFarm } from '../engine/xenoncode';
+import { playerHudDisplayName } from '../engine/playerhud';
 import { fmtW, type EnergyStatus } from '../engine/energy';
 import type { ItemSimCensus } from '../engine/itemsim';
 
@@ -286,7 +287,7 @@ export default function TopBar(p: Props) {
               Player HUDs</div>
               {(p.xenonPlayerHuds ?? []).map((h, i) => (
                 <Item key={h.name} testid={`xenon-playerhud-${i}`}
-                  label={`🎮 ${h.name}${h.kind === 'workshop' ? ' ·subscribed' : ''}`}
+                  label={`🎮 ${playerHudDisplayName(h.name)}${h.kind === 'workshop' ? ' ·subscribed' : ''}`}
                   hint={`${h.files} .xc`}
                   onClick={() => { close(); p.onPlayerHud?.(h.name); }} />
               ))}
@@ -301,6 +302,19 @@ export default function TopBar(p: Props) {
               label={`📡 Beacons — radio scope${p.beaconsOpen ? ' ·open' : ''}`}
               hint="freq + traffic"
               onClick={() => { close(); p.onBeacons?.(); }} />
+            {/* TURBO (v1.16.13, the user: "runs at 4x speed temporarily …
+                debugging easier and even our tests could run faster"): the
+                farm's pump cadence at 100 Hz — the programs' virtual dt
+                stays 40 ms, so the craft's clock advances 4× per real
+                second. Session-only; every Computer/Screens ⚡ mirrors it. */}
+            <Sep />
+            <Item testid="xenon-menu-turbo"
+              label={xenonFarm.pumps.some(q => q.turbo) ? '⚡ Turbo ×4 — RUNNING' : '⚡ Turbo ×4'}
+              hint="4× real time"
+              onClick={() => {
+                const on = !xenonFarm.pumps.some(q => q.turbo);
+                for (const q of xenonFarm.pumps) q.setTurbo(on);
+              }} />
           </>)}
         </Menu>
       )}

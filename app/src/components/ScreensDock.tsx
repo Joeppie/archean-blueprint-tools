@@ -419,6 +419,16 @@ export default function ScreensDock(p: {
           className={`rounded px-2 py-0.5 text-[11px] ${tight ? 'bg-[#243a52] text-[#8fd4ff]' : 'bg-[#1a2233] text-[#7d8aa0]'}`}>
           ▦ tile
         </button>
+        <button data-testid="screens-turbo"
+          aria-pressed={pumps.some(q => q.turbo)}
+          className={`rounded px-1.5 py-0.5 text-[10px] ${pumps.some(q => q.turbo)
+            ? 'bg-[#4a3d1d] text-[#ffd76b] hover:bg-[#5d4d26]'
+            : 'text-[#8a93a0] hover:text-white'}`}
+          title="turbo ×4 — every running computer of the craft at 4× real time (screens animate 4×; the programs’ own dt stays 40 ms)"
+          onClick={() => {
+            const on = !pumps.some(q => q.turbo);
+            for (const q of pumps) q.setTurbo(on);
+          }}>⚡ 4×</button>
         <button data-testid="screens-close" className="ml-auto text-[#8a93a0] hover:text-white"
           onClick={p.onClose} aria-label="close screens">✕</button>
       </div>

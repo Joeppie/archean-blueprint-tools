@@ -63,6 +63,14 @@ static double g_anyScroll = 0.0;
 static std::map<std::pair<int, int>, double> g_reads;
 
 static inline ScreenSlot* slotOf(const Var& obj);
+// the circle twin of the hit test: a click lands when it lies inside the
+// circle (center cx,cy, radius r) — button_circle (v1.16.13, the game's
+// hud 'readme' draws its mode buttons as circles).
+static inline bool xc_buttonHitCircle(ScreenSlot* s, int cx, int cy, int r) {
+	if (!s || !s->clicked) return false;
+	long dx = (long)s->clickX - cx, dy = (long)s->clickY - cy;
+	return dx * dx + dy * dy <= (long)r * r;
+}
 static inline bool xc_buttonHit(ScreenSlot* s, int x, int y, int w, int h) {
 	if (!s || !s->clicked) return false;
 	int xa = std::min(x, x + w), xb = std::max(x, x + w);
@@ -188,6 +196,10 @@ static double xc_vw = 1920, xc_vh = 1080, xc_mx = 0, xc_my = 0, xc_fov = 1, xc_m
 // serves both: the HUD runtime (g_hudMode, stamped by xc_hud_mode) reads
 // the viewport globals, a Computer keeps the main-screen size.
 static bool g_hudMode = false;
+// v1.16.13: the HUD's set_cps(n) rate (0 = unset → the pump keeps the
+// 25 Hz CYCLE_MS law); per wasm instance, and every pump opens its own
+// instance, so a re-boot restarts the cadence with the program.
+static int g_hudCps = 0;
 static map<string, double> g_wsProgram;    // name -> active program override
 static map<string, double> g_wsEffective;  // name -> last effective value
 static map<int, int> g_devByIo;        // computer io port → table index
@@ -349,6 +361,14 @@ static void archeanInit() {
 			int x = (int)(int64_t)a[0], y = (int)(int64_t)a[1], w = (int)(int64_t)a[2], h = (int)(int64_t)a[3];
 			if (auto* _S = Scr(o)) _S->DrawRect(x, y, x + w, y + h, packedColor(a[4]));
 			return xc_buttonHit(slotOf(o), x, y, w, h) ? 1.0 : 0.0; }},
+		// button_circle(x, y, r, color):number — the round twin (v1.16.13):
+		// the game's hud 'readme' panel calls it on its panels; draws the
+		// filled circle (center x,y, radius r, color) and "evaluates to
+		// true if clicked" INSIDE the circle — same law as button_rect.
+		{"button_circle($x:number,$y:number,$r:number,$c:number):number", [](Computer*, const Var& o, const vector<Var>& a) -> Var {
+			int x = (int)(int64_t)a[0], y = (int)(int64_t)a[1], r = (int)(int64_t)a[2];
+			if (auto* _S = Scr(o)) _S->DrawCircle(x, y, r, packedColor(a[3]), packedColor(a[3]));
+			return xc_buttonHitCircle(slotOf(o), x, y, r) ? 1.0 : 0.0; }},
 		// legacy button(x, y, color, width, height):number — the older
 		// width/height-parameter form (computer.md:156 — the COLOUR is the
 		// 3rd argument, unlike button_rect)
@@ -561,6 +581,11 @@ static void archeanInit() {
 		int x = (int)(int64_t)a[0], y = (int)(int64_t)a[1], w = (int)(int64_t)a[2], h = (int)(int64_t)a[3];
 		ms()->DrawRect(x, y, x + w, y + h, packedColor(a[4]));
 		return xc_buttonHit(msSlot(), x, y, w, h) ? 1.0 : 0.0; });
+	XenonCode::DeclareDeviceFunction("button_circle($x:number,$y:number,$r:number,$c:number):number",
+		[ms, msSlot](Computer*, const vector<Var>& a) -> Var {
+		int x = (int)(int64_t)a[0], y = (int)(int64_t)a[1], r = (int)(int64_t)a[2];
+		ms()->DrawCircle(x, y, r, packedColor(a[3]), packedColor(a[3]));
+		return xc_buttonHitCircle(msSlot(), x, y, r) ? 1.0 : 0.0; });
 	XenonCode::DeclareDeviceFunction("button($x:number,$y:number,$c:number,$w:number,$h:number):number",
 		[ms, msSlot](Computer*, const vector<Var>& a) -> Var {
 		int x = (int)(int64_t)a[0], y = (int)(int64_t)a[1], w = (int)(int64_t)a[3], h = (int)(int64_t)a[4];
@@ -653,9 +678,22 @@ static void archeanInit() {
 		g_worldTxt[xc_lower(string(a[0]))] = string(a[1]);
 		return {};
 	});
-	// set_cps(n) — the HUD panel refresh-rate hint: accepted, no-op (the
-	// app's canvas blits every cycle; the CADENCE law caps the pump anyway).
-	XenonCode::DeclareDeviceFunction("set_cps", [](Computer*, const vector<Var>&) -> Var { return {}; });
+	// set_cps(n) — THE HUD CADENCE LAW (wiki xenoncode/hud.md: "sets the
+	// number of HUD cycles per second"): the program's OWN voice on its
+	// update frequency, called from init (v1.16.13, we: "setCPS in HUDS lets
+	// code change its actual interval, but this is done in its init. We
+	// should support that way of doing it. We cannot preparse the init,
+	// because it can actually run and should run in the same scope").
+	// Recorded in HUD mode for the app's HUD pump (xc_hud_cps) — the pump
+	// adapts its interval after the cycle that moved it. Computers keep the
+	// 25 Hz law (the game drives them at server tick).
+	XenonCode::DeclareDeviceFunction("set_cps", [](Computer*, const vector<Var>& a) -> Var {
+		if (g_hudMode && a.size() >= 1) {
+			int n = (int)(int64_t)a[0];
+			if (n > 0) g_hudCps = n > 250 ? 250 : n;
+		}
+		return {};
+	});
 	// set_resolution_scale(n) — the HUD's DPI hint (readme/homo): accepted,
 	// no-op — the app renders the panel canvases at CSS scale (pixelated).
 	XenonCode::DeclareDeviceFunction("set_resolution_scale", [](Computer*, const vector<Var>&) -> Var { return {}; });
@@ -1660,7 +1698,14 @@ EMSCRIPTEN_KEEPALIVE void xc_set_view(double w, double h, double mx, double my,
 // ABI 12 (v1.15.2): stamp the RUNTIME KIND before xc_boot — the HUD pump
 // (program 'hud') runs in its own module instance and calls this; computer
 // pumps never do, so they keep the plain-screen screen_w/screen_h law.
-EMSCRIPTEN_KEEPALIVE void xc_hud_mode(int on) { g_hudMode = on != 0; }
+EMSCRIPTEN_KEEPALIVE void xc_hud_mode(int on) {
+	g_hudMode = on != 0;
+	if (on) g_hudCps = 0;   // a fresh HUD boot restarts the cadence law
+}
+// ABI 17 (v1.16.13): the HUD pump reads the program's set_cps(n) after
+// every cycle and adapts its interval (1000/n ms, clamped 1..250 cps by
+// set_cps; 0 = unset → the pump's 25 Hz CYCLE_MS law).
+EMSCRIPTEN_KEEPALIVE int xc_hud_cps() { return g_hudCps; }
 EMSCRIPTEN_KEEPALIVE double xc_screen_anchor(int idx) {
 	return (idx >= 0 && idx < (int)g_screens.size()) ? g_screens[idx].anchor : 16.0;
 }
@@ -1791,7 +1836,7 @@ EMSCRIPTEN_KEEPALIVE const char* xc_write_var(int fileIdx, int line, const char*
 
 // ABI stamp: the app checks this at boot (XC_ABI in engine/xenoncode.ts) and
 // warns ONCE on drift — new device/shim exports must bump it.
-EMSCRIPTEN_KEEPALIVE int xc_abi() { return 16; }  // 16: XENON-DEVCHANS — alias-addressed io is PER-DEVICE (a router net hangs many devices on one port; input_text("app-1",0) must not read light1's channel), alias writes mirror onto their port's wire, and every port whose channels received a value fires its input.N handler (RunInput — the ChipOS App Kit's event law); 15: xc_screen_version (XENON-SCREEN-VERSION write counter — the pump blits only changed surfaces); 14: xc_screen_px/xc_screen_py/xc_screen_haspos (the app's composited HUD SCREEN window — panels ride anchor until set_position); 13: $panel.set_size(w,h) + $panel.width/.height (HUD law from the shipped wiki hud.md — XENON-PANEL-RESIZE; RCS Infinity's guide HUD calls it live); 12: xc_hud_mode + ONE screen_w/screen_h declaration serving computer AND HUD (the v1.14.1 duplicate OVERRODE the computer law — DeclareDeviceFunction replaces by name — scaling every computer layout by the 1920x1080 viewport: the Space Invaders main-graphic loss); 11: panel()/beacon() object + beaconpair/beacontx events + get()/xc_set_world + xc_beacon_put + xc_set_input_t + xc_set_view + xc_screen_anchor (HUD runtime + beacon radio); 10: depth stream + hookLive gate + exact-line pause seam (XENON-DEBUG v3); 9: xc_write_var + the hook's cmd-6 write handoff (editable debug values); 8: xc_locals_json + the hook's SAB locals handoff (the Locals panel); 7: the stop-hook is LIVE (library_xc.js + Module.XC_SAB worker stepping); 6: xc_cycle_pairs + hook seam; 5: xc_set_cycle_ms
+EMSCRIPTEN_KEEPALIVE int xc_abi() { return 18; }  // 18: button_circle — the round button twin (draws the filled circle, evaluates true on a click inside it) — the game hud "readme" calls it; 17: set_cps RECORDS the HUD cadence (xc_hud_cps) — the HUD pump adapts its interval to the program's init-time call (wiki hud.md); 16: XENON-DEVCHANS — alias-addressed io is PER-DEVICE (a router net hangs many devices on one port; input_text("app-1",0) must not read light1's channel), alias writes mirror onto their port's wire, and every port whose channels received a value fires its input.N handler (RunInput — the ChipOS App Kit's event law); 15: xc_screen_version (XENON-SCREEN-VERSION write counter — the pump blits only changed surfaces); 14: xc_screen_px/xc_screen_py/xc_screen_haspos (the app's composited HUD SCREEN window — panels ride anchor until set_position); 13: $panel.set_size(w,h) + $panel.width/.height (HUD law from the shipped wiki hud.md — XENON-PANEL-RESIZE; RCS Infinity's guide HUD calls it live); 12: xc_hud_mode + ONE screen_w/screen_h declaration serving computer AND HUD (the v1.14.1 duplicate OVERRODE the computer law — DeclareDeviceFunction replaces by name — scaling every computer layout by the 1920x1080 viewport: the Space Invaders main-graphic loss); 11: panel()/beacon() object + beaconpair/beacontx events + get()/xc_set_world + xc_beacon_put + xc_set_input_t + xc_set_view + xc_screen_anchor (HUD runtime + beacon radio); 10: depth stream + hookLive gate + exact-line pause seam (XENON-DEBUG v3); 9: xc_write_var + the hook's cmd-6 write handoff (editable debug values); 8: xc_locals_json + the hook's SAB locals handoff (the Locals panel); 7: the stop-hook is LIVE (library_xc.js + Module.XC_SAB worker stepping); 6: xc_cycle_pairs + hook seam; 5: xc_set_cycle_ms
 EMSCRIPTEN_KEEPALIVE void xc_set_cycle_ms(int ms) {
 	// the app's pump cadence (CYCLE_MS): delta_time / system_frequency
 	// follow it, so dt-driven programs (Chip's Mario, physics on

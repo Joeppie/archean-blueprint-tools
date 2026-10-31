@@ -202,3 +202,29 @@ describe('NET-SCREEN screens on the VM tier (v1.16.12, the dev-kit flicker guard
     expect(vm.lit('main-screen#0')).toBeGreaterThan(50);
   }, 120_000);
 });
+
+describe('button_circle (v1.16.13 ABI 18 — the round button twin)', () => {
+  const CODE = [
+    'var $h = 0',
+    'var $s = screen("bench", 0)',
+    '',
+    'update',
+    '\t$s.blank(black)',
+    '\t$h = $s.button_circle(30, 30, 12, white)',
+    '',
+  ].join('\n');
+
+  it('draws + evaluates true on a click INSIDE the circle, false outside', async () => {
+    const vm = await bootSynthetic(CODE, 120, 120, 'bench');
+    vm.step(3);
+    expect(vm.vars().get('h')).toBe('0');
+    vm.press('bench#0', 36, 30);          // dx=6, dy=0 ≤ r=12
+    vm.step(1);
+    expect(vm.vars().get('h')).toBe('1');
+    vm.step(2);                            // click cleared
+    expect(vm.vars().get('h')).toBe('0');
+    vm.press('bench#0', 48, 48);          // dx=18, dy=18 → r²=256 < 648
+    vm.step(1);
+    expect(vm.vars().get('h')).toBe('0');
+  }, 60_000);
+});

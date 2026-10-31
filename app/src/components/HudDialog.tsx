@@ -15,6 +15,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import FloatingWindow from './FloatingWindow';
 import { CodeEditor, type CodeEditorHandle } from './CodeEditor';
+import { analyzeProject, type XCDiagnostic } from '../engine/xcanalyze';
 import BeaconPanel from './BeaconPanel';
 import { hudPump, ANCHOR_LABELS, HUD_VIEW_PRESETS, type HudSurface } from '../engine/hudpump';
 import XenonLibrary from './XenonLibrary';
@@ -48,10 +49,35 @@ export default function HudDialog(p: {
   const [dirty, setDirty] = useState<Set<number>>(new Set());
   const [tab, setTab] = useState(0);
   const [max, setMax] = useState(false);
-  const [side, setSide] = useState<'beacons' | 'panels' | 'screen' | 'library'>('panels');
+  const [side, setSide] = useState<'beacons' | 'panels' | 'screen' | 'library' | 'problems'>('panels');
+  // v1.16.13 THE ANALYZER RUNS ON HUD DISKS TOO (the user: "button_circle
+  // doesn't seem to work, its not know, and there is no squiggle, this is
+  // in the readme player HUD"): the player-HUD editor shares the CodeEditor
+  // — it now shares the lint marks and a Problems tab. Debounced like the
+  // computer IDE; HUDs address no devices, so the alias pass is off.
+  const [analysis, setAnalysis] = useState<XCDiagnostic[]>([]);
   const [pendingJump, setPendingJump] = useState<{ line: number; focus: boolean } | null>(null);
   const editorRef = useRef<CodeEditorHandle | null>(null);
   const [armedDel, setArmedDel] = useState(false);
+  const filesKey = files.map(f => `${f.name}\u0000${f.code}`).join('\u0001');
+  useEffect(() => {
+    const t = setTimeout(() => setAnalysis(analyzeProject(files)), 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filesKey, hud.ci]);
+  const analysisByFile = useMemo(() => {
+    const m = new Map<string, XCDiagnostic[]>();
+    for (const d of analysis) {
+      const a = m.get(d.file);
+      if (a) a.push(d); else m.set(d.file, [d]);
+    }
+    return m;
+  }, [analysis]);
+  const sevCounts = useMemo(() => ({
+    error: analysis.filter(d => d.severity === 'error').length,
+    warning: analysis.filter(d => d.severity === 'warning').length,
+    hint: analysis.filter(d => d.severity === 'hint').length,
+  }), [analysis]);
   // the detached (player HUD) save echo: where the bytes landed
   const [saved, setSaved] = useState('');
 
@@ -162,6 +188,21 @@ export default function HudDialog(p: {
               className={`rounded px-2 py-0.5 text-[11px] ${hudPumpRunning ? 'bg-[#5a2222] text-[#ffb3b3] hover:bg-[#7a2e2e]' : 'bg-[#1d2b42] text-[#5d6a7d]'}`}
               title="stop the HUD runtime"
               onClick={() => hudPump.close()} disabled={!hudPumpRunning}>⏹</button>
+            {/* TURBO (v1.16.13, the user: "runs at 4x speed temporarily"):
+                the HUD pump cadence at 100 Hz, the program's virtual dt
+                stays 40 ms — the HUD's clock advances 4× per real second.
+                (HUDs run the SAME 25 Hz cadence as computers here — the
+                game drives them at frame rate and the program cannot set
+                its own frequency — so the editor owns this button.) */}
+            <button data-testid="hud-turbo"
+              aria-pressed={hudPump.turbo}
+              className={`rounded px-2 py-0.5 text-[11px] ${hudPump.turbo
+                ? 'bg-[#4a3d1d] text-[#ffd76b] hover:bg-[#5d4d26]'
+                : 'bg-[#243a52] text-[#8fd4ff] hover:bg-[#2f4c6b]'}`}
+              title={hudPump.turbo
+                ? 'turbo ×4 RUNNING — this HUD advances 4× real time (click to return to ×1)'
+                : 'turbo ×4 — run this HUD at 4× real time (the program’s own dt stays 40 ms)'}
+              onClick={() => hudPump.setTurbo(!hudPump.turbo)}>⚡</button>
             <span data-testid="hud-run-status"
               className={`text-[10px] font-bold tabular-nums ${hudPumpRunning ? 'text-[#3ddc55]' : 'text-[#5d6a7d]'}`}>
               {hudPumpRunning ? `ON ${hudPumpVersion.cycles} cyc` : hudPumpVersion.error ? 'CRASH' : 'off'}
@@ -221,6 +262,7 @@ export default function HudDialog(p: {
                 onChange={editChange} onSave={save}
                 breaks={new Set<number>()} pausedLine={0}
                 errors={undefined}
+                diagnostics={analysisByFile.get(files[tab]?.name ?? '') ?? []}
                 funcs={funcs} decls={decls}
                 varList={[]}
                 devices={[]}
@@ -259,6 +301,11 @@ export default function HudDialog(p: {
               <span className={`rounded px-1 py-0.5 ${side === 'beacons' ? 'bg-[#1d2b42] text-[#8fd4ff]' : 'text-[#7d8aa0]'}`}>
                 Beacons</span>
             </button>
+            <button data-testid="hud-side-problems" onClick={() => setSide('problems')}
+              className="shrink-0 rounded px-2 py-1 text-[10px] tracking-wide hover:bg-[#182236]">
+              <span className={`rounded px-1 py-0.5 ${side === 'problems' ? 'bg-[#1d2b42] text-[#8fd4ff]' : sevCounts.error ? 'text-[#ff9c9c]' : 'text-[#7d8aa0]'}`}>
+                Problems {analysis.length ? `(${analysis.length})` : ''}</span>
+            </button>
           </div>
           <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto">
             {hudPumpVersion.error && (
@@ -268,6 +315,34 @@ export default function HudDialog(p: {
               </div>
             )}
             {side === 'panels' && <HudPanels />}
+            {side === 'problems' && (
+              <div data-testid="hud-problems-list"
+                className="flex min-h-0 flex-1 flex-col gap-[1px] pt-1 text-[11px]">
+                <div data-testid="hud-problems-counts" className="flex gap-3 px-1 pb-1 text-[10px]">
+                  <span className="text-[#ff6b6b]">{sevCounts.error} errors</span>
+                  <span className="text-[#e6c07b]">{sevCounts.warning} warnings</span>
+                  <span className="text-[#8a93a0]">{sevCounts.hint} hints</span>
+                </div>
+                {!analysis.length && (
+                  <div className="px-1 py-2 text-[11px] text-[#5d6a7d]">
+                    no problems — this disk analyzes clean.
+                  </div>
+                )}
+                {analysis.map((d, i) => (
+                  <button key={i} data-testid={`hud-problem-${i}`}
+                    onClick={() => jumpTo(d.file, d.line)}
+                    className="flex w-full items-start gap-1.5 rounded px-1 py-[3px] text-left hover:bg-[#182236]">
+                    <span aria-label={d.severity}
+                      className={`shrink-0 ${d.severity === 'error' ? 'text-[#ff6b6b]'
+                        : d.severity === 'warning' ? 'text-[#e6c07b]' : 'text-[#8a93a0]'}`}>
+                      {d.severity === 'error' ? '●' : d.severity === 'warning' ? '▲' : '○'}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-[#c7d3e3]" title={d.message}>{d.message}</span>
+                    <span className="shrink-0 text-[#5d6a7d]">{d.file}:{d.line}</span>
+                  </button>
+                ))}
+              </div>
+            )}
             {side === 'screen' && <HudScreenView />}
             {side === 'library' && (
               // v1.15.5 (we: "library of functions is missing like it is

@@ -674,6 +674,19 @@ test.describe('Xenon IDE @ui', () => {
         .poll(() => pane.getAttribute('data-editor-jump'),
           { message: `the editor follows the stop site ${site}`, timeout: 5_000 })
         .toBe(site);
+      // v1.16.13: the attribute is set by the dialog's jumpTo BEFORE the
+      // scroll runs — the FOLLOW law is about the VIEW. The active (paused)
+      // line must sit INSIDE the code pane's box (the user: "when I debug
+      // and step into, my scroll does NOT move").
+      const paneBox = await pane.boundingBox();
+      const active = pane.locator('.cm-activeLine').first();
+      await expect
+        .poll(async () => {
+          const a = await active.boundingBox();
+          if (!paneBox || !a) return false;
+          return a.y >= paneBox.y - 4 && a.y + a.height <= paneBox.y + paneBox.height + 4;
+        }, { message: `the paused line is on screen at ${site}`, timeout: 5_000 })
+        .toBe(true);
     };
     await page.locator('.xc-break-gutter .cm-gutterElement').nth(16).click();
     const pane0 = page.getByTestId('xenon-code-0');

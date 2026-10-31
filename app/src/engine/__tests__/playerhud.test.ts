@@ -10,6 +10,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { playerHudFromFiles, PLAYER_HUD_CI } from '../playerhud';
+import { hudPump } from '../hudpump';
+import { provideVmWasm } from './vmharness';
 import { listPlayerHuds, readPlayerHudProgram, writeHudFiles, hudSaveTarget, hudDir }
   from '../../../tools/vite-corpus';
 
@@ -82,4 +84,31 @@ describe('the file-picker extraction (works in EVERY build)', () => {
   it('the synthetic ci is NEGATIVE — it never collides with a component index', () => {
     expect(PLAYER_HUD_CI).toBeLessThan(0);
   });
+});
+
+describe('THE HUD CADENCE LAW (v1.16.13 — set_cps is the program’s own voice)', () => {
+  // (the user: "setCPS in HUDS lets code change its actual interval, but
+  // this is done in its init. We should support that way of doing it. We
+  // cannot preparse the init, because it can actually run and should run
+  // in the same scope") — the pump READS set_cps live: init runs as a
+  // cycle, the arm() after that tick adopts 1000/n.
+  it('set_cps(10) from init moves the pump to a 100 ms cadence', async () => {
+    provideVmWasm();
+    await hudPump.open({ ci: -9, alias: 'cpsbench', files: [
+      { name: 'main.xc', code: 'var $n = 0\n\ninit\n\tset_cps(10)\n\nupdate\n\t$n = $n + 1\n' },
+    ] });
+    await new Promise(r => setTimeout(r, 900));   // init + re-arm + settle
+    expect(hudPump.cadenceMs()).toBe(100);
+    hudPump.close();
+  }, 20_000);
+
+  it('no set_cps → the 25 Hz CYCLE_MS law stands', async () => {
+    provideVmWasm();
+    await hudPump.open({ ci: -9, alias: 'cpsbench', files: [
+      { name: 'main.xc', code: 'init\n\tprint(1)\n' },
+    ] });
+    await new Promise(r => setTimeout(r, 400));
+    expect(hudPump.cadenceMs()).toBe(40);
+    hudPump.close();
+  }, 20_000);
 });
