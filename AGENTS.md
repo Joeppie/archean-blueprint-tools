@@ -24,7 +24,7 @@ imperatives; put the WHY in a satellite, link it.
   PERF.md (perf baseline + harmful candidates), LOCATIONS.md (installs,
   paths, URLs), MATRIX.md, GEAR-F-A18F.md (rig-chain audit method),
   LIVING-CRAFT.md (the self-running craft: actuator sim laws, power net,
-  3-D press + popup), REWRITE.md (pending plans, § P8), NOTICE.md
+  3-D press + popup), REWRITE.md (pending plans, §§ P8, P10), NOTICE.md
   (licensing). A new subsystem with detail outside this file gets a
   satellite created/updated and linked IN THE SAME COMMIT.
 - Budget ~20k tokens: triage history OUT first; never shrink a law to fit.
@@ -1077,7 +1077,11 @@ behind a small link at the END of the gallery. Pages serves the GENERATED
   coupling inventory and the four seams (write-path, screen-feed, key-bus,
   shell-descriptors) in REWRITE.md § P8; P3 (project tree) + P4 (upstream
   PRs) land inside the module. Until scheduled: the no-cross-import rule in
-  § Xenon.
+  § Xenon. **P10 (planned 2026-10-31, REWRITE.md § P10) extends it into
+  repos**: `xenoncore` (analysis+VM+sim+blueprint codec as a published
+  package) + `xenoncode-vscode` (LSP, DAP, craft decompose/pack, webview
+  sim) + an MCP bin for AI checks; the move inventory and S0–S6 slices
+  live in § P10.
 - **WIRE integrity check + repair**: files written by older builds carry
   pipe endpoints referencing components that do not own the named port, and
   the census reports those as real connections. Wanted: flag a pipe whose

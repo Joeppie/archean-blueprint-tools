@@ -670,6 +670,150 @@ sim; the Beacon component is not an io DEVICE at all.
 Order: (1)+(2) FIRST (ChipOS-critical, no new UI surface), (3) with the
 device-table change, (4) rides P8's shell-descriptor seam.
 
+## P10 — `xenoncore`: the XenonCode language+runtime as its own repo (PLANNED 2026-10-31; extends P8)
+
+We (2026-10-31): "XenonCode stuff is rather complex and it's a lot of
+loadbearing stuff that is probably too tightly integrated … make a separate
+repository for our xenoncode analysis/syntax highlighting and running through
+a WASM … to be used from a (third) repository: a VS Code extension that lets
+people simulate their vessel/inputs and write and test xenoncode … which also
+makes it possible to easily integrate an AI and help design xenoncode for a
+specific purpose … COMPILE function for a craft, where it decomposes and
+recomposes a hard disk into multiple files in a folder, and can put it into
+our simulator for an easier debugging experience."
+
+**The shape — 2 new repos, 1 existing, 3 consumers:**
+
+| Repo | Role | Contents |
+|---|---|---|
+| `xenoncore` (NEW) | The platform: zero-UI, isomorphic TS (browser + node), published package | everything XenonCode-shaped that is not React and not three.js (inventory below); the interpreter fork submodule + `xc_host.cpp` + `build.sh` MOVE here (gitlink discipline unchanged); prebuilt glue+wasm ship with the package |
+| `xenoncode-vscode` (NEW) | The VS Code extension | LSP server + DAP debug adapter + decompose/pack commands + webview sim panel, all thin over `xenoncore` |
+| this repo | CONSUMER 1 | the app imports `xenoncore`; the P8 four-seam contract (write-path, screen-feed, key-bus, shell-descriptors) IS the remaining coupling |
+| `tools/xenoncode/upstream` (fork, exists) | the pinned C++ interpreter | unchanged; the submodule relocates into `xenoncore` |
+
+The MCP AI surface is a 400-line bin INSIDE `xenoncore` (tools: list_programs,
+list_variables, vocabulary, diagnose, decompose/pack, run_cycles/step,
+read_screen, press_element, io_probe) — every consumer (OpenCode, Claude,
+Cursor) speaks MCP, so the AI check needs no fourth repo.
+
+**The move inventory** (measured today, `app/src`):
+- PURE ANALYSIS → `xenoncore/analysis`: `xcproject.ts` (384 — function index,
+  include order, decls, XC_LIB_DOC/groups, keywords, consts, ioCallAt),
+  `xcanalyze.ts` (355 — diagnostics; vocabulary sets re-derived from
+  `xc_host.cpp`/`XenonCode.hpp` — the cross-pin moves WITH it), `xcdocs.ts`
+  (223 — the function-reference hover), `xcsites.ts` (114). Their vitest
+  suites move in the same commit.
+- VM RUNTIME → `xenoncore/vm`: the run/pump/farm half of `xenoncode.ts`
+  (3 001 — XenonRun, XenonWorkerRun + `xenonworker.ts`, XenonPump,
+  `stepperLaw`, `xenonFarm`, IoBus, SAB protocol), `hudpump.ts`,
+  `xenontest.ts`, `xcdbg.ts`, `playerhud.ts`. The `__XCDBG__`/
+  `__XENONTEST__` doors become the package's PUBLIC debug API (they are
+  already plain-JSON bounded).
+- CRAFT SIM → `xenoncore/sim`: `worldsim.ts`, `devicesim.ts`, `power.ts`,
+  `energy.ts`, `itemsim.ts`, `beaconnet.ts`, `flat.ts`, `buzzer.ts` (audio
+  behind a sink interface — WebAudio stays in the app). These stop reading
+  the Blueprint object and read a **CraftSpec** (below).
+- BLUEPRINT CODEC → `xenoncore/blueprint`: decompose/recompose of
+  `data.xc_files` + the doc.ts raw-literal machinery for the xc-file write
+  funnels (`setXcFileCode`/insert/remove) — the byte-identical rule and its
+  corpus pins MOVE with it (a package that breaks saves breaks every
+  consumer: the pin set is non-negotiable).
+- STAYS HERE: `scene.ts` buildDashboard/DataTexture faces, `thumbs.ts`
+  (three.js catalog previews — the extension gets a prerendered icon atlas,
+  open item), the React components (XenonDialog/HudDialog/ScreensDock/
+  CockpitWindow/XenonLibrary/AutosavesDialog, CodeEditor), `pilotkeys.ts`
+  (the key-bus lives app-side; the sim gets plain channel presses).
+- `tools/xenoncode/index.html` (zero-app-import POC) relocates as the
+  package repo's playground page.
+
+**The gaps this fills** (the user's list, each a package API):
+1. **`ProgramKind` becomes first-class.** Today the HUD/computer distinction
+   is implicit (ci, `hudRuntime` stamp, synthetic `PLAYER_HUD_CI`). The
+   codec stamps every decomposed program with kind =
+   Computer|MiniComputer|Crafter|HudController|PlayerHUD + its device
+   aliases + entry file + includes. Analyzer, LSP, MCP all read it.
+2. **`vocabularyFor(kind)`** — XC_SHIM_FUNCTIONS ⇄ XC_LANG_FUNCTIONS, gated
+   per kind (`xc_hud_mode` law), panel/beacon members, color constants.
+   The Coverage Law (xcdocs.test) travels with it: a vocabulary entry with
+   no doc fails the package suite.
+3. **`listVariables`** — static (projectDecls, exists) + LIVE (`run.vars()`,
+   exists for the HUD Vars tab + `.var-flash` rows) promoted to one API;
+   the DAP variables pane and the AI check are the same call.
+4. **CraftSpec** — the declarative craft descriptor the sim runs on:
+   computers (ci, kind, alias, entry), devices (alias, type, port/channel
+   table, cabled graph from the FLATTENED pipes law), routers/net, seats
+   (18-channel pads), dashboards/elements, beacons (frequencies), hud
+   blocks. This is what `xenonDevices`/`sockets`/`devicesim` distill today;
+   distilling it is THE hard design work of S3 and what makes the VS Code
+   sim possible: the extension fills a CraftSpec from the decomposed
+   `craft.json`, no blueprint needed.
+5. **Decompose/pack = the COMPILE function.** `xenon decompose <craft>
+   <dir>` → `craft.json` (CraftSpec + manifest) + `src/<alias>/*.xc`
+   (includes resolved to real files); `pack` writes the `.xc` texts back
+   through the doc funnels — every OTHER byte of the blueprint stays
+   untouched (the byte-identical law). The game recompiles
+   `xc_program.bin`; we never write it (the player-HUD law, generalized).
+6. **The analyzer answers the AI check directly**: is every call in the
+   kind's vocabulary, are returns/decls sane, what does this program DO
+   (io calls ⇄ CraftSpec channels) — the 9000009090 fixture's zero-hard-
+   diagnostics property on shipped disks is the package's false-positive
+   gate.
+
+**The VS Code extension (`xenoncode-vscode`):**
+- **LSP server** (node, over `xenoncore/analysis`): diagnostics (xcanalyze
+  codes → VS severities), completion (kind-gated vocabulary + project
+  decls), hover (xcdocs sigs + the io-call device/channel reading),
+  documentSymbol (variables/functions), go-to-definition + references
+  (xcproject function index), include-aware multi-file projects.
+- **DAP debug adapter** (over `xenoncore/vm`): XENON-DEBUG v3 pair+depth
+  stream ⇄ breakpoints/stepping = `stepperLaw` verbatim; variables pane =
+  `listVariables(live)`; the WRITEBACK LAW guards injections; the PARK
+  law maps to DAP pause. This is the "easier debugging experience".
+- **Commands**: `Archean: Decompose Craft` / `Pack Craft` (the COMPILE
+  function), boot/stop the farm, press a dashboard element, pilot-key
+  pads.
+- **Webview sim panel**: screens (the ScreensDock compositor's laws,
+  re-implemented in a small webview app — port laws, not React), io pin
+  view, beacon registry. The `.xc` grammar seeds from the fork's own
+  `vscode_extension/` (dev's own: thin grammar + native-linter spawn,
+  91-line extension.js — prior art only, NOTICE extends).
+- WASM on node needs `-sENVIRONMENT=web,worker,node` in the package build
+  (the app build is `web`-only today) — S0 build-chain item.
+
+**Slices (each lands green; the app gates unchanged):**
+- **S0** — scaffold `xenoncore`, move the build chain (submodule +
+  `xc_host.cpp` + patches + `build.sh`) + prebuilt artifacts; the app
+  consumes by dep. Gates: `build.sh` from the new repo, wasm export probe
+  (AGENTS § LESSONS), full app suite green on the dep.
+- **S1** — analysis layer + its vitest suites move; app imports. Pure,
+  pinned, lowest risk.
+- **S2** — VM runtime moves; `xenoncode.ts` is SURGICALLY split first
+  (run/pump/farm vs the craft glue: worldsim overrides, CRAFTER_BUILTIN,
+  models/atlas reads) — the split lands as app commits BEFORE the move.
+  `vmharness.ts` becomes the package's node-tier harness.
+- **S3** — CraftSpec distilled (the corpus audit via the existing probes:
+  jimmyprobe/netscreenprobe re-run per the AGENTS rule), sim modules move,
+  `scene.ts`/`Editor.tsx` shrink to the P8 ports (screen-feed, key-bus,
+  descriptors, write-path).
+- **S4** — the codec + doc.ts xc-file funnels move; decompose/pack get a
+  corpus roundtrip pin (decompose→pack == identity over every testdata
+  craft with xc_files).
+- **S5** — `xenoncode-vscode` repo: LSP first, decompose/pack, DAP,
+  webview sim.
+- **S6** — the MCP bin (`xenoncore/bin/mcp.ts`) + a demo prompt session
+  designing a door-toggle program against a decomposed fixture.
+
+**Non-negotiables carried into the new repos:** the pinned-gitlink build
+discipline; `xc_abi()` ⇄ `XC_ABI` as the package's version contract (a
+stale wasm degrades features, never spams); byte-identical re-emit of
+untouched blueprint bytes; no machine-local paths (config tiers travel);
+GPL-3.0 on our code (NOTICE splits: game data stays HERE, the interpreter
+fork's provenance note travels); compiled wasm ships via git LFS.
+
+**Open (needs the user's call):** repo names; npm-publish vs git-dep for
+`xenoncore`; S3-vs-S5 order (sim-first feeds the VS Code webview, LSP-first
+front-loads the low-risk wins).
+
 ## Non-negotiables carried over
 - AGENTS § Blueprint folder (paths via tools/config.py — the vite plugin
   reads it; no hardcoded paths in `app/` either).
