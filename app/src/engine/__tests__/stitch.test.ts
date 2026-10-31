@@ -217,12 +217,42 @@ describe('stitchHullSkin — corpus invariants', () => {
     // never match the stitch law (per-face paint, slants, lone halves), so
     // faces must be byte-equal. Big welded skins (gantry 241, Badger 1337)
     // MAY hold legal rectangle pairs — they answer to the COVERAGE pin.
+    //
+    // COVERAGE_AUTHORED (v1.16.12): an AUTHORED small skin that legitimately
+    // contains a rectangle-legal pair — Chip Patton's ChipOS Dev Kit ships a
+    // one-colour straight sheet whose halves are a clean weld target. The
+    // stitch is DRAW-ONLY (file verbatim) and its merged slabs are
+    // coverage-exact by the LAW tests, so the premise "authored ⇒ byte-
+    // equal" is empirically false for such a skin: it answers to the SAME
+    // coverage law as the big skins — per-plane cap areas equal, face count
+    // strictly lower. (The dev kit's game-side save, ingested 2026-10-30,
+    // is the machine corpus where this fired.)
+    const COVERAGE_AUTHORED = new Set(['3828773626']);
+    const capsByPlane = (fs: HullFace[]): string[] => {
+      const m = new Map<string, number>();
+      for (const f of fs) {
+        const n = normal(f), c = centroid(f);
+        const ax = n[0]! > 0.999 ? 0 : n[1]! > 0.999 ? 1 : n[2]! > 0.999 ? 2 : -1;
+        if (ax < 0) continue;
+        const co = (c as number[])[ax]!;
+        const g = co / CELL + 6;
+        if (Math.abs(g - Math.round(g)) < 1e-6) continue;        // on-lattice = wall
+        m.set(`${ax}+${co.toFixed(4)}`, (m.get(`${ax}+${co.toFixed(4)}`) ?? 0) + area(f));
+      }
+      return [...m.entries()].map(([k, v]) => `${k}=${v.toFixed(6)}`).sort();
+    };
     let checked = 0;
     for (const id of ids) {
       const tris = load(id).data.triangles ?? [];
       if (tris.length < 3 || tris.length > 100) continue;
       const st = stitchHullSkin(tris);
       const raw = buildHullSkin(tris);
+      if (COVERAGE_AUTHORED.has(id)) {
+        expect(capsByPlane(st.faces), id).toEqual(capsByPlane(raw.faces));
+        expect(st.faces.length, id).toBeLessThan(raw.faces.length);
+        checked++;
+        continue;
+      }
       const key = (fs: HullFace[]) => fs.map(f => `${f.slot}:${f.tri.map(v => v.map(x => x.toFixed(6)).join()).join(';')}`).sort();
       expect(key(st.faces), id).toEqual(key(raw.faces));
       checked++;

@@ -5176,3 +5176,19 @@ census leg pins it): 139 kg on an AR 0.37 lifting body, static margin
 **−35.5% = UNSTABLE**, trim −19.7° demanding 22° of elevator, 2 of 3
 control plates buried. The earlier variant 3518436870 reads margin +0.1%
 (neutral). The user's "RCS infinity can't fly stable", in numbers.
+
+**Sweep tidy (same day, the "go through + run the FULL suite" pass).** The
+full e2e ran 172 passed / 0 failed / 31 skipped. The full-suite stitch red
+on the machine corpus proved NOT to be the documented 3816936540 pair: the
+loop aborts at its first failing id, and the dev kit 3828773626 (game-side
+save, ingested v1.16.10) rides FIRST in the client-dir readdir — its
+one-colour straight-sheet skin legitimately contains a rectangle-legal
+pair, so the stitcher merges it. The stitch is DRAW-ONLY and coverage-
+exact by the LAW tests, so the premise "authored small skin ⇒ byte-equal"
+is empirically false for such a sheet: the sweep now classifies it
+(COVERAGE_AUTHORED) under the SAME coverage law the big skins answer to
+(per-plane cap areas equal, face count strictly lower) — the machine
+corpus goes 12/12 green; the 3816936540 data-drift pair stays red on the
+testdata corpus exactly as documented (v1.16.3; per-craft data calls are
+the user's, untouched). The ids-order lesson: a corpus sweep reports its
+FIRST failure only — check the full list before believing a red moved.

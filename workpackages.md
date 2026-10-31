@@ -545,3 +545,10 @@ LIGHTS-leg push law restated intent-driven (the 472-push count was the
 fingerprint). Pins: xenonvm ×2,
 e2e netscreens dock leg. RCS Infinity = 3812927875 (ws-names.tsv title;
 alias ISW-241): margin −35.5% UNSTABLE — flightlab census leg.
+
+## Full-suite pass (2026-10-31, evening) — gates ALL green
+- FULL e2e: 172 passed / 0 failed / 31 skipped (2.4 m, production build).
+- FULL vitest (machine corpus): 1094/0 incl. the new COVERAGE_AUTHORED
+  class for the dev kit's legal-pair authored skin (stitch 12/12);
+  testdata corpus keeps the documented 3816936540 pair red (data drift).
+- tsc clean; /tmp/opencode scratch swept (2.3 G of staleness dirs freed).
