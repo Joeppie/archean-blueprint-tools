@@ -481,7 +481,10 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   canvases + 3-D feed keys.
 - Buzzers: `data.mode` = the authored tone (0-3 sine/square/triangle/saw;
   wave `'auto'` = per-buzzer); amplitude `min(1, amp·1.8)·0.4` into warm
-  baked PERIODICWAVEs + 7.5 kHz lowpass + 16-level quantization. Sound
+  baked PERIODICWAVEs (PURE band-limited 1/n spectra — v1.16.15: an
+  extra n^0.1 rolloff softened square/saw until they read as sine; the game's
+  enum is Sine/Square/Triangle/Sawtooth = 0..3, verified from
+  ARCHEAN_beep.GAME_Mod.so) + 7.5 kHz lowpass + 16-level quantization. Sound
   defaults ON; the AudioContext is created+resumed inside a REAL gesture
   playing a 1-frame silent buffer (a context created in the pump loop starts
   suspended and never resumes).
@@ -579,7 +582,10 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   (keeps sending until clicked again); 🔒 LOCK is the GLOBAL send-lock
   (`setPilotLock` — keyboard pilot keys answer false = plain typing; pads
   press through via `padPress`); pads flash from `pump.pilotPulse` (the
-  keyboard and pad presses both stamp). VIEW-click is inspect-only
+  keyboard and pad presses both stamp). SITTING = keys live: the window
+  mounts `usePilotKeys(true)` (the pilot-key law rode only the IDE dialog
+  and the Screens dock — the cockpit e2e caught the keyboard inert with
+  just a cockpit window open). VIEW-click is inspect-only
   (v1.5 rule kept): no select/gizmo/fly — codeable parts and PilotSeats
   pop the ACTION widget (⌨ / 🕹, it carries its own ci). THE LAYOUT IS A
   KEYBOARD (v1.16.15, we: "the layout … is stupid, it should be more

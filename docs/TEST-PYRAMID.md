@@ -74,7 +74,11 @@ runs).
   pointer plumbing, IndexedDB/network, dev-pair → e2e. EVERY new e2e test
   carries a one-line `// e2e-tier because:` justification.
 - **L2 — Fixtures beat corpora.** Synthesise the minimal artifact
-  (`tools/make_*_test.py` → `testdata/900000NNNN`; the P7.3a x-ray fixture
+  (`tools/make_*_test.py` → `testdata/900000NNNN` —
+  incl. 9000009090 ANALYSIS BENCH: one deliberate defect per xcanalyze code
+  + clean twins; 9000009091 SEAT BENCH: seat Roll cable → Aileron, nose-
+  wheel cables in port drop order, Yaw cable → RCS, inert program — the
+  wires alone must animate; the P7.3a x-ray fixture
   is the template). No truck/giant in a feature pin.
 - **L3 — A flake is a re-tier signal.** A pin that flakes in a landing run
   gets MIGRATED down a tier in the same session — never healed with a
