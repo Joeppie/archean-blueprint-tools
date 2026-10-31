@@ -74,6 +74,29 @@ const pick = (comps: XenonComputer[], alias: string): XenonComputer => {
 const prints = (nd: Node): string =>
   nd.events.filter(e => e.e === 'print').map(e => String(e.v ?? '')).join('\n');
 
+describe('the ChipOS HDD craft — hdd INSERT = boot (WP2)', () => {
+  test('the workshop HDD craft is a MiniComputer carrying the whole OS disk', () => {
+    // In-game law (wiki Computer.md § HDD): the bay holds the disk whose
+    // code runs. Our model: data.hdd.xc_files + the LIVE auto-boot — the
+    // ChipOS v0.10 HDD craft (3828546114) is ONE MiniComputer carrying
+    // the disk; xenonComputers lists it and the farm boots it verbatim
+    // (the BENCH's chipos VM — the same 52 files — boots and scans: the
+    // pins above ARE the insert-and-run proof at the VM tier).
+    const { comps } = xenonCorpus('3828546114');
+    expect(comps.length).toBe(1);
+    const os = comps[0]!;
+    expect(os.files.length).toBeGreaterThan(40);        // the full v0.10 disk
+    expect(os.files.some(f => f.name === 'main.xc')).toBe(true);
+    expect(os.files.some(f => f.name === 'actions.xc')).toBe(true);
+    // the disk on the DEV KIT (v0.41b) is a superset of the HDD (v0.10):
+    // same core files — insert the newer disk, the same OS boots
+    const kit = xenonCorpus('3828773626').comps.find(c => c.alias === 'chipos')!;
+    const hdd = new Set(comps[0]!.files.map(f => f.name));
+    const kitFiles = kit.files.map(f => f.name);
+    expect(kitFiles.filter(f => hdd.has(f)).length).toBeGreaterThan(30);
+  });
+});
+
 describe('the CHIPOS BENCH device tables — THE ROUTER NET', () => {
   const { bp } = xenonCorpus(BENCH);
   test('every net device carries the LOCAL port of the router chain', () => {

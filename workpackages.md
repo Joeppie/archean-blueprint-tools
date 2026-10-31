@@ -380,8 +380,15 @@ user's explicit ask).
 - corpus byte-fidelity: the three new benches re-emit BYTE-IDENTICAL
   and keep every orientation literal (the two corpus walks got a
   data-budget timeout for the 9.9 MB bench — the law is unchanged).
-- e2e fast tier: see the run log; the two chipos legs are GREEN
-  (2.2 s + 0.9 s warm) — @slow for the manifest leg, @ui for the chip.
+- e2e FULL suite (test:e2e): 166 passed / 0 failed / 31 skipped —
+  incl. the two chipos legs GREEN (2.2 s + 0.9 s warm) and the
+  @codeditor leg hard-polled (CodeMirror's windowed doc fills over its
+  first frames: the span count is POLLED, the law is 'the doc is
+  highlighted' — the Jimmy-batch first-paint race).
+- final vitest: 1067 passed (+ the HDD-insert = boot pin: the workshop
+  ChipOS v0.10 HDD craft is ONE MiniComputer carrying the whole 52-file
+  disk — xenonComputers lists it, the farm boots it, the BENCH pins
+  above are the insert-and-run proof at the VM tier).
 - viewer gate: the version-string bump commit ran the SELFTEST+REGTEST
   pair through the pre-commit hook (viewer/ staged) — PASS.
 
