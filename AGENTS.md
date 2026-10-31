@@ -1097,9 +1097,11 @@ behind a small link at the END of the gallery. Pages serves the GENERATED
   tsc, CI, Pages playground) + the whole build chain (fork submodule,
   xc_host shim, build.sh with `APP_ASSETS=`); this app consumes the
   tag-pinned git dep, the corpus legs of the codec pins stay HERE
-  (`codec.corpus.test.ts`). Open: VM/sim moves (S2/S3), the codec's
-  fs/CLI + doc-funnel writeback (S4), LSP/DAP (S5), MCP (S6), and
-  `xenoncode-vscode` itself.
+  (`codec.corpus.test.ts`). **S4+S5+S6 LANDED (v1.16.20, 2026-11-01)**:
+  the byte-surgical workspace codec + `xenon` CLI; `xenoncode-vscode`
+  v0.1.0 (LSP + COMPILE-function commands, VSIX CI); the `xenon-mcp`
+  AI-check server. Open: S2/S3 (the VM/sim surgery, CraftSpec), the DAP
+  adapter + sim webview in the extension, marketplace publish.
 - **WIRE integrity check + repair**: files written by older builds carry
   pipe endpoints referencing components that do not own the named port, and
   the census reports those as real connections. Wanted: flag a pipe whose

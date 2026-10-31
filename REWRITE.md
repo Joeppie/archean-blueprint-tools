@@ -812,19 +812,35 @@ Cursor) speaks MCP, so the AI check needs no fourth repo.
   jimmyprobe/netscreenprobe re-run per the AGENTS rule), sim modules move,
   `scene.ts`/`Editor.tsx` shrink to the P8 ports (screen-feed, key-bus,
   descriptors, write-path).
-- **S4** — the codec + doc.ts xc-file funnels move; decompose/pack get a
-  corpus roundtrip pin (decompose→pack == identity over every testdata
-  craft with xc_files). **SEED LANDED v1.16.18**: the pure core
-  `packages/xenoncore/src/codec.ts` (entry law, key/file-order composition,
-  `#NODES` preservation, capacity/label verbatim, the content-hash
-  world-HDD bridge that skips the entitystate binary) with the corpus pin:
-  **528 disk files roundtrip decompose→compose byte-identically**.
-  REMAINING: the fs/CLI layer + the doc-funnel writeback (`setXcFileCode`
-  per composed file, S4 proper).
-- **S5** — `xenoncode-vscode` repo: LSP first, decompose/pack, DAP,
-  webview sim.
-- **S6** — the MCP bin (`xenoncore/bin/mcp.ts`) + a demo prompt session
-  designing a door-toggle program against a decomposed fixture.
+- **S4 — fs/CLI + writeback LANDED v0.2.x (xenoncore) + app v1.16.20**:
+  `workspace.ts` (subpath `xenoncore/workspace`) — `decomposeToDir`
+  (`craft.json` manifest + `src/<alias>/*.xc`) and `packBlueprintRaw`,
+  which writes the `.xc` texts back by **BYTE SPAN SURGERY** (locate the
+  `xc_files` array in the raw save, replace exactly that span; a fresh
+  disk gets the `hdd` INSERT, capacity/label from the manifest —
+  the doc-funnel writeback is REPLACED by the surgery: no doc.ts
+  dependency crosses into the package). Corpus pins (app): no-edit ⇒
+  byte identity on every corpus blueprint; one edit ⇒ diff bounded to
+  the disk array; every real disk span-locates. The `xenon` CLI ships
+  `decompose|pack|programs|diagnose`.
+- **S5 — `xenoncode-vscode` v0.1.0 LANDED** (github.com/Joeppie/
+  xenoncode-vscode): LSP on `xenoncore` (diagnostics `source:xenoncore`,
+  vocabulary+project completion, hover sigs+ORIGIN, `@`-definition,
+  document symbols), `.xc` grammar seeded from the dev's own
+  `vscode_extension` (NOTICE), the Decompose/Pack/Programs commands
+  spawning the package CLI through its bin subpath, pure logic tier at
+  node (8 pins, zero `vscode` imports), CI builds the VSIX artifact.
+  REMAINING: the DAP debug adapter (XENON-DEBUG v3 ⇄ breakpoints/steps/
+  live vars), the sim webview (screens/io/pilot), CraftSpec alias census
+  into the analyzer, marketplace publish.
+- **S6 — the MCP bin LANDED (xenoncore `xenon-mcp`)**: stdio JSON-RPC
+  serving `list_programs`, `diagnose`, `analyze_code` (paste-check loop),
+  `vocabulary`, `decompose`, `pack` — protocol-tested by spawning the
+  built bin. The AI design-check door is open; tool-list growth rides S5+
+  (live vars/screens need the runtime, S2).
+- The S6 demo prompt session (an AI designing a door-toggle program
+  against a decomposed fixture, end to end) is the slice's acceptance
+  test — schedule with the MCP tool-list growth.
 
 **S4 refinement — the pack-out ground truth (research on disk 2026-10-31;
 FORMAT § Xenon disk runtime/design pack-out bullets).** The game already

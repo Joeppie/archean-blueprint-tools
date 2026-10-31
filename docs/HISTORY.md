@@ -5442,3 +5442,37 @@ Version strings 9× v1.16.15 → v1.16.19 (no release tags past v1.16.9 —
 all dev labels). Gates: tsc clean on the dep, vitest **1083 passed**
 (6 skipped, 0 failed — the 68-test package tier now runs in xenoncore's
 CI), e2e fast tier green, xenoncore CI green on v0.1.1.
+
+## 20. v1.16.20 — S4+S5+S6: the COMPILE function ships, the VS Code
+## extension opens, the AI door opens (2026-11-01)
+
+"Continue do it all!" — three P10 slices landed the same day, none
+touching the app's runtime (the S2/S3 surgery stays its own session).
+**S4 (xenoncore v0.2.0/v0.2.1):** `workspace.ts` — the pack is BYTE
+SURGERY: `jsonSpanOf` walks the raw save with a path-addressed recursive
+descent, `packBlueprintRaw` replaces exactly the `xc_files` array bytes
+(a fresh disk gets the `hdd` INSERT, capacity/label from the manifest —
+the doc-funnel writeback was REPLACED: no doc.ts dependency crosses into
+the package). The CLI `xenon decompose|pack|programs|diagnose` is the
+COMPILE function; a live smoke on the intercom bench proved the diff
+bounded to the edited plain_code (edit landed, sibling disk byte-equal,
+capacity/label kept). The corpus pins (app tier) carry the law over the
+game-writer's real saves. A prepare-script + tag-pinned v0.2.1 taught:
+npm git-deps pack at the tag — exports/bin + prepare must ride the tag.
+**S5:** github.com/Joeppie/xenoncode-vscode v0.1.0 — an LSP whose whole
+brain is xenoncore (diagnostics `source:xenoncore`, completion over the
+device+language vocabulary and project @functions, hover with sig +
+description + ORIGIN, @-definition, document symbols; the server's
+project = the .xc files beside the document — the decomposed workspace
+layout), `.xc` grammar seeded from the dev's own `vscode_extension`
+(NOTICE §2), the Decompose/Pack/Programs commands spawning the package
+bin, 8 pure logic pins (L1, zero vscode imports), CI produces the VSIX.
+DAP, the sim webview, the CraftSpec alias census and marketplace
+publishing stay open. **S6:** `xenon-mcp` (stdio JSON-RPC, protocol-
+tested by spawning the built bin): list_programs, diagnose, analyze_code
+(the AI paste-check loop), vocabulary, decompose, pack. `xenon diagnose`
+on the ChipOS fixture: 110 diagnostics, 0 HARD — the TRUE-NEGATIVE law
+holds through the CLI. Toolchain notes: vitest inlines the TS-source
+package dep (`server.deps.inline`), esbuild bundles it into the browser
+and cjs bundles alike, TS6 `paths` without `baseUrl`; the extension repo
+sits on stable tsc 5.9/vitest 3 (VS Code ecosystem), xenoncore on TS6.
