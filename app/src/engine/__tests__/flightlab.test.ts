@@ -100,6 +100,25 @@ describe('corpus census (data laws at the node tier)', () => {
     expect(r!.pitchVerdict).not.toBe('stable');
   });
 
+  it('RCS Infinity (3812927875, the ISW-241 kit — Steam title in ' +
+    'ws-names.tsv): a stubby lifting body with the mass AFT = divergent ' +
+    '(the user: "RCS infinity can\'t fly stable" — QUANTIFIED)', () => {
+    const bp = load('3812927875');
+    if (!bp) return;
+    const r = flightLab(bp, null, { speed: 60, altitude: 0 });
+    expect(r).toBeTruthy();
+    expect(r!.pitchVerdict).toBe('unstable');
+    expect(r!.staticMarginPct).toBeLessThan(-10);
+    // a low-AR body (AR < 1): broad, deep along the flow — the census
+    // reads the lifting planform honestly
+    expect(r!.planform.AR).toBeLessThan(1);
+    expect(r!.planform.S).toBeGreaterThan(1);
+    // the aileron fleet is mostly buried in the hull (the same old-physics
+    // pattern as the Falcon, at kit scale)
+    expect(r!.authority.rows.length).toBeGreaterThan(0);
+    expect(r!.authority.rows.filter(x => x.buried).length).toBeGreaterThan(0);
+  });
+
   it('Chip Patton’s Falcon (3348745601): the old-physics plane — its ' +
     'AILERON CENSUS shows the hidden-plate fleet the new field ignores', () => {
     const bp = load('3348745601');

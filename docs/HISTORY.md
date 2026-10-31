@@ -5114,8 +5114,15 @@ Patton's Falcon (3348745601, ingested) = 27.6 t, 30 m wing, margin
 +1.2% 'neutral', and the smoking gun: **132 of its 150 aileron plates
 are BURIED in the structure** — the new field excludes Ailerons from the
 shape census and pays only deflection×area×lever, which is why the old-
-physics hidden plates "don't do anything anymore". RCS Infinity is NOT
-subscribed on this machine — the bench is ready the moment it is.
+physics hidden plates "don't do anything anymore". **RCS Infinity** was in
+the corpus the whole time — 3812927875 (Steam title per ws-names.tsv; the
+internal alias is ISW-241, the aero.spec ISW, the one with the preview
+shot; 3518436870 is the earlier variant). The bench reads it honestly:
+139 kg on an AR 0.37 lifting body, static margin **−35.5% = UNSTABLE**,
+trim at −19.7° AoA (inaccessible) demanding 22° of elevator, 2 of 3
+control plates buried — the user's "can't fly stable" in numbers; the
+earlier variant lands margin +0.1% (neutral). The alias-vs-title lesson:
+craft searches go through ws-names.tsv, not just `data.alias`.
 
 **Carry-overs (WP-D).** ROUTER POWER GATING landed as designed last
 session (MiniRouter/Router carry [ADAPTER lowvoltage] and ARE the alias
@@ -5132,3 +5139,40 @@ stitch data-drift baseline), tsc clean, targeted e2e (chipos,
 xenonfarm, netscreens, aero incl. the FLIGHT leg, living, xenon) 33/0/3,
 the netscreen + jimmy probes identical-or-better. Tree label v1.17.0
 stays PROPOSED (the Y awaits assent); no Pages deploy (standing rule).
+
+## 14. v1.16.12 session — the NEVER-PAINTED GATE + RCS Infinity found (2026-10-31, same day)
+
+We lit the dev kit's boards in the morning (§13) — and the user's evening
+report showed the cost: "ChipOS devkit screens flicker badly and the
+screens window shows only black windows."
+
+The net-screen law registers every board on EVERY router-net computer, so
+app-1 and app-2 hold main-screen#0..7 on their VMs and never paint them.
+Both pump modes fetched a registered surface's buffer on FIRST observation
+(the write-counter map started empty), cached the blank, and pushed it
+EVERY cycle — the idle pumps' black boards fought ChipOS's painted pushes
+frame-by-frame (flicker), and the ▣ SCREENS dock, showing the active
+(last-booted, paints-nothing) app-2 pump, showed nine black windows
+(PUSHES 472 over 19 s on a board ChipOS repaints on intent — the count was
+the fingerprint all along; an earlier "ink 1.0" census simply sampled
+painted frames).
+THE NEVER-PAINTED GATE: the XenonScreen constructor's bg fill counts as
+write #1 (XenonScreen.hpp `_writeSeq`), so a surface at seq ≤ 1 has never
+been painted by the program — neither pump mode ships pixels for it. The
+dock merges the farm's PAINTED surfaces per key (the painting pump owns
+the cell; un-fed registered boards stay as honest dark cells; shim
+auto-created probe surfaces — ChipOS's screen($a, 8..31) span scan — stay
+out). The secondary-screen#0 face now keeps its initial 51 px lattice size
+(never pushed) — a board ChipOS doesn't project is dark, like in-game.
+Pins: xenonvm (app-1 idle seq ≤ 1 at 300×300 registration; chipos paints
+≥6 panels), e2e netscreens dock leg (farm-merged cell + press-to-repaint
+push), the LIGHTS leg's push law restated intent-driven (a push per
+repaint, not a blank-carry every cycle).
+
+**RCS Infinity was in the corpus all along** — 3812927875, the aero.spec
+ISW with the preview.jpg; the Steam title lives in ws-names.tsv, the
+internal alias is ISW-241 (our alias-only search missed it — the flightlab
+census leg pins it): 139 kg on an AR 0.37 lifting body, static margin
+**−35.5% = UNSTABLE**, trim −19.7° demanding 22° of elevator, 2 of 3
+control plates buried. The earlier variant 3518436870 reads margin +0.1%
+(neutral). The user's "RCS infinity can't fly stable", in numbers.

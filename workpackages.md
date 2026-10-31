@@ -526,5 +526,22 @@ release label. Fixtures: make_flight_test.py → 9000009080 FLIGHT BENCH
   Falcon 132/150 ailerons buried, Flight Bench pair stable +124% /
   tail-heavy −34%.
 - Gates: vitest 1090 (+23, stitch data-drift red = baseline), tsc clean,
-  targeted e2e 33/0/3, probes clean. RCS Infinity: not subscribed here —
-  bench ready on ingest.
+  targeted e2e 33/0/3, probes clean. RCS Infinity = 3812927875 (alias
+  ISW-241; search via ws-names.tsv) — bench: margin −35.5% UNSTABLE.
+
+---
+
+# Batch 3b (same day, evening) — the NEVER-PAINTED GATE. Label v1.16.12.
+User report: "ChipOS devkit screens flicker badly and the screens window
+shows only black windows." Root cause + law: LIVING-CRAFT § 11 (gate) —
+idle pumps pushed blank buffers on the SAME keys ChipOS paints (seq ≤ 1 =
+created, never painted); the dock showed the active (paints-nothing)
+pump's nine black registrations. Fixes: gate in BOTH pump modes
+(fetchVersioned / worker pixelsFor), dock farm-merge (other pumps: painted
+surfaces only, the painting pump owns the cell; the ACTIVE pump lists its
+surfaces wholesale — its cell canvases are the want-set bootstrap for
+virtual/auto-created surfaces; net-probe artifacts #8..31 filtered), the
+LIGHTS-leg push law restated intent-driven (the 472-push count was the
+fingerprint). Pins: xenonvm ×2,
+e2e netscreens dock leg. RCS Infinity = 3812927875 (ws-names.tsv title;
+alias ISW-241): margin −35.5% UNSTABLE — flightlab census leg.
