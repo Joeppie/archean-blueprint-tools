@@ -122,6 +122,12 @@ function pixelsFor(keys: string[]): Record<string, ArrayBuffer> {
     mod._free(p);
     if (idx < 0) continue;
     const v = typeof mod._xc_screen_version === 'function' ? mod._xc_screen_version(idx) : -1;
+    // v1.16.12 NEVER-PAINTED GATE: seq ≤ 1 = the surface was created
+    // (constructor bg fill) and never painted by the program — an idle
+    // computer's pre-registered net screen. Shipping its blank lets every
+    // pump push the same key and fight the painter frame-by-frame (the
+    // dev-kit flicker). No program write (seq ≥ 2) = no pixels.
+    if (v >= 0 && v <= 1) continue;
     if (v >= 0 && sentVer.get(key) === v) continue;
     const w = mod._xc_screen_w(idx), h = mod._xc_screen_h(idx), d = mod._xc_screen_pixels(idx);
     if (!w || !h || !d) continue;

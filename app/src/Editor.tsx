@@ -2343,6 +2343,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
               <Suspense fallback={null}>
                 <ScreensDockLazy comp={activePump()?.comp ?? xenonComps[0] ?? null}
                   pump={activePump()}
+                  pumps={xenonFarm.pumps}
                   craftId={craft ?? undefined}
                   focus={new URLSearchParams(window.location.search).get('dash')?.toLowerCase() ?? undefined}
                   onClose={() => setScreensOpen(false)} />

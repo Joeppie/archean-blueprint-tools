@@ -232,6 +232,28 @@ law, alias + io tokens), e2e netscreens.spec (auto-boot → ink on the
 faces). The dev kit 3828773626 is the standing audit; netscreenprobe.mjs
 reports the feed registry + push counts + ink.
 
+THE NEVER-PAINTED GATE (v1.16.12 — the user's flicker + black-window
+report): the net law registers EVERY board on EVERY router-net computer,
+so the idle app-1/app-2 pumps hold the SAME keys ChipOS paints. The shim's
+screen write-counter counts the constructor's bg fill as #1 — a surface at
+seq ≤ 1 has NEVER been painted by that program, and NEITHER pump mode
+(main-thread fetchVersioned, worker pixelsFor) ships pixels for it.
+Without the gate every pump pushed the same key every cycle: black buffers
+fighting the painter frame-by-frame (visible flicker on the 3-D boards)
+and the ▣ SCREENS dock — which shows the ACTIVE pump, the last-booted
+app-2 that paints nothing — a wall of black windows. The dock now merges
+the farm's PAINTED surfaces per key (the painting pump owns the cell); the
+ACTIVE pump contributes its surfaces WHOLESALE — a dock cell's canvas is
+what puts a surface into the pump's want-set, so the dock IS the bootstrap
+for auto-created + virtual surfaces (painted-only listing deadlocks them:
+no cell → no canvas → no want → no pixels). Net-PROBE artifacts (a program
+addressing screen($alias, ch) beyond a board's element count — ChipOS's
+span scan seeds #8..31 at 640×480) stay out: registered alias base +
+channel beyond the registered ones = probe, not surface. Pins:
+xenonvm net-screen legs (idle app-1 seq ≤ 1 / chipos paints), e2e
+netscreens dock leg (farm-merged cell visible + press-to-repaint push),
+xenon.spec Screens-tab leg (the virtual bootstrap).
+
 ## 12. ROUTER POWER GATING (v1.16.11 — the deferred v1.16.10 design)
 Mini/Router carry a `[ADAPTER lowvoltage]` and ARE the alias resolvers, so
 an UNPOWERED router drops its whole subtree from every computer's

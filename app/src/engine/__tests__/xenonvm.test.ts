@@ -173,3 +173,32 @@ describe('THE DEBUGGER STREAMS on the real VM (v1.13.31 contract, VM side)', () 
     expect(vm.run.running, 'Start outranks a pending park').toBe(true);
   }, 60_000);
 });
+
+describe('NET-SCREEN screens on the VM tier (v1.16.12, the dev-kit flicker guard)', () => {
+  it('the IDLE appkit computer (app-1) registers the router-net boards at ' +
+    'the 6 px/unit size and NEVER WRITES them — the write counter stays 0, ' +
+    'the never-written gate keeps its pixels unfetched (an idle pump that ' +
+    'shipped its blank buffer fought the painted pushes of ChipOS frame by ' +
+    'frame — the flicker the user saw)', async () => {
+    const vm = await bootVm('3828773626', cs => cs.find(c => c.ci === 3)!);
+    expect(vm.run.running).toBe(true);
+    expect(vm.surface('main-screen#0')).toEqual({ key: 'main-screen#0', w: 300, h: 300 });
+    vm.step(60);
+    // seq ≤ 1 = constructor bg fill ONLY — app-1's appkit program never
+    // paints the boards (it ships manifests/frames as TEXT to 'chipos').
+    expect(vm.run.screenVersion('main-screen#0')).toBeLessThanOrEqual(1);
+    expect(vm.run.screenVersion('secondary-screen#0')).toBeLessThanOrEqual(1);
+    expect(vm.lit('main-screen#0')).toBe(0);
+  }, 120_000);
+
+  it('the chipos computer PAINTS the boards (the write counter moves) — ' +
+    'one painter, eight lit panels', async () => {
+    const vm = await bootVm('3828773626', cs => cs.find(c => c.ci === 4)!);
+    expect(vm.run.running).toBe(true);
+    vm.step(160);                                       // boot + wizard scan
+    const painted = [0, 1, 2, 3, 4, 5, 6, 7]
+      .filter(ch => vm.run.screenVersion(`main-screen#${ch}`) > 1);   // ≥ 2 = program-painted
+    expect(painted.length).toBeGreaterThanOrEqual(6);   // the shell's panels
+    expect(vm.lit('main-screen#0')).toBeGreaterThan(50);
+  }, 120_000);
+});

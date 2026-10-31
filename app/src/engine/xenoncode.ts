@@ -2249,6 +2249,15 @@ export class XenonPump {
   private surfVer = new Map<string, number>();
   private fetchVersioned(key: string, r: XenonRun): Uint8ClampedArray | null {
     const v = r.screenVersion(key);
+    // v1.16.12 NEVER-PAINTED GATE (the dev-kit flicker): the XenonScreen
+    // constructor's bg fill counts as write #1 — a surface at seq ≤ 1 was
+    // created (registered) and NEVER PAINTED by the program. Shipping its
+    // blank once and carrying it (the old first-fetch) made every pump
+    // push the SAME net-screen key every cycle: app-1's and app-2's black
+    // boards fought ChipOS's painted pushes frame by frame (visible
+    // flicker) and flooded the Screens dock with black tiles. No program
+    // write = no pixels, until the painting starts (seq ≥ 2).
+    if (v >= 0 && v <= 1) return null;
     if (v >= 0 && this.surfVer.get(key) === v && this.surfaces.get(key)?.pixels) return null;
     const px = r.screenPixels(key);
     if (px) this.surfVer.set(key, v);

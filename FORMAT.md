@@ -654,6 +654,17 @@ implementation `tools/xenoncode/xc_host.cpp` + `app/src/engine/xenoncode.ts`)
   binds ALL of its keys (setScreenFeeds keeps a key LIST per ci:channel;
   pushScreen by any key lands on the shared DataTexture) and the LIVE
   farm's auto-boot feeds the boards with NO IDE window open.
+  THE NEVER-PAINTED GATE (v1.16.12): the net law registers every board on
+  EVERY router-net computer, so the idle app-1/app-2 pumps hold the SAME
+  keys ChipOS paints — the shim's screen write-counter counts the
+  constructor's bg fill as #1, so a surface at seq ≤ 1 has never been
+  painted by its program, and the pump ships NO pixels for it. Without the
+  gate every pump pushed the same key each cycle — black buffers fighting
+  the painter frame-by-frame (visible flicker) and filling the ▣ SCREENS
+  dock with black tiles (the dock shows the farm's PAINTED surfaces, each
+  key owned by the pump that paints it). Pins: xenonvm net-screen legs
+  (idle app-1 seq ≤ 1 / chipos paints) + e2e dock leg (farm-merged cells +
+  press-to-repaint push).
 - **ROUTER POWER GATING (v1.16.11, the deferred v1.16.10 design)**:
   MiniRouter and Router carry a `[ADAPTER lowvoltage]` — they ARE the
   alias resolvers, so an UNPOWERED Mini/Router makes its whole net subtree

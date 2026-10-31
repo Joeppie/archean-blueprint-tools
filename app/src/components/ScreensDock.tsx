@@ -27,7 +27,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import FloatingWindow from './FloatingWindow';
 import {
   xenonFarm, xenonScreenBindings, CYCLE_HZ, type PilotKey, type XenonComputer,
-  type XenonPump,
+  type XenonPump, type XenonSurface,
 } from '../engine/xenoncode';
 import { usePilotKeys } from '../engine/pilotkeys';
 import { slug } from '../engine/worldsim';
@@ -254,6 +254,14 @@ export default function ScreensDock(p: {
   /** FARM (slice C): the pump whose surfaces the dock shows (the active
    *  computer's); null = no VM booted yet. */
   pump: XenonPump | null;
+  /** v1.16.12 FARM MERGE (the dev-kit "black windows"): every farm pump.
+   *  THE NET-SCREEN LAW registers the boards on EVERY computer of the
+   *  router net, so the last-booted app-2 pump carries main-screen#0..7
+   *  UNPAINTED while chipos paints them on its own pump — the dock of ONE
+   *  pump showed nine black tiles. Cells now merge the PAINTED surfaces of
+   *  all pumps (pixels present; the never-written gate keeps blank
+   *  registrations out), each cell owned by the pump that paints it. */
+  pumps?: XenonPump[];
   /** deep link (Editor `?dash=`): this surface's zoom window opens by itself */
   focus?: string;
   /** set → opening a zoom window writes the ?craft&dash deep link into the
@@ -285,23 +293,58 @@ export default function ScreensDock(p: {
   usePilotKeys(true);
 
   const bindings = p.comp ? xenonScreenBindings(p.comp) : new Map<string, string>();
-  const all = [...(pump ? pump.surfaces.values() : [])];
-  // The 3-D model-face MIRRORS (the Computer's built-in screen fed from
-  // main#0) are the 3-D scene's business — a dock cell for each duplicate
-  // blits a full 640×480 canvas every cycle for pixels the user already
-  // sees under the real key, and that blit load is what starved the audio
-  // pump (v1.13.11). Cells show the real surfaces only.
-  const mirrors = new Set((p.comp?.screens ?? [])
-    .filter(s => s.deviceScreen).map(s => `${slug(s.alias)}#${s.channel}`.toLowerCase()));
-  const virt = all.filter(s => s.key.startsWith('virtual#'));
-  const dash = all.filter(s => !s.key.startsWith('virtual#') && !mirrors.has(s.key));
+  // v1.16.12 FARM MERGE (the dev-kit "black windows"): paint-across-pumps.
+  // THE NET-SCREEN LAW registers the boards on every router-net computer;
+  // the last-booted app-2 pump carries them UNPAINTED (never-written → no
+  // pixels) while chipos paints the SAME keys on its pump. Show every
+  // painted surface once, owned by the pump that paints it; a key no pump
+  // has painted yet shows under the active pump as a live (black) cell.
+  const pumps = p.pumps?.length ? p.pumps : pump ? [pump] : [];
+  const mirrorSet = new Set(pumps.flatMap(q => (q.comp?.screens ?? [])
+    .filter(s => s.deviceScreen).map(s => `${slug(s.alias)}#${s.channel}`.toLowerCase())));
+  // OTHER pumps contribute only their PAINTED surfaces (their unpainted
+  // registrations are the black-window noise the gate kills).
+  const painted = new Map<string, { s: XenonSurface; q: XenonPump }>();
+  for (const q of pumps) {
+    if (q === pump) continue;
+    for (const s of q.surfaces.values())
+      if (s.pixels && !mirrorSet.has(s.key) && !painted.has(s.key)) painted.set(s.key, { s, q });
+  }
+  // The ACTIVE pump contributes its non-mirror surfaces: a dock cell
+  // registers its canvas → the surface joins that pump's want-set → pixels
+  // start flowing. The dock IS the bootstrap for auto-created + virtual
+  // surfaces (painted-only listing deadlocks them: no cell → no canvas →
+  // no want → no pixels — the Screens-tab leg caught it). Exception: the
+  // shim's NET-PROBE surfaces — a program addressing screen($alias, ch)
+  // beyond a board's element count (ChipOS's span scan probes #8..31)
+  // auto-creates 640×480 dev seeds that no program paints: the key's base
+  // is a registered alias and the channel exceeds the registered ones, so
+  // it is a probe artifact, not a surface — kept out of the grid.
+  if (pump) {
+    const regMax = new Map<string, number>();
+    for (const sc of pump.comp?.screens ?? []) {
+      const b = slug(sc.alias).toLowerCase();
+      regMax.set(b, Math.max(regMax.get(b) ?? -1, sc.channel));
+    }
+    for (const s of pump.surfaces.values()) {
+      if (mirrorSet.has(s.key) || painted.has(s.key)) continue;
+      const parts = s.key.split('#');
+      const chN = parts.length === 2 ? Number(parts[1]) : NaN;
+      const max = regMax.get(parts[0] ?? '');
+      if (max !== undefined && Number.isFinite(chN) && chN > max) continue;
+      painted.set(s.key, { s, q: pump });
+    }
+  }
+  const all = [...painted.values()];
+  const virt = all.filter(x => x.s.key.startsWith('virtual#'));
+  const dash = all.filter(x => !x.s.key.startsWith('virtual#'));
   const list = useMemo(() => {
     const base = tab === 'virtual' ? virt : dash;
     const s = q.trim().toLowerCase();
     if (!s) return base;
-    return base.filter(x => x.key.includes(s) || (bindings.get(x.key) ?? '').toLowerCase().includes(s));
+    return base.filter(x => x.s.key.includes(s) || (bindings.get(x.s.key) ?? '').toLowerCase().includes(s));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, q, pump?.cycles, bindings]);
+  }, [tab, q, pump?.cycles, bindings, pumps.length]);
 
   // deep-link focus is ONE-SHOT: consumed the moment the zoom window opens
   // (a filter round-trip remounts cells; a re-armed autoFull would raise
@@ -311,7 +354,7 @@ export default function ScreensDock(p: {
   // physical mounts (we: "it should actually focus on the first
   // virtualscreen").
   const [focusLeft, setFocusLeft] = useState(p.focus ?? null);
-  const virt0 = [...(pump ? pump.surfaces.values() : [])].find(s => s.key.startsWith('virtual#'));
+  const virt0 = all.find(x => x.s.key.startsWith('virtual#'))?.s;
   useEffect(() => {
     if (focusLeft === 'first-virtual' && virt0) setTab('virtual');
   }, [focusLeft, virt0?.key]);
@@ -322,7 +365,7 @@ export default function ScreensDock(p: {
   // Invaders deep link must work however the URL survives the trip.
   const resolveFocus = (f: string): string | null => {
     let s = f; try { s = decodeURIComponent(f); } catch { /* raw */ }
-    const keys = [...(pump ? pump.surfaces.keys() : [])];
+    const keys = [...painted.keys()];
     return keys.includes(s) ? s
       : keys.includes(`${s}#0`) ? `${s}#0`
       : keys.find(k => k.split('#')[0] === s) ?? null;
@@ -390,15 +433,15 @@ export default function ScreensDock(p: {
             {pump?.status === 'booting' ? 'booting the computer…' : 'no surfaces painted yet'}
           </span>
         )}
-        {pump && list.map(s => (
-          <ScreensCell key={s.key} surfKey={s.key} w={s.w} h={s.h} maxH={260}
-            craftId={p.craftId} pump={pump}
-            testid={`screens-cell-${s.key}`}
-            canvasTestid={`screens-canvas-${s.key}`}
-            autoFull={focusKey === s.key}
+        {pumps.length > 0 && list.map(({ s: sf, q: owner }) => (
+          <ScreensCell key={sf.key} surfKey={sf.key} w={sf.w} h={sf.h} maxH={260}
+            craftId={p.craftId} pump={owner}
+            testid={`screens-cell-${sf.key}`}
+            canvasTestid={`screens-canvas-${sf.key}`}
+            autoFull={focusKey === sf.key}
             onAutoOpened={() => setFocusLeft(null)}
             tight={tight}
-            label={bindings.get(s.key) ?? s.key} />
+            label={bindings.get(sf.key) ?? sf.key} />
         ))}
         {p.comp && !!all.length && !list.length && (
           <span className="text-[12px] text-[#5d6a7d]">

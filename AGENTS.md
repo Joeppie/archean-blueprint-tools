@@ -516,7 +516,10 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   `setScreenFeeds`); ROUTER POWER GATING (Mini/Router resolve aliases only
   when fed — an unpowered one drops its subtree + aliases from
   device/screen/bus space; DataJunction/DataBridge passive, never gated);
-  THE FLIGHT LAB (below). Pins: xenoncode net-screen/gating tests + e2e
+  THE FLIGHT LAB (below); the NEVER-PAINTED GATE (v1.16.12: net-registered
+  boards seq ≤ 1 = never painted → no pixels shipped, no black-pusher
+  fights the painter; the dock merges the farm's painted surfaces per key).
+  Pins: xenoncode net-screen/gating tests + xenonvm gate legs + e2e
   netscreens.spec; audit `app/tools/netscreenprobe.mjs`.
 - `window.__XCDBG__` = the plain-JSON async debug console over the real pump
   (every answer JSON-serialisable, every call bounded) — the agent seam;
