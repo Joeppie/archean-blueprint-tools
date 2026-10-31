@@ -10,6 +10,7 @@
 // needs a browser.
 import type { Blueprint, BlueprintComponent } from './format';
 import { flatToTopMap, flatEndpointTop } from './flat';
+import { loadStore, saveStore, storageKey, type XenonStore } from './xenonstore';
 import { atlasJsonPaths } from './models';
 import { CRAFTER_BUILTIN } from './crafterbuiltin';
 import { blockAt, functionAt, includeOrder, projectBlocks, projectFunctions, type XCBlock } from 'xenoncore';
@@ -54,6 +55,11 @@ type Mod = {
   // ABI 11 (v1.14.1 slices B+D): typed as OPTIONAL — every caller
   // typeof-guards (a stale wasm degrades features, never spams)
   _xc_set_input_t?: (alias: number, ch: number, text: number) => void;
+  /** ABI 19 STORAGE PERSISTENCE (xenonstore.ts): seed one storage-var
+   *  file into the fresh VM's FS before boot; dump the live cache back.
+   *  typeof-guarded — an older wasm simply never persists. */
+  _xc_seed_storage?: (name: number, text: number) => void;
+  _xc_storage_dump?: () => number;
   _xc_set_input_ti?: (io: number, ch: number, text: number) => void;
   _xc_set_virtual_dt?: (ms: number) => void;
   _xc_beacon_put?: (i: number, payload: number) => void;
@@ -133,6 +139,9 @@ export function xenonInstantiate(): Promise<Mod> {
 
 export interface XenonComputer {
   ci: number;                 // component index of the MiniComputer
+  /** the open craft's id (the Editor stamps it) — the STORAGE key
+   *  namespace: per-(craft, computer) persistence (xenonstore.ts) */
+  craft?: string;
   alias: string;
   program: string;
   files: XCFile[];            // main.xc = the entry file, then includes
@@ -689,7 +698,29 @@ export class XenonRun {
   error = '';
   private constructor(mod: Mod) { this.mod = mod; }
 
-  static async open(comp: XenonComputer): Promise<XenonRun> {
+  /** seed the fresh VM's storage files BEFORE boot (the shim's
+   *  LoadStorage reads /prog/storage/<name>, ABI 19). A no-op on older
+   *  wasm or an empty map — the pre-persistence behaviour stands. */
+  static seedStore(mod: Mod, store: XenonStore | null | undefined): void {
+    if (!store || typeof mod._xc_seed_storage !== 'function') return;
+    for (const [name, lines] of Object.entries(store)) {
+      const text = lines.map(l => l + '\n').join('');
+      const nb = new TextEncoder().encode(name).length + 1;
+      const tb = new TextEncoder().encode(text).length + 1;
+      const np = mod._malloc(nb), tp = mod._malloc(tb);
+      mod.stringToUTF8(name, np, nb); mod.stringToUTF8(text, tp, tb);
+      mod._xc_seed_storage(np, tp);
+      mod._free(np); mod._free(tp);
+    }
+  }
+  /** the live storage cache as {name: [lines]} (null: old wasm / no VM) */
+  getStore(): XenonStore | null {
+    if (typeof this.mod._xc_storage_dump !== 'function') return null;
+    try { return JSON.parse(this.mod.UTF8ToString(this.mod._xc_storage_dump!())); }
+    catch { return null; }
+  }
+
+  static async open(comp: XenonComputer, store?: XenonStore | null): Promise<XenonRun> {
     const mod = await xenonInstantiate();   // ONE VM PER INSTANCE (slice C)
     const run = new XenonRun(mod);
     // allocate by UTF-8 BYTE length, not string length (non-ASCII comments
@@ -759,6 +790,7 @@ export class XenonRun {
     // hook DISARMED — its debugger is the pair+depth stream, the EM_JS
     // boundary crossing at every executed line is pure cost here.
     if (typeof mod._xc_hook_live === 'function') mod._xc_hook_live(0);
+    XenonRun.seedStore(mod, store);   // STORAGE PERSISTENCE before LoadStorage
     if (mod._xc_boot()) { run.error = mod.UTF8ToString(mod._xc_error()); return run; }
     run.running = true;
     return run;
@@ -1148,6 +1180,10 @@ export class XenonWorkerRun {
   private cycleSet: ((d: CycleData) => void) | null = null;
   private parseSet: ((errs: string[]) => void) | null = null;
   private rebootSet: ((ok: boolean) => void) | null = null;
+  /** ABI 19 STORAGE PERSISTENCE: one-shot waiters for the worker's
+   *  {t:'stored'} answer (seq-keyed; 4 s guard keeps a dead worker honest) */
+  private storeWait = new Map<number, (s: XenonStore | null) => void>();
+  private storeSeq = 0;
 
   private constructor(worker: Worker, sab: SharedArrayBuffer) {
     this.worker = worker;
@@ -1157,12 +1193,18 @@ export class XenonWorkerRun {
     worker.onmessage = (e: MessageEvent) => {
       const d = e.data as CycleData & {
         t: string; abi?: number; ok?: boolean; errs?: string[]; sfiles?: string[];
+        n?: number; store?: XenonStore; error?: string;
       };
       if (d.t === 'open') {
         this.abi_ = d.abi ?? 0;
         this.error = d.error ?? '';
         this.lastSourceFiles = (d.sfiles ?? []) as string[];
         this.openSet({ abi: this.abi_, error: this.error });
+        return;
+      }
+      if (d.t === 'stored') {
+        const f = this.storeWait.get(d.n ?? 0);
+        if (f) { this.storeWait.delete(d.n ?? 0); f((d.store as XenonStore | undefined) ?? null); }
         return;
       }
       if (d.t === 'reboot') {
@@ -1206,7 +1248,19 @@ export class XenonWorkerRun {
    *  — the race loses at 15 s, the worker is disposed and the byte-identical
    *  main-thread stepper takes over. (The Badger's 36k-line compile boots
    *  its VM in ~3 s, so 15 s is pure dead-air detection.) */
-  static async open(comp: XenonComputer): Promise<XenonWorkerRun | null> {
+  /** ask the worker for the live storage cache (null: dead/old wasm) */
+  getStore(): Promise<XenonStore | null> {
+    if (!this.running) return Promise.resolve(null);
+    return new Promise(res => {
+      const id = ++this.storeSeq;
+      this.storeWait.set(id, res);
+      this.worker.postMessage({ t: 'getstore', n: id });
+      setTimeout(() => { const f = this.storeWait.get(id);
+        if (f) { this.storeWait.delete(id); res(null); } }, 4000);
+    });
+  }
+
+  static async open(comp: XenonComputer, store?: XenonStore | null): Promise<XenonWorkerRun | null> {
     if (!sabSupported()) return null;
     try {
       // 8192 B (v1.13.21 XENON-LOCALS): slots 0..139 are the v1.13.17 step
@@ -1222,7 +1276,7 @@ export class XenonWorkerRun {
         t: 'open',
         xcUrl: new URL(xcGlueUrl, location.href).href,
         xcWasmUrl: new URL(xcWasmUrl, location.href).href,
-        sab, comp,
+        sab, comp, store: store ?? null,
       });
       const d = await Promise.race([
         r.opened,
@@ -1502,6 +1556,18 @@ export class XenonPump {
 
   /** Boot comp (closing any other computer's run). Resolves when the VM is
    *  up (status running/error). */
+  /** THE STORAGE PERSISTENCE LAW (v1.16.27, xenonstore.ts): the key this
+   *  computer's storage lives under, set at open from comp.craft. */
+  private storeK: string | null = null;
+  /** grab the live cache and persist — sync for the main-thread VM, a
+   *  queued worker message otherwise; ~2 s loss max on hard teardown. */
+  private persistStore(): void {
+    const key = this.storeK; const run = this.run;
+    if (!key || !run) return;
+    if (this.wrun) void this.wrun.getStore().then(s => { if (s) void saveStore(key, s); });
+    else { const s = (run as XenonRun).getStore(); if (s) void saveStore(key, s); }
+  }
+
   async open(comp: XenonComputer): Promise<void> {
     if (this.run && this.comp?.ci === comp.ci
         && (this.status === 'running' || this.status === 'booting')) return;
@@ -1540,10 +1606,16 @@ export class XenonPump {
     // THE WASM-LOAD-FAILURE LAW (v1.16.5): a headless jsdom mount has no
     // wasm fetch path — the pump answers status 'error' (the IDE shows the
     // chip), it never leaves the boot's rejection unhandled.
+    // THE STORAGE PERSISTENCE LAW (v1.16.27): restore last session's
+    // storage and seed it into the fresh VM BEFORE boot (both run modes) —
+    // storage vars must survive the page, the way they survive beside the
+    // save in the game (the ChipOS devkit setup-amnesia fix).
+    this.storeK = comp.craft ? storageKey(comp.craft, comp.ci) : null;
+    const store = this.storeK ? await loadStore(this.storeK) : null;
     let wr: XenonWorkerRun | null; let run: XenonRun | XenonWorkerRun;
     try {
-      wr = await XenonWorkerRun.open(comp);
-      run = wr ?? await XenonRun.open(comp);
+      wr = await XenonWorkerRun.open(comp, store);
+      run = wr ?? await XenonRun.open(comp, store);
     }
     catch (e) {
       this.status = 'error'; this.error = String(e);
@@ -1608,6 +1680,7 @@ export class XenonPump {
   }
 
   close() {
+    this.persistStore();   // last grab while the VM is still alive
     this.openSeq++;
     this.stopLoop();
     xenonFarm.detach(this);   // FARM (slice C): off the shared bus
@@ -1654,6 +1727,7 @@ export class XenonPump {
     // ON indicator flips OFF with the status. ▶/F8 resumes.
     if (this.status === 'running') this.pause();
     this.status = 'stopped';
+    this.persistStore();
     this.notify();
   }
   /** Breakpoints keyed BY FILE (XENON-DEBUG v2): breaks in inactive tabs
@@ -2322,6 +2396,7 @@ export class XenonPump {
    *  on save — ide.md "Running the code"). */
   reload(comp: XenonComputer) {
     this.openSeq++;
+    this.persistStore();   // the reboot must re-seed from the LATEST state
     this.stopLoop();
     this.run?.stop();
     this.run = null;
@@ -2509,6 +2584,9 @@ export class XenonPump {
       }
     }
     this.cycles++;
+    // storage persistence: every ~2 s of run (25 Hz) — the disk is then
+    // at most 2 s stale for a hard teardown (close/stop also persist)
+    if (this.storeK && this.cycles % 50 === 0) this.persistStore();
     // XENON-DEBUG v2: walk the EXECUTION-ORDER (file,line) stream through
     // THE STEPPER LAW (see the law's cross-reference note at stepperLaw).
     // XenonTest gate cycles never touch the debugger (deterministic asserts).
@@ -2660,7 +2738,7 @@ export class XenonPump {
  *  measures 0.2 changing surfaces per cycle of 117);
  *  14 = xc_screen_px/py/haspos (the composited HUD SCREEN window);
  *  13 = $panel.set_size(w,h) + width/height getters (ABI 13; wiki hud.md law). */
-export const XC_ABI = 18;
+export const XC_ABI = 19;
 
 // ---------------------------------------------------------------------------
 // COMPUTERFARM — the craft's co-running pumps + the SHARED io bus

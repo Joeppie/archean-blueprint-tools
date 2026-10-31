@@ -271,13 +271,29 @@ export class BuzzerAudio {
     lp.frequency.value = 7500;
     lp.Q.value = 0.7;
     const comp = ctx.createDynamicsCompressor();
+    // THE MIXER LAWS (v1.16.27, we: "the drone … is the sound that is
+    // seemingly quietened on every new note"): ① the AnalyserNode is a
+    // PASS-THROUGH — v1.13.4 wired comp→destination AND comp→an→
+    // destination, so EVERY sample reached the speakers TWICE: the mix ran
+    // a constant +6 dB, the compressor never rested, and every new note
+    // ducked the held ones (the pumping 'drone', worse for sustained
+    // ChipOS-Mario tones). The analyser is a TAP now: outputLevel() keeps
+    // reading the same stream, but nothing reaches the speakers through it.
+    // ② the defaults (threshold −24 dB, ratio 12, attack 3 ms) engage on a
+    // SINGLE voice (a full 0.5 gain sits at −6 dBFS!) — held the mix down
+    // per note onset. A gentle limiter instead: rests between notes, only
+    // catches the genuine 8-voice chord pile-ups it was added for.
+    comp.threshold.value = -3;
+    comp.knee.value = 8;
+    comp.ratio.value = 4;
+    comp.attack.value = 0.005;
+    comp.release.value = 0.12;
     const an = ctx.createAnalyser();
     an.fftSize = 2048;
     master.connect(lp);
     lp.connect(comp);
     comp.connect(ctx.destination);
-    comp.connect(an);
-    an.connect(ctx.destination);
+    comp.connect(an);            // TAP only — the old an.connect(destination) doubled the mix
     this.ctx = ctx; this.master = master; this.analyser = an;
     this.analyBuf = new Float32Array(an.fftSize);
     this.startKeepAlive(ctx, ctx.destination);   // media-active: no tab throttling

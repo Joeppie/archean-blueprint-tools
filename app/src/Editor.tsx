@@ -190,14 +190,16 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [bp, manifestV]);
   const xenonComps = useMemo(
+    // THE STORAGE PERSISTENCE LAW (v1.16.27): every comp carries the open
+    // craft's id — the pump keys its per-computer storage on it.
     () => (bp ? xenonComputers(bp, {
       // v1.16.11 ROUTER POWER GATING: an unpowered Mini/Router drops its
       // subtree from the device/screen space (engine/power.ts reachability;
       // a grid-less craft answers true = the power-unaware convention)
       routerPowered: ci => !powerNet?.hasPower || computerPowered(powerNet, ci),
-    }) : []),
+    }).map(c => ({ ...c, craft: craft ?? undefined })) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [bp, powerNet]);
+    [bp, powerNet, craft]);
   // ── v1.15.6 THE LIVING CRAFT (we: "computers should start when a craft is
   //    loaded in, and parts need to respond to signals … hinges and buttons
   //    and pivots and ailerons actually move … if a pivot or hinge moves, so

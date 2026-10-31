@@ -348,6 +348,16 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   the face's own VM twin is never painted by the program. Pin:
   `xenonpump.test.ts` (real XenonPump, scene feed key only); probe
   `app/tools/invadersfaceprobe.mjs`.
+- THE STORAGE PERSISTENCE LAW (v1.16.27, we: the ChipOS devkit "all screens
+  say to use the primary one … I suspect something is wrong there"): a
+  `storage var` survives beside the SAVE in the game — our wasm MEMFS dies
+  with the PAGE, so without persistence ChipOS re-ran first-run setup every
+  load. engine/xenonstore.ts: the pump restores {name: [lines]} into the
+  fresh VM BEFORE boot (shim ABI 19 xc_seed_storage; worker mode included)
+  and persists the live cache back (xc_storage_dump) on a ~2 s cycle
+  throttle + stop/close/reload; IndexedDB per (craft, computer), typed
+  opaque. Pins: fixture 9000009096 boot-counter + e2e/storage.spec (two
+  reloads, count ITERATES). HudController VMs do NOT persist yet (Backlog).
 - THE COMPUTER FARM (v1.15.0 P9 slice C): MULTIPLE MiniComputers co-run —
   every XenonRun carries its OWN wasm instance (`xenonInstantiate`), the
   `xenonFarm` registry (keyed by comp.ci, `MAX_VM` evicts the oldest)
@@ -522,6 +532,12 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   defaults ON; the AudioContext is created+resumed inside a REAL gesture
   playing a 1-frame silent buffer (a context created in the pump loop starts
   suspended and never resumes).
+  THE MIXER LAWS (v1.16.27, we: mario "the drone … seemingly quietened on
+  every new note"): the AnalyserNode is a PASS-THROUGH — a tap must NEVER
+  connect to destination (comp→an→dest doubled the mix +6 dB and kept the
+  compressor permanently engaged = every note onset ducked the held ones);
+  the limiter is GENTLE (−3 dB, 4:1, attack 5 ms, release 120 ms) so a
+  single voice never compresses.
 - THE PILOT-KEY LAW: a cabled/aliased PilotSeat pads to ALL 18 documented
   channels; WASD/↑↓/F/E/Q/I/K/J/L/R/digits/SPACE bind by channel word (SPACE
   = Down/Up AND Aux 1); press = ±1, release CENTERS; global editor shortcuts
@@ -1135,6 +1151,24 @@ behind a small link at the END of the gallery. Pages serves the GENERATED
   the shipped wasm (breakpoints/steps/vars/writeback; smoke on real DAP +
   real wasm). Open: S2b+ (run/pump/farm + SAB, worker), S3 (CraftSpec),
   the extension's T6 webview + T4 real-parser leg, marketplace publish.
+- **HUD storage persistence**: the COMPUTER pumps restore/persist `storage
+  var`s across page loads (v1.16.27, engine/xenonstore.ts); HudController
+  VMs (hudpump.ts) do NOT yet — a HUD program's storage vars still reset
+  per page. Wire it through the same seam when a HUD disk needs it.
+- **VS-Code-parity inventory (v1.16.27 audit, we: "any feature still
+  missing from helping us developing XenonCode the way a developer would
+  with e.g. VS Code?")**: ALREADY THERE — completion (typed decls + builtins
+  + aliases), function-reference hover with ORIGIN, go-to-def/Ctrl+Click,
+  diagnostics (9 codes) + Problems tab + gutter dots, find/find-references
+  to-line, breakpoints/step-into-over-out/park/watch-value WRITEBACK,
+  nav history, worker-mode stepping at 25 Hz, XenonTest autotest door +
+  __XCDBG__ agent seam, storage persistence. MISSING (ranked): rename
+  symbol, find-all-references PANEL (jumps exist, a results list does
+  not), CALL-STACK panel (the frame LABEL rides in the debugger status —
+  a list of frames does not), watch EXPRESSIONS (vars are listed +
+  editable; no pinned expressions), document FORMATTING, multi-file
+  project/workspace views, source control. None block the devkit flow;
+  the DAP extension (T5) already carries stack/vars for VS Code itself.
 - **WIRE integrity check + repair**: files written by older builds carry
   pipe endpoints referencing components that do not own the named port, and
   the census reports those as real connections. Wanted: flag a pipe whose

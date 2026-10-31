@@ -5629,3 +5629,41 @@ plus proportionality/monotonicity pins for the quiet sfx band. Gate: buzzer
 bench audio-truth PASS, vitest 1088, tsc clean. The Mario cabinet's audio.xc
 (60 fps frame tables, per-frame pitch+gain writes) is the standing stress
 case for every future buzzer change.
+
+## 27. v1.16.27 — THE STORAGE PERSISTENCE LAW + the mixer laws (we: "the
+## chipOS devkt … all screens say to use the primary one and I cannot get it
+## to work. I suspect something is wrong there." + "the drone … is the sound
+## that is seemingly quietened on every new note"; 2026-11-01)
+DEVKIT DIAGNOSIS (the suspicion was right — it was ours): the kit's whole UI
+runs on ChipOS `storage var`s (which board is PRIMARY is a storage var);
+in-game those live beside the save, but our VMs run on the wasm in-memory
+filesystem, which DIES with the page — so every load was a first-run wizard
+("SETUP IS ON THE MAIN SCREEN" on every board) and completed setups
+evaporated. Taps DO route (probe proof: the generated click.$sN handlers
+fire through the screens-ref seam). FIX: shim ABI 19 (xc_seed_storage /
+xc_storage_dump — xenoncore v0.3.3) + engine/xenonstore.ts — the pump
+restores {name: [lines]} into the fresh VM BEFORE boot (both run modes;
+the worker path included) and persists the live cache on a ~2 s cycle
+throttle plus stop/close/reload; IndexedDB per (craft, computer), the
+crafts.ts pattern, memory fallback for node. Pin: fixture 9000009096
+STORAGE BENCH (make_storage_test.py) — a boot-counter storage var on the
+bus; e2e/storage.spec reloads the page TWICE and asserts the count
+ITERATES (without persistence it answers 1 forever).
+MIXER LAWS (the Mario drone): ① the AnalyserNode is a PASS-THROUGH —
+v1.13.4 wired compressor→destination AND compressor→analyser→destination:
+every sample reached the speakers TWICE, the mix sat +6 dB hot, the
+compressor never rested, and every new note onset DUCKED the held tones
+(the "quietened drone" — a textbook compressor-pump symptom, and the
+doubling is the reason an earlier −6 dB felt "louder yet wronger"). The
+analyser is a pure TAP now (outputLevel() unchanged); ② the defaults
+(threshold −24 dB, ratio 12) engage on a SINGLE voice — a gentle limiter
+(−3 dB, 4:1, 5 ms/120 ms) rests between notes and only catches genuine
+8-voice pile-ups. Gates: full vitest 1090, tsc clean, storage+buzzer-bench
+e2e (audio-truth line re-verified through the rewired chain).
+UNRESOLVED-BY-DESIGN (documented, not fixed): the ChipOS wizard itself is
+third-party program logic — our law now gives it a persistent disk and
+working taps, but every wizard step's UX belongs to Chip's disks; and the
+LOCAL SAVE of the kit is v0.41b while the workshop ships v1.1.0 (the
+viewer loads whichever copy the corpus resolution picks — a stale local
+save shows the older ChipOS). HUD controllers share the storage gap
+(hudpump does not persist yet — Backlog).

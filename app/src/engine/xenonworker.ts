@@ -28,6 +28,9 @@ type Msg = {
     screens: { alias: string; channel: number; w: number; h: number; deviceScreen?: boolean }[];
     devices: { id: number; io: number; alias: string; type: string; x: number; y: number; z: number }[];
   };
+  /** ABI 19 STORAGE PERSISTENCE: the restored storage map seeded
+   *  into the fresh VM's FS before boot (xenonstore.ts law) */
+  store?: Record<string, string[]> | null;
   inputs?: [number | string, number, number | string][];
   bputs?: [number, string][];
   sync?: [string, number][];
@@ -96,6 +99,16 @@ function openRun(m: Msg): void {
   // CALL (the hook IS this host's debugger); the tracking itself stays
   // gated (the pump's 'track' messages) — an untracked VM records nothing.
   if (typeof mod._xc_hook_live === 'function') mod._xc_hook_live(1);
+  // ABI 19 STORAGE PERSISTENCE: seed the restored storage into the fresh
+  // VM's FS before boot — the shim's LoadStorage reads /prog/storage/<name>
+  // and the program's vars_init then finds LAST SESSION's values (the game
+  // keeps storage beside the save; MEMFS dies with the page).
+  if (m.store && typeof mod._xc_seed_storage === 'function')
+    for (const [name, lines] of Object.entries(m.store)) {
+      const np = putStr(name), tp = putStr(lines.map(l => l + '\n').join(''));
+      mod._xc_seed_storage(np, tp);
+      mod._free(np); mod._free(tp);
+    }
   sentVer.clear();
   err = mod._xc_boot() ? mod.UTF8ToString(mod._xc_error()) : '';
 }
@@ -190,6 +203,15 @@ ctx.onmessage = (e: MessageEvent<Msg>) => {
     }
     if (!mod) return;
     if (m.t === 'keys') { wantKeys = m.keys ?? []; return; }
+    if (m.t === 'getstore') {   // ABI 19: the pump persists our cache
+      if (typeof mod._xc_storage_dump !== 'function')
+        return ctx.postMessage({ t: 'stored', n: m.n, store: null });
+      try {
+        const store = JSON.parse(mod.UTF8ToString(mod._xc_storage_dump()));
+        ctx.postMessage({ t: 'stored', n: m.n, store });
+      } catch { ctx.postMessage({ t: 'stored', n: m.n, store: null }); }
+      return;
+    }
     if (m.t === 'track') {
       // XENON-DEBUG v3 TRACKING GATE: on = record lines/pairs/depths +
       // ship them; off = the VM runs with the recorder fully idle
