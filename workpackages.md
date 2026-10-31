@@ -552,3 +552,28 @@ alias ISW-241): margin −35.5% UNSTABLE — flightlab census leg.
   class for the dev kit's legal-pair authored skin (stitch 12/12);
   testdata corpus keeps the documented 3816936540 pair red (data drift).
 - tsc clean; /tmp/opencode scratch swept (2.3 G of staleness dirs freed).
+
+---
+
+# Batch 4 (2026-10-31, afternoon) — ANALYZER + TURBO + set_cps. Label v1.16.13.
+- WP-A THE XENONCODE ANALYZER (DONE): engine/xcanalyze.ts, 11 codes,
+  CM6 lint marks + Problems tab; vocabulary ⇄ binary cross-pins; shipped
+  disks true-negative; fixture 9000009090; e2e analysis.spec.
+- WP-B TURBO ×4 (DONE): pump cadence 100 Hz, virtual dt frozen; ⚡ in IDE/
+  dock/menu/HUD; data-cycles observable; e2e turbo.spec.
+- WP-C set_cps CADENCE LAW (DONE): shim records (ABI 17), xc_hud_cps,
+  HUD pump arm() follows the program live; hudRuntime stamp made live;
+  playerhud cadence pins; xenonhud suite re-proves the viewport law.
+- Gates: vitest (incl. xcanalyze 21, playerhud 11), e2e analysis+turbo
+  (both projects), xenonhud re-run; wasm rebuilt (ABI 17).
+
+## Batch 4b (evening) — button_circle + HUD analyzer + display names
+- Shim ABI 18: button_circle (member + MS forms, circle hit law; VM pin
+  inside/outside). Analyzer vocabulary += button_circle/transmit/panel
+  members; sync pin covers ALL THREE shim declaration sites; new pin:
+  shipped player-HUD disks (readme/homo/omfg) analyze clean.
+- HudDialog wires the analyzer: lint squiggles + Problems tab
+  (playerhud.spec leg). DISPLAY-NAME LAW: homo → 'Human HUD' (labels
+  only; folder keys byte-safe).
+- Gates: xcanalyze 22, xenonvm 14 (+circle), playerhud 13 (+Problems leg),
+  turbo 3/0/1, xenonhud+playerhud+xenon (@codeditor) e2e run, vitest full.

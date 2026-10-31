@@ -1245,6 +1245,17 @@ Demonstrated semantics (homo / omfg / readme + the two craft HUDs):
   rate), color words (`white black brown cyan`), `color(r,g,b[,a])` (alpha
   0-255), `size() pow round find sin abs`, string `&` concat, `$text.$i`
   indexing, `$v:number` cast, `for A, B ($x)` loops, `storage var` persists.
+- **THE HUD CADENCE LAW (v1.16.13, ABI 17)**: `set_cps(n)` (wiki
+  xenoncode/hud.md: "sets the number of HUD cycles per second") is the
+  HUD program's OWN cadence, called from `init`. It cannot be pre-parsed —
+  init RUNS (in scope), so the shim RECORDS the value (set_cps stamps
+  `g_hudCps` in HUD mode only; clamped 1..250) and the app's HUD pump READS
+  it live (`xc_hud_cps`) after every cycle, adopting `1000/n` ms the moment
+  the call executes. Unset = the 25 Hz CYCLE_MS law; the editor's TURBO ×4
+  multiplies on top of the program's own rate. Computers keep the fixed
+  25 Hz cadence (the game drives them at server tick); the HUD pump STAMPS
+  its VM instance (`hudRuntime: true` → `xc_hud_mode`) — the v1.15.2 law
+  made live.
 - **HUD→craft commands are a real control path**: the omfg header states the
   HUD relays PRESSURE to the vessel, which auto-reduces flight power —
   bidirectional craft↔HUD operability, "without using too many inputs on the

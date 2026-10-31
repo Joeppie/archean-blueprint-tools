@@ -5192,3 +5192,95 @@ corpus goes 12/12 green; the 3816936540 data-drift pair stays red on the
 testdata corpus exactly as documented (v1.16.3; per-craft data calls are
 the user's, untouched). The ids-order lesson: a corpus sweep reports its
 FIRST failure only — check the full list before believing a red moved.
+
+## 15. v1.16.13 session — THE XENONCODE ANALYZER + TURBO ×4 + the set_cps cadence law (2026-10-31, afternoon)
+
+Three asks, one batch (the user: "I want better xenoncode analysis. Report
+missing functions, definitions, missing return statements in functions
+where a result is used, etc. … mark them like VS would"; "we need a turbo
+button for xenoncode so it runs at 4x speed temporarily; this makes
+debugging easier and even our tests could run faster"; "setCPS in HUDS lets
+code change its actual interval, but this is done in its init. We should
+support that way of doing it. We cannot preparse the init, because it can
+actually run and should run in the same scope").
+
+**The analyzer** (engine/xcanalyze.ts): a pure per-disk pass (+ the
+computer's device aliases) with eleven codes — undeclared-function (every
+@-reference without a `function @name`), unknown-function/unknown-method
+(the BARE/TRAILING call scan against the VOCABULARY OF THE BINARY — the
+interpreter's `{"name", "(args):type"…}` table in XenonCode.hpp and the
+shim's 81 DeclareDeviceFunction names, both RE-DERIVED by xcanalyze.test
+the way mass.ts ⇄ game_data.py cross-pin), unknown-include,
+duplicate-function/var, missing-return (result USED — `= @f(`, `if @f(`,
+… — or a declared `: type` with no return), unused-function/var/param,
+unknown-alias (input/output/screen naming a component the craft lacks).
+Marked VS-style: CodeMirror's lint renderer (squiggles + hover + gutter
+dots) + a Problems side tab whose rows jump the editor (data-editor-jump).
+Three calibration lessons the shipped disks taught: string bodies must be
+masked for the call scan (ChipOS's player-facing prose "{} radiators found
+(…)" matched call shapes), project @functions are legal BARE in
+expressions (the wiki ties the @ to the statement-leading form), and click
+_hold/scroll are entry-point words. The TRUE-NEGATIVE law: the ChipOS
+52-file OS disk + the Badger's 57-file disk answer to ZERO hard-class
+diagnostics. Fixture 9000009090 ANALYSIS BENCH (make_analysis_test.py):
+one defect per code + the clean twins; e2e analysis.spec proves the
+renderer; the phone rail fallback joined the leg the first run caught
+(desktop-only side tab hangs the phone project).
+
+**TURBO ×4**: the pump's setInterval at CYCLE_MS/4 (100 Hz) with the
+shim's virtual dt frozen at 40 ms — the program's clock advances 4× per
+real second (emulator turbo, not a finer dt). Buttons: IDE title ⚡,
+▣ SCREENS dock ⚡ (farm-wide), Xenon menu ⚡ (mirrors RUNNING), HUD IDE ⚡;
+session-only; the IDE's data-cycles attribute is the rate observable
+(turbo.spec measures base vs fast with loaded-runner margins).
+
+**set_cps is the program's own cadence** (ABI 17): the shim's set_cps was
+a no-op; it now RECORDS the rate in HUD mode (g_hudCps, clamped 1..250,
+xc_hud_cps), and the HUD pump `arm()`s to 1000/n after the cycle that
+calls it — init RUNS as a cycle, so no pre-parse, same scope, the program
+owns its rate; unset = the 25 Hz law; turbo multiplies on top. The HUD
+pump's comp finally carries `hudRuntime: true` (the v1.15.2 stamp the
+design always said it wears; the code never set it — the xenonhud suite
+proves the viewport law). The answer to "do HUDs run faster?": NO — the
+HUD pump ran the same 25 Hz as computers; the program sets its own rate
+via set_cps, and the editor offers turbo on top.
+
+**Evening follow-up (same day, v1.16.13): "button_circle doesnt seem to
+work, its not know, and there is no squiggle, this is in the readme player
+HUD. Also the Homo Hud shouldnt be shown, rename it to human."** Three
+findings. (1) THE GAME's `readme` HUD calls `$panel.button_circle(…)` —
+our shim never declared it (the interpreter's XenonScreen has DrawCircle
+since the fork; the shim's button twin was rect-only), so the call was a
+silent no-op in our runtime AND invisible to the analyzer. ABI 18: the shim
+now declares button_circle (member + MS forms — draws the filled circle,
+evaluates true on a click inside the circle, the exact button_rect law;
+VM pin: press at dx=6 → 1, cleared next cycle, dx²+dy²=648 > r²=256 → 0).
+(2) THE ANALYZER NEVER RAN ON HUDS at all — HudDialog is a separate window
+from XenonDialog; the missing squiggle was structural. HudDialog now wires
+the same analyzeProject (debounced) + lint marks + a Problems side tab
+(playerhud.spec leg: the fixture floor reads 0 errors / 0 warnings). (3)
+The vocabulary audit earned its keep TWICE more: the member-table
+declaration site (`{"button_circle($x…)` — the readme's `set_position` was
+the second unknown) and the `panelMembers["…"]` map (panel object:
+set_position/set_size/width/height/x/y) — the sync pin now re-derives ALL
+THREE shim sites, and a new TRUE-NEGATIVE pin runs the analyzer over the
+shipped player-HUD disks (readme/homo/omfg + fixture floor): zero hard
+diagnostics. The rename: THE DISPLAY-NAME LAW (playerhud.playerHudDisplayName)
+— folder keys stay byte-safe for fetch/save, UI labels soften: the game's
+`homo` HUD (Latin for human) reads **Human HUD** in the Xenon menu and the
+dialog title.
+
+**v1.16.13 late-evening: the FOLLOW-SCROLL bug (we: "when I debug and step
+into, my scroll does NOT move to where the currently being executed line
+now is").** The pendingJump effect called `setPendingJump(null)` INSIDE
+itself; the state change re-ran the effect and the re-run's cleanup CLEARed
+the 60 ms scroll timer before it fired — every follow (F10/F11/breakpoint/
+Library) scheduled its center-scroll and cancelled it, since v1.13.27.
+Breakpoint hits hid it (stops land near the view); stepping always needs
+the scroll. The v1.13.33 follow pins asserted `data-editor-jump`, which
+the dialog's jumpTo sets BEFORE the effect runs — the pins proved the
+dialog fired, never that the VIEW moved. Fix: the effect's state
+self-clears by key (the timer survives; a newer jump replaces it);
+followTo now poll-asserts the active (paused) line's box sits inside the
+code pane's box — the scroll itself is the observable. Law recorded in
+AGENTS §Nav: an effect must never setState on its own deps inside itself.

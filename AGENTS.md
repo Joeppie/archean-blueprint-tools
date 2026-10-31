@@ -373,6 +373,14 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   scroll/focus doesn't change position when I used f11 … not acceptable");
   `data-editor-jump` is the follow observable (asserting only
   `data-paused-jump` proves the pump, not the follow).
+  v1.16.13 FOLLOW-SCROLL FIX (we again: "when I debug and step into, my
+  scroll does NOT move"): the attribute is set by the dialog's jumpTo
+  BEFORE the editor's 60 ms scroll fires, so the pins proved the dialog,
+  not the view — followTo now poll-asserts the active (paused) line's box
+  sits INSIDE the code pane's box. Law: an effect that schedules a timer
+  must NEVER setState on its own dep inside itself — the re-run's cleanup
+  clears the timer (the follow scroll was self-cancelling since v1.13.27;
+  breakpoint stops hid it, stepping needs the scroll).
 - EDITOR KEY LAWS (v1.13.26): defaultKeymap + `indentWithTab` are REQUIRED
   (CM keeps Tab = focus-move by default; without them Tab leaves the
   editor via the browser); Enter auto-indents one unit — a TAB, the game
@@ -386,6 +394,29 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   `engine.flyTo(device.ci)` (XCDevice carries the component index).
   Editor e2e legs carry @codeditor — full @codeditor runs only when
   CodeEditor.tsx/xcproject.ts/CodeMirror touch.
+- THE XENONCODE ANALYZER (`engine/xcanalyze.ts`, v1.16.13): a pure per-disk
+  pass (+ the computer's device aliases) → VS-style diagnostics (squiggles +
+  hover via CM6's lint renderer, gutter dots, a Problems side tab; row click
+  = `jumpTo`). Codes: undeclared-function, unknown-function/method/include,
+  missing-return (result-used or declared `: type` with no return),
+  duplicate-function/var, unused-function/var/param, unknown-alias. The
+  VOCABULARY IS THE BINARY — XC_SHIM_FUNCTIONS ⇄ `xc_host.cpp` and
+  XC_LANG_FUNCTIONS ⇄ `XenonCode.hpp` are re-derived by xcanalyze.test (the
+  mass.ts ⇄ game_data.py cross-pin); the shipped ChipOS/Badger disks answer
+  to ZERO hard-class diagnostics (a false positive on working code fails the
+  suite). Calls to project @functions are legal BARE in expressions; string
+  bodies + `;` comments are inert to the call scan. Fixture
+  `make_analysis_test.py` → 9000009090 (one defect per code + clean twins).
+- TURBO ×4 + set_cps (v1.16.13, ABI 17): the ⚡ (IDE title / ▣ SCREENS dock
+  farm-wide / Xenon menu / HUD IDE) restarts the PUMP CADENCE at 100 Hz —
+  the shim's virtual dt stays 40 ms, so the program's clock advances 4× per
+  real second (session-only; `turbo` flag + `setTurbo`). THE HUD CADENCE LAW
+  is the PROGRAM's voice: `set_cps(n)` (wiki hud.md) fires from `init`
+  (RUNS in scope — never pre-parse it); the shim records it in HUD mode
+  (`xc_hud_cps`), the HUD pump `arm()`s to `1000/n` after the cycle that
+  calls it; the HUD pump STAMPS `hudRuntime: true` (v1.15.2 law made live).
+  Computers keep 25 Hz (server tick law). Pins: playerhud cadence legs +
+  e2e turbo.spec (data-cycles rate observable).
 - THE STEP LAW LIVES IN TWO PLACES: `stepperLaw()` (xenoncode.ts, pure,
   main-thread) ⇄ the EM_JS hook in `xc_host.cpp` (worker). ANY change lands
   in BOTH + re-pins (+ rebuilt wasm: `EMSDK=~/emsdk tools/xenoncode/build.sh

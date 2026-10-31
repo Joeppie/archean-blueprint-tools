@@ -210,3 +210,5 @@ keeps only what needs the live page. Device-table laws never leave
 vitest (pure). Opt-outs: the manifest value shows truncated (fmtVal 12
 chars) — identity is the `.kit{3}` signature; the full registry string
 is a VM-tier assertion.
+### analysis.spec (1, @analysis @xenon @slow, v1.16.13) KEEP-INT (the ANALYSIS BENCH 9000009090 disk in the real IDE: CodeMirror lint squiggles + gutter dots render, the Problems side tab counts/lists rows (rail fallback on phones), a row click jumps the editor via data-editor-jump) — the analyzer's 11 codes, the vocabulary sync to the C++ binary (all three shim declaration sites) and the shipped-disk true-negatives (ChipOS/Badger + the player-HUD folders) are PORTED to xcanalyze.test
+### turbo.spec (2, @turbo @ui, v1.16.13) KEEP-INT (the IDE ⚡ quadruples the pump rate measured on the data-cycles observable; the Xenon menu mirrors RUNNING (desktop); the ▣ SCREENS dock ⚡ drives every farm pump) — session-toggle law; the set_cps cadence law PORTED to playerhud.test (VM tier)

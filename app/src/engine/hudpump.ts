@@ -17,7 +17,7 @@
 // THE RUNTIME (slice C): every VM is its own wasm instance (co-run) — the
 // HUD pump and the computer farm share the craft's beaconNet/io state,
 // not an interpreter.
-import { XenonRun, CYCLE_MS, type XenonComputer, type XenonHud } from './xenoncode';
+import { XenonRun, CYCLE_MS, TURBO_X, type XenonComputer, type XenonHud } from './xenoncode';
 import { beaconNet } from './beaconnet';
 import { wsEnsure, evalExpr } from './worldsim';
 
@@ -109,6 +109,11 @@ class HudPump {
     this.stop();
     const comp: XenonComputer = {
       ci: hud.ci, alias: hud.alias, program: 'hud',
+      // v1.15.2 law made LIVE (and the v1.16.13 set_cps gate): the HUD pump
+      // STAMPS its VM instance — HUD-only builtins (screen_w/screen_h as
+      // the player viewport, set_cps's cadence recording) gate on it;
+      // computers never call it.
+      hudRuntime: true,
       files: hud.files.map(f => ({ ...f })),
       entryName: 'main.xc', capacity: 8192, channels: [], screens: [], devices: [],
     };
@@ -123,13 +128,51 @@ class HudPump {
     this.surfaces = [];
     this.t0 = Date.now();
     if (run.error) { this.stop(); this.notify(); return; }
-    this.timer = setInterval(() => this.tick(), CYCLE_MS);
+    this.arm();
+    this.notify();
+  }
+
+  /** v1.16.13 THE HUD CADENCE LAW (the user: "setCPS in HUDS lets code
+   *  change its actual interval, but this is done in its init. We should
+   *  support that way of doing it. We cannot preparse the init, because it
+   *  can actually run and should run in the same scope"): the pump's
+   *  interval follows the PROGRAM's set_cps(n) (wiki hud.md) read live
+   *  after every cycle — init RUNS as a cycle, so the cadence adapts the
+   *  moment the call executes: no pre-parse, same scope, the program owns
+   *  its rate. 0 = unset → the 25 Hz CYCLE_MS law; TURBO multiplies on top
+   *  of the program's own rate; older wasm (no xc_hud_cps) = 0 → 25 Hz. */
+  private timerMs = 0;
+  /** AUDIT SEAM (v1.16.13): the interval the pump currently runs
+   *  (40 = the 25 Hz law; 1000/n after the program's set_cps(n)). */
+  cadenceMs(): number { return this.timerMs; }
+  private arm(): void {
+    const cps = this.run?.hudCps() ?? 0;
+    const ms = Math.max(4, (cps > 0 ? 1000 / cps : CYCLE_MS) / (this.turbo ? TURBO_X : 1));
+    if (this.timer && ms === this.timerMs) return;
+    if (this.timer) clearInterval(this.timer);
+    this.timerMs = ms;
+    this.timer = setInterval(() => this.tick(), ms);
+  }
+
+  /** v1.16.13 TURBO (the user: "runs at 4x speed temporarily … debugging
+   *  easier and even our tests could run faster") — the HUD pump's cadence
+   *  only, the program's virtual dt stays 40 ms: the HUD's clock advances
+   *  4× per real second. Session-only. (The HUD pump runs the SAME 25 Hz
+   *  law as computers — the game drives HUDs at its frame rate; the
+   *  program itself cannot set the frequency, so the editor owns turbo.) */
+  turbo = false;
+  setTurbo(on: boolean) {
+    if (this.turbo === on) return;
+    this.turbo = on;
+    if (this.timer) { clearInterval(this.timer); this.timer = null; this.timerMs = 0; }
+    if (this.running) this.arm();
     this.notify();
   }
 
   private tick(): void {
     const run = this.run, hud = this.hud;
     if (!run || !hud || !this.running) return;
+    this.arm();   // v1.16.13: follow the program's set_cps (init runs as a cycle)
     // AVATARSIM feed: the avatar_sensor_* rows at t → the get() pool
     const t = (Date.now() - this.t0) / 1000;
     for (const r of AVATARSIM_ROWS) {
