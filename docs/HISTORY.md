@@ -5476,3 +5476,31 @@ holds through the CLI. Toolchain notes: vitest inlines the TS-source
 package dep (`server.deps.inline`), esbuild bundles it into the browser
 and cjs bundles alike, TS6 `paths` without `baseUrl`; the extension repo
 sits on stable tsc 5.9/vitest 3 (VS Code ecosystem), xenoncore on TS6.
+
+## 21. v1.16.21 — S2a: the stepper law goes to the package; the extension
+## hits parity and passes it (2026-11-01)
+
+"Start with the work you can do … make an inventory to test and dev the
+extension … check parity with the dev's extension". The dev extension
+(read in full): 91 lines — grammar + language-config + a tabs popup + an
+AGGRESSIVE spaces→tabs editor rewrite + a "linter" that spawns the
+native `xenoncode -parse-line-generic` binary once PER LINE; no project
+view, no completion/hover/definition, no craft anything. PARITY.md is
+the full table: basics met (their grammar is our seed, their
+language-configuration verbatim), exceeded on diagnostics (project-wide,
+true-negative-pinned — the N-spawn-per-edit design is the flaw we don't
+copy), on the whole missing IDE surface, and on everything craft
+(COMPILE function, MCP). The one real gap — the interpreter's own parse
+errors — has a named path: a `-sENVIRONMENT=web,worker,node` wasm + a
+compile-only entry (TESTING.md T4). TESTING.md is the T0–T6 inventory
+(pure 11 pins ✅ → protocol → xvfb extension-host → the GAME roundtrip
+manual → real-parser syntax → DAP → webview) — the extension v0.2.0
+shipped the TAB LAW as a Format provider + `[xenoncode]` tab defaults
+(the dev's rule, on demand, pure + pinned incl a deep-indent leg that
+caught a tab-collapsing bug in my first cut). S2a took the first runtime
+seam out of the 3 001-line `xenoncode.ts`: THE STEPPER LAW (the
+debugger's whole stepping model + pair-stream encoding) moved to
+`xenoncore/stepper.ts` verbatim with its 10 pins; the app pump imports
+it; debugger e2e green on the seam (4/4), suite 1076. The law's "lives
+in two places" note in AGENTS now names the package as site one — the
+DAP adapter can be written against the package alone.

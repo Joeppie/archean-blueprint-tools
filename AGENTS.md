@@ -438,8 +438,7 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   calls it; the HUD pump STAMPS `hudRuntime: true` (v1.15.2 law made live).
   Computers keep 25 Hz (server tick law). Pins: playerhud cadence legs +
   e2e turbo.spec (data-cycles rate observable).
-- THE STEP LAW LIVES IN TWO PLACES: `stepperLaw()` (xenoncode.ts, pure,
-  main-thread) ⇄ the EM_JS hook in `xc_host.cpp` (worker). ANY change lands
+- THE STEP LAW LIVES IN TWO PLACES: `stepperLaw()` (**xenoncore `stepper.ts`**, pure, main-thread, since P10-S2a) ⇄ the EM_JS hook in `xc_host.cpp` (worker). ANY change lands
   in BOTH + re-pins (+ rebuilt wasm: in the xenoncore repo
   `EMSDK=~/emsdk tools/xenoncode/build.sh wasm-only`,
   `APP_ASSETS=…/app/src/engine/xenoncode`). v1.13.31 XENON-DEBUG v3 CLASSIC STEP-OVER DEEPENED (ABI 10):
@@ -1100,8 +1099,10 @@ behind a small link at the END of the gallery. Pages serves the GENERATED
   (`codec.corpus.test.ts`). **S4+S5+S6 LANDED (v1.16.20, 2026-11-01)**:
   the byte-surgical workspace codec + `xenon` CLI; `xenoncode-vscode`
   v0.1.0 (LSP + COMPILE-function commands, VSIX CI); the `xenon-mcp`
-  AI-check server. Open: S2/S3 (the VM/sim surgery, CraftSpec), the DAP
-  adapter + sim webview in the extension, marketplace publish.
+  AI-check server. **S2a LANDED**: THE STEPPER LAW is package code now
+  (`stepper.ts` + 10 pins; the app pump imports it — the DAP core is
+  ready). Open: S2b+ (run/pump/farm + SAB, worker), S3 (CraftSpec), the
+  extension's T1-T6 (TESTING.md), marketplace publish.
 - **WIRE integrity check + repair**: files written by older builds carry
   pipe endpoints referencing components that do not own the named port, and
   the census reports those as real connections. Wanted: flag a pipe whose

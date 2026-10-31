@@ -29,7 +29,7 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "three": "^0.186.1",
-    "xenoncore": "github:Joeppie/xenoncore#v0.2.1",
+    "xenoncore": "github:Joeppie/xenoncore#v0.3.0",
     "zustand": "^5.0.15"
   },
   "devDependencies": {

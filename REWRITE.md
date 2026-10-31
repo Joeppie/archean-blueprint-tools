@@ -808,6 +808,12 @@ Cursor) speaks MCP, so the AI check needs no fourth repo.
   (run/pump/farm vs the craft glue: worldsim overrides, CRAFTER_BUILTIN,
   models/atlas reads) — the split lands as app commits BEFORE the move.
   `vmharness.ts` becomes the package's node-tier harness.
+  **SLICE S2a LANDED (v0.3.0 xenoncore + app v1.16.21)**: THE STEPPER LAW
+  (`stepper.ts`: `StepperState`/`StepperHit`/`stepperLaw` + the pair-stream
+  encoding) moved with its 10 pins verbatim; the app pump imports it, the
+  debugger e2e (xenondbg + xenonfarm) green on the seam. This is the DAP
+  adapter's core, already in the package. REMAINING: run/pump/farm +
+  SAB protocol, the worker, buzzer/worldsim decoupling.
 - **S3** — CraftSpec distilled (the corpus audit via the existing probes:
   jimmyprobe/netscreenprobe re-run per the AGENTS rule), sim modules move,
   `scene.ts`/`Editor.tsx` shrink to the P8 ports (screen-feed, key-bus,
