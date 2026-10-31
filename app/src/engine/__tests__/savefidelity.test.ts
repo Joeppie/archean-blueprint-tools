@@ -67,7 +67,7 @@ describe('open → save preserves component orientations VERBATIM', () => {
     }
     expect(legacyFiles).toBeGreaterThan(20);
     expect(checked).toBeGreaterThan(200);
-  });
+  }, 120_000);   // (v1.16.10: the 9.9 MB CHIPOS BENCH joined the corpus walk)
 
   test('the raw orientation LITERALS survive byte-for-byte (doc raw-literal store)', () => {
     // rule 4 used to flip n.raw too ("0.7071" → "-0.7071", "0.0" → "-0.0") —

@@ -95,6 +95,8 @@ describe('doc-synced edits', () => {
 
 describe.skipIf(!haveCorpus)('corpus', () => {
   test('an untouched save re-emits EVERY corpus file byte-identically', () => {
+    // (v1.16.10: the corpus carries the 9.9 MB CHIPOS BENCH — ChipOS's
+    // real OS disks; the corpus walk's 5 s default is data-budget now)
     let n = 0;
     for (const id of readdirSync(CORPUS)) {
       const file = `${CORPUS}/${id}/blueprint.json`;
@@ -106,7 +108,7 @@ describe.skipIf(!haveCorpus)('corpus', () => {
       n++;
     }
     expect(n).toBeGreaterThan(20);
-  });
+  }, 120_000);
 
   test('ISW: moving a wheel 0.25 m in x shifts its occ + mirror together', () => {
     const text = readFileSync(`${CORPUS}/3812927875/blueprint.json`, 'utf8');
