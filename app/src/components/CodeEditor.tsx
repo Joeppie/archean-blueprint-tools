@@ -33,14 +33,14 @@ import {
 import { closeSearchPanel, openSearchPanel, searchKeymap, searchPanelOpen } from '@codemirror/search';
 import { lintGutter, setDiagnostics, type Diagnostic } from '@codemirror/lint';
 import { requestThumb } from '../engine/thumbs';
-import { xcDoc } from '../engine/xcdocs';
-import type { XCDiagnostic } from '../engine/xcanalyze';
+import { xcDoc } from 'xenoncore';
+import type { XCDiagnostic } from 'xenoncore';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { tags as t } from '@lezer/highlight';
 import {
   XC_KEYWORDS, XC_LIB_DOC, XC_LIB_FNS, XC_SCREEN_MEMBERS, XC_GLOBAL_CONSTS, definitionOf,
   functionTokenAt, ioCallAt, opensBlockLine, type XCDecl, type XCFile, type XCFunction,
-} from '../engine/xcproject';
+} from 'xenoncore';
 
 // ── XenonCode language ────────────────────────────────────────────────
 const KEYWORDS = new Set(XC_KEYWORDS);

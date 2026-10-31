@@ -85,6 +85,9 @@ docs/E2E-INVENTORY.md           e2e spec inventory (tiers, fixtures)
 REWRITE.md                      rewrite plan (landed phases marked; P8 live)
 ```
 app/: components/ (React), engine/ (pure logic + scene.ts + xenoncode/),
+packages/xenoncore/ (P10-S1 seed: XenonCode project model, analyzer, docs,
+sites + the craft decompose/pack codec — pure, imported as `xenoncore`;
+analysis LAWS live there, the app is a consumer),
 e2e/ (Playwright), tools/ (node audit drivers — *.mjs, real-browser pairs).
 
 ## Blueprint folder (rule — machine-local paths are configurable)

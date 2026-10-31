@@ -1,6 +1,7 @@
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vitest/config'
+import { fileURLToPath } from 'node:url'
 import corpus from './tools/vite-corpus.ts'
 
 // https://vite.dev/config/
@@ -33,6 +34,15 @@ export default defineConfig({
     allowedHosts: true,
   },
   plugins: [react(), tailwindcss(), corpus()],
+  resolve: {
+    alias: {
+      // P10-S1 (REWRITE § P10): the xenoncore package — the XenonCode
+      // analysis cluster + codec. Source-aliased (dev/build/tests all run
+      // the SAME files the package pins cover); S0 lifts packages/
+      // xenoncore/ into its own repo and this alias becomes a dep import.
+      xenoncore: fileURLToPath(new URL('./packages/xenoncore/src/index.ts', import.meta.url)),
+    },
+  },
   build: {
     // v1.12.2 BOOT COST — chunk diet. THREE (three.js + its addons) is a
     // stable vendor: on Pages it becomes its OWN hashed chunk that survives
@@ -53,7 +63,8 @@ export default defineConfig({
   },
   test: {
     // pure-logic engine layer runs on plain node — no DOM, no WebGL
-    include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    // (packages/** = the xenoncore package's own vitest tier, P10-S1)
+    include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'packages/**/*.test.ts'],
     environment: 'node',
   },
 })

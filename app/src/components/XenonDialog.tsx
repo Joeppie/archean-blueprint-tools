@@ -43,8 +43,8 @@ import { CodeEditor, type CodeEditorHandle } from './CodeEditor';
 import BeaconPanel from './BeaconPanel';
 import {
   functionAt, projectDecls, projectFunctions, XC_LIB_DOC,
-} from '../engine/xcproject';
-import { analyzeProject, type XCDiagnostic } from '../engine/xcanalyze';
+} from 'xenoncore';
+import { analyzeProject, type XCDiagnostic } from 'xenoncore';
 import XenonLibrary from './XenonLibrary';
 
 const MAX_PARSE_LINES = 500;   // validation pass cap (window around the caret)

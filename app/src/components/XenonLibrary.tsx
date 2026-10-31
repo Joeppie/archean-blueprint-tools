@@ -9,7 +9,7 @@
 import { useMemo, useState } from 'react';
 import {
   XC_LIB_DOC, XC_LIB_GROUPS, XC_SCREEN_MEMBERS, XC_GLOBAL_CONSTS, libIndex,
-} from '../engine/xcproject';
+} from 'xenoncore';
 
 export interface LibFn { file: string; line: number; name: string; display: string }
 

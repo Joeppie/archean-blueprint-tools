@@ -1,0 +1,10 @@
+{
+  "name": "xenoncore",
+  "private": true,
+  "version": "0.0.0",
+  "description": "The XenonCode language+runtime core (REWRITE § P10-S1 seed): project model, analyzer, reference docs, program sites, and the craft decompose/pack codec. Pure TS, zero UI, zero three.js — the app imports it as 'xenoncore'; P10-S0 extracts THIS folder into the xenoncore repo.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

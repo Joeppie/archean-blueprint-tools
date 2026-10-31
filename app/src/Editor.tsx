@@ -60,7 +60,7 @@ import { craftPowerNet, computerPowered } from './engine/power';
 import { EnergySim, type EnergyStatus } from './engine/energy';
 import { ItemSim, type ItemSimCensus } from './engine/itemsim';
 import { soundscape } from './engine/soundscape';
-import { chanSites, rectSites, rectsAt, type ChanSite, type RectSite } from './engine/xcsites';
+import { chanSites, rectSites, rectsAt, type ChanSite, type RectSite } from 'xenoncore';
 import { loadManifest, peekManifest } from './engine/models';
 import { beaconNet } from './engine/beaconnet';
 import { makeXcdbg } from './engine/xcdbg';

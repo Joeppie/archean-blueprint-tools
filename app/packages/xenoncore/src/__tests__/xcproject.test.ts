@@ -226,7 +226,7 @@ import { XC_GLOBAL_CONSTS } from '../xcproject';
 describe('XC_GLOBAL_CONSTS ⇄ xc_host.cpp lockstep', () => {
   it('names every DeclareGlobalConstant the shim makes, and no others', () => {
     const src = readFileSync(
-      fileURLToPath(new URL('../../../../tools/xenoncode/xc_host.cpp', import.meta.url)),
+      fileURLToPath(new URL('../../../../../tools/xenoncode/xc_host.cpp', import.meta.url)),
       'utf8');
     const shim = [...src.matchAll(/DeclareGlobalConstant\("([\w.]+)"/g)].map(m => m[1]!);
     expect([...XC_GLOBAL_CONSTS.map(c => c.name)].sort())

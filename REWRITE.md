@@ -786,7 +786,13 @@ Cursor) speaks MCP, so the AI check needs no fourth repo.
   consumes by dep. Gates: `build.sh` from the new repo, wasm export probe
   (AGENTS § LESSONS), full app suite green on the dep.
 - **S1** — analysis layer + its vitest suites move; app imports. Pure,
-  pinned, lowest risk.
+  pinned, lowest risk. **SEED LANDED v1.16.18 (pre-S0)**:
+  `app/packages/xenoncore/` — the four modules git-moved VERBATIM with
+  their vitest tier, the app consumes the `xenoncore` alias (vite + tsconfig
+  paths), and `xcanalyze.test` SPLIT: pure pins (vocabulary ⇄ C++, synthetic
+  diagnostics) in the package, corpus TRUE-NEGATIVE/player-HUD legs stay in
+  the app (`xcanalyze.integration.test.ts`) — the package imports NEITHER
+  the blueprint reader NOR the VM.
 - **S2** — VM runtime moves; `xenoncode.ts` is SURGICALLY split first
   (run/pump/farm vs the craft glue: worldsim overrides, CRAFTER_BUILTIN,
   models/atlas reads) — the split lands as app commits BEFORE the move.
@@ -797,7 +803,13 @@ Cursor) speaks MCP, so the AI check needs no fourth repo.
   descriptors, write-path).
 - **S4** — the codec + doc.ts xc-file funnels move; decompose/pack get a
   corpus roundtrip pin (decompose→pack == identity over every testdata
-  craft with xc_files).
+  craft with xc_files). **SEED LANDED v1.16.18**: the pure core
+  `packages/xenoncore/src/codec.ts` (entry law, key/file-order composition,
+  `#NODES` preservation, capacity/label verbatim, the content-hash
+  world-HDD bridge that skips the entitystate binary) with the corpus pin:
+  **528 disk files roundtrip decompose→compose byte-identically**.
+  REMAINING: the fs/CLI layer + the doc-funnel writeback (`setXcFileCode`
+  per composed file, S4 proper).
 - **S5** — `xenoncode-vscode` repo: LSP first, decompose/pack, DAP,
   webview sim.
 - **S6** — the MCP bin (`xenoncore/bin/mcp.ts`) + a demo prompt session

@@ -12,7 +12,7 @@ import type { Blueprint, BlueprintComponent } from './format';
 import { flatToTopMap, flatEndpointTop } from './flat';
 import { atlasJsonPaths } from './models';
 import { CRAFTER_BUILTIN } from './crafterbuiltin';
-import { blockAt, functionAt, includeOrder, projectBlocks, projectFunctions, type XCBlock } from './xcproject';
+import { blockAt, functionAt, includeOrder, projectBlocks, projectFunctions, type XCBlock } from 'xenoncore';
 import { beaconNet } from './beaconnet';
 import { buzzerAudio, modeToWave } from './buzzer';
 import type { XenonSnap } from './xenontest';

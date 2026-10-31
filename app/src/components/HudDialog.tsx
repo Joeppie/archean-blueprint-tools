@@ -15,13 +15,13 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import FloatingWindow from './FloatingWindow';
 import { CodeEditor, type CodeEditorHandle } from './CodeEditor';
-import { analyzeProject, type XCDiagnostic } from '../engine/xcanalyze';
+import { analyzeProject, type XCDiagnostic } from 'xenoncore';
 import { varKind } from '../engine/xenoncode';
 import BeaconPanel from './BeaconPanel';
 import { hudPump, ANCHOR_LABELS, HUD_VIEW_PRESETS, type HudSurface } from '../engine/hudpump';
 import XenonLibrary from './XenonLibrary';
 import type { XCFile } from '../engine/xenoncode';
-import { projectFunctions, projectDecls } from '../engine/xcproject';
+import { projectFunctions, projectDecls } from 'xenoncore';
 import type { XenonHud } from '../engine/xenoncode';
 
 const MENU_HINT = 'F5 run = save (re-boots the HUD runtime on them) · Ctrl+F find · Ctrl+G goto · ⛶ maximise';

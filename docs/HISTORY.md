@@ -5378,3 +5378,39 @@ harness; e2e keeps real-cursor/IndexedDB/F5 legs) and WP-FULLSCREEN are
 the open plans; LIVING-CRAFT § 14 documents the cockpit-window law, the
 buzzer tables are pure 1/n (AGENTS), the seat-bench/analysis-bench
 fixtures join TEST-PYRAMID.
+
+## 18. v1.16.16–v1.16.18 — P10 planned; the pack-out on disk; the xenoncore package seed (2026-11-01)
+
+The user asked to isolate the XenonCode stack so a VS Code extension and an
+AI can consume it (IDE experience: variables, vocabulary, HUD-vs-computer
+context; a COMPILE function that decomposes/recomposes a craft's hard disk).
+REWRITE § P10 recorded the plan (two repos: `xenoncore` + `xenoncode-vscode`,
+an MCP bin in the package, the full move inventory and S0–S6 slices). The
+next turn researched the pack-out ON DISK to ground the codec: the game's
+server world saves decompose live craft disks into
+`ARCHEAN_computer/HDD-<24hex>/` folders themselves (loose `.xc`, the
+`#NODES` visual-editor header as the FIRST LINE of every `.main.xc`,
+`storage/` scalar-key files); the design-time pack-out is the in-game SAVE
+rewriting `client/blueprints/<wsid>/blueprint.json` (measured on 3828773626
+— three `hdd` disks, 747 kB source, every `capacity` 256 ⇒ capacity is NOT
+source bytes); compiled `xc_program.bin` rides only player-HUD installs. The
+entity↔HDD link is binary (`ARCHEAN!ENTITY`) — BANNED for tooling; the
+world-save bridge is a content hash. FORMAT/LOCATIONS carry the facts; § P10
+grew the codec source modes, the live-craft loop, the extension test tiers
+(LSP/DAP protocol tests headless; @vscode/test-electron nightly; webview
+manual) and the per-repo Pages/CI ritual. "Go full auto" then landed the
+package SEED in-repo: `app/packages/xenoncore/` — the analysis cluster
+(xcproject/xcanalyze/xcdocs/xcsites) git-moved VERBATIM with its vitest tier
+(the xcanalyze suite split: pure pins in the package, corpus TRUE-NEGATIVE
+legs stay as `xcanalyze.integration.test.ts` — the package imports neither
+the blueprint reader nor the VM), the whole app consuming it via the
+`xenoncore` vite/ts alias, and the NEW `codec.ts` (S4 seed):
+decomposeBlueprint/pickEntry (the xenonComputers entry law re-pinned),
+composeFiles (key-order `{name, plain_code}` + file-order law),
+nodesHeader/nodesViolations (73 corpus `.main.xc` carry the `#NODES` line),
+contentHash/matchWorldHdds (the entitystate-free bridge). The corpus IS the
+fixture: 528 disk files roundtrip decompose→compose byte-identically.
+`erasableSyntaxOnly` stays honored (TS6: paths without baseUrl — baseUrl is
+deprecated). Not yet in scope (logged in § P10): the repo split itself (S0),
+VM/sim moves (S2/S3), doc-funnel writeback of composed files (S4 fs layer),
+the LSP/DAP bins (S5), MCP (S6).

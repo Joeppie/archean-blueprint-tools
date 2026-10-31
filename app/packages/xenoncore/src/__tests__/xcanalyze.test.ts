@@ -1,27 +1,28 @@
-// xcanalyze.test.ts — THE XENONCODE ANALYZER pins (v1.16.13): vocabulary
-// sync against the C++ sources (the mass.ts ⇄ game_data.py pattern), one
-// pin per diagnostic code, and the TRUE-NEGATIVE law: the shipped real
-// programs (ChipOS's 52-file disk, the Badger's 57-file disk) compile —
-// they answer to ZERO error/warning-class diagnostics (hints are allowed:
-// shipped code may carry an unused local).
+// xcanalyze.test.ts — THE XENONCODE ANALYZER's pure pins (v1.16.13; the
+// xenoncore package era, P10-S1): vocabulary sync against the C++ sources
+// (the mass.ts ⇄ game_data.py pattern) and one pin per diagnostic code.
+// The corpus TRUE-NEGATIVE legs (real disks, player-HUD disks) ride in the
+// APP as xcanalyze.integration.test.ts — the package never imports the
+// blueprint reader.
 import { describe, expect, it } from 'vitest';
-import { readFileSync, existsSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { analyzeProject, XC_SHIM_FUNCTIONS, XC_LANG_FUNCTIONS } from '../xcanalyze';
-import { xenonComputers } from '../xenoncode';
-import { listPlayerHuds, readPlayerHudProgram } from '../../../tools/vite-corpus';
-import type { Blueprint } from '../format';
 import type { XCFile } from '../xcproject';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const XC_HOST = join(HERE, '../../../../tools/xenoncode/xc_host.cpp');
-const XENON_HPP = join(HERE, '../../../../tools/xenoncode/upstream/XenonCode.hpp');
-const CORPUS = join(HERE, '../../../../testdata');
-const load = (id: string): Blueprint | null => {
-  const p = join(CORPUS, id, 'blueprint.json');
-  return existsSync(p) ? JSON.parse(readFileSync(p, 'utf8')) : null;
-};
+function repoRoot(): string {
+  let d = HERE;
+  for (let i = 0; i < 8; i++) {
+    if (existsSync(join(d, 'tools', 'xenoncode', 'xc_host.cpp'))) return d;
+    d = join(d, '..');
+  }
+  throw new Error('tools/xenoncode/xc_host.cpp not found above the test file');
+}
+const ROOT = repoRoot();
+const XC_HOST = join(ROOT, 'tools/xenoncode/xc_host.cpp');
+const XENON_HPP = join(ROOT, 'tools/xenoncode/upstream/XenonCode.hpp');
 const f = (name: string, code: string): XCFile => ({ name, code });
 const codes = (ds: ReturnType<typeof analyzeProject>) => ds.map(d => d.code).sort();
 
@@ -135,89 +136,11 @@ describe('per-code diagnostics (synthetic programs)', () => {
   });
 });
 
-describe('TRUE-NEGATIVE law: shipped programs are clean', () => {
-  const HARD = ['xc-undeclared-function', 'xc-unknown-function', 'xc-unknown-method',
-    'xc-unknown-include', 'xc-duplicate-function', 'xc-missing-return'];
-  const runDisks = (id: string): string[] => {
-    const bp = load(id);
-    if (!bp) return [];
-    const bad: string[] = [];
-    for (const c of xenonComputers(bp)) {
-      if (!c.files.length) continue;
-      const aliases = c.devices.map(d => d.alias.toLowerCase()).filter(Boolean);
-      const ds = analyzeProject(c.files, { aliases });
-      bad.push(...ds.filter(d => HARD.includes(d.code))
-        .map(d => `${c.alias}/${d.file}:${d.line} ${d.code}: ${d.message}`));
-    }
-    return bad;
-  };
-
-  it('the ChipOS Dev Kit (per-computer disks incl. the 52-file OS): no HARD diagnostics', () => {
-    expect(xenonComputers(load('3828773626')!).length).toBeGreaterThanOrEqual(3);
-    expect(runDisks('3828773626').slice(0, 12),
-      'the shipped OS + app disks must analyze clean').toEqual([]);
-  }, 30_000);
-
-  it('the Badger 3326372833 disk: no HARD diagnostics', () => {
-    expect(runDisks('3326372833').slice(0, 12)).toEqual([]);
-  }, 30_000);
-
-  it('the corpus ids census reads at least the fixture disks', () => {
-    const ids = readdirSync(CORPUS).filter(d => d.startsWith('9000009050'));
-    expect(ids.length).toBe(1);
-  });
-
-  it('the SHIPPED player-HUD disks (fixture floor + machine huds: readme, ' +
-    'homo, omfg) carry no HARD diagnostics (v1.16.13 — the game hud calling ' +
-    'button_circle is what fired the vocabulary audit)', () => {
-    const entries = listPlayerHuds();
-    expect(entries.length).toBeGreaterThan(0);
-    for (const e of entries) {
-      const prog = readPlayerHudProgram(e.name);
-      if (!prog) continue;
-      const hard = analyzeProject(prog.files).filter(d => HARD.includes(d.code));
-      expect(hard.map(d => `${e.name}/${d.file}:${d.line} ${d.code}: ${d.message}`).slice(0, 8),
-        `hud ${e.name}`).toEqual([]);
-    }
-  }, 30_000);
-});
-
-describe('ANALYSIS BENCH fixture (9000009090 — one defect per code)', () => {
-  it('every planted defect fires; the clean counterparts stay silent', () => {
-    const bp = load('9000009090');
-    if (!bp) return;
-    const comp = xenonComputers(bp).find(c => c.alias === 'analyst')!;
-    const aliases = comp.devices.map(d => d.alias?.toLowerCase() ?? '').filter(Boolean);
-    expect(aliases).toContain('lamp');
-    const ds = analyzeProject(comp.files, { aliases });
-    const byCode = new Map<string, number>();
-    for (const d of ds) byCode.set(d.code, (byCode.get(d.code) ?? 0) + 1);
-    for (const code of ['xc-undeclared-function', 'xc-unknown-function',
-      'xc-unknown-method', 'xc-unknown-include', 'xc-missing-return',
-      'xc-unused-function', 'xc-unused-var', 'xc-unused-param',
-      'xc-unknown-alias', 'xc-duplicate-function', 'xc-duplicate-var'])
-      expect(byCode.has(code), `${code} must fire on the bench (got ${[...byCode]})`).toBe(true);
-    // the clean half: @dup/@sink calls, $v/$x reads, the lamp alias — the
-    // ghost alias fires EXACTLY once, the lamp one never
-    expect(byCode.get('xc-unknown-alias')).toBe(1);
-    expect(ds.filter(d => d.code === 'xc-undeclared-function')).toHaveLength(1);
-    // the disk is small: hints stay few (no diagnostic storm)
-    expect(ds.length).toBeLessThan(16);
-  });
-});
-
 describe('THE ROOT-NAME LAW (v1.16.14 — the Human HUD beacon case)', () => {
   it('member use references the ROOT var ($beacon.data in tick uses $beacon)', () => {
     const ds = analyzeProject([f('main.xc',
       'var $beacon = beacon("tx", "rx")\n\ninit\n\t$beacon.transmit("hi")\n\ntick\n\tprint($beacon.data)\n')]);
     expect(ds.filter(d => d.code === 'xc-unused-var' && d.message.includes('beacon')))
       .toEqual([]);
-  });
-  it('the Human HUD disk (homo) flags NO beacon var as unused', () => {
-    const prog = readPlayerHudProgram('homo');
-    if (!prog) return;                       // machine-local floor
-    const ds = analyzeProject(prog.files).filter(
-      d => d.code === 'xc-unused-var' && d.message.includes('beacon'));
-    expect(ds.map(d => d.message)).toEqual([]);
   });
 });
