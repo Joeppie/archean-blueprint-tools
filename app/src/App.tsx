@@ -187,6 +187,12 @@ function Gallery({ onOpen, onNew }: { onOpen: (id: string, dash?: string) => voi
           href is ROOT-relative-exact (from the Pages site root AND the dev
           '/' page — '../' would ESCAPE the Pages repo prefix). */}
       <footer className="mx-auto mt-12 max-w-5xl border-t border-white/5 pt-3 pb-1 text-[11px] text-ink-dim/70">
+        <a data-testid="xenoncore-link" href="https://joeppie.github.io/xenoncore/"
+          target="_blank" rel="noopener"
+          className="underline decoration-white/15 underline-offset-2 hover:text-ink">
+          xenoncore — the XenonCode language core & playground
+        </a>
+        {' · '}
         <a data-testid="legacy-link" href="viewer/index.html"
           className="underline decoration-white/15 underline-offset-2 hover:text-ink">
           legacy blueprint viewer

@@ -5439,5 +5439,6 @@ says so; npm-registry publishes will ship real bytes), docs swept
 with APP_ASSETS + dep-tag bump + asset copy in ONE commit; NOTICE §6,
 FORMAT §Xenon disk, help topic, landing row → the public playground).
 Version strings 9× v1.16.15 → v1.16.19 (no release tags past v1.16.9 —
-all dev labels). Gates: tsc clean on the dep, vitest 1149→(recount below),
-e2e fast tier green, xenoncore CI green on v0.1.1.
+all dev labels). Gates: tsc clean on the dep, vitest **1083 passed**
+(6 skipped, 0 failed — the 68-test package tier now runs in xenoncore's
+CI), e2e fast tier green, xenoncore CI green on v0.1.1.
