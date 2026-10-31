@@ -309,7 +309,7 @@ computer booted (power-gated), devicesim stepped, energy census, crafter
 installation identified; report = crash list + device table. This is the
 driving audit for "as much of the game as we can simulate".
 
-## WP8 — GATES + TRIAGE (IN PROGRESS — final full runs at the end)
+## WP8 — GATES + TRIAGE (DONE — results + the e2e-value verdict below)
 npm test + tsc + touched e2e tags + test:e2e:fast. NEW e2e kept minimal (one
 chipos end-to-end leg; the sound/item laws stay at vitest/scene tiers).
 docs: LIVING-CRAFT.md §§ extend, docs/HISTORY.md provenance, FORMAT.md
@@ -369,3 +369,51 @@ user's explicit ask).
   data belongs to the developer) — procedural WebAudio twins of the
   LAWS (switch click, relay clack, drill whir, anchor chain, alarms).
   DONE.
+
+
+## Gate results (the final runs)
+- vitest: 1078 tests — green except the TWO PRE-EXISTING stitch reds
+  (3816936540 old-hullify copy; data-source drift, documented in
+  docs/HISTORY.md v1.16.3 — red on every corpus this machine has,
+  before and after this batch, untouched by it).
+- tsc: clean.
+- corpus byte-fidelity: the three new benches re-emit BYTE-IDENTICAL
+  and keep every orientation literal (the two corpus walks got a
+  data-budget timeout for the 9.9 MB bench — the law is unchanged).
+- e2e fast tier: see the run log; the two chipos legs are GREEN
+  (2.2 s + 0.9 s warm) — @slow for the manifest leg, @ui for the chip.
+- viewer gate: the version-string bump commit ran the SELFTEST+REGTEST
+  pair through the pre-commit hook (viewer/ staged) — PASS.
+
+## The e2e-value verdict (the standing ask: "evaluate whether we need
+## all the e2e tests you might have created")
+- KEEP chipos.spec leg 1 (@slow): the ONLY tier with four real pumps
+  co-cycling in one page, the manifest crossing into IDE DOM rows and
+  the cascaded-window press plumbing it exercises (the drag-clear step
+  doubles as living-window coverage).
+- KEEP chipos.spec leg 2 (@ui, 0.9 s): the power-chip DOM + battery
+  panel — the whole energy UI surface in under a second; the numbers
+  themselves are all vitest-pinned (energy.test), the leg is the wiring
+  smoke.
+- NOT added as e2e (deliberate): the appkit registry string, the drill
+  rates, deep discharge, item flow, device tables, sound graph — every
+  one has a smaller-tier home (chipos/energy/items/flat/soundscape
+  tests, scene GLOW LAW) — an e2e for them would re-test the engine
+  through a browser at 100× the cost. The ChipOS wizard click-through +
+  TETRIS tile pixels would be a REAL new journey (Pages-tier UX), not a
+  law copy — kept OPEN, NOT written tonight (a green pin we cannot
+  ground in observed in-game pixels is a pin we'd have to guess; the
+  registry/bus laws are already pinned where they live).
+- Probes (node tools, not in the suite): jimmyprobe.mjs is the standing
+  census (AGENTS: re-run after any power/devices/items/bus change);
+  chiposprobe/benchprobe are its siblings — cheap, informative,
+  zero-suite-cost.
+
+## Session end state
+- Commits on main (ff from living-craft-2): the ingest, WP1+WP2 appkit
+  bus, WP5 power flow, WP6 items, the flat-endpoint fix, WP4 sound,
+  docs waves, the e2e greens, the data-budget timeouts.
+- Tree label v1.16.10 (Z). THE PROPOSAL for assent: v1.17.0 (merging
+  the standing HUD Y-proposal 98a0405 with this feature batch) — per §
+  Versioning a Y is proposed, never self-awarded.
+- No Pages deploy (the standing rule: deploy only on the explicit ask).

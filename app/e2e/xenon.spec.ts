@@ -817,8 +817,13 @@ test.describe('Xenon IDE @ui', () => {
     // syntax highlighting: token spans are styled (the theme's generated
     // classes ride every keyword/var/number span)
     await expect(page.locator('.cm-content .cm-line').first()).toBeVisible();
-    expect(await page.evaluate(() => document.querySelectorAll(
-      '.cm-content .cm-line span[class]').length)).toBeGreaterThan(8);
+    // POLLED (v1.16.10): CodeMirror's windowed doc fills over its first
+    // frames — the LAW is "the doc is syntax-highlighted", not "frame 1
+    // has spans" (the Jimmy-batch catch: a first-paint count raced).
+    await expect
+      .poll(() => page.evaluate(() => document.querySelectorAll(
+        '.cm-content .cm-line span[class]').length), { timeout: 10_000 })
+      .toBeGreaterThan(8);
     // RIGHT-CLICK a $var token → menu with Go to Definition / Run to
     // Cursor / Add Breakpoint
     const varTok = page.locator('.cm-content span').filter({ hasText: /^\$\S+$/ }).first();

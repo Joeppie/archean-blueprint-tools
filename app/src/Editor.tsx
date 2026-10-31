@@ -208,6 +208,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // is the browser gesture that arms the AudioContext (buzzer law).
   const [soundOn, setSoundOn] = useState(soundscape.soundOn);
   const powerStatusRef = useRef('ok');
+  const energyKeyRef = useRef('');
+  const itemsKeyRef = useRef('');
   const bpRef = useRef(bp); bpRef.current = bp;
   const latchedRef = useRef(new Map<string, boolean>());
   const sitesRef = useRef(new Map<number, { chan: ChanSite[]; rect: RectSite[] }>());
@@ -529,14 +531,27 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       });
       engineRef.current?.applyItemFlow(itemRef.current.snapshot());
       if (++beats % 15 === 0) {
+        // CHANGE-GATED publish (v1.16.10, the @codeditor catch): an
+        // unconditional setState every 0.6 s re-renders the whole Editor —
+        // the XenonDialog's CodeMirror doc reconfigured under the
+        // highlighting leg. An IDLE craft re-renders NOTHING; a running
+        // one rides its own census changes.
         const es = energyRef.current.state();
-        setEnergy(es);
-        if (es.status !== powerStatusRef.current) {
-          if (es.status === 'low' || es.status === 'deficit') soundscape.powerStatus(es.status);
-          powerStatusRef.current = es.status;
+        const esKey = JSON.stringify(es);
+        if (esKey !== energyKeyRef.current) {
+          energyKeyRef.current = esKey;
+          setEnergy(es);
+          if (es.status !== powerStatusRef.current) {
+            if (es.status === 'low' || es.status === 'deficit') soundscape.powerStatus(es.status);
+            powerStatusRef.current = es.status;
+          }
         }
         const ic = itemRef.current.census();
-        setItems(ic);
+        const icKey = JSON.stringify(ic);
+        if (icKey !== itemsKeyRef.current) {
+          itemsKeyRef.current = icKey;
+          setItems(ic);
+        }
         soundscape.craftTick(ic.crafted);
         soundscape.syncLoops(loopWanted(bpRef.current));
       }
