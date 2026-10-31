@@ -5596,3 +5596,36 @@ writes for never-sounded voices stay no-ops (rest cycles cost nothing).
 Keeps every starvation defence intact (writes are still the event; the
 sync/hold/wake-lock trio unchanged). Gate: buzzer-bench e2e audio-truth
 PASS through the new path, vitest 1087, tsc clean; the law is in AGENTS.
+
+## 26. v1.16.26 — the Mario ticking: waves innocent, automation guilty
+## (we: "still some ticking sounds in the music … esp. block breaking seems
+## really wrong … is it not correctly using either sawtooth or square
+## waves?" + "the ticking is like from stopping a sound wave mid-flight";
+## 2026-11-01)
+The waves ARE correct: 'auto' honours each buzzer's authored data.mode over
+the enum verified from the game binary (Mario's cabinet: melody/harmony/fx
+square, bass triangle, game-effects saw), and the bench pins the sawtooth
+law. Two real defects fed the tick: ① voiceGain still re-QUANTIZED every
+amp onto a 16-level (1/15) grid — but our writes already arrive as a stepped
+25 Hz stream, so this second quantizer erased the game's quiet layer
+outright: audio.xc's brick-crash fades at amp 0.05..0 over 32 frames, and
+on that grid the whole fade was ONE stair step (pop…silence) while every
+quiet decay stair-stepped. Quantization REMOVED — the law is now a linear
+×1.8 lift with a cap (the v1.13 audibility law intact). ② the write-time
+automation (cancelScheduledValues + setValueAtTime(p.value)) trusts the
+.value getter to answer the MID-RAMP value — Firefox answers the last
+SCRIPTED value, so every 25 Hz rewrite of a decaying voice snapped the gain
+back and slammed it out = the literal "stopping a wave mid-flight". Gain is
+now driven setTargetAtTime-ONLY (no event chain to fight; the curve always
+continues from where the audio thread actually is), release = an explicit
+amp-0 write (τ 12 ms, teardown ≥ 150 ms later = nodes never die mid-wave).
+③ frequency automation unified to instant setValueAtTime in BOTH paths: a
+pending setTarget in sync() had been fighting the write-time events AND
+smearing the game's 60 fps random-pitch brick-crash (81..622 Hz/frame) into
+mush — pitch steps are phase-continuous, they cannot click, and the game's
+crunch needs them instant. Pins: the old "quantizes 4-bit-ish" test SEALED
+the removed law — rewritten for the linear one (re-audit-your-pins lesson),
+plus proportionality/monotonicity pins for the quiet sfx band. Gate: buzzer
+bench audio-truth PASS, vitest 1088, tsc clean. The Mario cabinet's audio.xc
+(60 fps frame tables, per-frame pitch+gain writes) is the standing stress
+case for every future buzzer change.

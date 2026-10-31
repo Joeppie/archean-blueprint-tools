@@ -116,6 +116,18 @@ describe('THE BUZZER AUDIO LAWS (v1.13.4)', () => {
     expect(voiceGain(1)).toBeCloseTo(0.5);
     expect(voiceGain(5)).toBeCloseTo(0.5);            // capped
   });
+  it('quiet GAME SFX survive: NO double-quantization (v1.16.26)', () => {
+    // we: "still some ticking sounds … esp. block breaking seems really
+    // wrong": the brick-crash fades at amp 0.05..0 — the old 16-level grid
+    // (1/15 ≈ 0.067 steps) flattened that whole fade onto one stair step
+    // (pop…silence) and stair-stepped every quiet decay into ticks. The
+    // writes are already a stepped 25 Hz stream; the law is LINEAR below
+    // the cap: quiet values stay distinguishable and proportional.
+    expect(voiceGain(0.05)).toBeGreaterThan(0);
+    expect(voiceGain(0.05)).toBeCloseTo(voiceGain(0.1) * 0.5, 9);
+    expect(voiceGain(0.033)).not.toBeCloseTo(voiceGain(0.066), 6);
+    expect(voiceGain(0.4)).toBeLessThan(voiceGain(0.45));   // monotone
+  });
   it('sync() tracks the activity LEVEL from the bus, no AudioContext needed', () => {
     // (node has no AudioContext — the TopBar animation must reflect what
     // the program SENDS even when the device has no audio output)
@@ -204,10 +216,17 @@ describe('THE WARM-VOICE TABLES (v1.13.6)', () => {
     expect(tri[2]!).toBeCloseTo(0, 6);                                      // odd only
     expect(tri[1]!).toBeGreaterThan(0);
   });
-  it("voiceGain quantizes 4-bit-ish (the game's coarse DAC path)", async () => {
+  it('voiceGain is a LINEAR lift with a cap (the 4-bit grid is GONE)', async () => {
+    // v1.16.26 (we: "still some ticking … esp. block breaking seems really
+    // wrong"): this pin used to SEAL the 16-level quantization — re-
+    // quantizing the already-stepped 25 Hz write stream erased the game's
+    // quiet sfx (the brick-crash fade at amp ≤ 0.05 collapsed onto one
+    // stair step = the tick). The law now: linear below the cap, quiet
+    // values distinguishable and proportional.
     const { voiceGain } = await import('../buzzer');
     expect(voiceGain(0.09)).toBeGreaterThanOrEqual(0.05);   // Mario's melody audible
-    expect(voiceGain(0.07)).toBeCloseTo(voiceGain(0.09), 6);      // same 16th step
+    expect(voiceGain(0.07)).not.toBeCloseTo(voiceGain(0.09), 6);   // distinct steps
+    expect(voiceGain(0.07)).toBeCloseTo(voiceGain(0.09) * (7 / 9), 9);
     expect(voiceGain(1)).toBeCloseTo(voiceGain(1.4), 6);        // capped
   });
 });

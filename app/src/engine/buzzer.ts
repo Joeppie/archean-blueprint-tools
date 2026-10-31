@@ -111,13 +111,17 @@ const MASTER_GAIN = 0.5;    // a full-amplitude buzzer is a solid, not a blast
 
 /** Game buzzers run quiet amplitudes (Chip's Mario writes ~0.05..0.3), so
  *  a linear ·0.25 gain sat at ≈ −33 dB — the "I dont hear the buzzers"
- *  report. Lift the low end (×1.8, capped) and scale to 0.4, with a 4-bit
- *  amplitude quantization (round to 16 levels) — the game's channel
- *  amplitudes pass through a coarse DAC path, part of its character.
+ *  report. Lift the low end (×1.8, capped) and scale to MASTER_GAIN.
+ *  The 16-level quantization this once carried is REMOVED (v1.16.26, we:
+ *  "there is still some ticking sounds in the music … esp. block breaking
+ *  seems really wrong"): our writes already arrive as a stepped 25 Hz
+ *  stream — quantizing it AGAIN onto a 1/15 grid erased the game's quiet
+ *  sfx (the brick-crash fades at amp 0.05..0 collapsed to two stair steps
+ *  = pop-tick) and stair-stepped every decay. The game's lo-fi character is
+ *  its WAVES and stepped writes, not a second quantizer in the viewer.
  *  Pure — vitest-pinned. */
 export function voiceGain(amp: number): number {
-  const q = Math.round(Math.max(0, Math.min(1, amp)) * 15) / 15;   // 4-bit-ish
-  return Math.min(1, q * 1.8) * MASTER_GAIN;
+  return Math.min(1, Math.max(0, amp) * 1.8) * MASTER_GAIN;
 }
 
 /** WebAudio mixer: one square-wave-capable oscillator per loud Buzzer.
@@ -194,30 +198,33 @@ export class BuzzerAudio {
       if (v.kind !== kind) { v.osc.setPeriodicWave(this.waveFor(kind, ctx)); v.kind = kind; }
       const g = voiceGain(amp);
       const p = v.gain.gain;
-      p.cancelScheduledValues(now);
-      p.setValueAtTime(Math.max(0, p.value), now);
+      // setTargetAtTime ONLY — no cancelScheduledValues + .value pin
+      // (v1.16.26, we: "the ticking is like from stopping a sound wave
+      // mid-flight"): that pattern trusts the .value GETTER to answer the
+      // mid-ramp value; Firefox answers the last SCRIPTED value, so every
+      // 25 Hz rewrite of a decaying voice snapped the gain back and slammed
+      // it out again = the tick. setTargetAtTime carries no scheduled-event
+      // chain to fight: last writer wins, the curve always continues from
+      // where the audio thread actually is. Fast τ = crisp game steps,
+      // silence is asymptotic but the teardown gate (0.15 s) is well past
+      // −55 dB, so nodes never die mid-wave.
       if (g > 0) {
-        // THE DAC-HOLD LAW (v1.16.25, we: "sound cuts off too sharply
-        // sometimes … in game it doesnt … earlier iterations didnt"): the
-        // game holds the written Amplitude FLAT until the next write — a
-        // channel value, not a one-shot sample. The v1.13.14 per-write
-        // envelope (body to +100 ms, release by +140 ms) re-armed fine at
-        // 25 Hz, but one ~100 ms pump hiccup (Mario's blit load) let the
-        // envelope dive and the next write slam back up = the audible cut.
-        // So: 5 ms attack, then HOLD — no future events, nothing to fall
-        // into. sync()'s setTargetAtTime steering (also a hold) keeps the
-        // voice at level once the attack window passes.
-        p.linearRampToValueAtTime(g, now + 0.005);
-        v.beepUntil = now + 0.06;               // sync resumes steering here
-        v.hold = now + 0.15;                    // (renewed by every write)
+        p.setTargetAtTime(g, now, 0.004);               // ~4 ms crisp attack
+        v.beepUntil = now + 0.06;                       // sync may steer here
+        v.hold = now + 0.15;
       } else {
-        // a REAL note-off: an explicit amp-0 write. 40 ms release — the
-        // game's DAC cuts hard, but a sample-accurate zero ramp is what
-        // keeps our cut click-free.
-        p.linearRampToValueAtTime(0, now + 0.04);
+        // THE DAC-HOLD LAW (v1.16.25): a 0-amp write is the note-off.
+        p.setTargetAtTime(0, now, 0.012);
         v.beepUntil = now + 0.05;
-        v.hold = now + 0.05;
+        v.hold = now + 0.15;                            // clean teardown
       }
+      // THE GAME'S PITCH LAW: amplitude and frequency are DAC STEPS — the
+      // pitch changes INSTANTLY (a frequency jump is phase-continuous on an
+      // oscillator, so it cannot click; smoothing it instead smeared the
+      // game's 60 fps random-pitch brick-crash into mush — "block breaking
+      // seems really wrong"). Same style in sync(): ONE automation style
+      // per param — mixing setTarget with setValueAtTime let the 25 Hz
+      // steering fight the write-time path on every sfx frame.
       v.osc.frequency.setValueAtTime(Math.min(20000, Math.max(1, freq)), now);
     } catch { /* no audio device: the pump must never break */ }
   }
@@ -350,6 +357,9 @@ export class BuzzerAudio {
   toggleSound(): boolean {
     this.soundOn = !this.soundOn;
     try { localStorage.setItem(LS_ON, this.soundOn ? '1' : '0'); } catch { /* private mode */ }
+    // the master may have been BORN MUTED (context created while the MUTE
+    // chip held) — every toggle re-applies the mute law (v1.16.26)
+    if (this.master) this.master.gain.value = this.muted ? 0 : 1;
     if (this.soundOn) {
       try {
         const ctx = this.ensureCtx();
@@ -408,7 +418,10 @@ export class BuzzerAudio {
           v.osc.setPeriodicWave(this.waveFor(wantKind, this.ctx!));
           v.kind = wantKind;
         }
-        v.osc.frequency.setTargetAtTime(r.freq, now, 0.01);
+        // ONE automation style per param (v1.16.26): instant steps, the
+        // game's DAC law — a pending setTarget here would fire against the
+        // write-time setValueAtTime and smear the 60 fps pitch-noise sfx.
+        v.osc.frequency.setValueAtTime(Math.min(20000, Math.max(1, r.freq)), now);
         if (now >= v.beepUntil) {
           // gain steering only while no write-time envelope owns the voice
           v.gain.gain.setTargetAtTime(voiceGain(r.amp), now, 0.02);
