@@ -16,7 +16,9 @@
 //     (wiki mining/MiningDrill.md — HV drills deeper/louder)
 //   ItemConveyor / pumps       a low BELT rumble / pump burble loop while
 //     running
-//   Propeller / wheels         a speed-proportional hum
+//   Propellers               SILENT (v1.16.24, we: "they constantly make
+//     noise in the badger. Not good!") — a spinning prop is the craft's
+//     background; a steady hum was fatigue, not information.
 //   servos (hinge/pivot/track) a short whine sweep while driving
 //   the power warning          a two-tone alarm when the grid enters
 //     low/deficit (engine/energy.ts) — warning only, the grid keeps feeding
@@ -30,14 +32,21 @@
 import type { Blueprint, BlueprintComponent } from './format';
 
 const LS_ON = 'archean-app-sound';
+const LS_MUTE = 'archean-app-mute';
 
-type LoopKind = 'drill' | 'belt' | 'pump' | 'prop';
+type LoopKind = 'drill' | 'belt' | 'pump';
 interface Loop { kind: LoopKind; gain: GainNode; nodes: AudioNode[] }
 
 export class Soundscape {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
   soundOn = true;
+  /** THE GLOBAL MUTE (v1.16.24, we: "add a mute option next to the sound"):
+   *  one switch silences EVERY synthesized sound (this soundscape AND the
+   *  buzzer tones — the Editor drives both) without disturbing either 🔊
+   *  chip's own state; persisted; rides the master gain, and a context born
+   *  later (the next 🔊 gesture) starts silent too. */
+  muted = false;
   /** ci -> type (from the loaded blueprint) */
   private types = new Map<number, string>();
   /** ci -> last channel snapshot that drove edges */
@@ -47,7 +56,10 @@ export class Soundscape {
   private lastCraft = 0;
 
   constructor() {
-    try { this.soundOn = localStorage.getItem(LS_ON) !== '0'; } catch { /* private mode */ }
+    try {
+      this.soundOn = localStorage.getItem(LS_ON) !== '0';
+      this.muted = localStorage.getItem(LS_MUTE) === '1';
+    } catch { /* private mode */ }
   }
 
   /** (re)derive the type table; edges reset (a new craft = new parts). */
@@ -76,11 +88,21 @@ export class Soundscape {
     return this.soundOn;
   }
 
+  /** THE GLOBAL MUTE switch (v1.16.24): silences the master gain (every cue
+   *  and loop rides it), persists, and answers the new state. A context not
+   *  yet born is born silent (ensureCtx reads this.muted). */
+  setMuted(on: boolean): boolean {
+    this.muted = on;
+    try { localStorage.setItem(LS_MUTE, on ? '1' : '0'); } catch { /* private mode */ }
+    if (this.master) this.master.gain.value = on ? 0 : 0.5;
+    return on;
+  }
+
   private ensureCtx(): AudioContext {
     if (!this.ctx) {
       this.ctx = new AudioContext();
       this.master = this.ctx.createGain();
-      this.master.gain.value = 0.5;
+      this.master.gain.value = this.muted ? 0 : 0.5;
       this.master.connect(this.ctx.destination);
     }
     return this.ctx;
@@ -275,13 +297,8 @@ export class Soundscape {
       n.buffer = buf; n.loop = true;
       n.connect(lp); n.start(); nodes.push(n);
     } else {
-      const o = ctx.createOscillator();
-      o.type = 'sine'; o.frequency.value = 64;
-      const o2 = ctx.createOscillator();
-      o2.type = 'sine'; o2.frequency.value = 96;
-      const g2 = ctx.createGain(); g2.gain.value = 0.6;
-      o.connect(g); o2.connect(g2); g2.connect(g);
-      o.start(); o2.start(); nodes.push(o, o2);
+      g.disconnect();
+      return undefined;                       // an unbuilt kind makes no sound
     }
     const loop = { kind, gain: g, nodes };
     this.loops.set(key, loop);

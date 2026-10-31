@@ -59,6 +59,7 @@ import {DeviceSim, dataNeighbours, seatCableTargets} from './engine/devicesim';
 import { craftPowerNet, computerPowered } from './engine/power';
 import { EnergySim, type EnergyStatus } from './engine/energy';
 import { ItemSim, type ItemSimCensus } from './engine/itemsim';
+import { ScannerSim } from './engine/scannersim';
 import { soundscape } from './engine/soundscape';
 import { chanSites, rectSites, rectsAt, type ChanSite, type RectSite } from 'xenoncore';
 import { loadManifest, peekManifest } from './engine/models';
@@ -87,7 +88,7 @@ import StaleDialog from './components/StaleDialog';
  *  their speed channel — the soundscape remembers every bus write). */
 function loopWanted(bp: import('./engine/format').Blueprint | null) {
   if (!bp) return [];
-  const out: { ci: number; kind: 'drill' | 'belt' | 'pump' | 'prop'; gain: number }[] = [];
+  const out: { ci: number; kind: 'drill' | 'belt' | 'pump'; gain: number }[] = [];
   (bp.data.components as { type: string }[]).forEach((c, ci) => {
     const ch0 = soundscape.chan(ci, 0);
     switch (c.type) {
@@ -95,10 +96,11 @@ function loopWanted(bp: import('./engine/format').Blueprint | null) {
       case 'ItemConveyor': out.push({ ci, kind: 'belt', gain: (ch0 ?? 1) > 0 ? 0.05 : 0 }); break;
       case 'SmallTurboPump': case 'TurboPump':
         out.push({ ci, kind: 'pump', gain: (ch0 ?? 0) > 0 ? 0.05 : 0 }); break;
-      case 'Propeller': {
-        const v = soundscape.chan(ci, 0) ?? 0;
-        out.push({ ci, kind: 'prop', gain: Math.min(0.14, Math.abs(v) * 0.14) }); break;
-      }
+      // v1.16.24 THE PROPELLERS ARE SILENT (we: "Remove the sound from
+      // propellors. They constantly make noise in the badger. Not good!"):
+      // a spinning prop is the craft's BACKGROUND, and a steady hum under
+      // everything was fatigue, not information — the spin stays visible,
+      // audible it is not.
       default: break;
     }
   });
@@ -216,10 +218,15 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // the same heartbeat; container contents publish on the io bus (the
   // wiki's data-port KV law) so programs READ the inventory.
   const itemRef = useRef(new ItemSim());
+  const scannerRef = useRef(new ScannerSim());
   const [items, setItems] = useState<ItemSimCensus | null>(null);
   // v1.16.10 THE SOUND OF THE CRAFT (engine/soundscape.ts): the 🔊 chip
   // is the browser gesture that arms the AudioContext (buzzer law).
   const [soundOn, setSoundOn] = useState(soundscape.soundOn);
+  // THE GLOBAL MUTE (v1.16.24, we: "add a mute option next to the sound"):
+  // one chip silences the craft soundscape AND the buzzer tones at once;
+  // the two 🔊 chips keep their own states underneath.
+  const [muted, setMuted] = useState(soundscape.muted);
   const powerStatusRef = useRef('ok');
   const energyKeyRef = useRef('');
   const itemsKeyRef = useRef('');
@@ -249,6 +256,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     setEnergy(energyRef.current.state());
     itemRef.current.load(bp, powerNet?.hasPower ? powerNet.powered : null);
     setItems(itemRef.current.census());
+    scannerRef.current.load(bp);
     soundscape.load(bp);
     latchedRef.current.clear();
     sitesRef.current.clear();
@@ -275,6 +283,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     simRef.current.write(ci, ch, v);
     energyRef.current.write(ci, ch, v);   // gates: lamps, belts, generators
     itemRef.current.write(ci, ch, v);     // gates: drill, belts
+    scannerRef.current.write(ci, ch, v);  // scan distances (v1.16.24)
     soundscape.write(ci, ch, v);          // THE SOUND OF THE CRAFT (WP4)
     if (type === 'Dashboard') simRef.current.setLed(ci, ch, v > 1 ? v / 255 : v);
     if (type === 'PilotSeat' && ch !== 0)
@@ -463,6 +472,15 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     // break(file,lines) / run / step / frame / globals / write(name,value)
     // / bus / prints, all JSON-plain.
     (window as any).__XCDBG__ ??= makeXcdbg(() => xenonFarm.active());
+    // THE SCANNER SIM seam (v1.16.24): the live instance for probes/pins
+    // (Viewport mounts first as the child, so our key survives its setup).
+    // The xenonFarm handle rides too — dev probes must NOT dynamic-import
+    // '/src/engine/xenoncode.ts': after an HMR edit the live app imports the
+    // ?t-busted URL and a bare import gets a SECOND, empty module instance
+    // (the v1.16.24 ghost-bus catch).
+    (window as any).__ARCHEAN__ ??= {};
+    (window as any).__ARCHEAN__.scannerSim = () => scannerRef.current;
+    (window as any).__ARCHEAN__.xenon = { farm: xenonFarm };
     (window as any).__XENON__ ??= () => {
       const P = xenonFarm.active();
       return {
@@ -588,6 +606,10 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         // the container's content as the data-port KV text, into the bus
         xenonFarm.bus.write(alias, ch, text, {} as never, null);
       });
+      // THE SCANNER SIM (v1.16.24): one-tick-delayed answers on the answer
+      // channels — ore compositions (.Fe{0.2000}…) and terrain altitudes.
+      for (const r of scannerRef.current.step())
+        xenonFarm.bus.deviceReply(r.ci, r.ch, r.value);
       engineRef.current?.applyItemFlow(itemRef.current.snapshot());
       if (++beats % 15 === 0) {
         // CHANGE-GATED publish (v1.16.10, the @codeditor catch): an
@@ -2170,6 +2192,13 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         items={items}
         soundOn={soundOn}
         onToggleSound={() => setSoundOn(soundscape.toggleSound())}
+        muted={muted}
+        onToggleMute={() => {
+          const v = !soundscape.muted;
+          soundscape.setMuted(v);
+          buzzerAudio.setMuted(v);      // ONE chip, BOTH audio paths (v1.16.24)
+          setMuted(v);
+        }}
         onToggleLive={xenonComps.length ? () => {
           if (live) { xenonFarm.closeAll(); setLive(false); }
           else {

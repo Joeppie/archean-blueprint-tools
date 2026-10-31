@@ -2711,6 +2711,23 @@ export class IoBus {
       for (const p of this.pumps) p.acceptBusWrite(wAlias, ch, v);
     }
   }
+  /** SCANNER REPLY LAW (v1.16.24, scannersim): the device ANSWERS on its own
+   *  channel — deliver into every pump that knows this component. A program
+   *  may address the scanner by ALIAS or by its LOCAL PORT NUMBER (the wiki
+   *  examples use `$scanner_io`), so each pump gets the reply under BOTH
+   *  tokens it can resolve; the Bus-tab row rides the alias when there is
+   *  one, else the first pump's port token. */
+  deviceReply(ci: number, ch: number, v: number | string): void {
+    let row: string | null = null;
+    for (const p of this.pumps) {
+      const d = p.comp?.devices.find(x => x.ci === ci);
+      if (!d) continue;
+      p.acceptBusWrite(String(d.io), ch, v);
+      if (d.alias) p.acceptBusWrite(d.alias, ch, v);
+      row ??= d.alias || String(d.io);
+    }
+    if (row !== null) this.values.set(this.key(row, ch), v);
+  }
   /** Fire the actuator tap for one (device, channel, value) (v1.15.6). */
   notifyDevice(dev: { ci: number; type: string }, ch: number, v: number): void {
     for (const w of this.watchers)

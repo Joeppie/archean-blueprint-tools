@@ -133,6 +133,17 @@ export class BuzzerAudio {
    *  unlocks itself at the first real pointer/key interaction (arm) — for
    *  Mario that is the very first jump press. */
   soundOn = true;
+  /** THE GLOBAL MUTE (v1.16.24, we: "add a mute option next to the sound"):
+   *  the same `archean-app-mute` flag the soundscape reads — the Editor's
+   *  MUTE chip drives both audio paths with one click; the buzzer's own
+   *  🔊 chip keeps its separate state untouched. */
+  muted = false;
+  setMuted(on: boolean): boolean {
+    this.muted = on;
+    try { localStorage.setItem('archean-app-mute', on ? '1' : '0'); } catch { /* private mode */ }
+    if (this.master) this.master.gain.value = on ? 0 : 1;
+    return on;
+  }
   /** Loudest Amplitude seen in the latest sync (0 = all silent) — drives
    *  the TopBar 🔊 activity animation ("animates whenever any buzzer is
    *  making sound so its evident that is the reason there is sound"). */
@@ -223,7 +234,7 @@ export class BuzzerAudio {
     if (this.ctx) return this.ctx;
     const ctx = new AudioContext();
     const master = ctx.createGain();
-    master.gain.value = 1;
+    master.gain.value = this.muted ? 0 : 1;   // a mute born silent (v1.16.24)
     // game-ish voice: a gentle lowpass tames the digital edge (the in-game
     // buzzer path is dark; we: "in-game the sound is far closer to the
     // actual super-mario")
@@ -277,6 +288,7 @@ export class BuzzerAudio {
       const w = localStorage.getItem(LS_WAVE);
       if (w && (w === 'auto' || (BUZZER_MODES as readonly string[]).includes(w))) this.wave = w as BuzzerWave | 'auto';
       this.soundOn = localStorage.getItem(LS_ON) !== '0';   // on unless explicitly muted
+      this.muted = localStorage.getItem('archean-app-mute') === '1';   // global MUTE chip
     } catch { /* fresh profile / no storage: ON, auto */ }
   }
 

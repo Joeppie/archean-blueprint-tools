@@ -200,10 +200,17 @@ load — the browser probe caught the emptied-map variant).
 All cues SYNTHESIZED (the game's audio assets stay untouched — NOTICE).
 The bus tap fires edges: switch CLICK, relay CLACK, lamp blip, anchor
 CHAIN RATTLE, servo whine; the loop census runs the drill WHIR, belt
-rumble, pump burble, propeller hum; the grid alarm is a 20 s-spaced
-two-tone on entering low/deficit; the crafter DINGS. The 🔊 chip is the
-gesture that arms the AudioContext (the buzzer law: create+resume inside
-the click, Firefox 1-frame unlock); `archean-app-sound` default on.
+rumble, pump burble; the grid alarm is a 20 s-spaced two-tone on entering
+low/deficit; the crafter DINGS. The 🔊 chip is the gesture that arms the
+AudioContext (the buzzer law: create+resume inside the click, Firefox
+1-frame unlock); `archean-app-sound` default on.
+v1.16.24 amendments: PROPELLERS ARE SILENT (we: "They constantly make
+noise in the badger. Not good!" — one remembered channel kept the hum
+loop alive forever; the `prop` loop kind is GONE from the code). And the
+MUTE chip (TopBar, `archean-app-mute`) silences BOTH audio systems at
+once — the craft soundscape AND the buzzer tones ride their master gains
+to 0; a context born later is born silent. The old per-system chips keep
+their own state underneath (one concept = one word: MUTE means ALL).
 
 ## 10. THE GLOW LAW (v1.16.10, WP3)
 A sim-lit lamp is a LIT FACE (MeshBasic lens / emissive LED), NEVER a
@@ -330,3 +337,20 @@ brick. Stylised closed-form, not CFD (AGENTS). See FORMAT §Aerodynamics.
 - ChipOS's wizard: the e2e/VM tiers read the registry via the storage
   row + the bus; the click-through wizard + app-tile pixels are the
   Pages-tier UX journey (the wizard gates the home screen).
+
+## 15. THE SCANNER SIM (v1.16.24 — engine/scannersim.ts)
+OreScanner/TerrainScanner answer the wiki laws (mining/OreScanner.md,
+navigation/TerrainScanner.md): a NUMBER on channel ch is a scan distance
+(m); the tick that sees it answers the SAME channel — the ore answer is
+the `.Al{0.1500}.Fe{0.2000}…` KV text with fractions summing to 1
+(mining.md's element table + rock form), the terrain answer an altitude
+NUMBER. The answers are a deterministic synthetic FIELD (a deterministic
+hash, ore compositions quantised to ~12 m deposit cells, altitude
+continuous in the distance): stable distances answer identically — the
+game measures, it does not reroll (the wiki tells programs to keep
+distances consistent). The reply rides `IoBus.deviceReply(ci,ch,v)`: every
+pump that KNOWS the component gets it under BOTH tokens it can resolve
+(LOCAL PORT number and alias — the wiki examples address scanners by
+`$scanner_io`). Boundaries: no LV energy cost (100 W/ch — the device-power
+backlog), no planets/direction gating (no celestial in the sim). Pins:
+scannersim.test + the farm deviceReply pair.

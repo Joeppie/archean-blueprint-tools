@@ -82,6 +82,10 @@ interface Props {
    *  is the gesture that arms the AudioContext (buzzer law). */
   soundOn?: boolean;
   onToggleSound?: () => void;
+  /** THE GLOBAL MUTE chip (v1.16.24): silences the craft soundscape AND the
+   *  buzzer tones with one click — every drone, loop, click and alarm. */
+  muted?: boolean;
+  onToggleMute?: () => void;
   liveN?: number;
   onToggleLive?: () => void;
   children?: React.ReactNode;              // right side: panel toggle etc.
@@ -521,6 +525,20 @@ export default function TopBar(p: Props) {
           className={`ksp-btn px-2 py-1 text-[11px] leading-none ${
             p.soundOn ? 'text-[#ffd479] border-[#ffd479]/40' : 'text-[#8b93a1]'}`}>
           {p.soundOn ? '🔊' : '🔇'}
+        </button>
+      )}
+      {/* THE GLOBAL MUTE chip (v1.16.24, we: "add a mute option next to the
+          sound"; "if we have some sort of drone, can we also mute that?"):
+          one click kills ALL audio — craft loops AND buzzer tones. */}
+      {p.onToggleMute && (
+        <button data-testid="mute-chip" aria-pressed={!!p.muted}
+          title={p.muted
+            ? 'EVERYTHING is muted — sound and buzzers (click to allow sound again)'
+            : 'mute EVERYTHING at once: craft sounds, loops, drones and buzzer tones'}
+          onClick={p.onToggleMute}
+          className={`ksp-btn px-2 py-1 text-[11px] leading-none ${
+            p.muted ? 'text-[#ff7d7d] border-[#ff7d7d]/50' : 'text-[#8b93a1]'}`}>
+          {p.muted ? '🔕' : 'MUTE'}
         </button>
       )}
       {p.children}

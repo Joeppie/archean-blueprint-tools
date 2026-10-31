@@ -657,7 +657,12 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   flakes on the final tree before believing them.
 - LESSONS: probe face-INTERIOR pixels through the engine's own pick law
   (canvas fractions are NOT aspect-stable); camera SETTLE = two identical
-  `camPos()` samples; when an identity law changes, RE-AUDIT every pin that
+  `camPos()` samples; a live-browser probe must NEVER dynamic-import an app
+  module by bare URL to reach a singleton — after an HMR edit the app
+  imports the `?t=`-busted copy and the bare import gets a SECOND, EMPTY
+  module instance (the v1.16.24 ghost-bus catch: watchers 0, pumps 0 while
+  the app ran fine); use the exposed window seam (`__ARCHEAN__.xenon.farm`);
+  when an identity law changes, RE-AUDIT every pin that
   sealed its old trigger; a CodeMirror `toContainText` rides the VIEWPORT
   only (docs are windowed — assert head text, prove deep literals through a
   registry/chip observable); long game strings (beacon frequencies!) need

@@ -6,9 +6,9 @@
 import { describe, expect, test } from 'vitest';
 import { IoBus, XenonPump } from '../xenoncode';
 
-interface Rec { writes: [string, number, number][] }
+interface Rec { writes: [string, number, number | string][] }
 const stub = (recs: Rec) =>
-  ({ acceptBusWrite: (alias: string | number, ch: number, v: number) =>
+  ({ acceptBusWrite: (alias: string | number, ch: number, v: number | string) =>
       recs.writes.push([`${String(alias).toLowerCase()}:${ch}`, ch, v]) } as unknown as XenonPump);
 
 describe('IoBus — the cable law', () => {
@@ -120,5 +120,34 @@ describe('XenonPump — the coalesced fan-in (v1.15.1)', () => {
     bus.write('lamp', 0, 1, a);
     bus.write('lamp', 0, 2, a);
     expect(recs.writes.length).toBe(2);   // per-event law intact
+  });
+});
+
+// SCANNER REPLY LAW (v1.16.24, scannersim): a device ANSWER rides its own
+// channel; programs address a scanner by ALIAS or by LOCAL PORT (the wiki
+// examples use $scanner_io), so every pump that KNOWS the component gets
+// the value under BOTH tokens, and pumps that do not know it stay silent.
+describe('IoBus — the device reply', () => {
+  const knowPump = (recs: Rec, devices: { ci: number; io: number; alias: string }[]) =>
+    ({
+      comp: { devices },
+      acceptBusWrite: (alias: string | number, ch: number, v: number | string) =>
+        recs.writes.push([`${String(alias).toLowerCase()}:${ch}`, ch, v]),
+    } as unknown as XenonPump);
+
+  test('the reply reaches every knower under port AND alias tokens', () => {
+    const bus = new IoBus();
+    const recs: Rec = { writes: [] };
+    bus.attach(knowPump(recs, [{ ci: 7, io: 3, alias: 'oreSc' }]));
+    bus.deviceReply(7, 2, '.Fe{1.0000}');
+    expect(recs.writes).toEqual([['3:2', 2, '.Fe{1.0000}'], ['oresc:2', 2, '.Fe{1.0000}']]);
+    expect(bus.get('oreSc', 2)).toBe('.Fe{1.0000}');   // the Bus-tab row
+  });
+  test('a pump without the device takes nothing (net-scoped reply)', () => {
+    const bus = new IoBus();
+    const recs: Rec = { writes: [] };
+    bus.attach(knowPump(recs, []));              // knows NOTHING
+    bus.deviceReply(7, 0, 12.5);
+    expect(recs.writes).toEqual([]);
   });
 });

@@ -5549,3 +5549,29 @@ jointPoseQ 45.0°/release 0.0°). The probe's FIRST run "failed" honestly: a
 raw static bus write is overwritten by the 25 Hz program with its legitimate
 neutral value — a rest-state lesson for future probes (drive the INPUT, not
 the output, on live-program crafts).
+
+## 24. v1.16.24 — THE SCANNER SIM, silent propellers, the MUTE chip (2026-11-01)
+we: "the ore scanner needs to return somewhat OK results, so that it doesnt
+seem completely gibberish what it sends" — engine/scannersim.ts: a distance
+on a channel answers one tick later with the wiki's KV composition text
+(`.Pb{0.5701}.C{0.4299}`, fractions sum to 1, mining.md's element table) or
+a terrain altitude number; a deterministic hash makes it a FIELD — the same
+ground answers the same (~12 m deposit cells; the wiki explicitly tells
+programs distances stay consistent across ticks, the game measures, it does
+not reroll). The reply enters every pump that knows the part under BOTH its
+port and alias tokens (IoBus.deviceReply — the wiki examples address a
+scanner by $scanner_io). Proven live on 9000003065 through the real bus and
+heartbeat. THE GHOST-BUS CATCH of the session: a probe reaching a dev-server
+singleton via a bare dynamic import gets a SECOND, EMPTY module instance
+after any HMR edit (watchers 0, pumps 0, a fake pump attached to nothing) —
+the live app imports the ?t-busted URL; the fix is the new window seam
+__ARCHEAN__.xenon.farm (+ scannerSim). Sound (we: "Remove the sound from
+propellors. They constantly make noise in the badger. Not good!" and "add a
+mute option next to the sound … the propeler sound that is not muted by this
+mute"): two audio SYSTEMS existed — the craft soundscape 🔊 and the buzzer
+tones' own chip — each mute left the OTHER's drone alive, and a propeller's
+hum loop was permanent once one channel write was remembered; the `prop`
+loop kind is deleted, propellers are silent (the spin stays visible), and
+the TopBar MUTE chip (archean-app-mute) drives BOTH master gains to zero —
+a context born later is born silent. Pins: scannersim.test (7), the farm
+deviceReply pair; the sound law + § 15 scanner law in LIVING-CRAFT.
