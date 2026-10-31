@@ -13,7 +13,13 @@ import { test, expect } from '@playwright/test';
 
 const BENCH = '9000009090';
 
+// SKIPPED (we: "the tests for xenoncode IDE take too long, they run at too
+// high a level … skip this test for now") — the hover-geometry leg is the
+// fragile one; the laws it drives (xcDoc table, lint marks, Problems rows)
+// are unit-green in xcdocs.test/xcanalyze.test. Retire the browser leg to
+// a jsdom mount per WP-IDE-RETIER (workpackages.md), then re-enable.
 test.describe('@analysis @xenon THE XENONCODE ANALYSIS', () => {
+  test.skip(true, 'WP-IDE-RETIER: retier the IDE-geometry legs (jsdom) before re-enabling');
   test('the bench disk: squiggles, gutter marks, the Problems tab; a row click jumps', async ({ page }) => {
     test.setTimeout(150_000);
     test.slow();   // @slow: the real IDE opening on a corpus craft
@@ -39,11 +45,38 @@ test.describe('@analysis @xenon THE XENONCODE ANALYSIS', () => {
     // (a text-position probe — desktop geometry; the rule is platform-neutral)
     if ((page.viewportSize()?.width ?? 0) >= 768) {
       const printLine = page.locator('.cm-line', { hasText: 'made_up(2)' }).first();
-      // raw mouse move: the analysis refresh re-renders lines (the locator
-      // hover's stability gate starves on them)
-      const bb = await printLine.boundingBox();
-      expect(bb).toBeTruthy();
-      await page.mouse.move(bb!.x + 12, bb!.y + 6, { steps: 3 });
+      // the line must be VISIBLE before measuring (Range coords include
+      // clipped overflow — on the 1280×720 project viewport the line sat
+      // below the pane bottom and the hover hit window chrome)
+      await printLine.scrollIntoViewIfNeeded();
+      // exact word point: a DOM Range on the 'print' text inside the line
+      const pt = await printLine.evaluate((el) => {
+        // CM wraps syntax tokens in spans: walk the line's text nodes
+        const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+        let txt: Text | null;
+        while ((txt = w.nextNode() as Text | null)) {
+          const idx = (txt.textContent ?? '').indexOf('print');
+          if (idx < 0) continue;
+          const r = document.createRange();
+          r.setStart(txt, idx + 2);
+          r.setEnd(txt, idx + 3);
+          const b = r.getBoundingClientRect();
+          return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+        }
+        return null;
+      });
+      expect(pt).toBeTruthy();
+      // deterministic: dispatch mousemove events at the word position on
+      // the CM content (its hover listeners start the 300 ms timer)
+      await printLine.evaluate((el, p2) => {
+        // CM's tooltip system listens on the EDITOR root (view.dom)
+        const content = el.closest('.cm-editor') ?? el.closest('.cm-scroller') ?? el;
+        for (const dx of [-8, -3, 0, 1]) {
+          content.dispatchEvent(new MouseEvent('mousemove',
+            { clientX: p2.x + dx, clientY: p2.y, bubbles: true, view: window }));
+        }
+      }, pt!);
+      await page.waitForTimeout(1600);
       await expect(page.locator('.xc-doc-tip'))
         .toContainText('write a line to the computer console');
       await expect(page.locator('.xc-doc-origin').first()).toContainText(/shim/i);

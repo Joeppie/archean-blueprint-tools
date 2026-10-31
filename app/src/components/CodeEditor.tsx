@@ -376,8 +376,10 @@ function CodeEditorInner(p: CodeEditorProps, ref: React.Ref<CodeEditorHandle>) {
           dom.className = 'xc-hover xc-doc-tip';
           dom.innerHTML = `<b>${d.sig}</b><div>${d.desc}</div>`
             + `<div class="xc-doc-origin">${d.origin}</div>`;
+          // the class rides the OUTER tooltip node (CM nests create()'s
+          // dom inside .cm-tooltip-hover — the pins locate by this class)
           return { pos: line.from + widx, end: line.from + widx + word.length,
-            create: () => ({ dom }) };
+            create: () => ({ dom, class: 'xc-doc-tip' }) };
         }
       }
       const around = line.text.slice(Math.max(0, col - 24), col + 24);

@@ -634,3 +634,24 @@ Plan (surfaces = ScreensCell zoom windows + XenonDialog screen-tab canvas
 5. Buzzer fidelity (DONE this batch): pure 1/n spectra (the n^0.1 shaping
    was softening square/saw into sine — we: "for sound fidelity it needs
    them to be that").
+
+## WP-IDE-RETIER (OPEN, 2026-11-01, the user: "the tests for xenoncode IDE
+take too long, they run at too high a level. create abstractions where
+required and consume from a more standalone situation")
+analysis.spec SKIPPED at the file head (the hover-geometry leg is fragile:
+CM tooltips need visible-pane mouse coords; 1280×720 clipped the line).
+Plan — retier the Xenon IDE e2e mass (xenon.spec is 73 loc of the suite's
+slowest):
+1. ABSTRACTIONS (pure/jsdom): (a) xcdocs+xcanalyze are already pure — the
+   hover CONTENT needs no browser: pin xcDoc(word) per token (done);
+   (b) extract the IDE's tab/strip/nav/problems ROW MODEL into
+   engine/xcide.ts (pure: files, tabs, dirty set, problems rows, jump
+   target) → jsdom mounts assert rendering; (c) a jsdom CODEMIRROR
+   harness (view created off-screen, dispatch commands, assert state —
+   completion list, indent law, find-panel open/closed) replacing the
+   per-keypress e2e legs.
+2. e2e keeps ONLY: real-cursor hover (one leg, generous viewport
+   init 1440×900 + scrollIntoView BEFORE measuring), IndexedDB save
+   round-trip, F5-to-disk, real CM painting (pixel spot-checks).
+3. Gate-ladder note: @codeditor full-run drops from minutes to seconds
+   once the legs retire; the suite's fast tier gets the jsdom tier.
