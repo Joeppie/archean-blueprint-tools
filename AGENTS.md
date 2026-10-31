@@ -1084,7 +1084,12 @@ behind a small link at the END of the gallery. Pages serves the GENERATED
   repos**: `xenoncore` (analysis+VM+sim+blueprint codec as a published
   package) + `xenoncode-vscode` (LSP, DAP, craft decompose/pack, webview
   sim) + an MCP bin for AI checks; the move inventory and S0–S6 slices
-  live in § P10.
+  live in § P10. **SEEDS LANDED v1.16.18**: `app/packages/xenoncore/` —
+  the analysis cluster (project model/analyzer/docs/sites) at its own
+  vitest tier + the pure `codec.ts` (decompose/pack, `#NODES` preservation,
+  content-hash world bridge; 528-file corpus byte-identity pin). Open:
+  the repo split (S0), VM/sim moves (S2/S3), the codec's fs/CLI +
+  doc-funnel writeback (S4), LSP/DAP (S5), MCP (S6).
 - **WIRE integrity check + repair**: files written by older builds carry
   pipe endpoints referencing components that do not own the named port, and
   the census reports those as real connections. Wanted: flag a pipe whose

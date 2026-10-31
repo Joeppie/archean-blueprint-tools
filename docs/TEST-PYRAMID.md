@@ -488,3 +488,16 @@ wall clock):**
   band; and a `truncate` span without `min-w-0` in a phone-width flex row
   pushes its own ✕ close off-screen (landed with the same census, §
   phoneux @Screens pin).
+- **v1.16.18 P10-S1/S4 SEED — the `packages/xenoncore` tier (2026-11-01).**
+  The analysis cluster moved WITH its pins: the package's own vitest tier is
+  71 tests (xcproject/xcdocs/xcsites verbatim + the NEW codec 18). The
+  xcanalyze suite SPLIT per L1: the package keeps the pure legs (vocabulary
+  ⇄ C++ cross-pins, synthetic per-code diagnostics, the synthetic ROOT-NAME
+  leg); the corpus/player-HUD TRUE-NEGATIVE legs ride the app as
+  `xcanalyze.integration.test.ts` — the package imports neither the
+  blueprint reader nor the VM, so the split is the boundary enforcing itself.
+  The codec inverts the fixture rule ON PURPOSE (L2 exception, stated): the
+  corpus IS the fixture for the byte-identity law — 528 disk files across
+  every testdata blueprint roundtrip decompose→compose byte-identically; a
+  synthetic twin could not enumerate the game writer's real shapes.
+  vitest total **1149** (6 skipped, 0 failed).
