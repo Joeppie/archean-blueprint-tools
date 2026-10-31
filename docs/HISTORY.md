@@ -5361,3 +5361,20 @@ I/J/K/L inverted-T right; T and ←/→ sit inert (left/right ARE a/d in the
 corpus law). (3) Debug seam lesson: __XENON__ is REPLACED by the IDE
 dialog while mounted (restore-on-unmount) — probe seams must ride BOTH
 objects (wsChannels added to both).
+
+## 16. v1.16.15 evening — cockpit e2e GREEN, the pilot-key seat law, retier todos (2026-11-01)
+
+The cockpit spec (desktop) went GREEN after its last product fix: SITTING
+= keys live — usePilotKeys(true) rode only the IDE dialog and the Screens
+dock, so the keyboard sent nothing with just a cockpit window open (the
+e2e's unlocked-keyboard leg caught it; the pads had passed since the
+seat→surface batch). The analysis.spec hover-geometry leg stayed fragile
+(CM tooltips need visible-pane mouse coords; the 1280×720 project viewport
+clipped the measured line) — we: "the tests for xenoncode IDE take too
+long, they run at too high a level. create abstractions where required …
+make this a todo. skip this test for now" → the file is skipped at its
+describe head; WP-IDE-RETIER (pure IDE row model + jsdom CodeMirror
+harness; e2e keeps real-cursor/IndexedDB/F5 legs) and WP-FULLSCREEN are
+the open plans; LIVING-CRAFT § 14 documents the cockpit-window law, the
+buzzer tables are pure 1/n (AGENTS), the seat-bench/analysis-bench
+fixtures join TEST-PYRAMID.

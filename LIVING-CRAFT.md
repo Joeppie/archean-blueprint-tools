@@ -211,7 +211,44 @@ THREE PointLight/SpotLight: casting per lamp is too heavy for an editor
 (we, 2026-10-31: "light should just show as being on, not actually cast
 a light"). Pinned by the scene GLOW LAW test (castLightCount stays 0).
 
-## THE JIMMY PROBE (app/tools/jimmyprobe.mjs — WP7)
+## 14. THE COCKPIT WINDOW (v1.16.14/15 — sit, send, and the seat's wires)
+we: "'sit' in cockpits (simultaneously with others) which opens a small
+control window that allow us to send all inputs (and lock sending inputs
+…); a checkbox sets repeat, pressing a button keeps it pressed …; also
+1-0 should be on there as these are the 'aux' channels" + "the layout …
+should be more organic … as they are in keyboard".
+- 🕹 on a PilotSeat's mode widget (VIEW-click included — the view action
+  widget is inspect-only, no select/gizmo/fly) opens ONE window per seat.
+- THE KEYBOARD LAYOUT: 1-0 (aux ladder, digit PilotKeys) in a small row
+  over QWERT, ASDF below, wide space, arrow cluster beside, IJKL
+  inverted-T; keys the corpus does not bind (T, ←, →) render inert —
+  left/right ARE a/d (PILOT_KEYS is the law, no invented binds).
+- 🔒 LOCK = the GLOBAL send-lock (setPilotLock): keyboard pilot keys
+  answer false (plain typing returns to the editor); the pads press
+  through it (pump.padPress). ⟳ REPEAT latches a pad (keeps sending the
+  signed value until clicked again; leaving the window releases).
+- SITTING = keys live: the window mounts usePilotKeys(true) (the law
+  rode only the IDE dialog + Screens dock before the e2e caught it).
+- SEAT→SURFACE CABLES (we: "im sending to an aileron, but I dont see
+  effect"): stepWorldSim streams every PilotSeat channel onto the io bus
+  (IoBus.seatChannel — the seat's io key, NO computer-alias publish);
+  the Editor's actuator tap relays each write to the seat's data cables
+  (devicesim.seatCableTargets: a channel-numbered seat port
+  (data_port.005) carries exactly that channel, a plain data-port cable
+  mirrors by identity; a plain TARGET port indexes its cables by drop
+  order — Accelerate then Steer on a wheel); Using (ch 0) is occupancy,
+  never relayed.
+- PROXY VISIBILITY (applyDevicePoses): Aileron/Elevator/Rudder rotate
+  their stand-in root about the joint axis by the deflection; the wheel
+  family yaws by the Steer channel (the SmallWheel's steer node is its
+  y-axis 'pivot'); a firing RCS (any nozzle > 0.05) tints its proxy
+  emissive pale plume-blue. Seam: engine.simVisualState(ci).
+- Fixtures: make_seat_test.py → 9000009091 SEAT BENCH (seat Roll cable →
+  Aileron, two nose-wheel cables, Yaw cable → RCS, inert program — the
+  wires alone must animate); pins cockpit.spec (chromium) + the
+  devicesim/buzzer unit tests.
+
+ (app/tools/jimmyprobe.mjs — WP7)
 The living-craft census over 3334698274: FARM (crafter-28 + GIANTPLANE
 co-run), ENERGY (744 kW of RTGs vs a 107 kW load, the drill at 100 kW,
 600 kWh full), ITEMS (drill→cables→container, mined/in-transit counters),
