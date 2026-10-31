@@ -25,7 +25,7 @@
 //    again; without it keycaps are momentary (release centers the stick).
 //  • flash — a keycap lights when its key pulses, keyboard OR pad
 //    (pump.pilotPulse).
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import FloatingWindow from './FloatingWindow';
 import {
   xenonFarm, pilotLocked, setPilotLock, type PilotKey,
@@ -41,7 +41,7 @@ type Cell = PilotKey | 'gap' | 'inert' | 'left' | 'right';
 interface Row { fn: string; value: number }
 
 export default function CockpitWindow(p: { ci: number; alias: string; onClose: () => void }) {
-  const [, setTick] = useState(0);
+  const [tick, setTick] = useState(0);
   const [lock, setLock] = useState(pilotLocked());
   const [repeat, setRepeat] = useState(false);
   const latched = useRef<Set<string>>(new Set());
@@ -58,8 +58,10 @@ export default function CockpitWindow(p: { ci: number; alias: string; onClose: (
     latched.current.clear();
   }, []);
 
-  // the seat's channel rows across every running pump (`alias · fn`)
-  const rows = useMemo(() => {
+  // the seat's channel rows across every running pump (`alias · fn`) —
+  // recomputed EVERY render (the 10 Hz tick carries the live values; a
+  // useMemo keyed only on alias froze the bars at mount-time zeros)
+  const rows = (() => {
     const by = new Map<string, Row>();
     const pre = `${p.alias} · `;
     for (const q of xenonFarm.pumps)
@@ -71,7 +73,8 @@ export default function CockpitWindow(p: { ci: number; alias: string; onClose: (
           ? r.value : (cur?.value ?? 0) });
       }
     return [...by.values()].sort((x, y) => x.fn.localeCompare(y.fn));
-  }, [p.alias]);
+  })();
+  void tick;
   const bound = xenonFarm.pumps.some(q => q.wsChannels()
     .some(r => r.label.startsWith(`${p.alias} · `)));
 

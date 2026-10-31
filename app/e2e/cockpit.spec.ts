@@ -13,27 +13,20 @@ const CRAFT = '9000009091';   // the SEAT BENCH: seat→aileron direct
 test.describe('@cockpit @ui THE COCKPIT WINDOW', () => {
   test('⌨ on the view-click; 🕹 sits; pads send, repeat latches, the lock mutes the keyboard',
     async ({ page }) => {
-      test.setTimeout(240_000);
-      test.slow();   // @slow: real cockpit plumbing on a corpus craft
+      test.setTimeout(150_000);
+      // THE LIVE FARM boots the seat's computer at page load (grid feeds
+      // it) — no IDE needed, the pump (and its worldsim rows) outlive
+      // every window (living.spec pattern; the bench has no dashboards,
+      // so the ▣ keeper button does not exist here)
+      await page.addInitScript(() => localStorage.setItem('archean-app-live', 'on'));
       await page.goto(`/?craft=${CRAFT}`);
       await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 60_000 });
-
-      // boot the seat's computer (the pump binds the seat channels)
-      await page.getByTestId('xenon-menu').click();
-      const item = page.locator('[data-testid^="xenon-comp-"]').first();
-      await expect(item).toBeVisible();
-      await item.click();
-      const chip = page.getByTestId('xenon-mode');
       await expect
-        .poll(() => chip.getAttribute('data-cycles').then(v => +(v ?? '0')),
-          { timeout: 40_000 })
-        .toBeGreaterThan(3);
-      // keep the FARM alive across the IDE close (live=off law: the VMs
-      // close with the LAST IDE window AND the Screens tab) — the cockpit
-      // window needs the pump's worldsim rows
-      await page.getByTestId('screens-btn').click();
-      await expect(page.getByTestId('screens-dock')).toBeVisible({ timeout: 15_000 });
-      await page.getByTestId('xenon-close').click();
+        .poll(() => page.evaluate(() =>
+          (window as any).__XENON__().farm.reduce(
+            (a: number, f: { cycles: number }) => Math.max(a, f.cycles), 0)),
+          { timeout: 60_000, message: 'the live farm boots the seat computer' })
+        .toBeGreaterThan(5);
 
       // fly to the PilotSeat, VIEW-click it → the action widget carries ⌨
       // for computers/HUDs and 🕹 for the seat (view stays inspect-only)
@@ -57,8 +50,9 @@ test.describe('@cockpit @ui THE COCKPIT WINDOW', () => {
       await expect(win).toBeVisible();
       // the seat's channels laid out (label prefix `PilotSeat · `)
       const rollVal = page.getByTestId('cockpit-val-roll');
+      // a RESTING stick is zero-width — attach, not visibility
       await expect(rollVal, 'the seat publishes a roll channel')
-        .toBeVisible({ timeout: 10_000 });
+        .toBeAttached({ timeout: 10_000 });
 
       // REPEAT + pad click LATCHES: E (roll +) keeps sending 1
       await page.getByTestId(`cockpit-repeat-${seatCi}`).check();
