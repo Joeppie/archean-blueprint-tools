@@ -62,10 +62,18 @@ test.describe('player HUD: load, edit, Library, run @ui @playerhud', () => {
     await expect(page.getByTestId('hud-problems-counts'))
       .toContainText(/0 errors[\s\S]*0 warnings/);
 
+    // THE VARS TAB (v1.16.14, the user: "variables is missing from HUD
+    // code!"): live globals after ▶
+    await page.getByTestId('hud-side-vars').click();
+    await expect(page.getByTestId('hud-vars-list')).toBeVisible();
+
     // ▶ runs it: hudPump boots the program (AVATARSIM answers
     // avatar_sensor_speed), the panel(bottom, 240, 90) surface blits live
     await page.getByTestId('hud-run').click();
     await expect(page.getByTestId('hud-run-status')).toContainText(/cycles|ON/i, { timeout: 30_000 });
+    await expect(page.locator('[data-testid^="hud-var-"]').first(),
+      'live globals fill the Vars tab while the HUD runs')
+      .toBeVisible({ timeout: 15_000 });
     // the live panel canvases live under the PANELS side tab
     await page.getByTestId('hud-side-panels').click();
     const canvas = page.locator('canvas[data-testid^="hud-panel-canvas-"]').first();

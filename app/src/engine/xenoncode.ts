@@ -1334,6 +1334,14 @@ export type PilotKey = 'w' | 's' | 'a' | 'd' | 'up' | 'down' | 'f' | 'space' | '
   | 'q' | 'i' | 'k' | 'j' | 'l' | 'r'
   | 'digit1' | 'digit2' | 'digit3' | 'digit4' | 'digit5'
   | 'digit6' | 'digit7' | 'digit8' | 'digit9' | 'digit0';
+// THE SEND-LOCK (v1.16.14, the cockpit window: "a checkbox … lock sending
+// inputs"): while locked the keyboard sends NOTHING (pilotKey answers
+// false, so the keys fall through to the editor as normal typing). Global
+// law, one switch; the cockpit pads press through it (padPress).
+let pilotLock = false;
+export function setPilotLock(on: boolean): void { pilotLock = on; }
+export function pilotLocked(): boolean { return pilotLock; }
+
 export const PILOT_KEYS: Record<string, Partial<Record<PilotKey, number>>> = {
   'backward/forward': { w: 1, s: -1 },
   'left/right': { d: 1, a: -1 },
@@ -1522,7 +1530,10 @@ export class XenonPump {
   // pow(10,40) releases); sliders are the MANUAL mode per row.
   // name -> io/ch bindings of the CURRENT computer (the channels themselves
   // are the GLOBAL store in engine/worldsim.ts — shared, persisted)
-  private wsBindings = new Map<string, { io: number | string; ch: number }>();
+  private wsBindings = new Map<string, {
+    io: number | string; ch: number;
+    ci?: number; type?: string;
+  }>();
   private wsT0 = 0;
   private wsOverrides: Record<string, number> = {};
   log: XenonEvent[] = [];
@@ -1789,7 +1800,9 @@ export class XenonPump {
   private async buildWorldSim(comp: XenonComputer) {
     wsLoad();
     const table = await loadChannelTable();
-    const bindings = new Map<string, { io: number | string; ch: number }>();
+    const bindings = new Map<string, {
+      io: number | string; ch: number; ci?: number; type?: string;
+    }>();
     const pilot = new Map<PilotKey, { name: string; sign: number }[]>();
     for (const c of comp.channels) {
       const dev = comp.devices.find(d =>
@@ -1800,7 +1813,7 @@ export class XenonPump {
       wsEnsure(name, `${dev?.alias || type || c.io} · ${fn ?? `ch ${c.ch}`}`,
         wsKind(type.toLowerCase()),
         worldsimDefault(fn?.toLowerCase() ?? null, type.toLowerCase()));
-      bindings.set(name, { io: c.io, ch: c.ch });
+      bindings.set(name, { io: c.io, ch: c.ch, ci: dev?.ci, type });
       if (type === 'PilotSeat' && fn)
         for (const [k, sign] of Object.entries(PILOT_KEYS[fn.toLowerCase()] ?? {}) as [PilotKey, number][])
           (pilot.get(k) ?? pilot.set(k, []).get(k)!).push({ name, sign });
@@ -1821,7 +1834,7 @@ export class XenonPump {
         if (bindings.has(name)) continue;
         wsEnsure(name, `${dev.alias || 'PilotSeat'} · ${fn ?? `ch ${ch}`}`,
           wsKind('pilotseat'), worldsimDefault(fn?.toLowerCase() ?? null, 'pilotseat'));
-        bindings.set(name, { io: dev.io, ch });
+        bindings.set(name, { io: dev.io, ch, ci: dev.ci, type: 'PilotSeat' });
         if (fn)
           for (const [k, sign] of Object.entries(PILOT_KEYS[fn.toLowerCase()] ?? {}) as [PilotKey, number][])
             (pilot.get(k) ?? pilot.set(k, []).get(k)!).push({ name, sign });
@@ -1846,15 +1859,32 @@ export class XenonPump {
    *  has no PilotSeat channels). */
   pilotKeysBound(): PilotKey[] { return [...this.pilotBindings.keys()]; }
 
+  /** v1.16.14 THE PAD PRESS (the cockpit window): pilotKey with the
+   *  send-lock bypassed for exactly this call — a pad click is deliberate. */
+  padPress(key: PilotKey, down: boolean): boolean {
+    this.pilotAllowed = true;
+    try { return this.pilotKey(key, down); }
+    finally { this.pilotAllowed = false; }
+  }
+
   /** One flight-key press/release (v1.13.2): drives every matching PilotSeat
    *  worldsim row MANUAL at the channel's signed value (press = ±1, release
    *  centers to 0 — a stick, not a latch), exactly like the Bus-tab slider
    *  touching the row. The program sees it through input_number on the
    *  seat's channel next cycle. Returns false when no cockpit channel
    *  answers this key (the caller may then let the key through). */
+  /** THE ACTIVITY PULSE (v1.16.14, the cockpit window: "short highlight
+   *  when either using keyboard or when pressing"): every accepted press
+   *  stamps the key; the windows flash pads whose pulse is young. */
+  pilotPulse = new Map<PilotKey, number>();
+  /** a pad press bypasses the send-lock for exactly one call — the pads
+   *  ARE the deliberate send while the keyboard is muted */
+  private pilotAllowed = false;
   pilotKey(key: PilotKey, down: boolean): boolean {
+    if (pilotLock && !this.pilotAllowed) return false;
     const rows = this.pilotBindings.get(key);
     if (!rows?.length) return false;
+    this.pilotPulse.set(key, performance.now());
     for (const b of rows) {
       const r = wsChans().get(b.name);
       if (!r) continue;
@@ -1890,6 +1920,15 @@ export class XenonPump {
       r.value = v;
       run.setInput(bind.io, bind.ch, v);
       run.worldsimSync(name, v);
+      // v1.16.15 SEAT CHANNEL ON THE WIRE (we: "im sending to an aileron,
+      // but I dont see effect"): a PilotSeat publishes its 18 channels on
+      // its data ports — the game feeds a cabled Aileron/Elevator/Rudder
+      // from the seat DIRECTLY (no program in between). The channel lands
+      // on the io bus under the seat's io, and the actuator tap carries
+      // (seat ci, ch, v) — the Editor relays it to the seat-cabled parts.
+      if (bind.type === 'PilotSeat' && bind.ci !== undefined)
+        xenonFarm.bus.seatChannel(String(bind.io), bind.ch, v, this,
+          { ci: bind.ci, type: 'PilotSeat' });
     }
   }
 
@@ -2726,6 +2765,16 @@ export class IoBus {
     for (const w of this.watchers)
       { try { w(dev.ci, dev.type, ch, v); } catch { /* a tap never breaks the cable */ } }
   }
+  /** v1.16.15: a PilotSeat channel value streamed by its pump. The seat's
+   *  io key + the actuator tap, WITHOUT the COMPUTER-ALIAS publish (the
+   *  seat is not the computer — its channels must not land on the
+   *  computer's alias rows). */
+  seatChannel(ioKey: string, ch: number, v: number, _from: XenonPump,
+    dev: { ci: number; type: string }): void {
+    this.values.set(this.key(ioKey, ch), v);
+    this.notifyDevice(dev, ch, v);
+    for (const p of this.pumps) p.acceptBusWrite(ioKey, ch, v);
+  }
   /** Record a value WITHOUT the pump fan-out — the HUMAN PRESS lands here
    *  (Farm.pressDevice drives the pumps itself, per-computer io numbers);
    *  the bus-tab rows and the probes see the pressed channel like any other. */
@@ -2763,7 +2812,15 @@ class Farm {
     if (this.pumps.length !== had) this.notify();
   }
   /** The pump running (or owning) this computer's VM — created on demand. */
-  pumpFor(comp: XenonComputer): XenonPump {
+    /** v1.16.14: one cockpit pad press drives EVERY pump with the channel
+   *  bound (the pilot-key law: all co-running computers share the seat). */
+  pressPilot(key: PilotKey, down: boolean): boolean {
+    let hit = false;
+    for (const p of this.pumps) if (p.padPress(key, down)) hit = true;
+    return hit;
+  }
+
+pumpFor(comp: XenonComputer): XenonPump {
     let p = this.pumps.find(q => q.comp?.ci === comp.ci);
     if (!p) this.attach(p = new XenonPump());
     return p;

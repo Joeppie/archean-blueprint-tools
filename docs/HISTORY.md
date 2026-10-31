@@ -5284,3 +5284,80 @@ self-clears by key (the timer survives; a newer jump replaces it);
 followTo now poll-asserts the active (paused) line's box sits inside the
 code pane's box — the scroll itself is the observable. Law recorded in
 AGENTS §Nav: an effect must never setState on its own deps inside itself.
+
+## 16. v1.16.14 session — THE FUNCTION-REFERENCE HOVER (2026-10-31, late)
+
+We: "there is no descriptions on the function names for e.g. blank; nothing
+shows up when mouseovering, telling me what it is or where it comes from".
+engine/xcdocs.ts is one lookup table for every callable/constant/keyword
+the caret can rest on — signature, one-line description and ORIGIN (the
+interpreter's registry, the device shim, panel/beacon members, color
+constants, section words). The Library's tables (XC_LIB_DOC/
+XC_GLOBAL_CONSTS, curated since v1.13.25) are reused, not duplicated; the
+59 language functions got descriptions transcribed from the shipped wiki
+with signatures read from the binary's `{"name", "(args):type"}` registry.
+THE COVERAGE LAW (xcdocs.test): every name in the analyzer's vocabulary +
+the panel/beacon members + keywords must resolve — `blank` firing this
+feature was a vocabulary entry with no doc; the audit caught 31 more
+(drawing/button members, system functions, panel, isnumeric). The hover is
+a CodeMirror tooltip behind the project-@function and io-call hovers
+(analysis.spec hovers `print` on the bench disk and asserts the desc + the
+shim origin).
+
+**v1.16.14 fixes (same evening, two Human-HUD reports).** (1) "it cleams
+that $beacon is never used, but in tick $beacon.data is used; so this
+warning seems to not properly propagate": THE ROOT-NAME LAW — the
+analyzer's reference regex captured whole dotted paths (`$beacon.data` as
+one name), so member-used globals looked unreferenced. References now
+capture the ROOT name; pins: the synthetic beacon program flags nothing,
+and the machine's `homo` disk may never flag a beacon var as unused.
+(2) "variables is missing from HUD code!": the HUD IDE had no Vars tab at
+all — HudPump now snapshots `run.vars()` every cycle and the HUD IDE
+carries the same live-globals view the computer IDE does (Vars side tab,
+▶ fills it; playerhud pins at the VM tier and the e2e).
+
+## 17. v1.16.15 — THE COCKPIT WINDOW + view-click actions (2026-11-01)
+
+We: "'sit' in cockpits (simultaneously with others) which opens a small
+control window that allow us to send all inputs (and lock sending inputs
+using buttons, wasd up down left right qe, r, t a checkbox sets repeat,
+pressing a button keeps it pressed in that case, short highlight when
+either using keyboard or when pressing. also 1-0 should be on there as
+these are 'aux' channels. Compact setup so its easy to understand)" +
+"the view tab should allow us to view the code when clicking huds/
+computers". CockpitWindow: one compact floating window per seated
+PilotSeat (the 🕹 on its mode widget); rows = the seat's worldsim channels
+(`alias · fn` labels across pumps) with a signed pair of keycap pads per
+binding (PILOT_KEYS — the aux 1..9,0 ladder rides digit caps), a live
+value bar, ⟳ REPEAT (a pad click latches the press), 🔒 LOCK (the global
+send-lock: pilot keys answer false, keys are plain editor typing; pads
+press through via padPress), and a ~260 ms flash on any pad whose key
+pulses (pilotPulse — keyboard OR pad). The keys ride the corpus law
+(wasd/arrows/i-k/e-q/l-j/r/space/f + digits); 't' has no seat binding in
+the corpus, so channels without a keybind lay out pad-less rows. VIEW-
+CLICK (the v1.5 "view picks NOTHING" rule kept — no select, no gizmo, no
+fly): clicking a computer/HUD/PilotSeat pops the ACTION widget carrying
+its own ci — ⌨ opens the IDE, 🕹 sits. Pins: xenoncode cockpit seams
+(lock gate, PILOT_KEYS words incl. aux 0/digit0), cockpit.spec on the
+Space Invaders arcade (view-click → sit → latched pad sends +1 →
+unlatch → aux pads present → locked keyboard silent → unlocked stick
+down/up).
+
+**v1.16.15 follow-ups (same session): "im sending to an aileron, but I
+dont see effect" + "the layout of the buttons for the cockpit is stupid,
+it should be more organic …".** (1) THE SEAT→SURFACE CABLE: the game
+wires a PilotSeat's data_port.NN straight into a cabled Aileron/Elevator/
+Rudder — no program in between; our sim animated control surfaces only
+from PROGRAM bus writes, and the proxy view showed nothing at all (joint
+animation rides real models). Now seat channels stream onto the bus
+(IoBus.seatChannel — no computer-alias publish), the Editor relays along
+the seat's data cables (devicesim.seatCableTargets, target channel = the
+port digits), and applyDevicePoses deflects PROXY control surfaces about
+the joint axis. Bench 9000009091 SEAT BENCH: seat data_port.005 (Roll) →
+Aileron, INERT program — the cockpit e2e latches the E pad and asserts
+the joint swings > 20°. (2) THE KEYBOARD LAYOUT: the pads are a keyboard
+— 1-0 small row above QWERT, ASDF below, wide space, arrows beside, the
+I/J/K/L inverted-T right; T and ←/→ sit inert (left/right ARE a/d in the
+corpus law). (3) Debug seam lesson: __XENON__ is REPLACED by the IDE
+dialog while mounted (restore-on-unmount) — probe seams must ride BOTH
+objects (wsChannels added to both).

@@ -142,7 +142,11 @@ const VAR_DECL_RE = /^\s*(var|const|storage|array|global|local|param)\s+(\$[A-Za
 const FN_REF_RE = /@([A-Za-z_][\w.]*)/g;
 const BARE_CALL_RE = /([a-z_][\w]*)\s*\(/g;
 const METHOD_RE = /\.\s*([a-z_][\w]*)\s*\(/g;
-const VAR_REF_RE = /\$([A-Za-z_][\w.]*)/g;
+// v1.16.14 THE ROOT-NAME LAW for references: `$beacon.data` USES $beacon —
+// capturing the whole dotted path made member-used globals look unreferenced
+// (we: "it cleams that $beacon is never used, but in tick $beacon.data is
+// used; so this warning seems to not properly propagate")
+const VAR_REF_RE = /\$([A-Za-z_]\w*)/g;
 const ALIAS_ARG_RE = /(?:input_number|input_text|output_number|output_text|screen)\(\s*"([^"]+)"\s*[,)]/g;
 /** value positions: `= @f(`, `return @f(`, `if/while @f(`, operator/paren/comma before */
 const VALUE_USE_RE = /(?:[=+\-*/(<,]\s*|return\s+|if\s+|while\s+|and\s+|or\s+)@([A-Za-z_][\w.]*)\s*\(/g;

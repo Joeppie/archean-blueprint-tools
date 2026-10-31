@@ -119,7 +119,7 @@ const getAtlas = (): Promise<ModelAtlas | null> => (atlasP ??= openAtlas());
 
 let __vpMarked = false;
 let __cMarked = false;   // v1.12.2 BOOT COST: first-render mark
-export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, onBlockPick, onBlockHover, placing = null, onPlace, onPaintOpen, onBlockToTris, onPlaceCancel, onPlaceBuild, onPlaceRotate, onPlaceBack, onManifest, keepView = false, onPress, pressLabel, onCode }: {
+export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, onBlockPick, onBlockHover, placing = null, onPlace, onPaintOpen, onBlockToTris, onPlaceCancel, onPlaceBuild, onPlaceRotate, onPlaceBack, onManifest, keepView = false, onPress, pressLabel, onCode, onSit }: {
   bp: Blueprint | null;
   onPick: (h: PickHit) => void;
   onEngine?: (e: Engine | null) => void;
@@ -179,6 +179,10 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
   /** the popup label for the hover chip (we: "it should tell us what
    *  channel/ui element … which xenoncode line … as a popup label") */
   pressLabel?: (t: PressTarget) => string | null;
+  /** v1.16.14 THE SIT BUTTON: open the cockpit control window for a
+   *  PilotSeat (we: "'sit' in cockpits (simultaneously with others) which
+   *  opens a small control window that allow us to send all inputs") */
+  onSit?: (ci: number) => void;
   /** v1.16.2 THE CODE BUTTON: open the XenonCode IDE (computer) / HUD IDE
    *  for the part owning the widget (we: "I want of course to open its
    *  xenoncode") */
@@ -338,7 +342,7 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
     if (force) ghostCap.current!.force(x, y);          // Shift press/release re-aim
     else ghostCap.current!.move(x, y);
   };
-  const [widget, setWidget] = useState<{ x: number; y: number } | null>(null);
+  const [widget, setWidget] = useState<{ x: number; y: number; ci?: number } | null>(null);
   // v1.11: does a BLOCK own the widget (→ the ⤢ stretch row shows)? The
   // Editor's setBlockGizmo effect lands AFTER this component's render, so
   // the flag is polled (120 ms) while the widget is open, never derived at
@@ -573,7 +577,24 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
     // VIEW picks NOTHING (v1.5 user rule: "selecting components shouldnt be
     // possible in view — view shows the amounts"): inspect only, no select,
     // no fly-to, no mode widget — the side panel keeps the vessel stats.
-    if (mode === 'view') return;
+    // v1.16.14 (we: "the view tab should allow us to view the code when
+    // clicking huds/computers, 'sit' in cockpits"): a click on a CODEABLE
+    // part (computers, HUDs) or a PilotSeat pops the ACTION widget —
+    // inspection only: no select, no gizmo, no fly; the box carries its
+    // own ci (the selection stays empty).
+    if (mode === 'view') {
+      const hit = engine.pickAt(e.clientX, e.clientY);
+      onPick(hit);
+      const c = hit.kind === 'comp' && hit.ci != null
+        ? engine.blueprint?.data.components[hit.ci] : null;
+      const act = !!c && (/^(Computer|MiniComputer|Crafter)$/.test(c.type)
+        || c.type === 'HudController' || c.type === 'PilotSeat');
+      const box = hostRef.current?.getBoundingClientRect();
+      if (act && box && hit.ci != null)
+        setWidget({ x: e.clientX - box.left, y: e.clientY - box.top, ci: hit.ci });
+      else setWidget(null);
+      return;
+    }
     if (placing) { onPlace?.(e.clientX, e.clientY, 0); return; }   // KSP place: no select
     if (mode === 'edit') {                       // merged editor (v2.0.0)
       // the info chip still rides the plain pick path (scene.spec pin: a tap
@@ -693,7 +714,9 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
         <div data-testid="modebox"
           className="ksp-win absolute z-20 flex -translate-x-1/2 gap-1 rounded p-1"
           style={mobile ? { left: '50%', top: 8 } : { left: widget.x, top: Math.max(8, widget.y - 48) }}>
-          {([['off', '⊘', 'hide gizmo'], ['translate', '✥', 'move'], ['rotate', '⟳', 'rotate']] as const).map(([m, ic, t]) => (
+          {/* v1.16.14 the VIEW action widget (widget.ci): inspect-only —
+              it carries the part's actions (⌨/🕹), not the edit tiles */}
+          {!widget.ci && ([['off', '⊘', 'hide gizmo'], ['translate', '✥', 'move'], ['rotate', '⟳', 'rotate']] as const).map(([m, ic, t]) => (
             <button key={m} title={t} data-testid={`mode-${m}`} onClick={() => setMode(m)}
               className={`ksp-btn grid h-8 w-9 place-items-center text-[15px] leading-none ${gmode === m ? 'on' : ''}`}>
               {ic}
@@ -733,29 +756,44 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
           </button>
           {/* 🎨 PALETTE (v1.6): painting is a peer of moving/turning — this
               opens the colour window for the part/block under the widget */}
-          <button title="paint this part/block (palette)" data-testid="mode-paint"
-            onClick={() => onPaintOpen?.()}
-            className="ksp-btn grid h-8 w-9 place-items-center text-[15px] leading-none">
-            🎨
-          </button>
+          {!widget.ci && (
+            <button title="paint this part/block (palette)" data-testid="mode-paint"
+              onClick={() => onPaintOpen?.()}
+              className="ksp-btn grid h-8 w-9 place-items-center text-[15px] leading-none">
+              🎨
+            </button>
+          )}
           {/* v1.16.2 THE CODE BUTTON (we: "when I press the code button for
               a HUD or computer, or minicomputer, I guess I want of course
               to open its xenoncode"): a programmable part's widget opens
               ITS IDE — the same owners the XenonCode ▾ menu uses */}
           {(() => {
+            // v1.16.14: the VIEW action widget carries its own ci (no
+            // selection happened); the edit widget reads the selection.
             const sel = engineRef.current?.selectionState();
-            const c = sel && sel.ci >= 0
-              ? engineRef.current?.blueprint?.data.components[sel.ci] : null;
+            const ci = widget?.ci ?? (sel && sel.ci >= 0 ? sel.ci : undefined);
+            const c = ci != null
+              ? engineRef.current?.blueprint?.data.components[ci] : null;
             const codeable = !!c && (/^(Computer|MiniComputer|Crafter)$/.test(c.type)
               || c.type === 'HudController');
-            return codeable ? (
-              <button title={c!.type === 'HudController'
-                ? 'edit this HUD\u2019s XenonCode' : 'edit this computer\u2019s XenonCode'}
-                data-testid="mode-code" onClick={() => onCode?.(sel!.ci)}
-                className="ksp-btn grid h-8 w-9 place-items-center text-[15px] leading-none">
-                ⌨
-              </button>
-            ) : null;
+            const seat = c?.type === 'PilotSeat';
+            return (<>
+              {codeable && (
+                <button title={c!.type === 'HudController'
+                  ? 'edit this HUD\u2019s XenonCode' : 'edit this computer\u2019s XenonCode'}
+                  data-testid="mode-code" onClick={() => onCode?.(ci!)}
+                  className="ksp-btn grid h-8 w-9 place-items-center text-[15px] leading-none">
+                  ⌨
+                </button>
+              )}
+              {seat && (
+                <button title="sit in this cockpit — a window to send every seat input"
+                  data-testid="mode-sit" onClick={() => onSit?.(ci!)}
+                  className="ksp-btn grid h-8 w-9 place-items-center text-[15px] leading-none">
+                  🕹
+                </button>
+              )}
+            </>);
           })()}
         </div>
       )}

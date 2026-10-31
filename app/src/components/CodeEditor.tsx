@@ -33,6 +33,7 @@ import {
 import { closeSearchPanel, openSearchPanel, searchKeymap, searchPanelOpen } from '@codemirror/search';
 import { lintGutter, setDiagnostics, type Diagnostic } from '@codemirror/lint';
 import { requestThumb } from '../engine/thumbs';
+import { xcDoc } from '../engine/xcdocs';
 import type { XCDiagnostic } from '../engine/xcanalyze';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { tags as t } from '@lezer/highlight';
@@ -349,6 +350,33 @@ function CodeEditorInner(p: CodeEditorProps, ref: React.Ref<CodeEditorHandle>) {
           dom.appendChild(row);
           const idx = Math.max(0, line.text.indexOf(ioc.fn, Math.max(0, col - ioc.fn.length)));
           return { pos: line.from + idx, end: line.from + idx + ioc.fn.length,
+            create: () => ({ dom }) };
+        }
+      }
+      // THE FUNCTION-REFERENCE HOVER (v1.16.14, the user: "there is no
+      // descriptions on the function names for e.g. blank; nothing shows up
+      // when mouseovering, telling me what it is or where it comes from"):
+      // every bare/trailing word resolves against the reference table
+      // (engine/xcdocs) — signature, one-line desc and the ORIGIN
+      // (interpreter / device shim / panel / beacon / constant / keyword).
+      // Project @functions and io calls keep their richer hovers above;
+      // io calls that DO resolve win, the rest fall through to the table.
+      const wm = /(^|[^@\w$])([a-z_][a-z_0-9]*)/g;
+      let wmm: RegExpExecArray | null;
+      let word: string | null = null;
+      let widx = -1;
+      while ((wmm = wm.exec(line.text))) {
+        const a = wmm.index + (wmm[1]?.length ?? 0), b = a + (wmm[2]?.length ?? 0);
+        if (pos >= line.from + a && pos <= line.from + b) { word = wmm[2]!; widx = a; break; }
+      }
+      if (word) {
+        const d = xcDoc(word);
+        if (d) {
+          const dom = document.createElement('div');
+          dom.className = 'xc-hover xc-doc-tip';
+          dom.innerHTML = `<b>${d.sig}</b><div>${d.desc}</div>`
+            + `<div class="xc-doc-origin">${d.origin}</div>`;
+          return { pos: line.from + widx, end: line.from + widx + word.length,
             create: () => ({ dom }) };
         }
       }
@@ -707,6 +735,7 @@ if (typeof document !== 'undefined' && !document.querySelector('#xc-editor-css')
 .xc-break-gutter .cm-gutterElement { cursor: pointer; text-align: center; font-size: 10px; }
 .xc-bp { color: #ff5b5b; }
 .xc-paused-mark { color: #e6c07b; }
+.xc-doc-origin { color: #8a93a0; font-size: 10px; margin-top: 2px; }
 .xc-line-paused { background: rgba(230,192,123,.16) !important; }
 .xc-line-error { background: rgba(255,60,60,.14) !important; }
 .xc-hover { font-family: ui-monospace, monospace; font-size: 11px; padding: 4px 6px;

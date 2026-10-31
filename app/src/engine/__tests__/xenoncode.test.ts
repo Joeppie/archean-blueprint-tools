@@ -5,7 +5,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
-  xenonDevices,
+  xenonDevices, setPilotLock, pilotLocked,
   chanInfo, detectChannels, parseNodes, PILOT_KEYS, sabSupported, stepperLaw, tokenize,
   xenonComputers, xenonScreens, XenonWorkerRun,
 } from '../xenoncode';
@@ -569,5 +569,27 @@ describe('ROUTER POWER GATING (v1.16.11: routers resolve addresses only when fed
     const bp = data('9000009050');                     // CHIPOS BENCH (junction net)
     const dev = xenonDevices(bp, bp.data.components.findIndex(c => c.type === 'MiniComputer'));
     expect(dev.length).toBeGreaterThan(0);
+  });
+});
+
+describe('THE COCKPIT seams (v1.16.14)', () => {
+  it('the send-lock gate: pilotLocked reflects setPilotLock', () => {
+    setPilotLock(true);
+    expect(pilotLocked()).toBe(true);
+    setPilotLock(false);
+    expect(pilotLocked()).toBe(false);
+  });
+  it('every cockpit channel word the windows lay out has key bindings', () => {
+    // the pad rows (CockpitWindow's ORDER + the aux ladder) must all be
+    // real PILOT_KEYS words — a rename must fail this pin, not the e2e
+    const words = ['roll', 'pitch', 'yaw', 'backward/forward', 'left/right',
+      'down/up', 'main thrust',
+      'aux 1', 'aux 2', 'aux 3', 'aux 4', 'aux 5', 'aux 6', 'aux 7',
+      'aux 8', 'aux 9', 'aux 0'];
+    for (const w of words)
+      expect(Object.keys(PILOT_KEYS[w] ?? {}).length, w).toBeGreaterThan(0);
+    // 1-0 = the aux ladder (we: "1-0 should be on there as these are aux")
+    expect(PILOT_KEYS['aux 0']!.digit0).toBe(1);
+    expect(PILOT_KEYS['aux 9']!.digit9).toBe(1);
   });
 });

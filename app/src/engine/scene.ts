@@ -263,6 +263,9 @@ const qInv = (q: FileQuat): FileQuat => ({ w: q.w, x: -q.x, y: -q.y, z: -q.z });
  *  has 2 370 components, the next craft 668, so only giants take this path. */
 const HEAVY_COMPONENTS = 800;
 
+const AXIS_X = new Vector3(1, 0, 0);
+const AXIS_Y = new Vector3(0, 1, 0);
+
 export class Engine {
   readonly scene = new Scene();
   private renderer: WebGLRenderer | null = null;
@@ -2738,6 +2741,59 @@ void main() {
           if (jrefs) applyJointPoses(jrefs, c);
         }
       }
+      // v1.16.15 CONTROL-SURFACE DEFLECTION ON THE PROXY (we: "im sending
+      // to an aileron, but I dont see effect"): the joint animation rides
+      // the REAL model's joint refs — in the default proxy view a cabled
+      // seat deflects nothing visible. Rotate the part root about its
+      // joint axis by the deflection (the part's origin IS the hinge).
+      const WHEELISH = c && /^(SmallWheel|BigWheel|Wheel)$/.test(c.type);
+      if (c && (/^(Aileron|Elevator|Rudder)$/.test(c.type)
+        || (WHEELISH && (p?.steer ?? 0) !== 0))) {
+        const jv = WHEELISH ? (p!.steer ?? 0) * 30
+          : (p?.joints ? Object.values(p.joints)[0]?.angle : undefined);
+        const deg = ((jv ?? 0) * Math.PI) / 180;
+        const ax = c.type === 'Rudder' || WHEELISH ? AXIS_Y : AXIS_X;
+        for (const o of this.compRoots.get(ci) ?? []) {
+          if ((o.userData as { jrefs?: unknown }).jrefs) continue;   // real animates joints
+          const ud = o.userData as { baseQ?: [number, number, number, number] };
+          if (!ud.baseQ)
+            ud.baseQ = [o.quaternion.w, o.quaternion.x, o.quaternion.y, o.quaternion.z];
+          const base = new Quaternion(ud.baseQ[1], ud.baseQ[2], ud.baseQ[3], ud.baseQ[0]);
+          o.quaternion.copy(base).multiply(new Quaternion().setFromAxisAngle(ax, deg));
+        }
+      }
+      // v1.16.15 PROXY GLOW (we: "RCS … inputs dont visually result in
+      // actions"): a firing RCS/any glow part with no lamp lens tints its
+      // proxy box emissive (materials cloned once, kept per part)
+      {
+        const lens2 = this.lampLenses.get(ci);
+        const g = p?.glow;
+        if (!lens2 && c && (g ? g.r + g.g + g.b > 0.02 : false)) {
+          for (const o of this.compRoots.get(ci) ?? []) {
+            const ud = o.userData as { glowCloned?: boolean };
+            o.traverse(o2 => {
+              const m = o2 as Mesh;
+              if (!m.isMesh) return;
+              const mat = m.material as MeshStandardMaterial;
+              if (!ud.glowCloned) {
+                m.material = mat.clone();
+                ud.glowCloned = true;
+              }
+              (m.material as MeshStandardMaterial).emissive.setRGB(g!.r, g!.g, g!.b);
+              (m.material as MeshStandardMaterial).emissiveIntensity = 1;
+            });
+          }
+        } else if (!lens2 && c) {
+          for (const o of this.compRoots.get(ci) ?? []) {
+            const ud = o.userData as { glowCloned?: boolean };
+            if (!ud.glowCloned) continue;
+            o.traverse(o2 => {
+              const m = o2 as Mesh;
+              if (m.isMesh) (m.material as MeshStandardMaterial).emissive.setRGB(0, 0, 0);
+            });
+          }
+        }
+      }
       const lens = this.lampLenses.get(ci);
       if (lens) {
         const g = p?.glow;
@@ -2867,6 +2923,18 @@ void main() {
   /** AUDIT SEAM (v1.15.6, living-craft pins): the live quaternion of one
    *  joint node of a component's real model — proves a SIM pose reached
    *  the part's own plate. */
+  /** AUDIT SEAM (v1.16.15, cockpit pins): the live proxy visual of a part
+   *  (deflect = control-surface joint degrees, steer = wheel steer channel,
+   *  glow = emissive sum of a firing RCS/lamp). */
+  simVisualState(ci: number): { deflect: number; steer: number; glow: number } {
+    const p = this.simPoses.get(ci);
+    const c = this.bp?.data.components[ci];
+    const deflect = c && /^(Aileron|Elevator|Rudder)$/.test(c.type)
+      ? (p?.joints ? Object.values(p.joints)[0]?.angle ?? 0 : 0) : 0;
+    const g = p?.glow;
+    return { deflect, steer: p?.steer ?? 0, glow: g ? g.r + g.g + g.b : 0 };
+  }
+
   jointPoseQ(ci: number, name: string): [number, number, number, number] | null {
     for (const o of this.compRoots.get(ci) ?? []) {
       const jrefs = (o.userData as { jrefs?: JointPose[] }).jrefs;

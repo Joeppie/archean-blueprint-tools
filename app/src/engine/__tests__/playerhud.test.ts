@@ -112,3 +112,17 @@ describe('THE HUD CADENCE LAW (v1.16.13 — set_cps is the program’s own voice
     hudPump.close();
   }, 20_000);
 });
+
+describe('the pump snapshots live globals (v1.16.14 — the HUD IDE Vars tab)', () => {
+  it('vars fills while the HUD runs (we: "variables is missing from HUD code!")', async () => {
+    provideVmWasm();
+    await hudPump.open({ ci: -9, alias: 'varsbench', files: [
+      { name: 'main.xc', code: 'var $count = 0\n\nupdate\n\t$count = $count + 1\n' },
+    ] });
+    await new Promise(r => setTimeout(r, 600));
+    const v = hudPump.vars.find(x => x.name.replace(/^\$/, '') === 'count');
+    expect(v, 'the running global is dumped').toBeTruthy();
+    expect(+v!.v).toBeGreaterThan(3);
+    hudPump.close();
+  }, 20_000);
+});

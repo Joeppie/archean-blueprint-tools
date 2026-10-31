@@ -49,8 +49,12 @@ export function buzzerHarmonics(kind: BuzzerWave): Float32Array {
     else if (kind === 'square') a = (2 / (n * Math.PI)) * Math.sin(Math.PI * n * 0.5);
     else if (kind === 'sawtooth') a = (2 / (n * Math.PI)) * (n % 2 === 0 ? -1 : 1);
     else a = (8 / (Math.PI * Math.PI * n * n)) * Math.sin((Math.PI * n) / 2) * (((n - 1) / 2) % 2 === 0 ? 1 : -1);
-    // gentle 1/n^1.1 extra roll-off: tames the saw's edge, keeps bodies
-    b[n] = a / Math.pow(n, 0.1);
+    // v1.16.15 (we: "sawtooth and square wave dont work on the buzzers
+    // that need to be that, but for sound fidelity it needs them to be
+    // that"): the extra 1/n^0.1 rolloff softened the shapes until square
+    // read as sine — PURE 1/n spectra now: the game's hard-edged voice,
+    // band-limited only by the 64-harmonic cap.
+    b[n] = a;
   }
   return b;
 }

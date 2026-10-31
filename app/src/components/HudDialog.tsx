@@ -16,6 +16,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSPro
 import FloatingWindow from './FloatingWindow';
 import { CodeEditor, type CodeEditorHandle } from './CodeEditor';
 import { analyzeProject, type XCDiagnostic } from '../engine/xcanalyze';
+import { varKind } from '../engine/xenoncode';
 import BeaconPanel from './BeaconPanel';
 import { hudPump, ANCHOR_LABELS, HUD_VIEW_PRESETS, type HudSurface } from '../engine/hudpump';
 import XenonLibrary from './XenonLibrary';
@@ -49,7 +50,7 @@ export default function HudDialog(p: {
   const [dirty, setDirty] = useState<Set<number>>(new Set());
   const [tab, setTab] = useState(0);
   const [max, setMax] = useState(false);
-  const [side, setSide] = useState<'beacons' | 'panels' | 'screen' | 'library' | 'problems'>('panels');
+  const [side, setSide] = useState<'vars' | 'beacons' | 'panels' | 'screen' | 'library' | 'problems'>('panels');
   // v1.16.13 THE ANALYZER RUNS ON HUD DISKS TOO (the user: "button_circle
   // doesn't seem to work, its not know, and there is no squiggle, this is
   // in the readme player HUD"): the player-HUD editor shares the CodeEditor
@@ -286,6 +287,11 @@ export default function HudDialog(p: {
               <span className={`rounded px-1 py-0.5 ${side === 'panels' ? 'bg-[#1d2b42] text-[#8fd4ff]' : 'text-[#7d8aa0]'}`}>
                 Panels {hudPumpRunning && hudPump.surfaces.length ? `(${hudPump.surfaces.length})` : ''}</span>
             </button>
+            <button data-testid="hud-side-vars" onClick={() => setSide('vars')}
+              className="shrink-0 rounded px-2 py-1 text-[10px] tracking-wide hover:bg-[#182236]">
+              <span className={`rounded px-1 py-0.5 ${side === 'vars' ? 'bg-[#1d2b42] text-[#8fd4ff]' : 'text-[#7d8aa0]'}`}>
+                Vars {hudPumpRunning && hudPump.vars.length ? `(${hudPump.vars.length})` : ''}</span>
+            </button>
             <button data-testid="hud-side-screen" onClick={() => setSide('screen')}
               className="shrink-0 rounded px-2 py-1 text-[10px] tracking-wide hover:bg-[#182236]">
               <span className={`rounded px-1 py-0.5 ${side === 'screen' ? 'bg-[#1d2b42] text-[#8fd4ff]' : 'text-[#7d8aa0]'}`}>
@@ -315,6 +321,28 @@ export default function HudDialog(p: {
               </div>
             )}
             {side === 'panels' && <HudPanels />}
+            {side === 'vars' && (
+              // v1.16.14 THE VARS TAB (the user: "variables is missing from
+              // HUD code!"): the live globals of the running HUD program —
+              // the XENON-VARS dump, the same view the computer IDE carries
+              // (run with ▶ to fill it; storage vars survive re-boots)
+              <div data-testid="hud-vars-list"
+                className="flex min-h-0 flex-1 flex-col gap-[1px] overflow-y-auto pt-1 text-[11px]">
+                {!hudPumpRunning && (
+                  <div className="px-1 py-2 text-[11px] text-[#5d6a7d]">
+                    press ▶ to run the HUD — the variables fill live.
+                  </div>
+                )}
+                {hudPump.vars.map(v => (
+                  <div key={v.name} data-testid={`hud-var-${v.name.replace(/^\$/, '')}`}
+                    className="flex items-baseline gap-2 rounded px-1 py-[2px] hover:bg-[#182236]">
+                    <span className="shrink-0 font-semibold text-[#c7d3e3]">${v.name.replace(/^\$/, '')}</span>
+                    <span className="shrink-0 text-[10px] text-[#5d6a7d]">{varKind(v.t)}</span>
+                    <span className="min-w-0 flex-1 truncate text-[#8fd4ff]" title={v.v}>= {v.v}</span>
+                  </div>
+                ))}
+              </div>
+            )}
             {side === 'problems' && (
               <div data-testid="hud-problems-list"
                 className="flex min-h-0 flex-1 flex-col gap-[1px] pt-1 text-[11px]">

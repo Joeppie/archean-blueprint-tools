@@ -577,3 +577,60 @@ alias ISW-241): margin −35.5% UNSTABLE — flightlab census leg.
   only; folder keys byte-safe).
 - Gates: xcanalyze 22, xenonvm 14 (+circle), playerhud 13 (+Problems leg),
   turbo 3/0/1, xenonhud+playerhud+xenon (@codeditor) e2e run, vitest full.
+
+## Batch 5 (v1.16.14) — function-reference hover + HUD fixes
+- xcdocs.ts + hover (sig/desc/ORIGIN) + COVERAGE LAW pin (31 vocabulary
+  entries without docs found incl. blank); analysis.spec hover leg.
+- Root-name law ($beacon.data uses $beacon) + homo regression pin.
+- HUD Vars tab (pump run.vars() snapshot; side tab; VM + e2e legs).
+- Gates: xcanalyze+playerhud 36/36, tsc clean, playerhud+analysis e2e run.
+
+## Batch 6 (v1.16.15) — cockpit keyboard layout + seat→surface cables
+- Cockpit pads = a KEYBOARD (1-0 over QWERT / ASDF / space / arrows / IJKL;
+  T, ←/→ inert). SEAT→SURFACE: IoBus.seatChannel + Editor relay via
+  seatCableTargets + proxy deflection in applyDevicePoses.
+- Fixture 9000009091 SEAT BENCH (seat→aileron wire, inert program).
+- Gates: cockpit.spec (sit, latch→aileron >20°, aux digits, lock), tsc,
+  vitest full.
+
+## WP-FULLSCREEN (OPEN, planned 2026-11-01, NOT taken — context budget)
+We: "for any screen, there needs to be a PROPER fullscreen mode that tries
+to use the entire screen (toggle onscreen for stretch/fit, and buttons for
+control should overlay on mobile phone (provided there are no buttons in
+the way with button_rect or circle_button stuff; if there are, these must
+take precedence … make a toggle button on top for toggling that on mobile
+phone interface …). Also make toggles for switching to arrows and a
+1234567890 input alt".
+Plan (surfaces = ScreensCell zoom windows + XenonDialog screen-tab canvas
++ HUD SCREEN window — ONE shared component ScreenFullscreen):
+1. Shim (ABI 19): per-surface DRAWN-BUTTON RECTS export — the button_rect/
+   button/button_circle declarations record their rects into ScreenSlot
+   (rectsThisCycle), exported xc_screen_buttons(idx) -> JSON [{x,y,w,h,
+   shape}]; cleared per cycle (the game draws its controls every frame).
+2. Engine: XenonRun/XenonWorkerRun screenButtons(key) (typeof-guard, [] on
+   old wasm); pump want-set unchanged (rects ride the cycle response).
+3. Component: a ⛶ button on every screen canvas frame:
+   • requestFullscreen on the canvas wrapper; exit restores (fullscreen-
+     change listener keeps state honest).
+   • stretch/fit toggle chip (object-fit: canvas CSS 100%/100% vs
+     aspect-preserving contain), persisted per surface key
+     (localStorage archean-app-screen-fill).
+   • MOBILE (<768px) key overlay: bottom-anchored, translucent, reuse the
+     cockpit pad law (farm.pressPilot — the seat channels): layout toggle
+     chips: [WASD] [↑←↓→] [1234567890] (three overlay modes; the aux
+     ladder as the digit layout; arrows = up/down only like the cockpit).
+   • PRECEDENCE: when the pump reports non-empty screenButtons for this
+     surface (program-drawn button_rect/circle this cycle), overlay HIDES
+     and touches route to screenClick (the game's own controls win); a
+     small ☰ top-toggle switches overlay on anyway (we: "make a toggle
+     button on top … so user still can give input").
+   • Desktop: overlay hidden (keyboard is native); rects mode shows a
+     faint touch-target outline for debugging (hidden by default).
+4. Pins: vitest (buzzerHarmonics pure-1/n ratios — UPDATED); shim probe
+   (xc_screen_buttons JSON after a button_rect program); e2e
+   screenfull.spec (fixture 9000009050 dash with button_rect: fullscreen
+   button present; program-drawn rects → overlay toggle appears; mobile
+   viewport: WASD overlay sends pressPilot (assert the worldsim row)).
+5. Buzzer fidelity (DONE this batch): pure 1/n spectra (the n^0.1 shaping
+   was softening square/saw into sine — we: "for sound fidelity it needs
+   them to be that").

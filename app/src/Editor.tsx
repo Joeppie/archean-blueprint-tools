@@ -28,6 +28,7 @@ import {
   type EditApi, type PanelProps,
 } from './components/Panel';
 import TopBar, { type Mode } from './components/TopBar';
+import CockpitWindow from './components/CockpitWindow';
 import { BlockPanel, FlightPanel, TriPanel, WirePanel, WindPanel, brushSpec, placeBlock, type Brush } from './components/ModePanels';
 import { MirrorGlyph } from './components/ui';
 import { BlockPaint, CompPaint, SwatchGrid } from './components/ColorPanel';
@@ -54,7 +55,7 @@ import { isLegacyFile } from './engine/format';
 import { hasDashboards, xenonComputers, xenonHudControllers, xenonFarm, type XCFile,
   type XenonComputer } from './engine/xenoncode';
 import {PLAYER_HUD_CI, fetchPlayerHud, fetchPlayerHuds, playerHudDisplayName, playerHudFromFiles, savePlayerHud, type PlayerHudEntry, type PlayerHudProgram} from './engine/playerhud';
-import { DeviceSim, dataNeighbours } from './engine/devicesim';
+import {DeviceSim, dataNeighbours, seatCableTargets} from './engine/devicesim';
 import { craftPowerNet, computerPowered } from './engine/power';
 import { EnergySim, type EnergyStatus } from './engine/energy';
 import { ItemSim, type ItemSimCensus } from './engine/itemsim';
@@ -228,6 +229,9 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   /** LIVE CRAFT: the farm auto-boots the craft's programmed, POWERED
    *  computers on load and the VMs keep running when the IDE windows close
    *  (the craft runs while you look at it, like the game). Persisted ⚙. */
+  // v1.16.14 THE COCKPITS (we: "'sit' in cockpits (simultaneously with
+  // others)"): one cockpit window per seated PilotSeat ci
+  const [sitCis, setSitCis] = useState<number[]>([]);
   const [live, setLive] = useState(() => localStorage.getItem('archean-app-live') !== 'off');
   useEffect(() => { localStorage.setItem('archean-app-live', live ? 'on' : 'off'); }, [live]);
   // the manifest (joint limits for the sim, adapter kinds for power) lands
@@ -253,12 +257,34 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // THE ACTUATOR TAP: every bus write, resolved to its device (v1.15.6,
   // IoBus), feeds the sim; a Dashboard's element channels light its LED
   // faces (dashboard.md: one port, channel = element index).
+  // v1.16.15 SEAT→SURFACE CABLES (we: "im sending to an aileron, but I
+  // dont see effect"): a PilotSeat feeds its cabled control surfaces
+  // DIRECTLY (the game wires seat data_port.NN to the surface port — no
+  // program in between); the seat's worldsim channel write is relayed to
+  // the parts cabled to that seat.
+  const seatTargetsRef = useRef(new Map<number, { ci: number; ch: number; src: number | null }[]>());
+  useEffect(() => {
+    if (!bp) return;
+    const m = new Map<number, { ci: number; ch: number; src: number | null }[]>();
+    (bp.data.components as { type: string }[]).forEach((c, ci) => {
+      if (c.type === 'PilotSeat') m.set(ci, seatCableTargets(bp, ci));
+    });
+    seatTargetsRef.current = m;
+  }, [bp]);
   useEffect(() => xenonFarm.observeDevices((ci, type, ch, v) => {
     simRef.current.write(ci, ch, v);
     energyRef.current.write(ci, ch, v);   // gates: lamps, belts, generators
     itemRef.current.write(ci, ch, v);     // gates: drill, belts
     soundscape.write(ci, ch, v);          // THE SOUND OF THE CRAFT (WP4)
     if (type === 'Dashboard') simRef.current.setLed(ci, ch, v > 1 ? v / 255 : v);
+    if (type === 'PilotSeat' && ch !== 0)
+      // 'Using' (ch 0) is seat OCCUPANCY, not a control axis — it must
+      // never reach a surface/throttle channel through the cable
+      for (const t of seatTargetsRef.current.get(ci) ?? []) {
+        if (t.src !== null && t.src !== ch) continue;   // a channel-numbered seat port carries ONE channel
+        simRef.current.write(t.ci, t.ch, v);
+        energyRef.current.write(t.ci, t.ch, v);
+      }
   }), []);
   // AUTO-BOOT (we: "computers should start when a craft is loaded in"):
   // every programmed computer boots with the craft — POWER-GATED: a craft
@@ -449,6 +475,9 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         // view actually moved; null until a scene exists)
         cam: () => engineRef.current?.camPos() ?? null,
         pilotKeys: P?.pilotKeysBound() ?? [],
+        // v1.16.15 probe seam (cockpit windows): the worldsim rows
+        wsChannels: () => xenonFarm.pumps.flatMap(q =>
+          q.wsChannels().map(r => ({ name: r.name, label: r.label, v: r.value }))),
         surfaceMeta: [...(P?.surfaces.values() ?? [])].map(({ key, w, h }) => ({ key, w, h })),
         // v1.13.8 audit door: a surface's live framebuffer (the invadersaudit
         // orientation probe compares the RENDERED 3-D face against it) and the
@@ -2211,11 +2240,18 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
               onPlaceRotate={onPlaceRotate} onPlaceBack={onPlaceBack}
               keepView={bpKeepView}
               onPress={onDashPress} pressLabel={pressLabel} onCode={openCodeFor}
+              onSit={(ci) => setSitCis(prev => prev.includes(ci) ? prev : [...prev, ci])}
               onManifest={setManifest} />
             {/* 🎨 PALETTE window (v1.6): the paint alternative to the gizmo
                 modes, opened from the mode widget — targets the CURRENT
                 selection: the selected BLOCK (per-face, ⇄ twin), a COMPONENT
                 (color1/color2 snap), or the block BRUSH in the Place flavor */}
+            {bp && sitCis.map(ci => (
+              <CockpitWindow key={ci} ci={ci}
+                alias={bp.data.components[ci]?.alias
+                  || (bp.data.components[ci]?.type === 'PilotSeat' ? 'PilotSeat' : `seat ${ci}`)}
+                onClose={() => setSitCis(prev => prev.filter(x => x !== ci))} />
+            ))}
             {paintOpen && bp && ctxRef.current && (
               <div data-testid="palette-win"
                 className="ksp-win absolute right-2 top-12 z-30 max-h-[calc(100%-4rem)] w-[320px]

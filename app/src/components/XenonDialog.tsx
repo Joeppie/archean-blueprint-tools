@@ -230,6 +230,9 @@ export default function XenonDialog(p: {
         return r ? { name: r.name, mode: r.mode, manual: r.manual, value: r.value } : null;
       }).filter(Boolean),
       pilotKeys: pump.pilotKeysBound(),
+      // v1.16.15 probe seam (cockpit windows): the worldsim rows
+      wsChannels: () => xenonFarm.pumps.flatMap(q =>
+        q.wsChannels().map(r => ({ name: r.name, label: r.label, v: r.value }))),
       cycleLines: pump.run?.cycleLines() ?? [],
       cyclePairs: pump.run?.cyclePairs() ?? [],
       debug: { paused: pump.paused, file: pump.pausedFile, line: pump.pausedLine,

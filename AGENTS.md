@@ -407,6 +407,22 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   suite). Calls to project @functions are legal BARE in expressions; string
   bodies + `;` comments are inert to the call scan. Fixture
   `make_analysis_test.py` → 9000009090 (one defect per code + clean twins).
+- THE FUNCTION-REFERENCE HOVER (`engine/xcdocs.ts`, v1.16.14, we: "there is
+  no descriptions on the function names for e.g. blank; nothing shows up
+  when mouseovering, telling me what it is or where it comes from"): every
+  bare/trailing word, constant and section keyword resolves in the editor
+  to sig + one-line desc + ORIGIN (interpreter ⇄ XenonCode.hpp registry,
+  device shim ⇄ xc_host, panel/beacon members, color constants, keywords).
+  The Library tables (XC_LIB_DOC/XC_GLOBAL_CONSTS) are REUSED, not
+  duplicated; the 59 language descriptions are transcribed from the shipped
+  wiki documentation.md. THE COVERAGE LAW (xcdocs.test): every name in the
+  analyzer's vocabulary sets + panel/beacon members + keywords has a doc —
+  a vocabulary entry with no doc is exactly what fired this feature.
+  THE ROOT-NAME LAW (v1.16.14): references capture the ROOT of a dotted
+  use — `$beacon.data` USES $beacon (member access propagates; the
+  unused-var hint must not fire on member-used globals). The HUD IDE
+  carries a Vars side tab (HudPump snapshots run.vars() per cycle — the
+  live globals view the computer IDE has).
 - TURBO ×4 + set_cps (v1.16.13, ABI 17): the ⚡ (IDE title / ▣ SCREENS dock
   farm-wide / Xenon menu / HUD IDE) restarts the PUMP CADENCE at 100 Hz —
   the shim's virtual dt stays 40 ms, so the program's clock advances 4× per
@@ -552,6 +568,35 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   fights the painter; the dock merges the farm's painted surfaces per key).
   Pins: xenoncode net-screen/gating tests + xenonvm gate legs + e2e
   netscreens.spec; audit `app/tools/netscreenprobe.mjs`.
+- THE COCKPIT WINDOW (`components/CockpitWindow.tsx`, v1.16.14, we: "'sit'
+  in cockpits (simultaneously with others) which opens a small control
+  window that allow us to send all inputs (and lock sending inputs …); a
+  checkbox sets repeat, pressing a button keeps it pressed in that case;
+  …; also 1-0 should be on there as these are 'aux' channels"): the seat's
+  mode widget gains 🕹 (PilotSeat), opening one compact window per seated
+  seat; rows come from the pumps' worldsim labels (`alias · fn`) with key-
+  cap pads from PILOT_KEYS (aux 1-0 = digits); ⟳ REPEAT latches a pad
+  (keeps sending until clicked again); 🔒 LOCK is the GLOBAL send-lock
+  (`setPilotLock` — keyboard pilot keys answer false = plain typing; pads
+  press through via `padPress`); pads flash from `pump.pilotPulse` (the
+  keyboard and pad presses both stamp). VIEW-click is inspect-only
+  (v1.5 rule kept): no select/gizmo/fly — codeable parts and PilotSeats
+  pop the ACTION widget (⌨ / 🕹, it carries its own ci). THE LAYOUT IS A
+  KEYBOARD (v1.16.15, we: "the layout … is stupid, it should be more
+  organic … 1-9 super small buttons … row above wasd. q e besides wasd of
+  course, r t also in right place. Arrows besides"): the 1-0 aux ladder
+  rides a small row over QWERT(Y), ASDF below, the space bar wide, the
+  arrow cluster beside, the I/J/K/L inverted-T at the right; unbound keys
+  (T, ←, → — left/right ARE a/d in the corpus) sit inert so the shape
+  reads. SEAT→SURFACE CABLES (we: "im sending to an aileron, but I dont
+  see effect"): a PilotSeat feeds its cabled control surfaces DIRECTLY
+  (no program) — stepWorldSim streams seat channels onto the bus
+  (`IoBus.seatChannel`, no computer-alias publish), the Editor relays via
+  `devicesim.seatCableTargets` (target channel = the port digits), and the
+  proxy view deflects: applyDevicePoses rotates a non-real Aileron/Elevator
+  /Rudder root about its joint axis (the joint animation only rides real
+  models). Fixture `make_seat_test.py` → 9000009091 SEAT BENCH (seat
+  data_port.005→Aileron, inert program — the wire alone must animate).
 - `window.__XCDBG__` = the plain-JSON async debug console over the real pump
   (every answer JSON-serialisable, every call bounded) — the agent seam;
   `__XENONTEST__` the headless autotest seam (fixture 9000008001).

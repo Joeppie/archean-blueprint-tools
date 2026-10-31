@@ -45,6 +45,8 @@ export interface DevicePose {
   joints?: Record<string, JointDrive>;
   /** lamp family: light colour 0..1 + on/off (the scene glows the model) */
   glow?: { r: number; g: number; b: number };
+  /** wheel family: Steer channel (the proxy view yaws the stand-in) */
+  steer?: number;
   /** dashboard element state (ci of the Dashboard + element index):
    *  pressed/latched look + LED face value 0..1 */
   led?: number;
@@ -66,7 +68,7 @@ const SERVO_TYPES = new Set(['SmallHinge', 'SmallPivot', 'LinearTrack']);
  *  axle lever (limits [18,18,−18]) tips to −18° while the channel reads a
  *  truthy state, rests at +18° — the 3-D press animates the lever. */
 const BUTTON_TYPES = new Set(['ToggleButton', 'PushButton', 'ArrowButton']);
-const GLOW_TYPES = new Set(['Lamp', 'SpotLight', 'SlopeLight']);
+const GLOW_TYPES = new Set(['Lamp', 'SpotLight', 'SlopeLight', 'RCS']);
 const SPIN_TYPES = new Set(['Propeller', 'Wheel', 'BigWheel', 'SmallWheel']);
 const FLIGHT_TYPES = new Set(['Aileron', 'Elevator', 'Rudder']);
 
@@ -117,6 +119,50 @@ export function trackTarget(data: Record<string, unknown>, v: number): number {
   const lo = manual ? num(data, 'manualMinPos', -250) : num(data, 'minPos', -250);
   const hi = manual ? num(data, 'manualMaxPos', 250) : num(data, 'maxPos', 250);
   return Math.min(hi, Math.max(lo, v));
+}
+
+/** v1.16.15 SEAT→SURFACE CABLES (we: "im sending to an aileron, but I dont
+ *  see effect"): the seats publish their channels on data_port.NN; the game
+ *  feeds a cabled control surface straight from the seat. The target's
+ *  channel = the digits of ITS port name (data / data_port.003 → 0 / 3). */
+/** v1.16.15 SEAT→SURFACE CABLES (we: "im sending to an aileron, but I dont
+ *  see effect"): the seats publish their channels on data_port.NN — a
+ *  CHANNEL-numbered seat port (data_port.005) carries exactly that seat
+ *  channel; a plain seat data-port cable mirrors the whole block by
+ *  identity. The target's channel = the digits of ITS port name; a plain
+ *  target port takes the CABLE ORDER (the game indexes a port's cables by
+ *  drop order — two seat cables into a wheel's data port land on
+ *  Accelerate then Steer). src = the seat-side channel, null = mirror. */
+export function seatCableTargets(bp: Blueprint, seatCi: number):
+  { ci: number; ch: number; src: number | null }[] {
+  const portCh = (name: unknown): number | null => {
+    const m = /(?:data_port|port)\.?(\d+)/i.exec(String(name ?? ''));
+    return m ? +m[1]! : null;
+  };
+  const out: { ci: number; ch: number; src: number | null; plain: number }[] = [];
+  const fmap = flatToTopMap(bp);
+  for (const p of (bp.data.pipes ?? []) as { type?: string; a_component: number;
+    a_port?: string; b_component: number; b_port?: string }[]) {
+    if ((p.type ?? 'data') !== 'data') continue;
+    const aTop = flatEndpointTop(fmap, p.a_component);
+    const bTop = flatEndpointTop(fmap, p.b_component);
+    let t: number | undefined, tPort: unknown, sPort: unknown;
+    if (aTop === seatCi && bTop !== undefined) { t = bTop; tPort = p.b_port; sPort = p.a_port; }
+    else if (bTop === seatCi && aTop !== undefined) { t = aTop; tPort = p.a_port; sPort = p.b_port; }
+    else continue;
+    out.push({ ci: t, ch: portCh(tPort) ?? 0, src: portCh(sPort),
+      plain: portCh(tPort) === null ? 1 : 0 });
+  }
+  // plain target ports take their cable order (per target)
+  const order = new Map<number, number>();
+  return out.map(t => {
+    if (t.plain) {
+      const k = t.ci, n = order.get(k) ?? 0;
+      order.set(k, n + 1);
+      return { ci: t.ci, ch: n, src: t.src };
+    }
+    return { ci: t.ci, ch: t.ch, src: t.src };
+  });
 }
 
 export class DeviceSim {
@@ -237,8 +283,13 @@ export class DeviceSim {
         pose.joints = {};
         const steer = this.chans.get(ci)?.get(1);
         const spin = this.spins.get(ci) ?? 0;
+        pose.steer = steer ?? 0;   // proxy visual (the scene yaws the stand-in)
         for (const n of names) {
-          if (n === 'steering' && steer !== undefined) pose.joints[n] = { angle: steer * 30 };
+          // v1.16.15 (we: "nor qe on its nosewheel"): the SmallWheel's
+          // steer node is the y-axis 'pivot' (the big wheels' is
+          // 'steering') — the nose gear steers off channel 1 either way
+          if ((n === 'steering' || n === 'pivot') && steer !== undefined)
+            pose.joints[n] = { angle: steer * 30 };
           else if (n === 'axle') pose.joints[n] = { angle: spin };
         }
         if (!Object.keys(pose.joints).length) delete pose.joints;
@@ -248,6 +299,16 @@ export class DeviceSim {
         const lim = this.limits.get(ci);
         const on = (this.chans.get(ci)?.get(0) ?? 0) > 0;
         pose.joints = { [names[0]]: { angle: on ? (lim?.[2] ?? -18) : (lim?.[0] ?? 18) } };
+      } else if (type === 'RCS') {
+        // v1.16.15 (we: "RCS and aileron inputs … dont visually result in
+        // actions"): a thruster FIRES — any nozzle channel over ~0 lights
+        // the part (pale plume blue) on the proxy and the real model
+        const ch = this.chans.get(ci);
+        const fire = ch
+          ? Math.max(0, ...[0, 1, 2, 3, 4].map(k => ch.get(k) ?? 0)) : 0;
+        pose.glow = fire > 0.05
+          ? { r: 0.55 * Math.min(1, fire), g: 0.75 * Math.min(1, fire), b: Math.min(1, fire) }
+          : { r: 0, g: 0, b: 0 };
       } else if (GLOW_TYPES.has(type)) {
         const ch = this.chans.get(ci);
         if (ch) {
@@ -261,7 +322,8 @@ export class DeviceSim {
           pose.led = v;
           pose.pressed = this.pressedEl.has(k);
         }
-      if (pose.joints || pose.glow || pose.led !== undefined) out.set(ci, pose);
+      if (pose.joints || pose.glow || pose.led !== undefined || pose.steer)
+          out.set(ci, pose);
     }
     return out;
   }

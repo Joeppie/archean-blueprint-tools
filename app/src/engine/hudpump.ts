@@ -17,7 +17,8 @@
 // THE RUNTIME (slice C): every VM is its own wasm instance (co-run) — the
 // HUD pump and the computer farm share the craft's beaconNet/io state,
 // not an interpreter.
-import { XenonRun, CYCLE_MS, TURBO_X, type XenonComputer, type XenonHud } from './xenoncode';
+import { XenonRun, CYCLE_MS, TURBO_X, type XenonComputer, type XenonHud,
+  type XenonVar } from './xenoncode';
 import { beaconNet } from './beaconnet';
 import { wsEnsure, evalExpr } from './worldsim';
 
@@ -124,6 +125,7 @@ class HudPump {
     this.error = run.error;
     this.cycles = 0;
     this.prints = [];
+    this.vars = [];
     this.beaconIdx = [];
     this.surfaces = [];
     this.t0 = Date.now();
@@ -208,6 +210,9 @@ class HudPump {
       const [px, py, pos] = run.screenPos(m.key);
       return { key: m.key, w: m.w, h: m.h, anchor: run.screenAnchor(m.key), px, py, pos };
     });
+    // v1.16.14: the live globals snapshot (the HUD IDE's Vars tab — we:
+    // "variables is missing from HUD code!")
+    this.vars = run.vars();
     if (run.error) { this.error = run.error; this.stop(); }
     this.cycles++;
     this.notify();
@@ -216,6 +221,8 @@ class HudPump {
   /** ABI 15 XENON-SCREEN-VERSION (HUD twin): a panel whose write counter is
    *  unchanged returns the CACHED array — the canvas blit skips the heap
    *  copy; -1 (older wasm) fetches every cycle (the pre-v1.16.8 law). */
+  /** live program globals (the XENON-VARS dump — the HUD IDE's Vars tab) */
+  vars: XenonVar[] = [];
   private surfVer = new Map<string, { v: number; px: Uint8ClampedArray }>();
   pixels(key: string): Uint8ClampedArray | null {
     const r = this.run;

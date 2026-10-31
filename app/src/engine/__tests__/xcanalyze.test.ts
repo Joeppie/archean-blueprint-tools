@@ -205,3 +205,19 @@ describe('ANALYSIS BENCH fixture (9000009090 — one defect per code)', () => {
     expect(ds.length).toBeLessThan(16);
   });
 });
+
+describe('THE ROOT-NAME LAW (v1.16.14 — the Human HUD beacon case)', () => {
+  it('member use references the ROOT var ($beacon.data in tick uses $beacon)', () => {
+    const ds = analyzeProject([f('main.xc',
+      'var $beacon = beacon("tx", "rx")\n\ninit\n\t$beacon.transmit("hi")\n\ntick\n\tprint($beacon.data)\n')]);
+    expect(ds.filter(d => d.code === 'xc-unused-var' && d.message.includes('beacon')))
+      .toEqual([]);
+  });
+  it('the Human HUD disk (homo) flags NO beacon var as unused', () => {
+    const prog = readPlayerHudProgram('homo');
+    if (!prog) return;                       // machine-local floor
+    const ds = analyzeProject(prog.files).filter(
+      d => d.code === 'xc-unused-var' && d.message.includes('beacon'));
+    expect(ds.map(d => d.message)).toEqual([]);
+  });
+});

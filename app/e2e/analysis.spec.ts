@@ -32,6 +32,23 @@ test.describe('@analysis @xenon THE XENONCODE ANALYSIS', () => {
     await expect(page.locator('[class*="cm-lint-marker"]').first())
       .toBeVisible({ timeout: 10_000 });
 
+    // THE FUNCTION-REFERENCE HOVER (v1.16.14, the user: "there is no
+    // descriptions on the function names for e.g. blank; nothing shows up
+    // when mouseovering, telling me what it is or where it comes from"):
+    // hover `print` — the table answers WHAT and WHERE FROM.
+    // (a text-position probe — desktop geometry; the rule is platform-neutral)
+    if ((page.viewportSize()?.width ?? 0) >= 768) {
+      const printLine = page.locator('.cm-line', { hasText: 'made_up(2)' }).first();
+      // raw mouse move: the analysis refresh re-renders lines (the locator
+      // hover's stability gate starves on them)
+      const bb = await printLine.boundingBox();
+      expect(bb).toBeTruthy();
+      await page.mouse.move(bb!.x + 12, bb!.y + 6, { steps: 3 });
+      await expect(page.locator('.xc-doc-tip'))
+        .toContainText('write a line to the computer console');
+      await expect(page.locator('.xc-doc-origin').first()).toContainText(/shim/i);
+    }
+
     // the Problems side tab: counts + rows (phones get the right-edge RAIL
     // instead of the side strip — v1.13.32 phone IDE law)
     const sideBtn = page.getByTestId('xenon-side-problems');
