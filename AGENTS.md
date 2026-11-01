@@ -843,6 +843,19 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   fights the painter; the dock merges the farm's painted surfaces per key).
   Pins: xenoncode net-screen/gating tests + xenonvm gate legs + e2e
   netscreens.spec; audit `app/tools/netscreenprobe.mjs`.
+- THE IO-NUMBER SCREEN BINDING + THE STRICT-GAME LAW (v1.17.2, shim ABI
+  21, we: "Chip didnt release a broken version" / "STOP BEING FORGIVING
+  IN YOUR SHIM and properly emulate the game. Making an editor that is
+  tolerant will hurt anyone using it for xenoncode"): `screen(aliasOrIoNumber,
+  ch)` resolves a NUMERIC token through the shim's device table
+  (g_devByIo → alias) — ChipOS slot-binds by io number, the game binds
+  the board. The shim enumerates ONLY DISPLAYABLE surfaces
+  (xc_screen_visible): an unbound screen() target, a computer's
+  virtualscreen()/panel(), the plain target of a screenless MiniComputer
+  are INVISIBLE RENDER TARGETS (the game shows element boards, never
+  render targets; clicks still route to hidden slots via
+  xc_screen_index). Forgiving auto-created 640×480 tiles are DEAD law —
+  no Virtual-tab cells for computer pumps, no first-virtual deep links.
 - THE CANONICAL SCREEN-KEY LAW + THE FEED-MERGE LAW (v1.17.2, we: "when I
   went into actual screens, the model ones stopped working … why is there
   a main screen, element 09, but also one that has 640×800?"): the shim

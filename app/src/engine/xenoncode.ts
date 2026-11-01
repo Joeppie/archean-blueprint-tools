@@ -87,6 +87,7 @@ type Mod = {
     x: number, y: number, z: number, sx: number, sy: number, sz: number, mass: number): void;
   _xc_set_capability(ram: number, storage: number): void;
   _xc_screen_count(): number;
+  _xc_screen_visible?: (i: number) => number;
   _xc_screen_key(i: number): number;
   _xc_screen_w(i: number): number;
   _xc_screen_h(i: number): number;
@@ -1093,10 +1094,17 @@ export class XenonRun {
 
   screenCount(): number { return this.mod._xc_screen_count(); }
 
-  /** EVERY surface's key/size (cheap; the Badger carries 118 buffers). */
+  /** EVERY surface's key/size (cheap; the Badger carries 118 buffers).
+   *  THE STRICT-GAME LAW (v1.17.2 ABI 21, we: "STOP BEING FORGIVING IN
+   *  YOUR SHIM and properly emulate the game"): the shim enumerates only
+   *  VISIBLE surfaces — an unbound screen() target, a computer's
+   *  virtualscreen()/panel() are invisible render targets (the game
+   *  shows boards, never render targets). typeof-guard: an ABI-20 wasm
+   *  (mid-session stale asset) degrades to enumerating all. */
   screenMeta(): { key: string; w: number; h: number }[] {
     const m = this.mod, out = [];
     for (let i = 0; i < m._xc_screen_count(); i++) {
+      if (m._xc_screen_visible && !m._xc_screen_visible(i)) continue;
       const w = m._xc_screen_w(i), h = m._xc_screen_h(i);
       if (!w || !h) continue;
       out.push({ key: m.UTF8ToString(m._xc_screen_key(i)), w, h });
@@ -2862,7 +2870,7 @@ export class XenonPump {
  *  measures 0.2 changing surfaces per cycle of 117);
  *  14 = xc_screen_px/py/haspos (the composited HUD SCREEN window);
  *  13 = $panel.set_size(w,h) + width/height getters (ABI 13; wiki hud.md law). */
-export const XC_ABI = 20;
+export const XC_ABI = 21;
 
 // ---------------------------------------------------------------------------
 // COMPUTERFARM — the craft's co-running pumps + the SHARED io bus

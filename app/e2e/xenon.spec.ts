@@ -24,16 +24,6 @@ const BADGER = '3326372833';
 // BUZZER BENCH fixture 9000008001 below — the same laws, deterministic,
 // seconds; the game stays a manual playtest, not a CI test.)
 
-async function litPixels(page: import('@playwright/test').Page, selector: string): Promise<number> {
-  return page.evaluate(sel => {
-    const c = document.querySelector(sel) as HTMLCanvasElement | null;
-    if (!c || !c.width) return -1;
-    const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
-    let lit = 0;
-    for (let i = 0; i < d.length; i += 4) if (d[i] + d[i + 1] + d[i + 2] > 90) lit++;
-    return lit;
-  }, selector);
-}
 
 test.describe('Xenon IDE @ui', () => {
   // v1.16.6 (L5): the SCREEN lit-pixel census, the io-bus alias rows and the
@@ -608,9 +598,17 @@ test.describe('Xenon IDE @ui', () => {
     // the break fires again after the commit (line 18 now — the '; nav-pin'
     // comment rode in front of nothing, the break line shifted by one)
     await expect(pane).toHaveAttribute('data-paused-jump', /main\.xc:1[78]$/, { timeout: 20_000 });
-    // disarm the breakpoint, resume — the nav steps run unparked
-    await gutter.click();
-    await expect(page.locator('.xc-bp')).toHaveCount(0);
+    // disarm the breakpoint, resume — the nav steps run unparked.
+    // RE-PINNED (v1.17.2 flake): after the commit-reboot the break FIRES
+    // (line 18 now) and the paused line's gutter element is the one that
+    // carries the marker — clicking the un-paused row 17's element just
+    // toggles a SECOND marker and leaves the armed break alive (the old
+    // pin passed only when the reboot paused at 17 and the two lines
+    // coincided). The pane reports the exact hit via data-paused-jump —
+    // disarm THAT line, then require zero markers.
+    const hit = /:(\d+)$/.exec((await pane.getAttribute('data-paused-jump')) ?? ':0')!;
+    await page.locator('.xc-break-gutter .cm-gutterElement').nth(+hit[1]! - 1).click();
+    await expect(page.locator('.xc-bp')).toHaveCount(0, { timeout: 10_000 });
     await page.keyboard.press('F8');
 
     // NAV: the Library jump records the pause spot; Alt+← walks back,
@@ -1163,10 +1161,13 @@ test.describe('Xenon IDE @ui', () => {
     await ph.close();
   });
 
-  test('the ▣ Screens bottom tab shows dashboards + virtual surfaces @slow', async ({ page }) => {
+  test('the ▣ Screens bottom tab shows the craft boards — render targets stay hidden @slow', async ({ page }) => {
     // (we: "open the screens in the bottom tab using a screen button on top
-    // (only visible if the craft has dashboards) … a tab for normal and
-    // virtual ones")
+    // (only visible if the craft has dashboards)"; THE STRICT-GAME LAW
+    // v1.17.2, we: "STOP BEING FORGIVING IN YOUR SHIM and properly
+    // emulate the game"): the game displays element boards — a computer's
+    // virtualscreen() buffers are off-screen render targets (computer.md's
+    // own words), so the Virtual tab stays EMPTY.
     await page.goto(`/?craft=${BADGER}`);
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 180_000 });
     const btn = page.getByTestId('screens-btn');
@@ -1177,10 +1178,9 @@ test.describe('Xenon IDE @ui', () => {
     // the Dashboards tab: a real surface paints (pilot-screen)
     await expect(page.getByTestId('screens-tab-dash')).toBeVisible();
     await expect(page.locator('[data-testid^="screens-cell-"]')).not.toHaveCount(0, { timeout: 60_000 });
-    // the Virtual tab: the Badger composes out of virtualscreen() buffers
+    // the Virtual tab: render targets are not surfaces — none enumerated
     await page.getByTestId('screens-tab-virtual').click();
-    await expect(page.locator('[data-testid^="screens-cell-virtual#"]').first())
-      .toBeVisible({ timeout: 30_000 });
+    await expect(page.locator('[data-testid^="screens-cell-virtual#"]')).toHaveCount(0);
     await page.getByTestId('screens-close').click();
     await expect(dock).toHaveCount(0);
   });
@@ -1194,24 +1194,14 @@ test.describe('Xenon IDE @ui', () => {
   // aspect), the XenonTest panel (the AI-agent-facing automation door),
   // the cockpit law, and the AUDIO TRUTH via the analyser. Boots in
   // seconds; deterministic phase — no game, no sprite caching, no mash.
-  test('buzzer bench: deep link, XenonTest panel, cockpit, audio chain @ui', async ({ page }) => {
+  test('buzzer bench: XenonTest panel, cockpit, audio chain @ui', async ({ page }) => {
     test.setTimeout(180_000);
-    await page.goto('/?craft=9000008001&dash=first-virtual');
+    await page.goto('/?craft=9000008001');
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 180_000 });
-
-    // deep link: the program's own virtualscreen(160,120) opens fullscreen
-    const full = page.getByTestId('screens-cell-virtual#0#0-fullcanvas');
-    await expect(full).toBeVisible({ timeout: 120_000 });
-    {
-      const fb = (await full.boundingBox())!;
-      expect(Math.abs(fb.width / fb.height - 160 / 120)).toBeLessThan(0.15);   // aspect law
-    }
-    await expect
-      .poll(() => litPixels(page, '[data-testid="screens-cell-virtual#0#0-fullcanvas"]'),
-        { timeout: 30_000 })
-      .toBeGreaterThan(100);                                                    // canvas paints
-    await page.getByTestId('screens-cell-virtual#0#0-fullexit').click();
-    await page.getByTestId('screens-close').click();
+    // THE STRICT-GAME LAW (v1.17.2): the bench's virtualscreen(160,120)
+    // is an off-screen RENDER TARGET — the game shows boards, this craft
+    // has none, so no deep-link cell exists. The bench pins the audio
+    // chain through the XenonTest panel and the analyser.
 
     // the Autotest panel, preset for the bench
     await page.getByTestId('xenon-menu').click();

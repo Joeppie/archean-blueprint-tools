@@ -117,7 +117,9 @@ function openRun(m: Msg): void {
 
 function metas(): { key: string; w: number; h: number }[] {
   const out = [];
+  const vis = (mod as any)._xc_screen_visible as ((i: number) => number) | undefined;
   for (let i = 0; i < mod._xc_screen_count(); i++) {
+    if (vis && !vis(i)) continue;   // STRICT-GAME LAW (ABI 21): visible surfaces only
     const w = mod._xc_screen_w(i), h = mod._xc_screen_h(i);
     if (!w || !h) continue;
     out.push({ key: mod.UTF8ToString(mod._xc_screen_key(i)), w, h });

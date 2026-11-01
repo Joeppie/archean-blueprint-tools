@@ -6118,3 +6118,34 @@ plain scroll: zoom is Ctrl/⌘+wheel (native non-passive listener, so the
 browser's own ctrl+wheel page-zoom is suppressed only there) and pinch
 in fullscreen; touch-action stays pan-x/pan-y embedded so the page
 scrolls under a finger. The export's .mm script got the same gate.
+
+## 43. THE IO-NUMBER SCREEN BINDING LAW (we: "Chip didnt release a broken
+## version — what is the explanation?"; 2026-11-02)
+On the devkit craft 3828773626 the main boards stayed black while
+phantom 640×480 surfaces flashed in the Screens dock. Root: ChipOS
+slot-binds its displays by io NUMBER (@io_port('main-screen') → 8 →
+screen(8, ch)) — the game's screen(aliasOrIoNumber, ch) resolves numbers
+to the physical board. Our shim keyed screen() tokens LITERALLY: '8#0'
+missed the alias-registered 'main-screen#0' and auto-created eight
+dev-seed twins (the flashing "extra screens"); the real boards, keyed by
+alias, never received a pixel. xenoncore v0.3.6: numeric tokens resolve
+through the device table (g_devByIo → alias), the law the input path
+already used. Live: all 8 main_screen boards paint 300×300, twins zero.
+
+## 44. THE STRICT-GAME LAW — the shim emulates, it does not indulge (we:
+## "STOP BEING FORGIVING IN YOUR SHIM and properly emulate the game.
+## Making an editor that is tolerant will hurt anyone using it for
+## xenoncode"; 2026-11-02)
+The forgiving shim created visible 640×480 surfaces for unbound screen()
+tokens, and showed a computer's virtualscreen() buffers as tiles — so
+ChipOS' desktop (a render target the game never displays) flashed its
+next-button as a "virtual screen" beside the boards. xenoncore v0.3.7
+(ABI 21 xc_screen_visible): the shim enumerates ONLY surfaces the game
+could display — element boards (host-registered), the Computer's
+integrated screen, HUD surfaces in HUD mode. An unbound screen() target,
+a computer's virtualscreen()/panel(), the plain target of a screenless
+MiniComputer are INVISIBLE RENDER TARGETS: the program draws into them,
+clicks route to them (xc_screen_index), the host never shows them.
+Pins re-cut: the Virtual tab is empty for computer pumps, the
+first-virtual deep link is gone (the buzzer bench pins audio through the
+XenonTest panel). Devkit craft now: 9 surfaces, all painted boards.
