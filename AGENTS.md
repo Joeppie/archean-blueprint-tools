@@ -400,7 +400,11 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   persists the EMPTY map as the disk, tears the VM down with the
   persistence seam DISARMED (storeK null — the ~2 s throttle must never
   resurrect the broken cache over the wipe) and re-boots on the fresh
-  disk. HudController VMs do NOT persist yet (Backlog).
+  disk. THE CRAFT-WIDE WIPE (same breath, we: "Available in computers,
+  and for entire craft"): the Xenon ▾ menu row 🗑 Clear ALL storage vars
+  — every running pump of the craft clearStorage()s, then every
+  `${craft}#*` record drops (clearCraftStores); game saves untouched.
+  HudController VMs do NOT persist yet (Backlog).
 - THE WORK CENSUS (v1.17.1, we: "calculate how much work the computer does
   per iteration, and correspond to documentation Archean [has] on what is
   possible and allowed. Note huds and computers have different limits, huds
@@ -451,11 +455,25 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   second cut: "its too complex … I see all the outsides of everything, not
   just components with the rest of the geometry as a background … it
   should be like a blueprint"): the sheet is a BLUEPRINT — navy board +
-  ONE METRE GRID + a 1 m scale bar, the HULL as hairline construction
-  lines (0.4 px), other parts quiet thin lines (0.7 px), and ONLY THE
-  ACTORS inked bright (1.5 px + tint) in their label's palette colour —
-  line WEIGHT is the figure/ground hierarchy; material colours are
-  deliberately NOT carried. BOUNDED: per-mesh 20k triangles, per-class
+  ONE METRE GRID + a 1 m scale bar. THE ENGINEERING LINE LAW (v1.17.2,
+  we: "limit SVG complexity, the cockpit … should be a more recognizable
+  shape; e.g. removing 'internal' lines that would disappear if you
+  filled the outside mesh (but dont do that, itd make it hard to see)"):
+  a WELDED-EDGE census (0.1 px vertex weld, each edge once): SILHOUETTE
+  (facing↔back boundary) = the heavier form weight, CREASE (dihedral ≥
+  10°) = the light weight, COPLANAR INTERIOR (same plane ≤ 4 mm) NOT
+  DRAWN — box seams vanish exactly as asked, no fills; actors get a
+  SMOOTH-SHELL GATE (gentle folds < 25° are curvature, not geometry —
+  dropped; speaker cones read as silhouettes). Caps 3500 lines/group,
+  the LONGEST survive. Line WEIGHT is the figure/ground hierarchy;
+  material colours are deliberately NOT carried. THE CONNECTION-COLOUR
+  LAW (we: "let us know which connections go to which things … pick a
+  single color and show all connections to that thing with that color,
+  with a certain picking order; Computer most important, then cockpit"):
+  a cable run wears its ACTOR endpoint's colour (earlier in THE PICKING
+  ORDER: net devices → PilotSeat → the rest by io traffic), endpoint
+  dots + io tags wear it too; an actor's ink, label box and wires all
+  share ONE colour, IDENTICAL across all three views. BOUNDED: per-mesh 20k triangles, per-class
   caps 9k hull / 5k parts / 4k actors a panel — the LARGEST
   faces win. INSTANCED MESHES ARE TEMPLATES, SKIP THEM (v1.17.2, we:
   "there is a large fucking sphere in super mario and chipOS … that
@@ -479,8 +497,11 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   carry ⚡, entry nodes are bold bright stadiums, entry-carrying classes
   get the teal frame and devices the amber one — one colour language
   across plates and diagrams. THE HEADER RIDE (we: "weight, costs and
-  flight characteristics should be higher up in the analysis"): mass/
-  weight/build cost summary + the flight section ride ABOVE the per-
+  flight characteristics should be higher up in the analysis" + "Analysis
+  should just contain a recap of what infop tabs tells us"): the header
+  card RECAPS THE ⌖ INFO TAB — mass + families (hull/skin/parts/+struts
+  beams fluids) + declared, envelope m³ (sealed/open) + vacuum lift,
+  build cost, then the flight section ride ABOVE the per-
   computer sections in dialog AND export; the window runs wide (1280) with
   500-px diagram panes and every section on one 1160-px column (align). PLATE SCALE (we: "are they large enough for craft? Should you make
   the scale more illustrativ/diagrammatic?" — measured: a shared-sphere fit

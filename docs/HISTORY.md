@@ -5990,3 +5990,35 @@ the census skips isInstancedMesh (cables ride the amber pipeNet
 annotations, templates never ink). The live probe census names the
 culprits (SphereGeometry n=126/n=22/n=22, CylinderGeometry, BoxGeometry)
 — the same signature, unit raw ranges ±1, on every craft.
+
+## 38. THE ENGINEERING LINE LAW + CONNECTION-COLOUR + the WIPE PROMOTED
+## (we: "Analysis should just contain a recap of what infop tabs tells us
+## … schematics should let us know which connections go to which things …
+## pick a single color and show all connections to that thing with that
+## color, with a certain picking order; Computer most important, then
+## cockpit … if multiple ailerons, use multiple colors … re-use same
+## colors between different perspectives … limit SVG complexity, the
+## cockpit should be a more recognizable shape; e.g. removing 'internal'
+## lines that would disappear if you filled the outside mesh … I need to
+## be able to RESET/CLEAR storage vars, prioritize. Available in
+## computers, and for entire craft"; 2026-11-02)
+THE PLATE BECOMES A LINE DRAWING: the census welds projected vertices at
+0.1 px and classifies every EDGE once — silhouette (facing↔back, open
+boundary) = the form weight, crease (dihedral ≥ 10°) = the light weight,
+COPLANAR INTERIOR (same plane ≤ 4 mm) NOT DRAWN: box seams, plate tiling
+and block grids vanish exactly like a fill would swallow them, no fills
+anywhere (fills "make it hard to see"). Actors get the SMOOTH-SHELL GATE
+(gentle folds < 25° — speaker cones, seat bowls — are curvature, not
+geometry: the silhouette carries the shape); caps 3500 lines/group,
+overflow keeps the LONGEST. THE CONNECTION-COLOUR LAW: a cable run, its
+endpoint dots and its io tag all wear the colour of its ACTOR endpoint —
+the earlier in THE PICKING ORDER (net computers → PilotSeat → rest by io
+traffic); a device's ink, label and wires share one colour, identical on
+all three views; multiple ailerons = multiple palette colours (rotation,
+never a mismatch). THE INFO RECAP: the header card mirrors the ⌖ Info tab
+— mass + families + declared, sealed envelope + vacuum lift, build cost,
+flight — in dialog and export. THE WIPE PROMOTED: per-computer 🗑 (Vars
+tab) plus the CRAFT-WIDE row in the Xenon ▾ menu — every pump
+clearStorage()s (persistence disarmed for the teardown), then every
+`${craft}#*` record drops; pinned by storage.spec's fifth leg (count 2 →
+wipe → 1 → reload → 1).
