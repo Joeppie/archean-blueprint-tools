@@ -637,7 +637,16 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   channels; WASD/↑↓/F/E/Q/I/K/J/L/R/digits/SPACE bind by channel word (SPACE
   = Down/Up AND Aux 1); press = ±1, release CENTERS; global editor shortcuts
   yield while cockpit keys are active; keys never leak while typing; a bound
-  channel RESTS AT ZERO at bind time.
+  channel RESTS AT ZERO at bind time. THE SEAT TOKEN (v1.17.1, the Mario
+  cabinet: "Pressing space doesn't start it"): while a seat's `using` row
+  reads 1, stepWorldSim publishes PILOT_USER ('builder', mirroring the
+  shim's user()) as ch0 TEXT (setInputT) — games gate ALL inputs on
+  input_text(seat,0) != "" (the in-game seat reports the player's
+  username; ours said "nobody here" and the game was RIGHT). Probe lesson:
+  a quick keyboard.press can land inside ONE coalesced cycle (the bus
+  shows nothing) — HOLD the key to observe; games may also ignore inputs
+  until their own ready-state (Mario: $assetsready) — wait for the
+  program's vars, not the clock.
 - THE LIVING CRAFT (v1.15.6, we: "computers should start when a craft is
   loaded in, and parts need to respond to signals … hinges and buttons and
   pivots and ailerons actually move … if a pivot or hinge moves, so does
