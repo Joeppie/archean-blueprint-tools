@@ -430,9 +430,10 @@ function compOnIo(bp: Blueprint, ci: number, io: number): BlueprintComponent | u
   for (const p of pipes) {
     if (p.a_component !== ci && p.b_component !== ci) continue;
     const mine = p.a_component === ci ? p.a_port : p.b_port;
-    const m = /^(?:data_port\.(\d+)|data)$/.exec(String(mine));
+    const m = /^(?:data_port\.(\d+)|data[-_]?(\d+)|data)$/.exec(String(mine));
     if (!m) continue;                     // power_connector etc
-    if ((m[1] ? +m[1] : 0) === io) return comps[p.a_component === ci ? p.b_component : p.a_component];
+    if ((m[1] !== undefined ? +m[1] : m[2] !== undefined ? +m[2] : 0) === io)
+      return comps[p.a_component === ci ? p.b_component : p.a_component];
   }
   return undefined;
 }
@@ -476,8 +477,13 @@ const dataPeer = (p: any, idx: number, top?: (flat: number) => number | undefine
   return null;
 };
 const dataPort = (port: string): number | null => {
-  const m = /^(?:data[-_]?port\.?(\d+)|data[-_]?port|data|connector\.0*)$/i.exec(port);
-  return m ? (m[1] !== undefined ? +m[1] : 0) : null;
+  // v1.17.2 NET SLOT LAW (the ChipOS app-scan: apps all answered io 0):
+  // the .ini ADAPTER-NUMBER form 'data-N' (MiniRouter/DataJunction
+  // socket index) IS the device's io slot on the net — ChipOS probes
+  // io 0..31 to discover apps, and devices sharing one router socket
+  // were invisible/flapping behind one slot.
+  const m = /^(?:data[-_]?port\.?(\d+)|data[-_]?port|data[-_]?(\d+)|data|connector\.0*)$/i.exec(port);
+  return m ? (m[1] !== undefined ? +m[1] : m[2] !== undefined ? +m[2] : 0) : null;
 };
 
 export function xenonDevices(bp: Blueprint, ci: number, opts?: XenonOpts): XCDevice[] {
@@ -533,11 +539,19 @@ export function xenonDevices(bp: Blueprint, ci: number, opts?: XenonOpts): XCDev
         if (!other) continue;
         if (ROUTER_RE.test(other.type)) {
           if (!seen.has(dp.other) && routerLive(dp.other, gated)) {
-            seen.add(dp.other); add(dp.other, io); queue.push({ dev: dp.other, io });
+            seen.add(dp.other);
+            const rio = dataPort(dp.mine) ?? io;
+            add(dp.other, rio); queue.push({ dev: dp.other, io: rio });
           }
           continue;
         }
-        add(dp.other, io);
+        // THE NET SLOT LAW (v1.17.2, the ChipOS app-scan): a net device's
+        // io slot is the SOCKET on the current router that carries its
+        // cable (the game's net addressing — MiniRouter.md). The old walk
+        // handed every sibling the ROUTER's own slot: ChipOS probing
+        // io 0..31 saw app-1/app-2/app-earthnav/screen all answering io 0
+        // — one flapping slot, apps invisible, setup never completes.
+        add(dp.other, dataPort(dp.mine) ?? io);
       }
     }
     return byCi;

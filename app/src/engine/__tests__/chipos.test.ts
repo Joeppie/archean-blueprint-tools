@@ -104,12 +104,15 @@ describe('the CHIPOS BENCH device tables — THE ROUTER NET', () => {
       .findIndex(c => c.alias === 'chipos');
     const devs = xenonDevices(bp as Blueprint, chiposCi);
     const io = (alias: string) => devs.find(d => d.alias === alias)?.io;
-    // all four hang on the MiniRouter plugged into chipos data_port.000
-    expect(io('app-1')).toBe(0);
-    expect(io('app-2')).toBe(0);
-    expect(io('app-earthnav')).toBe(0);
-    expect(io('main-screen')).toBe(0);
-    expect(io('main-router')).toBe(0);
+    // THE NET SLOT LAW (v1.17.2): a net device's io = the SOCKET on the
+    // MiniRouter that carries its cable (the game's net addressing —
+    // ChipOS probes io 0..31 to discover apps; one shared slot made the
+    // apps invisible/flapping). The bench rides sockets 1/2/3/4.
+    expect(io('app-1')).toBe(1);
+    expect(io('app-2')).toBe(2);
+    expect(io('app-earthnav')).toBe(3);
+    expect(io('main-screen')).toBe(4);
+    expect(io('main-router')).toBe(0);   // the router itself: chipos' port 0
     // direct plugs keep their own ports
     expect(io('LV Switch')).toBe(1);
     expect(io('Main LV Battery')).toBe(2);

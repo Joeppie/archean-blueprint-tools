@@ -422,10 +422,13 @@ describe('THE NET-SCREEN LAW (v1.16.11: the 3828773626 blank screens)', () => {
       if (c.type === 'Dashboard') c.alias = '';
     const chipos = xenonComputers(bp).find((c: any) => c.ci === 4)!;
     const keys = new Set(chipos.screens.map((s: any) => `${s.alias}#${s.channel}`));
-    // chipos' data_port.006 carries MiniRouter 6 → dashboards sit at io 6
-    expect(keys.has('6#0')).toBe(true);
-    expect(keys.has('6#7')).toBe(true);
-    const s0 = chipos.screens.find((s: any) => s.alias === '6' && s.channel === 0)!;
+    // THE NET SLOT LAW (v1.17.2): MiniRouter 6's SOCKETS carry the boards —
+    // Dashboard 16 rides socket 8, Dashboard 14 socket 1 (the io token =
+    // the router's socket index, the game's net addressing)
+    expect(keys.has('8#0')).toBe(true);
+    expect(keys.has('8#7')).toBe(true);
+    expect(keys.has('1#0')).toBe(true);
+    const s0 = chipos.screens.find((s: any) => s.alias === '8' && s.channel === 0)!;
     expect(s0.w).toBe(300);
   });
 
