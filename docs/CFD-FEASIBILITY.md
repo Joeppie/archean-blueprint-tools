@@ -1,10 +1,12 @@
 # CFD-FEASIBILITY — can an OpenFOAM-like aerodynamic sim run in the editor?
 
-Status (v1.17.0): **no Navier–Stokes field solve ships in the editor**; the
-FLIGHT LAB (`engine/flightlab.ts`, FORMAT §Aerodynamics) answers the design
-questions with closed-form shape-field maths over a voxel census. This
-document records WHY a true CFD was not landed and what it would take, so
-the next person does not re-derive it (we: "see if openfoam like sim can be
+Status (v1.17.0, ruled 2026-11-01): **OpenFOAM — native OR WASM — is NOT
+FEASIBLE for this product; the question is closed.** No Navier–Stokes field
+solve ships in the editor; the FLIGHT LAB (`engine/flightlab.ts`,
+FORMAT §Aerodynamics) answers the design questions with closed-form
+shape-field maths over a voxel census. This document keeps the MEASURED
+evidence (incl. a live run of the OpenFOAM-WASM demo) so the question is
+not re-litigated with a budget. (we: "see if openfoam like sim can be
 used to simulate aerodynamics. Consider actual proper hull, as baked.
 Eddies/drag problems should be highlighted. Ensure aero flow properly
 simulated too").
@@ -47,11 +49,13 @@ a reentry profile. These need a solved velocity/pressure FIELD.
    core at ~0.5–0.75× native; (c) wasm32 = 4 GB linear memory (MEMORY64 →
    16 GB, fine). Realistic browser envelope: ~10–100k-cell blockMesh-able
    cases in minutes — a toy airframe, NOT a 2–10 M-cell boundary-layer hull
-   run (that stays overnight-on-a-server math). Verdict: shippable NOW as
-   an OPT-IN "CFD sandbox" (lazy ~10 MB chunk, real solver, honest toy
-   meshes — the voxel census staircased to polyMesh, bounding-shape flows,
-   NOT the baked skin); the baked-hull promise still runs through
-   snappyHexMesh ⇒ P11-S2 or an octree-mesher slice.
+   run (that stays overnight-on-a-server math). VERDICT (ruled 2026-11-01):
+   NOT FEASIBLE for this product — the sandbox idea was considered and the
+   four rejections are in § P11-S3 (a blockMesh-only solver answers the
+   WRONG geometry; real residuals over a fake hull read as false authority;
+   the one-core envelope never opens for hull-grade meshes; fork-of-a-fork
+   upkeep). True hull CFD, if ever, is P11-S2: an external user-run
+   SERVICE with snappyHexMesh doing what a browser cannot.
 2. **WASM-compiled solver** (e.g. a small LBM or panel method compiled with
    emscripten): viable size budget (a panel code is ~100–300 KB), but the
    mesh pipeline is the cost: OpenFOAM needs a watertight surface MESH. Our
@@ -80,14 +84,36 @@ a reentry profile. These need a solved velocity/pressure FIELD.
 - FORMAT §Aerodynamics + § Subgrids remain the law source; the FLIGHT LAB
   is the engine seam any future solver replaces behind the same report.
 
-## P11-S3 (NEW, enabled by openfoam-wasm) the opt-in CFD sandbox
-Bundle the proven openfoam-wasm build recipe (their build.sh + patches are
-GPL like us — one commit, upstream-credit) behind a lazy ⚗ "CFD sandbox"
-button: blockMesh + a chosen solver download ONLY on click (~10 MB wire);
-cases generated from the voxel census (stair-case polyMesh, 20–50k cell
-cap, 2D slice or coarse 3D); results parsed back into the analysis report
-as "real FVM, toy mesh" beside the closed-form numbers. The baked-skin
-case stays gated on a mesher (P11-S2 service or an octree-mesh slice).
+## P11-S3 the opt-in CFD sandbox — REJECTED 2026-11-01 (we: "document
+openfoam findings, it's not feasible")
+Considered: bundle the proven openfoam-wasm build behind a lazy ⚗ button
+(~10 MB wire), cases stair-cased from the voxel census. Rejected, and the
+rejections are the findings:
+1. THE MESH IS THE ANSWER. blockMesh-only means stair-cased blocks; for
+   bluff-body flows the stair-steps trip separation WHERE WE PAINTED THEM.
+   A steady-RANS solve on that mesh does not approximate "the actual proper
+   hull, as baked" — it answers a different geometry's question. The one
+   mesher that could honour the baked skin (snappyHexMesh-grade) is the
+   unported hard half. A CFD that cannot mesh the hull is theatre.
+2. FALSE CONFIDENCE IS WORSE THAN NONE. The ⚗ report's value is that every
+   number's class is labelled honestly (closed-form shape-field). A real
+   solver emitting real residuals over a fake hull reads MORE authoritative
+   than the honest closed-form numbers while being less representative.
+3. THE ENVELOPE NEVER OPENS. One core (vanilla OpenFOAM parallelises by
+   MPI, browsers have none) at ~0.5–0.75× native, 4 GB wasm32 (16 GB with
+   MEMORY64): the demo's 12k cells solved in 7.4 s, but hull-grade runs
+   need 10^5–10^6× that work. Minutes-scale interactive CFD on OUR craft
+   geometry remains out of reach for a static-site client, at any bundle
+   size (16.8–400 MB measured ladder above).
+4. COST/UPKEEP. Fork-of-a-fork build chain (their wmake patches tracking
+   OpenFOAM releases), ~35 MB+ lazy asset surface, and a results pipeline
+   for a feature whose honest output we already approximate better with
+   the FLIGHT LAB for the questions the editor actually answers.
+CONSEQUENCE: P11-S2 (external OpenFOAM SERVICE, user-run, does the snappy
+meshing + overnight cores) is the only future door for true hull CFD; the
+browser stays what it is: closed-form, honestly labelled. P11-S0 (VLM over
+the stitched skin — no volumetric mesh, steady attached flow) stays on the
+ladder as the only in-editor upgrade worth considering.
 
 ## If we ever do a panel MVP (the cheap 20%)
 1. Mesh: take `stitchHullSkin` quads (already lattice-exact) + block

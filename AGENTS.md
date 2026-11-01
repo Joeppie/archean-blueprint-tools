@@ -1179,6 +1179,14 @@ behind a small link at the END of the gallery. Pages serves the GENERATED
   the shipped wasm (breakpoints/steps/vars/writeback; smoke on real DAP +
   real wasm). Open: S2b+ (run/pump/farm + SAB, worker), S3 (CraftSpec),
   the extension's T6 webview + T4 real-parser leg, marketplace publish.
+- **OpenFOAM / WASM CFD — RULED NOT FEASIBLE 2026-11-01, do not re-explore**
+  (we: "document openfoam findings, it's not feasible"): the port EXISTS and
+  was measured live (16.8+17.6 MB wasm, ready 3.7 s, pitzDaily 12k cells
+  7.4 s) — and it still fails our product: no snappyHexMesh = no baked-hull
+  mesh, one core (no MPI in browsers), and a solver over a stair-cased fake
+  hull is false confidence in the ⚗ report. Full evidence + the four
+  rejections: docs/CFD-FEASIBILITY.md § P11-S3; the only future door is an
+  external service (REWRITE § P11-S2).
 - **HUD storage persistence**: the COMPUTER pumps restore/persist `storage
   var`s across page loads (v1.16.27, engine/xenonstore.ts); HudController
   VMs (hudpump.ts) do NOT yet — a HUD program's storage vars still reset

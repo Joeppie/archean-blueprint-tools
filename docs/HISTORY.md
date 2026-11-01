@@ -5701,3 +5701,28 @@ static browser app; VLM and WebGPU-LBM costed as P11-S0/S1). Gates at the
 cut: vitest 1103 (xcgraph 7 new), tsc clean, build clean, app fast tier
 127/127, chipossat + analysis @slow legs green, production probe: 3 SVGs +
 2 plates + flight on Pages, zero pageerrors.
+
+## 29. OpenFOAM — RULED NOT FEASIBLE (docs decision, 2026-11-01, we:
+## "Document openfoam findings, it's not feasible")
+The follow-up ("but openfoam could be wasm? how large would it be?") was
+answered with MEASUREMENTS, and the measurements then met the product
+reality: FoamScience/openfoam-wasm runs a REAL OpenFOAM in a browser
+(scalarTransportFoam.wasm 16.8 MB + blockMesh.wasm 17.6 MB, ~10 MB wire;
+ready 3.7 s; pitzDaily 12,225 cells solved 7.4 s single-threaded — probed
+live in headless Chromium). Feasible bytecode, NOT a feasible feature: (1)
+the port's only mesher is blockMesh — stair-cased blocks trip separation
+where we painted the steps, so the solve answers a DIFFERENT geometry than
+"the actual proper hull, as baked"; the snappyHexMesh-grade mesher is the
+unported hard half. (2) The ⚗ report's value is HONEST LABELLING of each
+number's class; real residuals over a fake hull read more authoritative
+while being less representative — false confidence is worse than none.
+(3) Vanilla OpenFOAM parallelises by MPI, browsers have none: one core at
+~0.5–0.75× native with a 4 GB (MEMORY64: 16 GB) ceiling — the demo's
+minutes-envelope never opens to hull-grade 10^5–10^6× work. (4) Fork-of-a-
+fork build upkeep + 35–400 MB asset surface for questions the FLIGHT LAB
+already answers honestly. DECISION: the P11-S3 sandbox is REJECTED; the
+size ladder, live-run evidence and all four rejections live in
+docs/CFD-FEASIBILITY.md § P11-S3; REWRITE § P11 records S2 (an EXTERNAL
+user-run service that can mesh and grind overnight) as the only future
+door; AGENTS carries the do-not-re-explore line. CLOSED WITH EVIDENCE, not
+vibes.

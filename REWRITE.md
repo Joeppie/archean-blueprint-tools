@@ -975,7 +975,7 @@ LSP-first front-loads the low-risk wins) stays open.
   in the ⚗ report). No volumetric mesh; steady attached flow only.
 - P11-S1 WebGPU Lattice-Boltzmann spike (128³, ping-pong) — the ONLY
   in-browser path to real separation/eddies; research, iGPU budget risk.
-- P11-S3 opt-in CFD SANDBOX: ship the measured openfoam-wasm bundle (real solver, ~10 MB wire, blockMesh-class cases from the voxel census) — docs/CFD-FEASIBILITY.md § "P11-S3".
+- P11-S3 opt-in CFD SANDBOX (openfoam-wasm) — REJECTED 2026-11-01 (we: "document openfoam findings, it's not feasible"): blockMesh-only meshes answer the wrong geometry, real residuals over a fake hull are false confidence, one-core wasm never reaches hull-grade; the measured evidence (16.8/17.6 MB, 3.7 s ready, 7.4 s pitzDaily) and the four rejections live in docs/CFD-FEASIBILITY.md § P11-S3. DO NOT RE-OPEN without a service (S2).
 - P11-S2 external OpenFOAM service (the baked-hull path: snappyHexMesh-grade, overnight cores) (user-run): decompose → mesh → solve →
   import surface Cp back into the report. Needs infrastructure we do not
   run; static Pages can only ever be the CLIENT.
