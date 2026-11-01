@@ -923,6 +923,22 @@ export default function XenonDialog(p: {
                   className="rounded bg-[#5a2222] px-2 py-0.5 text-[#ffb3b3] hover:bg-[#7a2e2e]"
                   title="stop (F6) — park on the executing line, values editable"
                   onClick={() => pump.stopRunning()}>⏹</button>
+                {/* THE STORAGE WIPE on the ALWAYS-VISIBLE title toolbar
+                    (v1.17.2, we: "The clear buttons are far outside of
+                    visibility"): two-step, wipes THIS computer's disk and
+                    re-boots it fresh — same action as the Vars-tab 🗑. */}
+                {comp.craft && (
+                  <button data-testid="ide-clear-storage"
+                    className={`rounded px-2 py-0.5 ${wipeArm
+                      ? 'bg-[#4a1520] text-[#ff9d9d] hover:bg-[#5f1d2b]'
+                      : 'bg-[#243a52] text-[#8b93a1] hover:bg-[#2f4c6b]'}`}
+                    title={wipeArm
+                      ? 'click again to confirm — the disk is cleared and the program re-boots fresh'
+                      : "clear this computer's persistent storage vars (fresh disk + re-boot)"}
+                    onClick={() => (wipeArm ? wipeStorage() : setWipeArm(true))}>
+                    {wipeArm ? 'sure?' : '🗑'}
+                  </button>
+                )}
                 {/* TURBO (v1.16.13, the user: "a turbo button for xenoncode
                     so it runs at 4x speed temporarily; this makes debugging
                     easier and even our tests could run faster"): pump

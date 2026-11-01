@@ -199,6 +199,15 @@ export default function TopBar(p: Props) {
           <Item testid="file-autosaves"
             label={`Autosaves…${(p.autosaveCount ?? 0) > 0 ? ` (${p.autosaveCount})` : ''}`}
             hint="shadow copies" onClick={() => { close(); p.onAutosaves?.(); }} />
+          {/* THE CRAFT-WIDE STORAGE WIPE (v1.17.2, we: "The clear buttons
+              are far outside of visibility and should be under MENU"):
+              the main File menu is where resets live; the per-computer 🗑
+              rides the IDE's Vars tab, the per-craft row rides HERE. */}
+          {p.onClearStorage && (
+            <Item testid="file-clear-storage"
+              label="🗑 Clear ALL storage vars (this craft)" hint="first-run reset"
+              onClick={() => { close(); p.onClearStorage?.(); }} />
+          )}
           <Item testid="file-close" label="Close → gallery" onClick={() => { close(); p.onClose(); }} />
         </>)}
       </Menu>
@@ -281,16 +290,6 @@ export default function TopBar(p: Props) {
                 label={`⌨ ${c.alias || c.program}${c.builtin ? ' ·built-in' : ''}`} hint={`${c.files} .xc`}
                 onClick={() => { close(); p.onXenon?.(c.ci); }} />
             ))}
-            {/* THE CRAFT-WIDE STORAGE WIPE (v1.17.2, we: "I need to be
-                able to RESET/CLEAR storage vars … Available in computers,
-                and for entire craft"): the per-computer 🗑 is the IDE's
-                Vars tab; this row is the whole-craft reset (a wedged
-                ChipOS fleet is the use case). Confirm rides the Editor. */}
-            {p.onClearStorage && (
-              <Item testid="xenon-clear-all"
-                label="🗑 Clear ALL storage vars (this craft)" hint="first-run reset"
-                onClick={() => { close(); p.onClearStorage?.(); }} />
-            )}
             {/* HUD BLOCKS (v1.14.0, we: "allow us to edit the code for at
                 least HUDs that are contained within a HUD block") */}
             {(p.xenonHuds?.length ?? 0) > 0 && (<>

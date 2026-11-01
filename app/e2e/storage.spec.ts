@@ -85,9 +85,8 @@ test.describe('@storage @xenon THE STORAGE PERSISTENCE LAW', () => {
     await page.getByTestId('xenon-menu').click();
     await page.locator('[data-testid^="xenon-comp-"]').first().click();
     await expect(page.getByTestId('xenon-dialog')).toBeVisible();
-    await page.getByTestId('xenon-side-vars').click();
-    await page.getByTestId('xc-clear-storage').click();          // arm
-    await page.getByTestId('xc-clear-storage').click();          // confirm
+    await page.getByTestId('ide-clear-storage').click();          // arm (title toolbar)
+    await page.getByTestId('ide-clear-storage').click();          // confirm
     await expect.poll(() => busRow(page), { timeout: 90_000 }).toBe(1);
     await page.locator('[data-testid="xenon-close"]').first().click();
     // …and the WIPE is itself persistent: a reload starts over from 1,
@@ -115,9 +114,10 @@ test.describe('@storage @xenon THE STORAGE PERSISTENCE LAW', () => {
       { timeout: 90_000 });
     await passGate(page);
     await expect.poll(() => busRow(page), { timeout: 60_000 }).toBeGreaterThanOrEqual(2);
-    // the Xenon ▾ row wipes the whole craft
-    await page.getByTestId('xenon-menu').click();
-    await page.getByTestId('xenon-clear-all').click();
+    // the FILE-menu row wipes the whole craft (v1.17.2, we: "The clear
+    // buttons are far outside of visibility and should be under MENU")
+    await page.getByTestId('file-menu').click();
+    await page.getByTestId('file-clear-storage').click();
     await expect.poll(() => busRow(page), { timeout: 90_000 }).toBe(1);
     // the wipe persists: a reload starts over from 1
     await page.reload({ waitUntil: 'load' });

@@ -401,9 +401,13 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   persistence seam DISARMED (storeK null — the ~2 s throttle must never
   resurrect the broken cache over the wipe) and re-boots on the fresh
   disk. THE CRAFT-WIDE WIPE (same breath, we: "Available in computers,
-  and for entire craft"): the Xenon ▾ menu row 🗑 Clear ALL storage vars
-  — every running pump of the craft clearStorage()s, then every
+  and for entire craft"): the FILE-menu row 🗑 Clear ALL storage vars —
+  every running pump of the craft clearStorage()s, then every
   `${craft}#*` record drops (clearCraftStores); game saves untouched.
+  VISIBILITY LAW for these (we: "the clear buttons are far outside of
+  visibility and should be under MENU"): the per-craft row rides the
+  FILE menu, the per-computer 🗑 rides the IDE's ALWAYS-VISIBLE title
+  toolbar (a Vars-tab twin stays); never only in a buried side tab.
   HudController VMs do NOT persist yet (Backlog).
 - THE WORK CENSUS (v1.17.1, we: "calculate how much work the computer does
   per iteration, and correspond to documentation Archean [has] on what is
