@@ -6109,3 +6109,12 @@ colour; the DENSE-MESH RULE + SMOOTH-SHELL GATE already strip the facet
 interior (94 % of actor strokes are silhouette). The glyph module and
 its pins are deleted — a drawing's parts are their outlines, placed and
 labelled.
+
+## 42. THE SCROLL-OWNERSHIP LAW (we: "scrolling down over the diagrams
+## zoom, that is not OK"; 2026-11-02)
+DiagramView hijacked the plain wheel for zoom — scrolling the analysis
+window over a diagram resized it. Embedded canvases do not own the
+plain scroll: zoom is Ctrl/⌘+wheel (native non-passive listener, so the
+browser's own ctrl+wheel page-zoom is suppressed only there) and pinch
+in fullscreen; touch-action stays pan-x/pan-y embedded so the page
+scrolls under a finger. The export's .mm script got the same gate.

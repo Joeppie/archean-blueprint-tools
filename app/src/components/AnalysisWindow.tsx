@@ -58,6 +58,22 @@ function DiagramView(p: { svg: string }) {
     const [a, b] = [...ptrs.current.values()];
     return a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 0;
   };
+  // THE SCROLL-OWNERSHIP LAW (v1.17.2, we: "scrolling down over the
+  // diagrams zoom, that is not OK"): the plain wheel scrolls the page;
+  // ZOOM is Ctrl/⌘+wheel (and pinch in fullscreen). Native listener —
+  // React's root wheel is passive and cannot preventDefault the browser
+  // zoom on ctrl+wheel.
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const h = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;   // plain wheel → the page
+      e.preventDefault();
+      setK(x => Math.min(6, Math.max(0.2, x * (e.deltaY < 0 ? 1.15 : 0.87))));
+    };
+    el.addEventListener('wheel', h, { passive: false });
+    return () => el.removeEventListener('wheel', h);
+  }, []);
   // FIT-ON-OPEN (v1.17.1, we: "cannot navigate or move through the diagrams"):
   // a diagram wider/taller than its panel opens FITTED, not cut off.
   useEffect(() => {
@@ -98,8 +114,7 @@ function DiagramView(p: { svg: string }) {
       {/* THE GALLERY LAW: click (no drag) opens fullscreen; pinch zooms;
           in fullscreen the empty backdrop closes it (photo-gallery exit). */}
       <div ref={scroller} className="min-h-0 flex-1 overflow-auto rounded border border-[#22314a] bg-[#101a2b]"
-        style={{ cursor: big ? 'grab' : 'zoom-in', touchAction: 'none' }}
-        onWheel={e => setK(x => Math.min(6, Math.max(0.2, x * (e.deltaY < 0 ? 1.15 : 0.87))))}
+        style={{ cursor: big ? 'grab' : 'zoom-in', touchAction: big ? 'none' : 'pan-x pan-y' }}
         onPointerDown={e => {
           ptrs.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
           (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
