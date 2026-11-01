@@ -5811,3 +5811,35 @@ aircraft practice; its pin updated, the one-side-flush strength model
 keeps the physics). Grammar tests rewritten (16): four kinds, bounds,
 node titles, split coupling, mario-scale caps; analysis.spec testids and
 legs follow (3 green).
+
+THE PLATE SAGA (v1.17.1, we: "Nothing visible in vesel overviews" — five
+misreads deep, recorded so the forensics pattern survives): the vessel
+plates had been empty since v1.17.0 and the spec's <img>-COUNT said green
+(COUNT IS NOT CONTENT). Layers peeled, each a real cause stacked on the
+last: (1) the dialog's actor list required ALIASES — most craft address
+raw io ports, so actors was []; actors now come from the program's own
+fan-in (the plate shows the diagram's world, with fallback to all devices);
+(2) `scene.background` = the day-sky blue painted EVERY throwaway render
+(#8fb4d8 over everything) — restored to null per shot; (3) the ortho
+frustum was sized in PIXELS (~692) while a craft is ~4 m — the ship was a
+5-px speck; frustum now world-units (~78 % of the short axis); (4) the
+object-tree bbox swallowed HUD sprite-label quads (95 m for a 4 m plane) —
+the box now comes from TRUSTED SOURCE DATA (file bbox + block buckets +
+part roots + subgrid), mirroring fit(); (5) ANGLE-vulkan/SwiftShader QUEUES
+draws — the scene's own readPixels-flush wisdom (snapshotOne, fps probe)
+applied: 1-px readPixels after render. Plus a production EMPTY-FLAG
+(mid/corner alpha + triangle count → empty:true → the dialog retries ×3
+while the scene builds). The plate renders as an X-RAY now: slate
+silhouette (wireframe at plate scale blends into a meaningless wash),
+solid-amber actors, amber cables, projected labels. Pinned PROPERLY: the
+FLYING leg DECODES the plate PNG and asserts silhouette+amber pixels —
+the bug class 'img count passed over empty pixels' is now impossible.
+Lesson for headless visual specs: sample the PIXELS, never the element
+count — an <img> of a blank canvas is still an <img>.
+
+CLASS DIAGRAM GETS THE WIRING (same release, we: "Why [not a] class
+diagram with devices?"): the centrepiece now carries every used part as a
+`≡ name : Type` class (io number, read/written ×count, channels) wired by
+`file ..> device : writes ch N` / `device ..> file : reads ch N` — bounded
+by the same caps with a '+N quieter device(s)' fold; the class diagram IS
+the wiring diagram the plate visualises.

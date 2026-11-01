@@ -54,6 +54,12 @@ describe('THE XENON ANALYSIS GRAMMAR v2 (bounded, split, node-aware)', () => {
     expect(cls).toContain('\u00abupdate \u00b7 tick 25 Hz\u00bb');       // the TICK block is visible
     expect(cls).toContain('\u00abinit\u00bb');                              // entry points seen
     expect(cls).toContain('@tone');
+    // THE DEVICES ARE IN THE CLASS DIAGRAM (we: "Why [not a] class diagram
+    // with devices?"): parts are first-class nodes with io + wiring edges
+    expect(cls).toMatch(/class \S+\["≡ melody : Buzzer"\]/);
+    expect(cls).toMatch(/\.\.> \S+ : writes ch/);
+    expect(cls).toMatch(/≡ seat-main/);
+    expect(cls).toMatch(/: reads ch/);
   });
   it('sequences are BOUNDED (we: "bloated and unusable")', () => {
     for (const d of ds.filter(x => x.kind.startsWith('seq'))) {

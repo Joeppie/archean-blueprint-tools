@@ -168,11 +168,29 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
   useEffect(() => {
     const eng = p.engine;
     if (!eng || !curCpu || plates[curCpu.ci]) return;
-    const actors = curCpu.devices
-      .filter(d => d.ci !== undefined && d.alias)
-      .map(d => ({ ci: d.ci!, tag: `${d.alias} · io ${d.io}` }));
-    eng.analysisShots({ actors }).then(ph => setPlates(x => ({ ...x, [curCpu!.ci]: ph })))
-      .catch(e => setShotErr(String(e).slice(0, 120)));
+    // THE PLATE SHOWS THE DIAGRAM'S OWN WORLD (v1.17.1, we: "Nothing
+    // visible in vesel overviews"): the actors are the devices THIS program
+    // actually cables (the rundown's fan-in), NOT only aliased ones — most
+    // craft address parts by raw io port and have no aliases at all.
+    const rd = codeRundown({ alias: curCpu.alias || `#${curCpu.ci}`, ci: curCpu.ci,
+      files: curCpu.files.map(f => ({ name: f.name, code: f.code })), devices: curCpu.devices });
+    const touched = new Set(rd.fanIn.map(x => x.device));
+    const devs = curCpu.devices.filter(d => d.ci !== undefined);
+    const picked = devs.filter(d => touched.has(d.alias || `io ${d.io}`));
+    const actorsSrc = (picked.length ? picked : devs).slice(0, 12);
+    const actors = actorsSrc.map(d => ({
+      ci: d.ci!, tag: `${d.alias || `${d.type} #${d.ci}`} · io ${d.io}` }));
+    // retry while the scene is still building (EMPTY-FLAG, v1.17.1)
+    let tries = 0;
+    const go = () => {
+      eng.analysisShots({ actors })
+        .then(ph => {
+          if (ph.empty && tries++ < 2) { setTimeout(go, 2500); return; }
+          setPlates(x => ({ ...x, [curCpu!.ci]: ph }));
+        })
+        .catch(e => setShotErr(String(e).slice(0, 120)));
+    };
+    go();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p.engine, curCpu?.ci]);
 

@@ -422,7 +422,10 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   diagram shown … each computer (max 1) a class AND wiring diagram
   together"): xcDiagrams emits FOUR BOUNDED diagrams — `class` (the
   centrepiece: ≤7 files, ≤6 members + an honest '+N more', entry marks
-  «update · tick 25 Hz» visible), `flow` (≤5 files; #NODES programs get
+  «update · tick 25 Hz» visible; THE DEVICES ARE IN IT (we: "Why [not a]
+  class diagram with devices?"): every used part is a `≡ name : Type`
+  class with io number, read/written counts and channels, wired by
+  `file ..> device : writes ch N` / `device ..> file : reads ch N`), `flow` (≤5 files; #NODES programs get
   their NODE GRAPH with node titles — the text scan is blind to a node
   program's whole io surface, the graph fixes it), `seqIn`/`seqOut`
   (SPLIT: press→read coupling kept, reads and writes no longer share a

@@ -174,7 +174,17 @@ export function xcDiagrams(prog: XcProgram, seatLabels?: Record<number, string>)
   };
   const short = (d: XCDevice) => (d.alias || `io${d.io}`).replace(/\s+/g, '_');
 
-  // ── CLASS & WIRING (the centrepiece, max one per computer) ────────────
+  const tally = new Map<string, { dev: XCDevice; dir: 'in' | 'out'; chs: Set<string>; n: number }>();
+  for (const ev of io)
+    for (const d of resolve(ev.file, ev.token)) {
+      const k = `${d.alias}|${d.io}|${ev.dir}`;
+      if (!tally.has(k)) tally.set(k, { dev: d, dir: ev.dir, chs: new Set(), n: 0 });
+      tally.get(k)!.chs.add(ev.ch); tally.get(k)!.n++;
+    }
+
+  // ── CLASS & WIRING (the centrepiece, max one per computer; v1.17.1 the
+  //    DEVICES join it (we: "Why [not a] class diagram with devices?") —
+  //    parts are first-class nodes: io number, who reads/writes them) ────
   const withContent = files.filter(f => (fns.get(f.name)?.length ?? 0) + (entries.get(f.name)?.length ?? 0) > 0);
   const shown = withContent.slice(0, CAP.cls);
   const cls: string[] = ['classDiagram'];
@@ -190,6 +200,29 @@ export function xcDiagrams(prog: XcProgram, seatLabels?: Record<number, string>)
   }
   if (withContent.length > shown.length)
     cls.push(`  class misc["… ${withContent.length - shown.length} more file(s)"]`);
+  // device nodes + wiring edges (bounded like the sequences)
+  const devRanked = [...tally.values()].sort((a, b) => b.n - a.n);
+  const devShown = devRanked.slice(0, CAP.seqDev);
+  for (const x of devShown)
+    cls.push(`  class ${nid('d', short(x.dev))}["≡ ${label(short(x.dev))} : ${label(x.dev.type)}"] {` +
+      `\n    +io ${x.dev.io}\n    +${x.dir === 'in' ? 'read' : 'written'} ×${x.n}` +
+      `\n    +ch ${label([...x.chs].slice(0, 4).join(','))}\n  }`);
+  if (devRanked.length > devShown.length)
+    cls.push(`  class devmisc["… +${devRanked.length - devShown.length} quieter device(s)"]`);
+  let devEdges = 0;
+  for (const x of devShown) {
+    if (devEdges >= CAP.edges + 4) break;
+    const owners = new Set<string>();
+    for (const ev of io) for (const d2 of resolve(ev.file, ev.token))
+      if (d2 === x.dev) owners.add(ev.file);
+    for (const f of owners) {
+      if (!shown.some(y => y.name === f)) continue;
+      cls.push(x.dir === 'in'
+        ? `  ${nid('d', short(x.dev))} ..> ${nid('c', f)} : reads ch ${label([...x.chs][0] ?? '0')}`
+        : `  ${nid('c', f)} ..> ${nid('d', short(x.dev))} : writes ch ${label([...x.chs][0] ?? '0')}`);
+      devEdges++;
+    }
+  }
   let edges = 0;
   for (const f of shown) {
     for (const inc of includes.get(f.name) ?? []) {
@@ -249,13 +282,6 @@ export function xcDiagrams(prog: XcProgram, seatLabels?: Record<number, string>)
 
   // ── SEQUENCE split in TWO bounded views (we: "doesnt couple input and
   //   output… maybe have two different ones") ────────────────────────────
-  const tally = new Map<string, { dev: XCDevice; dir: 'in' | 'out'; chs: Set<string>; n: number }>();
-  for (const ev of io)
-    for (const d of resolve(ev.file, ev.token)) {
-      const k = `${d.alias}|${d.io}|${ev.dir}`;
-      if (!tally.has(k)) tally.set(k, { dev: d, dir: ev.dir, chs: new Set(), n: 0 });
-      tally.get(k)!.chs.add(ev.ch); tally.get(k)!.n++;
-    }
   const byDir = (dir: 'in' | 'out') => [...tally.values()].filter(t => t.dir === dir)
     .sort((a, b) => b.n - a.n);
   const mkSeq = (dir: 'in' | 'out', title: string): XcDiagram => {

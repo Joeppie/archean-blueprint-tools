@@ -2967,14 +2967,38 @@ void main() {
   async analysisShots(opts: {
     actors: { ci: number; tag: string }[];
     size?: { w: number; h: number };
-  }): Promise<{ top: string; front: string }> {
+  }): Promise<{ top: string; front: string; empty: boolean }> {
     const w = opts.size?.w ?? 860, h = opts.size?.h ?? 540;
     const scene = this.scene;
     if (!scene || !this.bp) throw new Error('analysisShots: no scene');
     const craft = [this.root, this.hingeGroup, this.subGroup];
-    const box = new Box3();
-    for (const g of craft) box.expandByObject(g);
-    if (box.isEmpty()) box.setFromCenterAndSize(new Vector3(), new Vector3(4, 2, 4));
+    // THE BOX FROM TRUSTED SOURCE DATA (v1.17.1, mirroring fit()): the
+    // object-tree bbox swallows HUD sprite labels and helper quads (95 m
+    // for a 4 m plane) — the FILE box + block buckets + part boxes + subgrid
+    // content frame the ship honestly.
+    const box = new Box3(
+      new Vector3(this.bp.box_min.x, this.bp.box_min.y, this.bp.box_min.z),
+      new Vector3(this.bp.box_max.x, this.bp.box_max.y, this.bp.box_max.z));
+    const growPt = (x: number, y: number, z: number) => {
+      box.min.x = Math.min(box.min.x, x - this.moff.x); box.min.y = Math.min(box.min.y, y - this.moff.y);
+      box.min.z = Math.min(box.min.z, z - this.moff.z);
+      box.max.x = Math.max(box.max.x, x - this.moff.x); box.max.y = Math.max(box.max.y, y - this.moff.y);
+      box.max.z = Math.max(box.max.z, z - this.moff.z);
+    };
+    for (const b of this.batch?.buckets.values() ?? [])
+      for (let i = 0; i < b.positions.length; i += 3) growPt(b.positions[i]!, b.positions[i + 1]!, b.positions[i + 2]!);
+    this.compRoots.forEach((roots) => { for (const o of roots) {
+      const b = new Box3().setFromObject(o);
+      if (!b.isEmpty()) { box.union(b); }
+    } });
+    { const sb = new Box3().setFromObject(this.subGroup);
+      if (!sb.isEmpty()) box.union(sb); }
+    // EMPTY-FLAG (v1.17.1, we: "Nothing visible in vesel overviews"): the
+    // dialog can open while the meshes/models are still building — an
+    // empty box used to render a black rectangle and lie. The caller now
+    // sees empty:true and retries.
+    const emptyBox = box.isEmpty();
+    if (emptyBox) box.setFromCenterAndSize(new Vector3(), new Vector3(4, 2, 4));
     const c = box.getCenter(new Vector3());
     const r = Math.max(0.75, box.getSize(new Vector3()).length() * 0.56);
     const actorCis = new Set(opts.actors.map(a => a.ci));
@@ -2992,8 +3016,14 @@ void main() {
     // the actor roots (parts nest their render-node tree deep).
     type Swap = { o: Mesh | Line; prev: Material | Material[] };
     const swaps: Swap[] = [];
-    const wire = new MeshBasicMaterial({ color: 0x4fd6c8, wireframe: true, transparent: true, opacity: 0.5 });
-    const wireLine = new LineBasicMaterial({ color: 0x3fb2a8, transparent: true, opacity: 0.4 });
+    // X-RAY PLATE law (v1.17.1, we: "Nothing visible in vesel overviews" —
+    // measured cause: a full-block wireframe at ortho scale BLENDs into a
+    // single pale wash, 99 % ink and zero information). The plate reads as
+    // an x-ray: slate silhouette (depthWrite off so it never swallows the
+    // actors), the actor parts solid amber, the cables amber lines on top.
+    const wire = new MeshBasicMaterial({ color: 0x6f97c2, transparent: true,
+      opacity: 0.62, depthWrite: false, side: DoubleSide });
+    const wireLine = new LineBasicMaterial({ color: 0x54c9bd, transparent: true, opacity: 0.22 });
     const amber = new MeshBasicMaterial({ color: 0xffc35e });
     const hidden: Object3D[] = [];
     if (this.gridLines) { this.gridLines.visible = false; hidden.push(this.gridLines); }
@@ -3011,18 +3041,43 @@ void main() {
     });
     let renderer: WebGLRenderer | null = null;
     const shots: string[] = [];
+    let triCount = 0;
+    let glBlank = false;
+    // THE SKY LIES (v1.17.1, we: "Nothing visible in vesel overviews" — the
+    // ROOT CAUSE after three misreads: scene.background = the day-sky pale
+    // blue painted EVERY throwaway render, burying the plate under #8fb4d8).
+    const prevBg = scene.background;
+    scene.background = null;
     try {
       renderer = new WebGLRenderer({ alpha: true, antialias: true, preserveDrawingBuffer: true });
       renderer.setSize(w, h, false);
       const cam = new OrthographicCamera(-w / 2 / 1, w / 2 / 1, h / 2 / 1, -h / 2 / 1, 0.01, r * 12);
       const shoot = (pos: Vector3, up: Vector3) => {
         cam.position.copy(pos); cam.up.copy(up); cam.lookAt(c);
-        // ortho zoom: the craft fills ~78% of the frame
-        const span = Math.min(w, h) * 2 / 1.56;
-        cam.left = -span / 2; cam.right = span / 2;
-        cam.top = span / 2; cam.bottom = -span / 2;
+        // FRUSTUM IN WORLD UNITS (v1.17.1, the ROOT CAUSE behind three
+        // misreads: the span was computed in PIXELS (~692) while a craft is
+        // ~4 m — every plate rendered the ship as a five-pixel speck).
+        // The craft's bounding sphere fills ~78 % of the SMALLER axis.
+        const span = (r * 2) / 0.78;
+        const aspect = w / h;
+        cam.left = -span * Math.max(1, aspect) / 2; cam.right = -cam.left;
+        cam.top = span * Math.max(1, 1 / aspect) / 2; cam.bottom = -cam.top;
         cam.updateProjectionMatrix();
         renderer!.render(scene, cam);
+        triCount += renderer!.info.render.triangles;
+        // FLUSH THE QUEUE (v1.17.1, the scene's own proven wisdom at
+        // snapshotOne/readPixels): ANGLE-vulkan/SwiftShader queues draws;
+        // a 1-px readPixels synchronously FLUSHES them, so the drawImage
+        // below sees pixels instead of the pre-flush blank (the plate's
+        // 409k-triangle-into-0-pixel mystery, three misreads deep).
+        {
+          const gl = renderer!.getContext();
+          const px = new Uint8Array(4);
+          gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+          const mid = new Uint8Array(4);
+          gl.readPixels(w >> 1, h >> 1, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, mid);
+          if (mid[3]! <= 4 && px[3]! <= 4) glBlank = true;
+        }
         // 2D plate: dark card + the GL frame + amber wires + labels
         const cv = document.createElement('canvas');
         cv.width = w; cv.height = h;
@@ -3077,12 +3132,15 @@ void main() {
       shots.push(shoot(new Vector3(c.x, c.y + r * 5, c.z + 0.001), new Vector3(0, 0, -1)));   // TOPSIDE
       shots.push(shoot(new Vector3(c.x, c.y + r * 0.06, c.z - r * 5), new Vector3(0, 1, 0))); // FRONT (nose −z)
     } finally {
+      scene.background = prevBg;
       for (const s of swaps) s.o.material = s.prev as never;
       for (const o of hidden) o.visible = true;
       wire.dispose(); wireLine.dispose(); amber.dispose();
       renderer?.dispose();
     }
-    return { top: shots[0]!, front: shots[1]! };
+    // empty:true = nothing was there to draw (scene still building) — the
+    // dialog retries instead of framing a lie (we: "Nothing visible").
+    return { top: shots[0]!, front: shots[1]!, empty: emptyBox || triCount === 0 || glBlank };
   }
 
   /** green ground + grid just under the lowest rendered geometry (ground=true:

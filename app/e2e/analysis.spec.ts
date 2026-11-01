@@ -35,6 +35,40 @@ test.describe('@analysis @slow THE CRAFT ANALYSIS', () => {
     // the vessel plate pair above/with the reading: topside + front PNGs
     await expect(page.getByTestId('analysis-plates').locator('img')).toHaveCount(2,
       { timeout: 120_000 });
+    // THE PLATE HAS A SHIP ON IT (v1.17.1, we: "Nothing visible in vesel
+    // overviews" — the spec counted <img> tags for two releases and the
+    // plates were 100 % day-sky: COUNT IS NOT CONTENT, decode the pixels):
+    // x-ray silhouette + amber actor pixels must exist in the PNG.
+    await expect.poll(async () => page.evaluate(() => {
+      const im = document.querySelector('[data-testid="analysis-plates"] img') as HTMLImageElement;
+      if (!im?.complete || !im.currentSrc) return { sil: -1, amber: -1 };
+      const cv = document.createElement('canvas');
+      cv.width = im.naturalWidth; cv.height = im.naturalHeight;
+      const g = cv.getContext('2d')!; g.drawImage(im, 0, 0);
+      const d = g.getImageData(0, 0, cv.width, cv.height).data;
+      let sil = 0, amber = 0;
+      for (let i = 0; i < d.length; i += 16) {
+        if (d[i]! > 180 && d[i + 1]! > 140 && d[i + 2]! < 150) amber++;
+        else if (d[i + 2]! > 70 && d[i + 2]! > d[i]! && d[i]! >= 40) sil++;
+      }
+      return { sil, amber };
+    }), { message: 'the plate carries silhouette + amber actor pixels', timeout: 30_000 })
+      .toMatchObject({ sil: expect.any(Number) });
+    const plateInk = await page.evaluate(() => {
+      const im = document.querySelector('[data-testid="analysis-plates"] img') as HTMLImageElement;
+      const cv = document.createElement('canvas');
+      cv.width = im.naturalWidth; cv.height = im.naturalHeight;
+      const g = cv.getContext('2d')!; g.drawImage(im, 0, 0);
+      const d = g.getImageData(0, 0, cv.width, cv.height).data;
+      let sil = 0, amber = 0;
+      for (let i = 0; i < d.length; i += 16) {
+        if (d[i]! > 180 && d[i + 1]! > 140 && d[i + 2]! < 150) amber++;
+        else if (d[i + 2]! > 70 && d[i + 2]! > d[i]! && d[i]! >= 40) sil++;
+      }
+      return { sil, amber };
+    });
+    expect(plateInk.sil, 'x-ray silhouette present').toBeGreaterThan(20);
+    expect(plateInk.amber, 'amber actors present').toBeGreaterThan(5);
 
     // v1.17.1 THE PURE-SVG LAW (we: "SVG doesn't rendee images"): every
     // rendered diagram is foreignObject-free — real <text>, renders in the
