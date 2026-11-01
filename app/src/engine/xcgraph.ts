@@ -644,9 +644,9 @@ ${summaryHtml}${flightHtml}
   for (const s of opts.sections) {
     parts.push(`<h2 id="comp-${esc(s.compAlias)}">Computer ${esc(s.compAlias)}</h2>`);
     if (s.plateSvg) parts.push(`<figure class="plate-sheet">${s.plateSvg}
-<figcaption>three-view plate — front · side · topside at one shared scale,
-vector SVG: actors filled in their label colour, cabled runs amber + io tags,
-leader-line labels</figcaption></figure>`);
+<figcaption>blueprint plate — front · side · topside on a metre grid: hull
+hairlines, parts quiet, ONLY the actors inked in their label colour, cabled
+runs amber + io tags, leader-line labels</figcaption></figure>`);
     if (s.compute) {
       const c = s.compute;
       parts.push(`<h3>Compute budget</h3><p style="font-size:12px;color:#c8d4e4">

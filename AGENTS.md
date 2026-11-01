@@ -440,13 +440,19 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   panel). THE SILHOUETTE LAW (we, same day, on the bbox first cut: "the
   chair looks unrecognizable in the SVG. did you just use bounding boxes?
   That is not OK"): the plate draws the craft's OWN MESHES — every
-  triangle projected, back-face + sliver culled, painter-sorted far-first,
-  emitted as a polygon in the face's material colour; a bbox is NEVER a
-  part. BOUNDED: per-mesh 20k / per-view 16k triangle caps — the LARGEST
+  triangle projected, back-face + sliver culled, painter-sorted far-first;
+  a bbox is NEVER a part. THE BLUEPRINT LAW (we, on the filled-material
+  second cut: "its too complex … I see all the outsides of everything, not
+  just components with the rest of the geometry as a background … it
+  should be like a blueprint"): the sheet is a BLUEPRINT — navy board +
+  ONE METRE GRID + a 1 m scale bar, the HULL as hairline construction
+  lines (0.4 px), other parts quiet thin lines (0.7 px), and ONLY THE
+  ACTORS inked bright (1.5 px + tint) in their label's palette colour —
+  line WEIGHT is the figure/ground hierarchy; material colours are
+  deliberately NOT carried. BOUNDED: per-mesh 20k triangles, per-class
+  caps 9k hull / 5k parts / 4k actors a panel — the LARGEST
   faces win. No WebGL: the raster-era day-sky/blank-frame traps are
-  structurally gone. An ACTOR
-  FILLS in its label's palette colour — the fill names what the label
-  says. THE LEADER-LABEL LAW (we: "labels should try to not overlap and
+  structurally gone. THE LEADER-LABEL LAW (we: "labels should try to not overlap and
   use slightly different colors, using lines to indicate where things
   are"): every plate label (actors + cable io tags, ONE shared placer)
   gets a colour from the rotation palette, a collision-slotted box from

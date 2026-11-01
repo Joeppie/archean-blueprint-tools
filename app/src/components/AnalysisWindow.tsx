@@ -409,9 +409,10 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
               <div data-testid="analysis-plates" className="w-full max-w-[1160px]">
                 <DiagramView svg={ph.svg} />
                 <div className="mt-0.5 text-[10px] text-[#8b93a1]">
-                  three-view plate — front · side · topside at ONE shared scale,
-                  vector SVG (zoom to 600 %): actors filled in their label
-                  colour, cabled runs amber + io tags, leader-line labels
+                  blueprint plate — front · side · topside at one scale on a metre
+                  grid, vector SVG (zoom to 600 %): hull hairlines, parts quiet,
+                  ONLY the actors inked in their label colour, cabled runs amber
+                  + io tags, leader-line labels
                 </div>
               </div>
             ); })()}

@@ -41,28 +41,34 @@ test.describe('@analysis @slow THE CRAFT ANALYSIS', () => {
     await expect(page.getByTestId('analysis-plates').locator('svg')).toHaveCount(1,
       { timeout: 120_000 });
     // THE PLATE HAS A SHIP ON IT (the "COUNT IS NOT CONTENT" law): the
-    // vector plate is the craft's OWN mesh silhouettes — thousands of
-    // projected, painter-sorted polygons in the faces' own colours,
-    // actors filled in their label colour, cable runs, leader labels.
+    // vector plate is a BLUEPRINT of the craft's OWN meshes — navy board
+    // + metre grid, hull hairlines, parts as thin lines, ONLY the actors
+    // inked in their label colour, cable runs, leader labels.
     // (v1.17.2, we on the bbox first cut: "the chair looks unrecognizable
-    // in the SVG. did you just use bounding boxes? That is not OK".)
+    // in the SVG. did you just use bounding boxes? That is not OK"; on
+    // the filled-material second cut: "I see all the outsides of
+    // everything … it should be like a blueprint".)
     const plate = await page.evaluate(() => {
       const svg = document.querySelector('[data-testid="analysis-plates"] svg')!;
       const polys = [...svg.querySelectorAll('polygon')];
-      const fills = polys.map(p => p.getAttribute('fill') || '');
+      const strokes = polys.map(p => p.getAttribute('stroke') || '');
       return {
         polys: polys.length,
-        actorPolys: fills.filter(f => /#(ffd98a|7dffcf|9fd0ff|ff9ecb|c9ff8a|ffb08a|b7a6ff|8afff0|ffe08a|f0a6ff|a6ffd0|ffa6a6)/.test(f)).length,
-        fills: new Set(fills.filter(f => !/#(ffd98a|7dffcf|9fd0ff|ff9ecb|c9ff8a|ffb08a|b7a6ff|8afff0|ffe08a|f0a6ff|a6ffd0|ffa6a6)/.test(f))).size,
+        hullHair: polys.filter(p => (p.closest('g')?.getAttribute('stroke') || '') === '#8fc3ee').length,
+        partLines: polys.filter(p => (p.closest('g')?.getAttribute('stroke') || '') === '#b9dcff').length,
+        actorPolys: strokes.filter(f => /#(ffd98a|7dffcf|9fd0ff|ff9ecb|c9ff8a|ffb08a|b7a6ff|8afff0|ffe08a|f0a6ff|a6ffd0|ffa6a6)/.test(f)).length,
+        grids: svg.querySelectorAll('path').length,
         cables: svg.querySelectorAll('polyline').length,
         labels: svg.querySelectorAll('text').length,
         leaders: svg.querySelectorAll('line').length,
         views: [...svg.querySelectorAll('text')].filter(t => /FRONT|SIDE|TOPSIDE/.test(t.textContent || '')).length,
       };
     });
-    expect(plate.polys, 'mesh-silhouette polygons').toBeGreaterThan(300);
-    expect(plate.actorPolys, 'colour-filled actor faces').toBeGreaterThanOrEqual(20);
-    expect(plate.fills, 'faces keep their own material colours').toBeGreaterThan(2);
+    expect(plate.polys, 'blueprint linework polygons').toBeGreaterThan(300);
+    expect(plate.hullHair, 'hull construction hairlines').toBeGreaterThan(100);
+    expect(plate.partLines, 'quiet part lines').toBeGreaterThan(10);
+    expect(plate.actorPolys, 'actors inked in their label colour').toBeGreaterThanOrEqual(20);
+    expect(plate.grids, 'metre grid sheets').toBe(3);
     expect(plate.labels, 'leader labels').toBeGreaterThan(4);
     expect(plate.views, 'three view captions').toBe(3);
 

@@ -5935,3 +5935,24 @@ GAME-hull files) ended as a per-panel clip to the FILE box. Live census:
 — wide, long, planform: the plane READS as a plane at any zoom. Pinned by
 analysis.spec (300+ polygons, 20+ actor-coloured faces, 3+ material fills,
 three captions).
+
+## 35. THE BLUEPRINT LAW — figure/ground by line weight (we: "something is
+## wrong with the geometry, its too complex and it feels like I see all the
+## outsides of everything, not just components with the rest of the
+## geometry as a background … Remember; it should be like a blueprint";
+## 2026-11-02)
+The silhouette second cut emitted every camera-facing triangle in its own
+material colour at full opacity: 48k shouting tiles, zero hierarchy — the
+e2e census (polygons, fills, captions) was green while the sheet was
+noise, COUNT IS NOT CONTENT a third time in one day. FIX: the plate is a
+BLUEPRINT. Navy board (#0f2a48) + ONE METRE GRID + a 1 m scale bar; the
+hull is HAIRLINE construction (0.4 px, 32 %); non-actor parts quiet thin
+lines (0.7 px, 50 %); ONLY THE ACTORS are inked — 1.5 px + 14 % tint in
+their label's palette colour (the palette already ties fill to label).
+Material colours deliberately NOT carried; line WEIGHT is the
+figure/ground law. Caps per class (9k hull / 5k parts / 4k actors a
+panel), largest-faces-first on overflow. Live census on ISW-241: 27.5k
+polygons = 751 hull hairlines + 14.7k part hairlines + 12k inked actor
+faces + 3 grid sheets — the components read AS the drawing, the ship
+behind them. Pinned by analysis.spec (hullHair > 100, partLines > 10,
+actorInked ≥ 20, grids = 3).

@@ -2959,15 +2959,22 @@ void main() {
    *  bounding boxes? That is not OK" → THE SILHOUETTE LAW: the plate is
    *  the craft's OWN GEOMETRY — every mesh triangle projected, back-face
    *  and sliver culled, painter-sorted (far first) and emitted as a
-   *  vector polygon in the face's own material colour. The plane reads
-   *  AS a plane, a chair AS a chair — a bbox is never a part. ─────────
+   *  vector polygon. The plane reads AS a plane, a chair AS a chair — a
+   *  bbox is never a part. ─────────────────────────────────────────────
    *  ONE SVG sheet: FRONT / SIDE (starboard) / TOPSIDE at ONE shared
    *  px/m, drawn from the live scene (meshes for geometry, compRoots
-   *  boxes for label anchors, pipeNet.polys for the cable runs). Actors
-   *  fill in their label's palette colour (THE LEADER-LABEL LAW:
-   *  collision-slotted boxes + a line to the dot on the named thing).
-   *  BOUNDED: per-mesh and per-view triangle caps — the largest faces
-   *  win, the sheet stays at a few thousand polygons a panel. No WebGL:
+   *  boxes for label anchors, pipeNet.polys for the cable runs).
+   *  THE BLUEPRINT LAW v1.17.2 (we: "its too complex … I see all the
+   *  outsides of everything, not just components with the rest of the
+   *  geometry as a background … it should be like a blueprint"): a
+   *  drafting sheet — navy board + ONE METRE GRID, the hull as HAIRLINE
+   *  construction lines, other parts quiet thin lines, and ONLY THE
+   *  ACTORS inked bright in their label's palette colour; a 1 m SCALE
+   *  BAR rides the sheet. Line WEIGHT is the figure/ground hierarchy
+   *  (THE LEADER-LABEL LAW: collision-slotted boxes + a line to the dot
+   *  on the named thing).
+   *  BOUNDED: per-mesh 20k triangles, per-class caps (9k hull / 5k parts
+   *  / 4k actors a panel) — the LARGEST faces win. No WebGL:
    *  sharp at every zoom (the dialog renders it through DiagramView, the
    *  same wheel-zoom/pan/⤢ machinery as the mermaid diagrams); the
    *  raster-era day-sky/blank-frame traps are structurally gone.
@@ -2978,7 +2985,6 @@ void main() {
     if (!this.scene || !this.bp) return Promise.reject(new Error('analysisShots: no scene'));
     const PH = 640, PW = 940, GAP = 26, PAD = 44;
     const MESH_CAP = 20000;      // triangles per mesh (a monster model decimates)
-    const VIEW_CAP = 16000;      // polygons per panel (the largest faces win)
     const MIN_AREA = 0.12;       // px²: a sub-sliver carries no information
     const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     this.scene.updateMatrixWorld(true);
@@ -3020,8 +3026,20 @@ void main() {
     const actorOf = new Map<Object3D, number>();
     for (const ci of actorCis)
       for (const root of this.compRoots.get(ci) ?? []) root.traverse(o => actorOf.set(o, ci));
+    // THE FIGURE/GROUND LAW v1.17.2 (we: "its too complex … I see all the
+    // outsides of everything, not just components with the rest of the
+    // geometry as a background"): the plate is THREE stacked planes, not
+    // a mosaic — (0) the hull as ONE uniform silhouette sheet, (1) the
+    // craft's other parts a quiet mid-tone, (2) the ACTORS the only
+    // colour, in their label's palette hue. Face material colours are
+    // deliberately NOT carried: per-face colour at full opacity is what
+    // turned the ship into 48k shouting tiles.
+    const partOf = new Map<Object3D, number>();
+    this.compRoots.forEach((roots, ci) => {
+      for (const root of roots) root.traverse(o => partOf.set(o, ci));
+    });
     interface Tri { v: [number, number, number, number, number, number, number, number, number];
-      n: [number, number, number]; ci: number; color: string }
+      n: [number, number, number]; cls: 0 | 1 | 2; ci: number }
     const tris: Tri[] = [];
     const vA = new Vector3(), vB = new Vector3(), vC = new Vector3(), e1 = new Vector3(), e2 = new Vector3();
     for (const g of [this.root, this.hingeGroup, this.subGroup]) {
@@ -3034,9 +3052,9 @@ void main() {
         if (!pos) return;
         const idx = geo.getIndex();
         const n = idx ? idx.count : pos.count;
-        const col = (m.material as MeshBasicMaterial)?.color as Color | undefined;
-        const hex = col ? '#' + col.getHexString() : '#44608a';
-        const ci = actorOf.get(o) ?? -1;
+        const actorCi = actorOf.get(o);
+        const partCi = partOf.get(o);
+        const cls: 0 | 1 | 2 = actorCi !== undefined ? 2 : partCi !== undefined ? 1 : 0;
         const mtx = m.matrixWorld;
         const limit = Math.min(n, MESH_CAP * 3);
         for (let i = 0; i + 2 < limit; i += 3) {
@@ -3049,7 +3067,7 @@ void main() {
           const len = Math.hypot(nx, ny, nz);
           if (len < 1e-9) continue;                        // degenerate: no face
           tris.push({ v: [vA.x, vA.y, vA.z, vB.x, vB.y, vB.z, vC.x, vC.y, vC.z],
-            n: [nx / len, ny / len, nz / len], ci, color: hex });
+            n: [nx / len, ny / len, nz / len], cls, ci: actorCi ?? partCi ?? -1 });
         }
       });
     }
@@ -3102,7 +3120,19 @@ void main() {
         : view.axis === 'zy' ? -(t.v[0] + t.v[3] + t.v[6]) / 3
           : -(t.v[1] + t.v[4] + t.v[7]) / 3;
       const pa = new Vector3(), pb = new Vector3(), pc = new Vector3();
-      const drawn: { d: number; a: number; f: string; pts: string }[] = [];
+      // THE BLUEPRINT LAW v1.17.2 (we: "something is wrong with the
+      // geometry, its too complex … I see all the outsides of everything,
+      // not just components with the rest of the geometry as a background
+      // … it should be like a blueprint"): a drafting sheet, not a fill —
+      // navy ground, ONE METRE GRID, hull faces as HAIRLINE construction
+      // lines (the ship's body reads as a mass, every face boundary is
+      // construction, nothing shouts), parts as quiet thin lines, and
+      // ONLY THE ACTORS inked bright in their label colour. Line WEIGHT
+      // is the figure/ground hierarchy.
+      type Drawn = { d: number; a: number; f: string; pts: string };
+      const byClass: Drawn[][] = [[], [], []];
+      const caps = [9000, 5000, 4000];   // hull / parts / actors (the sheet
+      // stays a few thousand lines a panel; the LARGEST faces win on overflow)
       for (const t of tris) {
         if (faceN(t) <= 0) continue;                       // back face: invisible
         const [x0, y0, z0, x1, y1, z1, x2, y2, z2] = t.v;
@@ -3110,20 +3140,47 @@ void main() {
         const a = px(U(pa), V(pa)), b2 = px(U(pb), V(pb)), c2 = px(U(pc), V(pc));
         const area = Math.abs((b2.x - a.x) * (c2.y - a.y) - (c2.x - a.x) * (b2.y - a.y)) / 2;
         if (area < MIN_AREA) continue;                     // sliver: no information
-        const fill = t.ci >= 0 ? actColor.get(t.ci)! : t.color;
-        drawn.push({ d: depth(t), a: area, f: fill,
+        const f = t.cls === 2 ? actColor.get(t.ci) ?? '#ffd98a' : '';
+        byClass[t.cls]!.push({ d: depth(t), a: area, f,
           pts: `${a.x.toFixed(1)},${a.y.toFixed(1)} ${b2.x.toFixed(1)},${b2.y.toFixed(1)} ${c2.x.toFixed(1)},${c2.y.toFixed(1)}` });
       }
-      if (drawn.length > VIEW_CAP) {                       // decimate honestly:
-        drawn.sort((p, q) => q.a - p.a);                   // the biggest faces win
-        drawn.length = VIEW_CAP;
-      }
-      drawn.sort((p, q) => q.d - p.d);                     // painter: FAR first
       const out: string[] = [];
+      // the sheet itself: navy board, 1 m lattice, panel frame, scale bar
+      const bx0 = vi * (PW + GAP) + 10;
+      out.push(`<rect x="${bx0}" y="10" width="${PW - 20}" height="${PH - 20}" fill="#0f2a48" stroke="#33608f" stroke-width="1" rx="6"/>`);
+      {
+        const grid: string[] = [];
+        for (let u = Math.ceil(uMin); u <= uMin + extU + 0.01; u += 1) {
+          const p1 = px(u, vMin), p2 = px(u, vMin + extV);
+          grid.push(`M${p1.x.toFixed(1)} ${p1.y.toFixed(1)}L${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`);
+        }
+        for (let v = Math.ceil(vMin); v <= vMin + extV + 0.01; v += 1) {
+          const p1 = px(uMin, v), p2 = px(uMin + extU, v);
+          grid.push(`M${p1.x.toFixed(1)} ${p1.y.toFixed(1)}L${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`);
+        }
+        out.push(`<path d="${grid.join('')}" stroke="#1e4470" stroke-width="0.3" fill="none"/>`);
+      }
+      out.push(`<text x="${(bx0 + 16).toFixed(1)}" y="${PH - 24}" fill="#9fd0ff" font-size="11">1 m</text>` +
+        `<line x1="${(bx0 + 16).toFixed(1)}" y1="${PH - 38}" x2="${(bx0 + 16 + scale).toFixed(1)}" y2="${PH - 38}" stroke="#9fd0ff" stroke-width="2"/>` +
+        `<line x1="${(bx0 + 16).toFixed(1)}" y1="${PH - 42}" x2="${(bx0 + 16).toFixed(1)}" y2="${PH - 34}" stroke="#9fd0ff" stroke-width="2"/>` +
+        `<line x1="${(bx0 + 16 + scale).toFixed(1)}" y1="${PH - 42}" x2="${(bx0 + 16 + scale).toFixed(1)}" y2="${PH - 34}" stroke="#9fd0ff" stroke-width="2"/>`);
       out.push(`<text x="${(ox + extU * scale / 2).toFixed(1)}" y="${(PAD + 14).toFixed(1)}"` +
-        ` text-anchor="middle" fill="#8b93a1" font-size="15" font-weight="600" letter-spacing="2">${esc(view.title)}</text>`);
-      for (const t of drawn)
-        out.push(`<polygon points="${t.pts}" fill="${t.f}"/>`);
+        ` text-anchor="middle" fill="#9fd0ff" font-size="15" font-weight="600" letter-spacing="2">${esc(view.title)}</text>`);
+      byClass.forEach((list, cls) => {
+        if (list.length > caps[cls]!) {                    // decimate honestly:
+          list.sort((p, q) => q.a - p.a);                  // the biggest faces win
+          list.length = caps[cls]!;
+        }
+        list.sort((p, q) => q.d - p.d);                    // painter: FAR first
+        const body = list.map(t => `<polygon points="${t.pts}"${
+          cls === 2 ? ` fill="${t.f}" fill-opacity="0.14" stroke="${t.f}" stroke-opacity="0.95" stroke-width="1.5"` : ''}/>`).join('');
+        const wrap = cls === 0
+          ? `<g fill="none" stroke="#8fc3ee" stroke-opacity="0.32" stroke-width="0.4">${body}</g>`
+          : cls === 1
+            ? `<g fill="#27507e" fill-opacity="0.30" stroke="#b9dcff" stroke-opacity="0.5" stroke-width="0.7">${body}</g>`
+            : `<g>${body}</g>`;
+        out.push(wrap);
+      });
       // cables — lit amber runs + endpoint dots + collected io tags
       const labelItems: { s: { x: number; y: number }; text: string; font: string }[] = [];
       for (const r of runs) {
@@ -3170,7 +3227,7 @@ void main() {
           ` y2="${(b2.y + b2.h / 2).toFixed(1)}" stroke="${color}" stroke-opacity="0.8" stroke-width="1"/>`);
         out.push(`<circle cx="${it.s.x.toFixed(1)}" cy="${it.s.y.toFixed(1)}" r="3" fill="${color}"/>`);
         out.push(`<rect x="${b2.x.toFixed(1)}" y="${b2.y.toFixed(1)}" width="${b2.w.toFixed(1)}"` +
-          ` height="${b2.h}" fill="#0b1220" fill-opacity="0.86" stroke="${color}" stroke-width="1" rx="3"/>`);
+          ` height="${b2.h}" fill="#0f2a48" fill-opacity="0.92" stroke="${color}" stroke-width="1" rx="3"/>`);
         out.push(`<text x="${(b2.x + 5).toFixed(1)}" y="${(b2.y + bh - 4.5).toFixed(1)}" fill="${color}"` +
           ` font-size="${it.font.startsWith('bold') ? 13 : 11}"${it.font.startsWith('bold') ? ' font-weight="600"' : ''}>${esc(it.text)}</text>`);
       });
