@@ -5667,3 +5667,37 @@ LOCAL SAVE of the kit is v0.41b while the workshop ships v1.1.0 (the
 viewer loads whichever copy the corpus resolution picks — a stale local
 save shows the older ChipOS). HUD controllers share the storage gap
 (hudpump does not persist yet — Backlog).
+
+## 28. v1.17.0 — THE CRAFT ANALYSIS + the CHIP SAT BENCH (we: "let our
+## editor automatically make a mermaid diagram of the xenoncode … vessel
+## PNGs … Io devices as system actors, the cockpit as a user … read like a
+## detailed analysis of craft … create and add and test ChipOS setup that
+## has satellite connections into its main comp for aerthnav and Tetris
+## apps, and make it work"; released 2026-11-01, entry landed same day)
+THE CRAFT ANALYSIS (tag v1.17.0): ⚗ top-bar button → AnalysisWindow (LAZY
+— the mermaid RUNTIME chunks with it, never the boot path). engine/xcgraph
+is the pure grammar — flow (entry points + @call graph + include edges),
+sequence (actor PILOT presses the seats, devices as FULLY RESOLVED system
+actors `alias · Type · io N`, files as participants, input_/output_
+arrows), class (files as classes with $vars/@functions) — a documented
+STATIC approximation; a $var device token resolves through the string
+literals ASSIGNED to it, which lands the ChipOS/Mario `var $device =
+"game-fx-*"` idiom. Engine.analysisShots paints the VESSEL PLATES (ortho
+topside + front: craft wireframe teal, actor roots solid amber, their
+cable runs redrawn amber from pipeNet.polys with io tags, labels
+projected) via swap-and-restore materials on a throwaway renderer. The
+flight section is gated on control surfaces (the Mario cabinet gets an
+honest 'Not applicable'), the BURIED-SURFACE census is called out as the
+drag suspect, and ⬇ HTML exports the whole reading as one document. Two
+catches documented in-code: stripNoise must KEEP quoted bodies (it blinded
+every io/include scan), and the SVG cache must be ADDITIVE (a `dead` gate
+lost every diagram to the StrictMode double-run). CHIP SAT BENCH 9000009098
+(make_satchip_test.py): the real Tetris + EarthNAV app computers reach the
+main-router through their OWN DataBridge satellite links; ChipOS installs
+them, and a page RELOAD must not reinstall — the storage persistence law
+proven through a third-party OS's memory (e2e chipossat.spec). CFD: the
+honest answer is docs/CFD-FEASIBILITY.md + REWRITE § P11 (no OpenFOAM in a
+static browser app; VLM and WebGPU-LBM costed as P11-S0/S1). Gates at the
+cut: vitest 1103 (xcgraph 7 new), tsc clean, build clean, app fast tier
+127/127, chipossat + analysis @slow legs green, production probe: 3 SVGs +
+2 plates + flight on Pages, zero pageerrors.
