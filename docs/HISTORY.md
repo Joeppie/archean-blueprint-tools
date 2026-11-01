@@ -5956,3 +5956,20 @@ polygons = 751 hull hairlines + 14.7k part hairlines + 12k inked actor
 faces + 3 grid sheets — the components read AS the drawing, the ship
 behind them. Pinned by analysis.spec (hullHair > 100, partLines > 10,
 actorInked ≥ 20, grids = 3).
+
+## 36. THE STORAGE WIPE — persistence gets its escape hatch (we: "I need a
+## way to clear storage vars, ChipOS is in a broken state"; 2026-11-02)
+The v1.16.27 persistence law is deliberately airtight — a disk survives
+every reload — which makes a WEDGED saved state permanent: ChipOS (and
+any program with a first-run wizard) can talk itself into a corner the
+player cannot leave. The law needed the one door it refuses to open by
+accident: the IDE's Vars-tab 🗑 (two-step arm → "sure?").
+pump.clearStorage(): persist the EMPTY map as THE disk (xenonstore's own
+line: an empty map is real state), tear the VM down with the persistence
+seam DISARMED (storeK nulled before the teardown — the ~2 s throttled
+save and the stop-persist would otherwise resurrect the broken cache over
+the wipe; XenonRun.reboot is no help, it SAVES storage before re-booting
+into it), then re-open: the fresh VM seeds {} and the program redoes its
+first-run like a brand-new craft. Pinned by storage.spec's fourth leg:
+count reaches 3, WIPE, one boot on the fresh disk answers 1, and a RELOAD
+answers 1 — the wipe persists, the old count cannot come back.

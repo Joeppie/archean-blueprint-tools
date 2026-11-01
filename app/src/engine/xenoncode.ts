@@ -2299,6 +2299,27 @@ export class XenonPump {
     this.syncDebugTrack();
     this.notify();
   }
+  /** THE STORAGE WIPE (v1.17.2, we: "I need a way to clear storage vars,
+   *  ChipOS is in a broken state"): persist the EMPTY map as THE disk
+   *  (xenonstore's own law: a wiped disk is real state), tear the VM down
+   *  with the persistence seam DISARMED (a ~2 s throttled save from the
+   *  old, broken cache must never resurrect over the wipe — storeK null
+   *  gates persistStore), then re-boot: the fresh VM seeds the empty map
+   *  and the program redoes its first-run exactly like a brand-new craft.
+   *  The Vars-tab 🗑 is the only caller — the escape hatch, deliberate. */
+  async clearStorage(): Promise<void> {
+    const key = this.storeK;
+    if (!key) return;
+    this.stopLoop();
+    this.sabResume();
+    this.storeK = null;                              // persistence OFF for the teardown
+    this.wrun?.dispose(); this.wrun = null;
+    this.run?.stop(); this.run = null;
+    await saveStore(key, {});
+    this.storeK = key;
+    const comp = this.comp;
+    if (comp) await this.open(comp);                 // run is null → the guard lets the rebuild through
+  }
   reboot() {
     const r = this.run;
     if (!r) return;

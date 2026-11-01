@@ -67,5 +67,24 @@ test.describe('@storage @xenon THE STORAGE PERSISTENCE LAW', () => {
       { timeout: 90_000 });
     await passGate(page);
     await expect.poll(() => busRow(page), { timeout: 60_000 }).toBeGreaterThanOrEqual(3);
+
+    // THE STORAGE WIPE (v1.17.2, we: "I need a way to clear storage vars,
+    // ChipOS is in a broken state"): the IDE's Vars-tab 🗑 persists the
+    // empty map and re-boots — the counter returns to a FRESH disk's 1…
+    await page.getByTestId('xenon-menu').click();
+    await page.locator('[data-testid^="xenon-comp-"]').first().click();
+    await expect(page.getByTestId('xenon-dialog')).toBeVisible();
+    await page.getByTestId('xenon-side-vars').click();
+    await page.getByTestId('xc-clear-storage').click();          // arm
+    await page.getByTestId('xc-clear-storage').click();          // confirm
+    await expect.poll(() => busRow(page), { timeout: 90_000 }).toBe(1);
+    await page.locator('[data-testid="xenon-close"]').first().click();
+    // …and the WIPE is itself persistent: a reload starts over from 1,
+    // the old count cannot resurrect.
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForFunction(() => !!(window as any).__ARCHEAN__?.xenon?.farm, null,
+      { timeout: 90_000 });
+    await passGate(page);
+    await expect.poll(() => busRow(page), { timeout: 90_000 }).toBe(1);
   });
 });

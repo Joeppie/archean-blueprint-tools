@@ -394,7 +394,13 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   and persists the live cache back (xc_storage_dump) on a ~2 s cycle
   throttle + stop/close/reload; IndexedDB per (craft, computer), typed
   opaque. Pins: fixture 9000009096 boot-counter + e2e/storage.spec (two
-  reloads, count ITERATES). HudController VMs do NOT persist yet (Backlog).
+  reloads, count ITERATES). THE STORAGE WIPE (v1.17.2, we: "I need a way
+  to clear storage vars, ChipOS is in a broken state"): the IDE's Vars-tab
+  🗑 (two-step arm) is the deliberate escape hatch — pump.clearStorage()
+  persists the EMPTY map as the disk, tears the VM down with the
+  persistence seam DISARMED (storeK null — the ~2 s throttle must never
+  resurrect the broken cache over the wipe) and re-boots on the fresh
+  disk. HudController VMs do NOT persist yet (Backlog).
 - THE WORK CENSUS (v1.17.1, we: "calculate how much work the computer does
   per iteration, and correspond to documentation Archean [has] on what is
   possible and allowed. Note huds and computers have different limits, huds

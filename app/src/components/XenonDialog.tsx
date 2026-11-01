@@ -83,6 +83,15 @@ export default function XenonDialog(p: {
   const [armedDel, setArmedDel] = useState(false);
   const [vals, setVals] = useState<Record<string, number>>({});
   const [side, setSide] = useState<'vars' | 'screens' | 'library' | 'world' | 'bus' | 'console' | 'autotest' | 'beacons' | 'problems'>('screens');
+  // THE STORAGE WIPE (v1.17.2, we: "I need a way to clear storage vars,
+  // ChipOS is in a broken state"): the persistence law has no back door
+  // by design — this is the deliberate escape. The Vars tab's 🗑 persists
+  // an EMPTY map as the disk (xenonstore: a wiped disk is real state) and
+  // RE-BOOTS the pump, whose fresh VM seeds the empty map — the program
+  // redoes its first-run exactly like a brand-new craft. Two-step arm,
+  // never a one-click nuke.
+  const [wipeArm, setWipeArm] = useState(false);
+  const wipeStorage = () => { setWipeArm(false); void pump.clearStorage(); };
   const [varQ, setVarQ] = useState('');
   const [scrQ, setScrQ] = useState('');
   // LIBRARY side tab (v1.13.25, we: "an index of all known library and
@@ -1194,6 +1203,18 @@ export default function XenonDialog(p: {
                   <input data-testid="xenon-screen-search" value={scrQ} placeholder="search screen names…"
                     onChange={e => setScrQ(e.target.value)}
                     className="w-full rounded border border-[#2b3a52] bg-[#0b0f18] px-2 py-1 text-[11px] outline-none" />
+                )}
+                {side === 'vars' && comp.craft && (
+                  <button data-testid="xc-clear-storage"
+                    className={`shrink-0 rounded border border-[#3a2434] px-1.5 py-0.5 text-[10px]
+                      ${wipeArm ? 'bg-[#4a1520] text-[#ff9d9d]' : 'text-[#8b93a1] hover:bg-[#182236]'}`}
+                    title={wipeArm
+                      ? 'click again to confirm — the disk is cleared and the program re-boots fresh'
+                      : 'clear this computer\'s persistent storage vars (fresh disk + re-boot) — '
+                        + 'the escape hatch when a saved program state is wedged (a wiped ChipOS setup…)'}
+                    onClick={() => (wipeArm ? wipeStorage() : setWipeArm(true))}>
+                    {wipeArm ? 'sure?' : '🗑 storage'}
+                  </button>
                 )}
                 {side === 'library' && (
                   <span className="shrink-0 text-[9px] text-[#5d6a7d]">search inside the Library tab</span>
