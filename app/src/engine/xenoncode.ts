@@ -10,7 +10,7 @@
 // needs a browser.
 import type { Blueprint, BlueprintComponent } from './format';
 import { flatToTopMap, flatEndpointTop } from './flat';
-import { loadStore, saveStore, storageKey, type XenonStore } from './xenonstore';
+import { clearCraftStores, loadStore, saveStore, storageKey, type XenonStore } from './xenonstore';
 import { atlasJsonPaths } from './models';
 import { CRAFTER_BUILTIN } from './crafterbuiltin';
 import { blockAt, functionAt, includeOrder, projectBlocks, projectFunctions, type XCBlock } from 'xenoncore';
@@ -2986,6 +2986,18 @@ pumpFor(comp: XenonComputer): XenonPump {
     return booted;
   }
   closeAll(): void { for (const p of [...this.pumps]) p.close(); }
+  /** THE CRAFT-WIDE STORAGE WIPE (v1.17.2, we: "I need to be able to
+   *  RESET/CLEAR storage vars, prioritize. Available in computers, and
+   *  for entire craft"): every RUNNING pump of this craft re-boots on an
+   *  empty disk (pump.clearStorage tears down with persistence disarmed,
+   *  so no ~2 s throttle resurrects a broken cache), then EVERY remaining
+   *  `${craft}#ci` record (computers not running in the farm) is dropped.
+   *  The game-side saves are untouched — this is OUR persistence. */
+  async clearCraftStorage(craft: string): Promise<void> {
+    for (const p of [...this.pumps])
+      if (p.comp?.craft === craft) await p.clearStorage();
+    await clearCraftStores(craft);
+  }
 }
 
 export const xenonFarm = new Farm();

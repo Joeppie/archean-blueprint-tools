@@ -2216,6 +2216,17 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         onPlayerHud={openPlayerHud} onPlayerHudFiles={loadPlayerHudFiles}
         onBeacons={() => setBeaconsOpen(o => !o)} beaconsOpen={beaconsOpen}
         onXenon={openCodeFor}
+        onClearStorage={craft ? () => {
+          // THE CRAFT-WIDE STORAGE WIPE (v1.17.2, we: "I need to be able
+          // to RESET/CLEAR storage vars … Available in computers, and for
+          // entire craft"): every pump of this craft re-boots on an empty
+          // disk, every record drops; game saves untouched.
+          if (!window.confirm(
+            'Clear ALL storage vars of every programmable computer on this craft?\n\n'
+            + 'Running programs re-boot on a FRESH disk and re-run their first-run setup. '
+            + 'This clears the EDITOR-side persistence only — game saves are not touched.')) return;
+          void xenonFarm.clearCraftStorage(craft);
+        } : undefined}
         hasScreens={hasScreens} screensOpen={screensOpen}
         onScreens={() => setScreensOpen(o => !o)}
         hasComputers={xenonComps.length > 0}

@@ -98,4 +98,32 @@ test.describe('@storage @xenon THE STORAGE PERSISTENCE LAW', () => {
     await passGate(page);
     await expect.poll(() => busRow(page), { timeout: 90_000 }).toBe(1);
   });
+
+  test('THE CRAFT-WIDE WIPE: the Xenon ▾ row clears every disk on the craft', async ({ page, isMobile }) => {
+    test.skip(isMobile, 'desktop menu density (wipe family)');
+    test.setTimeout(240_000);
+    page.on('dialog', d => void d.accept());           // the confirm()
+    await page.addInitScript(() => localStorage.setItem('archean-app-live', 'on'));
+    await page.goto(`/?craft=${CRAFT}`);
+    await page.waitForFunction(() => !!(window as any).__ARCHEAN__?.xenon?.farm, null,
+      { timeout: 90_000 });
+    await passGate(page);
+    await expect.poll(() => busRow(page), { timeout: 60_000 }).toBeGreaterThanOrEqual(1);
+    // let it accumulate two boots' worth of count
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForFunction(() => !!(window as any).__ARCHEAN__?.xenon?.farm, null,
+      { timeout: 90_000 });
+    await passGate(page);
+    await expect.poll(() => busRow(page), { timeout: 60_000 }).toBeGreaterThanOrEqual(2);
+    // the Xenon ▾ row wipes the whole craft
+    await page.getByTestId('xenon-menu').click();
+    await page.getByTestId('xenon-clear-all').click();
+    await expect.poll(() => busRow(page), { timeout: 90_000 }).toBe(1);
+    // the wipe persists: a reload starts over from 1
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForFunction(() => !!(window as any).__ARCHEAN__?.xenon?.farm, null,
+      { timeout: 90_000 });
+    await passGate(page);
+    await expect.poll(() => busRow(page), { timeout: 90_000 }).toBe(1);
+  });
 });

@@ -48,6 +48,11 @@ interface Props {
    *  the menu only appears when the open blueprint has MiniComputers */
   xenonComps?: { ci: number; alias: string; program: string; files: number; builtin?: boolean }[];
   onXenon?: (ci: number) => void;
+  /** THE STORAGE WIPE, craft-wide (v1.17.2, we: "RESET/CLEAR storage vars
+   *  … Available in computers, and for entire craft"): every computer's
+   *  persistent disk on this craft is dropped and running VMs re-boot
+   *  fresh (the per-computer 🗑 rides the IDE's Vars tab) */
+  onClearStorage?: () => void;
   /** v1.14.0 P9 slice A: the craft's HUD blocks (HudController .xc files) */
   xenonHuds?: { ci: number; alias: string; files: number }[];
   /** PLAYER HUDs (v1.17.0, we: "make it possible to load a player HUD
@@ -276,6 +281,16 @@ export default function TopBar(p: Props) {
                 label={`⌨ ${c.alias || c.program}${c.builtin ? ' ·built-in' : ''}`} hint={`${c.files} .xc`}
                 onClick={() => { close(); p.onXenon?.(c.ci); }} />
             ))}
+            {/* THE CRAFT-WIDE STORAGE WIPE (v1.17.2, we: "I need to be
+                able to RESET/CLEAR storage vars … Available in computers,
+                and for entire craft"): the per-computer 🗑 is the IDE's
+                Vars tab; this row is the whole-craft reset (a wedged
+                ChipOS fleet is the use case). Confirm rides the Editor. */}
+            {p.onClearStorage && (
+              <Item testid="xenon-clear-all"
+                label="🗑 Clear ALL storage vars (this craft)" hint="first-run reset"
+                onClick={() => { close(); p.onClearStorage?.(); }} />
+            )}
             {/* HUD BLOCKS (v1.14.0, we: "allow us to edit the code for at
                 least HUDs that are contained within a HUD block") */}
             {(p.xenonHuds?.length ?? 0) > 0 && (<>

@@ -68,3 +68,30 @@ export async function saveStore(key: string, store: XenonStore): Promise<void> {
   mem.set(key, store);
   await idb('readwrite', s => s.put({ v: store }, key));
 }
+
+/** THE CRAFT-WIDE WIPE (v1.17.2, we: "I need to be able to RESET/CLEAR
+ *  storage vars … Available in computers, and for entire craft"): drop
+ *  EVERY `${craft}#ci` record — the memory map and the IndexedDB keys.
+ *  Returns the number of IDB keys removed. */
+export async function clearCraftStores(craft: string): Promise<number> {
+  const pre = `${craft}#`;
+  for (const k of [...mem.keys()]) if (k.startsWith(pre)) mem.delete(k);
+  dbP ??= openDb();
+  const db = await dbP;
+  if (!db) { dbP = null; return 0; }
+  return new Promise(res => {
+    try {
+      const tx = db.transaction(OS, 'readwrite');
+      const st = tx.objectStore(OS);
+      const rq = st.getAllKeys();
+      rq.onsuccess = () => {
+        const keys = (rq.result as IDBValidKey[])
+          .filter(k => typeof k === 'string' && (k as string).startsWith(pre));
+        for (const k of keys) st.delete(k);
+        res(keys.length);
+      };
+      rq.onerror = () => res(0);
+      tx.onabort = () => res(0);
+    } catch { res(0); }
+  });
+}
