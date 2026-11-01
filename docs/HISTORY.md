@@ -5852,3 +5852,25 @@ projected extent to ~82 % of the frame at ONE isotropic px/m (top 89×82,
 front 90×45 — a wide-flat plane reading flat from the front is honest,
 stretching it would lie); both plates share the one scale, like a
 three-view engineering drawing.
+
+## 31. THE SEAT TOKEN — Mario couldn't start (we: "Super Mario won't launch
+## why? Pressing space doesn't start it using phone pixel 7"; 2026-11-02)
+The Mario cabinet 3820116990 gates EVERY input on $seated, and $seated on
+input_text("gamer-chair", 0) != "" — the seated player's identity TOKEN
+(the in-game seat reports the player username; the shim's user() is
+'builder'). Our worldsim fed the seat's 18 numeric channels but never a
+TEXT token on ch0, so the game correctly decided "nobody is sitting" and
+zeroed space/jump on every profile — nothing wrong with the game, the
+cockpit, or turbo (all three were probed innocent: the VM ran at 4× with
+the screens alive, pad taps reached the seat device store, the keyboard
+law held; a QUICK keyboard.press can also race the per-cycle coalescing —
+probes must HOLD keys; and the title ignores inputs until its own
+$assetsready sprite cache finishes — a second red herring the probes had
+to peel). FIX: stepWorldSim feeds PILOT_USER as ch0 TEXT beside the
+using-channel (setInputT, alias/port resolution shared with the beacon
+feed). Verified on the live craft: the light bus flips (the game's own
+1-$seated lamp) and ONE phone-real tap on the thumb-sized space keycap
+takes $mode 0→1 — the game STARTS; desktop keyboard too. Pinned by
+mariostart.spec (@device @slow, phone context, waits the GAME's ready
+state, real pointer sequence); the engine XC_ABI was found stale at 19
+while the shipped wasm carried 20 — corrected in the same breath.

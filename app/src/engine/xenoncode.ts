@@ -1446,6 +1446,10 @@ export const PILOT_KEYS: Record<string, Partial<Record<PilotKey, number>>> = {
 /** Every PILOT_KEYS function word the table defines (worldsim binding
  *  filter; pure, vitest-pinned). */
 export const pilotKeyWords = (): string[] => Object.keys(PILOT_KEYS);
+/** The seated-player identity token (mirrors the shim's user() builtin —
+ *  xc_host returns 'builder'; the seat publishes it as ch0 TEXT so games
+ *  can identify the player — THE SEAT TOKEN above). */
+export const PILOT_USER = 'builder';
 
 export interface XenonSurface {
   key: string; w: number; h: number;
@@ -1961,6 +1965,14 @@ export class XenonPump {
       if (ov !== undefined) v = ov;
       r.value = v;
       run.setInput(bind.io, bind.ch, v);
+      // THE SEAT TOKEN (v1.17.1, the Mario cabinet 3820116990: "Pressing
+      // space doesn't start it"): the game gates ALL inputs on
+      // input_text(seat, 0) != "" — the seated player's identity token,
+      // which the in-game seat reports as the player username (the shim's
+      // user() = 'builder'). Without it $seated stays 0 and every key is
+      // ignored — the game was RIGHT, our seat said "nobody here".
+      if (bind.type === 'PilotSeat' && bind.ch === 0)
+        run.setInputT(String(bind.io), 0, v > 0 ? PILOT_USER : '');
       run.worldsimSync(name, v);
       // v1.16.15 SEAT CHANNEL ON THE WIRE (we: "im sending to an aileron,
       // but I dont see effect"): a PilotSeat publishes its 18 channels on
@@ -2764,7 +2776,7 @@ export class XenonPump {
  *  measures 0.2 changing surfaces per cycle of 117);
  *  14 = xc_screen_px/py/haspos (the composited HUD SCREEN window);
  *  13 = $panel.set_size(w,h) + width/height getters (ABI 13; wiki hud.md law). */
-export const XC_ABI = 19;
+export const XC_ABI = 20;
 
 // ---------------------------------------------------------------------------
 // COMPUTERFARM — the craft's co-running pumps + the SHARED io bus
