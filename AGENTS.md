@@ -395,6 +395,24 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   throttle + stop/close/reload; IndexedDB per (craft, computer), typed
   opaque. Pins: fixture 9000009096 boot-counter + e2e/storage.spec (two
   reloads, count ITERATES). HudController VMs do NOT persist yet (Backlog).
+- THE WORK CENSUS (v1.17.1, we: "calculate how much work the computer does
+  per iteration, and correspond to documentation Archean [has] on what is
+  possible and allowed. Note huds and computers have different limits, huds
+  run on client and have virtually no limitations"): the shim reports
+  `xc_cycle_instructions()` — the FORK'S OWN per-cycle IPC penalty counter
+  (builtins cost their arg count, arrays their size: the number the in-game
+  BIOS shows). XenonCode counts only while a cap is ENABLED, so the shim
+  boots with capability.ipc = u32-max = "server set no Max IPC" (counted,
+  never clamped — xenoncore v0.3.5). Pumps + the HUD pump expose workEma/
+  workSamples; the ⚗ analysis prints a Compute budget card per program and
+  quotes THE DOCUMENTED LAWS VERBATIM (wiki Computer.md: Max IPC = SERVER
+  config, crash-on-exceed; 30 W idle → 500 W by the utilisation ratio;
+  wiki hud.md: HUDs entirely CLIENT-managed — no server tick, no Max IPC,
+  numbers informational). estWatts() = the documented linear ratio. Mario
+  live: ≈10.7k units/cycle. Pins: xcgraph.test (laws + estWatts), analysis
+  .spec census leg; ReportFlight now carries the FULL flight stat set
+  (planform S/span/c̄/AR, CLα, CLmax, CD0, K, trims, q/ρ, fin, the polar)
+  in dialog + export ("other flight stats can go into there too").
 - THE BOOT-TURBO LAW (v1.17.1, we: "Super Mario quick start play should use
   turbo by default, url param"): `?turbo=1` boots every pump ×4, `?turbo=0`
   FORBIDS it; no param → ARCADE_TURBO_CRAFTS (mario 3820116990, invaders

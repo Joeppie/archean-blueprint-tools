@@ -19,7 +19,9 @@ import { useEffect, useRef, useState } from 'react';
 import FloatingWindow from './FloatingWindow';
 import type { Blueprint } from '../engine/format';
 import type { Engine } from '../engine/scene';
-import { xenonComputers, type XenonComputer } from '../engine/xenoncode';
+import { xenonComputers, xenonFarm, xenonHudControllers, type XenonComputer } from '../engine/xenoncode';
+import { hudPump } from '../engine/hudpump';
+import { GAME_HUD_LAW, GAME_IPC_LAW, GAME_POWER_LAW, type ReportCompute } from '../engine/xcgraph';
 import { peekManifest } from '../engine/models';
 import { flightLab } from '../engine/flightlab';
 import { buildAnalysisHtml, codeRundown, craftIsFlyable, svgTextOnly, xcDiagrams,
@@ -65,7 +67,6 @@ type MermaidLike = { initialize: (o: Record<string, unknown>) => void;
 
 export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
   engine: Engine | null; close: () => void }) {
-  const [ci, setCi] = useState<number | null>(null);
   const [svgs, setSvgs] = useState<Record<string, string>>({});
   const [errs, setErrs] = useState<Record<string, string>>({});
   const [plates, setPlates] = useState<Record<number, { top: string; front: string }>>({});
@@ -76,10 +77,21 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
   const [mm, setMm] = useState<MermaidLike | null>(null);
   const [shotErr, setShotErr] = useState('');
   const comps: XenonComputer[] = p.bp ? xenonComputers(p.bp) : [];
-  const cur = comps.find(c => c.ci === (ci ?? comps[0]?.ci)) ?? comps[0] ?? null;
+  // v1.17.1: HUDs join the analysis — same grammar, DIFFERENT limits law
+  // (client runtime, no server budget — wiki hud.md; we: "huds run on
+  // client and have virtually no limitations").
+  const huds = p.bp ? xenonHudControllers(p.bp) : [];
+  type Sel = { kind: 'cpu' | 'hud'; ci: number };
+  const [sel, setSel] = useState<Sel>({ kind: 'cpu', ci: -1 });
+  const curKey = sel.ci >= 0 ? sel : { kind: 'cpu' as const, ci: comps[0]?.ci ?? huds[0]?.ci ?? -1 };
+  const curCpu = curKey.kind === 'cpu' ? comps.find(c => c.ci === curKey.ci) ?? comps[0] ?? null : null;
+  const curHud = curKey.kind === 'hud' ? huds.find(h => h.ci === curKey.ci) ?? null
+    : curKey.kind === 'cpu' && !curCpu ? huds[0] ?? null : null;
+  const cur = curCpu ?? curHud;
+  const curIsHud = !curCpu && !!curHud;
   const diagrams: XcDiagram[] = cur
     ? xcDiagrams({ alias: cur.alias || `#${cur.ci}`, ci: cur.ci,
-      files: cur.files.map(f => ({ name: f.name, code: f.code })), devices: cur.devices })
+      files: cur.files.map(f => ({ name: f.name, code: f.code })), devices: curIsHud ? [] : curCpu!.devices })
     : [];
 
   useEffect(() => {
@@ -135,14 +147,14 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
   // the vessel plate for the CURRENT computer: actors = its cabled devices
   useEffect(() => {
     const eng = p.engine;
-    if (!eng || !cur || plates[cur.ci]) return;
-    const actors = cur.devices
+    if (!eng || !curCpu || plates[curCpu.ci]) return;
+    const actors = curCpu.devices
       .filter(d => d.ci !== undefined && d.alias)
       .map(d => ({ ci: d.ci!, tag: `${d.alias} · io ${d.io}` }));
-    eng.analysisShots({ actors }).then(ph => setPlates(x => ({ ...x, [cur.ci]: ph })))
+    eng.analysisShots({ actors }).then(ph => setPlates(x => ({ ...x, [curCpu!.ci]: ph })))
       .catch(e => setShotErr(String(e).slice(0, 120)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [p.engine, cur?.ci]);
+  }, [p.engine, curCpu?.ci]);
 
   // THE MANIFEST TIMING (models load async): the flight section recomputes
   // until the manifest lands, then freezes.
@@ -156,18 +168,29 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
   const flight = flyable ? flightLab(p.bp, peekManifest()) : null;
   const buriedNames = (flight?.authority.rows ?? []).filter(r => r.buried)
     .map(r => `${r.type} #${r.ci}`);
-  const reportSections: ReportSection[] = comps.map(c => {
-    const ds = xcDiagrams({ alias: c.alias || `#${c.ci}`, ci: c.ci,
-      files: c.files.map(f => ({ name: f.name, code: f.code })), devices: c.devices });
+  const reportSections: ReportSection[] = [
+    ...comps.map(c => reportSectionFor(c.ci, false, c.alias || `#${c.ci}`,
+      c.files.map(f => ({ name: f.name, code: f.code })), c.devices)),
+    ...huds.map(h => reportSectionFor(h.ci, true, h.alias || `#${h.ci}`,
+      h.files.map(f => ({ name: f.name, code: f.code })), [])),
+  ];
+  function reportSectionFor(cid: number, isHud: boolean, alias: string,
+    files: { name: string; code: string }[], devices: XenonComputer['devices']): ReportSection {
+    const ds = xcDiagrams({ alias, ci: cid, files, devices });
+    const pump = isHud ? null : xenonFarm.pumps.find(q => q.comp?.ci === cid);
     return {
-      compAlias: c.alias || `#${c.ci}`,
-      plateTop: plates[c.ci]?.top, plateFront: plates[c.ci]?.front,
+      compAlias: (isHud ? '📟 ' : '') + alias,
+      plateTop: isHud ? undefined : plates[cid]?.top, plateFront: isHud ? undefined : plates[cid]?.front,
       diagrams: ds,
-      svgs: ds.map(d => svgs[`${c.ci}|${d.kind}`] ?? null),
-      rundown: codeRundown({ alias: c.alias || `#${c.ci}`, ci: c.ci,
-        files: c.files.map(f => ({ name: f.name, code: f.code })), devices: c.devices }),
+      svgs: ds.map(d => svgs[`${cid}|${d.kind}`] ?? null),
+      rundown: codeRundown({ alias, ci: cid, files, devices }),
+      compute: isHud
+        ? { alias, isHud: true, workEma: hudPump.workEma, samples: hudPump.workSamples, live: hudPump.running }
+        : { alias, isHud: false, workEma: pump?.workEma ?? null, samples: pump?.workSamples ?? 0,
+            live: pump?.status === 'running' },
     };
-  });
+  }
+
 
   const exportHtml = () => {
     const html = buildAnalysisHtml({
@@ -178,6 +201,14 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
         pitchVerdict: flight.pitchVerdict, yawVerdict: flight.yawVerdict,
         rows: flight.authority.rows.map(r => ({ axis: r.axis, part: `${r.type} #${r.ci}`,
           authority: r.nm, buried: r.buried })),
+        altitude: flight.altitude, rho: flight.rho, q: flight.q, weight: flight.weight,
+        planform: { S: flight.planform.S, span: flight.planform.span, chord: flight.planform.chord,
+          AR: flight.planform.AR, zAc: flight.planform.zAc },
+        clAlpha: flight.clAlpha, clMax: flight.clMax, cd0: flight.cd0, kInd: flight.kInd,
+        ldTrim: flight.ldTrim, trimAlphaDeg: flight.trimAlphaDeg,
+        trimElevatorDeg: flight.trimElevatorDeg, neutralZ: flight.neutralZ,
+        frontal: flight.frontal, fin: { area: flight.finArea, lever: flight.finLever },
+        curve: flight.curve.map(c => ({ alphaDeg: c.alphaDeg, cl: c.cl, cd: c.cd })),
       } : null,
     });
     const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
@@ -204,13 +235,20 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
         data-testid="analysis-body">
         {comps.length === 0 && <div className="text-[#8b93a1] text-[12px]">
           No programmable computer on this craft — nothing to diagram.</div>}
-        {comps.length > 1 && (
+        {(comps.length + huds.length) > 1 && (
           <div className="flex flex-wrap gap-1">
             {comps.map(c => (
-              <button key={c.ci} data-testid={`analysis-comp-${c.ci}`}
-                className={`ksp-btn px-2 py-1 text-[11px] ${cur?.ci === c.ci
+              <button key={`c${c.ci}`} data-testid={`analysis-comp-${c.ci}`}
+                className={`ksp-btn px-2 py-1 text-[11px] ${cur?.ci === c.ci && !curIsHud
                   ? 'text-[#7dffcf] border-[#7dffcf]/50' : ''}`}
-                onClick={() => setCi(c.ci)}>{c.alias || `#${c.ci}`}</button>
+                onClick={() => setSel({ kind: 'cpu', ci: c.ci })}>{c.alias || `#${c.ci}`}</button>
+            ))}
+            {huds.map(h => (
+              <button key={`h${h.ci}`} data-testid={`analysis-hud-${h.ci}`}
+                className={`ksp-btn px-2 py-1 text-[11px] ${cur?.ci === h.ci && curIsHud
+                  ? 'text-[#ffd479] border-[#ffd479]/50' : ''}`}
+                title="HUD program — client runtime, NO server compute budget (wiki hud.md)"
+                onClick={() => setSel({ kind: 'hud', ci: h.ci })}>📟 {h.alias || `#${h.ci}`}</button>
             ))}
           </div>
         )}
@@ -232,8 +270,30 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
                   ))}
               </div>
             ); })()}
+            {(() => {
+              const pump = curIsHud ? null : xenonFarm.pumps.find(q => q.comp?.ci === cur.ci);
+              const compute: ReportCompute = curIsHud
+                ? { alias: cur.alias || `#${cur.ci}`, isHud: true,
+                    workEma: hudPump.workEma, samples: hudPump.workSamples, live: hudPump.running }
+                : { alias: cur.alias || `#${cur.ci}`, isHud: false,
+                    workEma: pump?.workEma ?? null, samples: pump?.workSamples ?? 0,
+                    live: pump?.status === 'running' };
+              return (
+                <section data-testid="analysis-compute" className="max-w-[900px] rounded border
+                  border-[#22314a] bg-[#0e1626] p-2 text-[11px] leading-relaxed text-[#c8d4e4]">
+                  <span className="font-medium text-[#e8edf4]">Compute budget</span> — measured
+                  work{' '}
+                  <b className="tabular-nums">{compute.workEma === null
+                    ? 'n/a (engine predates the census seam)'
+                    : `${compute.workEma.toFixed(0)} IPC units/cycle`}
+                  </b>{compute.workEma !== null && ` (EMA over ${compute.samples} cycles${compute.live ? ', running' : ''})`}
+                  <div className="mt-1 text-[#8b93a1]">
+                    {curIsHud ? GAME_HUD_LAW : `${GAME_IPC_LAW} · ${GAME_POWER_LAW}`}
+                  </div>
+                </section>);
+            })()}
             {(() => { const rd = codeRundown({ alias: cur.alias || `#${cur.ci}`, ci: cur.ci,
-              files: cur.files.map(f => ({ name: f.name, code: f.code })), devices: cur.devices });
+              files: cur.files.map(f => ({ name: f.name, code: f.code })), devices: curIsHud ? [] : curCpu!.devices });
               return (
                 <section data-testid="analysis-rundown" className="max-w-[900px]">
                   <h3 className="m-0 mb-1 text-[12px] font-medium text-[#e8edf4]">Code structure</h3>
@@ -289,6 +349,15 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
                   mass {flight.mass.toFixed(0)} kg · stall {flight.stallSpeed.toFixed(1)} m/s ·
                   L/D max {flight.ldMax.toFixed(1)} · static margin {flight.staticMarginPct.toFixed(1)}
                   % MAC → pitch <b>{flight.pitchVerdict}</b>, yaw <b>{flight.yawVerdict}</b>.
+                  <div className="mt-0.5 text-[#a7b6c9]">
+                    S {flight.planform.S.toFixed(2)} m² · span {flight.planform.span.toFixed(2)} m ·
+                    c̄ {flight.planform.chord.toFixed(2)} m · AR {flight.planform.AR.toFixed(2)} ·
+                    C<sub>Lα</sub> {flight.clAlpha.toFixed(2)}/rad · C<sub>Lmax</sub> {flight.clMax.toFixed(2)} ·
+                    C<sub>D0</sub> {flight.cd0.toFixed(4)} · K {flight.kInd.toFixed(3)} ·
+                    trim {(flight.trimAlphaDeg ?? 0).toFixed(1)}° AoA
+                    {flight.trimElevatorDeg !== null ? `, elevator ${flight.trimElevatorDeg.toFixed(1)}°` : ''} ·
+                    q {flight.q.toFixed(0)} Pa @ {flight.altitude} m
+                  </div>
                   <div className="mt-1 text-[11px] text-[#8b93a1]">Closed-form shape-field analysis —
                     NOT CFD: no Navier–Stokes field solve runs in the editor (docs/CFD-FEASIBILITY.md);
                     vortex/shedding needs an external solver.</div>

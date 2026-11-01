@@ -66,6 +66,10 @@ class HudPump {
   running = false;
   error = '';
   cycles = 0;
+  /** ⚗ WORK CENSUS (v1.17.1): the HUD VM's per-cycle work EMA. INFORMATIONAL
+   *  by law — HUDs are client-run and carry NO server budget (wiki hud.md). */
+  workEma: number | null = null;
+  workSamples = 0;
   prints: string[] = [];
   surfaces: HudSurface[] = [];
   version = 0;
@@ -215,6 +219,13 @@ class HudPump {
     this.vars = run.vars();
     if (run.error) { this.error = run.error; this.stop(); }
     this.cycles++;
+    {
+      const cw = this.run?.work ?? null;
+      if (cw !== null) {
+        this.workEma = this.workEma === null ? cw : this.workEma * 0.85 + cw * 0.15;
+        this.workSamples++;
+      }
+    }
     this.notify();
   }
 

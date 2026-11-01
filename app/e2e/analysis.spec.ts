@@ -86,4 +86,30 @@ test.describe('@analysis @slow THE CRAFT ANALYSIS', () => {
     await expect(page.getByTestId('analysis-flight')).toContainText(/Not applicable/i);
     expect(await page.getByTestId('analysis-flight-report').count()).toBe(0);
   });
+
+  test('the WORK CENSUS: compute card per program, HUDs as first-class tabs @ui', async ({ page, isMobile }) => {
+    test.skip(isMobile, 'desktop dialog density (analysis family)');
+    test.setTimeout(300_000);
+    // the ChipOS devkit-style bench: computers AND a HudController
+    await page.goto('/?craft=3326372833');
+    await page.waitForFunction(() => !!(window as any).__ARCHEAN__?.engine?.blueprint,
+      null, { timeout: 150_000 });
+    await page.getByTestId('analysis-btn').click();
+    await expect(page.getByTestId('analysis-dock')).toBeVisible();
+    // the census card answers with the game-unit work or the honest n/a
+    await expect(page.getByTestId('analysis-compute')).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId('analysis-compute')).toContainText(
+      /IPC units\/cycle|n\/a \(engine predates/);
+    // the live farm (live=off here) means the card may be at 0 samples —
+    // the LAW text must still be quoted (Max IPC = server config, 30→500 W)
+    await expect(page.getByTestId('analysis-compute')).toContainText(/Max IPC|wiki Computer/);
+    // a HUD joins as a tab and carries the CLIENT law, not the server cap
+    const hudTab = page.locator('[data-testid^="analysis-hud-"]').first();
+    if (await hudTab.count() > 0) {
+      await hudTab.click();
+      await expect(page.getByTestId('analysis-compute')).toContainText(/client/i,
+        { timeout: 30_000 });
+      await expect(page.getByTestId('analysis-sequence')).toBeVisible();
+    }
+  });
 });

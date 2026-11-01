@@ -5758,3 +5758,23 @@ $device SWITCH call-out (a token resolving to several devices is named),
 device fan-in table — in the dialog and the exported HTML; buildAnalysisHtml
 gained a TOC + rundown tables. 13 xcgraph pins, analysis.spec asserts
 purity+zoom+rundown, unit tier 1106.
+
+§ 30 continued (same release): THE WORK CENSUS (we: "calculate how much work
+the computer does per iteration, and correspond to documentation Archean [has]
+on what is possible and allowed; huds and computers have different limits,
+huds run on client and have virtually no limitations"): xc_cycle_instructions
+(xenoncore ABI 20/v0.3.4) reads the FORK'S OWN per-cycle IPC penalty counter —
+the BIOS number the server's Max IPC clamps; v0.3.5 discovered the counter
+only counts while a cap is enabled (xc reads of ipc=0 were all-zero) and boots
+with capability.ipc = u32-max = "no server limit": counted, never clamped.
+workEma/workSamples on every pump + the HUD pump; ⚗ Compute budget cards quote
+the DOCUMENTED laws verbatim (wiki Computer.md: Max IPC = server config file,
+exceed = virtual crash; power 30 W idle → 500 W by the work/Max-IPC ratio —
+estWatts() is that linear law; wiki hud.md: HUDs entirely client-managed →
+NO server tick, NO Max IPC, informational only). Mario measured live:
+≈10,700 penalty units/cycle at turbo. The flight section now carries the
+FULL FLIGHT LAB set (planform/CLα/CLmax/CD0/K/L-D trim/trim AoA+elevator/
+frontal/q/ρ/fin/polar table) in dialog + export (we: "other flight stats can
+go into there too"). HUD programs join the analysis as 📟 tabs with the
+CLIENT law. Engine chain: xenoncore v0.3.4/v0.3.5 tags, app dep + assets +
+XC_ABI 20 in one landing; census probe live-verified (turbo:true, ema≈10.7k).

@@ -48,6 +48,9 @@ type Mod = {
   _xc_write_file(a: number, b: number): void;
   _xc_boot(): number;
   _xc_cycle(): number;
+  /** ABI 20 (⚗ WORK CENSUS): the penalty-unit work the VM did LAST cycle —
+   *  the game's own IPC metric (the BIOS number, the server Max IPC clamp). */
+  _xc_cycle_instructions?: () => number;
   _xc_events(): number;
   _xc_error(): number;
   _xc_set_input(io: number, ch: number, v: number): void;
@@ -693,6 +696,9 @@ export interface XenonEvent {
   i?: number; tx?: string; rx?: string; d?: string;
 }
 export class XenonRun {
+  /** ABI 20 ⚗ WORK CENSUS: penalty-unit work of the LAST cycle (null =
+   *  older wasm). The game's own metric (BIOS number / server Max IPC). */
+  work: number | null = null;
   private mod: Mod;
   running = false;
   error = '';
@@ -805,6 +811,10 @@ export class XenonRun {
     if (!this.running) return { evs: [], pausedAt: null };
     const m = this.mod;
     const rc = m._xc_cycle();
+    // ABI 20 work census: the counter zeroes at cycle start, so AFTER the
+    // call it is exactly the work of THIS cycle (null on older wasm).
+    this.work = typeof m._xc_cycle_instructions === 'function'
+      ? m._xc_cycle_instructions() : null;
     if (rc === 1) { this.error = m.UTF8ToString(m._xc_error()); this.running = false; return { evs: [], pausedAt: null }; }
     const evs = JSON.parse(m.UTF8ToString(m._xc_events()));
     if (rc === 2 && typeof m._xc_pause_file === 'function' && typeof m._xc_pause_line === 'function')
@@ -1156,6 +1166,8 @@ export function sabSupported(): boolean {
 }
 
 export class XenonWorkerRun {
+  /** ABI 20 ⚗ WORK CENSUS (the worker ships it on every cycle answer). */
+  work: number | null = null;
   running = false;
   error = '';
   /** The debugger protocol array (xc_host.cpp's EM_JS hook is the other end) */
@@ -1193,7 +1205,7 @@ export class XenonWorkerRun {
     worker.onmessage = (e: MessageEvent) => {
       const d = e.data as CycleData & {
         t: string; abi?: number; ok?: boolean; errs?: string[]; sfiles?: string[];
-        n?: number; store?: XenonStore; error?: string;
+        n?: number; store?: XenonStore; w?: number | null; error?: string;
       };
       if (d.t === 'open') {
         this.abi_ = d.abi ?? 0;
@@ -1220,6 +1232,7 @@ export class XenonWorkerRun {
         return;
       }
       if (d.t === 'cycle') {
+        this.work = typeof d.w === 'number' ? d.w : null;
         this.error = d.error ?? '';
         if (this.error) this.running = false;
         this.lastVars = parseVarsJson(d.vars ?? '[]');
@@ -2473,6 +2486,9 @@ export class XenonPump {
    *  (a fresh pump runs 1×); works in both pump modes (worker mode is
    *  rate-limited by its inFlight gate, so it lands ≈ 4×, never less). */
   turbo = false;
+  /** ⚗ WORK CENSUS (v1.17.1): EMA + samples of the per-cycle work. */
+  workEma: number | null = null;
+  workSamples = 0;
   setTurbo(on: boolean) {
     if (this.turbo === on) return;
     this.turbo = on;
@@ -2588,6 +2604,12 @@ export class XenonPump {
       }
     }
     this.cycles++;
+    // ⚗ WORK CENSUS (v1.17.1): EMA of the game-unit work per cycle.
+    const cw = this.wrun ? this.wrun.work : (this.run as XenonRun | null)?.work ?? null;
+    if (cw !== null) {
+      this.workEma = this.workEma === null ? cw : this.workEma * 0.85 + cw * 0.15;
+      this.workSamples++;
+    }
     // storage persistence: every ~2 s of run (25 Hz) — the disk is then
     // at most 2 s stale for a hard teardown (close/stop also persist)
     if (this.storeK && this.cycles % 50 === 0) this.persistStore();

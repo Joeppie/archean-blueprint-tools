@@ -38,6 +38,8 @@ type Msg = {
   key?: string; x?: number; y?: number; d?: number;
   lines?: [string, number][];
   n?: number;
+  /** ABI 20 work census (cycle answers) */
+  w?: number | null;
   /** XENON-DEBUG v3: on = tracking gate (record + ship pair/depth streams) */
   on?: boolean;
 };
@@ -303,6 +305,10 @@ ctx.onmessage = (e: MessageEvent<Msg>) => {
       const d = cycleData(evsJson);
       d.t = 'cycle';
       d.n = n;
+      // ABI 20 ⚗ WORK CENSUS: the counter is worker-side; ship it with the
+      // answer (the post-cycle read IS the work of the cycles just run).
+      (d as Record<string, unknown>).w =
+        typeof mod._xc_cycle_instructions === 'function' ? mod._xc_cycle_instructions() : null;
       const tr: ArrayBuffer[] = [];
       const pmap = d.pixels as Record<string, ArrayBuffer>;
       for (const k in pmap) { const b = pmap[k]; if (b) tr.push(b); }

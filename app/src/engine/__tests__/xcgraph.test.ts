@@ -3,7 +3,8 @@
 // deterministic text; the mermaid RUNTIME itself is the dialog's concern
 // (e2e: analysis.spec renders SVGs in the browser).
 import { describe, expect, it } from 'vitest';
-import { buildAnalysisHtml, codeRundown, craftIsFlyable, svgTextOnly, xcDiagrams } from '../xcgraph';
+import { buildAnalysisHtml, codeRundown, craftIsFlyable, estWatts, GAME_HUD_LAW,
+  GAME_IPC_LAW, GAME_POWER_LAW, svgTextOnly, xcDiagrams } from '../xcgraph';
 import type { XCDevice } from '../xenoncode';
 
 const dev = (io: number, alias: string, type: string): XCDevice =>
@@ -170,5 +171,33 @@ describe('THE PURE-SVG LAW (v1.17.1, we: "SVG doesn\'t rendee images")', () => {
   it('pure svgs pass through untouched', () => {
     const clean = '<svg><text x="1">ok</text></svg>';
     expect(svgTextOnly(clean)).toBe(clean);
+  });
+});
+
+describe('THE WORK CENSUS LAW (v1.17.1, we: "calculate how much work the computer does per iteration, and correspond to documentation Archean [has] on what is possible and allowed")', () => {
+  it('the documented laws are quoted, not invented', () => {
+    expect(GAME_IPC_LAW).toMatch(/wiki Computer\.md/);
+    expect(GAME_IPC_LAW).toMatch(/SERVER config/i);          // the cap is NOT blueprint data
+    expect(GAME_POWER_LAW).toMatch(/30 W/);
+    expect(GAME_POWER_LAW).toMatch(/500 W/);
+    expect(GAME_HUD_LAW).toMatch(/wiki hud\.md/);
+    expect(GAME_HUD_LAW).toMatch(/client/i);                 // HUDs: no server budget
+  });
+  it('the energy correspondence is the documented linear ratio', () => {
+    expect(estWatts(0, 1000)).toBe(30);                      // idle
+    expect(estWatts(1000, 1000)).toBe(500);                  // 100 % Max IPC
+    expect(estWatts(2000, 1000)).toBe(500);                  // clamped (it crashed first)
+    expect(estWatts(500, 1000)).toBe(265);                   // the linear middle
+  });
+  it('the export carries a Compute budget card per program', () => {
+    const html = buildAnalysisHtml({ craft: 'c', sections: [{
+      compAlias: 'cpu', diagrams: [], svgs: [],
+      compute: { alias: 'cpu', isHud: false, workEma: 412.5, samples: 90, live: true } },
+      { compAlias: 'hud', diagrams: [], svgs: [],
+        compute: { alias: 'hud', isHud: true, workEma: null, samples: 0 } }] });
+    expect(html).toContain('Compute budget');
+    expect(html).toContain('413 IPC penalty units / cycle');
+    expect(html).toContain('EMA over 90 cycles');
+    expect(html.match(/client/g)!.length).toBeGreaterThan(0);   // the HUD row quotes hud law
   });
 });

@@ -432,10 +432,47 @@ export function craftIsFlyable(bp: { data: { components: { type: string }[] } })
  *  surfaces (a rover or a Mario cabinet gets no aero theatre). PURE string
  *  builder — the dialog hands it exactly what it rendered. */
 export interface ReportSection { compAlias: string; plateTop?: string; plateFront?: string;
-  diagrams: XcDiagram[]; svgs: (string | null)[]; rundown?: CodeRundown }
+  diagrams: XcDiagram[]; svgs: (string | null)[]; rundown?: CodeRundown;
+  compute?: ReportCompute }
 export interface ReportFlight { speed: number; mass: number; stallSpeed: number; ldMax: number;
   staticMarginPct: number; pitchVerdict: string; yawVerdict: string;
-  rows: { axis: string; part: string; authority: number; buried?: boolean }[] }
+  rows: { axis: string; part: string; authority: number; buried?: boolean }[];
+  /* the FULL FLIGHT LAB stat set (v1.17.1, we: "other flight stats can go
+     into there too") */
+  altitude?: number; rho?: number; q?: number; weight?: number;
+  planform?: { S: number; span: number; chord: number; AR: number; zAc: number };
+  clAlpha?: number; clMax?: number; cd0?: number; kInd?: number; ldTrim?: number;
+  trimAlphaDeg?: number; trimElevatorDeg?: number | null; neutralZ?: number;
+  frontal?: number; fin?: { area: number; lever: number };
+  curve?: { alphaDeg: number; cl: number; cd: number }[] }
+
+/** ── THE WORK CENSUS LAW (v1.17.1) ── the measured per-cycle work is in
+ *  the game's OWN units: XenonCode's IPC penalty counters (builtins cost
+ *  their argument count, array ops their size…), zeroed every cycle — the
+ *  number the in-game BIOS shows and the server's Max IPC clamps. The
+ *  documentation Archean HAS (quoted, verbatim bases):
+ *   · wiki Computer.md: "Max IPC: … determined by a configuration file …
+ *     the maximum number of instructions per cycle before it 'crashes'
+ *     virtually."  → the CAP is a SERVER setting, not blueprint data; the
+ *     editor engine runs UNLIMITED (the shim's system_ipc = 0 = POC).
+ *   · wiki Computer.md: "consumes 30 watts when idle and … up to 500 watts
+ *     depending on the ratio between the number of instructions executed
+ *     … and the current MAX IPC" → the energy↔work correspondence below.
+ *   · wiki hud.md: "HUDs are entirely managed by the client" → NO server
+ *     tick, NO Max IPC budget — HUD numbers are informational only. */
+export interface ReportCompute { alias: string; isHud: boolean; workEma: number | null;
+  samples: number; live?: boolean }
+export const GAME_IPC_LAW = 'Max IPC (wiki Computer.md): max instructions/cycle before the ' +
+  'computer "crashes" virtually — a SERVER config value, not blueprint data. The editor ' +
+  'engine parity: unlimited (system_ipc = 0).';
+export const GAME_POWER_LAW = 'In-game power (wiki Computer.md): 30 W idle, up to 500 W as the ' +
+  'instructions-per-cycle / Max IPC ratio rises — work IS energy.';
+export const GAME_HUD_LAW = 'HUDs (wiki hud.md): entirely client-managed — no server tick, no ' +
+  'Max IPC budget; the editor HUD numbers are informational.';
+/** the documented linear ratio (idle 30 W at 0 %, 500 W at 100 % Max IPC) */
+export function estWatts(work: number, maxIpc: number): number {
+  return 30 + 470 * Math.min(1, Math.max(0, work / Math.max(1, maxIpc)));
+}
 
 export function buildAnalysisHtml(opts: { craft: string; sections: ReportSection[];
   flight?: ReportFlight | null }): string {
@@ -467,6 +504,12 @@ drag with the middle/space key, double-click resets (script at the bottom).</p>
 <figure><img src="${s.plateTop ?? ''}"><figcaption>topside (orthographic; amber = actors,
 amber lines = cabled runs with io tags)</figcaption></figure>
 <figure><img src="${s.plateFront ?? ''}"><figcaption>front view</figcaption></figure></div>`);
+    if (s.compute) {
+      const c = s.compute;
+      parts.push(`<h3>Compute budget</h3><p style="font-size:12px;color:#c8d4e4">
+ measured work: <b>${c.workEma === null ? 'n/a (engine predates the census seam)' : c.workEma.toFixed(0) + ' IPC penalty units / cycle'}</b>
+ (EMA over ${c.samples} cycles)${c.isHud ? ' — HUD runtime: ' + GAME_HUD_LAW : ' — ' + GAME_IPC_LAW + ' ' + GAME_POWER_LAW}</p>`);
+    }
     if (s.rundown) {
       parts.push(`<h3>Code structure</h3><ul style="font-size:12px;color:#c8d4e4">` +
         s.rundown.summary.map(b => `<li>${esc(b)}</li>`).join('') + `</ul>
@@ -506,6 +549,24 @@ vortex/shedding questions need an external solver.</p>
 <table><tr><th>mass</th><td>${f.mass.toFixed(0)} kg</td><th>analysis speed</th>
 <td>${f.speed} m/s</td><th>stall speed</th><td>${f.stallSpeed.toFixed(1)} m/s</td>
 <th>L/D max</th><td>${f.ldMax.toFixed(1)}</td></tr>
+${f.planform ? `<tr><th>wing area S</th><td>${f.planform.S.toFixed(2)} m²</td>
+<th>span</th><td>${f.planform.span.toFixed(2)} m</th><th>chord c̄</th>
+<td>${f.planform.chord.toFixed(2)} m</td><th>AR</th><td>${f.planform.AR.toFixed(2)}</td></tr>
+<tr><th>C<sub>Lα</sub></th><td>${(f.clAlpha ?? 0).toFixed(2)} /rad</td>
+<th>C<sub>Lmax</sub></th><td>${(f.clMax ?? 0).toFixed(2)}</td>
+<th>C<sub>D0</sub></th><td>${(f.cd0 ?? 0).toFixed(4)}</td>
+<th>K (induced)</th><td>${(f.kInd ?? 0).toFixed(3)}</td></tr>
+<tr><th>L/D trim</th><td>${(f.ldTrim ?? 0).toFixed(1)}</td>
+<th>trim AoA</th><td>${(f.trimAlphaDeg ?? 0).toFixed(1)}°</td>
+<th>elevator trim</th><td>${f.trimElevatorDeg === null || f.trimElevatorDeg === undefined ? '—' : f.trimElevatorDeg.toFixed(1) + '°'}</td>
+<th>frontal</th><td>${(f.frontal ?? 0).toFixed(2)} m²</td></tr>
+<tr><th>altitude / ρ / q</th><td>${f.altitude ?? 0} m / ${(f.rho ?? 0).toFixed(3)} / ${(f.q ?? 0).toFixed(0)} Pa</td>
+<th>weight</th><td>${(f.weight ?? 0).toFixed(0)} N</td>
+<th>neutral point z</th><td>${(f.neutralZ ?? 0).toFixed(2)} m</td>
+<th>fin</th><td>${f.fin ? f.fin.area.toFixed(2) + ' m² @ ' + f.fin.lever.toFixed(1) + ' m' : '—'}</td></tr>` : ''}
+${f.curve?.length ? `<details><summary style="cursor:pointer;font-size:12px;color:#9fb0c8">lift/drag polar (α, C<sub>L</sub>, C<sub>D</sub>)</summary>
+<table><tr><th>α°</th><th>C<sub>L</sub></th><th>C<sub>D</sub></th></tr>
+${f.curve.map(c => `<tr><td>${c.alphaDeg}</td><td>${c.cl.toFixed(3)}</td><td>${c.cd.toFixed(4)}</td></tr>`).join('')}</table></details>` : ''}
 <tr><th>static margin</th><td>${f.staticMarginPct.toFixed(1)} % MAC</th>
 <th>pitch</th><td><span class="verdict ${f.pitchVerdict}">${f.pitchVerdict}</span></td>
 <th>yaw</th><td><span class="verdict ${f.yawVerdict}">${f.yawVerdict}</span></td></tr></table>
