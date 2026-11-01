@@ -35,6 +35,26 @@ function DiagramView(p: { svg: string }) {
   const [big, setBig] = useState(false);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const drag = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
+  const scroller = useRef<HTMLDivElement | null>(null);
+  // FIT-ON-OPEN (v1.17.1, we: "cannot navigate or move through the diagrams"):
+  // a diagram wider/taller than its panel opens FITTED, not cut off.
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const svg = el.querySelector('svg');
+    if (!svg) return;
+    const fit = () => {
+      const w = svg.getBoundingClientRect().width / (k || 1), h = svg.getBoundingClientRect().height / (k || 1);
+      // never smaller than READABLE (0.45) — a huge map then opens at its
+      // top, and the pan/zoom tools walk it; unreadable-fit helps nobody
+      const k0 = Math.max(0.45, Math.min(1, (el.clientWidth - 12) / Math.max(1, w),
+        (el.clientHeight - 12) / Math.max(1, h)));
+      if (k0 < 0.98) { setK(+k0.toFixed(3)); el.scrollTo({ left: 0, top: 0 }); }
+    };
+    // measure at scale 1 first
+    requestAnimationFrame(fit);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.svg, big]);
   const box = (
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 items-center gap-1 pb-1 text-[10px]">
@@ -50,7 +70,7 @@ function DiagramView(p: { svg: string }) {
           onClick={() => setBig(x => !x)}
           title="use the whole analysis window">{big ? '⤡' : '⤢'}</button>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto rounded bg-white" style={{ cursor: 'grab' }}
+      <div ref={scroller} className="min-h-0 flex-1 overflow-auto rounded bg-white" style={{ cursor: 'grab' }}
         onWheel={e => setK(x => Math.min(6, Math.max(0.2, x * (e.deltaY < 0 ? 1.15 : 0.87))))}
         onPointerDown={e => { drag.current = { x: e.clientX, y: e.clientY, px: pan.x, py: pan.y }; }}
         onPointerMove={e => { const d = drag.current; if (!d) return;
@@ -256,7 +276,14 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
           data-testid="analysis-mermaid-err">{errs['*']}</div>}
         {cur && (
           <>
-            {(() => { const ph = plates[cur.ci]; return ph && (
+            {(() => {
+              const ph = plates[cur.ci];
+              // v1.17.1 (we: "Total vessel overview wireframe … is totally useless
+              // … add such a SVG/PNG … to represent specifically a diagram shown
+              // … each computer (max 1) should have such a class and wiring
+              // diagram together"): the plate pair is the Class & Wiring section's
+              // OWN visual — this computer's actors amber, their cables lit.
+              return ph && (
               <div data-testid="analysis-plates" className="flex flex-wrap gap-3">
                 {([['topside', ph.top], ['front', ph.front]] as const)
                   .map(([k, src]) => (
@@ -327,7 +354,8 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
             {diagrams.map(d => {
               const id = `${cur.ci}|${d.kind}`;
               return (
-                <section key={d.kind} data-testid={`analysis-${d.kind}`}>
+                <section key={d.kind}
+                  data-testid={`analysis-${d.kind === 'seqIn' ? 'seqin' : d.kind === 'seqOut' ? 'seqout' : d.kind}`}>
                   <h3 className="m-0 mb-1 text-[12px] font-medium text-[#e8edf4]">{d.title}</h3>
                   {errs[id]
                     ? <div className="rounded bg-[#3a1420] p-2 text-[11px] text-[#ffb4b4]"

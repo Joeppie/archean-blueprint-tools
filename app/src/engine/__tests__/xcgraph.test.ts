@@ -3,8 +3,8 @@
 // deterministic text; the mermaid RUNTIME itself is the dialog's concern
 // (e2e: analysis.spec renders SVGs in the browser).
 import { describe, expect, it } from 'vitest';
-import { buildAnalysisHtml, codeRundown, craftIsFlyable, estWatts, GAME_HUD_LAW,
-  GAME_IPC_LAW, GAME_POWER_LAW, svgTextOnly, xcDiagrams } from '../xcgraph';
+import { buildAnalysisHtml, codeRundown, estWatts, GAME_HUD_LAW,
+  GAME_IPC_LAW, GAME_POWER_LAW, svgTextOnly, xcDiagrams, type XcFile } from '../xcgraph';
 import type { XCDevice } from '../xenoncode';
 
 const dev = (io: number, alias: string, type: string): XCDevice =>
@@ -38,45 +38,52 @@ const prog = {
     dev(2, 'screen-main', 'Dashboard')],
 };
 
-describe('THE XENON ANALYSIS GRAMMAR', () => {
-  it('emits the three diagrams, each valid-headed', () => {
-    const ds = xcDiagrams(prog, { 5: 'roll' });
-    expect(ds.map(d => d.kind)).toEqual(['flow', 'sequence', 'class']);
-    expect(ds[0]!.source).toMatch(/^flowchart TD/);
-    expect(ds[1]!.source).toMatch(/^sequenceDiagram/);
-    expect(ds[2]!.source).toMatch(/^classDiagram/);
+describe('THE XENON ANALYSIS GRAMMAR v2 (bounded, split, node-aware)', () => {
+  const ds = xcDiagrams(prog, { 5: 'roll' });
+  it('emits FOUR bounded diagrams: class, flow, seq-in, seq-out', () => {
+    expect(ds.map(d => d.kind)).toEqual(['class', 'flow', 'seqIn', 'seqOut']);
+    expect(ds[0]!.source).toMatch(/^classDiagram/);
+    expect(ds[2]!.source).toMatch(/^sequenceDiagram/);
+    // the user law: input and output do NOT share one diagram
+    expect(ds[2]!.source).not.toMatch(/write ch/);
+    expect(ds[3]!.source).not.toMatch(/read ch/);
   });
-  it('sequence: the PILOT is an actor and devices are FULLY RESOLVED system actors', () => {
-    const seq = xcDiagrams(prog, { 5: 'roll' })[1]!.source;
-    expect(seq).toContain('actor U as Pilot / user');
-    // seat FIRST (the pilot presses it), fully resolved name:
-    expect(seq).toContain('participant');
-    expect(seq).toMatch(/participant \S+ as seat-main · PilotSeat · io 10/);
-    expect(seq).toMatch(/U->>\S+: press ch 5 \(roll\)/);
-    // resolved by the $device VAR idiom (both literals assigned in source):
-    expect(seq).toMatch(/game-fx-blocks · Buzzer · io 12/);
-    expect(seq).toMatch(/game-fx-power · Buzzer · io 13/);
-    // program->device writes and reads:
-    expect(seq).toMatch(/->>\S+melody\S*: output_number ch 0/);
-    // cross-file @tone call: main.xc calls a game.xc function
-    expect(seq).toMatch(/@tone\(\)/);
-    expect(seq).toContain('entry: update');
-    expect(seq).toContain('entry: init');
+  it('class: files with entry marks and capped members', () => {
+    const cls = ds[0]!.source;
+    expect(cls).toMatch(/class \S+\["game\.xc"\] \{/);
+    expect(cls).toContain('\u00abupdate \u00b7 tick 25 Hz\u00bb');       // the TICK block is visible
+    expect(cls).toContain('\u00abinit\u00bb');                              // entry points seen
+    expect(cls).toContain('@tone');
   });
-  it('flow: per-file subgraphs with entry nodes, fns, include + call edges', () => {
-    const flow = xcDiagrams(prog)[0]!.source;
-    expect(flow).toContain('subgraph');
-    expect(flow).toMatch(/\(\["update"\]\):::entry/);
-    expect(flow).toContain('@tone');
-    expect(flow).toMatch(/-\.\s*include\s*\.\->/);
-    expect(flow).toMatch(/calls @tone/);
+  it('sequences are BOUNDED (we: "bloated and unusable")', () => {
+    for (const d of ds.filter(x => x.kind.startsWith('seq'))) {
+      const lines = d.source.split('\n');
+      expect(lines.length).toBeLessThan(40);
+      expect(lines.filter(l => l.includes('participant') || l.includes('actor')).length).toBeLessThanOrEqual(9);
+    }
   });
-  it('class: files as classes with $vars and @functions as members', () => {
-    const cls = xcDiagrams(prog)[0 + 2]!.source;
-    expect(cls).toMatch(/class c_[^ ]+\["game\.xc"\] \{/);
-    expect(cls).toContain('+tone(');
-    expect(cls).toMatch(/\.\.>.*:\s*include/);
-    expect(cls).toMatch(/calls @tone/);
+  it('the PILOT is an actor, devices FULLY RESOLVED, coupled press→read', () => {
+    const seqIn = ds[2]!.source;
+    expect(seqIn).toContain('actor U as Pilot / user');
+    expect(seqIn).toMatch(/U->>\S+: press \(roll\)/);
+    expect(seqIn).toMatch(/d_seat\S*->>\+?P: read ch 5/);
+    expect(ds[3]!.source).toMatch(/game19fx19(blocks|power)\S*: write ch/);  // the $device SWITCH lands (nid: dashes → 19)
+    const seqOut = ds[3]!.source;
+    expect(seqOut).toMatch(/->>\+?d_melody\S*: write ch/);
+  });
+  it('flow: subgraphs close, node files get their NODE graph (we: "or even a node if it is an node")', () => {
+    const nodeFile: XcFile = { name: 'plomo.main.xc', code:
+      '#NODES {"nodes":[{"id":"N1","channel":5,"ioNumber":11,"outputType":0,"title":"input.11","type":"InputNode","inputs":[],"inputValues":[]},' +
+      '{"id":"N2","ioNumber":0,"outputType":2,"title":"output.0","type":"OutputNode","inputs":["N1"],"inputValues":[""]}]}\n\nupdate\n\tvar $v = input_number(11, 5)\n\toutput_number("ail", 0, $v)\n' };
+    const dns = xcDiagrams({ alias: 'plomo', ci: 9, files: [nodeFile],
+      devices: [dev(11, 'seat-main', 'PilotSeat'), dev(0, 'ail', 'Aileron')] }, { 5: 'roll' });
+    const flow = dns[1]!.source;
+    expect(flow).toContain('input.11');                       // node TITLES label the graph
+    expect(flow).toContain('-->');
+    expect(flow.match(/subgraph/g)!.length).toBe(flow.match(/^  end$/gm)!.length);  // balanced
+    // the node program's io surface was INVISIBLE to the text scan; the graph fixes it
+    expect(dns[2]!.source).toContain('press');
+    expect(dns[3]!.source).toMatch(/d_ail\S*: write/);
   });
   it('mermaid-hostile characters never leak into labels', () => {
     const evil = xcDiagrams({
@@ -84,39 +91,23 @@ describe('THE XENON ANALYSIS GRAMMAR', () => {
       files: [{ name: 'x;y<x>.xc', code: 'update\n\toutput_number("q|w#e", 0, 1)' }],
       devices: [dev(1, 'q|w#e', 'Lamp')],
     });
-    const seq = evil[1]!.source;      // sequenceDiagram carries no legit #…
-    expect(seq).not.toContain('#');
-    expect(seq).not.toContain('|');
-    expect(seq).not.toContain('"');
-    expect(seq).not.toContain('<');
-    expect(seq).not.toContain(';');
+    for (const d of evil) {
+      const outside = d.source.replace(/\[[^\]]*\]/g, '');
+      expect(outside).not.toContain('|');
+      expect(outside).not.toContain('<');
+      expect(outside).not.toContain(';');
+    }
   });
-  it('flight gate: ailerons fly, rovers and Mario benches do not', () => {
-    expect(craftIsFlyable({ data: { components: [{ type: 'Aileron' }] } })).toBe(true);
-    expect(craftIsFlyable({ data: { components: [{ type: 'BigWheel' }, { type: 'MiniComputer' }] } })).toBe(false);
-  });
-  it('the ANALYSIS REPORT embeds plates + svgs and gates the flight theatre', () => {
-    const ds = xcDiagrams(prog);
-    const html = buildAnalysisHtml({
-      craft: '9000009096&x',
-      sections: [{ compAlias: 'app-1', plateTop: 'data:image/png;a', plateFront: 'data:image/png;b',
-        diagrams: ds, svgs: ['<svg id="s1"/>', null, '<svg id="s3"/>'] }],
-      flight: null,
-    });
-    expect(html).toContain('craft analysis');
-    expect(html).toContain('data:image/png;a');
-    expect(html).toContain('<svg id="s1"/>');           // RENDERED svgs embed
-    expect(html).toContain('mermaid source');           // unpainted ones fall back to source
-    expect(html).toContain('9000009096&amp;x');          // the craft id is escaped
-    expect(html).toMatch(/Not applicable/);              // no flight theatre without a report
-    const fly = buildAnalysisHtml({
-      craft: 'c', sections: [],
-      flight: { speed: 80, mass: 900, stallSpeed: 21, ldMax: 9, staticMarginPct: -2,
-        pitchVerdict: 'unstable', yawVerdict: 'stable',
-        rows: [{ axis: 'roll', part: 'Aileron #7', authority: 12, buried: true }] },
-    });
-    expect(fly).toContain('unstable');
-    expect(fly).toContain('buried in the collider mass');   // the drag suspect is CALLED OUT
+  it('MARIO-scale programs stay bounded (we: "for ASuper mario that became WAY too large")', () => {
+    const many = Array.from({ length: 30 }, (_, i) =>
+      ({ name: `f${i}.xc`, code: `update\n${Array.from({ length: 20 }, (_, j) => `function @g${j}()\n\tvar $x = ${j}`).join('\n')}` }));
+    const big = xcDiagrams({ alias: 'chipos', ci: 1, files: many, devices: [] });
+    for (const d of big) {
+      const n = d.source.split('\n').length;
+      expect(n, d.kind).toBeLessThan(90);
+    }
+    // overflow folds HONESTLY somewhere visible (30 files cannot all fit)
+    expect(big[0]!.source).toMatch(/\+ ?\d+ ?(more|functions|nodes|file)/);
   });
 });
 

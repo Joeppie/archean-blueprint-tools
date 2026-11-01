@@ -413,6 +413,30 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   .spec census leg; ReportFlight now carries the FULL flight stat set
   (planform S/span/c̄/AR, CLα, CLmax, CD0, K, trims, q/ρ, fin, the polar)
   in dialog + export ("other flight stats can go into there too").
+  DIAGRAM LAW v2 (we: "all diagrams are too large and bloated … the class
+  diagram especially … sequence doesnt couple input and output — two …
+  class diagram would have worked better … mark the lines with names … or
+  even a node if it is an node … entry points should see inits, but also
+  update and tick … for ASuper mario WAY too large … vessel overview
+  wireframe totally useless … add a PNG to represent specifically a
+  diagram shown … each computer (max 1) a class AND wiring diagram
+  together"): xcDiagrams emits FOUR BOUNDED diagrams — `class` (the
+  centrepiece: ≤7 files, ≤6 members + an honest '+N more', entry marks
+  «update · tick 25 Hz» visible), `flow` (≤5 files; #NODES programs get
+  their NODE GRAPH with node titles — the text scan is blind to a node
+  program's whole io surface, the graph fixes it), `seqIn`/`seqOut`
+  (SPLIT: press→read coupling kept, reads and writes no longer share a
+  diagram; ≤7 devices, ≤12 grouped messages '+N folded'). The vessel
+  plate pair is NOT a generic overview: it renders INSIDE the Class &
+  Wiring section as that diagram's own visual (actors amber, its cables
+  lit). DiagramView FIT-ON-OPEN (floor 0.45 — readable, pan walks the
+  rest), zoom/pan/⤢; mermaid overflow folds are honest '+N' lines, and
+  the Code rundown table remains the full inventory. BURIED LAW v2
+  (flightlab.buriedAt, we: "Plomo has misdiagnosed buried ailerons; they
+  are outside"): buried = airflow cannot reach the plate — ≥1 cell solid
+  around the centre in ≥4 of 6 directions; trailing-edge mount = NOT
+  buried; the ISW-241 one-face-flush pin RETRACTED to 0 buried rows (the
+  one-side-flush strength model still covers it).
 - THE BOOT-TURBO LAW (v1.17.1, we: "Super Mario quick start play should use
   turbo by default, url param"): `?turbo=1` boots every pump ×4, `?turbo=0`
   FORBIDS it; no param → ARCADE_TURBO_CRAFTS (mario 3820116990, invaders

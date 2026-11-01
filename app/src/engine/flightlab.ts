@@ -325,12 +325,31 @@ function finCensus(t: Tunnel | null, zCg: number): { area: number; lever: number
  *  field by the game — this is OUR census of "hidden inside the structure". */
 export function buriedAt(boxes: { c: [number, number, number]; e: [number, number, number] }[],
   world: [number, number, number]): boolean {
+  // THE BURIED LAW v2 (v1.17.1, we: "Plomo has misdiagnosed buried ailerons;
+  // they are outside and not buried in fuselage"): buried = AIRFLOW CANNOT
+  // REACH the plate — the centre sits ≥ 1 cell (0.25 m) inside the merged
+  // SOLID in at least FOUR of the six axis directions. A trailing-edge
+  // aileron has open air behind its hinge line → NOT buried, however close
+  // the wing cells sit around it (the old any-box-containment rule marked
+  // every correctly-mounted surface as buried); a plate poured into the
+  // fuselage volume reads 6/6 and IS buried (no clean flow → no authority).
   const cell = (v: number) => v / 0.25 + 5.5;
   const p: [number, number, number] = [cell(world[0]), cell(world[1]), cell(world[2])];
-  return boxes.some(b =>
-    p[0] >= b.c[0] && p[0] < b.c[0] + b.e[0] &&
-    p[1] >= b.c[1] && p[1] < b.c[1] + b.e[1] &&
-    p[2] >= b.c[2] && p[2] < b.c[2] + b.e[2]);
+  const solidAt = (q: [number, number, number]) => boxes.some(b =>
+    q[0] >= b.c[0] && q[0] < b.c[0] + b.e[0] &&
+    q[1] >= b.c[1] && q[1] < b.c[1] + b.e[1] &&
+    q[2] >= b.c[2] && q[2] < b.c[2] + b.e[2]);
+  if (!solidAt(p)) return false;
+  let enclosed = 0;
+  for (let d = 0; d < 3; d++) {
+    for (const sgn of [1, -1]) {
+      const off = sgn * 1.5;                   // ≥ 1 cell of SOLID, not mere contact
+      const q: [number, number, number] = d === 0 ? [p[0]! + off, p[1]!, p[2]!]
+        : d === 1 ? [p[0]!, p[1]! + off, p[2]!] : [p[0]!, p[1]!, p[2]! + off];
+      if (solidAt(q)) enclosed++;
+    }
+  }
+  return enclosed >= 4;
 }
 
 /** THE FLIGHT LAB: run the shape-field census and evaluate the forces. */

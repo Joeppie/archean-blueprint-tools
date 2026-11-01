@@ -24,7 +24,7 @@ test.describe('@analysis @slow THE CRAFT ANALYSIS', () => {
     await page.getByTestId('analysis-btn').click();
     await expect(page.getByTestId('analysis-dock')).toBeVisible();
 
-    for (const kind of ['flow', 'sequence', 'class']) {
+    for (const kind of ['class', 'flow', 'seqin', 'seqout']) {
       await expect(page.getByTestId(`analysis-${kind}`)).toBeVisible();
       // the mermaid RUNTIME produced a real SVG for each
       await expect.poll(async () =>
@@ -80,7 +80,7 @@ test.describe('@analysis @slow THE CRAFT ANALYSIS', () => {
     await page.getByTestId('analysis-btn').click();
     await expect(page.getByTestId('analysis-dock')).toBeVisible();
     await expect.poll(async () =>
-      page.getByTestId('analysis-sequence').locator('svg').count(),
+      page.getByTestId('analysis-seqin').locator('svg').count(),
     { timeout: 120_000 }).toBe(1);
     // the honest gate: no flight-control surfaces → no flight theatre
     await expect(page.getByTestId('analysis-flight')).toContainText(/Not applicable/i);
@@ -109,7 +109,7 @@ test.describe('@analysis @slow THE CRAFT ANALYSIS', () => {
       await hudTab.click();
       await expect(page.getByTestId('analysis-compute')).toContainText(/client/i,
         { timeout: 30_000 });
-      await expect(page.getByTestId('analysis-sequence')).toBeVisible();
+      await expect(page.getByTestId('analysis-seqin')).toBeVisible();
     }
   });
 });

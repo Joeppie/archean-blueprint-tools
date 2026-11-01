@@ -5778,3 +5778,36 @@ frontal/q/ρ/fin/polar table) in dialog + export (we: "other flight stats can
 go into there too"). HUD programs join the analysis as 📟 tabs with the
 CLIENT law. Engine chain: xenoncore v0.3.4/v0.3.5 tags, app dep + assets +
 XC_ABI 20 in one landing; census probe live-verified (turbo:true, ema≈10.7k).
+
+THE ACTIVE-LINE CATCH (same release, we: the F10-follow red during its
+gates): CodeEditor never REQUESTED CodeMirror's highlightActiveLine — the
+follow-scroll pins asserted through .cm-activeLine, which existed only as a
+preset/version accident; a lock re-resolution (the mermaid install) silently
+dropped it and the pins went BLIND (element absent → containment forever
+false). The editor now imports and registers highlightActiveLine() explicitly
+— the VS-style active line is a feature we own, not an accident of the tree.
+(nav-history's parallel-load flake re-passed solo per the re-run rule.)
+
+DIAGRAM LAW v2 + BURIED LAW v2 (same release, we: "all diagrams are too
+large … bloated and unusable … the class diagram especially … Super mario
+WAY too large … sequence doesnt couple input and output — two different
+ones … class diagram would have worked better … mark the lines with names
+… or even a node if it is an node … entry points should see inits, update
+and tick … vessel overview wireframe totally useless … add a PNG to
+represent specifically a diagram shown … each computer (max 1) a class and
+wiring diagram together. Plomo has misdiagnosed buried ailerons; they are
+outside"): xcDiagrams v2 emits FOUR BOUNDED diagrams (class ≤7 files ≤6
+members + '+N more'; flow ≤5 files and #NODES programs render their NODE
+GRAPH with node titles — parsing the blob also unveils a node program's
+ENTIRE io surface for the sequences and the rundown; seqIn/seqOut SPLIT
+with the press→read coupling kept, ≤7 devices, grouped '+N folded'
+messages); the plate pair moved INTO the Class & Wiring section as that
+diagram's own visual; DiagramView FIT-ON-OPEN at a readable 0.45 floor.
+BURIED LAW v2 (flightlab): buried = ≥1 cell of solid around the plate
+centre in ≥4 of 6 directions (airflow cannot reach it) — a trailing-edge
+aileron reads NOT buried (plomo live: 5/5 ailerons clean); the ISW-241's
+'buried fleet' claim RETRACTED (one-face-flush mounting is normal
+aircraft practice; its pin updated, the one-side-flush strength model
+keeps the physics). Grammar tests rewritten (16): four kinds, bounds,
+node titles, split coupling, mario-scale caps; analysis.spec testids and
+legs follow (3 green).

@@ -21,8 +21,8 @@ import {
 } from 'react';
 import { Compartment, Prec, EditorState, RangeSetBuilder, type Extension } from '@codemirror/state';
 import {
-  Decoration, EditorView, GutterMarker, ViewPlugin, hoverTooltip, keymap, lineNumbers,
-  gutter, type BlockInfo, type DecorationSet, type ViewUpdate,
+  Decoration, EditorView, GutterMarker, ViewPlugin, highlightActiveLine, hoverTooltip,
+  keymap, lineNumbers, gutter, type BlockInfo, type DecorationSet, type ViewUpdate,
 } from '@codemirror/view';
 import { defaultKeymap, indentWithTab } from '@codemirror/commands';
 import { StreamLanguage } from '@codemirror/language';
@@ -423,6 +423,11 @@ function CodeEditorInner(p: CodeEditorProps, ref: React.Ref<CodeEditorHandle>) {
       extensions: [
         oneDark,
         lineNumbers(),
+        // THE ACTIVE LINE (v1.17.1): the FOLLOW-SCROLL pins assert through
+        // .cm-activeLine — the highlighter must be REQUESTED, not inherited
+        // by preset accident (a lock drift silently removed it and the
+        // F10-follow leg went blind; the VS-Code-parity line marker too).
+        highlightActiveLine(),
         bpGutter,
         lintGutter(),               // v1.16.13: severity dots beside breakpoints (VS's gutter marks)
         xcLanguage,

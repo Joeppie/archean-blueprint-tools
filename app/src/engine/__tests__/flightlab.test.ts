@@ -38,6 +38,24 @@ describe('flightlab laws (pure)', () => {
     expect(buriedAt(boxes, [0, 0, 0.75])).toBe(true);     // fuselage core
     expect(buriedAt(boxes, [5, 0, 0.75])).toBe(false);    // far off the wing
   });
+  it('buriedAt v2: a TRAILING-EDGE surface is NOT buried (we: "Plomo has ' +
+    'misdiagnosed buried ailerons; they are outside and not buried in ' +
+    'fuselage")', () => {
+    const C = (v: number) => v / 0.25 + 5.5;             // world ▸ cell units
+    // a wing slab x∈[-1,1] m, z∈[-2,0] m (its trailing edge at z = 0), 1 cell thick
+    const wing = [{ c: [C(-1), C(0) - 0.5, C(-2)] as [number, number, number],
+      e: [8, 1, 8] as [number, number, number] }];
+    // aileron hinged ON the trailing edge: its centre at z = +0.125 — air aft
+    expect(buriedAt(wing, [0, 0, 0.125])).toBe(false);
+    // the same plate poured INTO the wing volume: 6/6 solid → buried
+    expect(buriedAt(wing, [0, 0, -1.0])).toBe(true);
+    // a thick fuselage with the plate fully inside: buried; flush on its
+    // face (air on one side): not buried
+    const hull = [{ c: [C(-1), C(-1), C(-1)] as [number, number, number],
+      e: [8, 8, 8] as [number, number, number] }];
+    expect(buriedAt(hull, [0, 0, 0])).toBe(true);
+    expect(buriedAt(hull, [0, 0, 1.0])).toBe(false);      // centre at the face cell
+  });
 });
 
 describe('FLIGHT BENCH fixtures (9000009080/81/82)', () => {
@@ -113,10 +131,13 @@ describe('corpus census (data laws at the node tier)', () => {
     // reads the lifting planform honestly
     expect(r!.planform.AR).toBeLessThan(1);
     expect(r!.planform.S).toBeGreaterThan(1);
-    // the aileron fleet is mostly buried in the hull (the same old-physics
-    // pattern as the Falcon, at kit scale)
+    // the aileron fleet: rows exist; NONE is FULLY buried under BURIED LAW v2
+    // (v1.17.1 retraction, we: "Plomo has misdiagnosed buried ailerons; they
+    // are outside": the old any-box-containment rule called one-face-flush
+    // mountings buried — the ISW-241's surfaces ride the hull skin, airflow
+    // reaches them; the one-side-flush LIFT STRENGTH model still applies)
     expect(r!.authority.rows.length).toBeGreaterThan(0);
-    expect(r!.authority.rows.filter(x => x.buried).length).toBeGreaterThan(0);
+    expect(r!.authority.rows.filter(x => x.buried).length).toBe(0);
   });
 
   it('Chip Patton’s Falcon (3348745601): the old-physics plane — its ' +

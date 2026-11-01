@@ -33,9 +33,8 @@ export interface XcProgram {
   files: XcFile[];
   devices: XCDevice[];
 }
-export interface XcDiagram { kind: 'flow' | 'sequence' | 'class'; title: string; source: string }
-
-interface FnInfo { name: string; sig: string; ret: string }
+export type XcDiagramKind = 'class' | 'flow' | 'seqIn' | 'seqOut';
+export interface XcDiagram { kind: XcDiagramKind; title: string; source: string }
 
 const ENTRIES = ['init', 'vars_init', 'update', 'click_hold', 'click', 'scroll', 'shutdown'];
 
@@ -64,8 +63,6 @@ function label(s: string): string {
 const nid = (p: string, s: string) =>
   p + '_' + s.replace(/[^A-Za-z0-9_]/g, c => c.charCodeAt(0).toString(36));
 
-interface IoEvent { file: string; dir: 'in' | 'out'; token: string; ch: string; fn: string }
-
 /** `var $x = "lit"` / `$x = "lit"` assignments of one file */
 function varLiterals(file: XcFile): Map<string, string[]> {
   const m = new Map<string, Set<string>>();
@@ -80,183 +77,219 @@ function varLiterals(file: XcFile): Map<string, string[]> {
   }
   return new Map([...m].map(([k, v]) => [k, [...v]]));
 }
-
 const IO_RE = /(input|output)_(number|text)\(\s*("[^"\n]{1,60}"|\$[A-Za-z0-9_]+|\d+)\s*,\s*([^,)\n]{1,24})/;
+
+/** ── THE NODE GRAPH (v1.17.1, we: "even a node if it is an node") ──
+ *  XenonCode editors save visual programs with a `#NODES {json}` first
+ *  line (plomo, Mario, Invaders are ALL node-generated). The blob is the
+ *  real program: nodes carry title/type, inputs[] reference source node
+ *  ids, InputNode/OutputNode carry ioNumber + channel. Parsing it fixes
+ *  what the text scan is blind to: a node program's ENTIRE io surface. */
+export interface XcNode { id: string; title: string; type: string; ioNumber?: number;
+  channel?: number; inputs: (string | undefined)[]; inputValues: string[] }
+export interface XcNodeGraph { nodes: XcNode[] }
+export function parseNodeGraph(file: XcFile): XcNodeGraph | null {
+  const m = /^\s*;?#NODES (\{.*\})\s*$/m.exec(file.code.slice(0, 200_000));
+  if (!m) return null;
+  try {
+    const g = JSON.parse(m[1]!) as { nodes?: XcNode[] };
+    return g?.nodes?.length ? { nodes: g.nodes } : null;
+  } catch { return null; }
+}
+
+/** size caps (we: "all diagrams are too large … bloated and unusable"):
+ *  every diagram is BOUNDED; overflow folds into honest "+N more" members. */
+const CAP = { cls: 7, fns: 6, edges: 8, seqDev: 7, seqMsg: 12, nodeCls: 8, flowFiles: 5 };
+const ENTRY_MARK: Record<string, string> = {
+  // the user asked to SEE the live blocks: init, update(tick), click…
+  vars_init: '«vars_init»', init: '«init»', update: '«update · tick 25 Hz»',
+  click: '«click»', click_hold: '«click_hold»', scroll: '«scroll»', shutdown: '«shutdown»',
+};
 
 export function xcDiagrams(prog: XcProgram, seatLabels?: Record<number, string>): XcDiagram[] {
   const files = prog.files;
-  const decl = new Map<string, string>();              // @fn -> owning file
-  const fns = new Map<string, FnInfo[]>();             // file -> declared fns
-  const entries = new Map<string, string[]>();         // file -> entry words
-  const calls = new Map<string, Set<string>>();        // file -> @fn tokens used
-  const includes = new Map<string, Set<string>>();
-  const ios: IoEvent[] = [];
+  const graphs = new Map<string, XcNodeGraph | null>();
+  for (const f of files) graphs.set(f.name, parseNodeGraph(f));
+  const decl = new Map<string, string>();
+  const fns = new Map<string, string[]>();
+  const entries = new Map<string, string[]>();
+  const includes = new Map<string, string[]>();
+  const calls = new Map<string, Set<string>>();
+  const io: { file: string; dir: 'in' | 'out'; token: string; ch: string; node?: string }[] = [];
   const varStrs = new Map<string, Map<string, string[]>>();
-
   for (const f of files) {
     varStrs.set(f.name, varLiterals(f));
+    const g = graphs.get(f.name);
+    if (g) {
+      // node program: the graph IS the structure; io comes from the io nodes
+      const byId = new Map(g.nodes.map(n => [n.id, n]));
+      for (const n of g.nodes) {
+        const t = /"([^"]{1,60})"/.exec(n.title ?? '')?.[1] ?? n.title ?? n.type;
+        (fns.get(f.name) ?? fns.set(f.name, []).get(f.name)!).push(t);
+        for (const src of n.inputs ?? []) {
+          if (src && byId.has(src)) {
+            if (!calls.has(f.name)) calls.set(f.name, new Set());
+            const s = byId.get(src)!;
+            calls.get(f.name)!.add(`${s.title || s.type} → ${n.title || n.type}`);
+          }
+        }
+        if (n.type === 'InputNode' && n.ioNumber !== undefined)
+          io.push({ file: f.name, dir: 'in', token: String(n.ioNumber), ch: String(n.channel ?? 0), node: n.title });
+        if (n.type === 'OutputNode' && n.ioNumber !== undefined)
+          io.push({ file: f.name, dir: 'out', token: String(n.ioNumber), ch: String(n.channel ?? 0), node: n.title });
+      }
+    }
     for (const raw of f.code.split('\n')) {
       const line = stripNoise(raw);
       const declM = /^\s*(?:recursive\s+)?function\s+@([A-Za-z0-9_]+)/.exec(line);
-      if (declM) {
-        const name = declM[1]!;
-        decl.set('@' + name, f.name);
-        const sig = /\(([^)]*)\)\s*(?::\s*(number|text))?/.exec(line.slice(line.indexOf('@' + name)));
-        if (!fns.has(f.name)) fns.set(f.name, []);
-        fns.get(f.name)!.push({ name, sig: sig?.[1] ?? '', ret: sig?.[2] ?? '' });
-        continue;
-      }
-      const entM = new RegExp('^\\s*(' + ENTRIES.join('|') + ')(?:\\.\\$?[A-Za-z0-9_]+)?\\b').exec(line);
-      if (entM) {
-        const list = entries.get(f.name) ?? [];
-        const qual = /^\s*[a-z_]+\.\$?([A-Za-z0-9_]+)/.exec(line);
-        const word = entM[1]! + (qual ? ' · ' + qual[1] : '');
-        if (!list.includes(word)) list.push(word);
-        entries.set(f.name, list);
-      }
+      if (declM) { decl.set('@' + declM[1]!, f.name);
+        if (!fns.has(f.name)) fns.set(f.name, []); fns.get(f.name)!.push('@' + declM[1]!); continue; }
+      const entM = new RegExp('^\\s*(' + ENTRIES.join('|') + ')\\b').exec(line);
+      if (entM) { const l = entries.get(f.name) ?? [];
+        if (!l.includes(entM[1]!)) l.push(entM[1]!); entries.set(f.name, l); }
+      const inc = /^\s*include\s+"([^"]+)"/.exec(line);
+      if (inc) { if (!includes.has(f.name)) includes.set(f.name, []); includes.get(f.name)!.push(inc[1]!); }
       for (const m of line.matchAll(/@([A-Za-z0-9_]+)\s*\(/g)) {
-        // strings are inert to the call search (the analyzer's law): an odd
-        // quote-count before the match means it lives inside a string
         const quotes = (line.slice(0, m.index ?? 0).match(/"/g) ?? []).length;
         if (quotes % 2) continue;
         if (!calls.has(f.name)) calls.set(f.name, new Set());
         calls.get(f.name)!.add('@' + m[1]!);
       }
-      const inc = /^\s*include\s+"([^"]+)"/.exec(line);
-      if (inc) {
-        if (!includes.has(f.name)) includes.set(f.name, new Set());
-        includes.get(f.name)!.add(inc[1]!);
-      }
-      const io = IO_RE.exec(line);
-      if (io) ios.push({ file: f.name, dir: io[1] === 'input' ? 'in' : 'out',
-        token: io[3]!, ch: io[4]!.trim(), fn: `${io[1]}_${io[2]}` });
+      if (graphs.get(f.name)) continue;    // node programs: io came from the graph
+      const ev = IO_RE.exec(line);
+      if (ev) io.push({ file: f.name, dir: ev[1] === 'input' ? 'in' : 'out',
+        token: ev[3]!, ch: ev[4]!.trim() });
     }
   }
-  // cross-file call edges: owner file -> target file (via the @fn's owner)
-  const callEdges = new Map<string, Set<string>>();
-  for (const [file, toks] of calls)
-    for (const tok of toks) {
-      const owner = decl.get(tok);
-      if (!owner || owner === file) continue;
-      if (!callEdges.has(file)) callEdges.set(file, new Set());
-      callEdges.get(file)!.add(owner + '\u0000' + tok);
-    }
-
-  // ── device actor model (FULLY RESOLVED names) ──────────────────────────
-  const devKey = (d: XCDevice) => `${d.alias || 'io ' + d.io} · ${d.type} · io ${d.io}`;
-  const touched = new Map<string, { dev: XCDevice; ins: Set<string>; outs: Set<string> }>();
-  const dkey = (d: XCDevice) => `${d.alias}|${d.io}`;
   const resolve = (file: string, tok: string): XCDevice[] => {
     const t = tok.trim();
     if (/^\d+$/.test(t)) return prog.devices.filter(d => d.io === +t);
-    if (/^".*"$/.test(t)) {
-      const a = t.slice(1, -1).toLowerCase();
-      return prog.devices.filter(d => d.alias.toLowerCase() === a);
-    }
-    if (t.startsWith('$')) {
-      const lits = varStrs.get(file)?.get(t) ?? [];
-      const out: XCDevice[] = [];
-      for (const l of lits)
-        for (const d of prog.devices)
-          if (d.alias.toLowerCase() === l.toLowerCase() && !out.includes(d)) out.push(d);
-      return out;
-    }
+    if (/^".*"$/.test(t)) { const a = t.slice(1, -1).toLowerCase();
+      return prog.devices.filter(d => d.alias.toLowerCase() === a); }
+    if (t.startsWith('$')) { const lits = varStrs.get(file)?.get(t) ?? []; const out: XCDevice[] = [];
+      for (const l of lits) for (const d of prog.devices)
+        if (d.alias.toLowerCase() === l.toLowerCase() && !out.includes(d)) out.push(d);
+      return out; }
     return [];
   };
-  for (const ev of ios)
-    for (const d of resolve(ev.file, ev.token)) {
-      const k = dkey(d);
-      if (!touched.has(k)) touched.set(k, { dev: d, ins: new Set(), outs: new Set() });
-      (ev.dir === 'in' ? touched.get(k)!.ins : touched.get(k)!.outs).add(ev.ch);
-    }
+  const short = (d: XCDevice) => (d.alias || `io${d.io}`).replace(/\s+/g, '_');
 
-  // ── FLOW ────────────────────────────────────────────────────────────────
-  const flow: string[] = ['flowchart TD'];
-  for (const f of files) {
-    flow.push(`  subgraph ${nid('f', f.name)}["${label(f.name)}"]`);
-    for (const e of entries.get(f.name) ?? [])
-      flow.push(`    ${nid('e', f.name + e)}(["${label(e)}"]):::entry`);
-    for (const fn of fns.get(f.name) ?? [])
-      flow.push(`    ${nid('fn', f.name + fn.name)}["@${label(fn.name)}"]`);
-    flow.push('  end');
-  }
-  flow.push('  classDef entry fill:#123,stroke:#7dffcf,color:#eafff6;');
-  for (const f of files) {
-    for (const e of entries.get(f.name) ?? [])
-      for (const fn of fns.get(f.name) ?? [])
-        if (new RegExp('@' + fn.name + '\\s*\\(').test(f.code))
-          flow.push(`  ${nid('e', f.name + e)} --> ${nid('fn', f.name + fn.name)}`);
-    for (const inc of includes.get(f.name) ?? [])
-      if (files.some(x => x.name === inc))
-        flow.push(`  ${nid('f', f.name)} -. include .-> ${nid('f', inc)}`);
-    for (const edge of callEdges.get(f.name) ?? []) {
-      const [tgt, tok] = edge.split('\u0000');
-      flow.push(`  ${nid('f', f.name)} -. "calls ${label(tok!)}" .-> ${nid('f', tgt!)}`);
-    }
-  }
-
-  // ── SEQUENCE (user = the pilot; devices = system actors) ───────────────
-  const seq: string[] = ['sequenceDiagram', '  autonumber'];
-  seq.push('  actor U as Pilot / user');
-  const parts = [...touched.values()].sort((a, b) =>
-    (a.dev.type === 'PilotSeat' ? 0 : 1) - (b.dev.type === 'PilotSeat' ? 0 : 1));
-  for (const t of parts)
-    seq.push(`  participant ${nid('d', dkey(t.dev))} as ${label(devKey(t.dev))}`);
-  for (const f of files)
-    seq.push(`  participant ${nid('p', f.name)} as ${label(prog.alias + ' · ' + f.name)}`);
-  // SOLID arrows: ->> is mermaid's solid message (the dotted -.-> family
-  // is for relations — sequence messages read as data flow).
-  for (const t of parts) if (t.dev.type === 'PilotSeat')
-    for (const ch of [...t.ins].slice(0, 8)) {
-      const w = seatLabels?.[+ch] ? ` (${seatLabels[+ch]})` : '';
-      seq.push(`  U->>+${nid('d', dkey(t.dev))}: press ch ${label(ch)}${w}`);
-    }
-  for (const ev of ios) {
-    const devs = resolve(ev.file, ev.token);
-    if (!devs.length) continue;
-    for (const d of devs.slice(0, 3)) {
-      const dpart = nid('d', dkey(d)), ppart = nid('p', ev.file);
-      if (ev.dir === 'out') seq.push(`  ${ppart}->>+${dpart}: ${ev.fn} ch ${label(ev.ch)}`);
-      else {
-        const w = d.type === 'PilotSeat' && seatLabels?.[+ev.ch] ? ` (${seatLabels[+ev.ch]})` : '';
-        seq.push(`  ${dpart}->>+${ppart}: ${ev.fn} ch ${label(ev.ch)}${w}`);
-      }
-    }
-  }
-  for (const [file, edges] of callEdges)
-    for (const edge of edges) {
-      const [tgt, tok] = edge.split('\u0000');
-      seq.push(`  ${nid('p', file)}->>+${nid('p', tgt!)}: ${label(tok!)}()`);
-    }
-  for (const f of files) {
-    const ent = (entries.get(f.name) ?? []).filter(e => !e.includes(' · '));
-    if (ent.length) seq.push(`  Note over ${nid('p', f.name)}: ${label('entry: ' + ent.join(', '))}`);
-  }
-
-  // ── CLASS (files as classes) ───────────────────────────────────────────
+  // ── CLASS & WIRING (the centrepiece, max one per computer) ────────────
+  const withContent = files.filter(f => (fns.get(f.name)?.length ?? 0) + (entries.get(f.name)?.length ?? 0) > 0);
+  const shown = withContent.slice(0, CAP.cls);
   const cls: string[] = ['classDiagram'];
-  for (const f of files) {
+  for (const f of shown) {
     const cname = nid('c', f.name);
     cls.push(`  class ${cname}["${label(f.name)}"] {`);
-    const vars = [...f.code.matchAll(/^\s*(?:storage\s+)?var\s+(\$[A-Za-z0-9_]+)\s*(?::\s*(number|text))?/gm)];
-    for (const v of vars.slice(0, 40)) cls.push(`    +${v[2] ?? 'var'} ${label(v[1]!)}`);
-    for (const fn of fns.get(f.name) ?? []) {
-      const args = fn.sig.replace(/\$([A-Za-z0-9_]+)/g, '$1').slice(0, 40);
-      cls.push(`    +${label(fn.name)}(${label(args)})${fn.ret ? ' ' + fn.ret : ''}`);
-    }
+    for (const e of entries.get(f.name) ?? [])
+      cls.push(`    +${ENTRY_MARK[e] ?? '«' + e + '»'}`);
+    const own = [...new Set(fns.get(f.name) ?? [])].filter(x => !entries.has(x));
+    for (const fn of own.slice(0, CAP.fns)) cls.push(`    +${label(fn)}`);
+    if (own.length > CAP.fns) cls.push(`    +… +${own.length - CAP.fns} more`);
     cls.push('  }');
-    for (const inc of includes.get(f.name) ?? [])
-      if (files.some(x => x.name === inc)) cls.push(`  ${cname} ..> ${nid('c', inc)} : include`);
-    for (const edge of callEdges.get(f.name) ?? []) {
-      const [tgt, tok] = edge.split('\u0000');
-      cls.push(`  ${cname} ..> ${nid('c', tgt!)} : calls ${label(tok!)}`);
+  }
+  if (withContent.length > shown.length)
+    cls.push(`  class misc["… ${withContent.length - shown.length} more file(s)"]`);
+  let edges = 0;
+  for (const f of shown) {
+    for (const inc of includes.get(f.name) ?? []) {
+      if (edges >= CAP.edges) break;
+      if (shown.some(x => x.name === inc)) { cls.push(`  ${nid('c', f.name)} ..> ${nid('c', inc)} : include`); edges++; }
+    }
+  }
+  for (const [file, cset] of calls) {
+    if (edges >= CAP.edges) break;
+    const cross = [...cset].filter(t => !t.includes('→')).map(t => decl.get(t)).filter(o => o && o !== file);
+    const uniq = [...new Set(cross)] as string[];
+    for (const tgt of uniq) {
+      if (edges >= CAP.edges || !shown.some(x => x.name === tgt || x.name === file)) continue;
+      cls.push(`  ${nid('c', file)} ..> ${nid('c', tgt)} : calls`); edges++;
     }
   }
 
+  // ── FLOW (entries + structure; node files get their node graph) ───────
+  const flow: string[] = ['flowchart LR'];
+  let flowEdges = 0;
+  // FLOW shows FEWER files than class (we: "for ASuper mario that became WAY
+  // too large"): the structure view is a map, not an inventory.
+  const flowShown = shown.slice(0, CAP.flowFiles);
+  for (const f of flowShown) {
+    flow.push(`  subgraph ${nid('f', f.name)}["${label(f.name)}"]`);
+    const g = graphs.get(f.name);
+    if (g) {
+      const nodes = g.nodes.slice(0, CAP.nodeCls);
+      for (const n of nodes)
+        flow.push(`    ${nid('n', f.name + n.id)}["${label(n.title || n.type)}"]`);
+      const byId = new Map(nodes.map(n => [n.id, n]));
+      for (const n of nodes) for (const src of n.inputs ?? [])
+        if (src && byId.has(src))
+          flow.push(`    ${nid('n', f.name + src)} --> ${nid('n', f.name + n.id)}`);
+      if (g.nodes.length > nodes.length)
+        flow.push(`    more_${nid('n', f.name)}["… +${g.nodes.length - nodes.length} nodes"]`);
+      flow.push('  end');
+    } else {
+      for (const e of entries.get(f.name) ?? [])
+        flow.push(`    ${nid('e', f.name + e)}(["${label(ENTRY_MARK[e] ?? e)}"]):::entry`);
+      const own = [...new Set(fns.get(f.name) ?? [])];
+      for (const fn of own.slice(0, CAP.fns))
+        flow.push(`    ${nid('fn', f.name + fn)}["${label(fn)}"]`);
+      if (own.length > CAP.fns)
+        flow.push(`    morefn_${nid('fn', f.name)}["… +${own.length - CAP.fns} functions"]`);
+      for (const e of entries.get(f.name) ?? [])
+        for (const fn of own.slice(0, CAP.fns))
+          if (flowEdges < 12 && (f.code.includes(`${fn}(`) || f.code.includes(`${fn} (`))) {
+            flow.push(`    ${nid('e', f.name + e)} --> ${nid('fn', f.name + fn)}`); flowEdges++;
+          }
+      flow.push('  end');
+    }
+  }
+  if (shown.length > flowShown.length)
+    flow.push(`  moref["… ${shown.length - flowShown.length} more file(s) — see the class diagram"]`);
+  flow.push('  classDef entry fill:#123,stroke:#7dffcf,color:#eafff6');
+
+  // ── SEQUENCE split in TWO bounded views (we: "doesnt couple input and
+  //   output… maybe have two different ones") ────────────────────────────
+  const tally = new Map<string, { dev: XCDevice; dir: 'in' | 'out'; chs: Set<string>; n: number }>();
+  for (const ev of io)
+    for (const d of resolve(ev.file, ev.token)) {
+      const k = `${d.alias}|${d.io}|${ev.dir}`;
+      if (!tally.has(k)) tally.set(k, { dev: d, dir: ev.dir, chs: new Set(), n: 0 });
+      tally.get(k)!.chs.add(ev.ch); tally.get(k)!.n++;
+    }
+  const byDir = (dir: 'in' | 'out') => [...tally.values()].filter(t => t.dir === dir)
+    .sort((a, b) => b.n - a.n);
+  const mkSeq = (dir: 'in' | 'out', title: string): XcDiagram => {
+    const ranked = byDir(dir);
+    const t = ranked.slice(0, CAP.seqDev);
+    const seats = t.filter(x => x.dev.type === 'PilotSeat');
+    const lines: string[] = ['sequenceDiagram'];
+    if (seats.length) lines.push('  actor U as Pilot / user');
+    lines.push('  participant P as ' + label(prog.alias));
+    for (const x of t)
+      lines.push(`  participant ${nid('d', short(x.dev))} as ${label(short(x.dev) + ' · ' + x.dev.type)}`);
+    let msgs = 0;
+    for (const x of t) {
+      if (msgs >= CAP.seqMsg) break;
+      const chs = [...x.chs].slice(0, 4).join(',');
+      const txt = `${dir === 'in' ? 'read' : 'write'} ch ${label(chs)} \u00d7${x.n}`;
+      if (x.dev.type === 'PilotSeat' && dir === 'in') {
+        const first = +[...x.chs][0]!;
+        lines.push(`  U->>+${nid('d', short(x.dev))}: press ${label(seatLabels?.[first] ? `(${seatLabels![first]})` : `ch ${[...x.chs][0]}`)}`);
+        lines.push(`  ${nid('d', short(x.dev))}->>+P: ${label(txt)}`); msgs += 2;
+      } else if (dir === 'in') { lines.push(`  ${nid('d', short(x.dev))}->>+P: ${label(txt)}`); msgs++; }
+      else { lines.push(`  P->>+${nid('d', short(x.dev))}: ${label(txt)}`); msgs++; }
+    }
+    const folded = Math.max(0, t.length - msgs / 2) + Math.max(0, ranked.length - t.length);
+    if (folded > 0)
+      lines.push(`  Note over P: +${folded} quieter channel group(s) folded \u2014 full census in the rundown`);
+    return { kind: dir === 'in' ? 'seqIn' : 'seqOut', title: `${prog.alias} \u2014 ${title}`, source: lines.join('\n') };
+  };
+
   return [
-    { kind: 'flow', title: `${prog.alias} — entry points & call graph`, source: flow.join('\n') },
-    { kind: 'sequence', title: `${prog.alias} — the pilot, the devices, the program`, source: seq.join('\n') },
-    { kind: 'class', title: `${prog.alias} — files as classes`, source: cls.join('\n') },
+    { kind: 'class', title: `${prog.alias} — class & wiring (files, methods, nodes)`, source: cls.join('\n') },
+    { kind: 'flow', title: `${prog.alias} — structure (entries, functions, node graph)`, source: flow.join('\n') },
+    mkSeq('in', 'INPUT flow — what the program reads'),
+    mkSeq('out', 'OUTPUT flow — what the program writes'),
   ];
 }
 
