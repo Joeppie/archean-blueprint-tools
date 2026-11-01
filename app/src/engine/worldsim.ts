@@ -122,7 +122,9 @@ export function slug(s: string): string {
  *  `slug(alias)#channel` — one key store, no twins. */
 export function normScreenKey(k: string): string {
   const i = k.lastIndexOf('#');
-  return i < 0 ? slug(k) : `${slug(k.slice(0, i))}#${k.slice(i + 1)}`;
+  if (i < 0) return k.toLowerCase().replace(/[^a-z0-9#]+/g, '_').replace(/^_+|_+$/g, '');
+  const base = k.slice(0, i).toLowerCase().replace(/[^a-z0-9#]+/g, '_').replace(/^_+|_+$/g, '');
+  return `${base}#${k.slice(i + 1)}`;
 }
 
 /** The worldsim NAME of a channel (predefined, program-addressable): the

@@ -1,7 +1,7 @@
 // worldsim.test.ts — the expression engine + the flight-at-2000 m defaults.
 import { describe, expect, it } from 'vitest';
 import {
-  evalExpr, slug, worldsimDefault, wsKind, wsName, wsEnsure, wsChans,
+  evalExpr, slug, worldsimDefault, wsKind, wsName, wsEnsure, wsChans, normScreenKey,
 } from '../worldsim';
 
 describe('worldsim expressions', () => {
@@ -65,5 +65,19 @@ describe('the 2000 m / 80 m/s defaults', () => {
     expect(worldsimDefault('using', 'pilotseat')).toBe('1');
     expect(worldsimDefault('backward/forward', 'pilotseat')).toContain('sin');
     expect(worldsimDefault(null, 'mystery')).toContain('sin');     // oscillates too
+  });
+});
+
+describe('THE CANONICAL SCREEN-KEY LAW — @screenkey (v1.17.2)', () => {
+  it('normalizes alias keys to slug#channel', () => {
+    expect(normScreenKey('Element 09#9')).toBe('element_09#9');
+    expect(normScreenKey('main-screen#0')).toBe('main_screen#0');
+  });
+  it('KEEPS the # inside virtual-surface bases (the dashboards-cell law)', () => {
+    expect(normScreenKey('virtual#0#0')).toBe('virtual#0#0');
+    expect(normScreenKey('virtual#12#3')).toBe('virtual#12#3');
+  });
+  it('no-# keys pass through slugged', () => {
+    expect(normScreenKey('main')).toBe('main');
   });
 });

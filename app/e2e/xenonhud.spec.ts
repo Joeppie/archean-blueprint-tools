@@ -199,7 +199,7 @@ test.describe('HUD blocks + beacon radio @ui', () => {
       .toBeGreaterThan(150);
   });
 
-  test('the HUD runtime: live panels + the beacon loop into a component @slow', async ({ page }) => {
+  test('the HUD runtime: live panels + the beacon loop into a component @slow', async ({ page, isMobile }) => {
     test.setTimeout(240_000);
     await page.goto(`/?craft=${BADGER}`);
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 120_000 });
@@ -208,6 +208,8 @@ test.describe('HUD blocks + beacon radio @ui', () => {
     await expect(page.getByTestId('hud-dialog')).toBeVisible();
     await page.getByTestId('hud-run').click();
     await expect(page.getByTestId('hud-run-status')).toContainText('ON', { timeout: 30_000 });
+    // PHONE (v1.17.2 panel-menu law): the side panel lives behind the rail
+    if (isMobile) await openSide(page, 'panels', 0, 'hud');
     // the guide renders its ACTIVE scale-set (1× at this viewport — the
     // 0×/2× sets sit parked empty, the guide's own scaling law): sum the
     // lit pixels across every panel canvas.
