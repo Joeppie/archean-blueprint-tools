@@ -15,7 +15,7 @@
 // (engine/xcgraph buildAnalysisHtml). The FLIGHT section appears only when
 // the craft carries flight surfaces (craftIsFlyable) — Mario cabinets and
 // rovers get an honest 'not applicable' line instead of theatre.
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import FloatingWindow from './FloatingWindow';
 import type { Blueprint } from '../engine/format';
 import type { Engine } from '../engine/scene';
@@ -23,9 +23,13 @@ import { xenonComputers, xenonFarm, xenonHudControllers, type XenonComputer } fr
 import { hudPump } from '../engine/hudpump';
 import { GAME_HUD_LAW, GAME_IPC_LAW, GAME_POWER_LAW, type ReportCompute } from '../engine/xcgraph';
 import { peekManifest } from '../engine/models';
+import { massModel } from '../engine/mass';
+import { buildCost, loadEconomy, materialQty, type Economy } from '../engine/economy';
 import { flightLab } from '../engine/flightlab';
 import { buildAnalysisHtml, codeRundown, craftIsFlyable, svgTextOnly, xcDiagrams,
   type ReportSection, type XcDiagram } from '../engine/xcgraph';
+
+const G0 = 9.80665;    // the craft's weight = mass · g (the header card, v1.17.2)
 
 /** A diagram you can actually MOVE (v1.17.1, we: "I cannot navigate or
  *  move through the diagrams properly"): wheel zoom, drag pan, −/+ /
@@ -78,7 +82,7 @@ function DiagramView(p: { svg: string }) {
         onPointerUp={() => { drag.current = null; }} onPointerLeave={() => { drag.current = null; }}
         dangerouslySetInnerHTML={{ __html: `<div style="transform:translate(${pan.x}px,${pan.y}px) scale(${k});transform-origin:0 0;width:max-content">${p.svg}</div>` }} />
     </div>);
-  if (!big) return <div className="h-[340px] max-w-[980px]">{box}</div>;
+  if (!big) return <div className="h-[500px] w-full max-w-[1200px]">{box}</div>;
   return <div className="absolute inset-0 z-20 flex flex-col bg-[#0b1220]/[.97] p-2">{box}</div>;
 }
 
@@ -89,7 +93,8 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
   engine: Engine | null; close: () => void }) {
   const [svgs, setSvgs] = useState<Record<string, string>>({});
   const [errs, setErrs] = useState<Record<string, string>>({});
-  const [plates, setPlates] = useState<Record<number, { top: string; front: string }>>({});
+  const [plates, setPlates] = useState<Record<number,
+    { top: string; front: string; side: string }>>({});
   const [busy, setBusy] = useState(false);
   // mermaid lives in STATE (a ref never re-fires the render effect — the
   // first-cut catch: the diagram effect ran once before the runtime loaded
@@ -206,6 +211,20 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
   const flight = flyable ? flightLab(p.bp, peekManifest()) : null;
   const buriedNames = (flight?.authority.rows ?? []).filter(r => r.buried)
     .map(r => `${r.type} #${r.ci}`);
+  // THE CRAFT HEADER (v1.17.2, we: "weight, costs and flight characteristics
+  // should be higher up in the analysis"): the mass model + the build-cost
+  // twin ride the SAME twins the Info/Build-cost widgets use, computed at
+  // the TOP of the reading — both are whole-craft censuses, so memo them
+  // on (bp, manifest, economy) and share them between dialog and export.
+  const [econ, setEcon] = useState<Economy | null>(null);
+  useEffect(() => { let dead = false; loadEconomy().then(e => { if (!dead) setEcon(e); });
+    return () => { dead = true; }; }, []);
+  const massKg = p.bp ? massModel(p.bp, peekManifest()).total : 0;
+  const cost = useMemo(() => (econ && p.bp ? buildCost(econ, p.bp) : null),
+    [econ, p.bp, maniTick]);
+  const summary = { massKg, weightN: massKg * G0,
+    costRaw: cost ? Math.round(materialQty(cost.total)) : undefined,
+    costTime: cost?.total.time };
   const reportSections: ReportSection[] = [
     ...comps.map(c => reportSectionFor(c.ci, false, c.alias || `#${c.ci}`,
       c.files.map(f => ({ name: f.name, code: f.code })), c.devices)),
@@ -218,7 +237,9 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
     const pump = isHud ? null : xenonFarm.pumps.find(q => q.comp?.ci === cid);
     return {
       compAlias: (isHud ? '📟 ' : '') + alias,
-      plateTop: isHud ? undefined : plates[cid]?.top, plateFront: isHud ? undefined : plates[cid]?.front,
+      plateTop: isHud ? undefined : plates[cid]?.top,
+      plateFront: isHud ? undefined : plates[cid]?.front,
+      plateSide: isHud ? undefined : plates[cid]?.side,
       diagrams: ds,
       svgs: ds.map(d => svgs[`${cid}|${d.kind}`] ?? null),
       rundown: codeRundown({ alias, ci: cid, files, devices }),
@@ -232,7 +253,7 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
 
   const exportHtml = () => {
     const html = buildAnalysisHtml({
-      craft: p.craft, sections: reportSections,
+      craft: p.craft, sections: reportSections, summary,
       flight: flight ? {
         speed: flight.speed, mass: flight.mass, stallSpeed: flight.stallSpeed,
         ldMax: flight.ldMax, staticMarginPct: flight.staticMarginPct,
@@ -257,7 +278,8 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
 
   return (
     <FloatingWindow id="analysis" testid="analysis-dock" fullNarrow
-      initial={(vw, vh) => ({ x: Math.max(20, vw / 2 - 520), y: 40, w: Math.min(1040, vw - 80), h: vh - 90 })}
+      initial={(vw, vh) => { const w = Math.min(1280, vw - 40);
+        return { x: Math.max(20, (vw - w) / 2), y: 30, w, h: vh - 60 }; }}
       header={
         <span className="flex items-center gap-2">
           <span data-testid="analysis-title">⚗ Analysis — {p.craft}</span>
@@ -292,25 +314,89 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
         )}
         {errs['*'] && <div className="rounded bg-[#3a1420] p-2 text-[11px] text-[#ffb4b4]"
           data-testid="analysis-mermaid-err">{errs['*']}</div>}
+        <section data-testid="analysis-summary" className="max-w-[1160px] rounded border
+          border-[#22314a] bg-[#0e1626] p-3 text-[12px] text-[#c8d4e4]">
+          {/* THE CRAFT HEADER FIRST (v1.17.2, we: "weight, costs and flight
+              characteristics should be higher up in the analysis") */}
+          <div className="flex flex-wrap gap-x-8 gap-y-1 tabular-nums">
+            <span><span className="text-[#8b93a1]">mass</span>{' '}
+              <b>{massKg.toFixed(0)} kg</b></span>
+            <span><span className="text-[#8b93a1]">weight</span>{' '}
+              <b>{summary.weightN.toFixed(0)} N</b></span>
+            <span><span className="text-[#8b93a1]">build cost</span>{' '}
+              <b>{summary.costRaw === undefined ? '…'
+                : `${summary.costRaw.toLocaleString('en-US')} raw material units`}</b>
+              {summary.costTime
+                ? <span className="text-[#8b93a1]"> · build {Math.round(summary.costTime / 60)} min</span>
+                : null}</span>
+            {flight && <span><span className="text-[#8b93a1]">stall</span>{' '}
+              <b>{flight.stallSpeed.toFixed(1)} m/s</b></span>}
+            {flight && <span><span className="text-[#8b93a1]">L/D max</span>{' '}
+              <b>{flight.ldMax.toFixed(1)}</b></span>}
+            {flight && <span><span className="text-[#8b93a1]">static margin</span>{' '}
+              <b>{flight.staticMarginPct.toFixed(1)} % MAC</b> → pitch{' '}
+              <b>{flight.pitchVerdict}</b>, yaw <b>{flight.yawVerdict}</b></span>}
+          </div>
+        </section>
+        <section data-testid="analysis-flight" className="max-w-[1160px]">
+          <h3 className="m-0 mb-1 text-[12px] font-medium text-[#e8edf4]">Flight characteristics</h3>
+          {flight ? (
+            <div className="text-[12px] text-[#c8d4e4]" data-testid="analysis-flight-report">
+              mass {flight.mass.toFixed(0)} kg · weight {flight.weight.toFixed(0)} N ·
+              stall {flight.stallSpeed.toFixed(1)} m/s ·
+              L/D max {flight.ldMax.toFixed(1)} · static margin {flight.staticMarginPct.toFixed(1)}
+              % MAC → pitch <b>{flight.pitchVerdict}</b>, yaw <b>{flight.yawVerdict}</b>.
+              <div className="mt-0.5 text-[#a7b6c9]">
+                S {flight.planform.S.toFixed(2)} m² · span {flight.planform.span.toFixed(2)} m ·
+                c̄ {flight.planform.chord.toFixed(2)} m · AR {flight.planform.AR.toFixed(2)} ·
+                C<sub>Lα</sub> {flight.clAlpha.toFixed(2)}/rad · C<sub>Lmax</sub> {flight.clMax.toFixed(2)} ·
+                C<sub>D0</sub> {flight.cd0.toFixed(4)} · K {flight.kInd.toFixed(3)} ·
+                trim {(flight.trimAlphaDeg ?? 0).toFixed(1)}° AoA
+                {flight.trimElevatorDeg !== null ? `, elevator ${flight.trimElevatorDeg.toFixed(1)}°` : ''} ·
+                q {flight.q.toFixed(0)} Pa @ {flight.altitude} m
+              </div>
+              {flight.authority.rows.length > 0 && (
+                <div className="mt-1 text-[11px] text-[#a7b6c9]" data-testid="analysis-authority">
+                  {flight.authority.rows.map(r => (
+                    <span key={r.ci} className="mr-4 inline-block whitespace-nowrap">
+                      <span className="text-[#8b93a1]">{r.axis}</span> {r.type} #{r.ci}
+                      {' '}<b className="tabular-nums">{r.nm.toFixed(0)} N·m</b>
+                      {r.buried && ' ⚠'}
+                    </span>))}
+                </div>)}
+              <div className="mt-1 text-[11px] text-[#8b93a1]">Closed-form shape-field analysis —
+                NOT CFD: no Navier–Stokes field solve runs in the editor (docs/CFD-FEASIBILITY.md);
+                vortex/shedding needs an external solver.</div>
+              {buriedNames.length > 0 && (
+                <div className="mt-1 rounded bg-[#3a2415] p-2 text-[11px] text-[#ffcf9d]">
+                  ⚠ buried control surface: {buriedNames.join(', ')} — inside the collider
+                  mass, it reads ≈ no authority (drag/interference suspect).</div>
+              )}
+            </div>
+          ) : (
+            <div className="text-[11px] text-[#8b93a1]">Not applicable — no flight-control
+              surfaces on this craft (rover/cabinet logic).</div>
+          )}
+        </section>
         {cur && (
           <>
             {(() => {
               const ph = plates[cur.ci];
-              // v1.17.1 (we: "Total vessel overview wireframe … is totally useless
-              // … add such a SVG/PNG … to represent specifically a diagram shown
-              // … each computer (max 1) should have such a class and wiring
-              // diagram together"): the plate pair is the Class & Wiring section's
-              // OWN visual — this computer's actors amber, their cables lit.
+              // v1.17.2 (we: "the diagrams should have a front/side/top
+              // diagram"): the plate pair became the THREE-VIEW trio —
+              // front, side, topside at one isotropic scale, actors solid,
+              // their cables lit, colour-rotated leader labels.
               return ph && (
-              <div data-testid="analysis-plates" className="flex flex-wrap gap-3">
-                {([['topside', ph.top], ['front', ph.front]] as const)
+              <div data-testid="analysis-plates" className="flex max-w-[1160px] flex-wrap gap-2">
+                {([['front (nose −z)', ph.front], ['side (starboard)', ph.side], ['topside', ph.top]] as const)
                   .map(([k, src]) => (
                     <figure key={k} className="m-0">
-                      <img src={src} width={430}
-                        className="max-w-[44vw] rounded-md border border-[#22314a]"
+                      <img src={src} width={380}
+                        className="max-w-[32vw] rounded-md border border-[#22314a]"
                         alt={`vessel ${k}`} />
                       <figcaption className="text-[10px] text-[#8b93a1]">{k} · wireframe,
-                        actors amber, cabled runs amber + io tags</figcaption>
+                        actors solid, cabled runs amber + io tags,
+                        leader-line labels</figcaption>
                     </figure>
                   ))}
               </div>
@@ -324,7 +410,7 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
                     workEma: pump?.workEma ?? null, samples: pump?.workSamples ?? 0,
                     live: pump?.status === 'running' };
               return (
-                <section data-testid="analysis-compute" className="max-w-[900px] rounded border
+                <section data-testid="analysis-compute" className="max-w-[1160px] rounded border
                   border-[#22314a] bg-[#0e1626] p-2 text-[11px] leading-relaxed text-[#c8d4e4]">
                   <span className="font-medium text-[#e8edf4]">Compute budget</span> — measured
                   work{' '}
@@ -340,7 +426,7 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
             {(() => { const rd = codeRundown({ alias: cur.alias || `#${cur.ci}`, ci: cur.ci,
               files: cur.files.map(f => ({ name: f.name, code: f.code })), devices: curIsHud ? [] : curCpu!.devices });
               return (
-                <section data-testid="analysis-rundown" className="max-w-[900px]">
+                <section data-testid="analysis-rundown" className="max-w-[1160px]">
                   <h3 className="m-0 mb-1 text-[12px] font-medium text-[#e8edf4]">Code structure</h3>
                   <ul className="m-0 list-disc pl-5 text-[11px] leading-relaxed text-[#c8d4e4]">
                     {rd.summary.map((b, i) => <li key={i}>{b}</li>)}
@@ -388,36 +474,6 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
                 </section>
               );
             })}
-            <section data-testid="analysis-flight">
-              <h3 className="m-0 mb-1 text-[12px] font-medium text-[#e8edf4]">Flight characteristics</h3>
-              {flight ? (
-                <div className="text-[12px] text-[#c8d4e4]" data-testid="analysis-flight-report">
-                  mass {flight.mass.toFixed(0)} kg · stall {flight.stallSpeed.toFixed(1)} m/s ·
-                  L/D max {flight.ldMax.toFixed(1)} · static margin {flight.staticMarginPct.toFixed(1)}
-                  % MAC → pitch <b>{flight.pitchVerdict}</b>, yaw <b>{flight.yawVerdict}</b>.
-                  <div className="mt-0.5 text-[#a7b6c9]">
-                    S {flight.planform.S.toFixed(2)} m² · span {flight.planform.span.toFixed(2)} m ·
-                    c̄ {flight.planform.chord.toFixed(2)} m · AR {flight.planform.AR.toFixed(2)} ·
-                    C<sub>Lα</sub> {flight.clAlpha.toFixed(2)}/rad · C<sub>Lmax</sub> {flight.clMax.toFixed(2)} ·
-                    C<sub>D0</sub> {flight.cd0.toFixed(4)} · K {flight.kInd.toFixed(3)} ·
-                    trim {(flight.trimAlphaDeg ?? 0).toFixed(1)}° AoA
-                    {flight.trimElevatorDeg !== null ? `, elevator ${flight.trimElevatorDeg.toFixed(1)}°` : ''} ·
-                    q {flight.q.toFixed(0)} Pa @ {flight.altitude} m
-                  </div>
-                  <div className="mt-1 text-[11px] text-[#8b93a1]">Closed-form shape-field analysis —
-                    NOT CFD: no Navier–Stokes field solve runs in the editor (docs/CFD-FEASIBILITY.md);
-                    vortex/shedding needs an external solver.</div>
-                  {buriedNames.length > 0 && (
-                    <div className="mt-1 rounded bg-[#3a2415] p-2 text-[11px] text-[#ffcf9d]">
-                      ⚠ buried control surface: {buriedNames.join(', ')} — inside the collider
-                      mass, it reads ≈ no authority (drag/interference suspect).</div>
-                  )}
-                </div>
-              ) : (
-                <div className="text-[11px] text-[#8b93a1]">Not applicable — no flight-control
-                  surfaces on this craft (rover/cabinet logic).</div>
-              )}
-            </section>
           </>
         )}
       </div>

@@ -32,8 +32,9 @@ test.describe('@analysis @slow THE CRAFT ANALYSIS', () => {
       { timeout: 120_000, message: `${kind} diagram renders` }).toBe(1);
       expect(await page.getByTestId(`analysis-error-${kind}`).count()).toBe(0);
     }
-    // the vessel plate pair above/with the reading: topside + front PNGs
-    await expect(page.getByTestId('analysis-plates').locator('img')).toHaveCount(2,
+    // v1.17.2 THE THREE-VIEW TRIO (we: "the diagrams should have a
+    // front/side/top diagram"): front + side + topside PNGs
+    await expect(page.getByTestId('analysis-plates').locator('img')).toHaveCount(3,
       { timeout: 120_000 });
     // THE PLATE HAS A SHIP ON IT (v1.17.1, we: "Nothing visible in vesel
     // overviews" — the spec counted <img> tags for two releases and the
@@ -95,6 +96,22 @@ test.describe('@analysis @slow THE CRAFT ANALYSIS', () => {
     // v1.17.1 THE CODE RUNDOWN (we: "should give a better rundown")
     await expect(page.getByTestId('analysis-rundown')).toBeVisible();
     await expect(page.getByTestId('analysis-rundown')).toContainText(/lines|entries/);
+    // v1.17.2 THE CRAFT HEADER (we: "weight, costs and flight characteristics
+    // should be higher up"): mass/weight/build cost lead the reading, ABOVE
+    // the diagrams (DOM order asserts the placement, content the numbers).
+    await expect(page.getByTestId('analysis-summary')).toContainText(/kg/);
+    await expect(page.getByTestId('analysis-summary')).toContainText(/weight\s[\d,.]+\sN/);
+    await expect(page.getByTestId('analysis-summary')).toContainText(/raw material units/);
+    const order = await page.evaluate(() => {
+      const body = document.querySelector('[data-testid="analysis-body"]')!;
+      const idx = (t: string) => [...body.querySelectorAll('[data-testid]')]
+        .findIndex(el => (el as HTMLElement).dataset.testid === t);
+      return { summary: idx('analysis-summary'), flight: idx('analysis-flight'),
+        plates: idx('analysis-plates'), rundown: idx('analysis-rundown') };
+    });
+    expect(order.summary).toBeLessThan(order.plates);
+    expect(order.flight).toBeLessThan(order.plates);
+    expect(order.plates).toBeLessThan(order.rundown);
     // flight: the plane gets the FLIGHT LAB reading (it carries surfaces)
     await expect(page.getByTestId('analysis-flight-report')).toBeVisible({ timeout: 60_000 });
 

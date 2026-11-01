@@ -2956,18 +2956,23 @@ void main() {
    *  a PNG of the vessel … topside, front, orthographic; the labels we used
    *  to have on, for only the relevant actors … highlighted, wireframe on,
    *  view zoomed; also wire highlighted between, io number") ─────────────
-   *  Offscreen two-view orthographic plate of the CRAFT ONLY (grid/ground/
-   *  helpers stay out): everything wireframe teal, the ACTOR set solid
-   *  amber, every cable touching an actor redrawn as an amber polyline
-   *  (from pipeNet.polys — the exact drawn run) with its endpoint io tags,
-   *  actors labelled from their projected centres. The live scene's
-   *  materials are swapped only for the two draws and restored before
-   *  resolve; the on-demand render law is untouched (this drives its own
-   *  throwaway renderer). Returns data-URL PNGs. */
+   *  Offscreen THREE-VIEW orthographic plate of the CRAFT ONLY (grid/
+   *  ground/helpers stay out): everything wireframe teal, the ACTOR set
+   *  solid amber, every cable touching an actor redrawn as an amber
+   *  polyline (from pipeNet.polys — the exact drawn run) with its endpoint
+   *  io tags. v1.17.2 (we: "the diagrams should have a front/side/top
+   *  diagram … the labels should try to not overlap and use slightly
+   *  different colors, using lines to indicate where things are"): the
+   *  plate pair became the classic TOPSIDE / FRONT / SIDE trio, and every
+   *  label gets a COLOUR-ROTATED, collision-slotted box with a LEADER LINE
+   *  to the dot on the thing it names. The live scene's materials are
+   *  swapped only for the three draws and restored before resolve; the
+   *  on-demand render law is untouched (this drives its own throwaway
+   *  renderer). Returns data-URL PNGs. */
   async analysisShots(opts: {
     actors: { ci: number; tag: string }[];
     size?: { w: number; h: number };
-  }): Promise<{ top: string; front: string; empty: boolean }> {
+  }): Promise<{ top: string; front: string; side: string; empty: boolean }> {
     const w = opts.size?.w ?? 860, h = opts.size?.h ?? 540;
     const scene = this.scene;
     if (!scene || !this.bp) throw new Error('analysisShots: no scene');
@@ -3025,6 +3030,11 @@ void main() {
       opacity: 0.62, depthWrite: false, side: DoubleSide });
     const wireLine = new LineBasicMaterial({ color: 0x54c9bd, transparent: true, opacity: 0.22 });
     const amber = new MeshBasicMaterial({ color: 0xffc35e });
+    // the label palette (v1.17.2): rotated per label so neighbouring
+    // leaders and boxes read apart — amber leads, the rest stay warm/cool
+    // pairs on the dark card.
+    const LABEL_COLORS = ['#ffd98a', '#7dffcf', '#9fd0ff', '#ff9ecb', '#c9ff8a',
+      '#ffb08a', '#b7a6ff', '#8afff0', '#ffe08a', '#f0a6ff', '#a6ffd0', '#ffa6a6'];
     const hidden: Object3D[] = [];
     if (this.gridLines) { this.gridLines.visible = false; hidden.push(this.gridLines); }
     if (this.surgeGroup.visible) { this.surgeGroup.visible = false; hidden.push(this.surgeGroup); }
@@ -3094,47 +3104,89 @@ void main() {
         // wire highlight: every cable run touching an actor (pipeNet.links
         // index-align polys) — drawn amber on top of the wireframe plate
         const net = this.pipeNet;
-        g2.strokeStyle = '#ffc35e'; g2.lineWidth = 2; g2.font = '12px ui-monospace, monospace';
-        g2.fillStyle = '#ffd98a';
+        g2.strokeStyle = '#ffc35e'; g2.lineWidth = 2;
+        const cableRuns: { mid: { x: number; y: number }; tag: string }[] = [];
         for (let i = 0; i < net.polys.length; i++) {
           const link = net.links[i];
           if (!link || !(actorCis.has(link.a) || actorCis.has(link.b))) continue;
           const pts = net.polys[i]!;
+          g2.strokeStyle = '#ffc35e';
           g2.beginPath();
           pts.forEach((p, k) => { const s = proj(p); if (!k) g2.moveTo(s.x, s.y); else g2.lineTo(s.x, s.y); });
           g2.stroke();
+          g2.fillStyle = '#ffd98a';
           for (const end of [pts[0], pts[pts.length - 1]]) {
             if (!end) continue;
             const s = proj(end);
             g2.fillText('●', s.x - 3, s.y + 4);
           }
-          // the io tags near the run midpoint
+          // the io tag: collected for the SHARED label placer (mid run)
           const mid = pts[Math.floor(pts.length / 2)];
           if (mid) {
-            const s = proj(mid);
             const tags = [link.a, link.b].map(ci => opts.actors.find(x => x.ci === ci)?.tag)
               .filter(Boolean).join(' ↔ ');
-            if (tags) g2.fillText(tags, s.x + 6, s.y - 4);
+            if (tags) cableRuns.push({ mid: proj(mid), tag: tags });
           }
         }
-        // actor labels
-        g2.font = 'bold 13px ui-sans-serif, system-ui';
-        for (const a of opts.actors) {
+        // THE LABEL LAW v1.17.2 (we: "labels should try to not overlap and
+        // use slightly different colors, using lines to indicate where
+        // things are"): every label (actors + cable io tags, ONE shared
+        // placer so the two never collide) gets a colour from the rotation
+        // palette, a slot from the candidate ring that touches nothing,
+        // and a leader line from the box to the dot ON the named thing.
+        const items: { s: { x: number; y: number }; text: string; font: string }[] = [];
+        opts.actors.forEach((a) => {
           const p = anchors.get(a.ci);
-          if (!p) continue;
-          const s = proj(p);
-          g2.fillStyle = '#0b1220aa';
-          const tw = g2.measureText(a.tag).width;
-          g2.fillRect(s.x + 6, s.y - 16, tw + 8, 18);
-          g2.fillStyle = '#ffd98a';
-          g2.fillText(a.tag, s.x + 10, s.y - 3);
-        }
+          if (p) items.push({ s: proj(p), text: a.tag,
+            font: 'bold 13px ui-sans-serif, system-ui' });
+        });
+        cableRuns.forEach((r) => items.push({
+          s: r.mid, text: r.tag, font: '11px ui-monospace, monospace' }));
+        g2.font = '13px ui-sans-serif, system-ui';
+        const placed: { x: number; y: number; w: number; h: number }[] = [];
+        const fits = (b: { x: number; y: number; w: number; h: number }) =>
+          b.x >= 2 && b.y >= 2 && b.x + b.w <= w - 2 && b.y + b.h <= h - 2 &&
+          !placed.some(p => b.x < p.x + p.w + 5 && b.x + b.w + 5 > p.x &&
+            b.y < p.y + p.h + 3 && b.y + b.h + 3 > p.y);
+        items.forEach((it, i) => {
+          const color = LABEL_COLORS[i % LABEL_COLORS.length]!;
+          g2.font = it.font;
+          const tw = g2.measureText(it.text).width;
+          const bw = tw + 10, bh = it.font.startsWith('bold') ? 17 : 14;
+          // candidate ring around the anchor: right/up, right/down, left,
+          // then walk outward in steps — always readable, never a pile-up
+          const offs: [number, number][] = [[12, -20], [12, 6], [12, 32],
+            [-bw - 18, -20], [-bw - 18, 6], [-bw - 18, 32],
+            [12, -48], [12, 60], [-bw - 18, -48], [-bw - 18, 60],
+            [30, -76], [30, 88], [-bw - 36, -76], [-bw - 36, 88]];
+          let b: { x: number; y: number; w: number; h: number } | null = null;
+          for (const [dx, dy] of offs) {
+            const cand = { x: it.s.x + dx, y: it.s.y + dy, w: bw, h: bh };
+            if (fits(cand)) { b = cand; break; }
+          }
+          if (!b) b = { x: Math.min(Math.max(2, it.s.x + 12), w - bw - 2),
+            y: Math.min(Math.max(2, it.s.y - 20), h - bh - 2), w: bw, h: bh };
+          placed.push(b);
+          // leader line anchor→box (drawn first, the box overpaints its end)
+          g2.strokeStyle = color; g2.lineWidth = 1;
+          g2.beginPath(); g2.moveTo(it.s.x, it.s.y);
+          g2.lineTo(b.x + b.w / 2, b.y + b.h / 2); g2.stroke();
+          // the dot ON the thing named
+          g2.fillStyle = color;
+          g2.beginPath(); g2.arc(it.s.x, it.s.y, 3, 0, Math.PI * 2); g2.fill();
+          // the label box
+          g2.fillStyle = '#0b1220cc'; g2.fillRect(b.x, b.y, b.w, b.h);
+          g2.strokeStyle = color; g2.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1);
+          g2.fillStyle = color;
+          g2.fillText(it.text, b.x + 5, b.y + bh - 4.5);
+        });
         return cv.toDataURL('image/png');
       };
       const bx = Math.max(0.5, box.max.x - box.min.x), by = Math.max(0.5, box.max.y - box.min.y),
         bz = Math.max(0.5, box.max.z - box.min.z);
       shots.push(shoot(new Vector3(c.x, c.y + r * 5, c.z + 0.001), new Vector3(0, 0, -1), bx, bz)); // TOPSIDE
       shots.push(shoot(new Vector3(c.x, c.y + r * 0.06, c.z - r * 5), new Vector3(0, 1, 0), bx, by)); // FRONT (nose −z)
+      shots.push(shoot(new Vector3(c.x + r * 5, c.y, c.z), new Vector3(0, 1, 0), bz, by));            // SIDE (starboard, nose right)
     } finally {
       scene.background = prevBg;
       for (const s of swaps) s.o.material = s.prev as never;
@@ -3144,7 +3196,8 @@ void main() {
     }
     // empty:true = nothing was there to draw (scene still building) — the
     // dialog retries instead of framing a lie (we: "Nothing visible").
-    return { top: shots[0]!, front: shots[1]!, empty: emptyBox || triCount === 0 || glBlank };
+    return { top: shots[0]!, front: shots[1]!, side: shots[2]!,
+      empty: emptyBox || triCount === 0 || glBlank };
   }
 
   /** green ground + grid just under the lowest rendered geometry (ground=true:

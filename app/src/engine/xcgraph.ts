@@ -102,8 +102,11 @@ export function parseNodeGraph(file: XcFile): XcNodeGraph | null {
 const CAP = { cls: 7, fns: 6, edges: 8, seqDev: 7, seqMsg: 12, nodeCls: 8, flowFiles: 5 };
 const ENTRY_MARK: Record<string, string> = {
   // the user asked to SEE the live blocks: init, update(tick), click…
-  vars_init: '«vars_init»', init: '«init»', update: '«update · tick 25 Hz»',
-  click: '«click»', click_hold: '«click_hold»', scroll: '«scroll»', shutdown: '«shutdown»',
+  // v1.17.2: the ⚡ rides the mark — in the class member list the live
+  // blocks must not hide among the plain +functions (we: "entry points
+  // is hard to read").
+  vars_init: '⚡«vars_init»', init: '⚡«init»', update: '⚡«update · tick 25 Hz»',
+  click: '⚡«click»', click_hold: '⚡«click_hold»', scroll: '⚡«scroll»', shutdown: '⚡«shutdown»',
 };
 
 export function xcDiagrams(prog: XcProgram, seatLabels?: Record<number, string>): XcDiagram[] {
@@ -200,6 +203,13 @@ export function xcDiagrams(prog: XcProgram, seatLabels?: Record<number, string>)
   }
   if (withContent.length > shown.length)
     cls.push(`  class misc["… ${withContent.length - shown.length} more file(s)"]`);
+  // ENTRY READABILITY v1.17.2 (we: "the entry points is hard to read …
+  // things dont properly align"): a class carrying live blocks gets the
+  // teal frame, devices keep amber — the diagram's colour language is
+  // THE SAME on both diagram kinds and the plates.
+  for (const f of shown)
+    if ((entries.get(f.name) ?? []).length)
+      cls.push(`  style ${nid('c', f.name)} stroke:#7dffcf,stroke-width:2px`);
   // device nodes + wiring edges (bounded like the sequences)
   const devRanked = [...tally.values()].sort((a, b) => b.n - a.n);
   const devShown = devRanked.slice(0, CAP.seqDev);
@@ -207,6 +217,8 @@ export function xcDiagrams(prog: XcProgram, seatLabels?: Record<number, string>)
     cls.push(`  class ${nid('d', short(x.dev))}["≡ ${label(short(x.dev))} : ${label(x.dev.type)}"] {` +
       `\n    +io ${x.dev.io}\n    +${x.dir === 'in' ? 'read' : 'written'} ×${x.n}` +
       `\n    +ch ${label([...x.chs].slice(0, 4).join(','))}\n  }`);
+  for (const x of devShown)
+    cls.push(`  style ${nid('d', short(x.dev))} stroke:#ffc35e,stroke-width:1.5px`);
   if (devRanked.length > devShown.length)
     cls.push(`  class devmisc["… +${devRanked.length - devShown.length} quieter device(s)"]`);
   let devEdges = 0;
@@ -278,7 +290,16 @@ export function xcDiagrams(prog: XcProgram, seatLabels?: Record<number, string>)
   }
   if (shown.length > flowShown.length)
     flow.push(`  moref["… ${shown.length - flowShown.length} more file(s) — see the class diagram"]`);
-  flow.push('  classDef entry fill:#123,stroke:#7dffcf,color:#eafff6');
+  // ENTRY READABILITY v1.17.2 (we: "the entry points is hard to read"):
+  // the entry nodes get a bright, BOLD, wide-stroked stadium — in the class
+  // diagram the carrying class gets the same teal stroke so the eye lands
+  // on «update · tick 25 Hz» first; devices stay amber. Mermaid honours
+  // `style` in classDiagram, so the pairing needs no theme surgery.
+  flow.push('  classDef entry fill:#0d3527,stroke:#7dffcf,stroke-width:2px,'
+    + 'color:#eafff6,font-weight:bold');
+  for (const f of shown)
+    if ((entries.get(f.name) ?? []).length)
+      flow.push(`  style ${nid('f', f.name)} stroke:#7dffcf,stroke-width:1.5px`);
 
   // ── SEQUENCE split in TWO bounded views (we: "doesnt couple input and
   //   output… maybe have two different ones") ────────────────────────────
@@ -491,8 +512,14 @@ export function craftIsFlyable(bp: { data: { components: { type: string }[] } })
  *  surfaces (a rover or a Mario cabinet gets no aero theatre). PURE string
  *  builder — the dialog hands it exactly what it rendered. */
 export interface ReportSection { compAlias: string; plateTop?: string; plateFront?: string;
+  plateSide?: string;
   diagrams: XcDiagram[]; svgs: (string | null)[]; rundown?: CodeRundown;
   compute?: ReportCompute }
+/** the craft header (v1.17.2, we: "weight, costs and flight characteristics
+ *  should be higher up in the analysis"): the mass model + the build-cost
+ *  twin, rendered FIRST in both dialog and export. */
+export interface ReportSummary { massKg: number; weightN: number;
+  costRaw?: number; costTime?: number }
 export interface ReportFlight { speed: number; mass: number; stallSpeed: number; ldMax: number;
   staticMarginPct: number; pitchVerdict: string; yawVerdict: string;
   rows: { axis: string; part: string; authority: number; buried?: boolean }[];
@@ -533,18 +560,70 @@ export function estWatts(work: number, maxIpc: number): number {
   return 30 + 470 * Math.min(1, Math.max(0, work / Math.max(1, maxIpc)));
 }
 
+/** the FLIGHT READING (v1.17.2: hoisted out of the section loop so the
+ *  export can place it HIGH — we: "flight characteristics should be
+ *  higher up in the analysis"). */
+function buildFlightHtml(f: ReportFlight, esc: (s: string) => string): string {
+  return `<h2>Flight characteristics</h2>
+<p class="note">Closed-form shape-field analysis (the editor's FLIGHT LAB): planform census
+over the voxelized hull, lift-curve + stall, fineness/Re drag, CG vs neutral point. This is
+NOT CFD — no Navier–Stokes field solve exists in the editor (see docs/CFD-FEASIBILITY.md);
+vortex/shedding questions need an external solver.</p>
+<table><tr><th>mass</th><td>${f.mass.toFixed(0)} kg</td><th>weight</th>
+<td>${(f.weight ?? 0).toFixed(0)} N</td><th>analysis speed</th>
+<td>${f.speed} m/s</td><th>stall speed</th><td>${f.stallSpeed.toFixed(1)} m/s</td>
+<th>L/D max</th><td>${f.ldMax.toFixed(1)}</td></tr>
+${f.planform ? `<tr><th>wing area S</th><td>${f.planform.S.toFixed(2)} m²</td>
+<th>span</th><td>${f.planform.span.toFixed(2)} m</th><th>chord c̄</th>
+<td>${f.planform.chord.toFixed(2)} m</td><th>AR</th><td>${f.planform.AR.toFixed(2)}</td></tr>
+<tr><th>C<sub>Lα</sub></th><td>${(f.clAlpha ?? 0).toFixed(2)} /rad</td>
+<th>C<sub>Lmax</sub></th><td>${(f.clMax ?? 0).toFixed(2)}</td>
+<th>C<sub>D0</sub></th><td>${(f.cd0 ?? 0).toFixed(4)}</td>
+<th>K (induced)</th><td>${(f.kInd ?? 0).toFixed(3)}</td></tr>
+<tr><th>L/D trim</th><td>${(f.ldTrim ?? 0).toFixed(1)}</td>
+<th>trim AoA</th><td>${(f.trimAlphaDeg ?? 0).toFixed(1)}°</td>
+<th>elevator trim</th><td>${f.trimElevatorDeg === null || f.trimElevatorDeg === undefined ? '—' : f.trimElevatorDeg.toFixed(1) + '°'}</td>
+<th>frontal</th><td>${(f.frontal ?? 0).toFixed(2)} m²</td></tr>
+<tr><th>altitude / ρ / q</th><td>${f.altitude ?? 0} m / ${(f.rho ?? 0).toFixed(3)} / ${(f.q ?? 0).toFixed(0)} Pa</td>
+<th>neutral point z</th><td>${(f.neutralZ ?? 0).toFixed(2)} m</td>
+<th>fin</th><td>${f.fin ? f.fin.area.toFixed(2) + ' m² @ ' + f.fin.lever.toFixed(1) + ' m' : '—'}</td></tr>` : ''}
+${f.curve?.length ? `<details><summary style="cursor:pointer;font-size:12px;color:#9fb0c8">lift/drag polar (α, C<sub>L</sub>, C<sub>D</sub>)</summary>
+<table><tr><th>α°</th><th>C<sub>L</sub></th><th>C<sub>D</sub></th></tr>
+${f.curve.map(c => `<tr><td>${c.alphaDeg}</td><td>${c.cl.toFixed(3)}</td><td>${c.cd.toFixed(4)}</td></tr>`).join('')}</table></details>` : ''}
+<tr><th>static margin</th><td>${f.staticMarginPct.toFixed(1)} % MAC</th>
+<th>pitch</th><td><span class="verdict ${f.pitchVerdict}">${f.pitchVerdict}</span></td>
+<th>yaw</th><td><span class="verdict ${f.yawVerdict}">${f.yawVerdict}</span></td></tr></table>
+<h3>Control authority per surface</h3><table><tr><th>axis</th><th>part</th>
+<th>moment @ q (N·m, ±45°)</th></tr>
+${f.rows.map(r => `<tr><td>${esc(r.axis)}</td><td>${r.buried
+  ? '⚠ <s>' + esc(r.part) + '</s> <span class=verdict unstable>buried in the collider mass — reads ≈ no authority</span>'
+  : esc(r.part)}</td><td>${r.authority.toFixed(0)}</td></tr>`).join('')}</table>`;
+}
+
 export function buildAnalysisHtml(opts: { craft: string; sections: ReportSection[];
-  flight?: ReportFlight | null }): string {
+  flight?: ReportFlight | null; summary?: ReportSummary | null }): string {
   const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  // THE CRAFT HEADER FIRST (v1.17.2, we: "weight, costs and flight
+  // characteristics should be higher up in the analysis"): mass/weight/
+  // cost, then the FLIGHT READING, then the per-computer sections.
+  const summaryHtml = opts.summary ? `<table><tr><th>mass</th>
+ <td>${opts.summary.massKg.toFixed(0)} kg</td><th>weight</th>
+ <td>${opts.summary.weightN.toFixed(0)} N</td>
+ <th>build cost</th><td>${opts.summary.costRaw === undefined
+    ? '—' : opts.summary.costRaw.toLocaleString('en-US') + ' raw material units'
+    + (opts.summary.costTime ? ` · ${Math.round(opts.summary.costTime / 60)} min build time` : '')}</td></tr></table>` : '';
+  const flightHtml = opts.flight ? buildFlightHtml(opts.flight, esc)
+    : `<h2>Flight characteristics</h2><p class="note">Not applicable — this craft
+carries no flight-control surfaces (rover/cabinet logic); the flight section is gated out.</p>`;
   const parts: string[] = [`<!doctype html><html><head><meta charset="utf-8">
 <title>Archean craft analysis — ${esc(opts.craft)}</title><style>
 body{font:14px/1.5 ui-sans-serif,system-ui;background:#0b1220;color:#dbe4f0;margin:0;padding:24px}
 h1{font-size:20px;color:#7dffcf} h2{font-size:16px;margin-top:28px;color:#9fd0ff}
 h3{font-size:13px;margin:18px 0 6px;color:#e8edf4}
 .plates{display:flex;gap:12px;flex-wrap:wrap} .plates figure{margin:0}
-.plates img{width:420px;max-width:44vw;border:1px solid #22314a;border-radius:6px}
+.plates img{width:320px;max-width:30vw;border:1px solid #22314a;border-radius:6px}
 figcaption{font-size:11px;color:#8b93a1;margin-top:4px}
-.mm{background:#fff;border-radius:8px;padding:8px;overflow:auto;max-width:1040px}
+.mm{background:#fff;border-radius:8px;padding:8px;overflow:auto;max-width:1200px}
 .mm svg{max-width:100%} details{margin:6px 0} pre{background:#101a2b;color:#b7c6dd;padding:10px;
 border-radius:6px;overflow:auto;font-size:11px}
 table{border-collapse:collapse}td,th{border:1px solid #22314a;padding:4px 10px;font-size:12px}
@@ -555,14 +634,16 @@ table{border-collapse:collapse}td,th{border:1px solid #22314a;padding:4px 10px;f
 <h1>Archean craft analysis — ${esc(opts.craft)}</h1>
 <p class="note">Scroll a diagram with the scrollbar, wheel-zoom inside it,
 drag with the middle/space key, double-click resets (script at the bottom).</p>
+${summaryHtml}${flightHtml}
 <nav>${opts.sections.map(s => `<a href="#comp-${esc(s.compAlias)}"
   style="color:#8fd4ff;margin-right:14px;font-size:12px">▸ ${esc(s.compAlias)}</a>`).join('')}</nav>`];
   for (const s of opts.sections) {
     parts.push(`<h2 id="comp-${esc(s.compAlias)}">Computer ${esc(s.compAlias)}</h2>`);
-    if (s.plateTop || s.plateFront) parts.push(`<div class="plates">
-<figure><img src="${s.plateTop ?? ''}"><figcaption>topside (orthographic; amber = actors,
-amber lines = cabled runs with io tags)</figcaption></figure>
-<figure><img src="${s.plateFront ?? ''}"><figcaption>front view</figcaption></figure></div>`);
+    if (s.plateTop || s.plateFront || s.plateSide) parts.push(`<div class="plates">
+<figure><img src="${s.plateFront ?? ''}"><figcaption>front view (nose −z)</figcaption></figure>
+<figure><img src="${s.plateSide ?? ''}"><figcaption>side view (starboard)</figcaption></figure>
+<figure><img src="${s.plateTop ?? ''}"><figcaption>topside view — wireframe, actors solid,
+cabled runs amber with io tags, colour-rotated leader labels</figcaption></figure></div>`);
     if (s.compute) {
       const c = s.compute;
       parts.push(`<h3>Compute budget</h3><p style="font-size:12px;color:#c8d4e4">
@@ -597,46 +678,6 @@ amber lines = cabled runs with io tags)</figcaption></figure>
       if (s.svgs[i]) parts.push(`<div class="mm">${s.svgs[i]}</div>`);
       parts.push(`<details><summary>mermaid source</summary><pre>${esc(d.source)}</pre></details>`);
     });
-  }
-  if (opts.flight) {
-    const f = opts.flight;
-    parts.push(`<h2>Flight characteristics</h2>
-<p class="note">Closed-form shape-field analysis (the editor's FLIGHT LAB): planform census
-over the voxelized hull, lift-curve + stall, fineness/Re drag, CG vs neutral point. This is
-NOT CFD — no Navier–Stokes field solve exists in the editor (see docs/CFD-FEASIBILITY.md);
-vortex/shedding questions need an external solver.</p>
-<table><tr><th>mass</th><td>${f.mass.toFixed(0)} kg</td><th>analysis speed</th>
-<td>${f.speed} m/s</td><th>stall speed</th><td>${f.stallSpeed.toFixed(1)} m/s</td>
-<th>L/D max</th><td>${f.ldMax.toFixed(1)}</td></tr>
-${f.planform ? `<tr><th>wing area S</th><td>${f.planform.S.toFixed(2)} m²</td>
-<th>span</th><td>${f.planform.span.toFixed(2)} m</th><th>chord c̄</th>
-<td>${f.planform.chord.toFixed(2)} m</td><th>AR</th><td>${f.planform.AR.toFixed(2)}</td></tr>
-<tr><th>C<sub>Lα</sub></th><td>${(f.clAlpha ?? 0).toFixed(2)} /rad</td>
-<th>C<sub>Lmax</sub></th><td>${(f.clMax ?? 0).toFixed(2)}</td>
-<th>C<sub>D0</sub></th><td>${(f.cd0 ?? 0).toFixed(4)}</td>
-<th>K (induced)</th><td>${(f.kInd ?? 0).toFixed(3)}</td></tr>
-<tr><th>L/D trim</th><td>${(f.ldTrim ?? 0).toFixed(1)}</td>
-<th>trim AoA</th><td>${(f.trimAlphaDeg ?? 0).toFixed(1)}°</td>
-<th>elevator trim</th><td>${f.trimElevatorDeg === null || f.trimElevatorDeg === undefined ? '—' : f.trimElevatorDeg.toFixed(1) + '°'}</td>
-<th>frontal</th><td>${(f.frontal ?? 0).toFixed(2)} m²</td></tr>
-<tr><th>altitude / ρ / q</th><td>${f.altitude ?? 0} m / ${(f.rho ?? 0).toFixed(3)} / ${(f.q ?? 0).toFixed(0)} Pa</td>
-<th>weight</th><td>${(f.weight ?? 0).toFixed(0)} N</td>
-<th>neutral point z</th><td>${(f.neutralZ ?? 0).toFixed(2)} m</td>
-<th>fin</th><td>${f.fin ? f.fin.area.toFixed(2) + ' m² @ ' + f.fin.lever.toFixed(1) + ' m' : '—'}</td></tr>` : ''}
-${f.curve?.length ? `<details><summary style="cursor:pointer;font-size:12px;color:#9fb0c8">lift/drag polar (α, C<sub>L</sub>, C<sub>D</sub>)</summary>
-<table><tr><th>α°</th><th>C<sub>L</sub></th><th>C<sub>D</sub></th></tr>
-${f.curve.map(c => `<tr><td>${c.alphaDeg}</td><td>${c.cl.toFixed(3)}</td><td>${c.cd.toFixed(4)}</td></tr>`).join('')}</table></details>` : ''}
-<tr><th>static margin</th><td>${f.staticMarginPct.toFixed(1)} % MAC</th>
-<th>pitch</th><td><span class="verdict ${f.pitchVerdict}">${f.pitchVerdict}</span></td>
-<th>yaw</th><td><span class="verdict ${f.yawVerdict}">${f.yawVerdict}</span></td></tr></table>
-<h3>Control authority per surface</h3><table><tr><th>axis</th><th>part</th>
-<th>moment @ q (N·m, ±45°)</th></tr>
-${f.rows.map(r => `<tr><td>${esc(r.axis)}</td><td>${r.buried
-  ? '⚠ <s>' + esc(r.part) + '</s> <span class=verdict unstable>buried in the collider mass — reads ≈ no authority</span>'
-  : esc(r.part)}</td><td>${r.authority.toFixed(0)}</td></tr>`).join('')}</table>`);
-  } else {
-    parts.push(`<h2>Flight characteristics</h2><p class="note">Not applicable — this craft
-carries no flight-control surfaces (rover/cabinet logic); the flight section is gated out.</p>`);
   }
   parts.push(`<script>
 for (const box of document.querySelectorAll('.mm')) {
