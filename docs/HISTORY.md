@@ -5843,3 +5843,12 @@ diagram with devices?"): the centrepiece now carries every used part as a
 `file ..> device : writes ch N` / `device ..> file : reads ch N` — bounded
 by the same caps with a '+N quieter device(s)' fold; the class diagram IS
 the wiring diagram the plate visualises.
+
+PLATE SCALE (same release, we: "Look at the illustrations, so they make
+sense, are they large enough for craft? Should you make the scale more
+illustrativ/diagrammatic?"): measured a shared bounding-sphere fit left the
+plane at 50 %×73 % (top) and 50 %×17 % (front). Each view now fits ITS OWN
+projected extent to ~82 % of the frame at ONE isotropic px/m (top 89×82,
+front 90×45 — a wide-flat plane reading flat from the front is honest,
+stretching it would lie); both plates share the one scale, like a
+three-view engineering drawing.

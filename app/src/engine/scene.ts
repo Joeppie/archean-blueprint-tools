@@ -3052,16 +3052,18 @@ void main() {
       renderer = new WebGLRenderer({ alpha: true, antialias: true, preserveDrawingBuffer: true });
       renderer.setSize(w, h, false);
       const cam = new OrthographicCamera(-w / 2 / 1, w / 2 / 1, h / 2 / 1, -h / 2 / 1, 0.01, r * 12);
-      const shoot = (pos: Vector3, up: Vector3) => {
+      const shoot = (pos: Vector3, up: Vector3, extW: number, extH: number) => {
         cam.position.copy(pos); cam.up.copy(up); cam.lookAt(c);
-        // FRUSTUM IN WORLD UNITS (v1.17.1, the ROOT CAUSE behind three
-        // misreads: the span was computed in PIXELS (~692) while a craft is
-        // ~4 m — every plate rendered the ship as a five-pixel speck).
-        // The craft's bounding sphere fills ~78 % of the SMALLER axis.
-        const span = (r * 2) / 0.78;
-        const aspect = w / h;
-        cam.left = -span * Math.max(1, aspect) / 2; cam.right = -cam.left;
-        cam.top = span * Math.max(1, 1 / aspect) / 2; cam.bottom = -cam.top;
+        // ILLUSTRATIVE PER-VIEW FIT (v1.17.1, we: "are they large enough for
+        // craft? Should you make the scale more illustrativ/diagrammatic?"
+        // — measured: one bounding-sphere fit left the FRONT view of a
+        // wide-flat plane at 17 % of frame height). Each view fits THAT
+        // view's projected extent at ~82 % of the frame, but at ONE px/m
+        // for both axes (isotropic — no anamorphic stretch).
+        const s = Math.min((w * 0.82) / Math.max(0.5, extW),
+          (h * 0.82) / Math.max(0.5, extH));
+        cam.left = -w / (2 * s); cam.right = -cam.left;
+        cam.top = h / (2 * s); cam.bottom = -cam.top;
         cam.updateProjectionMatrix();
         renderer!.render(scene, cam);
         triCount += renderer!.info.render.triangles;
@@ -3129,8 +3131,10 @@ void main() {
         }
         return cv.toDataURL('image/png');
       };
-      shots.push(shoot(new Vector3(c.x, c.y + r * 5, c.z + 0.001), new Vector3(0, 0, -1)));   // TOPSIDE
-      shots.push(shoot(new Vector3(c.x, c.y + r * 0.06, c.z - r * 5), new Vector3(0, 1, 0))); // FRONT (nose −z)
+      const bx = Math.max(0.5, box.max.x - box.min.x), by = Math.max(0.5, box.max.y - box.min.y),
+        bz = Math.max(0.5, box.max.z - box.min.z);
+      shots.push(shoot(new Vector3(c.x, c.y + r * 5, c.z + 0.001), new Vector3(0, 0, -1), bx, bz)); // TOPSIDE
+      shots.push(shoot(new Vector3(c.x, c.y + r * 0.06, c.z - r * 5), new Vector3(0, 1, 0), bx, by)); // FRONT (nose −z)
     } finally {
       scene.background = prevBg;
       for (const s of swaps) s.o.material = s.prev as never;

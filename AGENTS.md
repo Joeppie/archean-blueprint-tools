@@ -432,7 +432,14 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   diagram; ≤7 devices, ≤12 grouped messages '+N folded'). The vessel
   plate pair is NOT a generic overview: it renders INSIDE the Class &
   Wiring section as that diagram's own visual (actors amber, its cables
-  lit). DiagramView FIT-ON-OPEN (floor 0.45 — readable, pan walks the
+  lit). PLATE SCALE (we: "are they large enough for craft? Should you make
+  the scale more illustrativ/diagrammatic?" — measured: a shared-sphere fit
+  left the front view of a wide-flat plane at 17 % of frame height): each
+  view fits ITS OWN projected extent to ~82 % of the frame at ONE isotropic
+  px/m — no anamorphic stretch; a wide-flat craft is SUPPOSED to read flat
+  from the front, and both plates share one scale like a three-view drawing.
+  X-ray render, empty-flag + build-time retry, pixel-decoded spec (§ Plate
+  saga, docs/HISTORY.md). DiagramView FIT-ON-OPEN (floor 0.45 — readable, pan walks the
   rest), zoom/pan/⤢; mermaid overflow folds are honest '+N' lines, and
   the Code rundown table remains the full inventory. BURIED LAW v2
   (flightlab.buriedAt, we: "Plomo has misdiagnosed buried ailerons; they
