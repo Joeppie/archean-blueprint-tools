@@ -12,8 +12,10 @@
 //   Lamp / SpotLight           the soft relay blip on the on-edge
 //   GroundAnchor               the CHAIN RATTLE + thud on deploy/retract
 //     (data 0/1, wiki miscellaneous/GroundAnchor.md)
-//   MiningDrill                a rock-drill WHIR loop while it runs
-//     (wiki mining/MiningDrill.md — HV drills deeper/louder)
+//   MiningDrill                a rock-drill WHIR loop ONLY while the bus
+//     commands it (wiki mining/MiningDrill.md — HV drills deeper/louder;
+//     v1.17.2: the authored-ON default made a carried, never-commands
+//     drill drone on craft load — the Badger's rotor-sound catch)
 //   ItemConveyor / pumps       a low BELT rumble / pump burble loop while
 //     running
 //   Propellers               SILENT (v1.16.24, we: "they constantly make
@@ -322,3 +324,30 @@ export class Soundscape {
 }
 
 export const soundscape = new Soundscape();
+
+/** THE LOOP CENSUS (moved out of Editor.tsx v1.17.2 so the law is engine-
+ *  pure and vitest-pinnable): which part-loops run right now — the belt
+ *  authored-ON default (in-game conveyors run on power), the drill/pump by
+ *  THEIR COMMANDED channel. v1.17.2 THE DRILL WHIRS ONLY WHEN COMMANDED
+ *  (we: "badger makes sound for its rotors … it shouldnt"): the
+ *  authored-ON default made every carried, never-commands drill whir on
+ *  craft load — the Badger's pad drill (its firmware never writes the
+ *  drill channel) drone-hummed exactly like rotors. The item sim may keep
+ *  mining it; audible is only what the bus commands (the propeller law,
+ *  v1.16.24, extended: spin visible, silent). */
+export function loopWanted(bp: Blueprint | null,
+  sc: Soundscape = soundscape): { ci: number; kind: LoopKind; gain: number }[] {
+  if (!bp) return [];
+  const out: { ci: number; kind: LoopKind; gain: number }[] = [];
+  (bp.data.components as { type: string }[]).forEach((c, ci) => {
+    const ch0 = sc.chan(ci, 0);
+    switch (c.type) {
+      case 'MiningDrill': out.push({ ci, kind: 'drill', gain: (ch0 ?? 0) > 0 ? 0.09 : 0 }); break;
+      case 'ItemConveyor': out.push({ ci, kind: 'belt', gain: (ch0 ?? 1) > 0 ? 0.05 : 0 }); break;
+      case 'SmallTurboPump': case 'TurboPump':
+        out.push({ ci, kind: 'pump', gain: (ch0 ?? 0) > 0 ? 0.05 : 0 }); break;
+      default: break;   // PROPELLERS ARE SILENT (v1.16.24)
+    }
+  });
+  return out;
+}

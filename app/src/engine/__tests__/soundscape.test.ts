@@ -4,7 +4,7 @@
 // channel ledger (which the loop census reads) and the persisted toggle
 // are its pure core; every cue is guarded behind `typeof AudioContext`.
 import { describe, expect, test } from 'vitest';
-import { Soundscape } from '../soundscape';
+import { Soundscape, loopWanted } from '../soundscape';
 import type { Blueprint } from '../format';
 
 const bp = (types: string[]): Blueprint =>
@@ -41,5 +41,24 @@ describe('the soundscape ledger — @Sound', () => {
     expect(now).toBe(!before);
     expect(localStorage.getItem('archean-app-sound')).toBe(now ? '1' : '0');
     s.toggleSound();
+  });
+  test('THE DRILL WHIRS ONLY WHEN COMMANDED — the Badger rotor-sound law '
+    + '(v1.17.2, we: "badger makes sound for its rotors … it shouldnt")', () => {
+    const craft = bp(['MiningDrill', 'ItemConveyor', 'Propeller', 'TurboPump']);
+    const sc = new Soundscape();
+    sc.load(craft);
+    // an UN-COMMANDED drill (the Badger: its firmware never writes the
+    // drill channel) is SILENT — the old authored-ON default drone-hummed
+    // the whole session and read as rotors
+    expect(loopWanted(craft, sc).find(x => x.ci === 0)!.gain).toBe(0);
+    // a commanded drill whirs
+    sc.write(0, 0, 1);
+    expect(loopWanted(craft, sc).find(x => x.ci === 0)!.gain).toBeGreaterThan(0);
+    // the belt keeps the authored-ON default (in-game conveyors run on power)
+    expect(loopWanted(craft, sc).find(x => x.ci === 1)!.gain).toBeGreaterThan(0);
+    // propellers never join the census (v1.16.24)
+    expect(loopWanted(craft, sc).some(x => x.ci === 2)).toBe(false);
+    // pumps need their speed channel
+    expect(loopWanted(craft, sc).find(x => x.ci === 3)!.gain).toBe(0);
   });
 });

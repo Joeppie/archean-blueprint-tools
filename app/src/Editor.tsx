@@ -63,7 +63,7 @@ import { craftPowerNet, computerPowered } from './engine/power';
 import { EnergySim, type EnergyStatus } from './engine/energy';
 import { ItemSim, type ItemSimCensus } from './engine/itemsim';
 import { ScannerSim } from './engine/scannersim';
-import { soundscape } from './engine/soundscape';
+import { loopWanted, soundscape } from './engine/soundscape';
 import { chanSites, rectSites, rectsAt, type ChanSite, type RectSite } from 'xenoncore';
 import { loadManifest, peekManifest } from './engine/models';
 import { beaconNet } from './engine/beaconnet';
@@ -85,30 +85,6 @@ import { newCraftDoc, newComponent } from './engine/newcraft';
 import { craftState, craftInfo, loadCraft, type CacheInfo, type CraftState } from './crafts';
 import StaleDialog from './components/StaleDialog';
 
-
-/** WP4 loop census for the soundscape: which part-loops run right now
- *  (channel law: the drill/belt authored-ON defaults, the pump/prop by
- *  their speed channel — the soundscape remembers every bus write). */
-function loopWanted(bp: import('./engine/format').Blueprint | null) {
-  if (!bp) return [];
-  const out: { ci: number; kind: 'drill' | 'belt' | 'pump'; gain: number }[] = [];
-  (bp.data.components as { type: string }[]).forEach((c, ci) => {
-    const ch0 = soundscape.chan(ci, 0);
-    switch (c.type) {
-      case 'MiningDrill': out.push({ ci, kind: 'drill', gain: (ch0 ?? 1) > 0 ? 0.09 : 0 }); break;
-      case 'ItemConveyor': out.push({ ci, kind: 'belt', gain: (ch0 ?? 1) > 0 ? 0.05 : 0 }); break;
-      case 'SmallTurboPump': case 'TurboPump':
-        out.push({ ci, kind: 'pump', gain: (ch0 ?? 0) > 0 ? 0.05 : 0 }); break;
-      // v1.16.24 THE PROPELLERS ARE SILENT (we: "Remove the sound from
-      // propellors. They constantly make noise in the badger. Not good!"):
-      // a spinning prop is the craft's BACKGROUND, and a steady hum under
-      // everything was fatigue, not information — the spin stays visible,
-      // audible it is not.
-      default: break;
-    }
-  });
-  return out;
-}
 
 export default function Editor({ craft, onBack }: { craft: string | null; onBack: () => void }) {
   // v1.12.2 BOOT COST: the first render pass began (React tree build).
