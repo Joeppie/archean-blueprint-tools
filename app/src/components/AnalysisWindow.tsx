@@ -734,6 +734,27 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
                     {' · build '}<b>{Math.round(cost.total.time / 60)}</b> min
                   </div>
                   <table className="mt-2 text-[11px]">
+                    <thead><tr className="text-[#8b93a1]"><th className="pr-4 text-left">material source</th>
+                      <th className="pr-4 text-left">detail</th>
+                      <th className="pr-4 text-right">raw units</th></tr></thead>
+                    <tbody>
+                      {cost.sources.filter(s => s.rows.length).map(s => (
+                        <tr key={s.id} className="text-[#c8d4e4]"><td className="pr-4">{s.title}</td>
+                          <td className="pr-4 text-[#8b93a1]">{s.note}</td>
+                          <td className="pr-4 text-right">{Math.round(
+                            s.rows.reduce((a, r) => a + materialQty(r.total), 0)
+                          ).toLocaleString('en-US')}</td></tr>))}
+                      <tr className="text-[#c8d4e4]"><td className="pr-4">Parts</td>
+                        <td className="pr-4 text-[#8b93a1]">{cost.rows.length} placed part types</td>
+                        <td className="pr-4 text-right">{Math.round(
+                          cost.rows.reduce((a, r) => a + materialQty(r.total), 0)
+                        ).toLocaleString('en-US')}</td></tr>
+                      <tr className="font-semibold text-[#e8edf4]"><td className="pr-4">Total</td>
+                        <td className="pr-4" />
+                        <td className="pr-4 text-right">{Math.round(materialQty(cost.total)).toLocaleString('en-US')}</td></tr>
+                    </tbody></table>
+                  <div className="mt-2 text-[10px] uppercase tracking-widest text-[#5d6a7d]">Top parts by raw material</div>
+                  <table className="mt-1 text-[11px]">
                     <thead><tr className="text-[#8b93a1]"><th className="pr-4 text-left">part</th>
                       <th className="pr-4 text-right">count</th>
                       <th className="pr-4 text-right">raw units</th></tr></thead>
@@ -742,7 +763,7 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
                         <td className="pr-4 text-right">{r.count}</td>
                         <td className="pr-4 text-right">{Math.round(materialQty(r.total)).toLocaleString('en-US')}</td></tr>))}
                     </tbody></table>
-                  <div className="mt-1 text-[10px] text-[#8b93a1]">top parts by raw material — the Build-cost widget carries the full shopping list (blocks, cables, frames included)</div>
+                  <div className="mt-1 text-[10px] text-[#8b93a1]">THE FULL-QUESTION LAW (GetBlueprintContents twin): blocks, hull skin, cables, frames and struts are material you must build — the grand total counts them all; the Build-cost widget carries every item</div>
                 </>)}
               </div>
             </Ch>
