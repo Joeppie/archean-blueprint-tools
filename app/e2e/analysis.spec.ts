@@ -39,38 +39,42 @@ test.describe('@analysis @slow THE CRAFT ANALYSIS', () => {
     // inline SVG sheet (front/side/topside) rendered through the SAME
     // DiagramView as the mermaid diagrams — auto-selected views in ONE
     // sheet (elongated crafts: top + elevation; compact: all three).
-    await expect(page.getByTestId('analysis-plates').locator('svg')).toHaveCount(1,
-      { timeout: 120_000 });
+    // v1.17.2 ONE-PAGE-PER-VIEW: auto-selected views, one SVG sheet each
+    await expect.poll(async () => page.locator('[data-testid="analysis-plates"] svg').count(),
+      { timeout: 120_000 }).toBeGreaterThanOrEqual(2);
     // THE PLATE HAS A SHIP ON IT (the "COUNT IS NOT CONTENT" law): the
-    // vector plate is an ENGINEERING LINE DRAWING — a welded-edge census:
-    // hull hairlines, part lines, actors inked in their colour, cables
-    // COLOURED by their device endpoint, metre-grid sheets, leader labels.
-    // Coplanar interior seams are SUPPRESSED (the box seams a fill would
-    // swallow — we: "removing 'internal' lines … more blueprinty").
+    // vector plate is an ENGINEERING DRAWING under THE TRACE-OR-MESH
+    // LAW (v1.17.2, we: "make ailerons look the way they used to PLEASE,
+    // do not subject them to simplification! same for wheels"): parts
+    // draw as REAL MESH linework in census; only genuinely non-convex
+    // submeshes (props, beacon masts) are replaced by their
+    // union-boundary TRACE (outline.ts); convex-hull blobs DO NOT exist.
     const plate = await page.evaluate(() => {
-      const svg = document.querySelector('[data-testid="analysis-plates"] svg')!;
-      const lines = [...svg.querySelectorAll('line')];
-      const inG = (l: Element, s: string) => (l.parentElement?.getAttribute('stroke') || '') === s;
-      return {
-        hullLines: lines.filter(l => inG(l, '#8fc3ee')).length,
-        partLines: lines.filter(l => inG(l, '#b9dcff')).length,
-        actorLines: lines.filter(l =>
-          /#(ffd98a|7dffcf|9fd0ff|ff9ecb|c9ff8a|ffb08a|b7a6ff|8afff0|ffe08a|f0a6ff|a6ffd0|ffa6a6)/
-            .test(l.parentElement?.getAttribute('stroke') || '')).length,
-        cables: svg.querySelectorAll('polyline').length,
-        coloredCables: [...svg.querySelectorAll('polyline')]
-          .filter(p => (p.getAttribute('stroke') || '') !== '#ffc35e').length,
-        grids: svg.querySelectorAll('path').length,
-        labels: svg.querySelectorAll('text').length,
-        views: [...svg.querySelectorAll('text')].filter(t => /FRONT|SIDE|TOPSIDE/.test(t.textContent || '')).length,
-      };
+      const PAL = ['ffd98a','7dffcf','9fd0ff','ff9ecb','c9ff8a','ffb08a','b7a6ff','8afff0','ffe08a','f0a6ff','a6ffd0','ffa6a6'];
+      const svgs = [...document.querySelectorAll('[data-testid="analysis-plates"] svg')];
+      const agg = { censusLines: 0, tracedPaths: 0, hullPolys: 0, actorInk: 0,
+        cables: 0, coloredCables: 0, labels: 0, views: 0 };
+      for (const svg of svgs) {
+        const gs = [...svg.querySelectorAll('g[stroke]')];
+        const actor = gs.filter(g => PAL.some(p => (g.getAttribute('stroke') || '') === '#' + p));
+        agg.censusLines += gs.reduce((a, g) => a + g.querySelectorAll('line').length, 0);
+        agg.tracedPaths += gs.reduce((a, g) => a + g.querySelectorAll('path').length, 0);
+        agg.hullPolys += gs.reduce((a, g) => a + g.querySelectorAll('polygon').length, 0);
+        agg.actorInk += actor.reduce((a, g) => a + g.children.length, 0);
+        agg.cables += svg.querySelectorAll('polyline').length;
+        agg.coloredCables += [...svg.querySelectorAll('polyline')]
+          .filter(p => (p.getAttribute('stroke') || '') !== '#ffc35e').length;
+        agg.labels += svg.querySelectorAll('text').length;
+        agg.views += [...svg.querySelectorAll('text')].filter(t => /FRONT|SIDE|TOPSIDE/.test(t.textContent || '')).length;
+      }
+      return agg;
     });
-    expect(plate.hullLines, 'hull construction lines').toBeGreaterThan(80);
-    expect(plate.partLines, 'part lines').toBeGreaterThan(10);
-    expect(plate.actorLines, 'actors inked in their colour').toBeGreaterThan(30);
+    expect(plate.censusLines, 'mesh linework (wheels/aileron/structure)').toBeGreaterThan(200);
+    expect(plate.tracedPaths, 'non-convex submeshes traced (props)').toBeGreaterThanOrEqual(2);
+    expect(plate.hullPolys, 'NO convex-hull blobs exist').toBe(0);
+    expect(plate.actorInk, 'actors inked in their device colour').toBeGreaterThanOrEqual(20);
     expect(plate.cables, 'cable runs').toBeGreaterThan(0);
     expect(plate.coloredCables, 'cables wear their device endpoint colour').toBeGreaterThan(0);
-    expect(plate.grids, 'metre grid sheets').toBeGreaterThanOrEqual(2);
     expect(plate.labels, 'leader labels').toBeGreaterThan(4);
     // THE INFORMATIVE-VIEW LAW (v1.17.2): elongated crafts ship TWO
     // views (top + the informative elevation), compact crafts all three

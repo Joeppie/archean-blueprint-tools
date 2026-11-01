@@ -21,7 +21,7 @@ import type { Blueprint } from '../engine/format';
 import type { Engine } from '../engine/scene';
 import { xenonComputers, xenonFarm, xenonHudControllers, type XenonComputer } from '../engine/xenoncode';
 import { hudPump } from '../engine/hudpump';
-import { GAME_HUD_LAW, GAME_IPC_LAW, GAME_POWER_LAW, type ReportCompute } from '../engine/xcgraph';
+import { GAME_HUD_LAW, GAME_IPC_LAW, GAME_POWER_LAW, groupLabel, type ReportCompute } from '../engine/xcgraph';
 import { peekManifest } from '../engine/models';
 import { massModel } from '../engine/mass';
 import { envelopeVolume, liftKg, sealedEnvelopeVolume } from '../engine/atmo';
@@ -29,6 +29,7 @@ import { buildCost, loadEconomy, materialQty, type Economy } from '../engine/eco
 import { flightLab } from '../engine/flightlab';
 import { buildAnalysisHtml, codeRundown, craftIsFlyable, svgTextOnly, xcDiagrams,
   type ReportSection, type XcDiagram } from '../engine/xcgraph';
+import { flatToTopMap, flatEndpointTop } from '../engine/flat';
 
 const G0 = 9.80665;    // the craft's weight = mass · g (the header card, v1.17.2)
 
@@ -39,8 +40,24 @@ function DiagramView(p: { svg: string }) {
   const [k, setK] = useState(1);
   const [big, setBig] = useState(false);
   const [pan, setPan] = useState({ x: 0, y: 0 });
-  const drag = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
+  const drag = useRef<{ x: number; y: number; px: number; py: number; moved: number } | null>(null);
   const scroller = useRef<HTMLDivElement | null>(null);
+  // THE GALLERY LAW (v1.17.2, we: "when clicking SVG make full screen
+  // like in a photo gallery … hard to get out of pictures now"):
+  // a click (without drag) opens the fullscreen gallery; Esc, the
+  // backdrop strip and ⤡ all close it; two-finger pinch zooms.
+  useEffect(() => {
+    if (!big) return;
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); setBig(false); } };
+    addEventListener('keydown', h, true);
+    return () => removeEventListener('keydown', h, true);
+  }, [big]);
+  const ptrs = useRef(new Map<number, { x: number; y: number }>());
+  const pinch = useRef(0);
+  const pdist = () => {
+    const [a, b] = [...ptrs.current.values()];
+    return a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 0;
+  };
   // FIT-ON-OPEN (v1.17.1, we: "cannot navigate or move through the diagrams"):
   // a diagram wider/taller than its panel opens FITTED, not cut off.
   useEffect(() => {
@@ -78,17 +95,45 @@ function DiagramView(p: { svg: string }) {
       {/* THE EDITOR-NAVY CARD (v1.17.2, we: "the color choice on diagrams
           doesnt work well, it should fit in with the rest of the editor"):
           the white board is GONE — diagrams ride the editor's own navy */}
+      {/* THE GALLERY LAW: click (no drag) opens fullscreen; pinch zooms;
+          in fullscreen the empty backdrop closes it (photo-gallery exit). */}
       <div ref={scroller} className="min-h-0 flex-1 overflow-auto rounded border border-[#22314a] bg-[#101a2b]"
-        style={{ cursor: 'grab' }}
+        style={{ cursor: big ? 'grab' : 'zoom-in', touchAction: 'none' }}
         onWheel={e => setK(x => Math.min(6, Math.max(0.2, x * (e.deltaY < 0 ? 1.15 : 0.87))))}
-        onPointerDown={e => { drag.current = { x: e.clientX, y: e.clientY, px: pan.x, py: pan.y }; }}
-        onPointerMove={e => { const d = drag.current; if (!d) return;
-          setPan({ x: d.px + e.clientX - d.x, y: d.py + e.clientY - d.y }); }}
-        onPointerUp={() => { drag.current = null; }} onPointerLeave={() => { drag.current = null; }}
+        onPointerDown={e => {
+          ptrs.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+          (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+          if (ptrs.current.size === 2) pinch.current = pdist();
+          else drag.current = { x: e.clientX, y: e.clientY, px: pan.x, py: pan.y, moved: 0 };
+        }}
+        onPointerMove={e => {
+          if (!ptrs.current.has(e.pointerId)) return;
+          ptrs.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+          if (ptrs.current.size === 2) {
+            const d = pdist();
+            if (pinch.current > 0 && d > 0) setK(x => Math.min(6, Math.max(0.2, x * (d / pinch.current))));
+            pinch.current = d;
+            return;
+          }
+          const d = drag.current; if (!d) return;
+          d.moved += Math.abs(e.clientX - d.x) + Math.abs(e.clientY - d.y);
+          setPan({ x: d.px + e.clientX - d.x, y: d.py + e.clientY - d.y });
+        }}
+        onPointerUp={e => {
+          ptrs.current.delete(e.pointerId);
+          const d = drag.current;
+          if (d && d.moved < 8 && !big) setBig(true);   // a CLICK opens the gallery
+          drag.current = null;
+        }}
+        onPointerLeave={e => { ptrs.current.delete(e.pointerId); drag.current = null; }}
         dangerouslySetInnerHTML={{ __html: `<div style="transform:translate(${pan.x}px,${pan.y}px) scale(${k});transform-origin:0 0;width:max-content">${p.svg}</div>` }} />
     </div>);
-  if (!big) return <div className="h-[500px] w-full max-w-[1200px]">{box}</div>;
-  return <div className="absolute inset-0 z-20 flex flex-col bg-[#0b1220]/[.97] p-2">{box}</div>;
+  if (!big) return <div className="h-[420px] w-full max-w-[1400px]">{box}</div>;
+  return (
+    <div className="absolute inset-0 z-20 flex flex-col bg-[#050a14]/[.97] p-2"
+      onClick={e => { if (e.target === e.currentTarget) setBig(false); }}>
+      {box}
+    </div>);
 }
 
 type MermaidLike = { initialize: (o: Record<string, unknown>) => void;
@@ -98,7 +143,7 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
   engine: Engine | null; close: () => void }) {
   const [svgs, setSvgs] = useState<Record<string, string>>({});
   const [errs, setErrs] = useState<Record<string, string>>({});
-  const [plates, setPlates] = useState<Record<number, { svg: string }>>({});
+  const [plates, setPlates] = useState<Record<number, { svgs: string[] }>>({});
   const [busy, setBusy] = useState(false);
   // mermaid lives in STATE (a ref never re-fires the render effect — the
   // first-cut catch: the diagram effect ran once before the runtime loaded
@@ -201,8 +246,31 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
     const rd = codeRundown({ alias: curCpu.alias || `#${curCpu.ci}`, ci: curCpu.ci,
       files: curCpu.files.map(f => ({ name: f.name, code: f.code })), devices: curCpu.devices });
     const touched = new Set(rd.fanIn.map(x => x.device));
+    // THE WIRING-UNIVERSE LAW (v1.17.2, Jimmy: "many things dont have a
+    // label, or incorrectly labelled"): the plate labels every PART on
+    // the craft's io wiring (data/item cables), not just the devices
+    // THIS program addresses. Unwired parts are unimportant — unlabelled.
+    const cableCis = new Set<number>();
+    const fmap = p.bp ? flatToTopMap(p.bp) : null;
+    for (const pp of ((p.bp?.data as Record<string, unknown>)?.pipes ??
+      []) as { a_component?: number; b_component?: number }[]) {
+      for (const flat of [pp.a_component, pp.b_component])
+        if (typeof flat === 'number' && fmap) {
+          const top = flatEndpointTop(fmap, flat);   // FLATTENED-ENDPOINT LAW
+          if (top !== undefined) cableCis.add(top);  // nested parts skipped
+        }
+    }
+    const comps = (p.bp?.data.components ?? []) as { type?: string; alias?: string }[];
     const devs = curCpu.devices.filter(d => d.ci !== undefined);
-    const picked = devs.filter(d => touched.has(d.alias || `io ${d.io}`));
+    const seenCi = new Set(devs.map(d => d.ci));
+    cableCis.forEach(ci => {
+      if (seenCi.has(ci) || ci === curCpu.ci) return;
+      seenCi.add(ci);
+      const c = comps[ci];
+      if (!c || !c.type || c.type === 'Build' || c.type === 'Dashboard') return;
+      devs.push({ ci, io: -1, alias: (c.alias ?? '').toLowerCase(), type: c.type } as typeof devs[0]);
+    });
+    const picked = devs.filter(d => touched.has(d.alias || `io ${d.io}`) || d.io >= 0);
     // THE PICKING ORDER (v1.17.2, we: "pick a single color and then show
     // all connections to that thing with that color, with a certain
     // picking order; Computer most important, then cockpit"): net devices
@@ -213,17 +281,36 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
     const NET = new Set(['Computer', 'MiniComputer', 'Router', 'MiniRouter',
       'DataJunction', 'DataBridge', 'Crafter', 'HudController']);
     const rank = (t: string) => NET.has(t) ? 0 : t === 'PilotSeat' ? 1 : 2;
-    const src = picked.length ? picked : devs;
+    // THE PLURAL-LABEL LAW (v1.17.2, Jimmy's adventure, we: "things that
+    // repeat and are wired together … label the junction OR the central
+    // most component of an identified group and label it as plural"):
+    // ≥3 wired same-type parts are ONE labelled group ("Ailerons-Left
+    // 1–5" from patterned aliases, "Generators" from types); members
+    // share the group colour and lose their individual tags.
+    const byType = new Map<string, typeof picked>();
+    for (const d of picked) byType.set(d.type, [...(byType.get(d.type) ?? []), d]);
+    const groupsWithRank: { cis: number[]; label: string; r: number }[] = [];
+    const singles: typeof picked = [];
+    for (const [type, ds] of byType) {
+      if (ds.length >= 3)
+        groupsWithRank.push({
+          cis: ds.map(d => d.ci!).filter((c): c is number => c !== undefined),
+          label: groupLabel(type, ds.map(d => d.alias)), r: rank(type) });
+      else singles.push(...ds);
+    }
+    groupsWithRank.sort((a, b) => a.r - b.r);
+    const groups = groupsWithRank.map(({ cis, label }) => ({ cis, label }));
+    const src = singles.length ? singles : devs;
     const actorsSrc = [...src].sort((a, b) => rank(a.type) - rank(b.type)).slice(0, 12);
     const actors = actorsSrc.map(d => ({
       ci: d.ci!, tag: `${d.alias || `${d.type} #${d.ci}`} · io ${d.io}` }));
     // retry while the scene is still building (EMPTY-FLAG, v1.17.1)
     let tries = 0;
     const go = () => {
-      eng.analysisShots({ actors })
+      eng.analysisShots({ actors, groups })
         .then(ph => {
           if (ph.empty && tries++ < 2) { setTimeout(go, 2500); return; }
-          setPlates(x => ({ ...x, [curCpu!.ci]: { svg: ph.svg } }));
+          setPlates(x => ({ ...x, [curCpu!.ci]: { svgs: ph.svgs } }));
         })
         .catch(e => setShotErr(String(e).slice(0, 120)));
     };
@@ -284,7 +371,7 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
     const pump = isHud ? null : xenonFarm.pumps.find(q => q.comp?.ci === cid);
     return {
       compAlias: (isHud ? '📟 ' : '') + alias,
-      plateSvg: isHud ? undefined : plates[cid]?.svg,
+      plateSvg: isHud ? undefined : plates[cid]?.svgs,
       diagrams: ds,
       svgs: ds.map(d => svgs[`${cid}|${d.kind}`] ?? null),
       rundown: codeRundown({ alias, ci: cid, files, devices }),
@@ -323,8 +410,8 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
 
   return (
     <FloatingWindow id="analysis" testid="analysis-dock" fullNarrow
-      initial={(vw, vh) => { const w = Math.min(1280, vw - 40);
-        return { x: Math.max(20, (vw - w) / 2), y: 30, w, h: vh - 60 }; }}
+      initial={(vw, vh) => { const w = Math.min(1440, vw - 24);
+        return { x: Math.max(12, (vw - w) / 2), y: 16, w, h: vh - 32 }; }}
       header={
         <span className="flex items-center gap-2">
           <span data-testid="analysis-title">⚗ Analysis — {p.craft}</span>
@@ -442,19 +529,31 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
           <>
             {(() => {
               const ph = plates[cur.ci];
-              // v1.17.2 THE VECTORIZATION (we: "its too small and should be
-              // more zoomable … it would be really nice if it was SVG and
-              // you could zoom in on like with mermaid diagrams"): the trio
-              // is ONE vector sheet rendered through the SAME DiagramView as
-              // the mermaid diagrams — wheel zoom, pan, ⤢, 600 %.
+              // THE ONE-PAGE-PER-VIEW LAW (v1.17.2, we: "put the next
+              // schematic on the next page … default size bigger … when
+              // clicking SVG make full screen like in a photo gallery"):
+              // each view is its own sheet, filling it at its own scale;
+              // DiagramView is the gallery — click opens fullscreen,
+              // wheel/pinch/± zoom, Esc / backdrop closes.
               return ph && (
-              <div data-testid="analysis-plates" className="w-full max-w-[1160px]">
-                <DiagramView svg={ph.svg} />
+              <div data-testid="analysis-plates" className="flex w-full max-w-[1400px] flex-col gap-3">
+                {ph.svgs.map((s, i) => (
+                  // THE STATIC-SHEET + ZOOM-AVAILABLE LAW (v1.17.2, we:
+                  // "zooming on the schematics shouldnt be a thing" = the
+                  // DEFAULT must read at rest; "I cant zoom in on the
+                  // schematics anymore now" = keep the gallery for detail.
+                  // Sheets sit at full column width (readable as-is);
+                  // DiagramView offers zoom/fullscreen on demand.
+                  <div key={i} data-testid={`analysis-plate-${i}`}>
+                    <DiagramView svg={s} />
+                  </div>
+                ))}
                 <div className="mt-0.5 text-[10px] text-[#8b93a1]">
-                  blueprint plate — front · side · topside at one scale on a metre
-                  grid, vector SVG (zoom to 600 %): hull hairlines, parts quiet,
-                  ONLY the actors inked in their label colour, cabled runs amber
-                  + io tags, leader-line labels
+                  blueprint plates — one view per page, each filling its sheet:
+                  hull hairlines, actors as silhouette outlines in their label
+                  colour, cabled runs + io tags, leader-line labels.
+                  Click a sheet to open the gallery; wheel/pinch/± to zoom,
+                  Esc to close.
                 </div>
               </div>
             ); })()}

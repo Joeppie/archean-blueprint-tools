@@ -18,7 +18,7 @@
 
 import {
   Box3, BoxGeometry, BufferAttribute, BufferGeometry, Color, ConeGeometry, CylinderGeometry, DirectionalLight,
-  DoubleSide, EquirectangularReflectionMapping, Group, HemisphereLight, InstancedMesh, Line, LineBasicMaterial, LineSegments, LinearSRGBColorSpace, Matrix3, Matrix4, Mesh,
+  DoubleSide, Euler, EquirectangularReflectionMapping, Group, HemisphereLight, InstancedMesh, Line, LineBasicMaterial, LineSegments, LinearSRGBColorSpace, Matrix3, Matrix4, Mesh,
   MeshBasicMaterial, MeshStandardMaterial, Object3D, OrthographicCamera, PerspectiveCamera,
   AdditiveBlending, BackSide, LinearToneMapping, Material, Plane, PlaneGeometry, PMREMGenerator, Quaternion, Raycaster, RectAreaLight,
   RepeatWrapping, Scene, ShaderMaterial, SphereGeometry, Sprite, SpriteMaterial, Texture, TextureLoader,
@@ -39,6 +39,7 @@ import { buildAtlasPreview } from './thumbs';
 import { envIntensity, nodeMaterialSpec, pbr, srgbHexToLinear, type PbrSpec } from './materials';
 import { propellerSurface, type PropellerData } from './propeller';
 import { normScreenKey, wsDeviceSlug } from './worldsim';
+import { outlineOf, polyArea } from './outline';
 
 /** The generated propeller blade's material: the client raytraces it as a
  *  neutral NON-metallic grey — `ReverseGamma(vec3(0.5))` in the shader, i.e.
@@ -2985,11 +2986,16 @@ void main() {
    *  same wheel-zoom/pan/⤢ machinery as the mermaid diagrams); the
    *  raster-era day-sky/blank-frame traps are structurally gone.
    *  empty:true = scene not built yet (the dialog retries). */
-  analysisShots(opts: {
+  async analysisShots(opts: {
     actors: { ci: number; tag: string }[];
-  }): Promise<{ svg: string; empty: boolean }> {
+    /** THE PLURAL-LABEL LAW (v1.17.2, Jimmy's adventure): wired groups of
+     *  ≥3 same-type parts share ONE plural label, hung on the member
+     *  nearest the 2-D projected centroid (per view) — the group's
+     *  junction in effect. */
+    groups?: { cis: number[]; label: string }[];
+  }): Promise<{ svgs: string[]; empty: boolean }> {
     if (!this.scene || !this.bp) return Promise.reject(new Error('analysisShots: no scene'));
-    const PH = 640, PW = 940, GAP = 26, PAD = 44;
+    const PH = 640, PW = 940, PAD = 44;
     const MESH_CAP = 20000;      // triangles per mesh (a monster model decimates)
     const MIN_AREA = 0.12;       // px²: a sub-sliver carries no information
     const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -3020,50 +3026,51 @@ void main() {
       || ((this.bp.data.blocks as unknown[] | undefined)?.length ?? 0) + this.compRoots.size === 0;
     const C = box.min.clone();
     const S = box.max.clone().sub(C);
+    // THE 90°-SNAP (v1.17.2): a component's orientation is squared to
+    // the nearest 90° per Euler axis for the projection, so a reclined
+    // seat stands upright in the side view.
+    const snap90 = (q: Quaternion): Quaternion => {
+      const e = new Euler().setFromQuaternion(q, 'XYZ');
+      const sq = (a: number) => Math.round(a / (Math.PI / 2)) * (Math.PI / 2);
+      return new Quaternion().setFromEuler(new Euler(sq(e.x), sq(e.y), sq(e.z), 'XYZ'));
+    };
     const actorCis = new Set(opts.actors.map(a => a.ci));
+    for (const g of opts.groups ?? []) g.cis.forEach(ci => actorCis.add(ci));
     // the label palette: rotated per label; a PART's faces wear the
     // colour of its LABEL — the fill names what the label says.
     const LABEL_COLORS = ['#ffd98a', '#7dffcf', '#9fd0ff', '#ff9ecb', '#c9ff8a',
       '#ffb08a', '#b7a6ff', '#8afff0', '#ffe08a', '#f0a6ff', '#a6ffd0', '#ffa6a6'];
     const actColor = new Map<number, string>();
-    opts.actors.forEach((a, i) => actColor.set(a.ci, LABEL_COLORS[i % LABEL_COLORS.length]!));
-    // ── THE SILHOUETTE CENSUS: every craft mesh, every triangle, world
-    //    space, with its world normal and the owning part ci (−1 = hull)
+    const groupColors = new Map<string, string>();
+    {
+      let ki = 0;
+      for (const g of opts.groups ?? []) {
+        const c = LABEL_COLORS[ki++ % LABEL_COLORS.length]!;
+        groupColors.set(g.label, c);
+        g.cis.forEach(ci => actColor.set(ci, c));
+      }
+      opts.actors.forEach((a) => {
+        if (!actColor.has(a.ci)) actColor.set(a.ci, LABEL_COLORS[ki++ % LABEL_COLORS.length]!);
+      });
+    }
     const actorOf = new Map<Object3D, number>();
     for (const ci of actorCis)
       for (const root of this.compRoots.get(ci) ?? []) root.traverse(o => actorOf.set(o, ci));
-    // THE FIGURE/GROUND LAW v1.17.2 (we: "its too complex … I see all the
-    // outsides of everything, not just components with the rest of the
-    // geometry as a background"): the plate is THREE stacked planes, not
-    // a mosaic — (0) the hull as ONE uniform silhouette sheet, (1) the
-    // craft's other parts a quiet mid-tone, (2) the ACTORS the only
-    // colour, in their label's palette hue. Face material colours are
-    // deliberately NOT carried: per-face colour at full opacity is what
-    // turned the ship into 48k shouting tiles.
     const partOf = new Map<Object3D, number>();
     this.compRoots.forEach((roots, ci) => {
       for (const root of roots) root.traverse(o => partOf.set(o, ci));
     });
     interface Tri { v: [number, number, number, number, number, number, number, number, number];
-      n: [number, number, number]; cls: 0 | 1 | 2; ci: number; dense: boolean }
+      n: [number, number, number]; cls: 0 | 1 | 2; ci: number; dense: boolean; mid: number }
     const tris: Tri[] = [];
+    let meshSerial = 0;
     const vA = new Vector3(), vB = new Vector3(), vC = new Vector3(), e1 = new Vector3(), e2 = new Vector3();
     for (const g of [this.root, this.hingeGroup, this.subGroup]) {
-      // CRAFT GROUPS ONLY: the CoM marker, screen quads, sky dome and
-      // ground live at the SCENE layer — a drafting sheet draws the
-      // SHIP, never editor overlays (we: "Are you rendering the center
-      // of mass? Dont put that in a schematic" — it never was).
       g.traverse(o => {
         const m = o as Mesh;
         if (!(m as unknown as { isMesh?: boolean }).isMesh || !m.visible) return;
-        // InstancedMeshes are the pipe/elbow TEMPLATES (unit sphere/cyl/
-        // box + instanceMatrix): a census reading them emits the 1 m
-        // TEMPLATE at the group origin — the "large sphere" on every
-        // cabled craft (we: "there is a large fucking sphere in super
-        // mario and chipOS … that shouldnt fucking be there"). Cables
-        // ride the amber pipeNet annotations; templates never ink.
-        if ((o as unknown as { isInstancedMesh?: boolean }).isInstancedMesh) return;
         if ((o.userData as { windlines?: boolean })?.windlines) return;
+        if ((o as unknown as { isInstancedMesh?: boolean }).isInstancedMesh) return;
         const geo = m.geometry as BufferGeometry;
         const pos = geo?.getAttribute?.('position') as BufferAttribute | undefined;
         if (!pos) return;
@@ -3072,15 +3079,9 @@ void main() {
         const actorCi = actorOf.get(o);
         const partCi = partOf.get(o);
         const cls: 0 | 1 | 2 = actorCi !== undefined ? 2 : partCi !== undefined ? 1 : 0;
+        const dense = (idx ? idx.count : pos.count) / 3 > 1500;
+        const mid = meshSerial++;
         const mtx = m.matrixWorld;
-        // THE DENSE-MESH RULE (v1.17.2, we: "the propellor blades are TOO
-        // DETAILED … keep the outside vertices only of complex geometry —
-        // it kills performance on its SVGs"): a mesh over ~800 triangles
-        // (generated prop SDFs, high-poly models, the grid grilles) is
-        // DENSE — its SVG contribution is the SILHOUETTE RING + hard
-        // creases (≥ 35°); its gentle-facet interior and sub-pixel
-        // triangles are census-dropped.
-        const dense = (idx ? idx.count : pos.count) / 3 > 800;
         const limit = Math.min(n, MESH_CAP * 3);
         for (let i = 0; i + 2 < limit; i += 3) {
           const j0 = idx ? idx.getX(i) : i, j1 = idx ? idx.getX(i + 1) : i + 1, j2 = idx ? idx.getX(i + 2) : i + 2;
@@ -3090,13 +3091,14 @@ void main() {
           e1.subVectors(vB, vA); e2.subVectors(vC, vA);
           const nx = e1.y * e2.z - e1.z * e2.y, ny = e1.z * e2.x - e1.x * e2.z, nz = e1.x * e2.y - e1.y * e2.x;
           const len = Math.hypot(nx, ny, nz);
-          if (len < 1e-9) continue;                        // degenerate: no face
+          if (len < 1e-9) continue;
           tris.push({ v: [vA.x, vA.y, vA.z, vB.x, vB.y, vB.z, vC.x, vC.y, vC.z],
-            n: [nx / len, ny / len, nz / len], cls, ci: actorCi ?? partCi ?? -1, dense });
+            n: [nx / len, ny / len, nz / len], cls, ci: actorCi ?? partCi ?? -1, dense, mid });
         }
       });
     }
-    // cable runs touching an actor (pipeNet.links index-align polys)
+    // cable runs touching an actor (pipeNet.links index-align polys) —
+    // THE CONNECTION-COLOUR LAW: the run wears its ACTOR endpoint's colour
     const net = this.pipeNet;
     const runs: { pts: Vector3[]; tag: string; color: string }[] = [];
     for (let i = 0; i < net.polys.length; i++) {
@@ -3106,18 +3108,60 @@ void main() {
       if (pts.length < 2) continue;
       const tags = [link.a, link.b].map(ci => opts.actors.find(x => x.ci === ci)?.tag)
         .filter(Boolean).join(' ↔ ');
-      // THE CONNECTION-COLOUR LAW (v1.17.2): the run wears its ACTOR
-      // endpoint's colour — the earlier one in the picking order when
-      // both ends are actors.
       const ia = opts.actors.findIndex(a => a.ci === link.a);
       const ib = opts.actors.findIndex(a => a.ci === link.b);
-      const pick = ia >= 0 && (ib < 0 || ia <= ib) ? ia : ib;
-      const col = pick >= 0 ? actColor.get(opts.actors[pick]!.ci) ?? '#ffc35e' : '#ffc35e';
-      runs.push({ pts: pts.map(p => p instanceof Vector3 ? p : new Vector3(p[0], p[1], p[2])), tag: tags, color: col });
+      const pickIdx = ia >= 0 && (ib < 0 || ia <= ib) ? ia : ib;
+      const col = pickIdx >= 0 ? actColor.get(opts.actors[pickIdx]!.ci) ?? '#ffc35e' : '#ffc35e';
+      runs.push({ pts: pts.map(p => p instanceof Vector3 ? p : new Vector3(p[0]!, p[1]!, p[2]!)),
+        tag: tags, color: col });
     }
-    // THE THREE-VIEW LAW: one shared px/m for the whole sheet — the trio
-    // reads as ONE engineering drawing (per-view stretching is a LIE).
-    const S3 = new Vector3(Math.max(0.5, S.x), Math.max(0.5, S.y), Math.max(0.5, S.z));
+    // GROUP BY SUBMESH: a beacon is base + mast + lens — each renderable
+    // node is outlined for itself, so touching parts never fuse into an
+    // obelisk (we: "its become a washington monument and its square base
+    // merges to the pointy dome").
+    const compPts = new Map<string, { ci: number; xyz: Float32Array }>();
+    {
+      const byCi = new Map<string, number[][]>();
+      for (const t of tris)
+        if (t.cls >= 1) {
+          const arr = byCi.get(`${t.ci}|${t.mid}`) ?? [];
+          byCi.set(`${t.ci}|${t.mid}`, arr);
+          for (let k = 0; k < 3; k++) arr.push([t.v[k * 3]!, t.v[k * 3 + 1]!, t.v[k * 3 + 2]!]);
+        }
+      const inv = new Quaternion();
+      const d = new Vector3();
+      byCi.forEach((pts, k) => {
+        const ci = Number(k.slice(0, k.indexOf('|')));
+        const flat = new Float32Array(pts.length * 3);
+        const roots = this.compRoots.get(ci);
+        if (!roots?.[0]) {
+          pts.forEach((p, i) => { flat[i * 3] = p[0]!; flat[i * 3 + 1] = p[1]!; flat[i * 3 + 2] = p[2]!; });
+          compPts.set(k, { ci, xyz: flat });
+          return;
+        }
+        const o = new Vector3(); roots[0].getWorldPosition(o);
+        const q = new Quaternion(); roots[0].getWorldQuaternion(q);
+        const qS = snap90(q);
+        inv.copy(q).invert();
+        pts.forEach((p, i) => {
+          d.set(p[0]! - o.x, p[1]! - o.y, p[2]! - o.z).applyQuaternion(inv).applyQuaternion(qS);
+          flat[i * 3] = o.x + d.x; flat[i * 3 + 1] = o.y + d.y; flat[i * 3 + 2] = o.z + d.z;
+        });
+        compPts.set(k, { ci, xyz: flat });
+      });
+    }
+    const convexHull = (pts: [number, number][]): [number, number][] => {
+      const p = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+      if (p.length < 3) return p;
+      const cr = (o: [number, number], a: [number, number], b: [number, number]) =>
+        (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+      const lo: [number, number][] = [];
+      for (const pt of p) { while (lo.length >= 2 && cr(lo[lo.length - 2]!, lo[lo.length - 1]!, pt) <= 0) lo.pop(); lo.push(pt); }
+      const up: [number, number][] = [];
+      for (let i = p.length - 1; i >= 0; i--) { const pt = p[i]!; while (up.length >= 2 && cr(up[up.length - 2]!, up[up.length - 1]!, pt) <= 0) up.pop(); up.push(pt); }
+      lo.pop(); up.pop();
+      return lo.concat(up);
+    };
     // THE INFORMATIVE-VIEW LAW (v1.17.2, we: "craft are usually elongated
     // in one direction. So top and side is almost certainly sensible. But
     // a small craft, yeah it can have all three"): rank the extents — the
@@ -3130,6 +3174,7 @@ void main() {
       yz: { title: 'SIDE (starboard, nose right)', axis: 'zy' },
       xz: { title: 'TOPSIDE (nose up)', axis: 'xz' },
     };
+    const S3 = new Vector3(Math.max(0.5, S.x), Math.max(0.5, S.y), Math.max(0.5, S.z));
     const ext: Record<string, number> = { x: S3.x, y: S3.y, z: S3.z };
     const axk = (['x', 'y', 'z'] as string[]).sort((p, q) => ext[q]! - ext[p]!);
     const pairKey = (p: string, q: string) => [p, q].sort().join('');
@@ -3160,9 +3205,6 @@ void main() {
           for (const z of [box.min.z, box.max.z]) add(x, y, z);
       return { u0, u1, w0, w1 };
     });
-    const scale = Math.min(...extents.map(e => Math.min(
-      (PW - 2 * PAD) / Math.max(0.5, e.u1 - e.u0),
-      (PH - 2 * PAD - 10) / Math.max(0.5, e.w1 - e.w0))));
     const g2 = document.createElement('canvas').getContext('2d')!;
     const panels = views.map((view, vi) => {
       const U = (p: { x: number; y: number; z: number }) =>
@@ -3173,7 +3215,12 @@ void main() {
       // content extents (measured above), centred in the panel.
       const e0 = extents[vi]!;
       const uMin = e0.u0, vMin = e0.w0, extU = e0.u1 - e0.u0, extV = e0.w1 - e0.w0;
-      const ox = vi * (PW + GAP) + PAD + (PW - 2 * PAD - extU * scale) / 2 - uMin * scale;
+      // THE ONE-PAGE-PER-VIEW LAW (v1.17.2, we: "put the next schematic
+      // on the next page … the larger version will [fit]"): each view
+      // fills ITS OWN sheet at its own best scale — no shared px/m tax.
+      const scale = Math.min((PW - 2 * PAD) / Math.max(0.5, extU),
+        (PH - 2 * PAD - 10) / Math.max(0.5, extV));
+      const ox = PAD + (PW - 2 * PAD - extU * scale) / 2 - uMin * scale;
       const oy = PAD + 26 + (PH - 2 * PAD - 10 - extV * scale) / 2 - vMin * scale;
       const px = (u: number, v: number) => ({ x: ox + u * scale, y: oy + v * scale });
       // THE MARGIN LAW (v1.17.2, we: "schematics should try to move things
@@ -3203,10 +3250,42 @@ void main() {
       // edges, not 36 triangle sides — half the SVG of the triangle cut.
       interface Face { v: [number, number, number]; p0: [number, number, number];
         n: [number, number, number]; cls: 0 | 1 | 2; ci: number; facing: boolean; dense: boolean }
+      // THE TRACE-OR-MESH LAW (v1.17.2, we: "make ailerons look the
+      // way they used to PLEASE. do not subject them to
+      // simplification! same for wheels"): a part is replaced by its
+      // union-boundary TRACE only when its outline is genuinely
+      // non-convex (traced area < 85 % of its hull's — propellers,
+      // beacon masts). Every OTHER part draws as its REAL MESH through
+      // the edge census below — the wheel's tire rings, the aileron's
+      // plate and hinge, the way they always looked. No hull blobs.
+      const tracedKeys = new Set<string>();
+      const partShapes: string[] = [];
+      const actShapes = new Map<string, string[]>();
+      compPts.forEach(({ ci, xyz }, key) => {
+        const ptsPx: [number, number][] = [];
+        const trisPx: number[][] = [];
+        for (let i = 0; i < xyz.length; i += 9) {
+          const q = (j: number) => px(U({ x: xyz[i + j]!, y: xyz[i + j + 1]!, z: xyz[i + j + 2]! }),
+            V({ x: xyz[i + j]!, y: xyz[i + j + 1]!, z: xyz[i + j + 2]! }));
+          const a = q(0), b = q(3), c = q(6);
+          ptsPx.push([a.x, a.y], [b.x, b.y], [c.x, c.y]);
+          trisPx.push([a.x, a.y, b.x, b.y, c.x, c.y]);
+        }
+        const o = outlineOf(trisPx);
+        const hullA = o ? polyArea(convexHull(ptsPx)) : 0;
+        if (!o || o.area <= 2 || hullA <= 0 || o.area / hullA >= 0.85) return;
+        tracedKeys.add(key);
+        const shape = `<path d="${o.d}"/>`;
+        const col = actColor.get(ci);
+        if (col) { const l = actShapes.get(col) ?? []; l.push(shape); actShapes.set(col, l); }
+        else partShapes.push(shape);
+      });
       const faces: Face[] = [];
       const vid = new Map<string, number>();
       const vpt: number[] = [];
       for (const t of tris) {
+        // traced submeshes leave the edge census (their outline draws)
+        if (t.cls >= 1 && tracedKeys.has(`${t.ci}|${t.mid}`)) continue;
         const [x0, y0, z0, x1, y1, z1, x2, y2, z2] = t.v;
         pa.set(x0, y0, z0); pb.set(x1, y1, z1); pc.set(x2, y2, z2);
         const a = px(U(pa), V(pa)), b2 = px(U(pb), V(pb)), c2 = px(U(pc), V(pc));
@@ -3272,7 +3351,18 @@ void main() {
             if (e.cls === 2 && d > 0.906) continue;
             role = 'cre';
           } else role = 'cre';
-        } else role = 'sil';                                // facing ↔ back: form line
+        } else {
+          // THE SHARP-RIM RULE (v1.17.2, we: "propellors still crapo,
+          // why?"): a facing↔back transition on a SMOOTH surface (the
+          // extremal contour of a twisted blade / SDF grid) zigzags
+          // across the mesh — a line drawing keeps it ONLY where the
+          // surface bends hard (rim/edge ≥ 30°); smooth crossings are
+          // not form lines and drop.
+          const n1 = fA.n, n2 = fB.n;
+          if (Math.abs(n1[0] * n2[0] + n1[1] * n2[1] + n1[2] * n2[2]) > 0.866)
+            continue;
+          role = 'sil';
+        }
         if (e.cls === 2) {
           const c = actColor.get(e.ci) ?? '#ffd98a';
           let slot = actG.get(c);
@@ -3283,7 +3373,7 @@ void main() {
       }
       const out: string[] = [];
       // the sheet itself: navy board, 1 m lattice, panel frame, scale bar
-      const bx0 = vi * (PW + GAP) + 10;
+      const bx0 = 10;
       out.push(`<rect x="${bx0}" y="10" width="${PW - 20}" height="${PH - 20}" fill="#0f2a48" stroke="#33608f" stroke-width="1" rx="6"/>`);
       {
         const grid: string[] = [];
@@ -3331,7 +3421,14 @@ void main() {
       // are census-dropped (the DENSE-MESH RULE + SMOOTH-SHELL GATE
       // apply to cls-2 like every class). No glyphs, no collider boxes:
       // a propeller is the outline of the blades AS SEEN in this view.
-            // cables — THE CONNECTION-COLOUR LAW v1.17.2 (we: "schematics should
+            // THE COMPONENT-HULL LAW: draw each component's convex hull —
+      // actors in their device colour (the same colour as their wires
+      // and labels), plain parts in the quiet slate.
+      if (partShapes.length)
+        out.push(`<g fill="none" stroke="#b9dcff" stroke-opacity="0.55" stroke-width="0.9">${partShapes.join('')}</g>`);
+      actShapes.forEach((shapes, col) =>
+        out.push(`<g fill="none" stroke="${col}" stroke-opacity="0.95" stroke-width="1.4">${shapes.join('')}</g>`));
+      // cables — THE CONNECTION-COLOUR LAW v1.17.2 (we: "schematics should
       // let us know which connections go to which things … pick a single
       // color and then show all connections to that thing with that
       // color, with a certain picking order"): a cable run rides the
@@ -3346,7 +3443,7 @@ void main() {
         for (const p of [pts[0]!, pts[pts.length - 1]!])
           out.push(`<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="2.6" fill="${r.color}"/>`);
         if (r.tag) labelItems.push({ s: pts[Math.floor(pts.length / 2)]!, text: r.tag,
-          font: '11px ui-monospace, monospace', color: r.color });
+          font: '11px ui-monospace, monospace', color: r.color, out: true });
       }
       // THE LEADER-LABEL LAW (v1.17.2): actors + cable tags enter ONE
       // placer; colour-rotated, collision-slotted boxes, a leader line
@@ -3358,12 +3455,51 @@ void main() {
         labelItems.push({ s: px(U(mid), V(mid)), text: a.tag,
           font: 'bold 13px ui-sans-serif, system-ui', color: actColor.get(a.ci), out: true });
       });
-      // actors claim their margin slots FIRST (cable tags fill the rest)
-      labelItems.sort((a, b) => (b.out ? 1 : 0) - (a.out ? 1 : 0));
+      // THE PLURAL-LABEL LAW: one label per group, anchored on the
+      // member closest to the members' 2-D projected centroid.
+      for (const g of opts.groups ?? []) {
+        const centers = g.cis
+          .map(ci => partBoxes.get(ci))
+          .filter((b): b is Box3 => !!b)
+          .map(b => ({ x: (b.min.x + b.max.x) / 2, y: (b.min.y + b.max.y) / 2, z: (b.min.z + b.max.z) / 2 }));
+        if (!centers.length) continue;
+        const cu = centers.reduce((a, p) => a + U(p), 0) / centers.length;
+        const cv = centers.reduce((a, p) => a + V(p), 0) / centers.length;
+        let best = centers[0]!, bd = Infinity;
+        for (const c of centers) {
+          const dd = (U(c) - cu) ** 2 + (V(c) - cv) ** 2;
+          if (dd < bd) { bd = dd; best = c; }
+        }
+        labelItems.push({ s: px(U(best), V(best)), text: g.label,
+          font: 'bold 13px ui-sans-serif, system-ui', color: groupColors.get(g.label), out: true });
+      }
+      // ACTOR labels claim their slots FIRST (cable tags fill the rest)
+      labelItems.sort((a, b) => (b.font.startsWith('bold') ? 1 : 0) - (a.font.startsWith('bold') ? 1 : 0));
+      // THE CLEAR-SPACE LAW (v1.17.2, we: "still a lot of text in the
+      // middle of diagram … terrible placement on labels in the mining
+      // gyrocopter"): every part's projected bbox is an OBSTACLE — a
+      // label box may not sit on the drawing. Labels land in the clear
+      // space around the machine; the leader line keeps the link.
+      const obstacles: { x: number; y: number; w: number; h: number }[] = [];
+      compPts.forEach(({ xyz }) => {
+        let u0 = 1e9, u1 = -1e9, w0 = 1e9, w1 = -1e9;
+        for (let i = 0; i < xyz.length; i += 3) {
+          const p = { x: xyz[i]!, y: xyz[i + 1]!, z: xyz[i + 2]! };
+          const u = U(p), w = V(p);
+          if (u < u0) u0 = u; if (u > u1) u1 = u;
+          if (w < w0) w0 = w; if (w > w1) w1 = w;
+        }
+        const a = px(u0, w0), b = px(u1, w1);
+        obstacles.push({ x: a.x - 3, y: a.y - 3, w: b.x - a.x + 6, h: b.y - a.y + 6 });
+      });
+      const clearOfInk = (bb: { x: number; y: number; w: number; h: number }) =>
+        !obstacles.some(o => bb.x < o.x + o.w && bb.x + bb.w > o.x &&
+          bb.y < o.y + o.h && bb.y + bb.h > o.y);
       const placed: { x: number; y: number; w: number; h: number }[] = [];
-      const fits = (bb: { x: number; y: number; w: number; h: number }) =>
-        bb.x >= vi * (PW + GAP) + 2 && bb.x + bb.w <= vi * (PW + GAP) + PW - 2 &&
+      const fits = (bb: { x: number; y: number; w: number; h: number }, mustClear = true) =>
+        bb.x >= 2 && bb.x + bb.w <= PW - 2 &&
         bb.y >= 2 && bb.y + bb.h <= PH - 2 &&
+        (!mustClear || clearOfInk(bb)) &&
         !placed.some(p => bb.x < p.x + p.w + 5 && bb.x + bb.w + 5 > p.x &&
           bb.y < p.y + p.h + 3 && bb.y + bb.h + 3 > p.y);
       labelItems.forEach((it, i) => {
@@ -3379,13 +3515,17 @@ void main() {
         // fallback (cable tags use only these).
         const offs: [number, number][] = [];
         if (it.out) {
-          const cP = { x: vi * (PW + GAP) + PW / 2, y: PH / 2 };
-          const rx = extU * scale / 2 + 44, ry = extV * scale / 2 + 32;
+          const cP = { x: PW / 2, y: PH / 2 };
           const a0 = Math.atan2(it.s.y - cP.y, it.s.x - cP.x);
-          for (const k of [1.04, 1.24, 1.46])
-            for (const da of [0, 0.24, -0.24, 0.5, -0.5, 0.78, -0.78, 1.1, -1.1, 1.5, -1.5, 1.95, -1.95, Math.PI])
-              offs.push([cP.x - it.s.x + Math.cos(a0 + da) * rx * k,
-                cP.y - it.s.y + Math.sin(a0 + da) * ry * k - bh / 2]);
+          // HUG-OUT (v1.17.2, we: "pilotseat label is entirely to the
+          // side in the SVG, that aint good"): the ring rides the
+          // ANCHOR's own radius + a modest push — the label sits BY its
+          // part in the nearest clear space, never flung to the sheet.
+          const r0 = Math.hypot(it.s.x - cP.x, it.s.y - cP.y);
+          for (const d of [20, 46, 80, 122, 170, 230, 300, 380, 470])
+            for (const da of [0, 0.16, -0.16, 0.34, -0.34, 0.55, -0.55, 0.8, -0.8, 1.1, -1.1, 1.45, -1.45])
+              offs.push([cP.x + Math.cos(a0 + da) * (r0 + d) - it.s.x,
+                cP.y + Math.sin(a0 + da) * (r0 + d) * 0.82 - it.s.y - bh / 2]);
         }
         offs.push([12, -20], [12, 6], [12, 32],
           [-bw - 18, -20], [-bw - 18, 6], [-bw - 18, 32],
@@ -3396,7 +3536,7 @@ void main() {
           const cand = { x: it.s.x + dx, y: it.s.y + dy, w: bw, h: bh };
           if (fits(cand)) { b2 = cand; break; }
         }
-        if (!b2) b2 = { x: Math.min(Math.max(2, it.s.x + 12), vi * (PW + GAP) + PW - bw - 2),
+        if (!b2) b2 = { x: Math.min(Math.max(2, it.s.x + 12), PW - bw - 2),
           y: Math.min(Math.max(2, it.s.y - 20), PH - bh - 2), w: bw, h: bh };
         placed.push(b2);
         out.push(`<line x1="${it.s.x.toFixed(1)}" y1="${it.s.y.toFixed(1)}" x2="${(b2.x + b2.w / 2).toFixed(1)}"` +
@@ -3407,17 +3547,16 @@ void main() {
         out.push(`<text x="${(b2.x + 5).toFixed(1)}" y="${(b2.y + bh - 4.5).toFixed(1)}" fill="${color}"` +
           ` font-size="${it.font.startsWith('bold') ? 13 : 11}"${it.font.startsWith('bold') ? ' font-weight="600"' : ''}>${esc(it.text)}</text>`);
       });
-      // PANEL CLIP: the sheet frames the ship by the FILE box (v1.17.1's
-      // honest-box law) — geometry beyond it (notably the known GAME-hull
-      // stray skin prisms) is CLIPPED, never allowed to spill panels.
-      return `<defs><clipPath id="apclip${vi}"><rect x="${vi * (PW + GAP)}" y="0" width="${PW}" height="${PH}"/></clipPath></defs>` +
-        `<g clip-path="url(#apclip${vi})">${out.join('\\n')}</g>`;
+      // PANEL CLIP: the sheet frames the ship by the measured content —
+      // geometry beyond it (notably the known GAME-hull stray skin
+      // prisms) is CLIPPED, never allowed to spill the sheet.
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="${PW}" height="${PH}"` +
+        ` viewBox="0 0 ${PW} ${PH}" font-family="ui-sans-serif, system-ui">` +
+        `<rect width="${PW}" height="${PH}" fill="#0b1220" rx="10"/>` +
+        `<defs><clipPath id="apclip"><rect x="0" y="0" width="${PW}" height="${PH}"/></clipPath></defs>` +
+        `<g clip-path="url(#apclip)">${out.join('\n')}</g></svg>`;
     });
-    const W = views.length * PW + (views.length - 1) * GAP;
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${PH}"` +
-      ` viewBox="0 0 ${W} ${PH}" font-family="ui-sans-serif, system-ui">` +
-      `<rect width="${W}" height="${PH}" fill="#0b1220" rx="10"/>\n${panels.join('\n')}</svg>`;
-    return Promise.resolve({ svg, empty });
+    return Promise.resolve({ svgs: panels, empty });
   }
 
   /** green ground + grid just under the lowest rendered geometry (ground=true:

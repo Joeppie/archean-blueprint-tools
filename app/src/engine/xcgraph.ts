@@ -100,6 +100,34 @@ export function parseNodeGraph(file: XcFile): XcNodeGraph | null {
 /** size caps (we: "all diagrams are too large … bloated and unusable"):
  *  every diagram is BOUNDED; overflow folds into honest "+N more" members. */
 const CAP = { cls: 7, fns: 6, edges: 8, seqDev: 7, seqMsg: 12, nodeCls: 8, flowFiles: 5 };
+/** THE PLURAL-LABEL LAW (v1.17.2, we: Jimmy's adventure — "things that
+ *  repeat and are wired together … label the junction OR the central
+ *  most component of an identified group and label it as plural, e.g.
+ *  Aileron-left-1, Aileron-left-2 → Ailerons-Left 1-5, … generators"):
+ *  a wired group of ≥3 same-type parts gets ONE label. Patterned
+ *  aliases (common prefix + trailing number) become
+ *  "<Prefixs> <min>–<max>"; anything else pluralizes the type words
+ *  ("RTGGenerator" → "RTG Generators"). Pure + pinned. */
+export function groupLabel(type: string, aliases: string[]): string {
+  const parts = aliases.map(a => /^(.*?)[-\s_]+(\d+)$/.exec(a.trim()));
+  const prefixes = new Set(parts.map(p => p?.[1]?.toLowerCase()));
+  if (parts.every(Boolean) && prefixes.size === 1 && parts[0]![1]) {
+    const nums = parts.map(p => +p![2]!).sort((a, b) => a - b);
+    const words = parts[0]![1]!.split(/[-_\s]+/).filter(Boolean);
+    const cap = words
+      .map((w, i) => i === 0
+        ? w[0]!.toUpperCase() + w.slice(1) + (/s$/i.test(w) ? 'es' : 's')
+        : w[0]!.toUpperCase() + w.slice(1))
+      .join('-');
+    return nums[0] === nums[nums.length - 1]
+      ? `${cap} ${nums[0]}` : `${cap} ${nums[0]}–${nums[nums.length - 1]}`;
+  }
+  const words = type.replace(/([a-z0-9])([A-Z])/g, '$1 $2').split(/\s+/).filter(Boolean);
+  const last = words[words.length - 1] ?? type;
+  words[words.length - 1] = /s$/i.test(last) ? `${last}es` : `${last}s`;
+  return words.join(' ');
+}
+
 const ENTRY_MARK: Record<string, string> = {
   // the user asked to SEE the live blocks: init, update(tick), click…
   // v1.17.2: the ⚡ rides the mark — in the class member list the live
@@ -212,7 +240,8 @@ export function xcDiagrams(prog: XcProgram, seatLabels?: Record<number, string>)
       cls.push(`  style ${nid('c', f.name)} stroke:#7dffcf,stroke-width:2px`);
   // device nodes + wiring edges (bounded like the sequences)
   const devRanked = [...tally.values()].sort((a, b) => b.n - a.n);
-  const devShown = devRanked.slice(0, CAP.seqDev);
+  // THE NO-HIDDEN-DEVICES LAW (v1.17.2): ≤14 devices → show every one
+  const devShown = devRanked.length <= 14 ? devRanked : devRanked.slice(0, CAP.seqDev);
   for (const x of devShown)
     cls.push(`  class ${nid('d', short(x.dev))}["≡ ${label(short(x.dev))} : ${label(x.dev.type)}"] {` +
       `\n    +io ${x.dev.io}\n    +${x.dir === 'in' ? 'read' : 'written'} ×${x.n}` +
@@ -223,7 +252,7 @@ export function xcDiagrams(prog: XcProgram, seatLabels?: Record<number, string>)
     cls.push(`  class devmisc["… +${devRanked.length - devShown.length} quieter device(s)"]`);
   let devEdges = 0;
   for (const x of devShown) {
-    if (devEdges >= CAP.edges + 4) break;
+    if (devEdges >= (devRanked.length <= 14 ? 999 : CAP.edges + 4)) break;
     const owners = new Set<string>();
     for (const ev of io) for (const d2 of resolve(ev.file, ev.token))
       if (d2 === x.dev) owners.add(ev.file);
@@ -307,16 +336,21 @@ export function xcDiagrams(prog: XcProgram, seatLabels?: Record<number, string>)
     .sort((a, b) => b.n - a.n);
   const mkSeq = (dir: 'in' | 'out', title: string): XcDiagram => {
     const ranked = byDir(dir);
-    const t = ranked.slice(0, CAP.seqDev);
+    // THE NO-HIDDEN-DEVICES LAW (v1.17.2, we: "hiding devices in the
+    // sequence diagrams is harmful, cheap exploration plane shows a
+    // diagram where the pilot seat and wheel work together to…"): the
+    // fold exists to tame monster crafts (the Badger's io sprawl) — a
+    // small craft shows EVERY device, no folding, no message cap.
+    const t = ranked.length <= 14 ? ranked : ranked.slice(0, CAP.seqDev);
     const seats = t.filter(x => x.dev.type === 'PilotSeat');
     const lines: string[] = ['sequenceDiagram'];
     if (seats.length) lines.push('  actor U as Pilot / user');
     lines.push('  participant P as ' + label(prog.alias));
     for (const x of t)
       lines.push(`  participant ${nid('d', short(x.dev))} as ${label(short(x.dev) + ' · ' + x.dev.type)}`);
-    let msgs = 0;
+    let msgs = 0; let capped = false;
     for (const x of t) {
-      if (msgs >= CAP.seqMsg) break;
+      if (msgs >= (ranked.length <= 14 ? 999 : CAP.seqMsg)) { capped = true; break; }
       const chs = [...x.chs].slice(0, 4).join(',');
       const txt = `${dir === 'in' ? 'read' : 'write'} ch ${label(chs)} \u00d7${x.n}`;
       if (x.dev.type === 'PilotSeat' && dir === 'in') {
@@ -326,9 +360,15 @@ export function xcDiagrams(prog: XcProgram, seatLabels?: Record<number, string>)
       } else if (dir === 'in') { lines.push(`  ${nid('d', short(x.dev))}->>+P: ${label(txt)}`); msgs++; }
       else { lines.push(`  P->>+${nid('d', short(x.dev))}: ${label(txt)}`); msgs++; }
     }
-    const folded = Math.max(0, t.length - msgs / 2) + Math.max(0, ranked.length - t.length);
-    if (folded > 0)
-      lines.push(`  Note over P: +${folded} quieter channel group(s) folded \u2014 full census in the rundown`);
+    // THE NO-HIDDEN-DEVICES LAW (v1.17.2): the fold note is HONEST — it
+    // counts devices actually omitted (ranked − shown) and a message
+    // budget actually exhausted; a small craft with every device drawn
+    // gets NO note (the old t.length−msgs/2 arithmetic invented folds).
+    const hidden = Math.max(0, ranked.length - t.length);
+    if (hidden > 0)
+      lines.push(`  Note over P: ${hidden} more device(s) carry fewer messages — hidden to keep this map readable, every one is listed in the Device fan-in table below`);
+    else if (capped)
+      lines.push('  Note over P: message budget for this view reached — the remaining traffic of the listed devices is in the Device fan-in table below');
     return { kind: dir === 'in' ? 'seqIn' : 'seqOut', title: `${prog.alias} \u2014 ${title}`, source: lines.join('\n') };
   };
 
@@ -512,9 +552,9 @@ export function craftIsFlyable(bp: { data: { components: { type: string }[] } })
  *  surfaces (a rover or a Mario cabinet gets no aero theatre). PURE string
  *  builder — the dialog hands it exactly what it rendered. */
 export interface ReportSection { compAlias: string;
-  /** v1.17.2 THE VECTORIZATION: the FRONT/SIDE/TOPSIDE trio as ONE inline
-   *  SVG sheet (sharp at any zoom; the dialog renders it zoomable). */
-  plateSvg?: string;
+  /** v1.17.2 THE ONE-PAGE-PER-VIEW LAW: one inline SVG sheet per view
+   *  (sharp at any zoom; the dialog renders them as a gallery). */
+  plateSvg?: string[];
   diagrams: XcDiagram[]; svgs: (string | null)[]; rundown?: CodeRundown;
   compute?: ReportCompute }
 /** the craft header (v1.17.2, we: "weight, costs and flight characteristics
@@ -637,7 +677,7 @@ h1{font-size:20px;color:#7dffcf} h2{font-size:16px;margin-top:28px;color:#9fd0ff
 h3{font-size:13px;margin:18px 0 6px;color:#e8edf4}
 .plates{display:flex;gap:12px;flex-wrap:wrap} .plates figure{margin:0}
 .plates img{width:320px;max-width:30vw;border:1px solid #22314a;border-radius:6px}
-.plate-sheet{margin:12px 0} .plate-sheet svg{width:100%;max-width:1200px;
+.plate-sheet{margin:12px 0;page-break-after:always} .plate-sheet svg{width:100%;max-width:1200px;
 height:auto;border:1px solid #22314a;border-radius:8px}
 figcaption{font-size:11px;color:#8b93a1;margin-top:4px}
 .mm{background:#101a2b;border-radius:8px;padding:8px;overflow:auto;max-width:1200px}
@@ -656,10 +696,10 @@ ${summaryHtml}${flightHtml}
   style="color:#8fd4ff;margin-right:14px;font-size:12px">▸ ${esc(s.compAlias)}</a>`).join('')}</nav>`];
   for (const s of opts.sections) {
     parts.push(`<h2 id="comp-${esc(s.compAlias)}">Computer ${esc(s.compAlias)}</h2>`);
-    if (s.plateSvg) parts.push(`<figure class="plate-sheet">${s.plateSvg}
-<figcaption>blueprint plate — front · side · topside on a metre grid: hull
-hairlines, parts quiet, ONLY the actors inked in their label colour, cabled
-runs amber + io tags, leader-line labels</figcaption></figure>`);
+    if (s.plateSvg) parts.push(s.plateSvg.map((svg, i) => `<figure class="plate-sheet">${svg}
+<figcaption>blueprint plate · view ${i + 1} — one view per page, silhouette
+linework, actors in device colours, cabled runs + io tags, leader-line labels
+</figcaption></figure>`).join('\n'));
     if (s.compute) {
       const c = s.compute;
       parts.push(`<h3>Compute budget</h3><p style="font-size:12px;color:#c8d4e4">

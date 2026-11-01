@@ -3,7 +3,7 @@
 // deterministic text; the mermaid RUNTIME itself is the dialog's concern
 // (e2e: analysis.spec renders SVGs in the browser).
 import { describe, expect, it } from 'vitest';
-import { buildAnalysisHtml, codeRundown, estWatts, GAME_HUD_LAW,
+import { buildAnalysisHtml, codeRundown, estWatts, GAME_HUD_LAW, groupLabel,
   GAME_IPC_LAW, GAME_POWER_LAW, svgTextOnly, xcDiagrams, type XcFile } from '../xcgraph';
 import type { XCDevice } from '../xenoncode';
 
@@ -196,5 +196,39 @@ describe('THE WORK CENSUS LAW (v1.17.1, we: "calculate how much work the compute
     expect(html).toContain('413 IPC penalty units / cycle');
     expect(html).toContain('EMA over 90 cycles');
     expect(html.match(/client/g)!.length).toBeGreaterThan(0);   // the HUD row quotes hud law
+  });
+});
+
+describe('THE NO-HIDDEN-DEVICES LAW — @diagrams (v1.17.2)', () => {
+  it('a small craft lists EVERY device in both sequences, no fold note', () => {
+    const ds = xcDiagrams(prog);
+    const seqIn = ds[2]!.source;
+    const seqOut = ds[3]!.source;
+    expect(seqIn).not.toMatch(/hidden to keep this map readable/i);
+    expect(seqOut).not.toMatch(/hidden to keep this map readable/i);
+    expect(seqIn).toContain('seat-main');
+    expect(seqOut).toContain('melody');
+    expect(seqOut).toContain('screen-main');
+    // and the class diagram shows every device node too
+    const cls = ds[0]!.source;
+    for (const a of ['seat-main', 'melody', 'screen-main', 'game-fx-blocks', 'game-fx-power'])
+      expect(cls).toContain(a);
+  });
+});
+
+describe('THE PLURAL-LABEL LAW — @grouplabel (v1.17.2, Jimmy)', () => {
+  it('patterned aliases fold to a plural range', () => {
+    expect(groupLabel('Aileron', ['Aileron-left-1', 'Aileron-left-2', 'Aileron-left-5']))
+      .toBe('Ailerons-Left 1–5');
+    expect(groupLabel('Propeller', ['prop 3', 'prop 7']))
+      .toBe('Props 3–7');
+    expect(groupLabel('Aileron', ['flap-2', 'flap-2']))
+      .toBe('Flaps 2');
+  });
+  it('unnamed groups pluralize the type words', () => {
+    expect(groupLabel('Aileron', ['a', 'b', 'c'])).toBe('Ailerons');
+    expect(groupLabel('RadioisotopeThermoelectricGenerator', ['', '', '']))
+      .toBe('Radioisotope Thermoelectric Generators');
+    expect(groupLabel('BigWheel', ['x', 'y', 'z'])).toBe('Big Wheels');
   });
 });
