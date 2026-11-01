@@ -283,7 +283,20 @@ export function xenonComputers(bp: Blueprint, opts?: XenonOpts): XenonComputer[]
           ? [{ alias: c.alias || `computer-${ci}`, label: 'Computer · integrated screen',
               channel: 0, w: 200, h: 160, ci, deviceScreen: true }]
           : []),
-      ],
+      ].filter(s => {
+        // THE BOARD-TRUTH CLAMP (v1.17.2, we: chipOS shows "a LOOOOOOT of
+        // screens, way too many … they duplicate" — the appkit's span-scan
+        // registers main_screen#0..31 on an 8-element board): a Dashboard
+        // token registers its ELEMENTS; channels beyond the board's
+        // element count are the program's probes, not surfaces. The
+        // dock's probe filter reads this very list — the clamp kills the
+        // ghosts on every pump, dash tab and want-set alike.
+        const dc = s.ci === undefined ? undefined
+          : (bp.data.components as BlueprintComponent[])[s.ci];
+        if (dc && dc.type === 'Dashboard')
+          return s.channel < (((dc.data as { elements?: unknown[] }).elements ?? []).length);
+        return true;
+      }),
       devices: xenonDevices(bp, ci, opts),
     });
   });
@@ -1603,6 +1616,11 @@ export class XenonPump {
     this.run?.stop();
     this.run = null;
     this.comp = comp;
+    this.probeMax = new Map();
+    for (const sc of comp.screens ?? []) {
+      const b = slug(sc.alias).toLowerCase();
+      this.probeMax.set(b, Math.max(this.probeMax.get(b) ?? -1, sc.channel));
+    }
     // FARM (slice C): co-running pumps share the craft io bus (the HUD
     // runtime co-runs too — every VM is its own module instance now)
     xenonFarm.attach(this);
@@ -2381,6 +2399,11 @@ export class XenonPump {
    *  the typeof-guard degradation rule. Cleared on every open (a new VM's
    *  counters restart at 0; the cache must die with the old one). */
   private surfVer = new Map<string, number>();
+  // THE NET-PROBE CLAMP (v1.17.2, chipOS appkit: 32 painted probe
+  // surfaces on an 8-element board): registered board token probed
+  // BEYOND its element channels = the program's span-scan, not a
+  // surface — the pump never shows it (dock, want-set and feeds alike).
+  private probeMax = new Map<string, number>();
   private fetchVersioned(key: string, r: XenonRun): Uint8ClampedArray | null {
     const v = r.screenVersion(key);
     // v1.16.12 NEVER-PAINTED GATE (the dev-kit flicker): the XenonScreen
@@ -2693,6 +2716,16 @@ export class XenonPump {
     const next = new Map<string, XenonSurface>();
     const fetched = new Set<string>();        // surfaces FETCHED this cycle
     for (const meta of metas) {
+      // THE NET-PROBE CLAMP (v1.17.2): a registered board token probed
+      // beyond its registered channels is the program's span-scan.
+      {
+        const mk0 = normScreenKey(meta.key);
+        const hi = mk0.lastIndexOf('#');
+        const base = mk0.slice(0, hi);
+        const chN = Number(mk0.slice(hi + 1));
+        const mx = base === 'virtual' ? undefined : this.probeMax.get(base);
+        if (mx !== undefined && Number.isFinite(chN) && chN > mx) continue;
+      }
       // THE CANONICAL SCREEN-KEY LAW (v1.17.2): the shim's key is the raw
       // lowercased literal ("element 09#9" keeps its space); the app's
       // registrations, feeds, canvases and pushScreen keys are all

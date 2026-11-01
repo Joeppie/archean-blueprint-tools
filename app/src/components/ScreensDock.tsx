@@ -326,12 +326,27 @@ export default function ScreensDock(p: {
       const b = slug(sc.alias).toLowerCase();
       regMax.set(b, Math.max(regMax.get(b) ?? -1, sc.channel));
     }
+    // THE UNPAINTED-NOISE LAW (v1.17.2, we: chipOS "has a LOOOOOOT of
+    // screens. way too many … they duplicate … ONLY happens in the
+    // computer"): the ACTIVE pump contributes AUTHORED board surfaces
+    // (real hardware — black until painted), PAINTED surfaces of any
+    // kind, and VIRTUALS (the dock bootstraps them: no cell → no canvas
+    // → no pixels). What stays OUT: dev-seed ghosts (main#0 on a
+    // screenless MiniComputer, alias-typo seeds like chipos_none#0)
+    // while unpainted, and a net-registered black copy of a board
+    // ANOTHER pump already paints (the "duplicate").
+    const authored = new Set((pump.comp?.screens ?? [])
+      .map(sc => `${slug(sc.alias)}#${sc.channel}`.toLowerCase()));
     for (const s of pump.surfaces.values()) {
-      if (mirrorSet.has(s.key) || painted.has(s.key)) continue;
+      if (mirrorSet.has(s.key)) continue;
+      const other = painted.get(s.key);
+      if (other && (other.s.pixels || !s.pixels)) continue;   // keep the painted one
       const parts = s.key.split('#');
       const chN = parts.length === 2 ? Number(parts[1]) : NaN;
       const max = regMax.get(parts[0] ?? '');
       if (max !== undefined && Number.isFinite(chN) && chN > max) continue;
+      const isVirtual = s.key.startsWith('virtual#');
+      if (!s.pixels && !isVirtual && !authored.has(s.key)) continue;
       painted.set(s.key, { s, q: pump });
     }
   }
