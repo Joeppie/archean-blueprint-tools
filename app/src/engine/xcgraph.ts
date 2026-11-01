@@ -521,7 +521,14 @@ export interface ReportSection { compAlias: string;
  *  should be higher up in the analysis"): the mass model + the build-cost
  *  twin, rendered FIRST in both dialog and export. */
 export interface ReportSummary { massKg: number; weightN: number;
-  costRaw?: number; costTime?: number }
+  costRaw?: number; costTime?: number;
+  /** THE INFO RECAP (v1.17.2, we: "Analysis should just contain a recap
+   *  of what infop tabs tells us"): the ⌖ Info tab's numbers — the mass
+   *  families, the sealed envelope and its vacuum lift. */
+  families?: { hull: number; skin: number; struts: number; beams: number;
+    parts: number; fluids: number };
+  declared?: number; envelopeM3?: number; envelopeSealed?: boolean;
+  liftVacuumKg?: number }
 export interface ReportFlight { speed: number; mass: number; stallSpeed: number; ldMax: number;
   staticMarginPct: number; pitchVerdict: string; yawVerdict: string;
   rows: { axis: string; part: string; authority: number; buried?: boolean }[];
@@ -613,7 +620,13 @@ export function buildAnalysisHtml(opts: { craft: string; sections: ReportSection
  <td>${opts.summary.weightN.toFixed(0)} N</td>
  <th>build cost</th><td>${opts.summary.costRaw === undefined
     ? '—' : opts.summary.costRaw.toLocaleString('en-US') + ' raw material units'
-    + (opts.summary.costTime ? ` · ${Math.round(opts.summary.costTime / 60)} min build time` : '')}</td></tr></table>` : '';
+    + (opts.summary.costTime ? ` · ${Math.round(opts.summary.costTime / 60)} min build time` : '')}</td></tr>
+ ${opts.summary.families ? `<tr><th>mass families</th><td>hull ${opts.summary.families.hull.toFixed(0)} · skin ${opts.summary.families.skin.toFixed(0)}`
+    + ` · parts ${opts.summary.families.parts.toFixed(0)} · struts ${opts.summary.families.struts.toFixed(0)}`
+    + ` · beams ${opts.summary.families.beams.toFixed(0)} · fluids ${opts.summary.families.fluids.toFixed(0)} kg</td>`
+    + `<th>declared</th><td>${(opts.summary.declared ?? 0).toFixed(0)} kg</td>`
+    + `<th>envelope</th><td>${opts.summary.envelopeM3 ? opts.summary.envelopeM3.toFixed(1) + ' m³ (' + (opts.summary.envelopeSealed ? 'sealed' : 'open') + ')'
+      + (opts.summary.liftVacuumKg !== undefined ? ` · vacuum lift ${opts.summary.liftVacuumKg.toFixed(0)} kg` : '') : 'none sealed'}</td></tr>` : ''}</table>` : '';
   const flightHtml = opts.flight ? buildFlightHtml(opts.flight, esc)
     : `<h2>Flight characteristics</h2><p class="note">Not applicable — this craft
 carries no flight-control surfaces (rover/cabinet logic); the flight section is gated out.</p>`;

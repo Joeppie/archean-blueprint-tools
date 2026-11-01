@@ -24,6 +24,7 @@ import { hudPump } from '../engine/hudpump';
 import { GAME_HUD_LAW, GAME_IPC_LAW, GAME_POWER_LAW, type ReportCompute } from '../engine/xcgraph';
 import { peekManifest } from '../engine/models';
 import { massModel } from '../engine/mass';
+import { envelopeVolume, liftKg, sealedEnvelopeVolume } from '../engine/atmo';
 import { buildCost, loadEconomy, materialQty, type Economy } from '../engine/economy';
 import { flightLab } from '../engine/flightlab';
 import { buildAnalysisHtml, codeRundown, craftIsFlyable, svgTextOnly, xcDiagrams,
@@ -202,7 +203,18 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
     const touched = new Set(rd.fanIn.map(x => x.device));
     const devs = curCpu.devices.filter(d => d.ci !== undefined);
     const picked = devs.filter(d => touched.has(d.alias || `io ${d.io}`));
-    const actorsSrc = (picked.length ? picked : devs).slice(0, 12);
+    // THE PICKING ORDER (v1.17.2, we: "pick a single color and then show
+    // all connections to that thing with that color, with a certain
+    // picking order; Computer most important, then cockpit"): net devices
+    // first, the cockpit seat next, the rest by io traffic (the fan-in
+    // order already carried in `devs`/filter). The palette is assigned IN
+    // THIS order, so the most important device gets the lead colour and
+    // every cable/label/actor fill on ALL THREE views wears it.
+    const NET = new Set(['Computer', 'MiniComputer', 'Router', 'MiniRouter',
+      'DataJunction', 'DataBridge', 'Crafter', 'HudController']);
+    const rank = (t: string) => NET.has(t) ? 0 : t === 'PilotSeat' ? 1 : 2;
+    const src = picked.length ? picked : devs;
+    const actorsSrc = [...src].sort((a, b) => rank(a.type) - rank(b.type)).slice(0, 12);
     const actors = actorsSrc.map(d => ({
       ci: d.ci!, tag: `${d.alias || `${d.type} #${d.ci}`} · io ${d.io}` }));
     // retry while the scene is still building (EMPTY-FLAG, v1.17.1)
@@ -239,12 +251,27 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
   const [econ, setEcon] = useState<Economy | null>(null);
   useEffect(() => { let dead = false; loadEconomy().then(e => { if (!dead) setEcon(e); });
     return () => { dead = true; }; }, []);
-  const massKg = p.bp ? massModel(p.bp, peekManifest()).total : 0;
+  const mass = p.bp ? massModel(p.bp, peekManifest()) : null;
+  // THE INFO RECAP (v1.17.2, we: "Analysis should just contain a recap of
+  // what infop tabs tells us"): the ⌖ Info tab's numbers ride the header
+  // card — the mass families (Panel's Mass & CoM), the sealed-envelope
+  // flood + vacuum lift (LiftWidget), the build cost (CostWidget twin).
+  const env = useMemo(() => {
+    if (!p.bp) return null;
+    const s = sealedEnvelopeVolume(p.bp.data.triangles ?? [], p.bp.data.blocks ?? []);
+    return s.m3 > 0
+      ? { m3: s.m3, sealed: true }
+      : { m3: envelopeVolume(p.bp.data.triangles ?? []).m3, sealed: false };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.bp, maniTick]);
   const cost = useMemo(() => (econ && p.bp ? buildCost(econ, p.bp) : null),
     [econ, p.bp, maniTick]);
-  const summary = { massKg, weightN: massKg * G0,
+  const summary = mass ? { massKg: mass.total, weightN: mass.total * G0,
     costRaw: cost ? Math.round(materialQty(cost.total)) : undefined,
-    costTime: cost?.total.time };
+    costTime: cost?.total.time,
+    families: mass.families, declared: mass.declared,
+    envelopeM3: env?.m3, envelopeSealed: env?.sealed,
+    liftVacuumKg: env && env.m3 > 0 ? liftKg('vacuum', env.m3, 0) : undefined } : null;
   const reportSections: ReportSection[] = [
     ...comps.map(c => reportSectionFor(c.ci, false, c.alias || `#${c.ci}`,
       c.files.map(f => ({ name: f.name, code: f.code })), c.devices)),
@@ -332,15 +359,29 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
         )}
         {errs['*'] && <div className="rounded bg-[#3a1420] p-2 text-[11px] text-[#ffb4b4]"
           data-testid="analysis-mermaid-err">{errs['*']}</div>}
+        {summary && (
         <section data-testid="analysis-summary" className="max-w-[1160px] rounded border
           border-[#22314a] bg-[#0e1626] p-3 text-[12px] text-[#c8d4e4]">
-          {/* THE CRAFT HEADER FIRST (v1.17.2, we: "weight, costs and flight
-              characteristics should be higher up in the analysis") */}
+          {/* THE INFO RECAP FIRST (v1.17.2, we: "Analysis should just
+              contain a recap of what infop tabs tells us" + "weight,
+              costs and flight characteristics should be higher up"):
+              mass families + envelope + lift + cost + flight lead. */}
           <div className="flex flex-wrap gap-x-8 gap-y-1 tabular-nums">
             <span><span className="text-[#8b93a1]">mass</span>{' '}
-              <b>{massKg.toFixed(0)} kg</b></span>
+              <b>{summary.massKg.toFixed(0)} kg</b>
+              {summary.families && <span className="text-[#8b93a1]">
+                {' '}· hull {summary.families.hull.toFixed(0)} · skin {summary.families.skin.toFixed(0)}
+                · parts {summary.families.parts.toFixed(0)}
+                {summary.families.struts + summary.families.beams + summary.families.fluids > 0
+                  && ` · +${(summary.families.struts + summary.families.beams + summary.families.fluids).toFixed(0)}`}
+                {' '}kg</span>}
+              {summary.declared > 0 && <span className="text-[#8b93a1]"> · declared {summary.declared.toFixed(0)} kg</span>}</span>
             <span><span className="text-[#8b93a1]">weight</span>{' '}
               <b>{summary.weightN.toFixed(0)} N</b></span>
+            <span><span className="text-[#8b93a1]">envelope</span>{' '}
+              <b>{summary.envelopeM3 ? `${summary.envelopeM3.toFixed(1)} m³${summary.envelopeSealed ? ' (sealed)' : ' (open)'}` : 'none sealed'}</b>
+              {summary.liftVacuumKg !== undefined && <span className="text-[#8b93a1]">
+                · vacuum lift {summary.liftVacuumKg.toFixed(0)} kg</span>}</span>
             <span><span className="text-[#8b93a1]">build cost</span>{' '}
               <b>{summary.costRaw === undefined ? '…'
                 : `${summary.costRaw.toLocaleString('en-US')} raw material units`}</b>
@@ -356,6 +397,7 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
               <b>{flight.pitchVerdict}</b>, yaw <b>{flight.yawVerdict}</b></span>}
           </div>
         </section>
+        )}
         <section data-testid="analysis-flight" className="max-w-[1160px]">
           <h3 className="m-0 mb-1 text-[12px] font-medium text-[#e8edf4]">Flight characteristics</h3>
           {flight ? (

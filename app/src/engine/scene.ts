@@ -3084,7 +3084,7 @@ void main() {
     }
     // cable runs touching an actor (pipeNet.links index-align polys)
     const net = this.pipeNet;
-    const runs: { pts: Vector3[]; tag: string }[] = [];
+    const runs: { pts: Vector3[]; tag: string; color: string }[] = [];
     for (let i = 0; i < net.polys.length; i++) {
       const link = net.links[i];
       if (!link || !(actorCis.has(link.a) || actorCis.has(link.b))) continue;
@@ -3092,7 +3092,14 @@ void main() {
       if (pts.length < 2) continue;
       const tags = [link.a, link.b].map(ci => opts.actors.find(x => x.ci === ci)?.tag)
         .filter(Boolean).join(' ↔ ');
-      runs.push({ pts: pts.map(p => p instanceof Vector3 ? p : new Vector3(p[0], p[1], p[2])), tag: tags });
+      // THE CONNECTION-COLOUR LAW (v1.17.2): the run wears its ACTOR
+      // endpoint's colour — the earlier one in the picking order when
+      // both ends are actors.
+      const ia = opts.actors.findIndex(a => a.ci === link.a);
+      const ib = opts.actors.findIndex(a => a.ci === link.b);
+      const pick = ia >= 0 && (ib < 0 || ia <= ib) ? ia : ib;
+      const col = pick >= 0 ? actColor.get(opts.actors[pick]!.ci) ?? '#ffc35e' : '#ffc35e';
+      runs.push({ pts: pts.map(p => p instanceof Vector3 ? p : new Vector3(p[0], p[1], p[2])), tag: tags, color: col });
     }
     // THE THREE-VIEW LAW: one shared px/m for the whole sheet — the trio
     // reads as ONE engineering drawing (per-view stretching is a LIE).
@@ -3127,33 +3134,94 @@ void main() {
       // painter emits FAR first (FRONT far = +z, SIDE far = −x… camera at
       // +x means far = LOW x; TOP camera +y, far = LOW y).
       const faceN = (t: Tri) => view.axis === 'xy' ? -t.n[2] : view.axis === 'zy' ? t.n[0] : t.n[1];
-      const depth = (t: Tri) => view.axis === 'xy' ? (t.v[2] + t.v[5] + t.v[8]) / 3
-        : view.axis === 'zy' ? -(t.v[0] + t.v[3] + t.v[6]) / 3
-          : -(t.v[1] + t.v[4] + t.v[7]) / 3;
       const pa = new Vector3(), pb = new Vector3(), pc = new Vector3();
-      // THE BLUEPRINT LAW v1.17.2 (we: "something is wrong with the
-      // geometry, its too complex … I see all the outsides of everything,
-      // not just components with the rest of the geometry as a background
-      // … it should be like a blueprint"): a drafting sheet, not a fill —
-      // navy ground, ONE METRE GRID, hull faces as HAIRLINE construction
-      // lines (the ship's body reads as a mass, every face boundary is
-      // construction, nothing shouts), parts as quiet thin lines, and
-      // ONLY THE ACTORS inked bright in their label colour. Line WEIGHT
-      // is the figure/ground hierarchy.
-      type Drawn = { d: number; a: number; f: string; pts: string };
-      const byClass: Drawn[][] = [[], [], []];
-      const caps = [9000, 5000, 4000];   // hull / parts / actors (the sheet
-      // stays a few thousand lines a panel; the LARGEST faces win on overflow)
+      // THE ENGINEERING LINE LAW v1.17.2 (we: "limit SVG complexity, the
+      // cockpit … should be a more recognizable shape; e.g. removing
+      // 'internal' lines that would disappear if you filled the outside
+      // mesh (but dont do that, itd make it hard to see), that way the
+      // shapes should feel more blueprinty"): the sheet is LINE ART from
+      // a welded-edge census, each edge drawn ONCE —
+      //  • SILHOUETTE (facing↔back boundary, open boundary): the heavier
+      //    weight — the form line a filled mesh would show,
+      //  • CREASE (two facing faces, dihedral > ~10°): the light weight,
+      //  • COPLANAR INTERIOR (two facing faces, same plane within 4 mm):
+      //    NOT DRAWN — box seams and grille tiling vanish exactly as the
+      //    user asked, no fills anywhere.
+      // Every vertex welds at 0.1 px, so a cube emits its 12 silhouette
+      // edges, not 36 triangle sides — half the SVG of the triangle cut.
+      interface Face { v: [number, number, number]; p0: [number, number, number];
+        n: [number, number, number]; cls: 0 | 1 | 2; ci: number; facing: boolean }
+      const faces: Face[] = [];
+      const vid = new Map<string, number>();
+      const vpt: number[] = [];
       for (const t of tris) {
-        if (faceN(t) <= 0) continue;                       // back face: invisible
         const [x0, y0, z0, x1, y1, z1, x2, y2, z2] = t.v;
         pa.set(x0, y0, z0); pb.set(x1, y1, z1); pc.set(x2, y2, z2);
         const a = px(U(pa), V(pa)), b2 = px(U(pb), V(pb)), c2 = px(U(pc), V(pc));
         const area = Math.abs((b2.x - a.x) * (c2.y - a.y) - (c2.x - a.x) * (b2.y - a.y)) / 2;
         if (area < MIN_AREA) continue;                     // sliver: no information
-        const f = t.cls === 2 ? actColor.get(t.ci) ?? '#ffd98a' : '';
-        byClass[t.cls]!.push({ d: depth(t), a: area, f,
-          pts: `${a.x.toFixed(1)},${a.y.toFixed(1)} ${b2.x.toFixed(1)},${b2.y.toFixed(1)} ${c2.x.toFixed(1)},${c2.y.toFixed(1)}` });
+        const wv = (p: { x: number; y: number }): number => {
+          const k = `${Math.round(p.x * 10)},${Math.round(p.y * 10)}`;
+          let id = vid.get(k);
+          if (id === undefined) { id = vpt.length / 2; vid.set(k, id); vpt.push(p.x, p.y); }
+          return id;
+        };
+        faces.push({ v: [wv(a), wv(b2), wv(c2)],
+          p0: [(x0 + x1 + x2) / 3, (y0 + y1 + y2) / 3, (z0 + z1 + z2) / 3],
+          n: t.n, cls: t.cls, ci: t.ci, facing: faceN(t) > 0 });
+      }
+      interface Ed { a: number; b: number; f: number[]; cls: 0 | 1 | 2; ci: number }
+      const edges = new Map<string, Ed>();
+      faces.forEach((f, fi) => {
+        for (let k = 0; k < 3; k++) {
+          const va = f.v[k]!, vb = f.v[(k + 1) % 3]!;
+          if (va === vb) continue;
+          const kk = va < vb ? `${va}|${vb}` : `${vb}|${va}`;
+          let e = edges.get(kk);
+          if (!e) { e = { a: va, b: vb, f: [], cls: f.cls, ci: f.ci }; edges.set(kk, e); }
+          if (e.f.length < 2) e.f.push(fi);
+          if (f.cls > e.cls) { e.cls = f.cls; if (f.cls === 2) e.ci = f.ci; }
+        }
+      });
+      const g = { hullSil: [] as { l2: number; s: string }[], hullCre: [] as { l2: number; s: string }[],
+        partSil: [] as { l2: number; s: string }[], partCre: [] as { l2: number; s: string }[] };
+      const actG = new Map<string, { sil: { l2: number; s: string }[]; cre: { l2: number; s: string }[] }>();
+      const COP = 0.9848;                                   // cos 10°
+      const line = (e: Ed) => {
+        const ax = vpt[e.a * 2]!, ay = vpt[e.a * 2 + 1]!, bx = vpt[e.b * 2]!, by = vpt[e.b * 2 + 1]!;
+        return { l2: (bx - ax) * (bx - ax) + (by - ay) * (by - ay),
+          s: `<line x1="${ax.toFixed(1)}" y1="${ay.toFixed(1)}" x2="${bx.toFixed(1)}" y2="${by.toFixed(1)}"/>` };
+      };
+      for (const e of edges.values()) {
+        const fA = faces[e.f[0]!]!;
+        const fB = e.f.length > 1 ? faces[e.f[1]!] : undefined;
+        const facing = (fA.facing ? 1 : 0) + (fB ? (fB.facing ? 1 : 0) : 0);
+        if (facing === 0) continue;                         // back interior: invisible
+        let role: 'sil' | 'cre';
+        if (!fB) role = fA.facing ? 'sil' : 'cre';          // boundary edge
+        else if (facing === 2) {
+          const n1 = fA.n, n2 = fB.n;
+          const d = Math.abs(n1[0] * n2[0] + n1[1] * n2[1] + n1[2] * n2[2]);
+          if (d > COP) {
+            // coplanar pair → the seam a fill would swallow: NOT DRAWN
+            const off = Math.abs((fB.p0[0] - fA.p0[0]) * n1[0]
+              + (fB.p0[1] - fA.p0[1]) * n1[1] + (fB.p0[2] - fA.p0[2]) * n1[2]);
+            if (off < 0.004) continue;
+            // THE SMOOTH-SHELL GATE (v1.17.2, "limit SVG complexity"):
+            // an ACTOR's gentle folds (< 25° — speaker cones, seat bowls)
+            // are curvature, not geometry: the silhouette carries the
+            // shape, the crease flood only buries it. NOT drawn.
+            if (e.cls === 2 && d > 0.906) continue;
+            role = 'cre';
+          } else role = 'cre';
+        } else role = 'sil';                                // facing ↔ back: form line
+        if (e.cls === 2) {
+          const c = actColor.get(e.ci) ?? '#ffd98a';
+          let slot = actG.get(c);
+          if (!slot) actG.set(c, slot = { sil: [], cre: [] });
+          slot[role].push(line(e));
+        } else if (e.cls === 1) g[role === 'sil' ? 'partSil' : 'partCre'].push(line(e));
+        else g[role === 'sil' ? 'hullSil' : 'hullCre'].push(line(e));
       }
       const out: string[] = [];
       // the sheet itself: navy board, 1 m lattice, panel frame, scale bar
@@ -3177,30 +3245,41 @@ void main() {
         `<line x1="${(bx0 + 16 + scale).toFixed(1)}" y1="${PH - 42}" x2="${(bx0 + 16 + scale).toFixed(1)}" y2="${PH - 34}" stroke="#9fd0ff" stroke-width="2"/>`);
       out.push(`<text x="${(ox + extU * scale / 2).toFixed(1)}" y="${(PAD + 14).toFixed(1)}"` +
         ` text-anchor="middle" fill="#9fd0ff" font-size="15" font-weight="600" letter-spacing="2">${esc(view.title)}</text>`);
-      byClass.forEach((list, cls) => {
-        if (list.length > caps[cls]!) {                    // decimate honestly:
-          list.sort((p, q) => q.a - p.a);                  // the biggest faces win
-          list.length = caps[cls]!;
-        }
-        list.sort((p, q) => q.d - p.d);                    // painter: FAR first
-        const body = list.map(t => `<polygon points="${t.pts}"${
-          cls === 2 ? ` fill="${t.f}" fill-opacity="0.14" stroke="${t.f}" stroke-opacity="0.95" stroke-width="1.5"` : ''}/>`).join('');
-        const wrap = cls === 0
-          ? `<g fill="none" stroke="#8fc3ee" stroke-opacity="0.32" stroke-width="0.4">${body}</g>`
-          : cls === 1
-            ? `<g fill="#27507e" fill-opacity="0.30" stroke="#b9dcff" stroke-opacity="0.5" stroke-width="0.7">${body}</g>`
-            : `<g>${body}</g>`;
-        out.push(wrap);
+      // the line-weight classes: hull = construction hairlines (silhouette
+      // a touch stronger), parts quiet thin, actors inked in their colour
+      // CAP FAIRNESS: on overflow the LONGEST lines survive — form lines
+      // carry the shape, sub-metre tessellation does not.
+      const emitG = (items: { l2: number; s: string }[], attrs: string) => {
+        if (!items.length) return;
+        const kept = items.length > 3500
+          ? items.sort((p, q) => q.l2 - p.l2).slice(0, 3500).map(i => i.s)
+          : items.map(i => i.s);
+        out.push(`<g ${attrs}>${kept.join('')}</g>`);
+      };
+      emitG(g.hullSil!, 'fill="none" stroke="#8fc3ee" stroke-opacity="0.55" stroke-width="0.6"');
+      emitG(g.hullCre!, 'fill="none" stroke="#8fc3ee" stroke-opacity="0.26" stroke-width="0.4"');
+      emitG(g.partSil!, 'fill="none" stroke="#b9dcff" stroke-opacity="0.75" stroke-width="1"');
+      emitG(g.partCre!, 'fill="none" stroke="#b9dcff" stroke-opacity="0.4" stroke-width="0.65"');
+      actG.forEach((slot, c) => {
+        emitG(slot.sil, `fill="none" stroke="${c}" stroke-opacity="0.95" stroke-width="1.6"`);
+        emitG(slot.cre, `fill="none" stroke="${c}" stroke-opacity="0.55" stroke-width="0.9"`);
       });
-      // cables — lit amber runs + endpoint dots + collected io tags
-      const labelItems: { s: { x: number; y: number }; text: string; font: string }[] = [];
+      // cables — THE CONNECTION-COLOUR LAW v1.17.2 (we: "schematics should
+      // let us know which connections go to which things … pick a single
+      // color and then show all connections to that thing with that
+      // color, with a certain picking order"): a cable run rides the
+      // colour of its ACTOR endpoint (the earlier one in the picking
+      // order when both ends are actors), endpoint dots and io tags wear
+      // it too — the wire is the device's, the colour says whose.
+      const labelItems: { s: { x: number; y: number }; text: string; font: string; color?: string }[] = [];
       for (const r of runs) {
         const pts = r.pts.map(p => px(U(p), V(p)));
         out.push(`<polyline points="${pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')}"` +
-          ` fill="none" stroke="#ffc35e" stroke-opacity="0.85" stroke-width="2"/>`);
+          ` fill="none" stroke="${r.color}" stroke-opacity="0.85" stroke-width="2"/>`);
         for (const p of [pts[0]!, pts[pts.length - 1]!])
-          out.push(`<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="2.6" fill="#ffd98a"/>`);
-        if (r.tag) labelItems.push({ s: pts[Math.floor(pts.length / 2)]!, text: r.tag, font: '11px ui-monospace, monospace' });
+          out.push(`<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="2.6" fill="${r.color}"/>`);
+        if (r.tag) labelItems.push({ s: pts[Math.floor(pts.length / 2)]!, text: r.tag,
+          font: '11px ui-monospace, monospace', color: r.color });
       }
       // THE LEADER-LABEL LAW (v1.17.2): actors + cable tags enter ONE
       // placer; colour-rotated, collision-slotted boxes, a leader line
@@ -3209,7 +3288,8 @@ void main() {
         const b = partBoxes.get(a.ci);
         if (!b) return;
         const mid = { x: (b.min.x + b.max.x) / 2, y: (b.min.y + b.max.y) / 2, z: (b.min.z + b.max.z) / 2 };
-        labelItems.push({ s: px(U(mid), V(mid)), text: a.tag, font: 'bold 13px ui-sans-serif, system-ui' });
+        labelItems.push({ s: px(U(mid), V(mid)), text: a.tag,
+          font: 'bold 13px ui-sans-serif, system-ui', color: actColor.get(a.ci) });
       });
       const placed: { x: number; y: number; w: number; h: number }[] = [];
       const fits = (bb: { x: number; y: number; w: number; h: number }) =>
@@ -3218,7 +3298,7 @@ void main() {
         !placed.some(p => bb.x < p.x + p.w + 5 && bb.x + bb.w + 5 > p.x &&
           bb.y < p.y + p.h + 3 && bb.y + bb.h + 3 > p.y);
       labelItems.forEach((it, i) => {
-        const color = LABEL_COLORS[i % LABEL_COLORS.length]!;
+        const color = it.color ?? LABEL_COLORS[i % LABEL_COLORS.length]!;
         g2.font = it.font;
         const tw = g2.measureText(it.text).width;
         const bw = tw + 10, bh = it.font.startsWith('bold') ? 17 : 14;

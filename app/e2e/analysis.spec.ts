@@ -41,33 +41,34 @@ test.describe('@analysis @slow THE CRAFT ANALYSIS', () => {
     await expect(page.getByTestId('analysis-plates').locator('svg')).toHaveCount(1,
       { timeout: 120_000 });
     // THE PLATE HAS A SHIP ON IT (the "COUNT IS NOT CONTENT" law): the
-    // vector plate is a BLUEPRINT of the craft's OWN meshes — navy board
-    // + metre grid, hull hairlines, parts as thin lines, ONLY the actors
-    // inked in their label colour, cable runs, leader labels.
-    // (v1.17.2, we on the bbox first cut: "the chair looks unrecognizable
-    // in the SVG. did you just use bounding boxes? That is not OK"; on
-    // the filled-material second cut: "I see all the outsides of
-    // everything … it should be like a blueprint".)
+    // vector plate is an ENGINEERING LINE DRAWING — a welded-edge census:
+    // hull hairlines, part lines, actors inked in their colour, cables
+    // COLOURED by their device endpoint, metre-grid sheets, leader labels.
+    // Coplanar interior seams are SUPPRESSED (the box seams a fill would
+    // swallow — we: "removing 'internal' lines … more blueprinty").
     const plate = await page.evaluate(() => {
       const svg = document.querySelector('[data-testid="analysis-plates"] svg')!;
-      const polys = [...svg.querySelectorAll('polygon')];
-      const strokes = polys.map(p => p.getAttribute('stroke') || '');
+      const lines = [...svg.querySelectorAll('line')];
+      const inG = (l: Element, s: string) => (l.parentElement?.getAttribute('stroke') || '') === s;
       return {
-        polys: polys.length,
-        hullHair: polys.filter(p => (p.closest('g')?.getAttribute('stroke') || '') === '#8fc3ee').length,
-        partLines: polys.filter(p => (p.closest('g')?.getAttribute('stroke') || '') === '#b9dcff').length,
-        actorPolys: strokes.filter(f => /#(ffd98a|7dffcf|9fd0ff|ff9ecb|c9ff8a|ffb08a|b7a6ff|8afff0|ffe08a|f0a6ff|a6ffd0|ffa6a6)/.test(f)).length,
-        grids: svg.querySelectorAll('path').length,
+        hullLines: lines.filter(l => inG(l, '#8fc3ee')).length,
+        partLines: lines.filter(l => inG(l, '#b9dcff')).length,
+        actorLines: lines.filter(l =>
+          /#(ffd98a|7dffcf|9fd0ff|ff9ecb|c9ff8a|ffb08a|b7a6ff|8afff0|ffe08a|f0a6ff|a6ffd0|ffa6a6)/
+            .test(l.parentElement?.getAttribute('stroke') || '')).length,
         cables: svg.querySelectorAll('polyline').length,
+        coloredCables: [...svg.querySelectorAll('polyline')]
+          .filter(p => (p.getAttribute('stroke') || '') !== '#ffc35e').length,
+        grids: svg.querySelectorAll('path').length,
         labels: svg.querySelectorAll('text').length,
-        leaders: svg.querySelectorAll('line').length,
         views: [...svg.querySelectorAll('text')].filter(t => /FRONT|SIDE|TOPSIDE/.test(t.textContent || '')).length,
       };
     });
-    expect(plate.polys, 'blueprint linework polygons').toBeGreaterThan(300);
-    expect(plate.hullHair, 'hull construction hairlines').toBeGreaterThan(100);
-    expect(plate.partLines, 'quiet part lines').toBeGreaterThan(10);
-    expect(plate.actorPolys, 'actors inked in their label colour').toBeGreaterThanOrEqual(20);
+    expect(plate.hullLines, 'hull construction lines').toBeGreaterThan(80);
+    expect(plate.partLines, 'part lines').toBeGreaterThan(10);
+    expect(plate.actorLines, 'actors inked in their colour').toBeGreaterThan(30);
+    expect(plate.cables, 'cable runs').toBeGreaterThan(0);
+    expect(plate.coloredCables, 'cables wear their device endpoint colour').toBeGreaterThan(0);
     expect(plate.grids, 'metre grid sheets').toBe(3);
     expect(plate.labels, 'leader labels').toBeGreaterThan(4);
     expect(plate.views, 'three view captions').toBe(3);
