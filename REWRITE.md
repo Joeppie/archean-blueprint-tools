@@ -968,3 +968,13 @@ LSP-first front-loads the low-risk wins) stays open.
   only); integer grid keys; on-demand rendering;
   merged static geometry; iGPU-pinned headless runs (never contend the
   NVIDIA GPU); release cuts only on explicit user say-so.
+
+## P11 — aero upgrade ladder (parked, costed; docs/CFD-FEASIBILITY.md)
+- P11-S0 3-D VORTEX-LATTICE MVP over the stitched-skin quads (spanwise
+  loading, induced-drag distribution, tip-vortex Γ → authority heat-strip
+  in the ⚗ report). No volumetric mesh; steady attached flow only.
+- P11-S1 WebGPU Lattice-Boltzmann spike (128³, ping-pong) — the ONLY
+  in-browser path to real separation/eddies; research, iGPU budget risk.
+- P11-S2 external OpenFOAM service (user-run): decompose → mesh → solve →
+  import surface Cp back into the report. Needs infrastructure we do not
+  run; static Pages can only ever be the CLIENT.

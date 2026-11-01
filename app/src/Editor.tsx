@@ -43,6 +43,9 @@ import { lazy, Suspense } from 'react';
 const HelpDialogLazy = lazy(() => import('./components/HelpDialog'));
 const XenonDialogLazy = lazy(() => import('./components/XenonDialog'));
 const ScreensDockLazy = lazy(() => import('./components/ScreensDock'));
+// ⚗ THE CRAFT ANALYSIS (v1.17.0): lazy — the mermaid runtime chunks with it,
+// never with the boot path.
+const AnalysisWindowLazy = lazy(() => import('./components/AnalysisWindow'));
 const AutosavesDialogLazy = lazy(() => import('./components/AutosavesDialog'));
 const HudDialogLazy = lazy(() => import('./components/HudDialog'));
 const BeaconDockLazy = lazy(() => import('./components/BeaconDock'));
@@ -371,6 +374,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // ▣ SCREENS bottom tab (v1.13.x): the dashboards' live rasters, normal +
   // virtual surfaces, on the SHARED pump (the IDE, the dock and the 3-D
   // dashboard faces all ride ONE running computer).
+  // ⚗ analysis window (v1.17.0)
+  const [analysisOpen, setAnalysisOpen] = useState(false);
   const [screensOpen, setScreensOpen] = useState(
     // v1.13.2 deep link (?craft=<id>&dash=<surfaceKey>, e.g. dash=screen%230):
     // the ▣ Screens dock opens booted toward that surface, whose ZOOM WINDOW
@@ -2232,6 +2237,9 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         onXenon={openCodeFor}
         hasScreens={hasScreens} screensOpen={screensOpen}
         onScreens={() => setScreensOpen(o => !o)}
+        hasComputers={xenonComps.length > 0}
+        analysisOpen={analysisOpen}
+        onAnalysis={() => setAnalysisOpen(o => !o)}
         autosaveCount={autosaveCount} onAutosaves={() => setAutosavesOpen(true)}>
         <button data-testid="save-btn" onClick={() => save()}
           className={`ksp-btn shrink-0 px-2.5 py-1 text-[12px] ${dirty ? 'on font-semibold' : 'text-ink-dim'}`}>
@@ -2403,6 +2411,13 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
             )}
             {/* ▣ SCREENS bottom tab (v1.13.x): live dashboards + virtual
                 surfaces of the running computer (top-bar ▣ button) */}
+            {analysisOpen && bp && (
+              /* ⚗ mermaid diagrams + vessel plates + flight gate (v1.17.0) */
+              <Suspense fallback={null}>
+                <AnalysisWindowLazy craft={craft ?? 'craft'} bp={bp}
+                  engine={engineRef.current} close={() => setAnalysisOpen(false)} />
+              </Suspense>
+            )}
             {screensOpen && (
               /* the dock is a FloatingWindow: it positions, drags and
                  resizes itself (phones get it fullscreen) */

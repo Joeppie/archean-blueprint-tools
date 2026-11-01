@@ -348,6 +348,34 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   the face's own VM twin is never painted by the program. Pin:
   `xenonpump.test.ts` (real XenonPump, scene feed key only); probe
   `app/tools/invadersfaceprobe.mjs`.
+- ⚗ THE CRAFT ANALYSIS (v1.17.0, we: "make a mermaid diagram of the
+  xenoncode … vessel PNG … files as classes … Io devices as system actors,
+  cockpit as a user … read like a detailed analysis of craft"): the ⚗
+  Analysis top-bar button opens AnalysisWindow (LAZY — the mermaid RUNTIME
+  chunks with it, NEVER the boot path). engine/xcgraph.ts is the PURE
+  grammar: flow (entry points + @call graph + include edges), sequence
+  (actor PILOT → PilotSeat presses, devices as FULLY RESOLVED system actors
+  `alias · Type · io N`, files as participants, input_/output_ arrows),
+  class (files with $vars/@functions); STATIC approximation (file-scoped
+  calls; a $var device token resolves through the string literals assigned
+  to it — the games' own idiom). Engine.analysisShots renders the VESSEL
+  PLATE pair (orthographic top + front: craft wireframe teal, ACTOR roots
+  solid amber, cable runs between actors redrawn amber from pipeNet.polys
+  with io tags, labels projected) — swap-and-restore materials, throwaway
+  renderer, the on-demand render law intact. The SVG cache is ADDITIVE (a
+  `dead` gate lost every diagram to the StrictMode double-run). The FLIGHT
+  section is gated on flight-control surfaces (rover/Mario → honest 'Not
+  applicable'); ⬇ HTML exports ONE self-contained document (buildAnalysis-
+  Html, buried-surface census highlighted). NO CFD — see
+  docs/CFD-FEASIBILITY.md + REWRITE § P11. Pins: xcgraph.test (grammar),
+  e2e analysis.spec (runtime SVGs + plates + gate + download, @slow).
+- THE CHIP SAT BENCH (v1.17.0, we: "ChipOS setup that has satellite
+  connections into its main comp … and make it work"): fixture 9000009098
+  (make_satchip_test.py) — the REAL Tetris + EarthNAV app computers reach
+  the main-router through their OWN DataBridge satellite links; ChipOS
+  sees them as devices and INSTALLS them; e2e chipossat.spec reloads the
+  page and forbids a REINSTALL (the storage persistence law proven through
+  a third-party OS's memory).
 - THE STORAGE PERSISTENCE LAW (v1.16.27, we: the ChipOS devkit "all screens
   say to use the primary one … I suspect something is wrong there"): a
   `storage var` survives beside the SAVE in the game — our wasm MEMFS dies

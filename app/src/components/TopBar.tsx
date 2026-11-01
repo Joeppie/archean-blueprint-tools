@@ -65,6 +65,11 @@ interface Props {
   hasScreens?: boolean;
   screensOpen?: boolean;
   onScreens?: () => void;
+  /** ⚗ CRAFT ANALYSIS (v1.17.0): shown when the craft has a programmable
+   *  computer — opens the mermaid/plate/flight AnalysisWindow. */
+  hasComputers?: boolean;
+  analysisOpen?: boolean;
+  onAnalysis?: () => void;
   /** File ▸ Autosaves — the shadow-copy list (v1.13.x) */
   autosaveCount?: number;
   onAutosaves?: () => void;
@@ -334,6 +339,20 @@ export default function TopBar(p: Props) {
           className={`shrink-0 rounded border border-[#3a4a6a] px-2.5 py-1 text-[12px] transition-colors
                      ${p.screensOpen ? 'bg-[#243a52] text-[#8fd4ff]' : 'bg-[#141b28] text-[#9fb0c8] hover:text-white'}`}>
           ▣ Screens
+        </button>
+      )}
+
+      {/* ⚗ ANALYSIS (v1.17.0, we: "let our editor automatically make a
+          mermaid diagram of the xenoncode … vessel PNGs … flight
+          characteristics … a detailed analysis of craft") — visible when
+          the craft carries a programmable computer */}
+      {(p.hasComputers ?? false) && (
+        <button data-testid="analysis-btn" aria-pressed={p.analysisOpen ?? false}
+          title="Analysis — mermaid flow/sequence/class diagrams of every program, vessel plates with the actors and their cables highlighted, flight report where it flies"
+          onClick={() => p.onAnalysis?.()}
+          className={`shrink-0 rounded border border-[#3a4a6a] px-2.5 py-1 text-[12px] transition-colors
+                     ${p.analysisOpen ? 'bg-[#243a52] text-[#8fd4ff]' : 'bg-[#141b28] text-[#9fb0c8] hover:text-white'}`}>
+          ⚗ Analysis
         </button>
       )}
 

@@ -2952,6 +2952,139 @@ void main() {
     return g ? [g.quaternion.w, g.quaternion.x, g.quaternion.y, g.quaternion.z] : null;
   }
 
+  /** ── v1.17.0 THE ANALYSIS PLATE (we: "above each sequence diagram, render
+   *  a PNG of the vessel … topside, front, orthographic; the labels we used
+   *  to have on, for only the relevant actors … highlighted, wireframe on,
+   *  view zoomed; also wire highlighted between, io number") ─────────────
+   *  Offscreen two-view orthographic plate of the CRAFT ONLY (grid/ground/
+   *  helpers stay out): everything wireframe teal, the ACTOR set solid
+   *  amber, every cable touching an actor redrawn as an amber polyline
+   *  (from pipeNet.polys — the exact drawn run) with its endpoint io tags,
+   *  actors labelled from their projected centres. The live scene's
+   *  materials are swapped only for the two draws and restored before
+   *  resolve; the on-demand render law is untouched (this drives its own
+   *  throwaway renderer). Returns data-URL PNGs. */
+  async analysisShots(opts: {
+    actors: { ci: number; tag: string }[];
+    size?: { w: number; h: number };
+  }): Promise<{ top: string; front: string }> {
+    const w = opts.size?.w ?? 860, h = opts.size?.h ?? 540;
+    const scene = this.scene;
+    if (!scene || !this.bp) throw new Error('analysisShots: no scene');
+    const craft = [this.root, this.hingeGroup, this.subGroup];
+    const box = new Box3();
+    for (const g of craft) box.expandByObject(g);
+    if (box.isEmpty()) box.setFromCenterAndSize(new Vector3(), new Vector3(4, 2, 4));
+    const c = box.getCenter(new Vector3());
+    const r = Math.max(0.75, box.getSize(new Vector3()).length() * 0.56);
+    const actorCis = new Set(opts.actors.map(a => a.ci));
+    // ci -> a world anchor for the projected label (root bbox centre)
+    const anchors = new Map<number, Vector3>();
+    for (const a of opts.actors) {
+      const roots = this.compRoots.get(a.ci) ?? [];
+      if (!roots.length) continue;
+      const b = new Box3();
+      for (const o of roots) b.expandByObject(o);
+      if (!b.isEmpty()) anchors.set(a.ci, b.getCenter(new Vector3()));
+    }
+    // materials: swap everything craft-side (wire teal / solid amber),
+    // restore after the two draws. ACTOR membership = the descendants of
+    // the actor roots (parts nest their render-node tree deep).
+    type Swap = { o: Mesh | Line; prev: Material | Material[] };
+    const swaps: Swap[] = [];
+    const wire = new MeshBasicMaterial({ color: 0x4fd6c8, wireframe: true, transparent: true, opacity: 0.5 });
+    const wireLine = new LineBasicMaterial({ color: 0x3fb2a8, transparent: true, opacity: 0.4 });
+    const amber = new MeshBasicMaterial({ color: 0xffc35e });
+    const hidden: Object3D[] = [];
+    if (this.gridLines) { this.gridLines.visible = false; hidden.push(this.gridLines); }
+    if (this.surgeGroup.visible) { this.surgeGroup.visible = false; hidden.push(this.surgeGroup); }
+    const actorSet = new Set<Object3D>();
+    for (const ci of actorCis)
+      for (const root of this.compRoots.get(ci) ?? [])
+        root.traverse(o => actorSet.add(o));
+    for (const g of craft) g.traverse(o => {
+      const m = o as Mesh;
+      if (!(m as unknown as { isMesh?: boolean }).isMesh && !(m as unknown as { isLine?: boolean }).isLine) return;
+      swaps.push({ o: m as Mesh, prev: m.material as never });
+      m.material = actorSet.has(o) ? amber
+        : (m as unknown as { isLine?: boolean }).isLine ? wireLine : wire;
+    });
+    let renderer: WebGLRenderer | null = null;
+    const shots: string[] = [];
+    try {
+      renderer = new WebGLRenderer({ alpha: true, antialias: true, preserveDrawingBuffer: true });
+      renderer.setSize(w, h, false);
+      const cam = new OrthographicCamera(-w / 2 / 1, w / 2 / 1, h / 2 / 1, -h / 2 / 1, 0.01, r * 12);
+      const shoot = (pos: Vector3, up: Vector3) => {
+        cam.position.copy(pos); cam.up.copy(up); cam.lookAt(c);
+        // ortho zoom: the craft fills ~78% of the frame
+        const span = Math.min(w, h) * 2 / 1.56;
+        cam.left = -span / 2; cam.right = span / 2;
+        cam.top = span / 2; cam.bottom = -span / 2;
+        cam.updateProjectionMatrix();
+        renderer!.render(scene, cam);
+        // 2D plate: dark card + the GL frame + amber wires + labels
+        const cv = document.createElement('canvas');
+        cv.width = w; cv.height = h;
+        const g2 = cv.getContext('2d')!;
+        g2.fillStyle = '#0b1220'; g2.fillRect(0, 0, w, h);
+        g2.drawImage(renderer!.domElement, 0, 0, w, h);
+        const proj = (v: Vector3 | readonly [number, number, number]) => {
+          const t = v instanceof Vector3 ? v.clone() : new Vector3(v[0], v[1], v[2]);
+          const p = t.project(cam);
+          return { x: (p.x + 1) * w / 2, y: (1 - p.y) * h / 2 };
+        };
+        // wire highlight: every cable run touching an actor (pipeNet.links
+        // index-align polys) — drawn amber on top of the wireframe plate
+        const net = this.pipeNet;
+        g2.strokeStyle = '#ffc35e'; g2.lineWidth = 2; g2.font = '12px ui-monospace, monospace';
+        g2.fillStyle = '#ffd98a';
+        for (let i = 0; i < net.polys.length; i++) {
+          const link = net.links[i];
+          if (!link || !(actorCis.has(link.a) || actorCis.has(link.b))) continue;
+          const pts = net.polys[i]!;
+          g2.beginPath();
+          pts.forEach((p, k) => { const s = proj(p); if (!k) g2.moveTo(s.x, s.y); else g2.lineTo(s.x, s.y); });
+          g2.stroke();
+          for (const end of [pts[0], pts[pts.length - 1]]) {
+            if (!end) continue;
+            const s = proj(end);
+            g2.fillText('●', s.x - 3, s.y + 4);
+          }
+          // the io tags near the run midpoint
+          const mid = pts[Math.floor(pts.length / 2)];
+          if (mid) {
+            const s = proj(mid);
+            const tags = [link.a, link.b].map(ci => opts.actors.find(x => x.ci === ci)?.tag)
+              .filter(Boolean).join(' ↔ ');
+            if (tags) g2.fillText(tags, s.x + 6, s.y - 4);
+          }
+        }
+        // actor labels
+        g2.font = 'bold 13px ui-sans-serif, system-ui';
+        for (const a of opts.actors) {
+          const p = anchors.get(a.ci);
+          if (!p) continue;
+          const s = proj(p);
+          g2.fillStyle = '#0b1220aa';
+          const tw = g2.measureText(a.tag).width;
+          g2.fillRect(s.x + 6, s.y - 16, tw + 8, 18);
+          g2.fillStyle = '#ffd98a';
+          g2.fillText(a.tag, s.x + 10, s.y - 3);
+        }
+        return cv.toDataURL('image/png');
+      };
+      shots.push(shoot(new Vector3(c.x, c.y + r * 5, c.z + 0.001), new Vector3(0, 0, -1)));   // TOPSIDE
+      shots.push(shoot(new Vector3(c.x, c.y + r * 0.06, c.z - r * 5), new Vector3(0, 1, 0))); // FRONT (nose −z)
+    } finally {
+      for (const s of swaps) s.o.material = s.prev as never;
+      for (const o of hidden) o.visible = true;
+      wire.dispose(); wireLine.dispose(); amber.dispose();
+      renderer?.dispose();
+    }
+    return { top: shots[0]!, front: shots[1]! };
+  }
+
   /** green ground + grid just under the lowest rendered geometry (ground=true:
    *  nothing of a craft renders below ground — part boxes may ride below the
    *  file box, the 3481322297 truck builds down to y=−1.5) */

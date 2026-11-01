@@ -1,111 +1,63 @@
-// analysis.spec.ts — THE XENONCODE ANALYSIS in the real IDE (v1.16.13,
-// we: "report missing functions, definitions, missing return statements in
-// functions where a result is used … mark them like VS would"): the ANALYSIS
-// BENCH 9000009090 disk (tools/make_analysis_test.py — ONE deliberate
-// defect per analyzer code, with clean counterparts that must stay silent)
-// opens in the IDE → CodeMirror's lint renderer paints squiggles and the
-// gutter severity dots, the Problems side tab counts and lists the
-// diagnostics, and a row click JUMPS the editor (data-editor-jump, the v1.13
-// follow seam). The analyzer LAWS (the 11 codes, the vocabulary sync to the
-// C++ binary, the shipped ChipOS/Badger disks true-negative) are PORTED to
-// xcanalyze.test; this leg is the CM6 renderer + the IDE DOM.
-import { test, expect } from '@playwright/test';
+// analysis.spec.ts — THE CRAFT ANALYSIS (v1.17.0, we: "let our editor
+// automatically make a mermaid diagram of the xenoncode and display
+// that … above each sequence diagram, render a PNG of the vessel …
+// considering files as classes … Io devices … as system actors and button
+// presses, cockpit as a user … flight characteristics optional of course,
+// not logical for a rover or for Mario").
+//
+// e2e-tier because: the MERMAID RUNTIME renders SVG in the DOM, the vessel
+// plate is a real WebGL offscreen pass, and ⬇ HTML is a browser download.
+// The diagram GRAMMAR itself (sources, actors, resolved devices, burial)
+// is vitest-pure in xcgraph.test.ts.
+//
+// @slow: the mermaid chunk + runtime and the WebGL plates on the iGPU.
+import { expect, test } from '@playwright/test';
 
-const BENCH = '9000009090';
+test.describe('@analysis @slow THE CRAFT ANALYSIS', () => {
+  test('a FLYING craft: three rendered diagrams, vessel plates, the flight section @ui', async ({ page, isMobile }) => {
+    test.skip(isMobile, 'desktop dialog density (analysis family)');
+    test.setTimeout(300_000);
+    // the aileroned craft from the surface-cable law (3327182790)
+    await page.goto('/?craft=3327182790');
+    await page.waitForFunction(() => !!(window as any).__ARCHEAN__?.engine?.blueprint,
+      null, { timeout: 150_000 });
+    await page.getByTestId('analysis-btn').click();
+    await expect(page.getByTestId('analysis-dock')).toBeVisible();
 
-// SKIPPED (we: "the tests for xenoncode IDE take too long, they run at too
-// high a level … skip this test for now") — the hover-geometry leg is the
-// fragile one; the laws it drives (xcDoc table, lint marks, Problems rows)
-// are unit-green in xcdocs.test/xcanalyze.test. Retire the browser leg to
-// a jsdom mount per WP-IDE-RETIER (workpackages.md), then re-enable.
-test.describe('@analysis @xenon THE XENONCODE ANALYSIS', () => {
-  test.skip(true, 'WP-IDE-RETIER: retier the IDE-geometry legs (jsdom) before re-enabling');
-  test('the bench disk: squiggles, gutter marks, the Problems tab; a row click jumps', async ({ page }) => {
-    test.setTimeout(150_000);
-    test.slow();   // @slow: the real IDE opening on a corpus craft
-    await page.goto(`/?craft=${BENCH}`);
-    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 60_000 });
-    await page.getByTestId('xenon-menu').click();
-    await page.locator('[data-testid^="xenon-comp-"]').first().click();
-    const pane = page.getByTestId('xenon-code-0');
-    await expect(pane).toBeVisible({ timeout: 30_000 });
-
-    // the lint renderer marks the planted defects (>= 8 of the 11)
-    await expect
-      .poll(() => page.locator('.cm-lintRange').count(), { timeout: 20_000 })
-      .toBeGreaterThanOrEqual(8);
-    // VS-style gutter severity dots (lintGutter beside the breakpoint gutter)
-    await expect(page.locator('[class*="cm-lint-marker"]').first())
-      .toBeVisible({ timeout: 10_000 });
-
-    // THE FUNCTION-REFERENCE HOVER (v1.16.14, the user: "there is no
-    // descriptions on the function names for e.g. blank; nothing shows up
-    // when mouseovering, telling me what it is or where it comes from"):
-    // hover `print` — the table answers WHAT and WHERE FROM.
-    // (a text-position probe — desktop geometry; the rule is platform-neutral)
-    if ((page.viewportSize()?.width ?? 0) >= 768) {
-      const printLine = page.locator('.cm-line', { hasText: 'made_up(2)' }).first();
-      // the line must be VISIBLE before measuring (Range coords include
-      // clipped overflow — on the 1280×720 project viewport the line sat
-      // below the pane bottom and the hover hit window chrome)
-      await printLine.scrollIntoViewIfNeeded();
-      // exact word point: a DOM Range on the 'print' text inside the line
-      const pt = await printLine.evaluate((el) => {
-        // CM wraps syntax tokens in spans: walk the line's text nodes
-        const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-        let txt: Text | null;
-        while ((txt = w.nextNode() as Text | null)) {
-          const idx = (txt.textContent ?? '').indexOf('print');
-          if (idx < 0) continue;
-          const r = document.createRange();
-          r.setStart(txt, idx + 2);
-          r.setEnd(txt, idx + 3);
-          const b = r.getBoundingClientRect();
-          return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
-        }
-        return null;
-      });
-      expect(pt).toBeTruthy();
-      // deterministic: dispatch mousemove events at the word position on
-      // the CM content (its hover listeners start the 300 ms timer)
-      await printLine.evaluate((el, p2) => {
-        // CM's tooltip system listens on the EDITOR root (view.dom)
-        const content = el.closest('.cm-editor') ?? el.closest('.cm-scroller') ?? el;
-        for (const dx of [-8, -3, 0, 1]) {
-          content.dispatchEvent(new MouseEvent('mousemove',
-            { clientX: p2.x + dx, clientY: p2.y, bubbles: true, view: window }));
-        }
-      }, pt!);
-      await page.waitForTimeout(1600);
-      await expect(page.locator('.xc-doc-tip'))
-        .toContainText('write a line to the computer console');
-      await expect(page.locator('.xc-doc-origin').first()).toContainText(/shim/i);
+    for (const kind of ['flow', 'sequence', 'class']) {
+      await expect(page.getByTestId(`analysis-${kind}`)).toBeVisible();
+      // the mermaid RUNTIME produced a real SVG for each
+      await expect.poll(async () =>
+        page.getByTestId(`analysis-${kind}`).locator('svg').count(),
+      { timeout: 120_000, message: `${kind} diagram renders` }).toBe(1);
+      expect(await page.getByTestId(`analysis-error-${kind}`).count()).toBe(0);
     }
+    // the vessel plate pair above/with the reading: topside + front PNGs
+    await expect(page.getByTestId('analysis-plates').locator('img')).toHaveCount(2,
+      { timeout: 120_000 });
+    // flight: the plane gets the FLIGHT LAB reading (it carries surfaces)
+    await expect(page.getByTestId('analysis-flight-report')).toBeVisible({ timeout: 60_000 });
 
-    // the Problems side tab: counts + rows (phones get the right-edge RAIL
-    // instead of the side strip — v1.13.32 phone IDE law)
-    const sideBtn = page.getByTestId('xenon-side-problems');
-    if (await sideBtn.isVisible().catch(() => false)) await sideBtn.click();
-    else await page.getByTestId('xenon-rail-problems').click();
-    await expect(page.getByTestId('xc-problems-list')).toBeVisible();
-    await expect(page.getByTestId('xc-problems-counts'))
-      .toContainText(/errors[\s\S]*warnings[\s\S]*hints/);
-    const rows = page.locator('[data-testid^="xc-problem-"]');
-    await expect(rows.first()).toBeVisible({ timeout: 10_000 });
-    expect(await rows.count()).toBeGreaterThanOrEqual(8);
+    // ⬇ HTML: the whole reading exports as ONE download
+    const dl = page.waitForEvent('download', { timeout: 30_000 });
+    await page.getByTestId('analysis-export').click();
+    const file = await dl;
+    expect(file.suggestedFilename()).toBe('craft-3327182790-analysis.html');
+  });
 
-    // the ghost-alias row jumps the editor to its line (the follow seam)
-    const ghost = page.locator('[data-testid^="xc-problem-"]', { hasText: 'ghost' }).first();
-    await expect(ghost).toBeVisible();
-    await ghost.click();
-    await expect
-      .poll(() => pane.getAttribute('data-editor-jump'),
-        { message: 'the Problems row click moves the editor', timeout: 10_000 })
-      .toMatch(/^main\.xc:\d+$/);
-
-    // a CLEAN disk stays quiet: the Lamp ToggleButton's own disk has no
-    // program → the Problems list is the empty state
-    await expect(page.getByTestId('xc-problems-counts'))
-      .toContainText('errors');
+  test('a NON-flying craft (the Mario cabinet): diagrams yes, aero theatre no @ui', async ({ page, isMobile }) => {
+    test.skip(isMobile, 'desktop dialog density (analysis family)');
+    test.setTimeout(300_000);
+    await page.goto('/?craft=3820116990');
+    await page.waitForFunction(() => !!(window as any).__ARCHEAN__?.engine?.blueprint,
+      null, { timeout: 150_000 });
+    await page.getByTestId('analysis-btn').click();
+    await expect(page.getByTestId('analysis-dock')).toBeVisible();
+    await expect.poll(async () =>
+      page.getByTestId('analysis-sequence').locator('svg').count(),
+    { timeout: 120_000 }).toBe(1);
+    // the honest gate: no flight-control surfaces → no flight theatre
+    await expect(page.getByTestId('analysis-flight')).toContainText(/Not applicable/i);
+    expect(await page.getByTestId('analysis-flight-report').count()).toBe(0);
   });
 });
