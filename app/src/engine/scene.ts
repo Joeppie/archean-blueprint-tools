@@ -3043,6 +3043,10 @@ void main() {
     const tris: Tri[] = [];
     const vA = new Vector3(), vB = new Vector3(), vC = new Vector3(), e1 = new Vector3(), e2 = new Vector3();
     for (const g of [this.root, this.hingeGroup, this.subGroup]) {
+      // CRAFT GROUPS ONLY: the CoM marker, screen quads, sky dome and
+      // ground live at the SCENE layer — a drafting sheet draws the
+      // SHIP, never editor overlays (we: "Are you rendering the center
+      // of mass? Dont put that in a schematic" — it never was).
       g.traverse(o => {
         const m = o as Mesh;
         if (!(m as unknown as { isMesh?: boolean }).isMesh || !m.visible) return;

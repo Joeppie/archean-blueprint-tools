@@ -111,6 +111,18 @@ test.describe('view menu: see-through ground, sky backdrops, ortho @ui', () => {
       for (const b of NAMES)
         expect.soft(page.getByTestId(`backdrop-${b}`), `row backdrop-${b}`).toBeVisible();
       expect.soft(page.getByTestId('opt-ortho')).toBeVisible();
+      // v1.17.2 THE CoM TOGGLE PINNED (we: "make that [center of mass]
+      // toggleable in 3d"): the ⚙ View row "center-of-mass marker" exists
+      // (it rode opts.com all along) — the pin drives it live. The
+      // blueprint plate never carried the marker (SCENE-layer overlay;
+      // the plate walks the craft groups only).
+      expect.soft(page.getByTestId('opt-com')).toBeVisible();
+      await page.getByTestId('opt-com').uncheck();
+      await expect.poll(() => page.evaluate(() =>
+        (window as any).__ARCHEAN__?.engine?.getOptions?.().com)).toBe(false);
+      await page.getByTestId('opt-com').check();
+      await expect.poll(() => page.evaluate(() =>
+        (window as any).__ARCHEAN__?.engine?.getOptions?.().com)).toBe(true);
     });
 
     // The scan's discriminator (sky-blue vs the OLD solid green SHEET) is

@@ -67,10 +67,21 @@ test.describe('@storage @xenon THE STORAGE PERSISTENCE LAW', () => {
       { timeout: 90_000 });
     await passGate(page);
     await expect.poll(() => busRow(page), { timeout: 60_000 }).toBeGreaterThanOrEqual(3);
+  });
 
-    // THE STORAGE WIPE (v1.17.2, we: "I need a way to clear storage vars,
-    // ChipOS is in a broken state"): the IDE's Vars-tab 🗑 persists the
-    // empty map and re-boots — the counter returns to a FRESH disk's 1…
+  test('THE STORAGE WIPE: the Vars-tab 🗑 gives a fresh disk, and the wipe persists', async ({ page, isMobile }) => {
+    // desktop-only (the analysis-family law): the wipe rides the IDE's
+    // side panel, which on phones is a rail + overlay DRAWER.
+    test.skip(isMobile, 'IDE side-panel density (desktop dialog family)');
+    test.setTimeout(240_000);
+    await page.addInitScript(() => localStorage.setItem('archean-app-live', 'on'));
+    await page.goto(`/?craft=${CRAFT}`);
+    await page.waitForFunction(() => !!(window as any).__ARCHEAN__?.xenon?.farm, null,
+      { timeout: 90_000 });
+    await passGate(page);
+    // a booted disk carries a count > 1 after a beat (the pump writes
+    // every boot); the wipe must clear it to a FRESH disk's 1.
+    await expect.poll(() => busRow(page), { timeout: 60_000 }).toBeGreaterThanOrEqual(1);
     await page.getByTestId('xenon-menu').click();
     await page.locator('[data-testid^="xenon-comp-"]').first().click();
     await expect(page.getByTestId('xenon-dialog')).toBeVisible();
