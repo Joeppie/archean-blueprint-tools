@@ -3050,6 +3050,13 @@ void main() {
       g.traverse(o => {
         const m = o as Mesh;
         if (!(m as unknown as { isMesh?: boolean }).isMesh || !m.visible) return;
+        // InstancedMeshes are the pipe/elbow TEMPLATES (unit sphere/cyl/
+        // box + instanceMatrix): a census reading them emits the 1 m
+        // TEMPLATE at the group origin — the "large sphere" on every
+        // cabled craft (we: "there is a large fucking sphere in super
+        // mario and chipOS … that shouldnt fucking be there"). Cables
+        // ride the amber pipeNet annotations; templates never ink.
+        if ((o as unknown as { isInstancedMesh?: boolean }).isInstancedMesh) return;
         if ((o.userData as { windlines?: boolean })?.windlines) return;
         const geo = m.geometry as BufferGeometry;
         const pos = geo?.getAttribute?.('position') as BufferAttribute | undefined;

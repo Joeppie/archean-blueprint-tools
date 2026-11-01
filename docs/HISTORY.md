@@ -5973,3 +5973,20 @@ into it), then re-open: the fresh VM seeds {} and the program redoes its
 first-run like a brand-new craft. Pinned by storage.spec's fourth leg:
 count reaches 3, WIPE, one boot on the fresh disk answers 1, and a RELOAD
 answers 1 — the wipe persists, the old count cannot come back.
+
+## 37. THE TEMPLATE SPHERE — InstancedMeshes are GEOMETRY, not instances
+## (we: "there is a large fucking sphere in super mario and chipOS see?"
+## "that sohuldnt fucking be there"; 2026-11-02)
+The Mario and ChipOS blueprints carried a huge lat/long-grid sphere offset
+from the craft. Not the sky dome (scene layer, out of the census), not the
+CoM marker (scene layer, pinned out): the CABLE instancing. The pipe layer
+draws round cylinders/box ducts/elbow spheres as InstancedMeshes sharing
+UNIT templates (SphereGeometry(1,12,8), n=126 elbows on Mario) — the real
+transforms live in instanceMatrix, matrixWorld is the group's identity.
+The plate census reads geometry.getAttribute('position') × matrixWorld, so
+it inked the ONE unit template, radius 1 m, at the group origin — every
+cabled craft gets the "large sphere", every cable-free one doesn't. FIX:
+the census skips isInstancedMesh (cables ride the amber pipeNet
+annotations, templates never ink). The live probe census names the
+culprits (SphereGeometry n=126/n=22/n=22, CylinderGeometry, BoxGeometry)
+— the same signature, unit raw ranges ±1, on every craft.
