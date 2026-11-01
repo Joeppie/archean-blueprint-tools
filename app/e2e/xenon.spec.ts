@@ -15,6 +15,7 @@
 // Dashboard's 50×25 HdScreen element) and the Cheap Exploration Plane
 // (3327182790, pure #NODES flight-control program, no screens).
 import { expect, test } from '@playwright/test';
+import { openSide } from './sidepanel.js';
 
 const PLANE = '3294880085';
 const CEP = '3327182790';
@@ -92,7 +93,7 @@ test.describe('Xenon IDE @ui', () => {
 
     // LIBRARY TAB: the built-in docs render and filter; a declared function
     // JUMPS — opening its file with the caret on the declaration
-    await page.getByTestId('xenon-side-library').click();
+    await openSide(page, 'library');
     await expect(page.getByTestId('xenon-lib-doc-print')).toContainText('console');
     await page.getByTestId('xenon-lib-search').fill('worldsim');
     await expect(page.getByTestId('xenon-lib-doc-setworldsim')).toBeVisible();
@@ -281,7 +282,7 @@ test.describe('Xenon IDE @ui', () => {
     await expect(dlg).toBeVisible();
     // the firmware boots on the dev VM — the prints prove the program RUNS
     // (the side panel's CONSOLE tab — v1.13.x tabbed side panel)
-    await page.getByTestId('xenon-side-console').click();
+    await openSide(page, 'console');
     await expect(page.getByTestId('xenon-log')).toContainText('Smart Quad is ready', { timeout: 180_000 });
     console.log(`badger boot+init: ${((Date.now() - t0) / 1000).toFixed(1)} s`);
     await expect(page.getByText(/is running…/)).toBeVisible();
@@ -340,7 +341,7 @@ test.describe('Xenon IDE @ui', () => {
       return null;
     });
     expect(ioCh).not.toBeNull();
-    await page.getByTestId('xenon-side-bus').click();          // sliders live on the BUS tab
+    await openSide(page, 'bus');          // sliders live on the BUS tab
     const slider = page.getByTestId(`xenon-in-${ioCh!.io}-${ioCh!.ch}`);
     await slider.evaluate((el: HTMLInputElement, v: string) => {
       const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
@@ -383,7 +384,7 @@ test.describe('Xenon IDE @ui', () => {
     const fb = (await full.boundingBox())!;
     await full.click({ position: { x: fb.width * 4 / 870, y: fb.height * 4 / 396 } });
     await page.getByTestId('xenon-cell-10#0-fullexit').click();
-    await page.getByTestId('xenon-side-vars').click();
+    await openSide(page, 'vars');
     await expect(page.getByTestId('xenon-var-disp')).toBeVisible();
     // the 3381670618 code validates clean (no red lines in the entry file)
     await page.getByTestId('xenon-tab-0').click();
@@ -495,7 +496,7 @@ test.describe('Xenon IDE @ui', () => {
     // this pin is the worker-mode proof: the frame the hook dumps is the
     // MID-CYCLE truth (the parked VM's own voice), not a cycle-end echo
     await expect(page.getByTestId('xenon-mode')).toContainText('worker · true line-stepping');
-    await page.getByTestId('xenon-side-bus').click();
+    await openSide(page, 'bus');
     const key = page.getByTestId('xenon-in-11-3');
     await key.evaluate((el: HTMLInputElement) => {
       const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
@@ -517,7 +518,7 @@ test.describe('Xenon IDE @ui', () => {
     // the frame chip names the owning function; the rows carry the
     // ARGUMENTS the pause-carrying call passed (increment 5, limits
     // 0..100 = the throttle call) and $result — ABOVE the globals section
-    await page.getByTestId('xenon-side-vars').click();
+    await openSide(page, 'vars');
     await expect(page.getByTestId('xenon-locals-frame')).toContainText('@selectcase');
     await expect(page.getByTestId('xenon-loc-inputsource')).toBeVisible();
     await expect(page.getByTestId('xenon-loc-increment')).toContainText('5');
@@ -534,9 +535,9 @@ test.describe('Xenon IDE @ui', () => {
     const varBox = await anyVar.boundingBox();
     expect(!!ghBox && !!varBox && ghBox.y <= varBox.y).toBe(true);
     // THE ROW LAW (the layout half of the ask): the search box sits AT THE
-    // SAME LEVEL as the tab row — the old vertical rail is gone (boxes
-    // overlap vertically)
-    const tab = await page.getByTestId('xenon-side-vars').boundingBox();
+    // SAME LEVEL as the panel-menu control (v1.17.2: the tab strip became
+    // the ▤ dropdown — the ROW law survives against its button)
+    const tab = await page.getByTestId('xenon-side-open').boundingBox();
     const box = await page.getByTestId('xenon-var-search').boundingBox();
     expect(!!tab && !!box && tab.y < box.y + box.height && box.y < tab.y + tab.height).toBe(true);
     // the shared search filters the frame
@@ -614,7 +615,7 @@ test.describe('Xenon IDE @ui', () => {
 
     // NAV: the Library jump records the pause spot; Alt+← walks back,
     // Alt+→ forward
-    await page.getByTestId('xenon-side-library').click();
+    await openSide(page, 'library');
     await page.getByTestId('xenon-lib-fn-selectcase').click();
     await expect(page.getByTestId('xenon-code-1')).toContainText('function @selectcase');
     await expect(page.getByTestId('xenon-nav-back')).toBeEnabled();
@@ -712,7 +713,7 @@ test.describe('Xenon IDE @ui', () => {
     // @selectcase is never called; the pause is in the frame; F10 stays
     // IN THE BODY (line < 45 = the body range [5..44]) — the old law
     // landed at 49+ (out of the function)
-    await page.getByTestId('xenon-side-bus').click();
+    await openSide(page, 'bus');
     await page.getByTestId('xenon-in-11-3').evaluate((el: HTMLInputElement) => {
       const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
       set.call(el, '1');
@@ -800,7 +801,7 @@ test.describe('Xenon IDE @ui', () => {
     // the park (first writable value cell) and its row remounts with the
     // .var-flash wash. e2e-tier because: the wash fires through the
     // panel's per-commit value diffing (notify → key remount → CSS anim).
-    await page.getByTestId('xenon-side-vars').click();
+    await openSide(page, 'vars');
     await expect(page.getByTestId('xenon-locals-frame')).toContainText(/main\.xc:17/);
     const cell = page.locator('[data-testid^="xenon-var-"] [data-testid^="xenon-val-"]').first();
     await expect(cell).toBeVisible({ timeout: 10_000 });
@@ -919,7 +920,7 @@ test.describe('Xenon IDE @ui', () => {
     await page.getByTestId('xenon-menu').click();
     await page.locator('[data-testid^="xenon-comp-"]').first().click();
     await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 60_000 });
-    await page.getByTestId('xenon-side-bus').click();
+    await openSide(page, 'bus');
     // the stick channel row names the cabled device AND its game function
     const seatRow = page.locator('label', { hasText: 'PilotSeat' }).filter({ hasText: 'Backward/Forward' });
     await expect(seatRow.first()).toBeVisible();
@@ -935,7 +936,7 @@ test.describe('Xenon IDE @ui', () => {
     await page.getByTestId('xenon-menu').click();
     await page.locator('[data-testid^="xenon-comp-"]').first().click();
     await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 90_000 });
-    await page.getByTestId('xenon-side-bus').click();
+    await openSide(page, 'bus');
     const navRow = page.locator('label', { hasText: 'NavInstrument' }).filter({ hasText: 'Heading' });
     await expect(navRow.first()).toBeVisible({ timeout: 20_000 });
     await page.keyboard.press('Escape');
@@ -1011,7 +1012,7 @@ test.describe('Xenon IDE @ui', () => {
     await page.getByTestId('xenon-menu').click();
     await page.locator('[data-testid^="xenon-comp-"]').first().click();
     await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 90_000 });
-    await page.getByTestId('xenon-side-world').click();
+    await openSide(page, 'world');
     const alt = page.getByTestId('worldsim-row-navinstrument.altitude_meters_from_sea_level');
     await expect(alt).toBeVisible();
     // deterministic: pin the base to 2000, override with $val + 2 → 2002
@@ -1044,7 +1045,7 @@ test.describe('Xenon IDE @ui', () => {
     await page.keyboard.type('print(text("alt: {}", input_number(4, 2)))');
     await page.getByTestId('xenon-save').click();
     await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 90_000 });
-    await page.getByTestId('xenon-side-console').click();
+    await openSide(page, 'console');
     await expect(page.getByTestId('xenon-log')).toContainText('alt: 2002', { timeout: 30_000 });
     // PROGRAM override via setworldsim wins over the expression — authored
     // the user's own way (v1.13.26): click the update line, End, ENTER
@@ -1059,7 +1060,7 @@ test.describe('Xenon IDE @ui', () => {
     await page.keyboard.type('setworldsim("navinstrument.altitude_meters_from_sea_level", 3000)');
     await page.getByTestId('xenon-save').click();
     await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 90_000 });
-    await page.getByTestId('xenon-side-world').click();
+    await openSide(page, 'world');
     await expect(alt).toContainText('program');
     await expect(page.getByTestId('worldsim-val-navinstrument.altitude_meters_from_sea_level'))
       .toHaveText('3000.000', { timeout: 5_000 });
@@ -1070,7 +1071,7 @@ test.describe('Xenon IDE @ui', () => {
     await page.getByTestId('xenon-menu').click();
     await page.locator('[data-testid^="xenon-comp-"]').first().click();
     await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 60_000 });
-    await page.getByTestId('xenon-side-world').click();
+    await openSide(page, 'world');
     await expect(
       page.getByTestId('worldsim-name-navinstrument.altitude_meters_from_sea_level')
     ).toContainText('other craft');
@@ -1216,7 +1217,7 @@ test.describe('Xenon IDE @ui', () => {
     await page.getByTestId('xenon-menu').click();
     await page.locator('[data-testid^="xenon-comp-"]').first().click();
     await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 90_000 });
-    await page.getByTestId('xenon-side-autotest').click();
+    await openSide(page, 'autotest');
     await expect(page.getByTestId('xenon-test-src')).toContainText('buzzer-bench');
     await page.getByTestId('xenon-test-run').click();
     await expect(page.getByTestId('xenon-test-summary')).toContainText('5/5 PASS', { timeout: 30_000 });
@@ -1270,7 +1271,7 @@ test.describe('Xenon IDE @ui', () => {
     await page.getByTestId('xenon-menu').click();
     await page.getByTestId('xenon-comp-13').click();
     await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 90_000 });
-    await page.getByTestId('xenon-side-screens').click();
+    await openSide(page, 'screens');
 
     // #4 FULL COCKPIT: every seat channel has a row + a bound key, not just
     // the ch 1/2/3 the game reads (we: "keyboard binds available also for

@@ -13,6 +13,7 @@
 // (save bytes + reload) are vitest-pinned: xenoncode.test.ts
 // "THE FRESH-COMPUTER LISTING GATE" + xcfiles.test.ts round-trip.
 import { expect, test } from '@playwright/test';
+import { openSide } from './sidepanel.js';
 
 const FRESH = '9000009001';
 
@@ -54,7 +55,7 @@ test.describe('a fresh MiniComputer is programmable @ui', () => {
     // files (the game's rule) — so a fresh-boots print in the console can
     // only come from the file that did not exist before this test.
     await expect(page.getByTestId('xenon-on')).toHaveText('ON', { timeout: 60_000 });
-    await page.getByTestId('xenon-side-console').click();
+    await openSide(page, 'console');
     await expect(page.getByText(/fresh-boots \d+/).first()).toBeVisible({ timeout: 30_000 });
 
     // the IDE re-lists the computer from bp after the write (one disk file

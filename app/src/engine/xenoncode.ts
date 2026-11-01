@@ -22,7 +22,7 @@ import { stepperLaw } from 'xenoncore';
 import { buzzerAudio, modeToWave } from './buzzer';
 import type { XenonSnap } from './xenontest';
 import {
-  evalExpr, slug, wsChans, wsEnsure, wsKind, wsLoad, wsName, wsSave, worldsimDefault,
+  evalExpr, normScreenKey, slug, wsChans, wsEnsure, wsKind, wsLoad, wsName, wsSave, worldsimDefault,
   type WorldSimChan,
 } from './worldsim';
 
@@ -1566,6 +1566,12 @@ export class XenonPump {
   prints: XenonEvent[] = [];
   surfaces = new Map<string, XenonSurface>();        // screen key -> latest framebuffer
   private canvases = new Map<string, Set<HTMLCanvasElement>>();
+  // THE CANONICAL-KEY LAW bridge (v1.17.2): normalized app key → the
+  // shim's raw VM key. The WORKER fetches pixels by the keys we hand it,
+  // and the shim knows only its raw literals ("main-screen#0") — the
+  // worker's setKeys must carry the RAW variants; the surfaces map, the
+  // canvases and the feeds all speak normalized.
+  private rawKey = new Map<string, string>();
   private feedKeys = new Set<string>();   // 3-D dashboard face keys (Engine)
   private subs = new Set<() => void>();
   private timer = 0;
@@ -1617,6 +1623,7 @@ export class XenonPump {
     this.prints = [];
     this.surfaces = new Map();
     this.surfVer.clear();
+    this.rawKey.clear();
     // v1.13.17: worker mode when SAB-isolated AND the shim carries the live
     // hook (abi >= 7); XenonWorkerRun.open returns null otherwise → the
     // v1.13.16 main-thread pump, byte-identical.
@@ -1719,6 +1726,7 @@ export class XenonPump {
                                // sessions and a stale value lies)
     this.surfaces = new Map();
     this.surfVer.clear();
+    this.rawKey.clear();
     this.wsBindings = new Map();
     this.wsOverrides = {};
     this.pilotBindings = new Map();
@@ -2360,7 +2368,7 @@ export class XenonPump {
   screenScroll(key: string, d: number) { (this.wrun ?? this.run)?.screenScroll(key.toLowerCase(), d); }
 
   /** Which surface keys the 3-D scene is rendering on craft dashboards. */
-  setFeedKeys(keys: Iterable<string>) { this.feedKeys = new Set(keys); }
+  setFeedKeys(keys: Iterable<string>) { this.feedKeys = new Set([...keys].map(normScreenKey)); }
   /** debug channel: the rAF handle (0 = the loop is not running) */
   raf2(): number { return this.timer; }
 
@@ -2384,7 +2392,8 @@ export class XenonPump {
     // flicker) and flooded the Screens dock with black tiles. No program
     // write = no pixels, until the painting starts (seq ≥ 2).
     if (v >= 0 && v <= 1) return null;
-    if (v >= 0 && this.surfVer.get(key) === v && this.surfaces.get(key)?.pixels) return null;
+    if (v >= 0 && this.surfVer.get(key) === v
+      && this.surfaces.get(normScreenKey(key))?.pixels) return null;
     const px = r.screenPixels(key);
     if (px) this.surfVer.set(key, v);
     return px;
@@ -2392,7 +2401,7 @@ export class XenonPump {
 
   private cycleN = 0;
   registerCanvas(key: string, cv: HTMLCanvasElement, fill = false): () => void {
-    const k = key.toLowerCase();
+    const k = normScreenKey(key);
     let s = this.canvases.get(k);
     if (!s) { s = new Set(); this.canvases.set(k, s); }
     s.add(cv);
@@ -2550,7 +2559,8 @@ export class XenonPump {
       if (this.inFlight || this.paused) return;
       this.inFlight = true;
       this.flushBus();          // coalesced Cable Law fan-in (v1.15.2)
-      wr.setKeys([...this.canvases.keys(), ...this.feedKeys]);
+      wr.setKeys([...new Set([...this.canvases.keys(), ...this.feedKeys]
+        .flatMap(k => { const raw = this.rawKey.get(k); return raw && raw !== k ? [k, raw] : [k]; }))]);
       const t0 = typeof performance !== 'undefined' ? performance.now() : t;
       this.stepWorldSim(wr);
       this.stepRadio(wr);
@@ -2683,16 +2693,24 @@ export class XenonPump {
     const next = new Map<string, XenonSurface>();
     const fetched = new Set<string>();        // surfaces FETCHED this cycle
     for (const meta of metas) {
-      let pixels = this.surfaces.get(meta.key)?.pixels;
-      if (want.has(meta.key)) {
-        const got = pixelsFor(meta.key);
+      // THE CANONICAL SCREEN-KEY LAW (v1.17.2): the shim's key is the raw
+      // lowercased literal ("element 09#9" keeps its space); the app's
+      // registrations, feeds, canvases and pushScreen keys are all
+      // slug-based — normalize at the pump's ingress so the authored
+      // board and the program's token are ONE surface, not an authored
+      // cell + a 640×480 dev-seed twin.
+      const mk = normScreenKey(meta.key);
+      this.rawKey.set(mk, meta.key);
+      let pixels = this.surfaces.get(mk)?.pixels;
+      if (want.has(mk)) {
+        const got = pixelsFor(meta.key);   // the VM knows only its own key
         if (got) {
           pixels = got;
-          fetched.add(meta.key);
-          this.blitTo(meta.key, { ...meta, pixels: got });
+          fetched.add(mk);
+          this.blitTo(mk, { ...meta, key: mk, pixels: got });
         }
       }
-      next.set(meta.key, { ...meta, pixels });
+      next.set(mk, { ...meta, key: mk, pixels });
     }
     // BUILT-IN SCREEN mirror: the integrated touchscreen is the plain
     // screen-function target (main#0) - feed the model-face key with the

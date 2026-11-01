@@ -10,6 +10,7 @@
 // 999-line guide program with beacon("BADGER-GUIDE-UI-IN","BADGER-GUIDE-UI-
 // OUT") and Beacon ci 69 listens on BGR-D60167AC42520437045ED627.
 import { expect, test } from '@playwright/test';
+import { openSide } from './sidepanel.js';
 
 const BADGER = '3326372833';
 
@@ -38,7 +39,7 @@ test.describe('HUD blocks + beacon radio @ui', () => {
     await expect(page.getByTestId('hud-dirty')).toContainText('saved');
 
     // the beacon scope inside the HUD IDE: the craft's real radio map
-    await page.getByTestId('hud-side-beacons').click();
+    await openSide(page, 'beacons', 0, 'hud');
     await expect(page.getByTestId('beacon-freq-BGR-D60167AC42520437045ED627')).toBeVisible();
     await expect(page.getByTestId('beacon-freq-BADGER-GUIDE-UI-IN')).toBeVisible();
     // send onto a frequency a Beacon component LISTENS on → its log
@@ -84,7 +85,7 @@ test.describe('HUD blocks + beacon radio @ui', () => {
     await page.getByTestId('xenon-menu').click();
     await page.locator('[data-testid^="xenon-comp-"]').first().click();
     await expect(page.getByTestId('xenon-dialog')).toBeVisible();
-    await page.getByTestId('xenon-side-beacons').click();
+    await openSide(page, 'beacons');
     await expect(page.getByTestId('beacon-freqs')).toBeVisible();
     // the HUD program is a LISTENER in the global scope (intercomputer view)
     await expect(page.getByTestId('beacon-part-hud-9-0')).toContainText('pilot-guide');
@@ -98,7 +99,7 @@ test.describe('HUD blocks + beacon radio @ui', () => {
   // send form reaches the HUD's .data on BADGER-GUIDE-UI-OUT.
   // e2e-tier because: the law is VM → canvas pixels + cross-runtime radio
   // delivery — nothing below the browser can see it.
-  test('the Panel Bench: $panel.set_size COMPILES and resizes @slow', async ({ page }) => {
+  test('the Panel Bench: $panel.set_size COMPILES and resizes @slow', async ({ page, isMobile }) => {
     // v1.15.5 (we: "in rcs infinity, the HUD wont run/compile, it doesnt
     // know set_size lives in panel? … its in the HUD documentation, can we
     // get it from somewhere in the game files or official documentation?"
@@ -119,6 +120,9 @@ test.describe('HUD blocks + beacon radio @ui', () => {
     await expect(page.getByTestId('hud-run-status'))
       .toContainText('ON', { timeout: 30_000 });   // the PARSE gate
     const canvas = page.getByTestId('hud-panel-canvas-0');
+    // PHONE (v1.17.2 panel-menu law): the side panel lives behind the
+    // rail + drawer — claim the Panels tab first.
+    if (isMobile) await openSide(page, 'panels', 0, 'hud');
     await expect(canvas).toBeVisible({ timeout: 30_000 });
     // tick 30 (~1.2 s at 25 Hz) resizes the panel; the canvas follows the
     // per-cycle screen metas (XenonScreen::Resize keeps panel identity)
@@ -146,7 +150,7 @@ test.describe('HUD blocks + beacon radio @ui', () => {
     await page.getByTestId('xenon-hud-0').click();
     await page.getByTestId('hud-run').click();
     await expect(page.getByTestId('hud-run-status')).toContainText('ON', { timeout: 30_000 });
-    await page.getByTestId('hud-side-screen').click();
+    await openSide(page, 'screen', 0, 'hud');
     const screen = page.getByTestId('hud-screen-canvas');
     await expect(screen).toBeVisible({ timeout: 30_000 });
     const centroid = () => screen.evaluate((c: HTMLCanvasElement) => {
@@ -225,7 +229,7 @@ test.describe('HUD blocks + beacon radio @ui', () => {
     // the radio loop: the guide transmits on BADGER-GUIDE-UI-IN while it
     // is RECEIVING (the game's gate) — send to its rx first, the RELAY
     // Beacon component (ci 114, rx = BADGER-GUIDE-UI-IN) then logs echoes
-    await page.getByTestId('hud-side-beacons').click();
+    await openSide(page, 'beacons', 0, 'hud');
     await expect(page.getByTestId('beacon-freq-BADGER-GUIDE-UI-OUT')).toBeVisible({ timeout: 20_000 });
     await page.getByTestId('beacon-freq-BADGER-GUIDE-UI-OUT').click();
     await page.getByTestId('beacon-data-form').fill('.g{1}.s{E2E}');

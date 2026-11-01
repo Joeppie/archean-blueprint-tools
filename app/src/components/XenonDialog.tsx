@@ -42,7 +42,7 @@ import { ScreensCell } from './ScreensDock';
 import { CodeEditor, type CodeEditorHandle } from './CodeEditor';
 import BeaconPanel from './BeaconPanel';
 import {
-  functionAt, projectDecls, projectFunctions, XC_LIB_DOC,
+  functionAt, projectDecls, projectFunctions,
 } from 'xenoncore';
 import { analyzeProject, type XCDiagnostic } from 'xenoncore';
 import XenonLibrary from './XenonLibrary';
@@ -83,6 +83,20 @@ export default function XenonDialog(p: {
   const [armedDel, setArmedDel] = useState(false);
   const [vals, setVals] = useState<Record<string, number>>({});
   const [side, setSide] = useState<'vars' | 'screens' | 'library' | 'world' | 'bus' | 'console' | 'autotest' | 'beacons' | 'problems'>('screens');
+  // THE PANEL MENU (v1.17.2, we: "That needs scrolling … there should be
+  // a menu item for each button, organized, searchable, findable"): the
+  // nine-tab strip NO LONGER EXISTS — one dropdown, grouped Data /
+  // Views / Dev / Radio / Reset; no clipped tabs, no sideways scroll.
+  const [panelMenu, setPanelMenu] = useState(false);
+  useEffect(() => {
+    if (!panelMenu) return;
+    const h = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest('[data-testid="xenon-side-open"],[data-testid="xenon-side-menu"],[data-testid="xenon-side-rail"],[data-testid^="xenon-rail-"]'))
+        setPanelMenu(false);
+    };
+    addEventListener('mousedown', h);
+    return () => removeEventListener('mousedown', h);
+  }, [panelMenu]);
   // THE STORAGE WIPE (v1.17.2, we: "I need a way to clear storage vars,
   // ChipOS is in a broken state"): the persistence law has no back door
   // by design — this is the deliberate escape. The Vars tab's 🗑 persists
@@ -346,7 +360,7 @@ export default function XenonDialog(p: {
 
   // the 3-D law: tell the engine which dashboards this computer drives
   useEffect(() => {
-    p.engine?.setScreenFeeds(comp.screens
+    p.engine?.addScreenFeeds(comp.screens
       .filter(s => s.ci != null)
       .map(s => ({ key: `${s.alias.toLowerCase()}#${s.channel}`, ci: s.ci!, channel: s.channel })));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1180,7 +1194,7 @@ export default function XenonDialog(p: {
               on desktop it stands beside the code, top to bottom */}
           <div className={narrow
             ? (sideOpen
-              ? 'fixed inset-y-2 left-14 right-2 z-50 flex flex-col gap-1.5 overflow-y-auto rounded-lg border border-[#3a4a6a] bg-[#10141f]/[.98] p-2 shadow-2xl'
+              ? 'fixed left-14 right-2 top-11 bottom-2 z-50 flex flex-col gap-1.5 overflow-y-auto rounded-lg border border-[#3a4a6a] bg-[#10141f]/[.98] p-2 shadow-2xl'
               : 'hidden')
             : 'flex min-h-0 min-w-0 flex-1 flex-col gap-1.5'}>
             {narrow && sideOpen && (
@@ -1191,24 +1205,57 @@ export default function XenonDialog(p: {
                   onClick={() => setSideOpen(false)}>✕</button>
               </div>
             )}
-            {/* TOP TAB ROW (v1.13.21, we: "put the tabs currently vertically
-                labeled as top-tabs at the same level as the 'search
-                names/values'"): the rail becomes a horizontal row and the
-                tab's search box rides that SAME row */}
-            <div className="flex shrink-0 flex-nowrap items-center gap-1 overflow-x-auto [scrollbar-width:thin]">
-              {([['vars', `Vars ${pump.vars.size ? `(${pump.vars.size})` : ''}${pump.locals.length ? ` + frame ${pump.locals.length}` : ''}`],
-                ['screens', `Screens ${pump.surfaces.size ? `(${pump.surfaces.size})` : ''}`],
-                ['library', `Library ${funcs.length + XC_LIB_DOC.length ? `(${funcs.length} + ${XC_LIB_DOC.length})` : ''}`],
-                ['world', `World ${pump.wsChannels().length ? `(${pump.wsChannels().length})` : ''}`],
-                ['bus', 'Bus'], ['autotest', 'Auto'], ['console', 'Console'],
-                ['beacons', 'Beacons'],
-                ['problems', `Problems ${analysis.length ? `(${analysis.length})` : ''}`]] as const).map(([k, label]) => (
-                <button key={k} data-testid={`xenon-side-${k}`} onClick={() => setSide(k)}
-                  className="shrink-0 rounded px-2 py-1 text-[10px] tracking-wide hover:bg-[#182236]"
-                  title={label.trim()}>
-                  <span className={side === k ? 'rounded bg-[#1d2b42] px-1 py-0.5 text-[#8fd4ff]' : 'text-[#7d8aa0]'}>{label.trim()}</span>
+            {/* THE PANEL MENU ROW (v1.17.2): one dropdown + the active
+                tab's search. The nine-tab strip is GONE (phone-clipped). */}
+            <div className="flex shrink-0 flex-wrap items-center gap-1">
+              <div className="relative shrink-0">
+                <button data-testid="xenon-side-open"
+                  className="rounded bg-[#1d2b42] px-2.5 py-1 text-[11px] text-[#8fd4ff] hover:bg-[#27395c]"
+                  onClick={() => setPanelMenu(o => !o)}>
+                  ▤ {side[0]?.toUpperCase() + side.slice(1)} ▾
                 </button>
-              ))}
+                {panelMenu && (
+                  <div data-testid="xenon-side-menu"
+                    className="absolute left-0 top-8 z-[80] flex w-64 flex-col gap-0.5 rounded-lg
+                               border border-[#3a4a6a] bg-[#10141f] p-1.5 shadow-2xl">
+                    {([
+                      ['Data', [['vars', 'Vars'], ['bus', 'Bus'], ['world', 'World']] as const],
+                      ['Views', [['screens', 'Screens'], ['console', 'Console']] as const],
+                      ['Dev', [['library', 'Library'], ['autotest', 'Auto'], ['problems', 'Problems']] as const],
+                      ['Radio', [['beacons', 'Beacons']] as const],
+                    ] as const).map(([g, items]) => (
+                      <div key={g}>
+                        <div className="px-2 pt-1.5 text-[9px] uppercase tracking-widest text-[#5d6a7d]">{g}</div>
+                        {items.map(([k, lab]) => (
+                          <button key={k} data-testid={`xenon-side-${k}`}
+                            className={`w-full rounded px-2 py-1 text-left text-[11px] ${side === k
+                              ? 'bg-[#1d2b42] text-[#8fd4ff]' : 'text-[#aab8cf] hover:bg-[#182236]'}`}
+                            onClick={() => { setSide(k); setPanelMenu(false); }}>
+                            {lab}
+                            {k === 'vars' && (pump.vars.size || pump.locals.length
+                              ? ` (${pump.vars.size}${pump.locals.length ? ` + frame ${pump.locals.length}` : ''})` : '')}
+                            {k === 'screens' && (pump.surfaces.size ? ` (${pump.surfaces.size})` : '')}
+                            {k === 'library' && (funcs.length ? ` (+${funcs.length} own)` : '')}
+                            {k === 'world' && (pump.wsChannels().length ? ` (${pump.wsChannels().length})` : '')}
+                            {k === 'problems' && (analysis.length ? ` (${analysis.length})` : '')}
+                          </button>
+                        ))}
+                      </div>
+                    ))}
+                    {comp.craft && (
+                      <div>
+                        <div className="px-2 pt-1.5 text-[9px] uppercase tracking-widest text-[#5d6a7d]">Reset</div>
+                        <button data-testid="xenon-side-clear"
+                          className={`w-full rounded px-2 py-1 text-left text-[11px] ${wipeArm
+                            ? 'bg-[#4a1520] text-[#ff9d9d]' : 'text-[#ff9d9d]/90 hover:bg-[#4a1520]/40'}`}
+                          onClick={() => { if (wipeArm) { wipeStorage(); setPanelMenu(false); } else setWipeArm(true); }}>
+                          {wipeArm ? 'sure? clears this computer’s disk' : '🗑 Clear storage vars (this computer)'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
               <div className="min-w-0 flex-1">
                 {side === 'vars' && (
                   <input data-testid="xenon-var-search" value={varQ} placeholder="search names / values…"
@@ -1219,18 +1266,6 @@ export default function XenonDialog(p: {
                   <input data-testid="xenon-screen-search" value={scrQ} placeholder="search screen names…"
                     onChange={e => setScrQ(e.target.value)}
                     className="w-full rounded border border-[#2b3a52] bg-[#0b0f18] px-2 py-1 text-[11px] outline-none" />
-                )}
-                {side === 'vars' && comp.craft && (
-                  <button data-testid="xc-clear-storage"
-                    className={`shrink-0 rounded border border-[#3a2434] px-1.5 py-0.5 text-[10px]
-                      ${wipeArm ? 'bg-[#4a1520] text-[#ff9d9d]' : 'text-[#8b93a1] hover:bg-[#182236]'}`}
-                    title={wipeArm
-                      ? 'click again to confirm — the disk is cleared and the program re-boots fresh'
-                      : 'clear this computer\'s persistent storage vars (fresh disk + re-boot) — '
-                        + 'the escape hatch when a saved program state is wedged (a wiped ChipOS setup…)'}
-                    onClick={() => (wipeArm ? wipeStorage() : setWipeArm(true))}>
-                    {wipeArm ? 'sure?' : '🗑 storage'}
-                  </button>
                 )}
                 {side === 'library' && (
                   <span className="shrink-0 text-[9px] text-[#5d6a7d]">search inside the Library tab</span>
@@ -1563,7 +1598,8 @@ export default function XenonDialog(p: {
               one vertical chip per tab riding the viewport's right edge;
               a tap opens the drawer on that tab */}
           {narrow && !sideOpen && (
-            <div data-testid="xenon-side-rail" className="fixed right-0 top-1/4 z-40 flex flex-col gap-1">
+            <div data-testid="xenon-side-rail" className="fixed right-0 top-[25%] bottom-2 z-40 flex max-h-[70vh]
+                   flex-col gap-1 overflow-y-auto pr-[2px] [scrollbar-width:none]" title="side panel tabs">
               {([['vars', 'Vars'], ['screens', 'Screens'], ['library', 'Library'], ['world', 'World'],
                 ['bus', 'Bus'], ['autotest', 'Auto'], ['console', 'Console'],
                 ['beacons', 'Beacons'], ['problems', `Problems ${analysis.length || ''}`]] as const).map(([k, label]) => (

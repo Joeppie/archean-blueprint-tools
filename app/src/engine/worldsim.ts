@@ -113,6 +113,18 @@ export function slug(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 }
 
+/** THE CANONICAL SCREEN-KEY LAW v1.17.2 (we: "why is there a main screen,
+ *  element 09, but also one that has 640×800?"): the shim keys surfaces by
+ *  the LOWERCASED literal (spaces survive — "element 09#9"), the app
+ *  registers SLUGGED keys — the mismatch made the shim auto-create a
+ *  dev-seed twin at the program's virtual size beside the authored board.
+ *  Every screen key entering/leaving the app normalizes to
+ *  `slug(alias)#channel` — one key store, no twins. */
+export function normScreenKey(k: string): string {
+  const i = k.lastIndexOf('#');
+  return i < 0 ? slug(k) : `${slug(k.slice(0, i))}#${k.slice(i + 1)}`;
+}
+
 /** The worldsim NAME of a channel (predefined, program-addressable): the
  *  device's alias (or type) slugged + the channel function slugged. */
 /** The device-screen key of a BUILT-IN screen: `${slug}#0` with the SAME

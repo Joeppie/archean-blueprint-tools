@@ -51,6 +51,32 @@ export default function HudDialog(p: {
   const [tab, setTab] = useState(0);
   const [max, setMax] = useState(false);
   const [side, setSide] = useState<'vars' | 'beacons' | 'panels' | 'screen' | 'library' | 'problems'>('panels');
+  // THE PHONE RAIL + DRAWER (v1.17.2, we: "side panel problematic in
+  // computer. Same possible problem for hud?"): the computer IDE's
+  // v1.13.32 phone law ported — below 768 px the side panel collapses to
+  // an edge rail (scrollable, never spills the viewport) and opens as an
+  // overlay drawer; the code owns the full width.
+  const [narrow, setNarrow] = useState(() => window.innerWidth < 768);
+  const [sideOpen, setSideOpen] = useState(false);
+  // THE PANEL MENU (v1.17.2, the computer IDE law): grouped dropdown,
+  // no tab row.
+  const [panelMenu, setPanelMenu] = useState(false);
+  useEffect(() => {
+    if (!panelMenu) return;
+    const h = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest('[data-testid="hud-side-open"],[data-testid="hud-side-menu"],[data-testid="hud-side-rail"],[data-testid^="hud-rail-"]'))
+        setPanelMenu(false);
+    };
+    // THE PANEL MENU also closes the DRAWER's menu, not itself: the
+    // outside-close lives on the menu state; the drawer stays (spec law).
+    addEventListener('mousedown', h);
+    return () => removeEventListener('mousedown', h);
+  }, [panelMenu]);
+  useEffect(() => {
+    const h = () => setNarrow(window.innerWidth < 768);
+    addEventListener('resize', h);
+    return () => removeEventListener('resize', h);
+  }, []);
   // v1.16.13 THE ANALYZER RUNS ON HUD DISKS TOO (the user: "button_circle
   // doesn't seem to work, its not know, and there is no squiggle, this is
   // in the readme player HUD"): the player-HUD editor shares the CodeEditor
@@ -239,7 +265,7 @@ export default function HudDialog(p: {
         <span className="ml-auto hidden text-[10px] text-[#5d6a7d] md:inline">{MENU_HINT}</span>
       </div>
 
-      <div className={`flex min-h-0 flex-1 gap-2 overflow-hidden p-2${max ? '' : ''}`}>
+      <div className={`flex min-h-0 flex-1 gap-2 overflow-hidden p-2${narrow && !sideOpen ? ' pr-5' : ''}`}>
         {/* left: file tabs + the shared CodeEditor (the familiar environment:
             the very editor of the computer IDE — tabs, theme, completion,
             find/goto; the debugger gutters idle: no VM behind a HUD YET) */}
@@ -278,40 +304,56 @@ export default function HudDialog(p: {
           </div>
         </div>
 
-        {/* right: THE BEACONS tab — the global radio scope (the same panel
-            the computer IDE shows; beacons + HUD programs + your sends) */}
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-1.5">
-          <div className="flex shrink-0 flex-wrap items-center gap-1">
-            <button data-testid="hud-side-panels" onClick={() => setSide('panels')}
-              className="shrink-0 rounded px-2 py-1 text-[10px] tracking-wide hover:bg-[#182236]">
-              <span className={`rounded px-1 py-0.5 ${side === 'panels' ? 'bg-[#1d2b42] text-[#8fd4ff]' : 'text-[#7d8aa0]'}`}>
-                Panels {hudPumpRunning && hudPump.surfaces.length ? `(${hudPump.surfaces.length})` : ''}</span>
-            </button>
-            <button data-testid="hud-side-vars" onClick={() => setSide('vars')}
-              className="shrink-0 rounded px-2 py-1 text-[10px] tracking-wide hover:bg-[#182236]">
-              <span className={`rounded px-1 py-0.5 ${side === 'vars' ? 'bg-[#1d2b42] text-[#8fd4ff]' : 'text-[#7d8aa0]'}`}>
-                Vars {hudPumpRunning && hudPump.vars.length ? `(${hudPump.vars.length})` : ''}</span>
-            </button>
-            <button data-testid="hud-side-screen" onClick={() => setSide('screen')}
-              className="shrink-0 rounded px-2 py-1 text-[10px] tracking-wide hover:bg-[#182236]">
-              <span className={`rounded px-1 py-0.5 ${side === 'screen' ? 'bg-[#1d2b42] text-[#8fd4ff]' : 'text-[#7d8aa0]'}`}>
-                Screen</span>
-            </button>
-            <button data-testid="hud-side-library" onClick={() => setSide('library')}
-              className="shrink-0 rounded px-2 py-1 text-[10px] tracking-wide hover:bg-[#182236]">
-              <span className={`rounded px-1 py-0.5 ${side === 'library' ? 'bg-[#1d2b42] text-[#8fd4ff]' : 'text-[#7d8aa0]'}`}>
-                Library</span>
-            </button>
-            <button data-testid="hud-side-beacons" onClick={() => setSide('beacons')}
-              className="shrink-0 rounded px-2 py-1 text-[10px] tracking-wide hover:bg-[#182236]">
-              <span className={`rounded px-1 py-0.5 ${side === 'beacons' ? 'bg-[#1d2b42] text-[#8fd4ff]' : 'text-[#7d8aa0]'}`}>
-                Beacons</span>
-            </button>
-            <button data-testid="hud-side-problems" onClick={() => setSide('problems')}
-              className="shrink-0 rounded px-2 py-1 text-[10px] tracking-wide hover:bg-[#182236]">
-              <span className={`rounded px-1 py-0.5 ${side === 'problems' ? 'bg-[#1d2b42] text-[#8fd4ff]' : sevCounts.error ? 'text-[#ff9c9c]' : 'text-[#7d8aa0]'}`}>
-                Problems {analysis.length ? `(${analysis.length})` : ''}</span>
-            </button>
+        {/* right: THE SIDE PANEL — on phones it collapses to the edge rail
+            and opens as an OVERLAY DRAWER (v1.17.2, the computer IDE law) */}
+        <div className={narrow
+          ? (sideOpen
+            ? 'fixed left-2 right-2 top-11 bottom-2 z-50 flex flex-col gap-1.5 overflow-y-auto rounded-lg border border-[#3a4a6a] bg-[#10141f]/[.98] p-2 shadow-2xl'
+            : 'hidden')
+          : 'flex min-h-0 min-w-0 flex-1 flex-col gap-1.5'}>
+          {narrow && sideOpen && (
+            <div className="flex shrink-0 items-center justify-between">
+              <span className="text-[10px] uppercase tracking-widest text-[#5d6a7d]">HUD</span>
+              <button data-testid="hud-side-close" aria-label="collapse the panel"
+                className="rounded bg-[#33202a] px-2 py-0.5 text-[#ffb3b3] hover:bg-[#4a2836]"
+                onClick={() => setSideOpen(false)}>✕</button>
+            </div>
+          )}
+          {/* THE PANEL MENU (v1.17.2, the computer IDE law): one dropdown,
+              no tab row to clip or wrap */}
+          <div className="flex shrink-0 items-center gap-1">
+            <div className="relative">
+              <button data-testid="hud-side-open"
+                className="rounded bg-[#1d2b42] px-2.5 py-1 text-[11px] text-[#8fd4ff] hover:bg-[#27395c]"
+                onClick={() => setPanelMenu(o => !o)}>
+                ▤ {side[0]?.toUpperCase() + side.slice(1)} ▾
+              </button>
+              {panelMenu && (
+                <div data-testid="hud-side-menu"
+                  className="absolute left-0 top-8 z-[80] flex w-56 flex-col gap-0.5 rounded-lg
+                             border border-[#3a4a6a] bg-[#10141f] p-1.5 shadow-2xl">
+                  {([['Views', [['panels', 'Panels'], ['screen', 'Screen']] as const],
+                    ['Data', [['vars', 'Vars']] as const],
+                    ['Dev', [['library', 'Library'], ['problems', 'Problems']] as const],
+                    ['Radio', [['beacons', 'Beacons']] as const]] as const).map(([g, items]) => (
+                    <div key={g}>
+                      <div className="px-2 pt-1.5 text-[9px] uppercase tracking-widest text-[#5d6a7d]">{g}</div>
+                      {items.map(([k, lab]) => (
+                        <button key={k} data-testid={`hud-side-${k}`}
+                          className={`w-full rounded px-2 py-1 text-left text-[11px] ${side === k
+                            ? 'bg-[#1d2b42] text-[#8fd4ff]' : 'text-[#aab8cf] hover:bg-[#182236]'}`}
+                          onClick={() => { setSide(k); setPanelMenu(false); }}>
+                          {lab}
+                          {k === 'panels' && (hudPumpRunning && hudPump.surfaces.length ? ` (${hudPump.surfaces.length})` : '')}
+                          {k === 'vars' && (hudPumpRunning && hudPump.vars.length ? ` (${hudPump.vars.length})` : '')}
+                          {k === 'problems' && (analysis.length ? ` (${analysis.length})` : '')}
+                        </button>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
           <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto">
             {hudPumpVersion.error && (
@@ -384,6 +426,27 @@ export default function HudDialog(p: {
             {side === 'beacons' && <BeaconPanel />}
           </div>
         </div>
+
+        {/* THE PHONE EDGE RAIL (v1.17.2): one vertical chip per tab riding
+            the viewport's right edge; a tap opens the drawer on that tab.
+            Scrollable top→bottom — nine chips must never spill the phone
+            viewport (the computer rail's first cut started at 1/4 height
+            and buried Library/Beacons/Problems below the fold). */}
+        {narrow && !sideOpen && (
+          <div data-testid="hud-side-rail" className="fixed right-0 top-[25%] bottom-2 z-40 flex max-h-[70vh]
+                 flex-col gap-1 overflow-y-auto pr-[2px] [scrollbar-width:none]">
+            {([['panels', 'Panels'], ['vars', 'Vars'], ['screen', 'Screen'],
+              ['library', 'Library'], ['beacons', 'Beacons'],
+              ['problems', `Problems ${analysis.length || ''}`]] as const).map(([k, label]) => (
+              <button key={k} data-testid={`hud-rail-${k}`}
+                className="rotate-180 rounded-l border border-r-0 border-[#3a4a6a] bg-[#1d2b42] px-[3px] py-2
+                       text-[9px] tracking-wide text-[#8fd4ff] [writing-mode:vertical-rl] hover:bg-[#27395c]"
+                onClick={() => { setSide(k as typeof side); setSideOpen(true); }}>
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </FloatingWindow>
   );

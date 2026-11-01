@@ -6022,3 +6022,75 @@ tab) plus the CRAFT-WIDE row in the Xenon ▾ menu — every pump
 clearStorage()s (persistence disarmed for the teardown), then every
 `${craft}#*` record drops; pinned by storage.spec's fifth leg (count 2 →
 wipe → 1 → reload → 1).
+
+## 38b. THE CANONICAL SCREEN-KEY LAW + THE FEED-MERGE LAW (we: "testing
+## chipOS, but also mario, when I went into actual screens, the model ones
+## stopped working. Also I do NOT WANT copies of screens with wrong
+## resolutions? Why is there a main screen, element 09, but also one that
+## has 640×800?"; 2026-11-02)
+TWO structural bugs, one symptom family. (1) THE FEED-MERGE: every binder
+of the 3-D screen feeds (boot farm, IDE open, Screens-dock open) called
+setScreenFeeds, which REPLACED the global map with the one computer's
+entries; worse, the dashboard rebuild SPLICES compRoots (a second pass
+over the same board has no roots left to rebuild) — opening ANY IDE
+cleared every live DataTexture and rebuilt nothing: "the model ones
+stopped working". FIX: addScreenFeeds (binders ADD) + setScreenFeeds
+rebuilds ONLY boards whose feed keys CHANGED (dashOwner: key → ci).
+Probe: dashScreens 8 → 8 across dock + IDE opens (was 8 → 0).
+(2) THE KEY MISMATCH: the shim keys surfaces by the lowercased literal
+("element 09#9" keeps its space) while the app registers SLUGGED keys
+(element_09#9) — every mismatched token made the shim auto-create a
+dev-seed twin at the program's virtual size (640×800): the authored cell
+sat black beside a "copy with the wrong resolution". FIX: every app key
+normalizes to slug(alias)#channel (normScreenKey at the pump surfaces/
+canvases/feedKeys ingress, setScreenFeeds, dock); the worker's setKeys
+carries the RAW variants via a rawKey bridge (the shim knows only its own
+literals — the first cut fed normalized keys to the worker and NOTHING
+painted, caught by the live ChipOS probe). ChipOS 3828773626 census: 8
+boards painted at the authored 300×300, zero twins.
+
+## 39. THE FINDABILITY LAW — the command index (we: "that needs scrolling.
+## No menu. … There should be a menu item somewhere for each fucking
+## button, and it should be correctly organized, and searchable, findable.
+## even for the main editor, at top level. Help/Flight/wind/wire take a lot
+## of space imo"; 2026-11-02)
+The phone screenshots named the disease: nine-tab strips clipped at the
+viewport edge, a 🗑 floating in a strip, resets findable only where they
+were first bolted. LANDED: (1) THE COMMAND PALETTE (CommandPalette.tsx):
+Ctrl/Cmd+K, the 🔍, File ▸ Search… — every mode, view toggle, dock, tool,
+computer/HUD window and reset (per-computer wipes included) in one
+grouped, searchable box; (2) THE PANEL MENU: the computer + HUD IDE side
+tab strips became ONE dropdown each (Data / Views / Dev / Radio / Reset),
+rail chips open the drawer on a tab directly (phone); the rails are
+scrollable top→bottom strips (the first cut stacked nine vertical chips
+from top-1/4 — the bottom ones spilled the 915-px viewport); (3) the HUD
+IDE got the full phone rail+drawer law it never had; (4) the craft wipe
+now rides BOTH File ▾ and Tools ▾. Spec flow: e2e/sidepanel.js openSide()
+helper (desktop dropdown / phone rail, per-window nth). The mode-bar
+grouping (Flight/Wind space on phones) is NOT landed — hiding the tiles
+breaks the [pixel7] matrix (mode-* clicked by many mobile-run specs);
+parked as a follow-up with the test audit it needs.
+
+## 40. THE SYMBOL LAW + INFORMATIVE VIEWS + CONTENT FIT (we: "the propellor
+## blades are TOO DETAILED … keep the outside vertices only … Same issue
+## with seat/cockpit … For wheels its OK to keep as is … automatically
+## select which 2 schematics make sense … some craft refuse to properly
+## fit, like the united airliner … move things more out of the way, around
+## the diagram — RCS infinity is not understandable"; 2026-11-02)
+The wireframe plate proved the user's instinct: detail reads beautifully
+on STRUCTURE (boxes, planform) and drowns everything else (a prop SDF is
+20 000 near-coplanar facets; the RCS Infinity sheet was a label pile).
+FOUR laws, one architecture — an engineering drawing symbols its parts:
+(1) THE SYMBOL LAW: actors leave the mesh census; each draws a dashed
+collider box + a type GLYPH oriented by its projected world axis
+(schematicsymbols.ts, 20 glyph families, @symbols pinned) — the sheet
+went 4.3 MB → 0.5 MB on Mario and the seat finally READS as a seat.
+(2) THE DENSE-MESH RULE for structure meshes > 800 tris: silhouette ring
++ hard creases only. (3) THE INFORMATIVE-VIEW LAW: views auto-select —
+primary = the two biggest extents' pair, secondary = biggest+smallest,
+the third joins when smallest ≥ 55 % of middle (the plane and the
+airliner ship TOP+FRONT; Mario's compact volume keeps all three).
+(4) THE CONTENT-FIT LAW: scale/centring from projected content extents
+(the airliner's parts outgrow the file box — its sheet no longer spills
+into the clip). Plus THE MARGIN LAW: actor labels claim ellipse-ring
+slots around the content, actors first, leaders keep the link.

@@ -38,7 +38,8 @@ import { droppedParts, unityBake } from './models';
 import { buildAtlasPreview } from './thumbs';
 import { envIntensity, nodeMaterialSpec, pbr, srgbHexToLinear, type PbrSpec } from './materials';
 import { propellerSurface, type PropellerData } from './propeller';
-import { wsDeviceSlug } from './worldsim';
+import { normScreenKey, wsDeviceSlug } from './worldsim';
+import { symbolFor } from './schematicsymbols';
 
 /** The generated propeller blade's material: the client raytraces it as a
  *  neutral NON-metallic grey — `ReverseGamma(vec3(0.5))` in the shader, i.e.
@@ -314,6 +315,12 @@ export class Engine {
   // rebuilds only dashScreens, and clearing both is what left the model
   // face un-fed when the IDE opened after scene load
   private deviceScreens = new Map<string, { mat: MeshBasicMaterial; tex: DataTexture; w: number; h: number; mesh: Mesh }>();
+  // THE FEED-MERGE LAW (v1.17.2): which dashboard ci owns which
+  // dashScreens key — a rebind rebuilds ONLY the boards whose feed set
+  // CHANGED (a full clear+rebuild splices compRoots dry, and the second
+  // pass had nothing to rebuild: "when I went into actual screens, the
+  // model ones stopped working").
+  private dashOwner = new Map<string, number>();
   // ── v1.15.6 THE LIVING-CRAFT LAYER (engine/devicesim.ts + engine/power.ts)
   /** PRESSABLE dashboard element boxes (we: "button presses onto dashboards
    *  and screens should actually work on the 3d model"): key `ci:ch` → the
@@ -2366,7 +2373,7 @@ void main() {
         dt.needsUpdate = true;
         const bm = new MeshBasicMaterial({ map: dt });
         const entry = { mat: bm, tex: dt, w, h };
-        for (const fk of feedKeys) this.dashScreens.set(fk, entry);
+        for (const fk of feedKeys) { this.dashScreens.set(fk, entry); this.dashOwner.set(fk, ci); }
         face = bm;
       }
       const m = new Mesh(new BoxGeometry(ew, eh, 0.01),
@@ -3039,7 +3046,7 @@ void main() {
       for (const root of roots) root.traverse(o => partOf.set(o, ci));
     });
     interface Tri { v: [number, number, number, number, number, number, number, number, number];
-      n: [number, number, number]; cls: 0 | 1 | 2; ci: number }
+      n: [number, number, number]; cls: 0 | 1 | 2; ci: number; dense: boolean }
     const tris: Tri[] = [];
     const vA = new Vector3(), vB = new Vector3(), vC = new Vector3(), e1 = new Vector3(), e2 = new Vector3();
     for (const g of [this.root, this.hingeGroup, this.subGroup]) {
@@ -3065,8 +3072,20 @@ void main() {
         const n = idx ? idx.count : pos.count;
         const actorCi = actorOf.get(o);
         const partCi = partOf.get(o);
-        const cls: 0 | 1 | 2 = actorCi !== undefined ? 2 : partCi !== undefined ? 1 : 0;
+        // THE SYMBOL LAW (v1.17.2): ACTOR parts leave the mesh census
+        // entirely — they are drawn as collider box + type glyph (a
+        // propeller's sweep circle says more than its 20k-triangle mesh).
+        if (actorCi !== undefined) return;
+        const cls: 0 | 1 | 2 = partCi !== undefined ? 1 : 0;
         const mtx = m.matrixWorld;
+        // THE DENSE-MESH RULE (v1.17.2, we: "the propellor blades are TOO
+        // DETAILED … keep the outside vertices only of complex geometry —
+        // it kills performance on its SVGs"): a mesh over ~800 triangles
+        // (generated prop SDFs, high-poly models, the grid grilles) is
+        // DENSE — its SVG contribution is the SILHOUETTE RING + hard
+        // creases (≥ 35°); its gentle-facet interior and sub-pixel
+        // triangles are census-dropped.
+        const dense = (idx ? idx.count : pos.count) / 3 > 800;
         const limit = Math.min(n, MESH_CAP * 3);
         for (let i = 0; i + 2 < limit; i += 3) {
           const j0 = idx ? idx.getX(i) : i, j1 = idx ? idx.getX(i + 1) : i + 1, j2 = idx ? idx.getX(i + 2) : i + 2;
@@ -3078,7 +3097,7 @@ void main() {
           const len = Math.hypot(nx, ny, nz);
           if (len < 1e-9) continue;                        // degenerate: no face
           tris.push({ v: [vA.x, vA.y, vA.z, vB.x, vB.y, vB.z, vC.x, vC.y, vC.z],
-            n: [nx / len, ny / len, nz / len], cls, ci: actorCi ?? partCi ?? -1 });
+            n: [nx / len, ny / len, nz / len], cls, ci: actorCi ?? partCi ?? -1, dense });
         }
       });
     }
@@ -3104,32 +3123,70 @@ void main() {
     // THE THREE-VIEW LAW: one shared px/m for the whole sheet — the trio
     // reads as ONE engineering drawing (per-view stretching is a LIE).
     const S3 = new Vector3(Math.max(0.5, S.x), Math.max(0.5, S.y), Math.max(0.5, S.z));
-    const scale = Math.min((PW - 2 * PAD) / S3.x, (PH - 2 * PAD) / S3.y,
-      (PW - 2 * PAD) / S3.z, (PH - 2 * PAD - 10) / S3.y);
-    // view = (u, v) axes + the facing test (the camera looks ALONG −axis
-    // from +side: TOP from +y, FRONT from −z, SIDE from +x) + the far-to-
-    // near painter order along the depth axis.
+    // THE INFORMATIVE-VIEW LAW (v1.17.2, we: "craft are usually elongated
+    // in one direction. So top and side is almost certainly sensible. But
+    // a small craft, yeah it can have all three"): rank the extents — the
+    // PRIMARY view pairs the two biggest axes, the SECONDARY pairs the
+    // biggest with the smallest; the third view joins only when the
+    // smallest extent is ≥ 55 % of the middle one (compact crafts keep
+    // the full trio).
+    const VIEW_BY_AXES: Record<string, { title: string; axis: 'xy' | 'zy' | 'xz' }> = {
+      xy: { title: 'FRONT (nose −z)', axis: 'xy' },
+      yz: { title: 'SIDE (starboard, nose right)', axis: 'zy' },
+      xz: { title: 'TOPSIDE (nose up)', axis: 'xz' },
+    };
+    const ext: Record<string, number> = { x: S3.x, y: S3.y, z: S3.z };
+    const axk = (['x', 'y', 'z'] as string[]).sort((p, q) => ext[q]! - ext[p]!);
+    const pairKey = (p: string, q: string) => [p, q].sort().join('');
     const views: { title: string; axis: 'xy' | 'zy' | 'xz' }[] = [
-      { title: 'FRONT (nose −z)', axis: 'xy' },
-      { title: 'SIDE (starboard, nose right)', axis: 'zy' },
-      { title: 'TOPSIDE (nose up)', axis: 'xz' },
+      VIEW_BY_AXES[pairKey(axk[0]!, axk[1]!)]!,
+      VIEW_BY_AXES[pairKey(axk[0]!, axk[2]!)]!,
     ];
+    if (ext[axk[2]!]! / Math.max(0.3, ext[axk[1]!]!) >= 0.55)
+      views.push(VIEW_BY_AXES[pairKey(axk[1]!, axk[2]!)]!);
+    // THE CONTENT-FIT LAW (v1.17.2, we: "some craft refuse to properly
+    // fit, like the united airliner"): per-view extents measured from the
+    // PROJECTED CONTENT (census vertices + the file box as a floor), one
+    // isotropic px/m across the sheet — a craft whose parts outgrow the
+    // file box no longer spills its panel into the clip.
+    const projUV = (axis: string, x: number, y: number, z: number): [number, number] =>
+      axis === 'xy' ? [x, -y] : axis === 'zy' ? [-z, -y] : [x, z];
+    const extents = views.map(vw => {
+      let u0 = 1e9, u1 = -1e9, w0 = 1e9, w1 = -1e9;
+      const add = (x: number, y: number, z: number) => {
+        const [u, w] = projUV(vw.axis, x, y, z);
+        if (u < u0) u0 = u; if (u > u1) u1 = u;
+        if (w < w0) w0 = w; if (w > w1) w1 = w;
+      };
+      for (const t of tris)
+        for (let k = 0; k < 3; k++) add(t.v[k * 3]!, t.v[k * 3 + 1]!, t.v[k * 3 + 2]!);
+      for (const x of [box.min.x, box.max.x])
+        for (const y of [box.min.y, box.max.y])
+          for (const z of [box.min.z, box.max.z]) add(x, y, z);
+      return { u0, u1, w0, w1 };
+    });
+    const scale = Math.min(...extents.map(e => Math.min(
+      (PW - 2 * PAD) / Math.max(0.5, e.u1 - e.u0),
+      (PH - 2 * PAD - 10) / Math.max(0.5, e.w1 - e.w0))));
     const g2 = document.createElement('canvas').getContext('2d')!;
     const panels = views.map((view, vi) => {
       const U = (p: { x: number; y: number; z: number }) =>
         view.axis === 'xy' ? p.x : view.axis === 'zy' ? -p.z : p.x;
       const V = (p: { x: number; y: number; z: number }) =>
         view.axis === 'xy' ? -p.y : view.axis === 'zy' ? -p.y : p.z;
-      const uMin = view.axis === 'xy' ? C.x : view.axis === 'zy' ? -C.z - S.z : C.x;
-      const vMin = view.axis === 'xy' ? -C.y - S.y : view.axis === 'zy' ? -C.y - S.y : C.z;
-      const extU = view.axis === 'xy' ? S3.x : view.axis === 'zy' ? S3.z : S3.x;
-      // THE VERTICAL EXTENT PER VIEW: elevations stand on the height, the
-      // TOPSIDE planform spans the LENGTH (v = z) — one frame fit made the
-      // top panel overflow its sheet.
-      const extV = view.axis === 'xz' ? S3.z : S3.y;
+      // THE CONTENT-FIT LAW: this view's frame comes from its projected
+      // content extents (measured above), centred in the panel.
+      const e0 = extents[vi]!;
+      const uMin = e0.u0, vMin = e0.w0, extU = e0.u1 - e0.u0, extV = e0.w1 - e0.w0;
       const ox = vi * (PW + GAP) + PAD + (PW - 2 * PAD - extU * scale) / 2 - uMin * scale;
       const oy = PAD + 26 + (PH - 2 * PAD - 10 - extV * scale) / 2 - vMin * scale;
       const px = (u: number, v: number) => ({ x: ox + u * scale, y: oy + v * scale });
+      // THE MARGIN LAW (v1.17.2, we: "schematics should try to move things
+      // more out of the way, around the diagram to avoid making it
+      // unreadable — RCS Infinity is not understandable"): actor labels
+      // are pushed OUTWARD from the ship's centre along spokes (spread
+      // perpendicular, clamped to the sheet) — the annotations ring the
+      // drawing like a parts list, they do not pile on the vehicle.
       // facing axis + sign: FRONT keeps −z normals, SIDE +x, TOP +y; the
       // painter emits FAR first (FRONT far = +z, SIDE far = −x… camera at
       // +x means far = LOW x; TOP camera +y, far = LOW y).
@@ -3150,7 +3207,7 @@ void main() {
       // Every vertex welds at 0.1 px, so a cube emits its 12 silhouette
       // edges, not 36 triangle sides — half the SVG of the triangle cut.
       interface Face { v: [number, number, number]; p0: [number, number, number];
-        n: [number, number, number]; cls: 0 | 1 | 2; ci: number; facing: boolean }
+        n: [number, number, number]; cls: 0 | 1 | 2; ci: number; facing: boolean; dense: boolean }
       const faces: Face[] = [];
       const vid = new Map<string, number>();
       const vpt: number[] = [];
@@ -3159,7 +3216,7 @@ void main() {
         pa.set(x0, y0, z0); pb.set(x1, y1, z1); pc.set(x2, y2, z2);
         const a = px(U(pa), V(pa)), b2 = px(U(pb), V(pb)), c2 = px(U(pc), V(pc));
         const area = Math.abs((b2.x - a.x) * (c2.y - a.y) - (c2.x - a.x) * (b2.y - a.y)) / 2;
-        if (area < MIN_AREA) continue;                     // sliver: no information
+        if (area < (t.dense ? 0.35 : MIN_AREA)) continue;  // sliver / dense facet
         const wv = (p: { x: number; y: number }): number => {
           const k = `${Math.round(p.x * 10)},${Math.round(p.y * 10)}`;
           let id = vid.get(k);
@@ -3168,7 +3225,7 @@ void main() {
         };
         faces.push({ v: [wv(a), wv(b2), wv(c2)],
           p0: [(x0 + x1 + x2) / 3, (y0 + y1 + y2) / 3, (z0 + z1 + z2) / 3],
-          n: t.n, cls: t.cls, ci: t.ci, facing: faceN(t) > 0 });
+          n: t.n, cls: t.cls, ci: t.ci, facing: faceN(t) > 0, dense: t.dense });
       }
       interface Ed { a: number; b: number; f: number[]; cls: 0 | 1 | 2; ci: number }
       const edges = new Map<string, Ed>();
@@ -3202,11 +3259,17 @@ void main() {
         else if (facing === 2) {
           const n1 = fA.n, n2 = fB.n;
           const d = Math.abs(n1[0] * n2[0] + n1[1] * n2[1] + n1[2] * n2[2]);
-          if (d > COP) {
+          // DENSE pair (generated props, high-poly models): only HARD
+          // creases (≥ ~35°) survive — the blade's facet interior is
+          // curvature detail the silhouette ring already owns (we: "keep
+          // the outside vertices only of complex geometry").
+          const smooth = fA.dense && fB.dense ? 0.819 : COP;
+          if (d > smooth) {
             // coplanar pair → the seam a fill would swallow: NOT DRAWN
             const off = Math.abs((fB.p0[0] - fA.p0[0]) * n1[0]
               + (fB.p0[1] - fA.p0[1]) * n1[1] + (fB.p0[2] - fA.p0[2]) * n1[2]);
             if (off < 0.004) continue;
+            if (fA.dense && fB.dense) continue;           // dense gentle fold: the ring owns it
             // THE SMOOTH-SHELL GATE (v1.17.2, "limit SVG complexity"):
             // an ACTOR's gentle folds (< 25° — speaker cones, seat bowls)
             // are curvature, not geometry: the silhouette carries the
@@ -3264,6 +3327,44 @@ void main() {
         emitG(slot.sil, `fill="none" stroke="${c}" stroke-opacity="0.95" stroke-width="1.6"`);
         emitG(slot.cre, `fill="none" stroke="${c}" stroke-opacity="0.55" stroke-width="0.9"`);
       });
+      // THE SYMBOL LAW: every ACTOR draws as its collider box (dashed —
+      // exact placement, the drawing idiom) + its type GLYPH, oriented by
+      // the part's projected world axis (schematicsymbols.ts). The actor
+      // mesh is out of the census — a propeller is its sweep circle, a
+      // seat its profile: more recognizable, at ~20 strokes.
+      {
+        const symByColor = new Map<string, string[]>();
+        for (const a of opts.actors) {
+          const b = partBoxes.get(a.ci);
+          if (!b) continue;
+          const mid = { x: (b.min.x + b.max.x) / 2, y: (b.min.y + b.max.y) / 2, z: (b.min.z + b.max.z) / 2 };
+          const cc = px(U(mid), V(mid));
+          const col = actColor.get(a.ci) ?? '#ffd98a';
+          let ang = 0;
+          const roots = this.compRoots.get(a.ci);
+          if (roots?.[0]) {
+            const q = new Quaternion();
+            roots[0].getWorldQuaternion(q);
+            const d = new Vector3(0, 1, 0).applyQuaternion(q);
+            const t = { x: mid.x + d.x, y: mid.y + d.y, z: mid.z + d.z };
+            const c2 = px(U(t), V(t));
+            ang = Math.atan2(c2.y - cc.y, c2.x - cc.x);
+          }
+          let u0 = 1e9, u1 = -1e9, v0 = 1e9, v1 = -1e9;
+          for (const x of [b.min.x, b.max.x]) for (const y of [b.min.y, b.max.y]) for (const z of [b.min.z, b.max.z]) {
+            const p = px(U({ x, y, z }), V({ x, y, z }));
+            if (p.x < u0) u0 = p.x; if (p.x > u1) u1 = p.x;
+            if (p.y < v0) v0 = p.y; if (p.y > v1) v1 = p.y;
+          }
+          const box = `<rect x="${u0.toFixed(1)}" y="${v0.toFixed(1)}" width="${(u1 - u0).toFixed(1)}"` +
+            ` height="${(v1 - v0).toFixed(1)}" stroke-dasharray="4 3" stroke-opacity="0.5"/>`;
+          const list = symByColor.get(col) ?? [];
+          list.push(box + symbolFor(this.bp!.data.components[a.ci]?.type ?? '')(cc.x, cc.y, scale, ang));
+          symByColor.set(col, list);
+        }
+        symByColor.forEach((paths, col) =>
+          out.push(`<g fill="none" stroke="${col}" stroke-width="1.3" stroke-opacity="0.95">${paths.join('')}</g>`));
+      }
       // cables — THE CONNECTION-COLOUR LAW v1.17.2 (we: "schematics should
       // let us know which connections go to which things … pick a single
       // color and then show all connections to that thing with that
@@ -3271,7 +3372,7 @@ void main() {
       // colour of its ACTOR endpoint (the earlier one in the picking
       // order when both ends are actors), endpoint dots and io tags wear
       // it too — the wire is the device's, the colour says whose.
-      const labelItems: { s: { x: number; y: number }; text: string; font: string; color?: string }[] = [];
+      const labelItems: { s: { x: number; y: number }; text: string; font: string; color?: string; out?: boolean }[] = [];
       for (const r of runs) {
         const pts = r.pts.map(p => px(U(p), V(p)));
         out.push(`<polyline points="${pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')}"` +
@@ -3289,8 +3390,10 @@ void main() {
         if (!b) return;
         const mid = { x: (b.min.x + b.max.x) / 2, y: (b.min.y + b.max.y) / 2, z: (b.min.z + b.max.z) / 2 };
         labelItems.push({ s: px(U(mid), V(mid)), text: a.tag,
-          font: 'bold 13px ui-sans-serif, system-ui', color: actColor.get(a.ci) });
+          font: 'bold 13px ui-sans-serif, system-ui', color: actColor.get(a.ci), out: true });
       });
+      // actors claim their margin slots FIRST (cable tags fill the rest)
+      labelItems.sort((a, b) => (b.out ? 1 : 0) - (a.out ? 1 : 0));
       const placed: { x: number; y: number; w: number; h: number }[] = [];
       const fits = (bb: { x: number; y: number; w: number; h: number }) =>
         bb.x >= vi * (PW + GAP) + 2 && bb.x + bb.w <= vi * (PW + GAP) + PW - 2 &&
@@ -3302,10 +3405,26 @@ void main() {
         g2.font = it.font;
         const tw = g2.measureText(it.text).width;
         const bw = tw + 10, bh = it.font.startsWith('bold') ? 17 : 14;
-        const offs: [number, number][] = [[12, -20], [12, 6], [12, 32],
+        // MARGIN candidates (out:true): an ellipse ring around the ship
+        // at growing radii, base spoke angle + spread steps — the label
+        // travels to the sheet's clear space, its leader line keeps the
+        // link (we: "move things more out of the way, around the diagram";
+        // the RCS Infinity pile-up). Local ring offsets remain the
+        // fallback (cable tags use only these).
+        const offs: [number, number][] = [];
+        if (it.out) {
+          const cP = { x: vi * (PW + GAP) + PW / 2, y: PH / 2 };
+          const rx = extU * scale / 2 + 44, ry = extV * scale / 2 + 32;
+          const a0 = Math.atan2(it.s.y - cP.y, it.s.x - cP.x);
+          for (const k of [1.04, 1.24, 1.46])
+            for (const da of [0, 0.24, -0.24, 0.5, -0.5, 0.78, -0.78, 1.1, -1.1, 1.5, -1.5, 1.95, -1.95, Math.PI])
+              offs.push([cP.x - it.s.x + Math.cos(a0 + da) * rx * k,
+                cP.y - it.s.y + Math.sin(a0 + da) * ry * k - bh / 2]);
+        }
+        offs.push([12, -20], [12, 6], [12, 32],
           [-bw - 18, -20], [-bw - 18, 6], [-bw - 18, 32],
           [12, -48], [12, 60], [-bw - 18, -48], [-bw - 18, 60],
-          [30, -76], [30, 88], [-bw - 36, -76], [-bw - 36, 88]];
+          [30, -76], [30, 88], [-bw - 36, -76], [-bw - 36, 88]);
         let b2: { x: number; y: number; w: number; h: number } | null = null;
         for (const [dx, dy] of offs) {
           const cand = { x: it.s.x + dx, y: it.s.y + dy, w: bw, h: bh };
@@ -4523,24 +4642,66 @@ void main() {
    *  computer's screen bindings: key = the surface key `alias#channel`).
    *  Rebuilds the Dashboard components' real models so the Screen/HdScreen
    *  faces gain their DataTextures; feeds survive scene reloads. */
+  /** THE FARM FEED-MERGE LAW (v1.17.2, we: "when I went into actual
+   *  screens, the model ones stopped working"): a later binder — opening
+   *  one computer's IDE (XenonDialog) or the Screens dock — must ADD its
+   *  feeds, NEVER replace the global map. The farm co-runs MULTIPLE
+   *  computers (v1.15.0 slice C); a single-comp replace unbound every
+   *  OTHER computer's model faces, and the pumps' per-cycle
+   *  setFeedKeys(screenFeedKeys()) starved them. ChipOS (4 computers)
+   *  was the reporter. */
+  addScreenFeeds(feeds: { key: string; ci: number; channel: number }[]): void {
+    const all: { key: string; ci: number; channel: number }[] = [];
+    const have = new Set<string>();
+    for (const [k, keys] of this.screenFeeds) {
+      const ci = +k.slice(0, k.indexOf(':'));
+      const channel = +k.slice(k.indexOf(':') + 1);
+      for (const key of keys) {
+        all.push({ key, ci, channel });
+        have.add(`${ci}:${channel}:${key}`);
+      }
+    }
+    for (const f of feeds)
+      if (!have.has(`${f.ci}:${f.channel}:${f.key}`)) all.push(f);
+    this.setScreenFeeds(all);
+  }
   setScreenFeeds(feeds: { key: string; ci: number; channel: number }[]): void {
     // v1.16.11 THE NET-SCREEN LAW: MULTIPLE keys per element (alias + io
     // tokens) — the program picks alias- or number-addressing at runtime;
     // pushScreen by ANY of the element's keys lands on its shared texture.
-    this.screenFeeds = new Map();
+    const prev = this.screenFeeds;
+    const next = new Map<string, string[]>();
     for (const f of feeds) {
       const k = `${f.ci}:${f.channel}`;
-      const arr = this.screenFeeds.get(k) ?? [];
-      if (!arr.includes(f.key)) arr.push(f.key);
-      this.screenFeeds.set(k, arr);
+      const key = normScreenKey(f.key);
+      const arr = next.get(k) ?? [];
+      if (!arr.includes(key)) arr.push(key);
+      next.set(k, arr);
     }
-    for (const e of this.dashScreens.values()) e.tex.dispose();
-    this.dashScreens.clear();
+    this.screenFeeds = next;
+    // CHANGED SET (v1.17.2 FEED-MERGE LAW): a board is rebuilt only when
+    // its feed keys MOVED. The rebuild splices compRoots (a second pass
+    // over an UNCHANGED board has no roots left to rebuild — it would
+    // clear the live DataTextures and leave dead faces).
+    const changed = new Set<number>();
+    const ciOf = (k: string) => +k.slice(0, k.indexOf(':'));
+    for (const [k, keys] of next) {
+      const p = prev.get(k);
+      if (!p || p.join('|') !== keys.join('|')) changed.add(ciOf(k));
+    }
+    for (const k of prev.keys()) if (!next.has(k)) changed.add(ciOf(k));
+    for (const [key, e] of [...this.dashScreens])
+      if (changed.has(this.dashOwner.get(key) ?? -2)) {
+        e.tex.dispose();
+        this.dashScreens.delete(key);
+        this.dashOwner.delete(key);
+      }
     const atlas = this.atlasRef;
     const bp = this.bp;
     if (!atlas || !bp) { this.invalidate(); return; }
     bp.data.components.forEach((c, ci) => {
       if (c.type !== 'Dashboard') return;
+      if (!changed.has(ci)) return;
       if (![...this.screenFeeds.keys()].some(k => k.startsWith(`${ci}:`))) return;
       const roots = this.compRoots.get(ci);
       const model = this.liveGeo.get(c.type);

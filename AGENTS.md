@@ -225,6 +225,21 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   bottom clear-zone.
 - ONE CONCEPT = ONE WORD in the UI; one n-state control beats a 2×2 flip; a
   refusal is never a dead end (`ToolDef.fix` ⚖ repair).
+- THE FINDABILITY LAW (v1.17.2, we: "There should be a menu item somewhere
+  for each fucking button, and it should be correctly organized, and
+  searchable, findable. even for the main editor, at top level"): the
+  COMMAND PALETTE (`CommandPalette.tsx`, Ctrl/Cmd+K, the 🔍, File ▸
+  Search…) indexes EVERY command — modes, view toggles, docks, tools,
+  computers/HUDs, per-computer + craft-wide RESETS — grouped and
+  searchable. Side panels are ONE grouped dropdown (`xenon-side-open` /
+  `hud-side-open` → Data/Views/Dev/Radio/Reset), NEVER a tab strip that
+  clips or scrolls sideways; phone edge rails are scrollable strips
+  (`top-2 bottom-2 overflow-y-auto`) — vertical chips stacked from
+  top-1/4 spill the viewport. Destructive resets live in menus (File ▾
+  AND Tools ▾ carry the craft wipe; the IDE title toolbar + panel menu
+  carry the per-computer one) — an icon floating in a strip is NOT a
+  home. e2e flow: `e2e/sidepanel.ts` openSide() (desktop dropdown /
+  phone rail, per-window nth).
 - UNIFORM MIRROR RULE: every edit on a selected item ALWAYS drives its
   mirror twin in mirrored unison (blocks: cells/sizes/shapes/paint/material/
   delete; parts: positions/rotations/paint/joints/delete; prisms: shift =
@@ -448,10 +463,27 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   should be more zoomable … it would be really nice if it was SVG and you
   could zoom in on like with mermaid diagrams"): the plate is NOT a
   generic overview — ONE SVG sheet (analysisShots returns {svg}) holding
-  the FRONT / SIDE (starboard) / TOPSIDE trio at ONE shared px/m, rendered
+  AUTO-SELECTED views at ONE shared px/m, rendered
   through the SAME DiagramView as the mermaid diagrams (zoom to 600 %),
-  panel-clipped to the FILE box (stray GAME-hull prisms never spill a
-  panel). THE SILHOUETTE LAW (we, same day, on the bbox first cut: "the
+  panel-clipped to the measured sheet (stray GAME-hull prisms never
+  spill a panel). THE INFORMATIVE-VIEW LAW (v1.17.2, we: "craft are
+  usually elongated in one direction, so top and side is almost certainly
+  sensible; a small craft can have all three"): rank the extents —
+  primary view pairs the two BIGGEST axes, secondary the biggest with
+  the smallest; the third joins only when smallest ≥ 55 % of the middle.
+  THE CONTENT-FIT LAW (we: "some craft refuse to properly fit, like the
+  united airliner"): per-view scale/centring from PROJECTED CONTENT
+  extents (file box as floor), not the file box alone. THE SYMBOL LAW
+  (we: "the cockpit is too complex … the helicopter rotor is not good; a
+  schematic should be more symbolic of components"; `schematicsymbols.ts`
+  + @symbols pins): ACTOR parts leave the mesh census — each draws its
+  collider box (dashed) + a type GLYPH (prop = sweep circle + blade
+  ticks, wheel = tread + spokes, hinge = pivot + sweep arc, computer =
+  chip + pins, seat = profile, …) oriented by its projected world axis.
+  THE MARGIN LAW (we: "move things more out of the way, around the
+  diagram … RCS infinity is not understandable"): actor labels claim
+  ellipse-ring slots around the content (spoke angle + spread, actors
+  first), leader lines keep the link; cable tags keep local slots. THE SILHOUETTE LAW (we, same day, on the bbox first cut: "the
   chair looks unrecognizable in the SVG. did you just use bounding boxes?
   That is not OK"): the plate draws the craft's OWN MESHES — every
   triangle projected, back-face + sliver culled, painter-sorted far-first;
@@ -468,7 +500,10 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   10°) = the light weight, COPLANAR INTERIOR (same plane ≤ 4 mm) NOT
   DRAWN — box seams vanish exactly as asked, no fills; actors get a
   SMOOTH-SHELL GATE (gentle folds < 25° are curvature, not geometry —
-  dropped; speaker cones read as silhouettes). Caps 3500 lines/group,
+  dropped; speaker cones read as silhouettes) and the DENSE-MESH RULE
+  (>800 tris: silhouette ring + HARD creases ≥ 35° only, sub-0.35 px²
+  facets census-dropped — generated prop SDFs, high-poly models).
+  Caps 3500 lines/group,
   the LONGEST survive. Line WEIGHT is the figure/ground hierarchy;
   material colours are deliberately NOT carried. THE CONNECTION-COLOUR
   LAW (we: "let us know which connections go to which things … pick a
@@ -806,6 +841,22 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   fights the painter; the dock merges the farm's painted surfaces per key).
   Pins: xenoncode net-screen/gating tests + xenonvm gate legs + e2e
   netscreens.spec; audit `app/tools/netscreenprobe.mjs`.
+- THE CANONICAL SCREEN-KEY LAW + THE FEED-MERGE LAW (v1.17.2, we: "when I
+  went into actual screens, the model ones stopped working … why is there
+  a main screen, element 09, but also one that has 640×800?"): the shim
+  keys surfaces by the LOWERCASED literal (spaces survive) — every app
+  key now normalizes to `slug(alias)#channel` (`normScreenKey`) at the
+  pump's ingress (surfaces, canvases, feedKeys), at `setScreenFeeds` and
+  at the engine faces; the WORKER's `setKeys` carries the RAW vm variants
+  too (`rawKey` bridge — the shim knows only its own literals). A twin
+  at the shim's 640×480 dev seed beside an authored board = this law
+  violated. THE FEED-MERGE LAW: later binders (IDE window, Screens dock)
+  ADD (`addScreenFeeds`) — `setScreenFeeds` REPLACING the global map
+  unbound the co-running computers, and the dashboard rebuild splices
+  compRoots, so the second pass cleared the live DataTextures with
+  nothing to rebuild → rebuilt boards = CHANGED keys only (`dashOwner`
+  tracks per-ci ownership). Pins: e2e netscreens FEED-MERGE leg + the
+  canonical-key census in that spec.
 - THE COCKPIT WINDOW (`components/CockpitWindow.tsx`, v1.16.14, we: "'sit'
   in cockpits (simultaneously with others) which opens a small control
   window that allow us to send all inputs (and lock sending inputs …); a

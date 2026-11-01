@@ -98,7 +98,7 @@ test.describe('@storage @xenon THE STORAGE PERSISTENCE LAW', () => {
     await expect.poll(() => busRow(page), { timeout: 90_000 }).toBe(1);
   });
 
-  test('THE CRAFT-WIDE WIPE: the Xenon ▾ row clears every disk on the craft', async ({ page, isMobile }) => {
+  test('THE CRAFT-WIDE WIPE: the File-menu row clears every disk on the craft', async ({ page, isMobile }) => {
     test.skip(isMobile, 'desktop menu density (wipe family)');
     test.setTimeout(240_000);
     page.on('dialog', d => void d.accept());           // the confirm()

@@ -37,7 +37,8 @@ test.describe('@analysis @slow THE CRAFT ANALYSIS', () => {
     // v1.17.2 THE VECTORIZATION (we: "its too small and should be more
     // zoomable … it would be really nice if it was SVG"): the plate is ONE
     // inline SVG sheet (front/side/topside) rendered through the SAME
-    // DiagramView as the mermaid diagrams — 3 views in ONE sheet.
+    // DiagramView as the mermaid diagrams — auto-selected views in ONE
+    // sheet (elongated crafts: top + elevation; compact: all three).
     await expect(page.getByTestId('analysis-plates').locator('svg')).toHaveCount(1,
       { timeout: 120_000 });
     // THE PLATE HAS A SHIP ON IT (the "COUNT IS NOT CONTENT" law): the
@@ -69,9 +70,12 @@ test.describe('@analysis @slow THE CRAFT ANALYSIS', () => {
     expect(plate.actorLines, 'actors inked in their colour').toBeGreaterThan(30);
     expect(plate.cables, 'cable runs').toBeGreaterThan(0);
     expect(plate.coloredCables, 'cables wear their device endpoint colour').toBeGreaterThan(0);
-    expect(plate.grids, 'metre grid sheets').toBe(3);
+    expect(plate.grids, 'metre grid sheets').toBeGreaterThanOrEqual(2);
     expect(plate.labels, 'leader labels').toBeGreaterThan(4);
-    expect(plate.views, 'three view captions').toBe(3);
+    // THE INFORMATIVE-VIEW LAW (v1.17.2): elongated crafts ship TWO
+    // views (top + the informative elevation), compact crafts all three
+    expect(plate.views, 'view captions').toBeGreaterThanOrEqual(2);
+    expect(plate.views, 'view captions ≤ trio').toBeLessThanOrEqual(3);
 
     // v1.17.1 THE PURE-SVG LAW (we: "SVG doesn't rendee images"): every
     // rendered diagram is foreignObject-free — real <text>, renders in the

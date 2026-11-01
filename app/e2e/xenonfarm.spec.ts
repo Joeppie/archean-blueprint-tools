@@ -7,6 +7,7 @@
 // E2E-TIER because: two REAL VMs cycling together on one page over the
 // shared bus — nothing below the browser has two pumps.
 import { expect, test } from '@playwright/test';
+import { openSide } from './sidepanel.js';
 
 const FARM = '9000009010';
 
@@ -44,7 +45,7 @@ test.describe('Xenon computer farm @ui', () => {
 
     // B's bus tab: the RADIO crossed from A (radio-led row) and the io
     // bus crossed (mirror row — B's program saw A's lamp write)
-    await page.getByTestId('xenon-side-bus').nth(1).click();
+    await openSide(page, 'bus', 1);
     const busRows = page.locator('[data-testid^="xenon-bus-"]');
     await expect(busRows.filter({ hasText: 'radio-led' }).first())
       .toBeVisible({ timeout: 60_000 });

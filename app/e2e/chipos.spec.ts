@@ -8,6 +8,7 @@
 // the appkit protocol crossing pumps over the shared bus, and the results
 // surface in the IDE bus rows the builder reads.
 import { expect, test } from '@playwright/test';
+import { openSide } from './sidepanel.js';
 
 const BENCH = '9000009050';
 
@@ -34,7 +35,7 @@ test.describe('ChipOS appkit ecosystem @ChipOS', () => {
     const dialogs = page.getByTestId('xenon-dialog');
     await expect(dialogs).toHaveCount(2);
     await expect(page.getByTestId('xenon-on')).toHaveText(['ON', 'ON'], { timeout: 120_000 });
-    await page.getByTestId('xenon-side-bus').nth(1).click();
+    await openSide(page, 'bus', 1);
     // the bus row: the data-testid is the name cell, the manifest rides
     // the row's value cell (fmtVal truncates to 12 chars — the leading
     // .kit{3} signature is the identity; the full TETRIS/HELLO/EarthNAV
@@ -57,7 +58,7 @@ test.describe('ChipOS appkit ecosystem @ChipOS', () => {
     await page.mouse.move(Math.max(40, top!.x - 160), Math.min(860, top!.y + 420),
       { steps: 8 });
     await page.mouse.up();
-    await page.getByTestId('xenon-side-bus').nth(0).click();
+    await openSide(page, 'bus', 0);
     await expect(busRow('LV Switch').first()).toBeVisible({ timeout: 60_000 });
 
     // THE REGISTRY's engine room: the whole farm co-runs with the craft —

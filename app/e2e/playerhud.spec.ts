@@ -9,6 +9,7 @@
 // round-trip through the dev route. The loader laws (listing order, save
 // targets, the picker extraction) are vitest-pinned: playerhud.test.ts.
 import { expect, test } from '@playwright/test';
+import { openSide } from './sidepanel.js';
 
 async function litPixels(page: import('@playwright/test').Page, selector: string): Promise<number> {
   return page.evaluate(sel => {
@@ -45,7 +46,7 @@ test.describe('player HUD: load, edit, Library, run @ui @playerhud', () => {
 
     // THE LIBRARY TAB (the ask): it indexes the LOADED hud's declared
     // @functions — @speed_kph lives in parse.xc; a click JUMPS there.
-    await page.getByTestId('hud-side-library').click();
+    await openSide(page, 'library', 0, 'hud');
     const fn = page.getByTestId('hud-lib-fn-speed_kph');
     await expect(fn, 'the Library lists the loaded HUD\'s own function').toBeVisible();
     await fn.click();
@@ -57,14 +58,14 @@ test.describe('player HUD: load, edit, Library, run @ui @playerhud', () => {
     // THE ANALYZER RUNS ON HUD DISKS (v1.16.13, the user's button_circle
     // report: "there is no squiggle, this is in the readme player HUD") —
     // the Problems tab proves the wiring; the fixture floor analyzes clean.
-    await page.getByTestId('hud-side-problems').click();
+    await openSide(page, 'problems', 0, 'hud');
     await expect(page.getByTestId('hud-problems-list')).toBeVisible();
     await expect(page.getByTestId('hud-problems-counts'))
       .toContainText(/0 errors[\s\S]*0 warnings/);
 
     // THE VARS TAB (v1.16.14, the user: "variables is missing from HUD
     // code!"): live globals after ▶
-    await page.getByTestId('hud-side-vars').click();
+    await openSide(page, 'vars', 0, 'hud');
     await expect(page.getByTestId('hud-vars-list')).toBeVisible();
 
     // ▶ runs it: hudPump boots the program (AVATARSIM answers
@@ -75,7 +76,7 @@ test.describe('player HUD: load, edit, Library, run @ui @playerhud', () => {
       'live globals fill the Vars tab while the HUD runs')
       .toBeVisible({ timeout: 15_000 });
     // the live panel canvases live under the PANELS side tab
-    await page.getByTestId('hud-side-panels').click();
+    await openSide(page, 'panels', 0, 'hud');
     const canvas = page.locator('canvas[data-testid^="hud-panel-canvas-"]').first();
     await expect(canvas).toBeVisible({ timeout: 30_000 });
     await expect

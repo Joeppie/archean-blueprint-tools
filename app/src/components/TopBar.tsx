@@ -98,6 +98,9 @@ interface Props {
   onToggleMute?: () => void;
   liveN?: number;
   onToggleLive?: () => void;
+  /** THE SEARCHABLE COMMAND INDEX (v1.17.2): opens the palette (also
+   *  Ctrl/Cmd+K anywhere in the editor) */
+  onSearch?: () => void;
   children?: React.ReactNode;              // right side: panel toggle etc.
 }
 
@@ -187,6 +190,13 @@ export default function TopBar(p: Props) {
 
       <Menu testid="file" label="File ▾" onOpen={reportOpen}>
         {close => (<>
+          {/* THE COMMAND INDEX entry (v1.17.2, we: "searchable, findable,
+              even for the main editor, at top level") */}
+          {p.onSearch && (<>
+            <Item testid="file-search" label="🔍 Search commands…" hint="Ctrl+K"
+              onClick={() => { close(); p.onSearch?.(); }} />
+            <Sep />
+          </>)}
           <Item testid="file-new" label="New craft" onClick={() => { close(); p.onNew(); }} />
           <Item testid="file-open" label="Open file…" onClick={() => { close(); p.onOpen(); }} />
           <Sep />
@@ -234,6 +244,16 @@ export default function TopBar(p: Props) {
               <Item key={t.id} testid={`tool-${t.id}`} label={`${t.icon}  ${t.label}`}
                 onClick={() => { close(); p.onTool?.(t.id); }} />
             ))}
+            {/* THE CRAFT-WIDE STORAGE WIPE (v1.17.2, we: "I told you MENU!"
+                — findability, not placement): the row rides EVERY menu a
+                reset belongs in: Tools (the utilities menu) AND File. */}
+            {p.onClearStorage && (<>
+              <Sep />
+              <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-ink-dim">Reset</div>
+              <Item testid="tools-clear-storage"
+                label="🗑 Clear ALL storage vars (this craft)" hint="first-run reset"
+                onClick={() => { close(); p.onClearStorage?.(); }} />
+            </>)}
             <Sep />
             <div className="px-3 py-1.5 text-[10px] text-ink-dim">more tools to follow</div>
           </>)}
@@ -573,6 +593,10 @@ export default function TopBar(p: Props) {
             p.muted ? 'text-[#ff7d7d] border-[#ff7d7d]/50' : 'text-[#8b93a1]'}`}>
           {p.muted ? '🔕' : 'MUTE'}
         </button>
+      )}
+      {p.onSearch && (
+        <button data-testid="palette-btn" title="search commands (Ctrl+K)"
+          onClick={p.onSearch} className="ksp-btn shrink-0 px-2 py-1 text-[12px] leading-none">🔍</button>
       )}
       {p.children}
     </header>

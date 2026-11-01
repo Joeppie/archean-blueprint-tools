@@ -84,6 +84,7 @@ import { qAxisAngle } from './engine/compparts';
 import { newCraftDoc, newComponent } from './engine/newcraft';
 import { craftState, craftInfo, loadCraft, type CacheInfo, type CraftState } from './crafts';
 import StaleDialog from './components/StaleDialog';
+import CommandPalette, { type Command } from './components/CommandPalette';
 
 
 export default function Editor({ craft, onBack }: { craft: string | null; onBack: () => void }) {
@@ -97,6 +98,10 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   const [hit, setHit] = useState<PickHit | null>(null);
   const [dirty, setDirty] = useState(false);
   const [inspKey, setInspKey] = useState(0);
+  // THE SEARCHABLE COMMAND INDEX (v1.17.2, we: "there should be a menu
+  // item for each button … organized, searchable, findable … at top
+  // level"): Ctrl/Cmd+K, the 🔍, and File ▾ all open this.
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [mode, setMode] = useState<Mode>(() =>
     new URLSearchParams(window.location.search).has('aero') ? 'aero' : 'view');
   const [opts, setOpts] = useState<ViewOptions>(DEFAULT_OPTS);
@@ -297,8 +302,10 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     // with NO IDE window — feed the engine the booted lineup's
     // screen↔dashboard bindings (literal scan + THE NET-SCREEN LAW) so the
     // dashboard faces gain their DataTextures and the pumps' tick hooks
-    // have somewhere to push. (Opening an IDE later re-binds to THAT
-    // computer — the established XenonDialog law.)
+    // have somewhere to push. THE FARM FEED-MERGE LAW (v1.17.2, we: "when
+    // I went into actual screens, the model ones stopped working"):
+    // opening an IDE / the Screens dock later ADDS that computer's feeds
+    // (addScreenFeeds) — the co-running computers keep their model faces.
     const seen = new Set<string>();
     engineRef.current?.setScreenFeeds(booted.flatMap(c => c.screens
       .filter(s => s.ci != null)
@@ -399,7 +406,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     const comp = xenonFarm.active()?.comp ?? xenonComps[0];
     if (!comp) return;
     void xenonFarm.pumpFor(comp).open(comp);
-    engineRef.current?.setScreenFeeds(comp.screens
+    engineRef.current?.addScreenFeeds(comp.screens
       .filter(s => s.ci != null)
       .map(s => ({ key: `${s.alias.toLowerCase()}#${s.channel}`, ci: s.ci!, channel: s.channel })));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1489,6 +1496,13 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); save(); return; }
+      // THE SEARCHABLE COMMAND INDEX (v1.17.2, we: "searchable, findable,
+      // even for the main editor, at top level"): Ctrl/Cmd+K everywhere.
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        setPaletteOpen(o => !o);
+        return;
+      }
       // F5 RUN (v1.13.25, we: "F5 should run the code, so long as a computer
       // or screen window is open, otherwise it does a refresh"): with the ▣
       // Screens dock up and no IDE window, the pump re-boots its computer
@@ -1930,6 +1944,80 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
       onHoverPipe={pi => engineRef.current?.setPipeHover(pi)} />
   );
 
+  // THE COMMAND INDEX (v1.17.2): every top-bar button, mode, view toggle,
+  // dock, tool, computer and reset, grouped and searchable in one box.
+  const paletteCommands = useMemo<Command[]>(() => {
+    const cmds: Command[] = [];
+    for (const [m, lab] of [['clean', 'Clean'], ['view', 'View'], ['edit', 'Edit'],
+      ['wire', 'Wire'], ['flight', 'Flight'], ['aero', 'Wind tunnel']] as const)
+      cmds.push({ id: `mode-${m}`, label: `Mode: ${lab}`, group: 'Modes', run: () => setMode(m) });
+    const OPTS: [keyof ViewOptions, string][] = [
+      ['grid', 'ground grid'], ['occ', 'occupancy boxes'], ['hull', 'hull (blocks + triangles)'],
+      ['wire', 'wireframe'], ['pipes', 'pipes (cables)'], ['subs', 'subgrids (doors/hatches)'],
+      ['mirror', 'mirror plane'], ['com', 'centre-of-mass marker'], ['labels', 'part labels']];
+    for (const [k, lab] of OPTS)
+      cmds.push({ id: `opt-${k}`, label: `Toggle ${lab}`, hint: opts[k] ? 'on' : 'off',
+        group: 'View', run: () => toggleOpt(k, !opts[k]) });
+    cmds.push({ id: 'static-info', label: 'Toggle static info box', hint: staticInfo ? 'on' : 'off',
+      group: 'View', run: () => setStaticInfo(s => !s) });
+    cmds.push({ id: 'sound', label: 'Toggle craft sound', hint: soundOn ? 'on' : 'off',
+      group: 'View', run: () => setSoundOn(soundscape.toggleSound()) });
+    cmds.push({ id: 'mute', label: 'Toggle global mute', hint: muted ? 'muted' : 'live',
+      group: 'View', run: () => setMuted(!soundscape.setMuted(!muted)) });
+    if (xenonComps.length)
+      cmds.push({ id: 'live', label: 'Toggle LIVE chip (auto-boot computers)', hint: live ? 'on' : 'off',
+        group: 'View', run: () => {
+          if (live) { xenonFarm.closeAll(); setLive(false); }
+          else {
+            setLive(true);
+            const net = powerNet;
+            xenonFarm.autoboot(xenonComps.filter(c => !net?.hasPower || computerPowered(net, c.ci)));
+          }
+        } });
+    for (const [id, lab, open] of [['analysis', 'Analysis', analysisOpen],
+      ['screens', 'Screens dock', screensOpen], ['beacons', 'Beacons dock', beaconsOpen],
+      ['autosaves', 'Autosaves…', false], ['help', 'Manual & topics…', false]] as const)
+      cmds.push({ id, label: lab, hint: open ? 'open' : undefined, group: 'Panels & docks',
+        run: () => (id === 'analysis' ? setAnalysisOpen(true)
+          : id === 'screens' ? setScreensOpen(true)
+            : id === 'beacons' ? setBeaconsOpen(true)
+              : id === 'autosaves' ? setAutosavesOpen(true) : setHelpOpen(true)) });
+    for (const t of toolsMod?.TOOLS ?? [])
+      cmds.push({ id: `tool-${t.id}`, label: `${t.icon} ${t.label}`, group: 'Tools',
+        run: () => setToolOpen(t.id) });
+    for (const c of xenonComps)
+      cmds.push({ id: `cpu-${c.ci}`, label: `Open computer: ${c.alias || c.program}`,
+        hint: `${c.files} .xc`, group: 'Computers & HUDs', run: () => openCodeFor(c.ci) });
+    for (const h of xenonHuds)
+      cmds.push({ id: `hud-${h.ci}`, label: `Open HUD program: ${h.alias}`,
+        group: 'Computers & HUDs', run: () => setHudCi(h.ci) });
+    cmds.push({ id: 'save', label: 'Save (download)', hint: 'Ctrl+S', group: 'Craft', run: () => save() });
+    cmds.push({ id: 'open-file', label: 'Open file…', group: 'File', run: () => openFile() });
+    cmds.push({ id: 'refresh', label: 'Refresh craft (redownload)', group: 'Craft',
+      run: () => { forceRef.current = true; setRetrySeq(s => s + 1); } });
+    cmds.push({ id: 'undo', label: 'Undo', hint: 'Ctrl+Z', group: 'Craft', run: () => undo() });
+    cmds.push({ id: 'redo', label: 'Redo', hint: 'Ctrl+Y', group: 'Craft', run: () => redo() });
+    cmds.push({ id: 'back', label: 'Back to gallery', group: 'File', run: () => onBack() });
+    if (craft) {
+      for (const c of xenonComps)
+        cmds.push({ id: `wipe-${c.ci}`, label: `Clear storage vars: ${c.alias || c.program}`,
+          group: 'Reset', run: () => {
+            if (!window.confirm(`Clear the storage vars of "${c.alias || c.program}"?\nThe program re-boots on a FRESH disk (first-run setup again).`)) return;
+            void xenonFarm.pumpFor(c).clearStorage();
+          } });
+      cmds.push({ id: 'wipe-all', label: '🗑 Clear ALL storage vars (this craft)', group: 'Reset',
+        run: () => {
+          if (!window.confirm(
+            'Clear ALL storage vars of every programmable computer on this craft?\n\n'
+            + 'Running programs re-boot on a FRESH disk and re-run their first-run setup. '
+            + 'This clears the EDITOR-side persistence only — game saves are not touched.')) return;
+          void xenonFarm.clearCraftStorage(craft);
+        } });
+    }
+    return cmds;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opts, staticInfo, soundOn, muted, live, craft, xenonComps.length, xenonHuds.length, toolsMod,
+    analysisOpen, screensOpen, beaconsOpen]);
   const name = (bp?.data.alias?.trim()) || (craft ? craftName(craft) : 'Untitled craft');
   autosaveKeyRef.current = craft ?? `new:${name}`;
   autosaveLabelRef.current = name;
@@ -2216,6 +2304,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         onPlayerHud={openPlayerHud} onPlayerHudFiles={loadPlayerHudFiles}
         onBeacons={() => setBeaconsOpen(o => !o)} beaconsOpen={beaconsOpen}
         onXenon={openCodeFor}
+        onSearch={() => setPaletteOpen(true)}
         onClearStorage={craft ? () => {
           // THE CRAFT-WIDE STORAGE WIPE (v1.17.2, we: "I need to be able
           // to RESET/CLEAR storage vars … Available in computers, and for
@@ -2500,6 +2589,9 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
           <DownloadOverlay name={name} dl={dl} err={dlErr}
             onRetry={() => { forceRef.current = true; setRetrySeq(s => s + 1); }}
             onBack={onBack} />
+        )}
+        {paletteOpen && (
+          <CommandPalette commands={paletteCommands} onClose={() => setPaletteOpen(false)} />
         )}
         {/* VERSIONED CACHE open gate: the cached copy is not provably current
             — the user picks which copy opens (see StaleDialog.tsx) */}
