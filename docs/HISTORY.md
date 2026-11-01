@@ -6094,3 +6094,18 @@ airliner ship TOP+FRONT; Mario's compact volume keeps all three).
 (the airliner's parts outgrow the file box — its sheet no longer spills
 into the clip). Plus THE MARGIN LAW: actor labels claim ellipse-ring
 slots around the content, actors first, leaders keep the link.
+
+## 41. THE SIL-MESH LAW — silhouette, not symbols (we: "propellors have
+## become unrecognizable in your 'fix' … look at the edges when
+## orthogonally projected; keep silhouette, remove inner geometry that
+## doesn't define shape"; 2026-11-02)
+The same-day Symbol Law (glyph dictionary + collider boxes) overshot:
+symbols abstract too far — a propeller sweep circle is a pictogram, not
+the blade AS SEEN. The user's re-wording is the exact engineering
+definition: keep the SILHOUETTE (the facing↔back boundary of the
+orthographic projection), drop the interior. Actors return to the mesh
+census; the existing edge census emits their sil ring in the actor's
+colour; the DENSE-MESH RULE + SMOOTH-SHELL GATE already strip the facet
+interior (94 % of actor strokes are silhouette). The glyph module and
+its pins are deleted — a drawing's parts are their outlines, placed and
+labelled.

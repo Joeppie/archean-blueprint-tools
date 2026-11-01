@@ -473,13 +473,15 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   the smallest; the third joins only when smallest ≥ 55 % of the middle.
   THE CONTENT-FIT LAW (we: "some craft refuse to properly fit, like the
   united airliner"): per-view scale/centring from PROJECTED CONTENT
-  extents (file box as floor), not the file box alone. THE SYMBOL LAW
-  (we: "the cockpit is too complex … the helicopter rotor is not good; a
-  schematic should be more symbolic of components"; `schematicsymbols.ts`
-  + @symbols pins): ACTOR parts leave the mesh census — each draws its
-  collider box (dashed) + a type GLYPH (prop = sweep circle + blade
-  ticks, wheel = tread + spokes, hinge = pivot + sweep arc, computer =
-  chip + pins, seat = profile, …) oriented by its projected world axis.
+  extents (file box as floor), not the file box alone. THE SIL-MESH LAW
+  (v1.17.2, we: "propellors have become unrecognizable … look at the
+  edges when orthogonally projected; keep silhouette, remove inner
+  geometry that doesn't define shape" — replacing the same-day glyph
+  experiment, whose symbols were too abstract to read): ACTORS draw as
+  their REAL MESHES through the welded-edge census — the SILHOUETTE
+  (facing↔back boundary of the projection) is the shape; the DENSE-MESH
+  RULE + SMOOTH-SHELL GATE strip interior facets and gentle creases from
+  dense actors (props, seats, grilles). No glyphs, no collider boxes.
   THE MARGIN LAW (we: "move things more out of the way, around the
   diagram … RCS infinity is not understandable"): actor labels claim
   ellipse-ring slots around the content (spoke angle + spread, actors

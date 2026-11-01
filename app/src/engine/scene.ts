@@ -39,7 +39,6 @@ import { buildAtlasPreview } from './thumbs';
 import { envIntensity, nodeMaterialSpec, pbr, srgbHexToLinear, type PbrSpec } from './materials';
 import { propellerSurface, type PropellerData } from './propeller';
 import { normScreenKey, wsDeviceSlug } from './worldsim';
-import { symbolFor } from './schematicsymbols';
 
 /** The generated propeller blade's material: the client raytraces it as a
  *  neutral NON-metallic grey — `ReverseGamma(vec3(0.5))` in the shader, i.e.
@@ -3072,11 +3071,7 @@ void main() {
         const n = idx ? idx.count : pos.count;
         const actorCi = actorOf.get(o);
         const partCi = partOf.get(o);
-        // THE SYMBOL LAW (v1.17.2): ACTOR parts leave the mesh census
-        // entirely — they are drawn as collider box + type glyph (a
-        // propeller's sweep circle says more than its 20k-triangle mesh).
-        if (actorCi !== undefined) return;
-        const cls: 0 | 1 | 2 = partCi !== undefined ? 1 : 0;
+        const cls: 0 | 1 | 2 = actorCi !== undefined ? 2 : partCi !== undefined ? 1 : 0;
         const mtx = m.matrixWorld;
         // THE DENSE-MESH RULE (v1.17.2, we: "the propellor blades are TOO
         // DETAILED … keep the outside vertices only of complex geometry —
@@ -3327,45 +3322,16 @@ void main() {
         emitG(slot.sil, `fill="none" stroke="${c}" stroke-opacity="0.95" stroke-width="1.6"`);
         emitG(slot.cre, `fill="none" stroke="${c}" stroke-opacity="0.55" stroke-width="0.9"`);
       });
-      // THE SYMBOL LAW: every ACTOR draws as its collider box (dashed —
-      // exact placement, the drawing idiom) + its type GLYPH, oriented by
-      // the part's projected world axis (schematicsymbols.ts). The actor
-      // mesh is out of the census — a propeller is its sweep circle, a
-      // seat its profile: more recognizable, at ~20 strokes.
-      {
-        const symByColor = new Map<string, string[]>();
-        for (const a of opts.actors) {
-          const b = partBoxes.get(a.ci);
-          if (!b) continue;
-          const mid = { x: (b.min.x + b.max.x) / 2, y: (b.min.y + b.max.y) / 2, z: (b.min.z + b.max.z) / 2 };
-          const cc = px(U(mid), V(mid));
-          const col = actColor.get(a.ci) ?? '#ffd98a';
-          let ang = 0;
-          const roots = this.compRoots.get(a.ci);
-          if (roots?.[0]) {
-            const q = new Quaternion();
-            roots[0].getWorldQuaternion(q);
-            const d = new Vector3(0, 1, 0).applyQuaternion(q);
-            const t = { x: mid.x + d.x, y: mid.y + d.y, z: mid.z + d.z };
-            const c2 = px(U(t), V(t));
-            ang = Math.atan2(c2.y - cc.y, c2.x - cc.x);
-          }
-          let u0 = 1e9, u1 = -1e9, v0 = 1e9, v1 = -1e9;
-          for (const x of [b.min.x, b.max.x]) for (const y of [b.min.y, b.max.y]) for (const z of [b.min.z, b.max.z]) {
-            const p = px(U({ x, y, z }), V({ x, y, z }));
-            if (p.x < u0) u0 = p.x; if (p.x > u1) u1 = p.x;
-            if (p.y < v0) v0 = p.y; if (p.y > v1) v1 = p.y;
-          }
-          const box = `<rect x="${u0.toFixed(1)}" y="${v0.toFixed(1)}" width="${(u1 - u0).toFixed(1)}"` +
-            ` height="${(v1 - v0).toFixed(1)}" stroke-dasharray="4 3" stroke-opacity="0.5"/>`;
-          const list = symByColor.get(col) ?? [];
-          list.push(box + symbolFor(this.bp!.data.components[a.ci]?.type ?? '')(cc.x, cc.y, scale, ang));
-          symByColor.set(col, list);
-        }
-        symByColor.forEach((paths, col) =>
-          out.push(`<g fill="none" stroke="${col}" stroke-width="1.3" stroke-opacity="0.95">${paths.join('')}</g>`));
-      }
-      // cables — THE CONNECTION-COLOUR LAW v1.17.2 (we: "schematics should
+      // THE SIL-MESH LAW (v1.17.2, we: "propellors have become
+      // unrecognizable … look at the edges when orthogonally projected;
+      // keep silhouette, remove inner geometry that doesn't define
+      // shape"): ACTORS draw as their REAL MESHES through the edge
+      // census — the silhouette (facing↔back boundary of the projection)
+      // is the shape; a dense mesh's interior facets and gentle creases
+      // are census-dropped (the DENSE-MESH RULE + SMOOTH-SHELL GATE
+      // apply to cls-2 like every class). No glyphs, no collider boxes:
+      // a propeller is the outline of the blades AS SEEN in this view.
+            // cables — THE CONNECTION-COLOUR LAW v1.17.2 (we: "schematics should
       // let us know which connections go to which things … pick a single
       // color and then show all connections to that thing with that
       // color, with a certain picking order"): a cable run rides the
