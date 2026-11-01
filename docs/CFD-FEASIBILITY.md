@@ -28,11 +28,30 @@ frequency (buffet), interference drag where a pod meets a wing, heat from
 a reentry profile. These need a solved velocity/pressure FIELD.
 
 ## Option study (OpenFOAM-class, in/browser/out)
-1. **OpenFOAM itself** — C++/MPI, mesh-based FVM, needs Linux toolchain,
-   seconds-to-minutes per steady RANS solve, no WASM port exists, and it
-   cannot ship to a Pages static site. It can only live on a SERVER we do
-   not run (AGENTS § Publishing: the site is static GitHub Pages). Verdict:
-   not shippable here; possible later as an external service a user runs.
+1. **OpenFOAM WASM — IT EXISTS (measured 2026-11-01, we: "but openfoam
+   could be wasm? how large would it be?"): FoamScience/openfoam-wasm
+   (https://foamscience.github.io/openfoam-wasm/) compiles OpenFOAM with
+   Emscripten (wmake-rules patches, whole-archive link with the runtime
+   selector disabled — the dynamic .so dlopen machinery must go). Probed
+   live: scalarTransportFoam.wasm = **16.8 MB**, blockMesh.wasm =
+   **17.6 MB** (~10 MB compressed transfer); READY in 3.7 s (download +
+   wasm compile); pitzDaily (12,225 cells, 21 steps) solved in **7.4 s**
+   single-threaded in a headless Chromium tab. SIZE LADDER by extrapolation
+   (wasm does NOT escape template bloat; brotli ≈ 3× off the transfer):
+   simpleFoam-class steady RANS one-solver bundle ≈ **30–60 MB raw
+   (15–20 MB wire)**; + compressible/ multiphase per family ≈ +20–60 MB
+   each; full multi-solver + snappyHexMesh ≈ **150–400 MB raw**. What size
+   does NOT fix: (a) NO snappyHexMesh in the port today — and meshing the
+   BAKED hull is the hard half of the ask; (b) vanilla OpenFOAM parallelises
+   by MPI domain decomposition, which browsers do not have — you get ONE
+   core at ~0.5–0.75× native; (c) wasm32 = 4 GB linear memory (MEMORY64 →
+   16 GB, fine). Realistic browser envelope: ~10–100k-cell blockMesh-able
+   cases in minutes — a toy airframe, NOT a 2–10 M-cell boundary-layer hull
+   run (that stays overnight-on-a-server math). Verdict: shippable NOW as
+   an OPT-IN "CFD sandbox" (lazy ~10 MB chunk, real solver, honest toy
+   meshes — the voxel census staircased to polyMesh, bounding-shape flows,
+   NOT the baked skin); the baked-hull promise still runs through
+   snappyHexMesh ⇒ P11-S2 or an octree-mesher slice.
 2. **WASM-compiled solver** (e.g. a small LBM or panel method compiled with
    emscripten): viable size budget (a panel code is ~100–300 KB), but the
    mesh pipeline is the cost: OpenFOAM needs a watertight surface MESH. Our
@@ -60,6 +79,15 @@ a reentry profile. These need a solved velocity/pressure FIELD.
   as the drag/authority suspect we can actually detect from the lattice.
 - FORMAT §Aerodynamics + § Subgrids remain the law source; the FLIGHT LAB
   is the engine seam any future solver replaces behind the same report.
+
+## P11-S3 (NEW, enabled by openfoam-wasm) the opt-in CFD sandbox
+Bundle the proven openfoam-wasm build recipe (their build.sh + patches are
+GPL like us — one commit, upstream-credit) behind a lazy ⚗ "CFD sandbox"
+button: blockMesh + a chosen solver download ONLY on click (~10 MB wire);
+cases generated from the voxel census (stair-case polyMesh, 20–50k cell
+cap, 2D slice or coarse 3D); results parsed back into the analysis report
+as "real FVM, toy mesh" beside the closed-form numbers. The baked-skin
+case stays gated on a mesher (P11-S2 service or an octree-mesh slice).
 
 ## If we ever do a panel MVP (the cheap 20%)
 1. Mesh: take `stitchHullSkin` quads (already lattice-exact) + block
