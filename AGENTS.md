@@ -429,15 +429,30 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   their NODE GRAPH with node titles — the text scan is blind to a node
   program's whole io surface, the graph fixes it), `seqIn`/`seqOut`
   (SPLIT: press→read coupling kept, reads and writes no longer share a
-  diagram; ≤7 devices, ≤12 grouped messages '+N folded'). The vessel
-  plate pair is NOT a generic overview: it renders INSIDE the Class &
-  Wiring section as that diagram's own visual (actors amber, its cables
-  lit). PLATE SCALE (we: "are they large enough for craft? Should you make
+  diagram; ≤7 devices, ≤12 grouped messages '+N folded'). THE PLATE TRIO
+  (v1.17.2, we: "the diagrams should have a front/side/top diagram"): the
+  plate is NOT a generic overview — it renders INSIDE the Class & Wiring
+  section as that diagram's own visual (actors amber, its cables lit), as
+  the classic FRONT/SIDE (starboard)/TOPSIDE trio at one shared isotropic
+  scale. THE LEADER-LABEL LAW (we: "labels should try to not overlap and
+  use slightly different colors, using lines to indicate where things
+  are"): every plate label (actors + cable io tags, ONE shared placer)
+  gets a colour from the rotation palette, a collision-slotted box from
+  the candidate ring, and a LEADER LINE to the dot ON the named thing.
+  ENTRY READABILITY (we: "the entry points is hard to read"): entry marks
+  carry ⚡, entry nodes are bold bright stadiums, entry-carrying classes
+  get the teal frame and devices the amber one — one colour language
+  across plates and diagrams. THE HEADER RIDE (we: "weight, costs and
+  flight characteristics should be higher up in the analysis"): mass/
+  weight/build cost summary + the flight section ride ABOVE the per-
+  computer sections in dialog AND export; the window runs wide (1280) with
+  500-px diagram panes and every section on one 1160-px column (align). PLATE SCALE (we: "are they large enough for craft? Should you make
   the scale more illustrativ/diagrammatic?" — measured: a shared-sphere fit
   left the front view of a wide-flat plane at 17 % of frame height): each
   view fits ITS OWN projected extent to ~82 % of the frame at ONE isotropic
   px/m — no anamorphic stretch; a wide-flat craft is SUPPOSED to read flat
-  from the front, and both plates share one scale like a three-view drawing.
+  from the front, and all three plates share one scale like a three-view
+  drawing.
   X-ray render, empty-flag + build-time retry, pixel-decoded spec (§ Plate
   saga, docs/HISTORY.md). DiagramView FIT-ON-OPEN (floor 0.45 — readable, pan walks the
   rest), zoom/pan/⤢; mermaid overflow folds are honest '+N' lines, and
@@ -709,7 +724,12 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   audit — re-run it after ANY power/devices/items/bus change). THE
   SOUND OF THE CRAFT (`engine/soundscape.ts`: procedural WebAudio
   cues — game audio assets stay untouched (NOTICE); the 🔊 chip is the
-  gesture arming the AudioContext, the buzzer law). THE GLOW LAW: a
+  gesture arming the AudioContext, the buzzer law). THE COMMANDED-LOOP
+  LAW (v1.17.2, we: "badger makes sound for its rotors … it shouldnt"):
+  the drill/pump loops ride THEIR COMMANDED channel (no authored-ON
+  default — a carried, never-commands drill is silent, the propeller law
+  extended); the belt keeps its authored-ON default; `loopWanted` is
+  engine-pure and vitest-pinned. THE GLOW LAW: a
   sim-lit lamp is a LIT FACE, never a cast THREE light (pinned
   castLightCount=0).
 - THE LIVING CRAFT III (v1.16.11, §§ 11-13 of LIVING-CRAFT.md): THE

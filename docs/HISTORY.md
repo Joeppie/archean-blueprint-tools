@@ -5874,3 +5874,43 @@ takes $mode 0→1 — the game STARTS; desktop keyboard too. Pinned by
 mariostart.spec (@device @slow, phone context, waits the GAME's ready
 state, real pointer sequence); the engine XC_ABI was found stale at 19
 while the shipped wasm carried 20 — corrected in the same breath.
+
+## 32. THE READING RISES — analysis trio + header (we: "the diagrams
+## should have a front/side/top diagram … labels should try to not overlap
+## and use slightly different colors, using lines to indicate where things
+## are … the entry points is hard to read and things dont properly align
+## and the analysis should be larger, also weight, costs and flight
+## characteristics should be higher up in the analysis"; 2026-11-02)
+The v1.17.1 reading answered a lot but read small and out of order. Landed
+in v1.17.2: the plate PAIR became the FRONT/SIDE/TOPSIDE trio (analysis-
+Shots returns {top, front, side}; ReportSection gained plateSide; the e2e
+counts three PNGs); plate labels got THE LEADER-LABEL LAW — actor tags
+and cable io tags enter ONE shared placer, each label a colour from a
+12-hue rotation palette, slotted from a candidate ring that collides with
+nothing, with a leader line from the box to a dot ON the named thing
+(live-probe census: 11–12 palette colours present in every view). Entry
+points read: ⚡ rides the ENTRY_MARK, flow entries are bold bright
+stadiums, entry-carrying classes get the teal `style` frame, devices the
+amber one. Alignment: every dialog section on one 1160-px column; larger:
+window 1280, diagram panes 500 px. Order: THE HEADER RIDE — mass/weight
+(massModel · g)/raw-material build-cost (buildCost twin) card, then the
+FLIGHT READING (with a per-surface authority strip), ABOVE the
+per-computer sections; the export mirrors it (flight hoisted into
+buildFlightHtml, summary row first). DOM-order leg in analysis.spec pins
+summary < flight < plates < rundown.
+
+## 33. THE COMMANDED-LOOP LAW — the Badger's "rotors" were a drill (we:
+## "badger makes sound for its rotors I think, it shouldnt"; 2026-11-02)
+The Badger (3326372833) hummed a low drone that reads as rotor noise. The
+source: loopWanted's authored-ON default — `MiningDrill: (ch0 ?? 1) > 0`
+— and itemsim's crude anchored fit (a craft CARRYING a GroundAnchor is
+"anchored"), so the Badger's pad drill, whose firmware NEVER writes the
+drill channel (census over all 57 disk files), whirred its 78/117 Hz
+sawtooth loop from craft load. Propellers, relays, buzzers and pivots
+were each probed innocent first (the firmware's speaker writes are gated
+alarms, the prop-pwr relay writes are one-shots). FIX: the drill/pump
+loops ride THEIR COMMANDED channel; the belt keeps its authored-ON
+default (in-game conveyors run on power); loopWanted moved engine-pure
+into soundscape.ts and the law got its vitest pin. The item sim may keep
+mining the drill (the KPI laws stand); audible is only what the bus
+commands — the v1.16.24 propeller law, extended.
