@@ -60,22 +60,26 @@ function DiagramView(p: { svg: string }) {
   };
   // THE SCROLL-OWNERSHIP LAW (v1.17.2, we: "scrolling down over the
   // diagrams zoom, that is not OK"): the plain wheel scrolls the page;
-  // ZOOM is Ctrl/⌘+wheel (and pinch in fullscreen). Native listener —
-  // React's root wheel is passive and cannot preventDefault the browser
-  // zoom on ctrl+wheel.
+  // ZOOM is Ctrl/⌘+wheel. IN THE GALLERY (fullscreen, we: "at that point
+  // scroll should zoom") the plain wheel zooms — the page behind is not
+  // scrolling anyway. Native listener — React's root wheel is passive
+  // and cannot preventDefault the browser zoom on ctrl+wheel.
+  const bigRef = useRef(false);
+  bigRef.current = big;
   useEffect(() => {
     const el = scroller.current;
     if (!el) return;
     const h = (e: WheelEvent) => {
-      if (!(e.ctrlKey || e.metaKey)) return;   // plain wheel → the page
+      if (!(e.ctrlKey || e.metaKey) && !bigRef.current) return;   // plain wheel → the page
       e.preventDefault();
       setK(x => Math.min(6, Math.max(0.2, x * (e.deltaY < 0 ? 1.15 : 0.87))));
     };
     el.addEventListener('wheel', h, { passive: false });
     return () => el.removeEventListener('wheel', h);
   }, []);
-  // FIT-ON-OPEN (v1.17.1, we: "cannot navigate or move through the diagrams"):
-  // a diagram wider/taller than its panel opens FITTED, not cut off.
+  // FIT-ON-OPEN: embedded fits to READ (≤ 1:1); THE GALLERY opens FILLED
+  // (v1.17.2, we: "the zoomable version for the schematic it should zoom
+  // in by default, not remain equally small").
   useEffect(() => {
     const el = scroller.current;
     if (!el) return;
@@ -83,6 +87,12 @@ function DiagramView(p: { svg: string }) {
     if (!svg) return;
     const fit = () => {
       const w = svg.getBoundingClientRect().width / (k || 1), h = svg.getBoundingClientRect().height / (k || 1);
+      if (big) {
+        const k0 = Math.max(0.5, Math.min(8, (el.clientWidth - 16) / Math.max(1, w),
+          (el.clientHeight - 16) / Math.max(1, h)));
+        setK(+k0.toFixed(3)); setPan({ x: 0, y: 0 });
+        return;
+      }
       // never smaller than READABLE (0.45) — a huge map then opens at its
       // top, and the pan/zoom tools walk it; unreadable-fit helps nobody
       const k0 = Math.max(0.45, Math.min(1, (el.clientWidth - 12) / Math.max(1, w),
@@ -137,7 +147,10 @@ function DiagramView(p: { svg: string }) {
         onPointerUp={e => {
           ptrs.current.delete(e.pointerId);
           const d = drag.current;
-          if (d && d.moved < 8 && !big) setBig(true);   // a CLICK opens the gallery
+          // CLICK = the gallery door (v1.17.2, we: "click should close
+          // zoomed version"): a click (no drag) opens the sheet; in the
+          // gallery the same click closes it.
+          if (d && d.moved < 8) setBig(x => !x);
           drag.current = null;
         }}
         onPointerLeave={e => { ptrs.current.delete(e.pointerId); drag.current = null; }}
@@ -442,20 +455,34 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
         data-testid="analysis-body">
         {comps.length === 0 && <div className="text-[#8b93a1] text-[12px]">
           No programmable computer on this craft — nothing to diagram.</div>}
-        {(comps.length + huds.length) > 1 && (
-          <div className="flex flex-wrap gap-1">
+        {comps.length + huds.length >= 1 && (
+          // THE TAILORED-SCHEMATIC SELECTOR (v1.17.2, we: "selection for
+          // computer for tailored schematic is not obvious"): the row is
+          // ALWAYS visible and says what it is; the active computer is a
+          // solid, lit chip — you always know whose sheets these are.
+          <div className="flex flex-wrap items-center gap-2 rounded border
+                         border-[#22314a] bg-[#0e1626] px-2 py-1.5">
+            <span className="text-[10px] uppercase tracking-widest text-[#8b93a1]">
+              Schematic tailored to</span>
             {comps.map(c => (
               <button key={`c${c.ci}`} data-testid={`analysis-comp-${c.ci}`}
-                className={`ksp-btn px-2 py-1 text-[11px] ${cur?.ci === c.ci && !curIsHud
-                  ? 'text-[#7dffcf] border-[#7dffcf]/50' : ''}`}
-                onClick={() => setSel({ kind: 'cpu', ci: c.ci })}>{c.alias || `#${c.ci}`}</button>
+                className={`rounded border px-2.5 py-1 text-[12px] transition-colors ${cur?.ci === c.ci && !curIsHud
+                  ? 'border-[#7dffcf]/70 bg-[#7dffcf]/15 font-semibold text-[#7dffcf]'
+                  : 'border-[#2b3a52] text-[#9fb0c8] hover:bg-[#182236]'}`}
+                title={`Show the device table, plates, diagrams and compute budget of ${c.alias || `#${c.ci}`}`}
+                onClick={() => setSel({ kind: 'cpu', ci: c.ci })}>
+                ⌨ {c.alias || `#${c.ci}`}{cur?.ci === c.ci && !curIsHud ? ' ●' : ''}
+              </button>
             ))}
             {huds.map(h => (
               <button key={`h${h.ci}`} data-testid={`analysis-hud-${h.ci}`}
-                className={`ksp-btn px-2 py-1 text-[11px] ${cur?.ci === h.ci && curIsHud
-                  ? 'text-[#ffd479] border-[#ffd479]/50' : ''}`}
+                className={`rounded border px-2.5 py-1 text-[12px] transition-colors ${cur?.ci === h.ci && curIsHud
+                  ? 'border-[#ffd479]/70 bg-[#ffd479]/15 font-semibold text-[#ffd479]'
+                  : 'border-[#2b3a52] text-[#9fb0c8] hover:bg-[#182236]'}`}
                 title="HUD program — client runtime, NO server compute budget (wiki hud.md)"
-                onClick={() => setSel({ kind: 'hud', ci: h.ci })}>📟 {h.alias || `#${h.ci}`}</button>
+                onClick={() => setSel({ kind: 'hud', ci: h.ci })}>
+                📟 {h.alias || `#${h.ci}`}{cur?.ci === h.ci && curIsHud ? ' ●' : ''}
+              </button>
             ))}
           </div>
         )}
