@@ -457,7 +457,14 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   line WEIGHT is the figure/ground hierarchy; material colours are
   deliberately NOT carried. BOUNDED: per-mesh 20k triangles, per-class
   caps 9k hull / 5k parts / 4k actors a panel — the LARGEST
-  faces win. No WebGL: the raster-era day-sky/blank-frame traps are
+  faces win. INSTANCED MESHES ARE TEMPLATES, SKIP THEM (v1.17.2, we:
+  "there is a large fucking sphere in super mario and chipOS … that
+  shouldnt fucking be there"): the pipe layer instances UNIT templates
+  (SphereGeometry(1,12,8) for the 126 cable elbows, cyl/box twins) with
+  the real transforms in instanceMatrix — a census reading template
+  positions × matrixWorld inks the 1 m template sphere (lat/long grid)
+  at the origin of EVERY cabled craft; cables ride the amber pipeNet
+  annotations, templates never ink. No WebGL: the raster-era day-sky/blank-frame traps are
   structurally gone. THE LEADER-LABEL LAW (we: "labels should try to not overlap and
   use slightly different colors, using lines to indicate where things
   are"): every plate label (actors + cable io tags, ONE shared placer)
