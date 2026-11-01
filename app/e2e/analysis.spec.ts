@@ -6,11 +6,13 @@
 // not logical for a rover or for Mario").
 //
 // e2e-tier because: the MERMAID RUNTIME renders SVG in the DOM, the vessel
-// plate is a real WebGL offscreen pass, and ⬇ HTML is a browser download.
+// plate is derived from the live scene graph (compRoots boxes + pipeNet
+// runs — the real cable geometry), and ⬇ HTML is a browser download.
 // The diagram GRAMMAR itself (sources, actors, resolved devices, burial)
 // is vitest-pure in xcgraph.test.ts.
 //
-// @slow: the mermaid chunk + runtime and the WebGL plates on the iGPU.
+// @slow: the mermaid chunk + runtime and the full scene builds behind the
+// vector plates.
 import { expect, test } from '@playwright/test';
 
 test.describe('@analysis @slow THE CRAFT ANALYSIS', () => {
@@ -32,44 +34,37 @@ test.describe('@analysis @slow THE CRAFT ANALYSIS', () => {
       { timeout: 120_000, message: `${kind} diagram renders` }).toBe(1);
       expect(await page.getByTestId(`analysis-error-${kind}`).count()).toBe(0);
     }
-    // v1.17.2 THE THREE-VIEW TRIO (we: "the diagrams should have a
-    // front/side/top diagram"): front + side + topside PNGs
-    await expect(page.getByTestId('analysis-plates').locator('img')).toHaveCount(3,
+    // v1.17.2 THE VECTORIZATION (we: "its too small and should be more
+    // zoomable … it would be really nice if it was SVG"): the plate is ONE
+    // inline SVG sheet (front/side/topside) rendered through the SAME
+    // DiagramView as the mermaid diagrams — 3 views in ONE sheet.
+    await expect(page.getByTestId('analysis-plates').locator('svg')).toHaveCount(1,
       { timeout: 120_000 });
-    // THE PLATE HAS A SHIP ON IT (v1.17.1, we: "Nothing visible in vesel
-    // overviews" — the spec counted <img> tags for two releases and the
-    // plates were 100 % day-sky: COUNT IS NOT CONTENT, decode the pixels):
-    // x-ray silhouette + amber actor pixels must exist in the PNG.
-    await expect.poll(async () => page.evaluate(() => {
-      const im = document.querySelector('[data-testid="analysis-plates"] img') as HTMLImageElement;
-      if (!im?.complete || !im.currentSrc) return { sil: -1, amber: -1 };
-      const cv = document.createElement('canvas');
-      cv.width = im.naturalWidth; cv.height = im.naturalHeight;
-      const g = cv.getContext('2d')!; g.drawImage(im, 0, 0);
-      const d = g.getImageData(0, 0, cv.width, cv.height).data;
-      let sil = 0, amber = 0;
-      for (let i = 0; i < d.length; i += 16) {
-        if (d[i]! > 180 && d[i + 1]! > 140 && d[i + 2]! < 150) amber++;
-        else if (d[i + 2]! > 70 && d[i + 2]! > d[i]! && d[i]! >= 40) sil++;
-      }
-      return { sil, amber };
-    }), { message: 'the plate carries silhouette + amber actor pixels', timeout: 30_000 })
-      .toMatchObject({ sil: expect.any(Number) });
-    const plateInk = await page.evaluate(() => {
-      const im = document.querySelector('[data-testid="analysis-plates"] img') as HTMLImageElement;
-      const cv = document.createElement('canvas');
-      cv.width = im.naturalWidth; cv.height = im.naturalHeight;
-      const g = cv.getContext('2d')!; g.drawImage(im, 0, 0);
-      const d = g.getImageData(0, 0, cv.width, cv.height).data;
-      let sil = 0, amber = 0;
-      for (let i = 0; i < d.length; i += 16) {
-        if (d[i]! > 180 && d[i + 1]! > 140 && d[i + 2]! < 150) amber++;
-        else if (d[i + 2]! > 70 && d[i + 2]! > d[i]! && d[i]! >= 40) sil++;
-      }
-      return { sil, amber };
+    // THE PLATE HAS A SHIP ON IT (the "COUNT IS NOT CONTENT" law): the
+    // vector plate is the craft's OWN mesh silhouettes — thousands of
+    // projected, painter-sorted polygons in the faces' own colours,
+    // actors filled in their label colour, cable runs, leader labels.
+    // (v1.17.2, we on the bbox first cut: "the chair looks unrecognizable
+    // in the SVG. did you just use bounding boxes? That is not OK".)
+    const plate = await page.evaluate(() => {
+      const svg = document.querySelector('[data-testid="analysis-plates"] svg')!;
+      const polys = [...svg.querySelectorAll('polygon')];
+      const fills = polys.map(p => p.getAttribute('fill') || '');
+      return {
+        polys: polys.length,
+        actorPolys: fills.filter(f => /#(ffd98a|7dffcf|9fd0ff|ff9ecb|c9ff8a|ffb08a|b7a6ff|8afff0|ffe08a|f0a6ff|a6ffd0|ffa6a6)/.test(f)).length,
+        fills: new Set(fills.filter(f => !/#(ffd98a|7dffcf|9fd0ff|ff9ecb|c9ff8a|ffb08a|b7a6ff|8afff0|ffe08a|f0a6ff|a6ffd0|ffa6a6)/.test(f))).size,
+        cables: svg.querySelectorAll('polyline').length,
+        labels: svg.querySelectorAll('text').length,
+        leaders: svg.querySelectorAll('line').length,
+        views: [...svg.querySelectorAll('text')].filter(t => /FRONT|SIDE|TOPSIDE/.test(t.textContent || '')).length,
+      };
     });
-    expect(plateInk.sil, 'x-ray silhouette present').toBeGreaterThan(20);
-    expect(plateInk.amber, 'amber actors present').toBeGreaterThan(5);
+    expect(plate.polys, 'mesh-silhouette polygons').toBeGreaterThan(300);
+    expect(plate.actorPolys, 'colour-filled actor faces').toBeGreaterThanOrEqual(20);
+    expect(plate.fills, 'faces keep their own material colours').toBeGreaterThan(2);
+    expect(plate.labels, 'leader labels').toBeGreaterThan(4);
+    expect(plate.views, 'three view captions').toBe(3);
 
     // v1.17.1 THE PURE-SVG LAW (we: "SVG doesn't rendee images"): every
     // rendered diagram is foreignObject-free — real <text>, renders in the

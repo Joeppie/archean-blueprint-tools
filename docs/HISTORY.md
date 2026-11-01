@@ -5914,3 +5914,24 @@ default (in-game conveyors run on power); loopWanted moved engine-pure
 into soundscape.ts and the law got its vitest pin. The item sim may keep
 mining the drill (the KPI laws stand); audible is only what the bus
 commands — the v1.16.24 propeller law, extended.
+
+## 34. THE SILHOUETTE LAW — the vector plate must show the SHIP (we: "the
+## chair looks unrecognizable in the SVG. did you just use bounding boxes?
+## That is not OK"; 2026-11-02)
+The morning's vectorization (v1.17.2) drew hull blocks as lattice rects and
+PARTS as compRoots bbox outlines — the e2e census passed (rects, fills,
+captions) while the plate showed a grid of boxes where a plane should be:
+COUNT IS NOT CONTENT, re-armed, three releases deep. FIX: the plate census
+walks the CRAFT'S OWN MESHES (root/hinge/subGroup, sprites and lines out),
+projects every triangle per view, culls back faces (world normal vs view
+axis) and sub-0.12-px² slivers, painter-sorts FAR-first and emits polygons
+in each face's material colour; actors fill in their label's palette
+colour. Bounds: per-mesh 20k triangles, per-view 16k POLYGONS — over cap
+the LARGEST faces win (honest decimation, the silhouette survives). One
+shared px/m across the trio; a per-view frame-fit bug (TOP used the height
+where the planform spans the LENGTH) and the stray-prism spill (the known
+GAME-hull files) ended as a per-panel clip to the FILE box. Live census:
+48k polygons on the ISW-241, panel ink bboxes 348×168 / 360×168 / 342×226
+— wide, long, planform: the plane READS as a plane at any zoom. Pinned by
+analysis.spec (300+ polygons, 20+ actor-coloured faces, 3+ material fills,
+three captions).

@@ -74,7 +74,11 @@ function DiagramView(p: { svg: string }) {
           onClick={() => setBig(x => !x)}
           title="use the whole analysis window">{big ? '⤡' : '⤢'}</button>
       </div>
-      <div ref={scroller} className="min-h-0 flex-1 overflow-auto rounded bg-white" style={{ cursor: 'grab' }}
+      {/* THE EDITOR-NAVY CARD (v1.17.2, we: "the color choice on diagrams
+          doesnt work well, it should fit in with the rest of the editor"):
+          the white board is GONE — diagrams ride the editor's own navy */}
+      <div ref={scroller} className="min-h-0 flex-1 overflow-auto rounded border border-[#22314a] bg-[#101a2b]"
+        style={{ cursor: 'grab' }}
         onWheel={e => setK(x => Math.min(6, Math.max(0.2, x * (e.deltaY < 0 ? 1.15 : 0.87))))}
         onPointerDown={e => { drag.current = { x: e.clientX, y: e.clientY, px: pan.x, py: pan.y }; }}
         onPointerMove={e => { const d = drag.current; if (!d) return;
@@ -93,8 +97,7 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
   engine: Engine | null; close: () => void }) {
   const [svgs, setSvgs] = useState<Record<string, string>>({});
   const [errs, setErrs] = useState<Record<string, string>>({});
-  const [plates, setPlates] = useState<Record<number,
-    { top: string; front: string; side: string }>>({});
+  const [plates, setPlates] = useState<Record<number, { svg: string }>>({});
   const [busy, setBusy] = useState(false);
   // mermaid lives in STATE (a ref never re-fires the render effect — the
   // first-cut catch: the diagram effect ran once before the runtime loaded
@@ -133,7 +136,24 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
           flowchart: { htmlLabels: false, useMaxWidth: false },
           class: { useMaxWidth: false },
           sequence: { showSequenceNumbers: false, actorMargin: 42, useMaxWidth: false },
-          themeVariables: { fontSize: '13px' } });
+          // THE EDITOR-NAVY DIAGRAM LANGUAGE (v1.17.2, we: "the color choice
+          // on diagrams doesnt work well, it should fit in with the rest of
+          // the editor"): mermaid rides the editor's own family — #101a2b
+          // cards, #16233c node fills, #4b6a9b edges, #7dffcf pilot accents,
+          // #e8edf4 text. No grey panels, no white.
+          themeVariables: {
+            background: '#101a2b', mainBkg: '#16233c', primaryColor: '#16233c',
+            primaryTextColor: '#e8edf4', primaryBorderColor: '#4b6a9b',
+            secondaryColor: '#13233c', tertiaryColor: '#0f2233',
+            lineColor: '#7a93b8', textColor: '#e8edf4', nodeBorder: '#4b6a9b',
+            clusterBkg: '#0f1a2e', clusterBorder: '#22314a',
+            actorBkg: '#0f2233', actorBorder: '#7dffcf', actorTextColor: '#e8edf4',
+            actorLineColor: '#7a93b8', signalColor: '#c8d4e4', signalTextColor: '#c8d4e4',
+            labelBoxBkgColor: '#13233c', labelBoxBorderColor: '#4b6a9b', labelTextColor: '#c8d4e4',
+            noteBkgColor: '#1c2a44', noteTextColor: '#e8edf4', noteBorderColor: '#4b6a9b',
+            activationBkgColor: '#1c2a44', activationBorderColor: '#7dffcf',
+            classBkg: '#16233c', classBorder: '#4b6a9b', classText: '#e8edf4',
+            fontSize: '13px' } });
         if (!dead) setMm(m);
       } catch { if (!dead) setErrs({ '*': 'mermaid runtime failed to load' }); }
     })();
@@ -191,7 +211,7 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
       eng.analysisShots({ actors })
         .then(ph => {
           if (ph.empty && tries++ < 2) { setTimeout(go, 2500); return; }
-          setPlates(x => ({ ...x, [curCpu!.ci]: ph }));
+          setPlates(x => ({ ...x, [curCpu!.ci]: { svg: ph.svg } }));
         })
         .catch(e => setShotErr(String(e).slice(0, 120)));
     };
@@ -237,9 +257,7 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
     const pump = isHud ? null : xenonFarm.pumps.find(q => q.comp?.ci === cid);
     return {
       compAlias: (isHud ? '📟 ' : '') + alias,
-      plateTop: isHud ? undefined : plates[cid]?.top,
-      plateFront: isHud ? undefined : plates[cid]?.front,
-      plateSide: isHud ? undefined : plates[cid]?.side,
+      plateSvg: isHud ? undefined : plates[cid]?.svg,
       diagrams: ds,
       svgs: ds.map(d => svgs[`${cid}|${d.kind}`] ?? null),
       rundown: codeRundown({ alias, ci: cid, files, devices }),
@@ -382,23 +400,19 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
           <>
             {(() => {
               const ph = plates[cur.ci];
-              // v1.17.2 (we: "the diagrams should have a front/side/top
-              // diagram"): the plate pair became the THREE-VIEW trio —
-              // front, side, topside at one isotropic scale, actors solid,
-              // their cables lit, colour-rotated leader labels.
+              // v1.17.2 THE VECTORIZATION (we: "its too small and should be
+              // more zoomable … it would be really nice if it was SVG and
+              // you could zoom in on like with mermaid diagrams"): the trio
+              // is ONE vector sheet rendered through the SAME DiagramView as
+              // the mermaid diagrams — wheel zoom, pan, ⤢, 600 %.
               return ph && (
-              <div data-testid="analysis-plates" className="flex max-w-[1160px] flex-wrap gap-2">
-                {([['front (nose −z)', ph.front], ['side (starboard)', ph.side], ['topside', ph.top]] as const)
-                  .map(([k, src]) => (
-                    <figure key={k} className="m-0">
-                      <img src={src} width={380}
-                        className="max-w-[32vw] rounded-md border border-[#22314a]"
-                        alt={`vessel ${k}`} />
-                      <figcaption className="text-[10px] text-[#8b93a1]">{k} · wireframe,
-                        actors solid, cabled runs amber + io tags,
-                        leader-line labels</figcaption>
-                    </figure>
-                  ))}
+              <div data-testid="analysis-plates" className="w-full max-w-[1160px]">
+                <DiagramView svg={ph.svg} />
+                <div className="mt-0.5 text-[10px] text-[#8b93a1]">
+                  three-view plate — front · side · topside at ONE shared scale,
+                  vector SVG (zoom to 600 %): actors filled in their label
+                  colour, cabled runs amber + io tags, leader-line labels
+                </div>
               </div>
             ); })()}
             {(() => {

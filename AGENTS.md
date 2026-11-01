@@ -430,15 +430,32 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   program's whole io surface, the graph fixes it), `seqIn`/`seqOut`
   (SPLIT: press→read coupling kept, reads and writes no longer share a
   diagram; ≤7 devices, ≤12 grouped messages '+N folded'). THE PLATE TRIO
-  (v1.17.2, we: "the diagrams should have a front/side/top diagram"): the
-  plate is NOT a generic overview — it renders INSIDE the Class & Wiring
-  section as that diagram's own visual (actors amber, its cables lit), as
-  the classic FRONT/SIDE (starboard)/TOPSIDE trio at one shared isotropic
-  scale. THE LEADER-LABEL LAW (we: "labels should try to not overlap and
+  (v1.17.0 PNG pair; v1.17.2 THE VECTORIZATION, we: "its too small and
+  should be more zoomable … it would be really nice if it was SVG and you
+  could zoom in on like with mermaid diagrams"): the plate is NOT a
+  generic overview — ONE SVG sheet (analysisShots returns {svg}) holding
+  the FRONT / SIDE (starboard) / TOPSIDE trio at ONE shared px/m, rendered
+  through the SAME DiagramView as the mermaid diagrams (zoom to 600 %),
+  panel-clipped to the FILE box (stray GAME-hull prisms never spill a
+  panel). THE SILHOUETTE LAW (we, same day, on the bbox first cut: "the
+  chair looks unrecognizable in the SVG. did you just use bounding boxes?
+  That is not OK"): the plate draws the craft's OWN MESHES — every
+  triangle projected, back-face + sliver culled, painter-sorted far-first,
+  emitted as a polygon in the face's material colour; a bbox is NEVER a
+  part. BOUNDED: per-mesh 20k / per-view 16k triangle caps — the LARGEST
+  faces win. No WebGL: the raster-era day-sky/blank-frame traps are
+  structurally gone. An ACTOR
+  FILLS in its label's palette colour — the fill names what the label
+  says. THE LEADER-LABEL LAW (we: "labels should try to not overlap and
   use slightly different colors, using lines to indicate where things
   are"): every plate label (actors + cable io tags, ONE shared placer)
   gets a colour from the rotation palette, a collision-slotted box from
   the candidate ring, and a LEADER LINE to the dot ON the named thing.
+  THE EDITOR-NAVY DIAGRAM CARD (v1.17.2, we: "the color choice on diagrams
+  doesnt work well, it should fit in with the rest of the editor"): NO
+  white board — DiagramView rides #101a2b, mermaid's themeVariables are
+  the editor's own family (#16233c fills, #4b6a9b lines, #7dffcf pilot
+  accents, #e8edf4 text), the export `.mm` sheet the same.
   ENTRY READABILITY (we: "the entry points is hard to read"): entry marks
   carry ⚡, entry nodes are bold bright stadiums, entry-carrying classes
   get the teal frame and devices the amber one — one colour language

@@ -374,7 +374,7 @@ export function svgTextOnly(svg: string): string {
           show.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</text>`;
     });
   if (out !== svg && !out.includes('.fo2txt')) {
-    out = out.replace(/<svg\b[^>]*>/, m => `${m}<style>.fo2txt{fill:var(--text-color,#333);
+    out = out.replace(/<svg\b[^>]*>/, m => `${m}<style>.fo2txt{fill:var(--text-color,#e8edf4);
       dominant-baseline:middle}.fo2sm{font-size:10px !important}</style>`);
   }
   return out;
@@ -511,8 +511,10 @@ export function craftIsFlyable(bp: { data: { components: { type: string }[] } })
  *  and sources, and the flight section ONLY when the craft carries flight
  *  surfaces (a rover or a Mario cabinet gets no aero theatre). PURE string
  *  builder — the dialog hands it exactly what it rendered. */
-export interface ReportSection { compAlias: string; plateTop?: string; plateFront?: string;
-  plateSide?: string;
+export interface ReportSection { compAlias: string;
+  /** v1.17.2 THE VECTORIZATION: the FRONT/SIDE/TOPSIDE trio as ONE inline
+   *  SVG sheet (sharp at any zoom; the dialog renders it zoomable). */
+  plateSvg?: string;
   diagrams: XcDiagram[]; svgs: (string | null)[]; rundown?: CodeRundown;
   compute?: ReportCompute }
 /** the craft header (v1.17.2, we: "weight, costs and flight characteristics
@@ -622,8 +624,10 @@ h1{font-size:20px;color:#7dffcf} h2{font-size:16px;margin-top:28px;color:#9fd0ff
 h3{font-size:13px;margin:18px 0 6px;color:#e8edf4}
 .plates{display:flex;gap:12px;flex-wrap:wrap} .plates figure{margin:0}
 .plates img{width:320px;max-width:30vw;border:1px solid #22314a;border-radius:6px}
+.plate-sheet{margin:12px 0} .plate-sheet svg{width:100%;max-width:1200px;
+height:auto;border:1px solid #22314a;border-radius:8px}
 figcaption{font-size:11px;color:#8b93a1;margin-top:4px}
-.mm{background:#fff;border-radius:8px;padding:8px;overflow:auto;max-width:1200px}
+.mm{background:#101a2b;border-radius:8px;padding:8px;overflow:auto;max-width:1200px}
 .mm svg{max-width:100%} details{margin:6px 0} pre{background:#101a2b;color:#b7c6dd;padding:10px;
 border-radius:6px;overflow:auto;font-size:11px}
 table{border-collapse:collapse}td,th{border:1px solid #22314a;padding:4px 10px;font-size:12px}
@@ -639,11 +643,10 @@ ${summaryHtml}${flightHtml}
   style="color:#8fd4ff;margin-right:14px;font-size:12px">▸ ${esc(s.compAlias)}</a>`).join('')}</nav>`];
   for (const s of opts.sections) {
     parts.push(`<h2 id="comp-${esc(s.compAlias)}">Computer ${esc(s.compAlias)}</h2>`);
-    if (s.plateTop || s.plateFront || s.plateSide) parts.push(`<div class="plates">
-<figure><img src="${s.plateFront ?? ''}"><figcaption>front view (nose −z)</figcaption></figure>
-<figure><img src="${s.plateSide ?? ''}"><figcaption>side view (starboard)</figcaption></figure>
-<figure><img src="${s.plateTop ?? ''}"><figcaption>topside view — wireframe, actors solid,
-cabled runs amber with io tags, colour-rotated leader labels</figcaption></figure></div>`);
+    if (s.plateSvg) parts.push(`<figure class="plate-sheet">${s.plateSvg}
+<figcaption>three-view plate — front · side · topside at one shared scale,
+vector SVG: actors filled in their label colour, cabled runs amber + io tags,
+leader-line labels</figcaption></figure>`);
     if (s.compute) {
       const c = s.compute;
       parts.push(`<h3>Compute budget</h3><p style="font-size:12px;color:#c8d4e4">

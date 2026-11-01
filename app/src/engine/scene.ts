@@ -2952,38 +2952,42 @@ void main() {
     return g ? [g.quaternion.w, g.quaternion.x, g.quaternion.y, g.quaternion.z] : null;
   }
 
-  /** ── v1.17.0 THE ANALYSIS PLATE (we: "above each sequence diagram, render
-   *  a PNG of the vessel … topside, front, orthographic; the labels we used
-   *  to have on, for only the relevant actors … highlighted, wireframe on,
-   *  view zoomed; also wire highlighted between, io number") ─────────────
-   *  Offscreen THREE-VIEW orthographic plate of the CRAFT ONLY (grid/
-   *  ground/helpers stay out): everything wireframe teal, the ACTOR set
-   *  solid amber, every cable touching an actor redrawn as an amber
-   *  polyline (from pipeNet.polys — the exact drawn run) with its endpoint
-   *  io tags. v1.17.2 (we: "the diagrams should have a front/side/top
-   *  diagram … the labels should try to not overlap and use slightly
-   *  different colors, using lines to indicate where things are"): the
-   *  plate pair became the classic TOPSIDE / FRONT / SIDE trio, and every
-   *  label gets a COLOUR-ROTATED, collision-slotted box with a LEADER LINE
-   *  to the dot on the thing it names. The live scene's materials are
-   *  swapped only for the three draws and restored before resolve; the
-   *  on-demand render law is untouched (this drives its own throwaway
-   *  renderer). Returns data-URL PNGs. */
-  async analysisShots(opts: {
+  /** ── THE ANALYSIS PLATE — VECTOR THREE-VIEW (v1.17.0 PNG pair, v1.17.2
+   *  THE VECTORIZATION, we: "its too small and should be more zoomable …
+   *  SVG and you could zoom in on like with mermaid diagrams"; the SAME
+   *  DAY: "the chair looks unrecognizable in the SVG. did you just use
+   *  bounding boxes? That is not OK" → THE SILHOUETTE LAW: the plate is
+   *  the craft's OWN GEOMETRY — every mesh triangle projected, back-face
+   *  and sliver culled, painter-sorted (far first) and emitted as a
+   *  vector polygon in the face's own material colour. The plane reads
+   *  AS a plane, a chair AS a chair — a bbox is never a part. ─────────
+   *  ONE SVG sheet: FRONT / SIDE (starboard) / TOPSIDE at ONE shared
+   *  px/m, drawn from the live scene (meshes for geometry, compRoots
+   *  boxes for label anchors, pipeNet.polys for the cable runs). Actors
+   *  fill in their label's palette colour (THE LEADER-LABEL LAW:
+   *  collision-slotted boxes + a line to the dot on the named thing).
+   *  BOUNDED: per-mesh and per-view triangle caps — the largest faces
+   *  win, the sheet stays at a few thousand polygons a panel. No WebGL:
+   *  sharp at every zoom (the dialog renders it through DiagramView, the
+   *  same wheel-zoom/pan/⤢ machinery as the mermaid diagrams); the
+   *  raster-era day-sky/blank-frame traps are structurally gone.
+   *  empty:true = scene not built yet (the dialog retries). */
+  analysisShots(opts: {
     actors: { ci: number; tag: string }[];
-    size?: { w: number; h: number };
-  }): Promise<{ top: string; front: string; side: string; empty: boolean }> {
-    const w = opts.size?.w ?? 860, h = opts.size?.h ?? 540;
-    const scene = this.scene;
-    if (!scene || !this.bp) throw new Error('analysisShots: no scene');
-    const craft = [this.root, this.hingeGroup, this.subGroup];
+  }): Promise<{ svg: string; empty: boolean }> {
+    if (!this.scene || !this.bp) return Promise.reject(new Error('analysisShots: no scene'));
+    const PH = 640, PW = 940, GAP = 26, PAD = 44;
+    const MESH_CAP = 20000;      // triangles per mesh (a monster model decimates)
+    const VIEW_CAP = 16000;      // polygons per panel (the largest faces win)
+    const MIN_AREA = 0.12;       // px²: a sub-sliver carries no information
+    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    this.scene.updateMatrixWorld(true);
     // THE BOX FROM TRUSTED SOURCE DATA (v1.17.1, mirroring fit()): the
-    // object-tree bbox swallows HUD sprite labels and helper quads (95 m
-    // for a 4 m plane) — the FILE box + block buckets + part boxes + subgrid
-    // content frame the ship honestly.
+    // FILE box + block buckets + part boxes frame the ship honestly
+    // (file coords − moff = scene space).
     const box = new Box3(
-      new Vector3(this.bp.box_min.x, this.bp.box_min.y, this.bp.box_min.z),
-      new Vector3(this.bp.box_max.x, this.bp.box_max.y, this.bp.box_max.z));
+      new Vector3(this.bp.box_min.x - this.moff.x, this.bp.box_min.y - this.moff.y, this.bp.box_min.z - this.moff.z),
+      new Vector3(this.bp.box_max.x - this.moff.x, this.bp.box_max.y - this.moff.y, this.bp.box_max.z - this.moff.z));
     const growPt = (x: number, y: number, z: number) => {
       box.min.x = Math.min(box.min.x, x - this.moff.x); box.min.y = Math.min(box.min.y, y - this.moff.y);
       box.min.z = Math.min(box.min.z, z - this.moff.z);
@@ -2992,212 +2996,195 @@ void main() {
     };
     for (const b of this.batch?.buckets.values() ?? [])
       for (let i = 0; i < b.positions.length; i += 3) growPt(b.positions[i]!, b.positions[i + 1]!, b.positions[i + 2]!);
-    this.compRoots.forEach((roots) => { for (const o of roots) {
-      const b = new Box3().setFromObject(o);
-      if (!b.isEmpty()) { box.union(b); }
-    } });
-    { const sb = new Box3().setFromObject(this.subGroup);
-      if (!sb.isEmpty()) box.union(sb); }
-    // EMPTY-FLAG (v1.17.1, we: "Nothing visible in vesel overviews"): the
-    // dialog can open while the meshes/models are still building — an
-    // empty box used to render a black rectangle and lie. The caller now
-    // sees empty:true and retries.
-    const emptyBox = box.isEmpty();
-    if (emptyBox) box.setFromCenterAndSize(new Vector3(), new Vector3(4, 2, 4));
-    const c = box.getCenter(new Vector3());
-    const r = Math.max(0.75, box.getSize(new Vector3()).length() * 0.56);
-    const actorCis = new Set(opts.actors.map(a => a.ci));
-    // ci -> a world anchor for the projected label (root bbox centre)
-    const anchors = new Map<number, Vector3>();
-    for (const a of opts.actors) {
-      const roots = this.compRoots.get(a.ci) ?? [];
-      if (!roots.length) continue;
+    const partBoxes = new Map<number, Box3>();
+    this.compRoots.forEach((roots, ci) => {
       const b = new Box3();
       for (const o of roots) b.expandByObject(o);
-      if (!b.isEmpty()) anchors.set(a.ci, b.getCenter(new Vector3()));
-    }
-    // materials: swap everything craft-side (wire teal / solid amber),
-    // restore after the two draws. ACTOR membership = the descendants of
-    // the actor roots (parts nest their render-node tree deep).
-    type Swap = { o: Mesh | Line; prev: Material | Material[] };
-    const swaps: Swap[] = [];
-    // X-RAY PLATE law (v1.17.1, we: "Nothing visible in vesel overviews" —
-    // measured cause: a full-block wireframe at ortho scale BLENDs into a
-    // single pale wash, 99 % ink and zero information). The plate reads as
-    // an x-ray: slate silhouette (depthWrite off so it never swallows the
-    // actors), the actor parts solid amber, the cables amber lines on top.
-    const wire = new MeshBasicMaterial({ color: 0x6f97c2, transparent: true,
-      opacity: 0.62, depthWrite: false, side: DoubleSide });
-    const wireLine = new LineBasicMaterial({ color: 0x54c9bd, transparent: true, opacity: 0.22 });
-    const amber = new MeshBasicMaterial({ color: 0xffc35e });
-    // the label palette (v1.17.2): rotated per label so neighbouring
-    // leaders and boxes read apart — amber leads, the rest stay warm/cool
-    // pairs on the dark card.
+      if (!b.isEmpty()) { partBoxes.set(ci, b); box.union(b); }
+    });
+    // EMPTY-FLAG (v1.17.1): the dialog can open while the models are
+    // still building — the caller retries instead of framing a lie.
+    const empty = box.isEmpty()
+      || ((this.bp.data.blocks as unknown[] | undefined)?.length ?? 0) + this.compRoots.size === 0;
+    const C = box.min.clone();
+    const S = box.max.clone().sub(C);
+    const actorCis = new Set(opts.actors.map(a => a.ci));
+    // the label palette: rotated per label; a PART's faces wear the
+    // colour of its LABEL — the fill names what the label says.
     const LABEL_COLORS = ['#ffd98a', '#7dffcf', '#9fd0ff', '#ff9ecb', '#c9ff8a',
       '#ffb08a', '#b7a6ff', '#8afff0', '#ffe08a', '#f0a6ff', '#a6ffd0', '#ffa6a6'];
-    const hidden: Object3D[] = [];
-    if (this.gridLines) { this.gridLines.visible = false; hidden.push(this.gridLines); }
-    if (this.surgeGroup.visible) { this.surgeGroup.visible = false; hidden.push(this.surgeGroup); }
-    const actorSet = new Set<Object3D>();
+    const actColor = new Map<number, string>();
+    opts.actors.forEach((a, i) => actColor.set(a.ci, LABEL_COLORS[i % LABEL_COLORS.length]!));
+    // ── THE SILHOUETTE CENSUS: every craft mesh, every triangle, world
+    //    space, with its world normal and the owning part ci (−1 = hull)
+    const actorOf = new Map<Object3D, number>();
     for (const ci of actorCis)
-      for (const root of this.compRoots.get(ci) ?? [])
-        root.traverse(o => actorSet.add(o));
-    for (const g of craft) g.traverse(o => {
-      const m = o as Mesh;
-      if (!(m as unknown as { isMesh?: boolean }).isMesh && !(m as unknown as { isLine?: boolean }).isLine) return;
-      swaps.push({ o: m as Mesh, prev: m.material as never });
-      m.material = actorSet.has(o) ? amber
-        : (m as unknown as { isLine?: boolean }).isLine ? wireLine : wire;
-    });
-    let renderer: WebGLRenderer | null = null;
-    const shots: string[] = [];
-    let triCount = 0;
-    let glBlank = false;
-    // THE SKY LIES (v1.17.1, we: "Nothing visible in vesel overviews" — the
-    // ROOT CAUSE after three misreads: scene.background = the day-sky pale
-    // blue painted EVERY throwaway render, burying the plate under #8fb4d8).
-    const prevBg = scene.background;
-    scene.background = null;
-    try {
-      renderer = new WebGLRenderer({ alpha: true, antialias: true, preserveDrawingBuffer: true });
-      renderer.setSize(w, h, false);
-      const cam = new OrthographicCamera(-w / 2 / 1, w / 2 / 1, h / 2 / 1, -h / 2 / 1, 0.01, r * 12);
-      const shoot = (pos: Vector3, up: Vector3, extW: number, extH: number) => {
-        cam.position.copy(pos); cam.up.copy(up); cam.lookAt(c);
-        // ILLUSTRATIVE PER-VIEW FIT (v1.17.1, we: "are they large enough for
-        // craft? Should you make the scale more illustrativ/diagrammatic?"
-        // — measured: one bounding-sphere fit left the FRONT view of a
-        // wide-flat plane at 17 % of frame height). Each view fits THAT
-        // view's projected extent at ~82 % of the frame, but at ONE px/m
-        // for both axes (isotropic — no anamorphic stretch).
-        const s = Math.min((w * 0.82) / Math.max(0.5, extW),
-          (h * 0.82) / Math.max(0.5, extH));
-        cam.left = -w / (2 * s); cam.right = -cam.left;
-        cam.top = h / (2 * s); cam.bottom = -cam.top;
-        cam.updateProjectionMatrix();
-        renderer!.render(scene, cam);
-        triCount += renderer!.info.render.triangles;
-        // FLUSH THE QUEUE (v1.17.1, the scene's own proven wisdom at
-        // snapshotOne/readPixels): ANGLE-vulkan/SwiftShader queues draws;
-        // a 1-px readPixels synchronously FLUSHES them, so the drawImage
-        // below sees pixels instead of the pre-flush blank (the plate's
-        // 409k-triangle-into-0-pixel mystery, three misreads deep).
-        {
-          const gl = renderer!.getContext();
-          const px = new Uint8Array(4);
-          gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
-          const mid = new Uint8Array(4);
-          gl.readPixels(w >> 1, h >> 1, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, mid);
-          if (mid[3]! <= 4 && px[3]! <= 4) glBlank = true;
+      for (const root of this.compRoots.get(ci) ?? []) root.traverse(o => actorOf.set(o, ci));
+    interface Tri { v: [number, number, number, number, number, number, number, number, number];
+      n: [number, number, number]; ci: number; color: string }
+    const tris: Tri[] = [];
+    const vA = new Vector3(), vB = new Vector3(), vC = new Vector3(), e1 = new Vector3(), e2 = new Vector3();
+    for (const g of [this.root, this.hingeGroup, this.subGroup]) {
+      g.traverse(o => {
+        const m = o as Mesh;
+        if (!(m as unknown as { isMesh?: boolean }).isMesh || !m.visible) return;
+        if ((o.userData as { windlines?: boolean })?.windlines) return;
+        const geo = m.geometry as BufferGeometry;
+        const pos = geo?.getAttribute?.('position') as BufferAttribute | undefined;
+        if (!pos) return;
+        const idx = geo.getIndex();
+        const n = idx ? idx.count : pos.count;
+        const col = (m.material as MeshBasicMaterial)?.color as Color | undefined;
+        const hex = col ? '#' + col.getHexString() : '#44608a';
+        const ci = actorOf.get(o) ?? -1;
+        const mtx = m.matrixWorld;
+        const limit = Math.min(n, MESH_CAP * 3);
+        for (let i = 0; i + 2 < limit; i += 3) {
+          const j0 = idx ? idx.getX(i) : i, j1 = idx ? idx.getX(i + 1) : i + 1, j2 = idx ? idx.getX(i + 2) : i + 2;
+          vA.fromBufferAttribute(pos, j0).applyMatrix4(mtx);
+          vB.fromBufferAttribute(pos, j1).applyMatrix4(mtx);
+          vC.fromBufferAttribute(pos, j2).applyMatrix4(mtx);
+          e1.subVectors(vB, vA); e2.subVectors(vC, vA);
+          const nx = e1.y * e2.z - e1.z * e2.y, ny = e1.z * e2.x - e1.x * e2.z, nz = e1.x * e2.y - e1.y * e2.x;
+          const len = Math.hypot(nx, ny, nz);
+          if (len < 1e-9) continue;                        // degenerate: no face
+          tris.push({ v: [vA.x, vA.y, vA.z, vB.x, vB.y, vB.z, vC.x, vC.y, vC.z],
+            n: [nx / len, ny / len, nz / len], ci, color: hex });
         }
-        // 2D plate: dark card + the GL frame + amber wires + labels
-        const cv = document.createElement('canvas');
-        cv.width = w; cv.height = h;
-        const g2 = cv.getContext('2d')!;
-        g2.fillStyle = '#0b1220'; g2.fillRect(0, 0, w, h);
-        g2.drawImage(renderer!.domElement, 0, 0, w, h);
-        const proj = (v: Vector3 | readonly [number, number, number]) => {
-          const t = v instanceof Vector3 ? v.clone() : new Vector3(v[0], v[1], v[2]);
-          const p = t.project(cam);
-          return { x: (p.x + 1) * w / 2, y: (1 - p.y) * h / 2 };
-        };
-        // wire highlight: every cable run touching an actor (pipeNet.links
-        // index-align polys) — drawn amber on top of the wireframe plate
-        const net = this.pipeNet;
-        g2.strokeStyle = '#ffc35e'; g2.lineWidth = 2;
-        const cableRuns: { mid: { x: number; y: number }; tag: string }[] = [];
-        for (let i = 0; i < net.polys.length; i++) {
-          const link = net.links[i];
-          if (!link || !(actorCis.has(link.a) || actorCis.has(link.b))) continue;
-          const pts = net.polys[i]!;
-          g2.strokeStyle = '#ffc35e';
-          g2.beginPath();
-          pts.forEach((p, k) => { const s = proj(p); if (!k) g2.moveTo(s.x, s.y); else g2.lineTo(s.x, s.y); });
-          g2.stroke();
-          g2.fillStyle = '#ffd98a';
-          for (const end of [pts[0], pts[pts.length - 1]]) {
-            if (!end) continue;
-            const s = proj(end);
-            g2.fillText('●', s.x - 3, s.y + 4);
-          }
-          // the io tag: collected for the SHARED label placer (mid run)
-          const mid = pts[Math.floor(pts.length / 2)];
-          if (mid) {
-            const tags = [link.a, link.b].map(ci => opts.actors.find(x => x.ci === ci)?.tag)
-              .filter(Boolean).join(' ↔ ');
-            if (tags) cableRuns.push({ mid: proj(mid), tag: tags });
-          }
-        }
-        // THE LABEL LAW v1.17.2 (we: "labels should try to not overlap and
-        // use slightly different colors, using lines to indicate where
-        // things are"): every label (actors + cable io tags, ONE shared
-        // placer so the two never collide) gets a colour from the rotation
-        // palette, a slot from the candidate ring that touches nothing,
-        // and a leader line from the box to the dot ON the named thing.
-        const items: { s: { x: number; y: number }; text: string; font: string }[] = [];
-        opts.actors.forEach((a) => {
-          const p = anchors.get(a.ci);
-          if (p) items.push({ s: proj(p), text: a.tag,
-            font: 'bold 13px ui-sans-serif, system-ui' });
-        });
-        cableRuns.forEach((r) => items.push({
-          s: r.mid, text: r.tag, font: '11px ui-monospace, monospace' }));
-        g2.font = '13px ui-sans-serif, system-ui';
-        const placed: { x: number; y: number; w: number; h: number }[] = [];
-        const fits = (b: { x: number; y: number; w: number; h: number }) =>
-          b.x >= 2 && b.y >= 2 && b.x + b.w <= w - 2 && b.y + b.h <= h - 2 &&
-          !placed.some(p => b.x < p.x + p.w + 5 && b.x + b.w + 5 > p.x &&
-            b.y < p.y + p.h + 3 && b.y + b.h + 3 > p.y);
-        items.forEach((it, i) => {
-          const color = LABEL_COLORS[i % LABEL_COLORS.length]!;
-          g2.font = it.font;
-          const tw = g2.measureText(it.text).width;
-          const bw = tw + 10, bh = it.font.startsWith('bold') ? 17 : 14;
-          // candidate ring around the anchor: right/up, right/down, left,
-          // then walk outward in steps — always readable, never a pile-up
-          const offs: [number, number][] = [[12, -20], [12, 6], [12, 32],
-            [-bw - 18, -20], [-bw - 18, 6], [-bw - 18, 32],
-            [12, -48], [12, 60], [-bw - 18, -48], [-bw - 18, 60],
-            [30, -76], [30, 88], [-bw - 36, -76], [-bw - 36, 88]];
-          let b: { x: number; y: number; w: number; h: number } | null = null;
-          for (const [dx, dy] of offs) {
-            const cand = { x: it.s.x + dx, y: it.s.y + dy, w: bw, h: bh };
-            if (fits(cand)) { b = cand; break; }
-          }
-          if (!b) b = { x: Math.min(Math.max(2, it.s.x + 12), w - bw - 2),
-            y: Math.min(Math.max(2, it.s.y - 20), h - bh - 2), w: bw, h: bh };
-          placed.push(b);
-          // leader line anchor→box (drawn first, the box overpaints its end)
-          g2.strokeStyle = color; g2.lineWidth = 1;
-          g2.beginPath(); g2.moveTo(it.s.x, it.s.y);
-          g2.lineTo(b.x + b.w / 2, b.y + b.h / 2); g2.stroke();
-          // the dot ON the thing named
-          g2.fillStyle = color;
-          g2.beginPath(); g2.arc(it.s.x, it.s.y, 3, 0, Math.PI * 2); g2.fill();
-          // the label box
-          g2.fillStyle = '#0b1220cc'; g2.fillRect(b.x, b.y, b.w, b.h);
-          g2.strokeStyle = color; g2.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1);
-          g2.fillStyle = color;
-          g2.fillText(it.text, b.x + 5, b.y + bh - 4.5);
-        });
-        return cv.toDataURL('image/png');
-      };
-      const bx = Math.max(0.5, box.max.x - box.min.x), by = Math.max(0.5, box.max.y - box.min.y),
-        bz = Math.max(0.5, box.max.z - box.min.z);
-      shots.push(shoot(new Vector3(c.x, c.y + r * 5, c.z + 0.001), new Vector3(0, 0, -1), bx, bz)); // TOPSIDE
-      shots.push(shoot(new Vector3(c.x, c.y + r * 0.06, c.z - r * 5), new Vector3(0, 1, 0), bx, by)); // FRONT (nose −z)
-      shots.push(shoot(new Vector3(c.x + r * 5, c.y, c.z), new Vector3(0, 1, 0), bz, by));            // SIDE (starboard, nose right)
-    } finally {
-      scene.background = prevBg;
-      for (const s of swaps) s.o.material = s.prev as never;
-      for (const o of hidden) o.visible = true;
-      wire.dispose(); wireLine.dispose(); amber.dispose();
-      renderer?.dispose();
+      });
     }
-    // empty:true = nothing was there to draw (scene still building) — the
-    // dialog retries instead of framing a lie (we: "Nothing visible").
-    return { top: shots[0]!, front: shots[1]!, side: shots[2]!,
-      empty: emptyBox || triCount === 0 || glBlank };
+    // cable runs touching an actor (pipeNet.links index-align polys)
+    const net = this.pipeNet;
+    const runs: { pts: Vector3[]; tag: string }[] = [];
+    for (let i = 0; i < net.polys.length; i++) {
+      const link = net.links[i];
+      if (!link || !(actorCis.has(link.a) || actorCis.has(link.b))) continue;
+      const pts = net.polys[i]!;
+      if (pts.length < 2) continue;
+      const tags = [link.a, link.b].map(ci => opts.actors.find(x => x.ci === ci)?.tag)
+        .filter(Boolean).join(' ↔ ');
+      runs.push({ pts: pts.map(p => p instanceof Vector3 ? p : new Vector3(p[0], p[1], p[2])), tag: tags });
+    }
+    // THE THREE-VIEW LAW: one shared px/m for the whole sheet — the trio
+    // reads as ONE engineering drawing (per-view stretching is a LIE).
+    const S3 = new Vector3(Math.max(0.5, S.x), Math.max(0.5, S.y), Math.max(0.5, S.z));
+    const scale = Math.min((PW - 2 * PAD) / S3.x, (PH - 2 * PAD) / S3.y,
+      (PW - 2 * PAD) / S3.z, (PH - 2 * PAD - 10) / S3.y);
+    // view = (u, v) axes + the facing test (the camera looks ALONG −axis
+    // from +side: TOP from +y, FRONT from −z, SIDE from +x) + the far-to-
+    // near painter order along the depth axis.
+    const views: { title: string; axis: 'xy' | 'zy' | 'xz' }[] = [
+      { title: 'FRONT (nose −z)', axis: 'xy' },
+      { title: 'SIDE (starboard, nose right)', axis: 'zy' },
+      { title: 'TOPSIDE (nose up)', axis: 'xz' },
+    ];
+    const g2 = document.createElement('canvas').getContext('2d')!;
+    const panels = views.map((view, vi) => {
+      const U = (p: { x: number; y: number; z: number }) =>
+        view.axis === 'xy' ? p.x : view.axis === 'zy' ? -p.z : p.x;
+      const V = (p: { x: number; y: number; z: number }) =>
+        view.axis === 'xy' ? -p.y : view.axis === 'zy' ? -p.y : p.z;
+      const uMin = view.axis === 'xy' ? C.x : view.axis === 'zy' ? -C.z - S.z : C.x;
+      const vMin = view.axis === 'xy' ? -C.y - S.y : view.axis === 'zy' ? -C.y - S.y : C.z;
+      const extU = view.axis === 'xy' ? S3.x : view.axis === 'zy' ? S3.z : S3.x;
+      // THE VERTICAL EXTENT PER VIEW: elevations stand on the height, the
+      // TOPSIDE planform spans the LENGTH (v = z) — one frame fit made the
+      // top panel overflow its sheet.
+      const extV = view.axis === 'xz' ? S3.z : S3.y;
+      const ox = vi * (PW + GAP) + PAD + (PW - 2 * PAD - extU * scale) / 2 - uMin * scale;
+      const oy = PAD + 26 + (PH - 2 * PAD - 10 - extV * scale) / 2 - vMin * scale;
+      const px = (u: number, v: number) => ({ x: ox + u * scale, y: oy + v * scale });
+      // facing axis + sign: FRONT keeps −z normals, SIDE +x, TOP +y; the
+      // painter emits FAR first (FRONT far = +z, SIDE far = −x… camera at
+      // +x means far = LOW x; TOP camera +y, far = LOW y).
+      const faceN = (t: Tri) => view.axis === 'xy' ? -t.n[2] : view.axis === 'zy' ? t.n[0] : t.n[1];
+      const depth = (t: Tri) => view.axis === 'xy' ? (t.v[2] + t.v[5] + t.v[8]) / 3
+        : view.axis === 'zy' ? -(t.v[0] + t.v[3] + t.v[6]) / 3
+          : -(t.v[1] + t.v[4] + t.v[7]) / 3;
+      const pa = new Vector3(), pb = new Vector3(), pc = new Vector3();
+      const drawn: { d: number; a: number; f: string; pts: string }[] = [];
+      for (const t of tris) {
+        if (faceN(t) <= 0) continue;                       // back face: invisible
+        const [x0, y0, z0, x1, y1, z1, x2, y2, z2] = t.v;
+        pa.set(x0, y0, z0); pb.set(x1, y1, z1); pc.set(x2, y2, z2);
+        const a = px(U(pa), V(pa)), b2 = px(U(pb), V(pb)), c2 = px(U(pc), V(pc));
+        const area = Math.abs((b2.x - a.x) * (c2.y - a.y) - (c2.x - a.x) * (b2.y - a.y)) / 2;
+        if (area < MIN_AREA) continue;                     // sliver: no information
+        const fill = t.ci >= 0 ? actColor.get(t.ci)! : t.color;
+        drawn.push({ d: depth(t), a: area, f: fill,
+          pts: `${a.x.toFixed(1)},${a.y.toFixed(1)} ${b2.x.toFixed(1)},${b2.y.toFixed(1)} ${c2.x.toFixed(1)},${c2.y.toFixed(1)}` });
+      }
+      if (drawn.length > VIEW_CAP) {                       // decimate honestly:
+        drawn.sort((p, q) => q.a - p.a);                   // the biggest faces win
+        drawn.length = VIEW_CAP;
+      }
+      drawn.sort((p, q) => q.d - p.d);                     // painter: FAR first
+      const out: string[] = [];
+      out.push(`<text x="${(ox + extU * scale / 2).toFixed(1)}" y="${(PAD + 14).toFixed(1)}"` +
+        ` text-anchor="middle" fill="#8b93a1" font-size="15" font-weight="600" letter-spacing="2">${esc(view.title)}</text>`);
+      for (const t of drawn)
+        out.push(`<polygon points="${t.pts}" fill="${t.f}"/>`);
+      // cables — lit amber runs + endpoint dots + collected io tags
+      const labelItems: { s: { x: number; y: number }; text: string; font: string }[] = [];
+      for (const r of runs) {
+        const pts = r.pts.map(p => px(U(p), V(p)));
+        out.push(`<polyline points="${pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')}"` +
+          ` fill="none" stroke="#ffc35e" stroke-opacity="0.85" stroke-width="2"/>`);
+        for (const p of [pts[0]!, pts[pts.length - 1]!])
+          out.push(`<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="2.6" fill="#ffd98a"/>`);
+        if (r.tag) labelItems.push({ s: pts[Math.floor(pts.length / 2)]!, text: r.tag, font: '11px ui-monospace, monospace' });
+      }
+      // THE LEADER-LABEL LAW (v1.17.2): actors + cable tags enter ONE
+      // placer; colour-rotated, collision-slotted boxes, a leader line
+      // to the dot ON the named thing.
+      opts.actors.forEach((a) => {
+        const b = partBoxes.get(a.ci);
+        if (!b) return;
+        const mid = { x: (b.min.x + b.max.x) / 2, y: (b.min.y + b.max.y) / 2, z: (b.min.z + b.max.z) / 2 };
+        labelItems.push({ s: px(U(mid), V(mid)), text: a.tag, font: 'bold 13px ui-sans-serif, system-ui' });
+      });
+      const placed: { x: number; y: number; w: number; h: number }[] = [];
+      const fits = (bb: { x: number; y: number; w: number; h: number }) =>
+        bb.x >= vi * (PW + GAP) + 2 && bb.x + bb.w <= vi * (PW + GAP) + PW - 2 &&
+        bb.y >= 2 && bb.y + bb.h <= PH - 2 &&
+        !placed.some(p => bb.x < p.x + p.w + 5 && bb.x + bb.w + 5 > p.x &&
+          bb.y < p.y + p.h + 3 && bb.y + bb.h + 3 > p.y);
+      labelItems.forEach((it, i) => {
+        const color = LABEL_COLORS[i % LABEL_COLORS.length]!;
+        g2.font = it.font;
+        const tw = g2.measureText(it.text).width;
+        const bw = tw + 10, bh = it.font.startsWith('bold') ? 17 : 14;
+        const offs: [number, number][] = [[12, -20], [12, 6], [12, 32],
+          [-bw - 18, -20], [-bw - 18, 6], [-bw - 18, 32],
+          [12, -48], [12, 60], [-bw - 18, -48], [-bw - 18, 60],
+          [30, -76], [30, 88], [-bw - 36, -76], [-bw - 36, 88]];
+        let b2: { x: number; y: number; w: number; h: number } | null = null;
+        for (const [dx, dy] of offs) {
+          const cand = { x: it.s.x + dx, y: it.s.y + dy, w: bw, h: bh };
+          if (fits(cand)) { b2 = cand; break; }
+        }
+        if (!b2) b2 = { x: Math.min(Math.max(2, it.s.x + 12), vi * (PW + GAP) + PW - bw - 2),
+          y: Math.min(Math.max(2, it.s.y - 20), PH - bh - 2), w: bw, h: bh };
+        placed.push(b2);
+        out.push(`<line x1="${it.s.x.toFixed(1)}" y1="${it.s.y.toFixed(1)}" x2="${(b2.x + b2.w / 2).toFixed(1)}"` +
+          ` y2="${(b2.y + b2.h / 2).toFixed(1)}" stroke="${color}" stroke-opacity="0.8" stroke-width="1"/>`);
+        out.push(`<circle cx="${it.s.x.toFixed(1)}" cy="${it.s.y.toFixed(1)}" r="3" fill="${color}"/>`);
+        out.push(`<rect x="${b2.x.toFixed(1)}" y="${b2.y.toFixed(1)}" width="${b2.w.toFixed(1)}"` +
+          ` height="${b2.h}" fill="#0b1220" fill-opacity="0.86" stroke="${color}" stroke-width="1" rx="3"/>`);
+        out.push(`<text x="${(b2.x + 5).toFixed(1)}" y="${(b2.y + bh - 4.5).toFixed(1)}" fill="${color}"` +
+          ` font-size="${it.font.startsWith('bold') ? 13 : 11}"${it.font.startsWith('bold') ? ' font-weight="600"' : ''}>${esc(it.text)}</text>`);
+      });
+      // PANEL CLIP: the sheet frames the ship by the FILE box (v1.17.1's
+      // honest-box law) — geometry beyond it (notably the known GAME-hull
+      // stray skin prisms) is CLIPPED, never allowed to spill panels.
+      return `<defs><clipPath id="apclip${vi}"><rect x="${vi * (PW + GAP)}" y="0" width="${PW}" height="${PH}"/></clipPath></defs>` +
+        `<g clip-path="url(#apclip${vi})">${out.join('\\n')}</g>`;
+    });
+    const W = views.length * PW + (views.length - 1) * GAP;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${PH}"` +
+      ` viewBox="0 0 ${W} ${PH}" font-family="ui-sans-serif, system-ui">` +
+      `<rect width="${W}" height="${PH}" fill="#0b1220" rx="10"/>\n${panels.join('\n')}</svg>`;
+    return Promise.resolve({ svg, empty });
   }
 
   /** green ground + grid just under the lowest rendered geometry (ground=true:
