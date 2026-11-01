@@ -121,3 +121,25 @@ body { background: #14160f; color: var(--color-ink); font: 13px/1.45 'Arial Narr
   0%, 100% { transform: scale(1); filter: none; }
   50% { transform: scale(1.25); filter: drop-shadow(0 0 6px #7dffcf); }
 }
+
+/* THE DOCUMENT PRINT LAW (v1.17.2): the ⚗ Analysis window prints as a
+   clean chapter document (⎙ PDF expands all chapters, then window.print;
+   browsers offer "Save as PDF"). The window's chrome, TOC, toolbars and
+   zoom controls stay out; chapters avoid mid-chapter page breaks. */
+@media print {
+  body { background: #0b1220; }
+  body * { visibility: hidden; }
+  [data-testid="analysis-body"], [data-testid="analysis-body"] * { visibility: visible; }
+  [data-testid="analysis-body"] {
+    position: absolute; left: 0; top: 0; width: 100%; max-height: none !important;
+    overflow: visible !important;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  [data-testid="analysis-body"] .analysis-toc,
+  [data-testid="analysis-body"] .ksp-btn,
+  [data-testid="analysis-body"] [data-testid^="analysis-zoom"],
+  [data-testid="analysis-export"], [data-testid="analysis-pdf"], [data-testid="analysis-close"] { display: none !important; }
+  [data-testid="analysis-body"] section { page-break-inside: avoid; }
+  [data-testid="analysis-body"] svg, [data-testid="analysis-body"] img,
+  [data-testid="analysis-body"] .mm svg { max-width: 100% !important; height: auto !important; }
+}

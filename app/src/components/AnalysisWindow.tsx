@@ -95,7 +95,7 @@ function DiagramView(p: { svg: string }) {
       }
       // never smaller than READABLE (0.45) — a huge map then opens at its
       // top, and the pan/zoom tools walk it; unreadable-fit helps nobody
-      const k0 = Math.max(0.45, Math.min(1, (el.clientWidth - 12) / Math.max(1, w),
+      const k0 = Math.max(0.75, Math.min(1, (el.clientWidth - 12) / Math.max(1, w),
         (el.clientHeight - 12) / Math.max(1, h)));
       if (k0 < 0.98) { setK(+k0.toFixed(3)); el.scrollTo({ left: 0, top: 0 }); }
     };
@@ -167,6 +167,25 @@ function DiagramView(p: { svg: string }) {
 type MermaidLike = { initialize: (o: Record<string, unknown>) => void;
   render: (id: string, text: string) => Promise<{ svg: string }> };
 
+/** THE DOCUMENT LAW (v1.17.2, we: "collapse schematics a bit, like
+ *  sections, make it read more like an actual document with chapter,
+ *  small TOC in top, build cost stuff further below; option to download
+ *  as PDF at top"): a numbered, collapsible chapter. */
+function Ch(p: { id: string; n: string; title: string; open: boolean;
+  onToggle: () => void; testid: string; children: React.ReactNode }) {
+  return (
+    <section id={`analysis-ch-${p.id}`} data-testid={p.testid} className="max-w-[1400px]">
+      <button data-testid={`${p.testid}-head`} onClick={p.onToggle}
+        className="flex w-full items-center gap-2 border-b border-[#22314a] pb-1 text-left">
+        <span className="text-[11px] tabular-nums text-[#5d6a7d]">{p.n}</span>
+        <span className="text-[13px] font-semibold tracking-wide text-[#e8edf4]">{p.title}</span>
+        <span className="ml-auto text-[10px] text-[#5d6a7d]">{p.open ? '▾ collapse' : '▸ expand'}</span>
+      </button>
+      {p.open && <div className="flex flex-col gap-3 pt-2">{p.children}</div>}
+    </section>
+  );
+}
+
 export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
   engine: Engine | null; close: () => void }) {
   const [svgs, setSvgs] = useState<Record<string, string>>({});
@@ -178,6 +197,22 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
   // and never again).
   const [mm, setMm] = useState<MermaidLike | null>(null);
   const [shotErr, setShotErr] = useState('');
+  // THE DOCUMENT LAW: chapter open/closed + the TOC + print-to-PDF
+  const CHAPTERS: [string, string][] = [
+    ['summary', 'Summary'], ['flight', 'Flight'], ['plates', 'Plates'],
+    ['compute', 'Compute'], ['code', 'Code'], ['diagrams', 'Diagrams'], ['cost', 'Build cost']];
+  const [open, setOpen] = useState<Record<string, boolean>>({
+    summary: true, flight: true, plates: true, compute: true, code: true, diagrams: true, cost: false });
+  const tog = (id: string) => setOpen(o => ({ ...o, [id]: !o[id] }));
+  const gotoCh = (id: string) => {
+    setOpen(o => ({ ...o, [id]: true }));
+    requestAnimationFrame(() => document.getElementById(`analysis-ch-${id}`)
+      ?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  };
+  const printDoc = () => {
+    setOpen({ summary: true, flight: true, plates: true, compute: true, code: true, diagrams: true, cost: true });
+    setTimeout(() => window.print(), 150);
+  };
   const comps: XenonComputer[] = p.bp ? xenonComputers(p.bp) : [];
   // v1.17.1: HUDs join the analysis — same grammar, DIFFERENT limits law
   // (client runtime, no server budget — wiki hud.md; we: "huds run on
@@ -443,6 +478,10 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
       header={
         <span className="flex items-center gap-2">
           <span data-testid="analysis-title">⚗ Analysis — {p.craft}</span>
+          <button data-testid="analysis-pdf" className="ksp-btn px-2 py-0.5 text-[11px]"
+            onClick={printDoc} title="print / save as PDF — every chapter expands for the page">
+            ⎙ PDF
+          </button>
           <button data-testid="analysis-export" className="ksp-btn px-2 py-0.5 text-[11px]"
             onClick={exportHtml} title="download the whole reading as one HTML document">
             ⬇ HTML
@@ -488,6 +527,14 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
         )}
         {errs['*'] && <div className="rounded bg-[#3a1420] p-2 text-[11px] text-[#ffb4b4]"
           data-testid="analysis-mermaid-err">{errs['*']}</div>}
+        <nav className="analysis-toc flex flex-wrap items-center gap-1 text-[10px]"
+          data-testid="analysis-toc">
+          <span className="uppercase tracking-widest text-[#5d6a7d]">Contents</span>
+          {CHAPTERS.map(([id, lab], i) => (
+            <button key={id} data-testid={`analysis-toc-${id}`} className="ksp-btn px-2 py-0.5"
+              onClick={() => gotoCh(id)}>{i + 1}. {lab}</button>))}
+        </nav>
+        <Ch id="summary" n="1" title="Craft summary" open={!!open.summary} onToggle={() => tog('summary')} testid="analysis-ch-summary">
         {summary && (
         <section data-testid="analysis-summary" className="max-w-[1160px] rounded border
           border-[#22314a] bg-[#0e1626] p-3 text-[12px] text-[#c8d4e4]">
@@ -511,12 +558,7 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
               <b>{summary.envelopeM3 ? `${summary.envelopeM3.toFixed(1)} m³${summary.envelopeSealed ? ' (sealed)' : ' (open)'}` : 'none sealed'}</b>
               {summary.liftVacuumKg !== undefined && <span className="text-[#8b93a1]">
                 · vacuum lift {summary.liftVacuumKg.toFixed(0)} kg</span>}</span>
-            <span><span className="text-[#8b93a1]">build cost</span>{' '}
-              <b>{summary.costRaw === undefined ? '…'
-                : `${summary.costRaw.toLocaleString('en-US')} raw material units`}</b>
-              {summary.costTime
-                ? <span className="text-[#8b93a1]"> · build {Math.round(summary.costTime / 60)} min</span>
-                : null}</span>
+            <span><span className="text-[#8b93a1]">build cost</span> <b>§ 7</b></span>
             {flight && <span><span className="text-[#8b93a1]">stall</span>{' '}
               <b>{flight.stallSpeed.toFixed(1)} m/s</b></span>}
             {flight && <span><span className="text-[#8b93a1]">L/D max</span>{' '}
@@ -527,6 +569,8 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
           </div>
         </section>
         )}
+        </Ch>
+        <Ch id="flight" n="2" title="Flight characteristics" open={!!open.flight} onToggle={() => tog('flight')} testid="analysis-ch-flight">
         <section data-testid="analysis-flight" className="max-w-[1160px]">
           <h3 className="m-0 mb-1 text-[12px] font-medium text-[#e8edf4]">Flight characteristics</h3>
           {flight ? (
@@ -567,8 +611,10 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
               surfaces on this craft (rover/cabinet logic).</div>
           )}
         </section>
+        </Ch>
         {cur && (
           <>
+            <Ch id="plates" n="3" title="Plates & wiring" open={!!open.plates} onToggle={() => tog('plates')} testid="analysis-ch-plates">
             {(() => {
               const ph = plates[cur.ci];
               // THE ONE-PAGE-PER-VIEW LAW (v1.17.2, we: "put the next
@@ -599,6 +645,8 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
                 </div>
               </div>
             ); })()}
+            </Ch>
+            <Ch id="compute" n="4" title="Compute budget" open={!!open.compute} onToggle={() => tog('compute')} testid="analysis-ch-compute">
             {(() => {
               const pump = curIsHud ? null : xenonFarm.pumps.find(q => q.comp?.ci === cur.ci);
               const compute: ReportCompute = curIsHud
@@ -621,6 +669,8 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
                   </div>
                 </section>);
             })()}
+            </Ch>
+            <Ch id="code" n="5" title="Code structure" open={!!open.code} onToggle={() => tog('code')} testid="analysis-ch-code">
             {(() => { const rd = codeRundown({ alias: cur.alias || `#${cur.ci}`, ci: cur.ci,
               files: cur.files.map(f => ({ name: f.name, code: f.code })), devices: curIsHud ? [] : curCpu!.devices });
               return (
@@ -650,6 +700,8 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
                             · {fn.lines} lines{fn.calls.length ? ` · calls @${fn.calls.join(', @')}` : ''}</span></div>))}
                       </div></details>))}
                 </section>); })()}
+            </Ch>
+            <Ch id="diagrams" n="6" title="Diagrams" open={!!open.diagrams} onToggle={() => tog('diagrams')} testid="analysis-ch-diagrams">
             {busy && <div className="text-[11px] text-[#8b93a1]">rendering diagrams…</div>}
             {shotErr && <div className="text-[11px] text-[#ffb4b4]" data-testid="analysis-shot-err">
               plate: {shotErr}</div>}
@@ -672,6 +724,28 @@ export default function AnalysisWindow(p: { craft: string; bp: Blueprint;
                 </section>
               );
             })}
+            </Ch>
+            <Ch id="cost" n="7" title="Build cost" open={!!open.cost} onToggle={() => tog('cost')} testid="analysis-ch-cost">
+              <div className="max-w-[1160px] text-[12px] text-[#c8d4e4]" data-testid="analysis-cost">
+                {!econ ? <div className="text-[11px] text-[#8b93a1]">economy table loading…</div>
+                  : !cost ? <div className="text-[11px] text-[#8b93a1]">no economy data for this craft</div> : (<>
+                  <div className="tabular-nums">
+                    <b>{Math.round(materialQty(cost.total)).toLocaleString('en-US')}</b> raw material units
+                    {' · build '}<b>{Math.round(cost.total.time / 60)}</b> min
+                  </div>
+                  <table className="mt-2 text-[11px]">
+                    <thead><tr className="text-[#8b93a1]"><th className="pr-4 text-left">part</th>
+                      <th className="pr-4 text-right">count</th>
+                      <th className="pr-4 text-right">raw units</th></tr></thead>
+                    <tbody>{cost.rows.slice(0, 10).map((r, i) => (
+                      <tr key={i} className="text-[#c8d4e4]"><td className="pr-4">{r.type}</td>
+                        <td className="pr-4 text-right">{r.count}</td>
+                        <td className="pr-4 text-right">{Math.round(materialQty(r.total)).toLocaleString('en-US')}</td></tr>))}
+                    </tbody></table>
+                  <div className="mt-1 text-[10px] text-[#8b93a1]">top parts by raw material — the Build-cost widget carries the full shopping list (blocks, cables, frames included)</div>
+                </>)}
+              </div>
+            </Ch>
           </>
         )}
       </div>

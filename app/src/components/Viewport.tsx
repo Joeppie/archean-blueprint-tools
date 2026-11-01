@@ -583,6 +583,15 @@ export default function Viewport({ bp, onPick, onEngine, mode = 'edit', tool, on
     // inspection only: no select, no gizmo, no fly; the box carries its
     // own ci (the selection stays empty).
     if (mode === 'view') {
+      // THE VIEW-CLICKS-THE-PRESSABLE LAW (v1.17.2, we: "when I am in
+      // view I should just be able to click dashboards, without things
+      // behind them highlighting. I am viewing. I want to be able to
+      // click things and such, its view, so I am just
+      // interacting/viewing"): a click that BEGINS on a pressable
+      // (element/screen face/standalone button) is the interaction —
+      // the press owns it (pointerdown already sank/fired it); the part
+      // behind is NOT picked, chipped, widgeted, highlighted.
+      if (engine.pressPick(e.clientX, e.clientY)) return;
       const hit = engine.pickAt(e.clientX, e.clientY);
       onPick(hit);
       const c = hit.kind === 'comp' && hit.ci != null

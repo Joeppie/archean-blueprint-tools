@@ -111,7 +111,10 @@ test.describe('@analysis @slow THE CRAFT ANALYSIS', () => {
     // the diagrams (DOM order asserts the placement, content the numbers).
     await expect(page.getByTestId('analysis-summary')).toContainText(/kg/);
     await expect(page.getByTestId('analysis-summary')).toContainText(/weight\s[\d,.]+\sN/);
-    await expect(page.getByTestId('analysis-summary')).toContainText(/raw material units/);
+    // THE DOCUMENT LAW (v1.17.2): the build cost lives in chapter 7 now
+    await page.getByTestId('analysis-toc-cost').click();
+    await expect(page.getByTestId('analysis-cost'))
+      .toContainText(/raw material units/, { timeout: 30_000 });
     const order = await page.evaluate(() => {
       const body = document.querySelector('[data-testid="analysis-body"]')!;
       const idx = (t: string) => [...body.querySelectorAll('[data-testid]')]

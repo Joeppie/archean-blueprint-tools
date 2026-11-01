@@ -2995,7 +2995,7 @@ void main() {
     groups?: { cis: number[]; label: string }[];
   }): Promise<{ svgs: string[]; empty: boolean }> {
     if (!this.scene || !this.bp) return Promise.reject(new Error('analysisShots: no scene'));
-    const PH = 640, PW = 940, PAD = 44;
+    const PH = 700, PW = 1160, PAD = 52;
     const MESH_CAP = 20000;      // triangles per mesh (a monster model decimates)
     const MIN_AREA = 0.12;       // px²: a sub-sliver carries no information
     const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -3374,7 +3374,7 @@ void main() {
       const out: string[] = [];
       // the sheet itself: navy board, 1 m lattice, panel frame, scale bar
       const bx0 = 10;
-      out.push(`<rect x="${bx0}" y="10" width="${PW - 20}" height="${PH - 20}" fill="#0f2a48" stroke="#33608f" stroke-width="1" rx="6"/>`);
+      out.push(`<rect x="${bx0}" y="10" width="${PW - 20}" height="${PH - 20}" fill="#0f2a48" stroke="#33608f" stroke-width="1.5" rx="6"/>`);
       {
         const grid: string[] = [];
         for (let u = Math.ceil(uMin); u <= uMin + extU + 0.01; u += 1) {
@@ -3385,14 +3385,14 @@ void main() {
           const p1 = px(uMin, v), p2 = px(uMin + extU, v);
           grid.push(`M${p1.x.toFixed(1)} ${p1.y.toFixed(1)}L${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`);
         }
-        out.push(`<path d="${grid.join('')}" stroke="#1e4470" stroke-width="0.3" fill="none"/>`);
+        out.push(`<path d="${grid.join('')}" stroke="#1e4470" stroke-width="0.5" fill="none"/>`);
       }
-      out.push(`<text x="${(bx0 + 16).toFixed(1)}" y="${PH - 24}" fill="#9fd0ff" font-size="11">1 m</text>` +
+      out.push(`<text x="${(bx0 + 16).toFixed(1)}" y="${PH - 24}" fill="#9fd0ff" font-size="13">1 m</text>` +
         `<line x1="${(bx0 + 16).toFixed(1)}" y1="${PH - 38}" x2="${(bx0 + 16 + scale).toFixed(1)}" y2="${PH - 38}" stroke="#9fd0ff" stroke-width="2"/>` +
         `<line x1="${(bx0 + 16).toFixed(1)}" y1="${PH - 42}" x2="${(bx0 + 16).toFixed(1)}" y2="${PH - 34}" stroke="#9fd0ff" stroke-width="2"/>` +
         `<line x1="${(bx0 + 16 + scale).toFixed(1)}" y1="${PH - 42}" x2="${(bx0 + 16 + scale).toFixed(1)}" y2="${PH - 34}" stroke="#9fd0ff" stroke-width="2"/>`);
       out.push(`<text x="${(ox + extU * scale / 2).toFixed(1)}" y="${(PAD + 14).toFixed(1)}"` +
-        ` text-anchor="middle" fill="#9fd0ff" font-size="15" font-weight="600" letter-spacing="2">${esc(view.title)}</text>`);
+        ` text-anchor="middle" fill="#9fd0ff" font-size="18" font-weight="600" letter-spacing="2">${esc(view.title)}</text>`);
       // the line-weight classes: hull = construction hairlines (silhouette
       // a touch stronger), parts quiet thin, actors inked in their colour
       // CAP FAIRNESS: on overflow the LONGEST lines survive — form lines
@@ -3404,13 +3404,13 @@ void main() {
           : items.map(i => i.s);
         out.push(`<g ${attrs}>${kept.join('')}</g>`);
       };
-      emitG(g.hullSil!, 'fill="none" stroke="#8fc3ee" stroke-opacity="0.55" stroke-width="0.6"');
-      emitG(g.hullCre!, 'fill="none" stroke="#8fc3ee" stroke-opacity="0.26" stroke-width="0.4"');
-      emitG(g.partSil!, 'fill="none" stroke="#b9dcff" stroke-opacity="0.75" stroke-width="1"');
-      emitG(g.partCre!, 'fill="none" stroke="#b9dcff" stroke-opacity="0.4" stroke-width="0.65"');
+      emitG(g.hullSil!, 'fill="none" stroke="#8fc3ee" stroke-opacity="0.7" stroke-width="1"');
+      emitG(g.hullCre!, 'fill="none" stroke="#8fc3ee" stroke-opacity="0.38" stroke-width="0.7"');
+      emitG(g.partSil!, 'fill="none" stroke="#b9dcff" stroke-opacity="0.8" stroke-width="1.1"');
+      emitG(g.partCre!, 'fill="none" stroke="#b9dcff" stroke-opacity="0.5" stroke-width="0.9"');
       actG.forEach((slot, c) => {
-        emitG(slot.sil, `fill="none" stroke="${c}" stroke-opacity="0.95" stroke-width="1.6"`);
-        emitG(slot.cre, `fill="none" stroke="${c}" stroke-opacity="0.55" stroke-width="0.9"`);
+        emitG(slot.sil, `fill="none" stroke="${c}" stroke-opacity="0.95" stroke-width="2"`);
+        emitG(slot.cre, `fill="none" stroke="${c}" stroke-opacity="0.6" stroke-width="1.2"`);
       });
       // THE SIL-MESH LAW (v1.17.2, we: "propellors have become
       // unrecognizable … look at the edges when orthogonally projected;
@@ -3425,9 +3425,9 @@ void main() {
       // actors in their device colour (the same colour as their wires
       // and labels), plain parts in the quiet slate.
       if (partShapes.length)
-        out.push(`<g fill="none" stroke="#b9dcff" stroke-opacity="0.55" stroke-width="0.9">${partShapes.join('')}</g>`);
+        out.push(`<g fill="none" stroke="#b9dcff" stroke-opacity="0.6" stroke-width="1.2">${partShapes.join('')}</g>`);
       actShapes.forEach((shapes, col) =>
-        out.push(`<g fill="none" stroke="${col}" stroke-opacity="0.95" stroke-width="1.4">${shapes.join('')}</g>`));
+        out.push(`<g fill="none" stroke="${col}" stroke-opacity="0.95" stroke-width="1.9">${shapes.join('')}</g>`));
       // cables — THE CONNECTION-COLOUR LAW v1.17.2 (we: "schematics should
       // let us know which connections go to which things … pick a single
       // color and then show all connections to that thing with that
@@ -3443,7 +3443,7 @@ void main() {
         for (const p of [pts[0]!, pts[pts.length - 1]!])
           out.push(`<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="2.6" fill="${r.color}"/>`);
         if (r.tag) labelItems.push({ s: pts[Math.floor(pts.length / 2)]!, text: r.tag,
-          font: '11px ui-monospace, monospace', color: r.color, out: true });
+          font: '13px ui-monospace, monospace', color: r.color, out: true });
       }
       // THE LEADER-LABEL LAW (v1.17.2): actors + cable tags enter ONE
       // placer; colour-rotated, collision-slotted boxes, a leader line
@@ -3453,7 +3453,7 @@ void main() {
         if (!b) return;
         const mid = { x: (b.min.x + b.max.x) / 2, y: (b.min.y + b.max.y) / 2, z: (b.min.z + b.max.z) / 2 };
         labelItems.push({ s: px(U(mid), V(mid)), text: a.tag,
-          font: 'bold 13px ui-sans-serif, system-ui', color: actColor.get(a.ci), out: true });
+          font: 'bold 15px ui-sans-serif, system-ui', color: actColor.get(a.ci), out: true });
       });
       // THE PLURAL-LABEL LAW: one label per group, anchored on the
       // member closest to the members' 2-D projected centroid.
@@ -3471,7 +3471,7 @@ void main() {
           if (dd < bd) { bd = dd; best = c; }
         }
         labelItems.push({ s: px(U(best), V(best)), text: g.label,
-          font: 'bold 13px ui-sans-serif, system-ui', color: groupColors.get(g.label), out: true });
+          font: 'bold 15px ui-sans-serif, system-ui', color: groupColors.get(g.label), out: true });
       }
       // ACTOR labels claim their slots FIRST (cable tags fill the rest)
       labelItems.sort((a, b) => (b.font.startsWith('bold') ? 1 : 0) - (a.font.startsWith('bold') ? 1 : 0));
@@ -3506,7 +3506,7 @@ void main() {
         const color = it.color ?? LABEL_COLORS[i % LABEL_COLORS.length]!;
         g2.font = it.font;
         const tw = g2.measureText(it.text).width;
-        const bw = tw + 10, bh = it.font.startsWith('bold') ? 17 : 14;
+        const bw = tw + 10, bh = it.font.startsWith('bold') ? 19 : 16;
         // MARGIN candidates (out:true): an ellipse ring around the ship
         // at growing radii, base spoke angle + spread steps — the label
         // travels to the sheet's clear space, its leader line keeps the
@@ -3545,7 +3545,7 @@ void main() {
         out.push(`<rect x="${b2.x.toFixed(1)}" y="${b2.y.toFixed(1)}" width="${b2.w.toFixed(1)}"` +
           ` height="${b2.h}" fill="#0f2a48" fill-opacity="0.92" stroke="${color}" stroke-width="1" rx="3"/>`);
         out.push(`<text x="${(b2.x + 5).toFixed(1)}" y="${(b2.y + bh - 4.5).toFixed(1)}" fill="${color}"` +
-          ` font-size="${it.font.startsWith('bold') ? 13 : 11}"${it.font.startsWith('bold') ? ' font-weight="600"' : ''}>${esc(it.text)}</text>`);
+          ` font-size="${it.font.startsWith('bold') ? 15 : 13}"${it.font.startsWith('bold') ? ' font-weight="600"' : ''}>${esc(it.text)}</text>`);
       });
       // PANEL CLIP: the sheet frames the ship by the measured content —
       // geometry beyond it (notably the known GAME-hull stray skin
