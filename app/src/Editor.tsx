@@ -56,7 +56,7 @@ import { applyPinEdit, applyPinRotate, applyPinShift, applyTriFlip, applyTriPain
 import type { Blueprint, Triangle } from './engine/format';
 import { isLegacyFile } from './engine/format';
 import { hasDashboards, xenonComputers, xenonHudControllers, xenonFarm, type XCFile,
-  type XenonComputer } from './engine/xenoncode';
+  type XenonComputer, turboOnBoot } from './engine/xenoncode';
 import {PLAYER_HUD_CI, fetchPlayerHud, fetchPlayerHuds, playerHudDisplayName, playerHudFromFiles, savePlayerHud, type PlayerHudEntry, type PlayerHudProgram} from './engine/playerhud';
 import {DeviceSim, dataNeighbours, seatCableTargets} from './engine/devicesim';
 import { craftPowerNet, computerPowered } from './engine/power';
@@ -194,13 +194,18 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     [bp, manifestV]);
   const xenonComps = useMemo(
     // THE STORAGE PERSISTENCE LAW (v1.16.27): every comp carries the open
-    // craft's id — the pump keys its per-computer storage on it.
-    () => (bp ? xenonComputers(bp, {
+    // craft's id — the pump keys its per-computer storage on it. The same
+    // pass arms THE BOOT-TURBO LAW (v1.17.1, RENDER phase — before the
+    // auto-boot effect): arcade crafts and ?turbo=1 start pumps at ×4.
+    () => {
+      xenonFarm.turboDefault = turboOnBoot(window.location.search, craft);
+      return bp ? xenonComputers(bp, {
       // v1.16.11 ROUTER POWER GATING: an unpowered Mini/Router drops its
       // subtree from the device/screen space (engine/power.ts reachability;
       // a grid-less craft answers true = the power-unaware convention)
       routerPowered: ci => !powerNet?.hasPower || computerPowered(powerNet, ci),
-    }).map(c => ({ ...c, craft: craft ?? undefined })) : []),
+      }).map(c => ({ ...c, craft: craft ?? undefined })) : [];
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [bp, powerNet, craft]);
   // ── v1.15.6 THE LIVING CRAFT (we: "computers should start when a craft is

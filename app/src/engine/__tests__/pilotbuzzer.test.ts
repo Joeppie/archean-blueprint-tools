@@ -7,7 +7,7 @@
 //     bus keys are the program's RAW target (alias verbatim, io as number),
 //     silent-when-unwritten, 440 default, 0..1 / 20000 clamps.
 import { describe, expect, it } from 'vitest';
-import { PILOT_KEYS, XenonPump } from '../xenoncode';
+import { PILOT_KEYS, XenonPump, ARCADE_TURBO_CRAFTS, turboOnBoot } from '../xenoncode';
 import { buzzerReadings, voiceGain, BuzzerAudio } from '../buzzer';
 import { wsLoad, wsChans } from '../worldsim';
 
@@ -228,5 +228,23 @@ describe('THE WARM-VOICE TABLES (v1.13.6)', () => {
     expect(voiceGain(0.07)).not.toBeCloseTo(voiceGain(0.09), 6);   // distinct steps
     expect(voiceGain(0.07)).toBeCloseTo(voiceGain(0.09) * (7 / 9), 9);
     expect(voiceGain(1)).toBeCloseTo(voiceGain(1.4), 6);        // capped
+  });
+});
+
+describe('THE BOOT-TURBO LAW (v1.17.0-1, we: "Super Mario quick start play should use turbo by default, url param")', () => {
+  it('no param: arcade crafts boot turbo, others do not', () => {
+    expect(turboOnBoot('', '3820116990')).toBe(true);    // super mario
+    expect(turboOnBoot('', '3288012440')).toBe(true);    // space invaders
+    expect(turboOnBoot('', '3327182790')).toBe(false);   // the plane
+    expect(turboOnBoot('', null)).toBe(false);
+  });
+  it('the URL param rules: =1 forces on, =0 FORBIDS even arcade', () => {
+    expect(turboOnBoot('?turbo=1', '3327182790')).toBe(true);
+    expect(turboOnBoot('?turbo=0', '3820116990')).toBe(false);
+    expect(turboOnBoot('?craft=x&turbo=1', null)).toBe(true);
+    expect(turboOnBoot('?turbo=maybe', '3327182790')).toBe(false); // only 0/1 are verbs
+  });
+  it('the arcade set is explicit and tiny', () => {
+    expect([...ARCADE_TURBO_CRAFTS].length).toBeLessThanOrEqual(4);
   });
 });

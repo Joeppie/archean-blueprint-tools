@@ -1660,6 +1660,10 @@ export class XenonPump {
     if (run.error) { this.status = 'error'; this.error = run.error; }
     else {
       this.status = 'running';
+      // v1.17.1 BOOT TURBO (we: "Super Mario quick start play should use
+      // turbo by default, url param"): a pump booting while the farm carries
+      // a boot-turbo default starts at ×4, like the ⚡ chip had flipped it.
+      if (xenonFarm.turboDefault && !this.turbo) this.setTurbo(true);
       for (const c of comp.channels) run.setInput(c.io, c.ch, 0);
       // XENON-DEBUG v3 TRACKING GATE (workpackages WP6): the debugger's
       // per-line feed is armed ONLY while it has work (breakpoints, an
@@ -2840,6 +2844,8 @@ export class IoBus {
 class Farm {
   pumps: XenonPump[] = [];
   bus = new IoBus();
+  /** v1.17.1: pumps inherit turbo at boot (the URL law, turboOnBoot). */
+  turboDefault = false;
   /** VM budget: each pump is its own wasm instance (~64 MB heap); the
    *  OLDEST is evicted when one more computer wants the floor. */
   static readonly MAX_VM = 8;
@@ -2928,6 +2934,21 @@ pumpFor(comp: XenonComputer): XenonPump {
 }
 
 export const xenonFarm = new Farm();
+
+/** ── THE BOOT-TURBO LAW (v1.17.1, we: "Super Mario quick start play
+ *  should use turbo by default, url param") ── `?turbo=1` boots every
+ *  pump of the craft at ×4; `?turbo=0` FORBIDS even the per-game default;
+ *  no param → the ARCADE set boots turbo already (ChipOS game cabinets run
+ *  their emulator loops on the computer cadence — at 1× Mario feels slow).
+ *  An explicit SET of our shipped arcade benches, not a heuristic. */
+export const ARCADE_TURBO_CRAFTS = new Set(['3820116990' /* super mario */,
+  '3288012440' /* space invaders */]);
+export function turboOnBoot(search: string, craft: string | null): boolean {
+  const p = new URLSearchParams(search).get('turbo');
+  if (p === '0') return false;
+  if (p === '1') return true;
+  return craft !== null && ARCADE_TURBO_CRAFTS.has(craft);
+}
 
 /** A craft has PHYSICAL screens: a Dashboard carrying Screen/HdScreen
  *  elements (the gate for the Screens button — "only visible if the craft

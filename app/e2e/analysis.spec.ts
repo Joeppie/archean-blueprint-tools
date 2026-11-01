@@ -35,6 +35,32 @@ test.describe('@analysis @slow THE CRAFT ANALYSIS', () => {
     // the vessel plate pair above/with the reading: topside + front PNGs
     await expect(page.getByTestId('analysis-plates').locator('img')).toHaveCount(2,
       { timeout: 120_000 });
+
+    // v1.17.1 THE PURE-SVG LAW (we: "SVG doesn't rendee images"): every
+    // rendered diagram is foreignObject-free — real <text>, renders in the
+    // dialog, in the export and in any copied file alike.
+    expect(await page.evaluate(() => document
+      .querySelectorAll('[data-testid^="analysis-"] svg foreignObject').length)).toBe(0);
+    // (counts are program-shaped — a node-generated program has few nodes;
+    // the LAW is: zero foreignObject, real text labels present)
+    await expect.poll(async () => page.evaluate(() => document
+      .querySelectorAll('[data-testid="analysis-flow"] svg text').length)).toBeGreaterThan(0);
+
+    // v1.17.1 NAVIGATION (we: "I cannot navigate or move through the
+    // diagrams properly"): zoom controls drive the diagram transform.
+    const k0 = await page.getByTestId('analysis-zoom-k').first().textContent();
+    await page.getByTestId('analysis-zoom-in').first().click();
+    await page.getByTestId('analysis-zoom-in').first().click();
+    await expect.poll(async () =>
+      page.getByTestId('analysis-zoom-k').first().textContent(),
+    { timeout: 10_000 }).not.toBe(k0);
+    await page.getByTestId('analysis-zoom-max').first().click();   // ⤢ overlay
+    await page.getByTestId('analysis-zoom-reset').first().click();
+    await page.getByTestId('analysis-zoom-max').first().click();   // ⤡ back
+
+    // v1.17.1 THE CODE RUNDOWN (we: "should give a better rundown")
+    await expect(page.getByTestId('analysis-rundown')).toBeVisible();
+    await expect(page.getByTestId('analysis-rundown')).toContainText(/lines|entries/);
     // flight: the plane gets the FLIGHT LAB reading (it carries surfaces)
     await expect(page.getByTestId('analysis-flight-report')).toBeVisible({ timeout: 60_000 });
 

@@ -367,8 +367,17 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   section is gated on flight-control surfaces (rover/Mario → honest 'Not
   applicable'); ⬇ HTML exports ONE self-contained document (buildAnalysis-
   Html, buried-surface census highlighted). NO CFD — see
-  docs/CFD-FEASIBILITY.md + REWRITE § P11. Pins: xcgraph.test (grammar),
-  e2e analysis.spec (runtime SVGs + plates + gate + download, @slow).
+  docs/CFD-FEASIBILITY.md + REWRITE § P11. v1.17.1 (we: "SVG doesn't rendee
+  images … cannot navigate or move through the diagrams … should give a
+  better rundown"): THE PURE-SVG LAW — mermaid v12 renders labels as
+  foreignObject HTML that does NOT survive export/copy (the diagrams read
+  empty), so xcgraph svgTextOnly() rewrites every label into real <svg><text>
+  before it enters state — dialog, export and copied files share one pure-
+  vector truth; DiagramView = wheel-zoom, drag-pan, −/%/+/reset/⤢ overlay;
+  codeRundown() adds the CODE RUNDOWN (per-file lines/entries/functions with
+  lines+calls/storage vars/io reads+writes, the $device SWITCH call-out, the
+  device fan-in table) to the dialog AND the exported document. Pins:
+  xcgraph.test (13), e2e analysis.spec (purity + zoom + rundown, @slow).
 - THE CHIP SAT BENCH (v1.17.0, we: "ChipOS setup that has satellite
   connections into its main comp … and make it work"): fixture 9000009098
   (make_satchip_test.py) — the REAL Tetris + EarthNAV app computers reach
@@ -386,6 +395,12 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   throttle + stop/close/reload; IndexedDB per (craft, computer), typed
   opaque. Pins: fixture 9000009096 boot-counter + e2e/storage.spec (two
   reloads, count ITERATES). HudController VMs do NOT persist yet (Backlog).
+- THE BOOT-TURBO LAW (v1.17.1, we: "Super Mario quick start play should use
+  turbo by default, url param"): `?turbo=1` boots every pump ×4, `?turbo=0`
+  FORBIDS it; no param → ARCADE_TURBO_CRAFTS (mario 3820116990, invaders
+  3288012440 — an explicit set, emulator-cadence games) boot turbo. Armed in
+  the Editor's render pass (before auto-boot); pumps inherit at completion
+  via Farm.turboDefault. Pins: pilotbuzzer.test + live probes.
 - THE COMPUTER FARM (v1.15.0 P9 slice C): MULTIPLE MiniComputers co-run —
   every XenonRun carries its OWN wasm instance (`xenonInstantiate`), the
   `xenonFarm` registry (keyed by comp.ci, `MAX_VM` evicts the oldest)
@@ -672,7 +687,13 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   rides a small row over QWERT(Y), ASDF below, the space bar wide, the
   arrow cluster beside, the I/J/K/L inverted-T at the right; unbound keys
   (T, ←, → — left/right ARE a/d in the corpus) sit inert so the shape
-  reads. SEAT→SURFACE CABLES (we: "im sending to an aileron, but I dont
+  reads. THE PHONE COCKPIT (v1.17.1, we: "Cockpit controls shouldn't full
+  screen on phone and are awkward to use"): fullNarrow={false} — phones get
+  a COMPACT bottom sheet (~340×314, draggable by the title to any thumb
+  reach), ⤢ in the title toggles full size, thumb caps (34 px, space 120 px)
+  and the keyboard row scrolls sideways instead of crushing pads; pinned by
+  the @device leg in cockpit.spec — cockpit LEFT the pixel7 testIgnore list,
+  it carries a real device law now. SEAT→SURFACE CABLES (we: "im sending to an aileron, but I dont
   see effect"): a PilotSeat feeds its cabled control surfaces DIRECTLY
   (no program) — stepWorldSim streams seat channels onto the bus
   (`IoBus.seatChannel`, no computer-alias publish), the Editor relays via

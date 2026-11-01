@@ -3,7 +3,7 @@
 // deterministic text; the mermaid RUNTIME itself is the dialog's concern
 // (e2e: analysis.spec renders SVGs in the browser).
 import { describe, expect, it } from 'vitest';
-import { buildAnalysisHtml, craftIsFlyable, xcDiagrams } from '../xcgraph';
+import { buildAnalysisHtml, codeRundown, craftIsFlyable, svgTextOnly, xcDiagrams } from '../xcgraph';
 import type { XCDevice } from '../xenoncode';
 
 const dev = (io: number, alias: string, type: string): XCDevice =>
@@ -116,5 +116,59 @@ describe('THE XENON ANALYSIS GRAMMAR', () => {
     });
     expect(fly).toContain('unstable');
     expect(fly).toContain('buried in the collider mass');   // the drag suspect is CALLED OUT
+  });
+});
+
+describe('THE CODE RUNDOWN (v1.17.1, we: "analysis … should give a better rundown")', () => {
+  const rd = codeRundown(prog);
+  it('per-file inventory: lines, entries, functions, io counts', () => {
+    const game = rd.files.find(f => f.name === 'game.xc')!;
+    expect(game.lines).toBeGreaterThan(5);
+    expect(game.entries).toContain('update');
+    const tone = game.functions.find(fn => fn.name === 'tone')!;
+    expect(tone.ret).toBe('number');
+    expect(tone.lines).toBeGreaterThanOrEqual(3);
+    expect(game.io.filter(i => i.dir === 'out').length).toBeGreaterThanOrEqual(2);
+  });
+  it('the $device SWITCH resolves to every assigned device and is CALLED OUT', () => {
+    const game = rd.files.find(f => f.name === 'game.xc')!;
+    const devIo = game.io.find(i => i.token === '$device')!;
+    expect(devIo.resolved.sort()).toEqual(['game-fx-blocks', 'game-fx-power']);
+    expect(rd.summary.join('\n')).toMatch(/\$device is a SWITCH.*game-fx-blocks.*game-fx-power/);
+  });
+  it('device fan-in counts reads and writes per resolved device', () => {
+    const seat = rd.fanIn.find(x => x.device === 'seat-main')!;
+    expect(seat.readers).toBeGreaterThanOrEqual(1);
+    expect(seat.type).toBe('PilotSeat');
+    const melody = rd.fanIn.find(x => x.device === 'melody')!;
+    expect(melody.writers).toBeGreaterThanOrEqual(1);
+    expect(rd.summary.join('\n')).toContain('bus fan-in top');
+  });
+  it('the export document carries the rundown table', () => {
+    const html = buildAnalysisHtml({ craft: 'c', sections: [{
+      compAlias: 'app-1', diagrams: [], svgs: [], rundown: rd }] });
+    expect(html).toContain('Code structure');
+    expect(html).toContain('seat-main');
+    expect(html).toContain('Device fan-in');
+  });
+});
+
+describe('THE PURE-SVG LAW (v1.17.1, we: "SVG doesn\'t rendee images")', () => {
+  const fo = '<svg xmlns="http://www.w3.org/2000/svg"><rect/>' +
+    '<foreignObject x="10" y="20" width="90" height="30">' +
+    '<div xmlns="http://www.w3.org/1999/xhtml" style="font-size:16px;text-align:center">update &amp; click</div>' +
+    '</foreignObject></svg>';
+  it('foreignObject labels become real SVG text', () => {
+    const out = svgTextOnly(fo);
+    expect(out).not.toContain('foreignObject');
+    expect(out).toContain('<text');
+    expect(out).toContain('update &amp; click');
+    expect(out).toContain('font-size="16"');
+    expect(out).toContain('middle');                 // centred labels stay centred
+    expect(out).toContain('.fo2txt');                // the injected style
+  });
+  it('pure svgs pass through untouched', () => {
+    const clean = '<svg><text x="1">ok</text></svg>';
+    expect(svgTextOnly(clean)).toBe(clean);
   });
 });

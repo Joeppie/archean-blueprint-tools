@@ -5726,3 +5726,35 @@ docs/CFD-FEASIBILITY.md § P11-S3; REWRITE § P11 records S2 (an EXTERNAL
 user-run service that can mesh and grind overnight) as the only future
 door; AGENTS carries the do-not-re-explore line. CLOSED WITH EVIDENCE, not
 vibes.
+
+## 30. v1.17.1 — boot turbo, the phone cockpit, PURE-SVG + the CODE RUNDOWN
+(we: "Super Mario quick start play should use turbo by default, url param.
+Cockpit controls shouldn't full screen on phone and are awkward to use. SVG
+doesn't rendee images, I cannot navigate or move through the diagrams
+properly. analysis doesn't contain more details on code structure or should
+give a better rundown"; 2026-11-01)
+BOOT-TURBO LAW: `?turbo=1/0` rules; no param → ARCADE_TURBO_CRAFTS (mario
+3820116990, invaders 3288012440) boot ×4 — the ChipOS game cabinets run
+emulator loops on the pump cadence, 1× feels slow. Armed in the Editor's
+render pass; pumps inherit at boot completion (Farm.turboDefault). Live:
+mario default TURBO, ?turbo=0 1×, plane ?turbo=1 TURBO.
+PHONE COCKPIT: fullNarrow=false — the cockpit opens as a COMPACT draggable
+bottom sheet (340×314), title ⤢ toggles full size, THUMB caps (34 px, space
+120 px), the keyboard row scrolls sideways instead of crushing pads; cockpit
+spec gained an @device leg and LEFT the pixel7 testIgnore list (the device
+matrix is opt-IN where a real device law exists).
+PURE-SVG LAW: mermaid v12 renders labels as <foreignObject> HTML (its
+htmlLabels:false does NOT stick — measured: 103 fOs flow / 390 class with
+the config set) and foreignObject does not survive export/copy: the shipped
+diagrams read EMPTY elsewhere. xcgraph.svgTextOnly() now rewrites every
+label into a real <svg><text> (font-size kept, entities re-escaped, centres
+approximated) BEFORE the svg enters state — dialog, export and copied files
+share one pure-vector truth. Live: 0 foreignObjects, labels are text.
+NAVIGATION: DiagramView = wheel zoom, drag-pan, −/%/+/reset + a ⤢ overlay
+taking the whole window; the exported document ships a tiny inline
+wheel-zoom script. CODE RUNDOWN: codeRundown() per-file inventory (lines,
+entries, functions with LINES + calls, storage vars, io reads/writes), the
+$device SWITCH call-out (a token resolving to several devices is named),
+device fan-in table — in the dialog and the exported HTML; buildAnalysisHtml
+gained a TOC + rundown tables. 13 xcgraph pins, analysis.spec asserts
+purity+zoom+rundown, unit tier 1106.

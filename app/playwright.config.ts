@@ -71,8 +71,10 @@ export default defineConfig({
       // identical desktop laws at a smaller canvas, which is not coverage,
       // it is a canvas-resize flake generator. A spec that GAINS a phone
       // law removes its name from this list (or tags the phone test).
+      // v1.17.1: cockpit REMOVED from the list — it carries a real device
+      // law now (the PHONE COCKPIT compact sheet, @device).
       testIgnore:
-        /(app|asset-space|blockedit|blockplace|cockpit|download|gizmo|hinge|isolation|liveedit|paint|pipes|playerhud|propeller|savefidelity|staleness|subride|sym|views|wheels|xenon|xenondbg|xenonfresh|living)\.spec\.ts$/,
+        /(app|asset-space|blockedit|blockplace|download|gizmo|hinge|isolation|liveedit|paint|pipes|playerhud|propeller|savefidelity|staleness|subride|sym|views|wheels|xenon|xenondbg|xenonfresh|living)\.spec\.ts$/,
     },
   ],
   webServer: {

@@ -143,4 +143,45 @@ test.describe('@cockpit @ui THE COCKPIT WINDOW', () => {
           { timeout: 5_000, message: 'release centers the stick' })
         .toBe('0%');
     });
+
+  // THE PHONE COCKPIT (v1.17.1, we: "Cockpit controls shouldn't full screen
+  // on phone and are awkward to use") — a real DEVICE law, so cockpit.spec
+  // left the pixel7 ignore list: on a phone the cockpit opens as a COMPACT
+  // bottom sheet (never the whole viewport), ⤢ trades it for full size and
+  // back, and the keycaps are thumb-sized (>= 30 px).
+  test('the phone cockpit: compact sheet, ⤡ toggle, thumb caps @device', async ({ page }) => {
+    test.setTimeout(180_000);
+    const vw = page.viewportSize()!.width, vh = page.viewportSize()!.height;
+    await page.addInitScript(() => localStorage.setItem('archean-app-live', 'on'));
+    await page.goto(`/?craft=${CRAFT}`);
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 90_000 });
+    const seatCi = await page.evaluate(() => {
+      const bp = (window as any).__ARCHEAN__.engine.blueprint;
+      return bp.data.components.findIndex((c: any) => c.type === 'PilotSeat');
+    });
+    await page.evaluate((ci) => (window as any).__ARCHEAN__.engine.flyTo(ci), seatCi);
+    await page.waitForTimeout(700);
+    const canvas = page.locator('canvas').first();
+    const box = await canvas.boundingBox();
+    await canvas.click({ position: { x: box!.width / 2, y: box!.height / 2 } });
+    const sit = page.getByTestId('mode-sit');
+    await expect(sit).toBeVisible({ timeout: 10_000 });
+    await sit.click();
+    const win = page.getByTestId(`cockpit-window-${seatCi}`);
+    await expect(win).toBeVisible();
+    const bb = (await win.boundingBox())!;
+    expect(bb.width, 'NEVER the whole viewport on open').toBeLessThan(vw - 40);
+    expect(bb.height).toBeLessThan(vh - 40);
+    if (vw < 768) {
+      const pad = (await page.getByTestId('cockpit-pad-pilotseat-e').boundingBox())!;
+      expect(pad.width, 'thumb-sized keycaps on phones').toBeGreaterThanOrEqual(30);
+      await page.getByTestId(`cockpit-max-${seatCi}`).click();
+      const big = (await win.boundingBox())!;
+      expect(big.width).toBeGreaterThanOrEqual(vw - 8);
+      expect(big.height).toBeGreaterThanOrEqual(vh - 8);
+      await page.getByTestId(`cockpit-max-${seatCi}`).click();
+      const back = (await win.boundingBox())!;
+      expect(back.height).toBeLessThan(vh - 40);
+    }
+  });
 });

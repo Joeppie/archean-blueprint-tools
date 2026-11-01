@@ -260,6 +260,163 @@ export function xcDiagrams(prog: XcProgram, seatLabels?: Record<number, string>)
   ];
 }
 
+/** ── THE PURE-SVG LAW (v1.17.1, we: "SVG doesn't rendee images") ──
+ *  mermaid renders node labels as <foreignObject><div> HTML (its
+ *  htmlLabels:false does NOT stick in v12) — foreignObject content does
+ *  not render once the SVG is exported, copied or embedded elsewhere: the
+ *  diagrams arrive EMPTY. This post-pass rewrites every foreignObject label
+ *  into a real SVG <text> (font-size kept from the inner style, entities
+ *  re-escaped, vertical centre approximated), making each diagram pure
+ *  vector — renders everywhere, always. Pure + vitest-pinned. */
+export function svgTextOnly(svg: string): string {
+  let out = svg.replace(/<foreignObject([^>]*)>([\s\S]*?)<\/foreignObject>/g,
+    (_all, attrs: string, inner: string) => {
+      const num = (k: string) => {
+        const m = new RegExp(`${k}="(-?[\\d.]+)`).exec(attrs);
+        return m ? parseFloat(m[1]!) : 0;
+      };
+      const fs = /font-size:\s*([\d.]+)px/.exec(inner);
+      const size = fs ? parseFloat(fs[1]!) : 12;
+      const text = inner
+        .replace(/<br\s*\/?>(<\/p>)?/gi, ' ⏎ ')
+        .replace(/<\/p>\s*<p[^>]*>/gi, ' ')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"').replace(/\s+/g, ' ').trim();
+      const x = num('x') + 3, y = num('y') + num('height') / 2 + size * 0.35;
+      const anchor = /text-align:\s*center/.test(inner) ? ' middle' : '';
+      const w = num('width');
+      const clipped = text.length > 46 || text.includes('⏎');
+      const show = text.length > 46 ? text.slice(0, 44) + '…' : text;
+      void w;
+      return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-size="${size}"${anchor}` +
+        ` class="fo2txt${clipped ? ' fo2sm' : ''}">${
+          show.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</text>`;
+    });
+  if (out !== svg && !out.includes('.fo2txt')) {
+    out = out.replace(/<svg\b[^>]*>/, m => `${m}<style>.fo2txt{fill:var(--text-color,#333);
+      dominant-baseline:middle}.fo2sm{font-size:10px !important}</style>`);
+  }
+  return out;
+}
+
+/** ── THE CODE RUNDOWN (v1.17.1, we: "analysis doesn't contain more details
+ *  on code structure or should give a better rundown") ── a structured
+ *  inventory per file plus human-readable summary bullets: entry points,
+ *  functions (args/return/LINES/file-local calls), storage vars, and the
+ *  io census (every input_/output_ with its RESOLVED devices and the
+ *  $var-token it rode). A separate scan from xcDiagrams on purpose: the
+ *  diagram grammar stays frozen while the rundown grows. */
+export interface RundownFn { name: string; args: string; ret: string; lines: number;
+  calls: string[] }
+export interface RundownIo { dir: 'in' | 'out'; token: string; resolved: string[];
+  ch: string; line: number }
+export interface RundownFile { name: string; lines: number; entries: string[];
+  functions: RundownFn[]; vars: { name: string; storage: boolean; type: string }[];
+  includes: string[]; io: RundownIo[] }
+export interface CodeRundown { files: RundownFile[]; fanIn: { device: string; type: string;
+  io: number; readers: number; writers: number }[]; summary: string[] }
+
+export function codeRundown(prog: XcProgram): CodeRundown {
+  const varStrs = new Map<string, Map<string, string[]>>();
+  for (const f of prog.files) varStrs.set(f.name, varLiterals(f));
+  const resolveNames = (file: string, tok: string): string[] => {
+    const t = tok.trim();
+    const hits = (pred: (d: XCDevice) => boolean) =>
+      prog.devices.filter(pred).map(d => d.alias || `io ${d.io}`);
+    if (/^\d+$/.test(t)) return hits(d => d.io === +t);
+    if (/^".*"$/.test(t)) {
+      const a = t.slice(1, -1).toLowerCase();
+      return hits(d => d.alias.toLowerCase() === a);
+    }
+    if (t.startsWith('$')) {
+      const lits = varStrs.get(file)?.get(t) ?? [];
+      const out: string[] = [];
+      for (const l of lits)
+        for (const d of prog.devices)
+          if (d.alias.toLowerCase() === l.toLowerCase() && !out.includes(d.alias)) out.push(d.alias);
+      return out;
+    }
+    return [];
+  };
+
+  const files: RundownFile[] = [];
+  const fnOwners = new Map<string, string>();          // @fn -> file (for calledBy)
+  for (const f of prog.files) {
+    let inFn: string | null = null;
+    let fnStart = 0;
+    const fns: RundownFn[] = [];
+    const entries: string[] = [];
+    const vars: RundownFile['vars'] = [];
+    const includes: string[] = [];
+    const io: RundownIo[] = [];
+    const lines = f.code.split('\n');
+    const bump = (i: number) => {
+      if (inFn) { const fn = fns.find(x => x.name === inFn); if (fn) fn.lines = i - fnStart + 1; inFn = null; }
+    };
+    lines.forEach((raw, i) => {
+      const line = stripNoise(raw);
+      const declM = /^\s*(?:recursive\s+)?function\s+@([A-Za-z0-9_]+)(?:\(([^)]*)\))?\s*(?::\s*(number|text))?/.exec(line);
+      if (declM) {
+        bump(i - 1);
+        fnOwners.set('@' + declM[1]!, f.name);
+        fns.push({ name: declM[1]!, args: declM[2] ?? '', ret: declM[3] ?? '', lines: 1, calls: [] });
+        inFn = declM[1]!; fnStart = i;
+        return;
+      }
+      const entM = new RegExp('^\\s*(' + ENTRIES.join('|') + ')\\b').exec(line);
+      if (entM) { bump(i - 1); if (!entries.includes(entM[1]!)) entries.push(entM[1]!); }
+      const varM = /^\s*(storage\s+)?var\s+(\$[A-Za-z0-9_]+)\s*(?::\s*(\w+))?/.exec(line);
+      if (varM) vars.push({ name: varM[2]!, storage: !!varM[1], type: varM[3] ?? 'var' });
+      const inc = /^\s*include\s+"([^"]+)"/.exec(line);
+      if (inc) includes.push(inc[1]!);
+      for (const m of line.matchAll(/@([A-Za-z0-9_]+)\s*\(/g)) {
+        const quotes = (line.slice(0, m.index ?? 0).match(/"/g) ?? []).length;
+        if (quotes % 2) continue;
+        const tok = '@' + m[1]!;
+        if (inFn) { const fn = fns.find(x => x.name === inFn);
+          if (fn && m[1] !== inFn && !fn.calls.includes(m[1]!)) fn.calls.push(m[1]!); }
+        void tok;
+      }
+      const ioM = IO_RE.exec(line);
+      if (ioM) io.push({ dir: ioM[1] === 'input' ? 'in' : 'out', token: ioM[3]!,
+        resolved: resolveNames(f.name, ioM[3]!), ch: ioM[4]!.trim(), line: i + 1 });
+    });
+    bump(lines.length - 1);
+    files.push({ name: f.name, lines: lines.length, entries, functions: fns, vars, includes, io });
+  }
+  void fnOwners;
+
+  // fan-in census over the RESOLVED devices
+  const fan = new Map<string, { device: string; type: string; io: number; readers: number; writers: number }>();
+  for (const f of files)
+    for (const ev of f.io)
+      for (const name of ev.resolved) {
+        const d = prog.devices.find(x => (x.alias || `io ${x.io}`) === name);
+        const k = name + '|' + (d?.io ?? -1);
+        if (!fan.has(k)) fan.set(k, { device: name, type: d?.type ?? '?', io: d?.io ?? -1, readers: 0, writers: 0 });
+        if (ev.dir === 'in') fan.get(k)!.readers++; else fan.get(k)!.writers++;
+      }
+
+  const summary: string[] = [];
+  for (const f of files) {
+    const storage = f.vars.filter(v => v.storage).length;
+    const w = f.io.filter(i => i.dir === 'out').length, r = f.io.filter(i => i.dir === 'in').length;
+    summary.push(`${f.name}: ${f.lines} lines · entries ${f.entries.length ? f.entries.join('/') : '—'}` +
+      ` · ${f.functions.length} function(s)${storage ? ` · ${storage} storage var(s)` : ''}` +
+      ` · reads ${r}, writes ${w}`);
+    const varTok = f.io.find(i => i.token.startsWith('$') && i.resolved.length > 1);
+    if (varTok) summary.push(`${f.name}: token ${varTok.token} is a SWITCH — resolves to ` +
+      `${varTok.resolved.join(', ')} (assigned strings in source)`);
+    const heaviest = [...f.functions].sort((a, b) => b.lines - a.lines)[0];
+    if (heaviest && heaviest.lines > 15) summary.push(`${f.name}: heaviest @${heaviest.name}` +
+      ` (${heaviest.lines} lines${heaviest.calls.length ? `, calls @${heaviest.calls.join(', @')}` : ''})`);
+  }
+  const topFan = [...fan.values()].sort((a, b) => (b.readers + b.writers) - (a.readers + a.writers))[0];
+  if (topFan) summary.push(`bus fan-in top: ${topFan.device} (${topFan.type}) read ${topFan.readers}× written ${topFan.writers}×`);
+  return { files, fanIn: [...fan.values()], summary };
+}
+
 /** does the craft carry flight surfaces? (the analysis report's flight
  *  gate — we: "flight characteristics … not logical for a rover or for
  *  Mario") */
@@ -275,7 +432,7 @@ export function craftIsFlyable(bp: { data: { components: { type: string }[] } })
  *  surfaces (a rover or a Mario cabinet gets no aero theatre). PURE string
  *  builder — the dialog hands it exactly what it rendered. */
 export interface ReportSection { compAlias: string; plateTop?: string; plateFront?: string;
-  diagrams: XcDiagram[]; svgs: (string | null)[] }
+  diagrams: XcDiagram[]; svgs: (string | null)[]; rundown?: CodeRundown }
 export interface ReportFlight { speed: number; mass: number; stallSpeed: number; ldMax: number;
   staticMarginPct: number; pitchVerdict: string; yawVerdict: string;
   rows: { axis: string; part: string; authority: number; buried?: boolean }[] }
@@ -299,13 +456,40 @@ table{border-collapse:collapse}td,th{border:1px solid #22314a;padding:4px 10px;f
 .stable{background:#123d2a;color:#7dffcf}.unstable{background:#4a1520;color:#ff9d9d}
 .neutral,.unknown{background:#3a3418;color:#ffe08a}
 .note{color:#8b93a1;font-size:12px;max-width:820px}</style></head><body>
-<h1>Archean craft analysis — ${esc(opts.craft)}</h1>`];
+<h1>Archean craft analysis — ${esc(opts.craft)}</h1>
+<p class="note">Scroll a diagram with the scrollbar, wheel-zoom inside it,
+drag with the middle/space key, double-click resets (script at the bottom).</p>
+<nav>${opts.sections.map(s => `<a href="#comp-${esc(s.compAlias)}"
+  style="color:#8fd4ff;margin-right:14px;font-size:12px">▸ ${esc(s.compAlias)}</a>`).join('')}</nav>`];
   for (const s of opts.sections) {
-    parts.push(`<h2>Computer ${esc(s.compAlias)}</h2>`);
+    parts.push(`<h2 id="comp-${esc(s.compAlias)}">Computer ${esc(s.compAlias)}</h2>`);
     if (s.plateTop || s.plateFront) parts.push(`<div class="plates">
 <figure><img src="${s.plateTop ?? ''}"><figcaption>topside (orthographic; amber = actors,
 amber lines = cabled runs with io tags)</figcaption></figure>
 <figure><img src="${s.plateFront ?? ''}"><figcaption>front view</figcaption></figure></div>`);
+    if (s.rundown) {
+      parts.push(`<h3>Code structure</h3><ul style="font-size:12px;color:#c8d4e4">` +
+        s.rundown.summary.map(b => `<li>${esc(b)}</li>`).join('') + `</ul>
+<table><tr><th>file</th><th>lines</th><th>entries</th><th>functions</th>
+<th>storage vars</th><th>io reads / writes</th></tr>` +
+        s.rundown.files.map(f => `<tr><td>${esc(f.name)}</td><td>${f.lines}</td>
+<td>${esc(f.entries.join(', ') || '—')}</td>
+<td>${f.functions.map(fn => esc('@' + fn.name) + (fn.ret ? `: ${fn.ret}` : '')).join('<br>') || '—'}</td>
+<td>${esc(f.vars.filter(v => v.storage).map(v => v.name).join(', ') || '—')}</td>
+<td>${f.io.filter(i => i.dir === 'in').length} / ${f.io.filter(i => i.dir === 'out').length}</td></tr>`).join('') +
+        `</table><h4>Device fan-in</h4><table><tr><th>device</th><th>type</th><th>io</th>
+<th>reads</th><th>writes</th></tr>` +
+        s.rundown.fanIn.map(x => `<tr><td>${esc(x.device)}</td><td>${esc(x.type)}</td><td>${x.io}</td>
+<td>${x.readers}</td><td>${x.writers}</td></tr>`).join('') + '</table>');
+      for (const f of s.rundown.files) {
+        if (!f.functions.length) continue;
+        parts.push(`<details><summary style="cursor:pointer;font-size:12px;color:#9fb0c8">functions of ${esc(f.name)}</summary>
+<table><tr><th>function</th><th>args</th><th>returns</th><th>lines</th><th>calls</th></tr>` +
+          f.functions.map(fn => `<tr><td>@${esc(fn.name)}</td><td>${esc(fn.args || '—')}</td>
+<td>${esc(fn.ret || '—')}</td><td>${fn.lines}</td><td>${fn.calls.map(c => esc('@' + c)).join(', ') || '—'}</td></tr>`).join('') +
+          '</table></details>');
+      }
+    }
     s.diagrams.forEach((d, i) => {
       parts.push(`<h3>${esc(d.title)}</h3>`);
       if (s.svgs[i]) parts.push(`<div class="mm">${s.svgs[i]}</div>`);
@@ -334,6 +518,14 @@ ${f.rows.map(r => `<tr><td>${esc(r.axis)}</td><td>${r.buried
     parts.push(`<h2>Flight characteristics</h2><p class="note">Not applicable — this craft
 carries no flight-control surfaces (rover/cabinet logic); the flight section is gated out.</p>`);
   }
-  parts.push('</body></html>');
+  parts.push(`<script>
+for (const box of document.querySelectorAll('.mm')) {
+  let k = 1;
+  const apply = () => { const svg = box.querySelector('svg'); if (svg) svg.style.transform = 'scale(' + k + ')'; svg.style.transformOrigin = '0 0'; };
+  box.addEventListener('wheel', e => { k = Math.min(6, Math.max(0.2, k * (e.deltaY < 0 ? 1.15 : 0.87))); apply(); e.preventDefault(); }, { passive: false });
+  box.addEventListener('dblclick', () => { k = 1; apply(); });
+  box.style.cursor = 'grab';
+}
+</script></body></html>`);
   return parts.join('\n');
 }

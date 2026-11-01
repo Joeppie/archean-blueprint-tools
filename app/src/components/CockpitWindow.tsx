@@ -48,6 +48,7 @@ export default function CockpitWindow(p: { ci: number; alias: string; onClose: (
   usePilotKeys(true);
   const [tick, setTick] = useState(0);
   const [lock, setLock] = useState(pilotLocked());
+  const [big, setBig] = useState(false);   // ⤢ compact ↔ full (v1.17.1)
   const [repeat, setRepeat] = useState(false);
   const latched = useRef<Set<string>>(new Set());
   const [down, setDown] = useState<Set<string>>(new Set());
@@ -123,8 +124,12 @@ export default function CockpitWindow(p: { ci: number; alias: string; onClose: (
       onPointerCancel={() => padUp(k)}
 
       className={`select-none touch-none rounded border text-center leading-none
-        ${small ? 'h-[16px] w-[16px] text-[8px]' : 'h-[26px] w-[26px] text-[10px]'}
-        ${k === 'space' ? '!w-[92px]' : ''}
+        /* v1.17.1 touch law (we: cockpit "awkward to use" on phone): the
+           phone sheet gets THUMB-SIZED caps — 34 px, space 120 px — the
+           keyboard just scrolls sideways for the width (§ keys box). */
+        ${small ? 'h-[16px] w-[16px] text-[8px] max-sm:h-[24px] max-sm:w-[24px]'
+                : 'h-[26px] w-[26px] text-[10px] max-sm:h-[34px] max-sm:w-[34px] max-sm:text-[12px]'}
+        ${k === 'space' ? '!w-[92px] max-sm:!w-[120px]' : ''}
         ${down.has(k) ? 'border-[#8fd4ff] bg-[#2b4a6b] text-white'
           : live(k) ? 'border-[#3ddc55]/70 bg-[#20401f] text-[#b7ecb7]'
             : 'border-[#3a4a6a] bg-[#1d2b42] text-[#cfe1ff] hover:bg-[#27395c]'}`}>
@@ -165,11 +170,20 @@ export default function CockpitWindow(p: { ci: number; alias: string; onClose: (
     <FloatingWindow
       id={`cockpit-${p.ci}`} testid={`cockpit-window-${p.ci}`}
       minW={280} minH={200}
-      initial={(vw, vh) => ({
-        x: Math.max(12, vw * 0.60 + (p.ci % 4) * 24),
-        y: Math.min(vh - 330, 90 + (p.ci % 5) * 22),
-        w: 316, h: 260,
-      })}
+      /* v1.17.1 THE PHONE COCKPIT (we: "cockpit controls shouldn't full
+         screen on phone and are awkward to use"): fullNarrow=false keeps
+         the phone out of the fullscreen path — the cockpit opens as a
+         COMPACT bottom sheet sized to the keyboard, draggable by its title
+         to any thumb reach; ⤢ in the title trades compact ↔ full when the
+         hands want the whole screen. */
+      fullNarrow={false}
+      maximized={big}
+      initial={(vw, vh) => (vw < 768
+        ? { x: Math.max(4, (vw - 340) / 2), y: Math.max(8, vh - 322),
+            w: Math.min(340, vw - 8), h: 314 }
+        : { x: Math.max(12, vw * 0.60 + (p.ci % 4) * 24),
+            y: Math.min(vh - 330, 90 + (p.ci % 5) * 22),
+            w: 316, h: 260 })}
       header={
         <div className="flex min-w-0 items-center gap-1.5 text-[11px]">
           <span className="shrink-0 font-semibold">🕹 {p.alias}</span>
@@ -189,6 +203,10 @@ export default function CockpitWindow(p: { ci: number; alias: string; onClose: (
               }} />
             ⟳
           </label>
+          <button className="shrink-0 px-1 text-[#8a93a0] hover:text-white"
+            data-testid={`cockpit-max-${p.ci}`} aria-label="toggle full size"
+            title={big ? 'back to the compact cockpit' : 'full-screen cockpit'}
+            onClick={() => setBig(x => !x)}>{big ? '⤡' : '⤢'}</button>
           <button className="shrink-0 text-[#8a93a0] hover:text-white"
             onClick={p.onClose} aria-label="stand up">✕</button>
         </div>
@@ -200,8 +218,12 @@ export default function CockpitWindow(p: { ci: number; alias: string; onClose: (
           seat channels appear here.
         </div>
       )}
-      {/* THE KEYBOARD (organic layout, v1.16.15) */}
-      <div className="flex items-start gap-3 pl-1 pt-1" data-testid={`cockpit-keys-${p.ci}`}>
+      {/* THE KEYBOARD (organic layout, v1.16.15). v1.17.1: the phone sheet
+          is narrower than the keyboard — scroll it sideways instead of
+          crushing the keycaps below thumb size (the "awkward to use" fix:
+          the pads stay 30 px targets; a wide keyboard simply slides). */}
+      <div className="flex items-start gap-3 overflow-x-auto pl-1 pt-1 max-sm:gap-1.5"
+        data-testid={`cockpit-keys-${p.ci}`}>
         <div className="flex flex-col gap-[3px]">
           {grid.map((r, ri) => (
             <div key={ri} className="flex gap-[3px]">
