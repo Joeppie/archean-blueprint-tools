@@ -27,6 +27,7 @@
     "codemirror": "^6.0.2",
     "immer": "^11.1.21",
     "mermaid": "^12.2.0",
+    "meshoptimizer": "^1.1.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "three": "^0.186.1",

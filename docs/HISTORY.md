@@ -6170,3 +6170,29 @@ scale/representation/decimate knobs, stats + silhouette IoU; the preview
 quantiser IS the writer's quantiser (hullify preview/apply pair law).
 Browser tier loads GLB/glTF/OBJ/STL/PLY (the download-site corpus);
 FBX/.blend hop through the python tier (assimp; .blend is never parsed).
+
+## 46. 🧊 THE EXTERNAL MODEL IMPORTER lands — tier one (we: "Do it, use the
+## most logical option, and yes, optimize meshes, because most models are
+## just too complex."; 2026-11-02)
+The research (§ 45 + docs/IMPORT-3D.md) became the product's tier one the
+same day: engine/import.ts — the ONE quantiser the preview law demanded:
+normalise (axis map Y/Z-up, yaw, span-fit in cells, centre on g=6) →
+meshoptimizer QEM decimation (weld by lattice key, LockBorder from the
+directed-edge census, tolerance escalation 0.01→0.1→0.3 — meshopt is
+all-or-nothing on its relative target_error and v1.1 returns [indices,
+error]) → snap + weld + degen cull → blocks: SDF-flood voxels (yz-bucket
++x-ray parity, canonical Möller–Trumbore, irrational sample offsets so no
+ray ever grazes a lattice diagonal — the exact cube counts 13 824 solid /
+3 176 shell at span 24) → shell → greedy box merge (volume identity, size
+cap 24) → blockFromCell records | skin: the pinned encodeSkinTri→splitFace
+chain + non-manifold edge census. ImportDialog.tsx rides FloatingWindow:
+drop a GLB/glTF/OBJ/STL/PLY → live preview over the cell grid with the 3 m
+frame boxes (the window legal zone) + ghost + real-quantised layers + red
+non-manifold lines, knobs (span/up/yaw/offsets/mode/budget/shell/colours/
+material), live stats card, Import commits through the doc funnels. File ▸
+row + palette row (Findability law). Pins: import.test 20 + import.spec
+@import (exact cube counts through the real loader + canvas). meshoptimizer
+declared as a direct dep (was transitive; MIT). Dev pair: the whole feature
+is browsable on :5175. The python tier (FBX pre-bake, Manifold3d self-union
+repair for soups, α-wrap for scans, make_import_test fixtures) stays
+backlog.

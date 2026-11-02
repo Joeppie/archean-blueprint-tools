@@ -46,6 +46,7 @@ const ScreensDockLazy = lazy(() => import('./components/ScreensDock'));
 // ⚗ THE CRAFT ANALYSIS (v1.17.0): lazy — the mermaid runtime chunks with it,
 // never with the boot path.
 const AnalysisWindowLazy = lazy(() => import('./components/AnalysisWindow'));
+const ImportDialogLazy = lazy(() => import('./components/ImportDialog'));
 const AutosavesDialogLazy = lazy(() => import('./components/AutosavesDialog'));
 const HudDialogLazy = lazy(() => import('./components/HudDialog'));
 const BeaconDockLazy = lazy(() => import('./components/BeaconDock'));
@@ -364,6 +365,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // dashboard faces all ride ONE running computer).
   // ⚗ analysis window (v1.17.0)
   const [analysisOpen, setAnalysisOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [screensOpen, setScreensOpen] = useState(
     // v1.13.2 deep link (?craft=<id>&dash=<surfaceKey>, e.g. dash=screen%230):
     // the ▣ Screens dock opens booted toward that surface, whose ZOOM WINDOW
@@ -1993,6 +1995,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         group: 'Computers & HUDs', run: () => setHudCi(h.ci) });
     cmds.push({ id: 'save', label: 'Save (download)', hint: 'Ctrl+S', group: 'Craft', run: () => save() });
     cmds.push({ id: 'open-file', label: 'Open file…', group: 'File', run: () => openFile() });
+    cmds.push({ id: 'import-3d', label: '🧊 Import 3D model…',
+      hint: 'glb · obj · stl · ply', group: 'File', run: () => setImportOpen(true) });
     cmds.push({ id: 'refresh', label: 'Refresh craft (redownload)', group: 'Craft',
       run: () => { forceRef.current = true; setRetrySeq(s => s + 1); } });
     cmds.push({ id: 'undo', label: 'Undo', hint: 'Ctrl+Z', group: 'Craft', run: () => undo() });
@@ -2292,7 +2296,8 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
               !window.confirm('Start a NEW craft? Unsaved changes to this one are lost (download it first with Save).')) return;
           ctxRef.current = null; setBp(null); openText(emitNew());
         }}
-        onOpen={openFile} onSave={save} onClose={onBack} onBack={onBack}
+        onOpen={openFile} onImport={() => setImportOpen(true)}
+        onSave={save} onClose={onBack} onBack={onBack}
         onRefresh={craft ? () => { forceRef.current = true; setRetrySeq(s => s + 1); } : undefined}
         tools={(toolsMod?.TOOLS ?? []).map(t => ({ id: t.id, label: t.label, icon: t.icon }))}
         onTool={id => setToolOpen(id)}
@@ -2492,6 +2497,15 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
             )}
             {/* ▣ SCREENS bottom tab (v1.13.x): live dashboards + virtual
                 surfaces of the running computer (top-bar ▣ button) */}
+            {importOpen && bp && ctxRef.current && (
+              /* 🧊 THE PREVIEW LAW (docs/IMPORT-3D.md § 7): a live lattice-grid
+                 preview; the preview quantiser IS the writer's quantiser */
+              <Suspense fallback={null}>
+                <ImportDialogLazy ctx={ctxRef.current}
+                  onClose={() => setImportOpen(false)}
+                  onApplied={m => { sceneChanged(); setToolMsg(m); }} />
+              </Suspense>
+            )}
             {analysisOpen && bp && (
               /* ⚗ mermaid diagrams + vessel plates + flight gate (v1.17.0) */
               <Suspense fallback={null}>

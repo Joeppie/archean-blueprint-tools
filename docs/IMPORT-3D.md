@@ -1,6 +1,12 @@
 # IMPORT-3D.md — external 3D models → Archean geometry (research)
 
-Researched 2026-11-02. Goal: take an EXISTING 3D asset — a ship glTF, a statue
+Researched 2026-11-02. **STATUS: tier ONE LANDED v1.17.3** —
+`engine/import.ts` (the quantiser, 20 vitest pins) + `components/
+ImportDialog.tsx` (the § 7 preview) + File ▸ / palette entry; the § 8
+python tier (heavy FBX/.blend pre-bake, α-wrap scan repair, corpus
+fixtures) stays BACKLOG.
+
+Goal: take an EXISTING 3D asset — a ship glTF, a statue
 scan, an STL, an AI-generated mesh — and emit a VALID `blueprint.json` of
 blocks and/or hull skin triangles, so it flies as an Archean craft. All the
 format constraints below are quoted from FORMAT.md — not re-derived.
@@ -203,15 +209,24 @@ The law:
   the doc funnels.
 
 Format tiers (the "normal/common 3d formats" of the law):
-- **Browser drag-drop**: GLB/glTF, OBJ, STL, PLY — the three.js loaders
-  (GLTFLoader/OBJLoader/STLLoader/PLYLoader). This covers the download-site
+- **Browser drag-drop**: GLB/glTF, OBJ (+MTL colour pairs), STL, PLY, 3DS —
+  the three.js loaders (GLTFLoader/OBJLoader/MTLLoader/STLLoader/PLYLoader/
+  TDSLoader). This covers the download-site
   corpus (Sketchfab/Fab/CGTrader are GLB-first) and every Blender export.
 - **FBX**: a python-tier hop (assimp → GLB). Browser FBX parsers are
   SDK-derived and license-fragile; pre-baking is the clean door.
 - **.blend**: never parsed. "Export GLB" in Blender is one menu hop; batch
   via `bpy` headless (python tier).
+- **.gsm** (asked 2026-11-02): the 3D-domain .gsm is a **Graphisoft ArchiCAD
+  library part** — a parametric object in GDL SOURCE code (the geometry is
+  computed by ArchiCAD's interpreter; no public parser, not a mesh). The
+  honest door: Archicad ▸ File ▸ Libraries and Objects ▸ Export 3D
+  Geometry… ▸ OBJ, then drop the OBJ. (The other .gsm: GSM 06.10 audio —
+  not a 3D format at all.)
 - Textures: baseColor factors + vertex colours quantise directly (k-means →
   slots, LINEAR); baked images sample per-face at the triangle centroid.
+  The MTL Kd colour rides into the preview for OBJ+MTL pairs; image maps
+  are deliberately unread by the palette quantiser.
 
 The TS tier must run the loop at UI speed (tens–hundreds of ms per
 requantise): **manifold-3d** (npm, MIT — the wasm twin of the python kernel)

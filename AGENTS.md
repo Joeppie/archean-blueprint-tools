@@ -275,6 +275,32 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   storageState ships `archean-app-backdrop=none` (BACKDROP-SKIP FIXTURE LAW:
   a spec gaining a panorama law clicks the row explicitly).
 
+### External model import (v1.17.3, docs/IMPORT-3D.md)
+- THE PREVIEW LAW: 🧊 File ▸ Import 3D model… / palette row opens
+  `ImportDialog.tsx` — a live preview over the 0.25 m lattice grid with the
+  3 m frame boxes drawn (the triangle-window legal zone), the decimated
+  source as a ghost, the quantised result as the game renders it, red
+  non-manifold edges; every knob requantises live and the preview runs
+  `engine/import.ts` — the SAME module Import commits with (hullify
+  preview/apply pair law; never preview a lie).
+- The quantiser: normalise (axis map + span fit) → meshoptimizer QEM
+  (decimate default ON, budget knob, LockBorder, tolerance escalation) →
+  lattice snap + weld + degen cull → `blocks` = SDF-flood voxels (yz-bucket
+  +x rays, irrational sample offsets — never graze a diagonal) → shell →
+  greedy box merge (size ≤ 24, pos 0..12 via `blockFromCell`) | `skin` =
+  the pinned `encodeSkinTri`→`splitFace` chain. Honest counts ship: cells,
+  blocks, rescued/skipped faces, non-manifold, mass.
+- Formats: GLB/glTF, OBJ (+MTL pairs — Kd colours ride, image maps are
+  deliberately unread by the palette quantiser), STL, PLY, 3DS (TDSLoader)
+  load in-browser. FBX/.blend: pre-bake GLB (Blender) — the python tier
+  (Backlog) owns heavy repair (Manifold3d self-union, α-wrap). .gsm is an
+  Archicad GDL library part (parametric source, no mesh) — the dialog
+  answers with the File ▸ Libraries and Objects ▸ Export 3D Geometry ▸ OBJ
+  pointer.
+- Commit law: blocks push + `docArrayInsert(['data','blocks'])` per record
+  (the placeBlock pattern), skins via `appendTrianglesDoc`; then
+  `sceneChanged()`. e2e: `@import` (exact cube counts).
+
 ### Xenon workspace (computer / debugger / screens)
 - THE CADENCE LAW: the VM cycles at 25 Hz (`CYCLE_MS = 40`, shim
   `xc_set_cycle_ms`); React panels coalesce ≤ 10 Hz; canvases blit EVERY
@@ -957,7 +983,10 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   sleeps. e2e running WHILE files are edited gives phantom failures: re-run
   flakes on the final tree before believing them.
 - LESSONS: probe face-INTERIOR pixels through the engine's own pick law
-  (canvas fractions are NOT aspect-stable); camera SETTLE = two identical
+  (canvas fractions are NOT aspect-stable); OBJ face-lists FAN (a 6-vertex
+  `f` line is ONE face → fan-triangulates into 4 tris, 2 degenerate at the
+  lattice — a quantiser's degen count stays CORRECT; import fixtures write
+  explicit per-triangle `f` lines — the v1.17.3 import catch); camera SETTLE = two identical
   `camPos()` samples; a live-browser probe must NEVER dynamic-import an app
   module by bare URL to reach a singleton — after an HMR edit the app
   imports the `?t=`-busted copy and the bare import gets a SECOND, EMPTY
@@ -1375,7 +1404,7 @@ behind a small link at the END of the gallery. Pages serves the GENERATED
   config.py), byte-identical saves, no releases without the user asking.
 
 ## Backlog (live items)
-- **External model import (research LANDED, code pending)**: docs/IMPORT-3D.md
+- **External model import (TIER ONE LANDED v1.17.3 — engine/import.ts + ImportDialog; python tier pending)**: docs/IMPORT-3D.md
   — the pipeline (trimesh load → Manifold3d self-union repair → QEM decimate →
   lattice quantise + union fixpoint → frame-split `encodeSkinTri` twin /
   SDF-flood voxel + greedy box-merge + blockshape bevels) as

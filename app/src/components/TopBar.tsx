@@ -34,6 +34,7 @@ interface Props {
   onRedo?: () => void;
   onNew: () => void;
   onOpen: () => void;
+  onImport?: () => void;
   onSave: (as?: string) => void;
   onClose: () => void;
   onBack: () => void;
@@ -199,6 +200,9 @@ export default function TopBar(p: Props) {
           </>)}
           <Item testid="file-new" label="New craft" onClick={() => { close(); p.onNew(); }} />
           <Item testid="file-open" label="Open file…" onClick={() => { close(); p.onOpen(); }} />
+          <Item testid="file-import" label="Import 3D model…"
+            hint="glb · obj · stl · ply"
+            onClick={() => { close(); p.onImport?.(); }} />
           <Sep />
           <Item testid="file-save" label={p.dirty ? '● Save (download)' : 'Save (download)'}
             hint="Ctrl+S" onClick={() => { close(); p.onSave(); }} />

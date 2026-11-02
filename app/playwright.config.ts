@@ -74,7 +74,7 @@ export default defineConfig({
       // v1.17.1: cockpit REMOVED from the list — it carries a real device
       // law now (the PHONE COCKPIT compact sheet, @device).
       testIgnore:
-        /(app|asset-space|blockedit|blockplace|download|gizmo|hinge|isolation|liveedit|paint|pipes|playerhud|propeller|savefidelity|staleness|subride|sym|views|wheels|xenon|xenondbg|xenonfresh|living)\.spec\.ts$/,
+        /(app|asset-space|blockedit|blockplace|download|gizmo|hinge|import|isolation|liveedit|paint|pipes|playerhud|propeller|savefidelity|staleness|subride|sym|views|wheels|xenon|xenondbg|xenonfresh|living)\.spec\.ts$/,
     },
   ],
   webServer: {
