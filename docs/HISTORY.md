@@ -6149,3 +6149,24 @@ clicks route to them (xc_screen_index), the host never shows them.
 Pins re-cut: the Virtual tab is empty for computer pumps, the
 first-virtual deep link is gone (the buzzer bench pins audio through the
 XenonTest panel). Devkit craft now: 9 surfaces, all painted boards.
+
+## 45. THE PREVIEW LAW — import never runs blind (we: "If we do any
+## importing I want there to be a preview window, and it should feature a
+## 3d grid system so we can see how it would intersect with where triangles
+## can be placed, so we could tweak scale/size …"; 2026-11-02)
+The external-model import RESEARCH landed as docs/IMPORT-3D.md: the survey
+(trimesh/pyassimp load · Manifold3d self-union repair · QEM decimation ·
+SDF-flood/dvx voxelisation + greedy box-merge for blocks · the
+quantise-union-fixpoint lattice-snapping loop + the frame-split
+encodeSkinTri twin for skins · CGAL α-wrap + Poisson for scans · the
+1-cell-scale prior-art ecosystem: ObjToSchematic with its stair/slab
+shape-matching, Bloxelizer, BlockBlender, BrickFormer · photogrammetry +
+AI image→3D as model SOURCES) plus the adapted pipeline and the licence
+census (all MIT/BSD/Apache — the poison pill kept out: TetGen-derived
+pymeshfix). The requirement law for the feature day: the import surface is
+a LIVE PREVIEW over the 0.25 m lattice grid — frame borders = the triangle
+window legal zone, ghost + real-quantised layers, legality overlays, live
+scale/representation/decimate knobs, stats + silhouette IoU; the preview
+quantiser IS the writer's quantiser (hullify preview/apply pair law).
+Browser tier loads GLB/glTF/OBJ/STL/PLY (the download-site corpus);
+FBX/.blend hop through the python tier (assimp; .blend is never parsed).

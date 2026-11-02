@@ -21,6 +21,7 @@ imperatives; put the WHY in a satellite, link it.
 - Satellites own their domain; AGENTS.md links, never copies: FORMAT.md
   (format knowledge base), docs/HISTORY.md (provenance),
   docs/TEST-PYRAMID.md (test strategy + baselines), docs/E2E-INVENTORY.md,
+  docs/IMPORT-3D.md (research: external 3D models → blocks/skins),
   PERF.md (perf baseline + harmful candidates), LOCATIONS.md (installs,
   paths, URLs), MATRIX.md, GEAR-F-A18F.md (rig-chain audit method),
   LIVING-CRAFT.md (the self-running craft: actuator sim laws, power net,
@@ -84,6 +85,8 @@ NOTICE.md                       licensing
 docs/HISTORY.md                 archive of dated narratives (provenance only)
 docs/TEST-PYRAMID.md            test strategy + measured baselines
 docs/E2E-INVENTORY.md           e2e spec inventory (tiers, fixtures)
+docs/IMPORT-3D.md               research: external 3D models → Archean
+                                blocks/skins (libraries + adapted pipeline)
 REWRITE.md                      rewrite plan (landed phases marked; P8 live)
 ```
 app/: components/ (React), engine/ (pure logic + scene.ts + xenoncode/
@@ -1372,6 +1375,17 @@ behind a small link at the END of the gallery. Pages serves the GENERATED
   config.py), byte-identical saves, no releases without the user asking.
 
 ## Backlog (live items)
+- **External model import (research LANDED, code pending)**: docs/IMPORT-3D.md
+  — the pipeline (trimesh load → Manifold3d self-union repair → QEM decimate →
+  lattice quantise + union fixpoint → frame-split `encodeSkinTri` twin /
+  SDF-flood voxel + greedy box-merge + blockshape bevels) as
+  `tools/import_model.py`; the python quantiser mirrors the pinned TS window
+  law (cross-pin like mass.ts ⇄ game_data.py). THE PREVIEW LAW (§ 7, we:
+  "there to be a preview window … 3d grid system … tweak scale/size"):
+  import is a live preview over the lattice grid with the frame-window boxes
+  rendered, live knobs (scale/mode/decimate/shell/bevel/palette), the preview
+  quantiser = the writer's quantiser; GLB/glTF/OBJ/STL/PLY load in-browser,
+  FBX/.blend go through the python tier.
 - **`enough_power` in the shim**: the device function is a stub returning 1
   (v1.15.6 boundary) — wiring the power net into the VM (an unpowered
   computer's `enough_power` reads 0, the Crafter's own "Not enough power"
