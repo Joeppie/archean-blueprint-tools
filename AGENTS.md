@@ -1466,6 +1466,13 @@ behind a small link at the END of the gallery. Pages serves the GENERATED
   config.py), byte-identical saves, no releases without the user asking.
 
 ## Backlog (live items)
+- **phoneux.spec 'the Screens dock keeps its ✕ close reachable on phones'
+  is KNOWN-RED (pre-existing, bisect-proven red at HEAD a474788 with a clean
+  tree — NOT caused by the import batch)**: the deep-linked workshop craft's
+  zoom-window bar (`*-fullexit`) never appears; the fixture's expectations
+  have drifted from the current workshop craft. Re-derive the leg against
+  the craft (per the LESSONS 'when an identity law changes, RE-AUDIT every
+  pin that sealed its old trigger').
 - **External model import (TIER ONE LANDED v1.17.3 — engine/import.ts + ImportDialog; python tier pending)**: docs/IMPORT-3D.md
   — the pipeline (trimesh load → Manifold3d self-union repair → QEM decimate →
   lattice quantise + union fixpoint → frame-split `encodeSkinTri` twin /
