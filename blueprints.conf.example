@@ -1,0 +1,25 @@
+# blueprints.conf — machine-local path config (gitignored; see tools/config.py)
+# Copy to blueprints.conf at the repo root and adjust. Precedence:
+#   env (ARCHEAN_BLUEPRINTS / ARCHEAN_WORKSHOP / ARCHEAN_GAME) > this file > defaults.
+# Relative paths resolve against this repo's root. '~' is expanded.
+
+# The blueprint corpus: a folder of <workshop-id>/blueprint.json directories.
+# Default: <repo>/testdata. Point it anywhere — the repo no longer needs to
+# live inside the Steam tree. tests/run_tests.sh and regtest serve/reach it
+# automatically (regtest.html also takes ?corpus=<url>).
+#blueprints = /srv/archean/blueprints
+
+# Steam client's workshop download dir (tools/add_workshop.py ingest source).
+# Default: ~/.local/share/Steam/steamapps/workshop/content/2941660
+#workshop_content = /home/you/.local/share/Steam/steamapps/workshop/content/2941660
+
+# Archean-game install with modules/ (tools/extract_models.py source).
+# Default: ~/.local/share/Steam/steamapps/common/Archean/Archean-game
+#game_dir = /mnt/games/Archean/Archean-game
+
+# The client's PLAYER HUD folder: every subfolder is one installed player
+# HUD (main.xc + its includes + the game's compiled xc_program.bin).
+# The app's /hud route lists/edits them (Xenon ▸ Player HUDs).
+# Default: the `hud` folder beside the blueprints dir (= the install's
+# Archean-data/client/hud). Env: ARCHEAN_HUD.
+#hud_dir = /home/you/.steam/.../Archean-data/client/hud
