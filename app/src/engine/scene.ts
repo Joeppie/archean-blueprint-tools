@@ -6311,7 +6311,10 @@ void main() {
       comps: this.compRoots.size,
       subs: this.subCount,
       draws: this.renderer?.info.render.calls ?? 0,
-      ok: this.batch !== null && (this.batch.stats.blocks > 0 || this.batch.stats.hullTris > 0),
+      ok: this.batch !== null,   // v1.17.3: the probe's law is BUILD SUCCESS.
+      // The old rule (blocks>0 || hullTris>0) predates the empty craft — a
+      // PilotSeat-only hull is a valid scene, not a broken one. Sparse probe
+      // craft keep polling their seams; the title just stops lying.
       tier: this.heavy ? 'lite' : 'full',
       loads: this.loadCount,
       loadPhases: this.lastLoadPhases,

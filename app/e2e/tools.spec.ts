@@ -22,8 +22,12 @@ const loads = (page: Page) => page.evaluate(() =>
   (window as unknown as { __ARCHEAN__: { stats: () => { loads: number } } }).__ARCHEAN__.stats().loads);
 
 async function openNew(page: Page) {
-  await page.goto('/');
-  await page.getByTestId('gallery-new').click();
+  // v1.17.3: the New-craft doc is EMPTY ('empty craft should actually be
+  // empty'); these tool-census pins census over the DECK BENCH (9000009100)
+  // — the retired starter kit, frozen as a fixture (tools/make_deck_test.py)
+  // — so the green numbers ('5 blocks change material', '35 faces on 5
+  // blocks repaint') survive unchanged.
+  await page.goto('/?craft=9000009100');
   await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
 }
 

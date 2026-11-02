@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   normalise, snap, voxelize, shellOf, greedyBoxes, emitBlocks, emitSkin,
-  decimate, runImport, slotForLinear, IMPORT_DEFAULTS,
+  decimate, runImport, slotForLinear, IMPORT_DEFAULTS, mergeCoplanar,
 } from '../import';
 import type { ImportOptions, SrcMesh } from '../import';
 import { CELL } from '../format';
@@ -201,7 +201,8 @@ describe('emitSkin — the pinned window chain', () => {
   it('closed cube: 12 records, ZERO non-manifold edges', () => {
     const nm = normalise([src(cube(-1, -1, -1, 1, 1, 1))], { ...OPT, span: 24 });
     const g = snap(nm.gpos, null);
-    const r = emitSkin(g, { ...OPT, perTriColor: false, slot: 7 });
+    const r = emitSkin(g, { ...OPT, merge: false, perTriColor: false, slot: 7 },
+      Array(g.n).fill(7));
     expect(r.triangles.length).toBe(12);
     expect(r.skipped).toBe(0);
     expect(r.nmEdges.length).toBe(0);
@@ -221,7 +222,8 @@ describe('emitSkin — the pinned window chain', () => {
     // g-space directly: one triangle spanning 40 cells in x and z
     const pos = new Float32Array([6, 6, 6, 46, 6, 6, 6, 6, 46]);
     const g = snap(pos, null);
-    const r = emitSkin(g, { ...OPT, perTriColor: false, slot: 7 });
+    const r = emitSkin(g, { ...OPT, merge: false, perTriColor: false, slot: 7 },
+      Array(g.n).fill(7));
     expect(r.rescued).toBe(1);
     expect(r.triangles.length).toBe(4);           // 1 → 4 midpoint recut
     expect(r.skipped).toBe(0);
@@ -232,7 +234,8 @@ describe('emitSkin — the pinned window chain', () => {
     const pos = new Float32Array(a.length + b.length);
     pos.set(a, 0); pos.set(b, a.length);
     const g = snap(pos, null);
-    const r = emitSkin(g, { ...OPT, perTriColor: false, slot: 7 });
+    const r = emitSkin(g, { ...OPT, merge: false, perTriColor: false, slot: 7 },
+      Array(g.n).fill(7));
     expect(r.nmEdges.length / 6).toBeGreaterThanOrEqual(4);
   });
 });
@@ -245,12 +248,83 @@ describe('palette quantiser', () => {
     expect(R!.r).toBeGreaterThan(120);
     expect(B!.b).toBeGreaterThan(R!.b);
   });
+  it('NEVER maps to a glass slot (the church translucency catch)', () => {
+    // the glass family (160+) carries opacity 0-5: pale church stone mapped
+    // to 'clear glass' rendered at 3/16 alpha in the game
+    for (const c of [[1, 1, 1], [0.82, 0.8, 0.75], [0.55, 0.5, 0.45],
+      [0.2, 0.15, 0.12], [0.1, 0.1, 0.6]] as const) {
+      const s = slotForLinear(c[0], c[1], c[2]);
+      expect(s).toBeLessThan(160);
+      expect(DEFAULT_PALETTE[s]!.opacity).toBe(15);
+    }
+    expect(slotForLinear(1, 1, 1)).toBe(40);   // matte white, the first hit
+  });
+});
+
+describe('mergeCoplanar — the stitch (lossless, silhouette-exact)', () => {
+  const area9 = (tris: Int32Array, n: number): number => {
+    let a = 0;
+    for (let t = 0; t < n; t++) {
+      const ab = [tris[t * 9 + 3]! - tris[t * 9]!, tris[t * 9 + 4]! - tris[t * 9 + 1]!,
+        tris[t * 9 + 5]! - tris[t * 9 + 2]!];
+      const ac = [tris[t * 9 + 6]! - tris[t * 9]!, tris[t * 9 + 7]! - tris[t * 9 + 1]!,
+        tris[t * 9 + 8]! - tris[t * 9 + 2]!];
+      const cr = [ab[1]! * ac[2]! - ab[2]! * ac[1]!,
+        ab[2]! * ac[0]! - ab[0]! * ac[2]!, ab[0]! * ac[1]! - ab[1]! * ac[0]!];
+      a += Math.hypot(cr[0]!, cr[1]!, cr[2]!);
+    }
+    return a;
+  };
+  it('a cube is MINIMAL (every quad is 2 tris already): merge is a no-op', () => {
+    // the merge earns its keep on multi-quad regions (walls of grids) — a
+    // lone square quad is the smallest polygon the ear clip can emit
+    const g = snap(cube(0, 0, 0, 8, 8, 8), null);
+    const m = mergeCoplanar(g, Array(g.n).fill(7), false);
+    expect(m.n).toBe(12);
+    expect(m.merged).toBe(0);
+    expect(area9(m.tris, m.n)).toBeCloseTo(area9(g.tris, g.n), 6);
+    const r = emitSkin(m, { ...OPT, perTriColor: false, slot: 7 }, m.slots);
+    expect(r.triangles.length).toBe(12);
+    expect(r.nmEdges.length).toBe(0);
+  });
+  it('a 2×1 wall of 4 coplanar tris collapses to 2, area identical', () => {
+    // two unit quads side by side in z=0, each 2 tris → the union is one 2×1
+    const pos = new Float32Array([
+      6, 6, 6, 10, 6, 6, 10, 10, 6, 6, 6, 6, 10, 10, 6, 6, 10, 6,
+      10, 6, 6, 14, 6, 6, 14, 10, 6, 10, 6, 6, 14, 10, 6, 10, 10, 6,
+    ]);
+    const g = snap(pos, null);
+    expect(g.n).toBe(4);
+    const m = mergeCoplanar(g, Array(4).fill(7), false);
+    expect(m.n).toBe(2);
+    expect(area9(m.tris, m.n)).toBeCloseTo(area9(g.tris, g.n), 6);
+  });
+  it('colour gate keeps two-tone planes apart; ignoreColor fuses them', () => {
+    const pos = new Float32Array([
+      6, 6, 6, 10, 6, 6, 10, 10, 6, 6, 6, 6, 10, 10, 6, 6, 10, 6,
+      10, 6, 6, 14, 6, 6, 14, 10, 6, 10, 6, 6, 14, 10, 6, 10, 10, 6,
+    ]);
+    const g = snap(pos, null);
+    const two = [7, 7, 9, 9];   // per FACE: left quad pair slot 7, right 9
+    expect(mergeCoplanar(g, two, false).n).toBe(4);
+    const fused = mergeCoplanar(g, two, true);
+    expect(fused.n).toBe(2);
+    expect(fused.slots).toEqual([7, 7]);   // dominant (tie counts left first)
+  });
+  it('a 90° bend NEVER merges (planes differ)', () => {
+    const pos = new Float32Array([
+      6, 6, 6, 10, 6, 6, 10, 10, 6, 6, 6, 6, 10, 10, 6, 6, 10, 6,
+      10, 6, 6, 10, 6, 10, 10, 10, 10, 10, 6, 6, 10, 10, 10, 10, 10, 6,
+    ]);
+    const g = snap(pos, null);
+    expect(mergeCoplanar(g, Array(4).fill(7), true).n).toBe(4);
+  });
 });
 
 describe('runImport — end to end', () => {
   it('blocks mode: honest stats on the shell cube', async () => {
     const r = await runImport([src(cube(-1, -1, -1, 1, 1, 1))],
-      { ...OPT, span: 24, decimate: false, shell: true });
+      { ...OPT, mode: 'blocks', span: 24, decimate: false, shell: true });
     expect(r.ok).toBe(true);
     expect(r.stats.cells).toBe(24 ** 3 - 22 ** 3);
     expect(r.stats.blocks).toBeGreaterThan(0);
@@ -262,7 +336,9 @@ describe('runImport — end to end', () => {
     const r = await runImport([src(cube(-1, -1, -1, 1, 1, 1))],
       { ...OPT, span: 24, decimate: false, mode: 'skin', perTriColor: false });
     expect(r.ok).toBe(true);
+    // the cube is the merge's NO-OP case (squares are minimal quads)
     expect(r.stats.skinTris).toBe(12);
+    expect(r.stats.merged).toBe(0);
     expect(r.stats.nonManifold).toBe(0);
     expect(r.stats.massKg).toBeGreaterThan(0);
     // tri mass identity: side 6 m cube: 6 faces × 36 m² = 216 m² skin

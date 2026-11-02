@@ -51,8 +51,7 @@ const blockCentre = (b: Blk): [number, number, number] => {
 };
 
 async function openNew(page: Page) {
-  await page.goto('/');
-  await page.getByTestId('gallery-new').click();
+  await page.goto('/?craft=9000009100');   // DECK BENCH — New craft is EMPTY (v1.17.3)
   await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
 }
 

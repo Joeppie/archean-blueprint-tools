@@ -40,8 +40,7 @@ async function setDrawer(_page: Page, _want = true) { /* no-op */ }
 test.describe('faux-mirror screen: mismatches are flagged, not silent @place', () => {
   test('block pair: a material-divergent twin flags ⚠ (popup + red panel row)', async ({ page }) => {
     test.skip(test.info().project.name !== 'chromium', 'desktop-only');
-    await page.goto('/');
-    await page.getByTestId('gallery-new').click();
+    await page.goto('/?craft=9000009100');   // DECK BENCH — New craft is EMPTY (v1.17.3)
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
     await page.getByTestId('mode-edit').click();
     await page.getByTestId('ws-blocks').click();
@@ -122,8 +121,7 @@ test.describe('faux-mirror screen: mismatches are flagged, not silent @place', (
 
   test('component pair: a painted-apart twin flags ⚠', async ({ page }) => {
     test.skip(test.info().project.name !== 'chromium', 'desktop-only');
-    await page.goto('/');
-    await page.getByTestId('gallery-new').click();
+    await page.goto('/?craft=9000009100');   // DECK BENCH — New craft is EMPTY (v1.17.3)
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
     await page.getByTestId('mode-edit').click();
     await armMirror(page, true);

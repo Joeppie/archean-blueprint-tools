@@ -335,13 +335,13 @@ test.describe('modes, new craft, file menu @ui', () => {
     desktopOnly();
     await page.goto('/');
 
-    await test.step('New craft: untitled doc with the starter deck (v1.5.10: File-menu only, no toolbar button)', async () => {
+    await test.step('New craft: untitled EMPTY doc (v1.17.3: "empty craft should actually be empty")', async () => {
     await page.getByTestId('gallery-new').click();
     await expect(page.getByTestId('editor-title')).toContainText('New craft');
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
     const blocks = await page.evaluate(() =>
       (window as unknown as { __ARCHEAN__?: { stats: () => { blocks: number } } }).__ARCHEAN__!.stats().blocks);
-    expect(blocks).toBe(5);
+    expect(blocks).toBe(0);   // the starter kit retired to the DECK BENCH fixture
     await expect(page.getByTestId('wslink')).toHaveCount(0);        // not a workshop item
     await expect(page.getByTestId('save-btn')).toBeVisible();
     // v1.5.10 user rule ("new craft should not be a button, but only under
@@ -351,6 +351,10 @@ test.describe('modes, new craft, file menu @ui', () => {
     });
 
     await test.step('triangles submode: three lattice clicks add a prism, panel edits it', async () => {
+    // the prism rides deck faces — boot the DECK BENCH (New craft is EMPTY,
+    // v1.17.3): the deck under the probe is the fixture's, not the product's
+    await page.goto('/?craft=9000009100');
+    await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
     await page.getByTestId('mode-edit').click();
     await page.getByTestId('ws-tris').click();
     const canvas = page.getByTestId('canvas');

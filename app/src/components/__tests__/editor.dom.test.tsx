@@ -258,7 +258,9 @@ describe('brush/materials/RGB desk (was tools.spec DOM legs)', () => {  test('th
   });
 
   test('RGB picker: a custom colour becomes a NEW palette slot + paints', async () => {
-    const h = await mountEditor(null);
+    // v1.17.3: the New-craft doc is EMPTY — the picker's paint target and
+    // swatch grid ride blocks, so the pin runs on the DECK BENCH fixture
+    const h = await mountEditor('9000009100');
     fireEvent.click(screen.getByTestId('mode-edit'));
     fireEvent.click(screen.getByTestId('ws-blocks'));
     fireEvent.change(screen.getByTestId('rgb-hex'), { target: { value: '#ff3300' } });
@@ -274,7 +276,7 @@ describe('brush/materials/RGB desk (was tools.spec DOM legs)', () => {  test('th
   });
 
   test('RGB picker: nearest-slot never grows the palette', async () => {
-    const h = await mountEditor(null);
+    const h = await mountEditor('9000009100');   // DECK BENCH (empty new craft)
     fireEvent.click(screen.getByTestId('mode-edit'));
     fireEvent.click(screen.getByTestId('ws-blocks'));
     const len = () => ((h.engine.blueprint as Blueprint).data.colors ?? []).length;

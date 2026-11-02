@@ -22,10 +22,18 @@ import type { EditCtx } from '../../engine/edit';
 
 const tool = (id: string): ToolDef => TOOLS.find(t => t.id === id)!;
 
-/** the EXACT blueprint `gallery-new` opens: newCraftDoc through the real funnel */
+/** the tool census fixture: a 5-plate deck on an empty hull (v1.17.3: the
+ *  starter kit is EMPTY — "empty craft should actually be empty" — so the
+ *  deck the tools census over is this test's OWN scenery) */
 const starterDeck = () => {
-  const { bp, ctx } = openFunnel(emitDoc(newCraftDoc()));
-  return { bp, ctx };
+  const j = JSON.parse(emitDoc(newCraftDoc())) as {
+    data: { blocks: Record<string, unknown>[] } };
+  j.data.blocks = [3, 4, 5, 6, 7].map(pos_z => ({
+    colors: [4, 4, 4, 4, 4, 4, 4], frame_x: 0, frame_y: 0, frame_z: 0,
+    material: 0, pos_x: 2, pos_y: 5, pos_z, size_x: 8, size_y: 0, size_z: 0,
+    type: 0,
+  }));
+  return openFunnel(JSON.stringify(j));
 };
 
 /** an EMPTY craft — the refusal probe */

@@ -34,8 +34,7 @@ async function setDrawer(_page: Page, _want = true) { /* no-op */ }
 
 test.describe('⇄ mirrored placement @place', () => {
   test('blocks: one click lands the block + its mirrored twin', async ({ page }) => {
-    await page.goto('/');
-    await page.getByTestId('gallery-new').click();
+    await page.goto('/?craft=9000009100');   // DECK BENCH — New craft is EMPTY (v1.17.3)
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
     await page.getByTestId('mode-edit').click();
     // v1.10.7: the flavor switch and the ⇄ twin row BOTH live in the
@@ -91,8 +90,7 @@ test.describe('⇄ mirrored placement @place', () => {
   });
 
   test('catalog parts: the held part lands with a mirrored twin component', async ({ page }) => {
-    await page.goto('/');
-    await page.getByTestId('gallery-new').click();
+    await page.goto('/?craft=9000009100');   // DECK BENCH — New craft is EMPTY (v1.17.3)
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
     await page.getByTestId('mode-edit').click();
     // v1.10.7: PLACE flavor from the dock header (drawer closed), then the

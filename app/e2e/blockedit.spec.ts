@@ -58,8 +58,7 @@ const loads = (page: Page) => page.evaluate(() =>
 /** open a NEW craft in BLOCKS mode and return a canvas fraction that
  *  answers a deck block face through engine.pickCell (deterministic probe) */
 async function openDeck(page: Page, tab: 'place' | 'edit') {
-  await page.goto('/');
-  await page.getByTestId('gallery-new').click();
+  await page.goto('/?craft=9000009100');   // DECK BENCH — New craft is EMPTY (v1.17.3)
   await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
   await page.getByTestId('mode-edit').click();
   // v1.11 SINGLE MODE CONTROL: the tooltab-* pair became the ws-* row
@@ -121,8 +120,7 @@ test.describe('blocks EDIT: highlight, in-place rotate, snap, twin @place', () =
 
   test('a component picked in blocks mode gets the gizmo + widget + inspector (v1.4 regression: move/rotate)', async ({ page }) => {
     test.skip(test.info().project.name !== 'chromium', 'desktop-only');
-    await page.goto('/');
-    await page.getByTestId('gallery-new').click();
+    await page.goto('/?craft=9000009100');   // DECK BENCH — New craft is EMPTY (v1.17.3)
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
     await page.getByTestId('mode-edit').click();
     await page.getByTestId('ws-blocks').click();       // v1.5: the PLACE flavor
@@ -216,8 +214,7 @@ test.describe('blocks EDIT: highlight, in-place rotate, snap, twin @place', () =
 
   test('⇄ placed pair: the block editor identifies the similar twin', async ({ page }) => {
     test.skip(test.info().project.name !== 'chromium', 'desktop-only');
-    await page.goto('/');
-    await page.getByTestId('gallery-new').click();
+    await page.goto('/?craft=9000009100');   // DECK BENCH — New craft is EMPTY (v1.17.3)
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
     await page.getByTestId('mode-edit').click();
     await page.getByTestId('ws-blocks').click();       // v1.5: place with the brush

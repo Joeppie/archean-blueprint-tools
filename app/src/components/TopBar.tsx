@@ -382,11 +382,14 @@ export default function TopBar(p: Props) {
 
       {/* ⚗ ANALYSIS (v1.17.0, we: "let our editor automatically make a
           mermaid diagram of the xenoncode … vessel PNGs … flight
-          characteristics … a detailed analysis of craft") — visible when
-          the craft carries a programmable computer */}
-      {(p.hasComputers ?? false) && (
+          characteristics … a detailed analysis of craft") — visible on
+          EVERY craft (v1.17.3, we: "where is my analysis tab? I am missing
+          that" — the church): the header recap (mass/cost/envelope), the
+          vessel plate and the flight chapter are craft-wide laws; the
+          diagram chapters carry their own zero-computer empty state */}
+      {(
         <button data-testid="analysis-btn" aria-pressed={p.analysisOpen ?? false}
-          title="Analysis — mermaid flow/sequence/class diagrams of every program, vessel plates with the actors and their cables highlighted, flight report where it flies"
+          title="Analysis — mass/cost/envelope recap, vessel plates with the actors and their cables, flight report where it flies, mermaid diagrams of every program"
           onClick={() => p.onAnalysis?.()}
           className={`shrink-0 rounded border border-[#3a4a6a] px-2.5 py-1 text-[12px] transition-colors
                      ${p.analysisOpen ? 'bg-[#243a52] text-[#8fd4ff]' : 'bg-[#141b28] text-[#9fb0c8] hover:text-white'}`}>

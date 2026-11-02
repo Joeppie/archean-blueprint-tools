@@ -6196,3 +6196,85 @@ declared as a direct dep (was transitive; MIT). Dev pair: the whole feature
 is browsable on :5175. The python tier (FBX pre-bake, Manifold3d self-union
 repair for soups, α-wrap for scans, make_import_test fixtures) stays
 backlog.
+
+## 47. The church import finds four laws (we: "it placed blocks and not
+## triangles … the color is wrong … I cant see them they're like
+## translucent … empty craft should actually be empty … I dont understand
+## how to choose triangles versus blocks" + "You didnt touch on the fact it
+## should be TRIANGLES"; 2026-11-02)
+The first real-world flight of 🧊 was the free3d "Volumetric Church"
+(.blend, headless-blender pre-baked to church.glb: 79 k tris, 38.5 m) and
+it found four:
+- THE SKIN-DEFAULT LAW: the mode defaulted to blocks — the feature's own
+  founding words said "more logically and realistically: using TRIANGLES",
+  so mode defaults to 🔺 Skin now, and the buttons carry one-line captions
+  (skin = thin triangle hull, the game's own style; blocks = solid voxel
+  boxes, heavy). The choice is stated, not guessed.
+- THE OPAQUE-SLOT LAW: pale church stone mapped to the GLASS family (slots
+  160+, opacity 0-5) at colour distance ~0 — the game renders those at
+  3/16 alpha: "the color is wrong … like translucent … cant see them". The
+  quantiser scans opaque slots only (pin: white ▸ slot 40 matte, every
+  probe slot opacity 15).
+- Textured downloads get FACE texture baking (canvas sample at the UV
+  centroid × Kd, sRGB→LINEAR) — the palette quantiser speaks slots, not
+  image maps.
+- NEW CRAFT IS EMPTY: the starter kit's 5 deck plates were product scenery
+  no one asked for; newCraftDoc is a PilotSeat alone. The plates were the
+  hidden fixture of 13 pins (tooldialog 5, editor.dom 2, tools/undo/… e2e)
+  — the retired kit is frozen as the DECK BENCH craft testdata/9000009100
+  (tools/make_deck_test.py) and every pin brings its own deck from there.
+The church pre-bake pipeline (blender -b … export_scene.gltf) is the .blend
+door documented in docs/IMPORT-3D.md; .gsm (the free3d 'gsm3ds' bundles) is
+the Archicad GDL library part — parametric source, the dialog answers with
+the Export-3D-Geometry ▸ OBJ pointer.
+
+## 48. THE COPLANAR-MERGE LAW replaces blind decimation; the SPAN LAW (we:
+## "decimate decimates … it absolutely butchers and mangles irrecognizably";
+## "instead of decimating how about a coplanarity algo that simply merges
+## triangles whenever it can, kind of like we have for the zeppelin builder?
+## Option for ignoring color in it too"; "scale should be possible to make
+## larger; I made a cathedral … too small to walk into, that is just sad";
+## "if you dont support skp then do collada"; 2026-11-02)
+- mergeCoplanar (engine/import.ts): the skin path's default simplify. Faces
+  union-find over shared edges with parallel integer normals + identical
+  planes (exact on the snapped lattice); each region's directed boundary
+  loop (collinear grid-wall vertices dropped — ear clip chokes on them)
+  re-triangulates by ear clipping, non-convex regions included, pathological
+  loops keep their faces. LOSSLESS: area identity pinned; colour-gated by
+  palette slot, mergeIgnoreColor fuses tones (dominant wins). The cube is
+  the pinned NO-OP case (a square quad is the minimal polygon) — the merge
+  earns its keep on multi-quad walls, which is exactly what architecture
+  is. The UI simplify trio is 🧩 Coplanar (default) | 📉 QEM (opt-in, the
+  lossy budget tool) | ⛔ Off; decimate no longer defaults on.
+- THE SPAN LAW: span to 512 cells (128 m), offsets ±256 — a cathedral must
+  be walkable; the voxel gridCap 128/axis remains the blocks-mode bound
+  (refused honestly), skins pay nothing for size.
+- THE SKETCHUP DOOR: .dae (Collada — SketchUp's own export) loads in-browser
+  via ColladaLoader (`<unit>` scale + upAxis honoured), pinned by a real
+  DAE cube in import.spec; .skp is Trimble's sealed binary — the dialog
+  answers with the export pointer (python tier: assimp reads it).
+- The ⚗ Analysis un-gate + the empty-craft scene-probe fix (`ok` = build
+  success — a PilotSeat-only hull is a valid scene, the old rule dated from
+  the deck era) round out the church session.
+
+## 49. THE GHOST LAW + THE ONE-TONE LAW — the importer joins the zeppelin
+## family (we: "I want it to be like the zeppelin stuff, it should be under
+## tools, and I should get a shadow that I can place and really build into
+## the location I want. also, if all blocks have the same color from our
+## import, then we should have the option to pick color, otherwise
+## override"; 2026-11-02)
+ImportPanel.tsx splits the import SURFACE (file drop + all format loaders +
+the live lattice preview) from its two hosts: the File ▸ workspace dialog
+(offset knobs + Import at offset) and the new TOOLS ▸ 🧊 Import 3D model
+ToolDef — the balloon framework verbatim: previewAsync plans (OK disabled
+while it thinks), OK stages the result as a MOVABLE cluster ghost (widget
+⟲ turns, drag, ↩ retune keeps the spot, ✕/✔), ✔ Build writes at the final
+offset via commitImport (engine) — shiftBlocks/shiftSkinTris re-frame every
+record, bp AND doc, one Ctrl+Z. The ⚖ repair: a COLLAPSED model gets
+"double the span" one-tap. THE ONE-TONE LAW: runImport reports
+slotCount/commonSlot — a one-slot source shows a colour PICKER ("its faces
+are a choice"), a multi-tone source keeps its colours with an explicit
+override. The .bin question the same day: a bare .bin is headerless BY
+FORMAT (the .gltf JSON is the recipe) — the game loads the gltf which
+references its sidecars; so does the dialog (drop the set together,
+resolveURL routes the names to blob URLs).

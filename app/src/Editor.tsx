@@ -365,7 +365,6 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
   // dashboard faces all ride ONE running computer).
   // ⚗ analysis window (v1.17.0)
   const [analysisOpen, setAnalysisOpen] = useState(false);
-  const [importOpen, setImportOpen] = useState(false);
   const [screensOpen, setScreensOpen] = useState(
     // v1.13.2 deep link (?craft=<id>&dash=<surfaceKey>, e.g. dash=screen%230):
     // the ▣ Screens dock opens booted toward that surface, whose ZOOM WINDOW
@@ -1996,7 +1995,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
     cmds.push({ id: 'save', label: 'Save (download)', hint: 'Ctrl+S', group: 'Craft', run: () => save() });
     cmds.push({ id: 'open-file', label: 'Open file…', group: 'File', run: () => openFile() });
     cmds.push({ id: 'import-3d', label: '🧊 Import 3D model…',
-      hint: 'glb · obj · stl · ply', group: 'File', run: () => setImportOpen(true) });
+      hint: 'glb · obj · stl · ply', group: 'File', run: () => setToolOpen('import3d') });
     cmds.push({ id: 'refresh', label: 'Refresh craft (redownload)', group: 'Craft',
       run: () => { forceRef.current = true; setRetrySeq(s => s + 1); } });
     cmds.push({ id: 'undo', label: 'Undo', hint: 'Ctrl+Z', group: 'Craft', run: () => undo() });
@@ -2296,7 +2295,7 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
               !window.confirm('Start a NEW craft? Unsaved changes to this one are lost (download it first with Save).')) return;
           ctxRef.current = null; setBp(null); openText(emitNew());
         }}
-        onOpen={openFile} onImport={() => setImportOpen(true)}
+        onOpen={openFile} onImport={() => setToolOpen('import3d')}
         onSave={save} onClose={onBack} onBack={onBack}
         onRefresh={craft ? () => { forceRef.current = true; setRetrySeq(s => s + 1); } : undefined}
         tools={(toolsMod?.TOOLS ?? []).map(t => ({ id: t.id, label: t.label, icon: t.icon }))}
@@ -2497,15 +2496,6 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
             )}
             {/* ▣ SCREENS bottom tab (v1.13.x): live dashboards + virtual
                 surfaces of the running computer (top-bar ▣ button) */}
-            {importOpen && bp && ctxRef.current && (
-              /* 🧊 THE PREVIEW LAW (docs/IMPORT-3D.md § 7): a live lattice-grid
-                 preview; the preview quantiser IS the writer's quantiser */
-              <Suspense fallback={null}>
-                <ImportDialogLazy ctx={ctxRef.current}
-                  onClose={() => setImportOpen(false)}
-                  onApplied={m => { sceneChanged(); setToolMsg(m); }} />
-              </Suspense>
-            )}
             {analysisOpen && bp && (
               /* ⚗ mermaid diagrams + vessel plates + flight gate (v1.17.0) */
               <Suspense fallback={null}>
@@ -2591,8 +2581,30 @@ export default function Editor({ craft, onBack }: { craft: string | null; onBack
         </main>
 
         {/* TOOLS ▸ the definition-driven modal dialog (v1.7): opens over
-            the viewport, OK-and-run or Cancel. */}
-        {toolOpen && toolsMod && bp && ctxRef.current && (
+            the viewport, OK-and-run or Cancel.
+            🧊 import3d is the EXCEPTION (we: "the other editor for import
+            looks way better, also its colour scheme"): the workspace
+            window IS the import surface — every door (File ▸, Tools ▸,
+            palette) opens it, and 👻 stages the zeppelin ghost. */}
+        {toolOpen === 'import3d' && bp && ctxRef.current && (
+          <Suspense fallback={null}>
+            <ImportDialogLazy ctx={ctxRef.current}
+              onClose={() => setToolOpen(null)}
+              onApplied={m => { sceneChanged(); setToolMsg(m); }}
+              onStage={pl => {
+                // THE GHOST LAW: the placement widget owns the rest (⟲,
+                // drag, ↩ retune, ✕/✔); ✔ Build commits through the
+                // registry's import3d place.commit = commitImport
+                engineRef.current?.setBlockGizmo(-1, false);
+                engineRef.current?.select(-1);
+                engineRef.current?.setGizmoEnabled(true);
+                engineRef.current?.setClusterGhost(pl.blocks, 0x7dffcf, pl.triangles);
+                setPlaceStage({ toolId: 'import3d', form: {}, payload: pl });
+                setToolOpen(null);
+              }} />
+          </Suspense>
+        )}
+        {toolOpen && toolOpen !== 'import3d' && toolsMod && bp && ctxRef.current && (
           <toolsMod.ToolDialog key={toolOpen}
             tool={toolsMod.TOOLS.find(t => t.id === toolOpen)!} bp={bp} ctx={ctxRef.current}
             initialForm={placeStage?.toolId === toolOpen ? placeStage.form : undefined}

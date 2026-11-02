@@ -283,6 +283,48 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   non-manifold edges; every knob requantises live and the preview runs
   `engine/import.ts` — the SAME module Import commits with (hullify
   preview/apply pair law; never preview a lie).
+- THE SKIN-DEFAULT LAW (we, the church: "it placed blocks and not triangles
+  … it should be TRIANGLES"): mode defaults to 🔺 SKIN — a model becomes a
+  HULL (the game's own ship-skin style); 🧱 Blocks is the opt-in voxel mode.
+  The mode buttons carry one-line captions (blocks = solid voxel boxes,
+  heavy; skin = thin triangle shell, faithful) — the choice is stated, not
+  guessed.
+- THE OPAQUE-SLOT LAW (we: "the color is wrong … they're like translucent"):
+  `slotForLinear` scans OPAQUE slots only — the glass family (160+) carries
+  opacity 0-5 and pale stone maps to clear glass at distance 0. A source
+  model's colours are an opaque statement.
+- THE COPLANAR-MERGE LAW (we, the cathedral: "decimate decimates, it
+  absolutely butchers and mangles irrecognizably" → "a coplanarity algo that
+  merges triangles whenever it can, like the zeppelin builder"): the skin
+  path's DEFAULT simplify is `mergeCoplanar` — union-find faces over shared
+  edges whose integer normals are parallel and planes identical, walk each
+  region's directed boundary loop (collinear grid-wall vertices dropped),
+  EAR-CLIP back to triangles (non-convex regions included; pathological
+  regions keep their faces). LOSSLESS: area identity pinned; a wall of
+  hundreds of coplanar facets becomes a quad pair, silhouette EXACT.
+  Colour-gated by palette slot, `mergeIgnoreColor` fuses tones (dominant
+  wins). The trio UI is Coplanar | QEM | Off — the QEM budget (meshoptimizer)
+  is the opt-in LOSSY tool for absurdly dense scans only. Cubes are the
+  merge's no-op case (a square quad is minimal — pinned).
+- THE SPAN LAW: span reaches 512 cells (128 m) and offsets ±256 — a
+  cathedral must be walkable (we: "I made a cathedral … too small to walk
+  into, that is just sad"); the voxel gridCap 128/axis stays (blocks mode
+  refuses over-cap honestly, skins pay nothing for size).
+- THE GHOST LAW (the zeppelin ritual, we: "like the zeppelin stuff, under
+  tools, with a shadow I can place and really build into the location I
+  want"): TOOLS ▸ 🧊 Import 3D model — the ToolDef `place` contract: OK
+  stages the quantised result as a MOVABLE cluster ghost (`setClusterGhost`,
+  placement widget ⟲/✕/✔/↩, `__ARCHEAN__.placeGhost()/placeShift()`), ✔
+  Build writes it at the final whole-cell offset. `commitImport` (engine/
+  import.ts) is the ONE write path shared by the Tools flow (ghost offset)
+  and the File ▸ workspace dialog (offset knobs): shiftBlocks + shiftSkinTris
+  re-frame every record, push + docArrayInsert / appendTrianglesDoc.
+- THE ONE-TONE LAW (we: "if all blocks have the same colour from our import,
+  we should have the option to pick colour, otherwise override"):
+  `stats.slotCount/commonSlot` — a source that quantises to ONE slot gets a
+  colour PICKER (paint = every face takes the chosen slot); a multi-tone
+  source keeps its quantised colours, with an explicit override slider.
+  Field `paint` (Tools) / `paint` option (engine).
 - The quantiser: normalise (axis map + span fit) → meshoptimizer QEM
   (decimate default ON, budget knob, LockBorder, tolerance escalation) →
   lattice snap + weld + degen cull → `blocks` = SDF-flood voxels (yz-bucket
@@ -290,10 +332,21 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   greedy box merge (size ≤ 24, pos 0..12 via `blockFromCell`) | `skin` =
   the pinned `encodeSkinTri`→`splitFace` chain. Honest counts ship: cells,
   blocks, rescued/skipped faces, non-manifold, mass.
-- Formats: GLB/glTF, OBJ (+MTL pairs — Kd colours ride, image maps are
-  deliberately unread by the palette quantiser), STL, PLY, 3DS (TDSLoader)
-  load in-browser. FBX/.blend: pre-bake GLB (Blender) — the python tier
-  (Backlog) owns heavy repair (Manifold3d self-union, α-wrap). .gsm is an
+- Textured downloads: the dialog bakes each FACE's texture average (canvas
+  sample at the UV centroid × Kd, sRGB→LINEAR) into geometry colour — the
+  quantiser speaks palette slots, not image maps.
+- Formats: GLB/glTF, gltf WITH SIDECARS (drop the `.gltf` + its `.bin`/`.png`
+  together — the LoadingManager's `resolveURL` routes sidecar URIs to blob
+  URLs of the dropped files; the game's component gltf files 404 against the
+  dev-server URL and the SPA fallback's index.html parsed as a vertex buffer
+  IS the 'Float32Array out of bounds' — the centrifuge catch; the primary
+  file is found BY EXTENSION, multi-select order is a coin flip),
+  OBJ (+MTL pairs — Kd colours ride, image maps are
+  deliberately unread by the palette quantiser), STL, PLY, 3DS (TDSLoader),
+  DAE (ColladaLoader — SketchUp's native export, `<unit>`-scale + upAxis
+  honoured) load in-browser. FBX/.blend: pre-bake GLB (Blender) — the python
+  tier (Backlog) owns heavy repair (Manifold3d self-union, α-wrap) and the
+  proprietary binaries (.skp via assimp). .gsm is an
   Archicad GDL library part (parametric source, no mesh) — the dialog
   answers with the File ▸ Libraries and Objects ▸ Export 3D Geometry ▸ OBJ
   pointer.
@@ -396,7 +449,11 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
   xenoncode … vessel PNG … files as classes … Io devices as system actors,
   cockpit as a user … read like a detailed analysis of craft"): the ⚗
   Analysis top-bar button opens AnalysisWindow (LAZY — the mermaid RUNTIME
-  chunks with it, NEVER the boot path). engine/xcgraph.ts is the PURE
+  chunks with it, NEVER the boot path). The button is visible on EVERY
+  craft (v1.17.3, we: "where is my analysis tab? I am missing that" — the
+  church had none): the summary recap, vessel plate and flight chapter are
+  CRAFT-WIDE laws; the diagram chapters carry their own zero-computer empty
+  state. engine/xcgraph.ts is the PURE
   grammar: flow (entry points + @call graph + include edges), sequence
   (actor PILOT → PilotSeat presses, devices as FULLY RESOLVED system actors
   `alias · Type · io N`, files as participants, input_/output_ arrows),
@@ -967,7 +1024,12 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
 - FIXTURES BEAT CORPORA (`tools/make_*_test.py` → `testdata/900000NNNN`). A
   big craft in a test must defend why the fixture CANNOT exhibit the law.
   FIXTURE-FIRST BOOT LAW: geometry-behaviour laws run on generated law
-  fixtures; real-craft DATA laws belong at the node tier.
+  fixtures; real-craft DATA laws belong at the node tier. NEW CRAFT IS EMPTY
+  (we: "empty craft should actually be empty", v1.17.3): `newCraftDoc` =
+  PilotSeat only — pins that census over blocks bring their OWN deck: the
+  retired starter kit is frozen as the DECK BENCH fixture `testdata/
+  9000009100` (`tools/make_deck_test.py`); jsdom fixtures get it via
+  `openFunnel` with injected plates, e2e via `?craft=9000009100`.
 - A slow test is a DESIGN SMELL: the fix is the lower tier, never a longer
   timeout.
 - CHAIN LAW: tests sharing one boot + compatible state = ONE test of named

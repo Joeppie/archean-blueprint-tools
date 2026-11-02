@@ -176,4 +176,21 @@ test.describe('@analysis @slow THE CRAFT ANALYSIS', () => {
       await expect(page.getByTestId('analysis-seqin')).toBeVisible();
     }
   });
+
+  test('a craft with NO computer still gets Analysis (the church: "where is my analysis tab?")', async ({ page, isMobile }) => {
+    test.skip(isMobile, 'desktop dialog density (analysis family)');
+    test.setTimeout(300_000);
+    // Deck Bench: blocks + a PilotSeat, zero computers (v1.17.3)
+    await page.goto('/?craft=9000009100');
+    await page.waitForFunction(() => !!(window as any).__ARCHEAN__?.engine?.blueprint,
+      null, { timeout: 150_000 });
+    await expect(page.getByTestId('analysis-btn')).toBeVisible();
+    await page.getByTestId('analysis-btn').click();
+    await expect(page.getByTestId('analysis-dock')).toBeVisible();
+    // the craft-wide header recap works with no computers at all
+    await expect(page.getByTestId('analysis-summary')).toBeVisible();
+    // the diagram chapters answer honestly, not blank
+    await expect(page.getByTestId('analysis-body')).toContainText(
+      /No programmable computer/i);
+  });
 });

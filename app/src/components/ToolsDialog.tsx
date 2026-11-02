@@ -35,6 +35,8 @@ import { loadManifest, peekManifest, type ModelManifest } from '../engine/models
 import { KIND_STYLE, portRole } from '../engine/wireops';
 import { flattenComponents } from '../engine/subgrid';
 import { newComponent } from '../engine/newcraft';
+import { commitImport, IMPORT_DEFAULTS, runImport } from '../engine/import';
+import type { ImportOptions, ImportResult, SrcMesh } from '../engine/import';
 import { liftKg } from '../engine/atmo';
 import { cssColor } from '../engine/palette';
 
@@ -127,7 +129,134 @@ export interface ToolDef {
 
 // ------------------------------------------------------------------- TOOLS
 
+// THE IMPORT TOOL STATE: the dropped model files are not ToolForm values
+// (a File is not a form value) — the panel hands them to this module store,
+// the SAME store the preview canvas and the staging read from. One import
+// dialog is open at a time (the Editor's toolOpen gate), so one store is
+// exactly as concurrent as the dialog.
+const importStore: {
+  srcs: SrcMesh[] | null; name: string; res: ImportResult | null;
+} = { srcs: null, name: '', res: null };
+
+function importOpts(f: ToolForm): ImportOptions {
+  return {
+    ...IMPORT_DEFAULTS,
+    mode: (f['pmode'] as 'skin' | 'blocks') ?? 'skin',
+    span: +(f['span'] as number | string ?? 48),
+    up: (f['up'] as 'y' | 'z') ?? 'y',
+    yaw: (+(f['yaw'] as number | string ?? 0)) as 0 | 90 | 180 | 270,
+    decimate: f['simplify'] === 'qem',
+    merge: (f['simplify'] as string ?? 'merge') !== 'qem'
+      && (f['simplify'] as string ?? 'merge') !== 'off',
+    mergeIgnoreColor: f['mergecolor'] === 'on',
+    budget: +(f['budget'] as number | string ?? 3000),
+    shell: f['shell'] !== 'off',
+    paint: f['paint'] === 'one' ? +(f['paintslot'] as number | string ?? 40) : 0,
+    material: +(f['material'] as number | string ?? 0),
+    offset: [0, 0, 0],
+  };
+}
+
 export const TOOLS: ToolDef[] = [
+  {
+    id: 'import3d',
+    label: 'Import 3D model…',
+    icon: '🧊',
+    blurb: 'Drop a 3D model (GLB · glTF + .bin/.png sidecars · OBJ + .mtl · STL '
+      + '· PLY · 3DS · DAE): it quantises onto the 0.25 m lattice — the COPLANAR '
+      + 'MERGE fuses same-plane faces losslessly, walls of hundreds of triangles '
+      + 'collapse to quads, silhouette EXACT — and stages as a MOVABLE GHOST: '
+      + 'drag it onto the craft, ⟲-turn it, ✔ Build writes the blocks + hull '
+      + 'triangles into bp AND doc (one Ctrl+Z). A one-tone source gets a colour '
+      + 'PICKER (its faces are one choice, not a palette); a multi-tone source '
+      + 'keeps its colours quantised to slots.',
+    fields: [
+      { key: 'pmode', label: 'shape', kind: 'select',
+        options: [{ id: 'skin', label: '🔺 Skin — hull triangles' },
+          { id: 'blocks', label: '🧱 Blocks — voxel boxes' }],
+        hint: 'skin = thin TRIANGLE shell — the game\'s own ship-skin style, '
+          + 'light and faithful (ships, statues, buildings). blocks = solid '
+          + 'voxel boxes (hollow shell by default) — chunky, heavy.' },
+      { key: 'span', label: 'span', kind: 'range', min: 4, max: 512, step: 2,
+        unit: ' cells',
+        hint: 'the model\'s LONGEST axis in 0.25 m cells. Small game parts '
+          + 'want LARGE spans (a 1.5 m part at span 48 collapses — watch the '
+          + 'COLLAPSED count; a walkable cathedral wants 300+).' },
+      { key: 'up', label: 'up axis', kind: 'select',
+        options: [{ id: 'y', label: 'Y-up (glTF / OBJ / DAE)' },
+          { id: 'z', label: 'Z-up (STL / CAD)' }] },
+      { key: 'yaw', label: 'yaw', kind: 'select',
+        options: [0, 90, 180, 270].map(d => ({ id: String(d), label: `${d}°` })) },
+      { key: 'simplify', label: 'simplify', kind: 'select',
+        options: [{ id: 'merge', label: '🧩 Coplanar (lossless)' },
+          { id: 'qem', label: '📉 QEM budget (lossy)' },
+          { id: 'off', label: '⛔ Off' }],
+        hint: 'coplanar = the zeppelin stitch: same-plane triangles fuse into '
+          + 'their planar polygon (exact on the lattice, nothing lost). QEM = '
+          + 'quadric budget for absurdly dense scans — it SHAPES-lossy, use '
+          + 'sparingly.' },
+      { key: 'mergecolor', label: 'merge colour', kind: 'select',
+        options: [{ id: 'off', label: 'same colour only' },
+          { id: 'on', label: 'ignore colours' }],
+        showIf: f => f['simplify'] === 'merge',
+        hint: 'fusing across colours lands the region in its dominant slot' },
+      { key: 'budget', label: 'budget', kind: 'range', min: 100, max: 20000,
+        step: 100, showIf: f => f['simplify'] === 'qem' },
+      { key: 'shell', label: 'voxels', kind: 'select',
+        options: [{ id: 'on', label: 'hollow shell' }, { id: 'off', label: 'solid' }],
+        showIf: f => f['pmode'] === 'blocks' },
+      { key: 'paint', label: 'colours', kind: 'select',
+        options: [{ id: 'keep', label: 'keep source colours' },
+          { id: 'one', label: 'one colour ▾' }],
+        hint: 'a source whose faces all quantise to ONE slot is a colour '
+          + 'CHOICE — the preview line names the slot; slide the slot to '
+          + 'repaint the whole import.' },
+      { key: 'paintslot', label: 'slot', kind: 'range', min: 11, max: 255,
+        step: 1, showIf: f => f['paint'] === 'one' },
+      { key: 'material', label: 'material', kind: 'select',
+        options: MATERIALS.map((m, i) => ({ id: String(i), label: `${i} ${m}` })) },
+    ],
+    initial: {
+      pmode: 'skin', span: 48, up: 'y', yaw: '0', simplify: 'merge',
+      mergecolor: 'off', budget: 3000, shell: 'on', paint: 'keep',
+      paintslot: 40, material: '0',
+    },
+    preview: () => '',
+    previewAsync: async (f) => {
+      if (!importStore.srcs) return '';   // OK stays disabled until a drop
+      const r = await runImport(importStore.srcs, importOpts(f));
+      importStore.res = r;
+      if (!r.ok) return `nothing to place — ${r.reason ?? 'quantise failed'}`;
+      const st = r.stats;
+      const bits = [f['pmode'] === 'blocks'
+        ? `${st.blocks.toLocaleString()} blocks · ${st.cells.toLocaleString()} cells`
+        : `${st.skinTris.toLocaleString()} skin triangles`];
+      if (st.merged) bits.push(`${st.merged.toLocaleString()} coplanar merged`);
+      if (st.degenerate) bits.push(`${st.degenerate.toLocaleString()} COLLAPSED — raise the span`);
+      if (st.nonManifold) bits.push(`${st.nonManifold} non-manifold (red lines)`);
+      bits.push(`≈ ${Math.round(st.massKg).toLocaleString()} kg`);
+      if (st.slotCount === 1 && f['paint'] !== 'one' && f['pmode'] === 'skin')
+        bits.push(`one tone: slot ${st.commonSlot} — Colours ▸ one colour to repaint`);
+      return bits.join(' · ');
+    },
+    run: () => 'use placement',            // place tools never run()
+    place: {
+      // the ghost payload is the LAST PLANNED result (previewAsync filled
+      // importStore.res before OK ever enabled — the preview/apply pair law)
+      stage: () => importStore.res
+        ? { blocks: importStore.res.blocks, triangles: importStore.res.triangles }
+        : {},
+      commit: (_f, payload, offset, ctx) =>
+        commitImport(ctx, payload, [offset[0] | 0, offset[1] | 0, offset[2] | 0]),
+    },
+    fix: {
+      show: (p) => p.startsWith('nothing to place') && /COLLAPSED/.test(p),
+      label: '⚖ double the span',
+      hint: 'the model is small relative to the lattice — cells collapse to '
+        + 'zero area; doubling the span keeps the detail',
+      apply: (f) => ({ ...f, span: Math.min(512, +(f['span'] as number | string ?? 48) * 2) }),
+    },
+  },
   {
     id: 'replace-all',
     label: 'Replace all…',

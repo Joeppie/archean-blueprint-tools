@@ -18,8 +18,10 @@ const bpOf = (page: Page) => page.evaluate(() =>
     .__ARCHEAN__.engine.blueprint.data);
 
 async function openNew(page: Page) {
-  await page.goto('/');
-  await page.getByTestId('gallery-new').click();
+  // v1.17.3: the New-craft doc is EMPTY; these round-trip pins run on the
+  // DECK BENCH (9000009100) — the retired starter kit frozen as a fixture
+  // (tools/make_deck_test.py): 5 plates + PilotSeat, the old blocks.length 5.
+  await page.goto('/?craft=9000009100');
   await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
 }
 

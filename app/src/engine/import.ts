@@ -15,12 +15,15 @@
 
 import { CELL } from './format';
 import type { Block, Triangle } from './format';
-import { blockFromCell } from './blocks';
-import { encodeSkinTri, splitFace } from './latsphere';
+import { blockFromCell, shiftBlocks } from './blocks';
+import { encodeSkinTri, splitFace, shiftSkinTris } from './latsphere';
 import type { GP3, SkinOptions } from './latsphere';
 import { DEFAULT_PALETTE } from './palette';
 import { MATERIAL_DENSITY } from './mass';
 import { TRIANGLE_THICKNESS } from './economy';
+import { appendTrianglesDoc } from './edit';
+import type { EditCtx } from './edit';
+import { docArrayInsert, docFromValue } from './doc';
 import { MeshoptSimplifier } from 'meshoptimizer/simplifier';
 
 type Cell3 = [number, number, number];
@@ -39,8 +42,16 @@ export interface ImportOptions {
   yaw: 0 | 90 | 180 | 270;         // extra turn about world y after mapping
   offset: Cell3;                   // integer-cell shift of the centred model
   mode: 'blocks' | 'skin';
-  decimate: boolean;               // THE default: found models are too dense
+  decimate: boolean;               // the QEM budget pass (shape-lossy!)
   budget: number;                  // triangle budget for the QEM pass
+  merge: boolean;                  // THE default: coplanar merge (lossless —
+  //  we, the cathedral: "decimate … absolutely butchers and mangles
+  //  irrecognizably" → merge triangles whenever they share a plane, the
+  //  latsphere-stitch idea; exact on the lattice, walls collapse to quads)
+  mergeIgnoreColor: boolean;       // merge across colours (dominant wins)
+  paint: number;                   // >0: EVERY face takes this palette slot
+  //  (the one-tone import law: a single-colour source is a colour CHOICE —
+  //  the dialog offers the slot picker; multi-tone sources keep per-face)
   shell: boolean;                  // blocks: keep the boundary shell only
   slot: number;                    // single-colour mode's palette slot
   perTriColor: boolean;            // quantise source colours to slots
@@ -49,14 +60,17 @@ export interface ImportOptions {
 }
 
 export const IMPORT_DEFAULTS: ImportOptions = {
-  span: 48, up: 'y', yaw: 0, offset: [0, 0, 0], mode: 'blocks',
-  decimate: true, budget: 3000, shell: true, slot: 4, perTriColor: true,
+  span: 48, up: 'y', yaw: 0, offset: [0, 0, 0], mode: 'skin',
+  decimate: false, budget: 3000, merge: true, mergeIgnoreColor: false,
+  paint: 0,
+  shell: true, slot: 4, perTriColor: true,
   material: 0, gridCap: 128,
 };
 
 export interface ImportStats {
-  srcTris: number; decTris: number; degenerate: number;
+  srcTris: number; decTris: number; degenerate: number; merged: number;
   cells: number; blocks: number; skinTris: number;
+  slotCount: number; commonSlot: number;   // 1 + slot = a one-tone import
   skipped: number; rescued: number; nonManifold: number; massKg: number;
 }
 
@@ -75,12 +89,18 @@ const dens = (m: number): number =>
 
 /** Nearest built-in slot to a LINEAR rgb (0..1), scanning the real 256-slot
  *  table (slots 0..10 are engine-reserved). Squared distance in the
- *  palette's native LINEAR space. */
+ *  palette's native LINEAR space.
+ *  OPAQUE SLOTS ONLY (we, the church import: "the color is wrong … they're
+ *  like translucent"): the glass family (160+) carries opacity 0–5, and a
+ *  pale stone colour maps to clear glass at distance 0 — the game then
+ *  renders the importer's blocks/skins at 3/16 alpha. A source model's
+ *  surface colours are an OPAQUE statement; the quantiser answers in
+ *  opaque slots (matte/polished/metal families). */
 export function slotForLinear(r: number, g: number, b: number): number {
   let best = IMPORT_DEFAULTS.slot, bd = Infinity;
   for (let s = 11; s < DEFAULT_PALETTE.length; s++) {
     const e = DEFAULT_PALETTE[s];
-    if (!e) continue;
+    if (!e || e.opacity < 15) continue;
     const dr = e.r / 255 - r, dg = e.g / 255 - g, db = e.b / 255 - b;
     const d = dr * dr + dg * dg + db * db;
     if (d < bd) { bd = d; best = s; }
@@ -263,6 +283,227 @@ export function snap(gpos: Float32Array, gcol: Float32Array | null): {
   return { tris: out.subarray(0, n * 9), cols, n, degenerate };
 }
 
+// ---------- coplanar merge (the latsphere-stitch idea, we: "decimate …
+// absolutely butchers and mangles irrecognizably" → merge coplanar faces) --
+//
+// Lossless by construction: faces on a shared plane fuse into their planar
+// polygon and re-triangulate (ear clipping) — a cathedral wall of 800
+// coplanar triangles becomes ~2, silhouette EXACTLY unchanged (area-
+// identity pinned). Runs on SNAPPED lattice ints: parallel/coplanar tests
+// are exact integer arithmetic. Colour-gated by palette slot unless
+// ignoreColor (then the dominant slot of the region wins).
+
+/** Per-face palette slots (the colour gate). */
+export function quantizeSlots(g: { cols: Float32Array; n: number },
+  o: ImportOptions): number[] {
+  const out: number[] = [];
+  for (let t = 0; t < g.n; t++)
+    out.push(o.perTriColor
+      ? slotForLinear(g.cols[t * 3]!, g.cols[t * 3 + 1]!, g.cols[t * 3 + 2]!)
+      : o.slot);
+  return out;
+}
+
+export function mergeCoplanar(g: { tris: Int32Array; n: number },
+  slots: number[], ignoreColor: boolean):
+  { tris: Int32Array; slots: number[]; n: number; merged: number } {
+  // weld the soup to an indexed mesh
+  const vid = new Map<string, number>();
+  const V: number[] = [];                       // xyz×nverts
+  const F: number[][] = [];                     // [a,b,c]
+  for (let t = 0; t < g.n; t++) {
+    const f: number[] = [];
+    for (let k = 0; k < 3; k++) {
+      const x = g.tris[t * 9 + k * 3]!, y = g.tris[t * 9 + k * 3 + 1]!,
+        z = g.tris[t * 9 + k * 3 + 2]!;
+      const key = `${x},${y},${z}`;
+      let i = vid.get(key);
+      if (i === undefined) { i = vid.size; vid.set(key, i); V.push(x, y, z); }
+      f.push(i);
+    }
+    F.push(f);
+  }
+  const nrm = (f: number[]): number[] => {
+    const a = f[0]! * 3, b = f[1]! * 3, c = f[2]! * 3;
+    const p = [V[b]! - V[a]!, V[b + 1]! - V[a + 1]!, V[b + 2]! - V[a + 2]!];
+    const q = [V[c]! - V[a]!, V[c + 1]! - V[a + 1]!, V[c + 2]! - V[a + 2]!];
+    return [p[1]! * q[2]! - p[2]! * q[1]!, p[2]! * q[0]! - p[0]! * q[2]!,
+      p[0]! * q[1]! - p[1]! * q[0]!];
+  };
+  const NS = F.map(nrm);
+  const uf = [...F.keys()];
+  const find = (x: number): number => { while (uf[x] !== x) x = uf[x] = uf[uf[x]!]!; return x; };
+  const uni = (a: number, b: number) => {
+    const ra = find(a), rb = find(b);
+    if (ra !== rb) uf[ra] = rb;
+  };
+  const ekey = (a: number, b: number) => a < b ? `${a}_${b}` : `${b}_${a}`;
+  const edgeFaces = new Map<string, number[]>();
+  F.forEach((f, fi) => {
+    for (let e = 0; e < 3; e++) {
+      const a = f[e]!, b = f[(e + 1) % 3]!;
+      const k = ekey(a, b);
+      const arr = edgeFaces.get(k);
+      if (arr) arr.push(fi); else edgeFaces.set(k, [fi]);
+    }
+  });
+  const coplanar = (f1: number, f2: number): boolean => {
+    if (!ignoreColor && slots[f1] !== slots[f2]) return false;
+    const n1 = NS[f1]!, n2 = NS[f2]!;
+    if (n1[0]! * n2[1]! !== n1[1]! * n2[0]! ||
+      n1[1]! * n2[2]! !== n1[2]! * n2[1]! ||
+      n1[0]! * n2[2]! !== n1[2]! * n2[0]!) return false;   // not parallel
+    if (n1[0]! * n2[0]! + n1[1]! * n2[1]! + n1[2]! * n2[2]! <= 0)
+      return false;                                         // back-to-back
+    const a = F[f1]![0]! * 3, c = F[f2]![0]! * 3;
+    return n1[0]! * (V[a]! - V[c]!) + n1[1]! * (V[a + 1]! - V[c + 1]!) +
+      n1[2]! * (V[a + 2]! - V[c + 2]!) === 0;               // same plane
+  };
+  for (const fl of edgeFaces.values())
+    for (let i = 1; i < fl.length; i++)
+      if (coplanar(fl[0]!, fl[i]!)) uni(fl[0]!, fl[i]!);
+  const comps = new Map<number, number[]>();
+  F.forEach((_, fi) => {
+    const r = find(fi);
+    const arr = comps.get(r);
+    if (arr) arr.push(fi); else comps.set(r, [fi]);
+  });
+  // ear-clipping on the dominant plane
+  const out: number[][] = [];
+  const outSlots: number[] = [];
+  for (const members of comps.values()) {
+    const domSlot = (() => {
+      const c = new Map<number, number>();
+      for (const m of members) c.set(slots[m]!, (c.get(slots[m]!) ?? 0) + 1);
+      let best = slots[members[0]!]!, bc = -1;
+      for (const [s, k] of c) if (k > bc) { bc = k; best = s; }
+      return best;
+    })();
+    if (members.length === 1) {
+      out.push(F[members[0]!]!);
+      outSlots.push(slots[members[0]!]!);
+      continue;
+    }
+    // directed boundary edges of the region
+    const cnt = new Map<string, number>();
+    for (const m of members)
+      for (let e = 0; e < 3; e++) {
+        const k = ekey(F[m]![e]!, F[m]![(e + 1) % 3]!);
+        cnt.set(k, (cnt.get(k) ?? 0) + 1);
+      }
+    const next = new Map<number, number>();
+    const prev = new Map<number, number>();
+    let nb = 0;
+    for (const m of members)
+      for (let e = 0; e < 3; e++) {
+        const a = F[m]![e]!, b = F[m]![(e + 1) % 3]!;
+        if (cnt.get(ekey(a, b)) !== 1) continue;
+        if (next.has(a) || prev.has(b)) { nb = -1; break; }
+        next.set(a, b); prev.set(b, a); nb++;
+      }
+    if (nb < 3) {                                  // holes / touching faces
+      for (const m of members) { out.push(F[m]!); outSlots.push(slots[m]!); }
+      continue;
+    }
+    // walk the loop
+    const loop: number[] = [];
+    let cur = next.keys().next().value as number;
+    const start = cur;
+    do { loop.push(cur); cur = next.get(cur)!; } while (cur !== start && loop.length <= nb);
+    if (cur !== start || loop.length !== nb || nb > 4000) {
+      for (const m of members) { out.push(F[m]!); outSlots.push(slots[m]!); }
+      continue;
+    }
+    // project to the dominant 2D plane
+    const N = nrm(F[members[0]!]!);
+    const drop = Math.abs(N[0]!) >= Math.abs(N[1]!) && Math.abs(N[0]!) >= Math.abs(N[2]!) ? 0
+      : Math.abs(N[1]!) >= Math.abs(N[2]!) ? 1 : 2;
+    // drop collinear loop vertices (grid walls are full of them — they are
+    // not corners and ear-clipping chokes on them)
+    for (let pass = 0; pass < 4 && loop.length > 3; pass++) {
+      const keep: number[] = [];
+      for (let i = 0; i < loop.length; i++) {
+        const p = loop[(i - 1 + loop.length) % loop.length]!,
+          c = loop[i]!, q = loop[(i + 1) % loop.length]!;
+        const A = p * 3, B = c * 3, D = q * 3;
+        const ab = [V[B]! - V[A]!, V[B + 1]! - V[A + 1]!, V[B + 2]! - V[A + 2]!];
+        const bc = [V[D]! - V[B]!, V[D + 1]! - V[B + 1]!, V[D + 2]! - V[B + 2]!];
+        const cr = [ab[1]! * bc[2]! - ab[2]! * bc[1]!,
+          ab[2]! * bc[0]! - ab[0]! * bc[2]!, ab[0]! * bc[1]! - ab[1]! * bc[0]!];
+        if (cr[0]! * N[0]! + cr[1]! * N[1]! + cr[2]! * N[2]! !== 0) keep.push(c);
+      }
+      if (keep.length === loop.length || keep.length < 3) break;
+      loop.length = 0;
+      loop.push(...keep);
+    }
+    const ax = drop === 0 ? 1 : 0, ay = drop === 2 ? 1 : 2;
+    const P = loop.map(v => [V[v * 3 + ax]!, V[v * 3 + ay]!]);
+    let area2 = 0;
+    for (let i = 0; i < P.length; i++) {
+      const p = P[i]!, q = P[(i + 1) % P.length]!;
+      area2 += p[0]! * q[1]! - q[0]! * p[1]!;
+    }
+    if (area2 < 0) { loop.reverse(); P.reverse(); }
+    const ids = [...loop.keys()];
+    const tri: number[] = [];
+    const inside = (p: number[], a: number[], b: number[], c: number[]) => {
+      const s = (u: number[], v: number[]) => u[0]! * v[1]! - u[1]! * v[0]!;
+      const d1 = s([b[0]! - a[0]!, b[1]! - a[1]!], [p[0]! - a[0]!, p[1]! - a[1]!]);
+      const d2 = s([c[0]! - b[0]!, c[1]! - b[1]!], [p[0]! - b[0]!, p[1]! - b[1]!]);
+      const d3 = s([a[0]! - c[0]!, a[1]! - c[1]!], [p[0]! - c[0]!, p[1]! - c[1]!]);
+      return (d1 >= 0 && d2 >= 0 && d3 >= 0) || (d1 <= 0 && d2 <= 0 && d3 <= 0);
+    };
+    let guard = ids.length * ids.length + 8;
+    while (ids.length > 3 && guard-- > 0) {
+      let clipped = false;
+      for (let i = 0; i < ids.length && !clipped; i++) {
+        const ip = ids[(i - 1 + ids.length) % ids.length]!, ic = ids[i]!,
+          iq = ids[(i + 1) % ids.length]!;
+        const p = P[ip]!, c = P[ic]!, q = P[iq]!;
+        const cr = (c[0]! - p[0]!) * (q[1]! - c[1]!) - (c[1]! - p[1]!) * (q[0]! - c[0]!);
+        if (cr <= 0) continue;                       // reflex
+        let ok = true;
+        for (const r of ids)
+          if (r !== ip && r !== ic && r !== iq && inside(P[r]!, p, c, q)) { ok = false; break; }
+        if (!ok) continue;
+        tri.push(loop[ip]!, loop[ic]!, loop[iq]!);
+        ids.splice(i, 1);
+        clipped = true;
+      }
+      if (!clipped) break;
+    }
+    if (tri.length !== (ids.length + 1) * 3 && ids.length > 3) {
+      // ear clip failed on a pathological polygon: keep the region's faces
+      for (const m of members) { out.push(F[m]!); outSlots.push(slots[m]!); }
+      continue;
+    }
+    for (let i = 0; i < ids.length - 2; i++)
+      tri.push(loop[ids[0]!]!, loop[ids[i + 1]!]!, loop[ids[i + 2]!]!);
+    // orientation check against the region normal
+    if (tri.length) {
+      const a = tri[0]! * 3, b = tri[1]! * 3, c = tri[2]! * 3;
+      const p = [V[b]! - V[a]!, V[b + 1]! - V[a + 1]!, V[b + 2]! - V[a + 2]!];
+      const q = [V[c]! - V[a]!, V[c + 1]! - V[a + 1]!, V[c + 2]! - V[a + 2]!];
+      const cn = [p[1]! * q[2]! - p[2]! * q[1]!, p[2]! * q[0]! - p[0]! * q[2]!,
+        p[0]! * q[1]! - p[1]! * q[0]!];
+      const flip = cn[0]! * N[0]! + cn[1]! * N[1]! + cn[2]! * N[2]! < 0;
+      const nf = Math.trunc(tri.length / 3);
+      for (let f = 0; f < nf; f++) {
+        out.push(flip
+          ? [tri[f * 3 + 2]!, tri[f * 3 + 1]!, tri[f * 3]!]
+          : [tri[f * 3]!, tri[f * 3 + 1]!, tri[f * 3 + 2]!]);
+        outSlots.push(domSlot);
+      }
+    }
+  }
+  const tris = new Int32Array(out.length * 9);
+  out.forEach((f, t) => {
+    for (let k = 0; k < 3; k++)
+      tris.set([V[f[k]! * 3]!, V[f[k]! * 3 + 1]!, V[f[k]! * 3 + 2]!], t * 9 + k * 3);
+  });
+  return { tris, slots: outSlots, n: out.length, merged: g.n - out.length };
+}
+
 // ---------- voxels: SDF flood (yz-bucket +x-ray parity) ----------
 
 export interface Vox {
@@ -433,8 +674,8 @@ export function emitBlocks(boxes: Box[], slot: number, material: number): Block[
 
 /** The pinned chain (balloonfin's emit helper): encodeSkinTri, on null
  *  splitFace, on null skipped. Non-manifold census over the snapped soup. */
-export function emitSkin(g: { tris: Int32Array; cols: Float32Array; n: number },
-  opts: ImportOptions): {
+export function emitSkin(g: { tris: Int32Array; n: number },
+  opts: ImportOptions, slots: number[]): {
     triangles: Triangle[]; nmEdges: Float32Array; skipped: number; rescued: number;
   } {
   const triangles: Triangle[] = [];
@@ -443,9 +684,7 @@ export function emitSkin(g: { tris: Int32Array; cols: Float32Array; n: number },
     const v0: GP3 = [g.tris[t * 9]!, g.tris[t * 9 + 1]!, g.tris[t * 9 + 2]!];
     const v1: GP3 = [g.tris[t * 9 + 3]!, g.tris[t * 9 + 4]!, g.tris[t * 9 + 5]!];
     const v2: GP3 = [g.tris[t * 9 + 6]!, g.tris[t * 9 + 7]!, g.tris[t * 9 + 8]!];
-    const slot = opts.perTriColor
-      ? slotForLinear(g.cols[t * 3]!, g.cols[t * 3 + 1]!, g.cols[t * 3 + 2]!)
-      : opts.slot;
+    const slot = slots[t]!;
     const o: SkinOptions = { slot, material: opts.material };
     const rec = encodeSkinTri([v0, v1, v2], o);
     if (rec) { triangles.push(rec); continue; }
@@ -513,7 +752,8 @@ function triKg(t: Triangle): number {
 export async function runImport(srcs: SrcMesh[], o: ImportOptions):
   Promise<ImportResult> {
   const stats: ImportStats = {
-    srcTris: 0, decTris: 0, degenerate: 0, cells: 0, blocks: 0, skinTris: 0,
+    srcTris: 0, decTris: 0, degenerate: 0, merged: 0, cells: 0, blocks: 0,
+    skinTris: 0, slotCount: 0, commonSlot: 0,
     skipped: 0, rescued: 0, nonManifold: 0, massKg: 0,
   };
   const empty: ImportResult = {
@@ -531,12 +771,30 @@ export async function runImport(srcs: SrcMesh[], o: ImportOptions):
     return { ...empty, reason: 'everything collapsed at the lattice — raise the span' };
   const ghost = new Float32Array(dec.gpos.length);
   for (let i = 0; i < ghost.length; i++) ghost[i] = (dec.gpos[i]! - 6) * CELL;
+  // THE COPLANAR-MERGE LAW: skin faces on a shared plane fuse losslessly
+  // (walls of hundreds of coplanar tris become one quad, silhouette exact)
+  let sg: { tris: Int32Array; n: number } = { tris: g.tris, n: g.n };
+  let slots = quantizeSlots(g, o);
+  // the ONE-TONE law: a source whose faces all quantise to ONE slot is a
+  // colour choice, not a colour import — the picker (o.paint) repaints all
+  stats.slotCount = new Set(slots).size;
+  stats.commonSlot = stats.slotCount === 1 ? slots[0]! : 0;
+  if (o.paint > 0) slots = slots.map(() => o.paint);
+  if (o.merge && o.mode === 'skin') {
+    const m = mergeCoplanar(sg, slots, o.mergeIgnoreColor);
+    sg = { tris: m.tris, n: m.n };
+    slots = m.slots;
+    stats.merged = m.merged;
+  }
   if (o.mode === 'blocks') {
     const v = voxelize(g.tris, g.n, o.gridCap);
     if (!v.ok) return { ...empty, reason: v.reason, ghost };
     const sh = o.shell ? shellOf(v.v) : v.v;
     const boxes = greedyBoxes(sh);
-    const blocks = emitBlocks(boxes, o.slot, o.material);
+    // THE HONEST-COUNT LAW: re-frame at offset 0 NOW (shiftBlocks re-splits
+    // boxes crossing 12-cell frame borders) so the stats card shows the
+    // number of RECORDS the commit writes, not the pre-split merge count
+    const blocks = shiftBlocks(emitBlocks(boxes, o.slot, o.material), [0, 0, 0]);
     stats.cells = sh.cells;
     stats.blocks = blocks.length;
     stats.massKg = blocks.reduce((s, b) => s + blockKg(b), 0);
@@ -545,7 +803,7 @@ export async function runImport(srcs: SrcMesh[], o: ImportOptions):
       nmEdges: new Float32Array(0), stats,
     };
   }
-  const skin = emitSkin(g, o);
+  const skin = emitSkin(sg, o, slots);
   stats.skinTris = skin.triangles.length;
   stats.skipped = skin.skipped;
   stats.rescued = skin.rescued;
@@ -555,4 +813,24 @@ export async function runImport(srcs: SrcMesh[], o: ImportOptions):
     ok: true, blocks: [], triangles: skin.triangles, ghost,
     nmEdges: skin.nmEdges, stats,
   };
+}
+
+// ---------- the commit (shared by the workspace dialog and the TOOLS ▸
+// placement flow: the ghost's final whole-cell offset rides the SAME
+// re-framing helpers the balloon build uses; every record lands in bp AND
+// the doc — the AGENTS write-path law) ----------
+
+export function commitImport(ctx: EditCtx,
+  payload: { blocks?: Block[]; triangles?: Triangle[] },
+  offset: Cell3): string {
+  const blocks = payload.blocks ?? [], tris = payload.triangles ?? [];
+  if (!blocks.length && !tris.length) return 'nothing to place';
+  for (const b of shiftBlocks(blocks, offset)) {
+    ctx.bp.data.blocks.push(b);
+    docArrayInsert(ctx.doc, ['data', 'blocks'],
+      ctx.bp.data.blocks.length - 1, docFromValue(b));
+  }
+  if (tris.length) appendTrianglesDoc(ctx, shiftSkinTris(tris, offset));
+  return `imported ${blocks.length} blocks + ${tris.length} skin triangles ` +
+    `(offset ${offset[0]}/${offset[1]}/${offset[2]})`;
 }

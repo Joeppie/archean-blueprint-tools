@@ -8,10 +8,8 @@
 import { docFromValue, type DocNode } from './doc';
 
 export function newCraftDoc(alias = 'New craft'): DocNode {
-  const deck = (pos_z: number) => ({
-    colors: [4, 4, 4, 4, 4, 4, 4], frame_x: 0, frame_y: 0, frame_z: 0, material: 0,
-    pos_x: 2, pos_y: 5, pos_z, size_x: 8, size_y: 0, size_z: 0, type: 0,
-  });
+  // (we, the import session: "empty craft should actually be empty") — no
+  // starter deck plates; the PilotSeat alone pilots the blank hull.
   return docFromValue({
     author: '',
     box_max: { x: 1.5, y: 2.0, z: 1.5 },
@@ -19,7 +17,7 @@ export function newCraftDoc(alias = 'New craft'): DocNode {
     box_size: { x: 3.0, y: 2.0, z: 3.0 },
     data: {
       alias,
-      blocks: [deck(3), deck(4), deck(5), deck(6), deck(7)],
+      blocks: [],
       colors: new Array(256).fill(null),
       components: [{
         alias: '',
@@ -49,7 +47,7 @@ export function newCraftDoc(alias = 'New craft'): DocNode {
       version: 2,
     },
     datetime: new Date().toISOString().slice(0, 19).replace('T', ' '),
-    mass: 140.0,
+    mass: 50.0,
     type: 'Archean Build Blueprint',
     version: 1,
     workshop_item_id: 0,

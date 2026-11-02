@@ -213,6 +213,12 @@ Format tiers (the "normal/common 3d formats" of the law):
   the three.js loaders (GLTFLoader/OBJLoader/MTLLoader/STLLoader/PLYLoader/
   TDSLoader). This covers the download-site
   corpus (Sketchfab/Fab/CGTrader are GLB-first) and every Blender export.
+- **DAE (Collada)**: in-browser via ColladaLoader — this is SketchUp's
+  native export (File ▸ Export Model ▸ Collada), honouring the file's
+  `<unit>` scale and upAxis. Blender/Max/Maya export it too.
+- **.skp** (asked 2026-11-02): Trimble's proprietary SketchUp binary — no
+  browser parser exists; the dialog answers with the .dae/.obj/.stl export
+  pointer. `.skp` itself belongs to the python tier (assimp imports it).
 - **FBX**: a python-tier hop (assimp → GLB). Browser FBX parsers are
   SDK-derived and license-fragile; pre-baking is the clean door.
 - **.blend**: never parsed. "Export GLB" in Blender is one menu hop; batch
@@ -235,6 +241,28 @@ fast-simplification), custom snap+weld+degenerate-cull mirroring the pinned
 latsphere window law, SDF flood on typed arrays as the writer's voxelizer
 (deterministic, pinned); @pixiv/three-voxelizer (MIT, GPU) only for the
 ghost layer.
+
+### First flight (the church, 2026-11-02) — laws the real asset found
+
+- **THE SKIN-DEFAULT LAW**: the mode defaulted to blocks; the founding words
+  say triangles, so SKIN is the default and the mode buttons carry captions
+  (skin = thin hull triangles, the game's own style; blocks = voxel boxes,
+  heavy). The church wants skin; terrain-like props want blocks.
+- **THE OPAQUE-SLOT LAW**: pale stone colour-mapped onto the glass family
+  (slots 160+, opacity 0–5) at distance ~0 — the game rendered the import at
+  3/16 alpha ("the color is wrong … like translucent"). Source colours are
+  an opaque statement: the quantiser scans opaque slots only.
+- **Face texture baking**: site downloads are textured; the loader bakes each
+  face's texture average (canvas sample at the UV centroid × Kd, sRGB →
+  LINEAR) into geometry colour — the palette quantiser speaks slots, not
+  image maps.
+- **NEW CRAFT IS EMPTY**: the starter deck was scenery; the New doc is a
+  PilotSeat alone; pins get the frozen DECK BENCH fixture (9000009100).
+  Corollary found by the pin sweep: the scene health probe (`ok`) demanded
+  blocks>0 — a valid empty hull must count as a successful BUILD.
+- **.blend door works**: `blender -b file.blend --python-expr
+  '…export_scene.gltf…'` headless pre-bake (the Volumetric Church: 79 k
+  tris → church.glb) — one command, no parsing of the container.
 
 ## 8. Proposed implementation (when scheduled)
 
