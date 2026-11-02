@@ -394,6 +394,64 @@ function hudSave(name: string, req: IncomingMessage, res: ServerResponse) {
   });
 }
 
+/** the installed Archean GAME dir (env ARCHEAN_GAME > blueprints.conf
+ *  game_dir > none). The game-models browser is dev-pair only: a machine
+ *  without the install simply has no gameDir() and the picker hides. */
+export function gameDir(): string | null {
+  const raw = process.env.ARCHEAN_GAME ?? confValue('game_dir');
+  return raw ? path.resolve(REPO, expandUser(raw)) : null;
+}
+
+const GAME_NAME = /^[A-Za-z0-9][A-Za-z0-9_. -]*$/;
+const GAME_FILE = /^[A-Za-z0-9][A-Za-z0-9_. -]*\.(gltf|bin|png|jpg|jpeg)$/i;
+const GAME_MODULE = /^[A-Za-z0-9_]+$/;
+
+/** every game component with a .gltf: module, type name, files (main gltf
+ *  first — the one named after the type). READ-ONLY browse for the importer
+ *  (we: "all files CAN be read by the game, so we CAN READ THEM"): the
+ *  game loads the whole component folder, so we list and serve the folder. */
+export function listGameModels(): { module: string; name: string; files: string[] }[] {
+  const g = gameDir();
+  if (!g) return [];
+  const out: { module: string; name: string; files: string[] }[] = [];
+  let modules: string[];
+  try { modules = fs.readdirSync(path.join(g, 'modules')); } catch { return []; }
+  for (const m of modules.sort()) {
+    if (!GAME_MODULE.test(m)) continue;
+    const cdir = path.join(g, 'modules', m, 'components');
+    let comps: string[];
+    try { comps = fs.readdirSync(cdir); } catch { continue; }
+    for (const c of comps.sort()) {
+      if (!GAME_NAME.test(c)) continue;
+      let files: string[];
+      try {
+        files = fs.readdirSync(path.join(cdir, c)).filter(f => GAME_FILE.test(f));
+      } catch { continue; }
+      const gltfs = files.filter(f => f.toLowerCase().endsWith('.gltf'));
+      if (!gltfs.length) continue;
+      const main = gltfs.find(f => f.replace(/\.gltf$/i, '') === c) ?? gltfs[0]!;
+      out.push({ module: m, name: c,
+        files: [main, ...files.filter(f => f !== main).sort()] });
+    }
+  }
+  return out;
+}
+
+/** resolve one served game-model file; null = outside the whitelist. */
+function gameModelFile(module: string, name: string, file: string): string | null {
+  const g = gameDir();
+  if (!g || !GAME_MODULE.test(module) || !GAME_NAME.test(name) || !GAME_FILE.test(file))
+    return null;
+  const p = path.join(g, 'modules', module, 'components', name, file);
+  if (!p.startsWith(path.join(g, 'modules') + path.sep)) return null;
+  return fs.existsSync(p) ? p : null;
+}
+
+const MIME: Record<string, string> = {
+  '.gltf': 'model/gltf+json', '.bin': 'application/octet-stream',
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+};
+
 function handler(req: IncomingMessage, res: ServerResponse, next: () => void) {
   const url = decodeURIComponent((req.url ?? '').split('?')[0]!);
   if (url === '/workshop.json') return repoFile(req, res, 'viewer/workshop.json', 'application/json');
@@ -416,6 +474,21 @@ function handler(req: IncomingMessage, res: ServerResponse, next: () => void) {
       return;
     }
     res.statusCode = 405; res.end(); return;
+  }
+  if (url === '/game-models/') {
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ models: listGameModels() }));
+    return;
+  }
+  if (url.startsWith('/game-models/')) {
+    const m = /^\/game-models\/([A-Za-z0-9_]+)\/([A-Za-z0-9_. -]+)\/([A-Za-z0-9_. -]+)$/.exec(url);
+    const f = m && gameModelFile(m[1]!, m[2]!, m[3]!);
+    if (!f) { res.statusCode = 404; res.end('nope'); return; }
+    res.statusCode = 200;
+    res.setHeader('Content-Type', MIME[path.extname(f).toLowerCase()] ?? 'application/octet-stream');
+    fs.createReadStream(f).pipe(res);
+    return;
   }
   if (url.startsWith('/models/') || url.startsWith('/atlas/')) {
     // INDEXED form /atlas/<n>.json: n = position of the type name in the

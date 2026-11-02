@@ -17,7 +17,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Blueprint, Block, Triangle } from '../engine/format';
 import type { EditCtx } from '../engine/edit';
 import { appendTrianglesDoc, mirrorTrisDoc, writeBlockDoc, writeBlockMaterial, setPaletteSlot } from '../engine/edit';
-import { docArrayInsert, docArrayRemoveAt, docEnsureArray, docFromValue } from '../engine/doc';
+import { docArrayInsert, docArrayRemoveAt, docEnsureArray, docFromValue, docSetNumber } from '../engine/doc';
 import { OCCUPANCY_TYPE } from '../engine/blockshapes';
 import {
   MATERIALS, blockMaterial, hullifyApply, hullifyPreview, replaceCensus, replaceColorDests,
@@ -261,9 +261,11 @@ export const TOOLS: ToolDef[] = [
     id: 'replace-all',
     label: 'Replace all…',
     icon: '⇄',
-    blurb: 'Rewrite every block face colour or every build material in one go '
-      + '— e.g. all STEEL blocks to ALUMINIUM, or all metal-look paint to the '
-      + 'glass finish. Component paints and the occupancy mirrors are untouched.',
+    blurb: 'Rewrite every block face colour, every build material, or ALL '
+      + 'HULL-SKIN TRIANGLES in one go — all STEEL blocks to ALUMINIUM, all '
+      + 'metal-look paint to the glass finish, or a whole imported statue\'s '
+      + 'appearance to any palette colour. Component paints and the '
+      + 'occupancy mirrors are untouched.',
     fields: [
       {
         key: 'target', label: 'replace', kind: 'select',
@@ -298,10 +300,15 @@ export const TOOLS: ToolDef[] = [
         .find(s => s.id === f['source']);
       if (!src) return '';
       const c = replaceCensus(bp, src, f['target'] === 'material' ? 'material' : 'colors');
-      if (!c.blocks) return 'nothing on this craft matches';
-      return f['target'] === 'material'
-        ? `${c.blocks} block${c.blocks === 1 ? '' : 's'} change material`
-        : `${c.faces} face${c.faces === 1 ? '' : 's'} on ${c.blocks} block${c.blocks === 1 ? '' : 's'} repaint`;
+      if (!c.blocks && !c.tris) return 'nothing on this craft matches';
+      if (f['target'] === 'material')
+        return `${c.blocks} block${c.blocks === 1 ? '' : 's'} change material`;
+      const bits: string[] = [];
+      if (c.faces)
+        bits.push(`${c.faces} face${c.faces === 1 ? '' : 's'} on ${c.blocks} block${c.blocks === 1 ? '' : 's'} repaint`);
+      if (c.tris)
+        bits.push(`${c.tris} skin triangle${c.tris === 1 ? '' : 's'} repaint`);
+      return bits.join(' · ');
     },
     run: (f, ctx) => {
       const target = f['target'] === 'material' ? 'material' : 'colors';
@@ -312,6 +319,7 @@ export const TOOLS: ToolDef[] = [
       const before = ctx.bp.data.blocks.map(b => ({
         colors: (b.colors ?? []).slice(), material: blockMaterial(b),
       }));
+      const beforeTris = (ctx.bp.data.triangles ?? []).map(t => (t.colors ?? []).slice());
       const res = replaceAll(ctx.bp, src, target, destSlot, destMaterial);
       // doc mirror: only the blocks that actually changed
       ctx.bp.data.blocks.forEach((b, i) => {
@@ -323,9 +331,20 @@ export const TOOLS: ToolDef[] = [
           writeBlockMaterial(ctx, i, blockMaterial(b));
         }
       });
+      // doc mirror: repainted skin records (colours[i] are plain ints)
+      if (target === 'colors')
+        (ctx.bp.data.triangles ?? []).forEach((t, k) => {
+          const was = beforeTris[k] ?? [];
+          (t.colors ?? []).forEach((c, i) => {
+            if (typeof c === 'number' && c !== was[i])
+              docSetNumber(ctx.doc, ['data', 'triangles', k, 'colors', i], c);
+          });
+        });
+      const triBit = res.tris
+        ? ` + ${res.tris} skin triangle${res.tris === 1 ? '' : 's'}` : '';
       return target === 'material'
         ? `re-materialled ${res.blocks} block${res.blocks === 1 ? '' : 's'}`
-        : `repainted ${res.faces} faces on ${res.blocks} block${res.blocks === 1 ? '' : 's'}`;
+        : `repainted ${res.faces} faces on ${res.blocks} block${res.blocks === 1 ? '' : 's'}${triBit}`;
     },
   },
   {

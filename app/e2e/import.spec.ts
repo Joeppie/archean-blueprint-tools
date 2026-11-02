@@ -181,7 +181,7 @@ test.describe('@import @slow Import 3D model (preview law)', () => {
     // — the leg SKIPS where no install exists, never a hardcoded path.
     const conf = (() => {
       try {
-        const t = readFileSync(resolve(__dirname, '../../blueprints.conf'), 'utf8');
+        const t = readFileSync(new URL('../../blueprints.conf', import.meta.url), 'utf8');
         const m = t.match(/^\s*game_dir\s*=\s*(.+)$/m);
         return m ? m[1]!.trim() : '';
       } catch { return ''; }
@@ -205,6 +205,39 @@ test.describe('@import @slow Import 3D model (preview law)', () => {
     await expect.poll(async () =>
       Number((await stat(page, 'skin').textContent())!.replace(/\D/g, '')),
     { timeout: 30_000 }).toBeGreaterThan(0);
+  });
+
+  test('🎮 game models browser: the installed game, one click, on the lattice @ui', async ({ page }) => {
+    test.skip(!!process.env.PIXEL7, 'desktop law');
+    test.setTimeout(300_000);
+    // e2e-tier because: the dev/preview route serves the REAL game folder
+    // (blueprints.conf game_dir) — the whole point (we: "all files CAN be
+    // read by the game, so we CAN READ THEM") is the folder-to-lattice path
+    const gameDir = (() => {
+      try {
+        const t = readFileSync(new URL('../../blueprints.conf', import.meta.url), 'utf8');
+        const m = t.match(/^\s*game_dir\s*=\s*(.+)$/m);
+        return m ? m[1]!.trim() : '';
+      } catch { return ''; }
+    })();
+    test.skip(!gameDir || !existsSync(resolve(gameDir, 'modules')),
+      'needs the Archean game install');
+    await page.goto('/?craft=9000009040');
+    await page.waitForFunction(() =>
+      !!(window as unknown as { __ARCHEAN__?: { engine?: { blueprint?: unknown } } })
+        .__ARCHEAN__?.engine?.blueprint, null, { timeout: 150_000 });
+    await page.getByTestId('file-menu').click();
+    await page.getByTestId('file-import').click();
+    await expect(page.getByTestId('import-dock')).toBeVisible();
+    await expect(page.getByTestId('import-gamemodels')).toBeVisible({ timeout: 15_000 });
+    await page.getByTestId('import-gamemodels').click();
+    await expect(page.getByTestId('import-gamelist')).toBeVisible();
+    await page.getByTestId('import-gameq').fill('centrifuge');
+    await page.getByTestId('import-game-EnrichmentCentrifuge').click();
+    // the game's OWN gltf+bin+png quantise onto the lattice (skin default)
+    await expect.poll(async () =>
+      Number((await stat(page, 'skin').textContent())!.replace(/\D/g, '')),
+    { timeout: 60_000 }).toBeGreaterThan(0);
   });
 
   test('zeppelin ritual: TOOLS ▸ Import stages a GHOST, ✔ Build lands it @ui', async ({ page }) => {

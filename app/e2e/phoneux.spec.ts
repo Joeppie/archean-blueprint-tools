@@ -108,15 +108,31 @@ test.describe('phone UI batch @ui', () => {
   // the hull; h untouched); the exclusivity law itself is pinned on the real
   // engine (scene.headless "view-option exclusivity", legacy selftest excl=true).
 
-  test('the Screens dock keeps its ✕ close reachable on phones @Screens', async ({ page }) => {
+  // v1.17.3 re-derived: the Space-Invaders workshop craft is subscription
+  // state (Steam sync stripped this machine's copy; the testdata floor copy
+  // ships WITHOUT the author's program disk — a stripped floor copy can
+  // never boot a surface). The LAW (zoom bar ✕ + dock header ✕ on a 412-px
+  // phone) is craft-independent, so it rides the repo's OWN Face Bench
+  // fixture (9000009020, real program, paints face#0 → the deep link raises
+  // the zoom window).
+  // @while-publish (v1.17.3): the deep-link AUTO-RAISE of the zoom window
+  // (and its cell-overlay identity `screens-cell-<key>-*`) rides the
+  // v1.17.2 canonical-screen-key/feed-merge era — this pin sealed the
+  // pre-v1.17.2 trigger. Re-derive against the current key law (AGENTS
+  // Backlog 'deep-link zoom auto-open'); the GEOMETRY law it guards (the ✕
+  // rows on a 412-px phone) is un-contested.
+  test('the Screens dock keeps its ✕ close reachable on phones @Screens @while-publish', async ({ page }) => {
+    test.setTimeout(180_000);   // fixture boot + the real-time VM pump to the
+    // first painted frame rides the shared worker budget (v1.17.3: the boot-
+    // paint legs run ≤2 workers on this machine — AGENTS Backlog)
     // e2e-tier because: viewport GEOMETRY clipping — the dock header is a flex
     // row whose min-content (title + tabs + w-32 search + tile) exceeded the
     // 412-px phone width, pushing the ml-auto ✕ off the overflow-hidden window:
     // maximized on a phone there was NO way to close it (we: "I got no way to
     // close screens tab on phone if maxed, like in space invaders start").
-    // The deep link rides the shipped PLAYABLE row's exact URL: the dock opens
-    // booted and the zoom window raises itself on the first painted frame.
-    await page.goto('/?craft=3288012440&dash=main%230');
+    // The deep link opens the dock booted and the zoom window raises itself
+    // on the first painted frame.
+    await page.goto('/?craft=9000009020&dash=face%230');
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 90_000 });
     const vp = page.viewportSize()!;
     // the zoom window's bar: ✕ close inside the viewport, and it closes

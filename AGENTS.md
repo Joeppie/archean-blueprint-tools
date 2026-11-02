@@ -353,6 +353,20 @@ user's explicit say-so). Provenance: docs/HISTORY.md §1.
 - Commit law: blocks push + `docArrayInsert(['data','blocks'])` per record
   (the placeBlock pattern), skins via `appendTrianglesDoc`; then
   `sceneChanged()`. e2e: `@import` (exact cube counts).
+- 🎮 GAME MODELS, IN THE GAME'S OWN FORMAT (we: "all files CAN be read by
+  the game, so we CAN READ THEM"): the dev/preview server serves the
+  installed game's component folders (blueprints.conf game_dir → the
+  vite-corpus plugin's `/game-models/` catalog + `/game-models/<module>/
+  <Type>/<file>` file route) and the import panel's 🎮 browser loads a whole
+  component (gltf + .bin + .png) onto the lattice in ONE click. A dropped
+  FOLDER is walked (webkitGetAsEntry) — the game reads a folder, so do we.
+  Machines without the install: the probe 404s, the button hides (dev-pair
+  only; Pages never exposes game files).
+- PAINT-ALL covers the skin (Tools ▸ Replace-all): the colors target counts
+  and repaints hull-skin triangle RECORDS beside block faces (census.tris,
+  doc-mirrored per colours[i]) — a `hull-skin triangles ONLY` source paints
+  an imported statue's whole appearance in one run; every-colour is the
+  whole-craft appearance door. Engine: tools.ts ReplaceSource.tris.
 
 ### Xenon workspace (computer / debugger / screens)
 - THE CADENCE LAW: the VM cycles at 25 Hz (`CYCLE_MS = 40`, shim
@@ -1466,6 +1480,25 @@ behind a small link at the END of the gallery. Pages serves the GENERATED
   config.py), byte-identical saves, no releases without the user asking.
 
 ## Backlog (live items)
+- **face board orientation (faceorient.spec, @while-publish KNOWN-RED)**: the
+  live built-in-Computer board normal on the Face Bench reads (0,0,+1); the
+  pin seals the deck-side (0,0,−1) law. Broke in the v1.17.2 feed-merge era
+  (bisect-proven red at a474788, NOT the import batch). Decide which way the
+  built-in panel faces per the Computer .ini [RENDERABLE] node, fix the
+  board orientation in the dashOwner in-place rebuild (or re-pin the law
+  with the .ini cited), then remove @while-publish.
+- **Deep-link zoom auto-open + cell-overlay keys (app.spec PLAYABLE,
+  phoneux Screens-✕, both @while-publish since v1.17.3)**: the full-screen
+  game-screen seam (auto-raised zoom window + `screens-cell-<key>` overlay
+  identity) was pinned pre-v1.17.2; the canonical-screen-key + feed-merge +
+  never-painted laws changed the trigger identity. Re-derive both legs
+  against the current key law (probe: the Face Bench quad paints and cycles
+  run — the 3-D side is alive; the DOM overlay seam is the pinned-out part).
+- **Workshop arcade crafts (3820116990, 3288012440) are subscription state**:
+  Steam sync can strip the machine-corpus copies; the testdata floor carries
+  disk-bearing fallbacks, so the arcade legs pass — at high worker counts
+  the real-time VM pump starves and boot-paint legs (app.spec PLAYABLE) get
+  timing-sensitive. Keep boot-paint legs at ≤2 workers on this machine.
 - **phoneux.spec 'the Screens dock keeps its ✕ close reachable on phones'
   is KNOWN-RED (pre-existing, bisect-proven red at HEAD a474788 with a clean
   tree — NOT caused by the import batch)**: the deep-linked workshop craft's

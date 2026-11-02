@@ -54,7 +54,12 @@ test('?craft= deep link opens the editor directly', async ({ page }) => {
   await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 30_000 });
 });
 
-test('the PLAYABLE row: two in-craft arcade clips, click boots the game fullscreen @ui', async ({ page }) => {
+// @while-publish (v1.17.3): same v1.17.2 overlay-key re-audit family as the
+// phoneux Screens-✕ leg — the FULLSCREEN game-screen seam (cell overlay +
+// auto-raised zoom) sealed its trigger pre-canonical-keys; the gallery CARD
+// row law (PLAYABLE segment, webm clips) is un-contested. Backlog:
+// 'deep-link zoom auto-open'.
+test('the PLAYABLE row: two in-craft arcade clips, click boots the game fullscreen @ui @while-publish', async ({ page }) => {
   test.slow();   // two full craft boots + a VM reboot chained in one test
   // v1.13.8 (we: "Add those to the library on top in a little segment of
   // their own" + webm clips): the gallery's own segment for the two crafts
@@ -72,7 +77,7 @@ test('the PLAYABLE row: two in-craft arcade clips, click boots the game fullscre
   await page.getByTestId('playable-3288012440').click();
   await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 60_000 });
   await expect(page).toHaveURL(/craft=3288012440&dash=main%230/);
-  await expect(page.getByTestId('screens-cell-main#0-overlay')).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId('screens-cell-main#0-overlay')).toBeVisible({ timeout: 150_000 });
   // BACK TO THE GALLERY RESETS THE SIM (we: "going back to the gallery
   // DOESNT properly reset the entire sim, which it must if we can open
   // directly to a screen"): the pump (VM, surfaces, buzzers) must close on

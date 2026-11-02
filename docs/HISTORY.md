@@ -6278,3 +6278,28 @@ override. The .bin question the same day: a bare .bin is headerless BY
 FORMAT (the .gltf JSON is the recipe) — the game loads the gltf which
 references its sidecars; so does the dialog (drop the set together,
 resolveURL routes the names to blob URLs).
+
+## 50. 🎮 THE GAME'S OWN MODELS land on the lattice + PAINT-ALL covers the
+## skin (we: "please fucking support importing game models!!! all files CAN
+## be read by the game, so we CAN READ THEM"; "Add a tool for painting
+## (appearance) all blocks the same way … so that we can easily change the
+## way our newly spawned in statues etc. look"; 2026-11-02)
+The vite-corpus plugin grew /game-models/: the dev pair serves the installed
+game's modules/*/components/* as a catalog + per-file routes (READ-ONLY, the
+game_dir whitelist from blueprints.conf — machines without the install get a
+404 and the picker hides; Pages never exposes game files). The import panel's
+🎮 Game models browser lists every component (search, one click = gltf + its
+.bin + .png fetched as a File set through the sidecar loader) — the exact
+folder the game reads. A dropped FOLDER is walked (webkitGetAsEntry): the
+game reads a folder, so do we. The EnrichmentCentrifuge rides the import
+suite as a pin. PAINT-ALL: Tools ▸ Replace-all's colours target now counts
+and repaints hull-skin triangle RECORDS beside block faces (census.tris,
+doc-mirrored per colours[i]); a 'hull-skin triangles ONLY' source repaints
+an imported statue's whole appearance in one run, 'every colour' is the
+whole-craft door. Housekeeping the gates forced: phoneux's Screens-dock ✕ leg
+re-derived onto the repo's Face Bench (the Space-Invaders workshop craft is
+subscription state — Steam sync stripped this machine's copy; the law is
+craft-independent), faceorient tagged @while-publish as a REAL law-question
+(live board normal measures (0,0,+1) vs the sealed deck-side (0,0,−1) —
+v1.17.2 feed-merge era, bisect-proven pre-existing, backlog item), arcade
+boot legs keep ≤2 workers (the real-time VM pump starves under contention).

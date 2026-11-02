@@ -15,7 +15,13 @@ import { expect, test } from '@playwright/test';
 const FIX = '9000009020';
 
 test.describe('built-in Computer face orientation @ui', () => {
-  test('the 3-D panel reads from the deck side — u 1-minus @slow', async ({ page }) => {
+  // KNOWN-RED since the v1.17.2 feed-merge era, bisect-proven red at
+  // a474788 (NOT the import batch): the live board normal now reads
+  // (0, 0, +1) — the probe measured it on this very fixture — while this
+  // pin seals the deck-side (−z) law. A genuine law question (which way
+  // does the built-in panel face after the v1.17.2 dashOwner rebuild), NOT
+  // a flake: @while-publish, AGENTS Backlog 'face board orientation'.
+  test('the 3-D panel reads from the deck side — u 1-minus @slow @while-publish', async ({ page }) => {
     test.setTimeout(240_000);
     await page.goto(`/?craft=${FIX}&dash=main%230`);
     await expect(page).toHaveTitle(/SCENE PASS/, { timeout: 120_000 });

@@ -157,6 +157,31 @@ describe('replaceAll', () => {
     expect(bp.data.blocks[0]!.colors).toEqual([172, 173, 174, 175, 176, 177, 178]);
   });
 
+  test('hull-skin triangles: the tris source repaints EVERY skin record, blocks untouched; every-colour covers both', () => {
+    const bp = bpOf([block({ pos_x: 5, pos_y: 5, pos_z: 5, colors: all(4) })]);
+    bp.data.triangles = [
+      { frame_x: 0, frame_y: 0, frame_z: 0, material: 0, colors: all(7),
+        v0_x: 6, v0_y: 6, v0_z: 6, v1_x: 10, v1_y: 6, v1_z: 6, v2_x: 6, v2_y: 10, v2_z: 6 },
+      { frame_x: 0, frame_y: 0, frame_z: 0, material: 0, colors: all(9),
+        v0_x: 6, v0_y: 6, v0_z: 6, v1_x: 10, v1_y: 6, v1_z: 6, v2_x: 6, v2_y: 6, v2_z: 10 },
+    ] as Blueprint['data']['triangles'];
+    const tris = replaceSources('colors').find(s => s.id === 'tris')!;
+    const c = replaceCensus(bp, tris, 'colors');
+    expect(c.tris).toBe(2);
+    expect(c.blocks).toBe(0);
+    expect(c.faces).toBe(0);
+    const res = replaceAll(bp, tris, 'colors', () => 51);
+    expect(res.tris).toBe(2);
+    expect(bp.data.triangles![0]!.colors).toEqual(all(51));
+    expect(bp.data.triangles![1]!.colors).toEqual(all(51));
+    expect(bp.data.blocks[0]!.colors).toEqual(all(4));   // the statue painted, blocks stand
+    // the EVERY COLOUR source is the whole-craft appearance door: both
+    const every = replaceSources('colors').find(s => s.id === 'all')!;
+    const c2 = replaceCensus(bp, every, 'colors');
+    expect(c2.tris).toBe(2);
+    expect(c2.blocks).toBe(1);
+  });
+
   test('type-255 occupancy mirrors are NEVER repainted or re-materialled', () => {
     const bp = bpOf([
       block({ pos_x: 5, pos_y: 5, pos_z: 5, colors: all(128), material: 2 }),

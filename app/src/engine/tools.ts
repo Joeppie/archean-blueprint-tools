@@ -170,6 +170,11 @@ export interface ReplaceSource {
   /** for colour families: map a source slot to its destination (same index
    *  within the destination family); absent ⇒ the tool's dest constant. */
   map?: (slot: number) => number;
+  /** hull-skin TRIANGLES only: the colors census/mutate touches the skin
+   *  records and SKIPS every block (repaint an imported statue's whole
+   *  appearance in one shot; a normal colour source still paints tris
+   *  through the shared slot filter — this source is the tris-ONLY door) */
+  tris?: boolean;
 }
 
 const FAMILY_DEFS: [string, number, number][] = [
@@ -196,6 +201,10 @@ export function replaceSources(target: ReplaceTarget): ReplaceSource[] {
       id: 'metallook', label: 'metal chrome (engine slots 5..10 + metal family)',
       slot: (s) => (s >= 5 && s <= 10) || (s >= 128 && s <= 144),
     },
+    {
+      id: 'tris', label: 'hull-skin triangles ONLY (the imported statue)',
+      tris: true, slot: () => true,
+    },
   ];
   return out;
 }
@@ -219,6 +228,7 @@ export function replaceColorDests(): { id: string; label: string; slot: (s: numb
 export interface ReplaceCensus {
   blocks: number;      // geometry blocks touched (type-255 mirrors excluded)
   faces: number;       // face slots rewritten (colors target) / 0
+  tris: number;        // hull-skin triangle RECORDS touched (colors target)
 }
 
 const isTargetBlock = (b: Block): boolean => b.type !== OCCUPANCY_TYPE;
@@ -230,8 +240,8 @@ export const blockMaterial = (b: Block): number => (b.material as number | undef
 
 /** Preview a replace-all without touching anything. */
 export function replaceCensus(bp: Blueprint, src: ReplaceSource, target: ReplaceTarget): ReplaceCensus {
-  const res: ReplaceCensus = { blocks: 0, faces: 0 };
-  for (const b of bp.data.blocks ?? []) {
+  const res: ReplaceCensus = { blocks: 0, faces: 0, tris: 0 };
+  for (const b of (src.tris && target === 'colors') ? [] : (bp.data.blocks ?? [])) {
     if (!isTargetBlock(b)) continue;
     if (target === 'material') {
       if (src.material?.(blockMaterial(b)) === true) res.blocks++;
@@ -242,6 +252,13 @@ export function replaceCensus(bp: Blueprint, src: ReplaceSource, target: Replace
       if (typeof c === 'number' && (src.slot ? src.slot(c) : true)) hits++;
     if (hits) { res.blocks++; res.faces += hits; }
   }
+  if (target === 'colors')
+    for (const t of bp.data.triangles ?? []) {
+      let hits = 0;
+      for (const c of (t.colors ?? []))
+        if (typeof c === 'number' && (src.slot ? src.slot(c) : true)) hits++;
+      if (hits) res.tris++;
+    }
   return res;
 }
 
@@ -253,8 +270,8 @@ export function replaceAll(
   bp: Blueprint, src: ReplaceSource, target: ReplaceTarget,
   destSlot?: (s: number) => number, destMaterial?: number,
 ): ReplaceCensus {
-  const res: ReplaceCensus = { blocks: 0, faces: 0 };
-  for (const b of bp.data.blocks ?? []) {
+  const res: ReplaceCensus = { blocks: 0, faces: 0, tris: 0 };
+  for (const b of (src.tris && target === 'colors') ? [] : (bp.data.blocks ?? [])) {
     if (!isTargetBlock(b)) continue;
     if (target === 'material') {
       if (src.material?.(blockMaterial(b)) === true && destMaterial != null && b.material !== destMaterial) {
@@ -279,6 +296,24 @@ export function replaceAll(
     }
     if (touched) res.blocks++;
   }
+  if (target === 'colors')
+    for (const t of bp.data.triangles ?? []) {
+      const colors = t.colors;
+      if (!Array.isArray(colors)) continue;
+      let touched = false;
+      for (let i = 0; i < colors.length; i++) {
+        const c = colors[i];
+        if (typeof c !== 'number') continue;
+        if (!(src.slot ? src.slot(c) : true)) continue;
+        let to: number;
+        if (src.map) to = src.map(c);
+        else if (destSlot) to = destSlot(c);
+        else continue;
+        to = Math.max(0, Math.min(255, Math.round(to)));
+        if (to !== c) { colors[i] = to; touched = true; }
+      }
+      if (touched) res.tris++;
+    }
   return res;
 }
 
